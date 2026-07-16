@@ -1,0 +1,310 @@
+{
+  "workstream": "H — Reporting and exports (export tools, report model, renderers, export SKILL + references, dashboard export surfaces, artifact storage)",
+  "findings": [
+    {
+      "id": "H-1",
+      "workstream_item": "Are ALL exports persisted as auditable artifacts / where could a model-computed number sneak into a rendered report",
+      "title": "The audited-export invariant is opt-in: the model can file model-authored bytes as a durable, branded export artifact via record_export_artifact + upload_document(content_base64)",
+      "severity": "high",
+      "evidence": [
+        "agent/src/tools/registry/ops.ts:6-25 and :26-54 — record_export and record_export_artifact are registered as direct model-callable write tools (allowed under 'interactive' AND the 'documents' wake policy, since WRITE_ALLOW.documents only excludes the five onboarding fns — agent/src/tools/buildTools.ts:25); record_export_artifact's match_client guard only requires the fabrication to target the active client scope",
+        "agent/src/tools/buildTools.ts:250-251 — upload_document's own model-facing description blesses the manual lane: \"export bundles: the exact object_key record_export_artifact returned\"; :277-287 accepts model-generated content_base64 (≤2MB decoded) with content_type text/csv or application/pdf (INLINE_TYPES, :237)",
+        "db/v2/25-fns-ops.sql:190-282 — record_export_artifact accepts caller-supplied p_sha256/p_byte_size/p_row_count and RESERVES the row before any bytes exist; nothing ever verifies the stored object matches the recorded sha256; content_kind has no CHECK (db/v2/14-tables-ops.sql:161)",
+        "dashboard/lib/exportArtifacts.ts:83-97 — download re-reads object_key by artifactId and signs it: the fabricated artifact serves the model-authored bytes, indistinguishable on the Files shelf from a real build_export product",
+        "Every prohibition of this lane is prose-only, and the doctrine self-contradicts: belcort/export/SKILL.md:128-131 + :203-209 and belcort/year-end-close/SKILL.md:148-149 ('you do NOT call record_export / record_export_artifact / upload_document yourself') and belcort/export/references/journals-csv-execution-pattern.md:3-7 all forbid hand-filing — while belcort/export/SKILL.md:63 still cites that same superseded reference as 'the proven live pattern … formatter invocation, upload_document call, and byte-level verification'; no code path enforces any of it"
+      ],
+      "wrong": "The cardinal 'a figure NEVER passes through the model's text generation' guarantee holds only when the model voluntarily uses build_export. Inside the same curated tool surface a model (or a prompt-injected model) can reserve an artifact row, upload a CSV/PDF whose every number it wrote itself, and emit the export_result card for it — producing a durable, versioned, 7-year-retained 'audited' deliverable containing hallucinated figures. sha256/byte_size/row_count in the index are caller claims, never reconciled against the stored object.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\buildTools.ts:250",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "H-2",
+      "workstream_item": "Do the numbers come from DB read fns / audit trail honesty",
+      "title": "build_export hardcodes balanced:true for every scope, the model relays it, and the dashboard renders an unlabelled green 'In balance' chip the SKILL falsely claims is 'labelled non-authoritative at render'",
+      "severity": "high",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:413 — build_export returns fileExportBytes(..., balanced: true, ...) unconditionally (and fileExportBytes defaults `input.balanced ?? true`, :218) — even for management_accounts where the DB's client_financial_statements returns an explicit sofp.in_balance {current,prior} the tool never reads (db/v2/28-fns-reads.sql:770-772); build_analysis_report also files balanced:true (analysisTool.ts:307)",
+        "belcort/export/SKILL.md:186-187 — \"`balanced` is your agent-reported claim (labelled non-authoritative at render), not DB-verified\"; the Step-7 card template at :177 even ships \"balanced\":true inline",
+        "dashboard/components/export/ExportFileRow.tsx:83-87 — renders 'In balance' as a green chip with NO non-authoritative label; the file-top comment (:7-9) even calls it \"a faithful-dump signal the accountant defends to LHDN\"",
+        "dashboard/lib/artifacts.ts:415-435 — parseExportResult passes any boolean `balanced` through shape-validation only (:428); no server-side cross-check against the artifact or the books",
+        "Only trial_balance-backed figures are protected: _trial_balance_core RAISES trial_balance_unbalanced (db/v2/25-fns-ops.sql:102-106); client_financial_statements raises only client_not_found/fy_required and returns in_balance as data"
+      ],
+      "wrong": "Export a management-accounts pack for books whose SoFP does not balance (client_financial_statements surfaces in_balance=false but does not raise): the tool returns balanced:true, the card shows a green 'In balance' chip, and an accountant hands LHDN a pack carrying a false assurance. Only trial_balance is protected (the DB raises trial_balance_unbalanced); every other scope's 'balanced' is theater.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\exportTool.ts:413",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-3",
+      "workstream_item": "Where could a model-computed number sneak into a rendered report (exact composition path)",
+      "title": "The PDF 'IN BALANCE' seal is agent-recomputed with JS floats (ignoring the DB's in_balance) and provably fails on balanced books",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/tools/reportModel.ts:258-261 — managementAccountsDoc computes `balanced = assets !== '' && Number(assets) === Number(equity) + Number(liab)` over 2dp decimal strings instead of reading fs.sofp.in_balance (db/v2/28-fns-reads.sql:770-772, integer-cents equality in SQL)",
+        "Verified by execution in this audit: node -e \"Number('0.30') === Number('0.10') + Number('0.20')\" → false — a genuinely balanced SoFP (assets 30¢ = equity 10¢ + liabilities 20¢) is stamped unbalanced",
+        "agent/src/tools/pdfReport.ts:88 — `if (rep.balanced) drawSeal(...)` — the false-negative silently withholds the assurance seal; agent/src/tools/reportModel.ts:354-369 — buildFullBundleDoc propagates it (`if (sd.balanced === false) allBalanced = false`) to the whole Full Client Pack",
+        "Combined with H-2, the SAME export can carry a PDF without the seal while its chat card says 'In balance'"
+      ],
+      "wrong": "An assurance figure the DB already owns is recomputed in the agent with float arithmetic — a direct 'the agent never computes a figure' violation, with a demonstrated wrong output (false negative on cent combinations subject to binary-fraction error). Direction is false-negative only, so no unbalanced pack gains a seal, but deliverable and card contradict each other and the invariant is breached on the exact composition path reportModel.ts:258→pdfReport.ts:88.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\reportModel.ts:258",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-4",
+      "workstream_item": "Ad hoc/flexible reporting — can Clara generate charts/tables/commentary from verified sources",
+      "title": "The analysis lane launders model-authored numbers as 'computed by the database': SQL literals become authoritative cells, and free-text titles/headings/notes are unverified model prose printed on the branded PDF",
+      "severity": "high",
+      "evidence": [
+        "agent/src/tools/analysisTool.ts:5-7 — the invariant claim: \"Clara supplies the SQL, Postgres computes every number\"; but the SQL is model text — `select 999999 as revenue_cents` 'computes' the model's own literal (assertReadOnlySql passes it), which then renders as a DB-owned money cell (tableSection :133-138, kpiSection :186-191)",
+        "agent/src/tools/pdfReport.ts:227 — the analytical banner asserts to the reader: \"every figure is computed by the database from the query on the provenance page\" — untrue for literal-bearing SQL; :385-386 repeats \"it did not compute any number\"",
+        "agent/src/tools/analysisTool.ts:105,110,252-253 — heading/note/title/subtitle are unbounded model free text; pdfReport.ts drawHeading (:185-189), section notes (:176-181,:359) and the masthead title (:84) print them verbatim on the branded artifact — model-computed numbers can appear in 'commentary' with no stamp distinguishing them from DB cells",
+        "Mitigation exists but is reader-dependent: the provenance page prints each query (pdfReport.ts:382-395) — only an auditor who reads SQL catches a laundered literal; the 'Analytical view' stamp (reportModel.ts:382, pdfReport.ts:223-229) flags the lane but not the laundering"
+      ],
+      "wrong": "The 'ad hoc reporting engine' answer to the hero prompt is: yes it exists (structured section specs, tables/bar/line/hbar/donut/KPI, one branded PDF, filed under the analysis class) — but its central trust claim is over-stated. Two composition paths admit model-computed numbers into the rendered report: (1) numeric literals/expressions the model embeds in section SQL, presented as DB-computed cells under a banner asserting the opposite; (2) the model's own prose (title, subtitle, headings, notes) printed on the artifact. Commentary is not 'from verified sources'.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\analysisTool.ts:105",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-5",
+      "workstream_item": "Ad hoc reporting — verified data rendering",
+      "title": "Analysis money magnitude depends entirely on the model's money_columns labeling: unflagged cents render 100x too large, mislabelled non-cents 100x too small, and non-integer money is silently truncated or blanked",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/tools/analysisTool.ts:121-138 — a column is money ONLY if the model lists it in money_columns; an unflagged cents column falls to isNumericColumn → fmtNum groups raw cents ('123456' → '123,456', read as RM 123,456 when it is RM 1,234.56); label() (:38-41) even strips the '_cents' suffix from the header, erasing the unit clue",
+        "agent/src/tools/exportFormat.ts:13,17-37 — centsToDecimal divides any flagged value by 100 (an integer whole-RM column flagged as money renders ÷100); a STRING decimal ('123.45' fails INT_RE) returns '' and the cell renders '—' (pdfReport.ts:135-139), while a JSON-NUMBER decimal (the live path: agent_select returns jsonb via PostgREST, so a numeric avg() arrives as a JS number) is Math.trunc'd toward zero (:26) — sub-cent dropped silently; text-cast money blanks silently",
+        "agent/src/tools/pdfReport.ts:240-241 — chart axes/values divide by 100 only when chart.money is set (analysisTool.ts:164-169 derives it from the same model labels)",
+        "belcort/export/SKILL.md:149-150 — the only guard is doctrine: \"ALWAYS list your cents columns here, else they print as raw integers\""
+      ],
+      "wrong": "A single omitted or wrong money_columns entry produces a branded PDF whose figures are off by exactly 100x (or truncated/blanked for non-integer money) with no detection — no schema introspection, no _cents-suffix heuristic cross-check, no unit sanity check. For a report a client treats as authoritative, magnitude correctness resting on model labeling discipline is a real defect.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\analysisTool.ts:121",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "H-6",
+      "workstream_item": "Retrieve authoritative data through safe tools (adjacent: known SDT-001 reaches the reporting lane)",
+      "title": "The reporting lane's 'read-only' SQL guard is lexical and its claimed Postgres backstop is false — a SELECT-wrapped SECURITY DEFINER write inside an analysis section (or query_books) mutates the books, and the analysis PDF would print the mutating SQL as provenance",
+      "severity": "high",
+      "evidence": [
+        "agent/src/tools/sqlGuard.ts:17-43,57-85 — verb-word scan only; `select public.record_year_end_close(...)` / `select approve_entry(...)` contain no banned verb and pass; :3-6 claims \"even a write that slipped past this guard would be refused by Postgres\" — FALSE for fn calls: EXECUTE on the SECURITY DEFINER write fns is exactly the grant `authenticated` holds (per-file `grant execute ... to authenticated` in db/v2/25-fns-ops.sql etc.; db/v2/30-grants.sql only strips PUBLIC/anon)",
+        "db/v2/26-fns-session.sql:119-141 — agent_select is SECURITY INVOKER with the same lexical verb-scan (:130-135), no `set transaction read only`, and `execute format('select ... from (%s) __q', p_sql)` (:137) — a smuggled DEFINER call executes as the caller who holds EXECUTE",
+        "agent/src/tools/analysisTool.ts:273-289 — each model-composed section SQL runs assertReadOnlySql → ctx.query → agent_select under the caller's JWT; a smuggled DEFINER call executes, its return renders as report data, and the SQL is immortalized on the provenance page (pdfReport.ts:382-395)",
+        "agent/src/tools/buildTools.ts:375 — queryToolDef (same guard) is pushed under EVERY policy, including the proactive wake lane",
+        "CLAUDE.md acknowledges SDT-001/SEC-001 as a known audit finding; this workstream adds that the NEW analysis lane widened the surface where model-composed SQL is executed"
+      ],
+      "wrong": "An ostensibly read-only reporting request is a mutation vector: prompt-injected or confused model SQL in build_analysis_report/query_books can post, approve, or close via DEFINER fns. The guard file's comment materially misstates the defence-in-depth (Postgres does NOT refuse it), which invites future maintainers to trust a backstop that does not exist.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\sqlGuard.ts:3",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-7",
+      "workstream_item": "Are exports persisted as auditable artifacts with reproducibility/audit trail",
+      "title": "Artifact rows are reserved before bytes and never reconciled: a failed upload leaves a permanent phantom artifact (sha256/byte_size recorded, no object, no status column, no integrity verification ever)",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:270-279 — \"RESERVE the row BEFORE the agent writes bytes\"; the row carries sha256/byte_size at reserve time; export_artifacts has no stored/verified status column (db/v2/14-tables-ops.sql:156-186)",
+        "agent/src/tools/exportTool.ts:166-220 — fileExportBytes: record_export → record_export_artifact → ctx.storeBytes with no compensation on upload failure; the append-only index keeps the dangling row for 7 years (retain_until, 14-tables-ops.sql:176) and its version number is consumed",
+        "dashboard/components/export/ExportFileRow.tsx:67-69 — the user-facing consequence is only a generic \"Couldn't mint that download — retry.\"",
+        "No fn, job, or route re-hashes a stored object against export_artifacts.sha256 at any point in the lifecycle (searched db/v2 + agent/src + dashboard/lib — sha256 is only stored and displayed)"
+      ],
+      "wrong": "The artifact index — the audit trail an accountant would cite — can contain entries for files that never existed, and conversely nothing detects storage-side corruption/substitution (service_role bypasses RLS and could overwrite semantics aside, the recorded sha256 is never re-checked). An audit-grade export register needs a stored/verified status and an integrity sweep.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\exportTool.ts:176",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-8",
+      "workstream_item": "Persisted with parameters, data version, reproducibility",
+      "title": "Reproducibility is not pinned: the full request spec is not persisted (analysis section SQL lives only inside the PDF bytes; GL account_code filter unrecorded) and there is no data-version anchor",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:161-178,190-282 — receipts/artifacts persist scope/format/fy/period/row_count only; there is no parameters/spec column (table shape: db/v2/14-tables-ops.sql:127-186)",
+        "agent/src/tools/analysisTool.ts:303-308 — build_analysis_report files scope='analysis' with period fields; the sections spec (the SQL that defines the report) is never written to the DB — the only copy is the provenance page rendered into the PDF (reportModel.ts:375-384)",
+        "agent/src/tools/exportTool.ts:303-327 — a single-account GL export passes account_code to the read fn but records nothing distinguishing it from a full-ledger GL artifact at the same coordinates",
+        "No snapshot/as-of ledger version exists: books keep mutating (auto_draft entries are included in exports and remain editable — journalsFySql exportTool.ts:102 includes status 'auto_draft'; client_financial_statements likewise, db/v2/28-fns-reads.sql:626), so re-running the same parameters later yields different numbers; only the bytes' sha256 pins WHAT was produced, not FROM WHICH data state"
+      ],
+      "wrong": "\"Reproducible\" today means 're-run against whatever the books now say'. An auditor cannot regenerate or even fully characterize a filed artifact from its DB record — for analysis artifacts the defining queries are unqueryable, and for GL the filter is lost. Parameters + data-version capture are missing.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\analysisTool.ts:303",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-9",
+      "workstream_item": "Audit trail — who exported",
+      "title": "Export receipts and artifacts attribute everything to the literal 'agent': the requesting human is never recorded, and the fns accept any free-text actor",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/runtime/openai/runtime.ts:183 — interactive ToolContext actor is hardcoded 'agent'; exportTool.ts:177,189 pass ctx.actor into p_actor/created_by",
+        "db/v2/25-fns-ops.sql:171,218 — record_export/record_export_artifact validate only non-blank actor; app.audit_actor (the verified-email constraint, db/v2/00-foundation.sql:212-229) is NOT applied here — and 'agent' is an accepted label under it anyway",
+        "The only tie to the human is the per-user chat transcript — outside the export audit trail; firm_activity_feed shows the receipt with actor 'agent' (db/v2/25-fns-ops.sql:1141-1147 — export_receipts is source 5 of the feed union)"
+      ],
+      "wrong": "The audit trail cannot answer 'which member exported the whole ledger and when' — a basic confidentiality/accountability question for a firm handling client books. The JWT carries the caller identity; the fns simply do not capture it.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\runtime\\openai\\runtime.ts:183",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "H-10",
+      "workstream_item": "Permissions on exports",
+      "title": "No role floor anywhere on the export lane: a viewer can trigger export writes and download every whole-ledger artifact; the SKILL's 'bookkeeper+' download claim is stale relay doctrine",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:178,283-285 — record_export/record_export_artifact granted to authenticated with no assert_can_review/assert_can_manage floor",
+        "dashboard/lib/rbac.ts:26 — 'documents.export': 'viewer'; dashboard/components/export/ExportFileRow.tsx:47-49 and dashboard/components/rail/AgentCard.tsx:100 gate Download on that viewer-level permission",
+        "db/v2/storage-setup.sql:43-47 — firm_docs_read is firm-prefix-only, no role dimension; dashboard/lib/exportArtifacts.ts:83-97 signs dashboard-direct on the session JWT",
+        "belcort/export/SKILL.md:183-184 — claims the runtime mints the URL \"for bookkeeper+ via GET /firms/:id/books/exports/:artifactId/file\" — no such route exists in agent/src/http (hub/cors/auth/wakeGate/documents/server/sessions/wakes only; grep for 'exports' finds none); the as-built path is dashboard-direct and viewer-accessible"
+      ],
+      "wrong": "Reads-ungated is the PRD's stated design, but the export lane also has ungated WRITES (receipts/artifacts/build_export under any membership at the DB layer), and the doctrine tells the model a stricter gate exists than actually does. If the firm ever relies on the documented bookkeeper+ boundary for client-data egress, it is not enforced anywhere.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\dashboard\\lib\\rbac.ts:26",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-11",
+      "workstream_item": "Agentic flow safety — wrong-client export",
+      "title": "The MANDATORY whole-ledger client-confirm is prompt-only, and the export tools also run on the [documents] wake lane where clarify_tool does not even exist; a null active scope lets any client in the firm be exported",
+      "severity": "medium",
+      "evidence": [
+        "belcort/export/SKILL.md:87-92 — Step 3 mandates a clarify_tool client-confirm for full/management_accounts; no code path enforces it (exportTool.ts has no confirm state)",
+        "agent/src/tools/exportTool.ts:249-251 + analysisTool.ts:239-241 + buildTools.ts:384-388 — build_export and build_analysis_report are permitted under policy 'documents' (an autonomous wake); buildTools.ts:381 pushes clarifyToolDef only for 'interactive', so the mandated gate is structurally impossible on that lane",
+        "agent/src/tools/exportTool.ts:261-263 — the scope check passes whenever ctx.scope.clientId is null (the firm thread): `if (ctx.scope.clientId != null && clientId !== ctx.scope.clientId)`; build_export calls record_export/record_export_artifact via ctx.rpc directly, so the registry's enforceScope never runs for them",
+        "dashboard/lib/reportsPicker.ts:44-47 — even the 'deterministic' picker routes through the model by client NAME, not id (`buildExportIntent(clientName, ...)`), so client resolution is still LLM inference on look-alike names"
+      ],
+      "wrong": "The design treats a whole-ledger export of the wrong client as firm-killing, yet the only gate is model obedience to a skill paragraph — absent entirely on wake lanes and un-anchored (name-based) from the picker. RLS caps the blast radius at the firm, but intra-firm wrong-client egress to a client is exactly the scenario the SKILL calls firm-killing.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\exportTool.ts:261",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-12",
+      "workstream_item": "Standard exports — completeness of the produced file",
+      "title": "General-ledger export silently truncates any account beyond 200 pages (200k lines) with no error or truncation note; journals/documents exports are unbounded in memory",
+      "severity": "low",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:313-323 — `for (let guard = 0; guard < 200; guard++)` per account (limit 1000/page); when the guard exhausts with has_more still true the loop just ends — pages collected so far are formatted as if complete",
+        "agent/src/tools/exportFormat.ts:137-153 — generalLedgerCsv emits whatever pages it received; no truncation marker exists in the CSV or the PDF",
+        "agent/src/tools/exportTool.ts:293-300 — journals/documents pull the entire result set into memory in one agent_select (the 5s statement timeout, db/v2/26-fns-session.sql:136, is the only bound)"
+      ],
+      "wrong": "An export presented as a complete audit ledger can be silently incomplete at pathological volume; the honest-truncation discipline the analysis lane has (MAX_TABLE_ROWS note, analysisTool.ts:140-143) is missing from the audited-scope lane where it matters more.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\exportTool.ts:313",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-13",
+      "workstream_item": "Standard exports — SST-02",
+      "title": "The SST return PDF/XLSX omit the form_map (SST-02 field mapping) rows that the CSV carries, while still counting them in rowCount",
+      "severity": "low",
+      "evidence": [
+        "agent/src/tools/exportFormat.ts:289-295 — sstReturnCsv emits a form_map row per entry",
+        "agent/src/tools/reportModel.ts:323-330 — sstReturnDoc counts formCount into rowCount (`rowCount: 3 + byRate.length + formCount`) but builds only summary + by_rate sections — no form_map section is ever rendered",
+        "Consequence: the branded 'SST Return' PDF lacks the very form-field mapping an SST-02 preparer needs, and its recorded row_count overstates its rendered content; the rowCount parity test (agent/test/reportRender.test.ts:85-93) passes only because both sides count the same number while one side does not render the rows"
+      ],
+      "wrong": "Format parity claim ('all three carry the same figures', SKILL.md:79-81) is false for sst_return: PDF/XLSX drop the form_map figures. The numeric rowCount parity masks a content non-parity for this one scope.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\reportModel.ts:323",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-14",
+      "workstream_item": "Export SKILL + references correctness",
+      "title": "Doctrine drift cluster in the export skill: ghost Step 6, a reference asserting full/analysis are 'not yet wired', Hermes-era transport claims, a class ('permanent') the tool cannot produce, a picker stuck on CSV-only, and an implementation note billing the superseded hand-assembly pattern as 'the proven live pattern'",
+      "severity": "low",
+      "evidence": [
+        "belcort/export/SKILL.md:164 — steps jump 5 → 7; :207 cites \"the documented 23505 version-retry in Step 6\" which no longer exists; :166-167 \"Upstream Hermes has NO message-artifact field\" and :30-31 `messaging.send_message` are retired-runtime references",
+        "belcort/export/references/journals-csv-execution-pattern.md:30-31 — \"Not yet wired: the full bundle and the ad-hoc VISUAL analysis report … never fabricate a file/card for an unwired scope\" — contradicts SKILL.md:114-122/Step 5 and the shipped code (exportTool.ts:61 'full'; analysisTool.ts) — a model reading the reference may refuse wired capabilities; meanwhile SKILL.md:63 still bills this superseded reference as \"the proven live pattern for FY journals CSV exports: … formatter invocation, upload_document call, and byte-level verification\" — the exact hand-assembly lane the reference's own banner (:3-7) forbids",
+        "belcort/export/SKILL.md:57-58 — instructs class 'permanent' for non-period registers, but EXPORT_SCOPES hardcodes documents/aging → 'generated' and sst_return → 'filings' (agent/src/tools/exportTool.ts:53-62); build_export accepts no class parameter at all",
+        "dashboard/lib/reportsPicker.ts:13,23 — \"Full bundle + PDF remain future scope\"/\"PDF deferred\" are stale; the picker exposes only csv|bundle though all scopes render pdf/xlsx (exportTool.ts:239); agent/src/tools/registry/ops.ts:16-17,39 param docs omit xlsx/aging/sst_return/analysis"
+      ],
+      "wrong": "The doctrine is the runtime's behavioral spec (loaded verbatim into the model); contradictory/stale instructions produce refusals of wired features, wrong class expectations, and — worst — the SKILL's own implementation note (line 63) directs the model at the superseded hand-assembly pattern (formatter + upload_document) that the v2 invariant and the reference's banner exist to forbid.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\belcort\\export\\references\\journals-csv-execution-pattern.md:29",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "H-15",
+      "workstream_item": "References — presentation-mapping.md",
+      "title": "presentation-mapping.md still sanctions model-side statement composition (placing/netting TB figures, NBV = cost − accumulated depreciation) in tension with the DB-owned client_financial_statements",
+      "severity": "low",
+      "evidence": [
+        "belcort/export/references/presentation-mapping.md:3-7 — \"This reference is the agent's deterministic map from acc_type … to a statement line … it places the DB's signed nets into these lines\" — the model doing FS presentation",
+        "belcort/export/references/presentation-mapping.md:32-37 — §2 instructs net presentations (\"Net book value = cost − accumulated depreciation\", \"Net sales = sales − returns inwards\") — subtraction performed by whoever follows the doc, i.e. the model in chat",
+        "The as-built statement pipeline is DB-owned end-to-end (db/v2/28-fns-reads.sql client_financial_statements → reportModel managementAccountsDoc), and belcort/year-end-close/SKILL.md:145-146 confirms \"the DB owns the signed-net → SoFP/P&L mapping — you never place a figure into a statement line\"; the reference is live-loaded doctrine (agent/test/loader.test.ts:52 asserts presentation-mapping loads into read_reference) — a live contradiction inside the export references directory"
+      ],
+      "wrong": "A model following this doctrine composes statement figures in its own text (netting = computing money), the exact class of output the export lane was rebuilt to prevent. Either the reference is dead (then it must say so like journals-csv-execution-pattern.md does) or it licenses in-chat model-computed statements.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\belcort\\export\\references\\presentation-mapping.md:32",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "H-16",
+      "workstream_item": "Standard exports — do numbers come from DB read fns or model composition",
+      "title": "Journals/documents/COA/client-name reads are agent-templated raw SQL through agent_select — not named read fns — and the journals FY window duplicates app.fye_period_start/end logic in agent code",
+      "severity": "low",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:91-124 — journalsFySql/journalsRangeSql/documentsSql/accountsSql are SQL strings built in agent TypeScript (deterministic code, NOT model text; identifiers guarded by sqlInt/sqlDate/sqlText :64-89) executed via ctx.query → agent_select (agent/src/runtime/openai/db.ts:58-65)",
+        "agent/src/tools/exportTool.ts:91-104 vs db/v2/15-triggers.sql:78-91 — two independent FY-window definitions; re-verified equivalent in this audit by case analysis including the leap-February edge (fye_month=2, fy=2024 → both yield 2023-03-01..2024-02-29 via Postgres date clamping), but nothing keeps them in lockstep if D18 semantics ever change",
+        "belcort/export/SKILL.md:98-99 claims build_export \"reads the numbers from the authoritative DB fns\" — true for 5 of 7 single scopes (client_trial_balance/trial_balance_range, client_general_ledger, client_financial_statements, ar_aging/ap_aging, get_sst_return; 'full' composes three of those); journals and documents are raw-SQL scopes"
+      ],
+      "wrong": "Not a model-composition leak (the SQL is compiled agent code), but the 'named audited read fns' claim is overstated and the duplicated FY-window rule is a drift trap: a future change to app.fye_period_start/end (or a client FYE change mid-flight) would silently desynchronize the journals export window from every other FY surface.",
+      "target": "C:\\Users\\zhant\\Desktop\\initial acc software skillmd\\agent\\src\\tools\\exportTool.ts:91",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "All eight standard export scopes exist and are wired: trial_balance, journals, documents, general_ledger, management_accounts (SoCI + SoFP = P&L + SOFP), aging (AR+AP), sst_return (SST-02 draft), and the combined 'full' client pack — each in CSV/PDF/XLSX (full = always one PDF).",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:53-62 (EXPORT_SCOPES), :238-239 (format enum), :286-371 (per-scope DB reads), :391-406 (full-pack composition + forced ext='pdf' at :404)",
+        "agent/src/tools/exportFormat.ts (all seven CSV shapers), agent/src/tools/reportModel.ts:335-346 (buildReportDoc dispatch)"
+      ]
+    },
+    {
+      "claim": "On the build_export path, figures genuinely never pass through the model's text: the tool reads DB JSON server-side (rpc to client_trial_balance/trial_balance_range, client_general_ledger, client_financial_statements, ar_aging/ap_aging, get_sst_return; agent-templated SQL for journals/documents), shapes it once, and the CSV/PDF/XLSX layers only format cells (centsToDecimal/presentMoney/moneyToNumber).",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:279-407; agent/src/tools/reportModel.ts:1-9,89; agent/src/tools/exportFormat.ts:17-53; agent/src/runtime/openai/db.ts:53-65"
+      ]
+    },
+    {
+      "claim": "Exports are persisted as durable, versioned, firm-scoped artifacts — receipt (export_receipts) + write-once index row (export_artifacts, 7yr retain_until + legal_hold, per-firm unique object_key, version computed under an advisory lock with a unique backstop and a tool-side 23505 retry) — stored in a private write-once bucket (no UPDATE/DELETE storage policies, runtime upload upsert:false), with the object key derived server-side and belt-and-braces firm-prefix-checked in the tool layer.",
+      "evidence": [
+        "db/v2/14-tables-ops.sql:127-188; db/v2/25-fns-ops.sql:161-285; db/v2/storage-setup.sql:41-59; agent/src/main.ts:108-122; agent/src/tools/exportTool.ts:166-220 (23505 retry :182-199; the firm-prefix assert :203-206)"
+      ]
+    },
+    {
+      "claim": "The CSV formatter is defensively correct: RFC-4180 quoting, formula-injection neutralization of leading =/+/-/@/TAB/CR (which deliberately apostrophe-prefixes negative values too — csvCell('-1') → \"'-1\", tested at agent/test/exportFormat.test.ts:126, a consumer-visible tradeoff), UTF-8 BOM + CRLF, BigInt-safe integer-cents→2dp (no floats in cell text), boolean/NaN guards.",
+      "evidence": [
+        "agent/src/tools/exportFormat.ts:12-53; agent/test/exportFormat.test.ts (exercises centsToDecimal negatives/strings, csvCell injection, and the per-scope shapers)"
+      ]
+    },
+    {
+      "claim": "The download path is honest and scoped: the export_result card carries ONLY artifactId (never a URL/key), the dashboard fail-closed parses the card shape, listing is an RLS-direct select, and Download mints a fresh 10-minute signed URL on click via the session JWT with storage RLS as backstop.",
+      "evidence": [
+        "belcort/export/SKILL.md:181-184; dashboard/lib/artifacts.ts:415-435 (parseExportResult), dashboard/lib/exportArtifacts.ts:52-97 (signBooksUrl ttl 600 at :94), dashboard/components/rail/AgentCard.tsx:84-130, agent/src/http/sessions.ts:41-60 (fence extraction)"
+      ]
+    },
+    {
+      "claim": "Ad-hoc agentic reporting exists and is structurally real: build_analysis_report takes a typed report specification (1-16 sections of {sql, render, money_columns, label_column, value_columns, note}), executes each SELECT server-side under RLS/agent_select, renders tables/bar/line/hbar/donut charts/KPI tiles into one branded PDF, stamps 'Analytical view — not an audited financial statement', prints every source query on a provenance page, files under the segregated 'analysis' class, and honestly caps/annotates truncation and empty results.",
+      "evidence": [
+        "agent/src/tools/analysisTool.ts (whole file, esp. :26-32 caps, :116-198 renders, :273-289 execution+provenance, :303-308 filing); agent/src/tools/pdfReport.ts:223-395; db/v2/14-tables-ops.sql:132-135,179-182 ('analysis' in the scope/class closed sets); agent/test/analysisReport.test.ts:94-148"
+      ]
+    },
+    {
+      "claim": "The dashboard Reports picker is a deterministic parameterized intent (fixed 8-item menu, FY selector, exact skill grammar, RBAC-aware via can(role,'chat.use')), and the Files shelf derives current-version-per-coordinate folding read-only without recomputing any figure.",
+      "evidence": [
+        "dashboard/lib/reportsPicker.ts:17-47 + dashboard/lib/__tests__/reportsPicker.test.ts (exists); dashboard/components/reports/ReportsPicker.tsx:40-56; dashboard/lib/filesShelf.ts:1-70"
+      ]
+    },
+    {
+      "claim": "The journals FY window in agent SQL is currently numerically identical to the DB's app.fye_period_start/end for all months including leap-February (re-verified by case analysis: fye_month=12 and 2 across year boundaries, including the 2024-02-29 clamp).",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:91-104 vs db/v2/15-triggers.sql:78-91; db/v2/25-fns-ops.sql:122-137 (client_trial_balance uses the app helpers)"
+      ]
+    },
+    {
+      "claim": "Render-layer test coverage exists for shape parity and output validity: rowCount parity CSV↔ReportDoc per scope, %PDF/%%EOF and PK-zip magic-byte smoke tests per scope, trial-balance balanced-flag + total-row test, analysis-lane section execution/scope-refusal/read-only-rejection/empty-set tests — but NOT for the management-accounts balanced float identity, the build_export balanced:true hardcode, or build_export's period/scope orchestration (no exportTool.test.ts in agent/test/).",
+      "evidence": [
+        "agent/test/reportRender.test.ts:69-128; agent/test/analysisReport.test.ts:94-148; absence verified: agent/test/ directory listing has no exportTool test file"
+      ]
+    }
+  ],
+  "unverified": [
+    "The audit brief itself was unavailable to the verifier too: 'undefined/audit-brief.md' does not exist (verified — the literal 'undefined' directory contains only maps/db-map.md). Verification proceeded on the task-text discipline (frozen repo read-only, file:line evidence, H-n IDs, severity critical/high/medium/low); if the brief's rubric differs, severities may need remapping.",
+    "No code was executed against a live system: PDF/XLSX byte output, PostgREST jsonb numeric/bigint transport behavior (the H-5 truncate-vs-blank analysis is reasoned from row_to_json serialization + JSON.parse, not exercised live), and live storage-policy state (storage-setup.sql:7-12 notes the policy block must be applied by hand in the Dashboard SQL editor — the repo cannot prove what is applied in production) were reasoned from source. Exceptions verified by execution: the H-3 float-equality failure (Number('0.30') !== Number('0.10')+Number('0.20') → confirmed false) and the agent/test directory listing.",
+    "Whether the model in practice ever uses the manual record_export_artifact + upload_document lane (H-1) — the code permits it, the upload_document tool description advertises it, and SKILL.md:63 points at its execution pattern, but no transcripts/live artifacts were examined.",
+    "Whether any legacy dashboard export surface beyond the ReportsPicker/FilesShelf remains reachable (comments say the v1 ExportSheet retired at slice 5d; its removal from every route was not exhaustively proven).",
+    "db/v2/tests functional coverage of record_export/record_export_artifact edge cases (dangling-reservation, NULL-fy version backstop) was not read file-by-file; the isolation suite's cross-firm coverage of these fns is asserted by the db map but the test bodies were not independently re-read.",
+    "The exact behavior of a Supabase signed-URL mint for a nonexistent object (H-7 user-facing consequence) — inferred from the dashboard's generic error handling, not exercised."
+  ],
+  "decision_brief": "Verdict (adversarially re-verified — 12/16 findings CONFIRMED as drafted, 4 ADJUSTED on evidence/wording, 0 REFUTED): this is roughly two-thirds of a true agentic reporting engine — materially better than 'fixed templates only', but its central trust guarantee is opt-in rather than structural. What is real: eight standard scopes (TB, journals, GL, documents, management accounts = P&L+SOFP, AR/AP aging, SST-02 draft, full pack) in CSV/PDF/XLSX; five of seven single scopes read named DB fns and the DB genuinely owns those figures; a genuine ad-hoc lane (build_analysis_report) where Clara translates intent into a typed section spec (SQL + render + money labels), the DB executes under RLS, and a deterministic renderer produces branded PDFs with tables/charts/KPIs, an 'analytical view' stamp, and a printed provenance page; and a serious artifact discipline — receipts, write-once versioned server-keyed artifacts, 7-year retention, private write-once storage, artifactId-only cards, mint-on-click signed URLs, a version-folded Files shelf. No DOCX anywhere; analysis is PDF-only; the picker still exposes CSV-only. What breaks the 'true engine' claim: (1) the figures-never-pass-through-the-model invariant is enforceable only if the model cooperates — record_export_artifact + upload_document(content_base64) let model-authored bytes become indistinguishable audited artifacts (H-1: every prohibition is prose, and the doctrine self-contradicts — SKILL.md:63 still bills the hand-assembly pattern as 'the proven live pattern'), and the analysis lane launders SQL literals and free-text commentary under a banner asserting the database computed everything (H-4); (2) assurance honesty is broken — build_export hardcodes balanced:true onto every card while the PDF seal is agent-recomputed in floats with an execution-verified false negative (H-2/H-3); (3) auditability is shallower than it looks — no requesting-human attribution, no stored report spec or data-version anchor, phantom-artifact reservations never reconciled, no post-hoc integrity check (H-7/H-8/H-9); (4) safety gates are prose — the whole-ledger client confirm, the read-only SQL guard (whose in-code comment falsely claims a Postgres backstop against SELECT-wrapped DEFINER writes), and the 'bookkeeper+ download' all exist in doctrine but not in code (H-6/H-10/H-11). For the rebuild: PORT the format/renderer/report-model stack, the artifact taxonomy/versioning, and the analysis section-spec concept largely as-is; REBUILD the trust seams in the DB — server-verified balanced, sha256-verified stored artifacts with status, captured caller identity and full request spec, structural (not lexical) read scoping, and make the receipt→artifact→bytes pipeline the ONLY way bytes enter the exports tree; DROP the stale Hermes-era doctrine (ghost Step 6, the 'not yet wired' reference text, SKILL.md:63's superseded implementation note, presentation-mapping's model-side netting license)."
+}

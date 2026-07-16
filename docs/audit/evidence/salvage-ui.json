@@ -1,0 +1,392 @@
+{
+  "asset_class": "ui",
+  "basis": "Dashboard salvage classification against dashboard-map.md (backbone) and ALL verified findings (A, B, C, D, E, F12, F3, Ggr, Grt, H, I, J, GAPS). Definitions per work order: PORT = proven, take largely as-is; REBUILD = right idea, wrong implementation (reason states what was wrong AND what the rebuilt version must do); DROP = do not carry forward. Classifications were cross-checked against confirmed criticals: no asset carrying a confirmed critical defect is PORT unless the defect is trivially fixable in place and the reason says so.",
+  "items": [
+    {
+      "asset": "dashboard/lib/booksApi.ts — dashboard-direct data plane (rpcBooks / selectBooks / signBooksUrl / actorFromToken)",
+      "kind": "lib / data plane",
+      "recommendation": "PORT",
+      "reason": "An 89-line proven seam: browser -> audited SECURITY DEFINER fns / RLS reads / short-TTL signed URLs on the session JWT, no relay, no service role — the architectural keeper of the dashboard. Carry the caveat that actorFromToken is a display hint only (the DB must constrain actor on EVERY fn — A-11/H-9 show the ops engines don't today) and that the upstream auth model changes (GAP1-4).",
+      "evidence": "dashboard-map.md §3; A fine-claim (one shared state plane); A-11; H-9; GAP1-4 (upstream, not in this seam)"
+    },
+    {
+      "asset": "Typed data-lib layer over rpcBooks (workbenchActions, firmBooks, trialBalance, generalLedger, financialStatements, journalEntryDetail, activity, recon, arap, fa, kbActions, documentActions, digest, clientOverview, periodClose reads, booksErrors vocabulary)",
+      "kind": "lib layer",
+      "recommendation": "PORT",
+      "reason": "Thin per-surface wrappers with a consistent `${status}: ${body}` error vocabulary and no client-side arithmetic — the pattern and most files carry over as-is even as the fn catalog changes. Fix the handful of `selectBooks<any[]>` untyped seams (contactsRegister, documents) while porting.",
+      "evidence": "dashboard-map.md §3 (fn->lib->surface matrix), §7 note 9"
+    },
+    {
+      "asset": "dashboard/lib/artifacts.ts — parseArtifact card gate",
+      "kind": "lib / security gate",
+      "recommendation": "PORT",
+      "reason": "Verified genuine security asset: fail-closed discriminated parsing, bounded strings/rows/files/chips, safe-integer cents, strict slug charset, unknown types render nothing — keep the 'text-to-hydration, never text-to-code' LAW verbatim. Additive changes only: allow genuinely firm-scoped cards (today every card requires a positive clientId) and register the planned card types.",
+      "evidence": "D fine-claim (artifact gate); J fine-claims; dashboard-map.md §2 gate + §7 note 3; D-16 (catalog LAW defensible)"
+    },
+    {
+      "asset": "components/rail/ReadOnlyCards.tsx + ReviewSummaryCard.tsx (read-only card renderers)",
+      "kind": "component family",
+      "recommendation": "PORT",
+      "reason": "The renderers themselves are sound — per-card verbs wired only when a real route resolves, ReviewSummaryCard enforces the no-prior-evidence review-only carve-out with a single in-flight latch and live-id re-read. Their unreachability (4 of 8 catalog types have no emitter) is the emission pipeline's defect, fixed there, not here.",
+      "evidence": "J fine-claim (review_summary carve-out); dashboard-map.md §2 rendering; D-2 (unreachability is agent/pipeline-side)"
+    },
+    {
+      "asset": "Artifact fence/emission pipeline (lib/chat/artifactFence.ts, runEventChunks.ts fence suppression, hydrateTranscript single-artifact shape, dead native artifact/directive SSE vocabulary)",
+      "kind": "lib / wire seam",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: cards travel as fenced JSON in prose with two divergent extractor allowlists, only the FIRST fence per turn is lifted, suppression never resets (post-fence prose silently withheld live), half the catalog would flash raw JSON, and the native artifact/directive SSE frames are dead code on both ends. Rebuilt version must be a native typed artifact lane (one authoritative emit path per card type, N cards per turn, identical live and reload rendering, parity-tested across agent and dashboard) — retire fenced-text extraction entirely.",
+      "evidence": "D-2, D-3, D-4 (all CONFIRMED); Grt-9, Grt-10; dashboard-map.md §7 note 4"
+    },
+    {
+      "asset": "components/rail/PlanCard.tsx (je_review approval card) + planStateMap thread-local plan ledger",
+      "kind": "component / trust surface",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: rehydrated cards are stale-actionable (an already-posted entry re-renders 'needs approval' with a live Approve — violates the catalog's own inertness law), Edit/'Not now' exist but are never wired so chat is Approve-only, plan state is per-mount React state that disagrees with the grid, and the card is inline-styled outside the verified token system. Rebuilt card must derive state from the DB-owned entry status (projected live, self-resolving across surfaces), ship Approve/Edit/Reject-with-reason/Not-now, bind Approve to an exact-payload approval envelope (GAP0-5), and live in the token system. Keep its verified anatomy: balance cue vs posting gate, always-visible SST legs, authorship badge, provenance chip, fail-closed scope gate.",
+      "evidence": "D-7, D-12, J-1, J-12, J-23 (all CONFIRMED); GAP0-2/GAP0-5; D fine-claim (fresh-card anatomy); J fine-claim (scope-safety structural)"
+    },
+    {
+      "asset": "Chat transport (lib/chat/makeHermesRunner.ts, hermesChatTransport.ts, relayStream.ts, useHermesChat.ts, hydrateTranscript.ts)",
+      "kind": "lib / wire",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the stream is single-consumer and non-replaying with lossy-by-design drop recovery that even discards the final output the poll endpoint already returns, reconnectToStream is null (no reattach — a reload mid-run shows nothing while the reply lands in the DB), tool_calls are dropped at hydrate, and the whole stack is named and commented for the retired Hermes/relay contract. Rebuilt transport must speak a durable-run protocol: reattach/resume by run id, reconcile terminal polls to the authoritative output, carry typed tool/attachment/clarify parts, and shed all Hermes/relay vocabulary. Salvage the proven internals as reference: line-buffered dual-dialect SSE decode, heartbeats, early-close-on-done, keyset shape-at-read hydration.",
+      "evidence": "D-9, D-11 (CONFIRMED); Grt-1/Grt-6/Grt-8; dashboard-map.md §7 notes 1, 7; D fine-claims (SSE core, persistence)"
+    },
+    {
+      "asset": "components/clara/ClaraThread.tsx orchestration (agent FSM wiring, clarify lifecycle, optimistic plan ledger, error banner)",
+      "kind": "component / orchestration",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the clarify lifecycle is process-local and lossy (never persisted, orphaned by reload, answered fire-and-forget, card stays clickable after a free-text answer) and plan/tool state is thread-local optimism instead of projection of DB truth; tool activity is computed then rendered nowhere. Rebuilt thread must render persisted typed interruptions (clarify Q&A as transcript rows that survive reload), project card state from DB-owned status, show in-thread tool chips and an honest pre-first-token status line, and reattach to parked runs on mount. Keep the verified pieces: guardedApprove's fail-closed active-scope write gate, expired-session mutation blocking, honest offline banner.",
+      "evidence": "D-6, D-8 (CONFIRMED); J-4, J-12, J-28; J fine-claims (scope-safety, clarify live-flow, offline honesty)"
+    },
+    {
+      "asset": "Streaming markdown + transcript a11y core (ClaraMarkdown, StreamdownView, useSentenceFlush, MessageScroller, ClaraTranscript render primitives)",
+      "kind": "component family",
+      "recommendation": "PORT",
+      "reason": "Verified genuinely Claude-class where it works: Streamdown with incomplete-markdown parsing, per-word fade honoring reduced motion, an accounting-safe sentence-flush screen-reader mirror that never splits decimals, stick-to-bottom scroll physics with pin-user-turn-to-top, role=log semantics. Re-enable code-block copy controls (controls={false} today) and add the missing per-message affordances while porting.",
+      "evidence": "D fine-claims (rendering, scroll); J fine-claim (streaming a11y floor); D-14 (additive affordance gaps)"
+    },
+    {
+      "asset": "components/clara/ClaraRail.tsx dock shell (drag/keyboard resize, collapse-to-edge, overlay <1280px, canvas variant)",
+      "kind": "component / shell",
+      "recommendation": "PORT",
+      "reason": "The persistent docked-rail + full-canvas dual mounting is proven interaction design with real a11y craft (SC 2.5.8 resize grab zone, per-scope clean remount preventing cross-client leakage). Add the missing expand affordance and shared thread state across seats (J-11) as additive work on the ported shell.",
+      "evidence": "dashboard-map.md §2, §7 note 15; J-11 (medium, additive); D fine-claim (session hygiene)"
+    },
+    {
+      "asset": "components/clara/ClaraComposer.tsx + lib/attachments.ts (three-ingress attachment pipeline, caps, drafts, Esc ladder)",
+      "kind": "component / upload UX",
+      "recommendation": "PORT",
+      "reason": "One cumulative validation pipeline behind picker/drag/paste with caps mirrored to the service and inline first-failure errors — verified solid at three layers. Port with named fixes: de-dupe pasted images by content not filename (D-10 silently drops the second screenshot), close the .xml empty-MIME bypass, add the fixed scope chip and @-mention popover (J-9/D-15), and extend drop targets thread-wide (D-13); the b64-in-JSON wire itself is replaced by the rebuilt ingest transport.",
+      "evidence": "D fine-claim + E fine-claims (pipeline verified); D-10, D-13, D-15, J-9 (bounded, fixable); E-7 (wire-side)"
+    },
+    {
+      "asset": "Session UI (SessionMenu, sessionsApi, keyset 'Show earlier' pagination, archived sessions read-only, reset guard handling)",
+      "kind": "component + lib",
+      "recommendation": "PORT",
+      "reason": "DB-backed per-scope sessions over audited fns with id-keyset pagination, inert lead pages, and read-only archives — verified solid persistence UX. The endpoints it calls move to the durable-runtime session model, but the UI mechanics carry as-is.",
+      "evidence": "D fine-claim (persistence + pagination solid); dashboard-map.md §2"
+    },
+    {
+      "asset": "Presence/state machinery (lib/chat/useAgentState, lib/agentState FSM, PresenceDot, lib/connectivity offline latch)",
+      "kind": "lib + component",
+      "recommendation": "PORT",
+      "reason": "The idle/thinking/working/parked/clarify/offline FSM and the durable relay-offline latch feeding an honest 'your books are safe and editable' banner are verified working trust plumbing. Extend, don't rewrite: cross-scope needs-you count + jump list (J-28) and rendering the tool verb it already computes.",
+      "evidence": "J fine-claim (offline honesty); dashboard-map.md §2; J-28, J-4 (extensions)"
+    },
+    {
+      "asset": "Composer seeding buses + chat<->workbench bridge (lib/claraAsk.ts, lib/railChips.ts, lib/directives.ts, batch-bar context passing)",
+      "kind": "lib / integration seam",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: chips drop the entry id and serialize to lossy prose ('Re 14 Apr · Director loan' — Clara must guess which entry), multi-row selections can't be attached at all, and the agent->UI directive channel is dead at all four stations (no emitter, no SSE branch, no dispatcher caller, no grid listener) with exactly one verb defined. Rebuilt bridge must pass structured entity references (entry/document/filter descriptors) both ways, add 'Ask Clara about these N' to selections, and ship the directive union (open_view/focus_entity/apply_filter with period) end-to-end with the attributed one-click-undo chip pattern. Keep the never-auto-send seeding discipline.",
+      "evidence": "J-7, J-8 (CONFIRMED); D-3 (channel dead at every station); J fine-claim (⌘K dispatch never writes)"
+    },
+    {
+      "asset": "components/documents/DocumentsTable.tsx upload path (drop-zone/picker -> defaultSend fire-and-forget chat POST)",
+      "kind": "surface / upload flow",
+      "recommendation": "REBUILD",
+      "reason": "Confirmed CRITICAL: the self-declared ONLY ingest path POSTs a chat run that nothing ever executes (no SSE attach; runs only execute inside streamRun) — files are never uploaded/OCR'd/ingested while the UI toasts success and wedges session reset; not trivially fixable in place because the honest fix is the durable ingest architecture, not attaching a stream to a doctrine-dependent chat run. Rebuilt version must be a deterministic server-side ingest pipeline (bytes + row persisted BEFORE any model involvement), with real per-file progress/status and no success signal until the document row exists.",
+      "evidence": "D-1 / E-1 (CONFIRMED critical); E-2 (persist-after-OCR is doctrine, not structure); E-10 (no retry, 'retry' is Dismiss-only)"
+    },
+    {
+      "asset": "components/documents/DocumentsTable.tsx grid + triage verbs (rows, keyboard model, reassign/mark-sample/request-coding, signed-URL view, docStatus)",
+      "kind": "surface",
+      "recommendation": "PORT",
+      "reason": "The listing/triage half is verified good: role=grid keyboard model, honest fetch-error-vs-empty states, audited triage verbs with the atomic in-DB wake, mint-on-click 600s signed URLs, sourced-entry deep links. Type the `documents: any[]` seam while porting; the upload half is the separate REBUILD above.",
+      "evidence": "E fine-claims (triage verbs, unassigned lane, status surfacing); dashboard-map.md §4, §7 note 9"
+    },
+    {
+      "asset": "components/documents/FirmDocumentsTriage.tsx (firm unassigned lane + Assign-all)",
+      "kind": "surface",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: 'Assign all' mass-files the ENTIRE mixed multi-client lane to one client in one click, ignoring the per-row match-confidence evidence it renders, with no grouped preview, no outlier exclusion, no subset selection — and mis-files harden once coded; it also renders raw confidence percentages against the shaped-band law. Rebuilt lane must group by suggested client before committing, exclude low/other-client-confidence outliers by default with per-row opt-in, offer subset selection with a named-counts confirm step, and bucket confidence through the shaped evidence band. Keep the verified FIFO lane semantics, loop-of-audited-singles mechanics, and the zero-client escape hatch.",
+      "evidence": "GAP5-7 (CONFIRMED); J-20; GAPS fine-claim (assign-all mechanics sound as far as they go); E fine-claim (lane exists, honest)"
+    },
+    {
+      "asset": "Document detail / verification surface (components/documents/DocumentExpand.tsx + EntryDrawer source-document section)",
+      "kind": "surface / trust spine",
+      "recommendation": "REBUILD",
+      "reason": "Confirmed CRITICAL gap: document 'detail' is a guillemet-fenced raw OCR JSON dump plus a new-tab file link — the core professional verification loop (source page beside the proposed entry with extracted fields highlighted) does not exist, and evidence regions are not captured anywhere in the pipeline. Rebuilt version must be an in-drawer/side-by-side document viewer with per-field evidence-region overlays (requires pipeline capture + storage upstream), linked from every je_review card, drawer, and inbox review card. Keep the inert-data rendering discipline (OCR as data, never markup).",
+      "evidence": "J-18 (ADJUSTED->still critical: missing end-to-end, capture+store+render); J fine-claim (OCR treated as inert data)"
+    },
+    {
+      "asset": "components/files/FilesShelf.tsx + lib/filesShelf.ts + lib/exportArtifacts.ts",
+      "kind": "surface",
+      "recommendation": "PORT",
+      "reason": "Read-only artifact shelf with current-version-per-coordinate folding, superseded history visible, artifactId-only cards, and mint-on-click 10-minute signed downloads — verified honest and scoped. Upstream artifact-integrity fixes (sha verification, balanced honesty) are H-workstream agent/DB rebuilds, not this surface.",
+      "evidence": "H fine-claims (download path honest; shelf folding); E fine-claim (exports as auditable artifacts); H-2/H-7 (upstream)"
+    },
+    {
+      "asset": "components/reports/ReportsPicker.tsx + lib/reportsPicker.ts",
+      "kind": "surface",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the 'deterministic' picker routes through the model by client NAME (wrong-client egress is one look-alike name away), still exposes CSV-only despite all scopes rendering pdf/xlsx, and the tax 'Export forms' intent targets an export scope that does not exist. Rebuilt picker must pass structured parameters (client id, scope, fy, format) to a typed export capability — not a free-text chat intent — expose the real format set, and only offer scopes that exist; keep the fixed-menu, RBAC-aware, deterministic-intent shape.",
+      "evidence": "H-11 (name-based routing), H-14 (stale CSV-only), F12-10 (nonexistent tax scope); H fine-claim (picker deterministic in shape)"
+    },
+    {
+      "asset": "components/workbench/JournalsGrid.tsx + virtualization + row primitives (FilterBar, row selection funnel)",
+      "kind": "surface / daily driver",
+      "recommendation": "PORT",
+      "reason": "Verified strong skeleton: TanStack virtualization with measured rows, honest aria-rowcount, a selection funnel that structurally prevents bulk-approving non-flagged rows, SSR-seeded react-query with keyset load-more and SSE nudges. Port with the named ergonomic additions (Dr|Cr columns, DB-owned footer totals, multi-status + month windows, bulk reject/reassign, filtered-empty state, sweep banner — J-14/J-17) and settle the auto_draft queue-membership contradiction (J-16) as one deliberate semantic decision.",
+      "evidence": "J fine-claims (virtualization, selection funnel, keyboard model); J-14, J-16, J-17 (additive/semantic, none structural)"
+    },
+    {
+      "asset": "Approval flow model (grid instant 'a'-approve vs drawer ApproveGate vs ungated bulk approve; approve RPC binding)",
+      "kind": "interaction contract",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: three different frictions for the product's most consequential verb (single-keystroke posts with zero context; drawer demands a full gate; bulk fires a job with no summary card), and no approval anywhere is bound to the content reviewed (no expected-revision/snapshot token — an approval after an intervening edit posts legs the approver never saw, GAP0-5). Rebuilt flow must be one coherent model: every approve carries an exact-payload/revision envelope the DB verifies, bulk approve gets the spec'd one-summary-card with per-row opt-out, and any one-tap fast path is a deliberate, stated policy for balanced strong-evidence rows only.",
+      "evidence": "J-5 (CONFIRMED); GAP0-5 (CONFIRMED high); GAP0-2 (no structural human-authorization boundary); J-16"
+    },
+    {
+      "asset": "EntryDrawer + EntryReview + ApproveGate/RejectGate + EditEntrySheet",
+      "kind": "component family / write gates",
+      "recommendation": "PORT",
+      "reason": "Verified full-context, correctly tiered write gates: alertdialog approve with legs/balance-cue/SST/evidence/KB citation, reject-with-required-reason, typed-REVERSE destructive tier, reverse affordance bound to the fn-provided flag. Port and extend: render the before/after legs diff the DB already stores (J-3 — history blobs are deliberately opaque today), show a before/after preview in EditEntrySheet, and adopt the approval-envelope RPC params from the rebuilt approval contract.",
+      "evidence": "J fine-claim (drawer gates full-context and tiered); J-3 (CONFIRMED — additive diff surface); GAP0-5 (contract param)"
+    },
+    {
+      "asset": "Status/evidence/authorship primitives (StatusPill, EvidenceGlyph, AuthorshipBadge, MoneyCell)",
+      "kind": "component primitives",
+      "recommendation": "PORT",
+      "reason": "Durable machine-authorship (RULE/AUTO/MATCHED from durable fields, never mutable status) rendered identically across grid, drawer, and chat card, plus the shaped four-band evidence glyph and tabular-nums money cell — verified consistent trust vocabulary. Migrate EvidenceGlyph off inline styles into the token system and apply the band everywhere (the one raw-% deviation is in the triage lane).",
+      "evidence": "J fine-claims (authorship, evidence band); J-20, J-23 (bounded fixes)"
+    },
+    {
+      "asset": "components/records/CoaBrowser.tsx",
+      "kind": "surface",
+      "recommendation": "PORT",
+      "reason": "Modest, correct surface over audited fns (add account, toggle active, set type) with no findings against it. COA-change visibility gaps (no wake, absent from the activity feed) are DB-side event-taxonomy rebuilds, not this component.",
+      "evidence": "dashboard-map.md §3/§5; A-4, A-12 (DB-side)"
+    },
+    {
+      "asset": "Reports surfaces (TrialBalance, GeneralLedger + GlSegment/AccountPicker, FinancialStatements + FsStatement)",
+      "kind": "surface family",
+      "recommendation": "PORT",
+      "reason": "Verified to keep the DB-owns-every-number law: TB renders the envelope's own totals and never sums client-side, FS interleaves DB subtotals with zero client arithmetic, presentation_complete=false is a first-class banner with an actionable COA drill, GL raises honestly when a window spans a close. Upstream post-close asymmetries (F12-15 prior-year TB) are DB-read rebuilds this surface then inherits.",
+      "evidence": "J fine-claim (reports keep the law); dashboard-map.md §5; F12-15 (DB-side)"
+    },
+    {
+      "asset": "components/books/ReconWorkbench.tsx + ReconForms.tsx (bank reconciliation surface)",
+      "kind": "surface",
+      "recommendation": "REBUILD",
+      "reason": "Wrong at both layers: the surface sits on a match model with confirmed criticals (zero parity checks — any line matches any entry into any recon including completed ones; ghost matches on re-match; opening continuity ignored; every post-close recon structurally cannot tie), and the UI itself opens a recon on a hand-typed numeric document id with no picker on a control-critical flow. Rebuilt workbench must bind to the rebuilt first-class match model (structural line<->entry<->recon membership, chained periods, brought-forward outstanding items), replace the raw-id input with a statement-document picker, and surface match/unmatch as audited reversible verbs. Keep the two-plane statement<->ledger matching concept and DB-owned tie-out arithmetic display.",
+      "evidence": "GAP1-1, GAP1-2 (CONFIRMED critical), GAP1-3, F12-1 (critical), F12-2; dashboard-map.md §7 note 8; F3 fine-claim (tie-out math itself DB-owned)"
+    },
+    {
+      "asset": "components/books/ArApSubledger.tsx (AR/AP aging, statements, tie-outs)",
+      "kind": "surface",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: an honest read surface over a dead register — the subledger freezes at the onboarding seed (no workflow ever records invoices/receipts/allocations, so aging/statements/credit-balances read a corpse) and the tie-out it renders reports false drift after the first year-end close; the North Star also needs AR/AP write flows (raise invoice, record/allocate settlement, write-off) that have no UI at all. Rebuilt surface must sit on the maintained (co-committed or derived) subledger, add the settlement/allocation work surfaces and an open-items workflow, and keep the never-hidden tie-out badge pattern on segment-aware arithmetic.",
+      "evidence": "C-6 (high), F3-1/F3-2/F3-3 (critical), F12-1 (critical), C-7; dashboard-map.md §5 (read-only by design)"
+    },
+    {
+      "asset": "components/books/FaRegister.tsx (fixed-asset register + depreciation schedule + disposal)",
+      "kind": "surface",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: nothing in the product ever runs or gates depreciation (no run action here, no close guard, no completeness signal), acquisition never reaches the register from coding, and the control tie-out it displays is structurally false after the first close — the register UI is a viewer over a disconnected chain. Rebuilt surface must expose the depreciation run/completeness state (through-period_end signal wired to close readiness), register-from-coding linkage, and disposal tied to proceeds evidence, on segment-aware tie-outs. Keep the register + schedule presentation and the agent-routed-with-deterministic-fallback disposal pattern.",
+      "evidence": "F3-4, F3-5, F3-6 (high), F12-1 (critical), F12-13; F3 fine-claims (dispose/run engines themselves DB-owned)"
+    },
+    {
+      "asset": "components/books/PeriodClose.tsx + lib/periodClose.ts (FY-close readiness checklist)",
+      "kind": "surface / control",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the checklist FAILS OPEN — every failed read degrades to a non-blocking 'warn' and ready flips true, AR/AP/FA tie-outs are warn-only, and the whole checklist gates only a chat-intent button while the close fn itself is callable by any member with no floor; the readiness state is never persisted. Rebuilt version must render the DB-owned typed readiness checklist evaluated inside the close transaction (each condition hard-gating or requiring an attributed, persisted acknowledgment receipt), fail closed on read errors, and treat the UI as a projection of that contract rather than the only gate. The checklist composition itself (statements balance, pending entries, recons, docs, tie-outs, adjustments) is the right idea and materially better than the DB fn today.",
+      "evidence": "GAP5-1 (CONFIRMED high; fail-open verified at periodClose.ts:106-149); GAPS fine-claim (UI lane better than fn); F12-8 (no role floor); F12-13 (depreciation absent)"
+    },
+    {
+      "asset": "components/tax/SstReturn.tsx + lib/sstReturn.ts (SST-02 draft surface)",
+      "kind": "surface",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the period selector hard-codes six calendar-aligned bi-monthly periods, so an RMCD-assigned odd-cycle, DG-varied, or irregular-first-period registrant cannot even draft the right period (the DB fn accepts varied bounds but no surface can supply them), and the dual-registrant per-tax split must survive to the surface/export. Rebuilt surface must derive period candidates from modeled SST registration facts (assigned cycle, effective dates, variations), validate bounds, and render per-tax declarations for 'both' registrants. Keep the present-never-hidden posture, the honesty-layer rendering, and human-driven compute.",
+      "evidence": "GAP3-1 (CONFIRMED high; sstReturn.ts:22-40 calendar-only), GAP3-3 (export artifact combines); GAPS fine-claims (fn arithmetic correct given correct bounds)"
+    },
+    {
+      "asset": "components/tax/TaxComputation.tsx + lib/taxComp.ts (Form C/PT + CP204/CP500 worksheet)",
+      "kind": "surface",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the honesty layer is display-only — no per-item confirmation can be persisted as an audited decision (the only lever is recompute with two inputs), there is no reviewed/finalized lifecycle, and 'Export forms' is enabled while confirmations remain open and routes to a nonexistent export scope. Rebuilt surface must capture typed per-item confirmations (decision, actor, reason, evidence) that feed the recompute, drive a draft->reviewed->finalized state machine, surface the b/f relief ledger, and gate export on open confirmations. Keep the worksheet presentation and verbatim rendering of DB assumptions/confirmations.",
+      "evidence": "GAP5-4 (CONFIRMED high; taxComp.ts:4-7 self-describes display-only), F12-10; GAPS fine-claim (honesty layer itself works as documented)"
+    },
+    {
+      "asset": "Client onboarding cinematic (ClientOnboardLive, useOnboardingRun, stageReducer, ClientOnboardCinematic, CarryDownReview, DryRunReview, AnswerRail, chapter machinery)",
+      "kind": "surface / flow",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the whole interview rides one non-durable process-local run (reload = fresh interview; two production abort modes documented in the skill itself), 'done' maps to success unconditionally so a failed/never-reached carry-down or KB seed still shows an unqualified success card (only the client row is verified), and cross-clarify uploads clobber the held attachment batch. Rebuilt flow must be a durable, resumable, step-tracked workflow (identity -> carry-down -> KB with persisted completion state and guided resume), verify the full committed outcome per path before rendering success, and use immutable attachment references. Keep the verified gold: the [[carrydown]] plan->approve payload card, the dry-run review, the false-success guard on the identity commit, chip choice cards, and the cinematic presentation layer.",
+      "evidence": "B-3, B-4 (CONFIRMED high), GAP5-6 (CONFIRMED high), GAP4-3; B fine-claims (carrydown gate, false-success guard, live lane genuinely agentic)"
+    },
+    {
+      "asset": "components/onboarding/ClientOnboardFallback.tsx + lib/clientWizard.ts (deterministic onboarding fallback)",
+      "kind": "surface / flow",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the sanctioned degradation path silently onboards a stripped client (no banks, directors, aliases, carry-down, or KB) with no warning and no follow-up surface anywhere — against the product's own 'cold start is NOT acceptable' bar — and it is a COMMON path because the live lane dies easily. Rebuilt fallback must end with an explicit 'still to capture' checklist deep-linking into a resumable completion flow and mark the client visibly onboarding-incomplete. Keep its real code validators (ironically stronger than the AI lane's prose validators).",
+      "evidence": "B-10 (CONFIRMED); B-11 (fallback validates more strongly than the AI lane)"
+    },
+    {
+      "asset": "Auth perimeter pages (login, signup + pause gating, auth/confirm, forgot/set-password, welcome ceremony shell)",
+      "kind": "surface family",
+      "recommendation": "PORT",
+      "reason": "Straightforward, working perimeter with the pending-invite/admission/bootstrap sequencing and a verified false-success guard on the firm commit; no findings against the pages themselves. The firm-bootstrap INTERVIEW inherits the onboarding-flow rebuild; the session/claims model beneath is the separate auth-plumbing rebuild.",
+      "evidence": "dashboard-map.md §1; B fine-claim (FirmBootstrapFlow verifies committed my_firm row); E-11 (server-side bootstrap attachment drop)"
+    },
+    {
+      "asset": "components/kb/KbWorkbench.tsx (proposal lane + Confirmed/Candidate/Retired rulebook)",
+      "kind": "surface",
+      "recommendation": "PORT",
+      "reason": "The KB governance loop it fronts (evidence -> open proposal -> human promote/reject, admin-gated, no-downgrade) is verified wired end-to-end across DB, tools, and UI. Port it, and remove or populate the candidate lane per the owner's C-11 decision (the tier is currently unreachable in production, so the lane renders a population of zero).",
+      "evidence": "C fine-claim (proposal loop wired incl. dashboard); C-11 (candidate tier dead — owner decision, then align UI)"
+    },
+    {
+      "asset": "components/records/ContactsRegister.tsx + lib/contactsRegister.ts",
+      "kind": "surface",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: 'contacts' is a display-side merge over free-text snapshot strings from four sources with a second, drift-prone copy of the DB normalizer, sitting on a counterparty model that has no entity at all (alias repoints split history and strand settlements) and an AR/AP population that cannot grow post-onboarding. Rebuilt register must front the first-class id-keyed counterparty record the C-workstream specifies (typed roles, alias children, FK'd rules/evidence/subledger/hints) with governed rename/merge — never a string-folding projection. The honest display-only posture (no client-side figures) carries over.",
+      "evidence": "C-9 (CONFIRMED), C-6; C fine-claim (register honestly display-only); dashboard-map.md §7 note 9 (five any[] reads)"
+    },
+    {
+      "asset": "components/activity/ActivityFeedLive.tsx + ReverseDialog + ReceiptItem",
+      "kind": "surface",
+      "recommendation": "PORT",
+      "reason": "The firm-wide receipts feed with the typed-REVERSE reverse-not-delete dialog is proven trust UX; feed incompleteness (6 of 11 audit families) is the DB-side unified-event-log rebuild it will inherit. Restyle ReceiptItem off legacy tokens/inline styles into the v2 system while porting.",
+      "evidence": "J fine-claim (reverse tier); A-12 (DB-side union gap); J-23 (legacy skin, bounded)"
+    },
+    {
+      "asset": "components/calendar/ComplianceCalendarLive.tsx + lib/complianceCalendar.ts (client-side statutory deadline engine)",
+      "kind": "surface + rules lib",
+      "recommendation": "REBUILD",
+      "reason": "Wrong home: 18.9KB of Malaysian statutory deadline rules live in the frontend as duplicated knowledge the DB/agent can't audit and that drifts against agent-side rules, and the ruleset omits whole families (payroll statutory deadlines the PRD claims). Rebuilt version must move the deadline ruleset to a DB/shared authority (effective-dated, citation-carrying) with the calendar as a pure renderer. Keep the verified honesty pattern: dates-not-money carve-out, per-deadline primary-source citations, 'assumed/verify' caveats, explicit do-not-guess deferrals.",
+      "evidence": "dashboard-map.md §7 note 16; F12 fine-claim (calendar honestly scoped); GAP2-6 (payroll deadlines claimed but absent)"
+    },
+    {
+      "asset": "CommandCenterV2 + InboxLanes + digest (firm home: state strip, since-you-were-here, proactive lanes)",
+      "kind": "surface",
+      "recommendation": "PORT",
+      "reason": "Verified workable lane surface, not a bell: decision/review/proposal/FYI lanes off machine-readable intent, optimistic resolve with the projection rule, Answer/Discuss seeding the user's composer and never auto-sending. Two bounded fixes while porting: render the reason body visibly (it is sr-only today, J-19) and harden the render-time digest watermark idiom.",
+      "evidence": "J fine-claim (Inbox workable); J-19 (CONFIRMED, trivial); dashboard-map.md §7 note 17"
+    },
+    {
+      "asset": "CommandPalette (⌘K) + lib/commandIndex + lib/commandRouter",
+      "kind": "surface / dispatch",
+      "recommendation": "PORT",
+      "reason": "Verified dispatch-not-conversation that never executes a write, degrades Ask to a seeded navigation, and structurally strips forbidden rows. One mandatory fix in place: restyle the pane opaque (it is the last live backdrop-filter surface, violating the product's own MUST floor — trivially a CSS change once the glass ladder is dropped).",
+      "evidence": "J fine-claim (⌘K never writes); J-22 (glass-live pane — the fix is restyle + drop glass.css)"
+    },
+    {
+      "asset": "shell-v2 (FirmShell, TopBarV2, NavRailV2, DesktopGate, persistent-rail architecture)",
+      "kind": "shell",
+      "recommendation": "PORT",
+      "reason": "The persistent firm shell surviving intra-firm navigation with the docked Clara rail and an a11y-correct desktop gate (inert tree below 1024px) is proven architecture. Additive work: cross-scope needs-you badging on the presence dot, a breadcrumb client switcher, and per-segment loading.tsx skeletons.",
+      "evidence": "J fine-claim (DesktopGate a11y-correct); dashboard-map.md §1; J-24, J-27, J-28 (additive)"
+    },
+    {
+      "asset": "components/workbench/ClientWorkspace.tsx + WorkspaceHeader + workspaceTabs (17-tab workspace shell, deep-link targets)",
+      "kind": "shell / IA",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the URL-as-source-of-truth contract is parse-only — tab switches and all journal filters (period/status/band/flagged) never write to the URL, so reload/share/back are broken on the daily driver, and the tab row fakes tablist semantics without the ARIA keyboard pattern. Rebuilt shell must mirror tab/filter/band state into the querystring (as ?fy= already does), implement or honestly drop the tabs pattern, and keep the verified one-shot deep-link focus machinery (?entry/?focus with flash guards) and the 5-group tab IA.",
+      "evidence": "J-13 (CONFIRMED high), J-25; J fine-claim (deep-link focus targets work one-shot)"
+    },
+    {
+      "asset": "Design tokens v2 (app/tokens-v2.css) + contrast test harness (lib/__tests__/tokens-v2.test.ts)",
+      "kind": "design system",
+      "recommendation": "PORT",
+      "reason": "A ~273-prop OKLCH token system whose WCAG pairs are pinned by a real computed contrast harness in both themes ('change a value => change the test in the same commit') — verified and rare craft; port system and harness together. Add the missing CI enforcement (grep gates, bundle budget, axe) the handbook promised, since discipline alone already failed once.",
+      "evidence": "J fine-claim (token harness real); dashboard-map.md §6; J-26, J-22 (enforcement gap)"
+    },
+    {
+      "asset": "A11y/interaction machinery (lib/useGridKeys, components/a11y/useFocusTrap, DensityBoot + lib/uiPrefs, shadcn-lite ui/* primitives)",
+      "kind": "lib / primitives",
+      "recommendation": "PORT",
+      "reason": "useGridKeys faithfully implements the full grid keyboard model (roving tabindex, ranges, edit-mode suppression) and the density/prefs plumbing works — this is exactly the layer the map warns is at risk of being LOST in a rebuild, not added. Additive: the '?' shortcut sheet and per-surface density defaults.",
+      "evidence": "J fine-claim (useGridKeys faithful); dashboard-map.md §7 note 15; J-15, J-29 (additive)"
+    },
+    {
+      "asset": "lib/booksSync.ts (belcort:books-changed debounced refetch gate + BooksRouterRefresh)",
+      "kind": "infra",
+      "recommendation": "PORT",
+      "reason": "Verified freshness spine: one debounced gate that suppresses refetch while an editor is dirty and flushes once on close, bridged to RSC surfaces without resetting the persistent rail. Carries over regardless of what emits the nudge.",
+      "evidence": "J fine-claim (chat->workbench freshness works); dashboard-map.md §3"
+    },
+    {
+      "asset": "lib/notifications.ts (notifications SSE subscriber + nav badge + mark/resolve fns)",
+      "kind": "infra",
+      "recommendation": "PORT",
+      "reason": "Thin fetch-based SSE subscriber over durable notification rows with audited mark/resolve — sound consumption pattern that carries over onto the rebuilt event backbone. Strip the NEXT_PUBLIC_RELAY_URL fallback (retired-plane residue) while porting — a one-line fix.",
+      "evidence": "dashboard-map.md §3 + §7 note 2; A fine-claim (notifications durable dedup-keyed rows)"
+    },
+    {
+      "asset": "Background-work lane (components/jobs/JobLane.tsx, FirmJobsLane, lib/jobs.ts, lib/bulkApprove.ts)",
+      "kind": "surface + infra",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the lane is unported relay-era UI (glass-set skin, legacy tokens, all inline styles) with no staleness rule — a dead runner shows a live pulsing bar forever against the handbook's own 10-minute heartbeat rule — and the bulk-approve job it fronts miscounts restart re-drives as failures and only resumes on user-triggered surfaces. Rebuilt lane must bind to the durable-runtime job model with heartbeat/'state unknown' staleness, v2 styling, idempotent resume semantics, and a pre-dispatch summary gate; keep the pause/resume/cancel verb surface and the RELAY fallback goes with the residue drop.",
+      "evidence": "J-6 (CONFIRMED); Grt-11 (ADJUSTED, stands); J-5 (bulk gate); dashboard-map.md §7 note 2"
+    },
+    {
+      "asset": "lib/rbac.ts (client-side role/capability map)",
+      "kind": "lib / policy",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the UI capability map is the ONLY floor for whole write families (onboarding/opening seeders, close family, exports have no DB role floor — a viewer can call them directly), and code comments falsely claim 'the fn re-enforces via RLS'; UI gates and DB floors have already diverged (documents.export at viewer vs doctrine's bookkeeper+ claim). Rebuilt version must be generated from or contract-tested against the DB-owned per-mutation authorization policy so the UI map can never diverge from (or substitute for) real enforcement.",
+      "evidence": "B-2 (ADJUSTED high), F12-8 (high), H-10; dashboard-map.md §1 (client-side gate only)"
+    },
+    {
+      "asset": "Auth/session plumbing (middleware.ts + lib/supabase/*, requireVerifiedUser/loadMemberships per-page guards, notifySessionExpired singleton, authActions)",
+      "kind": "infra / auth",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: authority is stale-JWT-claims-only with no revocation (a removed/demoted member keeps full read+write power until token expiry — confirmed critical, and the claims hook fails open), per-route auth is unenforced convention with no central guard, and the session-expiry signal is a Node module-level singleton whose server-side use is a documented cross-user leak hazard. Rebuilt plumbing must implement the chosen revocation model (session-epoch claim or live-membership resolution + admin sign-out on remove/demote/suspend), an enforced route-guard layer, and per-request session-expiry signaling. Keep the session-JWT-to-PostgREST data-plane shape and the defense-in-depth RSC-guard habit.",
+      "evidence": "GAP1-4 (CONFIRMED critical); dashboard-map.md §1, §7 note 11; hydrateTranscript.ts:78-85 guard"
+    },
+    {
+      "asset": "components/onboarding/members surfaces (MembersLive, InviteDialog, RolePicker, RemoveMemberAlert) + SettingsLive",
+      "kind": "surface family",
+      "recommendation": "PORT",
+      "reason": "Functionally sound roster/invite/role management over audited fns; port with the v2 restyle (MembersLive still wears the legacy glass-set skin and inline styles). Note remove/demote must trigger the rebuilt revocation flow (GAP1-4) — a contract addition, not a UI rewrite.",
+      "evidence": "dashboard-map.md §1; J-23 (legacy skin); GAP1-4 (contract addition)"
+    },
+    {
+      "asset": "Glass system (app/glass.css, components/glass/GlassSurface.tsx, LiquidGlassEngine.tsx SDF refraction lens)",
+      "kind": "design system / css",
+      "recommendation": "DROP",
+      "reason": "The product went opaque-first as a MUST floor ('zero backdrop-filter in product surfaces — a lint rule, not a convention') yet the live-glass ladder still ships, is mounted at root, and powers the most-used overlay in violation of the floor. Do not carry it forward: restyle the two remaining consumers (⌘K palette, ReverseDialog overlay) opaque and add the backdrop-filter grep gate to CI so it cannot return.",
+      "evidence": "J-22 (CONFIRMED high); dashboard-map.md §6, §7 note 12"
+    },
+    {
+      "asset": "Legacy shell v1 (components/shell/*) + app/tokens.css legacy palette + inert data-ui=\"v2\" scope attributes",
+      "kind": "shell / css",
+      "recommendation": "DROP",
+      "reason": "Superseded by shell-v2 and tokens-v2 but still shipped as dead-ish weight, creating the two-shells/two-palettes coexistence the map flags; the legacy-token aliases keep legacy-skinned surfaces (Members/Jobs/Activity) alive instead of forcing their conversion. Do not port; finish the v2 conversion of the three legacy-skinned surfaces instead.",
+      "evidence": "dashboard-map.md §6, §7 note 12; J-23"
+    },
+    {
+      "asset": "Hermes/relay-era residue (hermes* module naming across the live chat stack, NEXT_PUBLIC_RELAY_URL fallbacks in notifications.ts/bulkApprove.ts, stale relay/src/transcript.ts parity citations)",
+      "kind": "naming / dead contract",
+      "recommendation": "DROP",
+      "reason": "The retired v1 framework's name saturates the live chat stack and two env fallbacks still point at the decommissioned relay — a verified cognitive-drift hazard whose stale citations already mislead (the parity contract's other half moved to the agent service). Purge wholesale in the rebuild: no Hermes naming, no relay env vars, no dead parity comments.",
+      "evidence": "dashboard-map.md §7 notes 1, 2; D decision brief (stale relay-era doctrine in transport)"
+    },
+    {
+      "asset": "lib/chatThreads.ts (retired active_run_id chat-threads dialect)",
+      "kind": "dead code",
+      "recommendation": "DROP",
+      "reason": "Consumer-less dead code — imported only by its own test — from the retired thread-pointer dialect; its existence helped mask the D-1/E-1 never-executed-run defect by suggesting a reattach path that nothing uses. The rebuilt durable-run protocol supersedes it entirely.",
+      "evidence": "E-1 evidence trace ('chatThreads.ts is imported only by its own test — nothing attaches a run by session pointer')"
+    }
+  ],
+  "summary_counts": { "port": 27, "rebuild": 24, "drop": 4 }
+}

@@ -1,0 +1,264 @@
+{
+  "workstream": "F (part 2) — F3 side-effects and subledger synchronization: per-chain verdicts — (a) AR coding: FAIL/ABSENT · (b) AP coding: FAIL/ABSENT · (c) receipt/payment settlement: FAIL/ABSENT (+auto-post double-count path) · (d) FA acquisition→register: FAIL (tool exists, doctrine-orphaned) · (e) depreciation: FAIL (DB-owned math, no workflow ever invokes or gates it) · (f) disposal: PROMPT-ONLY (structural fn + human dashboard intent; no workflow linkage; reversal hole) · (g) opening/carry-down: PASS structurally once invoked (prompt-gated trigger; two defects: dead 'management_account' kind, post-close tie-out doubling) · (h) SOFP/FS: PASS structurally on the governed export/read lanes (chat prose residual is prompt-only) · (i) tax/SST: PROMPT-ONLY at coding + human-dashboard returns, and the service-tax payment basis degrades to accrual (generic-note-only visibility) because chains a–c are dead · (j) KB/memory: PROMPT-ONLY (structural exceptions: rule decay inside reject/edit fns and DB wake triggers; delivery lossy, action optional). ADVERSARIALLY VERIFIED 2026-07-17: every cited file/line re-opened; 11/12 findings CONFIRMED, 1 ADJUSTED (F3-8 wording), 0 REFUTED; all 7 fine_claims verified.",
+  "findings": [
+    {
+      "id": "F3-1",
+      "workstream_item": "(a) Trade debtor/AR coding",
+      "title": "Coding a sales invoice to Trade Debtors never creates/links the AR open item — record_ar_invoice has no caller in any workflow (agent, doctrine, or dashboard)",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/23-fns-subledger.sql:83 — record_ar_invoice exists as an audited SD writer (gross READ from the anchoring entry's DC control leg via app.entry_account_net at :95)",
+        "db/v2/19-tables-subledger.sql:186-189 — the only trigger on ar_* tables is the firm-stamp; no trigger/constraint links journal_lines on the DC control account to ar_invoices",
+        "agent/test/registry.test.ts:28-53 — the complete EXPECTED curated tool list contains NO subledger fn (record_ar_invoice/record_ar_receipt/allocate_ar_receipt/write_off_ar_invoice all absent); :59-61 the 'no surprise extras' test structurally forbids adding one without changing the test",
+        "agent/src/tools/registry.ts:39-53 — EXCLUDED_FNS documents only the job lane + pure helpers as deliberate exclusions; the entire 23-fns-subledger family is unaccounted for in the parity story",
+        "belcort/coa-coding/SKILL.md:45,254-258 — the skill instructs 'Dr 300-000 TRADE DEBTORS' journal lines (cold-start polarity note + the issued-sales-invoice branch) with zero mention of any subledger step; repo-wide grep of belcort/ for record_ar|allocate_|ar_aging finds no operative subledger-write instruction (only export-read mentions)",
+        "belcort/AGENTS.md:71-78 — the §15 canonical audited-fn list omits every AR/AP subledger fn",
+        "dashboard/lib/arap.ts:1-8 — the dashboard AR/AP surface is read-only (ar_aging/ap_aging, tie-outs, statements; the one write is an agent-routed export intent); repo-wide grep of dashboard/ + agent/src/ finds ZERO production caller of any AR writer",
+        "db/v2/25b-fns-opening.sql:21-22,64 — the ONLY production callers are the opening seeders inside seed_opening_carry_forward (plus tests)"
+      ],
+      "wrong": "Every sales invoice Clara codes moves the GL control account while the open-item subledger stays frozen at the onboarding seed: aging, customer statements, allocation state, and the AR control tie-out are permanently stale from day one, and the firm-facing 'aging' and 'full' export deliverables (agent/src/tools/exportTool.ts:336-346,364-368; belcort/export/SKILL.md:53-55,75) render that wrong data to clients. Meets the workstream failure criterion exactly: journal lines post while required AR state goes stale.",
+      "target": "db/v2/23-fns-subledger.sql + agent/src/tools/registry.ts + belcort/coa-coding/SKILL.md"
+    },
+    {
+      "id": "F3-2",
+      "workstream_item": "(b) Trade creditor/AP coding",
+      "title": "Supplier-bill coding to Trade Creditors has the identical dead chain — record_ap_bill is never invoked by any workflow",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/23-fns-subledger.sql:306 — record_ap_bill exists (gross read from the CC control leg)",
+        "belcort/coa-coding/SKILL.md:298-302 — the Step-7 worked card posts 'Cr 400-000 TRADE CREDITORS 432.50' with no subledger step; :231-240 CN/DN handling flips legs only, never touches ap_bills",
+        "agent/test/registry.test.ts:28-53 — no AP writer in the tool surface; belcort/AGENTS.md:71-78 omits them; dashboard/lib/arap.ts is read-only (grep confirms zero production callers)",
+        "db/v2/25b-fns-opening.sql:78-114 — seed_opening_ap_bill is the sole production caller"
+      ],
+      "wrong": "AP aging, supplier statements and the AP control tie-out go stale on the first coded bill; ap_allocations never receive rows so nothing can ever mark a bill settled.",
+      "target": "db/v2/23-fns-subledger.sql + belcort/coa-coding/SKILL.md"
+    },
+    {
+      "id": "F3-3",
+      "workstream_item": "(c) Bank receipt/payment settling AR/AP",
+      "title": "A bank receipt is never recorded as ar_receipts nor allocated — it just posts Dr/Cr — and the bank-recon design routes customer receipts into coa-coding where a confirmed customer KB rule can AUTO-POST a revenue double-count",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/23-fns-subledger.sql:116,157,336,373 — record_ar_receipt/allocate_ar_receipt/record_ap_payment/allocate_ap_payment exist; grep of agent tools, doctrine, and dashboard finds no caller anywhere (same greps as F3-1)",
+        "belcort/bank-recon/SKILL.md:84-90 — Step-3 auto-match searches finalised entries 'on that COA account' (the BANK account); an invoice entry (Dr 300-000/Cr 5XX) has no bank leg, so a customer-payment line can never match it; :92-103 the unmatched line is declared 'usually a bank-only item' and handed to coa-coding",
+        "belcort/coa-coding/SKILL.md — the entire 357-line skill has no receipt/settlement branch; Step 3 matches KB rules by counterparty and Step 5.1 (:127) auto-drafts on a single confirmed rule ≥0.95; kb-evolve/SKILL.md:58 confirms customer-name rules map to 5XX Sales — so 'ACME PAYMENT' on a statement can code Dr Bank / Cr 500-000 into the ungated auto_draft lane (balanced, no tax leg for a non-SST client, no flags); the kb-evolve BM2/recon-hint learning loop actively CREATES these narration→customer→revenue mappings",
+        "belcort/kb-evolve/SKILL.md:267-269 — the doctrine explicitly anticipates pure settlements 'Dr 3XX Bank / Cr 300-000 Debtors' — but only to SKIP KB learning; nothing records or allocates the receipt",
+        "db/v2/25-fns-ops.sql:1302-1373 — proactive-notification kinds are generic (stuck/new_data/looks_wrong + internal digest); no unmatched/open-allocation task class exists",
+        "dashboard/lib/arap.ts:31-33 — 'credit_balances_cents' (unallocated receipts/advances) is surfaced only from ar_receipts rows, which no workflow ever creates"
+      ],
+      "wrong": "Best case the receipt posts Dr Bank / Cr 300-000 and the invoice stays open forever (aging overstates, statements never clear, s.11(2) service-tax trigger never fires); worst case a confirmed customer rule auto-posts Dr Bank / Cr Revenue — double-counted revenue with no human gate. No unmatched/open-allocation task ever surfaces.",
+      "target": "belcort/bank-recon/SKILL.md + belcort/coa-coding/SKILL.md + db/v2/23-fns-subledger.sql"
+    },
+    {
+      "id": "F3-4",
+      "workstream_item": "(d) Fixed-asset acquisition",
+      "title": "Coding to an FA cost account never creates the FA register row: record_fixed_asset is a curated tool but is doctrine-orphaned — no skill references it, AGENTS §15 omits it, and §8 forbids acting from tool descriptions alone",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src/tools/registry/fixedAssets.ts:9-35 — record_fixed_asset is in the tool registry with a full description",
+        "grep of belcort/ for record_fixed_asset|capitalis|fixed.asset|depreciat — zero operative hits outside client-onboarding's carry-down (belcort/client-onboarding/SKILL.md:250-253) and the export presentation-mapping note; none of the 11 routed skills (agent/src/doctrine/loader.ts:10-22) instructs capitalisation at coding time",
+        "belcort/AGENTS.md:71-78 — §15's canonical write-tool list omits record_fixed_asset/run_depreciation/dispose_fixed_asset entirely; :57 (§8) mandates 'I never onboard, bootstrap, code, close, or export from memory or from a tool description alone'",
+        "belcort/coa-coding/SKILL.md:86,117-119 — the motor_vehicle_over_50k must-ask flag is a materiality/awareness flag routing to needs_review only; no register step follows approval",
+        "dashboard/components/books/FaRegister.tsx:6-8 — 'DISPOSAL is the one write' on the dashboard FA surface; no acquisition writer (grep confirms)",
+        "db/v2/19b-tables-fixed-assets.sql:108-125 — only RLS + the firm-stamp trigger; no DB link from FA-cost journal lines to fixed_assets",
+        "db/v2/23d-fns-tax.sql:25,98,115,173-201 — compute_tax_draft's capital-allowance schedule reads the fixed_assets register (ca_class-driven), so an unregistered asset is silently excluded from the CA computation"
+      ],
+      "wrong": "An asset purchase coded Dr 200-xxx posts to the GL with no register row: no method/life/rate, no in-service date, no CA metadata (ca_class/is_commercial_vehicle), so depreciation and the capital-allowance computation silently exclude it. fa_control_tie_out would show the drift but is a dashboard-only read no skill checks — and F3-7 breaks it after the first close.",
+      "target": "agent/src/tools/registry/fixedAssets.ts + belcort/AGENTS.md §15 + belcort/coa-coding/SKILL.md"
+    },
+    {
+      "id": "F3-5",
+      "workstream_item": "(e) Depreciation",
+      "title": "Depreciation is DB-computed and DB-posted when run — but NOTHING in the product ever runs or gates it: no skill, no dashboard action, no close guard, and adjustments_status deliberately excludes it; manual depreciation journals are unblocked",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/23b-fns-fixed-assets.sql:131 — run_depreciation is a cumulative-target, idempotent DB engine (structural math; posts one balanced approved journal at :205-218 + fa_depreciation rows at :224-225)",
+        "grep of belcort/ for run_depreciation/depreciat — no skill instructs running it; belcort/year-end-close/SKILL.md:37-85 — the mandatory Step-0 pre-close gate lists pending entries, docs, recon, TX-provision, recurring/amortisation — depreciation is absent",
+        "db/v2/23c-fns-adjustments.sql:587-690 — adjustments_status covers ONLY recurring journals + amortisation (+ amortisation anchor-shortfall); db/v2/25-fns-ops.sql:490,767 — the close's pending_adjustments IS adjustments_status, so record_year_end_close closes an FY with zero depreciation charged and surfaces nothing",
+        "dashboard/components/books/FaRegister.tsx:6-8 — no 'run depreciation' action (disposal is the one write); grep of dashboard/ for run_depreciation finds only error copy (booksErrors.ts:87); agent/src/jobs/bulkApproveRunner.ts:104 — the only job lane calls approve_entry only",
+        "db/v2/20-fns-journal.sql:83-160 — draft_entry/finalize_coding validate firm scope, kb-rule citation, status/risk binding and balance only; nothing blocks a hand-drafted Dr 923-000 / Cr <AD> journal that bypasses the register (grep special_acc_type in 20-fns-journal.sql: guards exist only in set_coa_account_active at :433-454)"
+      ],
+      "wrong": "A financial year can be closed and hard-locked with no depreciation, or with model-invented depreciation hand-journaled outside the register (fa_depreciation stays empty ⇒ compute_tax_draft's register-driven add-back and CA schedules go wrong). The only detection surface (fa_control_tie_out) is unrouted for the agent and structurally false after the first close (F3-7).",
+      "target": "db/v2/23b-fns-fixed-assets.sql + db/v2/23c-fns-adjustments.sql + belcort/year-end-close/SKILL.md"
+    },
+    {
+      "id": "F3-6",
+      "workstream_item": "(f) Disposal",
+      "title": "Disposal is structurally complete inside dispose_fixed_asset and human-initiable from the dashboard register — but no workflow links disposal evidence (proceeds receipts, scrap decisions) to it, and reverse_entry lets an FA/AR/AP anchor be reversed leaving a live register row that keeps depreciating",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/23b-fns-fixed-assets.sql:242-340 — DB owns NBV + gain/loss (:277-279), posts the compound journal (:296-326), retires the row (:328-330); gain/loss account required when nonzero (:289-290); depreciate-to-date surfaced as warning (:280-288)",
+        "dashboard/components/books/FaRegister.tsx:6-8,60-64 + dashboard/lib/fa.ts:102-129 — the one write path: a human-initiated agent-routed intent ('Dispose fixed asset #N …') plus an admin+ deterministic rpcBooks('dispose_fixed_asset') fallback",
+        "grep of belcort/ for dispose — zero hits: no skill routes a coded proceeds receipt or scrap instruction to disposal; coa-coding would post the proceeds as an ordinary entry with the register untouched",
+        "db/v2/22-fns-documents-recon.sql:786-805 — reverse_entry blocks ONLY close-kind entries (:792) and active amortisation anchors (:802-805); the comment at :798-801 explicitly relies on 'the FA/AR/AP registers' tie-outs to surface anchor reversals — visibility-only, and that visibility is broken post-close (F3-7). A reversed acquisition leaves fixed_assets.status='active', and run_depreciation (23b:163-167 selects status='active') would keep charging on cost the GL no longer holds"
+      ],
+      "wrong": "Chain verdict PROMPT-ONLY: the engine is sound, the human dashboard path exists, but Clara coding 'sold the van, RM20k banked in' posts a plain journal and leaves the register holding an active asset — register/accum-dep/gain-loss/status all stale; and the anchor-reversal hole silently corrupts the register with only a (broken) tie-out to notice.",
+      "target": "db/v2/22-fns-documents-recon.sql (reverse_entry) + dashboard/components/books/FaRegister.tsx + belcort doctrine (missing skill)"
+    },
+    {
+      "id": "F3-7",
+      "workstream_item": "(g)+(a-f) visibility layer",
+      "title": "Post-close control tie-outs are structurally FALSE: the year-end close's opening entry re-posts every real-account balance (incl. DC/CC/FA/AD) but _tie_out_core and fa_control_tie_out sum raw posted GL with no entry_kind/segment exclusion — after the first close every AR/AP/FA tie-out reports phantom drift that grows with each close",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:406,658-704 — the opening entry (entry_kind='opening', posted at v_open_date = period_end+1, status approved) carries every real account's balance forward, windowed from the prior close (v_carry_from) so each close's opening equals the FULL cumulative real balance; :366 v_real includes FA/CA/CL (the DC/CC controls are CA/CL; AD accounts are FA-typed per export/references/presentation-mapping.md:34). The closing entry sweeps NOMINAL accounts only — real accounts are never zeroed, so the opening entry DUPLICATES them in any raw all-time sum",
+        "db/v2/23-fns-subledger.sql:551-577 — _tie_out_core's GL side: sum over ALL entries with status in (auto_draft,approved) and posting_date <= as_of — no entry_kind filter; the subledger side counts each anchored item once ⇒ for any as_of ≥ the close's opening date the GL side is 2× (then 3× after close 2, since each opening entry window includes the prior opening entry) while the subledger stays 1×",
+        "db/v2/23b-fns-fixed-assets.sql:431-443 — fa_control_tie_out has the identical raw GL sums for FA cost and AD; its register side (:450-459) anchors on acquisition-entry posting dates and stays 1×",
+        "db/v2/25-fns-ops.sql:49-69 — _trial_balance_core EXCLUDES entry_kind in ('closing','opening') for all-time reads (:69), proving the double-count hazard was known and handled there but not in the tie-outs",
+        "test coverage (verified by grep): db/v2/tests/subledger_test.sql and fixed_assets_test.sql call the tie-outs but never record_year_end_close; bee_carry_down_close_test.sql calls record_year_end_close twice (:106,:133) but never a tie_out — the close × tie-out interaction is untested",
+        "dashboard/lib/periodClose.ts:89-91 — the pre-close checklist reads ar/ap/fa tie-outs at as_of = the FY end being closed, so from the second FY onward the checklist itself shows false drift"
+      ],
+      "wrong": "The tie-out reads are the ONLY drift-detection layer the design relies on for the dead subledger and for anchor edits/reversals (22-fns-documents-recon.sql:798-801 says so explicitly). After the first close they cry wolf forever — false drift ≈ the full control balance — simultaneously destroying trust in the control and masking the real drift from F3-1/2/3/4. Static-analysis finding: derived by construction from the SQL (v_open_date=period_end+1; no entry_kind filter; disjoint test coverage verified); not executed on the rig in this session (see unverified).",
+      "target": "db/v2/23-fns-subledger.sql:_tie_out_core + db/v2/23b-fns-fixed-assets.sql:fa_control_tie_out"
+    },
+    {
+      "id": "F3-8",
+      "workstream_item": "(i) Tax/SST",
+      "title": "Service-tax payment basis degrades to accrual: with no workflow creating AR anchors, every on-credit service invoice falls into compute_sst_return's cash-direct bucket and is declared at posting_date; the s.11(2) 12-month rule, bad-debt relief, and CN machinery never engage — surfaced only as a generic boilerplate assumption, never per-invoice",
+      "severity": "high",
+      "verdict": "ADJUSTED",
+      "evidence": [
+        "db/v2/23e-fns-sst.sql:353-383 — bucket (2) counts any tagged 461 leg whose entry is NOT in ar_invoices as 'cash-direct at posting_date'; the exclusion list is anchors/CN-receipts/reversals only — an unanchored CREDIT invoice is indistinguishable from a cash sale and declares on the accrual basis with no per-invoice flag",
+        "db/v2/23e-fns-sst.sql:222-254 — the payment-basis cumulative-target model exists only for ar_invoices anchors; docs/architecture/backend.md:81 states service tax is payment-basis 'per-invoice cumulative-target from the AR subledger'",
+        "db/v2/23e-fns-sst.sql:703-714 — the draft's 'honesty layer' DOES carry a static assumptions line (:706): unanchored tagged legs 'are declared at posting_date (cash-sale semantics — early, never late); anchor credit-sale invoices via record_ar_invoice for true payment-basis timing' — but it is identical boilerplate on every draft, distinguishes nothing per-invoice, and the recommended fix (record_ar_invoice) is unreachable from any workflow (F3-1/F3-3)",
+        "F3-1/F3-3 — no workflow ever records the anchors or the settling receipts, so for a service-tax client the entire payment-basis machinery is starved from day one",
+        "the 'uncounted movement' visibility (23e:466-487) covers untagged/mismatched-tag/unknown-treatment legs on 460/461 only — a correctly tagged but unanchored invoice is silently counted on the wrong basis"
+      ],
+      "wrong": "SST-02 drafts for service-tax registrants declare output tax in the wrong taxable period as a systematic matter — early declaration on unpaid invoices ('early, never late', i.e. a cash-flow/timing misdeclaration rather than under-declaration), no 12-month-trigger tracking, no bad-debt relief candidates. The only surface is one generic assumptions line buried among ~11 boilerplate notes; no per-invoice detection exists and nothing in the product can create the anchors the note prescribes — a statutory-compliance defect flowing directly from the dead AR chain. (ADJUSTED from the draft: 'zero surfaced warning' overstated the invisibility; 'silently' softened to note the generic honesty-layer line.)",
+      "target": "db/v2/23e-fns-sst.sql + db/v2/23-fns-subledger.sql (missing anchor writers in workflows)"
+    },
+    {
+      "id": "F3-9",
+      "workstream_item": "(i) Tax/SST",
+      "title": "The coding-time SST output leg is prompt-only and a MISSING leg is invisible: no DB constraint requires a tax leg on a taxable revenue entry, and compute_sst_return can only scan legs that exist; the return additionally keys on literal account codes 460-000/461-000",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/coa-coding/SKILL.md:174-229 — the entire mandatory hybrid SST ladder (post 461/460 leg, tag tax_code) is skill text; the model may skip it",
+        "db/v2/20-fns-journal.sql:83-160 — draft_entry/finalize_coding validate firm scope, kb-rule citation, balance-trigger arming and status/risk binding only; no tax-leg check for sst_regime clients",
+        "db/v2/23e-fns-sst.sql:195,249,370,475 — the return counts only existing legs on literal '460-000'/'461-000' (the uncounted-movement scan at :475 also only inspects those two codes), so a skipped leg or a re-keyed SST-payable account produces a silently understated/empty return",
+        "docs/architecture/backend.md:63 — the ≤5¢/tax-leg gating lives in the dashboard review surfaces (UI contract, je-balance-tax-leg.md), not the DB",
+        "structural mitigations that DO exist: compute_sst_leg is a DB compute tool (agent/src/tools/registry/journal.ts:149-165) and coa-coding routes computed legs to needs_review — but only if the model follows the text"
+      ],
+      "wrong": "A model that omits the output-tax leg on a taxable sale posts a balanced, gate-passing entry whose tax never reaches the SST-02; nothing downstream can detect absence. PROMPT-ONLY.",
+      "target": "belcort/coa-coding/SKILL.md Step 5 + db/v2/20-fns-journal.sql + db/v2/23e-fns-sst.sql"
+    },
+    {
+      "id": "F3-10",
+      "workstream_item": "(g) Opening/carry-down",
+      "title": "Carry-down document provenance step is broken as written: client-onboarding instructs ingest_document(kind='management_account') but the documents.kind CHECK only allows transaction_source/sample_invoice",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/client-onboarding/SKILL.md:218-219 — 'then ingest_document (kind='management_account', financial_date = the statement's period end)'",
+        "db/v2/10-tables-core.sql:77-79 — «dead 'management_account'/'export' kinds are dropped (Track 0c)»; CHECK (kind in ('transaction_source','sample_invoice'))",
+        "db/v2/22-fns-documents-recon.sql:223-232 — ingest_document inserts p->>'kind' verbatim, so the call raises a raw 23514 check violation"
+      ],
+      "wrong": "The MA/aged-listing source document that anchors the ISA-510 opening position cannot be indexed as instructed: the model either fails the step, mislabels the doc as transaction_source, or skips indexing — leaving the carry-down without its provenance anchor.",
+      "target": "belcort/client-onboarding/SKILL.md:218-219 vs db/v2/10-tables-core.sql:79"
+    },
+    {
+      "id": "F3-11",
+      "workstream_item": "(j) KB/memory",
+      "title": "KB/memory learning is prompt-only end-to-end: evidence tally, recon hints, memory notes and the chat-mediated self-reconcile learn all depend on the model remembering skill text, over a lossy wake transport — only rule DECAY is structural",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/coa-coding/SKILL.md:275-288 — Step-6 record_kb_evidence for auto_draft entries is a skill instruction; nothing in draft_entry/finalize_coding/approve_entry records evidence in the DB",
+        "belcort/kb-evolve/SKILL.md:306-325 — the doctrine itself documents the gap: a chat-mediated match is stamped actor='agent', the teach-wake deliberately does NOT fire (db/v2/25-fns-ops.sql:1526-1548 fences on actor is distinct from 'agent'), and the model must self-record record_kb_evidence + record_recon_hint inline — pure prompt discipline",
+        "db/v2/25-fns-ops.sql:1415-1460 — belcort_proactive_emit is exception-wrapped so webhook failures are swallowed (:1453-1456, books writes never abort); the harness records wake ingress as best-effort/lossy — a dropped wake permanently loses the lesson",
+        "agent/src/runtime/inject.ts:41,82 — the wake note says 'you may record evidence' (permission, not enforcement); the workbench-kb tool policy (agent/src/tools/buildTools.ts:21) correctly CAPS the lane to evidence+hint+notify but cannot compel any call",
+        "structural exception (verified): human reject/edit-away decays the cited rule INSIDE the DB fns — db/v2/20-fns-journal.sql:259,345 call app.decay_rule_on_override; db/v2/21-fns-kb.sql:130-162 (internal, revoked from callers, auto-retire at 3 overrides)",
+        "belcort/AGENTS.md:74 — record_memory_note duties ('RECORD when … reveals a DURABLE client fact') are prompt text; db/v2/27-fns-memory.sql:18-26 takes actor from the payload with no via_fn/actor constraint compelling the write"
+      ],
+      "wrong": "A workflow that reveals a durable client rule/alias/treatment updates the KB only if (1) the wake webhook fired and was delivered, (2) the model chose to act on the note, or (3) the model remembered the inline chat-learn step — three prompt/transport hops with no receipt or reconciliation sweep; skipped lessons are invisible and the KB silently under-learns (the exact zero-rules-after-12-approvals class the doctrine says PR #13 fixed by prompt).",
+      "target": "belcort/kb-evolve/SKILL.md + db/v2/25-fns-ops.sql wake emitters + agent/src/runtime/inject.ts"
+    },
+    {
+      "id": "F3-12",
+      "workstream_item": "cross-chain root cause",
+      "title": "Three-way drift between the DB fn surface, the agent tool registry, and the doctrine's canonical tool list — including a doctrine-promised tool (unmatch_bank_line) that does not exist in the registry and would HARD-FAIL a run if called",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/AGENTS.md:75 — §15 lists unmatch_bank_line as a curated tool; agent/test/registry.test.ts:38-42 — the registry's complete documents/recon set has match_bank_line but NO unmatch_bank_line; agent/src/tools/buildTools.ts:128-133 documents that the OpenAI Agents SDK default toolNotFoundBehavior='raise_error' HARD-FAILS a run on an unknown tool name (the exact defect class that comment says was fixed for clarify_tool). Precision: the DB fn itself EXISTS and is granted (db/v2/22-fns-documents-recon.sql:522-567) — the drift is at the tool-registry layer",
+        "belcort/AGENTS.md:71-78 — §15 omits tools that DO exist in the registry: record_fixed_asset, run_depreciation, dispose_fixed_asset, set_coa_account_type, seed_opening_carry_forward — while §8 (:57) instructs never to act from a tool description alone, making the FA tools doctrine-unreachable",
+        "agent/src/tools/registry.ts:39-53 — EXCLUDED_FNS accounts only for the job lane + helpers; the whole 22 (unmatch_bank_line)/23/23c/23d/23e fn families (subledger writers/allocators, recurring/accrual/amortisation posters, compute_tax_draft, compute_sst_return, adjustments_status) are neither tools nor documented exclusions; registry.ts:4 still describes the surface as '(20..25-fns-*.sql)'",
+        "agent/src/doctrine/loader.ts:10-22 — the 11 routed skills contain no FA, no AR/AP, no adjustments, no tax-comp skill; belcort/year-end-close/SKILL.md:57-59 tells the user to run run_recurring_journals/run_amortisation, which are NOT agent tools and (verified by grep) have NO dashboard caller either — an instruction with no executable surface except the SDT-001 SELECT-wrap bypass"
+      ],
+      "wrong": "The doctrine, the tool registry, and the DB engine surface each describe a different product. Consequences range from silent capability gaps (F3-1..6) to a latent hard-exit (unmatch_bank_line) to skills instructing tools that don't exist — and the registry parity test freezes the drift in place rather than detecting it (it asserts only the EXPECTED snapshot, with no completeness check against granted DB fns).",
+      "target": "belcort/AGENTS.md §15 vs agent/src/tools/registry/* vs db/v2/22/23*-fns-*.sql"
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "(g) Opening/carry-down side-effect completeness is structural ONCE INVOKED: seed_opening_carry_forward atomically posts per-item opening journals, attaches AR/AP open items by reusing record_ar_invoice/record_ap_bill, registers FA via record_fixed_asset AND seeds a fa_depreciation BASELINE row so run_depreciation continues from NBV, plugs OBE and asserts it nets to zero (fail-loud), and writes the financial-position snapshot; invocation is prompt-driven but gated by a mandatory human [[carrydown]] approval card",
+      "evidence": [
+        "db/v2/25b-fns-opening.sql:18-27 (header: subledger attach REUSES record_ar_invoice/record_ap_bill/record_fixed_asset; baseline row), :64 (record_ar_invoice call), :105 (record_ap_bill), :168 (record_fixed_asset), :182-185 (fa_depreciation baseline insert), :256-260 (opening_carry_forward_unbalanced fail-loud) + :280-284 (opening_balance_equity_not_nil assertion over opening entries)",
+        "belcort/client-onboarding/SKILL.md:230-258 (payload contract: gl_lines exclude controls; per-item ar/ap/fa), :304-314 (mandatory [[carrydown]] clarify gate before the call)",
+        "agent/test/registry.test.ts:44-45,89-99 (seed_opening_carry_forward IS a registered tool, firm_or_client scoped)"
+      ]
+    },
+    {
+      "claim": "(h) SOFP/financial statements on the governed lanes are DB-owned reads only: build_export fetches client_financial_statements/client_trial_balance/client_general_ledger/aging/get_sst_return via ctx.rpc inside the tool — the model supplies scope/fy/format, never a figure; the analysis lane runs model-authored read-only SELECTs but prints DB cells verbatim with a provenance page; year-end-close's MA pack is one build_export call",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:286-371 (every scope's data from ctx.rpc/ctx.query; sst_return reads the persisted draft and errors loudly when none exists at :350-351)",
+        "agent/src/tools/analysisTool.ts:1-12 ('a figure NEVER passes through the model's text: Clara supplies the SQL, Postgres computes every number' + the provenance page)",
+        "belcort/year-end-close/SKILL.md:136-149 (Step 3 is one build_export(scope='management_accounts') call; no hand-built statements)",
+        "residual (prompt-only, low): chat prose figures and the model-authored analysis SQL/headings rest on doctrine text (AGENTS.md §2/§15), not structure"
+      ]
+    },
+    {
+      "claim": "(e-partial) When run_depreciation IS called, the figure is structurally DB-owned: cumulative-target model, whole-month proration, per-asset row locks (FOR UPDATE), idempotent per (asset, period) via the overlap-skip check with the fa_depreciation unique(asset_id, period_start, period_end) constraint as backstop, one balanced approved journal — the model cannot inject an amount",
+      "evidence": [
+        "db/v2/23b-fns-fixed-assets.sql:131-230 (engine: FOR UPDATE at :167, overlap-skip at :169-173, cumulative target at :180-192, balanced journal at :205-218); db/v2/19b-tables-fixed-assets.sql:96 (unique (asset_id, period_start, period_end))",
+        "agent/src/tools/registry/fixedAssets.ts:36-58 (tool params carry no amount; actor layer-injected)"
+      ]
+    },
+    {
+      "claim": "(f-partial) dispose_fixed_asset's accounting is structural (DB owns NBV and gain/loss; compound journal; register retire; reverse-not-delete) and a human-initiated invocation path exists on the dashboard FA register (agent-routed intent + admin+ deterministic rpc fallback)",
+      "evidence": [
+        "db/v2/23b-fns-fixed-assets.sql:242-340 (NBV/gain-loss at :277-279; compound journal :296-326; retire :328-330; gain/loss account required :289-290)",
+        "dashboard/components/books/FaRegister.tsx:6-8,60-64; dashboard/lib/fa.ts:102-129"
+      ]
+    },
+    {
+      "claim": "(j-partial) KB rule decay on human override is STRUCTURAL: reject_entry and edit-away-from-rule call app.decay_rule_on_override inside the DB fns (internal, revoked from callers), with auto-retire at 3 overrides — no prompt dependence; likewise the teach-WAKE TRIGGERS themselves (trg_pn_workbench/trg_pn_bank_match/trg_pn_doc_triage) fire structurally on human verbs",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:259,345 (decay calls inside reject/edit); db/v2/21-fns-kb.sql:130-162 (sole decay writer, revoked, threshold 3 auto-retire)",
+        "db/v2/25-fns-ops.sql:1526-1548 (human-verb wake triggers, actor-is-distinct-from-'agent' fences)"
+      ]
+    },
+    {
+      "claim": "(c-partial) The bank-reconciliation tie-out math itself is structural: close_reconciliation computes book balance, deposits-in-transit, unpresented payments and difference in the DB and never forces a balance; match_bank_line writes line+entry recon fields atomically with actor stamping",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:458 (match_bank_line), :688 (close_reconciliation computes everything); belcort/bank-recon/SKILL.md:111-129 (skill defers all math to the fn — 'The DB owns the entire tie-out')"
+      ]
+    },
+    {
+      "claim": "(i-partial) The SST leg AMOUNT, when the model does post one, comes from the DB (compute_sst_leg, effective-dated tax_rates) and the return computation itself (compute_sst_return / compute_tax_draft) is correctly kept OFF the agent surface and human-driven from the dashboard (bookkeeper+ UI), with the agent export reading only the persisted draft",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:42-73 (compute_sst_leg, effective-dated); agent/src/tools/registry/journal.ts:149-165 (compute tool, cls='compute')",
+        "dashboard/lib/sstReturn.ts:128-137 and dashboard/lib/taxComp.ts:91-107 (dashboard-direct compute, bookkeeper+ UI gate); agent/test/registry.test.ts:28-53 (compute_sst_return/compute_tax_draft not agent tools); agent/src/tools/exportTool.ts:347-354 (export reads get_sst_return only)"
+      ]
+    }
+  ],
+  "unverified": [
+    "The audit brief could not be read by the drafting agent OR this verifier: <repo>/undefined/audit-brief.md does not exist on disk (Glob for **/audit-brief.md across the repo returns nothing), and only maps/db-map.md of the named evidence maps is present under undefined/. Verification proceeded on the workstream spec verbatim: repo treated as read-only evidence, writes only under undefined/, file:line evidence re-opened for every finding, severity rubric applied by impact (critical = wrong client-facing figures/statutory output or ungated wrong posting; high = silent books/register corruption or broken control; medium = fail-visible or bounded).",
+    "F3-7 (post-close tie-out doubling) is established by static construction from the SQL — independently re-derived by this verifier (v_open_date = v_end + 1 at 25-fns-ops.sql:406; the closing entry sweeps nominal accounts only, so real accounts are never zeroed and the opening entry duplicates them in a raw sum; _tie_out_core/fa_control_tie_out have no entry_kind filter; the test-coverage disjointness was verified by grep). Neither the drafting agent nor this verifier executed the ephemeral rig to demonstrate the doubled figure empirically.",
+    "Classification PROMPT-ONLY vs ABSENT is structural (what the model CAN skip / what no workflow invokes); no empirical measurement of how often the live model actually skips prompt-only steps (e.g. the coa-coding Step-6 evidence tally or the SST leg) was possible from the frozen repo.",
+    "Whether the live Supabase project exactly matches the frozen db/v2 files was not verified (frozen-repo audit only; CLAUDE.md asserts the planes are in sync).",
+    "dashboard/docs/contracts/je-balance-tax-leg.md was cited only via its summary in docs/architecture/backend.md:63; the contract file itself was not read in full by the drafter or this verifier.",
+    "The SDT-001/SEC-001 agent_select SELECT-wrap bypass was re-verified structurally by this verifier (db/v2/26-fns-session.sql:119-141: the read-only guard is a lexical verb-scan — a `select record_ar_invoice(...)`/`select run_recurring_journals(...)` wrapper contains no banned verb and passes), so the model COULD invoke the unrouted subledger/adjustment fns via query_books despite them not being tools; whether the model ever does so in practice is unverifiable here — noted because it is the only path by which year-end-close's own instruction to 'run run_recurring_journals / run_amortisation' is executable at all.",
+    "Whether the aging/full export deliverables have actually been sent to any real client is unknown (repo contains no client books; the finding is about what the shipped lanes would render)."
+  ],
+  "decision_brief": "F3 verdict (adversarially verified — 11 CONFIRMED, 1 ADJUSTED, 0 REFUTED): COA coding is a self-contained journal loop; almost every accounting side-effect beyond the journal is either absent or resting on prompt text. Per chain: (a) AR — FAIL/ABSENT: record_ar_invoice (db/v2/23-fns-subledger.sql:83) has zero callers in the agent tool registry (agent/test/registry.test.ts:28-61 freezes the surface without it), zero mentions in the 11 routed skills, and the dashboard AR surface is read-only — the subledger dies at the onboarding seed while every coded invoice moves the GL control. (b) AP — FAIL/ABSENT, identical. (c) Settlement — FAIL/ABSENT and actively dangerous: bank-recon's matcher can only match entries with bank legs, so a customer receipt is classified 'bank-only' and handed to coa-coding, which has no settlement branch — a confirmed customer KB rule can AUTO-POST Dr Bank/Cr Revenue (double-count) into the ungated auto_draft lane, and the kb-evolve learning loop actively creates exactly those narration→customer→revenue mappings; allocations never happen; no unallocated-task surface exists. (d) FA acquisition — FAIL: the tool exists but is doctrine-orphaned (AGENTS.md §15 omits the FA trio; §8 forbids acting from tool descriptions; no skill and no dashboard writer; compute_tax_draft's CA schedule reads the register, so unregistered assets silently drop out of the tax comp). (e) Depreciation — FAIL: the engine is exemplary DB-owned math, but nothing invokes or gates it — adjustments_status and the close's pending_adjustments cover only recurring+amortisation, the year-end-close skill's Step-0 gate omits depreciation, and manual depreciation journals bypassing the register are unblocked. (f) Disposal — PROMPT-ONLY: structural fn + human dashboard intent path, but no workflow linkage from coded proceeds to disposal, and reverse_entry permits reversing FA/AR/AP anchors (close-kind + amortisation-only guards) while its own comment leans on the tie-outs for visibility. (g) Carry-down — the one genuinely well-built chain: seed_opening_carry_forward is atomic, subledger-complete (reuses the real writers + dep baseline), OBE-asserted and human-gated — PASS structurally once invoked; two defects: the skill instructs a dead ingest_document kind ('management_account' fails the CHECK), and — the sleeper bug — the close's opening entry (posted at period_end+1, duplicating every real balance the closing entry never zeroes) plus filterless tie-outs makes EVERY AR/AP/FA control tie-out report false, growing phantom drift after the first year-end close (interaction verified untested: the subledger/FA tests never close, the close test never ties out), destroying the only drift-visibility layer the whole design leans on — _trial_balance_core:69 proves the hazard was known and handled elsewhere. (h) SOFP/FS — PASS structurally on the governed lanes (build_export/analysis read DB fns internally; figures never transit model text). (i) Tax/SST — the leg amount and return engines are DB-owned and the return is correctly human-driven from the dashboard, but the coding-time leg is prompt-only with missing legs undetectable, the return keys on literal 460/461 codes, and — consequentially — service tax declares on the ACCRUAL basis because the payment-basis model is starved of the AR anchors no workflow creates: a statutory timing defect flowing directly from (a)/(c), surfaced only as one generic boilerplate assumption line (23e:706) whose prescribed fix (record_ar_invoice) is unreachable — ADJUSTED from 'zero surfaced warning', and note the DB itself documents the degradation as 'early, never late'. (j) KB/memory — PROMPT-ONLY over a lossy wake transport (emitters swallow failures; chat-mediated matches deliberately suppress the teach-wake and rely on model self-discipline); only rule decay and the wake triggers themselves are structural. Root cause (F3-12): three-way drift between the DB fn surface, the agent registry, and the doctrine canon — including a doctrine-promised tool (unmatch_bank_line — the DB fn exists at 22:522, the registry entry does not) whose invocation would hard-fail a run, and skills instructing fns (run_recurring_journals/run_amortisation) that have NO executable surface anywhere (not agent tools, no dashboard caller). Rebuild implication: the Track-1 DB engines (subledger, FA, adjustments, tax, SST, carry-down) are PORT-grade assets; the binding of workflows to them is the missing product — the greenfield target's per-mutation-class policy and workflow binding should make each side-effect either a structural co-commit (journal + subledger row in one governed transaction) or a DB-gated block/surface, never skill prose; and the tie-out fns need the same close-machinery exclusion _trial_balance_core already has, plus close-cross tests."
+}

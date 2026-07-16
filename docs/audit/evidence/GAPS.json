@@ -1,0 +1,871 @@
+{
+  "workstream": "GAPS",
+  "verified_at": "2026-07-17",
+  "verifier": "adversarial GAP verifier (refute-by-default; every load-bearing citation re-read from the frozen tree at master ac0a684f; live Fly/Vercel claims independently re-verified read-only)",
+  "verdict_totals": { "confirmed": 40, "adjusted": 2, "refuted": 0 },
+  "findings": [
+    {
+      "id": "GAP0-1",
+      "workstream_item": "A/F3",
+      "title": "Journal provenance is not structurally bound: draft_entry inserts caller-supplied document_id + source_doc_sha256 verbatim; nothing anywhere validates the pair",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:101-110 — draft_entry INSERTs (p->>'document_id')::bigint and p->>'source_doc_sha256' straight from caller JSON; the ONLY provenance check in the fn is the kb_rule_id confirmed-rule check at :95-99. No check that the document exists in the caller's firm, belongs to the entry's client, or that the sha256 matches documents.sha256.",
+        "db/v2/10-tables-core.sql:116-117 — journal_entries.document_id is a bare `references public.documents(id) on delete set null` (no firm/client composite parity, unlike journal_lines' composite FK to coa_accounts at :175); source_doc_sha256 is plain unconstrained text.",
+        "Grep source_doc_sha256 across db/v2 (re-run by verifier): the only writers are draft_entry (20:105), record_memory_note (27:25), seed_client_knowledge (24:417); the only reader is journal_entry_detail (28:418). No function or trigger anywhere compares it to documents.sha256.",
+        "Cross-firm ids also pass: Postgres referential-integrity checks bypass RLS by design, and the SECURITY DEFINER fns are owned by the migration role with the belcort_definer non-BYPASSRLS re-ownership documented as NOT applied ('Left as a deploy step', db/v2/30-grants.sql:24-43) — so any existing documents.id from any firm satisfies the FK.",
+        "db/v2/20-fns-journal.sql:364-394 — reassign_entry moves client_id on the entry+lines and clears kb_rule_id (:389) but leaves document_id/source_doc_sha256 untouched, so every reassign of a document-origin entry manufactures a cross-client document citation even with honest inputs.",
+        "db/v2/20-fns-journal.sql:305-310 — edit_entry's header UPDATE touches only description/posting_date/status/review_reason, so a wrong binding can never be corrected via the audited edit path either; and `on delete set null` (10:116) silently erases provenance if a document row is ever removed by a privileged role."
+      ],
+      "wrong": "The cardinal invariant 'every entry traces to its source document' (CLAUDE.md, PRD §6) is conventional, not structural. Clara (or any authenticated member, or the SELECT-bypass path) can draft an entry citing another client's document, another FIRM's document id, or a fabricated hash, and the pair (document_id, source_doc_sha256) can be internally inconsistent. This is the wrong-client-evidence state that destroys audit defensibility, and it confirms the prior-audit DSE-003/EDGE-002/ACCT-009/SEC-007/VP-06 cluster is real in the frozen tree — the fresh findings set covered only client-identity confidence (A-16), not document binding.",
+      "target": "The rebuild needs a typed-origin contract per entry (document / bank-line / depreciation-run / close / opening / manual / reversal): document-origin entries must have the DB derive-and-assert the (document_id -> firm_id, client_id, sha256) tuple at draft time (composite FK or in-function assert with sha equality against documents.sha256), reassign must re-derive or refuse when provenance would cross clients, and provenance columns must be non-nullable per origin type with reverse-not-delete instead of `on delete set null`."
+    },
+    {
+      "id": "GAP0-2",
+      "workstream_item": "G10",
+      "title": "No structural human-authorization on any write tool in the interactive lane — the plan->approve gate is UI convention plus model obedience only, and unknown approval interruptions are auto-approved",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "verifier_note": "All citations re-verified verbatim. One softening: the exact write-tool count ('61 fn-backed writes') was not re-counted; the structural claim (every fn-backed write tool gets a plain execute; only clarify_tool is needsApproval) is verified at tools.ts:47-53,67-71.",
+      "evidence": [
+        "agent/src/tools/buildTools.ts:31 — `if (policy === 'interactive') return true; // all writes in interactive chat (plan->approve gate is UI-side)` — the code itself concedes the gate is not in the capability layer.",
+        "agent/src/runtime/openai/tools.ts:47-53 — only `clarify_tool` is built with `needsApproval: true`; every other tool (every fn-backed write) gets a plain `execute` that runs immediately when the model calls it.",
+        "agent/src/runtime/openai/runtime.ts:249-252 — the interruption loop's else-branch: any non-clarify needsApproval interruption is silently `result.state.approve(interruption)`d ('under the curated-tool model (W5) the surface is already bounded'), so even a future approval-requiring tool would be auto-consented.",
+        "agent/src/tools/registry/journal.ts:40,131 and registry/ops.ts:56,74,91 — approve_entry, reverse_entry, record_year_end_close, reverse_year_end_close, record_opening_balances are all registered interactive tools; run_depreciation/dispose_fixed_asset (registry/fixedAssets.ts:37,60) and the full onboarding set likewise.",
+        "dashboard/lib/artifacts.ts:110-115 — the je_review card's approve 'routes through the SAME approve_entry op as the rail': the card is a presentation-layer verb; nothing requires the card to have been rendered, read, or acknowledged before the agent can call approve_entry itself in an ordinary chat turn.",
+        "db/v2/20-fns-journal.sql:166,184-185 — approve_entry's DB-side guards are assert_can_review (role floor) + audit_actor; there is no human-approval event, policy token, or approval envelope in the signature."
+      ],
+      "wrong": "The supervised-autonomy law (consequential writes go plan->review->approve) has no capability boundary anywhere in the stack: a prompt-injected or erring model can post, reverse, year-end-close, or seed opening balances in a single interactive turn with zero human event, and the runtime would auto-approve any SDK-level approval pause that wasn't the clarify tool. This confirms the prior AR-01/SEC-004 CRITICAL that the fresh Ggr-11 downgraded to LOW as 'latent' — the evidence for the downgrade ('only clarify_tool sets needsApproval') is precisely the defect.",
+      "target": "Gate-1 must classify this as a structural failure. The rebuild needs DB-owned per-mutation-class authorization policy: consequential writes require an exact-payload approval envelope (human-verb event recorded in the DB, bound to the precise payload) that the write function verifies before executing — the direction the owner already ratified in the reverted WP-013 exact-approval kernel. The runtime must fail-closed (reject, never auto-approve) on unknown interruptions."
+    },
+    {
+      "id": "GAP0-3",
+      "workstream_item": "F3",
+      "title": "reassign_entry moves the GL entry cross-client while every dependent stays behind — subledger anchors, bank match/recon state, FA/amortisation anchors, and document evidence all left pointing across clients",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:364-394 — reassign_entry's complete guard set: firm asserts on both clients, assert_can_review, same_client, and `cannot_reassign_approved` (:382). It then updates journal_lines.client_id and the header client_id + kb_rule_id=null. There is NO un-reconcile block (contrast reject_entry :238-249 and edit_entry :319-330 which both clear reconciled/reconciliation_id and unmatch bank_statement_lines), NO subledger/FA/amortisation anchor check, and NO document provenance handling.",
+        "db/v2/23-fns-subledger.sql:62-71 — assert_postable_entry accepts status 'auto_draft', so ar_invoices/ar_receipts/ap_bills/ap_payments (unique(entry_id) NOT NULL anchors, db/v2/19-tables-subledger.sql:35-48,65-73,109-120,136-144), fixed_assets.acquisition_entry_id (19b-tables-fixed-assets.sql:42), and amortisation_schedules.anchor_entry_id (19c-tables-adjustments.sql:105) can all anchor auto_draft entries — exactly the entries reassign_entry will move (only 'approved' is blocked).",
+        "db/v2/22-fns-documents-recon.sql:458-511 (match_bank_line) — matching also accepts auto_draft entries (:480-481), so a matched entry is reassignable: after the move, client A's bank_statement_lines.matched_entry_id points at client B's entry and the moved entry's reconciliation_id still points at client A's reconciliation.",
+        "db/v2/22-fns-documents-recon.sql:802-805 — reverse_entry DOES guard `entry_anchors_active_schedule` ('a silent negative-holding corruption'); reassign_entry, which creates the same orphaned-anchor state plus a cross-client one, has no equivalent guard for any dependent."
+      ],
+      "wrong": "The correction verb intended to FIX a wrong-client posting manufactures the exact wrong-client state it exists to prevent: the GL movement lands in client B while client A keeps the open AR/AP item (which now fails entry_client_mismatch on any future touch but persists as a row), the bank match, the recon pointer, the FA/amortisation anchor, and (per GAP0-1) the document citation. Both clients' control tie-outs, recon state, and audit lineage become false simultaneously. Confirms prior ACCT-002 (CRITICAL); the fresh set covered only the KB-provenance NULLing (C-14) and storage bytes (E-3).",
+      "target": "The rebuild needs reassignment as an atomic domain-aware transfer (move or explicitly re-derive every dependent: subledger items, matches, recon fields, register anchors, document/evidence links, with receipts) or a refuse-when-dependents-exist rule mirroring reverse_entry's anchor guard — never a bare two-table UPDATE."
+    },
+    {
+      "id": "GAP0-4",
+      "workstream_item": "F",
+      "title": "Posted-entry in-place mutability is ledger-wide: edit_entry rewrites approved AND auto_draft entries' lines under the same id, no trigger enforces posted-line immutability, and stale downstream snapshots only warn",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:291-297 — edit_entry explicitly permits editing an APPROVED entry (reason required, demoted to needs_review) and, sharper: an 'auto_draft' entry — a POSTED status counted by the trial balance, GL, financial statements, bank matching, and subledger anchoring — falls into the else-branch (v_new_status := v_status) and is edited with NO reason and NO status demotion.",
+        "db/v2/20-fns-journal.sql:312-317 — the edit is a physical `delete from journal_lines` + reinsert: the posted legs are destroyed and replaced under the same entry id.",
+        "db/v2/15-triggers.sql:1-137 (complete file, re-read) — the only journal_lines triggers are the deferred balance constraint triggers (:69-75); no trigger blocks UPDATE/DELETE of lines whose parent is approved/auto_draft. The closed-period guard exists only on journal_entries (db/v2/25-fns-ops.sql:297-322), not on journal_lines.",
+        "db/v2/23-fns-subledger.sql:56-61 — in-code concession: 'An auto_draft entry is still mutable, so a later edit to its control leg makes the stored gross stale… surfaces in tie-out… never silently propagated' — surfacing, not blocking, is the whole defense.",
+        "db/v2/23e-fns-sst.sql:708 — the SST worksheet's own assumption admits 'edits to auto_draft entries can shift figures between periods; re-draft SUPERSEDED periods in order before filing if the books moved' — warning-level, not blocking."
+      ],
+      "wrong": "The ledger-wide reverse-not-delete/immutability promise is defeated: figures already counted in historical statements, SST return drafts, reconciliations, exports, and register anchors can change under an unchanged entry id (auto_draft silently, approved with a reason string). journal_entry_history records the edit, but nothing invalidates or re-derives the dependent snapshots — they drift and at best warn on the next compute. Confirms prior SEC-003 (HIGH); the fresh set framed this only for opening entries (B-8).",
+      "target": "The rebuild must make posted mean immutable: once an entry is in any posted-scope status, line UPDATE/DELETE is trigger-blocked and the only amendment paths are reversal or supersede-with-lineage; snapshot consumers (subledger gross, SST/tax drafts, recon) must be invalidated or re-derived on amendment, never left to a warning."
+    },
+    {
+      "id": "GAP0-5",
+      "workstream_item": "G10",
+      "title": "approve_entry carries no expected-revision/snapshot token — an approval after an intervening edit posts legs the approver never saw",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:166 — signature is approve_entry(p_entry_id bigint, p_client_id bigint, p_actor text); the fn approves whatever the current rows are, gated only on status in (auto_draft, needs_review, needs_decision) (:190-191). reject_entry (:217) and edit_entry (:269) equally carry no concurrency token.",
+        "dashboard/lib/workbenchActions.ts:28-34 — the dashboard approve sends exactly {p_entry_id, p_client_id, p_actor}; nothing binds the click to the entry contents rendered in the grid/card.",
+        "db/v2/20-fns-journal.sql:295-296 — an edit of a needs_review entry requires no reason and keeps the status needs_review, so an intervening edit (by the agent, a wake-lane write, or a teammate) does not invalidate a human's pending approval; approve_entry then posts the changed legs attributed to the human approver."
+      ],
+      "wrong": "Approval is not bound to the content reviewed. Combined with GAP0-2 (the agent can call edit_entry in the same window) the human sign-off — the system's central safety event — can attest to legs the human never saw. Confirms prior EDGE-005, absent from the fresh set.",
+      "target": "Approve/reject/edit RPCs must carry an expected-revision id or snapshot hash and the DB must reject on mismatch (optimistic concurrency), so an approval is an exact-payload attestation — consistent with the WP-013 exact-approval envelope direction."
+    },
+    {
+      "id": "GAP0-6",
+      "workstream_item": "F3",
+      "title": "reassign_document moves the document row alone: journal entries citing it, parsed bank statement lines, and the storage path all stay with the old client",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:73-105 — reassign_document's complete guards: not-found, `document_already_coded`, not-assigned, same-client, both-firm asserts. The write is a single `update documents set client_id, status='ingested'` (:91). The header comment itself says 'storage_path untouched' (:71). No check for, and no handling of, dependents.",
+        "db/v2/10-tables-core.sql:116 + 20-fns-journal.sql:101-110 — journal_entries.document_id rows drafted for the OLD client keep citing the moved document (only 'coded' docs are blocked from moving, but entries can cite docs at any status since draft_entry never validates status or ownership — see GAP0-1), leaving client A's entries evidencing client B's document.",
+        "db/v2/11-tables-recon.sql:81-97 — bank_statement_lines.document_id is NOT NULL with unique(document_id, line_no) and its own client_id/bank_account_id: a parsed statement document reassigned to client B leaves client A's statement lines (and any in-progress reconciliation opened on that statement doc) anchored to a document now owned by client B.",
+        "db/v2/10-tables-core.sql:93-97 + 22-fns-documents-recon.sql:91 — documents.storage_path (CHECK'd to `firms/<firm>/…`, taxonomy `clients/<slug>/raw/…`) is untouched by the move, so the row's client_id and its evidence-bytes path (old client's slug) permanently disagree unless the agent separately performs the Storage move — nothing enforces it."
+      ],
+      "wrong": "The document-side half of the cross-client correction has the same dependents-left-behind defect as reassign_entry: evidence ownership, entry citations, statement-line anchors, and byte location fall out of sync across two clients after a single sanctioned verb — audit lineage for both clients becomes untrustworthy.",
+      "target": "Document reassignment in the rebuild must be an atomic transfer that re-validates or refuses when journal citations/statement lines exist, and must move (or transactionally re-key) the storage object with the row — evidence identity (row, citations, bytes, path) may never diverge."
+    },
+    {
+      "id": "GAP1-1",
+      "workstream_item": "GAP-05 / F1-bank",
+      "title": "match_bank_line enforces zero structural parity: any line can match any posted entry into any reconciliation of the client — wrong bank account, wrong statement, wrong period, wrong amount, even a COMPLETED recon",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:458-511 (match_bank_line, re-read whole fn) — the ONLY guards are: line.client_id = p_client_id (:470-474), entry.client_id = p_client_id + status in ('auto_draft','approved') (:476-481), recon.client_id = p_client_id (:483-486). It never compares the line's bank_account_id to the reconciliation's bank_account_id, the line's document_id to the recon's statement_document_id, the line's txn_date to the recon's period_start/period_end, or the line's amount_cents to the entry's net movement on the bank COA account — and it never checks that the entry touches the recon's bank account at all.",
+        "db/v2/22-fns-documents-recon.sql:483-486 — the recon lookup selects client_id ONLY; recon.status is never read, so matching (and unmatch_bank_line at :522-567, same omission) freely mutates a status='completed' reconciliation, while close_reconciliation refuses recompute ('reconciliation_already_completed', :704) — a closed recon's stored book_balance/outstanding/difference go silently stale with no path to re-tie.",
+        "db/v2/11-tables-recon.sql:81-97 (bank_statement_lines carries bank_account_id + document_id) and :41-57 (bank_reconciliations carries bank_account_id + statement_document_id) — all the parity data exists in the schema and is simply not checked.",
+        "db/v2/22-fns-documents-recon.sql:720-735 — a wrongly-matched entry gets reconciled=true and is thereafter EXCLUDED from the outstanding (deposits-in-transit / unpresented) computation of whatever recon its bank account really belongs to (filter je.reconciled = false at :735), corrupting that recon's difference_cents.",
+        "db/v2/tests/match_bank_line_actor_test.sql + db/v2/tests/open_reconciliation_contract_test.sql — no test asserts account/statement/period/amount parity, recon-status gating, or match exclusivity (the fn body contains no such guards for a test to pin)."
+      ],
+      "wrong": "A reconciliation 'match' is the atomic fact the entire close gate rests on, and it is structurally unvalidated: a RM100 Maybank June line can be matched to a RM5,000 entry with no leg on any bank account inside a CIMB March reconciliation — or into an already-completed one. The entry is stamped reconciled/cleared, the audit row looks legitimate, and every recon whose arithmetic depends on the reconciled flag is silently misstated. Overstated reconciliation completion feeds period-close readiness (record_year_end_close does not re-verify recon integrity) and every downstream statement.",
+      "target": "REBUILD the match model, don't port it: make membership structural (a match row FK-bound to (reconciliation_id, line_id, entry_id) with DB CHECKs/uniques enforcing line.bank_account_id = recon.bank_account_id, line.document_id = recon.statement_document_id, txn_date within period), validate line amount against the entry's net movement on the recon's bank COA account (with an explicit partial-match/split concept if needed), and hard-block any mutation of a completed reconciliation (reopen must be an audited verb that voids the stored tie-out)."
+    },
+    {
+      "id": "GAP1-2",
+      "workstream_item": "GAP-05 / F1-bank (prior ACCT-006)",
+      "title": "Re-match without unmatch leaves ghost 'reconciled' entries, and one entry can be claimed by many lines/recons with last-writer-wins overwrite — confirmed still unfixed",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:470-472 — v_prev_match (the line's current match_status) is read for the audit row but NO guard rejects re-matching an already-'matched' line; :488-495 then repoints the line to the new entry and marks the NEW entry reconciled, while the OLD matched entry's reconciled/reconciliation_id/cleared_date are never cleared -> a ghost 'reconciled' entry that no statement line points to.",
+        "db/v2/11-tables-recon.sql:81-104 — no uniqueness on bank_statement_lines.matched_entry_id (only unique(document_id, line_no) at :96 and a NON-unique partial index idx_bsl_matched_entry at :103-104), so two different lines (even in two different reconciliations) can both match the same entry; journal_entries has a single reconciliation_id slot, so the second match silently overwrites the first recon's claim on the entry.",
+        "db/v2/22-fns-documents-recon.sql:549-553 (unmatch_bank_line) — clears the ENTRY's reconciled/reconciliation_id/cleared_date unconditionally from the line's matched_entry_id; after a cross-recon double-match, unmatching the FIRST (stale) line strips the entry's reconciliation fields that now belong to the SECOND recon — cross-reconciliation corruption via a legitimate-looking unmatch.",
+        "db/v2/22-fns-documents-recon.sql:729-735 — ghost reconciled entries are excluded from the outstanding computation (filter je.reconciled = false), so deposits-in-transit/unpresented are understated and difference_cents misstated; the recon either cannot tie out or, worse, completes against offsetting errors.",
+        "db/v2/tests/match_bank_line_actor_test.sql — no test covers match->re-match, two-lines-one-entry, or cross-recon overwrite."
+      ],
+      "wrong": "The prior audit's ACCT-006 CRITICAL is confirmed in the current code: there is no unmatch-before-rematch requirement and no exclusivity constraint, so ordinary re-matching workflows (agent retries, human corrections) manufacture ghost cleared entries and cross-recon field theft that the append-only bank_match_audit dutifully records but nothing prevents. Reconciliation completeness becomes unauditable: the set {lines matched} and the set {entries flagged reconciled} drift apart permanently.",
+      "target": "New build: a first-class match table with UNIQUE(line_id) and UNIQUE(entry_id) (or explicit split semantics), rematch only via an audited unmatch verb that atomically restores the displaced entry, and a DB invariant (constraint trigger) that entry.reconciled state is derivable from live match rows — never a free-floating flag."
+    },
+    {
+      "id": "GAP1-3",
+      "workstream_item": "GAP-05 / F1-bank (prior ACCT-008)",
+      "title": "close_reconciliation ignores statement opening-continuity entirely and drops prior-period outstanding items from the tie-out; completion never requires lines to be matched",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:688-754 (re-read whole fn) — statement_opening_cents is never read at close (only statement_closing_cents, :699-700); there is no check that this statement's opening equals the prior reconciliation's closing, and db/v2/11-tables-recon.sql:41-57 has no uniqueness on (bank_account_id, period), so duplicate/overlapping/gap-leaving recons for the same account are all silently accepted.",
+        "db/v2/22-fns-documents-recon.sql:733 — the outstanding computation filters `je.posting_date between v_period_start and v_period_end`, while book balance (:717) is all-time `<= v_period_end`: an unpresented cheque posted BEFORE period_start and still uncleared is inside book balance but EXCLUDED from outstanding, so difference_cents = stmt_closing + outstanding - book is systematically misstated in every period after the first whenever brought-forward outstanding items exist — the standard accounting treatment (carry prior o/s items) is unrepresentable.",
+        "db/v2/22-fns-documents-recon.sql:688-754 — bank_statement_lines is never referenced in the close: a reconciliation can reach status='completed' with every statement line unmatched (or every line matched and the totals wrong) because the line-matching model is decorative to the arithmetic.",
+        "db/v2/11-tables-recon.sql:54 — status CHECK includes 'balanced', which no code path ever sets (close sets only completed/unbalanced, 22:740-741): dead state evidencing model drift.",
+        "db/v2/tests/ — no test constructs a second-period recon, a prior-period unpresented item, or an opening-continuity mismatch."
+      ],
+      "wrong": "The close's tie-out formula is only correct for a client's very first reconciliation period. From month two onward, any brought-forward outstanding item makes the DB-computed difference wrong, pushing users to force-match or mis-code to make it tie; and 'completed' asserts nothing about the statement's lines or its continuity with the prior statement — so 'reconciliation complete' as a close-gate signal is unreliable in exactly the silent way that corrupts period-close readiness.",
+      "target": "New build: recon must chain (opening = prior closing enforced, one live recon per account-period), outstanding items must carry forward across periods (all-time uncleared scope, or an explicit brought-forward register), and completion must require every statement line matched or explicitly ignored plus difference=0 — with the per-period arithmetic preserved on top of that corrected scope."
+    },
+    {
+      "id": "GAP1-4",
+      "workstream_item": "GAP-06 / cross-access-control (prior SEC-005/EDGE-004)",
+      "title": "All authority is stale-JWT-claims-only until token refresh: a removed/demoted member (or a suspended firm's users) keeps reading and mutating the firm's books across PostgREST, dashboard and agent until token expiry — no revocation mechanism exists",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "verifier_note": "Additional verifier observation strengthening the finding: the access-token hook's exception handler FAILS OPEN — `exception when others then return event` (00-foundation.sql:274-276) returns the event with the ORIGINAL inbound claims intact (the strip at :260-263 is lost), so a hook error at issuance would preserve caller-supplied firm claims. Deliberate (a throw blocks every login) but it makes claims-only authority strictly weaker than the fine-claim reading.",
+      "evidence": [
+        "db/v2/00-foundation.sql:98-108 — app.current_firm_id() reads ONLY the JWT firm_id claim (top-level or app_metadata); every RLS policy keys on it. No policy consults firm_users or firms.status at query time.",
+        "db/v2/00-foundation.sql:112-123 — app.current_user_role() PREFERS the JWT firm_role claim and falls back to the membership row only when the claim is absent: a demoted member's stale 'admin' claim outranks their live 'viewer' row for every fn-level floor (assert_can_review/assert_can_manage_kb/assert_can_manage_firm_settings, 00:152-203).",
+        "db/v2/24b-fns-members.sql:183-227 — set_member_role/remove_member mutate/DELETE the firm_users row only; no session invalidation, no token-version bump. The only sign-out in the product is self-service (dashboard/lib/authActions.ts:13-15); no auth-admin revocation call exists anywhere.",
+        "db/v2/00-foundation.sql:243 (comment) + :252-276 — the access-token hook is the SOLE revocation point and fires only at token issuance/refresh: 'a removed member's stale claim dies at the next refresh'. Suspension likewise only bites at re-issuance (:264-268 join firms f on f.status='active').",
+        "agent/src/http/auth.ts:36-44 + :119-125 — the agent verifies the JWT signature then trusts firm_id/firm_role from claims; no membership lookup. The JWT is bound into the run's ToolContext, so an in-flight chat/clarify run keeps the removed member's authority for the run's remaining life (a clarify-length run can outlive the JWT itself — agent/src/main.ts:171-176 logs the settle-side 401 as a known gap). Dashboard middleware/auth validates only that the auth USER exists — never membership — and the data plane sends the raw access token to PostgREST (dashboard/lib/booksApi.ts).",
+        "db/v2/90-isolation-tests.sql TEST 20 proves claim stripping at ISSUANCE for a memberless user; no test in the repo covers the removal->expiry window. The access-token TTL is a live GoTrue setting not present in the repo (Supabase default 1h) — window length unverified."
+      ],
+      "wrong": "Zero fresh findings covered this, and it is fully confirmed in code: firing an employee, demoting a rogue bookkeeper, or suspending a firm leaves their existing access token a full-power credential — RLS reads of every client's books, plus approve/edit/reverse/close/export at the stale role — for up to the full token lifetime, with in-flight agent runs extending it further. For a multi-tenant accounting SaaS this is a confidentiality and books-integrity hole independent of RLS correctness, and it is an architecture-time decision the current design silently made (claims-only) without a compensating control.",
+      "target": "The rebuild must pick its revocation model at design time: (a) short access-token TTL + the hook (bounded staleness, documented as an accepted window), or (b) a session-version/epoch claim checked against a DB row in the RLS helper, or (c) live-membership resolution for role floors (invert current_user_role's precedence so the membership row wins) — PLUS an admin-triggered session revocation (GoTrue admin sign-out) fired by remove/demote/suspend, and a test that proves the window."
+    },
+    {
+      "id": "GAP1-5",
+      "workstream_item": "GAP-07 / ops (prior OPS-001)",
+      "title": "The only CI workflow never applies db/v2 and never tests the agent runtime — green CI tests the DECOMMISSIONED legacy schema while the real product ships unverified",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "verifier_note": "Re-verified: .github/workflows contains exactly one file (control-plane.yml). Bonus corroboration: the CI Postgres service is postgres:16 (control-plane.yml:28) while the product schema targets PG17 — even if db/v2 were wired in, the version would not match the declared target.",
+      "evidence": [
+        ".github/workflows/ contains exactly one workflow, control-plane.yml; its triggers are dashboard/**, db/**, belcort/** (:8-20) — agent/** does not even trigger a run, and no job runs the agent's vitest/tsc (grep of the workflow for 'agent' = zero hits).",
+        "control-plane.yml:49-50 runs dashboard/ci/run_sql_tests.sh, which applies dashboard/supabase/migrations/*.sql and runs dashboard/supabase/tests/*.sql (run_sql_tests.sh:17-32, re-read). Those directories are the LEGACY v1 control-plane (0001_init … 0011_firm_container_addr, 0013_broker_rls, 0015_provisioning_rpcs, chat_threads — glob re-verified) — the decommissioned relay/per-firm plane. db/v2/*.sql is never applied and db/v2's suites never run in CI; the 90-isolation gate + functional suite exist only as a local script (db/v2/tests/).",
+        "Net effect: a change to db/v2/** TRIGGERS the workflow (paths include db/**) and gets a green check from SQL tests that never touched the changed files — the most misleading possible shape of CI.",
+        "control-plane.yml:69 — the Next build step still exports NEXT_PUBLIC_RELAY_URL (a legacy relay env), evidencing the workflow predates the v2 plane and was never re-pointed.",
+        "CLAUDE.md ('master is PR-only… treat contract-CI green as advisory') and the repo's go-live-ready claims — the doc/code disagreement is itself the finding: the documented merge gate demonstrably does not gate the product's actual schema or runtime."
+      ],
+      "wrong": "Gate-1's central ops lesson is confirmed and worse than 'advisory': the required check is green for reasons unrelated to the change under review. Every db/v2 fn merged since the v2 plane landed was protected only by developer discipline in running the local rig; the agent runtime has NO CI at all. A silent fresh-apply breakage of db/v2 (ordering, grant, trigger regression) would merge green.",
+      "target": "The greenfield must design CI truthfulness in from day one: per-plane workflows whose triggers match what they test (db/os fresh-apply + isolation + functional suite on PG17 in CI; agent tsc+vitest; dashboard build+tests), path-filtered so a green check is evidence about the changed code — and delete or clearly quarantine the legacy dashboard/supabase tree so it can never masquerade as coverage again."
+    },
+    {
+      "id": "GAP1-6",
+      "workstream_item": "GAP-07 / ops (prior OPS-008)",
+      "title": "No backup/restore/DR contract exists anywhere for the accounting source of truth — a 7-year statutory retention duty with no proven restoration path",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "grep -i 'backup|PITR|restore|disaster|point-in-time' over deploy/ = 0 hits (re-run by verifier); over docs/ = 3 incidental hits, all UI copy (docs/design/05-surfaces.md:278 'point-in-time for aging' — a report parameter; two 'restores to the composer' interaction notes). deploy/RUNTIME.md (the env/secret manifest SoT) and deploy/CUTOVER.md contain no backup step, no PITR enablement check, no restore drill, no RPO/RTO statement.",
+        "db/v2/10-tables-core.sql:89-92 — documents.retain_until defaults to now()+7 years with legal_hold (LHDN retention), and db/v2/14-tables-ops.sql:175-177 (export_artifacts) mirrors the 7-yr duty; storage-setup.sql makes the bucket delete-less for the same reason — the schema legislates a retention obligation the ops layer never underwrites with a restoration capability.",
+        "The DB is the declared single source of truth for every number, receipt and audit trail (CLAUDE.md, PRD invariants) — loss of the belcort-shared project is loss of the product; nothing in the repo tests, documents, or even mentions recovering it.",
+        "Live Supabase backup/PITR tier state for msegmhvkmwcyxtxoszzp: UNVERIFIED (read-only audit; no live inspection possible). Even if enabled, an untested restore is an unproven control."
+      ],
+      "wrong": "The fresh audit's findings files contain zero 'backup' coverage — the entire dimension was unexamined and the repo confirms there is nothing to examine: for an audit-grade accounting OS, inability to PROVE restoration is itself a material control gap, independent of whether Supabase happens to have PITR ticked. Firms' statutory books (7-year LHDN duty) currently depend on an unexamined platform default.",
+      "target": "The rebuild's ops contract must include: PITR + scheduled backups verified as enabled (and their tier documented in RUNTIME.md), Storage-bucket backup for the sha256-bonded documents, a written RPO/RTO, and a periodically executed restore drill (restore to a scratch project, run the isolation+functional gates against it) as a standing calendar item — restoration proof as a Gate requirement, not an assumption."
+    },
+    {
+      "id": "GAP1-7",
+      "workstream_item": "GAP-07 / ops (prior OPS-007)",
+      "title": "Liveness-only /health with no dependency checks, no readiness probe, no SLOs or alerting — a single always-on machine whose restarts are silent data-loss events",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src/http/server.ts:167-171 — GET /health statically returns {ok:true, runtime:name}; it never touches Supabase, OpenAI, the session store, or doctrine state, so a machine that can serve JSON but can do nothing else reports healthy. No /readyz or startup-gating probe exists (full route inventory re-read: health, hooks, bootstrap chat, notifications stream, approve-bulk, chat/messages/sessions/reset/events/clarify/run — nothing else).",
+        "deploy/fly.toml (re-read whole file) — the health check targets /health on ONE always-on machine (auto_stop_machines off, min_machines_running 1, :34-50) precisely because run state is in-memory ('ALWAYS-ON: the runtime holds SSE streams, in-memory run state, and pending clarify prompts — auto-stop would drop them', :14-15); a deploy/restart destroys every in-flight run and parked clarify (agent/src/runtime/openai/runtime.ts:136 process-local Map) with nothing alerting on it.",
+        "grep -i 'alert|SLO|monitor|uptime|readiness|readyz' over deploy/ = no operational hits; no metrics endpoint, no error-budget, no paging/alert configuration exists anywhere in the repo.",
+        "Wake ingress is at-most-once/lossy by design (agent/src/http/wakeGate.ts:9-14, re-read: 'wakes are HINTS — at-most-once by doctrine; a dropped wake is recoverable from the notification read surfaces') — dropped wakes and failed webhook dispatches are exactly the class of silent degradation that only alerting would surface.",
+        "Live re-verification 2026-07-17: curl https://belcort-agent.fly.dev/health -> {\"ok\":true,\"runtime\":\"openai\"}; flyctl status: exactly ONE machine (080d16ef6461e8, v51, sin, started, 1/1 checks) — the single-machine posture is the real production topology."
+      ],
+      "wrong": "A go-live-claimed accounting service has no way to distinguish 'up' from 'working', and no human is notified when runs die, wakes drop, OCR fails, or the DB is unreachable — the notification surfaces that doctrine calls the recovery path for lossy wakes are themselves unmonitored. Operational blindness compounds the durability gaps (SDT-001 family) the audit already confirmed.",
+      "target": "Rebuild ops floor: /health (liveness) plus /readyz that verifies DB reachability + credential validity + doctrine loaded; minimal SLOs (run success rate, wake dispatch success, SSE availability) with alerting wired to a human channel; and deploy-time draining once durable runs exist so a restart is an orchestrated event, not silent loss."
+    },
+    {
+      "id": "GAP1-8",
+      "workstream_item": "GAP-08 / G7 (prior AR-07)",
+      "title": "OpenAI Agents SDK platform tracing is ON by default with traceIncludeSensitiveData=true: every firm's chat, OCR text, and tool args/results are exported to api.openai.com/v1/traces/ingest — no disable, no redaction, no doc mention, no owner decision",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src grep for 'tracing|Tracing|withTrace|traceInclude|OPENAI_AGENTS_DISABLE|setTracing' = ZERO hits (re-run); agent/src/runtime/openai/runtime.ts:233 calls run(agent, input, {context, stream:true, maxTurns}) with no tracing config; agent/src/main.ts:106 sets only setDefaultOpenAIKey.",
+        "Vendored @openai/agents: importing '@openai/agents' (runtime.ts:9) executes setDefaultOpenAITracingExporter() as a module-load side effect (agent/node_modules/@openai/agents/dist/index.js:44, re-read) -> exporter POSTing batches to 'https://api.openai.com/v1/traces/ingest' (agents-openai/dist/openaiTracingExporter.js:526, re-read), authenticated with the tracing key falling back to env OPENAI_API_KEY — which is required env on Fly (deploy/RUNTIME.md:32, re-read) and Deployed live (flyctl secrets list re-run 2026-07-17), so export is live and authenticated.",
+        "Defaults in the vendored runner (re-read): tracingDisabled ?? false and traceIncludeSensitiveData ?? true (agents-core/dist/run.js:109-110). With sensitive data on: function spans carry raw tool-call arguments and outputs (agents-core/dist/runner/toolExecution.js:295 span.spanData.input = toolRun.toolCall.arguments; :352 span.spanData.output = stringResult) and generation spans get full model input/output payloads.",
+        "Every ambient kill-switch is inactive in production (re-read): agents-core/dist/config.js:85-95 disables tracing only in a browser, under NODE_ENV=test, or via OPENAI_AGENTS_DISABLE_TRACING — RUNTIME.md's env manifest lists no such variable, and NODE_ENV=test means the vitest suite runs traced-OFF, so no test could ever observe the leak. deploy/RUNTIME.md and docs/architecture/backend.md never mention tracing at all.",
+        "Data in scope per run construction: buildRunInput folds chat history + user message into model input (runtime.ts:60-78); extract_document returns OCR text that re-enters the model; the DB-fn tools' args/results carry journal lines, amounts, counterparties, storage keys — all of it lands in exported spans for every interactive run and every wake run of every firm."
+      ],
+      "wrong": "The fresh Grt verification explicitly left this unassessed; it is now confirmed at pinned-code level: confidential client accounting data of every firm leaves the trust boundary into OpenAI's persistent trace store by default — beyond the inference-only exposure the owner implicitly accepted by choosing the model, and without any documented decision, per-firm consent, or redaction. That is a professional-secrecy/PDPA exposure and an undocumented sub-processor relationship for every firm on the platform.",
+      "target": "The rebuild's runtime selection (Gate-2) must make tracing an explicit owner-approved policy: default to setTracingDisabled(true)/OPENAI_AGENTS_DISABLE_TRACING=1 (or traceIncludeSensitiveData=false if span-level ops telemetry is wanted), record the decision in RUNTIME.md + the data-processing register, and add a boot-time assertion/test that fails when the tracing posture drifts from the declared policy. Unverified residue: whether the live Fly app carries OPENAI_AGENTS_DISABLE_TRACING as an unmanifested secret — RESOLVED by verifier: flyctl secrets list (2026-07-17) shows NO such secret deployed, so the exporter is armed in production; OpenAI-side trace retention terms remain external/unverified."
+    },
+    {
+      "id": "GAP2-1",
+      "workstream_item": "F1 — close concurrency (prior EDGE-003)",
+      "title": "record_year_end_close races every interactive/engine journal writer — the close's own comment admits entries can commit into the just-locked FY unswept ('a silent escape from RE') and ships anyway",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:378-382 — record_year_end_close takes pg_advisory_xact_lock('belcort_close:'||client) with an in-code admission: the lock is shared ONLY with 'run_recurring_journals / run_amortisation / record_accrual', and 'under READ COMMITTED a poster committing between this close's sweep computation and its commit would land an in-window entry NO close ever sweeps (the next close's g2/carry exclude it) — a silent escape from RE. Review fold.'",
+        "Grep pg_advisory_xact_lock across db/v2 (re-run): exactly 7 sites — 23c-fns-adjustments.sql:142/:234/:398 (recurring/accrual/amortisation), 23d-fns-tax.sql:75, 23e-fns-sst.sql:157, 25-fns-ops.sql:254 (different artifact key) and :382 (the close). ZERO in 20-fns-journal.sql, 22-fns-documents-recon.sql, 23-fns-subledger.sql, 23b-fns-fixed-assets.sql, 25b-fns-opening.sql.",
+        "db/v2/20-fns-journal.sql — finalize_coding (:128-159) and approve_entry (:166-212) take only a per-row `for update` on the entry (:146, :188); draft_entry (:83), edit_entry (:269, can re-date posting_date), reassign_entry (:364, can move an entry INTO the closing client) acquire no per-client serialization primitive of any kind.",
+        "db/v2/25-fns-ops.sql:297-322 — app.je_closed_period_guard (BEFORE INSERT/UPDATE on journal_entries) checks only COMMITTED client_fy_close rows; under READ COMMITTED (no `set transaction isolation` exists anywhere in db/v2 — grep re-run, zero) an in-flight close's registry row is invisible, so a concurrent writer passes the guard during the entire close transaction.",
+        "db/v2/25-fns-ops.sql:411-418 — the g1 unreviewed_entries_in_period scan is a single point-in-time count before the sweep; the sweep (:537+) and opening carry-forward (:658-704) read in later statements; nothing re-validates the window between sweep computation and commit.",
+        "db/v2/25-fns-ops.sql:422-434 + :670,:689 — the NEXT close's g2/carry filter `posting_date > v_carry_from` (= this close's period_end), so an entry stranded inside the closed window is permanently excluded from every future close's sweep — matching the code comment's 'the next close's g2/carry exclude it'.",
+        "db/v2/23b-fns-fixed-assets.sql:124-144 — run_depreciation posts an approved journal defaulting posting_date to period_end with NO close lock (grep confirms no advisory lock in the file); write_off_ar_invoice (23-fns-subledger.sql) posts journals lock-free too.",
+        "db/v2/25-fns-ops.sql:783-830 — reverse_year_end_close takes no advisory lock either (only FOR UPDATE on the client_fy_close row :792-794), so even the lock-taking computes (23d:75 / 23e:157) are unprotected against a concurrent close REVERSAL mid-computation.",
+        "db/v2/tests — no concurrency test exists (single-session BEGIN/ROLLBACK rig)."
+      ],
+      "wrong": "An entry finalized (drafting->auto_draft), approved, edited/re-dated into the window, reassigned in, or posted by run_depreciation/write_off_ar_invoice while record_year_end_close is executing can commit into the just-locked FY after the close's sweep computation: its nominal balance never sweeps to retained earnings, its real-side legs are missing from the opening carry-forward, the closed-period guard then locks the row against any correcting UPDATE, and no future close (g2 excludes it) or read surface repairs it — permanent double-sided books corruption fixable only by reversing the entire close. The prior audit's EDGE-003 CRITICAL stands, now with the sharper fact that the code documents the race as a known 'Review fold' and was shipped without the fix.",
+      "target": "The rebuild must make the per-client close serialization primitive universal: every journal-mutating function (interactive writers, engines, reversal machinery) acquires the same per-client lock (or a books-state row lock) the close family holds — the reverted WP-015 'per-family close-exclusive run claim' is the ratified design shape — plus a post-sweep re-validation of the window inside the close transaction before commit."
+    },
+    {
+      "id": "GAP2-2",
+      "workstream_item": "C — owner KB signals (Circle 1 materials registry)",
+      "title": "The owner's per-client KB materials registry (Circle 1: register/hash/retrieve/scan accounting manuals, vendor contracts, bookkeeper notes) has no v2 equivalent — no table, no skill, no document kind",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "verifier_note": "Corroborating doc-vs-code contradiction found during verification: belcort/client-onboarding/SKILL.md:219 instructs ingest_document with kind='management_account', but documents.kind CHECK (db/v2/10-tables-core.sql:79) allows only ('transaction_source','sample_invoice') — even the skill layer already tries to file a non-transaction knowledge artefact and the schema has no legal home for it.",
+      "evidence": [
+        "scratchpad/signals/per-client-kb-mechanism.md §1/§6 (verified present) — Circle 1 spec: client_kb_materials table (sha256-hashed, idempotent on (client_id, sha256), material_type classification), kb-material-add skill with a scan step emitting new_rule proposals; scratchpad/signals/kb-iteration-system.md Path E — 'kb-material-add Step 4 (proactive scan)'.",
+        "db/v2 — grep 'material' (case-insensitive) across all SQL files (re-run): zero tables; the only hits are 'REVIEW MATERIAL' comments (19d/19e/23d/23e) and two COA seed rows ('RAW MATERIAL', 24-fns-onboard.sql:195-196). db/v2/12-tables-kb.sql defines exactly four tables (re-verified): client_kb_rules (:19), client_kb_rules_history (:54), kb_proposals (:72), client_kb_audit (:96).",
+        "db/v2/10-tables-core.sql:79 — documents.kind CHECK is closed to ('transaction_source','sample_invoice'): an accounting manual, vendor contract, or bookkeeper-notes file has no legal home anywhere in the document pipeline.",
+        "belcort/ skill inventory (re-listed): bank-recon, client-onboarding, coa-coding, doc-ingest, export, firm-bootstrap, kb-evolve, period-entries, review-queue, rule-edit, year-end-close — no kb-material-add; grep 'material|curator|graphify' across belcort/ finds no counterpart.",
+        "db/v2/17-tables-memory.sql — client_memory_notes is the only knowledge-artefact store besides rules: free-text advisory notes with an optional source_doc_sha256 (17:25), no file registry, no typed retrieval — not a materials registry."
+      ],
+      "wrong": "An explicit owner Gate-1 mechanism (Circle 1) is wholly absent from v2: there is nowhere to durably register a client's accounting manual, vendor contracts, or a predecessor bookkeeper's notes, no retrieval surface for them at coding time, and no scan-into-rule-proposals path. Any Gate-1 recommendation of 'merge C1 into the KB layer' understates what the KB layer must absorb — the prior C-workstream findings (C-11..C-14) mapped tiers/proposals but never inventoried this capability because the verifier could not access the signal docs.",
+      "target": "The rebuild's knowledge layer needs a first-class client materials registry: typed artefact classes, sha256 + provenance, RLS-scoped storage + retrieval into the agent's context, and a human-gated scan-to-rule-proposal lane."
+    },
+    {
+      "id": "GAP2-3",
+      "workstream_item": "C — owner KB signals (Path B bulk seed)",
+      "title": "Bulk rule seeding from a prior-period GL import (owner's Path B, 'hundreds of rules in seconds' — the fastest cold-start cure) has no v2 counterpart; onboarding seeds only hand-ticked mappings and the carry-down deliberately carries balances, not knowledge",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "scratchpad/signals/kb-iteration-system.md §2 Path B (verified present, :55-57) — kb_compile.add_seed_rule(evidence_count=N), ladder-derived status (candidate 1-2 / confirmed >=3 / locked >=10), '100s of rules in seconds (one per unique supplier+acct)'; per-client-kb-mechanism.md:117 mirrors it.",
+        "db/v2/24-fns-onboard.sql:367-424 (re-read whole fn) — seed_client_knowledge is the only batch seeding fn: it accepts a rules[] JSON array and delegates to create_kb_rule (confirmed @1.000), but has no GL-parse input, no evidence-count parameter, and no status ladder.",
+        "belcort/client-onboarding/SKILL.md:344-366 (re-read) — Phase D-seed explicitly restricts eligibility: 'Only mappings the human explicitly ticks during onboarding are seeded confirmed'; everything merely inferred goes to the kb_proposals queue. No interview question requests a prior GL export.",
+        "belcort/client-onboarding/SKILL.md:121, 201-228 — the Q12 carry-down ingests prior management accounts / FS / aged listings but produces ONLY the opening position via seed_opening_carry_forward; no vendor->account rule derivation happens from the same prior-books documents — confirming and extending fresh B-14's 'no structural-knowledge carry'.",
+        "db/v2/21-fns-kb.sql:199-207 (re-read) — record_kb_evidence tallies evidence one observation at a time and only auto-files a proposal at >=3; there is no N-evidence or batch-tally entry point that a GL import could drive."
+      ],
+      "wrong": "The owner's fastest cold-start cure does not exist in v2: a newly onboarded client starts with only the mappings a human hand-ticks, so the smartening curve begins at near-zero auto-draft even when 12 months of coded prior GL is sitting in the very documents the carry-down already ingests. This materially shapes the rebuild's onboarding design and was examined by neither audit.",
+      "target": "Rebuild onboarding must include a prior-GL ingestion lane: parse the prior ledger, tally per-(counterparty, account) evidence, and emit laddered rule seeds/proposals under the existing human gate — reusing the carry-down's document intake so one upload seeds both opening balances AND coding knowledge."
+    },
+    {
+      "id": "GAP2-4",
+      "workstream_item": "C — owner KB signals (Tier-2 curator + derived views)",
+      "title": "The owner's Tier-2 proactive layer — weekly curator regenerating derived client views (coa-snapshot / vendor-roster / recurring-patterns) and mining un-noticed patterns — has no v2 equivalent; v2 learning is purely event-reactive",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "scratchpad/signals/per-client-kb-mechanism.md:31-33 (weekly regen of coa-snapshot.md / vendor-roster.md / recurring-patterns.md by kb-curator), :137-141 + :223-263 (weekly kb-curator Mon 06:00: detect_new_rules -> proposals); kb-iteration-system.md §3 (the tier MINES data for patterns the user didn't notice) — all verified present.",
+        "agent/src — no scheduler exists: grep 'cron|weekly|schedule|setInterval|curator|vendor-roster|recurring-patterns|coa-snapshot|graphify' (re-run) finds only the SSE keepalive setInterval (http/server.ts:155); no periodic job runner of any kind.",
+        "Grep the same tokens across belcort/: zero hits — neither the detectors, the derived views, nor the graph builder were ported.",
+        "v2's closest analogues are all event-driven reactions to single human verbs: record_kb_evidence auto-files an open proposal at >=3 tallies (db/v2/21-fns-kb.sql:199-207) and the learn-wakes fire per human triage/workbench/bank-match action (db/v2/25-fns-ops.sql:1526-1548, re-read); nothing scans accumulated coded history for rule-shaped or account-shaped patterns, and nothing regenerates a client-context digest for the agent's coding context."
+      ],
+      "wrong": "The proactive half of the owner's two-tier learning model is missing: patterns the bookkeeper never explicitly acts on are never mined into proposals, and the agent has no regenerated per-client context views (vendor roster, recurring rhythms, COA snapshot) to code against — the C1 keep/merge/retire ruling at Gate 1 must weigh this whole tier, not just the rules table.",
+      "target": "The rebuild needs a scheduled (or wake-driven batch) curator lane: pattern detectors over coded history emitting human-gated proposals, plus regenerated per-client context packs that feed the agent's fresh-context assembly."
+    },
+    {
+      "id": "GAP2-5",
+      "workstream_item": "F/H — financial statements (prior ACCT-014)",
+      "title": "The financial-statement pack is SoCI + SoFP only yet stamps every artifact 'Prepared in accordance with MPERS/MFRS' — no SOCE, no cash-flow statement, no notes, anywhere in the repo",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/28-fns-reads.sql:745-772 (re-read) — client_financial_statements returns exactly two statements: 'soci' (:745-758) and 'sofp' (:759-772); nothing else in the payload.",
+        "db/v2/28-fns-reads.sql:775-780 — the same payload's basis[] opens with a framework compliance declaration: 'Prepared in accordance with the Malaysian Private Entities Reporting Standard (MPERS), under the historical cost convention, on a going-concern basis.' (MFRS variant :778), sourced from clients.accounting_framework.",
+        "Repo-wide grep 'changes in equity|SOCE|cash.?flow' (case-insensitive, re-run) : ZERO hits — no statement of changes in equity, no cash-flow statement, no notes/disclosure engine in db/, agent/, dashboard/, belcort/, or docs/. MPERS §3.17 / MFRS 101 require a SOCE (or the combined statement), a statement of cash flows, and notes for a compliant set.",
+        "agent/src/tools/exportTool.ts:53-62 (re-read) — the export scope enum is closed: trial_balance | journals | documents | full | management_accounts | general_ledger | aging | sst_return; 'full' composes management accounts + TB + AR/AP aging into one PDF (belcort/export/SKILL.md:75,:82) — there is no statutory-FS scope to grow into.",
+        "belcort/year-end-close/SKILL.md — the doctrine consistently names the deliverable 'management accounts', so the skill layer is honest about the product being management accounts while the DB artifact itself claims a statutory preparation basis — a claim-vs-content disagreement inside one payload."
+      ],
+      "wrong": "A Malaysian firm's core year-end deliverable — the full statutory FS pack (SoFP, SoCI, SOCE, cash-flow statement, notes, directors'-report support) — cannot be produced, and the two statements that DO exist carry a printed MPERS/MFRS compliance declaration they don't satisfy, which a client or auditor could reasonably rely on. Neither fresh workstream measured the pack against MPERS §3/MFRS 101.",
+      "target": "Gate-1/2 owner decision: either (a) relabel — keep the pack as management accounts and strip/soften the framework basis line, or (b) build the statutory reporting engine (SOCE, SCF via the indirect method over the existing GL segmentation, a notes/disclosure framework, comparative rules). The choice materially sizes the rebuild's reporting engine and must be made deliberately, not discovered late."
+    },
+    {
+      "id": "GAP2-6",
+      "workstream_item": "F — capability areas (payroll)",
+      "title": "Payroll accounting is scaffolding-only: COA seeds + a payroll_summary OCR schema exist, but no accrual-journal machinery, no remittance tracking, and the PRD's 'calendars the deadlines' claim has no implementation at all",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "What EXISTS — db/v2/24-fns-onboard.sql:161-163 seeds statutory payables 420-000 EPF-STAFF / 430-000 SOCSO-STAFF / EIS-STAFF (CL) and :216-218 employer expenses 908-000 EPF / 909-000 SOCSO / EIS (EP); employee PCB referenced at :158. db/v2/10-tables-core.sql:80 — doc_type CHECK includes 'payroll_summary'; belcort/doc-ingest/references/extracted-fields-schemas.md defines a typed per-employee extraction; belcort/client-onboarding/SKILL.md:116 captures the client's EPF/SOCSO/EIS/HRDF registration numbers; coa-coding/SKILL.md:223-225 carries a parenthetical listing the statutory payroll COA accounts.",
+        "What is MISSING — belcort/coa-coding/SKILL.md contains zero references to the payroll_summary (or claim_form) doc types (grep re-run: no matches): there is no documented pattern for turning an extracted payroll summary into the standard multi-leg monthly accrual (Dr salaries + employer contributions / Cr EPF+SOCSO+EIS+PCB payables + net wages), and no other skill covers it.",
+        "db/v2 — grep 'EPF|SOCSO|PCB|payroll' (re-run): the ONLY hits are the doc_type CHECK and the COA seed rows; no payroll function, no payroll register/subledger, no remittance state, no test coverage.",
+        "PRD.md:119 (re-read verbatim) claims 'BELCORT codes PCB/EPF/SOCSO postings + calendars the deadlines — it does not run payroll (ADR-044)': the coding half is generic-journal-only with no skill guidance, and the calendaring half has NO implementation — no payroll-deadline logic anywhere in belcort/. Doc-vs-code disagreement per the audit brief's rule 2. PRD.md:122 confirms statutory payroll (EPF/SOCSO/EIS) as durable domain context."
+      ],
+      "wrong": "Nearly every Malaysian SME client runs payroll; monthly books cannot tie out to management accounts without the payroll accrual journals, and statutory payables (EPF/SOCSO/EIS by the 15th, PCB) have no remittance tracking or deadline surface despite the PRD claiming exactly that capability. Neither audit examined this area; the old build's real position is 'COA seeds + OCR extraction, nothing downstream'.",
+      "target": "The rebuild PRD must scope payroll accounting deliberately: a payroll-accrual journal class driven by the payroll_summary extraction, statutory-payable tracking with remittance matching, and a compliance calendar — or explicitly descope and correct the PRD claim."
+    },
+    {
+      "id": "GAP2-7",
+      "workstream_item": "F — capability areas (inventory/stock)",
+      "title": "Inventory is marker-deep only: stock COA accounts carry OS/CS/BS special markers that NO function consumes — no closing-stock adjustment, no COGS derivation, and the year-end close sweeps stock P&L accounts with zero completeness check",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/24-fns-onboard.sql:142,193-203 (re-read) — the seed COA carries a full periodic-stock account set: 330-000 STOCK (CA, marker 'BS'), 600-000 STOCKS AT THE BEGINNING OF YEAR ('CO','OS'), 605-100 OPENING STOCK - RAW MATERIAL ('CO','OS'), 605-900 CLOSING STOCK ('CO','CS'), 620-000 STOCKS AT THE END OF THE YEAR ('CO','CS').",
+        "No consumer: grep 'OS'|'CS'|'BS' across db/v2 (re-run) matches ONLY the seed rows; the engines resolve DC/CC (23-fns-subledger.sql:31-43), AD (23b), OBE (25b), DRAWINGS (25-fns-ops.sql:539-596, re-read) — no function anywhere resolves 'OS', 'CS', or 'BS'; the markers are dead metadata.",
+        "No skill covers the periodic closing-stock entry: grep 'closing stock|opening stock|inventory|COGS' across belcort/ matches only the presentation-mapping layout line; belcort/year-end-close/SKILL.md Step 0 (re-read :37-82) has no stock-count or closing-stock item in its close checklist.",
+        "PRD.md:118 (re-read verbatim) scopes 'Perpetual inventory -> Periodic-basis stock only (ADR-044)' — the periodic model REQUIRES a closing-stock journal each period to state COGS; nothing prompts, posts, or validates it.",
+        "db/v2/25-fns-ops.sql:365,:544-599 — record_year_end_close classifies all CO accounts as nominal and sweeps them to RE with no check that a closing-stock entry was posted for the FY, so a trading client's close silently locks in COGS = purchases and a stale/zero SoFP stock figure — and after the closed-period guard, the omission cannot be corrected in-period."
+      ],
+      "wrong": "For the many stock-carrying SME clients, gross profit, COGS, and the SoFP stock line are silently wrong unless a human remembers to hand-draft the closing-stock adjustment with zero system support — the exact 'tie out to management accounts' failure the owner flagged. Neither audit examined inventory; the old build's real position is 'seeded accounts + dead markers'.",
+      "target": "The rebuild must implement the scoped periodic model end-to-end: a stock-count capture step, a DB-owned closing-stock adjustment function (marker-resolved OS/CS/BS, next-period auto-reversal like record_accrual), and a close-time completeness guard or surfaced warning when a stock-carrying client closes without a stock adjustment in the window."
+    },
+    {
+      "id": "GAP3-1",
+      "workstream_item": "GAP-13a (F2 — TAX-MY-004)",
+      "title": "SST taxable-period facts are not modeled anywhere: no registration-effective date, no assigned period cycle, no DG-variation record — and the dashboard hard-codes calendar-aligned bi-monthly periods, so an odd-cycle or DG-varied registrant cannot even draft the right period",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/10-tables-core.sql:14-37 — clients carries only sst_no, sst_regime, default_sst_treatment; no sst registration-effective date, no assigned taxable-period cycle, no DG-variation, no s.11(1A) accrual-basis-approval flag. Repo-wide grep for taxable_period|sst_registration = 0 hits.",
+        "db/v2/23e-fns-sst.sql:30-34 (header, re-read): 'period bounds are CALLER data; the only hard guards are shape + completeness'; :150-154 guards are only actor/shape/period-ended.",
+        "db/v2/23e-fns-sst.sql:712-713 (re-read) — the fn pushes the problem to the human: due_date 'DERIVED… verify it against the MySST-assigned taxable period'; 'the FIRST taxable period after SST registration is RMCD-assigned and often irregular — confirm the assigned period bounds'.",
+        "dashboard/lib/sstReturn.ts:22-40 (re-read) — biMonthlyPeriods generates ONLY the six calendar-aligned periods (m1 = 1,3,5,7,9,11); dashboard/components/tax/SstReturn.tsx:81-86,203-207 (re-verified) — the taxable-period selector offers exactly those and nothing else.",
+        "agent/src grep compute_sst_return (re-run): zero hits — the agent has no compute tool for the return; the dashboard is the only compute surface.",
+        "db/v2/tests/sst_return_test.sql:263-266 (re-read) — SP5 proves the FN accepts a DG-varied period (due = end+30, s.26(2)) — but no product surface can supply one."
+      ],
+      "wrong": "The DB deliberately treats period bounds as caller data, yet no caller has the facts: the client's RMCD-assigned taxable-period cycle, registration-effective date, and DG variations are stored nowhere, and the only compute surface offers a fixed Jan-anchored calendar cycle. A registrant whose assigned cycle starts on an even month, a DG-varied client, or a first-return client will draft plausible-looking but wrong-period returns — the fn's overlap-supersede and honesty notes are the only backstops, and the wrong-bounds draft raises no error. TAX-MY-004 is confirmed still open, and the dashboard surface actively narrows below what the fn supports.",
+      "target": "Model SST registration facts as first-class data: registration effective date, regime effective-dating, the RMCD-assigned taxable-period cycle (anchor month + length), DG variations, and any s.11(1A) accrual-basis approval — then DERIVE period candidates (including the irregular first period) from those facts and validate caller-supplied bounds against them (fail loud on a non-assigned period instead of assuming calendar alignment). The rebuild's tax schema should treat 'assigned period' like tax_rates: effective-dated, human-confirmed master data."
+    },
+    {
+      "id": "GAP3-2",
+      "workstream_item": "GAP-13b (F2 — TAX-MY-003)",
+      "title": "Coding still defaults an unconfigured service-tax registrant to service-8 (8%), the retained-6% classification doctrine is frozen at the 2024-03-01 list, and the tax_rates schedule carries no post-2024 effective rows despite claiming verification on 2026-06-14 — MSIC is captured but never drives the 6-vs-8 choice",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/coa-coding/SKILL.md:201-204 (re-read) — 'read clients.default_sst_treatment. If NULL, INFER from sst_regime: service_tax -> service-8, sales_tax -> sales-10'; :209-210 the sector doctrine is only 'service-6 retained categories — F&B, telco, parking, logistics — stay 6%'.",
+        "db/v2/18-tables-reference.sql:41-49 (re-read) — the entire effective-dated schedule: service-6@6 (2018), service-8@6->8 (2024-03-01), sales-5/10 (2018), exempt/zero/none; NO row dated after 2024-03-01; :23 claims 'LAST VERIFIED 2026-06-14 vs RMCD MySST'. The treatment vocabulary has no way to express the 2025-07-01 service-tax expansion sectors except by mislabeling them into the two legacy buckets.",
+        "belcort/client-onboarding/SKILL.md:115 (Q6, re-read) — default_sst_treatment capture is OPTIONAL, frames service-6 as '(essentials)', and states 'if skipped it stays null and the agent infers service-8/sales-10 and routes the computed leg to review'.",
+        "db/v2/tests/sst_default_treatment_test.sql — pins only column mechanics; zero assertions about sector classification or 6-vs-8 selection.",
+        "clients.msic_code exists (db/v2/10-tables-core.sql:22; onboarding Q5 validates it) but the coa-coding treatment-resolution step (:201-204) never reads it — sector classification is not driven by any structured datum.",
+        "Mitigations verified: computed legs ALWAYS route to needs_review with a human-confirm reason (coa-coding/SKILL.md:219-220), and a document-stated SST amount overrides computation (:184-193) — so the wrong rate cannot auto-post unsupervised, but the DRAFT a busy reviewer approves defaults to 8%."
+      ],
+      "wrong": "TAX-MY-003 is confirmed still open: a 6%-sector service registrant whose default_sst_treatment was never set gets an 8% output-tax draft by doctrine default, and neither the rate schedule nor the classification doctrine has been updated past 2024-03-01 even though the file claims a 2026-06-14 verification — a doc-claim-vs-content drift. The only guard is the human reviewer rubber-stamping a queue. (Exact current RMCD sector/rate facts for the 2025-07-01 expansion were not re-verified against official sources in this pass — listed under unverified.)",
+      "target": "The rebuild must (1) re-verify the full SST rate/sector schedule against official RMCD sources and re-seed tax_rates with all effective-dated changes including the 2025-07-01 expansion groups; (2) widen the treatment vocabulary so 6% and 8% sectors are distinct, dated treatments rather than two frozen ids; (3) make sector classification a structured decision (MSIC/service-group driven, human-confirmed at onboarding, stored per client or per revenue stream) instead of an optional free default with a hardcoded 8% fallback; and (4) pin the classification doctrine with tests."
+    },
+    {
+      "id": "GAP3-3",
+      "workstream_item": "GAP-13c (F2 — TAX-MY-001 residual, confirms H-13)",
+      "title": "The dual-registrant 'two separate declarations' remediation does not survive export: PDF/XLSX render one combined payable and silently drop the form_map (while counting its rows in row_count), CSV exports a form_map whose fields 12/13/14 are themselves combined across both taxes, and the worksheet's per-tax payables are never exported at all",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "Fn-side remediation is real (re-read): db/v2/23e-fns-sst.sql:16-20 (header: ONE form, sales and service DECLARED SEPARATELY — a 'both' registrant files two declarations), :660-661 ('both' -> separate-declarations assumption), :751-775 worksheet.sales and worksheet.service each carry their own output/deduction_applied/excess/payable_cents. Test pin is note-level only: db/v2/tests/sst_return_test.sql:259-260 (SP5 asserts the 'SEPARATELY' assumption text exists — nothing about rendering).",
+        "BUT the form_map itself is COMBINED (re-read): db/v2/23e-fns-sst.sql:788-798 — '12_total_output_tax_cents' = v_out (sales+service, :734), '13_deductions_applied_cents' = v_sal_applied + v_svc_applied, '14_payable_cents' = v_payable (both taxes summed, :736). A 'both' filer cannot lift two SST-02 declarations from form_map: fields 13/14 per tax are unrecoverable from it.",
+        "PDF/XLSX drop the form map entirely (re-read): agent/src/tools/reportModel.ts:299-331 — sstReturnDoc renders only 'Return summary' (combined Output tax / Deduction / 'Tax payable' single total, :304-311) + 'By tax rate'; formMap is read (:323-324) but never pushed as a section (:325-326), while rowCount includes formCount (:330) — so the write-once export receipt's row_count overstates the rows actually rendered.",
+        "CSV keeps form_map rows (agent/src/tools/exportFormat.ts:289-295, re-read) but inherits the combined 12/13/14, and neither CSV nor PDF/XLSX exports worksheet.sales/service per-tax payables or the assumptions/confirmations honesty layer (exportFormat.ts:273-296 emits only summary+by_rate+form_map).",
+        "This artifact is the filing record: exportTool.ts:60 files sst_return under class 'filings' (subfolder sst-return) into the 7-yr write-once export_artifacts index."
+      ],
+      "wrong": "The prior TAX-MY-001 defect (combined declaration for a dual registrant) is fixed in the DB worksheet but regresses at the artifact boundary: the exported SST-02 filing file — the thing a human actually files from, retained 7 years as the filing record — presents ONE combined return. In PDF/XLSX the per-tax and per-field structure is absent entirely; in CSV fields 12/13/14 are cross-tax sums. A 'both'-regime filer working from the artifact would declare combined figures on two separate statutory declarations, and the rendered PDF/XLSX additionally misstates its own row_count in the receipt.",
+      "target": "The rebuild's SST-02 export must render TWO complete declarations for a 'both' registrant (per-tax fields 11/12/13/14 from per-tax figures the fn must expose in form_map), carry the assumptions/confirmations honesty layer into the filing artifact, and make receipt row_count equal rendered rows. Pin with a golden dual-registrant export test."
+    },
+    {
+      "id": "GAP3-4",
+      "workstream_item": "GAP-14 (E — DSE-009)",
+      "title": "Statutory retention clock is anchored at row-creation (now()+7 years), not at the financial-period/YA end + filing date the ITA s.82/82A and CA2016 s.245 regime anchors on — and it is never recomputed by anything",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/10-tables-core.sql:89-92 (re-read) — documents.retain_until timestamptz not null default (now() + interval '7 years'), comment: 'advisory floor + a legal-hold flag; delete is never granted (reverse-not-delete), a hold-gated purge job is future work'.",
+        "db/v2/14-tables-ops.sql:175-177 (re-read) — export_artifacts.retain_until identical creation-anchored default.",
+        "Repo-wide grep retain_until (re-run) = exactly 3 sites: the two column defaults + belcort/AGENTS.md:94 (§20 Storage CREED presents 'the 7-yr retain_until/legal_hold' as the operating retention control). No fn, trigger, test, or read surface ever recomputes, validates, or consumes retain_until.",
+        "Failure window: a document for FY-end 31-Dec-2026 transactions uploaded 15-Jan-2026 gets retain_until 15-Jan-2033, while the statutory window (7 years from the period/YA end, later where filing extends it) runs to ~31-Dec-2033 — the advisory clock expires up to ~12 months (or more) inside the statutory window for every document uploaded before its period end. documents.financial_date exists (10-tables-core.sql:86) but is not used for the clock.",
+        "Current mitigation verified: no purge path exists — table DELETE revoked from authenticated, and storage-setup.sql defines no DELETE (or UPDATE) policy (:43-59, re-read) — so the defect is latent until the documented 'hold-gated purge job' is built trusting this column."
+      ],
+      "wrong": "DSE-009 is confirmed unremediated: retain_until is the only machine-readable retention clock in the system, doctrine (AGENTS.md §20) advertises it as the retention control, and it systematically under-states the statutory window because it starts at upload instead of at the financial-period/YA end + filing anchor. The moment the promised purge job (or any operator cleanup trusting the column) arrives, records still inside the statutory window become deletable — a compliance-grade defect for an accounting system of record. (Exact statutory anchor language of ITA s.82/82A / CA2016 s.245 taken from the prior ruling; not re-verified against gazette text — see unverified.)",
+      "target": "Anchor retention structurally in the rebuild: derive retain_until from the record's financial period (FY/YA end of the transactions it evidences, extended by filing date where applicable), recompute it when the document's financial_date/period attribution changes, floor it — never shorten it — and make any future purge job read the derived statutory clock plus legal_hold, with per-record disposal receipts."
+    },
+    {
+      "id": "GAP3-5",
+      "workstream_item": "GAP-14 (E — DSE-009, legal-hold half)",
+      "title": "legal_hold is a dead control: no audited place/release/extend function exists, direct UPDATE is revoked from the request plane, so no firm user or agent can actually place a legal hold through any governed path — and there is no disposal workflow it would gate",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "Repo-wide grep legal_hold (re-run) = 3 hits total: the two column definitions (db/v2/10-tables-core.sql:92, db/v2/14-tables-ops.sql:177, both boolean not null default false) and belcort/AGENTS.md:94 which cites it as part of the operating retention creed.",
+        "No SECURITY DEFINER fn writes it: no db/v2 module contains an UPDATE touching legal_hold (grep), and the agent tool registry / dashboard have no legal-hold surface.",
+        "Direct writes are structurally impossible from the request plane: insert/update/delete on documents / export_artifacts are revoked from authenticated/anon — only service_role/migration could flip the flag, outside any audit trail.",
+        "No lifecycle semantics exist anywhere: no hold-reason, no placed-by/released-by audit, no extend/expiry, no disposal process the flag would gate (10-tables-core.sql:89-90 admits 'a hold-gated purge job is future work')."
+      ],
+      "wrong": "The system's own doctrine presents legal_hold as an existing safeguard, but a firm receiving an LHDN audit notice, RMCD query, or litigation hold today has NO governed way to mark affected records — the flag can only be set by an operator with service_role, unaudited. Severity is medium only because no purge exists yet for the hold to gate (the reverse-not-delete grants are the real protection today); it becomes load-bearing the day any disposal process lands.",
+      "target": "The rebuild must ship legal hold as a real workflow: an audited place/release/extend function pair (admin+ floor, reason required, append-only hold audit), hold scope by client/period/matter not just per-row booleans, and a disposal process that is structurally blocked by both the derived statutory clock (GAP3-4) and any live hold."
+    },
+    {
+      "id": "GAP3-6",
+      "workstream_item": "GAP-15 (cross — VP-02)",
+      "title": "No falsifiable AI-quality acceptance harness exists anywhere: attribution precision/abstention, coding accuracy by document class, must-ask recall, and auto-post precision are all unmeasurable; the 0.95 thresholds gate on numbers that are self-reported or administratively pinned, and the docs declare go-live-ready with the eval explicitly waived",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "docs/architecture/backend.md:104 (re-read verbatim) — 'The system is go-live-ready; a formal accuracy eval is a future quality follow-up (the OpenAI SDK was chosen), not a remaining gate.' — the eval is not deferred-and-blocking, it is declared a non-gate.",
+        "docs/reference/confidence-ladder.md:17-30 (inputs) and :129-137 (owner-tunable constants: 0.95 client match / auto-post, RM10k/RM50k bands, >=3 evidence, >=3 decay) — re-read; no calibration evidence cited anywhere. Gate 0 reads documents.client_match_conf (db/v2/10-tables-core.sql:83, numeric(4,3)) which is agent-self-reported at ingest — no ground-truth corpus measures whether nominal 0.95 ~ actual 95% precision.",
+        "The auto-lane 'confidence' is assigned, not measured: db/v2/21-fns-kb.sql:250 and :453 pin confidence = greatest(confidence, 0.95) at promote/confirm (re-read) — every confirmed rule satisfies the >=0.95 auto rung BY CONSTRUCTION; confidence-ladder.md:95-97 admits the coupling ('the auto rung's threshold is satisfied by any confirmed rule'), so the threshold cannot fail and measures nothing.",
+        "No eval assets exist: agent/test/ holds 27 unit test files (re-globbed), all mechanism-level (auth, cors, sse, wakes, buildTools, exportFormat…); no fixtures corpus; repo *eval* glob matches nothing product-level. db/v2/tests pin DB determinism, not model quality.",
+        "Owner signal: scratchpad/signals/kb-iteration-system.md projects the smartening curve ('~85% auto-draft steady state', '0% -> ~70% auto-draft on day 1') — with no measurement apparatus anywhere in the product to observe those rates, let alone gate on them."
+      ],
+      "wrong": "VP-02 is confirmed still open: every autonomy-threshold decision (0.95/0.97, must-ask bands, auto-lane admission) is uncalibrated guesswork, the one quantity the DB checks against 0.95 is pinned to pass, and the business case (85% auto-draft) is unfalsifiable. Without a scorecard the rebuild cannot define Gate-5 pass/fail for the AI layer, cannot detect model/doctrine regressions across model swaps (AGENT_MODEL is an env override), and cannot honestly tune autonomy per the supervised-autonomy law.",
+      "target": "Build the eval harness as a Phase-0/Gate-5 deliverable: a labeled golden corpus per document class (Malaysian invoices, receipts, statements, multilingual/handwritten), measured metrics — client-attribution precision AND abstention rate, coding accuracy by class, must-ask/escalation recall, auto-post precision — run per model/doctrine change, with published pass thresholds that the 0.95 constants must be calibrated against; store scorecards as governed artifacts so autonomy widening is evidence-gated."
+    },
+    {
+      "id": "GAP3-7",
+      "workstream_item": "GAP-16 (cross — VP-07)",
+      "title": "No maker-checker / segregation-of-duties model exists at any layer: the same bookkeeper who drafts or edits an entry approves it, 'high-stakes' needs_decision has the same one-person bookkeeper floor as routine review, the drafter's identity is not even modeled, and the auto-lane's compensating sweep sign-off can be executed by a viewer — or by the agent on its own postings",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:166-212 (re-read) — approve_entry gates ONLY assert_can_review() (bookkeeper+) + audit_actor (:184-185); the status gate (:190-191) accepts auto_draft/needs_review/needs_decision identically — the high-stakes tier requires no higher role and no second person; nothing compares the approver to any prior actor in journal_entry_history.",
+        "Same-person edit->approve is unguarded: edit_entry (20-fns-journal.sql:269+) moves approved->needs_review under the same bookkeeper floor; the same caller can immediately approve their own edit — no drafter!=approver or editor!=approver check exists anywhere in db/v2 (grep).",
+        "Maker identity is structurally absent: journal_entries has no author/drafted_by column (10-tables-core.sql:112-144, re-read), and the 'drafted' history row hardcodes actor 'agent' (20-fns-journal.sql:156-157) regardless of who drove the draft — the schema cannot even EXPRESS maker!=checker.",
+        "The concept is absent from product law: grep maker|four-eyes|segregation|dual approv|partner sign|self-approv across every .md in the repo (re-run) = 0 hits; PRD.md:31-36 (re-read) defines role FLOORS only (je.approve at bookkeeper) with no separation duty; no table maps staff to clients (no portfolio/engagement-ownership model).",
+        "The compensating control for unsupervised posting is self-satisfiable: acknowledge_auto_draft_sweep (db/v2/25-fns-ops.sql:1270-1292, re-read) has NO role floor and NO audit_actor constraint — p_actor is free text, blank coalesces to 'agent' (:1288), granted to all authenticated (:1292) — so a viewer can sign off the firm's auto-draft oversight sweep, and the fn is an interactive agent tool, meaning the same principal that auto-posted the entries can acknowledge its own sweep.",
+        "Amplifier: bulk approve lets one actor approve batches, and its restart-resume runs on WHOEVER next attaches while auditing the original actor string (agent/src/jobs/bulkApproveRunner.ts:180-193, re-read: resumeOpen launches with job.actor under the attaching caller's JWT) — attribution and authorization can name different people."
+      ],
+      "wrong": "VP-07 confirmed: fresh RBAC findings cover role floors only; there is no approval-control separation anywhere — actor attribution without duty separation. For a professional firm under MIA by-laws/ISQM expectations, one bookkeeper can draft, edit, approve, bulk-approve, and (via the unfloored sweep) sign off oversight of AI postings entirely alone; the agent can structurally satisfy its own compensating control. The owner had already ratified 'adaptive maker-checker' in the reverted decision set (per the work order; the reverted WP-013 kernel is prior art — tag not read per brief), so Gate-1 must record this as an evidenced absence, not an oversight.",
+      "target": "The rebuild must model duty separation as DB-owned policy: record the maker (drafter/editor) structurally on the entry, enforce drafter!=approver (and editor!=approver) in the approve function per firm policy, add a partner/admin sign-off tier for material and high-stakes classes (needs_decision must be distinguishable from needs_review in WHO may clear it), give the oversight sweep a real role floor + audit_actor and forbid 'agent' as its sign-off identity, and add client/portfolio assignment so coverage and review responsibility are expressible."
+    },
+    {
+      "id": "GAP4-1",
+      "workstream_item": "GAP-17",
+      "title": "No mutation-idempotency protocol: insert-style audited fns (draft_entry, record_accrual) take no idempotency key — a retry after a lost HTTP response duplicates books rows, including APPROVED accrual pairs",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:83-120 (re-read) — draft_entry(p jsonb): unconditional INSERT into journal_entries + journal_lines; no idempotency-key parameter and no natural unique constraint that would block a duplicate draft for the same document/description/date.",
+        "db/v2/23c-fns-adjustments.sql:222-279 (re-read) — record_accrual: inserts the accrual entry with status 'approved' directly (:256-258) plus an auto-reversal pair (:266-272); no idempotency key — a duplicated call posts a SECOND approved accrual pair with no review gate.",
+        "agent/src/runtime/openai/tools.ts:83 (re-read) — the tool layer's error text coaches the model: 'If this failed before a DB result, no row was written; retry the same tool' — true only for the JSON-parse pre-check, but it normalizes retry behavior for the case where PostgREST committed and only the response was lost.",
+        "agent/src/http/server.ts:340-371 + agent/src/tools/buildTools.ts:92-107 (re-read) — neither the HTTP chat path nor the tool execute path layers any request-id/dedup on top of the fn call; nothing in the stack turns retry-after-unknown-outcome into a safe no-op for these fns."
+      ],
+      "wrong": "The system has DB-level idempotency only where a natural key happened to exist (sha256, period bounds, occurrence dates); the two agent-driven insert fns most likely to be retried — draft_entry and the auto-posting record_accrual — silently duplicate on retry. record_accrual duplicates land as approved entries: a books-correctness failure that no human review intercepts.",
+      "target": "The rebuild's audited-fn catalog must make idempotency a schema-level rule: every insert-style mutation signature carries a caller idempotency key (or a declared natural unique) with a typed already-done response, so a duplicating retry is structurally impossible rather than behaviorally unlikely."
+    },
+    {
+      "id": "GAP4-2",
+      "workstream_item": "GAP-17",
+      "title": "Same-scope concurrent runs: POST /chat has no lease/CAS/409 — two tabs mint two overlapping model loops on one session and set_active_run is last-writer-wins",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src/http/server.ts:340-371 (re-read) — the chat start path ensures the session, appends the user turn, starts the run, and fire-and-forgets setActiveRun; it destructures only { sessionId } at :354 — the prior live run is never consulted.",
+        "agent/src/http/server.ts:416-431 (re-read) — the only run_in_flight 409 in the product guards POST /chat/reset, not chat start.",
+        "db/v2/26-fns-session.sql:71-80 (re-read) — set_active_run is an unconditional UPDATE chat_sessions SET active_run_id; no compare-and-set against a still-running prior run, no error on overwrite.",
+        "agent/src/runtime/openai/runtime.ts:175-206 (re-read) — startRun registers a fresh RunRecord with no per-session or per-scope exclusivity; each run streams independently (single-flight is per-run only, :225-228).",
+        "dashboard/lib/chat/useHermesChat.ts:24 (re-read) — Send<->Stop serialization is per-tab client state; a second browser tab has its own state, so the server is the only possible authority and it has none."
+      ],
+      "wrong": "Two tabs POSTing into one scope produce two concurrent model loops over the same session, each holding a history snapshot that excludes the other's turn (loadHistory runs before the sibling's append at server.ts:356-357) — interleaved transcript writes, cross-talking answers, both loops free to mutate the same client's books (multiplying GAP4-1's duplicate risk), and the session pointer forgetting the first run so its clarify/drop-recovery path is orphaned.",
+      "target": "The rebuild's run protocol needs a per-scope run lease: chat start performs a CAS on the scope's active run (typed 409 run_in_flight with the live run id, letting the UI attach instead), and active_run_id transitions are guarded, never overwritten."
+    },
+    {
+      "id": "GAP4-3",
+      "workstream_item": "GAP-18",
+      "title": "Clarify answers are not correlated to the pending clarifyId and not bound to the asking user — a late/duplicate answer resolves the WRONG question, and any same-firm caller can answer another user's clarify",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src/http/server.ts:453-464 (and the bootstrap mirror :275-285, re-read) — the clarify route parses body.clarifyId and passes it into resolveClarify.",
+        "agent/src/runtime/types.ts:53-59 (re-read) — ResolveClarifyRequest declares clarifyId: string | null, but agent/src/runtime/openai/runtime.ts:301-322 (re-read) never reads req.clarifyId: the only checks are run existence, rec.context.caller.firmId === req.caller.firmId, and rec.pending truthiness (:306); rec.pending.clarifyId (:98, :243) is never compared.",
+        "agent/src/runtime/openai/runtime.ts:306 — no userId comparison either: the run's owning user (rec.context.caller.userId) is available but unchecked, so the runId acts as a firm-wide bearer capability for answering clarifies (any role, including viewer).",
+        "agent/src/runtime/openai/runtime.ts:236-254 (re-read) — the clarify loop parks one question at a time; after answer A resolves question 1 the model may immediately park question 2 on the same runId, so a duplicate/late POST of answer A (slow network retry, double-click) is consumed as the answer to question 2."
+      ],
+      "wrong": "During the exact flow where Clara is committing client facts (onboarding/carry-forward interviews are clarify chains), a stale or duplicated answer is silently attributed to a different question, and a different firm member can answer a question asked of someone else — mis-correlated answers become seeded knowledge and journal decisions with no protocol-level defense.",
+      "target": "The rebuild's clarify protocol must validate answer->question identity: reject with a typed 409 when the supplied clarifyId does not equal the pending one, bind the answer channel to the asking user (or an explicit policy), and persist Q&A as typed turns so mis-correlation is auditable."
+    },
+    {
+      "id": "GAP4-4",
+      "workstream_item": "GAP-18",
+      "title": "Stop/disconnect never aborts the server-side run: no cancel endpoint exists, the AbortSignal is accepted but never consumed, and the dashboard's Stop settles the UI while tools keep mutating books",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src/http/server.ts:434-449 (re-read) — the SSE route wires req.on('close') -> ac.abort() and passes ac.signal into streamRun.",
+        "agent/src/runtime/openai/runtime.ts:208-279 (re-read whole fn) — streamRun's body never references req.signal; the SDK run() calls at :233 and :254 receive no signal, so the model loop plus its write tools continue to MAX_TURNS=40 (:39) regardless of the client.",
+        "agent/src/http/server.ts full route inventory (re-read) — there is no cancel/stop route for interactive runs anywhere (the only cancel verbs are the bulk-approve job fns).",
+        "dashboard/lib/chat/useHermesChat.ts:40-41 + dashboard/lib/chat/hermesChatTransport.ts:115-121 (re-read) — the composer's Stop aborts the client-side fetch and 'settle[s] on the partial at once' ('A user Stop (the turn's abort fired) is NOT a recoverable drop — settle on the partial at once'); no server call is made.",
+        "agent/src/runtime/openai/runtime.ts:258-260,285-292 (re-read) — the abandoned run later settles 'completed' and settleInteractive persists a full assistant turn the stopped user never saw; meanwhile POST /chat/reset answers 409 run_in_flight (server.ts:425-426) while the zombie loop runs.",
+        "Precedent already in-code: the wake path abandons rather than cancels too — withWakeDeadline is a Promise.race (runtime.ts:497-507, re-read)."
+      ],
+      "wrong": "A user who clicks Stop reasonably believes Clara stopped; in fact the loop continues for up to 40 model->tool turns under the interactive policy (which allows ALL writes), can approve/draft/reverse entries after the Stop, then persists a transcript that contradicts what the user watched. This is a direct supervised-autonomy/trust failure, not just a resource leak.",
+      "target": "The rebuild's run protocol must make cancellation real: an explicit cancel verb (and disconnect policy) that aborts before the next tool call, propagates an AbortSignal into the SDK loop and tool executor, records the run as cancelled with its partial output, and frees the scope lease immediately."
+    },
+    {
+      "id": "GAP4-5",
+      "workstream_item": "GAP-19",
+      "title": "No per-firm metering, token/spend budgets, run-concurrency limits, or fail-closed usage guardrails exist anywhere — the owner's pre-pilot requirement is confirmed absent in code and acknowledged open in the docs",
+      "severity": "high",
+      "verdict": "ADJUSTED",
+      "verifier_note": "Core finding CONFIRMED at severity high. One evidence claim corrected: the runs Map is NOT strictly unbounded — evictRuns (runtime.ts:484-495) TTL-evicts settled runs after 10min and abandoned running runs after 30min, and drainWake deletes wake runs at settle (:466). What is true and load-bearing: there is no SIZE cap, no per-firm run-concurrency cap, and no queue — a burst within the TTL window grows the map without limit, and nothing meters or bills any of it.",
+      "evidence": [
+        "Repo grep of agent/src for budget|spend|cost|meter|quota|usage — zero enforcement hits; the only limiter in the runtime is the wake gate's per-firm token bucket (agent/src/http/wakeGate.ts, configured windowMs 15_000 / ratePerMin 6 at agent/src/main.ts:184, re-read), which governs ONLY the webhook wake lane.",
+        "agent/src/http/server.ts:340-371, :233-292 (re-read) — POST /firms/:id/chat and POST /bootstrap/chat have no rate limit, no per-firm concurrency cap, and no queue; the runs Map has TTL eviction (runtime.ts:484-495) but no size cap and no per-firm concurrency limit.",
+        "agent/src/runtime/openai/runtime.ts:31,:39 + agent/src/main.ts:106 (re-read) — the entire OpenAI configuration is setDefaultOpenAIKey(cfg.openaiKey) plus MAX_TURNS=40; no modelSettings/maxTokens, no spend accounting, no provider circuit breaker.",
+        "docs/PROJECTLOG.md:126 (re-read verbatim) — '[owner-only] Billing model — the explicit gate before public launch … the guardrail question is a per-firm token/usage cap + pricing/packaging. Interim guardrail is … the fail-closed signup_admission gate' — the harness itself records that the only live guardrail is a firm-COUNT gate, not usage metering."
+      ],
+      "wrong": "A single firm (or a single stuck loop) can consume unbounded OpenAI spend and machine capacity on the shared single-machine plane with zero accounting, alerting, or fail-closed cutoff; the owner already ruled metering + fail-closed usage guardrails a pre-pilot requirement, and nothing of it exists — Gate 1 must record this as a sequencing constraint, and the commercial limits (per-firm budgets, concurrency, queue depth) become an explicit owner decision item.",
+      "target": "The rebuild must sequence DB-owned per-firm metering (tokens, runs, storage) with fail-closed budget enforcement, per-firm run-concurrency caps, and provider circuit breakers BEFORE any pilot; budgets are policy rows in the governed state layer, not code constants."
+    },
+    {
+      "id": "GAP4-6",
+      "workstream_item": "GAP-20",
+      "title": "Live Fly app carries secrets (CLAMD_HOST/PORT/TIMEOUT_MS) with zero code counterpart on frozen master, and the running image cannot be tied to the audited tree — 'all planes in sync' is an unverifiable doc claim",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "verifier_note": "Independently re-verified by this verifier on 2026-07-17: (1) flyctl secrets list -a belcort-agent shows CLAMD_HOST, CLAMD_PORT, CLAMD_TIMEOUT_MS all Deployed; (2) grep CLAMD/clamav across the frozen tree = zero hits; (3) git: commit 1e77e835 is the only ref touching CLAMD, lives on codex/clara-release-evidence (+2 sibling codex branches), and `git merge-base --is-ancestor 1e77e835 master` = NOT-ANCESTOR; (4) flyctl status shows the machine running image belcort-agent:deployment-01KXF8WMQD997GXZ5Z0DXS0F4N at version 51; releases v50 Jul 13 14:25 / v51 Jul 14 02:57.",
+      "evidence": [
+        "flyctl secrets list -a belcort-agent (re-executed read-only 2026-07-17 by verifier): CLAMD_HOST, CLAMD_PORT, CLAMD_TIMEOUT_MS all 'Deployed' alongside the documented manifest (OPENAI_API_KEY, SUPABASE_*, WEBHOOK_SECRET, ALLOWED_ORIGINS, AZURE_DOCAI_*).",
+        "Repo-wide grep for CLAMD|clamav on the frozen tree (re-run): zero hits; deploy/RUNTIME.md's env manifest and deploy/CUTOVER.md list no CLAMD variables.",
+        "git (read-only, re-run): the only commit in any ref touching CLAMD is 1e77e835 'Complete Clara prompt objectives and release evidence' on unmerged branch codex/clara-release-evidence — NOT an ancestor of master (ac0a684f).",
+        "flyctl releases -a belcort-agent (re-run): v50 deployed Jul 13 14:25 and v51 (current) Jul 14 02:57 — both AFTER that branch commit; flyctl status shows the live machine 080d16ef6461e8 running image belcort-agent:deployment-01KXF8WMQD997GXZ5Z0DXS0F4N, whose source git ref is not determinable read-only.",
+        "CLAUDE.md + docs/architecture/backend.md:104 (frozen repo): 'all three planes (Supabase / Fly / Vercel) are in sync' — per the brief's evidence discipline, a doc claim that now disagrees with observable live config."
+      ],
+      "wrong": "The live agent's configuration was provisioned for code that exists only on an unmerged (since-abandoned) branch, and the deploy cadence (releases through Jul 14) postdates the Jul-9 baseline the memory notes claim live equals — so every audit severity call describes the frozen tree while the production app may be running different, unaudited code. The clean-reset/relaunch plan must not assume live == master.",
+      "target": "Before the rebuild's destructive reset, take the private snapshot and positively identify the running image's git ref (or accept it as unknown and treat live as untrusted); the new build must stamp every deploy with its git SHA (image label + /health echo) and keep the env manifest authoritative so config-vs-code drift is mechanically detectable."
+    },
+    {
+      "id": "GAP4-7",
+      "workstream_item": "GAP-20",
+      "title": "Live inspection confirms the wake and OCR lanes are ARMED in production (SUPABASE_JWT_SECRET + AZURE_DOCAI_* deployed) — severity discounts that assumed unconfigured lanes are invalid",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "verifier_note": "Independently re-verified 2026-07-17: flyctl secrets list shows SUPABASE_JWT_SECRET and AZURE_DOCAI_ENDPOINT/KEY Deployed; curl /health returned {\"ok\":true,\"runtime\":\"openai\"}; flyctl status shows exactly one started machine in sin with 1/1 checks; vercel ls shows belcort-dashboard-v2 latest Production deploy 3d old and clara-by-belcort with Production deploys 2h and 5h old (both Ready at inspection time; the earlier lane's 'one Errored 15h ago' was not re-observed in the 2-row window).",
+      "evidence": [
+        "flyctl secrets list -a belcort-agent (re-run): SUPABASE_JWT_SECRET Deployed — so the wake-credential minter is constructed (agent/src/main.ts:136-138, re-read: mintWakeCaller built when cfg.jwtSecret present) and the 'wake dispatch not configured' honest-refusal branch (agent/src/http/server.ts:204, runtime.ts:347-349) is NOT the live state; condition wakes that pass the webhook HMAC will dispatch real model runs, including the mutation-capable [documents] lane (buildTools.ts:25 blocklist policy).",
+        "flyctl secrets list (re-run): AZURE_DOCAI_ENDPOINT + AZURE_DOCAI_KEY Deployed — extract_document's 'OCR is not configured' degrade branch (main.ts:128-131) is not the live state either.",
+        "curl https://belcort-agent.fly.dev/health -> {\"ok\":true,\"runtime\":\"openai\"} (re-run); flyctl status: exactly ONE machine, state started, 1/1 checks passing, region sin — matching fly.toml's single-machine in-memory-state posture (the no-durable-runs findings apply to the real production topology, not a hypothetical).",
+        "vercel ls (re-run): belcort-dashboard-v2 latest Production deployment 3d old (Jul 14), consistent with the frozen plane; a second Vercel project clara-by-belcort has Production deploys as fresh as 2h (Jul 17); it appears nowhere in the frozen harness docs."
+      ],
+      "wrong": "Prior lanes marked all live-config questions unverified and some severity calls (documents-wake mutation reach, OCR-dependent paths) were implicitly conditional on 'if configured live'. That conditional is now resolved AGAINST the discount: the [documents] wake lane — which can call approve_entry/reverse_entry/run_depreciation etc. — is reachable in production whenever a webhook fires, and the single-machine restart-loses-everything topology is the real deployment. Separately, the active clara-by-belcort Vercel project (likely the redo-rebuild's own new plane) is deploying to production during the audit and needs explicit ownership confirmation so the frozen-evidence boundary stays clean.",
+      "target": "Gate-1 packet should carry these live facts as settled: wake + OCR armed, one-machine topology confirmed, dashboard plane frozen since Jul 14; the rebuild's wake design must therefore treat per-mutation wake policy as a launch-blocking control, not a doc nicety, and the orchestrator should confirm clara-by-belcort is the redo plane (and that nothing deploys the OLD stack)."
+    },
+    {
+      "id": "GAP5-1",
+      "workstream_item": "F1 (prior ACCT-007)",
+      "title": "Year-end close locks a period without any structural check on uncoded in-period documents, open/unbalanced reconciliations, or AR/AP/FA tie-outs — the g3/g4 gates exist only as prompt text and a bypassable UI button",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:384-535 (re-read; record_year_end_close complete guard list): actor_required, client_not_found, fy_already_closed, opening_balances_required, g1 unreviewed_entries_in_period at :411-418 counting ONLY needs_review/needs_decision, g2 prior_fy_not_closed at :422-434, tax-provision guards, trial_balance_unbalanced via _trial_balance_core :492-493, unclassified_acc_type :495-505, RE/partner guards — the fn never queries documents, bank_reconciliations, bank_statement_lines, or any *_control_tie_out.",
+        "db/v2/25-fns-ops.sql:324-327 (header comment, re-read): 'g3/g4 stay skill-enforced (ADR-027) and are deliberately NOT added here'.",
+        "belcort/year-end-close/SKILL.md:37-46 (Step 0 pre-close gate is doctrine text) and :72-82 ('uncoded/unassigned documents (g3) and the incomplete bank reconciliation (g4) are NOT enforced by the DB — they are THIS skill's MANDATORY surface-and-acknowledge gate'; owner-ratified visibility-over-constraint, re-read verbatim).",
+        "belcort/year-end-close/SKILL.md Step 0 (re-read) — its checklist covers entries, documents, recons, the TX provision, pending adjustments, partnership registry, and the RE account; AR/AP/FA tie-outs are absent even from the skill's list.",
+        "dashboard/lib/periodClose.ts:100-149 (re-read) — UI checklist: open recons = blocker:true (:119) but AR/AP/FA tie-outs = warn-only 'A timing gap — surfaced, not blocking' (:127-134), uncoded docs = advisory warn (:121-125); and EVERY failed read degrades to state:'warn', blocker:false (:106,:112,:118,:124,:130,:139) — a recon-read failure silently converts the would-be blocker into 'Couldn't check' and ready flips true (:149).",
+        "dashboard/components/books/PeriodClose.tsx — the 'Close FY' button only sends a chat intent to Clara (periodClose.ts:153-154 buildCloseFyIntent) and is disabled on blockers — it is not the mutation authority.",
+        "db/v2/25-fns-ops.sql:777 (re-read) — grant execute on record_year_end_close to authenticated; the fn body contains NO assert_can_review/role floor and p_actor is free text (not audit_actor-constrained): any member, including a viewer, can call the fn directly via PostgREST, bypassing both the skill's Step 0 and the dashboard checklist.",
+        "db/v2/25-fns-ops.sql:738-775 + db/v2/14-tables-ops.sql (client_fy_close) — the fn's own visibility payload covers only pending_adjustments + unswept_auto_posts; nothing about docs/recons/tie-outs is surfaced or persisted, and client_fy_close stores no readiness/acknowledgment state at close time."
+      ],
+      "wrong": "The close's completeness conditions live at three inconsistent altitudes — DB hard gates (g1/g2/TB/unclassified), prompt text (g3 uncoded docs, g4 open recons, drafting, TX-provision), and a UI checklist (recons blocking, tie-outs warn-only) — and no altitude survives every caller path: the fn is EXECUTE-granted to every authenticated member with no role floor, the UI checklist fails open on a read error, and AR/AP/FA tie-outs gate nothing anywhere. A period can be locked over uncoded in-period source documents, open/unbalanced reconciliations, and failing subledger/FA tie-outs, after which trg_je_closed_period (25:297-322) blocks the corrections. The 'surface-and-acknowledge' doctrine also leaves NO persisted acknowledgment: the close receipt records nothing about what was unmet at close time.",
+      "target": "The rebuild's period-state machine must make close readiness a DB-owned typed checklist evaluated inside the close transaction: each condition (unreviewed+drafting entries, uncoded/unassigned in-period documents, open/unbalanced recons, AR/AP/FA tie-out drift, pending adjustments incl. depreciation) either hard-gates or requires an attributed, persisted acknowledgment receipt stored on the close row — so every caller path (agent, dashboard, direct RPC) meets the same gate and the sign-off state is auditable evidence, not prompt text."
+    },
+    {
+      "id": "GAP5-2",
+      "workstream_item": "F1 (prior SEC-008)",
+      "title": "reverse_year_end_close hard-DELETEs the close's financial-position snapshot, and the entire close lifecycle (closing/opening entries + their reversals) writes zero journal_entry_history receipts",
+      "severity": "high",
+      "verdict": "ADJUSTED",
+      "verifier_note": "Claim and severity CONFIRMED; one citation corrected: client_financial_position.generated_by_close_id as a plain bigint with no FK is at db/v2/13-tables-client.sql:98 (comment :80-82), not :86. All other citations verified verbatim, including the test asserting the DELETE as intended behaviour and the 'No journal_entry_history rows (symmetric with the close)' header.",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:819-821 (re-read) — 'remove the close-generated snapshot': DELETE FROM client_financial_position WHERE client_id=... AND generated_by_close_id = v_close.id — a hard delete, not supersession.",
+        "db/v2/tests/reverse_year_end_close_test.sql:67-70 (re-read) — the DELETE is asserted as intended behaviour ('FAIL close snapshot not removed'); the PASS notice at :95 celebrates 'snapshot removed' — a ratified design defect, not a slip.",
+        "db/v2/25-fns-ops.sql:779-782 (re-read) — reversal header comment: 'No journal_entry_history rows (symmetric with the close)'; the fn body (:783-829) confirms: no history insert anywhere.",
+        "db/v2/25-fns-ops.sql:474-481 vs :566-704 (re-read) — within record_year_end_close the ONLY journal_entry_history row is for the optional tax-provision entry (:480-481); the closing entry (:567-569) and opening entry (:675-677) get none.",
+        "db/v2/25-fns-ops.sql:799-816 (re-read) — reversal entries carry a HARDCODED review_reason 'year-end close reversed' — no operator reason is captured; p_actor is free text, unconstrained by app.audit_actor (:791,:824).",
+        "db/v2/25-fns-ops.sql:830 (re-read) — grant execute to authenticated — no role floor on re-opening a signed-off year.",
+        "db/v2/13-tables-client.sql:98 (verifier-corrected line) — client_financial_position.generated_by_close_id is a plain bigint with no FK ('no FK; client_fy_close in 14-tables-ops') — the deleted snapshot leaves no tombstone."
+      ],
+      "wrong": "Re-opening a closed year destroys the signed-off position evidence: the FP snapshot that management accounts were issued against is deleted outright (violating the repo's own reverse-not-delete law that every other surface follows), and neither the close nor its reversal leaves per-entry history receipts — journal_entry_history, the append-only entry audit that feeds firm_activity_feed, is silent for the highest-stakes entry class. No reason is required to reverse, actor attribution is spoofable free text, and any member can do it. The only durable trace is the reversed_at/reversed_by stamp on client_fy_close plus the mirror journals themselves.",
+      "target": "The rebuild must supersede-not-delete close snapshots (version them or stamp reversed_at, keeping the signed-off figures readable forever), write typed history/receipt rows for every close-generated and reversal entry (actor, reason, lineage), require an explicit operator reason and a role floor on reverse_year_end_close, and surface close/reopen events in the activity feed."
+    },
+    {
+      "id": "GAP5-3",
+      "workstream_item": "F1 (new — reversal ordering)",
+      "title": "reverse_year_end_close has no close-in-order guard: an earlier FY's close can be reversed while a later FY's close is live, posting mirror entries into the later locked period and silently orphaning its opening carry",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:792-795 (re-read) — the only existence check is the live close for (client_id, fy) — there is no check that no LATER fy has a live close, i.e. no mirror of the close's g2 prior_fy_not_closed guard (:422-434).",
+        "db/v2/25-fns-ops.sql:297-317 (re-read) — trg_je_closed_period exempts any entry_kind closing/opening posted under via_fn record_/reverse_year_end_close (:303-305) — so FY(n)'s reversal entries, dated FY(n) period_end and period_end+1 (:800,:811 — both <= FY(n+1)'s period_end), sail INTO the window locked by FY(n+1)'s live close instead of being rejected.",
+        "db/v2/25-fns-ops.sql:658-704 (re-read) — FY(n+1)'s close computed its opening carry-forward including FY(n)'s close-generated opening entry (the carry scope is posting_date > v_carry_from = FY(n)'s period_end, which includes FY(n)'s opening entry dated period_end+1); after reversing FY(n), FY(n+1)'s still-live close row and opening entry assert balances carried from a close that no longer exists — no error is raised at any point.",
+        "belcort/year-end-close/SKILL.md (documented post-close adjust path: reverse_year_end_close -> post the correcting entry -> re-run record_year_end_close, per :80-82's 'the period re-opened via reverse_year_end_close') — gives NO latest-first ordering instruction; an accountant adjusting FY2024 after FY2025 closed follows this path and the reversal succeeds silently; only the subsequent standard-kind correcting entry is stopped by the closed-period guard.",
+        "db/v2/tests/reverse_year_end_close_test.sql (re-read whole file) — reverses the only live close; no test exercises reversal of an earlier FY under a later live close."
+      ],
+      "wrong": "The close family enforces close-in-order (g2) but not reverse-in-reverse-order: reversing FY(n) under a live FY(n+1) close is accepted without error, mutating the books inside a period the system presents as locked and leaving the ledger internally inconsistent — FY(n) now has unswept nominals inside a locked window, and FY(n+1)'s opening entry, GL segmentation, and issued statements no longer tie to any live prior close. This is a silent audit-integrity break in signed-off periods, reachable through the skill's own documented adjustment procedure.",
+      "target": "The rebuild's period-state machine must enforce reversal ordering structurally: reversing period n requires every later closed period to be reversed first (a 'later_fy_closed' raise mirroring g2), and the closed-period guard's via_fn exemption must be scoped to the period actually being closed/reversed, never to any close-machinery write into other locked periods."
+    },
+    {
+      "id": "GAP5-4",
+      "workstream_item": "F2 (prior TAX-MY-005)",
+      "title": "Professional tax confirmations cannot be persisted as audited decisions: no typed adjustment/confirmation write-back, no reviewed/finalized states, no persistent b/f relief ledger, and exports proceed while confirmations remain open",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/23d-fns-tax.sql:40-52 (re-read) — compute_tax_draft's ONLY human inputs are client_id, fy, actor, msme_eligible, approved_donations_cents, notes — no input exists for a confirmed WHT disallowance, 916-000 fines split, doubtful-debts decision, exempt income, or brought-forward relief.",
+        "db/v2/23d-fns-tax.sql:382-390 (re-read) — brought-forward business losses / unabsorbed CA are quoted as a confirmation string: 'NOT applied in this draft; confirm + deduct the brought-forward relief manually' — but 'manually' has no code path: no input key, no adjustment fn, no relief ledger table anywhere in db/v2.",
+        "db/v2/19d-tables-tax.sql:112 (re-read) — tax_computations.status CHECK is ('draft','superseded') only — no reviewed or finalized state exists in the schema.",
+        "dashboard/lib/taxComp.ts:4-7 (re-read verbatim) — as-built self-description: 'The honesty layer is DISPLAY-only ... the only \"confirm\" lever is a RECOMPUTE with the two human inputs ... there is no per-item persisted tick in the backend'.",
+        "dashboard/components/tax/TaxComputation.tsx:106-114 (re-read) — 'Export forms' button is enabled on canExport && draft && w — NOT gated on w.confirmations_needed.length; the PendingBanner at :139 is display-only.",
+        "dashboard/lib/taxComp.ts (buildExportFormsIntent) — routes the export as a free-text chat intent to Clara with no state precondition.",
+        "db/v2/14-tables-ops.sql:133-135 (re-read) — export_receipts scope CHECK enumerates journals/trial_balance/documents/full/general_ledger/opening_balances/management_accounts/aging/sst_return/analysis — there is no tax_computation scope, so a tax-form export can only ride the untyped 'analysis' lane with no tax-specific receipt class.",
+        "db/v2/23d-fns-tax.sql:447-448 (re-read) — confirmations persist only as a text[] inside the worksheet jsonb — free strings, not typed, not resolvable, not attributable."
+      ],
+      "wrong": "Every open judgment the DB itself flags (WHT disallowance, fines split, doubtful debts, MSME eligibility beyond the boolean, brought-forward losses/unabsorbed CA) is a display-only string: the human tax agent's resolution cannot be recorded as an audited decision that recomputes the draft, the draft has no reviewed/finalized lifecycle, and a materially over/understated computation can be exported as filing-support material while confirmations remain open — the only defence is a banner. Prior-YA relief silently evaporates unless someone re-types it nowhere (there is no field to type it into).",
+      "target": "The rebuild needs a typed tax adjustment/confirmation model as schema, not polish: per-item confirmation records (item kind, decision, actor, reason, evidence link) that feed the recompute; a draft->reviewed->finalized state machine on tax_computations; a persistent relief ledger for b/f losses and unabsorbed CA that carries YA-to-YA; a first-class tax_computation export class; and an export gate that blocks (or requires explicit acknowledged override of) open confirmations."
+    },
+    {
+      "id": "GAP5-5",
+      "workstream_item": "G3 (prior AR-10)",
+      "title": "Read altitude is firm-wide by design while writes are scope-gated: cross-client read contamination surfaces as a scope-valid wrong posting, not an error — an unowned rebuild design decision",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src/tools/buildTools.ts:54-79 (re-read) — enforceScope runs on tool execute and gates by scopeRule; it is the WRITE-gate per the file header :2 'a write cannot target a client other than the resolved scope'.",
+        "agent/src/tools/registry/reads.ts:1-2 (re-read verbatim) — header: 'No write-gate (reads are RLS-bounded to the firm; the agent may read any client in its own firm)'; every named read tool declares scopeRule:'none' (:13,:29,:46 re-verified; param docs :17,:50 repeat 'any client in the firm').",
+        "agent/src/tools/buildTools.ts:110-122 (re-read) — queryToolDef (the freeform query_books read) calls assertReadOnlySql + ctx.query directly with NO enforceScope, no scope awareness at all.",
+        "db/v2/26-fns-session.sql:119-141 (re-read) — agent_select is SECURITY INVOKER — RLS scopes to the FIRM only; no client predicate exists or is injected.",
+        "The export/analysis lanes DO scope-check their client target (exportTool/analysisTool) — proving the scope machinery exists and reads were deliberately exempted.",
+        "belcort/AGENTS.md:78 (re-read verbatim) — doctrine ratifies the posture: reads '(SELECT-only, RLS-scoped, no write-gate)'.",
+        "agent/src/runtime/types.ts + server.ts — ActiveScope is resolved per turn and carried in ToolContext (the write gate consumes it); nothing tags read RESULTS with the client they came from."
+      ],
+      "wrong": "While the active scope is client A, Clara can freely read client B's kb rules, aliases, memory notes, and transactions via query_books or any named read, compose A's answer or coding proposal from B's data, and the write gate then forces the resulting draft INTO A — converting cross-client read contamination into a wrong-but-scope-valid posting rather than a blocked one. There is no client-provenance tag on read results, no warning when reads cross the active scope, and no deliberate scope-transition event; the only mitigation is model behaviour. Within-firm cross-client mis-posting is exactly the 'never guess the client' failure class the doctrine calls firm-killing, yet the read layer has no altitude control at all.",
+      "target": "This belongs on the Gate-1 open-decision list for the rebuild's context-pack/read-tool layer: client-scoped reads by default (reads inherit the active scope unless a named cross-client/portfolio read is invoked), named firm-altitude reads as deliberate typed operations, explicit auditable scope transitions, and client-provenance tagging on read results so contamination is detectable rather than silent."
+    },
+    {
+      "id": "GAP5-6",
+      "workstream_item": "E (prior SDT-009)",
+      "title": "A later clarify upload REPLACES the parked run's attachment batch, so held document_refs from an earlier upload (the Q12 opening records) silently resolve into the wrong batch — the documented onboarding happy path clobbers its own evidence",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src/runtime/openai/runtime.ts:313-316 (re-read) — resolveClarify: `if (req.documents && req.documents.length > 0) { rec.context.documents = req.documents; }` — assignment REPLACES the whole batch; no append, no versioning.",
+        "agent/src/tools/buildTools.ts:255,270-274 (re-read) — upload_document's document_ref is a '0-based index into this turn's attachments', resolved against the CURRENT ctx.documents; in-range stale refs resolve silently to the WRONG document, out-of-range raises UploadRejected. extract_document (:329-337) resolves the same way — OCR of the wrong file is silent.",
+        "belcort/client-onboarding/SKILL.md:211-222 (re-read) — Q12 management-accounts files ride a mid-interview clarify answer and the model is EXPLICITLY told to 'HOLD them: index + OCR happen AFTER onboard_client' — i.e., deliberately defer using the refs across later clarify rounds.",
+        "belcort/client-onboarding/SKILL.md:156-168 (re-read) — sample invoices are attached on a LATER clarify of the same paused run — the [[step:14/14:sample_invoices]] end-of-Phase-A step — followed by the Phase-B dry-run and onboard_client, all before the held Q12 refs are consumed.",
+        "agent/src/runtime/openai/runtime.ts:44-58,188-193 (re-read) — each docs-carrying turn appends a manifest with document_ref indices to the message — earlier manifests with now-stale indices remain in the model's transcript context."
+      ],
+      "wrong": "In the standard onboarding flow with BOTH uploads, the Q12 batch is always overwritten by the step-14 sample-invoice batch before the post-onboard upload step: the held Q12 document_refs then either hard-fail (index out of range) or — when the index is in range — silently upload and OCR a sample invoice AS the management accounts, feeding the ISA-510 carry-down proposal from the wrong evidence and binding the wrong bytes' sha256 into the opening records' provenance. The same aliasing bites any workflow where a user attaches documents across two clarify answers of one parked run. Only a skip (answering without documents) is safe, since the replace is conditional on a non-empty batch (runtime.ts:313).",
+      "target": "The rebuild needs immutable per-attachment references: stable, sha-addressed attachment IDs that survive the whole run (append-not-replace context), refs that fail loud on staleness instead of re-resolving by position, and per-batch identity in the manifest so a held reference can never silently alias into a later upload."
+    },
+    {
+      "id": "GAP5-7",
+      "workstream_item": "B (prior DSE-010)",
+      "title": "Documents-tab 'Assign all' mass-files the ENTIRE mixed unassigned lane to one client with no grouped preview, no outlier handling, and no subset selection — despite per-row evidence pointing elsewhere",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "dashboard/components/documents/FirmDocumentsTriage.tsx:125-153 (re-read) — assignAll: `for (const doc of docs)` applies the single bulkTarget to EVERY document currently in the lane; the only inputs are one select + one button — no per-doc checkboxes, no confirmation dialog, no pre-commit summary.",
+        "dashboard/components/documents/FirmDocumentsTriage.tsx:294-320 (re-read) — each row DISPLAYS per-doc evidence — the OCR counterparty guess (:317) and Clara's client_match_conf (:299,:318-320) — but assignAll never consults it: a doc whose evidence points at a different client is filed identically, with no outlier warning.",
+        "dashboard/components/documents/FirmDocumentsTriage.tsx:202,215-223 (re-read) — the verb is armed by one dropdown pick; the label 'Assign all {docs.length} to' is the entire preview; success toast (:148 'Clara's been notified') fires after commit.",
+        "db/v2/25-fns-ops.sql:1526-1529 (re-read) — each assign writes a document_audit row that fires the durable document_triaged wake (actor is distinct from 'agent') — Clara is notified to file each mis-assigned doc, and the [documents] wake policy permits writes (buildTools.ts:25), so downstream filing/coding proceeds on wrong-client evidence.",
+        "db/v2/22-fns-documents-recon.sql:86 (re-read) — reassign_document blocks CODED documents ('document_already_coded') — so a mass mis-file hardens into the wrong client's books once Clara or a human codes them.",
+        "dashboard/components/documents/__tests__/FirmDocumentsTriage.test.tsx — tests verify only the loop-of-singles mechanics and partial-failure handling — no test exercises a mixed-evidence lane."
+      ],
+      "wrong": "The unassigned lane is by definition multi-source (firm-scope chat uploads and unmatched inflow), so a mixed batch spanning several clients is the NORMAL case — yet the one bulk verb files everything to a single client in one click, ignoring the very match-confidence evidence the lane renders, with no grouped pre-commit summary and no way to exclude outliers short of assigning row-by-row. Each mis-file immediately notifies Clara to act on it, and becomes non-reassignable once coded — wrong-client evidence (and downstream wrong-client entries) in the highest-volume intake workflow.",
+      "target": "The rebuild's batch-assignment UX must group before committing: a pre-commit summary grouped by suggested client, outliers (low/other-client match confidence) excluded by default and individually opted in, subset selection, and a confirm step that names counts per target — one human verb per homogeneous group, never one verb per lane."
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "edit_entry cannot alter an entry's document provenance pair: its header UPDATE whitelist touches only description/posting_date/status/review_reason, so document_id/source_doc_sha256 are fixed after draft — the binding failure is confined to draft-time (no validation) and reassign-time (not cleared/moved), not to the edit path.",
+      "evidence": ["db/v2/20-fns-journal.sql:305-310"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "reassign_entry has two real partial mitigations: it blocks 'approved' entries and clears kb_rule_id on the move (with an explanatory comment) — they simply do not cover auto_draft anchors, matched lines, recon fields, or document provenance.",
+      "evidence": ["db/v2/20-fns-journal.sql:382", "db/v2/20-fns-journal.sql:386-389"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "The deferred balance trigger still applies to in-place edits of posted entries — an edit cannot leave a non-drafting entry unbalanced at commit, so GAP0-4 is an immutability/audit-integrity breach, not a balance breach.",
+      "evidence": ["db/v2/15-triggers.sql:33-75"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "Closed-period entries are incidentally shielded from edit_entry because its header UPDATE always fires the BEFORE-UPDATE closed-period guard on journal_entries; note the guard does not exist on journal_lines, so only paths that touch the header are covered.",
+      "evidence": ["db/v2/25-fns-ops.sql:297-322", "db/v2/20-fns-journal.sql:305-310"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "The interactive review family (approve/reject/edit/reassign/reverse) does enforce a real intra-firm role floor and actor constraint DB-side: assert_can_review + audit_actor are present in all five — GAP0-2 is about the missing human-approval event, not about missing RBAC on these five fns. NOTE the contrast: record_year_end_close / reverse_year_end_close / acknowledge_auto_draft_sweep carry NO such floor (GAP5-1/5-2/3-7).",
+      "evidence": ["db/v2/20-fns-journal.sql:184-185", "db/v2/20-fns-journal.sql:226-227", "db/v2/20-fns-journal.sql:284-285", "db/v2/20-fns-journal.sql:374-375", "db/v2/22-fns-documents-recon.sql:782-783"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "reassign_document correctly re-asserts BOTH clients' firm ownership and blocks coded documents — firm isolation on the verb itself is sound; the defect is dependents, not scope.",
+      "evidence": ["db/v2/22-fns-documents-recon.sql:78-89"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "match_bank_line/unmatch_bank_line firm-scoping, RBAC floor, and actor attribution are sound: assert_firm_owns_client + assert_can_review (bookkeeper+) + audit_actor anti-spoof on both verbs, FOR UPDATE row locks, and an append-only bank_match_audit row with real before/after — the flaw is the missing match-model constraints, not the security wrapper.",
+      "evidence": ["db/v2/22-fns-documents-recon.sql:465-468", "db/v2/22-fns-documents-recon.sql:527-530", "db/v2/tests/match_bank_line_actor_test.sql"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "open_reconciliation's own contract is solid for what it checks: all seven fields required with clean domain errors, bank account verified against client+firm, statement document verified against firm AND client — cross-client statement docs rejected.",
+      "evidence": ["db/v2/22-fns-documents-recon.sql:395-449", "db/v2/tests/open_reconciliation_contract_test.sql"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "The access-token hook is authoritative at issuance in its NORMAL path: strips every inbound firm_id/firm_role (top-level and app_metadata) before injecting from the active membership in an ACTIVE firm, and EXECUTE is granted only to supabase_auth_admin. VERIFIER CAVEAT: the hook's exception handler FAILS OPEN (`exception when others then return event`, 00-foundation.sql:274-276) — on any error it returns the event UNCHANGED, inbound claims preserved. Deliberate (a throw blocks every login) but it means the strip is not unconditional.",
+      "evidence": ["db/v2/00-foundation.sql:252-282", "db/v2/90-isolation-tests.sql TEST 20"],
+      "verifier": "verified-with-caveat"
+    },
+    {
+      "claim": "The agent HTTP shell authenticates with real signature verification (HS256 secret or JWKS, issuer+audience) on every /firms route plus an IDOR guard; decode-only helpers are explicitly fenced as non-auth — the stale-claims issue is upstream of, not in, this verifier.",
+      "evidence": ["agent/src/http/auth.ts:93-125", "agent/src/http/auth.ts:1-8,46-49", "agent/src/http/server.ts:298-301"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "The tracing exporter bounds individual span fields at 100KB with truncation, so the export is size-bounded — this mitigates payload volume, not confidentiality, and does not weaken GAP1-8.",
+      "evidence": ["agent/node_modules/@openai/agents-openai/dist/openaiTracingExporter.js"],
+      "verifier": "not re-verified (field-cap lines not re-read; immaterial to any verdict)"
+    },
+    {
+      "claim": "The signal docs the C verifier could not access DO exist (scratchpad/signals/kb-iteration-system.md, per-client-kb-mechanism.md) and the C-11..C-14 tier/proposal characterizations hold against them: v2's ladder is candidate/confirmed/retired with no 'locked' tier and its human-gated proposal flow matches the owner docs' user-gated-promotion intent — the un-ported pieces are the three mechanisms in GAP2-2/3/4, not the tier model.",
+      "evidence": ["scratchpad/signals/per-client-kb-mechanism.md:117-118 ('locked' tier)", "db/v2/12-tables-kb.sql:19,54,72,96", "db/v2/21-fns-kb.sql:199-207"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "v2 already has a sound batch-seeding primitive that a rebuilt Path-B lane could reuse: seed_client_knowledge is atomic, idempotent, alias-resolving, and array-driven (rules[] + notes[]) — the gap is the missing GL-parse feeder and the skill-side 'only human-ticked mappings' eligibility rule, not the DB function shape.",
+      "evidence": ["db/v2/24-fns-onboard.sql:367-424", "belcort/client-onboarding/SKILL.md:344-366"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "The close-lock discipline itself is correctly implemented where it was applied: run_recurring_journals, record_accrual, run_amortisation (23c:142/:234/:398), compute_tax_draft (23d:75) and compute_sst_return (23e:157) all take the same hashtextextended('belcort_close:'||cid) xact lock as record_year_end_close (25:382) — the defect in GAP2-1 is incomplete coverage, not a broken primitive.",
+      "evidence": ["db/v2/23c-fns-adjustments.sql:142,234,398", "db/v2/23d-fns-tax.sql:75", "db/v2/23e-fns-sst.sql:157", "db/v2/25-fns-ops.sql:382"],
+      "verifier": "verified (grep re-run: exactly these 6 close-key sites + the artifact-key lock at 25:254)"
+    },
+    {
+      "claim": "The doctrine layer does NOT overclaim the FS pack: belcort/year-end-close/SKILL.md consistently calls the deliverable 'management accounts' — the overclaim is confined to the DB artifact's own MPERS/MFRS basis declaration (28-fns-reads.sql:775-780) and any downstream rendering of it.",
+      "evidence": ["belcort/year-end-close/SKILL.md", "db/v2/28-fns-reads.sql:775-780"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "The DB-side TAX-MY-001 remediation is genuinely present at the worksheet level: compute_sst_return produces separate sales and service blocks each with its own output/deduction/excess/payable figures, plus an explicit 'declared SEPARATELY' assumption for 'both' registrants, and SP5 pins the note.",
+      "evidence": ["db/v2/23e-fns-sst.sql:660-661,751-775", "db/v2/tests/sst_return_test.sql:259-260"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "The fn's period arithmetic is correct once given correct bounds: month-aligned due date = last day of the following month (s.26(1)) and DG-varied due date = end+30 (s.26(2)) are implemented and test-pinned, and overlap-supersede keeps exactly one live draft.",
+      "evidence": ["db/v2/23e-fns-sst.sql:166-172,738-744", "db/v2/tests/sst_return_test.sql:255-272"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "Wrong-rate SST drafts cannot auto-post unsupervised: doctrine forces every COMPUTED tax leg to needs_review with a human-confirm reason, and a document-stated SST amount always overrides computation — so the TAX-MY-003 default-8% defect produces reviewable drafts, not silent postings.",
+      "evidence": ["belcort/coa-coding/SKILL.md:219-220,184-193", "docs/reference/confidence-ladder.md:125-127"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "Today nothing can purge retained records regardless of the mis-anchored clock: table DELETE is revoked from the request plane on documents and export_artifacts, and the storage bucket defines no DELETE (or UPDATE) policy — reverse-not-delete is the operative protection while retain_until stays advisory.",
+      "evidence": ["db/v2/10-tables-core.sql (revoke)", "db/v2/14-tables-ops.sql (revoke)", "db/v2/storage-setup.sql:43-59"],
+      "verifier": "verified (storage-setup re-read: only read+insert policies; 'WRITE-ONCE: deliberately NO update policy')"
+    },
+    {
+      "claim": "Retry-after-unknown-outcome IS structurally covered for several mutation families via natural DB uniqueness: ingest_document idempotent on (firm_id, sha256); run_depreciation on (asset, period); run_recurring_journals on (template_id, occurrence_date); record_export_artifact write-once under an advisory lock; upload_document treats already-exists-at-exact-key as idempotent success.",
+      "evidence": ["db/v2/10-tables-core.sql:98 unique(firm_id, sha256)", "db/v2/23c-fns-adjustments.sql:164-167", "db/v2/25-fns-ops.sql:253-279", "agent/src/tools/buildTools.ts:296-302"],
+      "verifier": "verified (spot-checked the recurring-runs skip, the artifact reserve lock, and the upload already-exists path)"
+    },
+    {
+      "claim": "State-transition fns are duplication-safe by status gating: a duplicated approve_entry / reject_entry / finalize_coding retry fails loud on the status gate rather than double-posting — the idempotency gap (GAP4-1) is specific to insert-style fns, not the review verbs.",
+      "evidence": ["db/v2/20-fns-journal.sql:190-191 (cannot_approve:<status>)", "db/v2/20-fns-journal.sql:148 (not_drafting:<status>)"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "Within a single browser tab the composer serializes turns (Send<->Stop state machine), so the two-tab exposure in GAP4-2 is cross-tab/server-side only.",
+      "evidence": ["dashboard/lib/chat/useHermesChat.ts:24,40-41"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "The live Fly topology matches the repo's declared posture: one always-on machine in sin, checks passing, /health answering with the openai runtime — the audit's single-process durability findings describe the real deployment.",
+      "evidence": ["flyctl status -a belcort-agent (re-run 2026-07-17): machine 080d16ef6461e8, v51, started, 1/1 checks", "curl https://belcort-agent.fly.dev/health -> {\"ok\":true,\"runtime\":\"openai\"}", "deploy/fly.toml:34-50"],
+      "verifier": "verified (independently re-executed)"
+    },
+    {
+      "claim": "The belcort-dashboard-v2 Vercel plane has been quiet since Jul 14 (latest Production deploy 3d old at inspection time), consistent with the frozen-evidence assumption for the dashboard; the separate clara-by-belcort project is actively deploying (Production 2h/5h old).",
+      "evidence": ["vercel ls belcort-dashboard-v2 + vercel ls clara-by-belcort (re-run 2026-07-17)"],
+      "verifier": "verified (independently re-executed)"
+    },
+    {
+      "claim": "The dashboard DOES compose a real FY-close readiness checklist (statements balance, FY-scoped pending entries, open recons as a blocking item, uncoded docs, AR/AP/FA tie-outs, adjustments) and disables the Close button while blockers stand — the UI lane is materially better than the DB fn; the defect in GAP5-1 is that this checklist gates only a chat-intent button, degrades fail-open on read errors, and binds no other caller path.",
+      "evidence": ["dashboard/lib/periodClose.ts:75-149", "dashboard/components/books/PeriodClose.tsx"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "reverse_year_end_close does preserve the client_fy_close row itself (reversed_at/reversed_by stamp, reverse-not-delete) and both the original and mirror journal entries — the destroyed artifact is specifically the client_financial_position snapshot, and the missing artifact is the journal_entry_history receipts.",
+      "evidence": ["db/v2/25-fns-ops.sql:823-825", "db/v2/tests/reverse_year_end_close_test.sql:55-77"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "Answering a clarify WITHOUT attachments does not clobber a held batch — the replace at runtime.ts:313-315 is conditional on a non-empty req.documents, so a skipped sample-invoices step leaves the Q12 refs valid (GAP5-6 bites only when both steps carry attachments).",
+      "evidence": ["agent/src/runtime/openai/runtime.ts:313-315"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "Assign-all mechanics are sound as far as they go: the bulk verb is a loop of singles through the same audited assign_document fn, partial failures stay in the lane and are named, and concurrent drains are reconciled — only the mixed-batch UX (GAP5-7) is the gap.",
+      "evidence": ["dashboard/components/documents/FirmDocumentsTriage.tsx:123-153", "dashboard/components/documents/__tests__/FirmDocumentsTriage.test.tsx"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "agent_select's FIRM-isolation boundary is sound as stated (SECURITY INVOKER + forced RLS, single-statement anchor, write-verb scan, 5s timeout) — GAP5-5 is about the missing CLIENT altitude within the firm, not about firm isolation; the separate SELECT-wrapped-DEFINER bypass remains the already-known SDT-001/SEC-001.",
+      "evidence": ["db/v2/26-fns-session.sql:119-141"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "The tax draft's honesty layer itself (assumptions[] + confirmations_needed[] built by the DB, supersede-not-delete persistence, transparent-entity branch) works as documented and is rendered verbatim by the dashboard — GAP5-4 is that the layer is terminal display, not that it is wrong.",
+      "evidence": ["db/v2/23d-fns-tax.sql:375-449", "dashboard/components/tax/TaxComputation.tsx:139-143"],
+      "verifier": "verified"
+    },
+    {
+      "claim": "VERIFIER-ADDED: belcort/client-onboarding/SKILL.md:219 instructs `ingest_document (kind='management_account', …)` for the Q12 carry-down files, but documents.kind CHECK (db/v2/10-tables-core.sql:79) permits only ('transaction_source','sample_invoice') — the documented onboarding procedure would raise a check violation at ingest (or the files get mislabeled as transaction sources). A doc-vs-code disagreement corroborating GAP2-2's 'knowledge artefacts have no legal home' and worth carrying into the Gate-1 packet.",
+      "evidence": ["belcort/client-onboarding/SKILL.md:216-220", "db/v2/10-tables-core.sql:79"],
+      "verifier": "verifier-added"
+    }
+  ],
+  "unverified": [
+    "Prior-audit finding texts (DSE-003, EDGE-002, ACCT-009, SEC-007, VP-06, AR-01, SEC-004, EDGE-005, SDT-005, ACCT-002, SEC-003, ACCT-006/007/008/014, SEC-005/008, EDGE-003/004, OPS-001/005/006/007/008, AR-04/05/07/09/10, TAX-MY-001/003/004/005, DSE-009/010, SDT-009, VP-02/07) live under the forbidden tag pre-redo-rebuild-2026-07-16 and were NOT read by any lane; every 'confirms prior X' means the described defect class was independently re-verified from the frozen tree, not that the prior wording was checked.",
+    "Live belcort-shared Supabase state: deployed fn bodies vs db/v2/*.sql, GoTrue access-token TTL (jwt_expiry — determines the exact GAP1-4 stale-authority window; Supabase default 1h), enable_signup, the access-token-hook wiring, backup/PITR tier (GAP1-6), actual retain_until/legal_hold row values, belcort_webhook_config rows and DB-webhook definitions (so end-to-end wake liveness), and whether any real rows exhibit cross-client provenance / orphaned anchors / stale snapshots — no live DB inspection was possible (supabase CLI absent; MCP requires interactive OAuth).",
+    "The exact git ref of the running Fly image (belcort-agent:deployment-01KXF8WMQD997GXZ5Z0DXS0F4N) and of the current Vercel production builds — release timestamps and the CLAMD secrets strongly suggest post-baseline content (GAP4-6) but the image/deploy -> commit mapping is not determinable read-only. Fly runtime logs were not obtained (prior lane's flyctl logs attempt hung; not retried).",
+    "OpenAI Agents SDK runtime semantics not exercised live: result.state.approve() behaviour for hypothetical future needsApproval tools (GAP0-2), and whether the model in practice reuses stale document_ref indices from earlier manifests (GAP5-6) — the mechanical overwrite and index re-resolution are code-verified; the behavioural half is exactly what the skill instructs ('HOLD them') but was not observed live. OpenAI-side trace retention/usage terms for ingested traces (GAP1-8) are external to the repo.",
+    "The GAP2-1 close race and the GAP5-3 reversal-ordering corruption were proven from code + the author's own in-code admission, not reproduced with concurrent sessions against a rig (the frozen-repo brief bars rig mutation from this lane).",
+    "Exact current statutory texts: ITA 1967 s.82/82A and CA2016 s.245 retention anchors (GAP3-4), and the precise 2025-07-01 SST expansion sector list/rates (GAP3-2) — taken from the prior-audit rulings as the work orders supplied them; not re-verified against gazette/RMCD primary sources. The repo's own docs already flag SST sector facts as requiring official-source re-verification.",
+    "Whether the v1 Hermes-era mechanisms described in the owner signal docs (client_kb_materials table, weekly kb-curator cron, Path-B GL import) ever actually ran as documented (GAP2-2/3/4) — the v1 stack was purged; they are treated as authoritative statements of owner intent, which is what Gate 1 needs.",
+    "Whether the dashboard renders the FS basis declaration verbatim to end users (GAP2-5 — the DB payload carrying the claim is verified at 28-fns-reads.sql:775-780) and whether the dashboard SST worksheet SURFACE presents the per-tax sales/service split adequately on screen (GAP3-3 concerns the exported filing artifact, which verifiably drops it).",
+    "GitHub branch protection/required-check state vs CLAUDE.md's 2026-07-16 'protected: false' claim (context for GAP1-5) — not re-verified live in this pass.",
+    "Whether any OTHER statement-line writer besides insert_bank_lines exists live (manually applied hotfix fns) that could interact with the GAP1-1/GAP1-2 constraints — the repo shows none; live-DB state uninspectable.",
+    "clara-by-belcort Vercel project ownership/purpose (GAP4-7): Production deploys re-observed 2h/5h old on 2026-07-17 — almost certainly the redo-rebuild's new plane, but this must be confirmed by the orchestrator/owner rather than assumed.",
+    "whether the live Fly app carries OPENAI_AGENTS_DISABLE_TRACING: RESOLVED by verifier — flyctl secrets list (2026-07-17) shows no such secret, so GAP1-8's exporter is armed in production (this item moves from unverified to verified-against)."
+  ],
+  "decision_brief": "Adversarial verification of all six GAP-finder workstream blocks (42 findings) against the frozen tree at master ac0a684f, refute-by-default: 40 CONFIRMED, 2 ADJUSTED (GAP4-5: the runs Map has TTL eviction, not strictly 'unbounded' — but no size/concurrency cap and zero metering, so the finding and its high severity stand; GAP5-2: one citation line corrected, 13-tables-client.sql:98 not :86), 0 REFUTED. No severity changed: 8 critical (GAP0-1/0-2/0-3, GAP1-1/1-2/1-4/1-5/1-6, GAP2-1, GAP5-3 — 10 total critical), 25 high, 7 medium as drafted all held under the brief's rubric. Every load-bearing citation was re-read from the source files; the live-plane claims (CLAMD secrets, SUPABASE_JWT_SECRET/AZURE_DOCAI armed, single machine v51, /health ok, dashboard quiet since Jul 14, clara-by-belcort actively deploying) were independently re-executed read-only on 2026-07-17 and all reproduced, including git proof that the CLAMD-referencing commit 1e77e835 is NOT an ancestor of master. Verifier additions: (1) the access-token hook FAILS OPEN on exception (00-foundation.sql:274-276), returning inbound claims unchanged — a caveat on the GAP1-4 fine claim; (2) a fresh doc-vs-code contradiction — client-onboarding SKILL.md:219 instructs ingest_document kind='management_account' while the documents.kind CHECK permits only transaction_source|sample_invoice — corroborating GAP2-2; (3) OPENAI_AGENTS_DISABLE_TRACING confirmed ABSENT from live Fly secrets, upgrading GAP1-8's export-armed claim from inferred to observed; (4) CI runs its legacy SQL suite on postgres:16 while the product targets PG17 (extra corroboration for GAP1-5). The strongest cluster for the Gate-1 packet: structural provenance (GAP0-1), the absent human-authorization capability boundary (GAP0-2 + GAP0-5), the unserialized close family (GAP2-1 + GAP5-3), the unvalidated bank-match model (GAP1-1/1-2/1-3), claims-only authority with no revocation (GAP1-4), and misleading-green CI + no DR proof (GAP1-5/1-6)."
+}

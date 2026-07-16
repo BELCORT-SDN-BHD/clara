@@ -1,0 +1,317 @@
+{
+  "workstream": "D — Chat panel and interaction model (Clara chat vs Claude/Codex-class assistants): card registry + rendering + agent-side emission, attachments, upload paths, generative-UI capability, SSE streaming, persistence/pagination, error/retry UX, long-run visibility",
+  "findings": [
+    {
+      "id": "D-1",
+      "workstream_item": "image/file upload through EVERY expected path",
+      "title": "Documents-tab upload silently does nothing: the chat run it starts is never executed (no SSE attach), yet the UI toasts success",
+      "severity": "critical",
+      "evidence": [
+        "dashboard/components/documents/DocumentsTable.tsx:471-482 — defaultSend only POSTs /firms/:id/chat and returns res.json(); it never opens GET /chat/events (the run_id in the response is discarded at :250)",
+        "dashboard/components/documents/DocumentsTable.tsx:8-11 — header declares this 'the ONLY ingest path'; :250-252 success toast 'Clara is filing them; they'll appear in this list'",
+        "dashboard/components/workbench/WorkspaceIslands.tsx:142-154 — production passes no deps.send, so defaultSend is the live path",
+        "agent/src/runtime/openai/runtime.ts:175-206 — startRun only registers a RunRecord (status 'running'); the model loop runs exclusively inside streamRun (:233 `run(agent, rec.input, …)` is reached only from an SSE attach); :371 the wake path documents this exact contract — 'fire-and-forget: a wake has no SSE consumer — drain the stream so the run executes' — and drains itself; nothing drains an interactive run",
+        "agent/src/http/server.ts:340-371 — POST /chat persists the user turn (:357 appendUser, so a ghost transcript turn IS durable) and calls startRun, dispatching nothing; :434-449 GET /chat/events is the sole execution driver",
+        "agent/src/runtime/openai/runtime.ts:484-495 — a never-streamed 'running' run (streaming=false, no pending clarify) is silently evicted after 30 min; server.ts:413-428 acknowledges the 'never-streamed running run' state in the reset guard (15-min unwedge)"
+      ],
+      "wrong": "Uploading via the Documents tab drop-zone/picker reads the bytes, POSTs a chat turn, persists the user message, and toasts success — but with no SSE consumer the agent run never executes: no upload_document, no ingest_document, no OCR, no document row. Files never appear; the transcript later shows a ghost 'Uploaded N documents…' turn with no reply, and the scope's session reset is even 409-blocked for 15 minutes by the wedged run pointer. Complete, silent feature failure on the primary ingest surface.",
+      "target": "Any path that starts a run must also drive it: either attach an events/poll consumer after POST (like HermesChatTransport does), or make the agent service execute runs independently of an SSE attach (the durable-runtime target, ADR-122). Never toast success on a fire-and-forget POST.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-2",
+      "workstream_item": "inventory ALL interactive artifacts / card registry + agent-side card emission",
+      "title": "Half the artifact catalog is unreachable dead UI: review_summary has no emitter or fence tag anywhere; sst_summary/journal_table/kv_summary have no emitter and no live extraction; the native 'artifact' SSE frame is dead vocabulary on both ends",
+      "severity": "high",
+      "evidence": [
+        "dashboard/lib/artifacts.ts:45 — 8 registered types incl. review_summary; parseArtifact:478-495 validates all 8",
+        "dashboard/lib/chat/artifactFence.ts:24-29 — live fence allowlist is only export_result|je_review|suggestion|client_row; review_summary absent",
+        "agent/src/http/sessions.ts:43-44 — hydrate-path fence regex lifts 7 types; review_summary absent there too; :13-15 the native artifact jsonb column is 'reserved', and appendAssistant (:169-175) passes only content — nothing populates it (db/v2/26-fns-session.sql:62 has the column, never fed)",
+        "belcort doctrine grep — the only fenced-card instructions are coa-coding/SKILL.md:322-327 (je_review), export/SKILL.md:174-177 + year-end-close/SKILL.md:160 (export_result), _shared/suggestion-chips.md:25-29, _shared/client-row.md:17-22; kv_summary/journal_table/sst_summary/review_summary appear nowhere in belcort/ and (grep-verified) nowhere in agent/src outside a types.ts comment and the sessions.ts regex",
+        "agent/src/runtime/sse.ts:47-49 — an 'artifact' SSE frame exists, but agent/src/runtime/openai/events.ts:38-67 maps only delta/tool events (never kind:'artifact'), and dashboard/lib/relayStream.ts:47-81 has no 'artifact' branch (frame ignored if ever sent)",
+        "dashboard/components/rail/ReviewSummaryCard.tsx + AgentCard.tsx:72-73 — full component + 'Post all N' onPostBand wiring exists (ClaraThread.tsx:225-243 approveBandEntries) for a card that can never arrive"
+      ],
+      "wrong": "4 of 8 catalog cards (review_summary, sst_summary, journal_table, kv_summary) can never render from a real agent turn: no doctrine/tool emits them, the live translator doesn't extract three of them (they'd stream as raw JSON in the bubble), and review_summary isn't in either extractor — it is unreachable even after reload. The parallel native artifact wire (RuntimeEvent 'artifact' → SSE frame → dashboard) is dead code end-to-end. The design SoT (docs/design/04-agentic.md:97-108) marks all 8 as ✅ live; the catalog is proven only by test fixtures.",
+      "target": "One authoritative emit path per card type: doctrine/tool emission + identical fence allowlists in the live extractor and shape-at-read extractor + a parity test across dashboard/agent — or delete the dead card types and dead wire vocabulary.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-3",
+      "workstream_item": "agent-side card emission / streaming quality",
+      "title": "filter_journals directive channel is dead at every station AND doctrine-instructed emission renders raw JSON in the live chat bubble",
+      "severity": "high",
+      "evidence": [
+        "belcort/AGENTS.md:90 + belcort/_shared/filter-directive.md:3-7,21-26 — doctrine instructs Clara to emit ```filter_journals fences and promises 'the runtime lifts the directive off your message stream… it never shows as text, live or on reload'",
+        "agent/src/runtime/openai/events.ts:38-67 — the SDK-event mapper never yields a 'directive' RuntimeEvent, so agent/src/runtime/sse.ts:50-53's directive frame is never produced",
+        "dashboard/lib/relayStream.ts:47-81 — parseRunEvents has no 'directive' branch (the frame would be ignored even if sent)",
+        "dashboard/lib/directives.ts:40-43 — dispatchDirective exists but a repo-wide grep finds no production caller (tests only); a grep for DIRECTIVE_EVENT/'belcort:directive' listeners finds NONE outside directives.test.ts — the promised grid listener does not exist either",
+        "dashboard/lib/chat/artifactFence.ts:76-79 — hasFenceOpener matches only the 4 artifact tags, so a filter_journals fence is NOT suppressed while streaming; runEventChunks.ts:123-147 finalize (no-artifact branch flushes ex.content, which still contains the block) leaves it in the visible text",
+        "agent/src/http/sessions.ts:65-72 — stripDirectiveBlocks runs only at read (reload), confirming the live turn shows it raw"
+      ],
+      "wrong": "Whenever Clara follows her own doctrine (e.g. after coding a batch: 'filter to the new needs_review drafts'), the user sees an ugly raw ```filter_journals {json}``` code block in the live reply, the grid never filters (the channel is dead at all four stations: no agent emitter, no SSE branch, no dispatch call, no grid listener), and the block disappears after reload — live and persisted views of the same turn differ. The doctrine's promise is false twice over.",
+      "target": "Either build the channel end-to-end (translator extracts the fence → dispatchDirective → add the grid's DIRECTIVE_EVENT listener, which does NOT yet exist — only the dispatcher utility and asJournalDirective narrowing do) or remove the doctrine instruction; live view and reload view of a turn must be identical.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "D-4",
+      "workstream_item": "do cards render properly / streaming quality",
+      "title": "Multi-card turns are structurally broken: only the first fence is lifted, fence suppression never resets, and all post-fence prose is silently withheld from the live stream",
+      "severity": "high",
+      "evidence": [
+        "dashboard/lib/chat/runEventChunks.ts:50,90-98 — `suppressing` is set at the first fence opener (:98) and never reset; every subsequent delta only buffers (:90)",
+        "dashboard/lib/chat/runEventChunks.ts:123-147 — the artifact branch of finalize emits only closeText + the card; the stripped post-fence prose (ex.content beyond emitted) is never flushed live",
+        "dashboard/lib/chat/artifactFence.ts:57-59 and agent/src/http/sessions.ts:47-60 — both extractors lift only the FIRST fence match (single regex exec); ShapedMsg carries a single `artifact` and hydrate attaches at most one data-artifact part (hydrateTranscript.ts:32-41)",
+        "belcort/_shared/client-row.md:11,17-18 — doctrine explicitly instructs 'one client_row chip per client' and 'emit ONE chip's JSON per block (emit several blocks for several clients)'"
+      ],
+      "wrong": "A firm-level answer like 'what needs my attention?' with 3 client_row chips renders live as: prose + first card only, everything after the first fence (including more prose) invisible until reload; after reload it renders as first card + the remaining fences as raw JSON code blocks. Any prose Clara writes after a je_review/export_result card is likewise lost live.",
+      "target": "Support N artifact parts per turn (both extractors + message shape), reset suppression at the fence close, and flush post-fence prose — or constrain doctrine to exactly one trailing card and enforce it.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-5",
+      "workstream_item": "attachments: filename/type/size/upload status/OCR status/assignment status or a bare line",
+      "title": "Chat attachments are invisible in the transcript: no attachment parts, no metadata persisted, no thumbnails, no upload/OCR/assignment status, files-only turns show '(see attached)'",
+      "severity": "high",
+      "evidence": [
+        "dashboard/components/clara/ClaraTranscript.tsx:116-163 — MessageTurn renders only text, data-artifact and data-clarify parts; there is no attachment part in the vocabulary (lib/chat/hermesUIMessage.ts:41-46: artifact/tool/clarify/recovery only)",
+        "dashboard/lib/attachments.ts:141-148 — 'chat_messages persists no attachment metadata: this text is the turn's durable transcript trace'; the composer's AttachmentMeta chips exist pre-send only (ClaraComposer.tsx:248-261) and are dropped on send (:157)",
+        "dashboard/lib/chat/useHermesChat.ts:88 — a files-only turn becomes the literal text '(see attached)'",
+        "docs/design/04-agentic.md:37-38 — the design SoT promises 'thumbnail chips above the textarea with per-chip remove + upload progress'; there are no thumbnails and no progress indicator anywhere (a 5×20MB base64 POST just sits in 'submitted')",
+        "Contrast: the Documents tab does show filename/size/status/OCR-pending (components/documents/docStatus.ts:14-47) — but only there, not in chat"
+      ],
+      "wrong": "After Send, a user turn with attachments shows only its text (or '(see attached)'). Neither live nor after reload does the transcript show what was attached — no filename, type, size, no upload progress, no OCR/ingestion state, no client-assignment state, no preview, no actions. This is below the 'bare attached-file line' bar the workstream asks about — there is no line at all.",
+      "target": "Persist attachment metadata on the turn (documents row ids once ingested), render attachment chips/thumbnails on transcript turns with live status (uploading → ingested → OCR'd → assigned) and open/preview actions.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-6",
+      "workstream_item": "tool-result cards / streaming quality vs Claude-class",
+      "title": "Tool activity is effectively invisible: the humanized verb is computed then never rendered, most curated tool names map to 'Working…', tool history is never persisted, and a 60-150s cold start shows nothing in the thread",
+      "severity": "high",
+      "evidence": [
+        "dashboard/components/clara/ClaraThread.tsx:160-168 — chat.toolVerb feeds useAgentState, which consumes it as `toolActive: Boolean(input.toolVerb)` (lib/chat/useAgentState.ts:58) — boolean only; a repo grep shows the verb string is rendered nowhere; the rail header uses <PresenceDot showLabel={false}> (ClaraThread.tsx:278)",
+        "dashboard/lib/relayStream.ts:28-45 — VERB_MAP regex buckets; curated tool names draft_entry/approve_entry/assign_document/record_ar_invoice/extract_document/ingest_document match no bucket → 'Working…'; only query_books-style names map ('Checking the books…')",
+        "dashboard/lib/chat/hydrateTranscript.ts:25-27 — 'tool_calls … no landing slot in HermesUIMessage; dropped'; agent-side appendAssistant persists content only (agent/src/http/sessions.ts:169-175) — the chat_messages tool_calls column is never fed",
+        "dashboard/lib/chat/makeHermesRunner.ts:16-18 — 'A cold container takes ~60-150s to the first SSE event'; ClaraTranscript.tsx:102-114 renders nothing for an empty assistant turn (no thinking indicator, no status line)",
+        "docs/design/04-agentic.md:52,65-71 — even the design's reduced v1 promise (pre-first-token honest status line; 'v1 renders verb + phase only' as one chip per tool call) is unimplemented; 04-agentic.md:8 bans 'Working…' microcopy — which is exactly what the pipeline produces"
+      ],
+      "wrong": "During a long tool-heavy run the transcript shows an empty reply with only a small pulsing presence dot; the user cannot see that Clara is reading a document, querying the books, or drafting an entry — and after reload there is zero trace any tool ever ran. Versus Claude/Codex-class tool-call cards (named call, inputs, outputs, expandable) this is the single largest fidelity gap, and it is not even at the level the design SoT scoped for v1.",
+      "target": "Render the existing verb stream as an in-thread status line/chips (pre-first-token included), map curated tool names honestly, persist typed tool-call history, and add expandable tool-result detail per the design's recorded wire extension.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-7",
+      "workstream_item": "approval cards — do they render properly",
+      "title": "Rehydrated je_review approval cards are stale-actionable: an already-posted/rejected entry re-renders as 'Plan · needs approval' with a live Approve button",
+      "severity": "high",
+      "evidence": [
+        "dashboard/components/rail/planStateMap.ts:22-24 — planStateOf defaults every untracked entry to 'pending'; the optimistic ledger is per-mount React state (ClaraThread.tsx:138), empty after every reload/scope switch (ClaraRail.tsx:206-210 remounts ClaraThread per scope/session)",
+        "dashboard/components/rail/PlanCard.tsx:80,90,129-135 — the card gates on the `state` prop only (toConfirmation maps it to the Confirmation branches); art.status (the persisted lifecycle status, artifacts.ts:123) is never consulted for inertness",
+        "docs/design/04-agentic.md:116-118 — catalog LAW: 'cards re-hydrate identically from persisted parts forever … with stale actionable cards marked inert'"
+      ],
+      "wrong": "Open any thread containing an old je_review card: it shows the urgent 'needs approval' header and an enabled Approve & post regardless of the entry's real state. Clicking Approve on a posted entry round-trips to the DB and errors with a status-gate toast; on an entry edited since emission the user approves based on stale displayed legs while the DB posts the current ones. Safe at the DB, but the chat lies about pending work — corrosive to the trust spine and a design-law violation.",
+      "target": "Derive card state from the entry's live/persisted status on hydrate (art.status at minimum; ideally a fresh read — note art.status is itself emit-time-stale), render posted/dismissed terminal states inert.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-8",
+      "workstream_item": "clarification cards / choice cards / message persistence",
+      "title": "Clarify lifecycle is process-local and lossy: never persisted, orphaned by reload, absent from the model's own memory, answered fire-and-forget, and the card stays clickable after a free-text answer",
+      "severity": "medium",
+      "evidence": [
+        "dashboard/lib/chat/hydrateTranscript.ts:32-41 — shapedToHermesUI emits only text + artifact parts; a data-clarify part is never rehydrated (agent-side chat_messages stores no clarify rows)",
+        "agent/src/runtime/openai/runtime.ts:236-258,285-292 — the clarify Q&A lives only in the in-memory RunRecord/RunState; persistAssistant stores only the final output; sessions.ts loadHistory:253-270 reads chat_messages only, so the NEXT turn's model memory omits what the user answered",
+        "dashboard/components/clara/ClaraRail.tsx:122-132 — mount hydrates the transcript only; no reattach to active_run_id (GET /chat/messages doesn't even return it), so a reload mid-clarify hides the question while the run stays parked server-side (runtime.ts:491 — a run with a pending clarify is never evicted; server.ts:421-428 — the scope unwedges only after 15 min)",
+        "dashboard/components/clara/ClaraThread.tsx:248-256 — markClarifyResolved fires optimistically with the send; makeHermesRunner.ts:88-100 clarify() never throws on a failed POST (raiseIf401 only), so a failed answer leaves the run parked while the composer exits answer-mode",
+        "dashboard/components/clara/ClaraClarify.tsx:21-28 + ClaraTranscript.tsx:158-161 — answeredWith exists as a prop but is never passed, so after a composer-typed answer the choice buttons remain clickable and re-POST to the (possibly settled) run",
+        "docs/design/04-agentic.md:13-17 — design promise (cross-scope needs-you amber count badge + jump list; 'a clarify never times out silently … it persists as needs-you') is unbuilt — grep finds no such badge/jump-list, only PresenceDot state colors"
+      ],
+      "wrong": "Reload during a clarify: the question vanishes, the composer is normal-mode, the next message starts a new run while the old one sits parked; the transcript never shows the Q&A again; the model itself forgets the user's answer in later turns; a network blip while answering silently discards the answer.",
+      "target": "Persist clarify request/response as typed transcript rows (the greenfield interruptions table), reattach or surface parked runs on mount, ack/error the clarify POST, pin the answered state on the card from persisted data.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-9",
+      "workstream_item": "error/retry UX / SSE streaming",
+      "title": "Drop-recovery needlessly discards the final answer the poll endpoint already returns, settling on a partial with a false 'may be partial' warning",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/runtime/openai/runtime.ts:330-335 — pollRun returns `output` (the authoritative final text) for settled runs",
+        "dashboard/lib/chat/makeHermesRunner.ts:102-141 — the dashboard's poll parses only {status, pendingClarify} and drops `output`; lib/runRecovery.ts:31-41 classifyRunPollResult's terminal bucket carries only `ok`",
+        "dashboard/lib/chat/hermesChatTransport.ts:34,147-150 — a terminal poll settles the turn on the streamed partial + '⚠ Clara was interrupted mid-reply; this may be partial'; the module header's rationale (:8-16, 'the accumulated-but-undelivered content is lost service-side — there is no replay') is stale relay-era doctrine for the terminal case",
+        "agent/src/runtime/openai/runtime.ts:285-292 — the full output IS persisted, so a later reload shows the complete reply that the live view labeled partial"
+      ],
+      "wrong": "After any mid-stream blip on a run that completes, the user sees a truncated reply stamped 'may be partial' even though the complete text was one field away in the very poll response the client already made — and the same turn silently becomes complete after a reload (live/persisted divergence).",
+      "target": "When the recovery poll returns a terminal status with output, reconcile the turn to that output (same finalize path as `done`) instead of settling partial.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-10",
+      "workstream_item": "Ctrl+V paste upload path",
+      "title": "Pasted screenshots after the first are silently dropped: attachment de-dupe keys on filename and clipboard images are all named identically",
+      "severity": "medium",
+      "evidence": [
+        "dashboard/components/clara/ClaraComposer.tsx:125-129 — addFiles filters incoming by held NAME and returns with setFileError(null) when nothing is 'fresh' — no user feedback",
+        "Browsers name every pasted clipboard image 'image.png' (same name, different bytes), so the second pasted screenshot in a message is treated as a duplicate of the first"
+      ],
+      "wrong": "Paste screenshot A (attaches), paste screenshot B (silently ignored — no chip, no error). The user sends believing both are attached; only A rides the wire. Data-loss-shaped UX on the most common image path.",
+      "target": "De-dupe on content (size+hash) or uniquify names (image-2.png); at minimum surface 'already attached' feedback instead of silence.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-11",
+      "workstream_item": "long-run task visibility",
+      "title": "No visibility or reattach for in-flight chat runs across reload/navigation: the reply lands in the DB but the UI never learns",
+      "severity": "medium",
+      "evidence": [
+        "dashboard/lib/chat/hermesChatTransport.ts:263-265 — reconnectToStream returns null by design; dashboard/components/clara/ClaraRail.tsx:122-132 — mount hydrates history only; nothing reads the session's active_run_id to resume/poll",
+        "agent/src/http/server.ts:186-197 — the notifications hub nudges only proactive_notifications + books tables; db/v2/25-fns-ops.sql:1581-1606 — the trg_bs emit set is journal_entries/journal_lines/documents/client_kb_rules/kb_proposals/proactive_notifications/export_artifacts; chat_messages has NO trigger, so no signal refreshes the transcript when the reply persists",
+        "dashboard/lib/chat/hermesChatTransport.ts:4-6 + agent/src/runtime/openai/runtime.ts:225-228 — the SSE is single-consumer/non-replaying, so even a same-session second tab cannot watch a run"
+      ],
+      "wrong": "Reload (or navigate scope) during a 2-minute run: the thread renders as if nothing is happening; the run completes server-side and persists, but the answer only appears after a manual refresh or scope round-trip. There is no 'Clara is still working on X' state anywhere, and no other tab can see it. (Bulk-approve jobs DO have a tray + job SSE — chat runs have nothing.)",
+      "target": "Durable runs with reattach (poll active_run_id on mount, resume or at least show a working/settled banner and auto-refetch on completion) — aligns with the ADR-122 durable-runtime requirement.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-12",
+      "workstream_item": "approval cards — available actions",
+      "title": "je_review Edit and 'Not now' are dead in the shipped chat: ClaraThread never wires onEdit/onDismiss, so the card offers Approve only",
+      "severity": "medium",
+      "evidence": [
+        "dashboard/components/clara/ClaraThread.tsx:312-346 — ClaraTranscript is called without onEdit/onDismiss; ClaraTranscript.tsx:144-145 forwards them only if present; PlanCard.tsx:219-220 renders Edit/'Not now' buttons only when handlers exist",
+        "dashboard/components/rail/AgentCard.tsx:23-24 — the props exist and are typed, upstream support is complete (PlanCard's dismissed terminal state at :264-268 is fully built)",
+        "docs/design/04-agentic.md:101 — the catalog row promises 'Approve/Edit/Reject' on the Plan card"
+      ],
+      "wrong": "The in-chat approval card cannot route to the edit sheet or be parked ('Not now') — the two non-approve verbs the design promises. A user who disagrees with a draft has no in-thread affordance except leaving it; Edit exists only in the Journals grid.",
+      "target": "Wire onEdit (open EditEntrySheet for the entry) and onDismiss (plan-state 'dismissed') from ClaraThread at client scope.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-13",
+      "workstream_item": "drag-and-drop upload path",
+      "title": "Drag-drop is composer-only; dropping a file on the transcript triggers the browser's default (navigates away), contra the design's 'drag-drop anywhere on the thread'",
+      "severity": "medium",
+      "evidence": [
+        "dashboard/components/clara/ClaraComposer.tsx:178-216 — dragover/drop handlers live on the composer wrapper div only",
+        "repo grep — the only onDrop/onDragOver handlers in dashboard/components are ClaraComposer and DocumentsTable; no drop handlers on ClaraTranscript/MessageScroller and no document-level preventDefault anywhere in the rail",
+        "docs/design/04-agentic.md:37 — 'Attachments: button + drag-drop anywhere on the thread + paste'"
+      ],
+      "wrong": "A user dragging a PDF onto the visible conversation (the natural large target) gets the browser opening the PDF over the app — losing the composer draft (module state unloads on navigation) and thread position. The valid drop target is only the slim composer strip.",
+      "target": "Thread-wide (or rail-wide) drop zone with the existing overlay affordance; suppress default drop on the shell.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-14",
+      "workstream_item": "chat must feel Claude-class: message affordances",
+      "title": "No per-message affordances at all: no copy, no edit, no per-turn regenerate, no quote-reply; code-block copy explicitly disabled; no day dividers; live turns lack timestamps",
+      "severity": "medium",
+      "evidence": [
+        "dashboard/components/clara/ClaraTranscript.tsx:98-114 — a turn renders prose + hover timestamp only; there is no hover action row anywhere",
+        "dashboard/components/clara/StreamdownView.tsx:23 — <Streamdown … controls={false}> turns OFF the library's code-block copy/download controls; docs/design/04-agentic.md:62-63 promises 'Code blocks always get copy + language label'",
+        "docs/design/04-agentic.md:59-63 — promised v1 affordances (copy · edit-as-copy-into-composer · regenerate-as-new-turn · quote-reply) are all absent; the only retry is the turn-level error banner (ClaraThread.tsx:348-355)",
+        "dashboard/components/clara/ClaraTranscript.tsx:62-67 + lib/chat/hermesUIMessage.ts:49-55 — createdAt exists only on hydrated turns, so live turns show no timestamp until reload; no day dividers exist (04-agentic.md:31)"
+      ],
+      "wrong": "Against the Claude/Codex bar named in this workstream — and against this repo's own design SoT — the transcript is display-only: you cannot copy an answer, re-ask, or quote without manual selection. Copy on code/SQL blocks (an accountant's export surface) is deliberately disabled.",
+      "target": "Hover/roving-tabindex action row per turn (copy, copy-into-composer, resend-as-new-turn, quote), controls enabled on code blocks, day dividers, timestamps on live turns.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-15",
+      "workstream_item": "chat must feel native: composer power features",
+      "title": "No slash-commands or @-mentions in the composer (design-promised); context comes only from the scope and the rail 'reference' chips",
+      "severity": "low",
+      "evidence": [
+        "docs/design/04-agentic.md:44 — 'Slash-commands + @-mentions via a caret-anchored cmdk popover (accounts, clients, documents, entries)'",
+        "dashboard/components/clara/ClaraComposer.tsx — full read: a plain textarea; no popover, no mention/command parsing; the only entity referencing is the railChips bus (:114-119) fed from grid rows"
+      ],
+      "wrong": "The user cannot reference an account, client, document or entry from within the composer; the promised caret-anchored cmdk surface does not exist. (⌘K palette exists but is a separate, non-caret dispatch surface.)",
+      "target": "Caret-anchored mention/command popover backed by the existing read plane, per the design SoT.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-16",
+      "workstream_item": "generative-UI capability assessment",
+      "title": "Generative UI is a fixed 8-type static catalog (only 4 emittable today — see D-2): no dynamic forms, tables beyond 12 rows, charts, or workflow controls; all 6 design-planned additions unbuilt",
+      "severity": "medium",
+      "evidence": [
+        "dashboard/lib/artifacts.ts:1-18 — deliberate LAW: 'text-to-hydration, NEVER text-to-code'; the agent selects from a finite catalog, no agent-authored layout (a sound trust ceiling, correctly enforced by parseArtifact:478-495 fail-closed with caps :229-243)",
+        "docs/design/04-agentic.md:97-114 — catalog table: 8 'live' + 6 planned additions all ⬜ unbuilt: plan (multi-step plan-as-document), recon_table, doc_review (thumbnail + per-field evidence), account_combo (structured clarify picker), mini_chart (the ONLY chart anywhere), receipt",
+        "dashboard/components/rail/ReadOnlyCards.tsx / ReviewSummaryCard.tsx / PlanCard.tsx — every renderer is a hardcoded component; no chart library, no dynamic form machinery in the chat surface"
+      ],
+      "wrong": "Answering the workstream question directly: Clara cannot dynamically render context-aware cards/forms/tables/charts/workflow controls — only static hardcoded component types, and (per D-2) only je_review, export_result, suggestion and client_row can actually arrive. There is no charting capability at all, no structured input beyond clarify choice chips, and no multi-step workflow card. The static-catalog LAW is defensible for a system of record; the catalog being half-dead and the planned tier-2 cards all missing is the gap.",
+      "target": "Keep the fail-closed catalog LAW, but make every registered card reachable (D-2) and build the planned structured-input (account_combo), doc_review and mini_chart cards to close the Claude-class interactivity gap.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "D-17",
+      "workstream_item": "error/retry UX",
+      "title": "Regenerate after a failed attachment turn likely re-sends the text without the files (per-call body not replayed)",
+      "severity": "low",
+      "evidence": [
+        "dashboard/lib/chat/useHermesChat.ts:92-93 — documents ride ChatRequestOptions.body on the ORIGINAL sendMessage call only",
+        "dashboard/lib/chat/hermesChatTransport.ts:237-241 — sendMessages reads options.body.documents; chat.regenerate() (useHermesChat.ts:109) passes no body, so the re-POST would carry message text only"
+      ],
+      "wrong": "Clicking Retry on an errored attachment turn plausibly re-runs the turn without its files — Clara answers '(see attached)' with nothing attached. Marked plausible: AI SDK 6's regenerate body-replay semantics were not verified against the library source.",
+      "target": "Cache the turn's WireDocs until the turn settles successfully and replay them on regenerate, or disable Retry for attachment turns with honest copy.",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "SSE streaming core is robust and well-engineered: line-buffered frame decoding tolerant of both event-name dialects (assistant.delta/message.delta, assistant.completed/run.completed), keepalive comments ignored, 25s server heartbeat, 150s headers-only deadline with unbounded body read, early stream-close on terminal event (fixes the frozen-mid-word bug), single-consumer + firm-bound streams (WIRE-03 IDOR guards on events/poll/clarify)",
+      "evidence": ["dashboard/lib/relayStream.ts:47-81", "agent/src/http/server.ts:151-157,434-449", "dashboard/lib/chat/makeHermesRunner.ts:16-18,69-86", "dashboard/lib/chat/hermesChatTransport.ts:191-209", "agent/src/runtime/openai/runtime.ts:211-228,304-307,326-328"]
+    },
+    {
+      "claim": "Streaming markdown rendering is genuinely Claude-class where it works: Streamdown 2.5 with parseIncompleteMarkdown, per-word fade honoring prefers-reduced-motion, fence-flash suppression for the 4 live card tags, and an accounting-safe screen-reader sentence-flush mirror (polite, whole sentences, never split decimals)",
+      "evidence": ["dashboard/components/clara/ClaraMarkdown.tsx:32-58", "dashboard/components/clara/StreamdownView.tsx:21-27", "dashboard/lib/chat/runEventChunks.ts:35-41,84-99", "dashboard/package.json:41"]
+    },
+    {
+      "claim": "Scroll behavior is polished: use-stick-to-bottom engine, pin-user-turn-to-top-on-send with self-guarded ResizeObserver spacer, '↓ latest' pill, auto-follow that never yanks a scrolled-up reader, instant under reduced motion, keyboard-focusable role=log region",
+      "evidence": ["dashboard/components/clara/MessageScroller.tsx:23-109", "dashboard/components/clara/ClaraTranscript.tsx:179-219"]
+    },
+    {
+      "claim": "Message persistence + pagination are solid: DB-backed per-(firm,user,scope) sessions via audited SECURITY DEFINER fns on the caller's JWT, id-keyset pagination (limit+1/before, 50 default 200 max), read-only 'Show earlier' lead pages, archived sessions browsable read-only, reset guarded by run-in-flight 409 with a 15-min stale-run escape, raw-persist + shape-at-read (recoverable if extraction rules change)",
+      "evidence": ["agent/src/http/sessions.ts:113-272", "agent/src/http/server.ts:337-431", "dashboard/lib/chat/sessionsApi.ts:44-84", "dashboard/components/clara/ClaraRail.tsx:121-170,177-199", "dashboard/components/clara/SessionMenu.tsx:56-106"]
+    },
+    {
+      "claim": "All three chat upload paths exist in code and share one validation pipeline: paperclip file picker, drag-drop over the composer (with visible overlay), and Ctrl+V paste — cumulative caps (5 files/20MB each), MIME allowlist mirroring the agent gate (PDF/PNG/JPEG/WebP/TIFF/HEIC/XML with .xml MIME normalization), inline first-failure-wins errors, 32,768-char message cap surfaced inline; server re-validates independently (defense in depth) and the 150MB body ceiling is sized to the cap",
+      "evidence": ["dashboard/components/clara/ClaraComposer.tsx:125-216,276-297", "dashboard/lib/attachments.ts:7-110", "agent/src/http/documents.ts:7-63", "agent/src/http/server.ts:61-67"]
+    },
+    {
+      "claim": "Uploaded documents CAN be OCRed and referenced later — via the agent tool chain when a run actually executes (the composer/chat path; the Documents-tab path is D-1): attachments ride the POST as b64, the runtime injects a facts-only manifest (index/filename/MIME/bytes/sha256), and the model calls upload_document → ingest_document (idempotent on sha256 — db/v2/tests/documents_ingest_idempotency_test.sql) → extract_document (deterministic OCR engine, agent/src/ocr/azureDocai.ts); the Documents tab then offers preview (DocumentExpand), signed-URL open ('o' key, 600s TTL), and OCR-pending/coded status display",
+      "evidence": ["agent/src/runtime/openai/runtime.ts:48-58,192", "agent/src/tools/buildTools.ts:239-339", "agent/src/ocr/azureDocai.ts", "dashboard/components/documents/DocumentsTable.tsx:140-158", "dashboard/components/documents/docStatus.ts:14-47"]
+    },
+    {
+      "claim": "The clarify LIVE flow (when nothing drops) is well-built: first-class card with enumerated choice chips + free-text escape, composer answer-mode with visible banner and Esc ladder (Stop > cancel-answer > collapse), answering resumes the SAME suspended run over the open SSE (RunState approve/resume), injection-sanitized answers (sanitizeClarify), and the CLARA-01 guard prevents stray answers to settled runs",
+      "evidence": ["dashboard/components/clara/ClaraClarify.tsx:24-70", "dashboard/components/clara/ClaraComposer.tsx:94,117,163-169,219-224", "agent/src/runtime/openai/runtime.ts:236-258,301-322", "dashboard/lib/chat/hermesChatTransport.ts:247-261", "dashboard/lib/chat/useHermesChat.ts:69-73"]
+    },
+    {
+      "claim": "The artifact validation gate is a genuine security asset: fail-closed discriminated parsing, bounded strings/rows/files/chips, safe-integer cents, strict slug charset preventing in-app open-redirect, no raw HTML anywhere (no dangerouslySetInnerHTML over agent output; Streamdown keeps sanitised defaults), unknown types render nothing",
+      "evidence": ["dashboard/lib/artifacts.ts:229-500", "dashboard/lib/chat/runEventChunks.ts:127-133", "dashboard/components/rail/AgentCard.tsx:68-90"]
+    },
+    {
+      "claim": "Error/offline UX has honest foundations: turn-level error banner with Retry, scope-mismatch write blocks with dismissible reason, durable relay-offline latch feeding a global banner + composer disable ('nothing posts'), expired-session Approve rendered inert with a note, lossy drop-recovery clearly labels partials rather than fabricating (though see D-9 for the terminal case), session-expiry 401 signal raised once idempotently",
+      "evidence": ["dashboard/components/clara/ClaraThread.tsx:154-172,200-218,348-364", "dashboard/components/rail/PlanCard.tsx:107-116,222-230", "dashboard/lib/chat/hermesChatTransport.ts:29-34,106-155", "dashboard/lib/chat/makeHermesRunner.ts:25-31"]
+    },
+    {
+      "claim": "The je_review approval card itself (fresh, live, client scope) is strong: exact-balance cue distinct from the ≤5¢ posting gate, SST tax legs always visible, evidence glyph + declared-risk tier rendered never derived, durable RULE/AUTO/MATCHED authorship badge shared with the grid, source-document provenance chip, posted-state 'View in Journals' jump, role-gated with honest read-only copy, non-blocking role=group (never a focus trap)",
+      "evidence": ["dashboard/components/rail/PlanCard.tsx:80-269", "dashboard/components/rail/planCardModel.ts", "dashboard/components/clara/ClaraTranscript.tsx:122-136"]
+    },
+    {
+      "claim": "Session hygiene details are right: per-scope draft persistence across remounts, prefill seeds (⌘K ask + window event bus that expands a collapsed rail), files-only turns not silently dropped, viewer role honestly blocked from messaging, empty-state suggested prompts, per-thread state remounted clean on scope switch (no cross-client leakage)",
+      "evidence": ["dashboard/components/clara/ClaraComposer.tsx:64-102", "dashboard/components/clara/ClaraRail.tsx:60-78,206-235", "dashboard/lib/chat/useHermesChat.ts:76-94", "dashboard/components/clara/ClaraThread.tsx:96-113,258-269,329-345"]
+    }
+  ],
+  "unverified": [
+    "The audit brief (undefined/audit-brief.md) and the two prescribed evidence maps (undefined/maps/dashboard-map.md, undefined/maps/agent-map.md) do not exist in the repo — only undefined/maps/db-map.md does. Verification proceeded directly against the code; severity rubric applied is critical/high/medium/low.",
+    "D-17 (regenerate dropping attachments) remains PLAUSIBLE, not exercised — AI SDK 6's regenerate/body-replay semantics were not verified against the installed library source; the finding is stated as hedged and its code-side evidence (per-call body, no body on regenerate) is confirmed.",
+    "Whether the agent's model loop actually survives a client SSE disconnect to completion (res.write on a closed socket not aborting the for-await loop in server.ts:441-447) is inferred from Node semantics + the persistAssistant design, not exercised — if it does NOT survive, D-11 worsens (the reply would never persist).",
+    "Streamdown 2.5's `controls={false}` disabling code-block copy controls (D-14) is inferred from the library's documented prop and the deliberate in-code usage, not exercised in a browser.",
+    "No live/runtime testing was possible (frozen read-only repo, no deploy touched): every finding is static analysis of code + doctrine. In particular, whether gpt-5.5 ever spontaneously emits the undocumented kv_summary/journal_table/sst_summary fences (which would render as raw JSON live, then as cards after reload via the hydrate extractor's 7-tag regex) was not observed.",
+    "The onboarding/ceremony bootstrap chat (/bootstrap/chat via useOnboardingRun, cinematic interview) rides the same SSE decoder but was not audited in depth — adjacent surface, likely shares D-3/D-4-class fence behaviors.",
+    "Visual polish (Ledger Glass fidelity, exact a11y contrast, motion feel) was not assessed in a browser; only the code-level a11y/motion mechanics were verified.",
+    "dashboard/lib/chat/__tests__ and component test suites were not executed (read-only audit); claims about tested behavior rely on reading the source, not on green runs."
+  ],
+  "decision_brief": "Adversarial verification of workstream D: 16 of 17 draft findings CONFIRMED against the cited source lines, 1 ADJUSTED (D-3 — the finding is real and in fact worse than drafted: the filter_journals directive channel is dead at all four stations, since even the 'grid listener' the draft's fix assumed exists turns out to be test-only; no production listener for DIRECTIVE_EVENT exists), 0 REFUTED. Verdict unchanged in substance: the chat panel's FOUNDATIONS are unusually good — the SSE transport (dual-dialect decoder, heartbeats, firm-bound single-consumer streams), streaming markdown (Streamdown + SR sentence-flush), scroll physics, DB-backed persistence/pagination on audited fns, the fail-closed artifact gate, and the clarify live-flow are genuinely Claude-class engineering — but the EXPERIENCE fails the 'native modern assistant' bar because the layer between agent and UI is half-dead. One critical: the Documents-tab upload (the self-declared ONLY ingest path) POSTs a run that nothing ever executes (startRun registers, only an SSE attach drives streamRun — the wake path even documents this contract and drains itself), toasts success, persists a ghost user turn, and 409-wedges session reset for 15 minutes (D-1). Five highs cluster on the unfinished emission seam: half the 8-card registry unreachable with dead native artifact wire vocabulary on both ends (D-2), doctrine-instructed directives rendering as raw JSON live with no consumer (D-3), structurally broken multi-card turns with post-fence prose lost live (D-4), attachments invisible in the transcript (D-5), tool activity invisible — verb computed then rendered nowhere, curated tools mapped to the design-banned 'Working…', zero persisted tool history, blank thread through 60-150s cold starts (D-6) — plus stale-actionable rehydrated approval cards violating the catalog's own inertness law (D-7). Rebuild guidance: keep the transport/rendering/persistence spine and the artifact-gate LAW (salvage-grade); design the emission contract (agent→card/directive), attachment surfacing, tool-activity display, and durable-run visibility as first-class wire features, not fenced-text conventions — every doctrine promise of 'the runtime lifts it off the stream' is currently false. Note: the prescribed audit-brief.md and dashboard/agent maps did not exist; db-map.md plus direct code evidence (including db/v2 trigger sets and doctrine greps) was used throughout."
+}

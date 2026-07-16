@@ -1,0 +1,256 @@
+{
+  "workstream": "Workstream G (part 2): Grounding, database context, tool surface, action safety (G2 grounding / G3 DB context / G4 schema intelligence + sqlGuard / G5 numbers-from-DB / G8 super-UI / G9 skill-first / G10 action safety) — ADVERSARIALLY VERIFIED. Frozen repo C:\\Users\\zhant\\Desktop\\initial acc software skillmd @ master ac0a684f, read-only. Every cited line re-opened; severities recalibrated for correctness/isolation weight.",
+  "decision_brief": "No audit-brief.md exists at undefined/audit-brief.md (only undefined/maps/db-map.md and the sibling findings/*.json are present); the severity rubric and output contract were taken from the task instructions. Verification outcome: the load-bearing critical (Ggr-1, the SELECT-wrapped SECURITY-DEFINER mutation-bypass) is CONFIRMED against the actual guard code, the fn grants, and standard Postgres definer-in-invoker semantics. agent_select (26-fns-session.sql:119-141) is `volatile security invoker` with only a lexical guard and NO `set transaction read only` / no read-only role, so `select approve_entry(1,2,'x')` passes the TS guard (sqlGuard.ts:57-85) AND the DB guard (26-fns-session.sql:129-135) and executes approve_entry (SECURITY DEFINER, granted authenticated, 20-fns-journal.sql:166,212) with definer rights. IMPORTANT precision (verified): the target fn's OWN internal guards still fire on the wrapped call — app.assert_firm_owns_client keeps it in-firm (no cross-firm leak), app.assert_can_review enforces the bookkeeper+ floor (no viewer→writer escalation), and app.audit_actor clamps the actor to 'agent' or the caller identity. So Ggr-1 is a TOOL-LAYER bypass, not a DB-guard bypass: it defeats the active-scope write-gate (enforceScope — a same-firm NON-active-scope client can be mutated) and, most seriously, the per-wake speak-never-act policy (WRITE_ALLOW — the wake credential mints firm_role:'bookkeeper', so a proactive/workbench-kb wake passes assert_can_review and can invoke any granted write via a wrapped call). Critical stands because it breaks the 'firm-killing invariant' the tool layer exists to enforce (buildTools.ts:18) and it is untested (90-isolation-tests.sql:277-280 probes only update/drop/delete text). Query reads are additionally unlogged. The second structural spine: the ONLY general read path is freeform query_books — curated reads are 9 fns while ~14+ workflow read fns are granted-but-not-tools — so whole workflows must hand-write SQL through the exact surface Ggr-1 rides. Several draft findings framed as `high` are genuine but are target-architecture / robustness / forensic gaps with no active correctness-or-isolation harm (no distilled doctrine pack, no per-client context pack, no period/entity scope axis, no schema map, unlogged reads, skill-first is convention-not-gate) — recalibrated to `medium`; the two that force the vulnerable surface (Ggr-2) or open an actual unsupervised-mutation path (Ggr-7) stay `high`. Ggr-4 is reframed (the dropped dml_audit is justified — direct DML is revoked — so the real gap is unlogged reads plus the Ggr-1 route, not a mutation-audit hole). Ggr-13 is reframed (the canon does NOT require every draft to cite a rule and draft_entry's provenance RAISE matches the canon; the real, confirmed gap is that finalize_coding structurally enforces only the auto_draft↔risk_auto label bind while 4 of the 6 auto-post conditions are model-asserted). Ggr-11 is downgraded to `low` (purely latent — only clarify_tool sets needsApproval today, so nothing is currently auto-approved). Genuinely structural and worth preserving (all re-verified): the closed-period lock trigger (tested), the deferred SECURITY-DEFINER balance trigger, cross-firm isolation via assert_firm_owns_client + the (client_id,account_code) composite FK, the bookkeeper+/admin+ RBAC floors that also fence the wake credential, layer-set + DB-clamped actor on the curated path, the format-only export/report/analysis renderers (DB computes every figure), and the no-shell/psql/file/web token guard. The rebuild should keep these but make the agent read path structurally read-only, give every workflow a curated/typed read tool, audit every agent query, gate skill-load + context-load before consequential writes, add a period/entity axis + durable per-conversation working context, make wake autonomy an allowlist per mutation class, and ship a clean current doctrine pack (the resident AGENTS.md still names the wrong OCR vendor) plus a per-client context pack.",
+  "findings": [
+    {
+      "id": "Ggr-1",
+      "workstream_item": "G4",
+      "title": "query_books SELECT can invoke a SECURITY DEFINER write fn — tool-layer mutation-bypass confirmed at BOTH the TS guard and the DB guard",
+      "severity": "critical",
+      "evidence": [
+        "agent/src/tools/sqlGuard.ts:57-85 — assertReadOnlySql is purely lexical: rejects ANYWHERE_VERBS ['insert','update','delete','merge','truncate','drop','alter','grant','revoke'] as whole words and STMT_START_VERBS only at a statement/CTE head. A function CALL in a SELECT target list (`select approve_entry(1,2,'x')`) contains none of these and passes; the file header (sqlGuard.ts:1-7) calls itself 'Defence-in-depth ONLY'.",
+        "agent/src/tools/buildTools.ts:110-122 queryToolDef runs assertReadOnlySql then ctx.query(safe); it is pushed under EVERY policy (buildTools.ts:375), so proactive / documents / workbench-kb / interactive lanes all reach it — bypassing the buildFnToolDef enforcement core (policyAllows/WRITE_ALLOW at 28-33, enforceScope at 54-79, injectActor at 81-89) which only runs on the curated rpc path.",
+        "agent/src/runtime/openai/db.ts:58-65 — ctx.query routes to rpc('agent_select',{p_sql}); the header comment (db.ts:6-9) claims agent_select is 'READ ONLY', but the fn sets NO read-only transaction and switches to NO read-only role.",
+        "db/v2/26-fns-session.sql:119-141 — agent_select is `language plpgsql volatile security invoker`; its guard (129-135) rejects the same verb list plus create/copy/call, then `execute format('select ... from (%s) __q', p_sql)`. `select approve_entry(...)` matches no banned token ('call' blocks the CALL statement, not a function call), and there is only `set local statement_timeout='5s'` — no `set transaction read only` / no `default_transaction_read_only`.",
+        "db/v2/20-fns-journal.sql:166,212 — approve_entry is `security definer` granted to `authenticated`; a SECURITY DEFINER fn invoked from within the SECURITY INVOKER agent_select runs with the DEFINER's rights, so the caller's EXECUTE-only-no-write-grant posture does not stop it and the write commits. reverse_entry (22-fns-documents-recon.sql:771,842), edit_entry, finalize_coding, run_depreciation, record_year_end_close are likewise definer+granted and wrappable.",
+        "db/v2/90-isolation-tests.sql:277-280 — the only agent_select write-guard probes are `update`, `select 1; drop table`, and `delete`; a SELECT-wrapped definer call is never tested, so this path is unverified and unblocked in the suite.",
+        "SURVIVING mitigators (verified — this narrows blast radius, keeps it critical): on the wrapped call the target fn's OWN guards still fire — app.assert_firm_owns_client (20-fns-journal.sql:178) keeps it in-firm (NOT a cross-firm leak), app.assert_can_review (00-foundation.sql:152-161) enforces bookkeeper+ (NO viewer→writer escalation), and app.audit_actor (00-foundation.sql:212-229) clamps the actor. What is bypassed is the TOOL layer: enforceScope (a same-firm non-active-scope client can be mutated) and, critically, WRITE_ALLOW — the wake credential mints firm_role:'bookkeeper' (wakeCredential.ts:72) so a proactive/workbench-kb speak-never-act wake passes assert_can_review and can invoke any granted write via a wrapped call. This is the recorded SDT-001/SEC-001 class, now confirmed to pass the DB-side guard too."
+      ],
+      "wrong": "The agent's one freeform read tool is only lexically read-only at both the TS and DB layers, with no transactional or role-level read-only barrier, so it can execute any granted SECURITY DEFINER write fn wrapped in a SELECT. Firm isolation, the bookkeeper+ RBAC floor, and the audited actor survive (the DB fn's internal guards fire), but the tool-layer active-scope write-gate and the per-wake speak-never-act policy are defeated — a proactive wake or a non-active-scope-client turn can post/approve/reverse via a wrapped call the curated tool layer would have blocked, and it is untested.",
+      "target": "Make the agent read path STRUCTURALLY read-only: eliminate freeform SQL for a sufficient curated/typed read layer, or run agent SQL under a role with NO EXECUTE on any volatile/SECURITY DEFINER write fn (a read-only replica role, or EXECUTE only on the STABLE read fns) and set default_transaction_read_only. A verb-based string filter is not a security boundary. Add an isolation test asserting a SELECT-wrapped definer write is refused.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Ggr-2",
+      "workstream_item": "G4",
+      "title": "Curated read-tool surface is insufficient — whole accounting-workflow read families exist as granted DB fns but are not tools, forcing freeform SQL",
+      "severity": "high",
+      "evidence": [
+        "agent/src/tools/registry/reads.ts — the curated READS set is exactly 9 fns: client_trial_balance, trial_balance_range, journal_entry_detail, firm_activity_feed, resolve_counterparty, auto_draft_review_batch, get_job, list_jobs, suggest_recon_counterparty.",
+        "db/v2 defines and GRANTS TO authenticated many more read fns that are NOT in TOOL_REGISTRY (grants verified): ar_aging / ap_aging (23-fns-subledger.sql:530,534), ar_control_tie_out (587), customer_statement (673), fa_register (23b:385), fa_control_tie_out (23b:472), adjustments_status (23c:690), get_tax_computation (23d:483), get_sst_return (23e:843), client_general_ledger (28-fns-reads.sql:560), client_financial_statements (28:790), client_overview (28:904); also-defined (grants not each individually read): supplier_statement, ap_control_tie_out, fa_depreciation_schedule, amortisation_schedule_detail, client_trial_balance_comparative, firm_needs_attention, firm_digest.",
+        "Workflows with no curated read path reach data only via query_books freeform SQL: bank-recon reads statement lines through query_books; coa-coding says 'Load the extracted JSONB data from the document table' and browse client_kb_rules/coa_accounts via query_books (belcort/coa-coding/SKILL.md:40,49-55). There is no curated read tool for AR/AP aging, statements, GL, FS, FA register, tie-outs, tax/SST computation, KB rules, or period/lock status."
+      ],
+      "wrong": "An authorized read that should be a first-class, structurally-safe, individually-describable tool is instead reachable only by the model hand-writing SQL through the exact freeform surface that carries the Ggr-1 bypass and the Ggr-3 schema-guessing risk. backend.md and AGENTS §15 present the curated surface as the access path, but for AR/AP aging, statements, GL/FS, FA register, tie-outs, tax/SST, KB rules and period/lock status it is not.",
+      "target": "Provide a curated (or typed/generated) read tool for every workflow's authorized data so no workflow needs freeform SQL. Treat 'a workflow with no curated read path' as a build gate; make the read layer enumerable and mapped to the workflows that need it.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Ggr-7",
+      "workstream_item": "G10",
+      "title": "[documents] wake lane can post/approve/reverse/depreciate/close unsupervised — permissive write BLOCKLIST + bookkeeper RBAC, narrowed only by doctrine prose",
+      "severity": "high",
+      "evidence": [
+        "agent/src/tools/buildTools.ts:19-33 — WRITE_ALLOW.documents is a BLOCKLIST: `(n) => !['create_firm','onboard_client','seed_client_coa','seed_client_knowledge','seed_opening_carry_forward'].includes(n)`. approve_entry, reverse_entry, edit_entry, run_depreciation, dispose_fixed_asset, record_year_end_close, build_export are all reachable in the [documents] lane (confirmed registered write tools in registry/journal.ts, fixedAssets.ts, ops.ts, and build_export/analysis pushed for the documents policy at buildTools.ts:384-389).",
+        "agent/src/runtime/wakeCredential.ts:63-73 — the wake credential mints role 'authenticated' + firm_role:'bookkeeper'; its own comment (66-71) states this makes 'the bookkeeper+ HUMAN-decision fns that 2d re-gated (reverse_entry / update_client_profile / …) additionally pass — a wake lane's TOOL POLICY is what fences those'. So app.assert_can_review (00-foundation.sql:152-161) PASSES for a wake; only the blocklist stands between the wake and reverse/close.",
+        "agent/src/http/wakes.ts:30-39 — CONDITION_WAKE_KIND maps document_triaged (a document_audit INSERT: assign/reassign/sample/code) → the 'documents' MAY-act lane; inject.ts:38-39 ('[documents] Act on the human's verb (assign/reassign/code/sample) via review-queue') is the only narrowing — prompt framing, not a structural fence.",
+        "docs/architecture/backend.md:92 asserts 'Every wake is speak-never-act', which directly contradicts wakes.ts (documents = 'MAY-act') and the permissive blocklist.",
+        "Compounded by Ggr-1: every wake lane also carries query_books, so even the proactive/workbench-kb lanes can reach any granted write via a SELECT-wrapped definer call, defeating the blocklist entirely."
+      ],
+      "wrong": "backend.md claims every wake is speak-never-act, but the [documents] lane can execute posting/reversing/editing/depreciation/close writes with only a bookkeeper RBAC floor (which the wake credential satisfies) and a prose fence. Consequential, sometimes irreversible, book mutations can occur on a wake with no human authorization verb — and the Ggr-1 freeform path removes even the lane blocklist.",
+      "target": "Make wake autonomy an explicit DB-owned per-mutation-class policy (ALLOWLIST, not blocklist), default fail-to-draft-only; no wake lane should carry a freeform SQL tool; consequential/irreversible writes from a wake must require a human authorization verb or a materiality-gated policy. Reconcile backend.md's 'speak-never-act' claim with the actual documents-lane capability.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Ggr-9",
+      "workstream_item": "G5",
+      "title": "No-model-math is structural only for DERIVED totals; primary draft amounts are model-transcribed with no source-tie check",
+      "severity": "medium",
+      "evidence": [
+        "Derived/aggregate figures ARE DB-owned: client_trial_balance/trial_balance_range/tie-outs are read fns; compute_sst_leg computes the tax leg (20-fns-journal.sql:42-72); export/report/analysis renderers only FORMAT — exportTool.ts:85-124 builds SQL from validated/escaped literals and the DB joins/returns cents; reportModel.ts:110-127 maps DB cents through M()/T() and takes totals from tb.total_debit_cents/total_credit_cents (DB), 'balanced' a display boolean (122,262); analysisTool.ts:4-10 has Clara supply the SELECT and Postgres compute every number, stamped 'Analytical view — not an audited financial statement'.",
+        "But draft_entry (db/v2/20-fns-journal.sql:112-116) inserts model-supplied debit_cents/credit_cents with NO check they match any source document; the deferred balance trigger (15-triggers.sql:33-64) only asserts Σdr=Σcr and non-zero at commit, not that the amounts are the invoice's amounts. Primary transaction amounts on a draft are transcribed by the model from OCR/prose.",
+        "Combined with Ggr-1/analysisTool.ts, the model can run arbitrary aggregation SQL and narrate/render the (DB-computed, but model-chosen) result as an authoritative-looking view."
+      ],
+      "wrong": "The invariant 'the agent never computes a figure' is enforced structurally only for derived totals; the amounts the model transcribes onto a draft line are not validated against their source, and the balance trigger checks internal consistency (Σdr=Σcr), not source-correctness. Nothing structurally ties a drafted amount to the extracted document field it came from.",
+      "target": "Bind drafted document-origin amounts to their source (require OCR field/region provenance and validate legs against it) and keep all aggregation/derivation in DB fns the model cannot rewrite, so any figure the agent surfaces is a passthrough of a DB-owned value.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Ggr-12",
+      "workstream_item": "G3",
+      "title": "Multi-entity/branch/currency scope is effectively unsupported — currency_default column exists but the ledger is MYR bigint-cents only, no branch/FX dimension",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/10-tables-core.sql:30 — clients.currency_default default 'MYR'; but journal_lines amounts are plain bigint debit_cents/credit_cents (10-tables-core.sql:168-169) with no currency/FX columns anywhere (grep for fx_/exchange_rate/foreign_currency across db/v2/*.sql returns nothing).",
+        "No branch/segment/entity_group table or column exists (the sole 'segment' hit, 28-fns-reads.sql:783, is statement-period prose, not an entity segment).",
+        "ActiveScope carries no entity/branch/currency axis (agent/src/runtime/types.ts:34-37)."
+      ],
+      "wrong": "If any client keeps foreign-currency records or multiple branches/segments, the agent has no data model or context axis to see or code them correctly; currency_default is a label with no FX ledger behind it.",
+      "target": "Decide multi-currency/branch scope explicitly for the rebuild; if in scope, add FX-aware ledger columns and a branch/segment dimension plus context axes, otherwise document the single-MYR-single-entity constraint as a hard product boundary so the agent never silently mis-handles a multi-entity/FX client.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Ggr-3",
+      "workstream_item": "G4",
+      "title": "No schema map / tool-to-table / workflow-to-data map; schema knowledge is prose + hardcoded per-wake hints that leak hallucinated legacy names",
+      "severity": "medium",
+      "evidence": [
+        "No schema-map artifact exists in agent/src or belcort/. The model's only schema knowledge is tool descriptions (registry/*.ts), skill-body prose, and hardcoded column-name hints in wake notes.",
+        "agent/src/runtime/inject.ts:58-63 — the journal wake read-hint hand-enumerates 'Useful columns' for journal_entries/journal_lines/coa_accounts and literally instructs 'Do not use legacy names: chart_of_accounts, active, source_document_id, or journal_entries.entry_id.' An explicit anti-legacy-name instruction is direct evidence the model has hallucinated old schema.",
+        "belcort/coa-coding/SKILL.md:49,52 tells the model to 'Load the ClientContext once … browse the client's tables' and to 'Load the extracted JSONB data from the document table, to have the extarted field' (sic) — there is no ClientContext tool or structured schema the model can rely on."
+      ],
+      "wrong": "There is no machine-usable schema/tool-to-table/workflow-to-data map, so when a workflow must use freeform SQL the model reconstructs table and column names from lossy prose and per-wake string hints — a hallucination surface the code itself patches with negative instructions. The failure mode is a query error (Postgres rejects an unknown column), not silent wrong data, which is why this is a robustness rather than a correctness gap.",
+      "target": "Ship a first-class schema/data-dictionary the agent can consult, or (better) remove the need by giving it typed read tools per Ggr-2 so it never names a table/column; provide an explicit workflow-to-data-requirements mapping so each skill knows exactly which reads to run.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Ggr-4",
+      "workstream_item": "G4",
+      "title": "Query auditing is not real — agent_select reads are unlogged; the catch-all DML audit was removed (its bypass route is now Ggr-1)",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/26-fns-session.sql:119-140 — agent_select executes arbitrary SELECT text and returns rows; it writes NO audit row of the SQL it ran, so every agent READ over client books is invisible.",
+        "db/v2/25-fns-ops.sql:36-38 — 'the firm_activity_feed dml_audit source (src 5) is DROPPED: ADR-030 revokes all direct DML' — the residual-DML audit net is gone. Its stated justification (direct DML no longer possible) is sound for the curated path; the Ggr-1 wrapped-definer route re-introduces a mutation path this net would otherwise have caught.",
+        "Mutations remain per-fn audited: each write fn writes its own history row (e.g. journal_entry_history in approve_entry, 20-fns-journal.sql:208-209) with an app.audit_actor-constrained actor (00-foundation.sql:212-229). So a Ggr-1 SELECT-wrapped write is audited by the target fn's own trail; the gap is unlogged reads and the missing catch-all net."
+      ],
+      "wrong": "Reads over client books are unattributable and non-replayable (agent_select logs nothing), and the generic mutation audit net was dropped. Mutations still write their own constrained-actor history row, so this is a forensic/traceability completeness gap for an audit-grade OS rather than an unaudited-mutation hole.",
+      "target": "Log every agent-issued query (statement, caller, firm, timestamp, row-count) in a durable RLS-scoped audit table, and re-establish a catch-all mutation audit so reads are attributable/replayable and any bypass write leaves more than the target fn's own trail.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Ggr-5",
+      "workstream_item": "G9",
+      "title": "Skill-first execution is convention, not a gate — no structural check that read_skill (or the required context reads) precede a write tool",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/tools/buildTools.ts:92-107 — buildFnToolDef.execute enforces policyAllows → enforceScope → injectActor → rpc. Nothing checks whether read_skill(name) was called this run.",
+        "read_skill / read_reference are ordinary tools (buildTools.ts:157-202) with no side effect on write eligibility.",
+        "The only 'enforcement' is prose: belcort/AGENTS.md §8 ('I MUST call read_skill before I act … I NEVER call a write/commit tool … whose body I have not loaded THIS run') and the runtime's flow-control nudge injected into the clarify tool result (agent/src/runtime/openai/tools.ts:62).",
+        "Mitigating floor: the hard DB invariants hold regardless of skill-load — balance trigger, closed-period trigger, RBAC floors, firm-ownership, and (when cited) the confirmed-rule check — so a skill-skip risks procedural/quality error, not a bypass of the DB-owned invariants."
+      ],
+      "wrong": "A model that skips read_skill (or skips the client-context reads a skill mandates) can still call onboard_client, draft_entry, finalize_coding, approve_entry, record_year_end_close, etc. 'Load the procedure and the client context before acting' is prompt-enforced only, so premature/under-grounded action is not structurally prevented — the harm is bounded by the DB invariants but the grounding-before-action requirement is not a gate.",
+      "target": "Gate consequential writes on a satisfied precondition set (the relevant skill body loaded this run AND the required client-context reads performed), enforced in the tool layer or a planner/verifier step rather than in doctrine prose.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Ggr-6",
+      "workstream_item": "G2",
+      "title": "No distilled product-doctrine pack and no bundled per-client context pack; profile/COA/FY/tax/banks/KB/open-items retrieval is model-discretion",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/doctrine/loader.ts:91-109 — the resident systemInstructions are SOUL.md (2318 bytes) + AGENTS.md (19873 bytes) loaded verbatim + a rendered routing menu; there is no compact, curated product-doctrine distillation.",
+        "There is no context-pack tool that returns a client's profile + COA + FY/period + tax regime + banks + open items + KB rules in one grounded payload. belcort/coa-coding/SKILL.md:49 tells the model to 'Load the ClientContext once' but no such tool exists — it must assemble context ad hoc via query_books.",
+        "No curated read tool exists for client_kb_rules or client_fy_close (period/lock/close status), so 'retrieve the KB and the FY/period before proposing actions' is only possible via freeform SQL (Ggr-2), at the model's discretion."
+      ],
+      "wrong": "Grounding before action depends on the model choosing to run the right reads, over stale verbatim doctrine, rather than on a curated product-doctrine pack plus an authoritative per-client context pack delivered up front. The North-Star 'agent as a grounded super-UI' has no context substrate — a target-architecture gap rather than an active defect.",
+      "target": "Build a distilled, current product-doctrine pack (not raw verbatim mandates) and a first-class per-client context pack (profile, COA + normal balances, FY/period + lock/close status, tax regime, banks, open items, KB rules, recon hints, FA register summary) retrieved/attached before the agent proposes any action for a client.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Ggr-8",
+      "workstream_item": "G8",
+      "title": "The agent is a scope-follower, not a super-UI owner — ActiveScope carries no period/entity dimension and there is no durable per-conversation working context",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/runtime/types.ts:34-37 — ActiveScope is exactly {clientId, clientSlug}; there is NO period/FY/entity/branch/currency dimension.",
+        "dashboard/lib/activeScope.ts:15-36 — the dashboard owns the active-scope selection and its write-gate; the file's own comment calls it 'A NO-OP for today's single-client UX'. The agent's write-gate merely mirrors the passed-in scope (buildTools.ts:54-79); the agent does not autonomously carry or advance scope.",
+        "Cross-turn memory is cold transcript replay: loadHistory returns the last ≤40 (cap 100) turns of one session as prose (agent/src/http/sessions.ts:253-270); run state is process-local (runtime.ts:136, cross-verified in workstream Grt). No server-side working context (client profile, COA, FY, open items) persists across a workflow — each turn re-derives it via reads.",
+        "Period is re-computed per skill from query_books (belcort/period-entries, year-end-close skills) rather than being a carried context axis."
+      ],
+      "wrong": "The North-Star 'stateful super-UI over the whole product that carries client + period context across workflows' is not met: the dashboard drives scope, the agent has no period/entity axis, and every turn reloads client context from scratch. This is a capability/architecture gap for the rebuild target, not an active correctness or isolation defect.",
+      "target": "Give the agent a durable, server-owned working context per conversation — client + period/FY + entity scope + a cached context pack — that it carries and advances across workflows, so it is the state-owning super-UI rather than a per-request scope-follower.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Ggr-10",
+      "workstream_item": "G2",
+      "title": "Resident doctrine names the wrong OCR vendor to the model every run; on-demand skill bodies carry Hermes/Telegram/code_execution residue and a self-contradiction; the §15 tool inventory has drifted",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/doctrine/loader.ts:91-109 loads SOUL.md + AGENTS.md VERBATIM as the resident system instructions on EVERY run — 22191 bytes total by wc -c; the exact per-run token cost was not tokenizer-measured.",
+        "RESIDENT error (every run): belcort/AGENTS.md:50 §6 states the OCR engine is 'Google Document AI' SERVER-SIDE; the actual engine is Azure AI Document Intelligence (agent/src/ocr/azureDocai.ts, engine:'azure-document-intelligence'). The same wrong vendor is repeated in a code comment (agent/src/tools/buildTools.ts:311).",
+        "ON-DEMAND residue (loaded only when read_skill pulls that skill body, NOT every run): a `hermes:` front-matter key + Hermes references in bank-recon/client-onboarding/coa-coding/doc-ingest SKILL.md (e.g. client-onboarding/SKILL.md:391 '<HERMES_HOME> paths'; coa-coding/SKILL.md:316 'upstream Hermes'); Telegram mechanics (coa-coding/SKILL.md:30 'clarify_tool stays canonical for Telegram'); and a live self-contradiction — coa-coding/SKILL.md:40 says 'Python stays fine for OCR / code_execution' while bank-recon/SKILL.md:41 and client-onboarding/SKILL.md:65 state 'there is NO code_execution/Python runtime in v2'.",
+        "belcort/AGENTS.md §15's tool inventory omits add_bank_account, dispose_fixed_asset, run_depreciation, seed_opening_carry_forward, build_export, and extract_document — it has drifted behind the built tool set."
+      ],
+      "wrong": "The resident pack the model receives on every run contains a factual error (wrong OCR vendor), and the on-demand skill bodies carry dead-runtime instructions (Hermes/Telegram/code_execution) plus a direct self-contradiction about whether a Python/code_execution runtime exists; the §15 tool list is stale. The 'every run' scope applies to the AGENTS.md/SOUL.md resident core; the skill-body residue reaches the model only when that skill is loaded.",
+      "target": "Author a curated, current, self-consistent resident doctrine pack; drop verbatim loading of narrative/stale mandates; generate the tool inventory from the registry so it cannot drift; purge Hermes/Telegram/code_execution residue and the code_execution self-contradiction from skill bodies; verify every named external dependency (OCR vendor) matches the as-built runtime.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Ggr-13",
+      "workstream_item": "G10",
+      "title": "Auto-post's six-AND conditions are only partially structural — finalize_coding enforces just the label bind; confirmed-rule/≥0.95/empty-must_ask/no-tax-leg are model-asserted",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:137-143 — finalize_coding structurally asserts only (a) p_status ∈ {auto_draft,needs_review,needs_decision} and (b) the auto_draft↔estimated_risk='auto' self-consistency bind. It does NOT verify the substantive auto conditions.",
+        "docs/reference/confidence-ladder.md:56-64 lists the six-AND auto conditions: a CONFIRMED client_kb_rule matched, confidence ≥0.95, balanced, must_ask_flags empty, no tax leg, posting_date not in a closed period. Of these, only balance (15-triggers.sql:33-64) and closed-period (app.je_closed_period_guard) are trigger-enforced; confirmed-rule / ≥0.95 / empty-must_ask / no-tax-leg are asserted by the model's chosen status+risk labels, not checked by the DB.",
+        "draft_entry (db/v2/20-fns-journal.sql:95-99) raises kb_rule_not_confirmed_for_client ONLY when a kb_rule_id is cited and it is not a confirmed rule of the client — which MATCHES the canon (confidence-ladder.md:98-99, a provenance-honesty check). The canon does NOT require every draft to cite a rule; cold-start/needs_review drafts with no rule are explicitly allowed (confidence-ladder.md:77,87-89). The draft-time 'confirmed-rule-or-raise' framing was a misreading and is withdrawn."
+      ],
+      "wrong": "A mislabeling or mis-judging model can set status='auto_draft' + estimated_risk='auto' for an entry that does not actually satisfy the confirmed-rule / ≥0.95 / empty-must_ask / no-tax-leg conditions, and the DB will accept it (only balance and closed-period are trigger-enforced; the label bind is a self-consistency check, not a substantive one). The ≥0.95 confidence value is stored but never gated.",
+      "target": "Assert the substantive auto-post conditions structurally in the DB fn (a confirmed cited rule, the stored confidence ≥0.95, empty must_ask_flags, zero tax leg) rather than trusting the model's status/risk labels, and keep the confidence-ladder doc reconciled with the actual enforcement.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Ggr-11",
+      "workstream_item": "G10",
+      "title": "Unknown needsApproval interruptions are silently auto-approved — latent fail-open default",
+      "severity": "low",
+      "evidence": [
+        "agent/src/runtime/openai/runtime.ts:236-253 — the while-interruptions loop handles clarify_tool specially, then the else branch (249-252) calls result.state.approve(interruption) for ANY other needsApproval interruption, with the comment 'under the curated-tool model (W5) the surface is already bounded'.",
+        "agent/src/runtime/openai/tools.ts:47-53 — today ONLY clarify_tool sets needsApproval:true, so nothing else is currently auto-approved; the risk is purely latent — any future tool or SDK default that marks a call needsApproval would be auto-consented with no human/policy check."
+      ],
+      "wrong": "The approval-interruption handler defaults to auto-approve for everything that is not clarify, so the SDK's human-in-the-loop mechanism is fail-open by default. There is no current-code impact (only clarify sets needsApproval), so this is a latent-defensive concern: a single tool change (or SDK default) would flip consequential tool calls to silent auto-consent.",
+      "target": "Default unknown/other approval interruptions to DENY or route them to an explicit human/policy decision; never auto-approve an interruption the runtime does not specifically understand.",
+      "verdict": "ADJUSTED"
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "Closed-period / lock-date safety is genuinely DB-enforced (not prompt-enforced) and tested.",
+      "evidence": [
+        "db/v2/25-fns-ops.sql (app.je_closed_period_guard, ~297-322) — a SECURITY DEFINER BEFORE INSERT OR UPDATE trigger on journal_entries that raises posting_date_in_closed_period for any entry whose posting_date <= a live (reversed_at is null) close's period_end, exempting only entry_kind in ('closing','opening') under via_fn record_year_end_close / reverse_year_end_close.",
+        "db/v2/tests/closed_period_lock_test.sql:84,134 — PASS assertions cover blocking in-period standard entries, the UPDATE (approve) path, and the conjunctive close-exemption in both directions."
+      ]
+    },
+    {
+      "claim": "The Σdr=Σcr balance rule is a deferred SECURITY DEFINER constraint trigger, never RLS-skippable, with drafting exempt.",
+      "evidence": [
+        "db/v2/15-triggers.sql:33-75 — app.check_entry_balance, SECURITY DEFINER, wired as deferrable-initially-deferred constraint triggers on journal_entries (70-71) and journal_lines (73-75); skips status='drafting' (52); raises on Σdr<>Σcr (58-60) or zero value (61-63) at commit."
+      ]
+    },
+    {
+      "claim": "Human-review RBAC floors are re-homed into the DB fns (bookkeeper+ for review writes, admin+ for KB management), constraining a raw-PostgREST caller and the wake credential.",
+      "evidence": [
+        "db/v2/00-foundation.sql:152-161 app.assert_can_review() (bookkeeper/admin/owner, NULL denied) and 176-185 app.assert_can_manage_kb() (admin/owner).",
+        "db/v2/20-fns-journal.sql:184,226,284,374,411,450,493 — assert_can_review is called by approve_entry / reject_entry / edit_entry / reassign_entry / add_coa_account / set_coa_account_active / set_coa_account_type. Wake credential mints firm_role:'bookkeeper' (agent/src/runtime/wakeCredential.ts:72) so it passes the review floor but is denied admin+ KB-management fns."
+      ]
+    },
+    {
+      "claim": "Actor attribution on the CURATED tool path is set by the layer, not the model, and DB-constrained.",
+      "evidence": [
+        "agent/src/tools/buildTools.ts:81-89 — injectActor OVERWRITES any model-supplied p_actor / p.actor with ctx.actor (curated buildFnToolDef path only; NOT the query_books path — see Ggr-1).",
+        "db/v2/00-foundation.sql:212-229 — app.audit_actor constrains p_actor to the literal 'agent' or the caller's own JWT email/sub, else falls back to the caller identity (the 'a human labels their own firm's row agent' residual is accepted-with-visibility per the fn's note)."
+      ]
+    },
+    {
+      "claim": "Cross-firm isolation is structurally enforced (assert_firm_owns_client in every write fn + composite FK), and agent_select is SECURITY INVOKER so RLS scopes reads to the caller's firm; tested.",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:91,135,178,223 (and 280,369,380,407,449,492) — perform app.assert_firm_owns_client(...) on the write paths; the fn is defined at 00-foundation.sql:319.",
+        "db/v2/10-tables-core.sql:175 — journal_lines foreign key (client_id, account_code) references coa_accounts(client_id, acc_code), preventing coding to another client's account.",
+        "db/v2/26-fns-session.sql:120 — agent_select is `security invoker`; db/v2/90-isolation-tests.sql:273-281 PASS 6c proves firm-B reads its own clients and zero firm-A rows."
+      ]
+    },
+    {
+      "claim": "Export/report/analysis figures are DB-computed and only formatted in the agent; no authoritative aggregate is model-computed on those paths.",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:85-124 — SQL builders assemble from validated/escaped literals; the DB does the joins and returns cents.",
+        "agent/src/tools/reportModel.ts:110-127 — trialBalanceDoc maps DB-returned cents through M()/T() for presentation only; totals come from tb.total_debit_cents/total_credit_cents (DB), 'balanced' a display boolean (122,262).",
+        "agent/src/tools/analysisTool.ts:4-10 — 'Clara supplies the SQL, Postgres computes every number, the renderer prints DB cells verbatim'; the output is stamped 'Analytical view — not an audited financial statement'."
+      ]
+    },
+    {
+      "claim": "There is no shell/psql/file/web tool surface — the structural containment holds for the CURATED tool set (does NOT cover the Ggr-1 SQL-wrapped-definer path).",
+      "evidence": [
+        "agent/src/tools/registry.ts:57-74 — BANNED_TOOL_TOKENS = shell, bash, exec, spawn, psql, run_sql, raw_sql, execute_sql, file_read, file_write, readfile, writefile, fetch, http, curl, browser.",
+        "agent/src/tools/buildTools.ts:356-363 assertNoBannedTools runs over the built set on every buildTools call (390)."
+      ]
+    }
+  ],
+  "unverified": [
+    "Live confirmation that `select approve_entry(...)` (or another SECURITY DEFINER write) actually mutates through agent_select was NOT executed — the repo is frozen/read-only and no connection to belcort-shared was made. The bypass is established from the guard code (sqlGuard.ts:57-85 + db/v2/26-fns-session.sql:129-137), the fn's SECURITY DEFINER grant (20-fns-journal.sql:166,212), the absence of any read-only-transaction/role barrier in agent_select, and standard Postgres definer-in-invoker semantics; a live rig test should confirm before treating it as closed.",
+    "Whether the DEPLOYED Fly runtime (belcort-agent) actually has AZURE_DOCAI_ENDPOINT/KEY set (OCR live) vs answering 'OCR not configured' — not checked; no authenticated live inspection was performed. The as-built engine is Azure per agent/src/ocr/azureDocai.ts regardless of the doctrine's 'Google Document AI' text.",
+    "The ~22KB resident-doctrine figure is exact by byte count (SOUL.md 2318 + AGENTS.md 19873 = 22191 via wc -c) plus the rendered menu; the exact per-run TOKEN cost was not measured against a tokenizer.",
+    "Whether the dashboard passes any period/FY parameter to the agent through a channel OTHER than ActiveScope was not exhaustively grepped across all of dashboard/; ActiveScope itself (runtime/types.ts:34-37, dashboard/lib/activeScope.ts:15-20) carries none, but a separate period field elsewhere in the chat payload was not ruled out.",
+    "Grants were spot-verified for ~11 of the read fns cited as granted-but-not-tools (ar_aging/ap_aging/ar_control_tie_out/customer_statement/fa_register/fa_control_tie_out/adjustments_status/get_tax_computation/get_sst_return/client_general_ledger/client_financial_statements/client_overview); the remaining fns (supplier_statement, ap_control_tie_out, fa_depreciation_schedule, amortisation_schedule_detail, client_trial_balance_comparative, firm_needs_attention, firm_digest) were confirmed DEFINED but their individual GRANT lines were not each read, so the exact granted-but-not-a-tool list may be off by a few fns."
+  ]
+}

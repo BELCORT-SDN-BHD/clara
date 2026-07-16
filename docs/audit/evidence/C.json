@@ -1,0 +1,335 @@
+{
+  "workstream": "C — Knowledge, memory, and counterparties (memory-note mechanism · contacts/counterparty data · as-built KB vs owner design intent). Adversarial verification pass 2026-07-17 against the frozen repo at C:\\Users\\zhant\\Desktop\\initial acc software skillmd; every cited file/line re-opened. NOTE: audit-brief.md was absent at the specified path, and the signals/ owner-intent docs cited by the draft do not exist anywhere in the frozen repo (or on the Desktop) — all signals-sourced owner-intent claims were moved to unverified and the affected findings (C-11..C-14) rebased onto in-repo evidence.",
+  "findings": [
+    {
+      "id": "C-1",
+      "workstream_item": "C1",
+      "title": "Memory-note layer is write-only: no structural consumer exists anywhere (agent, dashboard, DB fns, wake lanes)",
+      "severity": "high",
+      "evidence": [
+        "db/v2/17-tables-memory.sql:3-7 — table header claims 'the agent reads it (RLS-scoped SELECT) and renders a per-client markdown memory index to Storage'",
+        "belcort/AGENTS.md:74 — the ONLY read path in the whole system: one sentence telling the model to 'READ my notes for the active client via query_books … at the start of substantive client work' (optional, model-volition)",
+        "belcort/coa-coding/SKILL.md:47-49 — Step 1 ClientContext enumerates MSIC, legal name, directors, COA, sst_regime — memory notes absent; grep of belcort/ for 'memory' hits ONLY AGENTS.md:57/:74, firm-bootstrap (Hermes session memory, unrelated) and client-onboarding:355-365 (the seed) — kb-evolve/review-queue/doc-ingest/bank-recon contain ZERO memory-note mentions",
+        "agent/src/runtime/inject.ts:44-84 — wake read-hints cover journal_entries/journal_entry_history/documents/bank_match_audit only; no lane injects or hints client_memory_notes",
+        "grep dashboard/ for client_memory_notes|record_memory_note = zero hits (no UI surface); grep db/v2/28-fns-reads.sql for 'memory' = zero (no read fn touches the table)",
+        "agent/src/tools/registry/kb.ts:132-143 — record_memory_note write tool exists (cls:'write'); its own description defers reads to 'query_books (client_memory_notes)'"
+      ],
+      "wrong": "ADR-033's advisory memory layer contributes approximately nothing to Clara's intelligence: notes can be written (tool + onboarding dual-seed) but nothing structural ever reads them — not the coding context, not the wake notes, not a read fn, not the dashboard. Whether a note is ever consulted depends entirely on the model choosing to run an optional doctrine-suggested SELECT. A knowledge layer whose consumption is unverifiable and unenforced is dead weight presented as a built capability.",
+      "target": "In the rebuild, client knowledge/context must be STRUCTURALLY injected (context packs assembled by the runtime per task, from the governed KB), never left to a doctrine sentence. Retire the free-text notes table; carry its three real needs into the KB/event layer as typed objects (see decision brief).",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-2",
+      "workstream_item": "C1",
+      "title": "ADR-033's promised per-client markdown memory index in Storage was never built",
+      "severity": "medium",
+      "evidence": [
+        "docs/PROJECTLOG.md:90 — ADR-033: notes are 'rendered to a per-client markdown memory index in Storage'",
+        "db/v2/17-tables-memory.sql:6-7 — repeats 'renders a per-client markdown memory index to Storage (the render is agent-side)'",
+        "grep agent/src for 'memory index'/'profile.md' = no renderer; agent/src/tools/exportTool.ts:276-371 enumerates every storage-writing export scope (trial_balance/journals/documents/general_ledger/management_accounts/aging/sst_return/full) — no memory index; grep belcort/ for 'memory index|profile.md' = zero (no skill instructs producing one)"
+      ],
+      "wrong": "A ratified ADR describes a deliverable (the storage-rendered memory index — the intended human-readable consumption surface) that has no implementation anywhere. The docs-vs-code disagreement is itself a finding; it also explains WHY the layer is consumerless (C-1): the read surface was designed but never shipped.",
+      "target": "Rebuild ADRs must not record consumption surfaces as built until code exists; the replacement knowledge layer needs its human-readable projection (workbench surface) shipped in the same slice as the write path.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-3",
+      "workstream_item": "C1",
+      "title": "must_ask / rule_hint / profile note kinds have no lifecycle, no resolution state, and no surfacing mechanism",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/17-tables-memory.sql:11-28 — schema has no status/resolved/superseded column; 'superseded by a newer note, never edited' (27-fns-memory.sql:6-7) is pure convention with no supersede key",
+        "db/v2/17-tables-memory.sql:15-17 — kind comments promise: must_ask = 'a standing question to raise next time'; profile = 'the profile.md index'; rule_hint = 'a candidate the agent may PROPOSE'",
+        "db/v2/21-fns-kb.sql:199-207 — kb_proposals are auto-filed ONLY from the record_kb_evidence tally; rule_hint notes have no bridge to proposals",
+        "No skill step, wake, or dashboard lane re-raises an open must_ask (greps in C-1); nothing renders profile notes (C-2)"
+      ],
+      "wrong": "A 'standing question to raise next time' that nothing raises, can never be marked answered, and accumulates forever is a broken contract: over months a client accrues stale must_asks with no way to distinguish open from resolved, and rule_hints never feed the proposal pipeline they were designed to seed.",
+      "target": "must_ask belongs in the rebuild as a first-class open-question/interruption object (task with resolution state, surfaced by the workflow engine at client-work start); rule_hint collapses into a low-evidence KB-proposal state; profile facts become typed KB profile fields with provenance.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-4",
+      "workstream_item": "C1",
+      "title": "Design docs claim memory notes ride the self-reconcile learn loop, but the workbench-kb tool policy structurally blocks record_memory_note and the handler skill never mentions notes",
+      "severity": "medium",
+      "evidence": [
+        "docs/design/04-agentic.md:177-179 — 'a bank_line_matched learn-wake feeds each confirmed match back to Clara — matching heuristics via client_recon_hints, coding rules, reactivated client memory notes'",
+        "docs/design/05-surfaces.md:184-186 — same claim ('…coding-rule learn, reactivated client memory notes')",
+        "agent/src/tools/buildTools.ts:19-26 — WRITE_ALLOW['workbench-kb'] = record_kb_evidence | record_recon_hint | record_proactive_notification ONLY; record_memory_note is cls:'write' (kb.ts:135), so buildTools.ts:374 filters it OUT of the wake tool set entirely",
+        "agent/src/runtime/openai/runtime.ts:339 — every non-proactive/non-documents wake kind (including the bank_match_audit self-reconcile wake) maps to the 'workbench-kb' policy",
+        "belcort/kb-evolve/SKILL.md — zero occurrences of 'memory' (grep); belcort/AGENTS.md:74 tells the agent to record notes when 'a self-reconcile reveals a DURABLE client fact' — impossible in the wake lane that handles self-reconciles"
+      ],
+      "wrong": "Two ratified design chapters describe a memory-note learning behaviour the code makes impossible: a [workbench] wake run literally cannot write a memory note (the tool is not even built for that policy), and its skill never instructs one. Doctrine (AGENTS.md §15) and policy (buildTools) contradict each other on the same behaviour.",
+      "target": "Rebuild must keep tool-policy matrices, doctrine, and design docs generated/tested from one source so a policy row cannot silently falsify a documented learning loop.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-5",
+      "workstream_item": "C1",
+      "title": "record_memory_note is the weakest-audited writer in the schema: no via_fn, unconstrained actor, empty note accepted",
+      "severity": "low",
+      "evidence": [
+        "db/v2/27-fns-memory.sql:10-31 — no set_config('belcort.via_fn'…), no app.audit_actor() (actor is free text via nullif), note = coalesce(p->>'note','') so an EMPTY note inserts, provenance free text, kind enforced only by the table CHECK (raises raw check_violation, not a domain error), no role floor (granted to authenticated)",
+        "db/v2/24-fns-onboard.sql:404-412 — the onboarding seed wrapper validates notes fail-loud (note required, kind whitelist, confidence range) — proving the validation exists but lives in the wrong layer",
+        "Contrast: db/v2/21-fns-kb.sql:78-81 (add_counterparty_alias applies assert_can_review + app.audit_actor)"
+      ],
+      "wrong": "Every other learning-loop writer constrains its audit attribution and validates its input; the memory writer does neither, so any member (or the wake credential, or a spoofed direct PostgREST call) can insert blank/attributed-to-anyone narrative rows into what ADR-033 calls part of the audit-visible knowledge layer.",
+      "target": "Any knowledge write in the rebuild carries the same actor-attribution + validation + receipt discipline as book writes — no second-class writers.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-6",
+      "workstream_item": "C2",
+      "title": "AR/AP subledger has NO sanctioned write path after onboarding — counterparty open-items are populated once (opening seed) and never maintained by any accounting execution",
+      "severity": "high",
+      "evidence": [
+        "agent/test/registry.test.ts:28-53 — the EXPECTED curated tool set contains no subledger fn (it DOES contain the FA writers and seed_opening_carry_forward), and the 'no surprise extras' assertion (:59-61) proves record_ar_invoice/record_ar_receipt/allocate_ar_receipt/record_ap_bill/record_ap_payment/allocate_ap_payment/write_off_ar_invoice can never be agent tools as-built",
+        "agent/src/tools/registry.ts:39-53 — EXCLUDED_FNS documents only the job lane + 4 helpers; the seven subledger writers are in neither list (unaccounted-for surface)",
+        "grep repo-wide for the seven writer names = hits ONLY in db/v2 (definitions, opening seeds, SST consumer, tests) — zero callers in belcort/, dashboard/, agent/; dashboard/lib/arap.ts:1-6 declares the AR/AP surface 'Read-only + the one export'; docs/design/05-surfaces.md:189-196 (§2.5) confirms read-only",
+        "belcort/coa-coding/SKILL.md:45 — coding a sales invoice = Dr 300-000 / Cr 500-000 with NO instruction to record an ar_invoices row; grep belcort/ for ar_receipt|allocat = only client-onboarding's opening carry-forward, whose own comment (:249) promises items 'later settle through the same allocation machinery' that no workflow ever invokes",
+        "db/v2/25b-fns-opening.sql:34-90 — the only production writers are the opening-carry-forward seeds (onboarding), which call record_ar_invoice/record_ap_bill",
+        "db/v2/23-fns-subledger.sql:15-21, 94-98, 180-192 — the writers exist, are granted to authenticated, and are internally sound (GL-anchored gross, counterparty-mismatch guard)"
+      ],
+      "wrong": "The moment onboarding finishes, every credit sale, supplier bill, customer receipt, and settlement bypasses the open-item subledger entirely: ar_invoices/ap_bills freeze at the opening set, receipts are never allocated, statuses never advance, and ar/ap_control_tie_out drifts immediately. Aging grids, per-counterparty statements, the contacts-register fold-in ('a supplier/customer Clara has coded' — contactsRegister.ts:4-6 — a population that can never grow post-onboarding), the close checklist's subledger tie-outs (05-surfaces.md:212-213), and the SST service payment basis (C-8) all read a corpse. A whole Track-1a capability is built in the DB but disconnected from every workflow.",
+      "target": "The rebuild must make subledger maintenance intrinsic to the accounting executions: either the coding/receipt workflows atomically record open items with the GL entry (one governed mutation class), or the open-item layer is DERIVED from control-account legs by the DB — never an optional parallel register that humans and the agent can silently skip.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-7",
+      "workstream_item": "C2",
+      "title": "Aging exports (aging scope, management_accounts, full pack) read the unmaintained subledger with no tie-out check in the export path",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:336-346 — aging scope fetches ar_aging/ap_aging only; :355-368 — the 'full' client pack merges FS + TB + aging; grep agent/src for tie_out = no call to ar_control_tie_out/ap_control_tie_out anywhere in the export pipeline",
+        "PRD.md:64 — aging is a headline export scope; belcort/export/SKILL.md:83,115 — management-accounts/full pack 'trial balance + AR/AP aging, each on its own page'",
+        "dashboard/lib/arap.ts:63-65 — the tie-out fns exist and the dashboard surface shows the drift badge (05-surfaces.md:193-196 'the tie-out badge never hides'); the export path drops it"
+      ],
+      "wrong": "Given C-6, an exported 'AR/AP aging' page in a client-facing management-accounts or full pack shows only opening items aging forever — materially wrong receivables/payables — and unlike the dashboard, the exported artifact carries no tie-out drift warning, so the one honesty mechanism the DB provides is dropped exactly where the number leaves the firm.",
+      "target": "Every exported statement that depends on a reconcilable register must embed its tie-out/drift check in the artifact (or refuse to render on drift) — honesty surfaces must travel with the number, not stay on the dashboard.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-8",
+      "workstream_item": "C2",
+      "title": "compute_sst_return's statutory service-tax payment basis rides the unmaintained AR subledger: with no ar_invoices anchor, credit-sale service tax silently falls back to the cash-direct bucket and declares in full at posting_date (accrual, not payment, basis); s.11(2), bad-debt relief, and advance handling can never operate",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/23e-fns-sst.sql:222-236 — the service-tax model: bucket (1) 'ANCHORED invoices (ar_invoices): the cumulative-target model' (payment basis); bucket (2) 'CASH-DIRECT entries (tagged 461 legs, not an anchor…): net Cr declares at posting_date'",
+        "db/v2/23e-fns-sst.sql:353-381 — bucket (2)'s selection: any posted tagged 461 leg with NO ar_invoices row (`not exists (select 1 from ar_invoices i where i.entry_id = e.id)`) is DECLARED in full at posting_date — so an unanchored credit-sale invoice is counted immediately, not routed to the uncounted surface (:479-487, which covers only untagged/mismatched/unknown/opening legs)",
+        "db/v2/23e-fns-sst.sql:57-101 — the payment-basis machinery (sst_service_target paid-proration, s.11(2) 12-month trigger, receipt effectiveness) operates ONLY on anchored invoices + their ar_receipts/ar_allocations — rows nothing records after onboarding (C-6)",
+        "docs/architecture/backend.md:81 — declares 'service tax on the payment basis (per-invoice cumulative-target from the AR subledger, s.11(2) 12-month rule)' as the built policy"
+      ],
+      "wrong": "The draft's original mechanism ('revenue lands in the surfaced-but-uncounted bucket, the SST-02 draft is perpetually incomplete') is WRONG — unanchored tagged legs ARE counted, as cash-direct. The verified defect is a silent statutory-basis substitution: for a service-tax registrant invoicing on credit, every post-onboarding invoice declares its full tax in the period of POSTING (accrual-like), not when payment is received — tax is remitted before it is statutorily due, period allocations on SST-02 are wrong, and the payment-basis machinery the docs claim (12-month trigger, bad-debt relief A×C/B, advances) is structurally inoperative because its feedstock (invoice → receipt → allocation) is never recorded. The engine is sound; its feedstock pipeline was never connected (root cause C-6), and nothing in the draft output warns that the basis silently degraded.",
+      "target": "Rebuild treats the SST service-basis dependency chain (invoice → receipt → allocation → declaration) as one governed lifecycle; the return computation must be able to PROVE its feedstock is complete (tie-out gate / anchored-coverage check) before a draft is presented as filable, and must surface when the payment-basis model degraded to accrual.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "C-9",
+      "workstream_item": "C2",
+      "title": "No counterparty entity exists: contacts are a display-side merge over free-text snapshot strings, alias repoints never re-key history, and stored-string matching can strand allocations",
+      "severity": "medium",
+      "evidence": [
+        "dashboard/lib/contactsRegister.ts:1-10 — 'There is no contacts table: a counterparty is assembled display-side from client_counterparty_aliases… client_kb_rules… client_kb_rules_history… AND the AR/AP subledger counterparties'; docs/design/05-surfaces.md:380-387 confirms owner-decided display-side population",
+        "db/v2/23-fns-subledger.sql:98-104 — counterparty is canonicalised then SNAPSHOTTED as text on ar_invoices at record time; db/v2/21-fns-kb.sql:95-98 — add_counterparty_alias upserts the mapping for FUTURE resolution only; no code re-keys existing client_kb_rules/client_kb_rules_history/ar_invoices rows on a repoint (the FROZEN-normalizer warning at 00-foundation.sql:289-290 itself notes a 'canonical re-key sweep' would be needed — none exists)",
+        "db/v2/23-fns-subledger.sql:188-189 — allocate_ar_receipt rejects on 'v_rcp is distinct from v_icp' comparing STORED strings: an invoice recorded before an alias repoint and its receipt recorded after resolve to different canonicals → counterparty_mismatch on a legitimate settlement",
+        "dashboard/lib/contactsRegister.ts:8-10 — display-side normalizeName only 'mirrors app.normalize_counterparty's intent' (a second, drift-prone implementation)"
+      ],
+      "wrong": "Counterparty identity is a string convention, not data: four sources fragment or merge purely by name folding; correcting a name mid-life (the alias workflow's whole purpose) silently splits history — old rules/evidence/open items keep the old canonical while new writes use the new one — and can block settlements. The 'contacts register' is a projection of this fragility, not a fix for it.",
+      "target": "Rebuild with a first-class per-client counterparty record (id-keyed; alias rows as children; typed customer/supplier/director/related-party), FK'd from KB rules, evidence, subledger items, and recon hints, so a rename/merge is one governed mutation that atomically re-keys — never a string convention.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-10",
+      "workstream_item": "C2",
+      "title": "Alias resolution is enforced only on writes/tallies; the coding-time rule LOOKUP never resolves the counterparty, contradicting the schema's own contract",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/13-tables-client.sql:56-58 — table contract: 'record_kb_evidence + create_kb_rule + edit_kb_rule resolve the counterparty pattern THROUGH this map…; the agent resolves a counterparty before a rule lookup'",
+        "belcort/coa-coding/SKILL.md:54-65 — Step 3 instructs a raw SELECT of all non-retired client_kb_rules and model-side pattern matching; no resolve_counterparty call is instructed anywhere in the coding procedure (grep: 'resolve_counterparty' appears only in the boilerplate tool list at line 40)",
+        "db/v2/21-fns-kb.sql:182-188 — resolution IS structural inside record_kb_evidence (write side), proving the asymmetry"
+      ],
+      "wrong": "The mechanism that stops 'TNB / TNB Berhad / Tenaga' fragmenting the learning loop is deterministic when TALLYING but purely LLM-judgment when MATCHING at coding time — the exact moment the rule must fire to hit the auto lane. A registered alias guarantees the evidence converges but does not guarantee the rule is found, so auto-post consistency rests on model fuzziness the schema comment claims is deterministic.",
+      "target": "Rule matching in the rebuild must be a deterministic DB-side operation (lookup keyed on the normalized/alias-resolved canonical), returning matched rules to the agent — never model-side fuzzy matching over a raw rule dump.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-11",
+      "workstream_item": "C1/KB-intent",
+      "title": "The 'candidate' rule tier is unreachable in production — every sanctioned writer mints 'confirmed', while the ratified ladder, the coding skill, the design docs, and the dashboard all describe candidates as a live rung",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/12-tables-kb.sql:25 — status CHECK candidate/confirmed/retired with DEFAULT 'candidate', but…",
+        "db/v2/21-fns-kb.sql:245-246 (promote_proposal inserts 'confirmed'), :329-330 (create_kb_rule inserts 'confirmed'); seed_client_knowledge delegates to create_kb_rule (db/v2/24-fns-onboard.sql:384-399); record_kb_evidence writes only the history tally + proposals; repo-wide grep shows status='candidate' inserted ONLY by privileged test setup",
+        "db/v2/tests/confirm_kb_rule_test.sql:6-8 — the test suite's own admission: 'no audited fn creates a candidate rule (create_kb_rule makes a CONFIRMED 1.000 rule), so a candidate must still be seeded raw'",
+        "docs/reference/confidence-ladder.md:93-99 (ratified, ADR-041) + belcort/coa-coding/SKILL.md:62-64 + belcort/AGENTS.md §15 lane note ('a clean cold-start / candidate-rule → needs_review') — all describe candidate rules as a live routing rung read at coding time (status <> 'retired')",
+        "db/v2/21-fns-kb.sql:439-467 — confirm_kb_rule exists to promote candidate→confirmed rows that production can never mint; db/v2/20-fns-journal.sql:93-99 — draft_entry carries a candidate-specific rejection ('a candidate/retired rule is not a citable posting authority')",
+        "docs/design/05-surfaces.md:390-391 — the KB workbench spec has 'confirmed rules · candidates · proposals' lanes and 'confirm a candidate'; dashboard/lib/contactsRegister.ts:23 counts 'candidate + confirmed' rules — surfaces for a population of zero"
+      ],
+      "wrong": "A whole tier of the documented learning state machine is dead in production: no writer mints a candidate, so the candidate rung survives only as dead schema, dead ratified-doc text (ladder, skill, AGENTS.md), a dead confirm transition, and dashboard lanes/counts that can never populate. Behaviourally, no rule row of any status exists until 3 evidence sightings PLUS a human promotion — sightings 2 and 3 cold-start exactly like sighting 1. (The draft's claim that this 'guts the owner's day-2-learning intent' rests on signals/ docs absent from the frozen repo — moved to unverified; severity accordingly rebased from high to medium: it is a docs-vs-code contradiction plus a capability gap, not a books-correctness or isolation risk.)",
+      "target": "The rebuild must make an explicit owner decision: either restore first-sighting candidate rules (auto-created, clearly sub-auto-lane, influencing routing at reduced confidence) or deliberately ratify the 3-evidence-then-promote-only model and delete the candidate tier from schema, ladder, skills, and dashboard so docs match reality.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "C-12",
+      "workstream_item": "C1/KB-intent",
+      "title": "The KB learning pipeline is purely reactive and structurally single-type: kb_proposals forbids every proposal kind except rule_promotion, no system-initiated proposal source exists beyond the ≥3 evidence tally, and doctrine still carries v1 residue (kb_compile) with no recorded drop decision",
+      "severity": "low",
+      "evidence": [
+        "db/v2/12-tables-kb.sql:77 — proposal_type CHECK IN ('rule_promotion') — any other proposal kind (new-account candidates, conflict resolutions, document-extracted rules) is an impossible row",
+        "v2's only proactive mining = the ≥3 evidence auto-file inside record_kb_evidence (db/v2/21-fns-kb.sql:199-207) plus read-only 'looks wrong' heuristics in the [proactive] wake handler (belcort/review-queue/SKILL.md:423-530, Step P3 — READ-ONLY, never mutates)",
+        "grep db/v2 + belcort/ for kb_material|graphify|kb_curator = zero implementations; belcort/rule-edit/SKILL.md:49 still references 'kb_compile's helpers' (a v1 mechanism with no v2 equivalent) — undeleted doctrine residue",
+        "grep docs/PROJECTLOG.md for curator|materials|graph|new_account = zero — no ADR records deciding these v1 mechanisms' fate",
+        "One-time seeding exists only at onboarding: seed_client_knowledge (db/v2/24-fns-onboard.sql:367-424); no post-onboarding document-to-rules extraction pathway exists"
+      ],
+      "wrong": "As-built, Clara learns ONLY from what a human approves (evidence tally → threshold → human promote). There is no system-initiated pattern mining, no new-account detection, no document-to-rules extraction after onboarding, and the proposals table is typed so narrowly that adding any of these requires a schema change. The draft's framing of this as dropping a specific owner-designed two-tier system (weekly curator, materials registry, knowledge graph) could NOT be verified — the cited signals/ intent docs do not exist in the frozen repo; what is verifiable is the structural single-type CHECK, the reactive-only pipeline, the v1 doctrine residue, and the absence of any recorded decision. Severity rebased medium→low accordingly (a design-scope gap for the rebuild, not an as-built defect).",
+      "target": "The rebuild's KB design must explicitly decide each proactive-learning mechanism's fate (materials/extraction-to-proposals, pattern miners, new-account detection, periodic digest) — carrying the proposal-gate discipline (never auto-mutate rules) while restoring system-initiated proposal SOURCES; the proposals table must be typed for multiple proposal kinds from day one.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "C-13",
+      "workstream_item": "C1/KB-intent",
+      "title": "No pinned/locked tier: a human-created 1.000 rule ('always code X to Y') silently auto-retires after 3 overrides, identically to an evidence-derived rule, while doctrine still offers 'lock' verbs",
+      "severity": "low",
+      "evidence": [
+        "db/v2/12-tables-kb.sql:25 — no 'locked' status exists; db/v2/21-fns-kb.sql:130-161 — app.decay_rule_on_override applies to ANY confirmed rule (including create_kb_rule's human pins at confidence 1.000) and auto-retires at threshold 3 with no human confirmation",
+        "belcort/rule-edit/SKILL.md:54-56 — doctrine still speaks the lock vocabulary ('Add/lock a new rule', 'Promote existing to locked — lock rule…'), mapping to confirm_kb_rule (whose kb.ts:116 description says 'Confirm/lock'), but the resulting 'locked' rule is just 'confirmed' and decays like any other; :49 references v1 'kb_compile's helpers' that have no v2 equivalent",
+        "docs/PROJECTLOG.md:89-92 — ADR-033 ratifies decay/auto-retire generally (rejected 'increment-only no-demotion') but never distinguishes human-pinned directives from evidence-derived rules",
+        "The conflict-resolution UX on a contradicted rule is surface-only: belcort/kb-evolve/SKILL.md:185 (Step W3) + :292-299 (BM3) warn via record_proactive_notification and STOP; belcort/review-queue/SKILL.md:423 (P3) is read-only"
+      ],
+      "wrong": "A rule the human explicitly pinned and a rule promoted from 3 sightings share one decay fate: three overrides silently retire either. For exactly the rules a human most deliberately authored, retirement happens without a human decision — the only surviving safeguard is an advisory heads-up. Doctrine's own 'lock' verbs promise a stickiness the schema does not implement. (The draft's v1 keep/switch/split flow and 'locked = 1.00 sticky' intent rest on signals/ docs absent from the frozen repo — moved to unverified; the in-repo doctrine-vs-schema mismatch and the ADR's silence on pin semantics stand.)",
+      "target": "Rebuild autonomy/rulebook design should distinguish evidence-derived rules (decayable) from human-pinned directives (conflict surfaces to the human, never silently retires), and put that distinction in front of the owner as an explicit decision.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "C-14",
+      "workstream_item": "C1/KB-intent",
+      "title": "Knowledge provenance on entries is single-rule, points at the rule's mutable current state, and is destroyed by corrections — no draft-time rule-application snapshot exists",
+      "severity": "low",
+      "evidence": [
+        "Provenance = the single journal_entries.kb_rule_id column (db/v2/12-tables-kb.sql:148-165, FK on delete set null); grep repo-wide for journal_entry_rules_applied|rules_applied = zero — no snapshot of what fired at draft time",
+        "db/v2/20-fns-journal.sql:337-348 — edit-away NULLs kb_rule_id ('drop the now-inaccurate provenance'); :386-389 — reassign_entry NULLs it on a client move",
+        "The cited rule row itself is mutable after the fact (edit_kb_rule changes pattern/account, decay changes status), so even a surviving kb_rule_id answers 'which rule NOW', not 'what fired THEN'; reconstruction requires walking journal_entry_history before/after jsonb snapshots + client_kb_audit prose"
+      ],
+      "wrong": "The auditor question 'which knowledge produced this entry AT THE TIME' cannot be answered deterministically after any correction: the pointer is cleared (edit-away/reassign) or points at the rule's CURRENT mutated state; only history-row jsonb snapshots and KB-audit prose allow effortful reconstruction. (The draft's comparison to v1's journal_entry_rules_applied six-step audit chain rests on signals/ docs absent from the frozen repo — moved to unverified; the in-repo structural facts stand on their own.)",
+      "target": "The rebuild's decision/receipt layer must snapshot the knowledge inputs (rule id + pattern + account + status + confidence at fire time) immutably per decision, separate from the mutable rulebook — corrections may supersede, never erase.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "C-15",
+      "workstream_item": "C2/C1-adjacent",
+      "title": "coa-coding Step 6 instructs the KB-evidence write as a SELECT-wrapped fn call — doctrine-endorsed use of the agent_select mutation-bypass shape",
+      "severity": "medium",
+      "evidence": [
+        "belcort/coa-coding/SKILL.md:275-283 — Step 6 verbatim: '`select record_kb_evidence(<client_id>, <pattern>, <account_code>, 1);`' — SQL form, not the curated tool call (the same skill's own DB-access preamble at :40 routes WRITES through named tools)",
+        "db/v2/26-fns-session.sql:119-140 — agent_select is VOLATILE, SECURITY INVOKER, and its guard is a lexical verb-scan (:130-135) that does not block function calls; record_kb_evidence is SECURITY DEFINER (21-fns-kb.sql:170-172) so the write commits through the read surface",
+        "agent/src/tools/sqlGuard.ts:57-85 (per its own header 'defence-in-depth ONLY') passes the same string (fn names are not banned verb words); the bypass skips buildTools' match_client scope gate (agent/src/tools/buildTools.ts:62-69 vs queryToolDef :110-122, which enforces no scope)"
+      ],
+      "wrong": "The doctrine itself teaches the exact SELECT-wrapped-SECURITY-DEFINER pattern that SDT-001/SEC-001 flags as the mutation-bypass hole: a model following the skill verbatim routes a learning-loop WRITE through query_books, bypassing the tool layer's active-scope write-gate (record_kb_evidence is registered as a match_client tool precisely to get that gate). It both normalizes the bypass shape for the model and makes the KB write escapable from scope enforcement.",
+      "target": "Rebuild: structural (not lexical) read-only enforcement on any freeform read surface (read-only transaction / no EXECUTE on writers from that path), and a doctrine lint that forbids skills from expressing writes as SQL.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "C-16",
+      "workstream_item": "C2",
+      "title": "update_client_profile hard-deletes and reinserts the contact-ish registers (directors/domains/aliases; delete-missing bank accounts) — no reverse-not-delete, id churn, raw FK errors",
+      "severity": "low",
+      "evidence": [
+        "db/v2/24-fns-onboard.sql:484-511 — bank accounts: DELETE where account_no not in the incoming list (:484-487); directors/email_domains/aliases: DELETE ALL then reinsert (:495, :501, :507)",
+        "db/v2/11-tables-recon.sql:45,86,148 — bank_reconciliations / bank_statement_lines / client_recon_hints FK client_bank_accounts(id) with no ON DELETE action (NO ACTION): deleting a referenced bank account makes the whole profile save fail with a raw 23503, not a domain error",
+        "Contrast: every other register in the schema is reverse-not-delete (e.g. retire_kb_rule 21-fns-kb.sql:406-430, retire_recon_hint 22-fns-documents-recon.sql:660+)"
+      ],
+      "wrong": "The client identity/contact data (directors used by the director_payee must-ask flag, domains/aliases used for doc→client matching) is the one register family that violates the repo's own reverse-not-delete law: every profile save rewrites history-less rows and churns ids anything may have cached, and a legitimate save that drops an in-use bank account crashes with an undomained FK violation.",
+      "target": "Rebuild: contact/identity registers get the same audited, reverse-not-delete, per-row mutation treatment as every other register; referenced rows deactivate, never delete.",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "The memory-note WRITE path works end-to-end and is firm-isolated: fn + curated tool + onboarding dual-seed, with rig proof of isolation and idempotent atomic seeding.",
+      "evidence": [
+        "db/v2/27-fns-memory.sql:10-31 (writer, cross-firm guard first)",
+        "agent/src/tools/registry/kb.ts:132-143 (tool)",
+        "db/v2/24-fns-onboard.sql:401-420 (seed path, fail-loud validation, idempotent on (kind,note))",
+        "db/v2/90-isolation-tests.sql:332-363 (TEST 7: isolation + direct-write blocked + cross-firm denied) and :777-826 (TEST 11a/b/c dual-seed: seeds, idempotent, atomic)"
+      ]
+    },
+    {
+      "claim": "The counterparty-alias machinery is sound engineering: IMMUTABLE frozen normalizer backing a functional unique index, single-level alias guard, canonical collapse on register, upsert-repoint correction model, audited, bookkeeper+ floor with audit_actor.",
+      "evidence": [
+        "db/v2/00-foundation.sql:284-297 (normalize_counterparty, FROZEN warning documented)",
+        "db/v2/13-tables-client.sql:62-75 (uq_client_cp_alias_norm)",
+        "db/v2/21-fns-kb.sql:65-107 (add_counterparty_alias: assert_can_review, audit_actor, single-level guard, canonical collapse, kb_audit 'alias')"
+      ]
+    },
+    {
+      "claim": "resolve_counterparty is deterministic and backward-compatible: alias-column hit beats canonical-column hit, then lowest id; no-hit returns the trimmed input as its own canonical.",
+      "evidence": [
+        "db/v2/21-fns-kb.sql:44-56"
+      ]
+    },
+    {
+      "claim": "record_kb_evidence is alias-aware and correctly suppresses re-proposal of retired rules (a decay-killed coding cannot silently return), with the ≥3 auto-file idempotent via the open-only partial unique index.",
+      "evidence": [
+        "db/v2/21-fns-kb.sql:182-207",
+        "db/v2/12-tables-kb.sql:88-89 (uq_kb_proposal_open)",
+        "db/v2/tests/record_kb_evidence_test.sql:63-78 (confirmed pin suppresses proposal, tally continues)"
+      ]
+    },
+    {
+      "claim": "The recon-hint (narration→counterparty) loop is genuinely wired end-to-end and human-fenced: DB trigger fires only on human 'matched' actions; the wake lane may write the hint; the coding-side read consumes it; promote is admin-gated; a confirmed hint never silently flips.",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:1539-1548 (trg_pn_bank_match fence: actor is distinct from 'agent' and action='matched')",
+        "agent/src/tools/buildTools.ts:21 (workbench-kb allows record_recon_hint)",
+        "agent/src/runtime/inject.ts:80-82 (wake procedure)",
+        "belcort/kb-evolve/SKILL.md:284-317 (BM2b + chat-mediated learn)",
+        "belcort/bank-recon/SKILL.md:79-83 (suggest_recon_counterparty first, advisory-only)",
+        "db/v2/22-fns-documents-recon.sql:599-609 (candidate may flip, confirmed/retired never), :638-657 (promote admin+)"
+      ]
+    },
+    {
+      "claim": "The AR/AP subledger writer fns are internally sound accounting (the integration, not the fns, is the failure): gross is read from the anchoring GL control leg (never agent-supplied), counterparty canonicalised, cross-customer allocation rejected except explicit contra, over-allocation raises, write-off bounded by outstanding.",
+      "evidence": [
+        "db/v2/23-fns-subledger.sql:15-21 (doctrine header)",
+        "db/v2/23-fns-subledger.sql:94-98 (control-leg gross + canonicalised counterparty)",
+        "db/v2/23-fns-subledger.sql:180-192 (positive/mismatch/over-allocate guards)",
+        "db/v2/23-fns-subledger.sql:249-255 (write-off 0 < amt ≤ outstanding)",
+        "db/v2/90-isolation-tests.sql:890+ (TEST 13 exact-cents tie-out, write-off preserves tie, over-allocation rejected)"
+      ]
+    },
+    {
+      "claim": "The contacts register is honestly display-only: names, counts, dates, provenance flag; no financial figure computed client-side.",
+      "evidence": [
+        "dashboard/lib/contactsRegister.ts:1-10, 20-29",
+        "docs/design/05-surfaces.md:380-387"
+      ]
+    },
+    {
+      "claim": "The KB proposal loop (evidence → open proposal → human promote/reject with no-downgrade of a human 1.000) is wired across DB, wake, agent tools, and dashboard.",
+      "evidence": [
+        "db/v2/21-fns-kb.sql:199-207 (auto-file), :245-252 (promote upsert, greatest(confidence,0.95), override reset)",
+        "db/v2/25-fns-ops.sql:1474-1482 (trg_pn_kbp creator-agnostic wake)",
+        "agent/src/tools/registry/kb.ts:25-57 (promote/reject tools)",
+        "dashboard/lib/kbActions.ts + dashboard/components/command/InboxLanes.tsx (both exist — UI surface)",
+        "db/v2/tests/promote_proposal_test.sql:74-91 (no-downgrade)"
+      ]
+    },
+    {
+      "claim": "Client identity registers (directors/email domains/client aliases) ARE genuinely read by accounting executions as model context: director_payee must-ask matching and doc→client identification.",
+      "evidence": [
+        "belcort/coa-coding/SKILL.md:88-99 (client_directors drives director_payee + entity-type routing)",
+        "belcort/doc-ingest/SKILL.md:80 (email-domain/alias/legal-name/SSM/TIN client matching)",
+        "belcort/doc-ingest/references/extracted-fields-schemas.md:129 (claimant_name matched against client_directors)"
+      ]
+    }
+  ],
+  "unverified": [
+    "signals/kb-iteration-system.md and signals/per-client-kb-mechanism.md — the owner-intent documents cited throughout the draft's C-11..C-14 — DO NOT EXIST in the frozen repo (or anywhere on the Desktop; searched). Every claim sourced solely to them (the two-tier learning design, the three circles, the weekly curator, kb-material-add, 'locked = 1.00 sticky', keep/switch/split, the v1 journal_entry_rules_applied audit chain, first-approval candidate rules at 0.75) is unverifiable here. Residual in-repo corroboration that SOME v1 mechanism existed: belcort/rule-edit/SKILL.md:49,54-56 still references kb_compile helpers and lock/locked verbs.",
+    "audit-brief.md was absent at its specified path (undefined/audit-brief.md); verification proceeded on the task-stated rules (frozen repo read-only, adversarial default-refute, severity discipline).",
+    "Live belcort-shared DB contents: whether ANY client_memory_notes rows, post-onboarding ar_invoices/ap_bills rows, counterparty aliases, or recon hints exist in production (no live DB access; repo/Desktop guide state no real client books). All 'dead weight' conclusions are structural (no caller/consumer exists), not usage-measured.",
+    "Runtime model behaviour: whether the deployed model ever actually obeys AGENTS.md:74's optional 'read my notes via query_books' directive, or follows coa-coding Step 6's SQL form vs the curated tool (no eval/trace artifacts in the repo either way).",
+    "Whether the agent_select SELECT-wrapped-DEFINER write (C-15) commits on the LIVE Supabase instance under the live role grants — verified at code/rig level (VOLATILE fn + lexical guard + EXECUTE grants) but not exercised against production.",
+    "Whether any live firm's exported aging/management-accounts pack has actually shipped misleading figures (would require live artifact inspection)."
+  ],
+  "decision_brief": "C1 — MEMORY NOTES: RECOMMEND MERGE-INTO-KB (retire the as-built table/fn as-is; carry the three underlying needs into the rebuild's knowledge layer as typed, lifecycle-managed objects). Does it work end-to-end? Only half: the WRITE half works and is well-isolated (27-fns-memory.sql + kb.ts tool + seed_client_knowledge dual-seed; isolation TEST 7 / dual-seed TEST 11), but the READ half was never built — no skill, no wake hint, no context builder, no read fn, and no dashboard surface consumes a note; the only consumption path is one optional sentence in AGENTS.md:74 asking the model to run a query_books SELECT, and ADR-033's promised storage-rendered markdown index has no implementation (C-1/C-2). The learn-wake lanes that should generate notes are policy-blocked from writing them (C-4), and the special kinds (must_ask/rule_hint/profile) have no lifecycle or surfacing (C-3). Its measurable contribution to Clara's intelligence is therefore approximately zero: Clara's real memory as-built is (a) the KB rulebook + evidence tally (alive, wired, tested) and (b) the 40-turn chat transcript (sessions.loadHistory). Once the rebuild has a real KB + event/task layer, every legitimate memory-note use collapses into it: 'observation/profile' → typed client-profile facts with provenance in the KB (structurally injected into context packs); 'must_ask' → a first-class open-question/interruption object with resolution state that the workflow engine surfaces at client-work start; 'rule_hint' → a low-evidence KB-proposal state. Do not port the table: an append-only free-text pile with no consumer, no lifecycle, and the weakest audit discipline in the schema (C-5) is pure injection-surface liability.\n\nC2 — CONTACTS/COUNTERPARTIES: SPLIT RECOMMENDATION — CARRY-FORWARD-AND-INTEGRATE the name-intelligence machinery; REDESIGN the counterparty data layer and its subledger integration. Genuinely used and in sync: client_counterparty_aliases + app.normalize_counterparty + resolve_counterparty (written via the audited bookkeeper+ tool, read structurally inside evidence/rule/subledger/recon-hint writers, isolation-tested) and client_recon_hints (full human-fenced learn loop: trg_pn_bank_match → workbench wake → record_recon_hint → suggest_recon_counterparty at match time, promote admin-gated) — this is proven, tested design worth porting conceptually. Mostly dead weight: the AR/AP open-item layer that actually CARRIES counterparty balances. Its seven writer fns are sound but have zero callers after onboarding — absent from the agent tool registry (proven by the registry parity test's closed EXPECTED set), absent from every skill, absent from the dashboard (arap.ts is read-only) — so aging, statements, allocations, tie-outs, and the contacts fold-in all freeze at the opening seed (C-6/C-7). VERIFICATION CORRECTION on the SST consequence (C-8): the return is NOT starved — an unanchored tagged service-tax leg silently falls back to the cash-direct bucket and declares IN FULL at posting_date — so the real defect is a silent statutory-basis substitution (accrual instead of payment basis; s.11(2), bad-debt relief, and advance handling structurally inoperative), which the docs (backend.md:81) misrepresent as a built payment basis. And there is no counterparty ENTITY at all: identity is free-text snapshot strings merged display-side, so an alias repoint splits history and can strand settlements (C-9), while coding-time rule lookup doesn't even use the alias map (C-10). The rebuild should: (1) create a first-class per-client counterparty record (id-keyed, typed, alias children) FK'd from rules, evidence, hints, and subledger items; (2) make subledger maintenance intrinsic to the coding/receipt executions (or DB-derived from control-account legs) so it cannot silently diverge; (3) keep the tie-out honesty pattern but let it travel with exported artifacts, and gate the SST service-basis computation on proven feedstock completeness.\n\nKB INTENT vs AS-BUILT: the as-built v2 keeps a strong governance spine (per-client rules, user-gated promotion, alias collapse, decay/override-watch, full KB audit — all verified and tested) but the learning ENGINE is thinner than the repo's own documentation describes: the candidate tier is unreachable (no writer mints one; the ratified ladder, the coding skill, AGENTS.md, the KB-workbench design spec, and a dashboard count all still describe it as live — C-11), the pipeline is purely reactive and the proposals table structurally forbids every proposal type except rule_promotion (C-12), human-pinned 1.000 rules decay and silently auto-retire identically to evidence-derived rules while doctrine still offers 'lock' verbs (C-13), and knowledge provenance on entries is single-rule, mutable-target, and destroyed by corrections (C-14). CAVEAT FOR GATE 1: the draft attributed these gaps to a specific owner-designed v1 system documented in signals/kb-iteration-system.md and signals/per-client-kb-mechanism.md — those files do not exist in the frozen repo, so the 'owner intended X' framing is unverifiable here (only doctrine residue like rule-edit's kb_compile/lock references corroborates that a richer v1 existed). Each item should still go to the owner as an explicit keep/drop decision in the rebuild's KB design — but present them as verified docs-vs-code contradictions and capability gaps, not as verified owner-intent violations, unless the owner re-supplies the intent documents."
+}

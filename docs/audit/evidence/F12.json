@@ -1,0 +1,296 @@
+{
+  "workstream": "F (part 1) — Accounting engine correctness: year-end close/carry-forward (F1) + Malaysian tax coverage map (F2)",
+  "findings": [
+    {
+      "id": "F12-1",
+      "workstream_item": "F1",
+      "title": "Every post-close continuity read outside GL/FS is segmentation-blind: bank reconciliation, AR/AP control tie-outs, and FA control tie-out double-count the close's opening restatement entry",
+      "severity": "critical",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:658-704 — the close's opening entry re-posts EVERY real account's post-closing balance dated period_end+1; original entries remain, so any all-time GL sum thereafter counts real balances twice (compounding once per close)",
+        "db/v2/22-fns-documents-recon.sql:711-718 — close_reconciliation book balance = Σ(dr−cr) on the bank account for ALL posted entries ≤ period_end, no entry_kind exclusion, no segment floor",
+        "db/v2/22-fns-documents-recon.sql:723-735 — the outstanding computation counts the opening entry's bank leg (never matchable to a statement line, so never reconciled=true) as a phantom 'deposit in transit' when it falls in the recon window; verified arithmetic: in the FIRST post-close recon the phantom DIT exactly cancels the doubled book balance so diff can hit 0 (a spuriously 'completed' recon with a full-balance phantom DIT in the working figures); from the SECOND post-close reconciliation onward (opening entry outside the window) the difference is permanently off by the full restated balance — the recon can never complete",
+        "db/v2/23-fns-subledger.sql:551-557 — _tie_out_core control_balance is an all-time posted sum on the DC/CC control account with no kind filter/floor, while subledger_net (23:564-575) has no opening-entry twin → ar/ap_control_tie_out reads permanently untied (difference = full carried control balance) after the first close",
+        "db/v2/23b-fns-fixed-assets.sql:432-443 — fa_control_tie_out GL cost/accum are all-time posted sums with no kind filter/floor; register side (23b:450-463) anchors on acquisition/depreciation entries only → cost and accum differences equal the full carried balances after the first close",
+        "Contrast — the reads that DO handle it: db/v2/25-fns-ops.sql:50-52,69 (_trial_balance_core all-time excludes closing/opening), db/v2/28-fns-reads.sql:473-487 + 615-620 (client_general_ledger segment floor + gl_window_spans_close; client_financial_statements per-window floors)",
+        "Test gap re-verified 2026-07-17: `grep -l tie_out db/v2/tests/*.sql` → fixed_assets_test.sql, subledger_test.sql; `grep -l record_year_end_close` → 7 other files; `grep -l close_reconciliation` → add_bank_account_test.sql, edit_entry_test.sql (neither runs a close). The sets are disjoint — no test ever runs a tie-out or close_reconciliation after a close"
+      ],
+      "wrong": "The year-end close uses an opening-restatement model (real balances re-posted into the new segment) but only client_general_ledger, client_financial_statements and the all-time TB were taught about segments. close_reconciliation, _tie_out_core and fa_control_tie_out sum the GL all-time, so from the client's SECOND financial year every bank reconciliation reports a doubled book balance and cannot reach difference=0 (and the first post-close recon can spuriously 'complete' on a phantom full-balance deposit-in-transit), and all three control tie-outs report a permanent 'drift' equal to the entire carried balance — burying any real drift they exist to surface. This silently breaks the exact continuity (subledger open items, FA register, bank recon) the close is supposed to hand into the next FY.",
+      "target": "db/v2/22-fns-documents-recon.sql (close_reconciliation), db/v2/23-fns-subledger.sql (_tie_out_core), db/v2/23b-fns-fixed-assets.sql (fa_control_tie_out) — add the client_fy_close segment floor (or exclude entry_kind in ('closing','opening')), plus post-close rig tests",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-2",
+      "workstream_item": "F1",
+      "title": "Cross-FY bank matching is hard-blocked: match/unmatch of an entry dated in a closed period trips the closed-period guard (unpresented cheques / deposits-in-transit can never be cleared after close)",
+      "severity": "high",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:493-495 — match_bank_line UPDATEs journal_entries (reconciled/reconciliation_id/cleared_date) on the matched entry",
+        "db/v2/25-fns-ops.sql:297-322 — trg_je_closed_period fires BEFORE INSERT OR UPDATE (no column list, no WHEN clause) and raises posting_date_in_closed_period for any row with posting_date ≤ the latest live close period_end; the only exemption is entry_kind closing/opening under the close via_fns — match_bank_line has no exemption",
+        "db/v2/22-fns-documents-recon.sql:549-552 — unmatch_bank_line has the same journal_entries UPDATE, so a wrong pre-close match can't be unwound either",
+        "db/v2/tests/closed_period_lock_test.sql — zero mentions of match_bank_line/reconciliation (grep re-verified 2026-07-17); the interaction was never tested",
+        "belcort/year-end-close/SKILL.md:46,72-82 — the g4 gate only requires reconciliations COVERING the closed period; items that clear in the NEXT FY's statements are by definition matched after the close"
+      ],
+      "wrong": "The textbook year-end scenario — a December-dated payment clearing on the January bank statement — cannot be reconciled once FY-December is closed: match_bank_line raises posting_date_in_closed_period. The firm's options are absurd (reverse the whole year-end close to match one cheque, or leave lines permanently unmatched). Setting recon metadata is not an accounting mutation of the period; the guard over-blocks it.",
+      "target": "db/v2/25-fns-ops.sql trg_je_closed_period (exempt recon-field-only updates, e.g. via_fn match/unmatch + no posting_date/lines change) or restructure match state off journal_entries",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-3",
+      "workstream_item": "F2",
+      "title": "compute_tax_draft has no entry_kind filter — run after the FY is closed it silently computes PBT=0 (the closing sweep nets every P&L account inside the window) and supersedes the live draft with a garbage worksheet",
+      "severity": "high",
+      "evidence": [
+        "db/v2/23d-fns-tax.sql:86-92 — PBT sums P&L nets over posted entries in [v_start, v_end] with status filter only; `grep -n entry_kind db/v2/23d-fns-tax.sql` returns nothing (re-verified 2026-07-17)",
+        "db/v2/25-fns-ops.sql:566-601 — the closing entry is dated v_end (inside 'between v_start and v_end') and exactly negates every nominal account's net, so post-close v_pbt=0, v_dep=0 (923-000 is EP, swept), v_fines=0 (916-000 swept); v_disp (23d:114-125) is anchored on disposal entries only, so it survives — corrected from the draft's claim that it zeroes",
+        "Post-close arithmetic (verified against 23d:293-299): v_adjusted = 0 + 0 + v_disp + flag add-backs — typically a small POSITIVE number, so statutory income ≈ 0, the entire CA total drafts as inflated 'unabsorbed CA', tax ≈ 0; a phantom business LOSS drafts only when deduction-direction items (disposal book gains) exceed the add-backs. Either way the worksheet is internally inconsistent (flag buckets still populated against a zero PBT) and wrong",
+        "db/v2/23d-fns-tax.sql:417-419 — the fn SUPERSEDES the prior (correct) live draft when it runs ('update tax_computations set status = superseded')",
+        "Contrast: db/v2/28-fns-reads.sql:627 (SoCI filters entry_kind='standard' for exactly this reason) and db/v2/23e-fns-sst.sql:193 (SST engine counts entry_kind='standard' only)",
+        "db/v2/tests/tax_computation_test.sql — `grep -n \"close\\|entry_kind\"` returns nothing: the post-close case is untested",
+        "Workflow reality: Form C/CP204 work happens up to 7 months after FYE — re-drafting after the books are closed is the NORMAL sequence"
+      ],
+      "wrong": "A tax computation regenerated after record_year_end_close (the common professional sequence — close first, prepare tax later, or re-draft during tax-agent review) silently supersedes the live draft with garbage: PBT 0, depreciation and fines sweeps 0, flag-based buckets still populated (inconsistent), statutory income near zero with the full CA total mis-drafted as unabsorbed relief (or a phantom loss in gain-heavy years), and no assumption/confirmation warns that the FY is closed.",
+      "target": "db/v2/23d-fns-tax.sql — add entry_kind='standard' to the PBT/depreciation/916-000 window queries (mirroring 23e/SoCI), plus a closed-FY note in the worksheet",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "F12-4",
+      "workstream_item": "F1",
+      "title": "The closed-period lock is one-directional: re-dating an entry OUT of a closed period passes the guard, silently draining closed-FY history that the close already swept and carried",
+      "severity": "high",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:307-315 — the guard inspects only NEW.posting_date; an UPDATE moving posting_date from inside the closed period to any later date does not raise",
+        "db/v2/20-fns-journal.sql:305-310 — edit_entry accepts a new posting_date on any non-rejected entry (approved→needs_review with reason; drafting/needs_review freely), agent- and dashboard-callable at the bookkeeper floor (assert_can_review, 20:284)",
+        "db/v2/tests/closed_period_lock_test.sql:108-116 — the only UPDATE-path test keeps posting_date inside the period (approve_entry); the move-out direction is untested",
+        "Effect chain: the moved entry's nominal effect was already swept to RE by the closing entry (25:566-601) and its real effect carried by the opening entry (25:658-704); after the move the closed FY's window no longer supports its own close, and the current segment holds the entry AND its carried effect — double count in GL/FS segment reads (28:496-517, 28:668-683)"
+      ],
+      "wrong": "An operator or the agent 'fixing a wrong date' on a pre-close entry (a natural response to F12-2's block, and an ordinary correction instinct) mutates a locked period without any raise: closed-FY statements no longer tie to the recorded close, and current-segment reads double-count the moved amounts. The hard lock the whole close model rests on has an unguarded exit door.",
+      "target": "db/v2/25-fns-ops.sql app.je_closed_period_guard — also reject when OLD.posting_date falls in a live closed period (UPDATE branch)",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-5",
+      "workstream_item": "F1",
+      "title": "Nothing blocks re-open (or re-close) out of order: reverse_year_end_close has no later-close guard, and the via_fn+kind exemption lets its entries post inside LATER closed periods, silently staling every subsequent close's carry-forward",
+      "severity": "high",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:783-830 — reverse_year_end_close guards are only actor_required and no_live_close; no check that a later FY close exists",
+        "db/v2/25-fns-ops.sql:302-306 — closing/opening-kind entries under via_fn record_/reverse_year_end_close are exempt from the closed-period guard, so reversing FY2023 posts mirrors dated inside FY2024/FY2025's already-closed windows; a bare RE-close of the mid-chain year also passes (its closing/opening entries are exempt) while a re-close WITH p_tax_provision_cents fails confusingly (the provision entry is kind 'standard' dated v_end, 25:474-475, and trips the guard)",
+        "Verified worse: after a mid-chain reversal the CORRECTING entry the operator reversed for is itself still blocked (any FY2023 posting_date ≤ the live FY2024/25 period_end raises, 25:308-313) — the books strand in a corrupted intermediate state where FY2023 is un-closed but still locked",
+        "db/v2/25-fns-ops.sql:420-434 — g2 (prior_fy_not_closed) enforces close-in-ORDER but nothing enforces reverse-in-order; later closes' opening entries (computed from v_carry_from at their close time) are never recomputed or invalidated",
+        "db/v2/tests/reverse_year_end_close_test.sql:95 — proves only the single-FY reverse → re-close cycle; no multi-year out-of-order scenario"
+      ],
+      "wrong": "With FY2023–FY2025 all closed, any member can reverse (and even bare-re-close) FY2023 while FY2024/25 stay live. The moment FY2023 is reversed, the FY2024 close's opening entry no longer equals its segment's true prior balances — silent chain corruption with no raise, no flag, and no mechanism to mark downstream closes stale; and the correction the operator wanted to post is still blocked by the later closes' lock. Combined with the missing role floor (F12-8) this is the most consequential unguarded operation in the books.",
+      "target": "db/v2/25-fns-ops.sql reverse_year_end_close — raise later_fy_still_closed unless the reversal is the LATEST live close; record_year_end_close — refuse when any later live close exists",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-8",
+      "workstream_item": "F1",
+      "title": "No RBAC floor on the close family or the tax/SST engines: a viewer (rank-1) — or any credential lacking a bookkeeper+ role — can close a year, re-open it, post opening balances, seed carry-downs, and supersede tax/SST drafts",
+      "severity": "high",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:376-385 (record_year_end_close) and :789-791 (reverse_year_end_close) — guard set is via_fn + assert_firm_owns_client + actor_required only; no assert_can_review/assert_can_manage_kb (the file's only two role asserts are at :1114 and :1395 — the activity-feed/notification fns)",
+        "db/v2/25-fns-ops.sql:835-845 (record_opening_balances), db/v2/25b-fns-opening.sql:40-315 (all four seed_opening_* fns, assert_firm_owns_client only), db/v2/23d-fns-tax.sql:73-77 (compute_tax_draft), db/v2/23e-fns-sst.sql:148-152 (compute_sst_return) — same pattern, EXECUTE granted to authenticated",
+        "db/v2/00-foundation.sql:152-160 — assert_can_review exists and gates approve/reject/edit/reverse_entry and even match/unmatch_bank_line (20-fns, 22-fns:467,529), i.e. a viewer may NOT approve a single RM50 entry or match one bank line but MAY close and re-open an entire financial year",
+        "db/v2/90-isolation-tests.sql:1621-1642 TEST 20d — proves viewer denial only on the 4 re-homed bookkeeper+ surfaces (reverse_entry/update_client_profile/resolve_notification/firm_activity_feed); close/tax/SST floors untested because they don't exist"
+      ],
+      "wrong": "The privilege ordering is inverted: the highest-consequence mutations (year-end close, its reversal, opening balances, carry-down seeding, tax/SST draft supersession) have a LOWER effective floor than routine entry approval or bank-line matching. Firm isolation is airtight, but intra-firm a read-only viewer — or a wake-lane credential whose role never reaches bookkeeper+ — can restructure the books' period spine and supersede filing drafts.",
+      "target": "db/v2/25-fns-ops.sql, 25b-fns-opening.sql, 23d/23e — add assert_can_review (or an admin+ floor for close/reverse) consistent with the re-homed surfaces",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-6",
+      "workstream_item": "F1",
+      "title": "The DB closes over 'drafting' entries (g1 counts only needs_review/needs_decision); they strand in the locked period where finalize_coding can never run",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:408-418 — g1 counts status in ('needs_review','needs_decision') only; 'drafting' entries are neither counted nor swept (sweep scope :550 is auto_draft/approved)",
+        "db/v2/20-fns-journal.sql:128-160 — finalize_coding UPDATEs journal_entries (status), so post-close the row-level trigger raises posting_date_in_closed_period; there is no delete path for a drafting entry (`grep 'delete from journal_entries' db/v2/*.sql` → no matches; reject_entry requires non-drafting status, 20:233)",
+        "belcort/year-end-close/SKILL.md:43 — 'drafting' is listed only in the skill's Step-0 surface-and-acknowledge gate; the DB itself is silent",
+        "Partial rescue exists but is itself the F12-4 hole: edit_entry can re-date the drafting entry out of the closed window (20:305-310); the balance trigger skips 'drafting' (15-triggers.sql:52) so the stranded row may not even balance; journal_entries_page lists drafting rows with no default exclusion (28-fns-reads.sql:43)"
+      ],
+      "wrong": "An in-flight drafted-but-never-finalized entry does not block the close and cannot be finalized afterwards — it lingers forever in the workbench grid inside a locked period, and the only clean fix is reversing the whole close. The unbalanced-drafting escape compounds it: the stranded row may not even balance.",
+      "target": "db/v2/25-fns-ops.sql record_year_end_close g1 — include 'drafting' in the hard block, or surface a drafting count in the close return",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-7",
+      "workstream_item": "F1",
+      "title": "fye_month is freely editable after closes exist; FY-window reads re-window history against frozen close periods and client_financial_statements silently double-counts when a close boundary lands inside a re-windowed FY",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/24-fns-onboard.sql:462-463,476 — update_client_profile (bookkeeper floor, :449) sets fye_month with no live-close guard; client_fy_close rows keep the ORIGINAL period_start/period_end (14-tables-ops.sql:201-203)",
+        "db/v2/28-fns-reads.sql:607-620 — FS windows are computed from the CURRENT fye_month; the segment floor takes only closes with period_end < v_cs, so a close boundary INSIDE the re-windowed FY is not floored and the SoFP cumulative (28:669-675) includes both the pre-boundary entries AND the restating opening entry — double count with no raise",
+        "db/v2/28-fns-reads.sql:480-487 — client_general_ledger DOES raise gl_window_spans_close for this case; the FS/TB paths have no equivalent guard (25:124-151 client_trial_balance/trial_balance_range)",
+        "db/v2/28-fns-reads.sql:788 — the FS basis[] admits 'a changed FYE re-windows history' but not the double-count mode"
+      ],
+      "wrong": "A legitimate FYE change (companies do change year-ends) on a client with closed years silently corrupts the comparative statements and the FY TB: windows straddle close boundaries and the SoFP double-counts the opening restatement, with in_balance potentially still true (both sides inflate). Also the next record_year_end_close computes its window from the new fye_month, which can overlap or gap against the frozen prior close (gap activity is caught by g2, but a gap with only real-account movement is not).",
+      "target": "db/v2/24-fns-onboard.sql update_client_profile — block or gate fye_month changes when a live client_fy_close exists; db/v2/28-fns-reads.sql — add a spans-close raise to FS/TB windows",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-9",
+      "workstream_item": "F1",
+      "title": "Doctrine–tool drift on the close: the year-end-close SKILL mandates the 7-arg Track-1c tax-provision path, but the registered agent tool exposes only 4 parameters — Clara cannot pass p_tax_provision_cents",
+      "severity": "medium",
+      "evidence": [
+        "belcort/year-end-close/SKILL.md:100-108 — 'The as-built fn is 7-arg (Track 1c) … pass the human-confirmed figure as p_tax_provision_cents to record_year_end_close'",
+        "agent/src/tools/registry/ops.ts:56-72 — the record_year_end_close tool schema carries only p_client_id, p_fy, p_actor, p_first_year_zero_opening; no provision params, and the description omits the provision entirely",
+        "db/v2/25-fns-ops.sql:346-352 — the DB fn is genuinely 7-arg; the dashboard is unaffected (dashboard-direct RPC), the agent lane is the one that breaks"
+      ],
+      "wrong": "The skill's Step-0 TX-vs-provision gate offers 'two sanctioned paths' and the second (provision via the close call) is uncallable from the agent runtime — the declared tool schema simply has no parameter to carry the figure. Clara following her own doctrine dead-ends; only the hand-post-then-close path works. The skill and tool registry were not updated together.",
+      "target": "agent/src/tools/registry/ops.ts — add the three provision params (or amend belcort/year-end-close/SKILL.md to the hand-post-only path)",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-10",
+      "workstream_item": "F2",
+      "title": "SST-02 and tax-computation drafting are dashboard-only: compute_sst_return / compute_tax_draft / get_sst_return / get_tax_computation are not registered agent tools and no belcort skill exists for either; the dashboard's 'Export forms' intent routes to an export scope that doesn't exist",
+      "severity": "medium",
+      "evidence": [
+        "grep of agent/src/ for the four fn names (re-verified 2026-07-17) — sole match is exportTool.ts:350 reading get_sst_return inside build_export scope 'sst_return'; the registry files (documents/enums/fixedAssets/journal/kb/onboard/ops/reads.ts) register none of them",
+        "belcort/ directory listing (re-verified) — skills are bank-recon, client-onboarding, coa-coding, doc-ingest, export, firm-bootstrap, kb-evolve, period-entries, review-queue, rule-edit, year-end-close; no SST-return or tax-computation skill",
+        "dashboard/lib/sstReturn.ts:129-137 (computeSstReturn) and dashboard/lib/taxComp.ts:91-106 (computeTaxDraft) — the compute writes are dashboard-direct RPCs (so the capability exists, human-driven only)",
+        "dashboard/lib/taxComp.ts:108-112 — buildExportFormsIntent asks Clara to 'Prepare the draft Form + tax computation worksheet … and save it as a filing', but agent/src/tools/exportTool.ts:53-62 EXPORT_SCOPES has no tax-computation scope (trial_balance/journals/documents/general_ledger/management_accounts/aging/sst_return/full only)"
+      ],
+      "wrong": "The product law says Clara runs the lifecycle through tax preparation, but the agent can neither draft an SST-02 nor a tax computation, has no doctrine for when/how to draft them (period-end triggers, pre-close provision sequencing), and the dashboard hands her an export request she cannot fulfil. Tax prep is a human-clicks-a-button feature, not an agent capability — and the export of the tax computation worksheet has no lane at all.",
+      "target": "agent/src/tools/registry (register the four fns), a belcort/sst-return + tax-computation skill pair, and a tax_comp export scope in agent/src/tools/exportTool.ts",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-11",
+      "workstream_item": "F2",
+      "title": "The SST return engine keys entirely on literal account codes 460-000/461-000 which carry NO special_acc_type marker — SST tagged to any other account silently vanishes from both the return and its uncounted-movement safety net",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/23e-fns-sst.sql:195, 249, 294-300, 370, 419, 466-467, 475, 490-498, 513-516, 530-532, 613, 621, 627 — every counting, model, candidate AND visibility query is anchored on the two literals (grep re-verified 2026-07-17); the uncounted-movement scan itself is `jl.account_code in ('460-000','461-000')` (:475, :498)",
+        "db/v2/24-fns-onboard.sql:169-170 — the seed creates 460-000/461-000 with special_acc_type NULL (no marker exists for SST payable)",
+        "db/v2/23-fns-subledger.sql:28-43 — the subledger/close family deliberately resolves control accounts by marker (DC/CC, and OBE at 24:179) precisely so re-keyed COAs can't break them; the SST engine diverges",
+        "db/v2/20-fns-journal.sql:101-116 — draft_entry takes account codes straight from the coding payload (compute_sst_leg computes the amount only, 20:42-73); nothing forces tagged legs onto 460/461, and add_coa_account lets a firm add e.g. a second SST payable account"
+      ],
+      "wrong": "A client whose output-tax legs land on any account other than the two seeded literals produces a confidently-wrong (understated or NIL) SST-02 draft, and the engine's own uncounted-movement scan — its designed safety net — is blind to it too, because it scans the same two literals. Under-declaration on SST-02 is an offence (STA s.26); this is the exact failure class the marker system was built to prevent.",
+      "target": "db/v2/24-fns-onboard.sql (seed OS-style markers on 460/461) + db/v2/23e-fns-sst.sql (resolve by marker; widen the uncounted scan to any tagged sales-%/service-% leg on ANY account)",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-12",
+      "workstream_item": "F2",
+      "title": "Tax add-back detection depends on coding-time must_ask_flags with no account-based fallback for donations or entertainment: the seeded 924-000 DONATIONS account is never swept and no entertainment account exists, so unflagged items silently escape the bridge",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/23d-fns-tax.sql:129-160 — entertainment/donation/WHT/doubtful-debt buckets select ONLY entries where must_ask_flags && the four flag names; account-code sweeps exist only for depreciation (923-000 + register expense accounts, :97-107), 916-000 fines (:165-168), and — the one bucket with a fallback — 925-000 doubtful-debt movement, which triggers a confirmation even unflagged (:406-409). Donations and entertainment have no equivalent",
+        "db/v2/24-fns-onboard.sql:233 — the master COA seeds 924-000 DONATIONS; the seed's EP list (208-241) contains no ENTERTAINMENT account at all",
+        "db/v2/20-fns-journal.sql:101-108 — must_ask_flags are set only from the draft_entry payload (agent coding lane); human/dashboard-drafted or edited entries carry no flags (edit_entry never writes must_ask_flags, 20:305-317)",
+        "db/v2/23d-fns-tax.sql:306-308 — the engine's own confirm text acknowledges unflagged donations for the DEDUCTION direction ('unflagged donation entries must be flagged + added back…') but nothing detects movement on 924-000 to trigger that warning"
+      ],
+      "wrong": "A donation posted manually to 924-000, or an entertainment expense coded without the keyword flag (any human-drafted entry, any OCR miss), is silently fully deducted in the draft chargeable income — the add-back engine under-adds-back with no candidate row and no confirmation item. The deterministic signal that DOES exist in the books (the 924-000 account) is ignored in favour of a fragile coding-time flag — even though the engine already demonstrates the account-sweep pattern for 925-000 doubtful debts.",
+      "target": "db/v2/23d-fns-tax.sql — sweep 924-000 (and a seeded entertainment account) as candidates alongside the flag buckets, mirroring the existing 925-000 confirmation; surface flagless movement on those accounts as confirmations",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "F12-13",
+      "workstream_item": "F1",
+      "title": "No depreciation-completeness signal at close: adjustments_status covers recurring+amortisation only, and neither the DB close return nor the year-end-close skill checks that depreciation was run through period_end",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/23c-fns-adjustments.sql:592-678 — adjustments_status computes recurring due-occurrences and amortisation catch-up; grep for depreciation/fixed_asset in 23c returns only a comment (:17)",
+        "db/v2/25-fns-ops.sql:484-490 — the close's pending_adjustments visibility is exactly adjustments_status; no FA component",
+        "belcort/year-end-close/SKILL.md:37-85 (Step 0) — the mandatory gate lists entries/documents/recon/TX-provision/pending-adjustments/partners/RE; depreciation is never mentioned (only run_recurring_journals/run_amortisation at :59)",
+        "db/v2/23b-fns-fixed-assets.sql:131-231 — run_depreciation's journal is dated coalesce(posting_date, period_end) (:138) as entry_kind 'standard' (:206); after the close a catch-up must be dated in the new FY (the cumulative-target model, :153-197, then lands the missing charge in the wrong year's P&L)"
+      ],
+      "wrong": "A firm can close an FY having never run depreciation: the close proceeds silently, the FY's profit is overstated, the tax draft's depreciation add-back and the FA-register CA basis diverge from the books, and the eventual catch-up charge lands in the next FY. Every comparable completeness condition (recurring, amortisation, TX provision, auto-posts) got a visibility surface; depreciation — the one MPERS-mandatory period charge the system itself generates — got none.",
+      "target": "db/v2/23c-fns-adjustments.sql adjustments_status (add an FA depreciation-through-period_end component) + belcort/year-end-close/SKILL.md Step 0",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-14",
+      "workstream_item": "F2",
+      "title": "ICT capital-allowance rate direction for YA2024+ (IA 40 / AA 20) is self-flagged as disputed and could not be verified against the gazette; the engine fixes it permanently per asset at first-use YA",
+      "severity": "low",
+      "evidence": [
+        "db/v2/19d-tables-tax.sql:17-19 — 'NOTE: an earlier research pass inverted this as 20/40 — the gazette split is 40/20, no sunset year corroborated' (verbatim, re-verified)",
+        "db/v2/19d-tables-tax.sql:50 — the seeded computer_ict row is IA 40 / AA 20 valid_from 2024-01-01 citing P.U.(A) 328/2024",
+        "db/v2/23d-fns-tax.sql:186-197 — the rate row is fixed at each asset's first-use YA for the WHOLE schedule, so a wrong split mis-drafts every ICT asset's CA for its entire life",
+        "C:/Users/zhant/Desktop/sst-research/ contains only SST sources (acts, regulations, MySST manuals, SST-02 form) — no income-tax gazettes; the claim is unverifiable from the frozen evidence base"
+      ],
+      "wrong": "Two internal research passes disagreed on whether the 2024 ACA ICT split is IA40/AA20 (3-year claim) or IA20/AA40 (2-year claim); the seeded value follows the later pass but no primary source is in the repo or research folder. If inverted, every YA2024+ ICT asset's drafted CA schedule is wrong in both timing and per-year quantum, permanently (first-use fixing).",
+      "target": "db/v2/19d-tables-tax.sql seed — owner to verify P.U.(A) 328/2024 against the gazette (e-Federal Gazette) before any live reliance",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "F12-15",
+      "workstream_item": "F1",
+      "title": "client_trial_balance_comparative shows a post-closing TB for a closed prior FY (nominals swept to zero) against a pre-closing current TB — asymmetric comparative presentation",
+      "severity": "low",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:50-52,69 — a bounded FY window INCLUDES close machinery by design; the closed FY's window contains its own closing entry dated period_end, netting every nominal to zero (dropped by the netted CTE :74-77)",
+        "db/v2/28-fns-reads.sql:801-815 — client_trial_balance_comparative is two client_trial_balance calls; no standard-only variant for the prior year",
+        "Mitigation exists: the FS pack's SoCI is standard-entries-only per window (28:622-637), so the STATEMENTS comparative is correct — only the TB viewer pair is asymmetric"
+      ],
+      "wrong": "The 'TB current vs prior' viewer promised by the read model shows the prior closed year with no P&L rows at all (post-closing TB) while the current year shows full nominal detail — technically defensible but certain to read as data loss to a practitioner comparing years, and the UI aligns rows by account_code so every nominal row shows a blank prior column.",
+      "target": "db/v2/28-fns-reads.sql client_trial_balance_comparative — pre-closing option (exclude closing entries from the prior window) or a documented UI affordance",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "The core close mechanics are correct and well-guarded: g1 (unreviewed entries) and g2 (close-in-order) hard-raise; the TB is re-asserted inside the close (trial_balance_unbalanced refuses); the acc_type exhaustiveness guard prevents unclassified accounts slipping the sweep; the closing sweep resolves drawings by the DRAWINGS marker (not literal codes); the RE residual balances the entry to the cent; partner-mode PSR must sum to exactly 1, shared drawings are rejected, unmapped drawings fail loud, and the rounding residual goes to the largest-PSR partner.",
+      "evidence": ["db/v2/25-fns-ops.sql:408-434 (g1/g2)", "db/v2/25-fns-ops.sql:492-505 (TB + exhaustiveness)", "db/v2/25-fns-ops.sql:510-655 (sweep/marker/partner mode: PSR=1 at :513-515, shared drawings :517-521, largest-PSR residual :611-621, unmapped raise :640-643)", "db/v2/tests/year_end_close_test.sql:285 (proven on the rig)"]
+    },
+    {
+      "claim": "Retained-earnings roll and real-account carry-forward are arithmetically correct within the aligned-FY happy path, including multi-year chains: the opening entry carries every real account's post-closing balance segment-by-segment (posting_date > carry_from), and the BEE CREATIVE golden test proves an accountant-reproduced SoFP carries unchanged through FY2025 and FY2026 openings.",
+      "evidence": ["db/v2/25-fns-ops.sql:658-704", "db/v2/tests/bee_carry_down_close_test.sql:40-47,138-146 (exact-cents asserts re-verified)"]
+    },
+    {
+      "claim": "The tax-provision double-count guard at close is real and conservative: any live movement on the liability account in the window blocks a second provision (operator must omit the arg or reverse the old entry), and transparent entities are hard-blocked from an entity provision with correct statutory reasoning (LHDN PR 8/2021 partnership / Form B sole prop; LLP + sdn_bhd allowed).",
+      "evidence": ["db/v2/25-fns-ops.sql:441-482", "belcort/year-end-close/SKILL.md:47-56"]
+    },
+    {
+      "claim": "Onboarding carry-down (prior-accountant handover) is genuinely sound: seed_opening_ar_invoice/ap_bill/fixed_asset + seed_opening_carry_forward create per-item opening entries tied to controls via markers, assert OBE nets to zero, and the FA baseline fa_depreciation row makes run_depreciation continue from NBV with no historical catch-up — all rig-proven.",
+      "evidence": ["db/v2/25b-fns-opening.sql:40-315", "db/v2/tests/opening_carry_forward_test.sql:70-158 (CF1 control-tie/OBE-nil/snapshot, CF2 depreciation baseline single-month charge, CF4 validations — re-verified)"]
+    },
+    {
+      "claim": "The closed-period guard's conjunctive exemption is correctly narrow (entry_kind AND via_fn both required, proven in both failure directions on the rig), and reverse_entry correctly never touches the original row — the mirror is deliberately dated current_date (documented), so a pre-close APPROVED entry can still be corrected via a current-dated mirror, which is the audit-correct behavior; reverse_entry refuses closing/opening entries (cannot_reverse_close_entry).",
+      "evidence": ["db/v2/25-fns-ops.sql:297-317", "db/v2/tests/closed_period_lock_test.sql:108-135", "db/v2/22-fns-documents-recon.sql:792,807-818"]
+    },
+    {
+      "claim": "AR/AP open-item continuity across the FY boundary is structurally fine at the subledger layer: items/allocations/aging/statements are keyed on their own document dates and never touch journal-line GL sums, so aging and customer/supplier statements remain correct after a close (the breakage is only in the GL-side tie-out, F12-1).",
+      "evidence": ["db/v2/23-fns-subledger.sql:434-526 (_aging_core as-of arithmetic on invoice/receipt dates)", "db/v2/23-fns-subledger.sql:597-668 (_statement_core)"]
+    },
+    {
+      "claim": "The SST-02 engine's statutory mechanics verify against the owner's primary-source research: service tax on the payment basis with the s.11(2) 12-month trigger at invoice_date+12m+1d (Act text: 'due on the day following that period of twelve months'); form arithmetic 14 = 12 − 13a − 13b − 13c − 13A with 13d (bad-debt relief) OUTSIDE the arithmetic exactly matches the 2025 SST-02 form; the field-11 buckets (5%/10%/6%/8%/Group-H card levy) match; due date last-day-of-following-month for aligned periods (s.26(1)) vs +30d for varied (s.26(2)); NIL returns valid; separate sales/service declarations; bad-debt relief C or C−A×C/B computed net of CNs as candidates only.",
+      "evidence": ["db/v2/23e-fns-sst.sql:15-55, 165-172, 309, 554-568, 788-798", "C:/Users/zhant/Desktop/sst-research/service-tax-act-2018.txt (s.11(2) text re-verified)", "C:/Users/zhant/Desktop/sst-research/sst-02-form-2025.txt:109-136, 168-178 ((14)=(12)−(13a)−(13b)−(13c)−(13A) verbatim)"]
+    },
+    {
+      "claim": "The SST engine is close-safe (counts entry_kind='standard' only), reversal-aware (cancelled pairs, bounced-receipt effectiveness via app.sst_receipt_effective, reversal rates bucketed at the original entry's date), floors per-tax payables at 0 with explicit carried-excess numbers, and its confessed gaps (Group-H levy, Part C/D/E, imported taxable services/SST-02A, first-period irregularity, s.11(1A) approval, rounding convention) accurately match the real SST-02 form's uncomputable fields.",
+      "evidence": ["db/v2/23e-fns-sst.sql:92-101, 186-196, 238-256, 356-382, 665-678, 702-718", "C:/Users/zhant/Desktop/sst-research/sst-02-form-2025.txt:189-224 (field 18 families the books can't derive)"]
+    },
+    {
+      "claim": "The SST rate table is correct as far as it goes: service 6% from 2018-09-01, general 6%→8% at 2024-03-01 with retained-6% categories noted, sales 5/10, exempt/zero/none 0 — and the July-2025 scope expansions require no NEW rate values (new taxable categories map onto the existing 6/8/5/10 treatments), so the rates authority is not blocking; classification guidance is the doctrine layer's job.",
+      "evidence": ["db/v2/18-tables-reference.sql:38-51 (re-verified)", "db/v2/20-fns-journal.sql:42-73 (date-aware compute_sst_leg raising no_sst_rate_for_date)"]
+    },
+    {
+      "claim": "The income-tax engine's verified-correct statutory numbers: MSME bands 15/17/24 from YA2023 with PR 8/2025 conditions human-confirmed; non-commercial MV QE caps RM100k (new, cost≤RM150k) / RM50k per Sch 3 para 2(2); SVA RM2,000/asset at 100% with the RM20k/YA aggregate cap waived for MSME (PR 3/2021); balancing charge capped at allowances claimed; disposal-year no-allowance; s44(6) approved donations capped at 10% of aggregate income AND at the flagged add-back (anti-double-dip); Sch 3 para-71 2-year withdrawal confirmations; brought-forward relief never silently applied (quoted from the prior draft as a confirmation item).",
+      "evidence": ["db/v2/19d-tables-tax.sql:77-87", "db/v2/23d-fns-tax.sql:206-216 (MV caps), 218-256 (disposal year + BC cap least(...,v_prior) at 242-245 + para 71 at 251-255), 259-274 (SVA), 301-309 (s44(6)), 382-391 (b/f quoted, never applied)"]
+    },
+    {
+      "claim": "Both engines' 'honesty layers' (assumptions[] + confirmations_needed[]) are genuinely comprehensive review-flag systems — single-source assumption, CA continuity assumption, entertainment proviso reclass, WHT remittance confirmation, fines split, IBA qualification, calendar-basis warning for non-Dec individuals, registration mismatches, late-penalty tiers — this is the strongest professional-review scaffolding in the codebase and should be preserved in any rebuild.",
+      "evidence": ["db/v2/23d-fns-tax.sql:374-415", "db/v2/23e-fns-sst.sql:655-718"]
+    },
+    {
+      "claim": "The compliance calendar (dashboard) is honestly scoped: dates-not-money carve-out, primary-source citations per deadline, 'assumed/verify' caveats, and an explicit do-NOT-guess deferred list (CP204 YA2027/28 timeline, CP204A/CP502, SST-02A, DG-varied periods, Form E/EA, penalties).",
+      "evidence": ["dashboard/lib/complianceCalendar.ts:1-60 (re-verified: basis 'derived'|'assumed', caveat chip, citation field, deferred list at :9-12)"]
+    }
+  ],
+  "unverified": [
+    "P.U.(A) 328/2024 ICT ACA split (IA 40/AA 20 vs 20/40) and the P.U.(A) 52/2000 general CA rates — no income-tax gazettes in the repo or the sst-research folder (folder re-listed 2026-07-17: SST acts/regulations/manuals/form only); the 19d file itself records an internal research-pass disagreement (F12-14). Needs owner gazette verification.",
+    "All findings are from code reading of the frozen repo; nothing was executed. The F12-1/F12-3 arithmetic (post-close double-count and phantom-DIT cancellation, PBT-zeroing) is confirmed by tracing the SQL and by the disjoint test coverage, but was not run on the ephemeral rig (read-only audit discipline).",
+    "The claimed 'LAST VERIFIED 2026-06-14 vs RMCD MySST' status of the 18-tables-reference retained-6% category list (F&B, telco, parking, logistics) — the sst-research folder's sources were spot-checked for the 12-month rule and the SST-02 form arithmetic only; the full 2025-07-01 service/sales scope-expansion category mapping (which categories a coding skill should tag service-6 vs service-8) was not exhaustively cross-checked and belongs to the coa-coding doctrine workstream.",
+    "Whether the agent tool layer rejects or silently drops unknown params for the 4-arg record_year_end_close tool when the skill instructs the 7-arg call (F12-9) — buildTools.ts passes spec.params as the tool parameter schema (agent/src/tools/buildTools.ts:96) but the SDK-side validation/strictness path was not traced end-to-end; either behavior leaves the provision path uncallable.",
+    "The dashboard SstReturn.tsx / TaxComputation.tsx surfaces' fidelity to the worksheets (whether all confirmations_needed render) — UI-lane, outside this workstream.",
+    "CP204 statutory notes in the engine (85% floor s.107C(3), month-11 revision permanent from YA2024, new-SME 2-YA exemption, 10%-beyond-30% underestimate penalty) — consistent with domain knowledge but not re-verified against a primary source in the evidence base."
+  ],
+  "decision_brief": "WORKSTREAM F PART 1 — VERDICT (adversarially re-verified 2026-07-17: 13 findings CONFIRMED, 2 ADJUSTED, 0 REFUTED; all 12 fine claims spot-verified against code and primary sources). The close/tax engines are the best-crafted SQL in the repo (marker-driven sweeps, partner-mode exactness, cumulative-target models, exceptional honesty layers, exact-cents tests) — but they fail the workstream's central question: the system does NOT correctly transition a client into the next FY, because the close's opening-restatement model was only taught to 3 of the ~7 read/write families that consume the GL.\n\nF1 ANSWER (what carries / what silently doesn't / what blocks re-open). CARRIES correctly: retained-earnings roll (single-RE, sole-prop drawings, and per-partner PSR modes), every real account's post-closing balance into an opening entry, the FP snapshot, AR/AP open items + aging + statements (subledger-native, close-immune), FA register + cumulative-target depreciation continuity, FS comparatives (segment-floored SoCI/SoFP). SILENTLY BREAKS: (1) bank reconciliation + AR/AP/FA control tie-outs — all-time GL sums with no segment floor double-count the opening restatement, so from year 2 every recon is structurally uncompletable (the first post-close recon can even spuriously 'complete' on a phantom full-balance deposit-in-transit) and every tie-out reads untied (F12-1, critical, untested combination); (2) cross-FY bank matching of unpresented items — the closed-period guard blocks match/unmatch UPDATEs (F12-2); (3) a re-run tax draft — no entry_kind filter, PBT computes 0 post-close, statutory income collapses and unabsorbed CA inflates (a phantom loss in gain-heavy years), superseding the correct draft (F12-3); (4) the lock itself is one-directional — entries can be re-dated OUT of a closed period (F12-4); (5) drafting entries strand (F12-6); (6) fye_month edits re-window history against frozen closes (F12-7). BLOCKS RE-OPEN: almost nothing — reverse_year_end_close needs only a live close + actor; no later-close ordering guard (F12-5, and after a mid-chain reversal the correcting entry is itself still locked, stranding the books mid-corruption), no role floor (a viewer can close/re-open a year, F12-8), and the via_fn exemption lets close machinery post inside later closed periods. There is no periods table (D18: computed windows) and no interim/month-end lock of any kind — SST bimonthly periods and monthly management closes have zero lock support; the FY close is the only period boundary in the system.\n\nF2 COVERAGE MAP (practicing-firm capabilities). SUPPORTED: output SST leg computation (date-aware, effective-dated, DB-owned); SST-02 Part-B2 draft with correct statutory mechanics (sales accrual, service payment-basis + 12-month rule, CN handling, cancelled/bounced awareness, bad-debt-relief candidates via the statutory formula, due dates, NIL returns, penalty-tier warnings) — form arithmetic verified against the owner's 2025 SST-02 primary source; output-tax liability tracking incl. a deferred-position reconciliation; draft chargeable-income computation delivering the full ADR-044 promise as a worksheet (certain add-backs, surfaced candidates, per-asset CA schedule with first-use-YA rate fixing, MV/SVA caps, balancing-adjustment candidates, MSME/standard bands, Form C/PT/P/B classification, CP204 draft, PSR allocation, CP500 notes); CA metadata on the FA register (ca_class, is_commercial_vehicle, is_new with conservative defaults); review flags (assumptions/confirmations) — outstanding. PARTIAL: unabsorbed CA/loss brought-forward (computed but never auto-applied, no persistent relief ledger — confirmation-quote only); CP204 (no CP204A revision support); Form outputs (worksheet only — no form-field artifact, and the dashboard's 'Export forms' intent routes to a nonexistent agent export scope); compliance calendar (dates-only, honest deferrals); SST category guidance post-2025-expansion (rates suffice, classification doctrine unverified); add-back detection (flag-driven; account fallback exists only for 925-000 doubtful debts, not donations/entertainment — F12-12). MISSING: imported taxable services / SST-02A reverse charge (confessed); SST registration-threshold monitoring (nothing watches taxable turnover vs RM500k/1.5M); Group-H levy + SST-02 Parts B1/C/D/E + field-18 exemption values (confessed — books lack source data); WHT remittance ledger (CP37 family); HP-asset QE timing + private-use apportionment metadata; RPGT; Form E/EA/PCB engine (declared non-goal); deferred tax (declared out of scope). AGENT-LANE GAP: compute_sst_return/compute_tax_draft and their reads are not agent tools and have no skills — 'Clara does tax prep' is currently false (F12-10); the year-end skill's tax-provision path is uncallable via the 4-arg registered tool (F12-9).\n\nREBUILD GUIDANCE: the engines' statutory logic, honesty layers, marker doctrine, and test discipline are port-grade assets; the defect class to design out is systemic, not local — every GL-consuming read/write must be forced through ONE segment-aware balance primitive (a single 'account balance as-of within segment' fn) instead of each fn hand-writing its own Σ(dr−cr), and period locking needs to become first-class (bidirectional, ordered, role-floored, with interim locks) rather than a trigger bolted to one table. Also unify detection signals: literal account codes (SST 460/461, tax 916/923/924/925) and coding-time flags should both resolve through markers/registries so silent-miss classes (F12-11, F12-12) become impossible."
+}

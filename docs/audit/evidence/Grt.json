@@ -1,0 +1,248 @@
+{
+  "workstream": "G (part 1) — Agent runtime: statefulness, resumability, post-workflow sync (as-built assessment of old Clara) — ADVERSARIALLY VERIFIED",
+  "findings": [
+    {
+      "id": "Grt-1",
+      "workstream_item": "G1 / G7",
+      "title": "All run, clarification, and interruption state lives in one process-local in-memory Map; nothing durable survives a restart",
+      "severity": "high",
+      "evidence": [
+        "agent/src/runtime/openai/runtime.ts:136 declares: private readonly runs = new Map<string, RunRecord>()",
+        "runtime.ts:80-99 RunRecord holds context, input, status, output, sessionId, and pending {clarifyId, question, choices, resolve} where the clarify resolver is an in-memory Promise callback (line 98)",
+        "runtime.ts:484-495 evictRuns() deletes runs by TTL; no code path persists any RunRecord field to the DB",
+        "db/v2 full 'create table' survey: only chat_sessions/chat_messages (16-tables-session.sql) and jobs (14-tables-ops.sql:98) exist as agent-adjacent state; NO tasks/runs/parts/interruptions/tool-calls/checkpoints/wakes tables anywhere in db/v2",
+        "deploy/fly.toml:8-15 single always-on machine by design ('--ha=false ... ONE always-on machine (in-memory run state + SSE — split-brain otherwise)'; 'ALWAYS-ON ... pending clarify prompts — auto-stop would drop them'); :37-39 auto_stop_machines=off, auto_start_machines=false, min_machines_running=1"
+      ],
+      "wrong": "A Fly restart/redeploy (single always-on machine, deploy/fly.toml) destroys the entire runs Map: every in-flight run, parked clarification, approval interruption, selected skill, retrieved context, pending tool call and output is lost with no recovery.",
+      "target": "Rebuild must persist run/task state, interruptions, and pending tool calls in the DB (durable runtime) so a redeploy resumes rather than drops work.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-2",
+      "workstream_item": "G1",
+      "title": "Cross-turn memory is cold transcript replay, not resumed agent state; each chat POST is a stateless run over re-folded history",
+      "severity": "medium",
+      "evidence": [
+        "runtime.ts:60-78 buildRunInput folds prior turns into the SDK input; the comment says each chat POST is otherwise a COLD run on the new message alone with zero memory of earlier turns (the DB transcript persisted only for UI hydration)",
+        "agent/src/http/sessions.ts:253-270 loadHistory returns the last ≤40 turns as role/content text (assistant turns de-fenced) that http/server.ts:355-366 passes into startRun; the model re-reads the transcript every turn",
+        "runtime.ts:161-173 agentFor() builds one cached SDK Agent per tool policy; instructions are the static doctrine string; no planner, no plan object, no persisted agent state"
+      ],
+      "wrong": "Within one run the SDK provides a genuine tool loop (and RunState carries the input across a clarify suspend/resume), but there is no durable agent state, no planning artifact, and nothing carried between turns except replayed message text; statefulness is an illusion produced by re-prompting.",
+      "target": "Rebuild needs first-class durable run state plus fresh context packs so continuity is structural, not reconstructed by string-folding the transcript each turn.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-3",
+      "workstream_item": "G1 / G7",
+      "title": "No tracing/observability in the system's own surfaces: no trace IDs or spans threaded or persisted; the durable tool_calls column is never written",
+      "severity": "medium",
+      "evidence": [
+        "grep of agent/src for tool_calls returns zero matches (re-verified this pass); the column at db/v2/16-tables-session.sql:51 (labelled 'the reasoning-trail steps (cap 3), durable on reload') is never populated",
+        "sessions.ts:163-175 appendUser/appendAssistant send only session_id, role, content, scope_client_id to append_chat_message; 26-fns-session.sql:62-64 therefore stores NULL for tool_calls and artifact",
+        "grep of agent/src for trace/otel/opentelemetry/span returns zero observability hits (only spreadsheet-cell and OCR-table 'span' fields); no OpenTelemetry, no span, no persisted trace id",
+        "observability is console.error/console.info only; the runId does appear in SOME failure logs ('[chat] run <id> failed' runtime.ts:268, '[wake] run <id> ...' runtime.ts:449,455) but is never threaded into DB writes, tool calls, or success paths"
+      ],
+      "wrong": "There is no way to trace a run end-to-end through BELCORT's own surfaces (logs are partial, DB has nothing); the reasoning trail streams to the UI live (events.ts) but is never persisted, so a reloaded transcript loses all tool-step history. (Whether the Agents SDK's default platform-side tracing exports anything to the OpenAI dashboard was out of scope and does not change the in-system gap.)",
+      "target": "Rebuild must persist typed tool calls/outputs and emit trace IDs/spans; the reserved durable columns must actually be written.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Grt-4",
+      "workstream_item": "G1",
+      "title": "No guardrails layer; the Agents SDK input/output guardrail feature is unused; safety rests on tool-layer scope/policy plus DB RLS plus prompt fencing",
+      "severity": "medium",
+      "evidence": [
+        "grep of agent/src for guardrail returns zero matches (re-verified this pass)",
+        "the only structural gates are the tool-layer policy filter + write-gate + actor inject (buildTools.ts:19-33, 54-107) and per-turn prompt fencing of untrusted DATA (runtime/inject.ts:1-23)",
+        "agent_select read tool is lexically-guarded only (db/v2/26-fns-session.sql:119-141 — regex anchors + verb scan at 130-135); a SELECT-wrapped SECURITY DEFINER call passes the lexical guard (the documented SDT-001/SEC-001 mutation-bypass path)"
+      ],
+      "wrong": "Nothing validates model inputs/outputs at the runtime boundary; a malformed or adversarial tool argument is caught only by the DB fn raises, and prompt-injected instructions in OCR/DB text are mitigated only by text fencing.",
+      "target": "Rebuild should add an explicit guardrail stage (input plus output plus tool-arg validation) instead of relying solely on prompt fencing and DB raises.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-5",
+      "workstream_item": "G1",
+      "title": "Error recovery is thin and the clarify loop depends on a brittle prompt nudge to keep the model from ending a run",
+      "severity": "medium",
+      "evidence": [
+        "runtime.ts:261-269 a run failure just settles failed and yields an error; no retry, no resume, no compensation",
+        "openai/tools.ts:54-64 the clarify tool result injects a long [flow-control] instruction because a plain assistant reply ENDS the run ('a plain reply ends the run and aborts onboarding with NO client created'); the comment records the observed failure ('onboarding asks 1-2 Qs then completes on an empty/\"Noted\" message')",
+        "runtime.ts:33-39 MAX_TURNS=40 was raised from the SDK default 10 because a legitimate onboarding aborts at the wrap-up with 'Max turns (10) exceeded'"
+      ],
+      "wrong": "Multi-question flows rely on the model obeying a prompt to keep calling clarify; one stray plain reply ends the run mid-interview with no client created, and there is no structural recovery, only re-ask from scratch.",
+      "target": "Rebuild must make multi-step flows structurally resumable/checkpointed rather than prompt-coerced, with real retry/compensation on failure.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-6",
+      "workstream_item": "G7",
+      "title": "Durable-vs-process-local inventory: only the user turn, final assistant text, active_run_id pointer, and bulk-approve job survive restart; everything agentic is process-local",
+      "severity": "high",
+      "evidence": [
+        "Process-local (lost): RunRecord incl. pending clarify Promise/resolve (runtime.ts:98, 242-246), approval interruptions/RunState (runtime.ts:236-256), selected skill + retrieved context + pending tool calls/outputs (inside the SDK run, never externalized), wake runs (runtime.ts:370-372)",
+        "Durable: user message pre-run (server.ts:355-358), assistant final text best-effort at settle (runtime.ts:285-292), active_run_id (26-fns-session.sql:71-80), bulk-approve remaining array in jobs.payload (bulkApproveRunner.ts:110-113, 171-178)",
+        "Trace IDs and wake-retry state: none persisted; wakeGate windows are unref'd in-memory timers (http/wakeGate.ts:66-73) and shutdown calls wakeGate.clearPending() which drops them WITHOUT firing (main.ts:236; wakeGate.ts:131-136)"
+      ],
+      "wrong": "Of pending runs, clarifications, approvals, selected skill, active scope, retrieved context, pending tool calls, tool outputs, trace IDs, and wake/retry state, essentially only the persisted transcript text and the durable job survive; the entire agentic working set is volatile.",
+      "target": "Rebuild must move the full workflow working set into durable DB state (runs, clarifications, approvals, tool calls/outputs, retrieved context, wake/retry state, trace IDs).",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-7",
+      "workstream_item": "G7",
+      "title": "A mid-interview redeploy loses the entire clarify interview with no resume path; the 15-minute reset wedge applies only to a same-process dead run, not to a restart",
+      "severity": "high",
+      "evidence": [
+        "runtime.ts:242-246 the clarify answer is awaited on an in-memory Promise held only in rec.pending; the onboarding interview is one long-lived paused run (runtime.ts:3-6: 'the streamRun generator SUSPENDS on a clarify ... which is why a blocking clarify needs a long-lived process')",
+        "server.ts:367-369 set_active_run persists only the runId pointer to the session; the run itself is memory-only",
+        "server.ts:422-428 reset is refused 409 run_in_flight ONLY while pollRun reports status 'running' and age < 15 min; after a restart the runs Map is empty and pollRun on the unknown runId returns {status:'failed'} (runtime.ts:326-328), so reset is immediately allowed — the wedge scenario is a SAME-process run stuck 'running' (e.g. never-streamed after POST /chat), which the 15-min age-out eventually frees"
+      ],
+      "wrong": "Redeploying during an onboarding/carry-down interview drops every answered question with no client created and no way to resume — the user starts the whole interview over. (The draft's claim that the redeploy also wedges reset for up to 15 minutes is wrong: post-restart the poll reads failed and reset proceeds immediately; the 15-minute guard only wedges a same-process dead-but-'running' run.)",
+      "target": "Rebuild must persist clarification state and resume the interview after restart; the reset guard must key on durable run records, not an in-memory liveness poll.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Grt-8",
+      "workstream_item": "G7",
+      "title": "active_run_id becomes a dangling pointer after restart; drop-recovery reads the dead run as failed with no resume (self-heals on the next message)",
+      "severity": "low",
+      "evidence": [
+        "26-fns-session.sql:71-80 set_active_run durably stores the runId on chat_sessions",
+        "runtime.ts:210-216 streamRun on an unknown runId yields kind:'error' 'unknown run'; runtime.ts:324-328 pollRun on an unknown run returns {status:'failed'}",
+        "server.ts:340-370 a new POST /chat simply starts a fresh run and overwrites active_run_id via setActiveRun — the user is NOT forced to reset (and reset is not blocked, see Grt-7); the stale pointer costs one misreported 'failed' poll and the lost work is the Grt-7 finding"
+      ],
+      "wrong": "After a restart the session still points at a runId absent from memory; the UI drop-recovery poll misreports the interrupted run as failed and nothing can resume it. Severity is low because the pointer self-heals on the next message and the substantive loss (the interview) is captured in Grt-7.",
+      "target": "Rebuild must tie active_run_id to durable run records so a reconnect resumes the real run instead of reading a tombstone.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Grt-9",
+      "workstream_item": "G7",
+      "title": "The reserved durable tool_calls and artifact columns are never written; reasoning trail and native cards are not durable",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/16-tables-session.sql:51-52 columns tool_calls jsonb ('the reasoning-trail steps (cap 3), durable on reload') and artifact jsonb ('a native typed card payload')",
+        "sessions.ts:163-175 appendUser/appendAssistant pass only role/content/scope; append_chat_message (26-fns-session.sql:62-64) inserts p->'tool_calls' and p->'artifact', which are absent from every caller — both store NULL",
+        "sessions.ts:229-249 on read, the artifact is re-derived by regex fence extraction (extractFencedArtifact) precisely because the column is empty ('unless a native artifact column is populated (it wins)')"
+      ],
+      "wrong": "The schema advertises durable typed tool/card history but the runtime never populates it; a reloaded transcript reconstructs cards from fenced prose and loses the reasoning trail entirely.",
+      "target": "Rebuild must actually persist typed tool-call and artifact history, retiring the fence-regex reconstruction.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-10",
+      "workstream_item": "G7 / G1",
+      "title": "Native artifact/directive runtime events are dead code; the retire-the-fenced-block-regex design is unrealized",
+      "severity": "low",
+      "evidence": [
+        "runtime/types.ts:130,132 define RuntimeEvent kinds 'artifact' and 'directive'; runtime/sse.ts:47-53 maps both to SSE frames",
+        "grep of agent/src for kind:'artifact' / kind:'directive' returns ONLY the type definitions; mapStreamEvent (events.ts:38-67) only ever returns delta or tool events, and no tool emits the native kinds",
+        "agent/README.md:84-86 claims 'Cards/directives are native typed tool-results (retire the fenced-block regex)', but sessions.ts:236-240 still relies on the fence regex at read"
+      ],
+      "wrong": "The neutral event union and SSE mapper support native cards/directives, but nothing produces them; cards still travel as fenced prose and the documented native path is aspirational.",
+      "target": "Rebuild should either implement true native typed tool-results end-to-end or drop the dead seam; do not carry an unrealized contract forward as built.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-11",
+      "workstream_item": "G7 / G6",
+      "title": "Bulk-approve restart re-drive can inflate the failed count and settle a job FAILED; re-drive fires only on a user surface (SSE reconnect or a new bulk start), never self-driven",
+      "severity": "medium",
+      "evidence": [
+        "bulkApproveRunner.ts:100 remaining.shift() removes the id locally BEFORE the approve; :110-113 advance_job persists the shifted remaining AFTER the approve — a crash between the approve_entry commit (:104) and advance_job leaves the already-approved id in the DB payload's remaining",
+        "on resume approve_entry raises cannot_approve:approved (db/v2/20-fns-journal.sql:190-191); bulkApproveRunner.ts:106-109 counts that raise as a per-entry failure; :123-126 any partial failure settles the job FAILED (deliberate relay contract per the comment)",
+        "resumeOpen is invoked from exactly two user-triggered surfaces: the notifications SSE subscribe (server.ts:308-310) and the start() of any NEW bulk job (bulkApproveRunner.ts:166); an orphaned job with neither event never re-drives (the header :10-13 documents automatic restart re-drive as a deferral)"
+      ],
+      "wrong": "No double-post (the DB status gate blocks it), but a restart-window re-approve is miscounted as failed and can flip a genuinely successful bulk job to a red FAILED; an orphaned job resumes only when the same user reconnects the notifications stream or starts another bulk job.",
+      "target": "Rebuild must make restart re-drive idempotent (treat already-approved as success) and drive it from durable job state, not a user-triggered surface.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "Grt-12",
+      "workstream_item": "G7",
+      "title": "Wake runs are process-local and best-effort; an in-flight wake or a batching window is dropped on restart",
+      "severity": "medium",
+      "evidence": [
+        "runtime.ts:370-372 a dispatched wake is stored in the same in-memory runs Map and drained fire-and-forget with no consumer (drainWake :445-468 deletes the record at settle)",
+        "http/wakeGate.ts:66-73 pending windows are unref'd setTimeout handles ('a pending hint never holds the process open'); main.ts:236 shutdown calls wakeGate.clearPending() which drops every open window WITHOUT firing (wakeGate.ts:131-136, 'at-most-once hints')",
+        "server.ts:204 an unconfigured deployment answers 202 dispatched:false; :229 a rate-limited submit drops with 202 rate_limited; no durable wake queue exists (db/v2 table survey)"
+      ],
+      "wrong": "A restart mid-wake, or during an open batching window, loses the wake entirely; wakes are at-most-once hints recoverable only from the notification/needs-attention read surfaces, so a burst lost at redeploy silently skips proactive processing.",
+      "target": "Rebuild needs a durable wake/queue with per-mutation policy and retry, not unref'd in-memory timers cleared on shutdown.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-13",
+      "workstream_item": "G6",
+      "title": "No post-workflow sync phase; derived outcomes (notifications, memory notes, recon hints, KB proposals) are model-remembered, not structural",
+      "severity": "high",
+      "evidence": [
+        "no reconciliation step exists after a run settles: runtime.ts:258-260 settles status + fires the best-effort assistant persist and nothing else; outcomes are only whatever fns the model called during the run",
+        "record_proactive_notification (registry/ops.ts:109), record_memory_note + add_counterparty_alias (registry/kb.ts:119,132), record_recon_hint (registry/documents.ts:213) are ordinary tools invoked only if the model chooses; buildTools.ts:98-105 execute just policy-checks, scope-checks, injects the actor and rpc's the fn",
+        "the DB owns posted numbers structurally (the audited write fn IS the sync), but nothing verifies the full derived-outcome set was recorded after a workflow"
+      ],
+      "wrong": "After a workflow, whether a stuck item gets a notification, a learned pattern gets a memory note, or a match gets a recon hint depends on the model remembering to call the tool; a forgotten call silently leaves the outcome un-synced with no structural backstop.",
+      "target": "Rebuild must add a structural post-workflow outcome-sync/reconciliation so derived writes (notifications, KB proposals, recon hints, memory notes, export receipts) are guaranteed, not model-discretionary.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-14",
+      "workstream_item": "G6",
+      "title": "The only structural, model-independent sync is the deterministic je_needs_human notification; the rest of the interactive lane is fully model-driven",
+      "severity": "medium",
+      "evidence": [
+        "runtime.ts:383-442 recordDeterministicProactive reads journal_entry_detail and records the audited notification WITHOUT the model, but the gate at :388 fires only for kind='proactive' AND condition='je_needs_human' AND table='journal_entries'",
+        "all other wake kinds and the entire interactive lane fall through to the model loop (runtime.ts:370-372; inject.ts:87-96 buildWakeNote is prompt framing, not enforcement)",
+        "export receipts are structural (exportTool.ts:166-219 always records record_export + record_export_artifact before returning); record_kb_evidence auto-files a kb_proposals row at threshold 3 in-DB (db/v2/21-fns-kb.sql:165-211); these are the exceptions, not the rule"
+      ],
+      "wrong": "Structural sync exists only for a narrow deterministic notification path and a few always-run tool internals; there is no general guarantee that an interactive workflow's outcomes are synced back through the audited fns.",
+      "target": "Generalize the deterministic-sync pattern in the rebuild so outcome recording is structural across all workflow types, not just je_needs_human.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "Grt-15",
+      "workstream_item": "G6 / G7",
+      "title": "Assistant-turn persistence is best-effort after settle and can silently drop, desyncing the durable transcript from what the user saw",
+      "severity": "medium",
+      "evidence": [
+        "runtime.ts:285-292 settleInteractive is fire-and-forget: void this.persistAssistant(...).catch(console.error); a persist failure is logged, never retried (the opts doc :116-119 says so explicitly)",
+        "main.ts:171-177 a clarify-length run can outlive the caller's ~1h JWT; the settle append 401s, logs '[chat] transcript gap: caller JWT expired before settle', and rethrows into the log-only catch — the assistant turn is lost",
+        "main.ts:164-170 the mid-run reset (TOCTOU) branch re-homes the reply to the fresh session, but the JWT-expiry branch has no such recovery (the durable fix is a recorded deferral per the comment)"
+      ],
+      "wrong": "The assistant reply the user watched stream live can be absent from the durable transcript on reload (JWT expiry on a long clarify run), so the persisted history and the DB outcomes diverge from the actual conversation.",
+      "target": "Rebuild must persist assistant turns durably within the run's own credential/transaction (e.g. a placeholder row reserved pre-run, or a refreshed credential on clarify) so the transcript never silently loses a delivered turn.",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "Run ops are correctly firm-bound: streamRun/resolveClarify/pollRun reject a runId minted by another firm (WIRE-03), reading as an unknown run with no existence leak.",
+      "evidence": ["runtime.ts:210-216 (streamRun firm check → 'unknown run')", "runtime.ts:301-308 (resolveClarify checks rec.context.caller.firmId !== req.caller.firmId → same error as no-pending-clarify)", "runtime.ts:324-328 (pollRun firm mismatch → {status:'failed'})"]
+    },
+    {
+      "claim": "Within the same process, a reconnect after settle REPLAYS the terminal outcome instead of re-running the loop, and a concurrent second attach is refused, so tools are not double-executed and the assistant turn is not double-persisted on same-process reattach.",
+      "evidence": ["runtime.ts:217-228 (status !== 'running' replays done/'run already settled'; rec.streaming guard yields 'stream already attached')"]
+    },
+    {
+      "claim": "The user turn is persisted BEFORE the run starts, so a run that dies immediately does not leave a ghost run with no transcript record; a store failure fails the request honestly.",
+      "evidence": ["server.ts:355-358 (await sessions.appendUser precedes runtime.startRun)", "server.ts:23-27 (header: 'persists the user turn BEFORE the run (a store failure fails the request honestly — no ghost runs)')"]
+    },
+    {
+      "claim": "Resume cannot double-post a journal entry: approve_entry has a hard status gate rejecting any entry not in (auto_draft, needs_review, needs_decision), so a re-approve of an already-approved entry raises rather than posting twice.",
+      "evidence": ["db/v2/20-fns-journal.sql:187-191 (SELECT ... FOR UPDATE then raise cannot_approve:% for any other status)", "db/v2/20-fns-journal.sql:207 (the approved update runs only past the gate)"]
+    },
+    {
+      "claim": "The wake credential rides the same anon-key plus JWT RLS plane as a human caller (never service_role on the request path), scoped to exactly the webhook firm; wakes stay honestly dispatched:false when the mint secret is absent.",
+      "evidence": ["runtime/wakeCredential.ts:56-89 (role:'authenticated', firm_id claim, synthetic sub, aud 'belcort-wake')", "runtime.ts:347-349 (no minter → {dispatched:false})", "main.ts:133-138 (minter only when SUPABASE_JWT_SECRET present)"]
+    }
+  ],
+  "unverified": [
+    "Live runtime behavior could not be exercised (no OPENAI_API_KEY / shared-DB access in this frozen repo); all runtime claims are from static code reading, not a live run.",
+    "Whether the OpenAI Agents SDK RunState is JSON-serializable (i.e., whether durable checkpointing of an in-flight run is feasible without SDK changes) was not verified; SDK internals were out of scope. Likewise, whether the SDK's default platform-side tracing exports anything externally was not assessed — Grt-3 is scoped to BELCORT's own surfaces.",
+    "The draft's fly CLI deployment facts (belcort-agent v51, 1 machine 080d16ef6461e8 in sin, releases v41-v51, the exit-255 telemetry error) were NOT re-executed in this verification pass; deploy/fly.toml independently confirms the single-always-on-machine design, which is what the findings rest on.",
+    "Dashboard-side handling of live artifact/directive frames was not inspected (out of workstream); Grt-10's claim that the runtime never EMITS them is verified from the runtime side only."
+  ],
+  "decision_brief": "VERDICT (G1): Old Clara is NOT a durable, truly-stateful agent, but also not a bare chat-completions wrapper. It is a THIN, PROCESS-LOCAL orchestration shell around the OpenAI Agents SDK run() loop. WITHIN a single run it gets a real multi-turn tool loop, interruptions, and RunState from the SDK (runtime.ts:232-256). ACROSS turns it is stateless COLD replay: every /chat POST reconstructs memory by string-folding prior DB message text into the next run input (buildRunInput runtime.ts:60-78; sessions.loadHistory:253-270). No planner, no plan persistence, no in-system tracing, no guardrails. The sole source of run/clarify/interruption state is one in-memory Map<string,RunRecord> (runtime.ts:136) evicted by TTL, never persisted.\n\nWHAT BREAKS (G7): A Fly restart/redeploy (single always-on machine by design, deploy/fly.toml:8-15,37-39) vaporizes every in-flight run, parked clarification, approval interruption, selected skill, retrieved context, pending tool call and output. Durable across restart: only the user turn (server.ts:355-358), the assistant FINAL text (best-effort at settle IF settle happens, runtime.ts:285-292), the dangling active_run_id pointer (26-fns-session.sql:71-80), and the bulk-approve job remaining[] (bulkApproveRunner.ts). Trace IDs: none. Worst case: a mid-onboarding redeploy loses the whole clarify interview with no resume. CORRECTION vs draft: the redeploy does NOT wedge reset — post-restart pollRun on the vanished run returns 'failed' (runtime.ts:326-328) so the reset guard (server.ts:422-428) passes immediately; the 15-min wedge only applies to a same-process dead-but-'running' run. NO double-post risk: the DB approve_entry status gate (20-fns-journal.sql:190-191) structurally rejects re-approve; the in-memory single-consumer/replay guards (runtime.ts:217-228) are only a same-process defense. Bulk-approve restart re-drive miscounts an already-approved id as failed and can settle a genuinely-successful job FAILED; re-drive fires only on a user surface (notifications SSE subscribe, server.ts:308-310, or a new bulk start, bulkApproveRunner.ts:166), never self-driven.\n\nPOST-WORKFLOW SYNC (G6): No sync phase. Because the DB is SoT, a posted entry IS the outcome, written structurally by the audited fn the model called mid-run. But derived outcomes (notifications, KB proposals beyond the DB threshold-3 auto-file, recon hints, memory notes) are written ONLY IF THE MODEL REMEMBERS to call the tool. The only structural model-independent sync is recordDeterministicProactive for je_needs_human (runtime.ts:383-442) plus the in-DB record_kb_evidence auto-proposal (21-fns-kb.sql:165-211); export receipts are structural (exportTool.ts:166-219 always records). Nothing reconciles that a workflow's full outcome set was recorded, and the assistant-turn persist can silently drop (main.ts:159-179, JWT expiry on a clarify-length run).\n\nRUNTIME REQUIREMENTS THE REBUILD MUST SATISFY: (1) durable DB-backed run/task/checkpoint state survivable across redeploy; (2) durable, resumable clarification/approval interruptions (not an in-memory Promise, runtime.ts:242-246); (3) durable typed tool-call/output/artifact history (tool_calls/artifact columns exist at 16-tables-session.sql:51-52 but are NEVER written — grep tool_calls in agent/src = 0 hits); (4) trace IDs/spans threaded and persisted; (5) a real guardrails layer (grep guardrail = 0 hits); (6) structural error-recovery/retry vs the prompt flow-control nudge (openai/tools.ts:62); (7) a structural post-workflow outcome-sync so derived writes are not model-remembered; (8) restart re-drive for all durable work (idempotent — treat already-approved as success), not only bulk-approve on a user-triggered surface.\n\nDEPLOYMENT FACTS: deploy/fly.toml independently confirms the single always-on machine design and that a redeploy is exactly the event that drops all in-process state. The draft's live fly CLI output (app v51, 1 machine, sin, checks passing, releases v41-v51) was not re-executed this pass and is carried as reported.\n\nVERIFICATION RESULT: 15 draft findings — 11 CONFIRMED, 4 ADJUSTED (Grt-3 scope caveat on SDK-side tracing + partial runId in failure logs; Grt-7 the restart-wedge claim removed, interview loss stands at high; Grt-8 downgraded medium→low, the dangling pointer self-heals on the next message and does not force a reset; Grt-11 resumeOpen also fires on a new bulk start, not SSE-only), 0 REFUTED. All 5 fine_claims spot-verified and confirmed."
+}

@@ -1,0 +1,88 @@
+# Clara — Phase 1 Audit · Gate 1 Packet
+
+**Date:** 2026-07-17 · **Auditor:** Fable orchestrator + 30 evidence-citing worker lanes (12 workstream auditors → 12 adversarial verifiers → completeness critic → 6 gap finders → 4 salvage classifiers) · **Subject:** the frozen BELCORT/Clara build at `C:\Users\zhant\Desktop\initial acc software skillmd` (git `master` @ `ac0a684f`), read-only. **Nothing in the old repo or old Supabase project was modified.**
+
+This packet is the hard gate at the end of Phase 1. Read this file first; the three deliverables the hero prompt asked for are the other documents in this folder.
+
+## The three Gate-1 deliverables
+
+| # | Deliverable | File |
+|---|---|---|
+| (a) | **Findings report by workstream** — all 235 verified findings, evidence → wrong → rebuild-target | [`01-findings-report.md`](01-findings-report.md) |
+| (b) | **Salvage manifest** — every significant asset classified PORT / REBUILD / DROP | [`02-salvage-manifest.md`](02-salvage-manifest.md) |
+| (c) | **Open-decision list** — what needs *your* ruling, incl. Workstream C (C1/C2) and the runtime decision | [`03-open-decisions.md`](03-open-decisions.md) |
+
+Supporting evidence (the raw verified finding sets, the four repo maps, and the preliminary runtime research) is in [`evidence/`](evidence/).
+
+---
+
+## The verdict, in one paragraph
+
+The frozen build's own harness asserts, in ~15 places, that the system is **"go-live-ready"**. That claim is the single most important thing this audit was sent to test, and **it is false — not marginally, but structurally.** The build is a competent, well-isolated *coding-and-drafting demo* with a genuinely strong security spine (forced RLS, EXECUTE-only grants, a deferred balance trigger, curated tools, anti-spoof actor stamping). But underneath that spine, **the accounting work is a shell**: the entire subledger / fixed-asset / reconciliation side-effect chain exists in the database and is called by nothing; the agent has no durable state and loses every in-flight workflow on a restart; the primary document-upload surface silently does nothing; the one freeform read tool can be used to *write*; the year-end close corrupts every subsequent period's continuity reads; and the CI that produces the green checkmarks tests a schema that was decommissioned. **An audit that finds nothing wrong is a failed audit — this one found 235 real, verified problems, 20 of them firm-killing.** The old build has done its job: it has taught us, in precise and cited detail, exactly what the rebuild must be.
+
+## By the numbers
+
+- **235 verified findings:** **20 critical · 77 high · 101 medium · 37 low.** Every finding was produced by an auditor citing frozen-repo evidence, then re-opened and *refuted-by-default* by an independent verifier. **0 survived-then-refuted at final verification** — severities were adjusted (some up, some down), nothing real was invented.
+- **282 assets classified:** **156 PORT · 115 REBUILD · 11 DROP.** The DB layer is the most salvageable (89/134 PORT); doctrine and UI are the most rebuild-heavy.
+- Live Supabase / Fly runtime facts are cited where a worker could read them and marked **unverified** where only an interactive login would confirm them. Nothing was assumed.
+
+---
+
+## The 11 cross-cutting failure patterns (the real story behind the finding count)
+
+The 235 findings are not 235 independent bugs. They cluster into eleven structural themes. The rebuild's architecture is essentially the list of answers to these eleven.
+
+### 1. The accounting side-effect chain is dead — the North Star's central promise is unmet (CRITICAL)
+Your hero prompt's F3 failure criterion — *"a workflow fails if Clara posts journal lines while leaving AR/AP/FA/reconciliation/reporting/KB state stale"* — is failed on **every** chain. The DB functions are real and sound (`record_ar_invoice`, `record_ap_bill`, `record_ar_receipt`, `record_ap_payment`, `record_fixed_asset`, `run_depreciation`, `dispose_fixed_asset`), but **nothing invokes them** — not the agent tool registry (proven by the registry parity test's closed set), not any skill, not the dashboard. So the instant Clara codes a sales invoice to Trade Debtors, the GL moves and the open-item subledger stays frozen at the onboarding seed *forever*: aging, statements, allocation, control tie-outs, and the "aging"/"full" client-facing exports all render stale numbers from day one. Depreciation is computed correctly and posted correctly — but no workflow ever *runs* it. Bank receipts settling invoices never allocate; worst case a confirmed customer rule auto-posts `Dr Bank / Cr Revenue` and double-counts income with no human gate. *(F3-1…F3-8, F3-12, C-6, GAP0-3, GAP0-6.)* **The rebuild must make subledger/register maintenance intrinsic to the coding and receipt executions — either inside the audited write path or DB-derived from the control-account legs — so it cannot silently diverge.**
+
+### 2. The agent has no durable state — every in-flight workflow dies on restart (CRITICAL)
+Old Clara is a thin, process-local shell around the OpenAI Agents SDK. *Within* one run it gets a real tool loop and interruptions; *across* turns it is cold replay of the last ≤40 chat messages. All run / clarification / approval-interruption / selected-skill / retrieved-context / pending-tool-call state lives in one in-memory `Map` evicted by TTL. A Fly restart or redeploy (single always-on machine by design) vaporizes all of it; a mid-onboarding redeploy loses the whole interview with no resume path. The durable columns for this (`tool_calls`, `artifact`) exist in the schema and are **never written** (0 grep hits). *(Grt-1, Grt-6, Grt-7, Grt-13, GAP4-1…GAP4-5.)* **The rebuild must make runs/tasks/checkpoints/interruptions/tool-calls durable and DB-backed, resumable across redeploy, with idempotency so nothing double-posts on re-drive.**
+
+### 3. There is no event-driven state layer or context pack — the "OS" is a chat box (CRITICAL/HIGH)
+The North Star's core — a continuously-synchronized, versioned accounting-state layer that publishes auditable domain events and hands Clara a fresh context pack before every decision — **does not exist.** Clara's run context is static doctrine + the last 40 turns of prose; every piece of client/accounting context is a model-initiated ad-hoc read. Event distribution is fire-and-forget with ≥5 independent loss points, no durable event log, no outbox, no replay. There is no books/KB version token, no stale-context detection of any kind — stale figures from an earlier chat turn replay verbatim into a later run. *(A-1…A-7, A-16.)* **This is the rebuild's spine: an event log + outbox + a per-decision context-pack retrieval with a freshness token.**
+
+### 4. The "read-only" SQL tool is a write path — a security-class defect across three workstreams (CRITICAL)
+`query_books` / `agent_select` is guarded only by a *lexical* verb filter at both the TS and DB layers. `select approve_entry(1,2,'x')` contains none of the blocked verbs, so it passes both guards and executes the `SECURITY DEFINER` writer with definer rights. RLS still bounds it to the firm and the target fn's own guards fire — so this is a **tool-layer** bypass, not a cross-tenant leak — but it defeats the active-scope write-gate and, most seriously, the per-wake *speak-never-act* policy: a proactive/workbench wake mints a `bookkeeper` credential and can therefore post/approve/reverse through a wrapped call the curated tool layer was built to forbid. It is untested. All 11 skills describe this tool as a safe read surface. *(Ggr-1, I-1, H-6; this is the repo's own known SDT-001/SEC-001, still live.)* **The rebuild's agent read path must be structurally read-only — a whitelisted/parameterised read surface, or a role with EXECUTE revoked on every volatile writer + `default_transaction_read_only`. A verb string-filter is not a security boundary.**
+
+### 5. The primary document-upload surface silently does nothing (CRITICAL)
+Found independently by two auditors. The Documents-tab drop-zone/picker reads the bytes, POSTs a chat turn, persists the user message, and toasts *"Clara is filing them"* — but never attaches the SSE stream, and interactive runs only execute *inside* the stream consumer. So no `upload_document`, no OCR, no `ingest_document`, no document row, **ever**. The file never appears; the transcript shows a ghost turn with no reply; the attachment is unrecoverable after run eviction. Only the chat-rail composer path actually works. *(D-1, E-1, E-2.)* **The rebuild must never toast success on a fire-and-forget POST; any path that starts a run must drive it, or the agent service must execute runs independently of an SSE attach (the durable-runtime target).**
+
+### 6. The generative-UI / chat experience is half-dead (HIGH)
+Against the Claude/Codex-class bar you set: half the artifact catalog is unreachable dead UI (`review_summary`, `sst_summary`, `journal_table`, `kv_summary` have no emitter or live extraction; the native `artifact` SSE frame is dead on both ends). Multi-card turns are structurally broken (only the first fence is lifted; post-fence prose is silently withheld). Chat attachments are invisible — no parts, no metadata, no thumbnails, no upload/OCR/assignment status; a files-only turn shows "(see attached)". Tool activity is invisible (a 60–150s cold start shows nothing; most tool names collapse to "Working…"). Rehydrated approval cards are stale-actionable (an already-posted entry re-renders with a live Approve button). *(D-2…D-7, J-1…J-8.)* **The rebuild needs a real streaming card protocol, persisted typed tool/artifact history, first-class attachment parts, and a generative-UI surface that can render plans, diffs, tables, and progress.**
+
+### 7. Year-end / period integrity is broken in both directions (CRITICAL)
+The opening carry-down (`seed_opening_carry_forward`) has no idempotency guard — a re-run, which the skill itself sanctions as recovery, silently posts the entire opening TB, subledgers, and FA register **twice**, and opening entries can't be reversed. The close uses an opening-restatement model but only the GL/FS reads were taught about segments, so from a client's *second* financial year every bank reconciliation and every AR/AP/FA control tie-out **double-counts** the restatement and reports permanent phantom drift — burying the real drift they exist to surface. The close races every unserialized journal writer (its own comment admits "a silent escape from RE"). Reversal has no in-order guard: reversing FY(n) under a live FY(n+1) close posts mirrors into the locked period and orphans its carry. Re-dating an entry *out* of a closed period passes the guard. *(B-1, F12-1…F12-5, GAP2-1, GAP5-1, GAP5-2, GAP5-3.)* **The rebuild must make close/carry-down one-shot and DB-guarded, teach every continuity read the period segment, serialize the close, and gate reversal ordering.**
+
+### 8. Governance and authorization are prompt-deep, not structural (CRITICAL/HIGH)
+The plan→approve gate, the ≥0.95 client-identity gate, the six auto-post conditions, and the maker/checker separation are all **model-asserted or UI-convention**, not DB-enforced. `client_match_conf` is persisted verbatim and never checked by any function; unknown approval interruptions auto-approve; `approve_entry` carries no expected-revision token so an approval after an intervening edit posts legs the approver never saw; journal provenance (`document_id` + `source_doc_sha256`) is inserted caller-supplied with **zero validation**; there is **no maker-checker anywhere** (the same bookkeeper drafts and approves; the auto-lane sweep sign-off can be done by a viewer or by the agent on its own postings); and authority is stale-JWT-only — a removed or demoted member keeps full read+write until the token expires, with no revocation. Several write families (close, tax/SST engines, opening balances) have **no role floor at all** — a viewer can close a year. *(A-5, A-16, GAP0-1, GAP0-2, GAP0-4, GAP0-5, GAP1-4, GAP3-7, F12-8.)* **The rebuild must move every one of these from prose into DB-owned authorization policy, with real maker-checker and token/session revocation.**
+
+### 9. Reporting can launder model-authored numbers as DB-authoritative (HIGH)
+The "DB owns every number" invariant leaks at the reporting boundary: the model can file model-authored bytes as a durable branded export artifact; `build_export` hard-codes `balanced:true` for every scope and the dashboard renders an unlabelled green "In balance" chip; the analysis lane turns SQL literals into "computed by the database" cells and prints unverified model prose on a branded PDF; and the SDT-001 write path reaches the reporting lane too. *(H-1, H-2, H-4, H-6.)* **The rebuild's reporting engine must derive every figure and every balance/verification claim from DB read functions, and never let model bytes enter the audited-artifact store.**
+
+### 10. Operational, verification, and compliance foundations are absent (CRITICAL/HIGH)
+The only CI workflow **never applies `db/v2` and never tests the agent** — it tests the *decommissioned* legacy schema, so the green checks are misleading. There is **no backup/restore/DR contract** for a source of truth under a 7-year statutory retention duty. OpenAI Agents SDK platform tracing is **on by default with sensitive data** — every firm's chat, OCR text, and tool args are exported to `api.openai.com` with no disable, redaction, or owner decision. There is **no AI-quality eval harness** (the 0.95 gates are self-reported or pinned; the docs waive the eval and declare go-live-ready anyway). The financial-statement pack is SoCI+SoFP only yet stamps every artifact "Prepared in accordance with MPERS/MFRS" (no SOCE, cash-flow, or notes). Payroll and inventory are scaffolding-only despite PRD claims. *(GAP1-5, GAP1-6, GAP1-8, GAP3-6, GAP2-5, GAP2-6, GAP2-7, GAP1-7.)* **These are Phase-3 foundation and Phase-5 verification requirements, not polish.**
+
+### 11. Doctrine has drifted from the code it governs (HIGH/MEDIUM)
+The doctrine loaded verbatim into Clara's resident prompt is wrong in ways that will mislead both the agent and any future auditor: `AGENTS.md §6` names the OCR engine as **Google Document AI** (the code is **Azure**), and even lists a third vendor enum elsewhere; the `§15` tool inventory has drifted both ways — it omits real tools and lists `unmatch_bank_line`, which **has no ToolSpec and would hard-fail a run if called**; Hermes/relay/Telegram/`messaging.send_message` residue from the retired v1 framework saturates the live stack. *(I-4, I-5, I-6, I-7, F3-12.)* **The rebuild's doctrine must be regenerated fresh against the real tool registry, with a lint gate that fails on drift.**
+
+---
+
+## What is genuinely good — and worth carrying forward
+
+The audit verified, not assumed, that these are sound (full list in the salvage manifest and the per-workstream "Verified as sound" sections):
+
+- **The isolation & audit spine:** forced RLS per `firm_id`, EXECUTE-only grants (no raw-DML path), the deferred `SECURITY DEFINER` balance trigger, `(client_id, account_code)` composite-FK COA integrity, anti-spoof actor stamping, the no-shell/psql/file/web token guard. This is the strongest part of the build and most of it is **PORT**.
+- **The domain gold inside the skills:** the SST hybrid output-tax ladder, the BEE carry-down golden test, CN/DN polarity, the bank self-reconcile learning loop, the counterparty alias/normalise machinery, the confidence-ladder lane semantics. These are **REBUILD** — extract the domain logic into drift-free bodies mapped to the live registry, don't port the prose wholesale.
+- **The DB function library** is 89/134 PORT — the write primitives are largely correct; what's missing is the *orchestration that calls them* and the *guards that should gate them*.
+
+The lesson of the salvage split (55% PORT / 41% REBUILD / 4% DROP) is that **the rebuild is not a from-scratch rewrite of everything** — it is a re-architecture of the *orchestration, state, governance, and UX layers* on top of a database layer that is mostly worth keeping.
+
+---
+
+## How this maps to your gates
+
+- **Gate 1 (now):** approve these findings, the salvage classifications, and the open decisions. Nothing is built or destroyed yet.
+- **Gate 2:** the refreshed PRD + target architecture (event layer, context packs, durable runtime, honest reporting, structural governance) + the **runtime recommendation** (preliminary research is in `evidence/runtime-research.md`; the durable-execution and human-in-the-loop rows are decisive and favour a durable-workflow substrate over the incumbent in-memory shell — but the decision is yours at Gate 2, not now).
+- **Phases 3–5:** foundations → build → verification, with the F3 failure criterion and an AI-quality eval as *actual* gates this time.
+
+**→ Please review [`03-open-decisions.md`](03-open-decisions.md). That is where I need your rulings to shape Phase 2.**

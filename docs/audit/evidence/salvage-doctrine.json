@@ -1,0 +1,398 @@
+{
+  "asset_class": "doctrine + skills + prompts + product docs",
+  "note": "Work order said '10 SKILL.md files'; the frozen repo contains 11 (belcort/*/SKILL.md) — all 11 classified. AGENTS.md is classified per major section as ordered. Classifications are consistent with findings/I.json (I-1..I-16, esp. the I-13 salvage ruling) except one justified divergence: bank-recon (I-13 said light-PORT; reclassified REBUILD on the confirmed CRITICAL F3-3). All line cites are to the frozen repo at master ac0a684f.",
+  "items": [
+    {
+      "asset": "belcort/AGENTS.md — header + Project Objectives (L1-19)",
+      "kind": "doctrine section",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: scopes Clara to the document-coding loop ('cut coding labour 99%+', 'no automated import/post') — not the Accounting-OS super-UI North Star — and carries v1 residue ('disposable v1 firms run a frozen pre-migration copy'). Rebuilt version must state the full-lifecycle mandate (onboarding→close→tax→continuity) and drop all v1/plane references.",
+      "evidence": "belcort/AGENTS.md:3-15; I-3 (whole fn families with no skill); audit-brief North Star"
+    },
+    {
+      "asset": "belcort/AGENTS.md §1 — firm scoping + data-access canon (L24-29)",
+      "kind": "doctrine section",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: presents query_books as 'a single read-only, RLS-scoped SELECT' — the confirmed-critical SDT-001/SEC-001 mutation-bypass path (I-1: agent_select's lexical guard passes SELECT-wrapped SECURITY DEFINER writers under every wake policy) — and overstates wake-note self-sufficiency (N18). Rebuilt: the read surface must be structurally read-only before doctrine may call it safe; probe/session rules re-grounded on the durable-runtime model.",
+      "evidence": "belcort/AGENTS.md:24-29; I-1 CRITICAL CONFIRMED (db/v2/26-fns-session.sql:119-140, agent/src/tools/buildTools.ts:375); doctrine-map N18"
+    },
+    {
+      "asset": "belcort/AGENTS.md §2 — database is the only state mutator (L31-33)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Proven cardinal invariant, verified structurally for the fn-tools (every write via ctx.rpc to audited SECURITY DEFINER fns; agent never computes a figure; reverse-never-delete). Carry verbatim as the first law of the rebuilt doctrine.",
+      "evidence": "belcort/AGENTS.md:31-33; I.json fine_claim 'DB-owns-every-number' CONFIRMED (buildTools.ts:104)"
+    },
+    {
+      "asset": "belcort/AGENTS.md §3 — client identification protocol (L35-43)",
+      "kind": "doctrine section",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the protocol is right (≥0.95, never guess, one client at a time) but the text is garbled ('MUST well recognized client per client, CANNOT POLLUTE'), mixes UI affordances into law, and the gate is prompt-only — client_match_conf is model-self-reported and never enforced by any fn (A-16). Rebuilt: clean statement paired with a DB-owned identity gate (fns refuse/park below the floor, persist match basis).",
+      "evidence": "belcort/AGENTS.md:35-43; A-16 HIGH CONFIRMED"
+    },
+    {
+      "asset": "belcort/AGENTS.md §4 — clarify_tool loop mandate (L45-46)",
+      "kind": "doctrine section",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: it is shim-law compensating for a fragile process-local runtime (a plain reply ends the run — the observed onboarding-kill bug, B-4/I-14) and it references the nonexistent messaging.send_message. Rebuilt: multi-step interviews must be durable runtime-owned checkpointed flows; the doctrine then states the interaction contract once, without triple-stated loop discipline or ghost tools.",
+      "evidence": "belcort/AGENTS.md:45-46; B-4 HIGH CONFIRMED; I-14 (tools.ts:56-63 flow-control shim); I-7"
+    },
+    {
+      "asset": "belcort/AGENTS.md §5 — never invent identifiers (L48)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Clean, proven anti-hallucination law with the important record-user-given-values carve-out that fixed a real refusal bug. Carry as-is.",
+      "evidence": "belcort/AGENTS.md:48; no adverse finding in any workstream"
+    },
+    {
+      "asset": "belcort/AGENTS.md §6 — deterministic OCR engine (L50)",
+      "kind": "doctrine section",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the law (deterministic OCR, never LLM vision, extraction is inert data) is right but it names the wrong vendor — 'Google Document AI' where the as-built engine is Azure Document Intelligence (I-5; three OCR identities exist across the tree). Rebuilt: vendor-agnostic law with the engine pinned once in the deploy doc, plus the evidence-region capture requirement (J-18).",
+      "evidence": "belcort/AGENTS.md:50; I-5 MEDIUM CONFIRMED (agent/src/ocr/azureDocai.ts:1-9); J-18 CRITICAL (regions never captured)"
+    },
+    {
+      "asset": "belcort/AGENTS.md §7 — wake-note authority (L52-55)",
+      "kind": "doctrine section",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the four-lane taxonomy is prose-only — the [documents] code policy is a permissive blocklist under which approve/reverse/close remain reachable from a non-interactive wake (I-2/Ggr-7), and backend.md:92 contradicts the lane grammar outright (N2). Rebuilt: per-lane ALLOWLISTS enforced in the tool layer/DB, with doctrine text generated from (or verified against) the enforced policy.",
+      "evidence": "belcort/AGENTS.md:52-55; I-2 HIGH ADJUSTED (buildTools.ts:25); Ggr-7 HIGH CONFIRMED; doctrine-map N2"
+    },
+    {
+      "asset": "belcort/AGENTS.md §8 — progressive disclosure / read_skill (L57)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Proven mechanism with real code support (loader + read_skill/read_reference); it kept resident prompt small while serving full procedure bodies on demand. Carry the mandate; the rebuild may additionally make skill-before-write a structural gate (Ggr-5) but the doctrine itself is sound.",
+      "evidence": "belcort/AGENTS.md:57; I-14 fine (loader.ts:44-53, buildTools.ts:157-202); Ggr-5 MEDIUM (convention-not-gate)"
+    },
+    {
+      "asset": "belcort/AGENTS.md §9 — schema frozen to skills (L59)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Trivially correct separation (no skill touches DDL) and structurally true (EXECUTE-only role). Carry as one line.",
+      "evidence": "belcort/AGENTS.md:59; db/v2/30-grants.sql EXECUTE-only model"
+    },
+    {
+      "asset": "belcort/AGENTS.md §10 — the document is truth / source_doc_sha256 (L61)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Proven provenance law (raw scan = truth, OCR = claims with confidence, every entry traces to sha256). Carry as-is; the rebuild extends it with typed provenance for non-document entries but this core stands.",
+      "evidence": "belcort/AGENTS.md:61; PRD §6.4; no finding falsifies the sha256 chain for document entries"
+    },
+    {
+      "asset": "belcort/AGENTS.md §11 — refuse nonexistent COA account (L63)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Correct and structurally backed (journal_lines composite FK makes coding to a nonexistent account impossible; the doctrine adds the graceful offer-to-add path). Carry as-is.",
+      "evidence": "belcort/AGENTS.md:63; doctrine-map 2.4 (composite FK enforces §11)"
+    },
+    {
+      "asset": "belcort/AGENTS.md §12 — know the current date (L65)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Trivial, correct, and load-bearing for effective-dated SST rates and period math. Carry as-is.",
+      "evidence": "belcort/AGENTS.md:65; ADR-046 date-aware compute_sst_leg"
+    },
+    {
+      "asset": "belcort/AGENTS.md §13 — recon/close preconditions (L67)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Right preconditions (no close over unbalanced recon / pending entries / unassigned docs) and consistent with the owner-ratified g3/g4 visibility split. Carry; note the rebuild separately hardens the close DB-side (GAP5-1 is a DB gap, not a defect of this mandate).",
+      "evidence": "belcort/AGENTS.md:67; ADR-027; GAP5-1 HIGH (DB-side structural checks missing)"
+    },
+    {
+      "asset": "belcort/AGENTS.md §14 — integer cents + finalised set + KB tables (L69)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Proven facts (bigint cents; status IN ('auto_draft','approved'); the three KB tables) that every skill keys on. Carry, regenerating table names against the rebuilt schema.",
+      "evidence": "belcort/AGENTS.md:69; PRD §6.5; db/v2 schema"
+    },
+    {
+      "asset": "belcort/AGENTS.md §15 — audited-fn tool inventory + estimated_risk contract (L71-84)",
+      "kind": "doctrine section",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the inventory claiming completeness has drifted BOTH directions (omits set_coa_account_type, add_bank_account, the 3 FA tools, seed_opening_carry_forward, journal_entry_detail and the 6 non-registry tools; advertises unmatch_bank_line which has no ToolSpec; carries record_opening_balances with no precedence over its successor — I-4/F3-12), and the agent-emitted estimated_risk materiality call is superseded by the target's DB-owned autonomy/materiality policy. Rebuilt: generate the resident tool list from the registry at load time (single source of truth) and move the risk/lane bind into DB-enforced policy.",
+      "evidence": "belcort/AGENTS.md:71-84; I-4 MEDIUM ADJUSTED; F3-12 HIGH CONFIRMED; Ggr-13 MEDIUM (label-bind only)"
+    },
+    {
+      "asset": "belcort/AGENTS.md §16 — global injection defence (L86)",
+      "kind": "doctrine section",
+      "recommendation": "PORT",
+      "reason": "Verified consistent and thorough across the doctrine (inert-DATA framing, wake handlers restate second-order injection with concrete examples, runtime prepends the dataRule to every wake note). Carry verbatim as a fine claim that held under adversarial verification.",
+      "evidence": "belcort/AGENTS.md:86; I.json fine_claim CONFIRMED (review-queue:249-257, agent/src/runtime/inject.ts:31-32)"
+    },
+    {
+      "asset": "belcort/AGENTS.md §17-19 — dashboard affordances (suggestion / filter_journals / client_row) (L88-92)",
+      "kind": "doctrine section",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: §18 instructs emitting a filter_journals directive whose channel is dead at every station — following the doctrine renders raw JSON in the live chat bubble (D-3) — and the multi-card transport drops everything after the first fence (D-4). Rebuilt: doctrine may only advertise channels that exist; the agent→UI directive lane must be native, typed, and wider than one verb (J-8) before it re-enters doctrine.",
+      "evidence": "belcort/AGENTS.md:88-92; D-3 HIGH ADJUSTED; D-4 HIGH CONFIRMED; J-8 HIGH CONFIRMED"
+    },
+    {
+      "asset": "belcort/AGENTS.md §20 — Storage CREED (L94)",
+      "kind": "doctrine section",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the firm-scoped key grammar + three-layer isolation design is proven and must carry, but the CREED over-claims ('all writers reject keys outside my firm + slug' — ingest_document does no key-grammar validation, E-4), the 7-yr retention clock is anchored at row-creation instead of period-end+filing (GAP3-4), and legal_hold has no place/release verb (GAP3-5). Rebuilt: same CREED with every writer actually validating key grammar, statutory retention anchored per ITA s.82/82A, and an audited legal-hold function.",
+      "evidence": "belcort/AGENTS.md:94; E-4 MEDIUM CONFIRMED; GAP3-4 HIGH CONFIRMED; GAP3-5 MEDIUM CONFIRMED"
+    },
+    {
+      "asset": "belcort/SOUL.md",
+      "kind": "persona doctrine",
+      "recommendation": "PORT",
+      "reason": "Clean, residue-free persona (zero Hermes/Telegram/vendor/code_execution hits) whose voice rules (I do not invent; I reverse, never delete; honest about doubt; BM/Mandarin) all align with the invariants. Port verbatim per I-13.",
+      "evidence": "belcort/SOUL.md:9,24-28,36; I-13 CONFIRMED (grep clean)"
+    },
+    {
+      "asset": "belcort/firm-bootstrap/SKILL.md",
+      "kind": "skill",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the 11-Q interview content, validators, synonym table, and [[dryrun]] commit gate are proven, but the body is the worst Hermes carrier — a DEPLOY.md pointer that resolves to nothing, a 'persist to Hermes session memory' step the runtime cannot honor (I-6), stale /setup route names, and the whole interview rides one non-durable run where any prose sentence kills setup (B-4). Rebuilt: same interview content on a durable checkpointed flow, all v1 residue purged, transport references matching the real web/SSE surface.",
+      "evidence": "firm-bootstrap/SKILL.md:107-109,292-293,25; I-6 MEDIUM CONFIRMED; B-4 HIGH CONFIRMED"
+    },
+    {
+      "asset": "belcort/client-onboarding/SKILL.md",
+      "kind": "skill",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: structurally defective as executable spec (no Phase C, a [[step:14/14]] marker in a 13-Q interview, superseded record_opening_balances text left in place — I-11) and it orchestrates a non-idempotent seed_opening_carry_forward whose re-run silently doubles the opening position (B-1 CRITICAL), a broken ingest kind step (F3-10), and an attachment-replacement hazard (GAP5-6). Rebuilt: preserve the domain gold (the BEE negative-equity carry-down worked example L280-294, TIN deferred-return, closing-net-never-movements rule) as tested fixtures inside a clean, contiguous, durable-flow body over idempotent fns.",
+      "evidence": "client-onboarding/SKILL.md:280-294,296-298; B-1 CRITICAL CONFIRMED; I-11; F3-10 MEDIUM; GAP5-6 HIGH"
+    },
+    {
+      "asset": "belcort/doc-ingest/SKILL.md",
+      "kind": "skill",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: teaches a Telegram inflow that does not exist, mandates persist-after-OCR and storage moves the runtime cannot perform (E-2/E-3 — attachments are process-local; no storage read/copy/move tool), and embeds a do-not-execute UBL block that is a prompt hazard (I-13). Rebuilt: the ordered ingest pipeline + dedup + client-ID gates carry, re-grounded on real capabilities (durable attachment persistence, a storage-move primitive), with the UBL target mapping moved to a non-loadable design doc.",
+      "evidence": "doc-ingest/SKILL.md:50,116-183,246-256; E-2 HIGH CONFIRMED; E-3 HIGH CONFIRMED; I-7"
+    },
+    {
+      "asset": "belcort/coa-coding/SKILL.md",
+      "kind": "skill",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the highest-throughput skill carries the stale 'Python stays fine for OCR / code_execution' line contradicting six siblings (I-8), instructs the KB-evidence write as a SELECT-wrapped fn call — doctrine-endorsed use of the agent_select mutation bypass (C-15) — and its six-AND auto lane plus SST-leg presence are prompt-only (A-5, F3-9). Rebuilt: extract the crown jewels (the SST hybrid ladder L174-262, CN/DN polarity both directions, must-ask flag classes, Dr-as-sum-of-credits) into a drift-free body whose gates are DB-enforced, with all writes as registered tools and subledger integration (F3-1/F3-2) added.",
+      "evidence": "coa-coding/SKILL.md:40,174-262; I-8 CONFIRMED; C-15 MEDIUM CONFIRMED; A-5 HIGH; F3-1/F3-2 CRITICAL; F3-9 MEDIUM"
+    },
+    {
+      "asset": "belcort/review-queue/SKILL.md",
+      "kind": "skill",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: three roles in one 531-line body (interactive queue + [documents] handler + [proactive] handler), a missing Step 2, a header still teaching Telegram inline_keyboard/send_message mechanics, and its [documents] lane is narrowed only by prose over a permissive code blocklist (I-2/Ggr-7). Rebuilt: split into three skills; the wake handlers' excellent read-back/provenance/injection discipline and the wake carve-out logic carry; the lane restriction moves into an enforced allowlist so the skill stops being the only safety layer.",
+      "evidence": "review-queue/SKILL.md:16-47,226-353,355-531; I-2 HIGH; I-7; I-11; A-13 MEDIUM (actor fence)"
+    },
+    {
+      "asset": "belcort/kb-evolve/SKILL.md",
+      "kind": "skill",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the three-door learning design is sound (never blind-writes rules, user-gated promotion, human-only self-reconcile fence — verified fine claims), but learning is LLM-mediated and never transactional (chat-mediated decisions can silently never learn, A-3), evidence has zero provenance and tolerated double-counting (A-9), and the body jumps Step 1→3a (I-11). Rebuilt: same learning contract with the learn event emitted transactionally by the DB fns themselves, evidence rows carrying entry/document provenance, and contiguous steps.",
+      "evidence": "kb-evolve/SKILL.md:16,76-86,306-325; A-3 HIGH CONFIRMED; A-9 MEDIUM CONFIRMED; I-11"
+    },
+    {
+      "asset": "belcort/bank-recon/SKILL.md",
+      "kind": "skill",
+      "recommendation": "REBUILD",
+      "reason": "DIVERGENCE from I-13 (light-PORT), justified: F3-3 is a confirmed CRITICAL and this skill IS the defective route — Step 4 sends customer receipts into plain coa-coding Dr/Cr so ar_receipts is never written or allocated, which porting largely-as-is would carry forward; plus the mid-sentence paste error (L94-96) and the match_bank_line signature drift. Rebuilt: keep the proven DB-owns-the-tie-out procedure and hint-learning verbatim, add the subledger allocation branch (allocate_ar_receipt/allocate_ap_payment) as a first-class step, fix the paste error and tool signatures.",
+      "evidence": "bank-recon/SKILL.md:94-100,112-113; F3-3 CRITICAL CONFIRMED; I-13 (paste error confirmed)"
+    },
+    {
+      "asset": "belcort/rule-edit/SKILL.md",
+      "kind": "skill",
+      "recommendation": "PORT",
+      "reason": "Sound user-proactive rule-mutation flow over the audited SP-6.2 fns (create/confirm/retire, 0/1/2+ resolution, no auto-recode) — port per I-13 with light edits: specify the referenced-but-missing Steps 1-2 client picker, drop the 'Telegram phrases' trigger wording, and reword the query_books safety framing (the I-1 fix itself lives in the runtime, a one-line prose edit here).",
+      "evidence": "rule-edit/SKILL.md:45-49,53,64,119-121; I-13 PORT-light CONFIRMED; C-13 LOW (pinned-tier decay is a DB/design gap, not this skill's)"
+    },
+    {
+      "asset": "belcort/period-entries/SKILL.md",
+      "kind": "skill",
+      "recommendation": "PORT",
+      "reason": "Clean, small, correct: finalised-set reads with a same-scope control total, the honest approved/auto_draft split disclosure, and the export handoff that protects the export audit path. Port per I-13 with one light edit (drop the 'Plain send_message' phrase).",
+      "evidence": "period-entries/SKILL.md:60-63,75,79-88,66; I-13 PORT-light CONFIRMED"
+    },
+    {
+      "asset": "belcort/export/SKILL.md",
+      "kind": "skill",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: a ghost Step 6 cited by Step 7, a bundled reference contradicting the skill on what is wired (I-9), a whole-ledger client-confirm that is prompt-only and absent on the [documents] wake lane (H-11), no role floor on the lane (H-10), and the skill's claim that the balanced chip is 'labelled non-authoritative at render' is false while build_export hardcodes balanced:true (H-2). Rebuilt: the scope/period/format resolution and ONE-build_export orchestration carry; the confirm gate, role floor, and balance truthfulness must become structural, and steps renumbered.",
+      "evidence": "export/SKILL.md:186-188,207; I-9 CONFIRMED; H-2 HIGH CONFIRMED; H-10/H-11 MEDIUM; H-14 LOW"
+    },
+    {
+      "asset": "belcort/year-end-close/SKILL.md",
+      "kind": "skill",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: mandates a 7-arg tax-provision close path the registered tool cannot call (only 4 params — Clara following her own doctrine dead-ends, F12-9), tells the agent the wired full pack is 'still unwired' (I-9), and has no '## When this fires' so its routing trigger renders empty (I-11). Rebuilt: preserve the rich close content (pre-close gate incl. TX-vs-410-081 provision logic, partnership per-partner close, sign-aware card, reverse-then-recluse flow) against a synchronized tool schema, and pair with the DB fixes (GAP5-3 reverse-order guard, F12-6 stranded drafting entries).",
+      "evidence": "year-end-close/SKILL.md:72-79,100-103,151-153; F12-9 MEDIUM CONFIRMED; I-9; I-11; GAP5-3 CRITICAL (DB-side)"
+    },
+    {
+      "asset": "belcort/_shared/validators.md",
+      "kind": "shared contract",
+      "recommendation": "PORT",
+      "reason": "Precise, well-sourced validator contracts (SSM 4 shapes, LHDN TIN prefix table with the exact-literal EI rule, MSIC format) that are honest about being app-layer-only. Port as-is; the rebuild should additionally mirror the shapes as DB CHECKs (B-11), which this file already flags.",
+      "evidence": "_shared/validators.md:14-27,49-55,79-83; B-11 MEDIUM (model-enforced prose — a runtime gap, not a content defect)"
+    },
+    {
+      "asset": "belcort/_shared/myinvois-reference.md",
+      "kind": "shared contract",
+      "recommendation": "PORT",
+      "reason": "Verified regime reference: RM1M exemption threshold, the cancelled RM500k-1M band explicitly recorded (ADR-013 never-re-add), the 55-field model, tier mapping. Port per I-13; re-confirm code lists against the current SDK at build time as the file itself instructs.",
+      "evidence": "_shared/myinvois-reference.md:12-24,41-44; I-13 PORT CONFIRMED"
+    },
+    {
+      "asset": "belcort/_shared/ocr-cache-schema.md",
+      "kind": "shared contract",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: documents a nested canonical envelope the producer never emits while the live agent writes a flat record — permanent 'aspirational' debt forcing every consumer to coalesce two shapes (I-12) — and its engine enum is v1-era pymupdf/marker-pdf (I-5's third OCR identity). Rebuilt: pick ONE shape the producer actually emits, name the real engine, and add per-field evidence regions (J-18) to the contract.",
+      "evidence": "_shared/ocr-cache-schema.md:14-24,36; I-12 CONFIRMED; I-5 CONFIRMED; A-15 MEDIUM; J-18 CRITICAL (regions absent end-to-end)"
+    },
+    {
+      "asset": "belcort/_shared/suggestion-chips.md",
+      "kind": "shared contract",
+      "recommendation": "PORT",
+      "reason": "One of the 4 genuinely live card channels; the fail-closed schema and the taste rules (zero chips usually right, never mid-clarify, never nag) are proven prompt-craft. Port the contract content; the transport itself should become a native typed artifact lane (I-14/D-4), which changes the envelope, not these rules.",
+      "evidence": "_shared/suggestion-chips.md:1-40; D-2 (suggestion among the emittable set); D-4 HIGH (fence transport defect is runtime-side)"
+    },
+    {
+      "asset": "belcort/_shared/filter-directive.md",
+      "kind": "shared contract",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: it specifies a channel that is dead at all four stations — no agent emitter path, no SSE branch, no dispatch call, no grid listener — so doctrine-compliant emission renders raw JSON in the live bubble (D-3 HIGH). Rebuilt: a real, end-to-end, typed agent→UI directive lane with more than one verb (open view / focus entity / carry period per J-8), or do not carry the contract at all.",
+      "evidence": "_shared/filter-directive.md:1-34; D-3 HIGH ADJUSTED CONFIRMED-dead; J-8 HIGH"
+    },
+    {
+      "asset": "belcort/_shared/client-row.md",
+      "kind": "shared contract",
+      "recommendation": "PORT",
+      "reason": "Live, fail-closed chip contract (both IDs required, snapshot semantics, firm-thread-only taste rule). Port the content into the rebuilt artifact lane; note D-4 means multi-chip turns are broken today at the transport layer, which the rebuilt native lane fixes.",
+      "evidence": "_shared/client-row.md:1-29; D-2 (client_row among live 4); D-4 HIGH (transport-side)"
+    },
+    {
+      "asset": "belcort/coa-coding/GL-Account-TaxNIndustriesCode.pdf + review-queue/ + rule-edit/ (3 byte-identical copies)",
+      "kind": "skill reference (binary)",
+      "recommendation": "DROP",
+      "reason": "The loader serves only .md references, so these 39KB PDFs (SHA256-identical in three dirs) can never reach the agent — pure dead weight (I-12). If the COA/tax-code mapping inside is needed, convert once to a single loadable .md; the binary copies do not carry.",
+      "evidence": "I-12 CONFIRMED (loader.ts:142 filters .endsWith('.md'); SHA256 identical ×3)"
+    },
+    {
+      "asset": "belcort/__init__.py",
+      "kind": "dead artifact",
+      "recommendation": "DROP",
+      "reason": "0-byte v1 Python-package residue, meaningless in the TS runtime (I-12). Do not carry.",
+      "evidence": "I-12 CONFIRMED (0 bytes verified)"
+    },
+    {
+      "asset": "belcort/export/references/journals-csv-execution-pattern.md",
+      "kind": "skill reference",
+      "recommendation": "DROP",
+      "reason": "Kept 'only as a pointer' yet it now actively misinforms — tells the agent the wired full pack and analysis report are 'not yet wired' and to refuse them (I-9). Its residual correct content is already in export/SKILL.md; drop rather than maintain a second drifting copy.",
+      "evidence": "journals-csv-execution-pattern.md:30-31; I-9 CONFIRMED (contradicted by exportTool.ts:61,355)"
+    },
+    {
+      "asset": "belcort/export/references/presentation-mapping.md",
+      "kind": "skill reference",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: still instructs flagging 906-000 as mis-typed OI (seed fixed to EP 2026-06-27 — generates false escalations, I-10) and sanctions model-side statement composition/netting (NBV = cost − acc.dep.) — the exact model-computes-money class the export lane exists to prevent (H-15). Rebuilt: a read-only presentation map scoped to legacy data where needed, with all figure composition delegated to the DB statement fns.",
+      "evidence": "presentation-mapping.md:32,58-63; I-10 CONFIRMED; H-15 LOW CONFIRMED"
+    },
+    {
+      "asset": "belcort/review-queue/references/clarify-tool-card-patterns.md",
+      "kind": "skill reference",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: describes Telegram inline_keyboard card mechanics and 'plain send_message' for a runtime that has neither (I-7/N14). Rebuilt: card-pattern guidance written for the real surface (web chat + SSE + typed artifact cards).",
+      "evidence": "clarify-tool-card-patterns.md:9-11; I-7 CONFIRMED; doctrine-map N14"
+    },
+    {
+      "asset": "belcort/doc-ingest/references/extracted-fields-schemas.md",
+      "kind": "skill reference",
+      "recommendation": "PORT",
+      "reason": "Per-doc-kind extracted-field schemas with no adverse finding; classified PORT-pending-review consistent with I.json's unverified note (not exhaustively cross-checked field-by-field against the MyInvois 55-field model). Verify against the 55-field model during the rebuild's contract pass.",
+      "evidence": "I.json unverified list (extracted-fields-schemas PORT-pending-review)"
+    },
+    {
+      "asset": "PRD.md",
+      "kind": "product law",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the §6 invariants core is proven and must carry (DB owns numbers, plan→approve, ≥0.95, sha256 provenance, cents, injection defence, SST output-only), but the PRD codifies the coding-loop product rather than the Accounting-OS lifecycle, asserts falsified status claims as law ('proven by the isolation rig', Track B 'built', gated beta live), and is silent on invariants the audit proved missing — maker-checker/SoD (GAP3-7), evidence regions (J-18 verifier: not required by this PRD), structural enforcement of its own gates (GAP0-2), payroll/inventory (GAP2-6/2-7 vs ADR-044 scope). Rebuilt: a lifecycle-scoped PRD carrying the surviving invariants verbatim, adding the missing ones, with zero as-built status claims inside law text.",
+      "evidence": "PRD.md:45,66,87-98,114,117-120; GAP3-7 HIGH; J-18 CRITICAL; GAP0-2 CRITICAL; GAP2-6/2-7 HIGH; doctrine-map 1.2"
+    },
+    {
+      "asset": "docs/architecture/backend.md",
+      "kind": "architecture doc",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: an as-built map whose headline claims are falsified — 'durable wakes' vs at-most-once pg_net (N1), 'Every wake is speak-never-act' vs the MAY-act [documents] lane (N2), 'go-live-ready' (N4), SDK tracing shipping firm data to OpenAI unmentioned (GAP1-8) — and its binding §2A SST policy is frozen at the 2024-03-01 sector list with the 8% default hazard (GAP3-2). Rebuilt: a fresh pointer-map of the new architecture; carry §2A's policy SKELETON (output-only, effective-dated single rate authority, hybrid ladder, not_registered never auto-legs) only after official-source RMCD re-verification, and never restate runtime durability claims the deploy doc contradicts.",
+      "evidence": "backend.md:3,87,92,104, §2A:69-82; doctrine-map N1/N2/N4; GAP1-8 HIGH; GAP3-2 HIGH; C-8/F3-8 (payment basis degrades)"
+    },
+    {
+      "asset": "docs/design/HANDBOOK.md (governing law + refresh log)",
+      "kind": "design SoT",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the governing-law pillars (grid is truth/chat is intent, DB owns every number/UI renders, receipts, drift protocol) are proven and carry, but the 2026-07-08 refresh embeds an unreconciled 0.97 auto-post threshold against the 0.95 canon (N8) and a stale F0→S0 OCR claim (N7), and the ratified-at-slice-2b framing binds it to the old product shape. Rebuilt: restate the pillars for the workbench-led dual Agentic-Accounting-OS target, resolve the 0.95/0.97 owner decision explicitly, and keep status/history out of the law text.",
+      "evidence": "HANDBOOK.md:15-21,34-45; doctrine-map N7/N8; GAP1-6 CRITICAL (no DR contract anywhere incl. design SoT)"
+    },
+    {
+      "asset": "docs/design/01-foundations.md (ch.01)",
+      "kind": "design chapter",
+      "recommendation": "PORT",
+      "reason": "Proven floors that survived adversarial audit as LAW even where the code violates them: WCAG 2.2 AA specifics, the 60fps/10k-row transform-opacity-only perf floor, zero backdrop-filter on product surfaces (J-22 is a code violation, not a law defect), OKLCH 3-tier tokens, the reserved agent-violet, money-color rules. Carry as the rebuilt product's floor; the rebuild must add the CI enforcement the old build never wired (J-26).",
+      "evidence": "01-foundations.md:37-70,117-126; J-22 HIGH (violation in code); J-26 MEDIUM (gates unenforced)"
+    },
+    {
+      "asset": "docs/design/02-interaction.md (ch.02)",
+      "kind": "design chapter",
+      "recommendation": "PORT",
+      "reason": "Sound, battle-tested interaction law: motion registers with reduced-motion MUSTs, the grid keyboard model with the binding suppression rule ('typing a in a reason field MUST never approve'), five mandatory screen states, the feedback ladder (toast never for errors), fail-loud reads. J findings fault the implementation (J-15 undiscoverable shortcuts, J-17 empty states), not this law. Carry as-is.",
+      "evidence": "02-interaction.md:84-88,107-128; J-15/J-17 (implementation shortfalls)"
+    },
+    {
+      "asset": "docs/design/03-architecture.md (ch.03)",
+      "kind": "design chapter",
+      "recommendation": "REBUILD",
+      "reason": "Wrong for the target: its IA fixes Clara into 3 seats with a ≤1/3 rail, 'Clara never drives a write surface', and a scope model with no period/entity dimension — the audited result is a scope-follower, not the conversational super-UI (Ggr-8, J-8, J-13 URL-not-truth), and the thread model contradicts ADR-032 (N13). Rebuilt: an agent-led IA where Clara can drive navigation/views/period scope through a real directive lane, deep-link contract retained, with the thread/scope model decided once and stated once.",
+      "evidence": "03-architecture.md:16-17,75-84,97-107; Ggr-8 MEDIUM; J-8 HIGH; J-13 HIGH; doctrine-map N13"
+    },
+    {
+      "asset": "docs/design/04-agentic.md (ch.04)",
+      "kind": "design chapter",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the right agentic patterns (7-state FSM, plan→approve tiers, static fail-closed gen-UI catalog, permanent attribution) sit under falsified as-built claims — 4 of 8 'live' catalog cards can never render (D-2), the durable-authorship badge is claimed closed while PROJECTLOG says the emit-seam never populates it (N9), rehydrated cards are stale-actionable (D-7), Edit/Dismiss are dead (D-12/J-1). Rebuilt: a native typed artifact lane with lifecycle state (supersede/expire cards), a catalog sized for the OS (multi-step plans, tables, doc-review per J-2), and honest as-built annotations kept out of the spec.",
+      "evidence": "04-agentic.md:20-25,90-137; D-2 HIGH; D-7 HIGH; D-12 MEDIUM; J-1/J-2 HIGH; doctrine-map N9"
+    },
+    {
+      "asset": "docs/design/05-surfaces.md (ch.05)",
+      "kind": "design chapter",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the per-surface domain rules are valuable (SST-02 present-never-hidden/never-submits, period-close agent-only owner ruling, verbatim-DB-figures, reverse binds to the fn's reversible flag) but the chapter is saturated with falsified 'As built' annotations and a jobs lane spec'd against the decommissioned relay (N10 — dead dependency), plus grid/inbox specs the build never met (J-14, J-19). Rebuilt: re-spec every surface for the new IA, carrying the domain rules and owner rulings forward and stripping all build-status narrative.",
+      "evidence": "05-surfaces.md:227-229,292-293,456-459; doctrine-map N10; J-6 MEDIUM (dead runner shows live bar); J-14/J-19 MEDIUM"
+    },
+    {
+      "asset": "docs/design/06-implementation.md (ch.06)",
+      "kind": "design chapter",
+      "recommendation": "DROP",
+      "reason": "A build log for the superseded dashboard build: stack pins, slice checklists all marked ✅, a '2088 tests ported' migration narrative, and validation gates that were never enforced in CI (J-26). The greenfield build makes its own stack and gate decisions; keep the file only as frozen historical evidence, carry nothing forward as authority.",
+      "evidence": "06-implementation.md:71-72,150-154; J-26 MEDIUM CONFIRMED (gates unenforced)"
+    },
+    {
+      "asset": "docs/reference/confidence-ladder.md",
+      "kind": "reference canon",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the ladder's design (deterministic persisted inputs, fail-closed gates, owner-tunable constants) is right, but its central claim — 'the ladder's verdict cannot be faked at write time' — is false in substance: only the status↔risk label bind is DB-enforced while confirmed-rule/≥0.95/empty-flags/no-tax-leg are model-asserted (A-5/Ggr-13), Gate 0's client_match_conf is model-self-reported and never gated (A-16), and the candidate tier it describes is unreachable in production (C-11). Rebuilt: each rung structurally enforced in the DB fns, the candidate-tier and 0.95-vs-0.97 owner decisions resolved, and the doc regenerated from the enforced policy (the target autonomy model supersedes its posting threshold).",
+      "evidence": "confidence-ladder.md:36-39,56-66,93-104,141-144; A-5 HIGH; A-16 HIGH; Ggr-13 MEDIUM; C-11 MEDIUM"
+    },
+    {
+      "asset": "dashboard/docs/contracts/je-balance-tax-leg.md",
+      "kind": "contract doc",
+      "recommendation": "PORT",
+      "reason": "A model contract doc: the two-truth gate-vs-indicator split (≤5¢-tolerant approve gate vs strict Balanced indicator), rounding-at-approve/exact-at-commit reconciliation, and the owner-decided sub-cent policy are all verified against fns + executable tests, with honest documentation of the accepted Bulk-Approve gap. Port the invariant wholesale, re-anchoring file paths to the new build; the rebuild separately adds the DB-side taxable-revenue-requires-leg check (F3-9), which this contract never claimed to provide.",
+      "evidence": "je-balance-tax-leg.md:10-47,80-92; db/v2/20-fns-journal.sql approve_entry; F3-9 MEDIUM (DB gap, out of this contract's scope)"
+    },
+    {
+      "asset": "docs/coa-reconciliation-findings.md",
+      "kind": "provenance record",
+      "recommendation": "PORT",
+      "reason": "LHDN/RMCD-sourced provenance for the 95-account seed: verified regime facts (GST repeal Act 805, NO input-tax-recoverable asset, numeric MyInvois codes), the 906-000 and installment-receivable fixes, and the must-preserve hardcoded-code list (980-100, 100-950, 150-000, coding defaults) the rebuild's seed must honor. Port as reference evidence; honor ADR-014's own TODO to re-verify against official sources before re-seeding.",
+      "evidence": "coa-reconciliation-findings.md:70-73; doctrine-map 1.11; ADR-014 (PROJECTLOG:41-44)"
+    },
+    {
+      "asset": "docs/track-c-myinvois-inbound-contract.md",
+      "kind": "deferred build contract",
+      "recommendation": "PORT",
+      "reason": "The parser-hardening mandate is timeless and correct (no DTD/XXE/network, bounded expansion, never render XML as HTML, don't-trust-totals with 5-sen reconcile, decimal→cents half-up, self-billed→review) and the v2 Track-C build remains unbuilt so this stays its SoT. Port as a deferred contract with two edits: strip the DEAD v1 deploy-runbook section and re-verify all regime facts (thresholds, code lists) against official sources at build time — it is deferred reference, not current build authority.",
+      "evidence": "track-c-myinvois-inbound-contract.md:3-5,44-46,73-74,96-106; doctrine-map 1.10; PROJECTLOG:51,129 (parse unbuilt)"
+    }
+  ]
+}

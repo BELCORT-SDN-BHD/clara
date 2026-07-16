@@ -1,0 +1,327 @@
+{
+  "workstream": "A - Accounting state, events, and governance (frozen repo root: C:\\Users\\zhant\\Desktop\\initial acc software skillmd; all evidence paths relative to that root. Adversarial verification pass 2026-07-17: every cited file/line independently re-opened and judged from the code itself; audit-brief.md and 3 of 4 evidence maps remain absent on disk - see unverified. Verdicts: 14 CONFIRMED, 2 ADJUSTED, 0 REFUTED.)",
+  "findings": [
+    {
+      "id": "A-1",
+      "workstream_item": "A1",
+      "title": "No context-pack layer exists: Clara's run context is static doctrine + the last <=40 chat turns of prose; every piece of client/accounting context is a model-initiated ad-hoc read",
+      "severity": "high",
+      "evidence": [
+        "agent/src/doctrine/loader.ts:91-109 - systemInstructions = SOUL + AGENTS + skill-routing menu + wake-routing lines + reference index only; no client data",
+        "agent/src/runtime/openai/runtime.ts:160-173 - one static Agent per tool policy (agents Map keyed on policy); instructions never vary per client/run",
+        "agent/src/runtime/openai/runtime.ts:60-78 + agent/src/http/sessions.ts:253-270 - cross-turn 'memory' = last 40 chat_messages replayed as raw prose (cap 100), no other injection",
+        "agent/src/http/server.ts:340-366 - POST /chat resolves scope -> loadHistory -> startRun(message, history); nothing else is injected",
+        "belcort/coa-coding/SKILL.md:47-49 - 'Load the ClientContext once per coding session - browse the client's tables' (query_books prose, model-dependent)",
+        "agent/src/tools/registry/reads.ts:6-147 - the named read surface has no client-profile/context read tool (only TB, TB-range, journal_entry_detail, firm_activity_feed, resolve_counterparty, auto_draft_review_batch, get_job/list_jobs, suggest_recon_counterparty); client_overview exists as a DB fn (db/v2/28-fns-reads.sql:840) but is not a named tool",
+        "agent/src/runtime/inject.ts:86-96 - a wake run's entire input is the framing + read-hints + the fenced id envelope"
+      ],
+      "wrong": "There is no structural guarantee that Clara sees client profile, FY/period, MSIC, SST status, COA, document/journal/approval/reversal history, recon exceptions, or any 'books version' before a decision. Whether context is loaded, how fresh it is, and whether it is complete depends entirely on the model obeying skill prose via query_books. A wake run gets even less: a minimal id envelope plus read-back instructions.",
+      "target": "A DB-assembled, versioned client/accounting context pack retrieved at run start (and re-retrieved on invalidation) - profile, FY/period state, SST status, COA policy, KB rules, open exceptions, recent history, books version - injected by the layer, not left to model initiative.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-2",
+      "workstream_item": "A1",
+      "title": "Event distribution is fire-and-forget with at least five independent loss points and no durable event log, outbox, or replay",
+      "severity": "high",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:1430-1457 - belcort_proactive_emit wraps net.http_post in EXCEPTION WHEN OTHERS -> 'raise warning' (enqueue failure swallowed); comment 1453-1455: 'live HTTP drops land in net._http_response' - verified nothing in the repo consumes net._http_response; no retry anywhere",
+        "agent/src/http/wakeGate.ts:9-14,110-136 - in-memory governor: a new-window submit beyond ratePerMin/firm is DROPPED ('rate_limited', line 124); clearPending() drops every open window WITHOUT firing (131-136); timers unref'd - at-most-once by design",
+        "agent/src/main.ts:184,236 - windowMs 15s, ratePerMin 6; shutdown calls wakeGate.clearPending() dropping pending batches unfired",
+        "agent/src/runtime/openai/runtime.ts:42,497-507 - a dispatched wake run is killed at 90s (wake_run_timeout) mid-learning; 130-137,196-205,444-468 - all run state is a process-local Map (restart loses everything; drainWake deletes the record at settle)",
+        "agent/src/http/server.ts:204,229 - wakesEnabled:false and rate_limited both answer 202 with no durable record of the dropped event (console.info/error only, 217-227)",
+        "docs/architecture/backend.md:87,92 - the docs call these wakes 'durable out-of-band wakes'"
+      ],
+      "wrong": "Every hop from a committed DB change to Clara acting on it is best-effort: pg_net enqueue -> HTTP POST (no retry) -> in-memory gate (rate-drop, shutdown-drop) -> in-memory run map -> 90s drain deadline. The KB/agent-context synchronization the target requires can silently not happen, and nothing records that it did not. Recovery depends on a human visiting a read surface. The repo's own docs call these wakes 'durable', which is false at every layer above the notification row itself.",
+      "target": "A transactional domain-event log/outbox in the DB (same commit as the mutation), with durable consumers, retries, and an auditable dispatch/consumption record - events as first-class rows, not webhooks-as-hints.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-3",
+      "workstream_item": "A1",
+      "title": "KB/books synchronization is LLM-mediated, never transactional - and chat-mediated human decisions never emit the learn event at all",
+      "severity": "high",
+      "evidence": [
+        "belcort/coa-coding/SKILL.md:275-288 - coding-time KB evidence (Step 6) is a prose instruction the model may or may not execute",
+        "belcort/kb-evolve/SKILL.md:164-183,258-290 - wake-time learning (record_kb_evidence, record_recon_hint) is model-executed inside a lossy, 90s-capped wake run",
+        "db/v2/25-fns-ops.sql:1522-1524 - recorded 'KNOWN ASYMMETRY': a human approving THROUGH CHAT rides the tool layer which injects actor='agent' - chat-mediated review decisions do not (yet) teach",
+        "agent/src/tools/buildTools.ts:82-89 + agent/src/runtime/openai/runtime.ts:183,362 - actor is always 'agent' for every agent-executed write, so trg_pn_workbench/trg_pn_bank_match (25-fns-ops.sql:1531-1548) never fire for them",
+        "belcort/kb-evolve/SKILL.md:306-326 - the compensation ('On a chat-mediated human self-reconcile' - self-record the learn inline) is again pure prompt discipline"
+      ],
+      "wrong": "The client knowledge base is only 'continuously synchronized' to the extent a language model reliably executes multi-step prose procedures across lossy runs. The one deterministic learn direction (rule decay on reject/edit-away) is in-transaction; the positive direction (evidence accrual) never is. An entire class of human decisions (made via chat) produces no durable learn signal whatsoever.",
+      "target": "Learning signals derived transactionally from the committed verbs themselves (approve/edit/reject/match write their own evidence events in the same transaction), with the model consuming events rather than being the event bus.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-4",
+      "workstream_item": "A2",
+      "title": "Trigger taxonomy is a static condition->lane map with no risk/materiality/period-status keying, and whole families of human-direct events emit nothing",
+      "severity": "high",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:1464-1548 - the COMPLETE emit inventory (re-verified exhaustive: belcort_proactive_emit is wired only in this file): je_needs_human, kb_proposal_open, recon_unbalanced, new_document, new_bank_line, document_triaged, workbench_committed, bank_line_matched - 8 conditions total",
+        "db/v2/25-fns-ops.sql:1531-1537 - trg_pn_workbench WHEN action in ('approved','edited','rejected') - human REVERSALS excluded (db/v2/22-fns-documents-recon.sql:821-825 writes 'reversed'/'reversal' history rows; the only in-transaction trace of a reversal's rule impact is the non-waking client_kb_audit 'flag' row at 22:832-837)",
+        "No emit trigger exists on coa_audit (COA add/retire/reclassify), client_profile_audit (incl. sst_regime/tax-status changes via update_client_profile, 24-fns-onboard.sql:434-478), firm_profile_audit, client_fy_close (close/reopen), client_kb_audit (governance verbs - belcort/kb-evolve/SKILL.md:346-348 admits they 'have NO durable wake source in v2'), export_receipts, or any subledger/FA/adjustment/tax/SST engine write",
+        "agent/src/http/wakes.ts:30-40 - static CONDITION_WAKE_KIND lookup; unknown -> 'proactive'; agent/src/http/wakeGate.ts:81-98 - batching by (firm,condition,client) + per-firm token bucket; nothing reads estimated_risk, confidence, amount, or period status",
+        "agent/src/main.ts:182-184 - the only 'policy' knobs are 15s window / 6 per min / 30 per batch; the sole materiality logic anywhere is the >=5x-median prose heuristic in belcort/review-queue/SKILL.md:452-454, executed by the model"
+      ],
+      "wrong": "Which events proactively trigger Clara is an accident of relay history, not a designed taxonomy: an entry parking in needs_review triggers her; a human reversing a posted entry, changing a client's SST registration, editing the COA, or closing a year triggers nothing. There is zero risk-, materiality-, or period-keyed trigger logic in code.",
+      "target": "A DB-owned trigger policy: every domain event classified, with routing/priority keyed on risk tier, materiality, and period status, and an explicit registry of which events wake the agent, notify humans, or both.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-5",
+      "workstream_item": "A3",
+      "title": "The auto-post lane's six gate conditions are prompt-only: the DB enforces the status<->risk label binding, not the substance",
+      "severity": "high",
+      "evidence": [
+        "db/v2/20-fns-journal.sql:128-158 - finalize_coding validates ONLY: status enum (137), auto_draft<->estimated_risk='auto' binding (140-143), entry is 'drafting' (148). No check of kb_rule_id presence, rule confidence, must_ask_flags emptiness, or tax-leg absence for the auto lane",
+        "db/v2/20-fns-journal.sql:95-99 - draft_entry checks a cited rule is CONFIRMED and THIS client's, but never that the rule's pattern matches the entry description or that its account_code appears in the lines",
+        "db/v2/20-fns-journal.sql:101-110 - journal_entries.confidence and must_ask_flags are persisted verbatim from the model's jsonb",
+        "belcort/coa-coding/SKILL.md:161-165 - the six auto-gate conditions (confirmed rule, conf >=0.95, balanced, empty flags, no tax leg, open period) live only in skill prose; docs/reference/confidence-ladder.md:139-144 claims 'the ladder's verdict cannot be faked at write time' - true only for the LABEL binding, not the gates",
+        "Compensating controls that ARE enforced: closed-period guard (db/v2/25-fns-ops.sql:297-322), deferred balance trigger (db/v2/15-triggers.sql:33-75), auto-draft oversight sweep (25-fns-ops.sql:1209-1292)"
+      ],
+      "wrong": "An entry with confidence 0.2, non-empty must_ask_flags, a tax leg, and no KB rule can be finalized auto_draft/auto - posted unsupervised - if the model (or any authenticated same-firm caller of finalize_coding) says so. The 'deterministic ladder' (must-ask detection, rule matching, confidence, collision detection, estimated_risk derivation) is executed entirely by the LLM in prose; the DB stores its self-report. Only balance, closed-period, and rule-citation-validity are structurally enforced.",
+      "target": "DB-enforced gate: finalize_coding (or its successor) refuses the unsupervised lane unless a confirmed rule is cited, flags are empty, no tax-coded line exists, confidence clears the floor - the autonomy/materiality kernel the rebuild specifies.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-6",
+      "workstream_item": "A2",
+      "title": "Deterministic je_needs_human wake handler swallows the rest of a batch when the first entry has settled, and dedup-keys the whole batch on the first entry",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/runtime/openai/runtime.ts:394 - const entryId = entryIds[0]! (only the first record is read back via journal_entry_detail, 396-398)",
+        "agent/src/runtime/openai/runtime.ts:404-406 - if the FIRST entry's status is no longer needs_review/needs_decision, return true -> the wake is treated as handled; no notification for the remaining N-1 batch entries",
+        "agent/src/runtime/openai/runtime.ts:417-424 - dedup_key `je:<first entryId>:needs_review` (line 422) for a multi-entry batch; the title (410-411) counts the total but the key does not"
+      ],
+      "wrong": "A coalesced batch (15s window can hold up to 30 entries) where entry #1 was already reviewed produces no notification for the others; a later batch with a different first id re-notifies for overlapping sets. Recoverable via the dashboard needs-attention read surface, but the notification plumbing is wrong for exactly the batched case the gate was built for.",
+      "target": "Per-record read-back and per-record (or set-correct) dedup in the deterministic wake path.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-7",
+      "workstream_item": "A4",
+      "title": "No stale-context detection of any kind: no books/KB version token, no invalidation, and stale figures from earlier chat turns replay verbatim into later runs",
+      "severity": "high",
+      "evidence": [
+        "Exhaustive grep for stale/freshness concepts across agent/src + belcort: the only hits are belcort/review-queue/SKILL.md:419 (wake-time 'stale condition -> finish silently' read-back rule) and belcort/coa-coding/SKILL.md:228 ('stale sst_regime' named as an escalation reason) - both prose, neither machinery",
+        "agent/src/http/sessions.ts:253-270 + agent/src/runtime/openai/runtime.ts:60-78 - prior assistant turns (including numbers read from the books hours earlier) are folded into every new run with no timestamps, no version markers, no invalidation when the books change mid-session",
+        "db/v2 - no version/sequence column exists on clients, client_kb_rules, or the books (verified by grep over 10-tables-core.sql, 12-tables-kb.sql, 13-tables-client.sql); the only watermarks are auto_draft_sweep_log and dashboard-seen state",
+        "db/v2/24-fns-onboard.sql:434-478 - update_client_profile (e.g. sst_regime change) writes client_profile_audit; no emit trigger, no wake, no session invalidation follows (client_profile_audit is absent from the exhaustive 25-fns-ops.sql PART 7 emit inventory, and 'clients' is not in wakes.ts BOOKS_TABLES)"
+      ],
+      "wrong": "If a human edits the client profile, changes SST registration, retires a KB rule, or reverses entries while a chat session is open, Clara's next turn carries the old world-state as authoritative-looking history. Nothing detects stale KB, stale books, changed tax status, or recent human edits; the sole freshness discipline is 'read the DB back' prose inside wake procedures.",
+      "target": "Versioned state (books version / KB version / profile version) + event-driven invalidation of any cached or replayed context, with the context pack (A-1) re-fetched on change.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-8",
+      "workstream_item": "A3",
+      "title": "Real coding path uses far less context than the target list: MSIC named in the context-load prose but consumed by no step or DB logic, no business-description field, exact-match-only rule retrieval, history/patterns unused",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/10-tables-core.sql:22 - clients.msic_code exists; verified by grep across db/v2: it is only inserted (24-fns-onboard.sql:301-305), patched (24:469), and echoed in client_overview (28-fns-reads.sql:840) - NO coding/tax/validation logic reads it; coa_accounts.msic_ind_code (10:52) likewise only seeded/echoed",
+        "belcort/coa-coding/SKILL.md:47-49 names msic_code in the Step-1 ClientContext load, but no subsequent step (2-7) ever uses it - loaded-but-unused prose, not a coding input",
+        "No business_description/industry column exists on clients (grep-verified); the only home is advisory client_memory_notes (db/v2/27-fns-memory.sql:2-31 - 'It NEVER decides an account or touches client_kb_rules')",
+        "belcort/coa-coding/SKILL.md:54-78,126-129 - the prescribed match is pattern equality against client_kb_rules (plus the custom_instruction hint); db/v2/21-fns-kb.sql:44-56 - resolve_counterparty is a single-level normalized-exact alias map; no fuzzy/semantic retrieval exists anywhere (grep: no tsvector/FTS/embedding in db/v2)",
+        "Historical postings, approval/reversal history, and vendor patterns beyond the exact-pattern rulebook appear nowhere in the coding procedure (coa-coding Steps 1-6); journal history is only consulted by kb-evolve wake learns",
+        "Bank narrations feed only the recon-hint matcher (db/v2/22-fns-documents-recon.sql:580-686), i.e. line->counterparty matching, not account coding",
+        "entity_type, sst_regime, default_sst_treatment, directors, and the OCR extract ARE genuinely in the prescribed path (coa-coding Steps 1,4,5) - the strongest real inputs"
+      ],
+      "wrong": "A3's answer: coding is 'raw extract + exact-match KB rules + a handful of client fields', executed by the model. MSIC code, industry, business description, prior COA usage, posting history, and approval/reversal history are either stored-but-unread or absent from the schema. There is no retrieval layer (no FTS, no embeddings, no candidate ranking) - a rule fires only on exact canonical-name equality, so learning generalizes to nothing beyond the literal counterparty.",
+      "target": "Context-aware coding that structurally consumes the full signal set (industry/MSIC, description, history, patterns, tax rules) through a real retrieval/ranking layer with recorded inputs.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "A-9",
+      "workstream_item": "A4",
+      "title": "KB evidence is an aggregate tally with zero provenance: no entry/document link, in-run dedup lives only in model memory, double-counting is acknowledged and tolerated",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/21-fns-kb.sql:170-211 - record_kb_evidence(client, pattern, account, increment): upserts an aggregate counter in client_kb_rules_history; no entry_id, no source_doc_sha256, no per-sighting row",
+        "db/v2/12-tables-kb.sql:49-63 - client_kb_rules_history is (pattern, account_code, evidence_count, last_seen_at) only, 'Deliberately NOT FK-constrained on account_code'; no provenance columns",
+        "belcort/kb-evolve/SKILL.md:180-183,273-276 - 'One entry, one increment - if you already recorded for this entry id in THIS run, skip' (model-memory dedup) and 'Known tolerated overlap: ... double-counts the pair - harmless: ... only the tally inflates'"
+      ],
+      "wrong": "You cannot answer 'which transactions taught this rule?' - the evidence trail that justifies a proposal (and eventually a confirmed auto-posting authority) is an unattributable integer. Replay, dedup, and audit of the learning loop are impossible; inflated tallies can cross the >=3 proposal threshold from repeated wakes on the same entry.",
+      "target": "Per-sighting evidence events carrying entry/document provenance, with idempotency enforced by the DB (unique on source event), aggregates derived.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-10",
+      "workstream_item": "A4",
+      "title": "Agent-run traceability gap: wake runs and tool calls leave no durable record; interactive transcripts persist only user text + final assistant prose; dropped wakes and active-run state vanish",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/runtime/openai/runtime.ts:80-99,130-137 - RunRecord (policy, input, pending clarify) is an in-memory Map; 444-468 - drainWake deletes the record at settle; wake runs never carry a session (95-97)",
+        "agent/src/runtime/openai/runtime.ts:285-292 + agent/src/main.ts:159-179 - only the final assistant prose is persisted (best-effort persistAssistant); tool calls, intermediate reads, and clarify Q/A are not stored anywhere",
+        "agent/src/http/server.ts:217-230 - wake dispatch/drop visibility is console.info/202 responses only; no DB row records a dispatched, rate-limited, or failed wake",
+        "Contrast: the DB side IS traceable (journal_entry_history/audit tables with before/after) - the gap is the agent plane"
+      ],
+      "wrong": "An agent-led decision is traceable only through its terminal DB writes. Why a wake did or did not produce a notification, what a run read before drafting, which wakes were dropped, and any run interrupted by restart are all unreconstructible.",
+      "target": "DB-backed tasks/runs/tool-call/interruption records (the durable-runtime requirement) so every recommendation and trigger outcome is auditable.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-11",
+      "workstream_item": "A4",
+      "title": "Actor attribution is weak on the ops-engine fns and the 'agent' label is caller-assertable everywhere, which also silences the human-verb learn-wakes",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:385 (record_year_end_close), 845 (record_opening_balances), 171 (record_export), 1288 (acknowledge_auto_draft_sweep, blank -> 'agent') - the ops engines accept free-text p_actor with only a non-empty check and never call app.audit_actor (grep-verified: no audit_actor call in 25-fns-ops.sql)",
+        "db/v2/00-foundation.sql:212-229 - app.audit_actor lets ANY caller stamp the literal 'agent' (constrained only for other labels); its own header (205-211) records the 'a human labels their own firm's row agent' residual as accepted-with-visibility. It IS applied across the journal-review, KB, document/recon-triage, and profile fns (grep: 20-fns-journal, 21-fns-kb, 22-fns-documents-recon, 24-fns-onboard) - but not the ops engines above",
+        "db/v2/25-fns-ops.sql:1526-1548 - trg_pn_doc_triage/trg_pn_workbench/trg_pn_bank_match all fence on actor is distinct from 'agent' - a spoofed 'agent' label suppresses the wake/learn event"
+      ],
+      "wrong": "Audit rows on the close/opening/export/sweep engines record whatever string the caller supplied, and any caller can label a write 'agent' - simultaneously corrupting attribution and switching off the event fences that A2's taxonomy depends on (a recorded, accepted residual - but governance requires attribution the caller cannot choose).",
+      "target": "Layer/DB-derived actor identity on every mutation (JWT-derived, never caller-supplied), with the agent principal a real distinguishable principal, not a string.",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "A-12",
+      "workstream_item": "A4",
+      "title": "firm_activity_feed unions only 6 audit sources - COA changes, firm-profile edits, year-end closes, sweep sign-offs, and memory notes are invisible in the firm's one audit surface",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:1115-1160 - the feed CTE unions exactly journal_entry_history, client_kb_audit, client_profile_audit, document_audit, export_receipts, bank_match_audit",
+        "coa_audit (db/v2/13-tables-client.sql:147-160), firm_profile_audit (00-foundation.sql:456-465), client_fy_close (14-tables-ops.sql:197+), auto_draft_sweep_log, client_memory_notes all exist but have no feed source (verified against the union list)"
+      ],
+      "wrong": "'Every action visible in one feed' is only 6 of 11 audit families; a COA reclassification or a year-end close - both accounting-material - never appear. The raw tables are RLS-readable, but the governance surface humans actually use is partial.",
+      "target": "A complete, uniformly-cursored event/audit feed generated from the single domain-event log rather than hand-unioned sidecars.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-13",
+      "workstream_item": "A2",
+      "title": "new_document / new_bank_line / je_needs_human triggers have no actor fence: the agent's own ingest and coding fire proactive wakes about its own in-flight work",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:1464-1472,1494-1502 - trg_pn_je/trg_pn_je_upd/trg_pn_doc/trg_pn_bsl WHEN clauses gate on status only (contrast the Track-2c human-verb triggers 1526-1548 which fence actor is distinct from 'agent')",
+        "agent/src/main.ts:184 + agent/src/http/wakeGate.ts:124 - every wake window consumes the 6/firm/min token budget at submit, before the runtime decides anything; new_document/new_bank_line wakes are real model runs (je_needs_human is handled deterministically, runtime.ts:383-442, but still consumes the budget)",
+        "belcort/review-queue/SKILL.md:419 - the mitigation is prose: read back, 'stale condition -> finish silently'"
+      ],
+      "wrong": "An interactive ingest-and-code turn generates wake work about itself (doc lands ingested -> wake; entry parks needs_review -> wake), consuming the small per-firm wake budget (6/min) that real out-of-band changes need, and relying on model-side read-backs to stay silent. The taxonomy conflates 'something changed' with 'something the agent did not already know changed'.",
+      "target": "Origin-aware events (actor/source on every event) so self-caused changes never re-trigger the agent, and the rate budget serves genuine external changes.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-14",
+      "workstream_item": "A1",
+      "title": "Doctrine/docs contradict the code on wake authority, durability, and the OCR engine - the 'living SoT' premise is already drifted",
+      "severity": "low",
+      "evidence": [
+        "docs/architecture/backend.md:92 - 'Every wake is speak-never-act' vs agent/src/tools/buildTools.ts:19-26 (the documents lane may call every write fn except the 5 onboarding/bootstrap ones) and agent/src/runtime/inject.ts:38-39 ('[documents] Act on the human's verb')",
+        "docs/architecture/backend.md:87,92 - 'durable out-of-band wakes' vs the at-most-once in-memory gate (A-2)",
+        "belcort/AGENTS.md:50 (par. 6) - 'Google Document AI' vs Azure Document Intelligence in code (agent/src/main.ts:124-131, agent/src/ocr/azureDocai.ts); backend.md:89 says Azure; even buildTools.ts:310 still says Google in a comment - the loaded doctrine itself is wrong",
+        "belcort/doc-ingest/SKILL.md:197-206 - the OCR-cache canonical schema vs the 'flatter' live-produced shape, with consumers told to coalesce both forever (review-queue/SKILL.md:429-450)",
+        "agent/src/doctrine/loader.ts:130-148 - only .md files load; the GL-Account-TaxNIndustriesCode.pdf shipped in 3 skill dirs (glob-verified: coa-coding, review-queue, rule-edit) can never be served to the model"
+      ],
+      "wrong": "The doctrine the model executes and the architecture docs the rebuild will mine disagree with the code on load-bearing facts (what a wake may do, whether events are durable, which OCR engine reads documents). Any port that trusts the prose inherits the errors.",
+      "target": "Doc-vs-code reconciliation as a gate before salvage; single-sourced generated contracts where possible.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-15",
+      "workstream_item": "A1",
+      "title": "The document/OCR 'index + retrieval layer' is one jsonb column with two competing schemas and prose-SQL retrieval",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/10-tables-core.sql:64-104 - documents.ocr_cache jsonb is the entire OCR index; no FTS index (only firm/client/status/kind/financial_date btrees), no extracted-field columns beyond invoice_date/financial_date, no vector/semantic store anywhere in db/v2 (grep-verified)",
+        "belcort/review-queue/SKILL.md:429-450 - duplicate detection and field reads are model-written SQL over coalesce(ocr_cache->'fields', ocr_cache->'extracted_fields') (the acknowledged dual-shape drift)",
+        "belcort/_shared/ocr-cache-schema.md is the referenced contract while doc-ingest/SKILL.md:197-206 admits the producer writes a different, flatter shape ('Either is accepted while the producer catches up')"
+      ],
+      "wrong": "Retrieval over documents (dedup, cross-doc lookups, 'find the prior invoice') is ad-hoc jsonb probing whose key paths differ by producer era. There is no indexed, versioned document/OCR layer for either the agent or future retrieval to build on.",
+      "target": "A typed, indexed extraction store (per-field columns or validated jsonb + generated columns/FTS) with one enforced schema version.",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "A-16",
+      "workstream_item": "A3",
+      "title": "Gate 0 (client identity >=0.95) is model-self-reported: client_match_conf is persisted verbatim and never enforced by any fn",
+      "severity": "high",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:223-231 - ingest_document persists (p->>'client_match_conf')::numeric verbatim; grep-verified client_match_conf appears ONLY in the table DDL and this insert - no floor, no derivation, no gate anywhere in db/v2",
+        "db/v2/22-fns-documents-recon.sql:30-68 - assign_document checks firm ownership and unassigned-status only; no confidence input or gate",
+        "docs/reference/confidence-ladder.md:17-21,32-42 - the ladder calls this input 'deterministic, persisted' and gate 0 the firm-killer axis",
+        "belcort/doc-ingest/SKILL.md:70-99 - client inference is model judgment over table browses (bank accounts, email domains, aliases, legal name, SSM, TIN); the 0.95 threshold lives in prose only"
+      ],
+      "wrong": "The single control the product itself calls firm-killing (never guess the client) has no structural teeth within a firm: the confidence number is an LLM's self-assessment, recorded but never validated or gated on by the DB. Cross-FIRM is sealed by RLS; cross-CLIENT within the firm rests on prompts plus the interactive clarify flow.",
+      "target": "DB-owned identity gating: assignment/drafting fns require a recorded match basis and refuse/park below the floor; identity evidence (which signals matched) persisted for audit.",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "Human-led and agent-led workflows genuinely converge on one shared state plane: the dashboard calls the same audited SECURITY DEFINER fns as the agent's curated tools, so books/KB/document state (as data) is never forked between planes",
+      "evidence": [
+        "dashboard/lib/workbenchActions.ts (approve_entry/reject_entry/edit_entry via rpcBooks, actor from token)",
+        "dashboard/lib/activity.ts:83-92 (reverse_entry), dashboard/lib/documentActions.ts:137-142 (assign/reassign_document), dashboard/lib/kbActions.ts:28 (promote_proposal), dashboard/components/records/CoaBrowser.tsx:35-40,80-86 (add_coa_account/set_coa_account_active/set_coa_account_type)",
+        "agent/src/tools/registry/*.ts - identical fn names; actor injected by the layer (buildTools.ts:82-89)"
+      ]
+    },
+    {
+      "claim": "Per-mutation auditability at the DB is real: append-only history/audit sidecars with before/after jsonb snapshots and reversal lineage exist for journals, KB, documents, profiles, and matches",
+      "evidence": [
+        "db/v2/10-tables-core.sql:200-214 (journal_entry_history with before/after, action set incl. reversed/reversal), db/v2/12-tables-kb.sql:96-108 (client_kb_audit before/after jsonb)",
+        "db/v2/22-fns-documents-recon.sql:820-825 (dual 'reversed'/'reversal' rows), db/v2/25-fns-ops.sql:1162-1183 (reverse lineage computed in the feed)"
+      ]
+    },
+    {
+      "claim": "Where learning IS wired transactionally it is well-built: reject/edit-away decays the cited rule in the same transaction (auto-retire at 3 overrides, evidence preserved), evidence >=3 auto-files an idempotent human-gated proposal, and alias canonicalization happens inside record_kb_evidence so variants cannot fork tallies",
+      "evidence": [
+        "db/v2/21-fns-kb.sql:130-161 (app.decay_rule_on_override, sole decay writer, not grantable), 21-fns-kb.sql:187-207 (canonical resolve + confirmed/retired suppress + partial-unique idempotent proposal via uq_kb_proposal_open, 12-tables-kb.sql:88-89)",
+        "db/v2/20-fns-journal.sql:259,345 (reject_entry and edit_entry call app.decay_rule_on_override in-transaction)"
+      ]
+    },
+    {
+      "claim": "Wake envelopes are minimal id+verb payloads with the DB as truth, injection-fenced at every interpolation, and the doctrine mandates provenance read-back before any wake action",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:1435-1450 ('Deliberately NOT the row's before/after payloads - the envelope stays minimal ids+verb')",
+        "agent/src/runtime/inject.ts:1-96 (control-char strip, guillemet fence, 4000-char cap), agent/src/http/wakes.ts:119-155 (strict envelope validation, allowlisted extras only)",
+        "belcort/review-queue/SKILL.md:390-396 and belcort/kb-evolve/SKILL.md:146-153,240-246 (mandatory read-back / zero-row -> stop)"
+      ]
+    },
+    {
+      "claim": "Self-wake loops are structurally prevented on the learn lanes and the kb chain is bounded one hop",
+      "evidence": [
+        "db/v2/25-fns-ops.sql:1526-1548 (actor is distinct from 'agent' fences on the three human-verb sources; workbench additionally via_fn-gated to the three review fns; unmatch fenced out via action='matched')",
+        "db/v2/25-fns-ops.sql:1474-1482 (kb_proposal_open deliberately creator-agnostic but idempotent + rate-bounded + one hop deep); agent/src/tools/buildTools.ts:19-26 (workbench-kb writes limited to record_kb_evidence/record_recon_hint/record_proactive_notification)"
+      ]
+    },
+    {
+      "claim": "The most common wake (je_needs_human) is handled deterministically without a model run - typed read + audited notification under the minted wake JWT (modulo the A-6 batch bug)",
+      "evidence": [
+        "agent/src/runtime/openai/runtime.ts:383-442 (recordDeterministicProactive: journal_entry_detail read-back + record_proactive_notification, no model loop)"
+      ]
+    },
+    {
+      "claim": "Hard accounting-state invariants are DB-enforced independent of the agent: deferred Sigma-dr=Sigma-cr balance at commit, closed-period posting lock, auto_draft<->risk-label binding, confirmed-rule-only citation",
+      "evidence": [
+        "db/v2/15-triggers.sql:33-75 (SECURITY DEFINER deferred constraint triggers on entries AND lines)",
+        "db/v2/25-fns-ops.sql:297-322 (closed-period guard, close-machinery exempt via via_fn)",
+        "db/v2/20-fns-journal.sql:137-143 (label binding), 95-99 (confirmed-rule citation)"
+      ]
+    },
+    {
+      "claim": "The agentless books-changed SSE nudge keeps human dashboards refetch-fresh without agent cost, correctly separated from agent wakes at the front door",
+      "evidence": [
+        "agent/src/http/wakes.ts:50-64,130-134 (BOOKS_TABLES allowlist; books_changed never becomes a wake)",
+        "agent/src/http/server.ts:187-196 (books -> coalescer nudge / notifications -> hub 'proactive'; no agent run)"
+      ]
+    },
+    {
+      "claim": "Proactive notifications are durable, dedup-keyed rows (not chat ephemera), and wake output is forced through them because wake runs have no chat reader",
+      "evidence": [
+        "agent/src/runtime/inject.ts:27-42 (no-chat framing in every wake note)",
+        "agent/src/runtime/openai/runtime.ts:417-435 (dedup_key + source_ref)",
+        "belcort/review-queue/SKILL.md:477-483 (pre-write open-dedup check)"
+      ]
+    }
+  ],
+  "unverified": [
+    "The audit brief (undefined/audit-brief.md) and three of the four evidence maps (agent-map.md, doctrine-map.md, dashboard-map.md) do not exist on disk - only undefined/maps/db-map.md exists (re-verified 2026-07-17). Verification proceeded on the task-text contract: repo treated as read-only, writes confined to undefined/, severity rubric critical=live correctness/security exposure, high=architectural gap vs the workstream target, medium=bounded defect, low=hygiene/drift. Every citation above was re-opened against the actual files.",
+    "Live deployment state: whether SUPABASE_JWT_SECRET (wake credential), per-firm belcort_webhook_config rows, and Azure OCR env are actually configured in production - i.e. whether ANY wake fires live today - is not verifiable from the frozen repo (agent/src/main.ts:133-138 makes wakes honestly disabled without the secret).",
+    "Model compliance with doctrine (context loading in coa-coding Step 1, Step-6 evidence recording, wake procedures, the chat-mediated self-teach compensation) - no eval harness exists in the repo (docs/architecture/backend.md:104 defers the accuracy eval), so all prose-governed behavior is unverifiable statically.",
+    "OpenAI Agents SDK internals (RunState preserving full context across clarify suspend/resume; interruption field shapes) - asserted in code comments; agent/README.md:243-245 itself flags 'Verify before real books: the exact SDK run_item/interruption field names' - not executable in this audit.",
+    "Whether any external scheduler (e.g. Supabase cron) exists live for periodic sweeps/digests - no evidence in the repo; the runtime itself has no scheduler, so the static conclusion is 'none', but a live-project cron cannot be ruled out from code alone."
+  ],
+  "decision_brief": "Distance from the Workstream-A target (adversarially re-verified; all 16 findings stand, 14 as-written and 2 with evidence-precision fixes): the DB layer is a genuinely strong transactional substrate - one shared state plane for human and agent verbs, per-mutation append-only audits with before/after snapshots, and a handful of well-built in-transaction couplings (rule decay, proposal thresholds, balance/closed-period locks). But there is no event-driven accounting state layer in the target sense. Domain events exist only as fire-and-forget webhooks with at least five loss points and no outbox/log/replay (A-2); the trigger taxonomy is a static 8-condition relay port with zero risk/materiality/period keying and entire missing families - reversals, COA changes, tax-status changes, closes, KB governance (A-4). Clara has no context pack: her world-state is static doctrine plus 40 turns of replayed prose, with all grounding left to model-initiated reads and no stale-context detection anywhere (A-1, A-7). The governance story inverts the product's own claims at the two highest-stakes points: the auto-post lane's six gates and the 0.95 client-identity gate are both model-self-reported values the DB stores but does not enforce (A-5, A-16), and the KB learning loop is LLM-mediated end-to-end, unattributable to source transactions, and silent for chat-mediated human decisions (A-3, A-9). Traceability is solid for state, absent for agent behavior (A-10) and partial at the feed surface (A-12). Verdict for the rebuild: salvage the audited-fn/audit-sidecar substrate and the wake fencing/injection-defence patterns as reference designs; the event backbone (transactional outbox + durable consumers), context-pack builder, DB-enforced ladder gates, provenance-carrying learning events, and versioned/invalidation-aware state must be new architecture - none of it exists to port."
+}

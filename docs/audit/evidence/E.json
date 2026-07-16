@@ -1,0 +1,316 @@
+{
+  "workstream": "E - Document pipeline and storage (upload flow, persist-after-OCR, storage doctrine and document registry)",
+  "findings": [
+    {
+      "id": "E-1",
+      "workstream_item": "E1/E2 - upload flow end-to-end trace",
+      "title": "Documents-tab uploads never execute: the upload chat turn is POSTed but nothing ever attaches its SSE stream, and interactive runs only run inside streamRun - files are silently never ingested while the UI toasts success",
+      "severity": "critical",
+      "evidence": [
+        "dashboard/components/documents/DocumentsTable.tsx:238-257 - startUpload POSTs the turn via deps.send/defaultSend, ignores the returned run_id, clears the pending row and toasts 'Clara is filing them'",
+        "dashboard/components/documents/DocumentsTable.tsx:471-482 - defaultSend only POSTs ${NEXT_PUBLIC_AGENT_URL}/firms/:id/chat and parses JSON; no GET /chat/events follows",
+        "dashboard/components/workbench/WorkspaceIslands.tsx:142-154 - the production mount passes NO deps, so defaultSend (the bare POST) is the live path",
+        "agent/src/http/server.ts:340-371 - POST /firms/:id/chat persists the user turn (appendUser :357) and calls runtime.startRun, returning { run_id } only",
+        "agent/src/runtime/openai/runtime.ts:175-206 - startRun merely registers an in-memory RunRecord; the model loop (run(agent, ...) at :233/:254) lives ONLY inside streamRun (:208-279), consumed solely by GET /firms/:id/chat/events (server.ts:433-449), GET /bootstrap/chat/events (server.ts:259-274), and the wake drain (drainWake :445-468); pollRun (:324-336) reads state without executing",
+        "Repo-wide trace of /chat/events consumers: dashboard/lib/chat/makeHermesRunner.ts:75 streams only the run its own hermesChatTransport.sendMessages just started (hermesChatTransport.ts:232-244; reconnectToStream returns null, :263-265), and dashboard/lib/useOnboardingRun.ts streams only runs it started (:210, :231); the chat_threads.active_run_id dialect is retired dead code (dashboard/lib/chatThreads.ts is imported only by its own test) - nothing attaches a run by session pointer",
+        "agent/src/http/server.ts:410-431 - the reset guard explicitly ages out 'a never-streamed running run' ('the client died between POST /chat and the SSE attach'), confirming no server-side execution fallback exists",
+        "agent/src/runtime/openai/runtime.ts:40,484-495 - the never-streamed run (not streaming, no pending clarify) is evicted after DEFAULT_RUNNING_RUN_TTL_MS = 30 min, taking the base64 attachments with it"
+      ],
+      "wrong": "The documents workbench drop-zone/picker - the primary bulk-ingest surface - produces a run that never executes: no upload_document, no OCR, no ingest_document, no documents row, ever. The user sees a success toast and an SSE-refreshing list that never shows the file; the transcript shows the turn (appendUser committed it) so Clara appears to have ignored it. The attachments are unrecoverable after run eviction; re-uploading via the same tab hits the same bug. Only the Clara rail composer path (which streams the run it starts) actually works.",
+      "target": "dashboard/components/documents/DocumentsTable.tsx + agent/src/http/server.ts",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-2",
+      "workstream_item": "E2 - persist-after-OCR guarantee",
+      "title": "Persist-after-OCR is doctrine-mandated, not structural: attachments are process-local in-memory state (evicted on TTL/restart/OOM), persistence happens only if the LLM calls upload_document->ingest_document, and any run failure before that point loses the whole batch",
+      "severity": "high",
+      "evidence": [
+        "belcort/doc-ingest/SKILL.md:56-60 - the ordered flow (upload bytes FIRST -> dedup -> OCR -> ingest_document) and :83-90/:102-113 - unassignable docs must be ingested with client_id=NULL/status=unassigned_pending BEFORE the client picker; this is a prompt-level mandate on the model, with zero code enforcement",
+        "agent/src/runtime/openai/runtime.ts:80-99,136 - runs (incl. the b64 attachments in context.documents and parked clarify resolvers) live in a plain Map on one process; :39-42 TTLs (running 30min, settled 10min) and deploy/fly.toml:8-15 (single always-on machine, 'in-memory run state ... split-brain otherwise') mean restart/deploy/crash loses every in-flight batch and pending clarify",
+        "dashboard/lib/attachments.ts:141-148 + agent/src/http/server.ts:355-357 - chat_messages persists ONLY the text turn ('chat_messages persists no attachment metadata') - the bytes exist nowhere durable until the model calls upload_document",
+        "agent/src/tools/buildTools.ts:270-276 and :329-337 - upload_document/extract_document read documents only from the CURRENT run context by index; a later run seeing 'Uploaded 2 documents...' in history gets UploadRejected ('not an attachment of this turn') - lost batches cannot be recovered from the transcript",
+        "agent/src/runtime/openai/runtime.ts:39 - MAX_TURNS=40 hard-fails a long mixed batch mid-run ('Max turns exceeded'); each ingest_document commits independently, so processed docs persist but the rest of the batch is stranded with no retry/resume",
+        "db/v2/22-fns-documents-recon.sql:186-236 - when the flow IS followed, the guarantee holds: ingest_document accepts client_id NULL (firm from JWT), stores sha256, storage_path, ocr_cache, source_filename, and is idempotent on (firm, sha256) with OCR fill-forward, never silently reassigning"
+      ],
+      "wrong": "The answer to 'does EVERY document persist immediately after OCR even when unassignable?' is NO as a guarantee: the DB/storage substrate supports it perfectly (unassigned holding area, idempotent ingest, write-once bytes), but the only executor of the persist chain is the model following SKILL.md inside a volatile in-memory run. Mid-conversation client-match failure is survivable only if the model already ran upload_document+ingest_document (the doctrine's ordered flow); a run abort, clarify abandonment, JWT expiry, process restart, Stop, or E-1's never-executed run loses bytes+OCR entirely and requires re-upload.",
+      "target": "agent/src/runtime/openai/runtime.ts + belcort/doc-ingest/SKILL.md",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-3",
+      "workstream_item": "E3 - storage doctrine consistency (the Storage move)",
+      "title": "The agent has no storage read/copy/move/delete capability, so the doctrine-mandated 'Storage move' after assign/reassign is structurally impossible in the wake lane - assigned documents' bytes stay under _unassigned/ indefinitely, and the doctrine's 'verify the object serves / sign-HEAD it' instructions name capabilities that do not exist",
+      "severity": "high",
+      "evidence": [
+        "agent/src/tools/* (exhaustive: full tool-name inventory + a grep for download/createSignedUrl/.remove/.move/.copy/.list/storage.from across agent/src) - the runtime's ONLY storage capability is the storeBytes upload closure (main.ts:113-122, upsert:false); there is no download, copy, move, delete, sign, or HEAD tool anywhere in the tool surface",
+        "db/v2/storage-setup.sql:27-38,43-59 - NO UPDATE and NO DELETE policies, so no authenticated caller (dashboard included) can relocate an object, only add a second copy; the service-role client bypasses RLS but no move/copy/delete call is wired anywhere in agent/src, so no actor in the system can relocate bytes",
+        "belcort/review-queue/SKILL.md:285-289 - 'THE WAKE CARVE-OUT: a wake run has NO turn attachments and no byte-download tool - the bytes are unobtainable, so the move DEFERS honestly ... file ONE record_proactive_notification flagging the pending Storage move'",
+        "belcort/review-queue/SKILL.md:286-287 and :330-331 - the same skill still instructs 'verify the object still serves at the OLD storage_path' and 'Verify the object EXISTS at storage_path (the runtime can sign/HEAD it)' - no tool can do either; the instruction is unexecutable doctrine drift",
+        "dashboard/components/documents/FirmDocumentsTriage.tsx:102-121 + db/v2/22-fns-documents-recon.sql:26-53 - the dashboard assign path sets client_id/status only ('storage_path deliberately NOT changed here - the agent owns the Storage move'), then relies on the [documents] wake, which cannot move bytes",
+        "agent/src/main.ts:182-184,236 + agent/src/http/server.ts:204,229 - wake ingress is best-effort (6 wake windows/firm-minute, drops on shutdown, at-most-once), so even the deferral notification can silently never happen"
+      ],
+      "wrong": "The canonical taxonomy (firms/{firm}/clients/{slug}/raw/ingested/{year}/{sha}.{ext}) is aspirational for every dashboard-assigned document: bytes permanently remain at firms/{firm}/_unassigned/{sha}.{ext}. Row-level consistency survives ONLY because the carve-out tells the model not to call set_document_storage_path without bytes - a prompt-level guard; a model that follows the older doc-ingest SKILL.md wording ('move the bytes to the assigned key via set_document_storage_path', SKILL.md:109-113) would repoint the DB path at a key with no object and break 'open original' (set_document_storage_path validates grammar, not object existence - 22-fns:332-382).",
+      "target": "agent/src/tools/buildTools.ts + belcort/review-queue/SKILL.md + db/v2/22-fns-documents-recon.sql",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-4",
+      "workstream_item": "E3 - storage key validation at creation",
+      "title": "ingest_document performs no key-grammar validation (only the table CHECK's firm prefix), while the Storage CREED claims all writers reject keys outside the asserted client's slug - a document can be created pointing at another client's folder, a wrong-sha key, or any invented firm-scoped layout",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:223-232 - ingest_document inserts p->>'storage_path' verbatim; the only structural guard is the documents table CHECK (db/v2/10-tables-core.sql:96-98: 'firms/{firm_id}/%' + no '..')",
+        "belcort/AGENTS.md:94 (paragraph 20, Storage CREED) - claims ingest_document/set_document_storage_path/record_export_artifact 'all reject any key outside my own firm + the asserted client's slug' - true only for the latter two",
+        "agent/src/tools/buildTools.ts:210-225 - assertFirmScopedKey (the upload gate) checks only firm prefix + seg[2] in {clients,_unassigned}; no slug ownership, folder whitelist, or sha-suffix check - bytes ARE uploadable under another client's slug",
+        "db/v2/22-fns-documents-recon.sql:352-375 - set_document_storage_path is the ONLY place slug/folder/sha are enforced, and it only runs on a later move"
+      ],
+      "wrong": "At creation time a client-A document can legally carry storage_path under client B's slug (bytes uploadable there via upload_document too), or a path whose sha segment does not match documents.sha256, silently breaking the sha256<->bytes provenance bond and the per-client folder story the CREED promises. Firm isolation holds; within-firm registry/object taxonomy consistency does not.",
+      "target": "db/v2/22-fns-documents-recon.sql (ingest_document)",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-5",
+      "workstream_item": "E2/E3 - unassigned lane completeness",
+      "title": "A reachable 'invisible document' state: ingest_document accepts caller-supplied status, so client_id=NULL + status='ingested' (or 'coded') creates a row that appears in NO UI surface and can never be assigned",
+      "severity": "medium",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:190 - v_status := coalesce(nullif(p->>'status',''),'unassigned_pending') with no cross-check that a NULL client_id forces unassigned_pending",
+        "dashboard/lib/documentActions.ts:92-99 - the unassigned lane reads status=eq.unassigned_pending AND client_id=is.null; :82-89 - client tabs read client_id=eq.N: a NULL-client 'ingested' row matches neither",
+        "db/v2/22-fns-documents-recon.sql:50 - assign_document raises document_not_unassigned for any status other than unassigned_pending, and :87 - reassign_document raises document_not_assigned on a NULL client, so the row is permanently stuck outside every workflow verb"
+      ],
+      "wrong": "One model slip (doctrine says status 'ingested' when a client is assigned - doc-ingest SKILL.md:60 - but nothing enforces the pairing) permanently hides a persisted source document from the triage funnel, every client tab, and all triage verbs; it is findable only via raw query_books/SQL.",
+      "target": "db/v2/22-fns-documents-recon.sql (ingest_document) + dashboard/lib/documentActions.ts",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-6",
+      "workstream_item": "E1/E2 - later referenceability without re-upload",
+      "title": "Stored documents are referenceable but not re-readable: no tool can OCR or read a persisted storage object (extract_document is turn-attachments-only) and ocr_cache is effectively write-once (fill-forward only when NULL) - a thin or failed first OCR leaves the content permanently opaque to Clara without a human re-upload",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/tools/buildTools.ts:329-337 - extract_document resolves document_ref against ctx.documents (this turn's attachments) only; there is no OCR-from-storage or storage-read tool",
+        "db/v2/22-fns-documents-recon.sql:213-218 - ingest_document sets ocr_cache = coalesce(ocr_cache, p->'ocr_cache'): an existing non-null value is never replaced; a repo grep confirms ingest_document is the ONLY writer of ocr_cache in db/v2",
+        "belcort/_shared/ocr-cache-schema.md:14-24 - the live producer already writes a flatter, sometimes preview-only record than the belcort_ocr_cache.v1 envelope ('Produced reality ... verified on firm 21'); doc-ingest/SKILL.md:241 admits preview-only caches are 'incomplete'",
+        "agent/src/main.ts:128-131 - with AZURE_DOCAI_* unset the runtime honestly ingests without OCR; those docs' ocr_cache stays NULL and can only be filled by re-uploading the same bytes in a new turn (the sha-idempotent fill-forward path, 22-fns:205-221)"
+      ],
+      "wrong": "'Uploaded once, referenceable forever' holds for the row and the bytes (durable, signed-URL viewable, assignable later), but NOT for the content: Clara's only future access to a document is whatever one-shot ocr_cache landed at ingest. A wrong/thin cache cannot be corrected (coalesce keeps the old value even on re-ingest with better OCR), and the human 'open original + re-attach' loop is the only repair path.",
+      "target": "agent/src/tools/buildTools.ts (extract_document) + db/v2/22-fns-documents-recon.sql",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-7",
+      "workstream_item": "E1 - hard ceilings (body caps, VM, buffering)",
+      "title": "Capacity ceiling: the 150MB JSON body cap is fully buffered and parsed in memory on a single shared-cpu-1x/1GB Fly machine that also holds all run state - a couple of concurrent max-size uploads can OOM the process and destroy every in-flight run, clarify, and attachment batch",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/http/server.ts:67,69-91 - MAX_BODY_BYTES = 150MB; readJson accumulates all chunks then Buffer.concat().toString() + JSON.parse (chunks, the concatenated string, and the parsed object concurrently resident); agent/test/bodyLimit.test.ts pins 150MB to the 5x20MB attachment cap",
+        "deploy/fly.toml:52-54 - [[vm]] size shared-cpu-1x, memory 1gb; :8-15 - deliberately ONE machine because run state is in-memory (split-brain otherwise)",
+        "agent/src/runtime/openai/runtime.ts:40-41,196-204 - each RunRecord retains the full b64 documents for up to 30 min running / 10 min settled",
+        "agent/src/http/server.ts:343-345 and :493-495 - stale comments still describe a '32MiB body limit', evidence the cap was raised without revisiting the memory budget"
+      ],
+      "wrong": "A by-the-caps-legal workload (two users each sending 5x20MB) transiently needs several hundred MB just for body buffering plus retained run contexts, on a 1GB VM. An OOM kill is a total-loss event for every unpersisted document batch and parked clarify in the process (see E-2).",
+      "target": "agent/src/http/server.ts + deploy/fly.toml",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-8",
+      "workstream_item": "E1 - OCR engine limits and timeouts",
+      "title": "Azure DI adapter: the 429-throttle branch skips the poll deadline check, making the OCR poll loop unbounded under sustained throttling, and interactive runs have no overall deadline to catch it",
+      "severity": "medium",
+      "evidence": [
+        "agent/src/ocr/azureDocai.ts:91-111 - loop order is sleep -> fetch -> `if (res.status === 429) continue;` (:94) -> ... -> deadline check LAST (:109); the 429 path never reaches the deadline check despite the comment 'keep waiting within the deadline' - the loop only times out on the first non-429 poll after the deadline, so 100% sustained 429s pin it forever",
+        "agent/src/ocr/azureDocai.ts:19-20 - POLL_INTERVAL_MS=1500, POLL_TIMEOUT_MS=120000 are the only OCR bounds in the repo; the poll fetch itself carries no AbortSignal/timeout either",
+        "agent/src/runtime/openai/runtime.ts:42,497-507 - wake runs get a 90s drain deadline (DEFAULT_WAKE_DRAIN_TIMEOUT_MS) but interactive streamRun has no per-run or per-tool timeout",
+        "agent/src/runtime/openai/runtime.ts:484-495 - evictRuns skips records with streaming=true, so a stream-attached run hung inside extract_document is NEVER evicted; the run record and its attachment batch leak until process restart (only the scope's reset guard, server.ts:410-431, unwedges the UI after 15 min)",
+        "deploy/RUNTIME.md:43 - the resource is S0 (Standard) tier; no Azure-side file-size/page/TPS limits are recorded anywhere in the repo"
+      ],
+      "wrong": "A throttled Azure resource (S0 TPS pressure from a multi-doc batch polling every 1.5s per doc) can pin an extract_document call indefinitely; the user's stream hangs with no timeout. For a stream-attached run the record is never evicted (streaming=true exempts it from the TTL sweep), so the hang and its held batch persist until a deploy/restart - which then loses the batch per E-2; the user can only reset the scope after the 15-minute guard.",
+      "target": "agent/src/ocr/azureDocai.ts",
+      "verdict": "ADJUSTED"
+    },
+    {
+      "id": "E-9",
+      "workstream_item": "E1 - client matching",
+      "title": "Client matching is entirely model-driven and client_match_conf is a model-fabricated number rendered as 'Evidence' in the triage UI; the <0.95 never-guess gate is prompt-only, and on the firm-scope thread the write-gate allows ingest to any within-firm client",
+      "severity": "medium",
+      "evidence": [
+        "belcort/doc-ingest/SKILL.md:70-99 (Step 2) - inference = the model querying client_bank_accounts/client_email_domains/client_aliases via query_books; no deterministic matcher exists in agent/src or db/v2",
+        "db/v2/22-fns-documents-recon.sql:229-230 - ingest_document stores (p->>'client_match_conf')::numeric verbatim; dashboard/components/documents/FirmDocumentsTriage.tsx:289,318-320 renders it as the 'Evidence' percent (Clara's stored figure rendered verbatim)",
+        "agent/src/tools/buildTools.ts:71-77 + agent/src/tools/registry/documents.ts:80 - ingest_document is scopeRule 'firm_or_client': on a client thread the target must equal the scope, but on the FIRM thread (scope null) ANY client_id passes with only the DB firm check - a misidentification files to the wrong client within the firm",
+        "belcort/AGENTS.md:35-43 (paragraph 3) - the 0.95 protocol is doctrine text, enforced nowhere in code or SQL"
+      ],
+      "wrong": "The firm-killing-mistake defence for document filing rests on prompt compliance plus a human reading a model-invented confidence number labelled 'Evidence'. Within-firm cross-client filing via the firm thread is one hallucinated match away; only the audited reassign verb repairs it after the fact.",
+      "target": "belcort/doc-ingest/SKILL.md + agent/src/tools/buildTools.ts (enforceScope)",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-10",
+      "workstream_item": "E1 - batch limits, partial failure, retries",
+      "title": "Batch mechanics: 5 files x 20MB per turn, whole-batch validation rejection (first failure wins), no upload retry anywhere (the Documents-tab 'retry' affordance is actually Dismiss-only), and MAX_TURNS=40 can abort a large mixed batch mid-flight leaving partial ingest with no resume",
+      "severity": "low",
+      "evidence": [
+        "dashboard/lib/attachments.ts:7-11,50-63 - MAX_DOCS_PER_TURN=5, MAX_DOC_BYTES=20MB, validateFiles returns first failure for the whole set (nothing is dropped or partially sent); ClaraComposer.tsx:125-143 applies the caps cumulatively across pick/drop/paste batches",
+        "agent/src/http/documents.ts:7-8,45-63 - the service mirror (MAX_DOCS=5, 20MB decoded, MIME allowlist) rejects the whole turn with DocumentRejected -> HTTP 400",
+        "dashboard/components/documents/DocumentsTable.tsx:253-256,270,364-373 - a POST failure marks ALL transient rows failed; retryUpload(key) only removes the row (button copy 'Dismiss'); docStatus.ts:36-38 still documents the state as '(retry)'",
+        "agent/src/runtime/openai/runtime.ts:32-39 - MAX_TURNS=40; a 5-doc mixed batch (upload+extract+ingest+assign+bank-lines+coding per doc, plus read_skill/query_books dedup checks) can exhaust it; the run fails, committed ingests survive, the rest need re-upload (idempotent ingest makes the re-send safe)"
+      ],
+      "wrong": "Bulk month-end intake (dozens of documents) must be hand-chunked into 5-file turns with no queueing, no automatic retry, and a hard model-loop budget that can strand the tail of a batch; the only safety net is sha-idempotency on re-upload.",
+      "target": "dashboard/lib/attachments.ts + agent/src/runtime/openai/runtime.ts",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-11",
+      "workstream_item": "E1 - upload ingress edge paths",
+      "title": "Edge-path gaps: the pre-firm bootstrap chat and bootstrap clarify routes silently drop attached documents (no documents field is read), and the rail composer refuses attachments on a clarify answer only by silently holding them",
+      "severity": "low",
+      "evidence": [
+        "agent/src/http/server.ts:247-257 - POST /bootstrap/chat reads only body.message; startRun is called without documents; :276-285 - POST /bootstrap/chat/clarify likewise never calls validateDocuments (the firm-scoped clarify route does, :453-464)",
+        "dashboard/lib/useOnboardingRun.ts:24-26,50-51,238-264 - answerWithDocs POSTs a documents array to ${base}/clarify (and sendWithDocs to ${base}), where base is /bootstrap/chat in bootstrap mode - those bytes are silently discarded by the server",
+        "dashboard/components/clara/ClaraComposer.tsx:150-157,177 - in answer-mode held files are deliberately kept, not sent ('attachments only ride a new turn') and canAttach is false, a quiet UX trap flagged only in a code comment"
+      ],
+      "wrong": "A user who attaches a file during the firm-bootstrap interview (e.g. an SSM form) gets no error and no ingestion; the model is told nothing was attached. Low blast radius (pre-firm flows rarely need files) but a silent-drop contract violation.",
+      "target": "agent/src/http/server.ts (bootstrap routes)",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-12",
+      "workstream_item": "E3 - wake ingress durability for the document lifecycle",
+      "title": "The [documents] wake chain (human assign/reassign -> trg_pn_doc_triage -> webhook -> wakeGate -> model run) is best-effort and lossy at four points, so the post-triage reconcile/flag work can silently never happen",
+      "severity": "low",
+      "evidence": [
+        "agent/src/http/server.ts:204 - wakesEnabled=false answers dispatched:false without queueing; :229 - rate_limited wakes are dropped with a 202",
+        "agent/src/main.ts:182-184 - wakeGate: 15s window, max 6 wake windows/firm-minute (wakeGate.ts:21-25 - maxBatch default 30 records/batch); main.ts:236 - shutdown clearPending() drops unfired hints (at-most-once by design, wakeGate.ts:51-53)",
+        "agent/src/http/wakes.ts:15-17,30-40 - only document_triaged maps to the may-act documents lane; new_document (an unassigned arrival) is deliberately speak-only proactive",
+        "agent/src/runtime/openai/runtime.ts:338-378,445-468 - a wake run is a fire-and-forget throwaway with a 90s drain deadline (:42); its failure is only a log line"
+      ],
+      "wrong": "Assign in the UI succeeds atomically (row + audit + trigger - db/v2/25-fns-ops.sql:1526-1529, human-actor fenced), but the second half - Clara verifying the assignment, flagging the pending storage move, or acting on the code verb - evaporates whenever the webhook, rate gate, credential, or 90s deadline drops it. The DB row stays consistent; the promised agent follow-through is best-effort with no dead-letter surface.",
+      "target": "agent/src/http/wakes.ts + agent/src/main.ts",
+      "verdict": "CONFIRMED"
+    },
+    {
+      "id": "E-13",
+      "workstream_item": "E2 - dedup edge",
+      "title": "unique(firm_id, sha256) makes byte-identical documents un-representable for two different clients in one firm; ingest returns the other client's existing row as 'idempotent'",
+      "severity": "low",
+      "evidence": [
+        "db/v2/10-tables-core.sql:98 - unique (firm_id, sha256)",
+        "db/v2/22-fns-documents-recon.sql:205-221 - the idempotent path returns the existing row (with ITS client_id) and never reassigns; belcort/doc-ingest/SKILL.md:58,66 treats any same-sha row as a true duplicate to skip"
+      ],
+      "wrong": "A genuinely shared source file (one supplier statement covering two sibling clients, a shared rental invoice) cannot be filed to both clients; the second ingest silently resolves to the first client's document. Rare, but the model is doctrine-bound to call it a duplicate rather than surface the cross-client tension.",
+      "target": "db/v2/10-tables-core.sql (documents unique constraint)",
+      "verdict": "CONFIRMED"
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "Upload ingress caps are real, mirrored at three layers, and pinned by tests: 5 documents/turn, 20MB decoded each, MIME allowlist (PDF, PNG/JPEG/JPG/WebP/TIFF/HEIC, XML), 32,768-char message cap, 150MB body ceiling sized to fit the attachment cap as base64",
+      "evidence": [
+        "dashboard/lib/attachments.ts:7-11,20-36 (picker mirror + .xml extension fallback normalized to application/xml at the wire, :95-100)",
+        "agent/src/http/documents.ts:7-21,45-63 (service gate)",
+        "agent/src/http/server.ts:67 (MAX_BODY_BYTES=150MB) + agent/test/bodyLimit.test.ts (pins body cap to MAX_DOCS x MAX_DECODED_BYTES x 4/3 with headroom)",
+        "server.ts:345 + attachments.ts:9-11 (32,768-char message cap enforced both sides)"
+      ]
+    },
+    {
+      "claim": "All three attach paths exist in the rail composer - paperclip picker, drag-drop, paste - through one cumulative-cap pipeline; the Documents tab adds a drop-zone + picker with an accept filter",
+      "evidence": [
+        "dashboard/components/clara/ClaraComposer.tsx:125-143 (addFiles cumulative validation), :171-184 (onPaste/onDrop), fileInputRef picker (reset at :159)",
+        "dashboard/components/documents/DocumentsTable.tsx:259-269,295-340 (picker accept=ALLOWED_TYPES+.xml, drop-zone, bookkeeper+ gating)"
+      ]
+    },
+    {
+      "claim": "The storage substrate is sound: one private firm-docs bucket; RLS SELECT/INSERT gated on the firms/{current_firm_id}/ prefix; NO UPDATE policy (write-once, protecting the sha256<->bytes bond); NO DELETE policy (reverse-not-delete + 7-yr LHDN retention); the service-role client is contained to a single upload closure guarded by assertFirmScopedKey",
+      "evidence": [
+        "db/v2/storage-setup.sql:15-59",
+        "agent/src/main.ts:108-122 (storeBytes closure, upsert:false)",
+        "agent/src/tools/buildTools.ts:210-225 (firm-prefix + taxonomy-root guard), :292-304 (already-exists treated as durable write-once success)",
+        "db/v2/10-tables-core.sql:88-98 (retain_until 7yr, legal_hold, firm-scoped path CHECK)"
+      ]
+    },
+    {
+      "claim": "The documents registry supports the unassigned lifecycle structurally: client_id nullable (holding area), firm_id NOT NULL, unique(firm_id,sha256) dedupe, status lifecycle unassigned_pending->ingested->coded, and ingest_document is idempotent with OCR fill-forward and an explicit never-silently-reassign rule",
+      "evidence": [
+        "db/v2/10-tables-core.sql:64-107",
+        "db/v2/22-fns-documents-recon.sql:186-236",
+        "db/v2/tests/documents_ingest_idempotency_test.sql (exists in the rig)",
+        "db/v2/90-isolation-tests.sql:160-166 (cross-firm BLC02 asserted on ingest/assign/reassign/sample/request-coding/set_document_storage_path)"
+      ]
+    },
+    {
+      "claim": "An 'Unassigned' lane exists in the UI: the firm-level Documents page is a triage funnel (status=unassigned_pending, client_id IS NULL, oldest-first) with per-row assign, Assign-all (loop of audited singles with named partial failures), an onboard escape hatch, read-only viewer mode, model-confidence rendered as evidence, and SSE-driven silent refresh",
+      "evidence": [
+        "dashboard/components/documents/FirmDocumentsTriage.tsx:99-153,285-357",
+        "dashboard/lib/documentActions.ts:92-99 (readUnassigned, uploaded_at.asc)",
+        "dashboard/app/(dash)/firms/[slug]/documents/page.tsx:13,38 (route exists and mounts FirmDocumentsTriage)"
+      ]
+    },
+    {
+      "claim": "Human triage verbs are DB-audited and atomic with the agent notification: assign/reassign/mark-sample/request-coding are SECURITY DEFINER fns with bookkeeper+ floor, actor constrained to verified identity, document_audit rows, and the document_triaged wake fires from the same transaction (no dispatch flag / retry state)",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:30-174",
+        "dashboard/lib/documentActions.ts:127-149",
+        "db/v2/25-fns-ops.sql:1526-1529 (trg_pn_doc_triage AFTER INSERT on document_audit, WHEN actor is distinct from 'agent')"
+      ]
+    },
+    {
+      "claim": "set_document_storage_path (the move-time writer) enforces the full key grammar: caller's own firm prefix, _unassigned or the asserted client's OWN slug, folder whitelist (ingested|sampleinvoices), no '..', and the key must end in THIS document's sha256 + extension",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:332-382"
+      ]
+    },
+    {
+      "claim": "Exports ARE auditable, referenceable artifacts, not loose files: build_export/build_analysis_report file through record_export (receipt) -> record_export_artifact (write-once versioned row, server-derived firm-scoped key, reserve-then-upload with unique-violation retry x3 and a belt-and-braces firm-prefix assert) -> storeBytes; the FilesShelf UI folds versions per (fy, content_kind, scope) with superseded history visible read-only; 7-yr retention + legal_hold on export_artifacts",
+      "evidence": [
+        "agent/src/tools/exportTool.ts:145-220",
+        "dashboard/lib/filesShelf.ts:1-60 + dashboard/components/files/FilesShelf.tsx",
+        "db/v2/14-tables-ops.sql:148-188 (unique(firm_id,object_key) + composite version unique, retain_until 7yr, key-shape CHECK)"
+      ]
+    },
+    {
+      "claim": "Progress/status surfacing exists at the granularity built: transient uploading/failed rows are component state (never a fake doc status); tool start/complete events stream over SSE (the rail shows Clara's tool activity); an OCR-pending accent is inferred (ingested + zero resolved OCR parts); document lists silently live-refresh off the books SSE nudge; source bytes open via 600s signed URLs minted on click, never listed or cached",
+      "evidence": [
+        "dashboard/components/documents/docStatus.ts:25-47",
+        "agent/src/runtime/openai/events.ts:52-63",
+        "dashboard/components/documents/DocumentsTable.tsx:193-222,348-378",
+        "dashboard/lib/documentActions.ts:113-125 (getFileUrl, signBooksUrl 600s)"
+      ]
+    },
+    {
+      "claim": "Deduplication is layered and safe to retry: sha256 computed by the tool layer (never model-fabricated), storage write-once with already-exists reported as flagged success, DB idempotency on (firm, sha256), and doctrine dedup-on-sha before ingest",
+      "evidence": [
+        "agent/src/tools/buildTools.ts:288-304",
+        "db/v2/22-fns-documents-recon.sql:205-221",
+        "belcort/doc-ingest/SKILL.md:57-58,64-66"
+      ]
+    },
+    {
+      "claim": "OCR is deterministic and injection-fenced: Azure Document Intelligence v4.0 prebuilt-layout via REST (no SDK), key never model-visible, text+tables returned as inert data with an explicit notice; a no-OCR deploy reports itself honestly instead of letting the model fabricate; MyInvois UBL XML is explicitly NOT parsed in this runtime (stored + routed to review per the Track-C carve-out)",
+      "evidence": [
+        "agent/src/ocr/azureDocai.ts:1-27,73-113",
+        "agent/src/tools/buildTools.ts:316-353 (extract_document + inert-data notice, honest no-op when unconfigured)",
+        "agent/src/main.ts:124-131",
+        "belcort/doc-ingest/SKILL.md:116-126 (UBL not-wired warning)",
+        "deploy/RUNTIME.md:36-43 (env manifest + S0 tier)"
+      ]
+    },
+    {
+      "claim": "In-interview uploads ride the clarify channel on firm-scoped routes: POST /firms/:id/chat/clarify accepts a documents array, the runtime attaches them to the parked run's context and appends a layer-computed attachment manifest (indices + sha256s) to the sanitized answer",
+      "evidence": [
+        "agent/src/http/server.ts:451-464",
+        "agent/src/runtime/openai/runtime.ts:44-58,301-322"
+      ]
+    }
+  ],
+  "unverified": [
+    "The audit brief does not exist: the task's paths were literal 'undefined/...' and undefined/audit-brief.md is absent (verified again this pass; only undefined/maps/db-map.md and prior findings JSONs exist under undefined/). A standard critical/high/medium/low ladder was applied; every citation was re-verified from the source files, not the maps.",
+    "Azure Document Intelligence S0 service-side hard limits (max file size, max pages, TPS/concurrency quotas) are not recorded anywhere in the repo; deploy/RUNTIME.md:43 names the tier only. The real OCR ceiling per document is therefore unverifiable from repo evidence (only the client-side 120s poll deadline and 20MB attachment cap are code facts).",
+    "Whether a dropped SSE connection mid-run stalls the server-side model loop: server.ts passes an AbortSignal that streamRun accepts but never consumes, and generator-pull semantics under a destroyed response socket could not be proven either way by code reading alone (no runtime execution was performed against the frozen repo). E-1's never-attached case is code-certain; the mid-run-drop case is not.",
+    "Supabase project-level storage limits (max object size for the service-role upload; whether a 20MB upload can be rejected platform-side) - project configuration, not in the repo.",
+    "Live behavior of the [documents] wake end-to-end (webhook config rows, WEBHOOK_SECRET/SUPABASE_JWT_SECRET presence on the live Fly deployment) - deploy/RUNTIME.md documents intent; live secrets/config were not inspected.",
+    "E-1 was re-verified this pass by independent exhaustive static tracing (all streamRun/(bootstrap)/chat/events consumers located; startRun/streamRun split confirmed; WorkspaceIslands.tsx:142-154 passes no deps so the bare-POST defaultSend is the live path; chatThreads.ts active_run pointer is consumer-less dead code; hermesChatTransport.reconnectToStream returns null), but not by driving the live dashboard - a runtime repro would make it incontrovertible.",
+    "The model's actual compliance with the doc-ingest persist-before-picker ordering and the review-queue wake carve-out (prompt-level guarantees) is inherently unverifiable statically; findings E-2/E-3 rate the structural exposure, not observed misbehavior."
+  ],
+  "decision_brief": "Workstream E verdict (adversarially verified: 12 findings CONFIRMED, 1 ADJUSTED, 0 refuted; all 12 fine claims spot-verified against source): the substrate is genuinely good - a private write-once firm-prefixed bucket, a firm-scoped documents registry with a real unassigned holding area, idempotent sha-keyed ingest, audited triage verbs with atomic wake triggers, a real UI unassigned lane, and exports filed as versioned write-once artifacts with a shelf UI. But the pipeline ABOVE the substrate is not a pipeline: it is one LLM run following a skill document, holding the only copy of the bytes in process memory. Three structural breaks dominate. (1) CRITICAL E-1: the Documents-tab upload (the primary bulk-ingest surface) POSTs a chat turn whose run is never streamed, and runs only execute inside streamRun - so those files are never uploaded, OCR'd, or ingested, while the UI toasts success; only the chat-rail path works. (2) E-2: persist-after-OCR is doctrine, not architecture - attachments live in an in-memory run map on one Fly machine (30-min TTL, 1GB RAM vs a 150MB fully-buffered body cap), so run failure, restart, eviction, clarify abandonment, or OOM loses whole batches unrecoverably; nothing durable exists until the model volunteers upload_document+ingest_document. (3) E-3: the agent has no storage read/copy/move capability, so the mandated post-assign 'Storage move' is impossible in the wake lane - assigned docs' bytes live under _unassigned forever, and doctrine still cites verification capabilities (sign/HEAD) that do not exist. Registry-level consistency mostly holds (path never repointed without bytes IF the model obeys the carve-out), but ingest-time key validation is far weaker than the CREED claims (E-4), an invisible stuck document state is one model slip away (E-5), and stored documents can never be re-read or re-OCR'd by Clara (E-6). For the rebuild: keep the DB/storage layer nearly verbatim; replace the model-discretionary ingest chain with a durable, deterministic server-side pipeline (persist bytes + row BEFORE any model involvement), give the runtime a scoped storage read/move capability or drop the move doctrine, and fix the run-execution model so a POSTed turn always executes."
+}

@@ -1,0 +1,265 @@
+{
+  "asset_class": "agent",
+  "note": "Salvage classification of the Clara agent/ runtime + tool registry (frozen repo @ ac0a684f). Consistent with verified findings in findings/*.json (Grt, Ggr, H, I, E, D, GAPS, A, B, C, F3, F12) and maps/agent-map.md. PORT = proven, carry largely as-is; REBUILD = right idea, rebuild to the named standard; DROP = do not carry.",
+  "items": [
+    {
+      "asset": "agent/src/http/server.ts (HTTP shell + routes)",
+      "kind": "http",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: a POSTed chat run executes ONLY inside a subsequent SSE attach, so fire-and-forget callers (Documents tab) silently never run (D-1/E-1 critical); no per-scope run lease (GAP4-2), no cancel verb and Stop never aborts the 40-turn write-capable loop (GAP4-4 high); 150MB bodies fully buffered on a 1GB VM (E-7); bootstrap routes silently drop attachments (E-11). Rebuilt shell must enqueue durable runs executed independently of any SSE consumer, CAS a per-scope run lease with typed 409, expose a real cancel that aborts before the next tool call, and stream/bound request bodies — while keeping the proven verify-then-IDOR auth order, exact error taxonomy, and honest webhook 202.",
+      "evidence": "agent/src/http/server.ts:340-371,422-431,61-67; findings D-1, E-1, GAP4-2, GAP4-4, E-7, E-11"
+    },
+    {
+      "asset": "agent/src/http/auth.ts (JWT verify + caller identity)",
+      "kind": "http",
+      "recommendation": "PORT",
+      "reason": "Proven: signature verification (HS256 shared-secret or JWKS) with issuer/audience checks, firm-claim extraction, route-level IDOR guard, and decode-only helpers explicitly marked not-auth — no confirmed defect is in this module itself. Caveats to carry: stale-JWT-claims authority (GAP1-4) is a claims/DB-architecture gap fixed in the target authorization kernel, and the firm-less bootstrap sentinel (firmId=userId, synthesized owner role) needs a first-class pre-firm principal in the rebuild.",
+      "evidence": "agent/src/http/auth.ts:36-49,62-66,93-125; agent-map.md section 1; findings GAP1-4 (architecture-level, not this verifier)"
+    },
+    {
+      "asset": "agent/src/http/cors.ts",
+      "kind": "http",
+      "recommendation": "PORT",
+      "reason": "Exact-origin allowlist that echoes only listed origins, never '*', deny-by-default on empty list, Vary: Origin set before every writeHead. Small, correct, zero findings against it.",
+      "evidence": "agent/src/http/cors.ts:23-38 (read in full 2026-07-17)"
+    },
+    {
+      "asset": "agent/src/http/documents.ts (attachment validation)",
+      "kind": "http",
+      "recommendation": "PORT",
+      "reason": "Clean defence-in-depth boundary: <=5 files, <=20MB decoded (computed without allocating), MIME allowlist, bytes never logged. Whole-batch first-failure rejection (E-10, low) is a UX polish item, not a defect that blocks porting.",
+      "evidence": "agent/src/http/documents.ts:7-63 (read in full); finding E-10 (low)"
+    },
+    {
+      "asset": "agent/src/http/sessions.ts (transcript store client)",
+      "kind": "http",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the durable tool_calls/artifact columns are never written and cards are re-derived by fence-regex at read (Grt-3/Grt-9; multi-card turns structurally broken per D-4); assistant persistence is best-effort after settle and silently drops when the caller JWT expires mid-clarify (Grt-15); cross-turn memory is cold transcript replay so stale figures re-enter later runs (A-7, Grt-2). Rebuilt store must persist typed turns, tool calls, and artifacts natively at emit time under a run-owned credential (no fence-regex, no JWT-expiry transcript gaps) — while keeping the proven caller-JWT-rides-every-call and persist-user-turn-before-run disciplines.",
+      "evidence": "agent/src/http/sessions.ts:43-72,163-175,229-270; findings Grt-3, Grt-9, Grt-15, D-4, A-7"
+    },
+    {
+      "asset": "agent/src/http/hub.ts (SSE fan-out + books coalescer)",
+      "kind": "http",
+      "recommendation": "PORT",
+      "reason": "Small, correct in-memory fan-out with ready-greet, trailing-window coalescing (drops-not-resets) and clean shutdown flush — acceptable as-is because in the target it remains a lossy UI-refresh nudge layer over durable DB state (all recovery lives in read surfaces, per Grt-12's durable-wake requirement). Multi-machine topology would need a pub/sub backplane, but that is a deployment change, not a defect in this module.",
+      "evidence": "agent/src/http/hub.ts:19-80 (read in full); finding Grt-12 (durability lives in the DB, not the hub)"
+    },
+    {
+      "asset": "agent/src/http/wakes.ts (webhook ingress + classifier)",
+      "kind": "http",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the trigger taxonomy is a static condition-to-lane map with no risk/materiality/period keying and whole event families emit nothing (A-4 high); ingress is best-effort with no persistence, and the BOOKS_TABLES allowlist must move in lockstep with DB triggers but is untested against them (agent-map note 13). Rebuilt ingress must persist-then-ack into a durable wake/outbox queue keyed by a DB-owned event taxonomy — while keeping the proven per-firm derived-HMAC bearer with constant-time compare, strict shape validation, allowlisted record extras, and default-to-safest-lane routing.",
+      "evidence": "agent/src/http/wakes.ts:30-64,67-155; findings A-4, A-2; agent-map.md sections 5, 9.13"
+    },
+    {
+      "asset": "agent/src/http/wakeGate.ts (batching/rate governor)",
+      "kind": "http",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the whole governor is unref'd in-memory timers — rate-cap excess is dropped, shutdown clearPending drops open windows without firing, and a restart loses every pending batch (Grt-12; A-2's five loss points include this stage). Rebuilt version must implement the same good ideas (per-(firm,condition,client) trailing-window batching, caps, dedup, per-firm rate limits) as durable DB queue state with at-least-once delivery and idempotent consumers instead of at-most-once process-local hints.",
+      "evidence": "agent/src/http/wakeGate.ts:9-14,66-73; agent/src/main.ts:236; findings Grt-12, A-2"
+    },
+    {
+      "asset": "agent/src/runtime/openai/runtime.ts (run loop, clarify, wakes, eviction)",
+      "kind": "runtime",
+      "recommendation": "REBUILD",
+      "reason": "Wrong at the core: 100% process-local run state (every in-flight run, parked clarify, interruption dies on restart — Grt-1/6/7/8 high), runs execute only when an SSE consumer attaches (D-1/E-1 critical), unknown needsApproval interruptions silently auto-approved (fail-open, Ggr-11/GAP0-2), clarify answers uncorrelated to clarifyId or asking user (GAP4-3 high), clarify uploads REPLACE the parked attachment batch causing evidence aliasing (GAP5-6 high), wake deadline races but never cancels the loop so late writes land after 'failed' (agent-map note 6), and SDK platform tracing ships every firm's data to OpenAI's trace store by default (GAP1-8 high). Rebuilt runtime must be DB-durable (tasks/runs/checkpoints/interruptions/tool-calls), execute independently of stream attach, deny-by-default on unknown interruptions, correlate + persist clarify Q&A, use immutable sha-addressed attachment refs, propagate real cancellation into the SDK loop, and make tracing an explicit owner-approved policy defaulting off. Worth carrying: the deterministic je_needs_human short-circuit pattern (Grt-14) and the firm-binding of runIds.",
+      "evidence": "agent/src/runtime/openai/runtime.ts:136,80-99,175-206,236-269,249-252,301-322,497-507; findings Grt-1..8, D-1, E-1, GAP0-2, GAP4-3, GAP4-4, GAP5-6, GAP1-8, Ggr-11, Grt-14"
+    },
+    {
+      "asset": "agent/src/runtime/types.ts (AgentRuntime seam + RuntimeEvent union)",
+      "kind": "runtime",
+      "recommendation": "REBUILD",
+      "reason": "Right idea — a neutral swap-seam runtime contract (ADR-031) that survived one adapter swap — but the contract itself encodes the broken model: startRun/streamRun coupling (execution requires a stream consumer), no cancel verb, no durable task identity, and artifact/directive event kinds that are dead code nothing ever emits (Grt-10). The rebuilt seam must be cut around durable tasks (enqueue/attach/cancel/resume), typed tool-result and artifact events that are actually produced, and checkpointed interruptions.",
+      "evidence": "agent/src/runtime/types.ts:130-158; findings Grt-10, D-1/E-1 (contract-level cause), GAP4-4"
+    },
+    {
+      "asset": "agent/src/runtime/openai/events.ts (SDK stream event mapper)",
+      "kind": "runtime",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: maps only text deltas and tool breadcrumbs; never emits the artifact/directive kinds the union promises, leaving tool activity effectively invisible and cards traveling as fenced prose (Grt-10, D-6). The rebuilt mapper must emit native typed tool-call/tool-result/artifact events that are persisted and rendered, retiring the fenced-block regex — it is a thin SDK-specific adapter and will be rewritten with the new event contract anyway.",
+      "evidence": "agent/src/runtime/openai/events.ts:38-67; findings Grt-10, D-6"
+    },
+    {
+      "asset": "agent/src/runtime/openai/tools.ts (SDK tool adapter + clarify_tool)",
+      "kind": "runtime",
+      "recommendation": "REBUILD",
+      "reason": "Right idea — clarify as a needsApproval interruption that structurally pauses the SDK run — but the loop's survival depends on a hard-coded [flow-control] directive injected into every clarify result to prompt-coerce the model into not ending the run (I-14, Grt-5), and the JSON-string back-compat parse papers over weak jsonb schemas. Rebuilt clarify must be a checkpointed, resumable protocol (persisted question/choices/answer, clarifyId-validated per GAP4-3) whose continuation is structural, not prompt-begged.",
+      "evidence": "agent/src/runtime/openai/tools.ts:18-24,47-64,79-84; findings I-14, Grt-5, GAP4-3"
+    },
+    {
+      "asset": "agent/src/runtime/openai/params.ts (zod schema builder)",
+      "kind": "runtime",
+      "recommendation": "PORT",
+      "reason": "Proven pattern: strict zod schemas for ordinary tools (nullable-optional convention, int-cents money, enums) with fail-before-DB parse errors; no confirmed finding against it. Carry with one tightening: the non-strict raw-JSON escape hatch for jsonb-bearing tools should become fully typed payload schemas in the rebuilt catalog.",
+      "evidence": "agent/src/runtime/openai/params.ts; agent-map.md section 3 (param schemas); no adverse finding in findings/*.json"
+    },
+    {
+      "asset": "agent/src/runtime/openai/db.ts (rpc + agent_select query client)",
+      "kind": "runtime",
+      "recommendation": "REBUILD",
+      "reason": "The ctx.rpc half (caller-JWT Supabase client, DB RAISE surfaced verbatim) is sound, but ctx.query is the transport for the confirmed critical mutation-bypass (SELECT-wrapped SECURITY DEFINER writes pass both the TS and DB lexical guards — Ggr-1/I-1/H-6) and its own comments misstate the DB backstop as READ ONLY. Rebuilt data access must drop the freeform-SQL channel entirely or run it under a role with no EXECUTE on volatile writers and default_transaction_read_only, keeping only the rpc path.",
+      "evidence": "agent/src/runtime/openai/db.ts:6-9,53-65; findings Ggr-1 (critical), I-1 (critical), H-6"
+    },
+    {
+      "asset": "agent/src/runtime/sse.ts (SSE wire framing)",
+      "kind": "runtime",
+      "recommendation": "PORT",
+      "reason": "Trivial, proven relay of RuntimeEvent to the exact wire names the dashboard consumes, with keepalive; the event-name-duplicated-in-payload quirk is a known dashboard contract, not a defect. The dead artifact/directive frames ride along until the rebuilt event contract lands (Grt-10 is a runtime-side gap, not an sse.ts one).",
+      "evidence": "agent/src/runtime/sse.ts:64-72; agent-map.md section 1; finding Grt-10 (emitter-side)"
+    },
+    {
+      "asset": "agent/src/runtime/wakeCredential.ts (wake JWT minter)",
+      "kind": "runtime",
+      "recommendation": "REBUILD",
+      "reason": "Right ideas proven (30-min TTL, RLS plane never service_role, deterministic synthetic sub, distinct aud, firm-id re-validation) but wrong trust anchor: signed with the project-wide legacy shared secret so holding it mints ANY firm's token, PostgREST does not enforce aud so the token is a full DB credential, and firm_role:'bookkeeper' gives wake runs human-decision fn eligibility fenced only by tool policy (agent-map notes 5; enables Ggr-7). Rebuilt credential must be a first-class agent principal: dedicated signing key or DB-issued short-lived token, a distinct DB role whose grants ARE the wake-lane allowlist, and enforced audience.",
+      "evidence": "agent/src/runtime/wakeCredential.ts:8-10,20-23,59-89; agent-map.md sections 5, 9.5; finding Ggr-7"
+    },
+    {
+      "asset": "agent/src/runtime/inject.ts (fencing/sanitize + wake-note builder)",
+      "kind": "runtime",
+      "recommendation": "REBUILD",
+      "reason": "The untrusted-data fencing discipline (guillemet fences, control-char strip, 4000 cap) is proven and must carry, but the wake-note content is the wrong context mechanism: hardcoded per-wake prose hints that leak hallucinated legacy table names (Ggr-3 ADJUSTED) and constitute the run's ENTIRE context — no client context pack exists (A-1 high, Ggr-6). Rebuilt injection must assemble governed, fresh per-client context packs (profile, COA, FY/period+lock status, tax regime, banks, open items, KB rules) instead of framing prose plus starter-SELECT hints.",
+      "evidence": "agent/src/runtime/inject.ts:6-23,30-96; findings A-1, Ggr-3, Ggr-6"
+    },
+    {
+      "asset": "agent/src/doctrine/loader.ts + frontmatter.ts (doctrine load + progressive disclosure)",
+      "kind": "doctrine-loader",
+      "recommendation": "REBUILD",
+      "reason": "Right idea proven — load-once residency budget (~22KB resident, ~200KB skill bodies on demand via read_skill/read_reference, no filesystem tool) — but the implementation is ungoverned: verbatim filesystem doctrine baked into the image with no versioning/reload/governance, a skill-routing menu scraped by heuristic from prose first-lines (year-end-close lacks its 'When this fires' header so routing silently degrades, I-11), hardcoded wake-prefix routing, and the content it serves verbatim is confirmed drifted/contradictory (I-4..I-10: wrong OCR vendor resident every run, Hermes/Telegram residue, tools described that don't exist). Rebuilt loader must serve versioned, DB-governed doctrine with structural routing metadata and content-freshness checks, and skill-first execution should become a gate, not a convention (Ggr-5).",
+      "evidence": "agent/src/doctrine/loader.ts:10-22,45-49,91-109; agent/src/doctrine/frontmatter.ts:50-64; findings I-4, I-5, I-6, I-7, I-8, I-9, I-11, Ggr-5, Ggr-10 (doctrine content itself is classified in the doctrine salvage lane)"
+    },
+    {
+      "asset": "agent/src/tools/buildTools.ts (enforcement core: policy matrix, scope gate, actor injection, upload_document, extract_document)",
+      "kind": "tool-core",
+      "recommendation": "REBUILD",
+      "reason": "The per-tool enforcement pipeline (policyAllows -> enforceScope -> injectActor anti-spoof; firm-scoped storage key grammar; banned-token structural guard) is the right shape and must carry as a pattern — but the policy matrix is confirmed unsafe: the [documents] wake lane is a write BLOCKLIST that leaves approve/reverse/depreciate/close reachable unsupervised (Ggr-7/I-2 high), query_books is pushed under EVERY policy including all wake lanes (carrier of the Ggr-1 critical), interactive allows ALL writes with no structural human authorization (GAP0-2 critical — UI-convention gate only), and upload_document lets the model file model-authored bytes as durable branded 'audited' artifacts (H-1). Rebuilt tool layer must enforce DB-owned per-mutation-class ALLOWLIST policies (default fail-to-draft), verify exact-payload human-approval envelopes before consequential writes, carry no freeform SQL tool on any lane, and reconcile artifact claims (sha256/size) against stored objects.",
+      "evidence": "agent/src/tools/buildTools.ts:19-33,82-107,210-307,375; findings Ggr-7, I-2, GAP0-2, Ggr-1, H-1"
+    },
+    {
+      "asset": "agent/src/tools/sqlGuard.ts + the query_books freeform-SQL tool",
+      "kind": "tool-core",
+      "recommendation": "DROP",
+      "reason": "Confirmed critical at both layers: the lexical verb filter cannot stop a SELECT-wrapped SECURITY DEFINER write (Ggr-1 CONFIRMED — the DB-side agent_select guard is equally lexical), it bypasses the scope gate and actor injection, is reachable under every policy including wakes, is doctrine-endorsed as 'read-only' in all 11 skills (I-1), and its own header misstates the Postgres backstop (H-6). A verb-based string filter is not a security boundary and no rebuilt version of THIS mechanism should exist: the replacement is a structurally read-only read layer (complete typed/curated read tools per Ggr-2, or a role with no EXECUTE on volatile writers + default_transaction_read_only) — i.e. a different component, not this one rebuilt.",
+      "evidence": "agent/src/tools/sqlGuard.ts:1-85; db/v2/26-fns-session.sql:119-140; findings Ggr-1 (critical), I-1 (critical), H-6, Ggr-2"
+    },
+    {
+      "asset": "agent/src/tools/registry.ts core (+ registry/enums.ts, tools/types.ts): declarative ToolSpec registry, EXCLUDED_FNS, BANNED_TOOL_TOKENS, 1:1 name==fn, locked by registry.test.ts",
+      "kind": "tool-registry",
+      "recommendation": "PORT",
+      "reason": "Proven pattern worth keeping: a declarative, test-locked, 1:1 fn-backed tool surface with structural name bans and an explicit exclusion list — the registry mechanism has no confirmed defect. Carry with one process fix: the surface drifted three ways from the DB fn catalog and doctrine (F3-12), so the rebuilt registry must be generated from / CI-verified against the DB's audited-fn catalog rather than hand-maintained (and the stale 'Google Document AI' comment in tools/types.ts goes).",
+      "evidence": "agent/src/tools/registry.ts:39-74; agent/test/registry.test.ts:28-61; agent/src/tools/types.ts:95; findings F3-12, I-4"
+    },
+    {
+      "asset": "agent/src/tools/registry/journal.ts (10 journal tools)",
+      "kind": "tool-registry",
+      "recommendation": "PORT",
+      "reason": "Thin, correct wrappers over the audited journal fns with sensible scope rules (match_client, the single 'present' cross-client reassign) and the estimated-risk write confined to finalize_coding. The confirmed defects live below them in the DB fns (draft_entry lacks an idempotency key GAP4-1; no maker-checker GAP3-7; no SST-leg constraint F3-9) — signatures will grow idempotency keys and approval envelopes, but the wrapper group ports.",
+      "evidence": "agent/src/tools/registry/journal.ts; agent-map.md section 3; findings GAP4-1, GAP3-7, F3-9 (all DB-layer)"
+    },
+    {
+      "asset": "agent/src/tools/registry/kb.ts (9 KB tools)",
+      "kind": "tool-registry",
+      "recommendation": "PORT",
+      "reason": "Wrappers are correct; the confirmed problems are ecosystem-level, not in these tools: memory notes have no structural consumer (C-1), the candidate tier is unreachable because every sanctioned writer mints 'confirmed' (C-11), and KB/books sync is LLM-mediated (A-3) — those are DB/workflow-design fixes. The rebuilt KB layer keeps these verbs and adds the structural learn-event emission the findings demand.",
+      "evidence": "agent/src/tools/registry/kb.ts; findings C-1, C-11, A-3 (design/DB layer, not wrapper defects)"
+    },
+    {
+      "asset": "agent/src/tools/registry/documents.ts (14 document/recon tools)",
+      "kind": "tool-registry",
+      "recommendation": "PORT",
+      "reason": "The wrappers port (idempotent ingest, sole storage_path writer, DB-computed recon tie-out, advisory hint store), with two named additions from confirmed findings: ingest_document needs key-grammar validation beyond the firm-prefix CHECK (E-4), and the surface is missing storage read/copy/move/delete plus a re-OCR-from-storage capability, which makes the doctrine-mandated post-assign Storage move structurally impossible (E-3 high, E-6) — those are new tools, not defects in the existing ones.",
+      "evidence": "agent/src/tools/registry/documents.ts; findings E-3, E-4, E-6"
+    },
+    {
+      "asset": "agent/src/tools/registry/fixedAssets.ts (3 FA tools)",
+      "kind": "tool-registry",
+      "recommendation": "PORT",
+      "reason": "The tools are right (cost read from the posted GL leg, DB-computed MPERS depreciation idempotent per period, DB-owned NBV/disposal) — the confirmed F3-4/5/6 highs are that NOTHING in the product wires them into a workflow: record_fixed_asset is doctrine-orphaned and nothing ever runs or gates depreciation. Port the tools; the rebuild must add the missing workflow/close-gate wiring around them.",
+      "evidence": "agent/src/tools/registry/fixedAssets.ts; findings F3-4, F3-5, F3-6 (workflow-wiring gaps, not tool defects)"
+    },
+    {
+      "asset": "agent/src/tools/registry/onboard.ts (6 onboarding tools)",
+      "kind": "tool-registry",
+      "recommendation": "PORT",
+      "reason": "Wrappers are correct and the scope-rule exceptions (create_firm/onboard_client as 'none') are justified. The B-1 CRITICAL (seed_opening_carry_forward re-run silently doubles the opening position) is a defect of the DB fn in db/v2/25b, not of this wrapper — the fix (one-shot seeded-registry guard + idempotency keys) lands DB-side and the wrapper re-points unchanged, which is why PORT stands despite the linked critical. B-12's missing incremental carry-down tool is an addition to this group, not a defect in it.",
+      "evidence": "agent/src/tools/registry/onboard.ts; findings B-1 (defect at db/v2/25b-fns-opening.sql:206-315), B-12"
+    },
+    {
+      "asset": "agent/src/tools/registry/ops.ts (9 ops tools)",
+      "kind": "tool-registry",
+      "recommendation": "PORT",
+      "reason": "Correct wrappers (write-once artifact receipts under advisory lock, dedup'd proactive notifications, close/reverse pair). Carry with the H-9 caveat: the export receipt fns accept free-text actor and everything is attributed to literal 'agent' — the rebuilt fn signatures must capture the requesting human principal, a DB+injection change the wrappers inherit.",
+      "evidence": "agent/src/tools/registry/ops.ts; finding H-9 (attribution — cross-layer fn-signature change)"
+    },
+    {
+      "asset": "agent/src/tools/registry/reads.ts (10 read tools)",
+      "kind": "tool-registry",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: the curated read surface is confirmed insufficient — whole workflow read families (AR/AP aging, statements, GL/FS, FA register, tie-outs, tax/SST, KB rules, period/lock status, client_overview) exist as granted DB fns but are not tools, forcing the model onto freeform SQL (Ggr-2 high); and reads are firm-wide with no scope inheritance or client-provenance tagging, so cross-client read contamination becomes a scope-valid wrong posting (GAP5-5 high). The rebuilt read layer must be complete (a curated/typed read for every workflow's data — treat 'workflow with no curated read path' as a build gate), client-scoped by default with named cross-client reads as deliberate typed operations, and rich enough to retire freeform SQL entirely.",
+      "evidence": "agent/src/tools/registry/reads.ts:6-147; findings Ggr-2, GAP5-5, A-1 (client_overview exists at db/v2/28-fns-reads.sql:840 but is not a tool)"
+    },
+    {
+      "asset": "agent/src/tools/exportTool.ts (build_export pipeline)",
+      "kind": "export-reporting",
+      "recommendation": "REBUILD",
+      "reason": "The architecture is the right answer (DB -> formatter -> bytes server-side; a figure never passes through model text; structural receipt + write-once artifact + firm-prefix belt-and-braces) but its trust claims are confirmed false: balanced:true is hardcoded for every scope so unbalanced books export under a green 'In balance' chip (H-2 high), artifact rows are reserved before bytes and never reconciled so phantom artifacts persist (H-7), the full request spec is not persisted so filed artifacts are unreproducible (H-8), the MANDATORY whole-ledger client-confirm is prompt-only and the tool also runs on the [documents] wake lane where clarify does not exist (H-11), GL silently truncates at 200 pages (H-12), and format parity is false for sst_return (H-13). Rebuilt export must pass DB-owned assurance flags through verbatim, reconcile artifacts to a stored/verified status, persist full parameters + data-version for reproducibility, policy-gate whole-ledger egress, and fail or annotate loudly on truncation.",
+      "evidence": "agent/src/tools/exportTool.ts:64-124,166-219,261,313,413; findings H-2, H-7, H-8, H-11, H-12, H-13"
+    },
+    {
+      "asset": "agent/src/tools/exportFormat.ts (CSV formatter)",
+      "kind": "export-reporting",
+      "recommendation": "PORT",
+      "reason": "Proven byte-identical formatter: BigInt-safe integer-cents to 2dp, RFC-4180 escaping, formula-injection neutralization, BOM/CRLF discipline, boolean/NaN guards — read in full, no finding against it anywhere in the audit.",
+      "evidence": "agent/src/tools/exportFormat.ts:12-53 (read in full 2026-07-17); no adverse finding in findings/*.json"
+    },
+    {
+      "asset": "agent/src/tools/reportModel.ts (ReportDoc composition)",
+      "kind": "export-reporting",
+      "recommendation": "REBUILD",
+      "reason": "Wrong: it recomputes the 'IN BALANCE' assurance seal in the agent with JS float arithmetic, ignoring the DB's own in_balance — a direct 'the agent never computes a figure' violation with a demonstrated false-negative on real cent combinations (H-3 CONFIRMED) — and its PDF/XLSX document model drops the SST-02 form_map rows the CSV carries while still counting them in rowCount (H-13). Rebuilt composition must pass every assurance/derived figure through from the DB verbatim (money stays bigint-cents until final render) and guarantee full content parity across formats.",
+      "evidence": "agent/src/tools/reportModel.ts:258,323; findings H-3, H-13"
+    },
+    {
+      "asset": "agent/src/tools/pdfReport.ts (pdfkit renderer)",
+      "kind": "export-reporting",
+      "recommendation": "PORT",
+      "reason": "Mechanical renderer of the ReportDoc model; the confirmed defects on the PDF path (float-recomputed seal H-3, MPERS/MFRS over-stamping GAP2-5) originate in reportModel/DB composition, not in the rendering code. Port the renderer; assurance wording and statement-pack completeness are fixed upstream.",
+      "evidence": "agent/src/tools/pdfReport.ts:88 (renders the flag it is given); findings H-3, GAP2-5 (composition-layer)"
+    },
+    {
+      "asset": "agent/src/tools/xlsxReport.ts (exceljs renderer)",
+      "kind": "export-reporting",
+      "recommendation": "PORT",
+      "reason": "Same posture as pdfReport: a mechanical ReportDoc renderer with no independent confirmed defect; the sst_return form_map omission (H-13) is a reportModel composition gap it inherits.",
+      "evidence": "agent/src/tools/xlsxReport.ts; finding H-13 (composition-layer)"
+    },
+    {
+      "asset": "agent/src/tools/analysisTool.ts (build_analysis_report)",
+      "kind": "export-reporting",
+      "recommendation": "REBUILD",
+      "reason": "Right idea (the North-Star ad-hoc analytical reporting lane: structured sections, charts/KPIs, branded PDF, provenance page, honest 'not an audited statement' stamp) but the trust foundation is confirmed broken: model-authored SQL literals and prose are laundered as 'computed by the database' (H-4 high), money magnitude rests entirely on model money_columns labeling with 100x error modes (H-5), the section SQL rides the same lexical guard so an analysis request is a mutation vector (H-6), and the defining queries are unqueryable afterward — irreproducible artifacts (H-8). Rebuilt analysis must compose from typed/parameterized reads or a governed semantic layer (no freeform SQL), derive units from schema not model labels, label model commentary as commentary, and persist the full spec for reproducibility.",
+      "evidence": "agent/src/tools/analysisTool.ts:105,121,140-143,303; findings H-4, H-5, H-6, H-8"
+    },
+    {
+      "asset": "agent/src/jobs/bulkApproveRunner.ts (durable bulk-approve job)",
+      "kind": "jobs",
+      "recommendation": "REBUILD",
+      "reason": "Right idea — the ONLY durable workflow in the runtime (DB job rows, resumable remaining-array, partial-failure honesty, caller-JWT per-id approval never service_role) — but confirmed wrong in three ways: restart re-drive counts an already-approved id as a failure and can settle a genuinely successful job FAILED (Grt-11), resume fires only when some user reconnects the notifications SSE so orphaned jobs sleep indefinitely (Grt-11), and a resumed job audits the ORIGINAL actor string while running on the resumer's JWT — audit rows name a person whose credential did not authorize the write (agent-map note 9). Rebuilt version: idempotent re-drive (already-approved = success), worker-lease-driven resume from durable job state independent of any UI connection, and attribution bound to the authorizing credential.",
+      "evidence": "agent/src/jobs/bulkApproveRunner.ts:29-59,104-126,171-193; findings Grt-11; agent-map.md section 8, note 9"
+    },
+    {
+      "asset": "agent/src/ocr/azureDocai.ts (Azure Document Intelligence adapter)",
+      "kind": "ocr",
+      "recommendation": "PORT",
+      "reason": "Clean, proven REST adapter (prebuilt-layout v4.0, poll-with-deadline, TSV table reconstruction with span fill, key never reaches model or DB, honest not-configured degradation) with one confirmed medium defect that is trivially fixable in place: the 429-throttle branch skips the 120s poll-deadline check, making the loop unbounded under sustained throttling (E-8 ADJUSTED — apply the deadline check in the 429 branch). One required extension for the rebuild: capture and return boundingRegions (Azure already provides them) so per-field evidence regions can be persisted and surfaced (J-18).",
+      "evidence": "agent/src/ocr/azureDocai.ts:50-113; findings E-8 (trivial in-place fix), J-18 (extension, pipeline-wide)"
+    },
+    {
+      "asset": "agent/src/main.ts (composition root)",
+      "kind": "runtime",
+      "recommendation": "REBUILD",
+      "reason": "The DI discipline is right and must carry (env read only at the root, injected lambdas, service-role confined to one storeBytes closure) — but the wiring it composes is the single-process world the audit condemned: shutdown clearPending drops pending wakes without firing (Grt-12), the settle path has a named JWT-expiry transcript gap (Grt-15), liveness-only /health with no dependency/readiness checks on a machine whose restarts are silent data-loss events (GAP1-7), and no tracing-policy, metering, or budget wiring exists (GAP1-8, GAP4-5). The rebuilt root wires the durable runtime, run-owned credentials, dependency-aware health/readiness, and fail-closed per-firm budgets.",
+      "evidence": "agent/src/main.ts:48-96,112-131,162-176,236; findings Grt-12, Grt-15, GAP1-7, GAP1-8, GAP4-5"
+    }
+  ]
+}

@@ -1,0 +1,302 @@
+{
+  "workstream": "I — Skills and harness architecture",
+  "findings": [
+    {
+      "id": "I-1",
+      "workstream_item": "I-guardrails (skill tool safety vs registry)",
+      "title": "Every skill's DB-ACCESS CANON calls query_books \"read-only\", but agent_select is a lexical guard that lets a SELECT-wrapped SECURITY DEFINER write-fn mutate — the read tool is added under every wake policy, bypassing the write-gate + actor injection",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/AGENTS.md:29 tells the agent query_books is 'a single read-only, RLS-scoped SELECT'; the same 'read-only / EXECUTE-only, no raw SQL write path' framing repeats in coa-coding/SKILL.md:40, review-queue/SKILL.md:63, doc-ingest/SKILL.md:35-39, kb-evolve/SKILL.md:44-46, bank-recon/SKILL.md:30-31, period-entries/SKILL.md:33-40, firm-bootstrap/SKILL.md:66-79, client-onboarding, rule-edit/SKILL.md:20-27, year-end-close/SKILL.md:17-19 — all 11 skills present query_books as a safe read surface.",
+        "db/v2/26-fns-session.sql:119-140 agent_select is SECURITY INVOKER with a purely lexical guard: line 134 blocks the whole words insert|update|delete|merge|truncate|drop|alter|grant|revoke|create|copy|call but NOT a function call, so `select draft_entry('{...}'::jsonb)` or `select approve_entry(1,2,'x')` passes the ^(select|with) anchor + verb scan and reaches `execute format('select ... from (%s) __q', p_sql)`.",
+        "The wrapped fns are SECURITY DEFINER granted to authenticated (db/v2/20-fns-journal.sql:120 draft_entry, :212 approve_entry, and the other journal writers all `security definer set search_path`), so the definer executes the mutation; the fn's own firm-scope re-check still fires (cross_firm_denied) so RLS bounds it to the caller's firm, but WITHIN-firm the write commits.",
+        "agent/src/tools/sqlGuard.ts:1-6,15-17 assertReadOnlySql is self-described 'Defence-in-depth ONLY' and blocks the same verbs, not function-call nodes; agent/src/tools/buildTools.ts:375 pushes queryToolDef() unconditionally under EVERY policy (interactive + proactive + documents + workbench-kb), so a SELECT-wrapped writer skips policyAllows/enforceScope/injectActor entirely (buildTools.ts:98-104 only guards buildFnToolDef, not queryToolDef)."
+      ],
+      "wrong": "The doctrine loaded verbatim into Clara's resident prompt (AGENTS.md §1 via loader.ts:94) tells the agent — and any auditor reading the skills — that query_books is a safe read surface. In fact it is the known SDT-001/SEC-001 mutation-bypass path: a SELECT-wrapped SECURITY DEFINER writer skips the tool layer's per-wake write-gate, scope-gate, and p_actor anti-spoof attribution. RLS still prevents cross-firm writes, but an injected instruction that reaches the SELECT string, or a model over-reach, can draft/approve/reverse/close WITHIN the firm through the 'read' tool under any wake policy — defeating the speak-never-act guarantee the per-wake policy is meant to enforce.",
+      "target": "The rebuilt read tool must be structurally read-only — a parameterized/whitelisted read surface (named views or a query builder over allowed tables), OR agent_select must run under a role with EXECUTE revoked on the write-fns (or parse for function-call nodes, not just verbs). Until then no skill may describe query_books as inherently safe; the guardrail must live in code, not prose."
+    },
+    {
+      "id": "I-2",
+      "workstream_item": "I-guardrails (wake policy vs doctrine)",
+      "title": "The [documents] wake tool policy is a BLOCKLIST, not an allowlist — a document_triaged wake can reach approve_entry / reverse_entry / run_depreciation / record_year_end_close; only skill prose narrows it to 4 triage verbs",
+      "severity": "high",
+      "verdict": "ADJUSTED",
+      "evidence": [
+        "agent/src/tools/buildTools.ts:25 WRITE_ALLOW.documents = (n) => !['create_firm','onboard_client','seed_client_coa','seed_client_knowledge','seed_opening_carry_forward'].includes(n) — every write tool EXCEPT those five onboarding fns is permitted in the [documents] lane; approve_entry/reject_entry/edit_entry/reverse_entry/reverse_year_end_close/record_year_end_close/run_depreciation/dispose_fixed_asset/build_export all pass.",
+        "The scope-gate still applies (buildTools.ts:54-79 enforceScope) but a [documents] wake resolves scope.clientId to the wake's own client_id, so approve_entry(entry, that_client) satisfies match_client — nothing structurally blocks it.",
+        "The narrowing is prose only: agent/src/runtime/inject.ts:38-39 frames the lane '[documents] Act on the human\\'s verb (assign/reassign/code/sample) via review-queue'; belcort/AGENTS.md:54 '[documents] — MAY act on the human\\'s verb (code / assign / reassign / mark-sample)'; review-queue/SKILL.md:226-293 implements only those four verbs ('Reconcile, do NOT code… never auto-code on assign').",
+        "The trigger is a human-actor document_audit INSERT (db/v2/25-fns-ops.sql:1526-1529 trg_pn_doc_triage fires belcort_proactive_emit('document_triaged') when new.actor is distinct from 'agent')."
+      ],
+      "wrong": "The safety of the [documents] lane rests entirely on the model obeying skill prose plus injection defence — not on the code policy. The code policy is more permissive than the doctrine's own stated intent (AGENTS.md §7 lists exactly four triage verbs). A second-order-injected document_audit/OCR free-text row, or a model that over-reaches, can in principle drive a posting, approval, reversal, or year-end close from a non-interactive wake with no human in the loop. NOTE (adjustment): the draft cited 'PRD §6.10' and 'backend.md:92' as contradicted — PRD.md:96 §6.10 speak-never-act is scoped to `[proactive]` ONLY, not `[documents]`, so it is NOT the contradicted contract; the genuinely over-broad statement is backend.md:92 'Every wake is speak-never-act', which the [documents] design (act-on-verb) already breaks by intent. The real defect is defence-in-depth: a blocklist where an allowlist belongs.",
+      "target": "The [documents] wake policy must be an explicit ALLOWLIST of exactly the triage verbs its handler needs (assign_document, reassign_document, mark_document_sample, request_document_coding, and the coa-coding draft/finalize chain for the code verb) — never a blocklist. Posting-class and destructive fns (approve_entry, reverse_entry, record_year_end_close, run_depreciation, edit_entry) must be structurally unreachable from any wake lane."
+    },
+    {
+      "id": "I-3",
+      "workstream_item": "I-coverage (lifecycle workflows with NO skill)",
+      "title": "Whole accounting-lifecycle capabilities are implemented in the DB and dashboard but have NO agent SKILL — Clara cannot drive AR/AP, fixed-asset runs, tax computation, SST returns, or recurring/accrual postings via chat",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2 defines these fns granted to authenticated with NO belcort/*/SKILL.md that teaches them: AR/AP subledger — record_ar_invoice/allocate_ar_receipt/write_off_ar_invoice/record_ap_bill/allocate_ap_payment/customer_statement/supplier_statement (db/v2/23-fns-subledger.sql:83,157,223,306,373,671,675); tax — compute_tax_draft/get_tax_computation (db/v2/23d-fns-tax.sql:45,465); SST return — compute_sst_return (db/v2/23e-fns-sst.sql:112; get_sst_return:823 appears only as an export SCOPE in export/SKILL.md:56, not a preparation skill); fixed assets — record_fixed_asset/run_depreciation/dispose_fixed_asset (db/v2/23b-fns-fixed-assets.sql:37,131,242); recurring/accrual/amortisation — create_recurring_journal/record_accrual/create_amortisation_schedule/run_recurring_journals/run_amortisation (db/v2/23c-fns-adjustments.sql:35,222,294,126,384); members/RBAC — create_invite/accept_invite/set_member_role/remove_member (db/v2/24b-fns-members.sql:31,81,183,203).",
+        "Grep of belcort/ confirms the only mentions are incidental, not driving skills: run_recurring_journals/run_amortisation appear once in year-end-close/SKILL.md:59 ('have the user run them' inside the pre-close gate); run_depreciation once in client-onboarding/SKILL.md:252 (carry-down baseline note); the AR/AP/tax/SST/FA/members write-fns have ZERO skill references.",
+        "Dashboard surfaces exist for the un-skilled capabilities: dashboard/components/tax/TaxComputation.tsx, SstReturn.tsx (a human can drive them in the UI); belcort/AGENTS.md:9 scopes Clara's mandate to coding transactions + escalating."
+      ],
+      "wrong": "The DB and dashboard implement a full Malaysian practice platform (AR/AP subledger, FA register, tax computation, SST return, adjustments), but the 11 skills cover only ingest→code→review→learn→reconcile→export→year-end-close — the document-coding loop. Every capability above is reachable by a human in the dashboard yet invisible to Clara: she cannot raise an AR invoice, allocate a receipt, run/dispose depreciation, prepare a tax computation or an SST-02 return, or post a recurring journal/accrual from chat. This is the single largest gap between the 'conversational super-UI over the whole product' North Star and the shipped agent doctrine.",
+      "target": "The rebuild needs new (or consolidated lifecycle) skills mapped 1:1 to the built fn families: an AR/AP-management skill, a fixed-asset skill, a tax-computation skill, an SST-return skill, a recurring-and-accruals skill, and a members/RBAC skill — each product-mapped to its fns with the correct scope/policy and a progressive-disclosure trigger."
+    },
+    {
+      "id": "I-4",
+      "workstream_item": "I-tools (AGENTS.md §15 inventory vs registry)",
+      "title": "AGENTS.md §15 claims to be THE audited-function inventory but has drifted from the built registry in BOTH directions — it omits registered tools and lists a fn that has no ToolSpec",
+      "severity": "medium",
+      "verdict": "ADJUSTED",
+      "evidence": [
+        "OMISSIONS verified — registered ToolSpecs absent from §15: set_coa_account_type (registry/journal.ts:118), add_bank_account (registry/documents.ts:131), record_fixed_asset/run_depreciation/dispose_fixed_asset (registry/fixedAssets.ts:11,37,60), seed_opening_carry_forward (registry/onboard.ts:61), and the read journal_entry_detail (registry/reads.ts:41) — none appear in AGENTS.md §15 (verified by grep of belcort/AGENTS.md). Plus the non-registry tools upload_document/extract_document/build_export/build_analysis_report/read_skill/read_reference (buildTools.ts:379-388) are not in §15.",
+        "REVERSE drift: belcort/AGENTS.md:75 lists `unmatch_bank_line` in the documents/recon inventory, but there is NO unmatch_bank_line ToolSpec (grep of agent/src/tools/registry/* finds none; the fn exists in db/v2/22-fns-documents-recon.sql:522 and is deliberately handled surface-only, so the agent has no tool to call it) — the inventory advertises a tool the agent cannot invoke.",
+        "CORRECTION to the draft: record_recon_hint/promote_recon_hint/retire_recon_hint ARE present in §15 (AGENTS.md:75), and seed_client_knowledge + update_client_profile ARE present (AGENTS.md:76) — the draft wrongly listed all five as omitted.",
+        "Superseded-in-place confirmed: belcort/AGENTS.md:77 still lists record_opening_balances (registered ops.ts:91) while client-onboarding/SKILL.md:296-298 declares it superseded by seed_opening_carry_forward for a carry-down; both are live and §15 gives no precedence rule."
+      ],
+      "wrong": "§15 is loaded verbatim as Clara's resident 'these are your audited functions' mandate (loader.ts:94). It lags the registry (the agent's own charter under-describes set_coa_account_type, the FA tools, build_analysis_report, etc.), advertises unmatch_bank_line which is not a callable tool, and carries record_opening_balances vs seed_opening_carry_forward with no precedence. For an inventory that claims completeness the bidirectional drift is a correctness defect, not cosmetics — though smaller than the draft implied (several tools it flagged as missing are in fact listed).",
+      "target": "Either generate the resident tool list from the registry at load time (single source of truth) or drop the claim-to-completeness and point to the registry. If kept by hand, regenerate on every registry change, remove non-tool entries (unmatch_bank_line), and carry an explicit superseded/preferred rule for overlapping fns."
+    },
+    {
+      "id": "I-5",
+      "workstream_item": "I-ambiguity (wrong OCR vendor in verbatim doctrine)",
+      "title": "AGENTS.md §6 names the OCR engine as 'Google Document AI' — the as-built engine is Azure Document Intelligence; three different OCR identities exist across the doctrine/code tree",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/AGENTS.md:50 §6: 'the runtime OCRs the bytes through a deterministic engine (Google Document AI) SERVER-SIDE'.",
+        "As-built is Azure: agent/src/ocr/azureDocai.ts:1-9 implements Azure AI Document Intelligence v4.0 REST (prebuilt-layout, api-version 2024-11-30); agent/src/main.ts:25,59,124-130 wires makeAzureDocaiOcr; docs/architecture/backend.md:89 names 'Azure Document Intelligence'.",
+        "The stale 'Google Document AI' string also survives in code comments: agent/src/tools/buildTools.ts:310 and agent/src/tools/types.ts:95 (ToolContext.ocrDocument doc-comment).",
+        "belcort/_shared/ocr-cache-schema.md:36 carries a THIRD, v1-era engine vocabulary: engine enum 'pymupdf (text PDF) | marker-pdf (scanned/OCR)'; doc-ingest/SKILL.md:3 alone is vendor-agnostic ('deterministic Document-AI OCR')."
+      ],
+      "wrong": "The doctrine file the live agent loads (AGENTS.md §6) names a vendor BELCORT does not use, and the shared OCR-cache contract names two more stale engines. Three OCR identities exist; at most one is as-built. This is a provenance/integrity defect in a document that must be authoritative, and it misleads any engineer or auditor reasoning about the OCR path.",
+      "target": "Standardise on the real engine (Azure Document Intelligence) in AGENTS.md §6, the ocr-cache-schema engine enum, and the buildTools/types code comments — or make them vendor-agnostic ('the deterministic OCR engine') and pin the vendor once, in the deploy/runtime doc only."
+    },
+    {
+      "id": "I-6",
+      "workstream_item": "I-ambiguity (Hermes/v1 residue in the v2 canon)",
+      "title": "Decommissioned Hermes/v1 instructions live inside the verbatim-loaded v2 doctrine — a pointer to a DEPLOY.md that does not exist, and a 'Hermes session memory' persistence step the v2 runtime cannot honor",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/firm-bootstrap/SKILL.md:107-109 'Human prerequisite… Hermes is installed, the belcort profile exists… See DEPLOY.md.' — no DEPLOY.md exists anywhere in the repo (verified: Glob **/DEPLOY.md → none).",
+        "belcort/firm-bootstrap/SKILL.md:292-293 failure-mode: 'User picks /pause mid-interview: persist partial answers to Hermes session memory; on next turn, resume' — the v2 runtime has no such store (interview state is in-conversation per firm-bootstrap:50-51; run/clarify state is process-local per agent/src/runtime/openai/runtime.ts:136 `private readonly runs = new Map`), so the instruction is unfulfillable.",
+        "All 11 SKILL.md carry a metadata.hermes front-matter block (grep 'hermes:' → 11/11 files); firm-bootstrap/SKILL.md:302 and client-onboarding/SKILL.md:391 say 'Does NOT touch <HERMES_HOME> paths' — dangling v1 references. AGENTS.md:3-5 states belcort/ is loaded verbatim, so all of this is live prompt content."
+      ],
+      "wrong": "Clara's resident instructions reference a retired runtime (Hermes), a non-existent runbook (DEPLOY.md), and a persistence mechanism the current runtime lacks. A capable model may follow the DEPLOY.md pointer or rely on 'session memory' that will silently drop the interview on a restart — the exact process-local-state fragility the runtime already has.",
+      "target": "Purge all Hermes/DEPLOY.md/HERMES_HOME/session-memory residue from the doctrine. Re-ground the /pause-resume story on whatever durable state the rebuilt runtime provides (DB-backed runs/checkpoints), and rename/remove the metadata.hermes front-matter block."
+    },
+    {
+      "id": "I-7",
+      "workstream_item": "I-ambiguity (Telegram / send_message residue)",
+      "title": "Multiple doctrine files still teach Telegram inline_keyboard + messaging.send_message mechanics for a v2 runtime that has neither; AGENTS.md §4 itself says the tool does not exist",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/review-queue/SKILL.md:16-47 header teaches Telegram inline_keyboard buttons + messaging.send_message, cites 'R.6 (Telegram batch UX)' (a plan doc not in the repo), and description L3 says cards surface 'on Telegram/Web'.",
+        "Telegram/send_message references also in coa-coding/SKILL.md:30-31 ('clarify_tool stays canonical for Telegram'), doc-ingest/SKILL.md:18-19 (messaging.send_message), rule-edit/SKILL.md:35,53 ('Bookkeeper Telegram phrases'), period-entries/SKILL.md:66 ('Plain send_message').",
+        "belcort/AGENTS.md:45-46 §4: 'there is no messaging.send_message tool — plain prose IS its equivalent'; the runtime has no Telegram transport (agent HTTP surface is SSE/web only). A literal messaging.send_message call would hit the SDK's toolNotFoundBehavior='raise_error' hard-fail path (buildTools.ts:130-133 note)."
+      ],
+      "wrong": "The doctrine repeatedly instructs the agent to use a transport (Telegram) and a tool (messaging.send_message) that do not exist in v2, relying on the model to reinterpret 'plain send_message' as 'plain prose'. A literal reading produces a failed/absent tool call, and the Telegram-card framing muddies the actual (web/SSE + fenced-artifact) card mechanics.",
+      "target": "Strip Telegram and messaging.send_message from every skill; state the real surface (web chat + SSE, clarify_tool for pauses, fenced je_review/export_result blocks for cards). The clarify-tool-card-patterns reference should describe the web renderer, not Telegram inline_keyboard."
+    },
+    {
+      "id": "I-8",
+      "workstream_item": "I-ambiguity (code_execution contradiction)",
+      "title": "coa-coding/SKILL.md:40 says 'Python stays fine for OCR / code_execution' — contradicting the no-code_execution rule stated in six sibling skills and enforced structurally in the runtime",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/coa-coding/SKILL.md:40, inside the DB-ACCESS paragraph of the highest-throughput skill: '(Python stays fine for OCR / code_execution.)'",
+        "The opposite is stated in doc-ingest/SKILL.md:39 ('this v2 runtime has NO code_execution / Python sandbox; never plan a step that runs code'), firm-bootstrap/SKILL.md:79, export/SKILL.md:96, year-end-close/SKILL.md:27, bank-recon/SKILL.md:41, period-entries/SKILL.md:39-40.",
+        "Structurally enforced: agent/src/tools/registry.ts:57-74 BANNED_TOOL_TOKENS blocks shell/exec/psql/file/fetch/http/browser tool names, and there is no code_execution tool anywhere in agent/src/tools/*; the only 'code_execution' strings in agent/src are NEGATIONS in exportFormat.ts:2-4 ('the v2 OpenAI-Agents-SDK runtime has NO code_execution')."
+      ],
+      "wrong": "A single stale v1 line inside the most-used coding skill tells the model that a Python/code_execution capability exists. If believed, the model may plan a code_execution OCR/formatting step that has no tool to execute it, producing a dead-end or a fabricated result — in the exact skill that drafts journal entries.",
+      "target": "Delete the code_execution line from coa-coding; the no-code_execution invariant should be stated once in AGENTS.md and inherited, not restated (correctly six times, incorrectly once) across skills."
+    },
+    {
+      "id": "I-9",
+      "workstream_item": "I-ambiguity (full/analysis 'unwired' contradiction)",
+      "title": "Two loadable export texts tell the agent the `full` pack and the analysis report don't exist — both are wired in code",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/export/references/journals-csv-execution-pattern.md:30-31 'Not yet wired: the full bundle and the ad-hoc VISUAL analysis report (charts/KPIs) — say so honestly; never fabricate a file/card for an unwired scope.'",
+        "belcort/year-end-close/SKILL.md:151-153 'The full multi-file bundle is still unwired — don\\'t fabricate one.'",
+        "Contradicted by belcort/export/SKILL.md:114-117 (full pack described as wired) and by code: agent/src/tools/exportTool.ts:61 EXPORT_SCOPES includes full, :238 lists full in the scope enum, :276 requires fy, :355 handles scope==='full' composing a combined PDF, :404 forces pdf; agent/src/tools/analysisTool.ts implements build_analysis_report (buildTools.ts:388 wires it under interactive + documents)."
+      ],
+      "wrong": "When year-end-close or the journals-CSV reference is loaded (progressive disclosure), the agent is told a working feature is unavailable and instructed to refuse it. A user asking for the full client pack via year-end-close, or the agent citing the CSV reference, will wrongly decline or 'honestly' say it is unwired.",
+      "target": "Update both stale texts to match export/SKILL.md and exportTool.ts (full + build_analysis_report are wired). Better: remove the journals-csv-execution-pattern reference (kept 'only as a pointer' yet now misinforms) and delete the year-end-close 'still unwired' caveat."
+    },
+    {
+      "id": "I-10",
+      "workstream_item": "I-ambiguity (906-000 stale flag)",
+      "title": "presentation-mapping.md still instructs the agent to FLAG 906-000 as mis-typed OI — the seed was corrected to EP on 2026-06-27, so the instruction now generates false escalations",
+      "severity": "low",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/export/references/presentation-mapping.md:58-63 '906-000 UPKEEP OF MOTOR VEHICLE is seeded acc_type=OI (other income) but is an expense (EP). When this account appears with a balance, FLAG it to the user.'",
+        "db/v2/24-fns-onboard.sql:214 `('906-000','UPKEEP OF MOTOR VEHICLE','EP',null,null,null),  -- fixed 2026-06-27: was mis-typed 'OI'` — the seed now types it EP, so any client onboarded after the fix has no discrepancy to flag.",
+        "presentation-mapping.md:66-69 notes record_year_end_close independently RAISES unclassified_acc_type as the real backstop."
+      ],
+      "wrong": "For every client seeded after 2026-06-27, the reference tells the agent to raise a false 'this account is mis-typed' flag on the management-accounts cover note, eroding trust in the agent's flags. It is correct only for pre-fix legacy data, which the reference does not scope.",
+      "target": "Scope the flag to legacy clients only, or remove it (the seed is fixed and record_year_end_close is the real backstop)."
+    },
+    {
+      "id": "I-11",
+      "workstream_item": "I-ambiguity (structural defects in verbatim procedure text)",
+      "title": "Step/phase numbering gaps and dangling cross-references riddle the verbatim-loaded procedure bodies, and year-end-close has no '## When this fires' so its routing trigger renders empty",
+      "severity": "low",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/review-queue/SKILL.md step headings run Step 0,1,3,4,5 (verified by grep '### Step') — there is no Step 2.",
+        "belcort/export/SKILL.md headings jump Step 5→7 (no Step 6) yet Step 7's error section at :207 cites 'the ONLY sanctioned retry is the documented 23505 version-retry in Step 6' — Step 6 does not exist.",
+        "belcort/kb-evolve/SKILL.md jumps Step 1→3a (no Step 2/3); belcort/rule-edit/SKILL.md's only numbered step is 'Step 3' (:64) with the Step 1-2 client-picker referenced but never specified.",
+        "belcort/client-onboarding/SKILL.md:3 says 'across 4 phases' then the body runs Phase A, B, D, D-seed, E (grep '## Phase') — there is NO Phase C; and a '[[step:14/14:sample_invoices]]' marker (:156-163) appears inside a 'Phase A — Identity interview (13 questions)' (:71).",
+        "belcort/year-end-close/SKILL.md has NO '## When this fires' heading (grep count 0; headings are Step 0/1/2/3/4 + 'Adjustments after a close'), so agent/src/doctrine/frontmatter.ts:62 section('when this fires') returns '' and loader.ts:66 renders that skill's routing line with no 'Fires:' trigger."
+      ],
+      "wrong": "The bodies are served verbatim to the model on demand (read_skill), and the routing menu is the model's only trigger index. Missing steps, a citation to a non-existent Step 6, a 13-vs-14 marker mismatch, and an empty 'When this fires' for the most consequential skill (year-end close) each force the model to reconcile an inconsistency at decision time and weaken routing.",
+      "target": "Renumber every skill's steps/phases contiguously, fix or remove the export Step-6 citation, reconcile the client-onboarding phase/question counts, and give year-end-close a '## When this fires' block so its routing trigger renders. Treat the loaded body as executable spec, not prose."
+    },
+    {
+      "id": "I-12",
+      "workstream_item": "I-salvage (dead/duplicate reference assets)",
+      "title": "A 39KB binary PDF is shipped byte-identically in three skill dirs but the loader only serves .md references — the PDFs are never loaded (dead weight); an empty __init__.py v1 artifact remains; the flat OCR-cache producer drift is carried as permanent 'aspirational' debt",
+      "severity": "low",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/coa-coding/GL-Account-TaxNIndustriesCode.pdf, belcort/review-queue/GL-Account-TaxNIndustriesCode.pdf, belcort/rule-edit/GL-Account-TaxNIndustriesCode.pdf are byte-identical (39372 bytes each; SHA256 9063DB4D…F73F3 for all three, verified).",
+        "agent/src/doctrine/loader.ts:142 loads references from each skill's references/ dir but filters `.endsWith('.md')` only, and read_reference serves by basename over that .md set — a PDF is never loaded or servable; the three PDFs are never seen by the agent.",
+        "belcort/__init__.py is 0 bytes (verified) — a v1 Python-package artifact meaningless in the TS runtime.",
+        "belcort/_shared/ocr-cache-schema.md:14-24 documents that the live agent writes a FLAT {text,fields,confidence,…} record while the nested belcort_ocr_cache.v1 envelope is 'target/aspirational, not yet produced' (SP-6.4 deferred), with consumers coalescing both shapes — a producer/consumer drift every doc-consuming skill must code around."
+      ],
+      "wrong": "The three GL PDFs are pure repo/doctrine bloat that can never inform the agent (wrong file type for the loader), and __init__.py is dead v1 residue. The OCR-cache schema simultaneously documents a target shape the producer never emits and instructs all consumers to defensively read the other shape — permanent aspirational debt that complicates every doc-consuming skill.",
+      "target": "DROP the three duplicate PDFs (or convert their content to a single loaded .md reference if the COA/tax mapping is needed) and the empty __init__.py. For the OCR cache, pick ONE shape as the rebuild contract and make the producer emit it, retiring the coalesce-both adapter."
+    },
+    {
+      "id": "I-13",
+      "workstream_item": "I-salvage (per-skill PORT/REBUILD/DROP)",
+      "title": "Salvage classification: of 11 SKILL.md, ~3 are light PORTs and ~6 REBUILDs; SOUL.md + the _shared contracts PORT; AGENTS.md REBUILD; the GL PDFs + two export references DROP/REBUILD",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "PORT verbatim: SOUL.md (grep for Hermes/Telegram/send_message/Google/code_execution → 0 hits, clean persona); _shared/myinvois-reference.md (myinvois-reference.md:41-44 verified RM1M threshold, no RM500k band, cancellation recorded).",
+        "PORT (light edit): bank-recon/SKILL.md (Step 4 has a mid-sentence paste error at :94-96 that interrupts the draft_entry/finalize_coding instruction), rule-edit/SKILL.md (specify the missing Steps 1-2 client picker; drop Telegram phrasing at :53), period-entries/SKILL.md (drop 'Plain send_message' at :66).",
+        "REBUILD (high-value domain content + material drift/defects): coa-coding (SST hybrid ladder :174-229 + CN/DN polarity :231-234 are crown jewels — fix the I-8 code_execution line at :40), client-onboarding (BEE negative-equity carry-down worked example :280-294 is gold — fix no-Phase-C, 13-vs-14 marker, record_opening_balances-superseded), review-queue (531 lines; split the [documents]/[proactive] wake handlers out; fix the I-2 blocklist in CODE; drop Telegram; add the missing Step 2), kb-evolve (learning loop sound — fix the Step 1→3a gap), doc-ingest (fix Telegram inflow + move any 'NOT WIRED' UBL block to a reference), year-end-close (rich close content — fix front-matter + the missing When-this-fires I-11 + the full-unwired I-9), export (build_export orchestration sound — fix the I-9 bundled-reference contradiction + the Step-6 dangling cite).",
+        "AGENTS.md REBUILD (§6 wrong OCR vendor I-5, §15 tool drift I-4, Hermes header/firm-bootstrap residue I-6 — the 20-mandate shape is right; refresh contents). DROP/REBUILD references: 3× GL PDF DROP (I-12), journals-csv-execution-pattern.md REBUILD-or-DROP (I-9), presentation-mapping.md REBUILD (906-000 stale flag I-10), _shared/ocr-cache-schema.md REBUILD (stale engine enum I-5, producer drift I-12)."
+      ],
+      "wrong": "Roughly half the skill corpus carries stale v1 residue (Hermes/Telegram/code_execution/unwired-feature claims) that would be inherited wholesale if the rebuild copies the tree; yet the domain content (SST ladder, carry-down, tax provision, learning loop) is genuinely valuable and must not be lost in a from-scratch rewrite.",
+      "target": "Rebuild plan: PORT the clean _shared assets + SOUL + the 3 light-edit skills near-verbatim; REBUILD the 6 domain-heavy skills by extracting their accounting logic into fresh, drift-free bodies mapped to the current registry; REBUILD AGENTS.md against the live tool set; DROP the dead PDFs/__init__.py and the self-contradicting references. Preserve the proven domain examples (BEE carry-down, SST hybrid, CN/DN polarity) as tested fixtures."
+    },
+    {
+      "id": "I-14",
+      "workstream_item": "I-agentic-vs-hardcoded",
+      "title": "The agentic security core is real and code-enforced, but the interview clarify-loop reliability is propped up by a hardcoded flow-control directive injected into every clarify result, and the 'cards' are fenced-text re-extraction, not a native artifact lane",
+      "severity": "low",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "Genuinely agentic + code-enforced (holds regardless of skill prose): the p_actor anti-spoof injection (agent/src/tools/buildTools.ts:82-89 overwrites any model-supplied actor), the active-scope write-gate (buildTools.ts:54-79), the per-wake tool policy (buildTools.ts:19-33), and progressive disclosure (read_skill/read_reference over pre-loaded bodies, loader.ts:44-53 + buildTools.ts:157-202).",
+        "Hardcoded plumbing compensating for model behavior: agent/src/runtime/openai/tools.ts:56-63 the clarify_tool execute returns the human answer PLUS a hardcoded '[flow-control]' directive re-stating the interview loop discipline on EVERY clarify result — the comment (:57-60) says the model tends to yield its turn after a clarify result. The same discipline is also stated in AGENTS.md §4 and firm-bootstrap:32-40 / client-onboarding:35-43.",
+        "The je_review/export_result 'cards' travel as fenced JSON in assistant text, re-extracted at read (agent/src/http/sessions.ts:43-59 ARTIFACT_FENCE regex + extractFencedArtifact), not a native SDK typed-artifact lane."
+      ],
+      "wrong": "The 'genuinely agentic vs hardcoded plumbing' question resolves to: the security/attribution/scoping/progressive-disclosure layer is genuinely agentic and code-enforced (keep it), but the multi-question interview reliability is carried by a hardcoded per-turn directive injection and triple-stated prose, and the card system is fenced-text extraction, not a native artifact channel. Copying the skills without the tools.ts flow-control shim would regress onboarding to the 'stops after Q1' bug the shim was written to fix.",
+      "target": "In the rebuild, keep the code-enforced write-gate/actor/policy/progressive-disclosure core. Decide deliberately whether the interview loop should stay a prompt shim or move to a durable, runtime-owned checkpointed multi-step flow, and whether cards should become a native typed artifact lane — so the doctrine no longer has to over-state the loop discipline three times."
+    },
+    {
+      "id": "I-15",
+      "workstream_item": "I-signal (harness-improvement-report verification)",
+      "title": "Signal file harness-improvement-report: its top recommendations were ALREADY ADOPTED in the installed dev-harness plugin (3.2.1) — the report is largely satisfied, not outstanding",
+      "severity": "low",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "The signal file (on the owner's Desktop, dated 2026-05-07, analysing harness 2.3.0) recommends a mandatory User-Journey-Simulation phase between BUILD and EVALUATE and evaluator-plugin integration.",
+        "Verified in the installed plugin ~/.claude/plugins/cache/belcort-harness/harness/3.2.1: SIMULATE is now a generator MODE (agents/generator.md contains 21 'SIMULATE' occurrences; commands/sprint.md:73 lists generator modes 'NEGOTIATE, FINALIZE-CONTRACT, BUILD, SIMULATE', :88 'T7 Simulate', :264 '3.5. Simulate — drive prod-mode runtime'; templates/features/simulation-report.md.txt exists). agentlint + security-guidance are integrated into the evaluator (evaluator.md matches agentlint/security-guidance)."
+      ],
+      "wrong": "The improvement report reads as an outstanding to-do list, but its highest-ROI items (the simulation phase, evaluator plugin integration) are already shipped in the harness version actually installed. Treating it as open work would duplicate effort. NOTE: this signal concerns the belcort-HARNESS dev-pipeline plugin (Planner/Generator/Evaluator), which is separate from the belcort/ accounting doctrine that is the substance of Workstream I.",
+      "target": "Report to the owner that the improvement-report's key recommendations are already in 3.2.1; scope any further harness-plugin work to residual items rather than re-adding the simulation phase. Keep the accounting-doctrine audit (I-1..I-14) separate from dev-plugin refinement."
+    },
+    {
+      "id": "I-16",
+      "workstream_item": "I-signal (harness-bugs verification)",
+      "title": "Signal file harness-bugs: several concerns reference dev-harness scripts that DO NOT EXIST in the installed plugin (already removed), and the sessionstart-hook ask is already satisfied",
+      "severity": "low",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "The signal file (owner's Desktop 'harness bugs.txt') items #15/#16/#18 ask to reassess progress-poller / phase-guard / assumption-test scripts; a recursive grep of ~/.claude/plugins/cache/belcort-harness/harness/3.2.1 for progress-poller|phase-guard|assumption-test returns 0 hits, and scripts/ contains only doctor.sh, install-rules.sh, setup.sh, uninstall-rules.sh — these features are already gone.",
+        "harness-bugs #11 'sessionstart hook should only fire main skill and let orchestrator self-read the project state': hooks/session-start.sh is already minimal ('this hook is only a 1-line trigger. State reading is done by the skill itself') and does no state-reading.",
+        "harness-bugs #14 'read the pretools use hook': hooks/pre-tool-use.sh exists and is documented — it parses tool JSON from stdin (fixing a prior $1 parse bug), blocks force-push/sudo/.harness deletion, and fails open if no JSON parser is available."
+      ],
+      "wrong": "The owner's harness-bugs list was written against an earlier/bloated harness state; against the installed 3.2.1 plugin, items #15/#16/#18 are moot (the scripts are already removed) and #11 is already implemented. Verifying them prevents wasted 'clean it up' work on features that no longer exist. NOTE: like I-15, this signal targets the dev-harness plugin, not the belcort/ accounting doctrine.",
+      "target": "Confirm to the owner that #15/#16/#18 need no action (already removed) and #11 is already satisfied; focus harness-bugs triage on the still-live design questions in the file rather than the removed scripts."
+    }
+  ],
+  "refuted": [],
+  "fine_claims": [
+    {
+      "claim": "Injection defence is consistently and thoroughly applied across the doctrine — AGENTS.md §16 declares all OCR/DB free-text/«»-fenced content inert DATA, and the wake handlers re-state second-order injection with concrete DATA-not-command examples.",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/AGENTS.md:86 §16 global injection defence",
+        "belcort/review-queue/SKILL.md:249-257 (second-order injection with source_filename/supplier_name DATA examples)",
+        "agent/src/runtime/inject.ts:31-32 the dataRule framing prepended to every wake note; clean()/fence() strip control chars + guillemets"
+      ]
+    },
+    {
+      "claim": "The DB-owns-every-number invariant is consistently stated in skills AND structurally backed — the agent's only write paths are the named audited fns routed through ctx.rpc, and it never computes a figure.",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/AGENTS.md:31-33 §2 'Database is the only state mutator… NEVER compute a financial figure'",
+        "belcort/coa-coding/SKILL.md:211-213 'make the Dr the SUM of the other legs — never compute the Dr independently'; bank-recon/SKILL.md:112-113 'The DB owns the entire tie-out'",
+        "agent/src/tools/buildTools.ts:104 buildFnToolDef routes every fn call through ctx.rpc(spec.fn, finalArgs). NOTE: this holds for the fn-tools; query_books/agent_select is the exception documented in I-1."
+      ]
+    },
+    {
+      "claim": "The SST hybrid ladder in coa-coding is accounting-correct and matches the binding backend policy — output-tax only, no input credit, not_registered never auto-legs, doc-states-verbatim over compute.",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/coa-coding/SKILL.md:174-229 (three-precedence hybrid; :227-229 'Never post an output-tax leg for a non-registrant'; :221-225 purchase-side SST folded into expense, no input-tax asset)",
+        "docs/architecture/backend.md §2A (output-only, effective-dated tax_rates)",
+        "db/v2/18-tables-reference.sql:43-44 service-8 general = 6% at 2018-09-01, rose to 8% on 2024-03-01 (effective-dated); db/v2/20-fns-journal.sql:42 compute_sst_leg"
+      ]
+    },
+    {
+      "claim": "The interview clarify-loop discipline (no plain prose between questions) is reinforced in BOTH doctrine and runtime code, so onboarding reliability does not rest on the prompt alone.",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/AGENTS.md:45-46 §4",
+        "belcort/firm-bootstrap/SKILL.md:32-40 and client-onboarding/SKILL.md:35-43",
+        "agent/src/runtime/openai/tools.ts:56-63 injects a [flow-control] directive into every clarify tool result"
+      ]
+    },
+    {
+      "claim": "Tool-layer enforcement (scope write-gate, p_actor anti-spoof injection, per-wake policy, structural no-shell/psql/file/web) holds for the fn-tools regardless of skill prose.",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src/tools/buildTools.ts:54-89 enforceScope + injectActor",
+        "agent/src/tools/buildTools.ts:19-33 policyAllows / WRITE_ALLOW",
+        "agent/src/tools/registry.ts:57-74 BANNED_TOOL_TOKENS + buildTools.ts:356-363 assertNoBannedTools. CAVEAT: applies to buildFnToolDef; the freeform query_books read tool (buildTools.ts:110-122) is NOT routed through this gate — see I-1."
+      ]
+    },
+    {
+      "claim": "The kb-evolve learning loop is coherently designed and product-mapped — never blind-writes client_kb_rules, evidence→user-gated proposal, promotions user-gated, recon-hint kept distinct from kb-evidence, human-only self-reconcile fence.",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/kb-evolve/SKILL.md:16 (never blind-writes), :76-86 (user-gated promotion, no auto-promote), :258-292 (BM2 account vs BM2b matching split), :306-325 (chat-mediated human-only fence)",
+        "db/v2/25-fns-ops.sql:1479-1482 trg_pn_kbp emits kb_proposal_open on a new open proposal"
+      ]
+    }
+  ],
+  "unverified": [
+    "Live Supabase (belcort-shared) state could not be inspected — the repo is frozen READ-ONLY and no live DB connection was made; all DB claims are verified against db/v2/*.sql source, not the running catalog. Whether the deployed doctrine on Fly matches belcort/ HEAD is assumed from loader.ts (reads belcort/ at startup) but not confirmed against a live process.",
+    "Whether the model, at runtime, actually reinterprets the stale 'messaging.send_message'/'Telegram' instructions as 'plain prose' (I-7) rather than attempting a literal tool call is behavioral and not statically verifiable from the frozen code.",
+    "The exact live-fired wake conditions and their note grammar were verified against db/v2/25-fns-ops.sql triggers and agent/src/runtime/inject.ts, but not exercised on the ephemeral rig — the emit-vs-consume coupling is read from source only.",
+    "belcort/doc-ingest/references/extracted-fields-schemas.md was not exhaustively cross-checked field-by-field against the MyInvois 55-field model (myinvois-reference.md:12-24) — classified PORT-pending-review, not fully verified.",
+    "Whether a SECURITY DEFINER writer invoked through agent_select (I-1) succeeds within-firm depends on the fn owner's RLS posture (FORCE RLS vs owner-bypass) on the running catalog; verified from source that the guard does not block the call and that the fns are `security definer` + granted to authenticated, but the actual commit was not exercised against a live/rig DB.",
+    "The two owner signal files concern the belcort-HARNESS dev-pipeline PLUGIN (installed at ~/.claude/plugins/cache/belcort-harness/3.2.1), outside the frozen accounting repo; the specific checkable claims (removed scripts, adopted SIMULATE phase, session-start/pre-tool-use hooks) were verified, but the full 3.2.1 Planner/Generator/Evaluator pipeline was not audited end-to-end.",
+    "The je_review/export_result/suggestion/client_row card rendering on the dashboard (whether the fenced-block seam hydrates a live card) is a dashboard-workstream concern; the agent-side extraction (sessions.ts:43-59) was confirmed but not the dashboard render path."
+  ],
+  "decision_brief": "WORKSTREAM I — Skills & harness architecture (ADVERSARIAL VERIFICATION). I opened every cited file/line for all 16 draft findings and all 6 fine_claims. Result: 14 CONFIRMED, 2 ADJUSTED (I-2, I-4), 0 REFUTED; all 6 fine_claims stand.\\n\\nHEADLINE unchanged: the security/attribution CORE is genuinely agentic and code-enforced (curated fn-tools, scope write-gate, p_actor anti-spoof, per-wake policy, progressive disclosure) — keep it. Three problem classes dominate: (1) two GUARDRAIL gaps where doctrine over-claims safety the code does not enforce — query_books/agent_select is a SELECT-wrapped-DEFINER mutation path presented as 'read-only' in all 11 skills and wired under every wake policy (I-1, CONFIRMED CRITICAL; RLS still bounds it to the firm, so it is a WITHIN-firm write + policy-bypass, not cross-tenant — the draft's cross-firm framing was tightened), and the [documents] wake policy is a blocklist leaving approve/reverse/close reachable from a non-interactive wake (I-2, HIGH but ADJUSTED: the draft's 'contradicts PRD §6.10' is wrong — PRD.md:96 §6.10 is scoped to [proactive] only; the over-broad statement is backend.md:92, and the real defect is blocklist-where-allowlist-belongs); (2) a large COVERAGE gap — AR/AP, fixed-asset, tax, SST-return, recurring/accrual, members fns are all built + granted but have NO driving skill (I-3, CONFIRMED HIGH); §15's tool inventory has drifted BOTH ways — it omits set_coa_account_type/add_bank_account/the 3 FA tools/seed_opening_carry_forward/journal_entry_detail and the 6 non-registry tools, AND lists unmatch_bank_line which has no ToolSpec (I-4, ADJUSTED MEDIUM: the draft wrongly flagged record_recon_hint/promote_recon_hint/retire_recon_hint + seed_client_knowledge + update_client_profile as omitted — those ARE present in §15); (3) pervasive v1 RESIDUE loaded verbatim — wrong OCR vendor (Google vs Azure, plus a third pymupdf/marker-pdf enum) (I-5), Hermes/DEPLOY.md/session-memory (I-6, DEPLOY.md confirmed absent), Telegram/messaging.send_message across 6 files (I-7), a code_execution contradiction in coa-coding:40 vs 6 siblings (I-8), two 'full/analysis unwired' claims contradicting wired code (I-9), a stale 906-000 false-flag (I-10, seed fixed 2026-06-27), and structural numbering/routing defects incl. year-end-close's missing '## When this fires' (I-11). Salvage (I-13) and agentic-vs-hardcoded (I-14) verified as-stated; the two signal findings (I-15/I-16) target the dev-harness PLUGIN 3.2.1 (SIMULATE phase + agentlint/security already adopted; progress-poller/phase-guard/assumption-test already removed) — a workstream distinct from the belcort/ doctrine.\\n\\nPER-SKILL SALVAGE (I-13, verified): SOUL.md + _shared PORT; bank-recon/rule-edit/period-entries light-PORT; coa-coding/client-onboarding/review-queue/kb-evolve/doc-ingest/year-end-close/export REBUILD (extract the domain gold — SST hybrid, BEE carry-down, CN/DN polarity, tax provision, learning loop — into drift-free bodies mapped to the live registry); AGENTS.md REBUILD (fix §6 vendor, §15 drift, Hermes header); DROP the 3 byte-identical GL PDFs (SHA256 verified identical; loader serves .md only) + the empty __init__.py; REBUILD/DROP journals-csv-execution-pattern.md, presentation-mapping.md, _shared/ocr-cache-schema.md."
+}

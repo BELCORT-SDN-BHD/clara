@@ -1,0 +1,291 @@
+{
+  "workstream": "B — Onboarding (B1 ongoing-client carry-down + KB init; B2 live onboarding agent vs hardcoded flow)",
+  "findings": [
+    {
+      "id": "B-1",
+      "workstream_item": "B1",
+      "title": "seed_opening_carry_forward has no idempotency or already-seeded guard — a re-run silently DOUBLES the entire opening position",
+      "severity": "critical",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25b-fns-opening.sql:206-315 — the orchestrator has no check for pre-existing opening entries, no idempotency key on per-item seeders (ar_invoices/ap_bills have unique(entry_id) only — invoice_no/bill_no are plain non-unique text, db/v2/19-tables-subledger.sql:37,48,111,120), and step-2's balance check (25b:249-260) recomputes OBE across ALL opening entries: after run 1 plugged OBE to 0, run 2 with the same payload re-passes the check (items re-credit OBE by X, gl_lines net credit X) and posts everything again, plugging OBE back to 0",
+        "db/v2/25b-fns-opening.sql:300-308 — the client_financial_position snapshot upserts on (client_id, as_of_date), so the doubled totals overwrite the snapshot with in_balance still TRUE (assets = liab + equity holds at 2x) — no signal anything is wrong",
+        "db/v2/24-fns-onboard.sql:243 (seed_client_coa on-conflict-do-nothing) and 24:384-419 (seed_client_knowledge idempotent on pattern/account and kind/note) — every OTHER onboarding writer IS idempotent; the carry-forward is the exception",
+        "dashboard/lib/useOnboardingRun.ts:33-35 — the dashboard explicitly relies on 'the agent's idempotent onboard tools make safe' a fresh-start reload; that assumption is false for the carry-down",
+        "db/v2/25-fns-ops.sql:835-894 — record_opening_balances is equally unguarded (no pre-existing-opening check) and coexists with the carry-forward (both granted to authenticated, both agent tools: agent/src/tools/registry/onboard.ts:61-75 + ops.ts:91-107); nothing but skill prose (belcort/client-onboarding/SKILL.md:296-298) prevents running both",
+        "db/v2/tests/opening_carry_forward_test.sql (CF1-CF4) and db/v2/tests/opening_balances_test.sql — no test ever re-runs a seed; no test covers the duplicate case",
+        "contrast db/v2/14-tables-ops.sql:222 — uq_fy_close_live gives the close family exactly the one-live-row DB guard the opening family lacks"
+      ],
+      "wrong": "The single most consequential onboarding write (an ongoing client's whole opening TB, subledgers, FA register) can be posted twice with zero resistance and zero surfacing. The trigger path is real and documented: the interview run is non-durable (B-4), a reload restarts it, and the sanctioned recovery ('a later chat session can capture it', SKILL.md:314) is exactly a second seed_opening_carry_forward call. Combined with B-8 (opening entries cannot be reversed and subledger rows have no void path), a double-seed is silent books corruption with no clean repair.",
+      "target": "Carry-down must be a one-shot, DB-guarded operation: a per-client 'opening seeded' registry row (or partial unique on live opening state) that makes a second full seed raise loudly; per-item idempotency keys for incremental completion; and a supersede-not-duplicate re-seed verb for corrections — mirroring uq_fy_close_live's design for the close family."
+    },
+    {
+      "id": "B-2",
+      "workstream_item": "B1+B2",
+      "title": "No intra-firm role floor on the onboarding/carry-down write family — a viewer can onboard clients, post approved opening journals, and write advisory memory (the confirmed-KB-rule leg is DB-blocked)",
+      "severity": "high",
+      "verdict": "ADJUSTED",
+      "evidence": [
+        "db/v2/24-fns-onboard.sql:258-351 (onboard_client) and 24:111-248 (seed_client_coa) — neither calls any app.assert_can_* role floor; contrast update_client_profile 24:449 and add_bank_account 24:605-607 which call app.assert_can_review",
+        "db/v2/25b-fns-opening.sql:40-315 — all four opening seeders (which post status='approved' entry_kind='opening' journals directly) have no role floor; db/v2/25-fns-ops.sql:843-845 — record_opening_balances likewise; all granted EXECUTE to authenticated",
+        "db/v2/24-fns-onboard.sql:367-424 — seed_client_knowledge has no floor of its own; its NOTES leg lands via record_memory_note (db/v2/27-fns-memory.sql — no assert_can_* anywhere in the file), so a viewer can seed advisory memory. Its RULES leg is NOT bypassable: the nested create_kb_rule asserts admin+ (db/v2/21-fns-kb.sql:316 app.assert_can_manage_kb, which reads the CALLER's JWT role — db/v2/00-foundation.sql:176-185), so a sub-admin seed with rules raises 'forbidden' and the atomic seed rolls back — the draft claim that a viewer can mint confirmed rules is REFUTED",
+        "dashboard/app/(dash)/firms/[slug]/clients/new/page.tsx:5,34 — the page gates clients.create=admin and its comment claims 'onboard_client re-enforces via RLS — defense in depth', which is false: RLS enforces firm isolation only; any member (including a rank-1 viewer) with a session JWT can call the EXECUTE-granted fns directly via PostgREST (the dashboard-direct rpcBooks plane proves the wire exists)",
+        "db/v2/90-isolation-tests.sql:180-183 — isolation tests prove cross-FIRM denial (BLC02) for the seeders, but no test in db/v2/tests/ proves any intra-firm role denial for onboard_client/seed_client_coa/the opening family (role-floor tests exist for kb/approve/triage/firm-profile only: kb_rbac_test.sql, approve_entry_test.sql:166, document_triage_test.sql:160, update_firm_profile_test.sql:50)"
+      ],
+      "wrong": "The dashboard's admin gate is presentation-only for the onboarding and opening-balance write family: a viewer can create clients, seed COAs, and post the takeover opening position (approved journals + FP snapshot) with one HTTP call — the plan→approve law for the most consequential onboarding writes has no DB enforcement. The KB rulebook floor, by contrast, DOES hold through seed_client_knowledge (admin+ asserted inside the nested create_kb_rule), so the confirmed-rule surface is not part of this gap; only advisory memory notes are viewer-writable.",
+      "target": "Every onboarding/carry-down mutation class needs an explicit DB-owned authorization floor (admin+ for onboard/seed families, consistent with the KB rulebook and the clients.create UI gate), asserted inside the SECURITY DEFINER fn like update_client_profile does — never only in the UI — plus rbac tests proving the intra-firm denial."
+    },
+    {
+      "id": "B-3",
+      "workstream_item": "B2",
+      "title": "Run completion is read as success and post-commit verification covers only the client row — a failed or never-reached carry-down/KB-seed still shows an unqualified success card",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "dashboard/lib/stageReducer.ts:130-131 — 'done' maps to phase 'success' unconditionally, whatever the run actually accomplished",
+        "agent/src/runtime/openai/runtime.ts:258 — settleRun(rec,'completed',…) fires on ANY final model output; a seed_opening_carry_forward raise the model narrates ('surface the exact text and STOP', belcort/client-onboarding/SKILL.md:256-258) settles the run as completed",
+        "dashboard/app/(dash)/firms/[slug]/clients/new/ClientOnboardLive.tsx:85-112 — the commit re-read verifies ONLY the client row + COA count; nothing re-reads the opening position, FP snapshot, or seeded KB",
+        "dashboard/components/onboarding/cinematic/CarryDownReview.tsx:32-33 + ClientOnboardCinematic.tsx:244 — the review card's error prop is fed only state.error (transport errors: stall/unknown-run/agent-down, useOnboardingRun.ts:104-116); a DB fn raise never reaches it",
+        "dashboard/components/onboarding/client/ClientOnboardCinematic.tsx:119-129 — the false-success guard exists ONLY for the missing-client-row case (commitUnverified)"
+      ],
+      "wrong": "For an ongoing client, 'onboarded' without the opening position is materially false — the books tie out to nothing at the takeover date — yet the flow renders the same success card whether carry-down posted, raised opening_carry_forward_unbalanced, or was never reached because the run died after onboard_client. The one verification that exists (client row) proves the WRONG invariant for the B1 requirement.",
+      "target": "The success card must verify the full committed outcome for the path taken: client row + (when carry-down was proposed/confirmed) the opening FP snapshot / opening entries + KB seed counts, with an explicit 'carry-down not captured — resume here' state instead of silent omission."
+    },
+    {
+      "id": "B-4",
+      "workstream_item": "B2",
+      "title": "The whole interview lives in one process-local, non-durable run where any plain assistant sentence ends onboarding — with two observed production failure modes documented in the skill itself",
+      "severity": "high",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/client-onboarding/SKILL.md:35-43 — 'a single stray sentence between questions ends the run after just one answer (this is the observed onboarding-stops-after-Q1 failure)'; SKILL.md:84-91 — 'the observed SSM-format-reject → hard-exit bug' aborting 'with NO client created'; the sole mitigation is prompt discipline ('emit nothing but clarify_tool calls')",
+        "agent/src/runtime/openai/runtime.ts:136 ('private readonly runs = new Map<string, RunRecord>()'), :3-4 (streamRun generator suspends on clarify awaiting a side-channel answer), :80-99 and :482-495 (bounded in-memory retention; abandoned runs evicted) — active interview state is process-local; an agent deploy/restart mid-interview destroys it",
+        "dashboard/lib/useOnboardingRun.ts:33-35 — 'Cross-visit resume is intentionally dropped on v2 (the run pointer is in-memory only): a reload begins a fresh interview'; :106-107 — 3 consecutive unknown-run polls surface 'This onboarding session ended.'",
+        "belcort/firm-bootstrap/SKILL.md:32-39 — identical fragility on the firm interview ('a single stray sentence between questions ends the run after just one answer')",
+        "dashboard/lib/useOnboardingRun.ts:157-165, 215-225 — a stray plain-text turn is synthesized as a clarify with clarifyId null; answering it posts a NEW chat turn/run, so even the graceful path re-orients instead of continuing"
+      ],
+      "wrong": "This directly answers B2's question: the flow is agentic, but end-to-end continuation is guaranteed by nothing but the model's obedience to a MANDATORY prose rule the authors already watched it break twice in production. A half-initialized client (committed identity, no carry-down, no KB) is a normal outcome of a mid-flow death, and there is no guided resume — a fresh interview hits client_exists (SKILL.md:152, whose only guidance is 'ask the user, don't retry blindly'), leaving completion to unstructured chat, which then collides with B-1.",
+      "target": "Durable, DB-backed interview/run state (the ADR-122 target's tasks/runs/checkpoints/interruptions) with a structural pause primitive that does not depend on the model never emitting prose, plus a resumable onboarding checklist (identity → carry-down → KB) whose incomplete steps persist and re-surface."
+    },
+    {
+      "id": "B-5",
+      "workstream_item": "B1",
+      "title": "FA carry-down baseline vs cumulative-target model: any historical depreciation-policy mismatch produces a silent first-run catch-up lump or a silent depreciation holiday",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/23b-fns-fixed-assets.sql:174-193 — the charge is v_target − v_accum where v_target is re-derived from cost/in-service/life-or-rate; the carried baseline only pins Σ recorded, it does not make the model respect the old policy",
+        "db/v2/25b-fns-opening.sql:180-185 — the baseline row pins accumulated depreciation but nothing validates the carried accum against the model's target at as_of or surfaces the delta",
+        "db/v2/tests/opening_carry_forward_test.sql:79-106 (CF2) — the only continuation test uses an EXACT-match case (24 months of SL@36m on 300000 = precisely the carried 200000); no test covers carried accum ≠ model target",
+        "belcort/client-onboarding/SKILL.md:250-253 — the skill promises 'NEVER re-charges the past' but gives no guidance to choose useful_life_months/rate so the model's implied history matches the carried accum"
+      ],
+      "wrong": "Example (verified against the 23b arithmetic): cost 300000, carried accum 150000 under the client's old reducing-balance policy, onboarded as straight_line/36m in service since 2023-01 → model target at first post-takeover month (elapsed 25) ≈ 208333 → one silent 58333 catch-up charge; carried accum 250000 → months of zero charge until elapsed catches up. Both misstate post-takeover P&L with no warning, no assumptions[] surface, no visibility read — an ISA 510 / MPERS prospective-continuation failure mode for exactly the ongoing-client case B1 exists for.",
+      "target": "At seed time, compute the model's implied accumulated depreciation at as_of and either require the caller to reconcile (fail-loud with the delta) or record a policy-transition row and surface the first-run delta as a confirmation, mirroring the tax engine's assumptions[]/confirmations_needed[] honesty layer."
+    },
+    {
+      "id": "B-6",
+      "workstream_item": "B1",
+      "title": "Per-item model is bypassable and aging dates default away: control accounts are accepted in gl_lines, and omitted invoice/due dates collapse the takeover aging profile",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25b-fns-opening.sql:253-277 — the only lump-entry check is NET equality (gl_cr − gl_dr = OBE net); nothing excludes marker-bearing control accounts (DC/CC/AD/FA-cost) from gl_lines, so a self-balancing full TB with empty ar_items/ap_items/fa_assets seeds lump AR/AP with EMPTY subledgers — accepted at seed time, surfaced only later by ar/ap_control_tie_out (23-fns-subledger.sql:585-591) / fa_control_tie_out (23b:425) reads",
+        "belcort/client-onboarding/SKILL.md:244-247 — 'Do NOT put the AR/AP control totals or the FA cost/accum-dep here' is prose-only; no enforcement",
+        "db/v2/25b-fns-opening.sql:67-68 and :108-109 — invoice_date/due_date (bill_date/due_date) default to as_of; ar_aging/ap_aging (db/v2/23-fns-subledger.sql:440-534, buckets keyed on due_date vs as_of at :451-457) then report every carried item as current at takeover — the true historical age (e.g. already 90+ days overdue) is erased and the aging clock restarts at as_of; the skill passes dates only when present (SKILL.md:238-239 marks them optional)"
+      ],
+      "wrong": "The 'ties out to management accounts' guarantee is only as strong as net arithmetic: a compensating misplacement (AR as a lump + no open items) passes every seed-time assertion, and the aged debtors/creditors listing the accountant relies on for collections is silently flattened when dates are omitted. Nothing verifies subledger-vs-control composition or aging fidelity at the moment the human approves the [[carrydown]] card.",
+      "target": "seed_opening_carry_forward should reject marker-resolved control accounts inside gl_lines (fail-loud), require or explicitly confirm real item dates for aged listings, and return a seed-time tie-out block (control vs subledger per account) that the CarryDownReview card renders before confirm."
+    },
+    {
+      "id": "B-7",
+      "workstream_item": "B1",
+      "title": "Opening entries carry no history/audit trail and unconstrained actor attribution",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25b-fns-opening.sql (entire file) — no seeder writes a journal_entry_history row; contrast run_depreciation db/v2/23b-fns-fixed-assets.sql:221-222 which attributes its auto-posted journal",
+        "db/v2/25-fns-ops.sql:857-864 — record_opening_balances likewise writes no history row",
+        "db/v2/25b-fns-opening.sql:211,225 — p_actor is free text (no app.audit_actor constraint, contrast db/v2/24-fns-onboard.sql:450) and lands only in client_financial_position.captured_by; the per-item seeders take no actor at all",
+        "db/v2/25-fns-ops.sql:1103-1160 — firm_activity_feed unions journal_entry_history / kb / profile / document audits / export receipts / bank-match audit; opening postings appear in none of those sources, so they never surface in the firm's activity feed"
+      ],
+      "wrong": "The takeover opening position — the highest-stakes posting family in the product — is the only posting family with no actor-attributed audit rows and no feed visibility, undermining the provenance/receipts invariant precisely where an ISA 510 reviewer needs it.",
+      "target": "Every opening seeder writes attributed history/audit rows (actor via app.audit_actor, payload snapshot, source document sha256 of the management accounts where available) and surfaces in the activity feed."
+    },
+    {
+      "id": "B-8",
+      "workstream_item": "B1",
+      "title": "No correction path for a wrong carry-down: opening entries cannot be reversed, and editing them strands the subledger snapshot and FA baseline",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/22-fns-documents-recon.sql:792 — reverse_entry raises cannot_reverse_close_entry for entry_kind in ('closing','opening')",
+        "db/v2/20-fns-journal.sql:269-355 — edit_entry has no entry_kind guard (grep for entry_kind: zero hits in the file) and explicitly permits editing an APPROVED entry with a reason (:291-297, demoting it to needs_review), deleting + reinserting its lines (:312-317); but ar_invoices/ap_bills gross is snapshotted at record time (db/v2/23-fns-subledger.sql:95-104, gross read from the control leg once) and fa_depreciation baseline rows (25b:182-185) are never recomputed on edit — the GL moves, the subledger/register does not",
+        "db/v2/19-tables-subledger.sql:41-43,115 — 'no void state: voiding a posted invoice must REVERSE the anchoring GL entry too … A future void_invoice fn adds it back'; write_off_ar_invoice is a bad-debt posting, not an un-seed",
+        "belcort/client-onboarding/SKILL.md:256-258 — the only correction guidance is pre-commit ('re-read the figures with the human'); nothing for post-commit"
+      ],
+      "wrong": "A wrongly keyed carried invoice (wrong gross, wrong counterparty, duplicate from B-1) is effectively permanent: the sanctioned reversal verb refuses, the edit verb desynchronizes GL from subledger (and knocks the opening entry to needs_review), and the tie-out reads then show perpetual drift the fn family cannot clear.",
+      "target": "A dedicated supersede/void verb for opening items (reverse-not-delete at both GL and subledger layers, baseline recomputation for FA), consistent with reverse_year_end_close's bespoke handling of its own machinery."
+    },
+    {
+      "id": "B-9",
+      "workstream_item": "B1",
+      "title": "SST continuity for a service-tax registrant is not modeled at takeover: carried invoices produce zero declared output tax on post-takeover collection",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25b-fns-opening.sql:56-68 — opening AR entries post Dr control / Cr OBE only; no 461-000 output-tax leg, no treatment tag on the carried item",
+        "db/v2/23e-fns-sst.sql:57-85 (per-invoice declared-tax model reads the invoice's tagged 461 legs) — a carried invoice has none, so its collection declares zero service tax; :42-50, :453-487, :707, :714 — opening lumps on 460/461 are excluded and surfaced as 'reconcile the first period against the opening 460/461 lump', but an opening AR item with NO 461 leg never appears in the uncounted-movement scan at all (the scan covers journal_lines on 460/461 only)",
+        "db/v2/25b-fns-opening.sql:67 — invoice_date defaults to as_of; the s.11(2) 12-month payment-trigger clock is keyed on invoice_date (db/v2/23e-fns-sst.sql:309,556), so the deemed-due clock for carried invoices is reset",
+        "belcort/client-onboarding/SKILL.md:201-258 — the carry-down section never mentions SST treatment of carried open invoices"
+      ],
+      "wrong": "For exactly the ongoing-client case, service tax due on post-takeover collections of pre-takeover invoices (and the aged 12-month deemed-due trigger) is invisible to compute_sst_return and un-prompted at onboarding — a compliance gap only partially covered by a generic first-period assumption string.",
+      "target": "Carried AR items for taxable regimes should capture treatment + original invoice date and either carry the pending output-tax split (Cr 461 vs Cr OBE) or register an explicit per-invoice SST-continuity candidate the return computation surfaces."
+    },
+    {
+      "id": "B-10",
+      "workstream_item": "B2",
+      "title": "The deterministic fallback silently onboards a stripped client: no banks, no directors/aliases, no carry-down, no KB — with no warning or follow-up",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "dashboard/lib/clientWizard.ts:94-115 — buildClientPayload hard-codes bank_accounts/directors/email_domains/aliases to []",
+        "dashboard/lib/clientOnboardingScript.ts:3-6 — 'the four array fields + management-accounts upload are deferred'",
+        "dashboard/components/onboarding/client/ClientOnboardFallback.tsx — zero occurrences of carry/opening/knowledge/bank (grep) — the form never mentions what it skipped",
+        "belcort/client-onboarding/SKILL.md:331-332 — 'a cold start is NOT acceptable' is the product's own bar; the fallback ships one",
+        "dashboard/app/(dash)/firms/[slug]/clients/new/ClientOnboardLive.tsx:165-172,196-197 — the fallback is the sanctioned degradation whenever the live run errors (which B-4 shows is easy), so this is a common path, not an edge"
+      ],
+      "wrong": "An ongoing client onboarded through the fallback has books that tie out to nothing at takeover and an agent starting cold, and the user is never told or given a to-do; no dashboard surface anywhere invokes seed_opening_carry_forward or seed_client_knowledge afterwards (grep across dashboard/: only the cinematic's in-run review), so completion depends on the user spontaneously asking chat.",
+      "target": "The fallback must end with an explicit 'still to capture: opening position, bank accounts, day-one knowledge' checklist that deep-links into a resumable completion flow (chat or workbench), and the client record should carry a visible onboarding-incomplete state."
+    },
+    {
+      "id": "B-11",
+      "workstream_item": "B2",
+      "title": "Live-lane validation is model-enforced prose and the dry-run→commit equivalence is honor-system",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "belcort/_shared/validators.md:1-58 — validate_ssm/validate_tin/validate_msic are markdown specs the model applies mentally; belcort/client-onboarding/SKILL.md:63-65 confirms 'there is NO code_execution/Python runtime in v2'",
+        "db/v2/24-fns-onboard.sql:276-308 — onboard_client validates only enums/fye/band/legal_name; ssm_no, myinvois_tin, msic_code are stored as arbitrary text (no DB-side format check)",
+        "dashboard/lib/clientWizard.ts:52-83 — the FALLBACK form has real code validators (validateSsm/validateTin at :58,:66), i.e. the deterministic lane validates more strongly than the AI lane",
+        "dashboard/app/(dash)/firms/[slug]/clients/new/ClientOnboardLive.tsx:114-116 — 'WYSIWYC: the agent commits exactly the dry-run profile' is asserted, but nothing machine-compares the committed row to the approved [[dryrun]] JSON; the re-read binds only slug/tier/coa_count (+ a legal-name match) (dashboard/lib/resolveOnboardResult.ts:20-45)"
+      ],
+      "wrong": "B2 asks whether the flow 'can store flawed data': yes — a model that mis-applies the prose validators or assembles a payload differing from the approved dry-run stores malformed SSM/TIN/MSIC (or altered fields) with only the human's eyeball on the dry-run card as defense; the DB accepts it.",
+      "target": "Move identifier format validation into the DB fn (structural, fail-loud like invalid_field) or a deterministic tool, and have the stage verify the committed row equals the approved dry-run profile field-by-field (a true WYSIWYC check, extending the existing commit re-read)."
+    },
+    {
+      "id": "B-12",
+      "workstream_item": "B1",
+      "title": "No incremental carry-down tool: only the atomic orchestrator is exposed to the agent, making the sanctioned 'capture it later' path a footgun",
+      "severity": "low",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "agent/src/tools/registry/onboard.ts — only seed_opening_carry_forward is registered (:61-75); seed_opening_ar_invoice/ap_bill/fixed_asset are not agent tools (grep agent/src: only the buildTools fence + onboard.ts mention the family)",
+        "belcort/client-onboarding/SKILL.md:314 — 'on skip the client is onboarded WITHOUT carry-down (a later chat session can capture it)'",
+        "db/v2/25b-fns-opening.sql:249-260 — a later partial call must supply compensating gl_lines to satisfy the OBE-net equation (with prior OBE plugged to 0, a top-up's items re-credit OBE and demand matching net-credit gl_lines), and (B-1) a later FULL call duplicates"
+      ],
+      "wrong": "The only later-completion instrument the agent has is the same non-idempotent atomic call, whose balance equation makes partial top-ups awkward and whose re-run is destructive.",
+      "target": "Expose guarded per-item seeders (or an additive orchestrator mode) for post-onboarding completion, with the B-1 registry guard distinguishing 'first seed' from 'addendum'."
+    },
+    {
+      "id": "B-13",
+      "workstream_item": "B1",
+      "title": "Seeder edge inputs raise raw Postgres errors instead of domain errors",
+      "severity": "low",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25b-fns-opening.sql:160-163 — accum_dep_cents>0 with a missing accum_deprn_account_code inserts a NULL account_code journal line → raw 23502 (journal_lines.account_code NOT NULL, db/v2/10-tables-core.sql:167) fires BEFORE record_fixed_asset's domain raise (23b:68) is ever reached",
+        "db/v2/25b-fns-opening.sql:266-271 — gl_lines with unknown/foreign account codes fail via the composite FK (10-tables-core.sql:175) as a raw 23503, while the skill instructs the agent to surface exact error text to the human (SKILL.md:256-258)"
+      ],
+      "wrong": "Fail-loud holds, but the interview loop surfaces opaque constraint noise instead of the domain-coded messages every other validation in the family produces, degrading the clarify-loop recovery UX.",
+      "target": "Pre-validate accum-account presence and gl_lines account existence with named raises (accum_account_required_for_carried_dep, unknown_coa_code:<code>) like onboard_client's bank-account check (24:317-322)."
+    },
+    {
+      "id": "B-14",
+      "workstream_item": "B1+B2",
+      "title": "Client-KB initialization exists but is thin, chat-only, and hostage to the fragile run — no dashboard path, no structural-knowledge carry",
+      "severity": "medium",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/24-fns-onboard.sql:367-424 + agent/src/tools/registry/onboard.ts:44-59 — seed_client_knowledge (confirmed rules @1.000 + advisory notes) exists, is atomic/idempotent, and is proven (db/v2/90-isolation-tests.sql:780-853)",
+        "grep dashboard/ for seed_client_knowledge: zero occurrences — no dashboard surface ever seeds or completes the KB; the only path is the skill's Phase D/D-seed inside the same non-durable run (belcort/client-onboarding/SKILL.md:328-367), after the commit and carry-down, i.e. the part most likely never reached when the run dies (B-4)",
+        "belcort/client-onboarding/SKILL.md:156-168 — the sample-invoices step exists only as a [[step:14/14]] clarify with an attach affordance; onboardingChapters.ts:13-26 doesn't list sample_invoices as a chapter field (clientFieldPresentation.ts:58-59 has the upload rail, so it renders, but progress/chapters end at management_accounts)",
+        "belcort/client-onboarding/SKILL.md + db/v2/25b — no carry of structural client knowledge for an ongoing client: recurring-journal templates, mid-life amortisation schedules, partnership PSR (set_client_partners exists at db/v2/23c-fns-adjustments.sql:486-580 but onboarding never captures it), or recon hints"
+      ],
+      "wrong": "B1 requires onboarding an existing client to initialize the client KB: the mechanism is real and well-guarded (human-confirmed rules only, advisory evidence via record_kb_evidence), but its delivery is the tail end of a brittle single run with no fallback, no dashboard surface, and no completion tracking — and 'knowledge' covers only coding rules/notes, not the operational fixtures an ongoing client arrives with.",
+      "target": "KB seeding becomes a first-class resumable onboarding step (workbench surface + chat), with completion state on the client, and the carry-down scope extends to structural fixtures (partners' PSR for partnerships, recurring/amortisation templates) or explicitly tracks them as to-dos."
+    },
+    {
+      "id": "B-15",
+      "workstream_item": "B1",
+      "title": "No carry of un-reconciled bank state at takeover — first reconciliation cannot tie without unscripted manual workarounds",
+      "severity": "low",
+      "verdict": "CONFIRMED",
+      "evidence": [
+        "db/v2/25b-fns-opening.sql:200-204 — the carry-down payload has per-item machinery only for AR/AP/FA; the bank balance is one gl_lines lump",
+        "db/v2/22-fns-documents-recon.sql:688-734 — close_reconciliation computes deposits-in-transit/unpresented from per-entry bank-COA lines dated WITHIN [period_start, period_end] that are not reconciled; takeover-date uncleared items live only inside the opening lump (dated as_of, before the first period), so they can neither be individually matched against post-takeover statement lines nor enter the outstanding computation",
+        "belcort/client-onboarding/SKILL.md:201-323 — the carry-down section never mentions uncleared bank items"
+      ],
+      "wrong": "An ongoing client with uncleared items at the conversion date (extremely common) will show an unexplained difference on their first bank reconciliation; the model offers no per-item carry for bank, and the skill doesn't warn the human to split the lump.",
+      "target": "Carry-down should optionally accept uncleared bank items as per-item opening entries on the bank account (mirroring AR/AP), or the skill/UI must instruct splitting the bank lump so the first recon can tie."
+    }
+  ],
+  "refuted": [
+    {
+      "id": "B-2 (partial — sub-claim only)",
+      "title": "Draft sub-claim 'a viewer can mint confirmed KB rules via seed_client_knowledge' — REFUTED; the parent finding survives as ADJUSTED",
+      "reason": "seed_client_knowledge's rules leg calls public.create_kb_rule for every rule (db/v2/24-fns-onboard.sql:393-396), and create_kb_rule asserts app.assert_can_manage_kb() (db/v2/21-fns-kb.sql:316), which reads the CALLER's JWT role via app.current_user_role() (db/v2/00-foundation.sql:176-185) — the nested SECURITY DEFINER call does not change the JWT claims, so a viewer/bookkeeper seed containing any rule raises 'forbidden' and the atomic seed rolls back entirely. Only the advisory-notes leg (record_memory_note, db/v2/27-fns-memory.sql — no role assert) is sub-admin-writable. No whole finding was refuted."
+    }
+  ],
+  "fine_claims": [
+    {
+      "claim": "AR open items CAN be loaded at takeover: per-item opening journals (Dr DC control by marker / Cr OBE) anchored 1:1 to ar_invoices rows whose gross is read from the posted control leg, later settling through the normal allocation machinery",
+      "evidence": ["db/v2/25b-fns-opening.sql:40-73", "db/v2/23-fns-subledger.sql:83-110 (gross READ from the leg)", "db/v2/tests/opening_carry_forward_test.sql:45-50 (AR control 150000 = subledger 150000)", "db/v2/90-isolation-tests.sql:180 (cross-firm BLC02 proven)"]
+    },
+    {
+      "claim": "AP open items CAN be loaded: mirror seeder, proven to the cent including against a real client's management accounts (BEE CREATIVE FY2024, negative-equity sole prop)",
+      "evidence": ["db/v2/25b-fns-opening.sql:81-114", "db/v2/tests/bee_carry_down_close_test.sql:13-47 (opening SoFP reproduces the accountant to the cent; OBE nil; AP ties; negative equity carried as a 150-000 DEBIT)"]
+    },
+    {
+      "claim": "FA register with accumulated-depreciation baseline CAN be loaded: Dr cost / Cr AD (historical) / Cr OBE (NBV), register cost GL-bounded via record_fixed_asset, and a fa_depreciation baseline row that prevents historical re-charging when the carried accum matches the model (one-month ~8333 charge, not the 208333 catch-up)",
+      "evidence": ["db/v2/25b-fns-opening.sql:128-190", "db/v2/tests/opening_carry_forward_test.sql:79-106 (CF2)", "db/v2/23b-fns-fixed-assets.sql:60-104 (account-role + method-driver validation)"]
+    },
+    {
+      "claim": "Internal TB tie-out IS verified at seed time: opening_carry_forward_unbalanced raises when lumps don't reconcile with carried subledger equity; OBE asserted to net to zero; deferred Σdr=Σcr trigger backstops every entry; FP snapshot records in_balance; downstream client_trial_balance raises trial_balance_unbalanced and ar/ap/fa control tie-out reads exist",
+      "evidence": ["db/v2/25b-fns-opening.sql:257-260, 279-284, 300-308", "db/v2/tests/opening_carry_forward_test.sql:108-124 (CF3 fail-loud)", "db/v2/15-triggers.sql:33-75", "db/v2/25-fns-ops.sql:105 (trial_balance_unbalanced raise)", "db/v2/23-fns-subledger.sql:541-591 + 23b:425-472 (tie-out reads)"]
+    },
+    {
+      "claim": "Carry-down runs behind a genuine human plan→approve gate: the [[carrydown]] clarify renders the exact seed_opening_carry_forward payload (Dr/Cr grid, AR/AP/FA blocks) with Confirm/Skip on the retained clarifyId, double-submit latched",
+      "evidence": ["dashboard/lib/stageReducer.ts:18-23, 96-102", "dashboard/components/onboarding/cinematic/CarryDownReview.tsx:36-115", "dashboard/app/(dash)/firms/[slug]/clients/new/ClientOnboardLive.tsx:122-128"]
+    },
+    {
+      "claim": "The identity commit is verified against the DB before success is shown (false-success guard): the client row is re-read with retries and a definitive miss renders the recovery panel, never a fake 'onboarded' card; firm bootstrap likewise verifies the committed my_firm row after a session refresh",
+      "evidence": ["dashboard/app/(dash)/firms/[slug]/clients/new/ClientOnboardLive.tsx:54-112", "dashboard/components/onboarding/client/ClientOnboardCinematic.tsx:119-129", "dashboard/app/welcome/FirmBootstrapFlow.tsx:21-52"]
+    },
+    {
+      "claim": "The live lane IS an iterative agent workflow, not a hardcoded form: 13-Q clarify interview with chip choice cards, validation re-ask loops, synonym normalisation, TIN-conditional-on-turnover back-tracking, dry-run confirm, in-run document upload (management accounts ride the clarify answer), and SSE + poll-recovery that tolerates slow turns instead of expiring them",
+      "evidence": ["belcort/client-onboarding/SKILL.md:71-197 (incl. :113 TIN-conditional)", "belcort/firm-bootstrap/SKILL.md:123-199 (buttons, synonym normalisation, validator loops)", "dashboard/lib/useOnboardingRun.ts:89-175, 238-264", "dashboard/components/onboarding/client/clientFieldPresentation.ts:29-66"]
+    },
+    {
+      "claim": "The [documents] wake cannot invoke onboarding/carry-down/KB-seed tools (fence excludes create_firm, onboard_client, seed_client_coa, seed_client_knowledge, seed_opening_carry_forward), and record_year_end_close's opening_balances_required is satisfied by carry-forward opening entries",
+      "evidence": ["agent/src/tools/buildTools.ts:22-25", "db/v2/25-fns-ops.sql:393-401 (existence check on entry_kind='opening' journals — the carry-forward creates exactly those)"]
+    },
+    {
+      "claim": "seed_client_knowledge is a sound dual-seed: atomic both directions, idempotent on (pattern,account)/(kind,note), confirmed rules only via create_kb_rule (audit + alias resolution + unknown_account fail-loud, AND its admin+ assert_can_manage_kb floor transits the nested call — a sub-admin cannot seed confirmed rules), cross-firm denied — and the skill's confirm-vs-propose boundary keeps agent-inferred mappings advisory",
+      "evidence": ["db/v2/24-fns-onboard.sql:353-424", "db/v2/21-fns-kb.sql:304-343 (:316 admin+ floor)", "db/v2/90-isolation-tests.sql:780-853", "belcort/client-onboarding/SKILL.md:344-366"]
+    },
+    {
+      "claim": "Cross-firm isolation on the whole onboarding/carry-down family is proven (BLC02 fires before any other error on all four opening seeders and the onboard fns)",
+      "evidence": ["db/v2/90-isolation-tests.sql:148-186 (incl. :180-183)"]
+    }
+  ],
+  "unverified": [
+    "The audit brief (undefined/audit-brief.md) does not exist on disk — only undefined/maps/db-map.md and undefined/findings/ exist; both the draft pass and this verification pass proceeded on standard audit discipline (read-only frozen repo, file:line evidence, critical/high/medium/low rubric) without the brief's exact severity wording or output constraints.",
+    "Runtime behavior was verified by static code reading only — neither pass executed the agent service, the dashboard, or the db/v2 test rigs on this frozen tree, so 'tests pass' claims rest on the checked-in suites, not a fresh run.",
+    "The two production onboarding failures ('stops-after-Q1', 'SSM-reject hard-exit') are documented only in the skill's own prose (belcort/client-onboarding/SKILL.md:35-43, 84-91; firm-bootstrap/SKILL.md:32-39); incident reports could not be independently confirmed.",
+    "The read_skill wiring was not traced end-to-end to confirm the v2 runtime loads client-onboarding/firm-bootstrap SKILL text verbatim into onboarding runs (agent/src/doctrine/loader.ts assumed per README/CLAUDE.md).",
+    "Whether the Command-Center chat surface (outside the cinematic) renders [[carrydown]]/[[dryrun]] clarifies usably for a later-session carry-down was not verified (makeHermesRunner/hermesChatTransport not audited).",
+    "DryRunReview.tsx internals were not read; the dry-run per-field 'Check answers' fidelity is assumed from stageReducer/onboardingMarkers evidence (the CarryDownReview internals WERE fully read and verified).",
+    "The exact behavior of a double seed_opening_carry_forward run (B-1) was derived by code analysis of the OBE-net arithmetic (independently re-derived during this verification pass: run-2 items re-credit OBE by X across the all-opening-entries sum, so the same gl_lines net credit X re-passes the :257 check) — deterministic, but not executed on a rig, so it remains analytically certain rather than rig-CONFIRMED."
+  ],
+  "decision_brief": "ADVERSARIAL VERIFICATION (2026-07-17): all 15 findings re-checked against the cited files/lines; 14 CONFIRMED, 1 ADJUSTED (B-2), 0 refuted outright. The one material draft error: B-2 claimed seed_client_knowledge bypasses the KB-confirmation floor — false, because create_kb_rule's app.assert_can_manage_kb() (21-fns-kb.sql:316) reads the caller's JWT role and transits the nested call, so a sub-admin cannot mint confirmed rules; B-2 was rewritten around the real, still-high gap (no role floor on onboard_client/seed_client_coa/all opening seeders/record_opening_balances + viewer-writable advisory notes + zero intra-firm rbac tests for the family). B1 verdict: the carry-down machinery is real and unusually good at its core — per-item opening journals for AR/AP/FA anchored 1:1 to subledger/register rows with marker-resolved controls, an OBE plug asserted to nil, fail-loud unbalanced raises, an FA depreciation baseline, and a golden test against a real client's management accounts (BEE, negative equity, to the cent). AR open items, AP open items, and a mid-life FA register all load and tie out internally. What is missing is everything around that core: the orchestrator is NOT idempotent and a re-run silently doubles the entire opening position with the FP snapshot still reporting in_balance (B-1, critical — and B-8 blocks repair: opening entries can't be reversed and subledger snapshots strand on edit); there is no intra-firm role floor anywhere in the family, so a viewer can onboard clients and post approved opening journals (B-2, high, adjusted); tie-out verification is net-arithmetic only, so control accounts in gl_lines bypass the per-item model and defaulted dates flatten the aged profile (B-6); the FA baseline meets a cumulative-target engine that silently trues up any historical-policy mismatch (B-5, arithmetic verified); opening postings have no history/audit rows or feed visibility (B-7); and SST continuity for carried service-tax invoices is unmodeled, with the s.11(2) 12-month clock keyed to a defaulted invoice_date (B-9). KB initialization exists (seed_client_knowledge, well-guarded incl. the admin+ floor, idempotent, atomic) but is chat-only, last in a fragile run, with zero dashboard surface and no structural-fixture carry (B-14). B2 verdict: the live lane is genuinely an intelligent iterative agent workflow — clarify loops with choice cards, validation re-asks, synonym normalisation, dry-run and carry-down plan→approve gates, in-run uploads, and a false-success guard on the identity commit — but its end-to-end continuation rests solely on the model never emitting a plain sentence, over a process-local in-memory run map with cross-visit resume deliberately dropped; the skills themselves document two observed production aborts (B-4). Run completion is read as success and only the client row is verified, so a dead or failed carry-down/KB step yields an unqualified success card (B-3), and the deterministic fallback silently ships a stripped, cold-start client against the product's own 'cold start is NOT acceptable' bar (B-10). Rebuild guidance: port the 25b accounting model (per-item + OBE plug + baseline) and its tests; add a DB-owned seeded-once registry (mirror uq_fy_close_live), role floors + rbac tests, seed-time composition tie-out, audit rows, and a supersede verb; and rebuild onboarding as a durable, resumable, step-tracked workflow rather than one heroic run."
+}
