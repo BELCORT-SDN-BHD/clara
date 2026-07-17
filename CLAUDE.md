@@ -95,5 +95,5 @@ Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 In one line: **Phase 3 foundations; Slice 0 spike — T1–T6 passed, the 48-hour
-park (T2-48h) pending final sign-off; Slice 1 (foundations) done; Slice 2
-(governed DB core) next.**
+park (T2-48h) pending final sign-off; Slice 1 (foundations) + Slice 2 (governed
+DB core, PR #5, ADR-015 lane-split) done; Slice 3 (event spine) next.**
