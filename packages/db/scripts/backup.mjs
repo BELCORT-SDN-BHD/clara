@@ -111,8 +111,17 @@ export async function backupFull(opts = {}) {
   } finally {
     await client.end();
   }
-  if (present.length === 0) {
-    throw new Error(`full backup: none of the authoritative schemas exist (${AUTHORITATIVE_SCHEMAS.join(", ")}).`);
+  // FULL-INVENTORY ASSERTION (finding 10): the production DR profile must capture
+  // EVERY authoritative schema, or a restore silently loses in-flight durable-run
+  // state. Refuse a partial "full" backup that omits any required schema — do not
+  // quietly accept whatever subset happens to exist.
+  const missing = AUTHORITATIVE_SCHEMAS.filter((s) => !present.includes(s));
+  if (missing.length) {
+    throw new Error(
+      `full backup: required schema(s) MISSING from the target — ${missing.join(", ")} (present: ${present.join(", ") || "none"}). ` +
+        `The FULL DR profile must capture every authoritative schema (${AUTHORITATIVE_SCHEMAS.join(", ")}) so a restore never drops durable-run state; ` +
+        `refusing to write a partial "full" backup. If a schema legitimately does not exist yet, the full-profile DR drill is not ready (see docs/ops/DR.md).`,
+    );
   }
   log(`backup(full): authoritative schemas present: ${present.join(", ")} · target ${targetLabel()}`);
   const res = backup({ schemas: present, out: opts.out, log });
