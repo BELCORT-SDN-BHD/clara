@@ -198,3 +198,17 @@ Payroll = coding + the built deadline calendar (practice-map Part 3). Inventory 
 | 10 · ops/verification/compliance | §9 CI/DR/eval/guardrails |
 | 11 · doctrine drift | §4.1 registry-generated tool catalog + lint gate |
 | 11a · bank-match integrity (GAP1-1/1-2) + evidence regions (J-18) | §3.5 structural match-parity + entry-exclusivity; §7 per-field bounding-region capture + the `doc_review` verification surface |
+
+---
+
+## Appendix A — Slice-0 spike results (2026-07-17): the durable engine is GO, with a binding versioning policy
+
+The Slice-0 spike ran against the fresh hosted Supabase project (`spike/RESULTS.md` is the evidence record). **T1–T6 ALL PASS.** Decisive findings, now binding on the build:
+
+1. **At-least-once is real; the DB idempotency key is the floor** (T4, empirically): the engine re-invoked a step whose transaction had already committed; only `ON CONFLICT (op_key)` kept the books at exactly one posting + the same receipt (`wasDuplicate: true` in the run's return value). Every audited mutation carries an idempotency key — permanent, mandatory (Codex refinement 1, confirmed).
+2. **The world self-recovers active runs at startup** (undocumented): re-enqueues in-flight runs under their dedup key, bypassing dead workers' stale locks — crash recovery was automatic (~5s) in T4. Parked runs count as "active" and replay their memoized prefix harmlessly on every boot.
+3. **No run pinning on self-hosted WDK** (T6, the hazard): an in-place edit to a workflow body **silently changes the semantics of the un-executed remainder of every in-flight run** — no error, no old-semantics preservation. A silent-correctness hazard for accounting workflows. **Mitigation proven:** name-versioned workflows — old parked runs completed on pure V1 semantics while new enqueues rode V2.
+4. **BINDING VERSIONING POLICY (from T6):** (a) a deployed workflow body is immutable once any run can be in flight; every behavioral change ships as a new exported workflow (`_v2`, `_v3`, …), the old export retained until zero non-terminal runs reference it; (b) enqueue sites always target the newest version; a CI freeze-lint (golden-hash per frozen workflow) forbids editing frozen bodies; (c) renaming/deleting an export with in-flight runs is forbidden (workflowName derives from path+export — a rename strands parked runs); (d) in-place hotfixes only for provably pre-park-idempotent step-body bugs.
+5. Operational notes: the runtime reads `WORKFLOW_POSTGRES_URL` (not `DATABASE_URL` — mapped in the worker entry); engine timestamps are tz-naive (display only); Supavisor session-mode LISTEN/NOTIFY verified at 32ms with sub-second job pickup.
+
+Remaining before final Slice-0 sign-off: the 48-hour park check-in (armed 2026-07-17 15:15 +08, resume due ≥2026-07-19 15:15 +08).
