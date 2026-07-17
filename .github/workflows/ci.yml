@@ -105,7 +105,8 @@ jobs:
       # if a previously-applied migration was edited/renamed/deleted.
       - name: Deploy-onto-existing check (main migrations, then HEAD)
         run: |
-          if git rev-parse --verify origin/main >/dev/null 2>&1; then
+          if git rev-parse --verify origin/main >/dev/null 2>&1 \
+             && git ls-tree -r --name-only origin/main -- packages/db/migrations | grep -q '\.sql$'; then
             git checkout origin/main -- packages/db/migrations
             echo "--- applying origin/main migrations (baseline) ---"
             pnpm db:migrate
@@ -113,7 +114,7 @@ jobs:
             echo "--- applying HEAD migrations onto the baseline (drift guard active) ---"
             pnpm db:migrate
           else
-            echo "no origin/main — first introduction; nothing to layer onto."
+            echo "origin/main has no packages/db/migrations yet — first introduction; nothing to layer onto."
           fi
 
       - name: Migrate + seed + smoke test (ephemeral postgres:17)
