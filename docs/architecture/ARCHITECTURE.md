@@ -93,9 +93,21 @@ Insert-style writers (`draft_entry`, `record_accrual`, …) accept an idempotenc
 
 ---
 
-## 4. The agent runtime (Clara) — **[Wave-1 integration: SDK choice from `runtime-recommendation.md`]**
+## 4. The agent runtime (Clara)
 
-The prior runtime was a thin, process-local shell — all run/clarify/interruption state in an in-memory Map, lost on restart (Grt-1). The rebuild's runtime is defined by **requirements**, with the SDK selected at Gate 2 (incumbent not presumptive):
+The prior runtime was a thin, process-local shell — all run/clarify/interruption state in an in-memory Map, lost on restart (Grt-1). The rebuild's runtime is defined by the requirements below, and the SDK recommendation is now firm (Gate-2 decision item):
+
+### 4.0 Runtime recommendation (G1 — for Gate-2 ratification)
+
+**Recommended: Vercel AI SDK 7 (`ai@7`) + Workflow DevKit (`workflow` + `@workflow/world-postgres`), self-hosted in the Clara service on Fly, all state in our own Postgres — behind the swap-seam. Named fallback: LangGraph JS + PostgresSaver.** Full evidence: `docs/phase2-research/runtime-recommendation.md`, **double-verified by two independent primary-source lanes on 2026-07-17** (a second lane re-fetched every decisive doc claim and corroborated all of them verbatim).
+
+Why it wins the decisive rows: the agent loop runs *inside* a step-checkpointed durable engine on our own Postgres (`'use step'` memoization = the strongest no-double-post story); hooks park clarify/approval interruptions for **days at zero compute** and resume on answer; approvals persist as HMAC-signable message parts in our DB; OTel tracing carries full-content spans to a DPA-covered vendor (Langfuse a concrete candidate) or self-host from the same code — satisfying the owner's C6 ruling; true model-agnosticism; Apache-2.0. The incumbent OpenAI Agents SDK loses on its own docs (parallel package-aliased SDK versions recommended for approvals pending across upgrades; no step engine); LangGraph ties on durability/HITL but re-executes an interrupted node from its top (a permanent idempotency burden) and gravitates to LangSmith; the Claude Agent SDK fails the stated model-agnosticism requirement.
+
+**Two hard preconditions carried to Gate 2:** (1) a **1–2 week production spike** before the Phase-3 commitment — Supabase session-mode (5432) LISTEN/NOTIFY under the WDK world, and explicit redeploy-under-parked-hook + redeploy-mid-run acceptance tests (WDK's deploy docs are verified silent on in-flight-run replay across code deploys — the top risk; mitigations: pinned versions, name-versioned workflows, drain-active-runs deploy policy); (2) the **C6 checklist** (executed DPA + firm disclosure + PDPA cross-border check) before any firm data flows to the trace vendor. **If the spike fails, LangGraph JS becomes #1 behind the same seam.**
+
+Integration shape (detail in the research file §6): engine schemas (`workflow_*`, `graphile_worker`) under a dedicated `clara_runtime` role with no `authenticated` grants; firm-facing **RLS-scoped projection tables** (`agent_tasks`, `agent_interruptions`, `wakes_outbox`) carry what the dashboard shows; clarify = a hook-parked tool; approvals = the `toolApproval` UX layer over the DB-owned authorization law (C3/C4); dual idempotency (step memoization + DB idempotency keys); `trace_id` threaded into task rows and audited-fn receipts; **runs execute independently of SSE attach** (closes the ghost-upload class D-1/E-1).
+
+### 4.0a Runtime requirements (SDK-independent — bind whichever runtime ships)
 
 1. **Durable run/task/checkpoint state** — `tasks`, `runs`, `run_steps`, `interruptions`, `tool_calls`, `checkpoints`, `wakes` are DB tables written *as the run progresses*, surviving restart/redeploy (the old schema had `tool_calls`/`artifact` columns that were never written — this is now the spine).
 2. **Resumable HITL** — clarification and approval interruptions are durable, first-class objects correlated to a `clarify_id` and bound to the asking user (fixes GAP4-3); a run pauses at zero compute and resumes on the answer, days later, without double-posting.
@@ -132,7 +144,10 @@ Fixes H-1/H-2/H-4 (model-authored numbers laundered as DB-authoritative). Compos
 
 ---
 
-## 7. Storage doctrine + document registry (E3)
+## 7. Document pipeline, storage doctrine + registry (E)
+
+**Evidence-region capture is an ingestion requirement, not a UI choice** (design dependency #2): the OCR pipeline captures and persists **per-field bounding regions** (Azure DI returns `boundingRegions` — the old integration discarded them), so the `doc_review` side-by-side verification surface (the J-18 fix, "verified against source IS the approval act") can bind every journal-line field to its exact source span, validated at insert (invariant 2b).
+
 
 Firm-scoped keys (`firms/{firm_id}/…`), an **Unassigned lane** for persist-after-OCR-before-assignment (every document persists immediately after OCR — fixes E2), a **storage move capability** so an assigned document's bytes actually relocate (the old wake lane could not move objects — E3), and every generated export in the export taxonomy as an auditable artifact. The document registry stays consistent across storage objects, DB rows, UI tabs, Clara's access, and the unassigned lane. Delete is never granted (reverse-not-delete + retention).
 
@@ -141,9 +156,19 @@ The 7-year statutory clock anchors at **period-end + filing date** (ITA s.82/82A
 
 ---
 
-## 8. Tax / SST engine — **[Wave-1 integration: `accounting-practice-map.md`]**
+## 8. Tax / SST engine
 
-The compliance-correct core (Gate-1 C5): a **taxable-period model** (registration date, assigned cycles, DG variations — fixes GAP3-1), **service-tax payment basis** on the now-real AR anchors + the s.11(2) 12-month rule + bad-debt relief (fixes F3-8/GAP3-8), sales-tax accrual basis, **dual-registrant separation that survives export** (fixes GAP3-3), output-only (no input credit), the maintained rate/sector schedule (incl. 6%-retained sectors — fixes GAP3-2), the SST-02 return, and the draft tax computation as the last slice. Detailed requirements integrate from the practice map.
+The compliance-correct core (Gate-1 C5). **The normative requirements document is `docs/phase2-research/accounting-practice-map.md`** — grounded in the owner's SST primary-source research (Acts, regulations, MySST manuals) + the frozen repo's tax evidence, with a source register. The engine implements, at minimum:
+
+- **Registration & taxable-period model** — registration-effective dates, assigned period cycles incl. DG variations; the SST taxable period is its own scope axis distinct from the FY (fixes GAP3-1).
+- **Service tax on the payment basis** on the now-real AR anchors + the s.11(2) 12-month rule + bad-debt relief + credit/debit-note deductions (fixes F3-8/GAP3-8 — no more silent accrual substitution).
+- **Sales tax on the accrual basis**; output-only, no input credit anywhere.
+- **Rate & sector schedule** maintained and effective-dated, incl. the 6%-retained sectors; MSIC informs classification (fixes GAP3-2).
+- **Dual-registrant (`both`) separation that survives export** — per-tax declarations through PDF/XLSX/CSV, never a combined payable (fixes GAP3-3/H-13).
+- **The SST-02 return** with per-field form mapping, NIL validity, imported-taxable-services reverse charge, and group/B2B exemption awareness.
+- **The draft tax computation** (add-backs, capital allowances, chargeable income, Form C/P/B, CP204) as the **last v1 slice**, allowed to slip to v1.1 (owner ruling).
+
+Payroll = coding + the built deadline calendar (practice-map Part 3). Inventory = periodic closing-stock adjustment at close with a completeness check (practice-map §2.9). The practice map's Part 5 v1 scope ledger is the scope authority for Phase 4.
 
 ---
 

@@ -266,3 +266,24 @@ swap without runtime rewrite. Rows most candidates tie on (MCP, streaming, typed
   becomes defensible, since durability would be DB-native and runtime-independent.
 - **Team-capacity constraint** (minimum new code now) → Mastra rises; incumbent stays only if durability
   is deferred, which the audit says it cannot be.
+
+---
+
+## 6. Addendum — post-review closures from G1's re-verification (2026-07-17)
+
+G1 (Gate-2 runtime recommendation worker) re-verified this matrix against primary sources and reports it
+held up; their FIRM recommendation (AI SDK 7 + WDK Postgres world, LangGraph fallback, spike as a hard
+precondition) is at `C:\Users\zhant\Desktop\clara-rebuild\docs\phase2-research\runtime-recommendation.md`.
+Two updates to the risk picture above (verified by G1, not independently re-checked by this report's author):
+
+1. **Risk 2 of §5 (WDK × Supabase pooling) is RESOLVED.** Supavisor **session mode** (port 5432, IPv4)
+   officially supports LISTEN/NOTIFY per the Supavisor FAQ, and graphile-worker's requirements (PG12+,
+   Node 22.18+) are met by our PG17/Node 22+. **Transaction mode (port 6543) remains forbidden for the
+   world connection.** Operational default: session mode; direct IPv6 as the fast path — noting a
+   Fly→Supabase regional IPv6 incident (gru, 2026-04) as the reason session mode is the default.
+2. **New verified gap (now Risk 1 in G1's recommendation):** `workflow-sdk.dev/docs/deploying` is
+   **silent on in-flight-run replay/versioning across code deploys**. Mitigations carried by G1:
+   drain-before-deploy + workflow name-versioning, with an explicit spike acceptance criterion.
+
+Attribution correction: the "Grt-*" findings referenced alongside this file in some task briefs come from
+the Workstream-G findings JSON (scratchpad `findings/Grt.json`), **not** from this report.
