@@ -19,8 +19,11 @@ app.get("/health", (_req, res) => {
 // balancer / orchestrator holds traffic. This is the GAP1-7 fix: readiness, not
 // liveness-only.
 app.get("/ready", async (_req, res) => {
-  const db = await checkDb();
+  const db = await checkDb(); // bounded (timeouts) + sanitized error code (lib/db.ts)
   const worldEnabled = process.env.CLARA_START_WORLD === "1";
+  // Readiness is DB reachability ONLY. `world.enabled` is INFORMATIONAL, not a
+  // health signal — a real worker-heartbeat check lands with the durable chat
+  // loop in Slice 4 (there is no worker to health-check in the skeleton).
   const ready = db.ok;
   res.status(ready ? 200 : 503).json({
     ready,
