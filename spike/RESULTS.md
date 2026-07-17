@@ -7,7 +7,9 @@ from Windows 11 / Node v20.19.5 / pnpm 10.33.0. Worker = the built
 `@workflow/world-postgres` world). Versions as pinned in `package.json`
 (`workflow@4.6.0`, `@workflow/world-postgres@4.3.0`, `graphile-worker@0.16.6`).
 
-**Verdicts: T1 PASS · T2 (5-min variant) PASS · T3 PASS · T4 PASS · T5 PASS.**
+**Verdicts: T1 PASS · T2 (5-min variant) PASS · T3 PASS · T4 PASS · T5 PASS ·
+T6 (code-change-under-parked-run + name-versioning mitigation) PASS ·
+T2-48h IN PROGRESS (parked 2026-07-17 15:15 +08, resume due ≥2026-07-19 15:15 +08).**
 
 Engine setup (`pnpm run db:setup`) created the `workflow` + `graphile_worker`
 schemas and the `spike` domain schema on the first run, idempotently. Hard
@@ -128,17 +130,110 @@ Run `wrun_01KXQE7PQ6KM94A736NNMPED1M`, opKey `t2-park5min`.
 
 ---
 
+## T2-48h — IN PROGRESS (started 2026-07-17)
+
+- Run `wrun_01KXQEVPPMX4XGZ2F4GFCYT3YE`, opKey `t2-park48h`, hook token
+  `approval:t2-park48h`. **Enqueued 2026-07-17 15:15:08 (+08:00)** under
+  build A; parked state verified (postEntry completed, hook registered,
+  posting/receipt committed, canary post_entry x1); worker hard-killed
+  15:15:48 and — after the T6 phases below — left **DOWN** at 15:22:07.
+- The park has already survived (a) two hard kills, (b) two rebuilds
+  (builds B and C), and (c) two boot-time re-enqueue replays, with the
+  canary still at x1 and zero queue jobs held while parked.
+- **Resume procedure (due ≥ 2026-07-19 15:15 +08):**
+  `pnpm worker` → `pnpm resume approval:t2-park48h` → assert run completed,
+  postings(t2-park48h)==1, post_entry invocations==1, completion row exists.
+  NOTE: closeDemo was in-place-changed in build C (T6a below), so the resumed
+  run is EXPECTED to complete with the adopted new-code markers:
+  `approver='inplace-v2:spike-operator'`, an `audit_mark` canary row
+  (`closeDemo-inplace-v2`), and `codeVersion` in the returnValue — that is
+  the documented in-place-change behavior, not a failure.
+- One permanently-failed tombstone job (id 16, the T4 crash's step job,
+  attempts 3/3, unlocked) remains in `graphile_worker._private_jobs`; it can
+  never run again (`is_available` requires attempts < max_attempts) and is
+  kept as evidence. The parked 48h run holds NO queue job.
+
+## T6 — workflow-code-change under a parked run + name-versioning: **PASS**
+
+Setup: three runs parked under **build A** (the T1-T5 code state):
+`t2-park48h` (above), `t6-inplace` (`wrun_01KXQEVQMVC94Z6MWP7ETM0PAG`),
+`t6-pinned` (`wrun_01KXQEVRHDJ3EX2J01V42KB8VN`). Worker killed.
+
+**Build B — the MITIGATION deploy (name-versioned V2 alongside untouched V1):**
+added `closeDemoV2` (new workflow file; observable markers: `v2:` approver
+prefix, extra `audit_mark` step, `codeVersion` in return) + `auditMark` step +
+`--v2` enqueue support. `closeDemo` byte-identical. Rebuilt, restarted.
+
+- Boot log: `[world-postgres] Re-enqueued 3 active run(s) on startup` —
+  **parked runs count as "active" and are re-enqueued on every boot.** The
+  replays consumed memoized steps and re-parked: canary counts stayed x1 for
+  all three runs; no domain writes.
+- `pnpm resume approval:t6-pinned` → run completed **on pure V1 semantics**:
+  approver `spike-operator` (no prefix), NO `audit_mark` row, returnValue has
+  NO `codeVersion` field, workflowName `workflow//./workflows/closeDemo//closeDemo`.
+  **Old parked runs are untouched by a V2-alongside deploy.**
+- `pnpm enqueue t6-v2-fresh --v2` → new run `wrun_01KXQF2Y56GWSGTEQMJATP233H`
+  on workflowName `workflow//./workflows/closeDemoV2//closeDemoV2`; parked;
+  resumed → completed **with full V2 markers** (approver `v2:spike-operator`,
+  `audit_mark` = `closeDemoV2`). **New work rides V2 while V1 runs coexist.**
+
+**Build C — the HAZARD (in-place change to closeDemo itself):** the post-hook
+continuation now writes approver `inplace-v2:<name>`, runs an extra
+`audit_mark` step, and returns `codeVersion` — the parked `t6-inplace` run
+(created under build A) was then resumed under build C.
+
+- Result: **the parked run silently ADOPTED THE NEW CODE mid-run.** Run
+  completed (no error): approver `inplace-v2:spike-operator`, `audit_mark`
+  canary row `closeDemo-inplace-v2` x1, returnValue
+  `codeVersion: "closeDemo-inplace-v2"`. The already-completed `post_entry`
+  stayed memoized (canary x1, `wasDuplicate:false` from the ORIGINAL
+  invocation) — only the not-yet-executed portion ran on new code.
+- Boot replay of the still-parked runs under the changed code was harmless
+  (memoized prefix, re-park) because the change is entirely post-hook.
+
+**Verdict:** confirmed empirically — self-hosted WDK has **no run pinning**:
+an in-place edit silently changes the semantics of the un-executed remainder
+of every in-flight run (it does not fail loud, and it does not preserve old
+semantics). Additive post-park changes complete "successfully" with the NEW
+semantics, which for accounting workflows is a silent-correctness hazard, not
+a crash hazard. The name-versioning discipline fully mitigates it.
+
+**Recommended production versioning policy (Clara runtime):**
+1. A deployed workflow's body is **immutable** once any run of it can be
+   in flight. Every behavioral change ships as a NEW exported workflow
+   (`closeDemo_v2`, `closeDemo_v3`, ...); the old export stays in the tree
+   until zero non-terminal runs reference its workflowName (queryable:
+   `workflow.workflow_runs where name = ... and status not in ('completed','failed','cancelled')`).
+2. Enqueue sites always target the newest version; a CI check should forbid
+   editing the body of any workflow file marked frozen (lint rule /
+   golden-hash test per frozen workflow).
+3. Renaming or deleting a workflow export with in-flight runs is forbidden -
+   the workflowName is derived from file path + export name, so a rename
+   strands parked runs (their re-enqueue would find no matching workflow).
+4. Exception permitted only for provably pre-park-idempotent hotfixes
+   (bug in a step body whose DB writes are idempotency-keyed), because
+   completed steps are memoized and never re-run - and even then prefer
+   cancel + re-run-on-latest for anything money-touching.
+5. Restart discipline: every boot re-enqueues ALL non-terminal runs and
+   replays them against CURRENT code - deploys must therefore never ship a
+   workflow-body change and assume parked runs are frozen. (This is also
+   why the boot replay is cheap: memoized steps + re-park.)
+
 ## WDK behavior findings from the live run
 
 1. **The world self-recovers active runs at startup** (not in the docs, missed
-   in the pre-run source read): boot logs `[world-postgres] Re-enqueued 1
-   active run(s) on startup`, which re-enqueues the interrupted run under its
-   dedup job key and bypasses the dead worker's stale job lock. Consequence:
+   in the pre-run source read): boot logs `[world-postgres] Re-enqueued N
+   active run(s) on startup`, which re-enqueues interrupted runs under their
+   dedup job keys and bypasses the dead worker's stale job lock. Consequence:
    crash recovery after restart was **automatic and immediate** in T4 —
    `pnpm unstick` was NOT needed for this path. The graphile 4-hour stale-lock
    reclaim (verified in graphile-worker 0.16.6 sources) still exists
    underneath; `unstick` stays as an instrument for any state the startup
-   sweep does not cover (none observed in this spike).
+   sweep does not cover (none observed in this spike). T6 refinement: the
+   sweep counts **parked-at-hook runs too** — every boot replays ALL
+   non-terminal runs against current code (memoized steps, re-park; harmless
+   for unchanged prefixes, and the mechanism behind T6a's mid-run code
+   adoption).
 2. **At-least-once is real, and the DB idempotency key is the floor.** T4 is
    the direct demonstration: the engine re-invoked a step whose transaction
    had already committed; only `ON CONFLICT (op_key)` kept the books correct.

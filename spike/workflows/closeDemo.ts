@@ -1,6 +1,6 @@
 import { createHook, getWorkflowMetadata } from "workflow";
 import type { Approval } from "../lib/types.js";
-import { finalize, postEntry } from "./steps.js";
+import { auditMark, finalize, postEntry } from "./steps.js";
 
 /**
  * The close-demo workflow: step A (post_entry, idempotent DB write) ->
@@ -20,7 +20,14 @@ export async function closeDemo(opKey: string, amountCents: number) {
   const hook = createHook<Approval>({ token: `approval:${opKey}` });
   const approval = await hook;
 
-  const completion = await finalize(meta.workflowRunId, opKey, approval);
+  // T6a IN-PLACE CHANGE (build C): the post-hook continuation now writes a
+  // marked approver, runs an extra step, and returns a codeVersion field.
+  // Runs parked under build A resume into THIS body - the hazard under test.
+  const completion = await finalize(meta.workflowRunId, opKey, {
+    approved: approval.approved,
+    approver: `inplace-v2:${approval.approver ?? "unknown"}`,
+  });
+  const mark = await auditMark(opKey, "closeDemo-inplace-v2");
 
-  return { opKey, posted, approval, completion };
+  return { opKey, posted, approval, completion, mark, codeVersion: "closeDemo-inplace-v2" };
 }

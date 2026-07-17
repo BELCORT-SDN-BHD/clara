@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import express from "express";
 import { getRun, resumeHook, start } from "workflow/api";
 import { closeDemo } from "../workflows/closeDemo.js";
+import { closeDemoV2 } from "../workflows/closeDemoV2.js";
 import { pingDemo } from "../workflows/pingDemo.js";
 
 // Control surface for the spike. The engine does NOT need these routes to
@@ -20,15 +21,26 @@ app.get("/health", (_req, res) => {
   });
 });
 
-// Start a close-demo run. Body (optional): { opKey?: string, amountCents?: number }
+// Start a close-demo run. Body (optional):
+// { opKey?: string, amountCents?: number, workflow?: "v1" | "v2" }
+// "v2" targets the name-versioned closeDemoV2 (T6 mitigation).
 app.post("/demo/enqueue", async (req, res) => {
   try {
     const body = (req.body ?? {}) as Record<string, unknown>;
     const amountCents = typeof body.amountCents === "number" ? Math.trunc(body.amountCents) : 12345;
     const opKey =
       typeof body.opKey === "string" && body.opKey.length > 0 ? body.opKey : `op-${randomUUID()}`;
-    const run = await start(closeDemo, [opKey, amountCents]);
-    res.json({ runId: run.runId, opKey, amountCents, hookToken: `approval:${opKey}` });
+    const useV2 = body.workflow === "v2";
+    const run = useV2
+      ? await start(closeDemoV2, [opKey, amountCents])
+      : await start(closeDemo, [opKey, amountCents]);
+    res.json({
+      runId: run.runId,
+      opKey,
+      amountCents,
+      workflow: useV2 ? "closeDemoV2" : "closeDemo",
+      hookToken: `approval:${opKey}`,
+    });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

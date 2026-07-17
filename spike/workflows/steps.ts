@@ -85,6 +85,17 @@ export async function postEntry(opKey: string, amountCents: number): Promise<Pos
 }
 
 /**
+ * T6 marker step: writes an observable canary row so tests can tell WHICH
+ * workflow code version executed the post-hook continuation. Added in the
+ * "V2 alongside" deploy (build B); the frozen V1 body never called it.
+ */
+export async function auditMark(opKey: string, marker: string): Promise<string> {
+  "use step";
+  await logInvocation(opKey, "audit_mark", marker);
+  return marker;
+}
+
+/**
  * Step B - finalize. Inserts the completion marker keyed to the run
  * (idempotent on op_key, which is 1:1 with the run in this demo).
  */

@@ -123,7 +123,8 @@ PASSED — full observations in `RESULTS.md`.**
 | T1 / T2(5-min) / T3 / T4 / T5 | **ALL PASS** (`RESULTS.md`) |
 | Crash recovery after hard kill | VERIFIED - the world re-enqueues active runs at startup (surprise 4) |
 | Connection budget / pool sizing under load (spike AC 7) | **STILL PENDING** (world defaults: `queueConcurrency` 10, `maxPoolSize` 10; not load-tested) |
-| 48h park + redeploy-under-changed-code (spike AC 2/4) | **STILL PENDING** (calendar time; procedures in tests/acceptance.md) |
+| T6 code-change-under-parked-run + name-versioning mitigation (spike AC 4) | **PASS** (RESULTS.md T6: in-place change = silent mid-run adoption; V2-alongside = clean pinning-by-discipline) |
+| 48h park (spike AC 2) | **IN PROGRESS** - `t2-park48h` parked 2026-07-17 15:15 +08, worker left down; resume due >=2026-07-19 15:15 +08 (RESULTS.md) |
 
 `pnpm dryrun` deliberately strips `DATABASE_URL`/`WORKFLOW_TARGET_WORLD`/`FAULT`
 from the child environment and runs the DB-free `pingDemo` workflow (same
@@ -132,16 +133,18 @@ a real database.
 
 ## API surprises found (vs the runtime-recommendation's assumptions)
 
-1. **Self-hosted has NO deployment pinning.** WDK docs now have a
-   `foundations/versioning` page ("runs are pinned to the deployment that
-   started them") - but `@workflow/world-postgres`'s `getDeploymentId()`
-   returns the constant `'postgres'` (verified in dist): every run executes
-   against whatever code currently serves the well-known routes, and
-   `deploymentId: 'latest'` is an explicit no-op self-hosted. Consequences:
-   (a) restarts/redeploys of the same workflow shape resume cleanly (good for
-   T1-T4); (b) workflow-**name** versioning (`closeDemo_v2`) is OUR discipline,
-   exactly as Codex Addendum 3 refinement 2 assumed; renaming a workflow
-   strands its in-flight runs.
+1. **Self-hosted has NO deployment pinning - empirically confirmed by T6.**
+   WDK docs have a `foundations/versioning` page ("runs are pinned to the
+   deployment that started them") - but `@workflow/world-postgres`'s
+   `getDeploymentId()` returns the constant `'postgres'` (verified in dist),
+   `deploymentId: 'latest'` is an explicit no-op self-hosted, and the live T6
+   test proved a run parked under old code **silently adopts an in-place code
+   change mid-run** (completes on NEW semantics, no error, memoized steps
+   preserved) - while a name-versioned deploy (`closeDemoV2` alongside an
+   untouched `closeDemo`) left parked V1 runs on V1 semantics and routed new
+   work to V2. Workflow-name versioning is a MANDATORY production discipline
+   (full policy in RESULTS.md T6); renaming a workflow strands its in-flight
+   runs.
 2. **The docs' Nitro plugin import path is stale.**
    `nitro/~internal/runtime/plugin` (postgres-world doc) does not exist in
    `nitro@3.0.260610-beta`'s exports map; the helper is `definePlugin`
