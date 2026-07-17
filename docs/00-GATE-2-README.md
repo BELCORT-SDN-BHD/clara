@@ -17,10 +17,10 @@ Research provenance: `phase2-research/design-{genui,agentic,saas,agent-coexist}.
 
 ## Decisions requested at this gate
 
-1. **Ratify the runtime** — AI SDK 7 + WDK (self-hosted Postgres world) with the LangGraph fallback and the Slice-0 spike as a hard precondition. *(Gate-1 left this open; the incumbent was not presumptive and indeed did not win.)*
+1. **Ratify the runtime** — AI SDK 7 + Workflow DevKit (self-hosted) with the LangGraph fallback and the Slice-0 spike as a hard precondition. **In plain terms:** instead of building the "never lose Clara's work" machinery ourselves, we buy a proven engine that saves every step of Clara's work into **our own database** as it happens — so a crash, restart, or redeploy resumes instead of losing the workflow, and an approval question can wait days without costing anything. A 1–2 week test must pass before we commit; if it fails, a named backup engine swaps in behind the same interface with no other change to the plan. *(Gate-1 left this open; the incumbent was not presumptive and indeed did not win.)*
 2. **Ratify the design direction** — including two explicit calls: **plan-as-document as a first-class versioned DB object**, and the **rewind-vs-reverse UI convention** (drafts discard; posted entries only Reverse-with-reason).
 3. **The C6 checklist** (from your Gate-1 override): the executed **DPA**, the **firm-facing disclosure**, and the **PDPA cross-border check** must be evidenced before vendor trace export is switched on. Until then tracing ships **feature-flagged off** with DB run history carrying debugging. Confirm this sequencing.
-4. **Approve the phase plan** — the slice/wave order, the GATE-3 thin-slice definition, and the Phase-5 verification plan (incl. the AI-quality eval as a real gate and tax-comp's pre-authorized slip to v1.1).
+4. **Approve the phase plan** — the slice/wave order, the GATE-3 thin-slice definition, and the Phase-5 verification plan (incl. the AI-quality eval as a real gate and tax-comp's pre-authorized slip to v1.1). **One deliberate scope note inside this decision:** your C5 ruling's floor was "add SOCE + basic notes, or stop claiming MPERS compliance" — the packet goes one step further and includes the **cash-flow statement** in the v1 FS pack, because MPERS Section 3 genuinely requires it for a complete set: honoring the literal floor while stamping "MPERS-compliant" would itself overclaim. Approving this decision ratifies that slightly larger FS set (SoFP + SoCI + SOCE + SCF + basic notes).
 
 ## What happens on approval
 

@@ -176,7 +176,7 @@ The prior build had no event layer, no context pack, and no stale-context detect
 
 ## 9. Open product questions (for later gates)
 
-1. **Runtime choice** — decided at Gate 2 with the architecture (`docs/architecture/runtime-recommendation.md`); the incumbent OpenAI Agents SDK is not presumptive.
+1. **Runtime choice** — decided at Gate 2 with the architecture (`docs/phase2-research/runtime-recommendation.md` + `docs/architecture/ARCHITECTURE.md` §4.0); the incumbent OpenAI Agents SDK is not presumptive.
 2. **C6 compliance execution** — the DPA, firm-facing disclosure, and PDPA cross-border transfer check are Gate-2 checklist items that must be satisfied before any firm data flows to a vendor trace platform.
 3. **Billing model + scale guardrails** — the pre-public-launch gate; per-firm token/usage cap design.
 4. **Tax-computation v1 vs v1.1** — the draft computation is the last slice; the slip decision is data-driven during Phase 4.

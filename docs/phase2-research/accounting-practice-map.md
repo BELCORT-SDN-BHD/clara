@@ -125,7 +125,7 @@ This is the **hardest and most valuable** part of SST correctness, and where the
 | **Sales tax** | specific per-unit | Schedule-2 goods (petroleum etc.) | — |
 | **Sales tax** | 0% / exempt | Essential goods (unchanged 1 Jul 2025) | — |
 | **Service tax** | **8%** | General taxable services (Groups A–I default) | **1 Mar 2024** (up from 6%) |
-| **Service tax** | **6% (retained)** | **F&B (Group B), telecommunications, parking, logistics (Group J)** | retained at the 1 Mar 2024 rise |
+| **Service tax** | **6% (retained)** | **F&B (Group B), telecommunications, parking, logistics (Group J — added by post-2018 amendment; the original 2018 First Schedule ran Groups A–I)** | retained at the 1 Mar 2024 rise |
 | **Service tax** | **8%** | New 1 Jul 2025 Groups: rental/leasing, construction, financial services (Group H), private healthcare (non-citizen), education (high-fee), beauty | **1 Jul 2025** |
 | **Service tax** | RM25/card/yr | Group H credit-card/charge-card levy (per card) | — |
 

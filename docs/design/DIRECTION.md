@@ -14,7 +14,7 @@ Precedence on any collision remains **accounting-correctness > backend contracts
 
 | # | Question (synthesis §7) | Disposition |
 |---|---|---|
-| 1 | Runtime coupling | **Resolved** — the recommended runtime (AI SDK 7 + WDK, `ARCHITECTURE.md` §4.0) natively persists typed parts, interruptions, and resumable HITL; the D-4/D-6/D-7/D-8 fixes and the RECOVER surfaces land on it. |
+| 1 | Runtime coupling | **Resolved conditional on Gate-2 ratification + the Slice-0 spike** — the recommended runtime (AI SDK 7 + WDK, `ARCHITECTURE.md` §4.0) natively persists typed parts, interruptions, and resumable HITL; the D-4/D-6/D-7/D-8 fixes and the RECOVER surfaces land on it (or on the LangGraph fallback behind the same seam). |
 | 2 | Evidence-region capture | **Adopted as an ingestion requirement** — `ARCHITECTURE.md` §7. The design never promises a surface the backend can't feed. |
 | 3 | Plan-as-document persistence | **Recommended: a first-class, versioned DB object** (the intended-vs-actual audit record). → **Gate-2 owner ratification.** |
 | 4 | Rewind vs reverse boundary | Drafts get local undo ("discard draft"); posted entries expose **only** Reverse-with-reason; the two affordances are visually and verbally distinct (never a shared "undo" verb). Accounting-correctness rules here; flagged to the owner at Gate 2 per the drift protocol. |

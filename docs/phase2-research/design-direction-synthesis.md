@@ -197,7 +197,7 @@ The approval interaction shape borrows `needsApproval → approval-requested →
 with **conditional gating on inputs** (amount > threshold, closed-period, tax-affecting), **but the decision
 authority lives in the DB**: the client approval calls the audited fn, which independently checks role floor,
 maker≠checker on the high-stakes lane, the ≥0.95 gate, and the **expected-revision token** so an approval
-after an intervening edit is rejected (the old `approve_entry` had no such token — GAP0-4).
+after an intervening edit is rejected (the old `approve_entry` had no such token — GAP0-5).
 
 ### 3.3 Diffs (VERIFY, part 1) — the diff IS the review surface, and there are two
 
@@ -428,7 +428,7 @@ color enforced by CI, five screen states everywhere, URL-as-truth, typed referen
 | AD-8 | Two diffs: legs before/after **and** source-doc↔entry | **J-3**, J-18 |
 | AD-9 | Honest streamed progress: status line + tool chips + DB-backed checklist; ban "working…" | **J-4**, Grt-3/9 |
 | AD-10 | Durable inspectable tool/reasoning trail (expandable, repetition collapsed) | Grt-3/9/10, H-1/2 |
-| AD-11 | Graduated boundary-based approval → DB write classes + role floors + high-stakes distinct-approver + revision token | **J-5**, C3, C4, GAP0-4 |
+| AD-11 | Graduated boundary-based approval → DB write classes + role floors + high-stakes distinct-approver + revision token | **J-5**, C3, C4, GAP0-5 |
 | AD-12 | Draft reversibility (discard/rollback/refine-and-rerun); posted = reverse-only | Grt-5, autonomy law |
 | AD-13 | Verification lane (tie-outs/parity/balance/SST/continuity); serious-only; reason on every judgment; DB-derived balance chip | **J-19, J-21, H-2**, GAP1-1/1-2 |
 | AD-14 | Durable/resumable/interruptible/idempotent runs; heartbeat/staleness; client isolation | Grt-1/5/6/7/11/12, **J-6** |

@@ -80,7 +80,7 @@ The agent's freeform read path no longer relies on a lexical verb filter. Two la
 - The agent identity can never be a `checker_actor` on its own postings, and sweep acknowledgements require a bookkeeper+ human. Enforced in the DB, not the UI.
 
 ### 3.5 Intrinsic subledger + counterparty entity (Gate-1 C2; fixes F3-1..8)
-- A first-class **`counterparties`** table per client: id-keyed, typed (customer/supplier/both), with **`counterparty_aliases`** children (the PORT'd alias/normalise machinery). Rules, KB evidence, recon hints, and AR/AP open items FK to the counterparty id — so an alias repoint never splits history (fixes C-9).
+- A first-class **`counterparties`** table per client: id-keyed, typed (customer/supplier/both), with **`counterparty_aliases`** children (the PORT'd alias/normalise machinery). Rules, KB evidence, recon hints, and AR/AP open items FK to the counterparty id — so an alias repoint never splits history (fixes C-9). Counterparty **narrative** (who this vendor is, quirks, typical treatments) lives as wiki pages cross-linked to the entity id (Gate-1 C2 §3).
 - **Subledger maintenance is intrinsic to the write.** Coding a sales invoice to Trade Debtors and recording the AR open item happen in **one audited transaction** (`code_and_open_ar(...)` composes the GL write + `record_ar_invoice` + counterparty link + the domain event). There is no path that posts the GL leg without the open item — the F3 dead-chain class is structurally impossible. Same for AP bills, bank receipts→allocations, and FA acquisitions→register rows.
 - Bank matching gets **structural parity checks** (fixes GAP1-1/1-2): `match_bank_line` RAISES on wrong account/period/amount-beyond-tolerance and enforces entry-exclusivity (an entry can be matched once); re-match requires an explicit unmatch first.
 
@@ -99,7 +99,7 @@ The prior runtime was a thin, process-local shell — all run/clarify/interrupti
 
 ### 4.0 Runtime recommendation (G1 — for Gate-2 ratification)
 
-**Recommended: Vercel AI SDK 7 (`ai@7`) + Workflow DevKit (`workflow` + `@workflow/world-postgres`), self-hosted in the Clara service on Fly, all state in our own Postgres — behind the swap-seam. Named fallback: LangGraph JS + PostgresSaver.** Full evidence: `docs/phase2-research/runtime-recommendation.md`, **double-verified by two independent primary-source lanes on 2026-07-17** (a second lane re-fetched every decisive doc claim and corroborated all of them verbatim).
+**Recommended: Vercel AI SDK 7 (`ai@7`) + Workflow DevKit (`workflow` + `@workflow/world-postgres`), self-hosted in the Clara service on Fly, all state in our own Postgres — behind the swap-seam. Named fallback: LangGraph JS + PostgresSaver.** Full evidence: `docs/phase2-research/runtime-recommendation.md`, **double-verified by two independent primary-source lanes on 2026-07-17** (a second lane re-fetched every decisive doc claim and corroborated all of them verbatim — record: `docs/phase2-research/runtime-recommendation-corroboration.md`).
 
 Why it wins the decisive rows: the agent loop runs *inside* a step-checkpointed durable engine on our own Postgres (`'use step'` memoization = the strongest no-double-post story); hooks park clarify/approval interruptions for **days at zero compute** and resume on answer; approvals persist as HMAC-signable message parts in our DB; OTel tracing carries full-content spans to a DPA-covered vendor (Langfuse a concrete candidate) or self-host from the same code — satisfying the owner's C6 ruling; true model-agnosticism; Apache-2.0. The incumbent OpenAI Agents SDK loses on its own docs (parallel package-aliased SDK versions recommended for approvals pending across upgrades; no step engine); LangGraph ties on durability/HITL but re-executes an interrupted node from its top (a permanent idempotency burden) and gravitates to LangSmith; the Claude Agent SDK fails the stated model-agnosticism requirement.
 
@@ -197,3 +197,4 @@ Payroll = coding + the built deadline calendar (practice-map Part 3). Inventory 
 | 9 · reporting launders numbers | §6 DB-owned figures only |
 | 10 · ops/verification/compliance | §9 CI/DR/eval/guardrails |
 | 11 · doctrine drift | §4.1 registry-generated tool catalog + lint gate |
+| 11a · bank-match integrity (GAP1-1/1-2) + evidence regions (J-18) | §3.5 structural match-parity + entry-exclusivity; §7 per-field bounding-region capture + the `doc_review` verification surface |
