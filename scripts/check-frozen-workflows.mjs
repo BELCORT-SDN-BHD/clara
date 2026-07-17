@@ -72,7 +72,7 @@ function hasWorkflowDirective(src) {
 }
 // Defence-in-depth: reject a base ref that isn't a plain git ref name.
 const RAW_BASE_REF = process.env.FREEZE_BASE_REF || "origin/main";
-const BASE_REF = /^[A-Za-z0-9._\/-]+$/.test(RAW_BASE_REF) ? RAW_BASE_REF : "origin/main";
+const BASE_REF = /^[A-Za-z0-9._/-]+$/.test(RAW_BASE_REF) ? RAW_BASE_REF : "origin/main";
 
 // Coverage scope: ALL tracked source under packages/ (spike/ is a throwaway and is
 // intentionally out of scope). Not a narrow per-directory allowlist.

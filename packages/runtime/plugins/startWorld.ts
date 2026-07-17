@@ -11,12 +11,29 @@ import { definePlugin } from "nitro";
 // "nitro/~internal/runtime/plugin"`; that subpath does not exist in
 // nitro@3.0.260610-beta — the helper is re-exported from the package root as
 // `definePlugin` (verified against the Slice-0 spike).
-export default definePlugin(async () => {
+//
+// Nitro invokes plugins SYNCHRONOUSLY and does NOT await them (dist codegen:
+// `for (const plugin of plugins) { try { plugin(app) } catch (e) { ... } }`, and
+// the docs state a plugin "must be synchronous (return void)"). The world start
+// is inherently async (dynamic import + start()), so it runs as a self-contained
+// task that OWNS its rejection. Handing nitro an `async` plugin body instead
+// would give it a promise it silently drops — turning a world-start failure into
+// an unhandled rejection (caught by @typescript-eslint/no-misused-promises).
+export default definePlugin(() => {
   if (process.env.CLARA_START_WORLD !== "1") {
     console.log("[clara-runtime] world NOT started (CLARA_START_WORLD != 1) — skeleton mode");
     return;
   }
-  const { getWorld } = await import("workflow/runtime");
-  await getWorld().start?.();
-  console.log(`[clara-runtime] durable world started pid=${process.pid}`);
+  void (async () => {
+    try {
+      const { getWorld } = await import("workflow/runtime");
+      await getWorld().start?.();
+      console.log(`[clara-runtime] durable world started pid=${process.pid}`);
+    } catch (err) {
+      console.error(
+        "[clara-runtime] durable world FAILED to start:",
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  })();
 });
