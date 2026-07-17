@@ -15,6 +15,7 @@ description = "Non-secret high-entropy strings + placeholder/evidence files"
 paths = [
   '''pnpm-lock\.yaml''',            # dependency integrity (sha512) hashes — not secrets
   '''frozen-workflows\.json''',     # freeze-lint golden sha256 manifest — not secrets
+  '''skills-lock\.json''',          # vendored-skills provenance sha256 manifest — not secrets
   '''(^|/)[^/]*\.example$''',       # *.env.example etc. — placeholders only
   '''(^|/)docs/audit/''',           # frozen audit evidence: long file-path/quote strings
 ]
