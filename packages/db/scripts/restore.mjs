@@ -1,25 +1,40 @@
-// Restore — applies a plain-SQL dump file with psql, ON_ERROR_STOP=1.
+// Restore — applies a plain-SQL dump file with psql.
 //
-// Connection is via libpq env vars only (see backup.mjs). psql 16+ can restore
-// a plain dump into a Postgres 17 server (only pg_dump enforces a strict
-// server-version match). Point PSQL at a specific binary if PATH's is wrong.
+// GUARDED (finding 9): a restore OVERWRITES whatever database is in the ambient
+// PG* / DATABASE_URL. It refuses unless CLARA_ALLOW_DESTRUCTIVE=1 AND the target
+// is disposable or explicitly named via CLARA_DESTRUCTIVE_TARGET — so a restore
+// can never silently land in the wrong project (see lib/guard.mjs).
+//
+// ATOMIC by default: psql runs with --single-transaction and ON_ERROR_STOP=1, so
+// a failure rolls the WHOLE restore back instead of leaving a half-applied
+// database. A dump profile that can't run in one transaction (e.g. one containing
+// CREATE INDEX CONCURRENTLY) can opt out with --no-single-transaction.
+//
+// Connection is via libpq env vars only (see backup.mjs). psql 16+ can restore a
+// plain dump into a Postgres 17 server. Point PSQL at a specific binary if needed.
 //
 // Usage:
-//   node scripts/restore.mjs --file <path.sql>
+//   node scripts/restore.mjs --file <path.sql> [--no-single-transaction]
 
 import { spawnSync } from "node:child_process";
 import { targetLabel, isMain } from "../lib/pg.mjs";
+import { assertDestructiveAllowed } from "../lib/guard.mjs";
 
 /**
- * @param {{ file: string, log?: (s:string)=>void }} opts
+ * @param {{ file: string, singleTransaction?: boolean, log?: (s:string)=>void }} opts
  */
 export function restore(opts) {
   if (!opts || !opts.file) throw new Error("restore requires { file }");
-  const { file, log = console.log } = opts;
-  const bin = process.env.PSQL || "psql";
-  const args = ["-X", "-v", "ON_ERROR_STOP=1", "-f", file, "--dbname", process.env.PGDATABASE || "postgres"];
+  const { file, singleTransaction = true, log = console.log } = opts;
 
-  log(`restore: ${bin} -f ${file} · target ${targetLabel()}`);
+  assertDestructiveAllowed({ action: `restore (overwrite ${targetLabel()})` });
+
+  const bin = process.env.PSQL || "psql";
+  const args = ["-X", "-v", "ON_ERROR_STOP=1"];
+  if (singleTransaction) args.push("--single-transaction");
+  args.push("-f", file, "--dbname", process.env.PGDATABASE || "postgres");
+
+  log(`restore: ${bin} ${singleTransaction ? "--single-transaction " : ""}-f ${file} · target ${targetLabel()}`);
   const r = spawnSync(bin, args, { stdio: ["ignore", "inherit", "inherit"], env: process.env });
   if (r.error) throw new Error(`psql failed to start (${r.error.message})`);
   if (r.status !== 0) throw new Error(`psql exited ${r.status}`);
@@ -31,6 +46,7 @@ function parseArgs(argv) {
   const opts = {};
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--file") opts.file = argv[++i];
+    else if (argv[i] === "--no-single-transaction") opts.singleTransaction = false;
   }
   return opts;
 }
