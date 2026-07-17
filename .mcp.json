@@ -2,19 +2,14 @@
   "mcpServers": {
     "codebase-memory-mcp": {
       "type": "stdio",
-      "command": "C:UserszhantAppDataLocalProgramscodebase-memory-mcpcodebase-memory-mcp.exe",
+      "command": "C:/Users/zhant/AppData/Local/Programs/codebase-memory-mcp/codebase-memory-mcp.exe",
       "args": [],
       "env": {}
     },
     "shadcn": {
       "type": "stdio",
       "command": "cmd",
-      "args": [
-        "/c",
-        "npx",
-        "shadcn@4.12.0",
-        "mcp"
-      ],
+      "args": ["/c", "npx", "shadcn@4.12.0", "mcp"],
       "env": {}
     }
   }
