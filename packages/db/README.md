@@ -4,10 +4,21 @@ Versioned migrations, seeds (synthetic only), the ephemeral test rig, and the
 DR backup/restore tooling. The shared Postgres is Clara's single source of
 truth (`docs/architecture/ARCHITECTURE.md` §3).
 
-> **Slice 1 scope.** This package contains the *pipeline*, not the real schema.
-> The governed DB core (firms/RBAC/RLS, the four structural invariants, the
-> balance trigger, money-as-cents) is **Slice 2** (`docs/plan/REBUILD-PLAN.md`).
-> Migration `0001_smoke.sql` exists only to prove the pipeline runs end-to-end.
+> **Scope.** Slice 1 landed the *pipeline* (migration `0001_smoke.sql` — a
+> placeholder that only proves the runner works end-to-end). **Slice 2** (`0002`–
+> `0004` + seed `0002_core_seed.sql`) lands the **governed DB core**: the six
+> `clara_*` roles, identity/RBAC, forced RLS with role-pinned read policies, the
+> two-lane audited writers (human vs. wake — the agent can never sign), the four
+> structural invariants, the balance/immutability/append-only triggers, and
+> money-as-cents. See `docs/plan/REBUILD-PLAN.md`.
+>
+> **audit_log append-only — honesty boundary.** `clara.audit_log` is append-only,
+> enforced by UPDATE/DELETE/TRUNCATE triggers so that no app role, agent, or even
+> a SECURITY DEFINER bug can rewrite a receipt. This is defense in depth against
+> *application-layer* tampering — **not** against a compromised database
+> **superuser**, who can drop the trigger or the table and therefore sits outside
+> the guarantee. That boundary belongs to the platform (Postgres role hardening,
+> backups, DR), not to the schema.
 
 ## Layout
 
