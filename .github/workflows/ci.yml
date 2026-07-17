@@ -74,7 +74,7 @@ jobs:
       - name: Typecheck (tsc across TS packages)
         run: pnpm typecheck
 
-      - name: Lint (freeze-lint + leak-scan + per-package)
+      - name: Lint (freeze-lint + leak-scan + eslint code-lint)
         run: pnpm lint
 
       # Called out explicitly for visibility even though `pnpm lint` runs them:
@@ -117,11 +117,15 @@ jobs:
             echo "origin/main has no packages/db/migrations yet — first introduction; nothing to layer onto."
           fi
 
-      - name: Migrate + seed + smoke test (ephemeral postgres:17)
+      # `pnpm -r --if-present test` runs EVERY package's test (not just @clara/db)
+      # so a test added to @clara/runtime or @clara/dashboard can't silently skip
+      # CI. Runs after seed because the db smoke test asserts against the migrated
+      # + seeded schema. Folds in the former `--filter @clara/db test` step.
+      - name: Migrate + seed + tests — all packages (ephemeral postgres:17)
         run: |
           pnpm db:migrate
           pnpm db:seed
-          pnpm --filter @clara/db test
+          pnpm -r --if-present test
 
       - name: DR backup/restore self-test (ephemeral postgres:17)
         run: pnpm --filter @clara/db dr:selftest
