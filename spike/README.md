@@ -27,10 +27,14 @@ in the `workflow` schema of the DATABASE_URL database; the queue lives in
 ```powershell
 pnpm install
 Copy-Item .env.example .env    # paste the Supabase SESSION-mode (port 5432) connection string
-pnpm setup                     # = setup:engine (workflow+graphile schemas) + setup:domain (schema.sql)
+pnpm run db:setup              # = setup:engine (workflow+graphile schemas) + setup:domain (schema.sql)
 pnpm build                     # compile workflows + server
 pnpm worker                    # terminal A: the long-lived worker
 ```
+
+> The aggregate setup script is named `db:setup` because `pnpm setup` is a
+> pnpm BUILT-IN that shadows package scripts (it silently configures
+> PNPM_HOME instead - found live, see RESULTS.md).
 
 - **Supavisor SESSION mode only** (port 5432). Transaction mode (6543) drops
   LISTEN/NOTIFY and breaks the engine; `pnpm probe` (T5) verifies this.
@@ -38,8 +42,13 @@ pnpm worker                    # terminal A: the long-lived worker
   (the documented command is `pnpm dlx --package @workflow/world-postgres bootstrap`;
   as a direct dependency its `bootstrap` bin is on our path). It self-loads
   `.env` and reads `WORKFLOW_POSTGRES_URL` falling back to `DATABASE_URL`.
+- **The runtime does NOT share the CLI's `DATABASE_URL` fallback** (surprise 7
+  below), so the worker entry is `scripts/worker.mjs`: it maps
+  `DATABASE_URL → WORKFLOW_POSTGRES_URL` and defaults
+  `WORKFLOW_TARGET_WORLD`/`PORT` before importing the built server. Only
+  `DATABASE_URL` is required in `.env`.
 - The built server does NOT self-load `.env`, so `pnpm worker` runs
-  `node --env-file=.env .output/server/index.mjs`.
+  `node --env-file=.env scripts/worker.mjs`.
 
 ## Scripts
 
@@ -56,7 +65,7 @@ pnpm worker                    # terminal A: the long-lived worker
 | `pnpm probe` | T5: LISTEN/NOTIFY round trip over DATABASE_URL |
 | `pnpm dryrun` | No-DB self-test of the harness on the Local World (see below) |
 | `pnpm typecheck` | `tsc --noEmit` |
-| `pnpm setup` / `setup:engine` / `setup:domain` | Engine bootstrap / domain schema.sql |
+| `pnpm run db:setup` / `setup:engine` / `setup:domain` | Engine bootstrap / domain schema.sql |
 
 The test workflow (`workflows/closeDemo.ts`): step A `post_entry` inserts a
 posting (idempotent `ON CONFLICT (op_key)`, returns the original row + a
@@ -99,7 +108,10 @@ Node on this machine: **v20.19.5** - fine: `graphile-worker@0.16.6` declares
 `node >=14`. (The "Node 22.18+" note in the research doc tracks graphile-worker's
 newer 0.17 line, which this pinned world does not use.)
 
-## Verified here vs pending-DB
+## Verified
+
+**2026-07-17: T1-T5 all executed against hosted Supabase (session mode) and
+PASSED — full observations in `RESULTS.md`.**
 
 | Item | Status |
 |---|---|
@@ -107,11 +119,11 @@ newer 0.17 line, which this pinned world does not use.)
 | `pnpm typecheck` | VERIFIED (clean) |
 | `pnpm build` - workflow compiler accepts both directives, bundles server | VERIFIED |
 | `pnpm dryrun` - full engine loop (start → step → **parked hook** → resume → completed run, correct return value) on the built output, Local World, zero external services | VERIFIED (PASS) |
-| Engine bootstrap command exists, self-loads .env, falls back to DATABASE_URL | VERIFIED in package sources; **execution pending DB** |
-| `schema.sql` apply, T1-T5 against Supabase | **PENDING DATABASE_URL** |
-| Supavisor session-mode LISTEN/NOTIFY (T5) | **PENDING DATABASE_URL** (probe ready) |
-| Connection budget / pool sizing under load (spike AC 7) | **PENDING DATABASE_URL** (world defaults: `queueConcurrency` 10 in this version, `maxPoolSize` 10; README of the world documents the knobs) |
-| 4h stale-lock behavior + `pnpm unstick` mitigation | Mechanism VERIFIED in graphile-worker sources; live behavior **PENDING DB** |
+| Engine bootstrap + `schema.sql` apply against Supabase | VERIFIED (executed) |
+| T1 / T2(5-min) / T3 / T4 / T5 | **ALL PASS** (`RESULTS.md`) |
+| Crash recovery after hard kill | VERIFIED - the world re-enqueues active runs at startup (surprise 4) |
+| Connection budget / pool sizing under load (spike AC 7) | **STILL PENDING** (world defaults: `queueConcurrency` 10, `maxPoolSize` 10; not load-tested) |
+| 48h park + redeploy-under-changed-code (spike AC 2/4) | **STILL PENDING** (calendar time; procedures in tests/acceptance.md) |
 
 `pnpm dryrun` deliberately strips `DATABASE_URL`/`WORKFLOW_TARGET_WORLD`/`FAULT`
 from the child environment and runs the DB-free `pingDemo` workflow (same
@@ -139,14 +151,15 @@ a real database.
    (override: `WORKFLOW_LOCAL_BASE_URL`). `PORT` mismatch = a worker that
    claims jobs and cannot execute them. Also: the graphile runner start is
    deferred until the loopback target is reachable.
-4. **Crash-lock reclaim is 4 hours, fixed.** graphile-worker 0.16.6 only
-   frees locks abandoned by a dead worker via its periodic `resetLockedAt`
-   (`locked_at < now() - interval '4 hours'`, not configurable), and the world
-   adds no crash-unlock at startup. Hard-kill mid-step therefore stalls that
-   job for up to 4h unless cleared - `pnpm unstick` is the spike instrument;
-   a production deploy/restart story MUST address this (graceful drain, or an
-   operational unstick step). Ctrl+C is graceful (locks released) - crash
-   tests must use `taskkill /F`.
+4. **Crash recovery is automatic via a startup re-enqueue** (live finding,
+   T4): on boot the world logs `[world-postgres] Re-enqueued N active run(s)
+   on startup` and re-enqueues interrupted runs under their dedup job keys,
+   bypassing the dead worker's stale graphile lock - recovery in T4 was
+   immediate, no intervention needed. Underneath, graphile-worker 0.16.6's
+   own stale-lock reclaim is a fixed 4 hours (`resetLockedAt`, not
+   configurable); `pnpm unstick` remains as an instrument for any state the
+   startup sweep might not cover (none observed). Ctrl+C is graceful (locks
+   released) - crash tests must use `taskkill /F` / `Stop-Process -Force`.
 5. **The engine executes runs without any SSE/stream consumer attached**
    (dryrun proves it) - the ghost-upload class (failure pattern 5) is indeed
    structurally closed.
@@ -155,6 +168,13 @@ a real database.
    and `foundations/idempotency` pages - the recommendation's "deploy docs are
    silent on in-flight runs" claim is now partially outdated (the gap that
    remains: no self-hosted pinning, per surprise 1).
+7. **The world runtime reads ONLY `WORKFLOW_POSTGRES_URL`** (live finding):
+   the `DATABASE_URL` fallback the docs describe exists only in the bootstrap
+   CLI. Without the mapping, the runtime silently defaults to
+   `postgres://world:world@localhost:5432/world` and `start()` fails with an
+   opaque 500 `AggregateError`. Handled by `scripts/worker.mjs`.
+8. **`pnpm setup` is a pnpm built-in** and shadows a package script of that
+   name - hence `db:setup`.
 
 ## Layout
 

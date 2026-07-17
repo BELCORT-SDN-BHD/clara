@@ -10,7 +10,7 @@ against Supabase Postgres. **No LLM anywhere** - these test the ENGINE
 cd C:\Users\zhant\Desktop\clara-rebuild\spike
 pnpm install
 Copy-Item .env.example .env      # then paste the Supabase SESSION-mode DATABASE_URL (port 5432)
-pnpm setup                       # engine bootstrap (workflow + graphile_worker schemas) + domain schema.sql
+pnpm run db:setup                # engine bootstrap (workflow + graphile_worker schemas) + domain schema.sql
 pnpm build                       # compile once; do NOT rebuild between a kill and a restart mid-test
 ```
 
@@ -30,15 +30,15 @@ Two terminals: **A** runs the worker, **B** runs commands.
 > releases its job locks on graceful shutdown. Crash tests MUST use
 > `taskkill /F` (or the T4 fault, which calls `process.exit(1)`).
 
-> **The 4-hour lock caveat (verified in graphile-worker@0.16.6 sources).**
-> A job locked by a hard-killed worker stays invisible to a restarted worker
-> until the periodic `resetLockedAt` sweep frees locks older than a fixed
-> **4 hours**. The `@workflow/world-postgres` startup adds no crash-unlock.
-> Whenever a test hard-kills the worker **while a job is executing** (T4
-> always; T3's racy variant), run `pnpm unstick` after the restart to release
-> the abandoned lock immediately. Killing while a run is **parked at a hook**
-> (T1/T2/T3 deterministic path) leaves no locked job - no unstick needed.
-> This caveat is itself a spike finding for the production deploy/restart story.
+> **Crash-lock recovery (revised after the 2026-07-17 live run).** On boot the
+> world re-enqueues interrupted active runs (`[world-postgres] Re-enqueued N
+> active run(s) on startup`) under their dedup job keys, bypassing the dead
+> worker's stale graphile lock - in the live T4, replay resumed within ~5s of
+> the restart with **no intervention**. Underneath, graphile-worker 0.16.6's
+> own stale-lock reclaim is a fixed **4 hours** (`resetLockedAt`); keep
+> `pnpm unstick` in the toolbox for any state the startup sweep does not
+> cover (none observed live). Killing while a run is **parked at a hook**
+> (T1/T2/T3 deterministic path) leaves no locked job at all.
 
 ---
 
@@ -109,10 +109,10 @@ Deterministic path (kill after step A completed, before the run finishes):
 **PASS:** postings(opKey)==1 AND post_entry invocations==1 AND run completed.
 
 Racy variant (optional, converges with T4): kill within <1s of `pnpm enqueue`
-so the kill lands **while** the `post_entry` job is locked and executing. After
-restart the abandoned lock blocks progress → `pnpm unstick` → the job re-runs.
-If the first invocation had already committed, the second lands on ON CONFLICT
-(wasDuplicate) - same assertions as T4.
+so the kill lands **while** the `post_entry` job is locked and executing. On
+restart the world's startup sweep re-enqueues the active run and the job
+re-runs (live-verified in T4); if the first invocation had already committed,
+the second lands on ON CONFLICT (wasDuplicate) - same assertions as T4.
 
 ---
 
@@ -136,15 +136,16 @@ re-invocation (runtime-recommendation Addendum 3, refinement 1).
    - `spike.step_invocations`: `post_entry` x1, note `fault-armed`
    - `graphile_worker jobs`: the step job **locked** by the dead worker
 6. Terminal A: `pnpm worker` (restart WITHOUT the fault - plain `pnpm worker`).
-7. Terminal B: `pnpm unstick` (releases the dead worker's lock now instead of
-   waiting for graphile-worker's fixed 4h reclaim - see caveat at top).
-8. Within ~5s the engine **re-invokes** `post_entry` (an at-least-once replay -
+   The boot log prints `[world-postgres] Re-enqueued 1 active run(s) on
+   startup` - the world's own crash recovery (live-verified 2026-07-17); no
+   `pnpm unstick` was needed. (Keep unstick in reserve per the caveat at top.)
+7. Within ~5s the engine **re-invokes** `post_entry` (an at-least-once replay -
    expected!). `pnpm status`:
    - `spike.step_invocations`: `post_entry` **x2**
    - `spike.postings`: **STILL exactly 1 row** for opKey (ON CONFLICT caught it)
    - `spike.receipts`: **STILL exactly 1 row**, SAME `receipt_no` (`rcpt-<opKey>`), SAME `posting_id`
    - `workflow.workflow_steps`: `post_entry` now completed; hook row present
-9. `pnpm resume approval:<opKey>` → run completes. The recorded step result
+8. `pnpm resume approval:<opKey>` → run completes. The recorded step result
    carries `wasDuplicate: true` (visible in the run's returnValue via
    `Invoke-RestMethod http://localhost:3100/demo/run/<runId>`) - positive
    evidence the idempotent replay path executed.
