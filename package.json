@@ -18,6 +18,7 @@
     "db:seed": "pnpm --filter @clara/db seed",
     "db:reset": "pnpm --filter @clara/db reset",
     "db:backup": "pnpm --filter @clara/db backup",
+    "db:backup:full": "pnpm --filter @clara/db backup:full",
     "db:restore": "pnpm --filter @clara/db restore",
     "freeze:lint": "node scripts/check-frozen-workflows.mjs",
     "freeze:update": "node scripts/check-frozen-workflows.mjs --update",
