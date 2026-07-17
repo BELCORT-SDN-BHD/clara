@@ -123,6 +123,23 @@ export async function migrate({ log = console.log, dir } = {}) {
       throw new Error("migration-history integrity check failed:\n  - " + drift.join("\n  - "));
     }
 
+    // ORDERING (finding 5): a pending migration whose number is <= the highest
+    // ALREADY-APPLIED number was inserted below the frontier after later
+    // migrations were applied — running it now would apply history out of order.
+    // Reject it (renumber above the frontier). Applied versions are guaranteed on
+    // disk here (the drift check above would have aborted otherwise).
+    const maxAppliedNum = applied.size
+      ? Math.max(...[...applied.keys()].map((v) => byVersion.get(v).num))
+      : -1;
+    for (const m of migrations) {
+      if (applied.has(m.version)) continue;
+      if (m.num <= maxAppliedNum) {
+        throw new Error(
+          `migration ${m.version} (number ${m.num}) is at or below the highest applied number (${maxAppliedNum}) but was never applied — a late-inserted lower number would run out of order. Renumber it above the frontier; migration history is append-only.`,
+        );
+      }
+    }
+
     let count = 0;
     for (const { file, version } of migrations) {
       if (applied.has(version)) continue; // already applied + checksum verified above
