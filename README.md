@@ -18,10 +18,12 @@ blueprint. **Product law → `docs/prd/PRD.md`. Target architecture →
   EXECUTE-only audited functions. The DB owns every number. Versioned migrations
   from day one (`packages/db`).
 - **Runtime (Clara)** — **Vercel AI SDK 7 + Workflow DevKit** (`workflow` +
-  `@workflow/world-postgres`), self-hosted on our own Postgres so every step is
-  durably checkpointed; LangGraph JS is the named fallback behind a seam. Proven
-  in the Slice-0 spike (`spike/`, `docs/architecture/ARCHITECTURE.md` Appendix A).
-  `packages/runtime` is the Slice-1 skeleton (durable substrate + health/ready).
+  `@workflow/world-postgres`) on a long-lived **Fly** process (region `sin`,
+  Supabase-adjacent), with all durable state in our own Postgres so every step is
+  checkpointed; LangGraph JS is the named fallback behind a seam. Proven in the
+  Slice-0 spike (`spike/`, `docs/architecture/ARCHITECTURE.md` Appendix A). The
+  host is ratified in PROJECTLOG ADR-014. `packages/runtime` is the Slice-1
+  skeleton (durable substrate + health/ready).
 - **Dashboard** — **Next.js 15** on Vercel, dashboard-direct on the Supabase
   session JWT (`apps/dashboard`).
 

@@ -30,11 +30,12 @@ Postgres (fresh Supabase project)  ── THE SINGLE SOURCE OF TRUTH
   forced RLS per firm_id · EXECUTE-only audited SECURITY DEFINER writers · structural read-only agent role
   · durable event log + outbox · durable agent-runtime tables · the two-layer knowledge store
   ▲
-Agent runtime (Clara)  ── long-lived Node service; durable runs/tasks/checkpoints; the ONLY holder of service credentials
+Agent runtime (Clara) on Fly  ── long-lived Node service; durable runs/tasks/checkpoints; the ONLY holder of service credentials
 ```
 
 - **Fresh Supabase project** + **local Supabase CLI** for day-to-day dev. Every schema change is a versioned migration in the repo from day one; seed scripts produce synthetic data. The old project stays frozen (read-only) until Phase-5 decommission sign-off.
 - Isolation is **RLS on `firm_id`**, not project-per-firm — the proven model from the old build (frozen-repo ADR-029, cited as salvage evidence — not an ADR in this repo's PROJECTLOG), which is PORT. What changes is everything *above* the isolation boundary.
+- **Hosts:** the runtime is a long-lived process on **Fly** (region `sin`, co-located with Supabase `ap-southeast-1`) — the WDK world needs an always-on worker, not a serverless function; the dashboard is on **Vercel**; the DB is **Supabase**. The runtime host is ratified in PROJECTLOG ADR-014 (Fly is also the frozen prior plane's host, so the ADR marks it a deliberate greenfield choice, not a carryover).
 
 ---
 
