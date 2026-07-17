@@ -324,12 +324,22 @@ function main() {
     }
   }
   if (!base.available) {
-    // ci.yml fetches origin/main before this runs; absence in CI means a
-    // misconfiguration, but we fail OPEN on the base check only (local + closure
-    // + coverage checks above still run) rather than self-DoS. Loud warning.
-    console.warn(
-      `freeze-lint: WARNING — base ref '${BASE_REF}' not available; append-only-vs-base check skipped (local integrity checks still enforced). In CI, ensure origin/main is fetched.`,
-    );
+    // The append-only-vs-base comparison is THE durable protection. On an
+    // established repo origin/main always resolves (ci.yml fetches it, failing
+    // closed if it exists but can't be fetched). So an unavailable base UNDER CI
+    // means this gate is not actually running — fail CLOSED (finding 2) rather
+    // than silently skip it. Locally (not CI) we warn: a fresh clone legitimately
+    // may not have the remote-tracking ref yet.
+    const msg = `base ref '${BASE_REF}' not available; the append-only-vs-base check cannot run`;
+    if (IN_CI) {
+      violations.push(
+        `BASE-UNAVAILABLE  ${msg}. Under CI the base MUST resolve (an established repo always has origin/main) — ensure it is fetched before freeze-lint. This gate does not fail open.`,
+      );
+    } else {
+      console.warn(
+        `freeze-lint: WARNING — ${msg}; skipped (local integrity checks still enforced). In CI this is a hard failure.`,
+      );
+    }
   }
 
   if (violations.length > 0) {

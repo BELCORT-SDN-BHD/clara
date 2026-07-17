@@ -57,7 +57,17 @@ jobs:
           fetch-depth: 0
 
       - name: Fetch base ref (origin/main) for append-only checks
-        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main || echo "no origin/main yet (first PR) — base checks treat all as new"
+        run: |
+          # Fail CLOSED (finding 2): if origin/main EXISTS on the remote, the
+          # append-only freeze-lint + migration-history gates MUST have it — a
+          # fetch failure can no longer masquerade as success. Only a genuine
+          # first-introduction (origin/main absent) may pass without a base.
+          if git ls-remote --exit-code --heads origin main >/dev/null 2>&1; then
+            echo "origin/main exists — fetching it for the append-only base checks"
+            git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main
+          else
+            echo "origin/main does not exist yet (first introduction) — base checks treat all as new"
+          fi
 
       - uses: pnpm/action-setup@v4
         with:
@@ -98,19 +108,27 @@ jobs:
           sudo apt-get install -y postgresql-client-17
           pg_dump --version
 
-      # DEPLOY-ONTO-EXISTING (finding F4): a real deploy applies HEAD's migrations
-      # onto a DB that ALREADY has main's migrations. CI starting from an empty DB
-      # would false-green an edited historical migration. So: apply origin/main's
-      # migrations first, THEN HEAD's — migrate.mjs's checksum-drift guard aborts
-      # if a previously-applied migration was edited/renamed/deleted.
+      # DEPLOY-ONTO-EXISTING (finding F4 / finding 3): a real deploy applies HEAD's
+      # migrations onto a DB that ALREADY has main's migrations. CI starting from an
+      # empty DB would false-green an edited historical migration. So: apply
+      # origin/main's migrations first, THEN HEAD's — migrate.mjs's checksum-drift
+      # guard aborts if a previously-applied migration was edited/renamed/deleted.
+      #
+      # Do NOT overlay-checkout main's migrations onto the working tree: a
+      # `git checkout main -- dir` then `git checkout HEAD -- dir` leaves a file
+      # that HEAD DELETED still on disk, so a PR deleting a historical migration
+      # would escape the drift guard. Instead export main's migrations to a TEMP dir
+      # and apply them via CLARA_MIGRATIONS_DIR, then apply HEAD from the UNTOUCHED
+      # working tree — migrate.mjs then correctly sees a HEAD-deleted applied
+      # migration as missing and aborts.
       - name: Deploy-onto-existing check (main migrations, then HEAD)
         run: |
           if git rev-parse --verify origin/main >/dev/null 2>&1 \
              && git ls-tree -r --name-only origin/main -- packages/db/migrations | grep -q '\.sql$'; then
-            git checkout origin/main -- packages/db/migrations
-            echo "--- applying origin/main migrations (baseline) ---"
-            pnpm db:migrate
-            git checkout HEAD -- packages/db/migrations
+            BASE_MIG="$(mktemp -d)"
+            git archive origin/main -- packages/db/migrations | tar -x -C "$BASE_MIG"
+            echo "--- applying origin/main migrations (baseline) from a temp export (working tree untouched) ---"
+            CLARA_MIGRATIONS_DIR="$BASE_MIG/packages/db/migrations" pnpm db:migrate
             echo "--- applying HEAD migrations onto the baseline (drift guard active) ---"
             pnpm db:migrate
           else
