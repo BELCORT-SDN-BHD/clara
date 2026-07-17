@@ -51,6 +51,11 @@ const GH_PAT = new RegExp("\\b" + "github" + "_" + "pat_" + "[0-9A-Za-z_]{60,}\\
 const SLACK = new RegExp("\\b" + "xox" + "[baprs]-[0-9A-Za-z-]{10,}\\b");
 const PRIVATE_KEY = /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/;
 const GENERIC = /(?:api[_-]?key|secret[_-]?key|access[_-]?token|client[_-]?secret)\s*[:=]\s*["'][0-9A-Za-z/+_-]{24,}["']/i;
+// Supabase personal/management access token: sbp_ + 40 hex (prefix from fragments).
+const SUPABASE_TOKEN = new RegExp("\\b" + "sb" + "p_" + "[0-9a-f]{40}\\b");
+// JWT — three base64url segments (e.g. a Supabase anon/service key). "eyJ" is the
+// base64 of a JSON header opener; assembled so this scanner never self-matches.
+const JWT = new RegExp("\\b" + "ey" + "J" + "[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\b");
 
 const RULES = [
   {
@@ -70,6 +75,8 @@ const RULES = [
   { id: "github-token", re: GH_TOKEN },
   { id: "github-pat", re: GH_PAT },
   { id: "slack-token", re: SLACK },
+  { id: "supabase-access-token", re: SUPABASE_TOKEN },
+  { id: "jwt", re: JWT },
   { id: "generic-key-assignment", re: GENERIC },
 ];
 

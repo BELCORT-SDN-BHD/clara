@@ -8,9 +8,9 @@ single source of truth. This repo is the rebuild from the Gate-1 audit + Gate-2
 blueprint. **Product law → `docs/prd/PRD.md`. Target architecture →
 `docs/architecture/ARCHITECTURE.md`. Plan → `docs/plan/REBUILD-PLAN.md`.**
 
-> **Status: Phase 3, Slice 1 (foundations).** This is the repo scaffold, CI, and
-> ops floor — *not* the product. The governed DB core is Slice 2; the durable
-> runtime is Slice 4 (`docs/plan/REBUILD-PLAN.md`).
+> **Status → `docs/PROJECTLOG.md` (START HERE) + project memory** — one home, so
+> the copies can't drift. In one line: Phase 3 foundations (scaffold, CI, ops
+> floor), *not* the product yet; the plan is `docs/plan/REBUILD-PLAN.md`.
 
 ## The stack (ratified at Gate 2)
 
@@ -18,10 +18,12 @@ blueprint. **Product law → `docs/prd/PRD.md`. Target architecture →
   EXECUTE-only audited functions. The DB owns every number. Versioned migrations
   from day one (`packages/db`).
 - **Runtime (Clara)** — **Vercel AI SDK 7 + Workflow DevKit** (`workflow` +
-  `@workflow/world-postgres`), self-hosted on our own Postgres so every step is
-  durably checkpointed; LangGraph JS is the named fallback behind a seam. Proven
-  in the Slice-0 spike (`spike/`, `docs/architecture/ARCHITECTURE.md` Appendix A).
-  `packages/runtime` is the Slice-1 skeleton (durable substrate + health/ready).
+  `@workflow/world-postgres`) on a long-lived **Fly** process (region `sin`,
+  Supabase-adjacent), with all durable state in our own Postgres so every step is
+  checkpointed; LangGraph JS is the named fallback behind a seam. Proven in the
+  Slice-0 spike (`spike/`, `docs/architecture/ARCHITECTURE.md` Appendix A). The
+  host is ratified in PROJECTLOG ADR-014. `packages/runtime` is the Slice-1
+  skeleton (durable substrate + health/ready).
 - **Dashboard** — **Next.js 15** on Vercel, dashboard-direct on the Supabase
   session JWT (`apps/dashboard`).
 
@@ -43,6 +45,12 @@ frozen-workflows.json golden hashes for the workflow-versioning freeze-lint
 Requires **Node 20.19+**, **pnpm 10**, and a Postgres client (**v17** for DR
 `pg_dump`). No Docker required for remote-DB work; local Supabase stack dev
 (`supabase start`) needs Docker and is a follow-up.
+
+> **Dev-env notes.** `.nvmrc` pins Node `20.19.5` (`nvm use`). `.mcp.json` pins
+> the `codebase-memory-mcp` server to an **owner-local absolute path**
+> (`C:\Users\…`); it won't start as-is on another machine — point that `command`
+> at your own install, or put the exe on PATH. (The path is intentionally kept in
+> the tracked file, not removed.)
 
 ```sh
 pnpm install
@@ -92,6 +100,6 @@ CI.
 
 - **Never commit a credential.** `.env` is gitignored; only `.env.example`
   (placeholders) is tracked. The leak-scan gate enforces it.
-- **`master` is PR-only** — land via PR with green CI.
+- **`main` is PR-only** — land via PR with green CI.
 - **The DB owns every number; the agent only orchestrates** (`docs/prd/PRD.md`).
 - Full agent working guide: `CLAUDE.md`.

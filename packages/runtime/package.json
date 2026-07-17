@@ -6,6 +6,7 @@
   "description": "Clara agent-runtime service skeleton — the durable substrate (Workflow DevKit Postgres world) with health/ready probes. NO agent/LLM logic yet (that is Slice 4).",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
     "build": "nitro build",
     "start": "node --env-file-if-exists=.env scripts/worker.mjs"
   },

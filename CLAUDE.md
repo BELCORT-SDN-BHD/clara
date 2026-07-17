@@ -91,8 +91,9 @@ in `docs/agents/`.
 
 ## Where we are
 
-Current phase/slice **status lives in one place** — memory
-(`project-clara-rebuild-state`, read-first) + `docs/PROJECTLOG.md` (START HERE) +
-`docs/plan/REBUILD-PLAN.md` — refreshed each slice so this file stays stable.
-In one line: **Phase 3 foundations; Slice 0 (spike) + Slice 1 (foundations) done;
-Slice 2 (governed DB core) next.**
+Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
+read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
+stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
+In one line: **Phase 3 foundations; Slice 0 spike — T1–T6 passed, the 48-hour
+park (T2-48h) pending final sign-off; Slice 1 (foundations) done; Slice 2
+(governed DB core) next.**

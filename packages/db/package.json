@@ -12,12 +12,10 @@
     "backup:full": "node scripts/backup.mjs --profile full",
     "restore": "node scripts/restore.mjs",
     "dr:selftest": "node scripts/dr-selftest.mjs",
+    "lint": "eslint .",
     "test": "node --test tests/"
   },
   "dependencies": {
     "pg": "8.20.0"
-  },
-  "devDependencies": {
-    "@types/pg": "8.15.4"
   }
 }

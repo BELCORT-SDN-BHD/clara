@@ -5,7 +5,7 @@
 
 ---
 
-> **START HERE.** Clara is a greenfield **AI-native Agentic Accounting OS** for Malaysian accounting firms, rebuilt from the frozen prior BELCORT build. This repo (`github.com/mosaladtaooo/clara`, `main` PR-only) is the active workspace. The old repo `initial acc software skillmd` + Supabase `belcort-shared` are FROZEN read-only audit evidence (untouched until Phase-5 decommission). The DB owns every number; the agent orchestrates. Phase 3 (foundations) is in progress: Slice 0 (spike) + Slice 1 (foundations) done; Slice 2 (governed DB core) next.
+> **START HERE.** Clara is a greenfield **AI-native Agentic Accounting OS** for Malaysian accounting firms, rebuilt from the frozen prior BELCORT build. This repo (`github.com/mosaladtaooo/clara`, `main` PR-only) is the active workspace; the old repo `initial acc software skillmd` + Supabase `belcort-shared` are FROZEN read-only audit evidence (untouched until Phase-5 decommission). The DB owns every number; the agent orchestrates. **This log is DECISIONS ONLY** — append-only ADRs + rationale; supersede, never rewrite. Current phase/slice **status lives in memory (`project-clara-rebuild-state`) + `docs/plan/REBUILD-PLAN.md`**; tasks live in the handoff; build narrative lives in git. Product law → `docs/prd/PRD.md`; target architecture → `docs/architecture/ARCHITECTURE.md`.
 
 ---
 
@@ -63,10 +63,25 @@
 **Decision:** `C:\Users\zhant\Desktop\clara-rebuild` is the active Claude Code working directory. Its own `CLAUDE.md`/`AGENTS.md`/this PROJECTLOG + the `.claude/` skill + `.mcp.json` (codebase-memory + shadcn; supabase MCP dropped — CLI/management-API used instead) are the harness. The stale parent `Desktop\CLAUDE.md` (old-plane doctrine that loaded for this dir too) was deleted; rebuild-relevant memory was migrated to this project's memory namespace and the reverted-first-attempt memories dropped. The codebase-memory graph is (re)indexed on this repo; the old repo's index remains as frozen evidence.
 **Why:** The harness pointed at / lived in the frozen old repo, polluting rebuild sessions with stale old-plane context. Owner-directed cleanup (2026-07-17). The old repo + Supabase remain frozen evidence — only the *workspace* moved.
 
+### ADR-014 — Runtime host = Fly (a long-lived Node process for the WDK world)
+**Decision:** The Clara agent-runtime service (`packages/runtime`) is hosted on **Fly**, region `sin` (Singapore), completing the greenfield three-plane topology: Postgres on Supabase (`ap-southeast-1`), the Next.js dashboard on Vercel, and the runtime on Fly. Fly runs the always-on Node process the self-hosted Workflow DevKit world requires — a persistent `graphile-worker` draining the durable queue, not a request-scoped serverless function. `sin` is co-located with the Supabase `ap-southeast-1` project to keep the runtime↔DB path (session-mode pooler, LISTEN/NOTIFY) low-latency. This ratifies of record what ARCHITECTURE §4.0/§4.0a and `docs/ops/DR.md` already assumed; the deploy itself lands with the durable chat loop (Slice 4), not the Slice-1 skeleton.
+**Why:** The runtime host was asserted in the architecture but never decided of record, and Fly is also the FROZEN prior plane's host (`belcort-agent`) — so an unratified "Fly" read as a possible accidental carryover rather than a deliberate choice. The WDK world needs a persistent worker (ADR-008/009: durable execution on our own Postgres), which rules out a purely serverless/edge runtime; a long-lived process on Fly in a Supabase-adjacent region is the shape the double-verified runtime-recommendation research selected (ARCHITECTURE §4.0, 2026-07-17). What this fixes is the *choice of host*, not the requirement (a long-lived process co-located with the DB) — supersede with a new ADR if a later deployment-slice constraint (WDK worker lifecycle, scale, or cost) favours a different long-lived host.
+
 ---
 
 ## PART 2 — OPEN ITEMS
-- **Slice-0 close-out:** resume the 48h parked WDK run (armed ~2026-07-17 15:15 +08; resume ≥2026-07-19 15:15 +08) to fully sign off Slice 0.
+
+*Open decisions + triggered obligations/gates only. Operational tasks (resume the 48h park, rotate a leaked token, and the like) live in the handoff + memory; phase/slice status lives in memory + `docs/plan/`; build narrative lives in git.*
+
+**Open decisions / obligations:**
 - **C6 checklist (ADR-011):** the DPA execution, firm-facing disclosure text, and PDPA cross-border check are OWNER/legal work items before any vendor trace export; engineering keeps the flag OFF until all three are evidenced.
-- **Owner housekeeping:** rotate the Supabase `sbp_` access token (it passed through a session transcript).
 - **Billing / scale guardrails, MyInvois depth, tax-comp v1-vs-v1.1 slip** — deferred product questions (PRD §9).
+
+**Triggered gates — REQUIRED before real client data (Slice 2+), not yet built (do not over-build early):**
+- **Full-profile fresh-project DR drill (ADR-012 / finding 10):** a real restore of the FULL backup profile into a fresh project — every authoritative schema **plus roles/grants/RLS, Supabase Auth/Storage recovery, encrypted off-site scheduling, and freshness alerts**. The exercised drill (`dr:selftest`, `docs/ops/DR.md` §5) proves the tooling on a single throwaway schema only; `db:backup:full` now asserts the full schema inventory, but the end-to-end fresh-project drill is unbuilt (no real schema exists yet). A hard gate before any real books land.
+
+**Deferred hardening (triggered follow-ups; note, don't build now):**
+- **Local disposable Supabase stack** (`supabase/config.toml` + `supabase start`) as the intended local test target — needs Docker (unavailable on this machine). Interim = a throwaway remote schema + the destructive-target guards (`packages/db/lib/guard.mjs`).
+- **Server-side branch protection** on `main` (a PR-required ruleset) — an owner-only plan upgrade; the git-base freeze-lint + CI are the interim gate (CLAUDE.md "`main` is PR-only").
+- **SHA-pin the GitHub Actions** (`checkout`/`setup-node`/`pnpm/action-setup` still use mutable major tags) — a supply-chain hardening follow-up (the gitleaks binary is already version-pinned, ADR-012 / finding 4).
+- **Freeze-lint registry-version monotonicity + enqueue-site-uses-registry** (finding 11) — a Slice-4 hardening, when real workflows + a live registry exist (ARCHITECTURE Appendix A).

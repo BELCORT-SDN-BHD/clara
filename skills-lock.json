@@ -1,0 +1,166 @@
+{
+  "_note": "Provenance lock for vendored engineering skills under .claude/skills/. Regenerate with `node scripts/gen-skills-lock.mjs` after intentionally adding/updating a skill; `--check` verifies it is current.",
+  "version": 1,
+  "skills": {
+    "ask-matt": {
+      "sha256": "e75f6fff3769a8e02e555a3264d56be9db5b24c98ae35a6e2e40021cea320313",
+      "files": 2
+    },
+    "claude-handoff": {
+      "sha256": "6caadf4240d1943df6134f4f56bbf0542ed03db5e8c164539c3db17e71ebf6e5",
+      "files": 2
+    },
+    "code-review": {
+      "sha256": "7bbf633a942528ecad7e9090460cb556f2b1dfe0b538b1becfad4346c4e9b780",
+      "files": 2
+    },
+    "codebase-design": {
+      "sha256": "e4ef98a519b0679090e31914cab87797aea9892c98a31f32c51fda7d5aeab542",
+      "files": 4
+    },
+    "design-an-interface": {
+      "sha256": "d9329d4406efb8edb0ce14a21a83422c9f6abee7f679c90fdc761a89b98bd5ce",
+      "files": 2
+    },
+    "diagnosing-bugs": {
+      "sha256": "40057543b291af4418138e68076b63eb45609e40952b33f0c14312efdce76d7a",
+      "files": 3
+    },
+    "domain-modeling": {
+      "sha256": "138c759ff3843f4112aa5e0d0128f0b25bf1ae594a30f88b1b3949db0b38ab19",
+      "files": 4
+    },
+    "edit-article": {
+      "sha256": "cb3f41da59d93e96012433ed02f30f1984c3cdf9b39ec503db23f68ec6d96090",
+      "files": 2
+    },
+    "git-guardrails-claude-code": {
+      "sha256": "a57bec48e789ecd6bd78c86c603389bb768640ef2a98de342b34a3cf640f7056",
+      "files": 3
+    },
+    "grill-me": {
+      "sha256": "71f882abf8228a68f9b9aacd3d9a7f5d2607d5b54f89c84369da2cc7e709a38e",
+      "files": 2
+    },
+    "grill-with-docs": {
+      "sha256": "cf12417ee2a7ec36d7fb47a24e109ad81bc85337b9b1a837db395aa2232a0fa7",
+      "files": 2
+    },
+    "grilling": {
+      "sha256": "1185157a3d5e4e4399e4ce038be146b2671cd04c3682d01eed7a591bb0bf94cd",
+      "files": 2
+    },
+    "handoff": {
+      "sha256": "86dc5d708ff185da9f66724f35588b227b8376e45be1bbe04db7c951e60b5504",
+      "files": 2
+    },
+    "implement": {
+      "sha256": "d79219119a74de61eced7a38c36d88c62b1cd6ffa5e2d7f7b49a7f25dfa4eee0",
+      "files": 2
+    },
+    "improve-codebase-architecture": {
+      "sha256": "c69ddb0de0c7d72e8799d90eceeff68c604e4cb0872d9191395392f70da88971",
+      "files": 3
+    },
+    "loop-me": {
+      "sha256": "6bc81a94808c77a7744e1d59db9aba313d188215c3faccef4dfd1345cd864c7e",
+      "files": 2
+    },
+    "migrate-to-shoehorn": {
+      "sha256": "0dfa9344caa8321587b34dd503cca67aa9df259ca11f23773b184aa4f798de15",
+      "files": 2
+    },
+    "obsidian-vault": {
+      "sha256": "34bd81033dd94faa03c32707b36106c806dd54988fa161e6f7cd6e8c58a0d1c1",
+      "files": 2
+    },
+    "orchestrator-fable": {
+      "sha256": "67e0c0f46058671893af8be75466e3800b37319ecac342bddd6a67fdc67b9d63",
+      "files": 1
+    },
+    "prototype": {
+      "sha256": "3d914b3ea241a431eb352c7675717531dbfe042e0d9dff2bccb75e1279e9b381",
+      "files": 4
+    },
+    "qa": {
+      "sha256": "e90af69b9aa86272845e4f63b6ae27bb118841216cac9e60ed0128751ea3f797",
+      "files": 2
+    },
+    "request-refactor-plan": {
+      "sha256": "f450a60c4f38b008a4beaecd216bacab1dd1cbee5c5b2456c05d77b11ebe31a2",
+      "files": 2
+    },
+    "research": {
+      "sha256": "074cf37e56b358bc9856635494a1e7a2fd1e4c864a5a953920a4eac7e8d7e266",
+      "files": 2
+    },
+    "resolving-merge-conflicts": {
+      "sha256": "98d310db2da770b7d32a2c57a6ed2dfa9c1a81ba564e41ae80d99f066e44b6e7",
+      "files": 2
+    },
+    "scaffold-exercises": {
+      "sha256": "e0dadc1b6df7d6c9207b52530aec5c11804810aacc8685287ec8f72ac2b1a6df",
+      "files": 2
+    },
+    "setup-matt-pocock-skills": {
+      "sha256": "94457e4a3fe1e9622a730c057d1c070391f459f23747178d27b01464cc10abd6",
+      "files": 7
+    },
+    "setup-pre-commit": {
+      "sha256": "6f188539b987c87b2ef63eafc37fb3d2d1067133785dd36c3fdaa5cfe6ecbe86",
+      "files": 2
+    },
+    "setup-ts-deep-modules": {
+      "sha256": "a5e1d40d198321a2e0d9cd3c75b54e40afe498742f8df7562059cd53bdac187b",
+      "files": 3
+    },
+    "tdd": {
+      "sha256": "3d0d004ef7720d18e1931f8b56f0faf4feb5c8ba296b89824d8cd4a448c2bdc3",
+      "files": 4
+    },
+    "teach": {
+      "sha256": "f548beca14aaa8e98642eee018d3ac0cc6335e72aea21363ba194d6b4bff65c0",
+      "files": 6
+    },
+    "to-spec": {
+      "sha256": "dc4ee6ac31538b7ab86ca6977891648e142169e7e0f5e7a472548eee70e13304",
+      "files": 2
+    },
+    "to-tickets": {
+      "sha256": "cabee225f957d3ed2b259bd39e4310885cd71533c6dc77b30ced404c5416e80b",
+      "files": 2
+    },
+    "triage": {
+      "sha256": "ef0b10a2b74f95bab7eb505a670eb1ed7fcfcf7710692266f2c0e7733b804051",
+      "files": 4
+    },
+    "ubiquitous-language": {
+      "sha256": "fb209f0991c3c417c713ff902c0e7ee0d54b599d79782efcbc4da7b5a53340a4",
+      "files": 2
+    },
+    "wayfinder": {
+      "sha256": "956d634e535b5de561a892a9209b054313eecc8192ea0f97b4110afb16206ef0",
+      "files": 2
+    },
+    "wizard": {
+      "sha256": "14497832cbc64ff3f59becb27af35f0262324058bf32ef361dd8e6b32cca16c4",
+      "files": 3
+    },
+    "writing-beats": {
+      "sha256": "f77331f585b2d59d323aa33f303141088aada07fbf4c73a0a015f2c6a7e051b9",
+      "files": 2
+    },
+    "writing-fragments": {
+      "sha256": "c19dc694018d519ba48400c1f84f1e9718f4b6bb85ae2aee34fde24977b8d90f",
+      "files": 2
+    },
+    "writing-great-skills": {
+      "sha256": "293306f10afb3596c331192deb9f1c0f13c8ba7e901498723548a2f357cde49b",
+      "files": 3
+    },
+    "writing-shape": {
+      "sha256": "e824e3f6aaa63ec71745d48e33c28ecacf9e9937a0081938d69dc1d20af02f53",
+      "files": 2
+    }
+  }
+}

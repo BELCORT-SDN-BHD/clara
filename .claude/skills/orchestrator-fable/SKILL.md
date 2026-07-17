@@ -1,6 +1,6 @@
 ---
 name: orchestrator-fable
-description: The session orchestration workflow — the main model (Fable) is the orchestrator (the brain), workers are the hands. Use this on ANY substantive task in this repo — multi-step implementation, debugging, test fixing, refactoring, environment/build work, research, or pre-ship review — to plan the work, pick the right worker lane (Claude subagents or Codex via codex:codex-rescue), delegate bounded work orders, verify every result, and run cross-model review through the available native and Codex review lanes. Apply it whenever work is big enough to delegate, not only when the user says "orchestrate".
+description: The session orchestration workflow — the main model (Fable) is the orchestrator (the brain), workers are the hands. Use this on ANY substantive task in this repo — multi-step implementation, debugging, test fixing, refactoring, environment/build work, research, or pre-ship review — to plan the work, pick the most reliable available worker lane (Claude native subagents, or Codex via direct `codex exec`), delegate bounded work orders when parallelism or specialist-isolation helps, verify every result, and run cross-model review through the available native or Codex review lanes. Apply it whenever work is big enough to delegate, not only when the user says "orchestrate".
 ---
 
 # Orchestrator Fable — session orchestration workflow
@@ -39,11 +39,11 @@ Heavy implementation may require detailed technical reasoning. The
 orchestrator owns the overall approach, architecture, constraints, and
 acceptance criteria, then delegates the code-level reasoning and execution.
 
-- Use Claude's native subagents/Workflow model when the native agents can cover the task, Select model and effort's tier based on thier capabilities: models:`sonnet 5`, `opus 4.8`, effort's tiers: `xhigh`. DO NOT dispatch `sonnet 5`.
-- Use **codex:codex-rescue** as the executor when a task needs heavy implementation, debugging, test fixing, refactoring, or multi-file code edits. Prefer `--model gpt-5.6-sol --effort xhigh`; if you say `spark`, that maps to `gpt-5.3-codex-spark`.
-- Keep Codex tasks focused and specific.
+- **Delegate to the most reliable available lane, not a fixed tool — and only when it helps.** Delegate when parallelism or specialist-isolation materially benefits the task; do a bounded, well-specified step yourself rather than dispatch as ceremony.
+- **Claude native lanes:** the most suitable native `subagents`, `agent-teammates` or `dynamicworkflow` dispatch that can cover the task. Select model + effort by capability — the dispatch agent's model field: `sonnet 5`, `opus 4.8`; effort tiers up to `xhigh`. **DO NOT dispatch `fable 5`.**
+- **Codex lane (caveat):** for heavy implementation, debugging, test fixing, refactoring, or multi-file edits, prefer a **direct `codex exec` via Bash** (run in the background + watch its output file) — the `codex:codex-rescue` companion queue has been **unreliable** (it has stalled for hours at "starting"). Prefer `--model gpt-5.6-sol --effort xhigh`; `spark` maps to `gpt-5.3-codex-spark`. Keep Codex tasks focused and specific. See memory `project-rebuild-ops-lessons`.
+- **Grill only when it changes scope.** Use the grilling skill (`/grillme`) when ambiguity would change *what* gets built or its acceptance — not for every bounded task whose spec is already clear.
 - After a worker (Codex or a subagent) finishes, inspect the result yourself before accepting it. Do not blindly trust worker output.
-- Follow-up rescue requests can continue the latest Codex task in the repo.
 
 ## Cross-model review
 
@@ -51,7 +51,7 @@ When a substantial change warrants an independent review pass, use the
 review mechanisms that are actually available in this harness.
 
 - **Native review lanes** — spawn a Claude's native review agent `/code-review` scoped to the diff for a standards/spec pass. It picks up your session effort setting automatically, or you can pass a level explicitly (e.g. "/code-review high").`low` effort runs a single pass over the diff. It's fast and cheap enough to run before every push. `medium` effort reads the changed code in context, runs multiple finder passes from different angles, then verifies every finding before surfacing it. `high` effort runs the finders and verifiers as subagents with fresh context, so they aren't anchored on the reasoning of the agent that just wrote the code. `xhigh` goes even further, sweeping for impacts to code outside of the change itself.
-- **Codex read-only review** —  `/codex:review` for a normal read-only Codex review ,  `/codex:adversarial-review` for a steerable challenge review. 
+- **Codex read-only review** —  `/codex:review` for a normal read-only Codex review ,  `/codex:adversarial-review` for a steerable challenge review. These run through the Codex companion queue, which has been unreliable — if it stalls, fall back to a native `/code-review` pass or a direct `codex exec` read-only review.
 
 `/codex:review`: Runs a normal Codex review on your current work. It gives you the same quality of code review as running `/review` inside Codex directly.
 

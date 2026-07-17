@@ -13,14 +13,16 @@
 //   a session advisory lock serialises concurrent runners.
 //
 // Connection comes from the environment only (see lib/pg.mjs). Never a DSN in argv.
-// The migrations directory can be overridden with CLARA_MIGRATIONS_DIR (used by
-// the CI deploy-onto-existing check to apply origin/main's migrations first).
+// The migrations directory can be overridden with CLARA_MIGRATIONS_DIR (or the
+// `dir` option) — an override hook for local/manual runs. NOTE: CI's
+// deploy-onto-existing check does NOT use this var; it swaps the files on disk
+// (`git checkout origin/main -- packages/db/migrations`, then re-runs migrate).
 
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeClient, targetLabel, isMain } from "../lib/pg.mjs";
+import { makeClient, targetLabel, isMain, assertNoTargetSplit } from "../lib/pg.mjs";
 
 const DEFAULT_MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
@@ -74,6 +76,10 @@ export async function migrate({ log = console.log, dir } = {}) {
   const migrations = loadMigrationFiles(MIGRATIONS_DIR);
   const byVersion = new Map(migrations.map((m) => [m.version, m]));
 
+  // Refuse if a DSN URL var and PG* resolve to different targets (finding 1) —
+  // a mutation must never run under an ambiguous target.
+  assertNoTargetSplit();
+
   const client = makeClient();
   await client.connect();
   let locked = false;
@@ -115,6 +121,23 @@ export async function migrate({ log = console.log, dir } = {}) {
     }
     if (drift.length) {
       throw new Error("migration-history integrity check failed:\n  - " + drift.join("\n  - "));
+    }
+
+    // ORDERING (finding 5): a pending migration whose number is <= the highest
+    // ALREADY-APPLIED number was inserted below the frontier after later
+    // migrations were applied — running it now would apply history out of order.
+    // Reject it (renumber above the frontier). Applied versions are guaranteed on
+    // disk here (the drift check above would have aborted otherwise).
+    const maxAppliedNum = applied.size
+      ? Math.max(...[...applied.keys()].map((v) => byVersion.get(v).num))
+      : -1;
+    for (const m of migrations) {
+      if (applied.has(m.version)) continue;
+      if (m.num <= maxAppliedNum) {
+        throw new Error(
+          `migration ${m.version} (number ${m.num}) is at or below the highest applied number (${maxAppliedNum}) but was never applied — a late-inserted lower number would run out of order. Renumber it above the frontier; migration history is append-only.`,
+        );
+      }
     }
 
     let count = 0;

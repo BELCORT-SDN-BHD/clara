@@ -72,7 +72,7 @@ function hasWorkflowDirective(src) {
 }
 // Defence-in-depth: reject a base ref that isn't a plain git ref name.
 const RAW_BASE_REF = process.env.FREEZE_BASE_REF || "origin/main";
-const BASE_REF = /^[A-Za-z0-9._\/-]+$/.test(RAW_BASE_REF) ? RAW_BASE_REF : "origin/main";
+const BASE_REF = /^[A-Za-z0-9._/-]+$/.test(RAW_BASE_REF) ? RAW_BASE_REF : "origin/main";
 
 // Coverage scope: ALL tracked source under packages/ (spike/ is a throwaway and is
 // intentionally out of scope). Not a narrow per-directory allowlist.
@@ -131,17 +131,58 @@ function resolveRelImport(fromAbs, spec) {
   return null;
 }
 
-/** Relative import/export specifiers of a source file (static + dynamic). */
-function relativeImportsOf(abs) {
+/** All import/export specifiers of a source file (static + dynamic). */
+function allImportsOf(abs) {
   const src = readFileSync(abs, "utf8");
   const specs = new Set();
   const re = /\bfrom\s*["']([^"']+)["']|\bimport\s*["']([^"']+)["']|\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
   let m;
   while ((m = re.exec(src))) {
     const spec = m[1] || m[2] || m[3];
-    if (spec && spec.startsWith(".")) specs.add(spec);
+    if (spec) specs.add(spec);
   }
   return [...specs];
+}
+
+/** Relative import/export specifiers of a source file (static + dynamic). */
+function relativeImportsOf(abs) {
+  return allImportsOf(abs).filter((spec) => spec.startsWith("."));
+}
+
+/** Names of the workspace packages (packages/* + apps/*) — first-party specifiers. */
+function workspacePackageNames() {
+  const names = new Set();
+  let listed = "";
+  try {
+    listed = git(["ls-files", "--", "packages/*/package.json", "apps/*/package.json"], { cwd: REPO_ROOT });
+  } catch {
+    return names;
+  }
+  for (const rel of listed.split("\n").map((s) => s.trim()).filter(Boolean)) {
+    try {
+      const name = JSON.parse(readFileSync(join(REPO_ROOT, rel), "utf8")).name;
+      if (name) names.add(name);
+    } catch {
+      /* a package.json without a name is not a specifier target */
+    }
+  }
+  return names;
+}
+
+/**
+ * A non-relative specifier that points at FIRST-PARTY source (a workspace package
+ * or a path-alias / subpath-import). These escape the relative-import closure: the
+ * freeze-lint can't follow them, so a frozen workflow could change behaviour
+ * through one while its hash stays green (finding 11). Bare third-party packages
+ * (node_modules) are legitimately outside the freeze surface and are NOT escapes.
+ */
+function isFirstPartyEscape(spec, wsNames) {
+  if (spec.startsWith(".")) return false; // relative — the closure already follows it
+  if (spec.startsWith("~") || spec.startsWith("#") || spec.startsWith("@/")) return true; // path alias / subpath-import
+  for (const name of wsNames) {
+    if (spec === name || spec.startsWith(name + "/")) return true; // workspace package (or its subpath)
+  }
+  return false;
 }
 
 /** Transitive relative-import closure (includes the start file itself). */
@@ -307,6 +348,29 @@ function main() {
     }
   }
 
+  // 2b. IMPORT-ESCAPE (finding 11): every frozen file must reach its first-party
+  // code through RELATIVE imports so the closure can follow + hash it. A
+  // workspace-package or path-alias specifier points at first-party source that
+  // escapes the closure — its body could change while the frozen hash stays green.
+  // Reject it (import relatively instead). Bare third-party packages are fine.
+  // NOTE: registry-version-monotonicity + enqueue-site-uses-the-registry
+  // enforcement is a Slice-4 hardening (when real workflows + a live registry
+  // exist) — see docs/architecture/ARCHITECTURE.md Appendix A / docs/ops/DR.md.
+  const wsNames = workspacePackageNames();
+  for (const rel of frozenRel) {
+    let escapes = [];
+    try {
+      escapes = allImportsOf(join(REPO_ROOT, rel)).filter((s) => isFirstPartyEscape(s, wsNames));
+    } catch {
+      /* unreadable file is reported by the checks above */
+    }
+    for (const spec of escapes) {
+      violations.push(
+        `IMPORT-ESCAPE ${rel} imports first-party module "${spec}" via a workspace/path-alias specifier — it escapes the frozen import-closure (its body is not hash-locked). Import it RELATIVELY so the freeze-lint freezes it too.`,
+      );
+    }
+  }
+
   // 3. Append-only vs the base ref — THE durable protection (see header).
   const base = loadBaseManifest();
   for (const [rel, entry] of Object.entries(base.workflows)) {
@@ -324,12 +388,22 @@ function main() {
     }
   }
   if (!base.available) {
-    // ci.yml fetches origin/main before this runs; absence in CI means a
-    // misconfiguration, but we fail OPEN on the base check only (local + closure
-    // + coverage checks above still run) rather than self-DoS. Loud warning.
-    console.warn(
-      `freeze-lint: WARNING — base ref '${BASE_REF}' not available; append-only-vs-base check skipped (local integrity checks still enforced). In CI, ensure origin/main is fetched.`,
-    );
+    // The append-only-vs-base comparison is THE durable protection. On an
+    // established repo origin/main always resolves (ci.yml fetches it, failing
+    // closed if it exists but can't be fetched). So an unavailable base UNDER CI
+    // means this gate is not actually running — fail CLOSED (finding 2) rather
+    // than silently skip it. Locally (not CI) we warn: a fresh clone legitimately
+    // may not have the remote-tracking ref yet.
+    const msg = `base ref '${BASE_REF}' not available; the append-only-vs-base check cannot run`;
+    if (IN_CI) {
+      violations.push(
+        `BASE-UNAVAILABLE  ${msg}. Under CI the base MUST resolve (an established repo always has origin/main) — ensure it is fetched before freeze-lint. This gate does not fail open.`,
+      );
+    } else {
+      console.warn(
+        `freeze-lint: WARNING — ${msg}; skipped (local integrity checks still enforced). In CI this is a hard failure.`,
+      );
+    }
   }
 
   if (violations.length > 0) {
