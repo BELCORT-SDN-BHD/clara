@@ -1,0 +1,96 @@
+name: CI
+
+# The anti-"misleading-green" gate. The OLD build's CI tested a decommissioned
+# schema (defect GAP1-5) — a green check that proved nothing. This pipeline
+# applies the REAL migrations, builds the REAL packages, and runs the smoke +
+# DR round-trip against a THROWAWAY postgres:17 service container — NEVER a live
+# project. See docs/architecture/ARCHITECTURE.md §9 and the repo README.
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    # Ephemeral, disposable Postgres 17 — created for this job and discarded when
+    # it ends. This is the ONLY database CI touches. It is not the frozen project.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clara_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # libpq vars — the db scripts read these (no DSN in code/argv).
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: clara_ci
+      NEXT_TELEMETRY_DISABLED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.5
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (tsc across TS packages)
+        run: pnpm typecheck
+
+      - name: Lint (freeze-lint + leak-scan + per-package)
+        run: pnpm lint
+
+      # Called out explicitly for visibility even though `pnpm lint` runs them:
+      - name: Freeze-lint (workflow versioning policy — ARCHITECTURE Appendix A)
+        run: node scripts/check-frozen-workflows.mjs
+
+      - name: Leak-scan (no committed credentials)
+        run: node scripts/check-leaks.mjs
+
+      - name: Build (nitro runtime + next dashboard)
+        run: pnpm build
+
+      # Install the v17 client so pg_dump matches the server (the wrapper picks
+      # the highest installed version). ubuntu-latest ships v16, which refuses a
+      # v17 server.
+      - name: Install PostgreSQL 17 client (for DR pg_dump)
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
+
+      - name: Migrate + seed + smoke test (ephemeral postgres:17)
+        run: |
+          pnpm db:migrate
+          pnpm db:seed
+          pnpm --filter @clara/db test
+
+      - name: DR backup/restore self-test (ephemeral postgres:17)
+        run: pnpm --filter @clara/db dr:selftest
