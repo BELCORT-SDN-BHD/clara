@@ -94,6 +94,20 @@ jobs:
       - name: Leak-scan (no committed credentials)
         run: node scripts/check-leaks.mjs
 
+      # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
+      # "backed by gitleaks in CI" claim true). Version-pinned to a released
+      # gitleaks binary (not a mutable action tag); config + allowlist in
+      # .gitleaks.toml. Scans the tracked git tree (history included via
+      # fetch-depth:0), so node_modules/.output are never scanned.
+      - name: Gitleaks (maintained secret scan, version-pinned)
+        env:
+          GITLEAKS_VERSION: "8.18.4"
+        run: |
+          curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          /tmp/gitleaks version
+          /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1
+
       - name: Build (nitro runtime + next dashboard)
         run: pnpm build
 
