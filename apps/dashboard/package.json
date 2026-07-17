@@ -1,0 +1,23 @@
+{
+  "name": "@clara/dashboard",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Clara dashboard (Next.js 15). Slice-1 skeleton: boots + placeholder page + reads NEXT_PUBLIC config. No real UI yet (see docs/design/DIRECTION.md).",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "15.5.20",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.0",
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "typescript": "5.9.3"
+  }
+}
