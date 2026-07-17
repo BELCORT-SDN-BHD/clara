@@ -1,0 +1,22 @@
+{
+  "name": "@clara/db",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Clara data plane — versioned SQL migrations, seeds (synthetic only), ephemeral test rig, and the DR backup/restore tooling. The shared Postgres is the single source of truth.",
+  "scripts": {
+    "migrate": "node scripts/migrate.mjs",
+    "seed": "node scripts/seed.mjs",
+    "reset": "node scripts/reset.mjs",
+    "backup": "node scripts/backup.mjs",
+    "restore": "node scripts/restore.mjs",
+    "dr:selftest": "node scripts/dr-selftest.mjs",
+    "test": "node --test tests/"
+  },
+  "dependencies": {
+    "pg": "8.20.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.15.4"
+  }
+}
