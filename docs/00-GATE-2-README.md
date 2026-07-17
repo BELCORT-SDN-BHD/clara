@@ -1,6 +1,6 @@
 # Clara — Phase 2 Blueprint · Gate 2 Packet
 
-**Date:** 2026-07-17 · **Status:** awaiting owner approval. Phase 1's audit (235 verified findings) and the Gate-1 rulings are fully synthesized into the rebuild blueprint. **Nothing is built, deployed, or destroyed yet** — Phase 3 starts only on your approval here.
+**Date:** 2026-07-17 · **Status:** partially ratified 2026-07-17 — **decision 2 (design direction) and decision 4 (phase plan, incl. the FS/SCF scope note) are APPROVED by the owner.** Decision 1 (runtime) and decision 3 (C6 tracing sequencing) are under owner-requested cross-model verification (Codex + a fresh SDK gap analysis); the owner has signalled "no need to switch off" on tracing pending a plain-language necessity explanation. Phase 1's audit (235 verified findings) and the Gate-1 rulings are fully synthesized into the rebuild blueprint. **Nothing is built, deployed, or destroyed yet** — Phase 3 starts only on your approval here.
 
 ## The packet
 
