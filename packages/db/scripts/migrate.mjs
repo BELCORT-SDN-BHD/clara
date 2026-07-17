@@ -13,8 +13,10 @@
 //   a session advisory lock serialises concurrent runners.
 //
 // Connection comes from the environment only (see lib/pg.mjs). Never a DSN in argv.
-// The migrations directory can be overridden with CLARA_MIGRATIONS_DIR (used by
-// the CI deploy-onto-existing check to apply origin/main's migrations first).
+// The migrations directory can be overridden with CLARA_MIGRATIONS_DIR (or the
+// `dir` option) — an override hook for local/manual runs. NOTE: CI's
+// deploy-onto-existing check does NOT use this var; it swaps the files on disk
+// (`git checkout origin/main -- packages/db/migrations`, then re-runs migrate).
 
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, existsSync } from "node:fs";

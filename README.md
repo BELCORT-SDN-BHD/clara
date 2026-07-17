@@ -8,9 +8,9 @@ single source of truth. This repo is the rebuild from the Gate-1 audit + Gate-2
 blueprint. **Product law → `docs/prd/PRD.md`. Target architecture →
 `docs/architecture/ARCHITECTURE.md`. Plan → `docs/plan/REBUILD-PLAN.md`.**
 
-> **Status: Phase 3, Slice 1 (foundations).** This is the repo scaffold, CI, and
-> ops floor — *not* the product. The governed DB core is Slice 2; the durable
-> runtime is Slice 4 (`docs/plan/REBUILD-PLAN.md`).
+> **Status → `docs/PROJECTLOG.md` (START HERE) + project memory** — one home, so
+> the copies can't drift. In one line: Phase 3 foundations (scaffold, CI, ops
+> floor), *not* the product yet; the plan is `docs/plan/REBUILD-PLAN.md`.
 
 ## The stack (ratified at Gate 2)
 
@@ -45,6 +45,12 @@ frozen-workflows.json golden hashes for the workflow-versioning freeze-lint
 Requires **Node 20.19+**, **pnpm 10**, and a Postgres client (**v17** for DR
 `pg_dump`). No Docker required for remote-DB work; local Supabase stack dev
 (`supabase start`) needs Docker and is a follow-up.
+
+> **Dev-env notes.** `.nvmrc` pins Node `20.19.5` (`nvm use`). `.mcp.json` pins
+> the `codebase-memory-mcp` server to an **owner-local absolute path**
+> (`C:\Users\…`); it won't start as-is on another machine — point that `command`
+> at your own install, or put the exe on PATH. (The path is intentionally kept in
+> the tracked file, not removed.)
 
 ```sh
 pnpm install
