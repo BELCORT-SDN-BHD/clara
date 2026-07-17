@@ -1,0 +1,48 @@
+{
+  "name": "clara-slice0-spike",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Slice-0 runtime spike: Workflow DevKit durable engine against Supabase Postgres. No LLM calls - tests the engine only.",
+  "type": "module",
+  "scripts": {
+    "build": "nitro build",
+    "dev": "nitro dev",
+    "worker": "node --env-file=.env .output/server/index.mjs",
+    "worker:fault": "cross-env FAULT=kill-after-commit node --env-file=.env .output/server/index.mjs",
+    "setup": "pnpm setup:engine && pnpm setup:domain",
+    "setup:engine": "bootstrap",
+    "setup:domain": "tsx scripts/apply-schema.ts",
+    "enqueue": "tsx scripts/enqueue.ts",
+    "resume": "tsx scripts/resume.ts",
+    "status": "tsx scripts/status.ts",
+    "reset": "tsx scripts/reset.ts",
+    "unstick": "tsx scripts/unstick.ts",
+    "probe": "tsx scripts/probe.ts",
+    "dryrun": "tsx scripts/dryrun.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@workflow/world-postgres": "4.3.0",
+    "dotenv": "17.3.1",
+    "express": "5.2.1",
+    "nitro": "3.0.260610-beta",
+    "pg": "8.20.0",
+    "rollup": "4.62.2",
+    "workflow": "4.6.0"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "20.19.0",
+    "@types/pg": "8.15.4",
+    "cross-env": "10.1.0",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@swc/core",
+      "cbor-extract",
+      "esbuild"
+    ]
+  }
+}
