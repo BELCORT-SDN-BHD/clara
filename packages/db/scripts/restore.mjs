@@ -17,7 +17,7 @@
 //   node scripts/restore.mjs --file <path.sql> [--no-single-transaction]
 
 import { spawnSync } from "node:child_process";
-import { targetLabel, isMain } from "../lib/pg.mjs";
+import { targetLabel, isMain, childEnvForExternalTools } from "../lib/pg.mjs";
 import { assertDestructiveAllowed } from "../lib/guard.mjs";
 
 /**
@@ -29,13 +29,16 @@ export function restore(opts) {
 
   assertDestructiveAllowed({ action: `restore (overwrite ${targetLabel()})` });
 
+  // Canonical child env (finding 1): derives PG* from a DSN URL when set so psql
+  // overwrites the SAME target the guard just authorized, never a split ambient DB.
+  const childEnv = childEnvForExternalTools();
   const bin = process.env.PSQL || "psql";
   const args = ["-X", "-v", "ON_ERROR_STOP=1"];
   if (singleTransaction) args.push("--single-transaction");
-  args.push("-f", file, "--dbname", process.env.PGDATABASE || "postgres");
+  args.push("-f", file, "--dbname", childEnv.PGDATABASE || "postgres");
 
   log(`restore: ${bin} ${singleTransaction ? "--single-transaction " : ""}-f ${file} · target ${targetLabel()}`);
-  const r = spawnSync(bin, args, { stdio: ["ignore", "inherit", "inherit"], env: process.env });
+  const r = spawnSync(bin, args, { stdio: ["ignore", "inherit", "inherit"], env: childEnv });
   if (r.error) throw new Error(`psql failed to start (${r.error.message})`);
   if (r.status !== 0) throw new Error(`psql exited ${r.status}`);
   log("restore: OK");

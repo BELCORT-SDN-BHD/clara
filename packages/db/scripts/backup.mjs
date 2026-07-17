@@ -23,7 +23,7 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeClient, targetLabel, isMain } from "../lib/pg.mjs";
+import { makeClient, targetLabel, isMain, childEnvForExternalTools } from "../lib/pg.mjs";
 
 const PKG_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -55,13 +55,19 @@ export function backup(opts = {}) {
   const label = all ? "all" : safeLabel(schemaList.join("+"));
   const out = opts.out || join(backupDir(), `clara-${label}-${tsStamp()}.sql`);
 
+  // Canonical child env: when a DSN URL is set, PGHOST/PGPORT/PGUSER/PGPASSWORD/
+  // PGDATABASE are derived from it (pg_dump ignores the URL) and conflicting
+  // inherited PG* are cleared — so the dump lands on the SAME target as targetLabel.
+  // Throws on a URL-vs-PG* split (finding 1).
+  const childEnv = childEnvForExternalTools();
+
   const args = ["--no-owner", "--no-privileges", "--format=plain"];
   if (!all) for (const s of schemaList) args.push("--schema", s);
   args.push("--file", out);
-  args.push("--dbname", process.env.PGDATABASE || "postgres"); // libpq supplies host/port/user/password
+  args.push("--dbname", childEnv.PGDATABASE || "postgres"); // libpq (childEnv) supplies host/port/user/password
 
   log(`backup: ${bin} ${all ? "(whole db)" : `schema(s)=${schemaList.join(",")}`} -> ${out} · target ${targetLabel()}`);
-  const r = spawnSync(bin, args, { stdio: ["ignore", "inherit", "inherit"], env: process.env });
+  const r = spawnSync(bin, args, { stdio: ["ignore", "inherit", "inherit"], env: childEnv });
   if (r.error) throw new Error(`pg_dump failed to start (${r.error.message}). Is PG_DUMP set to a v17 binary?`);
   if (r.status !== 0) throw new Error(`pg_dump exited ${r.status}`);
 
@@ -76,7 +82,7 @@ function dumpGlobals({ log = console.log } = {}) {
   const out = join(backupDir(), `clara-globals-${tsStamp()}.sql`);
   const r = spawnSync(bin, ["--globals-only", "--no-role-passwords", "--file", out], {
     stdio: ["ignore", "inherit", "inherit"],
-    env: process.env,
+    env: childEnvForExternalTools(), // same canonical target as the schema dump
   });
   if (r.error || r.status !== 0) {
     log(

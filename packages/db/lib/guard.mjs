@@ -15,7 +15,7 @@
 // a TTY prompt would auto-decline anyway — the sentinel + named-target IS the
 // non-interactive confirmation.
 
-import { targetLabel } from "./pg.mjs";
+import { targetLabel, assertNoTargetSplit } from "./pg.mjs";
 
 // Disposable database-name shapes (suffix or whole-name).
 const EPHEMERAL_DB = /(^|[._-])(ci|test|tmp|temp|scratch|ephemeral)$/i;
@@ -42,6 +42,10 @@ export function targetIsEphemeral(label = targetLabel()) {
  * @param {{ action: string }} opts
  */
 export function assertDestructiveAllowed({ action }) {
+  // Resolve ONE canonical target first: refuse if a DSN URL var and PG* disagree
+  // (finding 1) — otherwise the guard could clear one DB while pg_dump/psql (which
+  // read PG*) operate on another.
+  assertNoTargetSplit();
   const label = targetLabel();
   if (process.env.CLARA_ALLOW_DESTRUCTIVE !== "1") {
     throw new Error(

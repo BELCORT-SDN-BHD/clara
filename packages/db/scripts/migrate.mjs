@@ -22,7 +22,7 @@ import { createHash } from "node:crypto";
 import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { makeClient, targetLabel, isMain } from "../lib/pg.mjs";
+import { makeClient, targetLabel, isMain, assertNoTargetSplit } from "../lib/pg.mjs";
 
 const DEFAULT_MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
 
@@ -75,6 +75,10 @@ export async function migrate({ log = console.log, dir } = {}) {
   }
   const migrations = loadMigrationFiles(MIGRATIONS_DIR);
   const byVersion = new Map(migrations.map((m) => [m.version, m]));
+
+  // Refuse if a DSN URL var and PG* resolve to different targets (finding 1) —
+  // a mutation must never run under an ambiguous target.
+  assertNoTargetSplit();
 
   const client = makeClient();
   await client.connect();
