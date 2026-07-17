@@ -144,6 +144,18 @@ never touched — the DR test is fully schema-isolated).
 Re-run this **quarterly** and after any change to the backup tooling — a backup
 you have never restored is not a backup.
 
+> **Scope of what is exercised vs. what is still required (finding 10).** This
+> drill exercises the **default** profile (a single throwaway schema) — it proves
+> the `pg_dump`/`psql` tooling round-trips, not that a real recovery is complete.
+> `backupFull` (`db:backup:full`) now **asserts the full authoritative-schema
+> inventory** (`clara` + `workflow` + `graphile_worker`) and refuses a partial
+> "full" backup. But the **full-profile fresh-project DR drill** — restoring every
+> schema **+ roles/grants/RLS + Supabase Auth/Storage recovery + encrypted
+> off-site scheduling + freshness alerts** into a *fresh* project — is **not yet
+> built** (no real schema exists yet). It is a **REQUIRED gate before any real
+> client data (Slice 2+)**, tracked in `docs/PROJECTLOG.md` PART 2. Do not treat
+> the single-schema drill as evidence of full recoverability.
+
 ---
 
 ## 6. Readiness probe (fixes GAP1-7: readiness, not liveness-only)
@@ -201,3 +213,9 @@ escalation path for the pilot. The alerting **wiring** is a follow-up; the
    copy path (the DB dump does not include Storage objects). Wire in Slice 5
    when the document pipeline lands.
 4. **Wire the alerting** in §7 once the runtime is deployed.
+5. **Build + pass the full-profile fresh-project DR drill (finding 10)** — a real
+   restore of every authoritative schema + roles/grants/RLS + Supabase
+   Auth/Storage into a *fresh* project, with encrypted off-site scheduling and
+   freshness alerts. **REQUIRED before any real client data (Slice 2+);** the
+   current §5 drill only exercises the single-schema tooling. Tracked in
+   `docs/PROJECTLOG.md` PART 2.

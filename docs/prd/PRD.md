@@ -2,7 +2,7 @@
 
 *Supersedes the frozen `initial acc software skillmd/PRD.md` in full. This is the product law for the greenfield rebuild. It keeps the North Star, sharpens scope to professional Malaysian accounting practice, and binds the Gate-1 owner decisions (`docs/audit/04-gate1-decisions.md`). The invariants in §6 are LAW — they bind every feature, agent skill, and UI decision. The technical realisation is `docs/architecture/`; the design realisation is `docs/design/`; the build sequence is `docs/plan/`.*
 
-**Status:** Phase-2 draft for Gate 2. **Date:** 2026-07-17.
+**Status:** Gate-2 ratified 2026-07-17 (see `docs/PROJECTLOG.md`). **Date:** 2026-07-17.
 
 ---
 
@@ -176,7 +176,7 @@ The prior build had no event layer, no context pack, and no stale-context detect
 
 ## 9. Open product questions (for later gates)
 
-1. **Runtime choice** — decided at Gate 2 with the architecture (`docs/phase2-research/runtime-recommendation.md` + `docs/architecture/ARCHITECTURE.md` §4.0); the incumbent OpenAI Agents SDK is not presumptive.
+1. **Runtime choice — RESOLVED (PROJECTLOG ADR-008).** The AI SDK 7 model layer + Workflow DevKit durable substrate (`@workflow/world-postgres`), self-hosted on our own Postgres, behind a swap-seam (named fallback: LangGraph JS + PostgresSaver). See `docs/architecture/ARCHITECTURE.md` §4.0 + `docs/phase2-research/runtime-recommendation.md`. Kept here for provenance; no longer open.
 2. **C6 compliance execution** — the DPA, firm-facing disclosure, and PDPA cross-border transfer check are Gate-2 checklist items that must be satisfied before any firm data flows to a vendor trace platform.
 3. **Billing model + scale guardrails** — the pre-public-launch gate; per-firm token/usage cap design.
 4. **Tax-computation v1 vs v1.1** — the draft computation is the last slice; the slip decision is data-driven during Phase 4.

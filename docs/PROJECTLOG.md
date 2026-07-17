@@ -5,7 +5,7 @@
 
 ---
 
-> **START HERE.** Clara is a greenfield **AI-native Agentic Accounting OS** for Malaysian accounting firms, rebuilt from the frozen prior BELCORT build. This repo (`github.com/mosaladtaooo/clara`, `main` PR-only) is the active workspace. The old repo `initial acc software skillmd` + Supabase `belcort-shared` are FROZEN read-only audit evidence (untouched until Phase-5 decommission). The DB owns every number; the agent orchestrates. Phase 3 (foundations) is in progress: Slice 0 (spike) + Slice 1 (foundations) done; Slice 2 (governed DB core) next.
+> **START HERE.** Clara is a greenfield **AI-native Agentic Accounting OS** for Malaysian accounting firms, rebuilt from the frozen prior BELCORT build. This repo (`github.com/mosaladtaooo/clara`, `main` PR-only) is the active workspace; the old repo `initial acc software skillmd` + Supabase `belcort-shared` are FROZEN read-only audit evidence (untouched until Phase-5 decommission). The DB owns every number; the agent orchestrates. **This log is DECISIONS ONLY** — append-only ADRs + rationale; supersede, never rewrite. Current phase/slice **status lives in memory (`project-clara-rebuild-state`) + `docs/plan/REBUILD-PLAN.md`**; tasks live in the handoff; build narrative lives in git. Product law → `docs/prd/PRD.md`; target architecture → `docs/architecture/ARCHITECTURE.md`.
 
 ---
 
@@ -70,7 +70,18 @@
 ---
 
 ## PART 2 — OPEN ITEMS
-- **Slice-0 close-out:** resume the 48h parked WDK run (armed ~2026-07-17 15:15 +08; resume ≥2026-07-19 15:15 +08) to fully sign off Slice 0.
+
+*Open decisions + triggered obligations/gates only. Operational tasks (resume the 48h park, rotate a leaked token, and the like) live in the handoff + memory; phase/slice status lives in memory + `docs/plan/`; build narrative lives in git.*
+
+**Open decisions / obligations:**
 - **C6 checklist (ADR-011):** the DPA execution, firm-facing disclosure text, and PDPA cross-border check are OWNER/legal work items before any vendor trace export; engineering keeps the flag OFF until all three are evidenced.
-- **Owner housekeeping:** rotate the Supabase `sbp_` access token (it passed through a session transcript).
 - **Billing / scale guardrails, MyInvois depth, tax-comp v1-vs-v1.1 slip** — deferred product questions (PRD §9).
+
+**Triggered gates — REQUIRED before real client data (Slice 2+), not yet built (do not over-build early):**
+- **Full-profile fresh-project DR drill (ADR-012 / finding 10):** a real restore of the FULL backup profile into a fresh project — every authoritative schema **plus roles/grants/RLS, Supabase Auth/Storage recovery, encrypted off-site scheduling, and freshness alerts**. The exercised drill (`dr:selftest`, `docs/ops/DR.md` §5) proves the tooling on a single throwaway schema only; `db:backup:full` now asserts the full schema inventory, but the end-to-end fresh-project drill is unbuilt (no real schema exists yet). A hard gate before any real books land.
+
+**Deferred hardening (triggered follow-ups; note, don't build now):**
+- **Local disposable Supabase stack** (`supabase/config.toml` + `supabase start`) as the intended local test target — needs Docker (unavailable on this machine). Interim = a throwaway remote schema + the destructive-target guards (`packages/db/lib/guard.mjs`).
+- **Server-side branch protection** on `main` (a PR-required ruleset) — an owner-only plan upgrade; the git-base freeze-lint + CI are the interim gate (CLAUDE.md "`main` is PR-only").
+- **SHA-pin the GitHub Actions** (`checkout`/`setup-node`/`pnpm/action-setup` still use mutable major tags) — a supply-chain hardening follow-up (the gitleaks binary is already version-pinned, ADR-012 / finding 4).
+- **Freeze-lint registry-version monotonicity + enqueue-site-uses-registry** (finding 11) — a Slice-4 hardening, when real workflows + a live registry exist (ARCHITECTURE Appendix A).
