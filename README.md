@@ -92,6 +92,6 @@ CI.
 
 - **Never commit a credential.** `.env` is gitignored; only `.env.example`
   (placeholders) is tracked. The leak-scan gate enforces it.
-- **`master` is PR-only** — land via PR with green CI.
+- **`main` is PR-only** — land via PR with green CI.
 - **The DB owns every number; the agent only orchestrates** (`docs/prd/PRD.md`).
 - Full agent working guide: `CLAUDE.md`.
