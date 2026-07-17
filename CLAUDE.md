@@ -11,6 +11,8 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 | Need | Source of truth |
 |---|---|
+| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` (START HERE block) |
+| Live CODE structure (functions, callers, routes) | **codebase-memory graph — query it, don't grep** (`get_architecture` / `search_graph` / `trace_path`; re-index after big changes) |
 | What / why / scope · product invariants (LAW) | `docs/prd/PRD.md` |
 | Target architecture (event spine, structural invariants, runtime, reporting) | `docs/architecture/ARCHITECTURE.md` |
 | Phase 3–5 plan (vertical slices, gates, verification) | `docs/plan/REBUILD-PLAN.md` |
@@ -40,7 +42,9 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 - **Ground before building.** On a new/compacted session, read the relevant
   harness row above before answering an architecture question or changing code.
-- **`master` is PR-only** — land via PR with green CI (never push `master`).
+- **`main` is PR-only** — land via PR with green CI (never push `main`). Free-tier
+  branch protection is not platform-enforced, so the git-base freeze-lint + CI are
+  the real gate — treat them as binding.
 - **Never commit a credential.** `.env` is gitignored; only `.env.example`
   (placeholders) is tracked. Connections come from the environment (libpq PG*
   vars or `DATABASE_URL`) — never a DSN in code or argv. The leak-scan gate
@@ -68,14 +72,17 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
   overwriting files you didn't create; a genuinely destructive/irreversible op
   (a DROP on shared state, a data delete, a project teardown).
 - 🚫 **Never:** compute a financial number in the agent/UI (the DB owns it);
-  hand-write a books row when an audited fn exists; push to `master` directly;
+  hand-write a books row when an audited fn exists; push to `main` directly;
   commit a secret; disturb the frozen prior project/repo or the spike's parked run.
 
-## This slice (Slice 1 — foundations)
+## Where we are
 
-Built: the monorepo (`packages/db`, `packages/runtime`, `apps/dashboard`),
-CI (throwaway `postgres:17`, freeze-lint, leak-scan, migrate+smoke, DR
-self-test), and the ops floor (`docs/ops/DR.md`, backup/restore, `/ready`).
-**Not** built: the real schema (Slice 2), the event spine (Slice 3), the durable
-chat runtime (Slice 4), the document pipeline (Slice 5). See
-`docs/plan/REBUILD-PLAN.md`.
+**Phase 3 (foundations).** Slice 0 (WDK×Supabase durability spike) ✅ GO — see
+`spike/RESULTS.md` + ARCHITECTURE Appendix A. Slice 1 (monorepo + CI + freeze-lint
++ leak-scan + DR ops floor) ✅ MERGED (PR #1). **Next: Slice 2 — the governed DB
+core** (the four structural invariants as DB objects, forced RLS, EXECUTE-only
+grants, the structural read-only agent role, maker/checker, the deferred balance
+trigger, cross-firm isolation rig with negative-path tests). Security-critical →
+run dual-lane adversarial review before merge. Then Slices 3 (event spine) → 4
+(durable chat runtime) → 5 (document pipeline) → 6 (thin end-to-end slice = GATE
+3). Decision history: `docs/PROJECTLOG.md`; full plan: `docs/plan/REBUILD-PLAN.md`.

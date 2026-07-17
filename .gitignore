@@ -33,3 +33,9 @@ Thumbs.db
 
 # spike (frozen; keeps its own env)
 spike/.env
+
+# Local Claude Code state — except repo-authored shared skills.
+.claude/*
+!.claude/skills/
+.claude/skills/*
+!.claude/skills/orchestrator-fable/
