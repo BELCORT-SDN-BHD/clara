@@ -12,7 +12,7 @@ Fastest orientation:
   the agent only orchestrates.
 - **Where truth lives** — the table in `CLAUDE.md` maps every need to a doc.
 - **Non-negotiables** — never commit a credential (`.env` gitignored, leak-scan
-  enforced); `master` is PR-only; workflow bodies are immutable once deployed
+  enforced); `main` is PR-only; workflow bodies are immutable once deployed
   (freeze-lint enforced); don't disturb the frozen prior project or the Slice-0
   spike's parked run.
 - **Before you build** — `pnpm install`, then `pnpm typecheck` / `pnpm lint` /

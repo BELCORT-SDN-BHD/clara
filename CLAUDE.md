@@ -40,8 +40,11 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 ## Working protocol
 
-- **Ground before building.** On a new/compacted session, read the relevant
-  harness row above before answering an architecture question or changing code.
+- **Orchestrate via the `orchestrator-fable` skill.** The main model is the **orchestrator** (plan, delegate, synthesize, verify, own state); **workers** are the hands — Claude native subagent lanes, or Codex for heavy implementation/debugging/refactors. Delegate bounded work orders, inspect every worker result before accepting it, and run cross-model review before merging security-critical work. **Codex lane caveat (learned):** the `codex:codex-rescue` companion queue is unreliable (it has stalled for hours at "starting"); prefer a **direct `codex exec` via Bash** (background + a file-watcher on the output) or a **native subagent** — both have been reliable. See memory `project-rebuild-ops-lessons`.
+- **Ground before building.** On a new or compacted session, before answering an architecture question or changing code: **query the codebase-memory graph first** for structure, and read the relevant harness row above. For substantial, opt-in-scale work a grounding fan-out (Workflow) can help — but a few targeted graph queries + reads usually suffice.
+- **Query the graph, don't grep.** The codebase-memory graph is the first stop for "where / what / who-calls" questions (~100× cheaper than file-by-file reading). Use Grep/Read to drill into the specific file the graph points you at. Re-index after big code changes. *(stdio MCP, project-scoped in `.mcp.json`.)*
+- **Keep the harness fresh — each artifact for its purpose (before compact / refresh).** `docs/PROJECTLOG.md` = **DECISIONS only** (append-only ADRs + rationale; supersede, never rewrite — *no* status, build narrative, or task lists). Current phase/slice **status → memory** (`project-clara-rebuild-state`) + `docs/plan/`. **Tasks → the session task list.** **What-changed / build narrative → git.** So: a real decision → add an ADR; state changed → refresh the memory state file; big code change → re-index the graph. Do a harness-refresh pass before compacting a long session.
+- **Grill until crystal-clear.** For any non-trivial plan, bug fix, or feature, use the **`grilling` skill (`/grillme`)** to interview the owner — as many rounds as it takes until the plan is unambiguous and aligned. Resolve ambiguity before writing code.
 - **`main` is PR-only** — land via PR with green CI (never push `main`). Free-tier
   branch protection is not platform-enforced, so the git-base freeze-lint + CI are
   the real gate — treat them as binding.
@@ -75,14 +78,21 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
   hand-write a books row when an audited fn exists; push to `main` directly;
   commit a secret; disturb the frozen prior project/repo or the spike's parked run.
 
+## Dev toolchain (skills)
+
+The engineering skill set (mattpocock/skills + repo-authored) is vendored under
+`.claude/skills/` and **tracked in git** — available in every session. Key ones:
+**`orchestrator-fable`** (the session workflow), **`grilling`** (`/grillme` —
+interview the owner to kill ambiguity before building), **`handoff`** (a clean
+continue-prompt for a fresh session), **`code-review`**, **`tdd`**, **`research`**,
+**`diagnosing-bugs`**, **`codebase-design`**, **`qa`**. Per-repo skill config
+(issue-tracker → `mosaladtaooo/clara`, triage labels, the domain-doc map) lives
+in `docs/agents/`.
+
 ## Where we are
 
-**Phase 3 (foundations).** Slice 0 (WDK×Supabase durability spike) ✅ GO — see
-`spike/RESULTS.md` + ARCHITECTURE Appendix A. Slice 1 (monorepo + CI + freeze-lint
-+ leak-scan + DR ops floor) ✅ MERGED (PR #1). **Next: Slice 2 — the governed DB
-core** (the four structural invariants as DB objects, forced RLS, EXECUTE-only
-grants, the structural read-only agent role, maker/checker, the deferred balance
-trigger, cross-firm isolation rig with negative-path tests). Security-critical →
-run dual-lane adversarial review before merge. Then Slices 3 (event spine) → 4
-(durable chat runtime) → 5 (document pipeline) → 6 (thin end-to-end slice = GATE
-3). Decision history: `docs/PROJECTLOG.md`; full plan: `docs/plan/REBUILD-PLAN.md`.
+Current phase/slice **status lives in one place** — memory
+(`project-clara-rebuild-state`, read-first) + `docs/PROJECTLOG.md` (START HERE) +
+`docs/plan/REBUILD-PLAN.md` — refreshed each slice so this file stays stable.
+In one line: **Phase 3 foundations; Slice 0 (spike) + Slice 1 (foundations) done;
+Slice 2 (governed DB core) next.**
