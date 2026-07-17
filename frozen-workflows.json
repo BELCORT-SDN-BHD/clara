@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "workflows": {
+    "packages/runtime/workflows/closeExample.v1.ts": {
+      "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
+      "note": ""
+    }
+  }
+}
