@@ -1,0 +1,40 @@
+{
+  "name": "clara",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Clara — AI-native Accounting OS for Malaysian accounting firms (greenfield rebuild). Monorepo root.",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=20.19 <21",
+    "pnpm": ">=10"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r --if-present typecheck",
+    "lint": "node scripts/check-frozen-workflows.mjs && node scripts/check-leaks.mjs && pnpm -r --if-present lint",
+    "build": "pnpm -r --if-present build",
+    "test": "pnpm -r --if-present test",
+    "db:migrate": "pnpm --filter @clara/db migrate",
+    "db:seed": "pnpm --filter @clara/db seed",
+    "db:reset": "pnpm --filter @clara/db reset",
+    "db:backup": "pnpm --filter @clara/db backup",
+    "db:backup:full": "pnpm --filter @clara/db backup:full",
+    "db:restore": "pnpm --filter @clara/db restore",
+    "freeze:lint": "node scripts/check-frozen-workflows.mjs",
+    "freeze:update": "node scripts/check-frozen-workflows.mjs --update",
+    "leaks:scan": "node scripts/check-leaks.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "20.19.0",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@swc/core",
+      "cbor-extract",
+      "esbuild",
+      "sharp"
+    ]
+  }
+}

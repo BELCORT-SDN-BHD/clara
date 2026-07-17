@@ -1,0 +1,7 @@
+packages:
+  - packages/*
+  - apps/*
+# NOTE: spike/ is intentionally NOT a workspace member. It is the frozen
+# Slice-0 runtime spike (its own lockfile + node_modules) and must not be
+# pulled into the monorepo install graph. See docs/architecture/ARCHITECTURE.md
+# Appendix A and spike/README.md.

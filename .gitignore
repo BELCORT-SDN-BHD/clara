@@ -1,9 +1,35 @@
+# dependencies
 node_modules/
+.pnpm-store/
+
+# env / secrets (only *.example is tracked)
 .env
-.env.local
-*.log
-.DS_Store
+.env.*
+!.env.example
+*.pem
+
+# build output
+dist/
 .output/
 .nitro/
-dist/
+.next/
+out/
+*.tsbuildinfo
+
+# test / coverage
+coverage/
+.workflow-data/
+.workflow-data-dryrun/
+
+# DR / backups (may contain data — never commit)
+backups/
+*.dump
+*.sql.gz
+
+# logs / os
+*.log
+.DS_Store
+Thumbs.db
+
+# spike (frozen; keeps its own env)
 spike/.env

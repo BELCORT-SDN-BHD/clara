@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "plugins": [{ "name": "workflow" }]
+  },
+  "include": [
+    "nitro.config.ts",
+    "src/**/*",
+    "workflows/**/*",
+    "plugins/**/*",
+    "lib/**/*"
+  ]
+}

@@ -1,0 +1,18 @@
+# Force LF for all text so golden hashes (the frozen-workflow freeze-lint) and
+# CI checkouts are byte-stable across Windows dev and Linux CI. Without this,
+# git's autocrlf would rewrite line endings and break content hashes.
+* text=auto eol=lf
+
+*.ts   text eol=lf
+*.tsx  text eol=lf
+*.mjs  text eol=lf
+*.js   text eol=lf
+*.json text eol=lf
+*.sql  text eol=lf
+*.yml  text eol=lf
+*.yaml text eol=lf
+*.md   text eol=lf
+
+# Binary
+*.png  binary
+*.zip  binary

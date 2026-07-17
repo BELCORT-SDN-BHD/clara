@@ -1,0 +1,27 @@
+{
+  "name": "@clara/runtime",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Clara agent-runtime service skeleton — the durable substrate (Workflow DevKit Postgres world) with health/ready probes. NO agent/LLM logic yet (that is Slice 4).",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "nitro build",
+    "start": "node --env-file-if-exists=.env scripts/worker.mjs"
+  },
+  "dependencies": {
+    "@workflow/world-postgres": "4.3.0",
+    "express": "5.2.1",
+    "nitro": "3.0.260610-beta",
+    "pg": "8.20.0",
+    "rollup": "4.62.2",
+    "workflow": "4.6.0"
+  },
+  "devDependencies": {
+    "@types/express": "5.0.6",
+    "@types/node": "20.19.0",
+    "@types/pg": "8.15.4",
+    "tsx": "4.23.1",
+    "typescript": "5.9.3"
+  }
+}

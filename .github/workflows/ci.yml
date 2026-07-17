@@ -1,0 +1,127 @@
+name: CI
+
+# The anti-"misleading-green" gate. The OLD build's CI tested a decommissioned
+# schema (defect GAP1-5) — a green check that proved nothing. This pipeline
+# applies the REAL migrations, builds the REAL packages, and runs the smoke +
+# DR round-trip against a THROWAWAY postgres:17 service container — NEVER a live
+# project. See docs/architecture/ARCHITECTURE.md §9 and the repo README.
+
+on:
+  push:
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    # Ephemeral, disposable Postgres 17 — created for this job and discarded when
+    # it ends. This is the ONLY database CI touches. It is not the frozen project.
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clara_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      # libpq vars — the db scripts read these (no DSN in code/argv).
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: clara_ci
+      NEXT_TELEMETRY_DISABLED: "1"
+      # clara_ci is the ephemeral service DB (matches the guard's *_ci pattern) —
+      # authorize the destructive DR/reset scripts against it ONLY. lib/guard.mjs
+      # still refuses any non-ephemeral target even with this set.
+      CLARA_ALLOW_DESTRUCTIVE: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the freeze-lint + migration-history checks can compare
+          # against origin/main (append-only-vs-base is the ONLY real protection —
+          # free-tier branch protection is not platform-enforced).
+          fetch-depth: 0
+
+      - name: Fetch base ref (origin/main) for append-only checks
+        run: git fetch --no-tags --depth=1 origin main:refs/remotes/origin/main || echo "no origin/main yet (first PR) — base checks treat all as new"
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.5
+          cache: pnpm
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck (tsc across TS packages)
+        run: pnpm typecheck
+
+      - name: Lint (freeze-lint + leak-scan + per-package)
+        run: pnpm lint
+
+      # Called out explicitly for visibility even though `pnpm lint` runs them:
+      - name: Freeze-lint (workflow versioning policy — ARCHITECTURE Appendix A)
+        run: node scripts/check-frozen-workflows.mjs
+
+      - name: Leak-scan (no committed credentials)
+        run: node scripts/check-leaks.mjs
+
+      - name: Build (nitro runtime + next dashboard)
+        run: pnpm build
+
+      # Install the v17 client so pg_dump matches the server (the wrapper picks
+      # the highest installed version). ubuntu-latest ships v16, which refuses a
+      # v17 server.
+      - name: Install PostgreSQL 17 client (for DR pg_dump)
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          pg_dump --version
+
+      # DEPLOY-ONTO-EXISTING (finding F4): a real deploy applies HEAD's migrations
+      # onto a DB that ALREADY has main's migrations. CI starting from an empty DB
+      # would false-green an edited historical migration. So: apply origin/main's
+      # migrations first, THEN HEAD's — migrate.mjs's checksum-drift guard aborts
+      # if a previously-applied migration was edited/renamed/deleted.
+      - name: Deploy-onto-existing check (main migrations, then HEAD)
+        run: |
+          if git rev-parse --verify origin/main >/dev/null 2>&1 \
+             && git ls-tree -r --name-only origin/main -- packages/db/migrations | grep -q '\.sql$'; then
+            git checkout origin/main -- packages/db/migrations
+            echo "--- applying origin/main migrations (baseline) ---"
+            pnpm db:migrate
+            git checkout HEAD -- packages/db/migrations
+            echo "--- applying HEAD migrations onto the baseline (drift guard active) ---"
+            pnpm db:migrate
+          else
+            echo "origin/main has no packages/db/migrations yet — first introduction; nothing to layer onto."
+          fi
+
+      - name: Migrate + seed + smoke test (ephemeral postgres:17)
+        run: |
+          pnpm db:migrate
+          pnpm db:seed
+          pnpm --filter @clara/db test
+
+      - name: DR backup/restore self-test (ephemeral postgres:17)
+        run: pnpm --filter @clara/db dr:selftest
