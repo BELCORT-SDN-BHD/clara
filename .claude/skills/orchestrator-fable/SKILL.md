@@ -39,7 +39,7 @@ Heavy implementation may require detailed technical reasoning. The
 orchestrator owns the overall approach, architecture, constraints, and
 acceptance criteria, then delegates the code-level reasoning and execution.
 
-- Use Claude's native subagents/Workflow model when the native agents can cover the task, Select model and effort's tier based on thier capabilities: models:`sonnet 5`, `opus 4.8`, effort's tiers: `xhigh`. DO NOT dispatch `sonnet 5`.
+- Use the most suitable Claude's native `subagents`, `agent-team` or `dynamicworkflow` dispatch method that can cover the task, Select model and effort's tier based on thier capabilities: the dispatch agent's model field: `sonnet 5`, `opus 4.8`, effort's tiers: `xhigh`.  DO NOT dispatch `fable 5`.
 - Use **codex:codex-rescue** as the executor when a task needs heavy implementation, debugging, test fixing, refactoring, or multi-file code edits. Prefer `--model gpt-5.6-sol --effort xhigh`; if you say `spark`, that maps to `gpt-5.3-codex-spark`.
 - Keep Codex tasks focused and specific.
 - After a worker (Codex or a subagent) finishes, inspect the result yourself before accepting it. Do not blindly trust worker output.
