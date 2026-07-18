@@ -24,6 +24,10 @@ COPY apps/dashboard/package.json ./apps/dashboard/package.json
 RUN pnpm install --filter @clara/runtime... --frozen-lockfile
 
 # 2. Runtime source — deliberately NOT .env / node_modules / .output / tests / .swc.
+#    tsconfig.base.json is the workspace base the runtime tsconfig extends — without
+#    it the TS resolution chain collapses and nitro's rolldown build fails (proven
+#    at first deploy).
+COPY tsconfig.base.json ./
 COPY packages/runtime/tsconfig.json packages/runtime/nitro.config.ts ./packages/runtime/
 COPY packages/runtime/src ./packages/runtime/src
 COPY packages/runtime/lib ./packages/runtime/lib
@@ -59,7 +63,8 @@ COPY --from=builder /app/packages/runtime/package.json ./package.json
 
 EXPOSE 3200
 
-# The crash-only supervisor: HTTP + world + control listener + leader loop. It
-# defaults CLARA_START_WORLD=1; all secrets come from the environment (fly secrets),
+# The crash-only supervisor: HTTP + world + control listener + leader loop. The
+# world starts ONLY when CLARA_START_WORLD=1 (explicit opt-in; fly.toml/[env] sets
+# it for production, secrets can override). All secrets come from the environment,
 # never the image. Fly restarts the machine on any non-zero exit (crash-only, §4.1).
 CMD ["node", "scripts/serve.mjs"]

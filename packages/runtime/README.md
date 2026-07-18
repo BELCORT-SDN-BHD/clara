@@ -69,11 +69,17 @@ Artifacts: `fly.toml` + `Dockerfile` (in this package). The deploy is a
 single always-on, **non-HA** machine (contract §4.1) — the durable engine is
 single-leader, so this app must never scale > 1.
 
-### Prerequisites (do NOT deploy before these)
+### Prerequisites (do NOT start the world before these)
 
-1. **Ruling 7 gate**: the Slice-0 48-hour park (`T2-48h`) is resumed + signed
-   off (resume due ≥ 2026-07-19 15:15 +08), AND the owner has approved the
-   spike-schema drop. Until then, build/test on local throwaways only.
+1. **Ruling 7 gate, corrected scope (owner-ratified 2026-07-18 after the
+   wait-validation debate):** what waits for the `T2-48h` park sign-off +
+   the owner-approved spike-schema drop is ONLY (a) starting a world against
+   the shared engine schemas and (b) dropping those schemas. Everything
+   non-colliding may (and did) proceed early: applying `clara` migrations,
+   Fly app + secrets, and a QUARANTINED world-off smoke deploy
+   (`CLARA_START_WORLD=0`, health/operator access only — a world-off boot
+   may still open an eager engine LISTEN, which reads but never replays).
+   The world-on cutover strictly waits for the gate.
 2. A production Postgres reachable via a **SESSION-mode pooler** (port 5432 — the
    world needs `LISTEN/NOTIFY`, which transaction mode on 6543 drops).
 3. `fly apps create <name>` and set `app = "<name>"` in `fly.toml`.

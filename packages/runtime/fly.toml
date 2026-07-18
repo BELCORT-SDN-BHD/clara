@@ -10,8 +10,10 @@ app = "clara-runtime"
 primary_region = "sin"
 
 [build]
-  # Dockerfile path is relative to the build context (the repo root).
-  dockerfile = "packages/runtime/Dockerfile"
+  # Dockerfile path resolves relative to THIS config file (fly behavior, proven
+  # at first deploy); the BUILD CONTEXT is the directory `fly deploy` runs from —
+  # deploy from the REPO ROOT so the Dockerfile's root-relative COPYs work.
+  dockerfile = "Dockerfile"
 
 [env]
   PORT = "3200"
