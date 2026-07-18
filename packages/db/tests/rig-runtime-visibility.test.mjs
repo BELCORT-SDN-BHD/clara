@@ -165,7 +165,9 @@ test("§6 cross-firm denial sweep: a firm-B human sees ZERO firm-A rows on every
 test("§6 agent lane: clara_agent_ro has ZERO access to every new table (42501, grant-level)", async (t) => {
   if (unready(t)) return;
   const tables = await observedNewTables();
+  const slice5AgentReads = new Set(["document_filings", "document_extractions", "document_regions"]);
   for (const tbl of tables) {
+    if (slice5AgentReads.has(tbl)) continue;
     await assertRaises(
       PG.insufficientPrivilege,
       () => roleQuery(ROLES.agentRo, `select count(*) from clara.${tbl}`),

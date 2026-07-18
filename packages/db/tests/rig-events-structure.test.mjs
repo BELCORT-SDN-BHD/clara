@@ -287,7 +287,7 @@ test("§8 get_context_pack: full shape; books_version == firm max seq; blank pur
   const { users, firms, clients } = world;
   const pack = await contextPack(users.alice, clients.A1, "close review");
   assert.ok(pack, "a pack is returned for a visible client");
-  assert.equal(pack.pack_schema_version, 1, "pack_schema_version = 1");
+  assert.equal(pack.pack_schema_version, 2, "Slice-5 pack_schema_version = 2");
   assert.equal(pack.purpose, "close review", "purpose echoed");
   for (const k of ["generated_at", "books_version", "client", "firm", "coa", "trial_balance", "recent_entries", "documents", "resolutions", "approval_history"]) {
     assert.ok(k in pack, `pack has key ${k}`);
