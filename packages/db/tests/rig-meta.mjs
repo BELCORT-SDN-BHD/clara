@@ -14,11 +14,16 @@ export const WRITERS = [
 // granted to the same read audience as the other reads (clara_authenticated + agent_ro).
 export const READS = ["get_journal_entry", "list_journal_entries", "trial_balance", "get_context_pack"];
 export const ALLOWED = {
-  [ROLES.authenticated]: new Set([...WRITERS, ...READS]),
+  // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
+  [ROLES.authenticated]: new Set([...WRITERS, ...READS, "answer_interruption", "cancel_agent_task", "share_chat_session"]),
   [ROLES.agentRo]: new Set(READS),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_ingest_document", "wake_record_notification"]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
-  [ROLES.runtime]: new Set(["mint_wake_credential", "revoke_wake_credential"]),
+  // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
+  [ROLES.runtime]: new Set([
+    "mint_wake_credential", "revoke_wake_credential",
+    "resolve_chat_principal", "begin_chat_turn", "settle_chat_turn", "prune_trace_spans", "relay_health",
+  ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
 // as the querying role); their exact grant set is out of scope for the strict
@@ -35,6 +40,10 @@ export const GOVERNED_TABLES = [
   // Slice-3 event spine (event-spine contract §2 — all owned by clara_fn_owner, FORCE RLS).
   "event_types", "firm_event_seq", "domain_events", "taxonomy_versions", "trigger_taxonomy",
   "taxonomy_active", "wake_intents", "relay_checkpoints", "relay_dead_letters",
+  // Slice-4 runtime core (contract v2.1 §3 — all owned by clara_fn_owner, FORCE RLS).
+  "agent_tasks", "agent_interruptions", "wakes_outbox", "chat_sessions", "chat_messages",
+  "firm_limits", "firm_usage_daily", "task_usage", "trace_spans", "trace_prune_log",
+  "runtime_heartbeats",
 ];
 
 // The ONLY clara base tables that legitimately carry no RLS (migration bookkeeping + the
