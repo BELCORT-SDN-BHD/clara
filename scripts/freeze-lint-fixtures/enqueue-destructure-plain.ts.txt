@@ -1,0 +1,11 @@
+// Fixture (REJECT: ENQUEUE-UNTRACEABLE) — S4-FX6. Plain destructuring of the
+// enqueue namespace extracts `start` into an untracked binding; the later
+// start(...) call would escape provenance. Refused at the destructuring site.
+import * as api from "workflow/api";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+const { start } = api;
+
+export async function kick(): Promise<void> {
+  await start(chatTurnV1, []);
+}

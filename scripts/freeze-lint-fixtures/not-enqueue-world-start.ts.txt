@@ -1,0 +1,7 @@
+// Fixture (OK — false-positive guard): mirrors plugins/startWorld.ts. The
+// `.start?.()` here is the WORLD lifecycle method from "workflow/runtime"
+// (which does NOT export the enqueue API) — it must not be flagged.
+export async function boot(): Promise<void> {
+  const { getWorld } = await import("workflow/runtime");
+  await getWorld().start?.();
+}

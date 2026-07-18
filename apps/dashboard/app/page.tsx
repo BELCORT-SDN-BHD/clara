@@ -10,6 +10,9 @@ export default function Home() {
       <p>
         Environment: <code>{env}</code>
       </p>
+      <p>
+        <a href="/chat">Chat (Slice-4 plumbing page)</a>
+      </p>
     </main>
   );
 }

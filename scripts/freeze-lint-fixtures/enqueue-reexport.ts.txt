@@ -1,0 +1,4 @@
+// Fixture (REJECT: ENQUEUE-REEXPORT): re-exporting the enqueue API would let a
+// consumer import `start` from THIS module, where the per-file provenance scan
+// would no longer recognise it — refuse the laundering surface itself.
+export { start } from "workflow/api";

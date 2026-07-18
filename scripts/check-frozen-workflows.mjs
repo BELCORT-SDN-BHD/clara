@@ -28,6 +28,22 @@
 // workflow (so a "use step" body it imports can't change while the workflow hash
 // stays green). The manifest maps path -> sha256 of the LF-normalised file.
 //
+// Slice-4 hardening (contract §4.9; the deferred finding-11 half):
+//   (d) REGISTRY-VERSION MONOTONICITY — packages/runtime/workflows/registry.ts is
+//       parsed STRUCTURALLY at HEAD and at the base ref: a workflow class may only
+//       keep or INCREASE its version (closeExampleV1 -> closeExampleV2 ok; a
+//       downgrade or a class REMOVED from the registry is a hard REJECT — a
+//       removed class strands its non-terminal runs, policy (c)).
+//   (e) ENQUEUE-SITE PROVENANCE — every call to the WDK enqueue API in
+//       packages/runtime (tests + the registry itself excluded) must receive a
+//       workflow reference whose IMPORT PROVENANCE traces to the registry.
+//       Resolution is per-identifier, so importing the registry SOMEWHERE in the
+//       file while handing start() a direct module import is still a REJECT.
+//       Both checks fail CLOSED: unparseable registries and untraceable enqueue
+//       arguments are violations, never skips.
+//   Self-test: node scripts/check-frozen-workflows.selftest.mjs (fixtures under
+//   scripts/freeze-lint-fixtures/ — stored as .txt so eslint/tsc never parse them).
+//
 // Usage:
 //   node scripts/check-frozen-workflows.mjs          # verify (CI gate)
 //   node scripts/check-frozen-workflows.mjs --update  # re-baseline (local only)
@@ -41,6 +57,9 @@ import { createHash } from "node:crypto";
 import { readFileSync, existsSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve, extname } from "node:path";
 import { execFileSync } from "node:child_process";
+// The (d)+(e) checkers are PURE (source strings in, violations out) and live in
+// a sibling module so the self-test can inject simulated base/head pairs.
+import { checkRegistryMonotonicity, checkEnqueueSites, isTestPath, REGISTRY_REL } from "./freeze-lint-checks.mjs";
 
 // All git calls go through execFileSync with an argv array — never a shell string —
 // so a ref/path can never be interpreted as a shell command (no injection surface).
@@ -208,6 +227,15 @@ function loadManifest() {
   return parsed;
 }
 
+/** Raw content of a repo-relative file at the base ref, or null if absent there. */
+function readBaseFile(rel) {
+  try {
+    return git(["show", `${BASE_REF}:${rel}`], { cwd: REPO_ROOT, stdio: ["ignore", "pipe", "ignore"] });
+  } catch {
+    return null;
+  }
+}
+
 /**
  * The frozen manifest as it exists on the base ref (default origin/main).
  * If the ref or the file is absent, the manifest is being introduced for the
@@ -223,14 +251,14 @@ function loadBaseManifest() {
     refExists = false;
   }
   if (!refExists) return { available: false, workflows: {} };
+  const raw = readBaseFile(MANIFEST_REL);
+  if (raw === null) {
+    // Ref exists but manifest not present on it -> first introduction.
+    return { available: true, workflows: {} };
+  }
   try {
-    const raw = git(["show", `${BASE_REF}:${MANIFEST_REL}`], {
-      cwd: REPO_ROOT,
-      stdio: ["ignore", "pipe", "ignore"],
-    });
     return { available: true, workflows: JSON.parse(raw).workflows ?? {} };
   } catch {
-    // Ref exists but manifest not present on it -> first introduction.
     return { available: true, workflows: {} };
   }
 }
@@ -353,9 +381,8 @@ function main() {
   // workspace-package or path-alias specifier points at first-party source that
   // escapes the closure — its body could change while the frozen hash stays green.
   // Reject it (import relatively instead). Bare third-party packages are fine.
-  // NOTE: registry-version-monotonicity + enqueue-site-uses-the-registry
-  // enforcement is a Slice-4 hardening (when real workflows + a live registry
-  // exist) — see docs/architecture/ARCHITECTURE.md Appendix A / docs/ops/DR.md.
+  // (The other finding-11 half — registry-version monotonicity + enqueue-site
+  // provenance — is enforced below as checks 4 + 5; see freeze-lint-checks.mjs.)
   const wsNames = workspacePackageNames();
   for (const rel of frozenRel) {
     let escapes = [];
@@ -405,6 +432,30 @@ function main() {
       );
     }
   }
+
+  // 4. REGISTRY-VERSION MONOTONICITY (capability (d), contract §4.9): parse the
+  // registry structurally at HEAD and at the base ref — a class may only keep
+  // or INCREASE its version; a class removed vs base is a hard REJECT. When the
+  // base ref is unavailable, only HEAD-shape validation runs (under CI the
+  // BASE-UNAVAILABLE violation above already fails the build — no fail-open).
+  const headRegistryAbs = join(REPO_ROOT, REGISTRY_REL);
+  const headRegistrySrc = existsSync(headRegistryAbs) ? readFileSync(headRegistryAbs, "utf8") : null;
+  const baseRegistrySrc = base.available ? readBaseFile(REGISTRY_REL) : null;
+  violations.push(...checkRegistryMonotonicity(baseRegistrySrc, headRegistrySrc, BASE_REF));
+
+  // 5. ENQUEUE-SITE PROVENANCE (capability (e), contract §4.9): every WDK
+  // enqueue call in packages/runtime (tests + the registry itself excluded)
+  // must receive a workflow reference imported from workflows/registry.ts.
+  const enqueueEntries = [];
+  for (const rel of files) {
+    if (!rel.startsWith("packages/runtime/") || rel === REGISTRY_REL || isTestPath(rel)) continue;
+    try {
+      enqueueEntries.push({ rel, src: readFileSync(join(REPO_ROOT, rel), "utf8") });
+    } catch {
+      /* an unreadable frozen file is already reported above; a non-frozen one has no enqueue sites to read */
+    }
+  }
+  violations.push(...checkEnqueueSites(enqueueEntries));
 
   if (violations.length > 0) {
     console.error("freeze-lint: FAIL — frozen workflow policy violated (ARCHITECTURE.md Appendix A):\n");

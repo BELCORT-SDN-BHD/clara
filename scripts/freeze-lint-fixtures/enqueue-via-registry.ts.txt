@@ -1,0 +1,8 @@
+// Fixture (OK): the canonical enqueue site — the workflow reference is a
+// registry export, so it always targets the newest version (policy (b)).
+import { start } from "workflow/api";
+import { workflows } from "../workflows/registry.js";
+
+export async function kick(opKey: string): Promise<void> {
+  await start(workflows.closeExample, [opKey]);
+}

@@ -1,0 +1,12 @@
+// Fixture (REJECT: ENQUEUE-UNTRACEABLE) — S4-FX6, the exact live probe:
+// renamed destructuring of the enqueue namespace. `launch` carries no importable
+// provenance, so the call would escape both the member-access and computed
+// scans. Refused at the destructuring site (fail-closed).
+import * as api from "workflow/api";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+const { start: launch } = api;
+
+export async function kick(): Promise<void> {
+  await launch(chatTurnV1, []);
+}

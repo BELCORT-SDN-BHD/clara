@@ -1,0 +1,14 @@
+# Keep the Fly/Docker build context small and secret-free (the runtime Dockerfile
+# COPYs selectively regardless — this is speed + defense-in-depth, not the guarantee).
+.git
+node_modules
+**/node_modules
+**/.output
+**/.env
+**/.env.*
+!**/.env.example
+spike
+docs
+.claude
+.impeccable
+scratchpad

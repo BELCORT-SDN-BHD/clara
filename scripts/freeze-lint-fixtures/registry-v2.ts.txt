@@ -1,0 +1,8 @@
+// Fixture: registry after a legal repoint, closeExample -> V2.
+import { closeExampleV2 } from "./closeExample.v2.js";
+
+export const workflows = {
+  closeExample: closeExampleV2,
+} as const;
+
+export const workflowNames: string[] = Object.keys(workflows);

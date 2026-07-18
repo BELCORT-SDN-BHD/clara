@@ -2,7 +2,14 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "types": ["node"],
-    "plugins": [{ "name": "workflow" }]
+    "plugins": [{ "name": "workflow" }],
+    // The lib/* infrastructure is plain ESM (.mjs) so `node --test` and
+    // scripts/serve.mjs can run it without a build step (the relay precedent). The
+    // TS entrypoints (src, workflows) import those modules, so allow JS resolution +
+    // JSDoc-inferred types. checkJs stays off: the .mjs are proven by node --test,
+    // not by tsc (mirrors packages/db's "no tsc, proven by the rig" stance).
+    "allowJs": true,
+    "checkJs": false
   },
   "include": [
     "nitro.config.ts",

@@ -1,0 +1,12 @@
+// Fixture (REJECT: ENQUEUE-UNTRACEABLE): the dot-access twin of the computed
+// uncalled case — `const go = api.start;` extracts the enqueue callable into an
+// untracked binding, so the later go(...) call would escape provenance.
+// Refused fail-closed at the extraction point.
+import * as api from "workflow/api";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+const go = api.start;
+
+export async function kick(): Promise<void> {
+  await go(chatTurnV1, []);
+}

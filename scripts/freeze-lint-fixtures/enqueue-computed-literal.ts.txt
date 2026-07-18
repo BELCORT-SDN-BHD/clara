@@ -1,0 +1,9 @@
+// Fixture (REJECT: ENQUEUE-BYPASS) — S4-AB9 live-proven bypass. Computed
+// namespace access with a LITERAL property must be resolved like the dot form:
+// api["start"] IS the enqueue API, and the argument is a direct module import.
+import * as api from "workflow/api";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+export async function kick(): Promise<void> {
+  await api["start"](chatTurnV1, []);
+}

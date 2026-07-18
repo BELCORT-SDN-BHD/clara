@@ -1,0 +1,7 @@
+// Fixture (OK): namespace-imported enqueue API, registry-provenanced argument.
+import * as api from "workflow/api";
+import { workflows } from "../workflows/registry.js";
+
+export async function kick(): Promise<void> {
+  await api.start(workflows.closeExample, []);
+}

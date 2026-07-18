@@ -1,41 +1,76 @@
+import type { Server } from "node:http";
 import express from "express";
-import { checkDb } from "../lib/db.js";
 import { workflowNames } from "../workflows/registry.js";
+import { checkReadiness } from "../lib/health.mjs";
+import { chatRoutes } from "./chatRoutes.js";
+import { streamRoutes } from "./streamRoute.js";
 
-// Clara agent-runtime skeleton. Slice 1 wires ONLY the durable substrate +
-// health/ready probes + the workflow-versioning hook point. No agent/LLM logic
-// yet (Slice 4). The engine's own routes live under /.well-known/workflow/v1/*
-// (mounted by the workflow/nitro module).
+// Clara agent-runtime HTTP surface (Slice 4). The durable chat loop, SSE, and the
+// admission/turn routes ride on top of the WDK Postgres world (started by
+// plugins/startWorld.ts when CLARA_START_WORLD=1). The control listener, relay+drain,
+// and reconciler run in that same plugin so the whole process is one crash-only group.
+type Sup = { shuttingDown: boolean; stops: Array<() => unknown>; activeRequests: number; httpServer?: Server };
+const sup = ((globalThis as unknown as { __claraSupervisor?: Sup }).__claraSupervisor ??= {
+  shuttingDown: false,
+  stops: [],
+  activeRequests: 0,
+});
+
 const app = express();
-app.use(express.json());
 
-// Liveness — is the process up? No dependencies. Used for restart/keepalive.
+// Graceful-shutdown gate + active-request tracking (S4-FX2). Runs BEFORE every route:
+// captures the HTTP listener (so serve.mjs can server.close() on SIGTERM), refuses
+// NEW requests with 503 GLOBALLY while draining (except /health liveness), and counts
+// in-flight requests + SSE streams so the supervisor can wait for zero-active.
+app.use((req, res, next) => {
+  if (!sup.httpServer) {
+    const s = (req.socket as unknown as { server?: Server }).server;
+    if (s) sup.httpServer = s;
+  }
+  if (sup.shuttingDown && req.path !== "/health") {
+    res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+    return;
+  }
+  sup.activeRequests += 1;
+  let done = false;
+  const dec = () => {
+    if (done) return;
+    done = true;
+    sup.activeRequests -= 1;
+  };
+  res.on("close", dec);
+  res.on("finish", dec);
+  next();
+});
+
+app.use(express.json({ limit: "1mb" }));
+
+// Liveness — is the process up? No dependencies.
 app.get("/health", (_req, res) => {
   res.json({ ok: true, service: "clara-runtime", pid: process.pid, ts: new Date().toISOString() });
 });
 
-// Readiness — should we receive traffic? Checks DB connectivity (the single
-// source of truth must be reachable). Returns 503 when not ready so a load
-// balancer / orchestrator holds traffic. This is the GAP1-7 fix: readiness, not
-// liveness-only.
+// Readiness — should we receive traffic? FAILS (503) only on DB unreachable, world
+// dead, control listener dead, or taxonomy HALT (§4.7); relay lag / dead-letters /
+// backlog are warnings[] (degraded, still serving). Bounded + sanitized.
 app.get("/ready", async (_req, res) => {
-  const db = await checkDb(); // bounded (timeouts) + sanitized error code (lib/db.ts)
-  const worldEnabled = process.env.CLARA_START_WORLD === "1";
-  // Readiness is DB reachability ONLY. `world.enabled` is INFORMATIONAL, not a
-  // health signal — a real worker-heartbeat check lands with the durable chat
-  // loop in Slice 4 (there is no worker to health-check in the skeleton).
-  const ready = db.ok;
-  res.status(ready ? 200 : 503).json({
-    ready,
-    checks: { db, world: { enabled: worldEnabled } },
-    ts: new Date().toISOString(),
-  });
+  // During graceful shutdown, report NOT ready so the LB stops routing new traffic.
+  const sup = (globalThis as unknown as { __claraSupervisor?: { shuttingDown?: boolean } }).__claraSupervisor;
+  if (sup?.shuttingDown) {
+    res.status(503).json({ ready: false, checks: { shutdown: true }, warnings: [], ts: new Date().toISOString() });
+    return;
+  }
+  const r = await checkReadiness();
+  res.status(r.ready ? 200 : 503).json({ ready: r.ready, checks: r.checks, warnings: r.warnings, ts: new Date().toISOString() });
 });
 
-// The versioning hook point: the workflows the runtime knows about (newest
-// version per class, from the registry). The freeze-lint guards their bodies.
+// The registered workflows (the versioning hook point; freeze-lint guards bodies).
 app.get("/workflows", (_req, res) => {
   res.json({ registered: workflowNames });
 });
+
+// Chat: sessions, messages, turns (admission + enqueue), and the SSE stream.
+app.use(chatRoutes());
+app.use(streamRoutes());
 
 export default app;

@@ -1,0 +1,11 @@
+// Fixture: registry with two classes (closeExample V1 + chatTurn V1).
+// Used as HEAD for the new-class-OK case and as BASE for the removed-class case.
+import { closeExampleV1 } from "./closeExample.v1.js";
+import { chatTurnV1 } from "./chatTurn.v1.js";
+
+export const workflows = {
+  closeExample: closeExampleV1,
+  chatTurn: chatTurnV1,
+} as const;
+
+export const workflowNames: string[] = Object.keys(workflows);

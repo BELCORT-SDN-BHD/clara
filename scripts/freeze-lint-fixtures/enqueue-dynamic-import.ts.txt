@@ -1,0 +1,8 @@
+// Fixture (REJECT: ENQUEUE-DYNAMIC): a dynamically obtained enqueue API cannot
+// be provenance-traced — fail-closed.
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+export async function kick(): Promise<void> {
+  const { start } = await import("workflow/api");
+  await start(chatTurnV1, []);
+}

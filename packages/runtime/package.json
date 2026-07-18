@@ -3,23 +3,29 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Clara agent-runtime service skeleton — the durable substrate (Workflow DevKit Postgres world) with health/ready probes. NO agent/LLM logic yet (that is Slice 4).",
+  "description": "Clara agent-runtime service — the durable chat runtime (Slice 4): the WDK Postgres world, the chat loop (chatTurn_v1), SSE, clarify, the outbox drain, the settle-reconciler, the supervisor, and health/ready.",
   "scripts": {
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "build": "nitro build",
-    "start": "node --env-file-if-exists=.env scripts/worker.mjs",
+    "start": "node --env-file-if-exists=.env scripts/serve.mjs",
+    "worker": "node --env-file-if-exists=.env scripts/worker.mjs",
     "test": "node --test --test-concurrency=1 tests/"
   },
   "dependencies": {
+    "@ai-sdk/openai": "4.0.16",
     "@workflow/world-postgres": "4.3.0",
+    "ai": "7.0.31",
     "express": "5.2.1",
+    "jose": "6.2.3",
     "nitro": "3.0.260610-beta",
     "pg": "8.20.0",
     "rollup": "4.62.2",
-    "workflow": "4.6.0"
+    "workflow": "4.6.0",
+    "zod": "4.4.3"
   },
   "devDependencies": {
+    "@ai-sdk/provider": "4.0.3",
     "@types/express": "5.0.6",
     "@types/node": "20.19.0",
     "@types/pg": "8.15.4",
