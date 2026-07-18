@@ -97,9 +97,11 @@ stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 In one line: **Phase 3 foundations; Slice 0 spike — T1–T6 passed, the 48-hour
 park (T2-48h) resumable ≥2026-07-19 15:15 +08 for final sign-off; Slices 1
 (foundations) + 2 (governed DB core, PR #5, ADR-015) + 3 (event spine, PR #7,
-ADR-016) + 4 (durable chat runtime skeleton, ADR-017 — 0006, read-only chat
-loop, clarify, metering, drain, traces; deployed world-off) done; **Slice 5
-DESIGN stage done** (contract v1.2 + 0007 companion, PR #11 — ten owner rulings
-+ three delegated decisions + three delta amendments, all ratified; ADR-018
-lands with the build PR); Slice 5 BUILD next (local throwaways until the
-ceremony); the T2-48h cutover ceremony (world-on) gates ≥2026-07-19 15:15 +08.**
+ADR-016) + 4 (durable chat runtime skeleton, ADR-017; deployed world-off) +
+**5 (the document pipeline core — migrations 0007+0008, intake transport,
+documentIngest_v1, matcher consumer, /documents + attachment chip; contract
+v1.2 + as-built amendments AB-1..17, ADR-018; full dual-review ladder incl.
+the as-built round, PR #13)** done; the T2-48h cutover ceremony (world-on +
+the S5 deploy additions: storage-provision.sql, the §4.8 env set, egress flag
+OFF) gates ≥2026-07-19 15:15 +08; Slice 6 (thin end-to-end = GATE 3:
+chatTurn_v2, attachment perception, the write floor + coding flow) next.**
