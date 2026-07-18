@@ -13,7 +13,6 @@
 // No DB is touched: /health, /ready(shutdown short-circuit), and the 503 gate all run
 // BEFORE any pool checkout. TEST_MODE keeps the pool import fail-open.
 
-import assert from "node:assert/strict";
 import http from "node:http";
 
 process.env.TEST_MODE = "1";

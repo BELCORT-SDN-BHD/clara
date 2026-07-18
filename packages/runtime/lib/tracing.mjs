@@ -14,8 +14,8 @@ const DENY_KEY_RE = /(authorization|password|secret|api[-_]?key|access[-_]?token
 
 // VALUE patterns redacted inline even under an innocuous key (best-effort).
 const VALUE_PATTERNS = [
-  /Bearer\s+[A-Za-z0-9._\-]+/gi, // bearer tokens
-  /eyJ[A-Za-z0-9._\-]{10,}/g, // JWT-shaped
+  /Bearer\s+[A-Za-z0-9._-]+/gi, // bearer tokens
+  /eyJ[A-Za-z0-9._-]{10,}/g, // JWT-shaped
   /\b(?:postgres|postgresql|mysql|mongodb(?:\+srv)?):\/\/[^\s"']*/gi, // connection strings w/ creds
   /(password|secret|api[-_]?key|token)\s*[=:]\s*[^\s"';,&]+/gi, // key=value secrets
 ];

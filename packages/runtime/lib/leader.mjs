@@ -20,7 +20,7 @@ import {
 } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { drainCycle } from "./drain.mjs";
-import { runReconcilerSweep, heartbeat } from "./reconciler.mjs";
+import { runReconcilerSweep } from "./reconciler.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
 
 const POLL_INTERVAL_MS = Number(process.env.CLARA_LEADER_POLL_MS || 2000);
