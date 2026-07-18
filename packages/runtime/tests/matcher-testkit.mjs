@@ -111,7 +111,7 @@ export async function seedRegion({ firm, extraction, fieldPath = "tin", textCont
   return r.rows[0].id;
 }
 
-/** Human writer (bookkeeper+). Stores value_normalized = lower(btrim(value)). */
+/** Human writer (bookkeeper+). Stores value_normalized with ALL whitespace stripped (DC-1). */
 export async function addClientIdentifier(ownerSub, { client, kind = "tin", value }) {
   await fx.humanQuery(
     ownerSub,

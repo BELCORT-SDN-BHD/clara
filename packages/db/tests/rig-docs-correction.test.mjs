@@ -32,6 +32,8 @@ import {
   freshResolution,
   draftEntry,
   approveEntry,
+  reverseEntry,
+  contextPack,
   seedVerifiedDocument,
   fileDocument,
   retireDocumentFiling,
@@ -172,6 +174,9 @@ test("§3.5 a DRAFT of the corrected client is WITHDRAWN by the correction (draf
   const proposal = await proposeCorrection(users.alice, { document: s.documentId, fromClient: clients.A1, toClient: clients.A2, reason: "withdraw path" });
   const correctionId = idOf(proposal, "correction_id", "correction");
   const planHash = proposal.plan_hash ?? (await rootQuery("select plan_hash from clara.filing_corrections where id=$1", [correctionId])).rows[0]?.plan_hash;
+  // §G5(b): capture the trial-balance NET total BEFORE the withdraw (the correction txn).
+  const tbNet = async (client) => Number((await rootQuery("select coalesce(sum(debit_cents - credit_cents),0)::bigint as net from clara.trial_balance($1)", [client])).rows[0].net);
+  const netBefore = await tbNet(clients.A1);
   await approveCorrection(users.bob, { correction: correctionId, planHash });
 
   const st = (await rootQuery("select status from clara.journal_entries where id=$1", [draft.entry_id])).rows[0].status;
@@ -180,6 +185,19 @@ test("§3.5 a DRAFT of the corrected client is WITHDRAWN by the correction (draf
   await assertRaisesOneOf([CLR.immutable, CLR.badRequest], () => rootQuery("update clara.journal_lines set debit_cents=1 where entry_id=$1", [draft.entry_id]), "mutate a withdrawn entry's lines");
   // A withdrawn entry can never move back to draft/approved.
   await assertRaisesOneOf([CLR.immutable, CLR.badRequest, CLR.stale], () => rootQuery("update clara.journal_entries set status='draft' where id=$1", [draft.entry_id]), "revive a withdrawn entry");
+
+  // §G5(a): the WITHDRAWN entry is EXCLUDED from the human context pack's recent_entries,
+  // while a control approved entry (the reversed-but-still-approved cite) stays visible.
+  const pack = await contextPack(users.alice, clients.A1, "withdraw-exclusion check");
+  const recentIds = (pack.recent_entries ?? []).map((e) => e.entry?.id);
+  assert.ok(!recentIds.includes(draft.entry_id), "the WITHDRAWN draft is NOT in recent_entries[] (context excludes withdrawn)");
+  assert.ok(recentIds.includes(s.entry), "a control approved entry IS in recent_entries[] (the pack is not simply empty)");
+  // §G5(b): the withdraw leaves the trial-balance NET total unchanged (a withdrawn draft
+  // can neither post nor unbalance). Individual balances DO move — the correction also
+  // reverses the approved cite — so the balanced net total is the withdraw-safety invariant.
+  const netAfter = await tbNet(clients.A1);
+  assert.equal(netAfter, netBefore, "the withdraw leaves trial_balance's net total unchanged (books stay balanced)");
+  noteLane(`withdrawn-exclusion: draft absent from recent_entries; TB net total unchanged (${netBefore})`);
 });
 
 // ===========================================================================
@@ -190,6 +208,8 @@ test("§3.5 stale plan reject: a proposal approved after the plan_hash/books_ver
   if (unready(t)) return;
   const { users, clients } = world;
   const s = await docWithApprovedEntry(users.alice, clients.A1);
+  // F-07: propose requires the authoritative destination attribution.
+  await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: s.documentId });
   const proposal = await proposeCorrection(users.alice, { document: s.documentId, fromClient: clients.A1, toClient: clients.A2, reason: "stale test" });
   const correctionId = idOf(proposal, "correction_id", "correction");
   const planHash = proposal.plan_hash ?? (await rootQuery("select plan_hash from clara.filing_corrections where id=$1", [correctionId])).rows[0]?.plan_hash;
@@ -200,6 +220,29 @@ test("§3.5 stale plan reject: a proposal approved after the plan_hash/books_ver
     STALE_PLAN_CODES,
     () => approveCorrection(users.alice, { correction: correctionId, planHash: "0".repeat(64), attestation: "rig" }),
     "approve with a drifted/incorrect plan_hash",
+  );
+});
+
+test("§3.5 stale plan by books_version drift: a CORRECT-hash plan approved by a distinct checker AFTER the books move is refused (v_current<>books_version → CLR19)", async (t) => {
+  if (unready(t)) return;
+  const { users, clients } = world;
+  const s = await docWithApprovedEntry(users.alice, clients.A1);
+  // F-07: propose requires the authoritative destination attribution.
+  await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: s.documentId });
+  const proposal = await proposeCorrection(users.alice, { document: s.documentId, fromClient: clients.A1, toClient: clients.A2, reason: "books-drift test" });
+  const correctionId = idOf(proposal, "correction_id", "correction");
+  const planHash = proposal.plan_hash ?? (await rootQuery("select plan_hash from clara.filing_corrections where id=$1", [correctionId])).rows[0]?.plan_hash;
+  assert.ok(planHash, "the proposal is hash-bound");
+
+  // MOVE the books AFTER propose — any event bumps the firm max seq the plan pinned.
+  await freshResolution(users.alice, clients.A1);
+
+  // Approve with the CORRECT plan_hash, by a DISTINCT checker (bob) so the maker/distinct-
+  // checker gate is passed first and the v_current<>books_version branch is what fires.
+  await assertRaisesOneOf(
+    [...STALE_PLAN_CODES, "CLR19"],
+    () => approveCorrection(users.bob, { correction: correctionId, planHash }),
+    "approve a correct-hash plan after the books_version drifted",
   );
 });
 
@@ -257,4 +300,74 @@ test("§3.5 lock order: two concurrent filings on ONE document (filings id ASC) 
     ).catch((e) => { throw e; }) },
   });
   assert.ok(!sawDeadlock(out), `concurrent multi-client filings never deadlock (a=${out.a?.code ?? "ok"} b=${out.b?.code ?? "ok"})`);
+});
+
+// ===========================================================================
+// §8 — the multi-filing / partial-reversal correction cases.
+// ===========================================================================
+
+test("§8 doc filed to BOTH A1 and A2, only A1 wrong: the A1→A2 correction RETIRES A1 and leaves A2's pre-existing filing UNTOUCHED (ensure is idempotent — no second filing, not retired)", async (t) => {
+  if (unready(t)) return;
+  const { users, clients } = world;
+  const s = await docWithApprovedEntry(users.alice, clients.A1);
+  // ALSO file the SAME document to A2 BEFORE the correction (a legitimate co-filing).
+  await fileDocument(users.alice, { document: s.documentId, client: clients.A2, resolution: await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: s.documentId }) });
+  const a2Before = (await activeFilings(s.documentId)).find((f) => f.client_id === clients.A2);
+  assert.ok(a2Before, "A2 has an active filing before the correction");
+
+  // Guided A1→A2 correction: destination attribution BEFORE propose; approve as bob.
+  await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: s.documentId });
+  const proposal = await proposeCorrection(users.alice, { document: s.documentId, fromClient: clients.A1, toClient: clients.A2, reason: "A1 was wrong; A2 already correct" });
+  const correctionId = idOf(proposal, "correction_id", "correction");
+  const planHash = proposal.plan_hash ?? (await rootQuery("select plan_hash from clara.filing_corrections where id=$1", [correctionId])).rows[0]?.plan_hash;
+  await approveCorrection(users.bob, { correction: correctionId, planHash });
+
+  const filings = await allFilings(s.documentId);
+  const a1 = filings.find((f) => f.client_id === clients.A1);
+  const a2After = filings.filter((f) => f.client_id === clients.A2);
+  assert.ok(a1 && a1.retired_at != null, "A1's filing is retired");
+  assert.equal(a2After.length, 1, "still exactly ONE A2 filing — the ensure is idempotent (no second B filing)");
+  assert.equal(a2After[0].id, a2Before.id, "A2's filing row id is UNCHANGED (the pre-existing row survives)");
+  assert.equal(a2After[0].retired_at, null, "A2's filing is still active (untouched by the correction)");
+});
+
+test("§8 partially-reversed set: one of two approved cites is manually reversed first → the correction marks it already_reversed (NO double reversal) and reverses ONLY the other", async (t) => {
+  if (unready(t)) return;
+  const { users, clients } = world;
+  const s = await docWithApprovedEntry(users.alice, clients.A1); // entry1 = s.entry (approved cite)
+  // A SECOND approved entry citing the same document/filing.
+  const res2 = await freshResolution(users.alice, clients.A1);
+  const d2 = await draftEntry(human(users.alice), { client: clients.A1, resolution: res2, document: s.documentId, sha256: s.sha256, lines: LINES, opKey: opk("p8b-d2") });
+  await approveEntry(users.alice, { entry: d2.entry_id, expectedRevision: d2.revision_token, opKey: opk("p8b-a2") });
+
+  // Manually reverse entry1 FIRST (its own mirror carries no filing_id → it is not a cite).
+  await reverseEntry(users.bob, { entry: s.entry, reason: "manual pre-reversal", opKey: opk("p8b-rev") });
+  const manualMirror = (await rootQuery("select reversed_by from clara.journal_entries where id=$1", [s.entry])).rows[0].reversed_by;
+  assert.ok(manualMirror, "entry1 is reversed before the correction");
+
+  // Correct A1→A2: destination attribution before propose; approve as bob.
+  await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: s.documentId });
+  const proposal = await proposeCorrection(users.alice, { document: s.documentId, fromClient: clients.A1, toClient: clients.A2, reason: "partial-reversed set" });
+  const correctionId = idOf(proposal, "correction_id", "correction");
+  const planHash = proposal.plan_hash ?? (await rootQuery("select plan_hash from clara.filing_corrections where id=$1", [correctionId])).rows[0]?.plan_hash;
+
+  // The plan classifies the already-reversed cite vs the live one.
+  const items = (await rootQuery("select entry_id, action from clara.filing_correction_items where correction_id=$1", [correctionId])).rows;
+  const actionFor = (id) => items.find((i) => i.entry_id === id)?.action;
+  assert.equal(actionFor(s.entry), "already_reversed", "entry1 (pre-reversed) is planned already_reversed");
+  assert.equal(actionFor(d2.entry_id), "reverse", "entry2 (live) is planned reverse");
+
+  await approveCorrection(users.bob, { correction: correctionId, planHash });
+
+  // No double reversal: entry1's reversed_by is UNCHANGED; exactly ONE new mirror for entry2.
+  const e1After = (await rootQuery("select reversed_by from clara.journal_entries where id=$1", [s.entry])).rows[0].reversed_by;
+  assert.equal(e1After, manualMirror, "entry1's reversal is untouched (no double-reversal)");
+  const e2Mirrors = (await rootQuery("select count(*)::int as n from clara.journal_entries where reversal_of=$1", [d2.entry_id])).rows[0].n;
+  assert.equal(e2Mirrors, 1, "exactly ONE new mirror reverses entry2");
+  const outcomes = (await rootQuery("select entry_id, outcome from clara.filing_correction_items where correction_id=$1", [correctionId])).rows;
+  const outcomeFor = (id) => outcomes.find((o) => o.entry_id === id)?.outcome;
+  assert.equal(outcomeFor(s.entry), "already_reversed", "entry1 outcome recorded already_reversed");
+  assert.equal(outcomeFor(d2.entry_id), "reversed", "entry2 outcome recorded reversed");
+  const status = (await rootQuery("select status from clara.filing_corrections where id=$1", [correctionId])).rows[0].status;
+  assert.equal(status, "completed", "the correction completes");
 });

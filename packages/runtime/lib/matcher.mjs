@@ -25,14 +25,14 @@
 //     (document,matcher_version,fingerprint) AND a deterministic op_key ⇒ a
 //     re-delivered event produces ZERO new rows.
 //
-// AS-BUILT LANE-2 CONSTRAINT (flagged for integration): 0007 grants clara_runtime
-// SELECT on client_aliases but NOT on document_regions/document_extractions/
-// clara.clients (verified live) — so the matcher cannot autonomously COMPUTE lane-2
-// candidates, only WRITE ones it is given. matchCandidates is a pure unit-tested fn
-// fed by an INJECTABLE reader (deps.readMatchInputs); the default reader degrades to
-// empty on the expected 42501 (logged once) so the handler never fails, and lane 2
-// lights up with NO code change once those SELECTs (or a lane-2 fn) land.
-// Connections: env only, via pools.makeRuntimeClient.
+// LANE-2 READ SET (AB-1, migration 0008_runtime_read_surface): clara_runtime holds
+// SELECT on document_extractions/document_regions/clients/client_aliases/
+// client_identifiers, so the DEFAULT reader computes lane-2 candidates LIVE
+// (firm hard-scoped in SQL — RLS is not the tenant boundary on this lane, §3.4).
+// matchCandidates stays a pure unit-testable fn fed by an injectable reader
+// (deps.readMatchInputs); the 42501 latch below is retained as a fail-safe for a
+// mis-deployed grant set (degrades to lane-1-only, logged once, never fails the
+// handler). Connections: env only, via pools.makeRuntimeClient.
 
 import { setTimeout as sleep } from "node:timers/promises";
 import { createHash } from "node:crypto";
@@ -52,7 +52,7 @@ const POLL_INTERVAL_MS = Number(process.env.CLARA_MATCHER_POLL_MS || 2000);
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 
-let _lane2Disabled = false; // process latch: the as-built read grants are missing (42501)
+let _lane2Disabled = false; // fail-safe latch: only fires if the 0008 read grants are missing (42501)
 
 // ---------------------------------------------------------------------------
 // Pure lane-2 candidate matching — no DB, fully unit-testable. UNIQUE exact

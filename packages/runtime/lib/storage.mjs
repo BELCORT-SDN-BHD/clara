@@ -40,14 +40,23 @@ function decodeJwtClaims(jwt) {
 function realConfig() {
   const base = process.env.CLARA_STORAGE_URL;
   const jwt = process.env.CLARA_STORAGE_ROLE_JWT;
-  if (!base || !jwt) throw new StorageError("storage_error", "Storage custom-role configuration is missing", 503);
+  const designatedRole = process.env.CLARA_STORAGE_ROLE
+    || (process.env.RELAY_TEST_MODE === "1" ? "clara_storage_docs" : "");
+  if (!base || !jwt || !designatedRole) {
+    throw new StorageError("storage_error", "Storage custom-role configuration is missing", 503);
+  }
+  if (["anon", "authenticated", "service_role"].includes(designatedRole)) {
+    throw new StorageError("storage_error", "Storage designated role must be a dedicated custom role", 503);
+  }
   const claims = decodeJwtClaims(jwt);
   const exp = Number(claims?.exp);
   if (!Number.isFinite(exp) || exp * 1000 <= Date.now() + 30_000) {
     throw new StorageError("storage_error", "Storage role credential is expired or malformed", 503);
   }
-  if (typeof claims?.role !== "string" || ["anon", "authenticated", "service_role"].includes(claims.role)) {
-    throw new StorageError("storage_error", "Storage credential is not a dedicated custom-role JWT", 503);
+  if (typeof claims?.role !== "string"
+      || ["anon", "authenticated", "service_role"].includes(claims.role)
+      || claims.role !== designatedRole) {
+    throw new StorageError("storage_error", "Storage credential does not assume the designated custom-role", 503);
   }
   return { base: base.replace(/\/+$/, ""), jwt };
 }

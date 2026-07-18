@@ -129,10 +129,32 @@ test("idempotency: re-delivering the same event yields ONE matcher attempt and O
   assert.equal((await ruleResolutionsFor(firm, document)).length, 1, "exactly one rule resolution (partial-unique deduped)");
 });
 
+test("lane 1 (DC-1): a SPACED identifier normalizes on write and matches a space-free OCR hit", { skip }, async () => {
+  const { owner, firm, clients } = await buildFirmWithClients(1);
+  const tin = tinOf();
+  const spaced = `${tin.slice(0, 3)} ${tin.slice(3, 8)}  ${tin.slice(8)}`; // internal whitespace, the DC-1 shape
+  const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
+  const extraction = await seedExtraction({ firm, document });
+  await seedRegion({ firm, extraction, fieldPath: "tin", textContent: tin }); // OCR sees it space-free
+  await addClientIdentifier(owner, { client: clients[0], kind: "tin", value: spaced });
+
+  const stored = await rootQuery(
+    "select value_normalized from clara.client_identifiers where client_id=$1 and kind='tin'",
+    [clients[0]],
+  );
+  assert.equal(stored.rows[0].value_normalized, tin.toLowerCase(), "write-side strips ALL whitespace (DC-1 fix)");
+
+  await asMatcherLogin((c) => effectsInTxn(c, { documentId: document, extractionId: extraction, firmId: firm }));
+  const rules = await ruleResolutionsFor(firm, document);
+  assert.equal(rules.length, 1, "the spaced identifier MATCHES the space-free OCR hit (lane 1 resolves)");
+  assert.equal(rules[0].client_id, clients[0]);
+});
+
 // ---------------------------------------------------------------------------
-// Lane 2 — advisory candidates + confirm/dismiss round-trip. The matcher cannot
-// COMPUTE candidates under the as-built grants, but it (and the tests) can WRITE
-// them via record_attribution_attempt; confirming is a human act.
+// Lane 2 — advisory candidates + confirm/dismiss round-trip. Under the 0008 read
+// set (AB-1) the DEFAULT reader computes candidates LIVE; the injected-reader
+// test pins the pure wiring, the default-reader test pins the real SQL path +
+// firm scoping. Confirming is a human act.
 // ---------------------------------------------------------------------------
 
 test("lane 2: applyMatcherEffects wires computed candidates into the attempt (injected reader)", { skip }, async () => {
@@ -156,6 +178,33 @@ test("lane 2: applyMatcherEffects wires computed candidates into the attempt (in
   assert.equal(cands.length, 1, "the candidate was persisted via record_attribution_attempt");
   assert.equal(cands[0].client_id, clients[0]);
   assert.equal(cands[0].rule_kind, "name_exact");
+});
+
+test("lane 2 (DC-2b): the DEFAULT reader computes candidates LIVE from the 0008 read set, firm hard-scoped", { skip }, async () => {
+  const { owner, firm, clients } = await buildFirmWithClients(1);
+  const clientName = (await rootQuery("select name from clara.clients where id=$1", [clients[0]])).rows[0].name;
+  const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
+  const extraction = await seedExtraction({ firm, document });
+  await seedRegion({ firm, extraction, fieldPath: "supplier_name", textContent: clientName });
+
+  // NO injected reader — readMatchInputs runs its real SQL under the 0008 grants.
+  const res = await asMatcherLogin((c) =>
+    effectsInTxn(c, { documentId: document, extractionId: extraction, firmId: firm }),
+  );
+  assert.equal(res.lane2.candidates.length, 1, "the default reader computed the name hit live (no 42501 latch)");
+  const cands = await candidatesForDoc(document);
+  assert.equal(cands.length, 1, "the live-computed candidate persisted");
+  assert.equal(cands[0].client_id, clients[0]);
+
+  // Firm hard-scoping (§3.4: RLS is not the boundary — the SQL is): a sibling
+  // firm's document carrying the SAME name text yields NO candidate, because
+  // firm A's client registry is invisible to firm B's matcher pass.
+  const b = await buildFirmWithClients(1);
+  const docB = await seedVerifiedDocument({ firm: b.firm, uploadedBy: b.owner });
+  const extB = await seedExtraction({ firm: b.firm, document: docB });
+  await seedRegion({ firm: b.firm, extraction: extB, fieldPath: "supplier_name", textContent: clientName });
+  await asMatcherLogin((c) => effectsInTxn(c, { documentId: docB, extractionId: extB, firmId: b.firm }));
+  assert.equal((await candidatesForDoc(docB)).length, 0, "no cross-firm candidate (the reader is firm-scoped in SQL)");
 });
 
 test("lane 2: confirm creates a human resolution; dismiss marks the sibling candidate dismissed", { skip }, async () => {

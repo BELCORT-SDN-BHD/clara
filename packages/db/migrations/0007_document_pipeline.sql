@@ -347,6 +347,7 @@ create table clara.filing_correction_items (
   reversal_id      uuid,
   outcome          text        check (outcome is null or outcome in
                     ('reversed','already_reversed','withdrawn')),
+  adopted_reversal boolean     not null default false,
   created_at       timestamptz not null default now(),
   unique (id, firm_id),
   unique (correction_id, entry_id),
@@ -430,8 +431,11 @@ begin
       end if;
     when 'document_intakes' then
       if new.origin = 'chat' then
-        select firm_id into v_firm from clara.chat_sessions
-          where id = new.chat_session_id and created_by = new.uploaded_by;
+        select s.firm_id into v_firm from clara.chat_sessions s
+          join clara.firm_memberships m on m.firm_id=s.firm_id
+            and m.user_id=new.uploaded_by and m.status='active'
+          where s.id=new.chat_session_id
+            and (s.created_by=new.uploaded_by or s.visibility='firm');
       else
         select firm_id into v_firm from clara.firm_memberships
           where user_id = new.uploaded_by and status = 'active';
@@ -590,6 +594,44 @@ begin
 end $$;
 create trigger t_document_intakes_update before update or delete on clara.document_intakes
   for each row execute function clara._tf_document_intake_update();
+
+-- S5-R8 attachment admission. The message insert is inside begin_chat_turn's
+-- transaction, so refusing here also rolls back the just-created task. Foreign
+-- and nonexistent handles deliberately share CLR11 (no tenant oracle).
+create function clara._tf_validate_chat_attachments() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_firm uuid; v_author uuid; v_count int; elem jsonb;
+begin
+  if new.role<>'user' then return new; end if;
+  if jsonb_typeof(new.parts)<>'array' then
+    raise exception 'chat message parts must be an array' using errcode='CLR10';
+  end if;
+  select s.firm_id,t.created_by into v_firm,v_author
+    from clara.agent_tasks t join clara.chat_sessions s on s.id=t.session_id
+    where t.id=new.task_id and t.session_id=new.session_id;
+  if v_firm is null or v_author is null then
+    raise exception 'attachment admission context is invalid' using errcode='CLR11';
+  end if;
+  select count(*)::int into v_count from jsonb_array_elements(new.parts) p
+    where p->>'type'='attachment';
+  if v_count>5 then raise exception 'a chat turn may contain at most five attachments' using errcode='CLR10'; end if;
+  for elem in select value from jsonb_array_elements(new.parts) loop
+    if elem->>'type'='attachment' then
+      if coalesce(elem->>'intake_id','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         or coalesce(elem->>'document_id','') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+         or not exists (
+           select 1 from clara.document_intakes i
+            where i.id=(elem->>'intake_id')::uuid and i.firm_id=v_firm
+              and i.uploaded_by=v_author and i.status in ('finalized','adopted')
+              and i.document_id=(elem->>'document_id')::uuid) then
+        raise exception 'attachment is not an adopted intake for this author and firm' using errcode='CLR11';
+      end if;
+    end if;
+  end loop;
+  return new;
+end $$;
+create trigger t_chat_messages_attachment_admission before insert on clara.chat_messages
+  for each row execute function clara._tf_validate_chat_attachments();
 
 create function clara._tf_processing_task_update() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -1470,14 +1512,17 @@ declare c record; v_dedupe jsonb; v_id uuid;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
+  -- DC-1 (as-built review): normalization must MATCH the lane-1 predicate, which
+  -- strips ALL whitespace — machine identifiers (TIN/SSM/bank account) carry no
+  -- semantic internal whitespace; a btrim-only store could never match a spaced form.
   v_dedupe := clara._reserve_op(c.firm,'add_client_identifier',p_op_key,
-    clara._hash(jsonb_build_object('client',p_client,'kind',p_kind,'value',lower(btrim(p_value_normalized)))));
+    clara._hash(jsonb_build_object('client',p_client,'kind',p_kind,'value',lower(regexp_replace(p_value_normalized,'\s+','','g')))));
   if v_dedupe is not null then return v_dedupe; end if;
   if not exists (select 1 from clara.clients where id=p_client and firm_id=c.firm) then
     raise exception 'client not in your firm' using errcode = 'CLR11';
   end if;
   insert into clara.client_identifiers(firm_id,client_id,kind,value_normalized,added_by)
-    values(c.firm,p_client,p_kind,lower(btrim(p_value_normalized)),c.actor) returning id into v_id;
+    values(c.firm,p_client,p_kind,lower(regexp_replace(p_value_normalized,'\s+','','g')),c.actor) returning id into v_id;
   perform clara._audit(c.firm,c.actor,null,null,'add_client_identifier',null,
     jsonb_build_object('client',p_client,'identifier',v_id,'kind',p_kind,'op_key',p_op_key));
   return clara._finish_op(c.firm,'add_client_identifier',p_op_key,jsonb_build_object('identifier_id',v_id));
@@ -1598,10 +1643,10 @@ begin
     where firm_id=p_firm and state <> 'refunded'
       and created_at >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc');
   if v_docs + 1 > v_docs_limit then
-    raise exception 'document daily limit reached (docs)' using errcode='CLR14';
+    raise exception 'document daily limit reached (docs)' using errcode='CLR18';
   end if;
   if v_pages + p_pages > v_pages_limit then
-    raise exception 'document daily limit reached (pages)' using errcode='CLR14';
+    raise exception 'document daily limit reached (pages)' using errcode='CLR18';
   end if;
   insert into clara.document_ingest_reservations(firm_id,intake_id,pages_reserved,lease_expires_at)
     values(p_firm,p_intake,p_pages,p_lease_expires) returning id into v_id;
@@ -1625,7 +1670,7 @@ begin
     from clara.document_ingest_reservations
     where firm_id=p_firm and id<>r.id and state<>'refunded'
       and created_at >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc');
-  if v_pages + p_pages > v_limit then raise exception 'document daily page limit reached' using errcode='CLR14'; end if;
+  if v_pages + p_pages > v_limit then raise exception 'document daily page limit reached' using errcode='CLR18'; end if;
   update clara.document_ingest_reservations set state='resized',pages_reserved=p_pages
     where id=r.id;
   return r.id;
@@ -1662,7 +1707,7 @@ begin
     into v_other from clara.document_ingest_reservations
     where firm_id=p_firm and id<>r.id and state<>'refunded'
       and created_at >= (date_trunc('day', now() at time zone 'utc') at time zone 'utc');
-  if v_other + p_pages > v_limit then raise exception 'actual pages exceed daily limit' using errcode='CLR14'; end if;
+  if v_other + p_pages > v_limit then raise exception 'actual pages exceed daily limit' using errcode='CLR18'; end if;
   update clara.document_ingest_reservations set state='settled',settled_pages=p_pages,
     pages_reserved=p_pages,settled_at=now() where id=r.id;
   return r.id;
@@ -1723,7 +1768,7 @@ begin
       into v_other from clara.document_ingest_reservations
       where firm_id=r.firm_id and id<>r.id and state<>'refunded'
         and created_at >= (date_trunc('day',now() at time zone 'utc') at time zone 'utc');
-    if v_other+p_actual_pages>v_limit then raise exception 'actual pages exceed daily limit' using errcode='CLR14'; end if;
+    if v_other+p_actual_pages>v_limit then raise exception 'actual pages exceed daily limit' using errcode='CLR18'; end if;
     update clara.document_ingest_reservations set state='settled',settled_pages=p_actual_pages,
       pages_reserved=p_actual_pages,settled_at=now() where id=r.id;
   end if;
@@ -1747,6 +1792,36 @@ begin
     jsonb_build_object('reservation_id',p_reservation,'state','refunded'));
 end $$;
 
+-- A bearer capability never outlives the uploader's firm membership. This helper
+-- commits the honest terminal state instead of raising (a raise would roll the
+-- failure/refund back). Capability writers call it after their non-oracular
+-- capability/state checks and before performing any transition.
+create function clara._expire_inactive_document_intake(p_intake uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare i record; v_key text; v_dedupe jsonb; v_receipt jsonb;
+begin
+  select * into i from clara.document_intakes where id=p_intake for update;
+  if not found then return null; end if;
+  if exists (select 1 from clara.firm_memberships m
+      where m.firm_id=i.firm_id and m.user_id=i.uploaded_by and m.status='active') then
+    return null;
+  end if;
+  if i.status in ('finalized','adopted','failed') then
+    return jsonb_build_object('intake_id',i.id,'status',i.status,'failure_code',i.failure_code);
+  end if;
+  v_key:='revoked-uploader:'||i.id::text;
+  v_dedupe:=clara._reserve_op(i.firm_id,'fail_document_intake',v_key,
+    clara._hash(jsonb_build_object('i',i.id,'failure','expired')));
+  if v_dedupe is not null then return v_dedupe; end if;
+  update clara.document_intakes set status='failed',failure_code='expired',
+    upload_lease_owner=null,lease_expires_at=null where id=i.id;
+  perform clara._refund_document_reservation(i.firm_id,i.id,'expired');
+  perform clara._audit(i.firm_id,i.uploaded_by,null,null,'fail_document_intake',null,
+    jsonb_build_object('intake',i.id,'failure_code','expired','reason','uploader-membership-inactive','op_key',v_key));
+  v_receipt:=jsonb_build_object('intake_id',i.id,'status','failed','failure_code','expired');
+  return clara._finish_op(i.firm_id,'fail_document_intake',v_key,v_receipt);
+end $$;
+
 create function clara.create_document_intake(p_uploaded_by uuid, p_origin text,
     p_chat_session uuid, p_filename text, p_mime text, p_declared_bytes bigint,
     p_token_hash text, p_expires_at timestamptz, p_op_key text) returns jsonb
@@ -1755,9 +1830,14 @@ declare v_firm uuid; v_dedupe jsonb; v_id uuid; v_res uuid; v_pages int;
 begin
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
   if p_origin='chat' then
-    select firm_id into v_firm from clara.chat_sessions where id=p_chat_session and created_by=p_uploaded_by;
+    select s.firm_id into v_firm from clara.chat_sessions s
+      join clara.firm_memberships m on m.firm_id=s.firm_id and m.user_id=p_uploaded_by
+        and m.status='active' and clara.role_rank(m.role)>=clara.role_rank('bookkeeper')
+      where s.id=p_chat_session and (s.created_by=p_uploaded_by or s.visibility='firm');
   else
-    select firm_id into v_firm from clara.firm_memberships where user_id=p_uploaded_by and status='active';
+    select m.firm_id into v_firm from clara.firm_memberships m
+      where m.user_id=p_uploaded_by and m.status='active'
+        and clara.role_rank(m.role)>=clara.role_rank('bookkeeper');
   end if;
   if v_firm is null then raise exception 'uploader not authorized for intake' using errcode='CLR11'; end if;
   v_dedupe := clara._reserve_op(v_firm,'create_document_intake',p_op_key,
@@ -1779,7 +1859,7 @@ end $$;
 create function clara.claim_document_intake_upload(p_intake uuid, p_token_hash text,
     p_lease_owner text, p_lease_seconds int, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare i record; v_dedupe jsonb;
+declare i record; v_dedupe jsonb; v_expired jsonb;
 begin
   select * into i from clara.document_intakes where id=p_intake for update;
   if not found or i.status<>'uploading' or i.expires_at<=now() or i.token_hash<>p_token_hash then
@@ -1787,6 +1867,8 @@ begin
   end if;
   if p_op_key is null or btrim(p_op_key)='' or p_lease_owner is null or btrim(p_lease_owner)=''
      or p_lease_seconds not between 1 and 900 then raise exception 'invalid upload lease request' using errcode='CLR10'; end if;
+  v_expired:=clara._expire_inactive_document_intake(p_intake);
+  if v_expired is not null then return v_expired; end if;
   v_dedupe:=clara._reserve_op(i.firm_id,'claim_document_intake_upload',p_op_key,
     clara._hash(jsonb_build_object('i',p_intake,'o',p_lease_owner,'s',p_lease_seconds)));
   if v_dedupe is not null then return v_dedupe; end if;
@@ -1802,7 +1884,7 @@ end $$;
 create function clara.mark_document_intake_received(p_intake uuid, p_token_hash text,
     p_lease_owner text, p_sha256 text, p_storage_key text, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare i record; v_dedupe jsonb;
+declare i record; v_dedupe jsonb; v_expired jsonb;
 begin
   select * into i from clara.document_intakes where id=p_intake for update;
   if not found or i.status<>'uploading' or i.expires_at<=now() or i.token_hash<>p_token_hash
@@ -1810,6 +1892,8 @@ begin
     raise exception 'intake receipt capability/lease is invalid' using errcode='CLR16';
   end if;
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  v_expired:=clara._expire_inactive_document_intake(p_intake);
+  if v_expired is not null then return v_expired; end if;
   v_dedupe:=clara._reserve_op(i.firm_id,'mark_document_intake_received',p_op_key,
     clara._hash(jsonb_build_object('i',p_intake,'sha',p_sha256,'key',p_storage_key)));
   if v_dedupe is not null then return v_dedupe; end if;
@@ -1821,11 +1905,13 @@ end $$;
 
 create function clara.begin_document_intake_verification(p_intake uuid, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare i record; v_dedupe jsonb;
+declare i record; v_dedupe jsonb; v_expired jsonb;
 begin
   select * into i from clara.document_intakes where id=p_intake for update;
   if not found or i.status<>'received' then raise exception 'intake is not received' using errcode='CLR16'; end if;
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  v_expired:=clara._expire_inactive_document_intake(p_intake);
+  if v_expired is not null then return v_expired; end if;
   v_dedupe:=clara._reserve_op(i.firm_id,'begin_document_intake_verification',p_op_key,clara._hash(jsonb_build_object('i',p_intake)));
   if v_dedupe is not null then return v_dedupe; end if;
   update clara.document_intakes set status='verifying' where id=p_intake;
@@ -1836,13 +1922,15 @@ end $$;
 create function clara.verify_document_intake(p_intake uuid, p_token_hash text,
     p_trusted_pages int, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare i record; v_dedupe jsonb; v_status text; v_doc uuid;
+declare i record; v_dedupe jsonb; v_status text; v_doc uuid; v_expired jsonb;
 begin
   select * into i from clara.document_intakes where id=p_intake for update;
   if not found or i.status<>'verifying' or i.expires_at<=now() or i.token_hash<>p_token_hash then
     raise exception 'intake verification capability/state is invalid' using errcode='CLR16';
   end if;
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  v_expired:=clara._expire_inactive_document_intake(p_intake);
+  if v_expired is not null then return v_expired; end if;
   v_dedupe:=clara._reserve_op(i.firm_id,'verify_document_intake',p_op_key,
     clara._hash(jsonb_build_object('i',p_intake,'pages',p_trusted_pages)));
   if v_dedupe is not null then return v_dedupe; end if;
@@ -1856,11 +1944,13 @@ end $$;
 
 create function clara.fail_document_intake(p_intake uuid, p_failure_code text, p_op_key text)
   returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
-declare i record; v_dedupe jsonb;
+declare i record; v_dedupe jsonb; v_expired jsonb;
 begin
   select * into i from clara.document_intakes where id=p_intake for update;
   if not found or i.status in ('finalized','adopted','failed') then raise exception 'intake is terminal or unknown' using errcode='CLR16'; end if;
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  v_expired:=clara._expire_inactive_document_intake(p_intake);
+  if v_expired is not null then return v_expired; end if;
   v_dedupe:=clara._reserve_op(i.firm_id,'fail_document_intake',p_op_key,
     clara._hash(jsonb_build_object('i',p_intake,'failure',p_failure_code)));
   if v_dedupe is not null then return v_dedupe; end if;
@@ -1892,17 +1982,28 @@ create function clara.finalize_document_intake(p_intake uuid, p_token_hash text 
 declare
   i record; d record; v_dedupe jsonb; v_doc uuid; v_task uuid; v_filing uuid;
   v_created boolean:=false; v_upgraded boolean:=false; v_filed boolean:=false; v_basis text;
+  v_expired jsonb;
 begin
   select * into i from clara.document_intakes where id=p_intake for update;
-  if not found or i.status not in ('verified','duplicate') or i.expires_at<=now()
-     or (p_token_hash is not null and i.token_hash<>p_token_hash) then
+  if not found then
+    raise exception 'intake finalize capability/state is invalid' using errcode='CLR16';
+  end if;
+  if i.expires_at<=now() or (p_token_hash is not null and i.token_hash<>p_token_hash) then
     raise exception 'intake finalize capability/state is invalid' using errcode='CLR16';
   end if;
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  -- Reserve/replay BEFORE terminal-state validation. The fixed intake op_key makes
+  -- a response-loss retry return the original committed receipt.
   v_dedupe:=clara._reserve_op(i.firm_id,'finalize_document_intake',p_op_key,
-    clara._hash(jsonb_build_object('i',p_intake,'engine',p_engine_id,'config',p_engine_config,
-      'version',p_version_n,'lane',p_lane,'client',p_client,'resolution',p_resolution)));
+    clara._hash(jsonb_build_object('i',p_intake)));
   if v_dedupe is not null then return v_dedupe; end if;
+  if i.status not in ('verified','duplicate') then
+    raise exception 'intake finalize capability/state is invalid' using errcode='CLR16';
+  end if;
+  v_expired:=clara._expire_inactive_document_intake(p_intake);
+  if v_expired is not null then
+    return clara._finish_op(i.firm_id,'finalize_document_intake',p_op_key,v_expired);
+  end if;
 
   select * into d from clara.documents where firm_id=i.firm_id and sha256=i.sha256 for update;
   if i.status='verified' and not found then
@@ -2047,10 +2148,11 @@ create function clara.requeue_stranded_document_task(p_task uuid, p_op_key text)
 declare t record; v_dedupe jsonb;
 begin
   select * into t from clara.document_processing_tasks where id=p_task for update;
-  if not found or t.status<>'running' then raise exception 'task is not stranded-running' using errcode='CLR16'; end if;
+  if not found then raise exception 'task is not stranded-running' using errcode='CLR16'; end if;
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
   v_dedupe:=clara._reserve_op(t.firm_id,'requeue_stranded_document_task',p_op_key,clara._hash(jsonb_build_object('task',p_task)));
   if v_dedupe is not null then return v_dedupe; end if;
+  if t.status<>'running' then raise exception 'task is not stranded-running' using errcode='CLR16'; end if;
   update clara.document_processing_tasks set status='queued',workflow_run_id=null,
     started_at=null,vendor_op_ref=null where id=p_task;
   update clara.documents set extraction_status='pending' where id=t.document_id;
@@ -2065,13 +2167,14 @@ create function clara.persist_document_extraction(p_task uuid, p_status text, p_
 declare t record; v_dedupe jsonb; v_ext uuid; v_event text; elem jsonb;
 begin
   select * into t from clara.document_processing_tasks where id=p_task for update;
-  if not found or t.status<>'running' then raise exception 'processing task is not running' using errcode='CLR16'; end if;
-  if p_status not in ('done','failed') then raise exception 'extraction status must be done/failed' using errcode='CLR10'; end if;
+  if not found then raise exception 'processing task is not running' using errcode='CLR16'; end if;
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
   v_dedupe:=clara._reserve_op(t.firm_id,'persist_document_extraction',p_op_key,
     clara._hash(jsonb_build_object('task',p_task,'status',p_status,'pages',p_page_count,
       'envelope',p_envelope,'regions',p_regions,'error',p_error_code,'vendor',p_vendor_op_ref)));
   if v_dedupe is not null then return v_dedupe; end if;
+  if t.status<>'running' then raise exception 'processing task is not running' using errcode='CLR16'; end if;
+  if p_status not in ('done','failed') then raise exception 'extraction status must be done/failed' using errcode='CLR10'; end if;
   if t.lane='none' then raise exception 'store-only tasks do not create extractions' using errcode='CLR16'; end if;
   insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
       version_n,status,page_count,envelope)
@@ -2111,10 +2214,11 @@ create function clara.complete_stored_document_task(p_task uuid, p_op_key text) 
 declare t record; v_dedupe jsonb;
 begin
   select * into t from clara.document_processing_tasks where id=p_task for update;
-  if not found or t.status<>'running' or t.lane<>'none' then raise exception 'task is not running store-only' using errcode='CLR16'; end if;
+  if not found then raise exception 'task is not running store-only' using errcode='CLR16'; end if;
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
   v_dedupe:=clara._reserve_op(t.firm_id,'complete_stored_document_task',p_op_key,clara._hash(jsonb_build_object('task',p_task)));
   if v_dedupe is not null then return v_dedupe; end if;
+  if t.status<>'running' or t.lane<>'none' then raise exception 'task is not running store-only' using errcode='CLR16'; end if;
   update clara.document_processing_tasks set status='done',finished_at=now() where id=p_task;
   update clara.documents set extraction_status='stored_unparsed' where id=t.document_id;
   perform clara._settle_document_reservation(t.firm_id,p_task,0);
@@ -2160,7 +2264,9 @@ begin
   insert into clara.attribution_attempts(firm_id,document_id,matcher_version,input_fingerprint,
       outcome,conflict_reason)
     values(v_firm,p_document,p_matcher_version,p_input_fingerprint,
-      case when jsonb_array_length(coalesce(p_candidates,'[]'::jsonb))>0 then 'candidate' else 'abstained' end,
+      case when p_conflict_reason is not null then 'abstained'
+           when jsonb_array_length(coalesce(p_candidates,'[]'::jsonb))>0 then 'candidate'
+           else 'abstained' end,
       p_conflict_reason)
     on conflict(document_id,matcher_version,input_fingerprint) do nothing returning id into v_attempt;
   if v_attempt is null then
@@ -2356,6 +2462,22 @@ begin
     'subledger_model','not_built');
 end $$;
 
+-- Hash the exact state a pending reversal draft must have to be safely adopted.
+-- The envelope intentionally matches _entry_state_hash; only the expected lines
+-- are derived from the original with debit/credit swapped.
+create function clara._expected_reversal_state_hash(p_draft uuid, p_original uuid) returns text
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select encode(sha256(convert_to(jsonb_build_object(
+    'entry',jsonb_build_object('id',d.id,'status',d.status,'revision',d.revision_token,
+      'reversed_by',d.reversed_by,'filing_id',d.filing_id),
+    'lines',(select coalesce(jsonb_agg(jsonb_build_object('line_no',jl.line_no,
+      'account_code',jl.account_code,'debit_cents',jl.credit_cents,
+      'credit_cents',jl.debit_cents,'description',jl.description) order by jl.line_no),'[]'::jsonb)
+      from clara.journal_lines jl where jl.entry_id=o.id))::text,'UTF8')),'hex')
+  from clara.journal_entries d join clara.journal_entries o on o.id=p_original
+  where d.id=p_draft and d.status='draft' and d.reversal_of=o.id;
+$$;
+
 create function clara.propose_wrong_client_correction(p_document uuid, p_from_client uuid,
     p_to_client uuid, p_reason text, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -2369,6 +2491,12 @@ begin
     clara._hash(jsonb_build_object('document',p_document,'from',p_from_client,'to',p_to_client,'reason',p_reason)));
   if v_dedupe is not null then return v_dedupe; end if;
   v_preview:=clara.preview_wrong_client_correction(p_document,p_from_client,p_to_client);
+  if not exists (select 1 from clara.client_resolutions r
+      where r.firm_id=c.firm and r.client_id=p_to_client and r.subject_kind='document'
+        and r.subject_id=p_document and r.method in ('human','rule') and r.confidence>=0.95
+        and r.superseded_at is null) then
+    raise exception 'destination client attribution is not authoritative' using errcode='CLR01';
+  end if;
   v_items:=v_preview->'items'; v_books:=(v_preview->>'books_version')::bigint;
   v_hash:=encode(sha256(convert_to(jsonb_build_object('document',p_document,'from',p_from_client,
     'to',p_to_client,'books_version',v_books,'items',v_items)::text,'UTF8')),'hex');
@@ -2390,8 +2518,9 @@ end $$;
 create function clara.approve_wrong_client_correction(p_correction uuid, p_plan_hash text,
     p_attestation text, p_op_key text) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare c record; v_dedupe jsonb; x record; it record; o record; v_current bigint;
+declare c record; v_dedupe jsonb; x record; it record; o record; pending record; v_current bigint;
   v_mirror uuid; v_to_filing uuid; v_from_filing uuid; v_resolution uuid; v_solo text;
+  v_adopted boolean; v_recode_notification uuid;
 begin
   c:=clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
@@ -2439,20 +2568,37 @@ begin
   for it in select * from clara.filing_correction_items where correction_id=x.id order by entry_id loop
     select * into o from clara.journal_entries where id=it.entry_id;
     if it.action='reverse' then
-      insert into clara.journal_entries(client_id,status,posting_date,memo,origin,resolution_id,
-          is_opening_balance,is_year_end,tax_affecting,maker_actor,last_human_editor,
-          reversal_of,reversal_reason)
-        values(o.client_id,'draft',current_date,'Correction reversal: '||x.reason,'reversal',o.resolution_id,
-          o.is_opening_balance,o.is_year_end,o.tax_affecting,c.actor,c.actor,o.id,x.reason)
-        returning id into v_mirror;
-      insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description)
-        select v_mirror,line_no,account_code,credit_cents,debit_cents,description
-        from clara.journal_lines where entry_id=o.id order by line_no;
+      v_mirror:=null; v_adopted:=false;
+      -- F-13: adopt one exact pending mirror; every mismatch (and any duplicate
+      -- exact mirror after the first) is explicit withdrawn history.
+      for pending in select * from clara.journal_entries
+          where reversal_of=o.id and status='draft' order by id for update loop
+        if v_mirror is null
+           and clara._entry_state_hash(pending.id)=clara._expected_reversal_state_hash(pending.id,o.id) then
+          v_mirror:=pending.id; v_adopted:=true;
+        else
+          update clara.journal_entries set status='withdrawn',withdrawn_by=c.actor,
+            withdrawn_at=now(),withdrawal_reason='superseded-by-correction',updated_at=now()
+            where id=pending.id;
+        end if;
+      end loop;
+      if v_mirror is null then
+        insert into clara.journal_entries(client_id,status,posting_date,memo,origin,resolution_id,
+            is_opening_balance,is_year_end,tax_affecting,maker_actor,last_human_editor,
+            reversal_of,reversal_reason)
+          values(o.client_id,'draft',current_date,'Correction reversal: '||x.reason,'reversal',o.resolution_id,
+            o.is_opening_balance,o.is_year_end,o.tax_affecting,c.actor,c.actor,o.id,x.reason)
+          returning id into v_mirror;
+        insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description)
+          select v_mirror,line_no,account_code,credit_cents,debit_cents,description
+          from clara.journal_lines where entry_id=o.id order by line_no;
+      end if;
       perform clara._assert_balanced(v_mirror);
       update clara.journal_entries set status='approved',checker_actor=c.actor,approved_at=now(),
         self_approval_attestation=v_solo,updated_at=now() where id=v_mirror;
       update clara.journal_entries set reversed_by=v_mirror,reversal_reason=x.reason,updated_at=now() where id=o.id;
-      update clara.filing_correction_items set reversal_id=v_mirror,outcome='reversed' where id=it.id;
+      update clara.filing_correction_items set reversal_id=v_mirror,outcome='reversed',
+        adopted_reversal=v_adopted where id=it.id;
     elsif it.action='withdraw_draft' then
       update clara.journal_entries set status='withdrawn',withdrawn_by=c.actor,withdrawn_at=now(),
         withdrawal_reason=x.reason,updated_at=now() where id=o.id;
@@ -2472,6 +2618,14 @@ begin
       returning id into v_to_filing;
   end if;
   perform clara._recompute_document_retention(x.document_id);
+  -- AB-9 stopgap: Slice 5 has no actionable coding-task carrier. Emit one
+  -- durable firm-visible notification now; Slice 6 replaces this stopgap with
+  -- the coding-floor task while preserving this correction linkage.
+  insert into clara.notifications(firm_id,client_id,kind,payload,created_by)
+    values(c.firm,x.to_client,'document_recode_required',jsonb_build_object(
+      'correction_id',x.id,'document_id',x.document_id,'to_client',x.to_client,
+      'work_kind','recode_document','status','pending','carrier','slice6-coding-floor'),c.actor)
+    returning id into v_recode_notification;
   update clara.filing_corrections set status='completed',checker=c.actor,attestation=v_solo,
     approved_at=now(),completed_at=now() where id=x.id;
   perform clara._audit(c.firm,c.actor,null,null,'approve_wrong_client_correction',null,
@@ -2481,8 +2635,10 @@ begin
   -- Domain events are the transaction tail, after every book/filing mutation + audit.
   for it in select * from clara.filing_correction_items where correction_id=x.id order by entry_id loop
     if it.outcome='reversed' then
-      perform clara._append_event(c.firm,'entry.drafted',x.from_client,c.actor,null,null,
-        it.reversal_id,null,null,'{}'::jsonb);
+      if not it.adopted_reversal then
+        perform clara._append_event(c.firm,'entry.drafted',x.from_client,c.actor,null,null,
+          it.reversal_id,null,null,'{}'::jsonb);
+      end if;
       perform clara._append_event(c.firm,'entry.approved',x.from_client,c.actor,null,null,
         it.reversal_id,null,null,'{}'::jsonb);
       perform clara._append_event(c.firm,'entry.reversed',x.from_client,c.actor,null,null,
@@ -2495,6 +2651,8 @@ begin
     null,x.document_id,v_resolution,jsonb_build_object('filing_id',v_to_filing,'correction_id',x.id));
   perform clara._append_event(c.firm,'document.correction_applied',null,c.actor,null,null,
     null,x.document_id,null,jsonb_build_object('correction_id',x.id));
+  perform clara._append_event(c.firm,'notification.recorded',x.to_client,c.actor,null,null,
+    null,null,null,jsonb_build_object('notification_id',v_recode_notification,'correction_id',x.id));
   return clara._finish_op(c.firm,'approve_wrong_client_correction',p_op_key,
     jsonb_build_object('correction_id',x.id,'status','completed','from_filing_id',v_from_filing,
       'to_filing_id',v_to_filing));

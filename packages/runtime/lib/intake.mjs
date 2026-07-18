@@ -18,6 +18,7 @@ import {
 } from "./spool.mjs";
 import { downloadCanonical, putCanonical, StorageError, verifyCanonical } from "./storage.mjs";
 import { parseStructured } from "./structured.mjs";
+import { processDocumentTaskBehavior } from "../workflows/documentIngest.behavior.mjs";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const CAPABILITY_TTL_MS = 15 * 60_000;
@@ -124,6 +125,31 @@ async function requireCapabilityHash(intakeId, expectedHash) {
   return meta;
 }
 
+function requireContinuableIntakeReceipt(value) {
+  if (value?.status === "failed") throw new IntakeError(404, "not_found", "not found");
+  return value;
+}
+
+async function replayFinalizationWithoutSidecar(withRuntime, intakeId, token) {
+  if (!token) return null;
+  const hash = tokenHash(token);
+  return withRuntime(async (client) => {
+    const durable = await client.query(
+      `select op_key from clara.document_intakes
+        where id=$1 and token_hash=$2 and expires_at>now()
+          and status in ('finalized','adopted')`,
+      [intakeId, hash],
+    );
+    const fixedOp = durable.rows[0]?.op_key;
+    if (!fixedOp) return null;
+    return callWriter(
+      client,
+      "select clara.finalize_document_intake(p_intake=>$1,p_token_hash=>$2,p_op_key=>$3) as receipt",
+      [intakeId, hash, fixedOp],
+    );
+  });
+}
+
 function laneSnapshot(format) {
   if (["xlsx", "docx", "csv", "tsv"].includes(format)) {
     return { lane: "structured_parse", ...STRUCTURED_ENGINE_SNAPSHOT };
@@ -135,13 +161,6 @@ function laneSnapshot(format) {
 function failureCode(err) {
   const code = String(err?.code || "internal");
   return ["too_large", "bad_type", "limit", "checksum_mismatch", "storage_error", "expired", "malware_detected", "quarantined"].includes(code)
-    ? code
-    : "internal";
-}
-
-function processingFailureCode(err) {
-  const code = String(err?.code || "internal");
-  return ["engine_error", "timeout", "engine_lost", "storage_error", "corrupt", "encrypted", "bad_type", "limit"].includes(code)
     ? code
     : "internal";
 }
@@ -201,7 +220,7 @@ export async function uploadDocumentBytes({ withRuntime, intakeId, token, readab
     releaseIngress = tryEnterIngress(meta.uploadedBy);
     if (!releaseIngress) throw new IntakeError(429, "limit", "intake concurrency limit reached");
     const leaseOwner = `${process.pid}:${randomUUID()}`;
-    await withRuntime((client) =>
+    const claimed = await withRuntime((client) =>
       callWriter(client, "select clara.claim_document_intake_upload($1,$2,$3,$4,$5) as receipt", [
         intakeId,
         meta.tokenHash,
@@ -210,6 +229,7 @@ export async function uploadDocumentBytes({ withRuntime, intakeId, token, readab
         opKey("doc-intake-claim"),
       ]),
     );
+    requireContinuableIntakeReceipt(claimed);
     await writeIntakeMeta(intakeId, { ...meta, leaseOwner, status: "receiving", updatedAt: new Date().toISOString() });
     const stored = await spoolRequest(readable, { intakeId, declaredBytes: meta.declaredBytes, maxBytes: MAX_BYTES });
     await writeIntakeMeta(intakeId, {
@@ -251,7 +271,13 @@ export async function finalizeDocumentIntake(options) {
   let meta;
   let canonicalReached = false;
   try {
-    meta = expectedHash ? await requireCapabilityHash(intakeId, expectedHash) : await requireCapability(intakeId, token);
+    try {
+      meta = expectedHash ? await requireCapabilityHash(intakeId, expectedHash) : await requireCapability(intakeId, token);
+    } catch (err) {
+      const replayed = expectedHash ? null : await replayFinalizationWithoutSidecar(withRuntime, intakeId, token).catch(() => null);
+      if (replayed) return replayed;
+      throw err;
+    }
     if (!["spooled", "canonical", "received", "verifying", "verified", "duplicate"].includes(meta.status)) {
       throw new IntakeError(409, "intake_not_spooled", "upload bytes before finalizing");
     }
@@ -276,7 +302,7 @@ export async function finalizeDocumentIntake(options) {
     const leaseOwner = meta.leaseOwner || `${process.pid}:${randomUUID()}`;
     if (meta.status === "canonical") {
       try {
-        await withRuntime((client) =>
+        const claimed = await withRuntime((client) =>
           callWriter(client, "select clara.claim_document_intake_upload($1,$2,$3,$4,$5) as receipt", [
             intakeId,
             meta.tokenHash,
@@ -285,7 +311,8 @@ export async function finalizeDocumentIntake(options) {
             opKey("doc-intake-reclaim"),
           ]),
         );
-        await withRuntime((client) =>
+        requireContinuableIntakeReceipt(claimed);
+        const received = await withRuntime((client) =>
           callWriter(client, "select clara.mark_document_intake_received($1,$2,$3,$4,$5,$6) as receipt", [
             intakeId,
             meta.tokenHash,
@@ -295,6 +322,7 @@ export async function finalizeDocumentIntake(options) {
             opKey("doc-intake-received"),
           ]),
         );
+        requireContinuableIntakeReceipt(received);
       } catch (err) {
         if (err?.code !== "CLR16") throw err;
       }
@@ -303,12 +331,13 @@ export async function finalizeDocumentIntake(options) {
     }
     if (meta.status === "received") {
       try {
-        await withRuntime((client) =>
+        const verifying = await withRuntime((client) =>
           callWriter(client, "select clara.begin_document_intake_verification($1,$2) as receipt", [
             intakeId,
             opKey("doc-intake-verifying"),
           ]),
         );
+        requireContinuableIntakeReceipt(verifying);
       } catch (err) {
         if (err?.code !== "CLR16") throw err;
       }
@@ -326,6 +355,7 @@ export async function finalizeDocumentIntake(options) {
             opKey("doc-intake-verified"),
           ]),
         );
+        requireContinuableIntakeReceipt(verified);
       } catch (err) {
         if (err?.code !== "CLR16") throw err;
       }
@@ -344,9 +374,10 @@ export async function finalizeDocumentIntake(options) {
         snapshot.lane,
         null,
         null,
-        opKey("doc-intake-finalize"),
+        meta.beginOp,
       ]),
     );
+    requireContinuableIntakeReceipt(finalized);
 
     const needsStart = finalized.status === "finalized" || finalized.upgraded === true;
     if (needsStart && finalized.task_id) {
@@ -444,65 +475,20 @@ export async function noteDocumentTaskClaim(taskId, status, runId) {
 }
 
 export async function processDocumentTask(withRuntime, taskId) {
-  const task = await readTaskMeta(taskId);
-  if (!task) throw Object.assign(new Error(`document task ${taskId} has no durable runtime metadata`), { code: "internal" });
-  if (task.lane === "none") {
-    await withRuntime((client) =>
-      callWriter(client, "select clara.complete_stored_document_task($1,$2) as receipt", [taskId, opKey("doc-store-complete", taskId)]),
-    );
-    await removeTaskMeta(taskId);
-    return { taskId, status: "done", lane: "none" };
-  }
-
-  const tempPath = join(spoolConfig().dir, `task-${taskId}-${randomUUID()}.bin`);
-  try {
-    await downloadCanonical(task.storageKey, tempPath, task.sha256);
-    const result = task.lane === "ocr"
-      ? await analyzeDocument(tempPath, task.mime, task)
-      : await parseStructured(tempPath, task.format, task);
-    await withRuntime((client) =>
-      callWriter(client, "select clara.persist_document_extraction($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8) as receipt", [
-        taskId,
-        "done",
-        result.pageCount,
-        JSON.stringify(result.envelope),
-        JSON.stringify(result.regions),
-        null,
-        result.vendorOpRef ?? null,
-        opKey("doc-extract-done", taskId),
-      ]),
-    );
-    await removeTaskMeta(taskId);
-    return { taskId, status: "done", lane: task.lane };
-  } catch (err) {
-    const code = processingFailureCode(err);
-    try {
-      await withRuntime((client) =>
-        callWriter(client, "select clara.persist_document_extraction($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8) as receipt", [
-          taskId,
-          "failed",
-          0,
-          "{}",
-          "[]",
-          code,
-          null,
-          opKey("doc-extract-failed", taskId),
-        ]),
-      );
-      await removeTaskMeta(taskId);
-    } catch {
-      await updateTask(taskId, { status: "running", lastError: code }).catch(() => {});
-    }
-    throw err;
-  } finally {
-    await rm(tempPath, { force: true }).catch(() => {});
-  }
+  return processDocumentTaskBehavior(makeDocumentServices(), withRuntime, taskId);
 }
 
-export function makeDocumentServices(withRuntime) {
+export function makeDocumentServices() {
   return Object.freeze({
     noteClaim: noteDocumentTaskClaim,
-    process: (taskId) => processDocumentTask(withRuntime, taskId),
+    readTaskMeta,
+    removeTaskMeta,
+    taskTempPath: (taskId) => join(spoolConfig().dir, `task-${taskId}-${randomUUID()}.bin`),
+    removeTempFile: (path) => rm(path, { force: true }),
+    downloadCanonical,
+    analyzeDocument,
+    parseStructured,
+    noteTaskFailure: (taskId, code) => updateTask(taskId, { status: "running", lastError: code }),
   });
 }
 

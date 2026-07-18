@@ -12,6 +12,7 @@ import {
   uploadDocumentBytes,
 } from "../lib/intake.mjs";
 import { reconcileDocumentTasks } from "../lib/reconciler.mjs";
+import { normalizeAzureLayout } from "../lib/egress.mjs";
 import { readTaskMeta, writeTaskMeta } from "../lib/spool.mjs";
 
 const READY = await rig.documentPipelineReady();
@@ -62,7 +63,7 @@ async function admit(owner, firm, bytes, filename, mime) {
 
 test("enqueue-crash sidecar is re-enqueued, then OCR parks/releases/claims and persists", { skip }, async () => {
   const { owner, firm } = await rig.buildFirm("workflow-ocr");
-  const bytes = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\n%%EOF\n");
+  const bytes = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF\n");
   const receipt = await admit(owner, firm, bytes, "workflow.pdf", "application/pdf");
   const meta = await readTaskMeta(receipt.task_id);
   await writeTaskMeta(receipt.task_id, { ...meta, createdAt: new Date(Date.now() - 60_000).toISOString() });
@@ -91,17 +92,40 @@ test("enqueue-crash sidecar is re-enqueued, then OCR parks/releases/claims and p
     (err) => err.code === "CLR16",
   );
 
-  globalThis.__claraAzureForTest = async () => ({
+  const azurePayload = {
     operationId: "fixture-op",
     analyzeResult: { content: "MYR 123.45", pages: [{ pageNumber: 1, lines: [{ content: "MYR 123.45", polygon: [0, 0, 1, 0, 1, 1, 0, 1] }] }] },
-  });
+  };
+  globalThis.__claraAzureForTest = async () => azurePayload;
   const current = await readTaskMeta(receipt.task_id);
+  const normalized = normalizeAzureLayout(azurePayload, current);
   await writeTaskMeta(receipt.task_id, { ...current, status: "running", runId: "ocr-run" });
   await processDocumentTask(withRuntime, receipt.task_id);
   assert.equal((await rig.readDocumentTask(receipt.task_id)).status, "done");
   const extraction = await rig.rootQuery("select status,page_count from clara.document_extractions where document_id=$1", [receipt.document_id]);
   assert.equal(extraction.rows[0].status, "done");
   assert.equal(extraction.rows[0].page_count, 1);
+
+  const eventCount = async () => Number((await rig.rootQuery(
+    "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.extraction_completed'",
+    [receipt.document_id],
+  )).rows[0].n);
+  const beforeReplay = await eventCount();
+  const replay = await rig.asRuntime((client) => client.query(
+    "select clara.persist_document_extraction($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8) as receipt",
+    [
+      receipt.task_id,
+      "done",
+      normalized.pageCount,
+      JSON.stringify(normalized.envelope),
+      JSON.stringify(normalized.regions),
+      null,
+      normalized.vendorOpRef,
+      `doc-extract-done:${receipt.task_id}`,
+    ],
+  ));
+  assert.equal(replay.rows[0].receipt.status, "done", "terminal-state replay returns the stored receipt");
+  assert.equal(await eventCount(), beforeReplay, "double-persist emits no duplicate extraction event");
 });
 
 test("store-only XML lane completes without vendor egress or extraction rows", { skip }, async () => {

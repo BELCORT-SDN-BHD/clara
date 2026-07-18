@@ -207,12 +207,29 @@ export async function detectDocument(path, { originalFilename, prefix: suppliedP
 
 export async function countPdfPages(path) {
   let count = 0;
+  let objectStarts = 0;
+  let objectEnds = 0;
+  let hasStartXref = false;
   let carry = "";
+  let tail = "";
   for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+    const overlap = carry.length;
     const text = carry + chunk.toString("latin1");
     if (/\/Encrypt\b/.test(text)) throw new IntakeScanError("quarantined", "encrypted PDF documents are forbidden");
-    count += (text.match(/\/Type\s*\/Page\b/g) || []).length;
-    carry = text.slice(-32);
+    const countFresh = (pattern) => [...text.matchAll(pattern)]
+      .filter((match) => Number(match.index) + match[0].length > overlap).length;
+    count += countFresh(/\/Type\s*\/Page\b/g);
+    objectStarts += countFresh(/\b\d+\s+\d+\s+obj\b/g);
+    objectEnds += countFresh(/\bendobj\b/g);
+    hasStartXref ||= /\bstartxref\b/.test(text);
+    carry = text.slice(-64);
+    tail = (tail + chunk.toString("latin1")).slice(-4096);
+  }
+  // This is a pre-storage structural plausibility gate, not a full PDF parser.
+  // The vendor still performs complete parse/render validation after custody is
+  // sealed, but header-only/corrupt junk must never become canonical evidence.
+  if (!hasStartXref || objectStarts < 1 || objectEnds < 1 || !/%%EOF[\s\0]*$/.test(tail)) {
+    throw new IntakeScanError("bad_type", "PDF structure is incomplete or corrupt", 415);
   }
   return Math.max(1, count);
 }

@@ -7,6 +7,7 @@ import { Readable } from "node:stream";
 import { tmpdir } from "node:os";
 import * as rig from "./rig.mjs";
 import { beginDocumentIntake, finalizeDocumentIntake, recoverPendingDocumentIntakes, uploadDocumentBytes } from "../lib/intake.mjs";
+import { reconcileDocumentIntakes } from "../lib/reconciler.mjs";
 import { localObjectExists } from "../lib/storage.mjs";
 import { readIntakeMeta, writeIntakeMeta } from "../lib/spool.mjs";
 
@@ -63,7 +64,7 @@ async function transport(owner, firm, bytes, { filename = "fixture.pdf", mime = 
 
 test("transport-true bytes -> spool -> hash -> immutable object -> finalizer -> queued task", { skip }, async () => {
   const { owner, firm } = await rig.buildFirm("intake-transport");
-  const bytes = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\n%%EOF\n");
+  const bytes = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF\n");
   const starts = [];
   const { begun, finalized } = await transport(owner, firm, bytes, {
     enqueue: async (taskId) => (starts.push(taskId), { runId: "fake-run" }),
@@ -82,7 +83,7 @@ test("transport-true bytes -> spool -> hash -> immutable object -> finalizer -> 
 
 test("same-firm duplicate adopts one document/task and does not enqueue twice", { skip }, async () => {
   const { owner, firm } = await rig.buildFirm("intake-dupe");
-  const bytes = Buffer.from("%PDF-1.7\n2 0 obj << /Type /Page >> endobj\n%%EOF\n");
+  const bytes = Buffer.from("%PDF-1.7\n2 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF\n");
   let starts = 0;
   const enqueue = async () => (starts += 1, { runId: `fake-${starts}` });
   const first = await transport(owner, firm, bytes, { enqueue });
@@ -94,9 +95,23 @@ test("same-firm duplicate adopts one document/task and does not enqueue twice", 
   assert.equal(starts, 1);
 });
 
+test("finalize response-loss retry replays the original receipt after its sidecar is gone", { skip }, async () => {
+  const { owner, firm } = await rig.buildFirm("intake-finalize-replay");
+  const bytes = Buffer.from("%PDF-1.7\n7 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF\n");
+  const first = await transport(owner, firm, bytes);
+  assert.equal(await readIntakeMeta(first.begun.intake_id), null, "successful finalize removes the sidecar");
+  const replay = await finalizeDocumentIntake({
+    withRuntime,
+    intakeId: first.begun.intake_id,
+    token: first.begun.upload_token,
+    enqueue: async () => { throw new Error("a receipt replay must not enqueue"); },
+  });
+  assert.deepEqual(replay, first.finalized);
+});
+
 test("malware and entity-expansion inputs fail before canonical Storage", { skip }, async () => {
   const { owner, firm } = await rig.buildFirm("intake-quarantine");
-  const eicar = Buffer.from("%PDF-1.7\nX5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*\n");
+  const eicar = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\nX5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*\nstartxref\n0\n%%EOF\n");
   const begun = await rig.asRuntime((client) =>
     beginDocumentIntake(client, { sub: owner, firmId: firm }, {
       filename: "bad.pdf", mime: "application/pdf", declared_bytes: eicar.length, origin: "documents_tab",
@@ -161,6 +176,26 @@ test("wrong and unknown capability tokens are indistinguishable", { skip }, asyn
   }
 });
 
+test("corrupt header-only PDF fails pre-finalize and never reaches canonical Storage", { skip }, async () => {
+  const { owner, firm } = await rig.buildFirm("intake-corrupt-pdf");
+  const bytes = Buffer.from("%PDF-1.7\nheader-only-junk");
+  const begun = await rig.asRuntime((client) =>
+    beginDocumentIntake(client, { sub: owner, firmId: firm }, {
+      filename: "corrupt.pdf", mime: "application/pdf", declared_bytes: bytes.length, origin: "documents_tab",
+    }),
+  );
+  await uploadDocumentBytes({ withRuntime, intakeId: begun.intake_id, token: begun.upload_token, readable: Readable.from([bytes]) });
+  await assert.rejects(
+    finalizeDocumentIntake({ withRuntime, intakeId: begun.intake_id, token: begun.upload_token, enqueue: async () => ({}) }),
+    (err) => err.code === "bad_type",
+  );
+  const sha = createHash("sha256").update(bytes).digest("hex");
+  const intake = await rig.readDocumentIntake(begun.intake_id);
+  assert.equal(intake.status, "failed");
+  assert.equal(intake.failure_code, "bad_type");
+  assert.equal(await localObjectExists(`firms/${firm}/docs/${sha}.pdf`), false);
+});
+
 test("reconciler expires abandoned sidecars through the DB writer before unlink", { skip }, async () => {
   const { owner, firm } = await rig.buildFirm("intake-expiry");
   const begun = await rig.asRuntime((client) =>
@@ -176,4 +211,26 @@ test("reconciler expires abandoned sidecars through the DB writer before unlink"
   assert.equal(row.status, "failed");
   assert.equal(row.failure_code, "expired");
   assert.equal(await readIntakeMeta(begun.intake_id), null);
+});
+
+test("DB-first reconciler expires an intake and refunds its reservation without a sidecar", { skip }, async () => {
+  const { owner, firm } = await rig.buildFirm("intake-db-first-expiry");
+  const op = `db-only-expired:${randomUUID()}`;
+  const made = await rig.asRuntime((client) => client.query(
+    "select clara.create_document_intake($1,'documents_tab',null,$2,$3,$4,$5,$6,$7) as receipt",
+    [owner, "db-only.pdf", "application/pdf", 128, "c".repeat(64), new Date(Date.now() - 60_000).toISOString(), op],
+  ));
+  const intakeId = made.rows[0].receipt.intake_id;
+  assert.equal(await readIntakeMeta(intakeId), null, "the DB-only crash fixture has no sidecar");
+  const swept = await rig.asRuntime((client) => reconcileDocumentIntakes(client, { onlyFirm: firm }));
+  assert.equal(swept.documentIntakesExpired, 1);
+  const intake = await rig.readDocumentIntake(intakeId);
+  assert.equal(intake.status, "failed");
+  assert.equal(intake.failure_code, "expired");
+  const reservation = await rig.rootQuery(
+    "select state,refund_reason from clara.document_ingest_reservations where intake_id=$1",
+    [intakeId],
+  );
+  assert.equal(reservation.rows[0].state, "refunded");
+  assert.equal(reservation.rows[0].refund_reason, "expired");
 });

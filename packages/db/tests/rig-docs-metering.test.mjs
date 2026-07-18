@@ -26,6 +26,7 @@ import {
   printLaneNotes,
   noteLane,
   seedIntake,
+  finalizeIntake,
   setDocLimits,
   reservationFn,
   callFnAdaptive,
@@ -161,23 +162,37 @@ test("§6 reservation storm: at pages/day−k two concurrent reserves serialize 
   assert.ok(total <= 2, `admitted reservations never overshoot pages/day (sum=${total} ≤ 2)`);
 });
 
-test("§6 adopted duplicate shares ONE charge (the near-limit duplicate consequence, §8)", async (t) => {
+test("§6 adopted duplicate shares ONE charge (the near-limit duplicate consequence, §8): the duplicate's reservation is REFUNDED at adoption and exactly ONE physical document's pages survive as a live charge", async (t) => {
   if (unready(t)) return;
-  const { users, clients } = world;
-  const firm = await firmOf(clients.A1);
   const fn = await reservationFn("reserve");
   if (!fn) { noteLane("adopted-charge test skipped (reserve writer unresolved)"); return; }
+  // A FRESH firm so the charge accounting is isolated from the shared world's reservations.
+  const fresh = await seedFreshFirm(`s5adopt_${Date.now().toString(36)}`);
+  const firm = fresh.firm;
   await setDocLimits(firm, { docsPerDay: 100, pagesPerDay: 1000, ocrConcurrency: 2 });
   const digest = sha(randomUUID());
-  const iA = await seedIntake({ firm, uploadedBy: users.alice, status: "verifying", sha256: digest });
-  const iB = await seedIntake({ firm, uploadedBy: users.alice, status: "verifying", sha256: digest });
+  const key = `firms/${firm}/docs/${digest}.pdf`;
+
+  // Canonical ingest: reserve → finalize (creates the document + links the charge to its task).
+  const iA = await seedIntake({ firm, uploadedBy: fresh.owner, status: "verified", sha256: digest, storageKey: key });
   await reserve(firm, iA, 1);
+  await finalizeIntake({ intake: iA });
+
+  // A second same-sha intake: reserve → finalize → ADOPTED (folds onto the canonical ingest).
+  const iB = await seedIntake({ firm, uploadedBy: fresh.owner, status: "verified", sha256: digest, storageKey: key });
   await reserve(firm, iB, 1);
-  // Duplicate detection folds the second onto the first — one non-refunded charge
-  // survives per physical ingest (adoption TRANSFERS the charge).
-  const live = (await reservationsFor(firm)).filter((r) => r.state !== "refunded");
-  noteLane(`reservations for a duplicate sha: ${live.map((r) => r.state).join(", ")} — the one-charge-per-physical-ingest invariant (§3.6) is inspected here`);
-  assert.ok(live.length >= 1, "at least one reservation persists for the physical ingest");
+  await finalizeIntake({ intake: iB });
+
+  const iBrow = await rootQuery("select status from clara.document_intakes where id=$1", [iB]);
+  assert.equal(iBrow.rows[0].status, "adopted", "the duplicate intake terminalizes as 'adopted'");
+
+  const resv = await reservationsFor(firm);
+  const dupResv = resv.find((r) => r.intake_id === iB);
+  assert.ok(dupResv, "the duplicate's reservation row exists");
+  assert.equal(dupResv.state, "refunded", "the duplicate reservation is REFUNDED at adoption (transferred to the canonical charge, §3.6)");
+  const livePages = resv.filter((r) => r.state !== "refunded").reduce((s, r) => s + Number(r.pages_reserved ?? 0), 0);
+  assert.equal(livePages, 1, "exactly ONE physical document's pages survive as a live charge (one-charge-per-physical-ingest)");
+  noteLane(`adopted-duplicate reservations: ${resv.map((r) => `${r.state}:${r.pages_reserved}`).join(", ")}`);
 });
 
 // ===========================================================================

@@ -17,8 +17,12 @@
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
       "note": ""
     },
+    "packages/runtime/workflows/documentIngest.behavior.mjs": {
+      "sha256": "7306c457c553ddc57c0b90871f444326c75b1ec1763ca2bd5063183d9d02f07f",
+      "note": ""
+    },
     "packages/runtime/workflows/documentIngest.impl.ts": {
-      "sha256": "8a9d9939717d42a0512387faf75645ca2ecc3a0bdc9cbac68c8f13e837e57a33",
+      "sha256": "cded76b08c88f1937a2a5580eee3aa4bd3b23ccd014fbd335521fa7fcbf2007e",
       "note": ""
     },
     "packages/runtime/workflows/documentIngest.v1.ts": {

@@ -93,8 +93,10 @@ test("canonical test storage is immutable and readback-hash verified", async () 
 test("production Storage refuses service_role instead of treating it as custody authority", async () => {
   const previousUrl = process.env.CLARA_STORAGE_URL;
   const previousJwt = process.env.CLARA_STORAGE_ROLE_JWT;
+  const previousRole = process.env.CLARA_STORAGE_ROLE;
   process.env.RELAY_TEST_MODE = "0";
   process.env.CLARA_STORAGE_URL = "https://storage.invalid/object/private";
+  process.env.CLARA_STORAGE_ROLE = "clara_storage_docs";
   process.env.CLARA_STORAGE_ROLE_JWT = `x.${Buffer.from(JSON.stringify({ role: "service_role", exp: Math.floor(Date.now() / 1000) + 600 })).toString("base64url")}.x`;
   const file = join(root, "forbidden.pdf");
   await writeFile(file, "no service role");
@@ -109,6 +111,34 @@ test("production Storage refuses service_role instead of treating it as custody 
     else process.env.CLARA_STORAGE_URL = previousUrl;
     if (previousJwt === undefined) delete process.env.CLARA_STORAGE_ROLE_JWT;
     else process.env.CLARA_STORAGE_ROLE_JWT = previousJwt;
+    if (previousRole === undefined) delete process.env.CLARA_STORAGE_ROLE;
+    else process.env.CLARA_STORAGE_ROLE = previousRole;
+  }
+});
+
+test("production Storage requires the designated role claim and a future exp", async () => {
+  const previous = {
+    mode: process.env.RELAY_TEST_MODE,
+    url: process.env.CLARA_STORAGE_URL,
+    jwt: process.env.CLARA_STORAGE_ROLE_JWT,
+    role: process.env.CLARA_STORAGE_ROLE,
+  };
+  process.env.RELAY_TEST_MODE = "0";
+  process.env.CLARA_STORAGE_URL = "https://storage.invalid/object/firm-docs";
+  process.env.CLARA_STORAGE_ROLE = "clara_storage_docs";
+  const file = join(root, "designated-role.pdf");
+  await writeFile(file, "role-check");
+  const key = `firms/${randomUUID()}/docs/${"b".repeat(64)}.pdf`;
+  try {
+    process.env.CLARA_STORAGE_ROLE_JWT = `x.${Buffer.from(JSON.stringify({ role: "some_other_custom_role", exp: Math.floor(Date.now() / 1000) + 600 })).toString("base64url")}.x`;
+    await assert.rejects(putCanonical(file, key, "application/pdf"), (err) => err.code === "storage_error" && /designated/.test(err.message));
+    process.env.CLARA_STORAGE_ROLE_JWT = `x.${Buffer.from(JSON.stringify({ role: "clara_storage_docs" })).toString("base64url")}.x`;
+    await assert.rejects(putCanonical(file, key, "application/pdf"), (err) => err.code === "storage_error" && /expired or malformed/.test(err.message));
+  } finally {
+    for (const [name, value] of [["RELAY_TEST_MODE", previous.mode], ["CLARA_STORAGE_URL", previous.url], ["CLARA_STORAGE_ROLE_JWT", previous.jwt], ["CLARA_STORAGE_ROLE", previous.role]]) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
   }
 });
 

@@ -270,6 +270,66 @@ function documentOp(prefix, taskId) {
   return `${prefix}:${taskId}`;
 }
 
+/** DB-first intake/reservation reclamation. Sidecars remain a fast resume index,
+ * but these rows are the authority and cover a crash before sidecar creation. */
+export async function reconcileDocumentIntakes(client, deps = {}) {
+  const log = deps.log ?? (() => {});
+  const out = { documentIntakesExpired: 0, documentReservationsRefunded: 0 };
+  let expired;
+  try {
+    expired = await client.query(
+      `select id from clara.document_intakes
+        where status in ('uploading','received','verifying') and expires_at<now()
+          and ($1::uuid is null or firm_id=$1)
+        order by expires_at limit 100`,
+      [deps.onlyFirm ?? null],
+    );
+  } catch (err) {
+    if (isDocumentSelectUnavailable(err)) {
+      log(`[reconcile] document intake SELECT unavailable: ${err?.message ?? err}`);
+      return out;
+    }
+    throw err;
+  }
+  for (const row of expired.rows) {
+    try {
+      const failed = await client.query("select clara.fail_document_intake($1,$2,$3) as receipt", [
+        row.id,
+        "expired",
+        documentOp("doc-intake-db-expired", row.id),
+      ]);
+      if (failed.rows[0]?.receipt?.status === "failed") out.documentIntakesExpired += 1;
+    } catch (err) {
+      if (err?.code !== "CLR16") log(`[reconcile] DB intake expiry failed intake=${row.id}: ${err?.message ?? err}`);
+    }
+  }
+
+  // A live finalized ingest reservation is bound to its processing task. Only a
+  // terminal intake whose unsettled carrier has NO task is orphaned/refundable.
+  const orphaned = await client.query(
+    `select r.id from clara.document_ingest_reservations r
+       join clara.document_intakes i on i.id=r.intake_id and i.firm_id=r.firm_id
+      where r.state in ('reserved','resized') and r.task_id is null
+        and i.status in ('finalized','adopted','failed')
+        and ($1::uuid is null or r.firm_id=$1)
+      order by r.created_at limit 100`,
+    [deps.onlyFirm ?? null],
+  );
+  for (const row of orphaned.rows) {
+    try {
+      const refunded = await client.query("select clara.refund_ingest_reservation($1,$2,$3) as receipt", [
+        row.id,
+        documentOp("doc-orphan-reservation-refund", row.id),
+        "terminal-intake-orphan",
+      ]);
+      if (refunded.rows[0]?.receipt?.state === "refunded") out.documentReservationsRefunded += 1;
+    } catch (err) {
+      if (err?.code !== "CLR18") log(`[reconcile] orphan reservation refund failed reservation=${row.id}: ${err?.message ?? err}`);
+    }
+  }
+  return out;
+}
+
 function isDocumentSelectUnavailable(err) {
   return err?.code === "42501" || err?.code === "42P01" || /permission denied|does not exist/i.test(String(err?.message || ""));
 }
@@ -447,6 +507,7 @@ export async function runReconcilerSweep(client, deps) {
   const expiry = await expireClarifies(client, { onlyFirm: deps.onlyFirm ?? null });
   const tasks = await reconcileTasks(client, deps);
   const documentTasks = await reconcileDocumentTasks(client, { ...deps, integrity: deps.prune === true });
+  const documentIntakes = await reconcileDocumentIntakes(client, deps);
   let intakeRecovery = { recovered: 0, deferred: 0, expired: 0 };
   if (typeof deps.recoverDocumentIntakes === "function") {
     try {
@@ -469,5 +530,5 @@ export async function runReconcilerSweep(client, deps) {
       log(`[reconcile] trace prune error: ${err?.message ?? err}`);
     }
   }
-  return { ...expiry, ...tasks, ...documentTasks, ...intakeRecovery, ...spool, ...prune };
+  return { ...expiry, ...tasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...prune };
 }

@@ -11,6 +11,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CLR,
+  assertRaises,
   rootQuery,
   ensureReady,
   docsReady,
@@ -154,6 +156,41 @@ test("§3.7 correction_applied is the AGGREGATE (exempt); its children carry the
 // ===========================================================================
 // N2 — confidentiality: no amount-shaped key in any new document event payload.
 // ===========================================================================
+
+// ===========================================================================
+// §3.7 / DELTA-OWNER-3 — filing-based freshness, BEHAVIORAL (assert_books_current).
+// The structural test above proves the relevance INPUTS; this drives the gate.
+// ===========================================================================
+
+test("§3.7 assert_books_current: an unassigned document's ingest event stales NOBODY; filing to A1 then stales A1 (CLR12) but never the sibling A2", async (t) => {
+  if (unready(t)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.A1);
+  // Baseline BEFORE the ingest lands, so the unassigned document.ingested is strictly
+  // NEWER than the token — the only arrangement in which "does not stale" is meaningful.
+  const token = await maxSeq(firm);
+
+  // _seed_verified_document (unassigned) emits document.ingested with document_id set +
+  // client NULL and NO active filing → relevant to no client.
+  const { documentId } = await seedVerifiedDocument({ firm });
+  assert.equal((await activeFilings(documentId)).length, 0, "the document is unassigned (no active filing)");
+  const ingest = await rootQuery(
+    "select seq::int as seq from clara.domain_events where document_id=$1 and event_type=$2 order by seq desc limit 1",
+    [documentId, DOC_EVT.ingested]);
+  assert.ok(ingest.rows[0]?.seq > token, "the unassigned ingest event is newer than the token (so 'not stale' is a real assertion)");
+
+  // assert_books_current is an ungranted internal (companion §3.11) — superuser may call it.
+  const assertCurrent = (client) =>
+    rootQuery("select clara.assert_books_current(p_firm => $1, p_client => $2, p_version => $3)", [firm, client, token]);
+  await assertCurrent(clients.A1); // unassigned doc events stale nobody → no throw
+  await assertCurrent(clients.A2);
+
+  // File to A1 → document.filed (client A1) lands → A1 is NOW stale at the pre-filing token.
+  await fileDocument(users.alice, { document: documentId, client: clients.A1, resolution: await freshResolution(users.alice, clients.A1) });
+  await assertRaises(CLR.stale, () => assertCurrent(clients.A1), "document.filed stales exactly the filed client A1 (CLR12)");
+  await assertCurrent(clients.A2); // the sibling A2 is untouched — the filing binds A1 only
+  noteLane("filing-based freshness proven behaviorally: unassigned ingest stales nobody; document.filed stales the filed client, not its sibling");
+});
 
 test("N2 no amount-shaped key appears in any document.* event payload", async (t) => {
   if (unready(t)) return;

@@ -6,6 +6,7 @@
 // credentials, document bytes, and extraction envelopes never cross a WDK boundary.
 
 import { getWorkflowMetadata } from "workflow";
+import { processDocumentTaskBehavior } from "./documentIngest.behavior.mjs";
 
 type PgExec = {
   query(sql: string, params?: unknown[]): Promise<{ rows: Array<Record<string, unknown>>; rowCount: number | null }>;
@@ -17,7 +18,14 @@ type ClaraPools = {
 
 type DocumentServices = {
   noteClaim(taskId: string, status: string, runId: string | null): Promise<unknown>;
-  process(taskId: string): Promise<{ taskId: string; status: string; lane: string }>;
+  readTaskMeta(taskId: string): Promise<Record<string, unknown> | null>;
+  removeTaskMeta(taskId: string): Promise<unknown>;
+  taskTempPath(taskId: string): string;
+  removeTempFile(path: string): Promise<unknown>;
+  downloadCanonical(key: string, destination: string, sha256: string): Promise<unknown>;
+  analyzeDocument(path: string, mime: string, task: Record<string, unknown>): Promise<Record<string, unknown>>;
+  parseStructured(path: string, format: string, task: Record<string, unknown>): Promise<Record<string, unknown>>;
+  noteTaskFailure(taskId: string, code: string): Promise<unknown>;
 };
 
 function pools(): ClaraPools {
@@ -60,5 +68,5 @@ export async function claimDocumentTaskStep(
 
 export async function processDocumentTaskStep(taskId: string): Promise<{ taskId: string; status: string; lane: string }> {
   "use step";
-  return services().process(taskId);
+  return processDocumentTaskBehavior(services(), pools().withRuntime, taskId);
 }

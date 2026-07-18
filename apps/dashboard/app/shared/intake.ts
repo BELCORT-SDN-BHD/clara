@@ -210,10 +210,13 @@ export function intakeStatusCopy(status: IntakeStatus, failureCode: IntakeFailur
     case "uploading": return "Uploading…";
     case "received": return "Received — scanning…";
     case "verifying": return "Verifying…";
-    case "verified": return "Verified — filing…";
-    case "finalized": return "Filed";
+    // Honest-state law (§4.5 / MED-1): the transport NEVER files to a client —
+    // finalize lands the document UNASSIGNED; "Filed" is reserved for an actual
+    // active filing made later on the documents tab.
+    case "verified": return "Verified — storing…";
+    case "finalized": return "Stored — not yet filed";
     case "duplicate": return "Duplicate — adopting…";
-    case "adopted": return "Filed (adopted existing document)";
+    case "adopted": return "Stored — matched an existing document";
     case "failed": return `Failed${failureCode ? `: ${failureCode}` : ""}`;
   }
 }

@@ -12,11 +12,18 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SignJWT } from "jose";
 
-if (process.env.PGHOST !== "127.0.0.1" || process.env.PGPORT !== "5544" || process.env.PGDATABASE !== "clara_rt_test") {
-  throw new Error("intake-e2e is hard-gated to PGHOST=127.0.0.1 PGPORT=5544 PGDATABASE=clara_rt_test");
+// Fail-closed local gate. Any PGPORT is accepted (local 5544, CI's 5432 service),
+// but the host MUST be loopback and the database MUST be one of the two sanctioned
+// throwaways — never a live/remote target. The runtime local rig uses clara_rt_test;
+// CI provisions a fresh clara_intake_ci for this e2e.
+const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
+const ALLOWED_DB = /^clara_(rt_test|intake_ci)$/;
+if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
+  throw new Error("intake-e2e is hard-gated to a loopback host (127.0.0.1|localhost) + PGDATABASE in {clara_rt_test,clara_intake_ci}");
 }
-if (!process.env.WORKFLOW_POSTGRES_URL || !/127\.0\.0\.1:5544\/clara_rt_test(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
-  throw new Error("intake-e2e needs WORKFLOW_POSTGRES_URL targeting 127.0.0.1:5544/clara_rt_test");
+if (!process.env.WORKFLOW_POSTGRES_URL
+    || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|intake_ci)(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
+  throw new Error("intake-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|intake_ci)");
 }
 
 process.env.RELAY_TEST_MODE = "1";
@@ -143,7 +150,8 @@ async function main() {
   assert.equal(preflight.status, 204);
   assert.equal(preflight.headers.get("access-control-allow-origin"), ORIGIN);
 
-  const bytes = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\n%%EOF\n");
+  // Structurally plausible per the F-12 admission check (startxref + obj/endobj + %%EOF).
+  const bytes = Buffer.from("%PDF-1.7\n1 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF\n");
   const intake = await begin(jwt, bytes);
 
   // A slow first stream holds the intake lock; a second concurrent PUT is

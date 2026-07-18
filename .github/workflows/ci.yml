@@ -190,5 +190,25 @@ jobs:
           PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
             node --test tests/rig-docs-upgrade.test.mjs
 
+      # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
+      # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
+      # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap
+      # (WO-G G1b, proven): the documented idempotent `bootstrap` bin (the SAME one
+      # the S4-V3 runbook runs against prod, README §engine-bootstrap) creates the
+      # workflow/graphile_worker schemas first. Ephemeral clara_intake_ci only —
+      # never the shared project; the URL omits the password (pg falls back to the
+      # job-env PGPASSWORD for the throwaway service container).
+      - name: Slice-5 intake transport e2e (isolated DB + world bootstrap)
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_intake_ci'
+          PGDATABASE=clara_intake_ci pnpm db:migrate
+          PGDATABASE=clara_intake_ci pnpm db:seed
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_intake_ci" \
+            pnpm --filter @clara/runtime exec bootstrap
+          cd packages/runtime
+          PGDATABASE=clara_intake_ci \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_intake_ci" \
+            node tests/intake-e2e.mjs
+
       - name: DR backup/restore self-test (ephemeral postgres:17)
         run: pnpm --filter @clara/db dr:selftest

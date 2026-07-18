@@ -30,6 +30,15 @@ import {
   seedAttempt,
   seedCandidate,
   addClientIdentifier,
+  addClientAlias,
+  draftEntry,
+  human,
+  proposeCorrection,
+  setDocLimits,
+  idOf,
+  balanced,
+  ROUTINE_CENTS,
+  opk,
   EXPECTED_NEW_TABLES,
   NO_HUMAN_BASE_GRANT,
 } from "./rig-docs-fixtures.mjs";
@@ -102,6 +111,58 @@ test("§3.10 cross-firm read isolation: a firm's human sees its OWN new-table ro
     assert.equal(own.rows[0].n, 1, `alice sees firm A's ${tbl} row`);
     const foreign = await humanQuery(users.alice, `select count(*)::int as n from clara.${tbl} where id=$1`, [B[tbl]]);
     assert.equal(foreign.rows[0].n, 0, `alice must NOT see firm B's ${tbl} row (RLS-scoped)`);
+  }
+});
+
+test("§3.10 cross-firm read isolation extends to the attribution / correction / limits tables: firm-B's human sees ZERO of firm-A's rows (RLS-scoped, no existence oracle)", async (t) => {
+  if (unready(t)) return;
+  const { users, clients } = world;
+  const firmA = await firmOf(clients.A1);
+
+  // client_identifiers + client_aliases — audited human writers.
+  await addClientIdentifier(users.alice, { client: clients.A1, kind: "tin", value: `T${Date.now().toString(36)}` });
+  const identId = (await rootQuery("select id from clara.client_identifiers where client_id=$1 order by added_at desc limit 1", [clients.A1])).rows[0].id;
+  await addClientAlias(users.alice, { client: clients.A1, alias: `Alias ${Date.now().toString(36)}` });
+  const aliasId = (await rootQuery("select id from clara.client_aliases where client_id=$1 order by added_at desc limit 1", [clients.A1])).rows[0].id;
+
+  // attribution_candidate_regions — a candidate ↔ region link (fixture-only → raw root insert).
+  const { documentId, sha256 } = await seedVerifiedDocument({ firm: firmA });
+  const extraction = await seedExtraction({ firm: firmA, document: documentId, versionN: 1 });
+  const region = await seedRegion({ firm: firmA, extraction });
+  const attempt = await seedAttempt({ firm: firmA, document: documentId, matcherVersion: 1 });
+  const candidate = await seedCandidate({ firm: firmA, attempt, client: clients.A1, disposition: "open" });
+  const regionLinkId = (await rootQuery(
+    "insert into clara.attribution_candidate_regions(firm_id,candidate_id,region_id) values($1,$2,$3) returning id",
+    [firmA, candidate, region])).rows[0].id;
+
+  // filing_corrections + filing_correction_items — created together via the real writer
+  // (a draft cite → one withdraw_draft item; no approve needed to materialize the rows).
+  const res = await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: documentId });
+  await fileDocument(users.alice, { document: documentId, client: clients.A1, resolution: res });
+  await draftEntry(human(users.alice), { client: clients.A1, resolution: res, document: documentId, sha256, lines: balanced({ cash: "1000", sales: "4000" }, ROUTINE_CENTS), opKey: opk("iso-d") });
+  await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: documentId });
+  const proposal = await proposeCorrection(users.alice, { document: documentId, fromClient: clients.A1, toClient: clients.A2, reason: "iso probe" });
+  const correctionId = idOf(proposal, "correction_id", "correction");
+  const itemId = (await rootQuery("select id from clara.filing_correction_items where correction_id=$1 limit 1", [correctionId])).rows[0].id;
+
+  // firm_document_limits — operator writer (its PK is firm_id).
+  await setDocLimits(firmA, { docsPerDay: 100, pagesPerDay: 1000, ocrConcurrency: 2 });
+
+  // dave (firm B) sees ZERO of each firm-A row; alice sees each (control — so dave's
+  // zero is RLS cross-firm scoping, not an empty table).
+  const probes = [
+    ["client_identifiers", "id", identId],
+    ["client_aliases", "id", aliasId],
+    ["attribution_candidate_regions", "id", regionLinkId],
+    ["filing_corrections", "id", correctionId],
+    ["filing_correction_items", "id", itemId],
+    ["firm_document_limits", "firm_id", firmA],
+  ];
+  for (const [tbl, col, id] of probes) {
+    const own = await humanQuery(users.alice, `select count(*)::int as n from clara.${tbl} where ${col}=$1`, [id]);
+    assert.equal(own.rows[0].n, 1, `alice (firm A) sees her own ${tbl} row (control)`);
+    const foreign = await humanQuery(users.dave, `select count(*)::int as n from clara.${tbl} where ${col}=$1`, [id]);
+    assert.equal(foreign.rows[0].n, 0, `dave (firm B) must NOT see firm A's ${tbl} row (RLS cross-firm, no oracle)`);
   }
 });
 

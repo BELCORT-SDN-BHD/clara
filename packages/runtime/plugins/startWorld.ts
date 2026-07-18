@@ -44,7 +44,7 @@ export default definePlugin(() => {
     withRuntime,
     withRead,
   };
-  (globalThis as unknown as { __claraDocumentServices?: unknown }).__claraDocumentServices = makeDocumentServices(withRuntime);
+  (globalThis as unknown as { __claraDocumentServices?: unknown }).__claraDocumentServices = makeDocumentServices();
 
   // Register intake first. The HTTP shutdown gate rejects new requests immediately;
   // this stop waits for an already-streaming spool write to finish honestly.

@@ -71,6 +71,7 @@ There is deliberately no runtime status route. Human status reads use migration
 | `CLARA_DOC_EGRESS_APPROVED` | OCR pre-dispatch gate; default/Fly value `0`. Set `1` only after the firm-wide egress evidence bundle is approved. |
 | `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY` | Azure Document Intelligence service-layer credentials for `prebuilt-layout`, API `2024-11-30`; never workflow step IO. |
 | `CLARA_STORAGE_URL` | Full private-bucket object base, for example the Storage REST `/storage/v1/object/<bucket>` base. |
+| `CLARA_STORAGE_ROLE` | Exact dedicated custom role expected in the Storage JWT (`clara_storage_docs` at the ceremony); required outside tests. |
 | `CLARA_STORAGE_ROLE_JWT` | Rotated, unexpired dedicated custom-role JWT with object `INSERT` + `SELECT` only. `anon`, `authenticated`, and `service_role` are rejected; no `UPDATE`/`DELETE`. |
 
 `RELAY_TEST_MODE=1` is the only adapter gate: tests inject/localize scanner,
@@ -158,7 +159,7 @@ then hand those two credentials to the runtime as the DSN secrets below.
 - `CLARA_READ_DATABASE_URL` (the `clara_agent_read_login` DSN)
 - `CLARA_INTAKE_CORS_ORIGINS`
 - `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY`
-- `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE_JWT`
+- `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE`, `CLARA_STORAGE_ROLE_JWT`
 
 `CLARA_START_WORLD=1` and `PORT` live in `fly.toml [env]`, not secrets. The
 world runs ONLY in the deployed app.
