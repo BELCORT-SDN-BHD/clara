@@ -151,6 +151,38 @@ testCase("re-exporting the enqueue API -> REJECT (ENQUEUE-REEXPORT, fail-closed)
   expectCodes(checkEnqueueSites(entry("enqueue-reexport.ts.txt")), ["ENQUEUE-REEXPORT"]);
 });
 
+testCase("S4-AB9 computed literal api[\"start\"] + direct import -> REJECT (ENQUEUE-BYPASS)", () => {
+  expectCodes(checkEnqueueSites(entry("enqueue-computed-literal.ts.txt")), ["ENQUEUE-BYPASS"]);
+});
+
+testCase("computed literal api[\"start\"] with registry argument -> OK", () => {
+  expectClean(checkEnqueueSites(entry("enqueue-computed-literal-registry.ts.txt")));
+});
+
+testCase("computed NON-literal api[s] -> REJECT (ENQUEUE-UNTRACEABLE, fail-closed)", () => {
+  expectCodes(checkEnqueueSites(entry("enqueue-computed-nonliteral.ts.txt")), ["ENQUEUE-UNTRACEABLE"]);
+});
+
+testCase("uncalled computed extraction const go = api[\"start\"] -> REJECT (ENQUEUE-UNTRACEABLE)", () => {
+  expectCodes(checkEnqueueSites(entry("enqueue-computed-uncalled.ts.txt")), ["ENQUEUE-UNTRACEABLE"]);
+});
+
+testCase("uncalled dot extraction const go = api.start -> REJECT (ENQUEUE-UNTRACEABLE)", () => {
+  expectCodes(checkEnqueueSites(entry("enqueue-member-uncalled.ts.txt")), ["ENQUEUE-UNTRACEABLE"]);
+});
+
+testCase("S4-FX6 plain destructure const {start} = api -> REJECT (ENQUEUE-UNTRACEABLE)", () => {
+  expectCodes(checkEnqueueSites(entry("enqueue-destructure-plain.ts.txt")), ["ENQUEUE-UNTRACEABLE"]);
+});
+
+testCase("S4-FX6 renamed destructure const {start: launch} = api (the probe) -> REJECT (ENQUEUE-UNTRACEABLE)", () => {
+  expectCodes(checkEnqueueSites(entry("enqueue-destructure-renamed.ts.txt")), ["ENQUEUE-UNTRACEABLE"]);
+});
+
+testCase("S4-FX6 namespace re-alias const alias = api -> REJECT (ENQUEUE-UNTRACEABLE)", () => {
+  expectCodes(checkEnqueueSites(entry("enqueue-namespace-realias.ts.txt")), ["ENQUEUE-UNTRACEABLE"]);
+});
+
 testCase("world lifecycle getWorld().start?.() -> OK (no false positive)", () => {
   expectClean(checkEnqueueSites(entry("not-enqueue-world-start.ts.txt")));
 });

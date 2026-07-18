@@ -1,0 +1,11 @@
+// Fixture (REJECT: ENQUEUE-UNTRACEABLE): computed namespace access whose
+// property is NOT a string literal — the callable's identity is unknowable to
+// single-pass provenance, so the lint fails CLOSED rather than guess.
+import * as api from "workflow/api";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+const s = "start";
+
+export async function kick(): Promise<void> {
+  await api[s](chatTurnV1, []);
+}

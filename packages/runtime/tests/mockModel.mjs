@@ -43,13 +43,16 @@ export function mockTextModel(text = "here is your answer") {
   });
 }
 
-/** A model that calls `clarify` on the FIRST segment, then answers with text. */
+/** A model that calls `clarify` until the clarify has been ANSWERED, then replies
+ *  with text. Driven by the INPUT (whether a clarify tool-result is already in the
+ *  prompt), NOT a call counter — so it is deterministic across WDK step retries and
+ *  workflow replays (a counter would misalign when a step re-invokes the model). */
 export function mockClarifyThenTextModel(question = "Which client is this for?", answer = "thanks, done") {
-  let call = 0;
   return new MockLanguageModelV4({
-    doStream: async () => {
-      call += 1;
-      const chunks = call === 1 ? clarifyChunks(question) : textChunks(answer);
+    doStream: async (options) => {
+      const prompt = JSON.stringify(options?.prompt ?? options?.messages ?? "");
+      const clarifyAnswered = /tool-result/.test(prompt) && /clarify/.test(prompt);
+      const chunks = clarifyAnswered ? textChunks(answer) : clarifyChunks(question);
       return { stream: simulateReadableStream({ chunks, chunkDelayInMs: 5 }) };
     },
   });

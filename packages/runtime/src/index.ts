@@ -1,3 +1,4 @@
+import type { Server } from "node:http";
 import express from "express";
 import { workflowNames } from "../workflows/registry.js";
 import { checkReadiness } from "../lib/health.mjs";
@@ -8,7 +9,40 @@ import { streamRoutes } from "./streamRoute.js";
 // admission/turn routes ride on top of the WDK Postgres world (started by
 // plugins/startWorld.ts when CLARA_START_WORLD=1). The control listener, relay+drain,
 // and reconciler run in that same plugin so the whole process is one crash-only group.
+type Sup = { shuttingDown: boolean; stops: Array<() => unknown>; activeRequests: number; httpServer?: Server };
+const sup = ((globalThis as unknown as { __claraSupervisor?: Sup }).__claraSupervisor ??= {
+  shuttingDown: false,
+  stops: [],
+  activeRequests: 0,
+});
+
 const app = express();
+
+// Graceful-shutdown gate + active-request tracking (S4-FX2). Runs BEFORE every route:
+// captures the HTTP listener (so serve.mjs can server.close() on SIGTERM), refuses
+// NEW requests with 503 GLOBALLY while draining (except /health liveness), and counts
+// in-flight requests + SSE streams so the supervisor can wait for zero-active.
+app.use((req, res, next) => {
+  if (!sup.httpServer) {
+    const s = (req.socket as unknown as { server?: Server }).server;
+    if (s) sup.httpServer = s;
+  }
+  if (sup.shuttingDown && req.path !== "/health") {
+    res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+    return;
+  }
+  sup.activeRequests += 1;
+  let done = false;
+  const dec = () => {
+    if (done) return;
+    done = true;
+    sup.activeRequests -= 1;
+  };
+  res.on("close", dec);
+  res.on("finish", dec);
+  next();
+});
+
 app.use(express.json({ limit: "1mb" }));
 
 // Liveness — is the process up? No dependencies.
@@ -20,6 +54,12 @@ app.get("/health", (_req, res) => {
 // dead, control listener dead, or taxonomy HALT (§4.7); relay lag / dead-letters /
 // backlog are warnings[] (degraded, still serving). Bounded + sanitized.
 app.get("/ready", async (_req, res) => {
+  // During graceful shutdown, report NOT ready so the LB stops routing new traffic.
+  const sup = (globalThis as unknown as { __claraSupervisor?: { shuttingDown?: boolean } }).__claraSupervisor;
+  if (sup?.shuttingDown) {
+    res.status(503).json({ ready: false, checks: { shutdown: true }, warnings: [], ts: new Date().toISOString() });
+    return;
+  }
   const r = await checkReadiness();
   res.status(r.ready ? 200 : 503).json({ ready: r.ready, checks: r.checks, warnings: r.warnings, ts: new Date().toISOString() });
 });

@@ -46,7 +46,7 @@ async function runningTask(label, runId) {
   return { task_id, firm };
 }
 
-test("reconcile: a queued-without-run task past grace is re-enqueued + bound", { skip }, async () => {
+test("reconcile: a queued-without-run task past grace is re-enqueued (started)", { skip }, async () => {
   const { owner, firm, client } = await rig.buildFirm("rec1");
   const session = await rig.createChatSession({ author: owner, client });
   const { task_id } = await rig.beginChatTurn({ session, author: owner, turnKey: "t" }); // queued, no run
@@ -63,10 +63,12 @@ test("reconcile: a queued-without-run task past grace is re-enqueued + bound", {
       getRun: () => mockRun("running"),
     }),
   );
-  assert.deepEqual(enq, [task_id], "the stuck task was re-enqueued");
+  assert.deepEqual(enq, [task_id], "the stuck task was re-enqueued (started)");
+  // The reconciler no longer binds — the WORKFLOW self-binds via claimRunStep (S4-AB3).
+  // The mock enqueue does not run the workflow, so the task stays queued+unbound here;
+  // the real self-bind is proven end-to-end by the world-e2e.
   const t = await rig.readTask(task_id);
-  assert.equal(t.status, "running", "task bound running");
-  assert.ok(t.workflow_run_id, "run id bound");
+  assert.equal(t.status, "queued", "task stays queued until the real workflow claims it");
 });
 
 test("reconcile: a pending clarify past its deadline is expired", { skip }, async () => {
@@ -102,6 +104,43 @@ test("reconcile: an open task whose engine run is LOST is settled failed/engine_
   const t = await rig.readTask(task_id);
   assert.equal(t.status, "failed");
   assert.equal(t.error_code, "engine_lost");
+});
+
+test("reconcile: an open task whose engine run FAILED settles failed/internal (spec-c3)", { skip }, async () => {
+  const { task_id, firm } = await runningTask("rec3c", "wrun_failed");
+  await rig.asRuntime((c) =>
+    reconcileTasks(c, { onlyFirm: firm, enqueueChatTurn: async () => ({ runId: "x" }), getRun: () => mockRun("failed") }),
+  );
+  const t = await rig.readTask(task_id);
+  assert.equal(t.status, "failed");
+  assert.equal(t.error_code, "internal", "engine-FAILED maps to internal, not engine_lost");
+});
+
+test("reconcile: a PARKED (awaiting_input) task whose run is lost settles cancelled (matrix-safe)", { skip }, async () => {
+  const { task_id, firm } = await runningTask("rec3d", "wrun_parked_lost");
+  await rig.driveTask(task_id, ["awaiting_input"]); // park it
+  const notFound = () => {
+    const e = new Error("run not found");
+    e.name = "WorkflowRunNotFoundError";
+    throw e;
+  };
+  await rig.asRuntime((c) =>
+    reconcileTasks(c, { onlyFirm: firm, enqueueChatTurn: async () => ({ runId: "x" }), getRun: notFound }),
+  );
+  const t = await rig.readTask(task_id);
+  // awaiting_input CANNOT go to 'failed' (AB11) — the parked task settles 'cancelled'.
+  assert.equal(t.status, "cancelled");
+  assert.equal(t.error_code, "engine_lost");
+});
+
+test("reconcile: a RUNNING task whose engine run CANCELLED settles cancelled (two-step, FX5)", { skip }, async () => {
+  const { task_id, firm } = await runningTask("rec3e", "wrun_run_cancelled");
+  await rig.asRuntime((c) =>
+    reconcileTasks(c, { onlyFirm: firm, enqueueChatTurn: async () => ({ runId: "x" }), getRun: () => mockRun("cancelled") }),
+  );
+  // running->cancelled is illegal directly (AB11); the reconciler routes it via
+  // running->cancel_requested->cancelled rather than skipping the pair forever.
+  assert.equal((await rig.readTask(task_id)).status, "cancelled");
 });
 
 test("reconcile: cancel_requested is aborted + settled cancelled", { skip }, async () => {

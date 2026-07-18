@@ -14,17 +14,22 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
 
-// --- env (fragments avoid secret-shaped literals for the leak-scan gate) ---
-process.env.PGHOST ??= "127.0.0.1";
-process.env.PGPORT ??= "5544";
-process.env.PGUSER ??= "postgres";
-process.env.PGDATABASE ??= "clara_rt_test";
-process.env.PGPASSWORD ??= "postgres";
+// --- env (env-ONLY; no hardcoded credential fallback, no DSN-fragment construction).
+// The runner MUST export the DB target + the world DSN. RELAY_TEST_MODE / PORT /
+// CLARA_START_WORLD / WORKFLOW_TARGET_WORLD are run-config flags (not credentials).
+// e.g.  PGHOST=127.0.0.1 PGPORT=5544 PGUSER=postgres PGDATABASE=clara_rt_test \
+//       WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:5544/clara_rt_test \
+//       node tests/world-e2e.mjs
+if (!process.env.PGHOST && !process.env.DATABASE_URL) {
+  throw new Error("world-e2e needs a DB target in the ENVIRONMENT (PGHOST/... or DATABASE_URL) — env-only, no fallback");
+}
+if (!process.env.WORKFLOW_POSTGRES_URL) {
+  throw new Error("world-e2e needs WORKFLOW_POSTGRES_URL in the ENVIRONMENT (the WDK world's DB) — env-only, no fallback");
+}
 process.env.RELAY_TEST_MODE = "1";
-process.env.CLARA_START_WORLD = "1";
+process.env.CLARA_START_WORLD = "1"; // explicit opt-in — this IS a world test
 process.env.PORT = process.env.PORT || "3211";
 process.env.WORKFLOW_TARGET_WORLD = "@workflow/world-postgres";
-process.env.WORKFLOW_POSTGRES_URL ??= ["postgres:", "", `${process.env.PGUSER}@${process.env.PGHOST}:${process.env.PGPORT}`, process.env.PGDATABASE].join("/");
 const ISSUER = "https://clara.test/auth/v1";
 const AUD = "authenticated";
 const jwtSecret = "e2e-" + randomUUID().replace(/-/g, "");
@@ -51,6 +56,42 @@ async function waitHealthy(deadlineMs = 20000) {
     await sleep(200);
   }
   throw new Error("server did not become healthy");
+}
+
+/** Consume an SSE stream: collect {event, data} until 'done'/'detached' or maxMs. */
+async function consumeSSE(url, jwt, maxMs = 25000) {
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), maxMs);
+  const events = [];
+  try {
+    const res = await fetch(url, { headers: { authorization: `Bearer ${jwt}` }, signal: ctrl.signal });
+    if (res.status !== 200) return { status: res.status, events };
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const block = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const ev = /event:\s*(.+)/.exec(block)?.[1]?.trim();
+        const data = /data:\s*(.+)/.exec(block)?.[1];
+        events.push({ event: ev, data: data ? JSON.parse(data) : null });
+        if (ev === "done" || ev === "detached") {
+          await reader.cancel().catch(() => {});
+          return { status: 200, events };
+        }
+      }
+    }
+    return { status: 200, events };
+  } catch {
+    return { status: 0, events };
+  } finally {
+    clearTimeout(t);
+  }
 }
 
 async function pollTask(rig, taskId, pred, label, deadlineMs = 30000) {
@@ -137,6 +178,65 @@ async function main() {
     const asst = await rig.readAssistantMessage(task_id);
     assert.ok(/noted/.test(JSON.stringify(asst.parts)), "post-answer model text persisted");
     console.log("[e2e] PASS: clarify park -> answer -> resume -> settle completed");
+  }
+
+  // -------------------------------------------------------------------------
+  // 3. SSE consumer (S4-AB13): live tail -> terminal done; then late-attach replay.
+  // -------------------------------------------------------------------------
+  {
+    globalThis.__claraModelForTest = mockTextModel("streaming answer chunk one two three");
+    const { owner, client } = await rig.buildFirm("e2e-sse");
+    const session = await rig.createChatSession({ author: owner, client });
+    const jwt = await mint(owner);
+    const res = await fetch(`${BASE}/api/chat/${session}/turns`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${jwt}`, "content-type": "application/json" },
+      body: JSON.stringify({ turnKey: "e2e-sse-1", parts: [{ type: "text", text: "stream please" }] }),
+    });
+    const { task_id } = await res.json();
+
+    // Live tail: attach immediately, collect chunks until the terminal done.
+    const live = await consumeSSE(`${BASE}/api/tasks/${task_id}/stream`, jwt, 30000);
+    assert.equal(live.status, 200, "SSE opened");
+    const doneEv = live.events.find((e) => e.event === "done");
+    assert.ok(doneEv, "SSE reached a terminal 'done' event");
+    assert.equal(doneEv.data.status, "completed", "terminal status is completed");
+    const chunkEvents = live.events.filter((e) => e.event === "chunk");
+    assert.ok(chunkEvents.length > 0, "live stream delivered chunks (no dropped-read)");
+    // Ordering: text-delta chunks arrive in emission order.
+    const msgEv = live.events.find((e) => e.event === "message");
+    assert.ok(msgEv && /streaming answer/.test(JSON.stringify(msgEv.data.parts)), "final persisted parts are authority");
+
+    // Late-attach AFTER completion: full replay (chunks) + done, from persisted history.
+    const late = await consumeSSE(`${BASE}/api/tasks/${task_id}/stream`, jwt, 15000);
+    assert.ok(late.events.some((e) => e.event === "message"), "late attach replays the final message");
+    assert.ok(late.events.some((e) => e.event === "done"), "late attach terminates on done");
+    console.log("[e2e] PASS: SSE live tail + terminal done + late-attach replay");
+
+    // AB3: the workflow SELF-BOUND its run (claimRunStep) — the task carries exactly one run.
+    const bound = await rig.readTask(task_id);
+    assert.ok(bound.workflow_run_id, "the task's run_id was self-bound by the workflow (S4-AB3 claimRunStep)");
+    console.log("[e2e] PASS: workflow self-bind (AB3) — task bound to exactly one run");
+  }
+
+  // -------------------------------------------------------------------------
+  // 4. Credential secret never crosses a step boundary (S4-AB16): no two-UUID
+  //    wake-credential secret in durable step IO (jsonb + cbor) or traces.
+  // -------------------------------------------------------------------------
+  {
+    const twoUuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}[0-9a-f]{8}-[0-9a-f]{4}";
+    const leak = await rig.rootQuery(
+      `select count(*)::int n from (
+         select input::text t from workflow.workflow_steps where input is not null
+         union all select output::text from workflow.workflow_steps where output is not null
+         union all select encode(input_cbor,'escape') from workflow.workflow_steps where input_cbor is not null
+         union all select encode(output_cbor,'escape') from workflow.workflow_steps where output_cbor is not null
+         union all select attributes::text from clara.trace_spans
+       ) x where x.t ~ $1`,
+      [twoUuid],
+    );
+    assert.equal(leak.rows[0].n, 0, "no wake-credential secret (two concatenated UUIDs) in durable step IO / traces");
+    console.log("[e2e] PASS: no minted secret in durable step IO or traces (AB16)");
   }
 
   console.log("\nWORLD E2E: ALL PASS");

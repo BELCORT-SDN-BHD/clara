@@ -13,7 +13,6 @@ import express from "express";
 import { start } from "workflow/api";
 import { authenticate, assertSessionAccess, AuthError } from "../lib/authz.mjs";
 import { withRuntime } from "../lib/pools.mjs";
-import { bindChatRun } from "../lib/reconciler.mjs";
 import { workflows } from "../workflows/registry.js";
 
 const DEFAULT_MODEL = process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
@@ -36,18 +35,21 @@ function sendAuthError(res: express.Response, err: unknown): boolean {
 export function chatRoutes(): express.Router {
   const router = express.Router();
 
-  // Create a session (private by default; author = the JWT sub).
+  // Create a session — ALWAYS private (ruling 9 / S4-AB10). Sharing is a separate,
+  // audited, AUTHOR-ONLY act via clara.share_chat_session (dashboard → PostgREST);
+  // the runtime ingress never accepts a visibility field.
   router.post("/api/chat/sessions", async (req, res) => {
-    const body = (req.body ?? {}) as { title?: string; clientId?: string; visibility?: string };
+    const body = (req.body ?? {}) as { title?: string; clientId?: string };
     try {
       const out = await withRuntime(async (c) => {
         const p = await authenticate(c, req.header("authorization"));
         // clara_runtime holds INSERT on chat_sessions; the BEFORE trigger derives
         // firm_id from the author's active membership and validates the client.
+        // visibility defaults to 'private' in the schema — we never pass 'firm'.
         const r = await c.query(
-          `insert into clara.chat_sessions (created_by, client_id, visibility, title)
-             values ($1, $2, $3, $4) returning id`,
-          [p.sub, body.clientId ?? null, body.visibility === "firm" ? "firm" : "private", body.title ?? null],
+          `insert into clara.chat_sessions (created_by, client_id, title)
+             values ($1, $2, $3) returning id`,
+          [p.sub, body.clientId ?? null, body.title ?? null],
         );
         return r.rows[0].id as string;
       });
@@ -100,6 +102,13 @@ export function chatRoutes(): express.Router {
 
   // Post a turn: admit (begin_chat_turn), then enqueue + bind, then 202 {task_id}.
   router.post("/api/chat/:sessionId/turns", async (req, res) => {
+    // Stop intake during graceful shutdown (S4-AB7d) — the durable engine is intact,
+    // so the client simply retries against a live machine.
+    const sup = (globalThis as unknown as { __claraSupervisor?: { shuttingDown?: boolean } }).__claraSupervisor;
+    if (sup?.shuttingDown) {
+      res.status(503).json({ error: "shutting_down", message: "the runtime is draining — retry shortly" });
+      return;
+    }
     const body = (req.body ?? {}) as { turnKey?: string; parts?: unknown };
     if (typeof body.turnKey !== "string" || body.turnKey.length === 0) {
       res.status(400).json({ error: "turn_key_required", message: "a turnKey is required (idempotency key)" });
@@ -120,18 +129,21 @@ export function chatRoutes(): express.Router {
           DEFAULT_MODEL,
         ]);
         const receipt = r.rows[0].receipt as { task_id: string };
-        // Read the current binding so a turn_key replay does not double-enqueue.
-        const bound = await c.query("select workflow_run_id from clara.agent_tasks where id = $1", [receipt.task_id]);
-        return { taskId: receipt.task_id, alreadyBound: bound.rows[0]?.workflow_run_id != null };
+        // Only kick off a run when the task is fresh (queued + unbound). The WORKFLOW
+        // self-binds (S4-AB3 claimRunStep), so we never bind here; a turn_key replay of
+        // an already-started task is skipped.
+        const st = await c.query("select status, workflow_run_id from clara.agent_tasks where id = $1", [receipt.task_id]);
+        const row = st.rows[0];
+        return { taskId: receipt.task_id, needsStart: row?.status === "queued" && row?.workflow_run_id == null };
       });
       taskId = admitted.taskId;
 
-      if (!admitted.alreadyBound) {
-        // Post-commit enqueue + bind (best-effort — the reconciler re-enqueues an
-        // unbound queued task, so a failure here is recoverable, never a lost turn).
+      if (admitted.needsStart) {
+        // Post-commit enqueue (best-effort — the reconciler re-enqueues an unbound
+        // queued task, so a failure here is recoverable, never a lost turn). The
+        // workflow's first step CAS-binds itself; duplicate starts self-abort.
         try {
-          const run = await start(workflows.chatTurn, [{ taskId }]);
-          await withRuntime((c) => bindChatRun(c, taskId, run.runId));
+          await start(workflows.chatTurn, [{ taskId }]);
         } catch (err) {
           console.error("[clara-runtime] enqueue failed (reconciler will re-enqueue):", (err as Error)?.message ?? err);
         }

@@ -6,12 +6,16 @@
 
 import { randomUUID } from "node:crypto";
 
-// Env defaults for the local throwaway (composed before any pool connects).
-process.env.PGHOST ??= "127.0.0.1";
-process.env.PGPORT ??= "5544";
-process.env.PGUSER ??= "postgres";
-process.env.PGDATABASE ??= "clara_rt_test";
-process.env.PGPASSWORD ??= "postgres";
+// Env-ONLY (the documented secrets law — no hardcoded credential fallback). The
+// runner MUST supply the DB target; fail loudly rather than silently connecting to
+// node-postgres's own defaults. RELAY_TEST_MODE is a test-MODE flag (not a
+// credential), so the rig may default it.
+if (!process.env.PGHOST && !process.env.DATABASE_URL) {
+  throw new Error(
+    "runtime tests need a DB target in the ENVIRONMENT (PGHOST/PGPORT/PGUSER/PGDATABASE or DATABASE_URL). " +
+      "e.g. PGHOST=127.0.0.1 PGPORT=5544 PGUSER=postgres PGDATABASE=clara_rt_test RELAY_TEST_MODE=1 node --test tests/",
+  );
+}
 process.env.RELAY_TEST_MODE ??= "1";
 
 import * as fx from "./relay-fixtures.mjs";
@@ -75,6 +79,10 @@ export async function beginChatTurn({ session, author, turnKey = null, parts = n
   return r.rows[0].receipt;
 }
 
+export async function checkpointTurn({ task, segment = 0, tokens = 0, parts = [] }) {
+  await fx.asRuntime((c) => c.query("select clara.checkpoint_turn($1,$2,$3,$4::jsonb)", [task, segment, tokens, JSON.stringify(parts)]));
+}
+
 export async function settleChatTurn({ task, parts = [], tokens = 10, outcome = "completed", errorCode = null }) {
   const r = await fx.asRuntime((c) =>
     c.query("select clara.settle_chat_turn($1,$2::jsonb,$3,$4,$5) as receipt", [
@@ -134,12 +142,13 @@ export async function makeConsumableIntent({ ownerSub, client }) {
 // ---------------------------------------------------------------------------
 
 export async function insertInterruption({ task, hookToken = null, question = "Which client?", expiresInDays = 14 }) {
-  const q = { type: "clarify", question, context: null, framing: "visible to your firm", hook_token: hookToken ?? `clarify:${task}:0` };
+  const q = { type: "clarify", question, context: null, framing: "visible to your firm" };
+  const tok = hookToken ?? `clarify:${randomUUID()}`;
   const r = await fx.asRuntime((c) =>
     c.query(
-      `insert into clara.agent_interruptions (task_id, question, expires_at)
-         values ($1,$2::jsonb, now() + ($3 || ' days')::interval) returning id`,
-      [task, JSON.stringify(q), String(expiresInDays)],
+      `insert into clara.agent_interruptions (task_id, hook_token, question, expires_at)
+         values ($1,$2,$3::jsonb, now() + ($4 || ' days')::interval) returning id`,
+      [task, tok, JSON.stringify(q), String(expiresInDays)],
     ),
   );
   return r.rows[0].id;

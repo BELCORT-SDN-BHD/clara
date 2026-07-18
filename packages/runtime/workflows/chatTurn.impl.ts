@@ -13,11 +13,11 @@
 // credentials are minted INSIDE the step that uses them and NEVER cross a step
 // boundary (§4.1 — step IO is durably persisted).
 
-import { streamText, stepCountIs, hasToolCall, type ModelMessage } from "ai";
+import { randomUUID } from "node:crypto";
+import { streamText, stepCountIs, hasToolCall, tool, type ModelMessage } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
-import { tool } from "ai";
-import { getWritable } from "workflow";
+import { getWritable, getWorkflowMetadata } from "workflow";
 import {
   SYSTEM_PROMPT,
   CLARIFY_FRAMING,
@@ -120,6 +120,28 @@ function buildReadTools(secret: string, clientId: string) {
 // Steps.
 // ---------------------------------------------------------------------------
 
+/** CLAIM this task for THIS run (S4-AB3 self-bind dedupe). getWorkflowMetadata gives
+ *  the run its own id; a compare-and-swap binds queued+unbound -> running. If the CAS
+ *  loses (another run bound it first, or the task moved past queued), this run is a
+ *  DUPLICATE start — it self-aborts (the caller returns before any model call), so
+ *  exactly ONE run per task ever does the work, even under kill-after-start. Memoized,
+ *  so a replay of THIS run keeps its claim. */
+export async function claimRunStep(taskId: string): Promise<{ claimed: boolean }> {
+  "use step";
+  const { workflowRunId } = getWorkflowMetadata();
+  return pools().withRuntime(async (c) => {
+    const cas = await c.query(
+      `update clara.agent_tasks set workflow_run_id = $2, status = 'running'
+        where id = $1 and status = 'queued' and workflow_run_id is null returning id`,
+      [taskId, workflowRunId],
+    );
+    if (cas.rowCount === 1) return { claimed: true };
+    // Not claimed by the CAS — claimed iff WE are already the bound run (idempotent).
+    const own = await c.query("select 1 from clara.agent_tasks where id = $1 and workflow_run_id = $2", [taskId, workflowRunId]);
+    return { claimed: own.rowCount === 1 };
+  });
+}
+
 /** Read the task's durable snapshot + binding (model, session, client, firm). */
 export async function loadTaskStep(taskId: string): Promise<{ sessionId: string; model: string; clientId: string | null; firmId: string }> {
   "use step";
@@ -217,11 +239,22 @@ export async function runModelSegmentStep(
   };
 }
 
-/** Open a clarify interruption + park the task (awaiting_input, 14-day deadline).
- *  The hook token is carried INSIDE the question payload (0006 has no token column)
- *  so the control listener can resume the exact hook; the workflow creates the hook
- *  BEFORE this step, so the token is live before the interruption is answerable. */
-export async function recordInterruptionStep(
+/** Mint a RANDOM hook token in a MEMOIZED step (S4-AB4). Random avoids the §8
+ *  token-reuse footgun; minting it in a step (not the deterministic body) keeps it
+ *  STABLE across WDK replays — a body-side randomUUID would differ on every replay
+ *  and strand the park. */
+export async function mintHookTokenStep(): Promise<string> {
+  "use step";
+  return `clarify:${randomUUID()}`;
+}
+
+/** Open a clarify ATOMICALLY via clara.open_interruption (S4-AB4): it transitions
+ *  the task running→awaiting_input AND inserts the pending interruption (14-day
+ *  deadline) in ONE txn, idempotent by hook_token. The workflow creates the hook
+ *  BEFORE this step, so the token is live before the interruption is answerable; an
+ *  orphaned engine hook from a crash before this commits is acceptable garbage (the
+ *  hook is single-shot and never resumed). */
+export async function openInterruptionStep(
   taskId: string,
   hookToken: string,
   clarify: { question: string; context?: string },
@@ -232,17 +265,20 @@ export async function recordInterruptionStep(
     question: clarify.question,
     context: clarify.context ?? null,
     framing: CLARIFY_FRAMING,
-    hook_token: hookToken,
   };
-  await pools().withRuntime(async (c) => {
-    await c.query(
-      `insert into clara.agent_interruptions (task_id, question, expires_at)
-         values ($1, $2::jsonb, now() + interval '14 days')`,
-      [taskId, JSON.stringify(question)],
-    );
-    // Park the task — awaiting_input is the ONLY parked-visibility source (S4-P1a).
-    await c.query("update clara.agent_tasks set status = 'awaiting_input' where id = $1 and status = 'running'", [taskId]);
-  });
+  await pools().withRuntime((c) =>
+    c.query("select clara.open_interruption($1, $2, $3::jsonb, null)", [taskId, hookToken, JSON.stringify(question)]),
+  );
+}
+
+/** Durably checkpoint a completed segment's tokens + parts (S4-AB6). Idempotent by
+ *  (task, segment); settle sums checkpoints for the authoritative token total and
+ *  recovers checkpointed parts on a cancel/repair settle. Parts MUST be an array. */
+export async function checkpointStep(taskId: string, segment: number, tokens: number, parts: ClaraPart[]): Promise<void> {
+  "use step";
+  await pools().withRuntime((c) =>
+    c.query("select clara.checkpoint_turn($1, $2, $3, $4::jsonb)", [taskId, segment, tokens, JSON.stringify(parts)]),
+  );
 }
 
 /** Un-park the task on resume (awaiting_input -> running) so it counts as compute. */
@@ -267,11 +303,17 @@ export async function settleStep(
   );
 }
 
-/** Close the run's writable exactly once — the readable never signals done otherwise (P2). */
+/** Close the run's writable — the readable never signals done otherwise (P2).
+ *  IDEMPOTENT (S4-AB4b): a second close (already-closed writable, or the lock held)
+ *  is swallowed, so the workflow's try/finally can close on EVERY exit path safely. */
 export async function closeStreamStep(): Promise<void> {
   "use step";
-  const writer = getWritable<unknown>().getWriter();
-  await writer.close();
+  try {
+    const writer = getWritable<unknown>().getWriter();
+    await writer.close();
+  } catch {
+    // already closed / not lockable — the readable has already (or will) signal done.
+  }
 }
 
 // ---------------------------------------------------------------------------

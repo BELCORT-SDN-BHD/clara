@@ -59,11 +59,42 @@ export const READ_CREDENTIAL_TTL = process.env.CLARA_READ_CREDENTIAL_TTL || "5 m
  * @param {"runtime"|"read"} which
  * @returns {pg.PoolConfig}
  */
+function dsnVarFor(which) {
+  return which === "runtime" ? "CLARA_RUNTIME_DATABASE_URL" : "CLARA_READ_DATABASE_URL";
+}
+
+/**
+ * Assert the production pool config is present — call once at boot (serve.mjs). In
+ * production (RELAY_TEST_MODE !== '1') BOTH dedicated login DSNs are REQUIRED; the
+ * runtime must never fall back to a shared/base identity (S4-AB8, fail-closed).
+ */
+export function assertProductionPoolConfig() {
+  if (TEST_MODE) return;
+  for (const which of ["runtime", "read"]) {
+    const v = dsnVarFor(which);
+    if (!process.env[v]) {
+      throw new Error(
+        `${v} is REQUIRED in production (RELAY_TEST_MODE unset): the ${which} pool must connect as its dedicated ` +
+          `login (${which === "runtime" ? "clara_runtime_login" : "clara_agent_read_login"}) — never a fallback identity. Refusing to start.`,
+      );
+    }
+  }
+}
+
 function loginConfig(which) {
   assertNoTargetSplit(); // fail closed on a canonical-target split before connecting
   const dsn =
     which === "runtime" ? process.env.CLARA_RUNTIME_DATABASE_URL : process.env.CLARA_READ_DATABASE_URL;
-  const base = dsn ? { connectionString: dsn } : connConfig();
+  let base;
+  if (TEST_MODE) {
+    // Local throwaway: connect with the base env identity, then SET ROLE (N10).
+    base = dsn ? { connectionString: dsn } : connConfig();
+  } else if (!dsn) {
+    // Fail CLOSED — never fall back to connConfig() in production (S4-AB8).
+    throw new Error(`${dsnVarFor(which)} is required in production — refusing to connect the ${which} pool as a fallback identity.`);
+  } else {
+    base = { connectionString: dsn };
+  }
   return {
     ...base,
     max: which === "runtime" ? RUNTIME_POOL_MAX : READ_POOL_MAX,
@@ -127,30 +158,21 @@ async function checkout(pool, setup, fn) {
   client.on("error", onErr);
   try {
     await client.query(setup); // SET ROLE ... (+ read-only) + timeouts — N10
-    const out = await fn(client);
-    // Success path: close any transaction the caller left open (also drops SET
-    // LOCAL state) and reset the session for the next checkout.
+    return await fn(client);
+  } finally {
+    // SHARED cleanup on EVERY path (success AND throw — S4-AB8): close any open
+    // transaction (also drops SET LOCAL state) then reset session state. If EITHER
+    // fails, the connection is gone → discard it. We never inspect SQLSTATE (P4).
     try {
       await client.query("rollback");
     } catch {
-      broken = true; // a failed ROLLBACK means the connection is gone
+      broken = true;
     }
     try {
       await client.query("reset all");
     } catch {
       broken = true;
     }
-    return out;
-  } catch (err) {
-    // fn or setup threw. Try to unwind the transaction; a failed ROLLBACK is a
-    // dead connection (discard). We never inspect SQLSTATE (P4).
-    try {
-      await client.query("rollback");
-    } catch {
-      broken = true;
-    }
-    throw err;
-  } finally {
     client.removeListener("error", onErr);
     // release(true) DESTROYS the client (removes it from the pool); release()
     // returns it. Discard on any connection-level error.
@@ -234,6 +256,11 @@ export function withReadWakeScoped(secret, fn) {
 export function makeRuntimeClient() {
   assertNoTargetSplit();
   const dsn = process.env.CLARA_RUNTIME_DATABASE_URL;
+  // Fail CLOSED in production (S4-FX7): a dedicated LISTEN client must never fall
+  // back to the base identity — require the login DSN when not in test mode.
+  if (!TEST_MODE && !dsn) {
+    throw new Error(`${dsnVarFor("runtime")} is required in production — refusing a bare-identity LISTEN client.`);
+  }
   return new pg.Client(dsn ? { connectionString: dsn } : connConfig());
 }
 

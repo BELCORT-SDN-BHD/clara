@@ -69,12 +69,17 @@ test("settle: idempotent, records usage, closes pending interruptions", { skip }
   const { owner, client, firm } = await rig.buildFirm("adm5");
   const session = await rig.createChatSession({ author: owner, client });
   const { task_id } = await rig.beginChatTurn({ session, author: owner, turnKey: "s1" });
-  await rig.driveTask(task_id, ["running", "awaiting_input"]);
+  await rig.driveTask(task_id, ["running"]);
+  // Usage is now the sum of durable checkpoints (S4-AB6) — the workflow checkpoints
+  // each segment; settle IGNORES the passed token count. Checkpoint 42 before settling.
+  await rig.checkpointTurn({ task: task_id, segment: 0, tokens: 42, parts: [{ type: "text", text: "done" }] });
+  // A pending interruption present at settle must be closed (S4-D6). settle running->completed is matrix-legal.
   await rig.insertInterruption({ task: task_id });
 
-  const r1 = await rig.settleChatTurn({ task: task_id, parts: [{ type: "text", text: "done" }], tokens: 42, outcome: "completed" });
+  const r1 = await rig.settleChatTurn({ task: task_id, parts: [{ type: "text", text: "done" }], tokens: 999, outcome: "completed" });
   assert.equal(r1.status, "completed");
   assert.equal(r1.replayed, false);
+  assert.equal(Number(r1.tokens), 42, "settle reports the checkpoint-sum token total (passed 999 ignored)");
 
   const task = await rig.readTask(task_id);
   assert.equal(task.status, "completed");

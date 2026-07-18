@@ -11,4 +11,9 @@ if (!process.env.WORKFLOW_POSTGRES_URL && process.env.DATABASE_URL) {
 process.env.WORKFLOW_TARGET_WORLD ??= "@workflow/world-postgres";
 process.env.PORT ??= "3200";
 
+// Fail CLOSED at boot if the production pool DSNs are missing (S4-AB8/FX7) — every
+// supported entry point asserts, not just serve.mjs.
+const { assertProductionPoolConfig } = await import("../lib/pools.mjs");
+assertProductionPoolConfig();
+
 await import(new URL("../.output/server/index.mjs", import.meta.url).href);

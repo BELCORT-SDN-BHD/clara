@@ -73,8 +73,8 @@ export async function drainWakeIntents(client, opts = {}) {
       if (isWakeBound(it.decision)) {
         // Held task — the derivation trigger fills firm/client from intent→event
         // and pins kind/status. Targetless ON CONFLICT (the origin_intent_id unique
-        // index is PARTIAL) makes it idempotent.
-        await client.query(
+        // index is PARTIAL) makes it idempotent; rowCount counts only ACTUAL inserts.
+        const tIns = await client.query(
           `insert into clara.agent_tasks (origin_intent_id, kind, status)
              values ($1, 'wake', 'held')
            on conflict do nothing`,
@@ -82,14 +82,16 @@ export async function drainWakeIntents(client, opts = {}) {
         );
         // Held outbox row — the trigger derives condition from the intent's decision
         // (a caller-supplied condition is overwritten), so we insert only intent_id.
-        await client.query(
+        const oIns = await client.query(
           `insert into clara.wakes_outbox (intent_id, condition, status)
              values ($1, $2, 'held')
            on conflict (intent_id) do nothing`,
           [it.id, it.decision],
         );
-        // Surviving-row identity asserts (post-ON-CONFLICT). A mismatch is a benign
-        // diagnostic under at-least-once (log loudly, never abort — routing C3).
+        // Surviving-row identity asserts (post-ON-CONFLICT). Unlike the routing-phase
+        // C3 diagnostic, a DRAIN mismatch is a genuine invariant violation (the
+        // derivation triggers guarantee kind='wake' + condition=decision), so THROW
+        // to roll the whole batch back (fail-loud — S4-AB14), never log-and-consume.
         const surv = await client.query(
           `select at.kind as task_kind, wo.condition as outbox_condition
              from clara.agent_tasks at
@@ -99,13 +101,13 @@ export async function drainWakeIntents(client, opts = {}) {
         );
         const row = surv.rows[0];
         if (!row || row.task_kind !== "wake" || row.outbox_condition !== it.decision) {
-          log(
-            `[drain] surviving-row mismatch intent=${it.id} expected=(wake,${it.decision}) ` +
-              `got=(${row?.task_kind},${row?.outbox_condition})`,
+          throw new Error(
+            `drain: surviving-row identity mismatch intent=${it.id} expected=(wake,${it.decision}) ` +
+              `got=(${row?.task_kind},${row?.outbox_condition}) — rolling back batch`,
           );
         }
-        tasks += 1;
-        outbox += 1;
+        tasks += tIns.rowCount ?? 0;
+        outbox += oIns.rowCount ?? 0;
       } else {
         // Not reachable from routing (which only stamps wake-bound intents); defend
         // by dead-lettering rather than forging a task, and still consume the intent.

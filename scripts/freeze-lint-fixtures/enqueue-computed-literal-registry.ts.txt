@@ -1,0 +1,9 @@
+// Fixture (OK): computed namespace access with a LITERAL property and a
+// registry-provenanced argument — the literal is resolved and the call is
+// classified normally, not blanket-rejected.
+import * as api from "workflow/api";
+import { workflows } from "../workflows/registry.js";
+
+export async function kick(): Promise<void> {
+  await api["start"](workflows.closeExample, []);
+}

@@ -12,10 +12,10 @@
 // (settle_chat_turn is idempotent by task — the second run's settle is a
 // stored-outcome no-op), which is the contract's accepted honesty envelope (§0.4).
 //
-// Engine status vocabulary (world@4.2.1): pending | running | completed | failed |
-// cancelled. A PARKED run reports 'running' (S4-P1a) — so `awaiting_input` on the
-// TASK is the only parked-visibility source; the reconciler never treats engine
-// 'running' as "finished".
+// Engine status vocabulary (workflow@4.6.0 / @workflow/world-postgres@4.3.0):
+// pending | running | completed | failed | cancelled. A PARKED run reports
+// 'running' (S4-P1a) — so `awaiting_input` on the TASK is the only parked-visibility
+// source; the reconciler never treats engine 'running' as "finished".
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -26,6 +26,33 @@ const PRUNE_MAX_BATCHES = Number(process.env.CLARA_TRACE_PRUNE_MAX_BATCHES || 20
 /** True iff the error is the engine's "run id unknown" signal. */
 export function isRunNotFound(err) {
   return err != null && (/RunNotFound/i.test(String(err.name || "")) || /run .*not found/i.test(String(err.message || "")));
+}
+
+/**
+ * The legal terminal settle for an open task given the engine's terminal status,
+ * respecting the AB11 transition matrix:
+ *   running        → completed | failed
+ *   awaiting_input → expired | cancelled  (NEVER completed/failed)
+ * `engine` is 'completed' | 'failed' | 'cancelled' | 'lost'. Returns null when no
+ * legal settle applies (anomalous pair — leave for the next sweep / the cancel path).
+ * @returns {{outcome:'completed'|'failed'|'cancelled'|'expired', errorCode:string|null}|null}
+ */
+export function terminalFor(taskStatus, engine) {
+  if (taskStatus === "running") {
+    if (engine === "completed") return { outcome: "completed", errorCode: null };
+    if (engine === "failed") return { outcome: "failed", errorCode: "internal" }; // ran + failed = internal
+    if (engine === "lost") return { outcome: "failed", errorCode: "engine_lost" }; // run absent = engine_lost
+    return null; // engine 'cancelled' on a plain 'running' task is anomalous (cancel sets cancel_requested first)
+  }
+  if (taskStatus === "awaiting_input") {
+    // A parked task can only terminal to expired/cancelled. A lost/failed/cancelled
+    // engine run for a parked clarify settles 'cancelled' (the clarify can't resume).
+    if (engine === "lost") return { outcome: "cancelled", errorCode: "engine_lost" };
+    if (engine === "failed") return { outcome: "cancelled", errorCode: "internal" };
+    if (engine === "cancelled") return { outcome: "cancelled", errorCode: null };
+    return null; // engine 'completed' while parked is impossible (a finished run settles the task)
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -93,16 +120,6 @@ export async function pruneTraces(client, opts = {}) {
 // Task settlement helpers.
 // ---------------------------------------------------------------------------
 
-/** Bind a run onto a queued task (conditional — the run-listing dedupe of S4-V1). */
-export async function bindChatRun(client, taskId, runId) {
-  await client.query(
-    `update clara.agent_tasks
-        set workflow_run_id = $2, status = 'running'
-      where id = $1 and status = 'queued' and workflow_run_id is null`,
-    [taskId, runId],
-  );
-}
-
 /** Settle a task to a terminal outcome (idempotent; closes pending interruptions). */
 export async function settleTaskTerminal(client, taskId, outcome, errorCode) {
   await client.query("select clara.settle_chat_turn($1, $2::jsonb, $3, $4, $5)", [taskId, "[]", 0, outcome, errorCode]);
@@ -134,8 +151,9 @@ export async function reconcileTasks(client, deps) {
   );
   for (const t of stuck.rows) {
     try {
-      const run = await enqueueChatTurn(t.id);
-      await bindChatRun(client, t.id, run.runId);
+      // Just start — the workflow's first step CAS-binds itself (S4-AB3); a duplicate
+      // start (e.g. racing the ingress) self-aborts. No bind here.
+      await enqueueChatTurn(t.id);
       out.reenqueued += 1;
     } catch (err) {
       log(`[reconcile] re-enqueue failed task=${t.id}: ${err?.message ?? err}`);
@@ -162,6 +180,9 @@ export async function reconcileTasks(client, deps) {
   }
 
   // C) open task with a run -> settle from engine truth when the engine is terminal.
+  // The terminal OUTCOME is matrix-aware (S4-AB11): a 'running' task may go
+  // completed/failed, but an 'awaiting_input' (parked) task may only go
+  // expired/cancelled — so a lost/failed parked run settles 'cancelled', never 'failed'.
   const open = await client.query(
     `select id, status, workflow_run_id from clara.agent_tasks
       where kind = 'chat_turn' and workflow_run_id is not null
@@ -171,29 +192,35 @@ export async function reconcileTasks(client, deps) {
     [onlyFirm],
   );
   for (const t of open.rows) {
-    let es;
+    let engineTerminal; // 'completed' | 'failed' | 'cancelled' | 'lost' | null(in-flight)
     try {
-      es = await getRun(t.workflow_run_id).status;
+      const es = await getRun(t.workflow_run_id).status;
+      engineTerminal = es === "completed" || es === "failed" || es === "cancelled" ? es : null;
     } catch (err) {
       if (isRunNotFound(err)) {
-        await settleTaskTerminal(client, t.id, "failed", "engine_lost");
-        out.settledTerminal += 1;
+        engineTerminal = "lost";
       } else {
         log(`[reconcile] status probe failed task=${t.id}: ${err?.message ?? err}`);
+        continue;
       }
+    }
+    if (!engineTerminal) continue; // 'running'/'pending' (incl. a parked run) — in flight.
+    // A 'running' task whose engine run is CANCELLED can't go running→cancelled (AB11).
+    // Route it matrix-legally in one repair txn: running→cancel_requested→cancelled
+    // (S4-FX5) — otherwise the pair would be skipped forever.
+    if (t.status === "running" && engineTerminal === "cancelled") {
+      await client.query("update clara.agent_tasks set status = 'cancel_requested', updated_at = now() where id = $1 and status = 'running'", [t.id]);
+      await settleTaskTerminal(client, t.id, "cancelled", null); // cancel_requested→cancelled (legal)
+      out.settledTerminal += 1;
       continue;
     }
-    if (es === "completed") {
-      await settleTaskTerminal(client, t.id, "completed", null);
+    const settle = terminalFor(t.status, engineTerminal);
+    if (settle) {
+      await settleTaskTerminal(client, t.id, settle.outcome, settle.errorCode);
       out.settledTerminal += 1;
-    } else if (es === "failed") {
-      await settleTaskTerminal(client, t.id, "failed", "engine_lost");
-      out.settledTerminal += 1;
-    } else if (es === "cancelled") {
-      await settleTaskTerminal(client, t.id, "cancelled", null);
-      out.settledTerminal += 1;
+    } else {
+      log(`[reconcile] no legal terminal for task=${t.id} status=${t.status} engine=${engineTerminal} — skipping`);
     }
-    // 'running' (incl. parked/awaiting_input) or 'pending' -> in flight; no action.
   }
 
   // D) terminal task whose run is still active (crash after settle, before abort) ->

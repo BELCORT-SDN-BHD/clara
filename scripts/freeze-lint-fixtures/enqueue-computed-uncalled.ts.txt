@@ -1,0 +1,11 @@
+// Fixture (REJECT: ENQUEUE-UNTRACEABLE): a literal computed access that is
+// NOT immediately called extracts the enqueue callable into an untracked
+// binding (laundering) — refused fail-closed.
+import * as api from "workflow/api";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+const go = api["start"];
+
+export async function kick(): Promise<void> {
+  await go(chatTurnV1, []);
+}

@@ -32,18 +32,29 @@ COPY packages/runtime/plugins ./packages/runtime/plugins
 COPY packages/runtime/scripts ./packages/runtime/scripts
 RUN pnpm --filter @clara/runtime build
 
+# 3. A PRUNED PRODUCTION node_modules for the runner (S4-AB2). The nitro bundle does
+#    NOT bundle the WDK world — plugins/startWorld.ts loads @workflow/world-postgres
+#    via a RUNTIME require (WORKFLOW_TARGET_WORLD), so it must resolve from the runner
+#    cwd. `pnpm deploy` produces a self-contained, prod-only node_modules.
+RUN pnpm --filter @clara/runtime deploy --legacy --prod /app/deploy
+
 # ---------------------------------------------------------------------------
-# runner — the self-contained nitro output + the supervisor. No install, no secrets.
+# runner — the nitro output + the supervisor + the pruned engine node_modules.
 # ---------------------------------------------------------------------------
 FROM node:20-bookworm-slim AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 
-# The nitro node-server output is self-contained (bundled deps in _libs + traced
-# native modules under .output/server/node_modules), so no runtime install is needed.
-# serve.mjs resolves ../.output relative to itself, so keep the scripts/.output layout.
+# Engine deps for the runtime require()s (@workflow/world-postgres, workflow, pg, ...)
+# — resolved from the cwd node_modules by the .output bundle at runtime (S4-AB2).
+COPY --from=builder /app/deploy/node_modules ./node_modules
+# The nitro node-server output (bundled deps in _libs + traced native cbor modules).
+# serve.mjs resolves ../.output relative to itself — keep the scripts/.output layout.
 COPY --from=builder /app/packages/runtime/.output ./.output
 COPY --from=builder /app/packages/runtime/scripts ./scripts
+# The entry scripts import ../lib/* at RUNTIME (serve.mjs + worker.mjs → lib/pools.mjs;
+# relay.mjs → lib/relay.mjs) — these are NOT the bundled copies, so ship lib/ (S4-FX1).
+COPY --from=builder /app/packages/runtime/lib ./lib
 COPY --from=builder /app/packages/runtime/package.json ./package.json
 
 EXPOSE 3200

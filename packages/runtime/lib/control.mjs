@@ -27,6 +27,8 @@ import os from "node:os";
 import { setTimeout as sleep } from "node:timers/promises";
 import { resumeHook as apiResumeHook, getRun as apiGetRun } from "workflow/api";
 import { makeRuntimeClient, setRuntimeRoleOn } from "./pools.mjs";
+import { isConnErr, waitForNudge } from "./listen.mjs";
+import { settleTaskTerminal } from "./reconciler.mjs";
 
 /** The control NOTIFY channel (empty-payload nudge — the poll is the guarantee). */
 export const CONTROL_CHANNEL = "clara_runtime_ctl";
@@ -66,7 +68,10 @@ export function resumePayloadFor(row) {
  * after the TTL and re-delivers (idempotent via the single-shot hook).
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{resumeHook:(token:string,payload:unknown)=>Promise<unknown>, batchSize?:number,
- *          listenerId?:string, log?:(m:string)=>void}} deps
+ *          listenerId?:string, onlyFirm?:string|null, log?:(m:string)=>void}} deps
+ *   onlyFirm scopes the lease to a single firm (TEST-ONLY, the relay's onlyFirm
+ *   precedent — a shared test DB must not deliver other tests' leftovers). Production
+ *   leaves it null: one runtime delivers for the whole cluster.
  */
 export async function deliverInterruptions(client, deps) {
   const { resumeHook, batchSize = 20, listenerId = LISTENER_ID, onlyFirm = null, log = () => {} } = deps;
@@ -86,7 +91,7 @@ export async function deliverInterruptions(client, deps) {
          limit $3
          for update skip locked
       )
-      returning id, (question ->> 'hook_token') as hook_token, status, answer`,
+      returning id, hook_token, status, answer`,
     [listenerId, String(LEASE_SECONDS), batchSize, onlyFirm],
   );
   let delivered = 0;
@@ -115,11 +120,14 @@ export async function deliverInterruptions(client, deps) {
 
 /**
  * Abort + settle every cancel_requested task. `cancelRun(runId)` aborts the engine
- * run (idempotent — a terminal/absent run is fine); `settleCancelled(client,taskId)`
- * moves the task to cancelled and closes its pending interruptions (S4-D6). Abort
- * FIRST, then settle — a crash between them is repaired by the reconciler.
+ * run (idempotent — a terminal/absent run is fine); the reconciler's settleTaskTerminal
+ * moves the task to cancelled + closes pending interruptions (S4-D6) and lets
+ * settle_chat_turn recover any checkpointed work. Abort FIRST, then settle — a crash
+ * between them is repaired by the reconciler.
  * @param {import("pg").ClientBase} client  a clara_runtime connection
- * @param {{cancelRun:(runId:string)=>Promise<unknown>, batchSize?:number, log?:(m:string)=>void}} deps
+ * @param {{cancelRun:(runId:string)=>Promise<unknown>, batchSize?:number,
+ *          onlyFirm?:string|null, log?:(m:string)=>void}} deps
+ *   onlyFirm scopes the scan to one firm (TEST-ONLY; production leaves it null).
  */
 export async function processCancellations(client, deps) {
   const { cancelRun, batchSize = 20, onlyFirm = null, log = () => {} } = deps;
@@ -143,18 +151,10 @@ export async function processCancellations(client, deps) {
         log(`[control] cancelRun(${t.workflow_run_id}) noop/err: ${err?.message ?? err}`);
       }
     }
-    await settleCancelled(client, t.id);
+    await settleTaskTerminal(client, t.id, "cancelled", null);
     settled += 1;
   }
   return { settled };
-}
-
-/** Settle a task to cancelled (idempotent; closes pending interruptions — S4-D6). */
-export async function settleCancelled(client, taskId) {
-  await client.query(
-    "select clara.settle_chat_turn($1, $2::jsonb, $3, $4, $5)",
-    [taskId, "[]", 0, "cancelled", null],
-  );
 }
 
 /** One control cycle: deliver interruptions, then settle cancellations. */
@@ -229,31 +229,6 @@ export function startControlListener(deps) {
     },
     done: loop,
   };
-}
-
-function isConnErr(err) {
-  if (!err) return false;
-  const code = err.code;
-  if (code && ["57P01", "08000", "08001", "08003", "08004", "08006", "ECONNRESET", "EPIPE"].includes(code)) return true;
-  return /terminat|connection (?:closed|terminated|reset|refused)|server closed the connection/i.test(String(err.message || ""));
-}
-
-function waitForNudge(client, ms, stopRef) {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      client.removeListener("notification", onNotif);
-      stopRef.wake = null;
-      resolve();
-    };
-    const onNotif = () => finish();
-    const timer = setTimeout(finish, ms);
-    client.once("notification", onNotif);
-    stopRef.wake = finish;
-  });
 }
 
 /** Production dependency factory — the real world calls (workflow/api, statically

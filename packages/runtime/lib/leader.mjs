@@ -21,36 +21,12 @@ import {
 import { makeRuntimeClient } from "./pools.mjs";
 import { drainCycle } from "./drain.mjs";
 import { runReconcilerSweep, heartbeat } from "./reconciler.mjs";
+import { isConnErr, waitForNudge } from "./listen.mjs";
 
 const POLL_INTERVAL_MS = Number(process.env.CLARA_LEADER_POLL_MS || 2000);
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 const PRUNE_EVERY = Number(process.env.CLARA_LEADER_PRUNE_EVERY || 50);
-
-function isConnErr(err) {
-  if (!err) return false;
-  const code = err.code;
-  if (code && ["57P01", "08000", "08001", "08003", "08004", "08006", "ECONNRESET", "EPIPE"].includes(code)) return true;
-  return /terminat|connection (?:closed|terminated|reset|refused)|server closed the connection/i.test(String(err.message || ""));
-}
-
-function waitForNudge(client, ms, stopRef) {
-  return new Promise((resolve) => {
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      client.removeListener("notification", onNotif);
-      stopRef.wake = null;
-      resolve();
-    };
-    const onNotif = () => finish();
-    const timer = setTimeout(finish, ms);
-    client.once("notification", onNotif);
-    stopRef.wake = finish;
-  });
-}
 
 /**
  * Start the leader loop. Returns { stop, done }. `onHalt` (default process.exit(2))
@@ -90,7 +66,9 @@ export function startLeaderLoop(deps) {
             const routed = await runRelayCycle(client, { log });
             const drained = await drainCycle(client, { log });
             await runReconcilerSweep(client, { ...deps, prune: iteration % PRUNE_EVERY === 0 });
-            await heartbeat(client, "world");
+            // NB: the 'world' heartbeat is NOT written here (S4-AB7b / ND5) — relay
+            // leadership must not gate /ready. The engine heartbeat is a dedicated
+            // task in the supervisor; the leader only beats 'reconciler' (via the sweep).
             capped = routed.capped || drained.capped;
             iteration += 1;
           } catch (err) {
