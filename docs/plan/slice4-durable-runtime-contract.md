@@ -1,14 +1,17 @@
-# Slice 4 design contract — the durable runtime skeleton (v2.1 — build authority)
+# Slice 4 design contract — the durable runtime skeleton (v2.2 — as landed)
 
-Status: **v2.1 — the contract of record for the Slice-4 build.** v1 → dual
-adversarial design review: NATIVE **SOUND-WITH-FIXES** (S4-N1–N15) + CODEX
-xhigh **FLAWED** (S4-C1–C16) — all accepted → v2 → dual DELTA re-review:
-native **CLEARED-WITH-NOTES** (S4-ND1–ND9) + Codex **STILL-FLAWED with
-additive residuals** (S4-D1–D10) — ALL integrated here; no structural choice
-reversed (the Slice-3 precedent). Probes S4-P1–P6 ALL PASS (§2). **§0.11
-OWNER-RATIFIED 2026-07-18.** Authority above this doc: ARCHITECTURE §4 +
-Appendix A, ADR-008/009/010/011/014/015/016, slice3 contract v2.2,
-migrations 0001–0005. Tags S4-N*/C*/ND*/D*/P*/V* resolve here (§9 map).
+Status: **v2.2 — the contract of record AS BUILT.** v1 → dual adversarial
+design review: NATIVE **SOUND-WITH-FIXES** (S4-N1–N15) + CODEX xhigh
+**FLAWED** (S4-C1–C16) → v2 → dual DELTA re-review: **CLEARED-WITH-NOTES**
+(S4-ND1–ND9) + **STILL-FLAWED additive** (S4-D1–D10) — all integrated, no
+structural choice reversed → v2.1 (build authority) → the build (a
+CONTRACT-BLIND rig lane, three found-fixed-reproven defects, 48/48 final) →
+the live-verifying as-built review (S4-AB1–AB16, 2 CRITICAL) + standards/
+spec axes + a fix-round re-verification (S4-FX1–FX7) — ALL closed → **§10
+records the as-built amendments.** Probes S4-P1–P6 ALL PASS (§2). §0.11
+OWNER-RATIFIED 2026-07-18. Authority above this doc: ARCHITECTURE §4 +
+Appendix A, ADR-008/009/010/011/014/015/016/017, slice3 contract v2.2,
+migrations 0001–0005. Tags S4-N*/C*/ND*/D*/P*/V*/AB*/FX* resolve here.
 
 ## 0. Ratified owner semantics (grilled 2026-07-18)
 
@@ -344,12 +347,38 @@ rebuild (.output locks). ADR on merge: ten rulings + §0.11 (ratified) +
 trusted-ingress boundary + model-parameterization/config-snapshot law.
 
 ## 9. Finding-integration map
-N1→§3.6 · N2→§3.5/3.6 · N3→§3.2/3.3 · N4→§4.4 · N5→§3.2 · N6→§4.6 ·
-N7→§3.3 · N8/N9→§4.1 · N10→§4.2 · N11→§0.4 · N12→§4.1 · N13/N14→§6/§4.9 ·
-N15→§3.5 ‖ C1→§3.2(+CHECK)/§4.2 · C2→§4.2/§3.0 · C3→§3.0/4.1 · C4→§3.2/
-3.4/3.7 · C5→§3.6/4.2/4.6 · C6→§3.5/3.6 · C7→§3.6/§0.4 · C8→§3.2 ·
-C9→§3.3 · C10→§4.6/S4-V2 · C11→§4.9 · C12→§4.1/4.7/§5 · C13→§3.0/3.1/4.4 ·
-C14→§3.7 · C15→§0.11 · C16→§6 ‖ ND1→§3.2 · ND2→§3.0 · ND3→§0.4/§3.6 ·
-ND4→§4.9 · ND5→§4.7 · ND6→§3.6/4.1 · ND7→§3.2/3.5 · ND8→§0.8 · ND9→§3.9 ‖
-D1→§0.5 · D2→§3.3 · D3→§3.2/3.6/4.2 · D4→§4.9 · D5→§3.3 · D6→§3.2/3.3/
-4.6 · D7→§3.1 · D8→§4.1 · D9→§3.7 · D10→§4.1.
+The full N*/C*/ND*/D* → section map lived in v2.1 (this file's git history);
+the AB*/FX* closures are itemized in the two as-built-fix commit messages.
+
+## 10. As-built amendments (v2.2 — the three-stage ladder's output)
+- **0006 as landed** (original + 7 amendment rounds, blind-validated 48/48):
+  login memberships SET TRUE + INHERIT FALSE (AB1); the FULL task transition
+  matrix incl. `queued→cancelled` direct — a never-started task exits ONLY
+  via cancel (AB11); parts = array-of-typed-objects CHECK+trigger (AB12;
+  per-type field schemas DEFERRED to the Phase-4 fail-closed card catalog);
+  `hook_token` column UNIQUE + `open_interruption` (atomic, idempotent by
+  token, LINEARIZED — any-other-pending → CLR13 — and cross-task-race-
+  guarded, FX4); `task_checkpoints` + `checkpoint_turn`; settle usage =
+  sum(checkpoints) with p_tokens IGNORED, null-parts settle recovers
+  checkpointed parts, replay receipts byte-parity (AB6); session author
+  validate-never-rewrite (N15); deviations D-A..D-E stand as recorded.
+- **Runtime as landed:** workflow SELF-BIND dedupe (AB3 — S4-V1 resolved:
+  no native enqueue key exists; losing engine-run records are harmless);
+  hook tokens random, minted in a MEMOIZED step; whole-body try/finally
+  stream close (AB5); crash-only supervision with the engine heartbeat =
+  process event-loop liveness (an async-hung job still beats — job-level
+  liveness rides relay-lag warnings + the reconciler; ACCEPTED residual);
+  relay OUT of /ready; full HTTP drain on SIGTERM (FX2 — POSIX-only-
+  testable; in-process middleware tests on win32, e2e on CI/Fly);
+  fail-closed pools at EVERY entry point (AB8/FX7); SSE single-pending-read
+  + bounded terminal drain (AB13/FX3); sessions force-created private
+  (AB10); reconciler: engine-failed → 'internal', engine-cancelled →
+  two-step via cancel_requested (FX5).
+- **Freeze-lint as landed:** computed-access + namespace destructure/
+  re-alias/bare-use laundering all reject fail-closed (AB9/FX6); the
+  named-import alias remains the DOCUMENTED residual (needs data-flow).
+- **Recorded residuals:** S4-V2 (hook lifetime ≥14d) unproven — visible-
+  failure path + runbook watch; the Docker image verified by layout-
+  replication only (first deploy proves it); PostgREST must expose the
+  `clara` schema (deploy checklist); cancel_requested holds a compute slot
+  until settle.

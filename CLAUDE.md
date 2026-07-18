@@ -97,5 +97,6 @@ stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 In one line: **Phase 3 foundations; Slice 0 spike — T1–T6 passed, the 48-hour
 park (T2-48h) resumable ≥2026-07-19 15:15 +08 for final sign-off; Slices 1
 (foundations) + 2 (governed DB core, PR #5, ADR-015) + 3 (event spine, PR #7,
-ADR-016 — domain events, outbox relay, context packs, trigger taxonomy) done;
-Slice 4 (durable chat runtime) next.**
+ADR-016) + 4 (durable chat runtime skeleton, ADR-017 — 0006, read-only chat
+loop, clarify, metering, drain, traces; Fly deploy GATED on the park closure
++ spike cleanup) done; Slice 5 (document pipeline) next.**
