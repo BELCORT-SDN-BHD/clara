@@ -461,4 +461,6 @@ VF-5 typo + §3.11 in the intro + upgrade-charge wording.
 
 ## 13. As-built amendments
 
-*(Reserved — filled by the ladder's output.)*
+**The full §13 (AB-1..17 — build-stage + review-round amendments) lives in the
+companion `slice5-as-built-amendments.md` — same normativity, split for the
+500-line file cap (the §3 precedent). AB-N citations resolve there.**

@@ -42,8 +42,9 @@ import {
   setRuntimeRole,
   acquireLeaderLock,
   runRelayCycle,
-  redrive,
 } from "../lib/relay.mjs";
+import { CONSUMERS } from "../lib/matcher.mjs";
+import { makeRuntimeClient } from "../lib/pools.mjs";
 
 const POLL_INTERVAL_MS = 2000;
 const RECONNECT_BASE_MS = 500;
@@ -140,15 +141,29 @@ async function main() {
   const args = process.argv.slice(2);
   const testMode = process.env.RELAY_TEST_MODE === "1";
 
-  // redrive CLI — one-shot, its own connection (D3).
+  // redrive CLI — one-shot, its own connection (D3). Consumer-selectable (§4.4):
+  //   relay.mjs redrive <eventId> [--consumer router|matcher]
+  // The router path stays byte-identical (default consumer, makeClient +
+  // setRuntimeRole + the relay taxonomy redrive). The matcher path dispatches the
+  // MATCHER handler on a raw runtime-LOGIN connection (record_rule_resolution's
+  // EXECUTE lives on the login shell, not the clara_runtime group).
   if (args[0] === "redrive") {
-    const eventId = args[1];
-    if (!eventId) throw new Error("usage: relay.mjs redrive <eventId>");
-    const client = makeClient();
+    const rest = args.slice(1);
+    let consumer = "router";
+    const ci = rest.indexOf("--consumer");
+    if (ci >= 0) {
+      consumer = rest[ci + 1];
+      rest.splice(ci, 2);
+    }
+    const eventId = rest[0];
+    if (!eventId) throw new Error("usage: relay.mjs redrive <eventId> [--consumer router|matcher]");
+    const entry = CONSUMERS[consumer];
+    if (!entry) throw new Error(`redrive: unknown consumer '${consumer}' (known: ${Object.keys(CONSUMERS).join(", ")})`);
+    const client = entry.identity === "runtime-login" ? makeRuntimeClient() : makeClient();
     await client.connect();
-    await setRuntimeRole(client);
+    await setRuntimeRole(client); // set role clara_runtime (N10); the matcher handler resets transiently
     try {
-      const res = await redrive(client, CONSUMER, eventId, { log: errlog });
+      const res = await entry.redrive(client, eventId, { log: errlog });
       log(JSON.stringify(res));
     } finally {
       await client.end().catch(() => {});

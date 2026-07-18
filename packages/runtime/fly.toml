@@ -20,6 +20,12 @@ primary_region = "sin"
   # The deployed app IS the durable runtime — the world is ON here (and ONLY here).
   CLARA_START_WORLD = "1"
   WORKFLOW_TARGET_WORLD = "@workflow/world-postgres"
+  CLARA_SPOOL_DIR = "/data/spool"
+  CLARA_SPOOL_QUOTA_MB = "512"
+  CLARA_SPOOL_TTL_MIN = "60"
+  CLARA_DOC_EGRESS_APPROVED = "0"
+  CLARA_CLAMD_MANAGED = "1"
+  CLARA_CLAMD_SOCKET = "/run/clamav/clamd.ctl"
   # Secrets (OPENAI_API_KEY, SUPABASE_JWT_*, WORKFLOW_POSTGRES_URL,
   # CLARA_RUNTIME_DATABASE_URL, CLARA_READ_DATABASE_URL) are set with `fly secrets
   # set` — NEVER in this file. See the deploy runbook in README.md.
@@ -56,3 +62,10 @@ primary_region = "sin"
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1gb"
+
+# Disposable encrypted intake spool only; canonical custody remains private
+# object Storage. Create this single-region volume with snapshots disabled before
+# deploy (README runbook). Never scale the app or attach a second machine.
+[mounts]
+  source = "clara_spool"
+  destination = "/data"

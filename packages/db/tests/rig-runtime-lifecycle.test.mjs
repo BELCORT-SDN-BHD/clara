@@ -105,7 +105,9 @@ test("§3.1 insert_cannot_forge_consumed_intent (S4-D7): a runtime INSERT with c
     await rootQuery(
       `select de.id, de.firm_id, de.seq from clara.domain_events de
         left join clara.wake_intents wi on wi.event_id = de.id
-       where de.client_id = $1 and de.event_type = 'document.ingested' and wi.id is null
+       where de.event_type = 'document.ingested' and wi.id is null
+         and exists (select 1 from clara.document_filings f
+           where f.document_id=de.document_id and f.client_id=$1)
        order by de.seq desc limit 1`,
       [W.client],
     )

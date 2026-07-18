@@ -40,7 +40,6 @@ import {
   addMember,
   setMemberRole,
   removeMember,
-  ingestDocument,
   membershipId,
   insertUser,
   seedAdmission,
@@ -124,7 +123,15 @@ test("T2 cross-firm write attempts all raise CLR11 (unknown id is identical)", a
 
   await assertRaises(CLR.notFound, () => draftEntry(human(users.alice), { client: clients.B1, resolution: randomUUID(), lines: balanced(coa.A1, ROUTINE_CENTS), opKey: opk() }), "alice draft vs B client");
   await assertRaises(CLR.notFound, () => freshResolution(users.alice, clients.B1), "alice resolution vs B client");
-  await assertRaises(CLR.notFound, () => ingestDocument(human(users.alice), { client: clients.B1, sha256: "a".repeat(64), opKey: opk() }), "alice ingest vs B client");
+  await assertRaises(
+    PG.insufficientPrivilege,
+    () => humanQuery(
+      users.alice,
+      "select clara.ingest_document($1,$2,'x.pdf','application/pdf',1,'x','retired-cross-firm-rig')",
+      [clients.B1, "a".repeat(64)],
+    ),
+    "retired ingest is unreachable before any cross-firm existence check",
+  );
   await assertRaises(CLR.notFound, () => approveEntry(users.alice, { entry: entryB, expectedRevision: randomUUID(), opKey: opk() }), "alice approve B entry");
   await assertRaises(CLR.notFound, () => humanQuery(users.alice, reverseSql, [entryB, "x", opk()]), "alice reverse B entry");
   await assertRaises(CLR.notFound, () => addMember(users.alice, { firm: firms.B, user: users.erin, role: "viewer", opKey: opk() }), "alice add_member to firm B");

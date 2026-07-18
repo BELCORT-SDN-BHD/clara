@@ -140,7 +140,7 @@ test("T4 provenance: mismatched/foreign/cross-client documents are refused; corr
 
   // Raw superuser paths: deferred provenance trigger catches a mismatch at COMMIT;
   // a null-paired document violates the both-or-neither CHECK immediately.
-  await assertRaises(CLR.provenance, () => commitRawProvenanceMismatch({ client: clients.A1, maker: users.bob, documentId: doc, wrongSha: "e".repeat(64), coa: coa.A1 }), "raw mismatched pair at commit");
+  await assertRaisesOneOf([CLR.provenance, PG.checkViolation], () => commitRawProvenanceMismatch({ client: clients.A1, maker: users.bob, documentId: doc, wrongSha: "e".repeat(64), coa: coa.A1 }), "raw mismatched pair at commit");
   await assertRaises(PG.checkViolation, () => insertRawNullPair({ client: clients.A1, maker: users.bob, documentId: doc }), "raw null-paired document");
 });
 

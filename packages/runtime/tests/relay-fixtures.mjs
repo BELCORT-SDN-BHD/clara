@@ -120,18 +120,71 @@ export async function createClient(sub, { name, opKey }) {
   return r.rows[0].receipt.client_id;
 }
 
-export async function ingestDocument(sub, { client, sha256, filename, mime, bytes, storagePath, opKey }) {
-  // ingest_document(p_client, p_sha256, p_filename, p_mime, p_bytes, p_storage_path, p_op_key)
-  // → emits document.ingested (client-scoped) which under taxonomy v1 routes to
-  // background_review (WAKE-BOUND) — the pump for wake-bound events.
-  const r = await humanQuery(
-    sub,
-    `select clara.ingest_document(
-        p_client => $1, p_sha256 => $2, p_filename => $3, p_mime => $4,
-        p_bytes => $5::bigint, p_storage_path => $6, p_op_key => $7) as receipt`,
-    [client, sha256, filename ?? "rig.pdf", mime ?? "application/pdf", bytes ?? 1024, storagePath ?? "rig/path", opKey],
+// ---------------------------------------------------------------------------
+// Synthetic wake-bound event source (post-0007). Migration 0007 retired both SQL
+// ingest writers — clara.ingest_document / clara.wake_ingest_document now RAISE
+// (CLR13) with EXECUTE revoked — and taxonomy v2 routes document.ingested to
+// 'ignore', so document.ingested can no longer stand in as the relay's wake-bound
+// event. These relay tests prove the RELAY mechanics (routing, drain, checkpoint,
+// dead-letter, exactly-once, fairness, HALT), NOT document semantics — so we drive
+// them with a rig-only synthetic wake-bound event type registered into the ACTIVE
+// taxonomy as 'background_review' (the same decision document.ingested carried
+// under v1). Events are appended through the audited clara._append_event helper as
+// clara_fn_owner (its EXECUTE grant) — never a raw domain_events insert — exactly
+// as the taxonomy suite already emits its synthetic uncovered types.
+// ---------------------------------------------------------------------------
+
+/** The rig-only wake-bound event type these tests emit in place of the retired
+ *  document.ingested wake path. A STABLE name so registration is idempotent. */
+export const WAKE_EVENT_TYPE = "rig.relay.wake";
+
+const _APPEND_WAKE_SQL = `select clara._append_event(
+    p_firm => $1, p_type => $2, p_client => null, p_actor => $3,
+    p_obo => null, p_wake_kind => null, p_entry => null, p_document => null,
+    p_resolution => null, p_payload => $4::jsonb) as seq`;
+
+/** Idempotently register WAKE_EVENT_TYPE and map it to 'background_review' in the
+ *  CURRENTLY-ACTIVE taxonomy version. Purely ADDITIVE — it never changes an
+ *  existing type's decision, so it is invisible to every other suite. Re-run on
+ *  every pump so a mid-suite taxonomy repoint (the flip test copies the active
+ *  rows forward) stays covered. */
+export async function ensureWakeType() {
+  await rootQuery(
+    `insert into clara.event_types (name, client_scoped, description)
+       values ($1, false, 'rig synthetic wake-bound source (post-0007 relay tests)')
+     on conflict (name) do nothing`,
+    [WAKE_EVENT_TYPE],
   );
-  return r.rows[0].receipt.document_id;
+  await rootQuery(
+    `insert into clara.trigger_taxonomy (version, event_type, decision)
+       select a.version, $1, 'background_review' from clara.taxonomy_active a
+     on conflict (version, event_type) do nothing`,
+    [WAKE_EVENT_TYPE],
+  );
+}
+
+/** The firm that owns a client (superuser read — bypasses RLS). */
+export async function firmOfClient(client) {
+  const r = await rootQuery("select firm_id from clara.clients where id = $1", [client]);
+  return r.rows[0]?.firm_id ?? null;
+}
+
+/**
+ * Emit ONE synthetic wake-bound event for a firm via clara._append_event (as
+ * clara_fn_owner, autocommit) and return the resulting row
+ * { id, firm_id, seq, event_type }. Replaces the retired ingest_document wake path.
+ */
+export async function emitWakeEvent(firm, { actor = null, payload = {} } = {}) {
+  await ensureWakeType();
+  return asFnOwner(async (c) => {
+    const s = await c.query(_APPEND_WAKE_SQL, [firm, WAKE_EVENT_TYPE, actor, JSON.stringify(payload)]);
+    const seq = Number(s.rows[0].seq);
+    const e = await c.query(
+      "select id, firm_id, seq, event_type from clara.domain_events where firm_id = $1 and seq = $2",
+      [firm, seq],
+    );
+    return e.rows[0];
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -166,17 +219,23 @@ export async function buildFirm(label = "f") {
 }
 
 /**
- * Drive N document ingests for a client → N document.ingested (wake-bound) events.
- * Unique sha256 + op_key per call so every call emits a NEW event (an op_key
- * replay would short-circuit without emitting). Returns the emitted document ids.
+ * Drive N wake-bound events for a client's firm → N wake_intents on drain. Emits
+ * synthetic WAKE_EVENT_TYPE events through the audited clara._append_event helper
+ * (post-0007 the document.ingested wake path is retired — see emitWakeEvent). Every
+ * call appends fresh events (_append_event has no op_key dedup). `tag` is carried
+ * into each event payload for call-site traceability. Returns the emitted seqs.
  */
 export async function pumpDocuments(ownerSub, client, n, tag = "doc") {
-  const ids = [];
-  for (let i = 0; i < n; i++) {
-    const k = `${tag}-${i}-${randomUUID().slice(0, 8)}`;
-    ids.push(await ingestDocument(ownerSub, { client, sha256: sha(k), filename: `${k}.pdf`, opKey: opk(tag) }));
-  }
-  return ids;
+  const firm = await firmOfClient(client);
+  await ensureWakeType();
+  return asFnOwner(async (c) => {
+    const seqs = [];
+    for (let i = 0; i < n; i++) {
+      const s = await c.query(_APPEND_WAKE_SQL, [firm, WAKE_EVENT_TYPE, ownerSub, JSON.stringify({ tag, i })]);
+      seqs.push(Number(s.rows[0].seq));
+    }
+    return seqs;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -206,10 +265,10 @@ export async function countEventsByType(firmId, eventType) {
 
 /** All wake-bound event ids for a firm under the given active taxonomy decisions. */
 export async function wakeBoundEventIds(firmId) {
-  // document.ingested is the ONLY wake-bound type under seed taxonomy v1
-  // (background_review); everything else is context_update/ignore. We compute it
-  // generically by joining the ACTIVE taxonomy so the helper stays correct if the
-  // active version changes mid-test.
+  // Post-0007 the ONLY wake-bound type under the active taxonomy (v2) is the rig's
+  // synthetic WAKE_EVENT_TYPE (background_review); the document family + everything
+  // else route to context_update/ignore. Computed generically by joining the ACTIVE
+  // taxonomy so the helper stays correct across a mid-test repoint (the flip test).
   const r = await rootQuery(
     `select e.id, e.seq
        from clara.domain_events e

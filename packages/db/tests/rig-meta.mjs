@@ -8,16 +8,30 @@ import { ROLES, rootQuery } from "./rig-helpers.mjs";
 // The exact §5 EXECUTE matrix (v1 §5 as amended by v2 §A/§B/§F).
 export const WRITERS = [
   "create_firm", "add_member", "set_member_role", "remove_member", "create_client", "upsert_account",
-  "ingest_document", "record_client_resolution", "draft_entry", "approve_entry", "reverse_entry", "record_notification",
+  // Slice-5 retires ingest_document; verified documents now enter through the
+  // runtime intake finalizer and the legacy name retains no application grant.
+  "record_client_resolution", "draft_entry", "approve_entry", "reverse_entry", "record_notification",
+  "file_document", "retire_document_filing", "preview_wrong_client_correction",
+  "propose_wrong_client_correction", "approve_wrong_client_correction",
+  "confirm_attribution_candidate", "dismiss_attribution_candidate",
+  "add_client_identifier", "add_client_alias", "retire_client_alias",
+  "place_legal_hold", "release_legal_hold",
 ];
 // get_context_pack is the Slice-3 typed read (design §2.6): STABLE security-invoker,
 // granted to the same read audience as the other reads (clara_authenticated + agent_ro).
 export const READS = ["get_journal_entry", "list_journal_entries", "trial_balance", "get_context_pack"];
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
-  [ROLES.authenticated]: new Set([...WRITERS, ...READS, "answer_interruption", "cancel_agent_task", "share_chat_session"]),
+  [ROLES.authenticated]: new Set([
+    ...WRITERS, ...READS, "answer_interruption", "cancel_agent_task", "share_chat_session",
+    "file_document", "retire_document_filing", "preview_wrong_client_correction",
+    "propose_wrong_client_correction", "approve_wrong_client_correction",
+    "confirm_attribution_candidate", "dismiss_attribution_candidate",
+    "add_client_identifier", "add_client_alias", "retire_client_alias",
+    "place_legal_hold", "release_legal_hold",
+  ]),
   [ROLES.agentRo]: new Set(READS),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_ingest_document", "wake_record_notification"]),
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification"]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
@@ -25,6 +39,13 @@ export const ALLOWED = {
     "resolve_chat_principal", "begin_chat_turn", "settle_chat_turn", "prune_trace_spans", "relay_health",
     // Slice-4 as-built round 2 (S4-AB4/AB6): atomic clarify open + per-segment checkpoints.
     "open_interruption", "checkpoint_turn",
+    "create_document_intake", "claim_document_intake_upload", "mark_document_intake_received",
+    "begin_document_intake_verification", "verify_document_intake", "fail_document_intake",
+    "finalize_document_intake", "upgrade_legacy_document", "claim_document_processing_task",
+    "release_held_document_tasks", "requeue_stranded_document_task",
+    "persist_document_extraction", "complete_stored_document_task",
+    "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
+    "refund_ingest_reservation", "record_attribution_attempt",
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -46,6 +67,12 @@ export const GOVERNED_TABLES = [
   "agent_tasks", "agent_interruptions", "wakes_outbox", "chat_sessions", "chat_messages",
   "firm_limits", "firm_usage_daily", "task_usage", "trace_spans", "trace_prune_log",
   "runtime_heartbeats",
+  // Slice-5 document pipeline (contract v1.2 companion §3).
+  "document_filings", "document_intakes", "document_processing_tasks",
+  "document_extractions", "document_regions", "client_identifiers", "client_aliases",
+  "attribution_attempts", "attribution_candidates", "attribution_candidate_regions",
+  "filing_corrections", "filing_correction_items", "firm_document_limits",
+  "document_ingest_reservations",
 ];
 
 // The ONLY clara base tables that legitimately carry no RLS (migration bookkeeping + the

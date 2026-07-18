@@ -21,6 +21,7 @@ declare
   k_tok_b constant uuid := '5eed0000-0000-4000-8000-0000000a0002';
   v_firm_a uuid; v_firm_b uuid;
   v_client uuid; v_res uuid; v_entry uuid; v_tok uuid;
+  v_doc uuid; v_doc_firm uuid; v_sha text; v_seed_doc jsonb;
   v_clients uuid[] := '{}';
   cid uuid; acct record; n int;
 begin
@@ -82,13 +83,23 @@ begin
     end loop;
     perform clara.upsert_account(cid, '9990', 'Rounding', 'expense', 'rounding', 'seed-acct-'||cid||'-9990');
 
-    -- A human-attributed resolution, then one balanced approved opening entry
-    -- (RM5,000 — below the RM10,000 high-stakes threshold, so a routine approval).
-    v_res := (clara.record_client_resolution(cid, 'manual', null, 0.99, 'human', '{}'::jsonb, 'seed-res-'||cid)
-              ->> 'resolution_id')::uuid;
+    -- A transport-free VERIFIED fixture through 0007's owner-only seed helper.
+    -- The helper creates the optional filing + its authoritative resolution; direct
+    -- bytes_verified_at seeding is forbidden by the Slice-5 citability law.
+    select firm_id into v_doc_firm from clara.clients where id = cid;
+    v_sha := encode(sha256(convert_to(cid::text, 'UTF8')), 'hex');
+    v_seed_doc := clara._seed_verified_document(
+      v_doc_firm, cid, v_sha, 'synthetic-opening-'||cid||'.pdf', 'application/pdf', 2048,
+      'firms/'||v_doc_firm||'/docs/'||v_sha||'.pdf',
+      case when v_doc_firm = v_firm_a then k_alice else k_dave end);
+    v_doc := (v_seed_doc ->> 'document_id')::uuid;
+    v_res := (v_seed_doc ->> 'resolution_id')::uuid;
+
+    -- One balanced approved opening entry (RM5,000 — below the RM10,000
+    -- high-stakes threshold), citing the filing-bound verified document.
     v_entry := (clara.draft_entry(cid, v_res, current_date, 'Opening capital injection',
         '[{"account_code":"1000","debit_cents":500000},{"account_code":"3000","credit_cents":500000}]'::jsonb,
-        null, null, '{}'::jsonb, 'seed-de-'||cid) ->> 'entry_id')::uuid;
+        v_doc, v_sha, '{}'::jsonb, 'seed-de-'||cid) ->> 'entry_id')::uuid;
     select revision_token into v_tok from clara.journal_entries where id = v_entry;
     perform clara.approve_entry(v_entry, v_tok, null, 'seed-ap-'||cid);
   end loop;

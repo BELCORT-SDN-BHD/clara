@@ -11,6 +11,13 @@ const nextConfig = {
     return [
       { source: "/api/chat/:path*", destination: `${runtime}/api/chat/:path*` },
       { source: "/api/tasks/:path*", destination: `${runtime}/api/tasks/:path*` },
+      // Slice-5 intake (INTERFACE-PINS 3). Begin-intake (JSON) ALWAYS rides this
+      // same-origin proxy — only the byte PUT + finalize routes get CORS on the Fly
+      // origin, so begin-intake must not go cross-origin. The browser sends the byte
+      // PUT/finalize DIRECT to ${NEXT_PUBLIC_CLARA_RUNTIME_URL} when it is set
+      // (bypassing the 4.5MB serverless body cap); when it is empty they fall back
+      // through this proxy, which is safe ONLY for a LOCAL runtime.
+      { source: "/api/intake/:path*", destination: `${runtime}/api/intake/:path*` },
     ];
   },
 };

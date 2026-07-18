@@ -107,8 +107,64 @@
 .clarifyForm { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.4rem; }
 .clarifyInput { font: inherit; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; resize: vertical; }
 
-.composer { display: flex; gap: 0.5rem; margin-top: 0.75rem; align-items: flex-end; }
+.composerWrap { margin-top: 0.75rem; }
+.composer { display: flex; gap: 0.5rem; align-items: flex-end; }
 .composerInput { flex: 1; font: inherit; padding: 0.45rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; resize: vertical; }
+.attachButton {
+  font: inherit;
+  padding: 0.4rem 0.7rem;
+  border: 1px solid #b9c2da;
+  background: #eef2fd;
+  color: #2f4487;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Slice-5 composer attachment tray (contract §4.5). Honest states; no success
+   before the DB intake row is adopted. */
+.attachTray {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin-bottom: 0.5rem;
+  padding: 0.5rem 0.6rem;
+  border: 1px dashed #c8cfe0;
+  border-radius: 6px;
+  background: #fafbff;
+}
+.attachPending {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid #d9d9d9;
+  border-radius: 4px;
+  background: #fff;
+}
+.attachIcon { font-size: 0.85rem; }
+.attachName { font-weight: 600; max-width: 45%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachLabel { color: #4d4d4d; }
+.attachNote { margin: 0.1rem 0 0; font-size: 0.75rem; color: #6b4400; font-style: italic; }
+.attach_ready { border-color: #4c8a4c; background: #edf7ed; }
+.attach_failed, .attach_error { border-color: #b3261e; background: #fbe9e7; }
+.attach_starting, .attach_uploading, .attach_polling { border-color: #c9a227; background: #fdf7e2; }
+
+/* Persisted attachment chip in the transcript (re-derived on hydrate). */
+.attachmentChip {
+  border: 1px solid #b9c2da;
+  background: #f4f7ff;
+  border-radius: 6px;
+  padding: 0.4rem 0.6rem;
+  margin: 0.3rem 0;
+}
+.attachmentRow { display: flex; gap: 0.5rem; align-items: baseline; flex-wrap: wrap; }
+.attachmentIcon { font-size: 0.85rem; }
+.attachmentName { font-weight: 600; font-size: 0.88rem; }
+.attachmentStatus { font-size: 0.75rem; color: #4d4d4d; }
+.attachmentNote { margin: 0.15rem 0 0; font-size: 0.75rem; color: #6b4400; font-style: italic; }
 
 .input { font: inherit; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
 .button {

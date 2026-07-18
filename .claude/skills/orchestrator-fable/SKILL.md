@@ -42,7 +42,7 @@ acceptance criteria, then delegates the code-level reasoning and execution.
 - **Delegate to the most reliable available lane, not a fixed tool — and only when it helps.** Delegate when parallelism or specialist-isolation materially benefits the task; do a bounded, well-specified step yourself rather than dispatch as ceremony.
 - **Claude native lanes:** the most suitable native `subagents`, `agent-teammates` or `dynamicworkflow` dispatch that can cover the task. Select model + effort by capability — the dispatch agent's model field: `sonnet 5`, `opus 4.8`; effort tiers up to `xhigh`. **DO NOT dispatch `fable 5`.**
 - **Codex lane (caveat):** for heavy implementation, debugging, test fixing, refactoring, or multi-file edits, prefer a **direct `codex exec` via Bash** (run in the background + watch its output file) — the `codex:codex-rescue` companion queue has been **unreliable** (it has stalled for hours at "starting"). Prefer `--model gpt-5.6-sol --effort xhigh`; `spark` maps to `gpt-5.3-codex-spark`. Keep Codex tasks focused and specific. See memory `project-rebuild-ops-lessons`.
-- **Grill only when it changes scope.** Use the grilling skill (`/grillme`) when ambiguity would change *what* gets built or its acceptance — not for every bounded task whose spec is already clear.
+- **Grill only when it changes scope.** Use the grilling skill (`/grillme`,`/grill-with-docs`,`/loop-me`) when ambiguity would change *what* gets built or its acceptance — not for every bounded task whose spec is already clear.
 - After a worker (Codex or a subagent) finishes, inspect the result yourself before accepting it. Do not blindly trust worker output.
 
 ## Cross-model review

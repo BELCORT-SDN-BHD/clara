@@ -137,7 +137,10 @@ export async function makeConsumableIntent({ sub, client }) {
   const ev = (
     await rootQuery(
       `select de.id, de.firm_id, de.seq, de.event_type from clara.domain_events de
-       where de.client_id = $1 and de.event_type = 'document.ingested' order by de.seq desc limit 1`,
+       where de.event_type = 'document.ingested'
+         and exists (select 1 from clara.document_filings f
+           where f.document_id=de.document_id and f.client_id=$1)
+       order by de.seq desc limit 1`,
       [client],
     )
   ).rows[0];

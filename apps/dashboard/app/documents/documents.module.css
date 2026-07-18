@@ -1,0 +1,82 @@
+/* Slice-5 /documents plumbing page — readable, unstyled-but-tidy (contract §4.5).
+   Deliberately NOT the Phase-4 design system; mirrors the /chat plumbing look. */
+
+.page {
+  font-family: system-ui, sans-serif;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  line-height: 1.5;
+  color: #1a1a1a;
+}
+
+.header { margin-bottom: 1rem; }
+.title { font-size: 1.25rem; margin: 0 0 0.5rem; }
+.tokenBar { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; }
+.tokenBar .input { flex: 1; }
+
+.muted { color: #6b6b6b; font-size: 0.8rem; margin: 0.15rem 0; }
+.prose { margin: 0.25rem 0; font-size: 0.92rem; }
+.hint { font-size: 0.8rem; color: #6b4400; background: #fffbef; border: 1px solid #e7d9a8; border-radius: 4px; padding: 0.4rem 0.55rem; margin: 0.3rem 0; }
+.errorText { color: #b3261e; font-size: 0.8rem; }
+.okText { color: #2f6b2f; font-size: 0.9rem; }
+.note { color: #6b4400; background: #fdf3d7; padding: 0.4rem 0.6rem; border-radius: 4px; font-size: 0.85rem; }
+.banner {
+  background: #fbe9e7; border: 1px solid #e5b5ad; color: #7a2418;
+  padding: 0.45rem 0.65rem; border-radius: 4px; font-size: 0.85rem; margin: 0.5rem 0 0;
+}
+
+.layout { display: grid; grid-template-columns: 340px 1fr; gap: 1rem; align-items: start; }
+@media (max-width: 820px) { .layout { grid-template-columns: 1fr; } }
+
+.sidebar { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; }
+.pane { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; min-height: 60vh; }
+
+.section { margin-bottom: 1rem; }
+.h4 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.04em; color: #555; margin: 0 0 0.4rem; }
+
+.dropZone { border: 1px dashed #bbb; border-radius: 6px; padding: 0.6rem; background: #fafafa; }
+.dropZone input { display: block; margin-bottom: 0.4rem; font: inherit; }
+
+.plainList { list-style: none; margin: 0.4rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.queueItem {
+  display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;
+  font-size: 0.82rem; padding: 0.3rem 0.45rem; border: 1px solid #ddd; border-radius: 4px; background: #fff;
+}
+.q_ready { border-color: #4c8a4c; background: #edf7ed; }
+.q_failed, .q_error { border-color: #b3261e; background: #fbe9e7; }
+.q_queued, .q_starting, .q_uploading, .q_verifying { border-color: #c9a227; background: #fdf7e2; }
+
+.docList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.3rem; }
+.docItem {
+  display: flex; flex-direction: column; align-items: flex-start; width: 100%; text-align: left;
+  background: #fafafa; border: 1px solid #e2e2e2; border-radius: 4px; padding: 0.4rem 0.55rem; cursor: pointer; font: inherit;
+}
+.docItem:hover { background: #f0f0f0; }
+.docActive { border-color: #4a6bd6; background: #eef2fd; }
+.docName { font-weight: 600; font-size: 0.88rem; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+.detail { display: flex; flex-direction: column; gap: 0.4rem; }
+.detailHead { display: flex; gap: 0.6rem; align-items: baseline; flex-wrap: wrap; }
+.badges { display: flex; gap: 0.35rem; flex-wrap: wrap; margin: 0.2rem 0; }
+.badge { font-size: 0.72rem; border: 1px solid #ccc; border-radius: 999px; padding: 0.1rem 0.55rem; background: #fff; }
+.badgeHold { border-color: #b3261e; background: #fbe9e7; color: #7a2418; }
+.badgeInfo { border-color: #b9c2da; background: #f4f7ff; color: #2f4487; }
+
+.rowItem { display: flex; gap: 0.6rem; align-items: center; justify-content: space-between; flex-wrap: wrap; font-size: 0.85rem; padding: 0.25rem 0; border-bottom: 1px solid #f0f0f0; }
+.actions { display: flex; gap: 0.6rem; }
+.inlineRow { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.3rem 0; }
+.stack { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.4rem; }
+
+.tableWrap { overflow-x: auto; }
+.table { border-collapse: collapse; font-size: 0.8rem; width: 100%; }
+.table th, .table td { border: 1px solid #e2e2e2; padding: 0.25rem 0.4rem; text-align: left; }
+.table th { background: #f6f6f6; }
+
+.wizard { border: 1px solid #c9a227; background: #fffdf6; border-radius: 6px; padding: 0.7rem 0.8rem; margin-top: 0.6rem; }
+.wizardHead { display: flex; justify-content: space-between; align-items: baseline; }
+
+.input { font: inherit; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+.button { font: inherit; padding: 0.4rem 0.9rem; border: 1px solid #4a6bd6; background: #4a6bd6; color: #fff; border-radius: 4px; cursor: pointer; }
+.button:disabled { opacity: 0.5; cursor: default; }
+.linkButton { font-size: 0.75rem; background: none; border: none; color: #4a6bd6; cursor: pointer; padding: 0; text-decoration: underline; }

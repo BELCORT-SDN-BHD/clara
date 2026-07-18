@@ -12,12 +12,49 @@
 // never hang and never leak raw DB text.
 
 import { withRuntime } from "./pools.mjs";
+import { scannerReachable } from "./scan.mjs";
+import { listTaskMetas, spoolHealth } from "./spool.mjs";
+import { matcherHealth } from "./matcher.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
 
 function worldEnabled() {
   return process.env.CLARA_START_WORLD === "1";
+}
+
+async function intakeReadinessSnapshot() {
+  const spool = await spoolHealth();
+  const scanner = await scannerReachable();
+  const metas = (await listTaskMetas()).filter((row) => row && !row.corrupt);
+  let held = metas.filter((row) => row.status === "held_egress").length;
+  const queuedMetas = metas.filter((row) => row.status === "queued");
+  let queued = queuedMetas.length;
+  let oldestQueuedMs = queuedMetas.reduce((age, row) => {
+    const at = Date.parse(row.createdAt || row.updatedAt || "");
+    return Number.isFinite(at) ? Math.max(age, Date.now() - at) : age;
+  }, 0);
+  let source = "spool_index";
+  try {
+    const db = await withRuntime((client) =>
+      client.query(
+        `select count(*) filter (where status='held_egress')::int as held,
+                count(*) filter (where status='queued' and workflow_run_id is null)::int as queued,
+                extract(epoch from (now()-min(created_at) filter
+                  (where status='queued' and workflow_run_id is null)))*1000 as oldest_queued_ms
+           from clara.document_processing_tasks
+          where status in ('held_egress','queued')`,
+      ),
+    );
+    held = Number(db.rows[0]?.held ?? 0);
+    queued = Number(db.rows[0]?.queued ?? 0);
+    oldestQueuedMs = db.rows[0]?.oldest_queued_ms == null ? 0 : Number(db.rows[0].oldest_queued_ms);
+    source = "database";
+  } catch {
+    // Migration 0007 exposes writers but currently no runtime SELECT grant; the
+    // durable sidecar index is the bounded fallback until that DB surface exists.
+  }
+  return { ok: true, spool, scanner, held, queued, oldestQueuedMs, source };
 }
 
 /** Run fn with an overall wall-clock deadline; on timeout resolve to `onTimeout`. */
@@ -87,6 +124,19 @@ export async function checkReadiness() {
           } catch (err) {
             warnings.push(`relay_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }
+
+          // Matcher consumer health -> warnings only (§4.4: a stalled matcher
+          // must never take chat traffic down).
+          try {
+            const mh = await matcherHealth(c);
+            checks.matcher = { ok: true, ...mh };
+            const mDead = Number(mh.pendingDeadLetters ?? mh.pending_dead_letters ?? 0);
+            const mLag = Number(mh.lag ?? 0);
+            if (mDead > 0) warnings.push(`${mDead} matcher dead-letter(s)`);
+            if (mLag > 1000) warnings.push(`matcher lag ${mLag}`);
+          } catch (err) {
+            warnings.push(`matcher_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
+          }
         } else {
           checks.world = { enabled: false };
         }
@@ -94,6 +144,27 @@ export async function checkReadiness() {
       }),
     { ok: false, timeout: true },
   );
+
+  const intake = await bounded(intakeReadinessSnapshot, { ok: false, timeout: true });
+  checks.intake = intake.ok
+    ? {
+        spool: intake.spool,
+        scanner: intake.scanner,
+        held_egress: intake.held,
+        queued_unbound: intake.queued,
+        oldest_queued_ms: Math.round(intake.oldestQueuedMs),
+        source: intake.source,
+      }
+    : { ok: false, error: "intake_check_timeout" };
+  if (!intake.ok) warnings.push("intake readiness check unavailable");
+  else {
+    if (!intake.spool.ok) warnings.push("intake spool is not writable");
+    else if (intake.spool.used_bytes / intake.spool.quota_bytes >= 0.9) warnings.push("intake spool is at least 90% full");
+    if (!intake.scanner.ok) warnings.push("intake malware scanner is unreachable");
+    if (intake.held > 0) warnings.push(`${intake.held} document task(s) held for egress approval`);
+    const queueWarnMs = Number(process.env.CLARA_DOCUMENT_QUEUE_WARN_MS || 60000);
+    if (intake.oldestQueuedMs > queueWarnMs) warnings.push(`oldest unbound document task age ${Math.round(intake.oldestQueuedMs)}ms`);
+  }
 
   if (!result || result.ok !== true) {
     // DB unreachable or the whole check timed out.

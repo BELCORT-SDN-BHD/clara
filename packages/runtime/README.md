@@ -39,6 +39,50 @@ v2.1; `docs/architecture/ARCHITECTURE.md` §4 + Appendix A; migration
 check never attaches a worker to the durable engine — important while the shared
 project may hold parked runs from the Slice-0 spike.
 
+## Slice-5 document intake
+
+The runtime owns the complete evidence-byte path: authenticated begin-intake,
+backpressured byte streaming to the encrypted volume spool, magic/type/archive
+checks, local ClamAV scanning, server SHA-256, immutable private Storage upload,
+Storage download + re-hash, and the migration-0007 finalizer. The browser receives
+only a short-lived upload capability; it never receives a Storage credential.
+
+| Route | Authority | Body/result |
+|---|---|---|
+| `POST /api/intake/documents` | authenticated JWT + live membership | JSON begin; returns `intake_id`, `upload_token`, `expires_at` |
+| `PUT /api/intake/documents/:id/bytes` | Bearer upload capability | raw `application/octet-stream`; streamed, global/principal concurrency 2 |
+| `POST /api/intake/documents/:id/finalize` | Bearer upload capability | scan/store/readback/finalize; returns the committed receipt |
+
+There is deliberately no runtime status route. Human status reads use migration
+0007's masked PostgREST views and the authenticated JWT lane. CORS is confined to
+`/api/intake/*` and accepts only exact origins from the allowlist below.
+
+### Document environment contract
+
+| Variable | Required behavior |
+|---|---|
+| `CLARA_INTAKE_CORS_ORIGINS` | Comma-separated exact browser origins; no wildcard and no effect outside `/api/intake/*`. |
+| `CLARA_SPOOL_DIR` | Encrypted-volume spool path; Fly uses `/data/spool`. |
+| `CLARA_SPOOL_QUOTA_MB` | Hard local spool admission quota; Fly default is `512`. |
+| `CLARA_SPOOL_TTL_MIN` | Residue TTL; minimum effective value is 15 minutes so a live capability is never reaped (Fly default `60`). |
+| `CLARA_CLAMD_SOCKET` | clamd Unix socket or `host:port`; required outside `RELAY_TEST_MODE=1`. |
+| `CLARA_CLAMD_MANAGED` | `1` starts/supervises the image-local clamd and refreshes signatures. |
+| `CLARA_FRESHCLAM_INTERVAL_MS` | Optional refresh interval; floor one hour, default six hours. |
+| `CLARA_DOC_EGRESS_APPROVED` | OCR pre-dispatch gate; default/Fly value `0`. Set `1` only after the firm-wide egress evidence bundle is approved. |
+| `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY` | Azure Document Intelligence service-layer credentials for `prebuilt-layout`, API `2024-11-30`; never workflow step IO. |
+| `CLARA_STORAGE_URL` | Full private-bucket object base, for example the Storage REST `/storage/v1/object/<bucket>` base. |
+| `CLARA_STORAGE_ROLE` | Exact dedicated custom role expected in the Storage JWT (`clara_storage_docs` at the ceremony); required outside tests. |
+| `CLARA_STORAGE_ROLE_JWT` | Rotated, unexpired dedicated custom-role JWT with object `INSERT` + `SELECT` only. `anon`, `authenticated`, and `service_role` are rejected; no `UPDATE`/`DELETE`. |
+
+`RELAY_TEST_MODE=1` is the only adapter gate: tests inject/localize scanner,
+Storage, and Azure behavior. The real production adapters have no dev bypass.
+
+The connection ceiling is **18 sessions**: runtime pool 5 + read pool 5 + WDK
+engine 5 + control/router LISTEN 2 + the matcher lane's leader session 1. Document
+intake and extraction reuse short checkouts from the existing runtime pool; no DB
+connection is held while streaming, scanning, uploading, downloading, or calling
+Azure.
+
 ## Commands
 
 ```sh
@@ -83,6 +127,9 @@ single-leader, so this app must never scale > 1.
 2. A production Postgres reachable via a **SESSION-mode pooler** (port 5432 — the
    world needs `LISTEN/NOTIFY`, which transaction mode on 6543 drops).
 3. `fly apps create <name>` and set `app = "<name>"` in `fly.toml`.
+4. Create the single `clara_spool` volume in `sin`, keep platform encryption on,
+   disable snapshots, and verify it mounts at `/data`. It is disposable resumability
+   state, not authoritative custody; never attach it to a second machine.
 
 ### One-time engine bootstrap (S4-V3)
 
@@ -110,6 +157,9 @@ then hand those two credentials to the runtime as the DSN secrets below.
 - `WORKFLOW_POSTGRES_URL` (the world's DB — session pooler)
 - `CLARA_RUNTIME_DATABASE_URL` (the `clara_runtime_login` DSN)
 - `CLARA_READ_DATABASE_URL` (the `clara_agent_read_login` DSN)
+- `CLARA_INTAKE_CORS_ORIGINS`
+- `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY`
+- `CLARA_STORAGE_URL`, `CLARA_STORAGE_ROLE`, `CLARA_STORAGE_ROLE_JWT`
 
 `CLARA_START_WORLD=1` and `PORT` live in `fly.toml [env]`, not secrets. The
 world runs ONLY in the deployed app.

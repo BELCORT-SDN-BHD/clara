@@ -21,7 +21,6 @@ import {
   assertRaises,
   balanced,
   opk,
-  sha,
   rootQuery,
   human,
   ensureReady,
@@ -31,7 +30,6 @@ import {
   approveEntry,
   reverseEntry,
   recordResolution,
-  ingestDocument,
   recordNotification,
   createClient,
   createFirm,
@@ -134,13 +132,26 @@ test("§1 emission: human writers each emit exactly their contract event, ids/ac
   ev = await eventsSince(firm, m);
   assert.deepEqual(types(ev), [EVT.memberRemoved], "remove_member emits exactly member.removed");
 
-  // ingest_document → document.ingested
-  m = await maxSeq(firm);
-  const doc = await ingestDocument(human(owner), { client, sha256: sha(randomUUID()), opKey: opk() });
-  ev = await eventsSince(firm, m);
-  assert.deepEqual(types(ev), [EVT.documentIngested], "ingest_document emits exactly document.ingested");
-  assert.equal(ev[0].client_id, client);
-  assert.equal(ev[0].document_id, doc, "document.ingested carries the document id");
+  // Slice-5 retires both legacy ingest writers. Superuser reaches the sealed
+  // body deterministically; application lanes stop at the EXECUTE wall.
+  await assert.rejects(
+    () => rootQuery(
+      "select clara.ingest_document($1,$2,'x.pdf','application/pdf',1,'x','retired-rig')",
+      [client, "a".repeat(64)],
+    ),
+    (error) => error.code === "CLR13",
+  );
+  await assert.rejects(
+    () => rootQuery(
+      "select clara.wake_ingest_document($1,$2,'x.pdf','application/pdf',1,'x','retired-wake-rig')",
+      [client, "b".repeat(64)],
+    ),
+    (error) => error.code === "CLR13",
+  );
+  const retiredAllow = await rootQuery(
+    "select 1 from clara.wake_fn_allowlist where function_name='wake_ingest_document'",
+  );
+  assert.equal(retiredAllow.rowCount, 0, "wake_ingest_document is absent from the wake allowlist");
 
   // record_client_resolution → client.resolved
   m = await maxSeq(firm);
@@ -218,21 +229,11 @@ test("§1 emission: high-stakes reverse emits only entry.drafted; approving the 
 
 test("§1 emission: wake writers stamp actor=agent, via_wake_kind, on_behalf_of", async (t) => {
   if (unready(t)) return;
-  const { users, firms, clients } = world;
-  const cred = await mintWake({ kind: "interactive", firm: firms.A, onBehalfOf: users.bob });
-  let m = await maxSeq(firms.A);
-  const doc = await ingestDocument({ kind: "wake", role: ROLES.wakeInteractive, secret: cred.secret }, { client: clients.A1, sha256: sha(randomUUID()), opKey: opk(), wake: true });
-  let ev = await eventsSince(firms.A, m);
-  assert.deepEqual(types(ev), [EVT.documentIngested], "wake_ingest_document emits document.ingested");
-  assert.equal(ev[0].actor, AGENT_USER_ID, "wake event actor = the global agent id (never a human)");
-  assert.equal(ev[0].via_wake_kind, "interactive", "wake event via_wake_kind = interactive");
-  assert.equal(ev[0].on_behalf_of, users.bob, "wake event on_behalf_of = the credential's obo");
-  assert.equal(ev[0].document_id, doc);
-
+  const { firms } = world;
   const cred2 = await mintWake({ kind: "interactive", firm: firms.A });
-  m = await maxSeq(firms.A);
+  let m = await maxSeq(firms.A);
   await recordNotification({ kind: "wake", role: ROLES.wakeInteractive, secret: cred2.secret }, { kind: "rig.wnote", opKey: opk(), wake: true });
-  ev = await eventsSince(firms.A, m);
+  let ev = await eventsSince(firms.A, m);
   assert.deepEqual(types(ev), [EVT.notificationRecorded]);
   assert.equal(ev[0].actor, AGENT_USER_ID);
   assert.equal(ev[0].on_behalf_of, null, "a no-obo credential → on_behalf_of null");

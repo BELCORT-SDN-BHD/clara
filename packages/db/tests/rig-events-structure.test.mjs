@@ -218,9 +218,14 @@ test("§6 relay_dead_letters: UPDATE limited to status/attempt_count/resolved_at
 test("§7 coverage: the active taxonomy version covers every event_type; the 13 contract types are present with correct client_scoped", async (t) => {
   if (unready(t)) return;
   // The active version must ROUTE every catalog row (contract §0.5 / §2.7): anti-join ∅.
+  // `rig.%` is the reserved TEST namespace: the runtime relay suite appends a
+  // synthetic wake-bound type whose coverage tracks whichever version was active
+  // when it registered — on a shared DB (CI runs every package against one
+  // database) it must not false-fail the REAL catalog's full-coverage law.
   const uncovered = await rootQuery(`
     select et.name from clara.event_types et
-    where not exists (
+    where et.name not like 'rig.%'
+      and not exists (
       select 1 from clara.trigger_taxonomy tt
       where tt.version = (select version from clara.taxonomy_active) and tt.event_type = et.name)`);
   assert.deepEqual(uncovered.rows.map((r) => r.name), [], "the active version covers every event_type (anti-join empty)");
@@ -287,7 +292,7 @@ test("§8 get_context_pack: full shape; books_version == firm max seq; blank pur
   const { users, firms, clients } = world;
   const pack = await contextPack(users.alice, clients.A1, "close review");
   assert.ok(pack, "a pack is returned for a visible client");
-  assert.equal(pack.pack_schema_version, 1, "pack_schema_version = 1");
+  assert.equal(pack.pack_schema_version, 2, "Slice-5 pack_schema_version = 2");
   assert.equal(pack.purpose, "close review", "purpose echoed");
   for (const k of ["generated_at", "books_version", "client", "firm", "coa", "trial_balance", "recent_entries", "documents", "resolutions", "approval_history"]) {
     assert.ok(k in pack, `pack has key ${k}`);

@@ -57,8 +57,8 @@ test("(X5) redrive: missing dead-letter throws; still-uncovered reopens a resolv
   await fx.pumpDocuments(owner, client, 1, "x5-cov");
   const coveredEventId = await fx.asRoot(async (c) => {
     const r = await c.query(
-      "select id from clara.domain_events where firm_id = $1 and event_type = 'document.ingested' order by seq limit 1",
-      [firm],
+      "select id from clara.domain_events where firm_id = $1 and event_type = $2 order by seq limit 1",
+      [firm, fx.WAKE_EVENT_TYPE],
     );
     return r.rows[0].id;
   });

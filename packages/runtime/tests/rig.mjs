@@ -36,6 +36,45 @@ export async function runtimeReady() {
   return r.rows[0].tbl != null && r.rows[0].fn != null;
 }
 
+/** SKIP document-pipeline tests cleanly when migration 0007 is absent. */
+export async function documentPipelineReady() {
+  const r = await fx.rootQuery(
+    `select
+       to_regclass('clara.document_intakes') is not null as intakes,
+       to_regclass('clara.document_processing_tasks') is not null as tasks,
+       to_regprocedure('clara.finalize_document_intake(uuid,text,text,jsonb,integer,text,uuid,uuid,text)') is not null as finalizer`,
+  );
+  return r.rows[0].intakes === true && r.rows[0].tasks === true && r.rows[0].finalizer === true;
+}
+
+export const readDocumentIntake = (id) =>
+  fx.rootQuery("select * from clara.document_intakes where id=$1", [id]).then((r) => r.rows[0] ?? null);
+export const readDocumentTask = (id) =>
+  fx.rootQuery("select * from clara.document_processing_tasks where id=$1", [id]).then((r) => r.rows[0] ?? null);
+export const readDocument = (id) =>
+  fx.rootQuery("select * from clara.documents where id=$1", [id]).then((r) => r.rows[0] ?? null);
+
+/** Create a real 0007 intake receipt as clara_runtime (token remains hash-only). */
+export async function createDocumentIntakeFixture({ owner, origin = "documents_tab", session = null, filename = "fixture.pdf", mime = "application/pdf", bytes = 16 }) {
+  const token = randomUUID().replaceAll("-", "") + randomUUID().replaceAll("-", "");
+  const tokenHash = fx.sha(token);
+  const expiresAt = new Date(Date.now() + 15 * 60_000).toISOString();
+  const r = await fx.asRuntime((c) =>
+    c.query("select clara.create_document_intake($1,$2,$3,$4,$5,$6,$7,$8,$9) as receipt", [
+      owner,
+      origin,
+      session,
+      filename,
+      mime,
+      bytes,
+      tokenHash,
+      expiresAt,
+      fx.opk("intake"),
+    ]),
+  );
+  return { ...r.rows[0].receipt, token, tokenHash };
+}
+
 // ---------------------------------------------------------------------------
 // Membership (a second member for firm-shared / cross-member tests).
 // ---------------------------------------------------------------------------
@@ -118,20 +157,20 @@ export async function bindRun(task, runId) {
 // ---------------------------------------------------------------------------
 
 export async function makeConsumableIntent({ ownerSub, client }) {
-  const docId = await fx.ingestDocument(ownerSub, { client, sha256: fx.sha(randomUUID()), opKey: fx.opk("s4int") });
-  const ev = (
-    await fx.rootQuery(
-      `select id, firm_id, seq, event_type from clara.domain_events
-        where document_id = $1 and event_type='document.ingested' order by seq desc limit 1`,
-      [docId],
-    )
-  ).rows[0];
-  if (!ev) throw new Error("makeConsumableIntent: no document.ingested event");
+  // Post-0007 the ingest_document wake path is retired; emit the rig's synthetic
+  // wake-bound event instead and stamp the intent under the ACTIVE taxonomy (v2,
+  // where WAKE_EVENT_TYPE routes to background_review). The wake_intents stamping
+  // trigger derives firm_id/event_seq/event_type and validates the (version, type,
+  // decision) triple — so we provide only (event_id, decision, taxonomy_version),
+  // exactly like the real relay's insertWakeIntent (version=1 no longer holds).
+  const firm = await fx.firmOfClient(client);
+  const ev = await fx.emitWakeEvent(firm, { actor: ownerSub });
+  const version = await fx.activeTaxonomyVersion();
   const r = await fx.asRuntime((c) =>
     c.query(
-      `insert into clara.wake_intents (event_id, firm_id, event_seq, event_type, decision, taxonomy_version)
-         values ($1,$2,$3,$4,'background_review',1) returning id`,
-      [ev.id, ev.firm_id, ev.seq, ev.event_type],
+      `insert into clara.wake_intents (event_id, decision, taxonomy_version)
+         values ($1, 'background_review', $2) returning id`,
+      [ev.id, version],
     ),
   );
   return { intentId: r.rows[0].id, eventId: ev.id, firm: ev.firm_id };

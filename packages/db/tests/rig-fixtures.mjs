@@ -83,26 +83,44 @@ export async function upsertAccount(sub, { client, code, name, type, special = n
 }
 
 export async function ingestDocument(persona, o) {
-  const specs = [
-    { name: "p_client" },
-    { name: "p_sha256" },
-    { name: "p_filename" },
-    { name: "p_mime" },
-    { name: "p_bytes", cast: "bigint" },
-    { name: "p_storage_path" },
-    { name: "p_op_key" },
-  ];
-  const vals = [
-    o.client ?? null,
-    o.sha256,
-    o.filename ?? "rig.pdf",
-    o.mime ?? "application/pdf",
-    o.bytes ?? 1024,
-    o.storagePath ?? "rig/path",
-    o.opKey,
-  ];
-  const r = await runAs(persona, namedCall(o.wake ? "wake_ingest_document" : "ingest_document", specs), vals);
-  return r.rows[0].result.document_id; // receipt jsonb = {document_id, ...}
+  // Slice-5 retires both legacy ingest writers. Existing pre-Slice-5 rigs still
+  // need a canonical verified document fixture, so provision it through the
+  // owner-only migration helper instead of weakening the retired surface.
+  const helper = await rootQuery(
+    `select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname='_seed_verified_document'`,
+  );
+  if (!helper.rowCount) {
+    // Deploy-onto-existing drills intentionally stop at 0006 first. Only that
+    // historical schema still has the governed legacy writer.
+    const specs = [
+      { name: "p_client" }, { name: "p_sha256" }, { name: "p_filename" },
+      { name: "p_mime" }, { name: "p_bytes", cast: "bigint" },
+      { name: "p_storage_path" }, { name: "p_op_key" },
+    ];
+    const vals = [
+      o.client ?? null, o.sha256, o.filename ?? "rig.pdf",
+      o.mime ?? "application/pdf", o.bytes ?? 1024, o.storagePath ?? "rig/path", o.opKey,
+    ];
+    const legacy = await runAs(persona, namedCall(o.wake ? "wake_ingest_document" : "ingest_document", specs), vals);
+    return legacy.rows[0].result.document_id;
+  }
+  if (o.client == null) throw new Error("ingestDocument fixture requires a client after Slice-5");
+  const firm = await rootQuery("select firm_id from clara.clients where id = $1", [o.client]);
+  if (!firm.rows[0]?.firm_id) throw new Error("ingestDocument fixture client does not exist");
+  const firmId = firm.rows[0].firm_id;
+  const mime = o.mime ?? "application/pdf";
+  const extension = mime === "application/pdf" ? "pdf" : "bin";
+  const storagePath = o.storagePath?.startsWith(`firms/${firmId}/docs/`)
+    ? o.storagePath
+    : `firms/${firmId}/docs/${o.sha256}.${extension}`;
+  const r = await rootQuery(
+    `select clara._seed_verified_document(
+       p_firm => $1, p_client => $2, p_sha256 => $3, p_filename => $4,
+       p_mime => $5, p_bytes => $6::bigint, p_storage_path => $7) as receipt`,
+    [firmId, o.client, o.sha256, o.filename ?? "rig.pdf", mime, o.bytes ?? 1024, storagePath],
+  );
+  return r.rows[0].receipt.document_id;
 }
 
 export async function recordResolution(persona, o) {
@@ -135,6 +153,11 @@ export async function recordResolution(persona, o) {
 }
 
 export async function draftEntry(persona, o) {
+  // Negative document-pipeline rigs sometimes pass a resolution promise while
+  // arranging the provenance condition under test. Resolve it before handing
+  // the UUID to PostgreSQL so the intended database invariant—not driver-side
+  // Promise serialization—determines the outcome.
+  const resolution = await o.resolution;
   const specs = [
     { name: "p_client" },
     { name: "p_resolution" },
@@ -144,7 +167,7 @@ export async function draftEntry(persona, o) {
   ];
   const vals = [
     o.client,
-    o.resolution ?? null,
+    resolution ?? null,
     o.postingDate ?? "2026-01-15",
     o.memo ?? "rig entry",
     JSON.stringify(o.lines),
@@ -333,6 +356,32 @@ export async function buildWorld() {
 
 /** A fresh, valid (human, ≥0.95, not superseded) resolution id for `client`. */
 export async function freshResolution(sub, client, extra = {}) {
-  // recordResolution already returns the bare resolution_id — do NOT re-extract.
-  return recordResolution(human(sub), { client, confidence: 0.98, ...extra, opKey: opk("res") });
+  // Slice-5 document admission keeps exact-document attribution. When a caller
+  // has just filed a document and did not state another subject, bind the fixture
+  // resolution to the newest active filing. Non-document admission still accepts
+  // that authoritative client resolution.
+  let inferred = {};
+  if (extra.subjectId === undefined && extra.subjectKind === undefined) {
+    const hasFilings = await rootQuery("select to_regclass('clara.document_filings') as rel");
+    if (hasFilings.rows[0]?.rel) {
+      const filing = await rootQuery(
+        `select document_id from clara.document_filings
+          where client_id=$1 and retired_at is null order by filed_at desc,id desc limit 1`,
+        [client],
+      );
+      if (filing.rows[0]?.document_id) {
+        inferred = { subjectKind: "document", subjectId: filing.rows[0].document_id };
+      }
+    } else {
+      // The deploy drill's 0001-0006 phase still carries documents.client_id.
+      const legacyDocument = await rootQuery(
+        `select id from clara.documents where client_id=$1 order by created_at desc,id desc limit 1`,
+        [client],
+      );
+      if (legacyDocument.rows[0]?.id) {
+        inferred = { subjectKind: "document", subjectId: legacyDocument.rows[0].id };
+      }
+    }
+  }
+  return recordResolution(human(sub), { client, confidence: 0.98, ...inferred, ...extra, opKey: opk("res") });
 }

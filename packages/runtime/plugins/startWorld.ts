@@ -2,9 +2,13 @@ import { definePlugin } from "nitro";
 import { mintWakeCredential, withReadWakeScoped, withRuntime, withRead } from "../lib/pools.mjs";
 import { startControlListener, productionControlDeps } from "../lib/control.mjs";
 import { startLeaderLoop } from "../lib/leader.mjs";
+import { startMatcherLoop } from "../lib/matcher.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
 import { workflows } from "../workflows/registry.js";
+import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
+import { stopIntakeIngress } from "../lib/spool.mjs";
+import { startManagedScanner } from "../lib/scan.mjs";
 
 type SupervisorState = { shuttingDown: boolean; stops: Array<() => Promise<unknown> | void> };
 
@@ -40,6 +44,11 @@ export default definePlugin(() => {
     withRuntime,
     withRead,
   };
+  (globalThis as unknown as { __claraDocumentServices?: unknown }).__claraDocumentServices = makeDocumentServices();
+
+  // Register intake first. The HTTP shutdown gate rejects new requests immediately;
+  // this stop waits for an already-streaming spool write to finish honestly.
+  sup.stops.unshift(stopIntakeIngress);
 
   const fatal = (what: string, err?: unknown) => {
     if (sup.shuttingDown) return; // an expected settle during graceful shutdown
@@ -58,18 +67,42 @@ export default definePlugin(() => {
     }
 
     // Control listener — leased clarify delivery + cancel settlement (world API).
+    // Image-local ClamAV (when enabled) is part of the crash-only group. Intake
+    // remains fail-closed while its socket is unavailable.
+    const scanner = startManagedScanner({ log: (m: string) => console.log(m) });
+    if (scanner) {
+      scanner.done.then(() => fatal("clamd"), (e: unknown) => fatal("clamd", e));
+      sup.stops.push(scanner.stop);
+    }
+
     const control = startControlListener(productionControlDeps({ log: (m: string) => console.log(m) }));
     control.done.then(() => fatal("control listener"), (e: unknown) => fatal("control listener", e));
     sup.stops.push(control.stop);
 
     // Leader loop — routing + drain + reconcile under the 'router' advisory lock.
-    const leader = startLeaderLoop({
-      enqueueChatTurn: (taskId: string) => start(workflows.chatTurn, [{ taskId }]),
-      getRun,
-      log: (m: string) => console.log(m),
-    });
+    const leader = startLeaderLoop(
+      {
+        enqueueChatTurn: (taskId: string) => start(workflows.chatTurn, [{ taskId }]),
+        enqueueDocumentIngest: (taskId: string) => start(workflows.documentIngest, [{ task_id: taskId }]),
+        recoverDocumentIntakes: () =>
+          recoverPendingDocumentIntakes({
+            withRuntime,
+            enqueue: (taskId: string) => start(workflows.documentIngest, [{ task_id: taskId }]),
+            log: (m: string) => console.log(m),
+          }),
+        getRun,
+        log: (m: string) => console.log(m),
+      } as Parameters<typeof startLeaderLoop>[0],
+    );
     leader.done.then(() => fatal("leader loop"), (e: unknown) => fatal("leader loop", e));
     sup.stops.push(leader.stop);
+
+    // Matcher consumer (§4.4) — an INDEPENDENT loop on its own dedicated
+    // connection under the 'matcher' advisory lock, so router leadership and
+    // the engine heartbeat are untouched. +1 persistent session (budget 18).
+    const matcher = startMatcherLoop({ log: (m: string) => console.log(m) });
+    matcher.done.then(() => fatal("matcher loop"), (e: unknown) => fatal("matcher loop", e));
+    sup.stops.push(matcher.stop);
 
     // DEDICATED engine heartbeat — the ONLY writer of the 'world' beat (S4-AB7b).
     const beatMs = Number(process.env.CLARA_WORLD_BEAT_MS || 10000);
