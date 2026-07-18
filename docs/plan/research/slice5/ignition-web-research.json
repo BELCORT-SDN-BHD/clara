@@ -1,0 +1,246 @@
+{
+  "summary": "Research how accounting-automation SaaS and agentic-AI products handle post-ingest document attribution + ignition",
+  "agentCount": 3,
+  "logs": [],
+  "result": {
+    "accounting-saas": {
+      "findings": [
+        {
+          "claim": "Dext (ex-Receipt Bank) defaults to suggest-with-confirm: after deterministic extraction, ML auto-categorisation assigns a category to new Costs items based on how similar items were coded in the past, and 'Smart Suggestions' recommend values (project fields, description) which the user accepts — auto-apply of suggestions is OFF by default and must be explicitly enabled in Automation settings. No confidence scores are surfaced to the user anywhere in the docs.",
+          "source": "https://help.dext.com/en/articles/416713-rules-and-automation-in-dext"
+        },
+        {
+          "claim": "Dext's auto-publish is opt-in and rule-scoped, not confidence-scoped: it can be enabled per supplier/customer, per payment method, or account-wide, and only publishes when required fields (e.g. Category) were completed automatically AND essential fields were extracted AND the item was not flagged as suspicious — i.e. abstention is structural (missing field / suspicious flag blocks publish), not a numeric threshold. Rules apply only to items submitted after rule creation; priority is payment-method > approval workflows > supplier rules > account rules. Publish provenance ('published via autopublish') is recorded in the History tab.",
+          "source": "https://help.dext.com/en/articles/377051-how-to-use-auto-publish-in-dext"
+        },
+        {
+          "claim": "Dext supplier/customer rules are deterministic coding defaults keyed to a recognized supplier (category, tax rate, payment method, currency, description, due date, paid status); the ML layer only fills fields the human-authored rule doesn't. The human decision being encoded is 'for this supplier, always code like this' — a rule the accountant wrote once, exactly the shape of Clara's deterministic 'rule' resolution method.",
+          "source": "https://help.dext.com/en/articles/216125-how-to-use-supplier-and-customer-rules-in-dext"
+        },
+        {
+          "claim": "Hubdoc's equivalent ('autosync' per supplier) and AutoEntry's Auto-Publish are both per-supplier opt-ins that require previously 'remembered settings' (human-coded precedent) for that supplier before any document can publish automatically — a new/unknown supplier can never auto-publish; it waits for a human to code the first one.",
+          "source": "https://help.autoentry.com/en/articles/1313041-auto-publish and https://learn.hubdoc.com/courses/501826/lectures/9216860"
+        },
+        {
+          "claim": "QuickBooks Online receipt capture never auto-posts: every uploaded receipt lands in a 'For Review' tab; OCR extracts date/amount/merchant and QBO shows 'See suggested matches' with a count of candidate existing transactions in a dropdown; the user must confirm/correct fields and explicitly Match or create, moving the item to 'Reviewed' before it hits the books. The unassigned-lane + suggested-matches-dropdown pattern is the mainstream UX.",
+          "source": "https://quickbooks.intuit.com/learn-support/en-us/help-article/import-transactions/upload-receipts-bills-quickbooks-online/L862MmZHn_US_en_US and https://quickbooks.intuit.com/learn-support/en-us/help-article/bank-transactions/match-transactions-quickbooks-online/L0MF3Fn6y_US_en_US"
+        },
+        {
+          "claim": "Xero JAX (Just Ask Xero) auto bank reconciliation, global beta from Nov 2025, is the industry's most aggressive move to auto-assign — and it is explicitly confidence-gated: JAX auto-reconciles ONLY when high-confidence, using four matching layers (user's bank rules, document matching vs invoices/bills, the org's own reconciliation history, anonymised patterns from ~4.5M subscribers); low-confidence transactions are flagged for human review, and Xero claims >97% accuracy on the auto-reconciled subset. Note deterministic user-authored bank rules sit ABOVE the ML layers.",
+          "source": "https://fastlane-global.com/hk/blog/automatic-bank-reconciliation-powered-by-jax-beta-hk/ and https://www.xero.com/us/media-releases/xeros-ai-financial-superagent-jax-launches-powerful-new-features/"
+        },
+        {
+          "claim": "Independent testing of JAX (Digit, Jan–Mar 2026) shows the review UX and the failure modes: a 'View All Reconciled' screen lists every JAX-processed transaction with its matching logic visible (what it matched and why). Real-world hit rate was ~60–67% of transactions on suitable clients (the rest abstained to review); observed failures included wrong-entity bank transfers, GST misapplication, inconsistent coding across identical transactions, and timing conflicts with Dext feeds requiring manual unwind — a caution against auto-posting even at claimed 97% accuracy.",
+          "source": "https://digit.business/insights/xero/xero-auto-reconciliation-testing-notes"
+        },
+        {
+          "claim": "Sage Copilot (one free licence per practice announced Accountex May 2025) does instant transaction categorisation and matching but keeps the accountant in the loop by flagging anomalies and duplicates rather than silently posting; AutoEntry (Sage-owned) learns nominal codes and VAT categories over time from the practice's own coding history — improvement-by-observed-precedent, not generic ML.",
+          "source": "https://www.sage.com/en-gb/company/digital-newsroom/2025/05/14/sage-gives-every-accountant-a-free-ai-assistant/ and https://accountingaitools.com/tools/sage/"
+        },
+        {
+          "claim": "Ramp auto-matches receipts to card transactions using transaction details (amount/date/merchant, plus email-forwarded receipts matched by sender identity, and direct vendor auto-capture from Walmart/airlines/Square); on failed match it widens the search to other employees' transactions, and on ambiguity (date discrepancies, multi-charge receipts, similar recurring SaaS charges) it falls back to manual attach. GL-code prediction uses merchant, amount, department, memo, receipt content and past coding patterns — but suggestions are always shown for employee review and edit, and deterministic company accounting-automation rules explicitly take precedence over the AI prediction.",
+          "source": "https://support.ramp.com/submitting-receipts-memos-and-accounting-for-your-ramp-transactions"
+        },
+        {
+          "claim": "Brex auto-matches receipts to transactions with approval workflows, but its policy enforcement is reactive (violations surface at expense review) vs Ramp's proactive blocking; spend platforms can afford aggressive auto-match because the card transaction itself is ground truth for amount/date/merchant — a luxury a document-first accounting pipeline does not have, which is why the accounting-side incumbents are all more conservative.",
+          "source": "https://ramp.com/blog/brex-vs-expensify-vs-ramp"
+        },
+        {
+          "claim": "Cross-incumbent pattern (the industry consensus, 2025-26): (1) suggestion machinery always runs automatically after OCR, but auto-POSTING is gated by deterministic human-authored rules (supplier rules, bank rules, remembered settings) or, only in Xero's newest beta, by an internal high-confidence gate — and even Xero surfaces the matching logic per transaction and routes everything below the bar to review. (2) No incumbent shows a raw numeric confidence score to the accountant; confidence is expressed structurally: item placement (auto-done pile vs review pile), match counts, and 'here's why' explanations. (3) Deterministic rules always outrank ML predictions when both fire. (4) Abstention UX = the item simply stays in the review/unassigned lane with whatever partial data extraction produced, plus a reason (missing field, suspicious flag, no match found).",
+          "source": "Synthesis of all sources above"
+        }
+      ],
+      "caveats": [
+        "Xero's own media-release and blog pages (xero.com/us/media-releases, blog.xero.com, venturebeat.com) returned 403/503 to direct fetch; JAX confidence-gating and the 97% accuracy claim are taken from search-result summaries citing those pages plus the Fastlane and Digit secondary write-ups — the exact internal threshold number is not public anywhere.",
+        "Dext's docs describe rule mechanics but not the supplier-matching engine internals (exact OCR-name match vs fuzzy/ML); vendor help centers generally do not disclose this.",
+        "The Digit 60-67% hit-rate figure is one practice's testing of a beta (Jan-Mar 2026), not an official Xero benchmark; treat as directional.",
+        "Brex-specific detail is thin and partly sourced from Ramp comparison marketing pages, which are adversarial sources.",
+        "No incumbent publishes numeric confidence thresholds; Clara's 0.95 gate has no direct public comparable to calibrate against."
+      ],
+      "recommendation_for_clara": "Run the full suggestion machinery automatically after OCR, but follow the industry consensus split between suggesting and authorizing. Concretely: (1) After OCR, always attempt client attribution via a deterministic rule layer FIRST (exact/normalized supplier-name and bank-detail matches against per-client rules the accountant authored) — every incumbent (Dext supplier rules, Xero bank rules, Ramp accounting rules) puts human-authored deterministic rules above ML, and only these auto-resolve. (2) The model layer then produces a ranked suggestion (client + why) for everything the rules didn't catch, but it lands in the unassigned lane as a pre-filled suggestion awaiting one-click confirm — this mirrors QBO's 'For Review + suggested matches' and Dext's default-off auto-apply, and it matches Clara's legal methods exactly: a human confirm becomes method='human', and the confirm dialog should offer 'always attribute this supplier pattern to this client' to mint a new deterministic rule (the Hubdoc/AutoEntry 'remembered settings' loop — the second document from that supplier then auto-resolves via method='rule'). (3) Do NOT display raw confidence numbers to accountants — no incumbent does; express confidence structurally: lane placement (rule-resolved vs suggested vs no-suggestion), a visible 'why' (which signals matched: sender email, letterhead name, bank account, historical precedent), and candidate counts when ambiguous. (4) Abstention UX: when the model has no strong candidate, show the document with extracted fields and an empty client picker plus the abstention reason — never a forced low-quality guess (Digit's JAX testing shows wrong high-confidence guesses are far costlier to trust than abstentions). (5) Defer any model-confidence auto-resolve until the calibration harness exists; even Xero, with 4.5M orgs of training signal, ships confidence-gated auto-reconcile as a beta with a per-transaction 'here's my logic' audit screen and real-world 60-67% coverage — Clara's 0.95 structural gate plus rule-minting gets most of the automation win with zero calibration risk, and the suggestion-accept/override stream is itself the labeled dataset the future calibration harness needs, so log every accept/correct event with the model's internal score from day one.\""
+    },
+    "agentic-hitl": {
+      "findings": [
+        {
+          "claim": "The dominant 2025 HITL framework pattern (LangChain/LangGraph HITL middleware) intercepts a proposed tool call before execution, persists state, and offers exactly four human decisions: approve (run as proposed), edit (modify arguments then run), reject (skip with feedback returned to the agent), and respond (human supplies the answer directly). Guidance is to interrupt only on high-impact operations and use conditional predicates so routine low-risk actions auto-approve — this maps directly onto Clara's suggestion queue: a model suggestion is a paused 'tool call' that a human approves/edits/rejects, never self-executes.",
+          "source": "https://docs.langchain.com/oss/python/langchain/human-in-the-loop"
+        },
+        {
+          "claim": "LangChain's Agent Inbox pattern gives HITL a Gmail-like queue UI: interrupted agent actions land in an inbox where operators review, approve, edit, or reject; it is the reference product shape for a 'suggestions awaiting professional review' lane.",
+          "source": "https://prompts.brightcoding.dev/blog/stop-building-bad-ai-agents-agent-inbox-fixes-hil"
+        },
+        {
+          "claim": "A three-tier action ladder is the converged 2025 industry pattern: auto-approve for safe/reversible actions (reads, searches); 'notify' soft gate for impactful-but-recoverable actions (agent proceeds, user notified and can undo); 'block' hard gate for irreversible/high-stakes actions (money movement, deletes, publishing) which require explicit approval regardless of confidence. Design principle: minimize interruptions — too many gates cause users to abandon the agent.",
+          "source": "https://www.grizzlypeaksoftware.com/library/human-in-the-loop-patterns-for-ai-agents-n64sb2cm"
+        },
+        {
+          "claim": "Confidence-based routing practitioners report a hard lesson: raw LLM confidence measures token probability, not factual accuracy — one team saw an average confidence of 0.87 on actions that turned out wrong. Guidance: never use raw confidence as the sole gate; start conservative (0.90+ thresholds), lower gradually only after collecting per-band accuracy data; never auto-approve irreversible actions (financial transactions, deletes) at any confidence.",
+          "source": "https://waxell.ai/blog/ai-agent-approval-workflows"
+        },
+        {
+          "claim": "OpenAI's 'A practical guide to building agents' prescribes rating every tool/action low/medium/high risk based on read-vs-write, reversibility, permissions, and financial impact; high-risk actions (payments, large refunds, cancellations) trigger human intervention, and guardrails are layered — no single gate is treated as sufficient. Human intervention is called 'especially important early in deployment' for surfacing edge cases and building the evaluation cycle.",
+          "source": "https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf"
+        },
+        {
+          "claim": "Anthropic's agent-autonomy research advocates staged autonomy earned through use (Claude Code full auto-approval rises from ~20% of new users to 40%+ with experience) and explicitly warns that 'oversight requirements that prescribe specific interaction patterns, such as requiring humans to approve every action, will create friction without necessarily producing safety benefits' — favoring trustworthy visibility + simple intervention mechanisms over per-action approval.",
+          "source": "https://www.anthropic.com/research/measuring-agent-autonomy"
+        },
+        {
+          "claim": "Microsoft's 2025 Copilot Studio guidance ships HITL as a first-class connector (agent pauses and requests information/approval from an assignee) and its agentic maturity model states high-stakes environments should be human-in-the-loop by design — agents draft and propose, execute only after approval, with the autonomy envelope expanded over time for low-risk actions while approvals stay on irreversible/financially sensitive operations; deploying an agent does not transfer accountability from staff.",
+          "source": "https://learn.microsoft.com/en-us/microsoft-copilot-studio/guidance/autonomous-agents"
+        },
+        {
+          "claim": "CrewAI and AutoGen confirm the same convergence: CrewAI exposes human_input=True task gates and 'needs approval' events awaited in the event flow; AutoGen's UserProxyAgent puts a human in the conversation loop — every major 2025 agent framework treats human approval as a pause-and-resume event, not a synchronous blocking prompt, which suits Clara's outbox/durable-runtime spine.",
+          "source": "https://docs.crewai.com/en/learn/human-in-the-loop"
+        },
+        {
+          "claim": "Mature AP-automation products stage exactly rules -> calibrated confidence -> autonomy: AI invoice tools assign per-field confidence scores with a user-set threshold (high threshold ~95% = more human review, fewer errors; tuned to risk tolerance and audit requirements); Vic.ai lets firms define confidence thresholds so only qualifying invoices process automatically, reaching 'Autopilot' touchless posting only after sustained accuracy; Ramp's 2025-2026 AP/Accounting agents auto-code only items marked 'ready to sync' at 90%+ accuracy and route the rest to review.",
+          "source": "https://ramp.com/blog/accounts-payable/ai-invoice-processing"
+        },
+        {
+          "claim": "Documented failure modes of uncalibrated suggestions in professional tools: automation bias produces errors of commission (acting on wrong AI suggestions) and omission (failing to act when AI stays silent); 2025-2026 research on human-AI collaboration finds uncalibrated trust systematically shifts professionals toward acceptance over verification, and black-box suggestions without visible reasoning reduce critical engagement; health-professions literature documents deskilling — judgment eroding as review becomes passive monitoring. This is the direct risk of showing accountants unvalidated model-confidence numbers before Clara's calibration harness exists.",
+          "source": "https://www.tandfonline.com/doi/full/10.1080/10447318.2025.2487861"
+        },
+        {
+          "claim": "Deskilling/automation-bias evidence for professional reviewers: over-reliance on automated systems erodes procedural competence and diagnostic reasoning as once-active skills become passively monitored; instant polished AI output reduces deliberate practice of error-checking — an argument for keeping the human decision active (pick/confirm the client) rather than a one-click accept of a pre-filled answer for low-evidence cases.",
+          "source": "https://icenet.blog/2025/08/26/deskilling-and-automation-bias-a-cautionary-tale-for-health-professions-educators/"
+        },
+        {
+          "claim": "Confidence-display UX best practice (2025-2026): lead with plain-language reasoning/evidence before the number (progressive disclosure) so reviewers read the logic before anchoring on the score; tier alerts by decision weight, not raw probability; and show a 'model experience' indicator (is the model in familiar territory or extrapolating?) — reviewers engage differently with an 85% on a known vendor vs an 85% on a novel pattern. Uncertainty granularity research similarly finds how uncertainty is expressed changes whether humans actually verify.",
+          "source": "https://medium.com/@vamsiparasar1992/ux-patterns-for-ai-confidence-scores-and-risk-alerts-e8624e34cfd9"
+        }
+      ],
+      "recommendation_for_clara": "Run attribution automatically after OCR, but as a strict propose-only ladder until the calibration harness exists. Concretely: (1) Deterministic rules first — exact/normalized matches on registration numbers, bank account, TIN, known vendor-client mappings — and let only these mint resolution_method='rule' (this matches how Vic.ai/Ramp all started: rules and per-field thresholds before autonomy). (2) In the same post-OCR step, always compute a model suggestion (candidate client + cited evidence spans + a score), but store it as a suggestion event, never as an attribution — the >=0.95 DB gate plus 'human'/'rule'-only methods already makes this structural; keep it that way. (3) Present suggestions in an Agent-Inbox-style unassigned lane with the LangGraph four-verb contract: approve / edit (pick a different client) / reject-with-reason / answer-a-question, where each verb is a durable pause-resume event on the outbox spine, and every human verdict is captured as labeled training/calibration data — this is precisely the dataset the future eval harness needs, so the queue IS the calibration bootstrap. (4) Presentation: lead with evidence, not the number — show the matched fields/spans and a plain-language reason first, a coarse familiarity indicator (seen-this-vendor-before vs novel) second, and suppress raw model-confidence percentages entirely until calibration exists, because uncalibrated displayed confidence is the documented driver of automation bias and trust erosion among professionals; for low-evidence documents show 'no suggestion' rather than a weak guess (staying silent is a legitimate rung of the ladder). (5) Wire the future upgrade path now but keep it dark: when the eval harness lands and per-band accuracy is measured, graduate specific high-precision suggestion classes into new deterministic-style 'calibrated-model' rules (a new resolution method added by ADR, still never self-authorizing book writes — OpenAI/industry guidance is unanimous that financially impactful actions stay hard-gated regardless of confidence). (6) Respect Anthropic's anti-friction warning and Tao's flexibility preference: don't add approval ceremony beyond the one decision that matters (client attribution); everything upstream (OCR, dedupe, filing into the lane) runs fully automatic with visibility, and per-client 'auto-accept rule matches' can expand over time as trust is earned — autonomy staged per action class, evidence-first UI, confidence numbers only after calibration.",
+      "caveats": [
+        "Several search-result syntheses (e.g. the 0.87-confidence-wrong anecdote, the three-tier auto/notify/block model) come from practitioner blogs surfaced in search summaries, not peer-reviewed sources; I verified the LangChain docs, Anthropic autonomy research, and Vic.ai pages directly, but the OpenAI PDF and Microsoft Learn pages were cited from search results without a full fetch.",
+        "Vic.ai's public site confirms threshold-gated autonomy but does not disclose its internal calibration methodology, so 'how they got to Autopilot' is inferred from their FAQ/product pages rather than documented engineering detail.",
+        "Search results dated up to mid-2026 (some sources listed Apr 2026 / Q1 2026); treat vendor accuracy claims (Ramp '90%+ on ready-to-sync') as marketing figures, not audited numbers.",
+        "The recommendation to suppress raw confidence display pre-calibration is my synthesis of the automation-bias and confidence-UX literature, not a verbatim prescription from any single source."
+      ]
+    },
+    "docai-classification": {
+      "findings": [
+        {
+          "claim": "Microsoft's official Document Intelligence guidance treats confidence as a gate for automation: field-level confidence (0-1) should decide whether to auto-accept or flag for human review, and for financial/sensitive documents Microsoft recommends targeting near-100% model accuracy plus an explicit human-review stage. It also stresses that field confidence must be composed with the underlying OCR/word confidence (a 'composite' score) — the extraction confidence and the text-read confidence are independent and both must be checked.",
+          "source": "https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/concept/accuracy-confidence?view=doc-intel-4.0.0"
+        },
+        {
+          "claim": "The standard Azure pattern after prebuilt-layout is a downstream custom classification model (layout results feed the classifier; it combines layout + language features, classifies page-by-page, can split multi-document files) which is then paired with a per-type extraction model. I.e., classify -> route -> extract is the vendor-recommended pipeline shape, not one monolithic extraction.",
+          "source": "https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/train/custom-classifier?view=doc-intel-4.0.0"
+        },
+        {
+          "claim": "Production HITL document pipelines converge on a three-band abstention design: high confidence (~>=95%) auto-proceeds, a middle band (~80-95%) gets flagged/batch review with provisional status, low band (<~80%) gets mandatory review before any downstream processing — with thresholds set per-field by criticality (financial amounts and identifiers demand the highest thresholds).",
+          "source": "https://www.docupipe.ai/blog/human-in-the-loop-hitl-escalation-protocol"
+        },
+        {
+          "claim": "Recommended review UX for suggestion queues: side-by-side source document + extracted/suggested data, bounding-box or evidence highlighting showing where each value came from, color-coded confidence indicators, in-place correction with keyboard shortcuts, and batch processing — designed so the reviewer verifies evidence rather than re-keys data.",
+          "source": "https://www.docupipe.ai/blog/human-in-the-loop-hitl-escalation-protocol"
+        },
+        {
+          "claim": "In financial entity matching the industry pattern is tiered: exact match on strong identifiers first (reference IDs, bank account numbers, amounts), then fuzzy name matching (Levenshtein, Jaro-Winkler, token-sort, embeddings) only as a fallback, with 'blocking' (pre-grouping candidates by amount/date/prefix) to cut false positives. Exact-only systems auto-match just 60-70% of transactions; fuzzy tiers close the gap but the top auto-accept tier stays >=95 score, mid tiers get sampled or human-reviewed.",
+          "source": "https://optimus.tech/blog/fuzzy-matching-algorithms-in-bank-reconciliation-when-exact-match-fails"
+        },
+        {
+          "claim": "AP-automation vendors treat exact unique-identifier match and fuzzy/semantic name match as distinct trust classes: exact identifier matches can auto-reconcile, while fuzzy matches ('Amazon Web Services Inc.' vs 'AMZN*AWS', 'Corp' vs 'Corporation' via embeddings) are used to surface candidates that rules miss — and fuzzy matching doubles as fraud protection by catching near-duplicate resubmissions.",
+          "source": "https://www.zoneandco.com/glossary/smart-transaction-matching and https://matchdatapro.com/fuzzy-data-matching-and-entity-resolution/"
+        },
+        {
+          "claim": "Abstention/selective-prediction literature and vendors agree calibration is the precondition for meaningful thresholds: an uncalibrated model's '85% confidence' may be 60% accurate, making any fixed cutoff unsafe. Until a calibration/eval harness exists, raw model confidence should not be compared against a numeric gate at all — routing should be structural (suggest-only) rather than threshold-based.",
+          "source": "https://mbrenndoerfer.com/writing/calibration-machine-learning-confidence-accuracy-ece and https://www.runpulse.com/blog/confidence-scoring-for-downstream-automation-when-to-trust-when-to-review"
+        },
+        {
+          "claim": "Multi-tenant AI suggestion systems must enforce tenant isolation at the retrieval/candidate-generation step, not just at write time: every candidate query (SQL, cache, vector/semantic search) must carry the tenant filter, cache keys must be tenant-namespaced, and no cross-tenant data may be used for fine-tuning or batched inference context — 'without metadata filters, search returns most similar vectors from ANY tenant.' Leaked data in an agent is worse than classic SaaS leakage because it enters the reasoning chain and can drive tool calls.",
+          "source": "https://rafter.so/blog/multi-tenant-ai-agent-isolation and https://fast.io/resources/ai-agent-multi-tenant-architecture/"
+        },
+        {
+          "claim": "RLS alone is not treated as sufficient by 2025 assessments: PostgreSQL CVE-2024-10976 (RLS below subqueries) and CVE-2025-8713 (optimizer statistics leaking RLS-hidden rows) show DB-level isolation can fail; defense-in-depth (RLS + application-level tenant filter + automated cross-tenant access tests) is the recommended posture. Authorization present in UI but missing in the API is the most common cross-tenant finding.",
+          "source": "https://medium.com/@instatunnel/multi-tenant-leakage-when-row-level-security-fails-in-saas-da25f40c788c and https://bugstrix.com/blogs/multi-tenant-saas-security-testing-how-to-prevent-cross-tenant-data-leaks/"
+        },
+        {
+          "claim": "HITL routing is what makes automation scale safely: mature systems route only low-confidence/high-stakes items to humans, and structured human review stages take document pipelines from ~80% (fully automated) to 95-99.9% effective accuracy — the review lane is an accuracy feature, not overhead.",
+          "source": "https://www.databricks.com/blog/human-in-the-loop and https://idp-software.com/guides/human-in-the-loop-document-processing/"
+        }
+      ],
+      "caveats": [
+        "Vendor threshold bands (95/80 etc.) come from vendor marketing/engineering blogs, not peer-reviewed benchmarks; treat them as industry convention, not validated numbers for Clara's models.",
+        "The Azure accuracy-confidence page is versioned doc-intel-4.0.0 (updated 2026-04); if Clara pins a different API version, re-check field-confidence availability (field-level + table confidence require the 2024-11-30 GA API for custom models).",
+        "AICPA 2025 AP benchmark figures were quoted second-hand by a vendor blog and were not verified against the AICPA source.",
+        "PostgreSQL CVE-2025-8713 details were taken from a secondary article; verify against the official PostgreSQL security advisory before citing in an ADR.",
+        "Search results are US-weighted; no Malaysia-specific (SSM/LHDN) document-AI guidance surfaced in this lane — Malaysian identifier specifics (SSM registration number formats, e-Invoice TIN) need a separate check."
+      ],
+      "recommendation_for_clara": "Post-OCR, run an automatic ATTRIBUTION CASCADE that mirrors the industry trust-tier pattern, mapped onto Clara's existing legal resolution methods. Tier 1 — deterministic identifier match ('rule'): exact match on strong identifiers extracted from the document against the firm's known-party registry — client bank account number, SSM registration number / TIN, known e-mail/upload-channel binding. These are the only matches eligible to satisfy the >=0.95 structural gate automatically, because they are auditable and calibration-free. Tier 2 — fuzzy/semantic candidate generation (suggest-only): Jaro-Winkler/token-sort/embedding name match with blocking (restrict candidates by document type, date, amount range) to produce a RANKED SHORTLIST of clients with per-candidate evidence. Since the calibration harness doesn't exist yet, never compare raw model confidence to a numeric threshold — every Tier-2 output abstains by construction and lands in the unassigned lane as a suggestion awaiting 'human' resolution (this matches both Clara's ruling that model suggestions never self-authorize and the selective-prediction literature: uncalibrated confidence makes threshold gates unsafe). Presentation to accountants: an evidence-first review queue — side-by-side document viewer with bounding-box highlights on the fields that drove each suggestion, the matched registry evidence spelled out ('bank acct ****1234 = Client X on file', 'name similarity 0.91 to Client Y'), ranked candidates as one-click accept (which records resolution_method='human' with the accountant's identity), and keyboard-driven batch review. Show WHY, never just a score; when a human accepts a fuzzy match repeatedly, offer to promote it into a deterministic rule (learned alias -> future Tier-1). Multi-tenant safety: candidate generation must be structurally scoped to the firm — the suggester runs under the RLS-scoped read-only role, every candidate query/cache/embedding search carries firm_id, cache keys are firm-namespaced, no cross-firm data in any model context or fine-tune, and add automated cross-tenant suggestion tests (assert firm A's registry never appears in firm B's shortlist) since RLS alone has known failure modes (CVE-2024-10976, CVE-2025-8713). Later, once the calibration/eval harness exists, a calibrated-confidence auto-accept band can be considered — but as a new ADR, not a default."
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Research"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "research:accounting-saas",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a73aaf8a056c8490e",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1784372801537,
+      "queuedAt": 1784372799542,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Run the full suggestion machinery automatically after OCR, …",
+      "promptPreview": "Context: Clara is a multi-tenant AI accounting OS for Malaysian accounting firms. Its document pipeline persists every uploaded client document (invoice/receipt/bank statement) after deterministic OCR into an \"unassigned lane\"; a structural DB gate requires >=0.95-confidence client attribution before any book write; resolution methods legal today: 'human' and deterministic 'rule' (a model suggesti…",
+      "lastProgressAt": 1784372939797,
+      "tokens": 50369,
+      "toolCalls": 17,
+      "durationMs": 138260,
+      "resultPreview": "{\"findings\":[{\"claim\":\"Dext (ex-Receipt Bank) defaults to suggest-with-confirm: after deterministic extraction, ML auto-categorisation assigns a category to new Costs items based on how similar items were coded in the past, and 'Smart Suggestions' recommend values (project fields, description) which the user accepts — auto-apply of suggestions is OFF by default and must be explicitly enabled in Au…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "research:agentic-hitl",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a38a636f8a85af7cc",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1784372802342,
+      "queuedAt": 1784372799542,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Run attribution automatically after OCR, but as a strict pr…",
+      "promptPreview": "Context: Clara is a multi-tenant AI accounting OS for Malaysian accounting firms. Its document pipeline persists every uploaded client document (invoice/receipt/bank statement) after deterministic OCR into an \"unassigned lane\"; a structural DB gate requires >=0.95-confidence client attribution before any book write; resolution methods legal today: 'human' and deterministic 'rule' (a model suggesti…",
+      "lastProgressAt": 1784372932085,
+      "tokens": 52945,
+      "toolCalls": 14,
+      "durationMs": 129743,
+      "resultPreview": "{\"findings\":[{\"claim\":\"The dominant 2025 HITL framework pattern (LangChain/LangGraph HITL middleware) intercepts a proposed tool call before execution, persists state, and offers exactly four human decisions: approve (run as proposed), edit (modify arguments then run), reject (skip with feedback returned to the agent), and respond (human supplies the answer directly). Guidance is to interrupt only…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "research:docai-classification",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "aa0a7f937b547bab3",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1784372801928,
+      "queuedAt": 1784372799542,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Post-OCR, run an automatic ATTRIBUTION CASCADE that mirrors…",
+      "promptPreview": "Context: Clara is a multi-tenant AI accounting OS for Malaysian accounting firms. Its document pipeline persists every uploaded client document (invoice/receipt/bank statement) after deterministic OCR into an \"unassigned lane\"; a structural DB gate requires >=0.95-confidence client attribution before any book write; resolution methods legal today: 'human' and deterministic 'rule' (a model suggesti…",
+      "lastProgressAt": 1784372910647,
+      "tokens": 52409,
+      "toolCalls": 11,
+      "durationMs": 108719,
+      "resultPreview": "{\"findings\":[{\"claim\":\"Microsoft's official Document Intelligence guidance treats confidence as a gate for automation: field-level confidence (0-1) should decide whether to auto-accept or flag for human review, and for financial/sensitive documents Microsoft recommends targeting near-100% model accuracy plus an explicit human-review stage. It also stresses that field confidence must be composed wi…"
+    }
+  ],
+  "totalTokens": 155723,
+  "totalToolCalls": 42
+}

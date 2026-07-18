@@ -1,0 +1,222 @@
+{
+  "summary": "Research current industry practice for file ingestion in AI-agent SaaS platforms to ground the Slice-5 transport decision",
+  "agentCount": 3,
+  "logs": [],
+  "result": {
+    "industry-patterns": {
+      "findings": [
+        {
+          "claim": "The prevailing 2025-2026 SaaS pattern for browser file ingestion is direct-to-storage via presigned/signed URLs: the API only signs the operation and records metadata; the browser uploads bytes straight to object storage, then post-upload verification/processing is triggered server-side. Proxying bytes through the app tier is treated as an anti-pattern at scale (orders-of-magnitude more bandwidth through the app tier, latency, scaling bottlenecks).",
+          "source": "https://medium.com/@priyasrivastava18official/system-design-pattern-handling-large-blobs-with-presigned-urls-the-secret-sauce-behind-0e73f4adbe63 ; https://medium.com/@ThinkingLoop/9-high-scale-file-upload-designs-with-s3-r2-and-signed-urls-ad1425ee85e8 ; https://docs.aws.amazon.com/pdfs/prescriptive-guidance/latest/presigned-url-best-practices/presigned-url-best-practices.pdf"
+        },
+        {
+          "claim": "Even with presigned direct uploads, best practice is to validate files AFTER they land in storage (server-side verification of type/size/integrity, triggered by an event or notify call), plus enforce content-type and max-size constraints in the signature. The canonical flow: create registry row status='uploading' -> presigned upload -> notify -> server verifies real bytes -> flip status='uploaded' -> downstream processing.",
+          "source": "https://www.systemdesignsandbox.com/learn/presigned-urls ; https://www.hellointerview.com/learn/system-design/problem-breakdowns/dropbox ; https://medium.com/@wirelesser/upload-file-with-aws-s3-pre-signed-url-and-verify-uploaded-content-integrity-using-sha256-391740bd75e9"
+        },
+        {
+          "claim": "Vercel's own guidance (directly applicable since Clara's frontend is Next.js on Vercel): server-proxied uploads are hard-capped at a 4.5MB request body on Vercel Functions; for anything larger the documented recommendation is client uploads — a server-issued token, then the file goes directly from the browser to storage. This makes 'stream through a Vercel route' a non-starter for 20MB files; a runtime-proxied route would have to hit Fly directly, bypassing the app's own origin.",
+          "source": "https://vercel.com/docs/vercel-blob/client-upload ; https://vercel.com/kb/guide/how-to-bypass-vercel-body-size-limit-serverless-functions"
+        },
+        {
+          "claim": "Vercel AI SDK attachment guidance follows the same split: useChat attachments as data URLs are only for small inline files; for production and larger files the recommended pattern is presigned direct-to-storage upload from the client, then passing a file reference/URL to the AI route rather than the bytes.",
+          "source": "https://fast.io/resources/vercel-ai-sdk-file-storage/ ; https://github.com/vercel-labs/ai-sdk-preview-attachments ; https://vercel.com/blog/vercel-ai-sdk-3-3"
+        },
+        {
+          "claim": "Supabase Storage (Clara's actual storage vendor) has an explicit recommended pattern: standard upload for files under ~6MB; TUS resumable uploads for files that may exceed 6MB; use the direct storage hostname (project-id.storage.supabase.co) for large-file performance; and createSignedUploadUrl / signed TUS tokens (x-signature header) so a server that holds the credential can authorize a time-limited, path-scoped browser upload without exposing the key. Signed upload URLs are single-writer and expire (2h standard / 24h TUS). Default semantics reject overwrite (400 Asset Already Exists) unless x-upsert — which aligns with Clara's write-once doctrine.",
+          "source": "https://supabase.com/docs/guides/storage/uploads/resumable-uploads ; https://supabase.com/docs/reference/javascript/storage-from-createsigneduploadurl ; https://supabase.com/docs/guides/storage/uploads/standard-uploads"
+        },
+        {
+          "claim": "Supabase Storage documents no server-enforced sha256 checksum on upload (unlike S3's x-amz-checksum-sha256-in-signature). So under option B the runtime must itself re-read the object bytes from storage and compute sha256 before flipping the registry row — the sha the browser claims can never be trusted. This is a real (but bounded and streamable) verify cost that option B carries and option A gets 'for free' while the bytes pass through.",
+          "source": "https://supabase.com/docs/guides/storage/uploads/resumable-uploads ; https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity-upload.html"
+        },
+        {
+          "claim": "The AI platform vendors' own file APIs are server-proxied multipart from the DEVELOPER's perspective (OpenAI Files API /v1/files, up to 50MB per request; Anthropic Files API beta files-api-2025-04-14, upload-once-reference-many, immutable after upload) — but that is the vendor acting as the storage provider behind their own edge; it is the 'upload endpoint owned by whoever holds the storage,' not an endorsement of proxying through a single app VM. Their design signals that matter for Clara: upload-once + reference-by-id in chat turns, immutability/write-once, and content passed to the model by reference rather than inline.",
+          "source": "https://developers.openai.com/api/reference/resources/files/methods/create ; https://docs.anthropic.com/en/docs/build-with-claude/files"
+        },
+        {
+          "claim": "Streaming ~20MB multipart uploads through a Node process CAN be done without blocking the event loop (busboy-style streaming parsers with backpressure, never buffering whole files), but it is explicitly called out as a common source of Node performance problems and requires careful backpressure/limit engineering — and it turns the single always-on Fly machine (also serving chat SSE) into the bandwidth bottleneck for month-end bulk batches of dozens of 20MB files, exactly the load profile the direct-to-storage pattern exists to remove.",
+          "source": "https://oneuptime.com/blog/post/2026-01-06-nodejs-file-uploads-scale/view ; https://oneuptime.com/blog/post/2026-01-30-nodejs-streaming-file-uploads/view"
+        },
+        {
+          "claim": "For bulk/resumable ingestion specifically (month-end batches, flaky links, retries mid-file), the industry pattern is chunked/resumable protocols (TUS, Uppy, S3 multipart) direct to storage — resume from the last chunk, not restart — which a runtime-proxied single-POST multipart route cannot offer without reimplementing TUS on the runtime.",
+          "source": "https://supabase.com/docs/guides/storage/uploads/resumable-uploads ; https://codelit.io/blog/design-a-file-upload-system ; https://www.hellointerview.com/learn/system-design/problem-breakdowns/dropbox"
+        }
+      ],
+      "recommendation_for_clara": "Recommend (B) direct-to-storage as the single pattern for BOTH chat attachments and bulk batches, shaped as: runtime issues a path-scoped signed upload URL (createSignedUploadUrl for <6MB chat attachments; signed TUS token for larger/bulk, via the direct storage hostname) and creates the registry row in state 'uploading' in the same call; browser uploads bytes directly to Supabase; browser notifies the runtime; a durable workflow step streams the object back, computes sha256 server-side (never trusting the client's claim), enforces the per-firm UNIQUE, flips the row to 'verified', and enqueues OCR. This matches Vercel's own hard guidance (4.5MB function body limit makes proxying through the Next.js app impossible anyway), Supabase's documented upload doctrine, the AI SDK attachment pattern (upload first, reference by URL/id in the chat message), and keeps 20MB×dozens month-end traffic off the single SSE-serving Fly machine's event loop and NIC. The runtime keeps sole custody of the storage credential — signed URLs are time-limited, single-writer, write-once (no x-upsert), so the write-once doctrine and the four structural invariants are preserved. A staged hybrid (C: proxy tiny chat attachments through the runtime first) buys little — the verify-bytes step must exist for B regardless, so building A first is throwaway; build B once with two signing flavors (standard vs TUS). One honest caveat to surface to Tao: B's verify step re-downloads each object once inside the runtime (streamed, cheap on Fly<->Supabase bandwidth), because Supabase, unlike S3, cannot enforce a sha256 in the signature.",
+      "caveats": [
+        "Could not find a primary source documenting ChatGPT's or Claude.ai's internal browser-upload transport (their consumer apps); claims about vendor patterns rest on their public developer Files APIs, not their own web-app network behavior.",
+        "Supabase docs reviewed do not document any server-side checksum enforcement at upload time; if Supabase ships checksum support later, B's verify step could be simplified — worth a re-check at build time.",
+        "The 6MB standard-vs-TUS threshold and the 2h/24h signed-URL expiries are Supabase-documented values as of mid-2026 and should be re-confirmed against the pinned supabase-js version.",
+        "Several system-design sources cited (Medium, hellointerview, codelit) are secondary/educational rather than first-party engineering blogs; the first-party anchors are the Vercel, Supabase, AWS, OpenAI, and Anthropic docs.",
+        "Intercom/Notion/Linear-specific engineering posts on upload pipelines did not surface in searches; the 'prevailing pattern' claim is grounded in platform-vendor docs plus general system-design consensus instead."
+      ]
+    },
+    "supabase-storage": {
+      "findings": [
+        {
+          "claim": "createSignedUploadUrl issues a scoped upload token for one specific object path; the only documented option is `upsert` (allow overwrite). Per the supabase-js reference and GitHub issues, the signed upload URL is valid for 2 hours (fixed, no expiresIn parameter) and the token is effectively single-use — consumed on first successful upload unless upsert was set at creation time (upsert must be set on createSignedUploadUrl, not uploadToSignedUrl).",
+          "source": "https://supabase.com/docs/reference/javascript/storage-from-createsigneduploadurl ; https://github.com/supabase/supabase-js/issues/1672 ; https://github.com/supabase/storage/issues/502"
+        },
+        {
+          "claim": "TUS resumable uploads: chunk size must be exactly 6MB ('do not change it'); recommended for files >6MB; the per-upload TUS URL is valid up to 24 hours; supports presigned/scoped auth by passing the createSignedUploadUrl token in the x-signature header; supports x-upsert; concurrent uploads to the same path: first completer wins with 409 for others (last-wins under upsert). Storage v3 supports files up to 50GB via resumable uploads.",
+          "source": "https://supabase.com/docs/guides/storage/uploads/resumable-uploads ; https://supabase.com/blog/storage-v3-resumable-uploads"
+        },
+        {
+          "claim": "NO upload-time checksum enforcement exists on any Supabase upload path: the TUS docs document no checksum extension; the JS SDK upload/uploadToSignedUrl options have no expected-hash parameter; and the S3-compatibility matrix explicitly marks Content-MD5 as unsupported for PutObject/CreateMultipartUpload/UploadPart, with no documented enforcement of x-amz-content-sha256 payload hashes (UNSIGNED-PAYLOAD is the common S3-compat mode; there are open signature-compat issues). Therefore a direct-to-storage upload CANNOT structurally guarantee the bytes match a client-claimed sha256 — server-side verification must happen after upload by reading the stored bytes back.",
+          "source": "https://supabase.com/docs/guides/storage/s3/compatibility ; https://supabase.com/docs/guides/storage/uploads/resumable-uploads ; https://github.com/supabase/storage/issues/569"
+        },
+        {
+          "claim": "Write-once behavior is achievable: default upload behavior on an existing path is a 400 'Asset Already Exists' error; overwrite requires explicit upsert:true / x-upsert header, and upsert additionally requires SELECT+UPDATE RLS policies on storage.objects — so a bucket whose policies grant the uploader INSERT-only is structurally write-once at the RLS layer.",
+          "source": "https://supabase.com/docs/guides/storage/uploads/standard-uploads ; https://supabase.com/docs/guides/storage/security/access-control"
+        },
+        {
+          "claim": "RLS applies to storage.objects with per-operation policies (INSERT = upload, SELECT = read/list, UPDATE+SELECT = upsert/move, DELETE); owner_id can be matched against auth.jwt()->>'sub'; the service key (the runtime's own credential) bypasses RLS entirely for trusted server-side operations.",
+          "source": "https://supabase.com/docs/guides/storage/security/access-control"
+        },
+        {
+          "claim": "Copy and move are supported server-side including cross-bucket (destinationBucket option), limited to objects up to 5GB via the API; copy needs SELECT on source + INSERT on destination (UPDATE for overwrite-as-upsert); ownership transfers to the initiator; move deletes the original. Transactional atomicity is NOT documented — treat quarantine-to-canonical promotion as copy-then-verify-then-delete rather than assuming an atomic rename. S3 versioning is not supported; deletes are permanent.",
+          "source": "https://supabase.com/docs/guides/storage/management/copy-move-objects ; https://supabase.com/docs/guides/storage/s3/compatibility"
+        },
+        {
+          "claim": "File size limits per plan: Free 50MB max per file; Pro/Team up to 500GB (global project limit, with optional stricter per-bucket size and MIME-type restrictions). Clara's ~20MB documents fit even on Free, but Pro is needed only for headroom, not for this feature.",
+          "source": "https://supabase.com/docs/guides/storage/uploads/file-limits"
+        },
+        {
+          "claim": "Supabase Storage has NO native virus/malware scanning as of 2025-2026; the documented pattern is an app-side gate (Edge Function or your own runtime) scanning new objects via third-party services before promoting them. This aligns with a quarantine-then-verify pipeline anyway.",
+          "source": "https://github.com/orgs/supabase/discussions/23645 ; https://www.answeroverflow.com/m/1400608599172055040"
+        },
+        {
+          "claim": "Object-creation notification exists via Database Webhooks (pg_net wrapper) or custom Postgres triggers on storage.objects INSERT — but with a known gotcha: each upload can produce two INSERT firings (a first RLS-test insert with metadata=null that is rolled back, then the real one), so trigger-based notification needs dedup/metadata-not-null filtering; there is no bucket-scoped webhook, only table-level.",
+          "source": "https://supabase.com/docs/guides/database/webhooks ; https://github.com/orgs/supabase/discussions/19017 ; https://github.com/orgs/supabase/discussions/22879"
+        }
+      ],
+      "caveats": [
+        "The 2-hour TTL and single-use semantics of createSignedUploadUrl come from the supabase-js reference page (client-rendered; WebFetch 404'd) plus corroborating GitHub issues — verify the exact current TTL against the live reference or storage server source before hard-coding an expiry assumption.",
+        "The 24-hour validity in the resumable-uploads doc refers to the per-upload TUS URL, distinct from the 2-hour signed-upload token; both apply when combining them.",
+        "Absence of checksum enforcement is an absence-of-documentation finding (S3 compat matrix + TUS docs + SDK options); Supabase could add TUS checksum or S3 checksum support later — recheck before treating this as permanent.",
+        "Copy/move atomicity is undocumented, not documented-as-atomic; design the promotion step to be idempotent and crash-safe rather than relying on atomic rename."
+      ],
+      "recommendation_for_clara": "Direct-to-storage upload alone CANNOT satisfy the sha-verification law: Supabase enforces no upload-time checksum on any path (no Content-MD5, no documented x-amz-content-sha256 payload enforcement, no TUS checksum extension). So Option A vs B is really 'hash while streaming through the runtime' vs 'upload direct, then runtime reads the stored bytes back and hashes them'. Recommend Option B shaped as quarantine-and-promote: (1) runtime (holding the service credential) mints createSignedUploadUrl tokens for a quarantine prefix in an INSERT-only-RLS bucket (single-use, no upsert = structural write-once; TUS with the x-signature token for the >6MB/bulk month-end batches, plain uploadToSignedUrl for small chat attachments); (2) browser uploads directly — the 20MB x dozens month-end traffic never touches the chat/SSE event loop; (3) browser notifies the runtime (do NOT rely on storage.objects triggers as the primary signal given the double-INSERT gotcha — use them only as a reconciliation sweep); (4) a durable workflow step streams the object back, computes sha256 (streamed crypto hash, negligible event-loop cost at 20MB; use worker_threads only if batch hashing profiles hot), verifies against the client-claimed sha, inserts the registry row (UNIQUE per firm on sha256) in the same transaction as recording the canonical path, then copies/moves quarantine -> canonical (idempotent, verify-after-copy — atomicity is undocumented) and deletes the quarantine object; failures leave only quarantine garbage a sweeper can reap. This keeps 'server-side sha verified against real bytes' true (the runtime hashed the actual stored bytes before any registry row exists), keeps the write-once doctrine structural via RLS, and keeps virus scanning (no native option — app-side gate) in the same pre-promotion step. Option A adds nothing for integrity that B's read-back doesn't, while costing event-loop exposure and Fly egress on every upload."
+    },
+    "durable-ingestion": {
+      "findings": [
+        {
+          "claim": "Content-addressed ingestion (sha256 as the identity key) is the standard 2025 pattern for idempotent uploads: identical bytes hash to the same key, making retries and duplicate submissions naturally idempotent, with the DB registry enforcing uniqueness via a conditional insert; production guides pair this with reference counting and conditional writes rather than trusting client-supplied hashes.",
+          "source": "https://stonefly.com/blog/content-addressable-storage-enterprise-guide/ and https://transloadit.com/devtips/efficient-file-deduplication-with-sha-256-and-node-js/"
+        },
+        {
+          "claim": "DECISIVE for the A/B/C choice: Supabase Storage's S3-compatible API does NOT support Content-MD5, x-amz-checksum-algorithm, or x-amz-checksum-sha256 on PutObject, CreateMultipartUpload, or UploadPart — so unlike native S3 (which validates a signed-in checksum server-side before storing), Supabase cannot enforce upload integrity at the storage layer. Any direct-to-storage path (option B) therefore requires the runtime to re-read the stored bytes and stream-hash them itself before creating the registry row.",
+          "source": "https://supabase.com/docs/guides/storage/s3/compatibility (contrast with native S3 behavior: https://docs.aws.amazon.com/AmazonS3/latest/userguide/checking-object-integrity-upload.html)"
+        },
+        {
+          "claim": "Streaming hash computation is the standard way to verify sha256 without buffering: a Transform stream updates the hash as chunks pass through a pipeline (request body -> hash transform -> storage write), with Node's pipe/pipeline backpressure keeping memory flat. For a process that also serves latency-sensitive traffic (Clara's chat SSE), incremental crypto on ~20MB files is short per-chunk work and generally fine, but production write-ups warn that hashing at gigabyte scale or under concurrent batch load produces measurable event-loop delay (p95 spikes) — the documented mitigations are pushing hashing into a worker-thread pool and throttling concurrent ingest via backpressure/semaphore.",
+          "source": "https://nodejs.org/learn/modules/backpressuring-in-streams and https://dev.to/axiom_agent/nodejs-streaming-in-production-backpressure-pipelines-and-memory-efficient-processing-2ilh and https://medium.com/@2nick2patel2/node-streams-vs-workers-pick-the-right-hammer-cf9a5ec36dff"
+        },
+        {
+          "claim": "Orphan reconciliation must run in BOTH directions and is a known production failure mode: Harbor's registry GC (DB-driven) permanently misses 'storage-only orphans' — blobs that reached storage but whose DB row write failed (crash between storage commit and DB insert) — and the fix proposed is an inverted sweep that starts from storage and checks the DB. WarpStream's GC write-up makes the complementary point: with a periodic reconciliation loop in place, tracking deletions/uploads becomes an optimization, not a correctness requirement — the loop is the safety net.",
+          "source": "https://github.com/goharbor/harbor/issues/23199 and https://www.warpstream.com/blog/taking-out-the-trash-garbage-collection-of-object-storage-at-massive-scale"
+        },
+        {
+          "claim": "The safe write ordering that pairs with reconciliation: write the object to storage FIRST (at a content-addressed or staging key), then create/finalize the registry row in a single DB transaction, so a failure window can only produce an object-without-row (cleanable by the storage-driven sweep after a grace period) and never a row-without-object (which would be a dangling registry entry the pipeline could act on). Row-without-object detection (a HEAD check on registered objects) is still worth running as an integrity audit, since it indicates storage-side loss or a bugged delete.",
+          "source": "https://github.com/goharbor/harbor/issues/23199 (failure-window analysis) and https://www.warpstream.com/blog/taking-out-the-trash-garbage-collection-of-object-storage-at-massive-scale"
+        },
+        {
+          "claim": "Transactional outbox is the correct bridge from 'registry row committed' to 'OCR workflow started': persist the document row and the ingestion event in one DB transaction, relay the event asynchronously, and accept at-least-once delivery downstream. AWS Prescriptive Guidance and 2025 practitioner guides converge on the consumer side: carry the outbox event_id as the idempotency key and record processed IDs in an inbox table atomically with the consumer's state change, discarding duplicates. For Clara, the document sha256 itself (UNIQUE per firm) doubles as a natural idempotency key for the whole ingest, making re-notify/re-verify retries safe.",
+          "source": "https://docs.aws.amazon.com/prescriptive-guidance/latest/cloud-design-patterns/transactional-outbox.html and https://www.softwarecraftsperson.com/posts/2025-10-08-outbox... (practical guide: https://www.softwarecraftsperson.com/posts/2025-10-08-transactional-outbox-pattern/) and https://event-driven.io/en/outbox_inbox_patterns_and_delivery_guarantees_explained/"
+        },
+        {
+          "claim": "Resumable uploads: tus is being standardized as IETF 'Resumable Uploads for HTTP' (draft-ietf-httpbis-resumable-upload, v11 as of March 2026, Standards Track) — the protocol has long-term legs. Supabase Storage ships tus natively in production (6MB chunks, upload URLs valid 24h, Postgres advisory locks for chunk concurrency, up to 50GB on Pro), and createSignedUploadUrl tokens let the browser upload directly without holding a storage credential. However, resumability matters mainly above ~50-100MB or on flaky links; for Clara's ~20MB documents a plain single-shot upload with retry is usually sufficient, with tus as an option for bulk month-end batches.",
+          "source": "https://datatracker.ietf.org/doc/draft-ietf-httpbis-resumable-upload/ and https://supabase.com/docs/guides/storage/uploads/resumable-uploads and https://supabase.com/blog/storage-v3-resumable-uploads"
+        },
+        {
+          "claim": "Malware-scan placement doctrine (2025): treat uploaded bytes as untrusted, land them in a staging/quarantine-capable location, scan asynchronously, and gate downstream processing on scan completion — AWS's GuardDuty Malware Protection for S3 reference architecture (updated Nov 2025) explicitly warns that scans are not instantaneous, so event-driven pipelines need a decoupling step (tag-check or copy-to-clean-bucket) before consuming the object; post-scan actions move flagged objects to a quarantine bucket. A migration case study (ClamAV-on-Fargate to managed scanning) reports 99.8% compute-cost reduction and 75% faster scan turnaround from moving scanning OUT of the app's own process. Implication for Clara: never run AV inline on the chat-serving Node machine; scan as an async workflow step between persist and OCR, with the registry row carrying a scan_status the OCR step gates on.",
+          "source": "https://aws.amazon.com/blogs/security/using-amazon-guardduty-malware-protection-to-scan-uploads-to-amazon-s3/ and https://www.steamhaus.co.uk/insights/enhancing-s3-security-my-journey-from-clamav-to-guardduty-malware-scanning"
+        },
+        {
+          "claim": "Backpressure when ingest shares a process with latency-sensitive traffic: the documented pattern is (1) never buffer whole files (stream end-to-end with pipeline()), (2) cap concurrent ingest streams with an explicit semaphore so a month-end batch of dozens of 20MB files cannot saturate the event loop or memory, and (3) if hashing/parsing shows event-loop delay under load, move CPU work to worker threads while keeping I/O on the main loop. Direct-to-storage upload (option B) structurally removes the upload byte-stream from the chat process entirely — only the later verify-read (which the runtime schedules at its own pace via the durable workflow) touches the runtime, making backpressure trivially controllable.",
+          "source": "https://oneuptime.com/blog/post/2026-01-30-nodejs-streaming-file-uploads/view and https://nodejs.org/api/stream.html and https://medium.com/@2nick2patel2/node-streams-vs-workers-pick-the-right-hammer-cf9a5ec36dff"
+        }
+      ],
+      "recommendation_for_clara": "Recommend (B) direct-to-storage signed upload + notify + runtime verify, shaped as content-addressed staged ingestion — with eyes open that Supabase's S3 gateway does NOT do server-side checksum validation, so verification is a runtime read, not a storage feature. Concretely: (1) browser requests a scoped createSignedUploadUrl for a STAGING key (per-firm prefix, random upload-id — not the final content address, since the client-claimed sha is untrusted); (2) browser uploads directly (plain PUT for ~20MB chat attachments; tus resumable for bulk month-end batches — Supabase ships it natively and it is on the IETF standards track); (3) browser notifies the runtime with {upload_id, claimed_sha256}; (4) a durable WDK workflow stream-hashes the staged object from storage (pipeline + hash transform, concurrency-capped semaphore so dozens of batch verifies cannot stall chat SSE; promote to worker threads only if event-loop delay shows up), rejects on mismatch, then in ONE Postgres transaction inserts the registry row (UNIQUE(firm_id, sha256) = the idempotency key; on conflict, dedupe and delete the staged copy) plus the outbox event that triggers OCR; (5) the object is copied/finalized to its content-addressed key by the runtime's own credential, honoring write-once. This ordering guarantees the only possible inconsistency is object-without-row, which a storage-driven reconciliation sweep (Harbor's exact missing piece) deletes from staging after a grace period; also run the cheap inverse audit (HEAD every registered object). Malware scanning, if/when added, slots as an async workflow step between verify and OCR, gating on scan_status — never inline in the chat process. Option A (streaming through the runtime) is acceptable as a fallback for small chat attachments and saves the second read, but it puts every uploaded byte through the machine that serves chat SSE, makes month-end batch backpressure your problem at the HTTP layer, and Fly single-machine restarts kill in-flight uploads — B moves all of that to Supabase's infrastructure and lets the runtime pull verification work at its own pace. The main honest cost of B: each file's bytes are read once more (storage -> runtime) for hashing, ~20MB per doc, which is cheap and fully backpressure-controlled. C (hybrid) is only worth its complexity if Tao wants chat attachments visible in-message instantly via A while batches go through B; the B machinery alone covers both cases.",
+      "caveats": [
+        "Supabase checksum non-support was verified against the current S3-compatibility doc page; the native (non-S3) Supabase upload endpoints were not exhaustively checked for a checksum-verification option, though none is documented — the standard upload API accepts bytes without integrity headers.",
+        "Malware-scan sources are AWS-centric (GuardDuty/S3); Supabase has no managed equivalent, so the placement doctrine transfers but the implementation would be a self-run scanner step or an external scanning service.",
+        "Event-loop impact numbers for streaming sha256 at 20MB scale are qualitative from practitioner sources, not benchmarked; a quick local benchmark (hash 20MB x N concurrent while measuring event-loop delay) is cheap and worth doing before committing to main-loop hashing vs worker threads.",
+        "The IETF resumable-upload draft (v11, expires Sept 2026) is not yet an RFC; tus 1.0 remains the deployed protocol at Supabase.",
+        "One source URL in the outbox finding contains a corrected duplicate: the canonical link is https://www.softwarecraftsperson.com/posts/2025-10-08-transactional-outbox-pattern/."
+      ]
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Research"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "research:industry-patterns",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "aeb9305158295a778",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1784372324182,
+      "queuedAt": 1784372322145,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Recommend (B) direct-to-storage as the single pattern for B…",
+      "promptPreview": "Context: Clara is a multi-tenant AI accounting SaaS. Browser (Next.js on Vercel) must get sensitive client documents (PDF/images, ~20MB each, chat attachments + bulk month-end batches of dozens) into a pipeline: persist bytes to Supabase Storage + a Postgres registry row (UNIQUE per firm on sha256, sha must be verified against real bytes server-side), then OCR (Azure Document Intelligence). The ag…",
+      "lastProgressAt": 1784372450124,
+      "tokens": 52916,
+      "toolCalls": 13,
+      "durationMs": 125942,
+      "resultPreview": "{\"findings\":[{\"claim\":\"The prevailing 2025-2026 SaaS pattern for browser file ingestion is direct-to-storage via presigned/signed URLs: the API only signs the operation and records metadata; the browser uploads bytes straight to object storage, then post-upload verification/processing is triggered server-side. Proxying bytes through the app tier is treated as an anti-pattern at scale (orders-of-ma…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "research:supabase-storage",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a83475e58cd425b83",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1784372324081,
+      "queuedAt": 1784372322145,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Direct-to-storage upload alone CANNOT satisfy the sha-verif…",
+      "promptPreview": "Context: Clara is a multi-tenant AI accounting SaaS. Browser (Next.js on Vercel) must get sensitive client documents (PDF/images, ~20MB each, chat attachments + bulk month-end batches of dozens) into a pipeline: persist bytes to Supabase Storage + a Postgres registry row (UNIQUE per firm on sha256, sha must be verified against real bytes server-side), then OCR (Azure Document Intelligence). The ag…",
+      "lastProgressAt": 1784372462203,
+      "tokens": 51141,
+      "toolCalls": 17,
+      "durationMs": 138121,
+      "resultPreview": "{\"findings\":[{\"claim\":\"createSignedUploadUrl issues a scoped upload token for one specific object path; the only documented option is `upsert` (allow overwrite). Per the supabase-js reference and GitHub issues, the signed upload URL is valid for 2 hours (fixed, no expiresIn parameter) and the token is effectively single-use — consumed on first successful upload unless upsert was set at creation ti…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 3,
+      "label": "research:durable-ingestion",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "ad5105c1ab4bcd864",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1784372324131,
+      "queuedAt": 1784372322146,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Recommend (B) direct-to-storage signed upload + notify + ru…",
+      "promptPreview": "Context: Clara is a multi-tenant AI accounting SaaS. Browser (Next.js on Vercel) must get sensitive client documents (PDF/images, ~20MB each, chat attachments + bulk month-end batches of dozens) into a pipeline: persist bytes to Supabase Storage + a Postgres registry row (UNIQUE per firm on sha256, sha must be verified against real bytes server-side), then OCR (Azure Document Intelligence). The ag…",
+      "lastProgressAt": 1784372474319,
+      "tokens": 51054,
+      "toolCalls": 12,
+      "durationMs": 150188,
+      "resultPreview": "{\"findings\":[{\"claim\":\"Content-addressed ingestion (sha256 as the identity key) is the standard 2025 pattern for idempotent uploads: identical bytes hash to the same key, making retries and duplicate submissions naturally idempotent, with the DB registry enforcing uniqueness via a conditional insert; production guides pair this with reference counting and conditional writes rather than trusting cl…"
+    }
+  ],
+  "totalTokens": 155111,
+  "totalToolCalls": 42
+}
