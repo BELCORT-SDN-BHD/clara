@@ -1,6 +1,6 @@
 # Slice 5 — migration `0007_document_pipeline.sql` design (companion to the contract)
 
-**This file IS §3 of `slice5-document-pipeline-contract.md` (v1.1)** — split out
+**This file IS §3 of `slice5-document-pipeline-contract.md` (v1.2)** — split out
 only for the 500-line file cap. Same status, same review ladder, same
 normativity. Section numbers are shared with the contract (§3.x cites resolve
 here; everything else resolves there).
@@ -9,99 +9,118 @@ House rules: 0001–0006 untouched; rig-validated on throwaways; every writer
 SECURITY DEFINER with role floors, firm-scoped `op_key`/`op_receipts` idempotency,
 audit_log rows, and same-txn domain events for DOMAIN facts (documents, filings,
 extractions, corrections). Runtime-control tables (intakes, processing tasks,
-metering) emit NO domain events. **Every new table: immutable stamped `firm_id`,
-FORCE RLS, the three-policy pattern (owner true / humans firm-scoped / agent_ro
-firm-scoped where granted), zero direct DML for app roles, composite same-firm FK
-constraints to parents.** The full grant + policy matrix is §3.10.
+reservations, metering) emit NO domain events. **Every new table: immutable
+stamped `firm_id`, FORCE RLS, the three-policy pattern, zero direct DML for app
+roles, composite same-firm FK constraints to parents.** Grant matrix: §3.10.
 
-### 3.0 `documents` evolution + the client_id drop blast radius (enumerated)
+### 3.0 `documents` evolution + the client_id drop blast radius (enumerated, ordered)
 `client_id` migrates into `document_filings`, then drops. 0007 must, in order:
 1. Create filings; backfill one ACTIVE filing per existing non-null client_id with
    `basis='legacy-0007'` and **`resolution_id` NULL** — the backfill **creates NO
    resolutions** (a claim-only wake ingest must never become posting authority).
    Legacy rows keep their storage_path preserved as-is (any grammar).
-2. `CREATE OR REPLACE _tf_validate_domain_event`: document↔client congruence
-   validated via a **filings lookup (any status** — historical events reference
-   retired filings); entry/resolution branches unchanged.
-3. Replace the documents stamp path: a documents-specific stamp trigger deriving
+2. **Backfill `journal_entries.filing_id`** (the migration-apply blocker fix):
+   lock `journal_entries` writes; add the column NULLABLE; UPDATE every
+   document-citing entry to the unique legacy filing for
+   (entry.document_id → entry.client_id) — the migration **ABORTS if any cited
+   entry lacks exactly one match** (zero-ambiguity proof); the backfill runs
+   with `_tf_entry_immutable` DISABLED in-txn (ALTER TABLE … DISABLE TRIGGER,
+   re-enabled before commit — approved entries reject all other updates); THEN
+   add the paired CHECK `(document_id is null)=(filing_id is null)` as
+   `NOT VALID` and `VALIDATE` it.
+3. `CREATE OR REPLACE _tf_validate_domain_event`: document↔client congruence via
+   a **filings lookup (any status** — historical events reference retired
+   filings); entry/resolution branches unchanged.
+4. Replace the documents stamp path: a documents-specific stamp trigger deriving
    `firm_id` from the writer-passed value (no client_id read).
-4. Rework `_tf_documents_immutable`: `id`, `firm_id`, `sha256` frozen; DELETE
-   blocked; drop the client_id freeze with the column.
-5. Retire BOTH legacy ingest writers (**DD-1 extended**): `ingest_document` AND
-   `wake_ingest_document` bodies replaced with a deterministic CLR error
-   ("superseded by verified intake"); EXECUTE revoked from `clara_authenticated`;
-   the wake allowlist row deleted; `_ingest_document_core` dropped. The intake
-   finalizer (§3.2) is the SOLE document creator.
-6. Replace the context-pack documents section: docs-per-client via ACTIVE filings;
-   extraction blobs NEVER serialized into packs (metadata only).
-7. Replace indexes (`ix_documents_client_recent` → filing-based) and update seeds
-   + any rig fixtures that reference documents.client_id.
+5. Rework `_tf_documents_immutable`: `id`, `firm_id`, `sha256` frozen; DELETE
+   blocked; the client_id freeze drops with the column.
+6. Retire BOTH legacy ingest writers (**DD-1 extended**): `ingest_document` AND
+   `wake_ingest_document` bodies → deterministic CLR error; EXECUTE revoked;
+   allowlist row deleted; `_ingest_document_core` dropped. The intake finalizer
+   (§3.2) is the SOLE document creator.
+7. Replace the context-pack documents section (docs-per-client via ACTIVE
+   filings; extraction blobs NEVER serialized — metadata only) **and add the
+   `withdrawn` exclusion to `recent_entries`** (it has no status filter today).
+8. Replace indexes (`ix_documents_client_recent` → filing-based); update seeds +
+   rig fixtures per §3.11's fixture provision.
+9. Execute the taxonomy-v2 cutover per the §3.11 protocol (quiesce-aware).
 
 New columns: `bytes_verified_at` (NULL = legacy claim-only), `page_count`,
 `extraction_status` (`pending`|`running`|`done`|`failed`|`skipped_structured_done`
 |`stored_unparsed`|`held_egress` — CHECK; derived by writers only — E-5),
-`document_kind` (nullable; contract §9), `financial_date`, `retention_state`
-(`unanchored`|`anchored`), `retain_until` (NULL iff unanchored;
-floor-never-shorten trigger on anchored values), `retention_basis`, `legal_hold`
-+ `legal_hold_reason`. Existing `status` CHECK stays untouched. Lane membership
-is derived: unassigned ⇔ zero active filings. `storage_path` gains the grammar
-CHECK for NEW rows (legacy paths preserved; enforcement via insert-path trigger).
+`document_kind`, `financial_date`, `retention_state` (`unanchored`|`anchored`),
+`retain_until` (**persists across unanchor** — see §4.7: NULL only before the
+FIRST anchor; `retention_state`, not NULL, governs; the floor-never-shorten
+trigger therefore holds monotonic across unanchor→re-anchor cycles),
+`retention_basis`, `legal_hold` + `legal_hold_reason`. Existing `status` CHECK
+untouched. Lane membership derived: unassigned ⇔ zero active filings.
+`storage_path` grammar CHECK for post-0007 inserts (legacy preserved).
 
 **Citability law:** new drafts/approvals citing a document require an ACTIVE
-filing AND `bytes_verified_at IS NOT NULL` — legacy claim-only documents remain
-visible/filable but uncitable until re-uploaded through the verified intake
-(their filing history survives; existing posted entries are untouched history).
+filing AND `bytes_verified_at IS NOT NULL`. Legacy claim-only documents stay
+visible/filable but uncitable until upgraded (below); existing posted entries
+are untouched history.
 
-### 3.1 `document_filings` (historical, never deleted) + filing-bound provenance
-Columns: `id, firm_id, document_id, client_id, filed_at, filed_by, resolution_id
-(nullable — NULL only for basis='legacy-0007'), basis, retired_at, retired_by,
-retirement_reason, correction_id, revision_token`; partial UNIQUE
-`(document_id, client_id) WHERE retired_at IS NULL`; composite same-firm FKs.
-Writers: `file_document` (human lane; records/uses a resolution ABOUT the
-document — an uploader's explicit client choice IS a human attribution act),
-`retire_document_filing(filing_id, reason, expected_revision, op_key)` (S5-D3
-primitive: CAS + structured blockers + draft block). Events: `document.filed`,
-`document.filing_retired` (same-txn), each stamped with `filing_id` in payload.
+**Legacy claim-only UPGRADE branch (distinct from adoption):** an intake whose
+verified sha matches a legacy claim-only row (bytes_verified_at NULL) upgrades
+it: canonical object sealed (upload + readback as normal), `bytes_verified_at`
++ governed `storage_path` stamped on the EXISTING row (a dedicated
+runtime-only writer; the immutability rework permits exactly this transition
+once), its FIRST processing task created, reservation charged as a fresh
+ingest, filings preserved. No second document row, no new `document.ingested`
+(identity unchanged — staleness arrives via the extraction event under §3.7
+relevance). Exactly-once via (firm, sha256) uniqueness + the task UNIQUE.
 
-**Provenance re-shape (belt redesign — the deferred-trigger fix):**
-`journal_entries` gains `filing_id` (nullable; REQUIRED when document_id is
-present — paired CHECK like ck_je_doc_pair). Two layers:
-1. **Admission (non-deferred, inside draft/approve writers):** the bound filing
-   must be ACTIVE at write time, belong to the entry's client, and the document
-   must satisfy the citability law (§3.0).
+### 3.1 `document_filings` + filing-bound provenance
+Columns: `id, firm_id, document_id, client_id, filed_at, filed_by,
+resolution_id (nullable — NULL only for basis='legacy-0007'), basis,
+retired_at, retired_by, retirement_reason, correction_id, revision_token`;
+partial UNIQUE `(document_id, client_id) WHERE retired_at IS NULL`; composite
+same-firm FKs. Writers: `file_document` (human lane; records/uses a resolution
+ABOUT the document — an uploader's explicit client choice IS a human
+attribution act), `retire_document_filing(filing_id, reason, expected_revision,
+op_key)` (S5-D3 primitive: CAS + structured blockers + draft block). Events:
+`document.filed`, `document.filing_retired` (same-txn), each stamped with
+`filing_id` in the payload.
+**Two-layer provenance:**
+1. **Admission (non-deferred, in the WRITERS — specified):** `_draft_entry_core`
+   (the single body behind BOTH `draft_entry` and `wake_draft_entry` — both
+   lanes inherit) derives `filing_id` SERVER-SIDE from the unique ACTIVE
+   (document_id, p_client) filing — never caller-supplied; absence or
+   ambiguity → CLR02 — checks the citability law, and stamps the column.
+   `approve_entry` RE-AFFIRMS filing-active + citability at approval time.
 2. **Belt (`_tf_check_provenance`, stays DEFERRABLE):** validates CONGRUENCE
-   against the bound filing row — (document_id, sha256, client_id) match the
-   filing — **regardless of the filing's retired state**. The correction
-   transaction therefore commits: originals' reversal stamps re-fire the belt,
-   which validates congruence against their (now retired) filing and passes;
-   activity was enforced at admission time. Reversal mirrors carry no
-   document_id and never fire it (verified as-built).
+   against the BOUND filing row — (document_id, sha256, client_id) match —
+   regardless of retired state. The correction txn commits (activity was an
+   admission-time property); reversal mirrors carry no document_id and never
+   fire it (verified as-built).
 
-### 3.2 `document_intakes` (runtime-control; no events) — hardened state machine
-Columns: v1.0 set + `token_hash` (single-use bearer token, hashed, TTL),
-`expires_at`, `upload_lease_owner`/`lease_expires_at`, `failure_code` allowlist
-+ `'malware_detected'|'quarantined'`. **Structural contract:** DB transition
-triggers enforce the legal edge set
-(`uploading→received→verifying→{verified,duplicate,failed}`, `verified→adopted`,
-any→`failed`); identity fields (firm, uploader, origin, declared_*) immutable
-after insert; `op_key` fixed at creation (a retry NEVER mints a new op_key —
-CAS finalization replays the receipt); one upload lease at a time (concurrent
-PUT excluded; lease expiry reclaims). **Authz:** every route requires
-bookkeeper+ live membership; PUT/finalize/GET additionally require intake
-ownership (same firm + same uploader) + the intake token; `origin='chat'`
-requires an accessible session (authz session predicate); unknown/foreign
-intake ids are indistinguishable 404s (non-oracular).
-
-`finalize_document_intake` (runtime-login-only EXECUTE) creates the document
-row + the processing task (§3.9) + `document.ingested` in ONE txn, idempotent
-by op_key; on (firm, sha256) conflict it **adopts** (maps the intake, shares
-the existing charge/task, surfaces "already uploaded on …" — never a second
-row, event, or vendor call). Filing at finalize happens ONLY when the upload
-carried an explicit human client selection (Documents tab inside a client
-workspace) — recorded as a human resolution + filing in the same txn;
-chat/global uploads always land unassigned. Masking: humans have ZERO
-base-table grant; a definer view exposes intake rows firm-scoped WITHOUT
-`chat_session_id` (ruling-9 mechanism).
+### 3.2 `document_intakes` (runtime-control; no events) — state machine v1.2
+Columns: `id, firm_id, uploaded_by, origin ('chat'|'documents_tab'),
+chat_session_id (masked from all firm surfaces), original_filename,
+declared_mime, declared_bytes, status, sha256 (server-computed), storage_key,
+document_id, failure_code (CHECK: 'too_large'|'bad_type'|'limit'|
+'checksum_mismatch'|'storage_error'|'expired'|'malware_detected'|'quarantined'|
+'internal'), op_key, token_hash, expires_at, upload_lease_owner,
+lease_expires_at, created_at, updated_at`.
+**Statuses:** `uploading → received → verifying → {verified | duplicate |
+failed}`; `verified → finalized` (fresh document created); `duplicate →
+adopted` (mapped to the existing document, or the legacy UPGRADE branch);
+any NON-terminal → `failed`. **Terminal states (`finalized`,`adopted`,`failed`)
+are IMMUTABLE** — DB transition triggers enforce exactly this edge set.
+Identity fields immutable after insert; `op_key` fixed at creation (retry
+replays the receipt via CAS finalization); one upload lease (concurrent PUT
+excluded; expiry reclaims). **Token semantics (split):** the hashed intake
+token authorizes PUT-body + finalize ONLY (upload capability, TTL); status
+GET requires the authenticated session + firm/uploader ownership — no token —
+so chip polling is unconstrained and the token is genuinely single-purpose.
+Authz per route as v1.1 (bookkeeper+, ownership, chat-origin session
+predicate, non-oracular 404s). `finalize_document_intake` (runtime-only)
+creates document + processing task + `document.ingested` in ONE txn; duplicate
+→ adopt/upgrade with ONE charge + task + event lineage. Filing at finalize
+only on explicit human client selection. Masking: zero base grant + definer
+view WITHOUT `chat_session_id`.
 
 ### 3.3 `document_extractions` + `document_regions`
 Extractions: `id, firm_id, document_id, engine_id (snapshot string), engine_kind
@@ -109,92 +128,95 @@ Extractions: `id, firm_id, document_id, engine_id (snapshot string), engine_kind
 E-6 — an extraction cited by anything is never edited in place), status,
 page_count, envelope JSONB (ONE canonical producer-emitted shape — I-12),
 extracted_at`; UNIQUE (document_id, engine_id, version_n). Regions:
-`id, firm_id, extraction_id, locator_kind
-('page_polygon'|'sheet_cell_range'|'row_col'|'paragraph_run'), locator JSONB
-(kind-validated), field_path, text_content, engine_confidence numeric` —
-engine confidence is DATA, never authority. Regions persist NOW (cannot be
-backfilled without re-OCR). Monetary facts: raw string + deterministic bigint
-cents where parseable — claims, never book figures. Events (vendor-neutral,
-both lanes): **`document.extraction_completed` / `document.extraction_failed`**.
+`id, firm_id, extraction_id, locator_kind ('page_polygon'|'sheet_cell_range'|
+'row_col'|'paragraph_run'), locator JSONB (kind-validated), field_path,
+text_content, engine_confidence numeric` — engine confidence is DATA, never
+authority; regions persist NOW (cannot be backfilled without re-OCR). Monetary
+facts: raw string + deterministic bigint cents where parseable — claims, never
+book figures. Events (vendor-neutral, both lanes):
+`document.extraction_completed` / `document.extraction_failed`.
 
 ### 3.4 Attribution (S5-D2)
 - `client_identifiers` (`firm_id, client_id, kind ('tin'|'ssm'|'bank_account'),
   value_normalized`) — **non-unique index, no uniqueness constraint**: a
   duplicate identifier across sibling clients must be REPRESENTABLE and cause
-  lane-1 abstention with the conflict recorded, never hidden by a constraint.
-  Audited human writer maintains it.
+  lane-1 abstention with the conflict recorded. Audited human writer.
 - `client_aliases` (`firm_id, client_id, alias_normalized, added_by/at,
-  retired_at`) — the lane-2 registry (the as-built clients table has only
-  `name`); audited human writer; feeds candidates only, never authorizes.
+  retired_at`) — the lane-2 registry (as-built clients carry only `name`);
+  audited human writer; feeds candidates only, never authorizes.
 - `attribution_attempts` idempotent per (document_id, matcher_version,
-  input_fingerprint) — the matcher's replay key; `attribution_candidates` +
-  audited `confirm_attribution_candidate` / `dismiss_attribution_candidate`
-  writers (confirm = human resolution + optional `file_document` in one txn).
+  input_fingerprint) — the matcher's replay key; `attribution_candidates`
+  (`attempt_id, client_id, rank, rule_kind ('name_exact'|'alias_exact'),
+  disposition ('open'|'confirmed'|'dismissed'), disposed_by/at`) + audited
+  `confirm_attribution_candidate` / `dismiss_attribution_candidate` writers
+  (confirm = human resolution + optional `file_document` in one txn).
 - `record_rule_resolution(p_document, p_op_key)` — runtime-login-only EXECUTE
   (a deliberately widened runtime write surface — recorded); recomputes the
   lane-1 predicate server-side; confidence hardcoded ≥0.95 in-fn; unsuperseded
   rule-resolution per (document, client) deduped by partial unique index.
   Matcher SQL **hard-scopes firm_id in every query** (`clara_runtime` RLS is
   `using(true)` — RLS is NOT the tenant boundary on this lane).
+v1.2 additions:
+- **Candidate evidence is normalized:** `attribution_candidate_regions
+  (candidate_id, region_id → document_regions, composite same-firm FK)` —
+  no free-form JSON refs.
+- **Registry changes are audit-only BY DECISION:** identifier/alias writers
+  record audit_log rows and emit NO domain event (firm configuration, not a
+  books fact; they alter future matching only). Recorded as a decision, not an
+  omission.
 
-### 3.5 Correction case (S5-D3) + the `withdrawn` status + lock order
+### 3.5 Correction case + `withdrawn` — the status matrix
 `filing_corrections` (`firm_id, document_id, from_client, to_client, reason,
 maker, checker, status ('proposed'|'approved'|'completed'|'rejected'|'stale'),
 plan_hash (binds the enumerated item set + books_version), books_version,
 timestamps`) + `filing_correction_items` (`correction_id, entry_id,
 entry_state_hash, action ('reverse'|'already_reversed'|'withdraw_draft'),
-reversal_id, outcome`); stamped firm_id, FORCE RLS, composite FKs.
-**`journal_entries.status` CHECK gains `'withdrawn'`** (legal transition:
-draft→withdrawn ONLY, via the correction writer or an explicit audited withdraw
-writer; actor/reason/time recorded; immutability trigger reworked; every
-existing status predicate — uncoded-docs close gate, TB, listings — explicitly
-excludes withdrawn). Writers: `preview_wrong_client_correction` (read-only),
+reversal_id, outcome`); stamped firm_id, FORCE RLS, composite FKs. Writers:
+`preview_wrong_client_correction` (read-only blast radius),
 `propose_wrong_client_correction` (persists plan + hash; no book effect;
-always high-stakes), `approve_wrong_client_correction(correction_id, plan_hash,
-attestation, op_key)` — distinct-checker or solo-attest; stale-plan reject;
-closed-period HARD-BLOCK (v1); adopted pending-reversal drafts only on exact
-hash match, else explicit supersede; per-entry reversal mirrors with
-whole-consequence (F3); aggregate `document.correction_applied` + child events;
-all-or-nothing. **Global lock order (published, binding on all writers):** firm
-advisory scope → `document_filings` rows by id ASC → original `journal_entries`
-by id ASC → reversal mirrors (0005's original-before-mirror order preserved) →
-unique-slot inserts last. Posting/approval takes a SHARED lock on the entry's
-active filing; retirement/correction takes the conflicting lock.
+always high-stakes), `approve_wrong_client_correction(correction_id,
+plan_hash, attestation, op_key)` — distinct-checker or solo-attest;
+per-entry reversal mirrors with whole-consequence (F3); aggregate
+`document.correction_applied` + child events; all-or-nothing.
+The **exhaustive `withdrawn` matrix:** book-effect reads EXCLUDE it (trial_balance — already approved-only;
+close gates; subledgers; freshness; context-pack `recent_entries` — §3.0.7);
+history/audit surfaces INCLUDE it (entry detail, correction receipts,
+audit_log); **`_tf_lines_immutable` extends to freeze lines for status IN
+('approved','withdrawn')** — withdrawn evidence is structurally frozen;
+approval_history is approved-only and unaffected. Transition: draft→withdrawn
+ONLY, actor/reason/time recorded. Closed-period HARD-BLOCK at approve;
+stale-plan reject; adopted pending-reversal drafts on exact hash else explicit
+supersede; global lock order as v1.1 (firm scope → filings id ASC → originals
+id ASC → mirrors → unique slots; posting SHARED-locks the active filing).
 
-### 3.6 Document metering (S5-R7) — reservation semantics
-`firm_document_limits` (docs/day, pages/day, ocr_concurrency; operator defaults
-+ per-firm override). Admission is a **reservation**:
-`reserve_document_ingest(firm, op_key)` runs pre-spool (docs/day + concurrency
-lease + a conservative page reservation: deterministic preflight page count for
-PDF, 1 for images, byte-derived cap otherwise) under the namespaced advisory
-lock, CLR rejection naming limit + UTC reset. Terminal paths settle-or-refund
-idempotently: `settle_document_extraction` (actual pages), refund on
-failed/expired/duplicate-adopted intakes (adoption shares the original charge).
-Concurrency leases carry expiry; the reconciler reclaims leaked leases.
+### 3.6 Document metering — durable reservations
+`firm_document_limits` as v1.1. **`document_ingest_reservations`** (the durable
+carrier): `id, firm_id, intake_id, state ('reserved'|'resized'|'settled'|
+'refunded'), docs_reserved (1), pages_reserved, lease_expires_at, task_id,
+timestamps` — every transition under the namespaced advisory lock.
+**Timing (fixed):** pre-spool reserve uses a conservative cap derived from
+DECLARED size (deterministic table: bytes→page ceiling; images=1) — the real
+PDF page count is unknowable before bytes; post-scan the reservation RESIZES
+to the trusted preflight count; settle at extraction completion (actual
+pages); refund on failed/expired intakes; adoption/upgrade transfers the
+charge (ONE charge per physical ingest). Expired leases reclaimed by the
+reconciler. Near-limit consequence recorded in contract §8: a duplicate
+consumes a reservation until adoption refunds it.
 
-### 3.7 Events + taxonomy v2
-New `event_types`: `document.filed`, `document.filing_retired`,
-`document.extraction_completed`, `document.extraction_failed`,
-`document.correction_applied`. **Taxonomy v2 full routing:**
-`document.ingested → ignore` (the lane is DERIVED; no held task per document),
-`document.filed → context_update`, `document.filing_retired → context_update`,
-`document.extraction_completed → ignore` (router; the matcher consumer reads it
-directly — contract §4.4), `document.extraction_failed → ignore` (surfaced via
-lane/chip), `document.correction_applied → context_update` (two-sided staleness
-rides the child events: entry.reversed→A, document.filed→B). All pre-existing
-mappings carried forward. **Activation is migration-executed:** taxonomy v2 is
-inserted + coverage-validated + repointed INSIDE 0007 (the guarded singleton
-pattern the rig proves). `activate_taxonomy_version(v)` ships as an operator fn
-for later versions, explicitly **exempted of record** from firm-scoped
-op_receipts/audit (a global catalog operation; the 0002 stores require non-null
-firm_id — its audit surface is the migration/operator context).
-
-**[DELTA-OWNER-3] Freshness amendment (ADR-016 note at merge):**
-`assert_books_current` is replaced so a null-client `document.ingested` no
-longer stales every client (with the filings model an unassigned document is in
-NO client pack — the staleness point moves to `document.filed`). All OTHER
-null-client events keep firm-level staleness (the ADR-016 asymmetry narrows,
-not disappears).
+### 3.7 Events + taxonomy v2 + filing-based freshness relevance
+Event types + v2 routing as v1.1 (`document.ingested → ignore`; filed/retired/
+correction_applied → context_update; extraction_* → ignore for the router;
+full-coverage validated; activation migration-executed; operator fn exempted
+of record — global-receipts follow-up scheduled in contract §11).
+**[DELTA-OWNER-3 as ratified, mechanism generalized]:** `assert_books_current`
+is replaced with **filing-based relevance for document-bearing events**: a
+null-client event that carries a `document_id` is relevant to client X iff an
+ACTIVE filing (document→X) exists — so an unassigned document's ingest AND
+extraction events stale nobody, a filed document's events stale exactly its
+filed clients, and `document.correction_applied` (aggregate) is EXEMPT (its
+child events — entry.reversed→A, document.filed→B — carry the staleness).
+Non-document null-client events keep firm-level staleness (the ADR-016
+asymmetry narrows exactly this far).
 
 ### 3.8 Storage credential contract + doctrine enforcement
 The runtime's storage principal is a **custom Postgres role** with Storage RLS
@@ -208,30 +230,44 @@ platform break-glass is acknowledged + alarmed via the inventory sweep. Key
 grammar enforced at creation (§3.0). The leader-guarded reconciler inventories
 objects↔rows both directions (verify-then-adopt / incident, never delete).
 
-### 3.9 `document_processing_tasks` (runtime-control) — durable extraction
-Created IN the finalizer transaction (the Slice-4 durable-enqueue pattern):
-`id, firm_id, document_id, engine_id, engine_config (snapshot), version_n,
-lane ('ocr'|'structured_parse'|'none'), status
-('queued'|'running'|'done'|'failed'), vendor_op_ref, attempt_count, error_code
-(CHECK allowlist), timestamps`; UNIQUE (document_id, engine_id, version_n).
-The workflow receives ONLY `{task_id}`; it self-claims (queued→running CAS),
-persists vendor operation state for crash-resume, and the reconciler
-re-enqueues unbound queued tasks (a crash between finalize-commit and
-workflow-start is recovered; two same-SHA intakes share one task via adoption —
-one vendor call). The engine snapshot lives here (S5-R2's per-task snapshot law
-has a real carrier).
+### 3.9 `document_processing_tasks` — durable, BOUND, holdable
+As v1.1 plus: **`workflow_run_id`** (CAS-bound when the workflow claims the
+task — the Slice-4 self-bind pattern; proves boundness), status set gains
+**`held_egress`** (`queued → held_egress` when the §4.6 flag is off;
+`held_egress → queued` on flag-flip sweep or the retry verb), legal
+transitions enumerated (`queued→running→{done|failed}`, `queued↔held_egress`,
+terminal immutable). Reconciler: re-enqueues queued-UNBOUND tasks (crash
+between finalize and workflow start), requeues stranded `running` tasks whose
+run is engine-lost (checked against the engine run tables — Slice-4 pattern),
+sweeps `held_egress` on flag flip. UNIQUE (document, engine, version) holds
+one vendor call per content per engine version.
 
 ### 3.10 RLS / grant matrix (normative)
-| Table | humans (`clara_authenticated`) | `clara_agent_ro` | `clara_runtime` |
-|---|---|---|---|
-| document_filings | SELECT via firm policy | SELECT via wake_firm policy (packs/tools) | writers only |
-| document_extractions / _regions | SELECT firm policy | SELECT wake_firm policy | writers only |
-| attribution_attempts / _candidates | SELECT firm policy | none (v1) | writers only |
-| client_identifiers / client_aliases | SELECT firm policy; audited writers | none | SELECT (matcher; SQL hard-scopes firm) |
-| filing_corrections / _items | SELECT firm policy; preview/propose/approve writers | none | none |
-| document_intakes | NO base grant; masked definer view | none | full via writers |
-| document_processing_tasks | NO base grant; masked status view (chip) | none | full via writers |
-| firm_document_limits | SELECT firm policy | none | reserve/settle writers |
+As v1.1, plus rows: `document_ingest_reservations` — no base grant, runtime
+writers only; `attribution_candidate_regions` — SELECT firm policy (humans),
+none (agent v1), runtime writers; `client_aliases` — as client_identifiers.
+All writers SECURITY DEFINER with role floors; approve/correction writers have
+NO grant to the agent role or runtime login.
 
-All writers SECURITY DEFINER with explicit role-floor checks; approve/correction
-writers have NO grant to the agent role or runtime login (human-only).
+### 3.11 0007 cutover protocol + fixture provision (NEW)
+**Cutover (the D1 write-quiesce rule binds — a live runtime exists):**
+1. Quiesce: stop intake + chat admission (drain mode), let the relay reach
+   head and the drain leader finish consuming wake intents, STOP the runtime
+   (no router batch may span the repoint — batches pin the taxonomy at batch
+   start).
+2. Apply 0007 (throwaway-validated first, as always).
+3. **Residual-work sweep (in-migration):** cancel historical
+   `background_review` wake intents for document events + their held
+   task/outbox rows with an audited reason ('taxonomy-v2-cutover') — v1
+   artifacts must not survive into v2 semantics.
+4. Deploy the new runtime; verify /ready (router + matcher consumers), then
+   re-open admission.
+**Fixture provision (seeds + rigs lose the SQL ingest path):**
+(a) `_seed_verified_document(...)` — SECURITY DEFINER owned by clara_fn_owner,
+EXECUTE granted to NO app role (migration/seed/rig context only): mints a
+verified document + optional filing without transport. (b) A runtime
+test-adapter intake fixture exercising the REAL hash→canonical→readback→
+finalize→task path with synthetic bytes (the §6 rig's transport-true lane).
+(c) A legacy-upgrade fixture (claim-only row → verified via the upgrade
+branch). Direct `bytes_verified_at` seeding outside (a) is forbidden — it
+would bypass the citability proof.

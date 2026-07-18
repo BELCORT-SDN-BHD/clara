@@ -1,4 +1,4 @@
-# Slice 5 design contract — the document pipeline core (v1.1 — post design-review round 1)
+# Slice 5 design contract — the document pipeline core (v1.2 — post delta round 2)
 
 **Status:** DESIGN — round-1 findings integrated. Grilled with the owner 2026-07-18
 (ten rulings S5-R1…R10) + three **owner-delegated** decisions (S5-D1…D3) resolved by
@@ -8,10 +8,12 @@ Codex xhigh, both FLAWED) produced 25 accepted findings — integrated below and
 mapped in §12. Three fixes touch previously ratified semantics and are marked
 **[DELTA-OWNER-1..3]** — **ALL OWNER-RATIFIED 2026-07-18** at the delta stage
 ("OK all"); the tags remain as provenance markers.
-Ladder: delta re-review → build (contract-blind rig lane) → as-built review; §13
-carries as-built amendments. **The migration design (§3.x) lives in the companion
-`slice5-migration-0007-design.md` — same normativity, split only for the
-500-line file cap.**
+Delta round 2 (both lanes) confirmed all round-1 findings resolved and added
+20 narrower findings — ALL integrated (v1.2; §12 round-2 log). Ladder: round-2
+verification pass → build (contract-blind rig lane) → as-built review; §13
+carries as-built amendments. **The migration design (§3.x) lives in the
+companion `slice5-migration-0007-design.md` — same normativity, split only for
+the 500-line file cap.**
 
 Slice frame (REBUILD-PLAN): upload (picker/drag/paste) → OCR with bounding-region
 capture → persist-after-OCR always (unassigned lane) → assign/reassign → attachment
@@ -244,12 +246,18 @@ Emits the same vendor-neutral extraction events + cell/row/paragraph locators.
 The relay layer is **generalized to registered consumers**: each consumer has
 its own name, leader advisory-lock key, `(consumer, firm)` checkpoint stream
 (schema already carries `consumer`), batch loop, dead-letter lane, and a /ready
-warn signal (consumer lag). The as-built `router` keeps its exact semantics
-(taxonomy → wake intents). The new **`matcher`** consumer subscribes to
-`document.extraction_completed` only, and per event runs the S5-D2 lanes inside
-one idempotent transaction (attempt row is the replay key; writers per §3.4).
-No wake credential, no LLM, no held tasks. Cross-tenant boundary: firm derived
-from the event/document row; every query firm-scoped in SQL; nothing
+warn signal. The as-built `router` keeps its exact semantics (taxonomy → wake
+intents). The new **`matcher`** consumer subscribes to
+`document.extraction_completed` only, and per event runs the S5-D2 lanes with
+**handler effects + checkpoint move committed in ONE transaction** (the attempt
+row is the replay key; writers per §3.4). **Failure semantics (specified):**
+bounded attempts with backoff → a `consumer='matcher'` dead-letter row;
+redrive is **consumer-specific** (re-dispatches the matcher handler — never
+the router's taxonomy projection); /ready reports per-consumer lag +
+dead-letter counts with warn thresholds. Cold-start: a new consumer checkpoint
+walks the per-firm history once (bounded; document events only exist from
+0007). No wake credential, no LLM, no held tasks. Cross-tenant boundary: firm
+derived from the event/document row; every query firm-scoped in SQL; nothing
 client-scoped loads before assignment.
 
 ### 4.5 Chat + dashboard integration (S5-R3 as amended)
@@ -265,24 +273,37 @@ JSON routes ride the Next proxy; bytes go browser→Fly (CORS allowlist).
 
 ### 4.6 Egress gate flag (S5-R1)
 `CLARA_DOC_EGRESS_APPROVED` (default `0`): OCR-lane steps refuse pre-vendor-call
-→ `extraction_status='held_egress'` (visible, retryable). The flag may be set to
-`1` in a deployed environment ONLY against the evidenced S5-R1 bundle
-([DELTA-OWNER-1]). Tests use a test adapter — the real vendor adapter has no
-dev bypass. Structured-parse + store-only lanes never egress and run regardless.
+→ task `held_egress` + `extraction_status='held_egress'` (visible; released by
+the flag-flip sweep or the retry verb). **Authority scope (the global-flag
+coherence fix):** the bundle's client-authorization item is evidenced
+**FIRM-WIDE** — every ACTIVE client's engagement letter carries the processor
+clause BEFORE the flag flips — because unassigned documents OCR before their
+client is known; a global flag is then a faithful carrier of the authority.
+New-client onboarding requires the clause (an onboarding checklist item); a
+per-client selective-authority registry is a recorded follow-up (§11) for the
+day a client declines. Tests use a test adapter — the real vendor adapter has
+no dev bypass. Structured-parse + store-only lanes never egress and run
+regardless.
 
 ### 4.7 Retention + legal hold (S5-R9)
-As ruled: `unanchored` state (NULL retain_until, undeletable) → first filing
-anchors (FY-end + filing offset + 7y; conservative when FY data is missing —
-surfaced as a gap); MAX across active filings; floor-never-shorten on anchored
-values; retiring the LAST filing returns the doc to `unanchored` (the anchored
-history is preserved in audit; the clock never shortens on re-anchor).
-`place_legal_hold`/`release_legal_hold`: admin+ floor, reason, audit_log.
+As ruled, with the cross-cycle floor made STRUCTURAL: `retain_until` is NULL
+only before the FIRST anchor; on unanchor (last filing retired) the value
+**persists** and `retention_state='unanchored'` governs deletability — so the
+floor-never-shorten trigger's monotonic check holds across
+unanchor→re-anchor cycles without reconstructing history from audit. First
+filing anchors (FY-end + filing offset + 7y; conservative when FY data is
+missing — surfaced as a gap); recompute = MAX(current value, MAX across
+active filings' clocks). `place_legal_hold`/`release_legal_hold`: admin+
+floor, reason, audit_log; independent of the clock.
 
 ### 4.8 Env contract additions
 `AZURE_DI_ENDPOINT`, `AZURE_DI_KEY` (service layer only), `CLARA_DOC_EGRESS_APPROVED`,
 storage: URL + the §3.8 role JWT (+ rotation), spool dir/quota, scanner socket.
 Short DB txns ride the existing runtime pool (no third pool; no connection held
-across upload/scan/vendor calls) — the 17-session budget stands.
+across upload/scan/vendor calls). **Connection budget RE-DERIVED:** the matcher
+consumer adds ONE persistent leader session (dedicated connection + advisory
+lock + LISTEN, like the router runner) → the documented budget becomes 18
+sessions against the Supavisor session-mode ceiling — re-verified at deploy.
 
 ---
 
@@ -319,7 +340,19 @@ exclude it); cross-firm isolation on every new table; grant-matrix probes
 amendment proof (unassigned ingest no longer stales; document.filed does);
 freeze-lint (documentIngest_v1 frozen + registered); taxonomy v2 full-coverage;
 SSE liveness under ingest + parse load; load ceilings measured (100-file batch,
-20MB files, dup storms, 429 throttling).
+20MB files, dup storms, 429 throttling). Round-2 additions: **filing_id
+backfill drill** (a throwaway carrying cited APPROVED entries migrates clean;
+an ambiguous citation ABORTS the migration); **legacy-upgrade fixture**
+(claim-only row → verified via the upgrade branch, one task/charge, no second
+row/event); **taxonomy cutover drill** (§3.11: residual v1 intents/held rows
+cancelled with reason; no router batch spans the repoint); reservation
+resize/refund races + near-limit duplicate; retention floor across
+unanchor→re-anchor; intake terminal-immutability + the duplicate→adopted edge
++ token-vs-poll capability split; matcher dead-letter + consumer-specific
+redrive (never re-runs the router projection); withdrawn-LINE freeze;
+processing-task run-binding CAS + stranded-running requeue + held_egress
+release sweep; the §3.11 fixture provision (owner-only seed helper NOT
+executable by any app role; transport-true synthetic-intake fixture).
 
 ## 7. What does NOT change
 
@@ -350,7 +383,12 @@ drain/SIGTERM → intake stops first; spool + queued tasks survive restart ·
 Azure regional outage → bounded retries → extraction_failed, batch continues ·
 CSV with no magic bytes → parse-probe admission · XLSX formulas/macros → values
 only · client with no FY-end → conservative anchor + surfaced gap ·
-firm at pages/day mid-batch → per-file honest rejection, queue continues.
+firm at pages/day mid-batch → per-file honest rejection, queue continues ·
+near the docs/day limit a duplicate upload consumes a reservation until
+adoption refunds it (a legitimate re-upload can be spuriously rejected at the
+boundary — accepted + surfaced honestly) · legacy claim-only doc re-uploaded →
+UPGRADE branch (verified in place, first task, one charge) · legacy doc whose
+bytes never re-arrive → permanently uncitable-for-new, visible, honest.
 
 ## 9. Document-kind taxonomy (proposal — owner red-line)
 
@@ -375,10 +413,14 @@ E-10/E-11/E-12 → §4.1/§3.7 (unchanged from v1.0).
 
 As v1.0, plus: `chatTurn_v2` + firm-scoped unassigned-document read tool
 (Slice 6, with the write floor) · reopen/authority model for closed-period
-corrections · operator surface + global receipts for `activate_taxonomy_version`
-beyond the migration path · TUS · storage-credential rotation automation ·
-export_artifacts retention inheritance · eval-gated model attribution
-(schema-ready: attempts/candidates carry matcher_version).
+corrections · **global operator receipts + audited `activate_taxonomy_version`
+surface — SCHEDULED for the ops hardening pass alongside Slice 6** (activation
+is migration-only until then; an un-audited global repoint surface must not
+stay open-ended) · **per-client selective egress-authority registry** (for the
+day a client declines the processor clause — the firm-wide basis carries v1) ·
+TUS · storage-credential rotation automation · export_artifacts retention
+inheritance · eval-gated model attribution (schema-ready: attempts/candidates
+carry matcher_version).
 
 ## 12. Delta log — design-review round 1 (all findings accepted)
 
@@ -396,6 +438,20 @@ M3→§3.7 migration-executed activation · M4→§3.8 credential contract.
 Cross-check addendum: expected_revision→S5-D3 · closed-period block→S5-D3 ·
 intake masking mechanism→§3.2 · fly limits→§5 · S5-R3 wording→§0 · matcher
 net-new→§4.4 · AV→§4.1.
+
+**Round 2 (delta re-review; both lanes ANOTHER-ROUND; all accepted):**
+Native: ND-1→§3.0.2 backfill drill · ND-2→§3.1 writer spec · ND-3→§3.11
+fixtures · ND-4→§4.7/§3.0 persistent floor · ND-5→§3.0.7 pack exclusion ·
+ND-6→§8 near-limit · ND-7→§4.8 budget 18 · ND-8→§11 scheduled. Codex:
+DR2-C1→§3.0.2 · DR2-C2→§3.0 upgrade branch · DR2-C3→§4.6 firm-wide authority ·
+DR2-H1→§3.11 cutover protocol · DR2-H2→§3.7 filing-based relevance ·
+DR2-H3→§3.9 run-binding + held_egress · DR2-H4→§4.7 persistent floor ·
+DR2-H5→§3.2 edge set + token split · DR2-H6→§3.6 reservation carrier +
+declared-cap timing · DR2-H7→§4.4 consumer semantics · DR2-M1→§3.5 status
+matrix + line freeze · DR2-M2→§3.11 fixtures. Partial-resolution residues from
+Codex Part A close via the same sections (C4→§3.9, C5→§4.6, H2/H7→§4.4,
+H4/H5→§3.2, H6→§3.4 candidate_regions, H7→§3.5, H8→§3.6, H9→§4.7,
+M2→§3.4 audit-only decision, M3→§11 scheduled).
 
 ## 13. As-built amendments
 
