@@ -98,5 +98,8 @@ In one line: **Phase 3 foundations; Slice 0 spike — T1–T6 passed, the 48-hou
 park (T2-48h) resumable ≥2026-07-19 15:15 +08 for final sign-off; Slices 1
 (foundations) + 2 (governed DB core, PR #5, ADR-015) + 3 (event spine, PR #7,
 ADR-016) + 4 (durable chat runtime skeleton, ADR-017 — 0006, read-only chat
-loop, clarify, metering, drain, traces; Fly deploy GATED on the park closure
-+ spike cleanup) done; Slice 5 (document pipeline) next.**
+loop, clarify, metering, drain, traces; deployed world-off) done; **Slice 5
+DESIGN stage done** (contract v1.2 + 0007 companion, PR #11 — ten owner rulings
++ three delegated decisions + three delta amendments, all ratified; ADR-018
+lands with the build PR); Slice 5 BUILD next (local throwaways until the
+ceremony); the T2-48h cutover ceremony (world-on) gates ≥2026-07-19 15:15 +08.**
