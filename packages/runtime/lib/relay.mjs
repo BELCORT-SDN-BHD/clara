@@ -1,5 +1,5 @@
 // The outbox relay — pure, injectable logic (Slice 3, ARCHITECTURE §2 / ADR-016;
-// contract scratchpad/slice3-design.md v2.1 §2.8–2.9). This module NEVER opens
+// contract docs/plan/slice3-event-spine-contract.md v2.2 §2.8–2.9). This module NEVER opens
 // its own work connection for the routing functions: every routing function
 // (loadActiveTaxonomy / discoverWork / routeBatchForFirm / redrive / runRelayCycle)
 // takes an ALREADY-CONNECTED pg client that the caller has put into the
@@ -45,12 +45,12 @@ export const NON_WAKE_DECISIONS = Object.freeze(["context_update", "ignore"]);
 export const ALL_DECISIONS = Object.freeze([...WAKE_BOUND_DECISIONS, ...NON_WAKE_DECISIONS]);
 
 /**
- * Route a taxonomy decision to a relay action. Pure — the unit of the routing
- * decision map (§2.9.3). A covered event type always has a decision in the CHECK
- * set; an unknown/undefined decision is a defect and routes to no-op (never a
- * silent intent), which the batch loop treats as "no row".
+ * True iff a taxonomy decision produces a durable wake_intents row. Pure — the
+ * unit of the routing decision map (§2.9.3). A covered event type always has a
+ * decision in the CHECK set; an unknown decision is never wake-bound (the batch
+ * loop treats it as "no row", never a silent intent).
  * @param {string} decision
- * @returns {"intent"|"skip"}
+ * @returns {boolean}
  */
 export function isWakeBound(decision) {
   return WAKE_BOUND_SET.has(decision);
@@ -79,8 +79,54 @@ export class TaxonomyHaltError extends Error {
 // do, so a single env-resolution home avoids a DSN literal drifting into argv.
 // ---------------------------------------------------------------------------
 
+/** Resolve a DSN URL to a bare {host, port, db} (no password). Throws on garbage. */
+function parseUrlTarget(url) {
+  const u = new URL(url); // throws on an unparseable DSN — the caller surfaces it
+  const db = decodeURIComponent((u.pathname || "").replace(/^\//, "")) || "postgres";
+  return { host: (u.hostname || "").toLowerCase(), port: u.port || "5432", db };
+}
+
+/** The libpq PG* target, or null when no PG* identity var is set. */
+function pgEnvTarget() {
+  const { PGHOST, PGPORT, PGDATABASE, PGUSER } = process.env;
+  if (!PGHOST && !PGPORT && !PGDATABASE && !PGUSER) return null; // no PG* source present
+  return {
+    host: (PGHOST || "localhost").toLowerCase(),
+    port: PGPORT || "5432",
+    db: PGDATABASE || PGUSER || "postgres",
+  };
+}
+
+/**
+ * Fail CLOSED when two present connection sources point at DIFFERENT databases
+ * (mirrors packages/db/lib/pg.mjs's canonical-target guard). node-postgres would
+ * use DATABASE_URL/WORKFLOW_POSTGRES_URL while a stray PG* could redirect an
+ * external tool — so the relay must resolve exactly one target. Called before any
+ * client/pool creation.
+ */
+export function assertNoTargetSplit() {
+  const sources = [];
+  if (process.env.DATABASE_URL) sources.push({ name: "DATABASE_URL", ...parseUrlTarget(process.env.DATABASE_URL) });
+  if (process.env.WORKFLOW_POSTGRES_URL)
+    sources.push({ name: "WORKFLOW_POSTGRES_URL", ...parseUrlTarget(process.env.WORKFLOW_POSTGRES_URL) });
+  const pg = pgEnvTarget();
+  if (pg) sources.push({ name: "PG*", ...pg });
+  // Equality is transitive, so comparing every source against the first suffices.
+  for (let i = 1; i < sources.length; i++) {
+    const a = sources[0];
+    const b = sources[i];
+    if (a.host !== b.host || a.port !== b.port || a.db !== b.db) {
+      throw new Error(
+        `DB target split: ${a.name} (${a.host}:${a.port}/${a.db}) != ${b.name} (${b.host}:${b.port}/${b.db}). ` +
+          `The relay must resolve exactly ONE target — unset the conflicting source. Refusing.`,
+      );
+    }
+  }
+}
+
 /** @returns {pg.ClientConfig} */
 export function connConfig() {
+  assertNoTargetSplit(); // fail closed on a canonical-target split before connecting
   // DATABASE_URL wins over WORKFLOW_POSTGRES_URL; otherwise node-postgres reads
   // the libpq PG* vars itself when no connectionString is given.
   const url = process.env.DATABASE_URL || process.env.WORKFLOW_POSTGRES_URL;
@@ -122,12 +168,6 @@ export async function acquireLeaderLock(client, consumer = CONSUMER) {
   await client.query("select pg_advisory_lock(hashtext($1)::bigint)", [consumer]);
 }
 
-/** Non-blocking leader attempt — true iff this session now holds the lock. */
-export async function tryLeaderLock(client, consumer = CONSUMER) {
-  const r = await client.query("select pg_try_advisory_lock(hashtext($1)::bigint) as got", [consumer]);
-  return r.rows[0].got === true;
-}
-
 // ---------------------------------------------------------------------------
 // The active taxonomy — read ONCE inside each routing (batch) transaction.
 // ---------------------------------------------------------------------------
@@ -159,12 +199,14 @@ export async function loadActiveTaxonomy(client) {
 /**
  * Firms whose head sequence is ahead of the router's checkpoint. LEFT JOIN so a
  * brand-new firm (no checkpoint row) surfaces with last_seq 0 (bootstrap, C2).
- * `onlyFirm` narrows discovery to a single firm — a TEST-SCOPING knob so a test's
- * relay never drains firms owned by other tests / seeds in a shared DB (documented
- * test-only; the runner leaves it unset ⇒ all firms, the production behaviour).
+ * `onlyFirm` narrows discovery to a firm id (or an array of ids) — a TEST-SCOPING
+ * knob so a test's relay never drains firms owned by other tests / seeds in a
+ * shared DB (documented test-only; the runner leaves it unset ⇒ all firms, the
+ * production behaviour).
  * @returns {Promise<{firmId:string, headSeq:number, lastSeq:number}[]>}
  */
 export async function discoverWork(client, { consumer = CONSUMER, onlyFirm = null } = {}) {
+  const firms = onlyFirm == null ? null : Array.isArray(onlyFirm) ? onlyFirm : [onlyFirm];
   const r = await client.query(
     `select s.firm_id,
             s.n                         as head_seq,
@@ -173,9 +215,9 @@ export async function discoverWork(client, { consumer = CONSUMER, onlyFirm = nul
        left join clara.relay_checkpoints c
               on c.consumer = $1 and c.firm_id = s.firm_id
       where s.n > coalesce(c.last_seq, 0)
-        and ($2::uuid is null or s.firm_id = $2::uuid)
+        and ($2::uuid[] is null or s.firm_id = any($2::uuid[]))
       order by s.firm_id`,
-    [consumer, onlyFirm],
+    [consumer, firms],
   );
   return r.rows.map((row) => ({
     firmId: row.firm_id,
@@ -341,37 +383,50 @@ export async function routeBatchForFirm(client, opts) {
 // ---------------------------------------------------------------------------
 
 /**
- * Run one cycle: discover firms with pending events and drain each to its head in
- * batches. A {@link TaxonomyHaltError} from any batch propagates (the runner
- * halts). `onlyFirm` scopes discovery for tests (see discoverWork).
- * @returns {Promise<{firms:number, processed:number, intents:number, deadLetters:number}>}
+ * Run one cycle: discover firms with pending events and drain them in ROUND-ROBIN,
+ * bounded to `maxBatchesPerFirm` batches per firm per cycle (X1). A continuously
+ * busy firm therefore cannot starve the others — every discovered firm gets a turn
+ * each round, and a firm not caught up within the cap is rediscovered next cycle.
+ * `capped` is true when at least one firm still had work when the cap was hit; the
+ * runner loops again immediately (no poll wait) rather than idling on a backlog.
+ * A {@link TaxonomyHaltError} from any batch propagates (the runner halts).
+ * `onlyFirm` scopes discovery for tests (a firm id or an array of ids).
+ * @returns {Promise<{firms:number, processed:number, intents:number, deadLetters:number, capped:boolean}>}
  */
 export async function runRelayCycle(client, opts = {}) {
   const {
     consumer = CONSUMER,
     batchSize = 100,
+    maxBatchesPerFirm = 4,
     testBatchDelayMs = 0,
     onlyFirm = null,
     log = () => {},
   } = opts;
   const work = await discoverWork(client, { consumer, onlyFirm });
+  const cursors = work.map((w) => ({ firmId: w.firmId, lastSeq: w.lastSeq, active: true }));
   let processed = 0;
   let intents = 0;
   let deadLetters = 0;
-  for (const w of work) {
-    let lastSeq = w.lastSeq;
-    // Drain this firm fully (a firm may hold many batches, C2 bootstrap). Each
-    // batch advances lastSeq to its maxSeq; stop when a batch comes back empty.
-    for (let res = { processed: 1 }; res.processed > 0; ) {
-      res = await routeBatchForFirm(client, { firmId: w.firmId, lastSeq, batchSize, consumer, testBatchDelayMs, log });
-      if (res.processed === 0) break;
-      lastSeq = res.maxSeq;
+  for (let round = 0; round < maxBatchesPerFirm; round++) {
+    let anyActive = false;
+    for (const cur of cursors) {
+      if (!cur.active) continue;
+      const res = await routeBatchForFirm(client, { firmId: cur.firmId, lastSeq: cur.lastSeq, batchSize, consumer, testBatchDelayMs, log });
+      if (res.processed === 0) {
+        cur.active = false;
+        continue;
+      }
+      cur.lastSeq = res.maxSeq;
       processed += res.processed;
       intents += res.intents;
       deadLetters += res.deadLetters;
+      anyActive = true;
+      if (res.processed < batchSize) cur.active = false; // this firm is caught up
     }
+    if (!anyActive) break;
   }
-  return { firms: work.length, processed, intents, deadLetters };
+  const capped = cursors.some((c) => c.active); // a firm still had work when the cap was hit
+  return { firms: work.length, processed, intents, deadLetters, capped };
 }
 
 // ---------------------------------------------------------------------------
@@ -390,6 +445,16 @@ export async function redrive(client, consumer, eventId, { log = () => {} } = {}
   await client.query("begin");
   try {
     const taxonomy = await loadActiveTaxonomy(client); // HALT if un-routable
+    // (X5a) the dead-letter MUST exist — a covered, never-dead-lettered event must
+    // never report resolved. FOR UPDATE locks the row so a concurrent redrive/
+    // consumer serializes on it.
+    const dl = await client.query(
+      "select status from clara.relay_dead_letters where consumer = $1 and event_id = $2 for update",
+      [consumer, eventId],
+    );
+    if (dl.rowCount === 0) {
+      throw new Error(`redrive: no dead-letter for consumer='${consumer}' event=${eventId} — nothing to redrive`);
+    }
     const evR = await client.query("select event_type from clara.domain_events where id = $1", [eventId]);
     if (evR.rowCount === 0) {
       throw new Error(`redrive: event ${eventId} not found`);
@@ -397,12 +462,14 @@ export async function redrive(client, consumer, eventId, { log = () => {} } = {}
     const eventType = evR.rows[0].event_type;
     const decision = taxonomy.decisions.get(eventType);
     if (decision === undefined) {
-      await deadLetterEvent(client, {
-        consumer,
-        eventId,
-        reason: `still uncovered at redrive under taxonomy version ${taxonomy.version}`,
-        version: taxonomy.version,
-      });
+      // (X5b) still uncovered — REOPEN if it was resolved (status/resolved_at are in
+      // the dead-letter update allowlist), bump attempt_count, leave it pending.
+      await client.query(
+        `update clara.relay_dead_letters
+            set status = 'pending', resolved_at = null, attempt_count = attempt_count + 1
+          where consumer = $1 and event_id = $2`,
+        [consumer, eventId],
+      );
       await client.query("commit");
       log(`[relay] redrive: event ${eventId} (${eventType}) still uncovered under v${taxonomy.version} — left pending`);
       return { resolved: false, reason: "still-uncovered" };

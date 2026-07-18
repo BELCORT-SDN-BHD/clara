@@ -58,6 +58,14 @@ export async function reset({ log = console.log } = {}) {
   const client = makeClient();
   await client.connect();
   try {
+    // A brand-new database where schema clara NEVER existed: nothing to drop and
+    // nothing can depend on it — and the preflight's 'clara'::regnamespace cast
+    // would throw 3F000 there. Short-circuit (matches `drop ... if exists`).
+    const schema = await client.query("select to_regnamespace('clara') is not null as present");
+    if (!schema.rows[0].present) {
+      log(`reset: schema "clara" does not exist — nothing to drop · target ${targetLabel()}`);
+      return { ok: true };
+    }
     // Preflight: refuse if the CASCADE would reach outside clara.
     const dep = await client.query(CROSS_SCHEMA_DEPENDENTS);
     if (dep.rows.length > 0) {

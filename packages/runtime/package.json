@@ -9,7 +9,7 @@
     "lint": "eslint .",
     "build": "nitro build",
     "start": "node --env-file-if-exists=.env scripts/worker.mjs",
-    "test": "node --test tests/"
+    "test": "node --test --test-concurrency=1 tests/"
   },
   "dependencies": {
     "@workflow/world-postgres": "4.3.0",

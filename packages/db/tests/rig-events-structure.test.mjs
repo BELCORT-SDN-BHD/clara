@@ -1,6 +1,6 @@
 // Slice-3 rig — the EVENT SPINE, part 3: ISOLATION + MATRIX, APPEND-ONLY, CATALOG/
-// VALIDATION, CONTEXT PACK, DEADLOCKS, STAMPING, ALLOCATOR (contract §4.5–§4.10 + P6).
-// Contract-driven; see rig-events.test.mjs for the suite map. Every negative asserts
+// VALIDATION, CONTEXT PACK, DEADLOCKS, STAMPING, ALLOCATOR (§4.5–§4.10 + P6 of
+// docs/plan/slice3-event-spine-contract.md v2.2; suite map in rig-events.test.mjs). Every negative asserts
 // an EXACT SQLSTATE; a divergence stays as the contract states.
 
 import { test, before, after } from "node:test";
@@ -215,8 +215,9 @@ test("§6 relay_dead_letters: UPDATE limited to status/attempt_count/resolved_at
 // ===========================================================================
 // §7 — CATALOG / COVERAGE / VALIDATION.
 // ===========================================================================
-test("§7 coverage: the active taxonomy version covers every event_type; catalog == the 13 contract types with correct client_scoped", async (t) => {
+test("§7 coverage: the active taxonomy version covers every event_type; the 13 contract types are present with correct client_scoped", async (t) => {
   if (unready(t)) return;
+  // The active version must ROUTE every catalog row (contract §0.5 / §2.7): anti-join ∅.
   const uncovered = await rootQuery(`
     select et.name from clara.event_types et
     where not exists (
@@ -224,9 +225,14 @@ test("§7 coverage: the active taxonomy version covers every event_type; catalog
       where tt.version = (select version from clara.taxonomy_active) and tt.event_type = et.name)`);
   assert.deepEqual(uncovered.rows.map((r) => r.name), [], "the active version covers every event_type (anti-join empty)");
 
+  // The catalog is APPEND-ONLY: a shared-DB run may carry an extra synthetic type appended
+  // by the runtime suite, so assert the 13 contract types are PRESENT (superset), never
+  // exact-set equality — an appended type must not false-fail the rig.
   const cat = (await rootQuery("select name, client_scoped from clara.event_types")).rows;
-  assert.deepEqual(cat.map((r) => r.name).sort(), [...ALL_EVENT_TYPES].sort(), "event_types == the 13 contract types");
-  for (const r of cat) assert.equal(r.client_scoped, EVENT_CLIENT_SCOPED[r.name], `${r.name} client_scoped matches the contract`);
+  const flags = new Map(cat.map((r) => [r.name, r.client_scoped]));
+  const missing = ALL_EVENT_TYPES.filter((n) => !flags.has(n));
+  assert.deepEqual(missing, [], `every contract event type is present in the catalog (missing: ${missing.join(", ")})`);
+  for (const n of ALL_EVENT_TYPES) assert.equal(flags.get(n), EVENT_CLIENT_SCOPED[n], `${n} client_scoped matches the contract`);
 });
 
 test("§7 validation: firm-level event with a non-null client_id is rejected; a foreign entity id is rejected (D2)", async (t) => {
@@ -343,6 +349,12 @@ test("§9 deadlock (C5): approve reversal-mirror vs concurrent reverse-original 
   const rev = await reverseEntry(users.bob, { entry: hs.entry_id, reason: "c5 base", opKey: opk() }); // high-stakes mirror lands draft
   const mtok = (await rootQuery("select revision_token from clara.journal_entries where id = $1", [rev.reversal_id])).rows[0].revision_token;
 
+  // NOTE (X7b): the counterfactual AB-BA deadlock schedule that the C5 fix prevents can
+  // NOT be reproduced against the FIXED code — approve_entry now locks the original
+  // before the mirror (consistent original-before-mirror order), so no lock-order cycle
+  // exists to force. The coverage for C5 is therefore: the design-time probe (P5-class,
+  // reproduced the FK/lock cycle pre-fix), this concurrent race (both interleavings run,
+  // never 40P01), and the single-approved-reversal slot assertion below.
   const out = await approveMirrorVsReverse({ approverSub: users.alice, reverserSub: users.bob, original: hs.entry_id, mirror: rev.reversal_id, mirrorToken: mtok });
   assert.notEqual(out.approve?.code, "40P01", `approve did not deadlock (got ${JSON.stringify(out.approve)})`);
   assert.notEqual(out.reverse?.code, "40P01", `reverse did not deadlock (got ${JSON.stringify(out.reverse)})`);
@@ -357,21 +369,37 @@ test("§9 deadlock (C5): approve reversal-mirror vs concurrent reverse-original 
 // ===========================================================================
 // §10 — STAMPING (C6).
 // ===========================================================================
-test("§10 stamping: a runtime wake_intents INSERT with wrong firm/seq/type is corrected from the event; an invalid triple → CLR10", async (t) => {
+test("§10 stamping (C6): wake_intents AND relay_dead_letters INSERTs with wrong firm/seq/type are corrected from the event; an invalid triple → CLR10", async (t) => {
   if (unready(t)) return;
   const { users, firms, clients } = world;
   await ingestDocument(human(users.bob), { client: clients.A1, sha256: sha(randomUUID()), opKey: opk() });
   const ev = await latestEvent(firms.A, "document.ingested");
 
+  // wake_intents: insert with a WRONG firm/seq/type; the trigger derives all three.
   await roleQuery(
     ROLES.runtime,
     "insert into clara.wake_intents (event_id, firm_id, event_seq, event_type, decision, taxonomy_version) values ($1, $2, 999999, 'totally.wrong', 'background_review', 1)",
     [ev.id, randomUUID()],
   );
   const stored = (await rootQuery("select firm_id, event_seq::int as seq, event_type from clara.wake_intents where event_id = $1", [ev.id])).rows[0];
-  assert.equal(stored.firm_id, ev.firm_id, "firm_id derived from the event (caller value overwritten)");
-  assert.equal(stored.seq, ev.seq, "event_seq derived from the event");
-  assert.equal(stored.event_type, ev.event_type, "event_type derived from the event");
+  assert.equal(stored.firm_id, ev.firm_id, "wake_intents firm_id derived from the event (caller value overwritten)");
+  assert.equal(stored.seq, ev.seq, "wake_intents event_seq derived from the event");
+  assert.equal(stored.event_type, ev.event_type, "wake_intents event_type derived from the event");
+
+  // relay_dead_letters carries the SAME C6 stamping trigger — insert with WRONG
+  // firm/seq/type and READ BACK all three, so deleting the dead-letter stamping trigger
+  // cannot stay green (the §6 dead-letter test never reads the derived fields back).
+  await ingestDocument(human(users.bob), { client: clients.A1, sha256: sha(randomUUID()), opKey: opk() });
+  const dlEv = await latestEvent(firms.A, "document.ingested");
+  await roleQuery(
+    ROLES.runtime,
+    "insert into clara.relay_dead_letters (consumer, event_id, firm_id, event_seq, event_type, reason) values ('router', $1, $2, 888888, 'nope', 'rig stamp')",
+    [dlEv.id, randomUUID()],
+  );
+  const dl = (await rootQuery("select firm_id, event_seq::int as seq, event_type from clara.relay_dead_letters where event_id = $1", [dlEv.id])).rows[0];
+  assert.equal(dl.firm_id, dlEv.firm_id, "dead-letter firm_id derived from the event (caller value overwritten)");
+  assert.equal(dl.seq, dlEv.seq, "dead-letter event_seq derived from the event");
+  assert.equal(dl.event_type, dlEv.event_type, "dead-letter event_type derived from the event");
 
   await ingestDocument(human(users.bob), { client: clients.A1, sha256: sha(randomUUID()), opKey: opk() });
   const ev2 = await latestEvent(firms.A, "document.ingested");

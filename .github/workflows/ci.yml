@@ -159,5 +159,24 @@ jobs:
           pnpm db:seed
           pnpm -r --if-present test
 
+      # C9 baseline path (X8): the populated-upgrade / cutover test RESETS the schema,
+      # so rig-events-upgrade.test.mjs SKIPS in the shared-DB "Migrate + seed + tests"
+      # run above (CLARA_RIG_ALLOW_RESET is unset there — a mid-run schema drop would
+      # nuke the other concurrent test files). Run it FOR REAL here, ALONE, in its OWN
+      # throwaway database (clara_upgrade_ci — matches the guard's *_ci ephemeral
+      # pattern), so the C9 deploy-onto-existing baseline can never silently regress to
+      # a skipped (false-green) state. psql is on PATH from the "Install PostgreSQL 17
+      # client" step; PGHOST/PGPORT/PGUSER/PGPASSWORD come from the job env.
+      - name: Populated-upgrade cutover test (isolated DB, C9)
+        working-directory: packages/db
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_upgrade_ci'
+          # The test's first act is reset() on this BRAND-NEW database — which also
+          # regression-guards reset.mjs's never-existed-schema short-circuit (its
+          # preflight once threw 3F000 there). The test then applies 0001-0004,
+          # builds data through the writers, and applies 0005 itself.
+          PGDATABASE=clara_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+            node --test tests/rig-events-upgrade.test.mjs
+
       - name: DR backup/restore self-test (ephemeral postgres:17)
         run: pnpm --filter @clara/db dr:selftest

@@ -1,4 +1,5 @@
-// Slice-3 rig — the EVENT SPINE, part 4: UPGRADE / CUTOVER (contract §4.11 / C9).
+// Slice-3 rig — the EVENT SPINE, part 4: UPGRADE / CUTOVER (§4.11 / C9 of
+// docs/plan/slice3-event-spine-contract.md v2.2).
 //
 // This is the ONLY event-spine test that RESETS the database (drops schema clara),
 // so it is GATED behind CLARA_RIG_ALLOW_RESET=1 and is meant to run SEPARATELY (alone)

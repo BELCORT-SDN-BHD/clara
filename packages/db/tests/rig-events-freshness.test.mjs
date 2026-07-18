@@ -1,5 +1,5 @@
 // Slice-3 rig — the EVENT SPINE, part 2: IDEMPOTENT REPLAY + the FRESHNESS GATE
-// (contract §4.3/§4.4). Contract-driven; see rig-events.test.mjs for the suite map.
+// (§4.3/§4.4 of docs/plan/slice3-event-spine-contract.md v2.2; suite map in rig-events.test.mjs).
 // Every negative asserts an EXACT SQLSTATE; a divergence from the contract stays as
 // the contract states.
 
@@ -209,6 +209,7 @@ test("§4 C1 interleaving: T2 commits a relevant event between T1's fast-fail an
   const token = await packVersion(owner, client); // fresh (T2 not yet run)
 
   const out = await c1FreshnessInterleaving({ firm, client, humanSub: owner, wakeSecret: cred.secret, resolution: res, coa, amount: ROUTINE_CENTS, token });
+  assert.equal(out.provedBlocked, true, "T1 was proven WAITING at the allocator (past the fast gate) before T2 committed — so ONLY the commit-time recheck, not the fast gate, can catch the staleness");
   assert.ok(out.t1 && out.t1.ok === false, `T1 aborted (got ${JSON.stringify(out.t1)})`);
   assert.equal(out.t1.code, CLR.stale, "T1's commit-time recheck aborts with CLR12");
   assert.equal(out.gapFree, true, "the aborted T1 allocation left no seq gap");

@@ -1,20 +1,16 @@
 // Slice-3 rig — event-spine shared helpers (NOT a test file: the name does not end
 // in `.test.mjs`). Written INDEPENDENTLY from the migration lane, straight from the
-// Slice-3 design contract (scratchpad/slice3-design.md v2.1). A second, adversarial
+// Slice-3 event-spine contract (docs/plan/slice3-event-spine-contract.md v2.2). Adversarial
 // implementation of the contract that cross-checks lane-migration's 0005 schema.
 //
-// Everything the event-spine tests need beyond the Slice-2 harness lives here:
-//   * the event catalog + client-scoped map + the v1 routing taxonomy (contract §2.1/§2.7),
-//   * event-log / firm-counter / context-pack readers,
-//   * a wake_draft_entry wrapper that carries the NEW p_books_version freshness token,
-//   * two-session forced-schedule drivers (the C1 freshness interleaving, the C4/C5
-//     deadlock regressions, and the P6 concurrent-first-event allocator race).
+// Beyond the Slice-2 harness this holds: the event catalog + client-scoped map + v1
+// taxonomy (contract §2.1/§2.7), event-log/counter/pack readers, the wake_draft_entry +
+// p_books_version wrapper, and the two-session forced-schedule drivers (C1 freshness
+// interleaving, C4/C5 deadlock regressions, P6 allocator race).
 //
-// Signature strategy (inherited from rig-helpers): every clara function is called by
-// NAMED args using the parameter NAMES the CONTRACT states. A name the migration got
-// wrong is a real divergence finding, not something the rig papers over. In
-// particular _append_event / assert_books_current / get_context_pack / wake_draft_entry
-// (+ p_books_version) names come from the contract, never from reading 0005.
+// Signature strategy (inherited from rig-helpers): every clara fn is called by NAMED args
+// using the parameter NAMES the CONTRACT states (_append_event / assert_books_current /
+// get_context_pack / wake_draft_entry + p_books_version) — never from reading 0005.
 
 import { randomUUID } from "node:crypto";
 import {
@@ -273,20 +269,38 @@ const DRAFT_SPECS = [
 ];
 const WAKE_DRAFT_SPECS = [...DRAFT_SPECS, { name: "p_books_version", cast: "bigint" }];
 
+/** Poll until backend `pid` is WAITING on a Lock held by `blockerPid` (pg_blocking_pids
+ *  resolves the tuple/transactionid chain). True once proven, false on timeout. */
+async function waitBlockedBy(pid, blockerPid, timeoutMs = 15000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid = $1",
+      [pid],
+    );
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) return true;
+    await sleep(50);
+  }
+  return false;
+}
+
 /**
- * The C1 freshness interleaving (contract §2.5 / P4). T2 (human) holds the firm counter
- * lock with an UNCOMMITTED client-A draft; T1 (wake) passes the fast-fail at `token`
- * (T2 invisible), then BLOCKS at the allocator. T2 commits → T1 allocates over T2's now-
- * visible relevant event and the COMMIT-TIME RECHECK aborts it with CLR12. The counter
- * serialization guarantees the schedule (no data-race on timing of the abort itself).
- * Returns { t1: {ok|code}, gapFree }.
+ * The C1 freshness interleaving (contract §2.5 / P4) — PINS the commit-time recheck.
+ * T2 (human) holds the counter row lock with an UNCOMMITTED client-A draft; T1 (wake)
+ * passes the fast gate at `token`, then BLOCKS at the allocator on T2's lock. We PROVE T1
+ * is at the allocator (the fast gate is a lock-free SELECT, so a Lock-wait on T2 can only
+ * be the allocator) via pg_blocking_pids BEFORE committing T2 — so ONLY the commit-time
+ * recheck (0005's second assert_books_current) can catch the staleness; delete it and T1
+ * commits stale and this test FAILS. Returns { t1, gapFree, provedBlocked }.
  */
 export async function c1FreshnessInterleaving({ firm, client, humanSub, wakeSecret, resolution, coa, amount, token }) {
   const c2 = await getPool().connect(); // T2 human
   const c1 = await getPool().connect(); // T1 wake
-  const out = { t1: null, gapFree: null };
+  const out = { t1: null, gapFree: null, provedBlocked: false };
   try {
     // T2: a human draft on `client` — allocates + HOLDS the counter row lock, uncommitted.
+    const t2Pid = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
     await c2.query(`set role ${ROLES.authenticated}`);
     await c2.query("begin");
     await c2.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub: humanSub })]);
@@ -299,8 +313,9 @@ export async function c1FreshnessInterleaving({ firm, client, humanSub, wakeSecr
       opk(),
     ]);
 
-    // T1: wake draft at `token`. Fast-fail passes (T2 uncommitted → invisible); then it
-    // blocks at the allocator waiting for c2's counter lock. Do NOT await yet.
+    // T1: wake draft at `token`. Fast gate passes (T2 uncommitted → invisible); then it
+    // BLOCKS at the allocator waiting for c2's counter row lock. Do NOT await yet.
+    const t1Pid = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
     await c1.query(`set role ${ROLES.wakeInteractive}`);
     await c1.query("begin");
     await c1.query("select set_config('clara.wake_secret', $1, true)", [wakeSecret]);
@@ -321,8 +336,11 @@ export async function c1FreshnessInterleaving({ firm, client, humanSub, wakeSecr
         out.t1 = { ok: false, code: e.code };
       });
 
-    await sleep(400); // let T1 reach the (blocking) allocator, PAST its fast-fail
-    await c2.query("commit"); // release the lock + publish T2's relevant event
+    // PROVE T1 is past the fast gate and WAITING on T2's counter lock, THEN publish T2's
+    // now-relevant event. If T1 never reaches that wait (e.g. it CLR12'd at the fast gate
+    // instead), provedBlocked stays false and the test fails — the recheck is not pinned.
+    out.provedBlocked = await waitBlockedBy(t1Pid, t2Pid);
+    await c2.query("commit"); // publish T2's relevant event; T1 unblocks + rechecks → CLR12
     await t1p;
     await c1.query("commit").catch(() => c1.query("rollback").catch(() => {}));
   } finally {

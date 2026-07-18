@@ -32,7 +32,14 @@ export const GOVERNED_TABLES = [
   "firms", "firm_memberships", "clients", "coa_accounts", "documents", "client_resolutions",
   "journal_entries", "journal_lines", "fixed_assets", "notifications", "audit_log", "op_receipts",
   "freeform_read_log", "wake_credentials", "wake_fn_allowlist", "firm_admissions", "users",
+  // Slice-3 event spine (event-spine contract §2 — all owned by clara_fn_owner, FORCE RLS).
+  "event_types", "firm_event_seq", "domain_events", "taxonomy_versions", "trigger_taxonomy",
+  "taxonomy_active", "wake_intents", "relay_checkpoints", "relay_dead_letters",
 ];
+
+// The ONLY clara base tables that legitimately carry no RLS (migration bookkeeping + the
+// Slice-1 placeholder). Everything else in the schema MUST be RLS-enabled AND forced.
+export const RLS_EXEMPT = new Set(["schema_migrations", "slice1_smoke"]);
 
 /** Functions `role` can EXECUTE outside pg_catalog + clara (should be none). */
 async function reachableOutsideClara(role) {
@@ -113,20 +120,31 @@ export async function definerHygieneFailures() {
   return bad.rows.map((r) => `${r.proname} (owner=${r.owner})`);
 }
 
-/** T18 — governed firm-scoped tables have RLS ENABLED and FORCED. */
+/** T18 — governed tables have RLS ENABLED and FORCED. Derives the full clara base-table
+ * set and excludes RLS_EXEMPT, so a NEW table that forgets FORCE RLS can never silently
+ * escape the sweep — AND every GOVERNED_TABLES entry (incl. the nine Slice-3 tables) must
+ * actually EXIST (a missing one is a real defect the derive-only check can't catch). */
 export async function governedRlsFailures() {
   const rows = await rootQuery(
     `select c.relname, c.relrowsecurity, c.relforcerowsecurity
        from pg_class c join pg_namespace n on n.oid = c.relnamespace
-      where n.nspname = 'clara' and c.relkind = 'r' and c.relname = any($1)`,
-    [GOVERNED_TABLES],
+      where n.nspname = 'clara' and c.relkind = 'r'`,
   );
   const present = new Map(rows.rows.map((r) => [r.relname, r]));
   const problems = [];
+  // (a) every governed table must EXIST and be RLS-forced.
   for (const tbl of GOVERNED_TABLES) {
     const r = present.get(tbl);
     if (!r) problems.push(`${tbl}: MISSING from schema clara`);
     else if (!r.relrowsecurity || !r.relforcerowsecurity) problems.push(`${tbl}: rls=${r.relrowsecurity} force=${r.relforcerowsecurity}`);
+  }
+  // (b) any OTHER clara base table (a future one) must be forced too, unless explicitly exempt.
+  const governed = new Set(GOVERNED_TABLES);
+  for (const r of rows.rows) {
+    if (governed.has(r.relname) || RLS_EXEMPT.has(r.relname)) continue;
+    if (!r.relrowsecurity || !r.relforcerowsecurity) {
+      problems.push(`${r.relname} (unlisted): rls=${r.relrowsecurity} force=${r.relforcerowsecurity} — add to GOVERNED_TABLES or RLS_EXEMPT`);
+    }
   }
   return problems;
 }

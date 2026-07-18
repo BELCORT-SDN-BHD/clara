@@ -89,7 +89,7 @@ transaction) carries a deploy-time obligation once a **live runtime** exists:
 This is **materially zero-risk today** — no runtime is deployed until Slice 4, and
 CI / throwaway targets have no concurrent writers — so `0005` needs no special
 handling now. The rule binds the first live deploy that ships a writer-body change.
-(Design authority: `scratchpad/slice3-design.md` v2.1 §D1; the in-flight-body
+(Design authority: `docs/plan/slice3-event-spine-contract.md` v2.2 §D1; the in-flight-body
 behaviour is a PostgreSQL property, not a Clara mechanism.)
 
 ## CI

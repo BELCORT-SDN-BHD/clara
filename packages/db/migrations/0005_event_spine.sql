@@ -3,8 +3,9 @@
 -- uniform-emission retrofit of every audited writer. Built on the Slice-2 governed
 -- core (0002 identity/RBAC/audit, 0003 books tables/triggers, 0004 audited writers).
 --
--- Authority: scratchpad/slice3-design.md v2.1 (RATIFIED — owner-grilled 2026-07-18,
--- two adversarial design reviews + deltas integrated), docs/architecture/
+-- Authority: docs/plan/slice3-event-spine-contract.md v2.2 (RATIFIED — owner-grilled
+-- 2026-07-18, two adversarial design reviews + deltas + as-built-review amendments
+-- X6/X8 integrated), docs/architecture/
 -- ARCHITECTURE.md §2 (ADR-007 event spine), ADR-009, ADR-015. Finding tags inline
 -- (N* native review, C* Codex review, D* Codex delta, P* probe, R* owner ruling)
 -- point at the WHY of each load-bearing detail.
@@ -322,6 +323,23 @@ create trigger t_dead_letters_no_truncate before truncate on clara.relay_dead_le
 
 -- relay_checkpoints carries NO append-only guard: the checkpoint is a moving cursor
 -- (monotonic UPDATE by the router). Grants + RLS confine writes to clara_runtime.
+
+-- ---------------------------------------------------------------------
+-- A.6 Supplemental indexes for the get_context_pack + trial_balance access paths
+--     (X6 — the as-built review's live EXPLAIN showed the pack SEQ-SCANning
+--     journal_entries / documents / client_resolutions and the trial-balance join
+--     seq-scanning journal_lines on EVERY re-fetch; the agent re-fetches after every
+--     write, so this is a hot path). Each index matches the exact filter + ORDER BY
+--     shape §2.6 uses. They live in 0005 (not 0002/0003) because those migrations are
+--     immutable (append-only law). Verified on a 43-client / 3.7k-entry seeded book:
+--     all five flip to index/bitmap scans (e.g. the trial-balance join dropped from
+--     ~3130 to ~390 shared buffers; recent_entries from a 370-buffer seq-scan+sort to
+--     a 50-buffer ordered index scan).
+create index ix_je_client_recent on clara.journal_entries (client_id, posting_date desc, created_at desc);            -- recent_entries
+create index ix_je_client_approved on clara.journal_entries (client_id, approved_at desc) where approved_at is not null; -- approval_history (from base tables, C9)
+create index ix_documents_client_recent on clara.documents (client_id, created_at desc);                             -- pack documents
+create index ix_resolutions_client_live on clara.client_resolutions (client_id) where superseded_at is null;         -- live resolutions
+create index ix_jl_client_account on clara.journal_lines (client_id, account_code);                                  -- trial-balance join
 
 -- =====================================================================
 -- B. RLS — forced everywhere; every new table gets the owner using(true)/with
