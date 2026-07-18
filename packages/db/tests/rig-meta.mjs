@@ -10,7 +10,9 @@ export const WRITERS = [
   "create_firm", "add_member", "set_member_role", "remove_member", "create_client", "upsert_account",
   "ingest_document", "record_client_resolution", "draft_entry", "approve_entry", "reverse_entry", "record_notification",
 ];
-export const READS = ["get_journal_entry", "list_journal_entries", "trial_balance"];
+// get_context_pack is the Slice-3 typed read (design §2.6): STABLE security-invoker,
+// granted to the same read audience as the other reads (clara_authenticated + agent_ro).
+export const READS = ["get_journal_entry", "list_journal_entries", "trial_balance", "get_context_pack"];
 export const ALLOWED = {
   [ROLES.authenticated]: new Set([...WRITERS, ...READS]),
   [ROLES.agentRo]: new Set(READS),

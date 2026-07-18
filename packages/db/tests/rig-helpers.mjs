@@ -61,6 +61,7 @@ export const CLR = {
   lastOwner: "CLR09", // last-owner protection
   badRequest: "CLR10", // malformed args / unknown account / bad lifecycle
   notFound: "CLR11", // not-found-in-your-firm (NO existence oracle)
+  stale: "CLR12", // stale context / books-version freshness gate (Slice 3, §2.5)
 };
 
 /** Standard Postgres SQLSTATEs the rig asserts directly. */

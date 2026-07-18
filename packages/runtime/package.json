@@ -8,7 +8,8 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "build": "nitro build",
-    "start": "node --env-file-if-exists=.env scripts/worker.mjs"
+    "start": "node --env-file-if-exists=.env scripts/worker.mjs",
+    "test": "node --test tests/"
   },
   "dependencies": {
     "@workflow/world-postgres": "4.3.0",

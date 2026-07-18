@@ -72,6 +72,26 @@ Root shortcuts: `pnpm db:migrate`, `pnpm db:seed`, `pnpm db:reset`, `pnpm db:bac
   project the Slice-0 spike still holds a live parked run in `workflow` /
   `graphile_worker` — this is why the pipeline is schema-scoped.)
 
+## Deploy contract (writer-body migrations) — rule D1
+
+A migration that **replaces the body of an audited writer** (e.g. `0005_event_spine`
+rewrites every `clara.*` writer to append its `domain_events` row in the same
+transaction) carries a deploy-time obligation once a **live runtime** exists:
+
+> **D1 — write-quiesce.** Any migration that replaces writer function bodies
+> **requires an application write-quiesce for its deploy window.** PostgreSQL runs
+> each in-flight PL/pgSQL execution to completion on the body it **started** with, so
+> a writer call that begins *before* the migration commits and finishes *after* it
+> runs on the OLD body — it would skip the new behaviour (e.g. emit no event). Quiesce
+> the writers (stop accepting new wake/human write RPCs, let in-flight ones drain),
+> apply the migration, then resume.
+
+This is **materially zero-risk today** — no runtime is deployed until Slice 4, and
+CI / throwaway targets have no concurrent writers — so `0005` needs no special
+handling now. The rule binds the first live deploy that ships a writer-body change.
+(Design authority: `scratchpad/slice3-design.md` v2.1 §D1; the in-flight-body
+behaviour is a PostgreSQL property, not a Clara mechanism.)
+
 ## CI
 
 CI applies every migration to a **throwaway `postgres:17` service container**

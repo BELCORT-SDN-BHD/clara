@@ -54,7 +54,7 @@ import {
   definerHygieneFailures,
   governedRlsFailures,
 } from "./rig-meta.mjs";
-import { raceProactiveNotification } from "./rig-txn.mjs";
+import { raceProactiveNotification, truncateGuardError } from "./rig-txn.mjs";
 
 let world = null;
 let ready = false;
@@ -230,10 +230,16 @@ test("T10a posted entries are immutable / append-only (raw superuser DML → CLR
   await assertRaises(CLR.immutable, () => rootQuery("delete from clara.journal_lines where entry_id = $1", [entry]), "DELETE posted line");
   await assertRaises(CLR.immutable, () => rootQuery("update clara.journal_entries set memo = 'x' where id = $1", [entry]), "UPDATE posted entry memo");
   await assertRaises(CLR.immutable, () => rootQuery("delete from clara.journal_entries where id = $1", [entry]), "DELETE posted entry");
-  await assertRaises(CLR.immutable, () => rootQuery("truncate clara.journal_lines"), "TRUNCATE journal_lines");
+  // TRUNCATE takes table-level ACCESS EXCLUSIVE and can lose a deadlock race against
+  // the concurrently-running writer files before reaching the guard — retry the
+  // transient race so the assertion observes the append-only guard's CLR08 (Slice-3:
+  // the event suite raised the concurrent write pressure that exposes this).
+  const tjl = await truncateGuardError("truncate clara.journal_lines");
+  assert.equal(tjl && tjl.code, CLR.immutable, "TRUNCATE journal_lines → CLR08");
   // journal_entries is FK-referenced (journal_lines), so a BARE truncate hits the FK
   // restriction; CASCADE reaches the BEFORE TRUNCATE trigger → CLR08 (append-only).
-  await assertRaises(CLR.immutable, () => rootQuery("truncate clara.journal_entries cascade"), "TRUNCATE journal_entries CASCADE");
+  const tje = await truncateGuardError("truncate clara.journal_entries cascade");
+  assert.equal(tje && tje.code, CLR.immutable, "TRUNCATE journal_entries CASCADE → CLR08");
 });
 
 test("T10b agent_ro can EXECUTE nothing outside pg_catalog + clara", async (t) => {
