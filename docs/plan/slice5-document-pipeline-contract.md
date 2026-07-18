@@ -461,4 +461,37 @@ VF-5 typo + §3.11 in the intro + upgrade-charge wording.
 
 ## 13. As-built amendments
 
-*(Reserved — filled by the ladder's output.)*
+**Build stage (2026-07-19; the as-built review may extend):**
+- **AB-1 (§3.10 completed by `0008_runtime_read_surface.sql`):** READ-ONLY runtime
+  visibility added on (a) the matcher's lane-2 inputs (extractions/regions/clients —
+  the aliases/identifiers runtime-SELECT row proved matcher-side computation was the
+  intent) and (b) the runtime's own control tables (intakes/tasks/reservations — §3.9's
+  reconciler requires seeing queued-unbound tasks; closes an otherwise-irreducible
+  finalizer crash window). DML stays writer-only.
+- **AB-2 (§3.4 wording resolved):** `record_rule_resolution` EXECUTE is held by the
+  `clara_runtime_login` LOGIN directly (not the group) — a pooled SET-ROLE session
+  cannot reach it; the matcher calls it in its raw-login identity scope.
+- **AB-3 (S5-D3 destination attribution):** approve requires an unsuperseded ≥0.95
+  human/rule `client_resolutions` row (subject_kind='document', subject=the document,
+  client=to_client) — CLR01 otherwise; it must exist BEFORE propose (its own event
+  stales the plan). The distinct-checker law follows 0004 (attestation never bypasses
+  an available checker).
+- **AB-4 (honest-state period model):** no period/close/subledger model exists as-built;
+  `_correction_period_state` is the single extension point (reports 'no_period_model';
+  the §3.5 hard-block never fires yet). Retention uses a conservative floor recorded as
+  'missing-fy-conservative-0007' while clients carry no FY-end.
+- **AB-5 (re-affirmation belt):** retire-blocks-on-live-drafts makes "filing retired
+  between draft and approve" unreachable via governed paths; `approve_entry`'s
+  citability re-affirmation stays as defense-in-depth.
+- **AB-6 (S5 failure-code map, as-built):** CLR15 legacy-upgrade/transport-bypass ·
+  CLR16 intake/processing/extraction transitions · CLR17 filing conflict/retention
+  floor/CAS · CLR18 reservations/limits/concurrency · CLR19 correction authz/stale-plan/
+  period · CLR20 attribution/candidate state. (Process lesson: enumerate at design time.)
+- **AB-7 (`rig.%` = reserved test namespace):** taxonomy full-coverage assertions
+  exclude it (the runtime relay suite registers a synthetic wake-bound type; shared-DB
+  CI runs must not false-fail the real catalog's coverage law).
+- **AB-8 (residuals):** object↔row reconciliation enumerates tracked/sidecar objects
+  (verify-then-report; full bucket LIST adoption is a follow-up); the engine schema's
+  PUBLIC-EXECUTE exposure on an engine-carrying DB falls under the recorded
+  deployment-ACL-baseline deferral (PROJECTLOG HIGH-10) — re-examined at the as-built
+  review against the live posture.

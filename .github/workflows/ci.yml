@@ -178,5 +178,17 @@ jobs:
           PGDATABASE=clara_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
             node --test tests/rig-events-upgrade.test.mjs
 
+      # Slice-5 §3.0.2/§3.11 drill (same false-green protection as the C9 step
+      # above): the filing_id backfill (clean + ambiguous-citation atomic ABORT),
+      # the legacy claim-only upgrade branch, and the taxonomy-v2 cutover residual
+      # sweep — reset-gated (drops schema clara mid-run), so it runs ALONE in its
+      # OWN throwaway database, never inside the concurrent all-packages sweep.
+      - name: Slice-5 document-pipeline upgrade drill (isolated DB)
+        working-directory: packages/db
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_docs_upgrade_ci'
+          PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+            node --test tests/rig-docs-upgrade.test.mjs
+
       - name: DR backup/restore self-test (ephemeral postgres:17)
         run: pnpm --filter @clara/db dr:selftest
