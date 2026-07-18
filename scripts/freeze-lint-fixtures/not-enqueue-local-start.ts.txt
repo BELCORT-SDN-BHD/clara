@@ -1,0 +1,8 @@
+// Fixture (OK — false-positive guard): a local function that happens to be
+// named `start`, with no enqueue-module import anywhere. Detection is
+// binding-driven, so this file is skipped entirely.
+function start(x: number): number {
+  return x + 1;
+}
+
+export const y = start(1);

@@ -1,0 +1,12 @@
+// Fixture: a LAUNDERED "repoint" — chatTurnV2 is an inline alias of the v1
+// import, not a real v2 module. The identifier suffix claims v2 while the body
+// is v1. The structural parser must refuse to trust it (REGISTRY-UNPARSEABLE).
+import { chatTurnV1 } from "./chatTurn.v1.js";
+
+const chatTurnV2 = chatTurnV1;
+
+export const workflows = {
+  chatTurn: chatTurnV2,
+} as const;
+
+export const workflowNames: string[] = Object.keys(workflows);

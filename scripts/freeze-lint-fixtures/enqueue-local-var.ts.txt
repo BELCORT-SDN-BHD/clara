@@ -1,0 +1,10 @@
+// Fixture (REJECT: ENQUEUE-UNTRACEABLE): the argument is a LOCAL variable —
+// even though it happens to hold a registry export, single-pass import
+// provenance cannot prove that, and the lint fails CLOSED rather than guess.
+import { start } from "workflow/api";
+import { workflows } from "../workflows/registry.js";
+
+export async function kick(): Promise<void> {
+  const wf = workflows.closeExample;
+  await start(wf, []);
+}

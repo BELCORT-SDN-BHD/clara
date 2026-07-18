@@ -1,0 +1,8 @@
+// Fixture (REJECT: ENQUEUE-BYPASS): namespace-imported enqueue API called with
+// a direct workflow-module import.
+import * as api from "workflow/api";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+export async function kick(): Promise<void> {
+  await api.start(chatTurnV1, []);
+}

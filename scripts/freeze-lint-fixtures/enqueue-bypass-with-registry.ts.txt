@@ -1,0 +1,13 @@
+// Fixture (REJECT: ENQUEUE-BYPASS) — THE bypass. The registry IS imported and
+// even used, so a naive "does the file import the registry?" grep would green
+// this file — but the reference actually handed to start() is a DIRECT module
+// import. Provenance must be resolved PER IDENTIFIER to catch it.
+import { start } from "workflow/api";
+import { workflows } from "../workflows/registry.js";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+export const known = Object.keys(workflows);
+
+export async function kick(sessionId: string): Promise<void> {
+  await start(chatTurnV1, [sessionId]);
+}

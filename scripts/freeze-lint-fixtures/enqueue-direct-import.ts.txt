@@ -1,0 +1,9 @@
+// Fixture (REJECT: ENQUEUE-BYPASS): the workflow is imported DIRECTLY from its
+// module file — after a registry repoint this site would silently start STALE
+// v1 runs forever.
+import { start } from "workflow/api";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+export async function kick(sessionId: string): Promise<void> {
+  await start(chatTurnV1, [sessionId]);
+}

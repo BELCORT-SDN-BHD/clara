@@ -1,0 +1,8 @@
+// Fixture (REJECT: ENQUEUE-BYPASS): renaming the enqueue API on import must not
+// hide the call site — the binding map tracks `start as launch`.
+import { start as launch } from "workflow/api";
+import { chatTurnV1 } from "../workflows/chatTurn.v1.js";
+
+export async function kick(): Promise<void> {
+  await launch(chatTurnV1, []);
+}
