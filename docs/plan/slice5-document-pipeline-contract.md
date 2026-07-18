@@ -6,7 +6,8 @@ industry research + Codex (gpt-5.6-sol, xhigh) debate. Evidence:
 `docs/plan/research/slice5/`. Design review round 1 (dual-lane: native Opus +
 Codex xhigh, both FLAWED) produced 25 accepted findings — integrated below and
 mapped in §12. Three fixes touch previously ratified semantics and are marked
-**[DELTA-OWNER-1..3]** pending the owner's sign-off at the delta stage.
+**[DELTA-OWNER-1..3]** — **ALL OWNER-RATIFIED 2026-07-18** at the delta stage
+("OK all"); the tags remain as provenance markers.
 Ladder: delta re-review → build (contract-blind rig lane) → as-built review; §13
 carries as-built amendments. **The migration design (§3.x) lives in the companion
 `slice5-migration-0007-design.md` — same normativity, split only for the
