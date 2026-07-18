@@ -61,12 +61,13 @@ export const DEFAULT_RUN_CAP = 3;
 /** §3.3: interruption statuses (pending → answered/expired/cancelled). */
 export const INTERRUPTION_STATUSES = ["pending", "answered", "expired", "cancelled"];
 
-/** The new tables §3 names (semantic names; a differently-named as-built table
- *  shows up via the unlisted-table catch in s4RlsAudit — classified, not lost). */
+/** The new tables §3 names + round-2 amendments (S4-AB5: task_checkpoints).
+ *  A differently-named as-built table shows up via the unlisted-table catch in
+ *  s4RlsAudit — classified, not lost. */
 export const EXPECTED_NEW_TABLES = [
   "agent_tasks", "agent_interruptions", "wakes_outbox",
   "chat_sessions", "chat_messages",
-  "firm_limits", "firm_usage_daily", "task_usage",
+  "firm_limits", "firm_usage_daily", "task_usage", "task_checkpoints",
   "trace_spans", "runtime_heartbeats",
 ];
 
@@ -254,4 +255,30 @@ export async function observedNewTables() {
     "select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'clara' and c.relkind = 'r' order by c.relname",
   );
   return r.rows.map((x) => x.relname).filter((t) => !PRE_0006_TABLES.has(t));
+}
+
+// ---------------------------------------------------------------------------
+// S4-AB1 — REAL session authorization for the login shells. SET SESSION
+// AUTHORIZATION (from the superuser pool client) makes the session BE the
+// login role — ambient privileges are then exactly what the login holds
+// (INHERIT FALSE ⇒ none), and SET ROLE succeeds only for SET TRUE grants.
+// Always restores the session identity before releasing the client.
+// ---------------------------------------------------------------------------
+
+const LOGIN_ROLES = new Set(["clara_runtime_login", "clara_agent_read_login"]);
+
+export async function withSessionAuth(login, fn) {
+  if (!LOGIN_ROLES.has(login)) throw new Error(`withSessionAuth: not a known login shell: ${login}`);
+  const { getPool } = await import("./rig-events-helpers.mjs");
+  const c = await getPool().connect();
+  try {
+    await c.query(`set session authorization ${login}`);
+    return await fn(c);
+  } finally {
+    await c.query("rollback").catch(() => {});
+    await c.query("reset role").catch(() => {});
+    await c.query("reset session authorization").catch(() => {});
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
 }

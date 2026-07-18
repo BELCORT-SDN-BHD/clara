@@ -16,10 +16,12 @@ import { randomUUID } from "node:crypto";
 import {
   CLR,
   CLR13,
+  PG,
   assertRaises,
   assertRaisesOneOf,
   opk,
   humanQuery,
+  rootQuery,
   ensureReady,
   runtimeReady,
   endPool,
@@ -31,17 +33,21 @@ import {
   beginChatTurn,
   taskIdOf,
   settleChatTurn,
+  finishTask,
   driveTaskStatus,
   makeConsumableIntent,
   consumeIntent,
   insertWakeTask,
   insertInterruption,
   insertOutbox,
+  openInterruption,
+  interruptionColumns,
   answerInterruption,
   cancelAgentTask,
   shareChatSession,
   auditRows,
 } from "./rig-runtime-fixtures.mjs";
+import { crossTaskTokenRace } from "./rig-runtime-race.mjs";
 
 let ready = false;
 let world = null;
@@ -225,7 +231,7 @@ test("§3.5 share_chat_session: the AUTHOR shares → visibility=firm + member-r
   const task = taskIdOf(
     await beginChatTurn({ session, author: users.alice, turnKey: opk("sh"), parts: [{ type: "text", text: `${MM} sensitive draft context` }] }),
   );
-  await settleChatTurn({ task, tokens: 2, outcome: "completed" });
+  await finishTask(task); // S4-AB11-legal settle path (queued→running→completed)
 
   // Invisible to bob pre-share.
   assert.equal((await humanQuery(users.bob, "select id from clara.chat_sessions where id = $1", [session])).rowCount, 0, "pre-share: invisible to a non-author");
@@ -253,6 +259,118 @@ test("§3.5 share_chat_session: the AUTHOR shares → visibility=firm + member-r
     assert.ok(!JSON.stringify(a.args ?? {}).includes(MM), "share audit args leak message prose");
   }
   assert.ok(!JSON.stringify(receipt ?? {}).includes(MM), "the share receipt leaks message prose");
+});
+
+// ===========================================================================
+// Round-2 S4-AB4 — open_interruption: the runtime's atomic clarify opener.
+// ===========================================================================
+
+test("S4-AB4 open_interruption: atomic park+insert; idempotent by hook_token; CLR13 non-running + linearized; token unique/not-null; firm from task; runtime-only", async (t) => {
+  if (unready(t)) return;
+  const { users, firms } = world;
+  const { taskCol } = await interruptionColumns();
+  const rowsFor = async (task) =>
+    (await rootQuery(`select count(*)::int as n from clara.agent_interruptions where ${taskCol} = $1`, [task])).rows[0].n;
+
+  // Atomic open: running→awaiting_input + a pending insert in ONE call.
+  const { task } = await runningTask();
+  const token = `hook-${randomUUID()}`;
+  const id1 = await openInterruption({ task, hookToken: token, askedOf: users.alice });
+  assert.ok(id1, "open_interruption returned the interruption id");
+  assert.equal((await readRow("agent_tasks", task)).status, "awaiting_input", "the task PARKED in the same call (atomic)");
+  const irow = await readRow("agent_interruptions", id1);
+  assert.equal(irow.status, "pending", "the clarify landed pending");
+  assert.equal(irow.firm_id, firms.A, "the clarify firm is DERIVED from the task");
+  assert.equal(irow.hook_token, token, "the hook token is recorded");
+
+  // Idempotent replay: same token → same id, no dup row, no state change.
+  const id2 = await openInterruption({ task, hookToken: token });
+  assert.equal(id2, id1, "same hook_token → the SAME interruption id");
+  assert.equal(await rowsFor(task), 1, "no duplicate interruption row on replay");
+  assert.equal((await readRow("agent_tasks", task)).status, "awaiting_input", "no state change on replay");
+
+  // Linearized: with the clarify still pending (task resumed to running), a
+  // SECOND open with a fresh token refuses CLR13. On an (illegal) success the
+  // failure message carries the landed state for classification.
+  await driveTaskStatus(task, ["running"]);
+  let second = null;
+  try {
+    second = await openInterruption({ task, hookToken: `hook-${randomUUID()}` });
+  } catch (e) {
+    assert.equal(e.code, CLR13, `the linearize refusal is CLR13 (got ${e.code}: ${e.message})`);
+  }
+  if (second != null) {
+    const n = await rowsFor(task);
+    const st = (await readRow("agent_tasks", task)).status;
+    assert.fail(`a SECOND open while one is pending SUCCEEDED (id ${second}; task now '${st}' with ${n} interruption rows) — §3.3 linearization not enforced`);
+  }
+
+  // Non-running task → CLR13 with NO insert.
+  const s2 = await createChatSession({ firm: firms.A, author: users.alice, visibility: "private" });
+  const queued = taskIdOf(await beginChatTurn({ session: s2, author: users.alice, turnKey: opk("oi") }));
+  await assertRaises(CLR13, () => openInterruption({ task: queued, hookToken: `hook-${randomUUID()}` }), "open on a non-running (queued) task");
+  assert.equal(await rowsFor(queued), 0, "the refused open inserted NOTHING");
+
+  // hook_token is UNIQUE (cross-task reuse refused) and NOT NULL.
+  await driveTaskStatus(queued, ["running"]);
+  await assertRaisesOneOf([PG.uniqueViolation, CLR13, CLR.badRequest], () => openInterruption({ task: queued, hookToken: token }), "hook_token reuse across tasks (unique)");
+  await assertRaisesOneOf(["23502", CLR.badRequest, CLR13], () => openInterruption({ task: queued, hookToken: null }), "a NULL hook_token");
+
+  // Runtime-only EXECUTE (the matrix asserts it too; this is the live denial).
+  await assertRaises(
+    PG.insufficientPrivilege,
+    () => humanQuery(users.alice, "select clara.open_interruption(p_task => $1, p_hook_token => $2, p_question => '{}'::jsonb)", [queued, "human-token"]),
+    "human EXECUTE open_interruption",
+  );
+
+  // AB4-L4: once the pending clarify CLEARS (answered), a fresh token opens
+  // again — the linearize guard blocks concurrency, never the next clarify.
+  await answerInterruption(users.bob, { id: id1, answer: "cleared for L4", opKey: opk() });
+  const id3 = await openInterruption({ task, hookToken: `hook-${randomUUID()}` });
+  assert.ok(id3 && id3 !== id1, "a pending-cleared task accepts a FRESH token (AB4-L4: no over-blocking)");
+  assert.equal((await readRow("agent_tasks", task)).status, "awaiting_input", "the new open parked the task again");
+
+  // Cap hygiene: finish both legally (settle also closes the pending clarify — S4-D6).
+  await finishTask(task);
+  await finishTask(queued);
+});
+
+// ===========================================================================
+// FX4 — the CONCURRENT cross-task hook-token race (two-session forced
+// schedule). The loser must refuse CLR13 with its transition rolled back —
+// never cross-bind to the winner's interruption (the pre-fix stranding bug).
+// ===========================================================================
+
+test("FX4 cross-task token race: both running, same token; loser PROVEN blocked then CLR13; task B stays running with ZERO interruptions; A's clarify intact", async (t) => {
+  if (unready(t)) return;
+  const { taskCol } = await interruptionColumns();
+  const countFor = async (task) =>
+    (await rootQuery(`select count(*)::int as n from clara.agent_interruptions where ${taskCol} = $1`, [task])).rows[0].n;
+
+  const { task: taskA } = await runningTask("fx4-A");
+  const { task: taskB } = await runningTask("fx4-B");
+  const token = `hook-${randomUUID()}`;
+
+  const out = await crossTaskTokenRace({ taskA, taskB, token });
+  assert.ok(out.first?.ok, `the first open landed for task A (got ${JSON.stringify(out.first)})`);
+  assert.equal(out.provedBlocked, true, "X7: the second open was PROVEN blocked on the hook_token unique index before the winner committed");
+  assert.ok(out.second && out.second.ok === false, `the loser was REFUSED (got ${JSON.stringify(out.second)}) — an ok:true with the winner's id is the FX4 cross-bind bug`);
+  assert.equal(out.second.code, CLR13, `the loser refuses with CLR13 (got ${out.second.code}: ${out.second.message})`);
+
+  // The loser's WHOLE txn rolled back: task B not stranded, zero interruptions.
+  assert.equal((await readRow("agent_tasks", taskB)).status, "running", "task B remains RUNNING (its awaiting_input transition rolled back with the refusal)");
+  assert.equal(await countFor(taskB), 0, "task B carries ZERO interruptions");
+
+  // The winner's clarify is intact and correctly bound.
+  assert.equal((await readRow("agent_tasks", taskA)).status, "awaiting_input", "task A stays parked on its clarify");
+  const aRow = await readRow("agent_interruptions", out.first.id);
+  assert.ok(aRow, "task A's interruption row exists");
+  assert.equal(aRow[taskCol], taskA, "the winner's interruption is bound to task A");
+  assert.equal(aRow.status, "pending", "the winner's clarify is still pending");
+  assert.equal(aRow.hook_token, token, "the winner's clarify holds the raced token");
+
+  await finishTask(taskA); // cap hygiene (settle closes A's pending clarify — S4-D6)
+  await finishTask(taskB);
 });
 
 // ===========================================================================

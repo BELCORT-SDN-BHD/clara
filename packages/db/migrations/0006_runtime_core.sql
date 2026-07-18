@@ -17,12 +17,20 @@
 -- NEW ERROR CODES (0002's + 0005's registries are IMMUTABLE, so these are
 -- documented HERE — not by editing an applied migration):
 --   CLR13 = STATE CONFLICT — a turn is already live for the session (one-live-turn
---           23505 → CLR13/409), an interruption is not pending / has expired, or a
---           terminal task was re-transitioned. (Existing: CLR01..CLR12.)
+--           23505 → CLR13/409), an interruption is not pending / has expired, an
+--           agent_task transition is outside the legal matrix (incl. any move out of a
+--           terminal state — S4-AB11), or open_interruption hit a non-running task.
+--           (Existing: CLR01..CLR12.)
 --   CLR14 = LIMIT — a firm's daily token budget is exhausted OR its concurrent
 --           compute-run cap is reached (fail-closed admission; ruling 4). The
 --           message names which limit + the UTC reset day.
 -- Collision-free vs CLR01..CLR12 (verified both review lanes).
+--
+-- AS-BUILT FIX ROUND (inline S4-AB* tags mark each): AB1 login memberships WITH SET
+-- TRUE / INHERIT FALSE (the pool SET ROLEs into its group); AB11 the full agent_task
+-- transition matrix; AB12 chat_message parts array + element shape; AB4 the durable
+-- hook_token + open_interruption (atomic+idempotent clarify open); AB6 task_checkpoints
+-- + checkpoint_turn (per-segment durable accounting; settle sums them, one path).
 --
 -- HOUSE RULES (S4-C13 + the 0002/0005 precedent): cluster/role DDL runs FIRST as
 -- the DEPLOY role (clara_fn_owner is NOCREATEROLE and cannot mint the logins);
@@ -60,12 +68,15 @@ begin
   end loop;
 end $$;
 
--- Bind each login to EXACTLY its one group role, INHERITing that group's privileges
--- (the login ACTS as its group). NO SET on the group from the login (a runtime login
--- must not be able to SET ROLE into anything wider). resolve_chat_principal — NOT a
--- direct firm_memberships grant — is the runtime's only membership surface (S4-ND2).
-grant clara_runtime  to clara_runtime_login     with inherit true, set false;
-grant clara_agent_ro to clara_agent_read_login  with inherit true, set false;
+-- Bind each login to EXACTLY its one group role, WITH SET TRUE (S4-AB1 — the pool
+-- authenticates AS the login then `SET ROLE` into its group; without SET this fails
+-- 42501 on every checkout) and INHERIT FALSE (tightest — the login carries NO
+-- privilege until it explicitly SET ROLEs to the group; privileges never leak to the
+-- bare login identity). The login is a member of EXACTLY this one group and nothing
+-- wider. resolve_chat_principal — NOT a direct firm_memberships grant — is the
+-- runtime's only membership surface (S4-ND2).
+grant clara_runtime  to clara_runtime_login     with inherit false, set true;
+grant clara_agent_ro to clara_agent_read_login  with inherit false, set true;
 
 -- Deploy-role impersonation for the isolation rig (WITH SET, no inherit) so a
 -- non-superuser deploy can SET ROLE into each login to assert its membership set.
@@ -165,9 +176,10 @@ create table clara.chat_messages (
   role       text        not null check (role in ('user','assistant')),
   task_id    uuid        not null,                    -- the turn this message belongs to
   turn_key   text,                                    -- NOT NULL for user rows (S4-ND7)
-  parts      jsonb       not null default '[]',       -- typed parts[]
+  parts      jsonb       not null default '[]',       -- typed parts[] (element shape enforced by the trigger — S4-AB12)
   created_at timestamptz not null default now(),
-  constraint ck_msg_user_turn_key check (role <> 'user' or turn_key is not null)
+  constraint ck_msg_user_turn_key check (role <> 'user' or turn_key is not null),
+  constraint ck_msg_parts_array  check (jsonb_typeof(parts) = 'array')       -- S4-AB12
 );
 create unique index uq_msg_user_turn on clara.chat_messages (session_id, turn_key) where (role = 'user');
 create unique index uq_msg_assistant_task on clara.chat_messages (task_id) where (role = 'assistant');
@@ -181,6 +193,7 @@ create table clara.agent_interruptions (
   id                uuid        primary key default gen_random_uuid(),
   task_id           uuid        not null,             -- firm derived from the task
   firm_id           uuid        not null,
+  hook_token        text        not null unique,      -- the engine resume-hook token (S4-AB4); single-shot, immutable
   kind              text        not null default 'clarify' check (kind in ('clarify')),
   question          jsonb       not null default '{}',-- typed part (firm-visible)
   answer            jsonb,                            -- typed part
@@ -231,6 +244,23 @@ create table clara.task_usage (
   firm_id    uuid        not null,
   tokens     bigint      not null default 0 check (tokens >= 0),
   created_at timestamptz not null default now()
+);
+
+-- 2.6b task_checkpoints — per-segment DURABLE checkpoints (S4-AB6). The workflow
+--      checkpoints EVERY segment (tokens + the segment's typed parts); rows are
+--      immutable and replay-idempotent (checkpoint_turn is INSERT ON CONFLICT DO
+--      NOTHING). settle's authoritative token total is sum(tokens) over a task's
+--      checkpoints (single accounting path — §3.6 / see settle_chat_turn), and a
+--      cancel/repair settle with no assistant parts falls back to the CONCATENATED
+--      checkpoint parts so incurred work is never discarded. No firm_id column — the
+--      table is runtime-internal, keyed by task_id.
+create table clara.task_checkpoints (
+  task_id    uuid        not null,
+  segment    int         not null,
+  tokens     bigint      not null default 0 check (tokens >= 0),
+  parts      jsonb       not null default '[]' check (jsonb_typeof(parts) = 'array'),
+  created_at timestamptz not null default now(),
+  primary key (task_id, segment)
 );
 
 -- 2.7 Traces (§3.7 / ruling 8). Upsert key (trace_id, span_id); firm/task identity
@@ -401,12 +431,19 @@ begin
   return new;
 end $$;
 
--- agent_tasks: BEFORE UPDATE/DELETE — identity/config immutability (S4-D3) +
--- terminal-terminality (S4-D6). A terminal task never re-transitions (CLR13). No
--- DELETE. Everything mutable (status/workflow_run_id/trace_id/error_code/cancelled_*)
--- is left for the engine + settle paths.
+-- agent_tasks: BEFORE UPDATE/DELETE — identity/config immutability (S4-D3) + the FULL
+-- legal transition matrix (S4-AB11). A status change outside the matrix (incl. any
+-- move OUT of a terminal state) ⇒ CLR13. A non-status update (engine setting
+-- workflow_run_id/trace_id/error_code/cancelled_* while status is unchanged) is always
+-- allowed. No DELETE.
+--   chat_turn:  queued        → running | cancel_requested | cancelled
+--               running       → awaiting_input | cancel_requested | completed | failed
+--               awaiting_input→ running | cancel_requested | expired | cancelled
+--               cancel_requested → completed | failed | cancelled
+--   wake:       held          → cancelled
 create function clara._tf_agent_task_update() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_ok boolean;
 begin
   if tg_op = 'DELETE' then
     raise exception 'agent_tasks are not deleted' using errcode = 'CLR08';
@@ -423,8 +460,20 @@ begin
      or new.created_at <> old.created_at then
     raise exception 'agent_task identity/config is immutable' using errcode = 'CLR08';
   end if;
-  if old.status in ('completed','failed','cancelled','expired') and new.status <> old.status then
-    raise exception 'agent_task % is already terminal (%)', old.id, old.status using errcode = 'CLR13';
+  if new.status <> old.status then
+    v_ok := case
+      when old.kind = 'chat_turn' then case old.status
+        when 'queued'           then new.status in ('running','cancel_requested','cancelled')
+        when 'running'          then new.status in ('awaiting_input','cancel_requested','completed','failed')
+        when 'awaiting_input'   then new.status in ('running','cancel_requested','expired','cancelled')
+        when 'cancel_requested' then new.status in ('completed','failed','cancelled')
+        else false end
+      when old.kind = 'wake' then old.status = 'held' and new.status = 'cancelled'
+      else false end;
+    if not v_ok then
+      raise exception 'illegal agent_task transition % -> % (kind %)', old.status, new.status, old.kind
+        using errcode = 'CLR13';
+    end if;
   end if;
   new.updated_at := now();
   return new;
@@ -442,6 +491,20 @@ begin
   end if;
   new.firm_id := v_firm;
   new.seq := (select coalesce(max(seq), 0) + 1 from clara.chat_messages where session_id = new.session_id);
+  -- Bounded part-shape validation (S4-AB12): parts is a jsonb array (also a table
+  -- CHECK belt) whose EVERY element is an object carrying a text 'type' field. Not a
+  -- full schema — a structural floor so a malformed part can never persist. The
+  -- array-type guard MUST precede jsonb_array_elements (which errors on a non-array),
+  -- so a non-array is rejected here with a clean CLR10 rather than a raw 22023.
+  if jsonb_typeof(new.parts) <> 'array' then
+    raise exception 'chat_message parts must be a json array' using errcode = 'CLR10';
+  end if;
+  if exists (
+    select 1 from jsonb_array_elements(new.parts) e
+    where jsonb_typeof(e.value) <> 'object' or jsonb_typeof(e.value -> 'type') is distinct from 'string'
+  ) then
+    raise exception 'each chat_message part must be an object with a text ''type'' field' using errcode = 'CLR10';
+  end if;
   return new;
 end $$;
 
@@ -472,6 +535,7 @@ begin
     raise exception 'agent_interruptions are not deleted' using errcode = 'CLR08';
   end if;
   if new.id <> old.id or new.task_id <> old.task_id or new.firm_id <> old.firm_id
+     or new.hook_token <> old.hook_token
      or new.kind <> old.kind or new.question is distinct from old.question
      or new.created_at <> old.created_at or new.expires_at <> old.expires_at
      or new.asked_of is distinct from old.asked_of then
@@ -604,6 +668,12 @@ create trigger t_trace_prune_log_append_only before update or delete on clara.tr
 create trigger t_trace_prune_log_no_truncate before truncate on clara.trace_prune_log
   for each statement execute function clara._tf_no_truncate();
 
+-- task_checkpoints: immutable rows (S4-AB6 — replay-idempotent inserts only).
+create trigger t_task_checkpoints_append_only before update or delete on clara.task_checkpoints
+  for each row execute function clara._tf_append_only();
+create trigger t_task_checkpoints_no_truncate before truncate on clara.task_checkpoints
+  for each statement execute function clara._tf_no_truncate();
+
 -- =====================================================================
 -- 5. THE MASKED HUMAN SURFACE (S4-C1/ND1). Humans hold ZERO grant on the
 --    agent_tasks BASE table; agent_tasks_visible is a PLAIN definer view (NOT
@@ -632,7 +702,8 @@ declare t text;
 begin
   foreach t in array array[
     'chat_sessions','agent_tasks','chat_messages','agent_interruptions','wakes_outbox',
-    'firm_limits','firm_usage_daily','task_usage','trace_spans','trace_prune_log','runtime_heartbeats'
+    'firm_limits','firm_usage_daily','task_usage','task_checkpoints','trace_spans',
+    'trace_prune_log','runtime_heartbeats'
   ] loop
     execute format('alter table clara.%I enable row level security', t);
     execute format('alter table clara.%I force row level security', t);
@@ -688,6 +759,11 @@ create policy p_trace_spans_runtime on clara.trace_spans for all
 create policy p_runtime_heartbeats_runtime on clara.runtime_heartbeats for all
   to clara_runtime using (true) with check (true);
 
+-- task_checkpoints: runtime writes/reads (checkpoint_turn is the idempotent path;
+-- settle reads the sum). Rows immutable (append-only trigger). No human, no agent.
+create policy p_task_checkpoints_runtime on clara.task_checkpoints for all
+  to clara_runtime using (true) with check (true);
+
 -- =====================================================================
 -- 7. TABLE / COLUMN GRANTS. The GRANT is the wall (RLS still scopes every read).
 -- =====================================================================
@@ -713,6 +789,10 @@ grant select                 on clara.wakes_outbox to clara_authenticated;
 -- traces + heartbeats: runtime only (no human, no agent_ro).
 grant select, insert, update on clara.trace_spans to clara_runtime;
 grant select, insert, update on clara.runtime_heartbeats to clara_runtime;
+
+-- task_checkpoints: runtime select + insert (immutable — no update/delete grant; the
+-- append-only trigger backs it). No human, no agent_ro.
+grant select, insert on clara.task_checkpoints to clara_runtime;
 
 -- =====================================================================
 -- 8. FUNCTIONS. All SECURITY DEFINER (owned clara_fn_owner, pinned search_path).
@@ -918,14 +998,20 @@ begin
   return jsonb_build_object('task_id', v_task, 'status', 'queued', 'replayed', false);
 end $$;
 
--- settle_chat_turn (runtime lane, §3.6) — terminal settle. Assistant upsert by
--- task_id (append-only; a retry is absorbed); task_usage on-conflict-nothing + the
--- daily total increments ONLY when the ledger row was new; a terminal replay is a
--- stored-outcome no-op; closes pending interruptions on every terminal settle (S4-D6).
+-- settle_chat_turn (runtime lane, §3.6, amended S4-AB6) — terminal settle.
+-- ACCOUNTING: the authoritative token total is sum(task_checkpoints.tokens) for the
+-- task (the workflow checkpoints EVERY segment). p_tokens is RETAINED for signature
+-- stability but is NOT added — a SINGLE accounting path, so no double count.
+-- PARTS: a cancel/repair settle with null/empty p_parts upserts the CONCATENATED
+-- checkpointed parts (in segment/element order) so incurred work is never discarded.
+-- task_usage is on-conflict-nothing; the daily total increments ONLY when the ledger
+-- row was new; a terminal replay is a stored-outcome no-op; closes pending
+-- interruptions on every terminal settle (S4-D6). The status write is matrix-gated
+-- (S4-AB11): a bad outcome for the current state raises CLR13 and rolls the txn back.
 create function clara.settle_chat_turn(p_task uuid, p_parts jsonb, p_tokens bigint,
     p_outcome text, p_error_code text default null) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare t record; v_new boolean; v_day date;
+declare t record; v_new boolean; v_day date; v_total bigint; v_parts jsonb;
 begin
   if p_outcome not in ('completed','failed','cancelled','expired') then
     raise exception 'bad settle outcome %', p_outcome using errcode = 'CLR10';
@@ -934,33 +1020,118 @@ begin
   if not found then raise exception 'unknown task' using errcode = 'CLR11'; end if;
   if t.kind <> 'chat_turn' then raise exception 'settle_chat_turn is for chat turns only' using errcode = 'CLR10'; end if;
   if t.status in ('completed','failed','cancelled','expired') then
-    return jsonb_build_object('task_id', p_task, 'status', t.status, 'replayed', true);   -- terminal no-op
+    -- Terminal no-op — receipt is SHAPE-IDENTICAL to the fresh one (carries the stored tokens).
+    return jsonb_build_object('task_id', p_task, 'status', t.status, 'replayed', true,
+      'tokens', (select coalesce(tokens, 0) from clara.task_usage where task_id = p_task));
+  end if;
+
+  -- Authoritative usage = sum of the durable per-segment checkpoints (S4-AB6).
+  select coalesce(sum(tokens), 0) into v_total from clara.task_checkpoints where task_id = p_task;
+
+  -- Assistant reply parts: caller-supplied when non-empty, else the CONCATENATED
+  -- checkpoint parts (incurred work is never discarded on a cancel/repair settle).
+  if p_parts is null or p_parts = '[]'::jsonb then
+    select coalesce(jsonb_agg(e.value order by tc.segment, e.ord), '[]'::jsonb) into v_parts
+      from clara.task_checkpoints tc,
+           lateral jsonb_array_elements(tc.parts) with ordinality as e(value, ord)
+     where tc.task_id = p_task;
+  else
+    v_parts := p_parts;
   end if;
 
   -- Assistant reply (append-only; a partial-retry duplicate is absorbed).
   insert into clara.chat_messages (session_id, role, task_id, parts)
-    values (t.session_id, 'assistant', p_task, coalesce(p_parts, '[]'::jsonb))
+    values (t.session_id, 'assistant', p_task, v_parts)
     on conflict (task_id) where role = 'assistant' do nothing;
 
   -- Token ledger: one row per task; the daily total increments ONLY when this is new.
   insert into clara.task_usage (task_id, firm_id, tokens)
-    values (p_task, t.firm_id, coalesce(p_tokens, 0))
+    values (p_task, t.firm_id, v_total)
     on conflict (task_id) do nothing;
   v_new := found;
   if v_new then
     v_day := (t.created_at at time zone 'UTC')::date;              -- attribute to the admission UTC day
     insert into clara.firm_usage_daily (firm_id, usage_date, tokens_used)
-      values (t.firm_id, v_day, coalesce(p_tokens, 0))
+      values (t.firm_id, v_day, v_total)
       on conflict (firm_id, usage_date)
       do update set tokens_used = firm_usage_daily.tokens_used + excluded.tokens_used;
   end if;
 
-  -- Settle terminal (error_code CHECK is the allowlist wall — S4-C1); close pending clarifies.
+  -- Settle terminal (error_code CHECK is the allowlist wall — S4-C1; transition
+  -- matrix-gated — S4-AB11); close pending clarifies.
   update clara.agent_tasks set status = p_outcome, error_code = p_error_code, updated_at = now()
     where id = p_task;
   update clara.agent_interruptions set status = 'cancelled' where task_id = p_task and status = 'pending';
 
-  return jsonb_build_object('task_id', p_task, 'status', p_outcome, 'replayed', false);
+  return jsonb_build_object('task_id', p_task, 'status', p_outcome, 'replayed', false, 'tokens', v_total);
+end $$;
+
+-- open_interruption (runtime lane, §3.3 / S4-AB4) — ATOMIC + IDEMPOTENT clarify open.
+-- Order (S4-AB4 round-2): (1) same hook_token already on this task → return its id
+-- (idempotent — a memoized-token crash-replay lands here); (2) ANY OTHER pending
+-- interruption on the task → CLR13, NO insert, NO transition (EXPLICIT linearization —
+-- the transition gate alone is insufficient because awaiting_input→running is a legal
+-- resume, so a task can be running WITH a pending clarify and a fresh token would else
+-- double-open); (3) else conditionally transition running→awaiting_input AND insert a
+-- pending interruption (expires_at now()+14d) in ONE txn — a zero-row transition (task
+-- not running) ⇒ CLR13 and NO insert.
+create function clara.open_interruption(p_task uuid, p_hook_token text, p_question jsonb,
+    p_asked_of uuid default null) returns uuid
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_id uuid; v_task uuid; v_upd int;
+begin
+  if p_hook_token is null or btrim(p_hook_token) = '' then
+    raise exception 'a hook_token is required' using errcode = 'CLR10';
+  end if;
+  -- (1) Idempotent replay on the (globally-unique) hook_token.
+  select id, task_id into v_id, v_task from clara.agent_interruptions where hook_token = p_hook_token;
+  if v_id is not null then
+    if v_task <> p_task then
+      raise exception 'hook_token is already bound to a different task' using errcode = 'CLR13';
+    end if;
+    return v_id;                                                    -- replay no-op
+  end if;
+  -- (2) Linearization: a DIFFERENT pending clarify already blocks this task (no insert,
+  -- no transition). This catches the running-with-a-pending-clarify double-open.
+  if exists (select 1 from clara.agent_interruptions where task_id = p_task and status = 'pending') then
+    raise exception 'a clarify is already pending for task %', p_task using errcode = 'CLR13';
+  end if;
+  -- (3) Conditional transition (running→awaiting_input); zero rows ⇒ not running ⇒ CLR13.
+  update clara.agent_tasks set status = 'awaiting_input', updated_at = now()
+    where id = p_task and status = 'running';
+  get diagnostics v_upd = row_count;
+  if v_upd = 0 then
+    -- A concurrent open may have committed first — re-check the token before failing.
+    select id, task_id into v_id, v_task from clara.agent_interruptions where hook_token = p_hook_token;
+    if v_id is not null and v_task = p_task then return v_id; end if;
+    raise exception 'cannot open a clarify: task % is not running', p_task using errcode = 'CLR13';
+  end if;
+  begin
+    insert into clara.agent_interruptions (task_id, hook_token, question, asked_of, expires_at)
+      values (p_task, p_hook_token, coalesce(p_question, '{}'::jsonb), p_asked_of, now() + interval '14 days')
+      returning id into v_id;
+  exception when unique_violation then
+    -- A concurrent open won the token. It MUST be for THIS task (S4-FX4): a cross-task
+    -- collision means two running tasks raced the same token — hand the loser CLR13 so
+    -- its own running→awaiting_input transition (done above, this same txn) ROLLS BACK
+    -- rather than stranding the task parked with no interruption of its own.
+    select id, task_id into v_id, v_task from clara.agent_interruptions where hook_token = p_hook_token;
+    if v_task is distinct from p_task then
+      raise exception 'hook_token is already bound to a different task' using errcode = 'CLR13';
+    end if;
+  end;
+  return v_id;
+end $$;
+
+-- checkpoint_turn (runtime lane, §3.6 / S4-AB6) — durable per-segment checkpoint.
+-- INSERT ON CONFLICT DO NOTHING ⇒ replay-idempotent (a re-run of a memoized segment
+-- never double-counts). settle sums these for the task's authoritative token total.
+create function clara.checkpoint_turn(p_task uuid, p_segment int, p_tokens bigint, p_parts jsonb)
+  returns void language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  insert into clara.task_checkpoints (task_id, segment, tokens, parts)
+    values (p_task, p_segment, coalesce(p_tokens, 0), coalesce(p_parts, '[]'::jsonb))
+    on conflict (task_id, segment) do nothing;
 end $$;
 
 -- prune_trace_spans (runtime lane, §3.7 / ruling 8) — started_at-keyed, bounded-batch,
@@ -1004,6 +1175,8 @@ revoke execute on all functions in schema clara from public;
 grant execute on function clara.resolve_chat_principal(uuid) to clara_runtime;
 grant execute on function clara.begin_chat_turn(uuid, uuid, text, jsonb, text) to clara_runtime;
 grant execute on function clara.settle_chat_turn(uuid, jsonb, bigint, text, text) to clara_runtime;
+grant execute on function clara.open_interruption(uuid, text, jsonb, uuid) to clara_runtime;
+grant execute on function clara.checkpoint_turn(uuid, int, bigint, jsonb) to clara_runtime;
 grant execute on function clara.prune_trace_spans(timestamptz, int) to clara_runtime;
 grant execute on function clara.relay_health() to clara_runtime;
 

@@ -37,6 +37,7 @@ import {
   printLaneNotes,
   makeConsumableIntent,
   consumeIntent,
+  insertWakeTask,
   insertInterruption,
   insertOutbox,
   outboxRowsForIntent,
@@ -44,6 +45,8 @@ import {
   beginChatTurn,
   taskIdOf,
   settleChatTurn,
+  driveTaskStatus,
+  finishTask,
 } from "./rig-runtime-fixtures.mjs";
 import { answerAcrossDeadline } from "./rig-runtime-race.mjs";
 import { truncateGuardError } from "./rig-txn.mjs";
@@ -223,7 +226,7 @@ test("§3.3 transitions: pending→expired via the conditional pipe; terminal ro
   );
 
   // Cap hygiene: free the compute slot for the later tests in this firm.
-  await settleChatTurn({ task, tokens: 1, outcome: "completed" });
+  await finishTask(task);
 });
 
 test("§3.3 wait_across_deadline_answer_loses (S4-D5): an answer txn that STARTED pre-deadline but acquires the row post-deadline LOSES", async (t) => {
@@ -242,7 +245,7 @@ test("§3.3 wait_across_deadline_answer_loses (S4-D5): an answer txn that STARTE
   assert.notEqual(row.status, "answered", "the interruption did NOT become answered");
 
   // Cap hygiene: free the compute slot for the later tests in this firm.
-  await settleChatTurn({ task, tokens: 1, outcome: "completed" });
+  await finishTask(task);
 });
 
 // ===========================================================================
@@ -253,6 +256,7 @@ test("§3.2 terminal tasks are terminal and task identity is immutable (model_sn
   if (unready(t)) return;
   const session = await createChatSession({ firm: W.firm, author: W.owner, visibility: "private" });
   const task = taskIdOf(await beginChatTurn({ session, author: W.owner, turnKey: opk("term") }));
+  await driveTaskStatus(task, ["running"]); // S4-AB11: settle only from a compute state
   await settleChatTurn({ task, tokens: 5, outcome: "completed" });
   assert.equal((await readRow("agent_tasks", task)).status, "completed", "settle landed the terminal status");
 
@@ -275,7 +279,7 @@ test("§3.2 terminal tasks are terminal and task identity is immutable (model_sn
   await assertRaisesOneOf([CLR13, CLR.immutable], () => rootQuery("delete from clara.agent_tasks where id = $1", [task]), "DELETE agent_tasks");
 
   // Cap hygiene: free the live task's compute slot for the later tests.
-  await settleChatTurn({ task: live, tokens: 1, outcome: "completed" });
+  await finishTask(live);
 });
 
 // ===========================================================================
@@ -318,6 +322,7 @@ test("§3.5 chat messages: parts immutable once written; turn_key NOT NULL for u
   const session = await createChatSession({ firm: W.firm, author: W.owner, visibility: "private" });
   const turnKey = opk("msg");
   const task = taskIdOf(await beginChatTurn({ session, author: W.owner, turnKey }));
+  await driveTaskStatus(task, ["running"]); // S4-AB11: settle only from a compute state
   await settleChatTurn({ task, tokens: 3, outcome: "completed" });
 
   const msgs = await readRowsWhere("chat_messages", "session_id", session);
@@ -345,4 +350,86 @@ test("§3.5 chat messages: parts immutable once written; turn_key NOT NULL for u
     () => insertMessage({ session, task, role: "user", turnKey, author: W.owner, seq: 95002 }),
     "a duplicate (session_id, turn_key) user row",
   );
+});
+
+// ===========================================================================
+// Round-2 S4-AB11 — the FULL task transition matrix.
+//   chat_turn: queued→running|cancel_requested|cancelled; running→awaiting_input
+//   |cancel_requested|completed|failed; awaiting_input→running|cancel_requested
+//   |expired|cancelled; cancel_requested→completed|failed|cancelled.
+//   wake: held→cancelled ONLY.
+// ===========================================================================
+
+test("S4-AB11 transition matrix: the legal chat/wake graphs drive through; the representative illegal set raises CLR13", async (t) => {
+  if (unready(t)) return;
+  const mkTurn = async () => {
+    const s = await createChatSession({ firm: W.firm, author: W.owner, visibility: "private" });
+    return taskIdOf(await beginChatTurn({ session: s, author: W.owner, turnKey: opk("mx") }));
+  };
+  const legal = async (task, to) => {
+    const r = await roleQuery(ROLES.runtime, "update clara.agent_tasks set status = $2 where id = $1 returning status", [task, to]);
+    assert.equal(r.rowCount, 1, `legal transition → ${to} drove through`);
+  };
+  const illegal = (task, to, label) =>
+    assertRaises(CLR13, () => rootQuery("update clara.agent_tasks set status = $2 where id = $1", [task, to]), label);
+
+  // t1 walks the long legal chat path, with the named illegal probes en route.
+  const t1 = await mkTurn();
+  await illegal(t1, "awaiting_input", "queued→awaiting_input (illegal — parking requires running)");
+  await legal(t1, "running");
+  await illegal(t1, "expired", "running→expired (illegal — expiry is a parked-state exit)");
+  await legal(t1, "awaiting_input");
+  await legal(t1, "running");
+  await legal(t1, "completed");
+  await illegal(t1, "running", "terminal completed→running (terminal is terminal)");
+
+  // t2: the cancel path; then terminal is terminal.
+  const t2 = await mkTurn();
+  await legal(t2, "cancel_requested");
+  await legal(t2, "cancelled");
+  await illegal(t2, "running", "terminal cancelled→running");
+
+  // t3: queued→cancelled directly (reconciler repair path).
+  const t3 = await mkTurn();
+  await legal(t3, "cancelled");
+
+  // t4: the parked-expiry exit.
+  const t4 = await mkTurn();
+  await legal(t4, "running");
+  await legal(t4, "awaiting_input");
+  await legal(t4, "expired");
+
+  // wake: held→cancelled ONLY.
+  const { intentId } = await makeConsumableIntent({ sub: W.owner, client: W.client });
+  await consumeIntent(intentId);
+  const wt = await insertWakeTask({ intent: intentId, firm: W.firm });
+  await illegal(wt, "running", "wake held→running (wake tasks never compute in Slice 4)");
+  await legal(wt, "cancelled");
+});
+
+// ===========================================================================
+// Round-2 S4-AB12 — chat_messages.parts must be a jsonb ARRAY of OBJECTS each
+// carrying a text 'type'.
+// ===========================================================================
+
+test("S4-AB12 parts validation: non-array / non-object element / missing type → CLR10; a valid typed array is accepted (fn AND trigger level)", async (t) => {
+  if (unready(t)) return;
+  const session = await createChatSession({ firm: W.firm, author: W.owner, visibility: "private" });
+
+  await assertRaises(CLR.badRequest, () => beginChatTurn({ session, author: W.owner, turnKey: opk("pv1"), parts: { type: "text", text: "not an array" } }), "non-array parts");
+  await assertRaises(CLR.badRequest, () => beginChatTurn({ session, author: W.owner, turnKey: opk("pv2"), parts: ["just a string"] }), "a non-object element");
+  await assertRaises(CLR.badRequest, () => beginChatTurn({ session, author: W.owner, turnKey: opk("pv3"), parts: [{ text: "no type key" }] }), "an element missing 'type'");
+
+  const ok = await beginChatTurn({ session, author: W.owner, turnKey: opk("pv4"), parts: [{ type: "text", text: "valid" }] });
+  const task = taskIdOf(ok);
+  assert.ok(task, "a valid typed-object array is accepted");
+
+  // Trigger-level (not just fn-level): a direct root INSERT with bad parts fails too.
+  await assertRaisesOneOf(
+    [CLR.badRequest, CLR13],
+    () => insertMessage({ session, task, role: "user", turnKey: opk("pv5"), parts: { bad: true }, author: W.owner, seq: 95010 }),
+    "a direct INSERT with non-array parts",
+  );
+
+  await finishTask(task); // cap hygiene
 });

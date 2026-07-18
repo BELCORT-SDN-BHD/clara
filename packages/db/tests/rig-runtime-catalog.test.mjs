@@ -25,6 +25,10 @@ import {
   insertUser,
   printLaneNotes,
   noteLane,
+  withSessionAuth,
+  createChatSession,
+  finishTask,
+  opk,
 } from "./rig-runtime-fixtures.mjs";
 import {
   S4_NEW_FNS,
@@ -60,9 +64,84 @@ function unready(t) {
 // §3.0 — roles + the runtime's only membership surface.
 // ===========================================================================
 
-test("§3.0 login shells: clara_runtime_login → clara_runtime ONLY; clara_agent_read_login → clara_agent_ro ONLY; NOLOGIN/no-super/no-bypassrls", async (t) => {
+test("§3.0 login shells: clara_runtime_login → clara_runtime ONLY; clara_agent_read_login → clara_agent_ro ONLY; NOLOGIN/no-super/no-bypassrls; SET TRUE + INHERIT FALSE", async (t) => {
   if (unready(t)) return;
   assert.deepEqual(await loginRoleAudit(), [], "the §3.0 login-shell role audit is clean");
+});
+
+test("S4-AB1 real session authorization: bare logins hold NO ambient privilege; SET ROLE to their one group works; any other group refused", async (t) => {
+  if (unready(t)) return;
+  const { users, firms, clients } = world;
+  const session = await createChatSession({ firm: firms.A, author: users.alice, visibility: "private" });
+
+  // (a)+(b)+(d) clara_runtime_login.
+  await withSessionAuth("clara_runtime_login", async (c) => {
+    // Bare (INHERIT FALSE): no ambient privilege on schema clara.
+    let bare = null;
+    try {
+      await c.query("select count(*) from clara.wake_intents");
+    } catch (e) {
+      bare = e.code;
+    }
+    assert.equal(bare, PG.insufficientPrivilege, `bare clara_runtime_login cannot read clara tables (got ${bare ?? "SUCCESS"})`);
+    // (d) no lateral movement to any OTHER group role.
+    for (const other of [ROLES.authenticated, ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive, ROLES.fnOwner]) {
+      let denied = null;
+      try {
+        await c.query(`set role ${other}`);
+        await c.query("reset role");
+      } catch (e) {
+        denied = e.code;
+      }
+      assert.equal(denied, PG.insufficientPrivilege, `clara_runtime_login must NOT set role ${other} (got ${denied ?? "SUCCESS"})`);
+    }
+    // (b) SET ROLE into its ONE group succeeds and reaches the runtime surface
+    // — a REAL begin_chat_turn call, not a privilege-catalog read.
+    await c.query(`set role ${ROLES.runtime}`);
+    const ok = await c.query("select count(*)::int as n from clara.wake_intents");
+    assert.ok(ok.rows[0].n >= 0, "after SET ROLE clara_runtime the runtime surface is readable");
+    const turn = await c.query(
+      "select clara.begin_chat_turn(p_session => $1, p_author => $2, p_turn_key => $3, p_user_parts => $4::jsonb, p_model => $5) as result",
+      [session, users.alice, opk("ab1"), JSON.stringify([{ type: "text", text: "ab1" }]), "gpt-5.6-terra"],
+    );
+    assert.ok(turn.rows[0].result, "begin_chat_turn EXECUTEs under the runtime login's SET ROLE");
+  });
+  // Cap hygiene for firm A (S4-AB11-legal path).
+  const tid = (await rootQuery("select id from clara.agent_tasks where session_id = $1 order by created_at desc limit 1", [session])).rows[0].id;
+  await finishTask(tid);
+
+  // (c)+(d) clara_agent_read_login.
+  await withSessionAuth("clara_agent_read_login", async (c) => {
+    let bare = null;
+    try {
+      await c.query("select count(*) from clara.firms");
+    } catch (e) {
+      bare = e.code;
+    }
+    assert.equal(bare, PG.insufficientPrivilege, `bare clara_agent_read_login cannot read clara tables (got ${bare ?? "SUCCESS"})`);
+    for (const other of [ROLES.authenticated, ROLES.runtime, ROLES.wakeInteractive, ROLES.wakeProactive, ROLES.fnOwner]) {
+      let denied = null;
+      try {
+        await c.query(`set role ${other}`);
+        await c.query("reset role");
+      } catch (e) {
+        denied = e.code;
+      }
+      assert.equal(denied, PG.insufficientPrivilege, `clara_agent_read_login must NOT set role ${other} (got ${denied ?? "SUCCESS"})`);
+    }
+    await c.query(`set role ${ROLES.agentRo}`);
+    const read = await c.query("select count(*)::int as n from clara.firms");
+    assert.equal(read.rows[0].n, 0, "after SET ROLE clara_agent_ro reads succeed (zero rows without a wake credential — RLS)");
+    const pack = await c.query("select clara.get_context_pack(p_client => $1, p_purpose => 'ab1 probe') as pack", [clients.A1]);
+    assert.equal(pack.rows[0].pack, null, "get_context_pack EXECUTEs (null pack without a credential — no oracle)");
+    let writer = null;
+    try {
+      await c.query("select clara.create_client(p_name => 'ab1-illegal', p_op_key => 'ab1')");
+    } catch (e) {
+      writer = e.code;
+    }
+    assert.equal(writer, PG.insufficientPrivilege, `the agent read login can NEVER execute a writer (got ${writer ?? "SUCCESS"})`);
+  });
 });
 
 test("§3.0 resolve_chat_principal: returns the sub's LIVE firm + role to the runtime lane; empty for a member-less sub; EXECUTE = clara_runtime ONLY", async (t) => {
@@ -133,6 +212,8 @@ test("§6 EXECUTE matrix: re-asserted across the five lanes incl. the new fns; r
   await expectOnly("resolve_chat_principal", ROLES.runtime);
   await expectOnly("begin_chat_turn", ROLES.runtime);
   await expectOnly("settle_chat_turn", ROLES.runtime);
+  await expectOnly("open_interruption", ROLES.runtime);
+  await expectOnly("checkpoint_turn", ROLES.runtime);
   await expectOnly("answer_interruption", ROLES.authenticated);
   await expectOnly("cancel_agent_task", ROLES.authenticated);
   await expectOnly("share_chat_session", ROLES.authenticated);

@@ -86,6 +86,56 @@ export async function admissionRace({ winner, loser, model = DEFAULT_MODEL }) {
 }
 
 /**
+ * FX4 — the concurrent CROSS-TASK hook-token race. Two RUNNING tasks open the
+ * SAME hook_token: both pass the pending-exists check; T2 blocks on the unique
+ * index behind T1's uncommitted insert (proven — X7); after T1 commits, T2's
+ * unique-violation path must VERIFY task_id and refuse CLR13 with its whole
+ * txn (including its awaiting_input transition) rolled back. The pre-fix bug:
+ * the loser returned the WINNER's interruption id while its own transition
+ * committed — a task stranded awaiting_input with no interruption.
+ * Returns { first, second, provedBlocked }.
+ */
+export async function crossTaskTokenRace({ taskA, taskB, token }) {
+  const c1 = await getPool().connect();
+  const c2 = await getPool().connect();
+  const out = { first: null, second: null, provedBlocked: false };
+  const CALL =
+    "select clara.open_interruption(p_task => $1, p_hook_token => $2, p_question => $3::jsonb) as result";
+  const q = JSON.stringify({ type: "text", text: "fx4 race" });
+  try {
+    const pid1 = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await c1.query(`set role ${ROLES.runtime}`);
+    await c1.query("begin");
+    try {
+      const r = await c1.query(CALL, [taskA, token, q]);
+      out.first = { ok: true, id: r.rows[0].result };
+    } catch (e) {
+      out.first = { ok: false, code: e.code, message: e.message };
+    }
+
+    const pid2 = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await c2.query(`set role ${ROLES.runtime}`);
+    await c2.query("begin");
+    const p2 = c2
+      .query(CALL, [taskB, token, q])
+      .then((r) => {
+        out.second = { ok: true, id: r.rows[0].result };
+      })
+      .catch((e) => {
+        out.second = { ok: false, code: e.code, message: e.message };
+      });
+
+    out.provedBlocked = await waitBlockedBy(pid2, pid1);
+    await c1.query("commit").catch(() => c1.query("rollback").catch(() => {}));
+    await p2;
+    await c2.query("commit").catch(() => c2.query("rollback").catch(() => {}));
+  } finally {
+    await cleanup([c1, c2]);
+  }
+  return out;
+}
+
+/**
  * §3.3 / S4-D5 `wait_across_deadline_answer_loses`: the answer txn STARTS
  * before the deadline (its now() freezes pre-deadline) but acquires the row
  * AFTER the deadline passes — with the contract's clock_timestamp() comparison

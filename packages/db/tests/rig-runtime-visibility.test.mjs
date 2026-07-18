@@ -32,7 +32,7 @@ import {
   sessionAuthorColumn,
   beginChatTurn,
   taskIdOf,
-  settleChatTurn,
+  finishTask,
   insertInterruption,
   interruptionColumns,
   noteLane,
@@ -112,9 +112,10 @@ test("§0.9 shared sessions: firm-readable (sessions AND messages) and CONTINUAB
   assert.equal(daveS.rowCount, 0, "cross-firm still sees ZERO rows of a shared session");
 
   // Free the sessions' live turns first (one-live-turn would mask the real
-  // outcome of the continuation probes with a CLR13).
-  await settleChatTurn({ task: sharedTask, tokens: 2, outcome: "completed" });
-  await settleChatTurn({ task: privTask, tokens: 2, outcome: "completed" });
+  // outcome of the continuation probes with a CLR13). finishTask walks the
+  // S4-AB11-legal path (queued→running→settle).
+  await finishTask(sharedTask);
+  await finishTask(privTask);
 
   // Continuable: a member's turn on the SHARED session is admitted (the §4.2
   // ingress passes the member as p_author).

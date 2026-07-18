@@ -20,6 +20,9 @@ export const S4_NEW_FNS = {
   cancel_agent_task: { params: ["p_task", "p_op_key"], lanes: { [ROLES.authenticated]: true } },
   share_chat_session: { params: null, mustInclude: ["p_op_key"], lanes: { [ROLES.authenticated]: true } },
   relay_health: { params: null, lanes: null }, // §3.8 — audience contract-silent
+  // Round-2 amendments (S4-AB4 / S4-AB6) — both runtime-only.
+  open_interruption: { params: ["p_task", "p_hook_token", "p_question", "p_asked_of"], lanes: { [ROLES.runtime]: true } },
+  checkpoint_turn: { params: ["p_task", "p_segment", "p_tokens", "p_parts"], lanes: { [ROLES.runtime]: true } },
 };
 
 /** Known ungranted internals from 0002–0005 (any app-role grant on one = hard failure). */
@@ -51,6 +54,8 @@ export async function s4GrantAudit() {
   allowed[ROLES.runtime].add("resolve_chat_principal");
   allowed[ROLES.runtime].add("begin_chat_turn");
   allowed[ROLES.runtime].add("settle_chat_turn");
+  allowed[ROLES.runtime].add("open_interruption");
+  allowed[ROLES.runtime].add("checkpoint_turn");
 
   const knownNames = new Set([...KNOWN_INTERNALS, ...Object.keys(S4_NEW_FNS)]);
   for (const set of Object.values(allowed)) for (const n of set) knownNames.add(n);
@@ -159,6 +164,20 @@ export async function loginRoleAudit() {
       if (g === want) continue;
       if (forbidden.has(g)) problems.push(`${login}: FORBIDDEN transitive membership in ${g} (§3.0: member of ${want} ONLY)`);
       else problems.push(`${login}: extra membership ${g} (§3.0: member of ${want} ONLY)`);
+    }
+    // Round-2 S4-AB1: the direct grant must be SET TRUE + INHERIT FALSE — the
+    // login can BECOME its group but holds NO ambient privilege while bare.
+    const opt = await rootQuery(
+      `select am.set_option, am.inherit_option
+         from pg_auth_members am
+         join pg_roles member on member.oid = am.member
+         join pg_roles grp on grp.oid = am.roleid
+        where member.rolname = $1 and grp.rolname = $2`,
+      [login, want],
+    );
+    if (opt.rowCount === 1) {
+      if (opt.rows[0].set_option !== true) problems.push(`${login}→${want}: set_option=${opt.rows[0].set_option} (S4-AB1 requires SET TRUE)`);
+      if (opt.rows[0].inherit_option !== false) problems.push(`${login}→${want}: inherit_option=${opt.rows[0].inherit_option} (S4-AB1 requires INHERIT FALSE)`);
     }
   }
   return problems;

@@ -73,10 +73,41 @@ export function taskIdOf(receipt) {
 }
 
 export async function settleChatTurn({ task, parts, tokens = 10, outcome = "completed", errorCode = null }) {
+  // parts: undefined → a default assistant part; null → SQL NULL (round-2
+  // S4-AB6: a null/empty-parts settle upserts the CONCATENATED checkpointed parts).
+  const payload = parts === undefined ? [{ type: "text", text: "rig assistant" }] : parts;
   const r = await roleQuery(
     ROLES.runtime,
     "select clara.settle_chat_turn(p_task => $1, p_parts => $2::jsonb, p_tokens => $3, p_outcome => $4, p_error_code => $5) as result",
-    [task, JSON.stringify(parts ?? [{ type: "text", text: "rig assistant" }]), tokens, outcome, errorCode],
+    [task, payload === null ? null : JSON.stringify(payload), tokens, outcome, errorCode],
+  );
+  return r.rows[0].result;
+}
+
+/** Fixture hygiene under the round-2 S4-AB11 matrix: queued→completed is
+ *  ILLEGAL, so a task is finished by the LEGAL path for its current state
+ *  (queued/awaiting→running→settle; held/cancel_requested→cancelled). Never
+ *  use inside an assertion — this is slot cleanup only. */
+export async function finishTask(task) {
+  const row = await readRow("agent_tasks", task);
+  if (!row || ["completed", "failed", "cancelled", "expired"].includes(row.status)) return;
+  if (row.status === "held" || row.status === "cancel_requested") {
+    await laneQuery("runtime", "update clara.agent_tasks set status = 'cancelled' where id = $1", [task], "finish task → cancelled");
+    return;
+  }
+  if (row.status === "queued" || row.status === "awaiting_input") {
+    await laneQuery("runtime", "update clara.agent_tasks set status = 'running' where id = $1", [task], "finish task → running");
+  }
+  await settleChatTurn({ task, tokens: 0, outcome: "completed" });
+}
+
+/** Round-2 S4-AB6: checkpoint_turn — durable per-segment usage/parts checkpoints;
+ *  the AUTHORITATIVE usage source (settle sums these; its p_tokens is ignored). */
+export async function checkpointTurn({ task, segment, tokens, parts }) {
+  const r = await roleQuery(
+    ROLES.runtime,
+    "select clara.checkpoint_turn(p_task => $1, p_segment => $2, p_tokens => $3, p_parts => $4::jsonb) as result",
+    [task, segment, tokens, JSON.stringify(parts ?? [{ type: "text", text: `segment ${segment}` }])],
   );
   return r.rows[0].result;
 }
@@ -172,8 +203,22 @@ export async function insertInterruption({ task, firm = null, question = "Which 
   if (status !== undefined && byName.has("status")) desired.status = status;
   const kindCol = byName.get("kind");
   if (kindCol && kindCol.is_nullable === "NO" && kindCol.column_default == null && !("kind" in desired)) desired.kind = "clarify";
+  // Round-2 (S4-AB4): hook_token is UNIQUE — the generic text stub would collide
+  // across inserts; give every direct-insert row its own token.
+  if (byName.has("hook_token") && !("hook_token" in desired)) desired.hook_token = `rig-hook-${randomUUID()}`;
   const r = await adaptiveInsert("agent_interruptions", desired, { lane, label: "insert interruption" });
   return r.rows[0].id;
+}
+
+/** Round-2 S4-AB4: open_interruption — the runtime's atomic clarify opener
+ *  (running→awaiting_input + pending insert in ONE txn; idempotent by hook token). */
+export async function openInterruption({ task, hookToken, question = { type: "text", text: "which client is this?" }, askedOf = null }) {
+  const r = await roleQuery(
+    ROLES.runtime,
+    "select clara.open_interruption(p_task => $1, p_hook_token => $2, p_question => $3::jsonb, p_asked_of => $4) as result",
+    [task, hookToken, JSON.stringify(question), askedOf],
+  );
+  return r.rows[0].result;
 }
 
 /** The interruption's task-linkage + question column names (for readbacks/greps). */

@@ -23,6 +23,8 @@ export const ALLOWED = {
   [ROLES.runtime]: new Set([
     "mint_wake_credential", "revoke_wake_credential",
     "resolve_chat_principal", "begin_chat_turn", "settle_chat_turn", "prune_trace_spans", "relay_health",
+    // Slice-4 as-built round 2 (S4-AB4/AB6): atomic clarify open + per-segment checkpoints.
+    "open_interruption", "checkpoint_turn",
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs

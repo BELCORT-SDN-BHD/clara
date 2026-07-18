@@ -34,6 +34,8 @@ import {
   beginChatTurn,
   taskIdOf,
   settleChatTurn,
+  driveTaskStatus,
+  finishTask,
   makeConsumableIntent,
   consumeIntent,
   insertWakeTask,
@@ -80,7 +82,7 @@ test("§3.2 chat task derivation: a wrong caller firm/client is OVERWRITTEN from
   const row = await readRow("agent_tasks", task);
   assert.equal(row.firm_id, firms.A, "the task firm was DERIVED from the session (forged firm-B value overwritten)");
   assert.notEqual(row.client_id, clients.B1, "a foreign client_id cannot be smuggled onto a chat task");
-  await settleChatTurn({ task, tokens: 1, outcome: "completed" }); // cap hygiene
+  await finishTask(task); // cap hygiene
 });
 
 test("§3.2 wake task derivation: firm == the intent's EVENT firm (forged value overwritten); origin_intent_id is UNIQUE", async (t) => {
@@ -165,7 +167,7 @@ test("§3.3 interruption stamping: a wrong caller firm is corrected from the par
   const interruption = await insertInterruption({ task, firm: firms.B });
   const row = await readRow("agent_interruptions", interruption);
   assert.equal(row.firm_id, firms.A, "the interruption firm was DERIVED from the task (forged firm-B overwritten)");
-  await settleChatTurn({ task, tokens: 1, outcome: "completed" }); // cap hygiene (also closes the probe clarify)
+  await finishTask(task); // cap hygiene (also closes the probe clarify)
 });
 
 test("§3.4 outbox stamping: firm from intent→event; condition == the INTENT'S decision (forged values overwritten)", async (t) => {
@@ -216,8 +218,8 @@ test("§3.7 span_key_is_trace_scoped (S4-D9): same span_id under different trace
   );
 
   // Cap hygiene: free both firms' compute slots.
-  await settleChatTurn({ task: taskA, tokens: 1, outcome: "completed" });
-  await settleChatTurn({ task: taskB, tokens: 1, outcome: "completed" });
+  await finishTask(taskA);
+  await finishTask(taskB);
 });
 
 // ===========================================================================
@@ -242,6 +244,7 @@ test("§3.2 error_code allowlist: the six classes pass; free text is impossible 
   // Behavioral: a failed settle with a LEGAL class lands status+code.
   const session = await createChatSession({ firm: firms.A, author: users.alice, visibility: "private" });
   const task = taskIdOf(await beginChatTurn({ session, author: users.alice, turnKey: opk("ec") }));
+  await driveTaskStatus(task, ["running"]); // S4-AB11: running→failed is the legal fail edge
   await settleChatTurn({ task, tokens: 1, outcome: "failed", errorCode: "model_error" });
   const row = await readRow("agent_tasks", task);
   assert.equal(row.status, "failed", "the failed settle landed");
@@ -250,6 +253,7 @@ test("§3.2 error_code allowlist: the six classes pass; free text is impossible 
   // Behavioral negative: free text is rejected — through the fn AND on a raw insert.
   const session2 = await createChatSession({ firm: firms.A, author: users.alice, visibility: "private" });
   const task2 = taskIdOf(await beginChatTurn({ session: session2, author: users.alice, turnKey: opk("ec2") }));
+  await driveTaskStatus(task2, ["running"]); // so the error_code check (not the transition guard) is what raises
   await assertRaisesOneOf(
     [PG.checkViolation, CLR.badRequest, CLR13],
     () => settleChatTurn({ task: task2, tokens: 1, outcome: "failed", errorCode: "the model exploded spectacularly" }),
@@ -263,6 +267,6 @@ test("§3.2 error_code allowlist: the six classes pass; free text is impossible 
     "a raw INSERT with an out-of-allowlist error_code",
   );
 
-  // Cap hygiene: task2's rejected settle left it queued — settle it cleanly.
-  await settleChatTurn({ task: task2, tokens: 1, outcome: "completed" });
+  // Cap hygiene: task2's rejected settle left it running — settle it cleanly.
+  await finishTask(task2);
 });
