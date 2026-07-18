@@ -7,9 +7,11 @@
 // in-flight runs — a rename strands parked runs, policy (c)).
 
 import { closeExampleV1 } from "./closeExample.v1.js";
+import { chatTurn_v1 } from "./chatTurn.v1.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
+  chatTurn: chatTurn_v1,
 } as const;
 
 export const workflowNames: string[] = Object.keys(workflows);

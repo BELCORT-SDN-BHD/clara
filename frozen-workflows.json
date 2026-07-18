@@ -1,6 +1,18 @@
 {
   "version": 1,
   "workflows": {
+    "packages/runtime/workflows/chatTurn.impl.ts": {
+      "sha256": "1504af920e19471035c962bb00a8e912f874ded87c1a4175704f30cdfa8a6539",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.prompt.ts": {
+      "sha256": "91ba3170c052ac0e10bba78be08d5c9a27f72d74b6903eebbfe640a057ee77da",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v1.ts": {
+      "sha256": "78ba39e33abd512675dd801947ab2d49d5532cef1d1df1a69e4229b64ed358c1",
+      "note": ""
+    },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
       "note": ""

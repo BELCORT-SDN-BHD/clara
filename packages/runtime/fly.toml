@@ -1,0 +1,56 @@
+# fly.toml — Clara runtime (Slice 4, contract §5 / §4.1). Deploy from the REPO ROOT
+# so the Docker build context is the pnpm workspace root:
+#     fly deploy --config packages/runtime/fly.toml
+#
+# The app name below is a PLACEHOLDER — the operator creates the real app
+# (`fly apps create <name>`) and replaces this line before the first deploy.
+app = "clara-runtime"
+
+# Singapore — closest region to Malaysia (ADR-014).
+primary_region = "sin"
+
+[build]
+  # Dockerfile path is relative to the build context (the repo root).
+  dockerfile = "packages/runtime/Dockerfile"
+
+[env]
+  PORT = "3200"
+  # The deployed app IS the durable runtime — the world is ON here (and ONLY here).
+  CLARA_START_WORLD = "1"
+  WORKFLOW_TARGET_WORLD = "@workflow/world-postgres"
+  # Secrets (OPENAI_API_KEY, SUPABASE_JWT_*, WORKFLOW_POSTGRES_URL,
+  # CLARA_RUNTIME_DATABASE_URL, CLARA_READ_DATABASE_URL) are set with `fly secrets
+  # set` — NEVER in this file. See the deploy runbook in README.md.
+
+# ONE always-on machine — EXPLICITLY NON-HA (contract §4.1). The durable engine is
+# single-leader (the 'router' advisory lock); a second machine would contend it and
+# split the loops. Do NOT scale this app > 1. The world must never be parked by the
+# platform, so auto start/stop are OFF and one machine is always running.
+[http_service]
+  internal_port = 3200
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = false
+  min_machines_running = 1
+
+  # Readiness gate (§4.7): /ready FAILS on DB unreachable / world dead / control
+  # listener dead / taxonomy HALT — the LB then holds traffic (and a crash-only exit
+  # takes the machine down for Fly to restart).
+  [[http_service.checks]]
+    interval = "15s"
+    timeout = "5s"
+    grace_period = "30s"
+    method = "get"
+    path = "/ready"
+
+# Liveness — the process is up (no dependencies). Distinct from /ready.
+[[http_service.checks]]
+  interval = "30s"
+  timeout = "3s"
+  grace_period = "10s"
+  method = "get"
+  path = "/health"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
