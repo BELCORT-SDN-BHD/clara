@@ -218,9 +218,14 @@ test("§6 relay_dead_letters: UPDATE limited to status/attempt_count/resolved_at
 test("§7 coverage: the active taxonomy version covers every event_type; the 13 contract types are present with correct client_scoped", async (t) => {
   if (unready(t)) return;
   // The active version must ROUTE every catalog row (contract §0.5 / §2.7): anti-join ∅.
+  // `rig.%` is the reserved TEST namespace: the runtime relay suite appends a
+  // synthetic wake-bound type whose coverage tracks whichever version was active
+  // when it registered — on a shared DB (CI runs every package against one
+  // database) it must not false-fail the REAL catalog's full-coverage law.
   const uncovered = await rootQuery(`
     select et.name from clara.event_types et
-    where not exists (
+    where et.name not like 'rig.%'
+      and not exists (
       select 1 from clara.trigger_taxonomy tt
       where tt.version = (select version from clara.taxonomy_active) and tt.event_type = et.name)`);
   assert.deepEqual(uncovered.rows.map((r) => r.name), [], "the active version covers every event_type (anti-join empty)");

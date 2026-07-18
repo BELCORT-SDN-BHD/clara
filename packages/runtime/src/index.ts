@@ -3,6 +3,7 @@ import express from "express";
 import { workflowNames } from "../workflows/registry.js";
 import { checkReadiness } from "../lib/health.mjs";
 import { chatRoutes } from "./chatRoutes.js";
+import { intakeRoutes } from "./intakeRoutes.js";
 import { streamRoutes } from "./streamRoute.js";
 
 // Clara agent-runtime HTTP surface (Slice 4). The durable chat loop, SSE, and the
@@ -42,6 +43,10 @@ app.use((req, res, next) => {
   res.on("finish", dec);
   next();
 });
+
+// Intake owns its own tiny JSON parser and its byte PUT stays a raw backpressured
+// stream. Mount it before the global JSON parser so no middleware can consume it.
+app.use(intakeRoutes());
 
 app.use(express.json({ limit: "1mb" }));
 

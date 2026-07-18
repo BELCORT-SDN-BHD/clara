@@ -92,8 +92,8 @@ test("dead-letter upsert increments attempt_count, stamps firm/seq/type from the
   await fx.pumpDocuments(owner, client, 1, "dl");
   const eventId = await fx.asRoot(async (c) => {
     const r = await c.query(
-      "select id from clara.domain_events where firm_id = $1 and event_type = 'document.ingested' order by seq limit 1",
-      [firm],
+      "select id from clara.domain_events where firm_id = $1 and event_type = $2 order by seq limit 1",
+      [firm, fx.WAKE_EVENT_TYPE],
     );
     return r.rows[0].id;
   });
@@ -107,6 +107,6 @@ test("dead-letter upsert increments attempt_count, stamps firm/seq/type from the
   assert.equal(dls.length, 1, "one dead-letter row (upsert, not a duplicate)");
   assert.equal(dls[0].eventId, eventId);
   assert.equal(dls[0].attemptCount, 2, "attempt_count incremented on re-attempt");
-  assert.equal(dls[0].eventType, "document.ingested", "type derived from the event by the stamping trigger");
+  assert.equal(dls[0].eventType, fx.WAKE_EVENT_TYPE, "type derived from the event by the stamping trigger");
   assert.equal(dls[0].status, "pending");
 });

@@ -79,7 +79,9 @@ test("§3.7 taxonomy v2 is ACTIVE (pointer repointed) and maps EVERY event type;
   const active = (await rootQuery("select version from clara.taxonomy_active")).rows[0].version;
   assert.ok(active > 1, `the active taxonomy pointer repointed past v1 (got v${active})`);
 
-  const types = (await rootQuery("select name from clara.event_types")).rows.map((x) => x.name);
+  // `rig.%` = the reserved test namespace (a shared-DB run may carry the runtime
+  // suite's synthetic wake type) — excluded from the REAL catalog's coverage law.
+  const types = (await rootQuery("select name from clara.event_types where name not like 'rig.%'")).rows.map((x) => x.name);
   const mapped = new Map((await rootQuery("select event_type, decision from clara.trigger_taxonomy where version=$1", [active])).rows.map((r) => [r.event_type, r.decision]));
   for (const et of types) assert.ok(mapped.has(et), `taxonomy v${active} covers ${et} (full-coverage law)`);
   for (const [et, decision] of Object.entries(DOC_TAXONOMY_V2)) {

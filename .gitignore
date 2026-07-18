@@ -37,3 +37,7 @@ spike/.env
 # Local Claude Code state — track the full skills toolchain; keep everything else local.
 .claude/*
 !.claude/skills/
+
+# Codex-lane sandbox work dirs (reports + verification mirrors) — never committed
+.tmp/
+.tmp-corepack/

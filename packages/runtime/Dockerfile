@@ -49,6 +49,15 @@ FROM node:20-bookworm-slim AS runner
 ENV NODE_ENV=production
 WORKDIR /app
 
+# Locally controlled malware scanner. The runtime supervises clamd and refreshes
+# signatures; every production upload still uses the socket INSTREAM protocol and
+# fails closed while the daemon is unavailable.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends clamav-daemon clamav-freshclam \
+ && rm -rf /var/lib/apt/lists/* \
+ && mkdir -p /run/clamav /var/lib/clamav \
+ && chown -R clamav:clamav /run/clamav /var/lib/clamav
+
 # Engine deps for the runtime require()s (@workflow/world-postgres, workflow, pg, ...)
 # — resolved from the cwd node_modules by the .output bundle at runtime (S4-AB2).
 COPY --from=builder /app/deploy/node_modules ./node_modules
