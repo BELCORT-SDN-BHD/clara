@@ -1,0 +1,132 @@
+/* Slice-4 plumbing chat page — readable, unstyled-but-tidy (contract §4.8).
+   Deliberately NOT the Phase-4 design system. */
+
+.page {
+  font-family: system-ui, sans-serif;
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  line-height: 1.5;
+  color: #1a1a1a;
+}
+
+.header { margin-bottom: 1rem; }
+.title { font-size: 1.25rem; margin: 0 0 0.5rem; }
+
+.tokenBar { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; }
+.tokenBar .input { flex: 1; }
+
+.muted { color: #6b6b6b; font-size: 0.8rem; margin: 0.15rem 0; }
+.errorText { color: #b3261e; font-size: 0.8rem; }
+.note { color: #6b4400; background: #fdf3d7; padding: 0.4rem 0.6rem; border-radius: 4px; font-size: 0.85rem; }
+.banner {
+  background: #fbe9e7;
+  border: 1px solid #e5b5ad;
+  color: #7a2418;
+  padding: 0.45rem 0.65rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 1rem;
+  align-items: start;
+}
+@media (max-width: 720px) { .layout { grid-template-columns: 1fr; } }
+
+.sidebar { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; }
+.newSession { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 0.75rem; }
+
+.sessionList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.sessionItem {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  width: 100%;
+  text-align: left;
+  background: #fafafa;
+  border: 1px solid #e2e2e2;
+  border-radius: 4px;
+  padding: 0.4rem 0.55rem;
+  cursor: pointer;
+  font: inherit;
+}
+.sessionItem:hover { background: #f0f0f0; }
+.sessionActive { border-color: #4a6bd6; background: #eef2fd; }
+.sessionTitle { font-weight: 600; font-size: 0.9rem; }
+
+.pane { border: 1px solid #ddd; border-radius: 6px; padding: 0.75rem; min-height: 60vh; display: flex; flex-direction: column; }
+.transcript { flex: 1; display: flex; flex-direction: column; gap: 0.6rem; overflow-y: auto; }
+
+.userMsg, .assistantMsg { border-radius: 6px; padding: 0.5rem 0.7rem; }
+.userMsg { background: #eef2fd; align-self: flex-end; max-width: 85%; }
+.assistantMsg { background: #f6f6f6; align-self: flex-start; max-width: 95%; }
+.roleLabel { font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.04em; color: #8a8a8a; margin-bottom: 0.25rem; display: flex; gap: 0.6rem; align-items: baseline; }
+
+.prose { margin: 0.25rem 0; white-space: pre-wrap; font-size: 0.92rem; }
+
+.chip {
+  display: inline-block;
+  font-size: 0.75rem;
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  margin: 0.15rem 0.3rem 0.15rem 0;
+  border: 1px solid #ccc;
+  background: #fff;
+}
+.chip_running { border-color: #c9a227; background: #fdf7e2; }
+.chip_ok { border-color: #4c8a4c; background: #edf7ed; }
+.chip_error { border-color: #b3261e; background: #fbe9e7; }
+
+.clarifyCard {
+  border: 1px solid #c9a227;
+  background: #fffbef;
+  border-radius: 6px;
+  padding: 0.6rem 0.75rem;
+  margin: 0.3rem 0;
+}
+.clarifyBadge {
+  display: inline-block;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #6b4400;
+  background: #f4e3ae;
+  border-radius: 3px;
+  padding: 0.1rem 0.4rem;
+  margin-bottom: 0.35rem;
+}
+.clarifyQuestion { font-weight: 600; margin: 0.2rem 0; font-size: 0.92rem; }
+.clarifyContext { margin: 0.15rem 0; font-size: 0.85rem; color: #4d4d4d; }
+.clarifyFraming { margin: 0.15rem 0; font-size: 0.78rem; color: #6b4400; }
+.clarifyClosed { margin: 0.2rem 0; font-size: 0.85rem; color: #6b6b6b; }
+.clarifyForm { display: flex; flex-direction: column; gap: 0.35rem; margin-top: 0.4rem; }
+.clarifyInput { font: inherit; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; resize: vertical; }
+
+.composer { display: flex; gap: 0.5rem; margin-top: 0.75rem; align-items: flex-end; }
+.composerInput { flex: 1; font: inherit; padding: 0.45rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; resize: vertical; }
+
+.input { font: inherit; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+.button {
+  font: inherit;
+  padding: 0.4rem 0.9rem;
+  border: 1px solid #4a6bd6;
+  background: #4a6bd6;
+  color: #fff;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.button:disabled { opacity: 0.5; cursor: default; }
+.linkButton {
+  font-size: 0.75rem;
+  background: none;
+  border: none;
+  color: #4a6bd6;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
