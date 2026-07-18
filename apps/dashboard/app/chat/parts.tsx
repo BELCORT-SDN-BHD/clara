@@ -102,6 +102,16 @@ export type ClarifyControls = {
   onAnswer: (text: string) => void;
 };
 
+// Slice-5: re-derive persisted attachment chips on hydrate (D-4/D-5). The part
+// carries only ids; this optional lookup (from document_intakes_visible) enriches
+// the chip with the filename + current status. Absent lookup ⇒ ids only.
+export type AttachmentInfo = { filename?: string | null; status?: string | null };
+export type AttachmentLookup = Map<string, AttachmentInfo>;
+
+// Honest-state law ([DELTA-OWNER-2]): the chat door is a CAPTURE door in Slice 5 —
+// Clara does not perceive the attachment in-turn.
+export const ATTACHMENT_NON_PERCEPTION_COPY = "Clara will see this document once it is filed.";
+
 type ToolStatus = "running" | "ok" | "error";
 
 /** A tool_call's chip status is resolved by a later tool_result / tool_error. */
@@ -120,7 +130,15 @@ function lastClarifyIndex(parts: ClaraPart[]): number {
   return -1;
 }
 
-export function TranscriptParts({ parts, clarify }: { parts: ClaraPart[]; clarify?: ClarifyControls }) {
+export function TranscriptParts({
+  parts,
+  clarify,
+  attachments,
+}: {
+  parts: ClaraPart[];
+  clarify?: ClarifyControls;
+  attachments?: AttachmentLookup;
+}) {
   const statuses = toolStatuses(parts);
   const clarifyAt = clarify ? lastClarifyIndex(parts) : -1;
   return (
@@ -128,6 +146,20 @@ export function TranscriptParts({ parts, clarify }: { parts: ClaraPart[]; clarif
       {parts.map((p, i) => {
         if (p.type === "text") {
           return p.text.trim() ? <p key={i} className={styles.prose}>{p.text}</p> : null;
+        }
+        if (p.type === "attachment") {
+          const info = attachments?.get(p.intake_id);
+          const label = info?.filename || "Attached document";
+          return (
+            <div key={i} className={styles.attachmentChip}>
+              <div className={styles.attachmentRow}>
+                <span className={styles.attachmentIcon} aria-hidden>📎</span>
+                <span className={styles.attachmentName}>{label}</span>
+                {info?.status ? <span className={styles.attachmentStatus}>{info.status}</span> : null}
+              </div>
+              <p className={styles.attachmentNote}>{ATTACHMENT_NON_PERCEPTION_COPY}</p>
+            </div>
+          );
         }
         if (p.type === "tool_call") {
           const s = statuses.get(p.tool_call_id) ?? "running";

@@ -17,7 +17,14 @@ export type ClaraPart =
   | { type: "tool_result"; tool: string; tool_call_id: string; output: unknown }
   | { type: "tool_error"; tool: string; tool_call_id: string; error: string }
   | { type: "clarify"; tool_call_id: string; question: string; context?: string | null; framing: string }
-  | { type: "clarify_closed"; reason: "expired" | "cancelled"; framing: string };
+  | { type: "clarify_closed"; reason: "expired" | "cancelled"; framing: string }
+  // Slice-5 capture door (§4.5 / INTERFACE-PINS 4): present in p_user_parts AT
+  // SUBMIT (chat_messages is append-only). chatTurn stays v1 and does NOT perceive
+  // it in-turn — Clara sees the document only once it is filed ([DELTA-OWNER-2]).
+  | { type: "attachment"; document_id: string; intake_id: string };
+
+/** The attachment part shape a submitted turn carries (INTERFACE-PINS 4). */
+export type AttachmentPart = { type: "attachment"; document_id: string; intake_id: string };
 
 export type SessionRow = {
   id: string;
@@ -141,18 +148,21 @@ export async function getMessages(token: string, sessionId: string): Promise<Mes
   return body.messages ?? [];
 }
 
-/** Post a turn with a client-generated turn_key. 202 → taskId; 409/429 typed. */
+/** Post a turn with a client-generated turn_key. 202 → taskId; 409/429 typed.
+ *  Attachment parts (already adopted — document_id known) ride in the SAME parts
+ *  array as the text, present at begin_chat_turn (append-only; §4.5). */
 export async function postTurn(
   token: string,
   sessionId: string,
   text: string,
   turnKey: string,
+  attachments: AttachmentPart[] = [],
 ): Promise<TurnResult> {
   let res: Response;
   try {
     res = await runtimeFetch(`/api/chat/${encodeURIComponent(sessionId)}/turns`, token, {
       method: "POST",
-      body: JSON.stringify({ turnKey, parts: [{ type: "text", text }] }),
+      body: JSON.stringify({ turnKey, parts: [{ type: "text", text }, ...attachments] }),
     });
   } catch (err) {
     return { kind: "error", message: `network error: ${(err as Error).message}` };

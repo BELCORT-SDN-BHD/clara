@@ -26,7 +26,9 @@ import {
   type MessageRow,
   type SessionRow,
 } from "./api";
-import { applyChunk, emptyLive, TranscriptParts, type ClarifyControls, type LiveTranscript } from "./parts";
+import { applyChunk, emptyLive, TranscriptParts, type AttachmentLookup, type ClarifyControls, type LiveTranscript } from "./parts";
+import { intakeStatusCopy, readIntakesByIds } from "../shared/intake";
+import { useComposerAttachments } from "./attachments";
 import styles from "./chat.module.css";
 
 const TOKEN_KEY = "clara_dev_jwt";
@@ -51,7 +53,11 @@ export default function ChatPage() {
   const [clientId, setClientId] = useState("");
   const [creating, setCreating] = useState(false);
   const streamAbort = useRef<AbortController | null>(null);
+  const [attachmentLookup, setAttachmentLookup] = useState<AttachmentLookup>(new Map());
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const mySub = token ? jwtSub(token) : null;
+  // The composer-attachment lifecycle (upload → poll → adoption) lives in the hook.
+  const att = useComposerAttachments(token, (msg) => setNote(msg));
 
   useEffect(() => {
     const t = sessionStorage.getItem(TOKEN_KEY) ?? "";
@@ -77,7 +83,30 @@ export default function ChatPage() {
   const refreshMessages = useCallback(
     async (sessionId: string) => {
       try {
-        setMessages(await getMessages(token, sessionId));
+        const msgs = await getMessages(token, sessionId);
+        setMessages(msgs);
+        // Re-derive persisted attachment chips (D-4/D-5): enrich by intake_id with
+        // the filename + current status from the masked view.
+        const ids = msgs.flatMap((m) =>
+          (m.parts ?? [])
+            .filter((p): p is Extract<ClaraPart, { type: "attachment" }> => p.type === "attachment")
+            .map((p) => p.intake_id),
+        );
+        if (ids.length > 0 && supabaseBase()) {
+          const rows = await readIntakesByIds(token, ids).catch(() => null);
+          if (rows) {
+            setAttachmentLookup(
+              new Map(
+                Array.from(rows.values()).map((r) => [
+                  r.id,
+                  { filename: r.original_filename, status: intakeStatusCopy(r.status, r.failure_code) },
+                ]),
+              ),
+            );
+          }
+        } else {
+          setAttachmentLookup(new Map());
+        }
       } catch (err) {
         setBanner((err as Error).message);
       }
@@ -187,23 +216,28 @@ export default function ChatPage() {
       setClarify(null);
       setBanner(null);
       setNote(null);
+      att.clear();
+      setAttachmentLookup(new Map());
       await refreshMessages(id);
       await discoverAndAttach(id);
     },
-    [refreshMessages, discoverAndAttach],
+    [att, refreshMessages, discoverAndAttach],
   );
 
   const send = useCallback(async () => {
-    if (!selected || !text.trim() || sending) return;
+    // Submit blocks until every attachment reaches adoption (document_id known) —
+    // the part must be present in p_user_parts AT submit (append-only; §4.5).
+    if (!selected || !text.trim() || sending || !att.ready) return;
     // A fresh turn_key per send — the idempotency key of THIS submission (§3.5).
     const turnKey = crypto.randomUUID();
     setSending(true);
     setBanner(null);
     setNote(null);
-    const r = await postTurn(token, selected, text.trim(), turnKey);
+    const r = await postTurn(token, selected, text.trim(), turnKey, att.parts);
     setSending(false);
     if (r.kind === "accepted") {
       setText("");
+      att.clear();
       await refreshMessages(selected);
       void attachStream(r.taskId, selected);
     } else if (r.kind === "conflict") {
@@ -215,7 +249,7 @@ export default function ChatPage() {
     } else {
       setBanner(r.message);
     }
-  }, [selected, text, sending, token, refreshMessages, attachStream, discoverAndAttach]);
+  }, [selected, text, sending, att, token, refreshMessages, attachStream, discoverAndAttach]);
 
   const onAnswer = useCallback(
     async (answer: string) => {
@@ -280,6 +314,8 @@ export default function ChatPage() {
     setLive(null);
     setClarify(null);
     setBanner(null);
+    att.clear();
+    setAttachmentLookup(new Map());
   };
 
   const clarifyControls: ClarifyControls | undefined = clarify
@@ -353,7 +389,7 @@ export default function ChatPage() {
                   {messages.map((m) => (
                     <div key={m.id} className={m.role === "user" ? styles.userMsg : styles.assistantMsg}>
                       <div className={styles.roleLabel}>{m.role}</div>
-                      <TranscriptParts parts={m.parts ?? []} />
+                      <TranscriptParts parts={m.parts ?? []} attachments={attachmentLookup} />
                     </div>
                   ))}
                   {live ? (
@@ -368,24 +404,76 @@ export default function ChatPage() {
                   ) : null}
                   {note ? <p className={styles.note}>{note}</p> : null}
                 </div>
-                <form
-                  className={styles.composer}
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    void send();
-                  }}
-                >
-                  <textarea
-                    className={styles.composerInput}
-                    rows={2}
-                    value={text}
-                    onChange={(e) => setText(e.target.value)}
-                    placeholder="Ask Clara (read-only advisor)"
-                  />
-                  <button className={styles.button} type="submit" disabled={sending || !text.trim()}>
-                    {sending ? "Sending…" : "Send"}
-                  </button>
-                </form>
+                <div className={styles.composerWrap}>
+                  {att.items.length > 0 ? (
+                    <div className={styles.attachTray}>
+                      {att.items.map((a) => (
+                        <div key={a.localId} className={`${styles.attachPending} ${styles[`attach_${a.state}`] ?? ""}`}>
+                          <span className={styles.attachIcon} aria-hidden>📎</span>
+                          <span className={styles.attachName} title={a.name}>{a.name}</span>
+                          <span className={styles.attachLabel}>{a.label}</span>
+                          {a.state === "failed" || a.state === "error" ? (
+                            <button type="button" className={styles.linkButton} onClick={() => att.retry(a.localId, selected)}>retry</button>
+                          ) : null}
+                          <button type="button" className={styles.linkButton} onClick={() => att.remove(a.localId)}>remove</button>
+                          {a.error ? <span className={styles.errorText}>{a.error}</span> : null}
+                        </div>
+                      ))}
+                      <p className={styles.attachNote}>Clara will see this document once it is filed.</p>
+                    </div>
+                  ) : null}
+                  <form
+                    className={styles.composer}
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      void send();
+                    }}
+                    onDragOver={(e) => e.preventDefault()}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const f = Array.from(e.dataTransfer.files);
+                      if (f.length) att.add(f, selected);
+                    }}
+                  >
+                    <input
+                      ref={fileInputRef}
+                      type="file"
+                      multiple
+                      style={{ display: "none" }}
+                      onChange={(e) => {
+                        const f = Array.from(e.target.files ?? []);
+                        if (f.length) att.add(f, selected);
+                        e.target.value = "";
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className={styles.attachButton}
+                      onClick={() => fileInputRef.current?.click()}
+                      title="Attach files — or drag onto the composer, or paste a copied file/image"
+                    >
+                      Attach
+                    </button>
+                    <textarea
+                      className={styles.composerInput}
+                      rows={2}
+                      value={text}
+                      onChange={(e) => setText(e.target.value)}
+                      onPaste={(e) => {
+                        // Clipboard FILES/IMAGES only — pasted text is not a document (S5-R8).
+                        const f = Array.from(e.clipboardData.files);
+                        if (f.length) {
+                          e.preventDefault();
+                          att.add(f, selected);
+                        }
+                      }}
+                      placeholder="Ask Clara (read-only advisor)"
+                    />
+                    <button className={styles.button} type="submit" disabled={sending || !text.trim() || !att.ready}>
+                      {sending ? "Sending…" : "Send"}
+                    </button>
+                  </form>
+                </div>
               </>
             )}
           </section>

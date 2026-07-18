@@ -13,6 +13,9 @@ export default function Home() {
       <p>
         <a href="/chat">Chat (Slice-4 plumbing page)</a>
       </p>
+      <p>
+        <a href="/documents">Documents (Slice-5 plumbing page)</a>
+      </p>
     </main>
   );
 }
