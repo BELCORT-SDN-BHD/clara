@@ -1,0 +1,160 @@
+{
+  "summary": "Research how accounting SaaS + agentic products handle wrong-entity corrections when records already reference the item",
+  "agentCount": 2,
+  "logs": [],
+  "result": {
+    "accounting-corrections": {
+      "findings": [
+        {
+          "claim": "Xero 'find and recode' is the closest incumbent precedent for a compound bulk-correction tool: an advisor-only feature that finds transaction lines by condition and recodes up to four fields (Contact, Account, Tax Rate, Tracking) in bulk — i.e., a single guided operation, not a stepwise manual reversal per entry.",
+          "source": "https://central.xero.com/s/article/About-Find-Recode (via search summary) and https://central.xero.com/s/article/Find-Recode-a-group-of-transaction-lines"
+        },
+        {
+          "claim": "Xero gates find-and-recode behind the Advisor user role and attaches explicit warnings: only one advisor at a time should use it, recode no more than 200 transaction lines per batch, large batches can degrade report performance, and recoding takes minutes — wait for completion before the next batch. Xero also suggests non-advisors 'check in with your adviser' before use.",
+          "source": "https://central.xero.com/s/article/About-Find-Recode and https://central.xero.com/s/article/Troubleshooting-for-Find-Recode (search summaries)"
+        },
+        {
+          "claim": "Xero offers two recode modes: (a) recode the SOURCE transaction (edits history in place) or (b) recode WITH A MANUAL JOURNAL — Xero drafts a journal for the accountant to review and post, and adds a note linking the transaction to the journal. Mode (b) is the append-only/audit-preserving variant and maps directly to Clara's reverse-with-reason doctrine.",
+          "source": "https://central.xero.com/s/article/About-Find-Recode (search summary)"
+        },
+        {
+          "claim": "Xero writes a full recode audit trail: History & Notes on every touched transaction shows pre-recode details, and the recode record captures line/transaction counts, date range, the advisor's name, and status. However there is NO bulk 'reverse a find-and-recode' — customers have an open product idea requesting one, so a bad bulk recode must be manually recoded back.",
+          "source": "https://central.xero.com/s/article/View-transaction-information-and-recoding-history and https://productideas.xero.com/forums/967136-banking-chart-of-accounts/suggestions/47654522-find-recode-reverse-find-recode"
+        },
+        {
+          "claim": "Xero's reconciliation corrections distinguish two verbs by whether the transaction itself is wrong: 'Unreconcile' only breaks the statement-line link (transaction preserved), while 'Remove & redo' DELETES the payment/spend-money and returns the statement line for re-matching; Remove & redo cannot be undone and practitioners are told to document the fix in History & Notes. Choosing the wrong verb can orphan statement lines or delete valid payments.",
+          "source": "https://www.saasant.com/blog/xero-unreconcile-remove-redo/ (Sep 2025) and https://central.xero.com/s/article/Fix-an-incorrectly-reconciled-bank-statement-line"
+        },
+        {
+          "claim": "QuickBooks Online gates reconciliation-undo by role: only QuickBooks Online Accountant users get a one-click 'Undo' of an entire reconciliation; standard business users must manually cycle each transaction's R→C→blank status. Intuit's own help says if a transaction to unmatch is already reconciled, 'reach out to your accountant… this type of change can have a big impact on your accounts' — i.e., the incumbent pattern is escalate-to-professional rather than hard refusal.",
+          "source": "https://quickbooks.intuit.com/learn-support/en-us/help-article/statement-reconciliation/undo-clients-reconciliation-quickbooks-online/L2rUvgAg6_US_en_US and https://quickbooks.intuit.com/learn-support/en-us/help-article/bank-registers/unmatch-downloaded-bank-transactions-move-another/L71oaBb86_US_en_US"
+        },
+        {
+          "claim": "QBO's bulk analog, the 'Reclassify transactions' tool (QBO Accountant / Advanced only), moves many transactions to a different account/class/location at once but is deliberately scoped: it cannot change payee/vendor (the 'which entity' field), cannot touch payment accounts on expenses, inventory adjustments, or payroll, and on item-based transactions (invoices/sales receipts) it can change class but not account. So the incumbent bulk tool explicitly refuses the most dangerous field changes and forces those through per-transaction editing.",
+          "source": "https://quickbooks.intuit.com/learn-support/en-us/help-article/reclassify-transactions/reclassify-move-multiple-transactions/L249lPKyg_US_en_US and https://instabooks.io/articles/bulk-edit-reclassify-quickbooks-online"
+        },
+        {
+          "claim": "Dext's wrong-client republish flow is the closest analog to Clara's exact scenario (document filed/published to the wrong client), and it is STEPWISE and manual: the user must FIRST go into the accounting software and delete the previously published version 'to avoid creating duplicates', THEN clear the item's publishing data in Dext (Unarchive + 'Clear publishing data', or Inbox → Clear publishing data), THEN republish to the correct destination. Dext refuses to republish while publishing data exists (its duplicate-prevention tag), but performs no reversal on the books side itself.",
+          "source": "https://help.dext.com/en/articles/416728-how-to-republish-an-item and https://help.dext.com/en/s/article/how-to-re-publish-an-item"
+        },
+        {
+          "claim": "Sage's correction model is compound-but-audited: editing/correcting a transaction makes the system reverse the original and create a new transaction with a new number automatically — 'apart from the audit trail, only the new transaction shows on your reports' — i.e., a one-action reverse+repost where the audit trail retains both legs. This is direct incumbent precedent for an atomic reverse-and-refile function.",
+          "source": "https://gb-kb.sage.com/portal/app/portlets/results/viewsolution.jsp?solutionid=200519132932531 ('Correct a transaction') and https://gb-kb.sage.com/portal/app/portlets/results/viewsolution.jsp?solutionid=200427112224083 ('Delete or reverse transactions')"
+        },
+        {
+          "claim": "MYOB supports an opt-in strict mode ('unchangeable transactions', grey zoom arrow): once enabled, edits are blocked and the only correction path is reversal (the original stays, a reversing record is added); with Audit Trail Tracking on, even deletions are logged. Wrong-customer invoices otherwise require delete-and-re-enter. This shows the refuse-until-reversed posture exists in incumbents, but as a firm-level configuration choice, not the only mode.",
+          "source": "https://help.myob.com.au/ae18/mac/transactions_6.014.htm and https://www.perdisco.com/au/myoblearning/troubleshooting/editingtransactions.aspx"
+        },
+        {
+          "claim": "Across all vendors, corrections are surfaced in per-transaction history/audit panels (Xero History & Notes with pre-recode values; Sage audit trail keeping both reversal legs; MYOB audit-trail records of deletions/reversals; Xero recode records naming the advisor). The consistent presentation pattern: the correction is one user gesture, but the trail shows every leg, who did it, and the before-state.",
+          "source": "https://central.xero.com/s/article/View-transaction-information-and-recoding-history plus Sage/MYOB sources above"
+        }
+      ],
+      "caveats": [
+        "Xero Central pages (central.xero.com) timed out on direct fetch; their content is cited via search-result summaries corroborated across multiple secondary sources (SaasAnt Sep-2025, CALTRiX Malaysia, Outbooks) — exact current wording (e.g., the 200-line guidance) should be spot-checked before quoting in a spec.",
+        "Sage KB summaries came from search snippets over UK/IE KB articles; the exact behavior varies across Sage products (Sage Accounting vs Sage 50), so 'reverse+new transaction on edit' should be attributed to Sage's cloud Accounting correction flow specifically.",
+        "Dext's flow was verified from its own help centre, but note its delete-first step targets systems where deletion is allowed (QBO/Xero drafts); it doesn't address posted-and-locked journals — Clara's append-only regime is stricter than what Dext assumes.",
+        "No incumbent was found offering a fully atomic reverse+refile+recode across TWO client entities in one action — all found precedents operate within a single organisation's books; the cross-client (cross-tenant) aspect of Clara's scenario has no direct incumbent equivalent, which strengthens the case for extra guardrails on that leg."
+      ],
+      "recommendation_for_clara": "Incumbent practice in 2025-26 points to the HYBRID: none of the major tools makes the accountant hand-unwind everything stepwise, but none performs silent atomic magic either — the winning pattern is 'one guided gesture, many audited legs, gated by role and scope'. Concretely: (1) Un-filing should REFUSE by default while posted entries cite the document (Dext's publishing-data tag is exactly this refusal, and QBO refuses reconciled unmatch for non-accountants), but the refusal message should offer the guided correction rather than dead-end — QBO's 'ask your accountant' escalation, made actionable. (2) The guided path should be one audited compound function that reverses-with-reason, re-files, and opens recode tasks — Sage already does automatic reverse+repost as a single 'correct' action with both legs in the audit trail, and Xero's recode-with-manual-journal mode shows the append-only variant of a compound recode; Clara should adopt the journal-mode semantics (never edit-in-place, which is Xero's other, dirtier mode). (3) Copy the incumbent guardrails on the compound function: advisor/partner role gate (Xero), explicit scope preview with a hard batch cap (Xero's 200-line guidance), field-level refusals for legs the tool can't safely automate (QBO reclassify refuses payee/payment-account changes — Clara's analog: the compound fn should re-open, not auto-post, the recoded entries on client B, since cross-client recoding has no incumbent precedent), and a first-class correction record in the audit trail naming the actor, the before-state, and every generated leg (Xero recode history). (4) Note for the ADR: Xero users are still asking for a 'reverse a bulk recode' — design Clara's compound correction to be itself reversible (it emits normal reversible entries), which would exceed the incumbent state of the art rather than repeat its known gap.\""
+    },
+    "destructive-action-patterns": {
+      "findings": [
+        {
+          "claim": "2025-2026 destructive-action UX doctrine: friction must be proportional to blast radius, on a four-rung ladder (no confirmation → simple confirm → consequence-explicit confirm → type-to-confirm). Bulk/multi-record actions multiply blast radius, so the confirmation must state the named count explicitly ('Reverse 7 posted entries citing this document?') and spell out the exact object, what changes, recoverability, and ripple effects on other records/people. A wrong-client refile touching posted entries sits on the top rungs.",
+          "source": "https://www.saasui.design/blog/saas-destructive-actions-confirmation-ux-patterns"
+        },
+        {
+          "claim": "Undo-over-confirmation applies only to reversible actions; for irreversible or high-consequence compound actions the pattern flips to explicit pre-action consequence disclosure. In an append-only ledger a 'reversal' is itself a new posted fact, so the correction is not undoable in the toast-undo sense — it belongs in the consequence-explicit/preview tier, not the optimistic-undo tier.",
+          "source": "https://www.saasui.design/blog/saas-destructive-actions-confirmation-ux-patterns (undo vs confirmation section); https://www.eleken.co/blog-posts/bulk-actions-ux"
+        },
+        {
+          "claim": "Terraform-plan-style dry-run preview is the current standard pattern for compound changes: compute and display the full change-set (what will be reversed, re-filed, and reopened) before anything commits, with created/removed/changed items itemized. The 'Dry Run button' is explicitly framed as the UX that makes a product feel like a trustworthy partner for costly operations — directly applicable as a 'preview the correction' step before the compound verb runs.",
+          "source": "https://spacelift.io/blog/terraform-dry-run; https://developer.hashicorp.com/terraform/cli/commands/plan; https://medium.com/@Praxen/the-dry-run-button-ux-that-saves-your-users-money-a0a9be0b16fe"
+        },
+        {
+          "claim": "2025-2026 agentic-AI guardrail guidance converges on risk-tiered human-in-the-loop: destructive/financial/bulk-record operations require explicit step-up human approval (some frameworks mandate dual control), with the agent allowed to PLAN the compound correction but a human authorizing execution. OpenAI-style Level-2 guidance pairs this with structurally read-only agent roles and rollback mechanisms — matching Clara's existing structural write-authorization invariant.",
+          "source": "https://skywork.ai/blog/agentic-ai-safety-best-practices-2025-enterprise/; https://frontegg.com/blog/ai-agent-governance-starts-with-guardrails; https://theaiengineer.substack.com/p/what-are-ai-agent-guardrails"
+        },
+        {
+          "claim": "Approval-gate design (July 2026): a good gate answers 'what exactly is being approved, how long is the approval valid, what happens on timeout, where do exceptions route, who owns the decision.' Reviewers need the specific tool/target, exact parameters, risk classification, supporting evidence, and rollback options — not a summary. For compound actions: prevent stale approvals from applying across changed contexts (i.e., the approval must bind to the previewed change-set snapshot, and re-preview if the ledger changed), and record whether executed results match approved intent.",
+          "source": "https://digitalthoughtdisruption.com/2026/07/12/human-in-the-loop-ai-agent-approval-paths/"
+        },
+        {
+          "claim": "Saga/compensation literature: multi-record corrections should be modeled as orchestrated compensation ('correction, not rollback' — a payment is refunded, not un-happened), with compensations registered before actions, defensive/idempotent compensation steps, and partial-failure handling. Manual stepwise human execution of a multi-step correction is exactly the partial-failure surface sagas exist to eliminate — a half-done manual correction (entries reversed but document never refiled) leaves the books in a state no invariant describes.",
+          "source": "https://temporal.io/blog/compensating-actions-part-of-a-complete-breakfast-with-sagas; https://microservices.io/patterns/data/saga.html; https://en.wikipedia.org/wiki/Compensating_transaction"
+        },
+        {
+          "claim": "Incumbent accounting tools already ship the compound-verb precedent: Xero 'Find & Recode' and QuickBooks 'Reclassify Transactions' are accountant-only bulk correction tools that show the matched set first, execute the recode as one operation, and keep a full per-run history of what was recoded (audit trail). Xero explicitly offers the choice between recoding source transactions vs posting a correcting manual journal — i.e., the profession accepts guided compound correction so long as it is scoped to the accountant role and fully journaled.",
+          "source": "https://quickbooks.intuit.com/learn-support/en-us/help-article/reclassify-transactions/accountant-tools-reclassify-clients-transactions/L5ZJQODLR_US_en_US; https://www.blakeoliver.com/blog/find-recode-xero-vs-qbo"
+        },
+        {
+          "claim": "Professional bookkeeping practice for misclassified/misfiled items: never edit the original coding of a posted transaction — post a correcting journal entry instead, preserving the audit trail. This validates Clara's reverse-with-reason invariant and implies the compound function's internals must be ordinary reversal JEs + a refile event, each individually visible in the audit log, not a special-cased mutation.",
+          "source": "https://quickbooks.intuit.com/learn-support/en-us/reports-and-accounting/wrongfully-categorized-transactions-and-already-reconciled/00/497422; https://support.actionstep.com/support/solutions/articles/150000019810-correcting-accounting-errors"
+        },
+        {
+          "claim": "Enterprise/agentic-UI guidance 2025-2026: confirmation loops proportional to risk — the review surface should show the specific change the agent proposes, the data/evidence it used (here: why the document is believed to belong to client B), and an override path. Specialists making high-stakes decisions get guided multi-step review, not casual one-click verbs — but 'guided' means guided REVIEW of one atomic execution, not manually executing the steps by hand.",
+          "source": "https://www.neonapps.co/blogs/agentic-ui-design-for-enterprise-software-the-ai-workflow-integration-guide; https://traust.com/blog/enterprise-ux-design-for-complex-workflows/"
+        }
+      ],
+      "recommendation_for_clara": "Hybrid, weighted heavily toward the compound verb: bare un-filing REFUSES with a blast-radius disclosure (refusal is the guardrail, not the workflow), and the correction itself is ONE audited atomic DB function executed behind a preview-and-approve gate. Concretely: (1) attempting to un-file a document with posted citing entries fails structurally and returns the named blast radius — count and list of posted entries citing it — never a silent detach; (2) the agent (or accountant) may then request a dry-run of `correct_document_client(document_id, to_client, reason, expected_entry_ids[])` that renders a terraform-plan-style change-set: entries to reverse (with amounts), the refile A→B, and the recode work that reopens — computed by the DB, since the agent never computes figures; (3) a human accountant approves that specific snapshot (approval binds to `expected_entry_ids` + a ledger version so a stale approval cannot execute against changed books, per the 2026 approval-path guidance), supplies the mandatory reason, and the function runs atomically in one Postgres transaction — reversal JEs via the existing audited reversal function, refile event, open recode tasks, all append-only and individually audit-visible. Do NOT choose pure stepwise-manual: the saga literature identifies half-completed manual corrections (reversed but never refiled, or refiled under the old client attribution) as exactly the partial-failure state orchestration exists to eliminate, and Clara has a luxury microservices lack — a single RLS Postgres where the whole correction is genuinely ACID, so no runtime saga is even needed; the 'saga' collapses into one transaction whose internal steps are ordinary audited functions. Do NOT choose bare one-click either: this is a top-rung blast-radius action, so it takes consequence-explicit confirmation with named counts, and per the agentic-guardrail consensus the agent may propose/preview but only a human approval (recorded, with evidence of why the document belongs to client B) authorizes execution — which also composes cleanly with Clara's structural read-only agent role: `select correct_document_client(...)` from the agent role should fail exactly like `approve_entry` does, with the wake/approval channel being the only path to execution. Edge cases to spec (PM-rigor lens): citing entries in a closed/locked period (reversal must post to an open period with disclosure), entries already reversed (idempotent skip, shown in preview), the same document cited by entries across BOTH clients (partial-scope preview), and a preview-approve race where new entries cite the document between dry-run and execute (expected_entry_ids mismatch → refuse and re-preview).",
+      "caveats": [
+        "Several 2025-2026 sources are practitioner/vendor blogs (skywork.ai, saasui.design, neonapps) rather than peer-reviewed or standards bodies; the strongest primary anchors are HashiCorp (dry-run), Temporal/microservices.io (compensation), Intuit/Xero official docs (accountant reclassify tools), and NN/g-adjacent UX canon.",
+        "The Xero Find & Recode / QBO Reclassify precedent covers recoding WITHIN one entity's books; cross-client (cross-tenant-boundary) refiling is stricter in Clara because of RLS isolation — no incumbent source directly addresses cross-client document refiling, so that part of the recommendation is pattern extrapolation, not cited precedent.",
+        "I did not research Malaysian regulatory/LHDN requirements on correction documentation — that is outside this lane; another lane should confirm whether the reversal reason/approval record satisfies local audit requirements.",
+        "Search results were US-biased (WebSearch is US-only)."
+      ]
+    }
+  },
+  "workflowProgress": [
+    {
+      "type": "workflow_phase",
+      "index": 1,
+      "title": "Research"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 1,
+      "label": "research:accounting-corrections",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "a8e3bd3a2c5f48521",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1784373443095,
+      "queuedAt": 1784373441142,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Incumbent practice in 2025-26 points to the HYBRID: none of…",
+      "promptPreview": "Context: Clara is a multi-tenant AI accounting OS. A source document was filed to client A and journal entries were POSTED citing it; the firm discovers it belongs to client B. Posted entries are never deleted, only reversed-with-reason (append-only audit). Question to inform: should un-filing REFUSE until the accountant manually reverses the citing entries (stepwise), or should one audited compou…",
+      "lastProgressAt": 1784373621590,
+      "tokens": 48389,
+      "toolCalls": 12,
+      "durationMs": 178495,
+      "resultPreview": "{\"findings\":[{\"claim\":\"Xero 'find and recode' is the closest incumbent precedent for a compound bulk-correction tool: an advisor-only feature that finds transaction lines by condition and recodes up to four fields (Contact, Account, Tax Rate, Tracking) in bulk — i.e., a single guided operation, not a stepwise manual reversal per entry.\",\"source\":\"https://central.xero.com/s/article/About-Find-Recod…"
+    },
+    {
+      "type": "workflow_agent",
+      "index": 2,
+      "label": "research:destructive-action-patterns",
+      "phaseIndex": 1,
+      "phaseTitle": "Research",
+      "agentId": "ae51b15771e1a024f",
+      "model": "claude-fable-5",
+      "state": "done",
+      "startedAt": 1784373443189,
+      "queuedAt": 1784373441142,
+      "attempt": 1,
+      "lastToolName": "StructuredOutput",
+      "lastToolSummary": "Hybrid, weighted heavily toward the compound verb: bare un-…",
+      "promptPreview": "Context: Clara is a multi-tenant AI accounting OS. A source document was filed to client A and journal entries were POSTED citing it; the firm discovers it belongs to client B. Posted entries are never deleted, only reversed-with-reason (append-only audit). Question to inform: should un-filing REFUSE until the accountant manually reverses the citing entries (stepwise), or should one audited compou…",
+      "lastProgressAt": 1784373556958,
+      "tokens": 48722,
+      "toolCalls": 11,
+      "durationMs": 113769,
+      "resultPreview": "{\"findings\":[{\"claim\":\"2025-2026 destructive-action UX doctrine: friction must be proportional to blast radius, on a four-rung ladder (no confirmation → simple confirm → consequence-explicit confirm → type-to-confirm). Bulk/multi-record actions multiply blast radius, so the confirmation must state the named count explicitly ('Reverse 7 posted entries citing this document?') and spell out the exact…"
+    }
+  ],
+  "totalTokens": 97111,
+  "totalToolCalls": 23
+}
