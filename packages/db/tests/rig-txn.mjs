@@ -12,6 +12,42 @@
 
 import { getPool, namedCall, opk, ROLES } from "./rig-helpers.mjs";
 
+/**
+ * Attempt a TRUNCATE (as superuser) and return the resulting error, retrying the
+ * TRANSIENT lock races that a shared, concurrently-written DB produces.
+ *
+ * TRUNCATE takes a table-level ACCESS EXCLUSIVE lock on the named table AND every
+ * cascade dependent; on a hot table (audit_log / journal_* / domain_events) that
+ * contends with the other test files' concurrent writers and can lose a deadlock
+ * (40P01) or lock-wait race BEFORE reaching the BEFORE TRUNCATE guard. A short
+ * lock_timeout turns the wait into a fast 55P03 (below deadlock_timeout), and we
+ * retry so the assertion observes the GUARD's SQLSTATE (CLR08), not the race.
+ * Returns the final error (expected: the append-only guard's CLR08) or null.
+ */
+export async function truncateGuardError(sql, { tries = 15, lockTimeoutMs = 700 } = {}) {
+  for (let i = 0; ; i++) {
+    const c = await getPool().connect();
+    let err = null;
+    try {
+      await c.query(`set lock_timeout = '${lockTimeoutMs}ms'`);
+      await c.query(sql);
+    } catch (e) {
+      err = e;
+    } finally {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+    if (!err) return null; // truncate SUCCEEDED — the guard failed to fire (a real defect)
+    if ((err.code === "40P01" || err.code === "55P03") && i < tries) {
+      await new Promise((r) => setTimeout(r, 40 + Math.random() * 160));
+      continue;
+    }
+    return err;
+  }
+}
+
 /** Run fn(client) inside one superuser txn; COMMIT at the end. Always resets. */
 export async function withTxn(fn, { commit = true } = {}) {
   const c = await getPool().connect();

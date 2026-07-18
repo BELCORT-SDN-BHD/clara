@@ -46,6 +46,7 @@ import {
   raceApprove,
   reparentLineFromApproved,
   moveLineBetweenDraftsRotatesTokens,
+  truncateGuardError,
 } from "./rig-txn.mjs";
 
 let world = null;
@@ -461,7 +462,10 @@ test("T19-audit: writers leave receipts; audit_log is append-only; viewers canno
   // Append-only: even superuser cannot UPDATE / DELETE / TRUNCATE.
   await assertRaises(CLR.immutable, () => rootQuery("update clara.audit_log set fn = 'x' where firm_id = $1", [firms.A]), "UPDATE audit_log");
   await assertRaises(CLR.immutable, () => rootQuery("delete from clara.audit_log where firm_id = $1", [firms.A]), "DELETE audit_log");
-  await assertRaises(CLR.immutable, () => rootQuery("truncate clara.audit_log"), "TRUNCATE audit_log");
+  // audit_log is written by every writer; under the concurrent suite a TRUNCATE can
+  // lose a deadlock race before the append-only guard fires — retry the transient race.
+  const tal = await truncateGuardError("truncate clara.audit_log");
+  assert.equal(tal && tal.code, CLR.immutable, "TRUNCATE audit_log → CLR08");
 
   // Read floor: a viewer (carol) sees zero audit rows; a bookkeeper (bob) sees them.
   const carolSees = await humanQuery(users.carol, "select count(*)::int as n from clara.audit_log");

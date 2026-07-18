@@ -163,6 +163,18 @@ export async function draftEntry(persona, o) {
   }
   specs.push({ name: "p_op_key" });
   vals.push(o.opKey);
+  if (o.wake) {
+    // Slice-3 (design §2.5): wake_draft_entry gained a required books-version freshness
+    // token. Supply a FRESH one (the client's firm max seq) unless the caller pins a
+    // value — Slice-2 wake drafts exercise other invariants, not staleness, so a fresh
+    // token clears the gate exactly as the tokenless pre-Slice-3 call used to.
+    const fv = await rootQuery(
+      "select coalesce(max(d.seq), 0)::int as v from clara.domain_events d join clara.clients c on c.firm_id = d.firm_id where c.id = $1",
+      [o.client],
+    );
+    specs.push({ name: "p_books_version", cast: "bigint" });
+    vals.push(o.booksVersion ?? fv.rows[0].v);
+  }
   const r = await runAs(persona, namedCall(o.wake ? "wake_draft_entry" : "draft_entry", specs), vals);
   return r.rows[0].result;
 }
