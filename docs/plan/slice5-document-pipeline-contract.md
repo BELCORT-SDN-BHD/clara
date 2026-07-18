@@ -204,8 +204,9 @@ radius), §3.1 (filings + filing-bound provenance), §3.2 (intakes), §3.3
 (extractions/regions), §3.4 (attribution), §3.5 (correction + withdrawn + lock
 order), §3.6 (metering reservations), §3.7 (events + taxonomy v2 +
 [DELTA-OWNER-3]), §3.8 (storage credential contract), §3.9 (processing tasks),
-§3.10 (RLS/grant matrix) — lives in `slice5-migration-0007-design.md`.** It is
-part of this contract; §3.x citations elsewhere in this file resolve there.
+§3.10 (RLS/grant matrix), §3.11 (cutover protocol + fixture provision) — lives
+in `slice5-migration-0007-design.md`.** It is part of this contract; §3.x
+citations elsewhere in this file resolve there.
 
 ---
 
@@ -272,9 +273,11 @@ per-file retry, triage verbs (file/dismiss candidates), correction wizard entry.
 JSON routes ride the Next proxy; bytes go browser→Fly (CORS allowlist).
 
 ### 4.6 Egress gate flag (S5-R1)
-`CLARA_DOC_EGRESS_APPROVED` (default `0`): OCR-lane steps refuse pre-vendor-call
-→ task `held_egress` + `extraction_status='held_egress'` (visible; released by
-the flag-flip sweep or the retry verb). **Authority scope (the global-flag
+`CLARA_DOC_EGRESS_APPROVED` (default `0`): the **pre-dispatch claim gate**
+parks OCR-lane tasks — when the flag is off, the claim CAS moves the task
+`queued→held_egress` INSTEAD of `queued→running`, so no workflow run binds and
+no vendor call ever starts (`extraction_status='held_egress'`, visible;
+released `held_egress→queued` by the flag-flip sweep or the retry verb). **Authority scope (the global-flag
 coherence fix):** the bundle's client-authorization item is evidenced
 **FIRM-WIDE** — every ACTIVE client's engagement letter carries the processor
 clause BEFORE the flag flips — because unassigned documents OCR before their
@@ -401,7 +404,7 @@ never a gate, in v1.
 ## 10. Finding-integration map (audit)
 
 As v1.0, amended: E-3 → superseded by S5-R4 (owner-ratified) · HIGH-12 → S5-D1
-readback verify + **both** legacy ingest writers retired (§3.0.5) · E-9 →
+readback verify + **both** legacy ingest writers retired (§3.0.6) · E-9 →
 S5-D2 + the §3.4 representable-conflict design · GAP3-4/3-5 → S5-R9 honest
 states (§4.7) · E-5 → derived lane + derived extraction_status · E-6 →
 supersede-with-lineage · E-8 → §4.2 deadline · E-13 → S5-R5 filings ·
@@ -424,14 +427,14 @@ carry matcher_version).
 
 ## 12. Delta log — design-review round 1 (all findings accepted)
 
-Native lane (FLAWED): C1→§3.0.2 · C2→§3.7+§4.4 · C3→S5-R3/[DELTA-OWNER-2]+§4.5
-· H1→§3.0.3/.5 · H2→§3.10 · M1→[DELTA-OWNER-3]§3.7 · M2→§3.7 ingested→ignore ·
+Native lane (FLAWED): C1→§3.0.3 · C2→§3.7+§4.4 · C3→S5-R3/[DELTA-OWNER-2]+§4.5
+· H1→§3.0.4/.6 · H2→§3.10 · M1→[DELTA-OWNER-3]§3.7 · M2→§3.7 ingested→ignore ·
 M3→§3.7 full routing · M4→§4.3 worker isolation · M5→S5-R3 submit-blocks ·
 L1→§3.2 explicit-selection filing · L2→§4.1 CSV probe · L3→§8 · L4→§3.0.1
 no-resolution backfill · L5→§3.4 recorded surface. Codex lane (FLAWED):
-C1→§3.0.5 both writers · C2→§3.0.1 + citability law · C3→§3.1 filing-bound
+C1→§3.0.6 both writers · C2→§3.0.1 + citability law · C3→§3.1 filing-bound
 two-layer · C4→§3.9 durable tasks · C5→[DELTA-OWNER-1] S5-R1 bundle ·
-H1→[DELTA-OWNER-2] · H2→§3.7/§4.4 · H3→§3.0.2 · H4/H5→§3.2 · H6→§3 house rule
+H1→[DELTA-OWNER-2] · H2→§3.7/§4.4 · H3→§3.0.3 · H4/H5→§3.2 · H6→§3 house rule
 + §3.10 · H7→§3.5 withdrawn + lock order · H8→§3.6 reservations · H9→S5-R9
 states · H10→§4.1 scan · M1→§3.3 events + locators · M2→§3.4 aliases/op-keys ·
 M3→§3.7 migration-executed activation · M4→§3.8 credential contract.
@@ -449,9 +452,12 @@ DR2-H3→§3.9 run-binding + held_egress · DR2-H4→§4.7 persistent floor ·
 DR2-H5→§3.2 edge set + token split · DR2-H6→§3.6 reservation carrier +
 declared-cap timing · DR2-H7→§4.4 consumer semantics · DR2-M1→§3.5 status
 matrix + line freeze · DR2-M2→§3.11 fixtures. Partial-resolution residues from
-Codex Part A close via the same sections (C4→§3.9, C5→§4.6, H2/H7→§4.4,
+Codex Part A close via the same sections (C4→§3.9, C5→§4.6, H2→§4.4,
 H4/H5→§3.2, H6→§3.4 candidate_regions, H7→§3.5, H8→§3.6, H9→§4.7,
-M2→§3.4 audit-only decision, M3→§11 scheduled).
+M2→§3.4 audit-only decision, M3→§11 scheduled). Final verification (native):
+VF-1 renumbered cites · VF-2 inlined normative tables · VF-3 held_egress via
+the pre-dispatch claim gate · VF-4 upgrade carve-out folded into §3.0.5 ·
+VF-5 typo + §3.11 in the intro + upgrade-charge wording.
 
 ## 13. As-built amendments
 

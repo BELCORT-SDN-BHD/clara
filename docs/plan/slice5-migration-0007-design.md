@@ -34,7 +34,10 @@ roles, composite same-firm FK constraints to parents.** Grant matrix: §3.10.
 4. Replace the documents stamp path: a documents-specific stamp trigger deriving
    `firm_id` from the writer-passed value (no client_id read).
 5. Rework `_tf_documents_immutable`: `id`, `firm_id`, `sha256` frozen; DELETE
-   blocked; the client_id freeze drops with the column.
+   blocked; the client_id freeze drops with the column; **plus the one-time
+   legacy-UPGRADE carve-out** — the trigger permits `bytes_verified_at`
+   NULL→NOT NULL together with the governed `storage_path` stamp exactly once,
+   only via the dedicated upgrade writer (the §3.0 upgrade branch).
 6. Retire BOTH legacy ingest writers (**DD-1 extended**): `ingest_document` AND
    `wake_ingest_document` bodies → deterministic CLR error; EXECUTE revoked;
    allowlist row deleted; `_ingest_document_core` dropped. The intake finalizer
@@ -190,7 +193,9 @@ supersede; global lock order as v1.1 (firm scope → filings id ASC → original
 id ASC → mirrors → unique slots; posting SHARED-locks the active filing).
 
 ### 3.6 Document metering — durable reservations
-`firm_document_limits` as v1.1. **`document_ingest_reservations`** (the durable
+`firm_document_limits` (`firm_id, docs_per_day, pages_per_day,
+ocr_concurrency` — operator-set defaults + per-firm override, the ruling-4
+pattern). **`document_ingest_reservations`** (the durable
 carrier): `id, firm_id, intake_id, state ('reserved'|'resized'|'settled'|
 'refunded'), docs_reserved (1), pages_reserved, lease_expires_at, task_id,
 timestamps` — every transition under the namespaced advisory lock.
@@ -198,10 +203,11 @@ timestamps` — every transition under the namespaced advisory lock.
 DECLARED size (deterministic table: bytes→page ceiling; images=1) — the real
 PDF page count is unknowable before bytes; post-scan the reservation RESIZES
 to the trusted preflight count; settle at extraction completion (actual
-pages); refund on failed/expired intakes; adoption/upgrade transfers the
-charge (ONE charge per physical ingest). Expired leases reclaimed by the
-reconciler. Near-limit consequence recorded in contract §8: a duplicate
-consumes a reservation until adoption refunds it.
+pages); refund on failed/expired intakes; **adoption TRANSFERS the original
+charge; the legacy-upgrade branch CREATES a fresh charge (bytes flowed)** —
+the "one charge per physical ingest" invariant holds either way. Expired
+leases reclaimed by the reconciler. Near-limit consequence recorded in
+contract §8: a duplicate consumes a reservation until adoption refunds it.
 
 ### 3.7 Events + taxonomy v2 + filing-based freshness relevance
 Event types + v2 routing as v1.1 (`document.ingested → ignore`; filed/retired/
@@ -231,23 +237,38 @@ grammar enforced at creation (§3.0). The leader-guarded reconciler inventories
 objects↔rows both directions (verify-then-adopt / incident, never delete).
 
 ### 3.9 `document_processing_tasks` — durable, BOUND, holdable
-As v1.1 plus: **`workflow_run_id`** (CAS-bound when the workflow claims the
-task — the Slice-4 self-bind pattern; proves boundness), status set gains
-**`held_egress`** (`queued → held_egress` when the §4.6 flag is off;
-`held_egress → queued` on flag-flip sweep or the retry verb), legal
-transitions enumerated (`queued→running→{done|failed}`, `queued↔held_egress`,
-terminal immutable). Reconciler: re-enqueues queued-UNBOUND tasks (crash
-between finalize and workflow start), requeues stranded `running` tasks whose
-run is engine-lost (checked against the engine run tables — Slice-4 pattern),
-sweeps `held_egress` on flag flip. UNIQUE (document, engine, version) holds
-one vendor call per content per engine version.
+Created IN the finalizer transaction (the Slice-4 durable-enqueue pattern):
+`id, firm_id, document_id, engine_id, engine_config (snapshot), version_n,
+lane ('ocr'|'structured_parse'|'none'), status ('queued'|'held_egress'|
+'running'|'done'|'failed'), workflow_run_id (CAS-bound at claim — the Slice-4
+self-bind pattern; proves boundness), vendor_op_ref, attempt_count,
+error_code (CHECK allowlist), timestamps`; UNIQUE (document_id, engine_id,
+version_n) — one vendor call per content per engine version. The workflow
+receives ONLY `{task_id}`. Legal transitions: `queued→running→{done|failed}`;
+`queued→held_egress` via the **pre-dispatch claim gate** (§4.6 flag off — no
+run binds, no vendor call); `held_egress→queued` on the flag-flip sweep or
+the retry verb; terminal states immutable. Reconciler: re-enqueues
+queued-UNBOUND tasks (crash between finalize and workflow start), requeues
+stranded `running` tasks whose run is engine-lost (checked against the engine
+run tables), sweeps `held_egress` on flag flip. The engine snapshot lives
+here (S5-R2's per-task snapshot law has a real carrier).
 
 ### 3.10 RLS / grant matrix (normative)
-As v1.1, plus rows: `document_ingest_reservations` — no base grant, runtime
-writers only; `attribution_candidate_regions` — SELECT firm policy (humans),
-none (agent v1), runtime writers; `client_aliases` — as client_identifiers.
+| Table | humans (`clara_authenticated`) | `clara_agent_ro` | `clara_runtime` |
+|---|---|---|---|
+| document_filings | SELECT via firm policy | SELECT via wake_firm policy (packs/tools) | writers only |
+| document_extractions / _regions | SELECT firm policy | SELECT wake_firm policy | writers only |
+| attribution_attempts / _candidates | SELECT firm policy | none (v1) | writers only |
+| attribution_candidate_regions | SELECT firm policy | none (v1) | writers only |
+| client_identifiers / client_aliases | SELECT firm policy; audited writers | none | SELECT (matcher; SQL hard-scopes firm) |
+| filing_corrections / _items | SELECT firm policy; preview/propose/approve writers | none | none |
+| document_intakes | NO base grant; masked definer view | none | full via writers |
+| document_processing_tasks | NO base grant; masked status view (chip) | none | full via writers |
+| document_ingest_reservations | NO base grant | none | reserve/resize/settle/refund writers |
+| firm_document_limits | SELECT firm policy | none | reserve/settle writers |
+
 All writers SECURITY DEFINER with role floors; approve/correction writers have
-NO grant to the agent role or runtime login.
+NO grant to the agent role or runtime login (human-only).
 
 ### 3.11 0007 cutover protocol + fixture provision (NEW)
 **Cutover (the D1 write-quiesce rule binds — a live runtime exists):**
