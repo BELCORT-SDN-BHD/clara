@@ -59,9 +59,17 @@ primary_region = "sin"
   method = "get"
   path = "/health"
 
+[[restart]]
+  # After a crash-loop burns Fly's default 10-restart budget the machine stays
+  # STOPPED (ceremony lesson 2026-07-19) — always-restart keeps the single
+  # non-HA machine self-healing.
+  policy = "always"
+
 [[vm]]
   size = "shared-cpu-1x"
-  memory = "1gb"
+  # 1gb OOM-killed clamd once the full ClamAV signature set loaded (live
+  # incident 2026-07-19); 2gb is the proven-stable floor for clamd + node.
+  memory = "2gb"
 
 # Disposable encrypted intake spool only; canonical custody remains private
 # object Storage. Create this single-region volume with snapshots disabled before
