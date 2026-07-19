@@ -94,14 +94,13 @@ in `docs/agents/`.
 Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
-In one line: **Phase 3 foundations; Slice 0 spike — T1–T6 passed, the 48-hour
-park (T2-48h) resumable ≥2026-07-19 15:15 +08 for final sign-off; Slices 1
-(foundations) + 2 (governed DB core, PR #5, ADR-015) + 3 (event spine, PR #7,
-ADR-016) + 4 (durable chat runtime skeleton, ADR-017; deployed world-off) +
-**5 (the document pipeline core — migrations 0007+0008, intake transport,
-documentIngest_v1, matcher consumer, /documents + attachment chip; contract
-v1.2 + as-built amendments AB-1..17, ADR-018; full dual-review ladder incl.
-the as-built round, PR #13)** done; the T2-48h cutover ceremony (world-on +
-the S5 deploy additions: storage-provision.sql, the §4.8 env set, egress flag
-OFF) gates ≥2026-07-19 15:15 +08; Slice 6 (thin end-to-end = GATE 3:
-chatTurn_v2, attachment perception, the write floor + coding flow) next.**
+In one line: **Phase 3; Slices 1–5 MERGED and Slice 0 CLOSED — the T2-48h
+cutover ceremony ran 2026-07-19 (park PASS at 46h17m owner-ratified; spike
+schemas dropped incl. the workflow_drizzle journal; engine re-bootstrapped;
+WORLD ON on live with all core checks green; live chat/SSE-replay/clarify
+verified; the 14-day S4-V2 canary ARMED, due 2026-08-02; storage JWT probed +
+wired; dashboard deployed at clara-dashboard-pink.vercel.app; egress flag
+STAYS 0); Slice 6 DESIGN RATIFIED + MERGED (PR #15 — contract v1.3 +
+0009 companion + S6-D1/D2, full dual ladder + rig probes); NEXT = the Slice-6
+BUILD (GATE 3: chatTurn_v2, attachment perception, the write floor + coding
+flow; beta = the Rome Properties FY2025 replay).**
