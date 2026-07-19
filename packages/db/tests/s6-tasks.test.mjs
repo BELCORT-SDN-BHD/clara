@@ -87,9 +87,12 @@ test("P5/P6 the seven new event types are a COUPLED pair (event_type + trigger_t
   const active = (await rootQuery("select version from clara.taxonomy_active limit 1")).rows[0]?.version;
   assert.ok(active != null, "an active taxonomy version exists");
   // Every event type in event_types has a trigger_taxonomy row in the ACTIVE version.
+  // The reserved rig.% test namespace is excluded per the AB-7 house law — concurrent
+  // test files create transient deliberately-uncovered rig.% types (CI-proven race).
   const uncovered = await rootQuery(
     `select et.name as event_type from clara.event_types et
-      where not exists (select 1 from clara.trigger_taxonomy tt where tt.event_type=et.name and tt.version=$1)`,
+      where et.name not like 'rig.%'
+        and not exists (select 1 from clara.trigger_taxonomy tt where tt.event_type=et.name and tt.version=$1)`,
     [active],
   );
   assert.equal(uncovered.rowCount, 0, `taxonomy coverage is WHOLE in the active version (uncovered: ${uncovered.rows.map((r) => r.event_type).join(", ")})`);
