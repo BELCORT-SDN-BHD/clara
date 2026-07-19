@@ -1,0 +1,74 @@
+# RPR reviewed chart of accounts — Slice 6 onboarding (contract §9 + companion §10.6 + S6-D2).
+#
+# Client: ROME PROPERTIES SDN BHD (Co. No. 202501005621 / 1607035V).
+# Source of truth: docs/plan/research/slice6/6-rpr-corpus.md §(a) (Trial Balance + General Ledger,
+#   period 10/02/2025–08/12/2025). THE OWNER MUST REVIEW THIS FILE before it is loaded on live.
+# Loaded once, through the audited writer clara.upsert_account only (no hand-written rows).
+#
+# COLUMNS: account_code,account_name,account_type,account_class,special_acc_type,origin
+#   - account_type   : one of the 5 DB types (asset|liability|equity|income|expense). RPR's TB
+#                      classifications map per C-16: equity->equity, income->income,
+#                      expense_cogs->expense, expense->expense; GL asset/liability sub-kinds
+#                      collapse to asset / liability.
+#   - account_class  : 'payable' ONLY on the AP control account (the intrinsic-subledger floor,
+#                      companion §2); empty elsewhere. DB CHECK allows null or 'payable'.
+#   - special_acc_type: 'rounding' ONLY on the rounding account (discovered by _draft_entry_core
+#                      via `where special_acc_type='rounding'` for the <=5c auto-append leg);
+#                      empty elsewhere. This column is NOT in the contract's 5-column sketch but is
+#                      REQUIRED for the rounding account to function; upsert_account has a
+#                      first-class p_special_acc_type parameter for it.
+#   - origin         : provenance of the row —
+#                        tb          = on RPR's Trial Balance (the client's real chart).
+#                        gl          = a real GL account carrying a zero (or near-zero) closing
+#                                      balance, invisible on the TB but present in the ledger.
+#                        system_role = an OWNER-APPROVED augmentation NOT on RPR's chart
+#                                      (S6-D2 system-role governance): reused if already present,
+#                                      else created here; locked against deletion/retag after
+#                                      first use; postings only through governed writers.
+#
+# TWO SYSTEM-ROLE AUGMENTATIONS (require explicit owner sign-off — S6-D2 / C-17):
+#   400-000 TRADE CREDITORS  — a postable payable-class control account. In RPR's export it exists
+#                              ONLY as a GL reconciliation-footer plug (never posted to directly;
+#                              every observed supplier credit went straight to 310-000 CASH AT BANK).
+#                              Slice 6 accrues supplier bills to AP, so it is promoted to a real
+#                              postable account. The S6 AP gate: 400-000 balance == sum of
+#                              vendor-tagged open approved bill credits (NEVER zero in S6).
+#   999-R00 ROUNDING         — the <=5c rounding-difference account (PRD invariant 7). Absent from
+#                              RPR's chart. Code follows RPR's <major-3-digit>-<suffix> scheme in an
+#                              unused 999 sentinel block (R = Rounding mnemonic), so it reads as a
+#                              system account and cannot collide with RPR's real 900-block expenses.
+#                              Typed 'expense' (the rounding leg posts either side; matches the house
+#                              seed's rounding-account convention).
+#
+# DELIBERATE EXCLUSION: 300-000 TRADE DEBTORS — the AR-side control-footer plug (twin of 400-000).
+#   Slice 6 has no receivable/sales flow, so it is NOT promoted to a postable account. The contract
+#   §9 enumeration names only 400-000. Add it in a later slice if an AR flow needs it.
+#
+account_code,account_name,account_type,account_class,special_acc_type,origin
+100-000,SHARE CAPITAL,equity,,,tb
+500-000,REVENUE,income,,,tb
+530-000,OTHER INCOME,income,,,tb
+610-000,PURCHASE,expense,,,tb
+900-A01,ACCOUNTING FEE,expense,,,tb
+900-B01,BANK CHARGES,expense,,,tb
+900-E01,EPF - EMPLOYER,expense,,,tb
+900-E02,EIS - EMPLOYER,expense,,,tb
+900-O01,OFFICE & WAREHOUSE RENTAL,expense,,,tb
+900-R01,RENTAL OF WATER PURIFYIER,expense,,,tb
+900-S01,SALARIES,expense,,,tb
+900-S02,SOCSO - EMPLOYER,expense,,,tb
+900-S04,SECRETARY FEE,expense,,,tb
+900-T03,"TOLL, PARKING & FINED",expense,,,tb
+900-W01,WATER & ELECTRICITY,expense,,,tb
+150-000,RETAINED EARNING,equity,,,gl
+310-000,CASH AT BANK,asset,,,gl
+350-002,AMOUNT OWING FROM ROME GROUP SDN BHD,asset,,,gl
+410-001,WAGES & SALARIES ACCRUED,liability,,,gl
+410-003,EPF ACCRUED,liability,,,gl
+410-004,SOCSO ACCRUED,liability,,,gl
+410-005,EIS ACCRUED,liability,,,gl
+410-006,PCB ACCRUED,liability,,,gl
+420-001,AMOUNT OWING TO DIRECTOR - TAN LAKE WEI,liability,,,gl
+420-002,AMOUNT OWING TO IWIFI GROUP SDN BHD,liability,,,gl
+400-000,TRADE CREDITORS,liability,payable,,system_role
+999-R00,ROUNDING,expense,,rounding,system_role
