@@ -53,12 +53,16 @@ export async function processInvoiceFactsBehavior(services, withRuntime, taskId,
   try {
     await services.downloadCanonical(doc.storage_path, tempPath, doc.sha256);
     const result = await services.analyzeInvoice(tempPath, doc.mime_type, doc);
-    await callWriter(withRuntime, "select clara.persist_invoice_facts($1,$2::jsonb,$3,$4,$5) as receipt", [
+    // p_envelope (W3) carries the corroboration-ineligibility reason (multi_document /
+    // credit_note) into the extraction envelope; `default null` on the DB side keeps this
+    // additive. An eligible single invoice sends '{}' (no reason).
+    await callWriter(withRuntime, "select clara.persist_invoice_facts($1,$2::jsonb,$3,$4,$5,$6::jsonb) as receipt", [
       taskId,
       JSON.stringify(result.fields),
       result.rawSha256,
       result.normalizationVersion,
       result.pagesUsed,
+      JSON.stringify(result.envelope ?? {}),
     ]);
     return { taskId, status: "done" };
   } catch (err) {

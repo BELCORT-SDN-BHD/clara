@@ -13,6 +13,7 @@ import { getWritable, getWorkflowMetadata } from "workflow";
 import {
   SYSTEM_PROMPT_V2,
   CLARIFY_FRAMING,
+  DRAFT_TOOL,
   attachmentStub,
   toTypedParts_v2,
   findClarifyCall,
@@ -127,7 +128,7 @@ async function recoverCodingAttempt(taskId: string): Promise<JeReviewPart | null
     return await pools().withRuntime(async (c) => {
       const r = await c.query("select clara.get_coding_attempt($1) as a", [taskId]);
       const a = (r.rows[0]?.a ?? null) as
-        | { entry_id?: string; revision_token?: string; part_payload?: Record<string, unknown> }
+        | { entry_id?: string; revision_token?: string; exception?: boolean; part_payload?: Record<string, unknown> }
         | null;
       if (!a || !a.entry_id || !a.revision_token) return null;
       const pp = (a.part_payload ?? {}) as {
@@ -143,6 +144,9 @@ async function recoverCodingAttempt(taskId: string): Promise<JeReviewPart | null
         client_id: String(pp.client_id ?? ""),
         document_id: String(pp.document_id ?? ""),
         provenance_tier: pp.provenance_tier ?? "model_read",
+        // The recovery read exposes the persisted amount-exception state (W1) so a
+        // kill-after-draft resume shows the same exception panel as the fresh card.
+        ...(a.exception === true ? { exception: true } : {}),
         uncertainty: pp.uncertainty ?? undefined,
       };
     });
@@ -151,6 +155,24 @@ async function recoverCodingAttempt(taskId: string): Promise<JeReviewPart | null
     // path proceeds and the op_key replay backstops any double-draft.
     return null;
   }
+}
+
+/** A minimal view of a model-loop step for the stop condition (the AI SDK StepResult
+ *  carries a `toolResults` array of `{ toolName, output }`). */
+type LoopStep = { toolResults?: ReadonlyArray<{ toolName?: string; output?: unknown }> };
+
+/** Stop the model loop after the FIRST successful draft_journal_entry result (W4:
+ *  one coding per TASK). Mirrors the clarify stop mechanism, but keys on a successful
+ *  tool RESULT because the draft tool executes (clarify has no execute). A REFUSED
+ *  draft ({ok:false}) does NOT stop — the model may still clarify or explain. The DB's
+ *  one-coding-per-task law (CLR21 double_coded) is the hard backstop; this stop keeps
+ *  the model from even attempting a second bill in the same turn. */
+function stoppedOnSuccessfulDraft({ steps }: { steps: ReadonlyArray<LoopStep> }): boolean {
+  const last = steps[steps.length - 1];
+  if (!last?.toolResults) return false;
+  return last.toolResults.some(
+    (r) => r.toolName === DRAFT_TOOL && !!r.output && typeof r.output === "object" && (r.output as { ok?: unknown }).ok === true,
+  );
 }
 
 /** One model segment (v2): recover a completed coding attempt first, else stream the
@@ -195,7 +217,7 @@ export async function runModelSegmentStepV2(
     messages,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     tools: tools as any,
-    stopWhen: [stepCountIs(8), hasToolCall("clarify")],
+    stopWhen: [stepCountIs(8), hasToolCall("clarify"), stoppedOnSuccessfulDraft],
   });
 
   const writer = getWritable<unknown>().getWriter();

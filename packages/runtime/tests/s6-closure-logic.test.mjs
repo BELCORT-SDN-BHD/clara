@@ -88,7 +88,37 @@ test("readToolRefusalMessage is oracle-safe + isAuthorityOrOracleError classifie
 
 // --- the draft_journal_entry wrapper (stubbed pools) -----------------------
 
-function stubPools({ extract = null, verifiedFiling = true, writeThrows = null } = {}) {
+/** Build a REAL get_document_extract shape (0009 get_document_extract) with the given
+ *  invoice_facts total/currency, so the wrapper's Tier-A + currency reads exercise the
+ *  same regions[] the DB emits — never the old fictional top-level {invoice_facts} shape. */
+function extractWithFacts({ totalCents = null, confidence = 0.98, polygon = [0, 0, 1, 0, 1, 1, 0, 1], currency = "MYR", versionN = 1 } = {}) {
+  const regions = [];
+  if (totalCents != null) {
+    regions.push({
+      engine_kind: "invoice_facts",
+      version_n: versionN,
+      field_path: "invoice.total",
+      monetary_cents: totalCents,
+      engine_confidence: confidence,
+      locator: { page: 1, polygon },
+      text_content: String(totalCents),
+    });
+  }
+  if (currency != null) {
+    regions.push({
+      engine_kind: "invoice_facts",
+      version_n: versionN,
+      field_path: "invoice.currency",
+      monetary_cents: null,
+      engine_confidence: confidence,
+      locator: { page: 1, polygon },
+      text_content: currency,
+    });
+  }
+  return { document: { id: "d1" }, unassigned: false, filing: { id: "fil-1" }, extractions: [], regions, max_chars: 20000 };
+}
+
+function stubPools({ extract = null, verifiedFiling = true, writeThrows = null, receipt = null } = {}) {
   const captured = { writeParams: null, writeCalled: false };
   const readClient = {
     query: async (sql) => {
@@ -105,7 +135,8 @@ function stubPools({ extract = null, verifiedFiling = true, writeThrows = null }
       captured.writeCalled = true;
       captured.writeParams = params;
       if (writeThrows) throw writeThrows;
-      return { rows: [{ receipt: { entry_id: "entry-9", revision_token: "rev-9", status: "draft", filing_id: "fil-1" } }], rowCount: 1 };
+      const r = receipt ?? { entry_id: "entry-9", revision_token: "rev-9", status: "draft", filing_id: "fil-1" };
+      return { rows: [{ receipt: r }], rowCount: 1 };
     },
   };
   globalThis.__claraPools = {
@@ -153,21 +184,44 @@ test("draft wrapper success path returns a je_review + fetches sha256/books/op_k
   assert.equal(p[13], "supplier_bill", "coding_kind marker stamped");
 });
 
-test("draft wrapper refuses non-MYR currency at either tier (before any write)", async () => {
-  const cap = stubPools({ extract: { invoice_facts: { currency: "USD" } } });
+test("draft wrapper refuses non-MYR currency at either tier (before any write) — REAL extract shape", async () => {
+  // The invoice_facts extraction carries an explicit USD currency region (no total).
+  const cap = stubPools({ extract: extractWithFacts({ totalCents: null, currency: "USD" }) });
   const r = await runDraftJournalEntry({ firmId: "f", clientId: "c1", createdBy: "u", taskId: "t" }, baseInput);
   assert.equal(r.ok, false);
   assert.equal(r.refusal.reason, "currency_unsupported");
   assert.equal(cap.writeCalled, false, "no draft is attempted on a currency refusal");
 });
 
-test("draft wrapper refuses amount_conflict on a Tier-A total mismatch", async () => {
-  const cap = stubPools({ extract: { invoice_facts: { currency: "MYR", total: { cents: 500 } } } });
-  // proposed credit total = 1000 != verified 500.
+test("draft wrapper NO LONGER refuses a Tier-A total mismatch (W1) — the draft PROCEEDS; the DB persists the exception", async () => {
+  // Corroborated MYR total = 500; proposed credit total = 1000. The DB persists this as
+  // flags.amount_exception and returns exception:true; the je_review part carries it.
+  const cap = stubPools({
+    extract: extractWithFacts({ totalCents: 500 }),
+    receipt: { entry_id: "entry-9", revision_token: "rev-9", status: "draft", filing_id: "fil-1", provenance_tier: "verified", exception: true },
+  });
   const r = await runDraftJournalEntry({ firmId: "f", clientId: "c1", createdBy: "u", taskId: "t" }, baseInput);
-  assert.equal(r.ok, false);
-  assert.equal(r.refusal.reason, "amount_conflict");
-  assert.equal(cap.writeCalled, false);
+  assert.equal(r.ok, true, "a machine/proposed mismatch no longer refuses at the wrapper");
+  assert.equal(cap.writeCalled, true, "the draft is attempted (the DB owns the exception)");
+  assert.equal(r.je_review.exception, true, "the persisted amount exception is reflected on the part");
+  assert.equal(r.je_review.provenance_tier, "verified", "authoritative tier from the receipt");
+});
+
+test("draft wrapper labels a corroborated Tier-A total 'verified' from the REAL shape (receipt tier omitted)", async () => {
+  const cap = stubPools({ extract: extractWithFacts({ totalCents: 1000 }) }); // matches proposed gross 1000
+  const r = await runDraftJournalEntry({ firmId: "f", clientId: "c1", createdBy: "u", taskId: "t" }, baseInput);
+  assert.equal(r.ok, true);
+  assert.equal(cap.writeCalled, true);
+  assert.equal(r.je_review.provenance_tier, "verified", "detected from a single MYR total with confidence>=0.95 and geometry");
+  assert.equal(r.je_review.exception, undefined, "no exception when the receipt does not carry one");
+});
+
+test("draft wrapper: an empty-polygon total never corroborates (W3) — Tier B", async () => {
+  const cap = stubPools({ extract: extractWithFacts({ totalCents: 1000, polygon: [] }) });
+  const r = await runDraftJournalEntry({ firmId: "f", clientId: "c1", createdBy: "u", taskId: "t" }, baseInput);
+  assert.equal(r.ok, true);
+  assert.equal(cap.writeCalled, true);
+  assert.equal(r.je_review.provenance_tier, "model_read", "no physical geometry => never Tier A at the wrapper");
 });
 
 test("draft wrapper maps a DB refusal (CLR23) from the writer to a typed refusal", async () => {

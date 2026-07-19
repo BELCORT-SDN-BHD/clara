@@ -269,43 +269,90 @@ export async function scannerReachable(timeoutMs = 500) {
   }
 }
 
+/** The scanner-unavailable fail-closed refusal — retryable 503, nothing stored unscanned. */
+function scannerUnavailable() {
+  return new IntakeScanError(
+    "scanner_unavailable",
+    "malware scanner is unavailable; the upload was refused (nothing is stored unscanned)",
+    503,
+  );
+}
+
 export async function scanFile(path) {
   if (process.env.RELAY_TEST_MODE === "1") {
     const injected = globalThis.__claraScannerForTest;
     return injected ? injected(path) : testScan(path);
   }
-  // FAIL CLOSED, HONESTLY (PIN-AB-2): if clamd is unavailable (e.g. the supervisor is
-  // restarting it after an OOM kill), refuse the scan with a clear, retryable error
-  // rather than a generic 500 — nothing is ever stored unscanned. Already-spooled
-  // bytes simply hold until clamd returns (automatic recovery).
+  // FAIL CLOSED, HONESTLY (PIN-AB-2 / W6): clamd may die at ANY point in the scan — the
+  // live incident was an OOM kill mid signature-load. The ENTIRE scan lifetime runs under
+  // ONE persistent socket 'error' handler + a scan-wide deadline, so a mid-stream death or
+  // a wedged (connected-but-silent) scanner resolves to the fail-closed refusal — never an
+  // unhandled 'error' reaching the process-wide handler (which exits the runtime), never a
+  // hang. Nothing is ever stored unscanned; already-spooled bytes hold until clamd returns.
+  const deadlineMs = Number(process.env.CLARA_CLAMD_SCAN_DEADLINE_MS || 120_000);
   let socket;
   try {
     socket = connectSocket(process.env.CLARA_CLAMD_SOCKET);
-    await once(socket, "connect");
   } catch {
-    try {
-      socket?.destroy();
-    } catch {
-      /* best-effort */
-    }
-    throw new IntakeScanError("scanner_unavailable", "malware scanner is unavailable; the upload was refused (nothing is stored unscanned)", 503);
+    throw scannerUnavailable();
   }
-  socket.write("zINSTREAM\0");
-  let response = "";
-  socket.on("data", (chunk) => {
-    response += chunk.toString("utf8");
+
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    let response = "";
+    let timer;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.removeListener("error", onError);
+      try {
+        socket.destroy();
+      } catch {
+        /* best-effort */
+      }
+      fn(arg);
+    };
+    // Any socket fault over the WHOLE lifetime (connect refusal, mid-stream RST, a
+    // cleanup fault) is a fail-closed refusal — the persistent handler means there is
+    // never a window without an 'error' listener (the finding-6 crash window).
+    const onError = () => finish(reject, scannerUnavailable());
+    // A connected-but-silent scanner (no data, no close) trips the scan-wide deadline.
+    timer = setTimeout(() => finish(reject, scannerUnavailable()), deadlineMs);
+    timer.unref?.();
+
+    socket.on("error", onError);
+    socket.on("data", (chunk) => {
+      response += chunk.toString("utf8");
+    });
+    socket.on("close", () => {
+      if (settled) return;
+      if (/FOUND/i.test(response)) return finish(reject, new IntakeScanError("malware_detected", "malware scanner rejected the file"));
+      if (!/OK/i.test(response)) return finish(reject, new IntakeScanError("internal", "malware scanner failed closed", 503));
+      finish(resolve, { clean: true, adapter: "clamd" });
+    });
+
+    socket.once("connect", () => {
+      // Stream the file to clamd INSTREAM. Any fault here (write after death, a read
+      // error, a rejected drain wait) fails closed — the try/catch keeps a rejected
+      // `once(socket,'drain')` from becoming an unhandled rejection or a hang.
+      void (async () => {
+        try {
+          socket.write("zINSTREAM\0");
+          for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+            if (settled) return;
+            const len = Buffer.alloc(4);
+            len.writeUInt32BE(chunk.length);
+            if (!socket.write(len)) await once(socket, "drain");
+            if (!socket.write(chunk)) await once(socket, "drain");
+          }
+          if (!settled) socket.end(Buffer.alloc(4));
+        } catch {
+          finish(reject, scannerUnavailable());
+        }
+      })();
+    });
   });
-  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(chunk.length);
-    if (!socket.write(len)) await once(socket, "drain");
-    if (!socket.write(chunk)) await once(socket, "drain");
-  }
-  socket.end(Buffer.alloc(4));
-  await once(socket, "close");
-  if (/FOUND/i.test(response)) throw new IntakeScanError("malware_detected", "malware scanner rejected the file");
-  if (!/OK/i.test(response)) throw new IntakeScanError("internal", "malware scanner failed closed", 503);
-  return { clean: true, adapter: "clamd" };
 }
 
 function childExit(child) {

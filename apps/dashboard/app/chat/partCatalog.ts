@@ -71,12 +71,22 @@ export const PART_CATALOG = {
         document_id: "doc-2222",
         provenance_tier: "verified",
       },
+      {
+        // W1/F1: a persisted amount exception (part flags it; the card hydrates the panel).
+        type: "je_review",
+        entry_id: "entry-3333",
+        revision_token: "rev-3333",
+        client_id: "client-1111",
+        document_id: "doc-3333",
+        provenance_tier: "verified",
+        exception: true,
+      },
     ],
   },
   refusal: {
     renderBranch: true,
     fixtures: [
-      { type: "refusal", code: "CLR21", reason: "amount_conflict", message: "CLR21: the proposed lines do not match the machine-verified total." },
+      { type: "refusal", code: "CLR21", reason: "amount_conflict", message: "CLR21: the proposed lines do not match the machine-corroborated total." },
       { type: "refusal", code: "CLR23", message: "CLR23: a payable line needs a resolved vendor." },
     ],
   },

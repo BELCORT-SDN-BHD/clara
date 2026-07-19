@@ -40,15 +40,29 @@ export type EvidenceRow = {
   provenance_tier: ProvenanceTier;
 };
 
-/** The amount exception (S6-D1): a machine/proposed mismatch that disables
- *  ordinary approval; resolved only via the governed revise override. This is NOT
- *  a field of get_draft_review — the card composes it at approve/revise time from
- *  the CLR21 {"reason":"amount_conflict"} error + a get_document_extract read. */
+/** The amount exception (W1/F1): a supplier_bill total mismatch is PERSISTED at
+ *  draft on `entry.flags.amount_exception` — the draft no longer refuses at draft
+ *  time. The card renders the panel from THIS hydrated state (never synthesized from
+ *  a caught error); the machine region for the citation/override comes from a
+ *  separate getMachineTotal read. */
 export type AmountException = {
-  proposed_cents: number;
   machine_total_cents: number | null;
-  machine_region: string | null;
-  confidence: number | null;
+  proposed_cents: number;
+  fact_hash: string | null;
+  at: string | null;
+};
+
+/** Stamped ONLY via revise_entry's p_amount_override (W1): clears the approve block
+ *  and sets HIGH-STAKES so a distinct checker binds. */
+export type AmountOverride = { reason: string; region_id: string | null; actor: string | null; at: string | null };
+
+/** Advisory near-duplicate bills (W2): a non-blocking "possible duplicate" notice. */
+export type NearDuplicate = {
+  entry_id: string;
+  document_id: string | null;
+  invoice_id: string | null;
+  total_cents: number | null;
+  posting_date: string | null;
 };
 
 export type DraftReview = {
@@ -64,11 +78,14 @@ export type DraftReview = {
   vendor: VendorProposal | null;
   evidence: EvidenceRow[];
   provenance_tier: ProvenanceTier;
-  amount_label: string; // "machine-verified total" (Tier A) | "read by Clara …" (Tier B)
+  amount_label: string; // "machine-corroborated total" (Tier A) | "read by Clara …" (Tier B)
   uncertainty: Uncertainty | null;
   high_stakes: boolean;
   high_stakes_reasons: string[];
   eligible_checker_count: number;
+  amount_exception: AmountException | null; // entry.flags.amount_exception (persisted)
+  amount_override: AmountOverride | null; // entry.flags.amount_override (stamped)
+  near_duplicates: NearDuplicate[];
 };
 
 function num(v: unknown): number {
@@ -106,12 +123,18 @@ function mapDisposition(decision: string | null): { disposition: VendorProposal[
 export function toDraftReview(raw: unknown): DraftReview {
   const r = (raw ?? {}) as Record<string, unknown>;
   const entry = (r.entry ?? {}) as Record<string, unknown>;
+  const flags = (entry.flags ?? {}) as Record<string, unknown>;
   const cp = (r.counterparty ?? null) as Record<string, unknown> | null;
   const proposal = (cp?.proposal ?? null) as Record<string, unknown> | null;
+  // The proposal is {new:{name, registration_no}} | {existing_id} (NOT a flat name).
+  const proposalNew = (proposal?.new ?? null) as Record<string, unknown> | null;
+  const proposalExistingId = str(proposal?.existing_id);
   const outcome = (cp?.current_outcome ?? null) as Record<string, unknown> | null;
-  const unc = (entry.uncertainty ?? (entry.flags as Record<string, unknown> | undefined)?.uncertainty ?? null) as Record<string, unknown> | null;
+  const unc = (entry.uncertainty ?? flags.uncertainty ?? null) as Record<string, unknown> | null;
+  const amountEx = (flags.amount_exception ?? null) as Record<string, unknown> | null;
+  const amountOv = (flags.amount_override ?? null) as Record<string, unknown> | null;
 
-  const vendorName = str(proposal?.name) ?? str(outcome?.name_normalized);
+  const vendorName = str(proposalNew?.name) ?? str(outcome?.name_normalized);
   const evidence: EvidenceRow[] = arr(r.evidence).map((e) => {
     const o = (e ?? {}) as Record<string, unknown>;
     return {
@@ -123,7 +146,14 @@ export function toDraftReview(raw: unknown): DraftReview {
   });
   // Tier-A labeling: any evidence row verified ⇒ the amount is machine-corroborated.
   const tier: ProvenanceTier = evidence.some((e) => e.provenance_tier === "verified") ? "verified" : "model_read";
-  const disp = cp ? (outcome ? mapDisposition(str(outcome.decision)) : { disposition: "new" as const, note: "new vendor — born on approval" }) : null;
+  // current_outcome.decision CAN be 'birth' (the fn returns it); both null and
+  // 'birth' ⇒ the "new vendor" badge (born on approval).
+  const decision = str(outcome?.decision);
+  const disp = cp
+    ? !outcome || decision === "birth"
+      ? { disposition: "new" as const, note: "new vendor — born on approval" }
+      : mapDisposition(decision)
+    : null;
 
   return {
     entry_id: str(entry.id) ?? str(r.entry_id) ?? "",
@@ -153,18 +183,40 @@ export function toDraftReview(raw: unknown): DraftReview {
       ? {
           disposition: disp.disposition,
           name: vendorName ?? "(unnamed vendor)",
-          registration_no: str(proposal?.registration_no) ?? str(outcome?.registration_normalized),
-          matched_counterparty_id: str(outcome?.counterparty_id),
+          registration_no: str(proposalNew?.registration_no) ?? str(outcome?.registration_normalized),
+          matched_counterparty_id: str(outcome?.counterparty_id) ?? proposalExistingId,
           note: disp.note,
         }
       : null,
     evidence,
     provenance_tier: tier,
-    amount_label: tier === "verified" ? "machine-verified total" : "read by Clara from the document — verify against the source",
+    amount_label: tier === "verified" ? "machine-corroborated total" : "read by Clara from the document — verify against the source",
     uncertainty: unc && typeof unc.note === "string" ? { note: unc.note, alternatives: arr(unc.alternatives).map(String) } : null,
     high_stakes: r.high_stakes === true,
     high_stakes_reasons: arr(r.high_stakes_reasons).map(String),
     eligible_checker_count: num(r.eligible_checker_count),
+    amount_exception: amountEx
+      ? {
+          machine_total_cents: typeof amountEx.machine_total_cents === "number" ? amountEx.machine_total_cents : null,
+          proposed_cents: num(amountEx.proposed_cents),
+          fact_hash: str(amountEx.fact_hash),
+          at: str(amountEx.at),
+        }
+      : null,
+    amount_override:
+      amountOv && typeof amountOv.reason === "string"
+        ? { reason: amountOv.reason, region_id: str(amountOv.region_id), actor: str(amountOv.actor), at: str(amountOv.at) }
+        : null,
+    near_duplicates: arr(r.near_duplicates).map((d) => {
+      const o = (d ?? {}) as Record<string, unknown>;
+      return {
+        entry_id: str(o.entry_id) ?? "",
+        document_id: str(o.document_id),
+        invoice_id: str(o.invoice_id),
+        total_cents: typeof o.total_cents === "number" ? o.total_cents : null,
+        posting_date: str(o.posting_date),
+      };
+    }),
   };
 }
 
@@ -198,8 +250,18 @@ export async function approveEntry(
   );
 }
 
+/** A governed amount override (W1): reason (nonempty) + the machine-total region id
+ *  (cited in the revised evidence). Stamping it clears the approve block and sets
+ *  HIGH-STAKES. Revising to a conforming total instead clears the exception. */
+export type AmountOverrideArg = { reason: string; region_id: string | null };
+/** A governed duplicate override (W2): reason (nonempty) to approve past a
+ *  duplicate_bill refusal. */
+export type DuplicateOverrideArg = { reason: string };
+
 /** Edit a draft (draft-only; re-validates §2 line laws; rotates the token). Returns
- *  the NEW revision token — approve must then be called with THIS token (§6). */
+ *  the NEW revision token — approve must then be called with THIS token (§6). The
+ *  two overrides (both null by default) are the ONLY lawful way to clear an
+ *  amount_conflict / duplicate_bill without revising to a conforming state. */
 export async function reviseEntry(
   token: string,
   entryId: string,
@@ -207,6 +269,7 @@ export async function reviseEntry(
   vendor: VendorArg | null,
   evidence: EvidenceArg[],
   expectedRevision: string,
+  overrides?: { amount?: AmountOverrideArg | null; duplicate?: DuplicateOverrideArg | null },
 ): Promise<string> {
   const out = (await rpc(
     "revise_entry",
@@ -217,6 +280,8 @@ export async function reviseEntry(
       p_evidence: evidence,
       p_expected_revision: expectedRevision,
       p_op_key: opKey(),
+      p_amount_override: overrides?.amount ?? null,
+      p_duplicate_override: overrides?.duplicate ?? null,
     },
     token,
   )) as { revision_token?: string } | null;
@@ -230,9 +295,9 @@ export async function withdrawDraft(token: string, entryId: string, reason: stri
   await rpc("withdraw_draft", { p_entry: entryId, p_reason: reason, p_expected_revision: expectedRevision, p_op_key: opKey() }, token);
 }
 
-export type MachineTotal = { cents: number | null; region: string | null; confidence: number | null };
+export type MachineTotal = { cents: number | null; region: string | null; confidence: number | null; quote: string | null };
 
-/** The machine-verified invoice total from get_document_extract — the card composes
+/** The machine-corroborated invoice total from get_document_extract — the card composes
  *  the amount-exception panel (S6-D1) from this + the CLR21 error at approve time
  *  (get_draft_review does NOT carry the exception). Exact 0009 read shape:
  *  { document, unassigned, filing, extractions:[{id, status, version_n, …}],
@@ -254,10 +319,13 @@ export async function getMachineTotal(token: string, documentId: string, clientI
     .filter((r) => str(r.engine_kind) === "invoice_facts" && str(r.field_path) === "invoice.total" && doneExtractionIds.has(str(r.extraction_id) ?? ""))
     .sort((a, b) => num(b.version_n) - num(a.version_n)); // latest facts pass first
   const top = totals[0];
-  if (!top) return { cents: null, region: null, confidence: null };
+  if (!top) return { cents: null, region: null, confidence: null, quote: null };
   return {
     cents: typeof top.monetary_cents === "number" ? top.monetary_cents : null,
     region: str(top.id),
     confidence: typeof top.engine_confidence === "number" ? top.engine_confidence : null,
+    // region.text_content is the stored region text — used to prefill the amount
+    // override's evidence citation (the DB's position() check passes on a substring).
+    quote: str(top.text_content),
   };
 }

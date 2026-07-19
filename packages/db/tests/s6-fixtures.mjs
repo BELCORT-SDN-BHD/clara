@@ -6,9 +6,31 @@
 // of s6-helpers so each module stays under the repo's 500-line cap.
 
 import { randomUUID } from "node:crypto";
-import { ROLES, roleQuery, rootQuery, humanQuery, opk, digestOf, INVOICE_FACTS_LANE } from "./s6-helpers.mjs";
+import { ROLES, roleQuery, rootQuery, humanQuery, namedCall, opk, digestOf, INVOICE_FACTS_LANE } from "./s6-helpers.mjs";
 
 export * from "./s6-helpers.mjs";
+
+// ---------------------------------------------------------------------------
+// FIX-round readiness (INTERFACE-PINS §6.6). The post-Codex fix batch (W1–W5)
+// lands as an orchestrator-applied 0009 body edit AFTER the author lane exits.
+// Its marker: revise_entry gains p_amount_override (W1). New-behavior tests gate
+// on this so they SKIP against the pre-fix 0009 currently on clara_blind_test and
+// RUN once the orchestrator signals the fix batch is applied.
+// ---------------------------------------------------------------------------
+
+export async function s6FixReady() {
+  const r = await rootQuery(
+    "select pg_get_function_identity_arguments(p.oid) as a from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname='revise_entry'",
+  );
+  return (r.rows[0]?.a ?? "").includes("p_amount_override");
+}
+
+/** The internal invoice fact-state helper (ungranted → root). Returns
+ *  {currency, total_cents, corroborated, invoice_id?, ...} or null. */
+export async function invoiceFactState(document) {
+  const r = await rootQuery("select clara._invoice_fact_state($1) as s", [document]).catch(() => ({ rows: [{ s: null }] }));
+  return r.rows[0]?.s ?? null;
+}
 
 // ---------------------------------------------------------------------------
 // Invoice-facts lane writers (clara_runtime) — pinned signatures (§1).
@@ -43,12 +65,14 @@ export async function claimTask(task, { egressApproved = true, workflowRunId = n
 
 /** persist_invoice_facts (runtime) — inserts the OWN invoice_facts extraction +
  *  semantic regions (monetary_cents normalized in-DB), rotates open drafts'
- *  tokens. p_fields: [{field_path, value_raw, page, polygon, confidence}]. */
-export async function persistInvoiceFacts(task, fields, { rawSha = null, normVersion = "norm-2026-01", pagesUsed = 1 } = {}) {
+ *  tokens. p_fields: [{field_path, value_raw, page, polygon, confidence}]. The
+ *  FIX-round W3 added p_envelope (the mapper's corroboration eligibility — e.g.
+ *  {corroboration_ineligible:true} for a multi-doc result). */
+export async function persistInvoiceFacts(task, fields, { rawSha = null, normVersion = "norm-2026-01", pagesUsed = 1, envelope = {} } = {}) {
   const r = await roleQuery(
     ROLES.runtime,
-    "select clara.persist_invoice_facts(p_task => $1, p_fields => $2::jsonb, p_raw_sha256 => $3, p_normalization_version => $4, p_pages_used => $5) as r",
-    [task, JSON.stringify(fields), rawSha ?? digestOf(randomUUID()), normVersion, pagesUsed],
+    "select clara.persist_invoice_facts(p_task => $1, p_fields => $2::jsonb, p_raw_sha256 => $3, p_normalization_version => $4, p_pages_used => $5, p_envelope => $6::jsonb) as r",
+    [task, JSON.stringify(fields), rawSha ?? digestOf(randomUUID()), normVersion, pagesUsed, JSON.stringify(envelope ?? {})],
   );
   return r.rows[0].r;
 }
@@ -82,14 +106,20 @@ export async function factsRegion(document, fieldPath = "invoice.total") {
 // ---------------------------------------------------------------------------
 
 /** revise_entry(p_entry, p_lines, p_proposed_counterparty, p_evidence,
- *  p_expected_revision, p_op_key) → new token; stamps last_human_editor [C-4]. */
-export async function reviseEntry(sub, { entry, lines, vendor = null, evidence = null, expectedRevision, opKey = null }) {
-  const r = await humanQuery(
-    sub,
-    "select clara.revise_entry(p_entry => $1, p_lines => $2::jsonb, p_proposed_counterparty => $3::jsonb, p_evidence => $4::jsonb, p_expected_revision => $5, p_op_key => $6) as r",
-    [entry, JSON.stringify(lines), vendor == null ? null : JSON.stringify(vendor), evidence == null ? null : JSON.stringify(evidence), expectedRevision, opKey ?? opk("revise")],
-  );
-  return r.rows[0].r;
+ *  p_expected_revision, p_op_key [, p_amount_override, p_duplicate_override]) → new
+ *  token; stamps last_human_editor [C-4]. The two override args are the FIX-round
+ *  W1/W2 additions (§6.6); they are appended only when supplied so the call binds
+ *  against both the pre-fix (6-arg) and post-fix (8-arg) signatures. */
+export async function reviseEntry(sub, { entry, lines, vendor = null, evidence = null, expectedRevision, opKey = null, amountOverride = undefined, duplicateOverride = undefined }) {
+  const specs = [
+    { name: "p_entry" }, { name: "p_lines", cast: "jsonb" }, { name: "p_proposed_counterparty", cast: "jsonb" },
+    { name: "p_evidence", cast: "jsonb" }, { name: "p_expected_revision" }, { name: "p_op_key" },
+  ];
+  const vals = [entry, JSON.stringify(lines), vendor == null ? null : JSON.stringify(vendor), evidence == null ? null : JSON.stringify(evidence), expectedRevision, opKey ?? opk("revise")];
+  if (amountOverride !== undefined) { specs.push({ name: "p_amount_override", cast: "jsonb" }); vals.push(amountOverride == null ? null : JSON.stringify(amountOverride)); }
+  if (duplicateOverride !== undefined) { specs.push({ name: "p_duplicate_override", cast: "jsonb" }); vals.push(duplicateOverride == null ? null : JSON.stringify(duplicateOverride)); }
+  const r = await humanQuery(sub, namedCall("revise_entry", specs), vals);
+  return r.rows[0].result; // namedCall aliases the return as `result`
 }
 
 /** withdraw_draft(p_entry, p_reason, p_expected_revision, p_op_key). */

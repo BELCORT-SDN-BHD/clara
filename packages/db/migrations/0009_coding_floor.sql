@@ -16,8 +16,21 @@
 -- CLR21, DETAIL {"reason":"vendor_malformed"}         -> CLR21 terminal refusal
 -- CLR21, DETAIL {"reason":"evidence_invalid"}         -> CLR21 terminal refusal
 -- CLR21, DETAIL {"reason":"double_coded"}             -> CLR21 terminal refusal
+-- CLR21, DETAIL {"reason":"duplicate_bill"}           -> CLR21 duplicate exact bill
 -- 23505 uq_journal_entries_one_open_draft_filing        -> CLR21 double_coded
--- 23505 uq_coding_attempts_task_filing / _entry         -> CLR21 double_coded
+-- 23505 uq_coding_attempts_task / uq_coding_attempts_entry -> CLR21 double_coded
+--
+-- AMOUNT-EXCEPTION / GOVERNED-OVERRIDE SEMANTICS (W1/W2):
+--   A supplier_bill draft whose corroborated machine total conflicts with the
+--   proposed total does NOT raise at draft/revise -- it PERSISTS carrying
+--   journal_entries.flags.amount_exception {machine_total_cents, proposed_cents,
+--   fact_hash, at}. approve_entry then refuses CLR21 amount_conflict while the
+--   exception is present unless flags.amount_override {reason, region_id, actor,
+--   at} was stamped by revise_entry's p_amount_override. A conforming revise
+--   clears both. A newer facts completion voids the override and recomputes the
+--   exception (persist_invoice_facts). An exact (client, resolved vendor, facts
+--   invoice_id) duplicate refuses CLR21 duplicate_bill unless
+--   flags.duplicate_override {reason, actor, at} (revise's p_duplicate_override).
 -- 23505 uq_counterparties_client_registration           -> CLR23
 -- 23505 uq_counterparties_client_unregistered_name      -> CLR23
 -- CLR22 revise/withdraw lifecycle or missing reason     -> CLR22
@@ -109,6 +122,17 @@ begin
   return (v_amount * 100)::bigint;
 end $$;
 
+-- FIX-S-1: the single fact-hash equation. jsonb normalizes key order, so this is
+-- byte-identical to the former inline copies regardless of build order.
+create function clara._fact_hash(p_extraction uuid, p_region uuid, p_field text,
+    p_quote text, p_cents bigint) returns text
+  language sql immutable set search_path = clara, pg_temp as $$
+  select encode(sha256(convert_to(jsonb_build_object(
+    'extraction_id', p_extraction, 'region_id', p_region,
+    'field_path', p_field, 'quote', coalesce(p_quote,''),
+    'monetary_cents', p_cents)::text, 'UTF8')), 'hex');
+$$;
+
 -- Selects one concrete completed (engine, version) snapshot and returns its
 -- corroboration state. The chosen extraction id/version is always in the result;
 -- no caller relies on an unversioned "current extraction" alias.
@@ -118,8 +142,11 @@ declare
   v_ext uuid; v_version int; v_total_count int; v_total_region uuid;
   v_total bigint; v_conf numeric; v_locator text; v_currency text;
   v_due bigint; v_deposit bigint; v_hash text; v_ok boolean;
+  v_locator_json jsonb; v_poly_ok boolean; v_ineligible text;
+  v_invoice_id text; v_invoice_date text;
 begin
-  select e.id, e.version_n into v_ext, v_version
+  select e.id, e.version_n, nullif(btrim(e.envelope->>'corroboration_ineligible'),'')
+    into v_ext, v_version, v_ineligible
   from clara.document_processing_tasks t
   join clara.document_extractions e
     on e.document_id = t.document_id and e.engine_id = t.engine_id
@@ -132,8 +159,8 @@ begin
   select count(*)::int into v_total_count
   from clara.document_regions
   where extraction_id = v_ext and field_path = 'invoice.total';
-  select id, monetary_cents, engine_confidence, locator_kind
-    into v_total_region, v_total, v_conf, v_locator
+  select id, monetary_cents, engine_confidence, locator_kind, locator
+    into v_total_region, v_total, v_conf, v_locator, v_locator_json
   from clara.document_regions
   where extraction_id = v_ext and field_path = 'invoice.total'
   order by id limit 1;
@@ -144,27 +171,86 @@ begin
     where extraction_id = v_ext and field_path = 'invoice.amount_due';
   select min(monetary_cents) into v_deposit from clara.document_regions
     where extraction_id = v_ext and field_path = 'invoice.deposit';
+  select nullif(btrim(min(text_content)),'') into v_invoice_id from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.invoice_id';
+  select nullif(btrim(min(text_content)),'') into v_invoice_date from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.invoice_date';
 
   if v_total_region is not null then
-    select encode(sha256(convert_to(jsonb_build_object(
-      'extraction_id', r.extraction_id, 'region_id', r.id,
-      'field_path', r.field_path, 'quote', coalesce(r.text_content,''),
-      'monetary_cents', r.monetary_cents)::text, 'UTF8')), 'hex')
-      into v_hash from clara.document_regions r where r.id = v_total_region;
+    select clara._fact_hash(r.extraction_id, r.id, r.field_path, r.text_content,
+      r.monetary_cents) into v_hash from clara.document_regions r where r.id = v_total_region;
   end if;
+  -- W3: a total with no physical geometry (empty polygon array) can never reach
+  -- Tier A. Persistence still stores such rows; they simply never corroborate.
+  v_poly_ok := jsonb_typeof(v_locator_json->'polygon') = 'array'
+    and jsonb_array_length(v_locator_json->'polygon') > 0;
   v_ok := v_total_count = 1 and v_total is not null and v_total > 0
-    and coalesce(v_conf, 0) >= 0.95 and v_locator = 'page_polygon'
+    and coalesce(v_conf, 0) >= 0.95 and v_locator = 'page_polygon' and v_poly_ok
     and v_currency = 'MYR'
     and (v_due is null or v_due = v_total)
-    and coalesce(v_deposit, 0) = 0;
+    and coalesce(v_deposit, 0) = 0
+    and v_ineligible is null;
   return jsonb_build_object(
     'extraction_id', v_ext, 'version_n', v_version,
     'total_region_id', v_total_region, 'total_cents', v_total,
     'total_fact_hash', v_hash, 'currency', nullif(v_currency,''),
+    'invoice_id', v_invoice_id, 'invoice_date', v_invoice_date,
+    'corroboration_ineligible', v_ineligible,
     'corroborated', v_ok,
     'explicit_non_myr', nullif(v_currency,'') is not null and v_currency <> 'MYR'
   );
 end $$;
+
+-- FIX-S-2: the single corroboration-binding equation. True when the entry carries a
+-- 'verified' invoice.total evidence row whose cited cents equal the corroborated
+-- machine total AND whose stored fact_hash still matches the current region (so a
+-- newer/contradicting facts version fails it). Callers decide the raised code:
+-- draft/revise raise CLR21 evidence_invalid, approve raises CLR25 (stale evidence).
+-- plpgsql (not sql) so its reference to entry_evidence -- created later in this
+-- migration -- is resolved at call time, not at CREATE time.
+create function clara._corroboration_bound(p_entry uuid, p_total_cents bigint)
+  returns boolean
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+begin
+  return exists (
+    select 1 from clara.entry_evidence ev
+    join clara.document_regions r on r.id = ev.region_id
+      and r.extraction_id = ev.extraction_id
+    where ev.entry_id = p_entry and ev.provenance_tier = 'verified'
+      and ev.field_path = 'invoice.total'
+      and coalesce(r.monetary_cents, clara._normalize_invoice_cents(ev.quote)) = p_total_cents
+      and ev.fact_hash = clara._fact_hash(r.extraction_id, r.id, r.field_path,
+        r.text_content, r.monetary_cents)
+  );
+end $$;
+
+-- W5: an explicit non-MYR currency indicator (ISO code or symbol). Conservative --
+-- true ONLY for an EXPLICIT non-MYR token; bare RM/MYR/blank never trips it.
+create function clara._is_explicit_non_myr(p_quote text) returns boolean
+  language sql immutable set search_path = clara, pg_temp as $$
+  with n as (select upper(regexp_replace(coalesce(p_quote,''), '[[:space:]]', '', 'g')) as q)
+  select case
+    when (select q from n) = '' then false
+    when (select q from n) in ('RM','MYR','RMMYR','MYRRM') then false
+    -- explicit ISO codes / symbols for non-MYR currencies (word-boundary safe)
+    when (select q from n) ~ '(^|[^A-Z])(USD|SGD|EUR|GBP|JPY|CNY|RMB|AUD|NZD|CAD|CHF|HKD|IDR|THB|PHP|VND|INR|KRW|TWD|BND|AED|SAR|MMK|LAK|KHR)([^A-Z]|$)' then true
+    when (select q from n) ~ '(US\$|S\$|A\$|NZ\$|HK\$|C\$|€|£|¥|₩|฿|₱|₫|₹|Rp)' then true
+    else false
+  end;
+$$;
+
+-- W5: true when the SUBMITTED evidence array cites an invoice.currency row whose
+-- quote is an explicit non-MYR currency. Checked against the raw submission BEFORE
+-- evidence recoverability, so a non-MYR quote refuses as currency_unsupported rather
+-- than being swallowed as merely unrecoverable evidence.
+create function clara._evidence_cites_non_myr(p_evidence jsonb) returns boolean
+  language sql immutable set search_path = clara, pg_temp as $$
+  select case when jsonb_typeof(p_evidence) = 'array' then coalesce((
+    select bool_or(clara._is_explicit_non_myr(z.elem->>'quote'))
+    from jsonb_array_elements(p_evidence) as z(elem)
+    where z.elem->>'field_path' = 'invoice.currency'), false)
+  else false end;
+$$;
 
 -- Shared line validator used by draft and revise. Its returned array includes the
 -- governed <=5-cent rounding append, so both paths have byte-identical line law.
@@ -418,7 +504,11 @@ begin
     where ev.entry_id=p_entry and ev.provenance_tier='verified'
       and ev.field_path='invoice.total'
     order by ev.id limit 1;
-    if v_verified_total is not null then
+    -- W1: a governed amount_override explicitly permits the proposed total to
+    -- diverge from the corroborated machine total, so the gross equation is
+    -- relaxed (the payable-credit floor above still holds). The distinct-checker
+    -- law binds via is_high_stakes(amount_override) at approve.
+    if v_verified_total is not null and not (e.flags ? 'amount_override') then
       select coalesce(sum(l.debit_cents),0) into v_expense_debit
       from clara.journal_lines l
       join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
@@ -455,7 +545,7 @@ begin
   end if;
   if old.status = 'draft' and new.status = 'draft' then
     v_allowed := array['revision_token','updated_at','proposed_counterparty',
-                       'match_fingerprint','last_human_editor'];
+                       'match_fingerprint','last_human_editor','flags'];
   elsif old.status = 'draft' and new.status = 'approved' then
     if old.checker_actor is not null or new.checker_actor is null or new.approved_at is null then
       raise exception 'illegal approval transition' using errcode = 'CLR08';
@@ -758,6 +848,8 @@ alter table clara.journal_entries
   add column proposed_counterparty jsonb,
   add column match_fingerprint jsonb,
   add column coding_kind text,
+  add column flags jsonb not null default '{}'::jsonb,
+  add constraint ck_je_flags_shape check (jsonb_typeof(flags) = 'object'),
   add constraint ck_je_coding_kind check (
     coding_kind is null or coding_kind in ('supplier_bill')
   ),
@@ -877,7 +969,12 @@ create table clara.coding_attempts (
   part_payload jsonb       not null check (jsonb_typeof(part_payload) = 'object'),
   created_at   timestamptz not null default now(),
   unique (id, firm_id),
-  constraint uq_coding_attempts_task_filing unique (task_id, filing_id),
+  -- W4 (F5, one-coding-per-TASK): a task admits exactly ONE coding attempt (the v2
+  -- segment stops after the first successful draft), so recovery via the scalar
+  -- get_coding_attempt(task_id) is sound. This DEVIATES from companion §10's pinned
+  -- (task_id, filing_id) pair -- adjudicated in INTERFACE-PINS §6.6 W4 (C-12 scalar
+  -- recovery + S6-R11 one-doc-one-card). unique(entry_id) is retained.
+  constraint uq_coding_attempts_task unique (task_id),
   constraint uq_coding_attempts_entry unique (entry_id),
   constraint fk_coding_attempts_task foreign key (task_id, firm_id, client_id)
     references clara.agent_tasks(id, firm_id, client_id),
@@ -1027,8 +1124,11 @@ create policy p_entry_evidence_human on clara.entry_evidence for select
   to clara_authenticated using (firm_id = clara.jwt_firm());
 create policy p_entry_evidence_agent on clara.entry_evidence for select
   to clara_agent_ro using (firm_id = clara.wake_firm());
-create policy p_processing_call_reservations_runtime
-  on clara.processing_call_reservations for select to clara_runtime using (true);
+-- W7 (F7): no runtime-tree reader of processing_call_reservations exists (the
+-- reconciler reads document_processing_tasks, never this metering table), so the
+-- clara_runtime SELECT grant + its unrestricted policy are dropped -- companion §9
+-- is the law and grants runtime only the three invoice-facts functions. The table
+-- stays owner/definer-only; _reserve/_settle/_refund run security-definer.
 
 create view clara.coding_tasks_visible as
   select id, client_id, document_id, filing_id, origin, correction_id, status,
@@ -1112,7 +1212,7 @@ declare
   v_dedupe jsonb; v_client_firm uuid; v_client_status text; v_origin text;
   v_entry uuid; v_token uuid; v_filing uuid; v_lines jsonb; v_fingerprint jsonb;
   v_receipt jsonb; v_seq bigint; v_state jsonb; v_payable bigint; v_expense bigint;
-  v_task uuid; v_part jsonb; v_tier text; v_constraint text;
+  v_task uuid; v_part jsonb; v_tier text; v_constraint text; v_exception jsonb;
 begin
   if p_op_key is null or btrim(p_op_key) = '' then
     raise exception 'op_key is required' using errcode = 'CLR10';
@@ -1224,16 +1324,29 @@ begin
   perform clara._assert_balanced(v_entry);
 
   if p_document is not null then
+    -- W5: an explicit non-MYR currency in a SUBMITTED evidence row is terminal at
+    -- either tier -- checked against the raw submission BEFORE recoverability.
+    if clara._evidence_cites_non_myr(p_evidence) then
+      raise exception 'explicit non-MYR currency is unsupported'
+        using errcode='CLR21',detail='{"reason":"currency_unsupported"}';
+    end if;
     if p_evidence is not null then
       perform clara._write_entry_evidence(v_entry,p_document,p_evidence);
     end if;
     v_state := clara._invoice_fact_state(p_document);
+    -- Tier-A facts that themselves say non-MYR are equally terminal.
     if coalesce((v_state->>'explicit_non_myr')::boolean,false) then
       raise exception 'explicit non-MYR currency is unsupported'
         using errcode='CLR21',detail='{"reason":"currency_unsupported"}';
     end if;
     if p_coding_kind='supplier_bill'
        and coalesce((v_state->>'corroborated')::boolean,false) then
+      -- The corroborated machine total must be evidence-bound (verified tier) in
+      -- every corroborated case -- exception or not (FIX-S-2 helper).
+      if not clara._corroboration_bound(v_entry,(v_state->>'total_cents')::bigint) then
+        raise exception 'corroborated total is not bound by evidence'
+          using errcode='CLR21',detail='{"reason":"evidence_invalid"}';
+      end if;
       select coalesce(sum(l.credit_cents),0) into v_payable
       from clara.journal_lines l join clara.coa_accounts a
         on a.client_id=l.client_id and a.account_code=l.account_code
@@ -1242,31 +1355,27 @@ begin
       from clara.journal_lines l join clara.coa_accounts a
         on a.client_id=l.client_id and a.account_code=l.account_code
       where l.entry_id=v_entry and a.account_type='expense';
+      -- W1: a machine/proposed mismatch does NOT raise -- it persists a reviewable
+      -- amount exception. approve_entry gates on it (CLR21 amount_conflict) unless
+      -- revise stamps a governed override.
       if v_payable<>(v_state->>'total_cents')::bigint
          or v_expense<>(v_state->>'total_cents')::bigint then
-        raise exception 'proposed entry differs from machine-corroborated total'
-          using errcode='CLR21',detail='{"reason":"amount_conflict"}';
-      end if;
-      if not exists (
-        select 1 from clara.entry_evidence ev
-        join clara.document_regions r on r.id=ev.region_id
-          and r.extraction_id=ev.extraction_id
-        where ev.entry_id=v_entry and ev.provenance_tier='verified'
-          and ev.field_path='invoice.total'
-          and coalesce(r.monetary_cents,clara._normalize_invoice_cents(ev.quote))
-              =(v_state->>'total_cents')::bigint
-          and ev.fact_hash=encode(sha256(convert_to(jsonb_build_object(
-            'extraction_id',r.extraction_id,'region_id',r.id,
-            'field_path',r.field_path,'quote',coalesce(r.text_content,''),
-            'monetary_cents',r.monetary_cents)::text,'UTF8')),'hex')
-      ) then
-        raise exception 'corroborated total is not bound by evidence'
-          using errcode='CLR21',detail='{"reason":"evidence_invalid"}';
+        v_exception := jsonb_build_object(
+          'machine_total_cents',(v_state->>'total_cents')::bigint,
+          'proposed_cents',v_payable,
+          'fact_hash',v_state->>'total_fact_hash','at',now());
       end if;
     end if;
   elsif p_evidence is not null and p_evidence<>'[]'::jsonb then
     raise exception 'unbound evidence is not accepted'
       using errcode='CLR21',detail='{"reason":"evidence_invalid"}';
+  end if;
+
+  if v_exception is not null then
+    update clara.journal_entries
+      set flags = flags || jsonb_build_object('amount_exception',v_exception),
+          updated_at=now()
+      where id=v_entry;
   end if;
 
   select revision_token into v_token from clara.journal_entries where id=v_entry;
@@ -1279,7 +1388,8 @@ begin
           document_id,entry_id,part_payload)
         values(p_firm,p_client,v_task,v_filing,p_document,v_entry,
           v_part || jsonb_build_object('entry_id',v_entry,'revision_token',v_token,
-            'client_id',p_client,'document_id',p_document,'provenance_tier',v_tier));
+            'client_id',p_client,'document_id',p_document,'provenance_tier',v_tier,
+            'exception',(v_exception is not null)));
     exception when unique_violation then
       raise exception 'coding task or filing was already coded'
         using errcode='CLR21',detail='{"reason":"double_coded"}';
@@ -1294,7 +1404,8 @@ begin
     perform clara.assert_books_current(p_firm,p_client,p_books_version,v_seq);
   end if;
   v_receipt := jsonb_build_object('entry_id',v_entry,'revision_token',v_token,
-    'status','draft','filing_id',v_filing);
+    'status','draft','filing_id',v_filing,'exception',(v_exception is not null),
+    'provenance_tier',v_tier);
   return clara._finish_op(p_firm,'draft_entry',p_op_key,v_receipt);
 end $$;
 revoke all on function clara._draft_entry_core(uuid,uuid,uuid,text,boolean,uuid,uuid,
@@ -1397,6 +1508,18 @@ grant execute on function clara.upsert_account(uuid,text,text,text,text,text,tex
 -- 6. APPROVAL, REVERSAL, AND DRAFT-LIFECYCLE WRITERS
 -- =====================================================================
 
+-- W1/FIX-SP-5: a stamped governed amount_override raises the entry to high-stakes
+-- so the distinct-checker law (CLR05) binds on the approval that clears it.
+create or replace function clara.is_high_stakes(p_entry uuid) returns boolean
+  language sql stable security definer set search_path = clara, pg_temp as $$
+  select je.is_opening_balance or je.is_year_end or je.tax_affecting
+      or (je.flags ? 'amount_override')
+      or coalesce((select sum(debit_cents) from clara.journal_lines where entry_id = je.id), 0)
+         >= f.high_stakes_amount_cents
+  from clara.journal_entries je join clara.firms f on f.id = je.firm_id
+  where je.id = p_entry;
+$$;
+
 create or replace function clara.approve_entry(p_entry uuid, p_expected_revision uuid,
     p_attestation text default null, p_op_key text default null) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -1404,7 +1527,7 @@ declare
   c record; e record; v_dedupe jsonb; v_attest text; v_filing uuid;
   v_fingerprint jsonb; v_counterparty uuid; v_created boolean:=false;
   v_name text; v_reg text; v_tin text; v_name_n text; v_reg_n text;
-  v_state jsonb; v_payable bigint; v_expense bigint;
+  v_state jsonb; v_payable bigint; v_expense bigint; v_invoice_id text;
 begin
   c:=clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key)='' then
@@ -1498,31 +1621,40 @@ begin
     end if;
     if e.coding_kind='supplier_bill'
        and coalesce((v_state->>'corroborated')::boolean,false) then
-      select coalesce(sum(l.credit_cents),0) into v_payable
-      from clara.journal_lines l join clara.coa_accounts a
-        on a.client_id=l.client_id and a.account_code=l.account_code
-      where l.entry_id=p_entry and a.account_class='payable';
-      select coalesce(sum(l.debit_cents),0) into v_expense
-      from clara.journal_lines l join clara.coa_accounts a
-        on a.client_id=l.client_id and a.account_code=l.account_code
-      where l.entry_id=p_entry and a.account_type='expense';
-      if v_payable<>(v_state->>'total_cents')::bigint
-         or v_expense<>(v_state->>'total_cents')::bigint
-         or not exists (
-           select 1 from clara.entry_evidence ev
-           join clara.document_regions r on r.id=ev.region_id
-             and r.extraction_id=ev.extraction_id
-           where ev.entry_id=p_entry and ev.provenance_tier='verified'
-             and ev.field_path='invoice.total'
-             and coalesce(r.monetary_cents,clara._normalize_invoice_cents(ev.quote))
-                 =(v_state->>'total_cents')::bigint
-             and ev.fact_hash=encode(sha256(convert_to(jsonb_build_object(
-               'extraction_id',r.extraction_id,'region_id',r.id,
-               'field_path',r.field_path,'quote',coalesce(r.text_content,''),
-               'monetary_cents',r.monetary_cents)::text,'UTF8')),'hex')
-         ) then
+      -- CLR25 FIRST (stale-evidence semantics unchanged): the verified invoice.total
+      -- evidence must still bind the CURRENT facts. A newer/contradicting facts
+      -- version rotated the token; if it was re-fetched but not re-cited, the bound
+      -- fact_hash no longer matches -> stale evidence. This precedes the amount gate
+      -- so a genuine facts contradiction always surfaces as CLR25, never CLR21.
+      if not clara._corroboration_bound(p_entry,(v_state->>'total_cents')::bigint) then
         raise exception 'newer machine facts contradict the draft evidence'
           using errcode='CLR25';
+      end if;
+      -- W1: evidence is fresh; a persisted amount exception gates approval (CLR21
+      -- amount_conflict) unless revise stamped a governed override.
+      if (e.flags ? 'amount_exception') and not (e.flags ? 'amount_override') then
+        raise exception 'proposed total conflicts with the machine-corroborated total'
+          using errcode='CLR21',detail='{"reason":"amount_conflict"}';
+      end if;
+    end if;
+    -- W2: an exact (client, resolved vendor, facts invoice_id) duplicate of another
+    -- approved-unreversed supplier bill refuses (CLR21 duplicate_bill) unless a
+    -- governed duplicate override was stamped. invoice_id needs no corroboration.
+    if e.coding_kind='supplier_bill' and e.reversal_of is null
+       and v_counterparty is not null then
+      v_invoice_id:=nullif(v_state->>'invoice_id','');
+      if v_invoice_id is not null and not (e.flags ? 'duplicate_override')
+         and exists (
+           select 1 from clara.journal_entries e2
+           where e2.client_id=e.client_id and e2.coding_kind='supplier_bill'
+             and e2.status='approved' and e2.reversed_by is null and e2.id<>p_entry
+             and e2.document_id is not null
+             and exists (select 1 from clara.journal_lines l2
+                         where l2.entry_id=e2.id and l2.counterparty_id=v_counterparty)
+             and (clara._invoice_fact_state(e2.document_id)->>'invoice_id')=v_invoice_id
+         ) then
+        raise exception 'an approved bill already exists for this vendor and invoice number'
+          using errcode='CLR21',detail='{"reason":"duplicate_bill"}';
       end if;
     end if;
   end if;
@@ -1617,18 +1749,23 @@ end $$;
 
 create function clara.revise_entry(p_entry uuid, p_lines jsonb,
     p_proposed_counterparty jsonb, p_evidence jsonb,
-    p_expected_revision uuid, p_op_key text) returns jsonb
+    p_expected_revision uuid, p_op_key text,
+    p_amount_override jsonb default null,
+    p_duplicate_override jsonb default null) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   c record; e record; v_dedupe jsonb; v_lines jsonb; v_fingerprint jsonb;
   v_token uuid; v_state jsonb; v_payable bigint; v_expense bigint;
+  v_new_flags jsonb; v_exception jsonb; v_ovr_region uuid;
 begin
   c:=clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  -- W1/W2: the governed overrides join the request hash (C-1 law).
   v_dedupe:=clara._reserve_op(c.firm,'revise_entry',p_op_key,
     clara._hash(jsonb_build_object('entry',p_entry,'lines',p_lines,
       'counterparty',p_proposed_counterparty,'evidence',p_evidence,
-      'revision',p_expected_revision)));
+      'revision',p_expected_revision,'amount_override',p_amount_override,
+      'duplicate_override',p_duplicate_override)));
   if v_dedupe is not null then return v_dedupe; end if;
   select * into e from clara.journal_entries where id=p_entry for update;
   if not found or e.firm_id<>c.firm then raise exception 'entry not in your firm' using errcode='CLR11'; end if;
@@ -1655,7 +1792,14 @@ begin
       (x.elem->>'credit_cents')::bigint,x.elem->>'description'
     from jsonb_array_elements(v_lines) with ordinality as x(elem,idx);
   perform clara._assert_balanced(p_entry);
+  -- W1/W2: recompute amount flags fresh each revise; preserve any duplicate_override.
+  v_new_flags:=coalesce(e.flags,'{}'::jsonb) - 'amount_exception' - 'amount_override';
   if e.document_id is not null then
+    -- W5: explicit non-MYR in a SUBMITTED evidence row is terminal at either tier.
+    if clara._evidence_cites_non_myr(p_evidence) then
+      raise exception 'explicit non-MYR currency is unsupported'
+        using errcode='CLR21',detail='{"reason":"currency_unsupported"}';
+    end if;
     if p_evidence is not null then
       perform clara._write_entry_evidence(p_entry,e.document_id,p_evidence);
     end if;
@@ -1666,6 +1810,10 @@ begin
     end if;
     if e.coding_kind='supplier_bill'
        and coalesce((v_state->>'corroborated')::boolean,false) then
+      if not clara._corroboration_bound(p_entry,(v_state->>'total_cents')::bigint) then
+        raise exception 'corroborated total is not bound by revised evidence'
+          using errcode='CLR21',detail='{"reason":"evidence_invalid"}';
+      end if;
       select coalesce(sum(l.credit_cents),0) into v_payable
       from clara.journal_lines l join clara.coa_accounts a
         on a.client_id=l.client_id and a.account_code=l.account_code
@@ -1674,31 +1822,53 @@ begin
       from clara.journal_lines l join clara.coa_accounts a
         on a.client_id=l.client_id and a.account_code=l.account_code
       where l.entry_id=p_entry and a.account_type='expense';
+      -- W1: a mismatch persists a reviewable exception (never raises here). A
+      -- CONFORMING revised total leaves both flags cleared (stripped above).
       if v_payable<>(v_state->>'total_cents')::bigint
          or v_expense<>(v_state->>'total_cents')::bigint then
-        raise exception 'revised entry differs from machine-corroborated total'
-          using errcode='CLR21',detail='{"reason":"amount_conflict"}';
-      end if;
-      if not exists (
-        select 1 from clara.entry_evidence ev
-        join clara.document_regions r on r.id=ev.region_id
-          and r.extraction_id=ev.extraction_id
-        where ev.entry_id=p_entry and ev.provenance_tier='verified'
-          and ev.field_path='invoice.total'
-          and coalesce(r.monetary_cents,clara._normalize_invoice_cents(ev.quote))
-              =(v_state->>'total_cents')::bigint
-          and ev.fact_hash=encode(sha256(convert_to(jsonb_build_object(
-            'extraction_id',r.extraction_id,'region_id',r.id,
-            'field_path',r.field_path,'quote',coalesce(r.text_content,''),
-            'monetary_cents',r.monetary_cents)::text,'UTF8')),'hex')
-      ) then
-        raise exception 'corroborated total is not bound by revised evidence'
-          using errcode='CLR21',detail='{"reason":"evidence_invalid"}';
+        v_exception:=jsonb_build_object(
+          'machine_total_cents',(v_state->>'total_cents')::bigint,
+          'proposed_cents',v_payable,
+          'fact_hash',v_state->>'total_fact_hash','at',now());
+        v_new_flags:=v_new_flags||jsonb_build_object('amount_exception',v_exception);
+        -- The governed amount override: a reason + a region cited in the revised
+        -- evidence that belongs to this document. Only meaningful on a mismatch.
+        if p_amount_override is not null then
+          if jsonb_typeof(p_amount_override)<>'object'
+             or nullif(btrim(p_amount_override->>'reason'),'') is null then
+            raise exception 'amount override is malformed (reason required)'
+              using errcode='CLR10';
+          end if;
+          begin v_ovr_region:=(p_amount_override->>'region_id')::uuid;
+          exception when others then
+            raise exception 'amount override region is malformed' using errcode='CLR10';
+          end;
+          if not exists (select 1 from clara.entry_evidence ev
+              where ev.entry_id=p_entry and ev.region_id=v_ovr_region
+                and ev.document_id=e.document_id) then
+            raise exception 'amount override region must be cited in the revised evidence'
+              using errcode='CLR21',detail='{"reason":"evidence_invalid"}';
+          end if;
+          v_new_flags:=v_new_flags||jsonb_build_object('amount_override',
+            jsonb_build_object('reason',btrim(p_amount_override->>'reason'),
+              'region_id',v_ovr_region,'actor',c.actor,'at',now()));
+        end if;
       end if;
     end if;
   end if;
+  -- W2: the governed duplicate-bill override (reason-coded). Preserved across
+  -- ordinary revises; re-stamped when re-provided.
+  if p_duplicate_override is not null then
+    if jsonb_typeof(p_duplicate_override)<>'object'
+       or nullif(btrim(p_duplicate_override->>'reason'),'') is null then
+      raise exception 'duplicate override is malformed (reason required)' using errcode='CLR10';
+    end if;
+    v_new_flags:=v_new_flags||jsonb_build_object('duplicate_override',
+      jsonb_build_object('reason',btrim(p_duplicate_override->>'reason'),
+        'actor',c.actor,'at',now()));
+  end if;
   update clara.journal_entries set proposed_counterparty=p_proposed_counterparty,
-    match_fingerprint=v_fingerprint,last_human_editor=c.actor,
+    match_fingerprint=v_fingerprint,last_human_editor=c.actor,flags=v_new_flags,
     revision_token=gen_random_uuid(),updated_at=now() where id=p_entry
     returning revision_token into v_token;
   perform clara._audit(c.firm,c.actor,null,null,'revise_entry',p_entry,
@@ -1830,12 +2000,15 @@ end $$;
 -- =====================================================================
 
 create function clara.persist_invoice_facts(p_task uuid, p_fields jsonb,
-    p_raw_sha256 text, p_normalization_version text, p_pages_used int) returns jsonb
+    p_raw_sha256 text, p_normalization_version text, p_pages_used int,
+    p_envelope jsonb default null) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   t record; d record; v_ext uuid; v_existing uuid; v_entry uuid; v_date date;
   elem jsonb; v_path text; v_raw text; v_page int; v_conf numeric;
   v_cents bigint; v_region uuid;
+  v_newstate jsonb; v_p_payable bigint; v_p_expense bigint;
+  v_eflags jsonb; v_ekind text;
 begin
   -- Identity is read without a row lock so filing UUID order remains first.
   select * into t from clara.document_processing_tasks where id=p_task;
@@ -1878,7 +2051,11 @@ begin
       version_n,status,page_count,envelope)
     values(t.firm_id,t.document_id,'azure-di:prebuilt-invoice:2024-11-30',
       'invoice_facts',t.version_n,'done',p_pages_used,
-      jsonb_build_object('raw_sha256',p_raw_sha256,
+      -- W3 (ratified): the runtime's p_envelope (e.g. {corroboration_ineligible:
+      -- 'multi_document'|'credit_note'}) is merged in; the DB-authoritative keys are
+      -- applied LAST so the runtime can never spoof the raw hash / normalization /
+      -- field_count. _invoice_fact_state reads envelope->>'corroboration_ineligible'.
+      coalesce(p_envelope,'{}'::jsonb) || jsonb_build_object('raw_sha256',p_raw_sha256,
         'normalization_version',p_normalization_version,
         'field_count',jsonb_array_length(p_fields)))
     returning id into v_ext;
@@ -1927,13 +2104,40 @@ begin
     financial_date=coalesce(v_date,financial_date) where id=t.document_id;
 
   -- Explicit one-row updates preserve the entry-id order established above.
+  -- W1: newer facts force re-review by rotating the token AND, for supplier-bill
+  -- drafts, VOID any amount override + RECOMPUTE the amount exception against the
+  -- new facts (a preserved duplicate_override is untouched). Stale evidence still
+  -- surfaces as CLR25 at approve (corroboration_bound), regardless of this flag.
+  v_newstate:=clara._invoice_fact_state(t.document_id);
   for v_entry in
     select e.id from clara.journal_entries e
     join clara.document_filings f on f.id=e.filing_id
     where f.document_id=t.document_id and f.retired_at is null and e.status='draft'
     order by e.id
   loop
-    update clara.journal_entries set revision_token=gen_random_uuid(),updated_at=now()
+    select coding_kind,coalesce(flags,'{}'::jsonb) into v_ekind,v_eflags
+      from clara.journal_entries where id=v_entry;
+    v_eflags:=v_eflags - 'amount_exception' - 'amount_override';
+    if v_ekind='supplier_bill'
+       and coalesce((v_newstate->>'corroborated')::boolean,false) then
+      select coalesce(sum(l.credit_cents),0) into v_p_payable
+      from clara.journal_lines l join clara.coa_accounts a
+        on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=v_entry and a.account_class='payable';
+      select coalesce(sum(l.debit_cents),0) into v_p_expense
+      from clara.journal_lines l join clara.coa_accounts a
+        on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=v_entry and a.account_type='expense';
+      if v_p_payable<>(v_newstate->>'total_cents')::bigint
+         or v_p_expense<>(v_newstate->>'total_cents')::bigint then
+        v_eflags:=v_eflags||jsonb_build_object('amount_exception',jsonb_build_object(
+          'machine_total_cents',(v_newstate->>'total_cents')::bigint,
+          'proposed_cents',v_p_payable,
+          'fact_hash',v_newstate->>'total_fact_hash','at',now()));
+      end if;
+    end if;
+    update clara.journal_entries set revision_token=gen_random_uuid(),
+      flags=v_eflags,updated_at=now()
       where id=v_entry and status='draft';
   end loop;
   perform clara._audit(t.firm_id,null,null,null,'persist_invoice_facts',null,
@@ -2483,7 +2687,10 @@ end $$;
 create function clara.get_draft_review(p_entry uuid, p_client uuid default null)
   returns jsonb
   language plpgsql stable security invoker set search_path = clara, pg_temp as $$
-declare e record; v_current jsonb; cp record; v_result jsonb;
+declare
+  e record; v_current jsonb; cp record; v_result jsonb;
+  v_high boolean; v_reasons text[]; v_debits bigint; v_threshold bigint;
+  v_near jsonb; v_cp uuid; v_dinv_date text; v_dtotal bigint;
 begin
   if current_role='clara_agent_ro' then
     if clara.wake_firm() is null then
@@ -2526,6 +2733,64 @@ begin
       end if;
     end if;
   end if;
+
+  select coalesce((select sum(l.debit_cents) from clara.journal_lines l
+                   where l.entry_id=e.id),0),
+         (select f.high_stakes_amount_cents from clara.firms f where f.id=e.firm_id)
+    into v_debits, v_threshold;
+  -- W1/FIX-SP-5: a stamped amount_override raises high-stakes; reasons mirror the
+  -- boolean's terms plus 'amount_override' when present.
+  v_high := e.is_opening_balance or e.is_year_end or e.tax_affecting
+    or (e.flags ? 'amount_override') or v_debits >= v_threshold;
+  v_reasons := '{}'::text[];
+  if e.is_opening_balance then v_reasons:=v_reasons||'opening_balance'; end if;
+  if e.is_year_end then v_reasons:=v_reasons||'year_end'; end if;
+  if e.tax_affecting then v_reasons:=v_reasons||'tax_affecting'; end if;
+  if v_debits >= v_threshold then v_reasons:=v_reasons||'amount_threshold'; end if;
+  if e.flags ? 'amount_override' then v_reasons:=v_reasons||'amount_override'; end if;
+
+  -- W2: advisory near-duplicates (never blocking). Computed INLINE as an invoker
+  -- read (RLS-scoped) directly off the facts tables -- get_draft_review is
+  -- security-invoker and must not call the ungranted definer _invoice_fact_state, and
+  -- exposing that unscoped helper to the read lanes would leak cross-firm facts. A
+  -- match = same resolved vendor + (same facts invoice_date OR equal facts total).
+  v_cp := nullif(v_current->>'counterparty_id','')::uuid;
+  if v_cp is null or e.document_id is null then
+    v_near := '[]'::jsonb;
+  else
+    select nullif(btrim(min(r.text_content) filter (where r.field_path='invoice.invoice_date')),''),
+           min(r.monetary_cents) filter (where r.field_path='invoice.total')
+      into v_dinv_date, v_dtotal
+    from clara.document_regions r
+    where r.extraction_id = (select ex.id from clara.document_extractions ex
+      where ex.document_id=e.document_id and ex.engine_kind='invoice_facts'
+        and ex.status='done' order by ex.version_n desc, ex.id desc limit 1);
+    select coalesce(jsonb_agg(z.x order by z.x_posting, z.x_id), '[]'::jsonb) into v_near
+    from (
+      select e2.id as x_id, e2.posting_date as x_posting,
+        jsonb_build_object('entry_id',e2.id,'document_id',e2.document_id,
+          'invoice_id',cf.inv_id,'total_cents',cf.total_cents,
+          'posting_date',e2.posting_date) as x
+      from clara.journal_entries e2
+      cross join lateral (
+        select nullif(btrim(min(r.text_content) filter (where r.field_path='invoice.invoice_id')),'') as inv_id,
+               nullif(btrim(min(r.text_content) filter (where r.field_path='invoice.invoice_date')),'') as inv_date,
+               min(r.monetary_cents) filter (where r.field_path='invoice.total') as total_cents
+        from clara.document_regions r
+        where r.extraction_id = (select ex.id from clara.document_extractions ex
+          where ex.document_id=e2.document_id and ex.engine_kind='invoice_facts'
+            and ex.status='done' order by ex.version_n desc, ex.id desc limit 1)
+      ) cf
+      where e2.client_id=e.client_id and e2.coding_kind='supplier_bill'
+        and e2.status='approved' and e2.reversed_by is null and e2.id<>e.id
+        and e2.document_id is not null
+        and exists(select 1 from clara.journal_lines l2
+                   where l2.entry_id=e2.id and l2.counterparty_id=v_cp)
+        and ( (v_dinv_date is not null and cf.inv_date=v_dinv_date)
+           or (v_dtotal is not null and cf.total_cents=v_dtotal) )
+    ) z;
+  end if;
+
   select jsonb_build_object(
     'entry',to_jsonb(e),
     'lines',coalesce((select jsonb_agg(jsonb_build_object(
@@ -2548,10 +2813,10 @@ begin
       join clara.users u on u.id=m.user_id where m.firm_id=e.firm_id
         and m.status='active' and m.role in ('bookkeeper','admin','owner')
         and not u.is_agent),
-    'high_stakes',(e.is_opening_balance or e.is_year_end or e.tax_affecting
-      or coalesce((select sum(l.debit_cents) from clara.journal_lines l
-                   where l.entry_id=e.id),0) >=
-         (select f.high_stakes_amount_cents from clara.firms f where f.id=e.firm_id)))
+    'high_stakes',v_high,
+    'high_stakes_reasons',to_jsonb(v_reasons),
+    'flags',coalesce(e.flags,'{}'::jsonb),
+    'near_duplicates',v_near)
     into v_result;
   return v_result;
 end $$;
@@ -2601,7 +2866,8 @@ create function clara.get_coding_attempt(p_task uuid) returns jsonb
   select jsonb_build_object('id',a.id,'task_id',a.task_id,'filing_id',a.filing_id,
     'document_id',a.document_id,'entry_id',a.entry_id,'client_id',a.client_id,
     'part_payload',a.part_payload,'created_at',a.created_at,
-    'revision_token',e.revision_token,'entry_status',e.status)
+    'revision_token',e.revision_token,'entry_status',e.status,
+    'exception',(e.flags ? 'amount_exception'))
   from clara.coding_attempts a join clara.journal_entries e on e.id=a.entry_id
   where a.task_id=p_task;
 $$;
@@ -2613,7 +2879,7 @@ $$;
 grant select on clara.counterparties,clara.entry_evidence
   to clara_authenticated,clara_agent_ro;
 grant select on clara.coding_tasks_visible to clara_authenticated;
-grant select on clara.processing_call_reservations to clara_runtime;
+-- W7 (F7): processing_call_reservations carries NO app-lane grant (companion §9).
 
 -- The bare same-firm entry oracle remains human-only.
 revoke execute on function clara.get_journal_entry(uuid) from clara_agent_ro;
@@ -2629,7 +2895,7 @@ grant execute on function
   clara.upsert_account(uuid,text,text,text,text,text,text),
   clara.approve_entry(uuid,uuid,text,text),
   clara.reverse_entry(uuid,text,text),
-  clara.revise_entry(uuid,jsonb,jsonb,jsonb,uuid,text),
+  clara.revise_entry(uuid,jsonb,jsonb,jsonb,uuid,text,jsonb,jsonb),
   clara.withdraw_draft(uuid,text,uuid,text),
   clara.file_document(uuid,uuid,text,text),
   clara.confirm_attribution_candidate(uuid,text,boolean),
@@ -2649,7 +2915,7 @@ to clara_authenticated,clara_agent_ro;
 
 grant execute on function
   clara.enqueue_invoice_facts(uuid),
-  clara.persist_invoice_facts(uuid,jsonb,text,text,int),
+  clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb),
   clara.fail_invoice_facts(uuid,text),
   clara.claim_document_processing_task(uuid,text,boolean),
   clara.release_held_document_tasks(int),

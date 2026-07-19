@@ -52,6 +52,51 @@ test("the engine snapshot id is the pinned azure-di:prebuilt-invoice:2024-11-30"
   assert.equal(azure.AZURE_INVOICE_ENGINE_SNAPSHOT.engineId, "azure-di:prebuilt-invoice:2024-11-30");
 });
 
+// --- W3 corroboration-eligibility rules (Tier-A physical/single-doc/classification) ---
+
+test("normalizeAzureInvoice NEVER fabricates geometry — a total without a bounding region emits an EMPTY polygon", () => {
+  const payload = {
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: { InvoiceTotal: { content: "100.00", valueCurrency: { currencyCode: "MYR" }, confidence: 0.99 } } }],
+      pages: [{ pageNumber: 1 }],
+    },
+  };
+  const out = azure.normalizeAzureInvoice(payload);
+  const total = out.fields.find((f) => f.field_path === "invoice.total");
+  assert.deepEqual(total.polygon, [], "no boundingRegions => empty polygon (the DB then refuses to corroborate)");
+  assert.deepEqual(out.envelope, {}, "a single eligible invoice carries no ineligibility reason");
+});
+
+test("normalizeAzureInvoice flags a MULTI-DOCUMENT result as corroboration_ineligible='multi_document'", () => {
+  const oneDoc = { fields: { InvoiceTotal: { content: "100.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 } } };
+  const out = azure.normalizeAzureInvoice({ status: "succeeded", analyzeResult: { documents: [oneDoc, oneDoc], pages: [{ pageNumber: 1 }] } });
+  assert.equal(out.envelope.corroboration_ineligible, "multi_document");
+});
+
+test("normalizeAzureInvoice flags a CREDIT NOTE (docType / negative total) as corroboration_ineligible='credit_note'", () => {
+  const byDocType = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: { documents: [{ docType: "invoice.creditNote", fields: { InvoiceTotal: { content: "100.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 } } }], pages: [{ pageNumber: 1 }] },
+  });
+  assert.equal(byDocType.envelope.corroboration_ineligible, "credit_note", "docType signal");
+  const byNegative = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: { documents: [{ fields: { InvoiceTotal: { content: "-100.00", valueCurrency: { currencyCode: "MYR", amount: -100 }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 } } }], pages: [{ pageNumber: 1 }] },
+  });
+  assert.equal(byNegative.envelope.corroboration_ineligible, "credit_note", "negative total signal");
+});
+
+test("normalizeAzureInvoice emits invoice.deposit ONLY when the engine returns one", () => {
+  const withDeposit = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: { documents: [{ fields: { InvoiceTotal: { content: "100.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 }, Deposit: { content: "20.00", confidence: 0.9 } } }], pages: [{ pageNumber: 1 }] },
+  });
+  assert.ok(withDeposit.fields.some((f) => f.field_path === "invoice.deposit"), "deposit emitted when present");
+  const out = azure.normalizeAzureInvoice(samplePayload());
+  assert.ok(!out.fields.some((f) => f.field_path === "invoice.deposit"), "no deposit fabricated when absent");
+});
+
 test("analyzeInvoice uses the injected test adapter (no network) in RELAY_TEST_MODE", async () => {
   globalThis.__claraAzureInvoiceForTest = async () => samplePayload();
   try {

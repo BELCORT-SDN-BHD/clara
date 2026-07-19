@@ -34,6 +34,10 @@ export type ClaraPart =
       document_id: string;
       provenance_tier: ProvenanceTier;
       uncertainty?: Uncertainty;
+      // W1/F1: the draft PERSISTS an amount exception (supplier_bill + corroborated
+      // facts + total mismatch) instead of refusing at draft time; the part flags it
+      // so the card knows to render the persisted exception panel from get_draft_review.
+      exception?: boolean;
     }
   | { type: "refusal"; code: RefusalCode; reason?: string; message: string };
 

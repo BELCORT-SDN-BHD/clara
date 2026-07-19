@@ -23,6 +23,7 @@ export type Clr21Reason =
   | "vendor_malformed"
   | "evidence_invalid"
   | "double_coded"
+  | "duplicate_bill"
   | "session_unbound"
   | "coding_incomplete";
 
@@ -54,15 +55,16 @@ const MESSAGES = {
   CLR22: "This draft can no longer be edited or withdrawn (it is not a draft).",
   CLR23: "The supplier could not be resolved as proposed.",
   CLR24: "That coding task cannot make this transition.",
-  CLR25: "A newer machine-verified total contradicts this draft's evidence; re-draft against the current facts.",
+  CLR25: "A newer machine-corroborated total contradicts this draft's evidence; re-draft against the current facts.",
 };
 
 const CLR21_REASON_MESSAGES: Record<Clr21Reason, string> = {
-  amount_conflict: "The proposed total does not match the machine-verified invoice total.",
+  amount_conflict: "The proposed total does not match the machine-corroborated invoice total.",
   currency_unsupported: "This ledger only supports MYR; a non-MYR bill cannot be coded here.",
   vendor_malformed: "The supplier details on the draft are malformed.",
   evidence_invalid: "The cited evidence does not match the document's extraction.",
-  double_coded: "This document already has an open draft or an approved entry for this filing.",
+  double_coded: "One bill per turn — this turn already drafted a bill. Start a new turn to code the next document.",
+  duplicate_bill: "This exact bill (same supplier and invoice number) already has an approved entry for this client.",
   session_unbound: "Coding needs a chat session bound to a specific client.",
   coding_incomplete: "The coding could not be completed into a review card this turn.",
 };

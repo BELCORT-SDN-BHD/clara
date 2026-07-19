@@ -1,13 +1,16 @@
-// The two-login connection pools (Slice 4, contract §4.1). EVERY runtime DB
-// access flows through here so the P4 discipline is enforced in exactly one
-// place (proven empirically in the S4 probes — see spike/RESULTS + contract §2):
+// The dedicated-login connection pools (Slice 4 two-login base + the Slice-6 write
+// floor = THREE logins now; contract §4.1 / §5). EVERY runtime DB access flows through
+// here so the P4 discipline is enforced in exactly one place (proven empirically in the
+// S4 probes — see spike/RESULTS + contract §2):
 //
-//   * TWO logins / TWO roles. The runtime pool connects as clara_runtime_login
-//     and SET ROLEs to clara_runtime on every checkout; the read pool connects
-//     as clara_agent_read_login and SET ROLEs to clara_agent_ro with
-//     default_transaction_read_only=on. SET ROLE is issued IMMEDIATELY on every
-//     checkout (N10 — never operate as the bare login, so a missing grant fails
-//     loudly instead of silently succeeding as a privileged login).
+//   * THREE logins / THREE roles. The runtime pool connects as clara_runtime_login and
+//     SET ROLEs to clara_runtime on every checkout; the read pool connects as
+//     clara_agent_read_login and SET ROLEs to clara_agent_ro with
+//     default_transaction_read_only=on; the Slice-6 WRITE pool connects as
+//     clara_wake_write_login and SET ROLEs to clara_wake_interactive (NOT read-only; it
+//     COMMITs the draft). SET ROLE is issued IMMEDIATELY on every checkout (N10 — never
+//     operate as the bare login, so a missing grant fails loudly instead of silently
+//     succeeding as a privileged login).
 //   * txn-local GUCs ONLY. A session-level GUC LEAKS across checkouts (P4); so
 //     the wake-credential secret is set with SET LOCAL inside a transaction (see
 //     withReadWakeScoped) and clears on COMMIT/ROLLBACK. Session GUCs we DO set
@@ -23,15 +26,17 @@
 //     plain query error (e.g. CLR14) that leaves the connection healthy is NOT a
 //     connection error: its cleanup ROLLBACK succeeds and the client is reused.
 //   * idle_in_transaction_session_timeout + statement_timeout bound every
-//     session; pool sizes are env-tunable (defaults 5/5 + 2 dedicated LISTEN
-//     clients = the §4.1 budget of 17 against the Supavisor session ceiling).
+//     session; pool sizes are env-tunable (defaults 5 runtime + 5 read + 2 write
+//     + 5 engine + 2 dedicated LISTEN clients = the §4.1 budget of 19 against the
+//     Supavisor session ceiling; the Slice-6 write floor added the +2).
 //
-// Connections come from the ENVIRONMENT only (contract secrets law): the two
+// Connections come from the ENVIRONMENT only (contract secrets law): the three
 // prod logins are supplied as DSNs (CLARA_RUNTIME_DATABASE_URL /
-// CLARA_READ_DATABASE_URL); when those are absent (local throwaway, trust auth,
-// no login passwords) the pools connect with the base env identity and SET ROLE
-// — but ONLY when RELAY_TEST_MODE=1, so a production misconfiguration can never
-// silently run the whole runtime as the base login (N10 also binds tests).
+// CLARA_READ_DATABASE_URL / CLARA_WRITE_DATABASE_URL); when those are absent (local
+// throwaway, trust auth, no login passwords) the pools connect with the base env
+// identity and SET ROLE — but ONLY when RELAY_TEST_MODE=1, so a production
+// misconfiguration can never silently run the whole runtime as the base login (N10
+// also binds tests).
 
 import pg from "pg";
 import { connConfig, assertNoTargetSplit } from "./relay.mjs";

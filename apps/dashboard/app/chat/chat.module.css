@@ -252,6 +252,12 @@
   border-radius: 5px; padding: 0.5rem 0.6rem; margin: 0.4rem 0; font-size: 0.85rem;
 }
 .jeException p { margin: 0.25rem 0; }
+.jeReasonList { margin: 0.2rem 0 0; padding-left: 1.1rem; font-size: 0.82rem; }
+.jeReasonList li { margin: 0.1rem 0; }
+.jeDup {
+  border: 1px solid #d9b46a; background: #fdf6e6; color: #6b4a12;
+  border-radius: 5px; padding: 0.45rem 0.6rem; margin: 0.35rem 0; font-size: 0.84rem;
+}
 .jeActions { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem; }
 .jeAttest { font: inherit; font-size: 0.8rem; padding: 0.3rem 0.45rem; border: 1px solid #ccc; border-radius: 4px; flex: 1; min-width: 140px; }
 .jeEdit { border-top: 1px dashed #cdd5e8; margin-top: 0.5rem; padding-top: 0.5rem; }

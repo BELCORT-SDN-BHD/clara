@@ -114,9 +114,35 @@ export async function analyzeInvoiceReal({ filePath, mime, totalDeadlineMs = 120
   }
 }
 
+// NEVER fabricate geometry (W3 / finding 3): the page is a structural index, but the
+// POLYGON is emitted as an empty array whenever Azure returns no bounding region (or an
+// empty polygon). An empty polygon is the honest "no physical region" marker — the DB's
+// _invoice_fact_state refuses to corroborate a total whose polygon is empty, so a
+// geometry-less fact can never be promoted to Tier A.
 function firstRegion(field) {
   const region = Array.isArray(field?.boundingRegions) ? field.boundingRegions[0] : null;
-  return region ? { page: Number(region.pageNumber || 1), polygon: Array.isArray(region.polygon) ? region.polygon.map(Number) : [] } : { page: 1, polygon: [] };
+  if (!region) return { page: 1, polygon: [] };
+  const polygon = Array.isArray(region.polygon) && region.polygon.length > 0 ? region.polygon.map(Number) : [];
+  return { page: Number(region.pageNumber || 1), polygon };
+}
+
+// Credit-note doctype signal (W3): a credit note lawfully INCREASES nothing on the AP
+// gross-to-payable shape and has no S6 booking, so it must never corroborate. This is an
+// honest best-effort read of the engine result (docType / a type field / a negative or
+// parenthesised total); the DB is the final guard (it never corroborates when the
+// envelope carries corroboration_ineligible='credit_note').
+function isCreditNote(doc, fields) {
+  const docType = String(doc?.docType ?? "").toLowerCase();
+  if (docType.includes("credit")) return true;
+  for (const key of ["InvoiceType", "DocumentType", "Type"]) {
+    const v = fields[key];
+    const s = String(v?.content ?? v?.valueString ?? "").toLowerCase();
+    if (s.includes("credit")) return true;
+  }
+  const amt = fields.InvoiceTotal?.valueCurrency?.amount;
+  if (typeof amt === "number" && amt < 0) return true;
+  const content = String(fields.InvoiceTotal?.content ?? "").trim();
+  return content.startsWith("-") || /^\(.*\)$/.test(content);
 }
 
 // DI invoice field name -> the pinned field_path vocabulary. value_raw stays RAW
@@ -129,11 +155,23 @@ const FIELD_MAP = {
   VendorName: "invoice.vendor_name",
 };
 
+// DI field names that carry a deposit / prepayment (emitted as invoice.deposit when the
+// engine returns one; a non-zero deposit blocks Tier-A corroboration at the DB).
+const DEPOSIT_FIELDS = ["Deposit", "Deposits", "DepositAmount"];
+
 /** Map a succeeded prebuilt-invoice payload to the persist_invoice_facts fields
- *  array [{field_path, value_raw, page, polygon, confidence}] + a raw hash + pages. */
+ *  array [{field_path, value_raw, page, polygon, confidence}] + a raw hash + pages +
+ *  a corroboration-ineligibility envelope. The engine result is ALWAYS persisted as
+ *  facts; the envelope records WHY a total may never reach Tier A (W3):
+ *    - 'multi_document' — the result carries more than one top-level document (the INF
+ *      bundle rule: never corroborate the first/largest total of a multi-document scan).
+ *    - 'credit_note'    — a credit-note doctype signal (no S6 booking shape).
+ *  (A deposit is carried as its own invoice.deposit fact; the DB blocks corroboration on
+ *  a non-zero deposit directly, so it needs no envelope reason.) */
 export function normalizeAzureInvoice(payload) {
   const result = payload?.analyzeResult || payload || {};
-  const doc = Array.isArray(result.documents) ? result.documents[0] : null;
+  const documents = Array.isArray(result.documents) ? result.documents : [];
+  const doc = documents[0] || null;
   const fields = doc?.fields || {};
   const out = [];
   for (const [diName, fieldPath] of Object.entries(FIELD_MAP)) {
@@ -156,11 +194,25 @@ export function normalizeAzureInvoice(payload) {
     const region = firstRegion(total);
     out.push({ field_path: "invoice.currency", value_raw: String(currency), page: region.page, polygon: region.polygon, confidence: total.confidence == null ? null : Number(total.confidence) });
   }
+  // Deposit / prepayment (emitted only when the engine returns one — never fabricated).
+  for (const key of DEPOSIT_FIELDS) {
+    const f = fields[key];
+    if (!f) continue;
+    const region = firstRegion(f);
+    out.push({ field_path: "invoice.deposit", value_raw: String(f.content ?? f.valueString ?? ""), page: region.page, polygon: region.polygon, confidence: f.confidence == null ? null : Number(f.confidence) });
+    break;
+  }
+
+  let corroborationIneligible = null;
+  if (documents.length > 1) corroborationIneligible = "multi_document";
+  else if (doc && isCreditNote(doc, fields)) corroborationIneligible = "credit_note";
+  const envelope = corroborationIneligible ? { corroboration_ineligible: corroborationIneligible } : {};
+
   const rawSha256 = createHash("sha256")
     .update(JSON.stringify(payload ?? {}) + "|" + NORMALIZATION_VERSION, "utf8")
     .digest("hex");
   const pagesUsed = Array.isArray(result.pages) ? result.pages.length : doc ? 1 : 0;
-  return { fields: out, rawSha256, normalizationVersion: NORMALIZATION_VERSION, pagesUsed: pagesUsed || 1 };
+  return { fields: out, rawSha256, normalizationVersion: NORMALIZATION_VERSION, pagesUsed: pagesUsed || 1, envelope };
 }
 
 /** The injected service entry point. Test mode uses an injected adapter (no network). */

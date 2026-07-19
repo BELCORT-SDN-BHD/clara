@@ -23,6 +23,8 @@ import {
   printLaneNotes,
   noteLane,
   CLR,
+  CLR13,
+  CLR22,
   CLR23,
   CLR25,
   CODING_KIND,
@@ -41,6 +43,12 @@ import {
   invoiceFactsTask,
   claimTask,
   setDocLimits,
+  draftEntryV3,
+  balanced,
+  previewCorrection,
+  proposeCorrection,
+  idOf,
+  rootQuery,
   FIELD,
 } from "./s6-fixtures.mjs";
 import { holdThenContend, concurrentTwoSession, sawDeadlock } from "./rig-docs-race.mjs";
@@ -101,8 +109,22 @@ const approveRun = (entry, tok) => async (c) => {
 const persistRun = (task, totalRaw) => async (c) => {
   await c.query(GUARD);
   return c.query(
-    "select clara.persist_invoice_facts(p_task => $1, p_fields => $2::jsonb, p_raw_sha256 => $3, p_normalization_version => $4, p_pages_used => 1) as r",
+    "select clara.persist_invoice_facts(p_task => $1, p_fields => $2::jsonb, p_raw_sha256 => $3, p_normalization_version => $4, p_pages_used => 1, p_envelope => '{}'::jsonb) as r",
     [task, JSON.stringify([{ field_path: FIELD.total, value_raw: totalRaw, page: 1, polygon: [0, 0, 1, 1], confidence: 0.98 }, { field_path: FIELD.currency, value_raw: "MYR", page: 1, polygon: [0, 0, 1, 1], confidence: 0.99 }]), "a".repeat(64), "norm-2026-01"],
+  );
+};
+const reviseRun = (entry, tok, cited) => async (c) => {
+  await c.query(GUARD);
+  return c.query(
+    "select clara.revise_entry(p_entry => $1, p_lines => $2::jsonb, p_proposed_counterparty => $3::jsonb, p_evidence => $4::jsonb, p_expected_revision => $5, p_op_key => $6) as r",
+    [entry, JSON.stringify(billLines(EXP, AP, ROUTINE_CENTS)), JSON.stringify({ new: { name: "REVLOCK SDN BHD", registration_no: "201801000800" } }), JSON.stringify([ev(cited.regionId, cited.quote, FIELD.total)]), tok, opk("rev")],
+  );
+};
+const correctionRun = (correctionId, planHash) => async (c) => {
+  await c.query(GUARD);
+  return c.query(
+    "select clara.approve_wrong_client_correction(p_correction => $1, p_plan_hash => $2, p_attestation => $3, p_op_key => $4) as r",
+    [correctionId, planHash, "lock rig attest", opk("corr")],
   );
 };
 
@@ -176,4 +198,82 @@ test("C-2 approve of one draft || reverse of an unrelated approved entry on the 
   });
   assert.ok(!sawDeadlock(out), "approve || reverse on the same client do not deadlock");
   assert.ok(out.a.ok || out.b.ok, "at least one of the two independent operations committed");
+});
+
+// ===========================================================================
+// PROBE (2) — the REVISE and CORRECTION forced schedules (W9/§6.6 — the coverage
+// finding 9 flagged missing). Both winning orders, block proven via
+// pg_blocking_pids, hard statement_timeout guard, no deadlock.
+// ===========================================================================
+
+test("probe 2 revise || approve on the SAME draft, BOTH orders: the entry FOR UPDATE serializes them; the loser refuses (CLR22/CLR06); no deadlock", async (t) => {
+  if (unready(t)) return;
+  const { users, clients } = world;
+  // order A: approve holds the entry; revise blocks, then loses (non-draft → CLR22).
+  const a1 = await billWithClaimedFacts(users.alice, { client: clients.A1, amount: ROUTINE_CENTS });
+  const outA = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: users.alice, run: approveRun(a1.draft.entry_id, a1.draft.revision_token) },
+    b: { role: ROLES.authenticated, jwtSub: users.bob, run: reviseRun(a1.draft.entry_id, a1.draft.revision_token, a1.cited) },
+  });
+  assert.ok(outA.provedBlocked, "revise BLOCKED on approve's entry FOR UPDATE");
+  assert.ok(!sawDeadlock(outA), "approve-first revise schedule does not deadlock");
+  assert.equal(outA.a.ok, true, "approve committed first");
+  assert.equal(outA.b.ok, false, "revise then lost against the now-approved entry");
+  assert.ok([CLR22, CLR.revision].includes(outA.b.code), `the losing revise refuses CLR22 (non-draft) or CLR06 — got ${outA.b.code}`);
+
+  // order B: revise holds + rotates the token; approve blocks, then loses (stale token → CLR06).
+  const b1 = await billWithClaimedFacts(users.alice, { client: clients.A2, amount: ROUTINE_CENTS });
+  const outB = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: users.alice, run: reviseRun(b1.draft.entry_id, b1.draft.revision_token, b1.cited) },
+    b: { role: ROLES.authenticated, jwtSub: users.bob, run: approveRun(b1.draft.entry_id, b1.draft.revision_token) },
+  });
+  assert.ok(outB.provedBlocked, "approve BLOCKED on revise's entry FOR UPDATE");
+  assert.ok(!sawDeadlock(outB), "revise-first schedule does not deadlock");
+  assert.equal(outB.a.ok, true, "revise committed first (token rotated)");
+  assert.equal(outB.b.ok, false, "approve then lost with the pre-revise token");
+  assert.ok([CLR.revision, CLR.badRequest].includes(outB.b.code), `the losing approve refuses CLR06 (stale token) — got ${outB.b.code}`);
+});
+
+/** Build a proposed wrong-client correction over a doc with an approved cite +
+ *  a claimed facts task on the same doc. Returns { correctionId, planHash, task }. */
+async function setupCorrection(sub, fromClient, toClient, coa) {
+  const firm = await firmOf(fromClient);
+  const cited = await seedCitedDocument(sub, { firm, client: fromClient });
+  const d = await draftEntryV3(sub, { client: fromClient, resolution: await freshResolution(sub, fromClient), document: cited.documentId, sha256: cited.sha256, lines: balanced(coa, ROUTINE_CENTS), evidence: [ev(cited.regionId, cited.quote, FIELD.total)], opKey: opk("corrcite") });
+  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("ap") });
+  await previewCorrection(sub, { document: cited.documentId, fromClient, toClient });
+  await freshResolution(sub, toClient, { subjectKind: "document", subjectId: cited.documentId });
+  const proposal = await proposeCorrection(sub, { document: cited.documentId, fromClient, toClient, reason: "lock rig" });
+  const correctionId = idOf(proposal, "correction_id", "correction");
+  const planHash = proposal.plan_hash ?? (await rootQuery("select plan_hash from clara.filing_corrections where id=$1", [correctionId])).rows[0]?.plan_hash;
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  await claimTask(task.id, { egressApproved: true });
+  return { correctionId, planHash, task, cited };
+}
+
+test("probe 2 wrong-client correction || facts persist on the SAME document, BOTH orders: the active filing FOR UPDATE serializes them; no deadlock (the 0007 lock order holds)", async (t) => {
+  if (unready(t)) return;
+  const { users, clients, coa } = world;
+  // order A: persist holds the filing FOR UPDATE; correction blocks, then proceeds.
+  const s1 = await setupCorrection(users.alice, clients.A1, clients.A2, coa.A1);
+  const outA = await holdThenContend({
+    a: { role: ROLES.runtime, run: persistRun(s1.task.id, "RM 5,000.00") },
+    b: { role: ROLES.authenticated, jwtSub: users.bob, run: correctionRun(s1.correctionId, s1.planHash) },
+  });
+  assert.ok(outA.provedBlocked, "correction BLOCKED on persist's active-filing FOR UPDATE");
+  assert.ok(!sawDeadlock(outA), "facts-first correction schedule does not deadlock");
+  assert.equal(outA.a.ok, true, "persist committed first");
+  assert.ok(outA.b.ok || [CLR.stale, CLR.revision, CLR13].includes(outA.b.code), `the correction then commits, or refuses lawfully on the drifted plan — got ok=${outA.b.ok} code=${outA.b.code}`);
+
+  // order B: correction holds the filing; persist blocks, then commits harmlessly.
+  const s2 = await setupCorrection(users.alice, clients.A1, clients.A2, coa.A1);
+  const outB = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: users.bob, run: correctionRun(s2.correctionId, s2.planHash) },
+    b: { role: ROLES.runtime, run: persistRun(s2.task.id, "RM 5,000.00") },
+  });
+  assert.ok(outB.provedBlocked, "persist BLOCKED on the correction's active-filing lock");
+  assert.ok(!sawDeadlock(outB), "correction-first schedule does not deadlock");
+  assert.equal(outB.a.ok, true, "the correction committed first");
+  assert.equal(outB.b.ok, true, "persist then committed harmlessly against the retired/ensured filings");
 });

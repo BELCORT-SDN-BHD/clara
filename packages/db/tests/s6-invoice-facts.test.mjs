@@ -14,7 +14,6 @@ import assert from "node:assert/strict";
 import {
   ROUTINE_CENTS,
   assertRaises,
-  assertRaisesOneOf,
   assertRaisesReason,
   opk,
   rootQuery,
@@ -22,10 +21,8 @@ import {
   buildWorld,
   endPool,
   printLaneNotes,
-  noteLane,
   CLR,
   CLR21,
-  CLR23,
   CLR25,
   REASON,
   CODING_KIND,
@@ -53,6 +50,10 @@ import {
   persistInvoiceFacts,
   factField,
   factsRegion,
+  s6FixReady,
+  invoiceFactState,
+  reviseEntry,
+  getDraftReview,
 } from "./s6-fixtures.mjs";
 
 let ready = false;
@@ -161,14 +162,52 @@ test("§5 enqueue_invoice_facts is idempotent: a second enqueue in a live state 
 // CLR21 reason discriminants (all DB-raised, INTERFACE-PINS §2).
 // ===========================================================================
 
-test("Tier-A amount_conflict: a supplier bill whose line sum ≠ the persisted invoice.total → CLR21 amount_conflict", async (t) => {
+test("W1 amount exception (SUPERSEDES the draft-time amount_conflict refusal, §6.6 W1): a corroborated-total mismatch PERSISTS at draft with flags.amount_exception; approve refuses CLR21 amount_conflict; a governed p_amount_override (reason + cited region) resolves it HIGH-STAKES; a conforming revise clears it", async (t) => {
   if (unready(t)) return;
+  if (!(await s6FixReady())) { t.skip("fix-batch surface (revise_entry p_amount_override) absent — W1 lands in the post-Codex fix batch"); return; }
   const { users, clients } = world;
-  const { cited } = await docWithFacts(users.alice, { client: clients.A1, total: "RM 5,000.00" });
-  // Propose 400000 against a verified 500000 total.
+  const { cited } = await docWithFacts(users.alice, { client: clients.A1, total: "RM 5,000.00" }); // corroborated 500000
+  const freg = await factsRegion(cited.documentId, FIELD.total);
+  // Propose 400000 against a corroborated 500000 total → the draft PERSISTS (no draft refusal).
+  const draft = await wakeBill(users.alice, { client: clients.A1, cited, amount: 400000, evidence: [ev(freg.id, freg.text_content, FIELD.total)] });
+  assert.ok(draft.entry_id, "the mismatch draft PERSISTS (W1 supersedes the §6.5 draft-time refusal)");
+  const row = await entryRow(draft.entry_id);
+  assert.ok(row.flags?.amount_exception, "the draft carries flags.amount_exception");
+  assert.ok((await evidenceRows(draft.entry_id)).length >= 1, "evidence was still written in the draft transaction");
+  // Approve refuses while the exception is open.
   await assertRaisesReason(CLR21, REASON.amountConflict,
-    () => wakeBill(users.alice, { client: clients.A1, cited, amount: 400000 }),
-    "Tier-A mismatch (400000 vs verified 500000) → CLR21 amount_conflict");
+    () => approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: row.revision_token, opKey: opk("ap") }),
+    "approve with an open amount_exception → CLR21 amount_conflict");
+  // Governed override via revise (reason + cited region) → stamps flags.amount_override + HIGH-STAKES.
+  const rev = await reviseEntry(users.bob, {
+    entry: draft.entry_id, lines: billLines(EXP, AP, 400000),
+    vendor: { new: { name: "OVERRIDECO SDN BHD", registration_no: "201801000411" } },
+    evidence: [ev(freg.id, freg.text_content, FIELD.total)], expectedRevision: row.revision_token,
+    amountOverride: { reason: "supplier issued a partial credit note", region_id: freg.id },
+  });
+  const orow = await entryRow(draft.entry_id);
+  assert.ok(orow.flags?.amount_override, "revise stamped flags.amount_override");
+  const tok = rev.revision_token ?? orow.revision_token;
+  // The override makes the entry high-stakes: bob (the editor) cannot solo-approve.
+  await assertRaises(CLR.makerChecker, () => approveEntry(users.bob, { entry: draft.entry_id, expectedRevision: tok, opKey: opk("ap") }), "an override draft is high-stakes → self-approval CLR05");
+  await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: tok, opKey: opk("ap") });
+  assert.equal((await entryRow(draft.entry_id)).status, "approved", "a distinct checker approves the overridden bill");
+});
+
+test("W1 a CONFORMING revise clears the amount_exception (no override needed)", async (t) => {
+  if (unready(t)) return;
+  if (!(await s6FixReady())) { t.skip("fix-batch surface absent — W1 lands post-fix"); return; }
+  const { users, clients } = world;
+  const { cited } = await docWithFacts(users.alice, { client: clients.A2, total: "RM 5,000.00" });
+  const freg = await factsRegion(cited.documentId, FIELD.total);
+  const draft = await wakeBill(users.alice, { client: clients.A2, cited, amount: 400000, evidence: [ev(freg.id, freg.text_content, FIELD.total)] });
+  assert.ok((await entryRow(draft.entry_id)).flags?.amount_exception, "the mismatch draft carries the exception");
+  // Revise to the CONFORMING total (500000) → exception clears; approve succeeds.
+  const rev = await reviseEntry(users.bob, { entry: draft.entry_id, lines: billLines(EXP, AP, 500000), vendor: { new: { name: "CONFORMCO SDN BHD", registration_no: "201801000412" } }, evidence: [ev(freg.id, freg.text_content, FIELD.total)], expectedRevision: (await entryRow(draft.entry_id)).revision_token });
+  const crow = await entryRow(draft.entry_id);
+  assert.ok(!crow.flags?.amount_exception, "the conforming revise cleared flags.amount_exception");
+  await approveEntry(users.bob, { entry: draft.entry_id, expectedRevision: rev.revision_token ?? crow.revision_token, opKey: opk("ap") });
+  assert.equal((await entryRow(draft.entry_id)).status, "approved", "the conforming bill approves");
 });
 
 test("Tier-A agreement: a supplier bill whose line sum EQUALS the verified total (citing the MACHINE total region) drafts + approves", async (t) => {
@@ -251,6 +290,71 @@ test("D-L2-2 evidence is required on the SUPPLIER_BILL coding flow: coding_kind=
   assert.ok(plain.entry_id, "a plain (non-supplier_bill) doc-bound draft with null evidence is lawful (S5 behavior preserved, D-L2-2)");
 });
 
+test("W2 duplicate_bill (§6.6): a second approved supplier_bill of the same (client, counterparty, facts invoice_id) → CLR21 duplicate_bill at approve; a governed duplicate_override clears it; near_duplicates surface in get_draft_review", async (t) => {
+  if (unready(t)) return;
+  if (!(await s6FixReady())) { t.skip("fix-batch surface absent — W2 duplicate control lands post-fix"); return; }
+  const { users, clients } = world;
+  const invId = "INV-DUP-777";
+  // Bill 1 approves (births the vendor + records the facts invoice_id).
+  const d1 = await docWithFacts(users.alice, { client: clients.A1, total: "RM 5,000.00", extra: [factField(FIELD.invoiceId, invId)] });
+  const freg1 = await factsRegion(d1.cited.documentId, FIELD.total);
+  const bill1 = await wakeBill(users.alice, { client: clients.A1, cited: d1.cited, amount: 500000, evidence: [ev(freg1.id, freg1.text_content, FIELD.total)] });
+  await approveEntry(users.alice, { entry: bill1.entry_id, expectedRevision: bill1.revision_token, opKey: opk("ap") });
+  // Bill 2: a DIFFERENT document, same client + same vendor (same registration → same
+  // counterparty) + same facts invoice_id.
+  const d2 = await docWithFacts(users.alice, { client: clients.A1, total: "RM 5,000.00", extra: [factField(FIELD.invoiceId, invId)] });
+  const freg2 = await factsRegion(d2.cited.documentId, FIELD.total);
+  const bill2 = await wakeBill(users.alice, { client: clients.A1, cited: d2.cited, amount: 500000, evidence: [ev(freg2.id, freg2.text_content, FIELD.total)] });
+  const review = await getDraftReview(users.alice, { entry: bill2.entry_id, client: clients.A1 });
+  assert.ok("near_duplicates" in (review ?? {}) || JSON.stringify(review ?? {}).includes("near_dup"), "get_draft_review surfaces near_duplicates (FIX-SP-3)");
+  await assertRaisesReason(CLR21, REASON.duplicateBill,
+    () => approveEntry(users.alice, { entry: bill2.entry_id, expectedRevision: bill2.revision_token, opKey: opk("ap") }),
+    "exact (client, counterparty, invoice_id) duplicate → CLR21 duplicate_bill");
+  // A governed duplicate_override via revise clears the block.
+  const rev = await reviseEntry(users.bob, { entry: bill2.entry_id, lines: billLines(EXP, AP, 500000), vendor: VENDOR, evidence: [ev(freg2.id, freg2.text_content, FIELD.total)], expectedRevision: bill2.revision_token, duplicateOverride: { reason: "genuinely distinct bill with a reused supplier number" } });
+  const tok = rev.revision_token ?? (await entryRow(bill2.entry_id)).revision_token;
+  await approveEntry(users.bob, { entry: bill2.entry_id, expectedRevision: tok, opKey: opk("ap") });
+  assert.equal((await entryRow(bill2.entry_id)).status, "approved", "the governed duplicate_override lets the second bill post");
+});
+
+test("W3 no geometry never corroborates (§6.6): facts with an EMPTY polygon on the total → _invoice_fact_state corroborated=false (Tier B); a mismatching amount drafts with NO exception", async (t) => {
+  if (unready(t)) return;
+  if (!(await s6FixReady())) { t.skip("fix-batch surface absent — W3 polygon-required corroboration lands post-fix"); return; }
+  const { users, clients } = world;
+  const firm = await firmOf(clients.A1);
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  await claimTask(task.id, { egressApproved: true });
+  await persistInvoiceFacts(task.id, [factField(FIELD.total, "RM 5,000.00", { polygon: [] }), factField(FIELD.currency, "MYR")]);
+  const fs = await invoiceFactState(cited.documentId);
+  assert.equal(fs?.corroborated, false, "an empty-polygon total region never corroborates (W3)");
+  // A mismatching amount then drafts normally (Tier B — no corroborated total to conflict).
+  const draft = await wakeBill(users.alice, { client: clients.A1, cited, amount: 400000 });
+  assert.ok(draft.entry_id, "a mismatching amount drafts (facts not corroborated → Tier B)");
+  assert.ok(!(await entryRow(draft.entry_id)).flags?.amount_exception, "no amount_exception when the total does not corroborate");
+});
+
+test("W5 explicit non-MYR currency in a SUBMITTED evidence row → CLR21 currency_unsupported at draft AND revise (either tier, C-20)", async (t) => {
+  if (unready(t)) return;
+  if (!(await s6FixReady())) { t.skip("fix-batch surface absent — W5 evidence-row currency check lands post-fix"); return; }
+  const { users, clients } = world;
+  const firm = await firmOf(clients.A2);
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 }); // Tier B (no facts)
+  const cred = await mintInteractive(firm);
+  const res = await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: cited.documentId });
+  const usdEvidence = [ev(cited.regionId, "USD", FIELD.currency), ev(cited.regionId, cited.quote, FIELD.total)];
+  // at DRAFT: a submitted invoice.currency evidence row quoting USD → CLR21.
+  await assertRaisesReason(CLR21, REASON.currencyUnsupported,
+    () => wakeDraftEntry(cred, { client: clients.A2, resolution: res, lines: billLines(EXP, AP, ROUTINE_CENTS), document: cited.documentId, sha256: cited.sha256, vendor: VENDOR, evidence: usdEvidence, codingKind: CODING_KIND, opKey: opk("usd") }),
+    "non-MYR currency evidence at draft → CLR21 currency_unsupported");
+  // at REVISE: a clean MYR draft, then revise adding the USD currency evidence → CLR21.
+  const clean = await wakeBill(users.alice, { client: clients.A2, cited, amount: ROUTINE_CENTS });
+  await assertRaisesReason(CLR21, REASON.currencyUnsupported,
+    () => reviseEntry(users.bob, { entry: clean.entry_id, lines: billLines(EXP, AP, ROUTINE_CENTS), vendor: VENDOR, evidence: usdEvidence, expectedRevision: clean.revision_token }),
+    "non-MYR currency evidence at revise → CLR21 currency_unsupported");
+});
+
 // ===========================================================================
 // Evidence congruence + the evidence/approval race (CLR25 + token rotation).
 // ===========================================================================
@@ -285,7 +389,7 @@ test("C-8 stale evidence: a facts completion AFTER a Tier-B draft rotates its to
   assert.notEqual(rotated, draft.revision_token, "facts completion rotated the open draft's revision_token (P7)");
   // The OLD token is now stale → CLR06.
   await assertRaises(CLR.revision, () => approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("ap") }), "old token → CLR06");
-  // The NEW token surfaces the contradiction → CLR25 (stale evidence) or CLR23 (gross mismatch).
-  const err = await assertRaisesOneOf([CLR25, CLR23], () => approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: rotated, opKey: opk("ap") }), "contradicting facts refuse at approve");
-  if (err.code !== CLR25) noteLane(`stale-evidence approve refused with ${err.code} (expected CLR25; CLR23 bill-shape is the acceptable sibling — both refuse-not-approve). Record the guard order.`);
+  // The NEW token surfaces the contradiction → EXACTLY CLR25 (ratified law, W9/§6.6;
+  // the earlier CLR23-or-CLR25 tolerance is dropped — stale-evidence is CLR25).
+  await assertRaises(CLR25, () => approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: rotated, opKey: opk("ap") }), "contradicting late facts at approve → CLR25 exactly");
 });

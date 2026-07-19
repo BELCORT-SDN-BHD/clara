@@ -101,9 +101,9 @@ export function CodingSections({ token, clients }: { token: string; clients: Cli
                   <span className={styles.muted}>{clientName(t.client_id)}</span>
                 </div>
                 <div className={styles.inlineRow}>
-                  <input className={styles.input} aria-label={`result entry id for task ${t.id.slice(0, 8)}`} placeholder="coded entry id (optional)"
+                  <input className={styles.input} aria-label={`result entry id for task ${t.id.slice(0, 8)}`} placeholder="coded entry id"
                     value={entryInput[t.id] ?? ""} onChange={(e) => setEntryInput({ ...entryInput, [t.id]: e.target.value })} />
-                  <button className={styles.linkButton} disabled={busy} onClick={() => void act(() => completeCodingTask(token, t.id, entryInput[t.id]?.trim() || null))}>Done</button>
+                  <button className={styles.linkButton} disabled={busy || !(entryInput[t.id]?.trim())} onClick={() => void act(() => completeCodingTask(token, t.id, entryInput[t.id]!.trim()))}>Done</button>
                 </div>
                 <div className={styles.inlineRow}>
                   <input className={styles.input} aria-label={`dismiss reason for task ${t.id.slice(0, 8)}`} placeholder="dismiss reason"

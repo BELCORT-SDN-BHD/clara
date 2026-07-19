@@ -158,6 +158,11 @@ export type JeReviewPart = {
   client_id: string;
   document_id: string;
   provenance_tier: "verified" | "model_read";
+  // W1 (S6-D1 amount exception): the DB persisted a machine/proposed total mismatch as
+  // `flags.amount_exception` rather than refusing. The card renders the exception panel
+  // from the AUTHORITATIVE get_draft_review state; this flag is only a fast hint so the
+  // transcript/replay shows the draft opened an exception. The dashboard mirrors it.
+  exception?: boolean;
   uncertainty?: { note: string; alternatives: string[] };
 };
 

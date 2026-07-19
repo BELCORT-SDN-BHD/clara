@@ -13,14 +13,18 @@ import assert from "node:assert/strict";
 import {
   ROUTINE_CENTS,
   assertRaises,
+  assertRaisesReason,
   opk,
   rootQuery,
   s6EnsureReady,
+  s6FixReady,
   buildWorld,
   endPool,
   printLaneNotes,
   noteLane,
+  CLR21,
   CLR24,
+  REASON,
   CODING_KIND,
   S6_EVENT_TYPES,
   firmOf,
@@ -236,12 +240,30 @@ test("coding_attempts: a wake draft carrying p_coding writes ONE attempt row (ta
   assert.ok(attempt, "a coding_attempts row was written by the core in the draft transaction");
   assert.equal(attempt.entry_id, draft.entry_id, "the attempt binds the drafted entry");
   assert.equal(attempt.filing_id, cited.filingId, "the attempt binds the active filing");
-  // The structural one-attempt keys exist on the table (as unique constraints OR
-  // unique indexes — the DDL may create either).
-  const uniques = await rootQuery(
+  // unique(entry_id) holds in every 0009 (structural one-entry proof).
+  const uniques = (await rootQuery(
     `select indexdef from pg_indexes where schemaname='clara' and tablename='coding_attempts' and indexdef ilike '%unique%'`,
-  );
-  const defs = uniques.rows.map((r) => r.indexdef).join(" | ");
-  assert.ok(/\(\s*task_id,\s*filing_id\s*\)|\(\s*filing_id,\s*task_id\s*\)/.test(defs), `coding_attempts holds unique(task_id, filing_id) — got: ${defs}`);
-  assert.ok(/\(\s*entry_id\s*\)/.test(defs), `coding_attempts holds unique(entry_id) — got: ${defs}`);
+  )).rows.map((r) => r.indexdef).join(" | ");
+  assert.ok(/\(\s*entry_id\s*\)/.test(uniques), `coding_attempts holds unique(entry_id) — got: ${uniques}`);
+
+  // W4 (§6.6) SUPERSEDES the earlier unique(task_id, filing_id) expectation: the
+  // one-coding-per-TASK law makes the unique (task_id) (filing dimension dropped);
+  // a SECOND attempt for one task refuses CLR21 double_coded (one coding per turn).
+  if (!(await s6FixReady())) {
+    noteLane("coding_attempts one-per-TASK (W4) not yet applied — the pre-fix unique is (task_id, filing_id); skipping the W4 assertions");
+    return;
+  }
+  assert.ok(/\(\s*task_id\s*\)/.test(uniques), `W4: coding_attempts unique is now (task_id) — got: ${uniques}`);
+  // A second attempt for the SAME task on a DIFFERENT filing/document → CLR21 double_coded.
+  const cited2 = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  const cred2 = await mintInteractive(firm, users.alice);
+  const res2 = await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: cited2.documentId });
+  await assertRaisesReason(CLR21, REASON.doubleCoded,
+    () => wakeDraftEntry(cred2, {
+      client: clients.A1, resolution: res2, lines: billLines(EXP, AP, ROUTINE_CENTS),
+      document: cited2.documentId, sha256: cited2.sha256, vendor: { new: { name: "SECONDCO SDN BHD", registration_no: "201801000556" } },
+      evidence: [ev(cited2.regionId, cited2.quote, FIELD.total)], coding: { task_id: agentTask, part_payload: { type: "je_review" } },
+      codingKind: CODING_KIND, opKey: `code-doc:${agentTask}:${cited2.documentId}`,
+    }),
+    "a second coding attempt for one task → CLR21 double_coded (W4 one-coding-per-turn)");
 });

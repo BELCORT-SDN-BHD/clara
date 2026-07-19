@@ -23,22 +23,60 @@ import { readScoped, writeScoped, safeRead, type PgExec, type ToolCtx } from "./
 
 export type DraftInput = z.infer<typeof draftJournalEntryInputSchema>;
 
-/** Best-effort read of a verified MYR invoice total (cents) from get_document_extract.
- *  Unknown keys collapse to Tier B; the DB still enforces the Tier-A equation. */
-function readVerifiedTotalCents(extract: unknown): number | null {
-  const x = (extract ?? {}) as Record<string, unknown>;
-  const facts = (x.invoice_facts ?? x.facts ?? {}) as Record<string, unknown>;
-  const total = (facts.total ?? facts.invoice_total ?? x.invoice_total) as Record<string, unknown> | number | undefined;
-  const cents =
-    typeof total === "number" ? total : total && typeof total === "object" ? (total.cents as number | undefined) : undefined;
-  return typeof cents === "number" && Number.isFinite(cents) ? cents : null;
+/** One region of the REAL get_document_extract shape (0009 get_document_extract:
+ *  regions[] joined to a done extraction). locator is `{page, polygon}` jsonb. */
+type ExtractRegion = {
+  engine_kind?: string;
+  version_n?: number;
+  field_path?: string;
+  monetary_cents?: number | null;
+  engine_confidence?: number | null;
+  locator?: { page?: number; polygon?: unknown } | null;
+  text_content?: string | null;
+};
+
+/** Normalize a currency quote to its bare uppercase alpha code (e.g. "RM"/"MYR"). */
+function normalizeCurrency(text: string | null | undefined): string | null {
+  if (typeof text !== "string") return null;
+  const c = text.replace(/[^A-Za-z]/g, "").toUpperCase();
+  return c.length > 0 ? c : null;
 }
 
-function readCurrency(extract: unknown): string | null {
-  const x = (extract ?? {}) as Record<string, unknown>;
-  const facts = (x.invoice_facts ?? x.facts ?? {}) as Record<string, unknown>;
-  const cur = (facts.currency ?? x.currency) as string | undefined;
-  return typeof cur === "string" && cur.length > 0 ? cur.toUpperCase() : null;
+/** Read the invoice-facts corroboration signals off the REAL get_document_extract
+ *  shape (W5 / pins §3): the invoice_facts regions of the latest done extraction.
+ *  This is the wrapper's FRIENDLY early read — the tier label for the part and an
+ *  explicit-non-MYR early refusal. The DB (_invoice_fact_state / _draft_entry_core)
+ *  is the AUTHORITATIVE Tier-A + currency enforcer (single-doc, amount_due, deposit,
+ *  non-empty polygon, submitted-evidence currency); a disagreement never posts a
+ *  number — the DB persists the amount exception or refuses. */
+function readInvoiceFactState(extract: unknown): {
+  verifiedTotalCents: number | null;
+  corroborated: boolean;
+  explicitNonMyr: boolean;
+} {
+  const regions = ((extract as { regions?: unknown } | null)?.regions ?? []) as ExtractRegion[];
+  if (!Array.isArray(regions) || regions.length === 0) {
+    return { verifiedTotalCents: null, corroborated: false, explicitNonMyr: false };
+  }
+  const facts = regions.filter((r) => r?.engine_kind === "invoice_facts");
+  if (facts.length === 0) return { verifiedTotalCents: null, corroborated: false, explicitNonMyr: false };
+  const latest = Math.max(...facts.map((r) => Number(r.version_n ?? 0)));
+  const rows = facts.filter((r) => Number(r.version_n ?? 0) === latest);
+
+  const totals = rows.filter((r) => r.field_path === "invoice.total");
+  const totalRow = totals[0];
+  const totalCents =
+    totalRow && typeof totalRow.monetary_cents === "number" && Number.isFinite(totalRow.monetary_cents) ? totalRow.monetary_cents : null;
+  const polygon = (totalRow?.locator as { polygon?: unknown } | null | undefined)?.polygon;
+  const hasGeometry = Array.isArray(polygon) && polygon.length > 0;
+  const conf = typeof totalRow?.engine_confidence === "number" ? totalRow.engine_confidence : 0;
+
+  const currency = normalizeCurrency(rows.find((r) => r.field_path === "invoice.currency")?.text_content);
+  // Friendly Tier-A: exactly one physical total row, positive cents, confidence >=0.95,
+  // MYR. Empty geometry never corroborates (no fabricated locator — W3).
+  const corroborated = totals.length === 1 && totalCents != null && totalCents > 0 && conf >= 0.95 && hasGeometry && currency === "MYR";
+  const explicitNonMyr = currency != null && currency !== "MYR";
+  return { verifiedTotalCents: corroborated ? totalCents : null, corroborated, explicitNonMyr };
 }
 
 /**
@@ -76,25 +114,24 @@ export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Pro
 
     const filing = server.filing as { sha256: string; filing_id: string; resolution_id: string | null } | null;
     if (!filing) return { ok: false, refusal: refusalFromDbError({ code: "CLR02" }) };
-    const currency = readCurrency(server.extract);
-    if (currency && currency !== "MYR") {
+
+    // Friendly early reads off the AUTHORITATIVE extract shape (W5). Explicit non-MYR
+    // refuses early (the DB also refuses at both tiers). A machine/proposed total
+    // MISMATCH is NOT refused here (W1): the draft proceeds and the DB persists it as
+    // a reviewable `flags.amount_exception` — the receipt/part carries exception:true.
+    const facts = readInvoiceFactState(server.extract);
+    if (facts.explicitNonMyr) {
       return { ok: false, refusal: refusalFromDbError({ code: "CLR21", detail: '{"reason":"currency_unsupported"}' }) };
     }
-    const verifiedTotal = readVerifiedTotalCents(server.extract);
-    const proposedGross = input.lines.reduce((sum, l) => sum + (l.credit_cents || 0), 0);
-    let tier: "verified" | "model_read" = "model_read";
-    if (verifiedTotal != null) {
-      tier = "verified";
-      if (proposedGross !== verifiedTotal) {
-        return { ok: false, refusal: refusalFromDbError({ code: "CLR21", detail: '{"reason":"amount_conflict"}' }) };
-      }
-    }
+    const detectedTier: "verified" | "model_read" = facts.corroborated ? "verified" : "model_read";
 
     // 2. Assemble writer args. The model NEVER supplies sha256/books/op_key/resolution.
+    // The DB re-derives the authoritative provenance_tier into the coding_attempts row;
+    // detectedTier is a hint carried for the fresh part when the receipt omits a tier.
     const partPayload = {
       client_id: clientId,
       document_id: input.document_id,
-      provenance_tier: tier,
+      provenance_tier: detectedTier,
       uncertainty: input.uncertainty ?? null,
     };
     const coding = { task_id: ctx.taskId, part_payload: partPayload };
@@ -124,10 +161,20 @@ export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Pro
           "supplier_bill",
         ],
       );
-      return (r.rows[0]?.receipt ?? {}) as { entry_id?: string; revision_token?: string };
+      return (r.rows[0]?.receipt ?? {}) as {
+        entry_id?: string;
+        revision_token?: string;
+        provenance_tier?: string;
+        exception?: boolean;
+      };
     });
 
     if (!receipt.entry_id || !receipt.revision_token) return { ok: false, refusal: refusalFromDbError({ code: "internal" }) };
+    // Prefer the DB's authoritative tier from the receipt; fall back to the friendly
+    // detected tier when the receipt omits it. `exception` reflects a persisted
+    // amount exception (W1) — the card renders the panel from get_draft_review.
+    const tier: "verified" | "model_read" =
+      receipt.provenance_tier === "verified" || receipt.provenance_tier === "model_read" ? receipt.provenance_tier : detectedTier;
     const je_review: JeReviewPart = {
       type: "je_review",
       entry_id: String(receipt.entry_id),
@@ -135,6 +182,7 @@ export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Pro
       client_id: clientId,
       document_id: input.document_id,
       provenance_tier: tier,
+      ...(receipt.exception === true ? { exception: true } : {}),
       uncertainty: input.uncertainty,
     };
     return { ok: true, je_review };

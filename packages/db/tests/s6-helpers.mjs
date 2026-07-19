@@ -42,6 +42,7 @@ export const REASON = {
   vendorMalformed: "vendor_malformed",
   evidenceInvalid: "evidence_invalid",
   doubleCoded: "double_coded",
+  duplicateBill: "duplicate_bill", // FIX-round W2/§6.6 — exact (client, counterparty, invoice_id) dup
   sessionUnbound: "session_unbound", // RUNTIME-labeled only — never a DB raise
 };
 

@@ -28,12 +28,18 @@ import {
   insertUser,
   seedAdmission,
   createFirm,
+  addMember,
   createClient,
   upsertAccount,
   freshResolution,
   draftEntry,
+  approveEntry,
   seedVerifiedDocument,
   fileDocument,
+  previewCorrection,
+  proposeCorrection,
+  approveCorrection,
+  idOf,
   s6Ready,
 } from "./s6-fixtures.mjs";
 
@@ -145,4 +151,61 @@ test("probe 1 (upgrade pre-flight): a filing carrying TWO open drafts at 0008 AB
   const present = await rootQuery("select 1 from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='clara' and c.relname='counterparties'");
   assert.equal(present.rowCount, 0, "0009 rolled back cleanly (counterparties absent — the migration is atomic)");
   noteLane("one-open-draft pre-flight ABORT verified: a two-open-draft filing blocks the index build");
+});
+
+// ===========================================================================
+// W9/§6.6 — the LEGACY-STATE correction case (restores the §3.5 combined-case
+// coverage the §8 reorder lost). At 0008: an APPROVED cite + ONE OPEN draft on a
+// single filing (lawful pre-0009 — only TWO open drafts abort the pre-flight).
+// After 0009, a wrong-client correction reverses the live cite AND withdraws the
+// open draft in ONE bounded transaction.
+// ===========================================================================
+
+test("probe 1 (upgrade legacy-state correction): approved cite + one open draft on one filing at 0008 → 0009 applies (no abort); approve_wrong_client_correction reverses the cite + withdraws the draft in one bounded transaction", async (t) => {
+  if (skipUnlessReset(t)) return;
+  const { reset } = await import("../scripts/reset.mjs");
+  const { migrate } = await import("../scripts/migrate.mjs");
+  await reset({ log: () => {} });
+  await migrate({ dir: exportPre0009(), log: () => {} });
+
+  const prefix = `s6leg_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`;
+  const owner = await insertUser(prefix, "owner");
+  const bob = await insertUser(prefix, "bob");
+  const token = await seedAdmission();
+  const firm = await createFirm(owner, { name: `${prefix}_firm`, token, opKey: opk() });
+  await addMember(owner, { firm, user: bob, role: "bookkeeper", opKey: opk() });
+  const c1 = await createClient(owner, { name: `${prefix}_c1`, opKey: opk() });
+  const c2 = await createClient(owner, { name: `${prefix}_c2`, opKey: opk() });
+  for (const c of [c1, c2]) {
+    await upsertAccount(owner, { client: c, code: "1000", name: "Cash", type: "asset", opKey: opk() });
+    await upsertAccount(owner, { client: c, code: "4000", name: "Sales", type: "income", opKey: opk() });
+    await upsertAccount(owner, { client: c, code: "9990", name: "Rounding", type: "equity", special: "rounding", opKey: opk() });
+  }
+  const seed = await seedVerifiedDocument({ firm });
+  await fileDocument(owner, { document: seed.documentId, client: c1, resolution: await freshResolution(owner, c1, { subjectKind: "document", subjectId: seed.documentId }) });
+  const lines = balanced({ cash: "1000", sales: "4000" }, ROUTINE_CENTS);
+  // An APPROVED cite bound to the filing.
+  const d1 = await draftEntry(human(owner), { client: c1, resolution: await freshResolution(owner, c1), document: seed.documentId, sha256: seed.sha256, lines, opKey: opk() });
+  await approveEntry(owner, { entry: d1.entry_id, expectedRevision: d1.revision_token, opKey: opk() });
+  // ONE open draft on the SAME filing (lawful pre-0009).
+  const d2 = await draftEntry(human(owner), { client: c1, resolution: await freshResolution(owner, c1), document: seed.documentId, sha256: seed.sha256, lines, opKey: opk() });
+
+  // 0009 applies WITHOUT aborting (only two OPEN drafts abort; here it is one approved + one draft).
+  await migrate({ dir: MIG_DIR, log: () => {} });
+  await assertSurfaceClean();
+
+  // The wrong-client correction c1 → c2.
+  await freshResolution(owner, c2, { subjectKind: "document", subjectId: seed.documentId });
+  await previewCorrection(owner, { document: seed.documentId, fromClient: c1, toClient: c2 });
+  const proposal = await proposeCorrection(owner, { document: seed.documentId, fromClient: c1, toClient: c2, reason: "wrong client legacy" });
+  const correctionId = idOf(proposal, "correction_id", "correction");
+  const planHash = proposal.plan_hash ?? (await rootQuery("select plan_hash from clara.filing_corrections where id=$1", [correctionId])).rows[0]?.plan_hash;
+  await approveCorrection(bob, { correction: correctionId, planHash });
+
+  // The combined bounded transaction: the approved cite is reversed, the draft withdrawn.
+  const e1 = (await rootQuery("select reversed_by from clara.journal_entries where id=$1", [d1.entry_id])).rows[0];
+  assert.ok(e1.reversed_by, "the live approved cite was reversed by the correction");
+  const e2 = (await rootQuery("select status from clara.journal_entries where id=$1", [d2.entry_id])).rows[0];
+  assert.equal(e2.status, "withdrawn", "the open draft on the retired filing was withdrawn in the SAME correction transaction");
+  noteLane("legacy-state correction verified: combined reverse(live cite) + withdraw(open draft) in one bounded transaction");
 });

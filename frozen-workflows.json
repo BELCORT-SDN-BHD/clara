@@ -14,11 +14,11 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
-      "sha256": "3e7f8e4e4d363e26471665eedc145723009825f2a706d0b3010c65d04b0fff77",
+      "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v2.impl.ts": {
-      "sha256": "ac3c01816e244776ed5ac7feed2ac46c676caaaa41e30d0791fd4f78cc7596b3",
+      "sha256": "d8ec47ac070bc85cf038841095ee84b0f1eb2f84f85c194789f781724b3fea41",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v2.infra.ts": {
@@ -26,11 +26,11 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v2.prompt.ts": {
-      "sha256": "884b78d865adac4b6b212fe17f5badf829c53f368f7c835d271fc9ee6824718f",
+      "sha256": "db5c70767fbf87d55cf18226abf22e91dc7e3c96266ff58055f089e11b79b3f9",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v2.tools.ts": {
-      "sha256": "469181aa9efea4c92c1b923e747b11bff0a406a1e743ce6998ce285867899697",
+      "sha256": "ac64bc953c760a5e7dc523fb42ef69588e220e13499106ddf3c1bbc40e1e7c73",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v2.ts": {
@@ -54,7 +54,7 @@
       "note": ""
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
-      "sha256": "a1721782dab865bfa6c1a9cf00f32b5fc5bcbeed9a0feb708c99a62aa7ad1c21",
+      "sha256": "f2d3ef98ed9ce533d04252fd5771e463b017c8b66c77ec70d74a457f534bd7b1",
       "note": ""
     },
     "packages/runtime/workflows/invoiceFacts.v1.impl.ts": {

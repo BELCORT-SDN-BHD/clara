@@ -336,8 +336,9 @@ export async function listCodingTasks(jwt: string, opts?: { clientId?: string | 
   return pgrestSelect<CodingTaskRow>(q, jwt);
 }
 
-/** Close a coding task as done, optionally referencing the coded result entry. */
-export async function completeCodingTask(jwt: string, taskId: string, resultEntry: string | null): Promise<void> {
+/** Close a coding task as done — the coded result entry is REQUIRED (FIX-SP-4;
+ *  proof that the task was addressed, not just dismissed). */
+export async function completeCodingTask(jwt: string, taskId: string, resultEntry: string): Promise<void> {
   await rpc("complete_coding_task", { p_task: taskId, p_result_entry: resultEntry, p_op_key: opKey() }, jwt);
 }
 

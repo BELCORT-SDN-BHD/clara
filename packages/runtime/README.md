@@ -101,8 +101,10 @@ bookkeeper+ authority, never a firm-wide grant.
 |---|---|
 | `CLARA_WRITE_DATABASE_URL` | The `clara_wake_write_login` DSN (member of `clara_wake_interactive` alone). REQUIRED in production (fail-closed boot assert). **Deploy order:** 0009 creates the login NOLOGIN; the operator ceremony gives it LOGIN+password and sets this secret — it must be present before the Slice-6 image boots or the world fails closed. |
 | `CLARA_WRITE_POOL_MAX` | Write-pool size (default 2). |
-| `CLARA_INVOICE_FACTS_MAX_ATTEMPTS` | Per-document invoice-facts vendor-call cap (default 3); terminal `failed` after, with Tier B the honest fallback. |
+| (invoice-facts attempt cap) | Owned by the **database** — hard-coded to 3 in `0009`'s enqueue/claim path. There is **no** runtime env var (an env override would be a no-op); Tier B is the honest permanent fallback once the cap is reached. |
 | `CLARA_CLAMD_MIN_BACKOFF_MS` / `CLARA_CLAMD_MAX_BACKOFF_MS` | clamd self-heal backoff (PIN-AB-2): a clamd exit is non-fatal; intake fails closed honestly (`503 scanner_unavailable`) while it restarts. |
+| `CLARA_CLAMD_HEALTHY_RUN_MS` | A clamd run lasting at least this long (default `60000`) is treated as healthy and resets the restart backoff. |
+| `CLARA_CLAMD_SCAN_DEADLINE_MS` | Scan-wide deadline (default `120000`): a connected-but-silent (wedged) scanner fails closed (`503 scanner_unavailable`) rather than hanging (W6). |
 
 `withWriteWakeScoped(secret, fn)` = `BEGIN` → txn-local `set_config('clara.wake_secret',…,true)`
 → (checkout already did `SET ROLE clara_wake_interactive`, NOT read-only) → write →

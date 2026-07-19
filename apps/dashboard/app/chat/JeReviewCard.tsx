@@ -1,11 +1,13 @@
-// The je_review card (contract §6 / S6-R12). Hydration law: the je_review part
+// The je_review card (contract §6 / S6-R12 / W1). Hydration law: the je_review part
 // carries IDENTIFIERS ONLY — this card re-derives authoritative state via
 // get_draft_review on mount and after EVERY action (no optimistic UI; the
-// answer_interruption / CorrectionWizard precedent, brief 5b/5f). Actions are
-// direct PostgREST RPCs on the human lane, each with a fresh op_key (inside the
-// review.ts wrappers). DB refusals are surfaced VERBATIM; the CLR21 amount_conflict
-// discriminant renders the amount-exception state (S6-D1), whose only lawful
-// resolution is the governed revise override (which sets the HIGH-STAKES flag).
+// answer_interruption / CorrectionWizard precedent). Actions are direct PostgREST
+// RPCs on the human lane, each with a fresh op_key (inside the review.ts wrappers).
+// DB refusals are surfaced VERBATIM; the CLR21 DETAIL reason token is parsed EXACTLY
+// (never blanket-classified). The amount exception (W1/F1) is PERSISTED at draft on
+// entry.flags.amount_exception — the panel renders from that hydrated state, NEVER
+// synthesized from a caught error; its only lawful resolution is revising to the
+// corroborated total or a governed amount override (which sets HIGH-STAKES).
 
 import { useCallback, useEffect, useState } from "react";
 import type { ClaraPart, PgrestError } from "./api";
@@ -15,9 +17,11 @@ import {
   getMachineTotal,
   reviseEntry,
   withdrawDraft,
-  type AmountException,
+  type AmountOverrideArg,
   type DraftReview,
+  type DuplicateOverrideArg,
   type EvidenceArg,
+  type MachineTotal,
   type ReviseLine,
   type VendorArg,
 } from "./review";
@@ -27,6 +31,17 @@ type JeReviewPart = Extract<ClaraPart, { type: "je_review" }>;
 type LineBuf = { account_code: string; debit: string; credit: string; description: string };
 type EvidenceBuf = { region_id: string; quote: string; field_path: string };
 type VendorBuf = { mode: "existing" | "new"; existing_id: string; name: string; registration_no: string };
+
+// Per-token CLR21 copy (INTERFACE-PINS §2 tokens). The card renders the copy for
+// the EXACT reason discriminant; the verbatim DB message still shows below.
+const CLR21_COPY: Record<string, string> = {
+  amount_conflict: "The proposed total does not match the machine-corroborated total — resolve below (edit to the corroborated total, or override with a reason).",
+  currency_unsupported: "This bill's currency is not MYR — Clara cannot post it (multi-currency is a later slice).",
+  vendor_malformed: "The vendor proposal is malformed — fix the vendor before approving.",
+  evidence_invalid: "The cited evidence is missing or does not match the document — re-cite before approving.",
+  double_coded: "This filing is already coded — an approved entry or another open draft already binds it.",
+  duplicate_bill: "This looks like a duplicate of an approved bill (same vendor + invoice number). Override with a reason to proceed, or discard.",
+};
 
 function fmtCents(cents: number): string {
   const neg = cents < 0;
@@ -39,14 +54,17 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [notice, setNotice] = useState<"stale" | "amount_conflict" | null>(null);
-  const [amountException, setAmountException] = useState<AmountException | null>(null);
+  const [clr, setClr] = useState<{ code: string | null; reason: string | null } | null>(null);
+  const [stale, setStale] = useState(false);
+  const [machineFact, setMachineFact] = useState<MachineTotal | null>(null);
   const [outcome, setOutcome] = useState<"approved" | "discarded" | null>(null);
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [attestation, setAttestation] = useState("");
   const [lineBuf, setLineBuf] = useState<LineBuf[]>([]);
   const [evidenceBuf, setEvidenceBuf] = useState<EvidenceBuf[]>([]);
   const [vendorBuf, setVendorBuf] = useState<VendorBuf>({ mode: "new", existing_id: "", name: "", registration_no: "" });
+  const [amountOverrideReason, setAmountOverrideReason] = useState("");
+  const [duplicateOverrideReason, setDuplicateOverrideReason] = useState("");
 
   const load = useCallback(async () => {
     if (!token) return;
@@ -64,40 +82,43 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
     void load();
   }, [load]);
 
-  // The amount exception (S6-D1) is NOT a field of get_draft_review — compose it
-  // from the CLR21 error + a get_document_extract read (both machine values + region).
-  const composeAmountException = async (rev: DraftReview | null) => {
-    const proposed = rev ? rev.lines.reduce((sum, l) => sum + l.debit_cents, 0) : 0;
-    if (!token || !rev?.document_id) {
-      setAmountException({ proposed_cents: proposed, machine_total_cents: null, machine_region: null, confidence: null });
+  // The machine-total REGION for the persisted amount-exception panel + the amount
+  // override citation comes from get_document_extract (the exception itself is
+  // hydrated from get_draft_review — this only adds the region id).
+  const exceptionActive = !!review?.amount_exception && !review?.amount_override;
+  useEffect(() => {
+    if (!token || !exceptionActive || !review?.document_id) {
+      setMachineFact(null);
       return;
     }
-    const m = await getMachineTotal(token, rev.document_id, rev.client_id).catch(() => null);
-    setAmountException({ proposed_cents: proposed, machine_total_cents: m?.cents ?? null, machine_region: m?.region ?? null, confidence: m?.confidence ?? null });
-  };
+    let cancelled = false;
+    getMachineTotal(token, review.document_id, review.client_id)
+      .then((m) => {
+        if (!cancelled) setMachineFact(m);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [token, exceptionActive, review?.document_id, review?.client_id]);
 
-  // Every action re-derives authoritative state afterward. amount_conflict / stale
-  // token are classified from the governed error envelope and re-fetched so the
-  // card shows the DB's truth, never an optimistic guess. A plain function (not
-  // useCallback) so it closes over the CURRENT review for the exception compose.
+  // Every action re-derives authoritative state afterward (no optimistic UI). A CLR
+  // refusal is classified from the governed envelope (exact reason token) and the
+  // draft re-fetched so persisted state (e.g. the amount exception) shows the truth.
   const act = async (fn: () => Promise<void>, onOk?: () => void) => {
     setBusy(true);
     setErr(null);
-    setNotice(null);
-    setAmountException(null);
+    setClr(null);
+    setStale(false);
     try {
       await fn();
       onOk?.();
       await load();
     } catch (e) {
       const pe = e as PgrestError;
-      if (pe.reason === "amount_conflict" || pe.clr === "CLR21") {
-        setNotice("amount_conflict");
-        await composeAmountException(review);
-      } else if (pe.clr === "CLR06") {
-        setNotice("stale");
-      }
       setErr(pe.message ?? String(e));
+      if (pe.clr === "CLR06") setStale(true);
+      else if (pe.clr) setClr({ code: pe.clr, reason: pe.reason ?? null });
       await load().catch(() => {});
     } finally {
       setBusy(false);
@@ -114,17 +135,33 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
         description: l.description ?? "",
       })),
     );
-    setEvidenceBuf(review.evidence.map((e) => ({ region_id: e.region_id ?? "", quote: e.quote, field_path: e.field_path ?? "" })));
+    const seededEvidence = review.evidence.map((e) => ({ region_id: e.region_id ?? "", quote: e.quote, field_path: e.field_path ?? "" }));
+    // W1 refinement: an amount override must cite the machine-total region in the
+    // revised evidence — prefill it (region.text_content is the quote; the DB's
+    // position() recoverability check passes on the stored substring). The
+    // bookkeeper can still edit before submitting.
+    const exActive = !!review.amount_exception && !review.amount_override;
+    if (exActive && machineFact?.region && !seededEvidence.some((e) => e.region_id === machineFact.region)) {
+      seededEvidence.push({ region_id: machineFact.region, quote: machineFact.quote ?? "", field_path: "invoice.total" });
+    }
+    setEvidenceBuf(seededEvidence);
     setVendorBuf(
       review.vendor?.matched_counterparty_id
         ? { mode: "existing", existing_id: review.vendor.matched_counterparty_id, name: review.vendor.name, registration_no: review.vendor.registration_no ?? "" }
         : { mode: "new", existing_id: "", name: review.vendor?.name ?? "", registration_no: review.vendor?.registration_no ?? "" },
     );
+    setAmountOverrideReason("");
+    setDuplicateOverrideReason("");
     setErr(null);
     setMode("edit");
   };
 
-  const buildReviseArgs = (): { lines: ReviseLine[]; vendor: VendorArg | null; evidence: EvidenceArg[] } => {
+  const buildReviseArgs = (): {
+    lines: ReviseLine[];
+    vendor: VendorArg | null;
+    evidence: EvidenceArg[];
+    overrides: { amount: AmountOverrideArg | null; duplicate: DuplicateOverrideArg | null };
+  } => {
     const lines: ReviseLine[] = lineBuf.map((l) => ({
       account_code: l.account_code.trim(),
       debit_cents: Number(l.debit) || 0,
@@ -142,25 +179,40 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
     const evidence: EvidenceArg[] = evidenceBuf
       .filter((e) => e.quote.trim())
       .map((e) => ({ region_id: e.region_id.trim(), quote: e.quote.trim(), field_path: e.field_path.trim() || undefined }));
-    return { lines, vendor, evidence };
+    const overrides = {
+      // An amount override cites the machine-total region (must be in the revised evidence).
+      amount: amountOverrideReason.trim() ? { reason: amountOverrideReason.trim(), region_id: machineFact?.region ?? null } : null,
+      duplicate: duplicateOverrideReason.trim() ? { reason: duplicateOverrideReason.trim() } : null,
+    };
+    return { lines, vendor, evidence, overrides };
   };
 
   // Edit → approve (§6): revise (rotates the token) THEN approve with the NEW token.
   const saveAndApprove = () =>
-    act(async () => {
-      if (!review) return;
-      const { lines, vendor, evidence } = buildReviseArgs();
-      const nextToken = await reviseEntry(token!, review.entry_id, lines, vendor, evidence, review.revision_token);
-      await approveEntry(token!, review.entry_id, nextToken, attestation.trim() || null);
-    }, () => { setMode("view"); setOutcome("approved"); });
+    act(
+      async () => {
+        if (!review) return;
+        const { lines, vendor, evidence, overrides } = buildReviseArgs();
+        const nextToken = await reviseEntry(token!, review.entry_id, lines, vendor, evidence, review.revision_token, overrides);
+        await approveEntry(token!, review.entry_id, nextToken, attestation.trim() || null);
+      },
+      () => {
+        setMode("view");
+        setOutcome("approved");
+      },
+    );
 
-  // Save the edit as a re-reviewable draft (revise only; the token rotates).
+  // Save the edit as a re-reviewable draft (revise only; the token rotates). Clears
+  // an amount exception when revised to a conforming total or with an override.
   const saveDraft = () =>
-    act(async () => {
-      if (!review) return;
-      const { lines, vendor, evidence } = buildReviseArgs();
-      await reviseEntry(token!, review.entry_id, lines, vendor, evidence, review.revision_token);
-    }, () => setMode("view"));
+    act(
+      async () => {
+        if (!review) return;
+        const { lines, vendor, evidence, overrides } = buildReviseArgs();
+        await reviseEntry(token!, review.entry_id, lines, vendor, evidence, review.revision_token, overrides);
+      },
+      () => setMode("view"),
+    );
 
   if (!token) {
     return (
@@ -183,19 +235,22 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
   const r = review;
   const debitTotal = r ? r.lines.reduce((s, l) => s + l.debit_cents, 0) : 0;
   const creditTotal = r ? r.lines.reduce((s, l) => s + l.credit_cents, 0) : 0;
-  const ex = amountException;
   const uncertainty = r?.uncertainty ?? part.uncertainty ?? null;
   const isDraft = r?.status === "draft";
   const distinctCheckerNeeded = !!r && r.high_stakes && r.eligible_checker_count >= 2;
-  const ready = !!r && isDraft && !ex;
+  // Hydrated tier is authoritative (the part value can be stale). Approve is blocked
+  // only by an UNRESOLVED persisted amount exception.
+  const tier = r?.provenance_tier ?? part.provenance_tier;
+  const exUnresolved = !!r?.amount_exception && !r?.amount_override;
+  const ready = !!r && isDraft && !exUnresolved;
 
   return (
     <div className={styles.jeCard}>
       <div className={styles.jeHead}>
         <strong>Journal entry review</strong>
         <span className={styles.muted}>{part.entry_id.slice(0, 8)}{r ? ` · ${r.status}` : ""}</span>
-        <span className={`${styles.jeTierBadge} ${part.provenance_tier === "verified" ? styles.jeTierVerified : styles.jeTierRead}`}>
-          {part.provenance_tier === "verified" ? "machine-verified total" : "read by Clara — verify against the source"}
+        <span className={`${styles.jeTierBadge} ${tier === "verified" ? styles.jeTierVerified : styles.jeTierRead}`}>
+          {tier === "verified" ? "machine-corroborated total" : "read by Clara — verify against the source"}
         </span>
       </div>
 
@@ -206,7 +261,11 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
           {r.high_stakes ? (
             <div className={styles.jeHighStakes}>
               <strong>High-stakes</strong>
-              {r.high_stakes_reasons.length ? <span> — {r.high_stakes_reasons.join("; ")}</span> : null}
+              {r.high_stakes_reasons.length ? (
+                <ul className={styles.jeReasonList}>
+                  {r.high_stakes_reasons.map((reason, i) => <li key={i}>{reason}</li>)}
+                </ul>
+              ) : null}
               {distinctCheckerNeeded ? <p className={styles.jeHint}>A distinct checker is required (CLR05). If you created this draft, approval will be refused — a second eligible checker must approve.</p> : null}
             </div>
           ) : null}
@@ -253,7 +312,7 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
             <ul className={styles.jeEvidence}>
               {r.evidence.map((e, i) => (
                 <li key={i}>
-                  <span className={`${styles.jeCite} ${e.provenance_tier === "verified" ? styles.jeCiteVerified : styles.jeCiteRead}`}>{e.provenance_tier === "verified" ? "verified" : "read"}</span>
+                  <span className={`${styles.jeCite} ${e.provenance_tier === "verified" ? styles.jeCiteVerified : styles.jeCiteRead}`}>{e.provenance_tier === "verified" ? "corroborated" : "read"}</span>
                   <span className={styles.muted}>{e.field_path ?? "fact"}{e.region_id ? ` · region ${e.region_id.slice(0, 8)}` : ""}:</span> “{e.quote}”
                 </li>
               ))}
@@ -267,21 +326,40 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
             </div>
           ) : null}
 
-          {ex ? (
-            <div className={styles.jeException}>
-              <strong>Amount exception — approval is disabled.</strong>
-              {ex.machine_total_cents !== null ? (
-                <p>Machine-verified total {fmtCents(ex.machine_total_cents)}{ex.machine_region ? ` (region ${ex.machine_region.slice(0, 8)})` : ""}{ex.confidence !== null ? ` · confidence ${ex.confidence}` : ""} does not match the proposed {fmtCents(ex.proposed_cents)}.</p>
-              ) : (
-                <p>The proposed total {fmtCents(ex.proposed_cents)} was refused as an amount conflict; the machine total was not readable from the extract.</p>
-              )}
-              <p className={styles.jeHint}>Resolve with a governed override: edit the draft to the correct amount (or attest the read value). The override sets the HIGH-STAKES flag, so a distinct checker will be required.</p>
-              <button className={styles.button} disabled={busy} onClick={enterEdit}>Resolve by editing</button>
+          {r.near_duplicates.length ? (
+            <div className={styles.jeDup}>
+              <strong>Possible duplicate</strong>
+              <ul className={styles.jeReasonList}>
+                {r.near_duplicates.map((d, i) => (
+                  <li key={i}>
+                    {d.invoice_id ?? "(no invoice no)"} · {d.total_cents !== null ? fmtCents(d.total_cents) : "—"}
+                    {d.posting_date ? ` · ${d.posting_date}` : ""} · entry {d.entry_id.slice(0, 8)}
+                  </li>
+                ))}
+              </ul>
+              <span className={styles.muted}>Non-blocking — review before approving. An exact duplicate is refused at approve (override with a reason).</span>
             </div>
           ) : null}
 
-          {notice === "amount_conflict" && !ex ? <p className={styles.jeHint}>Amount conflict — resolve by editing the draft to the correct amount (a governed override that sets the HIGH-STAKES flag).</p> : null}
-          {notice === "stale" ? <p className={styles.jeHint}>The draft changed since it was shown — re-reviewed with the current state. Check the lines, then act again.</p> : null}
+          {r.amount_exception && !r.amount_override ? (
+            <div className={styles.jeException}>
+              <strong>Amount exception — approval is disabled.</strong>
+              <p>
+                The machine-corroborated total {r.amount_exception.machine_total_cents !== null ? fmtCents(r.amount_exception.machine_total_cents) : "(unavailable)"}
+                {machineFact?.region ? ` (region ${machineFact.region.slice(0, 8)})` : ""} does not match the proposed {fmtCents(r.amount_exception.proposed_cents)}.
+              </p>
+              <p className={styles.jeHint}>Resolve by editing the draft to the corroborated total, OR override with a reason (cites the machine-total region). An override sets HIGH-STAKES — a distinct checker will be required.</p>
+              <button className={styles.button} disabled={busy} onClick={enterEdit}>Resolve by editing</button>
+            </div>
+          ) : r.amount_override ? (
+            <div className={styles.jeException}>
+              <strong>Amount override applied.</strong>
+              <p>{r.amount_override.reason}{r.amount_override.region_id ? ` · region ${r.amount_override.region_id.slice(0, 8)}` : ""} — HIGH-STAKES; a distinct checker is required.</p>
+            </div>
+          ) : null}
+
+          {clr && clr.reason && CLR21_COPY[clr.reason] ? <p className={styles.jeHint}>{clr.reason}: {CLR21_COPY[clr.reason]}</p> : null}
+          {stale ? <p className={styles.jeHint}>The draft changed since it was shown — re-reviewed with the current state. Check the lines, then act again.</p> : null}
         </>
       ) : null}
 
@@ -295,6 +373,15 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
           setVendorBuf={setVendorBuf}
           attestation={attestation}
           setAttestation={setAttestation}
+          overrides={{
+            showAmount: exUnresolved,
+            amountReason: amountOverrideReason,
+            setAmountReason: setAmountOverrideReason,
+            machineRegion: machineFact?.region ?? null,
+            showDuplicate: (clr?.reason === "duplicate_bill") || r.near_duplicates.length > 0,
+            duplicateReason: duplicateOverrideReason,
+            setDuplicateReason: setDuplicateOverrideReason,
+          }}
           busy={busy}
           onSaveApprove={() => void saveAndApprove()}
           onSaveDraft={() => void saveDraft()}
@@ -316,13 +403,24 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
   );
 }
 
+type OverrideCtl = {
+  showAmount: boolean;
+  amountReason: string;
+  setAmountReason: (v: string) => void;
+  machineRegion: string | null;
+  showDuplicate: boolean;
+  duplicateReason: string;
+  setDuplicateReason: (v: string) => void;
+};
+
 function EditPanel({
-  lineBuf, setLineBuf, evidenceBuf, setEvidenceBuf, vendorBuf, setVendorBuf, attestation, setAttestation, busy, onSaveApprove, onSaveDraft, onCancel,
+  lineBuf, setLineBuf, evidenceBuf, setEvidenceBuf, vendorBuf, setVendorBuf, attestation, setAttestation, overrides, busy, onSaveApprove, onSaveDraft, onCancel,
 }: {
   lineBuf: LineBuf[]; setLineBuf: (v: LineBuf[]) => void;
   evidenceBuf: EvidenceBuf[]; setEvidenceBuf: (v: EvidenceBuf[]) => void;
   vendorBuf: VendorBuf; setVendorBuf: (v: VendorBuf) => void;
   attestation: string; setAttestation: (v: string) => void;
+  overrides: OverrideCtl;
   busy: boolean; onSaveApprove: () => void; onSaveDraft: () => void; onCancel: () => void;
 }) {
   const patchLine = (i: number, p: Partial<LineBuf>) => setLineBuf(lineBuf.map((l, j) => (j === i ? { ...l, ...p } : l)));
@@ -369,6 +467,19 @@ function EditPanel({
           </div>
         ))}
       </div>
+      {overrides.showAmount || overrides.showDuplicate ? (
+        <div className={styles.jeVendorEdit}>
+          <label className={styles.muted}>Governed overrides (HIGH-STAKES — a distinct checker will be required)</label>
+          {overrides.showAmount ? (
+            <input className={styles.jeInput} aria-label="amount override reason" placeholder={`amount override reason${overrides.machineRegion ? ` (cites region ${overrides.machineRegion.slice(0, 8)})` : ""}`}
+              value={overrides.amountReason} onChange={(e) => overrides.setAmountReason(e.target.value)} />
+          ) : null}
+          {overrides.showDuplicate ? (
+            <input className={styles.jeInput} aria-label="duplicate override reason" placeholder="duplicate override reason"
+              value={overrides.duplicateReason} onChange={(e) => overrides.setDuplicateReason(e.target.value)} />
+          ) : null}
+        </div>
+      ) : null}
       <input className={styles.jeAttest} placeholder="Attestation (solo path)" value={attestation} onChange={(e) => setAttestation(e.target.value)} aria-label="Attestation" />
       <div className={styles.jeActions}>
         <button className={styles.button} disabled={busy} onClick={onSaveApprove}>{busy ? "Working…" : "Save & approve"}</button>
