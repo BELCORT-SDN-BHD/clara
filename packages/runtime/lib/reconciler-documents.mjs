@@ -138,11 +138,19 @@ async function documentTaskIndex(client, deps) {
   try {
     const rows = await documentTaskSnapshot(client, deps.onlyFirm);
     const existingRows = await listTaskMetas();
+    // Return (and persist) the MERGED metas: the DB row is authoritative for
+    // lifecycle fields, the sidecar for transport fields (storageKey/sha256/mime)
+    // the task-only snapshot no longer carries — the sweep's later writeTaskMeta
+    // calls spread these merged objects, so returning raw rows would clobber the
+    // sidecar's transport fields (the pre-fix joined query masked exactly that).
+    const merged = [];
     for (const row of rows) {
       const existing = existingRows.find((meta) => meta?.taskId === row.taskId);
-      await writeTaskMeta(row.taskId, { ...existing, ...row });
+      const meta = { ...existing, ...row };
+      await writeTaskMeta(row.taskId, meta);
+      merged.push(meta);
     }
-    return rows;
+    return merged;
   } catch (err) {
     if (!isDocumentSelectUnavailable(err)) throw err;
     if (!warnedDocumentSelectGap) {
@@ -191,7 +199,7 @@ export async function reconcileDocumentTasks(client, deps) {
 
     if (task.status === "queued") {
       const age = Date.now() - Date.parse(task.createdAt || task.updatedAt || 0);
-      if (Number.isFinite(age) && age < DOCUMENT_GRACE_MS) continue;
+      if (Number.isFinite(age) && age < (deps.graceMs ?? DOCUMENT_GRACE_MS)) continue;
       if (task.runId) {
         try {
           const state = await documentRunState(deps.getRun, task.runId);
