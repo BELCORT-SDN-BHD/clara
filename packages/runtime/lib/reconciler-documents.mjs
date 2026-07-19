@@ -101,25 +101,18 @@ function isDocumentSelectUnavailable(err) {
   return err?.code === "42501" || err?.code === "42P01" || /permission denied|does not exist/i.test(String(err?.message || ""));
 }
 
-function documentFormat(mime, storageKey) {
-  const normalized = String(mime || "").toLowerCase();
-  if (normalized === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet") return "xlsx";
-  if (normalized === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") return "docx";
-  if (normalized === "text/tab-separated-values") return "tsv";
-  if (normalized === "text/csv") return "csv";
-  if (normalized === "application/xml" || normalized === "text/xml") return "xml";
-  if (normalized === "application/pdf") return "pdf";
-  const extension = String(storageKey || "").match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
-  return extension === "jpg" ? "jpeg" : extension || "unknown";
-}
 
 async function documentTaskSnapshot(client, onlyFirm) {
+  // TASK COLUMNS ONLY (all 0008-granted). The former clara.documents join always
+  // 42501'd on live (the runtime holds no SELECT there — deliberately, PIN-AB-6),
+  // which silently killed the DB-authority path and hid every sidecar-less task:
+  // exactly the DB-enqueued invoice_facts lane. Document metadata is NOT needed
+  // here — OCR sidecar merges keep their intake-written storage fields, and the
+  // facts workflow receives storage_path/sha256/mime_type from the CLAIM receipt.
   const result = await client.query(
     `select t.id as task_id, t.document_id, t.firm_id, t.engine_id, t.engine_config,
-            t.version_n, t.lane, t.status, t.workflow_run_id as run_id, t.created_at,
-            d.storage_path as storage_key, d.sha256, d.mime_type as mime
+            t.version_n, t.lane, t.status, t.workflow_run_id as run_id, t.created_at
        from clara.document_processing_tasks t
-       join clara.documents d on d.id=t.document_id and d.firm_id=t.firm_id
       where t.status in ('queued','held_egress','running')
         and ($1::uuid is null or t.firm_id=$1)
       order by t.created_at limit 100`,
@@ -136,10 +129,6 @@ async function documentTaskSnapshot(client, onlyFirm) {
     lane: String(row.lane),
     status: String(row.status),
     runId: row.run_id == null ? null : String(row.run_id),
-    storageKey: String(row.storage_key),
-    sha256: String(row.sha256),
-    mime: String(row.mime),
-    format: documentFormat(row.mime, row.storage_key),
     createdAt: new Date(row.created_at).toISOString(),
     updatedAt: new Date().toISOString(),
   }));
