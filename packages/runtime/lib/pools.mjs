@@ -41,6 +41,15 @@ const TEST_MODE = process.env.RELAY_TEST_MODE === "1";
 // Pool sizing + timeouts — env-tunable, documented against the §4.1 budget.
 export const RUNTIME_POOL_MAX = Number(process.env.CLARA_RUNTIME_POOL_MAX || 5);
 export const READ_POOL_MAX = Number(process.env.CLARA_READ_POOL_MAX || 5);
+// The Slice-6 write floor (contract §5 / brief-4 Shape-1): a THIRD login
+// (clara_wake_write_login, member of clara_wake_interactive alone) + a SMALL write
+// pool (max 2 — inside the connection budget) that reaches the EXISTING
+// wake_draft_entry writer. NOT read-only; SET ROLE clara_wake_interactive; COMMITs.
+export const WRITE_POOL_MAX = Number(process.env.CLARA_WRITE_POOL_MAX || 2);
+
+// The dedicated login each pool connects AS in production (the two-login law, N10):
+// the pool connects as this login, then SET ROLEs to its one group on every checkout.
+const LOGIN_NAMES = { runtime: "clara_runtime_login", read: "clara_agent_read_login", write: "clara_wake_write_login" };
 const STATEMENT_TIMEOUT_MS = Number(process.env.CLARA_STATEMENT_TIMEOUT_MS || 30000);
 const IDLE_IN_TXN_TIMEOUT_MS = Number(process.env.CLARA_IDLE_IN_TXN_TIMEOUT_MS || 15000);
 const CONNECT_TIMEOUT_MS = Number(process.env.CLARA_CONNECT_TIMEOUT_MS || 5000);
@@ -60,22 +69,35 @@ export const READ_CREDENTIAL_TTL = process.env.CLARA_READ_CREDENTIAL_TTL || "5 m
  * @returns {pg.PoolConfig}
  */
 function dsnVarFor(which) {
-  return which === "runtime" ? "CLARA_RUNTIME_DATABASE_URL" : "CLARA_READ_DATABASE_URL";
+  if (which === "runtime") return "CLARA_RUNTIME_DATABASE_URL";
+  if (which === "write") return "CLARA_WRITE_DATABASE_URL";
+  return "CLARA_READ_DATABASE_URL";
+}
+
+function poolMaxFor(which) {
+  if (which === "runtime") return RUNTIME_POOL_MAX;
+  if (which === "write") return WRITE_POOL_MAX;
+  return READ_POOL_MAX;
 }
 
 /**
  * Assert the production pool config is present — call once at boot (serve.mjs). In
- * production (RELAY_TEST_MODE !== '1') BOTH dedicated login DSNs are REQUIRED; the
- * runtime must never fall back to a shared/base identity (S4-AB8, fail-closed).
+ * production (RELAY_TEST_MODE !== '1') ALL THREE dedicated login DSNs are REQUIRED;
+ * the runtime must never fall back to a shared/base identity (S4-AB8, fail-closed).
+ * The write DSN (CLARA_WRITE_DATABASE_URL) joins this fail-closed set (contract §5 /
+ * C-18): a coding-floor world must never boot without a wired write floor. NOTE
+ * (deploy ordering): the clara_wake_write_login is created NOLOGIN in 0009 and given
+ * LOGIN+password + this secret at the operator ceremony — the secret must be present
+ * BEFORE the Slice-6 image boots, or the world fails closed.
  */
 export function assertProductionPoolConfig() {
   if (TEST_MODE) return;
-  for (const which of ["runtime", "read"]) {
+  for (const which of ["runtime", "read", "write"]) {
     const v = dsnVarFor(which);
     if (!process.env[v]) {
       throw new Error(
         `${v} is REQUIRED in production (RELAY_TEST_MODE unset): the ${which} pool must connect as its dedicated ` +
-          `login (${which === "runtime" ? "clara_runtime_login" : "clara_agent_read_login"}) — never a fallback identity. Refusing to start.`,
+          `login (${LOGIN_NAMES[which]}) — never a fallback identity. Refusing to start.`,
       );
     }
   }
@@ -83,8 +105,7 @@ export function assertProductionPoolConfig() {
 
 function loginConfig(which) {
   assertNoTargetSplit(); // fail closed on a canonical-target split before connecting
-  const dsn =
-    which === "runtime" ? process.env.CLARA_RUNTIME_DATABASE_URL : process.env.CLARA_READ_DATABASE_URL;
+  const dsn = process.env[dsnVarFor(which)];
   let base;
   if (TEST_MODE) {
     // Local throwaway: connect with the base env identity, then SET ROLE (N10).
@@ -97,7 +118,7 @@ function loginConfig(which) {
   }
   return {
     ...base,
-    max: which === "runtime" ? RUNTIME_POOL_MAX : READ_POOL_MAX,
+    max: poolMaxFor(which),
     connectionTimeoutMillis: CONNECT_TIMEOUT_MS,
   };
 }
@@ -116,6 +137,7 @@ function setupSql(role, readOnly) {
 
 let _runtimePool = null;
 let _readPool = null;
+let _writePool = null;
 
 /** Lazy singleton runtime pool (clara_runtime). */
 export function getRuntimePool() {
@@ -135,6 +157,17 @@ export function getReadPool() {
     _readPool.on("error", (err) => console.error("[clara-runtime] read pool error:", err.message));
   }
   return _readPool;
+}
+
+/** Lazy singleton WRITE pool (the Slice-6 coding floor). Connects as
+ * clara_wake_write_login and SET ROLEs to clara_wake_interactive — NOT read-only
+ * (it COMMITs the draft). Small (max 2) so it fits the connection budget. */
+export function getWritePool() {
+  if (!_writePool) {
+    _writePool = new pg.Pool(loginConfig("write"));
+    _writePool.on("error", (err) => console.error("[clara-runtime] write pool error:", err.message));
+  }
+  return _writePool;
 }
 
 /**
@@ -222,6 +255,28 @@ export function mintWakeCredential(firmId, ttl = READ_CREDENTIAL_TTL) {
 }
 
 /**
+ * Mint an interactive wake credential ON BEHALF OF a firm member (Slice 6, C-11/
+ * NEW-5). The DB mint REJECTS a below-bookkeeper OBO with CLR10, and wake_context()
+ * re-validates the member's bookkeeper+ standing on every USE — so a demoted author's
+ * outstanding credential goes inert. Used by the v2 read tools + the write floor so
+ * the coding capability rides the initiator's live authority, not a firm-wide grant.
+ * Same secret-handling law as mintWakeCredential (never crosses a WDK step boundary).
+ * @param {string} firmId
+ * @param {string} oboUserId  the task's created_by (the initiating member)
+ * @param {string} [ttl]
+ * @returns {Promise<{credentialId: string, secret: string}>}
+ */
+export function mintWakeCredentialObo(firmId, oboUserId, ttl = READ_CREDENTIAL_TTL) {
+  return withRuntime(async (c) => {
+    const r = await c.query(
+      "select credential_id, secret from clara.mint_wake_credential($1, $2, $3, $4::interval)",
+      ["interactive", firmId, oboUserId, ttl],
+    );
+    return { credentialId: r.rows[0].credential_id, secret: r.rows[0].secret };
+  });
+}
+
+/**
  * Run a firm-scoped read on the read pool with a wake secret bound TXN-LOCALLY
  * (SET LOCAL inside a transaction, so it can never leak to a later checkout —
  * P4). The whole read runs inside a read-only transaction; we ROLLBACK to end it
@@ -242,6 +297,35 @@ export function withReadWakeScoped(secret, fn) {
       // End the read-only txn; this drops the txn-local wake_secret. checkout()
       // then runs its own ROLLBACK/RESET (harmless no-ops) before release.
       await c.query("rollback").catch(() => {});
+    }
+  });
+}
+
+/**
+ * Run fn on a clara_wake_interactive WRITE connection (Slice-6 coding floor). The
+ * checkout SET ROLEs to clara_wake_interactive (NOT read-only); this helper binds
+ * the wake secret TXN-LOCALLY, runs the write, and COMMITs (a write, unlike the read
+ * path's rollback). A thrown fn rolls back; checkout()'s shared cleanup (ROLLBACK +
+ * RESET ALL) and P4 destroy-on-connection-error then apply. The secret is set with
+ * set_config(..., is_local=true) so it never enters SQL text and clears on commit.
+ * @template T
+ * @param {string} secret  a live interactive wake-credential secret (never persisted/returned)
+ * @param {(c: pg.PoolClient) => Promise<T>} fn
+ */
+export function withWriteWakeScoped(secret, fn) {
+  return checkout(getWritePool(), setupSql("clara_wake_interactive", false), async (c) => {
+    await c.query("begin");
+    // Parameterised SET LOCAL — the secret never enters SQL text; txn-scoped.
+    await c.query("select set_config('clara.wake_secret', $1, true)", [secret]);
+    try {
+      const result = await fn(c);
+      await c.query("commit");
+      return result;
+    } catch (err) {
+      // Roll back so the wake secret + any partial write are dropped; checkout()'s
+      // finally then resets/destroys the connection as appropriate (P4).
+      await c.query("rollback").catch(() => {});
+      throw err;
     }
   });
 }
@@ -269,12 +353,15 @@ export async function setRuntimeRoleOn(client) {
   await client.query("set role clara_runtime");
 }
 
-/** Close both pools (process shutdown / test teardown). */
+/** Close all pools (process shutdown / test teardown). */
 export async function endPools() {
   const runtime = _runtimePool;
   const read = _readPool;
+  const write = _writePool;
   _runtimePool = null;
   _readPool = null;
+  _writePool = null;
   if (runtime) await runtime.end().catch(() => {});
   if (read) await read.end().catch(() => {});
+  if (write) await write.end().catch(() => {});
 }

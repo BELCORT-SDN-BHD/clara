@@ -268,3 +268,79 @@ export async function placeLegalHold(jwt: string, documentId: string, reason: st
 export async function releaseLegalHold(jwt: string, documentId: string, reason: string): Promise<void> {
   await rpc("release_legal_hold", { p_document: documentId, p_reason: reason, p_op_key: opKey() }, jwt);
 }
+
+// ---------------------------------------------------------------------------
+// Slice-6 coding surfaces (contract §7 / INTERFACE-PINS §1/§4): a read-only
+// uncoded-bills view + the coding-tasks list (AB-9's recode carrier as a real
+// durable task). Writers are the governed human-lane fns; house act()/re-load
+// idiom, no optimistic UI.
+//
+// Cross-lane note: list_uncoded_filings' jsonb shape and coding_tasks_visible's
+// masked columns are 0009's (L1). The mappings/column lists below are the single
+// place to reconcile at integration; reads are defensive.
+// ---------------------------------------------------------------------------
+
+/** A filing with no draft and no unreversed approved entry bound to it (C-15). */
+export type UncodedFiling = {
+  filing_id: string;
+  document_id: string | null;
+  client_id: string | null;
+  filename: string | null;
+  filed_at: string | null;
+};
+
+export type CodingTaskRow = {
+  id: string;
+  client_id: string | null;
+  document_id: string | null;
+  filing_id: string | null;
+  origin: "correction" | "manual" | string;
+  correction_id: string | null;
+  status: "open" | "done" | "dismissed" | string;
+  closed_reason: string | null; // open-reason is NOT exposed by the masked view
+  result_entry_id: string | null;
+  created_at: string | null;
+  closed_at: string | null;
+};
+
+function s(v: unknown): string | null {
+  return typeof v === "string" ? v : null;
+}
+
+/** ACTIVE filings needing coding (read-only). p_client null = firm-wide. */
+export async function listUncodedFilings(jwt: string, clientId?: string | null): Promise<UncodedFiling[]> {
+  const rows = (await rpc("list_uncoded_filings", { p_client: clientId ?? null }, jwt)) as unknown;
+  if (!Array.isArray(rows)) return [];
+  return rows.map((raw) => {
+    const o = (raw ?? {}) as Record<string, unknown>;
+    return {
+      filing_id: s(o.filing_id) ?? s(o.id) ?? "",
+      document_id: s(o.document_id),
+      client_id: s(o.client_id),
+      filename: s(o.original_filename) ?? s(o.filename),
+      filed_at: s(o.filed_at),
+    };
+  });
+}
+
+const CODING_TASK_COLS =
+  "id,client_id,document_id,filing_id,origin,correction_id,status,closed_reason,result_entry_id,created_at,closed_at";
+
+/** Coding tasks via the masked view. taskId lets the chat recode notification
+ *  render one task's state by id (N-F18 — one surface, two rows). */
+export async function listCodingTasks(jwt: string, opts?: { clientId?: string | null; taskId?: string }): Promise<CodingTaskRow[]> {
+  const filters: string[] = [];
+  if (opts?.taskId) filters.push(`id=eq.${encodeURIComponent(opts.taskId)}`);
+  if (opts?.clientId) filters.push(`client_id=eq.${encodeURIComponent(opts.clientId)}`);
+  const q = `coding_tasks_visible?${filters.length ? filters.join("&") + "&" : ""}select=${CODING_TASK_COLS}&order=created_at.desc`;
+  return pgrestSelect<CodingTaskRow>(q, jwt);
+}
+
+/** Close a coding task as done, optionally referencing the coded result entry. */
+export async function completeCodingTask(jwt: string, taskId: string, resultEntry: string | null): Promise<void> {
+  await rpc("complete_coding_task", { p_task: taskId, p_result_entry: resultEntry, p_op_key: opKey() }, jwt);
+}
+
+export async function dismissCodingTask(jwt: string, taskId: string, reason: string): Promise<void> {
+  await rpc("dismiss_coding_task", { p_task: taskId, p_reason: reason, p_op_key: opKey() }, jwt);
+}

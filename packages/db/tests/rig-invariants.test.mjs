@@ -289,9 +289,11 @@ test("T9 balance + rounding: >5c refused; 1-5c auto-rounds; no rounding acct →
   const res4 = await freshResolution(users.bob, clients.A1);
   await assertRaises(CLR.badRequest, () => draftEntry(human(users.bob), { client: clients.A1, resolution: res4, lines: [{ account_code: coa.A1.cash, debit_cents: 100, credit_cents: 0 }], opKey: opk() }), "single-line entry");
   // Zero-amount line: keep the entry BALANCED (100=100) so the per-line
-  // exactly-one-of-debit/credit CHECK is what fires (23514), not the balance guard.
+  // exactly-one-of-debit/credit rule is what fires, not the balance guard.
+  // [S6 N-F8] shared validator pre-empts the table CHECK: CLR10 ("each line must carry
+  // exactly one positive debit or credit") — 0009 _validate_entry_lines runs before 23514.
   const res5 = await freshResolution(users.bob, clients.A1);
-  await assertRaises(PG.checkViolation, () => draftEntry(human(users.bob), { client: clients.A1, resolution: res5, lines: [{ account_code: coa.A1.cash, debit_cents: 100, credit_cents: 0 }, { account_code: coa.A1.sales, debit_cents: 0, credit_cents: 100 }, { account_code: coa.A1.expense, debit_cents: 0, credit_cents: 0 }], opKey: opk() }), "zero-amount line");
+  await assertRaises(CLR.badRequest, () => draftEntry(human(users.bob), { client: clients.A1, resolution: res5, lines: [{ account_code: coa.A1.cash, debit_cents: 100, credit_cents: 0 }, { account_code: coa.A1.sales, debit_cents: 0, credit_cents: 100 }, { account_code: coa.A1.expense, debit_cents: 0, credit_cents: 0 }], opKey: opk() }), "zero-amount line");
 });
 
 test("T9 raw path: deferred balance trigger holds at COMMIT; a moved line must leave both balanced", async (t) => {
@@ -440,10 +442,13 @@ test("T15 money shape: fractional/negative/both-sides lines are refused", async 
   // Fractional cents: the core's `(->>'debit_cents')::bigint` fails and is re-raised
   // as CLR10 (exact contract code — not the raw 22P02).
   await assertRaises(CLR.badRequest, () => draftEntry(human(users.bob), { client: clients.A1, resolution: resFrac, lines: [{ account_code: coa.A1.cash, debit_cents: 12.5, credit_cents: 0 }, { account_code: coa.A1.sales, debit_cents: 0, credit_cents: 12 }], opKey: opk() }), "fractional cents");
-  // Negative cents: the `debit_cents >= 0` table CHECK fires → exactly 23514.
-  await assertRaises(PG.checkViolation, () => draftEntry(human(users.bob), { client: clients.A1, resolution: resNeg, lines: [{ account_code: coa.A1.cash, debit_cents: -100, credit_cents: 0 }, { account_code: coa.A1.sales, debit_cents: 0, credit_cents: -100 }], opKey: opk() }), "negative cents");
-  // Both-sides line (totals BALANCED 200=200): the exactly-one-side CHECK fires → 23514.
-  await assertRaises(PG.checkViolation, () => draftEntry(human(users.bob), { client: clients.A1, resolution: resBoth, lines: [{ account_code: coa.A1.cash, debit_cents: 100, credit_cents: 100 }, { account_code: coa.A1.sales, debit_cents: 100, credit_cents: 100 }], opKey: opk() }), "both sides on one line");
+  // Negative cents: [S6 N-F8] shared validator pre-empts the table CHECK: CLR10
+  // ("each line must carry exactly one positive debit or credit") — 0009 _validate_entry_lines
+  // runs before the `debit_cents >= 0` table CHECK's 23514.
+  await assertRaises(CLR.badRequest, () => draftEntry(human(users.bob), { client: clients.A1, resolution: resNeg, lines: [{ account_code: coa.A1.cash, debit_cents: -100, credit_cents: 0 }, { account_code: coa.A1.sales, debit_cents: 0, credit_cents: -100 }], opKey: opk() }), "negative cents");
+  // Both-sides line (totals BALANCED 200=200): [S6 N-F8] shared validator pre-empts the
+  // exactly-one-side table CHECK: CLR10 (fires before 23514).
+  await assertRaises(CLR.badRequest, () => draftEntry(human(users.bob), { client: clients.A1, resolution: resBoth, lines: [{ account_code: coa.A1.cash, debit_cents: 100, credit_cents: 100 }, { account_code: coa.A1.sales, debit_cents: 100, credit_cents: 100 }], opKey: opk() }), "both sides on one line");
 });
 
 // ===========================================================================

@@ -190,6 +190,20 @@ jobs:
           PGDATABASE=clara_docs_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
             node --test tests/rig-docs-upgrade.test.mjs
 
+      # Slice-6 coding-floor upgrade drill (same false-green protection as the two
+      # steps above): the contract-blind §11 probe-1 battery — fresh 0001→0009
+      # compile + the pg_proc ACL/overload tail, deploy-onto-existing
+      # 0001→0008→0009 incl. the one-open-draft partial unique, and the
+      # two-open-drafts-on-one-filing pre-flight ABORT (atomic rollback) —
+      # reset-gated, so it runs ALONE in its OWN throwaway database, never inside
+      # the concurrent all-packages sweep.
+      - name: Slice-6 coding-floor upgrade drill (isolated DB)
+        working-directory: packages/db
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_s6_upgrade_ci'
+          PGDATABASE=clara_s6_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+            node --test tests/s6-upgrade.test.mjs
+
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
       # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap

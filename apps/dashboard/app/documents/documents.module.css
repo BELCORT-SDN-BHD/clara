@@ -64,6 +64,7 @@
 .badgeInfo { border-color: #b9c2da; background: #f4f7ff; color: #2f4487; }
 
 .rowItem { display: flex; gap: 0.6rem; align-items: center; justify-content: space-between; flex-wrap: wrap; font-size: 0.85rem; padding: 0.25rem 0; border-bottom: 1px solid #f0f0f0; }
+.codingTask { border: 1px solid #e2e2e2; border-radius: 5px; padding: 0.4rem 0.55rem; background: #fbfcff; display: flex; flex-direction: column; gap: 0.25rem; }
 .actions { display: flex; gap: 0.6rem; }
 .inlineRow { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.3rem 0; }
 .stack { display: flex; flex-direction: column; gap: 0.45rem; margin-top: 0.4rem; }

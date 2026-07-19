@@ -20,6 +20,20 @@ export const WRITERS = [
 // get_context_pack is the Slice-3 typed read (design §2.6): STABLE security-invoker,
 // granted to the same read audience as the other reads (clara_authenticated + agent_ro).
 export const READS = ["get_journal_entry", "list_journal_entries", "trial_balance", "get_context_pack"];
+// [S6 §9/C-11] Slice-6 (migration 0009) EXECUTE-grant deltas. Human lane keeps the bare
+// get_journal_entry; the agent lane LOSES it (the client-pinned reads replace the same-firm
+// entry oracle) but gains the four client-pinned reads + get_journal_entry_for. Runtime gains
+// the invoice-facts lane writers + the coding-attempt recovery read.
+const S6_HUMAN_FNS = [
+  "revise_entry", "withdraw_draft", "open_coding_task", "complete_coding_task", "dismiss_coding_task",
+  "list_unassigned_documents", "get_document_extract", "get_draft_review", "list_uncoded_filings",
+  "get_journal_entry_for",
+];
+const S6_AGENT_READS = [
+  "list_unassigned_documents", "get_document_extract", "get_draft_review", "list_uncoded_filings",
+  "get_journal_entry_for",
+];
+const S6_RUNTIME_FNS = ["enqueue_invoice_facts", "persist_invoice_facts", "fail_invoice_facts", "get_coding_attempt"];
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -29,8 +43,11 @@ export const ALLOWED = {
     "confirm_attribution_candidate", "dismiss_attribution_candidate",
     "add_client_identifier", "add_client_alias", "retire_client_alias",
     "place_legal_hold", "release_legal_hold",
+    ...S6_HUMAN_FNS, // [S6 §9/C-11] draft-lifecycle + coding-task + client-pinned reads
   ]),
-  [ROLES.agentRo]: new Set(READS),
+  // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
+  // reads and gains the client-pinned S6 reads + get_journal_entry_for.
+  [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS]),
   [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification"]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
@@ -46,6 +63,7 @@ export const ALLOWED = {
     "persist_document_extraction", "complete_stored_document_task",
     "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
     "refund_ingest_reservation", "record_attribution_attempt",
+    ...S6_RUNTIME_FNS, // [S6 §9/C-11] invoice-facts lane writers + coding-attempt recovery read
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs

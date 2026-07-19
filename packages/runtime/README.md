@@ -83,6 +83,43 @@ intake and extraction reuse short checkouts from the existing runtime pool; no D
 connection is held while streaming, scanning, uploading, downloading, or calling
 Azure.
 
+## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
+
+`chatTurn_v2` (registry-repointed from v1; v1 stays frozen for parked runs) adds a
+narrow WRITE capability: the model can **draft** one supplier-bill journal entry for a
+human to approve — it never approves or posts (agent-never-signs, ADR-015). New in v2:
+in-turn attachment perception (`read_document`), firm-scoped read tools
+(`list_unassigned_documents`), the `draft_journal_entry` write tool, and the
+`je_review` / `refusal` typed parts. Every read/write is wake-scoped **OBO the turn's
+initiator** (`created_by`) so the coding capability rides that member's live
+bookkeeper+ authority, never a firm-wide grant.
+
+**The write floor** is a THIRD login + small write pool wired to the EXISTING
+`wake_draft_entry` writer (no new grants, no new wake fn):
+
+| Variable | Required behavior |
+|---|---|
+| `CLARA_WRITE_DATABASE_URL` | The `clara_wake_write_login` DSN (member of `clara_wake_interactive` alone). REQUIRED in production (fail-closed boot assert). **Deploy order:** 0009 creates the login NOLOGIN; the operator ceremony gives it LOGIN+password and sets this secret — it must be present before the Slice-6 image boots or the world fails closed. |
+| `CLARA_WRITE_POOL_MAX` | Write-pool size (default 2). |
+| `CLARA_INVOICE_FACTS_MAX_ATTEMPTS` | Per-document invoice-facts vendor-call cap (default 3); terminal `failed` after, with Tier B the honest fallback. |
+| `CLARA_CLAMD_MIN_BACKOFF_MS` / `CLARA_CLAMD_MAX_BACKOFF_MS` | clamd self-heal backoff (PIN-AB-2): a clamd exit is non-fatal; intake fails closed honestly (`503 scanner_unavailable`) while it restarts. |
+
+`withWriteWakeScoped(secret, fn)` = `BEGIN` → txn-local `set_config('clara.wake_secret',…,true)`
+→ (checkout already did `SET ROLE clara_wake_interactive`, NOT read-only) → write →
+`COMMIT`; P4 destroy-on-connection-error. The secret is minted per attempt and never
+crosses a WDK step boundary.
+
+**Egress flip:** flip `CLARA_DOC_EGRESS_APPROVED=1` as a SECRET OVERRIDE (fly.toml
+`[env]` stays `0`), recorded against S6-R1 + the signed RPR consent note. On flip the
+reconciler bulk-releases `held_egress → queued` (the first vendor egress); verify the
+release count matches the held population and only RPR/synthetic docs exist.
+
+`invoiceFacts_v1` is a NEW frozen workflow class (beside a byte-untouched
+`documentIngest_v1`) that runs Azure DI **prebuilt-invoice**
+(`azure-di:prebuilt-invoice:2024-11-30`) over a filed supplier bill and persists
+semantic facts (`invoice.total`, `invoice.currency`, …) so a coding turn can
+corroborate the amount (Tier A). It never touches `documents.extraction_status`.
+
 ## Commands
 
 ```sh
