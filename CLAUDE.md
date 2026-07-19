@@ -94,13 +94,13 @@ in `docs/agents/`.
 Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
-In one line: **Phase 3; Slices 1–5 MERGED and Slice 0 CLOSED — the T2-48h
-cutover ceremony ran 2026-07-19 (park PASS at 46h17m owner-ratified; spike
-schemas dropped incl. the workflow_drizzle journal; engine re-bootstrapped;
-WORLD ON on live with all core checks green; live chat/SSE-replay/clarify
-verified; the 14-day S4-V2 canary ARMED, due 2026-08-02; storage JWT probed +
-wired; dashboard deployed at clara-dashboard-pink.vercel.app; egress flag
-STAYS 0); Slice 6 DESIGN RATIFIED + MERGED (PR #15 — contract v1.3 +
-0009 companion + S6-D1/D2, full dual ladder + rig probes); NEXT = the Slice-6
-BUILD (GATE 3: chatTurn_v2, attachment perception, the write floor + coding
-flow; beta = the Rome Properties FY2025 replay).**
+In one line: **Phase 3; Slices 1–6 MERGED and Slice 0 CLOSED — WORLD ON on live
+(ceremony 2026-07-19; the 14-day S4-V2 canary ARMED, due 2026-08-02; egress flag
+STAYS 0 until the RPR beta window); the Slice-6 BUILD (the coding floor) landed
+via PR #18 with ADR-019 (migration 0009, chatTurn_v2 + the write floor,
+invoiceFacts_v1 two-tier corroboration, the je_review card + the first
+card-catalog parity gate; as-built law = `docs/plan/slice6-as-built-amendments.md`
+AB-1..17); NEXT = the post-merge GATE-3 track: live deploy of 0009 + the S6
+image + the owner write-login ceremony, the RPR onboarding script, the egress
+flip for the consented beta, the 17-bill replay eval, and the GATE-3 demo with
+the owner-driven kill-mid-workflow.**
