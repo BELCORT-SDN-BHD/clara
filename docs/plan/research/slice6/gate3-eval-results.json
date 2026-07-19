@@ -1,0 +1,647 @@
+{
+  "generated_at": "2026-07-19T18:33:40.757Z",
+  "client_id": "e2b0f365-09c5-4f6a-953a-52a18c1bcc8a",
+  "manifest_count": 17,
+  "approved": 17,
+  "debit_leg_pass": 17,
+  "ap_gate": {
+    "db_ap_balance_cents": 135093821,
+    "sum_of_coded_bills_cents": 135093821,
+    "pass": true,
+    "cross_check": {
+      "reconstructed_ap_credit_legs_cents": 135093821,
+      "matches_db": true
+    }
+  },
+  "exceptions": [],
+  "bills": [
+    {
+      "file": "BRIGHPATH - Cost of Good Sold Invoice 2025/BINV202510-018 - BRIGHTPATH - RM435,000.000.pdf",
+      "vendor": "BRIGHTPATH CONSULTANCY SDN. BHD.",
+      "invoice_no": "BINV202510-018",
+      "captured_invoice_id": null,
+      "iso_date": "2025-10-14",
+      "posting_date": "2025-10-14",
+      "pdf_total_cents": 43556000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "new",
+      "vendor_name": "BRIGHTPATH CONSULTANCY SDN. BHD.",
+      "expected_debits": [
+        {
+          "code": "610-000",
+          "cents": 43556000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "610-000",
+          "cents": 43556000
+        }
+      ],
+      "clara_debit_total_cents": 43556000,
+      "ap_credit_cents": 43556000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Filename says RM435,000.00; PDF says subtotal excl. tax RM435,560.40, rounding -0.40, Total (Inclusive of Tax) RM435,560.00 -- PDF total matches GL/cash exactly, filename is the wrong figure (understates by RM560)."
+    },
+    {
+      "file": "BRIGHPATH - Cost of Good Sold Invoice 2025/BINV202511-014 - BRIGHTPATH - RM45,000.000.pdf",
+      "vendor": "BRIGHTPATH CONSULTANCY SDN. BHD.",
+      "invoice_no": "BINV202511-014",
+      "captured_invoice_id": null,
+      "iso_date": "2025-11-14",
+      "posting_date": "2025-11-14",
+      "pdf_total_cents": 4500000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "BRIGHTPATH CONSULTANCY SDN. BHD.",
+      "expected_debits": [
+        {
+          "code": "610-000",
+          "cents": 4500000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "610-000",
+          "cents": 4500000
+        }
+      ],
+      "clara_debit_total_cents": 4500000,
+      "ap_credit_cents": 4500000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Exact match, no discrepancy."
+    },
+    {
+      "file": "BUSYSTREET - Cost of Good Sold Invoice - RM29,200.pdf",
+      "vendor": "BUSYSTREET CONSULTANCY SDN BHD",
+      "invoice_no": "IV-2512-001",
+      "captured_invoice_id": null,
+      "iso_date": "2025-12-03",
+      "posting_date": "2025-12-03",
+      "pdf_total_cents": 2920000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "new",
+      "vendor_name": "BUSYSTREET CONSULTANCY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "610-000",
+          "cents": 2920000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "610-000",
+          "cents": 2920000
+        }
+      ],
+      "clara_debit_total_cents": 2920000,
+      "ap_credit_cents": 2920000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Exact match, no discrepancy."
+    },
+    {
+      "file": "INF - CLAIM OF OFFICE EXPENSES - RM11,111.90.pdf",
+      "vendor": "INF ASSET HOLDINGS SDN. BHD.",
+      "invoice_no": "DN-2509001 (styled Debit Note, not Invoice)",
+      "captured_invoice_id": null,
+      "iso_date": "2025-09-05",
+      "posting_date": "2025-09-05",
+      "pdf_total_cents": 1111190,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "new",
+      "vendor_name": "INF ASSET HOLDINGS SDN. BHD.",
+      "expected_debits": [
+        {
+          "code": "900-R01",
+          "cents": 24000
+        },
+        {
+          "code": "900-T03",
+          "cents": 576000
+        },
+        {
+          "code": "900-W01",
+          "cents": 511190
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-R01",
+          "cents": 24000
+        },
+        {
+          "code": "900-T03",
+          "cents": 576000
+        },
+        {
+          "code": "900-W01",
+          "cents": 511190
+        }
+      ],
+      "clara_debit_total_cents": 1111190,
+      "ap_credit_cents": 1111190,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": true,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Total matches exactly, but the source document is a 4-line debit note (2x monthly electricity + 2x monthly combined 'parking fee & Coway rental'), not natively split 3 ways. The 3-way category split is only recoverable from the two ACE Corporation (M) SDN BHD backup invoices attached as pages 2-3 (INV2507017 and INV2508017), which each itemise Coway rental RM120 + 8x named-staff TNG parking RM360 = RM3,000. Confirmed: Coway 120+120=RM240; parking 2,880+2,880=RM5,760; electricity (2 TNB bills, pages 4-7) 2,873.10+2,238.80=RM5,111.90. Sum 240+5,760+5,111.90=RM11,111.90 -- three-way split and grand total both confirmed."
+    },
+    {
+      "file": "KOK LIONG - SECRETARY FEE - RM1,190.00.pdf",
+      "vendor": "KOK LIONG ACCOUNTANCY & MANAGEMENT SERVICES",
+      "invoice_no": "202509230",
+      "captured_invoice_id": null,
+      "iso_date": "2025-09-25",
+      "posting_date": "2025-09-25",
+      "pdf_total_cents": 119000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "new",
+      "vendor_name": "KOK LIONG ACCOUNTANCY & MANAGEMENT SERVICES",
+      "expected_debits": [
+        {
+          "code": "900-S04",
+          "cents": 119000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-S04",
+          "cents": 119000
+        }
+      ],
+      "clara_debit_total_cents": 119000,
+      "ap_credit_cents": 119000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Invoice number and date match GL ref 202509230 / 25/9/2025 exactly. Line items: secretary fees 15 Feb-Dec 2025 (RM840.00) + BOI prep/submission via e-Bos (RM300.00) + bank-account-opening docs (RM50.00) = RM1,190.00."
+    },
+    {
+      "file": "PKL - Cost of Good Sold Invoice 2025/PKLG-2505-005 _ PKL GROUP SDN BHD _ RM389,930.00.pdf",
+      "vendor": "PKL GROUP SDN BHD",
+      "invoice_no": "PKLG-2505-005",
+      "captured_invoice_id": null,
+      "iso_date": "2025-05-30",
+      "posting_date": "2025-05-30",
+      "pdf_total_cents": 38993000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "new",
+      "vendor_name": "PKL GROUP SDN BHD",
+      "expected_debits": [
+        {
+          "code": "610-000",
+          "cents": 38993000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "610-000",
+          "cents": 38993000
+        }
+      ],
+      "clara_debit_total_cents": 38993000,
+      "ap_credit_cents": 38993000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Exact match, no discrepancy. 4.7% commission for 'DAW' project, 8 units."
+    },
+    {
+      "file": "PKL - Cost of Good Sold Invoice 2025/PKLG-2507-003 _ PKL GROUP SDN BHD _ RM200,500.00.pdf",
+      "vendor": "PKL GROUP SDN BHD",
+      "invoice_no": "PKLG-2507-003",
+      "captured_invoice_id": "PKLG-2507-003",
+      "iso_date": "2025-07-04",
+      "posting_date": "2025-07-04",
+      "pdf_total_cents": 20050000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "PKL GROUP SDN BHD",
+      "expected_debits": [
+        {
+          "code": "610-000",
+          "cents": 20050000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "610-000",
+          "cents": 20050000
+        }
+      ],
+      "clara_debit_total_cents": 20050000,
+      "ap_credit_cents": 20050000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Exact match, no discrepancy. 4.5% commission for 'Dawn' project, 5 units."
+    },
+    {
+      "file": "PKL - Cost of Good Sold Invoice 2025/PKLG-2508-001 _ PKL GROUP SDN BHD - RM206,946.31.pdf",
+      "vendor": "PKL GROUP SDN BHD",
+      "invoice_no": "PKLG-2508-001",
+      "captured_invoice_id": null,
+      "iso_date": "2025-08-05",
+      "posting_date": "2025-08-05",
+      "pdf_total_cents": 20694631,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "PKL GROUP SDN BHD",
+      "expected_debits": [
+        {
+          "code": "610-000",
+          "cents": 20694631
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "610-000",
+          "cents": 20694631
+        }
+      ],
+      "clara_debit_total_cents": 20694631,
+      "ap_credit_cents": 20694631,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Exact match, no discrepancy. 4.5% commission for Emerald 9 Residence, 12 units."
+    },
+    {
+      "file": "RPA - Accounting Fee Invoice 2025/2504 - INV250425 - ROME PUBLIC ADVISORY SB - RM500.pdf",
+      "vendor": "ROME PUBLIC ADVISORY SDN BHD (f.k.a LW PUBLIC ADVISORY SDN BHD)",
+      "invoice_no": "INV2504/25",
+      "captured_invoice_id": null,
+      "iso_date": "2025-04-30",
+      "posting_date": "2025-04-30",
+      "pdf_total_cents": 50000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "new",
+      "vendor_name": "ROME PUBLIC ADVISORY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "900-A01",
+          "cents": 50000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-A01",
+          "cents": 50000
+        }
+      ],
+      "clara_debit_total_cents": 50000,
+      "ap_credit_cents": 50000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Exact match. 'Being accounting fee...for the writing up for Apr 25'."
+    },
+    {
+      "file": "RPA - Accounting Fee Invoice 2025/2505 - INV250522 - ROME PUBLIC ADVISORY SB - RM500.pdf",
+      "vendor": "ROME PUBLIC ADVISORY SDN BHD (f.k.a LW PUBLIC ADVISORY SDN BHD)",
+      "invoice_no": "INV2505/22",
+      "captured_invoice_id": null,
+      "iso_date": "2025-05-31",
+      "posting_date": "2025-05-31",
+      "pdf_total_cents": 50000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "ROME PUBLIC ADVISORY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "900-A01",
+          "cents": 50000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-A01",
+          "cents": 50000
+        }
+      ],
+      "clara_debit_total_cents": 50000,
+      "ap_credit_cents": 50000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Exact match."
+    },
+    {
+      "file": "RPA - Accounting Fee Invoice 2025/2506 - INV250616 - ROME PUBLIC ADVISORY SB - RM500.pdf",
+      "vendor": "ROME PUBLIC ADVISORY SDN BHD (f.k.a LW PUBLIC ADVISORY SDN BHD)",
+      "invoice_no": "INV2506/16",
+      "captured_invoice_id": null,
+      "iso_date": "2025-06-10",
+      "posting_date": "2025-06-10",
+      "pdf_total_cents": 50000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "ROME PUBLIC ADVISORY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "900-A01",
+          "cents": 50000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-A01",
+          "cents": 50000
+        }
+      ],
+      "clara_debit_total_cents": 50000,
+      "ap_credit_cents": 50000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Exact match."
+    },
+    {
+      "file": "RPA - Accounting Fee Invoice 2025/2507 - INV250714 - ROME PUBLIC ADVISORY SB - RM500.pdf",
+      "vendor": "ROME PUBLIC ADVISORY SDN BHD (f.k.a LW PUBLIC ADVISORY SDN BHD)",
+      "invoice_no": "INV2507/14",
+      "captured_invoice_id": null,
+      "iso_date": "2025-07-15",
+      "posting_date": "2025-07-15",
+      "pdf_total_cents": 500000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "ROME PUBLIC ADVISORY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debit_total_cents": 500000,
+      "ap_credit_cents": 500000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Filename says RM500 but the PDF itself prints Total (RM) 5,000.00 and 'RINGGIT MALAYSIA: FIVE THOUSAND ONLY' -- confirmed by both the numeral and the words-in-full line, not a scan/OCR artifact. Description text also changed from Apr-Jun's plain 'accounting fee' to 'accounting fee and payroll services in connection with the writing up for the month Jul 25', explaining the 10x step-up. PDF matches GL; filename is stale/wrong."
+    },
+    {
+      "file": "RPA - Accounting Fee Invoice 2025/2508 - INV250810 - ROME PUBLIC ADVISORY SB - RM500.pdf",
+      "vendor": "ROME PUBLIC ADVISORY SDN BHD (f.k.a LW PUBLIC ADVISORY SDN BHD)",
+      "invoice_no": "INV2508/10",
+      "captured_invoice_id": null,
+      "iso_date": "2025-08-13",
+      "posting_date": "2025-08-13",
+      "pdf_total_cents": 500000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "ROME PUBLIC ADVISORY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debit_total_cents": 500000,
+      "ap_credit_cents": 500000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Same pattern as 2507: PDF total RM5,000.00 ('FIVE THOUSAND ONLY'), filename says RM500. PDF matches GL."
+    },
+    {
+      "file": "RPA - Accounting Fee Invoice 2025/2509 - INV250910 - ROME PUBLIC ADVISORY SB - RM500.pdf",
+      "vendor": "ROME PUBLIC ADVISORY SDN BHD (f.k.a LW PUBLIC ADVISORY SDN BHD)",
+      "invoice_no": "INV2509/10",
+      "captured_invoice_id": null,
+      "iso_date": "2025-09-17",
+      "posting_date": "2025-09-17",
+      "pdf_total_cents": 500000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "ROME PUBLIC ADVISORY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debit_total_cents": 500000,
+      "ap_credit_cents": 500000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Same pattern: PDF total RM5,000.00, filename says RM500. PDF matches GL."
+    },
+    {
+      "file": "RPA - Accounting Fee Invoice 2025/2510 - INV251010 - ROME PUBLIC ADVISORY SB - RM500.pdf",
+      "vendor": "ROME PUBLIC ADVISORY SDN BHD (f.k.a LW PUBLIC ADVISORY SDN BHD)",
+      "invoice_no": "INV2510/10",
+      "captured_invoice_id": "INV2510/10",
+      "iso_date": "2025-10-13",
+      "posting_date": "2025-10-13",
+      "pdf_total_cents": 500000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "ROME PUBLIC ADVISORY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debit_total_cents": 500000,
+      "ap_credit_cents": 500000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Same pattern: PDF total RM5,000.00, filename says RM500. PDF matches GL."
+    },
+    {
+      "file": "RPA - Accounting Fee Invoice 2025/2511 - INV251110 - ROME PUBLIC ADVISORY SB - RM500.pdf",
+      "vendor": "ROME PUBLIC ADVISORY SDN BHD (f.k.a LW PUBLIC ADVISORY SDN BHD)",
+      "invoice_no": "INV2511/10",
+      "captured_invoice_id": "INV2511/10",
+      "iso_date": "2025-11-13",
+      "posting_date": "2025-11-13",
+      "pdf_total_cents": 500000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "ROME PUBLIC ADVISORY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debit_total_cents": 500000,
+      "ap_credit_cents": 500000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Same pattern: PDF total RM5,000.00, filename says RM500. PDF matches GL."
+    },
+    {
+      "file": "RPA - Accounting Fee Invoice 2025/2512 - INV251201- ROME PUBLIC ADVISORY SB - RM500.pdf",
+      "vendor": "ROME PUBLIC ADVISORY SDN BHD (f.k.a LW PUBLIC ADVISORY SDN BHD)",
+      "invoice_no": "INV2512/01",
+      "captured_invoice_id": null,
+      "iso_date": "2025-12-02",
+      "posting_date": "2025-12-02",
+      "pdf_total_cents": 500000,
+      "tier": "model_read",
+      "corroborated": true,
+      "vendor_disposition": "registration_match",
+      "vendor_name": "ROME PUBLIC ADVISORY SDN BHD",
+      "expected_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debits": [
+        {
+          "code": "900-A01",
+          "cents": 500000
+        }
+      ],
+      "clara_debit_total_cents": 500000,
+      "ap_credit_cents": 500000,
+      "balanced": true,
+      "code_outcome": "je_review",
+      "approve_status": "approved",
+      "exception": null,
+      "exception_detail": null,
+      "is_inf_split": false,
+      "debit_verdict": "PASS",
+      "date_verdict": "PASS",
+      "note": "Same pattern: PDF total RM5,000.00 ('for the writing up for the month Dec 2025'), filename says RM500. PDF matches GL (GL ref shown as INV2512-01, same document)."
+    }
+  ]
+}
