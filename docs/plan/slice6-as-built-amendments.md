@@ -124,6 +124,29 @@ this fix round. Review evidence: `docs/plan/research/slice6/asbuilt-*` (archived
   only). Also folded: `storage-provision.sql` gains the ceremony-proven
   `grant clara_storage_docs to authenticator`.
 
+## Beta amendments (the GATE-3 live run, 2026-07-19/20 — see
+`research/slice6/gate3-closing-note.md` for the full account)
+
+- **AB-18 (facts-lane discovery, PR #21).** The document-task sweep's
+  DB-authority snapshot is TASK-COLUMNS-ONLY (the clara.documents join was never
+  runtime-readable and silently killed the path since S5), and the index returns
+  MERGED sidecar metas (the raw-row return let the re-enqueue write clobber
+  sidecar transport fields). `deps.graceMs` override added for tests.
+- **AB-19 (`chatTurn_v3`, PR #22).** The park-site assistant message is
+  sanitized to its text parts + ONLY the clarify tool-call, rebuilt plain — the
+  collected stream output is not valid model INPUT after a WDK replay. v1/v2
+  carry the latent form; registry repointed v3 with v1/v2 exports kept.
+- **AB-20 (migration 0010, PR #23).** `get_draft_review`'s reason appends use
+  `array_append` — `text[] || 'literal'` parses the untyped literal as an array
+  literal (22P02) the moment any high-stakes reason fires.
+- **AB-21 (beta operations).** BELCORT `clara.firm_limits.daily_token_limit`
+  raised to 5,000,000 for the beta window (owner-directed; the 1M default
+  fail-closed mid-eval — the metering law working). The eval driver runs ONE
+  SESSION PER BILL (a parked clarify holds its session's one-live-turn slot —
+  a shared session wedges everything behind it: a UX lesson for Phase-4 chat).
+  The NEW-3 CLR23 landscape refusal + revise-convergence path was exercised 11×
+  in production and behaved exactly as ratified.
+
 ## Residuals (recorded, not built)
 
 Per contract §11 unchanged, plus: a dedicated notification inbox surface (AB-5);

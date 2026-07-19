@@ -94,13 +94,15 @@ in `docs/agents/`.
 Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
-In one line: **Phase 3; Slices 1–6 MERGED and Slice 0 CLOSED — WORLD ON on live
-(ceremony 2026-07-19; the 14-day S4-V2 canary ARMED, due 2026-08-02; egress flag
-STAYS 0 until the RPR beta window); the Slice-6 BUILD (the coding floor) landed
-via PR #18 with ADR-019 (migration 0009, chatTurn_v2 + the write floor,
-invoiceFacts_v1 two-tier corroboration, the je_review card + the first
-card-catalog parity gate; as-built law = `docs/plan/slice6-as-built-amendments.md`
-AB-1..17); NEXT = the post-merge GATE-3 track: live deploy of 0009 + the S6
-image + the owner write-login ceremony, the RPR onboarding script, the egress
-flip for the consented beta, the 17-bill replay eval, and the GATE-3 demo with
-the owner-driven kill-mid-workflow.**
+In one line: **Phase 3 COMPLETE — Slices 1–6 MERGED, Slice 0 CLOSED, and GATE 3
+CLOSED beta-real on live (2026-07-19/20): 0009+0010 live, the S6 image deployed
+(2gb + always-restart), the write floor ceremonied, BELCORT+RPR onboarded, egress
+=1 under the signed S6-R1 consent, the 17-bill replay eval PASSED 17/17 with the
+AP gate exact (RM 1,350,938.21) and ZERO exceptions, and the owner-directed
+kill-mid-workflow PROVED exactly-once (evidence:
+`docs/plan/research/slice6/gate3-*`); three production defects caught+fixed
+same-day by the beta (facts-lane discovery PR #21, chatTurn_v3 park-resume
+PR #22, 0010 array fix — amendments AB-18..21); the S4-V2 canary stays ARMED,
+due 2026-08-02 — NEVER answer interruption daba7f2e; NEXT = Phase-4 direction
+with the recorded gates (AB-3 engine_kind pin BEFORE MyInvois; the C6/egress
+bundle before third-party client documents; the deferred S6 §11 list).**
