@@ -70,6 +70,12 @@ test("enqueue-crash sidecar is re-enqueued, then OCR parks/releases/claims and p
   const starts = [];
   const reconciled = await rig.asRuntime((client) =>
     reconcileDocumentTasks(client, {
+      // [S6 facts-discovery fix] the DB-authority snapshot now actually works under
+      // the runtime role (task-only SELECT), so scope to THIS fixture's firm (the
+      // shared test DB carries other files' queued tasks) and zero the grace (the
+      // DB row's created_at is immutability-protected and always fresh here).
+      onlyFirm: firm,
+      graceMs: 0,
       enqueueDocumentIngest: async (id) => (starts.push(id), { runId: "recovered-run" }),
       getRun: () => ({ status: Promise.resolve("running") }),
     }),
