@@ -7,6 +7,8 @@
 import type { FormEvent } from "react";
 import { useState } from "react";
 import type { ClaraPart } from "./api";
+import { isStatusResolverType } from "./partCatalog";
+import { JeReviewCard } from "./JeReviewCard";
 import styles from "./chat.module.css";
 
 /** Matches CLARIFY_FRAMING in the runtime (chatTurn.prompt.ts:31) — used only for
@@ -108,9 +110,16 @@ export type ClarifyControls = {
 export type AttachmentInfo = { filename?: string | null; status?: string | null };
 export type AttachmentLookup = Map<string, AttachmentInfo>;
 
-// Honest-state law ([DELTA-OWNER-2]): the chat door is a CAPTURE door in Slice 5 —
-// Clara does not perceive the attachment in-turn.
-export const ATTACHMENT_NON_PERCEPTION_COPY = "Clara will see this document once it is filed.";
+// Honest-state law (contract §3, INTERFACE-PINS §4): Slice-6 chatTurn_v2 PERCEIVES
+// the attachment in-turn (reads the stored extraction via read_document), so the
+// chip copy states that plainly. Supersedes DELTA-OWNER-2's non-perception copy
+// (ADR-018(3) anticipated exactly this reversal).
+export const ATTACHMENT_PERCEPTION_COPY = "Clara reads this document during this turn.";
+
+/** The explicit fallback for an unknown/unsupported part type — closes the Slice-5
+ *  silent-drop (`return null`) where a new wire type just vanished. The parity test
+ *  asserts registered render types NEVER reach this. */
+export const FALLBACK_UNSUPPORTED_PREFIX = "Unsupported part: ";
 
 type ToolStatus = "running" | "ok" | "error";
 
@@ -134,10 +143,12 @@ export function TranscriptParts({
   parts,
   clarify,
   attachments,
+  token,
 }: {
   parts: ClaraPart[];
   clarify?: ClarifyControls;
   attachments?: AttachmentLookup;
+  token?: string | null; // je_review actions need the human-lane JWT (omitted in the parity test)
 }) {
   const statuses = toolStatuses(parts);
   const clarifyAt = clarify ? lastClarifyIndex(parts) : -1;
@@ -157,7 +168,7 @@ export function TranscriptParts({
                 <span className={styles.attachmentName}>{label}</span>
                 {info?.status ? <span className={styles.attachmentStatus}>{info.status}</span> : null}
               </div>
-              <p className={styles.attachmentNote}>{ATTACHMENT_NON_PERCEPTION_COPY}</p>
+              <p className={styles.attachmentNote}>{ATTACHMENT_PERCEPTION_COPY}</p>
             </div>
           );
         }
@@ -180,7 +191,33 @@ export function TranscriptParts({
             </div>
           );
         }
-        return null; // tool_result / tool_error resolve their call's chip
+        if (p.type === "je_review") {
+          // Hydration law (§6): the card carries ids only and re-derives authoritative
+          // state via get_draft_review. No live-chunk branch is needed — the card
+          // renders from the authoritative terminal message (N-F16).
+          return <JeReviewCard key={`je:${p.entry_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        if (p.type === "refusal") {
+          // A typed terminal refusal (C-19): the code + message render VERBATIM; the
+          // card never re-derives (there is no draft to hydrate).
+          return (
+            <div key={i} className={styles.refusalCard}>
+              <div className={styles.refusalBadge}>{p.code}{p.reason ? ` · ${p.reason}` : ""}</div>
+              <p className={styles.refusalMessage}>{p.message}</p>
+            </div>
+          );
+        }
+        // tool_result / tool_error resolve their call's chip — render nothing (the
+        // one place this is declared is partCatalog's STATUS_RESOLVER_TYPES).
+        if (isStatusResolverType(p.type)) return null;
+        // Explicit fallback: an unknown/unsupported part type is made VISIBLE (closes
+        // the Slice-5 silent-drop). The parity test asserts registered render types
+        // never reach here.
+        return (
+          <span key={i} className={styles.unsupportedChip}>
+            {FALLBACK_UNSUPPORTED_PREFIX}{(p as { type?: string }).type ?? "?"}
+          </span>
+        );
       })}
     </>
   );

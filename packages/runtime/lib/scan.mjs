@@ -4,6 +4,7 @@ import net from "node:net";
 import { once } from "node:events";
 import { inflateRawSync } from "node:zlib";
 import { spawn } from "node:child_process";
+import { setTimeout as sleep } from "node:timers/promises";
 
 const MAX_ZIP_ENTRIES = 1000;
 const MAX_ZIP_UNCOMPRESSED = 100 * 1024 * 1024;
@@ -268,29 +269,90 @@ export async function scannerReachable(timeoutMs = 500) {
   }
 }
 
+/** The scanner-unavailable fail-closed refusal — retryable 503, nothing stored unscanned. */
+function scannerUnavailable() {
+  return new IntakeScanError(
+    "scanner_unavailable",
+    "malware scanner is unavailable; the upload was refused (nothing is stored unscanned)",
+    503,
+  );
+}
+
 export async function scanFile(path) {
   if (process.env.RELAY_TEST_MODE === "1") {
     const injected = globalThis.__claraScannerForTest;
     return injected ? injected(path) : testScan(path);
   }
-  const socket = connectSocket(process.env.CLARA_CLAMD_SOCKET);
-  await once(socket, "connect");
-  socket.write("zINSTREAM\0");
-  let response = "";
-  socket.on("data", (chunk) => {
-    response += chunk.toString("utf8");
-  });
-  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
-    const len = Buffer.alloc(4);
-    len.writeUInt32BE(chunk.length);
-    if (!socket.write(len)) await once(socket, "drain");
-    if (!socket.write(chunk)) await once(socket, "drain");
+  // FAIL CLOSED, HONESTLY (PIN-AB-2 / W6): clamd may die at ANY point in the scan — the
+  // live incident was an OOM kill mid signature-load. The ENTIRE scan lifetime runs under
+  // ONE persistent socket 'error' handler + a scan-wide deadline, so a mid-stream death or
+  // a wedged (connected-but-silent) scanner resolves to the fail-closed refusal — never an
+  // unhandled 'error' reaching the process-wide handler (which exits the runtime), never a
+  // hang. Nothing is ever stored unscanned; already-spooled bytes hold until clamd returns.
+  const deadlineMs = Number(process.env.CLARA_CLAMD_SCAN_DEADLINE_MS || 120_000);
+  let socket;
+  try {
+    socket = connectSocket(process.env.CLARA_CLAMD_SOCKET);
+  } catch {
+    throw scannerUnavailable();
   }
-  socket.end(Buffer.alloc(4));
-  await once(socket, "close");
-  if (/FOUND/i.test(response)) throw new IntakeScanError("malware_detected", "malware scanner rejected the file");
-  if (!/OK/i.test(response)) throw new IntakeScanError("internal", "malware scanner failed closed", 503);
-  return { clean: true, adapter: "clamd" };
+
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    let response = "";
+    let timer;
+    const finish = (fn, arg) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      socket.removeListener("error", onError);
+      try {
+        socket.destroy();
+      } catch {
+        /* best-effort */
+      }
+      fn(arg);
+    };
+    // Any socket fault over the WHOLE lifetime (connect refusal, mid-stream RST, a
+    // cleanup fault) is a fail-closed refusal — the persistent handler means there is
+    // never a window without an 'error' listener (the finding-6 crash window).
+    const onError = () => finish(reject, scannerUnavailable());
+    // A connected-but-silent scanner (no data, no close) trips the scan-wide deadline.
+    timer = setTimeout(() => finish(reject, scannerUnavailable()), deadlineMs);
+    timer.unref?.();
+
+    socket.on("error", onError);
+    socket.on("data", (chunk) => {
+      response += chunk.toString("utf8");
+    });
+    socket.on("close", () => {
+      if (settled) return;
+      if (/FOUND/i.test(response)) return finish(reject, new IntakeScanError("malware_detected", "malware scanner rejected the file"));
+      if (!/OK/i.test(response)) return finish(reject, new IntakeScanError("internal", "malware scanner failed closed", 503));
+      finish(resolve, { clean: true, adapter: "clamd" });
+    });
+
+    socket.once("connect", () => {
+      // Stream the file to clamd INSTREAM. Any fault here (write after death, a read
+      // error, a rejected drain wait) fails closed — the try/catch keeps a rejected
+      // `once(socket,'drain')` from becoming an unhandled rejection or a hang.
+      void (async () => {
+        try {
+          socket.write("zINSTREAM\0");
+          for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+            if (settled) return;
+            const len = Buffer.alloc(4);
+            len.writeUInt32BE(chunk.length);
+            if (!socket.write(len)) await once(socket, "drain");
+            if (!socket.write(chunk)) await once(socket, "drain");
+          }
+          if (!settled) socket.end(Buffer.alloc(4));
+        } catch {
+          finish(reject, scannerUnavailable());
+        }
+      })();
+    });
+  });
 }
 
 function childExit(child) {
@@ -302,13 +364,24 @@ function childExit(child) {
 
 /** Start the image-local scanner when explicitly enabled. Production never gets
  * an in-process bypass: the runtime still speaks clamd INSTREAM over the socket.
- * The child is supervised by startWorld and an unexpected clamd exit is fatal. */
+ *
+ * PIN-AB-2 (Slice-6 §13 as-built amendment): a clamd exit is NO LONGER runtime-FATAL.
+ * The live incident was a 1GB VM OOM-killing clamd after a signature load, and the
+ * old FATAL law crash-looped the WHOLE runtime. Now the supervisor RESTARTS clamd with
+ * bounded backoff (self-healing); while the socket is unavailable, intake scans fail
+ * closed HONESTLY (scanFile → 503 scanner_unavailable — nothing is stored unscanned)
+ * and /ready keeps scanner.ok:false as a WARNING (the world stays ready). `done`
+ * settles only on stop(), so the supervisor's watcher never treats a clamd bounce as a
+ * crash. A backoff resets after a healthy run and grows (capped) on rapid re-exits. */
 export function startManagedScanner({ log = NOOP_LOG } = {}) {
   if (process.env.RELAY_TEST_MODE === "1" || process.env.CLARA_CLAMD_MANAGED !== "1") return null;
   const clamdBin = process.env.CLARA_CLAMD_BIN || "clamd";
   const freshclamBin = process.env.CLARA_FRESHCLAM_BIN || "freshclam";
   const configuredRefreshMs = Number(process.env.CLARA_FRESHCLAM_INTERVAL_MS);
   const refreshMs = Math.max(60 * 60_000, Number.isFinite(configuredRefreshMs) ? configuredRefreshMs : 6 * 60 * 60_000);
+  const minBackoffMs = Number(process.env.CLARA_CLAMD_MIN_BACKOFF_MS || 2000);
+  const maxBackoffMs = Number(process.env.CLARA_CLAMD_MAX_BACKOFF_MS || 60_000);
+  const healthyRunMs = Number(process.env.CLARA_CLAMD_HEALTHY_RUN_MS || 60_000);
   let stopping = false;
   let clamd = null;
 
@@ -320,14 +393,26 @@ export function startManagedScanner({ log = NOOP_LOG } = {}) {
     if (result.code !== 0) log(`[freshclam] update exited ${result.code ?? result.signal}; clamd remains fail-closed`);
   };
 
+  // The supervise LOOP: refresh signatures, run clamd, and on exit restart with
+  // bounded backoff until stop() is called. It NEVER throws on a clamd exit.
   const done = (async () => {
+    let backoffMs = minBackoffMs;
     await refresh().catch((err) => log(`[freshclam] update failed: ${err?.message ?? err}`));
-    if (stopping) return;
-    clamd = spawn(clamdBin, ["--foreground=true"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
-    clamd.stdout?.on("data", (chunk) => log(`[clamd] ${String(chunk).trim()}`));
-    clamd.stderr?.on("data", (chunk) => log(`[clamd] ${String(chunk).trim()}`));
-    const result = await childExit(clamd);
-    if (!stopping) throw new Error(`clamd exited ${result.code ?? result.signal}`);
+    while (!stopping) {
+      const startedAt = Date.now();
+      clamd = spawn(clamdBin, ["--foreground=true"], { stdio: ["ignore", "pipe", "pipe"], windowsHide: true });
+      clamd.stdout?.on("data", (chunk) => log(`[clamd] ${String(chunk).trim()}`));
+      clamd.stderr?.on("data", (chunk) => log(`[clamd] ${String(chunk).trim()}`));
+      const result = await childExit(clamd).catch((err) => ({ code: null, signal: String(err?.message ?? err) }));
+      clamd = null;
+      if (stopping) break;
+      const ranMs = Date.now() - startedAt;
+      backoffMs = ranMs >= healthyRunMs ? minBackoffMs : Math.min(backoffMs * 2, maxBackoffMs);
+      log(
+        `[clamd] exited ${result.code ?? result.signal}; intake fails closed until it returns — restarting in ${backoffMs}ms (ran ${ranMs}ms)`,
+      );
+      await sleep(backoffMs).catch(() => {});
+    }
   })();
 
   const timer = setInterval(() => {

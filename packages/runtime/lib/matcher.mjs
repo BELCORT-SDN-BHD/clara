@@ -114,14 +114,14 @@ export function matchCandidates({ regions = [], aliases = [], clients = [] } = {
 // inputs; a future grant/fn lights lane 2 with no code change).
 // ---------------------------------------------------------------------------
 
-/** Raises 42501 under the as-built grants (regions/extractions/clients ungranted). */
+// 42501 under the as-built grants. C-7 (0009): PINNED to the raw-text engine_kinds so 0009's semantic `invoice_facts` extraction never false-matches a client / pollutes cites.
 export async function readMatchInputs(client, { firmId, documentId }) {
   const regions = (
     await client.query(
       `select r.id as region_id, r.field_path, r.text_content as text
          from clara.document_extractions e
          join clara.document_regions r on r.extraction_id = e.id and r.firm_id = e.firm_id
-        where e.document_id = $1 and e.firm_id = $2 and e.status = 'done'`,
+        where e.document_id = $1 and e.firm_id = $2 and e.status = 'done' and e.engine_kind in ('ocr','structured_parse')`,
       [documentId, firmId],
     )
   ).rows.map((x) => ({ regionId: x.region_id, fieldPath: x.field_path, text: x.text }));

@@ -10,6 +10,7 @@ import { listActiveFilings, listClients, listDocuments, type ClientRow, type Doc
 import { runtimeBase, supabaseBase } from "../shared/wire";
 import { useUploadQueue } from "./useUploadQueue";
 import { DocumentDetail } from "./DocumentDetail";
+import { CodingSections } from "./CodingSections";
 import styles from "./documents.module.css";
 
 const TOKEN_KEY = "clara_dev_jwt"; // shared with /chat
@@ -153,7 +154,10 @@ export default function DocumentsPage() {
             ) : selectedDoc ? (
               <DocumentDetail token={token} document={selectedDoc} clients={clients} onRefresh={() => void refresh()} />
             ) : (
-              <p className={styles.muted}>Select a document to see its status, filings, candidates, and corrections.</p>
+              <>
+                <p className={styles.muted}>Select a document to see its status, filings, candidates, and corrections — or work the coding queue below.</p>
+                <CodingSections token={token} clients={clients} />
+              </>
             )}
           </section>
         </div>

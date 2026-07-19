@@ -389,7 +389,7 @@ export default function ChatPage() {
                   {messages.map((m) => (
                     <div key={m.id} className={m.role === "user" ? styles.userMsg : styles.assistantMsg}>
                       <div className={styles.roleLabel}>{m.role}</div>
-                      <TranscriptParts parts={m.parts ?? []} attachments={attachmentLookup} />
+                      <TranscriptParts parts={m.parts ?? []} attachments={attachmentLookup} token={token} />
                     </div>
                   ))}
                   {live ? (
@@ -398,7 +398,7 @@ export default function ChatPage() {
                         assistant · streaming
                         <button className={styles.linkButton} onClick={() => void onCancel()}>cancel</button>
                       </div>
-                      <TranscriptParts parts={live.t.parts} clarify={clarifyControls} />
+                      <TranscriptParts parts={live.t.parts} clarify={clarifyControls} token={token} />
                       {live.t.streamError ? <p className={styles.errorText}>{live.t.streamError}</p> : null}
                     </div>
                   ) : null}
@@ -419,7 +419,7 @@ export default function ChatPage() {
                           {a.error ? <span className={styles.errorText}>{a.error}</span> : null}
                         </div>
                       ))}
-                      <p className={styles.attachNote}>Clara will see this document once it is filed.</p>
+                      <p className={styles.attachNote}>Clara reads this document during this turn.</p>
                     </div>
                   ) : null}
                   <form

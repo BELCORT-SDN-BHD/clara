@@ -1,0 +1,69 @@
+// The card-catalog PARITY + REACHABILITY gate (DIRECTION §3 / contract §3). This
+// is the CI mechanism that closes the Slice-5 silent-drop: a new wire part type
+// added without a persisted-render branch would vanish (`return null`). It runs
+// WITHOUT a DB — fixtures only (test/bootstrap.mjs stubs CSS + sets the JSX runtime).
+//
+// Guarantees:
+//   1. Parity     — every registered render type produces a visible element (never
+//                   the fallback chip); the compile-time asserts in partCatalog.ts
+//                   additionally forbid a wire type that is neither registered nor a
+//                   status-resolver.
+//   2. Reachability — every registered type has ≥1 fixture that renders non-empty.
+//   3. Fallback   — an unknown/unsupported part type renders the explicit chip.
+//   4. Resolvers  — tool_result / tool_error render nothing standalone (by design).
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import type { ClaraPart } from "./api";
+import { PART_CATALOG, RENDER_BRANCH_TYPES, STATUS_RESOLVER_TYPES } from "./partCatalog";
+import { TranscriptParts, FALLBACK_UNSUPPORTED_PREFIX } from "./parts";
+
+function render(parts: ClaraPart[]): string {
+  // No token → the je_review card renders its id-only state (still non-empty); no
+  // DB call fires (useEffect does not run under renderToStaticMarkup).
+  return renderToStaticMarkup(createElement(TranscriptParts, { parts }));
+}
+
+// 1 + 2: parity + reachability for every registered render-branch type.
+for (const type of RENDER_BRANCH_TYPES) {
+  const entry = PART_CATALOG[type];
+  test(`parity/reachability: ${type} has a non-empty persisted-render branch`, () => {
+    assert.ok(entry.fixtures.length >= 1, `${type} must have >=1 reachability fixture`);
+    for (const fixture of entry.fixtures) {
+      const html = render([fixture]);
+      assert.ok(html.trim().length > 0, `${type} rendered empty — missing/blank persisted-render branch`);
+      assert.ok(
+        !html.includes(FALLBACK_UNSUPPORTED_PREFIX),
+        `${type} hit the unsupported fallback chip — it has NO persisted-render branch in TranscriptParts`,
+      );
+    }
+  });
+}
+
+// 3: an unregistered/unknown part type renders the explicit fallback chip (visible,
+// never silently dropped).
+test("unknown part type renders the explicit unsupported fallback chip", () => {
+  const html = render([{ type: "totally_unknown_v9" } as unknown as ClaraPart]);
+  assert.ok(html.includes(FALLBACK_UNSUPPORTED_PREFIX), `expected the fallback chip, got: ${html}`);
+  assert.ok(html.includes("totally_unknown_v9"), "the fallback chip should name the unknown type");
+});
+
+// 4: status-resolver types intentionally render nothing on their own.
+for (const type of STATUS_RESOLVER_TYPES) {
+  test(`status-resolver ${type} renders nothing standalone`, () => {
+    const fixture =
+      type === "tool_result"
+        ? ({ type, tool: "trial_balance", tool_call_id: "c1", output: null } as ClaraPart)
+        : ({ type, tool: "trial_balance", tool_call_id: "c1", error: "boom" } as ClaraPart);
+    assert.equal(render([fixture]).trim(), "");
+  });
+}
+
+// Belt-and-braces: the je_review + refusal types the slice introduces are actually
+// registered (guards against a future refactor dropping them from the catalog).
+test("slice-6 part types are registered in the catalog", () => {
+  assert.ok(RENDER_BRANCH_TYPES.includes("je_review"), "je_review must be registered");
+  assert.ok(RENDER_BRANCH_TYPES.includes("refusal"), "refusal must be registered");
+});

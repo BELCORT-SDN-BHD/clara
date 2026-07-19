@@ -166,8 +166,12 @@ test("§6 agent lane: clara_agent_ro has ZERO access to every new table (42501, 
   if (unready(t)) return;
   const tables = await observedNewTables();
   const slice5AgentReads = new Set(["document_filings", "document_extractions", "document_regions"]);
+  // [S6 §9/C-11] counterparties + entry_evidence carry a firm-scoped agent SELECT grant BY
+  // DESIGN (the client-pinned reads project them); coding_tasks/coding_attempts/
+  // processing_call_reservations stay zero-access to agent_ro and are still asserted below.
+  const s6AgentReads = new Set(["counterparties", "entry_evidence"]);
   for (const tbl of tables) {
-    if (slice5AgentReads.has(tbl)) continue;
+    if (slice5AgentReads.has(tbl) || s6AgentReads.has(tbl)) continue;
     await assertRaises(
       PG.insufficientPrivilege,
       () => roleQuery(ROLES.agentRo, `select count(*) from clara.${tbl}`),

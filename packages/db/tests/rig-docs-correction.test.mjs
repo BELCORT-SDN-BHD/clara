@@ -165,7 +165,12 @@ test("§3.5 a DRAFT of the corrected client is WITHDRAWN by the correction (draf
   if (unready(t)) return;
   const { users, clients } = world;
   const s = await docWithApprovedEntry(users.alice, clients.A1);
-  // A second, still-DRAFT entry of A1 citing the same document.
+  // [S6 C-15] one-coding-per-active-filing (0009:1144-1150) refuses a second cite while an
+  // approved-UNREVERSED entry holds the filing; reverse the approved cite FIRST so the draft
+  // is lawfully creatable. s.entry stays status='approved' (reversed_by set) — exactly the
+  // "reversed-but-still-approved cite" the context-pack visibility assertion below expects.
+  await reverseEntry(users.bob, { entry: s.entry, reason: "pre-reverse to free the filing", opKey: opk("pre-rev") });
+  // A second, still-DRAFT entry of A1 citing the same document (now lawful — cite reversed).
   const res = await freshResolution(users.alice, clients.A1);
   const draft = await draftEntry(human(users.alice), { client: clients.A1, resolution: res, document: s.documentId, sha256: s.sha256, lines: LINES, opKey: opk("d2") });
 
@@ -193,8 +198,9 @@ test("§3.5 a DRAFT of the corrected client is WITHDRAWN by the correction (draf
   assert.ok(!recentIds.includes(draft.entry_id), "the WITHDRAWN draft is NOT in recent_entries[] (context excludes withdrawn)");
   assert.ok(recentIds.includes(s.entry), "a control approved entry IS in recent_entries[] (the pack is not simply empty)");
   // §G5(b): the withdraw leaves the trial-balance NET total unchanged (a withdrawn draft
-  // can neither post nor unbalance). Individual balances DO move — the correction also
-  // reverses the approved cite — so the balanced net total is the withdraw-safety invariant.
+  // can neither post nor unbalance). The approved cite's reversal is net-zero and already
+  // in netBefore ([S6 C-15] pre-reversed in the fixture), so the correction's only book
+  // effect here is the draft withdraw — the balanced net total is the withdraw-safety invariant.
   const netAfter = await tbNet(clients.A1);
   assert.equal(netAfter, netBefore, "the withdraw leaves trial_balance's net total unchanged (books stay balanced)");
   noteLane(`withdrawn-exclusion: draft absent from recent_entries; TB net total unchanged (${netBefore})`);
@@ -335,15 +341,19 @@ test("§8 partially-reversed set: one of two approved cites is manually reversed
   if (unready(t)) return;
   const { users, clients } = world;
   const s = await docWithApprovedEntry(users.alice, clients.A1); // entry1 = s.entry (approved cite)
-  // A SECOND approved entry citing the same document/filing.
-  const res2 = await freshResolution(users.alice, clients.A1);
-  const d2 = await draftEntry(human(users.alice), { client: clients.A1, resolution: res2, document: s.documentId, sha256: s.sha256, lines: LINES, opKey: opk("p8b-d2") });
-  await approveEntry(users.alice, { entry: d2.entry_id, expectedRevision: d2.revision_token, opKey: opk("p8b-a2") });
-
-  // Manually reverse entry1 FIRST (its own mirror carries no filing_id → it is not a cite).
+  // [S6 C-15] one-coding-per-active-filing (0009:1144-1150) refuses a 2nd cite while entry1
+  // holds the filing as approved-UNREVERSED. Reverse entry1 FIRST (its own mirror carries no
+  // filing_id → it is not a cite), which frees the filing for the live 2nd cite; the resulting
+  // pre-reversed + live pair is the same "partially-reversed set" this test proves — now
+  // reachable lawfully through the writers.
   await reverseEntry(users.bob, { entry: s.entry, reason: "manual pre-reversal", opKey: opk("p8b-rev") });
   const manualMirror = (await rootQuery("select reversed_by from clara.journal_entries where id=$1", [s.entry])).rows[0].reversed_by;
   assert.ok(manualMirror, "entry1 is reversed before the correction");
+
+  // A SECOND approved entry citing the same document/filing (now lawful — entry1 reversed).
+  const res2 = await freshResolution(users.alice, clients.A1);
+  const d2 = await draftEntry(human(users.alice), { client: clients.A1, resolution: res2, document: s.documentId, sha256: s.sha256, lines: LINES, opKey: opk("p8b-d2") });
+  await approveEntry(users.alice, { entry: d2.entry_id, expectedRevision: d2.revision_token, opKey: opk("p8b-a2") });
 
   // Correct A1→A2: destination attribution before propose; approve as bob.
   await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: s.documentId });

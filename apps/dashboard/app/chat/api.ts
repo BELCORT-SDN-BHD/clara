@@ -19,12 +19,42 @@ export type ClaraPart =
   | { type: "clarify"; tool_call_id: string; question: string; context?: string | null; framing: string }
   | { type: "clarify_closed"; reason: "expired" | "cancelled"; framing: string }
   // Slice-5 capture door (§4.5 / INTERFACE-PINS 4): present in p_user_parts AT
-  // SUBMIT (chat_messages is append-only). chatTurn stays v1 and does NOT perceive
-  // it in-turn — Clara sees the document only once it is filed ([DELTA-OWNER-2]).
-  | { type: "attachment"; document_id: string; intake_id: string };
+  // SUBMIT (chat_messages is append-only). Slice-6 chatTurn_v2 PERCEIVES it in-turn
+  // (reads the stored extraction via read_document) — [DELTA-OWNER-2] is superseded
+  // by contract §3 (the perception reversal ADR-018(3) anticipated).
+  | { type: "attachment"; document_id: string; intake_id: string }
+  // Slice-6 (§3, INTERFACE-PINS 3/4): the coding-turn's terminal typed parts. Both
+  // carry IDENTIFIERS ONLY — the card re-derives authoritative state on hydrate
+  // (get_draft_review), never trusting the persisted snapshot [DIRECTION §1].
+  | {
+      type: "je_review";
+      entry_id: string;
+      revision_token: string;
+      client_id: string;
+      document_id: string;
+      provenance_tier: ProvenanceTier;
+      uncertainty?: Uncertainty;
+      // W1/F1: the draft PERSISTS an amount exception (supplier_bill + corroborated
+      // facts + total mismatch) instead of refusing at draft time; the part flags it
+      // so the card knows to render the persisted exception panel from get_draft_review.
+      exception?: boolean;
+    }
+  | { type: "refusal"; code: RefusalCode; reason?: string; message: string };
 
 /** The attachment part shape a submitted turn carries (INTERFACE-PINS 4). */
 export type AttachmentPart = { type: "attachment"; document_id: string; intake_id: string };
+
+/** Two-tier amount provenance (contract §4): a machine-corroborated total vs a
+ *  model read from the document. Tier A = "verified", Tier B = "model_read". */
+export type ProvenanceTier = "verified" | "model_read";
+
+/** Qualitative uncertainty (S6-R5 — never a percentage): a note + alternatives. */
+export type Uncertainty = { note: string; alternatives: string[] };
+
+/** The Slice-6 CLR codes a refusal part can carry (contract §12). `string` keeps
+ *  the union open for codes the runtime maps that the dashboard has not enumerated;
+ *  the card renders `code` + `message` verbatim regardless. */
+export type RefusalCode = "CLR21" | "CLR22" | "CLR23" | "CLR24" | "CLR25" | (string & {});
 
 export type SessionRow = {
   id: string;
@@ -237,13 +267,35 @@ function pgrestHeaders(token: string, forWrite: boolean): Record<string, string>
   return h;
 }
 
-async function pgrestError(res: Response, what: string): Promise<Error> {
-  const body = (await res.json().catch(() => ({}))) as { message?: string; code?: string; hint?: string };
+export type PgrestError = Error & { pgCode?: string; pgDetails?: string; clr?: string | null; reason?: string | null };
+
+async function pgrestError(res: Response, what: string): Promise<PgrestError> {
+  const body = (await res.json().catch(() => ({}))) as { message?: string; code?: string; hint?: string; details?: string };
   const detail = [body.code, body.message].filter(Boolean).join(" — ");
-  return new Error(`${what} failed (${res.status})${detail ? `: ${detail}` : ""}`);
+  const err = new Error(`${what} failed (${res.status})${detail ? `: ${detail}` : ""}`) as PgrestError;
+  // Surface the governed CLR envelope so the je_review card can branch honestly:
+  // the CLR code lives in the message (house shape); the machine reason token lives
+  // in the exception DETAIL as `{"reason": <token>}` (INTERFACE-PINS §2 / C-20).
+  err.pgCode = body.code;
+  err.pgDetails = body.details;
+  err.clr = (body.message ?? "").match(/CLR\d{2}/)?.[0] ?? null;
+  err.reason = parseReasonToken(body.details);
+  return err;
 }
 
-async function rpc(fn: string, args: Record<string, unknown>, token: string): Promise<unknown> {
+/** The CLR21 discriminant (`amount_conflict` / `currency_unsupported` / …) rides in
+ *  the exception DETAIL as a json object (INTERFACE-PINS §2). Defensive parse. */
+function parseReasonToken(details?: string): string | null {
+  if (!details) return null;
+  try {
+    const j = JSON.parse(details) as { reason?: unknown };
+    return typeof j.reason === "string" ? j.reason : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function rpc(fn: string, args: Record<string, unknown>, token: string): Promise<unknown> {
   const base = supabaseBase();
   if (!base) throw new Error("NEXT_PUBLIC_SUPABASE_URL is not configured (governance acts need PostgREST)");
   const res = await fetch(`${base}/rest/v1/rpc/${fn}`, {

@@ -17,6 +17,11 @@ begin
   end if;
 end $$;
 
+-- Storage's API executes as `authenticator` and SET ROLEs to the JWT's role
+-- claim; without this membership that SET ROLE fails outright (ceremony-proven
+-- 2026-07-19; `supabase_storage_admin` is reserved and un-grantable).
+grant clara_storage_docs to authenticator;
+
 grant usage on schema storage to clara_storage_docs;
 revoke all on table storage.objects from clara_storage_docs;
 grant select, insert on table storage.objects to clara_storage_docs;

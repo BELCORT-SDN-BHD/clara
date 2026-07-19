@@ -1,5 +1,12 @@
 import { definePlugin } from "nitro";
-import { mintWakeCredential, withReadWakeScoped, withRuntime, withRead } from "../lib/pools.mjs";
+import {
+  mintWakeCredential,
+  mintWakeCredentialObo,
+  withReadWakeScoped,
+  withWriteWakeScoped,
+  withRuntime,
+  withRead,
+} from "../lib/pools.mjs";
 import { startControlListener, productionControlDeps } from "../lib/control.mjs";
 import { startLeaderLoop } from "../lib/leader.mjs";
 import { startMatcherLoop } from "../lib/matcher.mjs";
@@ -7,6 +14,7 @@ import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
 import { workflows } from "../workflows/registry.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
+import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
 import { stopIntakeIngress } from "../lib/spool.mjs";
 import { startManagedScanner } from "../lib/scan.mjs";
 
@@ -38,13 +46,18 @@ export default definePlugin(() => {
   });
 
   // Inject the pool API for the frozen chatTurn steps (globalThis contract §4.1).
+  // v2 adds the write floor (withWriteWakeScoped) + OBO minting (mintWakeCredentialObo)
+  // for the coding tools; v1's steps ignore the extra members.
   (globalThis as unknown as { __claraPools?: unknown }).__claraPools = {
     mintWakeCredential,
+    mintWakeCredentialObo,
     withReadWakeScoped,
+    withWriteWakeScoped,
     withRuntime,
     withRead,
   };
   (globalThis as unknown as { __claraDocumentServices?: unknown }).__claraDocumentServices = makeDocumentServices();
+  (globalThis as unknown as { __claraInvoiceFactsServices?: unknown }).__claraInvoiceFactsServices = makeInvoiceFactsServices();
 
   // Register intake first. The HTTP shutdown gate rejects new requests immediately;
   // this stop waits for an already-streaming spool write to finish honestly.
@@ -66,12 +79,22 @@ export default definePlugin(() => {
       process.exit(1); // crash-only: world-start failure is fatal (S4-D10)
     }
 
-    // Control listener — leased clarify delivery + cancel settlement (world API).
-    // Image-local ClamAV (when enabled) is part of the crash-only group. Intake
-    // remains fail-closed while its socket is unavailable.
+    // Image-local ClamAV (when enabled) is supervised as a SELF-HEALING child
+    // (PIN-AB-2 / Slice-6 §13 amendment): a clamd exit is NO LONGER runtime-fatal —
+    // startManagedScanner restarts it with bounded backoff, and intake scans fail
+    // closed honestly (503 scanner_unavailable) while it is down, so nothing bypasses
+    // scanning. `done` settles only on stop(); a supervisor-loop error is logged, never
+    // fatal. /ready keeps scanner.ok:false as a WARNING (the world stays ready).
     const scanner = startManagedScanner({ log: (m: string) => console.log(m) });
     if (scanner) {
-      scanner.done.then(() => fatal("clamd"), (e: unknown) => fatal("clamd", e));
+      scanner.done.then(
+        () => {},
+        (e: unknown) =>
+          console.error(
+            "[clara-runtime] clamd supervisor error (intake fails closed, NOT fatal):",
+            e instanceof Error ? e.message : String(e),
+          ),
+      );
       sup.stops.push(scanner.stop);
     }
 
@@ -84,6 +107,11 @@ export default definePlugin(() => {
       {
         enqueueChatTurn: (taskId: string) => start(workflows.chatTurn, [{ taskId }]),
         enqueueDocumentIngest: (taskId: string) => start(workflows.documentIngest, [{ task_id: taskId }]),
+        // The reconciler is lane-aware (L4's split): an invoice_facts document task routes
+        // HERE (invoiceFacts_v1); every other lane routes to documentIngest above. Both
+        // references resolve through the registry `workflows` object (freeze-lint
+        // enqueue-provenance law — a direct workflow-file import handed to start() fails CI).
+        enqueueInvoiceFacts: (taskId: string) => start(workflows.invoiceFacts, [{ task_id: taskId }]),
         recoverDocumentIntakes: () =>
           recoverPendingDocumentIntakes({
             withRuntime,

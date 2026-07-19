@@ -13,6 +13,30 @@
       "sha256": "77d58318e113af64f11ee7320aa8fc47727cf2104f233870dfe27df15df48e29",
       "note": ""
     },
+    "packages/runtime/workflows/chatTurn.v2.errors.ts": {
+      "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v2.impl.ts": {
+      "sha256": "d8ec47ac070bc85cf038841095ee84b0f1eb2f84f85c194789f781724b3fea41",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v2.infra.ts": {
+      "sha256": "2360eabbb39f27865244bd0c42ff8ac01d72abf6fef8febc3394f01f180bcd8d",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v2.prompt.ts": {
+      "sha256": "db5c70767fbf87d55cf18226abf22e91dc7e3c96266ff58055f089e11b79b3f9",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v2.tools.ts": {
+      "sha256": "ac64bc953c760a5e7dc523fb42ef69588e220e13499106ddf3c1bbc40e1e7c73",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v2.ts": {
+      "sha256": "db48b6f38bc1facca4651d79d7ba0f19f333835dcc49919ec05c1d45f1714311",
+      "note": ""
+    },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
       "note": ""
@@ -27,6 +51,18 @@
     },
     "packages/runtime/workflows/documentIngest.v1.ts": {
       "sha256": "5f9022f564ad5f78b8f49d8cd0fb31a36f1c7981f50acfd90930843a7601aa05",
+      "note": ""
+    },
+    "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
+      "sha256": "f2d3ef98ed9ce533d04252fd5771e463b017c8b66c77ec70d74a457f534bd7b1",
+      "note": ""
+    },
+    "packages/runtime/workflows/invoiceFacts.v1.impl.ts": {
+      "sha256": "f2f9338f98bb174ceff4bb0666a7979deb03855f55fbd85510c1c31e5d698e5b",
+      "note": ""
+    },
+    "packages/runtime/workflows/invoiceFacts.v1.ts": {
+      "sha256": "c7af91489397dbf0d64b55562edac5bf2ecd019ede5fab94871858f6b9b98334",
       "note": ""
     },
     "packages/runtime/workflows/steps.ts": {
