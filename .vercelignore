@@ -1,0 +1,14 @@
+# Deploy surface: apps/dashboard + the workspace files its build needs. Everything
+# else in the monorepo (runtime, db, spike, docs, .tmp) never ships to Vercel.
+/*
+!/apps
+/apps/*
+!/apps/dashboard
+/apps/dashboard/node_modules
+/apps/dashboard/.next
+/apps/dashboard/.vercel
+/apps/dashboard/.env.local
+!/package.json
+!/pnpm-workspace.yaml
+!/pnpm-lock.yaml
+!/tsconfig.base.json

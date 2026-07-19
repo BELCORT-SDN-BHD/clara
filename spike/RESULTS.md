@@ -258,3 +258,22 @@ a crash hazard. The name-versioning discipline fully mitigates it.
 7. Windows quirk (cosmetic): graphile-worker logs
    `Executable file detection not yet supported on 'win32'` twice at boot;
    no functional impact observed.
+
+---
+
+## T2-48h FINAL SIGN-OFF (2026-07-19, the cutover ceremony)
+
+**PASS — owner-ratified.** The 48-hour park (`approval:t2-park48h`, run
+`wrun_01KXQEVPPMX4XGZ2F4GFCYT3YE`, enqueued 2026-07-17 15:15:10 +08) was resumed
+at the ceremony after **46h 17m** — the owner explicitly ruled the evidence
+sufficient ahead of the full 48h mark. Observed on resume: hook consumed and run
+`completed` in seconds; `t2-park48h` posting count STILL exactly 1 (memoized
+prefix did not re-execute); receipt 1; canary invocation 1; the documented T6a
+in-place-change markers present (`approver='inplace-v2:spike-operator'`,
+`audit_mark='closeDemo-inplace-v2'`). Full `pnpm status` output archived in the
+ceremony evidence file; forensic JSON dump of all four schemas taken BEFORE the
+owner-approved drop of `workflow`/`graphile_worker`/`spike` — plus the
+**fourth spike-era schema `workflow_drizzle`** (the engine's migration journal),
+whose survival initially made the fresh engine bootstrap silently no-op (a
+runbook lesson: the drop list was one schema short). Slice 0 is CLOSED; the
+production engine schemas were re-bootstrapped clean and the world is ON.

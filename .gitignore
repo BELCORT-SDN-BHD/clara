@@ -41,3 +41,6 @@ spike/.env
 # Codex-lane sandbox work dirs (reports + verification mirrors) — never committed
 .tmp/
 .tmp-corepack/
+
+.vercel
+.env*
