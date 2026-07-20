@@ -51,7 +51,11 @@ at a portable v17 build; CI installs `postgresql-client-17`.
 **Preconditions:** owner GO; a *fresh* Supabase project (or a local throwaway for a
 rehearsal); v17 client on PATH via `PG_DUMP`/`PG_DUMPALL`/`PSQL`; the latest encrypted
 off-site bundle decrypted to a private dir; `CLARA_ALLOW_DESTRUCTIVE=1` and
-`CLARA_DESTRUCTIVE_TARGET="<host:port/db>"` set to the *exact* fresh-target label.
+`CLARA_DESTRUCTIVE_TARGET="<user@host:port/db>"` set to the *exact* fresh-target
+identity. **The `user@` prefix is load-bearing:** on a managed pooler every project in
+a region shares one host and the `postgres` database, so the USERNAME is what identifies
+the project — a host-only match could authorize a destructive op against the WRONG
+project. Copy the exact string out of the guard's refusal message rather than typing it.
 
 1. **Provision the fresh project.** Confirm the Supabase-managed roles + schemas exist
    (`auth`, `storage`, `authenticator`, `authenticated`, `anon`, `service_role`,
