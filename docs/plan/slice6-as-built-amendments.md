@@ -147,6 +147,36 @@ this fix round. Review evidence: `docs/plan/research/slice6/asbuilt-*` (archived
   The NEW-3 CLR23 landscape refusal + revise-convergence path was exercised 11×
   in production and behaved exactly as ratified.
 
+- **AB-22 (destructive-guard contract: the named target is now USER-QUALIFIED).**
+  Found while verifying the DR drill driver, BEFORE the drill ran. `targetLabel()`
+  rendered a target as `host:port/db`, dropping the username — but on a managed
+  Supabase pooler the **project ref lives in the username**
+  (`postgres.<ref>@aws-0-<region>.pooler.supabase.com:5432/postgres`), so host, port
+  and db are **byte-identical for every project in a region**. `guard.mjs`'s
+  `named === label` confirmation therefore **could not distinguish two projects**: an
+  operator who set `CLARA_DESTRUCTIVE_TARGET` to the scratch label while
+  `DATABASE_URL` still pointed at LIVE would have had a restore **waved through** —
+  precisely the ambient-DSN footgun the guard exists to defeat, defeated by the
+  pooler's shared-host architecture. Same exposure applied to `reset.mjs` (drops
+  schema clara) and `restore.mjs`/`restore-full.mjs`. **Law now:** `resolveTarget()`
+  also returns `user`; the new `destructiveTargetLabel()` renders
+  `user@host:port/db` and is what the named-target confirmation **and the refusal
+  message** compare, so the printed copy-paste string is already the safe form.
+  `targetLabel()` keeps its `host:port/db` shape (it is the human/log label in many
+  call sites and in dr-verify's refusal logic), and `targetIsEphemeral()` stays
+  host/db-based so the localhost / `*_ci` / `*_test` paths — and therefore CI — are
+  unaffected. Proven both ways on Supabase-shaped DSNs: the sabotage case (named
+  scratch, DSN live) REFUSES; the legitimate case ACCEPTS; the ephemeral path still
+  needs no named target; the db suite is unchanged at 265/0/11. The drill driver
+  computes the same user-qualified string, so it never asks the operator to
+  copy-paste an identity. **Not closable by the guard alone:** post-connect identity
+  (db oid + `pg_control_system().system_identifier`, as `dr-verify` does) is
+  strictly stronger, but the guard authorizes **child** processes (`psql`/`pg_dump`)
+  *before* any connection exists — a probe connection would prove only that the
+  parent could reach a target, not where the child lands (TOCTOU), and would force
+  the operator to supply an opaque identifier. The username is the discriminator
+  already present in the DSN, at zero operator cost.
+
 ## Residuals (recorded, not built)
 
 Per contract §11 unchanged, plus: a dedicated notification inbox surface (AB-5);
