@@ -11,7 +11,9 @@
     "backup": "node scripts/backup.mjs",
     "backup:full": "node scripts/backup.mjs --profile full",
     "restore": "node scripts/restore.mjs",
+    "restore:full": "node scripts/restore-full.mjs",
     "dr:selftest": "node scripts/dr-selftest.mjs",
+    "dr:verify": "node scripts/dr-verify.mjs",
     "lint": "eslint .",
     "test": "node --test tests/"
   },

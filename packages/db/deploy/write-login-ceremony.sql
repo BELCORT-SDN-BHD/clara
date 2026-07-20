@@ -40,10 +40,10 @@ alter role clara_wake_write_login nosuperuser nobypassrls nocreatedb nocreaterol
 select rolname, rolcanlogin, rolsuper, rolbypassrls, rolcreatedb, rolcreaterole, rolinherit
   from pg_roles where rolname = 'clara_wake_write_login';
 
--- (2) Exactly ONE membership: clara_wake_interactive, INHERIT FALSE, SET TRUE.
+-- (2) Exactly ONE membership: clara_wake_interactive, INHERIT FALSE, SET TRUE, ADMIN FALSE.
 --     Expect a single row: parent_role=clara_wake_interactive,
---     inherit_option=f, set_option=t.
-select parent.rolname as parent_role, am.inherit_option, am.set_option
+--     inherit_option=f, set_option=t, admin_option=f.
+select parent.rolname as parent_role, am.inherit_option, am.set_option, am.admin_option
   from pg_auth_members am
   join pg_roles member on member.oid = am.member
   join pg_roles parent on parent.oid = am.roleid

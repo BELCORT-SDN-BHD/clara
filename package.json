@@ -20,6 +20,8 @@
     "db:backup": "pnpm --filter @clara/db backup",
     "db:backup:full": "pnpm --filter @clara/db backup:full",
     "db:restore": "pnpm --filter @clara/db restore",
+    "db:restore:full": "pnpm --filter @clara/db restore:full",
+    "db:dr:verify": "pnpm --filter @clara/db dr:verify",
     "freeze:lint": "node scripts/check-frozen-workflows.mjs",
     "freeze:update": "node scripts/check-frozen-workflows.mjs --update",
     "leaks:scan": "node scripts/check-leaks.mjs"
