@@ -73,14 +73,37 @@ the dump cadence in §4 is the real RPO lever.
 
 ## 4. Repo-side backup/restore (runnable; the Free-tier floor)
 
-Two dependency-light scripts in `@clara/db` (Supabase's recommended `db dump`
-path, implemented directly so it runs anywhere with a Postgres client):
+Dependency-light scripts in `@clara/db` (Supabase's recommended `db dump` path,
+implemented directly so it runs anywhere with a Postgres client):
 
 - `packages/db/scripts/backup.mjs` — `pg_dump` (schema+data) → timestamped
   plain-SQL file under `packages/db/backups/` (gitignored — dumps may hold data).
 - `packages/db/scripts/restore.mjs` — `psql` apply of a dump into a target.
 - `packages/db/scripts/dr-selftest.mjs` — a full **dump → drop → restore →
   verify** round-trip in a throwaway `dr_selftest` schema.
+- `packages/db/deploy/roles-bootstrap.sql` · `scripts/restore-full.mjs` ·
+  `scripts/dr-verify.mjs` — the **full-profile** DR path (recreate roles → ordered
+  restore → verification battery). See **`docs/ops/DR-full-drill.md`**.
+
+### Two backup profiles (be honest about what each protects)
+
+- **DEFAULT** (`pnpm db:backup`, schema `clara`) — a **DIAGNOSTIC** books snapshot
+  ONLY, dumped **WITHOUT** owners/privileges (`--no-owner --no-privileges`) and without
+  the durable schemas. It **must NEVER be started as an application database** (Codex
+  HIGH-2): a restore yields postgres-owned, PUBLIC-EXECUTABLE functions (the write wall
+  is OPEN — `clara_agent_ro` can execute `approve_entry`), and because it carries
+  `clara.schema_migrations`, a re-migrate is a **no-op** that never rebuilds the
+  ownership/GRANT wall. Use it for inspection/diffing; **production recovery is
+  full-profile only.**
+- **FULL** (`pnpm db:backup:full`) — the **production DR profile**: all four
+  authoritative schemas (`clara` + the durable trio `workflow` /
+  **`workflow_drizzle`** / `graphile_worker`) dumped **WITH owners AND privileges**.
+  The two-lane security model *is* the GRANT/REVOKE matrix + `clara_fn_owner` object
+  ownership — a `SECURITY DEFINER` writer runs as its owner, so a `--no-owner` restore
+  is a **privilege-escalation**, not a cosmetic gap. Roles are cluster-level (not in a
+  `pg_dump`) and recreated by `deploy/roles-bootstrap.sql`; the globals dump beside the
+  backup is an **evidence/diff** artifact only. Scheduled DR **must** use the full
+  profile. Full runbook + tooling + off-site scheduling design: `docs/ops/DR-full-drill.md`.
 
 Connection is via **libpq env vars only** (`PGHOST/PGPORT/PGUSER/PGPASSWORD/
 PGDATABASE`) — no DSN in code or argv, so no credential is ever committed.
@@ -147,14 +170,32 @@ you have never restored is not a backup.
 > **Scope of what is exercised vs. what is still required (finding 10).** This
 > drill exercises the **default** profile (a single throwaway schema) — it proves
 > the `pg_dump`/`psql` tooling round-trips, not that a real recovery is complete.
-> `backupFull` (`db:backup:full`) now **asserts the full authoritative-schema
-> inventory** (`clara` + `workflow` + `graphile_worker`) and refuses a partial
-> "full" backup. But the **full-profile fresh-project DR drill** — restoring every
-> schema **+ roles/grants/RLS + Supabase Auth/Storage recovery + encrypted
-> off-site scheduling + freshness alerts** into a *fresh* project — is **not yet
-> built** (no real schema exists yet). It is a **REQUIRED gate before any real
-> client data (Slice 2+)**, tracked in `docs/PROJECTLOG.md` PART 2. Do not treat
-> the single-schema drill as evidence of full recoverability.
+> The **full-profile tooling is now built and rehearsed** (hardening interlude):
+> `db:backup:full` (owners + privileges + the four authoritative schemas incl.
+> `workflow_drizzle`), `deploy/roles-bootstrap.sql`, `db:restore:full`, and the
+> `db:dr:verify` battery — see **`docs/ops/DR-full-drill.md`**. It was rehearsed
+> end-to-end on a local `postgres` throwaway (§5b), and CI runs the whole
+> backup→restore→verify chain on an ephemeral pair (the "DR full-profile round-trip" CI step). What
+> **remains** is the **fresh-Supabase-project drill** (real `auth`/`storage`
+> recovery + encrypted off-site scheduling + freshness alerts), which is
+> **OWNER-GO-gated** and tracked in `docs/PROJECTLOG.md` PART 2. Do not treat the
+> single-schema drill as evidence of full recoverability.
+
+### 5b. Full-profile fresh-project drill evidence — PENDING (OWNER GO)
+
+The local-throwaway rehearsal (2026-07-20) passed the full sequence
+(`db:backup:full` → `roles-bootstrap` → `db:restore:full` → `db:dr:verify`: **all
+battery probes PASS**, ownership + grant matrix + RLS + policies + role census +
+memberships all identical, the confinement smoke returned 42501, and the AP-gate
+expression matched source == target). The **fresh-Supabase-project** evidence (a real
+`auth`/`storage` recovery + the parked-canary resume + the AP gate at RM 1,350,938.21)
+is pasted here once the owner-GO drill runs. The post-restore ceremonies
+(`roles-bootstrap` → full restore → `storage-provision` + bucket + bytes →
+`write-login-ceremony` → **`acl-baseline` re-apply** → engine-sanity → `dr-verify`)
+are the runbook in `docs/ops/DR-full-drill.md` §3. Note the **ACL baseline is not
+carried by any dump** — re-applying `deploy/acl-baseline.sql` is a mandatory
+post-restore step (a restore recreates `public` with its default PUBLIC USAGE, which
+would re-open the confined agent/wake lanes' reach).
 
 ---
 
@@ -208,14 +249,21 @@ escalation path for the pilot. The alerting **wiring** is a follow-up; the
 1. **Confirm the project plan and, before real data, upgrade to Pro + PITR.**
    On Free there is zero managed DR; the repo-side dump is the only floor.
 2. **Off-site dump destination** — decide where scheduled dumps are stored
-   (they must leave the Supabase account to survive account/region loss).
+   (they must leave the Supabase account to survive account/region loss). A design
+   with a recommendation (scheduled Windows Task + `age` + `rclone` to R2/B2, plus a
+   dead-man's-switch freshness alarm) is in `docs/ops/DR-full-drill.md` §6 — **OWNER
+   DECISION pending**.
 3. **Storage-bucket backup** — document bytes in Supabase Storage need their own
-   copy path (the DB dump does not include Storage objects). Wire in Slice 5
-   when the document pipeline lands.
-4. **Wire the alerting** in §7 once the runtime is deployed.
-5. **Build + pass the full-profile fresh-project DR drill (finding 10)** — a real
-   restore of every authoritative schema + roles/grants/RLS + Supabase
-   Auth/Storage into a *fresh* project, with encrypted off-site scheduling and
-   freshness alerts. **REQUIRED before any real client data (Slice 2+);** the
-   current §5 drill only exercises the single-schema tooling. Tracked in
-   `docs/PROJECTLOG.md` PART 2.
+   copy path (the DB dump does not include Storage objects); the recovery path is
+   `docs/ops/DR-full-drill.md` §4 (re-provision bucket → `storage-provision.sql` →
+   re-upload byte mirror → sha256-verify). The scheduled byte mirror is part of the
+   §6 off-site design (OWNER DECISION).
+4. **Wire the alerting** in §7 once the runtime is deployed (the dead-man's-switch
+   freshness alarm is the §6 recommendation).
+5. **Full-profile DR — tooling BUILT + rehearsed; the fresh-project drill is the
+   remaining gate.** `db:backup:full` (owners+privileges, four schemas),
+   `deploy/roles-bootstrap.sql`, `db:restore:full`, and the `db:dr:verify` battery
+   are built, rehearsed on a local throwaway (§5b), and CI-guarded (the "DR full-profile round-trip" CI step).
+   The **fresh-Supabase-project drill** (real `auth`/`storage` recovery + off-site
+   scheduling + freshness alerts) is **OWNER-GO-gated** and **REQUIRED before any real
+   client data**. Runbook: `docs/ops/DR-full-drill.md`. Tracked in `docs/PROJECTLOG.md` PART 2.

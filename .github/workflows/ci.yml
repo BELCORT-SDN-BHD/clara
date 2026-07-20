@@ -20,6 +20,10 @@ jobs:
 
     # Ephemeral, disposable Postgres 17 — created for this job and discarded when
     # it ends. This is the ONLY database CI touches. It is not the frozen project.
+    # `postgres_b` is a SECOND, INDEPENDENT cluster (different port) used only by the
+    # DR full-profile round-trip so cluster-role recovery is genuinely cross-cluster
+    # (Codex HIGH-5: two databases in ONE cluster share pg_authid, making role parity a
+    # tautology; restoring into a separate cluster exercises real role/membership creation).
     services:
       postgres:
         image: postgres:17
@@ -29,6 +33,19 @@ jobs:
           POSTGRES_DB: clara_ci
         ports:
           - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      postgres_b:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5433:5432
         options: >-
           --health-cmd "pg_isready -U postgres"
           --health-interval 10s
@@ -226,3 +243,42 @@ jobs:
 
       - name: DR backup/restore self-test (ephemeral postgres:17)
         run: pnpm --filter @clara/db dr:selftest
+
+      # FULL-PROFILE DR ROUND-TRIP (hardening interlude): prove the full-fidelity
+      # backup -> restore -> verify sequence end-to-end ACROSS TWO CLUSTERS. drci_source
+      # lives on the primary service (5432): migrate + seed + the WDK world bootstrap (the
+      # SAME idempotent `bootstrap` bin the intake-e2e step runs — it creates workflow /
+      # workflow_drizzle / graphile_worker). The FULL profile backup captures all four
+      # schemas WITH owners + the GRANT/REVOKE/RLS matrix. The target drci_target is on the
+      # SEPARATE postgres_b cluster (5433) whose pg_authid starts EMPTY, so
+      # deploy/roles-bootstrap.sql GENUINELY creates the clara roles + memberships (Codex
+      # HIGH-5 — not a same-cluster tautology). restore-full runs roles-bootstrap + the
+      # single-transaction restore; dr-verify diffs source(5432)<->target(5433) across every
+      # fidelity category and REFUSES a self-comparison. Both clusters are PG17 so no
+      # cross-version dump GUC issue arises. Canary + AP auto-SKIP (no live data). Any
+      # battery FAIL fails CI. Additive. pg_dump/psql are v17; the localhost targets are
+      # ephemeral so CLARA_ALLOW_DESTRUCTIVE=1 (job env) authorizes them. PGPASSWORD (job
+      # env) is the fallback password for BOTH services (same POSTGRES_PASSWORD).
+      - name: DR full-profile round-trip (two clusters, backup->restore->verify)
+        run: |
+          # SOURCE on cluster A (5432)
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_source'
+          PGDATABASE=drci_source pnpm db:migrate
+          PGDATABASE=drci_source pnpm db:seed
+          # roles-bootstrap the SOURCE too: the migrations create only the 9 clara group/login
+          # roles — clara_storage_docs comes from storage-provision.sql / roles-bootstrap, NOT a
+          # migration. Running it here gives cluster A the SAME 10-role census cluster B gets, so
+          # role/membership parity is genuine and not a deterministic clara_storage_docs mismatch
+          # (Codex re-verify NEW HIGH-2). All shells are NOLOGIN on a fresh migrate, so the
+          # fresh-target-only preflight cannot abort here.
+          PGDATABASE=drci_source psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/drci_source" \
+            pnpm --filter @clara/runtime exec bootstrap
+          PGDATABASE=drci_source node packages/db/scripts/backup.mjs --profile full --out /tmp/drci-full.sql
+          # TARGET on cluster B (5433) — a fresh cluster with an EMPTY pg_authid
+          PGPORT=5433 PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database drci_target'
+          PGPORT=5433 PGDATABASE=drci_target psql -v ON_ERROR_STOP=1 -f packages/db/deploy/roles-bootstrap.sql
+          PGPORT=5433 PGDATABASE=drci_target node packages/db/scripts/restore-full.mjs --file /tmp/drci-full.sql
+          CLARA_DR_SOURCE_URL="postgres://postgres@localhost:5432/drci_source" \
+          CLARA_DR_TARGET_URL="postgres://postgres@localhost:5433/drci_target" \
+            node packages/db/scripts/dr-verify.mjs

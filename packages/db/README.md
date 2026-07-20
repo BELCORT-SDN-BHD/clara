@@ -29,9 +29,15 @@ lib/pg.mjs                 env-only connection helper (no DSN in code/argv)
 scripts/migrate.mjs        runner: applies pending migrations in a tx each; records sha256
 scripts/seed.mjs           runner: applies seeds
 scripts/reset.mjs          drops ONLY the `clara` schema
-scripts/backup.mjs         pg_dump -> timestamped plain-SQL file
+scripts/backup.mjs         pg_dump -> timestamped plain-SQL file (default | --profile full)
 scripts/restore.mjs        psql apply of a dump file
+scripts/restore-full.mjs   full DR restore: roles-bootstrap -> restore -> ceremony checklist
 scripts/dr-selftest.mjs    real dump+restore round-trip in a throwaway schema
+scripts/dr-verify.mjs      full-profile restore verification battery (source<->target)
+scripts/dr-verify-util.mjs · dr-verify-checks.mjs   the battery's helpers + §4 probes
+deploy/roles-bootstrap.sql idempotent recreation of the 10 clara-custom roles (DR step 1; FRESH-TARGET-ONLY)
+deploy/read-logins-ceremony.sql  runtime + read-pool LOGIN ceremony (post-restore; mirrors write-login)
+deploy/acl-baseline.sql    HIGH-10 public-schema ACL baseline (ceremony; post-restore re-apply)
 tests/pipeline.test.mjs    migrate -> seed -> assert (node --test)
 ```
 
@@ -55,11 +61,16 @@ pnpm --filter @clara/db migrate    # apply pending migrations
 pnpm --filter @clara/db seed       # load synthetic seed data
 pnpm --filter @clara/db test       # migrate -> seed -> assert (needs a DB)
 pnpm --filter @clara/db reset      # drop the clara schema (scoped, safe)
-pnpm --filter @clara/db backup     # pg_dump the clara schema
+pnpm --filter @clara/db backup     # pg_dump the clara schema (default profile)
+pnpm --filter @clara/db backup:full# FULL DR profile: 4 schemas + owners + privileges
+pnpm --filter @clara/db restore:full # roles-bootstrap -> restore -> ceremony checklist
 pnpm --filter @clara/db dr:selftest# exercise a full dump+restore round-trip
+pnpm --filter @clara/db dr:verify  # restore verification battery (needs the two CLARA_DR_*_URL)
 ```
 
-Root shortcuts: `pnpm db:migrate`, `pnpm db:seed`, `pnpm db:reset`, `pnpm db:backup`.
+Root shortcuts: `pnpm db:migrate`, `pnpm db:seed`, `pnpm db:reset`, `pnpm db:backup`,
+`pnpm db:backup:full`, `pnpm db:restore:full`, `pnpm db:dr:verify`. Full-profile DR
+runbook + tooling: `docs/ops/DR-full-drill.md`.
 
 ## The migration runner contract
 
