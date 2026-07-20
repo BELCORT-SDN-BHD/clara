@@ -108,7 +108,13 @@ billing and the agent identity **`belcorttao`**. The drill found FIVE defects fo
 review stages had missed — three ceremony scripts that would have failed 42501
 MID-RECOVERY (books restored, no login able to reach them), a verifier that could
 not tell two Supabase projects apart, and a zero-probe battery reporting success.
-Canary daba7f2e stays ARMED, due 2026-08-02 — NEVER answer it. NEXT = the
-**Phase-4 Wave-A design grill** (the daily loop) with the recorded gates: AB-3
-engine_kind pin BEFORE anything MyInvois-shaped; the C6/egress bundle before ANY
-third-party client documents (RPR-only until then); the deferred S6 §11 list.**
+Canary daba7f2e stays ARMED, due 2026-08-02 — NEVER answer it. The **Phase-4
+Wave-A DESIGN STAGE is DONE (2026-07-21, ADR-022)**: the daily-loop contract is
+ratified (`docs/plan/wave-a-daily-loop-contract.md` v1.1 + the 0011 companion —
+rulings WA-R1..R12 + deltas WA-D1..D5; the full ladder ran: grill → dual design
+review, both FLAWED, 37 findings folded → 10/10 rig probes → owner ratification).
+**WA-R2 SUPERSEDED the RPR-only/C6 gate** (owner declared consent material valid,
+2026-07-21; the per-client egress registry ships in Wave A with the WA-D1
+lane-carve). Standing gates: AB-3 engine_kind pin = the FIRST item of migration
+0011; the deferred S6 §11 list. NEXT = the **Wave-A BUILD stage** (interface-pins
+first, then the five-lane build per the contract).**
