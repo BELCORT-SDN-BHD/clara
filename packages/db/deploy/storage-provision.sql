@@ -6,15 +6,52 @@
 -- verifying INSERT+SELECT, then revoking the old signing credential out of band.
 -- The local Postgres rig has no storage schema, so this posture is ceremony-tested.
 
+-- Role normalization is SPLIT by privilege (the 0002 §1 / HIGH-8 law, mirrored from
+-- deploy/roles-bootstrap.sql). PostgreSQL requires SUPERUSER to set SUPERUSER /
+-- BYPASSRLS / CREATEDB **even when setting them to false**, and REPLICATION can only
+-- be changed by a role that itself has REPLICATION. Supabase's `postgres` is NOT a
+-- superuser, so the previous unguarded `else alter role … nosuperuser …` made this
+-- script FAIL 42501 on every re-run once the role existed — including during DR
+-- recovery, where deploy/roles-bootstrap.sql legitimately creates the role first.
+-- A freshly CREATEd role already defaults to all of these, so the guarantee holds on
+-- a first apply regardless; the explicit normalizers are defense-in-depth.
 do $$
+declare
+  v_super boolean := current_setting('is_superuser') = 'on';
+  v_can_repl boolean := (select rolsuper or rolreplication from pg_roles where rolname = current_user);
 begin
   if not exists (select 1 from pg_roles where rolname='clara_storage_docs') then
-    create role clara_storage_docs nologin nosuperuser nocreatedb nocreaterole
-      noinherit noreplication nobypassrls;
-  else
-    alter role clara_storage_docs nologin nosuperuser nocreatedb nocreaterole
-      noinherit noreplication nobypassrls;
+    -- defaults: NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE NOREPLICATION
+    create role clara_storage_docs nologin noinherit;
   end if;
+  -- Settable by a plain CREATEROLE deploy role.
+  alter role clara_storage_docs nologin nocreaterole noinherit;
+  if v_can_repl then
+    alter role clara_storage_docs noreplication;
+  end if;
+  if v_super then
+    alter role clara_storage_docs nosuperuser nocreatedb nobypassrls;
+  end if;
+end $$;
+
+-- Fail closed if the role ended up with any escalation bit (whatever the deploy
+-- role's own privileges were): the write-once custody posture depends on it.
+do $$
+declare bad text := '';
+begin
+  select string_agg(x, ', ') into bad from (
+    select 'SUPERUSER' x from pg_roles where rolname='clara_storage_docs' and rolsuper
+    union all select 'BYPASSRLS' from pg_roles where rolname='clara_storage_docs' and rolbypassrls
+    union all select 'CREATEDB' from pg_roles where rolname='clara_storage_docs' and rolcreatedb
+    union all select 'CREATEROLE' from pg_roles where rolname='clara_storage_docs' and rolcreaterole
+    union all select 'REPLICATION' from pg_roles where rolname='clara_storage_docs' and rolreplication
+    union all select 'LOGIN' from pg_roles where rolname='clara_storage_docs' and rolcanlogin
+    union all select 'INHERIT' from pg_roles where rolname='clara_storage_docs' and rolinherit
+  ) s;
+  if bad is not null and bad <> '' then
+    raise exception 'storage-provision ABORTED: clara_storage_docs carries unexpected attribute(s): %. It must be NOLOGIN NOINHERIT with no escalation bits.', bad;
+  end if;
+  raise notice 'clara_storage_docs attributes OK (nologin, noinherit, no escalation bits)';
 end $$;
 
 -- Storage's API executes as `authenticator` and SET ROLEs to the JWT's role
