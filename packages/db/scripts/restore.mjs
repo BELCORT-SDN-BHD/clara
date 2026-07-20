@@ -17,6 +17,7 @@
 //   node scripts/restore.mjs --file <path.sql> [--no-single-transaction]
 
 import { spawnSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { targetLabel, isMain, childEnvForExternalTools } from "../lib/pg.mjs";
 import { assertDestructiveAllowed } from "../lib/guard.mjs";
 
@@ -26,6 +27,11 @@ import { assertDestructiveAllowed } from "../lib/guard.mjs";
 export function restore(opts) {
   if (!opts || !opts.file) throw new Error("restore requires { file }");
   const { file, singleTransaction = true, log = console.log } = opts;
+  // Fail fast and legibly on a bad path (restore-full.mjs already does). Without this,
+  // psql opens the missing file itself and the operator sees a bare "psql exited 1"
+  // from inside a restore — maximally confusing mid-drill. Relative paths resolve
+  // against the CWD, so run these from the repo root.
+  if (!existsSync(file)) throw new Error(`dump file not found: ${file} (paths resolve against the CWD — run from the repo root)`);
 
   assertDestructiveAllowed({ action: `restore (overwrite ${targetLabel()})` });
 

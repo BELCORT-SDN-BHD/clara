@@ -86,9 +86,27 @@ project. Copy the exact string out of the guard's refusal message rather than ty
    `public` with its default PUBLIC USAGE, re-opening the confined lanes' reach unless
    re-applied (Lane C §9).
 8. **Engine sanity (do NOT re-bootstrap blindly).** Confirm
-   `workflow_drizzle.workflow_migrations` == source **before** starting a worker — a
-   mismatch is the silent-no-op / `CREATE SCHEMA` collision trap. Only then point the
-   runtime (`CLARA_START_WORLD=1`); it should **resume** the parked canary.
+   `workflow_drizzle.workflow_migrations` == source **before** any worker could start — a
+   mismatch is the silent-no-op / `CREATE SCHEMA` collision trap. What you do next
+   **depends on which mode you are in, and the two are opposites:**
+
+   > ### ⛔ MODE CARVE-OUT — read before starting any runtime
+   >
+   > **REAL RECOVERY (production is gone; this target becomes the new production):**
+   > start the runtime (`CLARA_START_WORLD=1`). It **should resume** the parked canary —
+   > that resume *is* the recovery, and seeing it complete is the point.
+   >
+   > **DRILL / REHEARSAL (production is alive; this target is a scratch project):**
+   > **NEVER start a runtime, worker, or world against the scratch.** The restored canary
+   > is a **copy** of the LIVE interruption `daba7f2e`, which must stay parked on **both**
+   > sides — resuming it here would execute a duplicate of a live run against a database
+   > holding real books, and it would move the target's canary state so §4.9 parity FAILs.
+   > Drill verification is **SQL-only** (the §5 battery). The resume path is already
+   > proven: the GATE-3 kill-mid-workflow demo exercised exactly-once resume **on live**
+   > (2026-07-19/20). You are verifying that the durable state is present and consistent
+   > so a worker *would* resume — not making one resume.
+   >
+   > If you are unsure which mode you are in, you are in a DRILL. Do not start the world.
 9. **Verification battery (§5) — STRICT.** Run the drill in STRICT mode with the canary +
    AP gate REQUIRED, so it cannot silently SKIP the highest-value checks:
    ```sh
@@ -113,7 +131,8 @@ storage-provision.sql + firm-docs bucket + bytes  Storage recovery (out-of-band)
 write-login-ceremony.sql                          write-pool LOGIN + password
 read-logins-ceremony.sql                          runtime + read-pool LOGIN + passwords
 acl-baseline.sql                                  public-schema ACL baseline (MANDATORY)
-engine-sanity check                               workflow_drizzle == source, THEN world-on
+engine-sanity check                               workflow_drizzle == source (world-on:
+                                                  REAL RECOVERY only — NEVER in a drill, step 8)
 dr-verify.mjs                                     the §5 battery — all PASS
 ```
 
