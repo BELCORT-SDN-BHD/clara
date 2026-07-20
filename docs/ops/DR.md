@@ -197,15 +197,57 @@ you have never restored is not a backup.
 > **OWNER-GO-gated** and tracked in `docs/PROJECTLOG.md` PART 2. Do not treat the
 > single-schema drill as evidence of full recoverability.
 
-### 5b. Full-profile fresh-project drill evidence — PENDING (OWNER GO)
+### 5b. Full-profile fresh-project drill — **EXECUTED AND PASSED, 2026-07-20**
 
-The local-throwaway rehearsal (2026-07-20) passed the full sequence
-(`db:backup:full` → `roles-bootstrap` → `db:restore:full` → `db:dr:verify`: **all
-battery probes PASS**, ownership + grant matrix + RLS + policies + role census +
-memberships all identical, the confinement smoke returned 42501, and the AP-gate
-expression matched source == target). The **fresh-Supabase-project** evidence (a real
-`auth`/`storage` recovery + the parked-canary resume + the AP gate at RM 1,350,938.21)
-is pasted here once the owner-GO drill runs. The post-restore ceremonies
+**The ADR-012 / finding-10 gate is CLOSED.** A real restore of the live project
+(`bzecqklouchkmdmdxlln`, PG 17.6) into a **brand-new Supabase project** created in a
+**separate Free organization** (quota isolation — the live org runs a spend cap, and an
+extra project there could push the live books read-only), same region, PG 17.6.
+
+| Phase | Result |
+|---|---|
+| Full-profile backup | **51,891,128 bytes**, all four authoritative schemas (`clara`, `workflow`, `workflow_drizzle`, `graphile_worker`) **with owners + ACLs** |
+| `roles-bootstrap` | **10 roles + 24 memberships rebuilt from an EMPTY `pg_authid`** |
+| Restore | single-transaction; schema + data + ownership + the whole GRANT/REVOKE/RLS matrix |
+| Auth recovery | `auth.users` + `auth.identities` data-only (FK order via `session_replication_role=replica`); **password-grant login returned HTTP 200** — bcrypt hashes survived onto a project with different JWT signing keys |
+| Storage | **19/19 objects** downloaded, uploaded and **byte-identical on read-back** |
+| Ceremonies | `write-login` + `read-logins` + **`acl-baseline`** applied on a real hosted project; baseline `VERIFY: OK` |
+| **Battery (STRICT)** | **177 PASS · 0 FAIL · 1 SKIP · 10 INFO (188 probes)** |
+
+Load-bearing assertions inside that battery: **AP gate exact — `400-000` net
+(credit−debit) `source = target = 135,093,821` cents = RM 1,350,938.21**; the **S4-V2
+canary parked on both sides** (`daba7f2e` `status=pending`, task `032767e6` resumable,
+its `workflow_runs` row present — never answered); the security envelope identical
+(**505 relation grants, 281 routine grants, 2 column grants, 137 RLS policies, 180
+function definitions + security metadata, 126 triggers, 338 constraints, 141 indexes**);
+completeness floor matched the on-disk migration manifest by **sha256** on both sides;
+and the behavioural confinement smoke returned **42501** on the restored target.
+
+**The 10 INFO are deliberate, not waived failures.** Three runtime-churn tables
+(`runtime_heartbeats`, `trace_prune_log`, `trace_spans`) are compared **directionally**
+— a point-in-time restore can never byte-match a source whose runtime is still writing
+(`trace_prune_log` moved 868 → 880 → 885 across the run). The target must never *exceed*
+the source; anything a books figure, provenance link, or audit receipt depends on stays
+byte-exact, and did.
+
+**Five real defects the drill found — none of which four review stages had:**
+`storage-provision.sql`, `write-login-ceremony.sql` and `read-logins-ceremony.sql` (×2)
+all ran `ALTER ROLE … NOSUPERUSER/NOBYPASSRLS/NOCREATEDB` **unguarded**, which PostgreSQL
+refuses without SUPERUSER *even when setting them false* — so each worked exactly once,
+at role creation, and **would have failed 42501 mid-recovery**, leaving the books
+restored with no login able to reach them. `dr-verify`'s distinctness check keyed on
+`host:port/db` and refused every legitimate cross-project run (Supabase's regional pooler
+shares host, and — measured — every project shares database **oid 5** and the same
+**`system_identifier`**, because projects are cloned from one base image; only the DSN
+**username** and the server address discriminate). And the driver's triage reported
+*"the restore is faithful"* after a battery that ran **zero** probes.
+
+**Also surfaced:** one live storage object whose content-address is false
+(`firms/1111…/docs/aaaa….pdf` — synthetic b7 residue whose name never hashed to its
+bytes). Copied faithfully; no books depend on it; recorded as a provenance curiosity.
+
+Re-run this drill **quarterly** with `node .tmp/hardening/drill-driver.mjs` (or the
+runbook by hand). The post-restore ceremonies
 (`roles-bootstrap` → full restore → `storage-provision` + bucket + bytes →
 `write-login-ceremony` → **`acl-baseline` re-apply** → engine-sanity → `dr-verify`)
 are the runbook in `docs/ops/DR-full-drill.md` §3. Note the **ACL baseline is not

@@ -86,7 +86,7 @@ The engineering skill set (mattpocock/skills + repo-authored) is vendored under
 interview the owner to kill ambiguity before building), **`handoff`** (a clean
 continue-prompt for a fresh session), **`code-review`**, **`tdd`**, **`research`**,
 **`diagnosing-bugs`**, **`codebase-design`**, **`qa`**. Per-repo skill config
-(issue-tracker → `mosaladtaooo/clara`, triage labels, the domain-doc map) lives
+(issue-tracker → `BELCORT-SDN-BHD/clara`, triage labels, the domain-doc map) lives
 in `docs/agents/`.
 
 ## Where we are

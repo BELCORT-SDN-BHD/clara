@@ -1,6 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and PRDs for this repo live as GitHub issues in `mosaladtaooo/clara`. Use the `gh` CLI for all operations.
+Issues and PRDs for this repo live as GitHub issues in `BELCORT-SDN-BHD/clara` (transferred from the personal account `mosaladtaooo/clara` on 2026-07-20 — old URLs still redirect, and issue/PR numbers were preserved). Use the `gh` CLI for all operations.
 
 ## Conventions
 

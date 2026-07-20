@@ -24,7 +24,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AUTHORITATIVE_SCHEMAS } from "./backup.mjs";
-import { labelFor, multisetDiff } from "./dr-verify-util.mjs";
+import { labelFor, identityFor, multisetDiff } from "./dr-verify-util.mjs";
 import {
   checkSchemasAndJournals, checkTables, checkRoles, checkGrantsAndRls,
   checkConfinementSmoke, checkCanary, checkApGate, checkDocuments,
@@ -93,25 +93,37 @@ async function diffCheck(section, name, sql, params = [], { max = 5 } = {}) {
 
 // PREFLIGHT — distinctness (HIGH-3a) + BYPASSRLS visibility.
 async function preflight() {
+  // PLATFORM FINDING (measured on Supabase, 2026-07-20): projects are provisioned from
+  // a CLONED base image, so `pg_database.oid` for `postgres` (=5) and
+  // `pg_control_system().system_identifier` are IDENTICAL across every project — and a
+  // regional pooler gives them the same host:port/db too. All three "obvious"
+  // discriminators collide. What actually differs is the DSN USERNAME (it carries the
+  // project ref and is what the pooler routes on) and the backend's server address.
   const idSql =
     "select current_database() db, (select oid from pg_database where datname=current_database()) oid, " +
-    "(select system_identifier from pg_control_system()) sysid";
+    "(select system_identifier from pg_control_system()) sysid, coalesce(inet_server_addr()::text,'') ip";
   let srcId, tgtId, sysidOk = true;
   try {
     srcId = (await src.query(idSql)).rows[0];
     tgtId = (await tgt.query(idSql)).rows[0];
   } catch {
     sysidOk = false; // pg_control_system() may be restricted; fall back to (db, oid).
-    const fb = "select current_database() db, (select oid from pg_database where datname=current_database()) oid";
+    const fb = "select current_database() db, (select oid from pg_database where datname=current_database()) oid, coalesce(inet_server_addr()::text,'') ip";
     srcId = (await src.query(fb)).rows[0];
     tgtId = (await tgt.query(fb)).rows[0];
   }
-  const sameLabel = labelFor(SRC_URL) === labelFor(TGT_URL);
+  // Distinctness rests on the ROUTING identity (user@host:port/db), not the host-only
+  // label — the latter is shared by every project behind one regional pooler, so keying
+  // on it refused every legitimate cross-project run. The physical tuple is corroborating
+  // only, and now includes the server address because oid+sysid are clone-identical.
+  const sameIdentity = identityFor(SRC_URL) === identityFor(TGT_URL);
   const samePhysical =
-    srcId.db === tgtId.db && String(srcId.oid) === String(tgtId.oid) && (!sysidOk || String(srcId.sysid) === String(tgtId.sysid));
-  if (sameLabel || samePhysical) {
+    srcId.db === tgtId.db && String(srcId.oid) === String(tgtId.oid) &&
+    String(srcId.ip || "") === String(tgtId.ip || "") &&
+    (!sysidOk || String(srcId.sysid) === String(tgtId.sysid));
+  if (sameIdentity || samePhysical) {
     throw new Error(
-      `dr-verify REFUSED: source and target are the SAME database (label-equal=${sameLabel}, physical-equal=${samePhysical}${sysidOk ? "" : "; system_identifier unavailable, used db+oid"}). A self-comparison can false-certify an empty/half-built DB (Codex HIGH-3).`,
+      `dr-verify REFUSED: source and target look like the SAME database (identity-equal=${sameIdentity}, physical-equal=${samePhysical}${sysidOk ? "" : "; system_identifier unavailable, used db+oid+addr"}). A self-comparison can false-certify an empty/half-built DB (Codex HIGH-3). NOTE: on a cloned-provisioning platform, database oid and system_identifier are identical across projects — distinctness is established by the DSN user (project ref) and the server address.`,
     );
   }
   record("pre", "source/target are distinct databases", "INFO", `${labelFor(SRC_URL)} vs ${labelFor(TGT_URL)}${sysidOk ? " (system_identifier checked)" : " (db+oid only — system_identifier unavailable)"}`);

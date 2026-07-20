@@ -25,6 +25,24 @@ export function labelFor(url) {
   }
 }
 
+/**
+ * ROUTING identity — `user@host:port/db`, still never the password (mirrors
+ * lib/pg.mjs destructiveTargetLabel). The host-only label CANNOT distinguish two
+ * projects behind one regional pooler: they share host, port and the `postgres`
+ * database, and (measured) a cloned-provisioning platform also gives them the same
+ * database oid and system_identifier. The USERNAME carries the project ref and is
+ * what the pooler routes on, so it is the discriminator that actually works.
+ */
+export function identityFor(url) {
+  try {
+    const u = new URL(url);
+    const user = u.username ? decodeURIComponent(u.username) : "";
+    return user ? `${user}@${labelFor(url)}` : labelFor(url);
+  } catch {
+    return "(unparseable URL)";
+  }
+}
+
 /** Quote a catalog identifier for interpolation into a dynamic query. */
 export function ident(name) {
   return '"' + String(name).replace(/"/g, '""') + '"';
