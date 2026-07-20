@@ -42,6 +42,7 @@ import {
   enqueueInvoiceFacts,
   invoiceFactsTask,
   claimTask,
+  ensureClientEgress,
   setDocLimits,
   draftEntryV3,
   balanced,
@@ -70,6 +71,10 @@ before(async () => {
     for (const c of [world.clients.A1, world.clients.A2]) {
       await upsertPayableAccount(world.users.alice, { client: c, code: AP, name: "Trade Creditors", opKey: opk("ap") });
       await upsertAccountClassed(world.users.alice, { client: c, code: EXP, name: "Prof Fees", type: "expense", opKey: opk("exp") });
+      // [WA-D1] grant a live egress consent so billWithClaimedFacts / setupCorrection
+      // claims reach 'running' (the invoice_facts lane-carve fail-closes without one),
+      // letting persist_invoice_facts actually take the active-filing lock this suite probes.
+      await ensureClientEgress(world.users.alice, { client: c });
     }
   }
 });
@@ -83,6 +88,13 @@ function unready(t) {
   return false;
 }
 
+// A DISTINCT vendor per bill: these are LOCK-ORDERING probes, not rule-learning
+// probes. A single shared vendor would let ≥3 approved same-(client,vendor,account)
+// sightings accumulate across the suite and open a rule-proposal question, whose
+// CLR26 "open question blocks this entry" gate would then refuse a later approve —
+// defeating the entry FOR UPDATE hold these schedules rely on. Unique registrations
+// keep each approve on its own counterparty so no crossing (and no CLR26) occurs.
+let lockVendorSeq = 0;
 /** A Tier-B wake supplier bill (amount cents) on a cited doc + a claimed running
  *  invoice_facts task ready to persist. Returns { draft, cited, task }. */
 async function billWithClaimedFacts(sub, { client, amount = 500000 }) {
@@ -90,9 +102,11 @@ async function billWithClaimedFacts(sub, { client, amount = 500000 }) {
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
   const cred = await mintInteractive(firm);
   const res = await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId });
+  const seq = lockVendorSeq++;
   const draft = await wakeDraftEntry(cred, {
     client, resolution: res, lines: billLines(EXP, AP, amount),
-    document: cited.documentId, sha256: cited.sha256, vendor: { new: { name: "LOCKCO SDN BHD", registration_no: "201801000700" } },
+    document: cited.documentId, sha256: cited.sha256,
+    vendor: { new: { name: `LOCKCO ${seq} SDN BHD`, registration_no: `20189${String(seq).padStart(7, "0")}` } },
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)], codingKind: CODING_KIND,
     opKey: `code-doc:${cited.filingId}:${cited.documentId}`,
   });

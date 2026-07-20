@@ -8,53 +8,15 @@
 //                 Governance NEVER transits the runtime (§4.2).
 
 // ---------------------------------------------------------------------------
-// Types (mirrors of the runtime wire shapes — chatRoutes.ts / chatTurn.prompt.ts).
+// Types. The ClaraPart union + its supporting scalar types now live in the ONE
+// canonical dashboard-side module (INTERFACE-PINS §5 / PIN-DELTA-3). This file
+// re-exports them so every existing `import { … ClaraPart } from "./api"` keeps
+// resolving; api.ts is not frozen, so the re-export is lawful. The wire-envelope
+// row types (SessionRow / MessageRow / …) stay local — they are not parts.
 // ---------------------------------------------------------------------------
 
-export type ClaraPart =
-  | { type: "text"; text: string }
-  | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
-  | { type: "tool_result"; tool: string; tool_call_id: string; output: unknown }
-  | { type: "tool_error"; tool: string; tool_call_id: string; error: string }
-  | { type: "clarify"; tool_call_id: string; question: string; context?: string | null; framing: string }
-  | { type: "clarify_closed"; reason: "expired" | "cancelled"; framing: string }
-  // Slice-5 capture door (§4.5 / INTERFACE-PINS 4): present in p_user_parts AT
-  // SUBMIT (chat_messages is append-only). Slice-6 chatTurn_v2 PERCEIVES it in-turn
-  // (reads the stored extraction via read_document) — [DELTA-OWNER-2] is superseded
-  // by contract §3 (the perception reversal ADR-018(3) anticipated).
-  | { type: "attachment"; document_id: string; intake_id: string }
-  // Slice-6 (§3, INTERFACE-PINS 3/4): the coding-turn's terminal typed parts. Both
-  // carry IDENTIFIERS ONLY — the card re-derives authoritative state on hydrate
-  // (get_draft_review), never trusting the persisted snapshot [DIRECTION §1].
-  | {
-      type: "je_review";
-      entry_id: string;
-      revision_token: string;
-      client_id: string;
-      document_id: string;
-      provenance_tier: ProvenanceTier;
-      uncertainty?: Uncertainty;
-      // W1/F1: the draft PERSISTS an amount exception (supplier_bill + corroborated
-      // facts + total mismatch) instead of refusing at draft time; the part flags it
-      // so the card knows to render the persisted exception panel from get_draft_review.
-      exception?: boolean;
-    }
-  | { type: "refusal"; code: RefusalCode; reason?: string; message: string };
-
-/** The attachment part shape a submitted turn carries (INTERFACE-PINS 4). */
-export type AttachmentPart = { type: "attachment"; document_id: string; intake_id: string };
-
-/** Two-tier amount provenance (contract §4): a machine-corroborated total vs a
- *  model read from the document. Tier A = "verified", Tier B = "model_read". */
-export type ProvenanceTier = "verified" | "model_read";
-
-/** Qualitative uncertainty (S6-R5 — never a percentage): a note + alternatives. */
-export type Uncertainty = { note: string; alternatives: string[] };
-
-/** The Slice-6 CLR codes a refusal part can carry (contract §12). `string` keeps
- *  the union open for codes the runtime maps that the dashboard has not enumerated;
- *  the card renders `code` + `message` verbatim regardless. */
-export type RefusalCode = "CLR21" | "CLR22" | "CLR23" | "CLR24" | "CLR25" | (string & {});
+import type { ClaraPart, AttachmentPart, ProvenanceTier, Uncertainty, RefusalCode } from "../shared/parts";
+export type { ClaraPart, AttachmentPart, ProvenanceTier, Uncertainty, RefusalCode };
 
 export type SessionRow = {
   id: string;

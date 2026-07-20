@@ -25,23 +25,13 @@ import {
   type ReviseLine,
   type VendorArg,
 } from "./review";
+import { CLR21_COPY, CLR05_COPY } from "./reviewCopy";
 import styles from "./chat.module.css";
 
 type JeReviewPart = Extract<ClaraPart, { type: "je_review" }>;
 type LineBuf = { account_code: string; debit: string; credit: string; description: string };
 type EvidenceBuf = { region_id: string; quote: string; field_path: string };
 type VendorBuf = { mode: "existing" | "new"; existing_id: string; name: string; registration_no: string };
-
-// Per-token CLR21 copy (INTERFACE-PINS §2 tokens). The card renders the copy for
-// the EXACT reason discriminant; the verbatim DB message still shows below.
-const CLR21_COPY: Record<string, string> = {
-  amount_conflict: "The proposed total does not match the machine-corroborated total — resolve below (edit to the corroborated total, or override with a reason).",
-  currency_unsupported: "This bill's currency is not MYR — Clara cannot post it (multi-currency is a later slice).",
-  vendor_malformed: "The vendor proposal is malformed — fix the vendor before approving.",
-  evidence_invalid: "The cited evidence is missing or does not match the document — re-cite before approving.",
-  double_coded: "This filing is already coded — an approved entry or another open draft already binds it.",
-  duplicate_bill: "This looks like a duplicate of an approved bill (same vendor + invoice number). Override with a reason to proceed, or discard.",
-};
 
 function fmtCents(cents: number): string {
   const neg = cents < 0;
@@ -359,6 +349,7 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
           ) : null}
 
           {clr && clr.reason && CLR21_COPY[clr.reason] ? <p className={styles.jeHint}>{clr.reason}: {CLR21_COPY[clr.reason]}</p> : null}
+          {clr && clr.code === "CLR05" && clr.reason && CLR05_COPY[clr.reason] ? <p className={styles.jeHint}>{CLR05_COPY[clr.reason]}</p> : null}
           {stale ? <p className={styles.jeHint}>The draft changed since it was shown — re-reviewed with the current state. Check the lines, then act again.</p> : null}
         </>
       ) : null}

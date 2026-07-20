@@ -12,12 +12,14 @@ import { chatTurn_v2 } from "./chatTurn.v2.js";
 import { chatTurn_v3 } from "./chatTurn.v3.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
+import { autoDraft_v1 } from "./autoDraft.v1.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
   chatTurn: chatTurn_v3,
   documentIngest: documentIngest_v1,
   invoiceFacts: invoiceFacts_v1,
+  autoDraft: autoDraft_v1,
 } as const;
 
 // Slice 6 repointed `chatTurn:` v1→v2, then v2→v3 (the GATE-3 live find: v2's

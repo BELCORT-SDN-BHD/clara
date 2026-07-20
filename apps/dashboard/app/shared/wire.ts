@@ -47,13 +47,34 @@ export function pgrestHeaders(token: string, forWrite: boolean): Record<string, 
   return h;
 }
 
+/** A typed PostgREST error that surfaces the code + message + the governed CLR
+ *  envelope (the JeReviewCard precedent): the CLR code lives in the message (house
+ *  shape); the machine reason token lives in the exception DETAIL as
+ *  `{"reason": <token>}` (INTERFACE-PINS §2 / §6). Additive over the Slice-5 shape
+ *  (`pgCode` stays) so the document surfaces are unaffected. */
+export type PgrestError = Error & { pgCode?: string; pgDetails?: string; clr?: string | null; reason?: string | null };
+
+/** The reason discriminant rides in the exception DETAIL as a json object. Defensive parse. */
+export function parseReasonToken(details?: string): string | null {
+  if (!details) return null;
+  try {
+    const j = JSON.parse(details) as { reason?: unknown };
+    return typeof j.reason === "string" ? j.reason : null;
+  } catch {
+    return null;
+  }
+}
+
 /** A typed PostgREST error that surfaces the code + message verbatim (honest copy). */
-export async function pgrestError(res: Response, what: string): Promise<Error> {
-  const body = (await res.json().catch(() => ({}))) as { message?: string; code?: string; hint?: string };
+export async function pgrestError(res: Response, what: string): Promise<PgrestError> {
+  const body = (await res.json().catch(() => ({}))) as { message?: string; code?: string; hint?: string; details?: string };
   const detail = [body.code, body.message].filter(Boolean).join(" — ");
-  const err = new Error(`${what} failed (${res.status})${detail ? `: ${detail}` : ""}`);
+  const err = new Error(`${what} failed (${res.status})${detail ? `: ${detail}` : ""}`) as PgrestError;
   // Attach the raw governed code so callers can branch on CLR19 etc. honestly.
-  (err as Error & { pgCode?: string }).pgCode = body.code;
+  err.pgCode = body.code;
+  err.pgDetails = body.details;
+  err.clr = (body.message ?? "").match(/CLR\d{2}/)?.[0] ?? null;
+  err.reason = parseReasonToken(body.details);
   return err;
 }
 

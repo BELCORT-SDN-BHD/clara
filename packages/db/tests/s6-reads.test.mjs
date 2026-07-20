@@ -120,17 +120,28 @@ test("get_draft_review is CLIENT-PINNED for the agent lane: the wrong client →
 // Agent-lane CLR03 — never a silent empty when wake_firm() is null [D-F1/NEW-5].
 // ===========================================================================
 
-test("D-F1 each new read fn raises CLR03 on the agent lane when wake_firm() is null (never a silent empty)", async (t) => {
+test("D-F1 each new read fn REFUSES (never a silent empty) on the agent lane when wake_firm() is null", async (t) => {
   if (unready(t)) return;
   const { clients } = world;
+  // `agentReadNoFirm` runs as a raw clara_agent_ro with NO wake secret. Two lane
+  // detectors are now in play (ADR-015: a SET ROLE identity is INVISIBLE inside a
+  // SECURITY DEFINER function, so the wake-secret GUC is the only lane marker there):
+  //   • the credential-pattern readers (list_unassigned_documents / list_uncoded_filings)
+  //     detect the agent lane by current_role and, with a null wake context, raise
+  //     CLR03 ("no valid agent read context");
+  //   • the wake-secret-GUC readers (get_document_extract / get_draft_review) are
+  //     SECURITY DEFINER, so with NO secret set a raw agent_ro session is
+  //     indistinguishable from an anonymous human — it falls into the human branch and
+  //     raises CLR04 ("no authenticated actor").
+  // Either way the fn REFUSES; the D-F1 law (never a silent empty) holds for both codes.
   const calls = [
-    ["list_unassigned_documents", "select clara.list_unassigned_documents(p_limit => 50)"],
-    ["get_document_extract", "select clara.get_document_extract(p_document => gen_random_uuid(), p_client => null, p_max_chars => 100)"],
-    ["get_draft_review", "select clara.get_draft_review(p_entry => gen_random_uuid(), p_client => $1)"],
-    ["list_uncoded_filings", "select clara.list_uncoded_filings(p_client => $1)"],
+    ["list_unassigned_documents", "select clara.list_unassigned_documents(p_limit => 50)", CLR.wake],
+    ["get_document_extract", "select clara.get_document_extract(p_document => gen_random_uuid(), p_client => null, p_max_chars => 100)", CLR.authz],
+    ["get_draft_review", "select clara.get_draft_review(p_entry => gen_random_uuid(), p_client => $1)", CLR.authz],
+    ["list_uncoded_filings", "select clara.list_uncoded_filings(p_client => $1)", CLR.wake],
   ];
-  for (const [name, sql] of calls) {
-    await assertRaises(CLR.wake, () => agentReadNoFirm(sql, sql.includes("$1") ? [clients.A1] : []), `${name}: agent lane with null wake_firm() → CLR03`);
+  for (const [name, sql, code] of calls) {
+    await assertRaises(code, () => agentReadNoFirm(sql, sql.includes("$1") ? [clients.A1] : []), `${name}: secretless agent lane → ${code}`);
   }
 });
 

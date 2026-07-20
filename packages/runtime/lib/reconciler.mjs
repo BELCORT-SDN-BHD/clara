@@ -258,6 +258,107 @@ export async function reconcileTasks(client, deps) {
 }
 
 // ---------------------------------------------------------------------------
+// Autodraft-kind reconcile edges (Wave A, contract §3 / companion §4). autodraft tasks never
+// park (no awaiting_input), so the matrix is simpler than chat: a terminal engine run always
+// settles the task 'failed' UNLESS a draft was persisted (a crash after the draft, before the
+// settle) — the persisted coding attempt is honored as 'drafted'. Uses settle_autodraft_task
+// (not settle_chat_turn) and re-enqueues via deps.enqueueAutoDraft (registry provenance).
+// ---------------------------------------------------------------------------
+
+/** The failed-settle reason for a terminal engine run (pure; no awaiting_input branch). A
+ *  'completed' run that left no persisted draft still settles failed (it produced nothing). */
+export function terminalForAutodraft(engine) {
+  if (engine === "failed") return { outcome: "failed", reason: "internal" };
+  if (engine === "lost") return { outcome: "failed", reason: "engine_lost" };
+  if (engine === "cancelled") return { outcome: "failed", reason: "cancelled" };
+  if (engine === "completed") return { outcome: "failed", reason: "internal" };
+  return null; // in-flight (running/pending)
+}
+
+/** Settle an autodraft task terminally (idempotent). tokens=0 at the reconcile edge. */
+async function settleAutoDraftTerminal(client, taskId, outcome, entryId, refusal) {
+  await client.query("select clara.settle_autodraft_task($1, $2, $3, $4, $5::jsonb)", [
+    taskId,
+    outcome,
+    0,
+    entryId ?? null,
+    refusal == null ? null : JSON.stringify(refusal),
+  ]);
+}
+
+/**
+ * Converge autodraft task rows with engine truth. deps.enqueueAutoDraft is REQUIRED to run
+ * (absent -> a clean no-op, so legacy callers that never wired it are unaffected). Pre-0011
+ * the kind CHECK excludes 'autodraft' so no such rows exist and every query returns empty.
+ * @param {import("pg").ClientBase} client  a clara_runtime connection
+ * @param {{enqueueAutoDraft?:Function, getRun?:Function, onlyFirm?:string|null,
+ *          graceInterval?:string, log?:Function}} deps
+ */
+export async function reconcileAutoDraftTasks(client, deps) {
+  const { enqueueAutoDraft, getRun, onlyFirm = null, graceInterval = GRACE_REENQUEUE, log = () => {} } = deps;
+  const out = { autodraftReenqueued: 0, autodraftSettled: 0 };
+  if (typeof enqueueAutoDraft !== "function") return out; // not wired — no-op
+
+  // A) admitted-but-unstarted (queued, no run) past grace -> re-enqueue. The workflow's
+  //    claim step (begin_autodraft_task) self-binds; a duplicate start self-aborts.
+  const stuck = await client.query(
+    `select id from clara.agent_tasks
+      where kind = 'autodraft' and status = 'queued' and workflow_run_id is null
+        and created_at < now() - ($1)::interval
+        and ($2::uuid is null or firm_id = $2)
+      order by created_at limit 20`,
+    [graceInterval, onlyFirm],
+  );
+  for (const t of stuck.rows) {
+    try {
+      await enqueueAutoDraft(t.id);
+      out.autodraftReenqueued += 1;
+    } catch (err) {
+      log(`[reconcile] autodraft re-enqueue failed task=${t.id}: ${err?.message ?? err}`);
+    }
+  }
+
+  // C) running + bound with a terminal engine run -> honor a persisted draft, else settle failed.
+  if (typeof getRun !== "function") return out;
+  const open = await client.query(
+    `select id, workflow_run_id from clara.agent_tasks
+      where kind = 'autodraft' and status = 'running' and workflow_run_id is not null
+        and ($1::uuid is null or firm_id = $1)
+      order by created_at limit 50`,
+    [onlyFirm],
+  );
+  for (const t of open.rows) {
+    let engine; // 'completed' | 'failed' | 'cancelled' | 'lost' | null(in-flight)
+    try {
+      const es = await getRun(t.workflow_run_id).status;
+      engine = es === "completed" || es === "failed" || es === "cancelled" ? es : null;
+    } catch (err) {
+      if (isRunNotFound(err)) engine = "lost";
+      else {
+        log(`[reconcile] autodraft status probe failed task=${t.id}: ${err?.message ?? err}`);
+        continue;
+      }
+    }
+    if (!engine) continue; // still in flight
+    let draftedEntry = null;
+    try {
+      const a = (await client.query("select clara.get_coding_attempt($1) as a", [t.id])).rows[0]?.a ?? null;
+      if (a && a.entry_id) draftedEntry = String(a.entry_id);
+    } catch {
+      /* no recovery surface — treat as no draft */
+    }
+    if (draftedEntry) {
+      await settleAutoDraftTerminal(client, t.id, "drafted", draftedEntry, null); // crash-after-draft honored
+    } else {
+      const settle = terminalForAutodraft(engine) ?? { outcome: "failed", reason: "internal" };
+      await settleAutoDraftTerminal(client, t.id, "failed", null, { code: "internal", reason: settle.reason });
+    }
+    out.autodraftSettled += 1;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // One full sweep (called under the leader lock by the supervisor).
 // ---------------------------------------------------------------------------
 
@@ -272,6 +373,7 @@ export async function runReconcilerSweep(client, deps) {
   await heartbeat(client, "reconciler");
   const expiry = await expireClarifies(client, { onlyFirm: deps.onlyFirm ?? null });
   const tasks = await reconcileTasks(client, deps);
+  const autodraftTasks = await reconcileAutoDraftTasks(client, deps);
   const documentTasks = await reconcileDocumentTasks(client, { ...deps, integrity: deps.prune === true });
   const documentIntakes = await reconcileDocumentIntakes(client, deps);
   let intakeRecovery = { recovered: 0, deferred: 0, expired: 0 };
@@ -296,5 +398,5 @@ export async function runReconcilerSweep(client, deps) {
       log(`[reconcile] trace prune error: ${err?.message ?? err}`);
     }
   }
-  return { ...expiry, ...tasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...prune };
+  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...prune };
 }

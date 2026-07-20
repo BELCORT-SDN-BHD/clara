@@ -15,6 +15,7 @@ import { withRuntime } from "./pools.mjs";
 import { scannerReachable } from "./scan.mjs";
 import { listTaskMetas, spoolHealth } from "./spool.mjs";
 import { matcherHealth } from "./matcher.mjs";
+import { autodraftHealth } from "./autodraft.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -136,6 +137,19 @@ export async function checkReadiness() {
             if (mLag > 1000) warnings.push(`matcher lag ${mLag}`);
           } catch (err) {
             warnings.push(`matcher_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
+          }
+
+          // Autodraft consumer health -> warnings only (§3 / WA-L6: a stalled or dead sweep
+          // consumer must never take chat traffic down — it surfaces as a staleness badge).
+          try {
+            const ah = await autodraftHealth(c);
+            checks.autodraft = { ok: true, ...ah };
+            const aDead = Number(ah.pendingDeadLetters ?? ah.pending_dead_letters ?? 0);
+            const aLag = Number(ah.lag ?? 0);
+            if (aDead > 0) warnings.push(`${aDead} autodraft dead-letter(s)`);
+            if (aLag > 1000) warnings.push(`autodraft lag ${aLag}`);
+          } catch (err) {
+            warnings.push(`autodraft_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }
         } else {
           checks.world = { enabled: false };

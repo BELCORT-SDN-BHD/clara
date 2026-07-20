@@ -25,6 +25,7 @@ import {
   enqueueInvoiceFacts,
   invoiceFactsTask,
   claimTask,
+  ensureClientEgress,
   persistInvoiceFacts,
   failInvoiceFacts,
   factField,
@@ -36,7 +37,13 @@ let world = null;
 
 before(async () => {
   ready = await s6EnsureReady();
-  if (ready) world = await buildWorld();
+  if (ready) {
+    world = await buildWorld();
+    // [WA-D1] grant a live egress consent so the NEW-4 invoice_facts claims reach
+    // 'running' (the lane-carve fail-closes to held_egress/CLR28 without one). The
+    // N-F1 egress-OFF holds are the kill-switch gate and are unaffected by consent.
+    for (const c of [world.clients.A1, world.clients.A2]) await ensureClientEgress(world.users.alice, { client: c });
+  }
 });
 after(async () => {
   printLaneNotes("s6-metering");

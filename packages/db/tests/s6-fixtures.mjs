@@ -6,7 +6,7 @@
 // of s6-helpers so each module stays under the repo's 500-line cap.
 
 import { randomUUID } from "node:crypto";
-import { ROLES, roleQuery, rootQuery, humanQuery, namedCall, opk, digestOf, INVOICE_FACTS_LANE } from "./s6-helpers.mjs";
+import { ROLES, roleQuery, rootQuery, humanQuery, namedCall, opk, digestOf, INVOICE_FACTS_LANE, firmOf, seedCitedDocument } from "./s6-helpers.mjs";
 
 export * from "./s6-helpers.mjs";
 
@@ -61,6 +61,28 @@ export async function claimTask(task, { egressApproved = true, workflowRunId = n
     [task, workflowRunId ?? `wf-${randomUUID()}`, egressApproved],
   );
   return r.rows[0].r;
+}
+
+/** [WA-D1] Ensure a live client_egress consent exists for `client` so the
+ *  invoice_facts claim lane-carve does not fail closed (a claim of an invoice_facts
+ *  task otherwise parks at held_egress/CLR28 no_consent, and persist then raises
+ *  CLR16). The grant is IDEMPOTENT: a second live grant raises CLR28 duplicate_live
+ *  (one live consent per client), which is swallowed. Cites a freshly seeded doc
+ *  (status='ingested' + bytes_verified) as evidence. `sub` must be the firm OWNER. */
+export async function ensureClientEgress(sub, { client }) {
+  const firm = await firmOf(client);
+  const evidence = await seedCitedDocument(sub, { firm, client });
+  try {
+    const r = await humanQuery(
+      sub,
+      "select clara.grant_client_egress(p_client => $1, p_evidence_document => $2, p_scope_note => $3, p_op_key => $4) as r",
+      [client, evidence.documentId, "rig standing consent", opk("egress")],
+    );
+    return r.rows[0].r;
+  } catch (e) {
+    if (e.code === "CLR28") return null; // already holds a live consent (one-per-client)
+    throw e;
+  }
 }
 
 /** persist_invoice_facts (runtime) — inserts the OWN invoice_facts extraction +

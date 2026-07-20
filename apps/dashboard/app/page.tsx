@@ -16,6 +16,9 @@ export default function Home() {
       <p>
         <a href="/documents">Documents (Slice-5 plumbing page)</a>
       </p>
+      <p>
+        <a href="/queue">Review queue (Wave-A daily loop)</a>
+      </p>
     </main>
   );
 }

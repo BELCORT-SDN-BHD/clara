@@ -97,6 +97,100 @@ test("normalizeAzureInvoice emits invoice.deposit ONLY when the engine returns o
   assert.ok(!out.fields.some((f) => f.field_path === "invoice.deposit"), "no deposit fabricated when absent");
 });
 
+// --- WA §11 invoice_id recovery (the typed InvoiceId field is lossy on MY layouts) ---
+// Real RPR-corpus shapes: Azure returned an InvoiceId field with a bounding region but
+// an EMPTY value (BINV202510-018 / PKLG-2508-001), or no field at all, while the number
+// was plainly in the OCR. The mapper recovers it from keyValuePairs / content — but only
+// when the typed field yields nothing, and never for an implausible token.
+
+function idOf(out) {
+  return out.fields.find((f) => f.field_path === "invoice.invoice_id");
+}
+
+test("invoice_id: a non-empty TYPED InvoiceId is source of truth and is NEVER overridden by KV", () => {
+  const out = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: {
+        InvoiceTotal: { content: "100.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 },
+        InvoiceId: { content: "TYPED-001", boundingRegions: [{ pageNumber: 1, polygon: [] }], confidence: 0.9 },
+      } }],
+      keyValuePairs: [{ key: { content: "Invoice No" }, value: { content: "KV-999" }, confidence: 0.8 }],
+      pages: [{ pageNumber: 1 }],
+    },
+  });
+  assert.equal(idOf(out).value_raw, "TYPED-001", "typed hit wins; KV must not override");
+});
+
+test("invoice_id: an EMPTY typed InvoiceId (region, no value) is recovered from keyValuePairs", () => {
+  const out = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: {
+        InvoiceTotal: { content: "435,560.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.98 },
+        InvoiceId: { content: "", boundingRegions: [{ pageNumber: 1, polygon: [0.1, 0.1, 0.2, 0.2] }], confidence: 0.5 },
+      } }],
+      keyValuePairs: [
+        { key: { content: "Vendor" }, value: { content: "BRIGHTPATH" }, confidence: 0.9 },
+        { key: { content: "Invoice No." }, value: { content: "BINV202510-018", boundingRegions: [{ pageNumber: 1, polygon: [0.3, 0.3, 0.4, 0.4] }] }, confidence: 0.87 },
+      ],
+      pages: [{ pageNumber: 1 }],
+    },
+  });
+  assert.equal(idOf(out).value_raw, "BINV202510-018", "KV recovers the number the typed field dropped");
+  assert.equal(idOf(out).page, 1);
+});
+
+test("invoice_id: an ABSENT typed InvoiceId is recovered from a same-line content label", () => {
+  const out = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: { InvoiceTotal: { content: "5,000.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 } } }],
+      content: "ROME PUBLIC ADVISORY SDN BHD\nInvoice No : INV2510/10\nDate : 2025-10-13\nTotal RM 5,000.00\n",
+      pages: [{ pageNumber: 1 }],
+    },
+  });
+  assert.equal(idOf(out).value_raw, "INV2510/10");
+  assert.deepEqual(idOf(out).polygon, [], "a content-scan recovery carries no fabricated geometry");
+});
+
+test("invoice_id: recovered from a NEXT-line content label (label and value on separate lines)", () => {
+  const out = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: { InvoiceTotal: { content: "1,190.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 } } }],
+      content: "KOK LIONG ACCOUNTANCY\nInvoice No.\n202509230\nSecretary fees\n",
+      pages: [{ pageNumber: 1 }],
+    },
+  });
+  assert.equal(idOf(out).value_raw, "202509230");
+});
+
+test("invoice_id: the plausibility gate rejects a currency amount mislabelled as invoice no", () => {
+  const out = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: { InvoiceTotal: { content: "5,000.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 } } }],
+      keyValuePairs: [{ key: { content: "Invoice No" }, value: { content: "RM 5,000.00" }, confidence: 0.6 }],
+      content: "Total Amount Due\nRM 5,000.00\n",
+      pages: [{ pageNumber: 1 }],
+    },
+  });
+  assert.equal(idOf(out), undefined, "a currency total is not a plausible invoice number");
+});
+
+test("invoice_id: no recoverable number anywhere leaves invoice.invoice_id absent (honest)", () => {
+  const out = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: { InvoiceTotal: { content: "100.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 } } }],
+      content: "A receipt with no invoice number printed on it at all.\n",
+      pages: [{ pageNumber: 1 }],
+    },
+  });
+  assert.equal(idOf(out), undefined);
+});
+
 test("analyzeInvoice uses the injected test adapter (no network) in RELAY_TEST_MODE", async () => {
   globalThis.__claraAzureInvoiceForTest = async () => samplePayload();
   try {
