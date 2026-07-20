@@ -43,21 +43,22 @@ function urlVar() {
 
 /**
  * Resolve the ONE canonical connection target from exactly one source: a DSN URL
- * var when present, otherwise the libpq PG* vars. Returns host/port/db (never a
- * password). Throws on an unparseable URL.
- * @returns {{ source: "url" | "pg", host: string, port: string, db: string }}
+ * var when present, otherwise the libpq PG* vars. Returns host/port/db plus the
+ * USER (never a password). Throws on an unparseable URL.
+ * @returns {{ source: "url" | "pg", host: string, port: string, db: string, user: string }}
  */
 export function resolveTarget() {
   const url = urlVar();
   if (url) {
     const u = new URL(url); // throws on garbage — caller surfaces it
     const db = decodeURIComponent((u.pathname || "").replace(/^\//, "")) || "postgres";
-    return { source: "url", host: (u.hostname || "").toLowerCase(), port: u.port || "5432", db };
+    const user = u.username ? decodeURIComponent(u.username) : "";
+    return { source: "url", host: (u.hostname || "").toLowerCase(), port: u.port || "5432", db, user };
   }
   const host = (process.env.PGHOST || "localhost").toLowerCase();
   const port = process.env.PGPORT || "5432";
   const db = process.env.PGDATABASE || process.env.PGUSER || "postgres";
-  return { source: "pg", host, port, db };
+  return { source: "pg", host, port, db, user: process.env.PGUSER || "" };
 }
 
 /**
@@ -139,6 +140,25 @@ export function targetLabel() {
   try {
     const t = resolveTarget();
     return `${t.host}:${t.port}/${t.db}`;
+  } catch {
+    return "(unparseable DATABASE_URL)";
+  }
+}
+
+/**
+ * IDENTITY label for the destructive-op named-target confirmation: `user@host:port/db`
+ * (no password). MUST include the user — on a managed pooler the project identity lives
+ * in the USERNAME, not the host: every Supabase project in a region shares one pooler
+ * host and the `postgres` database, so `host:port/db` is byte-identical across projects
+ * and could not distinguish a scratch project from the live one. A guard keyed on the
+ * plain label would therefore accept a destructive op aimed at the WRONG project.
+ * Falls back to the plain label when no user is resolvable (nothing to disambiguate).
+ */
+export function destructiveTargetLabel() {
+  try {
+    const t = resolveTarget();
+    const base = `${t.host}:${t.port}/${t.db}`;
+    return t.user ? `${t.user}@${base}` : base;
   } catch {
     return "(unparseable DATABASE_URL)";
   }
