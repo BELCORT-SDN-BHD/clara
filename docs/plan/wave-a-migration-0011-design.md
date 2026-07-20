@@ -1,220 +1,299 @@
 # Wave A — migration 0011 design companion (`0011_daily_loop.sql`)
 
-*Status: v1.0 DRAFT (pre-review) · 2026-07-21 · companion to `wave-a-daily-loop-contract.md`.
-One migration, never split (house rule). Every recreated function follows the C-1
-signature-change law where arity changes (DROP → CREATE → REVOKE ALL FROM PUBLIC → re-grant
-exactly the lanes, same migration, tail asserts); body-only changes use CREATE OR REPLACE at
-identical arity (ACL preserved). All new required array/jsonb inputs refuse identically across
-all four SQL-null variants (AB-7). All text[] appends use `array_append` (AB-20).*
+*Status: **v1.1 (dual-review fold, owner-ratified)** · 2026-07-21 · companion to
+`wave-a-daily-loop-contract.md` v1.1. One migration, never split. C-1 law on every
+arity-changed function (DROP → CREATE → REVOKE ALL FROM PUBLIC → re-grant, same migration,
+tail asserts); **exact old/new signatures + complete caller lists are published in the build
+interface-pins file before any lane starts** (Codex 23 — no signature is left implicit).
+Body-only changes at identical arity use CREATE OR REPLACE. AB-7 null-variant law and AB-20
+`array_append` law apply to every new input/append.*
 
 ## §1 AB-3 pin (FIRST statement block)
 
-`clara.record_rule_resolution` (0007): pin the extraction read to
-`engine_kind in ('ocr','structured_parse')` — body-only change, arity unchanged, CREATE OR
-REPLACE. Tail assert: a planted `invoice_facts` extraction row carrying a colliding
-`field_path` is NOT visible to the fn's read (rig-proved, not reasoned). The runtime matcher
-twin is already pinned; after 0011 the DB fn and the twin agree.
+`clara.record_rule_resolution`: pin the extraction read to
+`engine_kind in ('ocr','structured_parse')` — body-only, CREATE OR REPLACE. Tail asserts:
+(a) a planted `invoice_facts` extraction with a colliding `field_path` is NOT visible;
+(b) the **login-direct EXECUTE grant to `clara_runtime_login` is preserved** (it is
+load-bearing for the matcher's lane-1 role dance; assert it so a later refactor cannot
+strand lane-1).
 
-## §2 Counterparty aliases + governed merge
+## §2 Counterparty aliases + identity-equivalence merge (WA-D3)
 
-- **`clara.counterparty_aliases`**: (id, firm_id, client_id, counterparty_id [composite
-  tenant FK to counterparties(id, firm_id, client_id)], alias_normalized [same normalizer as
-  `name_normalized`], alias_display, origin ∈ {former_name, trade_name, human}, created_by,
-  created_at, retired_at). Unique (client_id, alias_normalized) among unretired. Aliases are
-  NAME-LANE CANDIDATE inputs only: `_resolve_counterparty` extends its name lane to consult
-  unretired aliases, with the SAME registration-dominant law — an alias hit against a
-  differing-registration vendor is the existing conflict/ambiguity refusal, never a merge.
-  Alias hits surface in `get_draft_review.current_outcome` as `alias_match` (distinct token,
-  card renders "matched via former name …").
-- **`clara.merge_counterparties(p_client, p_survivor, p_merged, p_reason, p_op_key)`** —
-  human lane (bookkeeper+), audited: re-keys children (journal_lines.counterparty_id,
-  coding_rules, aliases, sightings) to the survivor in ONE transaction, writes a merge event
-  + receipt, retires the merged row (no delete), auto-creates a former-name alias from the
-  merged vendor's name. Refuses: cross-client; survivor==merged; merged has an OPEN draft
-  citing it (CLR23 — resolve the draft first); registration conflict between the two unless
-  `p_reason` is the governed conflict override (which flags HIGH-STAKES on the act's receipt).
-  `_resolve_counterparty`'s fingerprint law is unchanged — a merge between propose and
-  approve rotates nothing by itself, but approve's re-resolution then diverges → the existing
-  CLR23 refusal + revise path (this is correct and stays; rig case required).
-- **`_resolve_counterparty`** arity changes (alias input surface) → C-1 DROP/CREATE/REVOKE/
-  re-grant.
+- **`clara.counterparty_aliases`**: (id, firm_id, client_id, counterparty_id composite
+  tenant FK, alias_normalized [the house normalizer], alias_display, origin ∈ {former_name,
+  trade_name, human}, created_by/at, retired_at). Partial unique (client_id,
+  alias_normalized) where unretired. Aliases are NAME-LANE CANDIDATE inputs only:
+  `_resolve_counterparty` consults unretired aliases under the SAME registration-dominant
+  law — an alias hit against a differing-registration vendor is the existing
+  conflict/ambiguity refusal. Alias hits surface as `alias_match` in
+  `get_draft_review.current_outcome`.
+- **Alias writers exist** (Codex 21 — v1.0 named none): `add_counterparty_alias` /
+  `retire_counterparty_alias` (human lane, bookkeeper+, op_key-idempotent). Collision rules:
+  normalized duplicate of a live alias OR of any counterparty's canonical `name_normalized`
+  in the client → typed CLR23 refusal (never silent precedence). `rename_counterparty`
+  updates display name only (audited); normalized identity history is carried by aliases
+  (rename auto-creates a former-name alias, on-conflict-do-nothing — probe P5 precision: the
+  collision hazard is the auto-alias INSERT, not a re-key).
+- **`merge_counterparties(p_client, p_survivor, p_merged, p_reason, p_op_key)`** — human
+  lane (bookkeeper+), audited, ONE transaction, **identity-equivalence semantics**:
+  sets `counterparties.merged_into = survivor` (immutable once set; new column, nullable,
+  self-FK) + `retired_at` on the merged row; auto-creates the former-name alias
+  (on-conflict-do-nothing); **rewrites NO posted history** — `journal_lines`,
+  `rule_sightings`, and signed `coding_rules` rows are never UPDATEd (posted-line
+  immutability + governed-history law). Live-rule handling: the merged vendor's live rule is
+  RETIRED (reason `merged`); if the survivor has no live rule, a fresh rule referencing the
+  survivor is REISSUED as `proposed` (re-signing is a human act — content changed identity).
+  Refusals: cross-client; survivor==merged; survivor retired/merged; **differing non-null
+  registrations ALWAYS refuse (no override — WA-D3)**; an OPEN draft citing the merged
+  vendor refuses (CLR23; resolve first); repeat merge → idempotent via op_key, a
+  different-args repeat refuses.
+- **Canonicalized reads**: `_resolve_counterparty`, `_open_question_blocks`, near-dup and
+  duplicate-bill checks, and the sighting threshold computation all resolve
+  `merged_into` chains to the survivor (bounded depth; a chain is compressed on write).
+  Approve's fingerprint law is untouched: a merge between propose and approve diverges the
+  re-resolution → existing CLR23 + revise convergence (rig case).
+- `_resolve_counterparty` arity changes → C-1.
 
-## §3 The lane function
+## §3 The lane function (DEFINER — probes P1/P8)
 
-**`clara.coding_lane(p_client uuid, p_filing uuid) returns (lane text, reasons text[])`** —
-STABLE read fn, security INVOKER, RLS-scoped; granted `clara_authenticated`,
-`clara_agent_ro`. Lane ∈ {ready, needs_review, needs_you}; `reasons` carries the qualitative
-tokens (new_vendor, model_read_amount, high_stakes, near_duplicate, amount_exception,
-open_question, no_consent, non_myr, ambiguous_vendor, facts_failed…) that the UI renders as
-copy — tokens, not scores. Reads: filing/draft state, `_resolve_counterparty` preview,
-`_invoice_fact_state`, near-dup (inline invoker computation, 0009 precedent), `is_high_stakes`
-on the would-be amount, `open_questions` in scope, `client_egress_consents`, live
-`coding_rules`. A batch variant `clara.list_coding_lanes(p_client)` powers the queue read
-without N calls. Determinism note: the fn is a PURE read — the sweep re-evaluates it at
-execution time (admission recheck) so a lane computed at event time never authorizes a draft
-later (freshness law; no TOCTOU).
+**`clara.coding_lane(p_client, p_filing)`** and **`clara.list_coding_lanes(p_client)`** are
+**firm-scoped SECURITY DEFINER** reads owned by `clara_fn_owner` (non-BYPASSRLS), granted
+`clara_authenticated` + `clara_agent_ro`: human lane scoped by `jwt_firm()`; agent lane
+requires `wake_firm()` non-null (CLR03) AND **client-pinning** — `p_client` must equal the
+wake credential's bound client or the single not-found shape returns (the C-11 floor; a
+same-firm cross-client call is indistinguishable from absent). Internal calls to
+`_resolve_counterparty` / `_invoice_fact_state` / `is_high_stakes` are lawful (definer);
+the helpers stay ungranted (the P1 cross-firm oracle stays sealed). Returns (lane,
+reasons text[]) — qualitative tokens only. The lane read is ADVISORY (contract WA-L8): no
+locks; writers own correctness.
 
-## §4 The autodraft task lane
+## §4 The autodraft task lane (full model — probe P3)
 
-- `agent_tasks.kind` CHECK widens to include `'autodraft'` (CHECK-constraint replacement:
-  drop + re-add constraint, additive).
-- `_draft_entry_core` coding-eligibility branch accepts kind ∈ {chat_turn, autodraft} (still
-  agent-lane only; still ONE live task per session — autodraft tasks get their own synthetic
-  session per bill, AB-21). Arity unchanged if the branch is internal; if a parameter is
-  added, C-1 applies. `uq_coding_attempts_task` unique(task_id) stands — one bill per task
-  BY CONSTRUCTION.
-- Admission: the sweep consumer inserts held tasks via the existing drain/held-task
-  projection with wake kind on the allowlist for exactly: the read fns it needs +
-  `wake_draft_entry` (NO widening of any other wake kind's allowlist). op_key
-  `autodraft:<filing_id>`; attempt suffix only on operator-forced retry (`:retry-N`, audited).
+- **Kind + triggers:** `agent_tasks.kind` CHECK widens to ('chat_turn','wake','autodraft');
+  `_tf_agent_task_insert` gains an explicit `autodraft` branch: requires firm_id, client_id
+  (resolved by admission), params carrying (document_id, filing_id, origin ∈
+  {sweep, one_click}, run_id), a pinned model snapshot (the house per-task model law),
+  **no session_id** (no chat session exists; the one-live-turn unique is session-keyed and
+  NULL-session rows do not collide), no origin_intent_id. `_tf_agent_task_update` gains the
+  autodraft status machine: queued → running → done | failed | cancelled (+ the reconciler
+  edges the chat_turn kind has); no held state (admission is synchronous). Health/reconcile/
+  masked-view surfaces are extended to the new kind (enumerated at interface-pins; no
+  existing chat/wake transition changes — asserted in the rig).
+- **Admission writer:** `admit_autodraft_task(p_filing, p_origin, p_op_key)` — DEFINER,
+  runtime lane (consumer) + a human-lane wrapper `request_autodraft(p_filing)` for
+  one-click (bookkeeper+). Re-evaluates the lane; enforces the **active-attempt registry**:
+  partial unique one autodraft task per filing in non-terminal state → a concurrent/repeat
+  admission is an idempotent no-op (CLR29 shape, success-formed); **durable attempt
+  counters** on the filing-keyed registry row: 2 terminal failures park (CLR29
+  refused_attempts) until a human acts — survives restarts and new events; reserves budget
+  (§5). Deterministic op_key `autodraft:<filing_id>:<origin>`; op-key args are admission
+  facts only (never model output) so redelivery replays to the stored receipt without a
+  request-hash mismatch.
+- **Eligibility:** `_draft_entry_core` accepts task kind ∈ ('chat_turn','autodraft') on the
+  coding branch (agent-lane only, unchanged human-lane rejection). `uq_coding_attempts_task`
+  stands — one bill per task by construction.
+- **Wake identity:** NEW wake_kind `autodraft` with EXACT allowlist rows:
+  `wake_draft_entry`, `get_document_extract`, `get_context_pack`, `get_draft_review`,
+  `coding_lane` — nothing else (no list fns, no approve-shaped anything). Enumerated in
+  §13; minted OBO nobody (system-origin) with the client pinned from the admission row —
+  the credential carries the client the reads are pinned to.
 
-## §5 Sweep receipts, acks, budget
+## §5 Sweep runs, budget (reserve-first — WA-D2, probe P10)
 
-- **`clara.sweep_runs`**: (id, firm_id, window_started_at, window_ended_at, drafted_count,
-  skipped_count, refused_count, token_spend, consumer_checkpoint_seq). Per-filing outcomes in
-  **`clara.sweep_run_items`** (run_id, filing_id, outcome ∈ {drafted, skipped_lane,
-  refused_budget, refused_attempts, noop_existing}, entry_id nullable, refusal_token).
-  Written by the runtime lane in the drafting transaction's settle path.
-- **`clara.acknowledge_sweep_run(p_run, p_op_key)`** — human lane, ROLE FLOOR bookkeeper+
-  enforced in-fn against live membership; the actor identity must be a human principal (an
-  agent/wake identity refuses — the old build's self-satisfiable ack is killed by
-  construction). Writes `sweep_run_acks` (run_id, actor, at). Idempotent per (run, actor).
-- **`clara.firm_limits.sweep_budget_share`** numeric default 0.60 — the sweep admission
-  check refuses (CLR29 refused_budget) when metered firm daily spend ≥ share × daily limit.
-  Operator lever, same table as the existing metering.
+- **`clara.sweep_runs`**: (id, firm_id, state ∈ open|finalized, window bounds, expected
+  count, drafted/skipped/refused counts, token_reserved/spent, checkpoint seq). PRE-CREATED
+  `open` by the consumer with expected items; **finalized** only when every expected item is
+  terminal (the catch-up pass reconciles committed drafts after a crash and finalizes stale
+  runs). **`sweep_run_items`**: (run_id, filing_id) unique, outcome ∈ {drafted, skipped_lane,
+  refused_budget, refused_attempts, noop_existing}, entry_id, refusal_token — written in the
+  drafting settle path via the run_id threaded through admission.
+- **`acknowledge_sweep_run(p_run, p_op_key)`** — human lane, bookkeeper+ role floor enforced
+  in-fn against LIVE membership; refuses any agent/wake identity; refuses a non-finalized
+  run; idempotent per (run, actor).
+- **Budget primitives (NEW — the existing `begin_chat_turn` is chat_turn-only and
+  read-then-act):** `begin_autodraft_task` / `settle_autodraft_task` — under the existing
+  per-firm advisory budget lock, admission **RESERVES** a worst-case token estimate row
+  (refuse CLR29 `refused_budget` when reservation would take spend past
+  `firm_limits.sweep_budget_share` [new column, default 0.60] × daily limit); settle records
+  actual + refunds the difference; failure refunds fully; a concurrent-sweep-run cap (new
+  `firm_limits.max_concurrent_sweeps`, default 2) bounds overshoot; NULL-limit and
+  day-rollover follow the existing `firm_usage_daily` conventions (same usage_date
+  derivation as `settle_chat_turn`). One-click origin reserves identically (a human click is
+  not exempt from the reserve, but is exempt from `sweep_budget_share` — it counts against
+  the plain daily limit).
 
-## §6 The queue read
+## §6 The queue read (single snapshot — Codex 22)
 
-**`clara.list_review_queue(p_scope jsonb, p_cursor jsonb)`** — INVOKER, RLS + live-membership
-scoped, keyset-paginated union: open drafts / uncoded filings (+lane via §3) / open
-questions / open coding tasks, each row a typed identifier tuple + display accessories
-(counts come from a sibling `review_queue_counts` fn — DB counts). Granted
-`clara_authenticated` only (the dashboard's human lane; the agent has no queue business).
-No new table — it fronts existing state (the 0009 "no parallel queue table" law).
+**`clara.list_review_queue(p_scope, p_cursor)`** — firm-scoped DEFINER, HUMAN lane only
+(`clara_authenticated`), live-membership re-checked in-fn. Returns rows AND counts AND an
+as-of watermark (max surfaced domain_events seq) from ONE statement snapshot. Total ordering
+tuple: (section_rank, client_id, vendor_group, created_at, id); cursor = the tuple,
+validated (malformed → typed refusal, never raw). No new table — it fronts existing state.
 
-## §7 Coding rules
+## §7 Coding rules (real keys, transactional sightings)
 
 - **`clara.coding_rules`**: (id, firm_id, client_id, rule_type CHECK ('vendor_account'),
-  counterparty_id composite-FK, account_id FK [must exist + postable — refuse retired/
-  non-postable at signing AND re-verify at draft-time application], status CHECK
-  (proposed|live|declined|retired), pinned bool, origin CHECK (proposed|authored),
-  content_hash, created_by/at, signed_by/at, retired_by/at, retire_reason). Partial unique:
-  one LIVE rule per (client_id, counterparty_id, rule_type).
-- **`clara.rule_sightings`**: per-sighting provenance rows (rule proposal evidence): (client,
-  counterparty, account, entry_id, document_id, sighted_at) unique per entry — the ≥3
-  congruent threshold is computed over DISTINCT approved entries (A-9 kill: no tallies).
-  Written by a spine consumer hook on entry.approved events (or in approve receipts path —
-  build lane decides; either way DB-idempotent).
-- Writers (human lane, bookkeeper+): `propose_coding_rule` (also invoked by the system path
-  that materializes the ≥3-sighting proposal + its `open_questions` row),
-  `sign_coding_rule`, `decline_coding_rule`, `retire_coding_rule` (pinned → requires the
-  conflict-question path token; CLR27 otherwise). Rule application at draft time: the runtime
-  passes nothing — `_draft_entry_core` snapshots (rule_id, content_hash) into the coding
-  attempt metadata when the proposal cites a rule; the card's "per your rule" chip hydrates
-  from the snapshot (C-14 immutable fired-state).
+  counterparty_id composite tenant FK, **account_code with composite FK
+  (client_id, account_code) → coa_accounts** [the real key — there is no `coa_accounts.id`;
+  must exist + postable at signing AND re-verified at application], status
+  (proposed|live|declined|retired), pinned, origin (proposed|authored), content_hash,
+  created/signed/retired actor+time, retire_reason). Partial unique: one LIVE rule per
+  (client_id, counterparty_id, rule_type).
+- **`clara.rule_sightings`**: append-only, **unique (client_id, counterparty_id,
+  account_code, entry_id)** — a split bill records every distinct (vendor→account) mapping.
+  **Written INSIDE `approve_entry`'s transaction** (PRD invariants 4/13 — never an async
+  consumer): after the status flip, one row per distinct debit account with a payable-side
+  resolved counterparty; abort rolls both back; replay is op_key-idempotent. Reversal
+  excludes the entry from threshold eligibility (the count is over approved-UNREVERSED
+  entries, canonicalized through `merged_into`). The ≥3-distinct-entries threshold crossing
+  INSERTs the rule-proposal `open_questions` row + `kb_rule.proposed` event in the same
+  transaction.
+- **Writers** (human lane, bookkeeper+): `propose_coding_rule`, `sign_coding_rule`,
+  `decline_coding_rule`, `retire_coding_rule` (pinned → requires the conflict-question
+  token; CLR27 otherwise).
+- **Application (deterministic, proven — Codex 17, C-10):** `_draft_entry_core` resolves the
+  live rule by (client, resolved counterparty, 'vendor_account') **FOR SHARE in the draft
+  transaction**, and persists a **fired-decision record** (`rule_decisions`: entry_id +
+  revision token + the FULL rule content snapshot + `account_matched` bool — did the drafted
+  account equal the rule's). "Per your rule" renders only when `account_matched`. A rule
+  signed after the draft leaves no snapshot (nothing fired); a rule retired after firing
+  keeps its immutable snapshot. The model never selects the rule; sign/retire races
+  serialize on the rule row lock (rig case).
 
-## §8 Open questions
+## §8 Open questions (split lanes, serialized gate — Codex 8/9)
 
 - **`clara.open_questions`**: (id, firm_id, client_id, scope_kind CHECK
-  (document|vendor|client), document_id nullable, counterparty_id nullable [exactly the
-  scope-matching id NON-NULL — CHECK], origin CHECK (clarify_promotion|rule_proposal|
-  rule_conflict|sweep_refusal|manual), question_text, status CHECK (open|resolved|dismissed),
-  opened_by/at, resolved_by/at, resolution_text, spawned_rule_id nullable). Composite tenant
-  FKs; partial index on open per client.
-- Writers: `open_question` (human + runtime lanes — the sweep/turn may ask; opening is not a
-  gate change), `resolve_open_question` / `dismiss_open_question` (human lane, bookkeeper+).
-- **approve_entry** gains the CLR26 check: an OPEN question whose scope covers the entry
-  (its document, its resolved/proposed counterparty, or the client) refuses approval with the
-  question id in DETAIL. Body change; arity unchanged → OR REPLACE. The lane fn (§3) reads
-  the same predicate for READY demotion — ONE shared predicate fn `_open_question_blocks`
-  so the two sites cannot drift (the guard.mjs propagation lesson).
-- Clarify promotion: `promote_clarify_to_question(p_interruption, …)` — one-way, audited,
-  carries the interruption's text + document scope.
+  (document|vendor|client) with the scope-matching id NON-NULL by CHECK, origin
+  (clarify_promotion|rule_proposal|rule_conflict|sweep_refusal|manual), question_text,
+  status (open|resolved|dismissed), opened_by/at + opener_kind (human|wake),
+  resolved_by/at, resolution_text, spawned_rule_id). Partial index on open per client.
+- **Split entry points over an ungranted core** (ADR-015 — a single shared writer cannot
+  detect its lane): `open_question(...)` human lane bookkeeper+ (a viewer cannot block a
+  client); `wake_open_question(...)` agent lane, allowlisted per wake_kind, scope pinned to
+  the credential's client (a wake can never open a question outside its client).
+  `resolve_open_question` / `dismiss_open_question` human-only, bookkeeper+.
+- **Serialization (the CLR26 gate is not check-then-act):** question writers take, BEFORE
+  insert/resolve: document scope → the active-filing row lock (the existing serialization
+  point); vendor scope → `pg_advisory_xact_lock(hash(client, counterparty))`; client scope →
+  `pg_advisory_xact_lock(hash(client))`. `approve_entry` takes the SAME locks (its existing
+  filing lock + the vendor/client advisory locks for the entry's resolved counterparty and
+  client) before its CLR26 check — both commit orders rig-proved with deadlock bounds.
+  `_open_question_blocks` is a firm-scoped DEFINER predicate (probe P8: invoker cannot read
+  the fn-fronted table), canonicalizes `merged_into`, and is the ONE shared implementation
+  for `approve_entry` + `coding_lane`.
+- `promote_clarify_to_question(p_interruption, ...)` — one-way, audited.
 
-## §9 Diff reads
+## §9 Revision snapshots + diff reads (new state — Codex 12)
 
-- **`clara.get_entry_diff(p_entry, p_client)`** — revision walk from persisted history
-  (receipts/events + line snapshots), per step: actor, at, reason, per-leg before/after
-  (account, cents, counterparty). INVOKER, RLS; granted authenticated + agent_ro.
-- **`clara.get_doc_entry_diff(p_entry, p_client)`** — per corroborated field: document-side
-  value + region locator vs entry-side value, delta cents computed in SQL, plus the honest
-  `no captured region` marker rows for uncorroborated fields (WA-R8). Fronts
-  `_invoice_fact_state` + `entry_evidence`; no new state.
+- **`clara.journal_entry_revisions`**: append-only — (entry_id, revision_no, revision_token,
+  actor, reason, header snapshot, ordered legs jsonb [account_code, cents, side,
+  counterparty_id], rule_decision_id, evidence refs, created_at); unique (entry_id,
+  revision_no). Written in the SAME transaction at draft creation (rev 0), by every
+  `revise_entry`, and by every facts-driven token rotation. `revise_entry` body change
+  (arity unchanged → OR REPLACE; if arity changes for any fold reason → C-1).
+- **`get_entry_diff(p_entry, p_client)`** — walks the revisions table (firm-scoped DEFINER;
+  authenticated + agent_ro client-pinned; deltas computed in SQL).
+- **`get_doc_entry_diff(p_entry, p_client)`** — document-side corroborated fields + regions
+  vs entry legs, SQL deltas, honest no-region rows. Fronts `_invoice_fact_state` (definer)
+  + `entry_evidence`; no new state.
 
-## §10 Egress registry
+## §10 Egress registry + lane-carve (WA-D1 — probe P2)
 
-- **`clara.client_egress_consents`**: (id, firm_id, client_id, scope_note, evidence_document_id
-  FK [the signed consent/engagement doc — a real ingested document, provenance law],
+- **`clara.client_egress_consents`**: (id, firm_id, client_id, scope_note,
+  evidence_document_id FK → a REAL ingested document owned by the same firm [asserted],
   granted_by/at, revoked_by/at, revoke_reason). Partial unique: one live row per client.
-  Writers `grant_client_egress` / `revoke_client_egress` (human lane, OWNER role floor —
-  consent is a firm-owner act, not bookkeeper).
-- The egress claim gate (`claim_document_processing_task`'s held_egress logic + the intake
-  path) rewires: egress requires (global kill-switch != 0) AND a live consent row for the
-  document's client. `CLARA_DOC_EGRESS_APPROVED` semantics change is runtime-config only —
-  =0 halts all (unchanged), =1 now DELEGATES to rows instead of granting firm-wide. Deploy
-  ceremony: seed rows for currently-consented clients (RPR + owner-confirmed set) citing
-  their consent evidence docs BEFORE the image carrying the new gate deploys (ordering note:
-  migration first, rows second, image third — the gate must fail CLOSED between). Rig case:
-  revocation mid-pipeline holds queued egress and demotes lanes.
+  Writers `grant_client_egress` / `revoke_client_egress` — human lane, **OWNER role floor**;
+  grant→revoke→grant cycles produce distinct rows (audit history); a retired client refuses.
+- **Lane-carve in `claim_document_processing_task` (definer-internal — the runtime passes
+  ONLY the kill-switch boolean; it holds no consent read and never will):** `ocr` lane →
+  kill-switch only (pre-attribution: probe P2 proved no client is reachable);
+  `invoice_facts` lane → kill-switch AND a live consent row for EVERY active filing's
+  client of the document (multi-filing partial consent refuses CLR28 and holds the task).
+- **Last-boundary recheck (Codex 1):** the claim function re-verifies kill-switch + consent
+  on EVERY branch that can dispatch — fresh claims, `running` re-claims, and replayed
+  receipts return a consent-bound lease; the workflow re-claims immediately before the
+  external call, so kill/restart/replay after a revocation yields ZERO post-revocation
+  dispatch (rig case: revoke between claim and dispatch, kill, replay — count actual
+  outbound calls).
+- **Deploy ordering:** 0011 (gate live, zero rows → invoice_facts egress fails CLOSED) →
+  seed consent rows for the owner-confirmed consented clients citing their evidence docs →
+  deploy the image. The window between is fail-closed by construction.
 
 ## §11 Facts-capture fix
 
-`captured_invoice_id` lossiness (null 14/17): root-cause in the invoiceFacts persist path —
-the InvoiceId field mapping predates the field_path normalization. Fix in
-`persist_invoice_facts`'s mapper (or the workflow's extraction shaping — build lane
-root-causes; the DB refuses nothing new here). Re-measure on the eval corpus in the build
-gates; until measured ≥16/17, no lane predicate references it (contract WA-L3).
+`captured_invoice_id` (null 14/17): root-cause in the invoiceFacts field mapping; fix at the
+mapper; re-measure on the eval corpus; until ≥16/17 no lane predicate references it. Note
+the duplicate-bill gate + near-dup surface key on facts invoice_id and are near-inert while
+capture is lossy — the fix materially arms two existing controls.
 
-## §12 Events + taxonomy (additive v3)
+## §12 Events + taxonomy (additive into ACTIVE — probe P7)
 
-New event types: `sweep.run_completed`, `kb_rule.proposed`, `kb_rule.signed`,
-`kb_rule.retired`, `open_question.opened`, `open_question.resolved`, `counterparty.merged`,
-`egress.consent_granted`, `egress.consent_revoked`. Taxonomy v3 version rows: all default
-`ignore` for the router EXCEPT `kb_rule.proposed` + `open_question.opened` → `notification`
-(queue rows ride the read fn; the notification decision feeds later inbox work without
-waking anything). The autodraft consumer subscribes DIRECTLY to
-`document.invoice_facts_completed/failed` (no taxonomy dependency — matcher precedent).
-Repoint via a new `taxonomy_versions` row + `taxonomy_active` update in-migration (the 0009
-v2 pattern).
+New event types: `sweep.run_completed`, `kb_rule.proposed/signed/retired`,
+`open_question.opened/resolved`, `counterparty.merged`, `egress.consent_granted/revoked`.
+**Additive-insert into the ACTIVE taxonomy version** (the true 0009 pattern — NO new
+version, NO `taxonomy_active` flip): decision `ignore` except `kb_rule.proposed` +
+`open_question.opened` → `notification`. Coupled-pair coverage assert in the tail. The
+autodraft consumer subscribes DIRECTLY to `document.invoice_facts_completed/_failed`
+(matcher precedent; no taxonomy dependency).
 
 ## §13 Grants delta (complete enumeration — nothing else moves)
 
-| Object | clara_authenticated | clara_agent_ro | clara_wake_interactive | clara_runtime |
+| Object | authenticated | agent_ro | wake lanes | runtime |
 |---|---|---|---|---|
-| coding_lane / list_coding_lanes | EXECUTE | EXECUTE | — | — |
-| list_review_queue / review_queue_counts | EXECUTE | — | — | — |
+| coding_lane / list_coding_lanes | EXECUTE (jwt_firm) | EXECUTE (CLR03 + client-pinned) | autodraft allowlist: coding_lane only | — |
+| list_review_queue | EXECUTE | — | — | — |
+| add/retire_counterparty_alias, rename_counterparty | EXECUTE | — | — | — |
 | merge_counterparties | EXECUTE | — | — | — |
-| acknowledge_sweep_run | EXECUTE | — | — | — |
+| admit_autodraft_task | — | — | — | EXECUTE |
+| request_autodraft | EXECUTE | — | — | — |
+| begin/settle_autodraft_task | — | — | — | EXECUTE |
+| acknowledge_sweep_run | EXECUTE (bookkeeper+ in-fn, human-only) | — | — | — |
 | propose/sign/decline/retire_coding_rule | EXECUTE | — | — | — |
-| open_question (writer) | EXECUTE | — | via allowlist | — |
-| resolve/dismiss_open_question | EXECUTE | — | — | — |
-| promote_clarify_to_question | EXECUTE | — | — | — |
-| get_entry_diff / get_doc_entry_diff | EXECUTE | EXECUTE | — | — |
-| grant/revoke_client_egress | EXECUTE (owner-floor in-fn) | — | — | — |
-| sweep_runs/_items/_acks writers | — | — | — | EXECUTE (fn-wrapped) |
-| All new TABLES | zero direct DML/SELECT grants — fn-fronted only (house law) | | | |
+| open_question | EXECUTE (bookkeeper+) | — | — | — |
+| wake_open_question | — | — | via allowlist (autodraft + chat wake kinds) | — |
+| resolve/dismiss_open_question, promote_clarify_to_question | EXECUTE | — | — | — |
+| get_entry_diff / get_doc_entry_diff | EXECUTE | EXECUTE (client-pinned) | autodraft allowlist: get_entry_diff not granted | — |
+| grant/revoke_client_egress | EXECUTE (OWNER in-fn) | — | — | — |
+| approve_routine_entry | EXECUTE | — | — | — |
+| _open_question_blocks | not granted (called by definer sites) | | | |
+| **wake_kind `autodraft` allowlist rows** | n/a | n/a | wake_draft_entry, get_document_extract, get_context_pack, get_draft_review, coding_lane — EXACTLY these | n/a |
+| All new TABLES | zero direct DML/SELECT — fn-fronted only | | | |
 
-Tail asserts (0009 pattern): one overload per public writer; PUBLIC-zero-execute across every
-new fn; the §13 matrix asserted row-by-row; the AB-3 pin probe (§1).
+**§13a per-layer error table** (S6 §12 bar): every new SQLSTATE/constraint → CLR code +
+reason → runtime result → card copy, including multiple-gate precedence
+(CLR03 identity > CLR28 consent > CLR26 question > CLR21/23 business > CLR29 sweep no-op),
+authored in full at interface-pins; no raw SQLSTATE reaches a card.
+
+Tail asserts: one overload per public writer; PUBLIC-zero-execute on every new fn; the §13
+matrix row-by-row; the §1 AB-3 probes; the WA-D5 attestation gate (an agent-made high-stakes
+draft approved without attestation must refuse — the probe-P6 case inverted); the
+`approve_routine_entry` high-stakes refusal; taxonomy coverage whole.
 
 ## §14 Concurrency + lock order
 
-- Sweep draft vs chat draft on one filing: both funnel through `_draft_entry_core` → the
-  one-open-draft partial unique serializes; loser maps to noop (sweep) / CLR21 double_coded
-  (chat, existing UX). No new locks.
-- Facts rotation vs approve: unchanged 0009 serialization (filing FOR UPDATE vs FOR SHARE);
-  the lane fn takes NO locks (pure read).
-- merge_counterparties lock order: counterparties (survivor, merged — deterministic id
-  order) → children. Rig forced-schedule case vs a concurrent draft's resolve.
-- approve CLR26 check reads open_questions AFTER taking its existing filing lock —
-  no new deadlock edge (rig-proved).
-- The consumer holds one connection, one txn per event (matcher contract); autodraft
-  execution happens in the WORKFLOW, never in the consumer txn.
+- Sweep vs chat draft: both funnel through `_draft_entry_core`; the filing row lock +
+  one-open-draft unique serialize (probe P9: both orders, no deadlock); losers no-op.
+- **Duplicate-bill serialization (Codex 7):** `approve_entry` takes
+  `pg_advisory_xact_lock(hash(client, counterparty, facts_invoice_id))` BEFORE the
+  duplicate EXISTS check — concurrent exact-duplicate approvals serialize; at most one
+  commits approved-unreversed (rig: both orders + one batch worker vs one reviewer).
+- **CLR26 lock protocol (Codex 8):** as §8 — question writers and approve share the
+  filing/vendor/client locks; both orders rig-proved.
+- Merge lock order: survivor then merged by deterministic id order → children reads;
+  merge vs draft/approve/revise/sign schedules forced in both orders (rig).
+- Budget: reservation under the existing per-firm advisory budget lock (same lock as
+  `begin_chat_turn` — one budget authority).
+- Deferrable-trigger law unchanged: entry + lines + evidence + revision snapshot in ONE
+  explicit transaction.
 
-## §15 Second-run ledger (the DR-drill lens — every item exercised twice)
+## §15 Second-run ledger (executed, not reasoned)
 
-Consumer restart mid-backlog (checkpoint resume, no double-draft); migration 0011 re-apply
-onto itself (idempotent guards); `acknowledge_sweep_run` twice (idempotent); merge run twice
-(second refuses cleanly — merged already retired); consent grant→revoke→grant cycle; taxonomy
-v3 repoint re-run; the deploy ceremony order (§10) executed on the rig end-to-end before any
-live window.
+Migration re-application is governed by the RUNNER's duplicate refusal (the house
+migration model — 0011 is not self-reapplying; the misleading v1.0 "re-apply onto itself"
+claim is withdrawn); CI proves fresh-bootstrap AND 0010→0011 upgrade parity by catalog dump
+diff (overloads, ACLs, policies, triggers, taxonomy coverage). Executed-twice set: consumer
+restart mid-backlog (checkpoint resume, zero double-draft); `acknowledge_sweep_run` twice;
+merge repeat (same op_key idempotent; different args refuse); consent grant→revoke→grant;
+poison-filing park across restarts + a NEW event (cap holds); run finalization after a
+crash (catch-up reconciles); the §10 deploy ordering end-to-end on the rig before any live
+window.
