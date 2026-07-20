@@ -71,6 +71,9 @@ export function backup(opts = {}) {
 
   const label = all ? "all" : safeLabel(schemaList.join("+"));
   const out = opts.out || join(backupDir(), `clara-${label}-${tsStamp()}.sql`);
+  // pg_dump --file does NOT create parent dirs; backupDir() only covers the default
+  // location, so an explicit --out into a not-yet-existing dir failed inside pg_dump.
+  if (opts.out) mkdirSync(dirname(out), { recursive: true });
 
   // Canonical child env: when a DSN URL is set, PGHOST/PGPORT/PGUSER/PGPASSWORD/
   // PGDATABASE are derived from it (pg_dump ignores the URL) and conflicting
@@ -172,7 +175,9 @@ function parseArgs(argv) {
   const opts = {};
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
-    if (a === "--all") {
+    if (a === "--") {
+      continue; // pnpm forwards the separator LITERALLY (`pnpm db:backup:full --`); ignore it
+    } else if (a === "--all") {
       opts.all = true;
     } else if (VALUE_OPTS.has(a)) {
       const v = argv[i + 1];

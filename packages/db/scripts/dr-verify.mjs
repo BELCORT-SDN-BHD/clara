@@ -20,8 +20,8 @@
 // credit - debit (the authoritative S6 definition, Codex HIGH-6). This script only READS.
 
 import pg from "pg";
-import { writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { dirname, join, isAbsolute } from "node:path";
 import { fileURLToPath } from "node:url";
 import { AUTHORITATIVE_SCHEMAS } from "./backup.mjs";
 import { labelFor, multisetDiff } from "./dr-verify-util.mjs";
@@ -30,16 +30,45 @@ import {
   checkConfinementSmoke, checkCanary, checkApGate, checkDocuments,
 } from "./dr-verify-checks.mjs";
 
-const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "migrations");
+const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
+const MIGRATIONS_DIR = join(SCRIPT_DIR, "..", "migrations");
+const REPO_ROOT = join(SCRIPT_DIR, "..", "..", ".."); // scripts -> db -> packages -> repo root
 const SRC_URL = process.env.CLARA_DR_SOURCE_URL;
 const TGT_URL = process.env.CLARA_DR_TARGET_URL;
-const OUT = process.env.CLARA_DR_VERIFY_OUT;
+// A RELATIVE CLARA_DR_VERIFY_OUT resolves against the REPO ROOT, not the CWD. It used to
+// be written raw: under a different CWD that ENOENTs *after* the entire battery has run,
+// printing "dr-verify: FAIL" for a verification that actually PASSED — a false failure
+// report on real books. Absolute paths are honoured as-is.
+const OUT = process.env.CLARA_DR_VERIFY_OUT
+  ? (isAbsolute(process.env.CLARA_DR_VERIFY_OUT) ? process.env.CLARA_DR_VERIFY_OUT : join(REPO_ROOT, process.env.CLARA_DR_VERIFY_OUT))
+  : undefined;
 const STRICT = process.env.CLARA_DR_STRICT === "1";
 
 const results = [];
 function record(section, name, status, detail = "") {
   results.push({ section, name, status, detail });
   console.log(`[${status.padEnd(4)}] ${section.padEnd(4)} ${name}${detail ? " — " + detail : ""}`);
+}
+
+const tallyOf = (rs) => rs.reduce((a, r) => ((a[r.status] = (a[r.status] || 0) + 1), a), {});
+
+/**
+ * Persist the evidence JSON. Called from main()'s `finally`, so a probe that THROWS
+ * still leaves the results recorded so far on disk. A write failure is a loud WARNING
+ * and NEVER changes the exit code: the battery's verdict is the battery's, and turning
+ * a PASS into a FAIL because a file could not be written would misreport a real-books
+ * verification. The console transcript is the fallback evidence.
+ */
+function writeEvidence() {
+  if (!OUT) return;
+  try {
+    mkdirSync(dirname(OUT), { recursive: true });
+    const payload = { source: labelFor(SRC_URL), target: labelFor(TGT_URL), strict: STRICT, ts: new Date().toISOString(), tally: tallyOf(results), results };
+    writeFileSync(OUT, JSON.stringify(payload, null, 2));
+    console.log(`dr-verify: wrote JSON results -> ${OUT}`);
+  } catch (e) {
+    console.error(`dr-verify: WARNING — could not write evidence JSON to ${OUT}: ${e.message}. The battery verdict below STANDS; use the console transcript as evidence.`);
+  }
 }
 
 let src, tgt;
@@ -122,9 +151,10 @@ async function main() {
   } finally {
     await src.end().catch(() => {});
     await tgt.end().catch(() => {});
+    writeEvidence(); // from `finally`: an early THROW still yields the probes recorded so far
   }
 
-  const tally = results.reduce((a, r) => ((a[r.status] = (a[r.status] || 0) + 1), a), {});
+  const tally = tallyOf(results);
   const fails = tally.FAIL || 0;
   console.log("\n===== DR-VERIFY SUMMARY =====");
   console.log(`source ${labelFor(SRC_URL)}  →  target ${labelFor(TGT_URL)}${STRICT ? " · STRICT" : ""}`);
@@ -132,10 +162,6 @@ async function main() {
   if (fails) {
     console.log("FAILURES:");
     for (const r of results.filter((x) => x.status === "FAIL")) console.log(`  - [${r.section}] ${r.name} — ${r.detail}`);
-  }
-  if (OUT) {
-    writeFileSync(OUT, JSON.stringify({ source: labelFor(SRC_URL), target: labelFor(TGT_URL), strict: STRICT, ts: new Date().toISOString(), tally, results }, null, 2));
-    console.log(`dr-verify: wrote JSON results -> ${OUT}`);
   }
   console.log(fails ? "\ndr-verify: FAIL" : "\ndr-verify: PASS — restore is faithful across every probed category.");
   process.exit(fails ? 1 : 0);
