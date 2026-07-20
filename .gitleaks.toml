@@ -18,6 +18,11 @@ paths = [
   '''skills-lock\.json''',          # vendored-skills provenance sha256 manifest — not secrets
   '''(^|/)[^/]*\.example$''',       # *.env.example etc. — placeholders only
   '''(^|/)docs/audit/''',           # frozen audit evidence: long file-path/quote strings
+  # GATE-3 eval evidence: carries RPR's client UUID (a tenant identifier, NOT a
+  # credential) which trips generic-api-key on entropy alone. Scoped to these two
+  # archived files by name — path-based, not fingerprint-based, because a squash
+  # merge rewrites the commit sha every fingerprint is pinned to (bit twice).
+  '''(^|/)docs/plan/research/slice6/gate3-eval-(report\.md|results\.json)$''',
 ]
 regexes = [
   '''world:world@localhost''',      # WDK dev-default fixed string (also exempt in check-leaks.mjs)

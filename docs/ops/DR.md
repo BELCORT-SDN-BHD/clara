@@ -246,13 +246,23 @@ escalation path for the pilot. The alerting **wiring** is a follow-up; the
 
 ## 8. Open items (owner)
 
-1. **Confirm the project plan and, before real data, upgrade to Pro + PITR.**
-   On Free there is zero managed DR; the repo-side dump is the only floor.
-2. **Off-site dump destination** — decide where scheduled dumps are stored
-   (they must leave the Supabase account to survive account/region loss). A design
-   with a recommendation (scheduled Windows Task + `age` + `rclone` to R2/B2, plus a
-   dead-man's-switch freshness alarm) is in `docs/ops/DR-full-drill.md` §6 — **OWNER
-   DECISION pending**.
+1. **Plan upgrade — OWNER DECIDED 2026-07-20: upgrade to Pro ($25/mo); PITR
+   DEFERRED for later assessment.** Pro gives daily physical backups with 7-day
+   retention, restorable to a new project → managed **RPO ≤ 24h** (vs. Free's zero
+   managed DR). **The residual the owner accepted:** without PITR there is no
+   roll-back-to-a-timestamp for a bad write or migration — recovery granularity is
+   the last daily backup, so the §4/§6 off-site dump cadence remains a real RPO
+   lever, and the D1 write-quiesce discipline on writer-body migrations matters more.
+   PITR (~$100/mo per 7-day window, requires ≥ Small compute) is a **deferred item to
+   re-assess** — revisit when client count, transaction volume, or a near-miss makes
+   minutes-RPO worth the cost.
+2. **Off-site dump destination — OWNER DECIDED 2026-07-20: Cloudflare R2.**
+   The §6 design applies: a scheduled Windows Task runs `db:backup:full`, `age`-encrypts
+   the bundle (full dump + globals evidence + `auth` data-only + the `firm-docs` byte
+   mirror + `manifest.json`), and `rclone`-uploads to R2 — off-vendor, so an account or
+   region loss is survivable, with full credential custody retained locally. Alerting =
+   the dead-man's-switch (§6). **Wiring is the remaining task** (the DR drill does not
+   depend on it).
 3. **Storage-bucket backup** — document bytes in Supabase Storage need their own
    copy path (the DB dump does not include Storage objects); the recovery path is
    `docs/ops/DR-full-drill.md` §4 (re-provision bucket → `storage-provision.sql` →
