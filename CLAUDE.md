@@ -94,15 +94,21 @@ in `docs/agents/`.
 Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
-In one line: **Phase 3 COMPLETE — Slices 1–6 MERGED, Slice 0 CLOSED, and GATE 3
-CLOSED beta-real on live (2026-07-19/20): 0009+0010 live, the S6 image deployed
-(2gb + always-restart), the write floor ceremonied, BELCORT+RPR onboarded, egress
-=1 under the signed S6-R1 consent, the 17-bill replay eval PASSED 17/17 with the
-AP gate exact (RM 1,350,938.21) and ZERO exceptions, and the owner-directed
-kill-mid-workflow PROVED exactly-once (evidence:
-`docs/plan/research/slice6/gate3-*`); three production defects caught+fixed
-same-day by the beta (facts-lane discovery PR #21, chatTurn_v3 park-resume
-PR #22, 0010 array fix — amendments AB-18..21); the S4-V2 canary stays ARMED,
-due 2026-08-02 — NEVER answer interruption daba7f2e; NEXT = Phase-4 direction
-with the recorded gates (AB-3 engine_kind pin BEFORE MyInvois; the C6/egress
-bundle before third-party client documents; the deferred S6 §11 list).**
+In one line: **Phase 3 COMPLETE + GATE 3 CLOSED beta-real (2026-07-19/20: 17/17
+replay eval, AP gate exact RM 1,350,938.21, kill-mid-workflow exactly-once), AND
+THE HARDENING INTERLUDE IS DONE (2026-07-20, PRs #25–#32, ADR-020/021, AB-22):
+the PART-2 DR gate is CLOSED — a full-profile restore into a REAL fresh Supabase
+project PASSED 177/0 over 188 STRICT probes (AP exact on both sides, S4-V2 canary
+parked BOTH sides, 19/19 storage bytes identical, 10 roles rebuilt from an empty
+pg_authid; evidence `docs/ops/DR.md` §5b + `docs/ops/DR-full-drill.md`); HIGH-10's
+`deploy/acl-baseline.sql` is APPLIED TO LIVE (the five agent/wake lanes lost
+`public` USAGE + TEMP, every managed role preserved, runtime `/ready` green);
+the repo now lives at **`github.com/BELCORT-SDN-BHD/clara`** with CI on org
+billing and the agent identity **`belcorttao`**. The drill found FIVE defects four
+review stages had missed — three ceremony scripts that would have failed 42501
+MID-RECOVERY (books restored, no login able to reach them), a verifier that could
+not tell two Supabase projects apart, and a zero-probe battery reporting success.
+Canary daba7f2e stays ARMED, due 2026-08-02 — NEVER answer it. NEXT = the
+**Phase-4 Wave-A design grill** (the daily loop) with the recorded gates: AB-3
+engine_kind pin BEFORE anything MyInvois-shaped; the C6/egress bundle before ANY
+third-party client documents (RPR-only until then); the deferred S6 §11 list.**
