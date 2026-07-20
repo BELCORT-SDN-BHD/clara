@@ -28,7 +28,37 @@ end $$;
 -- stays TRUE (so the explicit SET ROLE carries clara_wake_interactive's privileges);
 -- the MEMBERSHIP is INHERIT FALSE, so the role carries nothing until it SET ROLEs.
 alter role clara_wake_write_login login password :'clara_write_pw';
-alter role clara_wake_write_login nosuperuser nobypassrls nocreatedb nocreaterole inherit;
+-- Attribute normalization is SPLIT by privilege (the 0002 §1 / HIGH-8 law, mirrored
+-- from deploy/roles-bootstrap.sql). PostgreSQL requires SUPERUSER to set SUPERUSER /
+-- BYPASSRLS / CREATEDB **even when setting them to false**; Supabase's `postgres` is
+-- NOT a superuser, so an unguarded ALTER here fails 42501 and aborts the ceremony
+-- under ON_ERROR_STOP (drill-proven on a real project, 2026-07-20). Migration 0009
+-- already creates the role with these defaults, so the guarantee holds regardless —
+-- these are defense-in-depth for a deploy role that happens to have the privilege,
+-- and the fail-closed check below asserts the posture either way.
+alter role clara_wake_write_login nocreaterole inherit;
+do $$
+begin
+  if current_setting('is_superuser') = 'on' then
+    alter role clara_wake_write_login nosuperuser nobypassrls nocreatedb;
+  end if;
+end $$;
+
+-- Fail closed: the write floor's whole premise is that this login carries NO privilege
+-- of its own until it SET ROLEs. Assert it rather than assume it.
+do $$
+declare bad text;
+begin
+  select string_agg(x, ', ') into bad from (
+    select 'SUPERUSER' x from pg_roles where rolname='clara_wake_write_login' and rolsuper
+    union all select 'BYPASSRLS' from pg_roles where rolname='clara_wake_write_login' and rolbypassrls
+    union all select 'CREATEDB' from pg_roles where rolname='clara_wake_write_login' and rolcreatedb
+    union all select 'CREATEROLE' from pg_roles where rolname='clara_wake_write_login' and rolcreaterole
+  ) s;
+  if bad is not null and bad <> '' then
+    raise exception 'write-login ceremony ABORTED: clara_wake_write_login carries %. The write floor requires a privilege-less login.', bad;
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- Post-ceremony verification -- ALL must hold before wiring the runtime DSN.

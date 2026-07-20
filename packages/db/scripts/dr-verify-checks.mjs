@@ -9,6 +9,22 @@ import {
   ident, multisetDiff, tableExists, tablesOf, schemaPresent, SCHEMA_ALLOWLIST, PLATFORM_SCHEMAS,
 } from "./dr-verify-util.mjs";
 
+/**
+ * RUNTIME-CHURN tables: operational telemetry the live runtime writes CONTINUOUSLY, so
+ * a point-in-time restore can never byte-match a still-running source. Compared
+ * DIRECTIONALLY (target must not exceed source) instead of exactly — see checkTables.
+ *
+ * The bar for this list is deliberately high: a table belongs here ONLY if no books
+ * figure, provenance link, or audit receipt depends on it. Nothing here is reachable
+ * from a journal entry, a document's provenance chain, or the audit log — those stay
+ * byte-exact and any drift in them is a REAL failure.
+ */
+const CHURN_TABLES = new Map([
+  ["clara.runtime_heartbeats", "runtime liveness beacons — rewritten every few seconds by the running runtime"],
+  ["clara.trace_prune_log", "audited trace-prune receipts — appended on the runtime's prune schedule"],
+  ["clara.trace_spans", "runtime traces — written per request and pruned on a schedule"],
+]);
+
 // On-disk migration manifest as Map<version, sha256> — computed EXACTLY the way
 // migrate.mjs records checksums (CRLF→LF normalization, then sha256 hex), so the
 // completeness floor can require exact (version, checksum) equality and a forged
@@ -125,9 +141,28 @@ export async function checkTables(ctx) {
         continue;
       }
       const rel = `${ident(sc)}.${ident(tbl)}`;
+      const churn = CHURN_TABLES.get(`${sc}.${tbl}`);
       const cq = `select count(*)::bigint n from ${rel}`;
       const [cs, ct] = await Promise.all([src.query(cq), tgt.query(cq)]);
-      const eq = cs.rows[0].n === ct.rows[0].n;
+      const sn = BigInt(cs.rows[0].n);
+      const tn = BigInt(ct.rows[0].n);
+      const eq = sn === tn;
+
+      // A restore is a POINT-IN-TIME snapshot; a LIVE source keeps running. Tables the
+      // runtime writes continuously (heartbeats, the audited trace-prune log) therefore
+      // diverge by design between the dump and the verification — that is source motion,
+      // not restore infidelity, and reporting it as REAL trains operators to ignore the
+      // battery. For these, the assertion is DIRECTIONAL: the target must not EXCEED the
+      // source (it can only hold what the dump captured) and must not be empty when the
+      // source is not. Anything the books depend on stays byte-exact.
+      if (churn) {
+        const bad = tn > sn || (tn === 0n && sn > 0n);
+        record("4.2", `${sc}.${tbl} rowcount`, bad ? "FAIL" : "INFO",
+          `${bad ? "target EXCEEDS source — not explainable by source motion: " : "expected live-source drift (target is the dump's point-in-time): "}source=${sn} target=${tn} · ${churn}`);
+        record("4.3", `${sc}.${tbl} content-md5`, "INFO", `not compared — ${churn}`);
+        continue;
+      }
+
       record("4.2", `${sc}.${tbl} rowcount`, eq ? "PASS" : "FAIL", eq ? `${cs.rows[0].n}` : `source=${cs.rows[0].n} target=${ct.rows[0].n}`);
 
       const mq = `select md5(coalesce(string_agg(h,'' order by h),'')) m from (select md5(row(t.*)::text) h from ${rel} t) s`;

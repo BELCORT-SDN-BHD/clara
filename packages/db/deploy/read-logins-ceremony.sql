@@ -30,7 +30,16 @@ begin
   end if;
 end $$;
 alter role clara_runtime_login login password :'clara_runtime_pw';
-alter role clara_runtime_login nosuperuser nobypassrls nocreatedb nocreaterole inherit;
+-- Privilege-SPLIT normalization (0002 §1 / HIGH-8; see roles-bootstrap.sql): PG needs
+-- SUPERUSER to set SUPERUSER/BYPASSRLS/CREATEDB even when setting them FALSE, and
+-- Supabase's `postgres` is not one — unguarded, this aborts the ceremony (42501).
+alter role clara_runtime_login nocreaterole inherit;
+do $$
+begin
+  if current_setting('is_superuser') = 'on' then
+    alter role clara_runtime_login nosuperuser nobypassrls nocreatedb;
+  end if;
+end $$;
 \unset clara_runtime_pw
 
 -- ===== clara_agent_read_login (member of clara_agent_ro) =====
@@ -42,8 +51,30 @@ begin
   end if;
 end $$;
 alter role clara_agent_read_login login password :'clara_readlogin_pw';
-alter role clara_agent_read_login nosuperuser nobypassrls nocreatedb nocreaterole inherit;
+alter role clara_agent_read_login nocreaterole inherit;
+do $$
+begin
+  if current_setting('is_superuser') = 'on' then
+    alter role clara_agent_read_login nosuperuser nobypassrls nocreatedb;
+  end if;
+end $$;
 \unset clara_readlogin_pw
+
+-- Fail closed for BOTH read logins: each must be a privilege-less shell that only
+-- becomes useful after SET ROLE into its one group.
+do $$
+declare bad text;
+begin
+  select string_agg(format('%s:%s', rolname, x), ', ') into bad from (
+    select rolname, 'SUPERUSER' x from pg_roles where rolname in ('clara_runtime_login','clara_agent_read_login') and rolsuper
+    union all select rolname, 'BYPASSRLS' from pg_roles where rolname in ('clara_runtime_login','clara_agent_read_login') and rolbypassrls
+    union all select rolname, 'CREATEDB' from pg_roles where rolname in ('clara_runtime_login','clara_agent_read_login') and rolcreatedb
+    union all select rolname, 'CREATEROLE' from pg_roles where rolname in ('clara_runtime_login','clara_agent_read_login') and rolcreaterole
+  ) s;
+  if bad is not null and bad <> '' then
+    raise exception 'read-logins ceremony ABORTED: %. These must be privilege-less login shells.', bad;
+  end if;
+end $$;
 
 -- ---------------------------------------------------------------------------
 -- POST-CEREMONY VERIFICATION -- eyeball each result against the expected value.
