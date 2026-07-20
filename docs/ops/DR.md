@@ -43,31 +43,47 @@ fetched 2026-07-17):
 - Supabase's own guidance for Free projects: *"regularly export their data using
   the Supabase CLI `db dump` command"* and keep off-site copies.
 
-### Current posture (ACTION REQUIRED — owner decision)
+### Current posture (VERIFIED 2026-07-20)
 
-The fresh project `bzecqklouchkmdmdxlln` (region ap-southeast-1) is on the
-**Free plan** unless upgraded (confirm in Dashboard → Settings → Billing).
+The project `bzecqklouchkmdmdxlln` (ap-southeast-1) sits in an organization on the
+**Pro plan** — owner-confirmed in Dashboard → Settings → Billing. It therefore has
+**managed daily physical backups with 7-day retention**.
 
-> **On Free, there are NO managed backups and NO PITR.** For a 7-year source of
-> truth this is not acceptable at pilot. The **repo-side backup tooling in §4 is
-> the only DR floor until the plan is upgraded.**
+> **Correction of record.** This section previously stated the project was "on the
+> Free plan unless upgraded" — an unverified Slice-1 assumption that was carried
+> forward and later reasoned on as if settled (it produced an "upgrade to Pro"
+> recommendation for a plan that was already active). Supabase billing is
+> **per-organization**; confirm the ORG, not the project.
 >
-> **Recommended before any real client data:** upgrade to **Pro** (daily
-> backups, 7-day retention) **and enable the PITR add-on** (drops RPO from ~24h
-> to minutes). This is an owner/billing decision, tracked from this slice.
+> **What is actually in place:** daily physical backups, 7-day retention → managed
+> **RPO ≤ 24h**. **PITR is NOT enabled** (owner decision 2026-07-20 — deferred for
+> later re-assessment, §8 item 1). The residual: no roll-back-to-a-timestamp for a
+> bad write or migration; recovery granularity is the last daily backup. That is why
+> the §4 off-site cadence and the D1 write-quiesce discipline on writer-body
+> migrations carry real weight.
+>
+> **Spend cap is ENABLED on the org.** Supabase's warning is explicit: exceeding the
+> included usage quota can make projects **unresponsive or read-only**. Consequence
+> for operations: never provision an additional project (e.g. a DR scratch target) in
+> this organization — a rehearsal must not be able to consume the live books' compute
+> budget. Use a separate Free organization.
 
 ---
 
 ## 3. Recovery scenarios
 
-| Scenario | With PITR (paid) | Managed daily only (Pro) | Free (today) |
-|---|---|---|---|
-| Accidental bad write / bad migration | Roll back to a timestamp before it | Restore latest daily (≤24h loss) | Restore from the most recent repo-side dump (§4) |
-| Project/region loss | Restore to a new project from physical backup | Same | Re-provision + restore the last off-site dump (§4) |
-| Single-table/schema corruption | PITR clone + selective copy | Dump-from-backup + selective restore | `restore.mjs` a scoped dump (§4) |
+**Bold = our posture today** (Pro, daily backups, no PITR — §2).
 
-Until PITR is enabled, **the RPO equals the age of the last repo-side dump** — so
-the dump cadence in §4 is the real RPO lever.
+| Scenario | With PITR (not enabled) | **Managed daily only (Pro) — TODAY** | If ever unplanned/Free |
+|---|---|---|---|
+| Accidental bad write / bad migration | Roll back to a timestamp before it | **Restore latest daily (≤24h loss)** | Restore from the most recent repo-side dump (§4) |
+| Project/region loss | Restore to a new project from physical backup | **Same** | Re-provision + restore the last off-site dump (§4) |
+| Single-table/schema corruption | PITR clone + selective copy | **Dump-from-backup + selective restore** | `restore.mjs` a scoped dump (§4) |
+
+Without PITR, **the finest recovery granularity is the last daily backup** — so for
+anything that happened since it, the repo-side dump cadence in §4 is the real RPO
+lever, and the off-site copy is what survives an account/region loss the managed
+backups (same account) would not.
 
 ---
 
