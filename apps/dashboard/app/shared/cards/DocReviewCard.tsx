@@ -95,7 +95,7 @@ export function DocReviewCard({ token, part }: { token: string | null; part: Doc
             <p className={styles.sectionTitle}>Derivation — document vs entry (DB-computed)</p>
             {data && data.diff.fields.length === 0 && !loading ? <p className={styles.emptyState}>No corroborated fields to compare.</p> : null}
             {data ? <DerivationTable fields={data.diff.fields} activeIndex={activeRegion?.index ?? null} onPickRegion={pickRegion} /> : null}
-            <p className={styles.inertNote}>A document-vs-ledger divergence is evidence FOR document-grounded coding — Clara never sums these figures. A cited region opens on its page; a polygon region also highlights on an image.</p>
+            <p className={styles.inertNote}>A document-vs-ledger divergence is evidence FOR document-grounded coding — Clara never sums these figures. A cited region opens on its page; a polygon region also highlights on the image or PDF page.</p>
           </div>
 
           {review && review.evidence.length > 0 ? (
