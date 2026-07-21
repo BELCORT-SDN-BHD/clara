@@ -166,9 +166,13 @@ test("§3 additive-insert into the ACTIVE taxonomy version (2) — coverage whol
   const active = (await rootQuery("select version from clara.taxonomy_active where singleton")).rows[0].version;
   assert.equal(active, 2, "the active taxonomy version is unchanged (additive-insert, NO flip — probe P7)");
   // Coverage whole: every registered type has a trigger_taxonomy row at the active version.
+  // Exclude the reserved rig.% namespace: a concurrent test file (rig-events-structure)
+  // inserts uncovered rig.% event types on the shared CI DB to exercise the coverage
+  // guard — they must not false-fail this test (the house precedent, AB-7 / rig-events).
   const uncovered = await rootQuery(
     `select e.name from clara.event_types e
-      where not exists (select 1 from clara.trigger_taxonomy tt where tt.event_type=e.name and tt.version=$1)`, [active]);
+      where e.name not like 'rig.%'
+        and not exists (select 1 from clara.trigger_taxonomy tt where tt.event_type=e.name and tt.version=$1)`, [active]);
   assert.equal(uncovered.rowCount, 0, `taxonomy coverage is whole at v${active} (uncovered: ${uncovered.rows.map((x) => x.name).join(", ")})`);
   // The two notification types route to 'notification'; the rest 'ignore'.
   const dec = await rootQuery(

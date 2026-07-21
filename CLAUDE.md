@@ -109,12 +109,36 @@ review stages had missed — three ceremony scripts that would have failed 42501
 MID-RECOVERY (books restored, no login able to reach them), a verifier that could
 not tell two Supabase projects apart, and a zero-probe battery reporting success.
 Canary daba7f2e stays ARMED, due 2026-08-02 — NEVER answer it. The **Phase-4
-Wave-A DESIGN STAGE is DONE (2026-07-21, ADR-022)**: the daily-loop contract is
-ratified (`docs/plan/wave-a-daily-loop-contract.md` v1.1 + the 0011 companion —
-rulings WA-R1..R12 + deltas WA-D1..D5; the full ladder ran: grill → dual design
-review, both FLAWED, 37 findings folded → 10/10 rig probes → owner ratification).
-**WA-R2 SUPERSEDED the RPR-only/C6 gate** (owner declared consent material valid,
-2026-07-21; the per-client egress registry ships in Wave A with the WA-D1
-lane-carve). Standing gates: AB-3 engine_kind pin = the FIRST item of migration
-0011; the deferred S6 §11 list. NEXT = the **Wave-A BUILD stage** (interface-pins
-first, then the five-lane build per the contract).**
+Wave-A DESIGN STAGE is DONE (2026-07-21, ADR-022)** (contract
+`docs/plan/wave-a-daily-loop-contract.md` v1.1 + the 0011 companion; WA-R1..R12 +
+WA-D1..D5; WA-R2 superseded the RPR-only/C6 gate). **The Wave-A BUILD STAGE is DONE
+(2026-07-21, ADR-023) and ON A PR** (`build/wave-a-daily-loop`, awaiting green CI +
+owner merge; as-built law = `docs/plan/wave-a-as-built-amendments.md`): migration
+0011 (AB-3 pin; counterparty aliases + identity-equivalence merge; DB-gated coding
+lanes; the event-driven autodraft task lane + reserve-first budget; sweep runs;
+coding rules + transactional sightings; open questions + the CLR26 gate; revision
+snapshots + diffs; the per-client egress registry + WA-D1 claim lane-carve; WA-D5
+attestation + approve_routine_entry) + runtime (the `autodraft` spine consumer,
+frozen `autoDraft_v1`, the document-bytes route) + dashboard (the ClaraPart union
+unification, `/queue`, doc_review with polygon overlays, five new cards) +
+matcher-adjacent (the `captured_invoice_id` mapper recovery). The FULL house ladder
+ran: interface-pins → five contract-blind lanes → integration (58-failure triage; 7
+real 0011 defects fixed, incl. a dead `current_role='clara_agent_ro'` gate in five
+converted definer readers → wake-secret-GUC gate per ADR-015) → as-built dual review
+(two INDEPENDENT live-verifying lanes — the Codex lane failed on a provider
+cyber-flag + Windows sandbox, replaced by a second native lane; each FLAWED with ONE
+HIGH the other missed: the CLR26 document-scope check-then-act race, and the
+sweep-run finalization wedge — both fixed) → final gates (db 359/0 + 4 upgrade
+drills, runtime 191/191, dashboard 41/41, freeze/leak/lint/typecheck clean).
+**FOUR OWNER DECISIONS OPEN (see `docs/plan/wave-a-as-built-amendments.md`):** (1)
+CLR26 rule-proposal blocking — both review lanes recommend excluding
+`origin='rule_proposal'` from `_open_question_blocks` so a learned-vendor suggestion
+does not block that vendor's next approval; (2) registered vendors are not
+sweep-READY as-built (invoice_facts captures vendor NAME only → registration-dominant
+ambiguity) — a facts-vocabulary follow-up gates the sweep's real-world reach; (3)
+PDF-page polygon overlays (image-backed only today — needs a PDF renderer); (4) the
+billable Azure `keyValuePairs` feature left OFF (content-scan covers all but
+unlabelled invoice numbers). Standing gate unchanged: the deferred S6 §11 list.
+NEXT = **merge the PR on green CI + owner GO, then the owner rulings above, then the
+LIVE deploy** (0011 rig-validated; the WA-D1 egress deploy ordering
+migration→consent-rows→image is BINDING).**
