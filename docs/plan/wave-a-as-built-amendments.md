@@ -231,6 +231,24 @@ value. Both HIGHs orchestrator-verified in-code and fixed; the security oracle s
    Owner-flippable (the `&features=keyValuePairs` request line + comment record billable +
    owner-flippable) only if live re-extraction shows unlabelled-number misses.
 
+> **RESOLUTION ADDENDUM (2026-07-21, ADR-024 — all four decisions were taken by the owner and
+> SHIPPED; the text above stands as the historical record):**
+> **(1)** CLR26 rule-proposal blocking → resolved as recommended: migration `0012` excludes
+> `origin='rule_proposal'` from `_open_question_blocks` (PR #36, applied live).
+> **(2)** Registered-vendor sweep readiness → BUILT: migration `0013` + mapper v3 add the
+> NON-MONETARY `invoice.vendor_registration` facts field (Azure `VendorTaxId`) and feed it into
+> registration-dominant resolution → a registered vendor now reaches READY (PR #38, applied live).
+> **(3)** PDF-page polygon overlays → BUILT: `PdfPageCanvas` renders the cited page via lazy
+> pdf.js + the existing normalized `RegionOverlay`; the pure `pickDocView()` rule keeps the honest
+> degradation (PR #39, live via Cloudflare Pages).
+> **(4)** `keyValuePairs` → ENABLED (mapper v4): the "billable" premise above was WRONG — per the
+> current Azure add-on-capabilities version table it is a FREE add-on at api-version 2024-11-30
+> (only Font/Formula/HighRes/QueryFields bill) and is supported on `prebuilt-invoice`
+> (PR #39, Fly runtime v19).
+> **Related:** the 0012 owner-declaration consent path was itself SUPERSEDED for evidence-backed
+> consents by migration `0014` (first-class `consent_evidence` documents — event-payload routing +
+> a structural facts/egress exemption); RPR's live consent cites the real signed PDF. See ADR-024.
+
 Standing Wave-A residuals also carried forward: contract §12 out-of-scope confirmations; the
 per-client egress registry now SHIPS (WA-R2 superseded the S6-R1 RPR-only gate — owner-declared
 2026-07-21); the AB-3 (S6) `engine_kind` pin remains the first statement block of migration 0011.
