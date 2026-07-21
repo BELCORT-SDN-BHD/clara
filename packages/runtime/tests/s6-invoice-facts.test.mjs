@@ -4,6 +4,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { writeFileSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 process.env.RELAY_TEST_MODE = "1";
 
@@ -217,7 +220,7 @@ test("vendor_registration: a typed VendorTaxId is emitted as invoice.vendor_regi
   assert.equal(reg.value_raw, "201801000900");
   assert.equal(reg.page, 1);
   assert.equal(reg.confidence, 0.88);
-  assert.equal(out.normalizationVersion, "clara-invoice-norm:v3", "normalization version is bumped to v3");
+  assert.equal(out.normalizationVersion, "clara-invoice-norm:v4", "normalization version is bumped to v4 (keyValuePairs enabled)");
 });
 
 test("vendor_registration: a MISSING VendorTaxId yields no invoice.vendor_registration field", () => {
@@ -237,6 +240,35 @@ test("vendor_registration: an implausible VendorTaxId (a currency total) is drop
     },
   });
   assert.equal(regOf(out), undefined, "a currency amount mislabelled as a tax id is not a plausible registration");
+});
+
+// WA §11 / v4: the real Azure request enables the (free, 2024-11-30) keyValuePairs
+// add-on so the model returns key-value pairs for the invoice_id KV recovery.
+test("analyzeInvoiceReal enables the keyValuePairs add-on on the analyze request", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "clara-kvp-"));
+  const file = join(dir, "one.pdf");
+  writeFileSync(file, "%PDF-1.7\n");
+  const saved = { ep: process.env.AZURE_DI_ENDPOINT, key: process.env.AZURE_DI_KEY };
+  process.env.AZURE_DI_ENDPOINT = "https://di.invalid";
+  process.env.AZURE_DI_KEY = "test-only";
+  const urls = [];
+  const fetchImpl = async (url, init) => {
+    urls.push(url);
+    if (init?.body) { for await (const _chunk of init.body) void _chunk; }
+    if (init?.method === "POST") return new Response(null, { status: 202, headers: { "operation-location": "https://di.invalid/op/1" } });
+    return new Response(JSON.stringify({ status: "succeeded", analyzeResult: { documents: [], pages: [{ pageNumber: 1 }] } }), { status: 200, headers: { "content-type": "application/json" } });
+  };
+  try {
+    await azure.analyzeInvoiceReal({ filePath: file, mime: "application/pdf", totalDeadlineMs: 1000, fetchImpl });
+    const analyzeUrl = urls[0];
+    assert.match(analyzeUrl, /:analyze\?/, "the first call is the analyze submission");
+    assert.match(analyzeUrl, /[?&]features=keyValuePairs\b/, "the analyze request enables the keyValuePairs add-on");
+    assert.match(analyzeUrl, /api-version=2024-11-30/, "the pinned api-version is preserved");
+  } finally {
+    if (saved.ep === undefined) delete process.env.AZURE_DI_ENDPOINT; else process.env.AZURE_DI_ENDPOINT = saved.ep;
+    if (saved.key === undefined) delete process.env.AZURE_DI_KEY; else process.env.AZURE_DI_KEY = saved.key;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("analyzeInvoice uses the injected test adapter (no network) in RELAY_TEST_MODE", async () => {

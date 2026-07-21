@@ -9,6 +9,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parsePagePolygon, polygonPointsAttr } from "./regionGeometry";
 import { RegionOverlay } from "./RegionOverlay";
+import { pickDocView } from "./DocViewer";
 import { DerivationTable } from "./DerivationTable";
 import type { DocEntryField } from "../reviewTypes";
 
@@ -81,4 +82,23 @@ test("a no_region field renders the WA-L7 marker unchanged, no button", () => {
   const html = renderRows([mkField({ no_region: true, doc_region_id: null, doc_page: null, doc_value: null })]);
   assert.ok(html.includes("no captured region — verify against the document"), "expected the WA-L7 marker");
   assert.ok(!html.includes("<button"), "no region → no page-jump button");
+});
+
+// --- pickDocView (honest degradation between image / pdf-canvas / object) --------
+
+test("an image always uses the aligned-overlay image view", () => {
+  assert.equal(pickDocView({ mime: "image/png", hasOverlay: true, pdfFailed: false }), "image");
+  assert.equal(pickDocView({ mime: "image/jpeg", hasOverlay: false, pdfFailed: false }), "image");
+});
+test("a PDF WITH a placeable region renders the cited page on a pdf.js canvas", () => {
+  assert.equal(pickDocView({ mime: "application/pdf", hasOverlay: true, pdfFailed: false }), "pdf-canvas");
+});
+test("a PDF WITHOUT a region falls back to the inert object viewer (page-jump)", () => {
+  assert.equal(pickDocView({ mime: "application/pdf", hasOverlay: false, pdfFailed: false }), "object");
+});
+test("a PDF whose pdf.js render FAILED degrades to the object viewer — never a blank pane", () => {
+  assert.equal(pickDocView({ mime: "application/pdf", hasOverlay: true, pdfFailed: true }), "object");
+});
+test("an unknown type falls back to the object viewer", () => {
+  assert.equal(pickDocView({ mime: "application/octet-stream", hasOverlay: true, pdfFailed: false }), "object");
 });

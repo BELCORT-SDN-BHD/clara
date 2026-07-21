@@ -24,8 +24,15 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
  *  when the typed InvoiceId field carries no value (WA §11 facts-capture fix).
  *  v3 (Wave A.1): invoice.vendor_registration emitted from the typed `VendorTaxId`
  *  field (non-monetary) so the coding lane can resolve a REGISTERED vendor by
- *  registration number instead of stalling on name-only ambiguity (AB-16). */
-export const NORMALIZATION_VERSION = "clara-invoice-norm:v3";
+ *  registration number instead of stalling on name-only ambiguity (AB-16).
+ *  v4 (Wave A.1): the `features=keyValuePairs` add-on is ENABLED (owner decision
+ *  2026-07-21), so the model now returns keyValuePairs and the invoice_id KV recovery
+ *  (recoverFromKeyValuePairs) goes live — recovering invoice numbers printed with no
+ *  recognizable label. keyValuePairs is a FREE add-on on prebuilt-invoice at
+ *  api-version 2024-11-30 (Azure add-on-capabilities version table — only Font/
+ *  Formula/HighRes/QueryFields are billable), so it adds no per-page cost. Bumped so
+ *  KV-enabled extractions are distinguishable from v3. */
+export const NORMALIZATION_VERSION = "clara-invoice-norm:v4";
 
 export class DocumentEngineError extends Error {
   constructor(code, message) {
@@ -73,13 +80,14 @@ export async function analyzeInvoiceReal({ filePath, mime, totalDeadlineMs = 120
   const hardTimer = setTimeout(() => controller.abort(new Error("Azure DI total deadline exceeded")), totalDeadlineMs);
   // The prebuilt-invoice `InvoiceId` typed field has poor recall on non-US layouts
   // (it returns a region with no value, or no field at all — see the RPR corpus).
-  // Azure's `features=keyValuePairs` add-on would recover the number from its printed
-  // label, but it is a BILLABLE per-page capability, and a billing-surface change on a
-  // live vendor call is an OWNER decision — so the request does NOT enable it. The
-  // label-anchored content scan (normalizeAzureInvoice's invoice_id fallback) is the
-  // active recovery and needs no add-on; the KV-consuming path below stays inert unless
-  // the owner enables the feature by appending `&features=keyValuePairs` here.
-  const analyzeUrl = `${endpoint}/documentintelligence/documentModels/${MODEL}:analyze?api-version=${API_VERSION}`;
+  // ENABLED (owner decision 2026-07-21): `features=keyValuePairs` makes the model
+  // return key-value pairs, from which normalizeAzureInvoice's invoice_id recovery
+  // (recoverFromKeyValuePairs) reads the number off its printed label — recovering
+  // numbers the typed field and the label-anchored content scan both miss.
+  // keyValuePairs is a FREE add-on on prebuilt-invoice at 2024-11-30 (it adds no
+  // per-page charge — only Font/Formula/HighRes/QueryFields are billable), so this is
+  // not a billing-surface change. Remove `&features=keyValuePairs` to turn it off.
+  const analyzeUrl = `${endpoint}/documentintelligence/documentModels/${MODEL}:analyze?api-version=${API_VERSION}&features=keyValuePairs`;
   try {
     let response;
     while (true) {
