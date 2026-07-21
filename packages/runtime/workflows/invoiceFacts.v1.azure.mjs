@@ -21,8 +21,11 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
 /** The deterministic normalization-policy version hashed with the raw engine
  *  response (model-drift honesty, S6-D1) — bump when the mapping below changes.
  *  v2 (Wave A): invoice.invoice_id gains a key-value-pair / OCR-content fallback
- *  when the typed InvoiceId field carries no value (WA §11 facts-capture fix). */
-export const NORMALIZATION_VERSION = "clara-invoice-norm:v2";
+ *  when the typed InvoiceId field carries no value (WA §11 facts-capture fix).
+ *  v3 (Wave A.1): invoice.vendor_registration emitted from the typed `VendorTaxId`
+ *  field (non-monetary) so the coding lane can resolve a REGISTERED vendor by
+ *  registration number instead of stalling on name-only ambiguity (AB-16). */
+export const NORMALIZATION_VERSION = "clara-invoice-norm:v3";
 
 export class DocumentEngineError extends Error {
   constructor(code, message) {
@@ -210,6 +213,22 @@ function looksLikeInvoiceNumber(s) {
   return true;
 }
 
+// A plausible vendor registration number (Malaysian SSM/ROC or tax id): has a sane
+// length and substantive alphanumeric content, and is not a bare currency amount or
+// an ISO date. Registration numbers carry dashes/slashes (e.g. "202301234567",
+// "1234567-A", "IG12345678900") — those pass; the DB normalizer strips separators.
+// Deliberately permissive on the token shape (the coding lane only uses it to match
+// an EXISTING registered counterparty by normalized registration; a non-match simply
+// falls back to name-only ambiguity, never a wrong resolution).
+function looksLikeRegistration(s) {
+  const v = String(s ?? "").trim();
+  if (v.length < 3 || v.length > 40) return false;
+  if (v.replace(/[^a-zA-Z0-9]/g, "").length < 3) return false; // substantive alnum content
+  if (/^\(?\s*(?:rm|myr|usd|sgd)?\s*[\d,]+\.\d{2}\s*\)?$/i.test(v)) return false; // currency amount
+  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return false; // ISO date, not a registration
+  return true;
+}
+
 // Trims label noise and surrounding punctuation, returning the invoice-number token.
 function cleanIdToken(s) {
   return String(s ?? "")
@@ -308,6 +327,22 @@ export function normalizeAzureInvoice(payload) {
     const region = firstRegion(f);
     out.push({ field_path: "invoice.deposit", value_raw: String(f.content ?? f.valueString ?? ""), page: region.page, polygon: region.polygon, confidence: f.confidence == null ? null : Number(f.confidence) });
     break;
+  }
+
+  // Vendor registration (WA §11 / AB-16): the prebuilt-invoice `VendorTaxId` typed
+  // field carries the supplier's registration / tax id. Emit it as a NON-MONETARY
+  // invoice.vendor_registration fact so the coding lane can resolve a REGISTERED
+  // vendor by registration number. Only when present and plausibly a registration
+  // (a currency total / date mislabelled as a tax id is dropped). It carries the
+  // typed field's own geometry (empty when Azure returned no region) — non-monetary,
+  // so it can NEVER corroborate a Tier-A total; it only feeds vendor identity.
+  const vtax = fields.VendorTaxId;
+  if (vtax) {
+    const regRaw = String(vtax.content ?? vtax.valueString ?? "").trim();
+    if (looksLikeRegistration(regRaw)) {
+      const region = firstRegion(vtax);
+      out.push({ field_path: "invoice.vendor_registration", value_raw: regRaw, page: region.page, polygon: region.polygon, confidence: vtax.confidence == null ? null : Number(vtax.confidence) });
+    }
   }
 
   // invoice_id recovery (WA §11): the typed InvoiceId field above may be absent, or

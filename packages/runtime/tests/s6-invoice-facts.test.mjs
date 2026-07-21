@@ -191,6 +191,54 @@ test("invoice_id: no recoverable number anywhere leaves invoice.invoice_id absen
   assert.equal(idOf(out), undefined);
 });
 
+// --- WA §11 / AB-16 vendor registration (the typed VendorTaxId field) ---
+// The prebuilt-invoice VendorTaxId carries the supplier's SSM/tax registration.
+// Emitted as a NON-MONETARY invoice.vendor_registration fact so the coding lane can
+// resolve a REGISTERED vendor by number instead of stalling on name ambiguity.
+
+function regOf(out) {
+  return out.fields.find((f) => f.field_path === "invoice.vendor_registration");
+}
+
+test("vendor_registration: a typed VendorTaxId is emitted as invoice.vendor_registration", () => {
+  const out = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: {
+        InvoiceTotal: { content: "5,000.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 },
+        VendorName: { content: "READYCO SDN BHD", confidence: 0.95 },
+        VendorTaxId: { content: "201801000900", boundingRegions: [{ pageNumber: 1, polygon: [0.2, 0.2, 0.3, 0.3] }], confidence: 0.88 },
+      } }],
+      pages: [{ pageNumber: 1 }],
+    },
+  });
+  const reg = regOf(out);
+  assert.ok(reg, "VendorTaxId yields an invoice.vendor_registration fact");
+  assert.equal(reg.value_raw, "201801000900");
+  assert.equal(reg.page, 1);
+  assert.equal(reg.confidence, 0.88);
+  assert.equal(out.normalizationVersion, "clara-invoice-norm:v3", "normalization version is bumped to v3");
+});
+
+test("vendor_registration: a MISSING VendorTaxId yields no invoice.vendor_registration field", () => {
+  const out = azure.normalizeAzureInvoice(samplePayload()); // sample has no VendorTaxId
+  assert.equal(regOf(out), undefined, "no registration fabricated when the engine returns none");
+});
+
+test("vendor_registration: an implausible VendorTaxId (a currency total) is dropped, never Tier-A geometry", () => {
+  const out = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: {
+        InvoiceTotal: { content: "5,000.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 1] }], confidence: 0.99 },
+        VendorTaxId: { content: "RM 5,000.00", confidence: 0.4 },
+      } }],
+      pages: [{ pageNumber: 1 }],
+    },
+  });
+  assert.equal(regOf(out), undefined, "a currency amount mislabelled as a tax id is not a plausible registration");
+});
+
 test("analyzeInvoice uses the injected test adapter (no network) in RELAY_TEST_MODE", async () => {
   globalThis.__claraAzureInvoiceForTest = async () => samplePayload();
   try {
