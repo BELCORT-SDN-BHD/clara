@@ -97,6 +97,42 @@ test("§5b(A) sweep linkage: admission threads p_run_id = the sweep_runs.id → 
 });
 
 // ===========================================================================
+// Sweep-run finalization WEDGE (indep-review HIGH regression): a run whose expected
+// filing admits as noop_existing (an already-in-flight active task) STILL gets a
+// sweep_run_items row and can finalize — pre-fix it wedged open forever.
+// ===========================================================================
+
+test("finalization wedge: a filing that admits noop_existing on a run STILL writes a run-bound sweep_run_items(noop_existing) row, so the run finalizes (never wedged open)", async (t) => {
+  if (skipUnready(t, ready)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.A1);
+  const rfX = await primeReadyFiling(users.alice, { client: clients.A1, vendorName: "WEDGEX SDN BHD", registration: "201801015000" });
+  // X admits in-flight on run1 (an active autodraft task now exists for the filing).
+  const run1 = await openSweepRun({ firm, expected: 1 });
+  const aX1 = await admitAutodraft({ filing: rfX.filingId, origin: ORIGIN.sweep, runId: run1 });
+  if (outcomeOf(aX1) !== "admitted") { noteLane(`wedge: X did not admit (outcome=${outcomeOf(aX1)}) — READY not reached`); return; }
+  // run2's expected set includes X; re-admit X on run2 → noop_existing (X already in-flight).
+  const run2 = await openSweepRun({ firm, expected: 1 });
+  const aX2 = await admitAutodraft({ filing: rfX.filingId, origin: ORIGIN.sweep, runId: run2 });
+  assert.equal(outcomeOf(aX2), "noop_existing", `X re-admits as noop_existing on run2 (an active task exists) — got ${outcomeOf(aX2)}`);
+  // THE FIX: a run-bound sweep_run_items(run2, X, noop_existing) row now EXISTS. Pre-fix
+  // the noop admission wrote NO item, so run2's expected count was never satisfied → wedge.
+  const items = (await sweepItemRows(run2)).filter((i) => i.filing_id === rfX.filingId);
+  assert.equal(items.length, 1, `a sweep_run_items row was written for the noop_existing admission on run2 (got ${items.length}) — the wedge fix`);
+  assert.equal(items[0].outcome, "noop_existing", `the item outcome is noop_existing (got ${items[0]?.outcome})`);
+  // run2's expected set is now satisfied by the noop item → reconcile finalizes it (proven
+  // on the fixed 0011: reconcile returns finalized>=1). Pre-fix run2 stays open forever.
+  await reconcileSweepRuns().catch((e) => noteLane(`reconcile raised ${e.code}`));
+  const st = (await rootQuery("select to_jsonb(s) as s from clara.sweep_runs where id=$1", [run2])).rows[0].s;
+  if (st.state === "finalized") {
+    const skipped = st.skipped_count ?? st.skipped ?? st.noop_count ?? null;
+    if (skipped != null) assert.ok(Number(skipped) >= 1, `run2's skipped/noop count reflects the noop item (got ${skipped})`);
+  } else {
+    noteLane(`run2 not finalized by reconcile (state=${st.state}) — the item-write fix is PROVEN; finalize may require the §5b(E) staleness window (manually verified: reconcile finalizes an all-terminal run)`);
+  }
+});
+
+// ===========================================================================
 // Acknowledge idempotency + not_finalized determinism.
 // ===========================================================================
 

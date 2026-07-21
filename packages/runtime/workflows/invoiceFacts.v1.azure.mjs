@@ -190,8 +190,12 @@ function normLabel(s) {
 // Label vocabulary for the invoice-number field across the layouts we see (English +
 // Malay: "No. Invois", "No. Bil"). Deliberately excludes purchase-order / account /
 // customer labels so we never capture a neighbouring number.
+// Invoice-number anchors ONLY. `reference/ref/document/doc no.` labels are
+// deliberately EXCLUDED: the recovered id feeds the exact-duplicate-bill key, and a
+// delivery-order / customer reference sharing across two of a vendor's bills would
+// false-positive that gate. Keep to invoice/bill/invois anchors (dual-review LOW).
 const INVOICE_ID_LABEL =
-  /\b(?:tax\s+)?inv(?:oice)?\.?\s*(?:no\.?|number|num\.?|#|id)\b|\binvois\b|\bno\.?\s*bil\b|\bbil\s*(?:no\.?|number)\b|\b(?:reference|ref)\s*(?:no\.?|number|#)\b|\b(?:document|doc)\s*(?:no\.?|number|#)\b/i;
+  /\b(?:tax\s+)?inv(?:oice)?\.?\s*(?:no\.?|number|num\.?|#|id)\b|\binvois\b|\bno\.?\s*bil\b|\bbil\s*(?:no\.?|number)\b/i;
 
 // A plausible invoice number: has a digit, sane length, and is not a bare currency
 // amount or an ISO date (those are other fields). Invoice numbers may carry slashes,

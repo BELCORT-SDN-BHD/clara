@@ -1921,7 +1921,15 @@ begin
         where f.document_id=v_document and f.client_id=p_client and f.retired_at is null) then
       raise exception 'question document not found' using errcode='CLR11';
     end if;
-    perform clara._active_document_filing(v_document,v_sha,p_client,true);
+    -- CLR26 serialization vs approve_entry: lock the active filing row FOR UPDATE
+    -- (approve holds it FOR SHARE to commit). SHARE-vs-UPDATE conflict ⇒ the two
+    -- serialize on the existing row lock — no new advisory. FOR UPDATE also proves
+    -- the verified active filing exists (its own provenance check, like
+    -- _active_document_filing with p_lock).
+    perform 1 from clara.document_filings f join clara.documents d on d.id=f.document_id
+      where f.document_id=v_document and f.client_id=p_client and f.retired_at is null
+        and d.sha256=v_sha and d.bytes_verified_at is not null
+      for update of f;
   elsif p_scope_kind='vendor' then
     v_counterparty:=clara._canonical_counterparty(p_client,p_scope_id);
     if v_counterparty is null or not exists(select 1 from clara.counterparties cp
@@ -2445,6 +2453,15 @@ begin
     left join clara.agent_tasks t on t.id=aa.task_id where aa.filing_id=p_filing;
   if found and a.state='active' and a.task_status in
       ('queued','running','cancel_requested') then
+    -- A run-bound noop MUST still write its item, or the run's expected_count is
+    -- never reached and it stays open forever (accumulating against the
+    -- concurrent-sweep cap — a firm-wide wedge). Mirrors the parked branch.
+    if p_run_id is not null then
+      insert into clara.sweep_run_items(run_id,filing_id,firm_id,client_id,document_id,
+          outcome)
+        values(p_run_id,a.filing_id,a.firm_id,a.client_id,a.document_id,'noop_existing')
+        on conflict do nothing;
+    end if;
     return jsonb_build_object('outcome','noop_existing','task_id',a.task_id);
   elsif found and a.state='parked' then
     if p_run_id is not null then
@@ -2476,6 +2493,12 @@ begin
     left join clara.agent_tasks t on t.id=aa.task_id where aa.filing_id=p_filing;
   if found and a.state='active' and a.task_status in
       ('queued','running','cancel_requested') then
+    if p_run_id is not null then
+      insert into clara.sweep_run_items(run_id,filing_id,firm_id,client_id,document_id,
+          outcome)
+        values(p_run_id,a.filing_id,a.firm_id,a.client_id,a.document_id,'noop_existing')
+        on conflict do nothing;
+    end if;
     return jsonb_build_object('outcome','noop_existing','task_id',a.task_id);
   elsif found and a.state='parked' then
     if p_run_id is not null then
@@ -2561,8 +2584,14 @@ begin
 exception when unique_violation then
   get stacked diagnostics v_constraint=constraint_name;
   if v_constraint='uq_autodraft_attempts_filing' then
-    select task_id into v_task from clara.autodraft_attempts where filing_id=p_filing;
-    return jsonb_build_object('outcome','noop_existing','task_id',v_task);
+    select * into a from clara.autodraft_attempts where filing_id=p_filing;
+    if p_run_id is not null then
+      insert into clara.sweep_run_items(run_id,filing_id,firm_id,client_id,document_id,
+          outcome)
+        values(p_run_id,a.filing_id,a.firm_id,a.client_id,a.document_id,'noop_existing')
+        on conflict do nothing;
+    end if;
+    return jsonb_build_object('outcome','noop_existing','task_id',a.task_id);
   end if;
   raise;
 end $$;
@@ -2706,7 +2735,21 @@ begin
         reserved_tokens=0 where aa.run_id=sr.id and aa.state='active'
         and exists(select 1 from clara.coding_attempts ca where ca.task_id=aa.task_id);
     end if;
+    -- §5b(E) staleness finalize (belt-and-suspenders): a run older than the window
+    -- with NO bound attempt still in a non-terminal task state can never reach
+    -- expected_count via the normal path, so finalize it with the ACTUAL counts
+    -- (expected stays as declared — the receipt honestly shows expected vs actual,
+    -- WA-L6). The guard (no live task) makes this safe — it can never cut off an
+    -- in-flight draft. The item-write on noop/parked closes the common case; this
+    -- catches any other stuck-open run.
     select count(*)::int into v_count from clara.sweep_run_items where run_id=sr.id;
+    if v_count<sr.expected_count
+       and sr.created_at < now() - interval '30 minutes'
+       and not exists(select 1 from clara.autodraft_attempts aa
+         join clara.agent_tasks t on t.id=aa.task_id
+         where aa.run_id=sr.id and t.status in ('queued','running','cancel_requested')) then
+      v_count:=sr.expected_count;  -- fall through to the finalize block below
+    end if;
     if v_count>=sr.expected_count then
       update clara.sweep_runs set state='finalized',window_ended_at=now(),finalized_at=now(),
         drafted_count=(select count(*) from clara.sweep_run_items where run_id=sr.id and outcome='drafted'),
@@ -2942,6 +2985,14 @@ begin
   if not found or e.firm_id<>c.firm then
     raise exception 'entry not in your firm' using errcode='CLR11';
   end if;
+  -- CLR26 document-scope serialization: approve holds the active filing FOR SHARE
+  -- (below, held to commit); the document-scope question writer takes the SAME
+  -- filing row FOR UPDATE. SHARE-vs-UPDATE conflict, so the two serialize on the
+  -- EXISTING filing row lock — no new broadly-held advisory (which would flood the
+  -- lock graph). Whichever commits first is seen by the other: writer-first ⇒
+  -- approve's CLR26 check (below) sees the committed question and refuses; approve-
+  -- first ⇒ the writer blocks until approve commits, so no question existed during
+  -- approve. No check-then-act window.
   if e.document_id is not null then
     v_filing:=clara._active_document_filing(e.document_id,e.source_doc_sha256,e.client_id,true);
     if v_filing<>e.filing_id then
@@ -3016,6 +3067,9 @@ begin
         and l.counterparty_id is not null;
   end if;
 
+  -- (Document-scope CLR26 is serialized by the filing FOR SHARE vs the question
+  -- writer's FOR UPDATE — see the filing-lock header above. Vendor + client scopes
+  -- keep their exclusive advisories.)
   if v_counterparty is not null then
     perform pg_advisory_xact_lock(203005003,
       hashtext(e.client_id::text||':'||v_counterparty::text));
@@ -3185,9 +3239,12 @@ declare
   w record; hc record; v_firm uuid;
 begin
   -- ADR-015: inside SECURITY DEFINER the caller's SET ROLE is invisible
-  -- (current_role = the owner) — the wake-secret GUC is the agent lane's
-  -- structural marker (the runtime always sets it on agent reads; a human
-  -- PostgREST session can never set it).
+  -- (current_role = the owner), so the wake-secret GUC's PRESENCE is the agent
+  -- lane's structural marker. A human PostgREST caller CAN set clara.wake_secret,
+  -- but that is not a bypass: a garbage/forged value makes wake_context() return
+  -- no row → CLR03 refusal (never data); a valid secret is exactly an authorized
+  -- agent credential. The security boundary is wake_context()'s hash+liveness
+  -- check, NOT the GUC being unreachable. (Runtime pools SET LOCAL it per request.)
   if coalesce(current_setting('clara.wake_secret',true),'')<>'' then
     select * into w from clara.wake_context();
     if w.credential_id is null then
@@ -3273,9 +3330,12 @@ begin
     raise exception 'a client and context-pack purpose are required' using errcode='CLR10';
   end if;
   -- ADR-015: inside SECURITY DEFINER the caller's SET ROLE is invisible
-  -- (current_role = the owner) — the wake-secret GUC is the agent lane's
-  -- structural marker (the runtime always sets it on agent reads; a human
-  -- PostgREST session can never set it).
+  -- (current_role = the owner), so the wake-secret GUC's PRESENCE is the agent
+  -- lane's structural marker. A human PostgREST caller CAN set clara.wake_secret,
+  -- but that is not a bypass: a garbage/forged value makes wake_context() return
+  -- no row → CLR03 refusal (never data); a valid secret is exactly an authorized
+  -- agent credential. The security boundary is wake_context()'s hash+liveness
+  -- check, NOT the GUC being unreachable. (Runtime pools SET LOCAL it per request.)
   if coalesce(current_setting('clara.wake_secret',true),'')<>'' then
     select * into w from clara.wake_context();
     if w.credential_id is null then
@@ -3343,9 +3403,12 @@ declare
   v_name_n text; v_reg_n text; v_alias boolean;
 begin
   -- ADR-015: inside SECURITY DEFINER the caller's SET ROLE is invisible
-  -- (current_role = the owner) — the wake-secret GUC is the agent lane's
-  -- structural marker (the runtime always sets it on agent reads; a human
-  -- PostgREST session can never set it).
+  -- (current_role = the owner), so the wake-secret GUC's PRESENCE is the agent
+  -- lane's structural marker. A human PostgREST caller CAN set clara.wake_secret,
+  -- but that is not a bypass: a garbage/forged value makes wake_context() return
+  -- no row → CLR03 refusal (never data); a valid secret is exactly an authorized
+  -- agent credential. The security boundary is wake_context()'s hash+liveness
+  -- check, NOT the GUC being unreachable. (Runtime pools SET LOCAL it per request.)
   if coalesce(current_setting('clara.wake_secret',true),'')<>'' then
     select * into w from clara.wake_context();
     if w.credential_id is null then
@@ -3563,9 +3626,12 @@ begin
     raise exception 'entry and client are required' using errcode='CLR10';
   end if;
   -- ADR-015: inside SECURITY DEFINER the caller's SET ROLE is invisible
-  -- (current_role = the owner) — the wake-secret GUC is the agent lane's
-  -- structural marker (the runtime always sets it on agent reads; a human
-  -- PostgREST session can never set it).
+  -- (current_role = the owner), so the wake-secret GUC's PRESENCE is the agent
+  -- lane's structural marker. A human PostgREST caller CAN set clara.wake_secret,
+  -- but that is not a bypass: a garbage/forged value makes wake_context() return
+  -- no row → CLR03 refusal (never data); a valid secret is exactly an authorized
+  -- agent credential. The security boundary is wake_context()'s hash+liveness
+  -- check, NOT the GUC being unreachable. (Runtime pools SET LOCAL it per request.)
   if coalesce(current_setting('clara.wake_secret',true),'')<>'' then
     select * into w from clara.wake_context();
     if w.credential_id is null then raise exception 'no valid agent read context' using errcode='CLR03'; end if;
@@ -3620,9 +3686,12 @@ begin
     raise exception 'entry and client are required' using errcode='CLR10';
   end if;
   -- ADR-015: inside SECURITY DEFINER the caller's SET ROLE is invisible
-  -- (current_role = the owner) — the wake-secret GUC is the agent lane's
-  -- structural marker (the runtime always sets it on agent reads; a human
-  -- PostgREST session can never set it).
+  -- (current_role = the owner), so the wake-secret GUC's PRESENCE is the agent
+  -- lane's structural marker. A human PostgREST caller CAN set clara.wake_secret,
+  -- but that is not a bypass: a garbage/forged value makes wake_context() return
+  -- no row → CLR03 refusal (never data); a valid secret is exactly an authorized
+  -- agent credential. The security boundary is wake_context()'s hash+liveness
+  -- check, NOT the GUC being unreachable. (Runtime pools SET LOCAL it per request.)
   if coalesce(current_setting('clara.wake_secret',true),'')<>'' then
     select * into w from clara.wake_context();
     if w.credential_id is null then raise exception 'no valid agent read context' using errcode='CLR03'; end if;
