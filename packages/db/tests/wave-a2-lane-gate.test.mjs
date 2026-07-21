@@ -20,11 +20,10 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, buildWorld, firmOf, seedVerifiedDocument, seedCitedDocument,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, grantConsent, revokeClientEgress, opk,
+  enqueueInvoiceFacts, invoiceFactsTask, claimTask, grantConsent, revokeClientEgress,
 } from "./wave-a-fixtures.mjs";
 
 let ready = false; // 0011 surface present

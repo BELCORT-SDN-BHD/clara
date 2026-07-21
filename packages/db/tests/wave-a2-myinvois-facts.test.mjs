@@ -20,8 +20,8 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  ROLES, rootQuery, roleQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
-  waveAEnsureReady, buildWorld, firmOf, opk,
+  rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
+  waveAEnsureReady, buildWorld, firmOf,
   seedVerifiedDocument, seedCitedDocument, seedExtraction, seedRegion, addClientIdentifier, recordRuleResolution,
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, invoiceFactState,
 } from "./wave-a-fixtures.mjs";

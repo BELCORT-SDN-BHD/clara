@@ -22,7 +22,7 @@ import {
   waveAEnsureReady, buildWorld, firmOf, opk, upsertAccountClassed,
   seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
   factField, factsRegion, grantConsent, freshResolution, ev, approveEntry, mintInteractive, wakeDraftEntry,
-  addClientIdentifier, reasonOf, CLR23,
+  addClientIdentifier, reasonOf,
 } from "./wave-a-fixtures.mjs";
 
 const REC = "300-000"; // trade debtors (receivable control)

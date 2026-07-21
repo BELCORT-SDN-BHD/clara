@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
-  waveAEnsureReady, buildWorld, firmOf, opk,
+  waveAEnsureReady, buildWorld, firmOf,
   seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
   factField, grantConsent, addClientIdentifier, addClientAlias,
 } from "./wave-a-fixtures.mjs";
