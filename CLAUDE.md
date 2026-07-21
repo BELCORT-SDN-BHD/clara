@@ -94,51 +94,26 @@ in `docs/agents/`.
 Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
-In one line: **Phase 3 COMPLETE + GATE 3 CLOSED beta-real (2026-07-19/20: 17/17
-replay eval, AP gate exact RM 1,350,938.21, kill-mid-workflow exactly-once), AND
-THE HARDENING INTERLUDE IS DONE (2026-07-20, PRs #25–#32, ADR-020/021, AB-22):
-the PART-2 DR gate is CLOSED — a full-profile restore into a REAL fresh Supabase
-project PASSED 177/0 over 188 STRICT probes (AP exact on both sides, S4-V2 canary
-parked BOTH sides, 19/19 storage bytes identical, 10 roles rebuilt from an empty
-pg_authid; evidence `docs/ops/DR.md` §5b + `docs/ops/DR-full-drill.md`); HIGH-10's
-`deploy/acl-baseline.sql` is APPLIED TO LIVE (the five agent/wake lanes lost
-`public` USAGE + TEMP, every managed role preserved, runtime `/ready` green);
-the repo now lives at **`github.com/BELCORT-SDN-BHD/clara`** with CI on org
-billing and the agent identity **`belcorttao`**. The drill found FIVE defects four
-review stages had missed — three ceremony scripts that would have failed 42501
-MID-RECOVERY (books restored, no login able to reach them), a verifier that could
-not tell two Supabase projects apart, and a zero-probe battery reporting success.
-Canary daba7f2e stays ARMED, due 2026-08-02 — NEVER answer it. The **Phase-4
-Wave-A DESIGN STAGE is DONE (2026-07-21, ADR-022)** (contract
-`docs/plan/wave-a-daily-loop-contract.md` v1.1 + the 0011 companion; WA-R1..R12 +
-WA-D1..D5; WA-R2 superseded the RPR-only/C6 gate). **The Wave-A BUILD STAGE is DONE
-(2026-07-21, ADR-023) and ON A PR** (`build/wave-a-daily-loop`, awaiting green CI +
-owner merge; as-built law = `docs/plan/wave-a-as-built-amendments.md`): migration
-0011 (AB-3 pin; counterparty aliases + identity-equivalence merge; DB-gated coding
-lanes; the event-driven autodraft task lane + reserve-first budget; sweep runs;
-coding rules + transactional sightings; open questions + the CLR26 gate; revision
-snapshots + diffs; the per-client egress registry + WA-D1 claim lane-carve; WA-D5
-attestation + approve_routine_entry) + runtime (the `autodraft` spine consumer,
-frozen `autoDraft_v1`, the document-bytes route) + dashboard (the ClaraPart union
-unification, `/queue`, doc_review with polygon overlays, five new cards) +
-matcher-adjacent (the `captured_invoice_id` mapper recovery). The FULL house ladder
-ran: interface-pins → five contract-blind lanes → integration (58-failure triage; 7
-real 0011 defects fixed, incl. a dead `current_role='clara_agent_ro'` gate in five
-converted definer readers → wake-secret-GUC gate per ADR-015) → as-built dual review
-(two INDEPENDENT live-verifying lanes — the Codex lane failed on a provider
-cyber-flag + Windows sandbox, replaced by a second native lane; each FLAWED with ONE
-HIGH the other missed: the CLR26 document-scope check-then-act race, and the
-sweep-run finalization wedge — both fixed) → final gates (db 359/0 + 4 upgrade
-drills, runtime 191/191, dashboard 41/41, freeze/leak/lint/typecheck clean).
-**FOUR OWNER DECISIONS OPEN (see `docs/plan/wave-a-as-built-amendments.md`):** (1)
-CLR26 rule-proposal blocking — both review lanes recommend excluding
-`origin='rule_proposal'` from `_open_question_blocks` so a learned-vendor suggestion
-does not block that vendor's next approval; (2) registered vendors are not
-sweep-READY as-built (invoice_facts captures vendor NAME only → registration-dominant
-ambiguity) — a facts-vocabulary follow-up gates the sweep's real-world reach; (3)
-PDF-page polygon overlays (image-backed only today — needs a PDF renderer); (4) the
-billable Azure `keyValuePairs` feature left OFF (content-scan covers all but
-unlabelled invoice numbers). Standing gate unchanged: the deferred S6 §11 list.
-NEXT = **merge the PR on green CI + owner GO, then the owner rulings above, then the
-LIVE deploy** (0011 rig-validated; the WA-D1 egress deploy ordering
-migration→consent-rows→image is BINDING).**
+In one line: **Phase 3 COMPLETE + GATE 3 CLOSED beta-real (17/17 replay eval, AP
+gate exact RM 1,350,938.21, kill-mid-workflow exactly-once); the HARDENING
+INTERLUDE is DONE (ADR-020/021 — the DR gate closed 177/0 on a real fresh
+project, `acl-baseline.sql` live, repo at `github.com/BELCORT-SDN-BHD/clara`,
+agent identity `belcorttao`); and PHASE-4 WAVE A IS FULLY LIVE AND POLISHED
+(2026-07-21, ADR-022/023/024, PRs #34–#39 all merged + deployed):** design
+contract v1.1 → the five-lane build through the full house ladder (as-built law
+= `docs/plan/wave-a-as-built-amendments.md`) → live deploy (migrations 0011+0012
+applied; Fly runtime with the autodraft consumer; egress kill-switch=1, RPR
+consent-gated) → the dashboard on **Cloudflare Pages at `app.clarabook.com`**
+(Vercel dropped) → Wave A.1 (0013 registered-vendor sweep reach via
+`invoice.vendor_registration`; 0014 first-class consent-evidence documents —
+RPR's consent cites the real signed PDF, structurally facts/egress-exempt) →
+polish (PDF-page polygon overlays via lazy pdf.js; Azure `keyValuePairs` ENABLED
+— free at 2024-11-30, the earlier "billable" premise was wrong). Live posture:
+Supabase at **14 migrations**, Fly runtime **v19** `/ready` all-green, dashboard
+auto-deploys from `main`. All four ADR-023 owner decisions are RESOLVED
+(ADR-024). **Canary daba7f2e stays ARMED, due 2026-08-02 — NEVER answer it.**
+Standing gates unchanged: the deferred S6 §11 list (PROJECTLOG PART 2), incl.
+the HARD pre-MyInvois AB-3 engine_kind gate. NEXT = **the owner picks the next
+build target** — candidates in PART 2: the sales-invoice/AR wave (+ MyInvois),
+bank/payment flows, standing rules, the R2 off-site backup wiring, the C6 legal
+items.
