@@ -134,22 +134,51 @@ test("enqueue-crash sidecar is re-enqueued, then OCR parks/releases/claims and p
   assert.equal(await eventCount(), beforeReplay, "double-persist emits no duplicate extraction event");
 });
 
-// Wave A2: an uploaded XML now rides the LOCAL MyInvois structured_parse identity pass
-// (laneSnapshot xml -> structured_parse + clara-myinvois:v1), NOT the pre-A2 store-only
-// lane. It is still fully local (no vendor egress). The minimal synthetic XML carries no
-// AccountingSupplierParty, so the identity pass yields an extraction with ZERO regions.
-test("XML rides the local MyInvois structured_parse identity pass — no vendor egress", { skip }, async () => {
-  const { owner, firm } = await rig.buildFirm("workflow-xml");
-  const bytes = Buffer.from("<?xml version=\"1.0\"?><Invoice><ID>SYNTHETIC-1</ID></Invoice>");
-  const receipt = await admit(owner, firm, bytes, "invoice.xml", "application/xml");
+// Wave A2 (RESIDUAL-7): an uploaded XML rides the LOCAL MyInvois structured_parse identity
+// pass (laneSnapshot xml -> structured_parse + clara-myinvois:v1), fully local (no vendor
+// egress). After the RESIDUAL-5/6 hardening the parser is a real UBL schema boundary, so
+// this test proves BOTH sides of that boundary end-to-end through the DB persist path.
+
+// A minimal VALID MyInvois UBL invoice: single ID/type/totals, a header TaxTotal, both
+// parties, and a supplier TIN (so the identity pass emits exactly one attributing region).
+const VALID_UBL = `<?xml version="1.0" encoding="UTF-8"?>
+<Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
+         xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+         xmlns:cbc="urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2">
+  <cbc:ID>AR-XML-1</cbc:ID>
+  <cbc:IssueDate>2026-01-15</cbc:IssueDate>
+  <cbc:InvoiceTypeCode listVersionID="1.1">01</cbc:InvoiceTypeCode>
+  <cbc:DocumentCurrencyCode>MYR</cbc:DocumentCurrencyCode>
+  <cac:AccountingSupplierParty><cac:Party>
+    <cac:PartyIdentification><cbc:ID schemeID="TIN">C1234567890</cbc:ID></cac:PartyIdentification>
+    <cac:PartyLegalEntity><cbc:RegistrationName>ROME PROPERTIES SDN BHD</cbc:RegistrationName></cac:PartyLegalEntity>
+  </cac:Party></cac:AccountingSupplierParty>
+  <cac:AccountingCustomerParty><cac:Party>
+    <cac:PartyLegalEntity><cbc:RegistrationName>DARE TO DREAM SDN BHD</cbc:RegistrationName></cac:PartyLegalEntity>
+  </cac:Party></cac:AccountingCustomerParty>
+  <cac:TaxTotal>
+    <cbc:TaxAmount currencyID="MYR">60.00</cbc:TaxAmount>
+  </cac:TaxTotal>
+  <cac:LegalMonetaryTotal>
+    <cbc:TaxExclusiveAmount currencyID="MYR">1000.00</cbc:TaxExclusiveAmount>
+    <cbc:TaxInclusiveAmount currencyID="MYR">1060.00</cbc:TaxInclusiveAmount>
+    <cbc:PayableAmount currencyID="MYR">1060.00</cbc:PayableAmount>
+  </cac:LegalMonetaryTotal>
+</Invoice>`;
+
+test("RESIDUAL-7(a): a VALID MyInvois UBL invoice rides the local structured_parse identity pass — no vendor egress", { skip }, async () => {
+  const { owner, firm } = await rig.buildFirm("workflow-xml-ok");
+  const receipt = await admit(owner, firm, Buffer.from(VALID_UBL, "utf8"), "invoice.xml", "application/xml");
   const task = await rig.readDocumentTask(receipt.task_id);
   assert.equal(task.lane, "structured_parse", "XML routes to the local identity pass, not store-only");
   // A local lane claims WITHOUT egress approval (0015 S6: structured_parse is kill-switch-exempt).
   await rig.asRuntime((client) =>
-    client.query("select clara.claim_document_processing_task($1,$2,$3)", [receipt.task_id, "xml-run", false]),
+    client.query("select clara.claim_document_processing_task($1,$2,$3)", [receipt.task_id, "xml-ok-run", false]),
   );
   await processDocumentTask(withRuntime, receipt.task_id);
-  assert.equal((await rig.readDocumentTask(receipt.task_id)).status, "done");
+  const done = await rig.readDocumentTask(receipt.task_id);
+  assert.equal(done.status, "done");
+  assert.equal(done.vendor_op_ref, null, "no vendor op — the local parse never egressed");
   assert.equal((await rig.readDocument(receipt.document_id)).extraction_status, "done", "structured_parse done marks the document extracted");
   // ONE structured_parse identity extraction is created (engine clara-myinvois:v1)...
   const extraction = await rig.rootQuery(
@@ -160,10 +189,46 @@ test("XML rides the local MyInvois structured_parse identity pass — no vendor 
   assert.equal(extraction.rows[0].engine_kind, "structured_parse");
   assert.equal(extraction.rows[0].engine_id, "clara-myinvois:v1");
   assert.equal(extraction.rows[0].status, "done");
-  // ...with ZERO regions (the synthetic XML has no AccountingSupplierParty/CustomerParty).
+  // ...carrying exactly ONE attributing identity region — the supplier TIN (the sales
+  // supplier IS the client). The buyer here has no TIN/BRN, so no buyer regions.
+  const regions = await rig.rootQuery(
+    "select r.field_path from clara.document_regions r join clara.document_extractions e on e.id=r.extraction_id where e.document_id=$1 order by r.field_path",
+    [receipt.document_id],
+  );
+  assert.equal(regions.rowCount, 1, "one identity region (supplier TIN)");
+  assert.equal(regions.rows[0].field_path, "myinvois.supplier_tin");
+});
+
+test("RESIDUAL-7(b): a malformed/non-UBL XML is REFUSED (bad_type) — no facts, no regions, no egress", { skip }, async () => {
+  const { owner, firm } = await rig.buildFirm("workflow-xml-bad");
+  // Well-formed XML, but NOT a MyInvois UBL invoice (no namespaces / no schema shape). The
+  // pre-hardening lenient parser accepted this; the schema boundary now refuses it.
+  const bytes = Buffer.from("<?xml version=\"1.0\"?><Invoice><ID>SYNTHETIC-1</ID></Invoice>");
+  const receipt = await admit(owner, firm, bytes, "invoice.xml", "application/xml");
+  assert.equal((await rig.readDocumentTask(receipt.task_id)).lane, "structured_parse");
+  await rig.asRuntime((client) =>
+    client.query("select clara.claim_document_processing_task($1,$2,$3)", [receipt.task_id, "xml-bad-run", false]),
+  );
+  // The identity pass throws UblParseError('bad_type'); the behavior persists a FAILED
+  // extraction and re-throws — the task never reaches 'done'-with-facts.
+  await assert.rejects(processDocumentTask(withRuntime, receipt.task_id), (err) => err.code === "bad_type");
+  const failed = await rig.readDocumentTask(receipt.task_id);
+  assert.notEqual(failed.status, "done", "a refused UBL doc never completes done");
+  assert.equal(failed.status, "failed");
+  assert.equal(failed.error_code, "bad_type");
+  assert.equal(failed.vendor_op_ref, null, "a refused local parse never egressed");
+  assert.equal((await rig.readDocument(receipt.document_id)).extraction_status, "failed");
+  // The failed extraction row exists but carries ZERO regions (no facts were trusted).
+  const extraction = await rig.rootQuery(
+    "select engine_id,engine_kind,status from clara.document_extractions where document_id=$1",
+    [receipt.document_id],
+  );
+  assert.equal(extraction.rowCount, 1);
+  assert.equal(extraction.rows[0].status, "failed");
+  assert.equal(extraction.rows[0].engine_id, "clara-myinvois:v1");
   const regions = await rig.rootQuery(
     "select count(*)::int n from clara.document_regions r join clara.document_extractions e on e.id=r.extraction_id where e.document_id=$1",
     [receipt.document_id],
   );
-  assert.equal(regions.rows[0].n, 0, "no parties in the synthetic XML → 0 identity regions");
+  assert.equal(regions.rows[0].n, 0, "a refused document emits no regions");
 });

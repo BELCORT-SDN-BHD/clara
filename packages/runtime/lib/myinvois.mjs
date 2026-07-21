@@ -1,31 +1,32 @@
 // The MyInvois UBL e-invoice engine (Wave A2, contract §3 / migration 0015 companion).
-// A LOCAL, deterministic, NO-EGRESS structured engine (engine id `clara-myinvois:v1`):
-// it parses an uploaded MyInvois UBL 2.1 XML file offline and produces the TWO
-// lifecycle-separated extractions the contract mandates (§3.1):
+// A LOCAL, deterministic, NO-EGRESS structured engine (engine id `clara-myinvois:v1`).
+// The XML parse + schema boundary lives in `./myinvois-ubl.mjs` (FIX-7): raw XML is
+// parsed with the hardened `fast-xml-parser` and VALIDATED as a well-formed, correctly-
+// namespaced, approved-type/version, correctly-shaped MyInvois UBL invoice BEFORE any
+// fact or identity region is emitted — anything else throws UblParseError and the worker
+// fails the task cleanly (NEEDS YOU), never trusted facts.
 //
-//   * The IDENTITY pass (engine_kind='structured_parse', lane='structured_parse') runs
-//     inside the frozen documentIngest lane via the shared worker thread. It emits ONLY
-//     the parties' identity regions with DELIBERATE field_paths:
-//       - `myinvois.supplier_tin` / `myinvois.supplier_brn` MATCH the attribution
-//         patterns (%tin%) and are on the DB attribution allowlist — the SALES supplier
-//         IS the client, so these attribute.
-//       - `myinvois.buyer_id_*` are named to NEVER match %tin%/%ssm%/%account%, so a
-//         buyer identifier can never attribute a client (the inversion guard; the 0015
-//         write-gate makes this structural, not just naming discipline).
-//   * The FACTS pass (engine_kind='invoice_facts', lane='local_facts') runs on the NEW
-//     non-frozen local_facts consumer's own worker. It emits the full §3.2 vocabulary
-//     (supplier + buyer + totals + tax breakdown) for persist_invoice_facts.
+// This module is the two-extraction MAPPER (§3.1):
+//   * The IDENTITY pass (engine_kind='structured_parse', lane='structured_parse') runs in
+//     the frozen documentIngest lane and emits ONLY the parties' identity regions with
+//     deliberate field_paths — `myinvois.supplier_tin`/`supplier_brn` attribute (the sales
+//     supplier IS the client), `myinvois.buyer_id_*` never match %tin%/%ssm%/%account%.
+//     A CONSOLIDATED (B2C aggregate) document emits NO attribution-bearing regions at all
+//     (FIX-8) — it must never resolve to a client, so it routes to NEEDS YOU.
+//   * The FACTS pass (engine_kind='invoice_facts', lane='local_facts') runs on the new
+//     non-frozen local_facts consumer's worker and emits the full §3.2 vocabulary
+//     (supplier + buyer + totals + rounding + tax breakdown) for persist_invoice_facts.
 //
-// CARDINAL INVARIANTS honored here: the parser NEVER computes a number — every monetary
-// value is emitted as `value_raw` byte-for-byte and the DB owns cents / ties / rounding.
-// Geometry is honest (page:1, polygon:[] — the empty-polygon marker). Direction is
-// DB-determined (§3.3): this mapper emits BOTH supplier (`invoice.vendor_*`) and buyer
-// (`invoice.customer_*`) facts and never asserts a side. The XML parser is SELF-CONTAINED
-// (no new dependency) — the OOXML hand-parse idiom, targeted at the LHDN SDK sample shape
-// (WA2-R5 residual: a real validated e-invoice is unproven). DOCTYPE/ENTITY are refused as
-// defence-in-depth (intake already ran the XXE gate before custody was sealed).
+// CARDINAL: the mapper NEVER computes a number — every monetary value is emitted as
+// `value_raw` byte-for-byte and the DB owns cents / ties / rounding. Geometry is honest
+// (page:1, polygon:[]). Direction is DB-determined (§3.3): both supplier (`invoice.vendor_*`)
+// and buyer (`invoice.customer_*`) facts are emitted; this mapper never asserts a side.
 
 import { createHash } from "node:crypto";
+import { parseXml, extractUblModel, detectConsolidated, resolveCurrency, UblParseError, GENERAL_PUBLIC_TIN } from "./myinvois-ubl.mjs";
+
+// Re-export the parse/model layer so callers and tests keep one import surface.
+export { parseXml, extractUblModel, detectConsolidated, UblParseError, GENERAL_PUBLIC_TIN };
 
 /** The pinned local engine id (contract §3.1 / companion Deploy-artifacts). */
 export const MYINVOIS_ENGINE_ID = "clara-myinvois:v1";
@@ -41,272 +42,10 @@ export const MYINVOIS_ENGINE_SNAPSHOT = Object.freeze({
 
 /** The deterministic normalization-policy version hashed with the signature-stripped
  *  document content (provenance-drift honesty, the S6-D1 idiom). Bump when the mapping
- *  below changes. v1 (Wave A2): the first MyInvois UBL facts mapping — supplier/buyer
- *  identity, totals, SST tax breakdown, type_code, envelope provenance. */
+ *  below changes across a DEPLOYED boundary. v1 (Wave A2): the first MyInvois UBL facts
+ *  mapping — supplier/buyer identity, totals, PayableRoundingAmount, SST tax breakdown,
+ *  type_code, envelope provenance. */
 export const MYINVOIS_NORMALIZATION_VERSION = "clara-myinvois-norm:v1";
-
-/** The MyInvois General TIN used on a CONSOLIDATED (B2C aggregate) e-invoice — the buyer
- *  is "General Public", never a resolvable customer counterparty (§3 / G-format §3). */
-export const GENERAL_PUBLIC_TIN = "EI00000000010";
-
-export class UblParseError extends Error {
-  constructor(code, message) {
-    super(message);
-    this.name = "UblParseError";
-    this.code = code;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// A minimal, self-contained namespace-aware XML reader. NOT a general XML
-// processor: it ignores the XML declaration / comments / processing instructions,
-// treats CDATA as text, and refuses DOCTYPE/ENTITY. Namespaces are handled by
-// splitting `prefix:local` and matching on the LOCAL part (UBL uses cbc:/cac:/ext:).
-// ---------------------------------------------------------------------------
-
-function splitName(raw) {
-  const i = raw.indexOf(":");
-  return i < 0 ? { prefix: "", local: raw } : { prefix: raw.slice(0, i), local: raw.slice(i + 1) };
-}
-
-function xmlUnescape(value) {
-  return String(value)
-    .replaceAll("&lt;", "<")
-    .replaceAll("&gt;", ">")
-    .replaceAll("&quot;", '"')
-    .replaceAll("&apos;", "'")
-    .replaceAll("&#39;", "'")
-    .replaceAll("&#34;", '"')
-    .replaceAll("&amp;", "&");
-}
-
-function makeNode(tag) {
-  const trimmed = tag.trim();
-  const m = /^(\S+)([\s\S]*)$/.exec(trimmed);
-  const rawName = m ? m[1] : trimmed;
-  const attrsStr = m ? m[2] : "";
-  const { prefix, local } = splitName(rawName);
-  const attrs = Object.create(null);
-  const re = /([^\s=/]+)\s*=\s*"([^"]*)"|([^\s=/]+)\s*=\s*'([^']*)'/g;
-  let a;
-  while ((a = re.exec(attrsStr))) {
-    const key = a[1] ?? a[3];
-    const val = xmlUnescape(a[2] ?? a[4]);
-    const { local: aLocal } = splitName(key);
-    // Store BOTH the full name and the local name; UBL attributes we read
-    // (schemeID / listID / currencyID / listVersionID) are unprefixed local names.
-    attrs[key] = val;
-    if (!(aLocal in attrs)) attrs[aLocal] = val;
-  }
-  return { name: rawName, local, prefix, attrs, children: [], text: "" };
-}
-
-/** Parse an XML string into a lightweight tree rooted at a synthetic `#root`.
- *  Throws UblParseError('bad_type') on a DOCTYPE/ENTITY declaration. */
-export function parseXml(text) {
-  if (/<!\s*(?:DOCTYPE|ENTITY)\b/i.test(text)) {
-    throw new UblParseError("bad_type", "XML DOCTYPE/ENTITY declarations are forbidden");
-  }
-  const cleaned = String(text)
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/<\?[\s\S]*?\?>/g, "");
-  const root = { name: "#root", local: "#root", prefix: "", attrs: Object.create(null), children: [], text: "" };
-  const stack = [root];
-  const n = cleaned.length;
-  let i = 0;
-  while (i < n) {
-    const lt = cleaned.indexOf("<", i);
-    if (lt < 0) break;
-    if (lt > i) {
-      const chunk = cleaned.slice(i, lt);
-      if (chunk.trim()) stack[stack.length - 1].text += xmlUnescape(chunk);
-    }
-    if (cleaned.startsWith("<![CDATA[", lt)) {
-      const end = cleaned.indexOf("]]>", lt + 9);
-      const cdata = end < 0 ? cleaned.slice(lt + 9) : cleaned.slice(lt + 9, end);
-      stack[stack.length - 1].text += cdata;
-      i = end < 0 ? n : end + 3;
-      continue;
-    }
-    const gt = cleaned.indexOf(">", lt);
-    if (gt < 0) break;
-    let tag = cleaned.slice(lt + 1, gt);
-    i = gt + 1;
-    if (tag.startsWith("/")) {
-      const closeName = tag.slice(1).trim();
-      for (let s = stack.length - 1; s > 0; s--) {
-        if (stack[s].name === closeName) {
-          stack.length = s;
-          break;
-        }
-      }
-      continue;
-    }
-    const selfClose = tag.endsWith("/");
-    if (selfClose) tag = tag.slice(0, -1);
-    const node = makeNode(tag);
-    stack[stack.length - 1].children.push(node);
-    if (!selfClose) stack.push(node);
-  }
-  return root;
-}
-
-// --- tree query helpers (local-name matching) ------------------------------
-
-function childNamed(node, local) {
-  if (!node) return null;
-  for (const c of node.children) if (c.local === local) return c;
-  return null;
-}
-
-function childrenNamed(node, local) {
-  return node ? node.children.filter((c) => c.local === local) : [];
-}
-
-function descend(node, ...locals) {
-  let cur = node;
-  for (const l of locals) {
-    cur = childNamed(cur, l);
-    if (!cur) return null;
-  }
-  return cur;
-}
-
-function textOf(node) {
-  if (!node) return null;
-  if (node.text && node.text.trim()) return node.text.trim();
-  const parts = [];
-  (function walk(x) {
-    if (x.text) parts.push(x.text);
-    for (const c of x.children) walk(c);
-  })(node);
-  const s = parts.join("").trim();
-  return s || null;
-}
-
-function textAt(node, ...locals) {
-  return textOf(descend(node, ...locals));
-}
-
-function amountAt(node, ...locals) {
-  const el = descend(node, ...locals);
-  if (!el) return null;
-  const raw = textOf(el);
-  if (raw == null || raw === "") return null;
-  return { raw, currency: el.attrs.currencyID || null };
-}
-
-// ---------------------------------------------------------------------------
-// UBL model extraction. Reads a parsed tree into a plain object the mappers
-// consume. Party identity is registration-scheme-aware (§2 of the format brief).
-// ---------------------------------------------------------------------------
-
-const BRN_SCHEMES = ["BRN", "NRIC", "PASSPORT", "ARMY"];
-
-function findInvoiceElement(root) {
-  const known = ["Invoice", "CreditNote", "DebitNote", "SelfBilledInvoice"];
-  for (const c of root.children) if (known.includes(c.local)) return c;
-  return root.children[0] || null;
-}
-
-function partyName(party) {
-  return textAt(party, "PartyLegalEntity", "RegistrationName") || textAt(party, "PartyName", "Name") || null;
-}
-
-function partyIdBySchemes(party, schemes) {
-  for (const pi of childrenNamed(party, "PartyIdentification")) {
-    const id = childNamed(pi, "ID");
-    if (!id) continue;
-    const scheme = String(id.attrs.schemeID || "").toUpperCase();
-    if (schemes.includes(scheme)) {
-      const v = textOf(id);
-      if (v) return v;
-    }
-  }
-  return null;
-}
-
-/** Extract the load-bearing UBL fields into a plain model (no numbers computed). */
-export function extractUblModel(root) {
-  const invoice = findInvoiceElement(root);
-  if (!invoice) throw new UblParseError("bad_type", "no UBL document element found");
-
-  const supplier = descend(invoice, "AccountingSupplierParty", "Party");
-  const buyer = descend(invoice, "AccountingCustomerParty", "Party");
-
-  const legal = descend(invoice, "LegalMonetaryTotal");
-  const taxTotal = childNamed(invoice, "TaxTotal");
-
-  const taxBreakdown = [];
-  for (const sub of childrenNamed(taxTotal, "TaxSubtotal")) {
-    const category = childNamed(sub, "TaxCategory");
-    taxBreakdown.push({
-      type: textAt(category, "ID"),
-      rate: textAt(sub, "Percent") ?? textAt(category, "Percent"),
-      taxable: (amountAt(sub, "TaxableAmount") || {}).raw ?? null,
-      amount: (amountAt(sub, "TaxAmount") || {}).raw ?? null,
-      exempt_reason: textAt(category, "TaxExemptionReason"),
-    });
-  }
-
-  const lineClassifications = [];
-  for (const line of childrenNamed(invoice, "InvoiceLine")) {
-    const item = childNamed(line, "Item");
-    for (const cc of childrenNamed(item, "CommodityClassification")) {
-      const code = childNamed(cc, "ItemClassificationCode");
-      if (code && String(code.attrs.listID || "").toUpperCase() === "CLASS") {
-        const v = textOf(code);
-        if (v) lineClassifications.push(v);
-      }
-    }
-  }
-
-  const typeCodeEl = childNamed(invoice, "InvoiceTypeCode");
-
-  return {
-    documentLocal: invoice.local,
-    invoiceId: textAt(invoice, "ID"),
-    issueDate: textAt(invoice, "IssueDate"),
-    typeCode: typeCodeEl ? textOf(typeCodeEl) : null,
-    listVersionId: typeCodeEl ? typeCodeEl.attrs.listVersionID || null : null,
-    documentCurrency: textAt(invoice, "DocumentCurrencyCode"),
-    supplier: supplier
-      ? {
-          name: partyName(supplier),
-          tin: partyIdBySchemes(supplier, ["TIN"]),
-          brn: partyIdBySchemes(supplier, BRN_SCHEMES),
-        }
-      : { name: null, tin: null, brn: null },
-    buyer: buyer
-      ? {
-          name: partyName(buyer),
-          tin: partyIdBySchemes(buyer, ["TIN"]),
-          brn: partyIdBySchemes(buyer, BRN_SCHEMES),
-        }
-      : { name: null, tin: null, brn: null },
-    totals: {
-      taxExclusive: amountAt(legal, "TaxExclusiveAmount"),
-      taxInclusive: amountAt(legal, "TaxInclusiveAmount"),
-      payable: amountAt(legal, "PayableAmount"),
-      prepaid: amountAt(legal, "PrepaidAmount"),
-      rounding: amountAt(legal, "PayableRoundingAmount"),
-    },
-    taxAmount: amountAt(taxTotal, "TaxAmount"),
-    taxBreakdown,
-    lineClassifications,
-    uuid: textAt(invoice, "UUID"),
-  };
-}
-
-/** Detect a consolidated (B2C aggregate) e-invoice — a non-attributable document
- *  (§3.1): the buyer is the General Public, so it never resolves to a customer. */
-export function detectConsolidated(model) {
-  const buyerTin = String(model.buyer?.tin || "").replace(/\s+/g, "").toUpperCase();
-  if (buyerTin === GENERAL_PUBLIC_TIN) return true;
-  if (/general\s+public/i.test(String(model.buyer?.name || ""))) return true;
-  if (model.lineClassifications.some((c) => String(c).trim() === "004")) return true;
-  return false;
-}
 
 /** Coarse corroboration-ineligibility reason for a non-standard type code. Any
  *  non-null value blocks the DB's structured Tier-A (mirrors the OCR `credit_note`
@@ -329,27 +68,11 @@ function typeCodeReason(code) {
   }
 }
 
-/** Assert monetary elements do not mix currencies; return the single doc currency.
- *  A MIXED-currency document is a data-integrity refusal (terminal). */
-function resolveCurrency(model) {
-  const seen = new Set();
-  const add = (a) => {
-    if (a && a.currency) seen.add(String(a.currency).toUpperCase());
-  };
-  add(model.totals.taxExclusive);
-  add(model.totals.taxInclusive);
-  add(model.totals.payable);
-  add(model.totals.prepaid);
-  add(model.taxAmount);
-  if (seen.size > 1) throw new UblParseError("bad_type", "UBL document mixes currencies across amounts");
-  return (model.documentCurrency && String(model.documentCurrency).toUpperCase()) || (seen.size === 1 ? [...seen][0] : null);
-}
-
 // ---------------------------------------------------------------------------
 // Signature handling: strip the enveloped XAdES block (ext:UBLExtensions +
-// cac:Signature) before content-hashing, exactly as the UBL signing flow removes
-// them before c14n (§3.1 / format brief §7). Coarse text-level strip (the parser
-// never re-serializes) — sufficient for a stable provenance content hash.
+// cac:Signature) before content-hashing, exactly as the UBL signing flow removes them
+// before c14n (§3.1 / format brief §7). Coarse text-level strip — sufficient for a
+// stable provenance content hash (the parser never re-serializes).
 // ---------------------------------------------------------------------------
 
 export function stripUblSignature(xmlText) {
@@ -384,14 +107,22 @@ function identityRegion(fieldPath, textContent) {
 // ---------------------------------------------------------------------------
 
 export function mapIdentityRegions(model, task = {}) {
+  const isConsolidated = detectConsolidated(model);
   const regions = [];
-  // Supplier identifiers ATTRIBUTE (sales supplier = the client). Names are on the
-  // DB attribution allowlist; supplier_tin deliberately matches %tin%.
-  if (model.supplier?.tin) regions.push(identityRegion("myinvois.supplier_tin", model.supplier.tin));
-  if (model.supplier?.brn) regions.push(identityRegion("myinvois.supplier_brn", model.supplier.brn));
-  // Buyer identifiers must NEVER attribute — names avoid %tin%/%ssm%/%account%.
-  if (model.buyer?.tin) regions.push(identityRegion("myinvois.buyer_id_primary", model.buyer.tin));
-  if (model.buyer?.brn) regions.push(identityRegion("myinvois.buyer_id_secondary", model.buyer.brn));
+  // FIX-8: a CONSOLIDATED (B2C aggregate) document is non-attributable by construction —
+  // its buyer is the General Public and there is no per-buyer client to resolve. Emit NO
+  // attribution-bearing regions so it can never auto-attribute a client; the document
+  // routes to NEEDS YOU (the DB attribution CTE finds no identity region → it abstains).
+  // The `consolidated` envelope marker keeps the task legible.
+  if (!isConsolidated) {
+    // Supplier identifiers ATTRIBUTE (sales supplier = the client). Names are on the
+    // DB attribution allowlist; supplier_tin deliberately matches %tin%.
+    if (model.supplier?.tin) regions.push(identityRegion("myinvois.supplier_tin", model.supplier.tin));
+    if (model.supplier?.brn) regions.push(identityRegion("myinvois.supplier_brn", model.supplier.brn));
+    // Buyer identifiers must NEVER attribute — names avoid %tin%/%ssm%/%account%.
+    if (model.buyer?.tin) regions.push(identityRegion("myinvois.buyer_id_primary", model.buyer.tin));
+    if (model.buyer?.brn) regions.push(identityRegion("myinvois.buyer_id_secondary", model.buyer.brn));
+  }
 
   const envelope = {
     schema_version: 1,
@@ -400,7 +131,7 @@ export function mapIdentityRegions(model, task = {}) {
     myinvois: {
       type_code: model.typeCode,
       list_version: model.listVersionId,
-      consolidated: detectConsolidated(model),
+      consolidated: isConsolidated,
       authority_unverified: true,
     },
   };
@@ -445,6 +176,9 @@ export function mapFactsFields(model) {
   push("invoice.total_excl_tax", model.totals.taxExclusive?.raw);
   push("invoice.tax_total", model.taxAmount?.raw);
   push("invoice.deposit", model.totals.prepaid?.raw);
+  // FIX-9: the rounding adjustment (PayableRoundingAmount) so the DB tie can enforce
+  // net + tax + rounding = gross. RAW — the DB owns the sign/cents.
+  push("invoice.rounding", model.totals.rounding?.raw);
 
   // SST breakdown — header-level v1, serialized; the DB validates Σ = tax_total.
   const breakdown = model.taxBreakdown.filter((b) => b.type != null || b.amount != null || b.taxable != null);
@@ -471,9 +205,11 @@ function factsEnvelope(model) {
 }
 
 // ---------------------------------------------------------------------------
-// Worker entry points — parse a raw XML string and return the pass-appropriate
-// result. Called from the worker thread (structured-worker.mjs) so a large/hostile
-// XML parse never blocks the supervisor event loop.
+// Worker entry points — parse a raw XML string and return the pass-appropriate result.
+// Called from the worker thread (structured-worker.mjs) so a large/hostile XML parse
+// never blocks the supervisor event loop. A document that is not a well-formed,
+// correctly-namespaced MyInvois UBL invoice throws UblParseError — the worker turns that
+// into a clean task failure (NEEDS YOU), never trusted facts.
 // ---------------------------------------------------------------------------
 
 /** IDENTITY pass: XML text → { pageCount, envelope, regions }. */

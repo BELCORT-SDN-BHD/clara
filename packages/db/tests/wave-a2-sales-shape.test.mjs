@@ -293,6 +293,97 @@ test("P6 a debit note (type 03) RAISES receivable like an invoice (invoice polar
     .catch((e) => { if (reasonOf(e) === "tax_tie_failed") assert.fail("a DN with correct invoice polarity was refused tax_tie_failed"); noteLane(`DN approve raised ${e.code}/${reasonOf(e)} — inspect`); });
 });
 
+// ===========================================================================
+// FIX-1 (adversarial #2) — control-account laundering: a sales invoice with an
+// EXTRA control (payable) leg must be REFUSED (the shape admits ONLY receivable,
+// income, sst_output, rounding). FIX-2 — type_code bound to polarity. Both FAIL
+// against the pre-fix floor (which checked only component ties) and PASS after.
+// ===========================================================================
+
+const AP4 = "400-000"; // trade creditors (payable control) — the laundering target
+
+test("FIX-1 a sales invoice with an EXTRA payable-control leg is REFUSED (no laundering into a control account under the tie)", async (t) => {
+  if (skip15(t)) return;
+  const client = world.clients.A1;
+  await upsertAccountClassed(world.users.alice, { client, code: REC, name: "Trade Debtors", type: "asset", accountClass: "receivable", opKey: opk("recL") }).catch((e) => noteLane(`recL ${e.code}`));
+  await upsertAccountClassed(world.users.alice, { client, code: REV, name: "Revenue", type: "income", opKey: opk("revL") }).catch((e) => noteLane(`revL ${e.code}`));
+  await upsertAccountClassed(world.users.alice, { client, code: AP4, name: "Trade Creditors", type: "liability", accountClass: "payable", opKey: opk("apL") }).catch((e) => noteLane(`apL ${e.code}`));
+  // Codex #2 shape: gross RM106, net RM1, tax absent; a BALANCED draft that debits AR
+  // for the gross but credits only RM1 to signed revenue and RM105 to an UNRELATED
+  // payable control (which the pre-fix floor exempted). It MUST refuse.
+  const f = await salesFiling({ client, gross: 10600, net: 100, tax: null, typeCode: "01" });
+  assert.ok(f, "the laundering-scenario facts filing was built (mandatory setup)");
+  const lines = [
+    { account_code: REC, debit_cents: 10600, credit_cents: 0, description: "sales-ar" },
+    { account_code: REV, debit_cents: 0, credit_cents: 100, description: "sales-rev (signed)" },
+    { account_code: AP4, debit_cents: 0, credit_cents: 10500, description: "launder-into-payable" },
+  ];
+  const d = await draftSales({ client, cited: f.cited, lines });
+  assert.ok(d?.entry_id, "the laundering draft was created (mandatory setup)");
+  let err = null;
+  try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("aplaunder") }); }
+  catch (e) { err = e; }
+  assert.ok(err, "a sales invoice with an extra payable-control leg is REFUSED (pre-fix it posted, laundering the amount under the control exemption)");
+  assert.equal(err.code, "CLR23", `the laundering shape is refused with CLR23 (got ${err?.code})`);
+  assert.notEqual((await rootQuery("select status from clara.journal_entries where id=$1", [d.entry_id])).rows[0]?.status, "approved", "the laundering entry is never approved");
+});
+
+test("FIX-2 a type-02 (credit note) document coded as a sales_invoice is REFUSED (type_polarity_mismatch)", async (t) => {
+  if (skip15(t)) return;
+  const client = world.clients.A1;
+  // The document states type 02 (credit note) but the draft is coded/booked as a
+  // sales_invoice (invoice polarity). The structural type<->polarity binding refuses.
+  const f = await salesFiling({ client, gross: 10600, net: 10000, tax: 600, typeCode: "02" });
+  assert.ok(f, "the type-02 facts filing was built (mandatory setup)");
+  await upsertAccountClassed(world.users.alice, { client, code: SST, name: "SST Output", type: "liability", special: "sst_output", opKey: opk("sstT") }).catch(() => {});
+  const d = await draftSales({ client, cited: f.cited, lines: salesLines(10600, 10000, 600), codingKind: "sales_invoice" });
+  assert.ok(d?.entry_id, "the type-mismatch draft was created (mandatory setup)");
+  let err = null;
+  try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("aptype") }); }
+  catch (e) { err = e; }
+  assert.ok(err, "a type-02 doc booked as an invoice is REFUSED (pre-fix polarity was unbound to type_code)");
+  assert.equal(err.code, "CLR21", `the type/polarity mismatch is refused with CLR21 (got ${err?.code})`);
+  if (reasonOf(err) && reasonOf(err) !== "type_polarity_mismatch") noteLane(`type mismatch refused with '${reasonOf(err)}' (expected type_polarity_mismatch)`);
+});
+
+// ===========================================================================
+// RESIDUAL-1 v2 (defense-in-depth) — a sales invoice may NOT launder a material amount
+// into a rounding leg. The round-1 floor admitted a rounding leg by CATEGORY with no
+// amount bound, so with no net/tax facts (tie skipped) the balance could be split off
+// into rounding. FAILS pre-fix (approved) and PASSES after (CLR23).
+// ===========================================================================
+
+// buildWorld already seeds ONE rounding account per client (COA.rounding='9990');
+// uq_coa_special permits only one, so reference it rather than creating another.
+const SRND = "9990"; // the seeded rounding account — the laundering target
+
+test("RESIDUAL-1 a sales invoice laundering a material amount into a ROUNDING leg is REFUSED (the rounding-amount bound)", async (t) => {
+  if (skip15(t)) return;
+  const client = world.clients.A1;
+  await upsertAccountClassed(world.users.alice, { client, code: REC, name: "Trade Debtors", type: "asset", accountClass: "receivable", opKey: opk("recR") }).catch((e) => noteLane(`recR ${e.code}`));
+  await upsertAccountClassed(world.users.alice, { client, code: REV, name: "Revenue", type: "income", opKey: opk("revR") }).catch((e) => noteLane(`revR ${e.code}`));
+  // No net/tax facts (so the component tie is skipped) — gross RM106 only. A BALANCED draft
+  // debits AR for the gross but credits only RM1 to signed revenue and RM105 to a ROUNDING
+  // account. Pre-fix the rounding leg was admitted by category with no amount bound → it
+  // approved. Post-fix the greatest(5, n_legs)-sen bound on non-{receivable,income,sst} legs
+  // refuses it.
+  const f = await salesFiling({ client, gross: 10600, net: null, tax: null, typeCode: "01" });
+  assert.ok(f, "the rounding-laundering sales facts filing was built (mandatory setup)");
+  const lines = [
+    { account_code: REC, debit_cents: 10600, credit_cents: 0, description: "sales-ar" },
+    { account_code: REV, debit_cents: 0, credit_cents: 100, description: "sales-rev (signed)" },
+    { account_code: SRND, debit_cents: 0, credit_cents: 10500, description: "launder-into-rounding" },
+  ];
+  const d = await draftSales({ client, cited: f.cited, lines });
+  assert.ok(d?.entry_id, "the rounding-laundering sales draft was created (mandatory setup)");
+  let err = null;
+  try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, attestation: "x", opKey: opk("apsrnd") }); }
+  catch (e) { err = e; }
+  assert.ok(err, "a sales invoice laundering into a material rounding leg is REFUSED (pre-fix it approved under the rounding category exemption)");
+  assert.equal(err.code, "CLR23", `the rounding-laundering sales shape is refused CLR23 (got ${err?.code})`);
+  assert.notEqual((await rootQuery("select status from clara.journal_entries where id=$1", [d.entry_id])).rows[0]?.status, "approved", "the laundering entry is never approved");
+});
+
 // Firm-B variants (dave is firm B's owner) reuse the same builders with a different actor.
 async function salesFilingFor(sub, { client, gross, net, tax, typeCode = "01" }) {
   const firm = await firmOf(client);

@@ -46,11 +46,12 @@ export function windowLabel(rule: AutopostRule): string {
   return `≤${n ?? "?"} posts${w ? ` / ${w}` : ""}`;
 }
 
-/** How many posts remain in the current window (DB-provided counts only). `null` when
- *  the DB did not supply the running count. */
+/** How many posts remain in the current window — read STRAIGHT from the DB
+ *  (`list_autopost_rules` emits `posts_remaining`). The UI does not recompute it: the DB
+ *  owns every number, counts included, so the window arithmetic stays in one place and
+ *  can't drift from the DB's own definition. `null` when the DB did not supply it. */
 export function postsRemaining(rule: AutopostRule): number | null {
-  if (rule.window_max_posts === null || rule.posts_in_window === null) return null;
-  return Math.max(0, rule.window_max_posts - rule.posts_in_window);
+  return rule.posts_remaining;
 }
 
 /** Whether a rule can be signed live (proposed only — admin+ enforced in the DB). */

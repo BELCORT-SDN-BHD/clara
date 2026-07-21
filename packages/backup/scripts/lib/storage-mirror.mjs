@@ -22,25 +22,70 @@ import { readSecretFile } from "./env.mjs";
 const sha256 = (buf) => createHash("sha256").update(buf).digest("hex");
 const expectedShaOf = (path) => (path.match(/\/docs\/([0-9a-f]{64})\.[a-z0-9]{1,12}$/) || [])[1] || null;
 
+// Supabase Storage `list` returns at most this many rows per call; a prefix with more
+// objects MUST be paged (offset += PAGE_SIZE) until a short/empty page, or the tail is
+// silently dropped and the backup reports a false SUCCESS with an incomplete evidence
+// archive — a DR-correctness hole (Wave A2 FIX-13).
+const PAGE_SIZE = 1000;
+
 function hdrs(cfg) {
   const key = readSecretFile(cfg.storageKeyFileEnv, "the Supabase service_role key (firm-docs LIST/READ)");
   return { Authorization: `Bearer ${key}`, apikey: key };
 }
 
-async function listAll(base, bucket, h, prefix = "") {
-  const out = [];
+/**
+ * Object names come from the Storage API; before one is turned into a LOCAL filesystem
+ * path (join(encStageDir, path)) or spliced into a fetch URL, refuse path-traversal and
+ * absolute escapes. Legitimate firm-docs names are `firms/<uuid>/docs/<sha>.<ext>` and
+ * never contain a ".." segment or a leading separator. Fail-closed: an anomalous name
+ * means the mirror cannot be trusted complete, so we abort the whole run (Wave A2 FIX-16).
+ */
+export function assertSafeObjectName(name, path = name) {
+  for (const s of [name, path]) {
+    if (typeof s !== "string" || s === "") throw new Error("storage: refusing empty/invalid object name");
+    if (s.includes("\0")) throw new Error(`storage: refusing object name with a NUL byte: ${JSON.stringify(s)}`);
+    if (s.startsWith("/") || s.startsWith("\\")) throw new Error(`storage: refusing object name with a leading separator: ${JSON.stringify(s)}`);
+    if (s.split(/[\\/]/).includes("..")) throw new Error(`storage: refusing object name containing a ".." segment: ${JSON.stringify(s)}`);
+  }
+}
+
+async function listPage(base, bucket, h, prefix, offset) {
   const res = await fetch(`${base}/storage/v1/object/list/${bucket}`, {
     method: "POST",
     headers: { ...h, "Content-Type": "application/json" },
-    body: JSON.stringify({ prefix, limit: 1000, offset: 0, sortBy: { column: "name", order: "asc" } }),
+    body: JSON.stringify({ prefix, limit: PAGE_SIZE, offset, sortBy: { column: "name", order: "asc" } }),
   });
-  if (!res.ok) throw new Error(`storage list ${prefix || "(root)"} -> HTTP ${res.status}`);
-  for (const item of await res.json()) {
-    const path = prefix ? `${prefix}/${item.name}` : item.name;
-    if (item.id === null) out.push(...(await listAll(base, bucket, h, path)));
-    else out.push({ path, mimetype: item.metadata?.mimetype || "application/octet-stream", size: item.metadata?.size ?? null });
+  if (!res.ok) throw new Error(`storage list ${prefix || "(root)"} @offset ${offset} -> HTTP ${res.status}`);
+  const rows = await res.json();
+  if (!Array.isArray(rows)) throw new Error(`storage list ${prefix || "(root)"} -> non-array response`);
+  return rows;
+}
+
+/**
+ * Recursively list every object under `prefix`, PAGING each prefix to exhaustion and
+ * de-duplicating by path (offset paging can repeat a boundary row). Returns one entry
+ * per distinct object, carrying its source-reported size for the download-integrity check.
+ */
+export async function listAll(base, bucket, h, prefix = "", seen = new Map()) {
+  for (let offset = 0; ; offset += PAGE_SIZE) {
+    const rows = await listPage(base, bucket, h, prefix, offset);
+    if (rows.length === 0) break;
+    for (const item of rows) {
+      const path = prefix ? `${prefix}/${item.name}` : item.name;
+      assertSafeObjectName(item.name, path);
+      if (item.id === null) {
+        await listAll(base, bucket, h, path, seen); // a "folder" placeholder — recurse (own paging)
+      } else if (!seen.has(path)) {
+        seen.set(path, {
+          path,
+          mimetype: item.metadata?.mimetype || "application/octet-stream",
+          size: item.metadata?.size ?? null,
+        });
+      }
+    }
+    if (rows.length < PAGE_SIZE) break; // last (short) page for this prefix
   }
-  return out;
+  return [...seen.values()];
 }
 
 /**
@@ -76,6 +121,12 @@ export async function mirrorFirmDocs({ cfg, runDir, recipients, existingKeys = n
     const res = await fetch(`${base}/storage/v1/object/${bucket}/${o.path}`, { headers: h });
     if (!res.ok) throw new Error(`storage download ${o.path} -> HTTP ${res.status}`);
     const buf = Buffer.from(await res.arrayBuffer());
+    if (o.size != null && Number(o.size) !== buf.length) {
+      // Source-reported size disagreeing with the bytes we actually received is a
+      // TRUNCATED/short download — a copy failure, not a source-side quirk. Fail the run
+      // rather than record an incomplete object into the DR archive (Wave A2 FIX-13).
+      throw new Error(`storage download ${o.path} size mismatch — source reports ${o.size} byte(s), received ${buf.length}; refusing to record an incomplete mirror.`);
+    }
     const hash = sha256(buf);
     const want = expectedShaOf(o.path);
     if (want && hash !== want) {
@@ -94,6 +145,18 @@ export async function mirrorFirmDocs({ cfg, runDir, recipients, existingKeys = n
     mkdirSync(dirname(outPath), { recursive: true });
     ageEncryptBuffer({ input: buf, outPath, recipients, age: ageBin });
     newEncrypted++;
+  }
+
+  // DR-CORRECTNESS GATE (Wave A2 FIX-13): every listed object must have been downloaded
+  // and recorded in the manifest index, and the tallied bytes must equal the sum of what
+  // we indexed. A silently short-listed prefix or a dropped object surfaces HERE as a hard
+  // failure — never a green run reporting SUCCESS over an incomplete evidence archive.
+  if (index.length !== objects.length) {
+    throw new Error(`mirror(firm-docs): manifest incomplete — listed ${objects.length} object(s) but indexed ${index.length}.`);
+  }
+  const indexBytes = index.reduce((n, e) => n + e.bytes, 0);
+  if (indexBytes !== totalBytes) {
+    throw new Error(`mirror(firm-docs): byte accounting diverged — index sums ${indexBytes} but running tally is ${totalBytes}.`);
   }
 
   // Order-independent fingerprint of "which docs exist" — carried by the UN-encrypted

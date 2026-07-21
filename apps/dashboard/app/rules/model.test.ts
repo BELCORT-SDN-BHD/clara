@@ -12,7 +12,7 @@ function mkRule(p: Partial<AutopostRule>): AutopostRule {
   return {
     rule_id: "rule-1", client_id: "c1", counterparty_id: "cp1", counterparty_name: "ACME",
     direction: "purchase", account_code: "620-000", account_name: "Professional fees",
-    amount_cap_cents: 100000, frequency_window: "monthly", window_max_posts: 3, posts_in_window: 1,
+    amount_cap_cents: 100000, frequency_window: "monthly", window_max_posts: 3, posts_in_window: 1, posts_remaining: 2,
     expires_at: "2027-01-01T00:00:00Z", status: "live", signed_by: "u1", signed_at: "2026-06-01T00:00:00Z",
     supersedes_rule_id: null, reason: null, created_at: "2026-06-01T00:00:00Z", ...p,
   };
@@ -38,12 +38,17 @@ test("ruleUrgency classifies proposed / live / expiring / expired / terminal", (
   assert.equal(ruleUrgency(mkRule({ status: "retired" }), NOW), "terminal");
 });
 
-test("windowLabel + postsRemaining read DB bounds only (no computation of money)", () => {
+test("windowLabel reads DB bounds only (no computation of money)", () => {
   assert.equal(windowLabel(mkRule({ window_max_posts: 3, frequency_window: "monthly" })), "≤3 posts / monthly");
   assert.equal(windowLabel(mkRule({ window_max_posts: null, frequency_window: null })), "no window bound");
-  assert.equal(postsRemaining(mkRule({ window_max_posts: 3, posts_in_window: 1 })), 2);
-  assert.equal(postsRemaining(mkRule({ window_max_posts: 3, posts_in_window: 5 })), 0); // never negative
-  assert.equal(postsRemaining(mkRule({ posts_in_window: null })), null);
+});
+
+test("postsRemaining reads the DB-emitted posts_remaining verbatim — the UI computes nothing", () => {
+  assert.equal(postsRemaining(mkRule({ posts_remaining: 2 })), 2);
+  assert.equal(postsRemaining(mkRule({ posts_remaining: 0 })), 0);
+  // Even when the raw window counts are present, it never re-derives from them: only the
+  // DB field is consulted, so it degrades to null when the DB omits posts_remaining.
+  assert.equal(postsRemaining(mkRule({ posts_remaining: null, window_max_posts: 3, posts_in_window: 1 })), null);
 });
 
 test("canSign is proposed-only; canRetire is proposed-or-live", () => {

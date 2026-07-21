@@ -7,7 +7,8 @@
   "scripts": {
     "backup": "node scripts/backup-run.mjs",
     "backup:dry": "node scripts/backup-run.mjs --dry-run",
-    "check": "node --check scripts/backup-run.mjs"
+    "check": "node --check scripts/backup-run.mjs",
+    "test": "node --test scripts/lib/backup-fixes.test.mjs"
   },
   "dependencies": {
     "pg": "8.20.0"

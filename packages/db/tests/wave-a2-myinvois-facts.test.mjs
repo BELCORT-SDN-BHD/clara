@@ -177,3 +177,330 @@ test("§3.1 a consolidated e-invoice's supplier TIN (the General TIN EI000000000
   if (after !== before) noteLane("the General TIN auto-attributed a client — contract §3.1 requires consolidated e-invoices to be non-attributable (NEEDS YOU); adjudicate whether the General-TIN filter lives in the parse or the matcher");
   assert.equal(after, before, "a consolidated e-invoice (General TIN) does NOT auto-attribute a client");
 });
+
+// ===========================================================================
+// FIX-5 (adversarial #4) — structured Tier-A requires COMPLETE stated facts: an
+// explicit type, gross, net AND tax; net+tax+rounding = gross; and Σ tax_breakdown
+// = tax_total. Each of these FAILS pre-fix (which defaulted the type and accepted a
+// missing net/tax, and never parsed the breakdown) and PASSES after.
+// ===========================================================================
+
+test("FIX-5 a structured source MISSING tax facts does NOT corroborate (complete facts required, not defaulted)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // gross + net present, but tax_total OMITTED, type 01. Pre-fix corroborated (the
+  // 'v_tax is null' short-circuit); post-fix requires tax to be explicitly stated.
+  await persistInvoiceFacts(lf.task, [
+    factField("invoice.total", "RM 106.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.total_excl_tax", "RM 100.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+    factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+    factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`, { polygon: [], confidence: 0.9 }),
+  ]);
+  const state = await invoiceFactState(lf.document);
+  assert.ok(state, "fact-state present");
+  assert.notEqual(state.corroborated, true, "a structured source missing tax does NOT corroborate (pre-fix accepted a missing component)");
+});
+
+test("FIX-5/v3 a structured (local_facts) source with NO explicit type_code is REFUSED at persist (type is neither defaulted nor accepted)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A2);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // v3 item 2 STRENGTHENS the v2 property: a MyInvois structured payload with no document
+  // type cannot be polarity-bound, so the DB now refuses it at the WRITE BOUNDARY (pre-v3 it
+  // persisted and merely failed corroboration; the type was never defaulted to 01). The
+  // negative property ("type is not defaulted") holds a fortiori — it never even persists.
+  await assert.rejects(
+    () => persistInvoiceFacts(lf.task, [
+      factField("invoice.total", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.total_excl_tax", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.tax_total", "RM 0.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+      factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`, { polygon: [], confidence: 0.9 }),
+    ]),
+    (e) => e.code === "CLR10" || /type_code/.test(e.message ?? ""),
+    "a local_facts payload with no type_code is refused (the DB owns the polarity fact)",
+  );
+});
+
+test("FIX-5 a MIS-SUMMED tax_breakdown does NOT corroborate; a correctly-summed one still does", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  // Mis-summed: header tax_total = RM6.00 but the per-type breakdown sums to RM5.00.
+  const bad = await localFactsTask({ firm });
+  assert.ok(bad, "the local_facts task was built (mandatory setup)");
+  await persistInvoiceFacts(bad.task, [
+    factField("invoice.total", "RM 106.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.total_excl_tax", "RM 100.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_total", "RM 6.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_breakdown", '[{"type":"01","rate":6,"amount":"5.00"}]', { polygon: [], confidence: 0.9 }),
+    factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+    factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+    factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`, { polygon: [], confidence: 0.9 }),
+  ]);
+  const badState = await invoiceFactState(bad.document);
+  assert.ok(badState, "fact-state present");
+  assert.notEqual(badState.corroborated, true, "a breakdown that does not sum to tax_total does NOT corroborate (pre-fix never parsed the breakdown)");
+
+  // Correctly-summed breakdown (RM6.00) with a matching header still corroborates.
+  const good = await localFactsTask({ firm });
+  assert.ok(good, "the second local_facts task was built (mandatory setup)");
+  await persistInvoiceFacts(good.task, [
+    factField("invoice.total", "RM 106.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.total_excl_tax", "RM 100.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_total", "RM 6.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_breakdown", '[{"type":"01","rate":6,"amount":"6.00"}]', { polygon: [], confidence: 0.9 }),
+    factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+    factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+    factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`, { polygon: [], confidence: 0.9 }),
+  ]);
+  const goodState = await invoiceFactState(good.document);
+  assert.ok(goodState, "fact-state present");
+  assert.equal(goodState.corroborated, true, "a correctly-summed breakdown corroborates (the tie holds end-to-end)");
+});
+
+test("FIX-5 a FACTS-declared rounding residual ties net+tax+rounding = gross and corroborates", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A2);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // total 100.01 = net 100.00 + tax 0.00 + rounding 0.01. Pre-fix (no rounding fact)
+  // net+tax=100.00 != 100.01 => would NOT corroborate; post-fix the declared rounding ties.
+  await persistInvoiceFacts(lf.task, [
+    factField("invoice.total", "RM 100.01", { polygon: [], confidence: 0.9 }),
+    factField("invoice.total_excl_tax", "RM 100.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_total", "RM 0.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.rounding", "RM 0.01", { polygon: [], confidence: 0.9 }),
+    factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+    factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+    factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`, { polygon: [], confidence: 0.9 }),
+  ]);
+  const state = await invoiceFactState(lf.document);
+  assert.ok(state, "fact-state present");
+  assert.equal(state.rounding_cents, 1, "the declared rounding fact is surfaced (1 sen)");
+  assert.equal(state.corroborated, true, "net + tax + declared rounding = gross corroborates the structured source");
+});
+
+// ===========================================================================
+// RESIDUAL-4 v2 (structured corroboration gaps) — (a) a positive-tax document MUST carry
+// a breakdown that sums to tax_total; (b) a conflicting DUPLICATE corroboration fact must
+// REJECT (single cardinality), never be min()-selected away. Both FAIL pre-fix (corroborate)
+// and PASS after (do not corroborate).
+// ===========================================================================
+
+test("RESIDUAL-4 a POSITIVE-tax structured source with NO tax_breakdown does NOT corroborate (breakdown required when tax>0)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // gross 106 = net 100 + tax 6, type 01, but NO tax_breakdown. Pre-fix corroborated (the
+  // `v_bd is null or ...` acceptance); post-fix a positive-tax doc MUST carry a breakdown.
+  await persistInvoiceFacts(lf.task, [
+    factField("invoice.total", "RM 106.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.total_excl_tax", "RM 100.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_total", "RM 6.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+    factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+    factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`, { polygon: [], confidence: 0.9 }),
+  ]);
+  const state = await invoiceFactState(lf.document);
+  assert.ok(state, "fact-state present");
+  assert.notEqual(state.corroborated, true, "a positive-tax doc with NO breakdown does NOT corroborate (pre-fix accepted the missing breakdown)");
+});
+
+test("RESIDUAL-4/v3 CONFLICTING duplicate corroboration facts (two tax_total values) are REFUSED at persist (single cardinality, not min-selected)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A2);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // gross 106 = net 100 + tax 6, breakdown 6.00 — but TWO tax_total regions (6.00 AND 7.00).
+  // Pre-v2 min()-selected 6.00 and corroborated; v2 failed only corroboration; v3 REFUSES the
+  // conflicting duplicate at the write boundary ("the DB owns every number").
+  await assert.rejects(
+    () => persistInvoiceFacts(lf.task, [
+      factField("invoice.total", "RM 106.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.total_excl_tax", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.tax_total", "RM 6.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.tax_total", "RM 7.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.tax_breakdown", '[{"type":"01","rate":6,"amount":"6.00"}]', { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+      factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`, { polygon: [], confidence: 0.9 }),
+    ]),
+    (e) => e.code === "CLR10" || /conflicting duplicate/.test(e.message ?? ""),
+    "a conflicting duplicate tax_total is refused at persist (pre-v3 min()-selected one away)",
+  );
+});
+
+test("RESIDUAL v3 CONFLICTING duplicate type_code ([01,02]) is REFUSED at persist (the polarity fact is single-valued)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // [01,02] — pre-v3 min()-selected '01' and the polarity binding accepted it; v3 refuses.
+  await assert.rejects(
+    () => persistInvoiceFacts(lf.task, [
+      factField("invoice.total", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "02", { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+    ]),
+    (e) => e.code === "CLR10" || /conflicting duplicate/.test(e.message ?? ""),
+    "two different type_code values are refused (pre-v3 min-selected '01' and passed the polarity bind)",
+  );
+});
+
+test("RESIDUAL v3 CONFLICTING duplicate currency ([MYR,USD]) is REFUSED at persist (never min-selected to MYR)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A2);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // [MYR,USD] — pre-v3 min()-selected 'MYR' (via the currency regexp) and corroborated; v3 refuses.
+  await assert.rejects(
+    () => persistInvoiceFacts(lf.task, [
+      factField("invoice.total", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "USD", { polygon: [], confidence: 0.9 }),
+    ]),
+    (e) => e.code === "CLR10" || /conflicting duplicate/.test(e.message ?? ""),
+    "two different currency values are refused (pre-v3 min-selected 'MYR' and passed)",
+  );
+});
+
+test("RESIDUAL v3 a MALFORMED rounding value (normalizes to NULL) is REFUSED at persist (item 4: never silently zero)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // A present rounding text that does not normalize to cents — pre-v3 it became NULL and was
+  // coalesced to 0 in the tie; v3 refuses it (a stated-but-unparseable number is a data error).
+  await assert.rejects(
+    () => persistInvoiceFacts(lf.task, [
+      factField("invoice.total", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+      factField("invoice.rounding", "not-a-number", { polygon: [], confidence: 0.9 }),
+    ]),
+    (e) => e.code === "CLR10" || /malformed/.test(e.message ?? ""),
+    "a rounding value that does not normalize to cents is refused (item 4: not treated as zero)",
+  );
+});
+
+// ===========================================================================
+// RESIDUAL-4 v4 (FOURTH adversarial re-verify) — the NULL/BLANK cardinality hole.
+// The v3 conflict/malformed checks used count(distinct <value>) / min(<value>),
+// which SQL NULL-semantics let IGNORE a blank/NULL: a crafted ['', real] duplicate
+// (or a single 'N/A' where a value is required) slipped past the write boundary and
+// then min() selected the blank -> NULL, re-opening polarity / direction / duplicate-
+// bill / corroboration. v4 coalesces to a control-char SENTINEL (blank is DISTINCT)
+// and refuses a present-but-malformed monetary value UNIFORMLY. Each FAILS pre-v4
+// (persists / corroborates) and PASSES after (refused at the write boundary).
+// ===========================================================================
+
+test("RESIDUAL-4/v4 a BLANK-duplicate type_code (['', '02']) is REFUSED at persist (blank vs real is a CONFLICT, not min-selected to blank -> polarity bypass)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // Pre-v4: count(distinct nullif(btrim,'')) ignored the blank -> {'02'} -> 1 -> persisted;
+  // _invoice_fact_state min()-selected '' -> NULL -> the supplier polarity floor never fired
+  // (a type-02 supplier credit note posted as a bill). v4 sentinels the blank -> conflict.
+  await assert.rejects(
+    () => persistInvoiceFacts(lf.task, [
+      factField("invoice.total", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "02", { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+    ]),
+    (e) => e.code === "CLR10" || /conflicting duplicate/.test(e.message ?? ""),
+    "a blank+real type_code duplicate is refused (pre-v4 min-selected the blank away, re-opening the polarity bind)",
+  );
+});
+
+test("RESIDUAL-4/v4 a BLANK-duplicate customer_taxid (['', a real TIN]) is REFUSED at persist (closes the direction double-identity bypass)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A2);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // Item 4: customer_taxid=['', clientTIN] slipped past (count-distinct ignored the blank),
+  // then min() selected '' -> NULL, so the buyer-is-the-client contradiction never reached
+  // CLR30 and the doc resolved decisively to 'sales'. v4 refuses the blank+real duplicate.
+  await assert.rejects(
+    () => persistInvoiceFacts(lf.task, [
+      factField("invoice.total", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+      factField("invoice.customer_taxid", "", { polygon: [], confidence: 0.9 }),
+      factField("invoice.customer_taxid", "C12345678901", { polygon: [], confidence: 0.9 }),
+    ]),
+    (e) => e.code === "CLR10" || /conflicting duplicate/.test(e.message ?? ""),
+    "a blank+real customer_taxid duplicate is refused (pre-v4 min-selected the blank, dropping the double-identity abstain)",
+  );
+});
+
+test("RESIDUAL-4/v4 a single MALFORMED amount_due ('N/A') is REFUSED at persist (item 5: never NULL-accepted as 'no due')", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // Item 5: amount_due='N/A' normalized to NULL cents; the corroboration guard `v_due is null
+  // or v_due=v_total` then accepted the NULL as "no due stated" and corroborated. v4 refuses a
+  // PRESENT-but-unparseable required monetary value at the write boundary.
+  await assert.rejects(
+    () => persistInvoiceFacts(lf.task, [
+      factField("invoice.total", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+      factField("invoice.amount_due", "N/A", { polygon: [], confidence: 0.9 }),
+    ]),
+    (e) => e.code === "CLR10" || /malformed/.test(e.message ?? ""),
+    "a present-but-unparseable amount_due is refused (pre-v4 it became NULL and corroborated as 'no due')",
+  );
+});
+
+test("RESIDUAL-4/v4 a single MALFORMED deposit ('N/A') is REFUSED at persist (item 5: never NULL-defaulted to a zero deposit)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A2);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // Item 5: deposit='N/A' normalized to NULL; `coalesce(v_deposit,0)=0` then treated it as a
+  // ZERO deposit and corroborated — a non-zero deposit would otherwise BLOCK corroboration.
+  await assert.rejects(
+    () => persistInvoiceFacts(lf.task, [
+      factField("invoice.total", "RM 100.00", { polygon: [], confidence: 0.9 }),
+      factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+      factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+      factField("invoice.deposit", "N/A", { polygon: [], confidence: 0.9 }),
+    ]),
+    (e) => e.code === "CLR10" || /malformed/.test(e.message ?? ""),
+    "a present-but-unparseable deposit is refused (pre-v4 it became NULL and defaulted to a zero deposit)",
+  );
+});
+
+test("RESIDUAL-4/v4 POSITIVE CONTROL: a PRESENT amount_due = total and a PRESENT deposit = 0 still corroborate (no false-reject from the read guard)", async (t) => {
+  if (skip15(t)) return;
+  const firm = await firmOf(world.clients.A1);
+  const lf = await localFactsTask({ firm });
+  assert.ok(lf, "the local_facts task was built (mandatory setup)");
+  // The v4 read guard is `(count=0 or (value is not null and value ties))`, so a genuinely
+  // stated amount_due = total and a genuinely stated deposit = 0 must STILL corroborate —
+  // only a PRESENT-but-NULL value is now excluded.
+  await persistInvoiceFacts(lf.task, [
+    factField("invoice.total", "RM 106.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.total_excl_tax", "RM 100.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_total", "RM 6.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_breakdown", '[{"type":"01","rate":6,"amount":"6.00"}]', { polygon: [], confidence: 0.9 }),
+    factField("invoice.currency", "MYR", { polygon: [], confidence: 0.9 }),
+    factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+    factField("invoice.amount_due", "RM 106.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.deposit", "RM 0.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.invoice_id", `SI-${randomUUID().slice(0, 8)}`, { polygon: [], confidence: 0.9 }),
+  ]);
+  const state = await invoiceFactState(lf.document);
+  assert.ok(state, "fact-state present");
+  assert.equal(state.corroborated, true, "a stated amount_due=total and deposit=0 still corroborate (the read guard rejects only a present-but-NULL value)");
+});

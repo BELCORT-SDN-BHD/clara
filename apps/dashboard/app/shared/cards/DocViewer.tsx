@@ -97,7 +97,7 @@ export function DocViewer({ token, documentId, page, overlay }: { token: string 
       ) : view === "pdf-canvas" ? (
         <PdfPageCanvas blobUrl={state.url} page={page ?? 1} overlay={overlay ?? []} onFail={onPdfFail} />
       ) : view === "xml" ? (
-        <XmlStructuredView blobUrl={state.url} mime={state.mime} />
+        <XmlStructuredView blobUrl={state.url} />
       ) : (
         <object key={src} className={styles.docFrame} data={src} type={state.mime} aria-label="Source document — inert data">
           <p className={styles.muted}>

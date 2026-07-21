@@ -24,7 +24,7 @@ import {
   waveAEnsureReady, buildWorld, firmOf, opk,
   callFnAdaptive, resolveFn, humanPersona,
   upsertPayableAccount, upsertAccountClassed, grantConsent, seedCitedDocument, freshResolution,
-  draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows, codingRuleRows,
+  draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows, codingRuleRows, reasonOf,
   AP, EXP,
 } from "./wave-a-fixtures.mjs";
 
@@ -72,16 +72,21 @@ async function seedSightings(sub, { client, cp, accountCode = EXP, n = 3 }) {
     if (d?.entry_id) await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("sa") }).catch(() => {});
   }
 }
-/** Propose an autopost rule (returns rule id) — bookkeeper+ author path. */
+/** Propose an autopost rule (returns rule id) — bookkeeper+ author path. The writer
+ *  takes a single jsonb proposal (contract §6.2: {client_id, counterparty_id,
+ *  account_code, direction, amount_cap RAW STRING, frequency_window, window_max_posts,
+ *  expires_at?}) + p_op_key — so the adaptive call packs a `proposal` object (loose
+ *  keys never map onto the jsonb param). */
 async function proposeAutopost(sub, { client, cp, accountCode = EXP, cap = 200000, windowMax = 3, direction = "purchase", supersedes = undefined }) {
   if (!proposeFn) return null;
-  const desired = {
-    client, counterparty: cp, account_code: accountCode, amount_cap_cents: cap,
-    frequency_window: "monthly", window_max_posts: windowMax, direction, op_key: opk("prop"),
+  const proposal = {
+    client_id: client, counterparty_id: cp, account_code: accountCode,
+    amount_cap: (cap / 100).toFixed(2), frequency_window: "monthly",
+    window_max_posts: windowMax, direction,
   };
-  if (supersedes !== undefined) desired.supersedes_rule_id = supersedes;
+  if (supersedes !== undefined) proposal.supersedes_rule_id = supersedes;
   try {
-    const r = await callFnAdaptive(proposeFn, desired, { persona: humanPersona(sub), label: proposeFn });
+    const r = await callFnAdaptive(proposeFn, { proposal, op_key: opk("prop") }, { persona: humanPersona(sub), label: proposeFn });
     const id = r?.rule_id ?? r?.id ?? (typeof r === "string" ? r : null);
     if (id) return id;
   } catch (e) { noteLane(`${proposeFn} raised ${e.code}: ${e.message}`); return { error: e }; }
@@ -242,4 +247,64 @@ test("§6.1 only ONE live autopost rule per (client, counterparty) — a second 
     (e) => e.code === "CLR27" || e.code === "23505",
     "signing a SECOND live autopost rule for the same (client, counterparty) is refused (one-live)",
   );
+});
+
+// ===========================================================================
+// SALES-AUTOPOST DEFERRAL (owner ruling → Wave-A2.1): a sales-direction autopost
+// is an EXPLICIT structural refusal, not silent dead code. Purchase stays live.
+// FAILS pre-fix (which admitted direction='sales').
+// ===========================================================================
+
+test("DEFERRAL propose_autopost_rule REFUSES direction='sales' (CLR27 sales_autopost_deferred); purchase is unaffected", async (t) => {
+  if (skip15(t)) return;
+  if (!proposeFn) { noteLane("propose_autopost_rule absent — deferral cell skipped"); return; }
+  const { users, clients } = world;
+  const cp = await makeVendor(users.alice, { client: clients.A1, name: `DEFERCO ${randomUUID().slice(0, 6)}`, reg: "201801030901" });
+  assert.ok(cp, "the deferral test counterparty was created (mandatory setup)");
+  // Seed the sightings FIRST so that — absent the deferral — the sales proposal would
+  // SUCCEED pre-fix (a clean regression guard: the failure is the deferral, not a
+  // coincidental insufficient-evidence CLR27). Post-fix the deferral refuses it first.
+  await seedSightings(users.alice, { client: clients.A1, cp, accountCode: EXP });
+  const sales = await proposeAutopost(users.alice, { client: clients.A1, cp, accountCode: EXP, direction: "sales" });
+  assert.ok(sales?.error, "a sales-direction autopost proposal is REFUSED (pre-fix, with sightings present, it was admitted)");
+  assert.equal(sales.error.code, "CLR27", `sales autopost is refused with CLR27 (got ${sales.error?.code})`);
+  assert.equal(reasonOf(sales.error), "sales_autopost_deferred", `sales autopost is refused specifically as sales_autopost_deferred (got '${reasonOf(sales.error)}')`);
+  // A purchase-direction proposal with the same shape is NOT refused for that reason.
+  const purchase = await proposeAutopost(users.alice, { client: clients.A1, cp, accountCode: EXP, direction: "purchase" });
+  if (purchase?.error) {
+    assert.notEqual(reasonOf(purchase.error), "sales_autopost_deferred", "a purchase proposal is never refused as sales_autopost_deferred");
+    noteLane(`purchase proposal raised ${purchase.error.code}/${reasonOf(purchase.error)} — inspect (not the deferral)`);
+  } else {
+    assert.ok(purchase, "a purchase-direction autopost proposal is accepted (the deferral is sales-only)");
+  }
+});
+
+test("DEFERRAL sign_autopost_rule REFUSES a sales-direction rule even if one predated the refusal (defense-in-depth)", async (t) => {
+  if (skip15(t)) return;
+  if (!signFn) { noteLane("sign_autopost_rule absent — deferral sign cell skipped"); return; }
+  const { users, clients } = world;
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `DEFERSIGN ${randomUUID().slice(0, 6)}`, reg: "201801030902" });
+  assert.ok(cp, "the deferral-sign counterparty was created (mandatory setup)");
+  // Raw-insert a PROPOSED sales autopost rule (as root) to simulate one that predated
+  // the propose-time refusal, then prove sign refuses it.
+  const firm = await firmOf(clients.A2);
+  const acct = (await rootQuery("select account_code from clara.coa_accounts where client_id=$1 and account_type='income' order by account_code limit 1", [clients.A2])).rows[0]?.account_code
+    ?? (await rootQuery("select account_code from clara.coa_accounts where client_id=$1 and is_active order by account_code limit 1", [clients.A2])).rows[0]?.account_code;
+  if (!acct) { noteLane("no account for a raw sales rule — deferral sign cell skipped"); return; }
+  const ins = await rootQuery(
+    `insert into clara.coding_rules(firm_id,client_id,rule_type,counterparty_id,account_code,status,pinned,origin,content_hash,created_by,
+        amount_cap_cents,frequency_window,window_max_posts,expires_at,direction)
+     values($1,$2,'autopost',$3,$4,'proposed',false,'authored',encode(sha256(convert_to($5,'UTF8')),'hex'),$6,
+        100000,'monthly',3,now()+interval '12 months','sales') returning id`,
+    [firm, clients.A2, cp, acct, `defersign-${randomUUID()}`, users.alice],
+  ).catch((e) => { noteLane(`raw sales rule insert ${e.code}: ${e.message}`); return null; });
+  const rid = ins?.rows?.[0]?.id;
+  if (!rid) { noteLane("could not raw-insert a proposed sales rule — deferral sign cell skipped"); return; }
+  let err = null;
+  try { await signAutopost(users.alice, { rule: rid }); } catch (e) { err = e; }
+  assert.ok(err, "signing a sales-direction autopost rule is REFUSED (defense-in-depth)");
+  assert.equal(err.code, "CLR27", `the sales-sign refusal is CLR27 (got ${err?.code})`);
+  if (reasonOf(err) && reasonOf(err) !== "sales_autopost_deferred") noteLane(`sales sign refused with '${reasonOf(err)}' (expected sales_autopost_deferred)`);
+  const row = (await codingRuleRows(clients.A2)).find((r) => r.id === rid);
+  assert.notEqual(row?.status, "live", "the sales rule never goes live");
 });

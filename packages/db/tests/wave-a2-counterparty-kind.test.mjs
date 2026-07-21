@@ -19,7 +19,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
-  waveAEnsureReady, buildWorld, firmOf, opk, addAlias,
+  waveAEnsureReady, buildWorld, firmOf, opk, addAlias, mergeCounterparties, reasonOf,
 } from "./wave-a-fixtures.mjs";
 
 let ready = false;
@@ -175,4 +175,51 @@ test("§4.2 add_counterparty_alias is kind-agnostic — it works on a customer-k
   );
   const rows = await rootQuery("select 1 from clara.counterparty_aliases where counterparty_id=$1 and alias_normalized=$2", [customerId, norm(alias)]);
   assert.ok(rows.rows.length > 0, "the customer's alias row persisted");
+});
+
+// ===========================================================================
+// FIX-3 (adversarial #6) — cross-kind merges are refused, and the resolution
+// canonicalization reload re-applies the kind scope so a customer proposal can
+// never return a vendor row through a crossed merge. Both FAIL pre-fix.
+// ===========================================================================
+
+test("FIX-3 merge_counterparties REFUSES a cross-kind merge (a vendor and a customer never merge) — CLR23 cross_kind_merge", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.A1);
+  const reg = `2018${randomUUID().slice(0, 8).replace(/\D/g, "0")}`;
+  const vendorId = await rawCounterparty({ firm, client: clients.A1, kind: "vendor", name: `XKIND VENDOR ${reg}`, reg, createdBy: users.alice });
+  const customerId = await rawCounterparty({ firm, client: clients.A1, kind: "customer", name: `XKIND CUSTOMER ${reg}`, reg, createdBy: users.alice });
+  let err = null;
+  try { await mergeCounterparties(users.alice, { client: clients.A1, survivor: vendorId, merged: customerId, reason: "cross-kind attempt", opKey: opk("xkind") }); }
+  catch (e) { err = e; }
+  assert.ok(err, "a cross-kind merge is REFUSED (pre-fix it silently merged a customer into a vendor)");
+  assert.equal(err.code, "CLR23", `cross-kind merge raises CLR23 (got ${err?.code})`);
+  if (reasonOf(err) && reasonOf(err) !== "cross_kind_merge") noteLane(`cross-kind merge refused with reason '${reasonOf(err)}' (expected cross_kind_merge)`);
+  // Neither row was retired (the merge never happened).
+  const rows = await rootQuery("select id, merged_into, retired_at from clara.counterparties where id in ($1,$2)", [vendorId, customerId]);
+  for (const r of rows.rows) assert.ok(r.merged_into == null && r.retired_at == null, "no row was retired by the refused merge");
+});
+
+test("FIX-3 the resolution canonicalization reload re-applies kind scope — a customer proposal never returns a vendor survivor", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.A1);
+  const reg = `2018${randomUUID().slice(0, 8).replace(/\D/g, "0")}`;
+  const vendorId = await rawCounterparty({ firm, client: clients.A1, kind: "vendor", name: `CROSSED VENDOR ${reg}`, reg, createdBy: users.alice });
+  const customerId = await rawCounterparty({ firm, client: clients.A1, kind: "customer", name: `CROSSED CUSTOMER ${reg}`, reg, createdBy: users.alice });
+  // Simulate a PRIOR cross-kind merge state (the guard defends against one that
+  // predates it / bypasses the public writer): point the customer at the vendor.
+  await rootQuery(
+    "update clara.counterparties set merged_into=$1, retired_at=now(), updated_at=now() where id=$2",
+    [vendorId, customerId],
+  );
+  // A customer proposal by that registration canonicalizes to the vendor survivor;
+  // the reload's re-applied kind predicate must REFUSE (CLR23), never return the vendor.
+  let err = null, got = null;
+  try { got = await resolve(clients.A1, { new: { name: `CROSSED CUSTOMER ${reg}`, registration_no: reg }, kind: "customer" }); }
+  catch (e) { err = e; }
+  assert.notEqual(got?.counterparty_id, vendorId, "a customer proposal must NEVER resolve to the vendor survivor through a crossed merge");
+  assert.ok(err, "the crossed canonicalization is REFUSED rather than returning the wrong-kind row (pre-fix returned the vendor row)");
+  if (err) assert.equal(err.code, "CLR23", `the crossed reload raises CLR23 (got ${err?.code})`);
 });

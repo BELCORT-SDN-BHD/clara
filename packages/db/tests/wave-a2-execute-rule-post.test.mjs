@@ -29,6 +29,8 @@ import {
   withSessionAuth, callFnAdaptive, resolveFn, humanPersona,
   upsertPayableAccount, upsertAccountClassed, grantConsent, seedCitedDocument, freshResolution,
   draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows, codingRuleRows, sightingRows,
+  mintInteractive, wakeDraftEntry,
+  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   AP, EXP,
 } from "./wave-a-fixtures.mjs";
 
@@ -60,15 +62,56 @@ async function makeVendor(sub, { client, name, reg }) {
   return (await counterpartyRows(client)).find((c) => (c.name_normalized ?? "") === norm)?.id ?? null;
 }
 
-/** Draft a fresh AP bill for `cp` coded to `accountCode` at `amount` (a DRAFT, not
- *  approved — the raw material execute_rule_post posts). Returns {entry_id, revision_token}. */
-async function draftBill(sub, { client, cp, accountCode = EXP, amount = 50000 }) {
+/** Draft a fresh supplier-bill DRAFT for `cp` (the raw material execute_rule_post
+ *  posts). It MUST carry coding_kind='supplier_bill' + a document + a counterparty
+ *  proposal — i.e. the AGENT/wake lane (the human draft_entry forces coding_kind=NULL,
+ *  which the executor rejects as not_eligible_shape). `lines` overrides the default
+ *  Dr expense / Cr payable pair. Returns {entry_id, revision_token}. */
+async function draftBill(sub, { client, cp, accountCode = EXP, amount = 50000, lines = null }) {
   const firm = await firmOf(client);
+  const cred = await mintInteractive(firm);
   const cited = await seedCitedDocument(sub, { firm, client, quote: `RM ${(amount / 100).toFixed(2)}` });
-  return draftEntryV3(sub, {
-    client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
-    document: cited.documentId, sha256: cited.sha256, lines: billLines(accountCode, AP, amount),
-    vendor: { existing_id: cp }, evidence: [ev(cited.regionId, cited.quote, FIELD.total)], opKey: opk("bill"),
+  return wakeDraftEntry(cred, {
+    client,
+    resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
+    lines: lines ?? billLines(accountCode, AP, amount),
+    document: cited.documentId, sha256: cited.sha256,
+    vendor: { existing_id: cp },
+    evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+    codingKind: "supplier_bill", opKey: opk("bill"),
+  });
+}
+
+/** Draft a Tier-A CORROBORATED supplier-bill DRAFT for `cp` — the raw material a
+ *  LEGITIMATE auto-post acts on (post-v5 the executor REQUIRES corroboration). Seeds a
+ *  facts-complete document whose invoice.total CORROBORATES (azure page_polygon Tier-A),
+ *  then wake-drafts a supplier_bill citing the MACHINE total region (so the evidence is
+ *  'verified' and binds the corroborated gross) with a control leg = the gross. Mirrors
+ *  the s6 "Tier-A agreement" recipe. Returns {entry_id, revision_token}. */
+async function draftCorroboratedBill(sub, { client, cp, accountCode = EXP, amount = 50000, lines = null }) {
+  const firm = await firmOf(client);
+  await grantConsent(sub, { firm, client }).catch(() => {});
+  const cred = await mintInteractive(firm);
+  const quote = `RM ${(amount / 100).toFixed(2)}`;
+  const cited = await seedCitedDocument(sub, { firm, client, quote });
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  await claimTask(task.id, { egressApproved: true });
+  await persistInvoiceFacts(task.id, [
+    factField(FIELD.total, quote),
+    factField(FIELD.currency, "MYR"),
+    factField("invoice.vendor_name", "CORROBVENDOR SDN BHD"), // a third party => direction=purchase
+    factField("invoice.invoice_id", `INV-${randomUUID().slice(0, 8)}`),
+  ]);
+  const freg = await factsRegion(cited.documentId, FIELD.total);
+  return wakeDraftEntry(cred, {
+    client,
+    resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
+    lines: lines ?? billLines(accountCode, AP, amount),
+    document: cited.documentId, sha256: cited.sha256,
+    vendor: { existing_id: cp },
+    evidence: [ev(freg.id, freg.text_content, FIELD.total)],
+    codingKind: "supplier_bill", opKey: opk("cbill"),
   });
 }
 
@@ -88,11 +131,16 @@ async function buildLiveAutopostRule(sub, { client, cp, accountCode = EXP, cap =
   await seedSightings(sub, { client, cp, accountCode });
   let ruleId = null;
   try {
-    const proposed = await callFnAdaptive(proposeFn, {
-      client, counterparty: cp, account_code: accountCode, amount_cap_cents: cap,
-      frequency_window: "monthly", window_max_posts: windowMax, direction,
-      expires_at: expiresAt, op_key: opk("proprule"),
-    }, { persona: humanPersona(sub), label: proposeFn });
+    // The writer takes a single jsonb proposal (contract §6.2) + p_op_key; the adaptive
+    // call packs a `proposal` object (loose keys never map onto the jsonb param).
+    const proposal = {
+      client_id: client, counterparty_id: cp, account_code: accountCode,
+      amount_cap: (cap / 100).toFixed(2), frequency_window: "monthly",
+      window_max_posts: windowMax, direction,
+    };
+    if (expiresAt) proposal.expires_at = expiresAt;
+    const proposed = await callFnAdaptive(proposeFn, { proposal, op_key: opk("proprule") },
+      { persona: humanPersona(sub), label: proposeFn });
     ruleId = proposed?.rule_id ?? proposed?.id ?? (typeof proposed === "string" ? proposed : null);
   } catch (e) { noteLane(`${proposeFn} raised ${e.code}: ${e.message}`); return null; }
   if (!ruleId) { const live = (await codingRuleRows(client)).filter((r) => r.rule_type === "autopost"); ruleId = live[live.length - 1]?.id ?? null; }
@@ -203,7 +251,10 @@ test("§6.3 a matching IN-BOUNDS routine draft posts via the rule (checked_via_r
   if (!cp) return;
   const rule = await buildLiveAutopostRule(users.alice, { client: clients.A1, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
   if (!rule) return;
-  const draft = await draftBill(users.alice, { client: clients.A1, cp, accountCode: EXP, amount: 50000 });
+  // v5: the executor auto-posts ONLY a CORROBORATED bill (a non-corroborated draft is
+  // now skipped not_corroborated — see the RESIDUAL v5 section). The happy path therefore
+  // cites a facts-corroborated document with the control leg tied to the verified gross.
+  const draft = await draftCorroboratedBill(users.alice, { client: clients.A1, cp, accountCode: EXP, amount: 50000 });
   if (!draft?.entry_id) { noteLane("in-bounds draft not created"); return; }
   const sightBefore = (await sightingRows(clients.A1)).length;
   try { await postViaRule(draft.entry_id); } catch (e) { noteLane(`execute_rule_post(in-bounds) raised ${e.code}: ${e.message}`); return; }
@@ -236,21 +287,59 @@ test("§6.3 execute_rule_post REFUSES a WHOLE-ENTRY violation (a 3-way split und
   if (!rule) return;
   // A 3-leg draft: two expense legs (EXP + EXP2) + the payable — total under cap, but
   // NOT every non-control leg hits the rule's account EXP (EXP2 is off-rule).
-  const firm = await firmOf(clients.A2);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 900.00" });
-  const draft = await draftEntryV3(users.alice, {
-    client: clients.A2, resolution: await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: cited.documentId }),
-    document: cited.documentId, sha256: cited.sha256,
+  const draft = await draftBill(users.alice, {
+    client: clients.A2, cp, amount: 90000,
     lines: [
       { account_code: EXP, debit_cents: 40000, credit_cents: 0, description: "leg-a" },
       { account_code: EXP2, debit_cents: 50000, credit_cents: 0, description: "leg-b (off-rule)" },
       { account_code: AP, debit_cents: 0, credit_cents: 90000, description: "ap" },
     ],
-    vendor: { existing_id: cp }, evidence: [ev(cited.regionId, cited.quote, FIELD.total)], opKey: opk("split"),
   }).catch((e) => { noteLane(`3-way split draft raised ${e.code}`); return null; });
-  if (!draft?.entry_id) return;
+  assert.ok(draft?.entry_id, "the 3-way split supplier-bill draft was created (mandatory setup)");
   await postViaRule(draft.entry_id).catch(() => {});
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a 3-way split with an off-rule leg is NOT auto-posted (the whole-entry constraint)");
+});
+
+test("FIX-1 execute_rule_post REFUSES an EXTRA control leg (a receivable leg on a purchase bill never launders under the control exemption)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const REC = "300-A00";
+  await upsertAccountClassed(users.alice, { client: clients.A2, code: REC, name: "Trade Debtors", type: "asset", accountClass: "receivable", opKey: opk("recX") }).catch((e) => noteLane(`recX ${e.code}`));
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `CTRLCO ${randomUUID().slice(0, 6)}`, reg: "201801020103" });
+  if (!cp) return;
+  const rule = await buildLiveAutopostRule(users.alice, { client: clients.A2, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
+  if (!rule) return;
+  // Dr EXP(rule) 40000 + Dr receivable-control 5000 + Cr AP 45000 — balanced, under cap.
+  // The extra receivable CONTROL leg is the laundering target; the pre-fix executor
+  // exempted ALL control lines, so the expense-only whole-entry check passed and it
+  // posted. Post-fix: exactly-one-direction-correct-control refuses it.
+  const draft = await draftBill(users.alice, {
+    client: clients.A2, cp, amount: 45000,
+    lines: [
+      { account_code: EXP, debit_cents: 40000, credit_cents: 0, description: "expense (rule)" },
+      { account_code: REC, debit_cents: 5000, credit_cents: 0, description: "launder-into-receivable" },
+      { account_code: AP, debit_cents: 0, credit_cents: 45000, description: "ap" },
+    ],
+  }).catch((e) => { noteLane(`control-leg draft raised ${e.code}`); return null; });
+  assert.ok(draft?.entry_id, "the extra-control-leg supplier-bill draft was created (mandatory setup)");
+  await postViaRule(draft.entry_id).catch(() => {});
+  assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a purchase bill with an extra receivable control leg is NOT auto-posted (control-shape refusal)");
+  const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
+  if (skip && skip !== "control_shape") noteLane(`extra-control-leg skipped with reason '${skip}' (expected control_shape)`);
+});
+
+test("FIX-6 execute_rule_post discriminates CLR10 — only the benign not_a_draft race is masked; other CLR10 propagate", async (t) => {
+  if (skip15(t)) return;
+  // The benign not_a_draft race is masked (proven behaviorally by the withdrawn-draft
+  // cell). This asserts the DISCRIMINATION exists: the executor inspects the exception
+  // detail rather than blanket-catching every CLR10, and the core tags the status race
+  // with the not_a_draft marker — so a config-integrity CLR10 (e.g. sst_account_missing)
+  // is never silently reported as not_a_draft. Both FAIL against the pre-fix code.
+  const src = (await rootQuery("select prosrc from pg_proc where oid='clara.execute_rule_post(uuid,text)'::regprocedure")).rows[0].prosrc;
+  assert.match(src, /pg_exception_detail/i, "execute_rule_post inspects the exception detail (no blanket CLR10 catch)");
+  assert.match(src, /not_a_draft/, "execute_rule_post keys the benign race on the not_a_draft marker");
+  const core = (await rootQuery("select prosrc from pg_proc where oid='clara._approve_entry_core(jsonb,uuid,uuid,text,text)'::regprocedure")).rows[0].prosrc;
+  assert.match(core, /not_a_draft/, "the approve core tags the not-a-draft status race with a distinct detail reason");
 });
 
 test("§6.5 execute_rule_post REFUSES a HIGH-STAKES draft (is_high_stakes re-checked hard at post time)", async (t) => {
@@ -286,35 +375,52 @@ test("§6.3 execute_rule_post SKIPS (does not raise) a draft a human already WIT
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a withdrawn draft is never posted; the executor skips it as a benign no-op");
 });
 
-test("P12 two concurrent posts on ONE rule at window_max=1 post EXACTLY ONE (FOR-UPDATE serialization)", async (t) => {
+test("P12 two concurrent posts on ONE rule at window_max=1 post EXACTLY ONE — a REAL two-open-transaction barrier proves FOR-UPDATE serialization", async (t) => {
   if (skip15(t)) return;
   const { users, clients } = world;
   const cp = await makeVendor(users.alice, { client: clients.A1, name: `WINCO ${randomUUID().slice(0, 6)}`, reg: "201801020006" });
-  if (!cp) return;
+  assert.ok(cp, "the window-race vendor was created (mandatory setup)");
   const rule = await buildLiveAutopostRule(users.alice, { client: clients.A1, cp, accountCode: EXP, cap: 200000, windowMax: 1 });
-  if (!rule) return;
-  const d1 = await draftBill(users.alice, { client: clients.A1, cp, accountCode: EXP, amount: 40000 });
-  const d2 = await draftBill(users.alice, { client: clients.A1, cp, accountCode: EXP, amount: 45000 });
-  if (!d1?.entry_id || !d2?.entry_id) { noteLane("could not build two window-race drafts"); return; }
+  assert.ok(rule, "the window_max=1 autopost rule was built (mandatory setup)");
+  // v5: both drafts must be CORROBORATED to be auto-post-eligible — else the executor skips
+  // not_corroborated before the window race is even reached. Each cites its own facts-
+  // corroborated document (gross = its amount), so the FOR-UPDATE window count is the sole
+  // discriminator that lets EXACTLY ONE through.
+  const d1 = await draftCorroboratedBill(users.alice, { client: clients.A1, cp, accountCode: EXP, amount: 40000 });
+  const d2 = await draftCorroboratedBill(users.alice, { client: clients.A1, cp, accountCode: EXP, amount: 45000 });
+  assert.ok(d1?.entry_id && d2?.entry_id, "both window-race drafts were created (mandatory setup)");
 
-  // Two runtime-login sessions, each posts its own draft, racing on the rule's FOR UPDATE.
+  // TRUE lock-serialization barrier (native #13): BOTH sessions BEGIN; session 1 posts
+  // d1 and HOLDS the rule's FOR-UPDATE row lock (uncommitted); session 2 then issues its
+  // post and must BLOCK on that same lock — it MUST NOT resolve while session 1 holds the
+  // row. Only after session 1 commits does session 2 proceed and re-derive the window
+  // count (now exhausted) → skip. This proves serialization, not mere sequential counting.
   const c1 = await getPool().connect();
   const c2 = await getPool().connect();
-  const out = { a: null, b: null };
   try {
-    for (const [c, d, slot] of [[c1, d1, "a"], [c2, d2, "b"]]) {
-      await c.query("set session authorization clara_runtime_login");
-      await c.query("begin");
-      const p = c.query("select clara.execute_rule_post(p_entry => $1, p_op_key => $2) as r", [d.entry_id, `rp:${d.entry_id}`])
-        .then(() => { out[slot] = { ok: true }; })
-        .catch((e) => { out[slot] = { ok: false, code: e.code }; });
-      if (slot === "a") { await p; await c1.query("commit"); } // c1 posts + commits first (holds/releases the row lock)
-      else { await p; await c2.query("commit").catch(() => c2.query("rollback").catch(() => {})); }
-    }
+    await c1.query("set session authorization clara_runtime_login");
+    await c2.query("set session authorization clara_runtime_login");
+    await c1.query("begin");
+    await c2.query("begin");
+    // Session 1: post d1 (returns, holding the rule row lock until commit).
+    await c1.query("select clara.execute_rule_post(p_entry => $1, p_op_key => $2) as r", [d1.entry_id, `rp:${d1.entry_id}`]);
+    // Session 2: start its post; it blocks on the rule's FOR UPDATE held by session 1.
+    let s2settled = false;
+    const p2 = c2.query("select clara.execute_rule_post(p_entry => $1, p_op_key => $2) as r", [d2.entry_id, `rp:${d2.entry_id}`])
+      .then((r) => { s2settled = true; return r; })
+      .catch((e) => { s2settled = true; throw e; });
+    // Barrier: session 2 must still be blocked (not settled) while session 1 holds the lock.
+    const raced = await Promise.race([p2.then(() => "settled", () => "settled"), new Promise((res) => setTimeout(() => res("blocked"), 500))]);
+    assert.equal(raced, "blocked", "session 2 BLOCKS on the rule FOR-UPDATE while session 1 holds it (true serialization, not sequential counting)");
+    assert.equal(s2settled, false, "session 2's post has not resolved while the lock is held");
+    // Release: session 1 commits → session 2 unblocks and re-derives the (now-exhausted) window.
+    await c1.query("commit");
+    await p2.catch(() => {}); // session 2 completes (posts a skip row; no throw expected)
+    await c2.query("commit").catch(() => c2.query("rollback").catch(() => {}));
   } finally {
     for (const c of [c1, c2]) {
       await c.query("rollback").catch(() => {});
-      await c.query("reset session authorization").catch(() => {});
+      await c.query("reset session authorization").catch(() => {}); // RESET ALL does NOT clear this
       await c.query("reset all").catch(() => {});
       c.release();
     }
@@ -323,4 +429,409 @@ test("P12 two concurrent posts on ONE rule at window_max=1 post EXACTLY ONE (FOR
   const s2 = (await entryRow(d2.entry_id))?.status;
   const n = [s1, s2].filter((s) => s === "approved").length;
   assert.equal(n, 1, `EXACTLY one of two concurrent posts at window_max=1 succeeds (got ${n}: ${s1}/${s2}) — the window count is atomic under FOR UPDATE`);
+});
+
+// ===========================================================================
+// RESIDUAL v2 (second adversarial re-verify) — the CRITICAL laundering path was
+// only PARTIALLY closed in round 1. These FAIL against the round-1 0015 and PASS
+// after the v2 fix.
+// ===========================================================================
+
+/** A purchase (supplier) facts doc whose stated MyInvois type_code is as given. */
+async function purchaseFactsDoc({ client, typeCode = "02", gross = 50000 }) {
+  const firm = await firmOf(client);
+  await grantConsent(world.users.alice, { firm, client }).catch(() => {});
+  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: `RM ${(gross / 100).toFixed(2)}` });
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  await claimTask(task.id, { egressApproved: true });
+  await persistInvoiceFacts(task.id, [
+    factField("invoice.total", `RM ${(gross / 100).toFixed(2)}`),
+    factField("invoice.currency", "MYR"),
+    factField("invoice.vendor_name", "THIRDPARTY SUPPLIER SDN BHD"),
+    factField("invoice.vendor_registration", "201899123456", { polygon: [], confidence: 0.9 }),
+    factField("invoice.type_code", typeCode, { polygon: [], confidence: 0.9 }),
+  ]).catch((e) => noteLane(`purchase facts persist ${e.code}: ${e.message}`));
+  return cited;
+}
+
+// buildWorld already seeds ONE rounding account per client (COA.rounding); uq_coa_special
+// permits only one, so the tests reference the existing code rather than creating another.
+const RND = "9990";
+
+test("RESIDUAL-1 execute_rule_post REFUSES a caller-supplied ROUNDING leg carrying a material amount (the 9,999¢ laundering vector)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const cp = await makeVendor(users.alice, { client: clients.A1, name: `RNDLAUNDER ${randomUUID().slice(0, 6)}`, reg: "201801020201" });
+  if (!cp) return;
+  const rule = await buildLiveAutopostRule(users.alice, { client: clients.A1, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
+  if (!rule) return;
+  // Dr EXP(rule) 1 + Dr rounding 9,999 + Cr AP 10,000 — balanced, under cap, EXACTLY one
+  // payable control, the only signed-account leg hits EXP. Pre-fix the rounding leg was
+  // exempted by CATEGORY with no amount bound, so RM99.99 laundered into rounding and it
+  // POSTED. Post-fix the expected-account-SET bound (greatest(5, n_legs) sen) refuses it.
+  const draft = await draftBill(users.alice, {
+    client: clients.A1, cp, amount: 10000,
+    lines: [
+      { account_code: EXP, debit_cents: 1, credit_cents: 0, description: "signed expense (1 sen)" },
+      { account_code: RND, debit_cents: 9999, credit_cents: 0, description: "launder-into-rounding" },
+      { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
+    ],
+  }).catch((e) => { noteLane(`rounding-launder draft raised ${e.code}`); return null; });
+  assert.ok(draft?.entry_id, "the rounding-laundering supplier-bill draft was created (mandatory setup)");
+  await postViaRule(draft.entry_id).catch(() => {});
+  assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a bill with a MATERIAL rounding leg is NOT auto-posted (the expected-account-set laundering bound)");
+  const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
+  if (skip && skip !== "account_mismatch") noteLane(`rounding-launder skipped with reason '${skip}' (expected account_mismatch)`);
+});
+
+test("RESIDUAL-1/v5 a ≤5-sen rounding-leg bill is SKIPPED not_corroborated (a rounding leg is inherently non-corroborated → auto-post now refuses it)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const cp = await makeVendor(users.alice, { client: clients.A1, name: `RNDOK ${randomUUID().slice(0, 6)}`, reg: "201801020204" });
+  if (!cp) return;
+  const rule = await buildLiveAutopostRule(users.alice, { client: clients.A1, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
+  if (!rule) return;
+  // v5 BEHAVIOR CHANGE (flagged): pre-v5 a ≤5-sen rounding leg auto-posted (the executor's
+  // rounding tolerance is generous). But a rounding leg means expense (49,997) ≠ gross
+  // (50,000), and the supplier-bill floor's verified-total tie REQUIRES expense=gross exactly
+  // — so a CORROBORATED bill can never carry a rounding leg (the floor refuses it). A rounding
+  // leg is therefore INHERENTLY non-corroborated, and v5 (auto-post only DB-verified entries)
+  // now SKIPS it not_corroborated. The executor's ≤5-sen tolerance still guards the human/agent
+  // approve path and any future non-verified admission; it is simply unreachable for auto-post.
+  // The >5-sen material-rounding refusal (account_mismatch, next-but-one test) is UNCHANGED.
+  const draft = await draftBill(users.alice, {
+    client: clients.A1, cp, amount: 50000,
+    lines: [
+      { account_code: EXP, debit_cents: 49997, credit_cents: 0, description: "expense" },
+      { account_code: RND, debit_cents: 3, credit_cents: 0, description: "genuine rounding (3 sen)" },
+      { account_code: AP, debit_cents: 0, credit_cents: 50000, description: "ap" },
+    ],
+  }).catch((e) => { noteLane(`legit-rounding draft raised ${e.code}`); return null; });
+  assert.ok(draft?.entry_id, "the ≤5-sen rounding bill draft was created (mandatory setup)");
+  await postViaRule(draft.entry_id).catch((e) => noteLane(`≤5-sen rounding post raised ${e.code}`));
+  assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a ≤5-sen rounding-leg bill is NOT auto-posted under v5 (inherently non-corroborated)");
+  const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
+  assert.equal(skip, "not_corroborated", `the ≤5-sen rounding bill is skipped not_corroborated (got '${skip}')`);
+});
+
+test("RESIDUAL-1 the supplier-bill shape floor REFUSES a material rounding leg at APPROVE (defense-in-depth, human path)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `RNDFLOOR ${randomUUID().slice(0, 6)}`, reg: "201801020202" });
+  if (!cp) return;
+  const draft = await draftBill(users.alice, {
+    client: clients.A2, cp, amount: 10000,
+    lines: [
+      { account_code: EXP, debit_cents: 1, credit_cents: 0, description: "signed expense (1 sen)" },
+      { account_code: RND, debit_cents: 9999, credit_cents: 0, description: "launder-into-rounding" },
+      { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
+    ],
+  }).catch((e) => { noteLane(`floor-rounding draft raised ${e.code}`); return null; });
+  assert.ok(draft?.entry_id, "the rounding-laundering supplier-bill draft was created (mandatory setup)");
+  let err = null;
+  try { await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("aprnd") }); }
+  catch (e) { err = e; }
+  assert.ok(err, "a supplier bill with a MATERIAL rounding leg is REFUSED at approve (pre-fix the floor had no rounding-amount bound)");
+  assert.equal(err.code, "CLR23", `the material-rounding bill is refused CLR23 (got ${err?.code})`);
+  assert.notEqual((await rootQuery("select status from clara.journal_entries where id=$1", [draft.entry_id])).rows[0]?.status, "approved", "the laundering bill is never approved");
+});
+
+test("RESIDUAL-2 a supplier_bill drafted against a type-02 (credit-note) document is REFUSED (type_polarity_mismatch)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const cited = await purchaseFactsDoc({ client: clients.A1, typeCode: "02", gross: 50000 });
+  const firm = await firmOf(clients.A1);
+  const cred = await mintInteractive(firm);
+  let err = null;
+  try {
+    await wakeDraftEntry(cred, {
+      client: clients.A1,
+      resolution: await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: cited.documentId }),
+      lines: billLines(EXP, AP, 50000),
+      document: cited.documentId, sha256: cited.sha256,
+      vendor: { new: { name: "THIRDPARTY SUPPLIER SDN BHD", registration_no: "201899123456" } },
+      evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+      codingKind: "supplier_bill", opKey: opk("bill02"),
+    });
+  } catch (e) { err = e; }
+  assert.ok(err, "drafting a supplier_bill against a type-02 document is REFUSED (pre-fix the purchase path never checked type_code)");
+  assert.equal(err.code, "CLR21", `the type-02 supplier bill is refused CLR21 (got ${err?.code})`);
+  assert.match(err.detail ?? err.message ?? "", /type_polarity_mismatch/, "the refusal reason is type_polarity_mismatch");
+});
+
+// ===========================================================================
+// RESIDUAL v3 (THIRD adversarial re-verify) — the laundering boundary is now a
+// COUNT+IDENTITY enumeration (the v2 Σ|dr−cr| tolerance is REPLACED). These FAIL
+// against the round-1/v2 0015 (which posted under the sum tolerance) and PASS after.
+// ===========================================================================
+
+const SST = "250-000"; // SST-output (liability, special_acc_type='sst_output')
+
+test("FIX-1/v3 execute_rule_post REFUSES N tiny decoy legs (count+identity — a Σ tolerance would have admitted them)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `DECOYCO ${randomUUID().slice(0, 6)}`, reg: "201801020302" });
+  if (!cp) return;
+  const rule = await buildLiveAutopostRule(users.alice, { client: clients.A2, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
+  if (!rule) return;
+  // Dr EXP(rule) 1¢ + SIX Dr EXP2 1¢ decoys + Cr AP 7¢ — balanced, under cap. The six decoys
+  // (6¢) sit UNDER the old greatest(5, n_legs=8)=8¢ Σ tolerance, so the v2 executor POSTED —
+  // laundering 6¢ into an off-rule account, scalable arbitrarily with more legs. v3 COUNTS
+  // the legs: six legs outside {control, signed, sst, rounding} => account_mismatch.
+  const decoys = Array.from({ length: 6 }, () => ({ account_code: EXP2, debit_cents: 1, credit_cents: 0, description: "decoy 1 sen" }));
+  const draft = await draftBill(users.alice, {
+    client: clients.A2, cp, amount: 7,
+    lines: [
+      { account_code: EXP, debit_cents: 1, credit_cents: 0, description: "signed expense (1 sen)" },
+      ...decoys,
+      { account_code: AP, debit_cents: 0, credit_cents: 7, description: "ap" },
+    ],
+  }).catch((e) => { noteLane(`decoy-legs draft raised ${e.code}`); return null; });
+  assert.ok(draft?.entry_id, "the N-decoy-legs supplier-bill draft was created (mandatory setup)");
+  await postViaRule(draft.entry_id).catch(() => {});
+  assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "N tiny decoy legs are NOT auto-posted (count+identity, no Σ tolerance to inflate)");
+  const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
+  if (skip && skip !== "account_mismatch") noteLane(`decoy-legs skipped with reason '${skip}' (expected account_mismatch)`);
+});
+
+test("FIX-7/v3 execute_rule_post REFUSES an UNTIED sst_output leg (Dr expense 1¢ / Dr sst_output 9,999¢ / Cr payable — sst is not a free bucket)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  await upsertAccountClassed(users.alice, { client: clients.A2, code: SST, name: "SST Output", type: "liability", special: "sst_output", opKey: opk("sstX") }).catch((e) => noteLane(`sstX ${e.code}`));
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `SSTLAUNDER ${randomUUID().slice(0, 6)}`, reg: "201801020301" });
+  if (!cp) return;
+  const rule = await buildLiveAutopostRule(users.alice, { client: clients.A2, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
+  if (!rule) return;
+  // No facts on this draft => NO tax fact. Pre-fix the executor exempted the active
+  // sst_output account UNCONDITIONALLY, so 9,999¢ laundered into it and it POSTED. v3 ties
+  // the sst_output leg to invoice.tax_total — absent a tax fact, the leg is refused.
+  const draft = await draftBill(users.alice, {
+    client: clients.A2, cp, amount: 10000,
+    lines: [
+      { account_code: EXP, debit_cents: 1, credit_cents: 0, description: "signed expense (1 sen)" },
+      { account_code: SST, debit_cents: 9999, credit_cents: 0, description: "launder-into-sst" },
+      { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
+    ],
+  }).catch((e) => { noteLane(`sst-launder draft raised ${e.code}`); return null; });
+  assert.ok(draft?.entry_id, "the sst-laundering supplier-bill draft was created (mandatory setup)");
+  await postViaRule(draft.entry_id).catch(() => {});
+  assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a bill with an UNTIED sst_output leg (no tax fact) is NOT auto-posted (the tied-sst gate)");
+  const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
+  if (skip && skip !== "account_mismatch") noteLane(`sst-launder skipped with reason '${skip}' (expected account_mismatch)`);
+});
+
+test("FIX-7/v3 the supplier-bill shape floor REFUSES an UNTIED sst_output leg at APPROVE (human path, defense-in-depth)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  await upsertAccountClassed(users.alice, { client: clients.A2, code: SST, name: "SST Output", type: "liability", special: "sst_output", opKey: opk("sstF") }).catch((e) => noteLane(`sstF ${e.code}`));
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `SSTFLOOR ${randomUUID().slice(0, 6)}`, reg: "201801020303" });
+  if (!cp) return;
+  // No facts => no tax fact. The floor (approve path) must refuse an sst_output leg that
+  // cannot tie to a stated tax total — mirroring the executor's autopost gate.
+  const draft = await draftBill(users.alice, {
+    client: clients.A2, cp, amount: 10000,
+    lines: [
+      { account_code: EXP, debit_cents: 1, credit_cents: 0, description: "signed expense (1 sen)" },
+      { account_code: SST, debit_cents: 9999, credit_cents: 0, description: "launder-into-sst" },
+      { account_code: AP, debit_cents: 0, credit_cents: 10000, description: "ap" },
+    ],
+  }).catch((e) => { noteLane(`floor-sst draft raised ${e.code}`); return null; });
+  assert.ok(draft?.entry_id, "the untied-sst supplier-bill draft was created (mandatory setup)");
+  let err = null;
+  try { await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("apsst") }); }
+  catch (e) { err = e; }
+  assert.ok(err, "a supplier bill with an untied sst_output leg is REFUSED at approve (no tax fact to tie against)");
+  assert.equal(err.code, "CLR23", `the untied-sst bill is refused CLR23 (got ${err?.code})`);
+  assert.notEqual((await rootQuery("select status from clara.journal_entries where id=$1", [draft.entry_id])).rows[0]?.status, "approved", "the untied-sst bill is never approved");
+});
+
+// ===========================================================================
+// FIX-2/v4 (FOURTH adversarial re-verify) — sst_output is a SALES-side (output-tax)
+// role ONLY. A supplier bill (PURCHASE) admits NO sst_output leg: Malaysian purchase
+// SST is expensed INTO cost (expense=gross), never booked as a separate output-tax
+// liability. This SUPERSEDES the v3 purchase-side sst TIE — v3 ALLOWED a purchase sst
+// leg that tied to the stated tax fact (the item-2 laundering vector); v4 refuses it
+// OUTRIGHT at both the supplier floor (approve) and the executor (auto-post). Each of
+// these FAILS pre-v4 (approves / posts) and PASSES after (refused).
+// ===========================================================================
+
+test("FIX-2/v4 the supplier-bill floor REFUSES ANY sst_output leg on a PURCHASE at APPROVE (a TIED leg v3 admitted is now refused; sst is sales-only)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  await upsertAccountClassed(users.alice, { client: clients.A2, code: SST, name: "SST Output", type: "liability", special: "sst_output", opKey: opk("sst4") }).catch((e) => noteLane(`sst4 ${e.code}`));
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `SSTV4 ${randomUUID().slice(0, 6)}`, reg: "201801020401" });
+  if (!cp) return;
+  // Dr EXP=net(10,000) / Dr SST=tax(600) / Cr AP=gross(10,600) — a WELL-FORMED, balanced
+  // purchase-with-tax split. Under v3 the supplier floor's sst block only refused an UNTIED
+  // leg ('sst_output leg must equal the stated tax total'); this tied-shaped leg PASSED it.
+  // Under v4 the floor refuses ANY sst leg on a purchase — the v4 message ('admits no
+  // sst_output leg') can ONLY appear post-v4, a clean FAIL-pre-v4 / PASS-post-v4 discriminator.
+  const draft = await draftBill(users.alice, {
+    client: clients.A2, cp, amount: 10600,
+    lines: [
+      { account_code: EXP, debit_cents: 10000, credit_cents: 0, description: "expense (net)" },
+      { account_code: SST, debit_cents: 600, credit_cents: 0, description: "purchase-sst (would-tie)" },
+      { account_code: AP, debit_cents: 0, credit_cents: 10600, description: "ap (gross)" },
+    ],
+  }).catch((e) => { noteLane(`sst-v4 floor draft raised ${e.code}`); return null; });
+  assert.ok(draft?.entry_id, "the sst-leg supplier-bill draft was created (mandatory setup)");
+  let err = null;
+  try { await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("apsst4") }); }
+  catch (e) { err = e; }
+  assert.ok(err, "a supplier bill with an sst_output leg is REFUSED at approve (sst is sales-only)");
+  assert.equal(err.code, "CLR23", `the sst-leg bill is refused CLR23 (got ${err?.code})`);
+  assert.match(err.message ?? "", /admits no sst_output leg/, "refused SPECIFICALLY by the v4 sst-is-sales-only rule (not the v3 tie message) — a clean post-v4 discriminator");
+  assert.notEqual((await rootQuery("select status from clara.journal_entries where id=$1", [draft.entry_id])).rows[0]?.status, "approved", "the sst-leg bill is never approved");
+});
+
+test("FIX-2/v4 execute_rule_post REFUSES a purchase-side sst_output leg that TIES to the stated tax fact (v3 auto-posted it; v4 counts it as an OUTSIDE leg)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  await upsertAccountClassed(users.alice, { client: clients.A2, code: SST, name: "SST Output", type: "liability", special: "sst_output", opKey: opk("sst4e") }).catch((e) => noteLane(`sst4e ${e.code}`));
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `SSTV4E ${randomUUID().slice(0, 6)}`, reg: "201801020402" });
+  if (!cp) return;
+  const rule = await buildLiveAutopostRule(users.alice, { client: clients.A2, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
+  if (!rule) return;
+  // A supplier-bill draft whose document STATES a tax fact (tax_total = 600), shaped
+  // Dr EXP=net(10,000) / Dr SST=tax(600) / Cr AP=gross(10,600). The total fact carries an
+  // EMPTY polygon on the azure lane, so it never corroborates (v_gross NULL => the control-
+  // amount tie stays lenient); the tax_total fact still surfaces. Under v3 the executor
+  // EXEMPTED the tied sst leg from the outside-leg count and the sst tie passed => it POSTED.
+  // v4 counts a PURCHASE sst leg as an OUTSIDE leg => account_mismatch, never posted.
+  const firm = await firmOf(clients.A2);
+  const cred = await mintInteractive(firm);
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 106.00" });
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  if (!task) { noteLane("no invoice_facts task for the sst-v4 executor doc — cell skipped"); return; }
+  await claimTask(task.id, { egressApproved: true }).catch((e) => noteLane(`sst4e claim ${e.code}`));
+  await persistInvoiceFacts(task.id, [
+    factField("invoice.total", "RM 106.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_total", "RM 6.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.type_code", "01", { polygon: [], confidence: 0.9 }),
+    factField("invoice.currency", "MYR"),
+    factField("invoice.vendor_name", "UNRELATED PURCHASE VENDOR SDN BHD"), // non-client => direction purchase
+  ]).catch((e) => noteLane(`sst4e persist ${e.code}: ${e.message}`));
+  let draft = null;
+  try {
+    draft = await wakeDraftEntry(cred, {
+      client: clients.A2,
+      resolution: await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: cited.documentId }),
+      lines: [
+        { account_code: EXP, debit_cents: 10000, credit_cents: 0, description: "expense (net)" },
+        { account_code: SST, debit_cents: 600, credit_cents: 0, description: "purchase-sst (ties to the tax fact)" },
+        { account_code: AP, debit_cents: 0, credit_cents: 10600, description: "ap (gross)" },
+      ],
+      document: cited.documentId, sha256: cited.sha256,
+      vendor: { existing_id: cp },
+      evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+      codingKind: "supplier_bill", opKey: opk("billf"),
+    });
+  } catch (e) { noteLane(`sst-v4 executor draft raised ${e.code}: ${e.message}`); return; }
+  if (!draft?.entry_id) { noteLane("sst-v4 executor draft not created"); return; }
+  await postViaRule(draft.entry_id).catch(() => {});
+  assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a purchase bill with a TIED sst_output leg is NOT auto-posted (v4: sst is sales-only; v3 posted it)");
+  const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
+  if (skip && skip !== "account_mismatch") noteLane(`sst-v4 executor skipped with reason '${skip}' (expected account_mismatch — the purchase sst leg as an outside leg)`);
+});
+
+// ===========================================================================
+// RESIDUAL v5 (FIFTH adversarial re-verify) — CORROBORATION-REQUIRED to auto-post.
+// The executor's control-leg tie only anchors to gross when gross is non-NULL; a
+// NON-corroborated document (a blank/malformed/unreadable total, or any state short of
+// Tier-A) leaves gross NULL, so a coded draft (the runtime submits EVERY entry.drafted —
+// rule-post.mjs, incl. interactive wake drafts) could carry an ARBITRARY under-cap
+// balanced amount with no verified anchor. v5 adds a corroboration-required admission
+// gate: a non-corroborated entry SKIPS not_corroborated and stays in the human queue.
+// Each FAILS pre-v5 (the draft POSTS) and PASSES after (skipped not_corroborated). The
+// gate is placed LAST, so a shaped-but-non-corroborated draft (an sst/decoy/rounding
+// laundering shape) still skips its SPECIFIC reason first — only a CLEAN-shaped
+// non-corroborated draft (the residual-5 path) lands on not_corroborated.
+// ===========================================================================
+
+test("RESIDUAL-5 execute_rule_post SKIPS not_corroborated a CLEAN draft on a NO-FACTS document (v_gross NULL — the blank-total auto-post path; pre-v5 it POSTED)", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const cp = await makeVendor(users.alice, { client: clients.A1, name: `NOFACTSCO ${randomUUID().slice(0, 6)}`, reg: "201801020501" });
+  if (!cp) return;
+  const rule = await buildLiveAutopostRule(users.alice, { client: clients.A1, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
+  if (!rule) return;
+  // draftBill seeds an OCR-cited doc with NO invoice_facts extraction ⇒ _invoice_fact_state
+  // returns {} ⇒ corroborated absent, v_gross NULL. Clean shape (Dr EXP 50,000 / Cr AP 50,000),
+  // under cap, matches the live rule. Pre-v5: the lenient control tie let it POST with no
+  // verified total. Post-v5: the corroboration gate SKIPS it.
+  const draft = await draftBill(users.alice, { client: clients.A1, cp, accountCode: EXP, amount: 50000 });
+  if (!draft?.entry_id) { noteLane("no-facts draft not created"); return; }
+  await postViaRule(draft.entry_id).catch((e) => noteLane(`no-facts post raised ${e.code}: ${e.message}`));
+  assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a non-corroborated (no-facts) draft is NOT auto-posted (pre-v5 it posted)");
+  const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
+  assert.equal(skip, "not_corroborated", `a no-facts draft is skipped not_corroborated (got '${skip}')`);
+});
+
+test("RESIDUAL-5 execute_rule_post SKIPS not_corroborated a draft on a document whose total is MALFORMED ('N/A' persists non-corroborated) with an ARBITRARY amount", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `MALFORMEDCO ${randomUUID().slice(0, 6)}`, reg: "201801020502" });
+  if (!cp) return;
+  const rule = await buildLiveAutopostRule(users.alice, { client: clients.A2, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
+  if (!rule) return;
+  // A facts doc whose invoice.total is UNREADABLE ('N/A' ⇒ monetary_cents NULL). invoice.total
+  // is deliberately allowed to persist blank/non-corroborated (fail-closed) — so total_cents is
+  // NULL, corroborated is false, and v_gross stays NULL (the control tie is inert). The wake
+  // draft then supplies an ARBITRARY under-cap balanced amount (50,000) citing the readable OCR
+  // region. Pre-v5 the executor posted it despite the blank total (the exact residual-5 hole);
+  // post-v5 the corroboration gate SKIPS it.
+  const firm = await firmOf(clients.A2);
+  await grantConsent(users.alice, { firm, client: clients.A2 }).catch(() => {});
+  const cred = await mintInteractive(firm);
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 500.00" });
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  if (!task) { noteLane("no invoice_facts task for the malformed-total doc — cell skipped"); return; }
+  await claimTask(task.id, { egressApproved: true }).catch((e) => noteLane(`malformed claim ${e.code}`));
+  await persistInvoiceFacts(task.id, [
+    factField(FIELD.total, "N/A"), // malformed ⇒ persists with monetary_cents NULL, never corroborates
+    factField(FIELD.currency, "MYR"),
+    factField("invoice.vendor_name", "MALFORMED PURCHASE VENDOR SDN BHD"),
+  ]).catch((e) => noteLane(`malformed persist ${e.code}: ${e.message}`));
+  const fs = (await rootQuery("select clara._invoice_fact_state($1) as s", [cited.documentId])).rows[0].s;
+  assert.equal(fs.corroborated ?? false, false, "the malformed-total doc is non-corroborated (mandatory setup)");
+  let draft = null;
+  try {
+    draft = await wakeDraftEntry(cred, {
+      client: clients.A2,
+      resolution: await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: cited.documentId }),
+      lines: billLines(EXP, AP, 50000), // arbitrary amount, unmoored from the (unreadable) total
+      document: cited.documentId, sha256: cited.sha256,
+      vendor: { existing_id: cp },
+      evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+      codingKind: "supplier_bill", opKey: opk("mbill"),
+    });
+  } catch (e) { noteLane(`malformed-total draft raised ${e.code}: ${e.message}`); return; }
+  if (!draft?.entry_id) { noteLane("malformed-total draft not created"); return; }
+  await postViaRule(draft.entry_id).catch((e) => noteLane(`malformed-total post raised ${e.code}: ${e.message}`));
+  assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a draft on a malformed-total (non-corroborated) doc is NOT auto-posted (pre-v5 it posted)");
+  const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
+  assert.equal(skip, "not_corroborated", `a malformed-total draft is skipped not_corroborated (got '${skip}')`);
+});
+
+test("RESIDUAL-5 POSITIVE CONTROL — a legit CORROBORATED bill STILL auto-posts (checked_via_rule_id stamped; never not_corroborated) — the gate does not over-tighten", async (t) => {
+  if (skip15(t)) return;
+  const { users, clients } = world;
+  const cp = await makeVendor(users.alice, { client: clients.A2, name: `CORROBOK ${randomUUID().slice(0, 6)}`, reg: "201801020503" });
+  if (!cp) return;
+  const rule = await buildLiveAutopostRule(users.alice, { client: clients.A2, cp, accountCode: EXP, cap: 200000, windowMax: 3 });
+  if (!rule) return;
+  // A Tier-A CORROBORATED bill (facts-complete doc, total corroborates; control leg = the
+  // verified gross). The corroboration gate PASSES and the entry auto-posts through the approve
+  // core with the rule's signature — the confidence ladder's DB-verified auto-post.
+  const draft = await draftCorroboratedBill(users.alice, { client: clients.A2, cp, accountCode: EXP, amount: 50000 });
+  if (!draft?.entry_id) { noteLane("corroborated positive-control draft not created"); return; }
+  await postViaRule(draft.entry_id).catch((e) => noteLane(`corroborated post raised ${e.code}: ${e.message}`));
+  const row = await entryRow(draft.entry_id);
+  assert.equal(row?.status, "approved", "a legit CORROBORATED bill still auto-posts under v5 (the gate does not over-tighten)");
+  assert.ok(row?.checked_via_rule_id, "the corroborated auto-post stamps checked_via_rule_id (the rule carried the checker authority)");
+  const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
+  assert.notEqual(skip, "not_corroborated", "a corroborated bill is NEVER skipped not_corroborated");
 });

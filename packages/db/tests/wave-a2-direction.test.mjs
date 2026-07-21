@@ -17,7 +17,7 @@ import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount, markSkip,
   waveAEnsureReady, buildWorld, firmOf, opk,
   seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
-  factField, grantConsent, addClientIdentifier,
+  factField, grantConsent, addClientIdentifier, addClientAlias,
 } from "./wave-a-fixtures.mjs";
 
 const CLIENT_REG = "199901000777";      // the client's own registration
@@ -80,6 +80,10 @@ before(async () => {
     // A1 is its own supplier identity; A2 is a distinct client with no matching id.
     await addClientIdentifier(world.users.alice, { client: world.clients.A1, kind: "ssm", value: CLIENT_REG }).catch(() => {});
     await addClientIdentifier(world.users.alice, { client: world.clients.A1, kind: "tin", value: CLIENT_REG }).catch(() => {});
+    // The doc fixtures state supplier NAME = CLIENT_NAME; register it as an A1 alias
+    // (normalized alphanumeric) so a genuine supplier=client doc matches on BOTH name and
+    // registration (post RESIDUAL-3, a registration match with a CONTRADICTING name abstains).
+    await addClientAlias(world.users.alice, { client: world.clients.A1, alias: CLIENT_NAME.toLowerCase().replace(/[^a-z0-9]/g, "") }).catch((e) => noteLane(`A1 alias ${e?.code}`));
   } else noteLane(ready ? "0015 _document_direction absent — direction suite skipped" : "0011 surface absent");
 });
 after(async () => { printLaneNotes("wave-a2-direction"); printSkipCount("wave-a2-direction"); await endPool(); });
@@ -131,4 +135,105 @@ test("§3.3 an ambiguous/contradictory supplier identity is direction-UNRESOLVED
   // Assert the strong invariant regardless: it never silently claims a confident side
   // that would auto-attribute — i.e. it did not resolve to a bare 'sales' with high confidence.
   assert.ok(true, "documented: the unresolved-direction outcome is a probe, adjudicated at integration");
+});
+
+// ===========================================================================
+// FIX-4 (adversarial #7 / native #3) — regression cases that FAIL against the
+// pre-fix registration-only matcher and PASS after: a NAME-only match resolves
+// to sales; a name match CONTRADICTED by a non-matching registration ABSTAINS
+// (CLR30) rather than silently defaulting a sales-shaped doc to purchase.
+// ===========================================================================
+
+async function clientName(client) {
+  const r = await rootQuery("select name from clara.clients where id=$1", [client]);
+  return r.rows[0]?.name ?? null;
+}
+
+test("FIX-4 a sales e-invoice stating the client's exact registered NAME but NO registration resolves to 'sales' (not purchase)", async (t) => {
+  if (skip15(t)) return;
+  const client = world.clients.A1;
+  const name = await clientName(client);
+  assert.ok(name, "the client's registered name is readable");
+  // supplier NAME = the client's registered name; NO supplier registration on the doc.
+  const doc = await factsDoc({ client, supplierName: name, supplierReg: null });
+  assert.ok(doc, "the name-only sales facts doc was built (mandatory setup)");
+  const { value, raised } = await direction(doc, client);
+  assert.ok(!raised, `a name-only supplier=client must resolve, not raise (got ${raised?.code})`);
+  assert.ok(value && value.includes("sales"),
+    `supplier name = client (no registration) resolves to SALES, not purchase (got ${value}) — the pre-fix registration-only matcher mis-coded this as purchase`);
+});
+
+test("FIX-4 a name match CONTRADICTED by a non-matching registration ABSTAINS (CLR30), never a silent 'purchase'", async (t) => {
+  if (skip15(t)) return;
+  const client = world.clients.A2;
+  const name = await clientName(client);
+  assert.ok(name, "the client's registered name is readable");
+  // The client currently carries only a TIN identifier; the invoice states the client
+  // name but a BRN that matches NO client identifier — ambiguous ⇒ abstain (NEEDS YOU).
+  await addClientIdentifier(world.users.alice, { client, kind: "tin", value: "TINONLYA2X" }).catch(() => {});
+  const doc = await factsDoc({ client, supplierName: name, supplierReg: "BRN9990001X" });
+  assert.ok(doc, "the BRN-vs-TIN facts doc was built (mandatory setup)");
+  const { value, raised } = await direction(doc, client);
+  // The load-bearing invariant: it NEVER silently defaults to purchase.
+  assert.notEqual(value, "purchase",
+    "a name match contradicted by a non-matching registration must NOT silently default to purchase");
+  assert.equal(raised?.code, "CLR30",
+    `an ambiguous supplier identity ABSTAINS with CLR30 direction_unresolved (got value=${value}, code=${raised?.code})`);
+});
+
+// ===========================================================================
+// RESIDUAL-3 v2 (contradiction asymmetry) — a registration match must NOT override a
+// CONTRADICTING stated name. FAILS pre-fix (round-1 returned a decisive 'sales' on the
+// registration alone) and PASSES after (CLR30 abstain).
+// ===========================================================================
+
+test("RESIDUAL-3 a supplier registration matching the client but a stated NAME naming a different entity ABSTAINS (CLR30), never a decisive 'sales'", async (t) => {
+  if (skip15(t)) return;
+  const client = world.clients.A1;
+  // The registration IS the client's (⇒ would resolve sales on reg alone), but the stated
+  // supplier NAME names a DIFFERENT entity that is not the client's registered name/alias.
+  const doc = await factsDoc({ client, supplierName: "A COMPLETELY DIFFERENT ENTITY SDN BHD", supplierReg: CLIENT_REG });
+  assert.ok(doc, "the reg-matches-but-name-contradicts facts doc was built (mandatory setup)");
+  const { value, raised } = await direction(doc, client);
+  assert.notEqual(value, "sales",
+    "a registration match with a contradicting supplier name must NOT decisively return 'sales' (pre-fix it did — reg was unconditionally decisive)");
+  assert.equal(raised?.code, "CLR30",
+    `a registration match contradicted by the stated name ABSTAINS with CLR30 (got value=${value}, code=${raised?.code})`);
+});
+
+// ===========================================================================
+// RESIDUAL v3 (item 3) — the BUYER identity must resolve through customer_taxid (TIN) and
+// customer_name too, not customer_registration alone. A doc whose supplier matches the
+// client AND whose buyer is ALSO the client (via TIN-only) is a double-identity
+// contradiction that must ABSTAIN. FAILS pre-v3 (buyer checked via registration only, so
+// it returned a decisive 'sales') and PASSES after (CLR30).
+// ===========================================================================
+
+test("RESIDUAL v3 a supplier=client doc whose BUYER is ALSO the client via TIN-only ABSTAINS (CLR30), never a decisive 'sales'", async (t) => {
+  if (skip15(t)) return;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+  await grantConsent(world.users.alice, { firm, client }).catch(() => {});
+  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: "RM 1,000.00" });
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  await claimTask(task.id, { egressApproved: true });
+  // Supplier = the client (name + registration match) => would resolve 'sales' on the
+  // supplier alone. But the BUYER states the client's own TIN (customer_taxid = CLIENT_REG),
+  // so BOTH parties are the client — a double-identity contradiction. Pre-v3 the buyer was
+  // only checked via customer_registration, so this returned a decisive 'sales'.
+  try {
+    await persistInvoiceFacts(task.id, [
+      factField("invoice.total", "RM 1,000.00"),
+      factField("invoice.currency", "MYR"),
+      factField("invoice.invoice_id", `DOC-${randomUUID().slice(0, 8)}`),
+      factField("invoice.vendor_name", CLIENT_NAME, { polygon: [], confidence: 0.9 }),
+      factField("invoice.vendor_registration", CLIENT_REG, { polygon: [], confidence: 0.9 }),
+      factField("invoice.customer_taxid", CLIENT_REG, { polygon: [], confidence: 0.9 }),
+    ]);
+  } catch (e) { noteLane(`double-identity persist raised ${e.code}: ${e.message}`); return; }
+  const { value, raised } = await direction(cited.documentId, client);
+  assert.notEqual(value, "sales", "a doc whose supplier AND buyer are both the client must NOT decisively return 'sales'");
+  assert.equal(raised?.code, "CLR30",
+    `the double-identity (supplier=client, buyer=client via TIN) ABSTAINS with CLR30 (got value=${value}, code=${raised?.code})`);
 });

@@ -24,7 +24,7 @@
 // r2.mjs, ping.mjs, and packages/db/lib/pg.mjs which imports the `pg` package) are
 // DYNAMICALLY imported only inside runReal(). In the image, `pg` is installed at the
 // app root so both packages/backup and packages/db resolve it (see Dockerfile).
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { resolveConfig, readValueOrFile, redactUrl, dbTargetLabel } from "./lib/env.mjs";
 
@@ -59,7 +59,14 @@ function printPlan(cfg, log) {
   log(`  R2 remote:bucket  : ${cfg.r2Remote}:${cfg.r2Bucket || "(missing)"}`);
   log(`  rclone config     : ${cfg.rcloneConfig || "(RCLONE_CONFIG unset — rclone default/env)"}`);
   log(`  age recipients    : ${cfg.ageRecipientsFile || "(missing)"}`);
-  log(`  ping URL          : ${process.env.CLARA_BACKUP_PING_URL || process.env.CLARA_BACKUP_PING_URL_FILE || "(missing — dead-man's-switch blind)"}`);
+  // NEVER print the ping URL verbatim — it carries a UUID token that would leak into
+  // retained logs (Wave A2 FIX-14). Show configured/missing + a redacted host at most.
+  const pingLabel = process.env.CLARA_BACKUP_PING_URL
+    ? `configured (${redactUrl(process.env.CLARA_BACKUP_PING_URL)})`
+    : process.env.CLARA_BACKUP_PING_URL_FILE
+      ? `configured (file ${process.env.CLARA_BACKUP_PING_URL_FILE})`
+      : "(missing — dead-man's-switch blind)";
+  log(`  ping URL          : ${pingLabel}`);
   log(`  staging dir       : ${cfg.stagingDir || "(missing)"}`);
   log(`  retention (days)  : ${cfg.retentionDays} (R2 lifecycle prunes db-snapshots)`);
   log(`  pg_dump / v17      : ${cfg.pgDump}`);
@@ -94,80 +101,93 @@ async function runReal(cfg, log) {
   const runDir = join(cfg.stagingDir, `run-${ts}`);
   const bundleDir = join(runDir, "bundle");
   mkdirSync(bundleDir, { recursive: true });
-  const ref = sourceRef(resolveTarget);
-  log(`clara-backup: run ${ts} · source ref ${ref} · target ${targetLabel()}`);
+  try {
+    const ref = sourceRef(resolveTarget);
+    log(`clara-backup: run ${ts} · source ref ${ref} · target ${targetLabel()}`);
 
-  // 1 + 2: full-profile dump + globals evidence (into the to-be-encrypted bundle dir).
-  const { fullDump, globals } = fullProfileDump({ runDir: bundleDir, log });
-  // 3: auth data-only (PII).
-  const authDump = authDataDump({ runDir: bundleDir, pgDump: cfg.pgDump, log });
+    // 1 + 2: full-profile dump + globals evidence (into the to-be-encrypted bundle dir).
+    const { fullDump, globals } = fullProfileDump({ runDir: bundleDir, log });
+    // 3: auth data-only (PII).
+    const authDump = authDataDump({ runDir: bundleDir, pgDump: cfg.pgDump, log });
 
-  // 4: firm-docs incremental encrypted mirror.
-  const recipients = readRecipients(cfg.ageRecipientsFile);
-  const existingKeys = rcloneListKeys({ remote: cfg.r2Remote, bucket: cfg.r2Bucket, prefix: MIRROR_PREFIX, rclone: RCLONE });
-  const mirror = await mirrorFirmDocs({ cfg, runDir, recipients, existingKeys, ageBin: AGE, log });
-  writeFirmDocsIndex({ bundleDir, index: mirror.index, log });
+    // 4: firm-docs incremental encrypted mirror.
+    const recipients = readRecipients(cfg.ageRecipientsFile);
+    const existingKeys = rcloneListKeys({ remote: cfg.r2Remote, bucket: cfg.r2Bucket, prefix: MIRROR_PREFIX, rclone: RCLONE });
+    const mirror = await mirrorFirmDocs({ cfg, runDir, recipients, existingKeys, ageBin: AGE, log });
+    writeFirmDocsIndex({ bundleDir, index: mirror.index, log });
 
-  // 5: migration-head fingerprint (completeness floor).
-  const head = await migrationHead();
-  log(`migration-head: ${head.rows.length} migration(s), head sha256 ${head.headSha256.slice(0, 16)}…`);
+    // 5: migration-head fingerprint (completeness floor).
+    const head = await migrationHead();
+    log(`migration-head: ${head.rows.length} migration(s), head sha256 ${head.headSha256.slice(0, 16)}…`);
 
-  // 5b: per-artifact digests for the detailed manifest.
-  const artifacts = { "full-profile.sql": fullDump, "auth-data-only.sql": authDump };
-  if (globals) artifacts["globals.sql"] = globals;
-  const artifactDigests = {};
-  for (const [name, path] of Object.entries(artifacts)) artifactDigests[name] = { path, ...(await fileDigest(path)) };
+    // 5b: per-artifact digests for the detailed manifest.
+    const artifacts = { "full-profile.sql": fullDump, "auth-data-only.sql": authDump };
+    if (globals) artifacts["globals.sql"] = globals;
+    const artifactDigests = {};
+    for (const [name, path] of Object.entries(artifacts)) artifactDigests[name] = { path, ...(await fileDigest(path)) };
 
-  // 6a: the DETAILED bundle manifest (goes inside the encrypted tar — may reference paths).
-  const detailed = {
-    schema: "clara-dr-bundle/1",
-    generated_at: new Date().toISOString(),
-    source_ref: ref,
-    source_target: targetLabel(),
-    migration_head: { count: head.rows.length, sha256: head.headSha256, rows: head.rows },
-    artifacts: artifactDigests,
-    firm_docs: { count: mirror.count, total_bytes: mirror.totalBytes, combined_sha256: mirror.combinedSha256, new_encrypted: mirror.newEncrypted, address_mismatches: mirror.addressMismatches },
-    age_recipients: recipients.length,
-  };
-  writeFileSync(join(bundleDir, "bundle-manifest.json"), JSON.stringify(detailed, null, 2));
+    // 6a: the DETAILED bundle manifest (goes inside the encrypted tar — may reference paths).
+    const detailed = {
+      schema: "clara-dr-bundle/1",
+      generated_at: new Date().toISOString(),
+      source_ref: ref,
+      source_target: targetLabel(),
+      migration_head: { count: head.rows.length, sha256: head.headSha256, rows: head.rows },
+      artifacts: artifactDigests,
+      firm_docs: { count: mirror.count, total_bytes: mirror.totalBytes, combined_sha256: mirror.combinedSha256, new_encrypted: mirror.newEncrypted, address_mismatches: mirror.addressMismatches },
+      age_recipients: recipients.length,
+    };
+    writeFileSync(join(bundleDir, "bundle-manifest.json"), JSON.stringify(detailed, null, 2));
 
-  // 6b: tar --zstd the bundle dir -> age-encrypt.
-  const tarPath = join(runDir, `clara-dr-${ts}.tar.zst`);
-  tarZstdDir({ srcDir: bundleDir, outPath: tarPath, tar: TAR, log });
-  const bundleAge = `${tarPath}.age`;
-  ageEncryptFile({ inPath: tarPath, outPath: bundleAge, recipients, age: AGE, log });
-  const bundleDigest = await fileDigest(bundleAge);
+    // 6b: tar --zstd the bundle dir -> age-encrypt.
+    const tarPath = join(runDir, `clara-dr-${ts}.tar.zst`);
+    tarZstdDir({ srcDir: bundleDir, outPath: tarPath, tar: TAR, log });
+    const bundleAge = `${tarPath}.age`;
+    ageEncryptFile({ inPath: tarPath, outPath: bundleAge, recipients, age: AGE, log });
+    const bundleDigest = await fileDigest(bundleAge);
 
-  // 7: the PLAINTEXT freshness manifest — freshness + integrity checkable WITHOUT
-  // decrypting, carrying NO client-identifying paths (only counts/bytes/fingerprints
-  // + the migration head, which are migration-file hashes, not client data).
-  const freshness = {
-    schema: "clara-dr-manifest/1",
-    generated_at: detailed.generated_at,
-    run: ts,
-    source_ref: ref,
-    bundle: { object: `clara-dr-${ts}.tar.zst.age`, ...bundleDigest, encrypted: "age", compression: "zstd" },
-    migration_head: { count: head.rows.length, sha256: head.headSha256, rows: head.rows },
-    firm_docs: { count: mirror.count, total_bytes: mirror.totalBytes, combined_sha256: mirror.combinedSha256, new_encrypted: mirror.newEncrypted },
-    age_recipients: recipients.length,
-    retention_days: cfg.retentionDays,
-  };
-  const manifestPath = join(runDir, "manifest.json");
-  writeFileSync(manifestPath, JSON.stringify(freshness, null, 2));
+    // 7: the PLAINTEXT freshness manifest — freshness + integrity checkable WITHOUT
+    // decrypting, carrying NO client-identifying paths (only counts/bytes/fingerprints
+    // + the migration head, which are migration-file hashes, not client data).
+    const freshness = {
+      schema: "clara-dr-manifest/1",
+      generated_at: detailed.generated_at,
+      run: ts,
+      source_ref: ref,
+      bundle: { object: `clara-dr-${ts}.tar.zst.age`, ...bundleDigest, encrypted: "age", compression: "zstd" },
+      migration_head: { count: head.rows.length, sha256: head.headSha256, rows: head.rows },
+      firm_docs: { count: mirror.count, total_bytes: mirror.totalBytes, combined_sha256: mirror.combinedSha256, new_encrypted: mirror.newEncrypted },
+      age_recipients: recipients.length,
+      retention_days: cfg.retentionDays,
+    };
+    const manifestPath = join(runDir, "manifest.json");
+    writeFileSync(manifestPath, JSON.stringify(freshness, null, 2));
 
-  // 8: upload. Incremental firm-docs mirror (additive, delete-never) + the dated DB snapshot.
-  if (mirror.encStageDir && mirror.newEncrypted > 0) {
-    rcloneCopyDir({ srcDir: mirror.encStageDir, remote: cfg.r2Remote, bucket: cfg.r2Bucket, destPrefix: MIRROR_PREFIX, rclone: RCLONE, log });
-  } else {
-    log(`r2: firm-docs mirror unchanged (${mirror.count} objects, 0 new) — nothing to upload.`);
+    // 8: upload. Incremental firm-docs mirror (additive, delete-never) + the dated DB snapshot.
+    if (mirror.encStageDir && mirror.newEncrypted > 0) {
+      rcloneCopyDir({ srcDir: mirror.encStageDir, remote: cfg.r2Remote, bucket: cfg.r2Bucket, destPrefix: MIRROR_PREFIX, rclone: RCLONE, log });
+    } else {
+      log(`r2: firm-docs mirror unchanged (${mirror.count} objects, 0 new) — nothing to upload.`);
+    }
+    const year = ts.slice(0, 4);
+    const snapPrefix = `db-snapshots/${year}/${ts}`;
+    rcloneCopyFile({ srcFile: bundleAge, remote: cfg.r2Remote, bucket: cfg.r2Bucket, destPrefix: snapPrefix, rclone: RCLONE, log });
+    rcloneCopyFile({ srcFile: manifestPath, remote: cfg.r2Remote, bucket: cfg.r2Bucket, destPrefix: snapPrefix, rclone: RCLONE, log });
+
+    log(`clara-backup: DONE — bundle ${bundleDigest.bytes} bytes -> ${cfg.r2Remote}:${cfg.r2Bucket}/${snapPrefix}/`);
+    return { ts, ref, bundleBytes: bundleDigest.bytes, firmDocs: mirror.count, newEncrypted: mirror.newEncrypted };
+  } finally {
+    // SECURITY (Wave A2 FIX-15): the staging dir holds the PLAINTEXT full-DB dump + the
+    // auth data-only dump (bcrypt hashes + PII) + the pre-age tarball. Purge it whether the
+    // run succeeded or failed — the durable copy is the age-encrypted bundle already on R2;
+    // nothing plaintext may linger on the Fly rootfs (that would defeat encrypt-at-rest).
+    try {
+      rmSync(runDir, { recursive: true, force: true });
+      log(`clara-backup: purged plaintext staging ${runDir}`);
+    } catch (e) {
+      log(`clara-backup: WARN could not purge staging ${runDir} — ${e.message}`);
+    }
   }
-  const year = ts.slice(0, 4);
-  const snapPrefix = `db-snapshots/${year}/${ts}`;
-  rcloneCopyFile({ srcFile: bundleAge, remote: cfg.r2Remote, bucket: cfg.r2Bucket, destPrefix: snapPrefix, rclone: RCLONE, log });
-  rcloneCopyFile({ srcFile: manifestPath, remote: cfg.r2Remote, bucket: cfg.r2Bucket, destPrefix: snapPrefix, rclone: RCLONE, log });
-
-  log(`clara-backup: DONE — bundle ${bundleDigest.bytes} bytes -> ${cfg.r2Remote}:${cfg.r2Bucket}/${snapPrefix}/`);
-  return { ts, ref, bundleBytes: bundleDigest.bytes, firmDocs: mirror.count, newEncrypted: mirror.newEncrypted };
 }
 
 async function main() {

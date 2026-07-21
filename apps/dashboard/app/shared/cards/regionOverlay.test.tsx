@@ -109,10 +109,16 @@ test("an unknown type falls back to the object viewer", () => {
 test("an XML e-invoice routes to the structured xml view — never a canvas or overlay", () => {
   assert.equal(pickDocView({ mime: "application/xml", hasOverlay: false, pdfFailed: false }), "xml");
   assert.equal(pickDocView({ mime: "text/xml", hasOverlay: false, pdfFailed: false }), "xml");
-  // A UBL/MyInvois payload with a `+xml` suffix also routes to the structured view.
-  assert.equal(pickDocView({ mime: "application/ubl+xml", hasOverlay: true, pdfFailed: false }), "xml");
+  // A charset parameter still routes (isXmlMime strips it, mirroring intake canonicalization).
+  assert.equal(pickDocView({ mime: "application/xml; charset=utf-8", hasOverlay: true, pdfFailed: false }), "xml");
 });
-test("an SVG image stays an image (image-first ordering wins over the xml match)", () => {
+test("a scriptable *+xml type is NOT the xml view — it falls through to the inert object viewer (FIX-10 narrowing)", () => {
+  // application/xhtml+xml / any `*+xml` can carry active markup — it must never reach the
+  // raw-XML render path; the intake allowlist admits only application/xml + text/xml.
+  assert.equal(pickDocView({ mime: "application/xhtml+xml", hasOverlay: false, pdfFailed: false }), "object");
+  assert.equal(pickDocView({ mime: "application/ubl+xml", hasOverlay: true, pdfFailed: false }), "object");
+});
+test("an SVG image stays an image (image-first ordering wins over any xml match)", () => {
   assert.equal(pickDocView({ mime: "image/svg+xml", hasOverlay: false, pdfFailed: false }), "image");
 });
 
@@ -148,10 +154,30 @@ test("extractXmlLeafFields decodes entities and is empty-safe", () => {
   const f = extractXmlLeafFields("<a>D &amp; D &lt;PROPERTIES&gt;</a>");
   assert.equal(f[0]?.value, "D & D <PROPERTIES>");
 });
-test("isXmlMime matches xml payloads, not plain pdf/image", () => {
+test("isXmlMime matches ONLY exact application/xml + text/xml (not scriptable *+xml)", () => {
   assert.ok(isXmlMime("application/xml"));
   assert.ok(isXmlMime("text/xml"));
-  assert.ok(isXmlMime("application/ubl+xml"));
+  assert.ok(isXmlMime("application/xml; charset=utf-8"), "a charset param is stripped before matching");
+  assert.ok(isXmlMime("TEXT/XML"), "case-insensitive");
+  assert.ok(!isXmlMime("application/ubl+xml"), "a *+xml suffix is NOT admitted (could be scriptable)");
+  assert.ok(!isXmlMime("application/xhtml+xml"));
+  assert.ok(!isXmlMime("image/svg+xml"));
   assert.ok(!isXmlMime("application/pdf"));
   assert.ok(!isXmlMime("image/png"));
+});
+
+// --- xmlFields dedup key (FIX-11: a text-safe JSON.stringify key, never a NUL byte) ----
+
+test("extractXmlLeafFields dedupes identical path+value pairs but keeps distinct ones", () => {
+  // Same local name, SAME value → one row (deduped). Same local name, DIFFERENT value →
+  // two rows (the [local, value] key is collision-free without any control-char separator).
+  const dup = extractXmlLeafFields("<Amt>100.00</Amt><x:Amt>100.00</x:Amt><y:Amt>250.00</y:Amt>");
+  const amts = dup.filter((f) => f.path === "Amt").map((f) => f.value).sort();
+  assert.deepEqual(amts, ["100.00", "250.00"], "identical pairs collapse; distinct values are both kept");
+});
+test("extractXmlLeafFields output carries no NUL byte (the dedup key never leaks into a row)", () => {
+  const NUL = String.fromCharCode(0); // constructed at runtime — never a literal control char in source
+  const fields = extractXmlLeafFields(UBL_SAMPLE);
+  assert.ok(fields.length > 0, "sanity: the sample yields rows");
+  assert.ok(fields.every((f) => !f.path.includes(NUL) && !f.value.includes(NUL)), "no field path/value carries a NUL");
 });

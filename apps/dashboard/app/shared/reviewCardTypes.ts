@@ -209,6 +209,7 @@ export type AutopostRule = {
   frequency_window: string | null;
   window_max_posts: number | null;
   posts_in_window: number | null;
+  posts_remaining: number | null; // DB-emitted (list_autopost_rules) — the UI never recomputes it
   expires_at: string | null;
   status: "proposed" | "live" | "declined" | "retired" | "expired" | string;
   signed_by: string | null;
@@ -232,6 +233,7 @@ export function toAutopostRule(raw: unknown): AutopostRule {
     frequency_window: s(o.frequency_window),
     window_max_posts: numOrNull(o.window_max_posts),
     posts_in_window: numOrNull(o.posts_in_window) ?? numOrNull(o.window_posts),
+    posts_remaining: numOrNull(o.posts_remaining),
     expires_at: s(o.expires_at),
     status: s(o.status) ?? "proposed",
     signed_by: s(o.signed_by),
