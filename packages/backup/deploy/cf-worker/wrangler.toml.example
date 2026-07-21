@@ -1,0 +1,24 @@
+# clara-backup — OPTIONAL freshness-monitor Worker (corroboration; NOT the primary
+# alarm). Copy to wrangler.toml, fill the account/bucket/webhook, and `wrangler deploy`.
+# See worker.js and docs/ops/DR.md §9.
+
+name = "clara-backup-freshness"
+main = "worker.js"
+compatibility_date = "2024-11-01"
+
+# Cron: check a few times a day (the threshold is 26h, so hourly is overkill). This
+# only READS R2 object timestamps — no data is decrypted or downloaded.
+[triggers]
+crons = ["0 */6 * * *"]
+
+# The R2 DR bucket (read-only list is all this needs).
+[[r2_buckets]]
+binding = "DR_BUCKET"
+bucket_name = "clara-dr"
+
+[vars]
+SNAPSHOT_PREFIX = "db-snapshots/"
+MAX_AGE_HOURS = "26"
+# A webhook that emails the owner (tools@belcort.com). Alternatively wire Cloudflare
+# Email Routing / an email API in worker.js. Set as a secret: `wrangler secret put ALERT_WEBHOOK`.
+# ALERT_WEBHOOK is provided at deploy time (secret), not committed here.

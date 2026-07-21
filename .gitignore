@@ -44,3 +44,9 @@ spike/.env
 
 .vercel
 .env*
+# Re-include env TEMPLATES repo-wide (restores the stated "only *.example is
+# tracked" intent — the bare `.env*` above otherwise re-shadows the earlier
+# `!.env.example`, which would silently un-track new placeholder templates like
+# packages/backup/.env.example). Placeholders only; the leak-scan gate covers them.
+!.env.example
+!**/.env.example

@@ -134,18 +134,36 @@ test("enqueue-crash sidecar is re-enqueued, then OCR parks/releases/claims and p
   assert.equal(await eventCount(), beforeReplay, "double-persist emits no duplicate extraction event");
 });
 
-test("store-only XML lane completes without vendor egress or extraction rows", { skip }, async () => {
-  const { owner, firm } = await rig.buildFirm("workflow-none");
+// Wave A2: an uploaded XML now rides the LOCAL MyInvois structured_parse identity pass
+// (laneSnapshot xml -> structured_parse + clara-myinvois:v1), NOT the pre-A2 store-only
+// lane. It is still fully local (no vendor egress). The minimal synthetic XML carries no
+// AccountingSupplierParty, so the identity pass yields an extraction with ZERO regions.
+test("XML rides the local MyInvois structured_parse identity pass — no vendor egress", { skip }, async () => {
+  const { owner, firm } = await rig.buildFirm("workflow-xml");
   const bytes = Buffer.from("<?xml version=\"1.0\"?><Invoice><ID>SYNTHETIC-1</ID></Invoice>");
   const receipt = await admit(owner, firm, bytes, "invoice.xml", "application/xml");
   const task = await rig.readDocumentTask(receipt.task_id);
-  assert.equal(task.lane, "none");
+  assert.equal(task.lane, "structured_parse", "XML routes to the local identity pass, not store-only");
+  // A local lane claims WITHOUT egress approval (0015 S6: structured_parse is kill-switch-exempt).
   await rig.asRuntime((client) =>
-    client.query("select clara.claim_document_processing_task($1,$2,$3)", [receipt.task_id, "none-run", false]),
+    client.query("select clara.claim_document_processing_task($1,$2,$3)", [receipt.task_id, "xml-run", false]),
   );
   await processDocumentTask(withRuntime, receipt.task_id);
   assert.equal((await rig.readDocumentTask(receipt.task_id)).status, "done");
-  assert.equal((await rig.readDocument(receipt.document_id)).extraction_status, "stored_unparsed");
-  const extraction = await rig.rootQuery("select count(*)::int n from clara.document_extractions where document_id=$1", [receipt.document_id]);
-  assert.equal(extraction.rows[0].n, 0);
+  assert.equal((await rig.readDocument(receipt.document_id)).extraction_status, "done", "structured_parse done marks the document extracted");
+  // ONE structured_parse identity extraction is created (engine clara-myinvois:v1)...
+  const extraction = await rig.rootQuery(
+    "select engine_id,engine_kind,status from clara.document_extractions where document_id=$1",
+    [receipt.document_id],
+  );
+  assert.equal(extraction.rowCount, 1, "one identity extraction row");
+  assert.equal(extraction.rows[0].engine_kind, "structured_parse");
+  assert.equal(extraction.rows[0].engine_id, "clara-myinvois:v1");
+  assert.equal(extraction.rows[0].status, "done");
+  // ...with ZERO regions (the synthetic XML has no AccountingSupplierParty/CustomerParty).
+  const regions = await rig.rootQuery(
+    "select count(*)::int n from clara.document_regions r join clara.document_extractions e on e.id=r.extraction_id where e.document_id=$1",
+    [receipt.document_id],
+  );
+  assert.equal(regions.rows[0].n, 0, "no parties in the synthetic XML → 0 identity regions");
 });

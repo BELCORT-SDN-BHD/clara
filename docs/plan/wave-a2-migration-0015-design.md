@@ -35,7 +35,13 @@ is the naming convention, so the assertion is its only enforcement.
   applies clean) but the default + fixtures fail at first insert. 0015 must retire the
   `fixture-engine` default (make the caller pass a real engine snapshot; rig fixtures move to
   `clara-fixture:v1` admitted under the local arm or an explicit test-namespace carve-in — the
-  build lane picks, the rig proves).
+  build lane picks, the rig proves). **Pin-stage additions (G1): the DB fixture
+  `rig-docs-fixtures.mjs:177` relies on the default AND `intake-authz-fixes.test.mjs:137`
+  hardcodes `'fixture-engine'`+`'ocr'` literally — both call sites need the retire.
+  CLARIFICATION (G1 flag): `local_facts` extraction rows REUSE `engine_kind='invoice_facts'`
+  (NO new engine_kind — the LANE distinguishes local vs Azure, the engine_kind stays the
+  semantic class); a lane needing a new engine_kind value contradicts this companion —
+  escalate, don't improvise.**
 - `special_acc_type` CHECK gains `'sst_output'` (adversarial #10; `uq_coa_special` already
   enforces at-most-one per (client, special type) — verify it covers the new value).
 
@@ -150,7 +156,9 @@ Typed event `entry.rule_posted`.
   this same migration** — no intermediate state where a customer proposal can resolve to a
   vendor row.
 - `_draft_entry_core` CoR: `sales_invoice`/`sales_credit_note` branches (document + customer
-  proposal + evidence required; CN polarity).
+  proposal + evidence required; CN polarity). **`revise_entry` CoR as well (pin-stage gap,
+  G3 flag): its supplier_bill-specific branches (0011:2846-2855, 2879) must gain the sales
+  mirrors — a revised sales draft keeps requiring customer + evidence.**
 - New `_assert_sales_invoice_shape` + constraint trigger; generalize the control-class
   counterparty rule (receivable OR payable line ⇒ counterparty_id, CLR23 preserved).
   Tie equations pinned per the contract §4.3 (01/03 vs 02 polarity); the tie evaluates on

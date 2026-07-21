@@ -134,7 +134,7 @@ test("revocation at every post-claim intake transition terminalizes and refunds"
         ));
       },
       invoke: async ({ intake }) => (await rig.asRuntime((client) => client.query(
-        "select clara.finalize_document_intake($1,$2,'fixture-engine','{}'::jsonb,1,'ocr',null,null,$3) as receipt",
+        "select clara.finalize_document_intake($1,$2,'clara-fixture:v1','{}'::jsonb,1,'ocr',null,null,$3) as receipt",
         [intake.intake_id, intake.tokenHash, rig.opk("revoked-finalize")],
       ))).rows[0].receipt,
     },

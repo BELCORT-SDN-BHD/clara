@@ -96,6 +96,36 @@ test("invoice_facts task is SKIPPED (never misrouted) when enqueueInvoiceFacts i
   await removeTaskMeta(row.taskId);
 });
 
+test("local_facts queued task routes to enqueueLocalFacts, never enqueueDocumentIngest (Wave A2)", async () => {
+  const row = task("local_facts");
+  await writeTaskMeta(row.taskId, row);
+  const ingest = [];
+  const local = [];
+  const out = await reconcileDocumentTasks(deniedSnapshotClient(), {
+    enqueueDocumentIngest: async (id) => (ingest.push(id), { runId: "ingest-run" }),
+    enqueueLocalFacts: async (id) => (local.push(id), { runId: null }),
+    getRun: () => ({ status: Promise.resolve("running") }),
+  });
+  assert.deepEqual(local, [row.taskId], "local_facts rides the MyInvois consumer");
+  assert.deepEqual(ingest, [], "documentIngest never sees a local_facts task");
+  assert.equal(out.documentReenqueued, 1);
+  await removeTaskMeta(row.taskId);
+});
+
+test("local_facts task is SKIPPED (never misrouted) when enqueueLocalFacts is not wired (Wave A2)", async () => {
+  const row = task("local_facts");
+  await writeTaskMeta(row.taskId, row);
+  const ingest = [];
+  const out = await reconcileDocumentTasks(deniedSnapshotClient(), {
+    enqueueDocumentIngest: async (id) => (ingest.push(id), { runId: "ingest-run" }),
+    // enqueueLocalFacts intentionally absent
+    getRun: () => ({ status: Promise.resolve("running") }),
+  });
+  assert.deepEqual(ingest, [], "a local_facts task is NEVER driven through documentIngest");
+  assert.equal(out.documentReenqueued, 0);
+  await removeTaskMeta(row.taskId);
+});
+
 test("ocr queued task still routes to enqueueDocumentIngest (unchanged)", async () => {
   const row = task("ocr");
   await writeTaskMeta(row.taskId, row);

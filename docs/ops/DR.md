@@ -335,3 +335,61 @@ escalation path for the pilot. The alerting **wiring** is a follow-up; the
    The **fresh-Supabase-project drill** (real `auth`/`storage` recovery + off-site
    scheduling + freshness alerts) is **OWNER-GO-gated** and **REQUIRED before any real
    client data**. Runbook: `docs/ops/DR-full-drill.md`. Tracked in `docs/PROJECTLOG.md` PART 2.
+
+---
+
+## 9. R2 off-site backup wiring — runbook (§8 item 2 built; Wave A2 §8 / WA2-R6)
+
+The §8-item-2 decision is now **scaffolded** as a self-contained app, **`packages/backup`**
+(`@clara/backup`) — a **separate Fly app `clara-backup` in `sin`** (WA2-R6; **never** the
+non-HA runtime machine), NOT a pnpm workspace member (excluded in `pnpm-workspace.yaml`; its
+deps install inside its own image). It is **built + locally dry-run-validated**; the **first
+live run is OWNER-GATED** (no live credential is touched by the agent). Full detail:
+`packages/backup/README.md`. Pipeline (one daily run): full-profile dump (reuses
+`db:backup:full`) + globals evidence + `auth` data-only + the `firm-docs` byte mirror
+(Storage REST) → `manifest.json` (migration-head fingerprint = the `dr-verify` completeness
+floor) → `tar --zstd` → **age-encrypt** → `rclone copy` to R2 → **healthchecks.io** success
+ping (`/fail` on error).
+
+### Crown-jewel secret inventory (what the app custodies)
+
+| Secret | Power | Where it lives |
+|---|---|---|
+| Session-pooler DSN (**port 5432**) | reads all schemas + ownership/ACLs + `auth` PII ≈ project admin | `fly secrets` (`DATABASE_URL`) |
+| Supabase `service_role` key | account-wide Storage bypass (firm-docs LIST/READ) | `fly secrets` → a file; `CLARA_BACKUP_STORAGE_KEY_FILE` names it (never logged) |
+| R2 API token | write to the DR bucket | `rclone.conf` (`RCLONE_CONFIG`) — never argv |
+| age **recipient (public)** key | none (encrypt-only) | committed: `packages/backup/deploy/age-recipient.txt` |
+| age **identity (private)** key | decrypts the whole bundle (books + `auth` PII) | **owner custody, off-repo AND off-R2** — laptop `~/.clara-age-identity.*` + an offline backup; NEVER in the bucket |
+| healthchecks.io ping URL | low (UUID) | `fly secrets` (value or `*_FILE`) |
+
+### Exact owner inputs (at wiring time)
+
+1. Create the app + a **scoped R2 token** (Object Read&Write on the ONE DR bucket) + the
+   bucket; put the token in `rclone.conf` (template: `deploy/rclone.conf.example`).
+2. `age-keygen` → paste the `age1…` **recipient** into `deploy/age-recipient.txt` (replaces
+   the placeholder — the job **refuses to run** until it is real); custody the **identity**
+   key off-repo/off-R2 (+ offline backup).
+3. A **healthchecks.io** check (26h grace) → `tools@belcort.com`; its ping URL as a secret.
+4. `fly secrets set -a clara-backup` for: `DATABASE_URL` (session pooler 5432),
+   `CLARA_BACKUP_STORAGE_URL`, the `service_role` key file + `CLARA_BACKUP_STORAGE_KEY_FILE`,
+   `RCLONE_CONFIG` (+ token), `CLARA_BACKUP_R2_BUCKET`, and `CLARA_BACKUP_PING_URL[_FILE]`.
+5. An **R2 Object-Lifecycle rule**: delete `db-snapshots/` objects older than 30 days (the
+   `firm-docs-mirror/` prefix is write-once, delete-never — do not lifecycle it away).
+6. `fly deploy --config packages/backup/fly.toml` (from repo root) → `fly machine run …
+   --schedule daily`.
+7. *(Optional corroboration)* deploy the freshness Worker (`deploy/cf-worker/`).
+
+### Steps the classifier FORCES owner-run (the agent may only scaffold/dry-run)
+
+Reading any `~/.clara-*` / live secret; the first **real** encrypted upload against live;
+creating/holding the **R2 token** + the **age identity** key; any **restore-into-a-project**
+(needs `CLARA_ALLOW_DESTRUCTIVE=1` + `CLARA_DESTRUCTIVE_TARGET="user@host:port/db"`);
+`gh pr merge`. The agent validates only on a **throwaway PG17 + a throwaway R2 bucket**.
+
+### Verify cadence (a backup you never restored is not a backup)
+
+- **Monthly-light:** decrypt the latest bundle + restore the DB dumps into a **local
+  throwaway PG17** (scratchpad pg17 bins, port 55432) + a subset of `dr-verify` (schema
+  presence + the manifest floor + the AP gate).
+- **Quarterly-full:** the STRICT fresh-project drill (§5b / `DR-full-drill.md` §3) against a
+  bundle decrypted from R2 — canary + AP gate (`135093821` cents) REQUIRED.

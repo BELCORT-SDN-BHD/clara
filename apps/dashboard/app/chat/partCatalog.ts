@@ -113,6 +113,12 @@ export const PART_CATALOG = {
     renderBranch: true,
     fixtures: [{ type: "open_question", question_id: "q-8888", client_id: "client-1111" }],
   },
+  // --- Wave-A2 addition (contract §6.4/§7): identifier-only; the card hydrates the
+  // rule_post_runs receipt on mount. Fixture renders the id-only (no-token) state.
+  rule_post_receipt: {
+    renderBranch: true,
+    fixtures: [{ type: "rule_post_receipt", run_id: "run-9999" }],
+  },
 } satisfies Record<string, CatalogEntry>;
 
 export type RenderBranchType = keyof typeof PART_CATALOG;

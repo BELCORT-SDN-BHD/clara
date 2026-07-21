@@ -1,7 +1,17 @@
 packages:
   - packages/*
+  - "!packages/backup"
   - apps/*
 # NOTE: spike/ is intentionally NOT a workspace member. It is the frozen
 # Slice-0 runtime spike (its own lockfile + node_modules) and must not be
 # pulled into the monorepo install graph. See docs/architecture/ARCHITECTURE.md
 # Appendix A and spike/README.md.
+#
+# NOTE: packages/backup (the clara-backup off-site DR app, Wave A2 §8 / WA2-R6)
+# is DELIBERATELY EXCLUDED from the workspace (the `!packages/backup` negation).
+# It is a self-contained, separately-imaged batch app deployed as its own Fly app
+# — never installed into @clara/runtime and never part of the monorepo install
+# graph. Excluding it keeps `pnpm install --frozen-lockfile` (CI) green without
+# regenerating pnpm-lock.yaml: a new workspace importer with no lockfile entry
+# would otherwise fail the frozen install. Its own deps are installed INSIDE its
+# Docker image from packages/backup/package.json. Mirrors the spike rationale.

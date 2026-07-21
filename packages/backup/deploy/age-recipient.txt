@@ -1,0 +1,20 @@
+# clara-backup — age RECIPIENT (public) key(s) for the off-site DR bundle.
+#
+# This file is COMMITTED to the repo ON PURPOSE: an age recipient is a PUBLIC key that
+# only ENCRYPTS. The scheduled job holds NO secret for the encryption step. Decryption
+# needs the age IDENTITY (private) key, which stays in OWNER CUSTODY — off-repo AND
+# off-R2 (a bucket compromise co-located with the key = plaintext). Store the identity
+# on the owner's laptop (e.g. ~/.clara-age-identity.txt, gitignored) PLUS an offline
+# backup (hardware token / printed / password manager). NEVER upload it to the DR bucket
+# and NEVER commit it. See docs/ops/DR.md §9.
+#
+# Format: one recipient per line. `age-keygen` prints `# public key: age1...` — paste
+# the `age1...` line here (or an `ssh-ed25519 ...` recipient; age supports SSH recipients).
+#
+# ROTATION: age encrypts to MULTIPLE recipients — during a rotation window list BOTH the
+# old and the new recipient here so historical bundles stay decryptable; manifest.json
+# records how many recipients a bundle used.
+#
+# The job REFUSES to run while this file holds only the placeholder below — the owner
+# MUST replace it with the real recipient before the first live run.
+age1PLACEHOLDER0000000000000000000000000000000000000000000000000

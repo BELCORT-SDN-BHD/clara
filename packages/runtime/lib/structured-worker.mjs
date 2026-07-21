@@ -1,6 +1,7 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { readFile } from "node:fs/promises";
 import { readZipEntries, readZipEntry } from "./scan.mjs";
+import { parseUblIdentity, parseUblFacts } from "./myinvois.mjs";
 
 const MAX_ITEMS = 50_000;
 const MAX_TEXT = 4 * 1024 * 1024;
@@ -106,9 +107,27 @@ async function parseDocx(path, task) {
   return { pageCount: 1, envelope: { schema_version: 1, engine: { id: task.engineId, kind: "structured_parse", version_n: task.versionN }, format: "docx", paragraphs }, regions };
 }
 
+// MyInvois UBL XML — the identity pass (lane 'structured_parse', via the frozen
+// documentIngest lane) emits the parties' identity regions; the facts pass (lane
+// 'local_facts', via the new local_facts consumer) emits the full §3.2 vocabulary.
+// The two passes are told apart by the task's lane; both run here so a large/hostile
+// XML parse never blocks the supervisor event loop.
+async function parseUbl(path, task) {
+  const text = await readFile(path, "utf8");
+  if (text.length > MAX_TEXT * 4) throw Object.assign(new Error("XML parse cap exceeded"), { code: "limit" });
+  return task?.lane === "local_facts" ? parseUblFacts(text, task) : parseUblIdentity(text, task);
+}
+
 try {
   const { filePath, format, task } = workerData;
-  const result = format === "xlsx" ? await parseXlsx(filePath, task) : format === "docx" ? await parseDocx(filePath, task) : await parseCsv(filePath, format, task);
+  const result =
+    format === "xlsx"
+      ? await parseXlsx(filePath, task)
+      : format === "docx"
+        ? await parseDocx(filePath, task)
+        : format === "xml"
+          ? await parseUbl(filePath, task)
+          : await parseCsv(filePath, format, task);
   parentPort.postMessage({ ok: true, result });
 } catch (err) {
   parentPort.postMessage({ ok: false, error: String(err?.message || err), code: err?.code || "corrupt" });

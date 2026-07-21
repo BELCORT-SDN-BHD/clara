@@ -13,13 +13,18 @@ import { useCallback, useEffect, useState } from "react";
 import { fetchDocumentBytes } from "../reviewApi";
 import { RegionOverlay } from "./RegionOverlay";
 import { PdfPageCanvas } from "./PdfPageCanvas";
+import { XmlStructuredView } from "./XmlStructuredView";
+import { isXmlMime } from "./xmlFields";
 import type { Pt } from "./regionGeometry";
 import styles from "./cards.module.css";
 
-export type DocView = "image" | "pdf-canvas" | "object";
+export type DocView = "image" | "pdf-canvas" | "object" | "xml";
 
 /** Which viewer to render (honest degradation — pure, unit-tested):
  *  - an image always aligns the overlay directly;
+ *  - a structured XML document (MyInvois/UBL `e_invoice_xml`, contract §7) renders the
+ *    structured view — a parsed-field table + a raw-XML <object> fallback, NEVER a
+ *    canvas and NEVER an overlay (a geometry-less fact has no region to place);
  *  - a PDF WITH a placeable region and no prior pdf.js failure renders the cited page
  *    on a canvas so the polygon aligns;
  *  - everything else (a PDF with no region, a PDF after a pdf.js failure, or any other
@@ -27,6 +32,7 @@ export type DocView = "image" | "pdf-canvas" | "object";
  *    and NEVER a misplaced overlay. */
 export function pickDocView({ mime, hasOverlay, pdfFailed }: { mime: string; hasOverlay: boolean; pdfFailed: boolean }): DocView {
   if (mime.startsWith("image/")) return "image";
+  if (isXmlMime(mime)) return "xml";
   if (mime.includes("pdf") && hasOverlay && !pdfFailed) return "pdf-canvas";
   return "object";
 }
@@ -90,6 +96,8 @@ export function DocViewer({ token, documentId, page, overlay }: { token: string 
         </span>
       ) : view === "pdf-canvas" ? (
         <PdfPageCanvas blobUrl={state.url} page={page ?? 1} overlay={overlay ?? []} onFail={onPdfFail} />
+      ) : view === "xml" ? (
+        <XmlStructuredView blobUrl={state.url} mime={state.mime} />
       ) : (
         <object key={src} className={styles.docFrame} data={src} type={state.mime} aria-label="Source document — inert data">
           <p className={styles.muted}>
