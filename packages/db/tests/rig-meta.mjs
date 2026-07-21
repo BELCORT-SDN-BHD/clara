@@ -34,6 +34,31 @@ const S6_AGENT_READS = [
   "get_journal_entry_for",
 ];
 const S6_RUNTIME_FNS = ["enqueue_invoice_facts", "persist_invoice_facts", "fail_invoice_facts", "get_coding_attempt"];
+// [WAVE-A §2/§13a] Wave-A (migration 0011) EXECUTE-grant deltas, cross-checked EXACT
+// against INTERFACE-PINS §2 (the per-role grant table) and the live catalog. The
+// daily-loop governance writers + typed reads land on the human lane; the agent lane
+// gains the client-pinned coding-lane reads + wake_client (+ the fix-round
+// _agent_read_admitted gate helper, granted clara_agent_ro only); the autodraft/sweep
+// runtime surface lands on clara_runtime; wake_interactive gains wake_open_question.
+const WAVE_A_HUMAN_FNS = [
+  "rename_counterparty", "add_counterparty_alias", "retire_counterparty_alias", "merge_counterparties",
+  "request_autodraft", "acknowledge_sweep_run",
+  "propose_coding_rule", "sign_coding_rule", "decline_coding_rule", "retire_coding_rule",
+  "open_question", "resolve_open_question", "dismiss_open_question", "promote_clarify_to_question",
+  "grant_client_egress", "revoke_client_egress", "approve_routine_entry",
+  "get_sweep_run", "get_open_question", "get_coding_rule", "list_review_queue",
+  "coding_lane", "list_coding_lanes", "get_entry_diff", "get_doc_entry_diff",
+];
+const WAVE_A_AGENT_READS = [
+  "coding_lane", "list_coding_lanes", "get_entry_diff", "get_doc_entry_diff",
+  "wake_client", "_agent_read_admitted",
+];
+const WAVE_A_RUNTIME_FNS = [
+  "admit_autodraft_task", "begin_autodraft_task", "settle_autodraft_task",
+  "open_sweep_run", "reconcile_sweep_runs",
+  "list_autodraft_candidates", "list_document_autodraft_candidates", "get_document_for_human_read",
+];
+const WAVE_A_WAKE_INTERACTIVE_FNS = ["wake_open_question"];
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -44,11 +69,12 @@ export const ALLOWED = {
     "add_client_identifier", "add_client_alias", "retire_client_alias",
     "place_legal_hold", "release_legal_hold",
     ...S6_HUMAN_FNS, // [S6 §9/C-11] draft-lifecycle + coding-task + client-pinned reads
+    ...WAVE_A_HUMAN_FNS, // [WAVE-A §2] daily-loop governance writers + typed reads
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
-  [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS]),
-  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification"]),
+  [ROLES.agentRo]: new Set([...READS.filter((r) => r !== "get_journal_entry"), ...S6_AGENT_READS, ...WAVE_A_AGENT_READS]),
+  [ROLES.wakeInteractive]: new Set(["wake_draft_entry", "wake_record_client_resolution", "wake_record_notification", ...WAVE_A_WAKE_INTERACTIVE_FNS]),
   [ROLES.wakeProactive]: new Set(["wake_record_notification"]),
   // Slice-4 runtime surface (contract v2.1 §3.0/3.6/3.7/3.8): runtime lane only.
   [ROLES.runtime]: new Set([
@@ -64,6 +90,7 @@ export const ALLOWED = {
     "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
     "refund_ingest_reservation", "record_attribution_attempt",
     ...S6_RUNTIME_FNS, // [S6 §9/C-11] invoice-facts lane writers + coding-attempt recovery read
+    ...WAVE_A_RUNTIME_FNS, // [WAVE-A §2] autodraft admission/settle + sweep-run + candidate reads
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs

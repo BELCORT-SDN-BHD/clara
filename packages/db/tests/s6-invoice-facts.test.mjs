@@ -47,6 +47,7 @@ import {
   enqueueInvoiceFacts,
   invoiceFactsTask,
   claimTask,
+  ensureClientEgress,
   persistInvoiceFacts,
   factField,
   factsRegion,
@@ -69,6 +70,9 @@ before(async () => {
     for (const c of [world.clients.A1, world.clients.A2]) {
       await upsertPayableAccount(world.users.alice, { client: c, code: AP, name: "Trade Creditors", opKey: opk("ap") });
       await upsertAccountClassed(world.users.alice, { client: c, code: EXP, name: "Prof Fees", type: "expense", opKey: opk("exp") });
+      // [WA-D1] grant a live egress consent so invoice_facts claims reach 'running'
+      // (the lane-carve fail-closes to held_egress/CLR28 without one).
+      await ensureClientEgress(world.users.alice, { client: c });
     }
   }
 });

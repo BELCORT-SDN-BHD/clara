@@ -180,9 +180,10 @@ test("high-stakes reversal: the mirror stays a draft; a DISTINCT checker approve
   if (unready(t)) return;
   const { users, clients } = world;
   // A high-stakes supplier bill (>= RM10k). The wake-drafted original has no human
-  // editor, so bob can approve it without a distinct checker.
+  // editor, so bob can approve it without a distinct checker — but WA-D5 now requires
+  // a non-blank attestation on an agent-made high-stakes approval (else CLR05).
   const { draft } = await supplierBillDraft(users.alice, { client: clients.A1, amount: HIGH_STAKES_CENTS });
-  await approveEntry(users.bob, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("ap") });
+  await approveEntry(users.bob, { entry: draft.entry_id, expectedRevision: draft.revision_token, attestation: "rig hs attest", opKey: opk("ap") });
 
   // bob reverses → the mirror is high-stakes → stays DRAFT with last_human_editor=bob.
   const rev = await reverseEntry(users.bob, { entry: draft.entry_id, reason: "rig hs reversal", opKey: opk("rev") });

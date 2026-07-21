@@ -5,6 +5,7 @@ import { checkReadiness } from "../lib/health.mjs";
 import { chatRoutes } from "./chatRoutes.js";
 import { intakeRoutes } from "./intakeRoutes.js";
 import { streamRoutes } from "./streamRoute.js";
+import { documentRoutes } from "./documentRoutes.js";
 
 // Clara agent-runtime HTTP surface (Slice 4). The durable chat loop, SSE, and the
 // admission/turn routes ride on top of the WDK Postgres world (started by
@@ -77,5 +78,8 @@ app.get("/workflows", (_req, res) => {
 // Chat: sessions, messages, turns (admission + enqueue), and the SSE stream.
 app.use(chatRoutes());
 app.use(streamRoutes());
+// Document bytes for the doc_review split-view (PIN-DELTA-4) — human JWT -> definer read ->
+// Storage stream with the runtime custody credential; the browser never holds a credential.
+app.use(documentRoutes());
 
 export default app;

@@ -9,6 +9,11 @@ import { useState } from "react";
 import type { ClaraPart } from "./api";
 import { isStatusResolverType } from "./partCatalog";
 import { JeReviewCard } from "./JeReviewCard";
+import { DocReviewCard } from "../shared/cards/DocReviewCard";
+import { DiffCard } from "../shared/cards/DiffCard";
+import { SweepReceiptCard } from "../shared/cards/SweepReceiptCard";
+import { KbRuleProposalCard } from "../shared/cards/KbRuleProposalCard";
+import { OpenQuestionCard } from "../shared/cards/OpenQuestionCard";
 import styles from "./chat.module.css";
 
 /** Matches CLARIFY_FRAMING in the runtime (chatTurn.prompt.ts:31) — used only for
@@ -206,6 +211,22 @@ export function TranscriptParts({
               <p className={styles.refusalMessage}>{p.message}</p>
             </div>
           );
+        }
+        // Wave-A parts (contract §9): identifier-only; each card hydrates on mount.
+        if (p.type === "doc_review") {
+          return <DocReviewCard key={`doc_review:${p.entry_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        if (p.type === "diff") {
+          return <DiffCard key={`diff:${p.entry_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        if (p.type === "sweep_receipt") {
+          return <SweepReceiptCard key={`sweep:${p.run_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        if (p.type === "kb_rule_proposal") {
+          return <KbRuleProposalCard key={`rule:${p.rule_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        if (p.type === "open_question") {
+          return <OpenQuestionCard key={`question:${p.question_id}:${i}`} token={token ?? null} part={p} />;
         }
         // tool_result / tool_error resolve their call's chip — render nothing (the
         // one place this is declared is partCatalog's STATUS_RESOLVER_TYPES).

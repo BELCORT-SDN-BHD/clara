@@ -10,6 +10,7 @@ import {
 import { startControlListener, productionControlDeps } from "../lib/control.mjs";
 import { startLeaderLoop } from "../lib/leader.mjs";
 import { startMatcherLoop } from "../lib/matcher.mjs";
+import { startAutodraftLoop } from "../lib/autodraft.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
 import { workflows } from "../workflows/registry.js";
@@ -112,6 +113,9 @@ export default definePlugin(() => {
         // references resolve through the registry `workflows` object (freeze-lint
         // enqueue-provenance law — a direct workflow-file import handed to start() fails CI).
         enqueueInvoiceFacts: (taskId: string) => start(workflows.invoiceFacts, [{ task_id: taskId }]),
+        // The reconciler re-enqueues an admitted-but-unstarted autodraft task (Wave A); the
+        // reference resolves through the registry `workflows` object (freeze-lint provenance).
+        enqueueAutoDraft: (taskId: string) => start(workflows.autoDraft, [{ taskId }]),
         recoverDocumentIntakes: () =>
           recoverPendingDocumentIntakes({
             withRuntime,
@@ -131,6 +135,17 @@ export default definePlugin(() => {
     const matcher = startMatcherLoop({ log: (m: string) => console.log(m) });
     matcher.done.then(() => fatal("matcher loop"), (e: unknown) => fatal("matcher loop", e));
     sup.stops.push(matcher.stop);
+
+    // Autodraft consumer (Wave A §3) — an INDEPENDENT loop on its own dedicated connection
+    // under the 'autodraft' advisory lock, so router/matcher leadership + the engine heartbeat
+    // are untouched. +1 persistent session. It resolves invoice_facts events -> filings, admits
+    // sweep tasks, and enqueues autoDraft_v1 (registry provenance) for each admitted task.
+    const autodraft = startAutodraftLoop({
+      enqueue: (taskId: string) => start(workflows.autoDraft, [{ taskId }]),
+      log: (m: string) => console.log(m),
+    });
+    autodraft.done.then(() => fatal("autodraft loop"), (e: unknown) => fatal("autodraft loop", e));
+    sup.stops.push(autodraft.stop);
 
     // DEDICATED engine heartbeat — the ONLY writer of the 'world' beat (S4-AB7b).
     const beatMs = Number(process.env.CLARA_WORLD_BEAT_MS || 10000);

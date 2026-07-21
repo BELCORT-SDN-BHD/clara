@@ -90,6 +90,29 @@ export const PART_CATALOG = {
       { type: "refusal", code: "CLR23", message: "CLR23: a payable line needs a resolved vendor." },
     ],
   },
+  // --- Wave-A additions (contract §9): identifier-only parts; each card hydrates
+  // authoritative state on mount. Fixtures render the card's id-only (no-token)
+  // state under the parity probe — non-empty, never the fallback chip.
+  doc_review: {
+    renderBranch: true,
+    fixtures: [{ type: "doc_review", document_id: "doc-4444", entry_id: "entry-4444", client_id: "client-1111" }],
+  },
+  diff: {
+    renderBranch: true,
+    fixtures: [{ type: "diff", entry_id: "entry-5555", client_id: "client-1111" }],
+  },
+  sweep_receipt: {
+    renderBranch: true,
+    fixtures: [{ type: "sweep_receipt", run_id: "run-6666" }],
+  },
+  kb_rule_proposal: {
+    renderBranch: true,
+    fixtures: [{ type: "kb_rule_proposal", rule_id: "rule-7777", question_id: "q-7777", client_id: "client-1111" }],
+  },
+  open_question: {
+    renderBranch: true,
+    fixtures: [{ type: "open_question", question_id: "q-8888", client_id: "client-1111" }],
+  },
 } satisfies Record<string, CatalogEntry>;
 
 export type RenderBranchType = keyof typeof PART_CATALOG;

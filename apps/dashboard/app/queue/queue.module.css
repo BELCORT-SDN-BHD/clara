@@ -1,0 +1,80 @@
+/* The firm review queue (contract §4 / DIRECTION List model). Plumbing-grade,
+   consistent with the /chat + /documents surfaces — opaque-first, dense-with-
+   hierarchy, bands carry shape + label (never hue-only), confidence never a digit. */
+
+.page { font-family: system-ui, sans-serif; max-width: 1280px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; color: #1a1a1a; }
+.header { margin-bottom: 0.75rem; }
+.title { font-size: 1.25rem; margin: 0 0 0.5rem; }
+.tokenBar { display: flex; gap: 0.5rem; margin-bottom: 0.25rem; }
+.tokenBar .input { flex: 1; }
+.muted { color: #6b6b6b; font-size: 0.8rem; margin: 0.15rem 0; }
+.banner { background: #fbe9e7; border: 1px solid #e5b5ad; color: #7a2418; padding: 0.45rem 0.65rem; border-radius: 4px; font-size: 0.85rem; margin: 0.5rem 0 0; }
+.errorText { color: #b3261e; font-size: 0.82rem; }
+
+.input { font: inherit; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+.button { font: inherit; padding: 0.4rem 0.9rem; border: 1px solid #4a6bd6; background: #4a6bd6; color: #fff; border-radius: 4px; cursor: pointer; }
+.button:disabled { opacity: 0.5; cursor: default; }
+.buttonSecondary { font: inherit; padding: 0.4rem 0.9rem; border: 1px solid #b9c2da; background: #eef2fd; color: #2f4487; border-radius: 4px; cursor: pointer; }
+.buttonSecondary:disabled { opacity: 0.5; cursor: default; }
+.linkButton { font-size: 0.78rem; background: none; border: none; color: #4a6bd6; cursor: pointer; padding: 0; text-decoration: underline; }
+
+/* Counts header — DB counts from one snapshot (WA-L6), never a live progress bar. */
+.countGrid { display: flex; gap: 0.5rem; flex-wrap: wrap; margin: 0.4rem 0; }
+.countTile { border: 1px solid #e2e2e2; border-radius: 5px; padding: 0.3rem 0.6rem; background: #fff; min-width: 78px; }
+.countNum { font-weight: 700; font-size: 1.05rem; font-variant-numeric: tabular-nums; }
+.countLabel { font-size: 0.68rem; color: #6b6b6b; text-transform: uppercase; letter-spacing: 0.03em; }
+.staleBadge { font-size: 0.68rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border-radius: 3px; padding: 0.1rem 0.45rem; border: 1px solid #e2cf9a; color: #6b4400; background: #f7eccf; }
+
+/* Toolbar — always-on filter + scope dropdown (DIRECTION §4.3/4.4). */
+.toolbar { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin: 0.4rem 0 0.6rem; }
+.filterInput { flex: 1; min-width: 200px; font: inherit; padding: 0.4rem 0.6rem; border: 1px solid #ccc; border-radius: 4px; }
+
+.layout { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); gap: 1rem; align-items: start; }
+@media (max-width: 980px) { .layout { grid-template-columns: 1fr; } }
+.listPane { border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem; min-height: 50vh; }
+.detailPane { border: 1px solid #ddd; border-radius: 6px; padding: 0.6rem; min-height: 50vh; }
+
+.sectionHeader { font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; color: #555; font-weight: 700; margin: 0.5rem 0 0.3rem; padding-bottom: 0.2rem; border-bottom: 1px solid #eee; }
+
+/* Virtualized list viewport. */
+.viewport { overflow-y: auto; max-height: 62vh; position: relative; }
+.spacer { position: relative; width: 100%; }
+
+.row { display: flex; gap: 0.5rem; align-items: center; width: 100%; text-align: left; background: #fafafa; border: 1px solid #e2e2e2; border-radius: 4px; padding: 0.4rem 0.55rem; cursor: pointer; font: inherit; }
+.row:hover { background: #f0f0f0; }
+.rowActive { border-color: #4a6bd6; background: #eef2fd; }
+.rowMain { display: flex; flex-direction: column; gap: 0.15rem; flex: 1; min-width: 0; }
+.rowTitle { font-weight: 600; font-size: 0.86rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rowSub { font-size: 0.74rem; color: #6b6b6b; }
+.rowAccessories { display: flex; gap: 0.35rem; align-items: center; flex-shrink: 0; }
+.rowCheck { width: 1rem; height: 1rem; flex-shrink: 0; }
+.rowAmount { font-variant-numeric: tabular-nums; font-size: 0.82rem; font-weight: 600; }
+.rowPeriod { font-size: 0.72rem; color: #6b6b6b; }
+.evidenceDot { width: 0.5rem; height: 0.5rem; border-radius: 50%; display: inline-block; background: #4c8a4c; }
+.evidenceDotNone { width: 0.5rem; height: 0.5rem; border-radius: 50%; display: inline-block; background: #ccc; border: 1px solid #bbb; }
+
+.band { font-size: 0.64rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; border-radius: 3px; padding: 0.08rem 0.4rem; border: 1px solid transparent; }
+.bandReady { color: #1f5c33; background: #e2f4e8; border-color: #b7dcc4; }
+.bandReview { color: #6b4400; background: #f7eccf; border-color: #e2cf9a; }
+.bandYou { color: #7a2418; background: #fbe2dd; border-color: #e8b3a8; }
+.badge { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; border-radius: 3px; padding: 0.08rem 0.35rem; border: 1px solid transparent; }
+.badgeAuto { color: #2f4487; background: #e7edfb; border-color: #c2cdec; }
+.badgeRule { color: #4a2f7a; background: #efe7fb; border-color: #d2c2ec; }
+.badgeHigh { color: #7a2418; background: #fbe2dd; border-color: #e8b3a8; }
+
+/* Screen states. */
+.stateBlock { padding: 1.2rem 0.6rem; text-align: center; color: #6b6b6b; }
+.skeletonRow { height: 2.4rem; background: linear-gradient(90deg, #f2f2f2, #eaeaea, #f2f2f2); border-radius: 4px; margin: 0.3rem 0; }
+.loadMoreBar { display: flex; justify-content: center; padding: 0.5rem; }
+
+/* Batch bar. */
+.batchBar { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; border: 1px solid #b9c2da; background: #f4f7ff; border-radius: 6px; padding: 0.45rem 0.65rem; margin: 0.4rem 0; }
+.batchSummary { border: 1px solid #cdd5e8; border-radius: 6px; background: #fbfcff; padding: 0.6rem 0.7rem; margin: 0.4rem 0; }
+.batchItem { padding: 0.25rem 0; border-bottom: 1px solid #f0f0f0; }
+.batchRow { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; font-size: 0.82rem; }
+.batchRowMain { display: flex; gap: 0.5rem; align-items: center; min-width: 0; }
+.batchLegs { display: flex; gap: 0.3rem; flex-wrap: wrap; margin: 0.2rem 0 0 1.4rem; }
+.legChip { font-size: 0.72rem; font-variant-numeric: tabular-nums; border: 1px solid #e2e2e2; border-radius: 3px; padding: 0.05rem 0.35rem; background: #fafafa; color: #4d4d4d; }
+.outcomeOk { color: #2f6f3e; font-size: 0.78rem; }
+.outcomeFail { color: #b3261e; font-size: 0.78rem; }
+.detailEmpty { color: #6b6b6b; font-size: 0.85rem; padding: 0.6rem 0; }

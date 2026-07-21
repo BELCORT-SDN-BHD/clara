@@ -132,8 +132,18 @@ test("S4-AB1 real session authorization: bare logins hold NO ambient privilege; 
     await c.query(`set role ${ROLES.agentRo}`);
     const read = await c.query("select count(*)::int as n from clara.firms");
     assert.equal(read.rows[0].n, 0, "after SET ROLE clara_agent_ro reads succeed (zero rows without a wake credential — RLS)");
-    const pack = await c.query("select clara.get_context_pack(p_client => $1, p_purpose => 'ab1 probe') as pack", [clients.A1]);
-    assert.equal(pack.rows[0].pack, null, "get_context_pack EXECUTEs (null pack without a credential — no oracle)");
+    // Wave-A (ADR-015): get_context_pack is now a GUC-gated SECURITY DEFINER —
+    // a SET-ROLE'd caller is invisible, so a secretless agent_ro session lands in
+    // the human branch and is refused CLR04 (a uniform refusal for EVERY
+    // credentialless caller, client existent or not — still no oracle; the S4-era
+    // invoker null-collapse is superseded).
+    let packDenied = null;
+    try {
+      await c.query("select clara.get_context_pack(p_client => $1, p_purpose => 'ab1 probe') as pack", [clients.A1]);
+    } catch (e) {
+      packDenied = e.code;
+    }
+    assert.equal(packDenied, "CLR04", `get_context_pack without a credential refuses CLR04 uniformly (got ${packDenied ?? "SUCCESS"})`);
     let writer = null;
     try {
       await c.query("select clara.create_client(p_name => 'ab1-illegal', p_op_key => 'ab1')");

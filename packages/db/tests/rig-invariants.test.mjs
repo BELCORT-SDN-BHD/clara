@@ -211,13 +211,15 @@ test("T7 maker/checker: self-approval of high-stakes blocked; routine self-appro
   const att = await rootQuery("select self_approval_attestation from clara.journal_entries where id = $1", [solo.entry_id]);
   assert.ok(att.rows[0].self_approval_attestation, "attestation stored");
 
-  // Agent-drafted high-stakes (last_human_editor NULL): any single human may approve.
+  // Agent-drafted high-stakes (last_human_editor NULL): a single human may approve,
+  // but WA-D5 now REQUIRES a non-blank attestation (else CLR05 attestation_required).
   const humanRes = await freshResolution(users.bob, clients.A1);
   const cred = await mintWake({ kind: "interactive", firm: world.firms.A });
   const wakeReceipt = await draftEntry({ kind: "wake", role: ROLES.wakeInteractive, secret: cred.secret }, { client: clients.A1, resolution: humanRes, lines: balanced(coa.A1, HIGH_STAKES_CENTS), opKey: opk(), wake: true });
-  await approveEntry(users.alice, { entry: wakeReceipt.entry_id, expectedRevision: wakeReceipt.revision_token, opKey: opk() });
-  const wchk = await rootQuery("select checker_actor from clara.journal_entries where id = $1", [wakeReceipt.entry_id]);
+  await approveEntry(users.alice, { entry: wakeReceipt.entry_id, expectedRevision: wakeReceipt.revision_token, attestation: "reviewed agent draft", opKey: opk() });
+  const wchk = await rootQuery("select checker_actor, self_approval_attestation from clara.journal_entries where id = $1", [wakeReceipt.entry_id]);
   assert.equal(wchk.rows[0].checker_actor, users.alice, "human checker on agent-drafted high-stakes");
+  assert.ok(wchk.rows[0].self_approval_attestation, "WA-D5 attestation stored on the agent-drafted high-stakes approval");
 });
 
 // ===========================================================================

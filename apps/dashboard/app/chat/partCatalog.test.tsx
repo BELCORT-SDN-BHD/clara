@@ -67,3 +67,12 @@ test("slice-6 part types are registered in the catalog", () => {
   assert.ok(RENDER_BRANCH_TYPES.includes("je_review"), "je_review must be registered");
   assert.ok(RENDER_BRANCH_TYPES.includes("refusal"), "refusal must be registered");
 });
+
+// Belt-and-braces: the five Wave-A part types are registered (the union unification +
+// new card set — contract §9). A future refactor dropping one fails here AND fails the
+// compile-time parity guard in partCatalog.ts.
+test("wave-a part types are registered in the catalog", () => {
+  for (const t of ["doc_review", "diff", "sweep_receipt", "kb_rule_proposal", "open_question"]) {
+    assert.ok(RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]), `${t} must be registered`);
+  }
+});
