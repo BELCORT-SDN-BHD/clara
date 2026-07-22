@@ -452,6 +452,20 @@ creating/holding the **R2 token** + the **age identity** key; any **restore-into
 (needs `CLARA_ALLOW_DESTRUCTIVE=1` + `CLARA_DESTRUCTIVE_TARGET="user@host:port/db"`);
 `gh pr merge`. The agent validates only on a **throwaway PG17 + a throwaway R2 bucket**.
 
+### Wiring evidence — EXECUTED AND PASSED, 2026-07-22
+
+The full loop ran live at wiring time: `fly machine run` (schedule daily) → first
+supervised run green end-to-end (`clara-backup: DONE — bundle 9720257 bytes ->
+r2:clara-dr/db-snapshots/2026/2026-07-22T09-31-46-611Z/`, manifest beside it,
+healthchecks ping → check GREEN at 26h grace) → the bundle was **downloaded back
+from R2, owner-decrypted with the age identity, and restored into a throwaway
+PG 17.9** (the §4 monthly-light bar): all 3 artifact sha256s = manifest; 4 schemas
+restored; migration floor 15 = manifest = live (0001→0015); **Gate A EXACT
+(300-000 debits = 500-000 credits = 197,333,291 cents)**; **AP gate EXACT
+(400-000 net = 135,093,821 cents)**; canary copy present + parked; the D&Dream
+`former_name` alias intact; plaintext purged after verification. First scheduled
+unattended run: the next daily tick.
+
 ### Verify cadence (a backup you never restored is not a backup)
 
 - **Monthly-light:** decrypt the latest bundle + restore the DB dumps into a **local
