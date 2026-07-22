@@ -141,33 +141,44 @@ test("redrive refuses when there is no sst_watch dead-letter (a never-dead-lette
 // the standalone concurrency run recorded in the review notes.)
 test("the daily SST belt issues ONE evaluate_sst_watch per active client + the receipt ONCE (finding 1)", { skip }, async () => {
   const { owner } = await buildFirm("sstbelt");
-  await createClient(owner, { name: `sstbelt_x_${Date.now()}`, opKey: opk("sstbelt-x") });
-  await createClient(owner, { name: `sstbelt_y_${Date.now()}`, opKey: opk("sstbelt-y") });
-  const active = Number((await rootQuery("select count(*)::int n from clara.clients where status='active'")).rows[0].n);
-  assert.ok(active >= 3, "several active clients are seeded");
+  const clientX = await createClient(owner, { name: `sstbelt_x_${Date.now()}`, opKey: opk("sstbelt-x") });
+  const clientY = await createClient(owner, { name: `sstbelt_y_${Date.now()}`, opKey: opk("sstbelt-y") });
 
+  // ROW-SCOPED assertions only (the rig truncate/deadlock lesson): in CI every package's
+  // suite shares ONE ephemeral postgres, so a concurrent lane can create clients between
+  // any global count() here and the sweep's own discovery — an exact-global-equality
+  // assertion is a race. We assert the sweep's SHAPE (per-client statements, one trailing
+  // receipt) and that OUR clients were each evaluated exactly once.
   const counts = { perClient: 0, receipt: 0 };
   const perClientKeys = [];
+  let receiptSeen = false;
   await asRuntime(async (c) => {
     const proxy = {
       query: (sql, params) => {
         const s = String(sql);
-        if (/evaluate_sst_watches_all/.test(s)) counts.receipt += 1;
-        else if (/evaluate_sst_watch/.test(s)) {
+        if (/evaluate_sst_watches_all/.test(s)) {
+          counts.receipt += 1;
+          receiptSeen = true;
+        } else if (/evaluate_sst_watch/.test(s)) {
           counts.perClient += 1;
-          perClientKeys.push(params?.[1]); // the per-client op-key
+          assert.equal(receiptSeen, false, "every per-client statement precedes the receipt");
+          perClientKeys.push(params?.[1]); // the per-client op-key embeds the client id
         }
         return c.query(sql, params);
       },
     };
     const out = await reconcileSstWatches(proxy, { log: () => {} });
     assert.equal(out.sstOk, true, "the sweep converges cleanly");
-    assert.equal(out.sstExamined, active, "every active client is examined");
+    assert.ok(out.sstExamined >= 3, "the receipt examined at least the seeded + our two clients");
     assert.ok(out.sstRunId, "the receipt run_id rides the result (compliance_eval_runs written)");
   });
-  assert.equal(counts.perClient, active, "exactly one evaluate_sst_watch statement per active client (never a bulk all-clients call)");
+  assert.ok(counts.perClient >= 3, "at least the seeded + our two clients each got a per-client statement (never a bulk-only call)");
   assert.equal(counts.receipt, 1, "evaluate_sst_watches_all (the ONLY compliance_eval_runs writer) is called exactly once, at the end");
-  assert.equal(new Set(perClientKeys).size, active, "each per-client op-key is distinct (embeds the client id)");
+  assert.equal(new Set(perClientKeys).size, counts.perClient, "each per-client op-key is distinct (embeds the client id)");
+  for (const id of [clientX, clientY]) {
+    const mine = perClientKeys.filter((k) => String(k).endsWith(`:${id}`));
+    assert.equal(mine.length, 1, `our client ${id} was evaluated exactly once by the per-client pass`);
+  }
 
   // The receipt landed — this is what backs list_review_queue's stale_evaluator (>48h) flag.
   const receipts = Number((await rootQuery("select count(*)::int n from clara.compliance_eval_runs")).rows[0].n);
