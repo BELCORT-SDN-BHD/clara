@@ -7,13 +7,15 @@
 // Every pane hydrates by identifier — the row payload carries ids only.
 
 import { useCallback } from "react";
-import type { QueueRow } from "../shared/reviewTypes";
+import type { QueueRow, ReviewCompliance } from "../shared/reviewTypes";
 import { getCodingLane } from "../shared/reviewApi";
-import { LANE_REASON_COPY, type CodingLane } from "../shared/reviewCardTypes";
+import { laneReasonCopy, type CodingLane } from "../shared/reviewCardTypes";
 import { useCard } from "../shared/cards/cardHooks";
 import { DocReviewCard } from "../shared/cards/DocReviewCard";
 import { DiffCard } from "../shared/cards/DiffCard";
 import { OpenQuestionCard } from "../shared/cards/OpenQuestionCard";
+import { ComplianceWatchCard } from "../shared/cards/ComplianceWatchCard";
+import { matchComplianceClient, parseServiceGroup } from "../shared/cards/complianceWatch";
 import { shortId } from "../shared/fmt";
 import styles from "./queue.module.css";
 
@@ -30,7 +32,9 @@ function LaneSummary({ token, clientId, filingId }: { token: string; clientId: s
           <p><span className={`${styles.band} ${band}`}>{data.lane ?? "—"}</span></p>
           {data.reasons.length > 0 ? (
             <ul>
-              {data.reasons.map((r, i) => <li key={i} className={styles.muted}>{LANE_REASON_COPY[r] ?? r}</li>)}
+              {/* An uncoded filing carries no coding_kind — direction is unknowable here,
+                  so the lane copy keeps the AP-loop wording (§6.2: never guess). */}
+              {data.reasons.map((r, i) => <li key={i} className={styles.muted}>{laneReasonCopy(r, null)}</li>)}
             </ul>
           ) : <p className={styles.muted}>No blocking reasons — eligible to draft.</p>}
         </>
@@ -40,11 +44,28 @@ function LaneSummary({ token, clientId, filingId }: { token: string; clientId: s
   );
 }
 
-export function QueueDetail({ token, row }: { token: string; row: QueueRow | null }) {
+export function QueueDetail({ token, row, compliance, onChanged }: {
+  token: string;
+  row: QueueRow | null;
+  compliance: ReviewCompliance | null;
+  onChanged: () => void;
+}) {
   if (!row) return <p className={styles.detailEmpty}>Select a row to see its detail — document, derivation, question, or lane.</p>;
 
   if (row.row_kind === "open_question" && row.question_id) {
     return <OpenQuestionCard token={token} part={{ type: "open_question", question_id: row.question_id, client_id: row.client_id ?? "" }} />;
+  }
+  if (row.row_kind === "compliance_watch" && row.watch_id) {
+    // Hydrate from the queue envelope — no get_compliance_watch fn exists (0016). Match
+    // the client entry by client_id + the parsed service group (else the tier).
+    const client = compliance
+      ? matchComplianceClient(compliance.clients, {
+          clientId: row.client_id,
+          serviceGroup: parseServiceGroup(row.question_text),
+          tier: row.tier,
+        })
+      : null;
+    return <ComplianceWatchCard token={token} row={row} client={client} watchId={row.watch_id} onChanged={onChanged} />;
   }
   if (row.row_kind === "draft" && row.entry_id) {
     if (row.document_id) {

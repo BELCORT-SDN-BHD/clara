@@ -11,6 +11,7 @@
 // field-name tolerance), so a key rename degrades a field, never crashes the card.
 
 import { rpc, type ProvenanceTier, type Uncertainty } from "./api";
+import { directionOf, counterpartyNoun, type Direction } from "../shared/direction";
 
 export type DraftLine = {
   account_code: string;
@@ -71,6 +72,7 @@ export type DraftReview = {
   document_id: string | null;
   filing_id: string | null;
   status: string; // 'draft' | 'approved' | 'withdrawn' | …
+  coding_kind: string | null; // §6.2 direction basis (supplier_bill / sales_* / null)
   revision_token: string;
   posting_date: string | null;
   memo: string | null;
@@ -104,18 +106,20 @@ function arr(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
 }
 
-/** Map the vendor decision from counterparty.current_outcome (0009) to the card
- *  badge. current_outcome === null ⇒ NO match ⇒ birth-on-approve ("new vendor"). */
-function mapDisposition(decision: string | null): { disposition: VendorProposal["disposition"]; note: string | null } {
+/** Map the counterparty decision from counterparty.current_outcome (0009) to the card
+ *  badge. current_outcome === null ⇒ NO match ⇒ birth-on-approve ("new vendor/customer").
+ *  §6.2: the note noun follows the draft direction (sales → customer). */
+function mapDisposition(decision: string | null, direction: Direction | null): { disposition: VendorProposal["disposition"]; note: string | null } {
+  const noun = counterpartyNoun(direction);
   switch (decision) {
     case "registration_match":
       return { disposition: "matched", note: "matched on registration" };
     case "name_match_unregistered":
-      return { disposition: "matched", note: "matched on name (unregistered vendor)" };
+      return { disposition: "matched", note: `matched on name (unregistered ${noun})` };
     case "registered_name_ambiguous":
-      return { disposition: "ambiguous", note: "a registered vendor matches this name — confirm the identity" };
+      return { disposition: "ambiguous", note: `a registered ${noun} matches this name — confirm the identity` };
     case "registration_conflict":
-      return { disposition: "ambiguous", note: "registration conflict — a name-equal vendor carries a different registration" };
+      return { disposition: "ambiguous", note: `registration conflict — a name-equal ${noun} carries a different registration` };
     default:
       return { disposition: "unresolved", note: decision };
   }
@@ -161,13 +165,18 @@ export function toDraftReview(raw: unknown): DraftReview | null {
   });
   // Tier-A labeling: any evidence row verified ⇒ the amount is machine-corroborated.
   const tier: ProvenanceTier = evidence.some((e) => e.provenance_tier === "verified") ? "verified" : "model_read";
+  // §6.2: coding_kind rides the draft path (to_jsonb(e)) and the slim settled payload;
+  // it fixes the counterparty noun (sales → customer, else vendor). Defensive: absent
+  // on a pre-0016 payload ⇒ null ⇒ the AP default.
+  const codingKind = str(entry.coding_kind);
+  const direction = directionOf(codingKind);
   // current_outcome.decision CAN be 'birth' (the fn returns it); both null and
-  // 'birth' ⇒ the "new vendor" badge (born on approval).
+  // 'birth' ⇒ the "new vendor/customer" badge (born on approval).
   const decision = str(outcome?.decision);
   const disp = cp
     ? !outcome || decision === "birth"
-      ? { disposition: "new" as const, note: "new vendor — born on approval" }
-      : mapDisposition(decision)
+      ? { disposition: "new" as const, note: `new ${counterpartyNoun(direction)} — born on approval` }
+      : mapDisposition(decision, direction)
     : null;
 
   return {
@@ -176,6 +185,7 @@ export function toDraftReview(raw: unknown): DraftReview | null {
     document_id: str(entry.document_id),
     filing_id: str(entry.filing_id),
     status: str(entry.status) ?? "unknown",
+    coding_kind: codingKind,
     revision_token: str(entry.revision_token) ?? "",
     posting_date: str(entry.posting_date),
     memo: str(entry.memo),

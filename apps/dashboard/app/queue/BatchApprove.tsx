@@ -14,6 +14,7 @@ import { getDraftReview, type DraftReview } from "../chat/review";
 import { approveRoutineEntry } from "../shared/reviewApi";
 import type { PgrestError } from "../shared/wire";
 import { fmtCents, shortId } from "../shared/fmt";
+import { directionOf, counterpartyNoun } from "../shared/direction";
 import styles from "./queue.module.css";
 
 type Loaded = { review: DraftReview | null; error: string | null };
@@ -117,7 +118,7 @@ export function BatchApprove({ token, rows, onClearSelection, onApproved }: {
                   <input type="checkbox" aria-label={`include ${shortId(id)}`} checked={!excluded} onChange={() => toggleOptOut(id)} disabled={busy} />
                 ) : null}
                 <span className={styles.rowTitle}>
-                  {l?.review?.vendor?.name ?? "(vendor)"} · {shortId(id)}
+                  {l?.review?.vendor?.name ?? `(${counterpartyNoun(directionOf(l?.review?.coding_kind ?? null))})`} · {shortId(id)}
                   {l?.error ? <span className={styles.errorText}> — {l.error}</span> : null}
                 </span>
               </span>
