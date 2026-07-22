@@ -15,7 +15,7 @@
 # old and the new recipient here so historical bundles stay decryptable; manifest.json
 # records how many recipients a bundle used.
 #
-# The job REFUSES to run while this file holds only the placeholder below — the owner
-# MUST replace it with the real recipient before the first live run.
+# The job REFUSES to run while this file holds only placeholder values (the
+# readRecipients guard) — a real owner-minted recipient must be present, as below.
 # Recipient minted 2026-07-22 (identity: owner custody, ~/.clara-age-identity.txt + offline backup).
 age1802286z6txlzuveq2was0h8nhkcngqvpcetz52uqdu7nqw9llp8sm4dkzw

@@ -1,19 +1,14 @@
 # fly.toml — clara-backup (Wave A2 §8 / WA2-R6): the off-site DR backup app.
 #
 # A SEPARATE Fly app from clara-runtime (the runtime machine is explicitly NON-HA and
-# must never carry this job). This file drives the IMAGE BUILD ONLY:
-#
-#     # from the REPO ROOT (build context must carry packages/backup AND packages/db);
-#     # --dockerfile is EXPLICIT because [build].dockerfile resolution relative to a
-#     # nested --config is not doc-guaranteed (fly.io/docs/launch/monorepo):
-#     fly deploy . --config packages/backup/fly.toml \
-#         --dockerfile packages/backup/Dockerfile \
-#         --build-only --push --image-label <tag> -a clara-backup
+# must never carry this job). This file drives the IMAGE BUILD ONLY.
 #
 # DO NOT run a plain `fly deploy`: with no services it still creates AND STARTS a
 # machine (plus a stopped standby), i.e. it would fire a live backup run on every
-# deploy. Build-only + push, then create the ONE scheduled machine from the pushed
-# image (registry.fly.io/clara-backup:<tag>) with `fly machine run`.
+# deploy. Build-only + push (from the REPO ROOT, --dockerfile explicit), then create
+# the ONE scheduled machine from the pushed image with `fly machine run`. The exact
+# commands live in ONE place — docs/ops/DR.md §9 step 6 — deliberately not restated
+# here (a stale copy of a deploy command in this file is how live-run accidents happen).
 #
 # `fly machine run` DISREGARDS fly.toml configuration (env/files/vm — it reads only
 # the app name), so there is NO [env] section here: image-intrinsic env lives in the

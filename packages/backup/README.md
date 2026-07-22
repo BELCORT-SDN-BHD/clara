@@ -54,9 +54,10 @@ flags — the exact flag set (the runtime contract) is `docs/ops/DR.md` §9 step
 
 ```sh
 fly apps create clara-backup
-# Stage ALL secrets first from a NAME=VALUE file (see DR.md §9 step 4; the
-# service_role key goes BASE64-encoded as CLARA_STORAGE_SERVICE_KEY_B64):
-fly secrets import -a clara-backup --stage < clara-backup-secrets.env
+# Stage ALL secrets first from a NAME=VALUE file written OUTSIDE the repo (see
+# DR.md §9 step 4; the service_role key goes BASE64-encoded as
+# CLARA_BACKUP_STORAGE_SERVICE_KEY_B64):
+fly secrets import -a clara-backup --stage < "$env:USERPROFILE\clara-backup-secrets.env"
 # Build from the REPO ROOT (context needs packages/backup + packages/db);
 # --dockerfile explicit (nested-config resolution is not doc-guaranteed):
 fly deploy . --config packages/backup/fly.toml --dockerfile packages/backup/Dockerfile \
