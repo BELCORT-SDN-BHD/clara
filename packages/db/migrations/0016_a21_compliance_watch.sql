@@ -316,6 +316,13 @@ create table clara.compliance_watches (
   window_start                date,
   window_end                  date,
   coverage_complete           boolean,
+  -- ADV-7: the statutory machine evaluates only COMPLETED months (STA 2018
+  -- s.12 fixes liability at the END of a month). Month-to-date movement is a
+  -- NON-STATUTORY provisional signal — surfaced as separate labeled figures,
+  -- never a state.
+  provisional_month           date,
+  provisional_included_cents  bigint,
+  provisional_crossed         boolean not null default false,
   future_method_status        text
                               check (future_method_status in
                                 ('not_assessed','attested_below','attested_above','expired')),
@@ -466,6 +473,10 @@ create function clara.evaluate_sst_watch(p_client uuid, p_op_key text) returns j
 declare
   v_firm uuid; v_today date:=current_date;
   v_cur_month date:=date_trunc('month',current_date)::date;
+  -- ADV-7: the last COMPLETED month — the statutory evaluation horizon (STA
+  -- 2018 s.12 fixes liability at the END of a month; the month in progress can
+  -- only ever be a provisional signal).
+  v_stat_month date:=(date_trunc('month',current_date)-interval '1 month')::date;
   v_groups text[]; g text; v_out jsonb:='[]'::jsonb; v_changed boolean:=false;
   v_threshold bigint; v_sched_from date;
   v_inc bigint; v_unk bigint; v_proxy bigint; v_first_month date;
@@ -473,6 +484,7 @@ declare
   v_fm text; v_att record; w record; v_watch uuid; v_seq bigint;
   v_rearm boolean; v_rearm_why text; v_group_changed boolean;
   v_figures jsonb; v_resolved record; v_first_posting date;
+  v_prov_inc bigint; v_prov_crossed boolean; v_fut_month date;
 begin
   begin
     if p_op_key is null or btrim(p_op_key)='' then
@@ -486,15 +498,30 @@ begin
         'reason','client_not_found','changed',false,'groups','[]'::jsonb);
     end if;
 
-    -- groups in play: every effective included/unknown classification group
-    -- (NULL group -> 'G'); a wholly-unclassified client with income activity is
+    -- groups in play (ADV-9: a group can never DISAPPEAR from evaluation):
+    -- every included/unknown classification group across the WHOLE effective
+    -- history (a later reclassification must not orphan a historical crossing),
+    -- UNION every open (unresolved) watch's group (backdating/expiry/deadline
+    -- updates keep flowing), UNION every unexpired attestation's group.
+    -- NULL group -> 'G'; a wholly-unclassified client with income activity is
     -- screened under 'G' so the condition can never hide behind missing setup.
-    select coalesce(array_agg(distinct coalesce(t.service_group,'G')),'{}'::text[])
+    select coalesce(array_agg(distinct u.grp),'{}'::text[])
       into v_groups
-      from clara.client_turnover_accounts t
-      where t.client_id=p_client
-        and t.effective_from<=v_today and (t.effective_to is null or t.effective_to>=v_today)
-        and t.classification in ('included','unknown_or_mixed');
+      from (
+        select coalesce(t.service_group,'G') as grp
+          from clara.client_turnover_accounts t
+          where t.client_id=p_client
+            and t.classification in ('included','unknown_or_mixed')
+        union
+        select cw0.service_group
+          from clara.compliance_watches cw0
+          where cw0.client_id=p_client and cw0.watch_kind='sst_registration'
+            and cw0.state<>'resolved'
+        union
+        select a0.service_group
+          from clara.sst_future_attestations a0
+          where a0.client_id=p_client and a0.expires_at>=v_today
+      ) u;
     if coalesce(array_length(v_groups,1),0)=0 then
       if exists(select 1 from clara.journal_entries e
           join clara.journal_lines l on l.entry_id=e.id
@@ -517,7 +544,7 @@ begin
     select min(e.posting_date) into v_first_posting from clara.journal_entries e
       where e.client_id=p_client and e.status='approved' and not e.is_opening_balance;
     v_cov:=not v_has_ob and v_first_posting is not null
-      and v_first_posting<=(v_cur_month-interval '11 months')::date;
+      and v_first_posting<=(v_stat_month-interval '11 months')::date;
     select coalesce(max(seq),0) into v_seq from clara.domain_events where firm_id=v_firm;
 
     foreach g in array v_groups loop
@@ -560,7 +587,9 @@ begin
           and (a.account_type='income' or cls.classification is not null)
         group by 1
       ), months as (
-        select generate_series((select min(c0.m) from counted c0),v_cur_month,
+        -- ADV-7: the statutory series stops at the last COMPLETED month; the
+        -- month in progress never becomes a statutory month-end.
+        select generate_series((select min(c0.m) from counted c0),v_stat_month,
           interval '1 month')::date as m
       ), rolled as (
         select mo.m,
@@ -580,12 +609,38 @@ begin
       )
       select
         (select min(r1.m) from rolled r1 where r1.thr is not null and r1.r_inc>r1.thr),
-        (select r2.r_inc from rolled r2 where r2.m=v_cur_month),
-        (select r3.r_unk from rolled r3 where r3.m=v_cur_month),
-        (select r4.r_proxy from rolled r4 where r4.m=v_cur_month),
-        (select min(c9.m) from counted c9)
-        into v_earliest,v_inc,v_unk,v_proxy,v_first_month;
+        (select r2.r_inc from rolled r2 where r2.m=v_stat_month),
+        (select r3.r_unk from rolled r3 where r3.m=v_stat_month),
+        (select r4.r_proxy from rolled r4 where r4.m=v_stat_month),
+        (select min(c9.m) from counted c9),
+        -- ADV-7: the PROVISIONAL rolling figure — the 12 months ending at the
+        -- month in progress, month-to-date included. A separate labeled signal,
+        -- never a statutory state input.
+        (select coalesce(sum(c5.inc),0) from counted c5
+           where c5.m>=(v_cur_month-interval '11 months')::date and c5.m<=v_cur_month)
+        into v_earliest,v_inc,v_unk,v_proxy,v_first_month,v_prov_inc;
       v_inc:=coalesce(v_inc,0); v_unk:=coalesce(v_unk,0); v_proxy:=coalesce(v_proxy,0);
+      v_prov_inc:=coalesce(v_prov_inc,0);
+      v_prov_crossed:=v_prov_inc>v_threshold;
+
+      -- ADV-8: the future method (WA21-R6) read BEFORE state derivation — a
+      -- valid above-threshold attestation whose as-of month has ENDED is the
+      -- statutory future test met in that month (s.12(c)/(d)); liability and
+      -- the deadline follow the EARLIER of the two methods.
+      select a2.* into v_att from clara.sst_future_attestations a2
+        where a2.client_id=p_client and a2.service_group=g
+        order by a2.as_of desc,a2.created_at desc limit 1;
+      if v_att.id is null then v_fm:='not_assessed';
+      elsif v_att.expires_at<v_today then v_fm:='expired';
+      elsif v_att.expected_cents>v_threshold then v_fm:='attested_above';
+      else v_fm:='attested_below';
+      end if;
+      v_fut_month:=null;
+      if v_fm='attested_above'
+         and date_trunc('month',v_att.as_of)::date<v_cur_month then
+        v_fut_month:=date_trunc('month',v_att.as_of)::date;
+      end if;
+      v_earliest:=least(coalesce(v_earliest,v_fut_month),coalesce(v_fut_month,v_earliest));
 
       -- statutory countdown (factsheet §2 / s.13(1)): application due the last
       -- day of the month FOLLOWING the crossing month.
@@ -598,23 +653,15 @@ begin
         when v_inc*5>=v_threshold*4 then 'early_warning'   -- >=80%, integer-exact
         else 'monitored' end;
 
-      -- future method (WA21-R6): human-attested or not_assessed — NEVER
-      -- inferred from ledger trends; expiry re-arms below.
-      select a2.* into v_att from clara.sst_future_attestations a2
-        where a2.client_id=p_client and a2.service_group=g
-        order by a2.as_of desc,a2.created_at desc limit 1;
-      if v_att.id is null then v_fm:='not_assessed';
-      elsif v_att.expires_at<v_today then v_fm:='expired';
-      elsif v_att.expected_cents>v_threshold then v_fm:='attested_above';
-      else v_fm:='attested_below';
-      end if;
-
       v_figures:=jsonb_build_object(
         'confirmed_included_cents',v_inc,'unknown_or_mixed_cents',v_unk,
         'screening_proxy_cents',v_proxy,'threshold_cents',v_threshold,
         'earliest_crossing_month',v_earliest,'application_due',v_due,
-        'window_start',(v_cur_month-interval '11 months')::date,'window_end',v_cur_month,
-        'future_method_status',v_fm,'coverage_complete',v_cov);
+        'window_start',(v_stat_month-interval '11 months')::date,'window_end',v_stat_month,
+        'future_method_status',v_fm,'future_method_month',v_fut_month,
+        'coverage_complete',v_cov,
+        'provisional_month',v_cur_month,'provisional_included_cents',v_prov_inc,
+        'provisional_crossed',v_prov_crossed);
 
       select * into w from clara.compliance_watches
         where client_id=p_client and service_group=g and watch_kind='sst_registration'
@@ -640,11 +687,13 @@ begin
         insert into clara.compliance_watches(firm_id,client_id,service_group,watch_kind,
             state,earliest_crossing_month,confirmed_included_cents,unknown_or_mixed_cents,
             screening_proxy_cents,window_start,window_end,coverage_complete,
+            provisional_month,provisional_included_cents,provisional_crossed,
             future_method_status,application_due,schedule_effective_from,
             evaluated_at,evaluated_through_event_seq)
           values(v_firm,p_client,g,'sst_registration',v_state,
             v_earliest,v_inc,v_unk,v_proxy,
-            (v_cur_month-interval '11 months')::date,v_cur_month,v_cov,
+            (v_stat_month-interval '11 months')::date,v_stat_month,v_cov,
+            v_cur_month,v_prov_inc,v_prov_crossed,
             v_fm,v_due,v_sched_from,now(),v_seq)
           returning id into v_watch;
         insert into clara.compliance_watch_events(watch_id,event_kind,state_before,
@@ -684,13 +733,17 @@ begin
           or v_proxy is distinct from w.screening_proxy_cents
           or v_earliest is distinct from w.earliest_crossing_month
           or v_fm is distinct from w.future_method_status
+          or v_prov_inc is distinct from w.provisional_included_cents
+          or v_prov_crossed is distinct from w.provisional_crossed
           or v_rearm;
         update clara.compliance_watches set
           state=v_state,
           earliest_crossing_month=v_earliest,
           confirmed_included_cents=v_inc,unknown_or_mixed_cents=v_unk,
           screening_proxy_cents=v_proxy,
-          window_start=(v_cur_month-interval '11 months')::date,window_end=v_cur_month,
+          window_start=(v_stat_month-interval '11 months')::date,window_end=v_stat_month,
+          provisional_month=v_cur_month,provisional_included_cents=v_prov_inc,
+          provisional_crossed=v_prov_crossed,
           coverage_complete=v_cov,future_method_status=v_fm,
           application_due=v_due,schedule_effective_from=v_sched_from,
           acknowledged_by=case when v_rearm then null else acknowledged_by end,
@@ -839,11 +892,19 @@ begin
       and t.effective_from<=p_effective_from
       and (t.effective_to is null or t.effective_to>=p_effective_from)
     order by t.effective_from desc limit 1;
+  -- ADV-10: watch-lowering includes SERVICE-GROUP REASSIGNMENT of an existing
+  -- classified account (moving turnover between groups splits it below both
+  -- thresholds); every lowering move demands admin+ AND non-blank evidence.
   v_lowering:=(p_classification='excluded')
     or (coalesce(v_cur.classification,'unknown_or_mixed')='included'
-        and p_classification='unknown_or_mixed');
+        and p_classification='unknown_or_mixed')
+    or (v_cur.id is not null
+        and coalesce(v_cur.service_group,'G') is distinct from coalesce(p_service_group,'G'));
   if v_lowering and coalesce(clara.actor_role_rank(),-1)<clara.role_rank('admin') then
     raise exception 'a watch-lowering classification requires admin' using errcode='CLR04';
+  end if;
+  if v_lowering and (p_evidence is null or btrim(p_evidence)='') then
+    raise exception 'a watch-lowering classification requires evidence' using errcode='CLR10';
   end if;
   update clara.client_turnover_accounts set effective_to=p_effective_from-1
     where client_id=p_client and account_code=p_account_code
@@ -1040,6 +1101,13 @@ begin
      or p_conclusion not in ('registration_recorded','not_liable_documented')
      or p_evidence is null or nullif(btrim(p_evidence),'') is null then
     raise exception 'resolution requires a typed conclusion and evidence' using errcode='CLR10';
+  end if;
+  -- ADV-10: a documented NOT-LIABLE analysis is exemption-equivalent (a
+  -- watch-lowering act) — admin+ only. Recording a registration stays
+  -- bookkeeper+ (the positive compliance outcome).
+  if p_conclusion='not_liable_documented'
+     and coalesce(clara.actor_role_rank(),-1)<clara.role_rank('admin') then
+    raise exception 'a not-liable resolution requires admin' using errcode='CLR04';
   end if;
   v_dedupe:=clara._reserve_op(c.firm,'resolve_compliance_watch',p_op_key,
     clara._hash(jsonb_build_object('watch',p_watch,'conclusion',p_conclusion,
@@ -1333,8 +1401,17 @@ begin
         and a.account_type='income'
       on conflict on constraint uq_rule_sightings_mapping do nothing;
 
+    -- ADV-2: the vendor_account auto-proposal breeds ONLY for canonical
+    -- VENDOR-kind counterparties onto NON-CONTROL accounts — a customer's AR
+    -- control debit sighting must never spawn a vendor_account rule (nor a
+    -- blocking vendor question) binding a customer to the receivable control.
     for v_map in select distinct s.account_code from clara.rule_sightings s
+        join clara.coa_accounts am on am.client_id=s.client_id and am.account_code=s.account_code
         where s.entry_id=p_entry and s.counterparty_id=v_counterparty and s.side='debit'
+          and coalesce(am.account_class,'') not in ('payable','receivable')
+          and exists(select 1 from clara.counterparties cpv
+            where cpv.id=v_counterparty and cpv.kind='vendor'
+              and cpv.merged_into is null and cpv.retired_at is null)
     loop
       select count(distinct s.entry_id)::int into v_seen
       from clara.rule_sightings s join clara.journal_entries j on j.id=s.entry_id
@@ -1413,6 +1490,34 @@ begin
   return new;
 end $$;
 
+-- ADV-5: the OCR six-sighting authority as ONE centralized predicate, called
+-- at PROPOSAL, at SIGNING, and atomically at POSTING (under the client
+-- serialization lock) — the floor is re-derived live, so reversing the
+-- evidence after proposal strips the authority. Qualifying = human-approved
+-- (never a rule's own output), unreversed, override-free, NON-FUTURE credit
+-- sightings; distinct documents AND distinct stated invoice numbers (two docs
+-- sharing a stated invoice_id collapse to one; a doc with no stated number
+-- counts by document identity); posting-date span >= 60 days.
+create function clara._ocr_sales_floor(p_client uuid, p_cp uuid, p_account text)
+  returns table(qualifying int, distinct_docs int, distinct_invoices int, span_days int)
+  language sql stable security definer set search_path=clara,pg_temp as $$
+  select count(distinct s.entry_id)::int,
+         count(distinct j.document_id)::int,
+         count(distinct coalesce(
+           nullif(clara._invoice_fact_state(j.document_id)->>'invoice_id',''),
+           j.document_id::text))::int,
+         (max(j.posting_date)-min(j.posting_date))::int
+  from clara.rule_sightings s
+  join clara.journal_entries j on j.id=s.entry_id
+  where s.client_id=p_client and s.account_code=p_account and s.side='credit'
+    and clara._canonical_counterparty(p_client,s.counterparty_id)=p_cp
+    and j.status='approved' and j.reversed_by is null and j.checked_via_rule_id is null
+    and j.document_id is not null
+    and j.posting_date<=current_date
+    and not (j.flags ? 'amount_override') and not (j.flags ? 'duplicate_override');
+$$;
+revoke all on function clara._ocr_sales_floor(uuid,uuid,text) from public;
+
 -- propose_autopost_rule CoR (same arity — new keys ride the jsonb): the
 -- sales_autopost_deferred CLR27 refusal is REMOVED (the Wave-A2.1 lift,
 -- WA21-R2); the sighting floor becomes DIRECTION-AWARE (side='credit' pool for
@@ -1458,6 +1563,13 @@ begin
      or v_maxposts<=0 or v_window<>'monthly' then
     raise exception 'autopost rule is malformed'
       using errcode='CLR27',detail='{"reason":"malformed"}';
+  end if;
+  -- ADV-6: the pinned bounds are NOT caller-widenable — monthly, <=3 posts per
+  -- window, expiry within 12 months of proposal (structurally re-enforced by
+  -- ck_coding_rules_autopost_bounds; re-verified at signing).
+  if v_maxposts>3 or v_expires>now()+interval '12 months' then
+    raise exception 'autopost bounds exceed the pinned envelope (monthly / <=3 posts / <=12-month expiry)'
+      using errcode='CLR27',detail='{"reason":"bounds_exceeded"}';
   end if;
   -- 0016/P2: the evidence class is part of the SIGNED authority. A sales rule
   -- must declare 'structured' (MyInvois) or 'ocr_sales' (the §3.3 envelope); a
@@ -1510,18 +1622,14 @@ begin
   -- rule-posted outputs excluded; the counterparty must ALREADY be resolved
   -- (v_cp above — no birth in this lane, ever).
   if v_evc='ocr_sales' then
-    select count(distinct s.entry_id)::int,count(distinct j.document_id)::int,
-           max(j.posting_date)-min(j.posting_date)
+    -- ADV-5: the centralized predicate — the same floor is re-derived at
+    -- signing and at posting.
+    select f.qualifying,f.distinct_invoices,f.span_days
       into v_seen,v_docs,v_span_days
-    from clara.rule_sightings s join clara.journal_entries j on j.id=s.entry_id
-    where s.client_id=v_client and s.account_code=v_account and s.side='credit'
-      and clara._canonical_counterparty(v_client,s.counterparty_id)=v_cp
-      and j.status='approved' and j.reversed_by is null and j.checked_via_rule_id is null
-      and j.document_id is not null
-      and not (j.flags ? 'amount_override') and not (j.flags ? 'duplicate_override');
+      from clara._ocr_sales_floor(v_client,v_cp,v_account) f;
     if coalesce(v_seen,0)<6 or coalesce(v_docs,0)<6
        or v_span_days is null or v_span_days<60 then
-      raise exception 'an OCR-sales autopost proposal needs 6+ human-approved credit sightings across 6+ documents spanning 60+ days'
+      raise exception 'an OCR-sales autopost proposal needs 6+ human-approved credit sightings across 6+ documents/invoice numbers spanning 60+ days'
         using errcode='CLR27',detail='{"reason":"insufficient_evidence"}';
     end if;
   end if;
@@ -1559,6 +1667,7 @@ end $$;
 create or replace function clara.sign_autopost_rule(p_rule uuid,p_op_key text) returns jsonb
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare c record; v_dedupe jsonb; r record; v_constraint text; v_hs bigint;
+  v_seen int; v_docs int; v_span int;
 begin
   c:=clara._human_ctx(clara.role_rank('admin'));
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
@@ -1581,6 +1690,25 @@ begin
   if v_hs is not null and r.amount_cap_cents>v_hs then
     raise exception 'autopost cap cannot exceed the firm high-stakes threshold'
       using errcode='CLR27',detail='{"reason":"cap_exceeds_high_stakes"}';
+  end if;
+  -- ADV-6: the pinned bounds re-verified at signing (defense-in-depth beside
+  -- the structural CHECK — a raw out-of-bounds proposal can never go live).
+  if r.frequency_window is distinct from 'monthly'
+     or r.window_max_posts not between 1 and 3
+     or r.expires_at is null or r.expires_at>r.created_at+interval '12 months' then
+    raise exception 'autopost bounds exceed the pinned envelope (monthly / <=3 posts / <=12-month expiry)'
+      using errcode='CLR27',detail='{"reason":"bounds_exceeded"}';
+  end if;
+  -- ADV-5: the OCR sighting floor re-derived at SIGNING — evidence reversed
+  -- after proposal strips the authority before it can go live.
+  if r.direction='sales' and r.evidence_class='ocr_sales' then
+    select f.qualifying,f.distinct_invoices,f.span_days into v_seen,v_docs,v_span
+      from clara._ocr_sales_floor(r.client_id,
+        clara._canonical_counterparty(r.client_id,r.counterparty_id),r.account_code) f;
+    if coalesce(v_seen,0)<6 or coalesce(v_docs,0)<6 or v_span is null or v_span<60 then
+      raise exception 'the OCR-sales sighting floor no longer holds (evidence reversed or lost since proposal)'
+        using errcode='CLR27',detail='{"reason":"insufficient_evidence"}';
+    end if;
   end if;
   begin
     update clara.coding_rules set status='live',signed_by=c.actor,signed_at=now() where id=p_rule;
@@ -1636,6 +1764,9 @@ declare
   v_cust_reg text; v_cust_taxid text; v_cust_name text; v_client_name text;
   v_hard_ok boolean; v_name_ok boolean; v_buyer_hit boolean;
   v_due_c int; v_due_amt bigint; v_skips int; v_suspended boolean:=false;
+  v_doc_lane text; v_doc_class text; v_verdict jsonb;
+  v_cust_name_raw text; v_cust_reg_raw text; v_buyer_fp jsonb; v_buyer_id uuid;
+  v_fseen int; v_fdocs int; v_fspan int;
 begin
   if p_op_key is null or btrim(p_op_key)='' then
     raise exception 'op_key is required' using errcode='CLR10';
@@ -1836,15 +1967,53 @@ begin
     return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','not_corroborated');
   end if;
 
+  -- ADV-1: the DOCUMENT's ACTUAL evidence class, derived from its latest done
+  -- facts task lane (the local no-egress MyInvois parse = 'structured'; the
+  -- Azure OCR lane = 'ocr_sales') — NEVER from the rule label alone. A signed
+  -- class that does not match the document's real extraction source is a named
+  -- visible skip: an OCR document can never ride a 'structured' rule around
+  -- the envelope, and an XML document never consumes an OCR authority.
+  if v_direction='sales' then
+    select t.lane into v_doc_lane
+      from clara.document_processing_tasks t
+      join clara.document_extractions x on x.document_id=t.document_id
+        and x.engine_id=t.engine_id and x.version_n=t.version_n
+        and x.engine_kind='invoice_facts' and x.status='done'
+      where t.document_id=e.document_id
+        and t.lane in ('invoice_facts','local_facts') and t.status='done'
+      order by t.version_n desc,t.id desc limit 1;
+    v_doc_class:=case v_doc_lane when 'local_facts' then 'structured'
+                                 when 'invoice_facts' then 'ocr_sales' end;
+    if v_doc_class is null or v_doc_class is distinct from r.evidence_class then
+      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
+        values(e.firm_id,e.client_id,p_entry,r.id,'evidence_class_mismatch');
+      return jsonb_build_object('entry_id',p_entry,'status','skipped',
+        'reason','evidence_class_mismatch','document_class',v_doc_class,
+        'rule_class',r.evidence_class);
+    end if;
+  end if;
+
   -- 0016 §3.3: the OCR compensating-control envelope, RE-DERIVED at post time
   -- (control 8 — no trust in signing-time state).
   if v_direction='sales' and r.evidence_class='ocr_sales' then
-    -- (a) positive polarity evidence.
+    -- (a) positive polarity evidence (ADV-3: a done classifier row is not by
+    -- itself positive evidence — the WINNING verdict must POSITIVELY say
+    -- 'invoice'): the human correction outranks classifier verdicts; among
+    -- classifier rows the newest version wins; the verdict must be
+    -- high-confidence (>=0.8, never low_confidence) or human, and must agree
+    -- with the CURRENT document_kind.
     select d2.document_kind into v_kind_doc from clara.documents d2 where d2.id=e.document_id;
+    select x.envelope into v_verdict from clara.document_extractions x
+      where x.document_id=e.document_id and x.engine_kind='doc_classify'
+        and x.status='done'
+      order by case when x.envelope->>'source'='human' then 0 else 1 end,
+        x.version_n desc limit 1;
     if v_kind_doc is distinct from 'invoice'
-       or not exists(select 1 from clara.document_extractions x
-         where x.document_id=e.document_id and x.engine_kind='doc_classify'
-           and x.status='done') then
+       or v_verdict is null
+       or (v_verdict->>'verdict_kind') is distinct from 'invoice'
+       or coalesce((v_verdict->>'low_confidence')::boolean,false)
+       or not ((v_verdict->>'source')='human'
+               or coalesce((v_verdict->>'confidence')::numeric,0)>=0.8) then
       insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
         values(e.firm_id,e.client_id,p_entry,r.id,'polarity_unverified');
       select count(*)::int into v_skips from clara.rule_post_skips
@@ -1923,6 +2092,40 @@ begin
       return jsonb_build_object('entry_id',p_entry,'status','skipped',
         'reason','direction_unproven','rule_suspended',v_suspended);
     end if;
+    -- (b2) ADV-4: stated-buyer <-> signed-counterparty CONGRUENCE. Control (b)
+    -- proves only that the buyer is NOT the client; the invoice's stated buyer
+    -- must ALSO resolve (kind-scoped, no birth ever) to the SAME canonical
+    -- customer the signed rule names — an invoice billing Buyer B can never be
+    -- posted through Customer A's authority. Absence, ambiguity, birth, or a
+    -- registration contradiction is a named visible skip.
+    select nullif(btrim(min(dr.text_content)),'') into v_cust_name_raw
+      from clara.document_regions dr
+      where dr.extraction_id=v_fx and dr.field_path='invoice.customer_name';
+    select nullif(btrim(min(dr.text_content)),'') into v_cust_reg_raw
+      from clara.document_regions dr
+      where dr.extraction_id=v_fx and dr.field_path='invoice.customer_registration';
+    v_buyer_id:=null;
+    if v_cust_name_raw is not null then
+      begin
+        v_buyer_fp:=clara._resolve_counterparty(e.client_id,jsonb_strip_nulls(
+          jsonb_build_object('kind','customer','new',jsonb_build_object(
+            'name',v_cust_name_raw,'registration_no',v_cust_reg_raw))));
+        if v_buyer_fp is not null and v_buyer_fp->>'decision'<>'birth'
+           and (v_buyer_fp->>'counterparty_id') is not null then
+          v_buyer_id:=clara._canonical_counterparty(e.client_id,
+            (v_buyer_fp->>'counterparty_id')::uuid);
+        end if;
+      exception when sqlstate 'CLR23' or sqlstate 'CLR21' then
+        v_buyer_id:=null; -- ambiguity/contradiction => mismatch below
+      end;
+    end if;
+    if v_buyer_id is null
+       or v_buyer_id is distinct from clara._canonical_counterparty(e.client_id,r.counterparty_id) then
+      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
+        values(e.firm_id,e.client_id,p_entry,r.id,'buyer_mismatch');
+      return jsonb_build_object('entry_id',p_entry,'status','skipped',
+        'reason','buyer_mismatch');
+    end if;
     -- (c) full multi-anchor corroboration.
     v_net:=nullif(v_state->>'total_excl_tax_cents','')::bigint;
     v_round:=nullif(v_state->>'rounding_cents','')::bigint;
@@ -1946,6 +2149,20 @@ begin
       insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
         values(e.firm_id,e.client_id,p_entry,r.id,'customer_unresolved');
       return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','customer_unresolved');
+    end if;
+    -- (e2) ADV-5: the sighting FLOOR re-derived atomically at post time, under
+    -- the client serialization lock (the same advisory lock the approve core
+    -- takes — reentrant in this transaction, so a concurrent reversal cannot
+    -- slip between the floor check and the post). Evidence reversed since
+    -- signing strips the live authority: a named visible skip.
+    perform pg_advisory_xact_lock(203005004,hashtext(e.client_id::text));
+    select f.qualifying,f.distinct_invoices,f.span_days into v_fseen,v_fdocs,v_fspan
+      from clara._ocr_sales_floor(e.client_id,
+        clara._canonical_counterparty(e.client_id,r.counterparty_id),r.account_code) f;
+    if coalesce(v_fseen,0)<6 or coalesce(v_fdocs,0)<6 or v_fspan is null or v_fspan<60 then
+      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
+        values(e.firm_id,e.client_id,p_entry,r.id,'floor_lost');
+      return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','floor_lost');
     end if;
   end if;
 
@@ -1997,6 +2214,156 @@ begin
     p_entry,e.document_id,null,jsonb_build_object('rule_id',r.id,'run_id',v_run,
       'counterparty_id',v_counterparty,'account_code',r.account_code));
   return jsonb_build_object('entry_id',p_entry,'status','posted','rule_id',r.id,'run_id',v_run);
+end $$;
+
+-- =====================================================================
+-- B4b — ADV-2 (4a): LIVE-BOOKS REPAIR — the pre-0016 auto-proposal pool
+-- admitted every active debit leg, so a CUSTOMER's receivable-control debits
+-- could breed vendor_account rules (and open blocking vendor questions) on
+-- live books. Retire (live) / decline (proposed) every vendor_account rule
+-- whose counterparty is not a live canonical VENDOR or whose target account is
+-- control-class; dismiss the questions they spawned; audit one explicit repair
+-- record per firm. A no-op on empty books (the fresh-rig case).
+-- =====================================================================
+do $$
+declare r record; v_n int:=0; v_firms uuid[]:='{}';
+begin
+  for r in
+    select cr.id,cr.firm_id,cr.status,cr.created_by,
+           cp.kind as cp_kind,coalesce(a.account_class,'') as acct_class
+      from clara.coding_rules cr
+      join clara.counterparties cp on cp.id=cr.counterparty_id
+      left join clara.coa_accounts a on a.client_id=cr.client_id
+        and a.account_code=cr.account_code
+      where cr.rule_type='vendor_account' and cr.status in ('proposed','live')
+        and (cp.kind<>'vendor' or cp.merged_into is not null or cp.retired_at is not null
+             or coalesce(a.account_class,'') in ('payable','receivable'))
+  loop
+    if r.status='proposed' then
+      update clara.coding_rules set status='declined',declined_by=r.created_by,
+        declined_at=now(),
+        decline_reason='0016 A21 repair: auto-proposal bound a '||r.cp_kind
+          ||' / '||coalesce(nullif(r.acct_class,''),'non-control')||' account'
+        where id=r.id;
+    else
+      update clara.coding_rules set status='retired',retired_at=now(),
+        retire_reason='0016 A21 repair: vendor_account rule bound a '||r.cp_kind
+          ||' / '||coalesce(nullif(r.acct_class,''),'non-control')||' account'
+        where id=r.id;
+    end if;
+    update clara.open_questions set status='dismissed',resolved_at=now(),
+        resolution_text='0016 A21 repair: the spawning vendor_account rule was invalid (customer/control-class pool defect) and has been '
+          ||case when r.status='proposed' then 'declined' else 'retired' end
+      where spawned_rule_id=r.id and status='open';
+    v_n:=v_n+1;
+    if not r.firm_id=any(v_firms) then v_firms:=v_firms||r.firm_id; end if;
+    perform clara._audit(r.firm_id,null,null,null,'a21_repair_vendor_account_rule',null,
+      jsonb_build_object('rule_id',r.id,'prior_status',r.status,
+        'counterparty_kind',r.cp_kind,'account_class',nullif(r.acct_class,''),
+        'migration','0016_a21_compliance_watch'));
+  end loop;
+  if v_n>0 then
+    raise notice '0016 A21 repair: % customer/control-class vendor_account rule(s) retired/declined across % firm(s)',v_n,array_length(v_firms,1);
+  end if;
+end $$;
+
+-- =====================================================================
+-- B4c — ADV-6: the pinned autopost bounds become STRUCTURAL. Pre-existing
+-- out-of-bounds authorities are repaired first (a live one is SUSPENDED
+-- pending re-signature — its content is hash-frozen, so clamping is not
+-- legal; a proposed one is declined), then the CHECK lands. Terminal rows
+-- (declined/retired/suspended) are exempt so history survives.
+-- =====================================================================
+do $$
+declare r record;
+begin
+  for r in select cr.* from clara.coding_rules cr
+      where cr.rule_type='autopost' and cr.status in ('proposed','live')
+        and (cr.frequency_window is distinct from 'monthly'
+             or cr.window_max_posts not between 1 and 3
+             or cr.expires_at is null
+             or cr.expires_at>cr.created_at+interval '12 months')
+  loop
+    if r.status='proposed' then
+      update clara.coding_rules set status='declined',declined_by=r.created_by,
+        declined_at=now(),
+        decline_reason='0016 A21 repair: proposal exceeds the pinned autopost bounds (monthly / <=3 posts / <=12-month expiry)'
+        where id=r.id;
+    else
+      update clara.coding_rules set status='suspended_pending_resignature'
+        where id=r.id;
+    end if;
+    perform clara._audit(r.firm_id,null,null,null,'a21_repair_autopost_bounds',null,
+      jsonb_build_object('rule_id',r.id,'prior_status',r.status,
+        'frequency_window',r.frequency_window,'window_max_posts',r.window_max_posts,
+        'expires_at',r.expires_at,'migration','0016_a21_compliance_watch'));
+  end loop;
+end $$;
+alter table clara.coding_rules add constraint ck_coding_rules_autopost_bounds check (
+  rule_type<>'autopost'
+  or status in ('declined','retired','suspended_pending_resignature')
+  or (frequency_window='monthly'
+      and window_max_posts between 1 and 3
+      and expires_at is not null
+      and expires_at<=created_at+interval '12 months'));
+
+-- =====================================================================
+-- B4d — ADV-12 (4b): client aliases are now a LOAD-BEARING OCR direction
+-- control (§3.3 control 3) — the writer must store the RESOLVER's exact
+-- strip-normalization, and the existing rows must be brought canonical.
+-- add_client_alias CoR (same arity, ACL preserved): normalize with
+-- lower(regexp_replace(...,'[^a-zA-Z0-9]','','g')) and refuse an alias that
+-- normalizes to empty. Preflight repair: a stored non-canonical alias is
+-- retired (identity rows are immutable) and re-inserted canonical unless the
+-- canonical form already lives for the firm — every move audited.
+-- =====================================================================
+create or replace function clara.add_client_alias(p_client uuid, p_alias_normalized text, p_op_key text)
+  returns jsonb language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record; v_dedupe jsonb; v_id uuid; v_norm text;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key) = '' then raise exception 'op_key is required' using errcode = 'CLR10'; end if;
+  v_norm := lower(regexp_replace(btrim(coalesce(p_alias_normalized,'')),'[^a-zA-Z0-9]','','g'));
+  if v_norm = '' then
+    raise exception 'alias normalizes to empty (letters/digits required)' using errcode = 'CLR10';
+  end if;
+  v_dedupe := clara._reserve_op(c.firm,'add_client_alias',p_op_key,
+    clara._hash(jsonb_build_object('client',p_client,'alias',v_norm)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  if not exists (select 1 from clara.clients where id=p_client and firm_id=c.firm) then
+    raise exception 'client not in your firm' using errcode = 'CLR11';
+  end if;
+  insert into clara.client_aliases(firm_id,client_id,alias_normalized,added_by)
+    values(c.firm,p_client,v_norm,c.actor) returning id into v_id;
+  perform clara._audit(c.firm,c.actor,null,null,'add_client_alias',null,
+    jsonb_build_object('client',p_client,'alias',v_id,'op_key',p_op_key));
+  return clara._finish_op(c.firm,'add_client_alias',p_op_key,jsonb_build_object('alias_id',v_id));
+end $$;
+
+do $$
+declare r record; v_norm text; v_new uuid;
+begin
+  for r in select a.* from clara.client_aliases a
+      where a.retired_at is null
+        and a.alias_normalized
+            <> lower(regexp_replace(btrim(a.alias_normalized),'[^a-zA-Z0-9]','','g'))
+  loop
+    v_norm := lower(regexp_replace(btrim(r.alias_normalized),'[^a-zA-Z0-9]','','g'));
+    update clara.client_aliases set retired_at=now(),retired_by=r.added_by
+      where id=r.id;
+    v_new := null;
+    if v_norm <> '' and not exists (select 1 from clara.client_aliases a2
+        where a2.firm_id=r.firm_id and a2.alias_normalized=v_norm
+          and a2.retired_at is null) then
+      insert into clara.client_aliases(firm_id,client_id,alias_normalized,added_by)
+        values(r.firm_id,r.client_id,v_norm,r.added_by) returning id into v_new;
+    end if;
+    perform clara._audit(r.firm_id,null,null,null,'a21_repair_client_alias',null,
+      jsonb_build_object('retired_alias',r.id,'stored',r.alias_normalized,
+        'canonical',nullif(v_norm,''),'replacement',v_new,
+        'collision',v_norm<>'' and v_new is null,
+        'migration','0016_a21_compliance_watch'));
+  end loop;
 end $$;
 
 -- =====================================================================
@@ -2863,6 +3230,12 @@ begin
   if p_document is null and (p_memo is null or btrim(p_memo)='') then
     raise exception 'a non-document entry requires a memo (its basis)' using errcode='CLR10';
   end if;
+  -- ADV-11 (P7): the closing-transfer marker is HUMAN-ONLY authority — it
+  -- narrows the SST evaluator's turnover base, so the wake/agent lane may
+  -- never author it.
+  if not p_is_human and coalesce((p_flags->>'closing_transfer')::boolean,false) then
+    raise exception 'closing_transfer is a human-lane marker' using errcode='CLR03';
+  end if;
 
   begin
     insert into clara.journal_entries(client_id,status,posting_date,memo,origin,
@@ -3118,6 +3491,9 @@ begin
         'application_due',cw.application_due,
         'future_method_status',cw.future_method_status,
         'coverage_complete',cw.coverage_complete,
+        'provisional_month',cw.provisional_month,
+        'provisional_included_cents',cw.provisional_included_cents,
+        'provisional_crossed',cw.provisional_crossed,
         'acknowledged_at',cw.acknowledged_at,'snoozed_until',cw.snoozed_until,
         'evaluated_at',cw.evaluated_at,
         'basis','db_computed_screening_estimate',
@@ -3590,12 +3966,17 @@ begin
     raise exception '0016 AB-3 engine predicate / brn assertion failed' using errcode='CLR10';
   end if;
 
-  -- (2) the 0014 consent-evidence branch survived the facts-gate CoR (the 0014
-  -- tail assert, re-run verbatim).
+  -- (2) the 0014 consent-evidence branch survived the facts-gate CoR — ADV-13:
+  -- asserted on the EXECUTABLE branch expression AND its ORDER (the exemption
+  -- must fire BEFORE the kind gate), never on token presence alone.
   select p.prosrc into v_src from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='clara' and p.proname='_enqueue_invoice_facts_core';
-  if v_src is null or position('consent_evidence' in v_src)=0 then
-    raise exception '0016 _enqueue_invoice_facts_core lost the consent_evidence exemption'
+  if v_src is null
+     or position('if d.document_kind=''consent_evidence'' then' in v_src)=0
+     or position('d.document_kind in (''invoice'',''credit_note'',''debit_note'')' in v_src)=0
+     or position('if d.document_kind=''consent_evidence'' then' in v_src)
+        >= position('d.document_kind in (''invoice'',''credit_note'',''debit_note'')' in v_src) then
+    raise exception '0016 _enqueue_invoice_facts_core lost the consent_evidence exemption (or its precedence over the kind gate)'
       using errcode='CLR10';
   end if;
 
@@ -3699,10 +4080,16 @@ begin
      or position('direction_unproven' in v_src)=0
      or position('anchor_missing' in v_src)=0
      or position('customer_unresolved' in v_src)=0
+     or position('evidence_class_mismatch' in v_src)=0
+     or position('buyer_mismatch' in v_src)=0
+     or position('floor_lost' in v_src)=0
      or position('suspended_pending_resignature' in v_src)=0
      or position('not_corroborated' in v_src)=0
      or position('v_outside_legs' in v_src)=0
-     or position('on a purchase an sst_output leg lands here' in v_src)=0
+     -- ADV-13: the EXECUTABLE outside-leg filter (never a prose comment) — a
+     -- purchase-side sst_output leg is enumerated as an outside leg by this
+     -- exact code expression.
+     or position('not (v_direction=''sales'' and coalesce(a.special_acc_type,'''')=''sst_output'')' in v_src)=0
      or position('pg_exception_detail' in lower(v_src))=0 then
     raise exception '0016 execute_rule_post missing a named skip / retained 0015 gate' using errcode='CLR10';
   end if;
@@ -3850,9 +4237,19 @@ begin
   if v_def is null or v_def not like '%classification%' then
     raise exception '0016 open_questions origin CHECK missing classification' using errcode='CLR10';
   end if;
-  if not exists(select 1 from pg_indexes where schemaname='clara'
-      and indexname='ix_je_client_approved_posting') then
-    raise exception '0016 ix_je_client_approved_posting missing' using errcode='CLR10';
+  -- ADV-13: the evaluator's supporting index asserted by CATALOG SHAPE —
+  -- exact column list AND the approved-only predicate, never the name alone.
+  if not exists(
+    select 1 from pg_index ix
+    join pg_class ic on ic.oid=ix.indexrelid
+    join pg_namespace n on n.oid=ic.relnamespace
+    where n.nspname='clara' and ic.relname='ix_je_client_approved_posting'
+      and (select array_agg(a.attname order by k.ord)
+             from unnest(ix.indkey::int2[]) with ordinality as k(attnum,ord)
+             join pg_attribute a on a.attrelid=ix.indrelid and a.attnum=k.attnum)
+          = array['client_id','posting_date','id']::name[]
+      and pg_get_expr(ix.indpred,ix.indrelid) ilike '%status%approved%') then
+    raise exception '0016 ix_je_client_approved_posting missing or wrong shape (columns/predicate)' using errcode='CLR10';
   end if;
   if not exists(select 1 from pg_indexes where schemaname='clara'
       and indexname='uq_compliance_watches_one_open'
@@ -3942,9 +4339,12 @@ begin
     if v_res->>'status'<>'ok' then
       raise exception '0016 probe: evaluator failed: %',v_res::text using errcode='CLR10';
     end if;
+    -- ADV-7: the statutory window ends at the last COMPLETED month (v_m), so
+    -- the confirmed figure is the FULL RM500,000.00 = 50,000,000c — still NOT
+    -- crossed (strict >).
     if v_res->'groups'->0->>'state'<>'early_warning'
        or (v_res->'groups'->0->>'earliest_crossing_month') is not null
-       or (v_res->'groups'->0->>'confirmed_included_cents')::bigint<>44000000 then
+       or (v_res->'groups'->0->>'confirmed_included_cents')::bigint<>50000000 then
       raise exception '0016 probe: RM500,000.00 exactly must NOT cross (got %)',v_res::text
         using errcode='CLR10';
     end if;
@@ -3965,14 +4365,34 @@ begin
         using errcode='CLR10';
     end if;
     v_watch:=(v_res->'groups'->0->>'watch_id')::uuid;
-    -- ack stores the +10pp bound; a +10pp movement re-arms.
+    -- ack stores the +10pp bound (statutory confirmed 50,000,001 + 5,000,000).
     perform clara.ack_compliance_watch(v_watch,'probe acknowledged','0016-probe-ack');
     if (select next_rearm_cents from clara.compliance_watches where id=v_watch)
-       <>44000001+5000000 then
+       <>50000001+5000000 then
       raise exception '0016 probe: ack must store the +10pp re-arm bound' using errcode='CLR10';
     end if;
+    -- ADV-7: CURRENT-MONTH movement is PROVISIONAL — it must set the
+    -- provisional figures without touching the statutory state or re-arming
+    -- the acknowledged watch (the statutory machine stays clean).
     insert into clara.journal_entries(client_id,status,posting_date,memo,origin,maker_actor)
-      values(v_client,'draft',v_cm,'0016 probe movement','manual',v_user)
+      values(v_client,'draft',v_cm,'0016 probe provisional','manual',v_user)
+      returning id into v_e;
+    insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents)
+      values(v_e,1,'300-000',99000000,0),(v_e,2,'500-000',0,99000000);
+    update clara.journal_entries set status='approved',checker_actor=v_user,
+      approved_at=now(),updated_at=now() where id=v_e;
+    v_res:=clara.evaluate_sst_watch(v_client,'0016-probe-eval2b');
+    if (select acknowledged_at from clara.compliance_watches where id=v_watch) is null
+       or (select confirmed_included_cents from clara.compliance_watches where id=v_watch)<>50000001
+       or not (select provisional_crossed from clara.compliance_watches where id=v_watch)
+       or (select provisional_included_cents from clara.compliance_watches where id=v_watch)
+          <>143000001 then
+      raise exception '0016 probe: current-month movement must stay provisional (got %)',
+        v_res::text using errcode='CLR10';
+    end if;
+    -- a +10pp movement in a COMPLETED month re-arms.
+    insert into clara.journal_entries(client_id,status,posting_date,memo,origin,maker_actor)
+      values(v_client,'draft',v_m,'0016 probe movement','manual',v_user)
       returning id into v_e;
     insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents)
       values(v_e,1,'300-000',5000100,0),(v_e,2,'500-000',0,5000100);
