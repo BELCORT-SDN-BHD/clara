@@ -292,11 +292,13 @@ test("§8 get_context_pack: full shape; books_version == firm max seq; blank pur
   const { users, firms, clients } = world;
   const pack = await contextPack(users.alice, clients.A1, "close review");
   assert.ok(pack, "a pack is returned for a visible client");
-  assert.equal(pack.pack_schema_version, 2, "Slice-5 pack_schema_version = 2");
+  // 0016 (P5/contract §2.3): pack_schema_version 2 → 3 + the sst_registration_watch array.
+  assert.equal(pack.pack_schema_version, 3, "0016 pack_schema_version = 3 (P5 version bump)");
   assert.equal(pack.purpose, "close review", "purpose echoed");
-  for (const k of ["generated_at", "books_version", "client", "firm", "coa", "trial_balance", "recent_entries", "documents", "resolutions", "approval_history"]) {
+  for (const k of ["generated_at", "books_version", "client", "firm", "coa", "trial_balance", "recent_entries", "documents", "resolutions", "approval_history", "sst_registration_watch"]) {
     assert.ok(k in pack, `pack has key ${k}`);
   }
+  assert.ok(Array.isArray(pack.sst_registration_watch), "sst_registration_watch is an array (one element per open watch; [] when none)");
   assert.equal(pack.client.id, clients.A1, "pack.client.id");
   assert.ok("status" in pack.client, "pack.client.status present");
   assert.ok("high_stakes_amount_cents" in pack.firm, "pack.firm.high_stakes_amount_cents present");

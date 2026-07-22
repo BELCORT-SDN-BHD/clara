@@ -252,7 +252,8 @@ export async function readyFiling(sub, { client, amount = 500000, vendorName = "
   // (WA-D1 lane-carve: zero rows ⇒ the claim fail-closes to held_egress/CLR28, then
   // persist raises CLR16). Tolerant of a pre-existing live consent (one-live-per-client).
   await grantConsent(sub, { firm, client }).catch(() => {});
-  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00", kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });

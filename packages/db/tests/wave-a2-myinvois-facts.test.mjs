@@ -140,7 +140,8 @@ test("§3.5 STRUCTURED Tier-A: a clara-engine facts extraction corroborates on t
 test("§3.5 the OCR empty-polygon wall STAYS: an azure facts extraction with empty geometry never corroborates (M3)", async (t) => {
   if (skip15(t)) return;
   const firm = await firmOf(world.clients.A2);
-  const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A2 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A2, kind: "invoice" });
   const { grantConsent } = await import("./wave-a-fixtures.mjs");
   await grantConsent(world.users.alice, { firm, client: world.clients.A2 }).catch(() => {});
   await enqueueInvoiceFacts(cited.documentId);

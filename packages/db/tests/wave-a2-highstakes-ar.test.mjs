@@ -49,7 +49,8 @@ const rm = (cents) => `RM ${(cents / 100).toLocaleString("en-US", { minimumFract
 async function highStakesSalesDraft(client) {
   const firm = await firmOf(client);
   await grantConsent(world.users.alice, { firm, client }).catch(() => {});
-  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: rm(HS) });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: rm(HS), kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });

@@ -89,7 +89,8 @@ function unready(t) {
 /** Seed a cited doc, enqueue+claim+persist facts on it. Returns { cited, task }. */
 async function docWithFacts(sub, { client, total = "RM 5,000.00", currency = "MYR", extra = [] }) {
   const firm = await firmOf(client);
-  const cited = await seedCitedDocument(sub, { firm, client });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(sub, { firm, client, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   assert.ok(task, "an invoice_facts processing task exists after enqueue");
@@ -141,7 +142,8 @@ test("§5 status honesty: an invoice_facts task never touches documents.extracti
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
   const before = (await rootQuery("select extraction_status from clara.documents where id=$1", [cited.documentId])).rows[0].extraction_status;
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
@@ -155,7 +157,8 @@ test("§5 enqueue_invoice_facts is idempotent: a second enqueue in a live state 
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   await enqueueInvoiceFacts(cited.documentId);
   const n = (await rootQuery("select count(*)::int n from clara.document_processing_tasks where document_id=$1 and lane='invoice_facts' and status in ('queued','held_egress','running')", [cited.documentId])).rows[0].n;
@@ -326,7 +329,8 @@ test("W3 no geometry never corroborates (§6.6): facts with an EMPTY polygon on 
   if (!(await s6FixReady())) { t.skip("fix-batch surface absent — W3 polygon-required corroboration lands post-fix"); return; }
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -381,7 +385,8 @@ test("C-8 stale evidence: a facts completion AFTER a Tier-B draft rotates its to
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 5,000.00" });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, quote: "RM 5,000.00", kind: "invoice" });
   // Tier-B draft (no facts yet): payable/expense = 500000, bound to the OCR region quote.
   const draft = await wakeBill(users.alice, { client: clients.A2, cited, amount: 500000 });
   // Facts complete LATER with a CONTRADICTING total (600000) → token rotates.

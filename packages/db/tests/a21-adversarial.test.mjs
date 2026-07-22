@@ -29,7 +29,7 @@ import {
   a21EnsureReady, skip16, metaProbe0016, THRESHOLD_CENTS, INC, INC_I,
   proposeAutopostRule, signAutopostRule, ruleRowById, postViaRule, lastSkipReason, entryStatusOf,
   upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent,
-  draftEntryV3, approveEntry, reverseEntry, ev, FIELD, counterpartyRows, sightingRows, codingRuleRows,
+  draftEntryV3, approveEntry, reverseEntry, ev, FIELD, counterpartyRows, codingRuleRows,
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, classifyDocument, rm, reasonOf,
   freshWatchClient, approvedTurnoverEntry, evaluateSstWatch, openWatchRow, watchEventRows,

@@ -36,7 +36,8 @@ after(async () => { printLaneNotes("wave-a-dupbill"); printSkipCount("wave-a-dup
  *  Returns { entry_id, revision_token }. */
 async function dupDraft(sub, { client, reg, invoiceId, name = "DUPCO SDN BHD", amount = ROUTINE_CENTS }) {
   const firm = await firmOf(client);
-  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 500.00" });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 500.00", kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true }).catch(() => {});

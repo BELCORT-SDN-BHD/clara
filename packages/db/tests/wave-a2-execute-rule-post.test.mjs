@@ -93,7 +93,8 @@ async function draftCorroboratedBill(sub, { client, cp, accountCode = EXP, amoun
   await grantConsent(sub, { firm, client }).catch(() => {});
   const cred = await mintInteractive(firm);
   const quote = `RM ${(amount / 100).toFixed(2)}`;
-  const cited = await seedCitedDocument(sub, { firm, client, quote });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(sub, { firm, client, quote, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -441,7 +442,9 @@ test("P12 two concurrent posts on ONE rule at window_max=1 post EXACTLY ONE — 
 async function purchaseFactsDoc({ client, typeCode = "02", gross = 50000 }) {
   const firm = await firmOf(client);
   await grantConsent(world.users.alice, { firm, client }).catch(() => {});
-  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: `RM ${(gross / 100).toFixed(2)}` });
+  // 0016 (P3): classify-first gate — kind-stamped at seed (typeCode-matched) so invoice_facts engages directly.
+  const kind = typeCode === "02" ? "credit_note" : typeCode === "03" ? "debit_note" : "invoice";
+  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: `RM ${(gross / 100).toFixed(2)}`, kind });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });

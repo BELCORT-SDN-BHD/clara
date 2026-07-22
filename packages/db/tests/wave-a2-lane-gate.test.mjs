@@ -167,7 +167,8 @@ test("regression: an invoice_facts task with kill-switch ON but NO consent STILL
   if (skip15(t)) return;
   const firm = await firmOf(world.clients.A2);
   await revokeClientEgress(world.users.alice, { client: world.clients.A2 }).catch(() => {});
-  const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A2 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A2, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true }).catch(() => null);
@@ -179,7 +180,8 @@ test("regression: an invoice_facts task with live consent BUT kill-switch OFF ST
   if (skip15(t)) return;
   const firm = await firmOf(world.clients.A1);
   await grantConsent(world.users.alice, { firm, client: world.clients.A1 }).catch(() => {});
-  const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A1 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(world.users.alice, { firm, client: world.clients.A1, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: false }).catch(() => null);

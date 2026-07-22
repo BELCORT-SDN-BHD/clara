@@ -290,9 +290,12 @@ export async function mintInteractive(firm, onBehalfOf = null) {
  *  a document-bound draft can cite REAL evidence (region↔extraction↔document
  *  congruence, C-9). Returns { documentId, filingId, sha256, extractionId,
  *  regionId, quote }. Uses the S5 seedExtraction/seedRegion fixtures. */
-export async function seedCitedDocument(sub, { firm, client, quote = "RM 5,000.00", fieldPath = FIELD.total } = {}) {
+// 0016 (pin P3/WA21-R7): `kind` pass-through — the classify-first facts gate sends a
+// NULL-kind pdf to `classify`; facts-lane fixtures seed kind:'invoice' (source-stamped
+// corpus) so invoice_facts engages directly (the classify loop is proven in a21-classifier-gate).
+export async function seedCitedDocument(sub, { firm, client, quote = "RM 5,000.00", fieldPath = FIELD.total, kind = null } = {}) {
   const { seedExtraction, seedRegion } = await import("./rig-docs-fixtures.mjs");
-  const doc = await filedDocument(sub, { firm, client });
+  const doc = await filedDocument(sub, { firm, client, kind });
   const extractionId = await seedExtraction({ firm, document: doc.documentId, engineKind: "ocr", status: "done" });
   const regionId = await seedRegion({ firm, extraction: extractionId, fieldPath, textContent: quote, locator: { page: 1, polygon: [0, 0, 1, 1] } });
   return { ...doc, extractionId, regionId, quote };
