@@ -11,13 +11,14 @@ import { chatTurn_v1 } from "./chatTurn.v1.js";
 import { chatTurn_v2 } from "./chatTurn.v2.js";
 import { chatTurn_v3 } from "./chatTurn.v3.js";
 import { chatTurn_v4 } from "./chatTurn.v4.js";
+import { chatTurn_v5 } from "./chatTurn.v5.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { autoDraft_v1 } from "./autoDraft.v1.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  chatTurn: chatTurn_v4,
+  chatTurn: chatTurn_v5,
   documentIngest: documentIngest_v1,
   invoiceFacts: invoiceFacts_v1,
   autoDraft: autoDraft_v1,
@@ -32,10 +33,13 @@ export const workflows = {
 // sales/CN shapes; v4 passes the model's coding_kind through). The v1/v2/v3
 // bodies stay frozen + built and their exports reachable so no parked run is
 // ever stranded (policy (c)); new admissions target v4; the engine resumes old
-// runs by run id. Drop a re-export only once zero non-terminal runs of that
-// version remain.
+// runs by run id. Wave A2 then repointed v4→v5 (the §9 Gate-B live find: no chat
+// version could send a NULL coding_kind, so the generic voucher lane the DB has
+// always accepted was undraftable via chat; v5 adds "journal_entry"->NULL). Drop a
+// re-export only once zero non-terminal runs of that version remain.
 export { chatTurn_v1 };
 export { chatTurn_v2 };
 export { chatTurn_v3 };
+export { chatTurn_v4 };
 
 export const workflowNames: string[] = Object.keys(workflows);
