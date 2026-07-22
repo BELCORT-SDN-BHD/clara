@@ -352,6 +352,30 @@ export async function approvedTurnoverEntry({
   return d.entry_id;
 }
 
+/** ADV-R2 (R1#5 strict): the OCR floor demands >=6 DISTINCT STATED invoice
+ *  numbers — sighting fixtures seed a minimal done invoice_facts extraction
+ *  stating one (raw, the D-P4 idiom; the doc keeps exactly ONE done lane). */
+export async function seedStatedInvoiceFacts(cited, { firm, invoiceId = null } = {}) {
+  const id = invoiceId ?? `RIG-${randomUUID().slice(0, 10)}`;
+  const ext = randomUUID();
+  await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,version_n,lane,status,workflow_run_id,started_at,finished_at)
+     values($1,$2,'clara-fixture:v1','{}'::jsonb,1,'invoice_facts','done','rig-stated-id',now(),now())`,
+    [firm, cited.documentId],
+  );
+  await rootQuery(
+    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count)
+     values($1,$2,$3,'clara-fixture:v1','invoice_facts',1,'done',1)`,
+    [ext, firm, cited.documentId],
+  );
+  await rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'invoice.invoice_id',$3,1.0)`,
+    [firm, ext, id],
+  );
+  return id;
+}
+
 // ---------------------------------------------------------------------------
 // Autopost plumbing shared across the P2/P4 files (the proven Wave-A2 idioms).
 // ---------------------------------------------------------------------------
@@ -374,6 +398,12 @@ export async function proposeAutopostRule(sub, {
   if (supersedes !== undefined) proposal.supersedes_rule_id = supersedes;
   try {
     const r = await callFnAdaptive(proposeFn, { proposal, op_key: opk("prop") }, { persona: humanPersona(sub), label: proposeFn });
+    // ADV-R2#4: a bounds refusal is a TYPED AUDITED RETURN — surface it error-shaped.
+    if (r && typeof r === "object" && r.status === "refused") {
+      return { error: Object.assign(new Error(`refused: ${r.reason}`), {
+        code: "CLR27", detail: JSON.stringify({ reason: r.reason }), refusedReturn: true,
+      }) };
+    }
     let id = r?.rule_id ?? r?.id ?? (typeof r === "string" ? r : null);
     if (!id) {
       const rows = (await codingRuleRows(client)).filter((x) => x.rule_type === "autopost");

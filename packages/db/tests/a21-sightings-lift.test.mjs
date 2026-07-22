@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount,
   buildWorld, firmOf, opk,
-  a21EnsureReady, skip16, metaProbe0016, SUSPENDED_STATUS,
+  a21EnsureReady, skip16, metaProbe0016, SUSPENDED_STATUS, seedStatedInvoiceFacts,
   proposeAutopostRule, signAutopostRule, ruleRowById,
   upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution,
   draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows, codingRuleRows, sightingRows,
@@ -47,6 +47,7 @@ function skipHere(t) { return skip16(t, has16, "0016 not applied — credit-sigh
 async function makeCustomer(sub, { client, name, date = undefined }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 900.00" });
+  await seedStatedInvoiceFacts(cited, { firm }); // ADV-R2 R1#5: floor evidence needs a STATED invoice id
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,
@@ -72,6 +73,7 @@ async function makeCustomer(sub, { client, name, date = undefined }) {
 async function salesSighting(sub, { client, cp, date = "2026-06-10", cents = 90000, reuseDoc = null }) {
   const firm = await firmOf(client);
   const cited = reuseDoc ?? await seedCitedDocument(sub, { firm, client, quote: "RM 900.00" });
+  if (!reuseDoc) await seedStatedInvoiceFacts(cited, { firm }); // ADV-R2 R1#5 (a reused doc keeps its one stated id)
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,

@@ -28,12 +28,12 @@ import {
   buildWorld, firmOf, opk,
   a21EnsureReady, skip16, metaProbe0016, THRESHOLD_CENTS, INC, INC_I,
   proposeAutopostRule, signAutopostRule, ruleRowById, postViaRule, lastSkipReason, entryStatusOf,
-  upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent,
+  upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedStatedInvoiceFacts,
   draftEntryV3, approveEntry, reverseEntry, ev, FIELD, counterpartyRows, codingRuleRows,
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, classifyDocument, rm, reasonOf,
   freshWatchClient, approvedTurnoverEntry, evaluateSstWatch, openWatchRow, watchEventRows,
-  setTurnoverClassification, resolveWatch,
+  setTurnoverClassification, resolveWatch, fnSource,
   AP, EXP,
 } from "./a21-helpers.mjs";
 
@@ -49,9 +49,10 @@ const ocrWorlds = new Map(); // client -> { cp, rule }
 
 function skipHere(t) { return skip16(t, has16, "0016 not applied — adversarial battery dormant"); }
 
-async function approvedSales(sub, { client, cp = null, newName = null, date = "2026-06-10", cents = 90000 }) {
+async function approvedSales(sub, { client, cp = null, newName = null, date = "2026-06-10", cents = 90000, statedId = true }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
+  if (statedId) await seedStatedInvoiceFacts(cited, { firm }); // ADV-R2 R1#5: floor evidence needs a STATED invoice id
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,
@@ -300,12 +301,17 @@ test("ADV-6: the pinned bounds are STRUCTURAL — a widened proposal refuses, a 
   const client = world.clients.A1;
   const sub = world.users.alice;
   const { cp } = await ocrWorld(client);
+  const audits0 = (await rootQuery("select count(*)::int as n from clara.audit_log where fn='propose_autopost_rule_refused'")).rows[0].n;
   const wide = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales", windowMax: 1000 });
   assert.ok(wide.error, "window_max_posts=1000 is REFUSED at proposal");
   assert.equal(reasonOf(wide.error), "bounds_exceeded", `the refusal names the bounds (got ${reasonOf(wide.error)})`);
   const far = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales", expiresAt: "2099-01-01" });
   assert.ok(far.error, "a 2099 expiry is REFUSED at proposal");
   assert.equal(reasonOf(far.error), "bounds_exceeded", "the expiry refusal names the bounds");
+  // ADV-R2#4: each refusal left a DURABLE append-only audit trace (the typed
+  // refusal RETURNS instead of raising, so the trace survives).
+  const audits1 = (await rootQuery("select count(*)::int as n from clara.audit_log where fn='propose_autopost_rule_refused'")).rows[0].n;
+  assert.ok(audits1 >= audits0 + 2, `both bounds refusals wrote audit rows (${audits0} -> ${audits1})`);
   const firm = await firmOf(client);
   await assert.rejects(
     () => rootQuery(
@@ -458,6 +464,169 @@ test("ADV-11: closing_transfer is a HUMAN-lane marker — the wake/agent draft r
   const row = (await rootQuery("select closing_transfer from clara.journal_entries where id=$1", [d.entry_id])).rows[0];
   assert.equal(row.closing_transfer, true, "the HUMAN draft lane stamps the marker");
 });
+
+test("R3-1 (R1#1): a document with BOTH done facts lanes is ambiguous evidence — the post skips evidence_lane_ambiguous", async (t) => {
+  if (skipHere(t)) return;
+  const client = world.clients.A1;
+  const { cp, name } = await ocrWorld(client);
+  const cited = await ocrSalesDoc(client, { customerName: name });
+  const draft = await ocrSalesDraft(client, cited, { cp });
+  assert.ok(draft?.entry_id, "the dual-lane cell draft exists (mandatory setup)");
+  // Seed a SECOND done facts lane (a historical local/XML parse beside the OCR
+  // lane) — raw, below the writer layer.
+  const firm = await firmOf(client);
+  const ext2 = randomUUID();
+  await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,version_n,lane,status,workflow_run_id,started_at,finished_at)
+     values($1,$2,'clara-myinvois:v1','{}'::jsonb,1,'local_facts','done','rig-dual-lane',now(),now())`,
+    [firm, cited.documentId],
+  );
+  await rootQuery(
+    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count)
+     values($1,$2,$3,'clara-myinvois:v1','invoice_facts',1,'done',1)`,
+    [ext2, firm, cited.documentId],
+  );
+  await postViaRule(draft.entry_id).catch((e) => noteLane(`r3-1 post raised ${e.code}`));
+  assert.notEqual(await entryStatusOf(draft.entry_id), "approved", "a dual-lane document NEVER posts (no coin-flip between extractions)");
+  assert.equal(await lastSkipReason(draft.entry_id), "evidence_lane_ambiguous", "the skip is NAMED evidence_lane_ambiguous");
+});
+
+test("R3-2 (R1#2): the AUTHORED vendor-rule path refuses customers and control accounts; the insert trigger is structural; the signer is type-bound", async (t) => {
+  if (skipHere(t)) return;
+  const { users, clients } = world;
+  const client = clients.A1;
+  const { cp } = await ocrWorld(client); // an existing CUSTOMER
+  const { proposeCodingRule, signCodingRule } = await import("./a21-helpers.mjs");
+  // (a) propose: a customer counterparty refuses by NAME.
+  let err = null;
+  try { await proposeCodingRule(users.alice, { client, counterparty: cp, accountCode: EXP }); } catch (e) { err = e; }
+  assert.ok(err, "propose_coding_rule(customer) is REFUSED");
+  assert.equal(reasonOf(err), "vendor_required", `the refusal names the vendor floor (got ${reasonOf(err)})`);
+  // (b) propose: a control-class target refuses by NAME (vendor + REC).
+  const vName = `R32VEND ${randomUUID().slice(0, 6)}`;
+  const firm = await firmOf(client);
+  const vId = (await rootQuery(
+    `insert into clara.counterparties(firm_id,client_id,kind,name,name_normalized,created_by)
+     values($1,$2,'vendor',$3,$4,$5) returning id`,
+    [firm, client, vName, vName.toLowerCase().replace(/[^a-z0-9]/g, ""), users.alice],
+  )).rows[0].id;
+  err = null;
+  try { await proposeCodingRule(users.alice, { client, counterparty: vId, accountCode: REC }); } catch (e) { err = e; }
+  assert.ok(err, "propose_coding_rule(vendor, receivable-control) is REFUSED");
+  assert.equal(reasonOf(err), "control_account", `the refusal names the control floor (got ${reasonOf(err)})`);
+  // (c) the STRUCTURAL floor: a raw insert of the same shape violates the trigger.
+  await assert.rejects(
+    () => rootQuery(
+      `insert into clara.coding_rules(firm_id,client_id,rule_type,counterparty_id,account_code,status,pinned,origin,content_hash,created_by)
+       values($1,$2,'vendor_account',$3,$4,'proposed',false,'authored',encode(sha256(convert_to($5,'UTF8')),'hex'),$6)`,
+      [firm, client, cp, EXP, `r32-${randomUUID()}`, users.alice],
+    ),
+    (e) => e.code === "CLR27",
+    "a raw customer-bound vendor_account insert is blocked by the BEFORE INSERT trigger",
+  );
+  // (d) the generic bookkeeper signer never flips an AUTOPOST rule live.
+  const { cp: cp2 } = await ocrWorld(client);
+  const prop = await proposeAutopostRule(users.alice, { client, cp: cp2, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales" });
+  assert.ok(!prop.error, `an autopost proposal for the signer cell (got ${prop.error?.code})`);
+  err = null;
+  try { await signCodingRule(users.bob, { rule: prop.id }); } catch (e) { err = e; }
+  assert.ok(err, "sign_coding_rule refuses a non-vendor_account rule");
+  assert.equal(reasonOf(err), "wrong_rule_type", `the signer is TYPE-BOUND (got ${reasonOf(err)}) — an autopost authority needs the admin signer`);
+});
+
+test("R3-3 (R1#8): liability is STICKY — attestation expiry/replacement re-arms freshness but never erases a crossed month", async (t) => {
+  if (skipHere(t)) return;
+  const { users } = world;
+  const client = await freshWatchClient(users.alice, { name: `r33_${randomUUID().slice(0, 6)}` });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 100_00, date: "2026-06-05" });
+  const firm = await firmOf(client);
+  await rootQuery(
+    `insert into clara.sst_future_attestations (firm_id, client_id, service_group, expected_cents, horizon_start, evidence_note, reviewer, as_of, expires_at)
+     values ($1, $2, 'G', $3, '2026-07-01', 'r3-3 above-threshold mandate', 'r3 reviewer', '2026-06-20', '2027-06-20')`,
+    [firm, client, THRESHOLD_CENTS + 10_000_00],
+  );
+  await evaluateSstWatch(client);
+  let w = await openWatchRow(client, "G");
+  assert.equal(w?.state, "crossed", "the ended-month attested_above crossing (mandatory setup)");
+  const dueBefore = w.application_due;
+  // REPLACEMENT: a newer below-threshold attestation must NOT erase liability.
+  await rootQuery(
+    `insert into clara.sst_future_attestations (firm_id, client_id, service_group, expected_cents, horizon_start, evidence_note, reviewer, as_of, expires_at)
+     values ($1, $2, 'G', 100, '2026-08-01', 'r3-3 later below-threshold view', 'r3 reviewer', current_date, '2027-07-01')`,
+    [firm, client],
+  );
+  await evaluateSstWatch(client);
+  w = await openWatchRow(client, "G");
+  assert.equal(w.state, "crossed", "a below-threshold REPLACEMENT never rewrites crossed back to monitored");
+  assert.equal(w.earliest_crossing_month, "2026-06-01", "the crossed month survives the replacement");
+  assert.equal(w.application_due, dueBefore, "the statutory deadline survives the replacement");
+  // EXPIRY: expire every attestation — liability still survives; freshness re-arms.
+  await ackWatchSafe(users.alice, w.id);
+  await rootQuery(
+    "set session_replication_role = replica; update clara.sst_future_attestations set expires_at='2026-07-01' where client_id='" + client + "'; reset session_replication_role",
+  );
+  await evaluateSstWatch(client);
+  w = await openWatchRow(client, "G");
+  assert.equal(w.state, "crossed", "attestation EXPIRY never erases the crossed liability");
+  assert.equal(w.earliest_crossing_month, "2026-06-01", "the crossed month survives expiry");
+  assert.equal(w.future_method_status, "expired", "the future-method FRESHNESS flag flips to expired");
+  assert.equal(w.acknowledged_at, null, "the expiry re-armed the acknowledged watch (freshness, not liability)");
+});
+
+test("R3-5 (R2#5 strict): the OCR floor demands six STATED invoice numbers — a number-less doc is not floor evidence", async (t) => {
+  if (skipHere(t)) return;
+  const { users, clients } = world;
+  const client = clients.B1;
+  const sub = world.users.dave;
+  const name = `R35CO ${randomUUID().slice(0, 6)}`;
+  // Birth + 5 sightings: SIX docs, but ONE (the birth) carries NO stated id.
+  await approvedSales(sub, { client, newName: name, date: "2026-01-03", statedId: false });
+  const cp = (await counterpartyRows(client)).find((c) => (c.name_normalized ?? "").startsWith("r35co"))?.id;
+  assert.ok(cp, "customer exists (mandatory setup)");
+  const docs = [];
+  for (const date of ["2026-02-03", "2026-03-03", "2026-04-03", "2026-05-03", "2026-06-03"]) {
+    docs.push(await approvedSales(sub, { client, cp, date }));
+  }
+  const five = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales" });
+  assert.ok(five.error, "six docs with only FIVE stated invoice numbers REFUSE (no document-UUID fallback)");
+  assert.equal(reasonOf(five.error), "insufficient_evidence", `the refusal is the floor (got ${reasonOf(five.error)})`);
+  // Stating the sixth number (a later extraction on the birth doc's sibling) admits.
+  await approvedSales(sub, { client, cp, date: "2026-06-20" });
+  const six = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales" });
+  assert.ok(!six.error, `with SIX stated numbers the proposal is admitted (got ${six.error?.code}/${six.error ? reasonOf(six.error) : ""})`);
+  void docs;
+});
+
+test("R3-10 (R2#5 tz): statutory month figures are session-timezone independent (Asia/Kuala_Lumpur law)", async (t) => {
+  if (skipHere(t)) return;
+  const { users } = world;
+  const client = await freshWatchClient(users.alice, { name: `r310_${randomUUID().slice(0, 6)}` });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 500_00, date: "2026-06-06" });
+  // The evaluator's date derivation is pinned to MYT in source (structural half)…
+  const src = await fnSource("evaluate_sst_watch");
+  assert.ok(src.includes("Asia/Kuala_Lumpur"), "the evaluator derives its dates from Asia/Kuala_Lumpur, never session current_date");
+  // …and behaviorally: two sessions at the tz extremes (their current_dates
+  // ALWAYS differ) must produce IDENTICAL statutory windows. NOTE: decisive
+  // whenever the extreme dates straddle a month boundary; mid-month both agree
+  // by arithmetic — the cell is a boundary tripwire, the source pin is the law.
+  const runIn = async (tz) => {
+    const r = await rootQuery(
+      `begin; set local time zone '${tz}'; select clara.evaluate_sst_watch('${client}'::uuid, 'r310:${tz}:${Date.now()}') as r; commit`,
+    );
+    const rows = Array.isArray(r) ? r : [r];
+    void rows;
+    const w = await openWatchRow(client, "G");
+    return { window_end: w.window_end, provisional_month: w.provisional_month };
+  };
+  const west = await runIn("Etc/GMT+12");
+  const east = await runIn("Etc/GMT-14");
+  assert.deepEqual(west, east, "the statutory window is identical under UTC-12 and UTC+14 sessions (Malaysian legal dates)");
+});
+
+async function ackWatchSafe(sub, watch) {
+  const { ackWatch } = await import("./a21-helpers.mjs");
+  await ackWatch(sub, { watch, rationale: "r3 ack" });
+}
 
 test("ADV-12: add_client_alias stores the resolver's exact strip-normalization and refuses an empty-normalizing alias", async (t) => {
   if (skipHere(t)) return;

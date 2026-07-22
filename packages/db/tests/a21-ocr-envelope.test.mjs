@@ -25,7 +25,7 @@ import {
   OCR_SKIP, SUSPENDED_STATUS,
   proposeAutopostRule, signAutopostRule, ruleRowById, postViaRule, lastSkipReason, entryStatusOf,
   classifyDocument, notificationsMatching,
-  upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent,
+  upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedStatedInvoiceFacts,
   draftEntryV3, approveEntry, ev, FIELD, counterpartyRows, sightingRows,
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm, fnSource,
@@ -46,6 +46,7 @@ function skipHere(t) { return skip16(t, has16, "0016 not applied — OCR-envelop
 async function approvedSales(sub, { client, cp = null, newName = null, date = "2026-06-10", cents = 90000, doc = null }) {
   const firm = await firmOf(client);
   const cited = doc ?? await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
+  if (!doc) await seedStatedInvoiceFacts(cited, { firm }); // ADV-R2 R1#5: floor evidence needs a STATED invoice id
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,

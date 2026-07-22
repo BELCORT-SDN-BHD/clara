@@ -471,12 +471,16 @@ join inserted_types i on i.name=x.name cross join clara.taxonomy_active a;
 create function clara.evaluate_sst_watch(p_client uuid, p_op_key text) returns jsonb
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare
-  v_firm uuid; v_today date:=current_date;
-  v_cur_month date:=date_trunc('month',current_date)::date;
+  -- ADV-R2#5: statutory dates are MALAYSIAN legal dates — derived explicitly
+  -- from Asia/Kuala_Lumpur, never the session timezone (a UTC session is 8h
+  -- behind at month boundaries).
+  v_today date:=(now() at time zone 'Asia/Kuala_Lumpur')::date;
+  v_firm uuid;
+  v_cur_month date;
   -- ADV-7: the last COMPLETED month — the statutory evaluation horizon (STA
   -- 2018 s.12 fixes liability at the END of a month; the month in progress can
   -- only ever be a provisional signal).
-  v_stat_month date:=(date_trunc('month',current_date)-interval '1 month')::date;
+  v_stat_month date;
   v_groups text[]; g text; v_out jsonb:='[]'::jsonb; v_changed boolean:=false;
   v_threshold bigint; v_sched_from date;
   v_inc bigint; v_unk bigint; v_proxy bigint; v_first_month date;
@@ -487,6 +491,8 @@ declare
   v_prov_inc bigint; v_prov_crossed boolean; v_fut_month date;
 begin
   begin
+    v_cur_month:=date_trunc('month',v_today)::date;
+    v_stat_month:=(date_trunc('month',v_today)-interval '1 month')::date;
     if p_op_key is null or btrim(p_op_key)='' then
       raise exception 'op_key is required' using errcode='CLR10';
     end if;
@@ -706,6 +712,21 @@ begin
         v_changed:=true;
       else
         v_watch:=w.id;
+        -- ADV-R2 (R1#8 sticky liability): once an ended-month method (historical
+        -- OR future) created a crossing on this OPEN episode, the earliest
+        -- crossing and its deadline SURVIVE attestation expiry/replacement —
+        -- statutory liability, once fixed at a month-end, is extinguished only
+        -- by a TYPED resolution. Expiry still re-arms freshness (rung 6) but
+        -- can never rewrite crossed/overdue back to monitored.
+        if w.earliest_crossing_month is not null then
+          v_earliest:=least(coalesce(v_earliest,w.earliest_crossing_month),
+            w.earliest_crossing_month);
+          v_due:=((v_earliest+interval '2 months')::date - 1);
+          v_state:=case when v_today>v_due then 'overdue' else 'crossed' end;
+          v_figures:=v_figures||jsonb_build_object(
+            'earliest_crossing_month',v_earliest,'application_due',v_due,
+            'liability_sticky',true);
+        end if;
         -- the re-arm ladder acts only on an acknowledged/snoozed overlay: the
         -- condition was seen; a materially-worse or expired basis re-surfaces it.
         v_rearm:=false; v_rearm_why:=null;
@@ -968,7 +989,9 @@ begin
   insert into clara.sst_future_attestations(firm_id,client_id,service_group,
       expected_cents,horizon_start,evidence_note,reviewer,as_of,expires_at)
     values(c.firm,p_client,p_service_group,p_expected_cents,p_horizon_start,
-      btrim(p_evidence),c.actor::text,current_date,p_expires_at)
+      btrim(p_evidence),c.actor::text,
+      (now() at time zone 'Asia/Kuala_Lumpur')::date,  -- ADV-R2#5: MYT legal date
+      p_expires_at)
     returning id into v_id;
   perform clara._audit(c.firm,c.actor,null,null,'record_future_attestation',null,
     jsonb_build_object('client',p_client,'group',p_service_group,
@@ -1009,9 +1032,12 @@ begin
   if w.state='resolved' then
     raise exception 'a resolved watch cannot be acknowledged' using errcode='CLR10';
   end if;
+  -- ADV-R2#5: the effective-dated lookup rides the Malaysian legal date.
   select s.threshold_cents into v_thr from clara.sst_threshold_schedule s
-    where s.service_group=w.service_group and s.effective_from<=current_date
-      and (s.effective_to is null or s.effective_to>=current_date)
+    where s.service_group=w.service_group
+      and s.effective_from<=(now() at time zone 'Asia/Kuala_Lumpur')::date
+      and (s.effective_to is null
+        or s.effective_to>=(now() at time zone 'Asia/Kuala_Lumpur')::date)
     order by s.effective_from desc limit 1;
   update clara.compliance_watches set
     acknowledged_by=c.actor::text,acknowledged_at=now(),
@@ -1494,18 +1520,17 @@ end $$;
 -- at PROPOSAL, at SIGNING, and atomically at POSTING (under the client
 -- serialization lock) — the floor is re-derived live, so reversing the
 -- evidence after proposal strips the authority. Qualifying = human-approved
--- (never a rule's own output), unreversed, override-free, NON-FUTURE credit
--- sightings; distinct documents AND distinct stated invoice numbers (two docs
--- sharing a stated invoice_id collapse to one; a doc with no stated number
--- counts by document identity); posting-date span >= 60 days.
+-- (never a rule's own output), unreversed, override-free, NON-FUTURE (MYT
+-- legal date, ADV-R2#5) credit sightings; >=6 distinct documents AND >=6
+-- distinct STATED invoice numbers (ADV-R2 strict ruling: a document whose
+-- extraction states no invoice id contributes NO invoice-number evidence —
+-- there is no document-UUID fallback); posting-date span >= 60 days.
 create function clara._ocr_sales_floor(p_client uuid, p_cp uuid, p_account text)
   returns table(qualifying int, distinct_docs int, distinct_invoices int, span_days int)
   language sql stable security definer set search_path=clara,pg_temp as $$
   select count(distinct s.entry_id)::int,
          count(distinct j.document_id)::int,
-         count(distinct coalesce(
-           nullif(clara._invoice_fact_state(j.document_id)->>'invoice_id',''),
-           j.document_id::text))::int,
+         count(distinct nullif(clara._invoice_fact_state(j.document_id)->>'invoice_id',''))::int,
          (max(j.posting_date)-min(j.posting_date))::int
   from clara.rule_sightings s
   join clara.journal_entries j on j.id=s.entry_id
@@ -1513,7 +1538,7 @@ create function clara._ocr_sales_floor(p_client uuid, p_cp uuid, p_account text)
     and clara._canonical_counterparty(p_client,s.counterparty_id)=p_cp
     and j.status='approved' and j.reversed_by is null and j.checked_via_rule_id is null
     and j.document_id is not null
-    and j.posting_date<=current_date
+    and j.posting_date<=(now() at time zone 'Asia/Kuala_Lumpur')::date
     and not (j.flags ? 'amount_override') and not (j.flags ? 'duplicate_override');
 $$;
 revoke all on function clara._ocr_sales_floor(uuid,uuid,text) from public;
@@ -1564,13 +1589,6 @@ begin
     raise exception 'autopost rule is malformed'
       using errcode='CLR27',detail='{"reason":"malformed"}';
   end if;
-  -- ADV-6: the pinned bounds are NOT caller-widenable — monthly, <=3 posts per
-  -- window, expiry within 12 months of proposal (structurally re-enforced by
-  -- ck_coding_rules_autopost_bounds; re-verified at signing).
-  if v_maxposts>3 or v_expires>now()+interval '12 months' then
-    raise exception 'autopost bounds exceed the pinned envelope (monthly / <=3 posts / <=12-month expiry)'
-      using errcode='CLR27',detail='{"reason":"bounds_exceeded"}';
-  end if;
   -- 0016/P2: the evidence class is part of the SIGNED authority. A sales rule
   -- must declare 'structured' (MyInvois) or 'ocr_sales' (the §3.3 envelope); a
   -- purchase rule carries none (the 0015 purchase semantics are class-free).
@@ -1589,6 +1607,21 @@ begin
     clara._hash(jsonb_build_object('client',v_client,'counterparty',v_counterparty,
       'account_code',v_account,'direction',v_direction,'cap',v_cap)));
   if v_dedupe is not null then return v_dedupe; end if;
+  -- ADV-6: the pinned bounds are NOT caller-widenable — monthly, <=3 posts per
+  -- window, expiry within 12 months of proposal (structurally re-enforced by
+  -- ck_coding_rules_autopost_bounds; re-verified at signing).
+  -- ADV-R2#4: a widened request leaves a DURABLE append-only trace — the
+  -- refusal is a typed AUDITED RETURN riding the op_key idiom (an
+  -- in-transaction raise would roll any trace back with it).
+  if v_maxposts>3 or v_expires>now()+interval '12 months' then
+    perform clara._audit(c.firm,c.actor,null,null,'propose_autopost_rule_refused',null,
+      jsonb_build_object('client',v_client,'counterparty',v_counterparty,
+        'account_code',v_account,'direction',v_direction,
+        'window_max_posts',v_maxposts,'expires_at',v_expires,
+        'reason','bounds_exceeded','op_key',p_op_key));
+    return clara._finish_op(c.firm,'propose_autopost_rule',p_op_key,
+      jsonb_build_object('rule_id',null,'status','refused','reason','bounds_exceeded'));
+  end if;
   v_cp:=clara._canonical_counterparty(v_client,v_counterparty);
   if v_cp is null or not exists(select 1 from clara.counterparties where id=v_cp
       and firm_id=c.firm and retired_at is null) then raise exception 'counterparty not found' using errcode='CLR11'; end if;
@@ -1693,11 +1726,17 @@ begin
   end if;
   -- ADV-6: the pinned bounds re-verified at signing (defense-in-depth beside
   -- the structural CHECK — a raw out-of-bounds proposal can never go live).
+  -- ADV-R2#4: refused as a typed AUDITED RETURN (durable trace; a raise would
+  -- roll the trace back).
   if r.frequency_window is distinct from 'monthly'
      or r.window_max_posts not between 1 and 3
      or r.expires_at is null or r.expires_at>r.created_at+interval '12 months' then
-    raise exception 'autopost bounds exceed the pinned envelope (monthly / <=3 posts / <=12-month expiry)'
-      using errcode='CLR27',detail='{"reason":"bounds_exceeded"}';
+    perform clara._audit(c.firm,c.actor,null,null,'sign_autopost_rule_refused',null,
+      jsonb_build_object('rule',p_rule,'window_max_posts',r.window_max_posts,
+        'frequency_window',r.frequency_window,'expires_at',r.expires_at,
+        'reason','bounds_exceeded','op_key',p_op_key));
+    return clara._finish_op(c.firm,'sign_autopost_rule',p_op_key,
+      jsonb_build_object('rule_id',p_rule,'status','refused','reason','bounds_exceeded'));
   end if;
   -- ADV-5: the OCR sighting floor re-derived at SIGNING — evidence reversed
   -- after proposal strips the authority before it can go live.
@@ -1726,6 +1765,160 @@ begin
     jsonb_build_object('rule_id',p_rule,'tier','autopost'));
   return clara._finish_op(c.firm,'sign_autopost_rule',p_op_key,
     jsonb_build_object('rule_id',p_rule,'status','live'));
+end $$;
+
+-- ADV-R2 (R1#1): ONE BOUND EXTRACTION. The pinned-extraction VARIANT (a distinct name — the rig one-overload law) carries
+-- the full 0015 fact-state body verbatim with the selection replaced by the
+-- caller-supplied extraction id; the 1-arg fn becomes a thin resolver that
+-- delegates here — so the executor's single resolution, the class check, and
+-- every envelope field read the SAME extraction, and every legacy caller's
+-- behavior is byte-identical.
+create function clara._invoice_fact_state_at(p_document uuid, p_extraction uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_ext uuid; v_version int; v_total_count int; v_total_region uuid;
+  v_total bigint; v_conf numeric; v_locator text; v_currency text;
+  v_due bigint; v_deposit bigint; v_hash text; v_ok boolean;
+  v_locator_json jsonb; v_poly_ok boolean; v_ineligible text;
+  v_invoice_id text; v_invoice_date text;
+  v_engine text; v_net bigint; v_tax bigint; v_type text;
+  v_customer text; v_customer_reg text; v_out jsonb;
+  v_rounding bigint; v_breakdown text; v_bd bigint;
+  v_net_c int; v_tax_c int; v_type_c int; v_bd_c int; v_round_c int;
+  v_due_c int; v_deposit_c int;
+begin
+  select e2.id, e2.version_n, nullif(btrim(e2.envelope->>'corroboration_ineligible'),''), e2.engine_id
+    into v_ext, v_version, v_ineligible, v_engine
+  from clara.document_extractions e2
+  where e2.id = p_extraction and e2.document_id = p_document
+    and e2.engine_kind = 'invoice_facts' and e2.status = 'done';
+  if v_ext is null then return '{}'::jsonb; end if;
+
+  select count(*)::int into v_total_count
+  from clara.document_regions
+  where extraction_id = v_ext and field_path = 'invoice.total';
+  select id, monetary_cents, engine_confidence, locator_kind, locator
+    into v_total_region, v_total, v_conf, v_locator, v_locator_json
+  from clara.document_regions
+  where extraction_id = v_ext and field_path = 'invoice.total'
+  order by id limit 1;
+  select upper(regexp_replace(coalesce(min(text_content),''), '[^A-Za-z]', '', 'g'))
+    into v_currency from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.currency';
+  -- FIX-5 v4 defense-in-depth: capture the region COUNT alongside due/deposit so a PRESENT
+  -- region whose cents normalized to NULL (a malformed 'N/A' — the write boundary now refuses
+  -- it, this is the read guard) can NEVER be min()-selected into "no due" / a defaulted-zero
+  -- deposit and thereby corroborate. An ABSENT field (count 0) stays legitimately optional.
+  select count(*)::int, min(monetary_cents) into v_due_c, v_due from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.amount_due';
+  select count(*)::int, min(monetary_cents) into v_deposit_c, v_deposit from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.deposit';
+  select nullif(btrim(min(text_content)),'') into v_invoice_id from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.invoice_id';
+  select nullif(btrim(min(text_content)),'') into v_invoice_date from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.invoice_date';
+  -- S6: additive sales / SST fact fields (all null for AP purchase docs). RESIDUAL-4:
+  -- capture the region COUNT alongside each value so the structured corroboration can
+  -- REJECT a conflicting duplicate instead of min()-selecting one away.
+  select count(*)::int, min(monetary_cents) into v_net_c, v_net from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.total_excl_tax';
+  select count(*)::int, min(monetary_cents) into v_tax_c, v_tax from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.tax_total';
+  select count(*)::int, min(monetary_cents) into v_round_c, v_rounding from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.rounding';
+  select count(*)::int, nullif(btrim(min(text_content)),'') into v_bd_c, v_breakdown from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.tax_breakdown';
+  select count(*)::int, nullif(btrim(min(text_content)),'') into v_type_c, v_type from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.type_code';
+  select nullif(btrim(min(text_content)),'') into v_customer from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.customer_name';
+  select nullif(btrim(min(text_content)),'') into v_customer_reg from clara.document_regions
+    where extraction_id = v_ext and field_path = 'invoice.customer_registration';
+
+  if v_total_region is not null then
+    select clara._fact_hash(r.extraction_id, r.id, r.field_path, r.text_content,
+      r.monetary_cents) into v_hash from clara.document_regions r where r.id = v_total_region;
+  end if;
+  -- W3: a total with no physical geometry (empty polygon array) can never reach
+  -- Tier A. Persistence still stores such rows; they simply never corroborate.
+  v_poly_ok := jsonb_typeof(v_locator_json->'polygon') = 'array'
+    and jsonb_array_length(v_locator_json->'polygon') > 0;
+  if v_engine like 'clara-%' then
+    -- STRUCTURED Tier-A (§3.5, adversarial #4): a schema-parsed source corroborates
+    -- WITHOUT geometry ONLY on COMPLETE stated facts + a tight arithmetic tie. Only
+    -- the invoice type (EXPLICIT 01) corroborates the invoice-total equation; a
+    -- missing type never defaults to 01; CN/DN (02/03) + self-billed carry their own
+    -- ties in the shape floor but are corroboration-INELIGIBLE for the total here.
+    -- Required: explicit type 01, gross, net AND tax (explicit zero tax counts);
+    -- net + tax + rounding = gross; and (when present) the per-type breakdown SUMS to
+    -- tax_total (a mis-summed / unparseable breakdown yields the -1 sentinel ⇒ fails).
+    v_bd := clara._tax_breakdown_cents(v_breakdown);
+    -- RESIDUAL-4: (a) SINGLE cardinality on EVERY corroboration fact (type, gross, net,
+    -- tax, breakdown, rounding) — a conflicting DUPLICATE region REJECTS corroboration
+    -- rather than being min()-selected away (mirrors the single-gross v_total_count=1
+    -- check); (b) a positive-tax document MUST carry a breakdown that sums to tax_total
+    -- (the earlier `v_bd is null or ...` accepted a positive-tax doc with NO breakdown).
+    v_ok := v_total_count = 1 and v_total is not null and v_total > 0
+      and v_currency = 'MYR'
+      and (v_due_c = 0 or (v_due is not null and v_due = v_total))
+      and (v_deposit_c = 0 or (v_deposit is not null and v_deposit = 0))
+      and v_ineligible is null
+      and v_type = '01' and v_type_c = 1
+      and v_net is not null and v_net_c = 1
+      and v_tax is not null and v_tax_c = 1
+      and v_round_c <= 1 and v_bd_c <= 1
+      -- RESIDUAL v3 (item 4): a PRESENT rounding region whose value normalized to NULL is
+      -- malformed — it must NOT be silently treated as zero. Fail corroboration (the write
+      -- boundary in persist_invoice_facts already refuses it outright; this is the read guard).
+      and (v_round_c = 0 or v_rounding is not null)
+      and (v_net + v_tax + coalesce(v_rounding, 0)) = v_total
+      and (v_bd is not null or v_tax = 0)     -- breakdown REQUIRED when tax_total > 0
+      and (v_bd is null or v_bd = v_tax);     -- when present it must sum to tax_total
+  else
+    -- OCR/azure Tier-A: the polygon wall stays (byte-identical to as-built).
+    v_ok := v_total_count = 1 and v_total is not null and v_total > 0
+      and coalesce(v_conf, 0) >= 0.95 and v_locator = 'page_polygon' and v_poly_ok
+      and v_currency = 'MYR'
+      and (v_due_c = 0 or (v_due is not null and v_due = v_total))
+      and (v_deposit_c = 0 or (v_deposit is not null and v_deposit = 0))
+      and v_ineligible is null;
+  end if;
+  v_out := jsonb_build_object(
+    'extraction_id', v_ext, 'version_n', v_version,
+    'total_region_id', v_total_region, 'total_cents', v_total,
+    'total_fact_hash', v_hash, 'currency', nullif(v_currency,''),
+    'invoice_id', v_invoice_id, 'invoice_date', v_invoice_date,
+    'corroboration_ineligible', v_ineligible,
+    'corroborated', v_ok,
+    'explicit_non_myr', nullif(v_currency,'') is not null and v_currency <> 'MYR'
+  );
+  -- Append the sales/SST fields ONLY when present, so an AP purchase bill's output
+  -- is byte-identical to as-built (review M3, rig exact-diff on the RPR corpus).
+  if v_net is not null then v_out := v_out || jsonb_build_object('total_excl_tax_cents',v_net); end if;
+  if v_tax is not null then v_out := v_out || jsonb_build_object('tax_total_cents',v_tax); end if;
+  if v_rounding is not null then v_out := v_out || jsonb_build_object('rounding_cents',v_rounding); end if;
+  if v_type is not null then v_out := v_out || jsonb_build_object('type_code',v_type); end if;
+  if v_customer is not null then v_out := v_out || jsonb_build_object('customer_name',v_customer); end if;
+  if v_customer_reg is not null then v_out := v_out || jsonb_build_object('customer_registration',v_customer_reg); end if;
+  return v_out;
+end $$;
+revoke all on function clara._invoice_fact_state_at(uuid,uuid) from public;
+
+-- 1-arg CoR: the ORIGINAL selection, then delegate to the pinned overload.
+create or replace function clara._invoice_fact_state(p_document uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare v_ext uuid;
+begin
+  select e.id into v_ext
+  from clara.document_processing_tasks t
+  join clara.document_extractions e
+    on e.document_id = t.document_id and e.engine_id = t.engine_id
+   and e.version_n = t.version_n and e.engine_kind = 'invoice_facts'
+   and e.status = 'done'
+  where t.document_id = p_document and t.lane in ('invoice_facts','local_facts') and t.status = 'done'
+  order by t.version_n desc, t.id desc limit 1;
+  if v_ext is null then return '{}'::jsonb; end if;
+  return clara._invoice_fact_state_at(p_document, v_ext);
 end $$;
 
 -- execute_rule_post CoR (same arity; the login-direct ACL is preserved by the
@@ -1764,7 +1957,7 @@ declare
   v_cust_reg text; v_cust_taxid text; v_cust_name text; v_client_name text;
   v_hard_ok boolean; v_name_ok boolean; v_buyer_hit boolean;
   v_due_c int; v_due_amt bigint; v_skips int; v_suspended boolean:=false;
-  v_doc_lane text; v_doc_class text; v_verdict jsonb;
+  v_doc_lane text; v_doc_class text; v_verdict jsonb; v_lane_n int;
   v_cust_name_raw text; v_cust_reg_raw text; v_buyer_fp jsonb; v_buyer_id uuid;
   v_fseen int; v_fdocs int; v_fspan int;
 begin
@@ -1784,6 +1977,36 @@ begin
       values(e.firm_id,e.client_id,p_entry,null,'not_eligible_shape');
     return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','not_eligible_shape');
   end if;
+
+  -- ADV-R2 (R1#1): ONE BOUND EXTRACTION per document per post, resolved BEFORE
+  -- the direction step (direction itself consumes the doc's facts). A document
+  -- with done facts in BOTH lanes (a historical OCR pass beside a later XML
+  -- parse) is inherently ambiguous evidence — a named visible skip, never a
+  -- coin-flip between potentially disagreeing extractions. With exactly one
+  -- done lane the extraction is bound ONCE (v_fx) and every consumer — the
+  -- direction, the class check, the fact state, and every envelope field —
+  -- reads that SAME single-lane extraction.
+  select count(distinct t.lane)::int into v_lane_n
+    from clara.document_processing_tasks t
+    join clara.document_extractions x on x.document_id=t.document_id
+      and x.engine_id=t.engine_id and x.version_n=t.version_n
+      and x.engine_kind='invoice_facts' and x.status='done'
+    where t.document_id=e.document_id
+      and t.lane in ('invoice_facts','local_facts') and t.status='done';
+  if v_lane_n>1 then
+    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
+      values(e.firm_id,e.client_id,p_entry,null,'evidence_lane_ambiguous');
+    return jsonb_build_object('entry_id',p_entry,'status','skipped',
+      'reason','evidence_lane_ambiguous');
+  end if;
+  select t.lane,x.id into v_doc_lane,v_fx
+    from clara.document_processing_tasks t
+    join clara.document_extractions x on x.document_id=t.document_id
+      and x.engine_id=t.engine_id and x.version_n=t.version_n
+      and x.engine_kind='invoice_facts' and x.status='done'
+    where t.document_id=e.document_id
+      and t.lane in ('invoice_facts','local_facts') and t.status='done'
+    order by t.version_n desc,t.id desc limit 1;
 
   -- direction (client-aware) — an unresolved direction is a skip, never a raise.
   begin
@@ -1867,7 +2090,9 @@ begin
   --       1; on a purchase an sst_output leg lands here too — closes item 2). 0016: an
   --       sst_purchase_cost leg is never sanctioned either — the named skip above fires
   --       first on a purchase; on a sales draft it lands here as an outside leg.
-  v_state := clara._invoice_fact_state(e.document_id);
+  -- (v_fx/v_doc_lane were bound ONCE at the top of the fn — ADV-R2 R1#1.)
+  v_state := case when v_fx is null then '{}'::jsonb
+    else clara._invoice_fact_state_at(e.document_id,v_fx) end;
   v_gross := nullif(v_state->>'total_cents','')::bigint;
   v_tax   := nullif(v_state->>'tax_total_cents','')::bigint;
 
@@ -1974,14 +2199,8 @@ begin
   -- visible skip: an OCR document can never ride a 'structured' rule around
   -- the envelope, and an XML document never consumes an OCR authority.
   if v_direction='sales' then
-    select t.lane into v_doc_lane
-      from clara.document_processing_tasks t
-      join clara.document_extractions x on x.document_id=t.document_id
-        and x.engine_id=t.engine_id and x.version_n=t.version_n
-        and x.engine_kind='invoice_facts' and x.status='done'
-      where t.document_id=e.document_id
-        and t.lane in ('invoice_facts','local_facts') and t.status='done'
-      order by t.version_n desc,t.id desc limit 1;
+    -- ADV-R2 (R1#1): the class derives from the ONE BOUND lane resolved above
+    -- (v_doc_lane rides the same single resolution as v_fx and v_state).
     v_doc_class:=case v_doc_lane when 'local_facts' then 'structured'
                                  when 'invoice_facts' then 'ocr_sales' end;
     if v_doc_class is null or v_doc_class is distinct from r.evidence_class then
@@ -2034,10 +2253,8 @@ begin
       return jsonb_build_object('entry_id',p_entry,'status','skipped',
         'reason','polarity_unverified','rule_suspended',v_suspended);
     end if;
-    -- (b) hard direction evidence.
-    select x.id into v_fx from clara.document_extractions x
-      where x.document_id=e.document_id and x.engine_kind='invoice_facts' and x.status='done'
-      order by x.version_n desc,x.id desc limit 1;
+    -- (b) hard direction evidence — every field reads the ONE BOUND extraction
+    -- (v_fx, resolved once above; ADV-R2 R1#1).
     select lower(regexp_replace(nullif(btrim(min(dr.text_content)),''),'[^a-zA-Z0-9]','','g'))
       into v_sup_reg from clara.document_regions dr
       where dr.extraction_id=v_fx and dr.field_path='invoice.vendor_registration';
@@ -2240,7 +2457,10 @@ begin
              or coalesce(a.account_class,'') in ('payable','receivable'))
   loop
     if r.status='proposed' then
-      update clara.coding_rules set status='declined',declined_by=r.created_by,
+      -- ADV-R2 new-2: a schema-valid creatorless row must not abort the repair —
+      -- the deterministic repair actor is the structural agent identity (0002).
+      update clara.coding_rules set status='declined',
+        declined_by=coalesce(r.created_by,clara.agent_user_id()),
         declined_at=now(),
         decline_reason='0016 A21 repair: auto-proposal bound a '||r.cp_kind
           ||' / '||coalesce(nullif(r.acct_class,''),'non-control')||' account'
@@ -2251,7 +2471,11 @@ begin
           ||' / '||coalesce(nullif(r.acct_class,''),'non-control')||' account'
         where id=r.id;
     end if;
-    update clara.open_questions set status='dismissed',resolved_at=now(),
+    -- ADV-R2 new-1 (BLOCKER fix): ck_open_questions_terminal demands resolved_by
+    -- on every terminal question — the repair actor is the question's own
+    -- opener, falling back to the structural agent identity.
+    update clara.open_questions set status='dismissed',
+        resolved_by=coalesce(opened_by,clara.agent_user_id()),resolved_at=now(),
         resolution_text='0016 A21 repair: the spawning vendor_account rule was invalid (customer/control-class pool defect) and has been '
           ||case when r.status='proposed' then 'declined' else 'retired' end
       where spawned_rule_id=r.id and status='open';
@@ -2285,7 +2509,8 @@ begin
              or cr.expires_at>cr.created_at+interval '12 months')
   loop
     if r.status='proposed' then
-      update clara.coding_rules set status='declined',declined_by=r.created_by,
+      update clara.coding_rules set status='declined',
+        declined_by=coalesce(r.created_by,clara.agent_user_id()),  -- ADV-R2 new-2
         declined_at=now(),
         decline_reason='0016 A21 repair: proposal exceeds the pinned autopost bounds (monthly / <=3 posts / <=12-month expiry)'
         where id=r.id;
@@ -2340,31 +2565,214 @@ begin
   return clara._finish_op(c.firm,'add_client_alias',p_op_key,jsonb_build_object('alias_id',v_id));
 end $$;
 
+-- ADV-R2 new-3: the repair is DETERMINISTIC (groups ordered by firm/canonical,
+-- members by id) and AMBIGUITY IS SURFACED, never first-wins-suppressed —
+-- mirroring the matcher policy (every pointer represented; a collision is a
+-- visible conflict). Per (firm, canonical form) group of live NON-CANONICAL
+-- aliases: every member is retired; a canonical replacement is inserted ONLY
+-- when the group names exactly one client and no live canonical row exists;
+-- every other shape (cross-client groups, a live canonical row for a DIFFERENT
+-- client, an empty canonical) is a COLLISION — no replacement, one
+-- review-visible notification + audit per group.
 do $$
-declare r record; v_norm text; v_new uuid;
+declare g record; m record; v_new uuid; v_existing record; v_actor uuid;
+  v_members uuid[]; v_collision boolean; v_note text;
 begin
-  for r in select a.* from clara.client_aliases a
-      where a.retired_at is null
-        and a.alias_normalized
-            <> lower(regexp_replace(btrim(a.alias_normalized),'[^a-zA-Z0-9]','','g'))
+  for g in
+    select a.firm_id,
+      lower(regexp_replace(btrim(a.alias_normalized),'[^a-zA-Z0-9]','','g')) as canon,
+      array_agg(a.id order by a.id) as ids,
+      array_agg(distinct a.client_id) as clients,
+      (array_agg(a.added_by order by a.id))[1] as any_actor
+    from clara.client_aliases a
+    where a.retired_at is null
+      and a.alias_normalized
+          <> lower(regexp_replace(btrim(a.alias_normalized),'[^a-zA-Z0-9]','','g'))
+    group by 1,2
+    order by 1,2
   loop
-    v_norm := lower(regexp_replace(btrim(r.alias_normalized),'[^a-zA-Z0-9]','','g'));
-    update clara.client_aliases set retired_at=now(),retired_by=r.added_by
-      where id=r.id;
-    v_new := null;
-    if v_norm <> '' and not exists (select 1 from clara.client_aliases a2
-        where a2.firm_id=r.firm_id and a2.alias_normalized=v_norm
-          and a2.retired_at is null) then
+    v_actor:=coalesce(g.any_actor,clara.agent_user_id());
+    v_members:='{}';
+    for m in select a.* from clara.client_aliases a where a.id=any(g.ids) order by a.id loop
+      update clara.client_aliases set retired_at=now(),
+        retired_by=coalesce(m.added_by,clara.agent_user_id()) where id=m.id;
+      v_members:=v_members||m.id;
+    end loop;
+    select a2.* into v_existing from clara.client_aliases a2
+      where a2.firm_id=g.firm_id and a2.alias_normalized=g.canon
+        and a2.retired_at is null limit 1;
+    v_new:=null; v_collision:=false; v_note:=null;
+    if g.canon='' then
+      v_collision:=true; v_note:='alias normalizes to empty (unrepresentable)';
+    elsif v_existing.id is null and array_length(g.clients,1)=1 then
       insert into clara.client_aliases(firm_id,client_id,alias_normalized,added_by)
-        values(r.firm_id,r.client_id,v_norm,r.added_by) returning id into v_new;
+        values(g.firm_id,g.clients[1],g.canon,v_actor) returning id into v_new;
+    elsif v_existing.id is not null and array_length(g.clients,1)=1
+          and g.clients[1]=v_existing.client_id then
+      null; -- the same pointer already lives canonically — nothing to add
+    else
+      v_collision:=true;
+      v_note:='colliding client pointers on one canonical form — human review required';
     end if;
-    perform clara._audit(r.firm_id,null,null,null,'a21_repair_client_alias',null,
-      jsonb_build_object('retired_alias',r.id,'stored',r.alias_normalized,
-        'canonical',nullif(v_norm,''),'replacement',v_new,
-        'collision',v_norm<>'' and v_new is null,
+    if v_collision then
+      begin
+        perform clara._record_notification_core(v_actor,g.firm_id,null,null,
+          null,'a21_alias_collision',
+          jsonb_build_object('canonical',nullif(g.canon,''),
+            'retired_aliases',to_jsonb(v_members),'clients',to_jsonb(g.clients),
+            'message','Migration 0016 alias repair: '||v_note
+              ||'. The retired display-form aliases must be re-recorded canonically by a human.'),
+          'a21-alias-collision:'||g.firm_id||':'||coalesce(nullif(g.canon,''),'empty'));
+      exception when others then null;
+      end;
+    end if;
+    perform clara._audit(g.firm_id,null,null,null,'a21_repair_client_alias',null,
+      jsonb_build_object('canonical',nullif(g.canon,''),'retired',to_jsonb(v_members),
+        'clients',to_jsonb(g.clients),'replacement',v_new,
+        'collision',v_collision,'note',v_note,
         'migration','0016_a21_compliance_watch'));
   end loop;
 end $$;
+
+-- =====================================================================
+-- B4e — ADV-R2 (R1#2): the AUTHORED vendor-rule path closes. propose_coding_rule
+-- and sign_coding_rule (0011) accepted ANY active counterparty/account — a
+-- bookkeeper could recreate exactly what B4b repaired. CoRs (same arity, ACL
+-- preserved) add the vendor-kind + non-control-account floor at PROPOSE and at
+-- SIGN; sign_coding_rule additionally binds to rule_type='vendor_account' (an
+-- autopost rule has its own ADMIN signer — the generic bookkeeper signer must
+-- never flip one live). A BEFORE INSERT trigger makes the invariant STRUCTURAL
+-- for every writer (authored, auto-proposal, merge propagation, raw).
+-- =====================================================================
+create or replace function clara.propose_coding_rule(p_client uuid,p_counterparty uuid,
+    p_account_code text,p_op_key text) returns jsonb
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+declare c record; v_dedupe jsonb; v_cp uuid; v_id uuid; v_hash text;
+begin
+  c:=clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  if p_client is null or p_counterparty is null or p_account_code is null
+     or nullif(btrim(p_account_code),'') is null then
+    raise exception 'coding rule is malformed'
+      using errcode='CLR27',detail='{"reason":"malformed"}';
+  end if;
+  v_dedupe:=clara._reserve_op(c.firm,'propose_coding_rule',p_op_key,
+    clara._hash(jsonb_build_object('client',p_client,'counterparty',p_counterparty,
+      'account_code',p_account_code)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  v_cp:=clara._canonical_counterparty(p_client,p_counterparty);
+  if v_cp is null or not exists(select 1 from clara.counterparties where id=v_cp
+      and firm_id=c.firm and retired_at is null) then raise exception 'counterparty not found' using errcode='CLR11'; end if;
+  -- ADV-R2 (R1#2): a vendor_account rule binds a canonical VENDOR only.
+  if not exists(select 1 from clara.counterparties where id=v_cp and kind='vendor'
+      and merged_into is null and retired_at is null) then
+    raise exception 'a vendor_account rule requires a vendor counterparty'
+      using errcode='CLR27',detail='{"reason":"vendor_required"}';
+  end if;
+  if not exists(select 1 from clara.coa_accounts where client_id=p_client
+      and account_code=p_account_code and is_active) then
+    raise exception 'rule account is not postable'
+      using errcode='CLR27',detail='{"reason":"account_not_postable"}';
+  end if;
+  -- ADV-R2 (R1#2): never a control-class target (payable/receivable).
+  if exists(select 1 from clara.coa_accounts where client_id=p_client
+      and account_code=p_account_code
+      and coalesce(account_class,'') in ('payable','receivable')) then
+    raise exception 'a vendor_account rule cannot target a control-class account'
+      using errcode='CLR27',detail='{"reason":"control_account"}';
+  end if;
+  v_hash:=encode(sha256(convert_to(jsonb_build_object('type','vendor_account',
+    'counterparty',v_cp,'account_code',p_account_code)::text,'UTF8')),'hex');
+  insert into clara.coding_rules(firm_id,client_id,rule_type,counterparty_id,
+      account_code,status,pinned,origin,content_hash,created_by)
+    values(c.firm,p_client,'vendor_account',v_cp,p_account_code,'proposed',false,
+      'authored',v_hash,c.actor) returning id into v_id;
+  perform clara._audit(c.firm,c.actor,null,null,'propose_coding_rule',null,
+    jsonb_build_object('rule',v_id,'client',p_client,'counterparty',v_cp,'op_key',p_op_key));
+  perform clara._append_event(c.firm,'kb_rule.proposed',p_client,c.actor,null,null,null,null,null,
+    jsonb_build_object('rule_id',v_id,'counterparty_id',v_cp));
+  return clara._finish_op(c.firm,'propose_coding_rule',p_op_key,
+    jsonb_build_object('rule_id',v_id,'status','proposed'));
+end $$;
+
+create or replace function clara.sign_coding_rule(p_rule uuid,p_op_key text) returns jsonb
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+declare c record; v_dedupe jsonb; r record; v_constraint text;
+begin
+  c:=clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  if p_rule is null then raise exception 'rule is required' using errcode='CLR10'; end if;
+  v_dedupe:=clara._reserve_op(c.firm,'sign_coding_rule',p_op_key,
+    clara._hash(jsonb_build_object('rule',p_rule)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  select * into r from clara.coding_rules where id=p_rule for update;
+  if not found or r.firm_id<>c.firm then raise exception 'rule not found' using errcode='CLR11'; end if;
+  -- ADV-R2 (R1#2): the bookkeeper signer signs vendor_account rules ONLY — an
+  -- autopost authority is signed exclusively by sign_autopost_rule (admin+).
+  if r.rule_type<>'vendor_account' then
+    raise exception 'only a vendor_account rule is signable here'
+      using errcode='CLR27',detail='{"reason":"wrong_rule_type"}';
+  end if;
+  if r.status<>'proposed' then raise exception 'rule is not proposed' using errcode='CLR27',detail='{"reason":"malformed"}'; end if;
+  -- ADV-R2 (R1#2): re-derive the vendor-rule invariant at SIGNING.
+  if not exists(select 1 from clara.counterparties where id=r.counterparty_id
+      and kind='vendor' and merged_into is null and retired_at is null) then
+    raise exception 'a vendor_account rule requires a vendor counterparty'
+      using errcode='CLR27',detail='{"reason":"vendor_required"}';
+  end if;
+  if exists(select 1 from clara.coa_accounts where client_id=r.client_id
+      and account_code=r.account_code
+      and coalesce(account_class,'') in ('payable','receivable')) then
+    raise exception 'a vendor_account rule cannot target a control-class account'
+      using errcode='CLR27',detail='{"reason":"control_account"}';
+  end if;
+  if not exists(select 1 from clara.coa_accounts where client_id=r.client_id
+      and account_code=r.account_code and is_active) then
+    raise exception 'rule account is not postable'
+      using errcode='CLR27',detail='{"reason":"account_not_postable"}';
+  end if;
+  begin
+    update clara.coding_rules set status='live',signed_by=c.actor,signed_at=now() where id=p_rule;
+  exception when unique_violation then
+    get stacked diagnostics v_constraint=constraint_name;
+    if v_constraint='uq_coding_rules_one_live_vendor' then
+      raise exception 'a live rule already exists for this vendor'
+        using errcode='CLR27',detail='{"reason":"duplicate_live"}';
+    end if;
+    raise;
+  end;
+  perform clara._audit(c.firm,c.actor,null,null,'sign_coding_rule',null,
+    jsonb_build_object('rule',p_rule,'op_key',p_op_key));
+  perform clara._append_event(c.firm,'kb_rule.signed',r.client_id,c.actor,null,null,null,null,null,
+    jsonb_build_object('rule_id',p_rule));
+  return clara._finish_op(c.firm,'sign_coding_rule',p_op_key,
+    jsonb_build_object('rule_id',p_rule,'status','live'));
+end $$;
+
+-- The STRUCTURAL floor: no writer — authored, auto-proposal, merge propagation,
+-- or raw — can insert a vendor_account rule bound to a non-vendor counterparty
+-- or a control-class account. (Runs after the B4b repair, which only UPDATEs.)
+create function clara._tf_coding_rule_insert_0016() returns trigger
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+begin
+  if new.rule_type='vendor_account' then
+    if not exists(select 1 from clara.counterparties cpv
+        where cpv.id=new.counterparty_id and cpv.kind='vendor'
+          and cpv.merged_into is null and cpv.retired_at is null) then
+      raise exception 'a vendor_account rule requires a live canonical vendor counterparty'
+        using errcode='CLR27',detail='{"reason":"vendor_required"}';
+    end if;
+    if exists(select 1 from clara.coa_accounts a
+        where a.client_id=new.client_id and a.account_code=new.account_code
+          and coalesce(a.account_class,'') in ('payable','receivable')) then
+      raise exception 'a vendor_account rule cannot target a control-class account'
+        using errcode='CLR27',detail='{"reason":"control_account"}';
+    end if;
+  end if;
+  return new;
+end $$;
+create trigger t_coding_rules_insert_0016 before insert on clara.coding_rules
+  for each row execute function clara._tf_coding_rule_insert_0016();
 
 -- =====================================================================
 -- B5 — P3: THE CLASSIFIER GATE (WA21-R7). classify_document is the SINGLE
@@ -3334,6 +3742,13 @@ begin
         and a.account_code=r.account_code and a.is_active
       where r.client_id=p_client and r.counterparty_id=v_rule_counterparty
         and r.rule_type='vendor_account' and r.status='live'
+        -- ADV-R2 (R1#2): live-rule CONSUMPTION revalidates the vendor-rule
+        -- invariant — a rule bound to a non-vendor or a control-class account
+        -- is never snapshotted into a draft, whatever wrote it.
+        and coalesce(a.account_class,'') not in ('payable','receivable')
+        and exists(select 1 from clara.counterparties cpv
+          where cpv.id=r.counterparty_id and cpv.kind='vendor'
+            and cpv.merged_into is null and cpv.retired_at is null)
       for share of r;
     if found then
       insert into clara.rule_decisions(firm_id,client_id,entry_id,revision_token,
@@ -3966,19 +4381,9 @@ begin
     raise exception '0016 AB-3 engine predicate / brn assertion failed' using errcode='CLR10';
   end if;
 
-  -- (2) the 0014 consent-evidence branch survived the facts-gate CoR — ADV-13:
-  -- asserted on the EXECUTABLE branch expression AND its ORDER (the exemption
-  -- must fire BEFORE the kind gate), never on token presence alone.
-  select p.prosrc into v_src from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-    where n.nspname='clara' and p.proname='_enqueue_invoice_facts_core';
-  if v_src is null
-     or position('if d.document_kind=''consent_evidence'' then' in v_src)=0
-     or position('d.document_kind in (''invoice'',''credit_note'',''debit_note'')' in v_src)=0
-     or position('if d.document_kind=''consent_evidence'' then' in v_src)
-        >= position('d.document_kind in (''invoice'',''credit_note'',''debit_note'')' in v_src) then
-    raise exception '0016 _enqueue_invoice_facts_core lost the consent_evidence exemption (or its precedence over the kind gate)'
-      using errcode='CLR10';
-  end if;
+  -- (2) the 0014 consent-evidence exemption + its precedence over the kind gate
+  -- are proven BEHAVIORALLY by the D-P6 consent sentinel probe below (ADV-R2
+  -- R1#13: prosrc text can sit in a comment while the executable code changes).
 
   -- (3) PUBLIC holds zero EXECUTE + one-overload on every recreated/new fn.
   foreach v_name in array v_recreated loop
@@ -4086,10 +4491,9 @@ begin
      or position('suspended_pending_resignature' in v_src)=0
      or position('not_corroborated' in v_src)=0
      or position('v_outside_legs' in v_src)=0
-     -- ADV-13: the EXECUTABLE outside-leg filter (never a prose comment) — a
-     -- purchase-side sst_output leg is enumerated as an outside leg by this
-     -- exact code expression.
-     or position('not (v_direction=''sales'' and coalesce(a.special_acc_type,'''')=''sst_output'')' in v_src)=0
+     -- ADV-R2 (R1#13): the purchase-sst_output-is-an-outside-leg claim is now
+     -- proven BEHAVIORALLY by the D-P6 executor sentinel probe below (prosrc
+     -- text — comments included — can never pin executable behavior).
      or position('pg_exception_detail' in lower(v_src))=0 then
     raise exception '0016 execute_rule_post missing a named skip / retained 0015 gate' using errcode='CLR10';
   end if;
@@ -4237,19 +4641,22 @@ begin
   if v_def is null or v_def not like '%classification%' then
     raise exception '0016 open_questions origin CHECK missing classification' using errcode='CLR10';
   end if;
-  -- ADV-13: the evaluator's supporting index asserted by CATALOG SHAPE —
-  -- exact column list AND the approved-only predicate, never the name alone.
+  -- ADV-13 / ADV-R2 (R1#13): the evaluator's supporting index asserted by EXACT
+  -- catalog shape — the exact 3-key column list, the EXACT predicate expression
+  -- (pg_get_expr equality; a '%status%approved%' pattern would admit
+  -- status <> 'approved'), and the key counts (no hidden expression keys).
   if not exists(
     select 1 from pg_index ix
     join pg_class ic on ic.oid=ix.indexrelid
     join pg_namespace n on n.oid=ic.relnamespace
     where n.nspname='clara' and ic.relname='ix_je_client_approved_posting'
+      and ix.indnatts=3 and ix.indnkeyatts=3 and ix.indexprs is null
       and (select array_agg(a.attname order by k.ord)
              from unnest(ix.indkey::int2[]) with ordinality as k(attnum,ord)
              join pg_attribute a on a.attrelid=ix.indrelid and a.attnum=k.attnum)
           = array['client_id','posting_date','id']::name[]
-      and pg_get_expr(ix.indpred,ix.indrelid) ilike '%status%approved%') then
-    raise exception '0016 ix_je_client_approved_posting missing or wrong shape (columns/predicate)' using errcode='CLR10';
+      and pg_get_expr(ix.indpred,ix.indrelid) = '(status = ''approved''::text)') then
+    raise exception '0016 ix_je_client_approved_posting missing or wrong shape (columns/predicate/keys)' using errcode='CLR10';
   end if;
   if not exists(select 1 from pg_indexes where schemaname='clara'
       and indexname='uq_compliance_watches_one_open'
@@ -4666,5 +5073,123 @@ begin
     end if;
     raise exception '0016 sst probe rollback' using errcode='ZC016';
   exception when sqlstate 'ZC016' then null;
+  end;
+end $$;
+
+-- =====================================================================
+-- D-P6a SENTINEL PROBE (ADV-R2 R1#13) — the 0014 consent-evidence exemption
+-- fires BEFORE the kind gate, proven by EXECUTING the gate: a pdf whose kind is
+-- 'consent_evidence' must return 'skipped_consent_evidence' (were the kind gate
+-- first, the return would be the 0016 'skipped_kind' receipt). Sentinel ZD016.
+-- =====================================================================
+do $$
+declare
+  v_firm uuid:=gen_random_uuid(); v_user uuid:=gen_random_uuid();
+  v_doc uuid:=gen_random_uuid(); v_sha text:=repeat('c',64); v_res jsonb;
+begin
+  begin
+    insert into clara.firms(id,name) values(v_firm,'0016 consent probe');
+    insert into clara.users(id,display_name,email) values(v_user,'0016 consent probe',
+      '0016-consent-'||v_user||'@invalid.example');
+    insert into clara.documents(id,firm_id,sha256,original_filename,mime_type,byte_size,
+        storage_path,uploaded_by,bytes_verified_at,document_kind)
+      values(v_doc,v_firm,v_sha,'consent.pdf','application/pdf',1,
+        'firms/'||v_firm||'/docs/'||v_sha||'.pdf',v_user,now(),'consent_evidence');
+    v_res:=clara._enqueue_invoice_facts_core(v_doc);
+    if v_res->>'status' is distinct from 'skipped_consent_evidence' then
+      raise exception '0016 probe: the consent-evidence exemption must fire BEFORE the kind gate (got %)',
+        v_res::text using errcode='CLR10';
+    end if;
+    if exists(select 1 from clara.document_processing_tasks where document_id=v_doc) then
+      raise exception '0016 probe: a consent-evidence document must enqueue NOTHING'
+        using errcode='CLR10';
+    end if;
+    raise exception '0016 consent probe rollback' using errcode='ZD016';
+  exception when sqlstate 'ZD016' then null;
+  end;
+end $$;
+
+-- =====================================================================
+-- D-P6b SENTINEL PROBE (ADV-R2 R1#13) — the EXECUTOR treats a purchase-side
+-- sst_output leg as an OUTSIDE leg, proven by EXECUTING execute_rule_post
+-- against a full sentinel world (live purchase rule, corroborable facts, a
+-- 3-leg draft carrying an sst_output debit): the post must SKIP
+-- 'account_mismatch' with an immutable rule_post_skips receipt, never post.
+-- Sentinel ZE016.
+-- =====================================================================
+do $$
+declare
+  v_firm uuid:=gen_random_uuid(); v_user uuid:=gen_random_uuid();
+  v_client uuid:=gen_random_uuid(); v_cp uuid:=gen_random_uuid();
+  v_doc uuid:=gen_random_uuid(); v_ext uuid:=gen_random_uuid();
+  v_fil uuid:=gen_random_uuid(); v_resn uuid:=gen_random_uuid();
+  v_rule uuid:=gen_random_uuid(); v_e uuid; v_sha text:=repeat('d',64);
+  v_res jsonb;
+begin
+  begin
+    insert into clara.firms(id,name) values(v_firm,'0016 executor probe');
+    insert into clara.users(id,display_name,email) values(v_user,'0016 executor probe',
+      '0016-exec-'||v_user||'@invalid.example');
+    insert into clara.clients(id,firm_id,name) values(v_client,v_firm,'0016 exec client');
+    insert into clara.coa_accounts(client_id,account_code,name,account_type)
+      values(v_client,'600-000','Purchases','expense');
+    insert into clara.coa_accounts(client_id,account_code,name,account_type,special_acc_type)
+      values(v_client,'620-000','SST output','liability','sst_output');
+    insert into clara.coa_accounts(client_id,account_code,name,account_type,account_class)
+      values(v_client,'400-000','Trade creditors','liability','payable');
+    insert into clara.counterparties(id,firm_id,client_id,kind,name,name_normalized,created_by)
+      values(v_cp,v_firm,v_client,'vendor','Probe Exec Vendor','probeexecvendor',v_user);
+    insert into clara.documents(id,firm_id,sha256,original_filename,mime_type,byte_size,
+        storage_path,uploaded_by,bytes_verified_at)
+      values(v_doc,v_firm,v_sha,'bill.pdf','application/pdf',1,
+        'firms/'||v_firm||'/docs/'||v_sha||'.pdf',v_user,now());
+    insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status,workflow_run_id,started_at,finished_at)
+      values(v_firm,v_doc,'clara-fixture:v1','{}'::jsonb,1,'invoice_facts','done',
+        '0016-exec-probe',now(),now());
+    insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,
+        version_n,status,page_count)
+      values(v_ext,v_firm,v_doc,'clara-fixture:v1','invoice_facts',1,'done',1);
+    insert into clara.client_resolutions(id,client_id,subject_kind,subject_id,confidence,
+        method,resolved_by)
+      values(v_resn,v_client,'document',v_doc,1.0,'human',v_user);
+    insert into clara.document_filings(id,firm_id,document_id,client_id,filed_by,
+        resolution_id,basis)
+      values(v_fil,v_firm,v_doc,v_client,v_user,v_resn,'human');
+    insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,
+        field_path,text_content,monetary_raw,monetary_cents,engine_confidence)
+      values(v_firm,v_ext,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,
+        'invoice.total','106.00','106.00',10600,1.0);
+    insert into clara.coding_rules(id,firm_id,client_id,rule_type,counterparty_id,
+        account_code,status,pinned,origin,content_hash,created_by,
+        amount_cap_cents,frequency_window,window_max_posts,expires_at,direction,
+        signed_by,signed_at)
+      values(v_rule,v_firm,v_client,'autopost',v_cp,'600-000','live',false,'authored',
+        encode(sha256(convert_to('0016-exec-probe','UTF8')),'hex'),v_user,
+        100000,'monthly',3,now()+interval '11 months','purchase',v_user,now());
+    insert into clara.journal_entries(client_id,status,posting_date,memo,origin,
+        document_id,filing_id,source_doc_sha256,maker_actor,coding_kind,
+        proposed_counterparty)
+      values(v_client,'draft',current_date,null,'document',v_doc,v_fil,v_sha,v_user,
+        'supplier_bill',jsonb_build_object('existing_id',v_cp,'kind','vendor'))
+      returning id into v_e;
+    insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,counterparty_id)
+      values(v_e,1,'600-000',10000,0,null),(v_e,2,'620-000',600,0,null),
+            (v_e,3,'400-000',0,10600,v_cp);
+    v_res:=clara.execute_rule_post(v_e,'0016-exec-probe:'||v_e);
+    if v_res->>'status' is distinct from 'skipped'
+       or v_res->>'reason' is distinct from 'account_mismatch' then
+      raise exception '0016 probe: a purchase sst_output leg must skip account_mismatch (got %)',
+        v_res::text using errcode='CLR10';
+    end if;
+    if not exists(select 1 from clara.rule_post_skips
+        where entry_id=v_e and rule_id=v_rule and reason='account_mismatch') then
+      raise exception '0016 probe: the account_mismatch receipt is missing' using errcode='CLR10';
+    end if;
+    if (select status from clara.journal_entries where id=v_e)<>'draft' then
+      raise exception '0016 probe: the sst_output draft must never post' using errcode='CLR10';
+    end if;
+    raise exception '0016 executor probe rollback' using errcode='ZE016';
+  exception when sqlstate 'ZE016' then null;
   end;
 end $$;

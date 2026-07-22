@@ -53,13 +53,13 @@ const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 
 let _lane2Disabled = false; // fail-safe latch: only fires if the 0008 read grants are missing (42501)
-
 // ---------------------------------------------------------------------------
 // Pure lane-2 candidate matching — no DB, fully unit-testable. UNIQUE exact
 // name/alias hits become candidates; two+ distinct clients ⇒ conflict abstain.
+// ADV-R2 R1#12: norm = the resolver's EXACT strip-normalization (0016 stores
+// aliases canonically; trim/lower-only stopped matching "Acme Sdn. Bhd.").
 // ---------------------------------------------------------------------------
-
-const norm = (s) => String(s ?? "").trim().toLowerCase();
+const norm = (s) => String(s ?? "").toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /**
  * @param {{regions?:{regionId?:string, text?:string}[], aliases?:{clientId:string, alias:string}[],
