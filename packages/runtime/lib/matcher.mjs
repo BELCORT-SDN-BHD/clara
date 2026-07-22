@@ -42,8 +42,8 @@ import { isConnErr, waitForNudge } from "./listen.mjs";
 
 /** The matcher consumer name — its own checkpoint / dead-letter / lock key. */
 export const MATCHER_CONSUMER = "matcher";
-/** The matcher's replay-key matcher_version (attribution_attempts). */
-export const MATCHER_VERSION = "matcher-v1";
+/** Replay-key matcher_version: v2 = strip-then-lowercase norm (ADV-R3#4). */
+export const MATCHER_VERSION = "matcher-v2";
 /** The ONLY event type the matcher acts on; all others are checkpoint-only. */
 export const MATCHER_EVENT_TYPE = "document.extraction_completed";
 
@@ -53,13 +53,13 @@ const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 
 let _lane2Disabled = false; // fail-safe latch: only fires if the 0008 read grants are missing (42501)
-
 // ---------------------------------------------------------------------------
 // Pure lane-2 candidate matching — no DB, fully unit-testable. UNIQUE exact
 // name/alias hits become candidates; two+ distinct clients ⇒ conflict abstain.
+// ADV-R3#4: norm = SQL's lower(regexp_replace(x,'[^a-zA-Z0-9]','','g')) — STRIP
+// FIRST then lowercase ("İNC" -> "nc" both sides; lowercase-first diverges).
 // ---------------------------------------------------------------------------
-
-const norm = (s) => String(s ?? "").trim().toLowerCase();
+const norm = (s) => String(s ?? "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
 
 /**
  * @param {{regions?:{regionId?:string, text?:string}[], aliases?:{clientId:string, alias:string}[],
@@ -209,7 +209,7 @@ export async function applyMatcherEffects(client, { documentId, extractionId, fi
     fp,
     JSON.stringify(lane2.candidates),
     lane2.conflictReason,
-    `mtc:attempt:${documentId}:${extractionId ?? "none"}`,
+    `mtc:attempt:${MATCHER_VERSION}:${documentId}:${extractionId ?? "none"}`,
   ]);
   return { rule, lane2 };
 }

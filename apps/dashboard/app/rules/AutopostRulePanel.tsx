@@ -10,7 +10,7 @@
 
 import { useState } from "react";
 import type { AutopostRule } from "../shared/reviewCardTypes";
-import { signAutopostRule, retireAutopostRule } from "../shared/reviewApi";
+import { signAutopostRule, retireAutopostRule, narrowRuleWrite } from "../shared/reviewApi";
 import type { PgrestError } from "../shared/wire";
 import { fmtCents, shortId } from "../shared/fmt";
 import { ruleUrgency, windowLabel, postsRemaining, canSign, canRetire, daysUntil } from "./model";
@@ -29,10 +29,19 @@ export function AutopostRulePanel({ token, rule, now, onChanged }: {
   const [clr, setClr] = useState<{ code: string; reason: string | null } | null>(null);
   const [retireReason, setRetireReason] = useState("");
 
-  const run = async (fn: () => Promise<void>) => {
+  const run = async (fn: () => Promise<unknown>) => {
     setBusy(true); setErr(null); setClr(null);
     try {
-      await fn();
+      // ADV-R3#6: a typed HTTP-200 refusal is NEVER success. The API layer
+      // throws it error-shaped; this narrow is the belt should any caller
+      // return the raw union — either way it renders through the refusal UI
+      // and onChanged() never fires.
+      const out = narrowRuleWrite(await fn());
+      if (out.status === "refused") {
+        setErr(`refused: ${out.reason}`);
+        setClr({ code: "CLR27", reason: out.reason });
+        return;
+      }
       onChanged();
     } catch (e) {
       const pe = e as PgrestError;

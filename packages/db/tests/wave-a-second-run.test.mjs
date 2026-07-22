@@ -180,7 +180,8 @@ test("deploy-ordering fail-closed: 0011 live with NO consent row for a client â‡
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
   // Deliberately DO NOT grant consent for A2 (simulate the pre-seed window).
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 });
+  // 0016 (P3): classify-first gate â€” kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   const receipt = await claimTask(task.id, { egressApproved: true }).catch((e) => ({ raised: e.code }));

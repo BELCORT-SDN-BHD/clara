@@ -99,7 +99,8 @@ let lockVendorSeq = 0;
  *  invoice_facts task ready to persist. Returns { draft, cited, task }. */
 async function billWithClaimedFacts(sub, { client, amount = 500000 }) {
   const firm = await firmOf(client);
-  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00", kind: "invoice" });
   const cred = await mintInteractive(firm);
   const res = await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId });
   const seq = lockVendorSeq++;
@@ -252,7 +253,8 @@ test("probe 2 revise || approve on the SAME draft, BOTH orders: the entry FOR UP
  *  a claimed facts task on the same doc. Returns { correctionId, planHash, task }. */
 async function setupCorrection(sub, fromClient, toClient, coa) {
   const firm = await firmOf(fromClient);
-  const cited = await seedCitedDocument(sub, { firm, client: fromClient });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(sub, { firm, client: fromClient, kind: "invoice" });
   const d = await draftEntryV3(sub, { client: fromClient, resolution: await freshResolution(sub, fromClient), document: cited.documentId, sha256: cited.sha256, lines: balanced(coa, ROUTINE_CENTS), evidence: [ev(cited.regionId, cited.quote, FIELD.total)], opKey: opk("corrcite") });
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("ap") });
   await previewCorrection(sub, { document: cited.documentId, fromClient, toClient });

@@ -65,3 +65,51 @@ test("blank/whitespace region text and empty registry are safely ignored", () =>
   const r = matchCandidates({ regions: [{ regionId: "r", text: "   " }], clients: [{ clientId: "c", name: "Acme" }] });
   assert.equal(r.candidates.length, 0);
 });
+
+// ADV-R2 (R1#12): the matcher rides the resolver's EXACT strip-normalization —
+// a CANONICALIZED stored alias must match its display form on the document.
+test("a canonical stored alias matches the punctuated display form (strip-normalization)", () => {
+  const r = matchCandidates({
+    regions: [{ regionId: "r", text: "Acme Sdn. Bhd." }],
+    clients: [{ clientId: "c9", name: "Beta Holdings" }],
+    aliases: [{ clientId: "c9", alias: "acmesdnbhd" }], // the 0016 canonical storage form
+  });
+  assert.equal(r.candidates.length, 1, "the repaired canonical alias still matches its display form");
+  assert.equal(r.candidates[0].rule_kind, "alias_exact");
+  assert.equal(r.candidates[0].client_id, "c9");
+  assert.equal(r.conflictReason, null);
+});
+
+test("punctuation/spacing variants of a registered NAME match (both sides share the norm)", () => {
+  const r = matchCandidates({
+    regions: [{ regionId: "r", text: "ACME   SDN-BHD" }],
+    clients: [{ clientId: "c1", name: "Acme Sdn. Bhd." }],
+  });
+  assert.equal(r.candidates.length, 1);
+  assert.equal(r.candidates[0].rule_kind, "name_exact");
+});
+
+// ADV-R3#4: strip-FIRST-then-lowercase — byte-equivalent with the SQL
+// lower(regexp_replace(x,'[^a-zA-Z0-9]','','g')) under Unicode case expansion.
+test("Unicode case expansion follows SQL: 'İNC' strips to 'nc' (never the JS lowercase-first 'inc')", () => {
+  const r = matchCandidates({
+    regions: [{ regionId: "r", text: "İNC" }],
+    clients: [{ clientId: "js", name: "inc" }, { clientId: "sql", name: "NC" }],
+  });
+  assert.equal(r.candidates.length, 1, "exactly the SQL-normalized pointer matches");
+  assert.equal(r.candidates[0].client_id, "sql", "'İNC' resolves as SQL does ('nc'), never as JS lowercase-first ('inc')");
+});
+
+test("the replay version is matcher-v2 (the v2 normalization must never share v1 replay keys)", async () => {
+  const { MATCHER_VERSION } = await import("../lib/matcher.mjs");
+  assert.equal(MATCHER_VERSION, "matcher-v2");
+});
+
+test("strip-normalization PRESERVES ambiguity: two clients colliding on the canonical form abstain", () => {
+  const r = matchCandidates({
+    regions: [{ regionId: "r", text: "Acme Sdn Bhd" }],
+    clients: [{ clientId: "a", name: "Acme Sdn. Bhd." }, { clientId: "b", name: "ACME SDN BHD" }],
+  });
+  assert.equal(r.candidates.length, 2, "the collision is represented, never first-wins-suppressed");
+  assert.equal(r.conflictReason, "ambiguous-name-or-alias");
+});

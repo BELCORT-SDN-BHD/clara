@@ -45,7 +45,8 @@ function skip15(t) {
 async function factsDoc({ client, supplierName, supplierReg, customerName = "SOME BUYER SDN BHD" }) {
   const firm = await firmOf(client);
   await grantConsent(world.users.alice, { firm, client }).catch(() => {});
-  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: "RM 1,000.00" });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: "RM 1,000.00", kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -214,7 +215,8 @@ test("RESIDUAL v3 a supplier=client doc whose BUYER is ALSO the client via TIN-o
   const client = world.clients.A1;
   const firm = await firmOf(client);
   await grantConsent(world.users.alice, { firm, client }).catch(() => {});
-  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: "RM 1,000.00" });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: "RM 1,000.00", kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });

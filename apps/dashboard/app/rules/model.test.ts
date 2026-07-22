@@ -5,6 +5,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AutopostRule } from "../shared/reviewCardTypes";
 import { daysUntil, isExpiringSoon, ruleUrgency, windowLabel, postsRemaining, canSign, canRetire } from "./model";
+import { narrowRuleWrite, ruleWriteRefusedError } from "../shared/reviewApi";
 
 const NOW = new Date("2026-07-22T00:00:00Z");
 
@@ -56,4 +57,24 @@ test("canSign is proposed-only; canRetire is proposed-or-live", () => {
   assert.equal(canSign(mkRule({ status: "live" })), false);
   assert.equal(canRetire(mkRule({ status: "live" })), true);
   assert.equal(canRetire(mkRule({ status: "retired" })), false);
+});
+
+// ADV-R3#6: the typed HTTP-200 refusal union — a refused write must NEVER
+// narrow to success (the panel's onChanged()-as-success bug class).
+test("narrowRuleWrite: a typed refusal is refused; every other shape is success", () => {
+  assert.deepEqual(narrowRuleWrite({ status: "refused", reason: "bounds_exceeded" }),
+    { status: "refused", reason: "bounds_exceeded" });
+  assert.deepEqual(narrowRuleWrite({ status: "refused" }), { status: "refused", reason: "refused" });
+  assert.deepEqual(narrowRuleWrite({ rule_id: "r1", status: "proposed" }), { status: "ok" });
+  assert.deepEqual(narrowRuleWrite({ rule_id: "r1", status: "live" }), { status: "ok" });
+  assert.deepEqual(narrowRuleWrite(null), { status: "ok" });
+  assert.deepEqual(narrowRuleWrite(undefined), { status: "ok" });
+  assert.deepEqual(narrowRuleWrite("ok"), { status: "ok" });
+});
+
+test("ruleWriteRefusedError renders through the existing refusal UI (PgrestError shape: CLR27 + reason)", () => {
+  const err = ruleWriteRefusedError("bounds_exceeded");
+  assert.equal(err.clr, "CLR27");
+  assert.equal(err.reason, "bounds_exceeded");
+  assert.match(err.message, /bounds_exceeded/);
 });

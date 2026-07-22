@@ -74,7 +74,9 @@ const rm = (cents) => `RM ${(cents / 100).toLocaleString("en-US", { minimumFract
 async function salesFiling({ client, gross, net, tax, typeCode = "01" }) {
   const firm = await firmOf(client);
   await grantConsent(world.users.alice, { firm, client }).catch(() => {});
-  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: rm(gross) });
+  // 0016 (P3): classify-first gate — kind-stamped at seed (typeCode-matched) so invoice_facts engages directly.
+  const kind = typeCode === "02" ? "credit_note" : typeCode === "03" ? "debit_note" : "invoice";
+  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: rm(gross), kind });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -387,7 +389,9 @@ test("RESIDUAL-1 a sales invoice laundering a material amount into a ROUNDING le
 // Firm-B variants (dave is firm B's owner) reuse the same builders with a different actor.
 async function salesFilingFor(sub, { client, gross, net, tax, typeCode = "01" }) {
   const firm = await firmOf(client);
-  const cited = await seedCitedDocument(sub, { firm, client, quote: rm(gross) });
+  // 0016 (P3): classify-first gate — kind-stamped at seed (typeCode-matched) so invoice_facts engages directly.
+  const kind = typeCode === "02" ? "credit_note" : typeCode === "03" ? "debit_note" : "invoice";
+  const cited = await seedCitedDocument(sub, { firm, client, quote: rm(gross), kind });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });

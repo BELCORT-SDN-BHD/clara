@@ -79,7 +79,8 @@ async function birthRegisteredVendor() {
 async function targetFiling({ registration = null, amount = 700000 } = {}) {
   const firm = await firmOf(client);
   await grantConsent(owner, { firm, client }).catch(() => {});
-  const cited = await seedCitedDocument(owner, { firm, client, quote: "RM 5,000.00" });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(owner, { firm, client, quote: "RM 5,000.00", kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });

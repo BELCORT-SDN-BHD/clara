@@ -7,6 +7,7 @@
 // the UI computes none.
 
 import { rpc, runtimeBase, supabaseBase } from "./wire";
+import type { PgrestError } from "./wire";
 import { toReviewQueue, toEntryDiff, toDocEntryDiff, type ReviewQueue, type EntryDiff, type DocEntryDiff } from "./reviewTypes";
 import { toSweepRun, toOpenQuestion, toCodingRule, toCodingLane, type SweepRun, type OpenQuestion, type CodingRule, type CodingLane } from "./reviewCardTypes";
 import { toRulePostRun, toAutopostRule, toNotification, type RulePostRun, type AutopostRule, type Notification } from "./reviewCardTypes";
@@ -117,10 +118,39 @@ export async function acknowledgeRulePosts(token: string, runIds: string[]): Pro
   await rpc("acknowledge_rule_posts", { p_run_ids: runIds, p_op_key: opKey() }, token);
 }
 
+// --- Typed rule-write results (0016 ADV-R2#4 / ADV-R3#6) -------------------------
+// propose/sign_autopost_rule REFUSE bounds violations as a TYPED HTTP-200 return
+// ({status:'refused', reason}) — a durable audited refusal, not an exception. The
+// callers must never treat that as success.
+
+export type RuleWriteResult = { status: "ok" } | { status: "refused"; reason: string };
+
+/** Narrow an RPC return into the rule-write union. Anything that is not an
+ *  explicit typed refusal is success-shaped (legacy jsonb receipts included). */
+export function narrowRuleWrite(out: unknown): RuleWriteResult {
+  if (out && typeof out === "object" && (out as { status?: unknown }).status === "refused") {
+    const reason = (out as { reason?: unknown }).reason;
+    return { status: "refused", reason: typeof reason === "string" ? reason : "refused" };
+  }
+  return { status: "ok" };
+}
+
+/** A typed refusal raised error-shaped (PgrestError-compatible: clr + reason) so
+ *  every existing catch path renders it through the refusal UI — never onChanged(). */
+export function ruleWriteRefusedError(reason: string): PgrestError {
+  const err = new Error(`refused: ${reason}`) as PgrestError;
+  err.clr = "CLR27";
+  err.reason = reason;
+  return err;
+}
+
 /** Sign a proposed autopost rule → live (WA2-R8: admin+ only; re-verifies bounds sane,
- *  account postable, one-live). Named in 0015 companion S3. */
-export async function signAutopostRule(token: string, ruleId: string): Promise<void> {
-  await rpc("sign_autopost_rule", { p_rule: ruleId, p_op_key: opKey() }, token);
+ *  account postable, one-live). Named in 0015 companion S3. A typed bounds refusal
+ *  THROWS error-shaped (rendered by the existing refusal UI). */
+export async function signAutopostRule(token: string, ruleId: string): Promise<RuleWriteResult> {
+  const r = narrowRuleWrite(await rpc("sign_autopost_rule", { p_rule: ruleId, p_op_key: opKey() }, token));
+  if (r.status === "refused") throw ruleWriteRefusedError(r.reason);
+  return r;
 }
 
 /** Retire a live/proposed autopost rule (WA2 §6.2 lifecycle). ASSUMED fn
@@ -133,8 +163,10 @@ export async function retireAutopostRule(token: string, ruleId: string, reason: 
 /** Human-author an autopost-rule proposal (WA2 §6.2: bookkeeper+ may propose; only
  *  admin+ signs). Named in 0015 companion S3; args ride a jsonb proposal per the house
  *  "new inputs ride existing jsonb params, never change arity" law (ASSUMED shape). */
-export async function proposeAutopostRule(token: string, proposal: Record<string, unknown>): Promise<void> {
-  await rpc("propose_autopost_rule", { p_proposal: proposal, p_op_key: opKey() }, token);
+export async function proposeAutopostRule(token: string, proposal: Record<string, unknown>): Promise<RuleWriteResult> {
+  const r = narrowRuleWrite(await rpc("propose_autopost_rule", { p_proposal: proposal, p_op_key: opKey() }, token));
+  if (r.status === "refused") throw ruleWriteRefusedError(r.reason);
+  return r;
 }
 
 // --- Document bytes (PIN-DELTA-4; runtime signed read path) ---------------------

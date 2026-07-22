@@ -46,7 +46,8 @@ test("no consent (fail-closed window): claiming an invoice_facts task with kill-
   if (skipUnready(t, ready)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
   const task = await factsTaskFor(cited.documentId);
   const receipt = await claimTask(task.id, { egressApproved: true }).catch((e) => { noteLane(`no-consent claim raised ${e.code} (${e.message}) instead of a typed hold — PINS §1 says typed receipt; inspect`); return { raised: e.code, reason: WREASON.noConsent }; });
   const st = await taskStatus(task.id);
@@ -62,7 +63,8 @@ test("live consent + kill-switch ON: the invoice_facts task runs (the only cell 
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
   await grantConsent(users.alice, { firm, client: clients.A2 });
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
   const task = await factsTaskFor(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
   assert.equal((await taskStatus(task.id)).status, "running", "with live consent + kill-switch ON, the facts task runs");
@@ -73,7 +75,8 @@ test("kill-switch OFF with live consent: still HOLDS (held_egress) with CLR28 ki
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
   await grantConsent(users.alice, { firm, client: clients.A1 });
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
   const task = await factsTaskFor(cited.documentId);
   const receipt = await claimTask(task.id, { egressApproved: false }).catch(() => null);
   const st = await taskStatus(task.id);
@@ -91,7 +94,8 @@ test("multi-filing document, ONE client unconsented: the facts task HOLDS with C
   await revokeClientEgress(users.alice, { client: clients.A2 }).catch(() => {});
   // Consent A1 only; file the SAME document to A1 AND A2 (two active filings).
   await grantConsent(users.alice, { firm, client: clients.A1 });
-  const seed = await seedVerifiedDocument({ firm });
+  // 0016 (P3): classify-first gate — kind-stamped at mint so invoice_facts engages directly.
+  const seed = await seedVerifiedDocument({ firm, kind: "invoice" });
   await fileDocument(users.alice, { document: seed.documentId, client: clients.A1, resolution: await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: seed.documentId }) });
   await fileDocument(users.alice, { document: seed.documentId, client: clients.A2, resolution: await freshResolution(users.alice, clients.A2, { subjectKind: "document", subjectId: seed.documentId }) });
   const task = await factsTaskFor(seed.documentId);
@@ -112,7 +116,8 @@ test("last-boundary recheck: revoke consent AFTER a running claim → a re-claim
   const firm = await firmOf(clients.A2);
   await revokeClientEgress(users.alice, { client: clients.A2 }).catch(() => {}); // normalize prior-test consent
   await grantConsent(users.alice, { firm, client: clients.A2 });
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
   const task = await factsTaskFor(cited.documentId);
   const runId = `wf-${opk("run")}`;
   await claimTask(task.id, { egressApproved: true, workflowRunId: runId });

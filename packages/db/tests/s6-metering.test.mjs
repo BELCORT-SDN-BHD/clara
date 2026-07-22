@@ -67,7 +67,8 @@ test("N-F1 egress OFF: claiming an invoice_facts task with egress NOT approved H
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   // A false-egress claim must NOT move the facts task to running.
@@ -81,7 +82,8 @@ test("N-F1 release_held_document_tasks covers the invoice_facts lane (a held fac
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: false }).catch(() => {});
@@ -100,7 +102,8 @@ test("NEW-4 a claimed+persisted invoice_facts task has a processing_call_reserva
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -117,7 +120,8 @@ test("NEW-4 refund-on-failure: fail_invoice_facts moves the task to failed and e
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A2);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -133,7 +137,8 @@ test("status honesty: a failed invoice_facts task never touched documents.extrac
   if (unready(t)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, kind: "invoice" });
   const st0 = (await rootQuery("select extraction_status from clara.documents where id=$1", [cited.documentId])).rows[0].extraction_status;
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
@@ -157,7 +162,8 @@ test("limit: an unaffordable facts reservation refuses with CLR18 (or lands fail
   const has = await rootQuery("select 1 from information_schema.tables where table_schema='clara' and table_name='firm_document_limits'");
   if (!has.rowCount) { noteLane("firm_document_limits absent — cannot force the facts limit path on this schema"); return; }
   await rootQuery("update clara.firm_document_limits set pages_per_day = 0 where firm_id=$1", [firm]).catch(() => {});
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2 });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A2, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   // Either the claim/persist refuses CLR18, OR the task lands failed('budget') honestly.

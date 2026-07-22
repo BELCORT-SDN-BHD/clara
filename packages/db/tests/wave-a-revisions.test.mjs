@@ -92,7 +92,8 @@ test("facts rotation writes a revision snapshot: persisting invoice_facts on a b
   if (skipUnready(t, ready)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
-  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, quote: "RM 500.00" });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, quote: "RM 500.00", kind: "invoice" });
   const d = await draftEntryV3(users.alice, {
     client: clients.A1, resolution: await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256, lines: billLines(EXP, AP, 50000),

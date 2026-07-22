@@ -70,6 +70,15 @@ const WAVE_A2_HUMAN_FNS = [
 // LOGIN-DIRECT to clara_runtime_login, like record_rule_resolution, so it is deliberately
 // NOT in any of the five matrix roles).
 const WAVE_A2_RUNTIME_FNS = ["reconcile_autopost_rules"];
+// 0016 [WAVE-A2.1 pins P1/P3 §C]: the compliance-watch human writers + the human
+// kind-override land on clara_authenticated (floors body-enforced); the SST evaluators
+// + the classifier verdict writer are clara_runtime ONLY. The agent role gains ZERO
+// EXECUTE anywhere in 0016 (tail-asserted in the migration itself).
+const WAVE_A21_HUMAN_FNS = [
+  "set_turnover_classification", "record_future_attestation", "ack_compliance_watch",
+  "snooze_compliance_watch", "resolve_compliance_watch", "set_document_kind",
+];
+const WAVE_A21_RUNTIME_FNS = ["evaluate_sst_watch", "evaluate_sst_watches_all", "classify_document"];
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -82,6 +91,7 @@ export const ALLOWED = {
     ...S6_HUMAN_FNS, // [S6 §9/C-11] draft-lifecycle + coding-task + client-pinned reads
     ...WAVE_A_HUMAN_FNS, // [WAVE-A §2] daily-loop governance writers + typed reads
     ...WAVE_A2_HUMAN_FNS, // [WAVE-A2 §6/§7] standing-rules writers + rule/notification/receipt reads
+    ...WAVE_A21_HUMAN_FNS, // 0016 [A2.1 §C] compliance-watch human writers + set_document_kind
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -104,6 +114,7 @@ export const ALLOWED = {
     ...S6_RUNTIME_FNS, // [S6 §9/C-11] invoice-facts lane writers + coding-attempt recovery read
     ...WAVE_A_RUNTIME_FNS, // [WAVE-A §2] autodraft admission/settle + sweep-run + candidate reads
     ...WAVE_A2_RUNTIME_FNS, // [WAVE-A2 §6.2] the autopost expiry/nudge reconcile sweep
+    ...WAVE_A21_RUNTIME_FNS, // 0016 [A2.1 §C] SST evaluators + classify_document (runtime ONLY; agent zero)
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs

@@ -93,7 +93,8 @@ async function draftCorroboratedBill(sub, { client, cp, accountCode = EXP, amoun
   await grantConsent(sub, { firm, client }).catch(() => {});
   const cred = await mintInteractive(firm);
   const quote = `RM ${(amount / 100).toFixed(2)}`;
-  const cited = await seedCitedDocument(sub, { firm, client, quote });
+  // 0016 (P3): classify-first gate — kind-stamped at seed so invoice_facts engages directly.
+  const cited = await seedCitedDocument(sub, { firm, client, quote, kind: "invoice" });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -441,7 +442,9 @@ test("P12 two concurrent posts on ONE rule at window_max=1 post EXACTLY ONE — 
 async function purchaseFactsDoc({ client, typeCode = "02", gross = 50000 }) {
   const firm = await firmOf(client);
   await grantConsent(world.users.alice, { firm, client }).catch(() => {});
-  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: `RM ${(gross / 100).toFixed(2)}` });
+  // 0016 (P3): classify-first gate — kind-stamped at seed (typeCode-matched) so invoice_facts engages directly.
+  const kind = typeCode === "02" ? "credit_note" : typeCode === "03" ? "debit_note" : "invoice";
+  const cited = await seedCitedDocument(world.users.alice, { firm, client, quote: `RM ${(gross / 100).toFixed(2)}`, kind });
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -512,7 +515,10 @@ test("RESIDUAL-1/v5 a ≤5-sen rounding-leg bill is SKIPPED not_corroborated (a 
   await postViaRule(draft.entry_id).catch((e) => noteLane(`≤5-sen rounding post raised ${e.code}`));
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a ≤5-sen rounding-leg bill is NOT auto-posted under v5 (inherently non-corroborated)");
   const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
-  assert.equal(skip, "not_corroborated", `the ≤5-sen rounding bill is skipped not_corroborated (got '${skip}')`);
+  // 0016 ADV-R4#1 (integration lane): a NO-FACTS document is now refused by the
+  // EARLIER named skip 'facts_missing' — before direction, never an unpinned
+  // pass-through. The protected property is identical (never auto-posts).
+  assert.equal(skip, "facts_missing", `the ≤5-sen rounding bill (no facts) is skipped facts_missing (got '${skip}')`);
 });
 
 test("RESIDUAL-1 the supplier-bill shape floor REFUSES a material rounding leg at APPROVE (defense-in-depth, human path)", async (t) => {
@@ -766,7 +772,9 @@ test("RESIDUAL-5 execute_rule_post SKIPS not_corroborated a CLEAN draft on a NO-
   await postViaRule(draft.entry_id).catch((e) => noteLane(`no-facts post raised ${e.code}: ${e.message}`));
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a non-corroborated (no-facts) draft is NOT auto-posted (pre-v5 it posted)");
   const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
-  assert.equal(skip, "not_corroborated", `a no-facts draft is skipped not_corroborated (got '${skip}')`);
+  // 0016 ADV-R4#1 (integration lane): the no-facts refusal moved EARLIER to the
+  // named 'facts_missing' skip (before direction). Same property, refused sooner.
+  assert.equal(skip, "facts_missing", `a no-facts draft is skipped facts_missing (got '${skip}')`);
 });
 
 test("RESIDUAL-5 execute_rule_post SKIPS not_corroborated a draft on a document whose total is MALFORMED ('N/A' persists non-corroborated) with an ARBITRARY amount", async (t) => {
