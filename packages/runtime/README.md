@@ -26,7 +26,10 @@ v2.1; `docs/architecture/ARCHITECTURE.md` §4 + Appendix A; migration
   principal + own-OR-firm-shared session predicate (indistinguishable 404).
 - **Control listener** (`lib/control.mjs`): leased clarify delivery + cancel
   settlement. **Leader loop** (`lib/leader.mjs`): routing + drain (`lib/drain.mjs`)
-  + reconcile (`lib/reconciler.mjs`). **Consumer lanes**, each on its OWN
+  + reconcile (`lib/reconciler.mjs`, incl. the daily
+  `clara.reconcile_autopost_rules()` sweep — autopost-rule hard-expiry + the
+  no-recent-post nudges, cadence `CLARA_AUTOPOST_RECONCILE_HOURS` default 24,
+  error-isolated; PR #52). **Consumer lanes**, each on its OWN
   dedicated connection + advisory lock: matcher (`lib/matcher.mjs`), autodraft
   (`lib/autodraft.mjs`), local_facts (`lib/local-facts.mjs`), rule_post
   (`lib/rule-post.mjs`) — plus the managed clamd scanner (`lib/scan.mjs`, no DB
