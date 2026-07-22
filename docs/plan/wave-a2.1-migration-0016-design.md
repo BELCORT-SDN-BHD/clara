@@ -161,4 +161,12 @@ isolation · per-group separation (G vs I never aggregate) · sighting side + fl
 each OCR skip reason fail-pre/pass-post · CN named skip · purchase tie ·
 classifier gate (payroll_summary never reaches invoice_facts; NULL-kind → classify →
 facts) · only-if-null stamping · settled `get_draft_review` per lane · context-pack v3
-shape · queue row_kind + stale-evaluator flag · closing-transfer exclusion semantics.
+shape · queue row_kind + stale-evaluator flag · closing-transfer exclusion semantics ·
+**`reconcile_autopost_rules` expiry/nudge proof** (the DB-side half of the contract §7
+/ PR #52 wiring: a live rule past `expires_at` hard-expires + notifies; a ¾-term
+no-recent-post rule nudges — this test lands HERE, not in the runtime lane, per the
+PR #52 spec review).
+
+Test-lane caution (the rig truncate-deadlock lesson): the PR #52 leader wiring adds a
+once-per-boot writer on `coding_rules`/`notifications` in any shared world-e2e DB —
+TRUNCATE-based tests on those tables must use the truncateGuardError pattern.
