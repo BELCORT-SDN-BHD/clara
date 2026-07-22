@@ -105,7 +105,7 @@ before(async () => {
   migrate({});
 });
 after(async () => {
-  try { if (c) await c.end(); } catch {}
+  try { if (c) await c.end(); } catch { /* already closed */ }
   try { await rootQuery(`drop database if exists ${DBNAME} with (force)`); }
   catch { await rootQuery(`drop database if exists ${DBNAME}`).catch(() => {}); }
   printLaneNotes("a21-prestate"); printSkipCount("a21-prestate"); await endPool();

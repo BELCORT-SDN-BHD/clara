@@ -575,7 +575,7 @@ test("R3-3 (R1#8): liability is STICKY — attestation expiry/replacement re-arm
 
 test("R3-5 (R2#5 strict): the OCR floor demands six STATED invoice numbers — a number-less doc is not floor evidence", async (t) => {
   if (skipHere(t)) return;
-  const { users, clients } = world;
+  const { clients } = world;
   const client = clients.B1;
   const sub = world.users.dave;
   const name = `R35CO ${randomUUID().slice(0, 6)}`;
