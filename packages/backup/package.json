@@ -1,0 +1,16 @@
+{
+  "name": "@clara/backup",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Clara off-site DR backup app (Wave A2 §8 / WA2-R6) — a SEPARATE, self-contained Fly app (`clara-backup`, sin) that dumps the full-profile DB + globals evidence + auth data-only + the firm-docs byte mirror, age-encrypts, and rclone-syncs to Cloudflare R2, pinging a dead-man's-switch on success. NOT a pnpm workspace member (excluded in pnpm-workspace.yaml); NEVER installed into @clara/runtime. Its deps are installed inside its own Docker image.",
+  "scripts": {
+    "backup": "node scripts/backup-run.mjs",
+    "backup:dry": "node scripts/backup-run.mjs --dry-run",
+    "check": "node --check scripts/backup-run.mjs",
+    "test": "node --test scripts/lib/backup-fixes.test.mjs"
+  },
+  "dependencies": {
+    "pg": "8.20.0"
+  }
+}

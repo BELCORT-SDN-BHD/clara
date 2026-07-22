@@ -220,7 +220,27 @@ test("vendor_registration: a typed VendorTaxId is emitted as invoice.vendor_regi
   assert.equal(reg.value_raw, "201801000900");
   assert.equal(reg.page, 1);
   assert.equal(reg.confidence, 0.88);
-  assert.equal(out.normalizationVersion, "clara-invoice-norm:v4", "normalization version is bumped to v4 (keyValuePairs enabled)");
+  assert.equal(out.normalizationVersion, "clara-invoice-norm:v5", "normalization version is bumped to v5 (Wave A2 customer fields)");
+});
+
+test("v5 (Wave A2): CustomerName/SubTotal/TotalTax map to AR facts; CustomerTaxId → customer_registration", () => {
+  const payload = samplePayload();
+  Object.assign(payload.analyzeResult.documents[0].fields, {
+    CustomerName: { content: "DARE TO DREAM REAL ESTATE SDN BHD", confidence: 0.93 },
+    SubTotal: { content: "410,000.00", confidence: 0.9 },
+    TotalTax: { content: "25,560.00", confidence: 0.9 },
+    CustomerTaxId: { content: "201901111111", confidence: 0.88 },
+  });
+  const out = azure.normalizeAzureInvoice(payload);
+  const byPath = Object.fromEntries(out.fields.map((f) => [f.field_path, f]));
+  assert.equal(byPath["invoice.customer_name"].value_raw, "DARE TO DREAM REAL ESTATE SDN BHD");
+  assert.equal(byPath["invoice.total_excl_tax"].value_raw, "410,000.00", "SubTotal is RAW (DB owns cents)");
+  assert.equal(byPath["invoice.tax_total"].value_raw, "25,560.00");
+  assert.equal(byPath["invoice.customer_registration"].value_raw, "201901111111");
+  // AB-3 boundary: none of the v5 customer keys may match the attribution patterns.
+  for (const p of Object.keys(byPath)) {
+    assert.ok(!/tin|ssm|account/.test(p), `v5 key ${p} avoids the attribution patterns`);
+  }
 });
 
 test("vendor_registration: a MISSING VendorTaxId yields no invoice.vendor_registration field", () => {

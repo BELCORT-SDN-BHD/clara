@@ -11,6 +11,8 @@ import { startControlListener, productionControlDeps } from "../lib/control.mjs"
 import { startLeaderLoop } from "../lib/leader.mjs";
 import { startMatcherLoop } from "../lib/matcher.mjs";
 import { startAutodraftLoop } from "../lib/autodraft.mjs";
+import { startLocalFactsLoop, processLocalFactsTask } from "../lib/local-facts.mjs";
+import { startRulePostLoop } from "../lib/rule-post.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
 import { workflows } from "../workflows/registry.js";
@@ -59,6 +61,9 @@ export default definePlugin(() => {
   };
   (globalThis as unknown as { __claraDocumentServices?: unknown }).__claraDocumentServices = makeDocumentServices();
   (globalThis as unknown as { __claraInvoiceFactsServices?: unknown }).__claraInvoiceFactsServices = makeInvoiceFactsServices();
+  // The MyInvois local_facts consumer reuses the document services (temp-file lifecycle +
+  // canonical download); the UBL facts parse runs in its own worker thread.
+  const localFactsServices = makeDocumentServices();
 
   // Register intake first. The HTTP shutdown gate rejects new requests immediately;
   // this stop waits for an already-streaming spool write to finish honestly.
@@ -113,6 +118,10 @@ export default definePlugin(() => {
         // references resolve through the registry `workflows` object (freeze-lint
         // enqueue-provenance law — a direct workflow-file import handed to start() fails CI).
         enqueueInvoiceFacts: (taskId: string) => start(workflows.invoiceFacts, [{ task_id: taskId }]),
+        // The MyInvois local_facts lane (Wave A2) has NO WDK workflow — a facts task is
+        // driven by processLocalFactsTask directly (claim/parse/persist). The claim gate
+        // makes this reconciler belt idempotent against the local_facts leader loop below.
+        enqueueLocalFacts: (taskId: string) => processLocalFactsTask(withRuntime, taskId, localFactsServices),
         // The reconciler re-enqueues an admitted-but-unstarted autodraft task (Wave A); the
         // reference resolves through the registry `workflows` object (freeze-lint provenance).
         enqueueAutoDraft: (taskId: string) => start(workflows.autoDraft, [{ taskId }]),
@@ -146,6 +155,21 @@ export default definePlugin(() => {
     });
     autodraft.done.then(() => fatal("autodraft loop"), (e: unknown) => fatal("autodraft loop", e));
     sup.stops.push(autodraft.stop);
+
+    // local_facts consumer (Wave A2) — an INDEPENDENT loop on its own connection under the
+    // 'local_facts' advisory lock. Claims MyInvois local_facts tasks, runs the UBL facts
+    // parse in a worker, persists via persist_invoice_facts. +1 persistent session.
+    const localFacts = startLocalFactsLoop({ withRuntime, services: localFactsServices, log: (m: string) => console.log(m) });
+    localFacts.done.then(() => fatal("local_facts loop"), (e: unknown) => fatal("local_facts loop", e));
+    sup.stops.push(localFacts.stop);
+
+    // rule-post consumer (Wave A2) — an INDEPENDENT loop on its own connection under the
+    // 'rule_post' advisory lock. Calls execute_rule_post login-direct on each entry.drafted.
+    // +1 persistent session (see the pools §4.1 budget note — Wave A2 adds two dedicated
+    // LISTEN clients; the integrator confirms the Supavisor session ceiling headroom).
+    const rulePost = startRulePostLoop({ log: (m: string) => console.log(m) });
+    rulePost.done.then(() => fatal("rule_post loop"), (e: unknown) => fatal("rule_post loop", e));
+    sup.stops.push(rulePost.stop);
 
     // DEDICATED engine heartbeat — the ONLY writer of the 'world' beat (S4-AB7b).
     const beatMs = Number(process.env.CLARA_WORLD_BEAT_MS || 10000);

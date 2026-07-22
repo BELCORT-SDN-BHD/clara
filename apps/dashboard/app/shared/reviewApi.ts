@@ -9,6 +9,7 @@
 import { rpc, runtimeBase, supabaseBase } from "./wire";
 import { toReviewQueue, toEntryDiff, toDocEntryDiff, type ReviewQueue, type EntryDiff, type DocEntryDiff } from "./reviewTypes";
 import { toSweepRun, toOpenQuestion, toCodingRule, toCodingLane, type SweepRun, type OpenQuestion, type CodingRule, type CodingLane } from "./reviewCardTypes";
+import { toRulePostRun, toAutopostRule, toNotification, type RulePostRun, type AutopostRule, type Notification } from "./reviewCardTypes";
 
 const opKey = () => crypto.randomUUID();
 
@@ -55,6 +56,30 @@ export async function getCodingLane(token: string, clientId: string, filingId: s
   return toCodingLane(row);
 }
 
+// --- Wave-A2 posted-by-rule + autopost-rule reads (human lane) -------------------
+// ASSUMED read fns — the 0015 companion pins the writers + tables but not these
+// hydrate reads (see LANE-D-NOTES). Arg names follow the house p_* convention.
+
+/** Hydrate one posted-by-rule receipt (WA2 §6.4). Assumed fn `get_rule_post_run(p_run)`. */
+export async function getRulePostRun(token: string, runId: string): Promise<RulePostRun> {
+  return toRulePostRun(await rpc("get_rule_post_run", { p_run: runId }, token));
+}
+
+/** The autopost rules in scope (WA2 §6). Assumed fn `list_autopost_rules(p_scope)`. */
+export async function listAutopostRules(token: string, scope: QueueScope): Promise<AutopostRule[]> {
+  const out = await rpc("list_autopost_rules", { p_scope: scope }, token);
+  const rows = Array.isArray(out) ? out : ((out as { rules?: unknown })?.rules ?? []);
+  return (Array.isArray(rows) ? rows : []).map(toAutopostRule);
+}
+
+/** Rule-lifecycle nudges (WA2 §6.2 / L6). Assumed fn `list_notifications(p_scope,p_kinds)`. */
+export async function listRuleNotifications(token: string, scope: QueueScope): Promise<Notification[]> {
+  const kinds = ["autopost_renew_or_retire", "autopost_rule_expiring", "autopost_rule_retired"];
+  const out = await rpc("list_notifications", { p_scope: scope, p_kinds: kinds }, token);
+  const rows = Array.isArray(out) ? out : ((out as { notifications?: unknown })?.notifications ?? []);
+  return (Array.isArray(rows) ? rows : []).map(toNotification);
+}
+
 // --- Governed writers (human lane; fresh op_key per call) ----------------------
 
 /** Batch entry point (WA-R7/WA-D5): structurally refuses is_high_stakes rows in-DB
@@ -82,6 +107,34 @@ export async function resolveOpenQuestion(token: string, questionId: string, res
 
 export async function dismissOpenQuestion(token: string, questionId: string, reason: string): Promise<void> {
   await rpc("dismiss_open_question", { p_question: questionId, p_reason: reason, p_op_key: opKey() }, token);
+}
+
+// --- Wave-A2 governed writers (human lane; fresh op_key per call) ----------------
+
+/** Acknowledge posted-by-rule receipts (WA2 §6.4). Bookkeeper+ floor; agent identity
+ *  hard-refused (CLR03). Takes an array so the ack can batch multiple receipts. */
+export async function acknowledgeRulePosts(token: string, runIds: string[]): Promise<void> {
+  await rpc("acknowledge_rule_posts", { p_run_ids: runIds, p_op_key: opKey() }, token);
+}
+
+/** Sign a proposed autopost rule → live (WA2-R8: admin+ only; re-verifies bounds sane,
+ *  account postable, one-live). Named in 0015 companion S3. */
+export async function signAutopostRule(token: string, ruleId: string): Promise<void> {
+  await rpc("sign_autopost_rule", { p_rule: ruleId, p_op_key: opKey() }, token);
+}
+
+/** Retire a live/proposed autopost rule (WA2 §6.2 lifecycle). ASSUMED fn
+ *  `retire_autopost_rule(p_rule,p_reason,p_op_key)` — the companion names only the
+ *  reconciler auto-retire on expiry; the manual retire fn is unpinned (LANE-D-NOTES). */
+export async function retireAutopostRule(token: string, ruleId: string, reason: string): Promise<void> {
+  await rpc("retire_autopost_rule", { p_rule: ruleId, p_reason: reason, p_op_key: opKey() }, token);
+}
+
+/** Human-author an autopost-rule proposal (WA2 §6.2: bookkeeper+ may propose; only
+ *  admin+ signs). Named in 0015 companion S3; args ride a jsonb proposal per the house
+ *  "new inputs ride existing jsonb params, never change arity" law (ASSUMED shape). */
+export async function proposeAutopostRule(token: string, proposal: Record<string, unknown>): Promise<void> {
+  await rpc("propose_autopost_rule", { p_proposal: proposal, p_op_key: opKey() }, token);
 }
 
 // --- Document bytes (PIN-DELTA-4; runtime signed read path) ---------------------

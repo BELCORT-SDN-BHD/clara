@@ -20,6 +20,7 @@ import { verifyCanonical } from "./storage.mjs";
 const DOCUMENT_GRACE_MS = Number(process.env.CLARA_DOCUMENT_RECONCILE_GRACE_MS || 15000);
 let warnedDocumentSelectGap = false;
 let warnedInvoiceFactsEnqueueGap = false;
+let warnedLocalFactsEnqueueGap = false;
 
 /** True iff the error is the engine's "run id unknown" signal. */
 export function isRunNotFound(err) {
@@ -30,11 +31,14 @@ function documentOp(prefix, taskId) {
   return `${prefix}:${taskId}`;
 }
 
-/** The re-enqueue workflow for a task's lane. 'invoice_facts' rides its own
- *  workflow (invoiceFacts_v1); every other document lane rides documentIngest. Returns
- *  the injected enqueue fn (or undefined when the supervisor has not wired that lane). */
+/** The re-enqueue driver for a task's lane. 'invoice_facts' rides its own workflow
+ *  (invoiceFacts_v1); 'local_facts' rides the non-frozen MyInvois consumer (Wave A2 — no
+ *  WDK workflow); every other document lane rides documentIngest. Returns the injected
+ *  enqueue fn (or undefined when the supervisor has not wired that lane). */
 function enqueueForLane(deps, lane) {
-  return lane === "invoice_facts" ? deps.enqueueInvoiceFacts : deps.enqueueDocumentIngest;
+  if (lane === "invoice_facts") return deps.enqueueInvoiceFacts;
+  if (lane === "local_facts") return deps.enqueueLocalFacts;
+  return deps.enqueueDocumentIngest;
 }
 
 /** DB-first intake/reservation reclamation. Sidecars remain a fast resume index,
@@ -209,12 +213,16 @@ export async function reconcileDocumentTasks(client, deps) {
           continue;
         }
       }
-      // Lane-aware dispatch: never route an invoice_facts task through documentIngest.
+      // Lane-aware dispatch: never route a facts task through documentIngest.
       const enqueue = enqueueForLane(deps, task.lane);
       if (typeof enqueue !== "function") {
         if (task.lane === "invoice_facts" && !warnedInvoiceFactsEnqueueGap) {
           warnedInvoiceFactsEnqueueGap = true;
           log("[reconcile] invoice_facts re-enqueue skipped: deps.enqueueInvoiceFacts not wired — a facts task is NEVER driven through documentIngest (supervisor must provide enqueueInvoiceFacts)");
+        }
+        if (task.lane === "local_facts" && !warnedLocalFactsEnqueueGap) {
+          warnedLocalFactsEnqueueGap = true;
+          log("[reconcile] local_facts re-enqueue skipped: deps.enqueueLocalFacts not wired — a MyInvois facts task is NEVER driven through documentIngest (supervisor must provide enqueueLocalFacts)");
         }
         continue;
       }
@@ -229,6 +237,10 @@ export async function reconcileDocumentTasks(client, deps) {
     }
 
     if (task.status === "running") {
+      // local_facts has NO WDK run to probe (its run id is a synthetic token, not a
+      // workflow run); its own leader loop owns stranded-running recovery (requeue past a
+      // grace). Never probe getRun here — that would error every cycle.
+      if (task.lane === "local_facts") continue;
       let state;
       try {
         state = await documentRunState(deps.getRun, task.runId);

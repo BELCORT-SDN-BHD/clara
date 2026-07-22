@@ -17,6 +17,7 @@
     "@workflow/world-postgres": "4.3.0",
     "ai": "7.0.31",
     "express": "5.2.1",
+    "fast-xml-parser": "4.5.7",
     "jose": "6.2.3",
     "nitro": "3.0.260610-beta",
     "pg": "8.20.0",

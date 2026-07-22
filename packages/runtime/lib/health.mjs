@@ -16,6 +16,8 @@ import { scannerReachable } from "./scan.mjs";
 import { listTaskMetas, spoolHealth } from "./spool.mjs";
 import { matcherHealth } from "./matcher.mjs";
 import { autodraftHealth } from "./autodraft.mjs";
+import { localFactsHealth } from "./local-facts.mjs";
+import { rulePostHealth } from "./rule-post.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -150,6 +152,30 @@ export async function checkReadiness() {
             if (aLag > 1000) warnings.push(`autodraft lag ${aLag}`);
           } catch (err) {
             warnings.push(`autodraft_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
+          }
+
+          // local_facts consumer health -> warnings only (Wave A2): a stalled MyInvois
+          // facts consumer must never take chat traffic down (the matcher/autodraft law).
+          try {
+            const lh = await localFactsHealth(c);
+            checks.localFacts = { ok: true, ...lh };
+            const queueWarnMs = Number(process.env.CLARA_DOCUMENT_QUEUE_WARN_MS || 60000);
+            if (Number(lh.oldestQueuedMs ?? 0) > queueWarnMs) warnings.push(`local_facts oldest queued ${Math.round(Number(lh.oldestQueuedMs))}ms`);
+          } catch (err) {
+            warnings.push(`local_facts_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
+          }
+
+          // rule-post consumer health -> warnings only (Wave A2): a stalled rule-post
+          // consumer must never take chat traffic down.
+          try {
+            const rph = await rulePostHealth(c);
+            checks.rulePost = { ok: true, ...rph };
+            const rDead = Number(rph.pendingDeadLetters ?? rph.pending_dead_letters ?? 0);
+            const rLag = Number(rph.lag ?? 0);
+            if (rDead > 0) warnings.push(`${rDead} rule_post dead-letter(s)`);
+            if (rLag > 1000) warnings.push(`rule_post lag ${rLag}`);
+          } catch (err) {
+            warnings.push(`rule_post_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }
         } else {
           checks.world = { enabled: false };

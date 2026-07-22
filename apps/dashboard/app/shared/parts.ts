@@ -72,7 +72,14 @@ export type KbRuleProposalPart = { type: "kb_rule_proposal"; rule_id: string; qu
  *  dismiss are human-only bookkeeper+ acts. */
 export type OpenQuestionPart = { type: "open_question"; question_id: string; client_id: string };
 
-/** The canonical transcript wire union: 9 existing members + 5 Wave-A members. */
+// --- Wave-A2 new part type (contract §6.4/§7; migration 0015 S4) ----------------
+/** A posted-by-rule receipt (WA2-R7 / §6.4): identifier-only; the card hydrates the
+ *  rule_post_runs receipt (the batch of entries a signed autopost rule posted) via its
+ *  pinned read fn on mount, and offers the bookkeeper+ acknowledgement (an ack is NOT
+ *  an approval — every rule-post is reversible). Mirrors `SweepReceiptPart`. */
+export type RulePostReceiptPart = { type: "rule_post_receipt"; run_id: string };
+
+/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 members. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
@@ -88,4 +95,6 @@ export type ClaraPart =
   | DiffPart
   | SweepReceiptPart
   | KbRuleProposalPart
-  | OpenQuestionPart;
+  | OpenQuestionPart
+  // --- Wave-A2 addition ---
+  | RulePostReceiptPart;

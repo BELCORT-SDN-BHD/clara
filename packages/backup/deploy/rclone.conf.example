@@ -1,0 +1,19 @@
+# clara-backup — rclone remote for Cloudflare R2 (S3-compatible). Copy to a real
+# rclone.conf, fill the placeholders with a SCOPED R2 API token (Object Read & Write on
+# the ONE DR bucket), and point RCLONE_CONFIG at it (a Fly secret file in production).
+#
+# The token NEVER goes on an rclone argv — it lives here (chmod 600) or in
+# RCLONE_CONFIG_R2_* env vars. Consider a SECOND, read-only token for the restore-verify
+# / freshness-monitor path (least privilege). R2 endpoint = the ACCOUNT S3 endpoint;
+# region MUST be `auto`. See docs/ops/DR.md §9.
+
+[r2]
+type = s3
+provider = Cloudflare
+env_auth = false
+access_key_id = YOUR_R2_ACCESS_KEY_ID
+secret_access_key = YOUR_R2_SECRET_ACCESS_KEY
+region = auto
+endpoint = https://YOUR_CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com
+# No public URL; DR objects are private.
+acl = private

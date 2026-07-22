@@ -18,23 +18,17 @@ import {
 } from "./spool.mjs";
 import { downloadCanonical, putCanonical, StorageError, verifyCanonical } from "./storage.mjs";
 import { parseStructured } from "./structured.mjs";
+import { MYINVOIS_ENGINE_SNAPSHOT } from "./myinvois.mjs";
 import { processDocumentTaskBehavior } from "../workflows/documentIngest.behavior.mjs";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const CAPABILITY_TTL_MS = 15 * 60_000;
 const activeIntakes = new Set();
-/** @type {(message: string) => void} */
-const NOOP_LOG = () => {};
+const NOOP_LOG = /** @type {(message: string) => void} */ (() => {});
 
 const STRUCTURED_ENGINE_SNAPSHOT = Object.freeze({
   engineId: "clara-structured:v1",
   engineConfig: { provider: "clara", parser: "values-only", version: 1 },
-  versionN: 1,
-});
-
-const STORE_ONLY_ENGINE_SNAPSHOT = Object.freeze({
-  engineId: "clara-store-only:v1",
-  engineConfig: { provider: "clara", parser: "none", version: 1 },
   versionN: 1,
 });
 
@@ -154,7 +148,7 @@ function laneSnapshot(format) {
   if (["xlsx", "docx", "csv", "tsv"].includes(format)) {
     return { lane: "structured_parse", ...STRUCTURED_ENGINE_SNAPSHOT };
   }
-  if (format === "xml") return { lane: "none", ...STORE_ONLY_ENGINE_SNAPSHOT };
+  if (format === "xml") return { lane: "structured_parse", ...MYINVOIS_ENGINE_SNAPSHOT }; // facts pass = separate local_facts task
   return { lane: "ocr", ...AZURE_ENGINE_SNAPSHOT };
 }
 
@@ -416,8 +410,7 @@ export async function finalizeDocumentIntake(options) {
           callWriter(client, "select clara.fail_document_intake($1,$2,$3) as receipt", [intakeId, code, opKey("doc-intake-fail")]),
         );
       } catch {
-        // The original failure remains authoritative; terminal/replayed intakes may
-        // legitimately refuse a second failure transition.
+        // The original failure stays authoritative; a terminal/replayed intake may refuse a second fail transition.
       }
       if (!canonicalReached || code === "malware_detected" || code === "quarantined" || code === "bad_type") {
         await removeIntakeSpool(intakeId);
@@ -429,9 +422,7 @@ export async function finalizeDocumentIntake(options) {
   }
 }
 
-/** Resume durable post-upload intakes after a process crash. The sidecar carries
- * only the capability HASH, which is exactly what the runtime-only SQL writers
- * accept; the plaintext browser token is neither retained nor reconstructed. */
+/** Resume durable post-upload intakes after a crash. The sidecar carries only the capability HASH (the plaintext token is gone). */
 export async function recoverPendingDocumentIntakes({ withRuntime, enqueue, log = NOOP_LOG }) {
   const out = { recovered: 0, deferred: 0, expired: 0 };
   const rows = (await listIntakeMetas()).filter((row) => row && !row.corrupt && row.intakeId);

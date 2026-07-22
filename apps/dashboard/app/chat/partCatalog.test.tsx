@@ -76,3 +76,13 @@ test("wave-a part types are registered in the catalog", () => {
     assert.ok(RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]), `${t} must be registered`);
   }
 });
+
+// Belt-and-braces: the Wave-A2 rule_post_receipt part (the 15th member) is registered
+// (union + catalog + render branch land together — the compile-time guard in
+// partCatalog.ts forces the union member and this key to arrive as a pair).
+test("wave-a2 rule_post_receipt is registered and renders non-empty", () => {
+  assert.ok(RENDER_BRANCH_TYPES.includes("rule_post_receipt" as (typeof RENDER_BRANCH_TYPES)[number]), "rule_post_receipt must be registered");
+  const html = render([{ type: "rule_post_receipt", run_id: "run-9999" }]);
+  assert.ok(html.includes("Posted by rule"), "the id-only card state must render");
+  assert.ok(!html.includes(FALLBACK_UNSUPPORTED_PREFIX), "rule_post_receipt must not hit the unsupported fallback");
+});

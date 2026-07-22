@@ -26,7 +26,7 @@
 #                                      else created here; locked against deletion/retag after
 #                                      first use; postings only through governed writers.
 #
-# TWO SYSTEM-ROLE AUGMENTATIONS (require explicit owner sign-off — S6-D2 / C-17):
+# THREE SYSTEM-ROLE AUGMENTATIONS (require explicit owner sign-off — S6-D2 / C-17 / Wave-A2 §4.1):
 #   400-000 TRADE CREDITORS  — a postable payable-class control account. In RPR's export it exists
 #                              ONLY as a GL reconciliation-footer plug (never posted to directly;
 #                              every observed supplier credit went straight to 310-000 CASH AT BANK).
@@ -40,9 +40,11 @@
 #                              Typed 'expense' (the rounding leg posts either side; matches the house
 #                              seed's rounding-account convention).
 #
-# DELIBERATE EXCLUSION: 300-000 TRADE DEBTORS — the AR-side control-footer plug (twin of 400-000).
-#   Slice 6 has no receivable/sales flow, so it is NOT promoted to a postable account. The contract
-#   §9 enumeration names only 400-000. Add it in a later slice if an AR flow needs it.
+#   300-000 TRADE DEBTORS    — the AR-side control-footer plug (twin of 400-000). PROMOTED to a
+#                              postable RECEIVABLE-class control account for Wave A2 (the sales/AR
+#                              wave, contract §4.1): RPR's GL already reconciles through this code.
+#                              Gate-A eval: 300-000 debit total == Σ sales invoices == 500-000 revenue
+#                              credit total (RM 1,973,332.91). SST-payable is NOT added — RPR shows none.
 #
 account_code,account_name,account_type,account_class,special_acc_type,origin
 100-000,SHARE CAPITAL,equity,,,tb
@@ -71,4 +73,5 @@ account_code,account_name,account_type,account_class,special_acc_type,origin
 420-001,AMOUNT OWING TO DIRECTOR - TAN LAKE WEI,liability,,,gl
 420-002,AMOUNT OWING TO IWIFI GROUP SDN BHD,liability,,,gl
 400-000,TRADE CREDITORS,liability,payable,,system_role
+300-000,TRADE DEBTORS,asset,receivable,,system_role
 999-R00,ROUNDING,expense,,rounding,system_role

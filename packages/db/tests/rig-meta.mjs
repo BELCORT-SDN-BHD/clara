@@ -59,6 +59,17 @@ const WAVE_A_RUNTIME_FNS = [
   "list_autodraft_candidates", "list_document_autodraft_candidates", "get_document_for_human_read",
 ];
 const WAVE_A_WAKE_INTERACTIVE_FNS = ["wake_open_question"];
+// [WAVE-A2 §6/§7] posting-tier standing-rules human surfaces (PostgREST rpc, coarse
+// grant to clara_authenticated; role floors are body-enforced): sign (admin+),
+// propose/retire/acknowledge (bookkeeper+), and the rule/notification/receipt reads.
+const WAVE_A2_HUMAN_FNS = [
+  "sign_autopost_rule", "propose_autopost_rule", "retire_autopost_rule",
+  "acknowledge_rule_posts", "get_rule_post_run", "list_autopost_rules", "list_notifications",
+];
+// [WAVE-A2 §6.2] the expiry/nudge sweep — runtime lane only (execute_rule_post is granted
+// LOGIN-DIRECT to clara_runtime_login, like record_rule_resolution, so it is deliberately
+// NOT in any of the five matrix roles).
+const WAVE_A2_RUNTIME_FNS = ["reconcile_autopost_rules"];
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -70,6 +81,7 @@ export const ALLOWED = {
     "place_legal_hold", "release_legal_hold",
     ...S6_HUMAN_FNS, // [S6 §9/C-11] draft-lifecycle + coding-task + client-pinned reads
     ...WAVE_A_HUMAN_FNS, // [WAVE-A §2] daily-loop governance writers + typed reads
+    ...WAVE_A2_HUMAN_FNS, // [WAVE-A2 §6/§7] standing-rules writers + rule/notification/receipt reads
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -91,6 +103,7 @@ export const ALLOWED = {
     "refund_ingest_reservation", "record_attribution_attempt",
     ...S6_RUNTIME_FNS, // [S6 §9/C-11] invoice-facts lane writers + coding-attempt recovery read
     ...WAVE_A_RUNTIME_FNS, // [WAVE-A §2] autodraft admission/settle + sweep-run + candidate reads
+    ...WAVE_A2_RUNTIME_FNS, // [WAVE-A2 §6.2] the autopost expiry/nudge reconcile sweep
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs

@@ -14,6 +14,7 @@ import { DiffCard } from "../shared/cards/DiffCard";
 import { SweepReceiptCard } from "../shared/cards/SweepReceiptCard";
 import { KbRuleProposalCard } from "../shared/cards/KbRuleProposalCard";
 import { OpenQuestionCard } from "../shared/cards/OpenQuestionCard";
+import { RulePostReceiptCard } from "../shared/cards/RulePostReceiptCard";
 import styles from "./chat.module.css";
 
 /** Matches CLARIFY_FRAMING in the runtime (chatTurn.prompt.ts:31) — used only for
@@ -227,6 +228,11 @@ export function TranscriptParts({
         }
         if (p.type === "open_question") {
           return <OpenQuestionCard key={`question:${p.question_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        // Wave-A2 (contract §6.4/§7): the posted-by-rule receipt; identifier-only, the
+        // card hydrates the rule_post_runs receipt on mount (like sweep_receipt).
+        if (p.type === "rule_post_receipt") {
+          return <RulePostReceiptCard key={`rulepost:${p.run_id}:${i}`} token={token ?? null} part={p} />;
         }
         // tool_result / tool_error resolve their call's chip — render nothing (the
         // one place this is declared is partCatalog's STATUS_RESOLVER_TYPES).

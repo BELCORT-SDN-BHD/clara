@@ -31,7 +31,9 @@ async function finalizeFixture(owner, firm, sha = rig.sha(randomUUID())) {
   const fixed = await rig.rootQuery("select op_key from clara.document_intakes where id=$1", [intake.intake_id]);
   const finalized = await rig.asRuntime((client) => client.query(
     "select clara.finalize_document_intake($1,$2,$3,'{}'::jsonb,1,'none',null,null,$4) as receipt",
-    [intake.intake_id, intake.tokenHash, "attachment-store:v1", fixed.rows[0].op_key],
+    // lane='none' (store-only) now requires a clara-% engine under ck_processing_task_lane_engine_0015
+    // (contract §3.4: local lanes ⟹ clara-%). The old 'attachment-store:v1' is a non-clara namespace.
+    [intake.intake_id, intake.tokenHash, "clara-store:v1", fixed.rows[0].op_key],
   ));
   return {
     type: "attachment",

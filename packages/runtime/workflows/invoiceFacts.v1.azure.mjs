@@ -31,8 +31,14 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
  *  recognizable label. keyValuePairs is a FREE add-on on prebuilt-invoice at
  *  api-version 2024-11-30 (Azure add-on-capabilities version table — only Font/
  *  Formula/HighRes/QueryFields are billable), so it adds no per-page cost. Bumped so
- *  KV-enabled extractions are distinguishable from v3. */
-export const NORMALIZATION_VERSION = "clara-invoice-norm:v4";
+ *  KV-enabled extractions are distinguishable from v3.
+ *  v5 (Wave A2): the AR facts vocabulary — CustomerName -> invoice.customer_name,
+ *  SubTotal -> invoice.total_excl_tax, TotalTax -> invoice.tax_total (FIELD_MAP), and
+ *  CustomerTaxId -> invoice.customer_registration (a looksLikeRegistration-gated emit,
+ *  mirroring VendorTaxId). None of the new keys match %tin%/%ssm%/%account% — the AB-3
+ *  naming boundary (§3.2); customer_taxid stays UBL-only (never emitted here). Bumped so
+ *  v5 extractions fold the customer-field mapping into the raw hash. */
+export const NORMALIZATION_VERSION = "clara-invoice-norm:v5";
 
 export class DocumentEngineError extends Error {
   constructor(code, message) {
@@ -174,6 +180,12 @@ const FIELD_MAP = {
   InvoiceId: "invoice.invoice_id",
   InvoiceDate: "invoice.invoice_date",
   VendorName: "invoice.vendor_name",
+  // Wave A2 (v5): the AR sales-invoice fields. CustomerName gives the buyer identity;
+  // SubTotal/TotalTax carry the net + tax split for the SST 3-leg tie. RAW value_raw
+  // (the DB owns cents). Names avoid %tin%/%ssm%/%account% (the AB-3 boundary, §3.2).
+  CustomerName: "invoice.customer_name",
+  SubTotal: "invoice.total_excl_tax",
+  TotalTax: "invoice.tax_total",
 };
 
 // DI field names that carry a deposit / prepayment (emitted as invoice.deposit when the
@@ -350,6 +362,20 @@ export function normalizeAzureInvoice(payload) {
     if (looksLikeRegistration(regRaw)) {
       const region = firstRegion(vtax);
       out.push({ field_path: "invoice.vendor_registration", value_raw: regRaw, page: region.page, polygon: region.polygon, confidence: vtax.confidence == null ? null : Number(vtax.confidence) });
+    }
+  }
+
+  // Customer registration (Wave A2 / §3.2): the prebuilt-invoice `CustomerTaxId` field
+  // carries the BUYER's registration / tax id. Emit it as the non-monetary
+  // invoice.customer_registration fact (gated by looksLikeRegistration, exactly like
+  // VendorTaxId) so the sales-direction coding lane can resolve a REGISTERED customer by
+  // registration. `customer_registration` avoids %tin%/%ssm%/%account% (AB-3 boundary).
+  const ctax = fields.CustomerTaxId;
+  if (ctax) {
+    const regRaw = String(ctax.content ?? ctax.valueString ?? "").trim();
+    if (looksLikeRegistration(regRaw)) {
+      const region = firstRegion(ctax);
+      out.push({ field_path: "invoice.customer_registration", value_raw: regRaw, page: region.page, polygon: region.polygon, confidence: ctax.confidence == null ? null : Number(ctax.confidence) });
     }
   }
 
