@@ -88,15 +88,24 @@ export async function reconcileSstWatches(client, opts = {}) {
   try {
     const r = (await client.query("select clara.evaluate_sst_watches_all($1) as r", [`${opKey}:receipt`])).rows[0]?.r ?? {};
     out.sstRunId = r?.run_id ?? null;
-    // The receipt's own counts are authoritative for what it recorded; the per-client pass
+    // The receipt's own counts are authoritative — it re-evaluates every client, so its
+    // clients_failed already includes any persistent per-client failure (using it REPLACES,
+    // never adds to, the per-client tally: adding would double-count). The per-client pass
     // owns `changed` (the converged receipt pass sees nothing left to change by design).
     out.sstExamined = Number(r?.clients_examined ?? out.sstExamined);
-    out.sstFailed += Number(r?.clients_failed ?? 0);
+    out.sstFailed = Number(r?.clients_failed ?? out.sstFailed);
   } catch (err) {
     out.sstOk = false;
     log(`[reconcile] evaluate_sst_watches_all error: ${err?.message ?? err}`);
   }
-  if (out.sstFailed > 0) out.sstOk = false;
+  // CADENCE LAW: sstOk gates the leader's daily timer (lastSstRun advances only on sstOk),
+  // so it goes false ONLY for a WHOLE-BELT failure (client discovery threw, or the receipt
+  // call threw — the belt genuinely did not run / did not record). A PER-CLIENT failure must
+  // NOT gate it: every other client was evaluated and the receipt was written, and pinning
+  // sstOk false on one permanently-poisoned client would re-run the belt on EVERY leader
+  // cycle (~2s / every nudge) instead of daily — unbounded compliance_eval_runs growth +
+  // sustained evaluator load. The poisoned client stays VISIBLE: logged per run here, and
+  // carried in the daily receipt's clients_failed / error_note (a21 battery).
 
   log(`[reconcile] sst watches examined=${out.sstExamined} changed=${out.sstChanged} failed=${out.sstFailed}`);
   return out;

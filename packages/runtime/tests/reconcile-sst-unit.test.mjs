@@ -3,10 +3,12 @@
 // shape (the firm-wide-stall fix): ONE evaluate_sst_watch statement PER active client (never a
 // single bulk evaluate_sst_watches_all across all clients), the receipt written ONCE at the
 // END via evaluate_sst_watches_all (so compliance_eval_runs / stale_evaluator stays fed),
-// per-client failure counted WITHOUT throwing, sstOk:false on any client failure, error
-// isolation ({sstOk:false} → the leader retries next cycle; the sweep never throws), the
-// runReconcilerSweep flag-gating, and the daily-cadence guard INCLUDING the junk-env fallback
-// (a NaN interval must never silently disable the belt).
+// per-client failure counted WITHOUT throwing, the CADENCE LAW (sstOk goes false ONLY for a
+// whole-belt failure — discovery/receipt threw; a per-client failure keeps sstOk true so one
+// permanently-poisoned client cannot pin the daily belt into an every-cycle re-run), error
+// isolation (the sweep never throws), the runReconcilerSweep flag-gating, and the
+// daily-cadence guard INCLUDING the junk-env fallback (a NaN interval must never silently
+// disable the belt).
 
 // The junk-env fallback: set a garbage cadence BEFORE leader.mjs loads (a dynamic import
 // after, so the module reads this env). It must fall back to a FINITE 24h, never NaN.
@@ -90,31 +92,34 @@ test("the sweep issues ONE evaluate_sst_watch PER client (never a bulk all-clien
   assert.ok(logs.some((m) => /\[reconcile\] sst watches examined=3 changed=1 failed=0/.test(m)));
 });
 
-test("a per-client failure is COUNTED without throwing, the pass continues, and sstOk goes false", async () => {
+test("a per-client failure is COUNTED without throwing, the pass continues, and sstOk STAYS true (cadence law)", async () => {
   const ids = ["ok1", "boom", "ok2"];
   const client = recordingClient({
     ids,
     // the DB evaluator is exception-isolated: it returns {status:'failed'} rather than raising
     perClient: (id) => (id === "boom" ? { status: "failed", error: "poisoned client" } : { status: "ok", changed: false }),
+    // the receipt pass re-evaluates everyone, so a persistent poison shows in ITS count too —
+    // the sweep takes the receipt's clients_failed as authoritative (never double-counts)
+    onReceipt: () => ({ run_id: "r", clients_examined: 3, clients_changed: 0, clients_failed: 1 }),
   });
   const logs = [];
   const out = await reconcileSstWatches(client, { log: (m) => logs.push(m) });
   const perClientCalls = client.queries.filter((q) => /evaluate_sst_watch\(/.test(q.sql) && !/evaluate_sst_watches_all/.test(q.sql));
   assert.equal(perClientCalls.length, 3, "every client is still evaluated — one poison never abandons the rest");
   assert.equal(out.sstExamined, 3);
-  assert.equal(out.sstFailed, 1);
-  assert.equal(out.sstOk, false, "any client failure makes the leader retry next cycle");
-  assert.ok(logs.some((m) => /sst watch client=boom failed: poisoned client/.test(m)));
+  assert.equal(out.sstFailed, 1, "the receipt's clients_failed is authoritative — no double count");
+  assert.equal(out.sstOk, true, "a per-client failure must NOT gate the daily cadence — one poisoned client would otherwise re-run the belt every leader cycle");
+  assert.ok(logs.some((m) => /sst watch client=boom failed: poisoned client/.test(m)), "the poisoned client stays visible in the log");
 });
 
-test("a THROWN per-client error (infra fault) is isolated: counted, the pass continues, sstOk:false, never propagates", async () => {
+test("a THROWN per-client error (infra fault) is isolated: counted, the pass continues, sstOk stays true, never propagates", async () => {
   const ids = ["a", "b"];
   const client = {
     queries: [],
     query(sql, params) {
       this.queries.push({ sql: String(sql).trim(), params });
       if (/from clara\.clients/.test(sql)) return Promise.resolve({ rows: ids.map((id) => ({ id })) });
-      if (/evaluate_sst_watches_all/.test(sql)) return Promise.resolve({ rows: [{ r: { run_id: "r", clients_examined: 2, clients_changed: 0, clients_failed: 0 } }] });
+      if (/evaluate_sst_watches_all/.test(sql)) return Promise.resolve({ rows: [{ r: { run_id: "r", clients_examined: 2, clients_changed: 0, clients_failed: 1 } }] });
       if (/evaluate_sst_watch/.test(sql)) {
         if (params[0] === "a") return Promise.reject(new Error("connection reset"));
         return Promise.resolve({ rows: [{ r: { status: "ok", changed: false } }] });
@@ -125,7 +130,7 @@ test("a THROWN per-client error (infra fault) is isolated: counted, the pass con
   const out = await reconcileSstWatches(client, { log: () => {} });
   assert.equal(out.sstExamined, 2, "both clients examined — the throw did not abort the loop");
   assert.equal(out.sstFailed, 1);
-  assert.equal(out.sstOk, false);
+  assert.equal(out.sstOk, true, "per-client infra faults surface via sstFailed + the receipt, not the cadence gate");
 });
 
 test("a thrown RECEIPT-call error is isolated: sstOk:false, never propagates", async () => {
