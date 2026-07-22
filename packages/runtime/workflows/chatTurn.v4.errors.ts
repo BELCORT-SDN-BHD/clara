@@ -58,6 +58,7 @@ const MESSAGES = {
   CLR23: "The counterparty could not be resolved as proposed.",
   CLR24: "That coding task cannot make this transition.",
   CLR25: "A newer machine-corroborated total contradicts this draft's evidence; re-draft against the current facts.",
+  CLR30: "The document's direction (sales vs purchase) could not be resolved from its facts.",
 };
 
 const CLR21_REASON_MESSAGES: Record<Clr21Reason, string> = {

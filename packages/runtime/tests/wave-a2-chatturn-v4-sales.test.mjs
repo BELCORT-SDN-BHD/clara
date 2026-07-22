@@ -104,4 +104,7 @@ test("v4 error map speaks the 0015 sales reason tokens", () => {
   assert.match(dir.message, /direction/i);
   const cp = refusalFromDbError({ code: "CLR23" });
   assert.match(cp.message, /counterparty/i, "CLR23 is kind-neutral in v4");
+  const clr30 = refusalFromDbError({ code: "CLR30" });
+  assert.equal(clr30.code, "CLR30", "a raw CLR30 maps to a typed refusal, not the generic internal");
+  assert.match(clr30.message, /direction/i);
 });

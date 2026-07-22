@@ -86,7 +86,7 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v4.errors.ts": {
-      "sha256": "62f1dc5226fbbe60d909568169e928d25352a953c33cb0ea6d97134df09b2797",
+      "sha256": "5430a356e5d5454d2328ca14cc199ef46ae8a4757f252cdb7726d594163d5e4d",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v4.impl.ts": {
@@ -98,7 +98,7 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v4.prompt.ts": {
-      "sha256": "72077d247617bcd9c9e70d7eb95890a77cee7c02768be442a2fbd8ca4dc7049c",
+      "sha256": "fd06a9382ffbe8a40125f1e648daf0c39373f143c1de051eb778303cca6b478e",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v4.tools.ts": {
