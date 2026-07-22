@@ -70,16 +70,27 @@ test("P1 the six compliance tables are RLS + FORCE RLS; the append-only three ca
     assert.ok(f, `clara.${tbl} exists`);
     assert.ok(f.rls && f.force, `clara.${tbl} is RLS + FORCE RLS (per-firm like siblings)`);
   }
+  // INTEGRATION (CLASS T): append-only-at-the-grant-level means no LANE role
+  // (authenticated/agent/wake/runtime) holds a write grant. The table OWNER is
+  // clara_fn_owner (the 0011/0015 sibling idiom — audit_log/domain_events are
+  // identical): owner privileges are implicit Postgres ownership, carried by the
+  // DEFINER writers, and excluded from this probe.
   for (const tbl of ["sst_future_attestations", "compliance_watch_events", "compliance_eval_runs"]) {
     const g = await rootQuery(
       `select count(*)::int as n from pg_class c join pg_namespace n on n.oid=c.relnamespace
          cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
          join pg_roles r on r.oid=a.grantee
         where n.nspname='clara' and c.relname=$1 and r.rolname like 'clara_%'
+          and r.rolname <> 'clara_fn_owner'
           and a.privilege_type in ('UPDATE','DELETE','TRUNCATE')`,
       [tbl],
     );
-    assert.equal(g.rows[0].n, 0, `clara.${tbl} is append-only at the grant level (no app-role UPDATE/DELETE)`);
+    assert.equal(g.rows[0].n, 0, `clara.${tbl} is append-only at the grant level (no lane-role UPDATE/DELETE)`);
+    const owner = await rootQuery(
+      "select r.rolname from pg_class c join pg_roles r on r.oid=c.relowner join pg_namespace n on n.oid=c.relnamespace where n.nspname='clara' and c.relname=$1",
+      [tbl],
+    );
+    assert.equal(owner.rows[0].rolname, "clara_fn_owner", `clara.${tbl} is clara_fn_owner-owned (the DEFINER-writer idiom)`);
   }
 });
 
@@ -93,15 +104,19 @@ test("P1 sst_threshold_schedule is seeded G + I at 50,000,000¢ effective 2018-0
     assert.equal(row.effective_to, null, `group ${g} seed row is open-ended`);
     assert.ok((row.source_note ?? "").length > 0, `group ${g} seed cites its source (source_note)`);
   }
-  // No app-role write grant on the table (system-maintained, migration-shipped).
+  // No LANE-role write grant on the table (system-maintained, migration-shipped).
+  // INTEGRATION (CLASS T): the table owner clara_fn_owner is excluded — owner
+  // privileges are implicit Postgres ownership (the sibling idiom); the firm-lane
+  // prosrc probe below proves no GRANTED fn writes it either.
   const g = await rootQuery(
     `select count(*)::int as n from pg_class c join pg_namespace n on n.oid=c.relnamespace
        cross join lateral aclexplode(coalesce(c.relacl, acldefault('r', c.relowner))) a
        join pg_roles r on r.oid=a.grantee
       where n.nspname='clara' and c.relname='sst_threshold_schedule' and r.rolname like 'clara_%'
+        and r.rolname <> 'clara_fn_owner'
         and a.privilege_type in ('INSERT','UPDATE','DELETE')`,
   );
-  assert.equal(g.rows[0].n, 0, "no app role can write sst_threshold_schedule directly");
+  assert.equal(g.rows[0].n, 0, "no lane role can write sst_threshold_schedule directly");
   // No GRANTED clara fn writes it (grep-assert over prosrc of granted fns).
   const writers = await rootQuery(
     `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
@@ -317,12 +332,25 @@ test("§2 COVERAGE: an opening-balance entry is EXCLUDED from observed turnover 
   // a flagged DRAFT (entry INSERT is unguarded; the rig-txn precedent) binding a
   // REAL audited resolution, then approves it through the audited approve_entry.
   const res = await freshResolution(users.alice, client);
+  // INTEGRATION (CLASS T): the balance backstop is a DEFERRED constraint trigger —
+  // it fires at COMMIT of the entry-insert transaction, so a lines-less entry in
+  // its own autocommit statement dies CLR07 before the lines ever land. The raw
+  // fixture must write entry + lines in ONE statement (one transaction).
+  // last_human_editor mirrors the audited human draft path — an opening-balance
+  // entry is CATEGORICALLY high-stakes (is_high_stakes) and an editor-less draft
+  // reads as agent-made, demanding an attestation at approve (CLR05).
   const entryId = (await rootQuery(
-    `insert into clara.journal_entries (client_id, posting_date, memo, origin, status, maker_actor, resolution_id, is_opening_balance)
-     values ($1, '2025-09-15', 'opening balance load', 'manual', 'draft', $2, $3, true) returning id`,
-    [client, users.alice, res],
+    `with e as (
+       insert into clara.journal_entries (client_id, posting_date, memo, origin, status, maker_actor, last_human_editor, resolution_id, is_opening_balance)
+       values ($1, '2025-09-15', 'opening balance load', 'manual', 'draft', $2, $2, $3, true) returning id
+     ), l as (
+       insert into clara.journal_lines (entry_id, line_no, account_code, debit_cents, credit_cents)
+       select e.id, x.line_no, x.code, x.d, x.c from e
+         cross join (values (1, $4::text, 50000::bigint, 0::bigint), (2, $5::text, 0::bigint, 50000::bigint)) as x(line_no, code, d, c)
+       returning entry_id
+     ) select id from e`,
+    [client, users.alice, res, CASH, INC],
   )).rows[0].id;
-  await rootQuery("insert into clara.journal_lines (entry_id, line_no, account_code, debit_cents, credit_cents) values ($1,1,$2,50000,0), ($1,2,$3,0,50000)", [entryId, CASH, INC]);
   const tok = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [entryId])).rows[0].revision_token;
   await approveEntry(users.bob, { entry: entryId, expectedRevision: tok, opKey: opk("oba") });
   const flag = (await rootQuery("select is_opening_balance, status from clara.journal_entries where id=$1", [entryId])).rows[0];

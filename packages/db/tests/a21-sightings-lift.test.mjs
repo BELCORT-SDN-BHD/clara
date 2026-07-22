@@ -44,7 +44,7 @@ function skipHere(t) { return skip16(t, has16, "0016 not applied — credit-sigh
 /** A customer counterparty born through an approved sales entry (Dr REC / Cr REV).
  *  NOTE: the birth approval itself records ONE credit sighting — floor cells count
  *  from 1, not 0. Returns { cp, firstEntry }. */
-async function makeCustomer(sub, { client, name }) {
+async function makeCustomer(sub, { client, name, date = undefined }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 900.00" });
   const d = await draftEntryV3(sub, {
@@ -56,6 +56,9 @@ async function makeCustomer(sub, { client, name }) {
     ],
     vendor: { new: { name }, kind: "customer" },
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)], opKey: opk("cust"),
+    // The OCR span floor measures POSTING_DATE (adjudication) — span-sensitive
+    // cells must control the birth date too, not just the top-up sightings.
+    ...(date ? { postingDate: date } : {}),
   });
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("custa") });
   const norm = name.toLowerCase().replace(/[^a-z0-9]/g, "");
@@ -76,7 +79,10 @@ async function salesSighting(sub, { client, cp, date = "2026-06-10", cents = 900
       { account_code: REC, debit_cents: cents, credit_cents: 0, description: "sales-ar" },
       { account_code: REV, debit_cents: 0, credit_cents: cents, description: "sales-rev" },
     ],
-    vendor: { existing_id: cp },
+    // INTEGRATION (CLASS T): the as-built 0015 counterparty resolution defaults
+    // the existing_id lane to kind='vendor' — an existing CUSTOMER must state
+    // its kind or the lookup refuses CLR23 (pre-0016 live behavior, un-pinned).
+    vendor: { existing_id: cp, kind: "customer" },
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
     postingDate: date, opKey: opk("ss"),
   });
@@ -166,7 +172,15 @@ test("P2 an approved sales entry records a CREDIT sighting (side='credit', the i
   const credit = rows.find((s) => s.side === "credit" && s.entry_id === firstEntry);
   assert.ok(credit, `the approved sales entry recorded a credit sighting (rows: ${JSON.stringify(rows.map((r) => [r.side, r.account_code])).slice(0, 200)})`);
   assert.equal(credit.account_code, REV, "the credit sighting keys on the INCOME account of the credit leg");
-  assert.equal(rows.filter((s) => s.side === "debit").length, 0, "a pure sales entry records no debit sighting");
+  // INTEGRATION (CLASS T, ratified as-built): the 0015 debit pool is preserved
+  // VERBATIM by the pin (additive credit recorder; H2 carve-out + reversal guard
+  // verbatim) — it records side='debit' for ANY debit leg with an active account,
+  // so a sales entry's AR control debit ALSO records a sighting. The pins never
+  // scope the debit recorder; asserting zero contradicted the preserved baseline.
+  // Flagged for the adversarial pass: customers accrue debit sightings on the
+  // receivable control account (see the vendor_account-breeding test below).
+  const debits = rows.filter((s) => s.side === "debit");
+  assert.ok(debits.every((s) => s.account_code === REC), `a pure sales entry's debit sightings key ONLY on the AR control leg (0015-verbatim pool; got ${JSON.stringify(debits.map((d) => d.account_code))})`);
   // The purchase side still records debit sightings (regression).
   const firm = await firmOf(clients.A1);
   const cited = await seedCitedDocument(users.alice, { firm, client: clients.A1, quote: "RM 500.00" });
@@ -189,8 +203,20 @@ test("P2 the 3-sighting vendor_account auto-proposal stays DEBIT-scoped — 3 cr
   assert.ok(cp, "customer exists (mandatory setup)");
   await salesSighting(users.alice, { client: clients.A2, cp, date: "2026-05-01" });
   await salesSighting(users.alice, { client: clients.A2, cp, date: "2026-05-02" });
+  // INTEGRATION (CLASS T): the PINNED invariant is that the auto-proposal query
+  // stays side='debit'-scoped — CREDIT sightings must never feed it, so no
+  // vendor_account rule may key on the INCOME account. The as-built (ratified)
+  // debit pool DOES record the sales entries' AR-control debits, so a
+  // vendor_account rule on the RECEIVABLE account can legally breed from the
+  // debit side — a design smell flagged for the adversarial pass, but not the
+  // pinned cell.
   const auto = (await codingRuleRows(clients.A2)).filter((r) => r.counterparty_id === cp && r.rule_type === "vendor_account");
-  assert.equal(auto.length, 0, "≥3 CREDIT sightings never auto-propose a vendor_account rule (the proposal query is side='debit'-scoped)");
+  assert.equal(auto.filter((r) => r.account_code === REV).length, 0,
+    "≥3 CREDIT sightings never auto-propose a vendor_account rule on the income account (the proposal query is side='debit'-scoped)");
+  for (const r of auto) {
+    assert.equal(r.account_code, REC, `any bred vendor_account rule keys on the DEBIT-side AR control only (got ${r.account_code})`);
+    noteLane(`as-built: a customer's AR-control debit sightings bred a vendor_account rule on ${r.account_code} — adversarial-pass flag`);
+  }
 });
 
 // ===========================================================================
@@ -255,9 +281,12 @@ test("§3.1 the floors are DIRECTION-AWARE: a purchase floor is not satisfied by
 test("§3.3 OCR admission: 6 credit sightings inside <60 days REFUSE; widening the span past 60 days admits + signs", async (t) => {
   if (skipHere(t)) return;
   const { users, clients } = world;
-  const { cp } = await makeCustomer(users.alice, { client: clients.A1, name: `OCRSPAN ${randomUUID().slice(0, 6)}` });
+  // INTEGRATION (CLASS T): the span is measured on POSTING_DATE (adjudication) —
+  // pin the birth INSIDE the tight window (the draft default 2026-03-15 would
+  // silently widen the span past 60 days and admit the "tight" cell).
+  const { cp } = await makeCustomer(users.alice, { client: clients.A1, name: `OCRSPAN ${randomUUID().slice(0, 6)}`, date: "2026-05-05" });
   assert.ok(cp, "customer exists (mandatory setup)");
-  // Birth (≈today's fixture doc) + 5 more, all 2026-05-01..2026-06-10 → 6 sightings, 6 docs, span < 60 days.
+  // Birth (2026-05-05) + 5 more, all 2026-05-01..2026-06-10 → 6 sightings, 6 docs, span < 60 days.
   for (const date of ["2026-05-01", "2026-05-10", "2026-05-20", "2026-06-01", "2026-06-10"]) {
     await salesSighting(users.alice, { client: clients.A1, cp, date });
   }

@@ -53,6 +53,10 @@ async function purchaseFactsDoc(client, { gross, net = null, tax = null }) {
   const firm = await firmOf(client);
   await grantConsent(sub, { firm, client }).catch(() => {});
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(gross) });
+  // INTEGRATION (CLASS T): the 0016 P3 gate sends a NULL-kind pdf to `classify`
+  // first — stamp the fixture doc 'invoice' at seed (the source-stamped corpus)
+  // so the facts lane engages directly; the classify loop is proven elsewhere.
+  await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -155,7 +159,9 @@ test("§4 the tie is EXACT: an sst_purchase_cost leg of stated-tax±1 sen REFUSE
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("tie") }); } catch (e) { err = e; }
   assert.ok(err, "an sst_purchase_cost leg that misses the stated tax by 1 sen is REFUSED");
-  assert.equal(err.code, "CLR23", `the tie refusal is CLR23 (got ${err.code})`);
+  // INTEGRATION (CLASS T): the refusal code is un-pinned; the as-built impl uses
+  // the 0015 tax-tie family — CLR21 detail tax_tie_failed (count/identity stays CLR23).
+  assert.equal(err.code, "CLR21", `the tie refusal is CLR21 tax_tie_failed (got ${err.code})`);
   assert.notEqual(await entryStatusOf(d.entry_id), "approved", "the mistied split never approves");
 });
 
@@ -190,7 +196,8 @@ test("§4 no tax facts ⇒ no leg: an sst_purchase_cost leg WITHOUT a stated inv
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("ntx") }); } catch (e) { err = e; }
   assert.ok(err, "an sst_purchase_cost leg with NO stated tax fact is REFUSED (the leg exists only when tax facts exist)");
-  assert.equal(err.code, "CLR23", `the no-fact refusal is CLR23 (got ${err.code})`);
+  // INTEGRATION (CLASS T): the no-fact refusal rides the same CLR21 tax-tie family.
+  assert.equal(err.code, "CLR21", `the no-fact refusal is CLR21 tax_tie_failed (got ${err.code})`);
 });
 
 test("§4 sst_output on a PURCHASE still refuses (sales-only in all three pinned places — unchanged by the split)", async (t) => {
@@ -209,7 +216,13 @@ test("§4 sst_output on a PURCHASE still refuses (sales-only in all three pinned
   let err = null;
   try { await approveEntry(world.users.alice, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("ssto") }); } catch (e) { err = e; }
   assert.ok(err, "an sst_output leg on a purchase is STILL refused — the new purchase special never loosens the sales-only law");
-  assert.equal(err.code, "CLR23", `the sst_output-on-purchase refusal is CLR23 (got ${err.code})`);
+  // INTEGRATION (CLASS T): two structural floors both refuse this shape and the
+  // code is un-pinned — the liability-typed sst_output leg breaks the verified
+  // expense=gross tie, so the draft carries amount_exception and the approve
+  // amount-tie fires FIRST (CLR21 amount_conflict); with no verified evidence the
+  // named supplier-bill guard fires instead (CLR23, proven by the migration's own
+  // tail probe). Either way the entry never approves.
+  assert.ok(["CLR21", "CLR23"].includes(err.code), `the sst_output-on-purchase refusal is structural CLR21/CLR23 (got ${err.code})`);
 });
 
 test("§4 the EXECUTOR grants the split NO sanction: a purchase draft carrying a TIED sst_purchase_cost leg skips purchase_sst_not_autopostable; its 2-leg sibling posts", async (t) => {

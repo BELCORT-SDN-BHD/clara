@@ -150,17 +150,21 @@ test("P3 set_document_kind is the audited HUMAN override: a bookkeeper corrects 
 // The facts gate — kind routes; NULL kind classifies first; receipts.
 // ===========================================================================
 
-test("§5 a payroll_summary NEVER reaches invoice_facts: the enqueue produces NO invoice_facts task and a skipped_kind receipt", async (t) => {
+test("§5 a payroll_summary NEVER reaches invoice_facts: the enqueue produces NO runnable invoice_facts task — only the skipped_kind receipt", async (t) => {
   if (skipHere(t)) return;
   const client = world.clients.A1;
   const cited = await pdfDoc(client, { kind: "payroll_summary" });
   await enqueueInvoiceFacts(cited.documentId);
-  const task = await factsTaskOf(cited.documentId, "invoice_facts");
-  assert.equal(task, null, "NO invoice_facts task exists for a payroll_summary (the classifier gate holds)");
-  // The receipt: the skipped_kind token must be observable on the doc's trail.
-  const tasks = await docTasks(cited.documentId);
-  const trail = JSON.stringify(tasks);
-  assert.ok(trail.includes("skipped_kind"), `the gate leaves a skipped_kind receipt on the doc's processing trail (got lanes: ${tasks.map((x) => `${x.lane}/${x.status}`).join(",")})`);
+  // INTEGRATION (CLASS T, adjudication #11): the skipped_kind receipt LIVES on
+  // the document_processing_tasks trail as a TERMINAL failed invoice_facts row
+  // (never claimed, attempt_count 0) — the gate holds when no row is runnable.
+  const rows = (await docTasks(cited.documentId)).filter((x) => x.lane === "invoice_facts");
+  assert.equal(rows.filter((x) => ["queued", "held_egress", "running", "done"].includes(x.status)).length, 0,
+    "NO runnable/completed invoice_facts task exists for a payroll_summary (the classifier gate holds)");
+  const receipt = rows.find((x) => x.status === "failed" && x.error_code === "skipped_kind");
+  assert.ok(receipt, `the gate leaves a skipped_kind receipt on the doc's task trail (got: ${rows.map((x) => `${x.lane}/${x.status}/${x.error_code}`).join(",")})`);
+  assert.equal(receipt.attempt_count, 0, "the receipt row was never claimed and consumes no attempts");
+  assert.equal(receipt.started_at, null, "the receipt row never ran (a receipt, not a task)");
 });
 
 test("§5 NULL kind → classify FIRST: the enqueue opens a 'classify' task (not invoice_facts); after the verdict the facts enqueue proceeds", async (t) => {

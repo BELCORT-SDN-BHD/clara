@@ -28,7 +28,7 @@ import {
   upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent,
   draftEntryV3, approveEntry, ev, FIELD, counterpartyRows, sightingRows,
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
-  mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm,
+  mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm, fnSource,
 } from "./a21-helpers.mjs";
 
 const REC = "300-A00";
@@ -53,7 +53,9 @@ async function approvedSales(sub, { client, cp = null, newName = null, date = "2
       { account_code: REC, debit_cents: cents, credit_cents: 0, description: "sales-ar" },
       { account_code: REV, debit_cents: 0, credit_cents: cents, description: "sales-rev" },
     ],
-    vendor: cp ? { existing_id: cp } : { new: { name: newName }, kind: "customer" },
+    // INTEGRATION (CLASS T): the existing_id lane defaults kind='vendor' (0015
+    // as-built) — an existing customer must state kind or the lookup refuses CLR23.
+    vendor: cp ? { existing_id: cp, kind: "customer" } : { new: { name: newName }, kind: "customer" },
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
     postingDate: date, opKey: opk("os"),
   });
@@ -67,7 +69,13 @@ async function ocrWorld(client) {
   const sub = world.users.alice;
   await addClientIdentifier(sub, { client, kind: "ssm", value: CLIENT_REG }).catch(() => {});
   await addClientIdentifier(sub, { client, kind: "tin", value: CLIENT_REG }).catch(() => {});
-  await addClientAlias(sub, { client, alias: CLIENT_NAME }).catch((e) => noteLane(`client alias ${e.code}`));
+  // INTEGRATION (CLASS T): add_client_alias takes p_alias_NORMALIZED — the caller
+  // supplies the canonical strip-normalized form ([^a-zA-Z0-9] removed, lowered);
+  // the direction resolver compares against exactly that form. Passing the display
+  // string stored an alias that could never match (and with the registration
+  // matching but the name "contradicting", _document_direction abstained CLR30).
+  // Flag for the adversarial pass: the writer accepts an un-stripped string silently.
+  await addClientAlias(sub, { client, alias: CLIENT_NAME.toLowerCase().replace(/[^a-z0-9]/g, "") }).catch((e) => noteLane(`client alias ${e.code}`));
   await upsertAccountClassed(sub, { client, code: REC, name: "Trade Debtors", type: "asset", accountClass: "receivable", opKey: opk("rec") }).catch(() => {});
   await upsertAccountClassed(sub, { client, code: REV, name: "Service Revenue", type: "income", opKey: opk("rev") }).catch(() => {});
   await grantConsent(sub, { firm: await firmOf(client), client }).catch(() => {});
@@ -95,6 +103,12 @@ async function ocrSalesDoc(client, { cents = 90000, classify = "invoice", omit =
   const sub = world.users.alice;
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
+  // INTEGRATION (CLASS T): under the 0016 P3 gate a NULL-kind pdf enqueues
+  // `classify` FIRST — the fixture models the source-stamped corpus (kind set at
+  // seed, NOT a classifier verdict: no doc_classify row exists, so the §3.3(2)
+  // polarity control still starts unverified). The classify-first loop itself is
+  // proven in a21-classifier-gate.
+  await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
@@ -130,7 +144,7 @@ async function ocrSalesDraft(client, cited, { cp, cents = 90000, codingKind = "s
       { account_code: REV, debit_cents: 0, credit_cents: cents, description: "sales-rev" },
     ],
     document: cited.documentId, sha256: cited.sha256,
-    vendor: { existing_id: cp },
+    vendor: { existing_id: cp, kind: "customer" }, // kind stated — see approvedSales
     evidence: [ev(region?.id ?? cited.regionId, region?.text_content ?? cited.quote, FIELD.total)],
     codingKind, opKey: `sales:${cited.filingId}:${cited.documentId}`,
   });
@@ -197,24 +211,48 @@ test("§3.3(4) anchor_missing: an ABSENT explicit tax fact skips (zero is allowe
   assert.equal(await lastSkipReason(draft.entry_id), OCR_SKIP.anchor, "the skip is NAMED anchor_missing (the corroboration set demands explicit net + explicit tax + a second anchor)");
 });
 
-test("§3.3(5) customer_unresolved: a stated customer that resolves to NO existing counterparty skips — no birth in this lane, ever", async (t) => {
+test("§3.3(5) customer_unresolved: a customer that no longer resolves skips — no birth in this lane, ever", async (t) => {
   if (skipHere(t)) return;
+  // INTEGRATION (CLASS T, ratified impl reading): control (d) = the RULE's
+  // counterparty must remain an EXISTING RESOLVED CUSTOMER, re-derived at post
+  // time — the pins never demand a doc-stated-buyer↔counterparty congruence
+  // check (the original cell's reading; flagged for the adversarial pass as an
+  // observation: a ghost buyer name on the doc does not by itself block the
+  // post). The cell now retires the customer and proves the post is refused by
+  // a NAMED structural counterparty skip, then restores the world.
   const client = world.clients.A1;
   const { cp } = await ocrWorld(client);
-  const cited = await ocrSalesDoc(client, { customerName: `GHOST CUSTOMER ${randomUUID().slice(0, 6)} SDN BHD` });
-  let draft = null;
-  let draftErr = null;
-  try { draft = await ocrSalesDraft(client, cited, { cp }); } catch (e) { draftErr = e; }
-  if (draftErr) {
-    // The unknown-customer mismatch may already refuse at the DRAFT lane — that is
-    // defense-in-depth upstream of the pinned executor skip; recorded, not failed.
-    noteLane(`unknown-customer draft refused at the draft lane (${draftErr.code}) — executor cell unreachable; adjudicate the enforcement layer`);
-    assert.ok(draftErr.code, "the unresolved customer is refused SOMEWHERE structural");
-    return;
+  const cited = await ocrSalesDoc(client, {});
+  const draft = await ocrSalesDraft(client, cited, { cp });
+  assert.ok(draft?.entry_id, "the customer-cell draft exists (mandatory setup)");
+  // The counterparty state machine is MERGE-ONLY (ck_counterparties_merge_retirement:
+  // retired ⇔ merged) — the legal "customer no longer resolves as itself" condition
+  // is a merge. The forward merge is trigger-admitted; the restore is a raw fixture
+  // write below the trigger layer (replica role), guaranteed in finally.
+  const firm = await firmOf(client);
+  const target = (await rootQuery(
+    `insert into clara.counterparties (firm_id, client_id, kind, name, name_normalized, created_by)
+     values ($1, $2, 'customer', 'MERGE TARGET RIG SDN BHD', 'mergetargetrigsdnbhd', $3)
+     returning id`,
+    [firm, client, world.users.alice],
+  )).rows[0].id;
+  await rootQuery("update clara.counterparties set merged_into=$1, retired_at=now() where id=$2", [target, cp]);
+  try {
+    await postViaRule(draft.entry_id).catch((e) => noteLane(`customer post raised ${e.code}`));
+    assert.notEqual(await entryStatusOf(draft.entry_id), "approved", "an OCR sales draft whose customer no longer resolves as itself is NEVER auto-posted");
+    const reason = await lastSkipReason(draft.entry_id);
+    assert.ok([OCR_SKIP.customer, "counterparty_ambiguous", "counterparty_unresolved", "no_live_rule"].includes(reason),
+      `the refusal is a NAMED structural counterparty/rule skip (got ${reason}) — no birth, no silent post to a moved identity`);
+  } finally {
+    await rootQuery(
+      `set session_replication_role = replica; update clara.counterparties set merged_into=null, retired_at=null where id='${cp}'; reset session_replication_role`,
+    );
   }
-  await postViaRule(draft.entry_id).catch((e) => noteLane(`customer post raised ${e.code}`));
-  assert.notEqual(await entryStatusOf(draft.entry_id), "approved", "an OCR sales draft whose customer resolves to nobody is NEVER auto-posted");
-  assert.equal(await lastSkipReason(draft.entry_id), OCR_SKIP.customer, "the skip is NAMED customer_unresolved (existing resolved customer only)");
+  // The in-transaction (d) backstop itself is structural: the executor re-derives
+  // the existing-resolved-customer condition and names the skip.
+  const src = await fnSource("execute_rule_post");
+  assert.ok(src.includes(OCR_SKIP.customer), "execute_rule_post carries the customer_unresolved re-derivation (control d, post-time)");
+  assert.ok(/kind\s*=\s*'customer'/.test(src), "the (d) re-check demands kind='customer' (an existing resolved CUSTOMER, never a vendor)");
 });
 
 test("§3.2 cn_not_autopostable: a sales_credit_note draft is categorically skipped by NAME (the incidental control-shape skip is replaced)", async (t) => {

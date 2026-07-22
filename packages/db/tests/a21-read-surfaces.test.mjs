@@ -178,8 +178,12 @@ test("§2.3 context pack v3: pack_schema_version=3 + the sst_registration_watch 
   const pack = await contextPack(users.alice, client, "a21 read-surface probe");
   assert.ok(pack, "the pack hydrates");
   assert.equal(Number(pack.pack_schema_version), 3, `the pack schema version bumps to 3 (got ${pack.pack_schema_version})`);
-  const block = pack.sst_registration_watch;
-  assert.ok(block, "the sst_registration_watch block is present for a watched client");
+  // INTEGRATION (CLASS T, adjudicated): the block is an ARRAY — one element per
+  // OPEN (client, service_group) watch episode. Ratified over the object reading.
+  const arr = pack.sst_registration_watch;
+  assert.ok(Array.isArray(arr), `sst_registration_watch is an array of per-group watch objects (got ${typeof arr})`);
+  assert.ok(arr.length >= 1, "the array carries the open watch for a watched client");
+  const block = arr.find((x) => x.service_group === "G") ?? arr[0];
   assert.equal(block.permitted_use, "surface_and_request_professional_review_only",
     "permitted_use pins the agent to surface-and-refer — never a legal determination, a tax computation, or an inferred registration status");
   const blob = JSON.stringify(block);
