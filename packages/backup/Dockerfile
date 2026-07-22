@@ -57,6 +57,19 @@ RUN mkdir -p /tmp/clara-backup
 ENV CLARA_BACKUP_AGE_RECIPIENTS_FILE=/app/packages/backup/deploy/age-recipient.txt \
     CLARA_BACKUP_STORAGE_KEY_FILE=/run/secrets/clara_storage_service_key
 
+# The rclone R2 remote's non-secret constants (the token key-id/secret/endpoint stay
+# Fly secrets). NO_CHECK_BUCKET is load-bearing: R2 talks through a BUCKET-SCOPED
+# token, which rightly cannot CreateBucket — but rclone's default bucket-existence
+# check falls back to exactly that (PUT /<bucket>) when a single-file upload's HEAD
+# 404s, turning every db-snapshots upload into 403 AccessDenied (proven live,
+# 2026-07-22 wiring ceremony; Cloudflare's R2 docs prescribe no_check_bucket for
+# scoped tokens). Baked here so no machine-run flag is load-bearing for correctness.
+ENV RCLONE_CONFIG_R2_TYPE=s3 \
+    RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+    RCLONE_CONFIG_R2_REGION=auto \
+    RCLONE_CONFIG_R2_ACL=private \
+    RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true
+
 # A Fly SCHEDULED machine boots this to completion daily. Exit 0 = success (pings the
 # dead-man's-switch); any non-zero exit = failure (fires the /fail ping). All secrets
 # come from the environment (Fly secrets), never the image.

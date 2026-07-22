@@ -419,17 +419,30 @@ ping (`/fail` on error).
    fly machine run registry.fly.io/clara-backup:dr-wiring-1 \
        -a clara-backup --region sin --schedule daily \
        --vm-size shared-cpu-1x --vm-memory 1024 \
-       --file-secret /run/secrets/clara_storage_service_key=CLARA_BACKUP_STORAGE_SERVICE_KEY_B64 \
+       --file-secret //run/secrets/clara_storage_service_key=CLARA_BACKUP_STORAGE_SERVICE_KEY_B64 \
        -e CLARA_BACKUP_STORAGE_URL=https://<project-ref>.supabase.co \
-       -e CLARA_BACKUP_R2_BUCKET=<bucket> \
-       -e RCLONE_CONFIG_R2_TYPE=s3 -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
-       -e RCLONE_CONFIG_R2_REGION=auto -e RCLONE_CONFIG_R2_ACL=private
+       -e CLARA_BACKUP_R2_BUCKET=<bucket>
    ```
 
    The machine boots immediately (the supervised first live run: watch `fly logs
    -a clara-backup` for the `clara-backup: DONE` line, then the healthchecks green
-   ping + the R2 objects). Non-secret env rides as `-e`; every secret is already on
-   the app from step 4.
+   ping + the R2 objects). Non-secret deploy-specific env rides as `-e`; the rclone
+   remote constants (incl. the load-bearing `RCLONE_CONFIG_R2_NO_CHECK_BUCKET=true`
+   — see the Dockerfile) are baked in the image; every secret is already on the app
+   from step 4.
+
+   **Running flyctl from Windows (learned live, 2026-07-22):** the guest path is
+   written `//run/…` on purpose — flyctl validates it with the HOST's path rules, so
+   a single `/run/…` is rejected as non-absolute on Windows (the UNC-shaped double
+   slash passes, and Linux resolves `//run` = `/run`); prefix the command with
+   `MSYS_NO_PATHCONV=1` under Git Bash (MSYS otherwise rewrites the guest path); and
+   any command override must sit after a `--` terminator or flyctl eats `sh -c`'s
+   `-c` as its own `--config` flag.
+
+   **Known residual (queued in the A2.1 finding ledger):** the image's Debian
+   bookworm rclone (1.60) gets a first-attempt `501 NotImplemented` on R2
+   single-file PUTs which its internal retry clears — uploads succeed, logs are
+   noisy. The clean fix is a modern rclone in the image.
 7. *(Optional corroboration)* deploy the freshness Worker (`deploy/cf-worker/`).
 
 ### Steps the classifier FORCES owner-run (the agent may only scaffold/dry-run)
