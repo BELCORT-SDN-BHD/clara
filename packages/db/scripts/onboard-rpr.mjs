@@ -40,7 +40,10 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 
 const ACCOUNT_TYPES = new Set(["asset", "liability", "equity", "income", "expense"]);
 const ACCOUNT_CLASSES = new Set(["payable", "receivable"]); // DB CHECK: null | 'payable' | 'receivable' (0015)
-const SPECIAL_TYPES = new Set(["rounding"]); // DB CHECK: null | 'rounding'
+// DB CHECK (0016): null | 'rounding' | 'sst_output' | 'sst_purchase_cost' — the FULL
+// live set (the ADR-027 #44 stale-validation class: keep this in lockstep with
+// coa_accounts_special_acc_type_check).
+const SPECIAL_TYPES = new Set(["rounding", "sst_output", "sst_purchase_cost"]);
 const ORIGINS = new Set(["tb", "gl", "system_role"]);
 const ROLES = new Set(["viewer", "bookkeeper", "admin", "owner"]);
 const CSV_COLUMNS = ["account_code", "account_name", "account_type", "account_class", "special_acc_type", "origin"];
@@ -165,7 +168,7 @@ function loadCoa(path) {
     if (!row.account_name) errors.push(`${where}: empty account_name`);
     if (!ACCOUNT_TYPES.has(row.account_type)) errors.push(`${where}: account_type "${row.account_type}" not in ${[...ACCOUNT_TYPES].join("|")}`);
     if (row.account_class && !ACCOUNT_CLASSES.has(row.account_class)) errors.push(`${where}: account_class "${row.account_class}" not in (empty|payable|receivable)`);
-    if (row.special_acc_type && !SPECIAL_TYPES.has(row.special_acc_type)) errors.push(`${where}: special_acc_type "${row.special_acc_type}" not in (empty|rounding)`);
+    if (row.special_acc_type && !SPECIAL_TYPES.has(row.special_acc_type)) errors.push(`${where}: special_acc_type "${row.special_acc_type}" not in (empty|${[...SPECIAL_TYPES].join("|")})`);
     if (!ORIGINS.has(row.origin)) errors.push(`${where}: origin "${row.origin}" not in ${[...ORIGINS].join("|")}`);
     if (row.special_acc_type === "rounding") roundingCount++;
     rows.push({
