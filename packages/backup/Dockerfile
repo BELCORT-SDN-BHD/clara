@@ -17,13 +17,27 @@ WORKDIR /app
 # postgresql-client-17 comes from the PGDG apt repo (bookworm ships only 15/16).
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends ca-certificates curl gnupg age rclone zstd; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg age unzip zstd; \
     install -d /usr/share/postgresql-common/pgdg; \
     curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc; \
     echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.list.d/pgdg.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends postgresql-client-17; \
     rm -rf /var/lib/apt/lists/*
+
+# rclone: a PINNED upstream release binary, NOT Debian's — bookworm ships rclone 1.60, which
+# fires a first-attempt 501 NotImplemented on R2 single-file PUTs (noisy retries; docs/ops/DR.md
+# §9). Provenance is checksum-verified. To bump: edit these two lines to the new version + its
+# rclone-v<VER>-linux-amd64.zip entry from https://downloads.rclone.org/v<VER>/SHA256SUMS.
+ARG RCLONE_VERSION=1.74.4
+ARG RCLONE_SHA256=fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d
+RUN set -eux; \
+    curl -fsSL -o /tmp/rclone.zip "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-amd64.zip"; \
+    echo "${RCLONE_SHA256}  /tmp/rclone.zip" | sha256sum -c -; \
+    unzip -j /tmp/rclone.zip "rclone-v${RCLONE_VERSION}-linux-amd64/rclone" -d /tmp/rclone-bin; \
+    install -m 0755 /tmp/rclone-bin/rclone /usr/local/bin/rclone; \
+    rm -rf /tmp/rclone.zip /tmp/rclone-bin; \
+    rclone --version
 
 # The v17 client binaries (Debian installs them under /usr/lib/postgresql/17/bin).
 ENV PG_DUMP=/usr/lib/postgresql/17/bin/pg_dump \

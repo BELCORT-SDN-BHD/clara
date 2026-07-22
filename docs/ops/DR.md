@@ -446,10 +446,12 @@ ping (`/fail` on error).
    any command override must sit after a `--` terminator or flyctl eats `sh -c`'s
    `-c` as its own `--config` flag.
 
-   **Known residual (queued in the A2.1 finding ledger):** the image's Debian
-   bookworm rclone (1.60) gets a first-attempt `501 NotImplemented` on R2
-   single-file PUTs which its internal retry clears — uploads succeed, logs are
-   noisy. The clean fix is a modern rclone in the image.
+   **Resolved (Wave A2.1 §7):** the Debian bookworm rclone (1.60) got a
+   first-attempt `501 NotImplemented` on R2 single-file PUTs which its internal
+   retry cleared — uploads succeeded, logs were noisy. The Dockerfile now pins a
+   checksum-verified current upstream rclone release binary (1.74.4 at pin time;
+   bump = the two ARG lines). Re-verify with a supervised run at the next image
+   rebuild + deploy.
 7. *(Optional corroboration)* deploy the freshness Worker (`deploy/cf-worker/`).
 
 ### Steps the classifier FORCES owner-run (the agent may only scaffold/dry-run)
