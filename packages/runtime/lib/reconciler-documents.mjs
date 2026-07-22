@@ -21,6 +21,7 @@ const DOCUMENT_GRACE_MS = Number(process.env.CLARA_DOCUMENT_RECONCILE_GRACE_MS |
 let warnedDocumentSelectGap = false;
 let warnedInvoiceFactsEnqueueGap = false;
 let warnedLocalFactsEnqueueGap = false;
+let warnedClassifyEnqueueGap = false;
 
 /** True iff the error is the engine's "run id unknown" signal. */
 export function isRunNotFound(err) {
@@ -33,11 +34,16 @@ function documentOp(prefix, taskId) {
 
 /** The re-enqueue driver for a task's lane. 'invoice_facts' rides its own workflow
  *  (invoiceFacts_v1); 'local_facts' rides the non-frozen MyInvois consumer (Wave A2 — no
- *  WDK workflow); every other document lane rides documentIngest. Returns the injected
- *  enqueue fn (or undefined when the supervisor has not wired that lane). */
+ *  WDK workflow); 'classify' rides the non-frozen classify consumer (Wave A2.1 — no WDK
+ *  workflow, its OWN leader loop discovers + drives queued tasks), so the shared reconciler
+ *  has NO dispatch role for it and MUST NOT fall through to documentIngest (that would start
+ *  an Azure DI OCR run for a classify task — real vendor egress — which then fails at
+ *  persist_document_extraction, CLR16). Returns the injected enqueue fn, or undefined when the
+ *  lane is owned elsewhere / the supervisor has not wired that lane. */
 function enqueueForLane(deps, lane) {
   if (lane === "invoice_facts") return deps.enqueueInvoiceFacts;
   if (lane === "local_facts") return deps.enqueueLocalFacts;
+  if (lane === "classify") return undefined; // owned by the classify leader loop, never documentIngest
   return deps.enqueueDocumentIngest;
 }
 
@@ -224,6 +230,10 @@ export async function reconcileDocumentTasks(client, deps) {
           warnedLocalFactsEnqueueGap = true;
           log("[reconcile] local_facts re-enqueue skipped: deps.enqueueLocalFacts not wired — a MyInvois facts task is NEVER driven through documentIngest (supervisor must provide enqueueLocalFacts)");
         }
+        if (task.lane === "classify" && !warnedClassifyEnqueueGap) {
+          warnedClassifyEnqueueGap = true;
+          log("[reconcile] classify re-enqueue skipped: the classify leader loop owns this lane's dispatch — a classify task is NEVER driven through documentIngest (that would start an Azure OCR run + fail at persist_document_extraction, CLR16)");
+        }
         continue;
       }
       try {
@@ -237,10 +247,13 @@ export async function reconcileDocumentTasks(client, deps) {
     }
 
     if (task.status === "running") {
-      // local_facts has NO WDK run to probe (its run id is a synthetic token, not a
-      // workflow run); its own leader loop owns stranded-running recovery (requeue past a
-      // grace). Never probe getRun here — that would error every cycle.
-      if (task.lane === "local_facts") continue;
+      // The synthetic-run lanes (local_facts, classify) have NO WDK run to probe — their run
+      // id is a synthetic token ('classify:<task>:<uuid>'), not a workflow run — so
+      // documentRunState would resolve 'lost' (RunNotFound, or a NULL run id) and requeue a
+      // LIVE task mid-work: for classify that means a SECOND concurrent generateObject call +
+      // a double-settle race. Each lane's OWN leader loop owns stranded-running recovery
+      // (requeue past a grace on its dedicated connection). Never probe getRun here.
+      if (task.lane === "local_facts" || task.lane === "classify") continue;
       let state;
       try {
         state = await documentRunState(deps.getRun, task.runId);
