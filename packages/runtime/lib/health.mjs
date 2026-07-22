@@ -18,6 +18,9 @@ import { matcherHealth } from "./matcher.mjs";
 import { autodraftHealth } from "./autodraft.mjs";
 import { localFactsHealth } from "./local-facts.mjs";
 import { rulePostHealth } from "./rule-post.mjs";
+import { sstWatchHealth } from "./sst-watch.mjs";
+import { factsGateHealth } from "./facts-gate.mjs";
+import { classifyHealth } from "./classify.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -176,6 +179,43 @@ export async function checkReadiness() {
             if (rLag > 1000) warnings.push(`rule_post lag ${rLag}`);
           } catch (err) {
             warnings.push(`rule_post_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
+          }
+
+          // sst_watch consumer health -> warnings only (Wave A2.1): a stalled SST compliance
+          // watch must never take chat traffic down. Queries pre-0016-safe spine tables only.
+          try {
+            const sh = await sstWatchHealth(c);
+            checks.sstWatch = { ok: true, ...sh };
+            const sDead = Number(sh.pendingDeadLetters ?? sh.pending_dead_letters ?? 0);
+            const sLag = Number(sh.lag ?? 0);
+            if (sDead > 0) warnings.push(`${sDead} sst_watch dead-letter(s)`);
+            if (sLag > 1000) warnings.push(`sst_watch lag ${sLag}`);
+          } catch (err) {
+            warnings.push(`sst_watch_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
+          }
+
+          // facts_gate consumer health -> warnings only (Wave A2.1): a stalled classifier→facts
+          // gate must never take chat traffic down. Queries pre-0016-safe spine tables only.
+          try {
+            const fh = await factsGateHealth(c);
+            checks.factsGate = { ok: true, ...fh };
+            const fDead = Number(fh.pendingDeadLetters ?? fh.pending_dead_letters ?? 0);
+            const fLag = Number(fh.lag ?? 0);
+            if (fDead > 0) warnings.push(`${fDead} facts_gate dead-letter(s)`);
+            if (fLag > 1000) warnings.push(`facts_gate lag ${fLag}`);
+          } catch (err) {
+            warnings.push(`facts_gate_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
+          }
+
+          // classify consumer health -> warnings only (Wave A2.1): a stalled doc classifier must
+          // never take chat traffic down. document_processing_tasks is 0009-era (pre-0016-safe).
+          try {
+            const ch = await classifyHealth(c);
+            checks.classify = { ok: true, ...ch };
+            const queueWarnMs = Number(process.env.CLARA_DOCUMENT_QUEUE_WARN_MS || 60000);
+            if (Number(ch.oldestQueuedMs ?? 0) > queueWarnMs) warnings.push(`classify oldest queued ${Math.round(Number(ch.oldestQueuedMs))}ms`);
+          } catch (err) {
+            warnings.push(`classify_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }
         } else {
           checks.world = { enabled: false };

@@ -384,16 +384,50 @@ export async function reconcileAutopostRules(client, opts = {}) {
 }
 
 // ---------------------------------------------------------------------------
+// SST compliance-watch daily sweep (Wave A2.1 §2.2 — the repair belt / migration 0016).
+// clara.evaluate_sst_watches_all() re-evaluates EVERY active client's SST-registration
+// watch from the books, counting failures WITHOUT raising (each client is exception-
+// isolated), and writes ONE append-only compliance_eval_runs receipt; the returned
+// {run_id, clients_examined, clients_changed, clients_failed} is the receipt. The fn is
+// runtime-GROUP-granted (the reconcile_autopost_rules precedent — a plain call on the
+// clara_runtime connection, NO login-direct dance). Errors are isolated: log +
+// sstOk:false, so the leader retries next cycle and the other sweepers are never blocked.
+// This first-cycle-at-boot sweep is what catches PRE-EXISTING crossings right after the
+// 0016 deploy ceremony (the event-driven spine only re-evaluates a client on a NEW
+// approval — the belt covers everyone).
+// ---------------------------------------------------------------------------
+
+/** @param {import("pg").ClientBase} client  a clara_runtime connection */
+export async function reconcileSstWatches(client, opts = {}) {
+  const log = opts.log ?? (() => {});
+  try {
+    const r = (await client.query("select clara.evaluate_sst_watches_all($1) as r", [`sstsweep:${new Date().toISOString()}`])).rows[0]?.r ?? {};
+    const out = {
+      sstOk: true,
+      sstExamined: Number(r?.clients_examined ?? 0),
+      sstChanged: Number(r?.clients_changed ?? 0),
+      sstFailed: Number(r?.clients_failed ?? 0),
+    };
+    log(`[reconcile] sst watches examined=${out.sstExamined} changed=${out.sstChanged} failed=${out.sstFailed}`);
+    return out;
+  } catch (err) {
+    log(`[reconcile] evaluate_sst_watches_all error: ${err?.message ?? err}`);
+    return { sstOk: false, sstExamined: 0, sstChanged: 0, sstFailed: 0 };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // One full sweep (called under the leader lock by the supervisor).
 // ---------------------------------------------------------------------------
 
 /**
  * Run every sweeper once + a heartbeat. Trace prune runs on a coarser cadence
  * (opts.prune=true) so it does not scan on every fast sweep; the autopost-rule
- * expiry sweep runs on the leader's daily flag (opts.autopostRules=true).
+ * expiry sweep runs on the leader's daily flag (opts.autopostRules=true); the SST
+ * compliance-watch repair belt runs on the leader's daily flag (opts.sstWatches=true).
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean,
- *          autopostRules?:boolean}} deps
+ *          autopostRules?:boolean, sstWatches?:boolean}} deps
  */
 export async function runReconcilerSweep(client, deps) {
   const log = deps.log ?? (() => {});
@@ -419,6 +453,8 @@ export async function runReconcilerSweep(client, deps) {
   }
   let autopost = {};
   if (deps.autopostRules) autopost = await reconcileAutopostRules(client, { log });
+  let sst = {};
+  if (deps.sstWatches) sst = await reconcileSstWatches(client, { log });
   let prune = { pruned: 0 };
   if (deps.prune) {
     try {
@@ -427,5 +463,5 @@ export async function runReconcilerSweep(client, deps) {
       log(`[reconcile] trace prune error: ${err?.message ?? err}`);
     }
   }
-  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...prune };
+  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...prune };
 }

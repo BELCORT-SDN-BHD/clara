@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { applyRulePostEffects, RULE_POST_CONSUMER, RULE_POST_EVENT_TYPE } from "../lib/rule-post.mjs";
+import { narrowTypedStatus } from "../lib/receipts.mjs";
 
 function recordingClient(onExecute = () => ({ posted: true })) {
   const queries = [];
@@ -58,4 +59,40 @@ test("the group role is restored even when execute_rule_post raises", async () =
 test("consumer identity constants are pinned", () => {
   assert.equal(RULE_POST_CONSUMER, "rule_post");
   assert.equal(RULE_POST_EVENT_TYPE, "entry.drafted");
+});
+
+// --- Typed-receipt hardening (Deliverable 5) -----------------------------------------
+// execute_rule_post returns {status:'posted'} on a post and {status:'skipped', reason:...}
+// for a benign non-post (the draft stays for human review — visibility-as-safety). The
+// consumer must narrow a skip to a NON-success and NEVER retry it into a post.
+
+test("applyRulePostEffects returns the execute_rule_post receipt VERBATIM (a skip is not swallowed)", async () => {
+  const client = recordingClient(() => ({ entry_id: "e", status: "skipped", reason: "polarity_unverified" }));
+  const receipt = await applyRulePostEffects(client, { entryId: "e", seq: 7 });
+  assert.deepEqual(receipt, { entry_id: "e", status: "skipped", reason: "polarity_unverified" });
+});
+
+test("narrowTypedStatus: a 'posted' receipt narrows to success (logged as before)", () => {
+  assert.deepEqual(narrowTypedStatus({ entry_id: "e", status: "posted", rule_id: "r" }), { status: "ok" });
+});
+
+test("narrowTypedStatus: a 'skipped' receipt passes through {status, reason} (never narrows to success)", () => {
+  assert.deepEqual(narrowTypedStatus({ status: "skipped", reason: "direction_unproven" }), { status: "skipped", reason: "direction_unproven" });
+  assert.deepEqual(narrowTypedStatus({ status: "skipped", reason: "customer_unresolved" }), { status: "skipped", reason: "customer_unresolved" });
+});
+
+test("narrowTypedStatus: a 'refused' bounded-write receipt passes through (the mandated propose/sign law)", () => {
+  assert.deepEqual(narrowTypedStatus({ status: "refused", reason: "bounds_exceeded" }), { status: "refused", reason: "bounds_exceeded" });
+});
+
+test("narrowTypedStatus: a refused/skipped receipt with no string reason falls back to the status", () => {
+  assert.deepEqual(narrowTypedStatus({ status: "skipped" }), { status: "skipped", reason: "skipped" });
+  assert.deepEqual(narrowTypedStatus({ status: "refused", reason: 42 }), { status: "refused", reason: "refused" });
+});
+
+test("narrowTypedStatus: anything else (null, legacy receipts, non-objects) is success-shaped", () => {
+  assert.deepEqual(narrowTypedStatus(null), { status: "ok" });
+  assert.deepEqual(narrowTypedStatus(undefined), { status: "ok" });
+  assert.deepEqual(narrowTypedStatus({ posted: true }), { status: "ok" });
+  assert.deepEqual(narrowTypedStatus("posted"), { status: "ok" });
 });
