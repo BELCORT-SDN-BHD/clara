@@ -94,26 +94,26 @@ in `docs/agents/`.
 Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
-In one line: **Phase 3 COMPLETE + GATE 3 CLOSED beta-real (17/17 replay eval, AP
-gate exact RM 1,350,938.21, kill-mid-workflow exactly-once); the HARDENING
-INTERLUDE is DONE (ADR-020/021 — the DR gate closed 177/0 on a real fresh
-project, `acl-baseline.sql` live, repo at `github.com/BELCORT-SDN-BHD/clara`,
-agent identity `belcorttao`); and PHASE-4 WAVE A IS FULLY LIVE AND POLISHED
-(2026-07-21, ADR-022/023/024, PRs #34–#39 all merged + deployed):** design
-contract v1.1 → the five-lane build through the full house ladder (as-built law
-= `docs/plan/wave-a-as-built-amendments.md`) → live deploy (migrations 0011+0012
-applied; Fly runtime with the autodraft consumer; egress kill-switch=1, RPR
-consent-gated) → the dashboard on **Cloudflare Pages at `app.clarabook.com`**
-(Vercel dropped) → Wave A.1 (0013 registered-vendor sweep reach via
-`invoice.vendor_registration`; 0014 first-class consent-evidence documents —
-RPR's consent cites the real signed PDF, structurally facts/egress-exempt) →
-polish (PDF-page polygon overlays via lazy pdf.js; Azure `keyValuePairs` ENABLED
-— free at 2024-11-30, the earlier "billable" premise was wrong). Live posture:
-Supabase at **14 migrations**, Fly runtime **v19** `/ready` all-green, dashboard
-auto-deploys from `main`. All four ADR-023 owner decisions are RESOLVED
-(ADR-024). **Canary daba7f2e stays ARMED, due 2026-08-02 — NEVER answer it.**
-Standing gates unchanged: the deferred S6 §11 list (PROJECTLOG PART 2), incl.
-the HARD pre-MyInvois AB-3 engine_kind gate. NEXT = **the owner picks the next
-build target** — candidates in PART 2: the sales-invoice/AR wave (+ MyInvois),
-bank/payment flows, standing rules, the R2 off-site backup wiring, the C6 legal
-items.
+In one line: **Phase 4 is deep in the product build. WAVE A is FULLY LIVE
+(ADR-022/023/024, PRs #34–#39): the daily AP loop — coding, review queue,
+`doc_review`, the confidence-ladder lanes, the event-driven autodraft sweep,
+typed rules + open-questions — on live Supabase, the Fly `clara-runtime`, and
+the dashboard at **Cloudflare Pages `app.clarabook.com`** (Vercel dropped);
+GATE 3 closed beta-real earlier (17/17 replay, AP gate exact RM 1,350,938.21,
+kill-mid-workflow exactly-once); the hardening interlude (ADR-020/021) closed
+the DR gate + `acl-baseline` live; repo at `github.com/BELCORT-SDN-BHD/clara`,
+agent identity `belcorttao`.** **WAVE A2 IS BUILT + MERGED but NOT YET DEPLOYED
+(2026-07-22, ADR-025 design / ADR-026 build, PRs #41+#42 on `main` `a4785e9`):**
+the sales-invoice/AR side + MyInvois UBL local no-egress parse + SST 3-leg +
+CN/DN + **purchase-only** human-signed bounded auto-posting + the `packages/backup`
+R2 app (migration `0015`, runtime with `fast-xml-parser`, the `/rules` dashboard).
+It survived a **six-round cross-model adversarial hardening** — the Codex lane
+caught a real auto-post money-laundering path the native review rated sound;
+closed structurally (count/identity leg gate + corroboration-required gate) and
+re-verified to RESOLVED. **LIVE POSTURE: Supabase at 14 migrations (0015 NOT yet
+applied), Fly runtime v19 (the A2 image NOT yet deployed), dashboard auto-deploys
+from `main`.** **IMMEDIATE NEXT = the owner-`!`-gated Wave-A2 DEPLOY CEREMONY**
+(backup → apply 0015 → deploy the runtime → re-onboard the CoA `300-000` → verify
+→ the §9 RPR sales+JV eval). **Canary `daba7f2e` stays ARMED, due 2026-08-02 —
+NEVER answer it.** After deploy: Wave A2.1 (sales autopost + purchase SST),
+the R2 wiring, then Wave B (knowledge + onboarding) per REBUILD-PLAN.
