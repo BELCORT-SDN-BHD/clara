@@ -70,8 +70,12 @@ alter table clara.coding_rules
   add column evidence_class text,
   add constraint ck_coding_rules_evidence_class check (
     (evidence_class is null or evidence_class in ('structured','ocr_sales'))
+    -- `is not null` (never `in (...)`) — an IN over a NULL evidence_class yields
+    -- NULL and a NULL CHECK passes, which would let a classless sales autopost
+    -- row through the raw-insert lane (integration finding; the vocabulary is
+    -- already pinned by the first conjunct).
     and (rule_type<>'autopost' or direction is distinct from 'sales'
-         or evidence_class in ('structured','ocr_sales'))
+         or evidence_class is not null)
     and (rule_type<>'autopost' or direction is distinct from 'purchase'
          or evidence_class is null)
     and (rule_type<>'vendor_account' or evidence_class is null));
@@ -3794,6 +3798,14 @@ begin
   end if;
   if not exists(select 1 from pg_constraint where conname='ck_coding_rules_evidence_class') then
     raise exception '0016 coding_rules evidence_class CHECK missing' using errcode='CLR10';
+  end if;
+  -- the sales-mandatory conjunct must be NULL-proof (`is not null`, never a
+  -- NULL-yielding IN) — else a classless sales autopost row passes the CHECK.
+  if (select pg_get_constraintdef(oid) from pg_constraint
+      where conname='ck_coding_rules_evidence_class')
+     !~* 'evidence_class\s+is\s+not\s+null' then
+    raise exception '0016 evidence_class CHECK lost its NULL-proof sales conjunct'
+      using errcode='CLR10';
   end if;
   select pg_get_constraintdef(con.oid) into v_def from pg_constraint con
     where con.conname='ck_coding_rules_terminal';
