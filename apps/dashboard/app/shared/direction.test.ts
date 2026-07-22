@@ -42,12 +42,24 @@ test("laneReasonCopy swaps vendor→customer for sales, keeps current wording ot
   assert.equal(laneReasonCopy("unknown_token", null), "unknown_token"); // unknown → echoed
 });
 
-test("clr21Copy swaps vendor/bill nouns for sales, else matches CLR21_COPY", () => {
+test("clr21Copy swaps the vendor noun for sales, else matches CLR21_COPY", () => {
   assert.ok(clr21Copy("vendor_malformed", "sales")?.includes("customer"));
   assert.ok(!clr21Copy("vendor_malformed", "sales")?.includes("vendor"));
-  const dup = clr21Copy("duplicate_bill", "sales");
-  assert.ok(dup?.includes("invoice") && dup?.includes("customer"));
   assert.equal(clr21Copy("vendor_malformed", "purchase"), CLR21_COPY.vendor_malformed);
   assert.equal(clr21Copy("vendor_malformed", null), CLR21_COPY.vendor_malformed);
   assert.equal(clr21Copy("amount_conflict", "sales"), CLR21_COPY.amount_conflict); // non-vendor discriminant unchanged
+});
+
+// 0016 raises ONE duplicate token per direction — duplicate_bill is gated on
+// coding_kind='supplier_bill', duplicate_sales on the sales kinds — so each token owns
+// its own nouns and neither is remapped by direction.
+test("the duplicate discriminants are per-direction tokens, not a direction remap", () => {
+  const bill = CLR21_COPY.duplicate_bill;
+  assert.ok(bill?.includes("vendor") && bill?.includes("bill"), "duplicate_bill keeps AP nouns");
+  const sales = CLR21_COPY.duplicate_sales;
+  assert.ok(sales?.includes("customer") && sales?.includes("invoice"), "duplicate_sales speaks AR");
+  // A sales direction never rewrites duplicate_bill — the DB cannot raise that pair.
+  assert.equal(clr21Copy("duplicate_bill", "sales"), bill);
+  assert.equal(clr21Copy("duplicate_sales", "sales"), sales);
+  assert.equal(clr21Copy("duplicate_sales", null), sales); // guidance renders without a known direction
 });

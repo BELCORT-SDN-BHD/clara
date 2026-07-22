@@ -155,7 +155,9 @@ export default function QueuePage() {
               <Tile n={queue.counts.open_drafts} label="open drafts" />
               <Tile n={queue.counts.open_questions} label="open questions" />
               <Tile n={queue.counts.open_tasks} label="open tasks" />
-              <Tile n={queue.counts.compliance_watches} label="compliance" />
+              {/* Only once the watch surface exists: a pre-0016 DB has no watches at
+                  all, and a permanent "0 compliance" tile would be noise, not news. */}
+              {queue.counts.compliance_watches > 0 || queue.compliance.clients.length > 0 ? <Tile n={queue.counts.compliance_watches} label="compliance" /> : null}
               {queue.sweep.open_run ? <span className={styles.staleBadge}>sweep reconciling</span> : null}
               {queue.compliance.stale_evaluator ? <span className={styles.staleBadge}>compliance eval stale</span> : null}
             </div>

@@ -14,7 +14,7 @@ import { ComplianceWatchCard } from "./ComplianceWatchCard";
 import {
   tierBand, isTerminalState, showStatutoryCountdown, ackEnabled, complianceFigures,
   parseServiceGroup, matchComplianceClient, snoozeMaxDate, isSnoozeWithinCap,
-  refusalLabel, refusalHint,
+  refusalLabel, refusalHint, SNOOZE_CAP_DAYS, SNOOZE_UI_CAP_DAYS,
 } from "./complianceWatch";
 import type { QueueRow, ComplianceClient } from "../reviewTypes";
 
@@ -67,8 +67,10 @@ test("the three figures render with their basis labels + fmtCents", () => {
 
 test("a null figure degrades to the safe unavailable marker, never a crash", () => {
   const html = render({ client: mkClient({ confirmed_included_cents: null }) });
-  assert.ok(html.includes("confirmed included turnover"));
-  assert.ok(html.includes("—"), "absent cents → the — marker");
+  // Assert the CELL, not a bare "—": the always-on qualification text carries an em
+  // dash of its own, so `includes("—")` would pass even on a regression.
+  assert.match(html, /confirmed included turnover<\/td><td class="num">—<\/td>/, "the null cents cell renders the — marker");
+  assert.ok(html.includes("RM 12,000.00"), "the sibling figures still render");
 });
 
 // --- render: the always-on qualification ----------------------------------------
@@ -111,12 +113,31 @@ test("with no token the card asks for a JWT and renders no figures", () => {
 
 // --- pure: refusal (verbatim) ---------------------------------------------------
 
-test("refusalLabel renders the CLR code + reason verbatim; refusalHint maps the floors", () => {
+test("refusalLabel renders the CLR code + reason verbatim", () => {
   assert.equal(refusalLabel({ code: "CLR03", reason: "agent_identity" }), "CLR03 · agent_identity");
   assert.equal(refusalLabel({ code: "CLR11", reason: null }), "CLR11");
-  assert.equal(refusalHint("CLR03"), "Human bookkeeper+ only.");
-  assert.equal(refusalHint("CLR04"), "Admin required.");
-  assert.equal(refusalHint("CLR10"), "");
+});
+
+// CLR04 is the GENERIC authorization refusal from clara._human_ctx (no actor / no
+// membership / insufficient role) and every watch writer takes the SAME bookkeeper
+// floor — so it must NOT advise "admin". Only the not_liable_documented resolve has an
+// admin floor of its own (0016).
+test("a generic CLR04 carries no hint — the verbatim DB message is the guidance", () => {
+  assert.equal(refusalHint("CLR04", "ack", "registration_recorded"), "");
+  assert.equal(refusalHint("CLR04", "ack", "not_liable_documented"), "", "a stale select never re-labels an ack refusal");
+  assert.equal(refusalHint("CLR04", "snooze", "not_liable_documented"), "");
+  assert.equal(refusalHint("CLR04", null, "not_liable_documented"), "");
+  assert.equal(refusalHint("CLR04", "resolve", "registration_recorded"), "", "recording a registration stays bookkeeper+");
+});
+
+test("only the not-liable resolve claims the admin floor", () => {
+  assert.equal(refusalHint("CLR04", "resolve", "not_liable_documented"), "A not-liable resolution requires admin.");
+});
+
+test("CLR03 keeps its identity hint; every other code shows the badge alone", () => {
+  assert.equal(refusalHint("CLR03", "ack", "registration_recorded"), "Human bookkeeper+ only.");
+  assert.equal(refusalHint("CLR10", "snooze", "registration_recorded"), "");
+  assert.equal(refusalHint("CLR11", "resolve", "not_liable_documented"), "");
 });
 
 // --- pure: snooze date cap ------------------------------------------------------
@@ -131,6 +152,25 @@ test("the snooze date cap is a bounded 60-day window strictly after today", () =
   assert.equal(isSnoozeWithinCap("", now), false);
   assert.equal(isSnoozeWithinCap(null, now), false);
   assert.equal(isSnoozeWithinCap("garbage", now), false);
+});
+
+// The date input yields a bare yyyy-mm-dd picked in BROWSER-LOCAL time; the DB casts it
+// in the SERVER zone and compares against `now() + interval '60 days'` (an instant). At
+// exactly 60 the two disagree for a user ahead of the server (UTC+8 before 08:00
+// local) and the DB refuses CLR10 — so the UI offers 59, and the gate matches the max.
+test("the offered snooze max is 59 days — a day of slack under the DB's 60-day instant", () => {
+  const now = new Date(2026, 6, 23); // 2026-07-23 local
+  assert.equal(SNOOZE_CAP_DAYS, 60, "the DB cap is unchanged");
+  assert.equal(SNOOZE_UI_CAP_DAYS, 59);
+  assert.equal(snoozeMaxDate(now), "2026-09-20", "today + 59 days");
+  assert.equal(isSnoozeWithinCap("2026-09-20", now), true, "the offered max is acceptable");
+  assert.equal(isSnoozeWithinCap("2026-09-21", now), false, "the exact 60th day is no longer offered");
+});
+
+test("the gate and the input max can never disagree (any month boundary)", () => {
+  for (const now of [new Date(2026, 0, 31), new Date(2026, 1, 28), new Date(2026, 11, 15), new Date(2028, 1, 29)]) {
+    assert.equal(isSnoozeWithinCap(snoozeMaxDate(now), now), true, `max is within cap at ${now.toDateString()}`);
+  }
 });
 
 // --- pure: tier band + terminal/countdown gates + ack --------------------------

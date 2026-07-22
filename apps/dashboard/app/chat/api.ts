@@ -236,13 +236,23 @@ async function pgrestError(res: Response, what: string): Promise<PgrestError> {
   const detail = [body.code, body.message].filter(Boolean).join(" — ");
   const err = new Error(`${what} failed (${res.status})${detail ? `: ${detail}` : ""}`) as PgrestError;
   // Surface the governed CLR envelope so the je_review card can branch honestly:
-  // the CLR code lives in the message (house shape); the machine reason token lives
-  // in the exception DETAIL as `{"reason": <token>}` (INTERFACE-PINS §2 / C-20).
+  // the CLR code IS the SQLSTATE (PostgREST reports it as `body.code`); the machine
+  // reason token lives in the exception DETAIL as `{"reason": <token>}`
+  // (INTERFACE-PINS §2 / C-20). Kept in step with shared/wire.ts parseClrCode — this
+  // module deliberately keeps its own copies (sealed Slice-4 artifact).
   err.pgCode = body.code;
   err.pgDetails = body.details;
-  err.clr = (body.message ?? "").match(/CLR\d{2}/)?.[0] ?? null;
+  err.clr = parseClrCode(body.code, body.message);
   err.reason = parseReasonToken(body.details);
   return err;
+}
+
+/** The governed CLR code rides in the SQLSTATE (`using errcode='CLR21'`), which
+ *  PostgREST reports as `body.code`. No governed raise embeds the token in its message
+ *  text, so the message regex is a defensive fallback only. */
+export function parseClrCode(code?: string, message?: string): string | null {
+  if (code && /^CLR\d{2}$/.test(code)) return code;
+  return (message ?? "").match(/CLR\d{2}/)?.[0] ?? null;
 }
 
 /** The CLR21 discriminant (`amount_conflict` / `currency_unsupported` / …) rides in

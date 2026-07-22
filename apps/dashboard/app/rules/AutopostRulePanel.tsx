@@ -28,9 +28,13 @@ export function AutopostRulePanel({ token, rule, now, onChanged }: {
   const [err, setErr] = useState<string | null>(null);
   const [clr, setClr] = useState<{ code: string; reason: string | null } | null>(null);
   const [retireReason, setRetireReason] = useState("");
+  // CLR04 is the GENERIC authorization refusal (clara._human_ctx — no actor / no
+  // membership / insufficient role). This panel mixes floors: signing is admin+, but
+  // retiring is bookkeeper+ — so only a sign refusal may name admin.
+  const [adminFloor, setAdminFloor] = useState(false);
 
-  const run = async (fn: () => Promise<unknown>) => {
-    setBusy(true); setErr(null); setClr(null);
+  const run = async (fn: () => Promise<unknown>, adminOnly = false) => {
+    setBusy(true); setErr(null); setClr(null); setAdminFloor(adminOnly);
     try {
       // ADV-R3#6: a typed HTTP-200 refusal is NEVER success. The API layer
       // throws it error-shaped; this narrow is the belt should any caller
@@ -83,7 +87,7 @@ export function AutopostRulePanel({ token, rule, now, onChanged }: {
       {(canSign(rule) || canRetire(rule)) ? (
         <div className={styles.actions}>
           {canSign(rule) ? (
-            <button className={styles.button} disabled={busy} onClick={() => void run(() => signAutopostRule(token, rule.rule_id))}>
+            <button className={styles.button} disabled={busy} onClick={() => void run(() => signAutopostRule(token, rule.rule_id), true)}>
               {busy ? "Working…" : "Sign — make live (admin+)"}
             </button>
           ) : null}
@@ -99,7 +103,7 @@ export function AutopostRulePanel({ token, rule, now, onChanged }: {
       ) : null}
       <p className={styles.hint}>Bounds are frozen once live — widening a cap means retiring this rule and signing a fresh successor (append-only genealogy). Signing is the posting authority; the agent never signs.</p>
 
-      {clr ? <p className={styles.refusalNote}><span className={styles.refusalBadge}>{clr.code}{clr.reason ? ` · ${clr.reason}` : ""}</span>{clr.code === "CLR04" ? "Owner/admin only." : ""}</p> : null}
+      {clr ? <p className={styles.refusalNote}><span className={styles.refusalBadge}>{clr.code}{clr.reason ? ` · ${clr.reason}` : ""}</span>{clr.code === "CLR04" && adminFloor ? "Signing a rule live requires admin." : ""}</p> : null}
       {err ? <p className={styles.errorText}>{err}</p> : null}
     </div>
   );

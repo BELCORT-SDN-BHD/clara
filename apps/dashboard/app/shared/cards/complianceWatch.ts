@@ -23,7 +23,8 @@ export function tierBand(state: string | null): { label: string; tone: TierTone 
   }
 }
 
-/** A resolved watch is terminal — the card renders inert (the queue also filters it). */
+/** A resolved watch is terminal — the card renders inert. Defensive: the queue already
+ *  filters resolved watches out, so this branch is not reachable from a live envelope. */
 export function isTerminalState(state: string | null): boolean {
   return state === "resolved";
 }
@@ -79,6 +80,14 @@ export function complianceFigures(client: ComplianceClient | null): { label: str
 /** A snooze is bounded to 60 days (the DB refuses CLR10 past the cap). */
 export const SNOOZE_CAP_DAYS = 60;
 
+/** The UI offers 59, not 60. The date input yields a bare `yyyy-mm-dd` picked in
+ *  BROWSER-LOCAL time, which Postgres casts to timestamptz at 00:00 in the SERVER
+ *  zone, while the DB compares it against `now() + interval '60 days'` — a real
+ *  instant. For a user ahead of the server (UTC+8 between 00:00 and 08:00 local) the
+ *  exact-60th date lands past that instant and is refused CLR10. One day of slack
+ *  keeps every date the UI can offer acceptable to the DB in any zone. */
+export const SNOOZE_UI_CAP_DAYS = SNOOZE_CAP_DAYS - 1;
+
 function isoDate(y: number, mZeroBased: number, day: number): string {
   const d = new Date(y, mZeroBased, day);
   const yy = d.getFullYear();
@@ -87,13 +96,14 @@ function isoDate(y: number, mZeroBased: number, day: number): string {
   return `${yy}-${mm}-${dd}`;
 }
 
-/** The `max` attribute for the snooze date input: today + 60 days (yyyy-mm-dd). */
+/** The `max` attribute for the snooze date input (yyyy-mm-dd) — see SNOOZE_UI_CAP_DAYS. */
 export function snoozeMaxDate(now: Date): string {
-  return isoDate(now.getFullYear(), now.getMonth(), now.getDate() + SNOOZE_CAP_DAYS);
+  return isoDate(now.getFullYear(), now.getMonth(), now.getDate() + SNOOZE_UI_CAP_DAYS);
 }
 
 /** True when a chosen snooze date (yyyy-mm-dd) is strictly after today AND within the
- *  60-day cap — the UI half of the DB's bounded-snooze guard. */
+ *  offered cap — the UI half of the DB's bounded-snooze guard. Shares SNOOZE_UI_CAP_DAYS
+ *  with snoozeMaxDate so the gate and the input's `max` can never disagree. */
 export function isSnoozeWithinCap(untilIso: string | null, now: Date): boolean {
   if (!untilIso) return false;
   const parts = untilIso.split("-");
@@ -104,7 +114,7 @@ export function isSnoozeWithinCap(untilIso: string | null, now: Date): boolean {
   if (!Number.isInteger(y) || !Number.isInteger(mo) || !Number.isInteger(da)) return false;
   const until = new Date(y, mo - 1, da).getTime();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const max = new Date(now.getFullYear(), now.getMonth(), now.getDate() + SNOOZE_CAP_DAYS).getTime();
+  const max = new Date(now.getFullYear(), now.getMonth(), now.getDate() + SNOOZE_UI_CAP_DAYS).getTime();
   return until > today && until <= max;
 }
 
@@ -117,10 +127,26 @@ export function refusalLabel(clr: { code: string; reason: string | null }): stri
   return `${clr.code}${clr.reason ? ` · ${clr.reason}` : ""}`;
 }
 
-/** A short human suffix for the two floor refusals this card can hit (CLR03 agent
- *  identity, CLR04 not-liable needs admin); every other code shows the verbatim badge only. */
-export function refusalHint(code: string): string {
+/** Which action produced the refusal — the hint below is action-specific. */
+export type WatchAction = "ack" | "snooze" | "resolve";
+
+/** A short human suffix for a governed refusal, or "" to show the verbatim badge alone.
+ *
+ *  CLR04 carries NO general hint: it is the GENERIC authorization refusal from
+ *  `clara._human_ctx` (0004) — raised alike for no authenticated actor, no active
+ *  membership, and insufficient role — and all three watch writers take the SAME
+ *  bookkeeper floor (0016 ack/snooze/resolve). Advising "admin" there would be wrong
+ *  for the common case (a viewer needs bookkeeper, not admin); the verbatim DB message
+ *  is the honest guidance. The ONE admin floor is the `not_liable_documented` resolve
+ *  (0016 — exemption-equivalent), hinted only against that exact action + conclusion.
+ *
+ *  CLR03 is unreachable from this card: the writers raise it only for a wake credential
+ *  or an `is_agent` user, which a human dashboard JWT cannot produce. Kept as harmless
+ *  defence-in-depth so an identity mix-up would still read honestly. */
+export function refusalHint(code: string, action: WatchAction | null, conclusion: ResolveConclusion): string {
+  if (code === "CLR04" && action === "resolve" && conclusion === "not_liable_documented") {
+    return "A not-liable resolution requires admin.";
+  }
   if (code === "CLR03") return "Human bookkeeper+ only.";
-  if (code === "CLR04") return "Admin required.";
   return "";
 }

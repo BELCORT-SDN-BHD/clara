@@ -387,7 +387,7 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
             amountReason: amountOverrideReason,
             setAmountReason: setAmountOverrideReason,
             machineRegion: machineFact?.region ?? null,
-            showDuplicate: (clr?.reason === "duplicate_bill") || r.near_duplicates.length > 0,
+            showDuplicate: clr?.reason === "duplicate_bill" || clr?.reason === "duplicate_sales" || r.near_duplicates.length > 0, // 0016 raises a token per direction
             duplicateReason: duplicateOverrideReason,
             setDuplicateReason: setDuplicateOverrideReason,
           }}

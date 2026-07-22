@@ -17,7 +17,7 @@ import { fmtCents, shortId } from "../fmt";
 import {
   tierBand, isTerminalState, showStatutoryCountdown, ackEnabled, complianceFigures,
   parseServiceGroup, snoozeMaxDate, isSnoozeWithinCap, refusalLabel, refusalHint,
-  type TierTone, type ResolveConclusion,
+  type TierTone, type ResolveConclusion, type WatchAction,
 } from "./complianceWatch";
 import styles from "./cards.module.css";
 
@@ -44,6 +44,9 @@ export function ComplianceWatchCard({ token, row, client, watchId, onChanged }: 
   const [snoozeReason, setSnoozeReason] = useState("");
   const [conclusion, setConclusion] = useState<ResolveConclusion>("registration_recorded");
   const [evidence, setEvidence] = useState("");
+  // Which action a refusal came from — CLR04 is generic, so only the resolve action
+  // (and only for the admin-floor conclusion) may claim an admin-specific hint.
+  const [lastAction, setLastAction] = useState<WatchAction | null>(null);
 
   if (!token) {
     return (
@@ -107,7 +110,7 @@ export function ComplianceWatchCard({ token, row, client, watchId, onChanged }: 
           <div className={styles.section}>
             <div className={styles.actions}>
               <input className={styles.reasonInput} aria-label="Acknowledge rationale" placeholder="Acknowledge rationale" value={rationale} onChange={(e) => setRationale(e.target.value)} />
-              <button className={styles.button} disabled={busy || !ackEnabled(rationale)} onClick={() => void act(() => ackComplianceWatch(token, watchId, rationale.trim()), () => { setRationale(""); onChanged(); })}>
+              <button className={styles.button} disabled={busy || !ackEnabled(rationale)} onClick={() => { setLastAction("ack"); void act(() => ackComplianceWatch(token, watchId, rationale.trim()), () => { setRationale(""); onChanged(); }); }}>
                 {busy ? "Working…" : "Acknowledge"}
               </button>
             </div>
@@ -118,7 +121,7 @@ export function ComplianceWatchCard({ token, row, client, watchId, onChanged }: 
             <div className={styles.actions}>
               <input className={styles.input} type="date" aria-label="Snooze until" max={snoozeMaxDate(now)} value={snoozeUntil} onChange={(e) => setSnoozeUntil(e.target.value)} />
               <input className={styles.reasonInput} aria-label="Snooze rationale" placeholder="Snooze rationale" value={snoozeReason} onChange={(e) => setSnoozeReason(e.target.value)} />
-              <button className={styles.buttonSecondary} disabled={busy || !snoozeReason.trim() || !isSnoozeWithinCap(snoozeUntil, now)} onClick={() => void act(() => snoozeComplianceWatch(token, watchId, snoozeUntil, snoozeReason.trim()), () => { setSnoozeUntil(""); setSnoozeReason(""); onChanged(); })}>
+              <button className={styles.buttonSecondary} disabled={busy || !snoozeReason.trim() || !isSnoozeWithinCap(snoozeUntil, now)} onClick={() => { setLastAction("snooze"); void act(() => snoozeComplianceWatch(token, watchId, snoozeUntil, snoozeReason.trim()), () => { setSnoozeUntil(""); setSnoozeReason(""); onChanged(); }); }}>
                 Snooze
               </button>
             </div>
@@ -132,7 +135,7 @@ export function ComplianceWatchCard({ token, row, client, watchId, onChanged }: 
                 <option value="not_liable_documented">not liable — documented</option>
               </select>
               <input className={styles.reasonInput} aria-label="Resolution evidence" placeholder="Evidence (required)" value={evidence} onChange={(e) => setEvidence(e.target.value)} />
-              <button className={styles.buttonSecondary} disabled={busy || !evidence.trim()} onClick={() => void act(() => resolveComplianceWatch(token, watchId, conclusion, evidence.trim()), () => { setEvidence(""); onChanged(); })}>
+              <button className={styles.buttonSecondary} disabled={busy || !evidence.trim()} onClick={() => { setLastAction("resolve"); void act(() => resolveComplianceWatch(token, watchId, conclusion, evidence.trim()), () => { setEvidence(""); onChanged(); }); }}>
                 Resolve
               </button>
             </div>
@@ -141,7 +144,7 @@ export function ComplianceWatchCard({ token, row, client, watchId, onChanged }: 
         </>
       )}
 
-      {clr ? <p className={styles.refusalNote}><span className={styles.refusalBadge}>{refusalLabel(clr)}</span>{refusalHint(clr.code)}</p> : null}
+      {clr ? <p className={styles.refusalNote}><span className={styles.refusalBadge}>{refusalLabel(clr)}</span>{refusalHint(clr.code, lastAction, conclusion)}</p> : null}
       {err ? <p className={styles.errorText}>{err}</p> : null}
     </div>
   );

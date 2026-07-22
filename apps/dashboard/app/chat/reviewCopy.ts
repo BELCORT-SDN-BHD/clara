@@ -2,7 +2,7 @@
 // (INTERFACE-PINS §2/§6). The verbatim DB message always renders too; this maps the
 // machine reason discriminant to human guidance for the exact next step.
 
-import { counterpartyNoun, docNoun, type Direction } from "../shared/direction";
+import { counterpartyNoun, type Direction } from "../shared/direction";
 
 /** CLR21 discriminants (draft/approve line-law refusals). */
 export const CLR21_COPY: Record<string, string> = {
@@ -12,18 +12,23 @@ export const CLR21_COPY: Record<string, string> = {
   evidence_invalid: "The cited evidence is missing or does not match the document — re-cite before approving.",
   double_coded: "This filing is already coded — an approved entry or another open draft already binds it.",
   duplicate_bill: "This looks like a duplicate of an approved bill (same vendor + invoice number). Override with a reason to proceed, or discard.",
+  duplicate_sales: "This looks like a duplicate of an approved sales invoice (same customer + invoice number, or same customer + date + total). Override with a reason to proceed, or discard.",
 };
 
 /** §6.2 direction-aware CLR21 copy. Same wording as CLR21_COPY for a null/purchase
- *  direction; a sales direction swaps the counterparty (vendor→customer) and document
- *  (bill→invoice) nouns for the two direction-sensitive discriminants. Keeps CLR21_COPY
- *  exported unchanged for any other caller. */
+ *  direction; a sales direction swaps the counterparty noun (vendor→customer) for the
+ *  direction-sensitive discriminant. Keeps CLR21_COPY exported unchanged for any other
+ *  caller.
+ *
+ *  The duplicate discriminants are deliberately NOT remapped by direction: 0016 gates
+ *  the `duplicate_bill` raise on `coding_kind='supplier_bill'` (so it is always a
+ *  purchase) and raises the DISTINCT `duplicate_sales` token for the sales kinds. Each
+ *  token already carries its own direction; a sales remap of `duplicate_bill` would be
+ *  copy for a combination the DB cannot produce. */
 export function clr21Copy(reason: string, direction: Direction | null): string | undefined {
   if (direction === "sales") {
     const noun = counterpartyNoun(direction); // "customer"
-    const doc = docNoun(direction); // "invoice"
     if (reason === "vendor_malformed") return `The ${noun} proposal is malformed — fix the ${noun} before approving.`;
-    if (reason === "duplicate_bill") return `This looks like a duplicate of an approved ${doc} (same ${noun} + invoice number). Override with a reason to proceed, or discard.`;
   }
   return CLR21_COPY[reason];
 }
