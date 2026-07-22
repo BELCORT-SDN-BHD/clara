@@ -12,11 +12,13 @@ v2.1; `docs/architecture/ARCHITECTURE.md` §4 + Appendix A; migration
 - **Durable substrate**: the Workflow DevKit Postgres world (`workflow` +
   `@workflow/world-postgres`, `ai@7.0.31`), built by Nitro with the
   `workflow/nitro` compiler module (Appendix A).
-- **The chat loop** (`workflows/chatTurn.v1.ts` + its FROZEN closure
-  `chatTurn.impl.ts` / `chatTurn.prompt.ts`): a read-only advisor that streams
-  the model to the run's writable, reads the client context pack with a
-  per-attempt wake credential (minted INSIDE the step, never crossing a step
-  boundary), and parks on a hook when it needs a firm-visible clarify.
+- **The chat loop** (`workflows/chatTurn.v5.ts` + its FROZEN closure
+  `chatTurn.v5.impl.ts` / `chatTurn.v5.prompt.ts`; the v1→v5 history follows
+  Appendix A — v1–v4 stay frozen + reachable for parked runs): a coding-capable
+  advisor with the `draft_journal_entry` write tool that streams the model to
+  the run's writable, reads the client context pack with a per-attempt wake
+  credential (minted INSIDE the step, never crossing a step boundary), and
+  parks on a hook when it needs a firm-visible clarify.
 - **Two-login pools** (`lib/pools.mjs`): a `clara_runtime` pool + a read-only
   `clara_agent_ro` pool, txn-local GUCs, ROLLBACK-before-release,
   discard-on-any-connection-error (the P4 discipline).
@@ -24,8 +26,11 @@ v2.1; `docs/architecture/ARCHITECTURE.md` §4 + Appendix A; migration
   principal + own-OR-firm-shared session predicate (indistinguishable 404).
 - **Control listener** (`lib/control.mjs`): leased clarify delivery + cancel
   settlement. **Leader loop** (`lib/leader.mjs`): routing + drain (`lib/drain.mjs`)
-  + reconcile (`lib/reconciler.mjs`). **Supervisor** (`scripts/serve.mjs`):
-  one crash-only process group.
+  + reconcile (`lib/reconciler.mjs`). **Consumer lanes**, each on its OWN
+  dedicated connection + advisory lock: matcher (`lib/matcher.mjs`), autodraft
+  (`lib/autodraft.mjs`), local_facts (`lib/local-facts.mjs`), rule_post
+  (`lib/rule-post.mjs`) — plus the managed clamd scanner (`lib/scan.mjs`, no DB
+  session). **Supervisor** (`scripts/serve.mjs`): one crash-only process group.
 - **HTTP** (`src/index.ts`): chat sessions/messages/turns, an SSE stream that
   survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7).
 - **Workflow-versioning**: `registry.ts` names the newest version enqueue sites
@@ -77,17 +82,20 @@ There is deliberately no runtime status route. Human status reads use migration
 `RELAY_TEST_MODE=1` is the only adapter gate: tests inject/localize scanner,
 Storage, and Azure behavior. The real production adapters have no dev bypass.
 
-The connection ceiling is **18 sessions**: runtime pool 5 + read pool 5 + WDK
-engine 5 + control/router LISTEN 2 + the matcher lane's leader session 1. Document
+The connection ceiling is **23 sessions**: runtime pool 5 + read pool 5 + WDK
+engine 5 + control/router LISTEN 2 + the four consumer-lane leader sessions
+(matcher, autodraft, local_facts, rule_post) 4 + the write pool 2. Document
 intake and extraction reuse short checkouts from the existing runtime pool; no DB
 connection is held while streaming, scanning, uploading, downloading, or calling
 Azure.
 
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
-`chatTurn_v2` (registry-repointed from v1; v1 stays frozen for parked runs) adds a
-narrow WRITE capability: the model can **draft** one supplier-bill journal entry for a
-human to approve — it never approves or posts (agent-never-signs, ADR-015). New in v2:
+`chatTurn_v2` (Slice 6) added the narrow WRITE capability; the registry now runs
+`chatTurn_v5` (v1–v4 stay frozen + reachable for parked runs): the model can **draft**
+ONE journal entry per turn — a supplier bill, a sales invoice / sales credit note, or
+a generic voucher-style `journal_entry` — always for a human to approve; it never
+approves or posts (agent-never-signs, ADR-015). New in v2:
 in-turn attachment perception (`read_document`), firm-scoped read tools
 (`list_unassigned_documents`), the `draft_journal_entry` write tool, and the
 `je_review` / `refusal` typed parts. Every read/write is wake-scoped **OBO the turn's
@@ -142,7 +150,7 @@ pnpm --filter @clara/runtime build && pnpm --filter @clara/runtime start
 ## Versioning discipline (do not skip)
 
 Per Appendix A, a deployed workflow body is immutable once any run can be in
-flight. Never edit a `// @frozen` file — add `chatTurn.v2.ts` and repoint
+flight. Never edit a `// @frozen` file — add `chatTurn.v6.ts` and repoint
 `registry.ts`. Renaming/deleting an export with in-flight runs is forbidden
 (the workflow name derives from path+export; a rename strands parked runs).
 

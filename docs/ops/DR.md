@@ -190,12 +190,13 @@ you have never restored is not a backup.
 > `db:backup:full` (owners + privileges + the four authoritative schemas incl.
 > `workflow_drizzle`), `deploy/roles-bootstrap.sql`, `db:restore:full`, and the
 > `db:dr:verify` battery — see **`docs/ops/DR-full-drill.md`**. It was rehearsed
-> end-to-end on a local `postgres` throwaway (§5b), and CI runs the whole
-> backup→restore→verify chain on an ephemeral pair (the "DR full-profile round-trip" CI step). What
-> **remains** is the **fresh-Supabase-project drill** (real `auth`/`storage`
-> recovery + encrypted off-site scheduling + freshness alerts), which is
-> **OWNER-GO-gated** and tracked in `docs/PROJECTLOG.md` PART 2. Do not treat the
-> single-schema drill as evidence of full recoverability.
+> end-to-end on a local `postgres` throwaway, CI runs the whole
+> backup→restore→verify chain on an ephemeral pair (the "DR full-profile round-trip" CI step), and the
+> **fresh-Supabase-project drill is DONE** (2026-07-20, **177/0 STRICT** — §5b;
+> real `auth`/`storage` recovery included). What **remains** is only the **R2
+> off-site wiring** (encrypted scheduled dumps + freshness alerts; PITR stays a
+> deferred owner item — §8). Do not treat the single-schema drill alone as
+> evidence of full recoverability — §5b is that evidence.
 
 ### 5b. Full-profile fresh-project drill — **EXECUTED AND PASSED, 2026-07-20**
 
@@ -281,8 +282,8 @@ When the DB is down, `/ready` returns `{"ready":false,...}` with HTTP 503.
 
 ## 7. SLO + alerting plan
 
-Targets to enforce once the runtime is deployed (Fly) — the probe and DB-backed
-run history exist now; the alert wiring is a fast follow-up.
+Targets to enforce — the runtime is deployed (Fly); the probe and DB-backed
+run history exist now; the alert wiring itself is the open piece.
 
 | SLO | Target | Signal | Alert when |
 |---|---|---|---|
@@ -328,13 +329,13 @@ escalation path for the pilot. The alerting **wiring** is a follow-up; the
    §6 off-site design (OWNER DECISION).
 4. **Wire the alerting** in §7 once the runtime is deployed (the dead-man's-switch
    freshness alarm is the §6 recommendation).
-5. **Full-profile DR — tooling BUILT + rehearsed; the fresh-project drill is the
-   remaining gate.** `db:backup:full` (owners+privileges, four schemas),
+5. **Full-profile DR — DONE.** `db:backup:full` (owners+privileges, four schemas),
    `deploy/roles-bootstrap.sql`, `db:restore:full`, and the `db:dr:verify` battery
-   are built, rehearsed on a local throwaway (§5b), and CI-guarded (the "DR full-profile round-trip" CI step).
-   The **fresh-Supabase-project drill** (real `auth`/`storage` recovery + off-site
-   scheduling + freshness alerts) is **OWNER-GO-gated** and **REQUIRED before any real
-   client data**. Runbook: `docs/ops/DR-full-drill.md`. Tracked in `docs/PROJECTLOG.md` PART 2.
+   are built, rehearsed, and CI-guarded (the "DR full-profile round-trip" CI step);
+   the **fresh-Supabase-project drill EXECUTED AND PASSED 2026-07-20** (**177/0
+   STRICT**, ADR-020 — §5b; real `auth`/`storage` recovery included). The only
+   remaining off-site gate is the **R2 wiring** (item 2: scheduling + freshness
+   alerts). Runbook: `docs/ops/DR-full-drill.md`.
 
 ---
 

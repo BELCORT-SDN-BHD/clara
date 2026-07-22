@@ -97,9 +97,10 @@ transaction) carries a deploy-time obligation once a **live runtime** exists:
 > the writers (stop accepting new wake/human write RPCs, let in-flight ones drain),
 > apply the migration, then resume.
 
-This is **materially zero-risk today** — no runtime is deployed until Slice 4, and
-CI / throwaway targets have no concurrent writers — so `0005` needs no special
-handling now. The rule binds the first live deploy that ships a writer-body change.
+This was **materially zero-risk pre-Slice-4** — no runtime deployed, and
+CI / throwaway targets have no concurrent writers — so `0005` needed no special
+handling. The runtime is live since Slice 4: the rule binds every live deploy that
+ships a writer-body change.
 (Design authority: `docs/plan/slice3-event-spine-contract.md` v2.2 §D1; the in-flight-body
 behaviour is a PostgreSQL property, not a Clara mechanism.)
 

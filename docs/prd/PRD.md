@@ -49,7 +49,7 @@ One-firm-per-user; the last active owner cannot be removed.
 - Every entry records its **maker** (the human or agent that drafted/last-edited it) and its **checker** (the approver), as distinct modelled identities.
 - On the **high-stakes lane** (tax-affecting, closed-period, large-amount, year-end close, opening balances) the checker **must be a different human** from the last human editor — a hard DB gate where the firm has ≥2 eligible staff.
 - Routine entries keep the efficient one-person flow.
-- **The agent can never satisfy any human sign-off** — auto-post-sweep acknowledgements and all approvals require a bookkeeper+ human actor; Clara is never the approving identity on her own postings.
+- **The agent can never satisfy any human sign-off** — every agent-drafted entry requires a bookkeeper+ human approval; standing-rule posts execute under the **signing admin's** authority (`checker_actor = rule.signed_by`, ADR-025) through the unchanged predicate wall. The invariant is *no unbounded / agent-initiated auto-approve*; Clara is never the approving identity on her own postings.
 - **Solo firms** (one eligible human) record an explicit self-approval attestation instead of being hard-blocked.
 - **Authority is live, not stale-token** — a removed or demoted member loses read+write immediately (session/authority revocation), closing the prior build's stale-JWT hole (GAP1-4).
 
@@ -90,7 +90,7 @@ One-firm-per-user; the last active owner cannot be removed.
 20. **The per-client knowledge wiki** (§6a) — Clara's compounding client memory, informing every decision.
 21. Members/RBAC, ⌘K command palette, settings, export/job-lane/session overlays.
 
-**MyInvois:** Track B (hybrid SST output-tax posting) is in-scope; Track C (inbound UBL-XML parse) is contract + schema-readiness only; **outbound issuance is out of scope**.
+**MyInvois:** Track B (hybrid SST output-tax posting) is in-scope; Track C (inbound UBL-XML parse) is BUILT + LIVE as a local no-egress structured engine (Wave A2, ADR-025/026/027); **API pull + outbound issuance remain future scope**.
 
 ---
 
@@ -162,7 +162,7 @@ The prior build had no event layer, no context pack, and no stale-context detect
 | An autonomy-dial settings page | Autonomy lives in the KB rulebook + the structural invariants + the `estimated_risk` gate. |
 | Billing/subscriptions (deferred pre-launch) | Interim guardrail = email-verify + fail-closed admission gate + per-firm usage guardrails (metering/budgets/concurrency — fixes GAP4-5). |
 | Held WebSocket chat | SSE only. |
-| Outbound MyInvois issuance | Track C is inbound-only, contract-stage. |
+| Outbound MyInvois issuance | Track C is inbound-only — the local no-egress UBL parse is live (ADR-025/026/027); API pull + issuance stay future scope. |
 | Multi-entity / group consolidation | Single-entity books per client. |
 | Perpetual inventory | Periodic closing-stock only. |
 | A payroll engine | Code PCB/EPF/SOCSO/EIS + calendar the deadlines. |
@@ -180,4 +180,4 @@ The prior build had no event layer, no context pack, and no stale-context detect
 2. **C6 compliance execution** — the DPA, firm-facing disclosure, and PDPA cross-border transfer check are Gate-2 checklist items that must be satisfied before any firm data flows to a vendor trace platform.
 3. **Billing model + scale guardrails** — the pre-public-launch gate; per-firm token/usage cap design.
 4. **Tax-computation v1 vs v1.1** — the draft computation is the last slice; the slip decision is data-driven during Phase 4.
-5. **MyInvois depth** — Track B built; Track C contract-only; outbound deferred.
+5. **MyInvois depth** — Track B built; Track C inbound UBL parse LIVE as a local no-egress engine (Wave A2, ADR-025/026/027); API pull + outbound issuance deferred.
