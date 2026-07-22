@@ -379,11 +379,17 @@ test("§2 future-dated entries are excluded; a reversal MIRROR is included (the 
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "G");
   assert.equal(Number(w.confirmed_included_cents), 700_00, "a future-dated entry contributes NOTHING (70,000¢ = the two past entries)");
-  // Reverse the RM300 entry (routine → the mirror auto-approves) — mirror included ⇒ nets out.
+  // Reverse the RM300 entry (routine → the mirror auto-approves). ADV-7
+  // (round 1): the mirror posts TODAY, i.e. into the month IN PROGRESS — so it
+  // nets immediately in the PROVISIONAL figure, while the statutory figure
+  // (completed months only, s.12 month-end basis) keeps the original until the
+  // mirror's month completes. The pair still nets — in the window that
+  // contains both legs.
   await reverseEntry(users.bob, { entry: revTarget, reason: "rig watch reversal", opKey: opk("rev") });
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
-  assert.equal(Number(w.confirmed_included_cents), 400_00, "the reversal mirror is INCLUDED so the reversed pair nets to zero (40,000¢ remain)");
+  assert.equal(Number(w.confirmed_included_cents), 700_00, "the STATUTORY figure (completed months) keeps the original until the mirror's month ends");
+  assert.equal(Number(w.provisional_included_cents), 400_00, "the PROVISIONAL figure nets the reversed pair immediately (40,000¢ remain)");
 });
 
 test("P7 closing-transfer: is_year_end alone still COUNTS; is_year_end + closing_transfer is EXCLUDED; the column defaults false", async (t) => {

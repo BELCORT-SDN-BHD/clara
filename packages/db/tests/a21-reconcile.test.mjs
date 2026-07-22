@@ -121,7 +121,9 @@ test("§7 EXPIRY: a live rule past expires_at HARD-EXPIRES on the daily reconcil
   const { users, clients } = world;
   const cp = await makeVendor(users.alice, { client: clients.A1, name: `RECEXP ${randomUUID().slice(0, 6)}`, reg: "201801070001" });
   assert.ok(cp, "the expiry-cell vendor exists (mandatory setup)");
-  const rule = await rawLiveRule({ client: clients.A1, cp, createdAgo: "13 months", expiresIn: "-1 day" });
+  // ADV-6 (round 1): rule lifetime is structurally <=12 months — the honest
+  // expired shape is a full-term rule whose 12 months have lapsed.
+  const rule = await rawLiveRule({ client: clients.A1, cp, createdAgo: "12 months", expiresIn: "-1 day" });
   assert.equal((await ruleRowById(rule))?.status, "live", "the fixture rule is live-but-expired (mandatory setup)");
   await callReconcile();
   const row = await ruleRowById(rule);

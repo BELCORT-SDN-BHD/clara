@@ -203,20 +203,11 @@ test("P2 the 3-sighting vendor_account auto-proposal stays DEBIT-scoped — 3 cr
   assert.ok(cp, "customer exists (mandatory setup)");
   await salesSighting(users.alice, { client: clients.A2, cp, date: "2026-05-01" });
   await salesSighting(users.alice, { client: clients.A2, cp, date: "2026-05-02" });
-  // INTEGRATION (CLASS T): the PINNED invariant is that the auto-proposal query
-  // stays side='debit'-scoped — CREDIT sightings must never feed it, so no
-  // vendor_account rule may key on the INCOME account. The as-built (ratified)
-  // debit pool DOES record the sales entries' AR-control debits, so a
-  // vendor_account rule on the RECEIVABLE account can legally breed from the
-  // debit side — a design smell flagged for the adversarial pass, but not the
-  // pinned cell.
+  // ADV-2 (round 1): the auto-proposal pool now admits only canonical VENDOR
+  // counterparties onto NON-CONTROL accounts — a customer breeds NOTHING, on
+  // any side (the round-0 tolerance for AR-control breeding is repealed).
   const auto = (await codingRuleRows(clients.A2)).filter((r) => r.counterparty_id === cp && r.rule_type === "vendor_account");
-  assert.equal(auto.filter((r) => r.account_code === REV).length, 0,
-    "≥3 CREDIT sightings never auto-propose a vendor_account rule on the income account (the proposal query is side='debit'-scoped)");
-  for (const r of auto) {
-    assert.equal(r.account_code, REC, `any bred vendor_account rule keys on the DEBIT-side AR control only (got ${r.account_code})`);
-    noteLane(`as-built: a customer's AR-control debit sightings bred a vendor_account rule on ${r.account_code} — adversarial-pass flag`);
-  }
+  assert.equal(auto.length, 0, "≥3 CREDIT sightings never auto-propose a vendor_account rule (customer + control-class pools are gated out)");
 });
 
 // ===========================================================================
