@@ -102,18 +102,22 @@ the dashboard at **Cloudflare Pages `app.clarabook.com`** (Vercel dropped);
 GATE 3 closed beta-real earlier (17/17 replay, AP gate exact RM 1,350,938.21,
 kill-mid-workflow exactly-once); the hardening interlude (ADR-020/021) closed
 the DR gate + `acl-baseline` live; repo at `github.com/BELCORT-SDN-BHD/clara`,
-agent identity `belcorttao`.** **WAVE A2 IS BUILT + MERGED but NOT YET DEPLOYED
-(2026-07-22, ADR-025 design / ADR-026 build, PRs #41+#42 on `main` `a4785e9`):**
+agent identity `belcorttao`.** **WAVE A2 IS FULLY LIVE AND THE §9 EVAL IS CLOSED
+(2026-07-22, ADR-025 design / ADR-026 build / ADR-027 deploy+eval, PRs #41–#46):**
 the sales-invoice/AR side + MyInvois UBL local no-egress parse + SST 3-leg +
-CN/DN + **purchase-only** human-signed bounded auto-posting + the `packages/backup`
-R2 app (migration `0015`, runtime with `fast-xml-parser`, the `/rules` dashboard).
-It survived a **six-round cross-model adversarial hardening** — the Codex lane
-caught a real auto-post money-laundering path the native review rated sound;
-closed structurally (count/identity leg gate + corroboration-required gate) and
-re-verified to RESOLVED. **LIVE POSTURE: Supabase at 14 migrations (0015 NOT yet
-applied), Fly runtime v19 (the A2 image NOT yet deployed), dashboard auto-deploys
-from `main`.** **IMMEDIATE NEXT = the owner-`!`-gated Wave-A2 DEPLOY CEREMONY**
-(backup → apply 0015 → deploy the runtime → re-onboard the CoA `300-000` → verify
-→ the §9 RPR sales+JV eval). **Canary `daba7f2e` stays ARMED, due 2026-08-02 —
-NEVER answer it.** After deploy: Wave A2.1 (sales autopost + purchase SST),
-the R2 wiring, then Wave B (knowledge + onboarding) per REBUILD-PLAN.
+CN/DN + **purchase-only** human-signed bounded auto-posting, deployed through the
+owner-`!`-gated ceremony (0015 applied, CoA `300-000` re-onboarded) and proven by
+the live eval — **Gate A exact** (Σ 6 sales invoices = RM 1,973,332.91 = 300-000
+debits = 500-000 credits; ONE customer with the D&Dream→Dare-To-Dream
+`former_name` alias via the audited rename) + **Gate B exact** (6 JVs chat-coded
+as generic `journal_entry` drafts; salaries 405,000 / EPF-er 52,200 / SOCSO-er
+2,187.15 / EIS-er 249.90 / share capital 1,000). The eval caught **three real
+as-built gaps, fixed live** (ADR-027): the onboard script's stale `receivable`
+validation (#44), the frozen chat tool's supplier-bill-only draft lane →
+**`chatTurn_v4`** (#45), and the missing NULL-kind voucher lane → **`chatTurn_v5`**
+(#46) — both version bumps per Appendix A, freeze manifest 29→41 append-only.
+**LIVE POSTURE: Supabase at 15 migrations, Fly runtime v23 (`chatTurn_v5`),
+dashboard auto-deploys from `main`.** **Canary `daba7f2e` stays ARMED, due
+2026-08-02 — NEVER answer it.** NEXT: the R2 wiring, Wave A2.1 (sales autopost +
+purchase SST + the eval's finding ledger incl. the STRUCTURAL SST-threshold
+visibility check), then Wave B (knowledge + onboarding) per REBUILD-PLAN.
