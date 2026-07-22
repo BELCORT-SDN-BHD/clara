@@ -1,10 +1,10 @@
 // @frozen
 //
 // BINDING versioning policy (ARCHITECTURE Appendix A): a deployed workflow body is IMMUTABLE
-// once any run can be in flight. autoDraft_v2 is a NEW frozen closure (registry adds
-// `autoDraft: autoDraft_v2`); chatTurn_v3 and every other export are byte-untouched. Do NOT
+// once any run can be in flight. autoDraft_v2 is a NEW frozen closure (registry repoints
+// `autoDraft: autoDraft_v2`); autoDraft_v1 and every other export are byte-untouched. Do NOT
 // edit this file or its import closure (autoDraft.v2.impl / .tools / .infra / .prompt / .errors)
-// once deployed — ship a behavioural change as autoDraft_v2.
+// once deployed — ship a behavioural change as autoDraft_v3.
 //
 // autoDraft_v2 — the UNATTENDED auto-draft sweep (contract §3 / companion §4-5). One admitted
 // READY bill per task: claim (begin_autodraft_task: CAS queued->running + context + reserved
