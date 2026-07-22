@@ -89,6 +89,22 @@ test("punctuation/spacing variants of a registered NAME match (both sides share 
   assert.equal(r.candidates[0].rule_kind, "name_exact");
 });
 
+// ADV-R3#4: strip-FIRST-then-lowercase — byte-equivalent with the SQL
+// lower(regexp_replace(x,'[^a-zA-Z0-9]','','g')) under Unicode case expansion.
+test("Unicode case expansion follows SQL: 'İNC' strips to 'nc' (never the JS lowercase-first 'inc')", () => {
+  const r = matchCandidates({
+    regions: [{ regionId: "r", text: "İNC" }],
+    clients: [{ clientId: "js", name: "inc" }, { clientId: "sql", name: "NC" }],
+  });
+  assert.equal(r.candidates.length, 1, "exactly the SQL-normalized pointer matches");
+  assert.equal(r.candidates[0].client_id, "sql", "'İNC' resolves as SQL does ('nc'), never as JS lowercase-first ('inc')");
+});
+
+test("the replay version is matcher-v2 (the v2 normalization must never share v1 replay keys)", async () => {
+  const { MATCHER_VERSION } = await import("../lib/matcher.mjs");
+  assert.equal(MATCHER_VERSION, "matcher-v2");
+});
+
 test("strip-normalization PRESERVES ambiguity: two clients colliding on the canonical form abstain", () => {
   const r = matchCandidates({
     regions: [{ regionId: "r", text: "Acme Sdn Bhd" }],

@@ -149,15 +149,21 @@ test("PRESTATE B4d: the collision is retired + SURFACED (no silent first-wins); 
   const aLive = (await c.query(
     "select count(*)::int as n from clara.client_aliases where firm_id=$1 and client_id=$2 and alias_normalized='acmesdnbhd' and retired_at is null",
     [ids.firm, ids.clientA])).rows[0];
-  assert.equal(aLive.n, 0, "NO replacement was minted for client A — the canonical form belongs to another client (ambiguity preserved)");
+  assert.equal(aLive.n, 0, "NO replacement was minted for client A — the canonical form is contested");
+  // ADV-R3#3 (RATIFIED): NOBODY keeps the name — the canonical OWNER's live row
+  // is retired too; ambiguity is surfaced for human re-recording, never
+  // first-wins-resolved in favor of whoever already held the canonical form.
   const bLive = (await c.query(
     "select count(*)::int as n from clara.client_aliases where firm_id=$1 and client_id=$2 and alias_normalized='acmesdnbhd' and retired_at is null",
     [ids.firm, ids.clientB])).rows[0];
-  assert.equal(bLive.n, 1, "client B's pre-existing canonical alias survives untouched");
+  assert.equal(bLive.n, 0, "client B's canonical owner row is retired too (nobody keeps the contested name)");
   const note = (await c.query(
-    "select count(*)::int as n from clara.notifications where firm_id=$1 and to_jsonb(notifications)::text like '%a21_alias_collision%'",
+    "select to_jsonb(n) as row from clara.notifications n where n.firm_id=$1 and to_jsonb(n)::text like '%a21_alias_collision%' limit 1",
     [ids.firm])).rows[0];
-  assert.ok(note.n >= 1, "the collision raised a review-visible notification");
+  assert.ok(note, "the collision raised a review-visible notification");
+  const noteText = JSON.stringify(note.row);
+  assert.ok(noteText.includes(ids.clientA) && noteText.includes(ids.clientB),
+    "the notification lists EVERY affected client (both sides of the collision)");
   const clean = (await c.query(
     "select count(*)::int as n from clara.client_aliases where firm_id=$1 and client_id=$2 and alias_normalized='betaholdingsbhd' and retired_at is null",
     [ids.firm, ids.clientA])).rows[0];

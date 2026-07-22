@@ -602,9 +602,15 @@ test("R3-10 (R2#5 tz): statutory month figures are session-timezone independent 
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `r310_${randomUUID().slice(0, 6)}` });
   await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 500_00, date: "2026-06-06" });
-  // The evaluator's date derivation is pinned to MYT in source (structural half)…
-  const src = await fnSource("evaluate_sst_watch");
-  assert.ok(src.includes("Asia/Kuala_Lumpur"), "the evaluator derives its dates from Asia/Kuala_Lumpur, never session current_date");
+  // The evaluator's date derivation is pinned to MYT in EXECUTABLE source —
+  // ADV-R3#7: comments are stripped first, so a prose mention can never
+  // satisfy the assertion; and no session-tz date primitive may remain.
+  const stripSql = (s) => s.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  const src = stripSql(await fnSource("evaluate_sst_watch"));
+  assert.ok(src.includes("Asia/Kuala_Lumpur"), "the evaluator derives its dates from Asia/Kuala_Lumpur (executable code, not a comment)");
+  assert.ok(!/current_date/.test(src), "no session-timezone current_date survives in the evaluator's executable code");
+  const sweepSrc = stripSql(await fnSource("evaluate_sst_watches_all"));
+  assert.ok(!/current_date/.test(sweepSrc), "the sweep's schedule_note rides the MYT date, never session current_date");
   // …and behaviorally: two sessions at the tz extremes (their current_dates
   // ALWAYS differ) must produce IDENTICAL statutory windows. NOTE: decisive
   // whenever the extreme dates straddle a month boundary; mid-month both agree
@@ -649,4 +655,71 @@ test("ADV-12: add_client_alias stores the resolver's exact strip-normalization a
     (e) => e.code === "CLR10",
     "an alias that normalizes to empty is refused (CLR10)",
   );
+});
+
+test("R4-1 (R3#1): the post path binds ONE extraction end-to-end — pinned variants exist and the core reads the executor's pin", async (t) => {
+  if (skipHere(t)) return;
+  const stripSql = (s) => s.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  for (const [fn, args] of [
+    ["_document_direction_at", "uuid,uuid,uuid"],
+    ["_assert_supplier_bill_shape_at", "uuid,uuid"],
+    ["_assert_sales_invoice_shape_at", "uuid,uuid"],
+    ["_invoice_fact_state_at", "uuid,uuid"],
+  ]) {
+    const r = await rootQuery(
+      "select count(*)::int as n from pg_proc p join pg_namespace n2 on n2.oid=p.pronamespace where n2.nspname='clara' and p.proname=$1",
+      [fn],
+    );
+    assert.equal(r.rows[0].n, 1, `clara.${fn}(${args}) exists exactly once (the one-overload law holds)`);
+  }
+  const core = stripSql(await fnSource("_approve_entry_core"));
+  assert.ok(core.includes("bound_extraction"), "the approve core reads the executor's bound extraction from the ctx");
+  assert.ok(core.includes("_assert_supplier_bill_shape_at") && core.includes("_assert_sales_invoice_shape_at"),
+    "both shape floors receive the pin");
+  const exec = stripSql(await fnSource("execute_rule_post"));
+  assert.ok(exec.includes("_document_direction_at"), "direction reads the bound extraction");
+  assert.ok(exec.includes("'bound_extraction',v_fx"), "the executor threads v_fx into the approve core");
+});
+
+test("R4-2 (R3#2): a crossing AFTER a not_liable resolution REOPENS a new episode — the old resolution never suppresses later liability", async (t) => {
+  if (skipHere(t)) return;
+  const { users } = world;
+  const client = await freshWatchClient(users.alice, { name: `r42_${randomUUID().slice(0, 6)}` });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: THRESHOLD_CENTS + 1, date: "2026-04-10" });
+  await evaluateSstWatch(client);
+  let w = await openWatchRow(client, "G");
+  assert.ok(["crossed", "overdue"].includes(w?.state), `the April crossing (mandatory setup; overdue past 2026-05-31 — got ${w?.state})`);
+  await resolveWatch(users.alice, { watch: w.id, conclusion: "not_liable_documented", evidence: "r4-2 documented analysis" });
+  await evaluateSstWatch(client);
+  assert.equal(await openWatchRow(client, "G"), null, "resolved THIS month: no completed month lies after the resolution — the episode stays closed");
+  // Backdate the resolution to April month-end (root fixture write): May's and
+  // June's month-end rolling tests now lie STRICTLY AFTER it.
+  await rootQuery(
+    "update clara.compliance_watches set resolved_at='2026-04-30T12:00:00+08' where client_id=$1 and state='resolved'",
+    [client],
+  );
+  await evaluateSstWatch(client);
+  w = await openWatchRow(client, "G");
+  assert.ok(w, "a post-resolution crossing REOPENS a new open episode");
+  assert.equal(w.earliest_crossing_month, "2026-05-01", "the new episode seeds from the first post-resolution crossing month (May), never the adjudicated April");
+  assert.equal(w.application_due, "2026-06-30", "the statutory deadline follows the reopened crossing");
+  assert.equal(w.state, "overdue", "past the reopened deadline the ladder reads overdue (today > 2026-06-30)");
+});
+
+test("R4-5 (R3#5): a reused op_key with widened bounds is a request-hash MISMATCH — never a replay around the bounds check", async (t) => {
+  if (skipHere(t)) return;
+  const client = world.clients.A1;
+  const sub = world.users.alice;
+  const { cp } = await ocrWorld(client);
+  const key = `r45:${randomUUID()}`;
+  const ok = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales", cap: 150000, windowMax: 3, opKey: key });
+  assert.ok(!ok.error, `the in-bounds proposal is admitted (got ${ok.error?.code}/${ok.error ? reasonOf(ok.error) : ""})`);
+  const replay = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales", cap: 150000, windowMax: 1000, opKey: key });
+  assert.ok(replay.error, "the SAME op_key with widened bounds never replays the earlier success");
+  assert.equal(replay.error.code, "CLR10", `the refusal is the op-idiom hash mismatch (got ${replay.error.code})`);
+  const widened = await rootQuery(
+    "select count(*)::int as n from clara.coding_rules where client_id=$1 and rule_type='autopost' and window_max_posts>3",
+    [client],
+  );
+  assert.equal(widened.rows[0].n, 0, "no widened rule row exists anywhere for the client");
 });

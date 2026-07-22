@@ -385,7 +385,7 @@ export async function seedStatedInvoiceFacts(cited, { firm, invoiceId = null } =
 export async function proposeAutopostRule(sub, {
   client, cp, accountCode, cap = 200000, windowMax = 3, direction = "purchase",
   evidenceClass = undefined, expiresAt = undefined, supersedes = undefined,
-}) {
+  opKey = undefined, /* ADV-R3#5: replay cells pin the op_key */ }) {
   const proposeFn = await resolveFn(["propose_autopost_rule"], { label: "autopost proposer" });
   if (!proposeFn) return { error: Object.assign(new Error("propose_autopost_rule absent"), { code: "42883" }) };
   const proposal = {
@@ -397,7 +397,7 @@ export async function proposeAutopostRule(sub, {
   if (expiresAt !== undefined) proposal.expires_at = expiresAt;
   if (supersedes !== undefined) proposal.supersedes_rule_id = supersedes;
   try {
-    const r = await callFnAdaptive(proposeFn, { proposal, op_key: opk("prop") }, { persona: humanPersona(sub), label: proposeFn });
+    const r = await callFnAdaptive(proposeFn, { proposal, op_key: opKey ?? opk("prop") }, { persona: humanPersona(sub), label: proposeFn });
     // ADV-R2#4: a bounds refusal is a TYPED AUDITED RETURN — surface it error-shaped.
     if (r && typeof r === "object" && r.status === "refused") {
       return { error: Object.assign(new Error(`refused: ${r.reason}`), {

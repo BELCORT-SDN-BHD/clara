@@ -14,6 +14,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { MATCHER_VERSION } from "../lib/matcher.mjs"; // ADV-R3#4: the live replay version, never a stale literal
 import {
   skip,
   rootQuery,
@@ -94,6 +95,6 @@ test("interleaved: only document.extraction_completed drives the matcher, not in
   await drainMatcher(firm);
 
   assert.equal(await matcherCheckpoint(firm), await headSeq(firm), "checkpoint reached head");
-  const attempts = (await attemptsFor(document)).filter((a) => a.matcher_version === "matcher-v1");
+  const attempts = (await attemptsFor(document)).filter((a) => a.matcher_version === MATCHER_VERSION);
   assert.equal(attempts.length, 1, "exactly one matcher attempt — from the layout extraction_completed alone");
 });

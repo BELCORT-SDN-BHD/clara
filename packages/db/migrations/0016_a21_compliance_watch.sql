@@ -489,6 +489,7 @@ declare
   v_rearm boolean; v_rearm_why text; v_group_changed boolean;
   v_figures jsonb; v_resolved record; v_first_posting date;
   v_prov_inc bigint; v_prov_crossed boolean; v_fut_month date;
+  v_res_month date; v_earliest_post date;
 begin
   begin
     v_cur_month:=date_trunc('month',v_today)::date;
@@ -554,6 +555,15 @@ begin
     select coalesce(max(seq),0) into v_seq from clara.domain_events where firm_id=v_firm;
 
     foreach g in array v_groups loop
+      -- ADV-R3#2: the latest not-liable resolution month (MYT truncation —
+      -- ADV-R3#7): a crossing STRICTLY AFTER it must open a NEW episode; the
+      -- old resolution can never suppress later real liability.
+      select date_trunc('month',(max(cw0.resolved_at) at time zone 'Asia/Kuala_Lumpur'))::date
+        into v_res_month
+        from clara.compliance_watches cw0
+        where cw0.client_id=p_client and cw0.service_group=g
+          and cw0.watch_kind='sst_registration' and cw0.state='resolved'
+          and cw0.resolved_conclusion='not_liable_documented';
       select s.threshold_cents,s.effective_from into v_threshold,v_sched_from
         from clara.sst_threshold_schedule s
         where s.service_group=g and s.effective_from<=v_today
@@ -623,8 +633,12 @@ begin
         -- month in progress, month-to-date included. A separate labeled signal,
         -- never a statutory state input.
         (select coalesce(sum(c5.inc),0) from counted c5
-           where c5.m>=(v_cur_month-interval '11 months')::date and c5.m<=v_cur_month)
-        into v_earliest,v_inc,v_unk,v_proxy,v_first_month,v_prov_inc;
+           where c5.m>=(v_cur_month-interval '11 months')::date and c5.m<=v_cur_month),
+        -- ADV-R3#2: the earliest crossing STRICTLY AFTER the latest not-liable
+        -- resolution month — the reopen candidate for a resolved episode.
+        (select min(r5.m) from rolled r5 where r5.thr is not null and r5.r_inc>r5.thr
+           and (v_res_month is null or r5.m>v_res_month))
+        into v_earliest,v_inc,v_unk,v_proxy,v_first_month,v_prov_inc,v_earliest_post;
       v_inc:=coalesce(v_inc,0); v_unk:=coalesce(v_unk,0); v_proxy:=coalesce(v_proxy,0);
       v_prov_inc:=coalesce(v_prov_inc,0);
       v_prov_crossed:=v_prov_inc>v_threshold;
@@ -647,6 +661,12 @@ begin
         v_fut_month:=date_trunc('month',v_att.as_of)::date;
       end if;
       v_earliest:=least(coalesce(v_earliest,v_fut_month),coalesce(v_fut_month,v_earliest));
+      -- ADV-R3#2: an ended-month future-method crossing AFTER the resolution
+      -- month is also a reopen candidate.
+      if v_fut_month is not null and (v_res_month is null or v_fut_month>v_res_month) then
+        v_earliest_post:=least(coalesce(v_earliest_post,v_fut_month),
+          coalesce(v_fut_month,v_earliest_post));
+      end if;
 
       -- statutory countdown (factsheet §2 / s.13(1)): application due the last
       -- day of the month FOLLOWING the crossing month.
@@ -682,13 +702,25 @@ begin
           where cw.client_id=p_client and cw.service_group=g
             and cw.watch_kind='sst_registration' and cw.state='resolved'
           order by cw.resolved_at desc nulls last limit 1;
+        -- ADV-R3#2: registration stays sticky-closed; a not-liable episode
+        -- stays closed ONLY while no crossing exists STRICTLY AFTER its
+        -- resolution month (v_earliest_post) — a later real crossing REOPENS a
+        -- NEW episode seeded with the post-resolution candidate, never the
+        -- adjudicated historical one.
         if v_resolved.resolved_conclusion='registration_recorded'
            or (v_resolved.resolved_conclusion='not_liable_documented'
-               and (v_earliest is null
-                    or v_earliest<=date_trunc('month',v_resolved.resolved_at)::date)) then
+               and v_earliest_post is null) then
           v_out:=v_out||(jsonb_build_object('service_group',g,'state','resolved_episode')
             ||v_figures);
           continue;
+        end if;
+        if v_resolved.resolved_conclusion='not_liable_documented' then
+          v_earliest:=v_earliest_post;
+          v_due:=((v_earliest+interval '2 months')::date - 1);
+          v_state:=case when v_today>v_due then 'overdue' else 'crossed' end;
+          v_figures:=v_figures||jsonb_build_object(
+            'earliest_crossing_month',v_earliest,'application_due',v_due,
+            'reopened_after_resolution_month',v_res_month);
         end if;
         insert into clara.compliance_watches(firm_id,client_id,service_group,watch_kind,
             state,earliest_crossing_month,confirmed_included_cents,unknown_or_mixed_cents,
@@ -849,8 +881,9 @@ begin
     values(v_started,clock_timestamp(),v_ex,v_ch,v_fail,v_seq,
       (select string_agg(s.service_group||'@'||s.effective_from,',' order by s.service_group)
          from clara.sst_threshold_schedule s
-         where s.effective_from<=current_date
-           and (s.effective_to is null or s.effective_to>=current_date)),
+         where s.effective_from<=(now() at time zone 'Asia/Kuala_Lumpur')::date
+           and (s.effective_to is null
+             or s.effective_to>=(now() at time zone 'Asia/Kuala_Lumpur')::date)),
       v_first_err)
     returning id into v_run;
   return jsonb_build_object('run_id',v_run,'clients_examined',v_ex,
@@ -1187,10 +1220,14 @@ declare
   v_name text; v_reg text; v_tin text; v_name_n text; v_reg_n text;
   v_state jsonb; v_invoice_id text; v_question record; v_map record;
   v_rule uuid; v_question_id uuid; v_seen int;
-  v_checked_via_rule uuid; v_kind text;
+  v_checked_via_rule uuid; v_kind text; v_bound uuid;
 begin
   select (p_ctx->>'actor')::uuid as actor, (p_ctx->>'firm')::uuid as firm into c;
   v_checked_via_rule:=nullif(p_ctx->>'checked_via_rule_id','')::uuid;
+  -- ADV-R3#1: the executor threads its ONE bound extraction through the ctx —
+  -- every current-document fact consumer in this approval then reads that same
+  -- extraction. A human approve (no ctx pin) keeps the live self-selection.
+  v_bound:=nullif(p_ctx->>'bound_extraction','')::uuid;
   if p_op_key is null or btrim(p_op_key)='' then
     raise exception 'op_key is required' using errcode='CLR10';
   end if;
@@ -1303,7 +1340,8 @@ begin
   end if;
 
   if e.document_id is not null then
-    v_state:=clara._invoice_fact_state(e.document_id);
+    v_state:=case when v_bound is null then clara._invoice_fact_state(e.document_id)
+      else clara._invoice_fact_state_at(e.document_id,v_bound) end;
     if coalesce((v_state->>'explicit_non_myr')::boolean,false) then
       raise exception 'newer facts identify an unsupported currency' using errcode='CLR25';
     end if;
@@ -1368,8 +1406,8 @@ begin
       end if;
     end if;
   end if;
-  perform clara._assert_supplier_bill_shape(p_entry);
-  perform clara._assert_sales_invoice_shape(p_entry);
+  perform clara._assert_supplier_bill_shape_at(p_entry,v_bound);
+  perform clara._assert_sales_invoice_shape_at(p_entry,v_bound);
 
   if clara.is_high_stakes(p_entry) then
     if e.last_human_editor is null then
@@ -1603,9 +1641,16 @@ begin
   if not exists(select 1 from clara.clients where id=v_client and firm_id=c.firm) then
     raise exception 'client not in your firm' using errcode='CLR11';
   end if;
+  -- ADV-R3#5: the reservation hash covers the COMPLETE normalized proposal —
+  -- every bound, the evidence class and the supersession input — so a reused
+  -- op_key with widened bounds is a request-hash mismatch, never a replay of an
+  -- earlier success around the bounds check.
   v_dedupe:=clara._reserve_op(c.firm,'propose_autopost_rule',p_op_key,
     clara._hash(jsonb_build_object('client',v_client,'counterparty',v_counterparty,
-      'account_code',v_account,'direction',v_direction,'cap',v_cap)));
+      'account_code',v_account,'direction',v_direction,'cap',v_cap,
+      'frequency_window',v_window,'window_max_posts',v_maxposts,
+      'expires_at',v_expires,'evidence_class',v_evc,
+      'supersedes',nullif(btrim(p_proposal->>'supersedes_rule_id'),''))));
   if v_dedupe is not null then return v_dedupe; end if;
   -- ADV-6: the pinned bounds are NOT caller-widenable — monthly, <=3 posts per
   -- window, expiry within 12 months of proposal (structurally re-enforced by
@@ -1765,6 +1810,281 @@ begin
     jsonb_build_object('rule_id',p_rule,'tier','autopost'));
   return clara._finish_op(c.firm,'sign_autopost_rule',p_op_key,
     jsonb_build_object('rule_id',p_rule,'status','live'));
+end $$;
+
+-- ADV-R3#1: the pinned-extraction DIRECTION variant — the executor resolves
+-- the document's one bound extraction (v_fx) and direction reads THAT
+-- extraction's identity regions, never a re-selected latest. A null pin
+-- delegates to the live resolver (byte-identical legacy behavior); a pin
+-- that is not a done invoice_facts extraction of this document defaults
+-- 'purchase' exactly like the no-facts case.
+create function clara._document_direction_at(p_document uuid, p_client uuid, p_extraction uuid) returns text
+  language plpgsql stable security definer set search_path=clara,pg_temp as $$
+declare
+  v_ext uuid; v_sup_reg text; v_sup_name text; v_cust_reg text; v_client_name text;
+  v_cust_taxid text; v_cust_name text;
+  v_reg_hit boolean:=false; v_name_hit boolean:=false;
+  v_sales boolean:=false; v_cust boolean:=false;
+begin
+  if p_extraction is null then
+    return clara._document_direction(p_document,p_client);
+  end if;
+  if p_document is null or p_client is null then return 'purchase'; end if;
+  select e.id into v_ext from clara.document_extractions e
+    where e.id=p_extraction and e.document_id=p_document
+      and e.engine_kind='invoice_facts' and e.status='done';
+  if v_ext is null then return 'purchase'; end if;
+  select lower(regexp_replace(nullif(btrim(min(r.text_content)),''),'[^a-zA-Z0-9]','','g'))
+    into v_sup_reg from clara.document_regions r
+    where r.extraction_id=v_ext and r.field_path='invoice.vendor_registration';
+  select lower(regexp_replace(nullif(btrim(min(r.text_content)),''),'[^a-zA-Z0-9]','','g'))
+    into v_sup_name from clara.document_regions r
+    where r.extraction_id=v_ext and r.field_path='invoice.vendor_name';
+  select lower(regexp_replace(nullif(btrim(min(r.text_content)),''),'[^a-zA-Z0-9]','','g'))
+    into v_cust_reg from clara.document_regions r
+    where r.extraction_id=v_ext and r.field_path='invoice.customer_registration';
+  -- RESIDUAL v3 (item 3): the BUYER identity also states a TIN (invoice.customer_taxid)
+  -- and a NAME (invoice.customer_name) — checking customer_registration ALONE let a doc
+  -- whose supplier matched the client AND whose buyer was that client via TIN-only (or a
+  -- name match) resolve to 'sales' instead of abstaining. Capture both so the double-
+  -- identity contradiction below is symmetric with the supplier-side identity.
+  select lower(regexp_replace(nullif(btrim(min(r.text_content)),''),'[^a-zA-Z0-9]','','g'))
+    into v_cust_taxid from clara.document_regions r
+    where r.extraction_id=v_ext and r.field_path='invoice.customer_taxid';
+  select lower(regexp_replace(nullif(btrim(min(r.text_content)),''),'[^a-zA-Z0-9]','','g'))
+    into v_cust_name from clara.document_regions r
+    where r.extraction_id=v_ext and r.field_path='invoice.customer_name';
+  -- supplier REGISTRATION match against the client's own hard identifiers (kind
+  -- tin/ssm; a Malaysian client's BRN is stored under kind='ssm' — mirrors the AB-3
+  -- matcher's ssm/%brn% arm, so a BRN-on-invoice reaches a BRN-registered client).
+  if v_sup_reg is not null and exists(select 1 from clara.client_identifiers ci
+      where ci.client_id=p_client and ci.kind in ('tin','ssm')
+        and ci.value_normalized=v_sup_reg) then
+    v_reg_hit:=true;
+  end if;
+  -- supplier NAME match against the client's registered name + approved (non-retired)
+  -- aliases (adversarial #7 / native #3: a valid sales e-invoice may state the exact
+  -- registered name yet carry NO registration, or a BRN the client has not yet
+  -- recorded as an identifier — a registration-only test mis-codes it as purchase).
+  if v_sup_name is not null then
+    select lower(regexp_replace(name,'[^a-zA-Z0-9]','','g')) into v_client_name
+      from clara.clients where id=p_client;
+    if v_client_name=v_sup_name
+       or exists(select 1 from clara.client_aliases a
+           where a.client_id=p_client and a.retired_at is null
+             and a.alias_normalized=v_sup_name) then
+      v_name_hit:=true;
+    end if;
+  end if;
+  -- SALES when the supplier IS the client. A hard-identifier (registration) match is
+  -- decisive. A NAME-only match with NO stated registration is also sales. But a name
+  -- match CONTRADICTED by a stated registration matching NO client identifier is
+  -- ambiguous → ABSTAIN (CLR30 → NEEDS YOU); never silently default a sales-shaped
+  -- doc to purchase (adversarial #7 / native #3).
+  -- RESIDUAL-3 (adversarial #7, contradiction asymmetry): a registration match is decisive
+  -- ONLY when a stated supplier NAME does not contradict it. If the registration matches the
+  -- client but a stated name names a DIFFERENT entity (it does not match the client's
+  -- registered name/aliases), ABSTAIN — a registration match must not override a contradicting
+  -- name (a swapped/forged header). Symmetric to the name-contradicted-by-registration abstain.
+  if v_reg_hit and v_sup_name is not null and not v_name_hit then
+    raise exception 'document direction is unresolved (supplier registration matches the client but its stated name names a different entity)'
+      using errcode='CLR30',detail='{"reason":"direction_unresolved"}';
+  end if;
+  if v_reg_hit then
+    v_sales:=true;
+  elsif v_name_hit and v_sup_reg is null then
+    v_sales:=true;
+  elsif v_name_hit and v_sup_reg is not null then
+    raise exception 'document direction is unresolved (supplier name matches the client but its registration does not)'
+      using errcode='CLR30',detail='{"reason":"direction_unresolved"}';
+  end if;
+  -- RESIDUAL v3 (item 3): the buyer resolves to the client through customer_registration,
+  -- customer_taxid (TIN) OR customer_name — not registration alone. A hard-id (reg/tin)
+  -- match against the client's own identifiers, OR a name match against the client's
+  -- registered name/aliases, marks the buyer as the client.
+  if (v_cust_reg is not null and exists(select 1 from clara.client_identifiers ci
+        where ci.client_id=p_client and ci.kind in ('tin','ssm') and ci.value_normalized=v_cust_reg))
+     or (v_cust_taxid is not null and exists(select 1 from clara.client_identifiers ci
+        where ci.client_id=p_client and ci.kind in ('tin','ssm') and ci.value_normalized=v_cust_taxid))
+     or (v_cust_name is not null and (
+        v_cust_name = (select lower(regexp_replace(name,'[^a-zA-Z0-9]','','g')) from clara.clients where id=p_client)
+        or exists(select 1 from clara.client_aliases a where a.client_id=p_client
+             and a.retired_at is null and a.alias_normalized=v_cust_name))) then
+    v_cust:=true;
+  end if;
+  if v_sales and v_cust then
+    raise exception 'document direction is unresolved (both parties match the client)'
+      using errcode='CLR30',detail='{"reason":"direction_unresolved"}';
+  end if;
+  if v_sales then return 'sales'; else return 'purchase'; end if;
+end $$;
+revoke all on function clara._document_direction_at(uuid,uuid,uuid) from public;
+
+-- ADV-R3#1: the pinned-extraction SALES-SHAPE variant (the 0015 body with the
+-- single fact-state read pinned to the caller's bound extraction; a null pin
+-- keeps the live self-selection byte-identical). The 1-arg fn becomes a thin
+-- delegate so the 0015 trigger and every human/draft caller are unchanged.
+create function clara._assert_sales_invoice_shape_at(p_entry uuid, p_extraction uuid) returns void
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  e record; v_state jsonb; v_gross bigint; v_net bigint; v_tax bigint; v_round bigint;
+  v_recv bigint; v_rev bigint; v_sst bigint; v_sst_acct text; v_type text;
+  v_is_cn boolean; v_ctrl_correct int; v_ctrl_total int; v_outside int;
+  v_round_imb bigint; v_leg_n int;
+begin
+  select * into e from clara.journal_entries where id = p_entry;
+  if not found then return; end if;
+  -- Act ONLY on sales entries. NB: `coding_kind not in (...)` is NULL (not true) when
+  -- coding_kind is NULL, so an explicit NULL guard is required — otherwise the whole
+  -- floor would run on non-sales entries (manual JVs, supplier bills) and its
+  -- complete-shape check would reject their legitimate legs.
+  if e.coding_kind is null
+     or e.coding_kind not in ('sales_invoice','sales_credit_note')
+     or e.reversal_of is not null then
+    return;
+  end if;
+  if e.document_id is null then return; end if;
+  v_is_cn := e.coding_kind = 'sales_credit_note';
+  v_state := case when p_extraction is null then clara._invoice_fact_state(e.document_id) else clara._invoice_fact_state_at(e.document_id, p_extraction) end;
+  v_gross := nullif(v_state->>'total_cents','')::bigint;
+  v_net   := nullif(v_state->>'total_excl_tax_cents','')::bigint;
+  v_tax   := nullif(v_state->>'tax_total_cents','')::bigint;
+  v_round := nullif(v_state->>'rounding_cents','')::bigint;
+  v_type  := nullif(v_state->>'type_code','');
+
+  -- FIX-2 + RESIDUAL-2 (type_code bound to polarity, EXHAUSTIVE). When the source states a
+  -- document type, bind it to the coding polarity with a POSITIVE whitelist: a sales_invoice
+  -- (incl. a debit note) codes ONLY from type 01/03; a sales_credit_note ONLY from 02/04.
+  -- Any OTHER stated type (a self-billed 11-14, an unknown code, or the cross-polarity code)
+  -- REFUSES => NEEDS YOU, rather than silently coding an unrecognized document. OCR docs
+  -- carry no type_code => the binding is inert (unchanged for the RPR OCR corpus).
+  if v_type is not null then
+    if v_is_cn then
+      if v_type not in ('02','04') then
+        raise exception 'document type % does not match a credit-note coding', v_type
+          using errcode='CLR21',detail='{"reason":"type_polarity_mismatch"}';
+      end if;
+    else
+      if v_type not in ('01','03') then
+        raise exception 'document type % does not match an invoice coding', v_type
+          using errcode='CLR21',detail='{"reason":"type_polarity_mismatch"}';
+      end if;
+    end if;
+  end if;
+
+  -- SST account presence (only demanded when tax facts are actually present). Ordered
+  -- BEFORE the whole-shape check so a missing sst_output account on the chart surfaces
+  -- sst_account_missing rather than the generic shape refusal.
+  select account_code into v_sst_acct from clara.coa_accounts
+    where client_id=e.client_id and special_acc_type='sst_output' and is_active;
+  if v_tax is not null and v_tax > 0 and v_sst_acct is null then
+    raise exception 'a tax-bearing sales invoice needs an sst_output account'
+      using errcode='CLR10',detail='{"reason":"sst_account_missing"}';
+  end if;
+
+  -- FIX-1 (adversarial #2, control-account laundering): the entry must consist ONLY of
+  -- the expected legs — receivable control, income, sst_output, rounding — and NOTHING
+  -- else (a payable-class or otherwise-unrelated leg RAISES). Combined with the ties
+  -- below + the balance invariant, every cent is accounted for, so a split can never
+  -- launder an amount into a control account outside the signed sales shape.
+  select count(*) into v_outside from clara.journal_lines l
+    join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+    where l.entry_id=p_entry
+      and a.account_class is distinct from 'receivable'
+      and a.account_type is distinct from 'income'
+      and coalesce(a.special_acc_type,'') not in ('sst_output','rounding');
+  if v_outside > 0 then
+    raise exception 'a sales entry admits only receivable, income, sst_output and rounding legs'
+      using errcode='CLR23';
+  end if;
+  -- EXACTLY ONE receivable control leg, on the direction-correct side (invoice DEBIT,
+  -- credit-note CREDIT); no opposite or additional receivable control leg.
+  select
+    count(*) filter (where a.account_class='receivable'
+      and ((not v_is_cn and l.debit_cents>0) or (v_is_cn and l.credit_cents>0))),
+    count(*) filter (where a.account_class='receivable')
+    into v_ctrl_correct, v_ctrl_total
+    from clara.journal_lines l
+    join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+    where l.entry_id=p_entry;
+  if v_ctrl_correct <> 1 or v_ctrl_total <> 1 then
+    raise exception 'a sales entry requires exactly one direction-correct receivable control leg'
+      using errcode='CLR23';
+  end if;
+  -- RESIDUAL-1 (defense-in-depth): after bounding the leg CATEGORIES above, bound the
+  -- rounding leg's AMOUNT. A 'rounding' leg is admitted by category but may carry only an
+  -- immaterial amount; aggregate |dr−cr| over any leg outside {receivable, income,
+  -- sst_output} (i.e. the rounding legs) must be <= greatest(5, n_legs) sen. Without this
+  -- an entry stating no net/tax facts could launder a material amount into rounding while
+  -- passing the gross tie (net/tax ties are skipped when those facts are absent).
+  select count(*)::int into v_leg_n from clara.journal_lines where entry_id=p_entry;
+  select coalesce(sum(abs(l.debit_cents-l.credit_cents)),0) into v_round_imb
+    from clara.journal_lines l
+    join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+    where l.entry_id=p_entry
+      and a.account_class is distinct from 'receivable'
+      and a.account_type is distinct from 'income'
+      and coalesce(a.special_acc_type,'') is distinct from 'sst_output';
+  if v_round_imb > greatest(5, v_leg_n) then
+    raise exception 'a sales entry admits no material amount outside the receivable/income/sst legs'
+      using errcode='CLR23';
+  end if;
+
+  -- Nothing to tie against without a stated gross (mirrors AP: enforce only when
+  -- the facts declare a total). Human/agent judgment carries an uncorroborated draft.
+  if v_gross is null then return; end if;
+  -- Tie on stated facts FIRST: net + tax + FACTS-declared rounding must EXACTLY equal
+  -- gross (a <=5-sen mismatch surfaces here rather than silently drifting into the
+  -- auto rounding leg — adversarial #9; the rounding leg absorbs only a declared
+  -- residual, e.g. a MyInvois PayableRoundingAmount).
+  if v_net is not null and v_tax is not null
+     and (v_net + v_tax + coalesce(v_round,0)) <> v_gross then
+    raise exception 'sales tax breakdown does not tie to the gross total'
+      using errcode='CLR21',detail='{"reason":"tax_tie_failed"}';
+  end if;
+  if v_is_cn then
+    -- type 02 mirror: receivable CREDIT = gross, revenue DEBIT = net, sst DEBIT = tax.
+    select coalesce(sum(l.credit_cents),0) into v_recv from clara.journal_lines l
+      join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=p_entry and a.account_class='receivable';
+    select coalesce(sum(l.debit_cents),0) into v_rev from clara.journal_lines l
+      join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=p_entry and a.account_type='income';
+    select coalesce(sum(l.debit_cents),0) into v_sst from clara.journal_lines l
+      join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=p_entry and a.special_acc_type='sst_output';
+  else
+    -- sales_invoice (type 01, and DN 03 which RAISES receivable like an invoice):
+    -- receivable DEBIT = gross, revenue CREDIT = net, sst CREDIT = tax.
+    select coalesce(sum(l.debit_cents),0) into v_recv from clara.journal_lines l
+      join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=p_entry and a.account_class='receivable';
+    select coalesce(sum(l.credit_cents),0) into v_rev from clara.journal_lines l
+      join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=p_entry and a.account_type='income';
+    select coalesce(sum(l.credit_cents),0) into v_sst from clara.journal_lines l
+      join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=p_entry and a.special_acc_type='sst_output';
+  end if;
+  if v_recv <> v_gross then
+    raise exception 'receivable-class total differs from the stated gross'
+      using errcode='CLR23';
+  end if;
+  if v_net is not null and v_rev <> v_net then
+    raise exception 'revenue total differs from the stated net'
+      using errcode='CLR21',detail='{"reason":"tax_tie_failed"}';
+  end if;
+  if v_tax is not null and v_tax > 0 and v_sst <> v_tax then
+    raise exception 'sst_output total differs from the stated tax'
+      using errcode='CLR21',detail='{"reason":"tax_tie_failed"}';
+  end if;
+end $$;
+revoke all on function clara._assert_sales_invoice_shape_at(uuid,uuid) from public;
+
+create or replace function clara._assert_sales_invoice_shape(p_entry uuid) returns void
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  perform clara._assert_sales_invoice_shape_at(p_entry, null);
 end $$;
 
 -- ADV-R2 (R1#1): ONE BOUND EXTRACTION. The pinned-extraction VARIANT (a distinct name — the rig one-overload law) carries
@@ -2008,9 +2328,10 @@ begin
       and t.lane in ('invoice_facts','local_facts') and t.status='done'
     order by t.version_n desc,t.id desc limit 1;
 
-  -- direction (client-aware) — an unresolved direction is a skip, never a raise.
+  -- direction (client-aware, pinned to the ONE bound extraction — ADV-R3#1) —
+  -- an unresolved direction is a skip, never a raise.
   begin
-    v_direction:=clara._document_direction(e.document_id,e.client_id);
+    v_direction:=clara._document_direction_at(e.document_id,e.client_id,v_fx);
   exception when sqlstate 'CLR30' then
     insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
       values(e.firm_id,e.client_id,p_entry,null,'direction_unresolved');
@@ -2390,7 +2711,8 @@ begin
   -- CLR10 like sst_account_missing — PROPAGATES honestly, never masked as not_a_draft.
   begin
     v_result:=clara._approve_entry_core(
-      jsonb_build_object('actor',r.signed_by,'firm',e.firm_id,'checked_via_rule_id',r.id),
+      jsonb_build_object('actor',r.signed_by,'firm',e.firm_id,'checked_via_rule_id',r.id,
+        'bound_extraction',v_fx),
       p_entry,e.revision_token,null,p_op_key);
   exception
     when sqlstate 'CLR10' then
@@ -2576,7 +2898,7 @@ end $$;
 -- review-visible notification + audit per group.
 do $$
 declare g record; m record; v_new uuid; v_existing record; v_actor uuid;
-  v_members uuid[]; v_collision boolean; v_note text;
+  v_members uuid[]; v_collision boolean; v_note text; v_all_clients uuid[];
 begin
   for g in
     select a.firm_id,
@@ -2601,7 +2923,7 @@ begin
     select a2.* into v_existing from clara.client_aliases a2
       where a2.firm_id=g.firm_id and a2.alias_normalized=g.canon
         and a2.retired_at is null limit 1;
-    v_new:=null; v_collision:=false; v_note:=null;
+    v_new:=null; v_collision:=false; v_note:=null; v_all_clients:=g.clients;
     if g.canon='' then
       v_collision:=true; v_note:='alias normalizes to empty (unrepresentable)';
     elsif v_existing.id is null and array_length(g.clients,1)=1 then
@@ -2613,22 +2935,37 @@ begin
     else
       v_collision:=true;
       v_note:='colliding client pointers on one canonical form — human review required';
+      -- ADV-R3#3 (RATIFIED): NOBODY keeps the name. Every live row for the
+      -- colliding canonical form — INCLUDING a canonical owner — is retired;
+      -- nothing is minted; every affected client is listed for human
+      -- re-recording. Ambiguity is surfaced, never first-wins-resolved.
+      for m in select a3.* from clara.client_aliases a3
+          where a3.firm_id=g.firm_id and a3.alias_normalized=g.canon
+            and a3.retired_at is null order by a3.id
+      loop
+        update clara.client_aliases set retired_at=now(),
+          retired_by=coalesce(m.added_by,clara.agent_user_id()) where id=m.id;
+        v_members:=v_members||m.id;
+        if not (m.client_id=any(v_all_clients)) then
+          v_all_clients:=v_all_clients||m.client_id;
+        end if;
+      end loop;
     end if;
     if v_collision then
       begin
         perform clara._record_notification_core(v_actor,g.firm_id,null,null,
           null,'a21_alias_collision',
           jsonb_build_object('canonical',nullif(g.canon,''),
-            'retired_aliases',to_jsonb(v_members),'clients',to_jsonb(g.clients),
+            'retired_aliases',to_jsonb(v_members),'clients',to_jsonb(v_all_clients),
             'message','Migration 0016 alias repair: '||v_note
-              ||'. The retired display-form aliases must be re-recorded canonically by a human.'),
+              ||'. Every colliding alias (canonical owners included) was retired; the intended pointers must be re-recorded canonically by a human.'),
           'a21-alias-collision:'||g.firm_id||':'||coalesce(nullif(g.canon,''),'empty'));
       exception when others then null;
       end;
     end if;
     perform clara._audit(g.firm_id,null,null,null,'a21_repair_client_alias',null,
       jsonb_build_object('canonical',nullif(g.canon,''),'retired',to_jsonb(v_members),
-        'clients',to_jsonb(g.clients),'replacement',v_new,
+        'clients',to_jsonb(v_all_clients),'replacement',v_new,
         'collision',v_collision,'note',v_note,
         'migration','0016_a21_compliance_watch'));
   end loop;
@@ -3397,7 +3734,11 @@ end $$;
 -- survives verbatim; sst_output on a purchase still refuses OUTRIGHT
 -- (sales-only, unchanged — the 0015 wording stands).
 -- =====================================================================
-create or replace function clara._assert_supplier_bill_shape(p_entry uuid) returns void
+-- ADV-R3#1: the pinned-extraction SUPPLIER-SHAPE variant — both fact-state
+-- reads (type polarity + the sst_purchase_cost tie) pin to the caller's bound
+-- extraction; a null pin keeps the live self-selection byte-identical. The
+-- 1-arg fn is a thin delegate for every legacy caller.
+create function clara._assert_supplier_bill_shape_at(p_entry uuid, p_extraction uuid) returns void
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   e record; v_payable_credit bigint; v_expense_debit bigint;
@@ -3423,7 +3764,9 @@ begin
     -- Refuse (=> NEEDS YOU). OCR bills carry no type_code => the binding is inert (unchanged
     -- for the RPR OCR corpus). Mirrors the sales floor's type<->polarity binding.
     if e.document_id is not null then
-      v_type := nullif(clara._invoice_fact_state(e.document_id)->>'type_code','');
+      v_type := nullif((case when p_extraction is null
+        then clara._invoice_fact_state(e.document_id)
+        else clara._invoice_fact_state_at(e.document_id, p_extraction) end)->>'type_code','');
       if v_type is not null and v_type <> '01' then
         raise exception 'a supplier document of type % cannot be coded as a plain bill', v_type
           using errcode='CLR21',detail='{"reason":"type_polarity_mismatch"}';
@@ -3500,7 +3843,9 @@ begin
           using errcode='CLR23';
       end if;
       v_tax := case when e.document_id is null then null
-        else nullif(clara._invoice_fact_state(e.document_id)->>'tax_total_cents','')::bigint end;
+        else nullif((case when p_extraction is null
+          then clara._invoice_fact_state(e.document_id)
+          else clara._invoice_fact_state_at(e.document_id, p_extraction) end)->>'tax_total_cents','')::bigint end;
       if v_tax is null then
         raise exception 'an sst_purchase_cost leg requires a stated document tax total'
           using errcode='CLR21',detail='{"reason":"tax_tie_failed"}';
@@ -3528,6 +3873,15 @@ begin
       end if;
     end if;
   end if;
+end $$;
+revoke all on function clara._assert_supplier_bill_shape_at(uuid,uuid) from public;
+
+-- The 1-arg fn becomes a thin delegate (every legacy caller — draft floor,
+-- human approve, the D-P4 probe — keeps its exact behavior via the null pin).
+create or replace function clara._assert_supplier_bill_shape(p_entry uuid) returns void
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  perform clara._assert_supplier_bill_shape_at(p_entry, null);
 end $$;
 
 -- =====================================================================
@@ -4499,7 +4853,9 @@ begin
   end if;
   --  (7d) supplier-bill floor: sst_output stays refused outright (sales-only);
   --  the sst_purchase_cost tie is present; the 0015 rounding/type markers stay.
-  select p.prosrc into v_src from pg_proc p where p.oid='clara._assert_supplier_bill_shape(uuid)'::regprocedure;
+  -- (ADV-R3#1: the body lives in the pinned-extraction variant; the 1-arg is a
+  -- thin delegate.)
+  select p.prosrc into v_src from pg_proc p where p.oid='clara._assert_supplier_bill_shape_at(uuid,uuid)'::regprocedure;
   if position('admits no sst_output leg' in v_src)=0
      or position('sst_purchase_cost' in v_src)=0
      or position('no material amount in a rounding leg' in v_src)=0
