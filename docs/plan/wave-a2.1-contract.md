@@ -1,6 +1,7 @@
 # Wave A2.1 contract — the eval finding ledger + the ADR-026 deferrals
 
-**Status: DRAFT v0.9 — awaiting the owner grill; ratifies as v1.0 by ADR.**
+**Status: RATIFIED v1.0 (2026-07-22, ADR-028) — the §10 grill closed with four owner
+rulings (WA21-R9..R12); this contract is the law of the wave.**
 Inputs of record: ADR-026 (deferrals) · ADR-027 (finding ledger + the ratified live-eval
 doctrine) · the owner rulings of 2026-07-22 (purchase = visibility split; sales autopost =
 all corroborated sales; ONE bundle) · `docs/plan/research/wave-a2.1/sst-registration-factsheet.md`
@@ -20,6 +21,10 @@ acceptance floor) · the five-lane as-built grounding maps (session 2026-07-22).
 | WA21-R6 | **The future method is human-attested or `not_assessed`** — never inferred from ledger trends, never displayed as "below threshold" when unassessed. Attestations carry amount, horizon, evidence, reviewer, as-of + expiry; expiry re-arms the watch. |
 | WA21-R7 | **The doc-type classifier is a dependency of the OCR-sales autopost lane** (§3.3 control 2) and gates the facts engines (§5). Classification uses the existing chat-model lane over already-extracted layout text (no NEW egress class); XML stays rule-classified. `persist_invoice_facts` stops stamping `document_kind` unconditionally (only-if-null). |
 | WA21-R8 | **Freeze law holds**: every behavioural prompt/tool change ships as new frozen versions (`chatTurn_v6`, `autoDraft_v2` where touched) + registry repoint + append-only manifest; `_approve_entry_core`/floor changes are same-arity CoR migrations (0016+) with tail assertions maintained, throwaway-validated before live. |
+| WA21-R9 | **Future-method attestations record at onboarding + material events** (a large signed mandate, a new service line) **+ on expiry** (12-month default); the watch card nags when a client sits in `early_warning` with an expired/absent attestation. |
+| WA21-R10 | **OCR-class autopost bounds = SAME as structured** (monthly / ≤3 posts / 12-month expiry / cap ≤ firm high-stakes) — **owner override** of the tighter-bounds recommendation (Codex control 7): the nine-control envelope's other eight controls carry the OCR safety differential. The build-time cross-model adversarial review retains standing to re-open this with concrete exploit evidence. |
+| WA21-R11 | **Backfill = re-classify live**: the six mis-stamped documents are re-classified through the audited `classify_document` fn during the deploy ceremony (full audit trail; books untouched); Gate C verifies one. |
+| WA21-R12 | **The §9 eval gates are ratified as drafted** — W/S/P/C/D + the refuse-to-ship boundary drills define DONE; the eval runs owner-`!`-gated on live books per the A2 ceremony pattern. |
 
 ## §1 Scope (seven items) + non-goals
 
@@ -155,8 +160,8 @@ sales (monthly / ≤3 posts / 12-month expiry / cap ≤ firm high-stakes).
 6. **≥6 qualifying human-approved OCR-sales sightings** across distinct documents/invoice
    numbers and a meaningful time span; overrides + rule-posted outputs excluded; two
    checkers where the firm has them, **solo-attest where it does not** (Gate-1 pattern).
-7. **Tighter bounds**: lower per-entry cap, a cumulative window-**cents** cap alongside
-   count, shorter expiry, smaller window count (exact numbers = grill item G2).
+7. **Bounds per WA21-R10**: same as the structured class (owner override of the
+   tighter-bounds recommendation; the envelope's other controls differentiate OCR).
 8. `execute_rule_post` re-derives every control at post time (no trust in signing-time state).
 9. Ambiguity ⇒ visible skip + draft stays for human review; repeated direction/type
    failures suspend the OCR rule pending re-signature.
@@ -256,12 +261,8 @@ payroll-summary never reaches invoice_facts); hydration tests; reconcile wiring 
 - Boundary/failure drills from the Codex refuse-list (exact threshold, dismissal/re-arm,
   evaluator-kill) run against the throwaway first, spot-checked live.
 
-## §10 Grill items (owner, before v1.0)
+## §10 Grill record (closed 2026-07-22)
 
-- **G1:** Future-method attestation cadence — who records it and when (per-client at
-  onboarding + on material mandate signings?), and the expiry default (12 months?).
-- **G2:** The OCR-lane numbers: per-entry cap (suggest ≤ RM10k?), cumulative window cents
-  cap, expiry (6 months?), window posts (2?) — your risk appetite, my suggestions attached.
-- **G3:** Backfill ruling — re-classify the six mis-stamped eval docs live (recommended) or
-  grandfather.
-- **G4:** The eval-gate list above — approve/amend (it is the wave's definition of DONE).
+The four v0.9 grill items resolved as rulings: G1 → WA21-R9 (onboarding + events + expiry,
+12-month default) · G2 → WA21-R10 (same-as-structured bounds, owner override, adversarial
+re-open standing) · G3 → WA21-R11 (re-classify live) · G4 → WA21-R12 (gates as drafted).
