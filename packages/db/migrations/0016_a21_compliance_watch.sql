@@ -934,10 +934,14 @@ begin
       and account_code=p_account_code) then
     raise exception 'account not found on the client chart' using errcode='CLR10';
   end if;
+  -- ADV-R4#5: every normalized PERSISTED input rides the hash — a reused op_key
+  -- with changed reason/evidence can never silently replay the old write.
   v_dedupe:=clara._reserve_op(c.firm,'set_turnover_classification',p_op_key,
     clara._hash(jsonb_build_object('client',p_client,'account',p_account_code,
       'classification',p_classification,'group',p_service_group,
-      'effective_from',p_effective_from)));
+      'effective_from',p_effective_from,
+      'reason',btrim(coalesce(p_reason,'')),
+      'evidence',btrim(coalesce(p_evidence,'')))));
   if v_dedupe is not null then return v_dedupe; end if;
   -- the classification in force at the new effective date; MISSING row means
   -- 'unknown_or_mixed' (the evaluator-side rule, mirrored here).
@@ -1015,9 +1019,11 @@ begin
   if not exists(select 1 from clara.clients where id=p_client and firm_id=c.firm) then
     raise exception 'client not in your firm' using errcode='CLR11';
   end if;
+  -- ADV-R4#5: the persisted evidence note rides the hash.
   v_dedupe:=clara._reserve_op(c.firm,'record_future_attestation',p_op_key,
     clara._hash(jsonb_build_object('client',p_client,'group',p_service_group,
-      'expected',p_expected_cents,'horizon',p_horizon_start,'expires',p_expires_at)));
+      'expected',p_expected_cents,'horizon',p_horizon_start,'expires',p_expires_at,
+      'evidence',btrim(coalesce(p_evidence,'')))));
   if v_dedupe is not null then return v_dedupe; end if;
   insert into clara.sst_future_attestations(firm_id,client_id,service_group,
       expected_cents,horizon_start,evidence_note,reviewer,as_of,expires_at)
@@ -1228,6 +1234,13 @@ begin
   -- every current-document fact consumer in this approval then reads that same
   -- extraction. A human approve (no ctx pin) keeps the live self-selection.
   v_bound:=nullif(p_ctx->>'bound_extraction','')::uuid;
+  -- ADV-R4#1: a RULE-DRIVEN approval may never run unpinned — the executor
+  -- always binds (zero lanes skip 'facts_missing' upstream), so a null pin
+  -- here is an internal-contract violation, not a lane.
+  if v_checked_via_rule is not null and v_bound is null then
+    raise exception 'a rule-driven approval requires a bound extraction'
+      using errcode='CLR10',detail='{"reason":"unpinned_rule_post"}';
+  end if;
   if p_op_key is null or btrim(p_op_key)='' then
     raise exception 'op_key is required' using errcode='CLR10';
   end if;
@@ -1597,6 +1610,7 @@ declare c record; v_dedupe jsonb; v_cp uuid; v_id uuid; v_hash text;
   v_client uuid; v_counterparty uuid; v_account text; v_direction text;
   v_cap bigint; v_window text; v_maxposts int; v_rationale text; v_cap_raw text;
   v_side text; v_evc text; v_docs int; v_span_days int; v_hash_obj jsonb;
+  v_supersedes uuid;
 begin
   c:=clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
@@ -1617,6 +1631,7 @@ begin
     v_expires:=coalesce(nullif(btrim(p_proposal->>'expires_at'),'')::timestamptz,
                         now()+interval '12 months');
     v_cap:=case when v_cap_raw is null then null else clara._normalize_invoice_cents(v_cap_raw) end;
+    v_supersedes:=nullif(btrim(p_proposal->>'supersedes_rule_id'),'')::uuid;
   exception when others then
     raise exception 'autopost proposal fields are malformed'
       using errcode='CLR27',detail='{"reason":"malformed"}';
@@ -1641,16 +1656,19 @@ begin
   if not exists(select 1 from clara.clients where id=v_client and firm_id=c.firm) then
     raise exception 'client not in your firm' using errcode='CLR11';
   end if;
-  -- ADV-R3#5: the reservation hash covers the COMPLETE normalized proposal —
-  -- every bound, the evidence class and the supersession input — so a reused
-  -- op_key with widened bounds is a request-hash mismatch, never a replay of an
-  -- earlier success around the bounds check.
+  -- ADV-R3#5 / ADV-R4#3: the reservation hash covers the COMPLETE proposal with
+  -- STABLE raw-input semantics — the RAW expiry text (explicit-null when
+  -- omitted, so an identical retry of a default-expiry proposal REPLAYS instead
+  -- of hash-mismatching on a moving now()+12mo), the normalized rationale, and
+  -- the parsed supersession — so a reused op_key with ANY changed input is a
+  -- request-hash mismatch, never a replay around the bounds check.
   v_dedupe:=clara._reserve_op(c.firm,'propose_autopost_rule',p_op_key,
     clara._hash(jsonb_build_object('client',v_client,'counterparty',v_counterparty,
       'account_code',v_account,'direction',v_direction,'cap',v_cap,
       'frequency_window',v_window,'window_max_posts',v_maxposts,
-      'expires_at',v_expires,'evidence_class',v_evc,
-      'supersedes',nullif(btrim(p_proposal->>'supersedes_rule_id'),''))));
+      'expires_at_raw',nullif(btrim(p_proposal->>'expires_at'),''),
+      'rationale',v_rationale,'evidence_class',v_evc,
+      'supersedes',v_supersedes)));
   if v_dedupe is not null then return v_dedupe; end if;
   -- ADV-6: the pinned bounds are NOT caller-widenable — monthly, <=3 posts per
   -- window, expiry within 12 months of proposal (structurally re-enforced by
@@ -1674,6 +1692,18 @@ begin
       and account_code=v_account and is_active) then
     raise exception 'rule account is not postable'
       using errcode='CLR27',detail='{"reason":"account_not_postable"}';
+  end if;
+  -- ADV-R4#3: the 0015-pinned supersession genealogy is IMPLEMENTED — a stated
+  -- supersedes_rule_id must name the proposer-firm's own retire-able autopost
+  -- rule for the same client (live, or suspended pending re-signature); the
+  -- link is written through to the new row (content-frozen thereafter).
+  if v_supersedes is not null and not exists(
+      select 1 from clara.coding_rules sr
+      where sr.id=v_supersedes and sr.firm_id=c.firm and sr.client_id=v_client
+        and sr.rule_type='autopost'
+        and sr.status in ('live','suspended_pending_resignature')) then
+    raise exception 'supersedes_rule_id must name your own retire-able autopost rule'
+      using errcode='CLR27',detail='{"reason":"bad_supersession"}';
   end if;
   -- cap ceiling visible at propose (min of rule cap and the firm high-stakes bound).
   select high_stakes_amount_cents into v_hs from clara.firms where id=c.firm;
@@ -1723,9 +1753,10 @@ begin
   insert into clara.coding_rules(firm_id,client_id,rule_type,counterparty_id,
       account_code,status,pinned,origin,content_hash,created_by,
       amount_cap_cents,frequency_window,window_max_posts,expires_at,direction,
-      evidence_class)
+      evidence_class,supersedes_rule_id)
     values(c.firm,v_client,'autopost',v_cp,v_account,'proposed',false,
-      'authored',v_hash,c.actor,v_cap,v_window,v_maxposts,v_expires,v_direction,v_evc)
+      'authored',v_hash,c.actor,v_cap,v_window,v_maxposts,v_expires,v_direction,v_evc,
+      v_supersedes)
     returning id into v_id;
   perform clara._audit(c.firm,c.actor,null,null,'propose_autopost_rule',null,
     jsonb_build_object('rule',v_id,'client',v_client,'counterparty',v_cp,
@@ -2327,6 +2358,15 @@ begin
     where t.document_id=e.document_id
       and t.lane in ('invoice_facts','local_facts') and t.status='done'
     order by t.version_n desc,t.id desc limit 1;
+  -- ADV-R4#1: ZERO done lanes = facts-absent — a named skip BEFORE direction.
+  -- The post path NEVER proceeds unpinned: a later/concurrent extraction commit
+  -- could otherwise be picked up mid-post by the live selectors.
+  if v_fx is null then
+    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
+      values(e.firm_id,e.client_id,p_entry,null,'facts_missing');
+    return jsonb_build_object('entry_id',p_entry,'status','skipped',
+      'reason','facts_missing');
+  end if;
 
   -- direction (client-aware, pinned to the ONE bound extraction — ADV-R3#1) —
   -- an unresolved direction is a skip, never a raise.
@@ -2897,8 +2937,9 @@ end $$;
 -- client, an empty canonical) is a COLLISION — no replacement, one
 -- review-visible notification + audit per group.
 do $$
-declare g record; m record; v_new uuid; v_existing record; v_actor uuid;
+declare g record; m record; v_new uuid; v_actor uuid;
   v_members uuid[]; v_collision boolean; v_note text; v_all_clients uuid[];
+  v_own_n int; v_own_clients uuid[];
 begin
   for g in
     select a.firm_id,
@@ -2920,18 +2961,24 @@ begin
         retired_by=coalesce(m.added_by,clara.agent_user_id()) where id=m.id;
       v_members:=v_members||m.id;
     end loop;
-    select a2.* into v_existing from clara.client_aliases a2
+    -- ADV-R4#2: aggregate EVERY live canonical owner for the contested form —
+    -- the registry index is NON-unique, so duplicate live canonical rows (and
+    -- multi-client owners) are representable; a LIMIT-1 sample would make the
+    -- benign/collision discrimination nondeterministic and gameable.
+    select count(*)::int, coalesce(array_agg(distinct a2.client_id),'{}'::uuid[])
+      into v_own_n, v_own_clients
+      from clara.client_aliases a2
       where a2.firm_id=g.firm_id and a2.alias_normalized=g.canon
-        and a2.retired_at is null limit 1;
+        and a2.retired_at is null;
     v_new:=null; v_collision:=false; v_note:=null; v_all_clients:=g.clients;
     if g.canon='' then
       v_collision:=true; v_note:='alias normalizes to empty (unrepresentable)';
-    elsif v_existing.id is null and array_length(g.clients,1)=1 then
+    elsif v_own_n=0 and array_length(g.clients,1)=1 then
       insert into clara.client_aliases(firm_id,client_id,alias_normalized,added_by)
         values(g.firm_id,g.clients[1],g.canon,v_actor) returning id into v_new;
-    elsif v_existing.id is not null and array_length(g.clients,1)=1
-          and g.clients[1]=v_existing.client_id then
-      null; -- the same pointer already lives canonically — nothing to add
+    elsif v_own_n=1 and array_length(g.clients,1)=1
+          and g.clients[1]=v_own_clients[1] then
+      null; -- ONE client's ONE canonical — the same pointer already lives; nothing to add
     else
       v_collision:=true;
       v_note:='colliding client pointers on one canonical form — human review required';
@@ -3131,11 +3178,14 @@ create function clara.classify_document(p_document uuid, p_kind text,
 declare
   d record; t record; v_dedupe jsonb; v_ext uuid; v_version int; v_prior text;
   f record; v_q uuid; v_questions jsonb:='[]'::jsonb; v_set boolean:=false;
+  v_human boolean:=false;
 begin
   if p_op_key is null or btrim(p_op_key)='' then
     raise exception 'op_key is required' using errcode='CLR10';
   end if;
-  select * into d from clara.documents where id=p_document;
+  -- ADV-R4#6: the document row is LOCKED for the whole verdict write — the two
+  -- classification writers serialize instead of racing on the kind.
+  select * into d from clara.documents where id=p_document for update;
   if not found then raise exception 'document not found' using errcode='CLR11'; end if;
   if p_engine_id is null or p_engine_id not like 'clara-classify-%' then
     raise exception 'classifier engine must carry the clara-classify- prefix' using errcode='CLR10';
@@ -3162,8 +3212,12 @@ begin
   if v_dedupe is not null then return v_dedupe; end if;
 
   -- settle the claimed classify task, when one is running (the enqueue path).
+  -- ADV-R4#6: settling is BOUND to the claimed task's engine snapshot — a
+  -- verdict under a different engine id settles nothing (the no-task ceremony
+  -- path stays explicitly open: WA21-R11 re-classification needs no task).
   select * into t from clara.document_processing_tasks
     where document_id=p_document and lane='classify' and status='running'
+      and engine_id=p_engine_id
     order by id limit 1 for update;
   if found then
     update clara.document_processing_tasks set status='done',finished_at=now()
@@ -3183,7 +3237,13 @@ begin
     returning id into v_ext;
 
   v_prior:=d.document_kind;
-  if p_confidence>=0.8 then
+  -- ADV-R4#6: a HUMAN verdict (set_document_kind) is never overwritten by the
+  -- classifier — the classifier's verdict ROW persists above, but the kind and
+  -- the classified event stay with the human correction.
+  v_human:=exists(select 1 from clara.document_extractions hx
+    where hx.document_id=p_document and hx.engine_kind='doc_classify'
+      and hx.status='done' and hx.engine_id='clara-classify-human:v1');
+  if p_confidence>=0.8 and not v_human then
     update clara.documents set document_kind=p_kind where id=p_document;
     v_set:=true;
     perform clara._audit(d.firm_id,null,null,null,'classify_document',null,
@@ -3194,6 +3254,13 @@ begin
       jsonb_build_object('document_kind',p_kind,'confidence',p_confidence,
         'engine_id',p_engine_id,'extraction_id',v_ext,'prior_kind',v_prior,
         'source','classifier'));
+  elsif v_human then
+    -- human precedence: the verdict ROW persisted above; the kind, the
+    -- classified event, and the review lane all stay with the human correction.
+    perform clara._audit(d.firm_id,null,null,null,'classify_document',null,
+      jsonb_build_object('document',p_document,'kind',p_kind,'confidence',p_confidence,
+        'engine',p_engine_id,'prior_kind',v_prior,'extraction',v_ext,
+        'human_precedence',true,'op_key',p_op_key));
   else
     for f in select df.client_id,df.id as filing_id from clara.document_filings df
         where df.document_id=p_document and df.retired_at is null loop
@@ -3254,7 +3321,8 @@ begin
       'knowledge_artifact','handwritten_note','consent_evidence','other') then
     raise exception 'unsupported document kind %',p_kind using errcode='CLR10';
   end if;
-  select * into d from clara.documents where id=p_document;
+  -- ADV-R4#6: locked — serialized against the classifier writer.
+  select * into d from clara.documents where id=p_document for update;
   if not found or d.firm_id<>c.firm then
     raise exception 'document not in your firm' using errcode='CLR11';
   end if;
@@ -4681,6 +4749,235 @@ grant execute on function
 to clara_runtime;
 
 -- =====================================================================
+-- B7b — ADV-R4#7 (pin P7): the REVISE path for the closing-transfer marker.
+-- revise_entry CoR (same 8-arity, ACL preserved; the 0015 body verbatim with
+-- the p_lines wrapper, the unwrapped validation, and the column write) + the
+-- _tf_entry_immutable CoR admitting closing_transfer on draft->draft only.
+-- =====================================================================
+create or replace function clara.revise_entry(p_entry uuid, p_lines jsonb,
+    p_proposed_counterparty jsonb, p_evidence jsonb,
+    p_expected_revision uuid, p_op_key text,
+    p_amount_override jsonb default null,
+    p_duplicate_override jsonb default null) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  c record; e record; v_dedupe jsonb; v_lines jsonb; v_fingerprint jsonb;
+  v_token uuid; v_state jsonb; v_payable bigint; v_expense bigint;
+  v_new_flags jsonb; v_exception jsonb; v_ovr_region uuid; v_proposal jsonb; v_kind text;
+  v_lines_in jsonb; v_flags_in jsonb; v_ct boolean;
+begin
+  c:=clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  -- ADV-R4#7 (pin P7): the closing-transfer marker rides a SAME-ARITY p_lines
+  -- wrapper {"lines":[...],"flags":{"closing_transfer":bool}} — human-only
+  -- (this fn is _human_ctx-floored), draft-only (the status gate below), in
+  -- the op hash (raw p_lines) and the revision record (the header snapshot
+  -- carries the column). A bare array stays the legacy shape, byte-identical.
+  if jsonb_typeof(p_lines)='object' then
+    v_lines_in:=p_lines->'lines';
+    v_flags_in:=coalesce(p_lines->'flags','{}'::jsonb);
+    if jsonb_typeof(v_lines_in) is distinct from 'array'
+       or jsonb_typeof(v_flags_in)<>'object'
+       or exists(select 1 from jsonb_object_keys(v_flags_in) k
+            where k not in ('closing_transfer')) then
+      raise exception 'revise lines wrapper is malformed (lines[] + flags{closing_transfer} only)'
+        using errcode='CLR10';
+    end if;
+    v_ct:=case when v_flags_in ? 'closing_transfer'
+      then (v_flags_in->>'closing_transfer')::boolean end;
+  else
+    v_lines_in:=p_lines;
+  end if;
+  v_dedupe:=clara._reserve_op(c.firm,'revise_entry',p_op_key,
+    clara._hash(jsonb_build_object('entry',p_entry,'lines',p_lines,
+      'counterparty',p_proposed_counterparty,'evidence',p_evidence,
+      'revision',p_expected_revision,'amount_override',p_amount_override,
+      'duplicate_override',p_duplicate_override)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  select * into e from clara.journal_entries where id=p_entry for update;
+  if not found or e.firm_id<>c.firm then
+    raise exception 'entry not in your firm' using errcode='CLR11';
+  end if;
+  if e.status<>'draft' then
+    raise exception 'only a draft can be revised' using errcode='CLR22';
+  end if;
+  if e.revision_token is distinct from p_expected_revision then
+    raise exception 'stale revision token' using errcode='CLR06';
+  end if;
+  if e.coding_kind in ('supplier_bill','sales_invoice','sales_credit_note')
+     and p_proposed_counterparty is null then
+    raise exception 'coded entry requires a counterparty proposal'
+      using errcode='CLR21',detail='{"reason":"vendor_malformed"}';
+  end if;
+  if e.coding_kind in ('supplier_bill','sales_invoice','sales_credit_note')
+     and (p_evidence is null or jsonb_typeof(p_evidence)<>'array'
+          or jsonb_array_length(p_evidence)=0) then
+    raise exception 'coded entry requires a cited evidence array'
+      using errcode='CLR21',detail='{"reason":"evidence_invalid"}';
+  end if;
+  v_kind:=coalesce(nullif(btrim(p_proposed_counterparty->>'kind'),''),
+    case when e.coding_kind in ('sales_invoice','sales_credit_note') then 'customer' else 'vendor' end);
+  v_proposal:=case when p_proposed_counterparty is null or v_kind='vendor'
+    then p_proposed_counterparty
+    else p_proposed_counterparty || jsonb_build_object('kind',v_kind) end;
+  v_fingerprint:=clara._resolve_counterparty(e.client_id,v_proposal);
+  v_lines:=clara._validate_entry_lines(e.client_id,v_lines_in);
+  delete from clara.journal_lines where entry_id=p_entry;
+  insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,
+      credit_cents,description)
+    select p_entry,x.idx,x.elem->>'account_code',(x.elem->>'debit_cents')::bigint,
+      (x.elem->>'credit_cents')::bigint,x.elem->>'description'
+    from jsonb_array_elements(v_lines) with ordinality as x(elem,idx);
+  perform clara._assert_balanced(p_entry);
+  v_new_flags:=coalesce(e.flags,'{}'::jsonb) - 'amount_exception' - 'amount_override';
+  if e.document_id is not null then
+    if clara._evidence_cites_non_myr(p_evidence) then
+      raise exception 'explicit non-MYR currency is unsupported'
+        using errcode='CLR21',detail='{"reason":"currency_unsupported"}';
+    end if;
+    if p_evidence is not null then
+      perform clara._write_entry_evidence(p_entry,e.document_id,p_evidence);
+    end if;
+    v_state:=clara._invoice_fact_state(e.document_id);
+    if coalesce((v_state->>'explicit_non_myr')::boolean,false) then
+      raise exception 'explicit non-MYR currency is unsupported'
+        using errcode='CLR21',detail='{"reason":"currency_unsupported"}';
+    end if;
+    if e.coding_kind='supplier_bill'
+       and coalesce((v_state->>'corroborated')::boolean,false) then
+      if not clara._corroboration_bound(p_entry,(v_state->>'total_cents')::bigint) then
+        raise exception 'corroborated total is not bound by revised evidence'
+          using errcode='CLR21',detail='{"reason":"evidence_invalid"}';
+      end if;
+      select coalesce(sum(l.credit_cents),0) into v_payable
+      from clara.journal_lines l join clara.coa_accounts a
+        on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=p_entry and a.account_class='payable';
+      select coalesce(sum(l.debit_cents),0) into v_expense
+      from clara.journal_lines l join clara.coa_accounts a
+        on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=p_entry and a.account_type='expense';
+      if v_payable<>(v_state->>'total_cents')::bigint
+         or v_expense<>(v_state->>'total_cents')::bigint then
+        v_exception:=jsonb_build_object(
+          'machine_total_cents',(v_state->>'total_cents')::bigint,
+          'proposed_cents',v_payable,
+          'fact_hash',v_state->>'total_fact_hash','at',now());
+        v_new_flags:=v_new_flags||jsonb_build_object('amount_exception',v_exception);
+        if p_amount_override is not null then
+          if jsonb_typeof(p_amount_override)<>'object'
+             or nullif(btrim(p_amount_override->>'reason'),'') is null then
+            raise exception 'amount override is malformed (reason required)'
+              using errcode='CLR10';
+          end if;
+          begin v_ovr_region:=(p_amount_override->>'region_id')::uuid;
+          exception when others then
+            raise exception 'amount override region is malformed' using errcode='CLR10';
+          end;
+          if not exists (select 1 from clara.entry_evidence ev
+              where ev.entry_id=p_entry and ev.region_id=v_ovr_region
+                and ev.document_id=e.document_id) then
+            raise exception 'amount override region must be cited in the revised evidence'
+              using errcode='CLR21',detail='{"reason":"evidence_invalid"}';
+          end if;
+          v_new_flags:=v_new_flags||jsonb_build_object('amount_override',
+            jsonb_build_object('reason',btrim(p_amount_override->>'reason'),
+              'region_id',v_ovr_region,'actor',c.actor,'at',now()));
+        end if;
+      end if;
+    end if;
+  end if;
+  if p_duplicate_override is not null then
+    if jsonb_typeof(p_duplicate_override)<>'object'
+       or nullif(btrim(p_duplicate_override->>'reason'),'') is null then
+      raise exception 'duplicate override is malformed (reason required)' using errcode='CLR10';
+    end if;
+    v_new_flags:=v_new_flags||jsonb_build_object('duplicate_override',
+      jsonb_build_object('reason',btrim(p_duplicate_override->>'reason'),
+        'actor',c.actor,'at',now()));
+  end if;
+  update clara.journal_entries set closing_transfer=coalesce(v_ct,closing_transfer),
+    proposed_counterparty=v_proposal,
+    match_fingerprint=v_fingerprint,last_human_editor=c.actor,flags=v_new_flags,
+    revision_token=gen_random_uuid(),updated_at=now() where id=p_entry
+    returning revision_token into v_token;
+
+  insert into clara.journal_entry_revisions(firm_id,client_id,entry_id,revision_no,
+      revision_token,actor_kind,actor,reason,header,legs,rule_decision_id,evidence_refs)
+    select j.firm_id,j.client_id,j.id,
+      coalesce((select max(r.revision_no)+1 from clara.journal_entry_revisions r
+        where r.entry_id=j.id),0),j.revision_token,'human',c.actor,'revised',
+      to_jsonb(j)-'firm_id'-'client_id'-'id'-'created_at'-'updated_at',
+      coalesce((select jsonb_agg(jsonb_build_object('line_no',l.line_no,
+        'account_code',l.account_code,'debit_cents',l.debit_cents,
+        'credit_cents',l.credit_cents,'side',case when l.debit_cents>0 then 'debit'
+          else 'credit' end,'counterparty_id',l.counterparty_id,
+        'description',l.description) order by l.line_no)
+        from clara.journal_lines l where l.entry_id=j.id),'[]'::jsonb),
+      (select rd.id from clara.rule_decisions rd where rd.entry_id=j.id
+        order by rd.created_at desc,rd.id desc limit 1),
+      coalesce((select jsonb_agg(jsonb_build_object('evidence_id',ev.id,
+        'region_id',ev.region_id,'fact_hash',ev.fact_hash,
+        'provenance_tier',ev.provenance_tier) order by ev.id)
+        from clara.entry_evidence ev where ev.entry_id=j.id),'[]'::jsonb)
+    from clara.journal_entries j where j.id=p_entry;
+
+  perform clara._audit(c.firm,c.actor,null,null,'revise_entry',p_entry,
+    jsonb_build_object('op_key',p_op_key));
+  perform clara._append_event(c.firm,'entry.revised',e.client_id,c.actor,null,null,
+    p_entry,e.document_id,null,'{}'::jsonb);
+  return clara._finish_op(c.firm,'revise_entry',p_op_key,
+    jsonb_build_object('entry_id',p_entry,'revision_token',v_token,'status','draft'));
+end $$;
+
+create or replace function clara._tf_entry_immutable() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_allowed text[];
+begin
+  if tg_op = 'DELETE' then
+    raise exception 'journal entries are never deleted (reverse, not delete)' using errcode = 'CLR08';
+  end if;
+  if old.status = 'draft' and new.status = 'draft' then
+    -- ADV-R4#7: closing_transfer joins the draft->draft allowset — settable
+    -- only while a draft, only by the human revise writer (wake drafting is
+    -- CLR03-guarded at birth and no wake revise path exists).
+    v_allowed := array['revision_token','updated_at','proposed_counterparty',
+                       'match_fingerprint','last_human_editor','flags','closing_transfer'];
+  elsif old.status = 'draft' and new.status = 'approved' then
+    if old.checker_actor is not null or new.checker_actor is null or new.approved_at is null then
+      raise exception 'illegal approval transition' using errcode = 'CLR08';
+    end if;
+    v_allowed := array['status','checker_actor','approved_at','self_approval_attestation',
+                       'proposed_counterparty','match_fingerprint','checked_via_rule_id','updated_at'];
+  elsif old.status = 'draft' and new.status = 'withdrawn' then
+    if new.withdrawn_by is null or new.withdrawn_at is null
+       or btrim(coalesce(new.withdrawal_reason,'')) = '' then
+      raise exception 'withdrawal requires actor, time, and reason' using errcode = 'CLR08';
+    end if;
+    v_allowed := array['status','withdrawn_by','withdrawn_at','withdrawal_reason',
+                       'proposed_counterparty','match_fingerprint','updated_at'];
+  elsif old.status = 'approved' and new.status = 'approved' then
+    if old.reversed_by is not null or old.reversal_reason is not null then
+      raise exception 'entry already reversed' using errcode = 'CLR08';
+    end if;
+    if new.reversed_by is null or btrim(coalesce(new.reversal_reason,'')) = '' then
+      raise exception 'approved entries permit only a complete reversal-linkage pair'
+        using errcode = 'CLR08';
+    end if;
+    v_allowed := array['reversed_by','reversal_reason','updated_at'];
+  else
+    raise exception 'illegal status transition % -> %', old.status, new.status using errcode = 'CLR08';
+  end if;
+  if (to_jsonb(new) - v_allowed) is distinct from (to_jsonb(old) - v_allowed) then
+    raise exception 'illegal change to entry (status % -> %)', old.status, new.status
+      using errcode = 'CLR08';
+  end if;
+  return new;
+end $$;
+
+-- =====================================================================
 -- D — TAIL ASSERTIONS (P6, 0015 idiom): the AB-3 boundary re-pin, the 0014
 -- consent-evidence re-pin, PUBLIC=0 + one-overload on every touched fn, the
 -- role-grant matrix (the agent role gained ZERO EXECUTE anywhere), the P6
@@ -5068,8 +5365,12 @@ do $$
 declare
   v_firm uuid:=gen_random_uuid(); v_user uuid:=gen_random_uuid();
   v_client uuid:=gen_random_uuid(); v_res jsonb; v_watch uuid; v_e uuid;
-  v_m date:=(date_trunc('month',current_date)-interval '1 month')::date;
-  v_cm date:=date_trunc('month',current_date)::date;
+  -- ADV-R4#4: ONE captured MYT legal date drives every probe month — the same
+  -- derivation as the evaluator, so a 00:00-07:59 MYT month boundary under a
+  -- UTC session can never split the probe's months from the evaluator's.
+  -- (now() is the transaction timestamp — all three derive from ONE instant.)
+  v_m date:=(date_trunc('month',(now() at time zone 'Asia/Kuala_Lumpur')::date)-interval '1 month')::date;
+  v_cm date:=date_trunc('month',(now() at time zone 'Asia/Kuala_Lumpur')::date)::date;
   i int; v_err boolean;
 begin
   begin

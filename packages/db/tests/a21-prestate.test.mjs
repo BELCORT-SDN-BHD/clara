@@ -100,6 +100,15 @@ before(async () => {
     `insert into clara.client_aliases(firm_id,client_id,alias_normalized,added_by)
      values($1,$2,'acme sdn bhd',$4),($1,$3,'acmesdnbhd',$4),($1,$2,'beta holdings bhd.',$4)`,
     [ids.firm, ids.clientA, ids.clientB, ids.user]);
+  // (4b) ADV-R4#2: the gameable multi-owner shape — client A holds BOTH a
+  // non-canonical display form AND its canonical form, while client B holds a
+  // DUPLICATE live canonical row (the registry index is non-unique). A LIMIT-1
+  // sample could land on A and bless the "benign" branch, leaving B's pointer
+  // silently authoritative. Nobody-wins must retire all three.
+  await c.query(
+    `insert into clara.client_aliases(firm_id,client_id,alias_normalized,added_by)
+     values($1,$2,'r52 shared co',$4),($1,$2,'r52sharedco',$4),($1,$3,'r52sharedco',$4)`,
+    [ids.firm, ids.clientA, ids.clientB, ids.user]);
 
   // ---- apply the full set: 0016 MUST apply over this prestate ----------
   migrate({});
@@ -168,6 +177,20 @@ test("PRESTATE B4d: the collision is retired + SURFACED (no silent first-wins); 
     "select count(*)::int as n from clara.client_aliases where firm_id=$1 and client_id=$2 and alias_normalized='betaholdingsbhd' and retired_at is null",
     [ids.firm, ids.clientA])).rows[0];
   assert.equal(clean.n, 1, "the clean non-canonical alias is repaired to the canonical form in place");
+});
+
+test("PRESTATE R5-2 (R4 must-2): every live canonical OWNER is aggregated — the multi-owner shape retires ALL rows, nobody wins", async () => {
+  const live = (await c.query(
+    "select count(*)::int as n from clara.client_aliases where firm_id=$1 and alias_normalized in ('r52 shared co','r52sharedco') and retired_at is null",
+    [ids.firm])).rows[0];
+  assert.equal(live.n, 0, "all three rows (A's display form, A's canonical, B's duplicate canonical) are retired — no LIMIT-1 benign blessing");
+  const note = (await c.query(
+    "select to_jsonb(n) as row from clara.notifications n where n.firm_id=$1 and to_jsonb(n)::text like '%r52sharedco%' limit 1",
+    [ids.firm])).rows[0];
+  assert.ok(note, "the multi-owner collision raised its review-visible notification");
+  const noteText = JSON.stringify(note.row);
+  assert.ok(noteText.includes(ids.clientA) && noteText.includes(ids.clientB),
+    "the notification lists BOTH owner clients");
 });
 
 test("PRESTATE: every repair wrote its audit row", async () => {

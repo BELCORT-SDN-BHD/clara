@@ -33,7 +33,7 @@ import {
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, classifyDocument, rm, reasonOf,
   freshWatchClient, approvedTurnoverEntry, evaluateSstWatch, openWatchRow, watchEventRows,
-  setTurnoverClassification, resolveWatch, fnSource,
+  setTurnoverClassification, resolveWatch, fnSource, reviseEntry, setDocumentKind, docKind,
   AP, EXP,
 } from "./a21-helpers.mjs";
 
@@ -722,4 +722,139 @@ test("R4-5 (R3#5): a reused op_key with widened bounds is a request-hash MISMATC
     [client],
   );
   assert.equal(widened.rows[0].n, 0, "no widened rule row exists anywhere for the client");
+});
+
+test("R5-1 (R4 must-1): a FACTS-ABSENT document skips facts_missing BEFORE direction — the post never proceeds unpinned", async (t) => {
+  if (skipHere(t)) return;
+  const client = world.clients.A1;
+  const sub = world.users.alice;
+  const { cp } = await ocrWorld(client);
+  const firm = await firmOf(client);
+  // A cited doc with ZERO done facts lanes (layout OCR only — no invoice_facts).
+  const cited = await seedCitedDocument(sub, { firm, client, quote: rm(90000) });
+  const draft = await ocrSalesDraft(client, cited, { cp });
+  assert.ok(draft?.entry_id, "the facts-less draft exists (mandatory setup)");
+  await postViaRule(draft.entry_id).catch((e) => noteLane(`r5-1 post raised ${e.code}`));
+  assert.notEqual(await entryStatusOf(draft.entry_id), "approved", "a facts-absent draft NEVER posts");
+  assert.equal(await lastSkipReason(draft.entry_id), "facts_missing", "the skip is NAMED facts_missing (before direction — never an unpinned pass-through)");
+  // The core's rule-driven pin requirement is structural.
+  const stripSql = (s) => s.replace(/--[^\n]*/g, "").replace(/\/\*[\s\S]*?\*\//g, "");
+  assert.ok(stripSql(await fnSource("_approve_entry_core")).includes("unpinned_rule_post"),
+    "a rule-driven core approval structurally requires a non-null bound extraction");
+});
+
+test("R5-3 (R4 must-3): the proposal hash is STABLE for omitted expiry (retry replays) and supersession is real genealogy", async (t) => {
+  if (skipHere(t)) return;
+  const client = world.clients.A1;
+  const sub = world.users.alice;
+  const { cp, rule } = await ocrWorld(client);
+  // (a) omitted-expiry retry: the identical request on the SAME op_key REPLAYS
+  // the receipt (pre-fix the moving now()+12mo default hash-mismatched CLR10).
+  const key = `r53:${randomUUID()}`;
+  const first = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales", cap: 120000, opKey: key });
+  assert.ok(!first.error, `the omitted-expiry proposal is admitted (got ${first.error?.code})`);
+  const retry = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales", cap: 120000, opKey: key });
+  assert.ok(!retry.error, `the identical omitted-expiry RETRY replays instead of hash-mismatching (got ${retry.error?.code}/${retry.error ? reasonOf(retry.error) : ""})`);
+  assert.equal(retry.id, first.id, "the replay returns the SAME rule (op idempotency restored for default expiry)");
+  // (b) supersession genealogy: a valid target writes through; garbage refuses by name.
+  const sup = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales", cap: 110000, supersedes: rule });
+  assert.ok(!sup.error, `a proposal superseding the live rule is admitted (got ${sup.error?.code})`);
+  assert.equal((await ruleRowById(sup.id))?.supersedes_rule_id, rule, "supersedes_rule_id is WRITTEN THROUGH (the 0015-pinned genealogy is real)");
+  const bad = await proposeAutopostRule(sub, { client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales", cap: 110000, supersedes: randomUUID() });
+  assert.ok(bad.error, "a supersession naming no retire-able own rule is refused");
+  assert.equal(reasonOf(bad.error), "bad_supersession", `the refusal is NAMED (got ${reasonOf(bad.error)})`);
+});
+
+test("R5-5 (R4 must-5): compliance-writer op hashes cover the persisted evidence — changed evidence never silently replays", async (t) => {
+  if (skipHere(t)) return;
+  const { users } = world;
+  const client = await freshWatchClient(users.alice, { name: `r55_${randomUUID().slice(0, 6)}` });
+  const key = `r55:${randomUUID()}`;
+  await setTurnoverClassification(users.alice, { client, accountCode: INC, classification: "included", serviceGroup: "G", evidence: "evidence A", effectiveFrom: "2026-07-01", opKey: key });
+  let err = null;
+  try {
+    await setTurnoverClassification(users.alice, { client, accountCode: INC, classification: "included", serviceGroup: "G", evidence: "evidence B (changed)", effectiveFrom: "2026-07-01", opKey: key });
+  } catch (e) { err = e; }
+  assert.ok(err, "the SAME op_key with CHANGED evidence never replays the old write");
+  assert.equal(err.code, "CLR10", `the refusal is the op-idiom hash mismatch (got ${err.code})`);
+});
+
+test("R5-6 (R4 must-6): a HUMAN kind verdict is never overwritten by the classifier; task settling is engine-bound", async (t) => {
+  if (skipHere(t)) return;
+  const client = world.clients.A1;
+  const sub = world.users.alice;
+  const firm = await firmOf(client);
+  // (a) human precedence.
+  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97 });
+  await setDocumentKind(world.users.bob, { document: cited.documentId, kind: "payment_voucher", reason: "r5-6 human correction" });
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.99 });
+  assert.equal(await docKind(cited.documentId), "payment_voucher", "the classifier NEVER overwrites an explicit human correction");
+  const verdicts = (await rootQuery(
+    "select count(*)::int as n from clara.document_extractions where document_id=$1 and engine_kind='doc_classify' and status='done'",
+    [cited.documentId])).rows[0].n;
+  assert.ok(verdicts >= 3, `the classifier's verdict ROW still persists under human precedence (got ${verdicts})`);
+  // (b) engine binding: a verdict under a foreign engine settles NO running task.
+  const cited2 = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
+  await enqueueInvoiceFacts(cited2.documentId); // NULL kind -> classify task
+  const task = (await rootQuery(
+    "select to_jsonb(t) as row from clara.document_processing_tasks t where t.document_id=$1 and t.lane='classify' order by t.created_at desc limit 1",
+    [cited2.documentId])).rows[0].row;
+  assert.ok(task, "the classify task exists (mandatory setup)");
+  await claimTask(task.id, { egressApproved: true });
+  await classifyDocument({ document: cited2.documentId, kind: "invoice", confidence: 0.95, engineId: "clara-classify-other:v9" });
+  assert.equal((await rootQuery("select status from clara.document_processing_tasks where id=$1", [task.id])).rows[0].status,
+    "running", "a foreign-engine verdict settles NOTHING (the claimed snapshot binds)");
+  await classifyDocument({ document: cited2.documentId, kind: "invoice", confidence: 0.95, engineId: task.engine_id });
+  assert.equal((await rootQuery("select status from clara.document_processing_tasks where id=$1", [task.id])).rows[0].status,
+    "done", "the matching-engine verdict settles the claimed task");
+});
+
+test("R5-7 (R4 must-7 / pin P7): closing_transfer is settable through the human REVISE wrapper — draft-only, allow-listed, recorded", async (t) => {
+  if (skipHere(t)) return;
+  const { users } = world;
+  const client = await freshWatchClient(users.alice, { name: `r57_${randomUUID().slice(0, 6)}` });
+  const { draftEntryV3: mkDraft, freshResolution: mkRes } = await import("./a21-helpers.mjs");
+  const d = await mkDraft(users.alice, {
+    client, resolution: await mkRes(users.alice, client),
+    lines: [
+      { account_code: "1000", debit_cents: 40000, credit_cents: 0, description: "dr" },
+      { account_code: INC, debit_cents: 0, credit_cents: 40000, description: "cr" },
+    ],
+    flags: { is_year_end: true }, memo: "r5-7 year-end draft", opKey: opk("r57"),
+  });
+  assert.equal((await rootQuery("select closing_transfer from clara.journal_entries where id=$1", [d.entry_id])).rows[0].closing_transfer,
+    false, "the draft starts unmarked (mandatory setup)");
+  const out = await reviseEntry(users.alice, {
+    entry: d.entry_id,
+    lines: {
+      lines: [
+        { account_code: "1000", debit_cents: 40000, credit_cents: 0, description: "dr" },
+        { account_code: INC, debit_cents: 0, credit_cents: 40000, description: "cr" },
+      ],
+      flags: { closing_transfer: true },
+    },
+    expectedRevision: d.revision_token, opKey: opk("r57b"),
+  });
+  assert.ok(out?.revision_token, "the wrapper revise succeeds (same-arity JSON input)");
+  const row = (await rootQuery("select closing_transfer, status from clara.journal_entries where id=$1", [d.entry_id])).rows[0];
+  assert.equal(row.closing_transfer, true, "the human REVISE path sets the marker (pin P7)");
+  assert.equal(row.status, "draft", "still a draft (the marker is draft-only)");
+  const rev = (await rootQuery(
+    "select header->>'closing_transfer' as ct from clara.journal_entry_revisions where entry_id=$1 order by revision_no desc limit 1",
+    [d.entry_id])).rows[0];
+  assert.equal(rev.ct, "true", "the revision record captures the marker");
+  // An unknown wrapper flag refuses by name.
+  await assert.rejects(
+    () => reviseEntry(users.alice, {
+      entry: d.entry_id,
+      lines: { lines: [
+        { account_code: "1000", debit_cents: 40000, credit_cents: 0, description: "dr" },
+        { account_code: INC, debit_cents: 0, credit_cents: 40000, description: "cr" },
+      ], flags: { closing_transfer: false, is_opening_balance: true } },
+      expectedRevision: out.revision_token, opKey: opk("r57c"),
+    }),
+    (e) => e.code === "CLR10",
+    "an off-allowset wrapper flag is refused (closing_transfer only)",
+  );
 });

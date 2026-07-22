@@ -515,7 +515,10 @@ test("RESIDUAL-1/v5 a ≤5-sen rounding-leg bill is SKIPPED not_corroborated (a 
   await postViaRule(draft.entry_id).catch((e) => noteLane(`≤5-sen rounding post raised ${e.code}`));
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a ≤5-sen rounding-leg bill is NOT auto-posted under v5 (inherently non-corroborated)");
   const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
-  assert.equal(skip, "not_corroborated", `the ≤5-sen rounding bill is skipped not_corroborated (got '${skip}')`);
+  // 0016 ADV-R4#1 (integration lane): a NO-FACTS document is now refused by the
+  // EARLIER named skip 'facts_missing' — before direction, never an unpinned
+  // pass-through. The protected property is identical (never auto-posts).
+  assert.equal(skip, "facts_missing", `the ≤5-sen rounding bill (no facts) is skipped facts_missing (got '${skip}')`);
 });
 
 test("RESIDUAL-1 the supplier-bill shape floor REFUSES a material rounding leg at APPROVE (defense-in-depth, human path)", async (t) => {
@@ -769,7 +772,9 @@ test("RESIDUAL-5 execute_rule_post SKIPS not_corroborated a CLEAN draft on a NO-
   await postViaRule(draft.entry_id).catch((e) => noteLane(`no-facts post raised ${e.code}: ${e.message}`));
   assert.notEqual((await entryRow(draft.entry_id))?.status, "approved", "a non-corroborated (no-facts) draft is NOT auto-posted (pre-v5 it posted)");
   const skip = (await rootQuery("select reason from clara.rule_post_skips where entry_id=$1 order by created_at desc limit 1", [draft.entry_id])).rows[0]?.reason;
-  assert.equal(skip, "not_corroborated", `a no-facts draft is skipped not_corroborated (got '${skip}')`);
+  // 0016 ADV-R4#1 (integration lane): the no-facts refusal moved EARLIER to the
+  // named 'facts_missing' skip (before direction). Same property, refused sooner.
+  assert.equal(skip, "facts_missing", `a no-facts draft is skipped facts_missing (got '${skip}')`);
 });
 
 test("RESIDUAL-5 execute_rule_post SKIPS not_corroborated a draft on a document whose total is MALFORMED ('N/A' persists non-corroborated) with an ARBITRARY amount", async (t) => {
