@@ -17,4 +17,5 @@
 #
 # The job REFUSES to run while this file holds only the placeholder below — the owner
 # MUST replace it with the real recipient before the first live run.
-age1PLACEHOLDER0000000000000000000000000000000000000000000000000
+# Recipient minted 2026-07-22 (identity: owner custody, ~/.clara-age-identity.txt + offline backup).
+age1802286z6txlzuveq2was0h8nhkcngqvpcetz52uqdu7nqw9llp8sm4dkzw
