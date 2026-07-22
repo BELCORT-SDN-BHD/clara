@@ -12,16 +12,18 @@ import { chatTurn_v2 } from "./chatTurn.v2.js";
 import { chatTurn_v3 } from "./chatTurn.v3.js";
 import { chatTurn_v4 } from "./chatTurn.v4.js";
 import { chatTurn_v5 } from "./chatTurn.v5.js";
+import { chatTurn_v6 } from "./chatTurn.v6.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { autoDraft_v1 } from "./autoDraft.v1.js";
+import { autoDraft_v2 } from "./autoDraft.v2.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  chatTurn: chatTurn_v5,
+  chatTurn: chatTurn_v6,
   documentIngest: documentIngest_v1,
   invoiceFacts: invoiceFacts_v1,
-  autoDraft: autoDraft_v1,
+  autoDraft: autoDraft_v2,
 } as const;
 
 // Slice 6 repointed `chatTurn:` v1→v2, then v2→v3 (the GATE-3 live find: v2's
@@ -35,11 +37,17 @@ export const workflows = {
 // ever stranded (policy (c)); new admissions target v4; the engine resumes old
 // runs by run id. Wave A2 then repointed v4→v5 (the §9 Gate-B live find: no chat
 // version could send a NULL coding_kind, so the generic voucher lane the DB has
-// always accepted was undraftable via chat; v5 adds "journal_entry"->NULL). Drop a
+// always accepted was undraftable via chat; v5 adds "journal_entry"->NULL). Wave A2.1
+// repointed v5→v6 (PROMPT-only: the SST registration-watch surfacing framing + the
+// purchase 3-leg visibility-split guidance + direction-first vocabulary; the draft
+// schema/steps are byte-identical to v5) and autoDraft v1→v2 (the same purchase 3-leg
+// guidance + an sst_registration_watch awareness note for the unattended sweep). Drop a
 // re-export only once zero non-terminal runs of that version remain.
 export { chatTurn_v1 };
 export { chatTurn_v2 };
 export { chatTurn_v3 };
 export { chatTurn_v4 };
+export { chatTurn_v5 };
+export { autoDraft_v1 };
 
 export const workflowNames: string[] = Object.keys(workflows);
