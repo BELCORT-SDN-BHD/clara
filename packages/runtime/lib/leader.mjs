@@ -28,7 +28,12 @@ const POLL_INTERVAL_MS = Number(process.env.CLARA_LEADER_POLL_MS || 2000);
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 const PRUNE_EVERY = Number(process.env.CLARA_LEADER_PRUNE_EVERY || 50);
-const AUTOPOST_RECONCILE_MS = Number(process.env.CLARA_AUTOPOST_RECONCILE_HOURS || 24) * 3600000;
+// Finite-guarded: junk or non-positive CLARA_AUTOPOST_RECONCILE_HOURS falls back to 24h —
+// a NaN here would make the due-check permanently false and silently DISABLE the
+// WA2-R10 expiry sweep, the one failure mode this knob must never have.
+const AUTOPOST_RECONCILE_HOURS = Number(process.env.CLARA_AUTOPOST_RECONCILE_HOURS);
+const AUTOPOST_RECONCILE_MS =
+  (Number.isFinite(AUTOPOST_RECONCILE_HOURS) && AUTOPOST_RECONCILE_HOURS > 0 ? AUTOPOST_RECONCILE_HOURS : 24) * 3600000;
 
 /** True iff the daily autopost-rule expiry sweep is due (pure — the since-last-run
  *  guard; lastRunMs=0 makes the first cycle after (re)boot run it immediately, which

@@ -88,9 +88,10 @@ test("an autopost failure never blocks the rest of the sweep (the sweep resolves
   const client = recordingClient(() => {
     throw new Error("boom");
   });
-  const swept = await runReconcilerSweep(client, { ...sweepDeps, autopostRules: true });
+  const swept = await runReconcilerSweep(client, { ...sweepDeps, autopostRules: true, prune: true });
   assert.equal(swept.autopostOk, false, "the leader sees the failure and retries next cycle");
-  assert.equal(typeof swept.spoolRemoved, "number", "the sweep completed the other passes");
+  assert.equal(typeof swept.spoolRemoved, "number", "the sweep completed the earlier passes");
+  assert.equal(typeof swept.pruned, "number", "a pass AFTER the failed autopost sweep still completed");
 });
 
 test("the daily cadence guard: due at boot, guarded within the interval, due after it", () => {
