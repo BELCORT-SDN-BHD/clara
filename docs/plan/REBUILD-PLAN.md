@@ -26,15 +26,25 @@
 
 Ordered by dependency + risk; each wave keeps the app runnable.
 
-> **STATUS (2026-07-22):** Wave **A** is FULLY LIVE (ADR-022/023/024). **Wave A2**
+> **STATUS (2026-07-23):** Wave **A** is FULLY LIVE (ADR-022/023/024). **Wave A2**
 > — the sales-invoice/AR side + MyInvois UBL local-parse + SST 3-leg + CN/DN +
 > **purchase-only** bounded auto-posting (the "standing rules" from Wave A's scope)
-> + the R2 backup app — was **deliberately inserted before Wave B** and is now
-> FULLY LIVE with the §9 eval CLOSED (ADR-025/026/027, migration `0015`; Gate A
-> exact RM 1,973,332.91, Gate B exact).
-> **Deferred to Wave A2.1:** sales-direction autopost + purchase-side SST 3-leg.
-> Waves **B–G** below are unchanged; next order: the **R2 wiring** → **Wave A2.1**
-> (incl. the ADR-027 eval finding ledger) → **Wave B (knowledge + onboarding)**.
+> — was **deliberately inserted before Wave B** and is FULLY LIVE with the §9 eval
+> CLOSED (ADR-025/026/027, migration `0015`; Gate A exact RM 1,973,332.91, Gate B
+> exact). The **R2 off-site backup is DONE + restore-proven** (PRs #49/#50;
+> evidence: `docs/ops/DR.md` §9). **Wave A2.1** — the eval finding ledger + the
+> ADR-026 deferrals (the SST registration-threshold compliance watch,
+> sales-direction autopost lift, purchase SST visibility split, doc-type
+> classifier gate) — is **RATIFIED v1.0** (ADR-028,
+> `docs/plan/wave-a2.1-contract.md`; PRs #51/#53), and **migration `0016` is
+> MERGED (PR #55) but NOT DEPLOYED — live Supabase remains at 15 migrations
+> (0001→0015)**; the `reconcile_autopost_rules` daily runtime sweep (#52) and the
+> settled review-card fix (#54) are on `main`. Still to build: the runtime
+> consumers (entry.approved→watch evaluator, document.classified→facts re-fire,
+> the classify worker), the `chatTurn_v6`/`autoDraft_v2` freeze bumps, and the
+> ComplianceWatchCard + direction-aware vocabulary.
+> Waves **B–G** below are unchanged; next order: the remaining **A2.1 lanes** →
+> the **0016 deploy ceremony + live eval** → **Wave B (knowledge + onboarding)**.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).

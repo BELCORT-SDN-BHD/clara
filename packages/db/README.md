@@ -12,6 +12,15 @@ truth (`docs/architecture/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/REBUILD-PLAN.md`.
 >
+> **Migration ledger (as of 2026-07-23).** The repo carries `0001`–`0016`;
+> **live Supabase is applied through `0015`**. `0016_a21_compliance_watch.sql`
+> (Wave A2.1: the SST registration-threshold compliance watch, the
+> sales-direction autopost lift, the doc-type classifier gate, the purchase SST
+> visibility split, context-pack v3) is **MERGED but NOT DEPLOYED** — it reaches
+> live only via the owner-gated deploy ceremony. The law of that surface is
+> `docs/plan/wave-a2.1-contract.md` (ADR-028) +
+> `docs/plan/wave-a2.1-migration-0016-design.md` (pins P1–P7).
+>
 > **audit_log append-only — honesty boundary.** `clara.audit_log` is append-only,
 > enforced by UPDATE/DELETE/TRUNCATE triggers so that no app role, agent, or even
 > a SECURITY DEFINER bug can rewrite a receipt. This is defense in depth against
