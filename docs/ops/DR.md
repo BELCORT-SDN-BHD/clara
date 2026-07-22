@@ -193,10 +193,12 @@ you have never restored is not a backup.
 > end-to-end on a local `postgres` throwaway, CI runs the whole
 > backup→restore→verify chain on an ephemeral pair (the "DR full-profile round-trip" CI step), and the
 > **fresh-Supabase-project drill is DONE** (2026-07-20, **177/0 STRICT** — §5b;
-> real `auth`/`storage` recovery included). What **remains** is only the **R2
-> off-site wiring** (encrypted scheduled dumps + freshness alerts; PITR stays a
-> deferred owner item — §8). Do not treat the single-schema drill alone as
-> evidence of full recoverability — §5b is that evidence.
+> real `auth`/`storage` recovery included), and the **R2 off-site wiring is DONE
+> too** (2026-07-22 — §9 evidence: first live run green + the bundle
+> restore-proven; PITR stays a deferred owner item — §8). What remains is the
+> §9 verify cadence (monthly-light restore + quarterly STRICT drill). Do not
+> treat the single-schema drill alone as evidence of full recoverability — §5b
+> is that evidence.
 
 ### 5b. Full-profile fresh-project drill — **EXECUTED AND PASSED, 2026-07-20**
 
@@ -283,7 +285,9 @@ When the DB is down, `/ready` returns `{"ready":false,...}` with HTTP 503.
 ## 7. SLO + alerting plan
 
 Targets to enforce — the runtime is deployed (Fly); the probe and DB-backed
-run history exist now; the alert wiring itself is the open piece.
+run history exist now. The **backup-freshness alarm is live** (the §9
+healthchecks.io dead-man's-switch, daily period + 26h grace, since 2026-07-22);
+the external `/ready` uptime checks remain the open wiring piece.
 
 | SLO | Target | Signal | Alert when |
 |---|---|---|---|
@@ -320,22 +324,25 @@ escalation path for the pilot. The alerting **wiring** is a follow-up; the
    (`sin`)**: one daily run does `db:backup:full`, `age`-encrypts the bundle (full dump +
    globals evidence + `auth` data-only + the `firm-docs` byte mirror + `manifest.json`),
    and `rclone`-uploads to R2 — off-vendor, so an account or region loss is survivable.
-   Alerting = the dead-man's-switch (§6). **Wiring is the remaining task** (the DR drill
-   does not depend on it); the runbook is §9.
+   Alerting = the dead-man's-switch (§6). **Wiring is DONE — 2026-07-22 (PRs #49/#50;
+   first live run green + restore-proven, §9 evidence).** Remaining cadence:
+   monthly-light restore + quarterly STRICT drill (§9); the runbook is §9.
 3. **Storage-bucket backup** — document bytes in Supabase Storage need their own
    copy path (the DB dump does not include Storage objects); the recovery path is
    `docs/ops/DR-full-drill.md` §4 (re-provision bucket → `storage-provision.sql` →
    re-upload byte mirror → sha256-verify). The scheduled byte mirror is part of the
-   §6 off-site design (OWNER DECISION).
-4. **Wire the alerting** in §7 once the runtime is deployed (the dead-man's-switch
-   freshness alarm is the §6 recommendation).
+   §6 off-site design (OWNER DECISION) — **live since 2026-07-22** as the
+   `firm-docs` byte mirror inside the §9 daily bundle.
+4. **Wire the alerting** in §7 — the dead-man's-switch backup-freshness alarm is
+   **live** (2026-07-22, §9); the external `/ready` uptime checks remain open.
 5. **Full-profile DR — DONE.** `db:backup:full` (owners+privileges, four schemas),
    `deploy/roles-bootstrap.sql`, `db:restore:full`, and the `db:dr:verify` battery
    are built, rehearsed, and CI-guarded (the "DR full-profile round-trip" CI step);
    the **fresh-Supabase-project drill EXECUTED AND PASSED 2026-07-20** (**177/0
-   STRICT**, ADR-020 — §5b; real `auth`/`storage` recovery included). The only
-   remaining off-site gate is the **R2 wiring** (item 2: scheduling + freshness
-   alerts). Runbook: `docs/ops/DR-full-drill.md`.
+   STRICT**, ADR-020 — §5b; real `auth`/`storage` recovery included). The R2
+   off-site wiring is DONE too (item 2, 2026-07-22 — §9 evidence); what remains
+   is the §9 verify cadence (monthly-light + quarterly STRICT).
+   Runbook: `docs/ops/DR-full-drill.md`.
 
 ---
 
