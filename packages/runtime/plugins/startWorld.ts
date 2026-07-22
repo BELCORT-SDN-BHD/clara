@@ -13,6 +13,9 @@ import { startMatcherLoop } from "../lib/matcher.mjs";
 import { startAutodraftLoop } from "../lib/autodraft.mjs";
 import { startLocalFactsLoop, processLocalFactsTask } from "../lib/local-facts.mjs";
 import { startRulePostLoop } from "../lib/rule-post.mjs";
+import { startSstWatchLoop } from "../lib/sst-watch.mjs";
+import { startFactsGateLoop } from "../lib/facts-gate.mjs";
+import { startClassifyLoop } from "../lib/classify.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
 import { workflows } from "../workflows/registry.js";
@@ -165,11 +168,40 @@ export default definePlugin(() => {
 
     // rule-post consumer (Wave A2) — an INDEPENDENT loop on its own connection under the
     // 'rule_post' advisory lock. Calls execute_rule_post login-direct on each entry.drafted.
-    // +1 persistent session (see the pools §4.1 budget note — Wave A2 adds two dedicated
-    // LISTEN clients; the integrator confirms the Supavisor session ceiling headroom).
+    // +1 persistent session.
     const rulePost = startRulePostLoop({ log: (m: string) => console.log(m) });
     rulePost.done.then(() => fatal("rule_post loop"), (e: unknown) => fatal("rule_post loop", e));
     sup.stops.push(rulePost.stop);
+
+    // === Wave A2.1 consumers (migration 0016) — three INDEPENDENT loops, each on its own
+    // dedicated LISTEN connection under its own advisory lock, structurally isolated from the
+    // other consumers' leadership / readiness / heartbeat. +3 persistent sessions.
+    //
+    // SUPAVISOR SESSION HEADROOM (walk the code): the process now holds NINE dedicated
+    // LISTEN/persistent clients — control + leader + matcher + autodraft + local_facts +
+    // rule_post + (A2.1) sst_watch + facts_gate + classify — ON TOP OF the pooled budgets in
+    // lib/pools.mjs (5 runtime + 5 read + 2 write + 5 engine = 17). Grand total ≈ 26 sessions
+    // against the Supavisor session ceiling; the integrator MUST confirm headroom before deploy.
+
+    // sst_watch consumer — the STRUCTURAL SST compliance watch. Plain group-role
+    // evaluate_sst_watch(client) on each entry.approved (never blocks/touches an approval).
+    const sstWatch = startSstWatchLoop({ log: (m: string) => console.log(m) });
+    sstWatch.done.then(() => fatal("sst_watch loop"), (e: unknown) => fatal("sst_watch loop", e));
+    sup.stops.push(sstWatch.stop);
+
+    // facts_gate consumer — re-fires clara.enqueue_invoice_facts(document) on each
+    // document.classified (the classifier→facts gate; the existing reconciler belt dispatches
+    // the re-fired task).
+    const factsGate = startFactsGateLoop({ log: (m: string) => console.log(m) });
+    factsGate.done.then(() => fatal("facts_gate loop"), (e: unknown) => fatal("facts_gate loop", e));
+    sup.stops.push(factsGate.stop);
+
+    // classify consumer — the doc-type classifier task lane: claims lane='classify' tasks,
+    // reads OCR layout text, model-classifies, settles via clara.classify_document. Uses the
+    // runtime pool for its DB writers (claim/classify_document are group-granted).
+    const classify = startClassifyLoop({ withRuntime, log: (m: string) => console.log(m) });
+    classify.done.then(() => fatal("classify loop"), (e: unknown) => fatal("classify loop", e));
+    sup.stops.push(classify.stop);
 
     // DEDICATED engine heartbeat — the ONLY writer of the 'world' beat (S4-AB7b).
     const beatMs = Number(process.env.CLARA_WORLD_BEAT_MS || 10000);

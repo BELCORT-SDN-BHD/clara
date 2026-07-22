@@ -33,7 +33,11 @@ const POLL_INTERVAL_MS = Number(process.env.CLARA_LOCAL_FACTS_POLL_MS || 2000);
 const BATCH_SIZE = Number(process.env.CLARA_LOCAL_FACTS_BATCH || 25);
 // A local UBL parse completes in seconds; a running task older than this is a crashed
 // mid-parse leftover (single-leader lock ⇒ no live peer is processing it) → requeue.
-const STRANDED_MS = Number(process.env.CLARA_LOCAL_FACTS_STRANDED_MS || 10 * 60_000);
+// Finite-guarded (the leader.mjs idiom): junk or non-positive falls back to 10min. An
+// unguarded NaN reached the requeue query as the string 'NaN', the interval cast RAISED, and
+// because requeueStranded runs BEFORE discoverQueued the whole lane stopped silently.
+const STRANDED_MS_ENV = Number(process.env.CLARA_LOCAL_FACTS_STRANDED_MS);
+const STRANDED_MS = Number.isFinite(STRANDED_MS_ENV) && STRANDED_MS_ENV > 0 ? STRANDED_MS_ENV : 10 * 60_000;
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
 
@@ -133,9 +137,9 @@ async function requeueStranded(client, { batchSize, strandedMs, log }) {
   const r = await client.query(
     `select id from clara.document_processing_tasks
        where lane='local_facts' and status='running'
-         and coalesce(started_at, updated_at) < now() - ($1 || ' milliseconds')::interval
+         and coalesce(started_at, updated_at) < now() - ($1::int * interval '1 millisecond')
        order by created_at limit $2`,
-    [String(strandedMs), batchSize],
+    [strandedMs, batchSize],
   );
   let requeued = 0;
   for (const row of r.rows) {

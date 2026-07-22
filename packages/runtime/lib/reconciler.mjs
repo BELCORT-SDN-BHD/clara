@@ -19,6 +19,7 @@
 
 import { sweepSpoolTtl } from "./spool.mjs";
 import { isRunNotFound, reconcileDocumentIntakes, reconcileDocumentTasks } from "./reconciler-documents.mjs";
+import { reconcileSstWatches } from "./reconciler-sst.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -383,6 +384,13 @@ export async function reconcileAutopostRules(client, opts = {}) {
   }
 }
 
+// The SST compliance-watch daily repair belt (Wave A2.1 §2.2 / migration 0016) lives in
+// reconciler-sst.mjs (module-size budget, the reconciler-documents.mjs precedent) and is
+// re-exported here so existing import sites keep resolving it from reconciler.mjs. It
+// iterates the active clients ONE TRANSACTION PER CLIENT — a single all-clients call would
+// hold the firm_event_seq row lock for the whole sweep and block every concurrent writer.
+export { reconcileSstWatches };
+
 // ---------------------------------------------------------------------------
 // One full sweep (called under the leader lock by the supervisor).
 // ---------------------------------------------------------------------------
@@ -390,10 +398,11 @@ export async function reconcileAutopostRules(client, opts = {}) {
 /**
  * Run every sweeper once + a heartbeat. Trace prune runs on a coarser cadence
  * (opts.prune=true) so it does not scan on every fast sweep; the autopost-rule
- * expiry sweep runs on the leader's daily flag (opts.autopostRules=true).
+ * expiry sweep runs on the leader's daily flag (opts.autopostRules=true); the SST
+ * compliance-watch repair belt runs on the leader's daily flag (opts.sstWatches=true).
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean,
- *          autopostRules?:boolean}} deps
+ *          autopostRules?:boolean, sstWatches?:boolean}} deps
  */
 export async function runReconcilerSweep(client, deps) {
   const log = deps.log ?? (() => {});
@@ -419,6 +428,8 @@ export async function runReconcilerSweep(client, deps) {
   }
   let autopost = {};
   if (deps.autopostRules) autopost = await reconcileAutopostRules(client, { log });
+  let sst = {};
+  if (deps.sstWatches) sst = await reconcileSstWatches(client, { log });
   let prune = { pruned: 0 };
   if (deps.prune) {
     try {
@@ -427,5 +438,5 @@ export async function runReconcilerSweep(client, deps) {
       log(`[reconcile] trace prune error: ${err?.message ?? err}`);
     }
   }
-  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...prune };
+  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...prune };
 }

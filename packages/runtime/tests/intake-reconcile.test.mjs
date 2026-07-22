@@ -85,6 +85,49 @@ test("lost running document task is requeued through the migration writer", asyn
   await removeTaskMeta(row.taskId);
 });
 
+// Finding 11 — a RUNNING classify task has a synthetic run id (no WDK run), so the shared
+// reconciler must NEVER probe getRun for it (that resolves 'lost' and requeues a live worker,
+// causing a duplicate concurrent LLM call + double-settle). Its own leader loop owns recovery.
+test("a RUNNING classify task is never probed via getRun and never requeued (finding 11)", async () => {
+  const row = task("running", { lane: "classify", runId: "classify:t-1:abc" });
+  await writeTaskMeta(row.taskId, row);
+  let getRunCalled = false;
+  let requeued = false;
+  const client = deniedSnapshotClient(async (sql) => {
+    if (/requeue_stranded_document_task/.test(sql)) requeued = true;
+    return { rows: [{ receipt: { status: "queued" } }], rowCount: 1 };
+  });
+  const out = await reconcileDocumentTasks(client, {
+    enqueueDocumentIngest: async () => ({ runId: "unused" }),
+    getRun: () => {
+      getRunCalled = true;
+      return { status: Promise.reject(Object.assign(new Error("run not found"), { name: "RunNotFound" })) };
+    },
+  });
+  assert.equal(getRunCalled, false, "getRun is NEVER called for a classify task (synthetic run, no WDK run to probe)");
+  assert.equal(requeued, false, "a live running classify task is NOT requeued by the shared reconciler");
+  assert.equal(out.documentRequeuedLost, 0);
+  assert.equal((await readTaskMeta(row.taskId)).status, "running", "the task stays running — its own loop owns recovery");
+  await removeTaskMeta(row.taskId);
+});
+
+// Finding 12 — a QUEUED classify task past the grace must NOT be driven through documentIngest
+// (an Azure OCR run for a classify task = real vendor egress, then CLR16 at persist). The
+// classify leader loop owns dispatch; the shared reconciler skips the lane with a one-shot warn.
+test("a QUEUED classify task is never driven through documentIngest (finding 12)", async () => {
+  const row = task("queued", { lane: "classify" });
+  await writeTaskMeta(row.taskId, row);
+  const ingestStarts = [];
+  const out = await reconcileDocumentTasks(deniedSnapshotClient(), {
+    enqueueDocumentIngest: async (id) => (ingestStarts.push(id), { runId: "OCR-RUN-SHOULD-NOT-HAPPEN" }),
+    getRun: () => ({ status: Promise.resolve("running") }),
+  });
+  assert.deepEqual(ingestStarts, [], "a classify task is NEVER passed to enqueueDocumentIngest (no Azure OCR egress)");
+  assert.equal(out.documentReenqueued, 0, "the reconciler re-enqueues nothing for the classify lane");
+  assert.equal((await readTaskMeta(row.taskId)).status, "queued", "the task stays queued for the classify loop to claim");
+  await removeTaskMeta(row.taskId);
+});
+
 test("flag flip releases held-egress tasks before re-enqueue", async () => {
   process.env.CLARA_DOC_EGRESS_APPROVED = "1";
   const row = task("held_egress", { lane: "ocr" });

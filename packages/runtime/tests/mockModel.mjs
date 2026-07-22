@@ -66,3 +66,27 @@ export function mockThrowingModel() {
     },
   });
 }
+
+/** A model for generateObject (the classify lane): doGenerate returns the object as a JSON
+ *  text content part — exactly what ai@7's generateObject reads (extractTextContent →
+ *  parse+validate). No network, no key. Deterministic for the classify tests. */
+export function mockObjectModel(object) {
+  return new MockLanguageModelV4({
+    doGenerate: async () => ({
+      content: [{ type: "text", text: JSON.stringify(object) }],
+      finishReason: { unified: "stop", raw: "stop" },
+      usage: usage(),
+      warnings: [],
+    }),
+  });
+}
+
+/** A generateObject model whose doGenerate throws (to exercise the classify worker's
+ *  transient-fault re-drive path). */
+export function mockThrowingObjectModel() {
+  return new MockLanguageModelV4({
+    doGenerate: async () => {
+      throw new Error("mock object model failure");
+    },
+  });
+}

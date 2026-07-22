@@ -24,6 +24,7 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole } from "./relay.mjs";
 import { makeRuntimeClient } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
+import { narrowTypedStatus } from "./receipts.mjs";
 
 /** The rule-post consumer name — its own checkpoint / dead-letter / lock key. */
 export const RULE_POST_CONSUMER = "rule_post";
@@ -107,14 +108,17 @@ async function checkpointOnly(client, { firmId, seq }) {
   }
 }
 
-/** The rule-post effect for one entry.drafted event + its checkpoint, in ONE transaction. */
+/** The rule-post effect for one entry.drafted event + its checkpoint, in ONE transaction.
+ *  Returns the execute_rule_post jsonb receipt so the caller can log its typed status — a
+ *  'skipped' receipt (a benign non-post; the draft stays for human review) is a SUCCESS for
+ *  checkpointing and must NEVER be retried into a post or dead-lettered. */
 async function runEffectTxn(client, { firmId, ev, deps }) {
   await client.query("begin");
   try {
-    await applyRulePostEffects(client, { entryId: ev.entryId, seq: ev.seq }, deps);
+    const receipt = await applyRulePostEffects(client, { entryId: ev.entryId, seq: ev.seq }, deps);
     await writeCheckpoint(client, { consumer: RULE_POST_CONSUMER, firmId, seq: ev.seq });
     await client.query("commit");
-    return { ok: true };
+    return { ok: true, receipt };
   } catch (err) {
     try {
       await client.query("rollback");
@@ -142,6 +146,13 @@ async function processRulePostFirm(client, { firmId, lastSeq, batchSize, deps })
     if (res.ok) {
       cursor = ev.seq;
       effects += 1;
+      // Typed-receipt visibility (the narrowRuleWrite law): a 'posted' receipt narrows to
+      // {status:'ok'} (logged as before — nothing extra); a 'skipped' receipt logs {status,
+      // reason} (e.g. polarity_unverified / direction_unproven / anchor_missing /
+      // customer_unresolved / cn_not_autopostable / purchase_sst_not_autopostable) and is a
+      // SUCCESS for checkpointing — the draft stays for human review, NEVER retried into a post.
+      const narrowed = narrowTypedStatus(res.receipt);
+      if (narrowed.status !== "ok") log(`[rule_post] entry=${ev.entryId} ${narrowed.status} reason=${narrowed.reason}`);
       continue;
     }
     if (res.attempts >= MAX_ATTEMPTS) {
