@@ -25,7 +25,7 @@ function strArr(v: unknown): string[] {
 
 // --- list_review_queue (FINAL pin) --------------------------------------------
 
-export type QueueRowKind = "draft" | "uncoded_filing" | "open_question" | "coding_task";
+export type QueueRowKind = "draft" | "uncoded_filing" | "open_question" | "coding_task" | "compliance_watch";
 export type QueueSection = "needs_review" | "needs_you";
 export type QueueLane = "ready" | "needs_review" | "needs_you" | null;
 
@@ -50,19 +50,42 @@ export type QueueRow = {
   question_text: string | null;
   created_at: string | null;
   id: string;
+  // 0016 additive keys — a pre-0016 envelope degrades each to null (§6.2 direction
+  // vocabulary + the compliance_watch row). Never crashes an existing row shape.
+  coding_kind: string | null;
+  watch_id: string | null;
+  tier: string | null;
 };
 
 export type QueueCounts = {
   ready: number; needs_review: number; needs_you: number;
   open_drafts: number; open_questions: number; open_tasks: number;
+  compliance_watches: number;
 };
 
 export type QueueSweep = { open_run: boolean; last_finalized_at: string | null; last_ack_at: string | null };
+
+// 0016 §2.3: the top-level `compliance` summary — per-(client, service_group) watch
+// figures + a `stale_evaluator` flag. Every field defensively nullable; an absent
+// block degrades to {stale_evaluator:false, clients:[]} (the mapper never crashes).
+export type ComplianceClient = {
+  client_id: string | null;
+  service_group: string | null;
+  state: string | null;
+  confirmed_included_cents: number | null;
+  unknown_or_mixed_cents: number | null;
+  screening_proxy_cents: number | null;
+  earliest_crossing_month: string | null;
+  application_due: string | null;
+  future_method_status: string | null;
+};
+export type ReviewCompliance = { stale_evaluator: boolean; clients: ComplianceClient[] };
 
 export type ReviewQueue = {
   watermark: string | null;
   counts: QueueCounts;
   sweep: QueueSweep;
+  compliance: ReviewCompliance;
   rows: QueueRow[];
   next_cursor: { tuple: string[] } | null;
 };
@@ -90,6 +113,24 @@ function toQueueRow(raw: unknown): QueueRow {
     question_text: s(o.question_text),
     created_at: s(o.created_at),
     id: s(o.id) ?? "",
+    coding_kind: s(o.coding_kind),
+    watch_id: s(o.watch_id),
+    tier: s(o.tier),
+  };
+}
+
+function toComplianceClient(raw: unknown): ComplianceClient {
+  const o = (raw ?? {}) as Record<string, unknown>;
+  return {
+    client_id: s(o.client_id),
+    service_group: s(o.service_group),
+    state: s(o.state),
+    confirmed_included_cents: numOrNull(o.confirmed_included_cents),
+    unknown_or_mixed_cents: numOrNull(o.unknown_or_mixed_cents),
+    screening_proxy_cents: numOrNull(o.screening_proxy_cents),
+    earliest_crossing_month: s(o.earliest_crossing_month),
+    application_due: s(o.application_due),
+    future_method_status: s(o.future_method_status),
   };
 }
 
@@ -106,11 +147,18 @@ export function toReviewQueue(raw: unknown): ReviewQueue {
     open_drafts: numOrNull(c.open_drafts) ?? 0,
     open_questions: numOrNull(c.open_questions) ?? 0,
     open_tasks: numOrNull(c.open_tasks) ?? 0,
+    compliance_watches: numOrNull(c.compliance_watches) ?? 0,
+  };
+  const comp = (o.compliance ?? {}) as Record<string, unknown>;
+  const compliance: ReviewCompliance = {
+    stale_evaluator: b(comp.stale_evaluator),
+    clients: arr(comp.clients).map(toComplianceClient),
   };
   return {
     watermark: s(o.watermark),
     counts,
     sweep: { open_run: b(sw.open_run), last_finalized_at: s(sw.last_finalized_at), last_ack_at: s(sw.last_ack_at) },
+    compliance,
     rows: arr(o.rows).map(toQueueRow),
     next_cursor: cursorTuple.length > 0 ? { tuple: cursorTuple } : null,
   };

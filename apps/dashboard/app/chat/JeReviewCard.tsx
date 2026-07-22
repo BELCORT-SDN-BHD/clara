@@ -25,7 +25,8 @@ import {
   type ReviseLine,
   type VendorArg,
 } from "./review";
-import { CLR21_COPY, CLR05_COPY } from "./reviewCopy";
+import { clr21Copy, CLR05_COPY } from "./reviewCopy";
+import { directionOf, counterpartyNoun } from "../shared/direction";
 import { resolveReviewHydration, settledReceiptCopy, type SettledState } from "../shared/settledState";
 import { JeSettledReceipt, JeReviewGoneShell } from "./JeSettledCard";
 import styles from "./chat.module.css";
@@ -238,6 +239,8 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
   if (gone) return <JeReviewGoneShell entryId={part.entry_id} />;
 
   const r = review;
+  const direction = directionOf(r?.coding_kind ?? null); // §6.2: sales → customer noun
+  const cpNoun = counterpartyNoun(direction);
   const debitTotal = r ? r.lines.reduce((s, l) => s + l.debit_cents, 0) : 0;
   const creditTotal = r ? r.lines.reduce((s, l) => s + l.credit_cents, 0) : 0;
   const uncertainty = r?.uncertainty ?? part.uncertainty ?? null;
@@ -282,14 +285,14 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
 
           <div className={styles.tableWrap}>
             <table className={styles.jeTable}>
-              <thead><tr><th>account</th><th className={styles.num}>debit</th><th className={styles.num}>credit</th><th>vendor / note</th></tr></thead>
+              <thead><tr><th>account</th><th className={styles.num}>debit</th><th className={styles.num}>credit</th><th>{cpNoun} / note</th></tr></thead>
               <tbody>
                 {r.lines.map((l, i) => (
                   <tr key={i}>
                     <td>{l.account_code}{l.account_name ? ` · ${l.account_name}` : ""}{l.description ? <span className={styles.muted}> — {l.description}</span> : null}</td>
                     <td className={styles.num}>{l.debit_cents ? fmtCents(l.debit_cents) : ""}</td>
                     <td className={styles.num}>{l.credit_cents ? fmtCents(l.credit_cents) : ""}</td>
-                    <td>{l.is_payable ? <span className={styles.muted}>{l.counterparty_name ?? "vendor"} (payable)</span> : ""}</td>
+                    <td>{l.is_payable ? <span className={styles.muted}>{l.counterparty_name ?? cpNoun} (payable)</span> : ""}</td>
                   </tr>
                 ))}
                 <tr className={styles.jeTotalRow}>
@@ -301,7 +304,7 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
 
           {r.vendor ? (
             <div className={styles.jeVendor}>
-              {r.vendor.disposition === "new" ? <span className={`${styles.jeBadge} ${styles.jeBadgeNew}`}>new vendor</span> : null}
+              {r.vendor.disposition === "new" ? <span className={`${styles.jeBadge} ${styles.jeBadgeNew}`}>new {cpNoun}</span> : null}
               {r.vendor.disposition === "matched" ? <span className={`${styles.jeBadge} ${styles.jeBadgeMatch}`}>matched existing</span> : null}
               {r.vendor.disposition === "ambiguous" ? <span className={`${styles.jeBadge} ${styles.jeBadgeWarn}`}>suspected match — confirm</span> : null}
               <span>{r.vendor.name}{r.vendor.registration_no ? ` · ${r.vendor.registration_no}` : " · no registration on the bill"}</span>
@@ -363,7 +366,7 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
             </div>
           ) : null}
 
-          {clr && clr.reason && CLR21_COPY[clr.reason] ? <p className={styles.jeHint}>{clr.reason}: {CLR21_COPY[clr.reason]}</p> : null}
+          {clr && clr.reason && clr21Copy(clr.reason, direction) ? <p className={styles.jeHint}>{clr.reason}: {clr21Copy(clr.reason, direction)}</p> : null}
           {clr && clr.code === "CLR05" && clr.reason && CLR05_COPY[clr.reason] ? <p className={styles.jeHint}>{CLR05_COPY[clr.reason]}</p> : null}
           {stale ? <p className={styles.jeHint}>The draft changed since it was shown — re-reviewed with the current state. Check the lines, then act again.</p> : null}
         </>
@@ -388,7 +391,7 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
             duplicateReason: duplicateOverrideReason,
             setDuplicateReason: setDuplicateOverrideReason,
           }}
-          busy={busy}
+          busy={busy} counterparty={cpNoun}
           onSaveApprove={() => void saveAndApprove()}
           onSaveDraft={() => void saveDraft()}
           onCancel={() => { setMode("view"); setErr(null); }}
@@ -420,13 +423,13 @@ type OverrideCtl = {
 };
 
 function EditPanel({
-  lineBuf, setLineBuf, evidenceBuf, setEvidenceBuf, vendorBuf, setVendorBuf, attestation, setAttestation, overrides, busy, onSaveApprove, onSaveDraft, onCancel,
+  lineBuf, setLineBuf, evidenceBuf, setEvidenceBuf, vendorBuf, setVendorBuf, attestation, setAttestation, overrides, busy, counterparty, onSaveApprove, onSaveDraft, onCancel,
 }: {
   lineBuf: LineBuf[]; setLineBuf: (v: LineBuf[]) => void;
   evidenceBuf: EvidenceBuf[]; setEvidenceBuf: (v: EvidenceBuf[]) => void;
   vendorBuf: VendorBuf; setVendorBuf: (v: VendorBuf) => void;
   attestation: string; setAttestation: (v: string) => void;
-  overrides: OverrideCtl;
+  overrides: OverrideCtl; counterparty: string;
   busy: boolean; onSaveApprove: () => void; onSaveDraft: () => void; onCancel: () => void;
 }) {
   const patchLine = (i: number, p: Partial<LineBuf>) => setLineBuf(lineBuf.map((l, j) => (j === i ? { ...l, ...p } : l)));
@@ -449,16 +452,16 @@ function EditPanel({
         </table>
       </div>
       <div className={styles.jeVendorEdit}>
-        <label className={styles.muted}>Vendor</label>
+        <label className={styles.muted}>{counterparty[0]?.toUpperCase()}{counterparty.slice(1)}</label>
         <select className={styles.jeInput} value={vendorBuf.mode} onChange={(e) => setVendorBuf({ ...vendorBuf, mode: e.target.value as VendorBuf["mode"] })} aria-label="Vendor mode">
-          <option value="new">New vendor</option>
-          <option value="existing">Existing vendor id</option>
+          <option value="new">New {counterparty}</option>
+          <option value="existing">Existing {counterparty} id</option>
         </select>
         {vendorBuf.mode === "existing" ? (
           <input className={styles.jeInput} aria-label="counterparty id" placeholder="counterparty id" value={vendorBuf.existing_id} onChange={(e) => setVendorBuf({ ...vendorBuf, existing_id: e.target.value })} />
         ) : (
           <>
-            <input className={styles.jeInput} aria-label="vendor name" placeholder="vendor name" value={vendorBuf.name} onChange={(e) => setVendorBuf({ ...vendorBuf, name: e.target.value })} />
+            <input className={styles.jeInput} aria-label="vendor name" placeholder={`${counterparty} name`} value={vendorBuf.name} onChange={(e) => setVendorBuf({ ...vendorBuf, name: e.target.value })} />
             <input className={styles.jeInput} aria-label="vendor registration no" placeholder="registration no (optional)" value={vendorBuf.registration_no} onChange={(e) => setVendorBuf({ ...vendorBuf, registration_no: e.target.value })} />
           </>
         )}

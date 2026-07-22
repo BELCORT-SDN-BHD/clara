@@ -8,6 +8,8 @@
 
 import type { QueueRow } from "../shared/reviewTypes";
 import { fmtCents, shortId } from "../shared/fmt";
+import { directionOf, counterpartyNoun } from "../shared/direction";
+import { tierBand } from "../shared/cards/complianceWatch";
 import styles from "./queue.module.css";
 
 function bandFor(row: QueueRow): { label: string; cls: string } {
@@ -23,8 +25,15 @@ function titleFor(row: QueueRow): string {
     case "draft": return `Draft · ${shortId(row.entry_id)}`;
     case "uncoded_filing": return `Uncoded filing · ${shortId(row.filing_id)}`;
     case "coding_task": return `Coding task · ${shortId(row.task_id)}`;
+    case "compliance_watch": return row.question_text ?? "SST registration watch";
     default: return `${row.row_kind} · ${shortId(row.id)}`;
   }
+}
+
+// §6.2: the counterparty subtitle noun follows the row's direction (sales → customer,
+// purchase/unknown → vendor).
+function counterpartySub(row: QueueRow): string {
+  return `${counterpartyNoun(directionOf(row.coding_kind))} ${shortId(row.counterparty_id)}`;
 }
 
 export function QueueRowView({ row, active, selectable, selected, onOpen, onToggleSelect }: {
@@ -47,7 +56,7 @@ export function QueueRowView({ row, active, selectable, selected, onOpen, onTogg
         <span className={styles.rowTitle}>{titleFor(row)}</span>
         <span className={styles.rowSub}>
           {row.client_id ? `client ${shortId(row.client_id)}` : "unattributed"}
-          {row.counterparty_id ? ` · vendor ${shortId(row.counterparty_id)}` : ""}
+          {row.counterparty_id ? ` · ${counterpartySub(row)}` : ""}
           {row.aged_since ? ` · aging since ${new Date(row.aged_since).toLocaleDateString()}` : ""}
         </span>
       </span>
@@ -55,6 +64,11 @@ export function QueueRowView({ row, active, selectable, selected, onOpen, onTogg
         {row.auto ? <span className={`${styles.badge} ${styles.badgeAuto}`}>auto</span> : null}
         {row.rule_backed ? <span className={`${styles.badge} ${styles.badgeRule}`}>rule</span> : null}
         {row.high_stakes ? <span className={`${styles.badge} ${styles.badgeHigh}`}>high-stakes</span> : null}
+        {row.row_kind === "compliance_watch" ? (() => {
+          const tb = tierBand(row.tier);
+          const cls = tb.tone === "alarm" ? styles.bandYou : tb.tone === "warn" ? styles.bandReview : "";
+          return <span className={`${styles.band} ${cls ?? ""}`}>{tb.label}</span>;
+        })() : null}
         <span className={`${styles.band} ${band.cls}`}>{band.label}</span>
         {row.amount_cents !== null ? <span className={styles.rowAmount}>{fmtCents(row.amount_cents)}</span> : null}
         {row.period ? <span className={styles.rowPeriod}>{row.period}</span> : null}

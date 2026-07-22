@@ -6,6 +6,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { QueueRow } from "../shared/reviewTypes";
+import { toReviewQueue } from "../shared/reviewTypes";
 import {
   decodeCursor, encodeCursor, filterRows, groupBySection, isSelectable, queueScreenState, selectableRows,
 } from "./model";
@@ -16,7 +17,8 @@ function mkRow(p: Partial<QueueRow>): QueueRow {
     row_kind: "draft", section: "needs_review", sort: [], client_id: "cl1", counterparty_id: null,
     filing_id: null, entry_id: "e1", question_id: null, task_id: null, document_id: null,
     lane: null, auto: false, rule_backed: false, high_stakes: false, aged_since: null,
-    amount_cents: null, period: null, question_text: null, created_at: null, id: "row1", ...p,
+    amount_cents: null, period: null, question_text: null, created_at: null, id: "row1",
+    coding_kind: null, watch_id: null, tier: null, ...p,
   };
 }
 
@@ -81,6 +83,52 @@ test("groupBySection orders needs_review before needs_you and drops empty sectio
   const groups = groupBySection(rows);
   assert.deepEqual(groups.map((g) => g.key), ["needs_review", "needs_you"]);
   assert.deepEqual(groupBySection([mkRow({ section: "needs_review" })]).map((g) => g.key), ["needs_review"]);
+});
+
+// --- compliance_watch row (0016 §2.3) ------------------------------------------
+
+test("a compliance_watch row groups by its section and is NOT selectable", () => {
+  const crossed = mkRow({ id: "cw1", row_kind: "compliance_watch", section: "needs_you", watch_id: "cw1", tier: "crossed", entry_id: null });
+  const monitored = mkRow({ id: "cw2", row_kind: "compliance_watch", section: "needs_review", watch_id: "cw2", tier: "monitored", entry_id: null });
+  // A watch is never batch-selectable (isSelectable keys on row_kind==='draft').
+  assert.equal(isSelectable(crossed), false);
+  assert.equal(isSelectable(monitored), false);
+  const groups = groupBySection([crossed, monitored]);
+  assert.deepEqual(groups.map((g) => g.key), ["needs_review", "needs_you"]);
+  assert.deepEqual(groups.find((g) => g.key === "needs_you")?.rows.map((r) => r.id), ["cw1"]);
+});
+
+// --- envelope mapper defensiveness (compliance block + counts) -----------------
+
+test("toReviewQueue maps the compliance block + additive row/count keys", () => {
+  const q = toReviewQueue({
+    counts: { compliance_watches: 2 },
+    compliance: {
+      stale_evaluator: true,
+      clients: [{ client_id: "cl1", service_group: "G", state: "crossed", confirmed_included_cents: 500000, application_due: "2026-09-30" }],
+    },
+    rows: [{ id: "cw1", row_kind: "compliance_watch", watch_id: "cw1", tier: "crossed", coding_kind: null, client_id: "cl1", period: "2026-07-31" }],
+  });
+  assert.equal(q.counts.compliance_watches, 2);
+  assert.equal(q.compliance.stale_evaluator, true);
+  assert.equal(q.compliance.clients.length, 1);
+  assert.equal(q.compliance.clients[0]?.confirmed_included_cents, 500000);
+  assert.equal(q.compliance.clients[0]?.application_due, "2026-09-30");
+  assert.equal(q.compliance.clients[0]?.unknown_or_mixed_cents, null); // absent → degrades to null
+  assert.equal(q.rows[0]?.watch_id, "cw1");
+  assert.equal(q.rows[0]?.tier, "crossed");
+});
+
+test("an absent compliance block degrades to a safe empty summary (never throws)", () => {
+  const q = toReviewQueue({ rows: [] });
+  assert.equal(q.compliance.stale_evaluator, false);
+  assert.deepEqual(q.compliance.clients, []);
+  assert.equal(q.counts.compliance_watches, 0);
+  // A garbage compliance value also degrades rather than crashing.
+  const q2 = toReviewQueue({ compliance: "nope", counts: null });
+  assert.equal(q2.compliance.stale_evaluator, false);
+  assert.deepEqual(q2.compliance.clients, []);
+  assert.equal(q2.counts.compliance_watches, 0);
 });
 
 // --- cents safety (WA hard gate) ----------------------------------------------

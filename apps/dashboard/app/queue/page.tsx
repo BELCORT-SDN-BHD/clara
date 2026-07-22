@@ -155,8 +155,16 @@ export default function QueuePage() {
               <Tile n={queue.counts.open_drafts} label="open drafts" />
               <Tile n={queue.counts.open_questions} label="open questions" />
               <Tile n={queue.counts.open_tasks} label="open tasks" />
+              <Tile n={queue.counts.compliance_watches} label="compliance" />
               {queue.sweep.open_run ? <span className={styles.staleBadge}>sweep reconciling</span> : null}
+              {queue.compliance.stale_evaluator ? <span className={styles.staleBadge}>compliance eval stale</span> : null}
             </div>
+          ) : null}
+
+          {/* §2.3: a persistent banner once any watch reaches early_warning (crossed/
+              overdue rows already sort to top-of-queue via their needs_you section). */}
+          {queue && queue.compliance.clients.some((c) => c.state === "early_warning" || c.state === "crossed" || c.state === "overdue") ? (
+            <p className={styles.banner}>An SST registration-threshold watch needs attention — open the compliance rows to review.</p>
           ) : null}
 
           <div className={styles.toolbar}>
@@ -209,7 +217,7 @@ export default function QueuePage() {
             </section>
 
             <section className={styles.detailPane}>
-              <QueueDetail token={token} row={detailRow} />
+              <QueueDetail token={token} row={detailRow} compliance={queue?.compliance ?? null} onChanged={() => void load()} />
             </section>
           </div>
         </>
