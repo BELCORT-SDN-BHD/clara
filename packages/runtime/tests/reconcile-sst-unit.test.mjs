@@ -1,10 +1,12 @@
-// Wave A2.1 §2.2 — the SST compliance-watch daily repair belt (lib/reconciler.mjs +
-// lib/leader.mjs), PURE (mocked client, scratch spool — no DB). Proves the plain group-role
-// call (evaluate_sst_watches_all is clara_runtime-GROUP-granted, so NO login-direct dance),
-// the op-key shape (sstsweep:<iso>), the receipt log line, error isolation ({sstOk:false} →
-// the leader retries next cycle; the sweep never throws), the runReconcilerSweep flag-gating,
-// and the daily cadence guard INCLUDING the junk-env fallback (a NaN interval must never
-// silently disable the belt).
+// Wave A2.1 §2.2 — the SST compliance-watch daily repair belt (lib/reconciler-sst.mjs +
+// lib/leader.mjs), PURE (mocked client, scratch spool — no DB). Proves the per-client sweep
+// shape (the firm-wide-stall fix): ONE evaluate_sst_watch statement PER active client (never a
+// single bulk evaluate_sst_watches_all across all clients), the receipt written ONCE at the
+// END via evaluate_sst_watches_all (so compliance_eval_runs / stale_evaluator stays fed),
+// per-client failure counted WITHOUT throwing, sstOk:false on any client failure, error
+// isolation ({sstOk:false} → the leader retries next cycle; the sweep never throws), the
+// runReconcilerSweep flag-gating, and the daily-cadence guard INCLUDING the junk-env fallback
+// (a NaN interval must never silently disable the belt).
 
 // The junk-env fallback: set a garbage cadence BEFORE leader.mjs loads (a dynamic import
 // after, so the module reads this env). It must fall back to a FINITE 24h, never NaN.
@@ -32,13 +34,18 @@ after(async () => {
   await rm(scratch, { recursive: true, force: true });
 });
 
-function recordingClient(onSweep = () => ({ clients_examined: 0, clients_changed: 0, clients_failed: 0 })) {
+// A client that answers the active-client discovery with `ids`, routes each per-client
+// evaluate_sst_watch through perClient(clientId), and each evaluate_sst_watches_all receipt
+// call through onReceipt(). Records every query in order so the tests can assert sequencing.
+function recordingClient({ ids = [], perClient = () => ({ status: "ok", changed: false }), onReceipt = () => ({ run_id: "r", clients_examined: ids.length, clients_changed: 0, clients_failed: 0 }) } = {}) {
   const queries = [];
   return {
     queries,
     query(sql, params) {
       queries.push({ sql: String(sql).trim(), params });
-      if (/evaluate_sst_watches_all/.test(sql)) return Promise.resolve({ rows: [{ r: onSweep(params) }], rowCount: 1 });
+      if (/from clara\.clients/.test(sql)) return Promise.resolve({ rows: ids.map((id) => ({ id })), rowCount: ids.length });
+      if (/evaluate_sst_watches_all/.test(sql)) return Promise.resolve({ rows: [{ r: onReceipt(params) }], rowCount: 1 });
+      if (/evaluate_sst_watch/.test(sql)) return Promise.resolve({ rows: [{ r: perClient(params[0]) }], rowCount: 1 });
       return Promise.resolve({ rows: [], rowCount: 0 });
     },
   };
@@ -50,44 +57,118 @@ const sweepDeps = {
   log: () => {},
 };
 
-test("reconcileSstWatches calls evaluate_sst_watches_all PLAIN (no reset role), op-key sstsweep:<iso>, logs the receipt", async () => {
-  const client = recordingClient(() => ({ run_id: "r1", clients_examined: 5, clients_changed: 2, clients_failed: 1 }));
-  const logs = [];
-  const out = await reconcileSstWatches(client, { log: (m) => logs.push(m) });
-  assert.deepEqual(out, { sstOk: true, sstExamined: 5, sstChanged: 2, sstFailed: 1 });
-  const call = client.queries.find((q) => /evaluate_sst_watches_all/.test(q.sql));
-  assert.ok(call, "the DB fn was invoked");
-  assert.match(String(call.params[0]), /^sstsweep:/, "op-key is sstsweep:<iso>");
-  assert.ok(!client.queries.some((q) => /reset role/.test(q.sql)), "group-granted fn — no login-direct dance");
-  assert.ok(logs.some((m) => /\[reconcile\] sst watches examined=5 changed=2 failed=1/.test(m)), "the receipt line carries the counts");
-});
-
-test("a thrown fn error is isolated: logged, sstOk:false, never propagates", async () => {
-  const client = recordingClient(() => {
-    throw new Error("permission denied for function evaluate_sst_watches_all");
+test("the sweep issues ONE evaluate_sst_watch PER client (never a bulk all-clients evaluate), then the receipt ONCE at the end", async () => {
+  const ids = ["c1", "c2", "c3"];
+  const client = recordingClient({
+    ids,
+    perClient: (id) => ({ status: "ok", changed: id === "c2" }),
+    onReceipt: () => ({ run_id: "run-1", clients_examined: 3, clients_changed: 0, clients_failed: 0 }),
   });
   const logs = [];
   const out = await reconcileSstWatches(client, { log: (m) => logs.push(m) });
-  assert.deepEqual(out, { sstOk: false, sstExamined: 0, sstChanged: 0, sstFailed: 0 });
-  assert.ok(logs.some((m) => /evaluate_sst_watches_all error/.test(m)), "the failure was logged");
+
+  // one per-client statement per client — count and identity
+  const perClientCalls = client.queries.filter((q) => /evaluate_sst_watch\(/.test(q.sql) && !/evaluate_sst_watches_all/.test(q.sql));
+  assert.equal(perClientCalls.length, 3, "exactly one evaluate_sst_watch per active client");
+  assert.deepEqual(perClientCalls.map((q) => q.params[0]), ids, "each client evaluated once, in the discovered order");
+  for (const q of perClientCalls) assert.match(String(q.params[1]), /^sstsweep:.*:c[123]$/, "per-client op-key embeds the client id");
+
+  // the receipt: exactly once, and AFTER every per-client call
+  const receiptCalls = client.queries.filter((q) => /evaluate_sst_watches_all/.test(q.sql));
+  assert.equal(receiptCalls.length, 1, "evaluate_sst_watches_all (the receipt writer) is called exactly once");
+  const lastPerClientIdx = client.queries.map((q, i) => (/evaluate_sst_watch\(/.test(q.sql) && !/evaluate_sst_watches_all/.test(q.sql) ? i : -1)).filter((i) => i >= 0).pop();
+  const receiptIdx = client.queries.findIndex((q) => /evaluate_sst_watches_all/.test(q.sql));
+  assert.ok(receiptIdx > lastPerClientIdx, "the receipt is written AFTER the per-client pass converges");
+  assert.match(String(receiptCalls[0].params[0]), /:receipt$/, "the receipt op-key is distinct");
+
+  assert.equal(out.sstOk, true);
+  assert.equal(out.sstExamined, 3);
+  assert.equal(out.sstChanged, 1, "the one changed client is counted from the per-client pass");
+  assert.equal(out.sstFailed, 0);
+  assert.equal(out.sstRunId, "run-1", "the receipt run_id rides the result");
+  assert.ok(!client.queries.some((q) => /reset role/.test(q.sql)), "group-granted fns — no login-direct dance");
+  assert.ok(logs.some((m) => /\[reconcile\] sst watches examined=3 changed=1 failed=0/.test(m)));
+});
+
+test("a per-client failure is COUNTED without throwing, the pass continues, and sstOk goes false", async () => {
+  const ids = ["ok1", "boom", "ok2"];
+  const client = recordingClient({
+    ids,
+    // the DB evaluator is exception-isolated: it returns {status:'failed'} rather than raising
+    perClient: (id) => (id === "boom" ? { status: "failed", error: "poisoned client" } : { status: "ok", changed: false }),
+  });
+  const logs = [];
+  const out = await reconcileSstWatches(client, { log: (m) => logs.push(m) });
+  const perClientCalls = client.queries.filter((q) => /evaluate_sst_watch\(/.test(q.sql) && !/evaluate_sst_watches_all/.test(q.sql));
+  assert.equal(perClientCalls.length, 3, "every client is still evaluated — one poison never abandons the rest");
+  assert.equal(out.sstExamined, 3);
+  assert.equal(out.sstFailed, 1);
+  assert.equal(out.sstOk, false, "any client failure makes the leader retry next cycle");
+  assert.ok(logs.some((m) => /sst watch client=boom failed: poisoned client/.test(m)));
+});
+
+test("a THROWN per-client error (infra fault) is isolated: counted, the pass continues, sstOk:false, never propagates", async () => {
+  const ids = ["a", "b"];
+  const client = {
+    queries: [],
+    query(sql, params) {
+      this.queries.push({ sql: String(sql).trim(), params });
+      if (/from clara\.clients/.test(sql)) return Promise.resolve({ rows: ids.map((id) => ({ id })) });
+      if (/evaluate_sst_watches_all/.test(sql)) return Promise.resolve({ rows: [{ r: { run_id: "r", clients_examined: 2, clients_changed: 0, clients_failed: 0 } }] });
+      if (/evaluate_sst_watch/.test(sql)) {
+        if (params[0] === "a") return Promise.reject(new Error("connection reset"));
+        return Promise.resolve({ rows: [{ r: { status: "ok", changed: false } }] });
+      }
+      return Promise.resolve({ rows: [] });
+    },
+  };
+  const out = await reconcileSstWatches(client, { log: () => {} });
+  assert.equal(out.sstExamined, 2, "both clients examined — the throw did not abort the loop");
+  assert.equal(out.sstFailed, 1);
+  assert.equal(out.sstOk, false);
+});
+
+test("a thrown RECEIPT-call error is isolated: sstOk:false, never propagates", async () => {
+  const client = recordingClient({
+    ids: ["c1"],
+    onReceipt: () => {
+      throw new Error("permission denied for function evaluate_sst_watches_all");
+    },
+  });
+  const logs = [];
+  const out = await reconcileSstWatches(client, { log: (m) => logs.push(m) });
+  assert.equal(out.sstOk, false);
+  assert.ok(logs.some((m) => /evaluate_sst_watches_all error/.test(m)), "the receipt failure was logged");
+});
+
+test("no active clients: no per-client call, the receipt still fires (keeps stale_evaluator fed)", async () => {
+  const client = recordingClient({ ids: [], onReceipt: () => ({ run_id: "empty", clients_examined: 0, clients_changed: 0, clients_failed: 0 }) });
+  const out = await reconcileSstWatches(client, { log: () => {} });
+  assert.ok(!client.queries.some((q) => /evaluate_sst_watch\(/.test(q.sql) && !/evaluate_sst_watches_all/.test(q.sql)), "no per-client call with zero clients");
+  assert.equal(client.queries.filter((q) => /evaluate_sst_watches_all/.test(q.sql)).length, 1, "the receipt still writes (stale_evaluator must not silently starve)");
+  assert.equal(out.sstOk, true);
+  assert.equal(out.sstRunId, "empty");
 });
 
 test("runReconcilerSweep runs the SST belt ONLY when the leader flags it due (the prune idiom)", async () => {
-  const due = recordingClient(() => ({ run_id: "r", clients_examined: 3, clients_changed: 0, clients_failed: 0 }));
+  const due = recordingClient({ ids: ["c1"], onReceipt: () => ({ run_id: "r", clients_examined: 1, clients_changed: 0, clients_failed: 0 }) });
   const sweptDue = await runReconcilerSweep(due, { ...sweepDeps, sstWatches: true });
   assert.equal(sweptDue.sstOk, true);
-  assert.equal(sweptDue.sstExamined, 3);
-  assert.ok(due.queries.some((q) => /evaluate_sst_watches_all/.test(q.sql)), "due → invoked");
+  assert.equal(sweptDue.sstExamined, 1);
+  assert.ok(due.queries.some((q) => /evaluate_sst_watch/.test(q.sql)), "due → invoked");
 
-  const notDue = recordingClient();
+  const notDue = recordingClient({ ids: ["c1"] });
   const sweptNotDue = await runReconcilerSweep(notDue, { ...sweepDeps });
   assert.equal(sweptNotDue.sstOk, undefined, "not due → no SST receipt in the sweep result");
-  assert.ok(!notDue.queries.some((q) => /evaluate_sst_watches_all/.test(q.sql)), "not due → not invoked");
+  assert.ok(!notDue.queries.some((q) => /evaluate_sst_watch/.test(q.sql)), "not due → not invoked");
 });
 
 test("an SST failure never blocks the rest of the sweep (the sweep resolves, sstOk:false)", async () => {
-  const client = recordingClient(() => {
-    throw new Error("boom");
+  const client = recordingClient({
+    ids: ["c1"],
+    onReceipt: () => {
+      throw new Error("boom");
+    },
   });
   const swept = await runReconcilerSweep(client, { ...sweepDeps, sstWatches: true, prune: true });
   assert.equal(swept.sstOk, false, "the leader sees the failure and retries next cycle");

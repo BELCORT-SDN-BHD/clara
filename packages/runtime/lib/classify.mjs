@@ -43,8 +43,21 @@ const POLL_INTERVAL_MS = Number(process.env.CLARA_CLASSIFY_POLL_MS || 2000);
 const BATCH_SIZE = Number(process.env.CLARA_CLASSIFY_BATCH || 25);
 // A classify pass (read text + one model call) completes in seconds; a running task older
 // than this is a crashed mid-classify leftover (single-leader lock ⇒ no live peer is
-// processing it) → requeue.
-const STRANDED_MS = Number(process.env.CLARA_CLASSIFY_STRANDED_MS || 10 * 60_000);
+// processing it) → requeue. Finite-guarded (the leader.mjs idiom): junk or non-positive falls
+// back to 10min. An unguarded NaN reached the requeue query as the string 'NaN', the interval
+// cast RAISED, and because requeueStranded runs BEFORE discoverQueued the whole lane stopped
+// silently behind a repeating cycle-error log.
+const STRANDED_MS_ENV = Number(process.env.CLARA_CLASSIFY_STRANDED_MS);
+const STRANDED_MS = Number.isFinite(STRANDED_MS_ENV) && STRANDED_MS_ENV > 0 ? STRANDED_MS_ENV : 10 * 60_000;
+// The retry ceiling for a task the settle keeps refusing. classify has no DB terminal-fail
+// writer, so a DETERMINISTIC settle failure (classify_document raising CLR28 for a document
+// already marked consent_evidence, CLR11 for a vanished document row, a repeatedly-failing
+// schema parse) would otherwise loop forever on the stranded-requeue path, burning model
+// spend with no page-budget ceiling. Capping in discoverQueued — NOT requeueStranded — is
+// deliberate: capping the requeue would strand the task 'running' where classifyHealth cannot
+// see it, whereas leaving it 'queued' makes oldestQueuedMs climb so /ready warns by itself.
+const MAX_ATTEMPTS_ENV = Number(process.env.CLARA_CLASSIFY_MAX_ATTEMPTS);
+const MAX_ATTEMPTS = Number.isFinite(MAX_ATTEMPTS_ENV) && MAX_ATTEMPTS_ENV > 0 ? MAX_ATTEMPTS_ENV : 3;
 const MAX_TEXT_CHARS = 24000;
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
@@ -71,20 +84,31 @@ function readingOrderKey(locator) {
 }
 
 // Read the document's stored OCR LAYOUT text — the matcher's readMatchInputs read path
-// (document_extractions + document_regions under the runtime role), scoped to the LATEST
+// (document_extractions + document_regions under the runtime role), scoped to the NEWEST
 // done ocr/structured_parse extraction. Regions are concatenated in reading order and capped
 // at ~24k chars (the model is told the text may be truncated). Injectable for tests.
+//
+// ORDERING: version_n is allocated PER (document_id, engine_id) (0016 L3234-3236), so an
+// 'ocr' v1 and a 'structured_parse' v1 TIE on version_n — the old `order by version_n desc,
+// id` then broke the tie by ASCENDING id and could hand the classifier the OLDER extraction's
+// text. Ordering by extracted_at first (version_n, then id, only as deterministic
+// tie-breakers) makes newest genuinely win.
+//
+// Deliberately NOT the matcher's read-ALL-extractions shape: the matcher pattern-matches for
+// attribution, where duplicate text is harmless and recall is what matters, but the
+// classifier reads one coherent document. Concatenating two engines' regions would interleave
+// them by page/position and garble the layout text the verdict depends on.
 export async function readExtractionText(client, { documentId, firmId }) {
   const r = await client.query(
-    `with latest as (
+    `with newest as (
        select e.id, e.firm_id
          from clara.document_extractions e
         where e.document_id = $1 and e.firm_id = $2 and e.status = 'done'
           and e.engine_kind in ('ocr','structured_parse')
-        order by e.version_n desc, e.id
+        order by e.extracted_at desc, e.version_n desc, e.id desc
         limit 1)
      select r.text_content as text, r.locator
-       from latest e
+       from newest e
        join clara.document_regions r on r.extraction_id = e.id and r.firm_id = e.firm_id`,
     [documentId, firmId],
   );
@@ -144,21 +168,31 @@ export async function processClassifyTask(withRuntime, taskId, deps = {}) {
 // Discovery — queued classify tasks + stranded-running tasks to requeue. Reads TASK COLUMNS
 // ONLY (all 0008-granted to clara_runtime). Runs on the leader connection.
 // ---------------------------------------------------------------------------
-async function discoverQueued(client, batchSize) {
+// Queued classify tasks under the attempt ceiling, plus the ids we refused to drive so the
+// caller can log them once. A capped task stays 'queued' on purpose (see MAX_ATTEMPTS).
+async function discoverQueued(client, batchSize, maxAttempts) {
   const r = await client.query(
-    "select id from clara.document_processing_tasks where lane='classify' and status='queued' order by created_at limit $1",
+    `select id, attempt_count from clara.document_processing_tasks
+       where lane='classify' and status='queued'
+       order by created_at limit $1`,
     [batchSize],
   );
-  return r.rows.map((row) => String(row.id));
+  const ids = [];
+  const capped = [];
+  for (const row of r.rows) {
+    if (Number(row.attempt_count) >= maxAttempts) capped.push({ id: String(row.id), attemptCount: Number(row.attempt_count) });
+    else ids.push(String(row.id));
+  }
+  return { ids, capped };
 }
 
 async function requeueStranded(client, { batchSize, strandedMs, log }) {
   const r = await client.query(
     `select id from clara.document_processing_tasks
        where lane='classify' and status='running'
-         and coalesce(started_at, updated_at) < now() - ($1 || ' milliseconds')::interval
+         and coalesce(started_at, updated_at) < now() - ($1::int * interval '1 millisecond')
        order by created_at limit $2`,
-    [String(strandedMs), batchSize],
+    [strandedMs, batchSize],
   );
   let requeued = 0;
   for (const row of r.rows) {
@@ -172,17 +206,23 @@ async function requeueStranded(client, { batchSize, strandedMs, log }) {
   return requeued;
 }
 
-/** One cycle: requeue stranded, then process every queued classify task. `deps.processTask` is
- *  injectable (tests) and defaults to the pooled processClassifyTask. */
+/** One cycle: requeue stranded, then process every queued classify task under the attempt
+ *  ceiling. `deps.processTask` is injectable (tests) and defaults to the pooled
+ *  processClassifyTask. */
 export async function runClassifyCycle(client, deps = {}) {
   const log = deps.log ?? (() => {});
   const batchSize = deps.batchSize ?? BATCH_SIZE;
   const strandedMs = deps.strandedMs ?? STRANDED_MS;
+  const maxAttempts = deps.maxAttempts ?? MAX_ATTEMPTS;
   const requeued = await requeueStranded(client, { batchSize, strandedMs, log });
-  const queued = await discoverQueued(client, batchSize);
+  const { ids: queued, capped: cappedTasks } = await discoverQueued(client, batchSize, maxAttempts);
+  for (const t of cappedTasks) {
+    log(`[classify] task=${t.id} exceeded ${maxAttempts} attempts (attempt_count=${t.attemptCount}) — not re-driven; left queued so /ready warns`);
+  }
   const process = deps.processTask ?? ((taskId) => processClassifyTask(deps.withRuntime ?? defaultWithRuntime, taskId, deps));
   let processed = 0;
   for (const taskId of queued) {
+    if (deps.stopRef?.stop) break; // a stop mid-batch: leave the rest queued for the next leader
     try {
       await process(taskId);
       processed += 1;
@@ -190,21 +230,36 @@ export async function runClassifyCycle(client, deps = {}) {
       log(`[classify] process error task=${taskId}: ${err?.message ?? err}`); // transient — the stranded requeue re-drives
     }
   }
-  return { requeued, discovered: queued.length, processed, capped: queued.length >= batchSize };
+  return {
+    requeued,
+    discovered: queued.length,
+    processed,
+    cappedTasks: cappedTasks.length,
+    capped: queued.length + cappedTasks.length >= batchSize,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// /ready WARN signal — queued backlog + stranded count (task-driven, so no relay checkpoint).
-// Warn-only: a stalled classify consumer must NEVER take chat traffic down. document_processing_tasks
-// is a 0009-era table, so this is safe to call BEFORE 0016 is applied (the classify lane rows
-// simply do not exist yet ⇒ queued 0).
+// /ready WARN signal — queued backlog + stuck-running age + the lane's worst attempt_count
+// (task-driven, so no relay checkpoint). Warn-only: a stalled classify consumer must NEVER
+// take chat traffic down. document_processing_tasks is a 0009-era table, so this is safe to
+// call BEFORE 0016 is applied (the classify lane rows simply do not exist yet ⇒ queued 0).
+//
+// oldestRunningMs exists because a QUEUED-only signal cannot see a poison loop: a looping task
+// is 'running' for all but a moment of each stranded cycle, so queued stays 0 and nothing ever
+// warns. (localFactsHealth has the same queued-only shape but is safe because local-facts
+// terminally fails its tasks via fail_invoice_facts; classify has NO terminal-fail writer, so
+// it inherits the shape without the property that made it safe.) maxAttemptCount surfaces the
+// same condition from the other side and shows the discoverQueued cap doing its job.
 // ---------------------------------------------------------------------------
 export async function classifyHealth(client) {
   const r = await client.query(
     `select
        count(*) filter (where status='queued')::int as queued,
        count(*) filter (where status='running')::int as running,
-       coalesce(extract(epoch from (now() - min(created_at) filter (where status='queued'))) * 1000, 0)::bigint as oldest_queued_ms
+       coalesce(extract(epoch from (now() - min(created_at) filter (where status='queued'))) * 1000, 0)::bigint as oldest_queued_ms,
+       coalesce(extract(epoch from (now() - min(coalesce(started_at, updated_at)) filter (where status='running'))) * 1000, 0)::bigint as oldest_running_ms,
+       coalesce(max(attempt_count), 0)::int as max_attempt_count
      from clara.document_processing_tasks where lane='classify' and status in ('queued','running')`,
   );
   return {
@@ -212,6 +267,8 @@ export async function classifyHealth(client) {
     queued: Number(r.rows[0].queued),
     running: Number(r.rows[0].running),
     oldestQueuedMs: Number(r.rows[0].oldest_queued_ms),
+    oldestRunningMs: Number(r.rows[0].oldest_running_ms),
+    maxAttemptCount: Number(r.rows[0].max_attempt_count),
   };
 }
 
@@ -250,7 +307,10 @@ export function startClassifyLoop(deps = {}) {
           if (connErr) throw connErr;
           let capped = false;
           try {
-            const r = await runClassifyCycle(client, { ...deps, log });
+            // Thread stopRef so a graceful stop skips the REMAINING queued tasks mid-batch
+            // (no fresh model call starts during shutdown); the in-flight call is separately
+            // bounded by classify-llm's abort timeout, so stop() never hangs indefinitely.
+            const r = await runClassifyCycle(client, { ...deps, log, stopRef });
             capped = r.capped;
           } catch (err) {
             if (connErr || isConnErr(err)) throw connErr ?? err;

@@ -18,8 +18,10 @@
 //
 // CLI:
 //   node scripts/relay.mjs            → run the relay loop
-//   node scripts/relay.mjs redrive <eventId>
-//                                     → one-shot idempotent dead-letter redrive
+//   node scripts/relay.mjs redrive <eventId> [--consumer <name>]
+//                                     → one-shot idempotent dead-letter redrive; <name> is any
+//                                       registered consumer (router|matcher|rule_post|
+//                                       sst_watch|facts_gate), default router
 //
 // Env:
 //   PG* / DATABASE_URL / WORKFLOW_POSTGRES_URL  → connection (env ONLY; a
@@ -43,8 +45,24 @@ import {
   acquireLeaderLock,
   runRelayCycle,
 } from "../lib/relay.mjs";
-import { CONSUMERS } from "../lib/matcher.mjs";
+import { CONSUMERS as MATCHER_CONSUMERS } from "../lib/matcher.mjs";
+import { CONSUMERS as RULE_POST_CONSUMERS } from "../lib/rule-post.mjs";
+import { CONSUMERS as SST_WATCH_CONSUMERS } from "../lib/sst-watch.mjs";
+import { CONSUMERS as FACTS_GATE_CONSUMERS } from "../lib/facts-gate.mjs";
 import { makeRuntimeClient } from "../lib/pools.mjs";
+
+// Every registered spine consumer's redrive seam, merged. Each module owns its own entry
+// (name + identity + redrive), so the CLI never hardcodes a consumer's identity: matcher and
+// rule_post need the raw runtime LOGIN (their writers' EXECUTE lives on the login shell, not
+// the clara_runtime group); router, sst_watch and facts_gate are plain runtime-role calls.
+// Without the merge, `redrive sst_watch|facts_gate|rule_post <event>` was rejected as an
+// unknown consumer and /ready warned about dead-letters no operator could clear.
+const CONSUMERS = Object.freeze({
+  ...MATCHER_CONSUMERS,
+  ...RULE_POST_CONSUMERS,
+  ...SST_WATCH_CONSUMERS,
+  ...FACTS_GATE_CONSUMERS,
+});
 
 const POLL_INTERVAL_MS = 2000;
 const RECONNECT_BASE_MS = 500;
@@ -142,11 +160,10 @@ async function main() {
   const testMode = process.env.RELAY_TEST_MODE === "1";
 
   // redrive CLI — one-shot, its own connection (D3). Consumer-selectable (§4.4):
-  //   relay.mjs redrive <eventId> [--consumer router|matcher]
+  //   relay.mjs redrive <eventId> [--consumer <name>]
   // The router path stays byte-identical (default consumer, makeClient +
-  // setRuntimeRole + the relay taxonomy redrive). The matcher path dispatches the
-  // MATCHER handler on a raw runtime-LOGIN connection (record_rule_resolution's
-  // EXECUTE lives on the login shell, not the clara_runtime group).
+  // setRuntimeRole + the relay taxonomy redrive). Every other path dispatches its own
+  // module's handler on the connection its registered `identity` calls for.
   if (args[0] === "redrive") {
     const rest = args.slice(1);
     let consumer = "router";
@@ -156,7 +173,7 @@ async function main() {
       rest.splice(ci, 2);
     }
     const eventId = rest[0];
-    if (!eventId) throw new Error("usage: relay.mjs redrive <eventId> [--consumer router|matcher]");
+    if (!eventId) throw new Error(`usage: relay.mjs redrive <eventId> [--consumer ${Object.keys(CONSUMERS).join("|")}]`);
     const entry = CONSUMERS[consumer];
     if (!entry) throw new Error(`redrive: unknown consumer '${consumer}' (known: ${Object.keys(CONSUMERS).join(", ")})`);
     const client = entry.identity === "runtime-login" ? makeRuntimeClient() : makeClient();

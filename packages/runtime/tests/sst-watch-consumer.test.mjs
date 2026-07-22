@@ -17,8 +17,9 @@ process.env.RELAY_TEST_MODE ??= "1";
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { rootQuery, humanQuery, asRuntime, asFnOwner, opk, buildFirm, headSeq, checkpointSeq, deadLettersForFirm, endPool } from "./relay-fixtures.mjs";
+import { rootQuery, humanQuery, asRuntime, asFnOwner, opk, buildFirm, createClient, headSeq, checkpointSeq, deadLettersForFirm, endPool } from "./relay-fixtures.mjs";
 import { runSstWatchCycle, sstWatchHealth, sstWatchRedrive, CONSUMERS, SST_WATCH_CONSUMER, SST_WATCH_EVENT_TYPE } from "../lib/sst-watch.mjs";
+import { reconcileSstWatches } from "../lib/reconciler.mjs";
 
 async function probe0016() {
   const r = await rootQuery(
@@ -129,6 +130,48 @@ test("redrive refuses when there is no sst_watch dead-letter (a never-dead-lette
   const { owner, firm, client } = await buildFirm("sstc");
   const { eventId } = await emitEntryApproved(firm, client, owner);
   await assert.rejects(() => asRuntime((c) => sstWatchRedrive(c, eventId)), /no dead-letter for consumer='sst_watch'/);
+});
+
+// Finding 1 (the firm-wide-stall BLOCKER) — the daily repair belt must iterate the active
+// clients ONE STATEMENT (one transaction) PER CLIENT, not one bulk evaluate_sst_watches_all
+// across all of them; a single call holds the firm_event_seq row lock for its whole duration
+// and blocks every concurrent writer. Here we count the statements the real belt issues
+// against the real DB: one evaluate_sst_watch per active client, then evaluate_sst_watches_all
+// (the receipt writer) EXACTLY ONCE at the end. (The non-blocking property itself is proven by
+// the standalone concurrency run recorded in the review notes.)
+test("the daily SST belt issues ONE evaluate_sst_watch per active client + the receipt ONCE (finding 1)", { skip }, async () => {
+  const { owner } = await buildFirm("sstbelt");
+  await createClient(owner, { name: `sstbelt_x_${Date.now()}`, opKey: opk("sstbelt-x") });
+  await createClient(owner, { name: `sstbelt_y_${Date.now()}`, opKey: opk("sstbelt-y") });
+  const active = Number((await rootQuery("select count(*)::int n from clara.clients where status='active'")).rows[0].n);
+  assert.ok(active >= 3, "several active clients are seeded");
+
+  const counts = { perClient: 0, receipt: 0 };
+  const perClientKeys = [];
+  await asRuntime(async (c) => {
+    const proxy = {
+      query: (sql, params) => {
+        const s = String(sql);
+        if (/evaluate_sst_watches_all/.test(s)) counts.receipt += 1;
+        else if (/evaluate_sst_watch/.test(s)) {
+          counts.perClient += 1;
+          perClientKeys.push(params?.[1]); // the per-client op-key
+        }
+        return c.query(sql, params);
+      },
+    };
+    const out = await reconcileSstWatches(proxy, { log: () => {} });
+    assert.equal(out.sstOk, true, "the sweep converges cleanly");
+    assert.equal(out.sstExamined, active, "every active client is examined");
+    assert.ok(out.sstRunId, "the receipt run_id rides the result (compliance_eval_runs written)");
+  });
+  assert.equal(counts.perClient, active, "exactly one evaluate_sst_watch statement per active client (never a bulk all-clients call)");
+  assert.equal(counts.receipt, 1, "evaluate_sst_watches_all (the ONLY compliance_eval_runs writer) is called exactly once, at the end");
+  assert.equal(new Set(perClientKeys).size, active, "each per-client op-key is distinct (embeds the client id)");
+
+  // The receipt landed — this is what backs list_review_queue's stale_evaluator (>48h) flag.
+  const receipts = Number((await rootQuery("select count(*)::int n from clara.compliance_eval_runs")).rows[0].n);
+  assert.ok(receipts >= 1, "a compliance_eval_runs receipt row exists after the belt runs");
 });
 
 test("registry + health: the sst_watch entry is group-runtime and health reports lag/dead-letters", { skip }, async () => {

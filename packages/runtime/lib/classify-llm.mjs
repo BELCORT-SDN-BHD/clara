@@ -14,8 +14,17 @@ import { generateObject } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { z } from "zod";
 
-/** The EXISTING 18-value document-kind vocabulary (0016 classify_document CHECK, L3202-3207).
- *  NO new values — the classifier picks exactly one of these. */
+/** Kinds classify_document REFUSES outright, whatever the model says. 'consent_evidence' is a
+ *  legal artifact owned by the egress-consent path: 0016 raises CLR28 unconditionally for it.
+ *  A refused kind is a DETERMINISTIC settle failure — the task would be left running, requeued
+ *  by the stranded path, and re-classified to the same refused verdict forever (~144 model
+ *  calls/day per poisoned document). So the classifier must never offer one. Pinned here and
+ *  asserted against CLASSIFY_KINDS in the tests, so a future kind addition cannot silently
+ *  reintroduce the loop. */
+export const DB_REFUSED_KINDS = Object.freeze(["consent_evidence"]);
+
+/** The document-kind vocabulary the classifier may return — the 0016 classify_document CHECK
+ *  (L3202-3207) MINUS DB_REFUSED_KINDS. NO new values. */
 export const CLASSIFY_KINDS = Object.freeze([
   "invoice",
   "receipt",
@@ -33,7 +42,6 @@ export const CLASSIFY_KINDS = Object.freeze([
   "opening_balance_doc",
   "knowledge_artifact",
   "handwritten_note",
-  "consent_evidence",
   "other",
 ]);
 
@@ -83,9 +91,11 @@ const SYSTEM_PROMPT = [
   "- knowledge_artifact: a reference/policy/guide/SOP/checklist note — not a transactional or",
   "  statutory record.",
   "- handwritten_note: a handwritten/scribbled informal note or memo, not a structured form.",
-  "- consent_evidence: evidence of a client's consent/authorization to act (a legal permission",
-  "  artifact). Owned by a separate path — pick this ONLY if the document is unmistakably that.",
   "- other: none of the above, or you genuinely cannot tell.",
+  "",
+  "A consent / permission / authorisation artifact (evidence a client authorised the firm to",
+  "act) is NOT one of the kinds above — a separate consent path owns those documents. Answer",
+  "'other' for one; never try to label it.",
   "",
   "Report an HONEST, calibrated confidence in [0,1]. If you are uncertain, report a confidence",
   "BELOW 0.8 — a low-confidence document is routed to a human for review, which is the correct,",
@@ -94,6 +104,12 @@ const SYSTEM_PROMPT = [
 ].join("\n");
 
 const MAX_TEXT_CHARS = 24000;
+// A bounded provider call. runClassifyCycle awaits its tasks SEQUENTIALLY and the loop's
+// stop() awaits that same promise, so an un-timed-out hung request would stall the whole lane
+// AND block graceful shutdown until a force-kill. Finite-guarded (the leader.mjs idiom): junk
+// or non-positive falls back to 60s — a NaN here would mean no timeout at all.
+const TIMEOUT_MS_ENV = Number(process.env.CLARA_CLASSIFY_LLM_TIMEOUT_MS);
+const TIMEOUT_MS = Number.isFinite(TIMEOUT_MS_ENV) && TIMEOUT_MS_ENV > 0 ? TIMEOUT_MS_ENV : 60_000;
 
 function resolveModel(modelId) {
   const override = globalThis.__claraModelForTest;
@@ -104,10 +120,10 @@ function resolveModel(modelId) {
  * Classify one document's OCR layout text into {kind, confidence, rationale}. `text` is the
  * concatenated region text in reading order; it is capped at ~24k chars (with a truncation
  * note to the model). Deterministic in tests via the __claraModelForTest override.
- * @param {{text:string, modelId:string}} args
+ * @param {{text:string, modelId:string, timeoutMs?:number, abortSignal?:AbortSignal}} args
  * @returns {Promise<{kind:string, confidence:number, rationale:string}>}
  */
-export async function classifyDocumentText({ text, modelId }) {
+export async function classifyDocumentText({ text, modelId, timeoutMs, abortSignal }) {
   const truncated = String(text ?? "").length > MAX_TEXT_CHARS;
   const body = String(text ?? "").slice(0, MAX_TEXT_CHARS);
   const prompt = [
@@ -118,6 +134,12 @@ export async function classifyDocumentText({ text, modelId }) {
   ]
     .filter(Boolean)
     .join("\n");
-  const { object } = await generateObject({ model: resolveModel(modelId), schema, system: SYSTEM_PROMPT, prompt });
+  // The timeout aborts the provider request itself (not just our await), and a caller-supplied
+  // signal (the loop's stop path) composes with it — so a shutdown cancels an in-flight call
+  // instead of waiting out the full timeout.
+  const budget = Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : TIMEOUT_MS;
+  const timer = AbortSignal.timeout(budget);
+  const signal = abortSignal ? AbortSignal.any([abortSignal, timer]) : timer;
+  const { object } = await generateObject({ model: resolveModel(modelId), schema, system: SYSTEM_PROMPT, prompt, abortSignal: signal });
   return object;
 }

@@ -214,6 +214,16 @@ export async function checkReadiness() {
             checks.classify = { ok: true, ...ch };
             const queueWarnMs = Number(process.env.CLARA_DOCUMENT_QUEUE_WARN_MS || 60000);
             if (Number(ch.oldestQueuedMs ?? 0) > queueWarnMs) warnings.push(`classify oldest queued ${Math.round(Number(ch.oldestQueuedMs))}ms`);
+            // A task stuck 'running' past the stranded threshold is the poison-loop signature —
+            // invisible to the queued-only signal above, because a looping task is 'running' for
+            // all but a moment of each stranded cycle. Same finite guard as the worker's own
+            // knob, so junk env can never disable the warn.
+            const strandedEnv = Number(process.env.CLARA_CLASSIFY_STRANDED_MS);
+            const strandedMs = Number.isFinite(strandedEnv) && strandedEnv > 0 ? strandedEnv : 10 * 60000;
+            if (Number(ch.oldestRunningMs ?? 0) > strandedMs)
+              warnings.push(`classify oldest running ${Math.round(Number(ch.oldestRunningMs))}ms (stranded/looping?)`);
+            const maxAttempts = Number(ch.maxAttemptCount ?? 0);
+            if (maxAttempts >= 3) warnings.push(`classify max attempt_count ${maxAttempts}`);
           } catch (err) {
             warnings.push(`classify_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }

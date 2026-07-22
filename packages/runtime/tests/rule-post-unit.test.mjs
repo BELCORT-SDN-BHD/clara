@@ -90,9 +90,16 @@ test("narrowTypedStatus: a refused/skipped receipt with no string reason falls b
   assert.deepEqual(narrowTypedStatus({ status: "refused", reason: 42 }), { status: "refused", reason: "refused" });
 });
 
-test("narrowTypedStatus: anything else (null, legacy receipts, non-objects) is success-shaped", () => {
-  assert.deepEqual(narrowTypedStatus(null), { status: "ok" });
-  assert.deepEqual(narrowTypedStatus(undefined), { status: "ok" });
+test("narrowTypedStatus: a legacy object receipt (no typed status) is success-shaped", () => {
   assert.deepEqual(narrowTypedStatus({ posted: true }), { status: "ok" });
-  assert.deepEqual(narrowTypedStatus("posted"), { status: "ok" });
+  assert.deepEqual(narrowTypedStatus({ entry_id: "e", rule_id: "r" }), { status: "ok" });
+});
+
+test("narrowTypedStatus: an ABSENT receipt (null/undefined/non-object) is {status:'absent'} — never success", () => {
+  // The future propose_autopost_rule / sign_autopost_rule callers must not read a missing
+  // receipt as a posted write; 'absent' is a distinct non-ok status so it can't slip through.
+  assert.deepEqual(narrowTypedStatus(null), { status: "absent", reason: "no_receipt" });
+  assert.deepEqual(narrowTypedStatus(undefined), { status: "absent", reason: "no_receipt" });
+  assert.deepEqual(narrowTypedStatus("posted"), { status: "absent", reason: "no_receipt" });
+  assert.deepEqual(narrowTypedStatus(42), { status: "absent", reason: "no_receipt" });
 });

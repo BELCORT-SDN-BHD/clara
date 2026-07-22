@@ -19,6 +19,7 @@
 
 import { sweepSpoolTtl } from "./spool.mjs";
 import { isRunNotFound, reconcileDocumentIntakes, reconcileDocumentTasks } from "./reconciler-documents.mjs";
+import { reconcileSstWatches } from "./reconciler-sst.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -383,38 +384,12 @@ export async function reconcileAutopostRules(client, opts = {}) {
   }
 }
 
-// ---------------------------------------------------------------------------
-// SST compliance-watch daily sweep (Wave A2.1 §2.2 — the repair belt / migration 0016).
-// clara.evaluate_sst_watches_all() re-evaluates EVERY active client's SST-registration
-// watch from the books, counting failures WITHOUT raising (each client is exception-
-// isolated), and writes ONE append-only compliance_eval_runs receipt; the returned
-// {run_id, clients_examined, clients_changed, clients_failed} is the receipt. The fn is
-// runtime-GROUP-granted (the reconcile_autopost_rules precedent — a plain call on the
-// clara_runtime connection, NO login-direct dance). Errors are isolated: log +
-// sstOk:false, so the leader retries next cycle and the other sweepers are never blocked.
-// This first-cycle-at-boot sweep is what catches PRE-EXISTING crossings right after the
-// 0016 deploy ceremony (the event-driven spine only re-evaluates a client on a NEW
-// approval — the belt covers everyone).
-// ---------------------------------------------------------------------------
-
-/** @param {import("pg").ClientBase} client  a clara_runtime connection */
-export async function reconcileSstWatches(client, opts = {}) {
-  const log = opts.log ?? (() => {});
-  try {
-    const r = (await client.query("select clara.evaluate_sst_watches_all($1) as r", [`sstsweep:${new Date().toISOString()}`])).rows[0]?.r ?? {};
-    const out = {
-      sstOk: true,
-      sstExamined: Number(r?.clients_examined ?? 0),
-      sstChanged: Number(r?.clients_changed ?? 0),
-      sstFailed: Number(r?.clients_failed ?? 0),
-    };
-    log(`[reconcile] sst watches examined=${out.sstExamined} changed=${out.sstChanged} failed=${out.sstFailed}`);
-    return out;
-  } catch (err) {
-    log(`[reconcile] evaluate_sst_watches_all error: ${err?.message ?? err}`);
-    return { sstOk: false, sstExamined: 0, sstChanged: 0, sstFailed: 0 };
-  }
-}
+// The SST compliance-watch daily repair belt (Wave A2.1 §2.2 / migration 0016) lives in
+// reconciler-sst.mjs (module-size budget, the reconciler-documents.mjs precedent) and is
+// re-exported here so existing import sites keep resolving it from reconciler.mjs. It
+// iterates the active clients ONE TRANSACTION PER CLIENT — a single all-clients call would
+// hold the firm_event_seq row lock for the whole sweep and block every concurrent writer.
+export { reconcileSstWatches };
 
 // ---------------------------------------------------------------------------
 // One full sweep (called under the leader lock by the supervisor).

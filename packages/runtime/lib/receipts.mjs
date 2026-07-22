@@ -10,17 +10,23 @@
 //     customer_unresolved, cn_not_autopostable, purchase_sst_not_autopostable, ...): the
 //     draft stays for human review (visibility-as-safety), never retried into a post.
 // Anything that is not an explicit typed refusal/skip is success-shaped (legacy jsonb
-// receipts included), exactly as the dashboard law narrows.
+// receipts included), exactly as the dashboard law narrows — EXCEPT an absent or non-object
+// receipt, which is 'absent'. An absent receipt is not evidence of success: it means the
+// writer returned nothing (a NULL column, a lost row, a shape change), and narrowing THAT to
+// success is precisely the failure this helper exists to prevent for the future
+// propose_autopost_rule / sign_autopost_rule callers, where a missed refusal would let a
+// bounds-exceeded write read as posted.
 
 /**
- * Narrow a DB writer's jsonb receipt into a typed status. A refused/skipped receipt
- * passes through {status, reason}; everything else (incl. 'posted' and legacy receipts)
- * is {status:'ok'}.
+ * Narrow a DB writer's jsonb receipt into a typed status. A refused/skipped receipt passes
+ * through {status, reason}; a null/undefined/non-object receipt is {status:'absent'};
+ * everything else (incl. 'posted' and legacy receipts) is {status:'ok'}.
  * @param {unknown} out
- * @returns {{status:"ok"} | {status:"refused"|"skipped", reason:string}}
+ * @returns {{status:"ok"} | {status:"absent", reason:string} | {status:"refused"|"skipped", reason:string}}
  */
 export function narrowTypedStatus(out) {
-  if (out && typeof out === "object" && (out.status === "refused" || out.status === "skipped")) {
+  if (out === null || out === undefined || typeof out !== "object") return { status: "absent", reason: "no_receipt" };
+  if (out.status === "refused" || out.status === "skipped") {
     const reason = out.reason;
     return { status: out.status, reason: typeof reason === "string" ? reason : out.status };
   }

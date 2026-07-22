@@ -128,5 +128,36 @@ test("classifyHealth reports the classify lane's queued/running backlog (pre-001
   assert.equal(typeof h.queued, "number");
   assert.equal(typeof h.running, "number");
   assert.equal(typeof h.oldestQueuedMs, "number");
+  assert.equal(typeof h.oldestRunningMs, "number", "oldestRunningMs surfaces a stuck/looping task (finding 3)");
+  assert.equal(typeof h.maxAttemptCount, "number", "maxAttemptCount surfaces the retry-cap signal (finding 3)");
   assert.ok(h.queued >= 0 && h.running >= 0);
+});
+
+// Finding 6 — version_n is per (document_id, engine_id), so an ocr v1 and a structured_parse
+// v1 TIE on version_n. The old `order by version_n desc, id` could hand the classifier the
+// OLDER extraction's text; ordering by extracted_at first makes the newest genuinely win.
+test("readExtractionText returns the NEWEST extraction's text when two engines tie on version_n (finding 6)", { skip }, async () => {
+  const { owner, firm, client } = await buildFirm("clsc");
+  const document = await seedVerifiedDocument({ firm, uploadedBy: owner });
+  await rootQuery(
+    "insert into clara.document_filings(firm_id, document_id, client_id, filed_by, basis) values($1,$2,$3,$4,'legacy-0007')",
+    [firm, document, client, owner],
+  );
+  // An OCR v1 (older) and a structured_parse v1 (newer) — same version_n, different engines.
+  const olderOcr = (await rootQuery(
+    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,extracted_at)
+       values($1,$2,'azure-di:prebuilt-layout:4.0','ocr',1,'done',1, now() - interval '1 hour') returning id`,
+    [firm, document],
+  )).rows[0].id;
+  const newerParse = (await rootQuery(
+    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,extracted_at)
+       values($1,$2,'clara-structured:v1','structured_parse',1,'done',1, now()) returning id`,
+    [firm, document],
+  )).rows[0].id;
+  await seedRegion({ firm, extraction: olderOcr, fieldPath: "body", textContent: "OLDER OCR EXTRACTION TEXT" });
+  await seedRegion({ firm, extraction: newerParse, fieldPath: "body", textContent: "NEWER STRUCTURED PARSE TEXT" });
+
+  const text = await asRuntime((c) => readExtractionText(c, { documentId: document, firmId: firm }));
+  assert.match(text, /NEWER STRUCTURED PARSE TEXT/, "the newest extraction's text wins the tie");
+  assert.doesNotMatch(text, /OLDER OCR EXTRACTION TEXT/, "the older tied extraction is not read (never interleaved)");
 });
