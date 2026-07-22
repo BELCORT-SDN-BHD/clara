@@ -359,14 +359,41 @@ export async function reconcileAutoDraftTasks(client, deps) {
 }
 
 // ---------------------------------------------------------------------------
+// Autopost-rule expiry/nudge sweep (Wave A2.1 §7 / migration 0015 S3 — WA2-R10
+// never-auto-renew). clara.reconcile_autopost_rules() hard-expires live autopost
+// rules past expires_at (+ notification) and writes the ¾-term no-recent-post
+// nudges; the returned {expired, nudged} counts are the receipt. The fn is
+// runtime-GROUP-granted (the reconcile_sweep_runs precedent — a plain call on the
+// clara_runtime connection, NOT the execute_rule_post login-direct dance). Errors
+// are isolated: log + autopostOk:false, so the leader retries next cycle and the
+// other sweepers are never blocked.
+// ---------------------------------------------------------------------------
+
+/** @param {import("pg").ClientBase} client  a clara_runtime connection */
+export async function reconcileAutopostRules(client, opts = {}) {
+  const log = opts.log ?? (() => {});
+  try {
+    const r = (await client.query("select clara.reconcile_autopost_rules() as r")).rows[0]?.r ?? {};
+    const out = { autopostOk: true, autopostExpired: Number(r?.expired ?? 0), autopostNudged: Number(r?.nudged ?? 0) };
+    log(`[reconcile] autopost rules expired=${out.autopostExpired} nudged=${out.autopostNudged}`);
+    return out;
+  } catch (err) {
+    log(`[reconcile] reconcile_autopost_rules error: ${err?.message ?? err}`);
+    return { autopostOk: false, autopostExpired: 0, autopostNudged: 0 };
+  }
+}
+
+// ---------------------------------------------------------------------------
 // One full sweep (called under the leader lock by the supervisor).
 // ---------------------------------------------------------------------------
 
 /**
  * Run every sweeper once + a heartbeat. Trace prune runs on a coarser cadence
- * (opts.prune=true) so it does not scan on every fast sweep.
+ * (opts.prune=true) so it does not scan on every fast sweep; the autopost-rule
+ * expiry sweep runs on the leader's daily flag (opts.autopostRules=true).
  * @param {import("pg").ClientBase} client  a clara_runtime connection
- * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean}} deps
+ * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean,
+ *          autopostRules?:boolean}} deps
  */
 export async function runReconcilerSweep(client, deps) {
   const log = deps.log ?? (() => {});
@@ -390,6 +417,8 @@ export async function runReconcilerSweep(client, deps) {
   } catch (err) {
     log(`[reconcile] spool TTL sweep error: ${err?.message ?? err}`);
   }
+  let autopost = {};
+  if (deps.autopostRules) autopost = await reconcileAutopostRules(client, { log });
   let prune = { pruned: 0 };
   if (deps.prune) {
     try {
@@ -398,5 +427,5 @@ export async function runReconcilerSweep(client, deps) {
       log(`[reconcile] trace prune error: ${err?.message ?? err}`);
     }
   }
-  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...prune };
+  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...prune };
 }
