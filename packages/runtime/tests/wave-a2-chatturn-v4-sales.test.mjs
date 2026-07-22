@@ -60,7 +60,8 @@ const salesInput = {
 
 test("v4 schema requires coding_kind and accepts the sales shape", () => {
   assert.ok(draftJournalEntryInputSchema.safeParse(salesInput).success, "sales_invoice input parses");
-  const { coding_kind: _omit, ...withoutKind } = salesInput;
+  const withoutKind = { ...salesInput };
+  delete withoutKind.coding_kind;
   assert.equal(draftJournalEntryInputSchema.safeParse(withoutKind).success, false, "coding_kind is required");
   assert.equal(
     draftJournalEntryInputSchema.safeParse({ ...salesInput, coding_kind: "nonsense" }).success,
