@@ -26,6 +26,15 @@
 
 Ordered by dependency + risk; each wave keeps the app runnable.
 
+> **STATUS (2026-07-22):** Wave **A** is FULLY LIVE (ADR-022/023/024). **Wave A2**
+> — the sales-invoice/AR side + MyInvois UBL local-parse + SST 3-leg + CN/DN +
+> **purchase-only** bounded auto-posting (the "standing rules" from Wave A's scope)
+> + the R2 backup app — was **deliberately inserted before Wave B** and is now
+> BUILT + MERGED (ADR-025/026, migration `0015`), pending the live deploy.
+> **Deferred to Wave A2.1:** sales-direction autopost + purchase-side SST 3-leg.
+> Waves **B–G** below are unchanged; **B (knowledge + onboarding) is next** after
+> the A2 deploy + A2.1.
+
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
 **Wave C — money movement.** Bank statement ingest, parity-checked matching + exclusivity, reconciliation tie-out, receipt/payment allocation (intrinsic), aging + statements, the self-reconcile learn loop (advisory, human-gated).
