@@ -74,6 +74,12 @@ export type DraftReview = {
   revision_token: string;
   posting_date: string | null;
   memo: string | null;
+  // §6.1 terminal metadata (the 0016 slim settled payload; all null on a live draft):
+  approved_at: string | null;
+  checker_actor: string | null;
+  withdrawn_at: string | null;
+  withdrawn_by: string | null;
+  withdrawal_reason: string | null;
   lines: DraftLine[];
   vendor: VendorProposal | null;
   evidence: EvidenceRow[];
@@ -119,10 +125,19 @@ function mapDisposition(decision: string | null): { disposition: VendorProposal[
  *  place to reconcile 0009's key names. Actual shape (per integration):
  *  { entry:<journal_entries row>, lines:[...], counterparty:{proposal, fingerprint,
  *  current_outcome:{decision,counterparty_id?,name_normalized,...}|null}, evidence:[...],
- *  eligible_checker_count, high_stakes }. Defensive reads: a rename degrades a field. */
-export function toDraftReview(raw: unknown): DraftReview {
-  const r = (raw ?? {}) as Record<string, unknown>;
+ *  eligible_checker_count, high_stakes }. Defensive reads: a rename degrades a field.
+ *
+ *  §6.1 (Wave A2.1): NEVER fabricate. Today's get_draft_review returns SQL NULL for a
+ *  settled (non-draft) entry — that MUST resolve to null here, not a status-'unknown'
+ *  shell with empty lines and RM 0.00 totals. A payload with no entry identity and no
+ *  status is equally not a review. Callers branch via resolveReviewHydration
+ *  (shared/settledState.ts): a future 0016 slim settled payload ({entry:{status,…}})
+ *  still maps below and is used directly. */
+export function toDraftReview(raw: unknown): DraftReview | null {
+  if (raw === null || raw === undefined || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
   const entry = (r.entry ?? {}) as Record<string, unknown>;
+  if (str(entry.id) === null && str(r.entry_id) === null && str(entry.status) === null) return null;
   const flags = (entry.flags ?? {}) as Record<string, unknown>;
   const cp = (r.counterparty ?? null) as Record<string, unknown> | null;
   const proposal = (cp?.proposal ?? null) as Record<string, unknown> | null;
@@ -164,6 +179,11 @@ export function toDraftReview(raw: unknown): DraftReview {
     revision_token: str(entry.revision_token) ?? "",
     posting_date: str(entry.posting_date),
     memo: str(entry.memo),
+    approved_at: str(entry.approved_at),
+    checker_actor: str(entry.checker_actor),
+    withdrawn_at: str(entry.withdrawn_at),
+    withdrawn_by: str(entry.withdrawn_by),
+    withdrawal_reason: str(entry.withdrawal_reason),
     lines: arr(r.lines).map((l) => {
       const o = (l ?? {}) as Record<string, unknown>;
       const isPayable = str(o.account_class) === "payable";
@@ -229,8 +249,10 @@ export type EvidenceArg = { region_id: string; quote: string; field_path?: strin
 
 const opKey = () => crypto.randomUUID();
 
-/** Re-derive the authoritative draft (hydration law §6). client-pinned per C-11. */
-export async function getDraftReview(token: string, entryId: string, clientId?: string | null): Promise<DraftReview> {
+/** Re-derive the authoritative draft (hydration law §6). client-pinned per C-11.
+ *  Null ⇒ the entry is not a visible draft (settled, or out of scope) — §6.1: the
+ *  caller resolves the terminal state via shared/settledState, never fabricates. */
+export async function getDraftReview(token: string, entryId: string, clientId?: string | null): Promise<DraftReview | null> {
   const out = await rpc("get_draft_review", { p_entry: entryId, p_client: clientId ?? null }, token);
   return toDraftReview(out);
 }
