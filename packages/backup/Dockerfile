@@ -47,6 +47,16 @@ COPY packages/db ./packages/db
 ENV CLARA_BACKUP_STAGING_DIR=/tmp/clara-backup
 RUN mkdir -p /tmp/clara-backup
 
+# Image-intrinsic paths. These live HERE (not fly.toml [env]) because the scheduled
+# machine is created with `fly machine run`, which DISREGARDS fly.toml configuration —
+# only Dockerfile ENVs and machine-run flags reach the machine (docs/ops/DR.md §9).
+#   - The age RECIPIENT (public) key ships in the image at this path.
+#   - The service_role key file is materialized at machine-create time via
+#     `--file-secret /run/secrets/clara_storage_service_key=CLARA_STORAGE_SERVICE_KEY_B64`
+#     (the Fly secret holds the BASE64-encoded key; Fly decodes it to this file).
+ENV CLARA_BACKUP_AGE_RECIPIENTS_FILE=/app/packages/backup/deploy/age-recipient.txt \
+    CLARA_BACKUP_STORAGE_KEY_FILE=/run/secrets/clara_storage_service_key
+
 # A Fly SCHEDULED machine boots this to completion daily. Exit 0 = success (pings the
 # dead-man's-switch); any non-zero exit = failure (fires the /fail ping). All secrets
 # come from the environment (Fly secrets), never the image.
