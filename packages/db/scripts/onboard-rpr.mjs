@@ -39,7 +39,7 @@ const DEFAULT_CSV = join(SCRIPT_DIR, "..", "deploy", "rpr-coa.csv");
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "0.0.0.0"]);
 
 const ACCOUNT_TYPES = new Set(["asset", "liability", "equity", "income", "expense"]);
-const ACCOUNT_CLASSES = new Set(["payable"]); // DB CHECK: null | 'payable'
+const ACCOUNT_CLASSES = new Set(["payable", "receivable"]); // DB CHECK: null | 'payable' | 'receivable' (0015)
 const SPECIAL_TYPES = new Set(["rounding"]); // DB CHECK: null | 'rounding'
 const ORIGINS = new Set(["tb", "gl", "system_role"]);
 const ROLES = new Set(["viewer", "bookkeeper", "admin", "owner"]);
@@ -164,7 +164,7 @@ function loadCoa(path) {
     seenCodes.add(row.account_code);
     if (!row.account_name) errors.push(`${where}: empty account_name`);
     if (!ACCOUNT_TYPES.has(row.account_type)) errors.push(`${where}: account_type "${row.account_type}" not in ${[...ACCOUNT_TYPES].join("|")}`);
-    if (row.account_class && !ACCOUNT_CLASSES.has(row.account_class)) errors.push(`${where}: account_class "${row.account_class}" not in (empty|payable)`);
+    if (row.account_class && !ACCOUNT_CLASSES.has(row.account_class)) errors.push(`${where}: account_class "${row.account_class}" not in (empty|payable|receivable)`);
     if (row.special_acc_type && !SPECIAL_TYPES.has(row.special_acc_type)) errors.push(`${where}: special_acc_type "${row.special_acc_type}" not in (empty|rounding)`);
     if (!ORIGINS.has(row.origin)) errors.push(`${where}: origin "${row.origin}" not in ${[...ORIGINS].join("|")}`);
     if (row.special_acc_type === "rounding") roundingCount++;
