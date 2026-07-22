@@ -11,7 +11,8 @@
 import { useCallback, useState } from "react";
 import type { DocReviewPart } from "../parts";
 import { getDocEntryDiff } from "../reviewApi";
-import { getDraftReview, type DraftReview } from "../../chat/review";
+import { getDraftReview } from "../../chat/review";
+import { getSettledState, resolveReviewHydration, settledReceiptCopy, SETTLED_GONE_COPY, type ReviewResolution } from "../settledState";
 import { useCard } from "./cardHooks";
 import { fmtCents, shortId } from "../fmt";
 import type { DocEntryDiff, DocEntryField } from "../reviewTypes";
@@ -20,15 +21,27 @@ import { DerivationTable } from "./DerivationTable";
 import { parsePagePolygon, type Pt } from "./regionGeometry";
 import styles from "./cards.module.css";
 
-type DocReviewData = { diff: DocEntryDiff; review: DraftReview | null };
+type DocReviewData = { diff: DocEntryDiff; resolution: ReviewResolution | null };
 type ActiveRegion = { index: number; page: number | null; overlay: Pt[] | null };
 
 export function DocReviewCard({ token, part }: { token: string | null; part: DocReviewPart }) {
   const loader = useCallback(
-    async (t: string): Promise<DocReviewData> => ({
-      diff: await getDocEntryDiff(t, part.entry_id, part.client_id),
-      review: await getDraftReview(t, part.entry_id, part.client_id).catch(() => null),
-    }),
+    async (t: string): Promise<DocReviewData> => {
+      const diff = await getDocEntryDiff(t, part.entry_id, part.client_id);
+      // §6.1: resolve the review hydration honestly — a null hydration (settled entry)
+      // learns its terminal state via the get_entry_diff bridge; a hydrated non-draft
+      // status (0016 slim payload) is used directly. A THROWN hydration (network/CLR)
+      // stays resolution=null: no entry pane, as before — never a fabricated one.
+      let resolution: ReviewResolution | null = null;
+      try {
+        const review = await getDraftReview(t, part.entry_id, part.client_id);
+        const bridge = review === null ? await getSettledState(t, part.entry_id, part.client_id) : null;
+        resolution = resolveReviewHydration(review, bridge);
+      } catch {
+        resolution = null;
+      }
+      return { diff, resolution };
+    },
     [part.entry_id, part.client_id],
   );
   const { data, loading, err, clr } = useCard(token, loader);
@@ -50,7 +63,11 @@ export function DocReviewCard({ token, part }: { token: string | null; part: Doc
     );
   }
 
-  const review = data?.review ?? null;
+  // §6.1: only a LIVE draft renders the full entry summary; a settled entry renders
+  // the true terminal receipt; a gone resolution renders the honest shell.
+  const resolution = data?.resolution ?? null;
+  const review = resolution?.kind === "draft" ? resolution.review : null;
+  const settled = resolution?.kind === "settled" ? resolution.settled : null;
 
   return (
     <div className={styles.card}>
@@ -58,7 +75,7 @@ export function DocReviewCard({ token, part }: { token: string | null; part: Doc
         <span className={styles.cardTitle}>Document review</span>
         <span className={styles.idChip}>doc {shortId(part.document_id)}</span>
         <span className={styles.idChip}>entry {shortId(part.entry_id)}</span>
-        {review ? <span className={styles.muted}>{review.status}</span> : null}
+        {review ? <span className={styles.muted}>{review.status}</span> : settled ? <span className={styles.muted}>{settled.status}</span> : null}
       </div>
 
       {loading && !data ? <p className={styles.loadingState}>Loading document review…</p> : null}
@@ -67,7 +84,20 @@ export function DocReviewCard({ token, part }: { token: string | null; part: Doc
         <DocViewer token={token} documentId={part.document_id} page={activeRegion?.page ?? null} overlay={activeRegion?.overlay ?? null} />
 
         <div>
-          {review ? (
+          {settled ? (
+            <div className={styles.entrySummary}>
+              <div className={styles.cardHead}>
+                <span className={styles.cardTitle}>Entry</span>
+                <span className={styles.muted}>{settled.status}</span>
+              </div>
+              <p className={styles.okText}>{settledReceiptCopy(settled.status)}</p>
+            </div>
+          ) : resolution?.kind === "gone" ? (
+            <div className={styles.entrySummary}>
+              <div className={styles.cardHead}><span className={styles.cardTitle}>Entry</span></div>
+              <p className={styles.muted}>{SETTLED_GONE_COPY}</p>
+            </div>
+          ) : review ? (
             <div className={styles.entrySummary}>
               <div className={styles.cardHead}>
                 <span className={styles.cardTitle}>Entry</span>

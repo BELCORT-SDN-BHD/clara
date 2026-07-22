@@ -26,6 +26,8 @@ import {
   type VendorArg,
 } from "./review";
 import { CLR21_COPY, CLR05_COPY } from "./reviewCopy";
+import { getSettledState, resolveReviewHydration, type SettledState } from "../shared/settledState";
+import { JeSettledReceipt, JeSettledShell } from "./JeSettledCard";
 import styles from "./chat.module.css";
 
 type JeReviewPart = Extract<ClaraPart, { type: "je_review" }>;
@@ -48,6 +50,9 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
   const [stale, setStale] = useState(false);
   const [machineFact, setMachineFact] = useState<MachineTotal | null>(null);
   const [outcome, setOutcome] = useState<"approved" | "discarded" | null>(null);
+  // §6.1: settled = a TRUE DB-reported terminal state; gone = the honest shell. Never both.
+  const [settled, setSettled] = useState<SettledState | null>(null);
+  const [gone, setGone] = useState(false);
   const [mode, setMode] = useState<"view" | "edit">("view");
   const [attestation, setAttestation] = useState("");
   const [lineBuf, setLineBuf] = useState<LineBuf[]>([]);
@@ -60,7 +65,15 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
     if (!token) return;
     setLoading(true);
     try {
-      setReview(await getDraftReview(token, part.entry_id, part.client_id));
+      // §6.1: null hydration ⇒ settled/out-of-scope — learn the terminal state via the
+      // get_entry_diff bridge; a hydrated non-draft status (0016 slim payload) resolves
+      // settled DIRECTLY, no bridge (see shared/settledState.ts).
+      const r = await getDraftReview(token, part.entry_id, part.client_id);
+      const bridge = r === null ? await getSettledState(token, part.entry_id, part.client_id) : null;
+      const res = resolveReviewHydration(r, bridge);
+      setReview(res.kind === "gone" ? null : res.review);
+      setSettled(res.kind === "settled" ? res.settled : null);
+      setGone(res.kind === "gone");
     } catch (e) {
       setErr((e as Error).message);
     } finally {
@@ -221,6 +234,11 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
       </div>
     );
   }
+
+  // §6.1: a settled entry renders a TRUE terminal receipt (or the honest shell when
+  // even the bridge yields nothing) — NEVER the fabricated unknown/RM 0.00 shell.
+  if (settled) return <JeSettledReceipt entryId={part.entry_id} settled={settled} review={review} />;
+  if (gone) return <JeSettledShell entryId={part.entry_id} />;
 
   const r = review;
   const debitTotal = r ? r.lines.reduce((s, l) => s + l.debit_cents, 0) : 0;
