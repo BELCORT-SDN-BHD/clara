@@ -26,8 +26,8 @@ import {
   type VendorArg,
 } from "./review";
 import { CLR21_COPY, CLR05_COPY } from "./reviewCopy";
-import { getSettledState, resolveReviewHydration, type SettledState } from "../shared/settledState";
-import { JeSettledReceipt, JeSettledShell } from "./JeSettledCard";
+import { resolveReviewHydration, settledReceiptCopy, type SettledState } from "../shared/settledState";
+import { JeSettledReceipt, JeReviewGoneShell } from "./JeSettledCard";
 import styles from "./chat.module.css";
 
 type JeReviewPart = Extract<ClaraPart, { type: "je_review" }>;
@@ -65,12 +65,9 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
     if (!token) return;
     setLoading(true);
     try {
-      // §6.1: null hydration ⇒ settled/out-of-scope — learn the terminal state via the
-      // get_entry_diff bridge; a hydrated non-draft status (0016 slim payload) resolves
-      // settled DIRECTLY, no bridge (see shared/settledState.ts).
-      const r = await getDraftReview(token, part.entry_id, part.client_id);
-      const bridge = r === null ? await getSettledState(token, part.entry_id, part.client_id) : null;
-      const res = resolveReviewHydration(r, bridge);
+      // §6.1: non-draft status (0016 slim payload) → settled; null → gone DIRECTLY,
+      // no bridge — a terminal state is unprovable client-side (shared/settledState.ts).
+      const res = resolveReviewHydration(await getDraftReview(token, part.entry_id, part.client_id));
       setReview(res.kind === "gone" ? null : res.review);
       setSettled(res.kind === "settled" ? res.settled : null);
       setGone(res.kind === "gone");
@@ -230,15 +227,15 @@ export function JeReviewCard({ token, part }: { token: string | null; part: JeRe
     return (
       <div className={styles.jeCard}>
         <div className={styles.jeHead}><strong>Journal entry review</strong><span className={styles.muted}>{part.entry_id.slice(0, 8)}</span></div>
-        <p className={styles.okText}>{outcome === "approved" ? "Approved — the entry is posted with filing-bound provenance." : "Draft discarded."}</p>
+        <p className={styles.okText}>{settledReceiptCopy(outcome === "approved" ? "approved" : "withdrawn")}</p>
       </div>
     );
   }
 
-  // §6.1: a settled entry renders a TRUE terminal receipt (or the honest shell when
-  // even the bridge yields nothing) — NEVER the fabricated unknown/RM 0.00 shell.
+  // §6.1: settled → the TRUE terminal receipt; gone → the honest no-claim shell —
+  // NEVER the fabricated unknown/RM 0.00 shell.
   if (settled) return <JeSettledReceipt entryId={part.entry_id} settled={settled} review={review} />;
-  if (gone) return <JeSettledShell entryId={part.entry_id} />;
+  if (gone) return <JeReviewGoneShell entryId={part.entry_id} />;
 
   const r = review;
   const debitTotal = r ? r.lines.reduce((s, l) => s + l.debit_cents, 0) : 0;

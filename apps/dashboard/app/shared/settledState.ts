@@ -1,90 +1,72 @@
 // Terminal-state hydration (Wave A2.1 contract §6.1). Today's get_draft_review
 // filters status='draft' and returns SQL NULL for a settled entry — the card must
-// NEVER fabricate a review from that (the "unknown"/RM 0.00 shell bug). Until the
-// 0016 CoR ships a slim settled payload, the BRIDGE is get_entry_diff (the DiffCard
-// precedent — it walks journal_entry_revisions regardless of status): the LAST
-// revision's header.status is the DB's word on the terminal state. Once 0016 lands,
-// the hydrated payload carries entry.status directly and the bridge never fires —
-// resolveReviewHydration branches on the hydrated status first, so this module
-// degrades forward automatically. All figures and statuses here are DB-returned;
-// nothing is computed client-side.
+// NEVER fabricate a review from that (the "unknown"/RM 0.00 shell bug). There is NO
+// client-side bridge to a terminal state: no writer records a terminal revision
+// (approve/withdraw UPDATE journal_entries only — 0009:1672/1898), so a revision
+// walk always ends 'draft' and can prove nothing. A TRUE terminal receipt therefore
+// comes ONLY from a hydrated non-draft status — the 0016 CoR's slim settled payload
+// ({entry:{status, approved_at|withdrawn_at, …}}); until it ships, a settled card
+// resolves to the honest "can no longer be loaded" shell. All statuses, actors and
+// timestamps here are DB-returned verbatim; nothing is computed client-side.
 
-import { getEntryDiff } from "./reviewApi";
-import type { EntryDiff } from "./reviewTypes";
 import type { DraftReview } from "../chat/review";
 
-/** The terminal state of a settled entry, as the DB reported it. */
+/** The terminal state of a settled entry, as the DB reported it (slim payload). */
 export type SettledState = {
   status: string; // 'approved' | 'withdrawn' | … (DB vocabulary, verbatim)
-  at: string | null; // the settling revision's created_at (bridge only)
-  actor_kind: string | null; // the settling revision's actor_kind (bridge only)
-  reason: string | null; // the settling revision's reason (bridge only)
+  at: string | null; // entry.approved_at / entry.withdrawn_at, when present
+  actor: string | null; // entry.checker_actor / entry.withdrawn_by, when present
+  reason: string | null; // entry.withdrawal_reason, when present
 };
 
 /** How a je_review/doc_review hydration resolved (§6.1):
  *  - draft   — a live draft (or a defensively-degraded payload): render as today.
- *  - settled — a true terminal state, from the hydrated status (future 0016 slim
- *              payload) or the get_entry_diff bridge: render the terminal receipt.
- *  - gone    — hydration returned null AND the bridge yielded nothing: render the
- *              honest "settled — no longer accessible" shell (NEVER a fabricated one). */
+ *  - settled — a hydrated non-draft status (the 0016 slim settled payload): render
+ *              the true terminal receipt.
+ *  - gone    — hydration returned null (today's DB for ANY settled entry, or a
+ *              scope/visibility miss): render the honest shell — no status claim,
+ *              NEVER a fabricated one. */
 export type ReviewResolution =
   | { kind: "draft"; review: DraftReview }
-  | { kind: "settled"; review: DraftReview | null; settled: SettledState }
+  | { kind: "settled"; review: DraftReview; settled: SettledState }
   | { kind: "gone" };
 
-/** A hydrated non-draft status ⇒ settled. The defensive 'unknown' (a key-rename
- *  degradation in toDraftReview, NOT a DB status) is excluded — that payload still
- *  carries real data and must render as today (visible lines, actions disabled),
- *  never a false terminal receipt. */
-export function settledFromStatus(status: string): SettledState | null {
-  if (status === "draft" || status === "unknown") return null;
-  return { status, at: null, actor_kind: null, reason: null };
+/** A hydrated non-draft status ⇒ settled, carrying the DB's terminal metadata
+ *  (approved_at/checker_actor, withdrawn_at/withdrawn_by/withdrawal_reason) when
+ *  the payload provides it. The defensive 'unknown' (a key-rename degradation in
+ *  toDraftReview, NOT a DB status) is excluded — that payload still carries real
+ *  data and must render as today (visible lines, actions disabled), never a false
+ *  terminal receipt. */
+export function settledFromReview(review: DraftReview): SettledState | null {
+  if (review.status === "draft" || review.status === "unknown") return null;
+  const withdrawn = review.withdrawn_at !== null || review.withdrawn_by !== null || review.withdrawal_reason !== null;
+  return {
+    status: review.status,
+    at: review.approved_at ?? review.withdrawn_at,
+    actor: withdrawn ? review.withdrawn_by : review.checker_actor,
+    reason: review.withdrawal_reason,
+  };
 }
 
-/** Read the terminal state from a revision walk: the LAST revision's header.status.
- *  Returns null when the walk is empty, headerless, or still shows 'draft' (then a
- *  null get_draft_review was a scope/visibility miss, not a settled entry — a
- *  terminal receipt would be a lie). */
-export function settledFromDiff(diff: EntryDiff): SettledState | null {
-  const last = diff.revisions.length > 0 ? diff.revisions[diff.revisions.length - 1] : undefined;
-  const status = last?.header && typeof last.header.status === "string" ? last.header.status : null;
-  if (!last || !status || status === "draft") return null;
-  return { status, at: last.created_at, actor_kind: last.actor_kind, reason: last.reason };
+/** Resolve a hydration outcome (PURE — the async glue lives in the cards): a
+ *  hydrated draft → draft; a hydrated non-draft status (the 0016 slim settled
+ *  payload) → settled; null → gone DIRECTLY. No fallback fetch exists — a null
+ *  hydration is unprovable client-side, so the card renders the honest shell. */
+export function resolveReviewHydration(review: DraftReview | null): ReviewResolution {
+  if (review === null) return { kind: "gone" };
+  const settled = settledFromReview(review);
+  return settled ? { kind: "settled", review, settled } : { kind: "draft", review };
 }
 
-/** The §6.1 bridge: learn a settled entry's terminal state via get_entry_diff (works
- *  on approved entries — the DiffCard precedent). Null on ANY failure — the caller
- *  falls back to the honest shell, never a fabricated one. get_entry_diff requires
- *  p_client (CLR10), so a missing client id short-circuits to null. */
-export async function getSettledState(token: string, entryId: string, clientId: string | null | undefined): Promise<SettledState | null> {
-  if (!clientId) return null;
-  try {
-    return settledFromDiff(await getEntryDiff(token, entryId, clientId));
-  } catch {
-    return null;
-  }
-}
-
-/** Resolve a hydration outcome (PURE — the async glue lives in the cards):
- *  hydrated draft → draft; hydrated non-draft status (the future 0016 slim settled
- *  payload) → settled DIRECTLY, no bridge; null hydration → the bridge result, or
- *  gone. `bridge` is only consulted when `review` is null. */
-export function resolveReviewHydration(review: DraftReview | null, bridge: SettledState | null): ReviewResolution {
-  if (review !== null) {
-    const settled = settledFromStatus(review.status);
-    return settled ? { kind: "settled", review, settled } : { kind: "draft", review };
-  }
-  return bridge ? { kind: "settled", review: null, settled: bridge } : { kind: "gone" };
-}
-
-/** Terminal-receipt wording, keyed on the DB status. 'approved'/'withdrawn' reuse the
- *  in-session receipt copy verbatim; an unforeseen settled status renders honestly
- *  by name rather than being forced into either. */
+/** Terminal-receipt wording, keyed on the DB status. 'approved'/'withdrawn' are the
+ *  single source for the in-session outcome receipt too (JeReviewCard); an
+ *  unforeseen settled status renders honestly by name. */
 export function settledReceiptCopy(status: string): string {
   if (status === "approved") return "Approved — the entry is posted with filing-bound provenance.";
   if (status === "withdrawn") return "Draft discarded.";
   return `Settled — ${status}.`;
 }
 
-/** The honest shell for a null hydration the bridge could not explain. */
-export const SETTLED_GONE_COPY = "Settled — details no longer accessible from chat.";
+/** The honest shell for a null hydration: claims NOTHING it cannot prove — a null
+ *  may be a settled entry (pre-0016) or a plain scope/visibility miss. */
+export const REVIEW_GONE_COPY = "This review can no longer be loaded from chat — check the entry in the review queue.";

@@ -1,26 +1,22 @@
-// §6.1 terminal-state hydration tests (Wave A2.1). The bug: a settled entry's
-// get_draft_review returns SQL NULL and toDraftReview FABRICATED a status-'unknown'
-// DraftReview (empty lines, RM 0.00 totals, dead buttons). These tests pin the fix:
-// (1) toDraftReview(null) → null, never a fabrication; (2) a draft payload still maps
-// exactly as today; (3) a null hydration + the get_entry_diff bridge resolves a TRUE
-// terminal receipt; (4) bridge-less null resolves the honest shell; (5) the future
-// 0016 slim settled payload is used directly (no bridge). Pure model + static render
-// (test/bootstrap.mjs stubs CSS; no DB, no effects).
+// §6.1 terminal-state hydration tests (Wave A2.1, reworked post-review). The bug: a
+// settled entry's get_draft_review returns SQL NULL and toDraftReview FABRICATED a
+// status-'unknown' DraftReview (empty lines, RM 0.00 totals, dead buttons). These
+// tests pin the fix: (1) toDraftReview(null) → null, never a fabrication; (2) a
+// draft payload still maps exactly as today; (3) null hydration resolves the honest
+// no-claim shell DIRECTLY — there is NO bridge fetch (no writer records a terminal
+// revision, so a revision walk can prove nothing; the module exports no bridge);
+// (4) a hydrated non-draft status (the 0016 slim settled payload) resolves a TRUE
+// terminal receipt with the DB's approved_at/withdrawn_at/actor/reason rendered.
+// Pure model + static render (test/bootstrap.mjs stubs CSS; no DB, no effects).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { toDraftReview } from "./review";
-import {
-  resolveReviewHydration,
-  settledFromDiff,
-  settledFromStatus,
-  settledReceiptCopy,
-  SETTLED_GONE_COPY,
-} from "../shared/settledState";
-import { toEntryDiff } from "../shared/reviewTypes";
-import { JeSettledReceipt, JeSettledShell } from "./JeSettledCard";
+import * as settledState from "../shared/settledState";
+import { resolveReviewHydration, settledFromReview, settledReceiptCopy, REVIEW_GONE_COPY } from "../shared/settledState";
+import { JeSettledReceipt, JeReviewGoneShell } from "./JeSettledCard";
 
 // The as-built get_draft_review draft payload shape (0009/0011 — review.ts header).
 const DRAFT_RAW = {
@@ -36,15 +32,6 @@ const DRAFT_RAW = {
   evidence: [{ field_path: "invoice.total", quote: "RM 1,350.00", region_id: "rg1", provenance_tier: "verified" }],
   eligible_checker_count: 2,
   high_stakes: false,
-};
-
-// A get_entry_diff walk whose LAST revision header shows the terminal state.
-const APPROVED_DIFF_RAW = {
-  entry_id: "e1",
-  revisions: [
-    { revision_no: 0, actor_kind: "agent", actor: "a1", reason: "draft", created_at: "2026-07-01T02:00:00Z", header: { status: "draft" }, legs: [], rule_decision_id: null, deltas_vs_prev: [] },
-    { revision_no: 1, actor_kind: "human", actor: "u1", reason: "approved", created_at: "2026-07-02T03:00:00Z", header: { status: "approved" }, legs: [], rule_decision_id: null, deltas_vs_prev: [] },
-  ],
 };
 
 // --- (1) never fabricate --------------------------------------------------------
@@ -68,7 +55,8 @@ test("a draft payload still maps as today (status, lines, DB cents verbatim)", (
   assert.equal(r.lines[0]!.debit_cents, 135000); // the DB figure, verbatim
   assert.equal(r.lines[1]!.credit_cents, 135000);
   assert.equal(r.vendor?.disposition, "new");
-  const res = resolveReviewHydration(r, null);
+  assert.equal(r.approved_at, null); // terminal metadata absent on a live draft
+  const res = resolveReviewHydration(r);
   assert.equal(res.kind, "draft"); // renders the full card path, unchanged
 });
 
@@ -76,72 +64,67 @@ test("a defensively-degraded payload (entry id, status key renamed) stays 'draft
   const r = toDraftReview({ entry: { id: "e1" } });
   assert.ok(r, "an entry with an id still maps (defensive degradation)");
   assert.equal(r.status, "unknown");
-  assert.equal(resolveReviewHydration(r, null).kind, "draft");
-  assert.equal(settledFromStatus("unknown"), null);
+  assert.equal(resolveReviewHydration(r).kind, "draft");
+  assert.equal(settledFromReview(r), null);
 });
 
-// --- (3) settled + bridge available → a TRUE terminal receipt --------------------
+// --- (3) null hydration → the honest shell DIRECTLY (no bridge exists) -----------
 
-test("settledFromDiff reads the LAST revision's header.status (the DB's word)", () => {
-  const s = settledFromDiff(toEntryDiff(APPROVED_DIFF_RAW));
-  assert.ok(s, "an approved walk must resolve a settled state");
-  assert.equal(s.status, "approved");
-  assert.equal(s.at, "2026-07-02T03:00:00Z");
-  assert.equal(s.actor_kind, "human");
+test("null hydration resolves gone directly — the module exports no bridge fetch", () => {
+  assert.equal(resolveReviewHydration(null).kind, "gone");
+  // The dead-code bridge (get_entry_diff never sees a terminal revision) is GONE:
+  assert.ok(!("getSettledState" in settledState), "no bridge fetch may exist");
+  assert.ok(!("settledFromDiff" in settledState), "no revision-walk mapper may exist");
 });
 
-test("settledFromDiff refuses to call a still-draft or empty walk settled", () => {
-  const draftLast = { ...APPROVED_DIFF_RAW, revisions: [APPROVED_DIFF_RAW.revisions[0]] };
-  assert.equal(settledFromDiff(toEntryDiff(draftLast)), null); // scope miss, not settled
-  assert.equal(settledFromDiff(toEntryDiff({ entry_id: "e1", revisions: [] })), null);
-  const headerless = { entry_id: "e1", revisions: [{ ...APPROVED_DIFF_RAW.revisions[1], header: null }] };
-  assert.equal(settledFromDiff(toEntryDiff(headerless)), null);
+test("the gone shell claims nothing unproven (no 'Settled', no RM, no 'unknown')", () => {
+  const html = renderToStaticMarkup(createElement(JeReviewGoneShell, { entryId: "e1e2e3e4-0000" }));
+  assert.ok(html.includes(REVIEW_GONE_COPY), "the honest shell copy must render");
+  assert.ok(!REVIEW_GONE_COPY.toLowerCase().includes("settled"), "the shell must not claim a settled status");
+  assert.ok(!html.includes("RM"), "the shell renders no fabricated figure");
+  assert.ok(!html.includes("unknown"), "the shell never claims an 'unknown' status");
 });
 
-test("null hydration + bridge → settled; the receipt renders the terminal wording", () => {
-  const bridge = settledFromDiff(toEntryDiff(APPROVED_DIFF_RAW));
-  const res = resolveReviewHydration(null, bridge);
+// --- (4) the 0016 slim settled payload → a TRUE terminal receipt -----------------
+
+test("a slim approved payload resolves settled with approved_at/checker_actor mapped", () => {
+  const r = toDraftReview({ entry: { id: "e1", status: "approved", approved_at: "2026-07-02T03:00:00Z", checker_actor: "u1u2u3u4-0000" } });
+  assert.ok(r, "the slim payload must map");
+  const res = resolveReviewHydration(r);
   assert.equal(res.kind, "settled");
   if (res.kind !== "settled") return;
+  assert.equal(res.settled.status, "approved");
+  assert.equal(res.settled.at, "2026-07-02T03:00:00Z"); // approved_at, not dropped
+  assert.equal(res.settled.actor, "u1u2u3u4-0000");
+  assert.equal(res.review, r); // the card uses the hydrated payload directly
   const html = renderToStaticMarkup(createElement(JeSettledReceipt, { entryId: "e1e2e3e4-0000", settled: res.settled, review: res.review }));
   assert.ok(html.includes("Approved — the entry is posted with filing-bound provenance."), "approved wording must render");
+  assert.ok(html.includes("2026"), "the DB timestamp must render");
+  assert.ok(html.includes("u1u2u3u4"), "the DB actor must render");
   assert.ok(!html.includes("unknown"), "the fabricated shell's 'unknown' must never render");
   assert.ok(!html.includes("RM"), "the receipt renders no fabricated RM figure");
 });
 
-test("a withdrawn terminal state renders the discard wording", () => {
-  const html = renderToStaticMarkup(createElement(JeSettledReceipt, {
-    entryId: "e1e2e3e4-0000",
-    settled: { status: "withdrawn", at: null, actor_kind: null, reason: null },
-    review: null,
-  }));
+test("a slim withdrawn payload maps withdrawn_at/withdrawn_by/withdrawal_reason and renders", () => {
+  const r = toDraftReview({ entry: { id: "e1", status: "withdrawn", withdrawn_at: "2026-07-03T04:00:00Z", withdrawn_by: "w1w2w3w4-0000", withdrawal_reason: "duplicate bill" } });
+  assert.ok(r, "the slim payload must map");
+  const s = settledFromReview(r);
+  assert.ok(s, "withdrawn must resolve settled");
+  assert.equal(s.at, "2026-07-03T04:00:00Z");
+  assert.equal(s.actor, "w1w2w3w4-0000");
+  assert.equal(s.reason, "duplicate bill");
+  const html = renderToStaticMarkup(createElement(JeSettledReceipt, { entryId: "e1e2e3e4-0000", settled: s, review: r }));
   assert.ok(html.includes("Draft discarded."), "withdrawn wording must render");
+  assert.ok(html.includes("duplicate bill"), "the DB withdrawal reason must render");
 });
 
 test("an unforeseen settled status renders honestly by name", () => {
   assert.equal(settledReceiptCopy("reversed"), "Settled — reversed.");
 });
 
-// --- (4) settled + nothing → the honest shell ------------------------------------
+// --- the receipt copy is the single source (the in-session outcome reuses it) ----
 
-test("null hydration + no bridge → gone; the honest shell renders (never RM 0.00)", () => {
-  const res = resolveReviewHydration(null, null);
-  assert.equal(res.kind, "gone");
-  const html = renderToStaticMarkup(createElement(JeSettledShell, { entryId: "e1e2e3e4-0000" }));
-  assert.ok(html.includes(SETTLED_GONE_COPY), "the honest settled shell must render");
-  assert.ok(!html.includes("RM"), "the shell renders no fabricated figure");
-  assert.ok(!html.includes("unknown"), "the shell never claims an 'unknown' status");
-});
-
-// --- (5) forward-compatible: the 0016 slim settled payload, used directly ---------
-
-test("a future slim settled payload resolves settled directly — no bridge needed", () => {
-  const r = toDraftReview({ entry: { id: "e1", status: "approved" } });
-  assert.ok(r, "the slim payload must map");
-  assert.equal(r.status, "approved");
-  const res = resolveReviewHydration(r, null); // bridge never consulted
-  assert.equal(res.kind, "settled");
-  if (res.kind !== "settled") return;
-  assert.equal(res.settled.status, "approved");
-  assert.equal(res.review, r); // the card uses the hydrated payload directly
+test("settledReceiptCopy carries the in-session outcome wording verbatim", () => {
+  assert.equal(settledReceiptCopy("approved"), "Approved — the entry is posted with filing-bound provenance.");
+  assert.equal(settledReceiptCopy("withdrawn"), "Draft discarded.");
 });

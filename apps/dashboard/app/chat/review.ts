@@ -74,6 +74,12 @@ export type DraftReview = {
   revision_token: string;
   posting_date: string | null;
   memo: string | null;
+  // §6.1 terminal metadata (the 0016 slim settled payload; all null on a live draft):
+  approved_at: string | null;
+  checker_actor: string | null;
+  withdrawn_at: string | null;
+  withdrawn_by: string | null;
+  withdrawal_reason: string | null;
   lines: DraftLine[];
   vendor: VendorProposal | null;
   evidence: EvidenceRow[];
@@ -173,6 +179,11 @@ export function toDraftReview(raw: unknown): DraftReview | null {
     revision_token: str(entry.revision_token) ?? "",
     posting_date: str(entry.posting_date),
     memo: str(entry.memo),
+    approved_at: str(entry.approved_at),
+    checker_actor: str(entry.checker_actor),
+    withdrawn_at: str(entry.withdrawn_at),
+    withdrawn_by: str(entry.withdrawn_by),
+    withdrawal_reason: str(entry.withdrawal_reason),
     lines: arr(r.lines).map((l) => {
       const o = (l ?? {}) as Record<string, unknown>;
       const isPayable = str(o.account_class) === "payable";

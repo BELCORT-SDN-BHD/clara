@@ -12,7 +12,7 @@ import { useCallback, useState } from "react";
 import type { DocReviewPart } from "../parts";
 import { getDocEntryDiff } from "../reviewApi";
 import { getDraftReview } from "../../chat/review";
-import { getSettledState, resolveReviewHydration, settledReceiptCopy, SETTLED_GONE_COPY, type ReviewResolution } from "../settledState";
+import { resolveReviewHydration, settledReceiptCopy, REVIEW_GONE_COPY, type ReviewResolution } from "../settledState";
 import { useCard } from "./cardHooks";
 import { fmtCents, shortId } from "../fmt";
 import type { DocEntryDiff, DocEntryField } from "../reviewTypes";
@@ -28,15 +28,13 @@ export function DocReviewCard({ token, part }: { token: string | null; part: Doc
   const loader = useCallback(
     async (t: string): Promise<DocReviewData> => {
       const diff = await getDocEntryDiff(t, part.entry_id, part.client_id);
-      // §6.1: resolve the review hydration honestly — a null hydration (settled entry)
-      // learns its terminal state via the get_entry_diff bridge; a hydrated non-draft
-      // status (0016 slim payload) is used directly. A THROWN hydration (network/CLR)
-      // stays resolution=null: no entry pane, as before — never a fabricated one.
+      // §6.1: a hydrated non-draft status (0016 slim payload) resolves settled; a null
+      // hydration resolves the honest gone shell — a terminal state is unprovable
+      // client-side. A THROWN hydration (network/CLR) stays resolution=null: no entry
+      // pane, as before — never a fabricated one.
       let resolution: ReviewResolution | null = null;
       try {
-        const review = await getDraftReview(t, part.entry_id, part.client_id);
-        const bridge = review === null ? await getSettledState(t, part.entry_id, part.client_id) : null;
-        resolution = resolveReviewHydration(review, bridge);
+        resolution = resolveReviewHydration(await getDraftReview(t, part.entry_id, part.client_id));
       } catch {
         resolution = null;
       }
@@ -95,7 +93,7 @@ export function DocReviewCard({ token, part }: { token: string | null; part: Doc
           ) : resolution?.kind === "gone" ? (
             <div className={styles.entrySummary}>
               <div className={styles.cardHead}><span className={styles.cardTitle}>Entry</span></div>
-              <p className={styles.muted}>{SETTLED_GONE_COPY}</p>
+              <p className={styles.muted}>{REVIEW_GONE_COPY}</p>
             </div>
           ) : review ? (
             <div className={styles.entrySummary}>
