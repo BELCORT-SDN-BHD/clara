@@ -1,12 +1,20 @@
 # fly.toml — clara-backup (Wave A2 §8 / WA2-R6): the off-site DR backup app.
 #
 # A SEPARATE Fly app from clara-runtime (the runtime machine is explicitly NON-HA and
-# must never carry this job). Deploy from the REPO ROOT so the build context carries
-# packages/backup AND packages/db:
-#     fly deploy --config packages/backup/fly.toml
+# must never carry this job). This file drives the IMAGE BUILD ONLY.
 #
-# The app name below is a PLACEHOLDER — the owner creates the real app
-# (`fly apps create clara-backup`) before the first deploy.
+# DO NOT run a plain `fly deploy`: with no services it still creates AND STARTS a
+# machine (plus a stopped standby), i.e. it would fire a live backup run on every
+# deploy. Build-only + push (from the REPO ROOT, --dockerfile explicit), then create
+# the ONE scheduled machine from the pushed image with `fly machine run`. The exact
+# commands live in ONE place — docs/ops/DR.md §9 step 6 — deliberately not restated
+# here (a stale copy of a deploy command in this file is how live-run accidents happen).
+#
+# `fly machine run` DISREGARDS fly.toml configuration (env/files/vm — it reads only
+# the app name), so there is NO [env] section here: image-intrinsic env lives in the
+# Dockerfile, run-specific env + the service_role secret file ride as `-e` /
+# `--file-secret` flags. The exact machine-run command is the runbook's step 6
+# (docs/ops/DR.md §9) — that flag set IS the runtime contract.
 app = "clara-backup"
 
 # Singapore — same city as the Supabase project (ap-southeast-1); low pooler latency,
@@ -20,32 +28,18 @@ primary_region = "sin"
 # port and serves no traffic — it boots, runs the pipeline to completion, and exits.
 # Liveness is the dead-man's-switch (healthchecks.io), NOT an HTTP health check.
 
-[env]
-  # Non-secret defaults. Every SECRET is set with `fly secrets set` on THIS app only:
-  #   DATABASE_URL           (session pooler, port 5432 — reads all schemas + auth PII)
-  #   CLARA_BACKUP_STORAGE_URL, CLARA_BACKUP_STORAGE_KEY_FILE + the service_role key file
-  #   RCLONE_CONFIG (+ the R2 token inside it) — or RCLONE_CONFIG_R2_* env
-  #   CLARA_BACKUP_PING_URL  (the healthchecks.io ping URL)
-  # The age RECIPIENT (public) key ships in the image (deploy/age-recipient.txt) — it is
-  # not a secret. See docs/ops/DR.md §9 for the exact `fly secrets set` list.
-  CLARA_BACKUP_R2_REMOTE = "r2"
-  CLARA_BACKUP_STORAGE_BUCKET = "firm-docs"
-  CLARA_BACKUP_AGE_RECIPIENTS_FILE = "/app/packages/backup/deploy/age-recipient.txt"
-  CLARA_BACKUP_RETENTION_DAYS = "30"
-
-# Modest one-shot sizing — the job is I/O-bound (dump + upload), not compute-heavy.
-# The ~52 MB dump + only the NEW encrypted firm-docs stage in /tmp (rootfs); mount a
-# volume at /data and repoint CLARA_BACKUP_STAGING_DIR only if the daily delta is large.
+# Sizing intent (informational — the scheduled machine is created by `fly machine run`,
+# which ignores this section too; pass --vm-size shared-cpu-1x --vm-memory 1024).
+# The job is I/O-bound (dump + upload); the ~52 MB dump + only the NEW encrypted
+# firm-docs stage in /tmp (rootfs); mount a volume at /data and repoint
+# CLARA_BACKUP_STAGING_DIR only if the daily delta is large.
 [[vm]]
   size = "shared-cpu-1x"
   memory = "1gb"
 
-# SCHEDULING (set at machine-create time, not in this file — Fly has no fly.toml
-# `schedule` key). After `fly deploy` builds the image + app, create ONE scheduled
-# machine that boots daily and exits:
-#     fly machine run . --config packages/backup/fly.toml --schedule daily \
-#         --region sin --app clara-backup
-# Fly's schedule granularity is coarse (hourly|daily|weekly|monthly); `daily` + the
-# 26h dead-man's-switch grace (docs/ops/DR.md §7) tolerates the coarse run time.
-# Do NOT set min_machines_running — a scheduled machine is created stopped and Fly
-# starts it on the schedule, then it exits.
+# SCHEDULING: set at machine-create time (Fly has no fly.toml `schedule` key). Fly's
+# schedule granularity is coarse and fuzzy (hourly|daily|weekly|monthly, approximate
+# times); `daily` + the 26h dead-man's-switch grace (docs/ops/DR.md §7) tolerates it.
+# The machine STARTS ONCE IMMEDIATELY at creation (that supervised boot IS the
+# owner-gated first live run), then re-runs ~daily; exit 0 → stopped until the next
+# cycle (scheduled machines default to the on-fail restart policy).

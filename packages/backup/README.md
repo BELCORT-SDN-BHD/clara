@@ -46,14 +46,26 @@ is committed (`deploy/age-recipient.txt`) — encryption needs no secret. The ag
 
 ## Build + deploy (owner)
 
+The image is shipped **build-only + push** (a plain `fly deploy` would create AND start
+a machine — i.e. fire a live backup run — even with no services), and the ONE scheduled
+machine is created from the pushed image. `fly machine run` **disregards fly.toml**
+(env/files/vm), so image-intrinsic env is baked in the Dockerfile and the rest rides as
+flags — the exact flag set (the runtime contract) is `docs/ops/DR.md` §9 step 6:
+
 ```sh
 fly apps create clara-backup
-# Build from the REPO ROOT (context needs packages/backup + packages/db):
-fly deploy --config packages/backup/fly.toml
-# Set secrets on THIS app only (see docs/ops/DR.md §9 for the full list):
-fly secrets set -a clara-backup DATABASE_URL=... CLARA_BACKUP_STORAGE_URL=... ...
-# Create ONE daily scheduled machine:
-fly machine run . --config packages/backup/fly.toml --schedule daily --region sin -a clara-backup
+# Stage ALL secrets first from a NAME=VALUE file written OUTSIDE the repo (see
+# DR.md §9 step 4; the service_role key goes BASE64-encoded as
+# CLARA_BACKUP_STORAGE_SERVICE_KEY_B64):
+fly secrets import -a clara-backup --stage < "$env:USERPROFILE\clara-backup-secrets.env"
+# Build from the REPO ROOT (context needs packages/backup + packages/db);
+# --dockerfile explicit (nested-config resolution is not doc-guaranteed):
+fly deploy . --config packages/backup/fly.toml --dockerfile packages/backup/Dockerfile \
+    --build-only --push --image-label dr-wiring-1 -a clara-backup
+# Create ONE daily scheduled machine from the pushed image (full flag set: DR.md §9).
+# It boots ONCE immediately at creation — that supervised run IS the first live run:
+fly machine run registry.fly.io/clara-backup:dr-wiring-1 -a clara-backup \
+    --region sin --schedule daily ... # + --file-secret / -e flags per DR.md §9
 ```
 
 ## Local validation (no live anything)

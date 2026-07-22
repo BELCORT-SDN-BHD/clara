@@ -316,12 +316,12 @@ escalation path for the pilot. The alerting **wiring** is a follow-up; the
    re-assess** — revisit when client count, transaction volume, or a near-miss makes
    minutes-RPO worth the cost.
 2. **Off-site dump destination — OWNER DECIDED 2026-07-20: Cloudflare R2.**
-   The §6 design applies: a scheduled Windows Task runs `db:backup:full`, `age`-encrypts
-   the bundle (full dump + globals evidence + `auth` data-only + the `firm-docs` byte
-   mirror + `manifest.json`), and `rclone`-uploads to R2 — off-vendor, so an account or
-   region loss is survivable, with full credential custody retained locally. Alerting =
-   the dead-man's-switch (§6). **Wiring is the remaining task** (the DR drill does not
-   depend on it).
+   The §6 design applies, executed per §9 as the **`clara-backup` Fly scheduled machine
+   (`sin`)**: one daily run does `db:backup:full`, `age`-encrypts the bundle (full dump +
+   globals evidence + `auth` data-only + the `firm-docs` byte mirror + `manifest.json`),
+   and `rclone`-uploads to R2 — off-vendor, so an account or region loss is survivable.
+   Alerting = the dead-man's-switch (§6). **Wiring is the remaining task** (the DR drill
+   does not depend on it); the runbook is §9.
 3. **Storage-bucket backup** — document bytes in Supabase Storage need their own
    copy path (the DB dump does not include Storage objects); the recovery path is
    `docs/ops/DR-full-drill.md` §4 (re-provision bucket → `storage-provision.sql` →
@@ -357,27 +357,79 @@ ping (`/fail` on error).
 | Secret | Power | Where it lives |
 |---|---|---|
 | Session-pooler DSN (**port 5432**) | reads all schemas + ownership/ACLs + `auth` PII ≈ project admin | `fly secrets` (`DATABASE_URL`) |
-| Supabase `service_role` key | account-wide Storage bypass (firm-docs LIST/READ) | `fly secrets` → a file; `CLARA_BACKUP_STORAGE_KEY_FILE` names it (never logged) |
-| R2 API token | write to the DR bucket | `rclone.conf` (`RCLONE_CONFIG`) — never argv |
+| Supabase `service_role` key | account-wide Storage bypass (firm-docs LIST/READ) | `fly secrets` **`CLARA_BACKUP_STORAGE_SERVICE_KEY_B64`** (base64-encoded — Fly file-secrets require it); materialized at `/run/secrets/clara_storage_service_key` by machine-run `--file-secret`; the image bakes `CLARA_BACKUP_STORAGE_KEY_FILE` to that path. Neither is ever logged; note the machine ALSO receives every app secret as env, so the base64 form rides in process env — the code reads only the file |
+| R2 API token | write to the DR bucket | `fly secrets` **`RCLONE_CONFIG_R2_ACCESS_KEY_ID` / `RCLONE_CONFIG_R2_SECRET_ACCESS_KEY` / `RCLONE_CONFIG_R2_ENDPOINT`** (rclone env-remote config — never argv; `deploy/rclone.conf.example` remains the LOCAL-rehearsal form) |
 | age **recipient (public)** key | none (encrypt-only) | committed: `packages/backup/deploy/age-recipient.txt` |
 | age **identity (private)** key | decrypts the whole bundle (books + `auth` PII) | **owner custody, off-repo AND off-R2** — laptop `~/.clara-age-identity.*` + an offline backup; NEVER in the bucket |
-| healthchecks.io ping URL | low (UUID) | `fly secrets` (value or `*_FILE`) |
+| healthchecks.io ping URL | low (UUID) | `fly secrets` (`CLARA_BACKUP_PING_URL`) |
 
 ### Exact owner inputs (at wiring time)
 
-1. Create the app + a **scoped R2 token** (Object Read&Write on the ONE DR bucket) + the
-   bucket; put the token in `rclone.conf` (template: `deploy/rclone.conf.example`).
+> Fly mechanics these steps rely on (verified against fly.io/docs, 2026-07-22): a plain
+> `fly deploy` on a service-less app still creates AND STARTS a machine (+1 stopped
+> standby) — i.e. it would fire a live backup run on every deploy, so the image is
+> shipped **build-only + push** and the ONE scheduled machine is created from the
+> pushed image. `fly machine run` **disregards fly.toml** (env/files/vm — it reads only
+> the app name), so the step-6 flag set IS the runtime contract. A `--file-secret`'s
+> Fly secret must hold the **base64** of the file content (machine creation fails
+> otherwise). A scheduled machine **starts once immediately at creation** — that
+> supervised boot is the owner-gated first live run — then re-runs ~daily (fuzzy;
+> the 26h grace tolerates it), exit 0 → stopped until the next cycle. The corollary
+> of the on-fail restart policy: a NON-zero exit makes Fly retry the run (repeated
+> live dump attempts), each failure firing the `/fail` ping — the switch alarms
+> promptly instead of waiting out the grace window.
+
+1. Create the **R2 bucket** + a **scoped R2 API token** (Object Read&Write on the ONE DR
+   bucket). Its access-key pair + account endpoint become the `RCLONE_CONFIG_R2_*` Fly
+   secrets in step 4 (for a LOCAL rehearsal use `deploy/rclone.conf.example` instead).
 2. `age-keygen` → paste the `age1…` **recipient** into `deploy/age-recipient.txt` (replaces
    the placeholder — the job **refuses to run** until it is real); custody the **identity**
    key off-repo/off-R2 (+ offline backup).
-3. A **healthchecks.io** check (26h grace) → `tools@belcort.com`; its ping URL as a secret.
-4. `fly secrets set -a clara-backup` for: `DATABASE_URL` (session pooler 5432),
-   `CLARA_BACKUP_STORAGE_URL`, the `service_role` key file + `CLARA_BACKUP_STORAGE_KEY_FILE`,
-   `RCLONE_CONFIG` (+ token), `CLARA_BACKUP_R2_BUCKET`, and `CLARA_BACKUP_PING_URL[_FILE]`.
+3. A **healthchecks.io** check (period 1 day, **26h grace**) → `tools@belcort.com`; its
+   ping URL becomes the `CLARA_BACKUP_PING_URL` secret.
+4. `fly apps create clara-backup`, then stage the six secrets from a NAME=VALUE file
+   written **OUTSIDE the repo** (e.g. `%USERPROFILE%\clara-backup-secrets.env`, in
+   Notepad — **never** via chat or argv, and never inside the working tree, where no
+   ignore pattern covers it; delete it after the import):
+
+   ```text
+   DATABASE_URL=              # session pooler, port 5432 (NOT 6543)
+   CLARA_BACKUP_STORAGE_SERVICE_KEY_B64=   # base64 of the service_role key
+   RCLONE_CONFIG_R2_ACCESS_KEY_ID=
+   RCLONE_CONFIG_R2_SECRET_ACCESS_KEY=
+   RCLONE_CONFIG_R2_ENDPOINT= # https://<account-id>.r2.cloudflarestorage.com
+   CLARA_BACKUP_PING_URL=     # https://hc-ping.com/<uuid>
+   ```
+
+   ```sh
+   fly secrets import -a clara-backup --stage < "$env:USERPROFILE\clara-backup-secrets.env"
+   ```
+
 5. An **R2 Object-Lifecycle rule**: delete `db-snapshots/` objects older than 30 days (the
    `firm-docs-mirror/` prefix is write-once, delete-never — do not lifecycle it away).
-6. `fly deploy --config packages/backup/fly.toml` (from repo root) → `fly machine run …
-   --schedule daily`.
+6. Build + push the image, then create the ONE scheduled machine from it (from the
+   **repo root**; `--dockerfile` is explicit because `[build].dockerfile` resolution
+   relative to a nested `--config` is not doc-guaranteed):
+
+   ```sh
+   fly deploy . --config packages/backup/fly.toml \
+       --dockerfile packages/backup/Dockerfile \
+       --build-only --push --image-label dr-wiring-1 -a clara-backup
+
+   fly machine run registry.fly.io/clara-backup:dr-wiring-1 \
+       -a clara-backup --region sin --schedule daily \
+       --vm-size shared-cpu-1x --vm-memory 1024 \
+       --file-secret /run/secrets/clara_storage_service_key=CLARA_BACKUP_STORAGE_SERVICE_KEY_B64 \
+       -e CLARA_BACKUP_STORAGE_URL=https://<project-ref>.supabase.co \
+       -e CLARA_BACKUP_R2_BUCKET=<bucket> \
+       -e RCLONE_CONFIG_R2_TYPE=s3 -e RCLONE_CONFIG_R2_PROVIDER=Cloudflare \
+       -e RCLONE_CONFIG_R2_REGION=auto -e RCLONE_CONFIG_R2_ACL=private
+   ```
+
+   The machine boots immediately (the supervised first live run: watch `fly logs
+   -a clara-backup` for the `clara-backup: DONE` line, then the healthchecks green
+   ping + the R2 objects). Non-secret env rides as `-e`; every secret is already on
+   the app from step 4.
 7. *(Optional corroboration)* deploy the freshness Worker (`deploy/cf-worker/`).
 
 ### Steps the classifier FORCES owner-run (the agent may only scaffold/dry-run)
