@@ -118,6 +118,13 @@ validation (#44), the frozen chat tool's supplier-bill-only draft lane →
 (#46) — both version bumps per Appendix A, freeze manifest 29→41 append-only.
 **LIVE POSTURE: Supabase at 15 migrations, Fly runtime v23 (`chatTurn_v5`),
 dashboard auto-deploys from `main`.** **Canary `daba7f2e` stays ARMED, due
-2026-08-02 — NEVER answer it.** NEXT: the R2 wiring, Wave A2.1 (sales autopost +
-purchase SST + the eval's finding ledger incl. the STRUCTURAL SST-threshold
-visibility check), then Wave B (knowledge + onboarding) per REBUILD-PLAN.
+2026-08-02 — NEVER answer it.** **THE R2 OFF-SITE BACKUP IS WIRED AND
+RESTORE-PROVEN (2026-07-22, PRs #49/#50; `clara-backup` Fly app, daily, dead-man's
+switch armed — evidence `docs/ops/DR.md` §9). WAVE A2.1 IS RATIFIED (ADR-028,
+contract v1.0) AND ITS DB HEART IS MERGED (ADR-029, PR #55 — migration 0016:
+the structural SST compliance watch, the sales-autopost lift + OCR envelope,
+the classifier gate, the purchase visibility split; six-round cross-model
+adversarial RESOLVED; NOT yet deployed to live).** NEXT: the remaining A2.1
+lanes (runtime consumers, `chatTurn_v6`/`autoDraft_v2`, ComplianceWatchCard,
+modern rclone), then the owner-`!`-gated 0016 deploy ceremony + the W/S/P/C/D
+live eval (the wave's DONE gate), then Wave B per REBUILD-PLAN.
