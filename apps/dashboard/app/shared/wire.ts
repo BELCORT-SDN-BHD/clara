@@ -48,11 +48,22 @@ export function pgrestHeaders(token: string, forWrite: boolean): Record<string, 
 }
 
 /** A typed PostgREST error that surfaces the code + message + the governed CLR
- *  envelope (the JeReviewCard precedent): the CLR code lives in the message (house
- *  shape); the machine reason token lives in the exception DETAIL as
- *  `{"reason": <token>}` (INTERFACE-PINS §2 / §6). Additive over the Slice-5 shape
- *  (`pgCode` stays) so the document surfaces are unaffected. */
+ *  envelope (the JeReviewCard precedent): the CLR code IS the SQLSTATE, which
+ *  PostgREST returns in `body.code`; the machine reason token lives in the exception
+ *  DETAIL as `{"reason": <token>}` (INTERFACE-PINS §2 / §6). Additive over the
+ *  Slice-5 shape (`pgCode` stays) so the document surfaces are unaffected. */
 export type PgrestError = Error & { pgCode?: string; pgDetails?: string; clr?: string | null; reason?: string | null };
+
+/** The governed CLR code rides in the SQLSTATE (`raise … using errcode='CLR04'`), so
+ *  PostgREST reports it as `body.code`. No governed raise puts the token in its message
+ *  text — a message-only parse yields null for every real refusal, and the one place a
+ *  CLRxx string does appear in a message is a migration self-test probe raised under a
+ *  DIFFERENT errcode (0011: 'CLR05 probe rollback' using ZA011). Code first; the
+ *  message regex stays as a defensive fallback only. */
+export function parseClrCode(code?: string, message?: string): string | null {
+  if (code && /^CLR\d{2}$/.test(code)) return code;
+  return (message ?? "").match(/CLR\d{2}/)?.[0] ?? null;
+}
 
 /** The reason discriminant rides in the exception DETAIL as a json object. Defensive parse. */
 export function parseReasonToken(details?: string): string | null {
@@ -73,7 +84,7 @@ export async function pgrestError(res: Response, what: string): Promise<PgrestEr
   // Attach the raw governed code so callers can branch on CLR19 etc. honestly.
   err.pgCode = body.code;
   err.pgDetails = body.details;
-  err.clr = (body.message ?? "").match(/CLR\d{2}/)?.[0] ?? null;
+  err.clr = parseClrCode(body.code, body.message);
   err.reason = parseReasonToken(body.details);
   return err;
 }

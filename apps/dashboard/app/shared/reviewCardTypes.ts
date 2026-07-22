@@ -5,6 +5,8 @@
 // integration (the toDraftReview precedent). coding_lane's reason vocabulary IS
 // pinned (§5a) and is transcribed exactly for the label map.
 
+import { counterpartyNoun, type Direction } from "./direction";
+
 function s(v: unknown): string | null {
   return typeof v === "string" ? v : null;
 }
@@ -295,3 +297,16 @@ export const LANE_REASON_COPY: Record<string, string> = {
   parked: "parked after repeated auto-draft failures",
   rule_backed: "a signed rule backs the account choice",
 };
+
+/** §6.2 direction-aware lane-reason copy. Compatible with LANE_REASON_COPY (same tokens,
+ *  same wording for a null/purchase direction); a sales direction swaps vendor→customer
+ *  for the two counterparty-resolution reasons. Callers that can't know the direction
+ *  (an uncoded filing carries no coding_kind) pass null and get the current wording. */
+export function laneReasonCopy(reason: string, direction: Direction | null): string {
+  if (direction === "sales") {
+    const noun = counterpartyNoun(direction); // "customer"
+    if (reason === "vendor_unresolved") return `${noun} not resolved`;
+    if (reason === "vendor_ambiguous") return `${noun} is ambiguous — confirm identity`;
+  }
+  return LANE_REASON_COPY[reason] ?? reason;
+}

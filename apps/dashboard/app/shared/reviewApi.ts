@@ -118,6 +118,28 @@ export async function acknowledgeRulePosts(token: string, runIds: string[]): Pro
   await rpc("acknowledge_rule_posts", { p_run_ids: runIds, p_op_key: opKey() }, token);
 }
 
+// --- Wave-A2.1 compliance-watch governed writers (0016 §2.3/§2.4; human lane) ----
+// Bookkeeper+ floor; agent identity hard-refused (CLR03). The card hydrates from the
+// queue envelope (no get_compliance_watch read); these only WRITE. Each carries a
+// mandatory rationale/evidence the DB re-enforces + a fresh op_key (firm,fn,op_key
+// idempotent). A resolve/snooze bound violation raises the governed CLR the refusal
+// UI renders verbatim.
+
+export async function ackComplianceWatch(token: string, watchId: string, rationale: string): Promise<void> {
+  await rpc("ack_compliance_watch", { p_watch: watchId, p_rationale: rationale, p_op_key: opKey() }, token);
+}
+
+/** Snooze a watch to a future date (bounded to 60 days in-DB — CLR10 past the cap). */
+export async function snoozeComplianceWatch(token: string, watchId: string, until: string, rationale: string): Promise<void> {
+  await rpc("snooze_compliance_watch", { p_watch: watchId, p_until: until, p_rationale: rationale, p_op_key: opKey() }, token);
+}
+
+/** Resolve a watch with a TYPED conclusion + mandatory evidence
+ *  (registration_recorded | not_liable_documented; not-liable is admin+ in-DB). */
+export async function resolveComplianceWatch(token: string, watchId: string, conclusion: string, evidence: string): Promise<void> {
+  await rpc("resolve_compliance_watch", { p_watch: watchId, p_conclusion: conclusion, p_evidence: evidence, p_op_key: opKey() }, token);
+}
+
 // --- Typed rule-write results (0016 ADV-R2#4 / ADV-R3#6) -------------------------
 // propose/sign_autopost_rule REFUSE bounds violations as a TYPED HTTP-200 return
 // ({status:'refused', reason}) — a durable audited refusal, not an exception. The
