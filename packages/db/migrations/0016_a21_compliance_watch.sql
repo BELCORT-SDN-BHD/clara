@@ -3190,6 +3190,12 @@ begin
   if p_engine_id is null or p_engine_id not like 'clara-classify-%' then
     raise exception 'classifier engine must carry the clara-classify- prefix' using errcode='CLR10';
   end if;
+  -- ADV-R5: the human attestation engine ID is RESERVED for set_document_kind —
+  -- a classifier caller may never mint a human-looking verdict row.
+  if p_engine_id='clara-classify-human:v1' then
+    raise exception 'the human attestation engine id is reserved for set_document_kind'
+      using errcode='CLR10',detail='{"reason":"reserved_engine"}';
+  end if;
   if p_confidence is null or p_confidence<0 or p_confidence>1 then
     raise exception 'classifier confidence is malformed' using errcode='CLR10';
   end if;
@@ -3237,12 +3243,14 @@ begin
     returning id into v_ext;
 
   v_prior:=d.document_kind;
-  -- ADV-R4#6: a HUMAN verdict (set_document_kind) is never overwritten by the
-  -- classifier — the classifier's verdict ROW persists above, but the kind and
-  -- the classified event stay with the human correction.
+  -- ADV-R4#6 / ADV-R5: a HUMAN verdict (set_document_kind) is never overwritten
+  -- by the classifier — the classifier's verdict ROW persists above, but the
+  -- kind and the classified event stay with the human correction. Precedence is
+  -- detected by the row's SOURCE MARKER (envelope source='human', written only
+  -- by set_document_kind), never by an engine-id string a caller could supply.
   v_human:=exists(select 1 from clara.document_extractions hx
     where hx.document_id=p_document and hx.engine_kind='doc_classify'
-      and hx.status='done' and hx.engine_id='clara-classify-human:v1');
+      and hx.status='done' and hx.envelope->>'source'='human');
   if p_confidence>=0.8 and not v_human then
     update clara.documents set document_kind=p_kind where id=p_document;
     v_set:=true;

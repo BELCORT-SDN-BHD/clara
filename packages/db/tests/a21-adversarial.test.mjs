@@ -858,3 +858,33 @@ test("R5-7 (R4 must-7 / pin P7): closing_transfer is settable through the human 
     "an off-allowset wrapper flag is refused (closing_transfer only)",
   );
 });
+
+test("R6-1 (R5 final): the human attestation engine ID is RESERVED — a classifier can never mint human precedence", async (t) => {
+  if (skipHere(t)) return;
+  const client = world.clients.A1;
+  const sub = world.users.alice;
+  const firm = await firmOf(client);
+  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
+  // (1) the runtime lane calling with the reserved ID refuses by NAME.
+  await assert.rejects(
+    () => classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.99, engineId: "clara-classify-human:v1" }),
+    (e) => e.code === "CLR10" && reasonOf(e) === "reserved_engine",
+    "classify_document REFUSES the reserved human engine id (named reserved_engine)",
+  );
+  assert.equal(await docKind(cited.documentId), null, "the spoof attempt wrote no kind");
+  // (2) no phantom precedence: a normal classifier verdict still sets the kind.
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.95 });
+  assert.equal(await docKind(cited.documentId), "invoice", "with NO real human row the classifier still governs the kind");
+  // (3) a REAL set_document_kind row (the source='human' marker) still takes
+  // precedence, and the later classifier still persists its own verdict row.
+  await setDocumentKind(world.users.bob, { document: cited.documentId, kind: "receipt", reason: "r6-1 human correction" });
+  const rows0 = (await rootQuery(
+    "select count(*)::int as n from clara.document_extractions where document_id=$1 and engine_kind='doc_classify' and status='done'",
+    [cited.documentId])).rows[0].n;
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.99 });
+  assert.equal(await docKind(cited.documentId), "receipt", "the real human verdict (source marker) still wins over a later classifier");
+  const rows1 = (await rootQuery(
+    "select count(*)::int as n from clara.document_extractions where document_id=$1 and engine_kind='doc_classify' and status='done'",
+    [cited.documentId])).rows[0].n;
+  assert.equal(rows1, rows0 + 1, "the deferring classifier still persists its own verdict row");
+});
