@@ -8,12 +8,17 @@
 // NO first-party infrastructure — the DB-backed tools are BUILT with an injected pool
 // handle inside the step that runs them (autoDraft.v2.impl.ts).
 //
-// v2 vs v1 (the delta — Wave-A2.1, PROMPT-ONLY; the schema + steps are byte-identical to
-// v1): the purchase 3-leg VISIBILITY split when a bill's facts state a tax amount (an
-// expense-net DEBIT + a tied sst_purchase_cost DEBIT = the stated tax + AP gross; Malaysian
-// SST has no input-tax credit), and an awareness note that the context pack may carry an
-// `sst_registration_watch` block — the sweep may MENTION it in a draft note with its basis
-// label but NEVER acts on it (surfacing/decisions belong to the attended chat lane).
+// v2 vs v1 (the delta — Wave-A2.1, PROMPT-ONLY; the schema STRUCTURE + steps are identical to
+// v1 — field names and types untouched — but the model-facing description TEXT is deliberately
+// NOT byte-identical: the `.describe()` string and the draft tool's description carry the
+// conditional purchase-leg rule, because a rule the schema surface contradicts is a rule the
+// model breaks): the purchase leg shape is CONDITIONAL on the facts — no stated tax ⇒ 2 legs
+// (expense GROSS + AP GROSS); a stated tax ⇒ a 3-leg VISIBILITY split (expense-net DEBIT + a
+// tied sst_purchase_cost DEBIT = the stated tax + AP gross; Malaysian SST has no input-tax
+// credit). Plus an EXISTENCE-ONLY note that the context pack may carry an
+// `sst_registration_watch` block: this unattended lane may say only that a watch is open and
+// that the professional handles it in the review queue — no figure, status, deadline or
+// conclusion — and NEVER acts on it (surfacing/decisions belong to the attended chat lane).
 //
 // autoDraft_v2 is the UNATTENDED coding lane: there is NO human in the loop, so there is
 // NO clarify tool and NO park. The model reads the client-pinned surface and either DRAFTS
@@ -44,25 +49,33 @@ export const SYSTEM_PROMPT_AUTODRAFT_V2 = [
   "The database owns every number: never compute, sum, or invent a figure — read amounts from",
   "the document's extracted invoice facts and cite them (region id + exact quote per amount).",
   "",
-  "Draft the entry GROSS to the expense account code(s) from the client's active chart of",
-  "accounts (in the context pack), with an equal credit to the Accounts Payable control account,",
-  "naming the supplier as the counterparty on every payable line. One document becomes one draft",
-  "(a split bill is one draft with several debit lines). Then call `draft_journal_entry` with the",
-  "lines, the document_id, the vendor, and an evidence array. This sweep only ever codes a",
+  "Choose the expense account code(s) from the client's active chart of accounts (in the context",
+  "pack) and name the supplier as the counterparty on every payable line. One document becomes one",
+  "draft (a split bill is one draft with several debit lines). Then call `draft_journal_entry` with",
+  "the lines, the document_id, the vendor, and an evidence array. This sweep only ever codes a",
   "supplier bill (purchase direction): the counterparty is the VENDOR, never a customer.",
   "",
-  "When the bill's extracted facts STATE a tax amount, draft it as a 3-leg VISIBILITY split: the",
-  "expense account(s) DEBIT for the NET, ONE tied SST-portion-of-cost DEBIT leg equal EXACTLY to",
-  "the stated tax figure from the facts (choose the account carrying the sst_purchase_cost special",
-  "type in the chart of accounts), and the Accounts Payable CREDIT for the GROSS. Malaysian SST",
-  "has NO input-tax credit — this leg is a visibility split of the expense cost, never a",
-  "recoverable asset and never an sst_output leg; never invent a tax figure the facts do not state.",
+  "The LEG SHAPE depends on one thing — whether the bill's extracted facts STATE a tax amount.",
+  "Check that first, every time:",
+  "  * NO stated tax in the facts: a TWO-leg entry — the expense account(s) DEBIT for the GROSS,",
+  "    and the Accounts Payable CREDIT for the same GROSS.",
+  "  * A STATED tax amount in the facts: a THREE-leg VISIBILITY split — the expense account(s)",
+  "    DEBIT for the NET, ONE tied SST-portion-of-cost DEBIT leg equal EXACTLY to the stated tax",
+  "    figure from the facts (choose the account carrying the sst_purchase_cost special type in",
+  "    the chart of accounts), and the Accounts Payable CREDIT for the GROSS.",
+  "When the facts state a tax amount NEVER put the gross on the expense leg and NEVER drop the",
+  "tied tax leg; when they state none, NEVER invent one. Malaysian SST has NO input-tax credit —",
+  "the tax leg is a visibility split of the expense cost, never a recoverable asset and never an",
+  "sst_output leg.",
   "",
   "The context pack (via get_context_pack, purpose \"coding\") may include an `sst_registration_watch`",
-  "block — a DB-computed screening estimate. You may MENTION it in the draft's note or rationale with",
-  "its basis label (\"a DB-computed screening estimate\"), but this unattended sweep NEVER acts on it:",
-  "never surface a decision, never compute tax, never multiply by 8%, never infer a registration",
-  "status. Surfacing and professional review belong to the attended chat lane.",
+  "block. Because no human is watching this run, the ONLY thing you may ever say about it is that an",
+  "SST registration watch is OPEN for this client and that the professional handles it in the review",
+  "queue. NEVER quote any figure, status, tier, window, or deadline from it, and NEVER draw ANY",
+  "conclusion from it: no liability, no registration status, no tax computation, no multiplying by",
+  "8%, no threshold judgement, no future-method inference, and never \"below threshold\" or \"no",
+  "issue\". This unattended sweep NEVER acts on it — surfacing and professional review belong to the",
+  "attended chat lane.",
   "",
   "This ledger is MYR-only. If the bill is not lawfully draftable — a non-MYR currency, an",
   "ambiguous or unresolvable supplier, missing corroborated amounts, or a multi-document bundle —",
@@ -90,7 +103,12 @@ export const draftJournalEntryInputSchema = z.object({
       }),
     )
     .min(2)
-    .describe("At least two balanced lines: expense debit(s) gross + one Accounts Payable credit."),
+    .describe(
+      "At least two balanced lines. When the facts state NO tax: expense debit(s) GROSS + one " +
+        "Accounts Payable credit GROSS (two legs). When the facts STATE a tax: expense debit(s) NET " +
+        "+ ONE sst_purchase_cost debit equal EXACTLY to the stated tax + one Accounts Payable credit " +
+        "GROSS (three legs) — never gross-to-expense with a tax leg, never a dropped tax leg.",
+    ),
   document_id: z.string().uuid().describe("The filed supplier bill this entry codes."),
   vendor: z
     .union([

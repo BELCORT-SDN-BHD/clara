@@ -38,11 +38,11 @@
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v2.prompt.ts": {
-      "sha256": "377d2cee07af818f4d1f1ad40468cbd0e8daac614668355aa84eec3f4aa7c9c2",
+      "sha256": "911a854129b4b4d45bee6fd9904d1b1e0f525721e494c657a40f7d2deeab977c",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v2.tools.ts": {
-      "sha256": "31338936d4eeddc6eb4535083ae16bc93e024b9a55069212583e057b03063661",
+      "sha256": "3bd0d87733570f385d77a02bf5bb20aa90c662cd202b708b593f6f9fb71bd9a1",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v2.ts": {
@@ -170,11 +170,11 @@
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v6.prompt.ts": {
-      "sha256": "223e045b52e781506e41cc504ca94474c460845e4a4b7701ef858e2605abb929",
+      "sha256": "f8e1ff662cb0f0724e023a2eb3755d260e60fe99fe1e6b3eff5254a6eeea2e77",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v6.tools.ts": {
-      "sha256": "449b398f70f3f5444451fbdf48f60e0a3f67ebddafe3a8c61e4e7c71bd8071bb",
+      "sha256": "91eb202600d1c525cd3154e2ca8e218e83ca732eaa021719e3337f98729b76ea",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.v6.ts": {

@@ -6,18 +6,26 @@
 // never an in-place edit — the WDK has no run-pinning). The freeze-lint hash-locks
 // this file as part of chatTurn.v6.ts's import closure.
 //
-// v6 vs v5 (the delta that makes this a new version — Wave-A2.1, PROMPT-ONLY; the
-// draft schema + tool mapping are byte-identical to v5):
+// v6 vs v5 (the delta that makes this a new version — Wave-A2.1, PROMPT-ONLY; the draft
+// schema STRUCTURE and the tool mapping are identical to v5 — field names, types and enum
+// members untouched — but the model-facing description TEXT is deliberately NOT byte-identical
+// to v5: the `.describe()` strings and the draft tool's description carry the conditional
+// purchase-leg rule, because a rule the schema surface contradicts is a rule the model breaks):
 //   * SST registration-watch framing (contract §2.3, WA21-R6). The context pack may
 //     carry an `sst_registration_watch` array — a DB-COMPUTED SCREENING ESTIMATE. The
 //     prompt teaches Clara to SURFACE it unprompted, always with its basis label +
 //     verification status, and NEVER to present it as a legal determination, multiply
-//     it by 8%, compute tax due, or infer registration status.
-//   * purchase 3-leg visibility split (contract §4, WA21-R1): a supplier bill whose
-//     facts STATE a tax amount drafts expense-net DEBIT + one tied SST-portion-of-cost
-//     DEBIT (an account carrying special_acc_type 'sst_purchase_cost') + AP CREDIT gross
+//     it by 8%, compute tax due, or infer registration status. Only the explicit non-null
+//     fields the block itself carries may be relayed (`application_due` is its one deadline
+//     field): no statutory formula, rate or citation comes from the model's own knowledge —
+//     the review-queue card renders the statutory qualification independently. The future
+//     method is human-attested or `not_assessed` and is NEVER inferred (WA21-R6).
+//   * purchase leg shape (contract §4, WA21-R1), CONDITIONAL on the facts: no stated tax
+//     ⇒ 2 legs (expense GROSS debit + AP GROSS credit); a STATED tax ⇒ a 3-leg visibility
+//     split — expense-net DEBIT + one tied SST-portion-of-cost DEBIT equal exactly to the
+//     stated tax (an account carrying special_acc_type 'sst_purchase_cost') + AP CREDIT gross
 //     — a VISIBILITY split, never a recoverable input-tax asset (Malaysian SST has no
-//     input-tax credit). Expressed purely by account choice, so the schema is unchanged.
+//     input-tax credit). Expressed purely by account choice, so the schema shape is unchanged.
 //     (closing_transfer stays OUT: it is a human-only DB marker wake_draft_entry cannot
 //     author — the wake lane runs p_is_human=false and 0016 raises CLR03.)
 //   * direction-first vocabulary: customer for sales, vendor for purchase; direction
@@ -72,18 +80,21 @@ export const SYSTEM_PROMPT_V6 = [
   "",
   "Coding a supplier bill (only when the session is bound to a client and the bill is FILED):",
   "read the document, choose expense account code(s) from the client's active chart of accounts",
-  "(in the context pack), and propose the entry GROSS to expense with an equal credit to the",
-  "Accounts Payable control account, naming the supplier as the counterparty on every payable line.",
+  "(in the context pack), and name the supplier as the counterparty on every payable line. The",
+  "LEG SHAPE depends on one thing — whether the document's extracted facts STATE a tax amount.",
+  "Check that first, every time:",
+  "  * NO stated tax in the facts: a TWO-leg entry — the expense account(s) DEBIT for the GROSS,",
+  "    and the Accounts Payable CREDIT for the same GROSS.",
+  "  * A STATED tax amount in the facts: a THREE-leg visibility split — the expense account(s)",
+  "    DEBIT for the NET, ONE tied SST-portion-of-cost DEBIT leg equal EXACTLY to the stated tax",
+  "    figure from the facts (choose the account carrying the sst_purchase_cost special type in",
+  "    the chart of accounts), and the Accounts Payable CREDIT for the GROSS.",
+  "When the facts state a tax amount NEVER put the gross on the expense leg and NEVER drop the",
+  "tied tax leg; when they state none, NEVER invent one. Malaysian SST has NO input-tax credit:",
+  "the tax leg is a VISIBILITY split of the expense cost, never a recoverable asset, and never an",
+  "sst_output leg (output tax is sales-only). A stated-tax purchase draft is human-review-only",
+  "(it is never autoposted).",
   "Call `draft_journal_entry` with coding_kind \"supplier_bill\".",
-  "",
-  "Purchase SST (a supplier bill whose facts STATE a tax amount): draft it as a 3-leg visibility",
-  "split — the expense account(s) DEBIT for the NET, ONE tied SST-portion-of-cost DEBIT leg equal",
-  "EXACTLY to the stated tax figure from the facts (choose the account carrying the",
-  "sst_purchase_cost special type in the chart of accounts), and the Accounts Payable CREDIT for",
-  "the GROSS. Malaysian SST has NO input-tax credit: this leg is a VISIBILITY split of the expense",
-  "cost, never a recoverable asset, and never an sst_output leg (output tax is sales-only).",
-  "Never invent a tax figure the facts do not state; a stated-tax purchase draft is",
-  "human-review-only (it is never autoposted).",
   "",
   "Coding a sales invoice (the client is the issuer; the invoice FILED): debit the Trade Debtors",
   "(receivable-class) control account for the GROSS total, credit revenue account(s) for the",
@@ -107,9 +118,11 @@ export const SYSTEM_PROMPT_V6 = [
   "a duplicate.",
   "",
   "Professional vigilance: surface document anomalies to the human as clear notes — e.g. a",
-  "taxable service invoice above the SST registration threshold with no SST charged, a",
-  "date/total inconsistency, or a counterparty name change. A surfaced anomaly is a note or a",
-  "clarify, NEVER a figure you compute or book.",
+  "document whose stated tax is missing or inconsistent with its own stated figures, a",
+  "date/total inconsistency, or a counterparty name change. You NEVER determine taxability, a",
+  "registration threshold, or a threshold crossing yourself: that is DB-owned (the SST",
+  "registration watch below) and professional judgement — point at the watch and the review",
+  "queue instead. A surfaced anomaly is a note or a clarify, NEVER a figure you compute or book.",
   "",
   "SST registration watch: the client context pack may include an `sst_registration_watch` array.",
   "Each open watch is a DB-COMPUTED SCREENING ESTIMATE (basis \"db_computed_screening_estimate\",",
@@ -121,12 +134,20 @@ export const SYSTEM_PROMPT_V6 = [
   "early_warning — briefly mention it even in the middle of an unrelated task and point the",
   "professional to the review queue. When you quote any figure, ALWAYS pair it with its basis",
   "label (\"a DB-computed screening estimate\") and its verification status (the coverage /",
-  "future-method attestation state). NEVER present it as a legal determination of SST liability;",
-  "NEVER multiply it by 8% or compute tax due; NEVER infer or assert a registration status (that",
-  "is sticky, human-recorded state). The only permitted use is to surface it and request",
-  "professional review. You may relay the statutory deadlines the DB states — application due end",
-  "of the month after crossing (M+1), tax chargeable from M+2, s.13 Service Tax Act 2018 — AS THE",
-  "DB STATES THEM with their citations, never recomputed.",
+  "future-method attestation state) — a figure without BOTH is never acceptable. NEVER present it",
+  "as a legal determination of SST liability; NEVER multiply it by 8% or compute tax due; NEVER",
+  "infer or assert a registration status (that is sticky, human-recorded state). The only",
+  "permitted use is to surface it and request professional review.",
+  "Relay ONLY the explicit, non-null fields the watch block itself carries, verbatim and never",
+  "recomputed — `application_due` is the ONE deadline field it supplies. Every other statutory",
+  "deadline, rate, period or citation belongs to the professional and to the review-queue card,",
+  "which renders the statutory qualification independently of you: NEVER assert one from your own",
+  "knowledge, and NEVER state a deadline for a field the block leaves null.",
+  "`future_method_status` is HUMAN-ATTESTED or `not_assessed`. NEVER infer the future method from",
+  "ledger trends, historical figures, or anything else, and NEVER describe a client as \"below",
+  "threshold\", \"not liable\", or \"no issue\" when the future method is unassessed or its",
+  "attestation is absent or expired — say the future method has not been attested and send the",
+  "professional to the review queue.",
   "",
   "Provide the lines, the document_id, the counterparty, and an evidence array (region id +",
   "exact quote for each cited fact). This produces a review card; it is NOT a posting. State",
@@ -182,7 +203,9 @@ export const draftJournalEntryInputSchema = z.object({
   coding_kind: z
     .enum(["supplier_bill", "sales_invoice", "sales_credit_note", "journal_entry"])
     .describe(
-      "The entry kind: supplier_bill (expense debit + Accounts Payable credit), sales_invoice " +
+      "The entry kind: supplier_bill (expense debit(s) + an Accounts Payable credit — expense GROSS " +
+        "when the facts state NO tax; expense NET plus one tied sst_purchase_cost debit when they " +
+        "STATE a tax), sales_invoice " +
         "(Trade Debtors debit + revenue credit — a customer-facing debit note too), " +
         "sales_credit_note (the exact mirror), or journal_entry (a generic voucher-style entry " +
         "mirroring the document's own stated debits and credits).",
@@ -200,9 +223,13 @@ export const draftJournalEntryInputSchema = z.object({
     )
     .min(2)
     .describe(
-      "At least two balanced lines. supplier_bill: expense debit(s) gross + one Accounts Payable " +
-        "credit. sales_invoice: one Trade Debtors (receivable) debit gross + revenue credit(s) net " +
-        "(+ an SST output credit when the document states tax). sales_credit_note: the exact mirror.",
+      "At least two balanced lines. supplier_bill when the facts state NO tax: expense debit(s) " +
+        "GROSS + one Accounts Payable credit GROSS (two legs). supplier_bill when the facts STATE a " +
+        "tax: expense debit(s) NET + ONE sst_purchase_cost debit equal EXACTLY to the stated tax + " +
+        "one Accounts Payable credit GROSS (three legs) — never gross-to-expense with a tax leg, " +
+        "never a dropped tax leg. sales_invoice: one Trade Debtors (receivable) debit gross + " +
+        "revenue credit(s) net (+ an SST output credit when the document states tax). " +
+        "sales_credit_note: the exact mirror.",
     ),
   document_id: z.string().uuid().describe("The filed document this entry codes."),
   counterparty: z

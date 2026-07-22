@@ -273,7 +273,9 @@ export function buildToolsV6(ctx: ToolCtx) {
     }),
     [DRAFT_TOOL]: tool({
       description:
-        "Draft ONE journal entry for a human to review: a supplier bill (gross to expense + an Accounts Payable credit with the supplier), " +
+        "Draft ONE journal entry for a human to review: a supplier bill — with NO stated tax in the facts, expense debit(s) GROSS + an " +
+        "Accounts Payable credit GROSS with the supplier; with a STATED tax, expense debit(s) NET + ONE sst_purchase_cost debit equal " +
+        "EXACTLY to the stated tax + the Accounts Payable credit GROSS — " +
         "a sales invoice (Trade Debtors debit gross + revenue credit net, + an SST output credit when the document states tax), " +
         "a sales credit note (the exact mirror), or a generic journal_entry mirroring a voucher's own stated debits and credits. " +
         "This is a proposal, not a posting: it produces a review card a bookkeeper approves. " +

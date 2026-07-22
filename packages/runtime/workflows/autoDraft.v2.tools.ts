@@ -230,7 +230,9 @@ export function buildAutoDraftTools(ctx: ToolCtx) {
     }),
     [DRAFT_TOOL]: tool({
       description:
-        "Draft ONE supplier-bill journal entry for a human to review (gross to expense + a credit to Accounts Payable with the vendor). " +
+        "Draft ONE supplier-bill journal entry for a human to review: with NO stated tax in the facts, expense debit(s) GROSS + a credit " +
+        "to Accounts Payable GROSS with the vendor; with a STATED tax, expense debit(s) NET + ONE sst_purchase_cost debit equal EXACTLY " +
+        "to the stated tax + the Accounts Payable credit GROSS. " +
         "This is a proposal, not a posting. Provide lines, document_id, vendor, and an evidence array. If the bill is not lawfully draftable, do NOT call this — explain the block in text.",
       inputSchema: draftJournalEntryInputSchema,
       execute: (input: DraftInput) => runDraftJournalEntry(ctx, input),
