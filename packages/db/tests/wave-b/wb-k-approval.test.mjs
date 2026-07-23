@@ -365,44 +365,50 @@ test("K5 GATE-2 MID-MUTATION (rig-only fault injection, WB-R19): a genuine fault
   const goodRevs = revMapOf(st.all);
   const key = opk("gate2mid");
 
-  // RIG-ONLY fault: _approve_opening_entry's per-entry loop body
-  // (0017_wave_b.sql:3809-3820) does exactly two writes per entry — an UPDATE
-  // of clara.journal_entries.status and an INSERT into
-  // clara.opening_seed_approvals (seed_id-scoped). No event/audit emission
-  // happens per-entry: _audit (3994) and every _append_event (3997-4007) fire
-  // ONCE, only AFTER the whole per-entry loop (3959-3964) has finished for
-  // every item — so those tables are unreachable, not merely empty, when the
-  // fault lands mid-loop. opening_seed_approvals is the cleanest seed-scoped
-  // counter of "how many entries have been approved so far this txn"; a
-  // BEFORE INSERT trigger there — scoped to THIS seed only, so no other test
-  // in the (serial) battery can ever trip it — raises on the 3rd per-entry
-  // insert, i.e. after items 1-2 have genuinely mutated and before item 3's
-  // mutation completes.
-  await rootQuery(`
-    create or replace function clara._rig_k5_midmutation_fault() returns trigger
-      language plpgsql as $fault$
-    begin
-      if new.seed_id = '${st.seed}'::uuid
-         and (select count(*)::int from clara.opening_seed_approvals where seed_id = new.seed_id) >= 2
-      then
-        raise exception 'rig_fault_injection';
-      end if;
-      return new;
-    end;
-    $fault$;
-  `);
-  await rootQuery(`
-    create trigger _rig_k5_midmutation_fault
-      before insert on clara.opening_seed_approvals
-      for each row execute function clara._rig_k5_midmutation_fault();
-  `);
-
-  const seq0 = await maxSeq(w.firms.A);
-  const auditPre = await rootQuery(
-    "select count(*)::int as n from clara.audit_log where fn='approve_opening_seed' and (args->>'seed')=$1", [st.seed]);
-  assert.equal(auditPre.rows[0].n, 0, "prestate pin: no prior audit_log row for this fresh seed");
-
   try {
+    // Defensive pre-drop: guard against a prior failed run (this cell or an
+    // earlier crashed process) leaving the rig's fault trigger/function
+    // behind — creation below must start from a clean slate.
+    await rootQuery("drop trigger if exists _rig_k5_midmutation_fault on clara.opening_seed_approvals");
+    await rootQuery("drop function if exists clara._rig_k5_midmutation_fault()");
+
+    // RIG-ONLY fault: _approve_opening_entry's per-entry loop body
+    // (0017_wave_b.sql:3809-3820) does exactly two writes per entry — an UPDATE
+    // of clara.journal_entries.status and an INSERT into
+    // clara.opening_seed_approvals (seed_id-scoped). No event/audit emission
+    // happens per-entry: _audit (3994) and every _append_event (3997-4007) fire
+    // ONCE, only AFTER the whole per-entry loop (3959-3964) has finished for
+    // every item — so those tables are unreachable, not merely empty, when the
+    // fault lands mid-loop. opening_seed_approvals is the cleanest seed-scoped
+    // counter of "how many entries have been approved so far this txn"; a
+    // BEFORE INSERT trigger there — scoped to THIS seed only, so no other test
+    // in the (serial) battery can ever trip it — raises on the 3rd per-entry
+    // insert, i.e. after items 1-2 have genuinely mutated and before item 3's
+    // mutation completes.
+    await rootQuery(`
+      create or replace function clara._rig_k5_midmutation_fault() returns trigger
+        language plpgsql as $fault$
+      begin
+        if new.seed_id = '${st.seed}'::uuid
+           and (select count(*)::int from clara.opening_seed_approvals where seed_id = new.seed_id) >= 2
+        then
+          raise exception 'rig_fault_injection';
+        end if;
+        return new;
+      end;
+      $fault$;
+    `);
+    await rootQuery(`
+      create trigger _rig_k5_midmutation_fault
+        before insert on clara.opening_seed_approvals
+        for each row execute function clara._rig_k5_midmutation_fault();
+    `);
+
+    const seq0 = await maxSeq(w.firms.A);
+    const auditPre = await rootQuery(
+      "select count(*)::int as n from clara.audit_log where fn='approve_opening_seed' and (args->>'seed')=$1", [st.seed]);
+    assert.equal(auditPre.rows[0].n, 0, "prestate pin: no prior audit_log row for this fresh seed");
+
     let err = null;
     try {
       await approveOpeningSeed(w.users.hana, {

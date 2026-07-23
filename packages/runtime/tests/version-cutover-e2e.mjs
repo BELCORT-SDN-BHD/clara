@@ -41,6 +41,21 @@ if (!process.env.WORKFLOW_POSTGRES_URL
     || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci)(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
   throw new Error("version-cutover-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci)");
 }
+// DSN GUARD (the parsed comparison is the actual gate; the regexes above are only a first
+// line): every field of WORKFLOW_POSTGRES_URL must independently agree with the PG* env this
+// process is trusting — never merely "looks like" a loopback URL.
+{
+  const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
+  const okProtocol = u.protocol === "postgres:";
+  const okHost = LOCAL_HOSTS.has(u.hostname);
+  const okPort = u.port === String(process.env.PGPORT ?? "");
+  const okPath = u.pathname === "/" + (process.env.PGDATABASE ?? "");
+  const okQuery = [...u.searchParams.keys()].length === 0; // allowlist: none
+  if (!okProtocol || !okHost || !okPort || !okPath || !okQuery) {
+    throw new Error(
+      `version-cutover-e2e: WORKFLOW_POSTGRES_URL failed the parsed DSN gate (protocol=${u.protocol} host=${u.hostname} port=${u.port} vs PGPORT=${process.env.PGPORT} path=${u.pathname} vs /${process.env.PGDATABASE} query=${u.search})`);
+  }
+}
 
 process.env.RELAY_TEST_MODE = "1";
 process.env.CLARA_START_WORLD = "1";
@@ -59,6 +74,16 @@ process.env.SUPABASE_JWT_SECRET = jwtSecret;
 const BASE = `http://127.0.0.1:${process.env.PORT}`;
 const key = new TextEncoder().encode(jwtSecret);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const FETCH_TIMEOUT_MS = 15000;
+
+// HANG BOUND: a real (non-unref'd) top-level watchdog — the backstop for a hang AbortSignal.
+// timeout on individual fetches (below) cannot cover (e.g. a poll loop's own logic hanging).
+const WATCHDOG_MS = 5 * 60 * 1000;
+setTimeout(() => {
+  console.error(`\nVERSION CUTOVER E2E: WATCHDOG — exceeded ${WATCHDOG_MS}ms; forcing exit(1) (a genuine hang)`);
+  process.exit(1);
+}, WATCHDOG_MS);
+
 const mint = (sub) =>
   new SignJWT({ role: AUD }).setProtectedHeader({ alg: "HS256" }).setSubject(sub).setIssuer(ISSUER).setAudience(AUD).setIssuedAt().setExpirationTime("15m").sign(key);
 
@@ -66,7 +91,7 @@ async function waitHealthy(deadlineMs = 20000) {
   const end = Date.now() + deadlineMs;
   while (Date.now() < end) {
     try {
-      if ((await fetch(`${BASE}/health`)).ok) return;
+      if ((await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).ok) return;
     } catch {
       /* not up */
     }
@@ -119,6 +144,17 @@ async function rollbackPreflight(rig, name) {
   return Number(r.rows[0].n) === 0 ? "allowed" : "refused";
 }
 
+/** The runbook's INVENTORY-shaped preflight: a real rollback doesn't ask "does THIS ONE name
+ *  have zero runs" — it asks "is EVERYTHING currently in flight covered by the build I'm rolling
+ *  back to". Refuse if ANY non-terminal run's name falls outside `supportedNames`. */
+async function rollbackPreflightInventory(rig, supportedNames) {
+  const r = await rig.rootQuery(
+    "select name, count(*)::int n from workflow.workflow_runs where status not in ('completed','failed','cancelled') group by name",
+  );
+  const outside = r.rows.filter((row) => !supportedNames.includes(row.name));
+  return { verdict: outside.length === 0 ? "allowed" : "refused", outside };
+}
+
 async function answerClarify(rig, taskId, ownerSub, answerText, opKey) {
   const inter = await rig.rootQuery("select id from clara.agent_interruptions where task_id=$1 and status='pending'", [taskId]);
   assert.equal(inter.rowCount, 1, `exactly one pending clarify for task ${taskId}`);
@@ -150,26 +186,11 @@ async function main() {
   const jwt = await mint(owner);
 
   // -------------------------------------------------------------------------
-  // CUTOVER: a NEW admission targets the newest version (v7) through the registry
-  // indirection — the HTTP /turns route calls start(workflows.chatTurn) = chatTurn_v7.
-  // -------------------------------------------------------------------------
-  const s7 = await rig.createChatSession({ author: owner, client });
-  const turnRes = await fetch(`${BASE}/api/chat/${s7}/turns`, {
-    method: "POST",
-    headers: { authorization: `Bearer ${jwt}`, "content-type": "application/json" },
-    body: JSON.stringify({ turnKey: "cutover-v7", parts: [{ type: "text", text: "help please" }] }),
-  });
-  assert.equal(turnRes.status, 202, "v7 turn admitted 202");
-  const t7 = (await turnRes.json()).task_id;
-  const t7Parked = await pollTask(rig, t7, (t) => t.status === "awaiting_input", "T7 parks on clarify");
-  const v7RowName = (await rig.readWorkflowRun(t7Parked.workflow_run_id)).name;
-  assert.match(v7RowName, /chatTurn\.v7|chatTurn_v7/, `new admission bound the NEWEST version v7 (row name ${v7RowName})`);
-  console.log(`[cutover-e2e] CUTOVER: new admission → v7 (${v7RowName})`);
-
-  // -------------------------------------------------------------------------
-  // A parked run on the RETAINED OLD version (chatTurn_v6): admit unbound via
-  // rig.beginChatTurn (NOT the HTTP route — that would auto-start v7), then start v6 in the
-  // same tick so its claimRunStep CAS binds v6 before anything else.
+  // ADMIT+PARK v6 FIRST — mirrors the real deploy sequence: the RETAINED OLD
+  // version's run is already in flight BEFORE the new build's registry
+  // repoint ever admits anything. Admit unbound via rig.beginChatTurn (NOT the
+  // HTTP route — that would auto-start v7), then start v6 in the same tick so
+  // its claimRunStep CAS binds v6 before anything else.
   // -------------------------------------------------------------------------
   const s6 = await rig.createChatSession({ author: owner, client });
   const t6Receipt = await rig.beginChatTurn({ session: s6, author: owner, turnKey: "cutover-v6", parts: [{ type: "text", text: "help please" }] });
@@ -179,17 +200,43 @@ async function main() {
   const v6RowName = (await rig.readWorkflowRun(t6Parked.workflow_run_id)).name;
   // GUARD: prove v6 (not a reconciler-raced v7) actually bound — fail loud so the race never false-greens.
   assert.match(v6RowName, /chatTurn\.v6|chatTurn_v6/, `GUARD: the parked run bound chatTurn_v6, not v7 (row name ${v6RowName})`);
-  assert.notEqual(v6RowName, v7RowName, "the v6 run and the v7 run carry DISTINCT body names");
-  console.log(`[cutover-e2e] parked v6 run staged (${v6RowName})`);
+  console.log(`[cutover-e2e] parked v6 run staged FIRST (${v6RowName})`);
 
   // -------------------------------------------------------------------------
-  // ROLLBACK PREFLIGHT (executable): both parked → both REFUSED.
+  // CUTOVER: AFTER v6 is already parked, a NEW admission targets the newest
+  // version (v7) through the registry indirection — the HTTP /turns route
+  // calls start(workflows.chatTurn) = chatTurn_v7.
+  // -------------------------------------------------------------------------
+  const s7 = await rig.createChatSession({ author: owner, client });
+  const turnRes = await fetch(`${BASE}/api/chat/${s7}/turns`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${jwt}`, "content-type": "application/json" },
+    body: JSON.stringify({ turnKey: "cutover-v7", parts: [{ type: "text", text: "help please" }] }),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+  });
+  assert.equal(turnRes.status, 202, "v7 turn admitted 202");
+  const t7 = (await turnRes.json()).task_id;
+  const t7Parked = await pollTask(rig, t7, (t) => t.status === "awaiting_input", "T7 parks on clarify");
+  const v7RowName = (await rig.readWorkflowRun(t7Parked.workflow_run_id)).name;
+  assert.match(v7RowName, /chatTurn\.v7|chatTurn_v7/, `new admission bound the NEWEST version v7 (row name ${v7RowName})`);
+  assert.notEqual(v6RowName, v7RowName, "the v6 run and the v7 run carry DISTINCT body names");
+  console.log(`[cutover-e2e] CUTOVER: new admission → v7 (${v7RowName})`);
+
+  // -------------------------------------------------------------------------
+  // ROLLBACK PREFLIGHT (executable): both parked → both REFUSED (per-name),
+  // AND the inventory-shaped preflight against a v6-only supported set (the
+  // build being rolled back to — it never registered v7) REFUSES BY NAME.
   // -------------------------------------------------------------------------
   assert.equal(await rollbackPreflight(rig, v6RowName), "refused", "v6 has a non-terminal run → rollback refused");
   assert.equal(await rollbackPreflight(rig, v7RowName), "refused", "v7 has a non-terminal run → rollback refused");
   // The zero-run control (asserted directly, not inferred): a registered-but-unused version passes.
   assert.equal(await rollbackPreflight(rig, closeExampleName), "allowed", "a workflow with ZERO runs → rollback allowed");
   console.log("[cutover-e2e] preflight: v6 refused, v7 refused, closeExample (zero-run) allowed");
+
+  const inv1 = await rollbackPreflightInventory(rig, [v6RowName, closeExampleName]);
+  assert.equal(inv1.verdict, "refused", "inventory against a v6-only supported set REFUSES while v7 is non-terminal");
+  assert.ok(inv1.outside.some((r) => r.name === v7RowName), "the inventory refusal NAMES v7 as the unsupported non-terminal build");
+  console.log(`[cutover-e2e] inventory preflight (v6-only supported set): refused, naming ${v7RowName}`);
 
   // -------------------------------------------------------------------------
   // RESUME v6 on its ORIGINAL body → completes; the name column NEVER migrates to v7.
@@ -217,6 +264,12 @@ async function main() {
   await pollRun(rig, t7Parked.workflow_run_id, (r) => r.status === "completed", "v7 run completed");
   assert.equal(await rollbackPreflight(rig, v7RowName), "allowed", "with v7's run completed, rollback is now allowed");
   console.log("[cutover-e2e] RESUME v7: completed; v7 now allowed");
+
+  // With BOTH runs terminal, the SAME v6-only inventory (unchanged supported set) now allows —
+  // proving the inventory tracks live state, not a snapshot taken at the refusal above.
+  const inv2 = await rollbackPreflightInventory(rig, [v6RowName, closeExampleName]);
+  assert.equal(inv2.verdict, "allowed", "with both runs terminal, the SAME v6-only inventory now ALLOWS");
+  console.log("[cutover-e2e] inventory preflight (same v6-only supported set): now allowed");
 
   // -------------------------------------------------------------------------
   // Static freeze/registry invariants that make the pin real.

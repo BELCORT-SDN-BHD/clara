@@ -11,7 +11,7 @@ import {
   ROLES, rootQuery, humanQuery, opk, getPool, jtxt,
   buildWorld, insertUser, addMember, createClient, upsertAccountClassed,
   filedDocument, freshResolution,
-  beginOnboarding, draftOpeningItem, createOpeningSeed, planRow,
+  beginOnboarding, draftOpeningItem, createOpeningSeed, planRow, waitBlockedByOrThrow,
 } from "./wb-calls.mjs";
 import { withTxn } from "../rig-txn.mjs";
 
@@ -430,18 +430,22 @@ export async function raceAnswerPlan({ plan, expectedRevision, itemsA, itemsB, a
   const keyB = opk("raceanB");
   const out = { a: null, b: null };
   try {
+    const pid1 = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
     await c1.query(`set role ${ROLES.runtime}`);
+    await c1.query("set statement_timeout = '15s'"); // hang bound only
     await c1.query("begin");
     const r1 = await c1.query(UPDATE_PLAN_SQL,
       [plan, expectedRevision, jtxt(itemsA), answeredByA, keyA]);
-
+    const pid2 = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
     await c2.query(`set role ${ROLES.runtime}`);
+    await c2.query("set statement_timeout = '15s'"); // hang bound only
     await c2.query("begin");
     const p2 = c2.query(UPDATE_PLAN_SQL,
       [plan, expectedRevision, jtxt(itemsB), answeredByB, keyB])
       .then((r) => { out.b = { ok: true, opKey: keyB, result: r.rows[0].r }; })
       .catch((e) => { out.b = { ok: false, opKey: keyB, code: e.code, reason: e.detail ?? e.message }; });
-
+    // OBSERVED BLOCKING before A commits: prove B is genuinely parked on A's held lock.
+    await waitBlockedByOrThrow(pid2, pid1, { what: "the onboarding_plans row lock" });
     await c1.query("commit");
     out.a = { ok: true, opKey: keyA, result: r1.rows[0].r };
     await p2;

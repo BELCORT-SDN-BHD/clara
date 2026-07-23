@@ -40,6 +40,21 @@ if (!process.env.WORKFLOW_POSTGRES_URL
     || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci)(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
   throw new Error("interview-kill-resume-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci)");
 }
+// DSN GUARD (the parsed comparison is the actual gate; the regexes above are only a first
+// line): every field of WORKFLOW_POSTGRES_URL must independently agree with the PG* env this
+// process is trusting — never merely "looks like" a loopback URL.
+{
+  const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
+  const okProtocol = u.protocol === "postgres:";
+  const okHost = LOCAL_HOSTS.has(u.hostname);
+  const okPort = u.port === String(process.env.PGPORT ?? "");
+  const okPath = u.pathname === "/" + (process.env.PGDATABASE ?? "");
+  const okQuery = [...u.searchParams.keys()].length === 0; // allowlist: none
+  if (!okProtocol || !okHost || !okPort || !okPath || !okQuery) {
+    throw new Error(
+      `interview-kill-resume-e2e: WORKFLOW_POSTGRES_URL failed the parsed DSN gate (protocol=${u.protocol} host=${u.hostname} port=${u.port} vs PGPORT=${process.env.PGPORT} path=${u.pathname} vs /${process.env.PGDATABASE} query=${u.search})`);
+  }
+}
 
 const PORT = process.env.INTERVIEW_KILL_PORT || "3216";
 const BASE = `http://127.0.0.1:${PORT}`;
@@ -49,6 +64,17 @@ const jwtSecret = "ivkr-" + randomUUID().replace(/-/g, "");
 const key = new TextEncoder().encode(jwtSecret);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const serveScript = fileURLToPath(new URL("../scripts/serve.mjs", import.meta.url));
+const FETCH_TIMEOUT_MS = 15000;
+
+// HANG BOUND: a real (non-unref'd) top-level watchdog — the backstop for a hang AbortSignal.
+// timeout on individual fetches (below) cannot cover (e.g. a poll loop's own logic hanging, or
+// a child process that never exits). 8 minutes: this file's SIGKILL+respawn+full-drive is the
+// slowest of the three standalone e2es.
+const WATCHDOG_MS = 8 * 60 * 1000;
+setTimeout(() => {
+  console.error(`\nINTERVIEW KILL-RESUME E2E: WATCHDOG — exceeded ${WATCHDOG_MS}ms; forcing exit(1) (a genuine hang)`);
+  process.exit(1);
+}, WATCHDOG_MS);
 
 const mint = (sub) =>
   new SignJWT({ role: AUD }).setProtectedHeader({ alg: "HS256" }).setSubject(sub).setIssuer(ISSUER).setAudience(AUD).setIssuedAt().setExpirationTime("15m").sign(key);
@@ -96,9 +122,9 @@ async function waitReady(deadlineMs = 30000) {
   let healthy = false;
   while (Date.now() < end) {
     try {
-      if (!healthy && (await fetch(`${BASE}/health`)).ok) healthy = true;
+      if (!healthy && (await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).ok) healthy = true;
       if (healthy) {
-        const r = await fetch(`${BASE}/ready`);
+        const r = await fetch(`${BASE}/ready`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
         if (r.status === 200) return;
       }
     } catch {
@@ -114,6 +140,7 @@ async function postJson(path, body, jwt) {
     method: "POST",
     headers: { authorization: `Bearer ${jwt}`, "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   let parsed = null;
   try {
@@ -129,7 +156,7 @@ async function getState({ runId, planId }, jwt) {
   if (runId) url.searchParams.set("runId", runId);
   url.searchParams.set("scope", "client");
   if (planId) url.searchParams.set("planId", planId);
-  const r = await fetch(url, { headers: { authorization: `Bearer ${jwt}` } });
+  const r = await fetch(url, { headers: { authorization: `Bearer ${jwt}` }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   let body = null;
   try {
     body = await r.json();

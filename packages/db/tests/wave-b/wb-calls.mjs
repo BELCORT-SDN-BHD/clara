@@ -11,6 +11,39 @@ import {
 export * from "./wb-helpers.mjs";
 
 // ---------------------------------------------------------------------------
+// Observed-blocking wait helper (mirrors rig-runtime-race.mjs's waitBlockedBy
+// convention: pg_blocking_pids resolves the tuple/lock chain; wait_event_type
+// ='Lock' proves a genuine wait, not a scheduling artifact). Lives here
+// (not wb-fixtures.mjs) to stay under the repo's 500-line-per-module lint
+// convention. Unlike the silent-false rig helper, this one FAILS LOUDLY on
+// timeout — a race driver that never proves the block proves nothing about
+// the interleaving it claims to test.
+// ---------------------------------------------------------------------------
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll (bounded, default ~5s / 25ms) until backend `pid` is observably
+ *  WAITING (wait_event_type='Lock') on a lock held by `blockerPid`. Throws
+ *  on timeout instead of returning false — callers want the race PROVEN, not
+ *  merely attempted. */
+export async function waitBlockedByOrThrow(pid, blockerPid, {
+  timeoutMs = 5000, intervalMs = 25, what = "the row lock",
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid = $1",
+      [pid],
+    );
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) return true;
+    await sleep(intervalMs);
+  }
+  throw new Error(
+    `waitBlockedByOrThrow: backend ${pid} never observably blocked on ${what} (held by ${blockerPid}) within ${timeoutMs}ms`);
+}
+
+// ---------------------------------------------------------------------------
 // Block-K wrappers
 // ---------------------------------------------------------------------------
 

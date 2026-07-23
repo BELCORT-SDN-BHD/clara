@@ -35,7 +35,7 @@ import { SignJWT } from "jose";
 // --- Fail-closed local gate (the intake-e2e precedent). Any PGPORT is accepted (local
 // 55440, CI's 5432 service), but the host MUST be loopback and the database MUST be a
 // sanctioned throwaway — never a live/remote target. Local rig uses clara_rt_test; CI
-// provisions a fresh clara_interview_ci for this e2e.
+// provisions a fresh clara_wave_b_ci for this e2e.
 const LOCAL_HOSTS = new Set(["127.0.0.1", "localhost"]);
 const ALLOWED_DB = /^clara_(rt_test|wave_b_ci)$/;
 if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATABASE ?? "")) {
@@ -44,6 +44,21 @@ if (!LOCAL_HOSTS.has(process.env.PGHOST) || !ALLOWED_DB.test(process.env.PGDATAB
 if (!process.env.WORKFLOW_POSTGRES_URL
     || !/(?:\/\/|@)(?:127\.0\.0\.1|localhost):\d+\/clara_(?:rt_test|wave_b_ci)(?:\?|$)/.test(process.env.WORKFLOW_POSTGRES_URL)) {
   throw new Error("interview-e2e needs WORKFLOW_POSTGRES_URL targeting a loopback host + clara_(rt_test|wave_b_ci)");
+}
+// DSN GUARD (the parsed comparison is the actual gate; the regexes above are only a first
+// line): every field of WORKFLOW_POSTGRES_URL must independently agree with the PG* env this
+// process is trusting — never merely "looks like" a loopback URL.
+{
+  const u = new URL(process.env.WORKFLOW_POSTGRES_URL);
+  const okProtocol = u.protocol === "postgres:";
+  const okHost = LOCAL_HOSTS.has(u.hostname);
+  const okPort = u.port === String(process.env.PGPORT ?? "");
+  const okPath = u.pathname === "/" + (process.env.PGDATABASE ?? "");
+  const okQuery = [...u.searchParams.keys()].length === 0; // allowlist: none
+  if (!okProtocol || !okHost || !okPort || !okPath || !okQuery) {
+    throw new Error(
+      `interview-e2e: WORKFLOW_POSTGRES_URL failed the parsed DSN gate (protocol=${u.protocol} host=${u.hostname} port=${u.port} vs PGPORT=${process.env.PGPORT} path=${u.pathname} vs /${process.env.PGDATABASE} query=${u.search})`);
+  }
 }
 
 process.env.RELAY_TEST_MODE = "1";
@@ -60,6 +75,16 @@ process.env.SUPABASE_JWT_SECRET = jwtSecret;
 const BASE = `http://127.0.0.1:${process.env.PORT}`;
 const key = new TextEncoder().encode(jwtSecret);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const FETCH_TIMEOUT_MS = 15000;
+
+// HANG BOUND: a real (non-unref'd) top-level watchdog. AbortSignal.timeout on individual
+// fetches (below) cannot cover a hang in non-fetch awaits (e.g. a poll loop's own logic) — this
+// is the last-resort backstop that guarantees the process itself never runs forever in CI.
+const WATCHDOG_MS = 5 * 60 * 1000;
+setTimeout(() => {
+  console.error(`\nINTERVIEW E2E: WATCHDOG — exceeded ${WATCHDOG_MS}ms; forcing exit(1) (a genuine hang)`);
+  process.exit(1);
+}, WATCHDOG_MS);
 
 const mint = (sub) =>
   new SignJWT({ role: AUD }).setProtectedHeader({ alg: "HS256" }).setSubject(sub).setIssuer(ISSUER).setAudience(AUD).setIssuedAt().setExpirationTime("15m").sign(key);
@@ -68,7 +93,7 @@ async function waitHealthy(deadlineMs = 20000) {
   const end = Date.now() + deadlineMs;
   while (Date.now() < end) {
     try {
-      if ((await fetch(`${BASE}/health`)).ok) return;
+      if ((await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) })).ok) return;
     } catch {
       /* not up yet */
     }
@@ -84,6 +109,7 @@ async function postJson(path, body, jwt) {
     method: "POST",
     headers: { authorization: `Bearer ${jwt}`, "content-type": "application/json" },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
   let parsed = null;
   try {
@@ -99,7 +125,7 @@ async function getState({ runId, scope, planId }, jwt) {
   if (runId) url.searchParams.set("runId", runId);
   url.searchParams.set("scope", scope);
   if (planId) url.searchParams.set("planId", planId);
-  const r = await fetch(url, { headers: { authorization: `Bearer ${jwt}` } });
+  const r = await fetch(url, { headers: { authorization: `Bearer ${jwt}` }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   let body = null;
   try {
     body = await r.json();
@@ -209,8 +235,14 @@ async function main() {
     assert.equal(terminalState.status, "cancelled");
     assert.equal(terminalState.terminal.outcome, "cancelled", "the streamed terminal marker is authoritative (a cancel returns normally)");
 
+    // The 'cancelled' outcome above is a DOMAIN-level SegmentResult/terminal() branch
+    // (interview.v1.core.ts) — clientOnboarding_v1 returns NORMALLY from that branch
+    // (`return { ..., outcome: 'cancelled', ... }`), it never calls an engine-level
+    // cancel API. So the WDK engine sees an ordinary successful return: the run row's
+    // status is DETERMINISTICALLY 'completed', not 'cancelled' — tightened from the
+    // original terminal-set assert (verified by an actual e2e run, not just the source).
     const run = await pollRunTerminal(rig, runId, "client cancel run settles");
-    assert.ok(["completed", "failed", "cancelled"].includes(run.status), `engine run is TERMINAL not running (got ${run.status})`);
+    assert.equal(run.status, "completed", `engine run row is 'completed' (domain-cancelled via a normal return, not an engine-level cancel) — got ${run.status}`);
 
     // No business plan item persisted — ONLY the interview_run binding (written before the
     // first question, so we assert on item_key != 'interview_run', NEVER literal-zero).
@@ -265,8 +297,17 @@ async function main() {
     const restart = await postJson("/api/interview/firm/start", {}, jwt);
     assert.equal(restart.status, 202, "a second firm/start again returns 202 (still pre-firm) — no firm/plan created by the cancelled run");
 
+    // TIDY: this second /firm/start parked a SECOND real run — cancel it before the
+    // scenario ends so the shared CI DB is never left holding a dangling parked run.
+    const runId2 = restart.body.run_id;
+    assert.ok(runId2, "the second firm run id was returned");
+    await pollState({ runId: runId2, scope: "firm" }, jwt, (b) => b.pending_park?.parkIndex === 0, "second firm run parks at index 0");
+    const cancel2 = await postJson("/api/interview/cancel", { runId: runId2, scope: "firm", parkIndex: 0 }, jwt);
+    assert.equal(cancel2.status, 200, `second firm run cancel → 200 (got ${cancel2.status} ${JSON.stringify(cancel2.body)})`);
+    await pollState({ runId: runId2, scope: "firm" }, jwt, (b) => b.status === "cancelled" && b.terminal?.outcome === "cancelled", "second firm run cancel terminal");
+
     assert.equal(containsSecretShape(terminalState), false, "P19: no secret-shaped key in the firm /state body");
-    console.log("[interview-e2e] PASS (a-firm): pre-firm cancel → cancelled terminal, no firm/plan, F1 foreign-cancel 404");
+    console.log("[interview-e2e] PASS (a-firm): pre-firm cancel → cancelled terminal, no firm/plan, F1 foreign-cancel 404; second run tidied");
   }
 
   // -------------------------------------------------------------------------
