@@ -217,3 +217,11 @@ test("echo-back gate + cancel path (client)", async () => {
 test("client hook token uses the 'co' prefix, reconstructible from run + park index", () => {
   assert.equal(hookToken("client", "run-9", 4), "co:run-9:4");
 });
+
+test("an answered client segment carries the sanitized echo (the interview_activity payload persistSegment forwards)", async () => {
+  const { res } = await driveOne(segByKey("legal_name"), [ANSWER("Acme Trading SB"), ANSWER("yes")]);
+  assert.equal(res.outcome, "answered");
+  assert.equal(typeof res.echo, "string");
+  assert.match(res.echo, /legal name/);
+  assert.match(res.echo, /Acme Trading SB/);
+});

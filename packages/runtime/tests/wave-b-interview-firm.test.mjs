@@ -76,6 +76,14 @@ test("a valid answer asks a confirm ('c') park BEFORE returning answered (echo-b
   assert.match(asked[1].question, /Is that correct/);
 });
 
+test("an answered segment carries the SANITIZED validator echo (the interview_activity payload) — never a raw submission or secret", async () => {
+  const { res } = await driveOne(segByKey("bookkeeper_email"), [ANSWER("bk@acme.my"), ANSWER("yes")]);
+  assert.equal(res.outcome, "answered");
+  assert.equal(typeof res.echo, "string", "the workflow streams this echo as {type:'interview_activity', seg, phase, echo}");
+  assert.match(res.echo, /bk@acme\.my/, "the echo is the validator's human echo of the confirmed value");
+  assert.equal(containsSecretShape({ echo: res.echo }), false, "the echo never carries a secret-shaped field (P19)");
+});
+
 test("a 'change'/no at the confirm re-asks the plain question (no persist)", async () => {
   const { res, asked } = await driveOne(segByKey("legal_name"), [ANSWER("Typo Ltd"), ANSWER("change"), ANSWER("ACME PLT"), ANSWER("yes")]);
   assert.equal(res.outcome, "answered");

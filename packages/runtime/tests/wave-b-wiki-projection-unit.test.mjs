@@ -43,6 +43,7 @@ function stubClient(o = {}) {
       if (/from clara\.clients/.test(s)) return { rows: [{ status: o.status ?? "active" }], rowCount: o.clientFound === false ? 0 : 1 };
       if (/projected_from_seq/.test(s)) return o.projectedSeq != null ? { rows: [{ seq: o.projectedSeq }], rowCount: 1 } : { rows: [], rowCount: 0 };
       if (/get_wiki_page/.test(s)) return { rows: [{ page: o.existing ?? null }], rowCount: 1 };
+      if (/from clara\.seeding_proposals/.test(s)) return o.proposal ? { rows: [o.proposal], rowCount: 1 } : { rows: [], rowCount: 0 };
       return { rows: [], rowCount: 0 }; // begin / rollback / set_config / mutate
     },
   };
@@ -88,12 +89,13 @@ test("GOVERNED_EGRESS_PURPOSES.wiki_synthesis names the consent discipline", () 
 });
 
 // --- registry + subscription ------------------------------------------------------------------
-test("CONSUMERS entry is runtime-role; the subscription SET is the 6 registered types", () => {
+test("CONSUMERS entry is runtime-role; the subscription SET is the 7 registered types", () => {
   assert.equal(CONSUMERS.wiki_projection.name, WIKI_PROJECTION_CONSUMER);
   assert.equal(CONSUMERS.wiki_projection.identity, "runtime-role");
   assert.deepEqual([...WIKI_PROJECTION_EVENT_TYPES].sort(), [
     "counterparty.created", "counterparty.merged", "document.classified",
     "egress.consent_granted", "egress.consent_revoked", "entry.approved",
+    "seeding.proposal_decided",
   ]);
 });
 
@@ -216,6 +218,124 @@ test("egress.consent_granted → consent_released (clears hold); egress.consent_
 test("an unsubscribed type dispatched to planEvent → skipped_kind (defensive)", async () => {
   const plan = await planEvent(stubClient(), { firmId: FIRM, ev: ev("wiki.page_published"), deps: {} });
   assert.equal(plan.status, "skipped_kind");
+});
+
+// --- the deterministic seeding wiki_fact lane (F13) ---------------------------------------------
+const PROP = randomUUID();
+const wikiFactProposal = (over = {}) => ({
+  proposal_kind: "wiki_fact", state: "ticked", client_id: CLIENT,
+  payload: { wiki: {
+    slug: "prior-gl/acmesupplies", title: "Prior-GL activity — Acme Supplies",
+    page_kind: "recurring_pattern", content: "# Prior-GL activity — Acme Supplies\n\nRoutine vendor.",
+  } },
+  evidence: { occurrence_count: 3, date_span: { first: "2025-01-02", last: "2025-11-30" },
+    line_cites: [{ region_id: "reg-1", text: "2025-01-02 Acme Supplies 5000 RM 1,200.00 DR" }] },
+  ...over,
+});
+const seedingEv = (payloadOver = {}) => ev("seeding.proposal_decided", {
+  documentId: DOC,
+  payload: { decision: "ticked", proposal_kind: "wiki_fact", proposal_id: PROP, ...payloadOver },
+});
+
+test("ticked wiki_fact → deterministic publish (synthesis='deterministic', engine_id null, prior_gl_line cites, seq op_key)", async () => {
+  const c = stubClient({ proposal: wikiFactProposal() });
+  const plan = await planEvent(c, { firmId: FIRM, ev: seedingEv(), deps: {} });
+  assert.equal(plan.status, "projected");
+  assert.equal(plan.lane, "deterministic");
+  const cap = stubClient({ proposal: wikiFactProposal() });
+  await plan.mutate(cap);
+  const call = cap.calls.find((x) => /publish_wiki_page_version/.test(x.sql));
+  assert.ok(call, "calls publish_wiki_page_version");
+  assert.equal(call.params[1], "prior-gl/acmesupplies", "slug from payload verbatim");
+  assert.equal(call.params[2], "recurring_pattern", "page_kind from payload (never counterparty)");
+  assert.equal(call.params[4], null, "counterparty is null for a fact page");
+  assert.match(call.params[5], /^# Prior-GL activity/, "content built from the payload verbatim");
+  assert.equal(call.params[10], "deterministic", "synthesis=deterministic");
+  assert.equal(call.params[11], null, "engine_id NULL (no model)");
+  assert.equal(call.params[12], 42, "projected_from_seq = the event seq");
+  assert.equal(call.params[13], `wikiproj:${CLIENT}:42`, "seq-embedded op_key idiom");
+  const cites = JSON.parse(call.params[8]);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].source_kind, "prior_gl_line");
+  assert.equal(cites[0].document_id, DOC, "citation binds the source prior-GL document");
+  assert.equal(cites[0].detail.proposal_id, PROP);
+});
+
+test("declined seeding decision → checkpoint-only skip (no publish)", async () => {
+  const plan = await planEvent(stubClient({ proposal: wikiFactProposal() }), {
+    firmId: FIRM, ev: seedingEv({ decision: "declined" }), deps: {},
+  });
+  assert.equal(plan.status, "skipped_declined");
+  assert.equal(plan.mutate, null);
+});
+
+test("ticked NON-wiki_fact decision (vendor_account_rule) → checkpoint-only skip", async () => {
+  const plan = await planEvent(stubClient({ proposal: wikiFactProposal() }), {
+    firmId: FIRM, ev: seedingEv({ proposal_kind: "vendor_account_rule" }), deps: {},
+  });
+  assert.equal(plan.status, "skipped_non_wiki_kind");
+  assert.equal(plan.mutate, null);
+});
+
+test("wiki_fact for an ONBOARDING client is publishable (seeding runs during onboarding)", async () => {
+  const plan = await planEvent(stubClient({ status: "onboarding", proposal: wikiFactProposal() }), {
+    firmId: FIRM, ev: seedingEv(), deps: {},
+  });
+  assert.equal(plan.status, "projected");
+});
+
+test("wiki_fact for an ARCHIVED client → skipped_inactive_client", async () => {
+  const plan = await planEvent(stubClient({ status: "archived", proposal: wikiFactProposal() }), {
+    firmId: FIRM, ev: seedingEv(), deps: {},
+  });
+  assert.equal(plan.status, "skipped_inactive_client");
+});
+
+test("wiki_fact already published at/after this seq → already_projected (idempotent)", async () => {
+  const plan = await planEvent(stubClient({ projectedSeq: 99, proposal: wikiFactProposal() }), {
+    firmId: FIRM, ev: seedingEv(), deps: {},
+  });
+  assert.equal(plan.status, "already_projected");
+  assert.equal(plan.mutate, null);
+});
+
+test("wiki_fact with a malformed payload (no content) → skipped_bad_wiki_fact (terminal, no dead-letter)", async () => {
+  const bad = wikiFactProposal({ payload: { wiki: { slug: "prior-gl/x", title: "x", page_kind: "recurring_pattern", content: "" } } });
+  const plan = await planEvent(stubClient({ proposal: bad }), { firmId: FIRM, ev: seedingEv(), deps: {} });
+  assert.equal(plan.status, "skipped_bad_wiki_fact");
+  assert.equal(plan.mutate, null);
+});
+
+test("wiki_fact claiming page_kind='counterparty' is refused (structural mismatch) → skipped_bad_wiki_fact", async () => {
+  const bad = wikiFactProposal({ payload: { wiki: { slug: "prior-gl/x", title: "x", page_kind: "counterparty", content: "# x" } } });
+  const plan = await planEvent(stubClient({ proposal: bad }), { firmId: FIRM, ev: seedingEv(), deps: {} });
+  assert.equal(plan.status, "skipped_bad_wiki_fact");
+});
+
+test("wiki_fact with NO concrete line/region anchor → skipped_no_citation (provenance is NEVER fabricated, F-M12)", async () => {
+  const noAnchor = wikiFactProposal({ evidence: { occurrence_count: 1, date_span: { first: null, last: null }, line_cites: [] } });
+  const plan = await planEvent(stubClient({ proposal: noAnchor }), { firmId: FIRM, ev: seedingEv(), deps: {} });
+  assert.equal(plan.status, "skipped_no_citation");
+  assert.equal(plan.mutate, null, "no publish, no synthesized citation");
+});
+
+test("wiki_fact whose line_cites carry NO row/region (text-only) → skipped_no_citation", async () => {
+  const soft = wikiFactProposal({ evidence: { occurrence_count: 1, line_cites: [{ text: "prose, no row or region anchor" }] } });
+  const plan = await planEvent(stubClient({ proposal: soft }), { firmId: FIRM, ev: seedingEv(), deps: {} });
+  assert.equal(plan.status, "skipped_no_citation");
+});
+
+test("wiki_fact with an xlsx PHYSICAL-row cite ({row}) publishes with that concrete anchor (F-M14 union)", async () => {
+  const rowCite = wikiFactProposal({ evidence: { occurrence_count: 1, line_cites: [{ row: 7, text: "2025-03-14 Acme Supplies 5000 RM 1,200.00 DR" }] } });
+  const plan = await planEvent(stubClient({ proposal: rowCite }), { firmId: FIRM, ev: seedingEv(), deps: {} });
+  assert.equal(plan.status, "projected");
+  const cap = stubClient({ proposal: rowCite });
+  await plan.mutate(cap);
+  const call = cap.calls.find((x) => /publish_wiki_page_version/.test(x.sql));
+  const cites = JSON.parse(call.params[8]);
+  assert.equal(cites.length, 1);
+  assert.equal(cites[0].source_kind, "prior_gl_line");
+  assert.equal(cites[0].detail.row, 7, "the physical row rides the citation detail");
 });
 
 // --- Storage put→verify + orphan-repair idempotence (put-409) -----------------------------------

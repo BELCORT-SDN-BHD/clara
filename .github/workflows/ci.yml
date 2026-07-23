@@ -171,6 +171,11 @@ jobs:
       # CI. Runs after seed because the db smoke test asserts against the migrated
       # + seeded schema. Folds in the former `--filter @clara/db test` step.
       - name: Migrate + seed + tests — all packages (ephemeral postgres:17)
+        env:
+          # Un-skips the rig-gated suites (the dashboard queue-kind parity probe +
+          # the runtime interview plan-db tests) against the shared migrated DB —
+          # they are pollution-proof by construction (they stage their own fixtures).
+          CLARA_RIG_DB: "1"
         run: |
           pnpm db:migrate
           pnpm db:seed

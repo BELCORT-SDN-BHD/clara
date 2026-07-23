@@ -26,7 +26,7 @@
 import { createHook } from "workflow";
 import { CLIENT_SEGMENTS } from "./interview.v1.questions.js";
 import { askAndConfirmSegment, hookToken, interviewRunBinding, type AskFn, type Resolution, type PlanItemInput } from "./interview.v1.core.js";
-import { mintOpKeyStep, runIdStep, streamPromptStep, streamOwnerStep, streamTerminalStep, readPlanStep, updatePlanStep } from "./interview.v1.steps.js";
+import { mintOpKeyStep, runIdStep, streamPromptStep, streamActivityStep, streamOwnerStep, streamTerminalStep, readPlanStep, updatePlanStep } from "./interview.v1.steps.js";
 import { itemFingerprint, fingerprintMap } from "./interview.v1.writer.js";
 
 // The authenticated caller who started the run (the /client/start principal). The DB re-validates
@@ -60,7 +60,7 @@ export async function clientOnboarding_v1(input: ClientOnboardingInput): Promise
   const park = { n: 0 };
   const ask: AskFn = async (prompt) => {
     const idx = park.n++;
-    await streamPromptStep({ parkIndex: idx, seg: prompt.seg, phase: prompt.phase, question: prompt.question, scope: "client", expects: prompt.expects });
+    await streamPromptStep({ parkIndex: idx, seg: prompt.seg, phase: prompt.phase, question: prompt.question, scope: "client", expects: prompt.expects, op_key: prompt.op_key });
     const hook = createHook<Resolution>({ token: hookToken("client", runId, idx) });
     return hook; // PARK — zero compute until the answer/cancel route resumes this token
   };
@@ -109,7 +109,9 @@ export async function clientOnboarding_v1(input: ClientOnboardingInput): Promise
       if (write.status !== "stale_conflict") {
         revision = write.revisionToken;
         for (const it of res.items) knownMap[it.item_key] = itemFingerprint({ state: it.state, answer: it.answer });
-        return { kind: "written" as const, value: res.value };
+        // `res` is the FINAL confirmed segment (a re-echo overwrites it above), so its echo is the
+        // sanitized value actually persisted — the activity chunk carries THAT, never a raw submit.
+        return { kind: "written" as const, value: res.value, echo: res.echo };
       }
       // Foreign edit to our key — rebuild the baseline from live and re-echo the segment.
       revision = write.revisionToken;
@@ -139,7 +141,12 @@ export async function clientOnboarding_v1(input: ClientOnboardingInput): Promise
       return { planId, clientId, outcome: done.kind, answered };
     }
     if (done.kind === "skipped") continue; // a re-echo chose to skip a skippable field
-    answered += 1;
+    if (done.kind === "written") {
+      // Confirmed AND persisted — stream the sanitized echo as an activity chunk (parity with the
+      // firm run; for the client the plan items are the primary answer surface, so /state MAY fold []).
+      await streamActivityStep({ seg: seg.key, phase: "c", echo: done.echo });
+      answered += 1;
+    }
   }
 
   await streamTerminalStep({ outcome: "interview_complete", planId, clientId, answered });

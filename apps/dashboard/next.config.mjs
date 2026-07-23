@@ -22,6 +22,11 @@ const nextConfig = {
             { source: "/api/chat/:path*", destination: `${runtime}/api/chat/:path*` },
             { source: "/api/tasks/:path*", destination: `${runtime}/api/tasks/:path*` },
             { source: "/api/intake/:path*", destination: `${runtime}/api/intake/:path*` },
+            // Wave B (settled dashboard plan F6): the interview + document-lane routes
+            // stay same-origin; production rides the Pages Function catch-all already.
+            { source: "/api/interview/:path*", destination: `${runtime}/api/interview/:path*` },
+            { source: "/api/opening/:path*", destination: `${runtime}/api/opening/:path*` },
+            { source: "/api/seeding/:path*", destination: `${runtime}/api/seeding/:path*` },
           ];
         },
       }),

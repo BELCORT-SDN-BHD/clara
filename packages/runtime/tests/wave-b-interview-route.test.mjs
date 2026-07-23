@@ -14,7 +14,8 @@ const core = await import("../workflows/interview.v1.core.ts");
 const { AuthError } = await import("../lib/authz.mjs");
 const { containsSecretShape } = await import("./wave-b-interview-testkit.mjs");
 
-const { buildFirmReceipt, validateAnswerValue, promptExpectsFirmReceipt, reduceRunMarkers } = routes;
+const { buildFirmReceipt, validateAnswerValue, promptExpectsFirmReceipt, reduceRunMarkers,
+  toPendingPark, toTerminal, normalizeStatus, buildInterviewState, deriveInterviewChip } = routes;
 const { firmOwnerMatches, interviewRunBinding } = core;
 
 const UUID_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -112,4 +113,158 @@ test("reduceRunMarkers latest prefers a terminal that arrives after the last pro
   ]);
   assert.equal(m.latest.type, "interview_terminal");
   assert.equal(m.terminal.outcome, "interview_complete");
+});
+
+// --- v2 (§3.1): activity fold + promptConsumed tracking ----------------------
+
+test("reduceRunMarkers folds interview_activity chunks into activity[] in order; a fresh prompt re-opens the park, an activity/terminal consumes it", () => {
+  // A parked run: q → c → confirm(activity) → next q. The LAST chunk is a fresh prompt, so the
+  // park is OPEN again (promptConsumed=false); the confirmed segment is in activity[].
+  const parked = reduceRunMarkers([
+    { type: "interview_owner", scope: "firm", principalUserId: "sub-1" },
+    { type: "interview_prompt", parkIndex: 0, seg: "legal_name", phase: "q", question: "Legal name?" },
+    { type: "interview_prompt", parkIndex: 1, seg: "legal_name", phase: "c", question: "I recorded: …" },
+    { type: "interview_activity", seg: "legal_name", phase: "c", echo: "legal name “ACME PLT”" },
+    { type: "interview_prompt", parkIndex: 2, seg: "ssm", phase: "q", question: "SSM?" },
+  ]);
+  assert.deepEqual(parked.activity, [{ kind: "answered", seg: "legal_name", phase: "c", echo: "legal name “ACME PLT”" }]);
+  assert.equal(parked.promptConsumed, false, "the last chunk is a fresh prompt → the park is open");
+  assert.equal(parked.prompt.parkIndex, 2);
+
+  // The transient computing state: the LAST chunk is the activity (confirmed, next prompt not yet
+  // streamed) → the latest prompt is consumed (promptConsumed=true, no open park).
+  const computing = reduceRunMarkers([
+    { type: "interview_prompt", parkIndex: 0, seg: "legal_name", phase: "q" },
+    { type: "interview_prompt", parkIndex: 1, seg: "legal_name", phase: "c" },
+    { type: "interview_activity", seg: "legal_name", phase: "c", echo: "legal name “ACME PLT”" },
+  ]);
+  assert.equal(computing.promptConsumed, true, "an activity after the latest prompt consumes it");
+});
+
+// --- v2 (§3.1): the pure projections -----------------------------------------
+
+test("toPendingPark projects the typed park fields; op_key + expects ride ONLY when present", () => {
+  assert.equal(toPendingPark(null), null, "no prompt → no pending park");
+  const plain = toPendingPark({ type: "interview_prompt", parkIndex: 3, seg: "ssm", phase: "q", question: "SSM?", scope: "firm" });
+  assert.deepEqual(plain, { parkIndex: 3, seg: "ssm", phase: "q", question: "SSM?" }, "an ordinary park has neither expects nor op_key");
+  const commit = toPendingPark({ type: "interview_prompt", parkIndex: 11, seg: "commit", phase: "q", question: "…confirm", scope: "firm", expects: "create_firm_receipt", op_key: "op-123" });
+  assert.equal(commit.expects, "create_firm_receipt");
+  assert.equal(commit.op_key, "op-123", "F5: the commit op_key is a TYPED field the dashboard reads (no prose parsing)");
+  assert.equal(containsSecretShape(commit), false, "op_key is an idempotency key, never a secret-shaped field");
+});
+
+test("toTerminal strips the stream type tag and passes the outcome payload through", () => {
+  assert.equal(toTerminal(null), null);
+  const t = toTerminal({ type: "interview_terminal", outcome: "firm_created", firmId: UUID_A, planId: UUID_B, answered: 10 });
+  assert.deepEqual(t, { outcome: "firm_created", firmId: UUID_A, planId: UUID_B, answered: 10 });
+  assert.equal(containsSecretShape(t), false, "a terminal carries navigable ids, never the admission token/receipt");
+});
+
+test("normalizeStatus: the terminal marker is authoritative (cancel/expire → cancelled); else the engine status maps to the §3.1 enum", () => {
+  assert.equal(normalizeStatus("running", null), "running");
+  assert.equal(normalizeStatus("running", { outcome: "cancelled" }), "cancelled", "a cancel returns normally, so only the terminal marker reveals it");
+  assert.equal(normalizeStatus("complete", { outcome: "expired" }), "cancelled");
+  assert.equal(normalizeStatus("running", { outcome: "firm_created" }), "complete", "any non-cancel terminal → complete");
+  assert.equal(normalizeStatus("complete", null), "complete");
+  assert.equal(normalizeStatus(null, null), "unknown", "no runId / indeterminate → unknown");
+});
+
+// --- v2 (§3.1): buildInterviewState — the exact /state body ------------------
+
+const FIRM_MID_STREAM = [
+  { type: "interview_owner", scope: "firm", principalUserId: "sub-1" },
+  { type: "interview_prompt", parkIndex: 0, seg: "legal_name", phase: "q", question: "What is the firm's registered legal name?", scope: "firm" },
+  { type: "interview_prompt", parkIndex: 1, seg: "legal_name", phase: "c", question: "I recorded: legal name “ACME PLT”. Is that correct? (yes / change)", scope: "firm" },
+  { type: "interview_activity", seg: "legal_name", phase: "c", echo: "legal name “ACME PLT”" },
+  { type: "interview_prompt", parkIndex: 2, seg: "ssm", phase: "q", question: "What is the firm's SSM registration number?", scope: "firm" },
+];
+
+test("buildInterviewState (firm, parked mid-interview): pending_park set, activity folded, status running, chip awaiting_you", () => {
+  const state = buildInterviewState(reduceRunMarkers(FIRM_MID_STREAM), { runId: "run-firm-1", scope: "firm", engineStatus: "running", plan: null, items: [] });
+  assert.deepEqual(state.pending_park, { parkIndex: 2, seg: "ssm", phase: "q", question: "What is the firm's SSM registration number?" });
+  assert.deepEqual(state.activity, [{ kind: "answered", seg: "legal_name", phase: "c", echo: "legal name “ACME PLT”" }]);
+  assert.equal(state.terminal, null);
+  assert.equal(state.status, "running");
+  assert.equal(state.run_id, "run-firm-1");
+  assert.equal(state.scope, "firm");
+  assert.equal(deriveInterviewChip(state), "awaiting_you", "pending_park && !terminal ⇒ awaiting_you");
+  assert.equal(containsSecretShape(state), false, "no secret in the whole /state body (P19)");
+});
+
+test("buildInterviewState (firm, commit park): pending_park carries expects + typed op_key; chip awaiting_you; no secret", () => {
+  const stream = [
+    { type: "interview_owner", scope: "firm", principalUserId: "sub-1" },
+    { type: "interview_activity", seg: "legal_name", phase: "c", echo: "legal name “ACME PLT”" },
+    { type: "interview_prompt", parkIndex: 22, seg: "commit", phase: "q", scope: "firm", expects: "create_firm_receipt", op_key: "op-abc-123", question: "Firm profile ready (10 answers). To create the firm, the dashboard calls create_firm with this op_key and your admission token, then confirms here. (confirm / cancel)" },
+  ];
+  const state = buildInterviewState(reduceRunMarkers(stream), { runId: "run-firm-1", scope: "firm", engineStatus: "running", plan: null, items: [] });
+  assert.equal(state.pending_park.expects, "create_firm_receipt");
+  assert.equal(state.pending_park.op_key, "op-abc-123");
+  assert.doesNotMatch(state.pending_park.question, /op-abc-123/, "the raw op_key stays OUT of the human prose (it rides the typed field)");
+  assert.equal(deriveInterviewChip(state), "awaiting_you");
+  assert.equal(containsSecretShape(state), false);
+});
+
+test("buildInterviewState (firm, terminal firm_created): pending_park null, terminal + activity surfaced, status complete, chip = outcome", () => {
+  const stream = [
+    ...FIRM_MID_STREAM,
+    { type: "interview_prompt", parkIndex: 3, seg: "commit", phase: "q", scope: "firm", expects: "create_firm_receipt", op_key: "op-abc-123", question: "…confirm / cancel" },
+    { type: "interview_terminal", outcome: "firm_created", firmId: UUID_A, planId: UUID_B, answered: 10 },
+  ];
+  const state = buildInterviewState(reduceRunMarkers(stream), { runId: "run-firm-1", scope: "firm", engineStatus: "complete", plan: null, items: [] });
+  assert.equal(state.pending_park, null, "a terminal consumes the park → null pending_park");
+  assert.deepEqual(state.terminal, { outcome: "firm_created", firmId: UUID_A, planId: UUID_B, answered: 10 });
+  assert.equal(state.status, "complete");
+  assert.equal(state.activity.length, 1, "the confirmed segment stays in activity[]");
+  assert.equal(deriveInterviewChip(state), "firm_created", "a terminal ⇒ its outcome");
+  assert.equal(containsSecretShape(state), false);
+});
+
+test("buildInterviewState (firm, cancelled): status cancelled, chip = cancelled", () => {
+  const state = buildInterviewState(
+    reduceRunMarkers([{ type: "interview_owner", scope: "firm", principalUserId: "sub-1" }, { type: "interview_prompt", parkIndex: 0, seg: "legal_name", phase: "q" }, { type: "interview_terminal", outcome: "cancelled", answered: 0 }]),
+    { runId: "run-firm-1", scope: "firm", engineStatus: "complete", plan: null, items: [] },
+  );
+  assert.equal(state.status, "cancelled");
+  assert.equal(state.pending_park, null);
+  assert.equal(deriveInterviewChip(state), "cancelled");
+});
+
+test("buildInterviewState (client scope): activity[] is [] — the plan page is the answer surface (R1 note); pending_park + plan/items still returned", () => {
+  const clientStream = [
+    { type: "interview_owner", scope: "client", planId: UUID_A },
+    { type: "interview_prompt", parkIndex: 0, seg: "legal_name", phase: "q", question: "Legal name?" },
+    { type: "interview_prompt", parkIndex: 1, seg: "legal_name", phase: "c", question: "confirm?" },
+    { type: "interview_activity", seg: "legal_name", phase: "c", echo: "legal name “Acme Trading SB”" },
+    { type: "interview_prompt", parkIndex: 2, seg: "entity_type", phase: "q", question: "Entity type?" },
+  ];
+  const plan = { id: UUID_A, state: "open", revision_token: "rev-1" };
+  const items = [{ item_key: "legal_name", state: "answered" }];
+  const state = buildInterviewState(reduceRunMarkers(clientStream), { runId: "run-client-1", scope: "client", engineStatus: "running", plan, items });
+  assert.deepEqual(state.activity, [], "client scope MAY (and does) return [] — the plan items are authoritative");
+  assert.deepEqual(state.pending_park, { parkIndex: 2, seg: "entity_type", phase: "q", question: "Entity type?" });
+  assert.equal(state.plan, plan);
+  assert.equal(state.items, items);
+  assert.equal(deriveInterviewChip(state), "awaiting_you");
+});
+
+test("buildInterviewState (no runId, plan-only view): status unknown, no pending, activity []", () => {
+  const plan = { id: UUID_A, state: "open" };
+  const state = buildInterviewState(null, { runId: "", scope: "client", engineStatus: null, plan, items: [] });
+  assert.equal(state.run_id, null);
+  assert.equal(state.status, "unknown");
+  assert.equal(state.pending_park, null);
+  assert.deepEqual(state.activity, []);
+  assert.equal(state.plan, plan);
+});
+
+test("deriveInterviewChip: running with no open park ⇒ working (the transient computing state)", () => {
+  // The activity is the LAST chunk (confirmed, next prompt not yet streamed) → no open park.
+  const state = buildInterviewState(
+    reduceRunMarkers([{ type: "interview_prompt", parkIndex: 0, seg: "legal_name", phase: "q" }, { type: "interview_prompt", parkIndex: 1, seg: "legal_name", phase: "c" }, { type: "interview_activity", seg: "legal_name", phase: "c", echo: "legal name “X”" }]),
+    { runId: "run-firm-1", scope: "firm", engineStatus: "running", plan: null, items: [] },
+  );
+  assert.equal(state.pending_park, null);
+  assert.equal(state.status, "running");
+  assert.equal(deriveInterviewChip(state), "working", "status 'running' with no pending_park ⇒ working");
 });

@@ -8,7 +8,10 @@
 
 import { rpc, runtimeBase, supabaseBase } from "./wire";
 import type { PgrestError } from "./wire";
-import { toReviewQueue, toEntryDiff, toDocEntryDiff, type ReviewQueue, type EntryDiff, type DocEntryDiff } from "./reviewTypes";
+import {
+  toReviewQueue, toEntryDiff, toDocEntryDiff, toLintFindingDetail,
+  type ReviewQueue, type EntryDiff, type DocEntryDiff, type LintFindingDetail,
+} from "./reviewTypes";
 import { toSweepRun, toOpenQuestion, toCodingRule, toCodingLane, type SweepRun, type OpenQuestion, type CodingRule, type CodingLane } from "./reviewCardTypes";
 import { toRulePostRun, toAutopostRule, toNotification, type RulePostRun, type AutopostRule, type Notification } from "./reviewCardTypes";
 
@@ -48,6 +51,13 @@ export async function getOpenQuestion(token: string, questionId: string): Promis
 
 export async function getCodingRule(token: string, ruleId: string): Promise<CodingRule> {
   return toCodingRule(await rpc("get_coding_rule", { p_rule: ruleId }, token));
+}
+
+/** Hydrate one lint finding + its append-only event trail (0017 L1/P18). Viewer
+ *  floor; degrades to {finding:null, events:[]} — never throws — when the id is
+ *  absent or belongs to another firm (get_lint_finding returns SQL NULL there). */
+export async function getLintFinding(token: string, findingId: string): Promise<LintFindingDetail> {
+  return toLintFindingDetail(await rpc("get_lint_finding", { p_finding: findingId }, token));
 }
 
 /** coding_lane returns table(lane, reasons[]); via PostgREST that is an array of rows. */
@@ -104,6 +114,20 @@ export async function declineCodingRule(token: string, ruleId: string, reason: s
 
 export async function resolveOpenQuestion(token: string, questionId: string, resolution: string): Promise<void> {
   await rpc("resolve_open_question", { p_question: questionId, p_resolution: resolution, p_op_key: opKey() }, token);
+}
+
+/** Resolve an OPEN lint finding with a TYPED conclusion + a mandatory note (0017
+ *  resolve_lint_finding; bookkeeper+ floor). Raises CLR33 malformed/not-open, CLR11
+ *  wrong firm — never a typed {status:'refused'} return, so this stays void like
+ *  resolveOpenQuestion/ackComplianceWatch. Fresh op_key per call. */
+export async function resolveLintFinding(
+  token: string, findingId: string, conclusion: string, note: string,
+): Promise<void> {
+  await rpc(
+    "resolve_lint_finding",
+    { p_finding: findingId, p_conclusion: conclusion, p_note: note, p_op_key: opKey() },
+    token,
+  );
 }
 
 export async function dismissOpenQuestion(token: string, questionId: string, reason: string): Promise<void> {

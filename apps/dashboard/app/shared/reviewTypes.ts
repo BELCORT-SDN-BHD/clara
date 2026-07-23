@@ -55,12 +55,18 @@ export type QueueRow = {
   coding_kind: string | null;
   watch_id: string | null;
   tier: string | null;
+  // 0017 additive key (L5/P18 — the lint_finding row): a pre-0017 envelope degrades
+  // to null, exactly like watch_id above. `tier` doubles as the lint severity slot
+  // for a lint_finding row (info/warn/critical) — no new envelope key needed for it.
+  finding_id: string | null;
 };
 
 export type QueueCounts = {
   ready: number; needs_review: number; needs_you: number;
   open_drafts: number; open_questions: number; open_tasks: number;
   compliance_watches: number;
+  // 0017 additive — a pre-0017 envelope degrades to 0, mirroring compliance_watches.
+  lint_findings: number;
 };
 
 export type QueueSweep = { open_run: boolean; last_finalized_at: string | null; last_ack_at: string | null };
@@ -81,11 +87,16 @@ export type ComplianceClient = {
 };
 export type ReviewCompliance = { stale_evaluator: boolean; clients: ComplianceClient[] };
 
+// 0017 L5/P18: the top-level `lint` summary, mirroring `compliance` above — a
+// missing block (pre-0017 envelope) degrades to {stale_evaluator:false}.
+export type ReviewLint = { stale_evaluator: boolean };
+
 export type ReviewQueue = {
   watermark: string | null;
   counts: QueueCounts;
   sweep: QueueSweep;
   compliance: ReviewCompliance;
+  lint: ReviewLint;
   rows: QueueRow[];
   next_cursor: { tuple: string[] } | null;
 };
@@ -116,6 +127,7 @@ function toQueueRow(raw: unknown): QueueRow {
     coding_kind: s(o.coding_kind),
     watch_id: s(o.watch_id),
     tier: s(o.tier),
+    finding_id: s(o.finding_id),
   };
 }
 
@@ -148,17 +160,21 @@ export function toReviewQueue(raw: unknown): ReviewQueue {
     open_questions: numOrNull(c.open_questions) ?? 0,
     open_tasks: numOrNull(c.open_tasks) ?? 0,
     compliance_watches: numOrNull(c.compliance_watches) ?? 0,
+    lint_findings: numOrNull(c.lint_findings) ?? 0,
   };
   const comp = (o.compliance ?? {}) as Record<string, unknown>;
   const compliance: ReviewCompliance = {
     stale_evaluator: b(comp.stale_evaluator),
     clients: arr(comp.clients).map(toComplianceClient),
   };
+  const lintRaw = (o.lint ?? {}) as Record<string, unknown>;
+  const lint: ReviewLint = { stale_evaluator: b(lintRaw.stale_evaluator) };
   return {
     watermark: s(o.watermark),
     counts,
     sweep: { open_run: b(sw.open_run), last_finalized_at: s(sw.last_finalized_at), last_ack_at: s(sw.last_ack_at) },
     compliance,
+    lint,
     rows: arr(o.rows).map(toQueueRow),
     next_cursor: cursorTuple.length > 0 ? { tuple: cursorTuple } : null,
   };
@@ -253,5 +269,109 @@ export function toDocEntryDiff(raw: unknown): DocEntryDiff {
         no_region: b(f.no_region),
       };
     }),
+  };
+}
+
+// --- get_lint_finding (0017 L1/P18 pin) -----------------------------------------
+// The queue's `lint_finding` row is identifier-only; the detail card hydrates the
+// full episode via get_lint_finding — {finding, events}. Every field is transcribed
+// verbatim (never re-derived); `detail`/`figures` stay opaque jsonb blobs — the card
+// (never this mapper) decides how to label/format them.
+
+export type LintFindingKind =
+  | "contradiction" | "stale_claim" | "orphan_page" | "cap_pages" | "cap_page_size"
+  | "wiki_synthesis_held" | "opening_tb_tie_broken" | "opening_doc_unfiled";
+export type LintSeverity = "info" | "warn" | "critical";
+export type LintFindingState = "open" | "superseded" | "resolved";
+export type LintResolveConclusion =
+  "corrected" | "accepted_revision" | "false_positive" | "superseded_by_edit";
+
+export type LintFinding = {
+  id: string;
+  client_id: string | null;
+  finding_kind: LintFindingKind | string;
+  dedupe_key: string | null;
+  severity: LintSeverity | string;
+  page_id: string | null;
+  seed_id: string | null;
+  detail: Record<string, unknown>;
+  state: LintFindingState | string;
+  prior_finding_id: string | null;
+  opened_at: string | null;
+  evaluated_through_event_seq: number | null;
+  resolved_conclusion: LintResolveConclusion | string | null;
+  resolved_note: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  superseded_at: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+};
+
+export type LintFindingEvent = {
+  id: string;
+  finding_id: string;
+  event_kind: string;
+  state_before: string | null;
+  state_after: string | null;
+  figures: Record<string, unknown>;
+  actor: string | null;
+  rationale: string | null;
+  created_at: string | null;
+};
+
+export type LintFindingDetail = { finding: LintFinding | null; events: LintFindingEvent[] };
+
+function jsonObj(v: unknown): Record<string, unknown> {
+  return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+}
+
+function toLintFinding(raw: unknown): LintFinding {
+  const o = jsonObj(raw);
+  return {
+    id: s(o.id) ?? "",
+    client_id: s(o.client_id),
+    finding_kind: s(o.finding_kind) ?? "",
+    dedupe_key: s(o.dedupe_key),
+    severity: s(o.severity) ?? "info",
+    page_id: s(o.page_id),
+    seed_id: s(o.seed_id),
+    detail: jsonObj(o.detail),
+    state: s(o.state) ?? "open",
+    prior_finding_id: s(o.prior_finding_id),
+    opened_at: s(o.opened_at),
+    evaluated_through_event_seq: numOrNull(o.evaluated_through_event_seq),
+    resolved_conclusion: s(o.resolved_conclusion),
+    resolved_note: s(o.resolved_note),
+    resolved_by: s(o.resolved_by),
+    resolved_at: s(o.resolved_at),
+    superseded_at: s(o.superseded_at),
+    created_at: s(o.created_at),
+    updated_at: s(o.updated_at),
+  };
+}
+
+function toLintFindingEvent(raw: unknown): LintFindingEvent {
+  const o = jsonObj(raw);
+  return {
+    id: s(o.id) ?? "",
+    finding_id: s(o.finding_id) ?? "",
+    event_kind: s(o.event_kind) ?? "",
+    state_before: s(o.state_before),
+    state_after: s(o.state_after),
+    figures: jsonObj(o.figures),
+    actor: s(o.actor),
+    rationale: s(o.rationale),
+    created_at: s(o.created_at),
+  };
+}
+
+/** get_lint_finding returns SQL NULL (not an error) when the id is absent or belongs
+ *  to another firm — degrades to {finding:null, events:[]}, never a crash. */
+export function toLintFindingDetail(raw: unknown): LintFindingDetail {
+  const o = jsonObj(raw);
+  return {
+    finding: o.finding != null ? toLintFinding(o.finding) : null,
+    events: arr(o.events).map(toLintFindingEvent),
   };
 }

@@ -4,11 +4,16 @@
 // It maintains the Layer-1 client wiki index as an EVENT-SPINE PROJECTION (WB-R3): (a) DETERMINISTIC
 // ingest (no model/consent, WB-R10) — entry.approved with a source doc → record_wiki_source_ingest;
 // (b) MODEL synthesis (consent-gated, W9) — counterparty.created/merged → synthesize the counterparty
-// page, content-address in Storage, verify by re-download, THEN publish_wiki_page_version. Terminal
-// receipts (checkpoint-advancing, no retry): projected|already_projected|skipped_inactive_client|
-// held_consent|consent_released|skipped_kind + CLR32 wiki refusals mapped terminal; only a genuine
-// throw dead-letters (matcher idiom). op_keys: model 'wikiproj:<client>:<seq>'; ingest
-// 'wikiingest:<client>:<document>'; consent 'wikihold:/wikirelease:<client>:<seq>'. P17: never
+// page, content-address in Storage, verify by re-download, THEN publish_wiki_page_version;
+// (c) DETERMINISTIC seeding fact (no model/consent/egress, R2 · F13) — a TICKED seeding.proposal_decided
+// of kind 'wiki_fact' publishes its page from the seeding proposal's payload VERBATIM (synthesis
+// 'deterministic', prior_gl_line citations, engine_id null); a declined or non-wiki_fact decision is a
+// checkpoint-only skip. A fact with NO concrete line/region anchor is skipped_no_citation — provenance
+// is NEVER fabricated (F-M12). Terminal receipts (checkpoint-advancing, no retry):
+// projected|already_projected|skipped_inactive_client|held_consent|consent_released|skipped_kind|
+// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation + CLR32 wiki refusals mapped terminal;
+// only a genuine throw dead-letters (matcher idiom). op_keys: model/seeding-fact 'wikiproj:<client>:<seq>';
+// ingest 'wikiingest:<client>:<document>'; consent 'wikihold:/wikirelease:<client>:<seq>'. P17: never
 // subscribes to / re-synthesizes from wiki.*. Cold start (checkpoint seed + backfill + repair) is a
 // CEREMONY item, never boot. Three reads are INJECTABLE + FAIL CLOSED under the 0008 grants (no
 // runtime document→client link, no SELECT on counterparties/client_egress_consents).
@@ -25,15 +30,24 @@ import { GOVERNED_EGRESS_PURPOSES } from "./egress.mjs";
 export const WIKI_PROJECTION_CONSUMER = "wiki_projection";
 
 // The subscription SET (the sanctioned deviation from the single-type template, W4), bound from the
-// live event_types registry (0005/0009/0011/0016). All other types (incl. wiki.* — P17) are
+// live event_types registry (0005/0009/0011/0016/0017). All other types (incl. wiki.* — P17) are
 // checkpoint-only advances. document.classified = ingest (client not carried → resolveDocumentClient);
 // entry.approved = ingest of the source doc (carries the client); counterparty.* = model synthesis;
-// egress.consent_* = hold set/clear.
+// egress.consent_* = hold set/clear; seeding.proposal_decided = the deterministic wiki_fact lane (F13).
 export const WIKI_PROJECTION_EVENT_TYPES = Object.freeze([
   "document.classified", "entry.approved", "counterparty.created",
   "counterparty.merged", "egress.consent_granted", "egress.consent_revoked",
+  "seeding.proposal_decided",
 ]);
 const SUBSCRIBED = new Set(WIKI_PROJECTION_EVENT_TYPES);
+
+/** The wiki page_kinds a deterministic seeding fact may claim — 'counterparty' is
+ *  excluded (it structurally requires a counterparty_id the fact never carries). */
+const WIKI_FACT_PAGE_KINDS = new Set([
+  "profile", "treatment", "recurring_pattern", "open_question", "period_context",
+]);
+/** Cap on prior_gl_line citations emitted per fact page (≥1 required by the DB). */
+const MAX_FACT_CITATIONS = 50;
 
 const WIKI_MODEL = process.env.CLARA_WIKI_MODEL || process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
 const WIKI_ENGINE_ID = `clara-wiki-synth:${WIKI_MODEL}`;
@@ -108,6 +122,38 @@ export async function synthesizeWikiPageDefault({ kind, counterpartyId, existing
 async function isClientActive(client, { clientId, firmId }) {
   const r = await client.query("select status from clara.clients where id=$1 and firm_id=$2", [clientId, firmId]);
   return r.rowCount > 0 && r.rows[0].status === "active";
+}
+/** Publishable = active OR onboarding (publish_wiki_page_version's own floor). Seeding
+ *  facts land DURING onboarding, so this lane accepts both — unlike the operational lanes. */
+async function isClientPublishable(client, { clientId, firmId }) {
+  const r = await client.query("select status from clara.clients where id=$1 and firm_id=$2", [clientId, firmId]);
+  return r.rowCount > 0 && (r.rows[0].status === "active" || r.rows[0].status === "onboarding");
+}
+/** Read a ticked seeding proposal's kind/state/payload/evidence (clara_runtime SELECT + RLS true). */
+async function readSeedingProposal(client, { proposalId, firmId }) {
+  const r = await client.query(
+    "select proposal_kind, state, payload, evidence, client_id from clara.seeding_proposals where id=$1 and firm_id=$2",
+    [proposalId, firmId]);
+  return r.rows[0] ?? null;
+}
+/** A line cite carries a CONCRETE anchor iff it is an object with an integer physical xlsx
+ *  `row` or a nonempty `region_id` (the F-M14 citation union). A cite without one is not
+ *  provenance and can never justify a fabricated citation (F-M12). */
+export function hasConcreteAnchor(lc) {
+  return !!lc && typeof lc === "object"
+    && ((typeof lc.region_id === "string" && lc.region_id !== "") || Number.isInteger(lc.row));
+}
+/** Build prior_gl_line citations from a proposal's evidence, keeping ONLY concrete-anchor
+ *  cites (F-M12: NEVER synthesize provenance). Every citation binds the source prior-GL
+ *  document; the concrete line cite rides `detail`. An EMPTY result means the fact has no
+ *  anchor — the caller turns that into a terminal skipped_no_citation (never a bare publish). */
+export function buildPriorGlCitations({ evidence, sourceDocumentId, proposalId }) {
+  const lineCites = Array.isArray(evidence?.line_cites) ? evidence.line_cites : [];
+  return lineCites.filter(hasConcreteAnchor).slice(0, MAX_FACT_CITATIONS).map((lc) => ({
+    source_kind: "prior_gl_line",
+    document_id: sourceDocumentId,
+    detail: { proposal_id: proposalId, ...lc },
+  }));
 }
 /** projected_from_seq of a page's CURRENT version (null if absent) — the already_projected guard. */
 async function currentProjectedSeq(client, { firmId, clientId, slug }) {
@@ -218,6 +264,53 @@ function planConsentTransition({ ev, clientId, granted }) {
   };
 }
 
+/** The DETERMINISTIC seeding wiki_fact lane (F13): a TICKED seeding.proposal_decided of kind
+ *  'wiki_fact' publishes its page from the proposal payload VERBATIM. A declined or non-wiki_fact
+ *  decision is a checkpoint-only skip. No model, no consent, no Storage egress — the content lives in
+ *  the DB version column (the record_wiki_source_ingest deterministic precedent). Reads the ticked
+ *  proposal (the event payload carries no wiki body) and cites the source prior-GL document. */
+async function planSeedingWikiFact(client, { firmId, ev }) {
+  const payload = ev.payload || {};
+  if (payload.decision !== "ticked") return skip("skipped_declined");
+  if (payload.proposal_kind !== "wiki_fact") return skip("skipped_non_wiki_kind");
+  const clientId = ev.clientId;
+  const proposalId = payload.proposal_id;
+  const sourceDoc = ev.documentId; // the batch's source_document_id (event column)
+  if (!clientId || !proposalId || !sourceDoc) return skip("skipped_kind");
+  if (!(await isClientPublishable(client, { clientId, firmId }))) return skip("skipped_inactive_client");
+  const sp = await readSeedingProposal(client, { proposalId, firmId });
+  if (!sp || sp.proposal_kind !== "wiki_fact" || sp.state !== "ticked") return skip("skipped_kind");
+  const wiki = (sp.payload && sp.payload.wiki) || {};
+  const slug = typeof wiki.slug === "string" ? wiki.slug : "";
+  const title = typeof wiki.title === "string" ? wiki.title.trim() : "";
+  const pageKind = typeof wiki.page_kind === "string" ? wiki.page_kind : "";
+  const content = typeof wiki.content === "string" ? wiki.content : "";
+  // Malformed payload is a TERMINAL skip (never a poison-pill dead-letter loop). The DB
+  // re-validates every field, but we refuse early so a bad payload advances the checkpoint.
+  if (!content || !slug || !title || !WIKI_FACT_PAGE_KINDS.has(pageKind)) return skip("skipped_bad_wiki_fact");
+  const projected = await currentProjectedSeq(client, { firmId, clientId, slug });
+  if (projected != null && projected >= ev.seq) return skip("already_projected");
+  const cites = buildPriorGlCitations({ evidence: sp.evidence, sourceDocumentId: sourceDoc, proposalId });
+  // F-M12: a fact with no concrete line/region anchor is a TERMINAL skip — never publish
+  // with fabricated provenance (the DB floor is ≥1 citation; we refuse rather than invent).
+  if (cites.length === 0) return skip("skipped_no_citation");
+  const sha = contentSha256(content);
+  const key = wikiStorageKey(firmId, clientId, sha);
+  return {
+    status: "projected", lane: "deterministic",
+    // Re-check recency IN-TXN (codex F9 parity with the model lane): a newer published seq
+    // for this slug between planning and commit makes this a checkpoint-only no-op.
+    mutate: async (c) => {
+      const now = await currentProjectedSeq(c, { firmId, clientId, slug });
+      if (now != null && now >= ev.seq) return;
+      await c.query(
+        "select clara.publish_wiki_page_version($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14) as r",
+        [clientId, slug, pageKind, title, null, content, sha, key,
+          JSON.stringify(cites), "[]", "deterministic", null, ev.seq, `wikiproj:${clientId}:${ev.seq}`]);
+    },
+  };
+}
+
 /** Dispatch one subscribed event to its lane plan (reads + any network egress happen here). */
 export async function planEvent(client, { firmId, ev, deps }) {
   const payload = ev.payload || {};
@@ -237,6 +330,8 @@ export async function planEvent(client, { firmId, ev, deps }) {
       return planConsentTransition({ ev, clientId: ev.clientId, granted: true });
     case "egress.consent_revoked":
       return planConsentTransition({ ev, clientId: ev.clientId, granted: false });
+    case "seeding.proposal_decided":
+      return planSeedingWikiFact(client, { firmId, ev });
     default:
       return skip("skipped_kind");
   }
