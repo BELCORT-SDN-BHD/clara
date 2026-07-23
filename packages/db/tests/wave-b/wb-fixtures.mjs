@@ -408,6 +408,57 @@ export async function racePublishPages({ firm, client, slugA, slugB }) {
 }
 
 // ---------------------------------------------------------------------------
+// [GATE 1] Two-session race against update_onboarding_plan (the ANSWER half of
+// the O5 concurrency story). Mirrors racePublishPages, NOT raceOpeningApproval:
+// update_onboarding_plan is granted clara_runtime ONLY (WB_ACL) and has NO
+// transaction_isolation assertion — it serializes on a FOR UPDATE row-lock +
+// revision_token CAS (0017:2643 FOR UPDATE -> 2655-2660 CLR06 stale_plan), not
+// SSI. PLAIN `begin` (READ COMMITTED) on both sessions; c1 takes the lock and
+// rotates the token uncommitted, c2 fires with the SAME expected_revision but a
+// DIFFERENT op_key (fired WITHOUT awaiting — it blocks on c1's row lock), c1
+// commits, then c2 is awaited and re-reads the rotated token -> CAS-fails.
+// ---------------------------------------------------------------------------
+
+const UPDATE_PLAN_SQL =
+  `select clara.update_onboarding_plan(p_plan => $1, p_expected_revision => $2,
+     p_items => $3::jsonb, p_answered_by => $4, p_op_key => $5) as r`;
+
+export async function raceAnswerPlan({ plan, expectedRevision, itemsA, itemsB, answeredByA, answeredByB }) {
+  const c1 = await getPool().connect();
+  const c2 = await getPool().connect();
+  const keyA = opk("raceanA");
+  const keyB = opk("raceanB");
+  const out = { a: null, b: null };
+  try {
+    await c1.query(`set role ${ROLES.runtime}`);
+    await c1.query("begin");
+    const r1 = await c1.query(UPDATE_PLAN_SQL,
+      [plan, expectedRevision, jtxt(itemsA), answeredByA, keyA]);
+
+    await c2.query(`set role ${ROLES.runtime}`);
+    await c2.query("begin");
+    const p2 = c2.query(UPDATE_PLAN_SQL,
+      [plan, expectedRevision, jtxt(itemsB), answeredByB, keyB])
+      .then((r) => { out.b = { ok: true, opKey: keyB, result: r.rows[0].r }; })
+      .catch((e) => { out.b = { ok: false, opKey: keyB, code: e.code, reason: e.detail ?? e.message }; });
+
+    await c1.query("commit");
+    out.a = { ok: true, opKey: keyA, result: r1.rows[0].r };
+    await p2;
+    if (out.b?.ok) await c2.query("commit").catch((e) => { out.b = { ok: false, opKey: keyB, code: e.code }; });
+    else await c2.query("rollback").catch(() => {});
+  } finally {
+    for (const c of [c1, c2]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Raw FK targets for the K2 CHECK matrix (rig-txn idiom: entries built raw as
 // superuser with balanced lines so ONLY the constraint under test can fail).
 // ---------------------------------------------------------------------------

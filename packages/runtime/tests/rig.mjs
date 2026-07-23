@@ -197,6 +197,53 @@ export async function insertInterruption({ task, hookToken = null, question = "W
 // Root readers (bypass RLS — see every firm).
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Wave-B interview / onboarding fixtures (Gate 3 + Gate 7 e2es).
+// ---------------------------------------------------------------------------
+
+/**
+ * Birth an onboarding client + plan via the HUMAN admin lane (JWT-claims GUC) — the
+ * dashboard's begin_client_onboarding verb (clara_authenticated-only), exactly as
+ * wave-b-interview-plan-db.test.mjs's inline beginOnboarding. The caller must be an
+ * admin+ of a firm (the firm owner satisfies both this and /client/start's bookkeeper+
+ * floor). Returns { clientId, planId } (snake receipt fields normalized to camel).
+ */
+export async function beginClientOnboarding({ ownerSub, name }) {
+  const r = await fx.humanQuery(ownerSub, "select clara.begin_client_onboarding($1, $2) as receipt", [
+    name,
+    fx.opk("begin"),
+  ]);
+  const rec = r.rows[0].receipt;
+  return { clientId: rec.client_id, planId: rec.plan_id };
+}
+
+/** Root read of one onboarding plan (bypasses RLS). */
+export const readOnboardingPlan = (planId) =>
+  fx
+    .rootQuery(
+      "select id, firm_id, client_id, scope_kind, state, revision_n, revision_token from clara.onboarding_plans where id=$1",
+      [planId],
+    )
+    .then((r) => r.rows[0] ?? null);
+
+/** Root read of a plan's items in creation order (the post-cancel / post-resume surface). */
+export const readOnboardingPlanItems = (planId) =>
+  fx
+    .rootQuery(
+      "select item_key, item_kind, state, answer, required_for_commit from clara.onboarding_plan_items where plan_id=$1 order by created_at",
+      [planId],
+    )
+    .then((r) => r.rows);
+
+/**
+ * Root read of ONE WDK run row. The engine keys runs by `id` (the primary key; the
+ * @workflow/world-postgres schema maps runId→"id") and stores the workflow's identity
+ * (path+export) in the `name` column — e.g. workflow//./workflows/chatTurn.v6//chatTurn_v6.
+ * We DERIVE the workflowName from the row and NEVER hardcode the WDK name format.
+ */
+export const readWorkflowRun = (runId) =>
+  fx.rootQuery("select name, status from workflow.workflow_runs where id=$1", [runId]).then((r) => r.rows[0] ?? null);
+
 export const readTask = (id) => fx.rootQuery("select * from clara.agent_tasks where id=$1", [id]).then((r) => r.rows[0] ?? null);
 export const readInterruption = (id) =>
   fx.rootQuery("select * from clara.agent_interruptions where id=$1", [id]).then((r) => r.rows[0] ?? null);
