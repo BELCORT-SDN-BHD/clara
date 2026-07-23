@@ -179,7 +179,7 @@
 - *(LANDED in 0017: the ADR-031 queue envelope rank alignment — draft rows now rank by lane in `list_review_queue`'s sort tuple.)*
 - **`fail_classify` terminal writer (0018 candidate, ADR-030; NOT in 0017):** the classify lane has no DB terminal-fail path (`persist_document_extraction` refuses it; only `classify_document` settles) — the runtime caps retries at 3 attempts and `/ready` warns, but a poisoned task can never be marked failed in the DB.
 - **ComplianceWatchCard `acknowledged_at` echo:** the queue envelope doesn't carry it, so the card can't show "acknowledged ✓ at …" after an ack (the DB trail is complete; UI-only).
-- **Supavisor session headroom watch:** runtime v24 holds 9 dedicated LISTEN sessions + 17 pooled maxima (~26) against `max_connections=60` (observed ~31 steady incl. platform overhead) — re-verify before any consumer-adding wave.
+- **Supavisor session headroom watch:** runtime v25 holds 10 dedicated LISTEN sessions + 17 pooled maxima (~27) against `max_connections=60` (22 observed pre-ceremony swap) — re-verify before any consumer-adding wave.
 - **Local disposable Supabase stack** (`supabase start`) as the intended local test target — needs Docker (unavailable). Interim = a throwaway remote schema / the throwaway-PG17.6 rig + the destructive-target guards (`packages/db/lib/guard.mjs`).
 - **Server-side branch protection** on `main` — owner-only plan upgrade; the git-base freeze-lint + CI are the interim gate.
 - **SHA-pin the GitHub Actions** (mutable major tags on checkout/setup-node/pnpm) — supply-chain follow-up.

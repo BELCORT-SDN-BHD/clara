@@ -38,7 +38,7 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > sales-direction autopost lift, purchase SST visibility split, doc-type
 > classifier gate) — is **CLOSED** (ADR-030, owner ruling **WA21-R13**; contract
 > `docs/plan/wave-a2.1-contract.md` v1.0, ADR-028; PRs #51–#61). **The 0016 deploy
-> ceremony EXECUTED 2026-07-23** (owner-`!`-gated): live Supabase now at **16
+> ceremony EXECUTED 2026-07-23** (owner-`!`-gated): it took live Supabase to **16
 > migrations (0001→0016)**, Fly `clara-runtime` **v24** (image `a21-v24`) running
 > `chatTurn_v6` + `autoDraft_v2` + the three new consumers (`sst_watch`,
 > `facts_gate`, `classify`) — **8 consumer loops** total; the in-migration audited
@@ -55,17 +55,23 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > `other`. **Gates S/P are FOLLOW-ON eval items, deferred to real documents** (never
 > synthetic): **S** needs ≥3 post-0016 credit sightings + a real MyInvois XML, **P**
 > needs a real SST-stated bill — both ride the next real document cycle.
-> **Wave B is MID-BUILD (2026-07-23):** the design contract
-> `docs/plan/wave-b-contract.md` v1.0 is ratified LAW (ADR-032, owner rulings
-> WB-R1..R18: `onboarding` client status, the tick-list seeding ceremony, F3
-> split-by-layer, atomic set approval, the wiki authority boundary, purpose-gated
-> pack v4, ONE ceremony → runtime v25 with chatTurn_v7 + wiki-aware autoDraft_v3,
-> close gates O/K/W2/L/R2/F on REAL documents). The **DB heart — migration 0017 —
-> is MERGED UNDEPLOYED** (ADR-033, PR #67; 55-pin design, 8 adjudicated forks, a
-> 179-cell contract-blind battery, a six-round cross-model ratchet to RESOLVED;
-> evidence `docs/plan/research/wave-b/`). Remaining: the v25 runtime lanes → the
-> dashboard lanes → the WB-R18 deploy ceremony → the live eval. Waves **C–G**
-> below are unchanged; the S/P follow-on eval rides the next real document cycle.
+> **Wave B is DEPLOYED (2026-07-24, ADR-036):** the ratified contract v1.0
+> (ADR-032, WB-R1..R18) shipped in full — migration **0017** (ADR-033, blind
+> lanes + a six-round cross-model ratchet), the **v25 runtime lanes** (ADR-034:
+> chatTurn_v7/autoDraft_v3 on the purpose+GUC-gated pack v4, the durable
+> interview family, the cold-start-gated wiki_projection consumer, the lint
+> belt), and the **dashboard surfaces + document parse lanes** (ADR-035, settled
+> by a research sweep + a Codex Socratic debate; the freeze-lint deploy-lock).
+> The **WB-R18 ceremony EXECUTED 2026-07-24** (owner-confirmed): **live =
+> Supabase 17 migrations · Fly `clara-runtime:wave-b-v25`** (ten loops,
+> WIKI_PROJECTION acquired, /ready 200); wiki backfill 30/30; every post-verify
+> probe green (pack dark/lit, replay byte-identical, sightings unchanged, F10
+> serializable via PostgREST); the freeze manifest fully deploy-locked. Evidence:
+> `docs/plan/research/wave-b/` + `docs/ops/wave-b-ceremony-runbook.md`.
+> **Remaining of Wave B: ONLY the live gates O/K/W2/L/R2/F on REAL documents**
+> (WB-R16/R17: the real second client's takeover pack + RPR's management
+> accounts → `bootstrap_client_plan` → B-12; never synthetic). Waves **C–G**
+> below are unchanged; the S/P follow-on eval rides the same real-document window.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
