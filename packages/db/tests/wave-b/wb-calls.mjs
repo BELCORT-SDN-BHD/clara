@@ -3,9 +3,45 @@
 // migration. Re-exports wb-helpers so a test file imports ONE leaf.
 // [AMB-n] markers refer to the ambiguity ledger in wb-helpers.mjs.
 
-import { ROLES, rootQuery, roleQuery, humanQuery, opk, jtxt } from "./wb-helpers.mjs";
+import { randomUUID } from "node:crypto";
+import {
+  ROLES, rootQuery, roleQuery, humanQuery, opk, jtxt, shaHex, publishWikiPage,
+} from "./wb-helpers.mjs";
 
 export * from "./wb-helpers.mjs";
+
+// ---------------------------------------------------------------------------
+// Observed-blocking wait helper (mirrors rig-runtime-race.mjs's waitBlockedBy
+// convention: pg_blocking_pids resolves the tuple/lock chain; wait_event_type
+// ='Lock' proves a genuine wait, not a scheduling artifact). Lives here
+// (not wb-fixtures.mjs) to stay under the repo's 500-line-per-module lint
+// convention. Unlike the silent-false rig helper, this one FAILS LOUDLY on
+// timeout — a race driver that never proves the block proves nothing about
+// the interleaving it claims to test.
+// ---------------------------------------------------------------------------
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+/** Poll (bounded, default ~5s / 25ms) until backend `pid` is observably
+ *  WAITING (wait_event_type='Lock') on a lock held by `blockerPid`. Throws
+ *  on timeout instead of returning false — callers want the race PROVEN, not
+ *  merely attempted. */
+export async function waitBlockedByOrThrow(pid, blockerPid, {
+  timeoutMs = 5000, intervalMs = 25, what = "the row lock",
+} = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const r = await rootQuery(
+      "select wait_event_type as wet, pg_blocking_pids(pid) as blockers from pg_stat_activity where pid = $1",
+      [pid],
+    );
+    const row = r.rows[0];
+    if (row && row.wet === "Lock" && (row.blockers || []).map(Number).includes(Number(blockerPid))) return true;
+    await sleep(intervalMs);
+  }
+  throw new Error(
+    `waitBlockedByOrThrow: backend ${pid} never observably blocked on ${what} (held by ${blockerPid}) within ${timeoutMs}ms`);
+}
 
 // ---------------------------------------------------------------------------
 // Block-K wrappers
@@ -233,4 +269,74 @@ export async function seedWikiCheckpoint(firm, lastSeq) {
   await rootQuery(
     `insert into clara.relay_checkpoints(consumer, firm_id, last_seq) values ('wiki_projection', $1, $2)
      on conflict (consumer, firm_id) do update set last_seq = excluded.last_seq`, [firm, lastSeq]);
+}
+
+// ---------------------------------------------------------------------------
+// [GATE 5] A firm-A vendor + ONE coding_rules row — the cross-firm
+// sign_coding_rule probe target. Any status/type works: the CLR11 firm-check
+// in sign_coding_rule (0016:3093) precedes every status/type check, so a
+// 'proposed' vendor_account row is a sufficient, minimal target.
+// ---------------------------------------------------------------------------
+
+export async function stageFirmAProbeRule(sub, { firm, client, accountCode }) {
+  const name = "WB Crossfirm Probe Vendor SDN BHD";
+  const cp = (await rootQuery(
+    `insert into clara.counterparties(firm_id,client_id,kind,name,name_normalized,created_by)
+     values ($1,$2,'vendor',$3,$4,$5) returning id`,
+    [firm, client, name, name.toLowerCase().replace(/[^a-z0-9]/g, ""), sub])).rows[0].id;
+  const contentHash = shaHex(`crossfirm-probe-rule:${randomUUID()}`);
+  const rule = (await rootQuery(
+    `insert into clara.coding_rules(firm_id,client_id,rule_type,counterparty_id,account_code,status,pinned,origin,content_hash,created_by)
+     values ($1,$2,'vendor_account',$3,$4,'proposed',false,'authored',$5,$6) returning id`,
+    [firm, client, cp, accountCode, contentHash, sub])).rows[0].id;
+  return rule;
+}
+
+// ---------------------------------------------------------------------------
+// [GATE 6] Large-corpus proof fixtures — TRUE default budgets, never
+// setBudget. seedWikiCorpus publishes a deterministic, byte-exact ASCII
+// corpus; expectedPackWindow replicates the get_context_pack v4 wiki-block
+// CTE EXACTLY (0017:5029-5066): priority map, (priority,updated_at desc,slug)
+// order, a running-bytes prefix cutoff. Reads the DB-assigned updated_at back
+// (root, epoch double — tie-safe past JS Date's millisecond truncation).
+// ---------------------------------------------------------------------------
+
+/** Publish `pages` ({slug,page_kind,bytes}) for `client` with deterministic
+ *  ASCII content of EXACT byte length ('#'+'x'.repeat(bytes-1)). Counterparty-
+ *  kind pages get `counterparty` (the W1 CHECK requires counterparty_id for
+ *  page_kind='counterparty'). Returns [{slug,page_kind,bytes,content,updatedAt}]. */
+export async function seedWikiCorpus(client, firm, { counterparty, pages }) {
+  const model = [];
+  for (const p of pages) {
+    const content = "#" + "x".repeat(p.bytes - 1);
+    const opts = { client, firm, slug: p.slug, pageKind: p.page_kind, title: p.slug, content };
+    if (p.page_kind === "counterparty") opts.counterparty = counterparty;
+    await publishWikiPage(opts);
+    const ts = (await rootQuery(
+      "select extract(epoch from updated_at) as ts from clara.wiki_pages where client_id=$1 and slug=$2",
+      [client, p.slug])).rows[0].ts;
+    model.push({ slug: p.slug, page_kind: p.page_kind, bytes: p.bytes, content, updatedAt: Number(ts) });
+  }
+  return model;
+}
+
+const WIKI_PACK_PRIORITY = {
+  profile: 1, period_context: 2, treatment: 3, recurring_pattern: 4, counterparty: 5,
+};
+
+/** Replicate the DB's budgeted-window selection over a seedWikiCorpus model.
+ *  Returns the ordered included [{slug,content}] — a strict prefix cutoff
+ *  (running bytes is monotone), never a partial page. */
+export function expectedPackWindow(model, { pageCap, byteCap }) {
+  const ranked = model
+    .map((p) => ({ ...p, priority: WIKI_PACK_PRIORITY[p.page_kind] ?? 6 }))
+    .sort((a, b) => a.priority - b.priority || b.updatedAt - a.updatedAt
+      || (a.slug < b.slug ? -1 : a.slug > b.slug ? 1 : 0));
+  let running = 0;
+  const out = [];
+  ranked.forEach((r, i) => {
+    running += Buffer.byteLength(r.content, "utf8");
+    if (i + 1 <= pageCap && running <= byteCap) out.push({ slug: r.slug, content: r.content });
+  });
+  return out;
 }

@@ -11,7 +11,7 @@ import {
   ROLES, rootQuery, humanQuery, opk, getPool, jtxt,
   buildWorld, insertUser, addMember, createClient, upsertAccountClassed,
   filedDocument, freshResolution,
-  beginOnboarding, draftOpeningItem, createOpeningSeed, planRow,
+  beginOnboarding, draftOpeningItem, createOpeningSeed, planRow, waitBlockedByOrThrow,
 } from "./wb-calls.mjs";
 import { withTxn } from "../rig-txn.mjs";
 
@@ -395,6 +395,61 @@ export async function racePublishPages({ firm, client, slugA, slugB }) {
     out.a = { ok: true };
     await p2;
     if (out.b?.ok) await c2.query("commit").catch((e) => { out.b = { ok: false, code: e.code }; });
+    else await c2.query("rollback").catch(() => {});
+  } finally {
+    for (const c of [c1, c2]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// [GATE 1] Two-session race against update_onboarding_plan (the ANSWER half of
+// the O5 concurrency story). Mirrors racePublishPages, NOT raceOpeningApproval:
+// update_onboarding_plan is granted clara_runtime ONLY (WB_ACL) and has NO
+// transaction_isolation assertion — it serializes on a FOR UPDATE row-lock +
+// revision_token CAS (0017:2643 FOR UPDATE -> 2655-2660 CLR06 stale_plan), not
+// SSI. PLAIN `begin` (READ COMMITTED) on both sessions; c1 takes the lock and
+// rotates the token uncommitted, c2 fires with the SAME expected_revision but a
+// DIFFERENT op_key (fired WITHOUT awaiting — it blocks on c1's row lock), c1
+// commits, then c2 is awaited and re-reads the rotated token -> CAS-fails.
+// ---------------------------------------------------------------------------
+
+const UPDATE_PLAN_SQL =
+  `select clara.update_onboarding_plan(p_plan => $1, p_expected_revision => $2,
+     p_items => $3::jsonb, p_answered_by => $4, p_op_key => $5) as r`;
+
+export async function raceAnswerPlan({ plan, expectedRevision, itemsA, itemsB, answeredByA, answeredByB }) {
+  const c1 = await getPool().connect();
+  const c2 = await getPool().connect();
+  const keyA = opk("raceanA");
+  const keyB = opk("raceanB");
+  const out = { a: null, b: null };
+  try {
+    const pid1 = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await c1.query(`set role ${ROLES.runtime}`);
+    await c1.query("set statement_timeout = '15s'"); // hang bound only
+    await c1.query("begin");
+    const r1 = await c1.query(UPDATE_PLAN_SQL,
+      [plan, expectedRevision, jtxt(itemsA), answeredByA, keyA]);
+    const pid2 = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
+    await c2.query(`set role ${ROLES.runtime}`);
+    await c2.query("set statement_timeout = '15s'"); // hang bound only
+    await c2.query("begin");
+    const p2 = c2.query(UPDATE_PLAN_SQL,
+      [plan, expectedRevision, jtxt(itemsB), answeredByB, keyB])
+      .then((r) => { out.b = { ok: true, opKey: keyB, result: r.rows[0].r }; })
+      .catch((e) => { out.b = { ok: false, opKey: keyB, code: e.code, reason: e.detail ?? e.message }; });
+    // OBSERVED BLOCKING before A commits: prove B is genuinely parked on A's held lock.
+    await waitBlockedByOrThrow(pid2, pid1, { what: "the onboarding_plans row lock" });
+    await c1.query("commit");
+    out.a = { ok: true, opKey: keyA, result: r1.rows[0].r };
+    await p2;
+    if (out.b?.ok) await c2.query("commit").catch((e) => { out.b = { ok: false, opKey: keyB, code: e.code }; });
     else await c2.query("rollback").catch(() => {});
   } finally {
     for (const c of [c1, c2]) {

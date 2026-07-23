@@ -250,3 +250,101 @@ test("O8 row 13: a rule live PRE-activation drives ZERO autodraft activity until
   const rows = await listDocumentAutodraftCandidates({ document: filing.documentId });
   assert.equal(rows.length, 0, "the live seeded rule cannot surface an onboarding client to the sweep (rides O8 row 2)");
 });
+
+// ===========================================================================
+// GATE 2 memo (docs/plan/research/wave-b/0017-asbuilt-reference.md:207,241) —
+// Option 1 (ratify-as-is): tick_seeding_proposal is an INDEPENDENT
+// per-item-transaction ceremony (0017_wave_b.sql:4407-4543); the dashboard
+// caller already re-queries proposal/batch state after every action
+// (seedingApi.ts / SeedingBatchView.tsx) rather than trusting an in-memory
+// resume token. This proves the "abandon-resume" shape end-to-end.
+// ===========================================================================
+
+test("S4 GATE-2 (0017-asbuilt-reference.md:207,241, Option 1): abandon-resume — tick K of N proposals, simulate a crash/abandon, reload via the normal readers, resume the remaining N-K with FRESH op_keys; no double-tick, no lost proposal, the batch completes", async () => {
+  fail0017(live);
+  const b4r = await createSeedingBatch({
+    client: onb.client, document: glDoc.documentId,
+    proposals: [
+      { ...P.vendor, proposal_key: "gate2:v1", payload: { name: "GATE2 VENDOR ONE SDN BHD", account_code: WB_COA.expense } },
+      { ...P.birth, proposal_key: "gate2:b1", payload: { name: "GATE2 BIRTH ONE SDN BHD", kind: "vendor" } },
+      { ...P.wiki, proposal_key: "gate2:w1" },
+      { ...P.birth, proposal_key: "gate2:b2", payload: { name: "GATE2 BIRTH TWO SDN BHD", kind: "vendor" } },
+    ],
+    opKey: opk("gate2batch"),
+  });
+  const batch4 = b4r.batch_id ?? b4r.id;
+  const rows0 = await proposalRows(batch4);
+  assert.equal(rows0.length, 4, "N=4 proposals landed");
+  const byKey = Object.fromEntries(rows0.map((p) => [p.proposal_key, p]));
+
+  // Tick K=2 of N=4, each its OWN transaction with its OWN op_key (S4's
+  // per-item ceremony) — THEN simulate a crash/abandon: just stop. There is
+  // no in-flight parent reservation to leak (S1/S3's per-item shape).
+  const keyA = opk("gate2tickA");
+  const keyB = opk("gate2tickB");
+  const r1a = await tickProposal(w.users.hana, { proposal: byKey["gate2:v1"].id, opKey: keyA });
+  await tickProposal(w.users.hana, { proposal: byKey["gate2:b1"].id, opKey: keyB });
+
+  // Reload via the NORMAL readers — the abandon-resume contract: no special
+  // resume state, the caller just re-queries what's still open (the exact
+  // SeedingBatchView.tsx self-hydrating idiom).
+  const midRows = await proposalRows(batch4);
+  const alreadyTicked = midRows.filter((p) => p.state === "ticked");
+  const stillOpen = midRows.filter((p) => p.state === "proposed");
+  assert.equal(alreadyTicked.length, 2, "K=2 already ticked, durably (survives the simulated abandon)");
+  assert.equal(stillOpen.length, 2, "N-K=2 remain 'proposed' for the resume to pick up");
+
+  // Resume: tick the remaining N-K with FRESH op_keys — never reusing the
+  // abandoned run's keys (a genuine resume, not a same-op replay).
+  for (const p of stillOpen) {
+    await tickProposal(w.users.hana, { proposal: p.id, opKey: opk("gate2resume") });
+  }
+
+  const finalRows = await proposalRows(batch4);
+  assert.equal(finalRows.filter((p) => p.state === "ticked").length, 4,
+    "all N=4 proposals ticked exactly once — no lost proposal");
+  assert.ok(finalRows.every((p) => p.state === "ticked"), "no proposal stuck 'proposed' after the resume");
+  for (const key of ["gate2:v1", "gate2:b1"]) {
+    const mid = midRows.find((p) => p.proposal_key === key);
+    const final = finalRows.find((p) => p.proposal_key === key);
+    assert.equal(final.decided_at, mid.decided_at, `${key} was NOT re-ticked by the resume (decided_at unchanged — no double-tick)`);
+    assert.equal(final.resulting_rule_id ?? null, mid.resulting_rule_id ?? null, `${key}'s lineage is untouched by the resume`);
+  }
+
+  // WB-R19 lost-ACK pair (ruling-batch-adr-037.md WB-R19) — both probed while
+  // batch4 is STILL open, so each hits the PROPOSAL guard specifically
+  // (0017_wave_b.sql:4428-4435 checks batch state THEN proposal state;
+  // completing the batch first would collapse (ii) onto batch_not_open
+  // instead of proving the proposal_not_open guard on its own).
+
+  // (i) same-key replay of an ALREADY-COMPLETED tick (gate2:v1, ticked above
+  // with keyA) — _reserve_op's dedupe short-circuits BEFORE any state check
+  // (4425-4427), returning the stored result byte-identically; ticked exactly
+  // once, no double side effects (no extra coding_rules row minted).
+  const rulesBeforeReplay = (await codingRuleRows(onb.client)).length;
+  const replayA = await tickProposal(w.users.hana, { proposal: byKey["gate2:v1"].id, opKey: keyA });
+  assert.equal(JSON.stringify(replayA), JSON.stringify(r1a),
+    "same-key replay of an ALREADY-COMPLETED tick is byte-identical to the original receipt");
+  assert.equal((await codingRuleRows(onb.client)).length, rulesBeforeReplay,
+    "the replay mints ZERO additional coding_rules rows (no double side effects)");
+  assert.equal((await proposalRows(batch4)).find((p) => p.proposal_key === "gate2:v1").state, "ticked",
+    "gate2:v1 remains ticked exactly once after the same-key replay");
+
+  // (ii) premature fresh-key retry against an already-ticked proposal → a
+  // TYPED refusal: CLR34 (exported here as CLR33 — the as-built code shift),
+  // detail reason proposal_not_open (0017_wave_b.sql:4432-4435) — NOT a
+  // silent success, NOT a same-op replay (this op_key was never used before).
+  const beforeRetry = (await proposalRows(batch4)).find((p) => p.proposal_key === "gate2:v1");
+  const retryErr = await assertRaises(CLR33, () => tickProposal(w.users.hana,
+    { proposal: byKey["gate2:v1"].id, opKey: opk("gate2premature") }),
+    "a fresh op_key retry against an already-ticked proposal");
+  assert.equal(detailReason(retryErr), "proposal_not_open",
+    "typed detail reason: proposal_not_open (batch4 is still open here, so this is the PROPOSAL guard, not batch_not_open)");
+  const afterRetry = (await proposalRows(batch4)).find((p) => p.proposal_key === "gate2:v1");
+  assert.equal(afterRetry.decided_at, beforeRetry.decided_at, "the refused fresh-key retry leaves gate2:v1's decided_at unchanged");
+  assert.equal(afterRetry.resulting_rule_id ?? null, beforeRetry.resulting_rule_id ?? null, "lineage unchanged by the refused retry");
+  assert.equal(afterRetry.state, "ticked", "gate2:v1's state is unchanged (still ticked) by the refused retry");
+
+  await completeSeedingBatch(w.users.hana, { batch: batch4, opKey: opk("gate2done") });
+  assert.equal((await batchRow(batch4)).state, "completed", "the batch completes cleanly after the abandon-resume");
+});

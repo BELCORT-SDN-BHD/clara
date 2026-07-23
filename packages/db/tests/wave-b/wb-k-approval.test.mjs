@@ -8,7 +8,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  CLR, CLR30, opk,
+  CLR, CLR30, opk, rootQuery,
   assertRaises, endPool, printLaneNotes,
   fail0017, wbEnsureReady, fnExists, detailReason,
   buildWaveBWorld, onboardingClient, seedOpeningCoa, openingDoc,
@@ -292,4 +292,170 @@ test("K11: a carry-down leaves the SST watch figures BIT-UNCHANGED; the carried 
     "provisional turnover ignores is_opening_balance entries");
   assert.equal(after12.coverage_complete, false,
     "coverage_complete flipped FALSE on the carried client (missing history surfaced) — UNCONDITIONAL");
+});
+
+// ===========================================================================
+// GATE 2 memo (docs/plan/research/wave-b/0017-asbuilt-reference.md:207,241) —
+// Option 1 (ratify-as-is): approve_opening_seed is ONE bounded serializable
+// transaction (0017_wave_b.sql:3825-4011); a mid-batch failure aborts the
+// WHOLE txn — including its _reserve_op insert (0004_governed_fns.sql:46-60)
+// — so {'pending':true} is structurally unreachable here.
+//
+// RULING WB-R19 (docs/plan/research/wave-b/ruling-batch-adr-037.md WB-R19,
+// set AFTER these cells were first built) sharpened the proof bar: a stale
+// revision on entry K+1 is caught by the CHECK loop (3913-3949) BEFORE the
+// approval loop (3959-3964) ever runs for ANY item — that is a PREFLIGHT
+// refusal, not a mid-mutation fault. The cell immediately below proves only
+// that (honestly retitled — it no longer claims to prove the mid-mutation
+// gate). The genuine mid-mutation case — a fault raised INSIDE the approval
+// loop after some entries have already mutated in-txn — is proved separately
+// by the RIG-ONLY trigger-fault cell that follows it.
+// ===========================================================================
+
+test("K5 GATE-2 PREFLIGHT (0017-asbuilt-reference.md:207,241, Option 1; WB-R19): a stale revision on one of five entries is refused by the CHECK loop BEFORE the approval loop ever runs for any item — zero approvals persist, the registry stays open, op_receipts holds no poisoned reservation, and a subsequent clean full retry succeeds end-to-end", async () => {
+  fail0017(live);
+  const o2 = await onboardingClient(w.users.hana);
+  await seedOpeningCoa(w.users.alice, o2.client);
+  const st = await stageFullSet(w.users.bob, { owner: w.users.alice, client: o2.client, plan: o2.plan, firm: w.firms.A });
+  assert.equal(st.all.length, 5, "N=5 draft entries staged (the full BEE + AR + reserves set)");
+  const goodRevs = revMapOf(st.all);
+  // Corrupt ONE entry's revision (item 3-of-5 by array position). The revision
+  // check and the approval itself are TWO SEPARATE loops in the fn body — the
+  // check-loop (3913-3949) raises on the FIRST mismatch it walks (in
+  // oi.item_key order), BEFORE the approval-loop (3959-3964) ever runs for ANY
+  // item — a PREFLIGHT refusal regardless of which array position actually
+  // carries the corruption (this cell does NOT exercise the approval loop at
+  // all; see the mid-mutation cell below for that).
+  const badRevs = { ...goodRevs };
+  badRevs[st.all[2].entry_id] = "00000000-0000-4000-8000-000000000099";
+  const key = opk("gate2fail");
+  const err = await assertRaises(CLR30, async () => approveOpeningSeed(w.users.hana, {
+    seed: st.seed, planRevision: await planRevision(o2.plan), tieSha256: st.doc.sha256,
+    entryRevisions: badRevs, opKey: key,
+  }), "a stale revision on one of five entries aborts the WHOLE batch");
+  if (detailReason(err)) assert.equal(detailReason(err), "revision_mismatch");
+
+  assert.equal((await openingApprovalRows(st.seed)).length, 0,
+    "ZERO approvals persisted — not even for entries that would have validated fine before the failure point");
+  for (const d of st.all) {
+    assert.equal((await entryRow(d.entry_id)).status, "draft", `entry ${d.entry_id} stays draft`);
+  }
+  assert.equal((await seedRegRow(st.seed)).state, "open", "the registry stays open — never partially finalized");
+
+  const receipt = await rootQuery(
+    "select count(*)::int as n from clara.op_receipts where fn='approve_opening_seed' and op_key=$1", [key]);
+  assert.equal(receipt.rows[0].n, 0,
+    "no poisoned op_receipts row survives the abort — the _reserve_op insert rolled back WITH the aborting transaction");
+
+  const retry = await approveOpeningSeed(w.users.hana, {
+    seed: st.seed, planRevision: await planRevision(o2.plan), tieSha256: st.doc.sha256,
+    entryRevisions: goodRevs, opKey: opk("gate2retry"),
+  });
+  assert.ok(retry, "a subsequent CLEAN full retry (correct revisions, a FRESH op_key) succeeds");
+  assert.equal((await seedRegRow(st.seed)).state, "finalized", "the retry finalizes the registry end-to-end");
+  assert.equal((await openingApprovalRows(st.seed)).length, st.all.length, "every entry approved on the clean retry");
+});
+
+test("K5 GATE-2 MID-MUTATION (rig-only fault injection, WB-R19): a genuine fault raised DURING the approval loop — after 2-of-5 entries have already mutated inside the txn — rolls back the WHOLE transaction (the partial work is fully reverted, no per-entry side-effect table leaks a row), op_receipts holds no poisoned reservation, and a subsequent SAME-op_key retry with IDENTICAL good args then succeeds end-to-end", async () => {
+  fail0017(live);
+  const o2 = await onboardingClient(w.users.hana);
+  await seedOpeningCoa(w.users.alice, o2.client);
+  const st = await stageFullSet(w.users.bob, { owner: w.users.alice, client: o2.client, plan: o2.plan, firm: w.firms.A });
+  assert.equal(st.all.length, 5, "N=5 draft entries staged (the full BEE + AR + reserves set)");
+  const goodRevs = revMapOf(st.all);
+  const key = opk("gate2mid");
+
+  try {
+    // Defensive pre-drop: guard against a prior failed run (this cell or an
+    // earlier crashed process) leaving the rig's fault trigger/function
+    // behind — creation below must start from a clean slate.
+    await rootQuery("drop trigger if exists _rig_k5_midmutation_fault on clara.opening_seed_approvals");
+    await rootQuery("drop function if exists clara._rig_k5_midmutation_fault()");
+
+    // RIG-ONLY fault: _approve_opening_entry's per-entry loop body
+    // (0017_wave_b.sql:3809-3820) does exactly two writes per entry — an UPDATE
+    // of clara.journal_entries.status and an INSERT into
+    // clara.opening_seed_approvals (seed_id-scoped). No event/audit emission
+    // happens per-entry: _audit (3994) and every _append_event (3997-4007) fire
+    // ONCE, only AFTER the whole per-entry loop (3959-3964) has finished for
+    // every item — so those tables are unreachable, not merely empty, when the
+    // fault lands mid-loop. opening_seed_approvals is the cleanest seed-scoped
+    // counter of "how many entries have been approved so far this txn"; a
+    // BEFORE INSERT trigger there — scoped to THIS seed only, so no other test
+    // in the (serial) battery can ever trip it — raises on the 3rd per-entry
+    // insert, i.e. after items 1-2 have genuinely mutated and before item 3's
+    // mutation completes.
+    await rootQuery(`
+      create or replace function clara._rig_k5_midmutation_fault() returns trigger
+        language plpgsql as $fault$
+      begin
+        if new.seed_id = '${st.seed}'::uuid
+           and (select count(*)::int from clara.opening_seed_approvals where seed_id = new.seed_id) >= 2
+        then
+          raise exception 'rig_fault_injection';
+        end if;
+        return new;
+      end;
+      $fault$;
+    `);
+    await rootQuery(`
+      create trigger _rig_k5_midmutation_fault
+        before insert on clara.opening_seed_approvals
+        for each row execute function clara._rig_k5_midmutation_fault();
+    `);
+
+    const seq0 = await maxSeq(w.firms.A);
+    const auditPre = await rootQuery(
+      "select count(*)::int as n from clara.audit_log where fn='approve_opening_seed' and (args->>'seed')=$1", [st.seed]);
+    assert.equal(auditPre.rows[0].n, 0, "prestate pin: no prior audit_log row for this fresh seed");
+
+    let err = null;
+    try {
+      await approveOpeningSeed(w.users.hana, {
+        seed: st.seed, planRevision: await planRevision(o2.plan), tieSha256: st.doc.sha256,
+        entryRevisions: goodRevs, opKey: key,
+      });
+    } catch (e) { err = e; }
+    assert.ok(err, "the mid-mutation fault raised — the call did not silently succeed");
+    // Assert on the injected fault's OWN identity (message + SQLSTATE) — NOT a
+    // CLR: plain plpgsql `raise exception '<msg>'` (no USING ERRCODE) carries
+    // the standard raise_exception SQLSTATE P0001.
+    assert.equal(err.code, "P0001", `the raised error is the rig's own raise_exception (P0001), not a CLR (got ${err.code})`);
+    assert.match(err.message, /rig_fault_injection/, "the raised error IS the injected fault");
+
+    assert.equal((await openingApprovalRows(st.seed)).length, 0,
+      "ZERO approvals persisted — the 2 entries that mutated before the fault are rolled back WITH the aborting transaction");
+    for (const d of st.all) {
+      assert.equal((await entryRow(d.entry_id)).status, "draft",
+        `entry ${d.entry_id} stays draft — any status='approved' mutation already applied before the fault is reverted`);
+    }
+    assert.equal((await seedRegRow(st.seed)).state, "open", "the registry stays open — never partially finalized");
+
+    const receipt = await rootQuery(
+      "select count(*)::int as n from clara.op_receipts where fn='approve_opening_seed' and op_key=$1", [key]);
+    assert.equal(receipt.rows[0].n, 0,
+      "no poisoned op_receipts row survives — the _reserve_op insert rolled back WITH the aborting transaction");
+
+    const leaked = await eventsSince(w.firms.A, seq0);
+    assert.equal(leaked.length, 0,
+      "ZERO domain_events leaked — batch_approved/entry.approved are emitted only AFTER the full per-entry loop succeeds (3994-4007), never reached here");
+
+    const auditPost = await rootQuery(
+      "select count(*)::int as n from clara.audit_log where fn='approve_opening_seed' and (args->>'seed')=$1", [st.seed]);
+    assert.equal(auditPost.rows[0].n, 0, "ZERO audit_log rows leaked — _audit() is called once, after the per-entry loop, never reached here");
+  } finally {
+    await rootQuery("drop trigger if exists _rig_k5_midmutation_fault on clara.opening_seed_approvals");
+    await rootQuery("drop function if exists clara._rig_k5_midmutation_fault()");
+  }
+
+  // SAME op_key K, IDENTICAL args: the failed txn left no reservation to
+  // collide with (_reserve_op's insert rolled back with it), so this is a
+  // fresh attempt from the DB's perspective and must succeed end-to-end.
+  const retry = await approveOpeningSeed(w.users.hana, {
+    seed: st.seed, planRevision: await planRevision(o2.plan), tieSha256: st.doc.sha256,
+    entryRevisions: goodRevs, opKey: key,
+  });
+  assert.ok(retry, "the SAME op_key K, IDENTICAL args, now succeeds");
+  assert.equal((await seedRegRow(st.seed)).state, "finalized", "the retry finalizes the registry end-to-end");
+  assert.equal((await openingApprovalRows(st.seed)).length, st.all.length, "every entry approved on the retry (approvals = 5)");
 });

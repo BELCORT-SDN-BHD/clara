@@ -246,6 +246,33 @@ jobs:
           WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_intake_ci" \
             node tests/intake-e2e.mjs
 
+      # Wave-B rig-confined fault gates (§4 of the contract): the three STANDALONE runtime e2es
+      # (NOT collected by `node --test`, so wired explicitly like intake-e2e above). Gate 3 —
+      # interview cancel/kill/complete through the REAL WDK engine (interview-e2e.mjs boots the
+      # world in-process; interview-kill-resume-e2e.mjs SPAWNS scripts/serve.mjs so the engine
+      # can be SIGKILLed mid-park and respawned on the same DB). Gate 7 — the v25 chatTurn_v6→v7
+      # cutover with parked runs + the executable rollback preflight. Own throwaway DB
+      # clara_wave_b_ci (matches the guard's *_ci ephemeral pattern) with the WDK world bootstrap
+      # (the SAME idempotent `bootstrap` bin the intake-e2e step runs); PGHOST/PGPORT/PGPASSWORD
+      # come from the job env. Each e2e owns its lifecycle and exits.
+      - name: Wave-B rig-confined fault-gate e2es (Gate 3 + Gate 7, isolated DB + world bootstrap)
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wave_b_ci'
+          PGDATABASE=clara_wave_b_ci pnpm db:migrate
+          PGDATABASE=clara_wave_b_ci pnpm db:seed
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+            pnpm --filter @clara/runtime exec bootstrap
+          cd packages/runtime
+          PGDATABASE=clara_wave_b_ci \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+            node tests/interview-e2e.mjs
+          PGDATABASE=clara_wave_b_ci \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+            node tests/interview-kill-resume-e2e.mjs
+          PGDATABASE=clara_wave_b_ci \
+          WORKFLOW_POSTGRES_URL="postgres://postgres@localhost:5432/clara_wave_b_ci" \
+            node tests/version-cutover-e2e.mjs
+
       - name: DR backup/restore self-test (ephemeral postgres:17)
         run: pnpm --filter @clara/db dr:selftest
 
