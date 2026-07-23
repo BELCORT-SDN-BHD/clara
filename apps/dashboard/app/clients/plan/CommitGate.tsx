@@ -19,8 +19,10 @@ import { OpeningDryRunCard } from "../../shared/cards/OpeningDryRunCard";
 import type { CommitReadiness, CommitRefusal } from "./model";
 import styles from "./plan.module.css";
 
-// The documented manual admission ceremony (F15 target — read-only reference, no mutation).
-const OPS_DOCS_HREF = "https://github.com/BELCORT-SDN-BHD/clara/tree/main/docs/ops";
+// The documented manual admission ceremony (F15 target — read-only reference, no mutation;
+// ruling WB-R22/ADR-037: the temp-admin lane with the non-contributor precondition).
+const OPS_DOCS_HREF =
+  "https://github.com/BELCORT-SDN-BHD/clara/blob/main/docs/ops/onboarding-admission-ceremony.md";
 
 const BLOCKER_COPY: Record<string, string> = {
   plan_not_open: "The plan is not open (already committed or cancelled).",
@@ -97,7 +99,7 @@ export function CommitGate(props: {
           This cannot be resolved by granting a temporary admin from this screen — follow the documented manual
           admission ceremony instead.
           <div className={styles.resolveRow}>
-            <a className={styles.linkButton} href={OPS_DOCS_HREF} target="_blank" rel="noreferrer">Manual admission ceremony (docs/ops) →</a>
+            <a className={styles.linkButton} href={OPS_DOCS_HREF} target="_blank" rel="noreferrer">Manual admission ceremony (the WB-R22 runbook) →</a>
           </div>
         </div>
       ) : refusal && refusal.kind === "other" ? (
