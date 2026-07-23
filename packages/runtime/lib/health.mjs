@@ -21,6 +21,7 @@ import { rulePostHealth } from "./rule-post.mjs";
 import { sstWatchHealth } from "./sst-watch.mjs";
 import { factsGateHealth } from "./facts-gate.mjs";
 import { classifyHealth } from "./classify.mjs";
+import { wikiProjectionHealth } from "./wiki-projection-ops.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);
@@ -226,6 +227,21 @@ export async function checkReadiness() {
             if (maxAttempts >= 3) warnings.push(`classify max attempt_count ${maxAttempts}`);
           } catch (err) {
             warnings.push(`classify_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
+          }
+
+          // wiki_projection consumer health -> warnings ONLY (Wave B): a stalled wiki projection
+          // must never take chat traffic down, and /ready NEVER gates on wiki freshness (WB-R3 —
+          // projection lag is surfaced in the pack; books_version stays the authoritative token).
+          // Queries pre-0017-safe spine tables only, so it is safe before 0017 is applied.
+          try {
+            const wh = await wikiProjectionHealth(c);
+            checks.wikiProjection = { ok: true, ...wh };
+            const wDead = Number(wh.pendingDeadLetters ?? wh.pending_dead_letters ?? 0);
+            const wLag = Number(wh.lag ?? 0);
+            if (wDead > 0) warnings.push(`${wDead} wiki_projection dead-letter(s)`);
+            if (wLag > 1000) warnings.push(`wiki_projection lag ${wLag}`);
+          } catch (err) {
+            warnings.push(`wiki_projection_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }
         } else {
           checks.world = { enabled: false };

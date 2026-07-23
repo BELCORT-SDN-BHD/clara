@@ -16,6 +16,7 @@ import { startRulePostLoop } from "../lib/rule-post.mjs";
 import { startSstWatchLoop } from "../lib/sst-watch.mjs";
 import { startFactsGateLoop } from "../lib/facts-gate.mjs";
 import { startClassifyLoop } from "../lib/classify.mjs";
+import { startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
 import { workflows } from "../workflows/registry.js";
@@ -177,11 +178,14 @@ export default definePlugin(() => {
     // dedicated LISTEN connection under its own advisory lock, structurally isolated from the
     // other consumers' leadership / readiness / heartbeat. +3 persistent sessions.
     //
-    // SUPAVISOR SESSION HEADROOM (walk the code): the process now holds NINE dedicated
+    // SUPAVISOR SESSION HEADROOM (walk the code): the process now holds TEN dedicated
     // LISTEN/persistent clients — control + leader + matcher + autodraft + local_facts +
-    // rule_post + (A2.1) sst_watch + facts_gate + classify — ON TOP OF the pooled budgets in
-    // lib/pools.mjs (5 runtime + 5 read + 2 write + 5 engine = 17). Grand total ≈ 26 sessions
-    // against the Supavisor session ceiling; the integrator MUST confirm headroom before deploy.
+    // rule_post + (A2.1) sst_watch + facts_gate + classify + (Wave B) wiki_projection — ON TOP
+    // OF the pooled budgets in lib/pools.mjs (5 runtime + 5 read + 2 write + 5 engine = 17).
+    // Grand total ≈ 27 sessions against the Supavisor session ceiling; the integrator MUST
+    // confirm headroom before deploy (WB-R18: ~26/60 today + this +1 = 27). The Wave B lint
+    // belt is a leader-phase sibling (ZERO new sessions); the interview workflows ride the WDK
+    // world (ZERO new sessions) — only wiki_projection adds a dedicated session this wave.
 
     // sst_watch consumer — the STRUCTURAL SST compliance watch. Plain group-role
     // evaluate_sst_watch(client) on each entry.approved (never blocks/touches an approval).
@@ -202,6 +206,18 @@ export default definePlugin(() => {
     const classify = startClassifyLoop({ withRuntime, log: (m: string) => console.log(m) });
     classify.done.then(() => fatal("classify loop"), (e: unknown) => fatal("classify loop", e));
     sup.stops.push(classify.stop);
+
+    // wiki_projection consumer (Wave B, migration 0017 W4) — an INDEPENDENT loop on its own
+    // dedicated LISTEN connection under the 'wiki_projection' advisory lock, structurally isolated
+    // from the other consumers' leadership / readiness / heartbeat. +1 persistent session (the
+    // TENTH dedicated client — see the Supavisor headroom walk above). It maintains the Layer-1
+    // client wiki index from the books/counterparty/consent spine (deterministic ingest +
+    // consent-gated model synthesis); a stall is a warn-only /ready signal, never chat-down, and
+    // NEVER gates on wiki freshness (WB-R3). Cold-start checkpoint seeding + backfill + orphan
+    // repair are CEREMONY items (scripts/relay.mjs wiki-backfill / wiki-repair), never boot.
+    const wikiProjection = startWikiProjectionLoop({ log: (m: string) => console.log(m) });
+    wikiProjection.done.then(() => fatal("wiki_projection loop"), (e: unknown) => fatal("wiki_projection loop", e));
+    sup.stops.push(wikiProjection.stop);
 
     // DEDICATED engine heartbeat — the ONLY writer of the 'world' beat (S4-AB7b).
     const beatMs = Number(process.env.CLARA_WORLD_BEAT_MS || 10000);

@@ -49,6 +49,30 @@
       "sha256": "ee8071f4282bc7572a8d4f2395da440941ff6c4638977887cefecf986e157d14",
       "note": ""
     },
+    "packages/runtime/workflows/autoDraft.v3.errors.ts": {
+      "sha256": "ed65612c1bda9b78736fd2e12bb0cf134af087cec92093d244f5885524299073",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v3.impl.ts": {
+      "sha256": "d2c27576652770168d4f82ec2c848ad88fc3c62ed05a5cbc4b037fe3fc7dcac9",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v3.infra.ts": {
+      "sha256": "295a5367b2349ca391946251189bec4dc0b2222f62c984cc0d9adfd10e74c6e7",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v3.prompt.ts": {
+      "sha256": "76607eb3e608205e62f7fd5f95beef5b50ffc67f2d685dcdb39658321f6310c2",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v3.tools.ts": {
+      "sha256": "8df862f0bacfde3cb23a5df07e61956cf582e364e84ad82b11c259d00699a7b1",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v3.ts": {
+      "sha256": "73990ddd927563fbabfc6bfb8feeeedfc92dcb71d2855ff0b28a9774a4c73b21",
+      "note": ""
+    },
     "packages/runtime/workflows/chatTurn.impl.ts": {
       "sha256": "015cf3c0fc5181c6706dc6f5e4e86361f419e25faf8f27f585a08a1ee23e22b6",
       "note": ""
@@ -181,6 +205,34 @@
       "sha256": "8ba6d95a2b1ce5df59fa6354ddd4984908299dfb368c0e0de264522ef0071f8a",
       "note": ""
     },
+    "packages/runtime/workflows/chatTurn.v7.errors.ts": {
+      "sha256": "212cc220f4644d7bb3e83524bda273b0ddfd56d37174a2389610a02c1f639e95",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v7.impl.ts": {
+      "sha256": "b6a56ef23af33fb8a027496b8cf6eeae72f96095c55b10434417de326eb9aae2",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v7.infra.ts": {
+      "sha256": "a5b5395e46f05d0cb4207a763dff3f2b1bfedf97ac8db861601118520e8fbc2b",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v7.prompt.ts": {
+      "sha256": "a36acd88473ef2a3e3c4b6c654a636d3a9e18d6aabee285641005069c28396ce",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v7.tools.ts": {
+      "sha256": "5a38dd923395f1d322a75091fccc468f40e9d5165568ca853c21d64fb26d651e",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v7.ts": {
+      "sha256": "10c58a9107d7c52f18d8caf3054bd4f2e4e65e2b9acf746052911e859f3148fc",
+      "note": ""
+    },
+    "packages/runtime/workflows/clientOnboarding.v1.ts": {
+      "sha256": "f0750212ec86fed812ca4f5ecff440e5894ec7ede2c174b3bf102f8d9346fd7d",
+      "note": ""
+    },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
       "note": ""
@@ -195,6 +247,26 @@
     },
     "packages/runtime/workflows/documentIngest.v1.ts": {
       "sha256": "5f9022f564ad5f78b8f49d8cd0fb31a36f1c7981f50acfd90930843a7601aa05",
+      "note": ""
+    },
+    "packages/runtime/workflows/firmInterview.v1.ts": {
+      "sha256": "9411a49d26a3d5b27a23a2f3e6d256c96174f790264c67e00e2ea93c21c2d921",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v1.core.ts": {
+      "sha256": "7ad6fd371a61d8874a041e64baa79978c86f4b933e57a4cc6785a6be1c37b3ab",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v1.questions.ts": {
+      "sha256": "04b8e616e6c967f573d03f18d781f0baf6f9415058c4fe1ec952325447a4ebee",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v1.steps.ts": {
+      "sha256": "7853953fb9b9d369e1ea59c0f03a5157baa87bc555217f6662224a409d509b2f",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v1.writer.ts": {
+      "sha256": "28c93bb7a7be8c0bcb2d059930c385d64bf76704df623f9626438c935a171582",
       "note": ""
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
