@@ -112,7 +112,7 @@ Gates S/P deferred to REAL documents (PART 2). **Wave B**: the design contract
 blind lanes (a 179-cell contract-blind battery, SQL-unread) and a SIX-round
 cross-model adversarial ratchet to RESOLVED; evidence in
 `docs/plan/research/wave-b/`. **Live posture: Supabase 16 migrations · Fly
-`clara-runtime` v24 (chatTurn_v6/autoDraft_v2, 8 loops) · dashboard Pages
+`clara-runtime:wave-b-v25` (chatTurn_v7/autoDraft_v3, ten loops) · dashboard Pages
 `app.clarabook.com` auto-deploys from `main` · `clara-backup` daily (rclone
 1.74.4, zero-501-proven).** The **v25 runtime lanes are BUILT merged undeployed**
 (ADR-034: chatTurn_v7, wiki-aware autoDraft_v3, firmInterview_v1/
