@@ -3,51 +3,63 @@
   "workflows": {
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {
       "sha256": "382e1fc75eef8159ba1fc7465c6f7d7858c51a6bd533aaa750d99667a3c87187",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v1.impl.ts": {
       "sha256": "b058660ad126ea257a68491beeb11437bc64783e2046f4dc3f797d5d1ffacd2f",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v1.infra.ts": {
       "sha256": "1f6f7505abe8bc2efe9a6339b6050cefd3c6f275e41ca680f50655270dff72b3",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v1.prompt.ts": {
       "sha256": "3b5f4956667012782d250accdc59477b1707fe3ec906396eb84551c213b7dc9e",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v1.tools.ts": {
       "sha256": "3d072895618c9355c219fa42fb1badf699c5492e58c5837f5fb6bb1bc8c27538",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v1.ts": {
       "sha256": "24e23e6aff408392ad4bcd96dce1deab0ed3968208ce5cace32feefa935c3a48",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v2.errors.ts": {
       "sha256": "5e4a7ed4003160a98472edd2019200eff971e5198045c291e95b60a2b77472bf",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v2.impl.ts": {
       "sha256": "66382d2f95562a6d9f3613e2998aee11ab53eaa5b5289eb45fca4d7a7db66642",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v2.infra.ts": {
       "sha256": "cb5faf78bac7733a493cc15080d5011c4c079e1fbdde7151201ae20d606c665e",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v2.prompt.ts": {
       "sha256": "911a854129b4b4d45bee6fd9904d1b1e0f525721e494c657a40f7d2deeab977c",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v2.tools.ts": {
       "sha256": "3bd0d87733570f385d77a02bf5bb20aa90c662cd202b708b593f6f9fb71bd9a1",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v2.ts": {
       "sha256": "ee8071f4282bc7572a8d4f2395da440941ff6c4638977887cefecf986e157d14",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v3.errors.ts": {
       "sha256": "ed65612c1bda9b78736fd2e12bb0cf134af087cec92093d244f5885524299073",
@@ -75,135 +87,168 @@
     },
     "packages/runtime/workflows/chatTurn.impl.ts": {
       "sha256": "015cf3c0fc5181c6706dc6f5e4e86361f419e25faf8f27f585a08a1ee23e22b6",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.prompt.ts": {
       "sha256": "91ba3170c052ac0e10bba78be08d5c9a27f72d74b6903eebbfe640a057ee77da",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v1.ts": {
       "sha256": "77d58318e113af64f11ee7320aa8fc47727cf2104f233870dfe27df15df48e29",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v2.errors.ts": {
       "sha256": "b88e5124a5df2e9000f9a64ea408dae6c05cf9ee47d4a528c426af3a7391e4b5",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v2.impl.ts": {
       "sha256": "d8ec47ac070bc85cf038841095ee84b0f1eb2f84f85c194789f781724b3fea41",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v2.infra.ts": {
       "sha256": "2360eabbb39f27865244bd0c42ff8ac01d72abf6fef8febc3394f01f180bcd8d",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v2.prompt.ts": {
       "sha256": "db5c70767fbf87d55cf18226abf22e91dc7e3c96266ff58055f089e11b79b3f9",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v2.tools.ts": {
       "sha256": "ac64bc953c760a5e7dc523fb42ef69588e220e13499106ddf3c1bbc40e1e7c73",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v2.ts": {
       "sha256": "db48b6f38bc1facca4651d79d7ba0f19f333835dcc49919ec05c1d45f1714311",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v3.errors.ts": {
       "sha256": "ab2b374a20443976058c5b90ee601d6e7c25226c8191ac36d8959372a85628cb",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v3.impl.ts": {
       "sha256": "e0279dcfcc47ef3ea4059b0ea277eb7d937388b5703eba073237ea5e636d7e76",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v3.infra.ts": {
       "sha256": "32572dd1314483dd90aa75db2ba697c531fdc09667df6820106e5b06dd64a89c",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v3.prompt.ts": {
       "sha256": "255bbb498a4eb0a601309ee9e6cc98a5750aa15dadd2a8b1554cedaefcd840a3",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v3.tools.ts": {
       "sha256": "b962fbd354ef45a6317a95610f1946d767dbea689be53dd8c87ca769fcdd8eab",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v3.ts": {
       "sha256": "4cd17a0d09a305272936dacf25d8e73b463cfd2fd7a0bf0b58bae1995951b6d6",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v4.errors.ts": {
       "sha256": "5430a356e5d5454d2328ca14cc199ef46ae8a4757f252cdb7726d594163d5e4d",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v4.impl.ts": {
       "sha256": "66b1f02bcaa1fa9885f27d38a881ffe4865c6769137dcb3317915d46681c0f68",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v4.infra.ts": {
       "sha256": "c3b3ad14336e3fadd8415d3cac9c544b8cf7cd319f96f57214feec6da77844bd",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v4.prompt.ts": {
       "sha256": "fd06a9382ffbe8a40125f1e648daf0c39373f143c1de051eb778303cca6b478e",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v4.tools.ts": {
       "sha256": "ae3504c68630df814e4b08004f73bf95577c10de61aebe93eb1552134c5e7133",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v4.ts": {
       "sha256": "2c1ce2bc2fc2e3dfd57fe31ade6c5fe20f7c5ae4790412bf0f314c917f5d39d1",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v5.errors.ts": {
       "sha256": "e8d1163db8ed2dd922a19a80292d9e752e0528de11d3471337f58468766441a4",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v5.impl.ts": {
       "sha256": "191b2615736bf5e26ee0c518c95036d091669936aac1795b4030cc4a51ada442",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v5.infra.ts": {
       "sha256": "2e9e3a03c2ee7ce4840a8b0d2cc92996722f8fb856a5ba3402cc7e0f1817802d",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v5.prompt.ts": {
       "sha256": "12f8e65b11f040703e3656ec98cc9c5c5e7afa4438d33c3255b96eb6954a6dae",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v5.tools.ts": {
       "sha256": "ac47731958b6b57fcc034a09982498345f3864b2157bb73e6e8b66c797521f55",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v5.ts": {
       "sha256": "33fba2194b573d0fd9f8555f0cbb4de2792c01da2fdb3cb9f3921c176548c9ff",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v6.errors.ts": {
       "sha256": "b036351a22360c76f56af5959ae32b4ca0769a0c2e878d90334d472dd47b8203",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v6.impl.ts": {
       "sha256": "ab5dfe9d85e0f4202596cc9868dc68ed02eefd4858ab31606386d68d6f16343f",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v6.infra.ts": {
       "sha256": "955256a34d5e59293ac9f03cf8e9ee1391f44c3c73f8f8b931509033358d784a",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v6.prompt.ts": {
       "sha256": "f8e1ff662cb0f0724e023a2eb3755d260e60fe99fe1e6b3eff5254a6eeea2e77",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v6.tools.ts": {
       "sha256": "91eb202600d1c525cd3154e2ca8e218e83ca732eaa021719e3337f98729b76ea",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v6.ts": {
       "sha256": "8ba6d95a2b1ce5df59fa6354ddd4984908299dfb368c0e0de264522ef0071f8a",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v7.errors.ts": {
       "sha256": "212cc220f4644d7bb3e83524bda273b0ddfd56d37174a2389610a02c1f639e95",
@@ -230,31 +275,35 @@
       "note": ""
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
-      "sha256": "f0750212ec86fed812ca4f5ecff440e5894ec7ede2c174b3bf102f8d9346fd7d",
+      "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",
       "note": ""
     },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/documentIngest.behavior.mjs": {
       "sha256": "7306c457c553ddc57c0b90871f444326c75b1ec1763ca2bd5063183d9d02f07f",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/documentIngest.impl.ts": {
       "sha256": "cded76b08c88f1937a2a5580eee3aa4bd3b23ccd014fbd335521fa7fcbf2007e",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/documentIngest.v1.ts": {
       "sha256": "5f9022f564ad5f78b8f49d8cd0fb31a36f1c7981f50acfd90930843a7601aa05",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/firmInterview.v1.ts": {
-      "sha256": "9411a49d26a3d5b27a23a2f3e6d256c96174f790264c67e00e2ea93c21c2d921",
+      "sha256": "bf7c1a5b1914c8493d378a5c75129d76c6660e3ff64f6cf47bfeabb58d5517e7",
       "note": ""
     },
     "packages/runtime/workflows/interview.v1.core.ts": {
-      "sha256": "7ad6fd371a61d8874a041e64baa79978c86f4b933e57a4cc6785a6be1c37b3ab",
+      "sha256": "8a4d79337256050dac239d1165e87e778a2f4ee584464c9a56f2981791e23c54",
       "note": ""
     },
     "packages/runtime/workflows/interview.v1.questions.ts": {
@@ -262,7 +311,7 @@
       "note": ""
     },
     "packages/runtime/workflows/interview.v1.steps.ts": {
-      "sha256": "7853953fb9b9d369e1ea59c0f03a5157baa87bc555217f6662224a409d509b2f",
+      "sha256": "f0bc0a0910367d586037f2988f8ef3ecd5c3ee775c2d639099d45b472dfbcff7",
       "note": ""
     },
     "packages/runtime/workflows/interview.v1.writer.ts": {
@@ -271,19 +320,23 @@
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
       "sha256": "f2d3ef98ed9ce533d04252fd5771e463b017c8b66c77ec70d74a457f534bd7b1",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/invoiceFacts.v1.impl.ts": {
       "sha256": "f2f9338f98bb174ceff4bb0666a7979deb03855f55fbd85510c1c31e5d698e5b",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/invoiceFacts.v1.ts": {
       "sha256": "c7af91489397dbf0d64b55562edac5bf2ecd019ede5fab94871858f6b9b98334",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/steps.ts": {
       "sha256": "ffaf17b5787f4238c54da8e79959acc591d7bb7b4ec55e0c3da614b8d286da52",
-      "note": ""
+      "note": "",
+      "deployed": true
     }
   }
 }

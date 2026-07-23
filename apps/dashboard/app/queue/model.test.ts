@@ -18,7 +18,7 @@ function mkRow(p: Partial<QueueRow>): QueueRow {
     filing_id: null, entry_id: "e1", question_id: null, task_id: null, document_id: null,
     lane: null, auto: false, rule_backed: false, high_stakes: false, aged_since: null,
     amount_cents: null, period: null, question_text: null, created_at: null, id: "row1",
-    coding_kind: null, watch_id: null, tier: null, ...p,
+    coding_kind: null, watch_id: null, tier: null, finding_id: null, ...p,
   };
 }
 

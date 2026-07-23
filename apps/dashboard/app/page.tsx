@@ -19,6 +19,18 @@ export default function Home() {
       <p>
         <a href="/queue">Review queue (Wave-A daily loop)</a>
       </p>
+      <p>
+        <a href="/onboarding">Onboarding (Wave-B interviews: firm + client)</a>
+      </p>
+      <p>
+        <a href="/clients/plan">Client plan (Wave-B plan-as-document — needs ?client_id=)</a>
+      </p>
+      <p>
+        <a href="/opening">Carry-down workbench (Wave-B opening seeds)</a>
+      </p>
+      <p>
+        <a href="/seeding">Seeding tick-list (Wave-B prior-GL ceremony)</a>
+      </p>
     </main>
   );
 }

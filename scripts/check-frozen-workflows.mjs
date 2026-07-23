@@ -45,11 +45,20 @@
 //   scripts/freeze-lint-fixtures/ — stored as .txt so eslint/tsc never parse them).
 //
 // Usage:
-//   node scripts/check-frozen-workflows.mjs          # verify (CI gate)
-//   node scripts/check-frozen-workflows.mjs --update  # re-baseline (local only)
+//   node scripts/check-frozen-workflows.mjs                  # verify (CI gate)
+//   node scripts/check-frozen-workflows.mjs --update         # re-baseline (local only)
+//   node scripts/check-frozen-workflows.mjs --lock-deployed  # ceremony: lock every entry
 //
 // `--update` is REFUSED under CI/GITHUB_ACTIONS — a re-baseline is a deliberate
 // local act, and CI's append-only-vs-base check is what actually gates a PR.
+//
+// DEPLOY-LOCK (Appendix A's actual boundary): `deployed: true` = shipped in a
+// LIVE image — hash immutable vs base forever, flag MONOTONIC (an unlock is the
+// bypass this blocks). A merged-but-UNDEPLOYED entry (the pre-ceremony window)
+// may re-baseline via --update: immutability binds at DEPLOY (parked runs only
+// exist after one). The ceremony runs --lock-deployed and commits (runbook).
+// Flagless BASE entries defer to the CURRENT declaration once (the reviewed
+// bootstrap stamp of the v24-live set).
 //
 // No dependencies — Node built-ins only.
 
@@ -100,6 +109,7 @@ const SOURCE_EXT = new Set([".ts", ".tsx", ".mts", ".cts", ".mjs", ".cjs", ".js"
 
 const IN_CI = !!(process.env.CI || process.env.GITHUB_ACTIONS);
 const UPDATE = process.argv.includes("--update");
+const LOCK_DEPLOYED = process.argv.includes("--lock-deployed");
 
 /** sha256 of file content, line-endings normalised to \n. */
 function hashText(text) {
@@ -308,7 +318,10 @@ function main() {
     for (const rel of frozenRel) {
       const prev = manifest.workflows[rel] ?? {};
       workflows[rel] = { sha256: hashFile(join(REPO_ROOT, rel)), note: prev.note ?? "" };
+      if (prev.deployed === true) workflows[rel].deployed = true; // PRESERVED, never granted, by --update
     }
+    // Entries dropped from scope stay in the manifest (append-only) — carry them.
+    for (const [rel, prev] of Object.entries(manifest.workflows)) if (!workflows[rel]) workflows[rel] = prev;
     writeFileSync(
       MANIFEST_PATH,
       JSON.stringify({ version: manifest.version ?? 1, workflows }, null, 2) + "\n",
@@ -317,6 +330,16 @@ function main() {
     console.log(
       `freeze-lint: re-baselined ${frozenRel.length} frozen file(s) (workflows + import-closure) into ${MANIFEST_REL}`,
     );
+    return 0;
+  }
+
+  if (LOCK_DEPLOYED) {
+    // The ceremony's post-deploy act: everything now live becomes immutable forever.
+    if (IN_CI) { console.error("freeze-lint: --lock-deployed is REFUSED under CI — a deliberate local ceremony act."); return 1; }
+    let locked = 0;
+    for (const e of Object.values(manifest.workflows)) if (e.deployed !== true) { e.deployed = true; locked += 1; }
+    writeFileSync(MANIFEST_PATH, JSON.stringify({ version: manifest.version ?? 1, workflows: manifest.workflows }, null, 2) + "\n", "utf8");
+    console.log(`freeze-lint: locked ${locked} newly-deployed entr(ies); every manifest entry is now deploy-locked.`);
     return 0;
   }
 
@@ -398,7 +421,9 @@ function main() {
     }
   }
 
-  // 3. Append-only vs the base ref — THE durable protection (see header).
+  // 3. Append-only vs the base ref — THE durable protection, refined by the
+  //    DEPLOY-LOCK (header): hash-immutability binds deployed entries; the flag
+  //    is monotonic; flagless base entries defer to the current declaration once.
   const base = loadBaseManifest();
   for (const [rel, entry] of Object.entries(base.workflows)) {
     const cur = manifest.workflows[rel];
@@ -408,11 +433,11 @@ function main() {
       );
       continue;
     }
-    if (cur.sha256 !== entry.sha256) {
-      violations.push(
-        `REHASHED-VS-BASE  ${rel}\n    base   ${entry.sha256}\n    current ${cur.sha256}\n    -> a frozen hash is immutable vs ${BASE_REF}; editing a frozen body + its manifest hash together is exactly the bypass this blocks. Ship a new _vN.`,
-      );
-    }
+    if (entry.deployed === true && cur.deployed !== true)
+      violations.push(`UNLOCKED-VS-BASE  ${rel}  (deployed:true on ${BASE_REF} but not on the current manifest — the deploy-lock is monotonic; unlocking a live workflow is exactly the bypass this blocks).`);
+    const hashLocked = entry.deployed === true || (entry.deployed === undefined && cur.deployed === true);
+    if (cur.sha256 !== entry.sha256 && hashLocked)
+      violations.push(`REHASHED-VS-BASE  ${rel}\n    base   ${entry.sha256}\n    current ${cur.sha256}\n    -> a DEPLOYED frozen hash is immutable vs ${BASE_REF}; editing a frozen body + its manifest hash together is exactly the bypass this blocks. Ship a new _vN.`);
   }
   if (!base.available) {
     // The append-only-vs-base comparison is THE durable protection. On an

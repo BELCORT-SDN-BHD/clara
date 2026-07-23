@@ -9,7 +9,7 @@
 import type { QueueRow } from "../shared/reviewTypes";
 import { fmtCents, shortId } from "../shared/fmt";
 import { directionOf, counterpartyNoun } from "../shared/direction";
-import { tierBand } from "../shared/cards/complianceWatch";
+import { catalogEntryFor, degradeTitle } from "../shared/queueKindCatalog";
 import styles from "./queue.module.css";
 
 function bandFor(row: QueueRow): { label: string; cls: string } {
@@ -19,15 +19,10 @@ function bandFor(row: QueueRow): { label: string; cls: string } {
   return { label: "needs review", cls: styles.bandReview ?? "" };
 }
 
+// §3.6: the per-kind title switch collapses into the queueKindCatalog — an
+// unrecognised row_kind degrades to the honest id-only label.
 function titleFor(row: QueueRow): string {
-  switch (row.row_kind) {
-    case "open_question": return row.question_text ?? "Open question";
-    case "draft": return `Draft · ${shortId(row.entry_id)}`;
-    case "uncoded_filing": return `Uncoded filing · ${shortId(row.filing_id)}`;
-    case "coding_task": return `Coding task · ${shortId(row.task_id)}`;
-    case "compliance_watch": return row.question_text ?? "SST registration watch";
-    default: return `${row.row_kind} · ${shortId(row.id)}`;
-  }
+  return catalogEntryFor(row.row_kind)?.title(row) ?? degradeTitle(row);
 }
 
 // §6.2: the counterparty subtitle noun follows the row's direction (sales → customer,
@@ -45,6 +40,7 @@ export function QueueRowView({ row, active, selectable, selected, onOpen, onTogg
   onToggleSelect: () => void;
 }) {
   const band = bandFor(row);
+  const RowAccessory = catalogEntryFor(row.row_kind)?.RowAccessory ?? null;
   return (
     <div className={`${styles.row} ${active ? styles.rowActive : ""}`} onClick={onOpen} role="button" tabIndex={0}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onOpen(); } }}>
@@ -64,11 +60,7 @@ export function QueueRowView({ row, active, selectable, selected, onOpen, onTogg
         {row.auto ? <span className={`${styles.badge} ${styles.badgeAuto}`}>auto</span> : null}
         {row.rule_backed ? <span className={`${styles.badge} ${styles.badgeRule}`}>rule</span> : null}
         {row.high_stakes ? <span className={`${styles.badge} ${styles.badgeHigh}`}>high-stakes</span> : null}
-        {row.row_kind === "compliance_watch" ? (() => {
-          const tb = tierBand(row.tier);
-          const cls = tb.tone === "alarm" ? styles.bandYou : tb.tone === "warn" ? styles.bandReview : "";
-          return <span className={`${styles.band} ${cls ?? ""}`}>{tb.label}</span>;
-        })() : null}
+        {RowAccessory ? <RowAccessory row={row} /> : null}
         <span className={`${styles.band} ${band.cls}`}>{band.label}</span>
         {row.amount_cents !== null ? <span className={styles.rowAmount}>{fmtCents(row.amount_cents)}</span> : null}
         {row.period ? <span className={styles.rowPeriod}>{row.period}</span> : null}

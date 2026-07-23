@@ -7,6 +7,8 @@ import { intakeRoutes } from "./intakeRoutes.js";
 import { streamRoutes } from "./streamRoute.js";
 import { documentRoutes } from "./documentRoutes.js";
 import { interviewRoutes } from "./interviewRoutes.js";
+import { openingRoutes } from "./openingRoutes.js";
+import { seedingRoutes } from "./seedingRoutes.js";
 
 // Clara agent-runtime HTTP surface (Slice 4). The durable chat loop, SSE, and the
 // admission/turn routes ride on top of the WDK Postgres world (started by
@@ -82,6 +84,11 @@ app.use(streamRoutes());
 // Durable interview family (Wave B, B-II): firm-bootstrap + client onboarding as durable
 // runs. Enqueue/answer/cancel/state; governance verbs stay on the dashboard (PostgREST).
 app.use(interviewRoutes());
+// Wave-B onboarding document lanes (R2): the opening-targets parse route (bookkeeper+;
+// deterministic extraction-surface read -> record_opening_targets_parsed) and the
+// prior-GL seeding-prepare route (admin; typed S1 proposals -> create_seeding_batch).
+app.use(openingRoutes());
+app.use(seedingRoutes());
 // Document bytes for the doc_review split-view (PIN-DELTA-4) — human JWT -> definer read ->
 // Storage stream with the runtime custody credential; the browser never holds a credential.
 app.use(documentRoutes());

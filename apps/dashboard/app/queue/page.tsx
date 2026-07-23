@@ -158,8 +158,11 @@ export default function QueuePage() {
               {/* Only once the watch surface exists: a pre-0016 DB has no watches at
                   all, and a permanent "0 compliance" tile would be noise, not news. */}
               {queue.counts.compliance_watches > 0 || queue.compliance.clients.length > 0 ? <Tile n={queue.counts.compliance_watches} label="compliance" /> : null}
+              {/* Same gate for 0017's lint_finding count — a pre-0017 DB never sets it. */}
+              {queue.counts.lint_findings > 0 ? <Tile n={queue.counts.lint_findings} label="lint findings" /> : null}
               {queue.sweep.open_run ? <span className={styles.staleBadge}>sweep reconciling</span> : null}
               {queue.compliance.stale_evaluator ? <span className={styles.staleBadge}>compliance eval stale</span> : null}
+              {queue.lint.stale_evaluator ? <span className={styles.staleBadge}>lint eval stale</span> : null}
             </div>
           ) : null}
 

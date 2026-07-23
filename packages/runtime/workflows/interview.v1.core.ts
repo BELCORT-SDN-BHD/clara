@@ -60,9 +60,12 @@ export type Resolution =
   | { kind: "cancelled" }
   | { kind: "expired" };
 
-/** The outcome of one fully-driven segment (question → validate → echo → confirm). */
+/** The outcome of one fully-driven segment (question → validate → echo → confirm). `echo` on
+ *  an answered result is the SANITIZED human echo the validator produced (e.g. "SSM 202401…",
+ *  "email bk@acme.my") — never the raw submission, never a secret — so the workflow can stream it
+ *  as an interview_activity chunk (the /state activity[] surface; see interviewRoutes). */
 export type SegmentResult =
-  | { outcome: "answered"; value: unknown; answeredBy: string; items: PlanItemInput[] }
+  | { outcome: "answered"; value: unknown; answeredBy: string; items: PlanItemInput[]; echo: string }
   | { outcome: "skipped" }
   | { outcome: "cancelled" }
   | { outcome: "expired" };
@@ -70,8 +73,10 @@ export type SegmentResult =
 /** What a park prompt carries to the client (streamed; the token is NEVER included).
  *  `expects` (firm commit park only) tags a prompt whose delivered answer the route must
  *  rebuild as a create_firm receipt {firmId, planId} — the raw value never reaches the hook
- *  (F7/F8; see interviewRoutes buildFirmReceipt). */
-export type Prompt = { seg: string; phase: "q" | "c"; question: string; expects?: string };
+ *  (F7/F8; see interviewRoutes buildFirmReceipt). `op_key` (firm commit park only) is the STABLE
+ *  create_firm idempotency key surfaced as a TYPED field (F5) so the dashboard reads it without
+ *  parsing the human question prose — the prose stays human; the token/secret is never streamed. */
+export type Prompt = { seg: string; phase: "q" | "c"; question: string; expects?: string; op_key?: string };
 
 /** The FIRST streamed chunk of every interview run — the binding marker the answer/cancel +
  *  /state routes check BEFORE resuming a hook or reading a prompt stream (F1). A firm run
@@ -278,9 +283,9 @@ function terminal(r: Resolution): SegmentResult {
   return r.kind === "expired" ? { outcome: "expired" } : { outcome: "cancelled" };
 }
 
-function answered(seg: Segment, v: { value: unknown }, r: Extract<Resolution, { kind: "answer" }>): SegmentResult {
+function answered(seg: Segment, v: { value: unknown; echo: string }, r: Extract<Resolution, { kind: "answer" }>): SegmentResult {
   const items = seg.toItems ? seg.toItems(v.value, seg) : [defaultItem(seg, v.value)];
-  return { outcome: "answered", value: v.value, answeredBy: r.answeredBy, items };
+  return { outcome: "answered", value: v.value, answeredBy: r.answeredBy, items, echo: v.echo };
 }
 
 /** The default plan item for a confirmed answer: a captured (or must-ask) answered item. */

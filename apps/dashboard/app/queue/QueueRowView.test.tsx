@@ -20,7 +20,7 @@ function mkRow(p: Partial<QueueRow>): QueueRow {
     filing_id: null, entry_id: "en000001", question_id: null, task_id: null, document_id: null,
     lane: null, auto: false, rule_backed: false, high_stakes: false, aged_since: null,
     amount_cents: null, period: null, question_text: null, created_at: null, id: "r1",
-    coding_kind: null, watch_id: null, tier: null, ...p,
+    coding_kind: null, watch_id: null, tier: null, finding_id: null, ...p,
   };
 }
 function renderRow(row: QueueRow): string {
@@ -61,9 +61,42 @@ test("a PRE-0016 queue envelope maps to safe nulls — no watch surface, no cras
   assert.equal(row.coding_kind, null);
   assert.equal(row.watch_id, null);
   assert.equal(row.tier, null);
+  assert.equal(row.finding_id, null, "the 0017 finding_id key degrades to null on a pre-0017 envelope");
   // The tile-gate condition fix [6] rests on this pair being empty pre-0016.
   assert.equal(q.counts.compliance_watches === 0 && q.compliance.clients.length === 0, true);
   assert.ok(renderRow(row).includes("vendor cp000001"), "the pre-0016 row still renders with the AP default");
+});
+
+// --- 0017 lint_finding row (catalog-dispatched title + severity chip) -----------
+
+test("a lint_finding row renders the DB-authored question_text verbatim, never a plain-language remap", () => {
+  const html = renderRow(mkRow({ row_kind: "lint_finding", finding_id: "lf1", tier: "critical", question_text: "Lint: contradiction" }));
+  assert.ok(html.includes("Lint: contradiction"), "the ROW shows the verbatim question_text — plain-language copy is the DETAIL card's job (F1)");
+  assert.ok(!html.includes("Two wiki pages contradict"), "no plain-language remap leaks onto the row");
+});
+
+test("a lint_finding row falls back to an honest title when question_text is null", () => {
+  const html = renderRow(mkRow({ row_kind: "lint_finding", finding_id: "lf1", tier: "warn", question_text: null }));
+  assert.ok(html.includes("Lint finding"));
+});
+
+test("the lint_finding row's severity chip is shape+label per tier, never hue-only", () => {
+  // `lane: "ready"` pins the ROW's OWN generic lane band to bandReady, so it can
+  // never be confused with the severity chip's bandYou/bandReview/neutral classes
+  // asserted below (the row unconditionally renders both bands side by side).
+  const critical = renderRow(mkRow({ row_kind: "lint_finding", finding_id: "lf1", tier: "critical", lane: "ready" }));
+  assert.ok(critical.includes("bandYou") && critical.includes(">critical<"));
+  const warn = renderRow(mkRow({ row_kind: "lint_finding", finding_id: "lf1", tier: "warn", lane: "ready" }));
+  assert.ok(warn.includes("bandReview") && warn.includes(">warn<"));
+  const info = renderRow(mkRow({ row_kind: "lint_finding", finding_id: "lf1", tier: "info", lane: "ready" }));
+  assert.ok(info.includes(">info<") && !info.includes("bandYou") && !info.includes("bandReview"));
+});
+
+// --- an unrecognised row_kind degrades honestly (the queueKindCatalog fallback) --
+
+test("an unrecognised row_kind renders the honest id-only title, no accessory, no crash", () => {
+  const html = renderRow(mkRow({ row_kind: "some_future_row_kind", id: "abcdef1234567890" }));
+  assert.ok(html.includes("some_future_row_kind · abcdef12"));
 });
 
 test("the watch card renders a pre-0016-shaped row (no tier, no matched client) inertly-safe", () => {

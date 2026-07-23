@@ -38,12 +38,28 @@ export async function runIdStep(): Promise<string> {
 
 /** Stream the current park's prompt to the run's writable so GET /state can render the
  *  open question. The hook TOKEN is never streamed — a reader learns the park index only,
- *  and resumeHook is server-only, so no resume capability leaks. */
-export async function streamPromptStep(prompt: { parkIndex: number; seg: string; phase: string; question: string; scope: string; expects?: string }): Promise<void> {
+ *  and resumeHook is server-only, so no resume capability leaks. `op_key` (firm commit park)
+ *  rides as a TYPED field so the dashboard reads it without parsing prose (F5); it is an
+ *  idempotency key, never a secret. */
+export async function streamPromptStep(prompt: { parkIndex: number; seg: string; phase: string; question: string; scope: string; expects?: string; op_key?: string }): Promise<void> {
   "use step";
   const writer = getWritable<unknown>().getWriter();
   try {
     await writer.write({ type: "interview_prompt", ...prompt });
+  } finally {
+    writer.releaseLock();
+  }
+}
+
+/** Stream an interview_activity chunk at each CONFIRMED answer — the SANITIZED validator echo
+ *  only (never a raw submission, never a secret; the firm admission token/receipt never appears).
+ *  GET /state folds these into activity[] (firm scope) so a firm interview — which owns NO plan
+ *  until create_firm — can render "here is what you told me". */
+export async function streamActivityStep(activity: { seg: string; phase: string; echo: string }): Promise<void> {
+  "use step";
+  const writer = getWritable<unknown>().getWriter();
+  try {
+    await writer.write({ type: "interview_activity", seg: activity.seg, phase: activity.phase, echo: activity.echo });
   } finally {
     writer.releaseLock();
   }

@@ -21,7 +21,7 @@
 import { createHook } from "workflow";
 import { FIRM_SEGMENTS, buildFirmPlanItems } from "./interview.v1.questions.js";
 import { askAndConfirmSegment, hookToken, type AskFn, type Resolution } from "./interview.v1.core.js";
-import { mintOpKeyStep, runIdStep, streamPromptStep, streamOwnerStep, streamTerminalStep, readPlanStep, updatePlanStep, verifyFirmReceiptStep } from "./interview.v1.steps.js";
+import { mintOpKeyStep, runIdStep, streamPromptStep, streamActivityStep, streamOwnerStep, streamTerminalStep, readPlanStep, updatePlanStep, verifyFirmReceiptStep } from "./interview.v1.steps.js";
 import { fingerprintMap } from "./interview.v1.writer.js";
 
 export type FirmInterviewInput = { principalUserId: string };
@@ -47,12 +47,14 @@ export async function firmInterview_v1(input: FirmInterviewInput): Promise<FirmI
   const park = { n: 0 };
   const ask: AskFn = async (prompt) => {
     const idx = park.n++;
-    await streamPromptStep({ parkIndex: idx, seg: prompt.seg, phase: prompt.phase, question: prompt.question, scope: "firm", expects: prompt.expects });
+    await streamPromptStep({ parkIndex: idx, seg: prompt.seg, phase: prompt.phase, question: prompt.question, scope: "firm", expects: prompt.expects, op_key: prompt.op_key });
     const hook = createHook<Resolution>({ token: hookToken("firm", runId, idx) });
     return hook; // PARK
   };
 
-  // The 11-Q interview — answers accumulate in the durable run ONLY (P19; no plan yet).
+  // The 11-Q interview — answers accumulate in the durable run ONLY (P19; no plan yet). Each
+  // CONFIRMED answer streams an interview_activity chunk (the SANITIZED validator echo only) so
+  // GET /state can render the running "here is what you told me" trail — the firm has no plan yet.
   const answers: Record<string, unknown> = {};
   let answered = 0;
   for (const seg of FIRM_SEGMENTS) {
@@ -63,6 +65,7 @@ export async function firmInterview_v1(input: FirmInterviewInput): Promise<FirmI
     }
     if (res.outcome === "skipped") continue;
     answers[seg.key] = res.value;
+    await streamActivityStep({ seg: seg.key, phase: "c", echo: res.echo });
     answered += 1;
   }
 
@@ -80,10 +83,11 @@ export async function firmInterview_v1(input: FirmInterviewInput): Promise<FirmI
       seg: "commit",
       phase: "q",
       expects: "create_firm_receipt",
+      op_key: opKey, // TYPED (F5) — the dashboard reads it off the chunk, not the prose
       question:
         prefix +
         `Firm profile ready (${answered} answers). To create the firm, the dashboard calls ` +
-        `create_firm with op_key=${opKey} and your admission token, then confirms here. (confirm / cancel)`,
+        `create_firm with this op_key and your admission token, then confirms here. (confirm / cancel)`,
     });
     if (commit.kind !== "answer") {
       await streamTerminalStep({ outcome: commit.kind, answered });

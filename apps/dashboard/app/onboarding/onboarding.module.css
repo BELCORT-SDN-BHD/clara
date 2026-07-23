@@ -1,0 +1,59 @@
+/* Wave-B onboarding surfaces (settled dashboard plan F8) — the firm bootstrap form + the
+   client interview panel. Plumbing-grade, consistent with /queue + /documents: opaque-first,
+   dense-with-hierarchy, run state as a shape+label chip (never hue-only), no computed figure. */
+
+.page { font-family: system-ui, sans-serif; max-width: 900px; margin: 0 auto; padding: 1.5rem; line-height: 1.5; color: #1a1a1a; }
+.title { font-size: 1.25rem; margin: 0 0 0.5rem; }
+.subtitle { font-size: 0.95rem; font-weight: 600; margin: 1rem 0 0.4rem; }
+.muted { color: #6b6b6b; font-size: 0.8rem; margin: 0.15rem 0; }
+.tokenBar { display: flex; gap: 0.5rem; margin: 0.5rem 0; }
+.tokenBar .input { flex: 1; }
+.banner { background: #fbe9e7; border: 1px solid #e5b5ad; color: #7a2418; padding: 0.45rem 0.65rem; border-radius: 4px; font-size: 0.85rem; margin: 0.5rem 0; }
+.note { background: #eef2fd; border: 1px solid #b9c2da; color: #2f4487; padding: 0.5rem 0.7rem; border-radius: 5px; font-size: 0.83rem; margin: 0.5rem 0; }
+
+.input { font: inherit; padding: 0.35rem 0.5rem; border: 1px solid #ccc; border-radius: 4px; }
+.textarea { font: inherit; padding: 0.4rem 0.55rem; border: 1px solid #ccc; border-radius: 4px; width: 100%; min-height: 3rem; resize: vertical; box-sizing: border-box; }
+.button { font: inherit; padding: 0.4rem 0.9rem; border: 1px solid #4a6bd6; background: #4a6bd6; color: #fff; border-radius: 4px; cursor: pointer; }
+.button:disabled { opacity: 0.5; cursor: default; }
+.buttonSecondary { font: inherit; padding: 0.4rem 0.9rem; border: 1px solid #b9c2da; background: #eef2fd; color: #2f4487; border-radius: 4px; cursor: pointer; }
+.buttonSecondary:disabled { opacity: 0.5; cursor: default; }
+.buttonDanger { font: inherit; padding: 0.4rem 0.9rem; border: 1px solid #e0a99f; background: #fbe2dd; color: #7a2418; border-radius: 4px; cursor: pointer; }
+.buttonDanger:disabled { opacity: 0.5; cursor: default; }
+.linkButton { font-size: 0.8rem; background: none; border: none; color: #4a6bd6; cursor: pointer; padding: 0; text-decoration: underline; }
+
+/* Run-state chip — shape + label, never hue-only. */
+.chip { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; border-radius: 3px; padding: 0.12rem 0.5rem; border: 1px solid transparent; }
+.chipAwaiting { color: #7a2418; background: #fbe2dd; border-color: #e8b3a8; }
+.chipWorking { color: #6b4400; background: #f7eccf; border-color: #e2cf9a; }
+.chipComplete { color: #1f5c33; background: #e2f4e8; border-color: #b7dcc4; }
+.chipCancelled { color: #555; background: #ececec; border-color: #cfcfcf; }
+.chipExpired { color: #555; background: #ececec; border-color: #cfcfcf; }
+.chipEnded { color: #555; background: #ececec; border-color: #cfcfcf; }
+.chipUnknown { color: #555; background: #f4f4f4; border-color: #ddd; }
+.chipGlyph { font-size: 0.7rem; line-height: 1; }
+
+.panelHead { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; margin: 0.5rem 0; }
+.progress { font-size: 0.74rem; color: #6b6b6b; font-variant-numeric: tabular-nums; }
+
+/* The Activity thread. */
+.thread { border: 1px solid #ddd; border-radius: 6px; padding: 0.5rem; margin: 0.6rem 0; max-height: 46vh; overflow-y: auto; display: flex; flex-direction: column; gap: 0.4rem; }
+.turn { display: flex; flex-direction: column; gap: 0.1rem; }
+.turnClara { align-items: flex-start; }
+.turnYou { align-items: flex-end; }
+.bubble { max-width: 82%; padding: 0.4rem 0.6rem; border-radius: 8px; font-size: 0.86rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bubbleClara { background: #f2f4f8; border: 1px solid #e1e5ee; color: #1a1a1a; border-top-left-radius: 2px; }
+.bubbleYou { background: #eef2fd; border: 1px solid #b9c2da; color: #21375f; border-top-right-radius: 2px; }
+.turnMeta { font-size: 0.64rem; color: #9a9a9a; text-transform: uppercase; letter-spacing: 0.03em; }
+
+.answerBar { display: flex; gap: 0.5rem; align-items: flex-start; margin-top: 0.4rem; }
+.answerBar .textarea { flex: 1; }
+.answerActions { display: flex; flex-direction: column; gap: 0.35rem; }
+
+/* Firm bootstrap form. */
+.form { display: flex; flex-direction: column; gap: 0.55rem; max-width: 460px; }
+.field { display: flex; flex-direction: column; gap: 0.2rem; }
+.label { font-size: 0.78rem; font-weight: 600; color: #444; }
+.hint { font-size: 0.72rem; color: #6b6b6b; }
+
+.clientRow { display: flex; align-items: center; gap: 0.5rem; padding: 0.3rem 0; }
+.obBadge { font-size: 0.62rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; border-radius: 3px; padding: 0.06rem 0.35rem; border: 1px solid #c9b98f; color: #6b4400; background: #f7eccf; }

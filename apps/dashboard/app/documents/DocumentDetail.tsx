@@ -143,7 +143,14 @@ export function DocumentDetail({
         <div className={styles.inlineRow}>
           <select aria-label="File to client" className={styles.input} value={fileClient} onChange={(e) => setFileClient(e.target.value)}>
             <option value="">Select a client…</option>
-            {clients.filter((c) => c.status === "active").map((c) => <option key={c.id} value={c.id}>{c.name || c.id.slice(0, 8)}</option>)}
+            {/* FILING targets include onboarding clients (O8 row 10 — the takeover pack
+                must be fileable pre-commit), BADGED, never filtered (WB-R1/design law).
+                Coding + wrong-client-correction pickers stay active-only. */}
+            {clients.filter((c) => c.status === "active" || c.status === "onboarding").map((c) => (
+              <option key={c.id} value={c.id}>
+                {(c.name || c.id.slice(0, 8)) + (c.status === "onboarding" ? " — onboarding" : "")}
+              </option>
+            ))}
           </select>
           <button className={styles.button} disabled={busy || !fileClient}
             onClick={() => void act(async () => { await fileToClient(token, doc.id, fileClient); setFileClient(""); })}>

@@ -86,21 +86,35 @@ export function promptExpectsFirmReceipt(prompt: Record<string, unknown> | null 
   return !!prompt && prompt.expects === "create_firm_receipt";
 }
 
+/** One sanitized confirmed-answer row in /state's activity[] (folded from interview_activity
+ *  chunks). `echo` is the validator's human echo — never a raw submission, never a secret. */
+export type ActivityItem = { kind: "answered"; seg: unknown; phase: unknown; echo: unknown; at?: unknown };
+
 export type RunMarkers = {
   owner: OwnerMarker | null;
   prompt: Record<string, unknown> | null;
   terminal: Record<string, unknown> | null;
   latest: Record<string, unknown> | null;
+  /** Confirmed-answer echoes in stream order (the firm-scope /state activity[] surface). */
+  activity: ActivityItem[];
+  /** True once the LATEST prompt has been consumed — a terminal ended the run, or an
+   *  interview_activity chunk followed it (its segment was confirmed and the run moved on). While
+   *  false, the latest prompt is the OPEN park; the /state pending_park is null once true. */
+  promptConsumed: boolean;
 };
 
 /** Fold a run's streamed chunks into the binding/current markers (pure — the stream read is
  *  separate). `owner` is the FIRST interview_owner chunk (the binding); `prompt`/`terminal` are
- *  the LATEST of each; `latest` is the most recent prompt-or-terminal (what /state renders). */
+ *  the LATEST of each; `latest` is the most recent prompt-or-terminal (what /state renders);
+ *  `activity` collects the confirmed-answer echoes in order; `promptConsumed` tracks whether the
+ *  latest prompt is still open (a fresh prompt re-opens it; an activity/terminal after it closes it). */
 export function reduceRunMarkers(chunks: ReadonlyArray<Record<string, unknown> | null | undefined>): RunMarkers {
   let owner: OwnerMarker | null = null;
   let prompt: Record<string, unknown> | null = null;
   let terminal: Record<string, unknown> | null = null;
   let latest: Record<string, unknown> | null = null;
+  const activity: ActivityItem[] = [];
+  let promptConsumed = false;
   for (const c of chunks) {
     if (!c || typeof c !== "object") continue;
     if (c.type === "interview_owner") {
@@ -108,12 +122,86 @@ export function reduceRunMarkers(chunks: ReadonlyArray<Record<string, unknown> |
     } else if (c.type === "interview_prompt") {
       prompt = c;
       latest = c;
+      promptConsumed = false; // a newly-streamed park re-opens the pending question
     } else if (c.type === "interview_terminal") {
       terminal = c;
       latest = c;
+      promptConsumed = true; // the run ended — no open park
+    } else if (c.type === "interview_activity") {
+      const item: ActivityItem = { kind: "answered", seg: c.seg, phase: c.phase, echo: c.echo };
+      if (c.at !== undefined) item.at = c.at;
+      activity.push(item);
+      promptConsumed = true; // a segment was confirmed after the latest prompt — that park is spent
     }
   }
-  return { owner, prompt, terminal, latest };
+  return { owner, prompt, terminal, latest, activity, promptConsumed };
+}
+
+/** The §3.1 pending_park projection of the latest prompt chunk (the typed fields the dashboard
+ *  renders; op_key/expects ride only when present). Null when there is no prompt. */
+export function toPendingPark(prompt: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (!prompt) return null;
+  const pp: Record<string, unknown> = { parkIndex: prompt.parkIndex, seg: prompt.seg, phase: prompt.phase, question: prompt.question };
+  if (prompt.expects !== undefined) pp.expects = prompt.expects;
+  if (prompt.op_key !== undefined) pp.op_key = prompt.op_key;
+  return pp;
+}
+
+/** The §3.1 terminal projection — the terminal chunk minus its stream `type` tag ({outcome, …}).
+ *  The workflow never puts a secret/receipt token in a terminal (firmId/planId are navigable ids,
+ *  not secrets), so this is a straight pass-through. Null when the run has not terminated. */
+export function toTerminal(terminal: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  if (!terminal) return null;
+  const rest: Record<string, unknown> = { ...terminal };
+  delete rest.type;
+  return rest;
+}
+
+/** Map the WDK engine run status (+ the streamed terminal marker) to the §3.1 status enum
+ *  'running'|'complete'|'cancelled'|'unknown'. The terminal marker is authoritative for our
+ *  workflows (a cancel/expire returns normally, so the engine alone cannot distinguish it). */
+export function normalizeStatus(engineStatus: string | null | undefined, terminal: Record<string, unknown> | null | undefined): "running" | "complete" | "cancelled" | "unknown" {
+  if (terminal) {
+    const o = terminal.outcome;
+    return o === "cancelled" || o === "expired" ? "cancelled" : "complete";
+  }
+  if (engineStatus === "running") return "running";
+  if (engineStatus === "complete" || engineStatus === "completed") return "complete";
+  if (engineStatus === "cancelled") return "cancelled";
+  return "unknown";
+}
+
+/** Build the §3.1 /state v2 body from a run's folded markers + the plan read. pending_park is the
+ *  latest UN-consumed prompt (null once answered/terminal); activity[] folds from the stream for a
+ *  firm run (a firm owns no plan mid-interview) and is [] for a client run (the plan page is the
+ *  answer surface — R1 interface note). All figures/counts stay DB-authored in `plan`/`items`. */
+export function buildInterviewState(
+  markers: RunMarkers | null,
+  opts: { runId: string; scope: "firm" | "client"; engineStatus: string | null; plan: Record<string, unknown> | null; items: Array<Record<string, unknown>> },
+): Record<string, unknown> {
+  const terminal = toTerminal(markers?.terminal ?? null);
+  const pendingPark = markers && !markers.promptConsumed ? toPendingPark(markers.prompt) : null;
+  const activity = opts.scope === "firm" ? (markers?.activity ?? []) : [];
+  return {
+    run_id: opts.runId || null,
+    scope: opts.scope,
+    status: normalizeStatus(opts.engineStatus, markers?.terminal ?? null),
+    pending_park: pendingPark,
+    terminal,
+    activity,
+    plan: opts.plan,
+    items: opts.items,
+  };
+}
+
+/** The §3.1 derived chip law (a client-side decision, exported so the dashboard shares ONE
+ *  definition and R1 can prove it): pending_park && !terminal ⇒ 'awaiting_you'; a terminal ⇒ its
+ *  outcome; a running run with no open park ⇒ 'working'; else the status verbatim. */
+export function deriveInterviewChip(state: { pending_park?: unknown; terminal?: { outcome?: unknown } | null; status?: unknown }): string {
+  if (state.terminal) return String(state.terminal.outcome ?? "complete");
+  if (state.pending_park) return "awaiting_you";
+  if (state.status === "running") return "working";
+  return String(state.status ?? "unknown");
 }
 
 /** True iff a thrown error is the engine's single-shot "hook already gone" signal — the
@@ -312,9 +400,10 @@ export function interviewRoutes(): express.Router {
           if (runId && interviewRunBinding(items) !== runId) throw new AuthError(404, "not_found", "not found");
         });
       }
-      const currentPrompt = markers?.latest ?? null;
-      const status = runId ? await runStatus(runId) : null;
-      res.json({ run_id: runId || null, scope, status, plan, items, current_prompt: currentPrompt });
+      // v2 (§3.1): the binding/authz above is UNCHANGED (bind-before-act); only the response
+      // projection changes — typed pending_park + terminal + folded activity[], no prose to parse.
+      const engineStatus = runId ? await runStatus(runId) : null;
+      res.json(buildInterviewState(markers, { runId, scope, engineStatus, plan, items }));
     } catch (err) {
       if (sendAuthError(res, err)) return;
       console.error("[clara-runtime] interview state:", (err as Error)?.message ?? err);

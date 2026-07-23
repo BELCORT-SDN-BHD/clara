@@ -24,7 +24,7 @@ function mkWatch(p: Partial<QueueRow>): QueueRow {
     filing_id: null, entry_id: null, question_id: null, task_id: null, document_id: null,
     lane: null, auto: false, rule_backed: false, high_stakes: false, aged_since: null,
     amount_cents: null, period: "2026-07-31", question_text: "SST registration threshold watch (G)",
-    created_at: null, id: "cw1", coding_kind: null, watch_id: "cw1", tier: "crossed", ...p,
+    created_at: null, id: "cw1", coding_kind: null, watch_id: "cw1", tier: "crossed", finding_id: null, ...p,
   };
 }
 function mkClient(p: Partial<ComplianceClient>): ComplianceClient {
