@@ -1,13 +1,17 @@
-# @clara/dashboard — Next.js 15 skeleton
+# @clara/dashboard — the Agentic OS surface
 
-Slice-1 scope: the app **boots**, renders a placeholder page, and reads
-`NEXT_PUBLIC_*` config. No real UI yet — the two-pane Agentic Accounting OS
-(typed `parts[]` transcript, fail-closed card catalog, PLAN→SHOW→GATE→VERIFY→
-RECOVER) is later work (`docs/design/DIRECTION.md`).
+The LIVE product surface (Waves A→A2.1): the `/chat` two-pane transcript with the
+typed `parts[]` card catalog (je_review, doc_review, refusal, open_question,
+sweep_receipt, kb_rule_proposal, rule_post_receipt, …), the `/queue` review queue
+(sectioned rows, batch approve, the ComplianceWatchCard with the SST tier banner),
+`/documents` intake (upload → scan → file-to-client), and `/rules` (autopost rule
+sign/retire). Design law: `docs/design/DIRECTION.md`. Governance reads/writes go
+**browser → PostgREST** on the session JWT (typed CLR refusals render verbatim);
+only the runtime `/api/*` transits the same-origin Pages Function proxy.
 
 Stack per Gate 2: Next.js 15 (App Router) + React 19, TypeScript, deployed on
-Vercel in a later slice, dashboard-direct on the Supabase session JWT (never a
-god key).
+**Cloudflare Pages** at `app.clarabook.com` (ADR-024; Vercel dropped),
+dashboard-direct on the Supabase session JWT (never a god key).
 
 ```sh
 pnpm --filter @clara/dashboard dev        # local dev server
