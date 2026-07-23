@@ -40,6 +40,11 @@ const AUTOPOST_RECONCILE_MS =
 // cadence stays well under that staleness floor.
 const SST_RECONCILE_MS_ENV = Number(process.env.CLARA_SST_RECONCILE_MS);
 const SST_RECONCILE_MS = Number.isFinite(SST_RECONCILE_MS_ENV) && SST_RECONCILE_MS_ENV > 0 ? SST_RECONCILE_MS_ENV : 24 * 3600000;
+// Finite-guarded like the SST cadence: junk or non-positive CLARA_LINT_RECONCILE_MS falls
+// back to 24h (WB-R8: "lint daily on the per-client belt") — a NaN here would make the
+// due-check permanently false and silently DISABLE the Wave-B wiki lint belt.
+const LINT_RECONCILE_MS_ENV = Number(process.env.CLARA_LINT_RECONCILE_MS);
+const LINT_RECONCILE_MS = Number.isFinite(LINT_RECONCILE_MS_ENV) && LINT_RECONCILE_MS_ENV > 0 ? LINT_RECONCILE_MS_ENV : 24 * 3600000;
 
 /** True iff the daily autopost-rule expiry sweep is due (pure — the since-last-run
  *  guard; lastRunMs=0 makes the first cycle after (re)boot run it immediately, which
@@ -54,6 +59,15 @@ export function autopostReconcileDue(lastRunMs, nowMs, intervalMs = AUTOPOST_REC
  *  exactly what catches pre-existing crossings right after the 0016 deploy ceremony —
  *  the evaluator is idempotent recomputation, so an extra run is a no-op). Wave A2.1 §2.2. */
 export function sstReconcileDue(lastRunMs, nowMs, intervalMs = SST_RECONCILE_MS) {
+  return nowMs - lastRunMs >= intervalMs;
+}
+
+/** True iff the daily wiki lint belt is due (pure — the since-last-run guard; lastRunMs=0
+ *  makes the first cycle after (re)boot run it immediately, which is exactly what catches
+ *  pre-existing conditions right after the 0017 deploy ceremony — run_client_lint/run_lint_all
+ *  are idempotent recomputation, so an extra run is a no-op). Wave B design part3 Block L /
+ *  L3, WB-R8 (lint daily on the per-client belt, never firm-wide locks). */
+export function lintReconcileDue(lastRunMs, nowMs, intervalMs = LINT_RECONCILE_MS) {
   return nowMs - lastRunMs >= intervalMs;
 }
 
@@ -77,6 +91,7 @@ export function startLeaderLoop(deps) {
     let iteration = 0;
     let lastAutopostRun = 0; // 0 ⇒ the first cycle after boot runs the daily autopost sweep
     let lastSstRun = 0; // 0 ⇒ the first cycle after boot runs the SST repair belt (catches pre-existing crossings post-0016)
+    let lastLintRun = 0; // 0 ⇒ the first cycle after boot runs the wiki lint belt (catches pre-existing conditions post-0017, WB-R8 daily cadence)
     while (!stopRef.stop) {
       const client = makeRuntimeClient();
       let connErr = null;
@@ -98,14 +113,17 @@ export function startLeaderLoop(deps) {
             const drained = await drainCycle(client, { log });
             const autopostDue = autopostReconcileDue(lastAutopostRun, Date.now());
             const sstDue = sstReconcileDue(lastSstRun, Date.now());
+            const lintDue = lintReconcileDue(lastLintRun, Date.now());
             const swept = await runReconcilerSweep(client, {
               ...deps,
               prune: iteration % PRUNE_EVERY === 0,
               autopostRules: autopostDue,
               sstWatches: sstDue,
+              lintBelt: lintDue,
             });
             if (autopostDue && swept.autopostOk) lastAutopostRun = Date.now(); // a failed autopost sweep retries next cycle
             if (sstDue && swept.sstOk) lastSstRun = Date.now(); // a failed SST belt retries next cycle
+            if (lintDue && swept.lintOk) lastLintRun = Date.now(); // a failed lint belt retries next cycle
             // NB: the 'world' heartbeat is NOT written here (S4-AB7b / ND5) — relay
             // leadership must not gate /ready. The engine heartbeat is a dedicated
             // task in the supervisor; the leader only beats 'reconciler' (via the sweep).

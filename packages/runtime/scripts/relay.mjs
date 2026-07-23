@@ -21,7 +21,12 @@
 //   node scripts/relay.mjs redrive <eventId> [--consumer <name>]
 //                                     → one-shot idempotent dead-letter redrive; <name> is any
 //                                       registered consumer (router|matcher|rule_post|
-//                                       sst_watch|facts_gate), default router
+//                                       sst_watch|facts_gate|wiki_projection), default router
+//   node scripts/relay.mjs wiki-backfill [--sources <path.json>]
+//                                     → Wave B ceremony: deterministic wiki ingest of pre-0017
+//                                       finalized documents (ZERO model calls)
+//   node scripts/relay.mjs wiki-repair → Wave B ceremony: re-drive the wiki projection to
+//                                       convergence (orphan repair; put-409 idempotent)
 //
 // Env:
 //   PG* / DATABASE_URL / WORKFLOW_POSTGRES_URL  → connection (env ONLY; a
@@ -49,6 +54,7 @@ import { CONSUMERS as MATCHER_CONSUMERS } from "../lib/matcher.mjs";
 import { CONSUMERS as RULE_POST_CONSUMERS } from "../lib/rule-post.mjs";
 import { CONSUMERS as SST_WATCH_CONSUMERS } from "../lib/sst-watch.mjs";
 import { CONSUMERS as FACTS_GATE_CONSUMERS } from "../lib/facts-gate.mjs";
+import { CONSUMERS as WIKI_PROJECTION_CONSUMERS, backfillWikiSources, repairWikiOrphans } from "../lib/wiki-projection.mjs";
 import { makeRuntimeClient } from "../lib/pools.mjs";
 
 // Every registered spine consumer's redrive seam, merged. Each module owns its own entry
@@ -62,6 +68,7 @@ const CONSUMERS = Object.freeze({
   ...RULE_POST_CONSUMERS,
   ...SST_WATCH_CONSUMERS,
   ...FACTS_GATE_CONSUMERS,
+  ...WIKI_PROJECTION_CONSUMERS,
 });
 
 const POLL_INTERVAL_MS = 2000;
@@ -182,6 +189,37 @@ async function main() {
     try {
       const res = await entry.redrive(client, eventId, { log: errlog });
       log(JSON.stringify(res));
+    } finally {
+      await client.end().catch(() => {});
+    }
+    return;
+  }
+
+  // Wave B cold-start ceremony verbs (migration 0017 W4) — one-shot, own runtime-role connection.
+  //   relay.mjs wiki-backfill [--sources <path.json>]  → DETERMINISTIC ingest of pre-0017 finalized
+  //       documents (ZERO model calls). <path.json> is an array of {clientId, documentId} the
+  //       ceremony pairs from finalized documents to their active filing (there is no runtime
+  //       document→client link). Absent ⇒ nothing to ingest (logged).
+  //   relay.mjs wiki-repair                            → orphan REPAIR: re-drive the projection to
+  //       convergence (a verified-but-never-published Storage object self-heals; put-409 idempotent).
+  if (args[0] === "wiki-backfill" || args[0] === "wiki-repair") {
+    const client = makeClient();
+    await client.connect();
+    await setRuntimeRole(client);
+    try {
+      if (args[0] === "wiki-repair") {
+        log(JSON.stringify(await repairWikiOrphans(client, { log: errlog })));
+      } else {
+        const si = args.indexOf("--sources");
+        let sources = [];
+        if (si >= 0 && args[si + 1]) {
+          const { readFile } = await import("node:fs/promises");
+          sources = JSON.parse(await readFile(args[si + 1], "utf8"));
+        } else {
+          errlog("wiki-backfill: no --sources <path.json> supplied — nothing to ingest (the ceremony pairs client↔document)");
+        }
+        log(JSON.stringify(await backfillWikiSources(client, { sources, log: errlog })));
+      }
     } finally {
       await client.end().catch(() => {});
     }

@@ -114,10 +114,16 @@ cross-model adversarial ratchet to RESOLVED; evidence in
 `docs/plan/research/wave-b/`. **Live posture: Supabase 16 migrations · Fly
 `clara-runtime` v24 (chatTurn_v6/autoDraft_v2, 8 loops) · dashboard Pages
 `app.clarabook.com` auto-deploys from `main` · `clara-backup` daily (rclone
-1.74.4, zero-501-proven).** NEXT: **the v25 runtime lanes** (chatTurn_v7,
-wiki-aware autoDraft_v3, firmInterview_v1/clientOnboarding_v1, the
-wiki-projection + lint consumers) → the dashboard lanes → the ONE owner-gated
-WB-R18 ceremony (Supavisor headroom first; live 16→17, runtime v24→v25) → the
+1.74.4, zero-501-proven).** The **v25 runtime lanes are BUILT merged undeployed**
+(ADR-034: chatTurn_v7, wiki-aware autoDraft_v3, firmInterview_v1/
+clientOnboarding_v1 on durable WDK-hook parks, the wiki-projection + lint
+consumers; runtime suite 482/482; adjudications in
+`docs/plan/research/wave-b/v25-runtime-lanes-memo.md` — model synthesis ships
+fail-closed DARK pending the runtime consent-read ruling, PART 2). NEXT: **the
+dashboard lanes** (onboarding flow + the create_firm commit handshake, tick-list
+ceremony UI, lint card + queue row_kind, plan view) → the ONE owner-gated
+WB-R18 ceremony (Supavisor headroom first — walked count 27/60; live 16→17,
+runtime v24→v25) → the
 live gates O/K/W2/L/R2/F on REAL documents (WB-R16: a real second client + RPR''s
 management accounts for the B-12 lane). **Canary `daba7f2e` stays ARMED, due
 2026-08-02 — NEVER answer it.**

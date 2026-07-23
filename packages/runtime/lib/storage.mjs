@@ -153,3 +153,83 @@ export async function localObjectExists(key) {
     throw err;
   }
 }
+
+// ---------------------------------------------------------------------------
+// Wave B — the wiki content-addressed object family (migration 0017 W5). ADDITIVE ONLY: a
+// safeWikiKey validator sibling of safeKey + put/verify siblings that share the private
+// realConfig()/test-shim plumbing but validate the DISTINCT wiki key grammar
+// (firms/{firm}/wiki/{client}/{sha}.md). The docs safeKey regex above is UNTOUCHED, so a wiki
+// key can never be put on the docs path and vice-versa. Same private bucket (firm-docs → the
+// daily rclone mirror covers wiki bytes for free). Overwrite is structurally impossible
+// (x-upsert:false → a 409 is idempotent success). Reuses globalThis.__claraStorageForTest when
+// the injected shim is wiki-key-aware; otherwise the local file shim handles wiki keys directly.
+// ---------------------------------------------------------------------------
+export function safeWikiKey(key) {
+  const value = String(key || "");
+  if (!/^firms\/[0-9a-f-]{36}\/wiki\/[0-9a-f-]{36}\/[0-9a-f]{64}\.md$/i.test(value)) {
+    throw new StorageError("storage_error", "canonical wiki storage key is invalid");
+  }
+  return value;
+}
+
+function wikiLocalPath(key) {
+  return join(testRoot(), ...safeWikiKey(key).split("/"));
+}
+function wikiObjectUrl(base, key) {
+  return `${base}/${safeWikiKey(key).split("/").map(encodeURIComponent).join("/")}`;
+}
+async function wikiLocalPut(filePath, key) {
+  const dest = wikiLocalPath(key);
+  await mkdir(dirname(dest), { recursive: true });
+  try {
+    await pipeline(createReadStream(filePath), createWriteStream(dest, { flags: "wx", mode: 0o600 }));
+    return { created: true, existed: false };
+  } catch (err) {
+    if (err?.code === "EEXIST") return { created: false, existed: true };
+    await rm(dest, { force: true }).catch(() => {});
+    throw err;
+  }
+}
+
+export async function putWikiCanonical(filePath, key, mime = "text/markdown") {
+  safeWikiKey(key);
+  if (process.env.RELAY_TEST_MODE === "1") {
+    const injected = globalThis.__claraStorageForTest;
+    return injected?.put ? injected.put(filePath, key, mime) : wikiLocalPut(filePath, key);
+  }
+  const { base, jwt } = realConfig();
+  const response = await fetch(wikiObjectUrl(base, key), {
+    method: "POST",
+    headers: { authorization: `Bearer ${jwt}`, apikey: jwt, "content-type": mime, "x-upsert": "false" },
+    body: createReadStream(filePath),
+    duplex: "half",
+  });
+  if (response.status === 409) return { created: false, existed: true };
+  if (!response.ok) throw new StorageError("storage_error", `wiki storage upload failed (${response.status})`);
+  return { created: true, existed: false };
+}
+
+async function wikiResponseFor(key) {
+  if (process.env.RELAY_TEST_MODE === "1") {
+    const injected = globalThis.__claraStorageForTest;
+    if (injected?.get) return injected.get(key);
+    return createReadStream(wikiLocalPath(key));
+  }
+  const { base, jwt } = realConfig();
+  const response = await fetch(wikiObjectUrl(base, key), { headers: { authorization: `Bearer ${jwt}`, apikey: jwt } });
+  if (!response.ok || !response.body) throw new StorageError("storage_error", `wiki storage read failed (${response.status})`);
+  return response.body;
+}
+
+export async function hashWikiCanonical(key) {
+  const body = await wikiResponseFor(safeWikiKey(key));
+  const hash = createHash("sha256");
+  for await (const chunk of body) hash.update(chunk);
+  return hash.digest("hex");
+}
+
+export async function verifyWikiCanonical(key, expectedSha256) {
+  const actual = await hashWikiCanonical(key);
+  if (actual !== expectedSha256) throw new StorageError("checksum_mismatch", "wiki canonical readback hash mismatch");
+  return { sha256: actual };
+}

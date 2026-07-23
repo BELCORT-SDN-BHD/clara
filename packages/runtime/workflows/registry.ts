@@ -13,17 +13,23 @@ import { chatTurn_v3 } from "./chatTurn.v3.js";
 import { chatTurn_v4 } from "./chatTurn.v4.js";
 import { chatTurn_v5 } from "./chatTurn.v5.js";
 import { chatTurn_v6 } from "./chatTurn.v6.js";
+import { chatTurn_v7 } from "./chatTurn.v7.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { autoDraft_v1 } from "./autoDraft.v1.js";
 import { autoDraft_v2 } from "./autoDraft.v2.js";
+import { autoDraft_v3 } from "./autoDraft.v3.js";
+import { firmInterview_v1 } from "./firmInterview.v1.js";
+import { clientOnboarding_v1 } from "./clientOnboarding.v1.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  chatTurn: chatTurn_v6,
+  chatTurn: chatTurn_v7,
   documentIngest: documentIngest_v1,
   invoiceFacts: invoiceFacts_v1,
-  autoDraft: autoDraft_v2,
+  autoDraft: autoDraft_v3,
+  firmInterview: firmInterview_v1,
+  clientOnboarding: clientOnboarding_v1,
 } as const;
 
 // Slice 6 repointed `chatTurn:` v1→v2, then v2→v3 (the GATE-3 live find: v2's
@@ -41,13 +47,22 @@ export const workflows = {
 // repointed v5→v6 (PROMPT-only: the SST registration-watch surfacing framing + the
 // purchase 3-leg visibility-split guidance + direction-first vocabulary; the draft
 // schema/steps are byte-identical to v5) and autoDraft v1→v2 (the same purchase 3-leg
-// guidance + an sst_registration_watch awareness note for the unattended sweep). Drop a
+// guidance + an sst_registration_watch awareness note for the unattended sweep). Wave B
+// (v25, WB-R18 ceremony) repointed v6→v7 and autoDraft v2→v3: v7/v3 fetch the pack with
+// the 'wiki_coding' purpose + the txn-local clara.pack_consumer='v25' GUC (FORK-6/AMB-1/
+// AMB-2 — the 0017 pack v4 wiki block renders ONLY under both), pin the tool's purpose to
+// a z.literal, and carry the WB-R6(4) wiki framing + citation-visible-reasoning prompt
+// law; the frozen v1–v6/v1–v2 closures stay wiki-dark by construction. Wave B also added
+// the two durable interview classes (FORK-8): firmInterview_v1 + clientOnboarding_v1
+// (hook-per-question parks, P19 plan-checkpoint persistence). Drop a
 // re-export only once zero non-terminal runs of that version remain.
 export { chatTurn_v1 };
 export { chatTurn_v2 };
 export { chatTurn_v3 };
 export { chatTurn_v4 };
 export { chatTurn_v5 };
+export { chatTurn_v6 };
 export { autoDraft_v1 };
+export { autoDraft_v2 };
 
 export const workflowNames: string[] = Object.keys(workflows);

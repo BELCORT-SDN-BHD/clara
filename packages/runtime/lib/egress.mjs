@@ -173,3 +173,23 @@ export const AZURE_ENGINE_SNAPSHOT = Object.freeze({
   engineConfig: { provider: "azure-document-intelligence", model: MODEL, api_version: API_VERSION, region: "southeast-asia" },
   versionN: 1,
 });
+
+// ---------------------------------------------------------------------------
+// The governed-egress purpose registry (WA2-R2 envelope / Wave B W9). ADDITIVE — this file was
+// the Azure DI OCR adapter and carried no purpose registry, so wiki_synthesis is the first entry;
+// it names the consent discipline for a lane that sends client-confidential data to a model. The
+// wiki-projection consumer resolves the client's consent state before any model call and, when
+// consent is absent/revoked, records the DB-side HELD state (clara.set_wiki_synthesis_hold) — the
+// DB owns the final gate (publish_wiki_page_version refuses synthesis='model' under a live hold).
+// ---------------------------------------------------------------------------
+export const GOVERNED_EGRESS_PURPOSES = Object.freeze({
+  wiki_synthesis: Object.freeze({
+    purpose: "wiki_synthesis",
+    description: "LLM synthesis of a client's CLARA-maintained advisory wiki page (Wave B W9).",
+    consentRequired: true,
+    consentSurface: "clara.client_egress_consents (live row = revoked_at is null)",
+    heldStatePath: "clara.set_wiki_synthesis_hold / clara.wiki_synthesis_holds",
+    dataClass: "client_confidential",
+    engineIdRequired: true,
+  }),
+});
