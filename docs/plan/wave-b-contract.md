@@ -164,3 +164,30 @@ green CI + clean review. Freeze manifest append-only; next bumps: `chatTurn_v7`,
 `autoDraft_v3` (v25). Supavisor headroom re-verify before the new consumers land. The
 S/P follow-on eval shares the next real-document window with WB-R16's second-client
 vehicle. OpenAI quota watch stands.
+
+## 6. Ruling annotations (2026-07-24, ADR-037 — batch WB-R19..R27; append-only)
+
+- **§4 "failure-after-N-items resume" [WB-R19]:** CLOSED BY POLICY — the two lawful
+  multi-item writer shapes are the atomic serializable batch and the per-item txn with
+  requery-resume; same-intent retries keep their op_key until an authoritative requery
+  proves terminal state; a two-phase reserve/finish writer re-opens this ruling. The
+  rig proof bar: a genuine mid-mutation K+1 fault (full-rollback assert incl. outbox)
+  + an S4 lost-ACK case.
+- **§4 "interview cancellation/expiry" [WB-R20]:** the cancellation half closes via
+  the real-engine cancel e2e; the EXPIRY half is EXPLICITLY DEFERRED — cancellation is
+  not expiry; the future mechanism is an additive timer-vs-event `_vN` landing a
+  distinct typed state, never auto-destroying answers.
+- **§4 W2 / WB-R6 [WB-R21]:** the R2-F2 EXISTS-veto
+  (`_assert_filing_wiki_unreferenced` from `approve_wrong_client_correction` +
+  `retire_document_filing`) is ruled a boundary defect scheduled for removal (0019:
+  event-driven projection-side STALE marking), NOT a ratified exception. Gate W2's
+  dependency audit runs interim with exactly those two call sites as known deviations
+  (closed set).
+- **§4 Gate O [WB-R22]:** the commit lane is the audited temp-admin ceremony with the
+  cleanliness precondition (the promoted checker must be a substantive
+  non-contributor); widened self-attestation rejected.
+- **§4 Gate K [WB-R24]:** keyed fixed-asset seeding waits for `seed_fixed_asset
+  p_resolution` (0018) — until then keyed FA is structurally refused (honest CLR01),
+  and Gate K runs document-primary or attributed-keyed minus FA.
+- **All live gates [WB-R24]:** per-gate version pinning — every gate receipt records
+  the migration count + runtime image; no gate journey straddles a deploy.
