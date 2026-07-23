@@ -83,7 +83,12 @@ export function filterRows(rows: QueueRow[], query: string): QueueRow[] {
 // --- Section grouping (by lane band; the envelope's total order is preserved) --
 
 export type QueueSectionKey = "needs_review" | "needs_you";
-export const SECTION_ORDER: QueueSectionKey[] = ["needs_review", "needs_you"];
+/** needs_you renders FIRST (WA21-R14, ADR-031): the exception/blocking band — open
+ *  questions, needs_you-lane filings/drafts, crossed/overdue watches — outranks routine
+ *  throughput, matching the envelope's rank-1-first total order and the §2.3
+ *  top-of-queue contract. (Envelope wrinkle: needs_you-lane DRAFTS are rank 2 in the
+ *  0016 sort tuple — DB alignment is a 0017 candidate; the UI hoists them per page.) */
+export const SECTION_ORDER: QueueSectionKey[] = ["needs_you", "needs_review"];
 export const SECTION_TITLE: Record<QueueSectionKey, string> = {
   needs_review: "Needs review",
   needs_you: "Needs you",
