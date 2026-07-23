@@ -12,10 +12,12 @@ register();
 
 const core = await import("../workflows/interview.v1.core.ts");
 const q = await import("../workflows/interview.v1.questions.ts");
-const { scriptedAsk, ANSWER, CANCEL, EXPIRE, containsSecretShape } = await import("./wave-b-interview-testkit.mjs");
+const writer = await import("../workflows/interview.v1.writer.ts");
+const { scriptedAsk, ANSWER, CANCEL, EXPIRE, containsSecretShape, stubRuntime } = await import("./wave-b-interview-testkit.mjs");
 
 const { askAndConfirmSegment, validateSsm, validateTin, validateEmail, validateFye, validateEnum, hookToken } = core;
 const { FIRM_SEGMENTS, buildFirmPlanItems } = q;
+const { verifyFirmCommitReceipt } = writer;
 const segByKey = (k) => FIRM_SEGMENTS.find((s) => s.key === k);
 
 /** Drive one segment with a scripted answer + confirm. */
@@ -148,4 +150,40 @@ test("hookToken is deterministic per run + park index (route-reconstructible)", 
   assert.equal(hookToken("firm", "run-abc", 0), "fi:run-abc:0");
   assert.equal(hookToken("firm", "run-abc", 7), "fi:run-abc:7");
   assert.equal(hookToken("firm", "run-abc", 0), hookToken("firm", "run-abc", 0), "stable across replay");
+});
+
+// --- F2: the firm commit VERIFIES the receipt before writing anything --------
+
+const FIRM_ID = "f1111111-1111-4111-8111-111111111111";
+const PLAN_ID = "d1111111-1111-4111-8111-111111111111";
+const OWNER = "50000000-0000-4000-8000-000000000001";
+const firmPlan = { id: PLAN_ID, scope_kind: "firm", state: "open", firm_id: FIRM_ID };
+
+test("F2: a verified receipt requires an OPEN firm plan of firmId AND the principal as active OWNER of it", async () => {
+  const { withRuntime, calls } = stubRuntime({ plan: firmPlan, principal: { firm_id: FIRM_ID, role: "owner" } });
+  const ok = await verifyFirmCommitReceipt(withRuntime, { planId: PLAN_ID, firmId: FIRM_ID, principalUserId: OWNER });
+  assert.equal(ok, true);
+  assert.equal(calls.principalReads, 1, "membership rides resolve_chat_principal (clara_runtime cannot read firm_memberships)");
+});
+
+test("F2: a receipt pointing at a plan in a firm the principal does NOT own is refused (zero writes)", async () => {
+  const { withRuntime } = stubRuntime({ plan: firmPlan, principal: { firm_id: "f2222222-2222-4222-8222-222222222222", role: "owner" } });
+  assert.equal(await verifyFirmCommitReceipt(withRuntime, { planId: PLAN_ID, firmId: FIRM_ID, principalUserId: OWNER }), false, "principal owns a DIFFERENT firm");
+});
+
+test("F2: a non-owner (admin) principal, a CLIENT-scope plan, a non-open plan, and a firmId mismatch are all refused", async () => {
+  const notOwner = stubRuntime({ plan: firmPlan, principal: { firm_id: FIRM_ID, role: "admin" } });
+  assert.equal(await verifyFirmCommitReceipt(notOwner.withRuntime, { planId: PLAN_ID, firmId: FIRM_ID, principalUserId: OWNER }), false, "admin is not owner");
+
+  const clientScope = stubRuntime({ plan: { ...firmPlan, scope_kind: "client" }, principal: { firm_id: FIRM_ID, role: "owner" } });
+  assert.equal(await verifyFirmCommitReceipt(clientScope.withRuntime, { planId: PLAN_ID, firmId: FIRM_ID, principalUserId: OWNER }), false, "a client-scope plan is not a firm bootstrap target");
+
+  const committed = stubRuntime({ plan: { ...firmPlan, state: "committed" }, principal: { firm_id: FIRM_ID, role: "owner" } });
+  assert.equal(await verifyFirmCommitReceipt(committed.withRuntime, { planId: PLAN_ID, firmId: FIRM_ID, principalUserId: OWNER }), false, "a non-open plan is refused");
+
+  const mismatch = stubRuntime({ plan: firmPlan, principal: { firm_id: FIRM_ID, role: "owner" } });
+  assert.equal(await verifyFirmCommitReceipt(mismatch.withRuntime, { planId: PLAN_ID, firmId: "f9999999-9999-4999-8999-999999999999", principalUserId: OWNER }), false, "the receipt's firmId must equal the plan's firm_id");
+
+  const noMembership = stubRuntime({ plan: firmPlan, principal: null });
+  assert.equal(await verifyFirmCommitReceipt(noMembership.withRuntime, { planId: PLAN_ID, firmId: FIRM_ID, principalUserId: OWNER }), false, "no membership row → refused");
 });

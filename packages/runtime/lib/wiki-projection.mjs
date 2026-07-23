@@ -13,14 +13,12 @@
 // CEREMONY item, never boot. Three reads are INJECTABLE + FAIL CLOSED under the 0008 grants (no
 // runtime document→client link, no SELECT on counterparties/client_egress_consents).
 
-import { setTimeout as sleep } from "node:timers/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { discoverWork, writeCheckpoint, acquireLeaderLock, setRuntimeRole } from "./relay.mjs";
-import { makeRuntimeClient } from "./pools.mjs";
-import { isConnErr, waitForNudge } from "./listen.mjs";
+import { discoverWork, writeCheckpoint } from "./relay.mjs";
+import { isConnErr } from "./listen.mjs";
 import { safeWikiKey, putWikiCanonical, verifyWikiCanonical } from "./storage.mjs";
 import { GOVERNED_EGRESS_PURPOSES } from "./egress.mjs";
 
@@ -40,9 +38,6 @@ const SUBSCRIBED = new Set(WIKI_PROJECTION_EVENT_TYPES);
 const WIKI_MODEL = process.env.CLARA_WIKI_MODEL || process.env.CLARA_CHAT_MODEL || "gpt-5.6-terra";
 const WIKI_ENGINE_ID = `clara-wiki-synth:${WIKI_MODEL}`;
 const MAX_ATTEMPTS = Number(process.env.CLARA_WIKI_PROJECTION_MAX_ATTEMPTS || 5);
-const POLL_INTERVAL_MS = Number(process.env.CLARA_WIKI_PROJECTION_POLL_MS || 2000);
-const RECONNECT_BASE_MS = 500;
-const RECONNECT_MAX_MS = 5000;
 const skip = (status) => ({ status, mutate: null });
 
 export function contentSha256(content) {
@@ -52,10 +47,10 @@ export function wikiStorageKey(firmId, clientId, sha) {
   return `firms/${firmId}/wiki/${clientId}/${sha}.md`;
 }
 /** A typed clara refusal (CLR*) — TERMINAL: receipt + checkpoint, never a dead-letter loop. */
-function isClaraTerminal(err) {
+export function isClaraTerminal(err) {
   return typeof err?.code === "string" && /^CLR\d{2}$/.test(err.code);
 }
-function claraReason(err) {
+export function claraReason(err) {
   try { return JSON.parse(err?.detail || "{}").reason ?? null; } catch { return null; }
 }
 function terminalStatusFor(err) {
@@ -192,10 +187,19 @@ async function planCounterpartySynthesis(client, { firmId, ev, clientId, counter
   const citations = [{ source_kind: "counterparty", counterparty_id: counterpartyId, detail: { trigger: ev.eventType } }];
   return {
     status: "projected", lane: "model",
-    mutate: (c) => c.query(
-      "select clara.publish_wiki_page_version($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14) as r",
-      [clientId, slug, "counterparty", title, counterpartyId, content, sha, key,
-        JSON.stringify(citations), "[]", "model", engineId, ev.seq, `wikiproj:${clientId}:${ev.seq}`]),
+    // The recency guard re-runs INSIDE the effect txn (codex finding 9): a concurrent
+    // live pass / manual redrive that published a NEWER seq between planning and commit
+    // must never be superseded by this older event — converge as a checkpoint-only no-op.
+    // (Residual: two writers inside the same txn window; the DB-side monotonic
+    // projected_from_seq guard is a 0018-candidate — see the v25 memo.)
+    mutate: async (c) => {
+      const now = await currentProjectedSeq(c, { firmId, clientId, slug });
+      if (now != null && now >= ev.seq) return;
+      await c.query(
+        "select clara.publish_wiki_page_version($1,$2,$3,$4,$5,$6,$7,$8,$9::jsonb,$10::jsonb,$11,$12,$13,$14) as r",
+        [clientId, slug, "counterparty", title, counterpartyId, content, sha, key,
+          JSON.stringify(citations), "[]", "model", engineId, ev.seq, `wikiproj:${clientId}:${ev.seq}`]);
+    },
   };
 }
 
@@ -388,109 +392,3 @@ export async function wikiProjectionRedrive(client, eventId, deps = {}) {
 export const CONSUMERS = Object.freeze({
   wiki_projection: Object.freeze({ name: WIKI_PROJECTION_CONSUMER, identity: "runtime-role", redrive: (c, id, o) => wikiProjectionRedrive(c, id, o) }),
 });
-
-// --- cold-start ceremony helpers (W4 — never boot; scripts/relay.mjs CLI verbs) ----------------
-/** DETERMINISTIC backfill over pre-0017 finalized documents (ZERO model). `sources` = {clientId,
- *  documentId}[] the ceremony supplies (no runtime document→client link); each rides
- *  record_wiki_source_ingest with a document-stable op_key (idempotent; per-pair CLR = skip). */
-export async function backfillWikiSources(client, { sources = [], log = () => {} } = {}) {
-  let ingested = 0;
-  let skipped = 0;
-  for (const src of sources) {
-    const clientId = src?.clientId;
-    const documentId = src?.documentId;
-    if (!clientId || !documentId) { skipped += 1; continue; }
-    try {
-      await client.query("select clara.record_wiki_source_ingest($1,$2,$3,$4)",
-        [clientId, documentId, null, `wikiingest:${clientId}:${documentId}`]);
-      ingested += 1;
-    } catch (err) {
-      if (isClaraTerminal(err)) {
-        log(`[wiki_projection] backfill skip client=${clientId} doc=${documentId} ${err.code}/${claraReason(err) ?? ""}`);
-        skipped += 1;
-      } else { throw err; }
-    }
-  }
-  return { examined: sources.length, ingested, skipped };
-}
-
-/** Orphan REPAIR — a verified-but-never-published Storage object self-heals on redelivery (the
- *  checkpoint never advanced); this forces that catch-up to convergence for the ceremony. */
-export async function repairWikiOrphans(client, opts = {}) {
-  const log = opts.log ?? (() => {});
-  let effects = 0;
-  let firms = 0;
-  for (let i = 0; i < (opts.maxRounds ?? 50); i++) {
-    const r = await runWikiProjectionCycle(client, { ...opts, log });
-    firms = r.firms;
-    effects += r.effects;
-    if (!r.capped) break;
-  }
-  return { firms, effects };
-}
-
-// --- /ready WARN signal (warn-only; /ready NEVER gates on wiki freshness — WB-R3). Spine tables
-// since 0005, safe pre-0017 (⇒ lag 0). -----------------------------------------------------------
-export async function wikiProjectionHealth(client) {
-  const r = await client.query(
-    `select
-       coalesce((select sum(greatest(s.n - coalesce(c.last_seq, 0), 0))
-                   from clara.firm_event_seq s
-                   left join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = s.firm_id), 0)::bigint as lag,
-       (select count(*) from clara.relay_dead_letters where consumer = $1 and status = 'pending')::int as pending_dead_letters,
-       (select count(*) from clara.relay_checkpoints where consumer = $1)::int as firms_tracked`,
-    [WIKI_PROJECTION_CONSUMER]);
-  return {
-    consumer: WIKI_PROJECTION_CONSUMER,
-    lag: Number(r.rows[0].lag),
-    pendingDeadLetters: r.rows[0].pending_dead_letters,
-    firmsTracked: r.rows[0].firms_tracked,
-  };
-}
-
-// --- the leader loop (own dedicated connection + advisory lock; +1 Supavisor session) ----------
-export function startWikiProjectionLoop(deps = {}) {
-  const log = deps.log ?? (() => {});
-  const makeClient = deps.makeClient ?? makeRuntimeClient;
-  const stopRef = { stop: false, wake: null };
-  const loop = (async () => {
-    let backoff = RECONNECT_BASE_MS;
-    while (!stopRef.stop) {
-      const client = makeClient();
-      let connErr = null;
-      client.on("error", (e) => { connErr = e; });
-      try {
-        await client.connect();
-        await setRuntimeRole(client); // N10 — all wiki writers are clara_runtime group-granted
-        await acquireLeaderLock(client, WIKI_PROJECTION_CONSUMER);
-        await client.query("listen clara_events");
-        log("WIKI_PROJECTION acquired");
-        backoff = RECONNECT_BASE_MS;
-        while (!stopRef.stop) {
-          if (connErr) throw connErr;
-          let capped = false;
-          try {
-            const r = await runWikiProjectionCycle(client, { ...deps, log });
-            capped = r.capped;
-          } catch (err) {
-            if (connErr || isConnErr(err)) throw connErr ?? err;
-            log(`WIKI_PROJECTION cycle-error ${err?.message ?? err}`);
-          }
-          if (stopRef.stop) break;
-          if (!capped) await waitForNudge(client, POLL_INTERVAL_MS, stopRef);
-        }
-      } catch (err) {
-        if (stopRef.stop) break;
-        log(`WIKI_PROJECTION connection-lost (${err?.message ?? err}) — reconnecting in ${backoff}ms`);
-        await sleep(backoff);
-        backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
-      } finally {
-        await client.end().catch(() => {});
-      }
-    }
-  })();
-  return {
-    stop: async () => { stopRef.stop = true; if (stopRef.wake) stopRef.wake(); await loop.catch(() => {}); },
-    done: loop,
-  };
-}

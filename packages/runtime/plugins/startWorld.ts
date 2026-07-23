@@ -16,7 +16,7 @@ import { startRulePostLoop } from "../lib/rule-post.mjs";
 import { startSstWatchLoop } from "../lib/sst-watch.mjs";
 import { startFactsGateLoop } from "../lib/facts-gate.mjs";
 import { startClassifyLoop } from "../lib/classify.mjs";
-import { startWikiProjectionLoop } from "../lib/wiki-projection.mjs";
+import { startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { heartbeat } from "../lib/reconciler.mjs";
 import { start, getRun } from "workflow/api";
 import { workflows } from "../workflows/registry.js";

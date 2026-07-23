@@ -9,7 +9,7 @@
 
 import { getWritable, getWorkflowMetadata } from "workflow";
 import { randomUUID } from "node:crypto";
-import { updatePlanWithCas, readPlan, type PgExec, type RuntimeExec, type PlanWriteResult, type PlanSnapshot } from "./interview.v1.writer.js";
+import { updatePlanWithCas, readPlan, verifyFirmCommitReceipt, type PgExec, type RuntimeExec, type PlanWriteResult, type PlanSnapshot, type PlanItemSnapshot } from "./interview.v1.writer.js";
 import type { PlanItemInput } from "./interview.v1.core.js";
 
 type Pools = { withRuntime: RuntimeExec };
@@ -39,7 +39,7 @@ export async function runIdStep(): Promise<string> {
 /** Stream the current park's prompt to the run's writable so GET /state can render the
  *  open question. The hook TOKEN is never streamed — a reader learns the park index only,
  *  and resumeHook is server-only, so no resume capability leaks. */
-export async function streamPromptStep(prompt: { parkIndex: number; seg: string; phase: string; question: string; scope: string }): Promise<void> {
+export async function streamPromptStep(prompt: { parkIndex: number; seg: string; phase: string; question: string; scope: string; expects?: string }): Promise<void> {
   "use step";
   const writer = getWritable<unknown>().getWriter();
   try {
@@ -47,6 +47,28 @@ export async function streamPromptStep(prompt: { parkIndex: number; seg: string;
   } finally {
     writer.releaseLock();
   }
+}
+
+/** Stream the run's binding owner marker as the FIRST chunk (before any prompt). The answer/
+ *  cancel + /state routes read this to bind a runId to its principal (firm) or plan (client)
+ *  BEFORE resuming a hook or exposing a prompt stream (F1). No token/secret is streamed. */
+export async function streamOwnerStep(marker: { scope: string; principalUserId?: string; planId?: string }): Promise<void> {
+  "use step";
+  const writer = getWritable<unknown>().getWriter();
+  try {
+    await writer.write({ type: "interview_owner", ...marker });
+  } finally {
+    writer.releaseLock();
+  }
+}
+
+/** Verify a firm create_firm receipt against live DB state BEFORE the plan write (F2). `attempt`
+ *  keys memoization per re-park (WDK memoizes a step by its args) so each re-delivered receipt is
+ *  verified against FRESH state, never a stale earlier verdict. */
+export async function verifyFirmReceiptStep(args: { planId: string; firmId: string; principalUserId: string; attempt?: number }): Promise<boolean> {
+  "use step";
+  void args.attempt; // memo-distinctness only — the reader ignores it
+  return verifyFirmCommitReceipt(pools().withRuntime, { planId: args.planId, firmId: args.firmId, principalUserId: args.principalUserId });
 }
 
 /** Stream a terminal marker (complete / cancelled / expired / firm_created) and close. */
@@ -76,9 +98,10 @@ export async function updatePlanStep(args: {
   answeredBy: string;
   opKey: string;
   retryOpKey: string;
+  knownItems?: Readonly<Record<string, string | null>>;
 }): Promise<PlanWriteResult> {
   "use step";
   return updatePlanWithCas(pools().withRuntime, args);
 }
 
-export type { PgExec, PlanWriteResult, PlanSnapshot };
+export type { PgExec, PlanWriteResult, PlanSnapshot, PlanItemSnapshot };

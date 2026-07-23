@@ -21,7 +21,8 @@
 import { createHook } from "workflow";
 import { FIRM_SEGMENTS, buildFirmPlanItems } from "./interview.v1.questions.js";
 import { askAndConfirmSegment, hookToken, type AskFn, type Resolution } from "./interview.v1.core.js";
-import { mintOpKeyStep, runIdStep, streamPromptStep, streamTerminalStep, readPlanStep, updatePlanStep } from "./interview.v1.steps.js";
+import { mintOpKeyStep, runIdStep, streamPromptStep, streamOwnerStep, streamTerminalStep, readPlanStep, updatePlanStep, verifyFirmReceiptStep } from "./interview.v1.steps.js";
+import { fingerprintMap } from "./interview.v1.writer.js";
 
 export type FirmInterviewInput = { principalUserId: string };
 export type FirmInterviewOutcome = {
@@ -37,12 +38,16 @@ type CommitDelivery = { firmId?: string; planId?: string };
 export async function firmInterview_v1(input: FirmInterviewInput): Promise<FirmInterviewOutcome> {
   "use workflow";
   const runId = await runIdStep();
-  void input.principalUserId; // advisory: the answering principal is re-validated by the DB writer
+
+  // FIRST streamed chunk: the binding owner marker. The answer/cancel + /state routes require
+  // this marker's principalUserId to equal the caller's sub BEFORE resuming a hook or exposing
+  // the prompt stream (F1) — a firm run has no plan yet, so the marker IS the binding.
+  await streamOwnerStep({ scope: "firm", principalUserId: input.principalUserId });
 
   const park = { n: 0 };
   const ask: AskFn = async (prompt) => {
     const idx = park.n++;
-    await streamPromptStep({ parkIndex: idx, seg: prompt.seg, phase: prompt.phase, question: prompt.question, scope: "firm" });
+    await streamPromptStep({ parkIndex: idx, seg: prompt.seg, phase: prompt.phase, question: prompt.question, scope: "firm", expects: prompt.expects });
     const hook = createHook<Resolution>({ token: hookToken("firm", runId, idx) });
     return hook; // PARK
   };
@@ -61,42 +66,74 @@ export async function firmInterview_v1(input: FirmInterviewInput): Promise<FirmI
     answered += 1;
   }
 
-  // Commit: mint the stable op_key (O7) and surface it; the dashboard calls create_firm
-  // with it + the admission token and delivers {firm_id, plan_id} as this park's answer.
+  // Commit: mint the stable op_key (O7) and surface it; the dashboard calls create_firm with it
+  // + the admission token and delivers a receipt as this park's answer. The answer route rebuilds
+  // that receipt into a bare {firmId, planId} (F7/F8 — no admission token ever reaches the hook).
   const opKey = await mintOpKeyStep("create_firm");
-  const commit = await ask({
-    seg: "commit",
-    phase: "q",
-    question:
-      `Firm profile ready (${answered} answers). To create the firm, the dashboard calls ` +
-      `create_firm with op_key=${opKey} and your admission token, then confirms here. (confirm / cancel)`,
-  });
-  if (commit.kind !== "answer") {
-    await streamTerminalStep({ outcome: commit.kind, answered });
-    return { outcome: commit.kind, firmId: null, planId: null, answered };
-  }
-  const delivery = (commit.value ?? {}) as CommitDelivery;
-  const firmId = delivery.firmId ?? null;
-  const planId = delivery.planId ?? null;
-  if (!firmId || !planId) {
-    // The dashboard must deliver a create_firm receipt; without it there is nothing to
-    // attribute the plan to — treat as a cancel (nothing flawed persisted).
-    await streamTerminalStep({ outcome: "cancelled", answered, reason: "no_create_firm_receipt" });
-    return { outcome: "cancelled", firmId: null, planId: null, answered };
+  let firmId: string | null = null;
+  let planId: string | null = null;
+  let answeredBy = "";
+  let prefix = "";
+  let commitAttempt = 0;
+  for (;;) {
+    const commit = await ask({
+      seg: "commit",
+      phase: "q",
+      expects: "create_firm_receipt",
+      question:
+        prefix +
+        `Firm profile ready (${answered} answers). To create the firm, the dashboard calls ` +
+        `create_firm with op_key=${opKey} and your admission token, then confirms here. (confirm / cancel)`,
+    });
+    if (commit.kind !== "answer") {
+      await streamTerminalStep({ outcome: commit.kind, answered });
+      return { outcome: commit.kind, firmId: null, planId: null, answered };
+    }
+    const delivery = (commit.value ?? {}) as CommitDelivery;
+    firmId = delivery.firmId ?? null;
+    planId = delivery.planId ?? null;
+    answeredBy = commit.answeredBy;
+    if (!firmId || !planId) {
+      prefix = "No create_firm receipt received yet — after create_firm succeeds, deliver its {firmId, planId}.\n\n";
+      commitAttempt += 1;
+      continue;
+    }
+    // F2: never write on an UNVERIFIED receipt — the plan must be an OPEN firm plan of firmId
+    // that this principal actively OWNS. A forged receipt pointing at a foreign/open plan re-parks.
+    const verified = await verifyFirmReceiptStep({ planId, firmId, principalUserId: input.principalUserId, attempt: commitAttempt });
+    if (verified) break;
+    prefix = "That firm receipt did not verify (it must name an open firm plan you own). Re-run create_firm and deliver a valid receipt.\n\n";
+    firmId = null;
+    planId = null;
+    commitAttempt += 1;
   }
 
-  // Write the accumulated intended-record to the firm plan (minted by create_firm).
+  // Write the accumulated intended-record to the (verified) firm plan minted by create_firm. The
+  // plan is freshly minted, so a CAS conflict is an extreme edge with no interactive re-echo
+  // possible post-commit — adopt the live baseline and retry a bounded number of times.
+  let revision = "";
+  let knownMap: Record<string, string | null> = {};
   const plan0 = await readPlanStep(planId);
-  const revision = plan0?.revisionToken ?? "";
-  const planOpKey = await mintOpKeyStep("firm_plan_write");
-  await updatePlanStep({
-    planId,
-    expectedRevision: revision,
-    items: buildFirmPlanItems(answers),
-    answeredBy: commit.answeredBy,
-    opKey: planOpKey,
-    retryOpKey: `${planOpKey}:retry`,
-  });
+  if (plan0) {
+    revision = plan0.revisionToken;
+    knownMap = fingerprintMap(plan0.items);
+  }
+  const items = buildFirmPlanItems(answers);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const planOpKey = await mintOpKeyStep(`firm_plan_write#${attempt}`);
+    const write = await updatePlanStep({
+      planId,
+      expectedRevision: revision,
+      items,
+      answeredBy,
+      opKey: planOpKey,
+      retryOpKey: `${planOpKey}:retry`,
+      knownItems: knownMap,
+    });
+    if (write.status !== "stale_conflict") break;
+    revision = write.revisionToken;
+    if (write.liveItems) knownMap = fingerprintMap(write.liveItems);
+  }
 
   await streamTerminalStep({ outcome: "firm_created", firmId, planId, answered });
   return { outcome: "firm_created", firmId, planId, answered };

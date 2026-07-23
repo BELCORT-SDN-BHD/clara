@@ -54,7 +54,8 @@ import { CONSUMERS as MATCHER_CONSUMERS } from "../lib/matcher.mjs";
 import { CONSUMERS as RULE_POST_CONSUMERS } from "../lib/rule-post.mjs";
 import { CONSUMERS as SST_WATCH_CONSUMERS } from "../lib/sst-watch.mjs";
 import { CONSUMERS as FACTS_GATE_CONSUMERS } from "../lib/facts-gate.mjs";
-import { CONSUMERS as WIKI_PROJECTION_CONSUMERS, backfillWikiSources, repairWikiOrphans } from "../lib/wiki-projection.mjs";
+import { CONSUMERS as WIKI_PROJECTION_CONSUMERS } from "../lib/wiki-projection.mjs";
+import { backfillWikiSources, repairWikiOrphans } from "../lib/wiki-projection-ops.mjs";
 import { makeRuntimeClient } from "../lib/pools.mjs";
 
 // Every registered spine consumer's redrive seam, merged. Each module owns its own entry

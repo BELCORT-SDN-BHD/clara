@@ -67,8 +67,49 @@ export type SegmentResult =
   | { outcome: "cancelled" }
   | { outcome: "expired" };
 
-/** What a park prompt carries to the client (streamed; the token is NEVER included). */
-export type Prompt = { seg: string; phase: "q" | "c"; question: string };
+/** What a park prompt carries to the client (streamed; the token is NEVER included).
+ *  `expects` (firm commit park only) tags a prompt whose delivered answer the route must
+ *  rebuild as a create_firm receipt {firmId, planId} — the raw value never reaches the hook
+ *  (F7/F8; see interviewRoutes buildFirmReceipt). */
+export type Prompt = { seg: string; phase: "q" | "c"; question: string; expects?: string };
+
+/** The FIRST streamed chunk of every interview run — the binding marker the answer/cancel +
+ *  /state routes check BEFORE resuming a hook or reading a prompt stream (F1). A firm run
+ *  binds to its pre-firm principal (`principalUserId`); a client run binds to its plan
+ *  (`planId`), which additionally carries the durable 'interview_run' item (interviewRunBinding). */
+export type OwnerMarker = {
+  type: "interview_owner";
+  scope: Scope;
+  principalUserId?: string;
+  planId?: string;
+};
+
+/** True iff a firm-run owner marker binds to `sub` (the caller's authenticated principal).
+ *  Fail-closed: a missing/malformed marker or a mismatch is false (the route then 404s). */
+export function firmOwnerMatches(owner: OwnerMarker | null | undefined, sub: string): boolean {
+  return (
+    !!owner &&
+    owner.type === "interview_owner" &&
+    owner.scope === "firm" &&
+    typeof owner.principalUserId === "string" &&
+    owner.principalUserId.length > 0 &&
+    owner.principalUserId === sub
+  );
+}
+
+/** The run id bound in a client plan's durable 'interview_run' capture item, or null when the
+ *  plan carries no binding. Accepts both the snake-cased route row (`item_key`/`answer`) and the
+ *  camel-cased writer snapshot (`itemKey`) so the route and the workflow share ONE decision. */
+export function interviewRunBinding(items: ReadonlyArray<Record<string, unknown>>): string | null {
+  for (const it of items) {
+    const key = (it.item_key ?? it.itemKey) as unknown;
+    if (key !== "interview_run") continue;
+    const ans = it.answer as { run_id?: unknown } | null | undefined;
+    const runId = ans && typeof ans === "object" ? ans.run_id : undefined;
+    return typeof runId === "string" && runId.length > 0 ? runId : null;
+  }
+  return null;
+}
 
 /** The single primitive the driver needs: park with a prompt, get a resolution. In
  *  production `ask` streams the prompt, opens a WDK hook, and awaits it; in tests it is

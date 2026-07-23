@@ -21,7 +21,7 @@ import { rulePostHealth } from "./rule-post.mjs";
 import { sstWatchHealth } from "./sst-watch.mjs";
 import { factsGateHealth } from "./facts-gate.mjs";
 import { classifyHealth } from "./classify.mjs";
-import { wikiProjectionHealth } from "./wiki-projection.mjs";
+import { wikiProjectionHealth } from "./wiki-projection-ops.mjs";
 
 const READY_DEADLINE_MS = Number(process.env.CLARA_READY_DEADLINE_MS || 5000);
 const HEARTBEAT_STALE_MS = Number(process.env.CLARA_HEARTBEAT_STALE_MS || 30000);

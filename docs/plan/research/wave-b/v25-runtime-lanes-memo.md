@@ -86,7 +86,42 @@ reconciler lint wiring were orchestrator integration acts.
   (was ≈26; wiki_projection +1; lint belt + interviews +0) against the 60 ceiling.
 - Egress registry: GOVERNED_EGRESS_PURPOSES.wiki_synthesis rides the image; no live config.
 
-## Open owner items raised by this build
+## Cross-model review round (2026-07-24 — native opus reviewer + Codex gpt-5.6-sol, both NOT-MERGEABLE first pass; all blockers fixed on-branch)
+
+Convergent findings, FIXED: the client-interview TIN/turnover segment order (the <RM1M
+exemption was unreachable — native HIGH-1 / codex 12; reordered + regression-locked) ·
+the wiki consumer's cold start (native HIGH-2 / codex 3; the loop now self-gates DORMANT
+until the 0017 surface exists AND the ceremony checkpoint seed has run — consumer-level
+exists-check, deliberately not per-firm so a post-ceremony new firm still starts at 0;
+`wikiColdStartReady` + interruptible dormancy) · the run-binding/authz cluster (native
+MEDIUM-1 / codex 1-CRITICAL, 2, 5, 7, 8; fixed as: the plan-item `interview_run` binding
++ the streamed owner marker + route-side bind-before-act on answer/cancel/state, the
+pre-firm floor on /firm/start, idempotent /client/start, the workflow-side receipt
+verification — scope_kind='firm' + owner membership — and route-side commit-receipt
+shape-filtering accepting both snake/camel, so no secret can reach durable run history) ·
+the CAS blind-retry overwrite (codex 6; retry only when the revision bump came from OTHER
+items, else `stale_conflict` → re-echo) · the redrive recency race (codex 9; an in-txn
+re-check makes an older event a checkpoint-only no-op over a newer published seq).
+
+Fix-lane deviations, RATIFIED: membership checks ride `clara.resolve_chat_principal`
+(clara_runtime cannot read `firm_memberships` — 0006 §8; same security property, DB-legal)
+· `/client/start` floors at bookkeeper+ (the binding write's `answered_by` would CLR04 a
+viewer mid-run otherwise) · the firm plan's single post-commit write retries bounded (≤3)
+on `stale_conflict` instead of re-echoing (no interactive point exists post-commit; the
+plan is freshly minted so same-key conflicts are practically impossible) · the
+receipt-verify step carries an attempt nonce so WDK memoization never replays a stale
+verdict.
+
+Accepted residuals (documented, not fixed this wave): storage BLOB orphans from
+model-lane retries and cap-refusals-after-upload (codex 4's real kernel — inert
+content-addressed garbage in the private bucket; a ceremony-time key-vs-versions sweep is
+the follow-on; `wiki-repair` converges dead-letters/lag, not blobs) · the ms-window
+double-writer residue under the in-txn recency check (the DB-side monotonic
+`projected_from_seq` guard is a 0018-candidate alongside the consent read surface) · the
+409-on-replay answer contract (a retried answer reads 409 not_pending; clients treat it
+as already-delivered + refresh /state — documented in the route header) · interview
+EXPIRY is dashboard/ops-driven this wave (the cancel verb is the vehicle; no ambient
+timer — the WB-R17 cancellation/expiry rig gate runs through cancel).
 
 - **The projection consumer's runtime READ surface** (consent state + document→client):
   0017 shipped the wiki writers only. Until a follow-on grant/DEFINER-fn migration (an

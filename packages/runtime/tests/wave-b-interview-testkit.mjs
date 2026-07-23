@@ -26,13 +26,26 @@ export function scriptedAsk(script) {
 
 /** A stubbed withRuntime + query router for update_onboarding_plan / plan reads. Options:
  *   - plan: the onboarding_plans row a read returns.
+ *   - items: the onboarding_plan_items rows a read returns (snake shape {item_key,state,answer,
+ *     answered_by}); readPlan's second query + the route binding reads use these. May be a
+ *     function (updateN) => rows so a CLR06 re-read can reflect a foreign edit.
+ *   - principal: the resolve_chat_principal row ({firm_id, role}) for verifyFirmCommitReceipt.
  *   - failCas: if a number N, the Nth (1-based) update_onboarding_plan call throws CLR06.
  *   - receipts: overrides the revision tokens returned per successful update call. */
-export function stubRuntime({ plan = null, failCas = 0, receipts = [] } = {}) {
-  const calls = { reads: 0, updates: [], updateArgs: [] };
+export function stubRuntime({ plan = null, items = [], principal = null, failCas = 0, receipts = [] } = {}) {
+  const calls = { reads: 0, itemReads: 0, updates: [], updateArgs: [], principalReads: 0 };
   let updateN = 0;
   const client = {
     query: async (sql, params) => {
+      if (/resolve_chat_principal/.test(sql)) {
+        calls.principalReads += 1;
+        return { rows: principal ? [principal] : [], rowCount: principal ? 1 : 0 };
+      }
+      if (/from clara\.onboarding_plan_items/.test(sql)) {
+        calls.itemReads += 1;
+        const rows = typeof items === "function" ? items(updateN) : items;
+        return { rows, rowCount: rows.length };
+      }
       if (/from clara\.onboarding_plans/.test(sql) && /select/i.test(sql)) {
         calls.reads += 1;
         return { rows: plan ? [plan] : [], rowCount: plan ? 1 : 0 };

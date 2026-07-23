@@ -103,6 +103,9 @@ export const CLIENT_SEGMENTS: readonly Segment[] = [
   { key: "legal_name", question: "What is the client's registered legal name?", requiredForCommit: true, skippable: false, validate: validateNonEmpty("legal name") },
   { key: "entity_type", question: "What is the client's entity type? (Sdn Bhd / Sole Prop / Partnership / LLP / Other)", requiredForCommit: true, skippable: false, validate: validateEnum("entity type", ENTITY_TYPES, ENTITY_SYNONYMS) },
   { key: "ssm", question: "What is the client's SSM registration number?", requiredForCommit: true, skippable: false, validate: validateSsm },
+  // turnover MUST precede tin: tinValidatorGatedByTurnover reads prior["turnover"] for the
+  // <RM1M exemption (adjudication 7; the firm segment order is the same for the same reason).
+  { key: "turnover", question: "What is the client's annual turnover band? (<RM1M / RM1M-5M / RM5M-25M / RM25M-100M / RM100M+)", requiredForCommit: true, skippable: false, validate: validateTurnover },
   { key: "tin", question: "What is the client's MyInvois TIN? (required unless turnover < RM1M — reply skip only if exempt)", requiredForCommit: false, skippable: false, validate: tinValidatorGatedByTurnover },
   { key: "msic", question: "What is the client's 5-digit MSIC industry code?", requiredForCommit: false, skippable: true, validate: validateMsic },
   { key: "sst_regime", question: "What is the client's SST registration? (not_registered / sales_tax / service_tax / both)", requiredForCommit: false, skippable: false, validate: validateEnum("SST regime", SST_REGIMES) },
@@ -116,7 +119,6 @@ export const CLIENT_SEGMENTS: readonly Segment[] = [
     toItems: (v, seg) => [{ item_key: "coa_seed_decision", item_kind: "must_ask", question: seg.question, answer: { seed: v === "yes" ? "lhdn_mpers_standard" : "manual" }, state: "answered", required_for_commit: true }] },
   { key: "opening_position", question: "Is this a brand-new/first-year client (opening = 0), or an ongoing client with a prior-period closing position to carry down? (new_first_year / ongoing_carry_down)", requiredForCommit: true, skippable: false, validate: validateEnum("opening position", OPENING_CHOICES, OPENING_SYNONYMS), toItems: (v) => openingItems(v) },
   { key: "fa_depreciation", question: "Does the client hold any fixed assets on a NON-straight-line depreciation method? (yes / no)", requiredForCommit: false, skippable: true, validate: validateEnum("non-straight-line assets", ["yes", "no"]), toItems: (v) => nonStraightLineItems(v) },
-  { key: "turnover", question: "What is the client's annual turnover band? (<RM1M / RM1M-5M / RM5M-25M / RM25M-100M / RM100M+)", requiredForCommit: true, skippable: false, validate: validateTurnover },
   { key: "sample_invoices", question: "Do you have sample invoices (purchases / sales / vendor) to seed day-one coding knowledge? Attach them now, or reply skip.", requiredForCommit: false, skippable: true, validate: validateOptionalText("sample invoices"),
     toItems: (v, seg) => [{ item_key: "sample_invoices", item_kind: "capture", question: seg.question, answer: v ? { attached: true } : { attached: false }, state: "answered", required_for_commit: false }] },
 ];

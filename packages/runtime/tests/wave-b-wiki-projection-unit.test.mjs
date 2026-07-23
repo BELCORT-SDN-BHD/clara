@@ -21,6 +21,7 @@ import {
   WIKI_PROJECTION_CONSUMER,
   CONSUMERS,
 } from "../lib/wiki-projection.mjs";
+import { wikiColdStartReady, startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { safeWikiKey, putWikiCanonical, verifyWikiCanonical, StorageError } from "../lib/storage.mjs";
 import { GOVERNED_EGRESS_PURPOSES } from "../lib/egress.mjs";
 
@@ -239,4 +240,53 @@ test("putWikiCanonical is idempotent (409 existed:true) and verify re-download m
     else process.env.CLARA_TEST_STORAGE_DIR = prevRoot;
     await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
+});
+
+// --- cold-start gates (native-review HIGH-2): dormant until surface + ceremony seed ------------
+
+test("wikiColdStartReady maps the two gates; ready only when BOTH hold", async () => {
+  const mk = (surface, seeded) => ({ query: async () => ({ rows: [{ surface, seeded }], rowCount: 1 }) });
+  assert.deepEqual(await wikiColdStartReady(mk(false, false)), { surface: false, seeded: false, ready: false });
+  assert.deepEqual(await wikiColdStartReady(mk(true, false)), { surface: true, seeded: false, ready: false });
+  assert.deepEqual(await wikiColdStartReady(mk(false, true)), { surface: false, seeded: true, ready: false });
+  assert.deepEqual(await wikiColdStartReady(mk(true, true)), { surface: true, seeded: true, ready: true });
+});
+
+test("the loop stays DORMANT while unseeded: no LISTEN, no discovery; stop() returns promptly", async () => {
+  const queries = [];
+  const fake = {
+    async connect() {},
+    on() {},
+    async query(sql) {
+      queries.push(String(sql));
+      // acquireLeaderLock/setRuntimeRole ignore rows; the gate reads surface/seeded.
+      return { rows: [{ surface: true, seeded: false }], rowCount: 1 };
+    },
+    async end() {},
+  };
+  const loop = startWikiProjectionLoop({ makeClient: () => fake, log: () => {} });
+  // Let the loop connect, take leadership, and hit the gate at least once.
+  await new Promise((r) => setTimeout(r, 150));
+  assert.ok(queries.some((q) => q.includes("to_regproc")), "the gate query ran");
+  assert.ok(!queries.some((q) => q.includes("listen clara_events")), "no LISTEN while dormant");
+  assert.ok(!queries.some((q) => q.includes("relay_checkpoints") && q.includes("coalesce")), "no discovery while dormant");
+  const t0 = Date.now();
+  await loop.stop();
+  assert.ok(Date.now() - t0 < 2000, "stop() interrupts the dormancy poll promptly");
+});
+
+test("model-lane mutate re-checks recency IN-TXN: a newer published seq makes it a no-op (codex F9)", async () => {
+  const plan = await planEvent(stubClient(), {
+    firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }),
+    deps: { resolveConsent: present, synthesize: goodSynth, putWiki: okPut, verifyWiki: okVerify },
+  });
+  assert.equal(plan.status, "projected");
+  // At mutate time a NEWER version (seq 99 > 42) has landed: the publish must not fire.
+  const newer = stubClient({ projectedSeq: 99 });
+  await plan.mutate(newer);
+  assert.ok(!newer.calls.some((x) => /publish_wiki_page_version/.test(x.sql)), "no publish over a newer seq");
+  // And with an older seq the publish still fires.
+  const older = stubClient({ projectedSeq: 7 });
+  await plan.mutate(older);
+  assert.ok(older.calls.some((x) => /publish_wiki_page_version/.test(x.sql)), "publish proceeds over an older seq");
 });

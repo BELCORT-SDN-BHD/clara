@@ -230,7 +230,7 @@
       "note": ""
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
-      "sha256": "9d7e634f17c62141507d840a7c9e05bad340d7b0530d07c792108d5a1e3d289e",
+      "sha256": "f0750212ec86fed812ca4f5ecff440e5894ec7ede2c174b3bf102f8d9346fd7d",
       "note": ""
     },
     "packages/runtime/workflows/closeExample.v1.ts": {
@@ -250,23 +250,23 @@
       "note": ""
     },
     "packages/runtime/workflows/firmInterview.v1.ts": {
-      "sha256": "223b8b26e8a9c46323359cf4f44e06ac6bf4c7558ed9e3d5d9cbece58cef95e5",
+      "sha256": "9411a49d26a3d5b27a23a2f3e6d256c96174f790264c67e00e2ea93c21c2d921",
       "note": ""
     },
     "packages/runtime/workflows/interview.v1.core.ts": {
-      "sha256": "ef5b617a07ab17d1dbbe9548a306f2248315b041e9b0536f2f9af4b5e9cf787d",
+      "sha256": "7ad6fd371a61d8874a041e64baa79978c86f4b933e57a4cc6785a6be1c37b3ab",
       "note": ""
     },
     "packages/runtime/workflows/interview.v1.questions.ts": {
-      "sha256": "d32eeacda0d7784e0c7e1fd57c67166582c2d1e2bc3f6ffc8ca4610eef059366",
+      "sha256": "04b8e616e6c967f573d03f18d781f0baf6f9415058c4fe1ec952325447a4ebee",
       "note": ""
     },
     "packages/runtime/workflows/interview.v1.steps.ts": {
-      "sha256": "e5256f5bdcdddac793ed7f9f9ff16302c448cd879074bf578f8428d15b006284",
+      "sha256": "7853953fb9b9d369e1ea59c0f03a5157baa87bc555217f6662224a409d509b2f",
       "note": ""
     },
     "packages/runtime/workflows/interview.v1.writer.ts": {
-      "sha256": "7abfef9e4b67fec4a8317500773b46ff38a401ebdbb43865d0f0161535a2560d",
+      "sha256": "28c93bb7a7be8c0bcb2d059930c385d64bf76704df623f9626438c935a171582",
       "note": ""
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {

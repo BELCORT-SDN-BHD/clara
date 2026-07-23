@@ -17,14 +17,15 @@ const skip = !RIG;
 
 const { register } = await import("tsx/esm/api");
 register();
-const { updatePlanWithCas, readPlan, isStalePlan } = await import("../workflows/interview.v1.writer.ts");
+const { updatePlanWithCas, readPlan, isStalePlan, verifyFirmCommitReceipt } = await import("../workflows/interview.v1.writer.ts");
 
 // Firm A fixtures (packages/db seed 0002_core_seed): Alara Advisory. USER ids are fixed by
 // the seed; FIRM ids are gen_random_uuid()'d at seed time and differ per rig — so the
 // owner's firm is derived from the live membership row in before(), never hardcoded.
 const OWNER_A = "5eed0000-0000-4000-8000-00000000a11e"; // owner (admin+ floor)
 const BOOKKEEPER_A = "5eed0000-0000-4000-8000-00000000b0b1"; // active bookkeeper (a valid answered_by)
-let FIRM_A;
+const OWNER_B = "5eed0000-0000-4000-8000-00000000da5e"; // owner of a DIFFERENT firm (foreign-owner probe)
+let FIRM_A, FIRM_A_FIRM_PLAN, FIRM_B, CLIENT_PLAN_A;
 
 let pg, client;
 
@@ -44,6 +45,22 @@ before(async () => {
   );
   FIRM_A = fr.rows[0]?.firm_id;
   assert.ok(FIRM_A, "seed owner has exactly one active owner membership");
+  const bp = await client.query(
+    "select id from clara.onboarding_plans where firm_id=$1 and scope_kind='firm' and state='open' order by created_at limit 1",
+    [FIRM_A],
+  );
+  FIRM_A_FIRM_PLAN = bp.rows[0]?.id; // the firm-scope plan create_firm minted for firm A
+  const fb = await client.query(
+    "select firm_id from clara.firm_memberships where user_id=$1 and status='active' and role='owner'",
+    [OWNER_B],
+  );
+  FIRM_B = fb.rows[0]?.firm_id;
+  // STAGE the open client plan ourselves — never query for a leftover one: when the whole
+  // runtime suite runs first, earlier tests commit every seeded open client plan (the
+  // firm-scope plans stay open; nothing commits those). Rig-portable by construction.
+  const staged = await beginOnboarding(`DB F2 probe ${Date.now()}`);
+  CLIENT_PLAN_A = staged.plan_id;
+  assert.ok(FIRM_A_FIRM_PLAN && FIRM_B && CLIENT_PLAN_A, "firm-scope plan, firm B, and a client plan all resolve");
 });
 
 after(async () => {
@@ -133,4 +150,21 @@ test("update_onboarding_plan refuses an answered_by that is not an active bookke
     (e) => e.code === "CLR04",
     "a non-member answered_by is CLR04",
   );
+});
+
+// --- F2: verifyFirmCommitReceipt against the REAL schema (resolve_chat_principal + plan) -----
+
+test("F2 (DB): a verified firm receipt requires an OPEN firm plan of firmId owned by the principal", { skip }, async () => {
+  assert.equal(await verifyFirmCommitReceipt(withRuntime, { planId: FIRM_A_FIRM_PLAN, firmId: FIRM_A, principalUserId: OWNER_A }), true, "firm A's owner, firm A's firm plan → verified");
+});
+
+test("F2 (DB): forged/foreign receipts are refused — foreign owner, non-owner member, firmId mismatch, client-scope plan", { skip }, async () => {
+  // The principal owns a DIFFERENT firm (firm B) — resolve_chat_principal.firm_id ≠ firmId.
+  assert.equal(await verifyFirmCommitReceipt(withRuntime, { planId: FIRM_A_FIRM_PLAN, firmId: FIRM_A, principalUserId: OWNER_B }), false, "an owner of a different firm cannot claim firm A's plan");
+  // An active member of firm A who is NOT the owner (a bookkeeper).
+  assert.equal(await verifyFirmCommitReceipt(withRuntime, { planId: FIRM_A_FIRM_PLAN, firmId: FIRM_A, principalUserId: BOOKKEEPER_A }), false, "a bookkeeper is not the owner");
+  // The receipt names firm B but the plan belongs to firm A.
+  assert.equal(await verifyFirmCommitReceipt(withRuntime, { planId: FIRM_A_FIRM_PLAN, firmId: FIRM_B, principalUserId: OWNER_A }), false, "firmId must equal the plan's firm_id");
+  // A client-scope plan is never a firm bootstrap target (F2 — pointing the receipt at an open client plan).
+  assert.equal(await verifyFirmCommitReceipt(withRuntime, { planId: CLIENT_PLAN_A, firmId: FIRM_A, principalUserId: OWNER_A }), false, "a client-scope plan is refused");
 });
