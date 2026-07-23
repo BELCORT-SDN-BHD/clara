@@ -55,8 +55,17 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > `other`. **Gates S/P are FOLLOW-ON eval items, deferred to real documents** (never
 > synthetic): **S** needs ≥3 post-0016 credit sightings + a real MyInvois XML, **P**
 > needs a real SST-stated bill — both ride the next real document cycle.
-> Waves **B–G** below are unchanged; next order: **Wave B (knowledge + onboarding)**,
-> with the S/P follow-on eval riding the next real document cycle.
+> **Wave B is MID-BUILD (2026-07-23):** the design contract
+> `docs/plan/wave-b-contract.md` v1.0 is ratified LAW (ADR-032, owner rulings
+> WB-R1..R18: `onboarding` client status, the tick-list seeding ceremony, F3
+> split-by-layer, atomic set approval, the wiki authority boundary, purpose-gated
+> pack v4, ONE ceremony → runtime v25 with chatTurn_v7 + wiki-aware autoDraft_v3,
+> close gates O/K/W2/L/R2/F on REAL documents). The **DB heart — migration 0017 —
+> is MERGED UNDEPLOYED** (ADR-033, PR #67; 55-pin design, 8 adjudicated forks, a
+> 179-cell contract-blind battery, a six-round cross-model ratchet to RESOLVED;
+> evidence `docs/plan/research/wave-b/`). Remaining: the v25 runtime lanes → the
+> dashboard lanes → the WB-R18 deploy ceremony → the live eval. Waves **C–G**
+> below are unchanged; the S/P follow-on eval rides the next real document cycle.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).

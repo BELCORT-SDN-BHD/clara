@@ -97,42 +97,27 @@ the domain-doc map) lives in `docs/agents/`.
 Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
-In one line: **Phase 4 is deep in the product build. WAVE A is FULLY LIVE
-(ADR-022/023/024, PRs #34–#39): the daily AP loop — coding, review queue,
-`doc_review`, the confidence-ladder lanes, the event-driven autodraft sweep,
-typed rules + open-questions — on live Supabase, the Fly `clara-runtime`, and
-the dashboard at **Cloudflare Pages `app.clarabook.com`** (Vercel dropped);
-GATE 3 closed beta-real earlier (17/17 replay, AP gate exact RM 1,350,938.21,
-kill-mid-workflow exactly-once); the hardening interlude (ADR-020/021) closed
-the DR gate + `acl-baseline` live; repo at `github.com/BELCORT-SDN-BHD/clara`,
-agent identity `belcorttao`.** **WAVE A2 IS FULLY LIVE AND THE §9 EVAL IS CLOSED
-(2026-07-22, ADR-025 design / ADR-026 build / ADR-027 deploy+eval, PRs #41–#46):**
-the sales-invoice/AR side + MyInvois UBL local no-egress parse + SST 3-leg +
-CN/DN + **purchase-only** human-signed bounded auto-posting, deployed through the
-owner-`!`-gated ceremony (0015 applied, CoA `300-000` re-onboarded) and proven by
-the live eval — **Gate A exact** (Σ 6 sales invoices = RM 1,973,332.91 = 300-000
-debits = 500-000 credits; ONE customer with the D&Dream→Dare-To-Dream
-`former_name` alias via the audited rename) + **Gate B exact** (6 JVs chat-coded
-as generic `journal_entry` drafts; salaries 405,000 / EPF-er 52,200 / SOCSO-er
-2,187.15 / EIS-er 249.90 / share capital 1,000). The eval caught **three real
-as-built gaps, fixed live** (ADR-027): the onboard script's stale `receivable`
-validation (#44), the frozen chat tool's supplier-bill-only draft lane →
-**`chatTurn_v4`** (#45), and the missing NULL-kind voucher lane → **`chatTurn_v5`**
-(#46) — both version bumps per Appendix A, freeze manifest 29→41 append-only.
-**WAVE A2.1 IS CLOSED (2026-07-23, ADR-028 design / ADR-029 DB / ADR-030
-close, owner ruling WA21-R13):** the four build lanes landed through the full
-adversarial ladder (PRs #57–#61), the 0016 deploy ceremony executed (backup →
-quiesce → atomic apply with the audited repairs → runtime v24), and the §9
-eval closed **Gates W/C/D on live books** — the RPR SST watch raised
-**overdue, earliest crossing June-2025, RM 1,310,276.40 confirmed to the sen**,
-the agent surfaced it **unprompted** mid-coding with full v6 framing (the
-§9-A2 assertion in production), and a fresh bank-statement scan ran the whole
-intake→classify pipeline (`bank_statement@0.99`, `invoice_facts` never ran).
-**Gates S/P are follow-on eval items deferred to REAL documents** (the
-side-aware sighting pool starts empty by design; never synthetic docs).
-**LIVE POSTURE: Supabase 16 migrations · Fly `clara-runtime` v24 (`chatTurn_v6`
-/ `autoDraft_v2`, 8 consumer loops) · dashboard auto-deploys from `main` ·
-`clara-backup` daily on pinned rclone 1.74.4 (zero-501 proven).** **Canary
-`daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.** NEXT: **Wave B
-(knowledge + onboarding) per REBUILD-PLAN**, with the S/P follow-on eval riding
-the next real invoice/bill cycle.
+
+**Phase 4, mid-WAVE B (knowledge + onboarding).** The waves so far, one line each:
+**Wave A** (daily AP loop) FULLY LIVE — ADR-022/023/024; GATE 3 closed beta-real
+(17/17 replay, AP gate exact RM 1,350,938.21, kill-mid-workflow exactly-once).
+**Wave A2** (sales/AR + MyInvois local parse + SST 3-leg + CN/DN + purchase-only
+bounded auto-posting) FULLY LIVE, §9 eval CLOSED — ADR-025/026/027 (Gate A exact
+RM 1,973,332.91; Gate B exact). **Wave A2.1** (SST registration watch + sales
+autopost lift + classifier gate) CLOSED — ADR-028/029/030, ruling WA21-R13; the RPR
+watch surfaced OVERDUE **unprompted** in production, RM 1,310,276.40 to the sen;
+Gates S/P deferred to REAL documents (PART 2). **Wave B**: the design contract
+`docs/plan/wave-b-contract.md` v1.0 is LAW (ADR-032, rulings WB-R1..R18) and the
+**DB heart — migration 0017 — is MERGED UNDEPLOYED** (ADR-033, PR #67): built by
+blind lanes (a 179-cell contract-blind battery, SQL-unread) and a SIX-round
+cross-model adversarial ratchet to RESOLVED; evidence in
+`docs/plan/research/wave-b/`. **Live posture: Supabase 16 migrations · Fly
+`clara-runtime` v24 (chatTurn_v6/autoDraft_v2, 8 loops) · dashboard Pages
+`app.clarabook.com` auto-deploys from `main` · `clara-backup` daily (rclone
+1.74.4, zero-501-proven).** NEXT: **the v25 runtime lanes** (chatTurn_v7,
+wiki-aware autoDraft_v3, firmInterview_v1/clientOnboarding_v1, the
+wiki-projection + lint consumers) → the dashboard lanes → the ONE owner-gated
+WB-R18 ceremony (Supavisor headroom first; live 16→17, runtime v24→v25) → the
+live gates O/K/W2/L/R2/F on REAL documents (WB-R16: a real second client + RPR''s
+management accounts for the B-12 lane). **Canary `daba7f2e` stays ARMED, due
+2026-08-02 — NEVER answer it.**
