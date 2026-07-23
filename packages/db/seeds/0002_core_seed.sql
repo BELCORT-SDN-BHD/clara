@@ -19,7 +19,9 @@ declare
   k_erin  constant uuid := '5eed0000-0000-4000-8000-00000000e21f';
   k_tok_a constant uuid := '5eed0000-0000-4000-8000-0000000a0001';
   k_tok_b constant uuid := '5eed0000-0000-4000-8000-0000000a0002';
+  k_cmt constant uuid := '5eed0000-0000-4000-8000-00000000c317';
   v_firm_a uuid; v_firm_b uuid;
+  v_plan uuid; v_prev uuid;
   v_client uuid; v_res uuid; v_entry uuid; v_tok uuid;
   v_doc uuid; v_doc_firm uuid; v_sha text; v_seed_doc jsonb;
   v_clients uuid[] := '{}';
@@ -38,7 +40,8 @@ begin
     (k_alice, 'Alice Tan',   'alice@synthetic.test'),
     (k_bob,   'Bob Lim',     'bob@synthetic.test'),
     (k_dave,  'Dave Rahman', 'dave@synthetic.test'),
-    (k_erin,  'Erin Wong',   'erin@synthetic.test');
+    (k_erin,  'Erin Wong',   'erin@synthetic.test'),
+    (k_cmt,   'Cara Commit', 'cara@synthetic.test'); -- [R3-F2] the clean Gate-O committer
   insert into clara.firm_admissions (token, note) values
     (k_tok_a, 'synthetic firm A bootstrap'),
     (k_tok_b, 'synthetic firm B bootstrap');
@@ -68,6 +71,50 @@ begin
         case when exists (select 1 from clara.clients c where c.id = cid and c.firm_id = v_firm_a)
              then k_alice else k_dave end
       )::text, true);
+
+    -- [R3-F2] the legacy creator now births ONBOARDING + a plan (no Gate-O
+    -- bypass), so the seed drives its operational clients active THROUGH the
+    -- audited verbs. PROBED law: the creator-opener is a contributor and the
+    -- bookkeeper counts as an eligible checker (so self-attestation refuses,
+    -- CLR05) yet cannot execute the admin-floored commit (CLR04) — the lawful
+    -- committer is a DISTINCT clean ADMIN: the synthetic k_cmt admin added per
+    -- firm below (memberships removed at the end). Bimodal-safe: on a pre-flip
+    -- schema the status is already 'active' and this block skips.
+    if (select status from clara.clients where id = cid) = 'onboarding' then
+      select id, revision_token into v_plan, v_prev from clara.onboarding_plans
+        where client_id = cid and state = 'open' order by created_at desc limit 1;
+      perform clara.update_onboarding_plan(p_plan => v_plan, p_expected_revision => v_prev,
+        p_items => '[{"item_kind":"todo","item_key":"carry_down_deferred","state":"deferred"}]'::jsonb,
+        p_answered_by => case when exists (select 1 from clara.clients c where c.id = cid and c.firm_id = v_firm_a)
+                              then k_alice else k_dave end,
+        p_op_key => 'seed-plan-'||cid);
+      select revision_token into v_prev from clara.onboarding_plans where id = v_plan;
+      -- one-ACTIVE-firm law: k_cmt holds one membership at a time — hop firms
+      -- through the audited member verbs as each firm's clients come up.
+      if not exists (select 1 from clara.firm_memberships fm
+          where fm.user_id = k_cmt and fm.status = 'active'
+            and fm.firm_id = (select c2.firm_id from clara.clients c2 where c2.id = cid)) then
+        if exists (select 1 from clara.firm_memberships fm where fm.user_id = k_cmt and fm.status = 'active') then
+          perform set_config('request.jwt.claims', json_build_object('sub',
+            case when exists (select 1 from clara.firm_memberships fm
+                   where fm.user_id = k_cmt and fm.status = 'active' and fm.firm_id = v_firm_a)
+                 then k_alice else k_dave end)::text, true);
+          perform clara.remove_member(fm.id, 'seed-hop-cmt-'||cid)
+            from clara.firm_memberships fm where fm.user_id = k_cmt and fm.status = 'active';
+        end if;
+        perform set_config('request.jwt.claims', json_build_object('sub',
+          case when exists (select 1 from clara.clients c2 where c2.id = cid and c2.firm_id = v_firm_a)
+               then k_alice else k_dave end)::text, true);
+        perform clara.add_member((select c2.firm_id from clara.clients c2 where c2.id = cid),
+          k_cmt, 'admin', 'seed-add-cmt-'||cid);
+      end if;
+      perform set_config('request.jwt.claims', json_build_object('sub', k_cmt)::text, true);
+      perform clara.commit_client_onboarding(p_client => cid, p_plan => v_plan,
+        p_expected_plan_revision => v_prev, p_op_key => 'seed-commit-'||cid);
+      perform set_config('request.jwt.claims', json_build_object('sub',
+        case when exists (select 1 from clara.clients c where c.id = cid and c.firm_id = v_firm_a)
+             then k_alice else k_dave end)::text, true);
+    end if;
 
     for acct in select * from (values
       ('1000','Cash at Bank','asset'), ('1100','Accounts Receivable','asset'),
@@ -104,5 +151,14 @@ begin
     perform clara.approve_entry(v_entry, v_tok, null, 'seed-ap-'||cid);
   end loop;
 
-  raise notice 'core seed applied: 2 firms, 4 users, 3 clients, charts + opening entries';
+  -- [R3-F2] retire the synthetic Gate-O committer's memberships (the audited
+  -- verb; the user row stays — synthetic worlds keep their audit trail).
+  perform set_config('request.jwt.claims', json_build_object('sub', k_alice)::text, true);
+  perform clara.remove_member(m.id, 'seed-rm-cmt-a')
+    from clara.firm_memberships m where m.firm_id = v_firm_a and m.user_id = k_cmt and m.status = 'active';
+  perform set_config('request.jwt.claims', json_build_object('sub', k_dave)::text, true);
+  perform clara.remove_member(m.id, 'seed-rm-cmt-b')
+    from clara.firm_memberships m where m.firm_id = v_firm_b and m.user_id = k_cmt and m.status = 'active';
+
+  raise notice 'core seed applied: 2 firms, 5 users, 3 clients, charts + opening entries';
 end $$;

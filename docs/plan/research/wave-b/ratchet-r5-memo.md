@@ -1,0 +1,9 @@
+R5 closing memo — read-only; nothing modified.
+
+[R4-F1] verified lawful. The tagged fixture bridge uses the real `update_onboarding_plan` CAS, audited `add_member`/`remove_member`, and contributor-distinct `commit_client_onboarding`; migration 0017 contains no test-mode branch or R4 backdoor. Taxonomy is exact: `member.added`/`member.removed` → `context_update`; `onboarding.plan_committed`/`client.activated` → `ignore`. Both decisions are non-waking.
+
+The pure-NULL residual is certified: [`supersede_opening_item`](</C:/Users/zhant/Desktop/clara-rebuild/packages/db/migrations/0017_wave_b.sql:4131>) calls `_record_onboarding_contributor(s.plan_id,c.actor)` unconditionally after the NULL/replacement branch. The tail pins both the helper’s update-and-snapshot effect and the call’s position after the NULL-branch anchor.
+
+[HIGH] Settled AMB-13 remains unimplemented — the [binding adjudication](</C:/Users/zhant/Desktop/clara-rebuild/docs/plan/research/wave-b/0017-ambiguity-adjudications.md:40>) requires K3 to follow the existing `entry.drafted` convention; the generic draft family emits it, but `_draft_opening_item_core` returns without an event and both [`draft_opening_item`](</C:/Users/zhant/Desktop/clara-rebuild/packages/db/migrations/0017_wave_b.sql:3500>) and `seed_fixed_asset` audit then finish without `_append_event`; the battery explicitly asserts neither behavior — consequence: opening-draft mutations do not advance `books_version` and are absent from event replay/projections, allowing stale context tokens to survive real book changes — fix: emit one correctly attributed `entry.drafted` per K3-created draft at each public writer’s transaction tail, consistently cover supersede-created reversal/replacement drafts, and add exact count/order/payload plus tail assertions.
+
+CONTINUE

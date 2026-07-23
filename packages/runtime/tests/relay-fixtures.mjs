@@ -117,7 +117,95 @@ export async function createFirm(sub, { name, token, opKey }) {
 
 export async function createClient(sub, { name, opKey }) {
   const r = await humanQuery(sub, "select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opKey]);
-  return r.rows[0].receipt.client_id;
+  const id = r.rows[0].receipt.client_id;
+  await activateOnboardingClient(sub, id);
+  return id;
+}
+
+// Membership verbs (human lane, granted to clara_authenticated) — added ONLY for the
+// [R4-F1] Gate-O bridge below. add_member returns { membership_id }; we read it off
+// the receipt so the temp-admin ceremony needs no separate lookup query.
+export async function addMember(sub, { firm, user, role: memberRole, opKey }) {
+  const r = await humanQuery(
+    sub,
+    "select clara.add_member(p_firm => $1, p_user => $2, p_role => $3, p_op_key => $4) as receipt",
+    [firm, user, memberRole, opKey],
+  );
+  return r.rows[0].receipt.membership_id;
+}
+
+export async function removeMember(sub, { membership, opKey }) {
+  await humanQuery(sub, "select clara.remove_member(p_membership => $1, p_op_key => $2)", [membership, opKey]);
+}
+
+/**
+ * [R4-F1] (ratchet round-4 finding) Drive a freshly-created fixture client from
+ * ONBOARDING to ACTIVE through the audited Gate-O ceremony — without relaxing any
+ * product law. Ported from packages/db/tests/rig-fixtures.mjs (createClient /
+ * bridge-v2), adapted to the relay tests' actor/JWT plumbing.
+ *
+ * Migration 0017's creator law makes clara.create_client birth an ONBOARDING client
+ * with an open plan (no Gate-O bypass). An onboarding client makes
+ * enqueue_invoice_facts return `skipped_client_onboarding` instead of `queued`
+ * (the finding's classify-consumer failure). Lawful activation:
+ *   1. Add a deferred `carry_down_deferred` item via update_onboarding_plan — the
+ *      runtime-interview CAS writer (EXECUTE → clara_runtime); its p_answered_by must
+ *      be an active bookkeeper+ (the firm owner qualifies). This item satisfies the
+ *      commit's opening-position gate.
+ *   2. commit_client_onboarding by an admin DISTINCT from every plan contributor
+ *      (Gate O). buildFirm has a single owner who is the sole contributor, so we mint
+ *      a TEMPORARY admin (add_member → commit → remove_member) — the distinct-checker
+ *      route, no attestation needed. If the firm already has another non-contributor
+ *      admin/owner, that one commits and no temp is minted.
+ * Pre-0017 (client born 'active') the status check no-ops, so callers stay bimodal-green.
+ */
+async function activateOnboardingClient(sub, client) {
+  const cl = (await rootQuery("select status, firm_id from clara.clients where id = $1", [client])).rows[0];
+  if (cl?.status !== "onboarding") return;
+  const plan = (
+    await rootQuery(
+      "select id, revision_token from clara.onboarding_plans where client_id = $1 and state = 'open' order by created_at desc limit 1",
+      [client],
+    )
+  ).rows[0];
+  if (!plan) throw new Error("[R4-F1] Gate-O bridge: onboarding client without an open plan");
+  await asRuntime((c) =>
+    c.query(
+      "select clara.update_onboarding_plan(p_plan => $1, p_expected_revision => $2, p_items => $3::jsonb, p_answered_by => $4, p_op_key => $5)",
+      [
+        plan.id,
+        plan.revision_token,
+        JSON.stringify([{ item_kind: "todo", item_key: "carry_down_deferred", state: "deferred" }]),
+        sub,
+        opk("bridge"),
+      ],
+    ),
+  );
+  const rev = (await rootQuery("select revision_token from clara.onboarding_plans where id = $1", [plan.id])).rows[0]
+    .revision_token;
+  const commitAs = (who) =>
+    humanQuery(
+      who,
+      "select clara.commit_client_onboarding(p_client => $1, p_plan => $2, p_expected_plan_revision => $3, p_op_key => $4)",
+      [client, plan.id, rev, opk("bridgec")],
+    );
+  // Prefer an existing non-contributor admin/owner; otherwise mint a temporary admin.
+  const alt = (
+    await rootQuery(
+      `select user_id from clara.firm_memberships
+        where firm_id = $1 and status = 'active' and role in ('admin','owner') and user_id <> $2
+        order by case role when 'owner' then 0 else 1 end, created_at limit 1`,
+      [cl.firm_id, sub],
+    )
+  ).rows[0]?.user_id;
+  if (alt) {
+    await commitAs(alt);
+  } else {
+    const temp = await insertUser("bridge", `tmp_${client.slice(0, 8)}`);
+    const membership = await addMember(sub, { firm: cl.firm_id, user: temp, role: "admin", opKey: opk("bta") });
+    await commitAs(temp);
+    await removeMember(sub, { membership, opKey: opk("btr") });
+  }
 }
 
 // ---------------------------------------------------------------------------

@@ -61,7 +61,54 @@ export async function removeMember(sub, { membership, opKey }) {
 
 export async function createClient(sub, { name, opKey }) {
   const r = await humanQuery(sub, "select clara.create_client(p_name => $1, p_op_key => $2) as receipt", [name, opKey]);
-  return r.rows[0].receipt.client_id; // receipt jsonb = {client_id}
+  const id = r.rows[0].receipt.client_id; // receipt jsonb = {client_id}
+  await activateLegacyClient(sub, id);
+  return id;
+}
+
+/** [R3-F2 bridge] Post-0017 the legacy creator births an ONBOARDING client with
+ *  a plan (no Gate-O bypass). Fixture worlds need operational clients, so drive
+ *  the birth to 'active' THROUGH the audited plan+commit verbs: a deferred
+ *  carry-down item, then a committer DISTINCT from every contributor (or the
+ *  sole-admin attestation path). Pre-fix (client born 'active') this no-ops, so
+ *  every suite stays bimodal-green. */
+async function activateLegacyClient(sub, client) {
+  const c = (await rootQuery("select status, firm_id from clara.clients where id = $1", [client])).rows[0];
+  if (c?.status !== "onboarding") return;
+  const plan = (await rootQuery(
+    "select id, revision_token from clara.onboarding_plans where client_id=$1 and state='open' order by created_at desc limit 1",
+    [client])).rows[0];
+  if (!plan) throw new Error("legacy bridge: onboarding client without an open plan");
+  await roleQuery(ROLES.runtime,
+    "select clara.update_onboarding_plan(p_plan => $1, p_expected_revision => $2, p_items => $3::jsonb, p_answered_by => $4, p_op_key => $5)",
+    [plan.id, plan.revision_token,
+      JSON.stringify([{ item_kind: "todo", item_key: "carry_down_deferred", state: "deferred" }]),
+      sub, opk("bridge")]);
+  const rev = (await rootQuery("select revision_token from clara.onboarding_plans where id=$1", [plan.id])).rows[0].revision_token;
+  // [R3-F2/F3 repair, PROBED] the eligible-checker population counts
+  // bookkeepers, so with one present the creator's self-attestation is
+  // lawfully REFUSED (CLR05 distinct_checker) while the bookkeeper cannot
+  // execute the admin-floored commit (CLR04). The uniform lawful route:
+  // a distinct contributor-clean ADMIN commits — an existing one when the
+  // firm has one, otherwise a TEMPORARY admin added, committing, and removed
+  // entirely through the audited membership verbs.
+  const alt = (await rootQuery(
+    `select user_id from clara.firm_memberships
+      where firm_id=$1 and status='active' and role in ('admin','owner') and user_id<>$2
+      order by case role when 'owner' then 0 else 1 end, created_at limit 1`,
+    [c.firm_id, sub])).rows[0]?.user_id;
+  const commitAs = async (who) => humanQuery(who,
+    "select clara.commit_client_onboarding(p_client => $1, p_plan => $2, p_expected_plan_revision => $3, p_op_key => $4)",
+    [client, plan.id, rev, opk("bridgec")]);
+  if (alt) {
+    await commitAs(alt);
+  } else {
+    const temp = await insertUser("bridge", `tmp_${client.slice(0, 8)}`);
+    await addMember(sub, { firm: c.firm_id, user: temp, role: "admin", opKey: opk("bta") });
+    await commitAs(temp);
+    const mem = await membershipId(c.firm_id, temp);
+    await removeMember(sub, { membership: mem, opKey: opk("btr") });
+  }
 }
 
 export async function upsertAccount(sub, { client, code, name, type, special = null, opKey = null }) {
