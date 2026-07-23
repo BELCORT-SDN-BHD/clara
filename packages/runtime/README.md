@@ -12,9 +12,9 @@ v2.1; `docs/architecture/ARCHITECTURE.md` §4 + Appendix A; migration
 - **Durable substrate**: the Workflow DevKit Postgres world (`workflow` +
   `@workflow/world-postgres`, `ai@7.0.31`), built by Nitro with the
   `workflow/nitro` compiler module (Appendix A).
-- **The chat loop** (`workflows/chatTurn.v5.ts` + its FROZEN closure
-  `chatTurn.v5.impl.ts` / `chatTurn.v5.prompt.ts`; the v1→v5 history follows
-  Appendix A — v1–v4 stay frozen + reachable for parked runs): a coding-capable
+- **The chat loop** (`workflows/chatTurn.v6.ts` + its FROZEN closure
+  `chatTurn.v6.impl.ts` / `chatTurn.v6.prompt.ts`; the v1→v6 history follows
+  Appendix A — v1–v5 stay frozen + reachable for parked runs): a coding-capable
   advisor with the `draft_journal_entry` write tool that streams the model to
   the run's writable, reads the client context pack with a per-attempt wake
   credential (minted INSIDE the step, never crossing a step boundary), and
@@ -29,11 +29,13 @@ v2.1; `docs/architecture/ARCHITECTURE.md` §4 + Appendix A; migration
   + reconcile (`lib/reconciler.mjs`, incl. the daily
   `clara.reconcile_autopost_rules()` sweep — autopost-rule hard-expiry + the
   no-recent-post nudges, cadence `CLARA_AUTOPOST_RECONCILE_HOURS` default 24,
-  error-isolated; PR #52). **Consumer lanes**, each on its OWN
-  dedicated connection + advisory lock: matcher (`lib/matcher.mjs`), autodraft
-  (`lib/autodraft.mjs`), local_facts (`lib/local-facts.mjs`), rule_post
-  (`lib/rule-post.mjs`) — plus the managed clamd scanner (`lib/scan.mjs`, no DB
-  session). **Supervisor** (`scripts/serve.mjs`): one crash-only process group.
+  error-isolated; PR #52). **Consumer lanes** (Wave A2.1 added the last three),
+  each on its OWN dedicated connection + advisory lock: matcher (`lib/matcher.mjs`),
+  autodraft (`lib/autodraft.mjs`), local_facts (`lib/local-facts.mjs`), rule_post
+  (`lib/rule-post.mjs`), sst_watch (`lib/sst-watch.mjs`), facts_gate
+  (`lib/facts-gate.mjs`), classify (`lib/classify.mjs`) — plus the managed clamd
+  scanner (`lib/scan.mjs`, no DB session). **Supervisor** (`scripts/serve.mjs`):
+  one crash-only process group.
 - **HTTP** (`src/index.ts`): chat sessions/messages/turns, an SSE stream that
   survives detach, and `/health` + `/ready` (fail-vs-warn matrix, §4.7).
 - **Workflow-versioning**: `registry.ts` names the newest version enqueue sites
@@ -85,9 +87,11 @@ There is deliberately no runtime status route. Human status reads use migration
 `RELAY_TEST_MODE=1` is the only adapter gate: tests inject/localize scanner,
 Storage, and Azure behavior. The real production adapters have no dev bypass.
 
-The connection ceiling is **23 sessions**: runtime pool 5 + read pool 5 + WDK
-engine 5 + control/router LISTEN 2 + the four consumer-lane leader sessions
-(matcher, autodraft, local_facts, rule_post) 4 + the write pool 2. Document
+The connection ceiling is **≈26 sessions** (Wave A2.1 added three consumer lanes;
+integrator must confirm Supavisor headroom before deploy): runtime pool 5 + read
+pool 5 + WDK engine 5 + control/router LISTEN 2 + the seven consumer-lane leader
+sessions (matcher, autodraft, local_facts, rule_post, sst_watch, facts_gate,
+classify) 7 + the write pool 2. Document
 intake and extraction reuse short checkouts from the existing runtime pool; no DB
 connection is held while streaming, scanning, uploading, downloading, or calling
 Azure.
@@ -95,7 +99,7 @@ Azure.
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
 `chatTurn_v2` (Slice 6) added the narrow WRITE capability; the registry now runs
-`chatTurn_v5` (v1–v4 stay frozen + reachable for parked runs): the model can **draft**
+`chatTurn_v6` (v1–v5 stay frozen + reachable for parked runs): the model can **draft**
 ONE journal entry per turn — a supplier bill, a sales invoice / sales credit note, or
 a generic voucher-style `journal_entry` — always for a human to approve; it never
 approves or posts (agent-never-signs, ADR-015). New in v2:
@@ -153,7 +157,7 @@ pnpm --filter @clara/runtime build && pnpm --filter @clara/runtime start
 ## Versioning discipline (do not skip)
 
 Per Appendix A, a deployed workflow body is immutable once any run can be in
-flight. Never edit a `// @frozen` file — add `chatTurn.v6.ts` and repoint
+flight. Never edit a `// @frozen` file — add `chatTurn.v7.ts` and repoint
 `registry.ts`. Renaming/deleting an export with in-flight runs is forbidden
 (the workflow name derives from path+export; a rename strands parked runs).
 

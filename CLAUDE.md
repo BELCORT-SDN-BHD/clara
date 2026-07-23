@@ -84,10 +84,11 @@ The engineering skill set (mattpocock/skills + repo-authored) is vendored under
 `.claude/skills/` and **tracked in git** — available in every session. Key ones:
 **`orchestrator-fable`** (the session workflow), **`grilling`** (`/grillme` —
 interview the owner to kill ambiguity before building), **`handoff`** (a clean
-continue-prompt for a fresh session), **`code-review`**, **`tdd`**, **`research`**,
-**`diagnosing-bugs`**, **`codebase-design`**, **`qa`**. Per-repo skill config
-(issue-tracker → `BELCORT-SDN-BHD/clara`, triage labels, the domain-doc map) lives
-in `docs/agents/`.
+continue-prompt for a fresh session), **`code-reviewbymatt`** (the review
+standards/spec bar; the built-in `/code-review` remains the native review lane),
+**`tdd`**, **`research`**, **`diagnosing-bugs`**, **`codebase-design`**, **`qa`**.
+Per-repo skill config (issue-tracker → `BELCORT-SDN-BHD/clara`, triage labels,
+the domain-doc map) lives in `docs/agents/`.
 
 ## Where we are
 
@@ -116,15 +117,20 @@ as-built gaps, fixed live** (ADR-027): the onboard script's stale `receivable`
 validation (#44), the frozen chat tool's supplier-bill-only draft lane →
 **`chatTurn_v4`** (#45), and the missing NULL-kind voucher lane → **`chatTurn_v5`**
 (#46) — both version bumps per Appendix A, freeze manifest 29→41 append-only.
-**LIVE POSTURE: Supabase at 15 migrations, Fly runtime v23 (`chatTurn_v5`),
-dashboard auto-deploys from `main`.** **Canary `daba7f2e` stays ARMED, due
-2026-08-02 — NEVER answer it.** **THE R2 OFF-SITE BACKUP IS WIRED AND
-RESTORE-PROVEN (2026-07-22, PRs #49/#50; `clara-backup` Fly app, daily, dead-man's
-switch armed — evidence `docs/ops/DR.md` §9). WAVE A2.1 IS RATIFIED (ADR-028,
-contract v1.0) AND ITS DB HEART IS MERGED (ADR-029, PR #55 — migration 0016:
-the structural SST compliance watch, the sales-autopost lift + OCR envelope,
-the classifier gate, the purchase visibility split; six-round cross-model
-adversarial RESOLVED; NOT yet deployed to live).** NEXT: the remaining A2.1
-lanes (runtime consumers, `chatTurn_v6`/`autoDraft_v2`, ComplianceWatchCard,
-modern rclone), then the owner-`!`-gated 0016 deploy ceremony + the W/S/P/C/D
-live eval (the wave's DONE gate), then Wave B per REBUILD-PLAN.
+**WAVE A2.1 IS CLOSED (2026-07-23, ADR-028 design / ADR-029 DB / ADR-030
+close, owner ruling WA21-R13):** the four build lanes landed through the full
+adversarial ladder (PRs #57–#61), the 0016 deploy ceremony executed (backup →
+quiesce → atomic apply with the audited repairs → runtime v24), and the §9
+eval closed **Gates W/C/D on live books** — the RPR SST watch raised
+**overdue, earliest crossing June-2025, RM 1,310,276.40 confirmed to the sen**,
+the agent surfaced it **unprompted** mid-coding with full v6 framing (the
+§9-A2 assertion in production), and a fresh bank-statement scan ran the whole
+intake→classify pipeline (`bank_statement@0.99`, `invoice_facts` never ran).
+**Gates S/P are follow-on eval items deferred to REAL documents** (the
+side-aware sighting pool starts empty by design; never synthetic docs).
+**LIVE POSTURE: Supabase 16 migrations · Fly `clara-runtime` v24 (`chatTurn_v6`
+/ `autoDraft_v2`, 8 consumer loops) · dashboard auto-deploys from `main` ·
+`clara-backup` daily on pinned rclone 1.74.4 (zero-501 proven).** **Canary
+`daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.** NEXT: **Wave B
+(knowledge + onboarding) per REBUILD-PLAN**, with the S/P follow-on eval riding
+the next real invoice/bill cycle.

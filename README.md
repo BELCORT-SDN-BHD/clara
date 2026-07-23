@@ -24,8 +24,9 @@ blueprint. **Product law → `docs/prd/PRD.md`. Target architecture →
   Slice-0 spike (`spike/`, `docs/architecture/ARCHITECTURE.md` Appendix A). The
   host is ratified in PROJECTLOG ADR-014. `packages/runtime` is the Slice-1
   skeleton (durable substrate + health/ready).
-- **Dashboard** — **Next.js 15** on Vercel, dashboard-direct on the Supabase
-  session JWT (`apps/dashboard`).
+- **Dashboard** — **Next.js 15** on **Cloudflare Pages** (`app.clarabook.com`;
+  Vercel dropped, ADR-024), dashboard-direct on the Supabase session JWT
+  (`apps/dashboard`).
 
 ## Monorepo map
 

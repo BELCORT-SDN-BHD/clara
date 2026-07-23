@@ -31,20 +31,32 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > **purchase-only** bounded auto-posting (the "standing rules" from Wave A's scope)
 > — was **deliberately inserted before Wave B** and is FULLY LIVE with the §9 eval
 > CLOSED (ADR-025/026/027, migration `0015`; Gate A exact RM 1,973,332.91, Gate B
-> exact). The **R2 off-site backup is DONE + restore-proven** (PRs #49/#50;
+> exact). The **R2 off-site backup is DONE + restore-proven** (PRs #49/#50, image
+> now on pinned rclone 1.74.4 per PRs #58/#61 with a zero-501 supervised live run;
 > evidence: `docs/ops/DR.md` §9). **Wave A2.1** — the eval finding ledger + the
 > ADR-026 deferrals (the SST registration-threshold compliance watch,
 > sales-direction autopost lift, purchase SST visibility split, doc-type
-> classifier gate) — is **RATIFIED v1.0** (ADR-028,
-> `docs/plan/wave-a2.1-contract.md`; PRs #51/#53), and **migration `0016` is
-> MERGED (PR #55) but NOT DEPLOYED — live Supabase remains at 15 migrations
-> (0001→0015)**; the `reconcile_autopost_rules` daily runtime sweep (#52) and the
-> settled review-card fix (#54) are on `main`. Still to build: the runtime
-> consumers (entry.approved→watch evaluator, document.classified→facts re-fire,
-> the classify worker), the `chatTurn_v6`/`autoDraft_v2` freeze bumps, and the
-> ComplianceWatchCard + direction-aware vocabulary.
-> Waves **B–G** below are unchanged; next order: the remaining **A2.1 lanes** →
-> the **0016 deploy ceremony + live eval** → **Wave B (knowledge + onboarding)**.
+> classifier gate) — is **CLOSED** (ADR-030, owner ruling **WA21-R13**; contract
+> `docs/plan/wave-a2.1-contract.md` v1.0, ADR-028; PRs #51–#61). **The 0016 deploy
+> ceremony EXECUTED 2026-07-23** (owner-`!`-gated): live Supabase now at **16
+> migrations (0001→0016)**, Fly `clara-runtime` **v24** (image `a21-v24`) running
+> `chatTurn_v6` + `autoDraft_v2` + the three new consumers (`sst_watch`,
+> `facts_gate`, `classify`) — **8 consumer loops** total; the in-migration audited
+> repairs ran (one customer/AR `vendor_account` rule declined); the six mis-stamped
+> docs re-classified via `classify_document`'s no-task path (verdicts `other`); a
+> fresh bank statement classified `bank_statement@0.99` through the full
+> intake→classify pipeline. Freeze manifest 53 entries; registry `chatTurn` v6 /
+> `autoDraft` v2 (v1–v5 / v1 retained frozen). **The §9 live eval closed Gates
+> W/C/D on live books:** **W** — the RPR (ROME PROPERTIES) turnover watch surfaced
+> UNPROMPTED with the full v6 framing (effective 2025-04-01 → OVERDUE, earliest
+> crossing 2025-06-01, application due 2025-07-31, included RM 1,310,276.40, mixed
+> 0; audited ack + re-arm ladder armed); **C** — the fresh bank statement classified
+> `bank_statement@0.99` end-to-end; **D** — the mis-stamped docs re-classified to
+> `other`. **Gates S/P are FOLLOW-ON eval items, deferred to real documents** (never
+> synthetic): **S** needs ≥3 post-0016 credit sightings + a real MyInvois XML, **P**
+> needs a real SST-stated bill — both ride the next real document cycle.
+> Waves **B–G** below are unchanged; next order: **Wave B (knowledge + onboarding)**,
+> with the S/P follow-on eval riding the next real document cycle.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
