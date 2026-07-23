@@ -63,27 +63,33 @@
     },
     "packages/runtime/workflows/autoDraft.v3.errors.ts": {
       "sha256": "ed65612c1bda9b78736fd2e12bb0cf134af087cec92093d244f5885524299073",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v3.impl.ts": {
       "sha256": "d2c27576652770168d4f82ec2c848ad88fc3c62ed05a5cbc4b037fe3fc7dcac9",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v3.infra.ts": {
       "sha256": "295a5367b2349ca391946251189bec4dc0b2222f62c984cc0d9adfd10e74c6e7",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v3.prompt.ts": {
       "sha256": "76607eb3e608205e62f7fd5f95beef5b50ffc67f2d685dcdb39658321f6310c2",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v3.tools.ts": {
       "sha256": "8df862f0bacfde3cb23a5df07e61956cf582e364e84ad82b11c259d00699a7b1",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v3.ts": {
       "sha256": "73990ddd927563fbabfc6bfb8feeeedfc92dcb71d2855ff0b28a9774a4c73b21",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.impl.ts": {
       "sha256": "015cf3c0fc5181c6706dc6f5e4e86361f419e25faf8f27f585a08a1ee23e22b6",
@@ -252,31 +258,38 @@
     },
     "packages/runtime/workflows/chatTurn.v7.errors.ts": {
       "sha256": "212cc220f4644d7bb3e83524bda273b0ddfd56d37174a2389610a02c1f639e95",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v7.impl.ts": {
       "sha256": "b6a56ef23af33fb8a027496b8cf6eeae72f96095c55b10434417de326eb9aae2",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v7.infra.ts": {
       "sha256": "a5b5395e46f05d0cb4207a763dff3f2b1bfedf97ac8db861601118520e8fbc2b",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v7.prompt.ts": {
       "sha256": "a36acd88473ef2a3e3c4b6c654a636d3a9e18d6aabee285641005069c28396ce",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v7.tools.ts": {
       "sha256": "5a38dd923395f1d322a75091fccc468f40e9d5165568ca853c21d64fb26d651e",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/chatTurn.v7.ts": {
       "sha256": "10c58a9107d7c52f18d8caf3054bd4f2e4e65e2b9acf746052911e859f3148fc",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
       "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
@@ -300,23 +313,28 @@
     },
     "packages/runtime/workflows/firmInterview.v1.ts": {
       "sha256": "bf7c1a5b1914c8493d378a5c75129d76c6660e3ff64f6cf47bfeabb58d5517e7",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/interview.v1.core.ts": {
       "sha256": "8a4d79337256050dac239d1165e87e778a2f4ee584464c9a56f2981791e23c54",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/interview.v1.questions.ts": {
       "sha256": "04b8e616e6c967f573d03f18d781f0baf6f9415058c4fe1ec952325447a4ebee",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/interview.v1.steps.ts": {
       "sha256": "f0bc0a0910367d586037f2988f8ef3ecd5c3ee775c2d639099d45b472dfbcff7",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/interview.v1.writer.ts": {
       "sha256": "28c93bb7a7be8c0bcb2d059930c385d64bf76704df623f9626438c935a171582",
-      "note": ""
+      "note": "",
+      "deployed": true
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
       "sha256": "f2d3ef98ed9ce533d04252fd5771e463b017c8b66c77ec70d74a457f534bd7b1",
