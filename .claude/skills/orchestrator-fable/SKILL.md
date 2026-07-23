@@ -41,9 +41,23 @@ acceptance criteria, then delegates the code-level reasoning and execution.
 
 - **Methodlogy/Philosophy: Delegate to the most reliable available lane, not a fixed tool — and only when it helps.** Delegate when parallelism or specialist-isolation materially benefits the task; do a bounded, well-specified step yourself rather than dispatch as ceremony.
 
-- Dispatch lanes **All lanes get explicit model overrides, FORBID to use model `fable` as lane's model.**:
- 1. **Claude native lane:** select the most suitable native `subagents`, `agent-teammates` or `dynamicworkflow` dispatch that can cover the task. Select model + effort by capability — the dispatch agent's model's only field: `sonnet` or `opus`; effort tiers up to `xhigh`. IMPORTANT: **DO NOT dispatch `fable`.**
-    **Model discipline is structural, not habitual (owner ruling 2026-07-23): the main model (Fable) is the orchestrator ONLY — no dispatch may ever run on it.** Every native dispatch — `Agent` calls, workflow `agent()` calls, teammate spawns — MUST carry an explicit `model`: `opus` for judgment lanes (reviews, test batteries, design drafting, audits), `sonnet` for mechanical lanes (readers, extractors, condensers). **Omitting `model` is a dispatch error, not a default** — omission silently inherits the main model, the exact forbidden outcome; agent-frontmatter `model:` pins have a known upstream inheritance bug, so never rely on them alone. The owner deliberately does NOT set the `CLAUDE_CODE_SUBAGENT_MODEL` env backstop (it would force-cap every subagent to one model and flatten the opus/sonnet split — ruled 2026-07-23: keep dispatch flexible). The explicit per-dispatch `model` field IS the enforcement — treat its omission as an error you catch before sending. See memory `feedback-no-fable-subagents`.
+- Dispatch lanes **All lanes get explicit model overrides, FORBID to Overuse model `fable` as lane's model.**:
+ 1. **Claude native lane:** select the most suitable native `subagents`, `agent-teammates` or `dynamicworkflow` dispatch that can cover the task. **Model discipline is structural, not habitual: the main model (Fable) is mostly the orchestrator.** Select model + effort by capability:
+ - Default worker: claude-sonnet-5, effort xhigh.
+ - Use high only for deterministic, low-risk, strongly testable work.
+ - Escalate to claude-opus-4-8 xhigh when the task is ambiguous,
+cross-service, long-horizon, security-sensitive, weakly testable,
+or has already defeated Sonnet.
+ - Use Fable primarily as orchestrator for exceptionally complex workflows,
+but permit explicit Fable escalation for rare unsolved critical subtasks.
+ 
+  Every native dispatch MUST carry an explicit `model` ; max effort tiers up to `xhigh`. 
+  
+  **Omitting `model` is a dispatch error, not a default** — omission silently inherits the main model, the exact forbidden outcome; agent-frontmatter `model:` pins have a known upstream inheritance bug, so never rely on them alone.
+     
+  Never use a global CLAUDE_CODE_SUBAGENT_MODEL override.
+  Pin every dispatch to a full model ID and explicit effort.
+  Use independent verification and deterministic quality gates.
  2. **Codex lane:** for heavy implementation, debugging, test fixing, refactoring, or multi-file edits, prefer a **direct `codex exec` via Bash** (run in the background + watch its output file) — the `codex:codex-rescue` companion queue has been **unreliable** (it has stalled for hours at "starting"). Prefer `--model gpt-5.6-sol --effort xhigh`. Keep Codex tasks focused and specific. See memory `project-rebuild-ops-lessons`.
 - **Grill only when it changes scope.** Use the grilling skill (`/grillme`,`/grill-with-docs`,`/loop-me`) when ambiguity would change *what* gets built or its acceptance — not for every bounded task whose spec is already clear.
 - After a worker (Codex or a subagent) finishes, inspect the result yourself before accepting it. Do not blindly trust worker output.
