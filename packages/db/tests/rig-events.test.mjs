@@ -18,6 +18,8 @@ import {
   AGENT_USER_ID,
   HIGH_STAKES_CENTS,
   ROUTINE_CENTS,
+  humanQuery, // [R3-F2] the raw-creator contract probe
+
   assertRaises,
   balanced,
   opk,
@@ -91,13 +93,22 @@ test("§1 emission: human writers each emit exactly their contract event, ids/ac
   assert.equal(ev[0].via_wake_kind, null, "human event carries no via_wake_kind");
   assert.equal(ev[0].on_behalf_of, null, "human event carries no on_behalf_of");
 
-  // create_client → client.created
+  // [R3-F2] the CoR'd creator joins the onboarding path: the RAW verb's contract
+  // is now exactly client.onboarding_started (client.created is retired from the
+  // creator; activation emits client.activated at Gate-O commit).
   let m = await maxSeq(firm);
+  const rawClient = (await humanQuery(owner,
+    "select clara.create_client(p_name => $1, p_op_key => $2) as r", [`${prefix}_raw`, opk()])).rows[0].r.client_id;
+  ev = await eventsSince(firm, m);
+  assert.deepEqual(types(ev), ["client.onboarding_started"], "create_client emits exactly client.onboarding_started [R3-F2]");
+  assert.equal(ev[0].client_id, rawClient, "the birth event carries the new client id");
+  assert.equal(ev[0].actor, owner);
+  // the FIXTURE creator drives the birth active through the audited Gate-O
+  // ceremony — its trail must END in client.activated:
+  m = await maxSeq(firm);
   const client = await createClient(owner, { name: `${prefix}_c1`, opKey: opk() });
   ev = await eventsSince(firm, m);
-  assert.deepEqual(types(ev), [EVT.clientCreated], "create_client emits exactly client.created");
-  assert.equal(ev[0].client_id, client, "client.created carries the new client id");
-  assert.equal(ev[0].actor, owner);
+  assert.ok(types(ev).includes("client.activated"), "the bridged fixture lands ACTIVE via the audited commit");
 
   // upsert_account → account.upserted
   m = await maxSeq(firm);

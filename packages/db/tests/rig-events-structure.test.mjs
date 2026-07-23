@@ -293,7 +293,8 @@ test("§8 get_context_pack: full shape; books_version == firm max seq; blank pur
   const pack = await contextPack(users.alice, clients.A1, "close review");
   assert.ok(pack, "a pack is returned for a visible client");
   // 0016 (P5/contract §2.3): pack_schema_version 2 → 3 + the sst_registration_watch array.
-  assert.equal(pack.pack_schema_version, 3, "0016 pack_schema_version = 3 (P5 version bump)");
+  // W6 pins the additive 3-to-4 bump.
+  assert.equal(pack.pack_schema_version, 4, "0017 pack_schema_version = 4 (W6)");
   assert.equal(pack.purpose, "close review", "purpose echoed");
   for (const k of ["generated_at", "books_version", "client", "firm", "coa", "trial_balance", "recent_entries", "documents", "resolutions", "approval_history", "sst_registration_watch"]) {
     assert.ok(k in pack, `pack has key ${k}`);

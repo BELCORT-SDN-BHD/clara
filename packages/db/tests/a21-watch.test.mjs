@@ -336,9 +336,12 @@ test("§2 COVERAGE: an opening-balance entry is EXCLUDED from observed turnover 
   // it fires at COMMIT of the entry-insert transaction, so a lines-less entry in
   // its own autocommit statement dies CLR07 before the lines ever land. The raw
   // fixture must write entry + lines in ONE statement (one transaction).
-  // last_human_editor mirrors the audited human draft path — an opening-balance
-  // entry is CATEGORICALLY high-stakes (is_high_stakes) and an editor-less draft
-  // reads as agent-made, demanding an attestation at approve (CLR05).
+  // [R1-F1] (0017 lifecycle isolation, SANCTIONED): generic approve_entry now
+  // REFUSES an is_opening_balance draft — the refusal IS the fix, and this
+  // fixture's coverage purpose is the EVALUATOR's exclusion arithmetic, not the
+  // approval lane. The raw fixture therefore lands the entry ALREADY APPROVED
+  // (checker_actor/approved_at stamped; the flag frozen at insert), exactly the
+  // approved-OB shape the K5 batch produces.
   const entryId = (await rootQuery(
     `with e as (
        insert into clara.journal_entries (client_id, posting_date, memo, origin, status, maker_actor, last_human_editor, resolution_id, is_opening_balance)
@@ -351,8 +354,10 @@ test("§2 COVERAGE: an opening-balance entry is EXCLUDED from observed turnover 
      ) select id from e`,
     [client, users.alice, res, CASH, INC],
   )).rows[0].id;
-  const tok = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [entryId])).rows[0].revision_token;
-  await approveEntry(users.bob, { entry: entryId, expectedRevision: tok, opKey: opk("oba") });
+  // …then the 0003 trigger's draft→approved allowlist shape (lines freeze once the parent approves).
+  await rootQuery(
+    "update clara.journal_entries set status='approved', checker_actor=$2, approved_at=now() where id=$1",
+    [entryId, users.bob]);
   const flag = (await rootQuery("select is_opening_balance, status from clara.journal_entries where id=$1", [entryId])).rows[0];
   assert.equal(flag.is_opening_balance, true, "the fixture opening-balance entry is flagged (mandatory setup)");
   assert.equal(flag.status, "approved", "the opening-balance entry is approved (mandatory setup)");

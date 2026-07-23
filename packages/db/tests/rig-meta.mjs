@@ -79,6 +79,27 @@ const WAVE_A21_HUMAN_FNS = [
   "snooze_compliance_watch", "resolve_compliance_watch", "set_document_kind",
 ];
 const WAVE_A21_RUNTIME_FNS = ["evaluate_sst_watch", "evaluate_sst_watches_all", "classify_document"];
+// 0017 Block G2 exact named-grant matrix. The agent and both wake roles gain
+// zero new EXECUTE; get_context_pack remains on its carried agent_ro grant.
+const WAVE_B_HUMAN_FNS = [
+  "retire_wiki_page",
+  "begin_client_onboarding", "commit_client_onboarding", "cancel_client_onboarding",
+  "resolve_onboarding_plan_item",
+  "bootstrap_client_plan", // [R3-F2] the admin+ B-12 plan bootstrap for pre-0017 actives
+  "create_opening_seed", "cancel_opening_seed", "draft_opening_item",
+  "record_opening_target", "seed_fixed_asset", "approve_opening_seed",
+  "supersede_opening_item", "approve_opening_correction", "reopen_opening_seed",
+  "get_opening_dryrun",
+  "tick_seeding_proposal", "decline_seeding_proposal", "complete_seeding_batch",
+  "cancel_seeding_batch", "get_lint_finding", "resolve_lint_finding",
+];
+const WAVE_B_RUNTIME_FNS = [
+  "publish_wiki_page_version", "record_wiki_source_ingest",
+  "set_wiki_synthesis_hold", "clear_wiki_synthesis_hold",
+  "update_onboarding_plan", "record_opening_targets_parsed",
+  "create_seeding_batch", "run_client_lint", "run_lint_all",
+];
+const WAVE_B_SHARED_READS = ["get_wiki_page", "list_wiki_pages", "trial_balance_as_of"];
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -88,6 +109,7 @@ export const ALLOWED = {
     "confirm_attribution_candidate", "dismiss_attribution_candidate",
     "add_client_identifier", "add_client_alias", "retire_client_alias",
     "place_legal_hold", "release_legal_hold",
+    ...WAVE_B_HUMAN_FNS, ...WAVE_B_SHARED_READS, // 0017 G2
     ...S6_HUMAN_FNS, // [S6 §9/C-11] draft-lifecycle + coding-task + client-pinned reads
     ...WAVE_A_HUMAN_FNS, // [WAVE-A §2] daily-loop governance writers + typed reads
     ...WAVE_A2_HUMAN_FNS, // [WAVE-A2 §6/§7] standing-rules writers + rule/notification/receipt reads
@@ -111,6 +133,7 @@ export const ALLOWED = {
     "persist_document_extraction", "complete_stored_document_task",
     "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
     "refund_ingest_reservation", "record_attribution_attempt",
+    ...WAVE_B_RUNTIME_FNS, ...WAVE_B_SHARED_READS, // 0017 G2
     ...S6_RUNTIME_FNS, // [S6 §9/C-11] invoice-facts lane writers + coding-attempt recovery read
     ...WAVE_A_RUNTIME_FNS, // [WAVE-A §2] autodraft admission/settle + sweep-run + candidate reads
     ...WAVE_A2_RUNTIME_FNS, // [WAVE-A2 §6.2] the autopost expiry/nudge reconcile sweep

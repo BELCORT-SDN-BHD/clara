@@ -1,0 +1,9 @@
+**RESOLVED.** No findings above LOW remain.
+
+- `draft_opening_item` and `seed_fixed_asset` each emit exactly one `entry.drafted`, matching the generic human-draft family: correct firm/client/actor, null delegation/wake fields, created entry ID, corresponding document/resolution, and `{}` payload ([0017_wave_b.sql](C:/Users/zhant/Desktop/clara-rebuild/packages/db/migrations/0017_wave_b.sql:3521)).
+- `supersede_opening_item` emits the reversal first, then the conditional replacement. Thus replacement supersede emits two consecutive events; pure-NULL supersede emits one. Attribution and provenance fields match each created draft ([0017_wave_b.sql](C:/Users/zhant/Desktop/clara-rebuild/packages/db/migrations/0017_wave_b.sql:4144)).
+- All emissions occur after audit and immediately before receipt completion; no book mutation follows them.
+- The migration-tail checks are effect-sensitive: they inspect the installed `pg_proc.prosrc`, enforce exact call counts and full argument shapes, and pin audit → reversal event → conditional replacement event → `_finish_op`. Removing, changing, duplicating, or reordering an emission aborts 0017 with `CLR10` ([0017_wave_b.sql](C:/Users/zhant/Desktop/clara-rebuild/packages/db/migrations/0017_wave_b.sql:5819)).
+- The SQL-blind lane behaviorally covers generic-family parity, both supersede cardinalities, tail sequencing, receipt/audit presence, and the CLR12 staleness consequence. Its supersede prerequisites are now staged in `before`, eliminating the disputed sequencing defect.
+
+The reported PG17 results complete the behavioral verification. No sixth finding.

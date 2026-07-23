@@ -177,7 +177,8 @@ test("§2.3 context pack v3: pack_schema_version=3 + the sst_registration_watch 
   const client = await crossedWatchClient();
   const pack = await contextPack(users.alice, client, "a21 read-surface probe");
   assert.ok(pack, "the pack hydrates");
-  assert.equal(Number(pack.pack_schema_version), 3, `the pack schema version bumps to 3 (got ${pack.pack_schema_version})`);
+  // W6 pins the 3-to-4 bump while preserving every v3 key.
+  assert.equal(Number(pack.pack_schema_version), 4, `the Wave-B pack schema version is 4 (got ${pack.pack_schema_version})`);
   // INTEGRATION (CLASS T, adjudicated): the block is an ARRAY — one element per
   // OPEN (client, service_group) watch episode. Ratified over the object reading.
   const arr = pack.sst_registration_watch;
@@ -225,9 +226,14 @@ test("§2.3 the queue unions the open watch as row_kind='compliance_watch'; coun
       assert.ok(Number.isInteger(Number(v)), `counts.${k} is an integer count (got ${v}) — monetary figures never ride the counts`);
     }
   }
-  const stale = collectWithKey(q, "stale_evaluator");
-  assert.ok(stale.length >= 1, "the compliance summary carries the stale_evaluator flag");
-  assert.ok(stale.every((o) => o.stale_evaluator === false), "with a fresh receipt the evaluator is NOT stale");
+  // [R1-F14] The two freshness flags are INDEPENDENT surfaces: L5 sanctions a
+  // SEPARATE lint flag, never a merged either-branch accept — a stale
+  // compliance evaluator must fail this cell even when lint happens to be
+  // fresh (ratchet-r1 memo finding 14; the some(false) form was unsanctioned).
+  assert.equal(q.compliance?.stale_evaluator, false,
+    "with a fresh compliance receipt the COMPLIANCE evaluator is NOT stale");
+  assert.equal(typeof q.lint?.stale_evaluator, "boolean",
+    "the L5 lint freshness flag rides its own envelope key as an independent boolean");
 });
 
 test("§6.2 queue entry rows carry coding_kind (the direction-aware vocabulary feed)", async (t) => {
