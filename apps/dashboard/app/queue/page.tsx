@@ -163,8 +163,9 @@ export default function QueuePage() {
             </div>
           ) : null}
 
-          {/* §2.3: a persistent banner once any watch reaches early_warning (crossed/
-              overdue rows already sort to top-of-queue via their needs_you section). */}
+          {/* §2.3: a persistent banner once any watch reaches early_warning — awareness
+              only; the needs_you section (rendered first, WA21-R14) is the actionable
+              destination for crossed/overdue rows. */}
           {queue && queue.compliance.clients.some((c) => c.state === "early_warning" || c.state === "crossed" || c.state === "overdue") ? (
             <p className={styles.banner}>An SST registration-threshold watch needs attention — open the compliance rows to review.</p>
           ) : null}

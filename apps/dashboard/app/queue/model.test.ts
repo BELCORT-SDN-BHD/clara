@@ -78,10 +78,17 @@ test("filter is an always-on case-insensitive subsequence over row tokens", () =
   assert.deepEqual(filterRows(rows, "bright").map((r) => r.id), ["a"]);
   assert.deepEqual(filterRows(rows, "zzz").map((r) => r.id), []);
 });
-test("groupBySection orders needs_review before needs_you and drops empty sections", () => {
-  const rows = [mkRow({ id: "a", section: "needs_you" }), mkRow({ id: "b", section: "needs_review" })];
+test("groupBySection orders needs_you before needs_review (WA21-R14) and drops empty sections", () => {
+  // WA21-R14 / ADR-031: the exception band renders first — including needs_you-lane
+  // drafts, which the 0016 envelope still ranks 2 (the UI hoists them per page).
+  const rows = [
+    mkRow({ id: "a", section: "needs_you" }),
+    mkRow({ id: "b", section: "needs_review" }),
+    mkRow({ id: "c", section: "needs_you", row_kind: "draft" }),
+  ];
   const groups = groupBySection(rows);
-  assert.deepEqual(groups.map((g) => g.key), ["needs_review", "needs_you"]);
+  assert.deepEqual(groups.map((g) => g.key), ["needs_you", "needs_review"]);
+  assert.deepEqual(groups.find((g) => g.key === "needs_you")?.rows.map((r) => r.id), ["a", "c"]);
   assert.deepEqual(groupBySection([mkRow({ section: "needs_review" })]).map((g) => g.key), ["needs_review"]);
 });
 
@@ -94,7 +101,8 @@ test("a compliance_watch row groups by its section and is NOT selectable", () =>
   assert.equal(isSelectable(crossed), false);
   assert.equal(isSelectable(monitored), false);
   const groups = groupBySection([crossed, monitored]);
-  assert.deepEqual(groups.map((g) => g.key), ["needs_review", "needs_you"]);
+  // WA21-R14 / ADR-031: crossed/overdue watches render top-of-queue (needs_you first).
+  assert.deepEqual(groups.map((g) => g.key), ["needs_you", "needs_review"]);
   assert.deepEqual(groups.find((g) => g.key === "needs_you")?.rows.map((r) => r.id), ["cw1"]);
 });
 
