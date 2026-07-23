@@ -29,12 +29,14 @@ RUN set -eux; \
 # fires a first-attempt 501 NotImplemented on R2 single-file PUTs (noisy retries; docs/ops/DR.md
 # §9). Provenance is checksum-verified. To bump: edit these two lines to the new version + its
 # rclone-v<VER>-linux-amd64.zip entry from https://downloads.rclone.org/v<VER>/SHA256SUMS.
-ARG RCLONE_VERSION=1.74.4
-ARG RCLONE_SHA256=fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d
+# The ARGs are deliberately NOT RCLONE_-prefixed: rclone reads every RCLONE_<flag> env var as
+# config (RCLONE_VERSION would set its boolean --version flag and abort the smoke check).
+ARG PINNED_RCLONE_VERSION=1.74.4
+ARG PINNED_RCLONE_SHA256=fe435e0c36228e7c2f116a8701f01127bb1f694005fc11d1f27186c8bca4115d
 RUN set -eux; \
-    curl -fsSL -o /tmp/rclone.zip "https://downloads.rclone.org/v${RCLONE_VERSION}/rclone-v${RCLONE_VERSION}-linux-amd64.zip"; \
-    echo "${RCLONE_SHA256}  /tmp/rclone.zip" | sha256sum -c -; \
-    unzip -j /tmp/rclone.zip "rclone-v${RCLONE_VERSION}-linux-amd64/rclone" -d /tmp/rclone-bin; \
+    curl -fsSL -o /tmp/rclone.zip "https://downloads.rclone.org/v${PINNED_RCLONE_VERSION}/rclone-v${PINNED_RCLONE_VERSION}-linux-amd64.zip"; \
+    echo "${PINNED_RCLONE_SHA256}  /tmp/rclone.zip" | sha256sum -c -; \
+    unzip -j /tmp/rclone.zip "rclone-v${PINNED_RCLONE_VERSION}-linux-amd64/rclone" -d /tmp/rclone-bin; \
     install -m 0755 /tmp/rclone-bin/rclone /usr/local/bin/rclone; \
     rm -rf /tmp/rclone.zip /tmp/rclone-bin; \
     rclone --version
