@@ -119,16 +119,15 @@ cross-model adversarial ratchet to RESOLVED; evidence in
 clientOnboarding_v1 on durable WDK-hook parks, the wiki-projection + lint
 consumers; runtime suite 482/482; adjudications in
 `docs/plan/research/wave-b/v25-runtime-lanes-memo.md` — model synthesis ships
-fail-closed DARK pending the runtime consent-read ruling, PART 2). The
-**dashboard surfaces + pre-ceremony runtime lanes are BUILT merged undeployed**
-(ADR-035, PR #71: queue/lint + catalog parity gate, onboarding/interview panel +
-create_firm handshake + plan page, the carry-down workbench + K5 ceremony, the
-seeding tick-list, the document parse lanes; the freeze-lint deploy-lock; suites
-754/0 · 566/566 · 259/259; settled plan + §3b record in
-`docs/plan/research/wave-b/dashboard-lanes-plan.md`). **Wave B's BUILD is
-COMPLETE — what remains is ONLY: the ONE owner-`!`-gated WB-R18 ceremony**
-(runbook `docs/ops/wave-b-ceremony-runbook.md`; Supavisor 27/60 first; live
-16→17, runtime v24→v25; ceremony SQL in `packages/db/deploy/`) **→ the
-live gates O/K/W2/L/R2/F on REAL documents** (WB-R16: a real second client + RPR''s
-management accounts for the B-12 lane; Gate K is parse-feasible document-primary). **Canary `daba7f2e` stays ARMED, due
+fail-closed DARK pending the runtime consent-read ruling, PART 2). The dashboard
+surfaces + runtime lanes are BUILT (ADR-035, PR #71) and **the WB-R18 CEREMONY
+IS EXECUTED (ADR-036, 2026-07-24): LIVE = Supabase 17 migrations · Fly
+`clara-runtime` wave-b-v25 (ten loops, WIKI_PROJECTION acquired, /ready 200) ·
+wiki backfill 30/30 · every post-verify probe green (pack dark/lit, replay
+byte-identical, sightings unchanged, F10 serializable via PostgREST) · the
+freeze deploy-lock committed (18 v25 entries immutable).** **What remains of
+Wave B is ONLY the live gates O/K/W2/L/R2/F on REAL documents** (WB-R16: a real
+second client + RPR''s management accounts for the B-12 lane; Gate K is
+parse-feasible document-primary — the live OCR must emit `opening_tb.line`
+regions, else the attributed keyed fallback). **Canary `daba7f2e` stays ARMED, due
 2026-08-02 — NEVER answer it.**
