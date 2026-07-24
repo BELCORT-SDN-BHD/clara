@@ -49,16 +49,21 @@ export function DocumentDetail({
 
   // A fresh document selection starts the classify draft blank — it must never carry
   // a stale kind/reason over from whichever document was selected before (DocumentDetail
-  // is not remounted per document; only `load()` below is keyed on doc.id).
+  // is not remounted per document; only `load()` below is keyed on doc.id). `clr` is
+  // reset here too: it is rendered APPENDED to `err`, and `load()` clears only `err`, so
+  // a refusal reason from the previous document would otherwise survive and be glued onto
+  // an unrelated error for the next one.
   useEffect(() => {
     setKindDraft("");
     setKindReason("");
+    setClr(null);
   }, [doc.id]);
 
   const clientName = (id: string) => clients.find((c) => c.id === id)?.name || id.slice(0, 8);
 
   const load = useCallback(async () => {
     setErr(null);
+    setClr(null);
     try {
       const [t, f, a] = await Promise.all([
         readProcessingTasks(token, doc.id),

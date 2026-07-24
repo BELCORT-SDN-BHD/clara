@@ -12,6 +12,16 @@
 // /documents page, where Finding 3's classify control + "File to a client" can finish the job.
 // The operator still types an answer into the interview's own answer box below this control
 // (e.g. "attached" or "skip") — this component only adds the attachment side-channel.
+//
+// PROVENANCE LIMIT, recorded rather than faked: every upload from here is tagged
+// origin='documents_tab', because clara.intake_requests.origin is a closed DB CHECK —
+// `check (origin in ('chat','documents_tab'))` (0007_document_pipeline.sql:104), with a
+// paired constraint tying 'chat' to a chat_session_id (0007:133). An honest
+// 'onboarding_interview' origin therefore needs a migration, not a dashboard constant, and
+// is a Wave-C candidate. Nothing downstream branches on the difference today (the runtime
+// intake route special-cases only origin='chat', for a session-access check), so the cost
+// is audit-trail precision, not behaviour — but it IS imprecise, and this is where to fix
+// it when the origin enum is widened.
 
 import { useState } from "react";
 import Link from "next/link";
