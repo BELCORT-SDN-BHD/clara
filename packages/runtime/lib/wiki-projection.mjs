@@ -80,7 +80,12 @@ export function isClaraTerminal(err) {
 export function claraReason(err) {
   try { return JSON.parse(err?.detail || "{}").reason ?? null; } catch { return null; }
 }
-function terminalStatusFor(err) {
+/** EXPORTED for unit test only: the 0019 §4 contract requires the CLR32/
+ *  stale_projected_from_seq -> already_projected mapping to be PROVEN, and the mapping is a
+ *  pure function of the error. Driving it through the DB would need a real serialized
+ *  supersede race; exporting the pure mapping proves it directly. No caller outside this
+ *  module uses it. */
+export function terminalStatusFor(err) {
   const reason = claraReason(err);
   if (err.code === "CLR32") {
     // stale_projected_from_seq is the 0019 §5 DB-side monotonic guard: a BENIGN

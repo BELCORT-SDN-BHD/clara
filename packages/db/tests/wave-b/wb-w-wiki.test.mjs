@@ -8,6 +8,7 @@ import {
   CLR, CLR28, CLR31, PG, ROLES, rootQuery, roleQuery, opk, getPool,
   assertRaises, assertRaisesOneOf, endPool, printLaneNotes, WB_PACK_CONSUMER,
   fail0017, wbEnsureReady, hasColumn, rlsFlags, detailReason, roleCanExecute,
+  fail0019, has0019, markStale, WB_STALE_REASON,
   buildWaveBWorld, createClient, filedDocument,
   publishWikiPage, recordWikiIngest, retireWikiPage, getWikiPage, listWikiPages,
   setWikiHold, clearWikiHold, holdRow,
@@ -17,6 +18,7 @@ import {
 import { truncateGuardError } from "../rig-txn.mjs";
 
 let live = false;
+let live19 = false;
 let w = null;
 const client = () => w.clients.A1;
 const firm = () => w.firms.A;
@@ -24,6 +26,7 @@ const firm = () => w.firms.A;
 before(async () => {
   live = await wbEnsureReady();
   if (live) w = await buildWaveBWorld();
+  live19 = live ? await has0019() : false;
 });
 after(async () => { printLaneNotes("wb-w-wiki"); await endPool(); });
 
@@ -270,6 +273,55 @@ test("W8: reads are viewer-floor PURE reads — human + MARKED runtime yes; clai
     assert.equal(await roleCanExecute(role, "list_wiki_pages"), false, `${role} holds NO EXECUTE on list_wiki_pages`);
   }
   assert.equal((await wikiLogRows(client())).length, before1, "query stays PURE (P17) — no log writes from reads");
+});
+
+// ---------------------------------------------------------------------------
+// [0019 §7] The stale marker's EXACT read shape on the W8 verbs. Gated by
+// fail0019 — this cell is REQUIRED to be red against an 18-migration DB.
+// ---------------------------------------------------------------------------
+
+test("[0019 §7]: get_wiki_page serves the marker per CITATION and per REF plus has_stale_sources; list_wiki_pages carries the flag; nothing is dropped", async () => {
+  fail0019(live19);
+  const c = await createClient(w.users.alice, { name: `w0019_${opk("x")}`, opKey: opk("cli") });
+  const d = await filedDocument(w.users.alice, { firm: firm(), client: c, kind: "invoice" });
+  await publishWikiPage({
+    client: c, firm: firm(), slug: "stale-read", pageKind: "profile", title: "Stale read",
+    content: "# stale read", citations: [{ source_kind: "document", document_id: d.documentId }],
+    refs: [{ ref_kind: "document", document_id: d.documentId }],
+  });
+  await publishWikiPage({ client: c, firm: firm(), slug: "clean-read", pageKind: "treatment",
+    title: "Clean read", content: "# clean read" });
+
+  const before1 = await getWikiPage(w.users.alice, { client: c, slug: "stale-read" });
+  const flagOf = (g) => ("has_stale_sources" in (g ?? {}) ? g.has_stale_sources : g?.page?.has_stale_sources);
+  assert.notEqual(flagOf(before1), undefined,
+    "get_wiki_page exposes has_stale_sources (top level or on the page object — the contract does not pin which)");
+  assert.equal(flagOf(before1), false, "…false while unmarked");
+  for (const row of [...before1.citations, ...before1.refs]) {
+    assert.ok("stale_at" in row && "stale_reason" in row, "every citation AND ref row carries the marker pair");
+    assert.equal(row.stale_at, null, "…null while unmarked");
+  }
+
+  const f = (await rootQuery("select revision_token from clara.document_filings where id=$1", [d.filingId])).rows[0];
+  const { retireDocumentFiling } = await import("../rig-docs-fixtures.mjs");
+  await retireDocumentFiling(w.users.alice, {
+    filing: d.filingId, reason: "0019 read-shape probe", expectedRevision: f.revision_token });
+  const receipt = await markStale({ client: c, document: d.documentId, opKey: opk("w19m") });
+  assert.equal(receipt.status, "marked", `the mark landed (got ${JSON.stringify(receipt)})`);
+
+  const after1 = await getWikiPage(w.users.alice, { client: c, slug: "stale-read" });
+  assert.equal(flagOf(after1), true, "has_stale_sources flips TRUE");
+  assert.equal(after1.citations[0].stale_reason, WB_STALE_REASON, "the citation's reason is served verbatim");
+  assert.ok(after1.citations[0].stale_at, "…with its timestamp");
+  assert.ok(after1.refs[0].stale_at, "the page-level document ref's marker is served too");
+  // INFORM, NEVER DECIDE.
+  assert.equal(after1.page.state, "active", "the page is STILL ACTIVE — marked, never retired");
+  assert.equal(after1.page.current_version_id, before1.page.current_version_id, "…still the current version");
+  assert.equal(after1.version.content, before1.version.content, "…serving byte-identical content");
+  const list = await listWikiPages(w.users.alice, { client: c });
+  assert.equal(list.length, 2, "BOTH pages are still listed — no filtering");
+  assert.equal(list.find((p) => p.slug === "stale-read").has_stale_sources, true, "the marked page's flag is TRUE");
+  assert.equal(list.find((p) => p.slug === "clean-read").has_stale_sources, false, "the clean page's flag is FALSE");
 });
 
 test("W9: synthesis holds — runtime-only set/clear; the hold row carries reason+since", async () => {

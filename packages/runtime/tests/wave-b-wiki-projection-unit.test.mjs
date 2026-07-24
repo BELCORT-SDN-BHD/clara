@@ -89,13 +89,15 @@ test("GOVERNED_EGRESS_PURPOSES.wiki_synthesis names the consent discipline", () 
 });
 
 // --- registry + subscription ------------------------------------------------------------------
-test("CONSUMERS entry is runtime-role; the subscription SET is the 7 registered types", () => {
+test("CONSUMERS entry is runtime-role; the subscription SET is the 8 registered types", () => {
   assert.equal(CONSUMERS.wiki_projection.name, WIKI_PROJECTION_CONSUMER);
   assert.equal(CONSUMERS.wiki_projection.identity, "runtime-role");
+  // 0019 adds document.filing_retired — the WB-R21 stale lane. It is a document.* type,
+  // NOT a wiki.* one, so P17 (never re-synthesize from wiki.*) is untouched.
   assert.deepEqual([...WIKI_PROJECTION_EVENT_TYPES].sort(), [
     "counterparty.created", "counterparty.merged", "document.classified",
-    "egress.consent_granted", "egress.consent_revoked", "entry.approved",
-    "seeding.proposal_decided",
+    "document.filing_retired", "egress.consent_granted", "egress.consent_revoked",
+    "entry.approved", "seeding.proposal_decided",
   ]);
 });
 

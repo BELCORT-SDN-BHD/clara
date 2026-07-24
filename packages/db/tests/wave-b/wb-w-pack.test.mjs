@@ -11,6 +11,7 @@ import {
   rootQuery, opk,
   endPool, printLaneNotes,
   fail0017, wbEnsureReady, fnSource,
+  fail0019, has0019, markStale, filedDocument, WB_STALE_REASON,
   buildWaveBWorld, createClient, mintInteractive,
   packHuman, packWake, publishWikiPage, retireWikiPage, setWikiHold, clearWikiHold,
   pageRow, seedWikiCheckpoint, setBudget,
@@ -21,6 +22,7 @@ import {
 import { maxSeq } from "../rig-events-helpers.mjs";
 
 let live = false;
+let live19 = false;
 let w = null;
 let cred = null;
 
@@ -35,6 +37,7 @@ before(async () => {
   cred = await mintInteractive(w.firms.A);
   await publishWikiPage({ client: w.clients.A1, firm: w.firms.A, slug: "profile", pageKind: "profile",
     title: "Profile", content: "# Profile\nHardware wholesaler." });
+  live19 = await has0019();
 });
 after(async () => { printLaneNotes("wb-w-pack"); await endPool(); });
 
@@ -135,6 +138,63 @@ test("W6: page selection is the budgeted running window — rank order, never a 
         `whole pages only — '${p.slug}' rides the window with its EXACT published bytes, never truncated`);
     }
   } finally { await setBudget("pack_max_bytes", WB_BUDGET_SEEDS.pack_max_bytes); }
+});
+
+// ---------------------------------------------------------------------------
+// [0019 §7] The pack's wiki block MARKS and never gates. Gated by fail0019 —
+// this cell is REQUIRED to be red against an 18-migration DB.
+// ---------------------------------------------------------------------------
+
+test("[0019 §7]: the pack's wiki block adds stale_at/stale_reason BY NAME and has_stale_sources, and changes NOTHING else", async () => {
+  fail0019(live19);
+  const c = await createClient(w.users.alice, { name: `p0019_${opk("x")}`, opKey: opk("cli") });
+  const d = await filedDocument(w.users.alice, { firm: w.firms.A, client: c, kind: "invoice" });
+  await publishWikiPage({ client: c, firm: w.firms.A, slug: "marked", pageKind: "profile",
+    title: "Marked", content: "# marked\nthe stale page",
+    citations: [{ source_kind: "document", document_id: d.documentId }],
+    refs: [{ ref_kind: "document", document_id: d.documentId }] });
+  await publishWikiPage({ client: c, firm: w.firms.A, slug: "clean", pageKind: "treatment",
+    title: "Clean", content: "# clean\nthe live page" });
+
+  const before1 = await packHuman(w.users.alice, { client: c, purpose: WB_V7_PURPOSE });
+  for (const p of before1.wiki.pages) {
+    assert.ok("has_stale_sources" in p, `pack page '${p.slug}' carries has_stale_sources`);
+    assert.equal(p.has_stale_sources, false, `…false for '${p.slug}' while unmarked`);
+    for (const cit of p.citations ?? []) {
+      for (const k of ["source_kind", "document_id", "entry_id", "counterparty_id", "detail"]) {
+        assert.ok(k in cit, `the pre-0019 enumerated citation key '${k}' is CARRIED on '${p.slug}'`);
+      }
+      assert.ok("stale_at" in cit && "stale_reason" in cit,
+        `the pack's citation enumeration gained stale_at/stale_reason BY NAME on '${p.slug}' (nothing arrives for free — 0017:5053-5063)`);
+    }
+    assert.ok(!("refs" in p), "the pack's page object still carries NO refs array — the flag is the only ref signal there");
+  }
+
+  const f = (await rootQuery("select revision_token from clara.document_filings where id=$1", [d.filingId])).rows[0];
+  const { retireDocumentFiling } = await import("../rig-docs-fixtures.mjs");
+  await retireDocumentFiling(w.users.alice, {
+    filing: d.filingId, reason: "0019 pack-shape probe", expectedRevision: f.revision_token });
+  assert.equal((await markStale({ client: c, document: d.documentId, opKey: opk("p19m") })).status, "marked",
+    "the mark landed");
+
+  const after1 = await packHuman(w.users.alice, { client: c, purpose: WB_V7_PURPOSE });
+  // The marker is VISIBLE …
+  const marked = after1.wiki.pages.find((p) => p.slug === "marked");
+  assert.equal(marked.has_stale_sources, true, "the marked page's flag flips TRUE");
+  assert.equal(marked.citations.find((x) => x.document_id === d.documentId).stale_reason, WB_STALE_REASON,
+    "…and the citation's reason is served verbatim");
+  assert.equal(after1.wiki.pages.find((p) => p.slug === "clean").has_stale_sources, false,
+    "…on that page ONLY");
+  // … and NOTHING is filtered, reordered or gated.
+  assert.equal(after1.wiki.pages.length, before1.wiki.pages.length, "page COUNT unchanged");
+  assert.deepEqual(after1.wiki.pages.map((p) => p.slug), before1.wiki.pages.map((p) => p.slug),
+    "page SELECTION and ORDER unchanged (candidates / priority / row_number / the admission window are untouched)");
+  for (const p of after1.wiki.pages) {
+    assert.equal(p.content, before1.wiki.pages.find((x) => x.slug === p.slug).content,
+      `page '${p.slug}' CONTENT is byte-identical — content_bytes derives from wv.content alone, so new citation fields cannot shift the byte cap`);
+  }
+  assert.equal(after1.pack_schema_version, 4, "the pack schema version did NOT move (0019 is additive)");
+  assert.equal(after1.wiki.permitted_use, "inform_never_decide", "the framing is unchanged");
 });
 
 test("W4 DB-half: the seq-embedded projection op_key replays byte-identically (exactly-once)", async () => {
