@@ -85,7 +85,14 @@ export const WB_NEW_TABLES = [
 /** Global/system tables (no firm column pinned): wiki_budgets, lint_runs. */
 export const WB_SYSTEM_TABLES = ["wiki_budgets", "lint_runs"];
 
-/** G1 — event types + pinned taxonomy decisions (all client-scoped). */
+/** G1 — event types + pinned taxonomy decisions (all client-scoped).
+ *
+ *  [0019 amendment 4] This roster is UNCHANGED by migration 0019 and that is a
+ *  LOAD-BEARING negative: `wiki.citations_staled` is DROPPED, so the stale-mark
+ *  writer appends NO event at all. A client-scoped wiki event would move the firm
+ *  event head and reach `assert_books_current` (0007:2665-2681) and the
+ *  correction books-version check (0009:2449-2450) — handing a projection-derived
+ *  event an indirect veto over authority. `wb-0019-tail` asserts the absence. */
 export const WB_EVENT_TYPES = {
   "wiki.page_published": "ignore",
   "wiki.page_retired": "ignore",
@@ -111,6 +118,9 @@ export const WB_ACL = {
   record_wiki_source_ingest: ["runtime"],
   set_wiki_synthesis_hold: ["runtime"],
   clear_wiki_synthesis_hold: ["runtime"],
+  // [0019 §3] the stale-mark writer — runtime ONLY, mirroring the
+  // set_wiki_synthesis_hold grant block. Never authenticated / agent_ro / wake.
+  mark_wiki_citations_stale: ["runtime"],
   create_seeding_batch: ["runtime"],
   record_opening_targets_parsed: ["runtime"],
   update_onboarding_plan: ["runtime"],
@@ -157,7 +167,11 @@ export const WB_ALL_FNS = Object.keys(WB_ACL);
  *  the UNION of the pinned matrix and this live-catalog inventory, so an
  *  unpinned sibling (e.g. a cancel verb) can never silently escape them. */
 export const WB_FN_FAMILY_RE =
-  "^(publish_wiki|record_wiki|retire_wiki|get_wiki|list_wiki|set_wiki|clear_wiki" +
+  // [0019 amendment 8] `mark_wiki` joins the grammar: without it the new stale
+  // writer escapes wbFnInventory() entirely and therefore every catalog-derived
+  // sweep (G2 unpinned-grant, G2 agent-zero, G3 wake allowlist, G5(h) PUBLIC,
+  // and the wb-g-opkeys writer inventory).
+  "^(publish_wiki|record_wiki|retire_wiki|get_wiki|list_wiki|set_wiki|clear_wiki|mark_wiki" +
   "|begin_client_onboarding|commit_client_onboarding|cancel_client_onboarding" +
   "|update_onboarding|resolve_onboarding|create_opening|draft_opening|record_opening" +
   "|get_opening|approve_opening|supersede_opening|reopen_opening|cancel_opening" +
@@ -176,8 +190,21 @@ export async function wbFnInventory() {
 }
 
 /** W10 — the WB-R6 named authority list whose prosrc must NEVER reference
- *  wiki tables (plus every K/S writer, appended per the pin). */
+ *  wiki tables (plus every K/S writer, appended per the pin).
+ *
+ *  [0019 amendment 8] `retire_document_filing` + `approve_wrong_client_correction`
+ *  JOIN the list — the two filing-transition verbs 0017 hung the R2-F2 veto on,
+ *  and the very functions whose wiki-freedom 0019 exists to prove.
+ *  CAVEAT recorded by this lane: adding them to a list that is scanned with
+ *  WIKI_TABLE_RE alone proves LESS than amendment 8 implies. The 0017 veto never
+ *  put a wiki TABLE token in either body — it put a call to
+ *  `_assert_filing_wiki_unreferenced`, and the helper held the reads (0017:1824,
+ *  1860). A relation-token scan was blind to it pre-0019 and is blind to any
+ *  future helper-shaped leak. The CALL-EDGE half of the §9 closed-set scan
+ *  (wb-0019-tail) is what actually closes this; the roster addition is necessary
+ *  but not sufficient. */
 export const WB_AUTHORITY_FNS = [
+  "retire_document_filing", "approve_wrong_client_correction",
   "_approve_entry_core", "_draft_entry_core", "draft_entry", "wake_draft_entry",
   "approve_entry", "execute_rule_post", "propose_coding_rule", "sign_coding_rule",
   "propose_autopost_rule", "sign_autopost_rule", "reconcile_autopost_rules",
@@ -193,13 +220,60 @@ export const WB_AUTHORITY_FNS = [
 ];
 
 /** G5(d) — the wiki-family whitelist: the ONLY fns whose prosrc may reference
- *  wiki tables. */
+ *  wiki tables. [0019 amendment 7/8] gains the new stale writer and the
+ *  UNGRANTED publication core (which reads wiki_budgets at 0017:2016-2019 and
+ *  writes every wiki relation — 0017's *granted*-function scan never saw it, but
+ *  0019's inverse all-definers scan does, so it must be whitelisted). */
 export const WB_WIKI_WHITELIST = [
-  "publish_wiki_page_version", "record_wiki_source_ingest", "retire_wiki_page",
+  "publish_wiki_page_version", "_publish_wiki_page_version_core",
+  "record_wiki_source_ingest", "retire_wiki_page",
   "get_wiki_page", "list_wiki_pages", "set_wiki_synthesis_hold",
   "clear_wiki_synthesis_hold", "get_context_pack", "run_client_lint",
-  "run_lint_all",
+  "run_lint_all", "mark_wiki_citations_stale",
 ];
+
+/** The seven wiki relations (0017:5961-5963 — the word-bounded family the
+ *  dependency scans use, qualified or search_path-relative). */
+export const WB_WIKI_RELATIONS = [
+  "wiki_pages", "wiki_page_versions", "wiki_page_citations", "wiki_page_refs",
+  "wiki_log", "wiki_budgets", "wiki_synthesis_holds",
+];
+export const WIKI_TABLE_RE = new RegExp(`\\b(${WB_WIKI_RELATIONS.join("|")})\\b`);
+
+/** [0019 §9 amendment 7] The clean-end-state whitelist by EXACT regprocedure
+ *  identity (NOT by proname — a future overload of a whitelisted name must not
+ *  be silently covered). Verbatim from the contract's §9 block. */
+export const WB_0019_WHITELIST_SIGS = [
+  "clara.publish_wiki_page_version(uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,text)",
+  "clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,uuid,text,text)",
+  "clara.record_wiki_source_ingest(uuid,uuid,text,text)",
+  "clara.retire_wiki_page(uuid,text,text)",
+  "clara.set_wiki_synthesis_hold(uuid,text,text)",
+  "clara.clear_wiki_synthesis_hold(uuid,text)",
+  "clara.get_wiki_page(uuid,text)",
+  "clara.list_wiki_pages(uuid)",
+  "clara.get_context_pack(uuid,text)",
+  "clara.run_client_lint(uuid,text)",
+  "clara.run_lint_all(text)",
+  "clara.mark_wiki_citations_stale(uuid,uuid,text,text)",
+];
+
+/** [0019 §2/§3] The single allowed `stale_reason` value (the column CHECK's set
+ *  and the writer's validated set are the SAME set — §3). */
+export const WB_STALE_REASON = "source_filing_retired";
+/** [0019 §2] Both relations gain the SAME additive pair (0018:36-44 pattern). */
+export const WB_STALE_COLS = ["stale_at", "stale_reason"];
+export const WB_STALE_RELATIONS = ["wiki_page_citations", "wiki_page_refs"];
+/** [0019 §6] The lint finding class + its exact dedupe grain. */
+export const WB_STALE_FINDING = "stale_citation";
+export const staleCiteKey = (page, doc) => `stalecite:${page}:${doc}`;
+/** [0019 §4] The consumer lane's pinned seq-embedded op-key idiom (same shape as
+ *  the existing `wikihold:<client>:<seq>` / `wikiproj:<client>:<seq>`). */
+export const staleOpKey = (client, seq) => `wikistale:${client}:${seq}`;
+/** [0019 §11] The ceremony catch-up op key — the run key is MANDATORY (a fixed
+ *  per-pair key replays the original receipt forever, 0004:43-60). */
+export const staleCatchupOpKey = (runKey, client, doc) =>
+  `wikistale-catchup:${runKey}:${client}:${doc}`;
 
 /** W6/G5(b) — v3 pack top-level keys that MUST carry into v4 (0016 as-built). */
 export const PACK_V3_KEYS = [
@@ -267,6 +341,43 @@ export function fail0018(live) {
   if (!live) {
     throw new Error(
       "0018 NOT applied (clara.schema_migrations has no '0018_%' row) — the Gate-K/accounting-domain pins (WB-R24(i)) are not built; this battery is REQUIRED to fail against the 17-migration prestate (work-order discipline)",
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 0019 readiness (the wiki AUTHORITY BOUNDARY, WB-R21 · WB-R24(ii)) — the SAME
+// FAIL-never-skip discipline as fail0017/fail0018, one migration up. The 0019
+// blind battery (wb-0019-*.test.mjs, plus the gated 0019 cells inside
+// wb-w-wiki / wb-w-pack / wb-l-lint) is REQUIRED to fail RED against the
+// 18-migration prestate: its pins (the veto REMOVED with the client-row
+// serializer preserved, the citation/ref stale marker, mark_wiki_citations_stale,
+// the CLR32 monotonic guard, the stale_citation lint class, the has_stale_sources
+// read surfaces) are not built yet. Amendment 8 makes this gate GATING: without
+// it a new cell can silently pass against 0018 and the blind lane proves nothing.
+// ---------------------------------------------------------------------------
+
+export async function has0019() {
+  try {
+    const r = await rootQuery("select version from clara.schema_migrations where version ~ '^0019_'");
+    return r.rows.length > 0;
+  } catch { return false; }
+}
+
+/** Best-effort migrate (idempotent) then the 0019 gate. Mirrors wbEnsureReady. */
+export async function wbEnsureReady19() {
+  try {
+    const { ensureReady } = await import("../rig-docs-fixtures.mjs");
+    await ensureReady();
+  } catch { /* dirty tree — probe the live catalog as-is */ }
+  return has0019();
+}
+
+/** The per-cell 0019 gate: at 18 migrations every 0019 cell FAILS loudly. */
+export function fail0019(live) {
+  if (!live) {
+    throw new Error(
+      "0019 NOT applied (clara.schema_migrations has no '0019_%' row) — the wiki authority-boundary pins (WB-R21/WB-R24(ii): veto removal + stale marker + mark_wiki_citations_stale + the CLR32 monotonic guard + stale_citation + has_stale_sources) are not built; this battery is REQUIRED to fail against the 18-migration prestate (work-order discipline)",
     );
   }
 }
@@ -346,6 +457,21 @@ export async function clearWikiHold({ client, opKey = null }) {
   const r = await roleQuery(ROLES.runtime,
     "select clara.clear_wiki_synthesis_hold(p_client => $1, p_op_key => $2) as r",
     [client, opKey ?? opk("wrel")]);
+  return r.rows[0].r;
+}
+
+/** [0019 §3] mark_wiki_citations_stale(p_client,p_document,p_reason,p_op_key) —
+ *  SECURITY DEFINER, GRANT clara_runtime ONLY. Returns the closed receipt
+ *  {document_id, reason, citations_marked, refs_marked, status} with
+ *  status ∈ {'marked','noop'} ('noop' IFF citations_marked+refs_marked=0).
+ *  `role` is overridable so the ACL cells can drive the refused lanes. */
+export async function markStale({
+  client, document, reason = WB_STALE_REASON, opKey = null, role = ROLES.runtime,
+}) {
+  const r = await roleQuery(role,
+    `select clara.mark_wiki_citations_stale(p_client => $1, p_document => $2,
+       p_reason => $3, p_op_key => $4) as r`,
+    [client, document, reason, opKey ?? opk("wstale")]);
   return r.rows[0].r;
 }
 

@@ -99,6 +99,10 @@ const WAVE_B_RUNTIME_FNS = [
   "set_wiki_synthesis_hold", "clear_wiki_synthesis_hold",
   "update_onboarding_plan", "record_opening_targets_parsed",
   "create_seeding_batch", "run_client_lint", "run_lint_all",
+  // 0019 [§3, amendment 8]: the stale-mark writer is runtime-ONLY. Listing it
+  // here is what makes the rig-isolation grant matrix cover it — the human,
+  // agent and both wake lanes must show EXECUTE=false for it.
+  "mark_wiki_citations_stale",
 ];
 const WAVE_B_SHARED_READS = ["get_wiki_page", "list_wiki_pages", "trial_balance_as_of"];
 export const ALLOWED = {

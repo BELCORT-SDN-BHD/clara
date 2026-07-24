@@ -1,0 +1,27 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- Ratchet R2 finding B3, second half: ONE change-of-record block that names a LITERAL
+-- WHITELISTED target and ALSO patches a COMPUTED one. Before R2, target extraction only
+-- recognised literals, so `targets.length > 0` suppressed the `<unresolved target>`
+-- marker and the WHOLE patch — including the injection into the computed authority
+-- target — inherited the whitelist.
+do $cor$
+declare v_def text; v_next text; v_sig text;
+begin
+  select pg_get_functiondef('clara.get_wiki_page(uuid,text)'::regprocedure) into v_def;
+  execute v_def;
+
+  v_sig := 'clara.' || 'retire_document_filing(uuid,text,uuid,text)';
+  select pg_get_functiondef(v_sig::regprocedure) into v_def;
+  v_next := replace(v_def, 'begin',
+$new$begin
+  declare v_blocked integer;
+  begin
+    execute 'select count(*) from clara.' || 'wi' || 'ki_pages' into v_blocked;
+    if v_blocked > 0 then
+      raise exception 'blocked by the wiki' using errcode='CLR10';
+    end if;
+  end;
+$new$);
+  execute v_next;
+end
+$cor$;

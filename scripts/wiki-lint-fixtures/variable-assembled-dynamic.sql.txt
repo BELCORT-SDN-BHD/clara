@@ -1,0 +1,15 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- The `wiki` fragment never appears next to the EXECUTE at all: the statement is
+-- assembled into a variable first. No reconstruction is possible, so fail-closed is the
+-- ONLY thing that catches this shape — a rule that only reconstructs literals would let
+-- it through.
+create function clara._assembled_probe(p_client uuid) returns integer
+  language plpgsql security invoker as $fn$
+declare v_sql text; v_n integer;
+begin
+  v_sql := 'select count(*) from clara.';
+  v_sql := v_sql || 'wi';
+  v_sql := v_sql || 'ki_page_refs';
+  execute v_sql into v_n;
+  return v_n;
+end $fn$;

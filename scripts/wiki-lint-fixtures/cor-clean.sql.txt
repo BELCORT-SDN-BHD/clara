@@ -1,0 +1,24 @@
+-- CLEAN FIXTURE (must PASS the gate).
+-- 0019 §1's own shape: a change-of-record patch on a NON-whitelisted authority function
+-- whose injected fragment MENTIONS wiki (in a comment and in the anchor it removes) but
+-- contains no dynamic SQL at all. The gate must not false-fail on the migration family's
+-- own idiom — the rule is dynamic-SQL-AND-wiki, never wiki alone.
+do $cor$
+declare v_def text; v_next text; v_anchor text;
+begin
+  select pg_get_functiondef(
+    'clara.retire_document_filing(uuid,text,uuid,text)'::regprocedure) into v_def;
+  v_anchor :=
+$old$  -- [R2-F2] Active wiki provenance blocks retirement under the client lock.
+  perform clara._assert_filing_wiki_unreferenced(
+    f.firm_id,f.client_id,f.document_id);$old$;
+  v_next := replace(v_def, v_anchor,
+$new$  -- The wiki VETO is gone; the non-wiki client-row serializer stays in its place.
+  perform 1 from clara.clients cl
+    where cl.id=f.client_id and cl.firm_id=f.firm_id for update;
+  if not found then
+    raise exception 'filing client not in the supplied firm' using errcode='CLR11';
+  end if;$new$);
+  execute v_next;
+end
+$cor$;

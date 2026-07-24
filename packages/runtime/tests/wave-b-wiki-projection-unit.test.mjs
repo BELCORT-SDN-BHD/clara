@@ -20,6 +20,9 @@ import {
   WIKI_PROJECTION_EVENT_TYPES,
   WIKI_PROJECTION_CONSUMER,
   CONSUMERS,
+  isConfigurationRefusal,
+  terminalStatusFor,
+  CONFIG_DEAD_LETTER_PREFIX,
 } from "../lib/wiki-projection.mjs";
 import { wikiColdStartReady, startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { safeWikiKey, putWikiCanonical, verifyWikiCanonical, StorageError } from "../lib/storage.mjs";
@@ -89,13 +92,15 @@ test("GOVERNED_EGRESS_PURPOSES.wiki_synthesis names the consent discipline", () 
 });
 
 // --- registry + subscription ------------------------------------------------------------------
-test("CONSUMERS entry is runtime-role; the subscription SET is the 7 registered types", () => {
+test("CONSUMERS entry is runtime-role; the subscription SET is the 8 registered types", () => {
   assert.equal(CONSUMERS.wiki_projection.name, WIKI_PROJECTION_CONSUMER);
   assert.equal(CONSUMERS.wiki_projection.identity, "runtime-role");
+  // 0019 adds document.filing_retired — the WB-R21 stale lane. It is a document.* type,
+  // NOT a wiki.* one, so P17 (never re-synthesize from wiki.*) is untouched.
   assert.deepEqual([...WIKI_PROJECTION_EVENT_TYPES].sort(), [
     "counterparty.created", "counterparty.merged", "document.classified",
-    "egress.consent_granted", "egress.consent_revoked", "entry.approved",
-    "seeding.proposal_decided",
+    "document.filing_retired", "egress.consent_granted", "egress.consent_revoked",
+    "entry.approved", "seeding.proposal_decided",
   ]);
 });
 
@@ -393,6 +398,78 @@ test("the loop stays DORMANT while unseeded: no LISTEN, no discovery; stop() ret
   const t0 = Date.now();
   await loop.stop();
   assert.ok(Date.now() - t0 < 2000, "stop() interrupts the dormancy poll promptly");
+});
+
+// --- ratchet R3: refusal classification + configuration self-heal (F2/F3) ----------------------
+
+/** A typed clara refusal (with an optional {reason} discriminant), the shape the DB raises. */
+const clr = (code, reason, msg = "x") =>
+  Object.assign(new Error(msg), reason != null ? { code, detail: JSON.stringify({ reason }) } : { code });
+
+test("[R3 F2] budget_unknown is a CONFIGURATION refusal, not terminal (repair + replay succeeds)", () => {
+  const err = clr("CLR32", "budget_unknown", "wiki budget configuration is incomplete");
+  assert.equal(isConfigurationRefusal(err), true,
+    "budget_unknown is a missing config row — the checkpoint must stay BEHIND it, never past");
+  assert.equal(terminalStatusFor(err), null,
+    "…so it is NOT terminal: checkpointing past it would permanently lose the projection");
+});
+
+test("[R3 F2] a missing-EXECUTE-privilege 42501 is a CONFIGURATION refusal (a grant gap, not data)", () => {
+  const err = Object.assign(new Error("permission denied for function"), { code: "42501" });
+  assert.equal(isConfigurationRefusal(err), true);
+  assert.equal(terminalStatusFor(err), null, "a raw SQLSTATE is never a terminal domain outcome");
+});
+
+test("[R3 F2] isolation_unsupported and CLR03 remain configuration refusals", () => {
+  assert.equal(isConfigurationRefusal(clr("CLR32", "isolation_unsupported")), true);
+  assert.equal(isConfigurationRefusal(clr("CLR03", null)), true);
+});
+
+test("[R3 F2] an UNKNOWN typed refusal is NEITHER terminal NOR configuration → non-exhausting", () => {
+  const err = clr("CLR32", "some_future_reason");
+  assert.equal(terminalStatusFor(err), null, "an unrecognised reason is not terminal — never checkpointed");
+  assert.equal(isConfigurationRefusal(err), false,
+    "…and not configuration either, so runTargetEvent flags it `unclassified` → BLOCKS the cursor until a human classifies it");
+});
+
+test("[R3 F2] the still-terminal reasons keep their exact mappings (the change is additive)", () => {
+  assert.equal(terminalStatusFor(clr("CLR32", "stale_projected_from_seq")), "already_projected");
+  assert.equal(terminalStatusFor(clr("CLR32", "bad_state")), "skipped_bad_state");
+  assert.equal(terminalStatusFor(clr("CLR32", "cap_exceeded")), "skipped_cap");
+  assert.equal(terminalStatusFor(clr("CLR32", "consent_held")), "held_consent");
+  assert.ok(CONFIG_DEAD_LETTER_PREFIX.length > 0, "the config dead-letter prefix is a real string the health query keys on");
+});
+
+test("[R3 F3] a configuration-blocked cycle RELEASES the connection (advisory lock) and reconnects after the backoff", async () => {
+  let made = 0;
+  const clients = [];
+  const makeClient = () => {
+    const c = {
+      ended: false,
+      async connect() {},
+      on() {}, once() {}, removeListener() {},
+      // acquireLeaderLock/setRuntimeRole ignore rows; the cold-start gate is READY.
+      async query() { return { rows: [{ surface: true, seeded: true, ready: true }], rowCount: 1 }; },
+      async end() { this.ended = true; },
+    };
+    made++; clients.push(c);
+    return c;
+  };
+  // First cycle reports configurationBlocked; later cycles are quiet.
+  let cycles = 0;
+  const runCycle = async () => {
+    cycles++;
+    return cycles === 1
+      ? { firms: 1, effects: 0, capped: false, configurationBlocked: true }
+      : { firms: 0, effects: 0, capped: false, configurationBlocked: false };
+  };
+  const loop = startWikiProjectionLoop({ makeClient, runCycle, configBackoffMs: 40, log: () => {} });
+  await new Promise((r) => setTimeout(r, 300)); // acquire → cycle#1 (blocked) → release → backoff → reconnect → cycle#2
+  await loop.stop();
+
+  assert.ok(clients[0]?.ended, "the FIRST connection was CLOSED — the session advisory lock is released for a standby");
+  assert.ok(made >= 2, `the leader RECONNECTED after the block instead of pinning the lock (makeClient called ${made}×)`);
+  assert.ok(cycles >= 2, "…and a fresh cycle ran on the new connection (the self-heal path)");
 });
 
 test("model-lane mutate re-checks recency IN-TXN: a newer published seq makes it a no-op (codex F9)", async () => {

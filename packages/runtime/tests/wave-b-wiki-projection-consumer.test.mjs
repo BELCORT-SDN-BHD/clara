@@ -18,6 +18,7 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { rootQuery, humanQuery, asRuntime, asFnOwner, opk, buildFirm, headSeq, checkpointSeq, endPool } from "./relay-fixtures.mjs";
 import { runWikiProjectionCycle, wikiProjectionRedrive, CONSUMERS, WIKI_PROJECTION_CONSUMER } from "../lib/wiki-projection.mjs";
+import { wikiProjectionHealth } from "../lib/wiki-projection-ops.mjs";
 import { verifyWikiCanonical } from "../lib/storage.mjs";
 
 let storageDir;
@@ -38,6 +39,15 @@ async function probe0017() {
 }
 const HAS17 = await probe0017();
 const skip = HAS17 ? false : "0017 wiki surface absent — migrate the target first";
+// The isolation floor (CLR32/isolation_unsupported) is a 0019 feature — gate the config-block cell.
+async function probe0019iso() {
+  const r = await rootQuery(
+    `select count(*)::int as n from pg_proc
+       where oid = to_regprocedure('clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,uuid,text,text)')
+         and prosrc like '%isolation_unsupported%'`);
+  return Number(r.rows[0].n) === 1;
+}
+const skip19 = HAS17 && (await probe0019iso()) ? false : "0019 isolation floor absent — migrate to 19 first";
 
 const sha256hex = (seed) => createHash("sha256").update(String(seed)).digest("hex");
 const present = async () => "present";
@@ -85,7 +95,7 @@ const pageBySlug = (client, slug) =>
        from clara.wiki_pages p join clara.wiki_page_versions v on v.id=p.current_version_id
       where p.client_id=$1 and p.slug=$2`, [client, slug]).then((r) => r.rows[0] ?? null);
 const deadLetters = (firm) =>
-  rootQuery("select event_id, status, attempt_count from clara.relay_dead_letters where firm_id=$1 and consumer=$2",
+  rootQuery("select event_id, status, attempt_count, reason, resolved_at from clara.relay_dead_letters where firm_id=$1 and consumer=$2",
     [firm, WIKI_PROJECTION_CONSUMER]).then((r) => r.rows);
 
 test("MODEL path: counterparty.created → synthesize → Storage put/verify → publish; real 0017 rows + verified object", { skip }, async () => {
@@ -197,6 +207,88 @@ test("dead-letter on a genuine throw + redrive through the CONSUMERS entry", { s
   const page = await pageBySlug(client, `counterparty/${cp}`);
   assert.ok(page, "the redrive published the page");
   await verifyWikiCanonical(page.storage_key, page.content_sha256);
+});
+
+// --- ratchet R3: dead-letter recovery + configuration self-heal (F6/F2/F3) ---------------------
+
+test("[R3 F6] an AUTOMATIC replay after a repair RESOLVES the dead-letter atomically (no explicit redrive)", { skip }, async () => {
+  const { owner, firm, client } = await buildFirm("wpf6");
+  const cp = await insertCounterparty(firm, client, owner);
+  const { eventId } = await emitEvent(firm, "counterparty.created", { client, actor: owner, payload: { counterparty_id: cp } });
+
+  // Poison ONE cycle: a non-CLR throw dead-letters the event; the checkpoint does NOT advance.
+  const boomDeps = { resolveConsent: present, synthesize: async () => { throw new Error("boom: model unavailable"); } };
+  await asRuntime((c) => runWikiProjectionCycle(c, { onlyFirm: firm, ...boomDeps }));
+  let dl = (await deadLetters(firm)).find((d) => d.event_id === eventId);
+  assert.ok(dl && dl.status === "pending", "the poison event dead-lettered (pending)");
+  assert.equal(dl.resolved_at, null, "…with no resolved_at yet");
+  assert.notEqual(await checkpointSeq(firm, WIKI_PROJECTION_CONSUMER), await headSeq(firm), "…and the checkpoint stayed BEHIND it");
+
+  // Heal: a normal drain re-reads the same event (checkpoint never advanced) and it now SUCCEEDS.
+  await drainWiki(firm, goodDeps);
+  assert.ok(await pageBySlug(client, `counterparty/${cp}`), "the automatic replay published the page");
+  dl = (await deadLetters(firm)).find((d) => d.event_id === eventId);
+  assert.equal(dl.status, "resolved", "…and RESOLVED the dead-letter automatically — no explicit redrive (F6)");
+  assert.ok(dl.resolved_at != null, "…stamping resolved_at");
+});
+
+test("[R3 F6] recordDeadLetter REFRESHES on re-failure — a stale-resolved row flips back to pending, attempts bump", { skip }, async () => {
+  const { owner, firm, client } = await buildFirm("wpf6b");
+  const cp = await insertCounterparty(firm, client, owner);
+  const { eventId } = await emitEvent(firm, "counterparty.created", { client, actor: owner, payload: { counterparty_id: cp } });
+  // boomDeps NEVER publishes (the throw precedes publish), so the event re-fails every cycle while
+  // the checkpoint stays behind — no already_projected short-circuit can hide the re-failure.
+  const boomDeps = { resolveConsent: present, synthesize: async () => { throw new Error("boom: model unavailable"); } };
+
+  await asRuntime((c) => runWikiProjectionCycle(c, { onlyFirm: firm, ...boomDeps }));
+  let dl = (await deadLetters(firm)).find((d) => d.event_id === eventId);
+  assert.equal(dl.status, "pending");
+  assert.equal(Number(dl.attempt_count), 1);
+
+  // Simulate a stale RESOLVE left over from before a checkpoint rewind.
+  await rootQuery("update clara.relay_dead_letters set status='resolved', resolved_at=now() where consumer=$1 and event_id=$2",
+    [WIKI_PROJECTION_CONSUMER, eventId]);
+
+  // Re-poison: the event re-reads (checkpoint never advanced) and re-fails → the row must NOT stay resolved.
+  await asRuntime((c) => runWikiProjectionCycle(c, { onlyFirm: firm, ...boomDeps }));
+  dl = (await deadLetters(firm)).find((d) => d.event_id === eventId);
+  assert.equal(dl.status, "pending", "the re-failure flipped the stale-resolved row BACK to pending (F6 — /ready warns again)");
+  assert.equal(dl.resolved_at, null, "…and cleared resolved_at");
+  assert.equal(Number(dl.attempt_count), 2, "…and bumped the attempt count");
+});
+
+test("[R3 F2/F3] a CONFIGURATION refusal (isolation_unsupported) BLOCKS the cursor, surfaces configurationBlocked, then self-heals", { skip: skip19 }, async () => {
+  const { owner, firm, client } = await buildFirm("wpcfg");
+  const cp = await insertCounterparty(firm, client, owner);
+  await emitEvent(firm, "counterparty.created", { client, actor: owner, payload: { counterparty_id: cp } });
+
+  // Pin the runtime connection's default isolation to REPEATABLE READ so the cycle's own `begin`
+  // opens RR → publish raises CLR32/isolation_unsupported (0019 §1b). Instance-local; restored below.
+  const blocked = await asRuntime(async (c) => {
+    await c.query("set default_transaction_isolation to 'repeatable read'");
+    try {
+      const r = await runWikiProjectionCycle(c, { onlyFirm: firm, ...goodDeps });
+      const health = await wikiProjectionHealth(c);
+      return { r, health };
+    } finally {
+      await c.query("reset default_transaction_isolation").catch(() => {});
+    }
+  });
+
+  assert.equal(blocked.r.configurationBlocked, true, "the cycle reports configurationBlocked");
+  assert.notEqual(await checkpointSeq(firm, WIKI_PROJECTION_CONSUMER), await headSeq(firm),
+    "the checkpoint stayed BEHIND the event — a config failure is NEVER checkpointed past");
+  assert.equal(await pageBySlug(client, `counterparty/${cp}`), null, "nothing published under the refused isolation");
+  const dl = (await deadLetters(firm)).find((d) => String(d.reason).startsWith("runtime misconfiguration"));
+  assert.ok(dl && dl.status === "pending", "a config-prefixed dead-letter was recorded (the configurationBlocked signal)");
+  assert.equal(blocked.health.configurationBlocked, true, "wikiProjectionHealth exposes configurationBlocked=true");
+
+  // Self-heal: a normal (READ COMMITTED) drain projects the event and clears the signal.
+  await drainWiki(firm, goodDeps);
+  assert.equal(await checkpointSeq(firm, WIKI_PROJECTION_CONSUMER), await headSeq(firm), "checkpoint converged after the config was corrected");
+  assert.ok(await pageBySlug(client, `counterparty/${cp}`), "the event projected once the isolation was fixed");
+  const dl2 = (await deadLetters(firm)).find((d) => String(d.reason).startsWith("runtime misconfiguration"));
+  assert.equal(dl2.status, "resolved", "…and the config dead-letter resolved automatically (F6)");
 });
 
 test("registry + redrive guard: unknown dead-letter refuses; identity is runtime-role", { skip }, async () => {

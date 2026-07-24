@@ -1,0 +1,9 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- A PROCEDURE, not a function. It is a callable clara surface with a body exactly like a
+-- function's; the pre-R2 parser matched only `create function` and never saw it.
+create procedure clara._sweep_pages(p_client uuid)
+  language plpgsql security definer set search_path=clara,pg_temp as $pr$
+begin
+  execute 'update clara.' || 'wi' || 'ki_pages set updated_at=now() where client_id=$1'
+    using p_client;
+end $pr$;

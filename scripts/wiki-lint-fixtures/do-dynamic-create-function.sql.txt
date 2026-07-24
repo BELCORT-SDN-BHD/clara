@@ -1,0 +1,12 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- A `do` block that reads NO function body but dynamically CREATEs one. It leaves a
+-- callable surface behind — the very property that puts change-of-record patches in
+-- scope — so it cannot ride the "migration-time do blocks leave nothing behind"
+-- exemption. Here the block's OWN dynamic SQL is the persistent surface.
+do $mk$
+begin
+  execute 'create function clara._shadow_wiki_probe(p_client uuid) returns integer'
+    || ' language sql stable as $b$ select count(*)::int from clara.wiki_pages'
+    || ' where client_id = p_client $b$';
+end
+$mk$;

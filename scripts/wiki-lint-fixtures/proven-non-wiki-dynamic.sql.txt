@@ -1,0 +1,14 @@
+-- FAIL-then-WAIVABLE FIXTURE (ratchet R3 finding F4).
+-- A statement fully reconstructible from literals that names only `clara.firms` is NOT
+-- proven safe by that alone: `clara.firms` could be a VIEW over a wiki relation, invisible
+-- to a string scan. So a persistent dynamic EXECUTE outside the whitelist is a FINDING —
+-- safety is never inferred from string absence — but a waiver DECLARING its base relations
+-- (`firms`) can excuse it. This cell proves the gate is not vacuous: a declared, verified
+-- waiver passes; an undeclared or wiki-declaring one does not.
+create function clara._proven_probe() returns integer
+  language plpgsql security invoker as $fn$
+declare v_n integer;
+begin
+  execute 'select count(*) from clara.' || 'firms' into v_n;
+  return v_n;
+end $fn$;

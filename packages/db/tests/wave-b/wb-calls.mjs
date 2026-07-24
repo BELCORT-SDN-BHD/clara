@@ -256,6 +256,34 @@ export const wikiLogRows = (client) =>
   rowsOf("select to_jsonb(l) as row from clara.wiki_log l where l.client_id=$1 order by l.created_at, l.id", [client]);
 export const holdRow = (client) =>
   row1("select to_jsonb(h) as row from clara.wiki_synthesis_holds h where h.client_id=$1", [client]);
+
+// --- [0019] provenance-relation readbacks (the stale-marker surface) --------
+/** Citation rows of ONE version (immutable, versioned provenance). */
+export const citationRows = (version) =>
+  rowsOf("select to_jsonb(c) as row from clara.wiki_page_citations c where c.version_id=$1 order by c.created_at, c.id", [version]);
+/** Every citation row of a PAGE across all versions (current + superseded) —
+ *  the scope-precision cells need the superseded rows too. */
+export const pageCitationRows = (page) =>
+  rowsOf(`select to_jsonb(c) as row from clara.wiki_page_citations c
+            join clara.wiki_page_versions v on v.id=c.version_id
+           where v.page_id=$1 order by v.version_n, c.id`, [page]);
+/** Page-level refs (MUTABLE — deleted and re-created on every republish). */
+export const refRows = (page) =>
+  rowsOf("select to_jsonb(r) as row from clara.wiki_page_refs r where r.page_id=$1 order by r.created_at, r.id", [page]);
+/** audit_log rows for one fn whose args mention `frag` (op_key, usually). */
+export const auditRowsFor = async (fn, frag = null) => {
+  const rows = await rowsOf(
+    "select to_jsonb(a) as row from clara.audit_log a where a.fn=$1 order by a.at, a.id", [fn]);
+  return frag == null ? rows : rows.filter((r) => JSON.stringify(r).includes(frag));
+};
+/** The op_receipts row for (fn, op_key) — null when no reservation survives. */
+export const opReceiptRow = (fn, opKey) =>
+  row1("select to_jsonb(o) as row from clara.op_receipts o where o.fn=$1 and o.op_key=$2", [fn, opKey]);
+/** Every index definition on a clara relation (index-coverage asserts). */
+export const indexDefs = async (table) => (await rootQuery(
+  `select pg_get_indexdef(ix.indexrelid) as def from pg_index ix
+     join pg_class t on t.oid=ix.indrelid join pg_namespace n on n.oid=t.relnamespace
+    where n.nspname='clara' and t.relname=$1`, [table])).rows.map((x) => x.def);
 export const budgetVal = async (key) =>
   (await rootQuery("select value_int::bigint as v from clara.wiki_budgets where budget_key=$1", [key])).rows[0]?.v ?? null;
 export const setBudget = (key, v) =>

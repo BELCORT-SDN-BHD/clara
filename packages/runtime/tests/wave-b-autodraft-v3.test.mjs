@@ -147,7 +147,44 @@ test("v3 draft-wrapper re-fetch stays purpose 'coding' and NEVER sets clara.pack
 // pack must never change what reaches the write client for the same model input.
 // ===========================================================================
 
-test("v3 W2 probe: write params are byte-identical whether the pack carries a wiki block or not", async () => {
+// The 0019 §7 stale marker is NEW pack surface, and the contract (§10) requires this W2
+// probe to run WITH it present: `stale_at`/`stale_reason` BY NAME on the enumerated
+// citation object (0019 §7.3) and the derived page-level `has_stale_sources`. Unproven,
+// staleness is new W2 exposure — a later refactor could consume `has_stale_sources`
+// outside prompt construction and move the write arguments only when it is true, and a
+// fixture carrying no stale metadata would keep passing byte-identity while production's
+// MARKED pages quietly steered authority writes.
+const WIKI_PAGE_STALE = {
+  slug: "vendor-brightpath",
+  title: "BRIGHTPATH SDN BHD",
+  page_kind: "counterparty",
+  version_n: 3,
+  updated_at: "2026-07-20T02:11:04.882Z",
+  has_stale_sources: true,
+  citations: [
+    {
+      source_kind: "document",
+      document_id: "8f1c2d3e-4a5b-4c6d-8e9f-0a1b2c3d4e5f",
+      entry_id: null,
+      counterparty_id: null,
+      detail: {},
+      stale_at: "2026-07-23T09:14:55.201Z",
+      stale_reason: "source_filing_retired",
+    },
+    {
+      source_kind: "human_note",
+      document_id: null,
+      entry_id: null,
+      counterparty_id: null,
+      detail: { note: "net-30 confirmed by the client" },
+      stale_at: null,
+      stale_reason: null,
+    },
+  ],
+  content: "Pays net-30.",
+};
+
+test("v3 W2 probe: write params are byte-identical whether the pack carries a wiki block or not — INCLUDING a block carrying 0019 stale metadata", async () => {
   const packNoWiki = { books_version: 7 };
   const packWithWiki = {
     books_version: 7,
@@ -159,6 +196,21 @@ test("v3 W2 probe: write params are byte-identical whether the pack carries a wi
       permitted_use: "inform_never_decide",
     },
   };
+  const packWithStaleWiki = {
+    books_version: 7,
+    wiki: {
+      last_projected_seq: 42,
+      held: false,
+      pages: [WIKI_PAGE_STALE],
+      basis: "clara_maintained_advisory_notes",
+      permitted_use: "inform_never_decide",
+    },
+  };
+  // Guard the fixture itself: a silent shape drift would make the probe below vacuous.
+  assert.equal(packWithStaleWiki.wiki.pages[0].has_stale_sources, true, "the fixture page IS marked");
+  assert.equal(packWithStaleWiki.wiki.pages[0].citations[0].stale_reason, "source_filing_retired",
+    "…and carries the named per-citation stale_reason (0019 §7)");
+  assert.ok(packWithStaleWiki.wiki.pages[0].citations[0].stale_at, "…and stale_at");
 
   const { client: clientA } = makeLoggingReadClient({ pack: packNoWiki });
   const writeA = stubPools({ readClient: clientA });
@@ -170,7 +222,13 @@ test("v3 W2 probe: write params are byte-identical whether the pack carries a wi
   const rB = await runDraftJournalEntry(ctx, baseInput);
   assert.equal(rB.ok, true);
 
+  const { client: clientC } = makeLoggingReadClient({ pack: packWithStaleWiki });
+  const writeC = stubPools({ readClient: clientC });
+  const rC = await runDraftJournalEntry(ctx, baseInput);
+  assert.equal(rC.ok, true);
+
   assert.deepEqual(writeA.params, writeB.params, "a wiki block present in the pack must not change the write params for an identical model input");
+  assert.deepEqual(writeA.params, writeC.params, "…and neither does a wiki block whose sources are MARKED STALE (0019 §7 is inform-never-decide: the marker informs the prompt, never the write)");
 });
 
 test("v3 structural W2 check: no non-prompt source file reads the pack's wiki field to build draft params", () => {

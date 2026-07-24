@@ -1,0 +1,10 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- Nested replacement construction: the relation name is materialised by a FUNCTION CALL,
+-- so the expression is not reconstructible. Fail-closed rejects it on the spot.
+create function clara._templated_probe() returns integer
+  language plpgsql security invoker as $fn$
+declare v_n integer;
+begin
+  execute replace('select count(*) from clara.@TBL@', '@TBL@', 'wi' || 'ki_log') into v_n;
+  return v_n;
+end $fn$;

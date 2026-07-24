@@ -1,0 +1,15 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- The second hole ratchet R1 finding 3 named: the predecessor gate keyed definitions and
+-- the whitelist by BARE NAME, so a brand-new OVERLOAD of a whitelisted name inherited the
+-- whitelist and its dynamic wiki SQL was never examined. The contract's §9 whitelist is by
+-- exact `regprocedure`; `get_wiki_page(uuid,text,text)` is a DIFFERENT function from
+-- `get_wiki_page(uuid,text)` and must be scanned like any other.
+create function clara.get_wiki_page(p_client uuid, p_slug text, p_as_of text)
+  returns jsonb language plpgsql security definer
+  set search_path=clara,pg_temp as $fn$
+declare v_out jsonb;
+begin
+  execute 'select to_jsonb(p) from clara.' || 'wiki' || '_pages p where p.client_id=$1'
+    into v_out using p_client;
+  return v_out;
+end $fn$;

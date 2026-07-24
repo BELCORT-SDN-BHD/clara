@@ -27,6 +27,17 @@
 //                                       finalized documents (ZERO model calls)
 //   node scripts/relay.mjs wiki-repair → Wave B ceremony: re-drive the wiki projection to
 //                                       convergence (orphan repair; put-409 idempotent)
+//   node scripts/relay.mjs wiki-stale-scan
+//                                     → WB-R21/0019 §11 catch-up, half (i): the CEREMONY-ROLE,
+//                                       READ-ONLY inverted scan. Prints the {clientId,documentId}
+//                                       pair list as JSON (the ceremony records it as evidence).
+//                                       It runs WITHOUT `set role clara_runtime` on purpose:
+//                                       clara_runtime has no SELECT on clara.document_filings
+//                                       (0007:2740-2741) and 0019 adds NO grant.
+//   node scripts/relay.mjs wiki-stale-catchup --run-key <k> [--pairs <path.json>]
+//                                     → half (ii): the RUNTIME-ROLE marking verb over those pairs.
+//                                       --run-key is MANDATORY (a fixed per-pair op_key replays its
+//                                       original receipt forever); same run retried ⇒ same key.
 //
 // Env:
 //   PG* / DATABASE_URL / WORKFLOW_POSTGRES_URL  → connection (env ONLY; a
@@ -55,7 +66,12 @@ import { CONSUMERS as RULE_POST_CONSUMERS } from "../lib/rule-post.mjs";
 import { CONSUMERS as SST_WATCH_CONSUMERS } from "../lib/sst-watch.mjs";
 import { CONSUMERS as FACTS_GATE_CONSUMERS } from "../lib/facts-gate.mjs";
 import { CONSUMERS as WIKI_PROJECTION_CONSUMERS } from "../lib/wiki-projection.mjs";
-import { backfillWikiSources, repairWikiOrphans } from "../lib/wiki-projection-ops.mjs";
+import {
+  backfillWikiSources,
+  repairWikiOrphans,
+  scanStaleCatchupCandidates,
+  catchUpWikiStale,
+} from "../lib/wiki-projection-ops.mjs";
 import { makeRuntimeClient } from "../lib/pools.mjs";
 
 // Every registered spine consumer's redrive seam, merged. Each module owns its own entry
@@ -221,6 +237,48 @@ async function main() {
         }
         log(JSON.stringify(await backfillWikiSources(client, { sources, log: errlog })));
       }
+    } finally {
+      await client.end().catch(() => {});
+    }
+    return;
+  }
+
+  // WB-R21 / 0019 §11 stale catch-up — RECONCILIATION for any pre-existing anomaly, run once at
+  // the ceremony and re-runnable thereafter. Two verbs because of a privilege boundary:
+  //   wiki-stale-scan     → CEREMONY-ROLE, READ-ONLY, no `set role clara_runtime`: clara_runtime
+  //       has no SELECT on clara.document_filings (0007:2740-2741) and 0019 adds NO grant, so the
+  //       inverted scan cannot run on the runtime connection. The session is pinned read-only so
+  //       this lane structurally cannot write. Emits the pair list the ceremony records as evidence.
+  //   wiki-stale-catchup  → RUNTIME-ROLE marking over those pairs (the grant it already has).
+  if (args[0] === "wiki-stale-scan") {
+    const client = makeClient();
+    await client.connect();
+    await client.query("set default_transaction_read_only = on");
+    errlog("wiki-stale-scan: CEREMONY-ROLE read-only scan (clara_runtime cannot read document_filings)");
+    try {
+      log(JSON.stringify(await scanStaleCatchupCandidates(client)));
+    } finally {
+      await client.end().catch(() => {});
+    }
+    return;
+  }
+  if (args[0] === "wiki-stale-catchup") {
+    const ki = args.indexOf("--run-key");
+    const runKey = ki >= 0 ? args[ki + 1] : null;
+    if (!runKey) throw new Error("usage: relay.mjs wiki-stale-catchup --run-key <k> [--pairs <path.json>]");
+    const pi = args.indexOf("--pairs");
+    let pairs = [];
+    if (pi >= 0 && args[pi + 1]) {
+      const { readFile } = await import("node:fs/promises");
+      pairs = JSON.parse(await readFile(args[pi + 1], "utf8"));
+    } else {
+      errlog("wiki-stale-catchup: no --pairs <path.json> supplied — nothing to mark (run wiki-stale-scan first)");
+    }
+    const client = makeClient();
+    await client.connect();
+    await setRuntimeRole(client);
+    try {
+      log(JSON.stringify(await catchUpWikiStale(client, { pairs, runKey, log: errlog })));
     } finally {
       await client.end().catch(() => {});
     }

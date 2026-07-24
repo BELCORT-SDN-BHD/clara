@@ -1,0 +1,20 @@
+-- FAIL-then-WAIVABLE FIXTURE (ratchet R3 findings F4 + F8).
+-- A change-of-record patch into a SINGLE literal non-whitelisted target that injects a
+-- RECONSTRUCTIBLE, non-wiki dynamic statement (`clara.firms`). F4: reconstructibility is not
+-- proof, so it is a finding; F8: because the patch has exactly one literal target, an
+-- exact-identity waiver DECLARING that target's base relations can excuse it.
+do $cor$
+declare v_def text; v_next text;
+begin
+  select pg_get_functiondef(
+    'clara.retire_document_filing(uuid,text,uuid,text)'::regprocedure) into v_def;
+  v_next := replace(v_def, 'begin',
+$new$begin
+  declare v_n integer;
+  begin
+    execute 'select count(*) from clara.' || 'firms' into v_n;
+  end;
+$new$);
+  execute v_next;
+end
+$cor$;

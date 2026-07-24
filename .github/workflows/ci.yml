@@ -111,6 +111,14 @@ jobs:
       - name: Leak-scan (no committed credentials)
         run: node scripts/check-leaks.mjs
 
+      # The 0019 §9 wiki-authority boundary — the repo half of the defence the DB tail
+      # structurally cannot provide, plus its fixture-driven self-test (ratchet R1
+      # finding 3: signature-keyed definitions + change-of-record patch analysis).
+      - name: Wiki dynamic-SQL gate + self-test (0019 §9 · WB-R21)
+        run: |
+          node scripts/check-wiki-dynamic-sql.mjs
+          node scripts/check-wiki-dynamic-sql.selftest.mjs
+
       # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
       # "backed by gitleaks in CI" claim true). Version-pinned to a released
       # gitleaks binary (not a mutable action tag); config + allowlist in

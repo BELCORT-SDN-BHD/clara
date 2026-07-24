@@ -1,0 +1,10 @@
+-- CLEAN FIXTURE (must PASS the gate).
+-- The word `execute` here is the PRIVILEGE keyword, and `wiki` is a real (static) mention.
+-- The PRE-R2 rule — "body contains execute AND body matches /wiki/i" — flagged this as a
+-- violation. It is not dynamic SQL at all, and the DB tail already sees the static token.
+create function clara._regrant_reads() returns void
+  language plpgsql security definer set search_path=clara,pg_temp as $fn$
+begin
+  grant execute on function clara.get_wiki_page(uuid,text) to clara_runtime;
+  revoke execute on function clara.list_wiki_pages(uuid) from public;
+end $fn$;

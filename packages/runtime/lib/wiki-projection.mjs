@@ -9,11 +9,26 @@
 // of kind 'wiki_fact' publishes its page from the seeding proposal's payload VERBATIM (synthesis
 // 'deterministic', prior_gl_line citations, engine_id null); a declined or non-wiki_fact decision is a
 // checkpoint-only skip. A fact with NO concrete line/region anchor is skipped_no_citation — provenance
-// is NEVER fabricated (F-M12). Terminal receipts (checkpoint-advancing, no retry):
-// projected|already_projected|skipped_inactive_client|held_consent|consent_released|skipped_kind|
-// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation + CLR32 wiki refusals mapped terminal;
-// only a genuine throw dead-letters (matcher idiom). op_keys: model/seeding-fact 'wikiproj:<client>:<seq>';
-// ingest 'wikiingest:<client>:<document>'; consent 'wikihold:/wikirelease:<client>:<seq>'. P17: never
+// is NEVER fabricated (F-M12); (d) the STALE lane (WB-R21 / migration 0019 D3) — document.filing_retired
+// marks the citing client's live wiki sources stale via mark_wiki_citations_stale. The authority domain
+// no longer VETOES a retirement under a live citation, so the wiki converges by MARKING from the
+// retirement EVENT; the lane is gated PER EVENT on the writer's presence so the runtime-image-first
+// ceremony window is silent, and it emits NO event of its own (wiki.citations_staled was dropped).
+// Terminal receipts (checkpoint-advancing, no retry):
+// projected|already_projected|citations_staled|skipped_inactive_client|held_consent|consent_released|
+// skipped_kind|skipped_no_surface|
+// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation + the ENUMERATED
+// typed refusals of TERMINAL_STATUS (incl. CLR32/stale_projected_from_seq -> already_projected, the
+// 0019 §5 monotonic guard). That table is CLOSED (ratchet R2 finding B2): a typed CLR that is NOT in
+// it is NOT terminal, because the old catch-all mapped every unrecognised CLR32 reason to
+// skipped_bad_state and CHECKPOINTED it — permanently losing an event that had not converged at all.
+// Two non-terminal classes: a CONFIGURATION REFUSAL (CONFIGURATION_REFUSALS — the runtime is
+// misconfigured, not the data) NEVER advances the checkpoint and is exempt from the attempt-exhaustion
+// escape, so the firm's cursor waits for the fix and then replays; an UNRECOGNISED typed refusal takes
+// the ordinary dead-letter + retry path. Only a genuine throw dead-letters (matcher idiom). op_keys: model/seeding-fact 'wikiproj:<client>:<seq>';
+// ingest 'wikiingest:<client>:<document>'; consent 'wikihold:/wikirelease:<client>:<seq>'; stale
+// 'wikistale:<client>:<seq>' (the ceremony catch-up uses 'wikistale-catchup:<run_key>:<client>:<document>'
+// — a fixed per-pair key would replay the original receipt forever). P17: never
 // subscribes to / re-synthesizes from wiki.*. Cold start (checkpoint seed + backfill + repair) is a
 // CEREMONY item, never boot. Three reads are INJECTABLE + FAIL CLOSED under the 0008 grants (no
 // runtime document→client link, no SELECT on counterparties/client_egress_consents).
@@ -33,11 +48,15 @@ export const WIKI_PROJECTION_CONSUMER = "wiki_projection";
 // live event_types registry (0005/0009/0011/0016/0017). All other types (incl. wiki.* — P17) are
 // checkpoint-only advances. document.classified = ingest (client not carried → resolveDocumentClient);
 // entry.approved = ingest of the source doc (carries the client); counterparty.* = model synthesis;
-// egress.consent_* = hold set/clear; seeding.proposal_decided = the deterministic wiki_fact lane (F13).
+// egress.consent_* = hold set/clear; seeding.proposal_decided = the deterministic wiki_fact lane (F13);
+// document.filing_retired = the WB-R21 STALE lane (0019 D3) — the authority domain no longer vetoes a
+// retirement under a live wiki citation, so the wiki converges by MARKING its sources from the
+// retirement EVENT. Note this is a document.* type, NOT a wiki.* one: P17 (never re-synthesize from
+// wiki.*) is untouched, and with wiki.citations_staled dropped the lane emits no event to loop on.
 export const WIKI_PROJECTION_EVENT_TYPES = Object.freeze([
   "document.classified", "entry.approved", "counterparty.created",
   "counterparty.merged", "egress.consent_granted", "egress.consent_revoked",
-  "seeding.proposal_decided",
+  "seeding.proposal_decided", "document.filing_retired",
 ]);
 const SUBSCRIBED = new Set(WIKI_PROJECTION_EVENT_TYPES);
 
@@ -60,24 +79,99 @@ export function contentSha256(content) {
 export function wikiStorageKey(firmId, clientId, sha) {
   return `firms/${firmId}/wiki/${clientId}/${sha}.md`;
 }
-/** A typed clara refusal (CLR*) — TERMINAL: receipt + checkpoint, never a dead-letter loop. */
-export function isClaraTerminal(err) {
-  return typeof err?.code === "string" && /^CLR\d{2}$/.test(err.code);
-}
 export function claraReason(err) {
   try { return JSON.parse(err?.detail || "{}").reason ?? null; } catch { return null; }
 }
-function terminalStatusFor(err) {
+const isClaraCode = (err) => typeof err?.code === "string" && /^CLR\d{2}$/.test(err.code);
+
+/**
+ * The CLOSED terminal table: every typed refusal this consumer's call surface can raise that
+ * is a genuine DOMAIN outcome — a convergence or a malformed write. A terminal refusal earns a
+ * receipt and ADVANCES the checkpoint, which is only ever safe when reprocessing the event
+ * could not produce a different result.
+ *
+ * It is closed BY CONSTRUCTION (ratchet R2 finding B2, hardened R3 finding F2). The predecessor
+ * fell through to `skipped_bad_state` for any unrecognised CLR32 reason and to `skipped_invalid`
+ * for any unrecognised CLR code — so 0019's brand-new CLR32/isolation_unsupported, a CONFIGURATION
+ * failure and not a convergence at all, silently checkpointed past the event and lost its
+ * projection forever. Enumerating the terminal set instead of the exceptions makes the DEFAULT
+ * non-terminal. R3 finished the job: an unrecognised typed refusal no longer EXHAUSTS into a
+ * checkpoint after MAX_ATTEMPTS either — it BLOCKS the firm cursor (like a configuration refusal)
+ * until a human classifies it deliberately, into this table or into CONFIGURATION_REFUSALS. So a
+ * reason a future migration adds genuinely cannot be checkpointed away by default.
+ *
+ * The keys are the reasons the wiki writers actually raise (0017:1999-2153 for the CLR32 family,
+ * plus 0019 §1b/§5); the CLR-code table covers the non-CLR32 refusals of the same surface.
+ * (CLR32/budget_unknown is DELIBERATELY absent — it is a CONFIGURATION_REFUSAL, not terminal.)
+ */
+const CLR32_TERMINAL = Object.freeze({
+  consent_held: "held_consent",
+  cap_exceeded: "skipped_cap",
+  // The 0019 §5 DB-side monotonic guard: a BENIGN convergence (a newer seq is already published
+  // for this slug), not a malformed write — it must not report itself as one.
+  stale_projected_from_seq: "already_projected",
+  bad_state: "skipped_bad_state",
+  sha_mismatch: "skipped_bad_state",
+  citation_required: "skipped_bad_state",
+});
+const CLR_TERMINAL = Object.freeze({
+  CLR28: "skipped_consent_evidence",
+  CLR02: "skipped_unfiled",
+  CLR11: "skipped_client_mismatch",
+  CLR10: "skipped_invalid",
+});
+
+/** The stable reason PREFIX a CONFIGURATION-blocked dead-letter carries, so /ready's
+ *  wikiProjectionHealth can count them into an explicit `configurationBlocked` signal (F3)
+ *  without a schema change to relay_dead_letters. */
+export const CONFIG_DEAD_LETTER_PREFIX = "runtime misconfiguration ";
+
+/**
+ * CONFIGURATION REFUSALS — the runtime/deployment is misconfigured; the EVENT is fine. Retrying
+ * the same event on a correctly configured connection (or after the config row is repaired)
+ * succeeds, so the checkpoint must stay BEHIND it, and these are exempt from the attempt-
+ * exhaustion escape in processFirm (which exists for poison-pill DATA, not a broken deployment).
+ * A configuration refusal ADDITIONALLY makes the leader RELEASE its advisory lock and reconnect
+ * on a long backoff (ratchet R3 finding F3), so a corrected standby can take over leadership
+ * instead of the broken leader pinning it forever.
+ *   CLR32/isolation_unsupported — 0019 §1b refuses publication under REPEATABLE READ. The pool
+ *     opens READ COMMITTED today, so this fires only from a role-level default, a pooler setting
+ *     or a future config change — instance-local, so a corrected standby heals it.
+ *   CLR32/budget_unknown        — the clara.wiki_budgets config rows are missing (0017:2016-2022,
+ *     "wiki budget configuration is incomplete"). CONFIGURATION drift, not a convergence:
+ *     repairing the row and replaying SUCCEEDS, so checkpointing past it would permanently lose
+ *     the projection (ratchet R3 finding F2 — it used to sit in the terminal table).
+ *   CLR03 (any reason)          — get_wiki_page's authority gate (0017:2380-2384): no human
+ *     claims AND not the trusted v25 runtime marker. The lane sets that marker itself, so a
+ *     CLR03 means the role or the marker is wrong, never that the event is bad.
+ *   SQLSTATE 42501              — a missing EXECUTE privilege on an audited wiki writer: a grant
+ *     gap in the deployment, never bad data (ratchet R3 finding F2).
+ */
+export function isConfigurationRefusal(err) {
+  if (err?.code === "42501") return true;
+  if (!isClaraCode(err)) return false;
+  if (err.code === "CLR03") return true;
+  if (err.code !== "CLR32") return false;
   const reason = claraReason(err);
-  if (err.code === "CLR32") {
-    return reason === "consent_held" ? "held_consent"
-      : reason === "cap_exceeded" ? "skipped_cap"
-      : reason === "budget_unknown" ? "skipped_budget_unknown" : "skipped_bad_state";
-  }
-  if (err.code === "CLR28") return "skipped_consent_evidence";
-  if (err.code === "CLR02") return "skipped_unfiled";
-  if (err.code === "CLR11") return "skipped_client_mismatch";
-  return "skipped_invalid";
+  return reason === "isolation_unsupported" || reason === "budget_unknown";
+}
+
+/** EXPORTED for unit test only: the 0019 §4 contract requires the CLR32/
+ *  stale_projected_from_seq -> already_projected mapping to be PROVEN, and the mapping is a
+ *  pure function of the error. Driving it through the DB would need a real serialized
+ *  supersede race; exporting the pure mapping proves it directly. No caller outside this
+ *  module uses it. Returns NULL when the refusal is not terminal — the caller must then take
+ *  a path that does NOT advance the checkpoint. */
+export function terminalStatusFor(err) {
+  if (!isClaraCode(err) || isConfigurationRefusal(err)) return null;
+  if (err.code === "CLR32") return CLR32_TERMINAL[claraReason(err)] ?? null;
+  return CLR_TERMINAL[err.code] ?? null;
+}
+
+/** A typed clara refusal that is TERMINAL: receipt + checkpoint, never a dead-letter loop.
+ *  A CLR code alone is no longer sufficient — it must be IN the closed table above. */
+export function isClaraTerminal(err) {
+  return terminalStatusFor(err) !== null;
 }
 
 // --- injectable reads (fail-closed defaults under the 0008 grants) -----------------------------
@@ -311,6 +405,38 @@ async function planSeedingWikiFact(client, { firmId, ev }) {
   };
 }
 
+/** PER-EVENT surface gate for the stale lane (0019 §4). The ratified ceremony is RUNTIME-IMAGE-
+ *  FIRST (§11): this binary leads the projection BEFORE migration 0019 applies, so the writer may
+ *  not exist yet. to_regprocedure is a plain catalog read — no EXECUTE needed — and pins the exact
+ *  signature; a missing surface makes the lane a checkpoint-only skip instead of a dead-letter.
+ *  This is the load-bearing safety of window A, so it is evaluated per event, not once at cold
+ *  start (contrast wikiColdStartReady, wiki-projection-ops.mjs:100-108). */
+export async function hasStaleWriterDefault(client) {
+  const r = await client.query(
+    "select to_regprocedure('clara.mark_wiki_citations_stale(uuid,uuid,text,text)') is not null as surface");
+  return r.rows[0]?.surface === true;
+}
+
+/** The FILING-RETIRED → STALE lane (WB-R21 / 0019 D3). Both keys ride the event today, so no
+ *  document→client resolver is needed: retire_document_filing emits client_id=f.client_id +
+ *  document_id=f.document_id (0007:1462), and approve_wrong_client_correction emits
+ *  client_id=x.from_client — the SOURCE / citing client whose provenance goes stale — with the same
+ *  document (0009:2561-2563). One stale_reason covers both paths: the marker describes what
+ *  invalidated the provenance, not which verb caused it.
+ *  At-least-once safety: op-key dedupe (case a) plus the writer's own `stale_at is null` filter mean
+ *  a re-delivery or a rewound-checkpoint redrive never double-marks. */
+async function planFilingRetiredStale(client, { ev, clientId, documentId, deps }) {
+  // A null key is a checkpoint-only SKIP — never a dead-letter, never a call with nulls.
+  if (!clientId || !documentId) return skip("skipped_kind");
+  if (!(await (deps.hasStaleWriter ?? hasStaleWriterDefault)(client))) return skip("skipped_no_surface");
+  return {
+    status: "citations_staled", lane: "filing_retired",
+    mutate: (c) => c.query(
+      "select clara.mark_wiki_citations_stale($1,$2,$3,$4) as r",
+      [clientId, documentId, "source_filing_retired", `wikistale:${clientId}:${ev.seq}`]),
+  };
+}
+
 /** Dispatch one subscribed event to its lane plan (reads + any network egress happen here). */
 export async function planEvent(client, { firmId, ev, deps }) {
   const payload = ev.payload || {};
@@ -332,19 +458,28 @@ export async function planEvent(client, { firmId, ev, deps }) {
       return planConsentTransition({ ev, clientId: ev.clientId, granted: false });
     case "seeding.proposal_decided":
       return planSeedingWikiFact(client, { firmId, ev });
+    case "document.filing_retired":
+      return planFilingRetiredStale(client, { ev, clientId: ev.clientId, documentId: ev.documentId, deps });
     default:
       return skip("skipped_kind");
   }
 }
 
 // --- dead-letter (own txn, matcher idiom) + checkpoint-only ------------------------------------
+// F6: a re-failure must REFRESH the row, not merely bump its counter — otherwise `/ready` can warn
+// with a stale reason forever after a repair, or stay silent when it should warn (a row that was
+// resolved before a rewind must flip back to 'pending' when the event stalls again).
 async function recordDeadLetter(client, { eventId, reason }) {
   await client.query("begin");
   try {
     const r = await client.query(
       `insert into clara.relay_dead_letters (consumer, event_id, reason, attempted_taxonomy_version)
          values ($1, $2, $3, null)
-       on conflict (consumer, event_id) do update set attempt_count = clara.relay_dead_letters.attempt_count + 1
+       on conflict (consumer, event_id) do update
+          set attempt_count = clara.relay_dead_letters.attempt_count + 1,
+              reason        = excluded.reason,
+              status        = 'pending',
+              resolved_at   = null
        returning attempt_count`, [WIKI_PROJECTION_CONSUMER, eventId, String(reason).slice(0, 500)]);
     await client.query("commit");
     return Number(r.rows[0].attempt_count);
@@ -353,10 +488,19 @@ async function recordDeadLetter(client, { eventId, reason }) {
     throw err;
   }
 }
-async function checkpointOnly(client, { firmId, seq }) {
+/** Resolve this event's dead-letter (if any) — runs INSIDE the caller's effect/checkpoint txn so
+ *  the recovery is ATOMIC with the projection that earned it (F6). A no-op when no row exists. */
+async function resolveDeadLetter(client, eventId) {
+  await client.query(
+    "update clara.relay_dead_letters set status='resolved', resolved_at=now()"
+    + " where consumer=$1 and event_id=$2 and status <> 'resolved'",
+    [WIKI_PROJECTION_CONSUMER, eventId]);
+}
+async function checkpointOnly(client, { firmId, seq, resolveEventId = null }) {
   await client.query("begin");
   try {
     await writeCheckpoint(client, { consumer: WIKI_PROJECTION_CONSUMER, firmId, seq });
+    if (resolveEventId) await resolveDeadLetter(client, resolveEventId);
     await client.query("commit");
   } catch (err) {
     await client.query("rollback").catch(() => {});
@@ -364,9 +508,11 @@ async function checkpointOnly(client, { firmId, seq }) {
   }
 }
 
-// One target event: plan (reads + egress) → atomic effect txn { mutate ; checkpoint }. A typed CLR
-// refusal (either phase) is a TERMINAL receipt (checkpoint advances); a connection error PROPAGATES
-// (reconnect); every other throw dead-letters.
+// One target event: plan (reads + egress) → atomic effect txn { mutate ; checkpoint }. An ENUMERATED
+// typed CLR refusal (either phase) is a TERMINAL receipt (checkpoint advances); a connection error
+// PROPAGATES (reconnect); a CONFIGURATION refusal and every other throw dead-letter WITHOUT advancing
+// the checkpoint — the configuration case additionally flags itself so the firm's cursor blocks
+// instead of being swept past by the attempt-exhaustion escape.
 async function runTargetEvent(client, { firmId, ev, deps }) {
   const log = deps.log ?? (() => {});
   let plan;
@@ -376,6 +522,10 @@ async function runTargetEvent(client, { firmId, ev, deps }) {
     try {
       if (plan.mutate) await plan.mutate(client);
       await writeCheckpoint(client, { consumer: WIKI_PROJECTION_CONSUMER, firmId, seq: ev.seq });
+      // F6: a successful (re)projection RESOLVES any dead-letter for this event ATOMICALLY with the
+      // effect + checkpoint — so an automatic replay after a repair clears the /ready warning in the
+      // same transaction that makes it true, never leaving a stale 'pending' row behind.
+      await resolveDeadLetter(client, ev.id);
       await client.query("commit");
     } catch (err) {
       await client.query("rollback").catch(() => {});
@@ -384,11 +534,35 @@ async function runTargetEvent(client, { firmId, ev, deps }) {
     return { ok: true, receipt: { status: plan.status, lane: plan.lane ?? null, event: ev.eventType } };
   } catch (err) {
     if (isConnErr(err)) throw err;
-    if (isClaraTerminal(err)) {
-      const status = terminalStatusFor(err);
+    const status = terminalStatusFor(err);
+    if (status !== null) {
       log(`[wiki_projection] event=${ev.id} ${ev.eventType} terminal ${err.code}/${claraReason(err) ?? ""} → ${status}`);
-      await checkpointOnly(client, { firmId, seq: ev.seq });
+      // A terminal refusal converges: advance the checkpoint AND resolve any dead-letter for the
+      // event, atomically (F6 — a converged event must not keep warning on /ready).
+      await checkpointOnly(client, { firmId, seq: ev.seq, resolveEventId: ev.id });
       return { ok: true, receipt: { status, event: ev.eventType } };
+    }
+    if (isConfigurationRefusal(err)) {
+      log(`[wiki_projection] event=${ev.id} ${ev.eventType} REFUSED ${err.code}/${claraReason(err) ?? ""}`
+        + " — this is a RUNTIME MISCONFIGURATION, not a convergence. The checkpoint is NOT advanced"
+        + " and nothing is skipped: fix the deployment and this event projects on the next cycle."
+        + " (isolation_unsupported = the connection is at REPEATABLE READ, which 0019 §1b refuses;"
+        + " budget_unknown = the wiki_budgets config rows are missing; CLR03 = the wiki read runs"
+        + " without the v25 runtime marker/role; 42501 = a missing EXECUTE grant.) The leader also"
+        + " releases leadership so a corrected standby can take over (F3).");
+      const attempts = await recordDeadLetter(client, {
+        eventId: ev.id,
+        reason: `${CONFIG_DEAD_LETTER_PREFIX}${err.code}/${claraReason(err) ?? ""}: ${err?.message ?? String(err)}`,
+      });
+      return { ok: false, err, attempts, configuration: true };
+    }
+    if (isClaraCode(err)) {
+      log(`[wiki_projection] event=${ev.id} ${ev.eventType} UNRECOGNISED typed refusal`
+        + ` ${err.code}/${claraReason(err) ?? ""} — it is not in the closed terminal table and not a`
+        + " configuration refusal, so it is NON-EXHAUSTING (ratchet R3 finding F2): it dead-letters"
+        + " and BLOCKS the firm cursor — it is NEVER checkpointed away until a human classifies it.");
+      const attempts = await recordDeadLetter(client, { eventId: ev.id, reason: err?.message ?? String(err) });
+      return { ok: false, err, attempts, unclassified: true };
     }
     const attempts = await recordDeadLetter(client, { eventId: ev.id, reason: err?.message ?? String(err) });
     return { ok: false, err, attempts };
@@ -412,13 +586,28 @@ async function readEvents(client, firmId, lastSeq, batchSize) {
 async function processFirm(client, { firmId, lastSeq, batchSize, deps }) {
   const log = deps.log ?? (() => {});
   const evs = await readEvents(client, firmId, lastSeq, batchSize);
-  if (evs.length === 0) return { readCount: 0, maxSeq: lastSeq, effects: 0, blocked: false };
+  if (evs.length === 0) return { readCount: 0, maxSeq: lastSeq, effects: 0, blocked: false, configurationBlocked: false };
   let cursor = lastSeq;
   let effects = 0;
   for (const ev of evs) {
     if (!SUBSCRIBED.has(ev.eventType)) continue; // checkpoint-only; coalesced below
     const res = await runTargetEvent(client, { firmId, ev, deps });
     if (res.ok) { cursor = ev.seq; effects += 1; continue; }
+    // A runtime MISCONFIGURATION blocks the firm's cursor unconditionally — it is exempt from
+    // the exhaustion escape below, which exists to step past poison-pill DATA. Skipping here
+    // would checkpoint past an event that never got its chance to project (ratchet R2 B2). It
+    // ALSO tells the leader to RELEASE its advisory lock so a corrected standby can take over (F3).
+    if (res.configuration) {
+      log(`[wiki_projection] event=${ev.id} BLOCKED on a runtime misconfiguration (${res.err?.code}/${claraReason(res.err) ?? ""}) after attempt=${res.attempts} — the checkpoint stays BEHIND this event until the configuration is fixed; NO event is skipped, and this leader will RELEASE leadership so a corrected standby can take over`);
+      return { readCount: evs.length, maxSeq: cursor, effects, blocked: true, configurationBlocked: true };
+    }
+    // An UNRECOGNISED typed refusal is likewise NON-EXHAUSTING (ratchet R3 finding F2): it blocks
+    // the cursor until a human classifies it. It is NOT a deployment misconfiguration, so leadership
+    // is held in place — a failover would only meet the same unknown refusal.
+    if (res.unclassified) {
+      log(`[wiki_projection] event=${ev.id} BLOCKED on an UNRECOGNISED typed refusal (${res.err?.code}/${claraReason(res.err) ?? ""}) after attempt=${res.attempts} — the checkpoint stays BEHIND it until it is classified into the terminal or configuration set; NO event is skipped`);
+      return { readCount: evs.length, maxSeq: cursor, effects, blocked: true, configurationBlocked: false };
+    }
     if (res.attempts >= MAX_ATTEMPTS) {
       log(`[wiki_projection] event=${ev.id} exhausted ${MAX_ATTEMPTS} attempts → dead-lettered + skipped: ${res.err?.message ?? res.err}`);
       await checkpointOnly(client, { firmId, seq: ev.seq });
@@ -426,11 +615,11 @@ async function processFirm(client, { firmId, lastSeq, batchSize, deps }) {
       continue;
     }
     log(`[wiki_projection] effect-error event=${ev.id} attempt=${res.attempts}/${MAX_ATTEMPTS}: ${res.err?.message ?? res.err}`);
-    return { readCount: evs.length, maxSeq: cursor, effects, blocked: true };
+    return { readCount: evs.length, maxSeq: cursor, effects, blocked: true, configurationBlocked: false };
   }
   const batchMax = evs[evs.length - 1].seq; // trailing/interior non-target (incl. wiki.*): one coalesced advance
   if (batchMax > cursor) { await checkpointOnly(client, { firmId, seq: batchMax }); cursor = batchMax; }
-  return { readCount: evs.length, maxSeq: cursor, effects, blocked: false };
+  return { readCount: evs.length, maxSeq: cursor, effects, blocked: false, configurationBlocked: false };
 }
 
 export async function runWikiProjectionCycle(client, opts = {}) {
@@ -439,11 +628,13 @@ export async function runWikiProjectionCycle(client, opts = {}) {
   const work = await discoverWork(client, { consumer: WIKI_PROJECTION_CONSUMER, onlyFirm });
   const cursors = work.map((w) => ({ firmId: w.firmId, lastSeq: w.lastSeq, active: true }));
   let effects = 0;
+  let configurationBlocked = false;
   for (let round = 0; round < maxBatchesPerFirm; round++) {
     let anyActive = false;
     for (const cur of cursors) {
       if (!cur.active) continue;
       const res = await processFirm(client, { firmId: cur.firmId, lastSeq: cur.lastSeq, batchSize, deps });
+      if (res.configurationBlocked) configurationBlocked = true;
       if (res.blocked || res.maxSeq <= cur.lastSeq) { cur.active = false; continue; }
       cur.lastSeq = res.maxSeq;
       effects += res.effects;
@@ -452,7 +643,7 @@ export async function runWikiProjectionCycle(client, opts = {}) {
     }
     if (!anyActive) break;
   }
-  return { firms: work.length, effects, capped: cursors.some((c) => c.active) };
+  return { firms: work.length, effects, capped: cursors.some((c) => c.active), configurationBlocked };
 }
 
 // --- redrive (runtime-role, sst-watch pattern); idempotent via op_key + already_projected + put-409

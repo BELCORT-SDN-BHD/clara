@@ -11,6 +11,8 @@ import {
   CLR, CLR32, PG, ROLES, rootQuery, roleQuery, opk,
   assertRaises, endPool, printLaneNotes,
   fail0017, wbEnsureReady, fnExists, detailReason,
+  fail0019, has0019, markStale, filedDocument, pageRow, citationRows,
+  staleCiteKey, WB_STALE_FINDING, WB_STALE_REASON,
   buildWaveBWorld, onboardingClient, seedOpeningCoa, planRevision,
   commitOnboarding, updatePlan, stageBeeSet, approveOpeningSeed, WB_COA,
   runClientLint, runLintAll, getLintFinding, resolveLintFinding,
@@ -23,6 +25,7 @@ import {
 import { maxSeq } from "../rig-events-helpers.mjs";
 
 let live = false;
+let live19 = false;
 let w = null;
 let b12 = null; // { client, plan } — ACTIVE with a finalized BEE seed
 let st = null;
@@ -42,6 +45,7 @@ before(async () => {
     seed: st.seed, planRevision: await planRevision(b12.plan), tieSha256: st.doc.sha256,
     entryRevisions: st.revMap, opKey: opk("lbase"),
   });
+  live19 = await has0019();
 });
 after(async () => { printLaneNotes("wb-l-lint"); await endPool(); });
 
@@ -202,6 +206,55 @@ test("L7 SOFT: approach >=90% opens a cap finding; an in-place breach is CRITICA
   } finally {
     await setBudget("max_page_bytes", WB_BUDGET_SEEDS.max_page_bytes);
   }
+});
+
+// ---------------------------------------------------------------------------
+// [0019 §6] The stale_citation finding's EXACT shape through the belt. Gated by
+// fail0019 — this cell is REQUIRED to be red against an 18-migration DB. The
+// grain, the inverted scan and convergence live in wb-0019-lint.
+// ---------------------------------------------------------------------------
+
+test("[0019 §6]: a stale-marked source surfaces a stale_citation finding with the EXACT pinned shape (top-level page_id included)", async () => {
+  fail0019(live19);
+  const d = await filedDocument(w.users.alice, { firm: w.firms.A, client: b12.client, kind: "invoice" });
+  await publishWikiPage({
+    client: b12.client, firm: w.firms.A, slug: "l19-stale", title: "L19 stale",
+    content: "# l19 stale", citations: [{ source_kind: "document", document_id: d.documentId }],
+    refs: [{ ref_kind: "document", document_id: d.documentId }],
+  });
+  const page = await pageRow(b12.client, "l19-stale");
+  const f = (await rootQuery("select revision_token from clara.document_filings where id=$1", [d.filingId])).rows[0];
+  const { retireDocumentFiling } = await import("../rig-docs-fixtures.mjs");
+  await retireDocumentFiling(w.users.alice, {
+    filing: d.filingId, reason: "0019 lint-shape probe", expectedRevision: f.revision_token });
+  const marked = await markStale({ client: b12.client, document: d.documentId, opKey: opk("l19m") });
+  assert.equal(marked.status, "marked", `the mark landed (got ${JSON.stringify(marked)})`);
+
+  // run_client_lint SWALLOWS raises into {status:'failed'} (0017:4666, 4911-4913):
+  // assert on the RECEIPT and the findings table, NEVER on an exception.
+  const receipt = await runClientLint({ client: b12.client });
+  assert.equal(receipt.status, "ok",
+    `the belt did not degrade to 'failed' with the new class staged (got ${JSON.stringify(receipt)})`);
+  const finding = (await findingRows(b12.client))
+    .find((x) => x.finding_kind === WB_STALE_FINDING && x.state === "open"
+      && String(x.detail?.document_id) === String(d.documentId));
+  assert.ok(finding, "the stale_citation episode opened");
+  assert.equal(finding.dedupe_key, staleCiteKey(page.id, d.documentId), "dedupe_key = stalecite:<page>:<document>");
+  assert.equal(finding.severity, "warn", "severity 'warn'");
+  assert.equal(finding.page_id, page.id,
+    "page_id is on the ROW — the episode insert reads nullif(j->>'page_id','')::uuid from the CONDITION (0017:4836-4842), so a detail-only page_id would leave the FK null");
+  for (const k of ["page_id", "document_id", "stale_reason", "since", "marker_missing"]) {
+    assert.ok(k in (finding.detail ?? {}), `detail carries '${k}' (got ${JSON.stringify(finding.detail)})`);
+  }
+  assert.equal(finding.detail.stale_reason, WB_STALE_REASON, "detail.stale_reason");
+  assert.equal(finding.detail.marker_missing, false, "marker_missing=false — found by the MARKED scan");
+  assert.ok(finding.detail.since, "…so `since` carries the earliest stale_at");
+  assert.equal(new Date(finding.detail.since).getTime(),
+    new Date((await citationRows(page.current_version_id))[0].stale_at).getTime(),
+    "…which is exactly the marked citation's stale_at");
+  assert.equal((await notificationsMatching(finding.id)).length, 1, "notified exactly once");
+  assert.equal((await pageRow(b12.client, "l19-stale")).state, "active",
+    "the page is still ACTIVE — lint SURFACES the staleness, it never retires or repairs");
 });
 
 test("L3: run_lint_all writes ONE append-only receipt with the run counters", async () => {

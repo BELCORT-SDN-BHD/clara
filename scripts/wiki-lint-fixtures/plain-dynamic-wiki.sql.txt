@@ -1,0 +1,17 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- The original rule, unchanged: an ordinary non-whitelisted `create function` whose body
+-- constructs a wiki relation name dynamically. Kept as a regression fixture so the
+-- finding-3 rewrite cannot quietly lose the behaviour the predecessor gate already had.
+create function clara._assert_filing_wiki_unreferenced(
+    p_firm uuid, p_client uuid, p_document uuid) returns void
+  language plpgsql security definer
+  set search_path=clara,pg_temp as $fn$
+declare v_n int;
+begin
+  execute 'select count(*) from clara.' || 'wiki_page_citations'
+    || ' where client_id=$1 and document_id=$2'
+    into v_n using p_client, p_document;
+  if v_n > 0 then
+    raise exception 'active wiki document reference' using errcode='CLR10';
+  end if;
+end $fn$;

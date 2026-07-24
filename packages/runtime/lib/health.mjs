@@ -240,6 +240,9 @@ export async function checkReadiness() {
             const wLag = Number(wh.lag ?? 0);
             if (wDead > 0) warnings.push(`${wDead} wiki_projection dead-letter(s)`);
             if (wLag > 1000) warnings.push(`wiki_projection lag ${wLag}`);
+            // F3: a runtime misconfiguration is a distinct, louder signal than an ordinary
+            // dead-letter — the projection is stalled until the deployment is fixed.
+            if (wh.configurationBlocked) warnings.push("wiki_projection BLOCKED on a runtime misconfiguration");
           } catch (err) {
             warnings.push(`wiki_projection_health unavailable: ${String(err?.message ?? err).slice(0, 80)}`);
           }

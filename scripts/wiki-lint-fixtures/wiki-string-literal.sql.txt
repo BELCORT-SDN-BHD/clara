@@ -1,0 +1,13 @@
+-- FAIL-then-WAIVABLE FIXTURE (ratchet R3 finding F8).
+-- `select 'wiki'::text` names NO wiki relation or call — it merely contains the substring
+-- `wiki` in a string literal. The old `/wiki/i` rule flagged it as an UNWAIVABLE wiki hit
+-- (a false-fail with no escape). The new rule classifies it as an ordinary reconstructible
+-- dynamic statement: a FINDING (F4 — safety is never inferred), but one an exact-identity
+-- waiver can excuse (it targets no clara relation at all).
+create function clara._wiki_word_probe() returns text
+  language plpgsql security invoker as $fn$
+declare v_out text;
+begin
+  execute 'select ''wiki''::text' into v_out;
+  return v_out;
+end $fn$;

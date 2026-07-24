@@ -12,7 +12,7 @@ import {
   fail0017, wbEnsureReady, WB_FN_FAMILY_RE, WB_COA,
   buildWaveBWorld, onboardingClient, seedOpeningCoa, planRevision,
   beginOnboarding, createOpeningSeed, recordOpeningTarget, draftOpeningItem,
-  publishWikiPage, setWikiHold, clearWikiHold, retireWikiPage, recordWikiIngest,
+  publishWikiPage, setWikiHold, clearWikiHold, retireWikiPage, recordWikiIngest, markStale,
   createSeedingBatch, tickProposal, declineProposal, completeSeedingBatch, cancelSeedingBatch,
   updatePlan, resolvePlanItem, commitOnboarding, cancelOnboarding,
   filedDocument, setDocumentKind, keyedRes, recordOpeningKeyedResolution, proposalRows, pageRow,
@@ -119,6 +119,12 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
   for (const slug of ["g4r1", "g4r2"]) {
     await publishWikiPage({ client: w.clients.A1, firm: w.firms.A, slug, title: slug, content: `# ${slug}` });
   }
+  // [0019 §3] the stale writer's G4 pair: TWO actively-filed A1 documents, so the
+  // mutated field is a real semantic arg (p_document) rather than p_reason —
+  // which is a single-valued validated set (§3) and would refuse on its own
+  // merits before ever reaching the _reserve_op hash comparison.
+  const g4staleA = await filedDocument(w.users.alice, { firm: w.firms.A, client: w.clients.A1, kind: "invoice" });
+  const g4staleB = await filedDocument(w.users.alice, { firm: w.firms.A, client: w.clients.A1, kind: "invoice" });
   await setWikiHold({ client: w.clients.A2, reason: "g4 pair" });
   const commitReady = async () => {
     const o = await onboardingClient(w.users.hana);
@@ -157,6 +163,8 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
     retire_wiki_page: async (k, v) => retireWikiPage(w.users.bob, {
       page: (await pageRow(w.clients.A1, v === "a" ? "g4r1" : "g4r2")).id, reason: "g4", opKey: k }),
     record_wiki_source_ingest: (k, v) => recordWikiIngest({ client: b1.client, document: b1.doc.documentId, note: `g4 ${v}`, opKey: k }),
+    mark_wiki_citations_stale: (k, v) => markStale({
+      client: w.clients.A1, document: (v === "a" ? g4staleA : g4staleB).documentId, opKey: k }),
     create_seeding_batch: (k, v) => createSeedingBatch({
       client: gsrcClient, document: gsrcDoc.documentId,
       proposals: [{ proposal_kind: "wiki_fact", proposal_key: "wf:g4", payload: { slug: "profile", fact: v }, evidence: {} }],

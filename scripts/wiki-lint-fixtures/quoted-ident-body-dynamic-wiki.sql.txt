@@ -1,0 +1,12 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- Ratchet R3 finding F5, bypass #3: a QUOTED, whitespace-qualified identifier
+-- (`"clara" . "_name"`) hid the whole persisted definition from the create-scan, so its
+-- dynamic wiki SQL was never examined. The parser must recognise the quoted spelling.
+create function "clara" . "_quoted_probe"(p_client uuid) returns integer
+  language plpgsql security invoker as $fn$
+declare v_n integer;
+begin
+  execute 'select count(*) from clara.' || 'wi' || 'ki_pages where client_id=$1'
+    into v_n using p_client;
+  return v_n;
+end $fn$;
