@@ -52,7 +52,18 @@ export function pgrestHeaders(token: string, forWrite: boolean): Record<string, 
  *  PostgREST returns in `body.code`; the machine reason token lives in the exception
  *  DETAIL as `{"reason": <token>}` (INTERFACE-PINS §2 / §6). Additive over the
  *  Slice-5 shape (`pgCode` stays) so the document surfaces are unaffected. */
-export type PgrestError = Error & { pgCode?: string; pgDetails?: string; clr?: string | null; reason?: string | null };
+export type PgrestError = Error & {
+  pgCode?: string;
+  pgDetails?: string;
+  clr?: string | null;
+  reason?: string | null;
+  /** The raw HTTP status (§4.5 / finding 6a: a 401 — an expired/invalid session JWT —
+   *  is an AUTH failure, never a governed business refusal, and must never be parsed
+   *  as one just because its body happens to carry no CLR code). Callers branch on
+   *  this BEFORE looking at `clr` so an expired token can never masquerade as, or
+   *  silently defeat detection of, a CLRxx refusal. */
+  status?: number;
+};
 
 /** The governed CLR code rides in the SQLSTATE (`raise … using errcode='CLR04'`), so
  *  PostgREST reports it as `body.code`. No governed raise puts the token in its message
@@ -86,6 +97,7 @@ export async function pgrestError(res: Response, what: string): Promise<PgrestEr
   err.pgDetails = body.details;
   err.clr = parseClrCode(body.code, body.message);
   err.reason = parseReasonToken(body.details);
+  err.status = res.status;
   return err;
 }
 

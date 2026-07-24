@@ -225,13 +225,16 @@ export function SeedWorkbench({ token, seed, clientName, onSeedChanged }: { toke
         </div>
       ) : null}
 
+      {/* Finding 4b: the DB's verbatim message (err) is ALWAYS shown alongside the CLR
+          badge — a recognized code must never suppress the actual refusal text (a bare
+          "CLR10" with no reason token was previously the only thing an operator saw). */}
       {clr ? (
         <p className={styles.refusalNote}>
           <span className={styles.refusalBadge}>{refusalLabel(clr)}</span>
           {refusalHint(clr.code, clr.reason)}
         </p>
       ) : null}
-      {err && !clr ? <p className={styles.errorText}>{err}</p> : null}
+      {err ? <p className={styles.errorText}>{err}</p> : null}
     </div>
   );
 }

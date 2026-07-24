@@ -17,6 +17,7 @@ import {
   type OnboardingPlanRow, type OnboardingPlanItemRow, type OnboardingPlanRevisionRow, type OpeningSeedLite,
 } from "../../shared/onboardingApi";
 import { listClients, type ClientRow } from "../../documents/api";
+import { hasAnyAccounts } from "../../accounts/api";
 import { supabaseBase } from "../../shared/wire";
 import {
   groupItems, stillToCapture, commitReadiness, revisionsRecord,
@@ -65,6 +66,10 @@ export default function PlanPage() {
   const [refusal, setRefusal] = useState<CommitRefusal | null>(null);
   const [resolveDrafts, setResolveDrafts] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  // live-gate-run-2026-07-24 finding 1: a freshly onboarded client with zero accounts
+  // cannot receive any posting at all — surface that gap here, not just discover it later
+  // on the accounts page itself.
+  const [hasAccounts, setHasAccounts] = useState<boolean | null>(null);
 
   useEffect(() => {
     setToken(sessionStorage.getItem(TOKEN_KEY) ?? "");
@@ -103,6 +108,14 @@ export default function PlanPage() {
   }, [token, clientId]);
 
   useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!token || !clientId || !supabaseBase()) {
+      setHasAccounts(null);
+      return;
+    }
+    hasAnyAccounts(token, clientId).then(setHasAccounts).catch(() => setHasAccounts(null));
+  }, [token, clientId, plan?.state]);
 
   const saveToken = () => { const t = tokenDraft.trim(); sessionStorage.setItem(TOKEN_KEY, t); setToken(t); };
 
@@ -164,7 +177,14 @@ export default function PlanPage() {
         {clientId ? `client ${clientId.slice(0, 8)}` : "no client_id"}
         {client?.name ? ` · ${client.name}` : ""}
         {clientId ? <> · <Link className={styles.linkButton} href={`/onboarding/client?client_id=${clientId}`}>interview →</Link></> : null}
+        {clientId ? <> · <Link className={styles.linkButton} href={`/accounts?client_id=${clientId}`}>chart of accounts →</Link></> : null}
       </p>
+      {hasAccounts === false ? (
+        <p className={styles.refusal}>
+          This client has no chart of accounts yet — it cannot receive any posting until one exists.{" "}
+          <Link className={styles.linkButton} href={`/accounts?client_id=${clientId}`}>Set up the chart of accounts →</Link>
+        </p>
+      ) : null}
       <div className={styles.tokenBar}>
         <input className={styles.input} type="password" placeholder="Paste a Supabase session JWT" value={tokenDraft}
           onChange={(e) => setTokenDraft(e.target.value)} aria-label="Session JWT" />

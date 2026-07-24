@@ -93,6 +93,12 @@ export function OpeningCeremony({
   const [busy, setBusy] = useState(false);
   const [clr, setClr] = useState<Clr>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Finding 6a: an expired/invalid session JWT returns a bare 401 — distinct from any
+  // governed CLR refusal (which is a 400 with a typed code). Detected on `pe.status`,
+  // never inferred from `pe.clr` being absent (that would also true for genuine
+  // ungoverned errors), so a 401 can never be mistaken for — or silently swallowed
+  // alongside — a business refusal.
+  const [sessionExpired, setSessionExpired] = useState(false);
   // 0018 §5: the DB-authored receipt, persisted here (not auto-forwarded to onFinalized)
   // so the operator sees proof the transaction posted before this component can unmount.
   const [receipt, setReceipt] = useState<{ data: ApprovalReceipt; kind: Exclude<CeremonyKind, null> } | null>(null);
@@ -125,6 +131,7 @@ export function OpeningCeremony({
     setBusy(true);
     setClr(null);
     setErr(null);
+    setSessionExpired(false);
     try {
       const entryRevisions = buildRevisionMap(entries);
       const attest = soloRequired ? attestation.trim() : null;
@@ -145,11 +152,21 @@ export function OpeningCeremony({
       setReceipt({ data: r, kind: approvedKind });
     } catch (e) {
       const pe = e as PgrestError;
-      setErr(pe.message ?? String(e));
-      if (pe.clr) {
-        setClr({ code: pe.clr, reason: pe.reason ?? null });
-        // Fail-closed reveal: the DB says this actor is the sole eligible approver.
-        if (pe.clr === "CLR05" && pe.reason === "self_attestation") setSoloRequired(true);
+      // Finding 6a: branch on the HTTP status FIRST — a 401 is Supabase/PostgREST
+      // rejecting the JWT itself (expired or invalid), never a governed CLR refusal,
+      // and must never fall into the `clr`/`refusalHint` path below (which would
+      // either show nothing useful or, worse, misread it as a business refusal and
+      // silently defeat the solo-attestation reveal on CLR05).
+      if (pe.status === 401) {
+        setSessionExpired(true);
+        setErr(null);
+      } else {
+        setErr(pe.message ?? String(e));
+        if (pe.clr) {
+          setClr({ code: pe.clr, reason: pe.reason ?? null });
+          // Fail-closed reveal: the DB says this actor is the sole eligible approver.
+          if (pe.clr === "CLR05" && pe.reason === "self_attestation") setSoloRequired(true);
+        }
       }
     } finally {
       setBusy(false);
@@ -238,13 +255,23 @@ export function OpeningCeremony({
       </div>
 
       {planMissing ? <p className={styles.hint}>The onboarding plan revision could not be read — reload before approving.</p> : null}
+      {/* Finding 6a: a 401 (expired/invalid session JWT) is an AUTH failure, never a
+          business refusal — it gets its OWN distinct message, never the CLR path below. */}
+      {sessionExpired ? (
+        <p className={styles.banner}>
+          Your session token has expired — paste a fresh JWT in the token box above and retry the approval.
+        </p>
+      ) : null}
+      {/* Finding 4b: err (the DB's verbatim message) is ALWAYS shown alongside the CLR
+          badge — a recognized code must never suppress the actual refusal text (a bare
+          "CLR10" with no reason token was previously the only thing an operator saw). */}
       {clr ? (
         <p className={styles.refusalNote}>
           <span className={styles.refusalBadge}>{refusalLabel(clr)}</span>
           {refusalHint(clr.code, clr.reason)}
         </p>
       ) : null}
-      {err && !clr ? <p className={styles.errorText}>{err}</p> : null}
+      {err ? <p className={styles.errorText}>{err}</p> : null}
     </div>
   );
 }

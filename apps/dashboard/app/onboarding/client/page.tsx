@@ -13,6 +13,7 @@ import { runtimeBase } from "../../shared/wire";
 import { useInterviewRun } from "../useInterviewRun";
 import { InterviewPanel } from "../InterviewPanel";
 import { ClientStarter } from "./ClientStarter";
+import { InterviewAttachments } from "./InterviewAttachments";
 import Link from "next/link";
 import styles from "../onboarding.module.css";
 
@@ -134,6 +135,7 @@ export default function ClientOnboardingPage() {
             onSubmitAnswer={run.submitAnswer}
             onCancel={() => setShowCancel(true)}
             cancelLabel="Cancel onboarding"
+            attachSlot={(park) => (park.seg === "sample_invoices" ? <InterviewAttachments token={token} /> : null)}
           />
           {showCancel ? (
             <div className={styles.note}>

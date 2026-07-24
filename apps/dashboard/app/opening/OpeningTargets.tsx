@@ -191,13 +191,15 @@ export function OpeningTargets({
         </div>
       ) : null}
 
+      {/* Finding 4b: err (the DB's verbatim message) is ALWAYS shown alongside the CLR
+          badge — a recognized code must never suppress the actual refusal text. */}
       {clr ? (
         <p className={styles.refusalNote}>
           <span className={styles.refusalBadge}>{refusalLabel(clr)}</span>
           {refusalHint(clr.code, clr.reason)}
         </p>
       ) : null}
-      {err && !clr ? <p className={styles.errorText}>{err}</p> : null}
+      {err ? <p className={styles.errorText}>{err}</p> : null}
     </div>
   );
 }

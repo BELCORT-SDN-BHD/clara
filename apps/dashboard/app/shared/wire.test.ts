@@ -63,6 +63,18 @@ test("pgrestError leaves clr null for an ungoverned Postgres error", async () =>
   assert.equal(err.pgCode, "23505");
 });
 
+test("pgrestError attaches the raw HTTP status — a 401 (expired/invalid JWT) never carries a CLR code (finding 6a)", async () => {
+  const err: PgrestError = await pgrestError(pgrestBody({ message: "JWT expired" }, 401), "approve_opening_seed");
+  assert.equal(err.status, 401);
+  assert.equal(err.clr, null, "an auth failure must never be mistaken for a governed business refusal");
+});
+
+test("pgrestError's status survives alongside a real governed refusal (400, CLR code present)", async () => {
+  const err: PgrestError = await pgrestError(pgrestBody({ code: "CLR10", message: "op_key is required" }, 400), "set_document_kind");
+  assert.equal(err.status, 400);
+  assert.equal(err.clr, "CLR10");
+});
+
 test("parseReasonToken reads the DETAIL discriminant, and never throws on junk", () => {
   assert.equal(parseReasonToken('{"reason": "amount_conflict"}'), "amount_conflict");
   assert.equal(parseReasonToken('{"reason": 7}'), null);
