@@ -277,12 +277,24 @@ export function signatureIdentity(sig) {
 // comments — so a keyword inside a literal or a comment is never mistaken for code.
 // ---------------------------------------------------------------------------
 
-/** Index just past the single-quoted literal starting at `i` (which must be a quote). */
+/** Index just past the single-quoted literal starting at `i` (which must be a quote).
+ *
+ *  RATCHET R4 — E-STRING FAIL-OPEN. PostgreSQL has two single-quoted forms: a STANDARD
+ *  string `'…'` (standard_conforming_strings=on, PG's default since 9.1) where a backslash
+ *  is literal and only `''` closes-then-reopens as an escaped quote; and an ESCAPE string
+ *  `E'…'` / `e'…'` where `\'` and `\\` are C-style escapes AS WELL as `''`. The old scan
+ *  handled only `''`, so `E'it\'s harmless'` under-skipped at `\'`, desynced every literal
+ *  after it, and a real `execute 'select … clara.wiki_pages'` that followed went UNSEEN —
+ *  a fail-open in the security gate. `escapes` is true only when the opening quote is
+ *  immediately introduced by a word-boundaried E/e, matching PostgreSQL's own lexer. */
 function skipQuoted(s, i) {
+  const escapes = (s[i - 1] === "E" || s[i - 1] === "e")
+    && !/[A-Za-z0-9_]/.test(s[i - 2] ?? " ");
   let j = i + 1;
   while (j < s.length) {
+    if (escapes && s[j] === "\\") { j += 2; continue; }  // \' and \\ inside E'…' only
     if (s[j] !== "'") { j++; continue; }
-    if (s[j + 1] === "'") { j += 2; continue; }
+    if (s[j + 1] === "'") { j += 2; continue; }           // '' in BOTH forms
     return j + 1;
   }
   return s.length;

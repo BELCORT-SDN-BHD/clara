@@ -137,6 +137,13 @@ testCase("a SPLIT relation token -> REJECT (the R2 bypass, reconstructed)", () =
     ["_innocent_counter(uuid)", "PROVABLY names", "wiki_pages"]);
 });
 
+testCase("[R4] an E'…\\'…' escape string does NOT desync the scan -> the following wiki EXECUTE is REJECT", () => {
+  // Pre-fix, skipQuoted honoured only '' and under-skipped at the backslash-escaped quote,
+  // hiding the real dynamic wiki execute that followed (a fail-open in the security gate).
+  expectFinding(scan("estring-desync-dynamic-wiki.sql.txt"),
+    ["_escaped_probe(uuid)", "wiki_pages"]);
+});
+
 testCase("a VARIABLE-ASSEMBLED statement -> REJECT (nothing to reconstruct ⇒ fail closed)", () => {
   expectFinding(scan("variable-assembled-dynamic.sql.txt"),
     ["_assembled_probe(uuid)", "cannot be statically proven non-wiki"]);

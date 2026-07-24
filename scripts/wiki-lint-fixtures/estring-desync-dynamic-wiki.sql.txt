@@ -1,0 +1,16 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- Ratchet R4, the E-string desync fail-open: a PostgreSQL ESCAPE string E'…\'…' embeds a
+-- backslash-escaped quote. The old scanner honoured only the '' doubled-quote escape, so it
+-- under-skipped at the \' , desynced every literal after it, and the real dynamic wiki
+-- EXECUTE below went UNSEEN — while the payload's split relation token ('wi'||'ki_pages')
+-- also defeats the DB-side prosrc scan, so BOTH gates would have missed it. Making
+-- skipQuoted E-string aware is what re-syncs the scan and catches it.
+create function clara._escaped_probe(p_client uuid) returns integer
+  language plpgsql security invoker as $fn$
+declare v_n integer;
+begin
+  perform E'it\'s a decoy string that used to desync the lexer';
+  execute 'select count(*) from clara.' || 'wi' || 'ki_pages where client_id=$1'
+    into v_n using p_client;
+  return v_n;
+end $fn$;
