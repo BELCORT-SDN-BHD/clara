@@ -16,7 +16,7 @@ import {
   stageBeeSet, stageFullSet, BEE, WB_COA, revMapOf, planRevision,
   approveOpeningSeed, raceOpeningApproval,
   seedRegRow, openingApprovalRows, entryRow, sightingRows,
-  freshResolution, commitOnboarding, updatePlan,
+  freshResolution, keyedRes, commitOnboarding, updatePlan,
   freshWatchClient, approvedTurnoverEntry, evaluateSstWatch,
   setTurnoverClassification, openWatchRow,
 } from "./wb-fixtures.mjs";
@@ -85,7 +85,8 @@ test("K5: maker=checker is REFUSED per entry (OB is high-stakes; CLR05 semantics
   const r = await createOpeningSeed(w.users.hana, { client: o2.client, plan: o2.plan });
   const s2 = r.seed_id ?? r.id;
   const d = await draftOpeningItem(w.users.hana, {
-    client: o2.client, seed: s2, resolution: freshResolution(w.users.hana, o2.client),
+    // [AMB-0018-1] keyed lane → seed-bound mint (WB-R24(i)).
+    client: o2.client, seed: s2, resolution: keyedRes(w.users.hana, { client: o2.client, seed: s2 }),
     item: { item_kind: "gl_balance", item_key: "mc:cash" },
     lines: [{ account_code: WB_COA.cash, debit_cents: 1_000, credit_cents: 0 }],
   });
@@ -225,12 +226,13 @@ test("K5 SOLO (firm S): the sole approver needs the self-approval attestation; a
     provenance_kind: "keyed", entered_by: erin } });
   await mkT("cash", WB_COA.cash, 1_000, 0);
   await mkT("cap", WB_COA.shareCap, 0, 1_000);
+  // [AMB-0018-1] keyed lane → seed-bound mint (WB-R24(i)); one binding serves both solo items.
   const d1 = await draftOpeningItem(erin, {
-    client: o2.client, seed: s2, resolution: freshResolution(erin, o2.client),
+    client: o2.client, seed: s2, resolution: keyedRes(erin, { client: o2.client, seed: s2 }),
     item: { item_kind: "gl_balance", item_key: "solo:cash" },
     lines: [{ account_code: WB_COA.cash, debit_cents: 1_000, credit_cents: 0 }] });
   const d2 = await draftOpeningItem(erin, {
-    client: o2.client, seed: s2, resolution: freshResolution(erin, o2.client),
+    client: o2.client, seed: s2, resolution: keyedRes(erin, { client: o2.client, seed: s2 }),
     item: { item_kind: "gl_balance", item_key: "solo:cap" },
     lines: [{ account_code: WB_COA.shareCap, debit_cents: 0, credit_cents: 1_000 }] });
   // ADJUDICATED AMB-16: the checker-family refusal (attestation_required) is CLR05.

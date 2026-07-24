@@ -87,7 +87,8 @@ const WAVE_B_HUMAN_FNS = [
   "resolve_onboarding_plan_item",
   "bootstrap_client_plan", // [R3-F2] the admin+ B-12 plan bootstrap for pre-0017 actives
   "create_opening_seed", "cancel_opening_seed", "draft_opening_item",
-  "record_opening_target", "seed_fixed_asset", "approve_opening_seed",
+  "record_opening_target", "record_opening_keyed_resolution", // [AMB-0018-5] 0018 seed-bound keyed mint
+  "seed_fixed_asset", "approve_opening_seed",
   "supersede_opening_item", "approve_opening_correction", "reopen_opening_seed",
   "get_opening_dryrun",
   "tick_seeding_proposal", "decline_seeding_proposal", "complete_seeding_batch",

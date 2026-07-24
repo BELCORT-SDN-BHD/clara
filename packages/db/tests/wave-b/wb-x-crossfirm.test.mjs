@@ -39,8 +39,8 @@ import {
   assertRaises, endPool, printLaneNotes, detailReason,
   fail0017, wbEnsureReady,
   buildWaveBWorld, onboardingClient, seedOpeningCoa, WB_COA,
-  filedDocument, freshResolution,
-  createOpeningSeed, draftOpeningItem, recordOpeningTarget, seedFixedAsset,
+  filedDocument,
+  createOpeningSeed, draftOpeningItem, recordOpeningTarget, seedFixedAsset, keyedRes,
   approveOpeningSeed, supersedeOpeningItem, cancelOpeningSeed, reopenOpeningSeed,
   approveOpeningCorrection, retireWikiPage, signCodingRule,
   tickProposal, declineProposal, completeSeedingBatch, cancelSeedingBatch,
@@ -107,7 +107,8 @@ before(async () => {
   const seedR = await createOpeningSeed(w.users.bob, { client: onb.client, plan: onb.plan });
   seed = seedR.seed_id ?? seedR.id;
   await draftOpeningItem(w.users.bob, {
-    client: onb.client, seed, resolution: freshResolution(w.users.bob, onb.client),
+    // [AMB-0018-1] keyed lane → seed-bound mint (WB-R24(i)), not the generic mint.
+    client: onb.client, seed, resolution: keyedRes(w.users.bob, { client: onb.client, seed }),
     item: { item_kind: "gl_balance", item_key: "probe:item0" },
     lines: [{ account_code: WB_COA.cash, debit_cents: 1_000, credit_cents: 0 }],
   });

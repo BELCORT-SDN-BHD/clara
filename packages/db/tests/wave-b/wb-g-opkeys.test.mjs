@@ -15,7 +15,7 @@ import {
   publishWikiPage, setWikiHold, clearWikiHold, retireWikiPage, recordWikiIngest,
   createSeedingBatch, tickProposal, declineProposal, completeSeedingBatch, cancelSeedingBatch,
   updatePlan, resolvePlanItem, commitOnboarding, cancelOnboarding,
-  filedDocument, setDocumentKind, freshResolution, proposalRows, pageRow,
+  filedDocument, setDocumentKind, keyedRes, recordOpeningKeyedResolution, proposalRows, pageRow,
 } from "./wb-fixtures.mjs";
 
 let live = false;
@@ -80,7 +80,13 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
   await seedOpeningCoa(w.users.alice, oSeed.client);
   const g4seedR = await createOpeningSeed(w.users.bob, { client: oSeed.client, plan: oSeed.plan });
   const g4seed = g4seedR.seed_id ?? g4seedR.id; // NO tie document — the keyed lane is lawful here
-  const g4res = await freshResolution(w.users.bob, oSeed.client);
+  // [AMB-0018-1] the keyed draft_opening_item fixture rides a SEED-BOUND resolution (WB-R24(i)).
+  const g4res = await keyedRes(w.users.bob, { client: oSeed.client, seed: g4seed });
+  // [AMB-0018-5] a DEDICATED keyed seed for the new record_opening_keyed_resolution
+  // writer fixture (kept off g4seed so its mint never supersedes g4res).
+  const oOkr = await onboardingClient(w.users.hana);
+  const okrSeedR = await createOpeningSeed(w.users.bob, { client: oOkr.client, plan: oOkr.plan });
+  const okrSeed = okrSeedR.seed_id ?? okrSeedR.id;
   const oFresh = await onboardingClient(w.users.hana);
   const oPlan = await onboardingClient(w.users.hana);
   await updatePlan({ plan: oPlan.plan, expectedRevision: oPlan.revision, answeredBy: w.users.bob,
@@ -140,6 +146,10 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
       client: oSeed.client, seed: g4seed, resolution: g4res,
       item: { item_kind: "gl_balance", item_key: `g4:${v}` },
       lines: [{ account_code: WB_COA.cash, debit_cents: 500, credit_cents: 0 }], opKey: k }),
+    // [AMB-0018-5] the subject-bound keyed-resolution mint — hash covers the
+    // evidence, so a same-key mutated payload refuses CLR10 at _reserve_op.
+    record_opening_keyed_resolution: (k, v) => recordOpeningKeyedResolution(w.users.bob, {
+      client: oOkr.client, seed: okrSeed, evidence: { g4: v }, opKey: k }),
     publish_wiki_page_version: (k, v) => publishWikiPage({
       client: w.clients.A1, firm: w.firms.A, slug: "g4hash", title: "G4", content: `# g4 ${v}`, opKey: k }),
     set_wiki_synthesis_hold: (k, v) => setWikiHold({ client: w.clients.A1, reason: `g4 ${v}`, opKey: k }),
