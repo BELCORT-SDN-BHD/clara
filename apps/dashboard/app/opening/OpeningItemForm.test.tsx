@@ -1,11 +1,13 @@
 // OpeningItemForm render tests (the regionOverlay/ComplianceWatchCard pattern:
 // createElement + renderToStaticMarkup, no jsdom — the form's initial render only, no
 // effects/network). Locks two adjudicated fixes:
-//   F-H4: a KEYED seed does NOT offer the fixed-asset kind (seed_fixed_asset derives its
-//         resolution from a tie document, so it would fail CLR01), and shows the honest
-//         FORK-7 path with a link to the plan page. A DOCUMENT seed keeps the FA option.
-//   F-C1: a keyed seed disables drafting until an EXPLICIT client attribution exists (the
-//         resolution id is passed in from the workbench), with an honest hint.
+//   F-H4 (0018 §2): seed_fixed_asset is now a 5-arg fn whose p_resolution flows to the §1
+//         bound assert on a KEYED seed (and is omitted — the DB locks the active filing
+//         itself — on a TIED seed), so the fixed-asset kind is offered on BOTH lanes; the
+//         old FORK-7 "cannot register fixed assets" prohibition is gone.
+//   F-C1: a keyed seed disables drafting (fixed assets included) until an EXPLICIT client
+//         attribution exists (the resolution id is passed in from the workbench), with an
+//         honest hint.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -21,16 +23,15 @@ function mkSeed(p: Partial<OpeningSeedRow> = {}): OpeningSeedRow {
   };
 }
 
-test("F-H4: a keyed seed does NOT offer the fixed-asset kind and shows the honest FORK-7 path", () => {
+test("F-H4 (0018): a keyed seed WITH a confirmed attribution DOES offer the fixed-asset kind, no FORK-7 refusal", () => {
   const html = renderToStaticMarkup(createElement(OpeningItemForm, {
     token: "jwt", seed: mkSeed({ tie_document_id: null }), clientId: "c1", keyedResolution: "res-1", onChanged: () => {},
   }));
-  assert.ok(!html.includes(">Fixed asset<"), "the fixed-asset option is not offered on a keyed seed");
-  assert.ok(html.includes("cannot register fixed assets"), "the honest FORK-7 path renders");
-  assert.ok(html.includes("/clients/plan?client_id=c1"), "it links to the plan page to record the todo");
+  assert.ok(html.includes(">Fixed asset<"), "seed_fixed_asset's p_resolution now makes keyed FA reachable");
+  assert.ok(!html.includes("cannot register fixed assets"), "the old FORK-7 prohibition copy is gone");
 });
 
-test("F-H4: a document-tied seed DOES offer the fixed-asset kind and shows no FORK-7 refusal", () => {
+test("F-H4 (0018): a document-tied seed DOES offer the fixed-asset kind and shows no FORK-7 refusal", () => {
   const html = renderToStaticMarkup(createElement(OpeningItemForm, {
     token: "jwt", seed: mkSeed({ tie_document_id: "doc-1", tie_document_sha256: "a".repeat(64) }), clientId: "c1", keyedResolution: null, onChanged: () => {},
   }));

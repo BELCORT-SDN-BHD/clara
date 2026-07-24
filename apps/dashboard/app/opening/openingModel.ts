@@ -286,6 +286,40 @@ export function compoundAckSentence(
 }
 
 // ---------------------------------------------------------------------------
+// The K5/K6 approval receipt (migration 0018 dashboard rider, §5). The DB-authored
+// proof a carry-down/correction transaction actually posted — every field (most of
+// all entry_count) is read verbatim off the approval fn's return jsonb; the UI NEVER
+// derives entry_count itself (e.g. from entries.length or the pre-approval approval-set
+// read) — a partial/malformed body is not a receipt at all (toApprovalReceipt → null,
+// and the caller throws rather than fabricate one).
+// ---------------------------------------------------------------------------
+
+export type ApprovalReceipt = {
+  seed_id: string;
+  status: string;
+  batch_n: number;
+  entry_count: number;
+  entries: string[];
+};
+
+/** Runtime-validate the DB's approval-receipt jsonb. Every field must be present and
+ *  correctly typed; entry_count in particular must be the DB's own number, never
+ *  reconstructed client-side. An unrecognized/partial shape degrades to null (never a
+ *  best-guess receipt) — approveOpeningSeed/approveOpeningCorrection throw on null. */
+export function toApprovalReceipt(raw: unknown): ApprovalReceipt | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  const seedId = str(o.seed_id);
+  const status = str(o.status);
+  const batchN = num(o.batch_n);
+  const entryCount = num(o.entry_count);
+  const entries =
+    Array.isArray(o.entries) && o.entries.every((e) => typeof e === "string") ? (o.entries as string[]) : null;
+  if (!seedId || !status || batchN === null || entryCount === null || !entries) return null;
+  return { seed_id: seedId, status, batch_n: batchN, entry_count: entryCount, entries };
+}
+
+// ---------------------------------------------------------------------------
 // The runtime parse-route result (§3.3) narrowed for the keyed-fallback UX.
 // ---------------------------------------------------------------------------
 

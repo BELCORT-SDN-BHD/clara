@@ -1,16 +1,22 @@
 "use client";
 
-// The K5/K6 carry-down approval ceremony (LANE D3; settled plan §1 F9). ONE compound
-// acknowledgment over the DB-DISPLAYED facts (the dry-run card + the approval-set read),
-// framed explicitly as a single transaction; maker status rendered PASSIVELY (no per-row
-// approve control — that is the tick-list this ceremony must never blur into). The typed
-// solo-attestation input appears ONLY when the DB self-approval path requires it (revealed
-// fail-closed after the DB's CLR05 self_attestation refusal). Then approve_opening_seed /
-// approve_opening_correction is called with the AMB-3 revision map built VERBATIM from the
-// approval-set read. Every displayed figure/count is DB-authored.
+// The K5/K6 carry-down approval ceremony (LANE D3; settled plan §1 F9; 0018 §5 rider). ONE
+// compound acknowledgment over the DB-DISPLAYED facts (the dry-run card + the approval-set
+// read), framed explicitly as a single transaction; maker status rendered PASSIVELY (no
+// per-row approve control — that is the tick-list this ceremony must never blur into). The
+// typed solo-attestation input appears ONLY when the DB self-approval path requires it
+// (revealed fail-closed after the DB's CLR05 self_attestation refusal). Then
+// approve_opening_seed / approve_opening_correction is called with the AMB-3 revision map
+// built VERBATIM from the approval-set read; the DB-authored ApprovalReceipt it returns is
+// persisted in local state and rendered in place of the form — `onFinalized` is deliberately
+// NEVER auto-invoked on success (a parent reload can unmount this component the instant its
+// state moves, e.g. SeedWorkbench's `approvalSet.length > 0` guard, which would otherwise
+// race the receipt off-screen before the operator ever sees proof the transaction posted).
+// The receipt stays up until an explicit Done/Reload click. Every displayed figure/count is
+// DB-authored.
 
 import { useState } from "react";
-import type { OpeningSeedRow, ApprovalSetEntry, OpeningDryRun, CeremonyKind } from "./openingModel";
+import type { OpeningSeedRow, ApprovalSetEntry, OpeningDryRun, CeremonyKind, ApprovalReceipt } from "./openingModel";
 import { buildRevisionMap, ceremonyKind, ceremonyIsMixed, compoundAckSentence, refusalLabel, refusalHint } from "./openingModel";
 import { approveOpeningSeed, approveOpeningCorrection } from "../shared/openingApi";
 import type { PgrestError } from "../shared/wire";
@@ -18,6 +24,53 @@ import { fmtCents, shortId } from "../shared/fmt";
 import styles from "./opening.module.css";
 
 type Clr = { code: string; reason: string | null } | null;
+
+/** The persisted post-approval receipt view (0018 §5) — a pure, prop-driven presentational
+ *  component (the OpeningDryRunView/Card split precedent) so it stays independently
+ *  observable/testable. Every field is DB-authored (entry_count is NEVER recomputed from
+ *  entries.length). `onDone` is wired to BOTH the Done and Reload actions — either is the
+ *  operator's explicit signal that they have seen this receipt and it is safe to reload. */
+export function OpeningApprovalReceiptView({
+  receipt,
+  kind,
+  onDone,
+}: {
+  receipt: ApprovalReceipt;
+  kind: Exclude<CeremonyKind, null>;
+  onDone: () => void;
+}) {
+  return (
+    <div className={styles.ceremony}>
+      <p className={styles.ceremonyHead}>
+        {kind === "correction" ? "Opening correction approved" : "Opening carry-down approved"}
+      </p>
+      <p className={styles.okText}>
+        Posted {receipt.entry_count} {receipt.entry_count === 1 ? "entry" : "entries"} in batch {receipt.batch_n} — status{" "}
+        {receipt.status}.
+      </p>
+      <div className={styles.tableWrap}>
+        <table className={styles.table}>
+          <thead>
+            <tr>
+              <th>posted entry</th>
+            </tr>
+          </thead>
+          <tbody>
+            {receipt.entries.map((id) => (
+              <tr key={id}>
+                <td>{shortId(id)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className={styles.actions}>
+        <button className={styles.button} onClick={onDone}>Done</button>
+        <button className={styles.buttonSecondary} onClick={onDone}>Reload</button>
+      </div>
+    </div>
+  );
+}
 
 export function OpeningCeremony({
   token,
@@ -40,8 +93,25 @@ export function OpeningCeremony({
   const [busy, setBusy] = useState(false);
   const [clr, setClr] = useState<Clr>(null);
   const [err, setErr] = useState<string | null>(null);
+  // 0018 §5: the DB-authored receipt, persisted here (not auto-forwarded to onFinalized)
+  // so the operator sees proof the transaction posted before this component can unmount.
+  const [receipt, setReceipt] = useState<{ data: ApprovalReceipt; kind: Exclude<CeremonyKind, null> } | null>(null);
 
   const kind: CeremonyKind = ceremonyKind(seed.state, entries);
+
+  if (receipt) {
+    return (
+      <OpeningApprovalReceiptView
+        receipt={receipt.data}
+        kind={receipt.kind}
+        onDone={() => {
+          setReceipt(null);
+          onFinalized();
+        }}
+      />
+    );
+  }
+
   if (!kind) {
     return <p className={styles.muted}>This seed has no draft entries awaiting approval.</p>;
   }
@@ -58,19 +128,21 @@ export function OpeningCeremony({
     try {
       const entryRevisions = buildRevisionMap(entries);
       const attest = soloRequired ? attestation.trim() : null;
-      if (kind === "initial") {
-        await approveOpeningSeed(token, {
-          seedId: seed.id,
-          expectedPlanRevision: planRevision as string,
-          tieSha256: seed.tie_document_sha256,
-          entryRevisions,
-          attestation: attest,
-        });
-      } else {
-        await approveOpeningCorrection(token, { seedId: seed.id, entryRevisions, attestation: attest });
-      }
+      const approvedKind = kind as Exclude<CeremonyKind, null>;
+      const r =
+        approvedKind === "initial"
+          ? await approveOpeningSeed(token, {
+              seedId: seed.id,
+              expectedPlanRevision: planRevision as string,
+              tieSha256: seed.tie_document_sha256,
+              entryRevisions,
+              attestation: attest,
+            })
+          : await approveOpeningCorrection(token, { seedId: seed.id, entryRevisions, attestation: attest });
       setAck(false);
-      onFinalized();
+      // Deliberately NOT calling onFinalized() here — the receipt above must render and
+      // stay observable; the operator's explicit Done/Reload click triggers the reload.
+      setReceipt({ data: r, kind: approvedKind });
     } catch (e) {
       const pe = e as PgrestError;
       setErr(pe.message ?? String(e));
