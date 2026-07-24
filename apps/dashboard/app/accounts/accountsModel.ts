@@ -11,14 +11,15 @@
 
 import {
   COA_TEMPLATE,
-  CORE_BLOCKS,
+  STANDARD_BLOCKS,
+  OPTIONAL_BLOCKS,
   templateAccounts,
   type CoaTemplateAccount,
   type CoaTemplateBlock,
 } from "../shared/coaTemplate";
 
 export type { CoaTemplateAccount, CoaTemplateBlock };
-export { COA_TEMPLATE, CORE_BLOCKS };
+export { COA_TEMPLATE, STANDARD_BLOCKS, OPTIONAL_BLOCKS };
 
 // ---------------------------------------------------------------------------
 // Account-code validation (clara.coa_accounts_account_code_check, 0009, verbatim).
@@ -71,13 +72,13 @@ export type AccountRow = {
 };
 
 // ---------------------------------------------------------------------------
-// Block selection maths (the "Apply the template" panel). Core blocks are
+// Block selection maths (the "Apply the template" panel). Standard blocks are
 // pre-selected; optional blocks are not. The DB owns nothing here — this is pure
 // UI-selection bookkeeping over the already-fixed template.
 // ---------------------------------------------------------------------------
 
 export function defaultSelectedBlockKeys(): string[] {
-  return CORE_BLOCKS.map((b) => b.key);
+  return STANDARD_BLOCKS.map((b) => b.key);
 }
 
 export function toggleBlockKey(selected: readonly string[], key: string): string[] {

@@ -23,7 +23,8 @@ import {
   applySummary,
   buildMpersLookup,
   COA_TEMPLATE,
-  CORE_BLOCKS,
+  STANDARD_BLOCKS,
+  OPTIONAL_BLOCKS,
   templateAccounts,
 } from "./accountsModel";
 
@@ -80,11 +81,11 @@ test("coaSeedOpKey varies by client and by code — never collides across either
 
 // --- block selection maths -------------------------------------------------------------
 
-test("defaultSelectedBlockKeys pre-selects every core block and none of the optional ones", () => {
+test("defaultSelectedBlockKeys pre-selects every standard block and none of the optional ones", () => {
   const keys = defaultSelectedBlockKeys();
-  assert.deepEqual(keys, CORE_BLOCKS.map((b) => b.key));
+  assert.deepEqual(keys, STANDARD_BLOCKS.map((b) => b.key));
   for (const block of COA_TEMPLATE) {
-    assert.equal(keys.includes(block.key), block.tier === "core", `${block.key} selection must match its tier`);
+    assert.equal(keys.includes(block.key), block.tier === "standard", `${block.key} selection must match its tier`);
   }
 });
 
@@ -98,19 +99,26 @@ test("toggleBlockKey adds an absent key and removes a present one, leaving other
 test("selectionAccountCount reads the count straight off the fixed template, never estimates", () => {
   assert.equal(selectionAccountCount([]), 0);
   assert.equal(selectionAccountCount(["equity"]), templateAccounts(["equity"]).length);
-  const core = defaultSelectedBlockKeys();
-  assert.equal(selectionAccountCount(core), templateAccounts(core).length);
+  const standard = defaultSelectedBlockKeys();
+  assert.equal(selectionAccountCount(standard), templateAccounts(standard).length);
 });
 
 // --- COA_TEMPLATE's own structural integrity -------------------------------------------
 
-test("COA_TEMPLATE totals 118 accounts across every block, core+optional partitioning cleanly", () => {
+test("COA_TEMPLATE totals 186 accounts across every block, standard+optional partitioning cleanly", () => {
   const total = COA_TEMPLATE.reduce((n, b) => n + b.accounts.length, 0);
-  assert.equal(total, 118);
-  const coreTotal = CORE_BLOCKS.reduce((n, b) => n + b.accounts.length, 0);
-  const optionalTotal = COA_TEMPLATE.filter((b) => b.tier === "optional").reduce((n, b) => n + b.accounts.length, 0);
-  assert.equal(coreTotal + optionalTotal, 118);
-  for (const b of COA_TEMPLATE) assert.ok(b.tier === "core" || b.tier === "optional", `${b.key} has a recognized tier`);
+  assert.equal(total, 186);
+  const standardTotal = STANDARD_BLOCKS.reduce((n, b) => n + b.accounts.length, 0);
+  const optionalTotal = OPTIONAL_BLOCKS.reduce((n, b) => n + b.accounts.length, 0);
+  assert.equal(standardTotal, 142);
+  assert.equal(optionalTotal, 44);
+  assert.equal(standardTotal + optionalTotal, 186);
+  for (const b of COA_TEMPLATE) assert.ok(b.tier === "standard" || b.tier === "optional", `${b.key} has a recognized tier`);
+});
+
+test("every block key is unique — templateAccounts() selects by key, so a duplicate would double-seed", () => {
+  const keys = COA_TEMPLATE.map((b) => b.key);
+  assert.equal(new Set(keys).size, keys.length);
 });
 
 test("every template account code is unique across the whole template (no cross-block collision)", () => {
@@ -132,6 +140,31 @@ test("every template account_type/account_class/special value is one the DB CHEC
       assert.ok((ACCOUNT_TYPES as readonly string[]).includes(acct.type), `${acct.code} type`);
       if (acct.accountClass) assert.ok((ACCOUNT_CLASSES as readonly string[]).includes(acct.accountClass), `${acct.code} class`);
       if (acct.special) assert.ok((SPECIAL_ACC_TYPES as readonly string[]).includes(acct.special), `${acct.code} special`);
+    }
+  }
+});
+
+test("no special_acc_type appears twice anywhere in the template — clara.uq_coa_special is UNIQUE per client, so a second one would refuse mid-apply", () => {
+  const specials = COA_TEMPLATE.flatMap((b) => b.accounts.map((a) => a.special).filter(Boolean));
+  assert.equal(new Set(specials).size, specials.length, `duplicate special marker in ${specials.join(", ")}`);
+});
+
+test("no account NAME encodes a rate, percentage, threshold or effective date — the template's own standing rule 2", () => {
+  // Statutory SECTION references (s.39(1)(l)) identify the rule and are allowed; a quantum
+  // or a date is an effective-dated compliance fact that belongs in the tax engine.
+  for (const block of COA_TEMPLATE) {
+    for (const acct of block.accounts) {
+      assert.doesNotMatch(acct.name, /%|\bper cent\b/i, `${acct.code} name carries a percentage`);
+      assert.doesNotMatch(acct.name, /\b(19|20)\d{2}\b/, `${acct.code} name carries a year`);
+      assert.doesNotMatch(acct.name, /\bRM\s?\d/i, `${acct.code} name carries a ringgit threshold`);
+    }
+  }
+});
+
+test("every account carries an MPERS roll-up — the mapping is what makes an unofficial chart defensible", () => {
+  for (const block of COA_TEMPLATE) {
+    for (const acct of block.accounts) {
+      assert.ok(acct.mpers && acct.mpers.trim().length > 0, `${acct.code} has no MPERS roll-up`);
     }
   }
 });

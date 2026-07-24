@@ -4,7 +4,7 @@
 // "no dashboard page references upsert_account", so a freshly onboarded client has an
 // empty CoA and cannot receive any posting at all). Three panels: (1) the existing
 // accounts read, with an empty state that names the problem; (2) "Apply the template" —
-// COA_TEMPLATE blocks, core pre-selected, optional not, applied SEQUENTIALLY through the
+// COA_TEMPLATE blocks, standard pre-selected, optional not, applied SEQUENTIALLY through the
 // governed upsert_account with a stable per-account op_key (WB-R19) so a retry after a
 // partial failure replays rather than duplicates; (3) an ad-hoc single-account add form.
 // Every figure/count here is either a DB row (the accounts list) or read straight off the
@@ -243,7 +243,7 @@ export function AccountsWorkbench({
                   />
                   <span className={styles.blockTitle}>{block.title}</span>
                 </label>
-                <span className={`${styles.band} ${block.tier === "core" ? styles.bandReady : styles.bandReview}`}>
+                <span className={`${styles.band} ${block.tier === "standard" ? styles.bandReady : styles.bandReview}`}>
                   {block.tier}
                 </span>
                 <span className={styles.blockCount}>{block.accounts.length} account(s)</span>
