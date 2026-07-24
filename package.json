@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "pnpm -r --if-present typecheck",
-    "lint": "node scripts/check-frozen-workflows.mjs && node scripts/check-leaks.mjs && node scripts/check-wiki-dynamic-sql.mjs && eslint scripts eslint.config.mjs && pnpm -r --if-present lint",
+    "lint": "node scripts/check-frozen-workflows.mjs && node scripts/check-leaks.mjs && node scripts/check-wiki-dynamic-sql.mjs && node scripts/check-wiki-dynamic-sql.selftest.mjs && eslint scripts eslint.config.mjs && pnpm -r --if-present lint",
     "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
     "db:migrate": "pnpm --filter @clara/db migrate",
@@ -25,7 +25,8 @@
     "freeze:lint": "node scripts/check-frozen-workflows.mjs",
     "freeze:update": "node scripts/check-frozen-workflows.mjs --update",
     "leaks:scan": "node scripts/check-leaks.mjs",
-    "wiki:dynsql": "node scripts/check-wiki-dynamic-sql.mjs"
+    "wiki:dynsql": "node scripts/check-wiki-dynamic-sql.mjs",
+    "wiki:dynsql:selftest": "node scripts/check-wiki-dynamic-sql.selftest.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

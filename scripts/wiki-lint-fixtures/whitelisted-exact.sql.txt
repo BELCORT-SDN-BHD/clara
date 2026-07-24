@@ -1,0 +1,15 @@
+-- CLEAN FIXTURE (must PASS the gate).
+-- The whitelisted signature itself, verbatim from the contract's §9 list, using the
+-- repo's declared-argument spelling. This pins the identity EXTRACTOR: if
+-- `functionIdentity` ever stopped rendering `(p_client uuid, p_slug text)` as
+-- `(uuid,text)`, the real whitelist would silently stop matching and every wiki verb
+-- would be scanned as an offender (or, worse, an overload would start matching).
+create function clara.get_wiki_page(p_client uuid, p_slug text)
+  returns jsonb language plpgsql security definer
+  set search_path=clara,pg_temp as $fn$
+declare v_out jsonb;
+begin
+  execute 'select to_jsonb(p) from clara.wiki_pages p where p.client_id=$1'
+    into v_out using p_client;
+  return v_out;
+end $fn$;

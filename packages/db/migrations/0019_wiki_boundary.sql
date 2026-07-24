@@ -16,6 +16,11 @@
 --      wiki event would reach assert_books_current (0007:2665-2681) and the correction
 --      books-version check (0009:2449-2450), handing a projection-derived event an
 --      indirect veto over authority — exactly the inversion WB-R21 abolishes);
+--   §1b a TYPED refusal of REPEATABLE READ on the publication CORE (ratchet R1
+--      finding 2): under a pinned snapshot the preserved client-row lock does NOT order
+--      publication against retirement, so the unlocked active-filing floor could
+--      validate an already-retired filing and commit a permanently UNMARKED citation.
+--      READ COMMITTED and SERIALIZABLE are both safe and both keep working;
 --   §5 an additive, NULL-safe MONOTONIC projected_from_seq guard on the supersede
 --      branch of _publish_wiki_page_version_core, as a TYPED TERMINAL refusal
 --      CLR32/{"reason":"stale_projected_from_seq"} (a silent converge is rejected: the
@@ -189,12 +194,32 @@ $ck$;
 -- Drift-guard per body (apply ABORTS otherwise): the anchor matched EXACTLY ONCE;
 -- the replace changed the body; the normalized result no longer contains
 -- _assert_filing_wiki_unreferenced; it DOES contain the client-row FOR UPDATE token
--- and its CLR11 raise; and that lock still PRECEDES the retirement UPDATE.
+-- and its CLR11 raise; and the COMPLETE acquisition sequence above is asserted as a
+-- chain of positional inequalities.
+--
+-- WHY THE FULL CHAIN AND NOT JUST "BEFORE THE UPDATE" (ratchet R1 finding 5). A
+-- "client lock precedes the retirement UPDATE" assertion is satisfied by MANY orders,
+-- including the one that deadlocks: if a future body change hoists the client lock ABOVE
+-- the filing lock, correction/retirement would take client -> filing while page
+-- publication keeps client -> pages and a concurrent retirement takes filing -> client —
+-- and PostgreSQL aborts one of the pair with a deadlock. Every token the old guard
+-- asserted would still be present. So the guards below pin each PAIR of adjacent steps:
+--   retire_document_filing : filing FOR UPDATE < CLR17 already-retired < CLR17
+--     stale-revision < client FOR UPDATE < the journal-entry live blocker < the
+--     retirement UPDATE;
+--   approve_wrong_client_correction : filing_corrections FOR UPDATE <
+--     document_filings FOR UPDATE < the CLR19 source-filing guard < client FOR UPDATE <
+--     the entry locks (`for update of je`) < the retirement UPDATE.
+-- The same chain is mirrored in the live-catalog battery (wb-0019-tail.test.mjs), so a
+-- later migration cannot reorder a body and still pass CI.
 -- =====================================================================
 do $cor1$
-declare v_def text; v_next text; v_norm text; v_anchor text;
+declare
+  v_def text; v_next text; v_norm text; v_anchor text; v_sig text;
+  v_chain text[]; v_tok text; v_at int; v_prev int;
 begin
   ---- retire_document_filing -------------------------------------------------
+  v_sig := 'retire_document_filing';
   select pg_get_functiondef(
     'clara.retire_document_filing(uuid,text,uuid,text)'::regprocedure) into v_def;
   v_anchor :=
@@ -217,18 +242,36 @@ $new$  -- [WB-R21/0019 §1] The wiki VETO is gone. The non-wiki client-row SERIA
   v_norm := regexp_replace(lower(v_next), '\s+', '', 'g');
   if v_next = v_def
      or position('_assert_filing_wiki_unreferenced' in v_norm) > 0
-     or position('perform1fromclara.clientsclwherecl.id=f.client_idandcl.firm_id=f.firm_idforupdate'
-       in v_norm) = 0
      or position('raiseexception''filingclientnotinthesuppliedfirm''usingerrcode=''clr11'''
-       in v_norm) = 0
-     or position('perform1fromclara.clientsclwherecl.id=f.client_idandcl.firm_id=f.firm_idforupdate'
-          in v_norm)
-        > position('updateclara.document_filingssetretired_at' in v_norm) then
+       in v_norm) = 0 then
     raise exception '0019: retire_document_filing veto-removal drift' using errcode = 'CLR10';
   end if;
+  -- The COMPLETE acquisition chain, pair by pair (see the section header).
+  v_chain := array[
+    'select*intoffromclara.document_filingswhereid=p_filing_idforupdate',
+    'raiseexception''filingisalreadyretired''usingerrcode=''clr17''',
+    'raiseexception''stalefilingrevision''usingerrcode=''clr17''',
+    'perform1fromclara.clientsclwherecl.id=f.client_idandcl.firm_id=f.firm_idforupdate',
+    'fromclara.journal_entriesjewhereje.filing_id=f.id',
+    'updateclara.document_filingssetretired_at'
+  ];
+  v_prev := 0;
+  foreach v_tok in array v_chain loop
+    v_at := position(v_tok in v_norm);
+    if v_at = 0 then
+      raise exception '0019: % lost the acquisition-chain step "%"', v_sig, v_tok
+        using errcode = 'CLR10';
+    end if;
+    if v_at <= v_prev then
+      raise exception '0019: % acquisition-order drift — "%" no longer follows its predecessor',
+        v_sig, v_tok using errcode = 'CLR10';
+    end if;
+    v_prev := v_at;
+  end loop;
   execute v_next;
 
   ---- approve_wrong_client_correction ----------------------------------------
+  v_sig := 'approve_wrong_client_correction';
   select pg_get_functiondef(
     'clara.approve_wrong_client_correction(uuid,text,text,text)'::regprocedure)
     into v_def;
@@ -253,16 +296,32 @@ $new$  -- [WB-R21/0019 §1] The wiki VETO is gone. A correction move still retir
   v_norm := regexp_replace(lower(v_next), '\s+', '', 'g');
   if v_next = v_def
      or position('_assert_filing_wiki_unreferenced' in v_norm) > 0
-     or position('perform1fromclara.clientsclwherecl.id=x.from_clientandcl.firm_id=c.firmforupdate'
-       in v_norm) = 0
      or position('raiseexception''filingclientnotinthesuppliedfirm''usingerrcode=''clr11'''
-       in v_norm) = 0
-     or position('perform1fromclara.clientsclwherecl.id=x.from_clientandcl.firm_id=c.firmforupdate'
-          in v_norm)
-        > position('updateclara.document_filingssetretired_at' in v_norm) then
+       in v_norm) = 0 then
     raise exception '0019: approve_wrong_client_correction veto-removal drift'
       using errcode = 'CLR10';
   end if;
+  v_chain := array[
+    'select*intoxfromclara.filing_correctionswhereid=p_correctionforupdate',
+    'perform1fromclara.document_filingsfwheref.document_id=x.document_idandf.firm_id=c.firmorderbyf.idforupdate',
+    'raiseexception''sourcefilingisnolongeractive''usingerrcode=''clr19''',
+    'perform1fromclara.clientsclwherecl.id=x.from_clientandcl.firm_id=c.firmforupdate',
+    'forupdateofje',
+    'updateclara.document_filingssetretired_at'
+  ];
+  v_prev := 0;
+  foreach v_tok in array v_chain loop
+    v_at := position(v_tok in v_norm);
+    if v_at = 0 then
+      raise exception '0019: % lost the acquisition-chain step "%"', v_sig, v_tok
+        using errcode = 'CLR10';
+    end if;
+    if v_at <= v_prev then
+      raise exception '0019: % acquisition-order drift — "%" no longer follows its predecessor',
+        v_sig, v_tok using errcode = 'CLR10';
+    end if;
+    v_prev := v_at;
+  end loop;
   execute v_next;
 end
 $cor1$;
@@ -272,6 +331,56 @@ $cor1$;
 drop function clara._assert_filing_wiki_unreferenced(uuid, uuid, uuid);
 
 -- =====================================================================
+-- THE PUBLICATION-CORE PATCHES. Two independent guards land in ONE CoR block
+-- because both rewrite clara._publish_wiki_page_version_core, and a second
+-- pg_get_functiondef round-trip would have to re-read the body this one just
+-- installed. They are applied in BODY order: §1b first (the preamble), then §5
+-- (the supersede branch).
+--
+-- §1b. THE ISOLATION FLOOR ON THE PUBLICATION PATH — a TYPED refusal of
+-- REPEATABLE READ (ratchet R1 finding 2).
+--
+-- §1's safety argument is that the preserved client-row lock ORDERS publication against
+-- filing retirement/correction. That argument is sound at two of PostgreSQL's three
+-- isolation levels and UNSOUND at the third:
+--
+--   READ COMMITTED (the default, and everything the runtime opens) — SAFE. Every
+--     statement after `clients ... for update` takes a FRESH snapshot, so a retirement
+--     that committed while we waited on the lock is visible to the active-filing reads at
+--     0017:2115-2121 / 2157-2163, and the publication refuses CLR02.
+--
+--   SERIALIZABLE — SAFE, and STRICTER, so it is NOT refused. Publication and both
+--     retirement paths each call clara._append_event, whose first act is
+--     `insert into clara.firm_event_seq ... on conflict do update` on the SAME firm row
+--     (0005:482-484). Under SERIALIZABLE that is a genuine write-write conflict on a row
+--     the other transaction changed after our snapshot, so the loser aborts 40001 instead
+--     of committing on a stale view; SSI additionally sees the rw-conflict on
+--     clara.document_filings. A publication cannot commit an unmarked citation.
+--
+--   REPEATABLE READ — UNSAFE. The snapshot is pinned for the whole transaction, and
+--     `select ... for update` raises 40001 only if the row was actually UPDATED or
+--     DELETED — merely LOCKING it does not. Retirement only LOCKS the client row
+--     (it updates document_filings, not clients), so a publisher that pinned its snapshot
+--     while the filing was still active can wait behind retirement's client lock, be
+--     granted it cleanly, re-read the filing through its stale snapshot, see it ACTIVE,
+--     and commit a citation to a document whose filing is already retired. The consumer
+--     ran before that commit and marked zero rows, and no later event repairs it: the
+--     citation is a permanently UNMARKED INVALID END STATE, exactly what §10 R2-F2c
+--     forbids. (The firm_event_seq upsert usually catches this at RR too — but only when
+--     the publisher has not already bumped that row earlier in its own transaction, so it
+--     is a coincidence, not a barrier.)
+--
+-- The fix is structural refusal, not a filing lock: adding `document_filings for update`
+-- to publication would create the reverse-order cycle (retirement takes filing -> client,
+-- publication would take client -> filing) that §1 deliberately avoids. It goes on the
+-- CORE, which is the single choke point both publishing wrappers pass through
+-- (publish_wiki_page_version 0017:2212, record_wiki_source_ingest 0017:2264), and it is
+-- the FIRST statement in the body so no stale-snapshot read can precede it.
+--
+-- Idiom + code: the typed `current_setting('transaction_isolation')` refusal of
+-- 0017:3834-3836 / 0017:4172-4174, raised in the WIKI family (CLR32, 0017:13) that owns
+-- every other refusal on this path, with a reason discriminant.
+--
 -- §5. THE MONOTONIC projected_from_seq GUARD — a TYPED TERMINAL refusal.
 --
 -- The residual (v25-runtime-lanes-memo.md:118-120): the app-side recency re-check
@@ -293,17 +402,53 @@ drop function clara._assert_filing_wiki_unreferenced(uuid, uuid, uuid);
 -- has no prior — both bypass the guard and publish.
 -- =====================================================================
 do $cor2$
-declare v_def text; v_next text; v_norm text; v_anchor text;
+declare v_def text; v_cur text; v_next text; v_norm text; v_anchor text;
 begin
   select pg_get_functiondef(
     'clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,uuid,text,text)'::regprocedure)
     into v_def;
+  v_cur := v_def;
+
+  ---- §1b the isolation floor (the FIRST statement of the body) ----------------
+  v_anchor :=
+$old$begin
+  if p_slug is null or p_slug!~'^[a-z0-9][a-z0-9/_-]{0,199}$'$old$;
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0019: publication-core preamble anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_cur, v_anchor,
+$new$begin
+  -- [WB-R21/0019 §1b] REPEATABLE READ is refused STRUCTURALLY: under a pinned snapshot
+  -- the client-row lock this path shares with filing retirement does not order the two
+  -- (a lock without an UPDATE is not a serialization failure), so the unlocked
+  -- active-filing floor below could validate an already-retired filing and commit an
+  -- UNMARKED citation. READ COMMITTED (fresh per-statement snapshots) and SERIALIZABLE
+  -- (the firm_event_seq write-write conflict + SSI on document_filings) are both safe
+  -- and both keep working.
+  if current_setting('transaction_isolation') = 'repeatable read' then
+    raise exception 'wiki publication cannot run under repeatable read isolation'
+      using errcode='CLR32',detail='{"reason":"isolation_unsupported"}';
+  end if;
+  if p_slug is null or p_slug!~'^[a-z0-9][a-z0-9/_-]{0,199}$'$new$);
+  v_norm := regexp_replace(lower(v_next), '\s+', '', 'g');
+  if v_next = v_cur
+     or position('isolation_unsupported' in v_norm) = 0
+     or position('current_setting(''transaction_isolation'')=''repeatableread''' in v_norm) = 0
+     -- …and it precedes the unlocked active-filing floor it exists to protect.
+     or position('isolation_unsupported' in v_norm)
+        > position('wikicitationdocumentisnotactivelyfiledtothisclient' in v_norm) then
+    raise exception '0019: publication-core isolation-floor drift' using errcode = 'CLR10';
+  end if;
+  v_cur := v_next;
+
+  ---- §5 the monotonic projected_from_seq guard -------------------------------
   v_anchor := 'if v_prior is not null then';
-  if (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor) <> 1 then
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
     raise exception '0019: supersede-branch anchor must match exactly once'
       using errcode = 'CLR10';
   end if;
-  v_next := replace(v_def, v_anchor,
+  v_next := replace(v_cur, v_anchor,
 $new$if v_prior is not null then
       -- [WB-R21/0019 §5] Structural monotonic recency guard on the supersede branch.
       if p_projected_from_seq is not null and exists(
@@ -314,7 +459,7 @@ $new$if v_prior is not null then
           using errcode='CLR32',detail='{"reason":"stale_projected_from_seq"}';
       end if;$new$);
   v_norm := regexp_replace(lower(v_next), '\s+', '', 'g');
-  if v_next = v_def
+  if v_next = v_cur
      or position('stale_projected_from_seq' in v_norm) = 0
      or position('p_projected_from_seq<=pv.projected_from_seq' in v_norm) = 0
      or position('p_projected_from_seq<=pv.projected_from_seq' in v_norm)
@@ -357,6 +502,46 @@ $cor2$;
 -- Firm is resolved FROM the client, as every wiki writer does (0017:2199-2200).
 -- Argument validation precedes _reserve_op so an invalid call never consumes an
 -- op_key (the 0018 R1-0018-2 discipline).
+--
+-- ELIGIBILITY IS LOCKED, NOT SAMPLED (ratchet R1 finding 1). A collect-then-update
+-- shape — gather ids by joining wiki_pages, then UPDATE by id re-checking only
+-- `stale_at is null` — leaves the eligibility predicate unprotected between the two
+-- statements, and BOTH ways out of scope are reachable:
+--   * a clean republish supersedes the version the citation hangs off, so the row is
+--     no longer a CURRENT-version citation (0017:2080) — and §3 says superseded-version
+--     citations are NEVER touched;
+--   * retire_wiki_page (0017:2296-2307) retires the page, so the row is no longer on an
+--     ACTIVE page.
+-- Both are closed by taking the locks BEFORE the collection and re-evaluating the
+-- active/current predicates UNDER them:
+--   (1) the CLIENT ROW FOR UPDATE — the same serializer _publish_wiki_page_version_core
+--       takes at 0017:2049-2053, so no publication for this client can interleave at all
+--       (current_version_id cannot move, refs cannot be deleted/re-inserted, 0017:2134);
+--   (2) then the eligible PAGE ROWS FOR UPDATE, in ASCENDING page-id order — this is what
+--       orders against retire_wiki_page, which locks the page row (0017:2296) and takes NO
+--       client row.
+--
+-- WHY THIS INTRODUCES NO DEADLOCK CYCLE (state it, don't assume it). The three actors
+-- that touch these rows acquire:
+--   publication   : clients(p_client) -> wiki_pages(one row, by client+slug)   0017:2049-2056
+--   this writer   : clients(p_client) -> wiki_pages(N rows, ascending id)      here
+--   page retirement: wiki_pages(one row, by id) — and NOTHING else             0017:2296
+-- Publication and the writer share the SAME first lock (the client row), so they are
+-- mutually exclusive before either reaches a page row: no publication/writer cycle can
+-- form. Page retirement takes exactly one lock and then requests none, so it can only ever
+-- be a leaf in the wait-for graph — a leaf cannot close a cycle. Two writers on the SAME
+-- client serialize on the client row; two writers on DIFFERENT clients touch disjoint page
+-- sets (wiki_pages is client-scoped), so the ascending-id order is belt-and-braces there.
+-- No actor takes a page row before a client row, so the reverse edge that would close a
+-- cycle does not exist anywhere in the schema.
+--
+-- The re-evaluation is correct at every isolation level. READ COMMITTED: each statement
+-- after the locks takes a fresh snapshot, so a retirement that committed while we waited is
+-- visible. REPEATABLE READ / SERIALIZABLE: both republish (0017:2168) and retire_wiki_page
+-- (0017:2301) genuinely UPDATE the wiki_pages row, so `for update` on a row they changed
+-- after our snapshot raises 40001 rather than granting a stale-snapshot lock — the exact
+-- failure mode §5's sibling guard (below) has to legislate for the publication path, where
+-- the contended row is only LOCKED and never updated.
 -- =====================================================================
 create function clara.mark_wiki_citations_stale(
     p_client uuid, p_document uuid, p_reason text, p_op_key text) returns jsonb
@@ -366,6 +551,7 @@ declare
   v_cit int := 0; v_ref int := 0; v_page uuid;
   v_cit_ids uuid[] := '{}'; v_ref_ids uuid[] := '{}';
   v_pages_c uuid[] := '{}'; v_pages_r uuid[] := '{}'; v_pages uuid[] := '{}';
+  v_locked uuid[] := '{}'; v_lock record;
 begin
   if p_op_key is null or btrim(p_op_key) = '' then
     raise exception 'op_key is required'
@@ -389,26 +575,61 @@ begin
       'reason', p_reason)));
   if v_dedupe is not null then return v_dedupe; end if;
 
-  -- (i) CURRENT-version citations of ACTIVE pages.
+  -- ---- LOCK 1: the client row — the publication serializer (0017:2049-2053). ----
+  perform 1 from clara.clients cl
+    where cl.id = p_client and cl.firm_id = v_firm for update;
+  if not found then
+    raise exception 'client not found' using errcode = 'CLR11';
+  end if;
+
+  -- ---- LOCK 2: every ELIGIBLE page row, in ASCENDING page-id order. Eligibility is
+  -- read once here only to bound the lock set; nothing is decided on it. A page cannot
+  -- JOIN the set behind our back: joining requires a publication, and publication is
+  -- blocked on the client row we now hold. A page can LEAVE the set (retire_wiki_page
+  -- takes no client row), which is precisely what the re-evaluation below catches. ----
+  for v_lock in
+    select wp.id as page_id
+      from clara.wiki_pages wp
+     where wp.firm_id = v_firm and wp.client_id = p_client and wp.state = 'active'
+       and (exists(select 1 from clara.wiki_page_citations wc
+                    where wc.version_id = wp.current_version_id
+                      and wc.client_id = wp.client_id and wc.firm_id = wp.firm_id
+                      and wc.document_id = p_document and wc.stale_at is null)
+         or exists(select 1 from clara.wiki_page_refs wr
+                    where wr.page_id = wp.id
+                      and wr.client_id = wp.client_id and wr.firm_id = wp.firm_id
+                      and wr.ref_kind = 'document' and wr.document_id = p_document
+                      and wr.stale_at is null))
+     order by wp.id
+  loop
+    perform 1 from clara.wiki_pages lp where lp.id = v_lock.page_id for update;
+    v_locked := v_locked || v_lock.page_id;
+  end loop;
+
+  -- (i) CURRENT-version citations of ACTIVE pages — RE-EVALUATED under the locks, so
+  -- `state='active'` and `current_version_id` are the values the UPDATE is authorised
+  -- against, not the values some earlier statement happened to observe.
   select coalesce(array_agg(wc.id), '{}'), coalesce(array_agg(distinct wp.id), '{}')
     into v_cit_ids, v_pages_c
   from clara.wiki_page_citations wc
   join clara.wiki_pages wp on wp.current_version_id = wc.version_id
     and wp.client_id = wc.client_id and wp.firm_id = wc.firm_id
-  where wp.firm_id = v_firm and wp.client_id = p_client and wp.state = 'active'
+  where wp.id = any(v_locked)
+    and wp.firm_id = v_firm and wp.client_id = p_client and wp.state = 'active'
     and wc.document_id = p_document and wc.stale_at is null;
   update clara.wiki_page_citations
     set stale_at = now(), stale_reason = p_reason
     where id = any(v_cit_ids) and stale_at is null;
   get diagnostics v_cit = row_count;
 
-  -- (ii) page-level ref_kind='document' refs on ACTIVE pages.
+  -- (ii) page-level ref_kind='document' refs on ACTIVE pages — same re-evaluation.
   select coalesce(array_agg(wr.id), '{}'), coalesce(array_agg(distinct wp.id), '{}')
     into v_ref_ids, v_pages_r
   from clara.wiki_page_refs wr
   join clara.wiki_pages wp on wp.id = wr.page_id
     and wp.client_id = wr.client_id and wp.firm_id = wr.firm_id
-  where wp.firm_id = v_firm and wp.client_id = p_client and wp.state = 'active'
+  where wp.id = any(v_locked)
+    and wp.firm_id = v_firm and wp.client_id = p_client and wp.state = 'active'
     and wr.ref_kind = 'document' and wr.document_id = p_document
     and wr.stale_at is null;
   update clara.wiki_page_refs
@@ -416,7 +637,9 @@ begin
     where id = any(v_ref_ids) and stale_at is null;
   get diagnostics v_ref = row_count;
 
-  -- page_id is set only when the mark is unambiguously page-attributable.
+  -- page_id is set only when the mark is unambiguously page-attributable — and it is
+  -- derived from the SAME locked, re-evaluated sets the UPDATEs ran against, so the
+  -- audit/wiki_log attribution can never name a page whose rows were not marked.
   select coalesce(array_agg(distinct z), '{}') into v_pages
     from unnest(v_pages_c || v_pages_r) z;
   if coalesce(array_length(v_pages, 1), 0) = 1 then v_page := v_pages[1]; end if;
@@ -681,6 +904,7 @@ declare
   v_pg uuid; v_ver uuid; v_cit uuid; v_r jsonb;
   v_rev uuid; v_stale timestamptz; v_content text; v_sha text; v_key text;
   v_seq0 bigint; v_relrx text; v_callrx text;
+  v_chain text[]; v_at int; v_prev int;
 begin
   v_owner := (select oid from pg_roles where rolname = 'clara_fn_owner');
   v_relrx := '\m(wiki_pages|wiki_page_versions|wiki_page_citations|wiki_page_refs|wiki_log|wiki_budgets|wiki_synthesis_holds)\M';
@@ -709,11 +933,52 @@ begin
       raise exception '0019 the client-row serializer is missing from %', v_sig
         using errcode = 'CLR10';
     end if;
-    if position('fromclara.clientscl' in v_src)
-       > position('updateclara.document_filingssetretired_at' in v_src) then
-      raise exception '0019 the client-row lock no longer precedes the retirement UPDATE in %',
-        v_sig using errcode = 'CLR10';
+  end loop;
+
+  -- ---- §1 THE COMPLETE ACQUISITION CHAIN, pair by pair (ratchet R1 finding 5).
+  -- "the client lock precedes the retirement UPDATE" is satisfied by orders that
+  -- DEADLOCK — notably one that hoists the client lock above the filing lock, giving
+  -- correction/retirement client -> filing against a concurrent retirement's
+  -- filing -> client. Every token the weaker assertion named would still be present.
+  -- Each step below must exist AND strictly follow its predecessor. ----
+  foreach v_sig in array array[
+    'clara.retire_document_filing(uuid,text,uuid,text)',
+    'clara.approve_wrong_client_correction(uuid,text,text,text)'
+  ] loop
+    select regexp_replace(lower(prosrc), '\s+', '', 'g') into v_src
+      from pg_proc where oid = v_sig::regprocedure;
+    if v_sig like 'clara.retire_document_filing%' then
+      v_chain := array[
+        'select*intoffromclara.document_filingswhereid=p_filing_idforupdate',
+        'raiseexception''filingisalreadyretired''usingerrcode=''clr17''',
+        'raiseexception''stalefilingrevision''usingerrcode=''clr17''',
+        'perform1fromclara.clientsclwherecl.id=f.client_idandcl.firm_id=f.firm_idforupdate',
+        'fromclara.journal_entriesjewhereje.filing_id=f.id',
+        'updateclara.document_filingssetretired_at'
+      ];
+    else
+      v_chain := array[
+        'select*intoxfromclara.filing_correctionswhereid=p_correctionforupdate',
+        'perform1fromclara.document_filingsfwheref.document_id=x.document_idandf.firm_id=c.firmorderbyf.idforupdate',
+        'raiseexception''sourcefilingisnolongeractive''usingerrcode=''clr19''',
+        'perform1fromclara.clientsclwherecl.id=x.from_clientandcl.firm_id=c.firmforupdate',
+        'forupdateofje',
+        'updateclara.document_filingssetretired_at'
+      ];
     end if;
+    v_prev := 0;
+    foreach v_txt in array v_chain loop
+      v_at := position(v_txt in v_src);
+      if v_at = 0 then
+        raise exception '0019 % lost the acquisition-chain step "%"', v_sig, v_txt
+          using errcode = 'CLR10';
+      end if;
+      if v_at <= v_prev then
+        raise exception '0019 % acquisition-order drift — "%" no longer follows its predecessor',
+          v_sig, v_txt using errcode = 'CLR10';
+      end if;
+      v_prev := v_at;
+    end loop;
   end loop;
 
   -- ---- §1 NON-WIKI blockers survive, PER FUNCTION (never both-in-both) ----
@@ -863,6 +1128,33 @@ begin
     raise exception '0019 monotonic guard missing or misplaced' using errcode = 'CLR10';
   end if;
 
+  -- ---- §1b the isolation floor is present and PRECEDES every read it protects ----
+  if position('current_setting(''transaction_isolation'')=''repeatableread''' in v_src) = 0
+     or position('isolation_unsupported' in v_src) = 0 then
+    raise exception '0019 the publication-core REPEATABLE READ refusal is missing'
+      using errcode = 'CLR10';
+  end if;
+  -- SERIALIZABLE must NOT be refused — it is STRICTER, and refusing it would break the
+  -- 0017 opening-seed lanes that legitimately run publication inside a serializable txn.
+  if position('<>''serializable''' in v_src) > 0 then
+    raise exception '0019 the publication core refuses serializable isolation — it must not'
+      using errcode = 'CLR10';
+  end if;
+  v_chain := array[
+    'isolation_unsupported',
+    'wikicitationdocumentisnotactivelyfiledtothisclient',
+    'wikirefdocumentisnotactivelyfiledtothisclient'
+  ];
+  v_prev := 0;
+  foreach v_txt in array v_chain loop
+    v_at := position(v_txt in v_src);
+    if v_at = 0 or v_at <= v_prev then
+      raise exception '0019 the isolation floor no longer precedes the unlocked active-filing read "%"',
+        v_txt using errcode = 'CLR10';
+    end if;
+    v_prev := v_at;
+  end loop;
+
   -- ---- §9 GRANTS / capability closed set ----
   if not has_function_privilege('clara_runtime',
       'clara.mark_wiki_citations_stale(uuid,uuid,text,text)', 'execute') then
@@ -912,12 +1204,24 @@ begin
   -- ---- §9 THE CLEAN-END-STATE CLOSED-SET SCAN (D4b). This SUPERSEDES 0017's
   -- exclusion loop (0017:5945-5967), which scanned a FIXED NAMED LIST and OMITTED
   -- retire_document_filing + approve_wrong_client_correction — exactly why the veto
-  -- could hide there. The inverse scan covers ALL clara SECURITY DEFINER fns and
-  -- fails if any fn outside the whitelist either (a) names one of the seven wiki
-  -- relations or (b) carries a CALL EDGE into the wiki-touch set. The whitelist is
-  -- by EXACT regprocedure IDENTITY, not by proname (0017:6000-6004 used proname, so
-  -- a future overload of a whitelisted name was silently covered). Resolving each
-  -- signature is itself an existence assertion. ----
+  -- could hide there. The inverse scan covers ALL clara fns and fails if any fn
+  -- outside the whitelist either (a) names one of the seven wiki relations or
+  -- (b) carries a CALL EDGE into the wiki-touch set. The whitelist is by EXACT
+  -- regprocedure IDENTITY, not by proname (0017:6000-6004 used proname, so a future
+  -- overload of a whitelisted name was silently covered). Resolving each signature is
+  -- itself an existence assertion.
+  --
+  -- THE SCAN IS NOT RESTRICTED TO DEFINERS (ratchet R1 finding 4). A `p.prosecdef`
+  -- filter leaves an escape hatch that defeats the whole closed set: an innocuously
+  -- named SECURITY INVOKER helper reads wiki_pages (or calls get_wiki_page), an
+  -- authority DEFINER is patched to call that helper, and the definer's own body then
+  -- contains no wiki token at all. Both halves pass a definers-only scan — yet when the
+  -- definer invokes the invoker helper, current_user is still the DEFINER's owner, so
+  -- the helper runs with the definer owner's authority and a wiki-derived veto is fully
+  -- restored. Scanning EVERY clara function (definer or not) is the conservative closure:
+  -- an invoker helper cannot be reached from a definer without existing, and if it
+  -- exists it is scanned. The baseline is clean — the only clara functions matching
+  -- either regex are exactly the twelve whitelisted ones. ----
   v_wl := array[
     'clara.publish_wiki_page_version(uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,text)',
     'clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,uuid,text,text)',
@@ -936,11 +1240,11 @@ begin
   select string_agg(p.oid::regprocedure::text, ', ' order by p.oid::regprocedure::text)
     into v_bad
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
-   where n.nspname = 'clara' and p.prosecdef
+   where n.nspname = 'clara'
      and not (p.oid = any(v_wl_oids))
      and (p.prosrc ~* v_relrx or p.prosrc ~* v_callrx);
   if v_bad is not null then
-    raise exception '0019 wiki authority/call-edge leaked into non-whitelisted definer(s): %',
+    raise exception '0019 wiki authority/call-edge leaked into non-whitelisted function(s): %',
       v_bad using errcode = 'CLR10';
   end if;
 

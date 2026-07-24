@@ -1,0 +1,15 @@
+-- CLEAN FIXTURE (must PASS the gate).
+-- 0017's RLS loop: a migration-time `do` block that builds DDL dynamically over a table
+-- list including the wiki relations. It reads NO function body, patches NOTHING, and
+-- leaves NO callable surface behind — the one class of `do` block that genuinely is out
+-- of scope. This fixture is the guard against over-correcting finding 3 into a gate that
+-- flags every dynamic DDL loop in the tree.
+do $rls$
+declare t text;
+begin
+  foreach t in array array['wiki_pages','wiki_page_versions','wiki_page_citations'] loop
+    execute format('alter table clara.%I enable row level security', t);
+    execute format('alter table clara.%I force row level security', t);
+  end loop;
+end
+$rls$;

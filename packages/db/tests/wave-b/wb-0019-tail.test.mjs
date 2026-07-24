@@ -16,7 +16,9 @@
 //            naming a wiki relation — outside the whitelisted set", shipping with
 //            0019). That is a scripts/ deliverable and is NOT expressible from
 //            the DB rig, which owns no filesystem assertions. Reported as
-//            uncovered-by-this-battery, by construction.
+//            uncovered-by-this-battery, by construction. (It ships as
+//            scripts/check-wiki-dynamic-sql.mjs with its own fixture-driven
+//            self-test, both wired into `pnpm lint` and called out in CI.)
 //   [D19-19] §9's honest characterisation says the scan is a closed STATIC
 //            defence with a known FALSE-FAIL mode (a raw prosrc regex also sees
 //            comments and string literals). This lane verified the current
@@ -80,27 +82,32 @@ test("[0019 §9]: the whitelist resolves by EXACT regprocedure identity — ever
   assert.equal(whitelistOids.length, 12, "the whitelist is a closed set of twelve");
 });
 
-test("[0019 §9]: the INVERSE closed-set scan — NO clara SECURITY DEFINER fn outside the whitelist names a wiki relation OR carries a call edge", async () => {
+test("[0019 §9]: the INVERSE closed-set scan — NO clara fn outside the whitelist names a wiki relation OR carries a call edge", async () => {
   fail0019(live);
   assert.ok(whitelistOids.length === 12, "the whitelist resolved (this cell depends on the previous one)");
+  // RATCHET R1 finding 4: the scan is NOT restricted to `p.prosecdef`. A definers-only
+  // filter leaves a SECURITY INVOKER helper reading wiki_pages invisible — and when an
+  // authority definer calls it, current_user is still the definer's owner, so the helper
+  // carries the definer's authority. This mirrors the migration tail, which was widened
+  // the same way; wb-0019-ratchet.test.mjs proves the delta with a live probe.
   const r = await rootQuery(`
-    select p.oid::regprocedure::text as sig,
+    select p.oid::regprocedure::text as sig, p.prosecdef,
            (p.prosrc ~* $2) as names_relation,
            (p.prosrc ~* $3) as call_edge
       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-     where n.nspname='clara' and p.prosecdef
+     where n.nspname='clara'
        and not (p.oid::text = any($1::text[]))
        and (p.prosrc ~* $2 or p.prosrc ~* $3)
      order by 1`, [whitelistOids, RELATION_RE, CALL_EDGE_RE]);
   assert.equal(r.rows.length, 0,
-    `definers outside the wiki whitelist touching the wiki set:\n${r.rows.map((x) => `  ${x.sig} (relation=${x.names_relation} call_edge=${x.call_edge})`).join("\n")}`);
+    `clara functions outside the wiki whitelist touching the wiki set:\n${r.rows.map((x) => `  ${x.sig} (secdef=${x.prosecdef} relation=${x.names_relation} call_edge=${x.call_edge})`).join("\n")}`);
   // …and the scan is NOT vacuous: the whitelisted members do trip both halves.
   const positive = await rootQuery(`
     select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-     where n.nspname='clara' and p.prosecdef and p.oid::text = any($1::text[])
+     where n.nspname='clara' and p.oid::text = any($1::text[])
        and (p.prosrc ~* $2 or p.prosrc ~* $3)`, [whitelistOids, RELATION_RE, CALL_EDGE_RE]);
   assert.ok(positive.rows[0].n >= 5,
-    `the scan expression genuinely matches (got ${positive.rows[0].n} whitelisted definers) — a vacuous regex would pass the assertion above for the wrong reason`);
+    `the scan expression genuinely matches (got ${positive.rows[0].n} whitelisted fns) — a vacuous regex would pass the assertion above for the wrong reason`);
 });
 
 test("[0019 §9]: the veto helper is GONE and BOTH former deviations are clean (the exact inverse of the 0017:5595-5618 pins)", async () => {

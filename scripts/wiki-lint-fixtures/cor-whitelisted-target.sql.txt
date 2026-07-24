@@ -1,0 +1,15 @@
+-- CLEAN FIXTURE (must PASS the gate).
+-- A change-of-record patch that injects dynamic wiki SQL into a function that IS in the
+-- wiki-touch whitelist by exact signature. Whitelisted verbs are the sanctioned wiki
+-- surface — the gate exists to stop wiki reads LEAKING OUT of that set, not to forbid
+-- them inside it.
+do $cor$
+declare v_def text; v_next text;
+begin
+  select pg_get_functiondef('clara.get_wiki_page(uuid,text)'::regprocedure) into v_def;
+  v_next := replace(v_def, $old$begin$old$,
+$new$begin
+  execute 'select 1 from clara.' || 'wiki' || '_pages limit 1';$new$);
+  execute v_next;
+end
+$cor$;

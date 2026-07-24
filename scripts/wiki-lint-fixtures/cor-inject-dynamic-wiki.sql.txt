@@ -1,0 +1,25 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- The exact hole ratchet R1 finding 3 named: a later migration uses the repo's own
+-- change-of-record idiom (pg_get_functiondef -> replace -> execute) to inject dynamic
+-- wiki SQL into an AUTHORITY function, which is NOT in the wiki-touch whitelist. The
+-- injected fragment builds the relation name by concatenation, so migration 0019's
+-- prosrc token scan sees no word-bounded `wiki_pages` in the final body and passes.
+do $cor$
+declare v_def text; v_next text; v_anchor text;
+begin
+  select pg_get_functiondef(
+    'clara.retire_document_filing(uuid,text,uuid,text)'::regprocedure) into v_def;
+  v_anchor := $old$  if f.retired_at is not null then$old$;
+  v_next := replace(v_def, v_anchor,
+$new$  declare v_blocked int;
+  begin
+    execute 'select count(*) from clara.' || 'wi' || 'ki_pages where client_id=$1'
+      into v_blocked using f.client_id;
+    if v_blocked > 0 then
+      raise exception 'blocked by the wiki' using errcode='CLR10';
+    end if;
+  end;
+  if f.retired_at is not null then$new$);
+  execute v_next;
+end
+$cor$;
