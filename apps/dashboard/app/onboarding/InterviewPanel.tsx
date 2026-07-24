@@ -6,6 +6,13 @@
 // When the current park is the firm COMMIT handshake (expects create_firm_receipt), the parent
 // supplies `commitSlot` — the panel renders it instead of the free-text answer box (F8).
 //
+// Finding 5 (live-gate-run-2026-07-24): the client interview's 'sample_invoices' segment asks
+// the operator to "Attach them now, or reply skip", but this panel had no file input anywhere.
+// `attachSlot` is the same shape of render-prop as `commitSlot`, except it renders ALONGSIDE the
+// free-text answer box rather than instead of it (the segment still expects a typed answer, e.g.
+// "attached" or "skip") — the panel stays agnostic of uploads; only the client-onboarding page
+// supplies it, gated on `park.seg`.
+//
 // The panel computes nothing: every displayed value is DB/runtime-authored. The thread is the
 // parent's append-only log (seeded from durable plan items on resume; §3.1's resume story).
 
@@ -32,9 +39,10 @@ export function InterviewPanel(props: {
   busy: boolean;
   error: string | null;
   commitSlot?: (park: PendingPark) => ReactNode;
+  attachSlot?: (park: PendingPark) => ReactNode;
   cancelLabel?: string;
 }) {
-  const { state, thread, onSubmitAnswer, onCancel, busy, error, commitSlot } = props;
+  const { state, thread, onSubmitAnswer, onCancel, busy, error, commitSlot, attachSlot } = props;
   const [draft, setDraft] = useState("");
   const park = state.pendingPark;
   const isFirmCommit = !!park && park.expects === "create_firm_receipt" && !!commitSlot;
@@ -73,6 +81,7 @@ export function InterviewPanel(props: {
         commitSlot!(park)
       ) : park ? (
         <div>
+          {attachSlot ? attachSlot(park) : null}
           {/* The live question is the thread's last Clara entry above; the bar answers it. */}
           <div className={styles.answerBar}>
             <textarea

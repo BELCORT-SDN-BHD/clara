@@ -261,6 +261,28 @@ export async function approveCorrection(
   )) as { correction_id: string; status: string };
 }
 
+// Finding 3 (live-gate-run-2026-07-24): the documents_document_kind_check CHECK
+// constraint, verbatim (0016/0017) — the ONE dashboard source for the classify
+// control's option list. The DB is still the final authority (set_document_kind
+// re-validates); this is a UI convenience, kept in lockstep by hand.
+export const DOCUMENT_KINDS = [
+  "invoice", "receipt", "credit_note", "debit_note", "bank_statement",
+  "payment_voucher", "claim_form", "payroll_summary", "tax_correspondence",
+  "ssm_company_doc", "agreement_contract", "e_invoice_xml", "management_account",
+  "opening_balance_doc", "knowledge_artifact", "handwritten_note", "consent_evidence",
+  "prior_gl", "other",
+] as const;
+
+export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
+
+/** set_document_kind (0016 §C, bookkeeper+): the audited human classify/correction
+ *  lane. A reason is REQUIRED by the DB (CLR10 otherwise) — the caller must not
+ *  default it silently. Refusals throw PgrestError (clr + reason) for verbatim
+ *  rendering (contract's refusal-transparency idiom). */
+export async function setDocumentKind(jwt: string, documentId: string, kind: string, reason: string): Promise<void> {
+  await rpc("set_document_kind", { p_document: documentId, p_kind: kind, p_reason: reason, p_op_key: opKey() }, jwt);
+}
+
 export async function placeLegalHold(jwt: string, documentId: string, reason: string): Promise<void> {
   await rpc("place_legal_hold", { p_document: documentId, p_reason: reason, p_op_key: opKey() }, jwt);
 }
