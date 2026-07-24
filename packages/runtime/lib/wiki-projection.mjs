@@ -9,11 +9,20 @@
 // of kind 'wiki_fact' publishes its page from the seeding proposal's payload VERBATIM (synthesis
 // 'deterministic', prior_gl_line citations, engine_id null); a declined or non-wiki_fact decision is a
 // checkpoint-only skip. A fact with NO concrete line/region anchor is skipped_no_citation — provenance
-// is NEVER fabricated (F-M12). Terminal receipts (checkpoint-advancing, no retry):
-// projected|already_projected|skipped_inactive_client|held_consent|consent_released|skipped_kind|
-// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation + CLR32 wiki refusals mapped terminal;
+// is NEVER fabricated (F-M12); (d) the STALE lane (WB-R21 / migration 0019 D3) — document.filing_retired
+// marks the citing client's live wiki sources stale via mark_wiki_citations_stale. The authority domain
+// no longer VETOES a retirement under a live citation, so the wiki converges by MARKING from the
+// retirement EVENT; the lane is gated PER EVENT on the writer's presence so the runtime-image-first
+// ceremony window is silent, and it emits NO event of its own (wiki.citations_staled was dropped).
+// Terminal receipts (checkpoint-advancing, no retry):
+// projected|already_projected|citations_staled|skipped_inactive_client|held_consent|consent_released|
+// skipped_kind|skipped_no_surface|
+// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation + CLR32 wiki refusals mapped terminal
+// (incl. CLR32/stale_projected_from_seq -> already_projected, the 0019 §5 monotonic guard);
 // only a genuine throw dead-letters (matcher idiom). op_keys: model/seeding-fact 'wikiproj:<client>:<seq>';
-// ingest 'wikiingest:<client>:<document>'; consent 'wikihold:/wikirelease:<client>:<seq>'. P17: never
+// ingest 'wikiingest:<client>:<document>'; consent 'wikihold:/wikirelease:<client>:<seq>'; stale
+// 'wikistale:<client>:<seq>' (the ceremony catch-up uses 'wikistale-catchup:<run_key>:<client>:<document>'
+// — a fixed per-pair key would replay the original receipt forever). P17: never
 // subscribes to / re-synthesizes from wiki.*. Cold start (checkpoint seed + backfill + repair) is a
 // CEREMONY item, never boot. Three reads are INJECTABLE + FAIL CLOSED under the 0008 grants (no
 // runtime document→client link, no SELECT on counterparties/client_egress_consents).
@@ -33,11 +42,15 @@ export const WIKI_PROJECTION_CONSUMER = "wiki_projection";
 // live event_types registry (0005/0009/0011/0016/0017). All other types (incl. wiki.* — P17) are
 // checkpoint-only advances. document.classified = ingest (client not carried → resolveDocumentClient);
 // entry.approved = ingest of the source doc (carries the client); counterparty.* = model synthesis;
-// egress.consent_* = hold set/clear; seeding.proposal_decided = the deterministic wiki_fact lane (F13).
+// egress.consent_* = hold set/clear; seeding.proposal_decided = the deterministic wiki_fact lane (F13);
+// document.filing_retired = the WB-R21 STALE lane (0019 D3) — the authority domain no longer vetoes a
+// retirement under a live wiki citation, so the wiki converges by MARKING its sources from the
+// retirement EVENT. Note this is a document.* type, NOT a wiki.* one: P17 (never re-synthesize from
+// wiki.*) is untouched, and with wiki.citations_staled dropped the lane emits no event to loop on.
 export const WIKI_PROJECTION_EVENT_TYPES = Object.freeze([
   "document.classified", "entry.approved", "counterparty.created",
   "counterparty.merged", "egress.consent_granted", "egress.consent_revoked",
-  "seeding.proposal_decided",
+  "seeding.proposal_decided", "document.filing_retired",
 ]);
 const SUBSCRIBED = new Set(WIKI_PROJECTION_EVENT_TYPES);
 
@@ -70,9 +83,13 @@ export function claraReason(err) {
 function terminalStatusFor(err) {
   const reason = claraReason(err);
   if (err.code === "CLR32") {
+    // stale_projected_from_seq is the 0019 §5 DB-side monotonic guard: a BENIGN
+    // convergence (a newer seq already published for this slug), not a malformed write.
+    // Without this arm it falls through to 'skipped_bad_state' and misreports itself.
     return reason === "consent_held" ? "held_consent"
       : reason === "cap_exceeded" ? "skipped_cap"
-      : reason === "budget_unknown" ? "skipped_budget_unknown" : "skipped_bad_state";
+      : reason === "budget_unknown" ? "skipped_budget_unknown"
+      : reason === "stale_projected_from_seq" ? "already_projected" : "skipped_bad_state";
   }
   if (err.code === "CLR28") return "skipped_consent_evidence";
   if (err.code === "CLR02") return "skipped_unfiled";
@@ -311,6 +328,38 @@ async function planSeedingWikiFact(client, { firmId, ev }) {
   };
 }
 
+/** PER-EVENT surface gate for the stale lane (0019 §4). The ratified ceremony is RUNTIME-IMAGE-
+ *  FIRST (§11): this binary leads the projection BEFORE migration 0019 applies, so the writer may
+ *  not exist yet. to_regprocedure is a plain catalog read — no EXECUTE needed — and pins the exact
+ *  signature; a missing surface makes the lane a checkpoint-only skip instead of a dead-letter.
+ *  This is the load-bearing safety of window A, so it is evaluated per event, not once at cold
+ *  start (contrast wikiColdStartReady, wiki-projection-ops.mjs:100-108). */
+export async function hasStaleWriterDefault(client) {
+  const r = await client.query(
+    "select to_regprocedure('clara.mark_wiki_citations_stale(uuid,uuid,text,text)') is not null as surface");
+  return r.rows[0]?.surface === true;
+}
+
+/** The FILING-RETIRED → STALE lane (WB-R21 / 0019 D3). Both keys ride the event today, so no
+ *  document→client resolver is needed: retire_document_filing emits client_id=f.client_id +
+ *  document_id=f.document_id (0007:1462), and approve_wrong_client_correction emits
+ *  client_id=x.from_client — the SOURCE / citing client whose provenance goes stale — with the same
+ *  document (0009:2561-2563). One stale_reason covers both paths: the marker describes what
+ *  invalidated the provenance, not which verb caused it.
+ *  At-least-once safety: op-key dedupe (case a) plus the writer's own `stale_at is null` filter mean
+ *  a re-delivery or a rewound-checkpoint redrive never double-marks. */
+async function planFilingRetiredStale(client, { ev, clientId, documentId, deps }) {
+  // A null key is a checkpoint-only SKIP — never a dead-letter, never a call with nulls.
+  if (!clientId || !documentId) return skip("skipped_kind");
+  if (!(await (deps.hasStaleWriter ?? hasStaleWriterDefault)(client))) return skip("skipped_no_surface");
+  return {
+    status: "citations_staled", lane: "filing_retired",
+    mutate: (c) => c.query(
+      "select clara.mark_wiki_citations_stale($1,$2,$3,$4) as r",
+      [clientId, documentId, "source_filing_retired", `wikistale:${clientId}:${ev.seq}`]),
+  };
+}
+
 /** Dispatch one subscribed event to its lane plan (reads + any network egress happen here). */
 export async function planEvent(client, { firmId, ev, deps }) {
   const payload = ev.payload || {};
@@ -332,6 +381,8 @@ export async function planEvent(client, { firmId, ev, deps }) {
       return planConsentTransition({ ev, clientId: ev.clientId, granted: false });
     case "seeding.proposal_decided":
       return planSeedingWikiFact(client, { firmId, ev });
+    case "document.filing_retired":
+      return planFilingRetiredStale(client, { ev, clientId: ev.clientId, documentId: ev.documentId, deps });
     default:
       return skip("skipped_kind");
   }

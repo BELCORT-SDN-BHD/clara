@@ -1,8 +1,9 @@
 // wiki_projection — the OPS half (module-size budget: the reconciler-sst/-documents
 // precedent). The projection/planning/receipt/redrive core lives in wiki-projection.mjs;
 // this module owns everything the SUPERVISOR and the WB-R18 CEREMONY touch: the leader
-// loop (with the cold-start gates), the /ready warn signal, and the two ceremony CLI
-// verbs (deterministic backfill, orphan repair). Ceremony order (design part3 post-verify,
+// loop (with the cold-start gates), the /ready warn signal, and the ceremony CLI verbs
+// (deterministic backfill, orphan repair, and the WB-R21/0019 §11 stale catch-up — a
+// ceremony-role SCAN plus a runtime-role MARKING verb). Ceremony order (design part3 post-verify,
 // amended by the native-review HIGH-2 finding): the loop self-gates, so the checkpoint
 // seed-at-head may run before OR after the v25 runtime starts — the consumer stays
 // DORMANT (no discovery, no dead-letters) until BOTH the 0017 surface exists and the
@@ -52,6 +53,80 @@ export async function backfillWikiSources(client, { sources = [], log = () => {}
     }
   }
   return { examined: sources.length, ingested, skipped };
+}
+
+// --- the WB-R21 / 0019 §11 STALE CATCH-UP (two halves) -----------------------------------------
+// RECONCILIATION, not the mechanism that makes the deploy ordering safe — the ratified ordering is
+// RUNTIME-IMAGE-FIRST with proven exclusive new-binary lock acquisition as the cutover point, and it
+// opens no window. Expected result at the 0019 ceremony: ZERO pairs; a non-empty result is a finding
+// to adjudicate before unquiescing, not a routine sweep.
+//
+// It splits in two because of a PRIVILEGE BOUNDARY: clara_runtime has NO SELECT on
+// clara.document_filings (0007:2740-2741 grants it to clara_authenticated/clara_agent_ro only — the
+// same gap that makes resolveDocumentClientDefault return null), so the INVERTED scan cannot run on
+// the runtime connection and 0019 adds NO grant. This mirrors backfillWikiSources' established
+// contract exactly: the ceremony supplies the {clientId, documentId} pairs.
+
+/** (i) The SCAN half — a CEREMONY-ROLE step, run on the owner connection, READ-ONLY. Returns the
+ *  candidate pairs: for each ACTIVE page, each current-version citation and each active-page
+ *  ref_kind='document' ref with a non-null document_id and stale_at is null, where the document has
+ *  NO active filing to that page's client. This is the veto's blocker query, INVERTED — the same
+ *  predicate run_client_lint's scan (2) uses. The ceremony records the list as evidence. */
+export async function scanStaleCatchupCandidates(client) {
+  const r = await client.query(
+    `select distinct wp.client_id as client_id, src.document_id as document_id
+       from clara.wiki_pages wp
+       join lateral (
+         select wc.document_id
+           from clara.wiki_page_citations wc
+          where wc.version_id = wp.current_version_id and wc.client_id = wp.client_id
+            and wc.firm_id = wp.firm_id and wc.document_id is not null and wc.stale_at is null
+         union all
+         select wr.document_id
+           from clara.wiki_page_refs wr
+          where wr.page_id = wp.id and wr.client_id = wp.client_id and wr.firm_id = wp.firm_id
+            and wr.ref_kind = 'document' and wr.document_id is not null and wr.stale_at is null
+       ) src on true
+      where wp.state = 'active'
+        and not exists (select 1 from clara.document_filings df
+              where df.document_id = src.document_id and df.client_id = wp.client_id
+                and df.retired_at is null)
+      order by 1, 2`);
+  return r.rows.map((row) => ({ clientId: row.client_id, documentId: row.document_id }));
+}
+
+/** (ii) The MARKING half — a RUNTIME-ROLE verb over the pairs the ceremony supplies, plus a ceremony
+ *  `runKey`. The run key is MANDATORY: a fixed per-pair op key is NOT re-runnable, because _reserve_op
+ *  replays the original receipt forever for that key (0004:43-60), so a later repair run would return
+ *  stale receipts and never examine fresh rows. Same run retried ⇒ same run key (a true idempotent
+ *  retry); a NEW repair run ⇒ a NEW run key. A typed CLR is a per-pair skip (the backfillWikiSources
+ *  idiom); anything else propagates. */
+export async function catchUpWikiStale(client, { pairs = [], runKey = null, log = () => {} } = {}) {
+  if (typeof runKey !== "string" || runKey.trim() === "") {
+    throw new Error(
+      "wiki stale catch-up: a ceremony run_key is REQUIRED — a fixed per-pair op_key replays its "
+      + "original receipt forever (_reserve_op) and would never examine fresh rows");
+  }
+  let marked = 0;
+  let noop = 0;
+  let skipped = 0;
+  for (const pair of pairs) {
+    const clientId = pair?.clientId;
+    const documentId = pair?.documentId;
+    if (!clientId || !documentId) { skipped += 1; continue; }
+    try {
+      const r = await client.query("select clara.mark_wiki_citations_stale($1,$2,$3,$4) as r",
+        [clientId, documentId, "source_filing_retired",
+          `wikistale-catchup:${runKey}:${clientId}:${documentId}`]);
+      if (r.rows[0]?.r?.status === "marked") marked += 1; else noop += 1;
+    } catch (err) {
+      if (isClaraTerminal(err)) {
+        log(`[wiki_projection] stale-catchup skip client=${clientId} doc=${documentId} ${err.code}/${claraReason(err) ?? ""}`);
+        skipped += 1;
+      } else { throw err; }
+    }
+  }
+  return { examined: pairs.length, marked, noop, skipped, run_key: runKey };
 }
 
 /** Orphan REPAIR — a verified-but-never-published Storage object self-heals on redelivery (the
