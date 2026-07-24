@@ -11,6 +11,7 @@
 
 import {
   COA_TEMPLATE,
+  MPERS_ROLLUPS,
   STANDARD_BLOCKS,
   OPTIONAL_BLOCKS,
   templateAccounts,
@@ -19,7 +20,7 @@ import {
 } from "../shared/coaTemplate";
 
 export type { CoaTemplateAccount, CoaTemplateBlock };
-export { COA_TEMPLATE, STANDARD_BLOCKS, OPTIONAL_BLOCKS };
+export { COA_TEMPLATE, MPERS_ROLLUPS, STANDARD_BLOCKS, OPTIONAL_BLOCKS };
 
 // ---------------------------------------------------------------------------
 // Account-code validation (clara.coa_accounts_account_code_check, 0009, verbatim).

@@ -23,6 +23,7 @@ import {
   applySummary,
   buildMpersLookup,
   COA_TEMPLATE,
+  MPERS_ROLLUPS,
   STANDARD_BLOCKS,
   OPTIONAL_BLOCKS,
   templateAccounts,
@@ -105,14 +106,14 @@ test("selectionAccountCount reads the count straight off the fixed template, nev
 
 // --- COA_TEMPLATE's own structural integrity -------------------------------------------
 
-test("COA_TEMPLATE totals 186 accounts across every block, standard+optional partitioning cleanly", () => {
+test("COA_TEMPLATE totals 193 accounts across every block, standard+optional partitioning cleanly", () => {
   const total = COA_TEMPLATE.reduce((n, b) => n + b.accounts.length, 0);
-  assert.equal(total, 186);
+  assert.equal(total, 193);
   const standardTotal = STANDARD_BLOCKS.reduce((n, b) => n + b.accounts.length, 0);
   const optionalTotal = OPTIONAL_BLOCKS.reduce((n, b) => n + b.accounts.length, 0);
-  assert.equal(standardTotal, 142);
-  assert.equal(optionalTotal, 44);
-  assert.equal(standardTotal + optionalTotal, 186);
+  assert.equal(standardTotal, 145);
+  assert.equal(optionalTotal, 48);
+  assert.equal(standardTotal + optionalTotal, 193);
   for (const b of COA_TEMPLATE) assert.ok(b.tier === "standard" || b.tier === "optional", `${b.key} has a recognized tier`);
 });
 
@@ -161,12 +162,48 @@ test("no account NAME encodes a rate, percentage, threshold or effective date �
   }
 });
 
-test("every account carries an MPERS roll-up — the mapping is what makes an unofficial chart defensible", () => {
+test("no NOTE or BLURB carries a quantum either — the second-pass review's finding that the rule was only pinned on names", () => {
+  // Rule 2 exempts statutory citations (which carry years) and the MPERS twelve-month
+  // classification criterion. What is never allowed anywhere is a rate or a money amount.
+  const prose: Array<[string, string]> = [];
+  for (const block of COA_TEMPLATE) {
+    prose.push([`block ${block.key} blurb`, block.blurb]);
+    for (const acct of block.accounts) if (acct.note) prose.push([`${acct.code} note`, acct.note]);
+  }
+  for (const [where, text] of prose) {
+    assert.doesNotMatch(text, /\d\s?%|\bper cent\b/i, `${where} carries a percentage`);
+    assert.doesNotMatch(text, /\bRM\s?\d/i, `${where} carries a ringgit amount`);
+  }
+});
+
+test("every account's MPERS roll-up is one of the closed MPERS_ROLLUPS set — a new account must choose a mapping, never invent a string", () => {
+  const allowed = new Set<string>(MPERS_ROLLUPS);
   for (const block of COA_TEMPLATE) {
     for (const acct of block.accounts) {
-      assert.ok(acct.mpers && acct.mpers.trim().length > 0, `${acct.code} has no MPERS roll-up`);
+      assert.ok(allowed.has(acct.mpers), `${acct.code} maps to "${acct.mpers}", which is not in MPERS_ROLLUPS`);
     }
   }
+});
+
+test("every MPERS_ROLLUPS value is actually used — a dead roll-up means a mapping decision was abandoned", () => {
+  const used = new Set(COA_TEMPLATE.flatMap((b) => b.accounts.map((a) => a.mpers)));
+  for (const rollup of MPERS_ROLLUPS) assert.ok(used.has(rollup), `"${rollup}" is declared but unused`);
+});
+
+test("module coherence — a charge account never ships without the assets it belongs to", () => {
+  // The second-pass review's finding: amortisation sat in the standard set while every
+  // intangible asset was optional, so a default client got a charge with nothing to charge.
+  const blockOf = (code: string) => COA_TEMPLATE.find((b) => b.accounts.some((a) => a.code === code))?.key;
+  assert.equal(blockOf("900-AMO"), blockOf("220-SW1"), "amortisation must ship with the intangibles it amortises");
+  assert.equal(blockOf("620-IMP"), blockOf("330-900"), "the inventory write-down charge must ship with the allowance");
+  assert.equal(blockOf("530-IPG"), blockOf("230-FV1"), "investment-property fair-value movements must ship with the fair-value asset");
+  assert.equal(blockOf("800-H01"), blockOf("470-H01"), "HP finance charges must ship with the HP liability");
+});
+
+test("imported taxable services is gated SEPARATELY from SST registration — a non-registered recipient can still owe it", () => {
+  const blockOf = (code: string) => COA_TEMPLATE.find((b) => b.accounts.some((a) => a.code === code))?.key;
+  assert.notEqual(blockOf("430-ITS"), blockOf("430-SVT"), "430-ITS must not sit behind the registered-person gate");
+  assert.equal(blockOf("900-SST"), "operating-expenses", "SST borne on purchases is a cost to registered and unregistered clients alike");
 });
 
 test("the two equity markers (OBE, retained earnings) are typed equity — the DB's ck_coa_obe_equity/ck_coa_retained_earnings_equity would else refuse them", () => {
