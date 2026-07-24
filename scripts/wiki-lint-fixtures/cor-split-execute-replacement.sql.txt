@@ -1,0 +1,15 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- Ratchet R3 finding F5, bypass #1: the change-of-record REPLACEMENT is built as a
+-- SPLIT-literal concatenation, so no individual quoted fragment contains the word
+-- EXECUTE — yet the INSTALLED body does. Scanning the fragments one by one misses it;
+-- reconstructing the || chain of the replacement joins the keyword back together.
+do $cor$
+declare v_def text; v_next text;
+begin
+  select pg_get_functiondef(
+    'clara.retire_document_filing(uuid,text,uuid,text)'::regprocedure) into v_def;
+  v_next := replace(v_def, 'begin',
+    'begin ex' || 'ecute ''select count(*) from clara.' || 'wi' || 'ki_pages'' into v_blocked;');
+  execute v_next;
+end
+$cor$;

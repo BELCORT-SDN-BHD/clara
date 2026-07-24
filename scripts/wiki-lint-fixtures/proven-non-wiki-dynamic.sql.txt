@@ -1,8 +1,10 @@
--- CLEAN FIXTURE (must PASS the gate).
--- Fail-closed is not "no dynamic SQL anywhere": a statement whose text is fully
--- reconstructible from literals and demonstrably does not name wiki is PROVEN safe and
--- passes without a whitelist entry. Without this cell the gate could pass by rejecting
--- everything.
+-- FAIL-then-WAIVABLE FIXTURE (ratchet R3 finding F4).
+-- A statement fully reconstructible from literals that names only `clara.firms` is NOT
+-- proven safe by that alone: `clara.firms` could be a VIEW over a wiki relation, invisible
+-- to a string scan. So a persistent dynamic EXECUTE outside the whitelist is a FINDING —
+-- safety is never inferred from string absence — but a waiver DECLARING its base relations
+-- (`firms`) can excuse it. This cell proves the gate is not vacuous: a declared, verified
+-- waiver passes; an undeclared or wiki-declaring one does not.
 create function clara._proven_probe() returns integer
   language plpgsql security invoker as $fn$
 declare v_n integer;

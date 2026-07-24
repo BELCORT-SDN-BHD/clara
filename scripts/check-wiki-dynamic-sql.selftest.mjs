@@ -156,8 +156,61 @@ testCase("a PROCEDURE is a callable surface too -> REJECT", () => {
   expectFinding(scan("procedure-dynamic-wiki.sql.txt"), ["_sweep_pages(uuid)", "wiki_pages"]);
 });
 
-testCase("dynamic SQL PROVEN non-wiki -> OK (the gate is not vacuous)", () => {
-  expectClean(scan("proven-non-wiki-dynamic.sql.txt"));
+// R3 F4: reconstructibility is NOT proof — a view/helper (clara.page_index over wiki_pages)
+// reaches wiki with no wiki token in the text. So a reconstructible non-wiki dynamic EXECUTE is a
+// FINDING, waivable ONLY by a waiver that DECLARES (and the gate VERIFIES) its base targets.
+testCase("[R3 F4] a RECONSTRUCTIBLE non-wiki dynamic EXECUTE is a FINDING (safety is never inferred)", () => {
+  expectFinding(scan("proven-non-wiki-dynamic.sql.txt"),
+    ["_proven_probe()", "cannot be PROVEN", "clara.firms"]);
+});
+testCase("[R3 F4] …an exact-identity waiver DECLARING its base relations EXCUSES it (not vacuous)", () => {
+  DYNAMIC_SQL_ALLOWLIST.set("_proven_probe()", { why: "reads clara.firms only", relations: ["firms"], calls: [] });
+  try { expectClean(scan("proven-non-wiki-dynamic.sql.txt")); }
+  finally { DYNAMIC_SQL_ALLOWLIST.delete("_proven_probe()"); }
+});
+testCase("[R3 F4] …but a waiver that OMITS a referenced target does NOT excuse it (verify, never rubber-stamp)", () => {
+  DYNAMIC_SQL_ALLOWLIST.set("_proven_probe()", { why: "incomplete", relations: [], calls: [] });
+  try { expectFinding(scan("proven-non-wiki-dynamic.sql.txt"), ["_proven_probe()"]); }
+  finally { DYNAMIC_SQL_ALLOWLIST.delete("_proven_probe()"); }
+});
+testCase("[R3 F4] …and a waiver may NEVER declare a wiki relation (that would open the boundary)", () => {
+  DYNAMIC_SQL_ALLOWLIST.set("_proven_probe()", { why: "malicious", relations: ["firms", "wiki_pages"], calls: [] });
+  try { expectFinding(scan("proven-non-wiki-dynamic.sql.txt"), ["_proven_probe()"]); }
+  finally { DYNAMIC_SQL_ALLOWLIST.delete("_proven_probe()"); }
+});
+
+// R3 F5: the lexical evasions the previous gate walked through.
+testCase("[R3 F5 #1] a SPLIT-execute CoR replacement -> REJECT (the || chain is reconstructed)", () => {
+  expectFinding(scan("cor-split-execute-replacement.sql.txt"),
+    ["change-of-record patch", "retire_document_filing", "PROVABLY names", "wiki_pages"]);
+});
+testCase("[R3 F5 #2] a SPLIT create-function `do` block -> REJECT (the create keyword is reconstructed)", () => {
+  expectFinding(scan("do-split-create-function.sql.txt"),
+    ["dynamic function-creating", "_split_probe", "PROVABLY names", "wiki_pages"]);
+});
+testCase("[R3 F5 #3] a QUOTED whitespace-qualified identifier body -> REJECT (no longer invisible)", () => {
+  expectFinding(scan("quoted-ident-body-dynamic-wiki.sql.txt"),
+    ["_quoted_probe(uuid)", "wiki_pages"]);
+});
+testCase("[R3 F5] a NESTED `do` creator -> REJECT", () => {
+  expectFinding(scan("nested-do-creator.sql.txt"),
+    ["dynamic function-creating", "_nested_probe", "wiki_pages"]);
+});
+
+// R3 F8: the wiki classification is by parsed relation/call TARGET, not a bare `wiki` substring,
+// and exact-target waivers reach literal-attributed CoR patches.
+testCase("[R3 F8] `select 'wiki'::text` names NO wiki relation → a WAIVABLE dynamic finding, not an unwaivable wiki hit", () => {
+  expectFinding(scan("wiki-string-literal.sql.txt"), ["_wiki_word_probe()", "cannot be PROVEN"]);
+  DYNAMIC_SQL_ALLOWLIST.set("_wiki_word_probe()", { why: "a bare string literal, no relation", relations: [], calls: [] });
+  try { expectClean(scan("wiki-string-literal.sql.txt")); }
+  finally { DYNAMIC_SQL_ALLOWLIST.delete("_wiki_word_probe()"); }
+});
+testCase("[R3 F8] a literal-attributed CoR patch's non-wiki dynamic SQL is WAIVABLE by its exact target", () => {
+  expectFinding(scan("cor-nonwiki-dynamic.sql.txt"), ["retire_document_filing", "clara.firms"]);
+  DYNAMIC_SQL_ALLOWLIST.set("retire_document_filing(uuid,text,uuid,text)",
+    { why: "injects a clara.firms count only", relations: ["firms"], calls: [] });
+  try { expectClean(scan("cor-nonwiki-dynamic.sql.txt")); }
+  finally { DYNAMIC_SQL_ALLOWLIST.delete("retire_document_filing(uuid,text,uuid,text)"); }
 });
 
 testCase("`grant execute on function clara.get_wiki_page` -> OK (privilege keyword, not dynamic SQL)", () => {

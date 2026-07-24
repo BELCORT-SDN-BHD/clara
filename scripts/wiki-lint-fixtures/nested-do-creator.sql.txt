@@ -1,0 +1,13 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- Ratchet R3 finding F5: a NESTED `do` creator. The outer block EXECUTEs an inner `do`
+-- block that dynamically CREATEs a wiki-reading function. Reconstructing the outer
+-- statement reveals both the `create function` and the wiki relation the created body reads.
+do $outer$
+begin
+  execute
+    'do $inner$ begin '
+    || 'execute $q$ create function clara._nested_probe() returns integer '
+    || 'language sql as $b$ select count(*)::int from clara.wiki_pages $b$ $q$; '
+    || 'end $inner$';
+end
+$outer$;

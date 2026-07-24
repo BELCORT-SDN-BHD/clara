@@ -187,8 +187,9 @@ test("[R1-1 · two-session] RETIRE-PAGE vs MARK: the writer blocks on the page r
   let s1 = null, s2 = null;
   const out = { mark: null };
   try {
-    // Session 1: retire_wiki_page locks the PAGE row (0017:2296) and takes NO client row —
-    // which is exactly why the writer's second lock has to be the page, in id order.
+    // Session 1: retire_wiki_page. Since §3a it takes the CLIENT row FIRST (0019 §3a), then the
+    // page row — so the writer (which also takes the client row first, LOCK 1) now blocks on the
+    // shared CLIENT row here, not the page row. The re-evaluation still converges to a clean noop.
     s1 = await session(ROLES.authenticated, { jwtSub: w.users.alice });
     await s1.c.query("begin");
     await s1.c.query(
@@ -202,7 +203,7 @@ test("[R1-1 · two-session] RETIRE-PAGE vs MARK: the writer blocks on the page r
       .catch((e) => { out.mark = { error: e.code, detail: e.detail ?? e.message }; });
 
     await waitBlockedByOrThrow(s2.pid, s1.pid, {
-      what: "the clara.wiki_pages row lock held by the retiring session (0019 §3 LOCK 2)",
+      what: "the clara.clients row lock held by the retiring session (0019 §3 LOCK 1 — §3a made retire_wiki_page take the client row FIRST)",
     });
 
     await s1.c.query("commit");
@@ -228,7 +229,7 @@ test("[R1-1 · two-session] RETIRE-PAGE vs MARK: the writer blocks on the page r
   assert.equal(log.rows[0].n, 0, "a noop wrote NO wiki_log row (the positive-change-only posture survives the fix)");
 });
 
-test("[R1-1/R2-B1] the lock graph is acyclic BY A SHARED PREFIX: EVERY wiki actor takes the clara.clients row before any wiki_pages row", async () => {
+test("[R1-1/R2-B1/R3-F1] the WIKI-PAGE lock graph is acyclic BY A SHARED PREFIX: EVERY wiki actor takes the clara.clients row before any wiki_pages row", async () => {
   fail0019(live);
   const writer = norm(await fnSource("mark_wiki_citations_stale"));
   const core = norm(await fnSource("_publish_wiki_page_version_core"));
@@ -242,6 +243,13 @@ test("[R1-1/R2-B1] the lock graph is acyclic BY A SHARED PREFIX: EVERY wiki acto
   // The fix is ordering, not argument: page retirement now takes client -> page like every
   // other wiki actor, so the reverse edge exists nowhere. All three are held to the SAME
   // rule below — no actor gets an exemption, and a future one must join the prefix too.
+  //
+  // RATCHET R3 FINDING F1 — what this shared prefix PROVES is bounded: the WIKI-PAGE lock
+  // graph is acyclic among these three (each invoked one verb per transaction). It does NOT
+  // prove the absence of the composed-transaction firm_event_seq <-> clients deadlock — a
+  // pre-existing, schema-wide property of _append_event, retryable as 40P01, not introduced
+  // by 0019 and with no instantiation in this one-verb-per-transaction system (0019 §3 header
+  // residual). The assertions below prove exactly the client-before-page prefix, nothing more.
   for (const [name, src] of [
     ["mark_wiki_citations_stale", writer],
     ["_publish_wiki_page_version_core", core],
@@ -453,4 +461,53 @@ test("[R1-5] the core's SIGNATURE is unchanged by the ratchet — the whitelist,
   const r = await rootQuery("select to_regprocedure($1)::oid::text as oid", [CORE_SIG]);
   assert.ok(r.rows[0].oid && r.rows[0].oid !== "0",
     "the publication core still resolves at its 0017 signature (the guards are body-only)");
+});
+
+// ===========================================================================
+// R3-F7 — the §3a lock-order drift scan strips comments/literals (source-spoof-proof).
+// ===========================================================================
+
+test("[R3-F7] the §3a lock-order scan STRIPS comments and string literals — a commented-out client lock above a real page-first lock is CAUGHT (and would have SPOOFED the old scan)", async () => {
+  fail0019(live);
+  // The exact normalizations 0019's tail uses: STRIP = block/line comments + single-/dollar-quoted
+  // literals then whitespace (R3-F7); RAW = the OLD whitespace-only form the finding spoofed.
+  const STRIP = String.raw`regexp_replace(regexp_replace(regexp_replace(regexp_replace(regexp_replace(lower(prosrc),'/\*.*?\*/',' ','g'),'--[^'||chr(10)||']*',' ','g'),'\$[a-z0-9_]*\$.*?\$[a-z0-9_]*\$',' ','g'),'''([^'']|'''')*''',' ','g'),'\s+','','g')`;
+  const RAW = String.raw`regexp_replace(lower(prosrc),'\s+','','g')`;
+  const LOCK = String.raw`for(?:nokeyupdate|keyshare|update|share)`;
+  const PAGE = String.raw`fromclara\.wiki_pages[a-z]*where[^;]*` + LOCK;
+  const CLI = String.raw`fromclara\.clients[a-z]*where[^;]*` + LOCK;
+  const isViolator = async (client, norm, sig) => {
+    const r = await client.query(
+      `select regexp_instr(${norm}, $2) as page_at, regexp_instr(${norm}, $3) as client_at
+         from pg_proc where oid = $1::regprocedure`, [sig, PAGE, CLI]);
+    const p = Number(r.rows[0].page_at), cl = Number(r.rows[0].client_at);
+    return p > 0 && (cl === 0 || cl > p); // the tail's violator predicate
+  };
+
+  const probe = `clara._f7_probe_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+  const c = await getPool().connect();
+  let caught = null, spoofed = null;
+  try {
+    await c.query("begin");
+    // A REAL page-first violator with NO real client lock — but a commented-out client lock sits
+    // ABOVE the page lock, AND a decoy client lock hides inside a string literal, so a raw-prosrc
+    // positional scan reads "client before page" and passes.
+    await c.query(`create function ${probe}(p_client uuid) returns void
+      language plpgsql as $probe$
+      begin
+        -- select 1 from clara.clients cl where cl.id = p_client for update;
+        perform 'a decoy from clara.clients cl where cl.id = x for update';
+        perform 1 from clara.wiki_pages wp where wp.client_id = p_client for update;
+      end $probe$`);
+    caught = await isViolator(c, STRIP, `${probe}(uuid)`);
+    spoofed = await isViolator(c, RAW, `${probe}(uuid)`);
+    await c.query("rollback");
+  } finally {
+    await c.query("rollback").catch(() => {});
+    c.release();
+  }
+  assert.equal(caught, true,
+    "the STRIPPED scan CATCHES the page-first violator — the comment and the string literal no longer spoof the client-before-page order");
+  assert.equal(spoofed, false,
+    "…and the OLD whitespace-only scan MISSED it, proving the comment/literal strip is load-bearing (F7), not cosmetic");
 });

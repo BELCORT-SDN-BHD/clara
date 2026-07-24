@@ -15,8 +15,8 @@
 --      finding B1). Page retirement is NOT a wait-for-graph leaf — after its page lock it
 --      requests clara.firm_event_seq through _append_event (0005:482-484) — so once §3
 --      added a client -> page actor, a composing transaction could close a real 40P01
---      cycle. All four wiki actors now share ONE client -> page order, asserted over
---      EVERY clara function by the §9 tail rather than over three named ones;
+--      cycle. All THREE page-locking wiki actors now share ONE client -> page order,
+--      asserted over EVERY clara function by the §9 tail rather than over three named ones;
 --   §3 clara.mark_wiki_citations_stale — the runtime-only stale WRITER. NO domain
 --      event is appended and NO event type is registered (amendment 4: a client-scoped
 --      wiki event would reach assert_books_current (0007:2665-2681) and the correction
@@ -52,6 +52,18 @@
 --
 -- The 0017 apply-time veto-existence pins (0017:5595-5605, 5606-5618) ran once at
 -- 0017-apply and are NOT re-run here; 0019's tail is their exact inverse.
+--
+-- RESIDUAL (Wave C) — the composed-transaction _append_event deadlock. §3a's reorder makes
+-- the WIKI-PAGE lock graph acyclic among the three page-locking wiki actors (§3), but it does
+-- NOT close a pre-existing, schema-wide property of clara._append_event (0005:482-484): a
+-- transaction that already holds clara.firm_event_seq (from a prior appended event in the same
+-- outer transaction) and then requests a clara.clients row can deadlock against one holding
+-- that client row and requesting the sequence. EVERY governed verb that locks clients and then
+-- appends an event has this shape; 0019 neither introduced nor widened it. It has no
+-- instantiation today (every governed verb is invoked one-per-transaction — a PostgREST RPC or
+-- one-event-per-transaction from the consumer — so nothing composes two governed calls in one
+-- transaction) and it manifests only as a retryable 40P01, never as an unmarked invalid end
+-- state. A general lock-order discipline across _append_event is deferred to Wave C.
 --
 -- HONEST CHARACTERISATION OF THE §9 CLOSED-SET SCAN (amendment 7). It is a closed
 -- STATIC defence, not a proof. Known limits:
@@ -435,13 +447,15 @@ $old$begin
   end if;
   v_next := replace(v_cur, v_anchor,
 $new$begin
-  -- [WB-R21/0019 §1b] REPEATABLE READ is refused STRUCTURALLY: under a pinned snapshot
-  -- the client-row lock this path shares with filing retirement does not order the two
-  -- (a lock without an UPDATE is not a serialization failure), so the unlocked
-  -- active-filing floor below could validate an already-retired filing and commit an
-  -- UNMARKED citation. READ COMMITTED (fresh per-statement snapshots) and SERIALIZABLE
-  -- (the firm_event_seq write-write conflict + SSI on document_filings) are both safe
-  -- and both keep working.
+  -- [WB-R21/0019 §1b] Repeatable-read is refused STRUCTURALLY, as conservative defence-in-
+  -- depth. Under a pinned snapshot the client-row lock this path shares with filing retirement
+  -- does not order the two (a lock without an UPDATE is not a serialization failure). In TODAY's
+  -- code the stale-snapshot commit is ALREADY prevented by the firm_event_seq write-write
+  -- barrier in _append_event (the §1b header states this precisely) — the refusal is kept only
+  -- to remove the safety argument's dependence on that _append_event internal, so a future change
+  -- that stops publication touching firm_event_seq cannot silently reopen the hole. READ
+  -- COMMITTED (fresh per-statement snapshots) and SERIALIZABLE (the firm_event_seq conflict + SSI
+  -- on document_filings) are both safe and both keep working.
   if current_setting('transaction_isolation') = 'repeatable read' then
     raise exception 'wiki publication cannot run under repeatable read isolation'
       using errcode='CLR32',detail='{"reason":"isolation_unsupported"}';
@@ -511,7 +525,10 @@ $cor2$;
 -- cycle was unreachable; §3's LOCK 2 is what closed it.
 --
 -- THE FIX IS ORDERING, NOT ARGUMENT. Page retirement adopts the SAME client -> page order
--- every other wiki actor uses, which removes the reverse edge outright:
+-- every other wiki actor uses, which removes the reverse edge in the WIKI-PAGE lock graph
+-- outright (ratchet R3 finding F1 bounds the claim to that graph — the composed-transaction
+-- firm_event_seq <-> clients deadlock is a pre-existing schema-wide _append_event property,
+-- retryable 40P01, out of 0019's scope; see the header residual note):
 --   publication    : clients(p_client) -> wiki_pages(one row)      0017:2049-2056
 --   the stale writer: clients(p_client) -> wiki_pages(N, asc id)   §3 below
 --   page retirement : clients(p.client)  -> wiki_pages(p_page)     HERE
@@ -675,19 +692,29 @@ $cor1b$;
 --   publication    : clients(p_client) -> wiki_pages(one row, by client+slug) 0017:2049-2056
 --   this writer    : clients(p_client) -> wiki_pages(N rows, ascending id)    here
 --   page retirement: clients(page.client) -> wiki_pages(one row, by id)       §3a above
--- ALL THREE share the same client -> page prefix, so any two of them are mutually
--- exclusive at the CLIENT row before either can reach a page row: the reverse edge that a
--- cycle needs does not exist. That is the whole argument, and it survives the fact that
--- publication and page retirement BOTH go on to request clara.firm_event_seq through
--- _append_event (0005:482-484) — a lock requested strictly AFTER the shared prefix cannot
--- close a cycle across it.
+-- ALL THREE share the same clients -> wiki_pages prefix, so any two of them are mutually
+-- exclusive at the CLIENT row before either can reach a page row. WHAT THIS PROVES, stated
+-- precisely (ratchet R3 finding F1 corrected the round-2 overclaim): the WIKI-PAGE lock
+-- graph is acyclic — no cycle can form AMONG these three, each invoked one verb per
+-- transaction, because none takes a wiki_pages row without first holding the clients row.
 --
--- The round-1 text claimed instead that page retirement "takes exactly one lock and then
--- requests none, so it can only ever be a leaf". It is not a leaf: _append_event's
--- firm_event_seq upsert is a request made while holding the page row, and an outer
--- transaction that already holds that sequence row plus the client row closes a genuine
--- 40P01 cycle (the full three-statement sequence is in §3a). §3a repairs the ORDER; this
--- comment repairs the ARGUMENT.
+-- WHAT IT DOES NOT PROVE, named honestly: a COMPOSING transaction that already holds
+-- clara.firm_event_seq (from a prior appended event in the same outer transaction) and then
+-- requests a client row can still deadlock against one holding that client row and requesting
+-- the sequence through _append_event (0005:482-484). That is a PRE-EXISTING, SCHEMA-WIDE
+-- property of _append_event — every governed verb that locks clara.clients and then appends
+-- an event has it — NOT introduced by 0019, and it manifests as a retryable 40P01, never as
+-- an unmarked invalid end state. It has no instantiation in this system: every governed verb
+-- is invoked ONE-PER-TRANSACTION (a PostgREST RPC, or one-event-per-transaction from the
+-- consumer), so no "outer transaction" holds firm_event_seq across a second governed call.
+-- Closing it in general is a Wave C item (see the residual note in the header); §3a's reorder
+-- is what makes the wiki-page graph itself acyclic and is the whole of 0019's scope here.
+--
+-- The round-1 text claimed page retirement "takes exactly one lock and then requests none, so
+-- it can only ever be a leaf". It is not a leaf: _append_event's firm_event_seq upsert is a
+-- request made while holding the page row, and the composing transaction above closes a
+-- genuine 40P01 (the three-statement sequence is in §3a). §3a repairs the wiki-page ORDER;
+-- this comment repairs the ARGUMENT and bounds what it proves.
 --
 -- Two writers on the SAME client serialize on the client row; two writers on DIFFERENT
 -- clients touch disjoint page sets (wiki_pages is client-scoped), so the ascending-id
@@ -742,10 +769,12 @@ begin
   end if;
 
   -- ---- LOCK 2: every ELIGIBLE page row, in ASCENDING page-id order. Eligibility is
-  -- read once here only to bound the lock set; nothing is decided on it. A page cannot
-  -- JOIN the set behind our back: joining requires a publication, and publication is
-  -- blocked on the client row we now hold. A page can LEAVE the set (retire_wiki_page
-  -- takes no client row), which is precisely what the re-evaluation below catches. ----
+  -- read once here only to bound the lock set; nothing is decided on it. A page cannot JOIN
+  -- the set behind our back: joining requires a publication, blocked on the client row we now
+  -- hold. Since §3a, retire_wiki_page ALSO takes the client row first, so a same-client
+  -- retirement is likewise blocked on LOCK 1 and the set cannot change under us; the page-row
+  -- locks here are the shared client -> page prefix (the §9 lock-order invariant) and the
+  -- re-evaluation below stays as defence-in-depth. ----
   for v_lock in
     select wp.id as page_id
       from clara.wiki_pages wp
@@ -1062,12 +1091,16 @@ declare
   v_f uuid; v_u uuid; v_c uuid; v_d uuid; v_fil uuid;
   v_pg uuid; v_ver uuid; v_cit uuid; v_r jsonb;
   v_rev uuid; v_stale timestamptz; v_content text; v_sha text; v_key text;
-  v_seq0 bigint; v_relrx text; v_callrx text;
+  v_seq0 bigint; v_relrx text; v_callrx text; v_lockrx text;
   v_chain text[]; v_at int; v_prev int;
 begin
   v_owner := (select oid from pg_roles where rolname = 'clara_fn_owner');
   v_relrx := '\m(wiki_pages|wiki_page_versions|wiki_page_citations|wiki_page_refs|wiki_log|wiki_budgets|wiki_synthesis_holds)\M';
   v_callrx := '\m(publish_wiki_page_version|_publish_wiki_page_version_core|record_wiki_source_ingest|retire_wiki_page|set_wiki_synthesis_hold|clear_wiki_synthesis_hold|get_wiki_page|list_wiki_pages|get_context_pack|run_client_lint|run_lint_all|mark_wiki_citations_stale)\M';
+  -- ratchet R3 finding F7: the lock-order probe recognises EVERY PostgreSQL row-lock clause, not
+  -- just FOR UPDATE, and (below) it runs over a prosrc with comments + string literals STRIPPED so
+  -- a commented-out or literal `clients … for update` cannot spoof the client-before-page order.
+  v_lockrx := 'for(?:nokeyupdate|keyshare|update|share)';
 
   -- ---- §1 the helper is GONE. to_regprocedure, NOT to_regproc (0011:4132-4136):
   -- to_regproc takes a BARE name and errors/misresolves on an argument list. ----
@@ -1189,14 +1222,21 @@ begin
   -- is precisely why "it is a leaf" was false), and a lock held outside the shared prefix
   -- is exactly the reverse edge a cycle needs. Positions are taken on the
   -- whitespace-stripped body, the drift-guard idiom used throughout this migration. ----
+  -- prosrc with block/line comments and single- + dollar-quoted string literals stripped, then
+  -- whitespace collapsed (F7): source-order positional analysis on the CODE only, never on a
+  -- comment or a literal. The strip runs comment-first so line comments still see their newline.
   select string_agg(q.sig, ', ' order by q.sig) into v_bad
     from (
       select p.oid::regprocedure::text as sig,
-             regexp_instr(regexp_replace(lower(p.prosrc), '\s+', '', 'g'),
-               'fromclara\.wiki_pages[a-z]*where[^;]*forupdate') as page_at,
-             regexp_instr(regexp_replace(lower(p.prosrc), '\s+', '', 'g'),
-               'fromclara\.clients[a-z]*where[^;]*forupdate') as client_at
+             regexp_instr(z.src, 'fromclara\.wiki_pages[a-z]*where[^;]*' || v_lockrx) as page_at,
+             regexp_instr(z.src, 'fromclara\.clients[a-z]*where[^;]*' || v_lockrx) as client_at
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+        cross join lateral (select regexp_replace(regexp_replace(regexp_replace(regexp_replace(
+          regexp_replace(lower(p.prosrc), '/\*.*?\*/', ' ', 'g'),
+          '--[^' || chr(10) || ']*', ' ', 'g'),
+          '\$[a-z0-9_]*\$.*?\$[a-z0-9_]*\$', ' ', 'g'),
+          $sq$'([^']|'')*'$sq$, ' ', 'g'),
+          '\s+', '', 'g') as src) z
        where n.nspname = 'clara' and p.prolang = (select oid from pg_language where lanname = 'plpgsql')
     ) q
    where q.page_at > 0 and (q.client_at = 0 or q.client_at > q.page_at);
@@ -1207,8 +1247,13 @@ begin
   -- …and the scan is NOT vacuous: the three actors that DO take both must be found by it.
   select count(*) into v_n
     from (
-      select regexp_instr(regexp_replace(lower(p.prosrc), '\s+', '', 'g'),
-               'fromclara\.wiki_pages[a-z]*where[^;]*forupdate') as page_at
+      select regexp_instr(regexp_replace(regexp_replace(regexp_replace(regexp_replace(
+               regexp_replace(lower(p.prosrc), '/\*.*?\*/', ' ', 'g'),
+               '--[^' || chr(10) || ']*', ' ', 'g'),
+               '\$[a-z0-9_]*\$.*?\$[a-z0-9_]*\$', ' ', 'g'),
+               $sq$'([^']|'')*'$sq$, ' ', 'g'),
+               '\s+', '', 'g'),
+               'fromclara\.wiki_pages[a-z]*where[^;]*' || v_lockrx) as page_at
         from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'clara'
          and p.oid in (

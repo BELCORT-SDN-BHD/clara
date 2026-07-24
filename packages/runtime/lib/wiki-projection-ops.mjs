@@ -22,12 +22,26 @@ import {
   runWikiProjectionCycle,
   isClaraTerminal,
   claraReason,
+  CONFIG_DEAD_LETTER_PREFIX,
 } from "./wiki-projection.mjs";
 
 const POLL_INTERVAL_MS = Number(process.env.CLARA_WIKI_PROJECTION_POLL_MS || 2000);
 const COLD_START_POLL_MS = Number(process.env.CLARA_WIKI_PROJECTION_COLDSTART_POLL_MS || 30000);
 const RECONNECT_BASE_MS = 500;
 const RECONNECT_MAX_MS = 5000;
+// F3: after a CONFIGURATION-blocked cycle the leader releases its advisory lock and waits THIS
+// long before reconnecting, so a corrected standby has room to acquire leadership instead of the
+// broken leader re-grabbing it in a tight loop.
+const CONFIG_RECONNECT_MS = Number(process.env.CLARA_WIKI_PROJECTION_CONFIG_BACKOFF_MS || 30000);
+
+/** An interruptible delay: stop()/stopRef.wake resolves it immediately so graceful-shutdown
+ *  latency never waits out a poll or a configuration backoff. */
+function interruptibleDelay(ms, stopRef) {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    stopRef.wake = () => { clearTimeout(t); resolve(); };
+  }).finally(() => { stopRef.wake = null; });
+}
 
 // --- ceremony CLI verbs (scripts/relay.mjs wiki-backfill / wiki-repair; NEVER boot) ------------
 
@@ -158,12 +172,19 @@ export async function wikiProjectionHealth(client) {
                    from clara.firm_event_seq s
                    left join clara.relay_checkpoints c on c.consumer = $1 and c.firm_id = s.firm_id), 0)::bigint as lag,
        (select count(*) from clara.relay_dead_letters where consumer = $1 and status = 'pending')::int as pending_dead_letters,
+       (select count(*) from clara.relay_dead_letters
+          where consumer = $1 and status = 'pending' and reason like $2)::int as configuration_blocked,
        (select count(*) from clara.relay_checkpoints where consumer = $1)::int as firms_tracked`,
-    [WIKI_PROJECTION_CONSUMER]);
+    [WIKI_PROJECTION_CONSUMER, CONFIG_DEAD_LETTER_PREFIX + "%"]);
   return {
     consumer: WIKI_PROJECTION_CONSUMER,
     lag: Number(r.rows[0].lag),
     pendingDeadLetters: r.rows[0].pending_dead_letters,
+    // F3: an EXPLICIT signal that the projection is stalled on a runtime misconfiguration (a
+    // pending dead-letter whose reason carries the CONFIG_DEAD_LETTER_PREFIX), distinct from an
+    // ordinary poison-pill dead-letter. Clears automatically when the config is fixed and the
+    // event replays (F6 resolves the row).
+    configurationBlocked: Number(r.rows[0].configuration_blocked) > 0,
     firmsTracked: r.rows[0].firms_tracked,
   };
 }
@@ -192,12 +213,15 @@ export async function wikiColdStartReady(client) {
 export function startWikiProjectionLoop(deps = {}) {
   const log = deps.log ?? (() => {});
   const makeClient = deps.makeClient ?? makeRuntimeClient;
+  const runCycle = deps.runCycle ?? runWikiProjectionCycle; // injectable for the loop unit test
+  const configBackoffMs = deps.configBackoffMs ?? CONFIG_RECONNECT_MS;
   const stopRef = { stop: false, wake: null };
   const loop = (async () => {
     let backoff = RECONNECT_BASE_MS;
     while (!stopRef.stop) {
       const client = makeClient();
       let connErr = null;
+      let configBlocked = false; // F3: a configuration-blocked cycle drops us out to release the lock
       client.on("error", (e) => { connErr = e; });
       try {
         await client.connect();
@@ -211,10 +235,7 @@ export function startWikiProjectionLoop(deps = {}) {
           if (gate.ready) break;
           log(`WIKI_PROJECTION dormant (surface=${gate.surface} seeded=${gate.seeded}) — awaiting the WB-R18 ceremony steps`);
           // Interruptible: stop() must not wait out the poll (graceful-shutdown latency).
-          await new Promise((resolve) => {
-            const t = setTimeout(resolve, COLD_START_POLL_MS);
-            stopRef.wake = () => { clearTimeout(t); resolve(); };
-          }).finally(() => { stopRef.wake = null; });
+          await interruptibleDelay(COLD_START_POLL_MS, stopRef);
         }
         if (stopRef.stop) break;
         await client.query("listen clara_events");
@@ -224,8 +245,13 @@ export function startWikiProjectionLoop(deps = {}) {
           if (connErr) throw connErr;
           let capped = false;
           try {
-            const r = await runWikiProjectionCycle(client, { ...deps, log });
+            const r = await runCycle(client, { ...deps, log });
             capped = r.capped;
+            // F3: a configuration-blocked cycle means a broken leader is otherwise pinning the
+            // advisory lock forever. Break out so the `finally` closes the connection (RELEASING
+            // the session-level lock), then reconnect on a long backoff below — a corrected
+            // standby can take over in the meantime, and a rolling config repair self-heals.
+            if (r.configurationBlocked) { configBlocked = true; break; }
           } catch (err) {
             if (connErr || isConnErr(err)) throw connErr ?? err;
             log(`WIKI_PROJECTION cycle-error ${err?.message ?? err}`);
@@ -240,6 +266,14 @@ export function startWikiProjectionLoop(deps = {}) {
         backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
       } finally {
         await client.end().catch(() => {});
+      }
+      // Reached on a clean inner-loop break. The connection (and its advisory lock) is now closed
+      // by the `finally` above; on a configuration block, wait a long backoff before re-acquiring
+      // leadership so a healthy standby has room to take over (F3).
+      if (configBlocked && !stopRef.stop) {
+        log(`WIKI_PROJECTION configuration-blocked — leadership RELEASED; reconnecting after ${configBackoffMs}ms so a corrected standby can take over`);
+        backoff = RECONNECT_BASE_MS;
+        await interruptibleDelay(configBackoffMs, stopRef);
       }
     }
   })();

@@ -80,21 +80,93 @@ export const WIKI_WHITELIST = new Set([
 ]);
 
 /**
- * The ONLY escape hatch from fail-closed: identities whose dynamic SQL is REVIEWED and
- * justified as non-wiki but is not statically reconstructible (a `format('%I', t)` over a
- * table list, say). Keyed by exact identity, value = the written justification, which is
- * printed by the gate so an entry cannot rot silently.
+ * The ONLY escape hatch from fail-closed (ratchet R3 findings F4/F8). Keyed by EXACT identity
+ * (a persisted function signature, or a CoR patch's single literal target). The value RECORDS AND
+ * lets the gate VERIFY the statement's base-relation and call dependencies:
  *
- * It waives ONLY the "unprovable target" class. A dynamic statement that PROVABLY names
- * `wiki` is a finding for every function on earth — no entry here can suppress it.
+ *   identity -> { why: string, relations: string[], calls: string[] }
  *
- * EMPTY TODAY, and that is a fact about the tree, not an accident: no `create function
- * clara.…` in packages/db/migrations carries an `EXECUTE` in its body at all. Adding an
+ * where `relations`/`calls` are the BARE `clara.<name>` targets the waived statement is permitted
+ * to touch (lower-cased). The gate VERIFIES (never rubber-stamps):
+ *   - a RECONSTRUCTIBLE statement (its `clara.<name>` targets are known) is excused ONLY when
+ *     every target it references is DECLARED here — an undeclared target is still a finding; and
+ *   - NO declared target may itself be a wiki relation/call — a waiver can never open the boundary.
+ * A statement that PROVABLY names wiki is a finding for every function on earth: no entry here can
+ * suppress it. An UNPROVABLE statement (targets unknowable) is excused by a declared, wiki-free
+ * waiver as a reviewed human attestation — its `why` is printed so the entry cannot rot silently.
+ *
+ * EMPTY TODAY, and that is a fact about the tree, not an accident: no non-whitelisted clara
+ * function or CoR replacement in packages/db/migrations carries a dynamic `EXECUTE`. Adding an
  * entry is a contract-level decision, exactly like widening WIKI_WHITELIST.
  */
 export const DYNAMIC_SQL_ALLOWLIST = new Map([]);
 
-const WIKI = /wiki/i;
+/** Normalise a waiver value to {why, relations:Set, calls:Set}; a legacy string is a bare
+ *  attestation with no declared targets. Returns null for a missing waiver. */
+function normalizeWaiver(waiver) {
+  if (waiver == null) return null;
+  if (typeof waiver === "string") return { why: waiver, relations: new Set(), calls: new Set() };
+  const rels = new Set((waiver.relations ?? []).map((s) => String(s).toLowerCase()));
+  const calls = new Set((waiver.calls ?? []).map((s) => String(s).toLowerCase()));
+  return { why: waiver.why ?? "", relations: rels, calls: calls };
+}
+
+/** Does `waiver` excuse finding `f`? Never a wiki hit; a reconstructible finding only when every
+ *  referenced clara.<name> target is DECLARED and no declared target is a wiki token (F4). */
+function waiverExcuses(waiver, f) {
+  const w = normalizeWaiver(waiver);
+  if (!w) return false;
+  if (f.kind === "wiki") return false;                                   // never waivable
+  const declared = new Set([...w.relations, ...w.calls]);
+  for (const d of declared) if (WIKI_TOKENS.has(d)) return false;        // a waiver can't declare wiki
+  if (f.kind === "unprovable") return true;                              // human attestation
+  // "dynamic": every referenced clara.<name> must be declared.
+  return (f.targets ?? []).every((t) => declared.has(t));
+}
+
+// The wiki RELATIONS and wiki-touch CALL tokens — the EXACT set migration 0019's tail scans for
+// (0019:1069-1070). Ratchet R3 finding F8: the "names wiki" test is by WORD-BOUNDED token, not a
+// bare `/wiki/i` substring, so `select 'wiki'::text` (which names no wiki relation or call) is not
+// treated as an unwaivable wiki hit — it is a waivable dynamic finding instead.
+const WIKI_RELATIONS = [
+  "wiki_pages", "wiki_page_versions", "wiki_page_citations", "wiki_page_refs",
+  "wiki_log", "wiki_budgets", "wiki_synthesis_holds",
+];
+const WIKI_CALLS = [
+  "publish_wiki_page_version", "_publish_wiki_page_version_core", "record_wiki_source_ingest",
+  "retire_wiki_page", "set_wiki_synthesis_hold", "clear_wiki_synthesis_hold", "get_wiki_page",
+  "list_wiki_pages", "get_context_pack", "run_client_lint", "run_lint_all", "mark_wiki_citations_stale",
+];
+const WIKI_TOKENS = new Set([...WIKI_RELATIONS, ...WIKI_CALLS]);
+const WIKI_TOKEN_RE = new RegExp(`\\b(${[...WIKI_RELATIONS, ...WIKI_CALLS].join("|")})\\b`, "i");
+
+/** True when reconstructed SQL WORD-BOUNDED names a wiki relation or wiki-touch call — the same
+ *  grain migration 0019's prosrc scan uses, applied to text the DB tail structurally cannot see
+ *  (a dynamic statement's run-time value). NOT a bare `wiki` substring (F8). */
+function namesWikiTarget(sql) {
+  return WIKI_TOKEN_RE.test(sql);
+}
+
+/** The distinct wiki tokens a reconstructed statement names — NAMED in the finding so a long
+ *  statement whose wiki relation falls past the snippet cap is still identified. */
+function wikiTokensIn(sql) {
+  const re = new RegExp(WIKI_TOKEN_RE.source, "gi");
+  const out = new Set();
+  let m;
+  while ((m = re.exec(sql))) out.add(m[1].toLowerCase());
+  return [...out];
+}
+
+/** Every distinct `clara.<name>` reference in reconstructed SQL, as bare lower-cased names — the
+ *  "base-relation and call dependencies" a waiver must DECLARE (F4). Handles quoted and
+ *  whitespace-qualified spellings (`clara . "wiki_pages"`). */
+function claraTargets(sql) {
+  const out = new Set();
+  const re = /\bclara\s*\.\s*(?:"([A-Za-z0-9_]+)"|([A-Za-z0-9_]+))/gi;
+  let m;
+  while ((m = re.exec(sql))) out.add((m[1] ?? m[2]).toLowerCase());
+  return [...out];
+}
 
 /** Alias → the spelling `pg_get_function_identity_arguments` reports. */
 const TYPE_ALIASES = new Map([
@@ -276,9 +348,12 @@ const lineOf = (sql, index) => sql.slice(0, index).split("\n").length;
 export function parseFunctions(sql) {
   const masked = maskComments(sql);   // same length ⇒ every offset below is valid in `sql`
   const out = [];
-  const re = /create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+clara\.([A-Za-z0-9_]+)\s*\(/gi;
+  // F5 bypass #3: quoted (`"clara"."name"`) and whitespace-qualified (`clara . name`) identifiers
+  // must be recognised, or a static definition can hide from the scan entirely.
+  const re = /create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+"?clara"?\s*\.\s*(?:"([A-Za-z0-9_]+)"|([A-Za-z0-9_]+))\s*\(/gi;
   let m;
   while ((m = re.exec(masked))) {
+    const name = m[1] ?? m[2];
     const open = m.index + m[0].length - 1;
     const args = readParens(masked, open);
     if (!args) continue;
@@ -307,8 +382,8 @@ export function parseFunctions(sql) {
       continue;
     }
     out.push({
-      name: m[1],
-      identity: functionIdentity(m[1], args.text),
+      name,
+      identity: functionIdentity(name, args.text),
       args: args.text,
       body,
       line: lineOf(sql, m.index),
@@ -425,13 +500,15 @@ export function executeExpressions(text) {
   return out;
 }
 
-/** Split a dynamic-SQL expression on TOP-LEVEL `||`. */
+/** Split an expression on TOP-LEVEL `||`, skipping single-quoted AND dollar-quoted regions and
+ *  parens (ratchet R3 finding F5 — the replacement/DDL builder mixes both string forms). */
 function splitConcat(expr) {
   const out = [];
   let depth = 0, start = 0, i = 0;
   while (i < expr.length) {
     const ch = expr[i];
     if (ch === "'") { i = skipQuoted(expr, i); continue; }
+    if (ch === "$") { const j = skipDollar(expr, i); if (j > i) { i = j; continue; } i++; continue; }
     if (ch === "(") { depth++; i++; continue; }
     if (ch === ")") { depth--; i++; continue; }
     if (depth === 0 && ch === "|" && expr[i + 1] === "|") {
@@ -446,30 +523,52 @@ function splitConcat(expr) {
   return out;
 }
 
+/** One expression part → its literal text, or null when the part is not a bare literal.
+ *  Accepts single-quoted (`''` escapes) AND dollar-quoted (`$tag$…$tag$`) literals (F5). */
+function literalText(part) {
+  const t = part.trim();
+  const sq = /^'((?:[^']|'')*)'$/.exec(t);
+  if (sq) return sq[1].replace(/''/g, "'");
+  const dq = /^\$([A-Za-z0-9_]*)\$([\s\S]*)\$\1\$$/.exec(t);
+  if (dq) return dq[2];
+  return null;
+}
+
 /**
- * STATIC PROOF of what a dynamic-SQL expression runs. `{proven:true, sql}` only when the
- * whole expression is a concatenation of single-quoted literals and nothing else — then
- * `sql` is the exact statement text. Anything else is `{proven:false}` and, by the
- * fail-closed rule, a finding.
+ * STATIC PROOF of what a dynamic-SQL expression runs. `{proven:true, sql}` only when the whole
+ * expression is a concatenation of string LITERALS (single- or dollar-quoted) and nothing else —
+ * then `sql` is the exact statement text. Anything else is `{proven:false}` and, by the
+ * fail-closed rule, a finding. A `||` that SPLITS a keyword (`'begin ex' || 'ecute …'`) is joined
+ * back here, so the split cannot hide the installed statement (F5).
  */
 export function staticSqlOf(expr) {
   let sql = "";
   for (const part of splitConcat(expr)) {
-    const t = part.trim();
-    const m = /^'((?:[^']|'')*)'$/.exec(t);
-    if (!m) return { proven: false, sql: null };
-    sql += m[1].replace(/''/g, "'");
+    const lit = literalText(part);
+    if (lit === null) return { proven: false, sql: null };
+    sql += lit;
   }
   return { proven: true, sql };
 }
 
-/** Apply the rule to one body/fragment → [{expr, kind:'wiki'|'unprovable', sql?}]. */
+/**
+ * Apply the fail-closed rule to one body/fragment → [{expr, kind, sql?, targets?}].
+ *   'wiki'       — reconstructible AND word-bounded names a wiki relation/call. UNWAIVABLE.
+ *   'dynamic'    — reconstructible, non-wiki. Ratchet R3 finding F4: reconstructibility is NOT
+ *                  proof of safety — a view or helper (`clara.page_index` over `clara.wiki_pages`)
+ *                  reaches wiki state with no wiki token in the text. So it is a FINDING, waivable
+ *                  only by a waiver that DECLARES its `clara.<name>` targets.
+ *   'unprovable' — not reconstructible at all (a variable, `format()`, `replace()`). Waivable by a
+ *                  reviewed human attestation.
+ * Never infers safety from string absence.
+ */
 export function dynamicSqlFindings(text) {
   const out = [];
   for (const { expr } of executeExpressions(text)) {
     const { proven, sql } = staticSqlOf(expr);
     if (!proven) { out.push({ expr, kind: "unprovable" }); continue; }
-    if (WIKI.test(sql)) out.push({ expr, kind: "wiki", sql });
+    if (namesWikiTarget(sql)) { out.push({ expr, kind: "wiki", sql, wikiTokens: wikiTokensIn(sql) }); continue; }
+    out.push({ expr, kind: "dynamic", sql, targets: claraTargets(sql) });
   }
   return out;
 }
@@ -478,15 +577,86 @@ const snippet = (s) => {
   const one = String(s).replace(/\s+/g, " ").trim();
   return one.length > 120 ? one.slice(0, 117) + "…" : one;
 };
-const why = (f) => (f.kind === "wiki"
-  ? `runs dynamic SQL that PROVABLY names "wiki": ${snippet(f.sql)}`
-  : `runs dynamic SQL whose target cannot be statically proven non-wiki: EXECUTE ${snippet(f.expr)}`);
+const why = (f) => {
+  if (f.kind === "wiki") {
+    const named = (f.wikiTokens && f.wikiTokens.length) ? ` (${f.wikiTokens.join(", ")})` : "";
+    return `runs dynamic SQL that PROVABLY names "wiki"${named}: ${snippet(f.sql)}`;
+  }
+  if (f.kind === "dynamic") {
+    const t = (f.targets && f.targets.length) ? `clara.${f.targets.join(", clara.")}` : "no clara.* target named";
+    return `runs a RECONSTRUCTIBLE dynamic statement (${t}) whose transitive reach cannot be PROVEN`
+      + ` wiki-free — a view or helper can reach wiki state with no wiki token in the text; it needs a`
+      + ` justified DYNAMIC_SQL_ALLOWLIST waiver declaring its targets: ${snippet(f.sql)}`;
+  }
+  return `runs dynamic SQL whose target cannot be statically proven non-wiki: EXECUTE ${snippet(f.expr)}`;
+};
+
+const CREATE_FN_RE = /\bcreate\s+(?:or\s+replace\s+)?(?:function|procedure)\b/i;
+
+/** Every dynamic-SQL statement in `text` reconstructed to its literal value (proven ones only).
+ *  Used to see a create/DDL statement whose keyword was SPLIT across `||` (F5 bypass #2). */
+function reconstructedExecutes(text) {
+  const out = [];
+  for (const { expr } of executeExpressions(text)) {
+    const { proven, sql } = staticSqlOf(expr);
+    if (proven) out.push(sql);
+  }
+  return out;
+}
+
+/** The identity of a function a reconstructed `create … function clara.NAME(args)` DDL installs,
+ *  or null. Handles quoted / whitespace-qualified identifiers (F5 bypass #3). */
+function parseCreatedIdentity(ddl) {
+  const m = /\bcreate\s+(?:or\s+replace\s+)?(?:function|procedure)\s+"?clara"?\s*\.\s*(?:"([A-Za-z0-9_]+)"|([A-Za-z0-9_]+))\s*\(/i.exec(ddl);
+  if (!m) return null;
+  const argsOpen = m.index + m[0].length - 1;
+  const args = readParens(ddl, argsOpen);
+  if (!args) return null;
+  return functionIdentity(m[1] ?? m[2], args.text);
+}
+
+/** Every maximal `||`-concatenation of string literals in `text`, reconstructed to one string
+ *  (length ≥ 2 parts). A replacement/DDL builder that SPLITS a keyword — `'begin ex' || 'ecute …'`
+ *  — is joined here so `dynamicSqlFindings` can see the installed statement (F5 bypass #1). Single
+ *  literals are already scanned separately, so only multi-part chains are emitted. */
+function concatChains(text) {
+  const s = maskComments(text);
+  const isLitStart = (k) => s[k] === "'" || (s[k] === "$" && /^\$[A-Za-z0-9_]*\$/.test(s.slice(k)));
+  const litEnd = (k) => (s[k] === "'" ? skipQuoted(s, k) : skipDollar(s, k));
+  const out = [];
+  let i = 0;
+  while (i < s.length) {
+    if (!isLitStart(i)) { i++; continue; }
+    let j = i, joined = "", count = 0, ok = true;
+    for (;;) {
+      const end = litEnd(j);
+      if (end <= j) { ok = false; break; }
+      const lit = literalText(s.slice(j, end));
+      if (lit === null) { ok = false; break; }
+      joined += lit; count++;
+      let k = end;
+      while (k < s.length && /\s/.test(s[k])) k++;
+      if (s[k] === "|" && s[k + 1] === "|") {
+        k += 2;
+        while (k < s.length && /\s/.test(s[k])) k++;
+        if (!isLitStart(k)) { j = end; break; } // `|| <non-literal>` ends the chain at the last literal
+        j = k;
+        continue;
+      }
+      j = end;
+      break;
+    }
+    if (ok && count >= 2) out.push(joined);
+    i = Math.max(j, i + 1);
+  }
+  return out;
+}
 
 /**
  * Every CHANGE-OF-RECORD patch: a `do $tag$ … $tag$` block that installs a callable
  * surface — it reads a function body with `pg_get_functiondef` and `execute`s a rewritten
  * version, or it dynamically creates a function/procedure.
- * Returns {line, targets:[identity|null], whitelisted, fragments:[string]}.
+ * Returns {line, kind, targets:[identity|null], whitelisted, fragments:[string]}.
  * `spans` (from parseFunctions) suppresses `do` matches that live inside a body.
  */
 export function parseCoRPatches(sql, spans = []) {
@@ -504,13 +674,16 @@ export function parseCoRPatches(sql, spans = []) {
     const block = sql.slice(open, close);
     const masked = maskedSql.slice(open, close);
     const patchesABody = /pg_get_functiondef/i.test(masked);
-    const createsAFunction = /\bcreate\s+(?:or\s+replace\s+)?(?:function|procedure)\b/i.test(masked);
+    // Create detection is RECONSTRUCTION-based (F5 bypass #2): a `'create ' || 'function …'` split
+    // defeats a contiguous-keyword regex, so also test every reconstructed dynamic statement.
+    const dynamicCreates = reconstructedExecutes(block).filter((s) => CREATE_FN_RE.test(s));
+    const createsAFunction = CREATE_FN_RE.test(masked) || dynamicCreates.length > 0;
     if (!patchesABody && !createsAFunction) continue;   // installs no callable surface
     if (!/\bexecute\b/i.test(masked)) continue;         // reads a body but installs nothing
 
-    // Targets: EVERY pg_get_functiondef call, not only the ones with a literal argument.
-    // A computed argument yields `null` — an unresolved target — so a block that mixes a
-    // whitelisted literal target with a computed one can no longer inherit the whitelist.
+    // Targets: EVERY pg_get_functiondef call (a computed argument yields `null` — an unresolved
+    // target — so a MIX of a whitelisted literal and a computed one can no longer inherit the
+    // whitelist), PLUS the identity of every dynamically-CREATED function (F5 bypass #3).
     const targets = [];
     const tre = /pg_get_functiondef\s*\(/gi;
     let t;
@@ -521,27 +694,33 @@ export function parseCoRPatches(sql, spans = []) {
       targets.push(lit ? signatureIdentity(lit[1].replace(/''/g, "'")) : null);
       tre.lastIndex = arg.end;
     }
+    for (const ddl of dynamicCreates) targets.push(parseCreatedIdentity(ddl));
     if (targets.length === 0) targets.push(null);
 
     // FRAGMENTS = the text that ends up inside the persistent surface.
     //
-    // For the CoR idiom that is the injected text: the dollar-quoted segments plus the
-    // single-quoted literals of the surrounding plain text. The block's own
-    // `execute v_next` lives in that plain text OUTSIDE any literal and is therefore NOT a
-    // fragment — it is the migration-time machinery, not a persistent surface.
+    // For the CoR idiom that is the injected text: the dollar-quoted segments, the single-quoted
+    // literals of the surrounding plain text, AND every reconstructed multi-part `||` chain in that
+    // plain text (F5 bypass #1 — a replacement whose keyword is split across literals). The block's
+    // own `execute v_next` lives in the plain text OUTSIDE any literal and is NOT a fragment — it is
+    // migration-time machinery, not a persistent surface.
     //
-    // For a block that dynamically CREATEs a function instead, the persistent surface IS
-    // the block's own dynamic SQL, and there is no machinery `execute` to confuse it with,
-    // so the block itself is the fragment.
+    // For a block that dynamically CREATEs a function, the persistent surface IS the block's own
+    // dynamic SQL, so the block itself is the fragment.
     let fragments;
     if (patchesABody) {
       const segments = dollarSegments(block);
       fragments = segments.map((s) => s.body);
       let cursor = 0;
       for (const seg of [...segments, { start: block.length, end: block.length }]) {
-        if (seg.start > cursor) fragments.push(...quotedLiterals(block.slice(cursor, seg.start)));
+        if (seg.start > cursor) {
+          const plain = block.slice(cursor, seg.start);
+          fragments.push(...quotedLiterals(plain));
+          fragments.push(...concatChains(plain));
+        }
         cursor = seg.end;
       }
+      if (createsAFunction) fragments.push(block); // a mixed patch+creator: scan the created DDL too
     } else {
       fragments = [block];
     }
@@ -579,9 +758,9 @@ export function scanSources(sources, { assertWhitelistResolves = true } = {}) {
     if (WIKI_WHITELIST.has(identity)) continue;
     const waiver = DYNAMIC_SQL_ALLOWLIST.get(identity) ?? null;
     for (const f of dynamicSqlFindings(d.body)) {
-      // A justified waiver excuses an UNPROVABLE target. It can never excuse dynamic SQL
-      // that provably names wiki — that is a finding for every function in the schema.
-      if (f.kind === "unprovable" && waiver) continue;
+      // A justified waiver excuses an UNPROVABLE or a target-DECLARED reconstructible statement.
+      // It can never excuse dynamic SQL that provably names wiki — a finding for every function.
+      if (waiverExcuses(waiver, f)) continue;
       findings.push(`  ${d.file}:${d.line}  clara.${identity}  — ${why(f)}`);
     }
   }
@@ -591,13 +770,22 @@ export function scanSources(sources, { assertWhitelistResolves = true } = {}) {
       .map((t) => (t === null ? "<unresolved target>" : `clara.${t}`))
       .filter((v, i, a) => a.indexOf(v) === i)
       .join(", ");
+    // F8: a waiver applies to a CoR patch ONLY when it has a SINGLE literal-resolved target (a
+    // computed/unresolved target is never waivable, and a mixed patch keeps every finding).
+    const litTargets = [...new Set(p.targets.filter((x) => x !== null))];
+    const waiver = (p.targets.every((x) => x !== null) && litTargets.length === 1)
+      ? (DYNAMIC_SQL_ALLOWLIST.get(litTargets[0]) ?? null) : null;
+    let reported = false;
     for (const frag of p.fragments) {
-      const [f] = dynamicSqlFindings(frag);
-      if (!f) continue;
-      findings.push(
-        `  ${p.file}:${p.line}  ${p.kind} → ${named}`
-        + `  — the INSTALLED body ${why(f)}`);
-      break;
+      for (const f of dynamicSqlFindings(frag)) {
+        if (waiverExcuses(waiver, f)) continue;
+        findings.push(
+          `  ${p.file}:${p.line}  ${p.kind} → ${named}`
+          + `  — the INSTALLED body ${why(f)}`);
+        reported = true;
+        break;
+      }
+      if (reported) break;
     }
   }
 

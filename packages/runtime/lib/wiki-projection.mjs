@@ -90,21 +90,23 @@ const isClaraCode = (err) => typeof err?.code === "string" && /^CLR\d{2}$/.test(
  * receipt and ADVANCES the checkpoint, which is only ever safe when reprocessing the event
  * could not produce a different result.
  *
- * It is closed BY CONSTRUCTION (ratchet R2 finding B2). The predecessor fell through to
- * `skipped_bad_state` for any unrecognised CLR32 reason and to `skipped_invalid` for any
- * unrecognised CLR code — so 0019's brand-new CLR32/isolation_unsupported, which is a
- * CONFIGURATION failure and not a convergence at all, silently checkpointed past the event and
- * lost its projection forever; fixing the isolation afterwards would not replay it. Enumerating
- * the terminal set instead of the exceptions makes the DEFAULT non-terminal, so the next reason
- * a migration adds cannot repeat that.
+ * It is closed BY CONSTRUCTION (ratchet R2 finding B2, hardened R3 finding F2). The predecessor
+ * fell through to `skipped_bad_state` for any unrecognised CLR32 reason and to `skipped_invalid`
+ * for any unrecognised CLR code — so 0019's brand-new CLR32/isolation_unsupported, a CONFIGURATION
+ * failure and not a convergence at all, silently checkpointed past the event and lost its
+ * projection forever. Enumerating the terminal set instead of the exceptions makes the DEFAULT
+ * non-terminal. R3 finished the job: an unrecognised typed refusal no longer EXHAUSTS into a
+ * checkpoint after MAX_ATTEMPTS either — it BLOCKS the firm cursor (like a configuration refusal)
+ * until a human classifies it deliberately, into this table or into CONFIGURATION_REFUSALS. So a
+ * reason a future migration adds genuinely cannot be checkpointed away by default.
  *
  * The keys are the reasons the wiki writers actually raise (0017:1999-2153 for the CLR32 family,
  * plus 0019 §1b/§5); the CLR-code table covers the non-CLR32 refusals of the same surface.
+ * (CLR32/budget_unknown is DELIBERATELY absent — it is a CONFIGURATION_REFUSAL, not terminal.)
  */
 const CLR32_TERMINAL = Object.freeze({
   consent_held: "held_consent",
   cap_exceeded: "skipped_cap",
-  budget_unknown: "skipped_budget_unknown",
   // The 0019 §5 DB-side monotonic guard: a BENIGN convergence (a newer seq is already published
   // for this slug), not a malformed write — it must not report itself as one.
   stale_projected_from_seq: "already_projected",
@@ -119,22 +121,39 @@ const CLR_TERMINAL = Object.freeze({
   CLR10: "skipped_invalid",
 });
 
+/** The stable reason PREFIX a CONFIGURATION-blocked dead-letter carries, so /ready's
+ *  wikiProjectionHealth can count them into an explicit `configurationBlocked` signal (F3)
+ *  without a schema change to relay_dead_letters. */
+export const CONFIG_DEAD_LETTER_PREFIX = "runtime misconfiguration ";
+
 /**
- * CONFIGURATION REFUSALS — the runtime is misconfigured; the EVENT is fine. Retrying the same
- * event on a correctly configured connection succeeds, so the checkpoint must stay BEHIND it and
- * these are additionally exempt from the attempt-exhaustion escape in processFirm (which exists
- * for poison-pill DATA, not for a broken deployment).
+ * CONFIGURATION REFUSALS — the runtime/deployment is misconfigured; the EVENT is fine. Retrying
+ * the same event on a correctly configured connection (or after the config row is repaired)
+ * succeeds, so the checkpoint must stay BEHIND it, and these are exempt from the attempt-
+ * exhaustion escape in processFirm (which exists for poison-pill DATA, not a broken deployment).
+ * A configuration refusal ADDITIONALLY makes the leader RELEASE its advisory lock and reconnect
+ * on a long backoff (ratchet R3 finding F3), so a corrected standby can take over leadership
+ * instead of the broken leader pinning it forever.
  *   CLR32/isolation_unsupported — 0019 §1b refuses publication under REPEATABLE READ. The pool
  *     opens READ COMMITTED today, so this fires only from a role-level default, a pooler setting
- *     or a future config change — every projection event would be affected at once.
+ *     or a future config change — instance-local, so a corrected standby heals it.
+ *   CLR32/budget_unknown        — the clara.wiki_budgets config rows are missing (0017:2016-2022,
+ *     "wiki budget configuration is incomplete"). CONFIGURATION drift, not a convergence:
+ *     repairing the row and replaying SUCCEEDS, so checkpointing past it would permanently lose
+ *     the projection (ratchet R3 finding F2 — it used to sit in the terminal table).
  *   CLR03 (any reason)          — get_wiki_page's authority gate (0017:2380-2384): no human
  *     claims AND not the trusted v25 runtime marker. The lane sets that marker itself, so a
  *     CLR03 means the role or the marker is wrong, never that the event is bad.
+ *   SQLSTATE 42501              — a missing EXECUTE privilege on an audited wiki writer: a grant
+ *     gap in the deployment, never bad data (ratchet R3 finding F2).
  */
 export function isConfigurationRefusal(err) {
+  if (err?.code === "42501") return true;
   if (!isClaraCode(err)) return false;
   if (err.code === "CLR03") return true;
-  return err.code === "CLR32" && claraReason(err) === "isolation_unsupported";
+  if (err.code !== "CLR32") return false;
+  const reason = claraReason(err);
+  return reason === "isolation_unsupported" || reason === "budget_unknown";
 }
 
 /** EXPORTED for unit test only: the 0019 §4 contract requires the CLR32/
@@ -447,13 +466,20 @@ export async function planEvent(client, { firmId, ev, deps }) {
 }
 
 // --- dead-letter (own txn, matcher idiom) + checkpoint-only ------------------------------------
+// F6: a re-failure must REFRESH the row, not merely bump its counter — otherwise `/ready` can warn
+// with a stale reason forever after a repair, or stay silent when it should warn (a row that was
+// resolved before a rewind must flip back to 'pending' when the event stalls again).
 async function recordDeadLetter(client, { eventId, reason }) {
   await client.query("begin");
   try {
     const r = await client.query(
       `insert into clara.relay_dead_letters (consumer, event_id, reason, attempted_taxonomy_version)
          values ($1, $2, $3, null)
-       on conflict (consumer, event_id) do update set attempt_count = clara.relay_dead_letters.attempt_count + 1
+       on conflict (consumer, event_id) do update
+          set attempt_count = clara.relay_dead_letters.attempt_count + 1,
+              reason        = excluded.reason,
+              status        = 'pending',
+              resolved_at   = null
        returning attempt_count`, [WIKI_PROJECTION_CONSUMER, eventId, String(reason).slice(0, 500)]);
     await client.query("commit");
     return Number(r.rows[0].attempt_count);
@@ -462,10 +488,19 @@ async function recordDeadLetter(client, { eventId, reason }) {
     throw err;
   }
 }
-async function checkpointOnly(client, { firmId, seq }) {
+/** Resolve this event's dead-letter (if any) — runs INSIDE the caller's effect/checkpoint txn so
+ *  the recovery is ATOMIC with the projection that earned it (F6). A no-op when no row exists. */
+async function resolveDeadLetter(client, eventId) {
+  await client.query(
+    "update clara.relay_dead_letters set status='resolved', resolved_at=now()"
+    + " where consumer=$1 and event_id=$2 and status <> 'resolved'",
+    [WIKI_PROJECTION_CONSUMER, eventId]);
+}
+async function checkpointOnly(client, { firmId, seq, resolveEventId = null }) {
   await client.query("begin");
   try {
     await writeCheckpoint(client, { consumer: WIKI_PROJECTION_CONSUMER, firmId, seq });
+    if (resolveEventId) await resolveDeadLetter(client, resolveEventId);
     await client.query("commit");
   } catch (err) {
     await client.query("rollback").catch(() => {});
@@ -487,6 +522,10 @@ async function runTargetEvent(client, { firmId, ev, deps }) {
     try {
       if (plan.mutate) await plan.mutate(client);
       await writeCheckpoint(client, { consumer: WIKI_PROJECTION_CONSUMER, firmId, seq: ev.seq });
+      // F6: a successful (re)projection RESOLVES any dead-letter for this event ATOMICALLY with the
+      // effect + checkpoint — so an automatic replay after a repair clears the /ready warning in the
+      // same transaction that makes it true, never leaving a stale 'pending' row behind.
+      await resolveDeadLetter(client, ev.id);
       await client.query("commit");
     } catch (err) {
       await client.query("rollback").catch(() => {});
@@ -498,25 +537,32 @@ async function runTargetEvent(client, { firmId, ev, deps }) {
     const status = terminalStatusFor(err);
     if (status !== null) {
       log(`[wiki_projection] event=${ev.id} ${ev.eventType} terminal ${err.code}/${claraReason(err) ?? ""} → ${status}`);
-      await checkpointOnly(client, { firmId, seq: ev.seq });
+      // A terminal refusal converges: advance the checkpoint AND resolve any dead-letter for the
+      // event, atomically (F6 — a converged event must not keep warning on /ready).
+      await checkpointOnly(client, { firmId, seq: ev.seq, resolveEventId: ev.id });
       return { ok: true, receipt: { status, event: ev.eventType } };
     }
     if (isConfigurationRefusal(err)) {
       log(`[wiki_projection] event=${ev.id} ${ev.eventType} REFUSED ${err.code}/${claraReason(err) ?? ""}`
         + " — this is a RUNTIME MISCONFIGURATION, not a convergence. The checkpoint is NOT advanced"
-        + " and nothing is skipped: fix the runtime configuration and this event projects on the next"
-        + " cycle. (isolation_unsupported = the connection is at REPEATABLE READ, which 0019 §1b"
-        + " refuses; CLR03 = the wiki read is running without the v25 runtime marker or role.)");
+        + " and nothing is skipped: fix the deployment and this event projects on the next cycle."
+        + " (isolation_unsupported = the connection is at REPEATABLE READ, which 0019 §1b refuses;"
+        + " budget_unknown = the wiki_budgets config rows are missing; CLR03 = the wiki read runs"
+        + " without the v25 runtime marker/role; 42501 = a missing EXECUTE grant.) The leader also"
+        + " releases leadership so a corrected standby can take over (F3).");
       const attempts = await recordDeadLetter(client, {
         eventId: ev.id,
-        reason: `runtime misconfiguration ${err.code}/${claraReason(err) ?? ""}: ${err?.message ?? String(err)}`,
+        reason: `${CONFIG_DEAD_LETTER_PREFIX}${err.code}/${claraReason(err) ?? ""}: ${err?.message ?? String(err)}`,
       });
       return { ok: false, err, attempts, configuration: true };
     }
     if (isClaraCode(err)) {
       log(`[wiki_projection] event=${ev.id} ${ev.eventType} UNRECOGNISED typed refusal`
-        + ` ${err.code}/${claraReason(err) ?? ""} — it is not in the closed terminal table, so it is`
-        + " treated as an effect error (dead-letter + retry) rather than checkpointed away");
+        + ` ${err.code}/${claraReason(err) ?? ""} — it is not in the closed terminal table and not a`
+        + " configuration refusal, so it is NON-EXHAUSTING (ratchet R3 finding F2): it dead-letters"
+        + " and BLOCKS the firm cursor — it is NEVER checkpointed away until a human classifies it.");
+      const attempts = await recordDeadLetter(client, { eventId: ev.id, reason: err?.message ?? String(err) });
+      return { ok: false, err, attempts, unclassified: true };
     }
     const attempts = await recordDeadLetter(client, { eventId: ev.id, reason: err?.message ?? String(err) });
     return { ok: false, err, attempts };
@@ -540,7 +586,7 @@ async function readEvents(client, firmId, lastSeq, batchSize) {
 async function processFirm(client, { firmId, lastSeq, batchSize, deps }) {
   const log = deps.log ?? (() => {});
   const evs = await readEvents(client, firmId, lastSeq, batchSize);
-  if (evs.length === 0) return { readCount: 0, maxSeq: lastSeq, effects: 0, blocked: false };
+  if (evs.length === 0) return { readCount: 0, maxSeq: lastSeq, effects: 0, blocked: false, configurationBlocked: false };
   let cursor = lastSeq;
   let effects = 0;
   for (const ev of evs) {
@@ -549,10 +595,18 @@ async function processFirm(client, { firmId, lastSeq, batchSize, deps }) {
     if (res.ok) { cursor = ev.seq; effects += 1; continue; }
     // A runtime MISCONFIGURATION blocks the firm's cursor unconditionally — it is exempt from
     // the exhaustion escape below, which exists to step past poison-pill DATA. Skipping here
-    // would checkpoint past an event that never got its chance to project (ratchet R2 B2).
+    // would checkpoint past an event that never got its chance to project (ratchet R2 B2). It
+    // ALSO tells the leader to RELEASE its advisory lock so a corrected standby can take over (F3).
     if (res.configuration) {
-      log(`[wiki_projection] event=${ev.id} BLOCKED on a runtime misconfiguration (${res.err?.code}/${claraReason(res.err) ?? ""}) after attempt=${res.attempts} — the checkpoint stays BEHIND this event until the configuration is fixed; NO event is skipped`);
-      return { readCount: evs.length, maxSeq: cursor, effects, blocked: true };
+      log(`[wiki_projection] event=${ev.id} BLOCKED on a runtime misconfiguration (${res.err?.code}/${claraReason(res.err) ?? ""}) after attempt=${res.attempts} — the checkpoint stays BEHIND this event until the configuration is fixed; NO event is skipped, and this leader will RELEASE leadership so a corrected standby can take over`);
+      return { readCount: evs.length, maxSeq: cursor, effects, blocked: true, configurationBlocked: true };
+    }
+    // An UNRECOGNISED typed refusal is likewise NON-EXHAUSTING (ratchet R3 finding F2): it blocks
+    // the cursor until a human classifies it. It is NOT a deployment misconfiguration, so leadership
+    // is held in place — a failover would only meet the same unknown refusal.
+    if (res.unclassified) {
+      log(`[wiki_projection] event=${ev.id} BLOCKED on an UNRECOGNISED typed refusal (${res.err?.code}/${claraReason(res.err) ?? ""}) after attempt=${res.attempts} — the checkpoint stays BEHIND it until it is classified into the terminal or configuration set; NO event is skipped`);
+      return { readCount: evs.length, maxSeq: cursor, effects, blocked: true, configurationBlocked: false };
     }
     if (res.attempts >= MAX_ATTEMPTS) {
       log(`[wiki_projection] event=${ev.id} exhausted ${MAX_ATTEMPTS} attempts → dead-lettered + skipped: ${res.err?.message ?? res.err}`);
@@ -561,11 +615,11 @@ async function processFirm(client, { firmId, lastSeq, batchSize, deps }) {
       continue;
     }
     log(`[wiki_projection] effect-error event=${ev.id} attempt=${res.attempts}/${MAX_ATTEMPTS}: ${res.err?.message ?? res.err}`);
-    return { readCount: evs.length, maxSeq: cursor, effects, blocked: true };
+    return { readCount: evs.length, maxSeq: cursor, effects, blocked: true, configurationBlocked: false };
   }
   const batchMax = evs[evs.length - 1].seq; // trailing/interior non-target (incl. wiki.*): one coalesced advance
   if (batchMax > cursor) { await checkpointOnly(client, { firmId, seq: batchMax }); cursor = batchMax; }
-  return { readCount: evs.length, maxSeq: cursor, effects, blocked: false };
+  return { readCount: evs.length, maxSeq: cursor, effects, blocked: false, configurationBlocked: false };
 }
 
 export async function runWikiProjectionCycle(client, opts = {}) {
@@ -574,11 +628,13 @@ export async function runWikiProjectionCycle(client, opts = {}) {
   const work = await discoverWork(client, { consumer: WIKI_PROJECTION_CONSUMER, onlyFirm });
   const cursors = work.map((w) => ({ firmId: w.firmId, lastSeq: w.lastSeq, active: true }));
   let effects = 0;
+  let configurationBlocked = false;
   for (let round = 0; round < maxBatchesPerFirm; round++) {
     let anyActive = false;
     for (const cur of cursors) {
       if (!cur.active) continue;
       const res = await processFirm(client, { firmId: cur.firmId, lastSeq: cur.lastSeq, batchSize, deps });
+      if (res.configurationBlocked) configurationBlocked = true;
       if (res.blocked || res.maxSeq <= cur.lastSeq) { cur.active = false; continue; }
       cur.lastSeq = res.maxSeq;
       effects += res.effects;
@@ -587,7 +643,7 @@ export async function runWikiProjectionCycle(client, opts = {}) {
     }
     if (!anyActive) break;
   }
-  return { firms: work.length, effects, capped: cursors.some((c) => c.active) };
+  return { firms: work.length, effects, capped: cursors.some((c) => c.active), configurationBlocked };
 }
 
 // --- redrive (runtime-role, sst-watch pattern); idempotent via op_key + already_projected + put-409
