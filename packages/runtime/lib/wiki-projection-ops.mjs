@@ -31,6 +31,11 @@ const RECONNECT_MAX_MS = 5000;
 
 // --- ceremony CLI verbs (scripts/relay.mjs wiki-backfill / wiki-repair; NEVER boot) ------------
 
+/** A per-pair skip means an ENUMERATED terminal CLR (wiki-projection.mjs's CLOSED terminal table).
+ *  A runtime MISCONFIGURATION (CLR32/isolation_unsupported, CLR03) and any unrecognised typed
+ *  refusal are NOT terminal, so both verbs below abort the ceremony loudly instead of silently
+ *  counting a skip — the ceremony must never "converge" over a broken deployment (ratchet R2 B2). */
+
 /** DETERMINISTIC backfill over pre-0017 finalized documents (ZERO model). `sources` = {clientId,
  *  documentId}[] the ceremony supplies (no runtime document→client link); each rides
  *  record_wiki_source_ingest with a document-stable op_key (idempotent; per-pair CLR = skip). */

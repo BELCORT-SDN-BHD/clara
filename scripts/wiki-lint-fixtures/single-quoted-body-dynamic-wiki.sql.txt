@@ -1,0 +1,11 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- The pre-dollar-quote spelling: the body is a plain single-quoted literal. PostgreSQL
+-- accepts it identically, and before R2 the parser required a `$tag$` so the whole
+-- definition — dynamic wiki SQL and all — was INVISIBLE to this gate.
+create function clara._legacy_quoted_body(p_client uuid) returns integer
+  language plpgsql security invoker as '
+declare v_n integer;
+begin
+  execute ''select count(*) from clara.'' || ''wi'' || ''ki_page_citations'' into v_n;
+  return v_n;
+end';

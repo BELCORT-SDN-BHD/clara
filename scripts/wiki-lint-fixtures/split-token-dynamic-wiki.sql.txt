@@ -1,0 +1,13 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- Ratchet R2 finding B3, the exact bypass: the relation name is SPLIT so no contiguous
+-- `wiki` fragment exists anywhere in the source. The DB tail's word-bounded prosrc scan
+-- sees nothing; the pre-R2 repo rule saw `execute` but its /wiki/i test was FALSE.
+-- Reconstructing the literal concatenation is what catches it.
+create function clara._innocent_counter(p_client uuid) returns integer
+  language plpgsql security invoker as $fn$
+declare v_n integer;
+begin
+  execute 'select count(*) from clara.' || 'wi' || 'ki_pages where client_id=$1'
+    into v_n using p_client;
+  return v_n;
+end $fn$;

@@ -17,9 +17,15 @@
 // Terminal receipts (checkpoint-advancing, no retry):
 // projected|already_projected|citations_staled|skipped_inactive_client|held_consent|consent_released|
 // skipped_kind|skipped_no_surface|
-// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation + CLR32 wiki refusals mapped terminal
-// (incl. CLR32/stale_projected_from_seq -> already_projected, the 0019 §5 monotonic guard);
-// only a genuine throw dead-letters (matcher idiom). op_keys: model/seeding-fact 'wikiproj:<client>:<seq>';
+// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation + the ENUMERATED
+// typed refusals of TERMINAL_STATUS (incl. CLR32/stale_projected_from_seq -> already_projected, the
+// 0019 §5 monotonic guard). That table is CLOSED (ratchet R2 finding B2): a typed CLR that is NOT in
+// it is NOT terminal, because the old catch-all mapped every unrecognised CLR32 reason to
+// skipped_bad_state and CHECKPOINTED it — permanently losing an event that had not converged at all.
+// Two non-terminal classes: a CONFIGURATION REFUSAL (CONFIGURATION_REFUSALS — the runtime is
+// misconfigured, not the data) NEVER advances the checkpoint and is exempt from the attempt-exhaustion
+// escape, so the firm's cursor waits for the fix and then replays; an UNRECOGNISED typed refusal takes
+// the ordinary dead-letter + retry path. Only a genuine throw dead-letters (matcher idiom). op_keys: model/seeding-fact 'wikiproj:<client>:<seq>';
 // ingest 'wikiingest:<client>:<document>'; consent 'wikihold:/wikirelease:<client>:<seq>'; stale
 // 'wikistale:<client>:<seq>' (the ceremony catch-up uses 'wikistale-catchup:<run_key>:<client>:<document>'
 // — a fixed per-pair key would replay the original receipt forever). P17: never
@@ -73,33 +79,80 @@ export function contentSha256(content) {
 export function wikiStorageKey(firmId, clientId, sha) {
   return `firms/${firmId}/wiki/${clientId}/${sha}.md`;
 }
-/** A typed clara refusal (CLR*) — TERMINAL: receipt + checkpoint, never a dead-letter loop. */
-export function isClaraTerminal(err) {
-  return typeof err?.code === "string" && /^CLR\d{2}$/.test(err.code);
-}
 export function claraReason(err) {
   try { return JSON.parse(err?.detail || "{}").reason ?? null; } catch { return null; }
 }
+const isClaraCode = (err) => typeof err?.code === "string" && /^CLR\d{2}$/.test(err.code);
+
+/**
+ * The CLOSED terminal table: every typed refusal this consumer's call surface can raise that
+ * is a genuine DOMAIN outcome — a convergence or a malformed write. A terminal refusal earns a
+ * receipt and ADVANCES the checkpoint, which is only ever safe when reprocessing the event
+ * could not produce a different result.
+ *
+ * It is closed BY CONSTRUCTION (ratchet R2 finding B2). The predecessor fell through to
+ * `skipped_bad_state` for any unrecognised CLR32 reason and to `skipped_invalid` for any
+ * unrecognised CLR code — so 0019's brand-new CLR32/isolation_unsupported, which is a
+ * CONFIGURATION failure and not a convergence at all, silently checkpointed past the event and
+ * lost its projection forever; fixing the isolation afterwards would not replay it. Enumerating
+ * the terminal set instead of the exceptions makes the DEFAULT non-terminal, so the next reason
+ * a migration adds cannot repeat that.
+ *
+ * The keys are the reasons the wiki writers actually raise (0017:1999-2153 for the CLR32 family,
+ * plus 0019 §1b/§5); the CLR-code table covers the non-CLR32 refusals of the same surface.
+ */
+const CLR32_TERMINAL = Object.freeze({
+  consent_held: "held_consent",
+  cap_exceeded: "skipped_cap",
+  budget_unknown: "skipped_budget_unknown",
+  // The 0019 §5 DB-side monotonic guard: a BENIGN convergence (a newer seq is already published
+  // for this slug), not a malformed write — it must not report itself as one.
+  stale_projected_from_seq: "already_projected",
+  bad_state: "skipped_bad_state",
+  sha_mismatch: "skipped_bad_state",
+  citation_required: "skipped_bad_state",
+});
+const CLR_TERMINAL = Object.freeze({
+  CLR28: "skipped_consent_evidence",
+  CLR02: "skipped_unfiled",
+  CLR11: "skipped_client_mismatch",
+  CLR10: "skipped_invalid",
+});
+
+/**
+ * CONFIGURATION REFUSALS — the runtime is misconfigured; the EVENT is fine. Retrying the same
+ * event on a correctly configured connection succeeds, so the checkpoint must stay BEHIND it and
+ * these are additionally exempt from the attempt-exhaustion escape in processFirm (which exists
+ * for poison-pill DATA, not for a broken deployment).
+ *   CLR32/isolation_unsupported — 0019 §1b refuses publication under REPEATABLE READ. The pool
+ *     opens READ COMMITTED today, so this fires only from a role-level default, a pooler setting
+ *     or a future config change — every projection event would be affected at once.
+ *   CLR03 (any reason)          — get_wiki_page's authority gate (0017:2380-2384): no human
+ *     claims AND not the trusted v25 runtime marker. The lane sets that marker itself, so a
+ *     CLR03 means the role or the marker is wrong, never that the event is bad.
+ */
+export function isConfigurationRefusal(err) {
+  if (!isClaraCode(err)) return false;
+  if (err.code === "CLR03") return true;
+  return err.code === "CLR32" && claraReason(err) === "isolation_unsupported";
+}
+
 /** EXPORTED for unit test only: the 0019 §4 contract requires the CLR32/
  *  stale_projected_from_seq -> already_projected mapping to be PROVEN, and the mapping is a
  *  pure function of the error. Driving it through the DB would need a real serialized
  *  supersede race; exporting the pure mapping proves it directly. No caller outside this
- *  module uses it. */
+ *  module uses it. Returns NULL when the refusal is not terminal — the caller must then take
+ *  a path that does NOT advance the checkpoint. */
 export function terminalStatusFor(err) {
-  const reason = claraReason(err);
-  if (err.code === "CLR32") {
-    // stale_projected_from_seq is the 0019 §5 DB-side monotonic guard: a BENIGN
-    // convergence (a newer seq already published for this slug), not a malformed write.
-    // Without this arm it falls through to 'skipped_bad_state' and misreports itself.
-    return reason === "consent_held" ? "held_consent"
-      : reason === "cap_exceeded" ? "skipped_cap"
-      : reason === "budget_unknown" ? "skipped_budget_unknown"
-      : reason === "stale_projected_from_seq" ? "already_projected" : "skipped_bad_state";
-  }
-  if (err.code === "CLR28") return "skipped_consent_evidence";
-  if (err.code === "CLR02") return "skipped_unfiled";
-  if (err.code === "CLR11") return "skipped_client_mismatch";
-  return "skipped_invalid";
+  if (!isClaraCode(err) || isConfigurationRefusal(err)) return null;
+  if (err.code === "CLR32") return CLR32_TERMINAL[claraReason(err)] ?? null;
+  return CLR_TERMINAL[err.code] ?? null;
+}
+
+/** A typed clara refusal that is TERMINAL: receipt + checkpoint, never a dead-letter loop.
+ *  A CLR code alone is no longer sufficient — it must be IN the closed table above. */
+export function isClaraTerminal(err) {
+  return terminalStatusFor(err) !== null;
 }
 
 // --- injectable reads (fail-closed defaults under the 0008 grants) -----------------------------
@@ -420,9 +473,11 @@ async function checkpointOnly(client, { firmId, seq }) {
   }
 }
 
-// One target event: plan (reads + egress) → atomic effect txn { mutate ; checkpoint }. A typed CLR
-// refusal (either phase) is a TERMINAL receipt (checkpoint advances); a connection error PROPAGATES
-// (reconnect); every other throw dead-letters.
+// One target event: plan (reads + egress) → atomic effect txn { mutate ; checkpoint }. An ENUMERATED
+// typed CLR refusal (either phase) is a TERMINAL receipt (checkpoint advances); a connection error
+// PROPAGATES (reconnect); a CONFIGURATION refusal and every other throw dead-letter WITHOUT advancing
+// the checkpoint — the configuration case additionally flags itself so the firm's cursor blocks
+// instead of being swept past by the attempt-exhaustion escape.
 async function runTargetEvent(client, { firmId, ev, deps }) {
   const log = deps.log ?? (() => {});
   let plan;
@@ -440,11 +495,28 @@ async function runTargetEvent(client, { firmId, ev, deps }) {
     return { ok: true, receipt: { status: plan.status, lane: plan.lane ?? null, event: ev.eventType } };
   } catch (err) {
     if (isConnErr(err)) throw err;
-    if (isClaraTerminal(err)) {
-      const status = terminalStatusFor(err);
+    const status = terminalStatusFor(err);
+    if (status !== null) {
       log(`[wiki_projection] event=${ev.id} ${ev.eventType} terminal ${err.code}/${claraReason(err) ?? ""} → ${status}`);
       await checkpointOnly(client, { firmId, seq: ev.seq });
       return { ok: true, receipt: { status, event: ev.eventType } };
+    }
+    if (isConfigurationRefusal(err)) {
+      log(`[wiki_projection] event=${ev.id} ${ev.eventType} REFUSED ${err.code}/${claraReason(err) ?? ""}`
+        + " — this is a RUNTIME MISCONFIGURATION, not a convergence. The checkpoint is NOT advanced"
+        + " and nothing is skipped: fix the runtime configuration and this event projects on the next"
+        + " cycle. (isolation_unsupported = the connection is at REPEATABLE READ, which 0019 §1b"
+        + " refuses; CLR03 = the wiki read is running without the v25 runtime marker or role.)");
+      const attempts = await recordDeadLetter(client, {
+        eventId: ev.id,
+        reason: `runtime misconfiguration ${err.code}/${claraReason(err) ?? ""}: ${err?.message ?? String(err)}`,
+      });
+      return { ok: false, err, attempts, configuration: true };
+    }
+    if (isClaraCode(err)) {
+      log(`[wiki_projection] event=${ev.id} ${ev.eventType} UNRECOGNISED typed refusal`
+        + ` ${err.code}/${claraReason(err) ?? ""} — it is not in the closed terminal table, so it is`
+        + " treated as an effect error (dead-letter + retry) rather than checkpointed away");
     }
     const attempts = await recordDeadLetter(client, { eventId: ev.id, reason: err?.message ?? String(err) });
     return { ok: false, err, attempts };
@@ -475,6 +547,13 @@ async function processFirm(client, { firmId, lastSeq, batchSize, deps }) {
     if (!SUBSCRIBED.has(ev.eventType)) continue; // checkpoint-only; coalesced below
     const res = await runTargetEvent(client, { firmId, ev, deps });
     if (res.ok) { cursor = ev.seq; effects += 1; continue; }
+    // A runtime MISCONFIGURATION blocks the firm's cursor unconditionally — it is exempt from
+    // the exhaustion escape below, which exists to step past poison-pill DATA. Skipping here
+    // would checkpoint past an event that never got its chance to project (ratchet R2 B2).
+    if (res.configuration) {
+      log(`[wiki_projection] event=${ev.id} BLOCKED on a runtime misconfiguration (${res.err?.code}/${claraReason(res.err) ?? ""}) after attempt=${res.attempts} — the checkpoint stays BEHIND this event until the configuration is fixed; NO event is skipped`);
+      return { readCount: evs.length, maxSeq: cursor, effects, blocked: true };
+    }
     if (res.attempts >= MAX_ATTEMPTS) {
       log(`[wiki_projection] event=${ev.id} exhausted ${MAX_ATTEMPTS} attempts → dead-lettered + skipped: ${res.err?.message ?? res.err}`);
       await checkpointOnly(client, { firmId, seq: ev.seq });

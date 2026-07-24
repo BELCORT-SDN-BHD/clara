@@ -11,31 +11,57 @@
 // and `execute format('… clara.%I …', t)` construct the relation name at run time and no
 // literal ever appears in prosrc. This gate is that missing half.
 //
-// RULE: a clara function whose body uses dynamic SQL (`execute`) must not mention `wiki`
-// AT ALL unless its EXACT SIGNATURE is in the wiki-touch whitelist. Deliberately stricter
-// than a seven-relation token match — `'wiki' || '_pages'` and `format('%I', v_tbl)` both
-// trip on the bare `wiki` fragment, which a token scan misses.
+// THE RULE IS FAIL-CLOSED (ratchet R2 finding B3). Every PERSISTENT `EXECUTE` outside the
+// wiki-touch whitelist is a finding UNLESS the SQL it runs can be STATICALLY PROVEN not to
+// mention `wiki`. "Statically proven" means the whole dynamic expression is built from
+// single-quoted literals and nothing else, so the checker can reconstruct the exact SQL
+// text. Anything else — a variable, `format(...)`, `quote_ident(...)`, `replace(...)`, a
+// parenthesised expression — is UNPROVABLE and therefore a finding.
 //
-// TWO POPULATIONS ARE SCANNED (ratchet R1 finding 3 closed both holes):
+// The predecessor rule was `body mentions "execute" AND body matches /wiki/i`, which this
+// one-liner walked straight through:
 //
-//   1. PERSISTED FUNCTION DEFINITIONS — `create [or replace] function clara.<name>(args)
-//      AS $tag$ … $tag$`. Keyed by FULL IDENTITY (`name(type,…)`), never by bare name,
-//      because the contract's §9 whitelist is by exact `regprocedure`: a dynamic OVERLOAD
-//      of a whitelisted name is a different function and must NOT inherit the whitelist.
+//     execute 'select count(*) from clara.' || 'wi' || 'ki_pages';
 //
-//   2. CHANGE-OF-RECORD PATCHES — a `do $tag$ … $tag$` block that reads a function body
-//      with `pg_get_functiondef`, rewrites it, and `execute`s the result. This migration
-//      family USES that idiom (0017, 0018 and 0019 all do), and it absolutely DOES leave a
-//      callable surface behind: the patched function. The predecessor comment claiming
-//      migration-time DO blocks "leave no callable surface behind" was false for exactly
-//      this shape, and the gate skipped the one mechanism 0019 itself relies on.
-//      The injected FRAGMENTS (the replacement literals) are analysed against the rule,
-//      attributed to the patch's TARGET signature(s).
+// The DB-side scan sees no word-bounded `wiki_pages`; the old repo check saw `execute` but
+// its `/wiki/i` test was false. Reconstructing the literal concatenation catches it, and
+// failing closed on everything non-reconstructible catches every variant of it that has
+// not been invented yet — including the variable-assembled one, where the `wiki` fragment
+// never appears anywhere near the `execute` at all.
+//
+// TWO POPULATIONS ARE SCANNED (ratchet R1 finding 3 opened both; R2 hardened both):
+//
+//   1. PERSISTED FUNCTION DEFINITIONS — `create [or replace] function|procedure
+//      clara.<name>(args) AS <body>`, where <body> is dollar-quoted OR single-quoted.
+//      Keyed by FULL IDENTITY (`name(type,…)`), never by bare name, because the contract's
+//      §9 whitelist is by exact `regprocedure`: a dynamic OVERLOAD of a whitelisted name is
+//      a different function and must NOT inherit the whitelist.
+//
+//   2. CHANGE-OF-RECORD PATCHES — a `do $tag$ … $tag$` block that installs a callable
+//      surface: it either reads a function body with `pg_get_functiondef` and `execute`s a
+//      rewritten version, or dynamically `create`s a function/procedure. This migration
+//      family USES the first idiom (0017, 0018 and 0019 all do), and it absolutely DOES
+//      leave a callable surface behind: the patched function. The injected FRAGMENTS (the
+//      replacement literals) are analysed against the rule, attributed to the patch's
+//      TARGET signature(s).
+//
+//      A patch counts as WHITELISTED only when EVERY `pg_get_functiondef` call in it
+//      resolves to a literal signature AND every one of those signatures is whitelisted.
+//      An unresolved (computed) target, or a MIX of a whitelisted literal target and a
+//      computed one, leaves the block unwhitelisted — that mix was the second half of
+//      finding B3: one literal whitelisted target made `targets.length > 0`, no
+//      `<unresolved target>` was inserted, and the whole patch inherited the whitelist.
+//
+//      The block's OWN `execute v_next` is migration-time machinery, not a persistent
+//      surface, so it is deliberately not a fragment: fragments are the dollar-quoted
+//      segments and the single-quoted literals of the block, which is exactly the text
+//      that ends up inside the patched body.
 //
 // STILL OUT OF SCOPE, correctly: a `do` block that performs plain DDL over a table list
 // (0017's RLS loop legitimately builds `alter table clara.%I` over names that include the
-// wiki relations). Such a block reads no function body, patches nothing, and leaves no
-// callable surface — it is skipped because it contains no `pg_get_functiondef`.
+// wiki relations). Such a block reads no function body, creates no function, and leaves no
+// callable surface — it is skipped because it contains neither `pg_get_functiondef` nor a
+// dynamic `create function`/`create procedure`.
 
 /** The wiki-touch whitelist, by EXACT identity (contract §9's regprocedure list). */
 export const WIKI_WHITELIST = new Set([
@@ -53,7 +79,21 @@ export const WIKI_WHITELIST = new Set([
   "mark_wiki_citations_stale(uuid,uuid,text,text)",
 ]);
 
-const DYNAMIC = /\bexecute\b/i;
+/**
+ * The ONLY escape hatch from fail-closed: identities whose dynamic SQL is REVIEWED and
+ * justified as non-wiki but is not statically reconstructible (a `format('%I', t)` over a
+ * table list, say). Keyed by exact identity, value = the written justification, which is
+ * printed by the gate so an entry cannot rot silently.
+ *
+ * It waives ONLY the "unprovable target" class. A dynamic statement that PROVABLY names
+ * `wiki` is a finding for every function on earth — no entry here can suppress it.
+ *
+ * EMPTY TODAY, and that is a fact about the tree, not an accident: no `create function
+ * clara.…` in packages/db/migrations carries an `EXECUTE` in its body at all. Adding an
+ * entry is a contract-level decision, exactly like widening WIKI_WHITELIST.
+ */
+export const DYNAMIC_SQL_ALLOWLIST = new Map([]);
+
 const WIKI = /wiki/i;
 
 /** Alias → the spelling `pg_get_function_identity_arguments` reports. */
@@ -65,7 +105,7 @@ const TYPE_ALIASES = new Map([
   ["varchar", "character varying"], ["decimal", "numeric"],
 ]);
 
-/** First tokens that mean "this argument is UNNAMED — the whole thing is the type". */
+/** First tokens that mean "this argument may be UNNAMED — the whole thing is the type". */
 const TYPE_HEADS = new Set([
   "uuid", "text", "jsonb", "json", "bigint", "integer", "int", "int2", "int4", "int8",
   "smallint", "boolean", "bool", "numeric", "decimal", "date", "bytea", "interval",
@@ -74,8 +114,23 @@ const TYPE_HEADS = new Set([
   "oid", "regprocedure", "regclass", "inet", "tsvector", "xml",
 ]);
 
+/** Complete type spellings — used to tell an UNNAMED argument from a named one whose NAME
+ *  happens to be a type head (`date date`, `text text`). Without this the old head-only
+ *  test read `date date` as the two-word type "date date". */
+const KNOWN_TYPES = new Set([
+  ...TYPE_HEADS,
+  ...TYPE_ALIASES.values(),
+  "timestamp with time zone", "timestamp without time zone",
+  "time with time zone", "time without time zone",
+  "character varying", "double precision", "bit varying", "character",
+]);
+
+/** Strip a type MODIFIER — `numeric(12,2)`, `varchar(50)`, `timestamp(3) with time zone`.
+ *  `pg_get_function_identity_arguments` never reports one, so the identity must not carry it. */
+const stripTypmod = (t) => t.replace(/\(\s*\d+\s*(?:,\s*\d+\s*)?\)/g, "");
+
 function normalizeType(raw) {
-  let t = raw.trim().toLowerCase().replace(/\s+/g, " ");
+  let t = stripTypmod(raw).trim().toLowerCase().replace(/\s+/g, " ");
   let suffix = "";
   const arr = /((?:\s*\[\s*\d*\s*\])+)$/.exec(t);
   if (arr) {
@@ -104,22 +159,37 @@ function splitTopLevel(s) {
   return out.map((x) => x.trim()).filter((x) => x.length > 0);
 }
 
-/** One declared argument → its bare TYPE, in identity spelling. */
+/**
+ * One declared argument → its bare TYPE, in identity spelling, or `null` when the argument
+ * does NOT participate in the identity.
+ *
+ * OUT parameters return null: `pg_get_function_identity_arguments` OMITS them, so an
+ * `out` argument counted as a type produced an identity that could never match a
+ * whitelist entry written as a `::regprocedure` literal. `inout` and `variadic` DO
+ * participate and render as their bare type — the spelling a signature literal is written
+ * in, which is the spelling both sides of this checker use.
+ */
 export function argType(arg) {
   let s = arg.replace(/\s+/g, " ").trim();
   s = s.replace(/\s+default\s+.*$/i, "").replace(/\s*:?=\s*[^,]*$/, "").trim();
-  s = s.replace(/^(in|out|inout|variadic)\s+/i, "").trim();
+  const mode = /^(in|out|inout|variadic)\s+/i.exec(s);
+  if (mode) {
+    if (mode[1].toLowerCase() === "out") return null;
+    s = s.slice(mode[0].length).trim();
+  }
   const parts = s.split(" ");
   if (parts.length > 1) {
-    const head = parts[0].toLowerCase().replace(/(\s*\[\s*\d*\s*\])+$/, "");
-    if (!TYPE_HEADS.has(head)) parts.shift();
+    const head = stripTypmod(parts[0]).toLowerCase().replace(/(\s*\[\s*\d*\s*\])+$/, "");
+    const whole = normalizeType(s).replace(/(\[\])+$/, "");
+    if (!TYPE_HEADS.has(head) || !KNOWN_TYPES.has(whole)) parts.shift();
   }
   return normalizeType(parts.join(" "));
 }
 
 /** `name` + a raw declared-argument list → the identity the whitelist is keyed by. */
 export function functionIdentity(name, argsText) {
-  return `${name.toLowerCase()}(${splitTopLevel(argsText).map(argType).join(",")})`;
+  const types = splitTopLevel(argsText).map(argType).filter((t) => t !== null);
+  return `${name.toLowerCase()}(${types.join(",")})`;
 }
 
 /** A `clara.name(uuid,text)` signature literal (as written for ::regprocedure) → identity. */
@@ -129,16 +199,66 @@ export function signatureIdentity(sig) {
   return functionIdentity(m[1], m[2]);
 }
 
-/** Read a balanced `(...)` starting at `open`; returns {text, end} or null. */
-function readParens(sql, open) {
-  let depth = 0, quoted = false;
-  for (let i = open; i < sql.length; i++) {
-    const ch = sql[i];
-    if (quoted) {
-      if (ch === "'") quoted = sql[i + 1] === "'" ? (i++, true) : false;
+// ---------------------------------------------------------------------------
+// Lexical helpers. Everything below walks SQL with the three string forms
+// PostgreSQL actually has — single-quoted (with '' escapes), dollar-quoted, and
+// comments — so a keyword inside a literal or a comment is never mistaken for code.
+// ---------------------------------------------------------------------------
+
+/** Index just past the single-quoted literal starting at `i` (which must be a quote). */
+function skipQuoted(s, i) {
+  let j = i + 1;
+  while (j < s.length) {
+    if (s[j] !== "'") { j++; continue; }
+    if (s[j + 1] === "'") { j += 2; continue; }
+    return j + 1;
+  }
+  return s.length;
+}
+
+/** Index just past the dollar-quoted string starting at `i`, or `i` when there is none. */
+function skipDollar(s, i) {
+  const m = /^\$[A-Za-z0-9_]*\$/.exec(s.slice(i));
+  if (!m) return i;
+  const close = s.indexOf(m[0], i + m[0].length);
+  return close < 0 ? s.length : close + m[0].length;
+}
+
+/** Blank out `--` and `/* *\/` comments, preserving length (so offsets stay valid) and
+ *  newlines (so line numbers stay valid). String literals are left untouched. */
+export function maskComments(text) {
+  const out = text.split("");
+  let i = 0;
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "'") { i = skipQuoted(text, i); continue; }
+    if (ch === "$") { const j = skipDollar(text, i); if (j > i) { i = j; continue; } i++; continue; }
+    if (ch === "-" && text[i + 1] === "-") {
+      while (i < text.length && text[i] !== "\n") { out[i] = " "; i++; }
       continue;
     }
-    if (ch === "'") { quoted = true; continue; }
+    if (ch === "/" && text[i + 1] === "*") {
+      let depth = 1;
+      out[i] = " "; out[i + 1] = " "; i += 2;
+      while (i < text.length && depth > 0) {
+        if (text[i] === "/" && text[i + 1] === "*") { depth++; out[i] = " "; out[i + 1] = " "; i += 2; continue; }
+        if (text[i] === "*" && text[i + 1] === "/") { depth--; out[i] = " "; out[i + 1] = " "; i += 2; continue; }
+        if (text[i] !== "\n") out[i] = " ";
+        i++;
+      }
+      continue;
+    }
+    i++;
+  }
+  return out.join("");
+}
+
+/** Read a balanced `(...)` starting at `open`; returns {text, end} or null. */
+function readParens(sql, open) {
+  let depth = 0;
+  for (let i = open; i < sql.length; i++) {
+    const ch = sql[i];
+    if (ch === "'") { i = skipQuoted(sql, i) - 1; continue; }
     if (ch === "(") depth++;
     else if (ch === ")") { depth--; if (depth === 0) return { text: sql.slice(open + 1, i), end: i }; }
   }
@@ -148,106 +268,294 @@ function readParens(sql, open) {
 const lineOf = (sql, index) => sql.slice(0, index).split("\n").length;
 
 /**
- * Every `create [or replace] function clara.NAME(args) … $tag$ BODY $tag$`.
+ * Every `create [or replace] function|procedure clara.NAME(args) … AS <body>`, where
+ * <body> is `$tag$ … $tag$` OR a single-quoted literal (the pre-dollar-quote spelling,
+ * which parses identically for PostgreSQL and used to be invisible here).
  * Returns {name, identity, args, body, line, start, end}.
  */
 export function parseFunctions(sql) {
+  const masked = maskComments(sql);   // same length ⇒ every offset below is valid in `sql`
   const out = [];
-  const re = /create\s+(?:or\s+replace\s+)?function\s+clara\.([A-Za-z0-9_]+)\s*\(/gi;
+  const re = /create\s+(?:or\s+replace\s+)?(?:function|procedure)\s+clara\.([A-Za-z0-9_]+)\s*\(/gi;
   let m;
-  while ((m = re.exec(sql))) {
+  while ((m = re.exec(masked))) {
     const open = m.index + m[0].length - 1;
-    const args = readParens(sql, open);
+    const args = readParens(masked, open);
     if (!args) continue;
-    const rest = sql.slice(args.end);
-    const tag = /\$[A-Za-z0-9_]*\$/.exec(rest);
-    if (!tag) continue;
-    const start = tag.index + tag[0].length;
-    const end = rest.indexOf(tag[0], start);
-    if (end < 0) continue;
+    const rest = masked.slice(args.end);
+    const raw = sql.slice(args.end);
+    // Anchor on the AS that introduces the body, so a quoted attribute value earlier in
+    // the header (`set search_path = 'clara'`) cannot be mistaken for the body.
+    const as = /\bas\b/i.exec(rest);
+    if (!as) continue;
+    const after = as.index + as[0].length;
+    const tag = /\$[A-Za-z0-9_]*\$/.exec(rest.slice(after));
+    const quote = rest.indexOf("'", after);
+    let body = null, end = -1;
+    const tagAt = tag ? after + tag.index : -1;
+    if (tag && (quote < 0 || tagAt < quote)) {
+      const start = tagAt + tag[0].length;
+      const close = rest.indexOf(tag[0], start);
+      if (close < 0) continue;
+      body = raw.slice(start, close);
+      end = close + tag[0].length;
+    } else if (quote >= 0) {
+      const close = skipQuoted(rest, quote);
+      body = raw.slice(quote + 1, close - 1).replace(/''/g, "'");
+      end = close;
+    } else {
+      continue;
+    }
     out.push({
       name: m[1],
       identity: functionIdentity(m[1], args.text),
       args: args.text,
-      body: rest.slice(start, end),
+      body,
       line: lineOf(sql, m.index),
       start: m.index,
-      end: args.end + end + tag[0].length,
+      end: args.end + end,
     });
   }
   return out;
 }
 
-/** Every dollar-quoted segment inside `text`, as {tag, body}. */
-function dollarSegments(text) {
+/** Every dollar-quoted segment inside `text`, as {tag, body, start, end}. Located on the
+ *  comment-masked text (offsets are preserved) so a `$tag$` inside a comment is not one. */
+export function dollarSegments(text) {
+  const s = maskComments(text);
   const out = [];
   const re = /\$[A-Za-z0-9_]*\$/g;
   let m;
-  while ((m = re.exec(text))) {
-    const close = text.indexOf(m[0], m.index + m[0].length);
+  while ((m = re.exec(s))) {
+    const close = s.indexOf(m[0], m.index + m[0].length);
     if (close < 0) continue;
-    out.push({ tag: m[0], body: text.slice(m.index + m[0].length, close) });
+    out.push({
+      tag: m[0],
+      body: text.slice(m.index + m[0].length, close),
+      start: m.index,
+      end: close + m[0].length,
+    });
     re.lastIndex = close + m[0].length;
   }
   return out;
 }
 
-/** Every single-quoted literal inside `text` (doubled quotes are escapes, not ends). */
-function quotedLiterals(text) {
+/**
+ * Every single-quoted literal inside `text` (doubled quotes are escapes, not ends).
+ * Located on the comment-masked text: an APOSTROPHE IN A COMMENT (`-- the core's lock`)
+ * otherwise opens a phantom literal that swallows the rest of the block, and every
+ * literal after it is misread — which is how the migration tree's own change-of-record
+ * machinery (`execute v_next`) surfaced as an "injected fragment".
+ */
+export function quotedLiterals(text) {
+  const s = maskComments(text);
   const out = [];
-  for (let i = 0; i < text.length; i++) {
-    if (text[i] !== "'") continue;
-    let j = i + 1, buf = "";
-    for (; j < text.length; j++) {
-      if (text[j] !== "'") { buf += text[j]; continue; }
-      if (text[j + 1] === "'") { buf += "'"; j++; continue; }
-      break;
-    }
-    out.push(buf);
-    i = j;
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== "'") continue;
+    const end = skipQuoted(s, i);
+    out.push(text.slice(i + 1, end - 1).replace(/''/g, "'"));
+    i = end - 1;
   }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// The fail-closed dynamic-SQL analysis.
+// ---------------------------------------------------------------------------
+
+/** True when this `execute` is the PRIVILEGE keyword (`grant execute on function …`,
+ *  `revoke execute …`), not plpgsql's dynamic-SQL statement. */
+function isPrivilegeExecute(s, start, end) {
+  if (/^\s+on\b/i.test(s.slice(end))) return true;
+  const before = s.slice(Math.max(0, start - 64), start);
+  return /(?:\bgrant\b|\brevoke\b|\ball\b|\bprivileges\b|,)\s*$/i.test(before);
+}
+
+/** From just past the `execute` keyword, read the dynamic-SQL EXPRESSION — up to a
+ *  top-level `;`, or the `into` / `using` clause that ends it. */
+function readExecuteExpr(s, from) {
+  let depth = 0;
+  let i = from;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === "'") { i = skipQuoted(s, i); continue; }
+    if (ch === "$") { const j = skipDollar(s, i); if (j > i) { i = j; continue; } i++; continue; }
+    if (ch === "(") { depth++; i++; continue; }
+    if (ch === ")") { depth--; i++; continue; }
+    if (depth === 0) {
+      if (ch === ";") return { text: s.slice(from, i), end: i + 1 };
+      if (/[A-Za-z_]/.test(ch)) {
+        let j = i;
+        while (j < s.length && /[A-Za-z0-9_]/.test(s[j])) j++;
+        const word = s.slice(i, j).toLowerCase();
+        if (word === "into" || word === "using") return { text: s.slice(from, i), end: j };
+        i = j;
+        continue;
+      }
+    }
+    i++;
+  }
+  return { text: s.slice(from), end: s.length };
+}
+
+/** Every dynamic-SQL statement in `text`, as {index, expr}. Comments are masked and both
+ *  string forms are respected, so `-- execute` and `'execute'` are never counted. */
+export function executeExpressions(text) {
+  const s = maskComments(text);
+  const out = [];
+  let i = 0;
+  while (i < s.length) {
+    const ch = s[i];
+    if (ch === "'") { i = skipQuoted(s, i); continue; }
+    if (ch === "$") { const j = skipDollar(s, i); if (j > i) { i = j; continue; } i++; continue; }
+    if (/[A-Za-z_]/.test(ch)) {
+      let j = i;
+      while (j < s.length && /[A-Za-z0-9_]/.test(s[j])) j++;
+      if (s.slice(i, j).toLowerCase() === "execute" && !isPrivilegeExecute(s, i, j)) {
+        const expr = readExecuteExpr(s, j);
+        out.push({ index: i, expr: expr.text.trim() });
+        i = expr.end;
+        continue;
+      }
+      i = j;
+      continue;
+    }
+    i++;
+  }
+  return out;
+}
+
+/** Split a dynamic-SQL expression on TOP-LEVEL `||`. */
+function splitConcat(expr) {
+  const out = [];
+  let depth = 0, start = 0, i = 0;
+  while (i < expr.length) {
+    const ch = expr[i];
+    if (ch === "'") { i = skipQuoted(expr, i); continue; }
+    if (ch === "(") { depth++; i++; continue; }
+    if (ch === ")") { depth--; i++; continue; }
+    if (depth === 0 && ch === "|" && expr[i + 1] === "|") {
+      out.push(expr.slice(start, i));
+      i += 2;
+      start = i;
+      continue;
+    }
+    i++;
+  }
+  out.push(expr.slice(start));
   return out;
 }
 
 /**
- * Every CHANGE-OF-RECORD patch: a `do $tag$ … $tag$` block that reads a function
- * body with `pg_get_functiondef` and `execute`s a rewritten version.
- * Returns {line, targets:[identity|null], fragments:[string]}.
- * `spans` (from parseFunctions) suppresses `do` matches that live inside a body.
+ * STATIC PROOF of what a dynamic-SQL expression runs. `{proven:true, sql}` only when the
+ * whole expression is a concatenation of single-quoted literals and nothing else — then
+ * `sql` is the exact statement text. Anything else is `{proven:false}` and, by the
+ * fail-closed rule, a finding.
  */
-export function parseCoRPatches(sql, spans = []) {
+export function staticSqlOf(expr) {
+  let sql = "";
+  for (const part of splitConcat(expr)) {
+    const t = part.trim();
+    const m = /^'((?:[^']|'')*)'$/.exec(t);
+    if (!m) return { proven: false, sql: null };
+    sql += m[1].replace(/''/g, "'");
+  }
+  return { proven: true, sql };
+}
+
+/** Apply the rule to one body/fragment → [{expr, kind:'wiki'|'unprovable', sql?}]. */
+export function dynamicSqlFindings(text) {
   const out = [];
-  const re = /\bdo\s+(\$[A-Za-z0-9_]*\$)/gi;
-  let m;
-  while ((m = re.exec(sql))) {
-    if (spans.some((s) => m.index > s.start && m.index < s.end)) continue;
-    const tag = m[1];
-    const open = m.index + m[0].length;
-    const close = sql.indexOf(tag, open);
-    if (close < 0) continue;
-    re.lastIndex = close + tag.length;
-    const block = sql.slice(open, close);
-    if (!/pg_get_functiondef/i.test(block)) continue;   // not a function patch
-    if (!DYNAMIC.test(block)) continue;                 // reads a body but installs nothing
-
-    const targets = [];
-    const tre = /pg_get_functiondef\s*\(\s*'([^']+)'\s*::\s*regprocedure/gi;
-    let t;
-    while ((t = tre.exec(block))) targets.push(signatureIdentity(t[1]));
-    // A patch whose target we cannot resolve statically is treated as unwhitelisted.
-    if (targets.length === 0) targets.push(null);
-
-    const fragments = [
-      ...dollarSegments(block).map((s) => s.body),
-      ...quotedLiterals(block),
-    ];
-    out.push({ line: lineOf(sql, m.index), targets, fragments });
+  for (const { expr } of executeExpressions(text)) {
+    const { proven, sql } = staticSqlOf(expr);
+    if (!proven) { out.push({ expr, kind: "unprovable" }); continue; }
+    if (WIKI.test(sql)) out.push({ expr, kind: "wiki", sql });
   }
   return out;
 }
 
-/** The rule, applied to one body/fragment. */
-const offends = (text) => DYNAMIC.test(text) && WIKI.test(text);
+const snippet = (s) => {
+  const one = String(s).replace(/\s+/g, " ").trim();
+  return one.length > 120 ? one.slice(0, 117) + "…" : one;
+};
+const why = (f) => (f.kind === "wiki"
+  ? `runs dynamic SQL that PROVABLY names "wiki": ${snippet(f.sql)}`
+  : `runs dynamic SQL whose target cannot be statically proven non-wiki: EXECUTE ${snippet(f.expr)}`);
+
+/**
+ * Every CHANGE-OF-RECORD patch: a `do $tag$ … $tag$` block that installs a callable
+ * surface — it reads a function body with `pg_get_functiondef` and `execute`s a rewritten
+ * version, or it dynamically creates a function/procedure.
+ * Returns {line, targets:[identity|null], whitelisted, fragments:[string]}.
+ * `spans` (from parseFunctions) suppresses `do` matches that live inside a body.
+ */
+export function parseCoRPatches(sql, spans = []) {
+  const maskedSql = maskComments(sql);
+  const out = [];
+  const re = /\bdo\s+(\$[A-Za-z0-9_]*\$)/gi;
+  let m;
+  while ((m = re.exec(maskedSql))) {
+    if (spans.some((s) => m.index > s.start && m.index < s.end)) continue;
+    const tag = m[1];
+    const open = m.index + m[0].length;
+    const close = maskedSql.indexOf(tag, open);
+    if (close < 0) continue;
+    re.lastIndex = close + tag.length;
+    const block = sql.slice(open, close);
+    const masked = maskedSql.slice(open, close);
+    const patchesABody = /pg_get_functiondef/i.test(masked);
+    const createsAFunction = /\bcreate\s+(?:or\s+replace\s+)?(?:function|procedure)\b/i.test(masked);
+    if (!patchesABody && !createsAFunction) continue;   // installs no callable surface
+    if (!/\bexecute\b/i.test(masked)) continue;         // reads a body but installs nothing
+
+    // Targets: EVERY pg_get_functiondef call, not only the ones with a literal argument.
+    // A computed argument yields `null` — an unresolved target — so a block that mixes a
+    // whitelisted literal target with a computed one can no longer inherit the whitelist.
+    const targets = [];
+    const tre = /pg_get_functiondef\s*\(/gi;
+    let t;
+    while ((t = tre.exec(masked))) {
+      const arg = readParens(masked, t.index + t[0].length - 1);
+      if (!arg) { targets.push(null); continue; }
+      const lit = /^\s*'((?:[^']|'')*)'\s*::\s*regprocedure\s*$/.exec(arg.text);
+      targets.push(lit ? signatureIdentity(lit[1].replace(/''/g, "'")) : null);
+      tre.lastIndex = arg.end;
+    }
+    if (targets.length === 0) targets.push(null);
+
+    // FRAGMENTS = the text that ends up inside the persistent surface.
+    //
+    // For the CoR idiom that is the injected text: the dollar-quoted segments plus the
+    // single-quoted literals of the surrounding plain text. The block's own
+    // `execute v_next` lives in that plain text OUTSIDE any literal and is therefore NOT a
+    // fragment — it is the migration-time machinery, not a persistent surface.
+    //
+    // For a block that dynamically CREATEs a function instead, the persistent surface IS
+    // the block's own dynamic SQL, and there is no machinery `execute` to confuse it with,
+    // so the block itself is the fragment.
+    let fragments;
+    if (patchesABody) {
+      const segments = dollarSegments(block);
+      fragments = segments.map((s) => s.body);
+      let cursor = 0;
+      for (const seg of [...segments, { start: block.length, end: block.length }]) {
+        if (seg.start > cursor) fragments.push(...quotedLiterals(block.slice(cursor, seg.start)));
+        cursor = seg.end;
+      }
+    } else {
+      fragments = [block];
+    }
+
+    out.push({
+      line: lineOf(sql, m.index),
+      kind: patchesABody ? "change-of-record patch" : "dynamic function-creating `do` block",
+      targets,
+      whitelisted: targets.every((x) => x !== null && WIKI_WHITELIST.has(x)),
+      fragments,
+    });
+  }
+  return out;
+}
 
 /**
  * Scan a set of `{file, sql}` sources.
@@ -269,20 +577,26 @@ export function scanSources(sources, { assertWhitelistResolves = true } = {}) {
   const findings = [];
   for (const [identity, d] of defs) {
     if (WIKI_WHITELIST.has(identity)) continue;
-    if (offends(d.body)) {
-      findings.push(
-        `  ${d.file}:${d.line}  clara.${identity}  — dynamic SQL (EXECUTE) in a body that mentions "wiki"`);
+    const waiver = DYNAMIC_SQL_ALLOWLIST.get(identity) ?? null;
+    for (const f of dynamicSqlFindings(d.body)) {
+      // A justified waiver excuses an UNPROVABLE target. It can never excuse dynamic SQL
+      // that provably names wiki — that is a finding for every function in the schema.
+      if (f.kind === "unprovable" && waiver) continue;
+      findings.push(`  ${d.file}:${d.line}  clara.${identity}  — ${why(f)}`);
     }
   }
   for (const p of patches) {
-    const unwhitelisted = p.targets.filter((t) => t === null || !WIKI_WHITELIST.has(t));
-    if (unwhitelisted.length === 0) continue;
+    if (p.whitelisted) continue;
+    const named = p.targets
+      .map((t) => (t === null ? "<unresolved target>" : `clara.${t}`))
+      .filter((v, i, a) => a.indexOf(v) === i)
+      .join(", ");
     for (const frag of p.fragments) {
-      if (!offends(frag)) continue;
-      const named = unwhitelisted.map((t) => (t === null ? "<unresolved target>" : `clara.${t}`)).join(", ");
+      const [f] = dynamicSqlFindings(frag);
+      if (!f) continue;
       findings.push(
-        `  ${p.file}:${p.line}  change-of-record patch → ${named}`
-        + `  — the INJECTED body fragment carries dynamic SQL (EXECUTE) and mentions "wiki"`);
+        `  ${p.file}:${p.line}  ${p.kind} → ${named}`
+        + `  — the INSTALLED body ${why(f)}`);
       break;
     }
   }

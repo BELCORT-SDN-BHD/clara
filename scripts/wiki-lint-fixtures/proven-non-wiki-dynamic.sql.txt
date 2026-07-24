@@ -1,0 +1,12 @@
+-- CLEAN FIXTURE (must PASS the gate).
+-- Fail-closed is not "no dynamic SQL anywhere": a statement whose text is fully
+-- reconstructible from literals and demonstrably does not name wiki is PROVEN safe and
+-- passes without a whitelist entry. Without this cell the gate could pass by rejecting
+-- everything.
+create function clara._proven_probe() returns integer
+  language plpgsql security invoker as $fn$
+declare v_n integer;
+begin
+  execute 'select count(*) from clara.' || 'firms' into v_n;
+  return v_n;
+end $fn$;

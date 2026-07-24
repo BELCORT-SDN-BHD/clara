@@ -18,7 +18,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   scanSources, parseFunctions, parseCoRPatches, functionIdentity, signatureIdentity,
-  WIKI_WHITELIST,
+  executeExpressions, staticSqlOf, WIKI_WHITELIST, DYNAMIC_SQL_ALLOWLIST,
 } from "./wiki-lint-checks.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -85,6 +85,26 @@ testCase("a regprocedure literal and a declaration agree on the same identity", 
   if (!WIKI_WHITELIST.has(a)) throw new Error(`${a} is not in the whitelist`);
 });
 
+// R2: the identity edge cases the parser used to get wrong. Each one produced an identity
+// that could never equal the `::regprocedure` spelling a whitelist entry is written in.
+testCase("an OUT parameter is EXCLUDED — pg_get_function_identity_arguments omits it", () => {
+  const got = functionIdentity("f", "p_a uuid, out p_total numeric, inout p_state text");
+  if (got !== "f(uuid,text)") throw new Error(`got ${got} (an OUT arg must not become a type)`);
+});
+
+testCase("type MODIFIERS are stripped — the catalog never reports one", () => {
+  const got = functionIdentity("f",
+    "p_a numeric(12,2), p_b varchar(50), p_c character varying(8)[], p_d timestamp(3) with time zone");
+  if (got !== "f(numeric,character varying,character varying[],timestamp with time zone)") {
+    throw new Error(`got ${got}`);
+  }
+});
+
+testCase("an argument whose NAME is a type head is still a name", () => {
+  const got = functionIdentity("f", "date date, text text, p_x uuid");
+  if (got !== "f(date,text,uuid)") throw new Error(`got ${got}`);
+});
+
 // --- persisted function definitions ------------------------------------------
 console.log("persisted function definitions:");
 
@@ -109,12 +129,115 @@ testCase("the overload does NOT suppress the whitelisted definition, and vice ve
   }
 });
 
+// --- the FAIL-CLOSED rule (ratchet R2 finding B3) -----------------------------
+console.log("fail-closed dynamic SQL:");
+
+testCase("a SPLIT relation token -> REJECT (the R2 bypass, reconstructed)", () => {
+  expectFinding(scan("split-token-dynamic-wiki.sql.txt"),
+    ["_innocent_counter(uuid)", "PROVABLY names", "wiki_pages"]);
+});
+
+testCase("a VARIABLE-ASSEMBLED statement -> REJECT (nothing to reconstruct ⇒ fail closed)", () => {
+  expectFinding(scan("variable-assembled-dynamic.sql.txt"),
+    ["_assembled_probe(uuid)", "cannot be statically proven non-wiki"]);
+});
+
+testCase("NESTED replacement construction -> REJECT", () => {
+  expectFinding(scan("nested-replace-dynamic.sql.txt"),
+    ["_templated_probe()", "cannot be statically proven non-wiki"]);
+});
+
+testCase("a SINGLE-QUOTED function body is parsed and REJECTED (it used to be invisible)", () => {
+  expectFinding(scan("single-quoted-body-dynamic-wiki.sql.txt"),
+    ["_legacy_quoted_body(uuid)", "wiki_page_citations"]);
+});
+
+testCase("a PROCEDURE is a callable surface too -> REJECT", () => {
+  expectFinding(scan("procedure-dynamic-wiki.sql.txt"), ["_sweep_pages(uuid)", "wiki_pages"]);
+});
+
+testCase("dynamic SQL PROVEN non-wiki -> OK (the gate is not vacuous)", () => {
+  expectClean(scan("proven-non-wiki-dynamic.sql.txt"));
+});
+
+testCase("`grant execute on function clara.get_wiki_page` -> OK (privilege keyword, not dynamic SQL)", () => {
+  expectClean(scan("grant-execute-body.sql.txt"));
+});
+
+testCase("the reconstruction itself is exact", () => {
+  const [one] = executeExpressions("begin execute 'select ' || '1' into v; end");
+  if (!one) throw new Error("no execute statement found");
+  const { proven, sql } = staticSqlOf(one.expr);
+  if (!proven || sql !== "select 1") throw new Error(`got proven=${proven} sql=${JSON.stringify(sql)}`);
+  const two = staticSqlOf("format('%I', v_tbl)");
+  if (two.proven) throw new Error("a format() call must NOT be treated as proven");
+});
+
+testCase("an `execute` inside a comment or a string literal is not dynamic SQL", () => {
+  const sql = "create function clara._quiet(p_a uuid) returns void language plpgsql as $b$\n"
+    + "begin\n  -- execute 'select 1 from clara.wiki_pages';\n"
+    + "  perform 1 where 'execute wiki_pages' <> '';\n  return;\nend $b$;\n";
+  expectClean(scanSources([{ file: "inline", sql }], { assertWhitelistResolves: false }).findings);
+});
+
+testCase("the dynamic-SQL allowlist waives ONLY unprovable targets, never a proven wiki hit", () => {
+  if (DYNAMIC_SQL_ALLOWLIST.size !== 0) {
+    throw new Error(`the tree passes fail-closed with an EMPTY allowlist; it now has ${DYNAMIC_SQL_ALLOWLIST.size} entr(ies) — each needs a written justification`);
+  }
+  DYNAMIC_SQL_ALLOWLIST.set("_innocent_counter(uuid)", "selftest-only waiver");
+  try {
+    expectFinding(scan("split-token-dynamic-wiki.sql.txt"), ["PROVABLY names"]);
+    expectClean(scan("variable-assembled-dynamic.sql.txt").filter((f) => f.includes("_innocent_counter")));
+  } finally {
+    DYNAMIC_SQL_ALLOWLIST.delete("_innocent_counter(uuid)");
+  }
+});
+
 // --- change-of-record patches (the finding-3 hole) ---------------------------
 console.log("change-of-record patches:");
 
 testCase("a CoR patch injecting dynamic wiki SQL into a NON-whitelisted target -> REJECT", () => {
   expectFinding(scan("cor-inject-dynamic-wiki.sql.txt"),
-    ["change-of-record patch", "clara.retire_document_filing(uuid,text,uuid,text)", "INJECTED"]);
+    ["change-of-record patch", "clara.retire_document_filing(uuid,text,uuid,text)", "INSTALLED"]);
+});
+
+testCase("a MIXED patch — one literal whitelisted target PLUS a computed one -> REJECT", () => {
+  // The R2 hole: `targets.length > 0` suppressed the unresolved marker and the whole
+  // patch inherited get_wiki_page's whitelist entry.
+  expectFinding(scan("cor-mixed-target.sql.txt"),
+    ["<unresolved target>", "clara.get_wiki_page(uuid,text)", "wiki_pages"]);
+});
+
+testCase("a patch whose ONLY target is computed -> REJECT (unresolved is never whitelisted)", () => {
+  expectFinding(scan("cor-computed-target.sql.txt"),
+    ["<unresolved target>", "wiki_page_refs"]);
+});
+
+testCase("a `do` block that dynamically CREATEs a function leaves a callable surface -> REJECT", () => {
+  expectFinding(scan("do-dynamic-create-function.sql.txt"),
+    ["dynamic function-creating", "PROVABLY names", "_shadow_wiki_probe"]);
+});
+
+testCase("every pg_get_functiondef call is attributed, literal or not", () => {
+  const { sql } = source("cor-mixed-target.sql.txt");
+  const [patch] = parseCoRPatches(sql, parseFunctions(sql));
+  if (!patch) throw new Error("the mixed patch was not detected at all");
+  if (patch.targets.length !== 2) throw new Error(`expected 2 targets, got ${patch.targets.length}`);
+  if (patch.targets[0] !== "get_wiki_page(uuid,text)" || patch.targets[1] !== null) {
+    throw new Error(`targets resolved as ${JSON.stringify(patch.targets)}`);
+  }
+  if (patch.whitelisted) throw new Error("a patch with an unresolved target must NOT be whitelisted");
+});
+
+testCase("the block's OWN `execute v_next` is machinery, not an installed fragment", () => {
+  // Otherwise every change-of-record block in the tree (0017/0018/0019 all use the idiom)
+  // is a false finding under the fail-closed rule.
+  expectClean(scan("cor-whitelisted-target.sql.txt"));
+  const { sql } = source("cor-clean.sql.txt");
+  const [patch] = parseCoRPatches(sql, parseFunctions(sql));
+  if (patch.fragments.some((f) => /\bexecute\s+v_(next|cur|def)\b/i.test(f))) {
+    throw new Error("the CoR machinery leaked into the fragment set");
+  }
 });
 
 testCase("a CoR patch whose fragment mentions wiki but is NOT dynamic -> OK (0019 §1's own shape)", () => {

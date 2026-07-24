@@ -1,0 +1,17 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate).
+-- The patch target is built at run time, so it cannot be attributed statically. An
+-- UNRESOLVED target must never be treated as whitelisted: the block is scanned under the
+-- strict rule and its injected dynamic wiki SQL is a finding.
+do $cor$
+declare v_def text; v_next text; v_sig text;
+begin
+  v_sig := 'clara.' || 'approve_wrong_client_correction(uuid,text,text,text)';
+  select pg_get_functiondef(v_sig::regprocedure) into v_def;
+  v_next := replace(v_def, 'begin',
+$new$begin
+  perform 1 where exists(select 1 from (select 1) z);
+  execute 'select 1 from clara.' || 'wi' || 'ki_page_refs';
+$new$);
+  execute v_next;
+end
+$cor$;

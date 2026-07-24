@@ -228,13 +228,25 @@ test("[R1-1 · two-session] RETIRE-PAGE vs MARK: the writer blocks on the page r
   assert.equal(log.rows[0].n, 0, "a noop wrote NO wiki_log row (the positive-change-only posture survives the fix)");
 });
 
-test("[R1-1] the writer's lock graph is acyclic BY CONSTRUCTION: nothing takes a wiki_pages row before a clara.clients row", async () => {
+test("[R1-1/R2-B1] the lock graph is acyclic BY A SHARED PREFIX: EVERY wiki actor takes the clara.clients row before any wiki_pages row", async () => {
   fail0019(live);
   const writer = norm(await fnSource("mark_wiki_citations_stale"));
   const core = norm(await fnSource("_publish_wiki_page_version_core"));
   const retire = norm(await fnSource("retire_wiki_page"));
 
-  for (const [name, src] of [["mark_wiki_citations_stale", writer], ["_publish_wiki_page_version_core", core]]) {
+  // RATCHET R2 FINDING B1 — this cell USED to assert that retire_wiki_page takes NO client
+  // row and is therefore "a LEAF in the wait-for graph". That reasoning was WRONG: after
+  // locking its page row it calls _append_event, which upserts the firm's firm_event_seq
+  // row (0005:482-484) — it holds a page while REQUESTING a shared per-firm row, the
+  // textbook shape of a NON-leaf, and §3's added page lock closed a real cycle through it.
+  // The fix is ordering, not argument: page retirement now takes client -> page like every
+  // other wiki actor, so the reverse edge exists nowhere. All three are held to the SAME
+  // rule below — no actor gets an exemption, and a future one must join the prefix too.
+  for (const [name, src] of [
+    ["mark_wiki_citations_stale", writer],
+    ["_publish_wiki_page_version_core", core],
+    ["retire_wiki_page", retire],
+  ]) {
     const cl = src.search(/fromclara\.clients[a-z]*where[^;]*forupdate/);
     const pg = src.search(/fromclara\.wiki_pages[a-z]*where[^;]*forupdate/);
     assert.ok(cl >= 0, `${name} takes a clara.clients row FOR UPDATE`);
@@ -242,9 +254,7 @@ test("[R1-1] the writer's lock graph is acyclic BY CONSTRUCTION: nothing takes a
     assert.ok(cl < pg, `${name} takes the CLIENT row FIRST — the shared prefix that makes the graph acyclic`);
   }
   assert.ok(/fromclara\.wiki_pageswhereid=p_pageforupdate/.test(retire),
-    "retire_wiki_page locks the page row");
-  assert.ok(!/fromclara\.clients[a-z]*where[^;]*forupdate/.test(retire),
-    "…and takes NO clara.clients row — so it is a LEAF in the wait-for graph and cannot close a cycle");
+    "retire_wiki_page still locks the page row it retires");
   assert.ok(/orderbywp\.id/.test(writer),
     "the writer locks its page set in ASCENDING id order (two writers on one client are already excluded by the client row; the order is belt-and-braces)");
 });

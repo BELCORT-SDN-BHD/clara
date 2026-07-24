@@ -11,6 +11,12 @@
 --   §2 wiki_page_citations + wiki_page_refs gain the additive stale marker pair
 --      (stale_at / stale_reason + the paired-presence CHECK), plus the index coverage
 --      the writer / lint / read predicates need (both tables shipped PK-only);
+--   §3a clara.retire_wiki_page takes the CLIENT row before the PAGE row (ratchet R2
+--      finding B1). Page retirement is NOT a wait-for-graph leaf — after its page lock it
+--      requests clara.firm_event_seq through _append_event (0005:482-484) — so once §3
+--      added a client -> page actor, a composing transaction could close a real 40P01
+--      cycle. All four wiki actors now share ONE client -> page order, asserted over
+--      EVERY clara function by the §9 tail rather than over three named ones;
 --   §3 clara.mark_wiki_citations_stale — the runtime-only stale WRITER. NO domain
 --      event is appended and NO event type is registered (amendment 4: a client-scoped
 --      wiki event would reach assert_books_current (0007:2665-2681) and the correction
@@ -366,9 +372,19 @@ drop function clara._assert_filing_wiki_unreferenced(uuid, uuid, uuid);
 --     and commit a citation to a document whose filing is already retired. The consumer
 --     ran before that commit and marked zero rows, and no later event repairs it: the
 --     citation is a permanently UNMARKED INVALID END STATE, exactly what §10 R2-F2c
---     forbids. (The firm_event_seq upsert usually catches this at RR too — but only when
---     the publisher has not already bumped that row earlier in its own transaction, so it
---     is a coincidence, not a barrier.)
+--     forbids.
+--
+-- WHAT THE RR REFUSAL IS FOR — stated accurately (ratchet R2 corrects the round-1 wording,
+-- which called the firm_event_seq upsert "a coincidence, not a barrier"). It IS a barrier
+-- for these two wrappers, by either arm: if publication has NOT already touched the
+-- firm_event_seq row, the later conflicting upsert raises 40001 under RR; if it HAS, then
+-- retirement cannot commit its own event while publication owns that row, and an opposing
+-- client-row wait resolves as a deadlock abort. So the hole above is not open in today's
+-- code. The refusal is therefore CONSERVATIVE DEFENCE-IN-DEPTH, not the thing that closes
+-- an open hole — and it is kept because it is cheap, structural, and removes the safety
+-- argument's dependence on an INTERNAL of clara._append_event (0005:482-484): a future
+-- change that stops publication touching firm_event_seq, or moves the append, would
+-- silently reopen the hole with no local signal. A one-line isolation check does not.
 --
 -- The fix is structural refusal, not a filing lock: adding `document_filings for update`
 -- to publication would create the reverse-order cycle (retirement takes filing -> client,
@@ -473,6 +489,139 @@ end
 $cor2$;
 
 -- =====================================================================
+-- §3a. THE PAGE-RETIREMENT LOCK REORDER — clara.retire_wiki_page takes the CLIENT
+-- row before the PAGE row (ratchet R2 finding B1).
+--
+-- WHAT R1 GOT WRONG. §3's round-1 no-deadlock argument asserted that page retirement
+-- "takes exactly one lock and then requests none, so it can only ever be a leaf in the
+-- wait-for graph". That is FALSE. After locking its page row (0017:2296) the body calls
+-- clara._append_event (0017:2315), whose first act is an upsert on the firm's
+-- clara.firm_event_seq row (0005:482-484). Page retirement therefore HOLDS a page row
+-- while REQUESTING a shared per-firm row — the textbook shape of a non-leaf.
+--
+-- THE REACHABLE CYCLE the added page lock completed:
+--   1. T1 (an outer runtime transaction) publishes page A. The call returns while T1 still
+--      holds clients(X), wiki_pages(A) and firm_event_seq(F).
+--   2. T2 runs retire_wiki_page(page B): it locks wiki_pages(B), then WAITS on T1's
+--      firm_event_seq(F).
+--   3. T1 calls mark_wiki_citations_stale for a document on page B. It already owns
+--      clients(X) and now WAITS on wiki_pages(B).
+--   4. T1 waits for T2, T2 waits for T1 → PostgreSQL aborts one with 40P01.
+-- Before §3 existed nothing else locked a page row while holding the client row, so the
+-- cycle was unreachable; §3's LOCK 2 is what closed it.
+--
+-- THE FIX IS ORDERING, NOT ARGUMENT. Page retirement adopts the SAME client -> page order
+-- every other wiki actor uses, which removes the reverse edge outright:
+--   publication    : clients(p_client) -> wiki_pages(one row)      0017:2049-2056
+--   the stale writer: clients(p_client) -> wiki_pages(N, asc id)   §3 below
+--   page retirement : clients(p.client)  -> wiki_pages(p_page)     HERE
+--   (all three then reach firm_event_seq LAST, or not at all — the writer appends no event.)
+-- The filing actors take document_filings -> clients (§1) and NEVER take a page row, and
+-- publication reads document_filings UNLOCKED (0017:2115-2121), so there is no
+-- clients -> document_filings edge anywhere to close a cycle against them either.
+--
+-- (firm_id, client_id) are IMMUTABLE on clara.wiki_pages — nothing in 0017/0018/0019
+-- updates either column — so the UNLOCKED lookup that identifies which client row to lock
+-- cannot go stale. It decides NOTHING: every authority check is re-evaluated under the
+-- page lock afterwards, including a re-assertion that the page still belongs to the client
+-- whose row we hold.
+--
+-- The CLR11 refusal text is unchanged, so no caller sees a new error shape; the only
+-- observable difference is that a retirement now BLOCKS on a concurrent same-client
+-- publication (as publication and the stale writer already do) instead of racing it.
+--
+-- Drift-guard: the two anchors match EXACTLY ONCE each, both replaces change the body, and
+-- the complete acquisition chain is asserted as positional inequalities — the §1 idiom.
+-- =====================================================================
+do $cor1b$
+declare
+  v_def text; v_cur text; v_next text; v_norm text; v_anchor text;
+  v_chain text[]; v_tok text; v_at int; v_prev int;
+begin
+  select pg_get_functiondef('clara.retire_wiki_page(uuid,text,text)'::regprocedure)
+    into v_def;
+  v_cur := v_def;
+
+  ---- (1) the two new locals ---------------------------------------------------
+  v_anchor := 'declare c record; p record; v_dedupe jsonb; v_result jsonb;';
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0019: retire_wiki_page declare anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_cur, v_anchor,
+$new$declare c record; p record; v_dedupe jsonb; v_result jsonb;
+  -- [WB-R21/0019 §3a] the immutable (firm,client) of the page, read UNLOCKED so the
+  -- client row can be locked FIRST. Nothing is decided on them.
+  v_firm uuid; v_client uuid;$new$);
+  if v_next = v_cur then
+    raise exception '0019: retire_wiki_page declare drift' using errcode = 'CLR10';
+  end if;
+  v_cur := v_next;
+
+  ---- (2) client row FIRST, then the page row, then revalidate ------------------
+  v_anchor :=
+$old$  select * into p from clara.wiki_pages where id=p_page for update;
+  if not found or p.firm_id<>c.firm then
+    raise exception 'wiki page not in your firm' using errcode='CLR11';
+  end if;$old$;
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0019: retire_wiki_page page-lock anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_cur, v_anchor,
+$new$  -- [WB-R21/0019 §3a] CLIENT -> PAGE, the order publication (0017:2049-2056) and
+  -- mark_wiki_citations_stale (§3) both use. Page retirement is NOT a wait-for-graph
+  -- leaf: after the page row it requests clara.firm_event_seq through _append_event
+  -- (0005:482-484), so holding a page row while another actor holds the client row
+  -- closes a real 40P01 cycle. Taking the client row first removes that edge.
+  select wp.firm_id,wp.client_id into v_firm,v_client
+    from clara.wiki_pages wp where wp.id=p_page;
+  if v_firm is null or v_firm<>c.firm then
+    raise exception 'wiki page not in your firm' using errcode='CLR11';
+  end if;
+  perform 1 from clara.clients cl
+    where cl.id=v_client and cl.firm_id=v_firm for update;
+  if not found then
+    raise exception 'wiki page not in your firm' using errcode='CLR11';
+  end if;
+  -- Re-read EVERYTHING the body decides on under the page lock. The unlocked probe
+  -- above only chose which client row to take.
+  select * into p from clara.wiki_pages where id=p_page for update;
+  if not found or p.firm_id<>c.firm or p.client_id<>v_client then
+    raise exception 'wiki page not in your firm' using errcode='CLR11';
+  end if;$new$);
+  v_norm := regexp_replace(lower(v_next), '\s+', '', 'g');
+  if v_next = v_cur then
+    raise exception '0019: retire_wiki_page page-lock drift' using errcode = 'CLR10';
+  end if;
+  -- The COMPLETE acquisition chain, pair by pair. "the client lock is present" would be
+  -- satisfied by the very order this fix exists to forbid (page -> client).
+  v_chain := array[
+    'selectwp.firm_id,wp.client_idintov_firm,v_clientfromclara.wiki_pageswpwherewp.id=p_page;',
+    'perform1fromclara.clientsclwherecl.id=v_clientandcl.firm_id=v_firmforupdate',
+    'select*intopfromclara.wiki_pageswhereid=p_pageforupdate',
+    'ifnotfoundorp.firm_id<>c.firmorp.client_id<>v_clientthen',
+    'clara._reserve_op(c.firm,''retire_wiki_page''',
+    'updateclara.wiki_pagessetstate=''retired'''
+  ];
+  v_prev := 0;
+  foreach v_tok in array v_chain loop
+    v_at := position(v_tok in v_norm);
+    if v_at = 0 then
+      raise exception '0019: retire_wiki_page lost the acquisition-chain step "%"', v_tok
+        using errcode = 'CLR10';
+    end if;
+    if v_at <= v_prev then
+      raise exception '0019: retire_wiki_page acquisition-order drift — "%" no longer follows its predecessor',
+        v_tok using errcode = 'CLR10';
+    end if;
+    v_prev := v_at;
+  end loop;
+  execute v_next;
+end
+$cor1b$;
+
+-- =====================================================================
 -- §3. THE STALE WRITER — clara.mark_wiki_citations_stale.
 --
 -- Scope of the mark is EXACTLY the blocker scope the veto scanned (0017:1821-1836),
@@ -518,22 +667,32 @@ $cor2$;
 --       takes at 0017:2049-2053, so no publication for this client can interleave at all
 --       (current_version_id cannot move, refs cannot be deleted/re-inserted, 0017:2134);
 --   (2) then the eligible PAGE ROWS FOR UPDATE, in ASCENDING page-id order — this is what
---       orders against retire_wiki_page, which locks the page row (0017:2296) and takes NO
---       client row.
+--       orders against retire_wiki_page, which also locks the page row (0017:2296).
 --
--- WHY THIS INTRODUCES NO DEADLOCK CYCLE (state it, don't assume it). The three actors
--- that touch these rows acquire:
---   publication   : clients(p_client) -> wiki_pages(one row, by client+slug)   0017:2049-2056
---   this writer   : clients(p_client) -> wiki_pages(N rows, ascending id)      here
---   page retirement: wiki_pages(one row, by id) — and NOTHING else             0017:2296
--- Publication and the writer share the SAME first lock (the client row), so they are
--- mutually exclusive before either reaches a page row: no publication/writer cycle can
--- form. Page retirement takes exactly one lock and then requests none, so it can only ever
--- be a leaf in the wait-for graph — a leaf cannot close a cycle. Two writers on the SAME
--- client serialize on the client row; two writers on DIFFERENT clients touch disjoint page
--- sets (wiki_pages is client-scoped), so the ascending-id order is belt-and-braces there.
--- No actor takes a page row before a client row, so the reverse edge that would close a
--- cycle does not exist anywhere in the schema.
+-- WHY THIS INTRODUCES NO DEADLOCK CYCLE (state it, don't assume it — and do NOT argue it
+-- from any actor being a "leaf"; ratchet R2 finding B1 showed that argument was false).
+-- The three actors that touch these rows acquire:
+--   publication    : clients(p_client) -> wiki_pages(one row, by client+slug) 0017:2049-2056
+--   this writer    : clients(p_client) -> wiki_pages(N rows, ascending id)    here
+--   page retirement: clients(page.client) -> wiki_pages(one row, by id)       §3a above
+-- ALL THREE share the same client -> page prefix, so any two of them are mutually
+-- exclusive at the CLIENT row before either can reach a page row: the reverse edge that a
+-- cycle needs does not exist. That is the whole argument, and it survives the fact that
+-- publication and page retirement BOTH go on to request clara.firm_event_seq through
+-- _append_event (0005:482-484) — a lock requested strictly AFTER the shared prefix cannot
+-- close a cycle across it.
+--
+-- The round-1 text claimed instead that page retirement "takes exactly one lock and then
+-- requests none, so it can only ever be a leaf". It is not a leaf: _append_event's
+-- firm_event_seq upsert is a request made while holding the page row, and an outer
+-- transaction that already holds that sequence row plus the client row closes a genuine
+-- 40P01 cycle (the full three-statement sequence is in §3a). §3a repairs the ORDER; this
+-- comment repairs the ARGUMENT.
+--
+-- Two writers on the SAME client serialize on the client row; two writers on DIFFERENT
+-- clients touch disjoint page sets (wiki_pages is client-scoped), so the ascending-id
+-- order is belt-and-braces there. NO actor in the schema takes a wiki_pages row before a
+-- clara.clients row — asserted over EVERY clara function by the §9 tail, not assumed.
 --
 -- The re-evaluation is correct at every isolation level. READ COMMITTED: each statement
 -- after the locks takes a fresh snapshot, so a retirement that committed while we waited is
@@ -995,6 +1154,71 @@ begin
     from pg_proc where oid = 'clara.approve_wrong_client_correction(uuid,text,text,text)'::regprocedure;
   if position('raiseexception''sourcefilingisnolongeractive''usingerrcode=''clr19''' in v_src) = 0 then
     raise exception '0019 approve_wrong_client_correction lost its CLR19 source-filing guard'
+      using errcode = 'CLR10';
+  end if;
+
+  -- ---- §3a PAGE RETIREMENT TAKES THE CLIENT ROW FIRST (ratchet R2 finding B1) ----
+  select regexp_replace(lower(prosrc), '\s+', '', 'g') into v_src
+    from pg_proc where oid = 'clara.retire_wiki_page(uuid,text,text)'::regprocedure;
+  v_chain := array[
+    'selectwp.firm_id,wp.client_idintov_firm,v_clientfromclara.wiki_pageswpwherewp.id=p_page;',
+    'perform1fromclara.clientsclwherecl.id=v_clientandcl.firm_id=v_firmforupdate',
+    'select*intopfromclara.wiki_pageswhereid=p_pageforupdate',
+    'ifnotfoundorp.firm_id<>c.firmorp.client_id<>v_clientthen',
+    'clara._reserve_op(c.firm,''retire_wiki_page''',
+    'updateclara.wiki_pagessetstate=''retired'''
+  ];
+  v_prev := 0;
+  foreach v_txt in array v_chain loop
+    v_at := position(v_txt in v_src);
+    if v_at = 0 or v_at <= v_prev then
+      raise exception '0019 retire_wiki_page acquisition-chain drift at "%" — the client row must be locked BEFORE the page row',
+        v_txt using errcode = 'CLR10';
+    end if;
+    v_prev := v_at;
+  end loop;
+
+  -- ---- §3a THE CLIENT -> PAGE ORDER, OVER EVERY clara FUNCTION. §3's no-deadlock
+  -- argument rests on one absolute claim — no actor takes a clara.wiki_pages row before a
+  -- clara.clients row — and ratchet R1 "verified" it over three NAMED functions, which is
+  -- how R2 found retire_wiki_page violating it. The claim is only worth its enforcement,
+  -- so it is now asserted over the WHOLE schema: any function that locks a page row
+  -- either locks a client row FIRST, or fails the apply. A function that locks a page row
+  -- and NO client row is also a violator: it may request anything afterwards (page
+  -- retirement requested clara.firm_event_seq through _append_event, 0005:482-484, which
+  -- is precisely why "it is a leaf" was false), and a lock held outside the shared prefix
+  -- is exactly the reverse edge a cycle needs. Positions are taken on the
+  -- whitespace-stripped body, the drift-guard idiom used throughout this migration. ----
+  select string_agg(q.sig, ', ' order by q.sig) into v_bad
+    from (
+      select p.oid::regprocedure::text as sig,
+             regexp_instr(regexp_replace(lower(p.prosrc), '\s+', '', 'g'),
+               'fromclara\.wiki_pages[a-z]*where[^;]*forupdate') as page_at,
+             regexp_instr(regexp_replace(lower(p.prosrc), '\s+', '', 'g'),
+               'fromclara\.clients[a-z]*where[^;]*forupdate') as client_at
+        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'clara' and p.prolang = (select oid from pg_language where lanname = 'plpgsql')
+    ) q
+   where q.page_at > 0 and (q.client_at = 0 or q.client_at > q.page_at);
+  if v_bad is not null then
+    raise exception '0019 lock-order violation — these clara function(s) take a wiki_pages row FOR UPDATE without a preceding clara.clients row FOR UPDATE: %',
+      v_bad using errcode = 'CLR10';
+  end if;
+  -- …and the scan is NOT vacuous: the three actors that DO take both must be found by it.
+  select count(*) into v_n
+    from (
+      select regexp_instr(regexp_replace(lower(p.prosrc), '\s+', '', 'g'),
+               'fromclara\.wiki_pages[a-z]*where[^;]*forupdate') as page_at
+        from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'clara'
+         and p.oid in (
+           'clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,uuid,text,text)'::regprocedure,
+           'clara.mark_wiki_citations_stale(uuid,uuid,text,text)'::regprocedure,
+           'clara.retire_wiki_page(uuid,text,text)'::regprocedure)
+    ) q
+   where q.page_at > 0;
+  if v_n <> 3 then
+    raise exception '0019 lock-order scan is vacuous — it recognises only % of the 3 page-locking actors', v_n
       using errcode = 'CLR10';
   end if;
 
