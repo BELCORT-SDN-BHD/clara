@@ -11,6 +11,7 @@ import { pgrestSelect, rpc } from "./wire";
 import type { PgrestError } from "./wire";
 import {
   toDryRun,
+  toApprovalReceipt,
   type OpeningSeedRow,
   type OpeningTargetRow,
   type OpeningItemRow,
@@ -18,6 +19,7 @@ import {
   type OpeningDryRun,
   type OpeningItemKind,
   type ParseResult,
+  type ApprovalReceipt,
 } from "../opening/openingModel";
 
 const opKey = () => crypto.randomUUID();
@@ -245,41 +247,43 @@ export async function recordOpeningTarget(token: string, seedId: string, line: R
   await rpc("record_opening_target", { p_seed: seedId, p_line: line, p_op_key: opKey() }, token);
 }
 
-/** The LIVE keyed client-attribution resolution for THIS seed, if one exists. F-C1: a
- *  keyed seed's attribution is an EXPLICIT once-per-seed human act (the seed-workbench
- *  "Confirm client attribution" verb), never a draft-path side effect — so it is stamped
- *  with `evidence.seed_id = <seed>` and read back here. Returns the resolution id or null.
- *  (client_resolutions SELECT is granted to clara_authenticated with a firm RLS policy; 0003.) */
+/** The LIVE bound keyed client-attribution resolution for THIS seed, if one exists (0018
+ *  §1 — the capability-confinement fix). F-C1: a keyed seed's attribution is an EXPLICIT
+ *  once-per-seed human act (the seed-workbench "Confirm client attribution" verb), never a
+ *  draft-path side effect. The read-back filters the STRUCTURAL binding
+ *  (bound_scope_kind='opening_seed', bound_scope_id=<seed>) PLUS the same live/method/
+ *  confidence eligibility the bound assert itself re-checks (superseded_at is null; method
+ *  human/rule; confidence >=0.95) — never id alone, so a superseded or sub-floor row can
+ *  never read back as "confirmed". (client_resolutions SELECT is granted to
+ *  clara_authenticated with a firm RLS policy; 0003.) */
 export async function getKeyedSeedResolution(token: string, seedId: string): Promise<string | null> {
   const rows = await pgrestSelect<{ id: string }>(
-    `client_resolutions?subject_kind=eq.manual&superseded_at=is.null` +
-      `&evidence->>seed_id=eq.${encodeURIComponent(seedId)}&select=id&order=created_at.desc&limit=1`,
+    `client_resolutions?bound_scope_kind=eq.opening_seed&bound_scope_id=eq.${encodeURIComponent(seedId)}` +
+      `&superseded_at=is.null&method=in.(human,rule)&confidence=gte.0.95` +
+      `&select=id&order=created_at.desc&limit=1`,
     token,
   );
   return rows[0]?.id ?? null;
 }
 
-/** Mint the ONE keyed client-attribution resolution for a seed (F-C1 — the EXPLICIT human
- *  attribution act on the keyed seed workbench, not a draft-path side effect). draft_opening_item
- *  needs a client attribution even with no tie document — assert_client_resolved with a null
- *  document accepts any human resolution ≥0.95 for the client. Subject_kind='manual', method
- *  human, confidence 1.0; the evidence carries `seed_id` so the workbench reads it back and every
- *  keyed draft form consumes it. record_client_resolution floors at bookkeeper+ (CLR03 otherwise). */
+/** Mint the ONE bound keyed client-attribution resolution for a seed (0018 §1 — the
+ *  EXPLICIT human attribution act on the keyed seed workbench, F-C1, never a draft-path
+ *  side effect). The bound mint verb `record_opening_keyed_resolution` pins
+ *  subject_kind='manual'/method='human'/confidence=1.0 SERVER-SIDE (a categorical human
+ *  confirmation — NO caller confidence arg) and structurally binds the resolution to THIS
+ *  seed (bound_scope_kind='opening_seed', bound_scope_id=p_seed), so it can never serve a
+ *  different seed/document's draft (the capability-confinement fix — generic
+ *  assert_client_resolved now rejects any bound row). The canonical evidence spine
+ *  ({source:'opening_keyed_seed', seed_id}) is stamped by the DB itself, merged with the
+ *  caller's p_evidence — an empty object is sufficient here. Floors at bookkeeper+ (CLR03/
+ *  CLR04 otherwise); refuses CLR10 tie_document_present if the seed is document-tied. */
 export async function recordKeyedClientResolution(token: string, clientId: string, seedId: string): Promise<string> {
   const out = (await rpc(
-    "record_client_resolution",
-    {
-      p_client: clientId,
-      p_subject_kind: "manual",
-      p_subject: clientId,
-      p_confidence: 1.0,
-      p_method: "human",
-      p_evidence: { source: "opening_keyed_seed", seed_id: seedId },
-      p_op_key: opKey(),
-    },
+    "record_opening_keyed_resolution",
+    { p_client: clientId, p_seed: seedId, p_evidence: {}, p_op_key: opKey() },
     token,
   )) as { resolution_id?: string } | null;
-  if (!out?.resolution_id) throw new Error("record_client_resolution returned no resolution_id");
+  if (!out?.resolution_id) throw new Error("record_opening_keyed_resolution returned no resolution_id");
   return out.resolution_id;
 }
 
@@ -313,17 +317,25 @@ export async function draftOpeningItem(
   return { item_id: out.item_id, entry_id: out.entry_id, revision_token: out.revision_token ?? "" };
 }
 
+/** 0018 §2: the 5-arg seed_fixed_asset. `resolution` flows to `p_resolution` ONLY on a
+ *  KEYED seed (the core routes it to the §1 bound assert) — pass the seed's bound
+ *  attribution id. On a TIED seed pass null and the key is OMITTED entirely: the DB locks
+ *  the exact active filing itself and derives the resolution from THAT filing id (closes
+ *  the retire/refile race vs an unlocked read); sending a non-null p_resolution alongside a
+ *  tie refuses CLR10 resolution_conflicts_with_tie. Omitting (vs sending null) also keeps
+ *  the op_key hash byte-identical to the pre-0018 4-arg receipts when unresolved. */
 export async function seedFixedAsset(
   token: string,
   clientId: string,
   seedId: string,
   asset: Record<string, unknown>,
+  resolution: string | null,
 ): Promise<{ item_id: string; entry_id: string; fixed_asset_id: string | null }> {
-  const out = (await rpc(
-    "seed_fixed_asset",
-    { p_client: clientId, p_seed: seedId, p_asset: asset, p_op_key: opKey() },
-    token,
-  )) as { item_id?: string; entry_id?: string; fixed_asset_id?: string } | null;
+  const args: Record<string, unknown> = { p_client: clientId, p_seed: seedId, p_asset: asset, p_op_key: opKey() };
+  if (resolution) args.p_resolution = resolution;
+  const out = (await rpc("seed_fixed_asset", args, token)) as
+    | { item_id?: string; entry_id?: string; fixed_asset_id?: string }
+    | null;
   if (!out?.item_id || !out?.entry_id) throw new Error("seed_fixed_asset returned no item");
   return { item_id: out.item_id, entry_id: out.entry_id, fixed_asset_id: out.fixed_asset_id ?? null };
 }
@@ -338,17 +350,18 @@ export async function supersedeOpeningItem(
 
 // The two serializable approval fns. A 40001 (serialization_failure) means the txn
 // rolled back under a concurrent live approval; the wire retries the SAME op_key ONCE
-// (F10) — idempotent on the DB. Any other refusal (CLR05 self_attestation, CLR31
-// tie_mismatch, revision_mismatch) throws for verbatim rendering.
-async function rpcSerializableOnce(fn: string, args: Record<string, unknown>, token: string): Promise<void> {
+// (F10) — idempotent on the DB, so the retry's body is the authoritative receipt. Any
+// other refusal (CLR05 self_attestation, CLR31 tie_mismatch, revision_mismatch) throws
+// for verbatim rendering. Returns the DB's raw jsonb body (the caller runtime-validates
+// it into an ApprovalReceipt) — never swallowed, since 0018 needs it on BOTH paths.
+async function rpcSerializableOnce(fn: string, args: Record<string, unknown>, token: string): Promise<unknown> {
   const key = opKey();
   try {
-    await rpc(fn, { ...args, p_op_key: key }, token);
+    return await rpc(fn, { ...args, p_op_key: key }, token);
   } catch (e) {
     const pe = e as PgrestError;
     if (pe.pgCode === "40001") {
-      await rpc(fn, { ...args, p_op_key: key }, token);
-      return;
+      return await rpc(fn, { ...args, p_op_key: key }, token);
     }
     throw e;
   }
@@ -366,8 +379,8 @@ export async function approveOpeningSeed(
     entryRevisions: Record<string, string>;
     attestation: string | null;
   },
-): Promise<void> {
-  await rpcSerializableOnce(
+): Promise<ApprovalReceipt> {
+  const body = await rpcSerializableOnce(
     "approve_opening_seed",
     {
       p_seed: args.seedId,
@@ -378,18 +391,24 @@ export async function approveOpeningSeed(
     },
     token,
   );
+  const receipt = toApprovalReceipt(body);
+  if (!receipt) throw new Error("approve_opening_seed returned no valid receipt (entry_count missing)");
+  return receipt;
 }
 
 /** approve_opening_correction (K6). Same AMB-3 revision map; no plan/tie args. */
 export async function approveOpeningCorrection(
   token: string,
   args: { seedId: string; entryRevisions: Record<string, string>; attestation: string | null },
-): Promise<void> {
-  await rpcSerializableOnce(
+): Promise<ApprovalReceipt> {
+  const body = await rpcSerializableOnce(
     "approve_opening_correction",
     { p_seed: args.seedId, p_entry_revisions: args.entryRevisions, p_attestation: args.attestation },
     token,
   );
+  const receipt = toApprovalReceipt(body);
+  if (!receipt) throw new Error("approve_opening_correction returned no valid receipt (entry_count missing)");
+  return receipt;
 }
 
 // ---------------------------------------------------------------------------

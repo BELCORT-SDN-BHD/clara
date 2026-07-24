@@ -1,14 +1,15 @@
 "use client";
 
-// The opening-item drafting forms (LANE D3; §1 K3/AMB-4/AMB-5/WB-R11/WB-R12 + K8).
-// One form per item kind; the payload is built by the pure ./openingPayloads builders and
-// posted through draft_opening_item / seed_fixed_asset. Provenance (document vs keyed) is
-// resolved from the seed: a document-tied seed binds the exact filing/hash; a keyed seed
-// mints a client-scoped resolution once. FORK-7 (non-straight-line depreciation) is left
-// to the DB, whose refusal renders verbatim. No figure is computed — cents pass through.
+// The opening-item drafting forms (LANE D3; §1 K3/AMB-4/AMB-5/WB-R11/WB-R12 + K8; 0018 §2
+// lifts the keyed fixed-asset exclusion). One form per item kind; the payload is built by
+// the pure ./openingPayloads builders and posted through draft_opening_item / seed_fixed_asset.
+// Provenance (document vs keyed) is resolved from the seed: a document-tied seed lets the DB
+// lock the exact active filing itself (seed_fixed_asset omits p_resolution); a keyed seed
+// sends its bound client-attribution resolution as p_resolution. FORK-7 (non-straight-line
+// depreciation) is left to the DB, whose refusal renders verbatim. No figure is computed —
+// cents pass through.
 
 import { useState } from "react";
-import Link from "next/link";
 import type { OpeningSeedRow, OpeningItemKind } from "./openingModel";
 import { refusalLabel, refusalHint } from "./openingModel";
 import {
@@ -85,10 +86,10 @@ export function OpeningItemForm({
   }
 
   const isKeyed = seed.tie_document_id === null;
-  // F-H4: seed_fixed_asset derives its resolution from a TIE DOCUMENT, so on a keyed seed
-  // every call fails CLR01. Do not offer the fixed-asset kind on keyed seeds; render the
-  // honest FORK-7 path instead (below).
-  const availableKinds = isKeyed ? KINDS.filter((k) => k.value !== "fixed_asset") : KINDS;
+  // 0018 §2: seed_fixed_asset now accepts a 5th arg (p_resolution) that flows to the §1
+  // bound assert on a keyed seed, so fixed assets are reachable on BOTH lanes — every kind
+  // is always offered.
+  const availableKinds = KINDS;
   // F-C1: a keyed seed cannot draft until its explicit client attribution exists.
   const attributionMissing = isKeyed && !keyedResolution;
 
@@ -126,7 +127,10 @@ export function OpeningItemForm({
       if (!built.ok) return setErr(built.error);
       setBusy(true);
       try {
-        await seedFixedAsset(token, clientId, seed.id, built.payload);
+        // 0018 §2: p_resolution flows ONLY on a keyed seed (the bound attribution already
+        // gating this form's draft button); a tied seed omits it — the DB locks the exact
+        // active filing itself.
+        await seedFixedAsset(token, clientId, seed.id, built.payload, isKeyed ? keyedResolution : null);
         reset();
         onChanged();
       } catch (e) {
@@ -299,16 +303,6 @@ export function OpeningItemForm({
             </label>
           ))}
         </div>
-      ) : null}
-
-      {/* F-H4: a keyed seed cannot register fixed assets in v25 (seed_fixed_asset derives its
-          resolution from a tie document). Offer the honest FORK-7 path instead. */}
-      {isKeyed ? (
-        <p className={styles.hint}>
-          A keyed seed cannot register fixed assets in v25 — record it as a still-to-capture plan item (FORK-7) and complete
-          it via the B-12 document lane.{" "}
-          <Link className={styles.linkButton} href={`/clients/plan?client_id=${clientId}`}>Record it on the plan →</Link>
-        </p>
       ) : null}
 
       <div className={styles.actions}>
