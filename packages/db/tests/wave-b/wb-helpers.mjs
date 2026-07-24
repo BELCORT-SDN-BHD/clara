@@ -126,7 +126,8 @@ export const WB_ACL = {
   create_opening_seed: ["authenticated"],
   draft_opening_item: ["authenticated"],
   record_opening_target: ["authenticated"],
-  seed_fixed_asset: ["authenticated"],
+  record_opening_keyed_resolution: ["authenticated"], // [AMB-0018-5] the 0018 seed-bound keyed mint
+  seed_fixed_asset: ["authenticated"], // [AMB-0018-5] now the 5-arg (p_resolution default null)
   approve_opening_seed: ["authenticated"],
   supersede_opening_item: ["authenticated"],
   approve_opening_correction: ["authenticated"],
@@ -232,6 +233,40 @@ export function fail0017(live) {
   if (!live) {
     throw new Error(
       "0017 NOT applied (clara.schema_migrations has no '0017_%' row) — the Wave-B pins are not built; this battery is REQUIRED to fail against the 16-migration prestate (work-order discipline)",
+    );
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 0018 readiness (the Gate-K/accounting-domain wave, WB-R24(i)) — the SAME
+// FAIL-never-skip discipline as fail0017, one migration up. The 0018 blind
+// battery (wb-0018-*.test.mjs) is REQUIRED to fail RED against the 17-migration
+// prestate: its pins (subject-bound keyed resolutions, seed_fixed_asset
+// p_resolution, dual-lane K5/K6 guards, typed commit reasons) are not built yet.
+// ---------------------------------------------------------------------------
+
+export async function has0018() {
+  try {
+    const r = await rootQuery("select version from clara.schema_migrations where version ~ '^0018_'");
+    return r.rows.length > 0;
+  } catch { return false; }
+}
+
+/** Best-effort migrate (idempotent) then the 0018 gate. Mirrors wbEnsureReady. */
+export async function wbEnsureReady18() {
+  try {
+    const { ensureReady } = await import("../rig-docs-fixtures.mjs");
+    await ensureReady();
+  } catch { /* dirty tree — probe the live catalog as-is */ }
+  return has0018();
+}
+
+/** The per-cell 0018 gate: at 17 migrations every 0018 cell FAILS loudly (the
+ *  pins are not built yet — a red battery is the CORRECT pre-integration state). */
+export function fail0018(live) {
+  if (!live) {
+    throw new Error(
+      "0018 NOT applied (clara.schema_migrations has no '0018_%' row) — the Gate-K/accounting-domain pins (WB-R24(i)) are not built; this battery is REQUIRED to fail against the 17-migration prestate (work-order discipline)",
     );
   }
 }

@@ -16,7 +16,7 @@ import {
   recordOpeningTargetsParsed, stageBeeSet, revMapOf, planRevision,
   approveOpeningSeed, approveOpeningCorrection, supersedeOpeningItem,
   seedFixedAsset, openingItemRows, entryRow, entryLines, faRow, seedRegRow,
-  approveEntry, reviseEntry, withdrawDraft, reverseEntry, freshResolution,
+  approveEntry, reviseEntry, withdrawDraft, reverseEntry, freshResolution, keyedRes,
   commitOnboarding, updatePlan, clientRow, draftEntryV3,
   publishWikiPage, setBudget, WB_BUDGET_SEEDS, racePublishPages,
   createClient, upsertAccountClassed, recordParsedTargets,
@@ -58,7 +58,8 @@ test("[R1-F1a]: generic approve/revise/withdraw each REFUSE an is_opening_balanc
   const sr = await createOpeningSeed(w.users.bob, { client: o.client, plan: o.plan });
   const seed = sr.seed_id ?? sr.id;
   const d = await draftOpeningItem(w.users.bob, {
-    client: o.client, seed, resolution: resOn(w.users.bob, o.client),
+    // [AMB-0018-1] keyed lane → seed-bound mint (WB-R24(i)).
+    client: o.client, seed, resolution: keyedRes(w.users.bob, { client: o.client, seed }),
     item: { item_kind: "gl_balance", item_key: "f1:cash" },
     lines: [{ account_code: WB_COA.cash, debit_cents: 1_000, credit_cents: 0 }],
   });
@@ -179,17 +180,20 @@ test("[R1-F9]: obe_plug rides AMB-4 — lines REFUSED, amount from p_item, BOTH 
   await seedOpeningCoa(w.users.alice, oA.client);
   const srA = await createOpeningSeed(w.users.bob, { client: oA.client, plan: oA.plan });
   const seedA = srA.seed_id ?? srA.id;
+  // [AMB-0018-1] keyed lane → one seed-bound mint reused across seedA's items
+  // (incl. the obe_plug-lines refusal probe, so it reaches the CLR10 lines check
+  // rather than being blocked earlier at the binding assert).
   await draftOpeningItem(w.users.bob, {
-    client: oA.client, seed: seedA, resolution: resOn(w.users.bob, oA.client),
+    client: oA.client, seed: seedA, resolution: keyedRes(w.users.bob, { client: oA.client, seed: seedA }),
     item: { item_kind: "gl_balance", item_key: "f9:cash" },
     lines: [{ account_code: WB_COA.cash, debit_cents: 1_000, credit_cents: 0 }] });
   await assertRaises(CLR.badRequest, () => draftOpeningItem(w.users.bob, {
-    client: oA.client, seed: seedA, resolution: resOn(w.users.bob, oA.client),
+    client: oA.client, seed: seedA, resolution: keyedRes(w.users.bob, { client: oA.client, seed: seedA }),
     item: { item_kind: "obe_plug", item_key: "f9:pluglines", amount_cents: -1_000 },
     lines: [{ account_code: WB_COA.expense, debit_cents: 1_000, credit_cents: 0 }],
   }), "obe_plug with caller-supplied lines (AMB-4: any supplied lines are REJECTED)");
   const plugA = await draftOpeningItem(w.users.bob, {
-    client: oA.client, seed: seedA, resolution: resOn(w.users.bob, oA.client),
+    client: oA.client, seed: seedA, resolution: keyedRes(w.users.bob, { client: oA.client, seed: seedA }),
     item: { item_kind: "obe_plug", item_key: "f9:plug", amount_cents: -1_000 },
   });
   // AMB-4 CLARIFICATION (fix-round 1 ruling): the plug is one ITEM minting one
@@ -208,11 +212,11 @@ test("[R1-F9]: obe_plug rides AMB-4 — lines REFUSED, amount from p_item, BOTH 
   const srB = await createOpeningSeed(w.users.bob, { client: oB.client, plan: oB.plan });
   const seedB = srB.seed_id ?? srB.id;
   await draftOpeningItem(w.users.bob, {
-    client: oB.client, seed: seedB, resolution: resOn(w.users.bob, oB.client),
+    client: oB.client, seed: seedB, resolution: keyedRes(w.users.bob, { client: oB.client, seed: seedB }),
     item: { item_kind: "gl_balance", item_key: "f9:cap" },
     lines: [{ account_code: WB_COA.shareCap, debit_cents: 0, credit_cents: 1_000 }] });
   const plugB = await draftOpeningItem(w.users.bob, {
-    client: oB.client, seed: seedB, resolution: resOn(w.users.bob, oB.client),
+    client: oB.client, seed: seedB, resolution: keyedRes(w.users.bob, { client: oB.client, seed: seedB }),
     item: { item_kind: "obe_plug", item_key: "f9:plug", amount_cents: 1_000 },
   });
   const linesB = await entryLines(plugB.entry_id);

@@ -13,7 +13,7 @@ import {
   assertRaises, assertRaisesOneOf, endPool, printLaneNotes, noteLane,
   fail0017, wbEnsureReady, fnExists,
   buildWaveBWorld, onboardingClient, seedOpeningCoa, openingDoc,
-  createOpeningSeed, draftOpeningItem, getOpeningDryrun,
+  createOpeningSeed, draftOpeningItem, getOpeningDryrun, keyedRes,
   stageBeeSet, BEE, WB_COA,
   entryRow, entryLines, openingItemRows, recordResolution, freshResolution,
   draftEntryV3, approveEntry, trialBalanceAsOf, trialBalance1,
@@ -110,22 +110,30 @@ test("K3: the WB-R15 keyed FALLBACK lane rides a NO-document seed; under a tie d
   // [R1-F2] (fix-round 1 invalidation): keyed is lawful ONLY without a tie
   // document — the fallback stages its own document-less seed, and the old
   // tie-document staging becomes the negative probe.
+  // [AMB-0018-1]/WB-R24(i): the keyed lane is now SEED-BOUND — its attribution
+  // is minted by record_opening_keyed_resolution for THIS keyed seed (the
+  // attributed-keyed spirit of WB-R15, tightened to seed-grain). A document-TIED
+  // seed can never mint such a binding, so a keyed draft under a tie registry is
+  // now refused at the BINDING layer (CLR01, the bound-assert precedes the tie
+  // check in _draft_opening_item_core) as well as the document-primary tie policy
+  // — either refusal proves the same invariant: document-primary is law.
   const o2 = await onboardingClient(w.users.hana);
   await seedOpeningCoa(w.users.alice, o2.client);
   const sr = await createOpeningSeed(w.users.bob, { client: o2.client, plan: o2.plan });
+  const keyedSeed = sr.seed_id ?? sr.id;
   const r = await draftOpeningItem(w.users.bob, {
-    client: o2.client, seed: sr.seed_id ?? sr.id, resolution: res(w.users.bob, o2.client),
+    client: o2.client, seed: keyedSeed, resolution: keyedRes(w.users.bob, { client: o2.client, seed: keyedSeed }),
     item: { item_kind: "gl_balance", item_key: "k3:keyed1" },
     lines: [{ account_code: WB_COA.expense, debit_cents: 3_300, credit_cents: 0 }],
   });
   const e = await entryRow(r.entry_id);
   assert.equal(e.document_id, null, "no document bound (keyed lane)");
   assert.match(e.memo ?? "", /opening carry-down/i, "the memo basis 'opening carry-down: <item_key>' (ck_je_basis)");
-  await assertRaisesOneOf([CLR30, CLR.badRequest], () => draftOpeningItem(w.users.bob, {
+  await assertRaisesOneOf([CLR30, CLR.badRequest, CLR.client], () => draftOpeningItem(w.users.bob, {
     client: onb.client, seed, resolution: res(w.users.bob, onb.client),
     item: { item_kind: "gl_balance", item_key: `k3:keyedtie:${opk("x")}` },
     lines: [{ account_code: WB_COA.expense, debit_cents: 3_300, credit_cents: 0 }],
-  }), "a keyed item under the TIE-DOCUMENT registry (document-primary is law)");
+  }), "a keyed item under the TIE-DOCUMENT registry (document-primary is law; WB-R24(i) refuses it at the binding layer)");
 });
 
 test("K3: CLR02 is never loosened — a document item with a MISMATCHED sha refuses", async () => {

@@ -110,12 +110,55 @@ export async function cancelOpeningSeed(sub, { seed, reason = "rig cancel", opKe
   return r.rows[0].r;
 }
 
-/** [AMB-8] — one-call FA seeding. */
-export async function seedFixedAsset(sub, { client, seed, asset, opKey = null }) {
-  const r = await humanQuery(sub,
-    "select clara.seed_fixed_asset(p_client => $1, p_seed => $2, p_asset => $3::jsonb, p_op_key => $4) as r",
-    [client, seed, jtxt(asset), opKey ?? opk("fa")]);
+/** [AMB-8] — one-call FA seeding. [0018 §2] gains the OPTIONAL p_resolution
+ *  named arg: OMITTED (the default, `resolution` key absent/undefined) binds the
+ *  4-arg call verbatim — the exact byte-shape the five pinned FA tests already
+ *  pass, so they stay green against the 5-arg-with-default signature; SUPPLIED
+ *  (a uuid, or an explicit null — the contract treats null ≡ omitted) adds
+ *  p_resolution to the call. Awaits a promise resolution the same way the K
+ *  drafters do. */
+export async function seedFixedAsset(sub, { client, seed, asset, resolution = undefined, opKey = null }) {
+  const specs = ["p_client => $1", "p_seed => $2", "p_asset => $3::jsonb"];
+  const vals = [client, seed, jtxt(asset)];
+  if (resolution !== undefined) { specs.push(`p_resolution => $${vals.length + 1}`); vals.push(await resolution); }
+  specs.push(`p_op_key => $${vals.length + 1}`); vals.push(opKey ?? opk("fa"));
+  const r = await humanQuery(sub, `select clara.seed_fixed_asset(${specs.join(", ")}) as r`, vals);
   return r.rows[0].r;
+}
+
+/** [0018 §1] The subject-bound keyed-resolution mint verb. Human lane, bookkeeper+
+ *  floor; the fn pins confidence 1.0 + subject_kind='manual'/subject_id=p_seed +
+ *  bound_scope_kind='opening_seed'/bound_scope_id=p_seed internally — there is NO
+ *  caller confidence/subject arg (a categorical human confirmation). Returns the
+ *  receipt jsonb; callers read .resolution_id.
+ *  [R1-0018-2] `evidence: null` (explicit) sends a genuine SQL-NULL p_evidence —
+ *  distinct from `jtxt(null)` (the string "null", i.e. the JSON null literal,
+ *  which is a non-object and would wrongly refuse evidence_not_object). Every
+ *  other value (the {} default, an object, or a non-object probe payload) still
+ *  goes through jtxt() unchanged. */
+export async function recordOpeningKeyedResolution(sub, { client, seed, evidence = {}, opKey = null }) {
+  const r = await humanQuery(sub,
+    "select clara.record_opening_keyed_resolution(p_client => $1, p_seed => $2, p_evidence => $3::jsonb, p_op_key => $4) as r",
+    [client, seed, evidence === null ? null : jtxt(evidence), opKey ?? opk("okr")]);
+  return r.rows[0].r;
+}
+
+// [AMB-0018-1] The keyed opening lane (draft_opening_item / seed_fixed_asset with
+// p_document NULL) is now SEED-BOUND (WB-R24(i)): its resolution must be minted by
+// record_opening_keyed_resolution for that exact seed. This helper mints one bound
+// resolution per KEYED seed and reuses it across every keyed draft on that seed
+// (seed-grain binding is by design — one live binding serves the whole set). It
+// returns a promise resolving to the resolution_id, which the drafter wrappers
+// already `await`, so a keyed-lane `freshResolution(sub, client)` call site becomes
+// a drop-in `keyedRes(sub, { client, seed })` with no shape change. NOT for tied
+// seeds (record_opening_keyed_resolution refuses those) or the document lane.
+const _keyedResBySeed = new Map(); // seed -> Promise<resolution_id>
+export function keyedRes(sub, { client, seed }) {
+  if (!_keyedResBySeed.has(seed)) {
+    _keyedResBySeed.set(seed, recordOpeningKeyedResolution(sub, { client, seed })
+      .then((m) => m.resolution_id ?? m.id));
+  }
+  return _keyedResBySeed.get(seed);
 }
 
 export async function trialBalanceAsOf(sub, { client, asOf }) {
@@ -239,6 +282,9 @@ export const entryLines = (entry) =>
   rowsOf("select to_jsonb(l) as row from clara.journal_lines l where l.entry_id=$1 order by l.line_no", [entry]);
 export const faRow = (id) =>
   row1("select to_jsonb(f) as row from clara.fixed_assets f where f.id=$1", [id]);
+/** [0018 §1] A client_resolutions row (bound-column / supersede-state asserts). */
+export const resolutionRow = (id) =>
+  row1("select to_jsonb(r) as row from clara.client_resolutions r where r.id=$1", [id]);
 
 export const batchRow = (batch) =>
   row1("select to_jsonb(b) as row from clara.seeding_batches b where b.id=$1", [batch]);
