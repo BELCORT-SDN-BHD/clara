@@ -104,12 +104,12 @@ test("selectionAccountCount reads the count straight off the fixed template, nev
 
 // --- COA_TEMPLATE's own structural integrity -------------------------------------------
 
-test("COA_TEMPLATE totals 106 accounts across every block, core+optional partitioning cleanly", () => {
+test("COA_TEMPLATE totals 117 accounts across every block, core+optional partitioning cleanly", () => {
   const total = COA_TEMPLATE.reduce((n, b) => n + b.accounts.length, 0);
-  assert.equal(total, 106);
+  assert.equal(total, 117);
   const coreTotal = CORE_BLOCKS.reduce((n, b) => n + b.accounts.length, 0);
   const optionalTotal = COA_TEMPLATE.filter((b) => b.tier === "optional").reduce((n, b) => n + b.accounts.length, 0);
-  assert.equal(coreTotal + optionalTotal, 106);
+  assert.equal(coreTotal + optionalTotal, 117);
   for (const b of COA_TEMPLATE) assert.ok(b.tier === "core" || b.tier === "optional", `${b.key} has a recognized tier`);
 });
 
