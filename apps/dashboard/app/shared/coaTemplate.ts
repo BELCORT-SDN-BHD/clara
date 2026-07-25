@@ -1,4 +1,6 @@
-// The default Chart of Accounts template for a Malaysian private company (Sdn Bhd).
+// The default Chart of Accounts template for a Malaysian accounting firm's clients — a
+// private company (Sdn Bhd) by default, with an alternative equity shape for a sole
+// proprietorship (see the ENTITY-SHAPE NOTE below).
 //
 // PROVENANCE — read docs/plan/research/wave-b/malaysian-coa-official-research.md (the
 // official-source findings) and coa-review-adjudications.md (what two adversarial review
@@ -46,6 +48,29 @@
 // with a five-step performance-obligation model, so the construction module and the
 // unbilled-income accounts will need revisiting before a client's first period beginning
 // on or after 1 January 2027.
+//
+// ENTITY-SHAPE NOTE: the chart is per-client data and clara.coa_accounts is entity-agnostic,
+// so the template carries a SECOND equity shape rather than forcing every client into a
+// company. MPERS reaches only a "private entity", which MASB defines as "a private company
+// as defined in section 2 of the Companies Act 2016" that neither prepares nor lodges
+// financial statements under a Securities Commission or Bank Negara law and is not a
+// subsidiary, associate or jointly controlled by an entity that does. A sole proprietorship
+// registered under the Registration of Businesses Act 1956 is not a company, so MPERS does
+// not reach it — and no other financial-reporting framework is imposed on it either: that
+// Act is "An Act to provide for the registration of businesses", and its arrangement of
+// sections runs registration, renewal, termination, appeal, offences and rule-making, with
+// NO accounts, financial-statement or audit provision anywhere in it. What does bind is
+// ITA s.82, on which LHDN's Public Ruling "Keeping Sufficient Records (Individuals &
+// Partnerships)" requires books "sufficient to explain the transactions and to enable a true
+// and fair profit and loss account and a balance sheet to be prepared", and separately names
+// records of private money brought into the business, of personal drawings, and of capital
+// and current accounts. So TWO blocks are entity-shaped, and both are declared mutually
+// exclusive with `sole-proprietor`: the `equity` block (clara.coa_accounts permits exactly
+// one retained-earnings marker per client, and both shapes need it) and `company-officers`
+// (dividends and directors presuppose shareholders and a board — see that block's blurb for
+// why a note could not have carried this). Everything else is common to both shapes, and the
+// roll-up strings there name ordinary statement lines an unincorporated balance sheet carries
+// too. See limitation 5.
 
 export type CoaTemplateAccount = {
   code: string;
@@ -84,6 +109,26 @@ export type CoaTemplateBlock = {
    * optional = activity-, registration- or regime-gated. Never seeded unless chosen.
    */
   tier: "standard" | "optional";
+  /**
+   * Blocks that CANNOT be seeded alongside this one. Declared on BOTH sides and test-pinned
+   * symmetric. TWO reasons are admissible, both structural rather than stylistic:
+   *
+   *   (a) A DB constraint refuses MID-APPLY. clara.uq_coa_special is UNIQUE per
+   *       (client_id, special_acc_type), so two blocks each carrying a retained-earnings
+   *       marker are mutually exclusive by construction, not by preference. Note what that
+   *       failure actually looks like: the apply loop catches per-account errors and
+   *       CONTINUES, so it is not a truncated run — it is one error row among ~200, and a
+   *       chart that looks complete while the wrong account holds accumulated equity.
+   *   (b) The accounts presuppose a legal form the other block's entity does not have —
+   *       dividends and directors against a sole proprietorship. Selection is per BLOCK,
+   *       so an instruction to deselect individual accounts would name an operation the
+   *       workbench cannot perform; only a block can carry the entity choice.
+   *
+   * toggleBlockKey() drops the conflicting selection so the operator sees a checkbox change
+   * instead of either outcome. Two STANDARD blocks may never conflict — the default
+   * selection would then be invalid on its face.
+   */
+  conflictsWith?: readonly string[];
   blurb: string;
   accounts: CoaTemplateAccount[];
 };
@@ -130,6 +175,13 @@ export const MPERS_ROLLUPS = [
   "Equity — other reserves",
   "Equity — retained earnings",
   "Equity — retained earnings movement",
+  // The unincorporated equity shape. MPERS reaches only a private COMPANY (Companies Act
+  // 2016 s.2), so a sole proprietorship's equity section has no MPERS face line at all —
+  // these two name the line its balance sheet actually carries and say so in their own
+  // text, rather than borrowing a company roll-up that would misdescribe the entity. See
+  // the ENTITY-SHAPE NOTE and limitation 5.
+  "Equity — proprietor's capital (no MPERS roll-up)",
+  "Equity — proprietor's capital movement (no MPERS roll-up)",
   "Equity — must clear to nil (no statutory roll-up)",
   // --- income statement
   "Revenue",
@@ -164,10 +216,11 @@ export const MPERS_ROLLUPS = [
 export const COA_TEMPLATE: CoaTemplateBlock[] = [
   {
     key: "equity",
-    title: "Equity",
+    title: "Equity — company (Sdn Bhd)",
     tier: "standard",
+    conflictsWith: ["sole-proprietor"],
     blurb:
-      "No share-premium account: Companies Act 2016 s.74 abolished par value for shares (s.618 handled the transition of pre-existing premium balances). Dividends are distributions of equity, never a P&L expense.",
+      "The COMPANY equity shape, and the default. No share-premium account: Companies Act 2016 s.74 abolished par value for shares (s.618 handled the transition of pre-existing premium balances). Dividends are distributions of equity, never a P&L expense. An unincorporated client takes the sole-proprietorship equity block INSTEAD — selecting that one deselects this one, because clara.coa_accounts permits exactly one retained-earnings marker per client and both shapes need it. Opening balance equity is not here: it is machinery every client keeps, so it lives in the System block.",
     accounts: [
       { code: "100-000", name: "Share capital", type: "equity", mpers: "Equity — share capital" },
       { code: "120-000", name: "Other reserves", type: "equity", mpers: "Equity — other reserves" },
@@ -185,14 +238,42 @@ export const COA_TEMPLATE: CoaTemplateBlock[] = [
         mpers: "Equity — retained earnings movement",
         note: "A distribution, not an expense. Kept apart from 150-000 so the retained-earnings roll-forward is readable. CA 2016 ss.131-132 allow a distribution only out of profits available and only if the solvency test is satisfied.",
       },
+    ],
+  },
+  {
+    key: "company-officers",
+    title: "Directors and distributions — company only",
+    tier: "standard",
+    conflictsWith: ["sole-proprietor"],
+    blurb:
+      "Every account here presupposes a SEPARATE LEGAL PERSON with shareholders and a board: a distribution payable to members, remuneration of office-holders, and balances with directors as counterparties in their own right. A sole proprietorship has none of those — the proprietor cannot be his own director or his own debtor, and money he puts in or takes out is capital (100-CAP / 160-DRW), not a related-party balance. They are a block rather than a note because selection is per BLOCK: an instruction to deselect eight individual accounts names an operation the workbench cannot perform, so the entity choice has to carry them. Selecting the sole-proprietorship equity shape drops this block automatically. Pairs with the company equity block: 410-DIV is the payable side of 160-DIV.",
+    accounts: [
       {
-        code: "190-OBE",
-        name: "Opening balance equity (system clearing)",
-        type: "equity",
-        special: "opening_balance_equity",
-        mpers: "Equity — must clear to nil (no statutory roll-up)",
-        note: "A conversion account, not permanent equity, and not a statutory presentation concept. Must net to nil and be cleared before statutory statements are finalised.",
+        code: "250-DIR",
+        name: "Amount owing from director — non-current",
+        type: "asset",
+        mpers: "Trade and other receivables — related party (non-current)",
+        note: "Directional. Never net against 472-DIR without a legally enforceable right of set-off. MPERS 4.5 classifies by expected recovery against the twelve-month criterion, not by counterparty.",
       },
+      {
+        code: "350-D01",
+        name: "Amount owing from director — current",
+        type: "asset",
+        mpers: "Trade and other receivables — related party",
+        note: "Directional. Never net against 420-D01 without a legally enforceable right of set-off. MPERS Section 33 related-party disclosure, and CA 2016 s.249(4) allows the Registrar to require loans-to-directors disclosure.",
+      },
+      {
+        code: "410-DIV",
+        name: "Dividends payable",
+        type: "liability",
+        mpers: "Trade and other payables",
+        note: "Recognised only once the distribution is validly authorised and no longer at the company's discretion (CA 2016 ss.131-132). Pairs with 160-DIV in the company equity block.",
+      },
+      { code: "420-D01", name: "Amount owing to director — current", type: "liability", mpers: "Trade and other payables — related party" },
+      { code: "472-DIR", name: "Amount owing to director — non-current", type: "liability", mpers: "Trade and other payables — related party (non-current)" },
+      { code: "900-D01", name: "Directors' fees", type: "expense", mpers: "Administrative expenses", note: "Form C analyses fees separately from salaries. Approval follows CA 2016 s.230 — for a private company generally board approval subject to the constitution, then notification to members. CA 2016 s.249(4) disclosure." },
+      { code: "900-D04", name: "Directors' salaries and bonuses", type: "expense", mpers: "Employee benefits", note: "EPF/SOCSO/PCB consequences turn on whether the director is engaged under a CONTRACT OF SERVICE — not on the ledger label. Do not treat the fee/salary split as deciding statutory liability." },
+      { code: "900-D05", name: "Directors' benefits and other remuneration", type: "expense", mpers: "Employee benefits", note: "Benefits-in-kind need their own analysis for payroll and BIK reporting. CA 2016 s.249(4) disclosure." },
     ],
   },
   {
@@ -239,13 +320,6 @@ export const COA_TEMPLATE: CoaTemplateBlock[] = [
         mpers: "Other non-current assets",
         note: "A deposit pledged against a facility is not freely available cash and must not be presented as a cash equivalent.",
       },
-      {
-        code: "250-DIR",
-        name: "Amount owing from director — non-current",
-        type: "asset",
-        mpers: "Trade and other receivables — related party (non-current)",
-        note: "Directional. Never net against 472-DIR without a legally enforceable right of set-off.",
-      },
       { code: "250-REL", name: "Amount owing from related company — non-current", type: "asset", mpers: "Trade and other receivables — related party (non-current)" },
       {
         code: "260-DTA",
@@ -261,7 +335,7 @@ export const COA_TEMPLATE: CoaTemplateBlock[] = [
     title: "Current assets",
     tier: "standard",
     blurb:
-      "Trade receivables carries the receivable control marker. Director and related-party balances are separate, directional and never netted — MPERS Section 33 related-party disclosure, and CA 2016 s.249(4) allows the Registrar to require loans-to-directors disclosure.",
+      "Trade receivables carries the receivable control marker. Related-company balances are separate, directional and never netted — MPERS Section 33 related-party disclosure. Balances with DIRECTORS sit in the company-officers block instead, because they presuppose an office a sole proprietorship does not have.",
     accounts: [
       {
         code: "300-000",
@@ -310,7 +384,6 @@ export const COA_TEMPLATE: CoaTemplateBlock[] = [
         mpers: "Trade and other receivables",
         note: "Revenue earned and reliably measurable but not yet invoiced, under the ordinary MPERS Section 23 revenue model. A long-term construction contract is NOT accounted for here — it uses the gross amount due from customers (370-CON, construction module).",
       },
-      { code: "350-D01", name: "Amount owing from director — current", type: "asset", mpers: "Trade and other receivables — related party", note: "Directional. Never net against 420-D01 without a legally enforceable right of set-off." },
       { code: "350-R01", name: "Amount owing from related company — current", type: "asset", mpers: "Trade and other receivables — related party" },
       {
         code: "360-T01",
@@ -358,14 +431,6 @@ export const COA_TEMPLATE: CoaTemplateBlock[] = [
         mpers: "Trade and other payables",
         note: "An independently reconciled control balance in its own right; it should not disappear inside trade payables.",
       },
-      {
-        code: "410-DIV",
-        name: "Dividends payable",
-        type: "liability",
-        mpers: "Trade and other payables",
-        note: "Recognised only once the distribution is validly authorised and no longer at the company's discretion (CA 2016 ss.131-132). Pairs with 160-DIV.",
-      },
-      { code: "420-D01", name: "Amount owing to director — current", type: "liability", mpers: "Trade and other payables — related party" },
       { code: "420-R01", name: "Amount owing to related company — current", type: "liability", mpers: "Trade and other payables — related party" },
       {
         code: "430-WHT",
@@ -407,7 +472,6 @@ export const COA_TEMPLATE: CoaTemplateBlock[] = [
         note: "Separate from term borrowings. It forms part of cash and cash equivalents for cash-flow presentation only where it is repayable on demand and integral to cash management.",
       },
       { code: "461-L01", name: "Borrowings — non-current", type: "liability", mpers: "Loans and borrowings — non-current" },
-      { code: "472-DIR", name: "Amount owing to director — non-current", type: "liability", mpers: "Trade and other payables — related party (non-current)" },
       { code: "472-REL", name: "Amount owing to related company — non-current", type: "liability", mpers: "Trade and other payables — related party (non-current)" },
       {
         code: "490-D01",
@@ -501,10 +565,7 @@ export const COA_TEMPLATE: CoaTemplateBlock[] = [
       { code: "900-B04", name: "Impairment loss — collective", type: "expense", mpers: "Other operating expenses", note: "Movement on 300-901. Adjusted in the tax computation when created and reversing on write-off or release — never merged with 900-B03." },
       { code: "900-C01", name: "Commission expense", type: "expense", mpers: "Selling and distribution expenses", note: "Form C requires commissions paid to residents to be separately disclosed." },
       { code: "900-CMP", name: "Contractual compensation and damages (tax review)", type: "expense", mpers: "Other operating expenses", note: "Commercial compensation, liquidated damages and settlements — NOT statutory penalties (900-FIN). Treatment depends on whether the payment arises in the ordinary course of the trade." },
-      { code: "900-D01", name: "Directors' fees", type: "expense", mpers: "Administrative expenses", note: "Form C analyses fees separately from salaries. Approval follows CA 2016 s.230 — for a private company generally board approval subject to the constitution, then notification to members. CA 2016 s.249(4) disclosure." },
       { code: "900-D02", name: "Depreciation", type: "expense", mpers: "Administrative expenses", note: "Replaced by capital allowances in the tax computation. Under a by-function presentation, depreciation of production or delivery assets is allocated to cost of sales or distribution rather than administration — see limitation 4." },
-      { code: "900-D04", name: "Directors' salaries and bonuses", type: "expense", mpers: "Employee benefits", note: "EPF/SOCSO/PCB consequences turn on whether the director is engaged under a CONTRACT OF SERVICE — not on the ledger label. Do not treat the fee/salary split as deciding statutory liability." },
-      { code: "900-D05", name: "Directors' benefits and other remuneration", type: "expense", mpers: "Employee benefits", note: "Benefits-in-kind need their own analysis for payroll and BIK reporting. CA 2016 s.249(4) disclosure." },
       { code: "900-DON", name: "Donations with current approval evidence (tax review)", type: "expense", mpers: "Other operating expenses", note: "Post here only where a receipt from an institution, organisation or fund with current approved status is held. Approved status is verifiable on the LHDN register and is a fact about the recipient, not a claim this account makes." },
       { code: "900-DN2", name: "Donations, sponsorships and contributions — no approval evidence", type: "expense", mpers: "Other operating expenses", note: "Everything without an approved-status receipt, plus sponsorships, which follow their own rules. Kept apart so 900-DON stays a clean, evidenced figure." },
       { code: "900-DSP", name: "Loss on disposal of assets", type: "expense", mpers: "Other operating expenses", note: "Pairs with 530-G01." },
@@ -602,8 +663,51 @@ export const COA_TEMPLATE: CoaTemplateBlock[] = [
     key: "system",
     title: "System",
     tier: "standard",
-    blurb: "Machine-owned. A recurring or material rounding balance means a coding or calculation defect, not a real expense.",
-    accounts: [{ code: "999-R00", name: "Rounding", type: "expense", special: "rounding", mpers: "Other operating expenses" }],
+    blurb:
+      "Machine-owned, entity-agnostic and never deselected: both accounts exist because a DB mechanism resolves them by MARKER, not because any standard presents them. A recurring or material rounding balance means a coding or calculation defect, not a real expense. Opening balance equity sits here rather than in an equity block because the opening-balance carry-down needs it for EVERY client whatever its entity shape — a company-shaped equity block was the wrong place to keep a machine account, and a sole proprietor who swapped that block out lost the one line Gate K refuses without.",
+    accounts: [
+      {
+        code: "190-OBE",
+        name: "Opening balance equity (system clearing)",
+        type: "equity",
+        special: "opening_balance_equity",
+        mpers: "Equity — must clear to nil (no statutory roll-up)",
+        note: "A conversion account, not permanent equity, and not a statutory presentation concept. Must net to nil and be cleared before statutory statements are finalised. The opening-balance carry-down resolves it — and the accumulated-equity marker beside it — by special_acc_type and refuses outright if either is missing, so this account ships with every entity shape.",
+      },
+      { code: "999-R00", name: "Rounding", type: "expense", special: "rounding", mpers: "Other operating expenses" },
+    ],
+  },
+  {
+    key: "sole-proprietor",
+    title: "Sole proprietorship equity (optional)",
+    tier: "optional",
+    conflictsWith: ["equity", "company-officers"],
+    blurb:
+      "The UNINCORPORATED equity shape — for a business registered under the Registration of Businesses Act 1956, certified by its proprietor rather than by directors, and filing Form B rather than Form C. Selecting it DESELECTS BOTH company-shaped blocks, so no deselection is left for the operator to remember: the company equity block goes (share capital, reserves, retained earnings and the dividend-clearing line have no counterpart in a business with no shareholders, and both shapes need the single retained-earnings marker clara.coa_accounts allows per client), and the company-officers block goes with it (dividends payable, directors' fees, salaries and benefits, and the four director related-party balances — there are no directors, and money the proprietor puts in or takes out is capital, not a balance with a separate legal person). KEEP the System block exactly as it is: opening balance equity and rounding are DB machinery, and the opening-balance carry-down refuses without both the OBE and the accumulated-equity markers. KEEP the payroll accounts if the business has STAFF — but not for the proprietor himself: he cannot be his own employee, so his EPF self-employed voluntary contributions and his contributions under the Self-Employment Social Security Act 2017 (Act 789) are contributions by a self-employed person, never employer contributions on a contract of service, and they do not belong in 900-E01/900-E02/900-E07.",
+    accounts: [
+      {
+        code: "100-CAP",
+        name: "Capital account — contributed by the proprietor",
+        type: "equity",
+        mpers: "Equity — proprietor's capital (no MPERS roll-up)",
+        note: "Money and assets the proprietor puts INTO the business, held as a STANDING BALANCE — it is not closed off or cleared at year end, and it is not the mirror of a company's dividend-clearing account. It is the Form B financial particulars' own separate *Capital account* line, which is read straight off this balance. Kept apart from 150-CAP because a contribution is not a profit: netting the two before the Form B analysis is prepared destroys exactly the split LHDN asks for. LHDN's records ruling for individuals and partnerships (ITA s.82) requires a record of private money brought into the business, with the evidence retained.",
+      },
+      {
+        code: "150-CAP",
+        name: "Proprietor's capital account — accumulated",
+        type: "equity",
+        special: "retained_earnings",
+        mpers: "Equity — proprietor's capital (no MPERS roll-up)",
+        note: "The proprietor's ACCUMULATED equity position — the balance brought forward plus the period's profit or loss, against which 160-DRW's drawings are set — which is how Malaysian sole-proprietor accounts are normally presented, and the account the opening-balance carry-down targets. Named 'accumulated' to keep it distinct from 100-CAP, which holds what the proprietor contributed; the two are the contributed and accumulated sides of one capital position, not two competing capital accounts. NAMING TENSION, stated rather than hidden: special_acc_type='retained_earnings' is a DB MECHANISM, not a claim about this account's title. clara.coa_accounts admits exactly one accumulated-equity marker per client and the carry-down resolves that marker rather than a code; for an unincorporated business the accumulated-equity position IS the capital account. Do not import the marker's wording into the name — retained earnings is a company concept and this entity has no shareholders. The Form B financial particulars' analysis is served by the THREE accounts together and NOT by splitting this one: 100-CAP is the Capital account line, while this account and 160-DRW carry the current-account movement — balance brought forward, the year's result, drawings. A strict capital/current PAIR here was considered and refused, because a split the client's own books do not hold would let the opening plug land in the wrong half and the schema has no non-posting header to stop it (limitation 3).",
+      },
+      {
+        code: "160-DRW",
+        name: "Drawings",
+        type: "equity",
+        mpers: "Equity — proprietor's capital movement (no MPERS roll-up)",
+        note: "Cash, goods and personal expenditure taken OUT of the business by the proprietor: a reduction of his capital, NEITHER a salary NOR a deductible expense. A sole proprietorship is not a separate legal person, so the proprietor cannot employ himself and nothing here belongs in 900-S01; ITA s.39(1)(a) denies a deduction for domestic or private expenses and s.39(1)(b) for any disbursement not wholly and exclusively laid out to produce the gross income. Kept apart from 150-CAP so the capital roll-forward stays readable, exactly as 160-DIV is kept apart from 150-000. LHDN's records ruling for individuals and partnerships requires money taken out of the business for personal or family use to be recorded, and the Form B financial particulars ask for drawings as their own line. The proprietor's own EPF self-employed voluntary contributions and Self-Employment Social Security Act 2017 (Act 789) contributions are his as a self-employed individual; where the business account pays them they are his personal expenditure, and whether he obtains relief for them is a question for his individual tax computation, never a conclusion this ledger states.",
+      },
+    ],
   },
   {
     key: "hire-purchase",
@@ -780,8 +884,20 @@ export function templateAccounts(blockKeys: string[]): CoaTemplateAccount[] {
 }
 
 /**
+ * Every block that cannot be seeded alongside `key`. Read in BOTH directions — a block's
+ * own `conflictsWith` and any block naming it — so a one-sided declaration still refuses
+ * rather than silently letting a uq_coa_special violation through. (Declarations are
+ * test-pinned symmetric anyway; this is belt and braces on the safety-critical side.)
+ */
+export function conflictingBlockKeys(key: string): string[] {
+  const declared = COA_TEMPLATE.find((b) => b.key === key)?.conflictsWith ?? [];
+  const naming = COA_TEMPLATE.filter((b) => (b.conflictsWith ?? []).includes(key)).map((b) => b.key);
+  return [...new Set([...declared, ...naming])].filter((k) => k !== key);
+}
+
+/**
  * KNOWN LIMITATIONS surfaced while building this template — recorded, not worked around.
- * All four are Wave-C/D candidates, not blockers:
+ * All six are Wave-C/D candidates, not blockers:
  *
  * 1. clara.coa_accounts permits only ONE account per client carrying special_acc_type
  *    'sst_output'. Sales tax and service tax are distinct regimes with different scopes,
@@ -812,6 +928,42 @@ export function templateAccounts(blockKeys: string[]): CoaTemplateAccount[] {
  *    their note, and the two known collectors are mapped to
  *    "Administrative expenses — must be reallocated". A per-client reporting-profile
  *    dimension is the real fix.
+ *
+ * 5. The field is called `mpers`, and the template now carries an entity shape MPERS does
+ *    not reach. MPERS applies to a "private entity" — a private COMPANY under Companies
+ *    Act 2016 s.2 — so for a sole proprietorship the string names the line its balance
+ *    sheet carries, not a face line any standard mandates. Only the equity section
+ *    actually diverges, and the two roll-ups added for it say "(no MPERS roll-up)" in
+ *    their own text; everything below the equity line reads correctly for either shape.
+ *    The real fix is a per-client reporting-FRAMEWORK dimension, which is the same
+ *    data-model change limitation 4 already asks for, not a second one.
+ *
+ * 6. Mutual exclusion is declared on the block (`conflictsWith`) and enforced in two places
+ *    in this app, neither of them the DB. toggleBlockKey() keeps the IN-SESSION selection
+ *    consistent; specialMarkerConflicts() is a pre-apply read of the client's existing
+ *    accounts that refuses BEFORE the first write when a different code already holds a
+ *    marker the selection wants (the already-seeded client that switches entity shape).
+ *    Still uncovered: a caller that bypasses both and posts a hand-assembled list straight
+ *    at upsert_account. That meets the DB's uq_coa_special unique violation MID-APPLY, and
+ *    three things about that failure need stating exactly, because two of them were
+ *    overstated in this list until round 4:
+ *      - It does NOT abort the run into a half-seeded chart. The apply loop catches
+ *        per-account errors and continues, so every other account lands. The danger is the
+ *        opposite of a truncated run: a chart that reads as complete while the accumulated-
+ *        equity marker sits on an account named for the wrong entity shape, which is
+ *        precisely what the opening-balance carry-down resolves by marker.
+ *      - Retrying does NOT fix it. The exception aborts the whole upsert_account
+ *        transaction, rolling back _reserve_op's reservation with it, so the deterministic
+ *        coaSeedOpKey has nothing to replay: every retry re-runs the insert and re-raises
+ *        the same violation for as long as the marker sits elsewhere. The marker must be
+ *        cleared first — re-upsert THAT code with a null special_acc_type, which the
+ *        on-conflict update writes through.
+ *      - The refusal names the wrong account class. upsert_account maps EVERY
+ *        unique_violation to "a rounding account already exists for this client" (0009), so
+ *        a retained-earnings collision is reported as a rounding one. 0009 is deployed and
+ *        is not editable here; recorded for a future migration in
+ *        docs/plan/research/wave-b/coa-review-adjudications.md.
+ *    The real guard is a DB-side seed verb taking the whole selection in one transaction.
  *
  * DELIBERATE OMISSION: no share-based-payment module (MPERS Section 26). Employee share
  * schemes are rare in the SME population this template serves, and the equity-reserve and
