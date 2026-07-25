@@ -82,9 +82,11 @@ export async function backfillWikiSources(client, { sources = [], log = () => {}
 //
 // It splits in two because of a PRIVILEGE BOUNDARY: clara_runtime has NO SELECT on
 // clara.document_filings (0007:2740-2741 grants it to clara_authenticated/clara_agent_ro only — the
-// same gap that makes resolveDocumentClientDefault return null), so the INVERTED scan cannot run on
-// the runtime connection and 0019 adds NO grant. This mirrors backfillWikiSources' established
-// contract exactly: the ceremony supplies the {clientId, documentId} pairs.
+// gap that made the old plan-time document→client resolver fail closed; migration 0020 closes it
+// with a DEFINER verb, clara.resolve_document_client, and still adds NO table grant), so the
+// INVERTED scan cannot run on the runtime connection and 0019 adds NO grant. This mirrors
+// backfillWikiSources' established contract exactly: the ceremony supplies the
+// {clientId, documentId} pairs.
 
 /** (i) The SCAN half — a CEREMONY-ROLE step, run on the owner connection, READ-ONLY. Returns the
  *  candidate pairs: for each ACTIVE page, each current-version citation and each active-page

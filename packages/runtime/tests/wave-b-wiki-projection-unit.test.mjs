@@ -23,6 +23,8 @@ import {
   isConfigurationRefusal,
   terminalStatusFor,
   CONFIG_DEAD_LETTER_PREFIX,
+  HELD_CONSENT_REASON,
+  WIKI_SYNTHESIS_PURPOSE,
 } from "../lib/wiki-projection.mjs";
 import { wikiColdStartReady, startWikiProjectionLoop } from "../lib/wiki-projection-ops.mjs";
 import { safeWikiKey, putWikiCanonical, verifyWikiCanonical, StorageError } from "../lib/storage.mjs";
@@ -53,10 +55,64 @@ function stubClient(o = {}) {
 }
 const ev = (type, extra = {}) => ({ seq: 42, id: randomUUID(), firmId: FIRM, eventType: type, clientId: CLIENT, documentId: null, payload: {}, ...extra });
 const goodSynth = async () => ({ title: "Acme Sdn Bhd", content: "# Acme Sdn Bhd\n\nRoutine vendor." });
-const present = async () => "present";
-const absent = async () => "absent";
 const okPut = async () => ({ created: true, existed: false });
 const okVerify = async () => ({ sha256: "x" });
+
+// --- 0020 §3.7: the two-phase authorization, modelled as TWO DISTINCT INJECTABLE STEPS ----------
+//
+// The single `resolveConsent` dep is RETIRED and these tests no longer accept it. §3.1 explains
+// why the old shape could never be a gate: it READ a purpose-blind relation, the revoker had no
+// way to invalidate anything it returned, and the model call happened after the read returned. A
+// test that keeps injecting `resolveConsent` would silently assert nothing at all — the consumer
+// ignores the key — so every model-lane cell below drives PREPARE and CONSUME separately and
+// counts the calls.
+//
+// §3.7 also requires a cell proving the SECOND boundary cannot be bypassed. `authz()` therefore
+// wraps `synthesize` in a tripwire: calling the model without a prior successful consume THROWS,
+// so a regression that skips the linearization point fails the suite instead of passing it.
+const AUTH_ID = "11111111-2222-3333-4444-555555555555";
+function authz({ prepare = "granted", consume = "granted", surface = true, synth = goodSynth } = {}) {
+  const seen = { surface: 0, prepared: 0, consumed: 0, synthesized: 0, order: [], prepareArgs: null, consumeArgs: null };
+  return {
+    seen,
+    hasSynthesisAuthorizationSurface: async () => { seen.surface++; seen.order.push("surface"); return surface; },
+    prepareEgressDispatch: async (_c, args) => {
+      seen.prepared++; seen.order.push("prepare"); seen.prepareArgs = args;
+      return prepare === "granted"
+        ? { verdict: "granted", authorization_id: AUTH_ID }
+        : { verdict: "unknown", authorization_id: null };
+    },
+    consumeEgressDispatch: async (_c, args) => {
+      seen.consumed++; seen.order.push("consume"); seen.consumeArgs = args;
+      return { verdict: consume };
+    },
+    synthesize: async (a) => {
+      seen.order.push("synthesize");
+      // THE BYPASS TRIPWIRE (§3.7). The model must never be reachable except through a consume
+      // that returned `granted` — the dispatch linearization point. A default that quietly
+      // synthesizes would make every model-lane cell below vacuous.
+      if (seen.consumed === 0 || consume !== "granted") {
+        throw new Error("BYPASS: deps.synthesize ran without a successful consume_egress_dispatch");
+      }
+      seen.synthesized++;
+      return synth(a);
+    },
+    putWiki: okPut, verifyWiki: okVerify,
+  };
+}
+/** The 0020 resolver pair, injected. `status` is whatever the serialized DB verb would return. */
+function resolver({ surface = true, status = "projected", throws = null } = {}) {
+  const seen = { surface: 0, calls: 0, args: null };
+  return {
+    seen,
+    hasResolverSurface: async () => { seen.surface++; return surface; },
+    resolveAndIngestWikiSource: async (_c, args) => {
+      seen.calls++; seen.args = args;
+      if (throws) throw throws;
+      return { status };
+    },
+  };
+}
 
 // --- safeWikiKey accept/reject matrix -----------------------------------------------------------
 test("safeWikiKey accepts the wiki grammar and rejects docs keys / traversal / bad sha / non-.md", () => {
@@ -82,26 +138,51 @@ test("wikiStorageKey + contentSha256 produce a valid, content-addressed wiki key
 });
 
 // --- governed-egress purpose entry --------------------------------------------------------------
-test("GOVERNED_EGRESS_PURPOSES.wiki_synthesis names the consent discipline", () => {
+// 0020 §1.1 CHANGED THE SURFACE THIS REGISTRY NAMES, and the change is the whole point of the
+// migration. Before 0020 the entry named `clara.client_egress_consents` — the PURPOSE-BLIND legacy
+// relation whose live-row predicate also authorizes the invoice-facts lane (0015:3361-3366). §1.1
+// withdrew that: carrying a typed wiki grant there would make a wiki consent ALSO authorize
+// invoice-facts egress, and `revoke_client_egress` (no purpose, no ordering, no STRICT) would
+// revoke an arbitrary one of two live rows. So the typed purpose got its OWN relation, plus a
+// positive owner ACTIVATION (§2), reachable only through the two DEFINER verbs (§3.3/§3.4). The
+// assertion is re-aimed and STRENGTHENED: it now pins the typed pair, both verbs, and — the
+// load-bearing half — that the legacy purpose-blind relation is NOT named as this purpose's surface.
+test("GOVERNED_EGRESS_PURPOSES.wiki_synthesis names the TYPED consent discipline (0020 §1.1/§3)", () => {
   const p = GOVERNED_EGRESS_PURPOSES.wiki_synthesis;
   assert.equal(p.purpose, "wiki_synthesis");
   assert.equal(p.consentRequired, true);
   assert.equal(p.engineIdRequired, true);
-  assert.match(p.consentSurface, /client_egress_consents/);
+  assert.match(p.consentSurface, /client_egress_purpose_consents/, "the typed consent relation (§1.2)");
+  assert.match(p.consentSurface, /client_egress_purpose_activations/, "…AND the positive activation (§2.2) — a grant alone never authorizes");
+  assert.match(p.consentSurface, /prepare_egress_dispatch/, "the plan-time verdict verb (§3.3)");
+  assert.match(p.consentSurface, /consume_egress_dispatch/, "the dispatch linearization point (§3.4)");
+  assert.doesNotMatch(p.consentSurface, /client_egress_consents/,
+    "the LEGACY purpose-blind relation is NOT this purpose's surface — it governs invoice-facts and nothing else (§1.1/§6)");
   assert.match(p.heldStatePath, /set_wiki_synthesis_hold/);
 });
 
 // --- registry + subscription ------------------------------------------------------------------
-test("CONSUMERS entry is runtime-role; the subscription SET is the 8 registered types", () => {
+test("CONSUMERS entry is runtime-role; the subscription SET is the 13 registered types", () => {
   assert.equal(CONSUMERS.wiki_projection.name, WIKI_PROJECTION_CONSUMER);
   assert.equal(CONSUMERS.wiki_projection.identity, "runtime-role");
-  // 0019 adds document.filing_retired — the WB-R21 stale lane. It is a document.* type,
-  // NOT a wiki.* one, so P17 (never re-synthesize from wiki.*) is untouched.
+  // 0019 added document.filing_retired — the WB-R21 stale lane. 0020 adds FIVE more:
+  //   * document.filed (§5.4) — the OTHER half of the topology-change surface. Without it a
+  //     document classified while unfiled (or ambiguous) is checkpointed forever and its
+  //     re-drive can only ever fire on a RETIREMENT, which is the rarer half of the pair.
+  //   * the four egress.purpose_* typed events (§4.1/§4.2) — subscribed for observability and
+  //     ordering only; the DB owns their hold transitions inside the owner-floored RPCs.
+  // Every added type is document.* or egress.*, NOT wiki.*, so P17 (never re-synthesize from
+  // wiki.*) is untouched.
   assert.deepEqual([...WIKI_PROJECTION_EVENT_TYPES].sort(), [
     "counterparty.created", "counterparty.merged", "document.classified",
-    "document.filing_retired", "egress.consent_granted", "egress.consent_revoked",
+    "document.filed", "document.filing_retired",
+    "egress.consent_granted", "egress.consent_revoked",
+    "egress.purpose_activated", "egress.purpose_consent_granted",
+    "egress.purpose_consent_revoked", "egress.purpose_deactivated",
     "entry.approved", "seeding.proposal_decided",
   ]);
+  assert.ok(![...WIKI_PROJECTION_EVENT_TYPES].some((t) => t.startsWith("wiki.")),
+    "NO wiki.* type is subscribed (P17) — the lane's own effects emit no event to loop on");
 });
 
 // --- receipt-mapping matrix + op_key idioms -----------------------------------------------------
@@ -123,30 +204,96 @@ test("entry.approved WITHOUT a source doc → skipped_kind", async () => {
   assert.equal(plan.mutate, null);
 });
 
-test("document.classified (client not carried, default resolver) → skipped_unresolved_client", async () => {
+// 0020 §10.2 — the LANE-LOCAL fallback. Without the exact resolver pair the classified lane
+// degrades to today's receipt instead of dead-lettering the whole projection.
+test("document.classified with the 0020 resolver pair ABSENT → skipped_unresolved_client (§10.2 fallback)", async () => {
+  const r = resolver({ surface: false });
   const plan = await planEvent(stubClient(), {
-    firmId: FIRM, ev: ev("document.classified", { clientId: null, documentId: DOC }), deps: {},
+    firmId: FIRM, ev: ev("document.classified", { clientId: null, documentId: DOC }), deps: r,
   });
   assert.equal(plan.status, "skipped_unresolved_client");
+  assert.equal(plan.mutate, null, "checkpoint-only — no write is attempted without the surface");
+  assert.equal(r.seen.calls, 0, "the absent verb is never invoked");
 });
 
-test("document.classified with an injected resolver → deterministic ingest", async () => {
-  const plan = await planEvent(stubClient(), {
-    firmId: FIRM, ev: ev("document.classified", { clientId: null, documentId: DOC }),
-    deps: { resolveDocumentClient: async () => CLIENT },
-  });
-  assert.equal(plan.status, "projected");
-  assert.equal(plan.lane, "deterministic");
-});
-
-test("counterparty.created with consent present → model synthesis (projected) + seq-embedded op_key + engine_id", async () => {
+// 0020 §5.4 REPLACED THE INJECTED PLAN-TIME RESOLVER. The old cell injected
+// `deps.resolveDocumentClient` returning a client id, which the lane then handed to
+// record_wiki_source_ingest — the exact read-then-mutate shape §5.2 shows cannot be closed: between
+// the read and the write a filing for B can commit, and record_wiki_source_ingest re-checks only
+// that A still has an ACTIVE FILING (0017:2238-2242), never that A is still the ONLY client. So the
+// document→client decision moved INSIDE clara.resolve_and_ingest_wiki_source, which re-decides
+// uniqueness under the §5.3 filing-topology lock pair and ingests in the SAME transaction. The
+// consumer therefore no longer learns a client id at all, and the receipt is whatever the verb
+// returns — which is why it is refined from `mutate`, not from the plan.
+test("document.classified → the SERIALIZED verb inside the effect txn; no client id is ever resolved consumer-side", async () => {
+  const r = resolver({ status: "projected" });
   const c = stubClient();
   const plan = await planEvent(c, {
-    firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }),
-    deps: { resolveConsent: present, synthesize: goodSynth, putWiki: okPut, verifyWiki: okVerify },
+    firmId: FIRM, ev: ev("document.classified", { clientId: null, documentId: DOC }), deps: r,
+  });
+  assert.equal(plan.status, "projected");
+  assert.equal(plan.lane, "resolved_ingest");
+  assert.equal(r.seen.calls, 0, "the verb runs in the EFFECT txn (mutate), never at plan time");
+  const cap = stubClient();
+  const effect = await plan.mutate(cap);
+  assert.equal(r.seen.calls, 1);
+  assert.deepEqual(r.seen.args, { firmId: FIRM, documentId: DOC }, "firm-scoped (§5.1: p_firm is required) + the document; NO client");
+  assert.deepEqual(effect, { status: "projected" }, "the receipt is refined from the verb's own status");
+  assert.ok(!cap.calls.some((x) => /record_wiki_source_ingest/.test(x.sql)),
+    "the consumer NEVER calls the audited writer directly on this lane — the serialized verb owns the write");
+});
+
+// §5.4/§9.6 — the three-way receipt. Ambiguity earns its OWN token: the discriminant survives
+// operationally even though no candidate identity and no count ever leaves the database (§5.1).
+test("document.classified receipts are refined from the verb: ambiguous / unresolved / unclassified", async () => {
+  for (const status of ["skipped_ambiguous_client", "skipped_unresolved_client", "skipped_unclassified"]) {
+    const r = resolver({ status });
+    const plan = await planEvent(stubClient(), {
+      firmId: FIRM, ev: ev("document.classified", { clientId: null, documentId: DOC }), deps: r,
+    });
+    assert.deepEqual(await plan.mutate(stubClient()), { status }, `${status} rides through the refinement`);
+  }
+});
+
+// §5.4 — the NEW document.filed re-drive subscription (the other half of the topology surface).
+test("document.filed → the same serialized verb on the redrive lane; absent surface is checkpoint-only", async () => {
+  const r = resolver({ status: "projected" });
+  const plan = await planEvent(stubClient(), {
+    firmId: FIRM, ev: ev("document.filed", { clientId: null, documentId: DOC }), deps: r,
+  });
+  assert.equal(plan.lane, "filed_redrive");
+  assert.deepEqual(await plan.mutate(stubClient()), { status: "projected" });
+
+  const off = resolver({ surface: false });
+  const dark = await planEvent(stubClient(), {
+    firmId: FIRM, ev: ev("document.filed", { clientId: null, documentId: DOC }), deps: off,
+  });
+  assert.equal(dark.status, "skipped_no_surface", "§10.2: absent resolver pair ⇒ the re-drive lane is checkpoint-only");
+  assert.equal(dark.mutate, null);
+});
+
+// 0020 §3.7 — the LIT path. `resolveConsent: present` no longer exists: a plan-time READ is not an
+// authorization (§3.1), so the cell now PREPARES an authorization and CONSUMES it immediately
+// before the model call. The dark counterpart (zero typed consent ⇒ every verdict `unknown`) is the
+// production posture asserted two cells below and in the DB-integration suite.
+test("counterparty.created, PREPARED + CONSUMED granted → model synthesis (projected) + seq-embedded op_key + engine_id", async () => {
+  const c = stubClient();
+  const a = authz();
+  const plan = await planEvent(c, {
+    firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }), deps: a,
   });
   assert.equal(plan.status, "projected");
   assert.equal(plan.lane, "model");
+  assert.deepEqual(a.seen.prepareArgs, {
+    firmId: FIRM, clientId: CLIENT, purpose: WIKI_SYNTHESIS_PURPOSE, eventSeq: 42, eventType: "counterparty.created",
+  }, "prepare carries firm + client + the typed purpose + the dispatch intent (§3.2/§3.3)");
+  assert.deepEqual(a.seen.consumeArgs, { firmId: FIRM, authorizationId: AUTH_ID },
+    "consume carries the firm and ONLY the opaque authorization id (§3.2: it encodes nothing else)");
+  // §3.7 pins the ORDER: the consume is the LAST db interaction before the model, and it comes
+  // AFTER the wiki-context read — a third read could never buy what a state transition does.
+  assert.deepEqual(a.seen.order, ["surface", "prepare", "consume", "synthesize"],
+    "surface guard → prepare → (context read) → consume → model; the consume is the dispatch linearization point");
+  assert.equal(a.seen.synthesized, 1);
   const cap = stubClient();
   await plan.mutate(cap);
   const call = cap.calls.find((x) => /publish_wiki_page_version/.test(x.sql));
@@ -162,27 +309,67 @@ test("counterparty.created with consent present → model synthesis (projected) 
   assert.equal(cites[0].counterparty_id, CP, "the counterparty citation (≥1 cite floor)");
 });
 
-test("counterparty.created with consent ABSENT → held_consent + sets the hold (no model call)", async () => {
-  let synthCalled = false;
+// §10.1 — THE DARK POSTURE. With zero typed consents and zero activations every verdict is
+// `unknown`, and the reason token + op key are UNCHANGED from as-built. That byte-equivalence is
+// the entire DARK claim, so it is asserted literally, not by shape.
+test("PREPARE unknown → held_consent with the UNCHANGED reason token + op key, and NO model call (§10.1 DARK)", async () => {
+  const a = authz({ prepare: "unknown" });
   const plan = await planEvent(stubClient(), {
-    firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }),
-    deps: { resolveConsent: absent, synthesize: async () => { synthCalled = true; return goodSynth(); } },
+    firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }), deps: a,
   });
   assert.equal(plan.status, "held_consent");
-  assert.equal(synthCalled, false, "the model is NEVER called without consent (no un-consented egress)");
+  assert.equal(a.seen.synthesized, 0, "the model is NEVER called on a non-granted verdict");
+  assert.equal(a.seen.consumed, 0, "…and no authorization is consumed when none was granted");
   const cap = stubClient();
   await plan.mutate(cap);
-  assert.ok(cap.calls.find((x) => /set_wiki_synthesis_hold/.test(x.sql)), "records the DB-side hold");
+  const hold = cap.calls.find((x) => /set_wiki_synthesis_hold/.test(x.sql));
+  assert.ok(hold, "records the DB-side hold through the audited writer");
+  assert.equal(hold.params[1], HELD_CONSENT_REASON, "the reason token is byte-identical to as-built");
+  assert.equal(hold.params[1], "wiki synthesis consent unknown", "…pinned literally (§10.1)");
+  assert.equal(hold.params[2], `wikihold:${CLIENT}:42`, "…and so is the op key shape");
+});
+
+// §3.4/§3.6 — THE DISPATCH LINEARIZATION POINT. A revocation that commits between prepare and
+// consume must refuse, and the model must never be reached. This is the cell that proves the
+// two-phase design buys something a second read could not: `granted` at plan time is not a licence.
+test("PREPARED granted but CONSUME unknown (a revoke landed in between) → held_consent, zero egress", async () => {
+  const a = authz({ prepare: "granted", consume: "unknown" });
+  const plan = await planEvent(stubClient(), {
+    firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }), deps: a,
+  });
+  assert.equal(plan.status, "held_consent");
+  assert.equal(a.seen.prepared, 1);
+  assert.equal(a.seen.consumed, 1, "the consume DID run — it is what refused");
+  assert.equal(a.seen.synthesized, 0, "no synthesize");
+  assert.ok(!a.seen.order.includes("synthesize"), "…the model was not even entered: no put, no verify, no publish");
+  const cap = stubClient();
+  await plan.mutate(cap);
+  assert.equal(cap.calls.find((x) => /set_wiki_synthesis_hold/.test(x.sql)).params[1], HELD_CONSENT_REASON,
+    "the SAME terminal at both boundaries (§9.6) — externally indistinguishable from the dark path");
+});
+
+// §10.2 — the LANE-LOCAL synthesis fallback. A rollback or a reversed ceremony order must degrade
+// this lane to today's dark held path, never dead-letter the whole projection.
+test("the 0020 synthesis pair ABSENT → held_consent, and prepare is never even attempted (§10.2)", async () => {
+  const a = authz({ surface: false });
+  const plan = await planEvent(stubClient(), {
+    firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }), deps: a,
+  });
+  assert.equal(plan.status, "held_consent");
+  assert.equal(a.seen.prepared, 0);
+  assert.equal(a.seen.consumed, 0);
+  assert.equal(a.seen.synthesized, 0);
 });
 
 test("counterparty.merged synthesizes the SURVIVOR's page", async () => {
   const survivor = randomUUID();
   const c = stubClient();
+  const a = authz();
   const plan = await planEvent(c, {
-    firmId: FIRM, ev: ev("counterparty.merged", { payload: { survivor_id: survivor, merged_id: CP } }),
-    deps: { resolveConsent: present, synthesize: goodSynth, putWiki: okPut, verifyWiki: okVerify },
+    firmId: FIRM, ev: ev("counterparty.merged", { payload: { survivor_id: survivor, merged_id: CP } }), deps: a,
   });
   assert.equal(plan.status, "projected");
+  assert.equal(a.seen.consumed, 1, "the survivor's page is model egress too — it goes through the same two phases");
   const cap = stubClient();
   await plan.mutate(cap);
   const call = cap.calls.find((x) => /publish_wiki_page_version/.test(x.sql));
@@ -190,34 +377,54 @@ test("counterparty.merged synthesizes the SURVIVOR's page", async () => {
 });
 
 test("already_projected when the page's current version is at/after this seq (idempotent redrive)", async () => {
+  const a = authz();
   const plan = await planEvent(stubClient({ projectedSeq: 100 }), {
-    firmId: FIRM, ev: ev("counterparty.created", { seq: 42, payload: { counterparty_id: CP } }),
-    deps: { resolveConsent: present, synthesize: goodSynth },
+    firmId: FIRM, ev: ev("counterparty.created", { seq: 42, payload: { counterparty_id: CP } }), deps: a,
   });
   assert.equal(plan.status, "already_projected");
   assert.equal(plan.mutate, null);
+  assert.equal(a.seen.prepared, 0, "a converged event mints NO authorization — no stranded row, no needless audit");
 });
 
 test("non-active client → skipped_inactive_client for every synthesis/ingest lane", async () => {
-  const onboarding = stubClient({ status: "onboarding" });
-  const cp = await planEvent(onboarding, { firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }), deps: { resolveConsent: present, synthesize: goodSynth } });
+  const a = authz();
+  const cp = await planEvent(stubClient({ status: "onboarding" }), { firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }), deps: a });
   assert.equal(cp.status, "skipped_inactive_client");
+  assert.equal(a.seen.prepared, 0, "the client gate precedes authorization — an inactive client never mints one");
   const ing = await planEvent(stubClient({ status: "archived" }), { firmId: FIRM, ev: ev("entry.approved", { documentId: DOC }), deps: {} });
   assert.equal(ing.status, "skipped_inactive_client");
 });
 
-test("egress.consent_granted → consent_released (clears hold); egress.consent_revoked → held_consent (sets hold)", async () => {
-  const granted = await planEvent(stubClient(), { firmId: FIRM, ev: ev("egress.consent_granted"), deps: {} });
-  assert.equal(granted.status, "consent_released");
-  let cap = stubClient();
-  await granted.mutate(cap);
-  assert.ok(cap.calls.find((x) => /clear_wiki_synthesis_hold/.test(x.sql)));
+// 0020 §4.2 DELIBERATELY BROKE THE OLD COUPLING, and the old expectation encoded the bug. Before
+// 0020 an `egress.consent_granted` — a LEGACY, NULL-PURPOSE row minted for the invoice-facts lane —
+// CLEARED the wiki synthesis hold, and `egress.consent_revoked` set it. That let a consent given for
+// one purpose silently release a control governing another, which is exactly what purpose limitation
+// (WB-R23(1)) forbids. §4.2 makes both legacy events CHECKPOINT-ONLY for wiki. The cell is re-aimed
+// to assert the ABSENCE of the coupling — not merely a different status — because "different" would
+// also be satisfied by a lane that writes the hold somewhere else.
+test("LEGACY egress.consent_granted/revoked are CHECKPOINT-ONLY for wiki — no hold is set OR cleared (§4.2)", async () => {
+  for (const type of ["egress.consent_granted", "egress.consent_revoked"]) {
+    const c = stubClient();
+    const plan = await planEvent(c, { firmId: FIRM, ev: ev(type), deps: {} });
+    assert.equal(plan.mutate, null, `${type}: no effect at all — the checkpoint just advances`);
+    assert.equal(plan.status, "skipped_kind", `${type}: the existing generic no-op receipt (§4.2 names no new token)`);
+    assert.ok(!c.calls.some((x) => /clear_wiki_synthesis_hold|set_wiki_synthesis_hold/.test(x.sql)),
+      `${type}: an invoice-facts consent NEVER touches wiki authorization state again`);
+  }
+});
 
-  const revoked = await planEvent(stubClient(), { firmId: FIRM, ev: ev("egress.consent_revoked"), deps: {} });
-  assert.equal(revoked.status, "held_consent");
-  cap = stubClient();
-  await revoked.mutate(cap);
-  assert.ok(cap.calls.find((x) => /set_wiki_synthesis_hold/.test(x.sql)));
+// §4.2 — the four TYPED events are checkpoint-only in the consumer too: the DB owns their hold
+// transitions inside the owner-floored RPCs (§4.3), so the consumer has nothing to do but advance.
+// They are subscribed for observability and ordering, not for effect.
+test("the four TYPED egress.purpose_* events are checkpoint-only in the consumer (the DB owns the hold, §4.3)", async () => {
+  for (const type of ["egress.purpose_consent_granted", "egress.purpose_consent_revoked",
+    "egress.purpose_activated", "egress.purpose_deactivated"]) {
+    const c = stubClient();
+    const plan = await planEvent(c, { firmId: FIRM, ev: ev(type), deps: {} });
+    assert.equal(plan.mutate, null, `${type}: no consumer-side effect`);
+    assert.ok(!c.calls.some((x) => /clear_wiki_synthesis_hold|set_wiki_synthesis_hold/.test(x.sql)),
+      `${type}: the hold transition lives inside activate_/deactivate_/revoke_client_egress_purpose, never here`);
+  }
 });
 
 test("an unsubscribed type dispatched to planEvent → skipped_kind (defensive)", async () => {
@@ -474,8 +681,7 @@ test("[R3 F3] a configuration-blocked cycle RELEASES the connection (advisory lo
 
 test("model-lane mutate re-checks recency IN-TXN: a newer published seq makes it a no-op (codex F9)", async () => {
   const plan = await planEvent(stubClient(), {
-    firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }),
-    deps: { resolveConsent: present, synthesize: goodSynth, putWiki: okPut, verifyWiki: okVerify },
+    firmId: FIRM, ev: ev("counterparty.created", { payload: { counterparty_id: CP } }), deps: authz(),
   });
   assert.equal(plan.status, "projected");
   // At mutate time a NEWER version (seq 99 > 42) has landed: the publish must not fire.
@@ -486,4 +692,73 @@ test("model-lane mutate re-checks recency IN-TXN: a newer published seq makes it
   const older = stubClient({ projectedSeq: 7 });
   await plan.mutate(older);
   assert.ok(older.calls.some((x) => /publish_wiki_page_version/.test(x.sql)), "publish proceeds over an older seq");
+});
+
+// --- 0020 §5.4: the filing_retired lane now carries TWO effects in one transaction --------------
+
+const retiredEv = () => ev("document.filing_retired", { documentId: DOC, payload: { filing_id: randomUUID() } });
+
+test("document.filing_retired: the 0019 stale mark FIRST, then the 0020 re-drive attempt (§5.4)", async () => {
+  const r = resolver({ status: "projected" });
+  const plan = await planEvent(stubClient(), {
+    firmId: FIRM, ev: retiredEv(), deps: { ...r, hasStaleWriter: async () => true },
+  });
+  assert.equal(plan.status, "citations_staled", "the 0019 receipt is unchanged — the re-drive does not rename the lane");
+  const cap = stubClient();
+  const effect = await plan.mutate(cap);
+  const order = cap.calls.map((x) => x.sql).filter((s) => /mark_wiki_citations_stale|savepoint/i.test(s));
+  assert.match(order[0], /mark_wiki_citations_stale/, "the 0019 effect commits first");
+  assert.equal(r.seen.calls, 1, "…then the serialized verb is attempted for the same document");
+  assert.deepEqual(effect, { redrive: "projected" }, "the re-drive outcome rides the receipt WITHOUT displacing citations_staled");
+});
+
+test("document.filing_retired with the 0020 resolver pair absent → the 0019 lane is untouched (§10.2)", async () => {
+  const r = resolver({ surface: false });
+  const plan = await planEvent(stubClient(), {
+    firmId: FIRM, ev: retiredEv(), deps: { ...r, hasStaleWriter: async () => true },
+  });
+  const cap = stubClient();
+  assert.equal(await plan.mutate(cap), null);
+  assert.ok(cap.calls.some((x) => /mark_wiki_citations_stale/.test(x.sql)), "the 0019 stale mark still happens");
+  assert.equal(r.seen.calls, 0);
+});
+
+// DEFECT FOUND IN THE REWIRE (fixed in lib/wiki-projection.mjs, not asserted away here).
+// The re-drive was running BARE inside the effect transaction. An ENUMERATED terminal refusal from
+// the serialized verb — CLR32/cap_exceeded when the client is at its wiki page cap is the reachable
+// one — aborts that transaction, rolling back mark_wiki_citations_stale; runTargetEvent then maps
+// the refusal through the closed terminal table and CHECKPOINTS the event. The 0019 §4 guarantee
+// (a retirement marks the citing client's live wiki sources stale) would be silently lost forever,
+// and the citation would never converge. The fix is a SAVEPOINT around the attempt only.
+test("[defect] a TERMINAL re-drive refusal must NOT roll back the 0019 stale mark (savepoint containment)", async () => {
+  const capExceeded = Object.assign(new Error("wiki page cap exceeded"), {
+    code: "CLR32", detail: JSON.stringify({ reason: "cap_exceeded" }),
+  });
+  assert.equal(terminalStatusFor(capExceeded), "skipped_cap",
+    "…and it IS terminal, which is exactly why it would have been checkpointed past");
+  const r = resolver({ throws: capExceeded });
+  const plan = await planEvent(stubClient(), {
+    firmId: FIRM, ev: retiredEv(), deps: { ...r, hasStaleWriter: async () => true },
+  });
+  const cap = stubClient();
+  const effect = await plan.mutate(cap);
+  assert.ok(cap.calls.some((x) => /mark_wiki_citations_stale/.test(x.sql)), "the 0019 effect was issued");
+  assert.ok(cap.calls.some((x) => /^savepoint wiki_redrive$/i.test(x.sql.trim())), "the attempt ran under a savepoint");
+  assert.ok(cap.calls.some((x) => /rollback to savepoint wiki_redrive/i.test(x.sql)),
+    "…and only the ATTEMPT was rolled back — the stale mark survives to commit with the checkpoint");
+  assert.deepEqual(effect, { redrive: "refused:CLR32/cap_exceeded" }, "the refusal is REPORTED, not swallowed");
+});
+
+test("[defect] a NON-terminal re-drive failure still aborts the whole event (the checkpoint stays behind)", async () => {
+  for (const [err, label] of [
+    [Object.assign(new Error("wiki budget configuration is incomplete"), { code: "CLR32", detail: JSON.stringify({ reason: "budget_unknown" }) }), "a CONFIGURATION refusal"],
+    [Object.assign(new Error("deadlock detected"), { code: "40P01" }), "a deadlock (residual R-1)"],
+    [Object.assign(new Error("some future reason"), { code: "CLR32", detail: JSON.stringify({ reason: "not_in_the_table" }) }), "an UNRECOGNISED typed refusal"],
+  ]) {
+    const plan = await planEvent(stubClient(), {
+      firmId: FIRM, ev: retiredEv(), deps: { ...resolver({ throws: err }), hasStaleWriter: async () => true },
+    });
+    await assert.rejects(() => plan.mutate(stubClient()), (e) => e === err,
+      `${label} must PROPAGATE so the whole transaction rolls back and the event re-drives — it is not a convergence`);
+  }
 });

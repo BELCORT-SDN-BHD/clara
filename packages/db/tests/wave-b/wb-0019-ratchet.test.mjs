@@ -40,7 +40,7 @@ import {
   fail0019, wbEnsureReady19, fnSource, waitBlockedByOrThrow,
   buildWaveBWorld, createClient, filedDocument,
   publishWikiPage, pageRow, versionRows, citationRows, refRows, pageCitationRows,
-  shaHex, wikiKey, WB_STALE_REASON, WB_0019_WHITELIST_SIGS,
+  shaHex, wikiKey, WB_STALE_REASON, WB_0019_WHITELIST_SIGS, authorizedWikiCallerFacts,
 } from "./wb-fixtures.mjs";
 
 const CORE_SIG = "clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,"
@@ -358,6 +358,29 @@ test("[R1-4] a SECURITY INVOKER helper reading wiki_pages IS caught by the live 
     + "|record_wiki_source_ingest|retire_wiki_page|set_wiki_synthesis_hold"
     + "|clear_wiki_synthesis_hold|get_wiki_page|list_wiki_pages|get_context_pack"
     + "|run_client_lint|run_lint_all|mark_wiki_citations_stale)\\M";
+
+  // The wiki-touch set is a CAPABILITY SET that grows by EXPLICIT ENUMERATION: a later
+  // migration's AUTHORIZED CALLER reaches wiki state by calling an AUDITED governed verb,
+  // which the call-edge half cannot tell apart from an unaudited wrapper — so it must be
+  // named (WB_0020_WHITELIST_SIGS, wb-helpers.mjs; unresolvable signatures are skipped, so
+  // this cell is correct at 19 and at 20+ alike).
+  //
+  // THIS CELL'S MEANING IS THE DELTA, and the enumeration is applied to BOTH sides of it
+  // precisely to preserve that: the widened scan minus the definers-only scan must be the
+  // PLANTED ROGUE AND NOTHING ELSE. Subtracting the capability set from both sides keeps
+  // `definersOnly.length === 0` as a real assertion — relaxing it to ">= 1" would have
+  // made the cell pass for the wrong reason, with the authorized callers padding the
+  // count and the actual delta unproven.
+  const callers = await authorizedWikiCallerFacts({ relationRe: RELATION_RE, callEdgeRe: CALL_EDGE_RE });
+  // TEETH — enumeration buys the CALL-EDGE capability only, and only while it is live.
+  for (const c of callers) {
+    assert.equal(c.namesRelation, false,
+      `the authorized caller ${c.sig} NAMES a wiki relation directly — direct relation access is still a failure, for an authorized caller as much as for anyone`);
+    assert.equal(c.callEdge, true,
+      `${c.sig} is enumerated as an authorized wiki caller but carries NO call edge into the audited set — a dead exemption; remove it from WB_0020_WHITELIST_SIGS`);
+  }
+  const capabilitySet = [...whitelist, ...callers.map((c) => c.oid)];
+
   /** The 0019 §9 tail scan, parameterised by whether it filters on prosecdef. */
   const scan = async (client, definersOnly) => (await client.query(`
     select p.oid::regprocedure::text as sig
@@ -365,7 +388,7 @@ test("[R1-4] a SECURITY INVOKER helper reading wiki_pages IS caught by the live 
      where n.nspname='clara' ${definersOnly ? "and p.prosecdef" : ""}
        and not (p.oid::text = any($1::text[]))
        and (p.prosrc ~* $2 or p.prosrc ~* $3)
-     order by 1`, [whitelist, RELATION_RE, CALL_EDGE_RE])).rows.map((x) => x.sig);
+     order by 1`, [capabilitySet, RELATION_RE, CALL_EDGE_RE])).rows.map((x) => x.sig);
 
   const probe = `_ratchet_probe_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
   const c = await getPool().connect();
@@ -392,13 +415,16 @@ test("[R1-4] a SECURITY INVOKER helper reading wiki_pages IS caught by the live 
     `the WIDENED scan (all clara functions) catches the invoker helper — got: ${widened.join(", ") || "(nothing)"}`);
   assert.ok(!definersOnly.some((s) => s.includes(probe)),
     "…and the definers-only scan does NOT — this is precisely the gap the fix closes, asserted rather than assumed");
-  assert.equal(definersOnly.length, 0, "the definers-only scan is otherwise clean, so the delta is the probe alone");
+  assert.equal(definersOnly.length, 0,
+    `the definers-only scan is otherwise clean, so the delta is the probe alone (got ${definersOnly.join(", ") || "(nothing)"})`);
+  assert.deepEqual(widened.filter((s) => !s.includes(probe)), [],
+    `…and the widened scan returns the probe AND NOTHING ELSE, so the delta is exact in both directions — an authorized caller padding this list would mean the capability set was not subtracted from both sides (got ${widened.join(", ")})`);
 
   // …and the LIVE catalog, with no probe present, is clean under the WIDENED scan.
   const cLive = await getPool().connect();
   try {
     assert.deepEqual(await scan(cLive, false), [],
-      "no clara function of ANY security type, outside the twelve whitelisted signatures, names a wiki relation or carries a call edge");
+      `no clara function of ANY security type, outside the wiki-touch capability set (0019's twelve whitelisted signatures + ${callers.length} enumerated authorized caller(s)), names a wiki relation or carries a call edge`);
   } finally {
     cLive.release();
   }
