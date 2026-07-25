@@ -29,7 +29,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  ROLES, rootQuery, opk, endPool, printLaneNotes, noteLane, roleCanExecute, fnSource,
+  ROLES, rootQuery, opk, endPool, printLaneNotes, noteLane, roleCanExecute, fnSource, getPool,
   fail0020, wbEnsureReady20,
   buildWaveBWorld, createClient, seedOpeningCoa,
   RUNTIME_FNS, OWNER_FNS, ALL_0020_FN_NAMES, ALL_0020_FN_SIGS, NEW_RELATIONS,
@@ -132,6 +132,107 @@ test("[0020 §7.1 amendment / R1-F3]: the evidence-classification verb is OWNER-
   }
   assert.equal(await roleCanExecute(ROLES.authenticated, "classify_consent_evidence_document"), true,
     "…and clara_authenticated can (the owner floor is in the body)");
+});
+
+// ===========================================================================
+// RATCHET R2 — cross-firm LOCK REACH on the evidence-classification verb.
+//
+// The v1.1 build read `select * into d from clara.documents where id=p_document for update`
+// and compared d.firm_id AFTERWARDS, while its own comment claimed "firm-checked BEFORE
+// anything else is read off the row". So a firm-A owner holding a firm-B document UUID took
+// a ROW LOCK on firm B's document — and, if firm B held it, WAITED on it — before receiving
+// CLR11. Two defects in one: cross-tenant lock contention (firm A queues behind firm B's
+// unrelated work), and a timing oracle (a foreign UUID that exists and is locked becomes
+// distinguishable from one that does not exist). Same class as R1-F5, reintroduced by a verb
+// added AFTER R1's sweep.
+//
+// The fix puts firm_id IN the predicate; NOT FOUND still means CLR11, so a foreign document
+// and a nonexistent one stay indistinguishable in the RESULT. This cell proves they are now
+// also indistinguishable in the WAIT.
+//
+// Method. Session A holds firm B's document row FOR UPDATE. A CONTROL session proves that
+// lock genuinely blocks (it must time out on the same row). Then session B — the firm-A
+// owner, on a short leash — calls the verb and must return CLR11 promptly. Pre-fix, session B
+// takes the control's fate instead: it blocks and the leash fires (57014). That is exactly
+// how this cell fails if the predicate ever regresses.
+// ===========================================================================
+
+test("[0020 ratchet R2 · two-session]: a firm-A owner classifying a LOCKED firm-B document returns CLR11 WITHOUT ever waiting on firm B's row", async () => {
+  fail0020(live);
+  const { seedVerifiedDocument, assertRaises, classifyConsentEvidence } =
+    await import("./wb-0020-helpers.mjs");
+  const foreign = await seedVerifiedDocument({ firm: w.firms.B });
+
+  let a = null; let ctl = null; let b = null;
+  let out = null; let control = null;
+  try {
+    // Session A — firm B holds its own document row, exactly as a concurrent firm-B write would.
+    a = await getPool().connect();
+    await a.query("begin");
+    assert.equal((await a.query(
+      "select id from clara.documents where id = $1 for update", [foreign.documentId])).rows.length, 1,
+    "session A holds the firm-B document row FOR UPDATE");
+
+    // CONTROL — anything that genuinely reaches that row now blocks. Without this the fast
+    // CLR11 below could be explained by the lock not being held at all.
+    ctl = await getPool().connect();
+    await ctl.query("set statement_timeout = '1s'");
+    try {
+      await ctl.query("select id from clara.documents where id = $1 for update", [foreign.documentId]);
+      control = { code: null };
+    } catch (e) { control = { code: e.code }; }
+    assert.equal(control.code, "57014",
+      "the CONTROL proves session A's row lock is real and blocking (a plain FOR UPDATE times out)");
+
+    // Session B — the firm-A owner, with a short leash. The leash IS the assertion.
+    b = await getPool().connect();
+    await b.query(`set role ${ROLES.authenticated}`);
+    await b.query("select set_config('request.jwt.claims', $1, false)",
+      [JSON.stringify({ sub: w.users.alice, role: "authenticated" })]);
+    await b.query("set statement_timeout = '4s'");
+    const t0 = Date.now();
+    try {
+      await b.query(
+        `select clara.classify_consent_evidence_document(p_document => $1, p_reason => $2,
+           p_op_key => $3) as r`,
+        [foreign.documentId, "r2 cross-firm lock-reach probe", opk("r2reach")]);
+      out = { code: null };
+    } catch (e) { out = { code: e.code }; }
+    out.ms = Date.now() - t0;
+
+    // Session A is STILL holding the lock here — that is what makes the result mean something.
+    assert.equal(out.code, "CLR11",
+      `the cross-firm call refuses CLR11 (got ${JSON.stringify(out)}). A 57014 means the verb`
+      + " reached and WAITED on the foreign firm's row: the R2 defect, back.");
+    assert.ok(out.ms < 2000,
+      `…and it refused without waiting (${out.ms}ms against a 4000ms leash, while the control`
+      + " on the same row timed out at 1000ms) — no cross-tenant contention, no timing oracle");
+
+    await a.query("commit");
+  } finally {
+    for (const c of [a, ctl, b]) {
+      if (!c) continue;
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      await c.query("reset all").catch(() => {});
+      c.release();
+    }
+  }
+
+  assert.equal((await rootQuery(
+    "select document_kind from clara.documents where id=$1", [foreign.documentId])).rows[0].document_kind,
+  null, "the refused cross-firm call stamped nothing on firm B's document");
+  // Unlocked, the same call still refuses CLR11 — the fix changed the WAIT, not the verdict,
+  // and a nonexistent document is still indistinguishable from a foreign one.
+  await assertRaises("CLR11",
+    () => classifyConsentEvidence(w.users.alice, { document: foreign.documentId }),
+    "the same cross-firm classification with NO lock held");
+  await assertRaises("CLR11",
+    () => classifyConsentEvidence(w.users.alice, { document: crypto.randomUUID() }),
+    "classification of a document that does not exist at all");
+  noteLane("[R2] classify_consent_evidence_document carries firm_id IN the document predicate;"
+    + " a cross-firm probe neither locks nor waits on the foreign row, and CLR11 still covers"
+    + " foreign and nonexistent identically");
 });
 
 test("[0020 §8]: the four purpose-discriminated event types are registered — and 0020 registered NOTHING else", async () => {
@@ -310,13 +411,19 @@ test("[0020 Dependencies-on-0019]: 0020's functions do NOT name any of the seven
     "activate_client_egress_purpose clears the hold via the audited writer (§4.3)");
 });
 
-test("[0020 §5.3 / Dependencies-on-0019]: record_wiki_source_ingest is NOT modified — the entry.approved lane, which carries an authoritative client_id and may legitimately serve a multi-filed document, keeps working", async () => {
+test("[0020 §5.3 / Dependencies-on-0019]: record_wiki_source_ingest gains NO uniqueness requirement — the entry.approved lane, which carries an authoritative client_id and may legitimately serve a multi-filed document, keeps working", async () => {
   fail0020(live);
   assert.equal(await overloadCount("record_wiki_source_ingest"), 1,
     "one overload — 0020 did not add a uniqueness-requiring sibling");
   const src = (await fnSource("record_wiki_source_ingest")).toLowerCase();
   assert.ok(!src.includes("distinct"),
     "the writer carries no distinct-client uniqueness test — the uniqueness requirement belongs to the RESOLVER-driven entry point only (§5.3)");
+  // [A6] This cell used to be titled "is NOT modified", which stopped being true when the
+  // deterministic-content floor landed (§5.6c). The claim §5.3 actually makes is about
+  // UNIQUENESS, and that is what is asserted above. The one real change is named here rather
+  // than left implied, and its byte-exact extent is pinned in wb-0020-legacy's §6 diff cell.
+  assert.ok(src.includes("source_note_not_permitted"),
+    "…and the ONE change 0020 does make to this verb is the A6 note floor, present and named");
 });
 
 // ===========================================================================

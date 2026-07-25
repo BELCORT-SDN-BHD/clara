@@ -18,7 +18,9 @@
 // projected|already_projected|citations_staled|skipped_inactive_client|held_consent|
 // skipped_kind|skipped_no_surface|skipped_unresolved_client|skipped_ambiguous_client|
 // skipped_unclassified|
-// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation + the ENUMERATED
+// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation|
+// skipped_source_cap (0020 §A5 — the DETERMINISTIC-SOURCE ceiling, distinct from skipped_cap so a
+// receipt never confuses "out of synthesized pages" with "out of source pages") + the ENUMERATED
 // typed refusals of TERMINAL_STATUS (incl. CLR32/stale_projected_from_seq -> already_projected, the
 // 0019 §5 monotonic guard). That table is CLOSED (ratchet R2 finding B2): a typed CLR that is NOT in
 // it is NOT terminal, because the old catch-all mapped every unrecognised CLR32 reason to
@@ -161,12 +163,27 @@ const isClaraCode = (err) => typeof err?.code === "string" && /^CLR\d{2}$/.test(
  * reason a future migration adds genuinely cannot be checkpointed away by default.
  *
  * The keys are the reasons the wiki writers actually raise (0017:1999-2153 for the CLR32 family,
- * plus 0019 §1b/§5); the CLR-code table covers the non-CLR32 refusals of the same surface.
+ * plus 0019 §1b/§5 and 0020 §A5); the CLR-code table covers the non-CLR32 refusals of the same
+ * surface.
  * (CLR32/budget_unknown is DELIBERATELY absent — it is a CONFIGURATION_REFUSAL, not terminal.)
  */
 const CLR32_TERMINAL = Object.freeze({
   consent_held: "held_consent",
   cap_exceeded: "skipped_cap",
+  // The 0020 §A5 two-class page budget. `cap_exceeded` now means ONLY the SYNTHESIZED cap
+  // (max_pages_per_client); deterministic sources/<document_id> pages are exempt from it and
+  // carry their own ceiling (max_source_pages_per_client), which refuses with its OWN reason so
+  // the two exhaustion modes are never confused on a receipt. Terminal for exactly the reason
+  // cap_exceeded is — replaying the event meets the identical ceiling — and the DISTINCT status
+  // keeps "this client has 50000 filed source documents" legible as itself, never as "this
+  // client is out of synthesized wiki pages".
+  source_cap_exceeded: "skipped_source_cap",
+  // 0020 §A5 RESERVES the 'sources/' slug namespace for deterministic ingest. REACHABLE from
+  // this consumer: planSeedingWikiFact publishes a slug taken VERBATIM from a model-authored
+  // seeding proposal, so a model can propose one. It is a malformed write, exactly like
+  // bad_state — and enumerating it is what stops it BLOCKING the firm cursor as an
+  // unrecognised typed refusal (the R3-F2 default).
+  reserved_slug_namespace: "skipped_bad_state",
   // The 0019 §5 DB-side monotonic guard: a BENIGN convergence (a newer seq is already published
   // for this slug), not a malformed write — it must not report itself as one.
   stale_projected_from_seq: "already_projected",

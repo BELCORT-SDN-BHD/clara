@@ -71,11 +71,21 @@ const BYTE_IDENTICAL = {
     exact: "0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e",
     acl: ["clara_fn_owner=X/clara_fn_owner"],
   },
+  // AMENDMENT A6 (ratified 2026-07-25, contract v1.3 §5.6c). This is the ONE member of §6's
+  // closed set that 0020 deliberately changes: the deterministic-content floor (p_note must be
+  // NULL). The pins below are therefore NOT retuned to post-A6 hashes — retuning would reduce
+  // this cell to "it is whatever it is now" and would silently absorb any OTHER edit shipped
+  // in the same migration. Instead `strip` removes exactly the A6 insertion and the remainder
+  // is compared against the UNCHANGED 19-migration prestate, so the cell proves both halves:
+  // the floor is present in its exact shape, and nothing else in that body moved. This mirrors
+  // the migration's own §6 tail assertion.
   record_wiki_source_ingest: {
     sig: "clara.record_wiki_source_ingest(uuid,uuid,text,text)",
     len: 2515, sha: "65609d6f4a9e0399985f5568f960ae6cbcc7457bb372ee38c4520bf20662aaac",
     exact: "0c3adf2dc31ff2780df85b27ae3d5a09f76ae7f98cf7b816d557c74c8fdb484c",
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_runtime=X/clara_fn_owner"],
+    strip: /\n {2}-- \[0020 A6] THE DETERMINISTIC-CONTENT FLOOR\.[\s\S]*?\n {2}end if;/,
+    stripMust: /source_note_not_permitted/,
   },
 };
 
@@ -125,13 +135,26 @@ test("[0020 §6 — THE exact-diff pin]: the five closed-set functions have ONE 
       `clara.${name} has EXACTLY one overload (0020 added no sibling)`);
     const facts = await fnFacts(pin.sig);
     assert.ok(facts, `${pin.sig} resolves — the EXACT argument signature is unchanged`);
-    const n = normSrc(facts.src);
+    // [A6] For the one deliberately-amended member, strip exactly the ratified insertion and
+    // hold the REMAINDER to the untouched prestate pins. The two assertions below make the
+    // strip itself load-bearing: it must actually remove something, and the removed thing must
+    // be the A6 floor — so this cannot degrade into "strip whatever makes the hash match".
+    let src = facts.src;
+    if (pin.strip) {
+      assert.match(src, pin.stripMust,
+        `${name}: the ratified A6 insertion must be PRESENT in the live body`);
+      src = src.replace(pin.strip, "");
+      assert.notEqual(src, facts.src, `${name}: the A6 strip pattern matched nothing — it has drifted from the migration's`);
+      assert.doesNotMatch(src, pin.stripMust,
+        `${name}: stripping the A6 block must remove the whole block, not part of it`);
+    }
+    const n = normSrc(src);
     if (sha256(n) !== pin.sha) {
       drift.push(`${name}: prestate len=${pin.len} sha=${pin.sha} → now len=${n.length} sha=${sha256(n)}`);
     }
     // R1-F4: the pin §6 actually promises. Normalization is a readability aid, not identity.
-    if (sha256(facts.src) !== pin.exact) {
-      drift.push(`${name}: EXACT prosrc sha ${pin.exact} → ${sha256(facts.src)} (a change invisible to the normalized digest is still a change)`);
+    if (sha256(src) !== pin.exact) {
+      drift.push(`${name}: EXACT prosrc sha ${pin.exact} → ${sha256(src)} (a change invisible to the normalized digest is still a change)`);
     }
     assert.equal(facts.secdef, true, `${name} is still SECURITY DEFINER`);
     assert.equal(facts.owner, ROLES.fnOwner, `${name} is still owned by clara_fn_owner`);

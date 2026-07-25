@@ -1,5 +1,23 @@
-# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.1 (RATIFIED)
+# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.3 (RATIFIED)
 
+> **Status: RATIFIED v1.3 — v1.2 plus the ratified OWNER RULING A6 (2026-07-25): what the
+> A5 exemption was still missing, §5.6.** A5 was reviewed adversarially after it was built.
+> The discriminator held; the exemption was incomplete in three places — the daily lint went
+> superlinear on the population A5 unbounded (§5.6a), the apply-time bridge proved set
+> membership rather than content provenance (§5.6b), and the exemption's premise that source
+> bytes are machine-generated was a **caller convention** rather than a structural fact
+> (§5.6c). A6 is the owner's adjudication of all three. Residual **A5-R1** is restated
+> plainly and promoted to §11; the *context-pack* half is deliberately **not** fixed here.
+> Ratchet **R2**'s cross-firm lock reach in `classify_consent_evidence_document` lands in the
+> same PR as a build fix — see the v1.2 → v1.3 changelog. Everything about A1–A5 is unchanged.
+>
+> **Status: RATIFIED v1.2 — v1.1 plus the ratified OWNER RULING A5 (2026-07-25): the
+> two-class wiki page budget, §5.5.** A5 is not a ratchet finding. Lighting deterministic
+> ingest (§5.3/§10.1) made a latent defect in the *inherited* WB-R8 page budget operative —
+> one budget was silently bounding two different classes of page — and the owner ruled on it
+> before the migration shipped. §5.5 is that ruling; the amendment table below carries its
+> row. Everything about A1–A4 is unchanged.
+>
 > **Status: RATIFIED v1.1 — v1.0 plus the ratified ratchet-R1 amendments (2026-07-25).**
 > v1.0 was ratified as a *design* contract; ratchet R1 reviewed the BUILD against it,
 > cross-model and repo-grounded, and found four things wrong **with the contract
@@ -13,6 +31,7 @@
 > | **A2** | TTL and expiry are **wall clock** (`clock_timestamp()`), and the runtime's consume helper runs in its **own committed transaction**. v1.0 left §3.6's linearization claim conditional on a caller nobody had audited. | **§3.2**, **§3.4**, **§3.6**, **§3.7**, **§9.3** |
 > | **A3** | A fifth owner RPC, `classify_consent_evidence_document`. v1.0's §7.2 step 1 was **not executable**: no verb could stamp `document_kind='consent_evidence'` without also granting purpose-blind legacy egress. | **§7.1**, **§7.2**, **§8**, **§9.1**, **§9.7** |
 > | **A4** | §6's byte-identity pins hash **exact `prosrc` with SHA-256** and add legacy **ACL** and **relation-structure** pins. v1.0's normalized-md5 pin was neither byte nor semantic identity. | **§6**, **§8** |
+> | **A5** *(owner ruling, 2026-07-25)* | The WB-R8 per-client page cap is **split into two classes**. Deterministic `sources/<document_id>` pages are **exempt** from `max_pages_per_client` and bounded by their own key **`max_source_pages_per_client`** with its own typed reason; the **`sources/` slug namespace is reserved** so the exemption cannot be forged. Lighting ingest would otherwise have un-indexed every busy client at 40 documents. | **§5.5** (new), **§5.3**, **§8**, **§9.6**, **§10.1** |
 >
 > Two **errata** are ratified with them: §8's "three partial unique indexes" is wrong
 > (two uniques + one non-unique open-authorization index — see §8), and §3.3/§5.1's
@@ -684,6 +703,238 @@ convergence rather than assume it.
   prior `document.classified` event for `p_document` to exist before it publishes;
   absent one it returns `{"status":"skipped_unclassified"}` and writes nothing.
 
+### 5.5 The two-class page budget (AMENDMENT A5, owner ruling, ratified 2026-07-25)
+
+**What the cap conflated.** WB-R8 seeded exactly one per-client page budget —
+`clara.wiki_budgets('max_pages_per_client', 40)` — and the publication core charges
+**every** new slug against it. That budget was written to bound **synthesized** pages: the
+two costs it protects against are **model spend** and **context-pack noise**. Until this
+migration nothing else could create pages at volume, so one budget was one class and the
+conflation was invisible.
+
+**Why lighting deterministic ingest surfaced it.** §5.3 / §10.1 make a uniquely-filed
+`document.classified` publish deterministically, and `record_wiki_source_ingest` mints
+**one page per document** at slug `sources/<document_id>`. Those pages were charged against
+the same 40. At RPR-scale document volume a client reaches 40 **in weeks**, and from that
+moment the client is silently un-indexed: every further ingest *and* every synthesized page
+refuses `CLR32/cap_exceeded`, and every later `document.filing_retired` re-drive takes the
+`skipped_cap` path. A volume threshold, not a knowledge threshold, would have stopped the
+wiki — quietly, on the busiest clients first.
+
+**The ruling.** A `sources/*` page is a **deterministic provenance record**: no model call,
+no synthesis, no consent surface, one per document, and it scales with **document volume**
+rather than with **knowledge**. A synthesized page scales with knowledge and costs a model
+call. *The two classes must not share a budget.* Deterministic source pages are therefore
+**exempt** from `max_pages_per_client` and bounded by their own key. Unbounded growth is not
+wanted either — a separate ceiling costs almost nothing and keeps the classes honest.
+
+**The discriminator, and why every weaker candidate was rejected.** The test a discriminator
+must pass is that a **model-synthesis path cannot publish a page satisfying it**. That is not
+hypothetical: the seeding `wiki_fact` lane publishes `slug` / `title` / `page_kind` /
+`content` taken **verbatim** from a seeding proposal a **model authored**, calling
+`publish_wiki_page_version` with `synthesis='deterministic'`, `engine_id=null`.
+
+| Candidate | Verdict |
+|---|---|
+| The `sources/` **slug prefix** alone | **Rejected — forgeable.** The slug is a caller argument on the granted wrapper, `sources/<uuid>` satisfies the W1 slug grammar, and the lane above hands a model direct authorship of it. Worse than losing the exemption: a model page would land in the **source counting bucket**, so the synthesized cap would stop binding. |
+| **`page_kind`** | **Rejected — cannot separate them even in principle.** `record_wiki_source_ingest` uses `period_context`, and the deterministic `wiki_fact` lane may also use `period_context`. |
+| **`p_synthesis='deterministic'`** | **Rejected — a caller argument, and a *claim*.** It asserts how the bytes were produced; the DB cannot verify it, and the `wiki_fact` lane already passes exactly that value. |
+| **`p_engine_id is null`** | **Rejected — not independent.** The preamble already enforces `(p_synthesis='model') <> (p_engine_id is not null)`, so this is `synthesis='deterministic'` restated, forgeable identically. |
+| The citation detail flag `deterministic_ingest: true` | **Rejected — caller-supplied JSON the core never validates.** A claim, not a fact. |
+| **`p_log_action='ingest'`** | **CHOSEN.** `p_log_action` is a parameter of `clara._publish_wiki_page_version_core`, which is **ungranted**; its only callers are the two `SECURITY DEFINER` wrappers, and each **hard-codes** its value (`'publish'` / `'ingest'`). No grantee, and no argument of the granted surface, can reach `'ingest'`. It is the only term on this path a model-synthesis caller **structurally cannot reach**. |
+
+The installed condition is `p_log_action='ingest'` **in conjunction with**
+`p_synthesis='deterministic'`, `p_engine_id is null`, `p_projected_from_seq is null` and the
+canonical `sources/<uuid>` slug shape. Those four are a **consistency belt** over facts the
+ingest wrapper fixes, never the cut — a future wrapper passing `'ingest'` with different
+values **fails closed** into the tighter synthesized cap rather than silently inheriting the
+exemption.
+
+The conjunction is wrapped in `coalesce(…, false)`, and that is **load-bearing**. `p_log_action`
+is the only term that can be `NULL`; without the coalesce the conjunction is `NULL`, `not
+v_is_src` is `NULL`, so the namespace refusal **silently does not fire** while the exemption
+branch also fails — and the page publishes **into** the reserved namespace and is counted in
+the **source** bucket: a synthesized page escaping its own cap through three-valued logic.
+`UNKNOWN` must mean *not a source page*, which is both fail-closed halves at once.
+
+**The row-level half.** The discriminator decides one call's *arguments*; the cap must also
+**count** the existing population per class, and a `wiki_pages` row carries no arguments.
+Joining each page to its `wiki_log` `action='ingest'` row is exact but has no index. So the
+namespace is **reserved structurally**: the core now refuses, typed
+(`CLR32` / `reserved_slug_namespace`), any publication into `sources/%` that is not a
+deterministic ingest. With that refusal in place `slug like 'sources/%'` is an exact
+restatement of the unforgeable argument fact, and the cheap predicate is used. The bridge for
+pages that already exist is proven **empirically at apply time, in both directions**, and a
+single stray page aborts the apply.
+
+**The new budget key.** `max_source_pages_per_client`, default **50000**, seeded into
+`clara.wiki_budgets` (which becomes a five-row closed set). Generous by construction: the slug
+namespace is keyed by document id, so a client's source pages can never outnumber the
+documents actively filed to it — 50000 is roughly a century of a 500-document-a-year client.
+It is read through 0017's own idiom and joins the **same** null check, so a missing row raises
+`CLR32/budget_unknown`, which stays a **CONFIGURATION** refusal in the runtime (never
+terminal; the checkpoint stays behind it).
+
+**What deliberately does not change.**
+
+- The synthesized refusal keeps its **exact** shape — message, `CLR32`, reason
+  `cap_exceeded`, `budget_key` `max_pages_per_client`, same `limit`. Only the population it
+  counts narrows.
+- The new ceiling refuses with its **own** reason `source_cap_exceeded` and its own
+  `budget_key`, so the two exhaustion modes are never confused in a receipt, a dead-letter or
+  a lint finding. The consumer maps it to its own terminal status `skipped_source_cap`
+  (§9.6); `reserved_slug_namespace` maps to `skipped_bad_state` — both **must** be enumerated,
+  or an unrecognised typed refusal would block the firm cursor.
+- The L7 `cap_pages` lint belt narrows to the **synthesized** population it measures. No
+  second lint finding kind is added for the source ceiling: 50000 is not an operational
+  target to warn about at 90%, its breach is already a hard typed refusal carrying its own
+  reason, and a new kind would mean widening the `lint_findings` `finding_kind` CHECK.
+- **No grant is added, no signature changes, no new error code.**
+
+**One interaction worth stating plainly.** Reserving the namespace means
+`publish_wiki_page_version` can no longer supersede a `sources/*` page. Nothing in production
+did — the runtime lanes mint `counterparty/<id>` slugs and model/seeding-proposal slugs — but
+one consequence follows: 0019 §5's monotonic guard case "a **non-null** new
+`projected_from_seq` over an **ingest-made null** prior" is now **unreachable**, because the
+only writer permitted in that namespace passes `null` itself. The guard's null-prior branch is
+unchanged and still fully reachable on any non-source page; only that particular combination
+is gone, and it is gone **by design**, not by accident.
+
+**Named residual A5-R1 (not fixed here; needs its own ruling).** `get_context_pack` ranks
+candidates by `page_kind` priority, and `period_context` is priority **2 of 6**. Deterministic
+source pages carry `page_kind='period_context'` and are the most recently updated pages a busy
+client has, so once six exist the pack window is theirs and treatments / recurring patterns /
+counterparty pages are crowded out. That is a consequence of **lighting ingest**, not of A5 —
+at the old shared cap of 40 the same six slots were already taken, and A5 does not change what
+the pack selects. It is recorded because this ruling names *context-pack noise* as one of the
+two things WB-R8's cap protected, and the **pack half of that protection is demonstrably not
+doing its job**.
+
+> **A5-R1, restated plainly (ratchet A5-R, 2026-07-25).** The paragraph above understates it,
+> and the understatement mattered enough to correct. WB-R8's single cap was protecting **two**
+> things: model spend and context-pack noise. A5 keeps the spend half bounded — the synthesized
+> cap still binds at 40, on exactly the population that costs money. It does **not** keep the
+> pack half bounded, and it **raises the ceiling on the population that crowds the pack from 40
+> to 50000**. Both halves of what the cap protected therefore now scale with **document
+> volume**, and A6 (below) is the same story on the lint surface: every exempt source page was
+> simultaneously a permanently-open `orphan_page` finding and a priority-2 pack candidate. A6
+> fixes the lint half structurally. **The pack half is not fixed and is not fixable here** —
+> `get_context_pack`'s ranking is WB-R8 / W6 contract surface, and changing what the six-page
+> window selects is a ruling of its own, not a patch attached to a budget amendment. It is
+> recorded as the **open residual it is**, with the honest consequence stated: on a
+> document-heavy client the six-page pack is, today, six provenance stubs.
+
+### 5.6 What the exemption was still missing (AMENDMENT A6, owner ruling, ratified 2026-07-25)
+
+A5 was reviewed adversarially after it was built. The review did not find the discriminator
+wrong — it found the exemption **incomplete in three places**, each of which follows from the
+same oversight: A5 decided *who* may publish into the reserved namespace and *how many* pages
+that namespace may hold, and then stopped. It did not ask what the exempt pages **cost the
+rest of the system**, what the exempt **bytes** are, or what the apply-time bridge actually
+**proves**. A6 is the owner's adjudication of that review.
+
+**(a) The exemption made the daily lint a superlinear work queue.** L's orphan rule
+(`0017:4716-4728`) opens an `orphan_page` finding for any active page with **zero**
+`wiki_page_refs`. A deterministic source page has zero refs **by construction** —
+`record_wiki_source_ingest` always passes `p_refs = '[]'::jsonb` (`0017:2269`). So every
+ingested document produced a permanently-open finding **and** an L6 `lint_finding_opened`
+notification, on a population A5 had just re-ceilinged from 40 to 50000. Worse than noise: the
+supersede sweep rescans the whole conditions array once per open finding (`0017:4863-4866`), so
+`run_client_lint` costs **O(N²)** in exactly that population, and `run_lint_all` iterates every
+active client in one call (`0017:4927-4934`) — one document-heavy client stalls the firm's whole
+daily pass. **Measured on the rig** (local PG17, one client, steady state):
+
+| Source pages | `run_client_lint`, before | after | open findings, before → after |
+|---|---|---|---|
+| 900 | 307 ms (first pass 1,526 ms) | 2 ms | 900 → 0 |
+| 2,700 | 10,991 ms (first pass 33,242 ms) | 3 ms | 2,700 → 0 |
+
+3× the pages, **35.8×** the time. The fix is one more drift-guarded narrowing in the same
+change-of-record block A5 already owns: the orphan rule skips the reserved namespace. The rule
+is **not** disabled — a synthesized page with no refs is still an orphan, asserted by its own
+cell. Pages that already carry stale findings **self-heal**: the existing not-in-conditions
+sweep supersedes them on the next pass (measured: 4,881 ms once for 2,700 findings, then 3 ms
+steady). No backfill, no data fix, nothing to run by hand.
+
+*Rejected: teaching the ingest verb to write a ref.* A ref is a **knowledge edge** between wiki
+pages; a provenance record has none, and manufacturing one to satisfy a linter is writing the
+graph to fit the tool. The page's tie to its document already lives in its citation and in its
+`wiki_log` ingest row.
+
+**(b) The apply-time bridge proved set membership, not content provenance.** v1.2's bridge
+asked, in both directions, whether the `sources/%` population and the `wiki_log action='ingest'`
+population coincide. Neither direction notices that a page's **current version is
+model-synthesized**. Before 0020 the namespace was unreserved, so a model
+`publish_wiki_page_version` **could** have superseded an ingested `sources/<doc>` page; the
+result carries an `ingest` row from its birth, satisfies both directions, applies clean, and
+becomes **permanently exempt and unrepairable** — the reservation now refuses a re-publish, and
+a `record_wiki_source_ingest` re-drive returns the `_reserve_op` dedupe receipt without
+re-entering the core. Live likelihood is near zero. A claim the apply cannot substantiate is
+not. **A third fail-closed direction is added** — no `sources/%` page carries a `wiki_log`
+`action='publish'` row, which only `publish_wiki_page_version` can write — and v1.2's wording
+("proven empirically, in both directions") is **corrected**: what is proven is **creation and
+every publication**, not set membership. §10.3 step 3's receipt is corrected the same way.
+
+**(c) The exemption's premise was a caller convention. It is now structural.** A5 argues that a
+`sources/*` page is a deterministic provenance record — machine-generated bytes, no model, no
+consent surface — and grants the exemption **on that basis**. But
+`record_wiki_source_ingest` built its page content as
+`coalesce(nullif(btrim(p_note),''), 'Source document: '||filename)` (`0017:2255-2256`), and
+`p_note` is a **caller argument on a verb granted to `clara_runtime`**. Arbitrary prose could
+therefore be written as page body, stamped `synthesis='deterministic'`, and made exempt from
+`max_pages_per_client`. And because the W9 synthesis-hold gate fires only for
+`p_synthesis='model'` (`0017:2040-2044`), that prose **published onto a client under a live
+synthesis hold**, in the same transaction where a model page is refused `consent_held`. Both
+halves were driven on the rig.
+
+> **Ruling.** `p_note` must be **NULL** on the exempt path. **All three** production callers
+> already pass null — `packages/runtime/lib/wiki-projection.mjs` `planDeterministicIngest`,
+> `packages/runtime/lib/wiki-projection-ops.mjs` `backfillWikiSources` (the ceremony's
+> deterministic backfill), and §5.3's `resolve_and_ingest_wiki_source` — so it costs nothing
+> today and closes the channel
+> structurally. A documented "callers must pass null" limit would be exactly the model
+> discipline this project rejects — the cardinal invariant is that guarantees are enforced in
+> the DB, not by caller convention, and R1's F1 was refused on the same ground. If a future lane
+> genuinely needs a human note on a source page, it revisits this **deliberately** rather than
+> inheriting a silent hole.
+
+The refusal is typed with its own discriminant — **CLR10 / `source_note_not_permitted`**, in
+§7.1's argument-validation grammar — and is placed **first**, after the op-key check and before
+every read, lock and `_reserve_op` call, so a noted call reserves nothing, reads nothing and
+cannot be turned into a document-existence probe. The predicate is `is not null`, **not**
+`btrim(...) <> ''`: the channel is closed, not the subset that happens to reach the content.
+The **parameter is kept** — dropping it would change a signature 0019 pins by exact identity,
+that the grant and the wiki whitelist both name, and that the runtime caller passes.
+
+**The trade this costs.** `record_wiki_source_ingest` is a member of §6.1's EXACT-source pinned
+set, and A6 is the one deliberate change to it. Its pin is therefore **not retuned to a new
+opaque hash** — that would say only "it is whatever it is now". It is made **stronger**: strip
+exactly the A6 insertion and the remainder must still hash to **0017's original pin**, byte for
+byte. The assertion proves two things at once — the floor is present in its exact shape, and
+nothing else in that function moved, including under an edit that also carried the A6 text.
+
+**Rig cost, stated rather than hidden.** The rig's `recordWikiIngest` helper defaulted to a
+non-null note, so six fixtures passed prose the DB now refuses. The helper default becomes
+`null` (matching production) and each fixture is updated. One of them — the `op_key` mutation
+law in `wb-g-opkeys` — used `p_note` as the field it moved to prove "same key, different args →
+CLR10"; it now moves the **document** instead, over two filed sources on the same client. No
+assertion anywhere depended on the note's content.
+
+**What A6 does not change.** No grant. No signature. No new error code. No `finding_kind`
+CHECK. The synthesized cap, the source ceiling, both typed reasons, both budget keys and every
+receipt token are exactly as A5 ratified them.
+
+**Where the proof lives.** A5's battery, `packages/db/tests/wave-b/wb-0020-source-budget.test.mjs`
+— **not** a blind lane, and it says so: it is written alongside the SQL as the amendment's own
+adversarial proof. A6 adds six cells to it: **E2** (a ref-less *synthesized* page is still an
+orphan — the rule was narrowed, not disabled), **F / F2 / F3** (the note refusal; that it
+precedes every read, lock and `_reserve_op`; and that the channel it closed was a hold bypass),
+and **G / G2** (no page in the namespace carries a model-path publication, corpus-wide, plus
+the mechanism that keeps it true). **E** is tightened to pin the orphan population by exact
+slug rather than asserting only about `cap_pages`. The R2 build fix is proven by a two-session
+cell **with a control** in `wb-0020-tail.test.mjs`, and the §6 strip-and-compare pin lives in
+`wb-0020-legacy.test.mjs`.
+
 ---
 
 ## 6. Legacy egress fidelity — the byte-identity closed set
@@ -893,10 +1144,47 @@ clara_fn_owner` / `reset role`. One transaction; **any failure aborts the apply*
   `_enqueue_invoice_facts_core`, `record_wiki_source_ingest` have exactly one overload
   each, with unchanged argument signatures and **exact `prosrc` SHA-256 pins — no
   normalization** (§6.1).
+  - **A6 exception, and it is stricter, not looser.** `record_wiki_source_ingest` is the one
+    member 0020 deliberately changes (§5.6c). Its pin is **not** retuned: the tail strips
+    exactly the A6 insertion and asserts the remainder still hashes to **0017's original
+    pin**. So the assertion carries both halves — the floor is present in its exact shape,
+    **and** nothing else in that function moved.
 - Their **EXECUTE ACLs** are pinned as one closed-set string.
 - `client_egress_consents` has no new column, **and** its constraints, indexes,
   non-internal triggers, RLS flags/owner and policies are pinned as one exact
   structural digest (§6.1).
+
+**The two-class page budget (§5.5, amendment A5)**
+- `clara.wiki_budgets` is a **five**-row closed set: the four WB-R8 values unchanged, plus
+  `max_source_pages_per_client = 50000`.
+- The **persisted** `_publish_wiki_page_version_core` carries **both** classes — the
+  `p_log_action='ingest'` discriminator, the `reserved_slug_namespace` refusal, the new
+  budget read joined to the existing `budget_unknown` null check, the `source_cap_exceeded`
+  ceiling, **and** the synthesized `cap_exceeded` refusal byte-for-byte in its original shape,
+  narrowed to `slug not like 'sources/%'`. 0019's `isolation_unsupported` and
+  `stale_projected_from_seq` guards are asserted to have **survived** the layering.
+- **(A6)** The persisted core is asserted to **count** the source bucket
+  (`slug like 'sources/%' ) >= v_max_src`), not merely to name the `source_cap_exceeded`
+  reason. Without that, a body whose exempt-branch count had been inverted or dropped would
+  satisfy every presence, reason and body-order assertion above.
+- The persisted `run_client_lint` still opens `cap_pages` against `max_pages_per_client`,
+  narrowed to the synthesized population, and still carries 0019's `stale_citation`
+  condition — **and (A6)** still opens `orphan_page`, narrowed to skip the reserved namespace.
+  Both narrowings are pinned in forms that cannot be satisfied by the other.
+- **(A6)** The persisted `record_wiki_source_ingest` carries the `p_note` floor and its
+  `source_note_not_permitted` discriminant, **before** its `_reserve_op` call.
+- **Apply-time bridge, three directions (A6):** no pre-existing page occupies `sources/%`
+  without a deterministic-ingest `wiki_log` row; no deterministic-ingest page lives outside
+  it; and **no `sources/%` page carries a `wiki_log` `action='publish'` row**. The first two
+  are set membership; only the third is content provenance. A single stray page in any
+  direction **aborts the apply**. The third is re-read in the tail as a receipt.
+- **Functional probe (rolled back):** a synthesized publication into the reserved namespace,
+  driven through `publish_wiki_page_version` — the granted verb the model-fed seeding
+  `wiki_fact` lane calls — is refused `CLR32/reserved_slug_namespace` and writes nothing.
+- **Functional probe (rolled back, A6):** `record_wiki_source_ingest` with a non-null `p_note`
+  and a **nonexistent** document uuid is refused `CLR10/source_note_not_permitted` — proving
+  the floor precedes every read — while the same nonexistent document with a **null** note
+  still draws the verb's own `CLR02`, proving the floor displaced nothing.
 
 **Apply-time precondition (empirical, never assumed)**
 - The three new relations are empty at end of apply — **zero typed consents, zero
@@ -1032,6 +1320,19 @@ discipline).
   · `projected` only when prepared-granted **and** consumed-granted.
 - Every refusal is a typed terminal: checkpoint-only advance, never a crash, never a
   dead-letter loop.
+- **(A5) The two-class page budget.** `skipped_source_cap` for `CLR32/source_cap_exceeded`
+  (the deterministic-source ceiling) — **distinct** from `skipped_cap`, which now means only
+  the synthesized cap. `skipped_bad_state` for `CLR32/reserved_slug_namespace` (a publication
+  into the reserved `sources/` namespace by anything other than deterministic ingest — a
+  malformed write). Both **must** be enumerated in the closed terminal table:
+  an unrecognised typed refusal is deliberately non-terminal and would **block the firm
+  cursor**. `CLR32/budget_unknown` stays a CONFIGURATION refusal after the third budget row
+  joins the same null check.
+- **(A6) No new consumer receipt, deliberately.** `CLR10/source_note_not_permitted` cannot
+  reach the consumer: both production callers pass `p_note = null`, and the DB now refuses
+  anything else. If a future lane ever raised it, the existing `CLR10 → skipped_invalid`
+  mapping already applies — a typed terminal for a caller bug, which is the right shape. No
+  entry is added to the closed terminal table for a refusal the runtime cannot provoke.
 
 ### 9.7 Lockstep test updates
 
@@ -1044,6 +1345,15 @@ legacy-fidelity proof. New typed helpers are **added** to `wave-a-fixtures.mjs`
 `wave-b-wiki-projection-consumer` and its unit suite change: the default path moves from
 `resolveConsentDefault` to prepare/consume, `document.classified` gains the three-way
 receipt, and the injected `deps` gain the two authorization steps (§3.7).
+
+**A6 lockstep (2026-07-25).** `recordWikiIngest`'s `note` default in `wb-helpers.mjs` moves
+from `"rig ingest"` to **`null`**, matching both production callers, because the DB now
+refuses a non-null note (§5.6c). Six fixtures that passed prose incidentally are updated;
+none of their assertions read the note. One is a genuine substitution rather than a deletion:
+`wb-g-opkeys`'s same-key/different-args law used `p_note` as the field it moved for
+`record_wiki_source_ingest`, and now moves the **document** instead, over two verified
+actively-filed sources on the same client. A cell that *wants* the refusal passes a note
+explicitly.
 
 ---
 
@@ -1064,6 +1374,14 @@ contract will not say it. Before any activation, 0020 **deliberately changes**:
    `document.filing_retired`).
 5. The catalog/API surface gains three relations and **nine** functions (eight in v1.0
    plus `classify_consent_evidence_document`, amendment A3).
+6. **(A5)** The per-client page budget becomes **two** budgets (§5.5). Deterministic
+   `sources/*` pages stop being charged to `max_pages_per_client` and are charged to
+   `max_source_pages_per_client` instead; the `sources/` slug namespace becomes **reserved**,
+   so a publication into it by anything but deterministic ingest is refused
+   `CLR32/reserved_slug_namespace`; two new receipt tokens exist (§9.6); and the L7
+   `cap_pages` lint belt counts the synthesized population only. This is a direct
+   consequence of item 1 — without it, lighting ingest un-indexes a busy client at 40
+   documents. It is a **deliberate** behaviour change and is not part of the DARK claim.
 
 **What is DARK is MODEL SYNTHESIS.** With zero typed consents and zero activations —
 asserted at apply time (§8) and re-asserted post-apply (§10.3) — the model-egress path is
@@ -1109,8 +1427,32 @@ neither order can light synthesis — there is no silent-loss window in either d
    - The invoice-facts lane is still authorized for RPR (a read-only consent-count
      probe against `claim_document_processing_task`'s predicate).
    - No table grant to `clara_runtime` on any consent relation.
+   - **(A5) `clara.wiki_budgets` is a five-row set** — the four WB-R8 values *unchanged*
+     plus `max_source_pages_per_client = 50000`. (The 0017 ceremony runbook's "the four
+     WB-R8 values" expectation becomes "these four, of five".)
+   - **(A5, corrected by A6)** Three counts, not two. `select count(*) from clara.wiki_pages
+     where slug like 'sources/%'` **equals** the count of pages carrying a `wiki_log`
+     `action='ingest'` row (both directions), **and** the count of `sources/%` pages carrying a
+     `wiki_log` `action='publish'` row is **zero**. The first two are set membership — they say
+     the page was *created* by deterministic ingest. Only the third says every *publication*
+     was, which is the property the exemption actually rests on. The apply aborts on any of the
+     three, so a green apply has already proven them — re-read them as a receipt.
+   - **(A5)** A `clara_runtime`-role `publish_wiki_page_version` probe with slug
+     `sources/<any uuid>` refuses `CLR32` / `reserved_slug_namespace` and writes nothing.
+   - **(A6)** A `clara_runtime`-role `record_wiki_source_ingest` probe with a **non-null**
+     `p_note` refuses `CLR10` / `source_note_not_permitted` and writes nothing — including
+     against a document uuid that does not exist, which is what proves the floor precedes every
+     read. The same call with a **null** note is unchanged.
+   - **(A6)** `run_client_lint` on the busiest existing client returns promptly and opens **no**
+     `orphan_page` finding against any `sources/%` page. On a database that ran the pre-A6 lint,
+     expect the first post-deploy pass to **supersede** the accumulated source-page findings —
+     that pass is proportional to how many there were, and every pass after it is not.
 4. **Deploy the runtime image** (`fly deploy`); confirm `/ready` 200 and the
-   `WIKI_PROJECTION` lane acquires.
+   `WIKI_PROJECTION` lane acquires. The image **must** be one that enumerates
+   `source_cap_exceeded` and `reserved_slug_namespace` in the wiki consumer's closed terminal
+   table (§9.6) — an older image treats them as unrecognised typed refusals and **blocks the
+   firm cursor**. Runtime-image-first is therefore also acceptable here; DB-first is not
+   acceptable with an image that predates A5.
 5. **Verify DARK:** every counterparty event still records `held_consent` with the
    unchanged reason token; zero `synthesize`; zero model-lane publications;
    `document.classified` publishes only on unique; invoice-facts unaffected.
@@ -1134,6 +1476,7 @@ at the owner's pace, afterwards.
 | **R-6** | A second typed purpose will need per-purpose revocation semantics on any future shared surface. | The typed relation is already per-purpose; the legacy relation stays single-lane. No action now. |
 | **R-7** | **Timing side channel on the runtime DEFINER verbs** (added 2026-07-25 with the §3.3 erratum). Payloads and error shapes are byte-identical across every non-granted cause, and the two coarsest differences are removed (the firm-leading live-activation index; the resolver's two-row cap). Execution is nevertheless **not constant-time**, and SQL cannot make it so. | **Named, not claimed away.** Closing it needs an architectural control — a constant-time gateway, or a rate limit on `prepare_egress_dispatch` / `resolve_document_client` for `clara_runtime` — which is a ruling, not a patch. v1.0's absolute "no timing branch a caller can distinguish" is withdrawn from §3.3 and §5.1. |
 | **R-8** | **The consume must be committed by its caller** (added 2026-07-25 with amendment A2). A PostgreSQL function cannot commit its caller's transaction, so `granted` implies committed only if the caller commits before calling the model. | Closed on the caller side: the runtime's default consume helper runs its own `begin`/`commit` (§3.7), pinned by a unit cell. It remains a **precondition on any other caller** of the verb, stated in §3.4 and §3.6 rather than assumed. |
+| **A5-R1** | **The context pack is not protected, and A5 widened the population that crowds it** (raised with A5, restated plainly with A6). `get_context_pack` ranks by `page_kind`, `period_context` is priority 2 of 6, and every deterministic source page is a recently-updated `period_context`. WB-R8's cap protected model spend **and** pack noise; A5 keeps spend bounded at 40 and raises the pack-crowding ceiling to 50000. On a document-heavy client the six-page pack is, today, six provenance stubs. | **Open, and named as open.** Not fixable inside a budget amendment: what the six-page window selects is WB-R8 / W6 contract surface and needs its own ruling. A6 fixed the *lint* half of the same compounding (§5.6a); the *pack* half is deliberately untouched — no ranking change was attempted. |
 
 ---
 
@@ -1206,9 +1549,62 @@ text, and the text was wrong. Those are amendments A1–A4; the rest were build 
 | Timing (§3.3, §5.1) | "no timing branch a caller can distinguish" | Withdrawn as unachievable in SQL. Payload/error-shape uniformity is enforced; the two coarsest execution differences are removed; the remainder is **named** as residual **R-7**. |
 | Refusal code (§7.1) | CLR11 for client-not-in-firm | Kept — but the ordering is now specified: firm membership is verified **first**, and `firm_id` is in every state-row predicate, so `activate`/`deactivate`/`revoke` neither return CLR28 nor lock a foreign firm's row. |
 
+## Changelog v1.1 → v1.2 (owner ruling A5, ratified 2026-07-25)
+
+A5 did not come from a review of the build. It came from reading what §10.1 actually turns
+on: lighting deterministic ingest made a defect in the **inherited** WB-R8 budget operative
+for the first time. The contract text was not wrong about anything it said — it simply had
+never had to say which class of page the 40 was for.
+
+| # | What v1.1 assumed | Why it stopped being true | Where it landed |
+|---|---|---|---|
+| **A5** | One per-client page budget, `max_pages_per_client = 40`, charged for every new slug (inherited from WB-R8 / 0017, restated nowhere in this contract). | §5.3 mints **one page per uniquely-filed classified document**. Those pages are provenance records, not knowledge: no model call, no synthesis, scaling with document **volume**. Charging them to a budget written for model spend and pack noise silently un-indexes a busy client after 40 documents — weeks, at RPR scale — and every later re-drive takes `skipped_cap`. | **§5.5** (new), **§5.3**, **§8**, **§9.6**, **§10.1** |
+
+**Rejected alternatives are recorded in §5.5**, one row each, with the reason each is weaker
+than `p_log_action`. The short version: every other candidate is a **caller argument on the
+granted wrapper**, and the seeding `wiki_fact` lane already hands a **model** authorship of
+the slug, the page kind and the synthesis claim.
+
+**Named residual A5-R1** (pack ranking gives `period_context` priority 2, so source pages
+crowd the six-page window) is **not** fixed by A5 and needs its own ruling — see §5.5.
+
 **Not adopted, with reasons.** (a) A `domain_events` cross-check inside
 `prepare_egress_dispatch` — one review's suggested extra: it would give a runtime-callable
 existence probe over the event log, and A1's re-binding already prevents spending an
 authorization on a different dispatch. (b) The §10.2 two-PR split as a *rewrite of history*:
 the staging requirement stands and is decided at PR time; commits are not restructured
 retroactively.
+
+---
+
+## Changelog v1.2 → v1.3 (owner ruling A6 + ratchet R2, ratified 2026-07-25)
+
+A5 was reviewed adversarially after it was built. The discriminator survived; the **exemption**
+did not, in three places — each the same oversight, that A5 decided *who may publish* and *how
+many pages* and never asked what the exempt pages cost, what the exempt bytes are, or what the
+apply-time bridge proves. A6 is the owner's adjudication. One further finding, queued from
+ratchet R2, is a **build** defect rather than a contract one and is recorded below the table.
+
+| # | What v1.2 assumed | Why it was wrong | Where it landed |
+|---|---|---|---|
+| **A6(a)** | Exempting `sources/*` from the page cap was the whole cost of the exemption. | L's orphan rule opens a finding for any active page with zero refs, and a source page has zero refs **by construction** — so every ingested document became a permanently-open finding **plus** an L6 notification, on a population A5 re-ceilinged from 40 to 50000. The supersede sweep rescans the conditions array per open finding, making `run_client_lint` **O(N²)** in exactly that population, and `run_lint_all` iterates every active client in one call. Measured: 900 pages → 307 ms, 2,700 → 10,991 ms. | **§5.6a**, **§8**, **§9.6**, **§10.3**. Fixed by a second drift-guarded narrowing in A5's own `run_client_lint` block; measured after: **3 ms, zero findings**. Existing findings self-heal on the next pass. |
+| **A6(b)** | "The bridge is proven empirically, **in both directions**." | Both directions prove **set membership** (creation). Neither notices a page whose **current version is model-synthesized** — reachable before 0020 reserved the namespace, and thereafter permanently exempt and unrepairable. The claim was broader than the evidence. | **§5.6b**, **§8**, **§10.3**. A **third** fail-closed direction (no `sources/%` page carries a `wiki_log action='publish'` row) and the wording corrected to **creation and every publication**. |
+| **A6(c)** | A `sources/*` page holds machine-generated bytes. | `p_note` is a **caller argument on a granted verb** that becomes the page body. Arbitrary prose could be stamped `deterministic` and exempted — and because the W9 hold gate fires only for `synthesis='model'`, it published onto a client **under a live synthesis hold**. Both halves driven on the rig. The premise was a caller convention, not a fact. | **§5.6c**, **§7.1** grammar, **§8**, **§9.6**, **§9.7**, **§10.3**. `p_note` must be **NULL**; typed **CLR10 / `source_note_not_permitted`**, placed before every read, lock and `_reserve_op`. |
+
+**Erratum ratified with them.**
+
+| Erratum | v1.2 said | Correct |
+|---|---|---|
+| Residual A5-R1 (§5.5) | "A5 does not change what the pack selects", recorded as a pre-existing consequence of lighting ingest. | **Understated.** WB-R8's cap protected model spend **and** pack noise; A5 keeps spend bounded and **raises the pack-crowding ceiling from 40 to 50000**. Both halves of that protection now scale with document volume. A6 fixes the *lint* half; the *pack* half is **not fixed, not fixable here**, and is promoted to the §11 residual register as **A5-R1**. No pack-ranking change was attempted — that is WB-R8 / W6 surface and needs its own ruling. |
+| §6 closed set (§8) | Five functions with unchanged EXACT `prosrc` pins. | Still five, but `record_wiki_source_ingest` is deliberately amended by A6. Its pin is **not retuned**: strip exactly the A6 insertion and the remainder must still hash to **0017's original pin**. Stronger than the original assertion, not weaker — and enforced identically in the migration tail and in the rig's §6 diff cell. |
+
+**Ratchet R2 build fix (no contract change).** `classify_consent_evidence_document` (added by
+A3) read `clara.documents ... for update` and compared `firm_id` **afterwards**, while its own
+comment claimed the opposite. A firm-A owner holding a firm-B document UUID therefore reached
+and **waited on** firm B's row before receiving CLR11 — cross-tenant lock contention plus a
+timing oracle, the same defect class R1-F5 fixed in `activate`/`deactivate`/`revoke`, and a
+straight violation of §7.1's already-ratified "firm membership is verified **first**". The fix
+puts `firm_id` in the predicate; `NOT FOUND` still means CLR11, so foreign and nonexistent stay
+indistinguishable in the **result** as well as now in the **wait**. Proven by a two-session
+cell with a control: firm B holds the row, a plain `FOR UPDATE` on it times out, and the
+cross-firm call still returns CLR11 in single-digit milliseconds.

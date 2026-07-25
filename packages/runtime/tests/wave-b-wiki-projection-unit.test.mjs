@@ -711,6 +711,33 @@ test("[R3 F2] the still-terminal reasons keep their exact mappings (the change i
   assert.ok(CONFIG_DEAD_LETTER_PREFIX.length > 0, "the config dead-letter prefix is a real string the health query keys on");
 });
 
+test("[0020 A5] the DETERMINISTIC-SOURCE ceiling is terminal under its OWN status — never conflated with skipped_cap", () => {
+  assert.equal(terminalStatusFor(clr("CLR32", "source_cap_exceeded")), "skipped_source_cap",
+    "max_source_pages_per_client exhaustion is terminal (a replay meets the identical ceiling)");
+  assert.notEqual(terminalStatusFor(clr("CLR32", "source_cap_exceeded")),
+    terminalStatusFor(clr("CLR32", "cap_exceeded")),
+    "the two exhaustion modes must be distinguishable on a receipt — that is the point of the split key");
+  assert.equal(isConfigurationRefusal(clr("CLR32", "source_cap_exceeded")), false,
+    "a full source ceiling is a domain outcome, not a broken deployment");
+});
+
+test("[0020 A5] the reserved sources/ namespace refusal is a MALFORMED WRITE, enumerated so it cannot block the firm cursor", () => {
+  // Reachable from this consumer: planSeedingWikiFact publishes a slug taken VERBATIM from a
+  // model-authored seeding proposal, so a model can propose 'sources/<uuid>'.
+  assert.equal(terminalStatusFor(clr("CLR32", "reserved_slug_namespace")), "skipped_bad_state",
+    "a model-proposed page in the reserved namespace converges as a malformed write");
+  assert.equal(isConfigurationRefusal(clr("CLR32", "reserved_slug_namespace")), false);
+});
+
+test("[0020 A5] budget_unknown stays a CONFIGURATION refusal after the THIRD budget row joined the same null check", () => {
+  // §A5 reads max_source_pages_per_client through 0017's idiom and joins its null check, so a
+  // missing row raises the SAME CLR32/budget_unknown — which must stay non-terminal, or a
+  // deployment that forgot the row would silently checkpoint past every projection.
+  const err = clr("CLR32", "budget_unknown", "wiki budget configuration is incomplete");
+  assert.equal(terminalStatusFor(err), null, "never terminal — the checkpoint stays BEHIND it");
+  assert.equal(isConfigurationRefusal(err), true, "repair the row, replay, and it projects");
+});
+
 test("[R3 F3] a configuration-blocked cycle RELEASES the connection (advisory lock) and reconnects after the backoff", async () => {
   let made = 0;
   const clients = [];

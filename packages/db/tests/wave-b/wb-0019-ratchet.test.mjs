@@ -279,9 +279,13 @@ test("[R1-2] publication under REPEATABLE READ is REFUSED — typed CLR32/isolat
   for (const [label, sql, params] of [
     ["publish_wiki_page_version", PUBLISH_SQL,
       pubParams(w.firms.A, client, "d19r-iso", d.documentId, "# iso rr", "d19riso")],
+    // [0020 A6] p_note MUST be null. The deterministic-content floor refuses a non-null note
+    // (CLR10 / source_note_not_permitted) in the WRAPPER, before the core's isolation floor is
+    // reached. A noted probe would prove the note floor instead — the safety outcome is
+    // identical (refused, nothing written), but the cell would stop testing what it names.
     ["record_wiki_source_ingest",
       "select clara.record_wiki_source_ingest(p_client => $1, p_document => $2, p_note => $3, p_op_key => $4) as r",
-      [client, d.documentId, "ratchet iso probe", opk("d19risoi")]],
+      [client, d.documentId, null, opk("d19risoi")]],
   ]) {
     const s = await session(ROLES.runtime);
     let err = null;

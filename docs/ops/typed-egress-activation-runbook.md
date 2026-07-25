@@ -2,7 +2,13 @@
 
 **Owner-only. Run per client, at the owner's pace, AFTER the 0020 ceremony.**
 *(Updated 2026-07-25 for the ratified contract v1.1 amendments: step 1 now has a real
-owner verb, and consumption re-verifies the dispatch it is used for.)*
+owner verb, and consumption re-verifies the dispatch it is used for. Updated again the same
+day for the ratified owner ruling **A5** — contract v1.2 §5.5 — which splits the per-client
+wiki page cap into two budgets. **Nothing in this recipe touches either budget**, and A5
+changes no step below; the note at the end says what to expect instead. Updated a third time
+for owner ruling **A6** — contract v1.3 §5.6 — which completes A5. A6 likewise changes **no
+step below**; it changes what a source page may contain and what the daily lint reports, both
+covered in the same closing note.)*
 Activation is deliberately **not** part of the deploy ceremony: 0020 ships with zero
 typed consents and zero activations, and that emptiness is what makes model synthesis
 dark. Lighting a client is a separate, considered act.
@@ -214,3 +220,56 @@ covers "never attested", "attested then withdrawn", "granted but never activated
 byte-identical payload — because all of them lead to the same safety action, and telling
 them apart would hand the runtime an oracle for "did this client ever consent, and did
 they withdraw?".
+
+---
+
+## The wiki page budgets (amendment A5) — what changed, and what to watch
+
+A5 (contract v1.2 §5.5) split one per-client page budget into two. It is **orthogonal to
+consent**: it constrains how many wiki pages a client may have, never who may see them, and
+no step of this runbook reads or writes a budget.
+
+| Budget key | Value | Governs |
+|---|---|---|
+| `max_pages_per_client` | 40 (unchanged) | **Synthesized** pages — everything a model or the interview lanes publish. |
+| `max_source_pages_per_client` | 50000 | **Deterministic** `sources/<document_id>` provenance pages — one per uniquely-filed classified document. |
+
+**What you will see.**
+
+- A client that is **not** activated still accumulates `sources/*` pages. That is correct and
+  expected: deterministic ingest involves no model, no egress and no consent — the typed
+  consent surface governs **synthesis**, not provenance.
+- A receipt of `skipped_cap` means the client is out of **synthesized** pages (40). Retire a
+  stale page (`clara.retire_wiki_page`) — activating egress will not help.
+- A receipt of `skipped_source_cap` means the client has 50000 deterministic source pages.
+  That is a document-volume fact; raising it is a migration + an ADR, exactly like any other
+  `wiki_budgets` retune.
+- A receipt of `skipped_bad_state` carrying `reserved_slug_namespace` means something tried
+  to publish a **synthesized** page into the reserved `sources/` slug namespace. Since the
+  seeding `wiki_fact` lane takes its slug verbatim from a **model-authored** proposal, the
+  likely cause is a model proposal that a human ticked. It is refused, nothing is written,
+  and the finding is worth reading — treat it as a signal about the proposal, not a bug.
+- `budget_unknown` on a wiki write is a **deployment** fault (a missing `wiki_budgets` row),
+  never a client fault. The projection checkpoint deliberately stays behind it; repair the
+  row and the event projects on the next cycle.
+
+### What A6 adds (contract v1.3 §5.6)
+
+A6 completes A5. Again: **no step of this runbook changes.** Two operational facts follow.
+
+- **A source page has no human note.** `clara.record_wiki_source_ingest` now refuses a non-null
+  `p_note` with **CLR10 / `source_note_not_permitted`**, and its page body is always
+  `Source document: <filename>`. That is what makes "deterministic provenance record" a fact
+  about the bytes rather than a promise about the caller — the exemption from
+  `max_pages_per_client` rests on it, and so does the fact that these pages are outside the
+  synthesis-hold gate. If you ever need a human note about a document, it belongs on a
+  synthesized page or in the document record, not in the reserved namespace. Both production
+  callers already pass null, so nothing you run can trip this.
+- **The daily lint stops reporting source pages as orphans.** Pre-A6, every ingested document
+  produced a permanent `orphan_page` finding and a `lint_finding_opened` notification, because
+  a provenance record has no wiki refs by construction. On a document-heavy client this was
+  also **slow** — measured at 11 s per `run_client_lint` pass at 2,700 source pages, against
+  3 ms after. **On the first post-deploy lint pass expect a burst of `superseded`
+  transitions** as the accumulated findings clear themselves; that pass is proportional to how
+  many there were and every pass after it is not. Nothing to run by hand, and no backfill.
+  A ref-less **synthesized** page is still an orphan — the rule was narrowed, not disabled.

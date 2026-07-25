@@ -38,6 +38,13 @@
 --       'consent_evidence' that did not ALSO grant purpose-blind legacy egress, so a client
 --       who consented only to wiki synthesis could not be onboarded as designed.
 --   §8  The in-transaction fail-closed tail battery. One transaction; any failure aborts.
+--   §A5 THE TWO-CLASS WIKI PAGE BUDGET (ratified amendment A5, 2026-07-25) — the direct
+--       consequence of §10.1 lighting deterministic ingest. max_pages_per_client (40) was
+--       written to bound SYNTHESIZED pages; one page per filed document is a deterministic
+--       PROVENANCE record and must not spend that budget. Deterministic source pages are
+--       exempted, given their own key max_source_pages_per_client, and the 'sources/' slug
+--       namespace is RESERVED so the exemption cannot be forged. See the §A5 block comment
+--       for the discriminator and for every weaker candidate that was rejected.
 --
 -- RATIFIED CONTRACT AMENDMENTS carried by this file (2026-07-25, cross-model ratchet R1):
 --   * §3.4 consume_egress_dispatch takes SIX arguments and re-verifies the dispatch it is
@@ -51,6 +58,8 @@
 --     structure pins.
 --   * §8's "three partial unique indexes" is an erratum: two uniques + one non-unique
 --     open-authorization index.
+--   * §A5 (amendment A5) splits the WB-R8 per-client page cap into two classes and reserves
+--     the 'sources/' slug namespace for deterministic ingest.
 --
 -- SHIPS DARK for MODEL SYNTHESIS, and only that (contract §10.1). With zero typed consents
 -- and zero activations — asserted empirically at the end of this apply — every verdict is
@@ -87,6 +96,16 @@
 --     (WB-R21) is untouched: 0020 reaches wiki state only through record_wiki_source_ingest,
 --     set_wiki_synthesis_hold and clear_wiki_synthesis_hold — the cardinal invariant
 --     (never hand-write a row when an audited function exists).
+--   * AMENDMENT A5 QUALIFIES THAT SENTENCE, and does not weaken it. A5 adds (i) two
+--     change-of-record patches, each targeting a function that is ALREADY on 0019's twelve-
+--     entry wiki whitelist (_publish_wiki_page_version_core and run_client_lint) — so the
+--     injected fragments land inside whitelisted bodies and the closed-set scan is unaffected;
+--     (ii) one INSERT of a configuration row into clara.wiki_budgets, the system budget table
+--     that holds no client data and grants no role DML; and (iii) one anonymous `do` bridge
+--     assertion that READS clara.wiki_pages / clara.wiki_log to prove a precondition. A `do`
+--     block is not a function, leaves no callable surface and cannot be reached by any role —
+--     it is not a hole in the boundary, and it writes nothing. No 0020 FUNCTION names a wiki
+--     relation, before A5 or after it.
 -- ---------------------------------------------------------------------------------------
 --
 -- Structure mirrors 0017/0018/0019: every DDL + function body runs under
@@ -585,10 +604,13 @@ end $$;
 -- Both authority functions take filings BEFORE clients, and this function takes filings
 -- before documents before (via the audited writer) clients — one consistent direction.
 --
--- record_wiki_source_ingest is NOT modified. Making it require uniqueness would break the
--- entry.approved lane, which carries an authoritative client_id and must keep working for a
--- document legitimately filed to more than one client. The uniqueness requirement belongs to
--- the RESOLVER-DRIVEN path only, which is why it lives in this new entry point.
+-- record_wiki_source_ingest does NOT gain the uniqueness requirement. Making it require
+-- uniqueness would break the entry.approved lane, which carries an authoritative client_id and
+-- must keep working for a document legitimately filed to more than one client. The uniqueness
+-- requirement belongs to the RESOLVER-DRIVEN path only, which is why it lives in this new
+-- entry point. (Amendment A6 does make one unrelated change to that verb, far below: it
+-- refuses a non-null p_note, the deterministic-content floor. Its behaviour on this path is
+-- unaffected — the call at the end of this function already passes null.)
 --
 -- RESIDUAL R-1: a deadlock (40P01) against a concurrent authority function is possible in
 -- principle. It aborts this transaction; the consumer's at-least-once delivery re-drives the
@@ -688,9 +710,16 @@ begin
   v_dedupe:=clara._reserve_op(c.firm,'classify_consent_evidence_document',p_op_key,
     clara._hash(jsonb_build_object('document',p_document,'reason',p_reason)));
   if v_dedupe is not null then return v_dedupe; end if;
-  -- Locked, and firm-checked BEFORE anything else is read off the row.
-  select * into d from clara.documents where id=p_document for update;
-  if not found or d.firm_id<>c.firm then
+  -- [RATCHET R2] The firm is IN THE PREDICATE, not a test after the fact. The v1.1 build read
+  -- `where id=p_document for update` and compared d.firm_id afterwards -- so a firm-A owner
+  -- holding a firm-B document UUID took, and WAITED ON, firm B's row before receiving CLR11.
+  -- That is cross-tenant lock contention and a timing oracle in one, and it is the SAME defect
+  -- class R1-F5 fixed in activate/deactivate/revoke; this verb (added by A3, after R1's sweep)
+  -- reintroduced it while its own comment claimed the opposite. NOT FOUND still means CLR11:
+  -- a foreign document and a nonexistent one are indistinguishable, which is what §7.1 wants.
+  select * into d from clara.documents
+    where id=p_document and firm_id=c.firm for update;
+  if not found then
     raise exception 'document not in your firm' using errcode='CLR11';
   end if;
   if d.status<>'ingested' or d.bytes_verified_at is null then
@@ -968,6 +997,564 @@ begin
     jsonb_build_object('consent_id',x.id,'activation_id',v_activation,'purpose',p_purpose,
       'status','revoked'));
 end $$;
+
+-- =====================================================================
+-- §A5. THE DETERMINISTIC-SOURCE PAGE BUDGET (RATIFIED AMENDMENT 2026-07-25).
+--
+-- WHAT THE CAP CONFLATED. WB-R8 seeded ONE per-client page budget,
+-- clara.wiki_budgets('max_pages_per_client', 40) (0017:816), and the publication core
+-- charges EVERY new slug against it (0017:2056-2063). That budget was written to bound
+-- SYNTHESIZED knowledge: model cost, and context-pack noise. Until this migration nothing
+-- else could create a page at volume, so one budget was one class and the conflation was
+-- invisible.
+--
+-- WHY LIGHTING INGEST SURFACED IT. §5.3/§10.1 makes a uniquely-filed document.classified
+-- publish deterministically: clara.record_wiki_source_ingest (0017:2229) mints ONE page per
+-- document, slug 'sources/<document_id>' (0017:2265). Those pages are charged against the
+-- SAME 40. At RPR-scale document volume a client reaches 40 in weeks, after which the client
+-- is silently un-indexed: every further ingest AND every synthesized page refuses
+-- CLR32/cap_exceeded, and every later document.filing_retired re-drive takes the
+-- `skipped_cap` path (wiki-projection.mjs:169). The wiki stops, quietly, on volume.
+--
+-- THE RULING. A 'sources/*' page is a DETERMINISTIC PROVENANCE RECORD: no model call, no
+-- synthesis, no consent surface, one page per document, and it scales with document VOLUME
+-- rather than with KNOWLEDGE. A synthesized page scales with knowledge and costs a model
+-- call. The two classes must not share a budget. Deterministic source pages are therefore
+-- EXEMPT from max_pages_per_client and bounded by their OWN key. Unbounded is not wanted
+-- either — a separate ceiling costs almost nothing and keeps the classes honest.
+--
+-- ---------------------------------------------------------------------------------------
+-- THE DISCRIMINATOR, and why every weaker candidate was rejected.
+--
+-- The test a discriminator must pass: a MODEL-SYNTHESIS path must not be able to publish a
+-- page that satisfies it. That is not hypothetical. The seeding wiki_fact lane
+-- (wiki-projection.mjs planSeedingWikiFact) takes slug / title / page_kind / content
+-- VERBATIM from a seeding proposal payload that a MODEL authored, and calls
+-- clara.publish_wiki_page_version with synthesis='deterministic', engine_id=null. A model
+-- can therefore propose ANY slug, including 'sources/<uuid>'.
+--
+--   REJECTED — the 'sources/' slug prefix alone. Forgeable: the slug is a caller argument on
+--     the granted wrapper, 'sources/<uuid>' satisfies the W1 slug grammar, and the lane above
+--     hands a model direct authorship of it. A model page could take the exemption AND, worse,
+--     land in the source COUNTING bucket, so the synthesized cap would stop binding at all.
+--   REJECTED — page_kind. record_wiki_source_ingest uses 'period_context', and the
+--     deterministic wiki_fact lane may ALSO use 'period_context' (it is one of the six ratified
+--     kinds and is on that lane's permitted set). page_kind cannot separate them even in
+--     principle.
+--   REJECTED — p_synthesis='deterministic'. A caller ARGUMENT on the granted wrapper, and the
+--     wiki_fact lane already passes exactly that value. It is a CLAIM about how the bytes were
+--     produced; the DB cannot verify it. (It is kept below as a CONSISTENCY term, never as the
+--     cut.)
+--   REJECTED — p_engine_id is null. Not independent: the preamble already enforces
+--     (p_synthesis='model') <> (p_engine_id is not null), so "engine_id is null" is exactly
+--     "synthesis='deterministic'" restated, and is forgeable in the same way.
+--   REJECTED — the citation detail flag 'deterministic_ingest': true (0017:2270). Caller-
+--     supplied JSON the core never validates — a claim, not a fact.
+--
+--   CHOSEN — p_log_action='ingest', in conjunction with the four consistency terms.
+--     p_log_action is a parameter of clara._publish_wiki_page_version_core, which is UNGRANTED
+--     (0017 revokes execute from public at :5112 and never grants the core to any role). Its
+--     only two callers are the two SECURITY DEFINER wrappers, and each HARD-CODES its value:
+--     publish_wiki_page_version passes 'publish' (0017:2214-2215), record_wiki_source_ingest
+--     passes 'ingest' (0017:2268-2269). No grantee can choose it, and no argument of the
+--     granted surface can influence it. It is the ONLY term on this path that a model-
+--     synthesis caller structurally cannot reach — so it is the cut, and the rest is belt.
+--     The conjunction additionally requires p_synthesis='deterministic', p_engine_id is null,
+--     p_projected_from_seq is null (0019 §5 already pins that the ingest path passes null) and
+--     the canonical slug shape 'sources/<uuid>'. Every one of those is a fact the ingest
+--     wrapper fixes; a future wrapper that passed 'ingest' with different values would FAIL
+--     CLOSED into the tighter synthesized cap rather than silently inherit the exemption.
+--
+-- THE ROW-LEVEL HALF, and why it is also unforgeable. The discriminator above decides the
+-- ARGUMENTS of one call; the cap must also COUNT the existing population per class, and a
+-- wiki_pages row carries no argument. Two mechanisms were available:
+--   (i) join each page to clara.wiki_log for its action='ingest' row — exact (wiki_log is
+--       append-only, 0017:1392, and only record_wiki_source_ingest ever writes 'ingest'), but
+--       there is NO index on wiki_log(page_id), so the count would be a per-page scan of a log
+--       that grows with every publish and supersede; and
+--   (ii) the slug namespace — cheap (the count rides the existing uq_wiki_pages_client_slug
+--       index on (client_id, slug)) but forgeable ON ITS OWN.
+-- So the namespace is RESERVED structurally: the core now REFUSES, typed, any publication
+-- into 'sources/%' that is not a deterministic ingest. With that refusal in place the two
+-- mechanisms are equivalent — 'slug like ''sources/%''' becomes an exact restatement of the
+-- unforgeable log fact — and the cheap one is used. The bridge for pages that already exist
+-- is proven EMPIRICALLY below, before the patch is installed, in THREE directions: set
+-- membership BOTH ways, plus CONTENT PROVENANCE — that no page in the namespace was ever
+-- published through the model path. [A6] The third is not redundant. Before this migration
+-- the namespace was unreserved, so a model publish_wiki_page_version COULD have superseded an
+-- ingested sources/<doc> page; the resulting page has an action='ingest' row from its birth
+-- and would satisfy both set-membership directions while its CURRENT version is
+-- synthesis='model'. It would then be permanently exempt AND unrepairable — the reservation
+-- now refuses a re-publish, and a record_wiki_source_ingest re-drive returns the _reserve_op
+-- dedupe receipt without re-entering the core. Live likelihood is near zero; a claim that the
+-- apply cannot substantiate is not.
+--
+-- WHAT DELIBERATELY DOES NOT CHANGE.
+--   * The synthesized refusal keeps its EXACT shape — message 'wiki client page cap reached',
+--     CLR32, reason 'cap_exceeded', budget_key 'max_pages_per_client', the same 'limit'. Only
+--     the population it counts narrows. Existing receipts, the runtime's terminal mapping and
+--     the rig's cap cells are untouched.
+--   * The new ceiling gets its OWN reason, 'source_cap_exceeded', with its own budget_key, so
+--     the two exhaustion modes can never be confused in a receipt, a dead-letter or a lint
+--     finding.
+--   * The third budget read joins the SAME configuration refusal as the other two
+--     (0017:2016-2022): a missing row is CLR32/budget_unknown, which the runtime classifies as
+--     a CONFIGURATION refusal (wiki-projection.mjs isConfigurationRefusal) and must keep doing
+--     — the checkpoint stays BEHIND it and the projection is never lost.
+--   * No grant is added. No function signature changes. No new error code.
+--
+-- NAMED RESIDUAL A5-R1 (NOT fixed here; it needs its own ruling). get_context_pack ranks
+-- candidates by page_kind priority, and 'period_context' is priority 2 of 6 (0017:5044-5047).
+-- Deterministic source pages carry page_kind='period_context' and are the most recently
+-- updated pages a busy client has, so once six of them exist the pack window is theirs and
+-- treatments / recurring patterns / counterparty pages are crowded out. That is a consequence
+-- of LIGHTING INGEST (§10.1), not of this amendment — at the old shared cap of 40 the same six
+-- slots were already taken — and this amendment neither creates nor worsens the selection
+-- (the pack still takes pack_max_pages=6). It is recorded here because the same ruling names
+-- "context-pack noise" as one of the two things WB-R8's cap was protecting, and the pack half
+-- of that protection is now demonstrably not doing its job.
+-- =====================================================================
+
+-- ---- (1) The new budget key. -------------------------------------------------
+-- Generous by construction: the slug namespace is keyed by document id, so a client's source
+-- pages can never outnumber the documents actively filed to it. 50000 is roughly a century of
+-- a 500-document-a-year client — it is never the operative limit in practice, and it still
+-- bounds a runaway filing loop instead of leaving growth open.
+insert into clara.wiki_budgets(budget_key,value_int,note) values
+  ('max_source_pages_per_client',50000,
+   '0020 A5: deterministic sources/<document_id> page ceiling, per client');
+
+-- ---- (2) THE BRIDGE ASSERTION, three directions, before anything is patched. --
+-- The row-level predicate about to become load-bearing is `slug like 'sources/%'`. It is an
+-- exact restatement of "every version of this page was written by record_wiki_source_ingest"
+-- only if (i) the two populations coincide on the corpus that already exists (0019 is
+-- deployed; a live backfill has already run) AND (ii) no page in the namespace has ever been
+-- published through the model path. Proven, never assumed — and fail-closed: a single stray
+-- page in ANY direction ABORTS the apply rather than silently mis-bucketing a client's cap or
+-- granting a model-authored page a permanent, unrepairable exemption.
+--
+-- Directions 1 and 2 prove SET MEMBERSHIP (creation). Direction 3 proves CONTENT PROVENANCE
+-- (every publication) — and it is the one that catches the pre-reservation supersede. The
+-- probe is wiki_log action='publish', which _publish_wiki_page_version_core writes for the
+-- MODEL/synthesis wrapper and only for it (publish_wiki_page_version hard-codes 'publish' at
+-- 0017:2215; the row is written at 0017:2171-2172; no other writer in 0017/0019/0020 inserts
+-- action='publish' -- the other six sites write supersede/retire/hold/release/lint_pass/
+-- mark_stale). 'supersede' rows are deliberately NOT probed: the ingest path writes those
+-- itself on every re-ingest of the same slug.
+do $a5bridge$
+declare v_n bigint;
+begin
+  select count(*) into v_n from clara.wiki_pages p
+   where p.slug like 'sources/%'
+     and not exists(select 1 from clara.wiki_log l
+       where l.page_id=p.id and l.action='ingest');
+  if v_n>0 then
+    raise exception '0020 A5: % existing page(s) occupy the reserved sources/ namespace with no deterministic-ingest log row',
+      v_n using errcode='CLR10';
+  end if;
+  select count(*) into v_n from clara.wiki_pages p
+   where p.slug not like 'sources/%'
+     and exists(select 1 from clara.wiki_log l
+       where l.page_id=p.id and l.action='ingest');
+  if v_n>0 then
+    raise exception '0020 A5: % deterministic-ingest page(s) live outside the sources/ namespace',
+      v_n using errcode='CLR10';
+  end if;
+  -- [A6] Direction 3 — CONTENT PROVENANCE, not set membership.
+  select count(*) into v_n from clara.wiki_pages p
+   where p.slug like 'sources/%'
+     and exists(select 1 from clara.wiki_log l
+       where l.page_id=p.id and l.action='publish');
+  if v_n>0 then
+    raise exception '0020 A5: % page(s) in the reserved sources/ namespace carry a model-path publication and would take a permanent, unrepairable exemption',
+      v_n using errcode='CLR10';
+  end if;
+end
+$a5bridge$;
+
+-- ---- (3) THE PUBLICATION-CORE PATCH, layered on 0019's. ----------------------
+-- 0019 rewrote clara._publish_wiki_page_version_core through the change-of-record idiom
+-- (pg_get_functiondef -> replace -> execute, with a per-replace drift-guard), and 0019's file
+-- checksum locks on its own deploy, so it CANNOT be edited. This block is the same idiom
+-- applied to whatever body is live at apply time — 0017's, as rewritten by 0019 §1b/§5 — with
+-- its own drift-guard. Four replaces, applied in BODY order, one pg_get_functiondef round
+-- trip (a second read would have to re-read the body this one is building).
+--
+-- Drift-guard (the apply ABORTS otherwise): every anchor matches EXACTLY ONCE; every replace
+-- CHANGES the body; and the FINAL body carries BOTH the new deterministic-source discriminator
+-- (its unforgeable p_log_action term, the reserved-namespace refusal, the new budget key and
+-- the new typed reason, in that body order) AND the EXISTING synthesized-page cap refusal,
+-- byte-for-byte in its original shape.
+do $a5core$
+declare v_def text; v_cur text; v_next text; v_norm text; v_anchor text;
+begin
+  select pg_get_functiondef(
+    'clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,uuid,text,text)'::regprocedure)
+    into v_def;
+  v_cur := v_def;
+
+  ---- (a) the two new locals ---------------------------------------------------
+  v_anchor := '  v_max_pages bigint; v_max_bytes bigint; j jsonb; v_kind text;';
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0020 A5: publication-core declare anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_cur, v_anchor,
+$new$  v_max_pages bigint; v_max_bytes bigint; j jsonb; v_kind text;
+  v_max_src bigint; v_is_src boolean;$new$);
+  if v_next = v_cur then
+    raise exception '0020 A5: publication-core declare drift' using errcode = 'CLR10';
+  end if;
+  v_cur := v_next;
+
+  ---- (b) the discriminator + the reserved-namespace refusal -------------------
+  -- Placed in the PREAMBLE, immediately after the metadata validation and before every
+  -- content/hash/budget check, so a reserved-namespace violation is refused before any read
+  -- of configuration and long before any lock is taken.
+  v_anchor :=
+$old$  if p_content is null or octet_length(p_content)=0 then
+    raise exception 'wiki page content is required'
+      using errcode='CLR32',detail='{"reason":"bad_state"}';
+  end if;$old$;
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0020 A5: publication-core content anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_cur, v_anchor,
+$new$  -- [0020 A5] THE DETERMINISTIC-SOURCE DISCRIMINATOR. p_log_action is the load-bearing term:
+  -- this core is UNGRANTED, its only callers are the two definer wrappers, and each hard-codes
+  -- the value ('publish' / 'ingest'), so no grantee and no argument of the granted surface can
+  -- reach 'ingest'. Every other term here is a consistency belt over facts the ingest wrapper
+  -- fixes -- deliberately NOT the cut, because each of them IS a caller argument on
+  -- publish_wiki_page_version and the seeding wiki_fact lane already passes a model-authored
+  -- slug with synthesis='deterministic' and engine_id=null.
+  --
+  -- THE coalesce(...,false) IS LOAD-BEARING, not decoration. p_log_action is the ONLY term
+  -- here that can be NULL (p_slug, p_synthesis and p_page_kind are already validated above;
+  -- the other three are is-null tests, which never yield null). Without the coalesce a NULL
+  -- p_log_action makes v_is_src NULL, `not v_is_src` NULL, and the namespace refusal below
+  -- SILENTLY DOES NOT FIRE -- while `if v_is_src` also fails, so the page would publish into
+  -- the reserved namespace and be counted in the SOURCE bucket: a synthesized page escaping
+  -- its own cap through three-valued logic. UNKNOWN must mean NOT-A-SOURCE-PAGE, which is
+  -- both fail-closed halves at once (the namespace refuses it, the synthesized cap counts it).
+  v_is_src := coalesce(p_log_action='ingest'
+    and p_synthesis='deterministic' and p_engine_id is null
+    and p_projected_from_seq is null
+    and p_slug ~ '^sources/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    false);
+  -- [0020 A5] THE NAMESPACE RESERVATION. It is what makes the ROW-level predicate
+  -- (slug like 'sources/%') an exact restatement of the unforgeable argument fact above: with
+  -- this refusal in place nothing but a deterministic ingest can ever occupy the namespace, so
+  -- counting by slug cannot be gamed into moving a synthesized page out of its own budget.
+  if not v_is_src and p_slug like 'sources/%' then
+    raise exception 'the sources/ wiki slug namespace is reserved for deterministic ingest'
+      using errcode='CLR32',detail='{"reason":"reserved_slug_namespace"}';
+  end if;
+  if p_content is null or octet_length(p_content)=0 then
+    raise exception 'wiki page content is required'
+      using errcode='CLR32',detail='{"reason":"bad_state"}';
+  end if;$new$);
+  if v_next = v_cur then
+    raise exception '0020 A5: publication-core discriminator drift' using errcode = 'CLR10';
+  end if;
+  v_cur := v_next;
+
+  ---- (c) the third budget read, on the SAME configuration refusal -------------
+  v_anchor :=
+$old$  select value_int into v_max_pages from clara.wiki_budgets
+    where budget_key='max_pages_per_client';
+  select value_int into v_max_bytes from clara.wiki_budgets
+    where budget_key='max_page_bytes';
+  if v_max_pages is null or v_max_bytes is null then$old$;
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0020 A5: publication-core budget-read anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_cur, v_anchor,
+$new$  select value_int into v_max_pages from clara.wiki_budgets
+    where budget_key='max_pages_per_client';
+  select value_int into v_max_bytes from clara.wiki_budgets
+    where budget_key='max_page_bytes';
+  -- [0020 A5] The deterministic-source ceiling reads through the SAME idiom and joins the SAME
+  -- null check, so a missing row is CLR32/budget_unknown -- a CONFIGURATION refusal in the
+  -- runtime (never terminal, the checkpoint stays behind it), which is what that reason means
+  -- and must keep meaning.
+  select value_int into v_max_src from clara.wiki_budgets
+    where budget_key='max_source_pages_per_client';
+  if v_max_pages is null or v_max_bytes is null or v_max_src is null then$new$);
+  if v_next = v_cur then
+    raise exception '0020 A5: publication-core budget-read drift' using errcode = 'CLR10';
+  end if;
+  v_cur := v_next;
+
+  ---- (d) the two-class cap branch --------------------------------------------
+  v_anchor :=
+$old$    if (select count(*) from clara.wiki_pages
+        where client_id=p_client and state='active')>=v_max_pages then
+      raise exception 'wiki client page cap reached'
+        using errcode='CLR32',detail=jsonb_build_object(
+          'reason','cap_exceeded','budget_key','max_pages_per_client',
+          'limit',v_max_pages)::text;
+    end if;$old$;
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0020 A5: publication-core cap anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_cur, v_anchor,
+$new$    if v_is_src then
+      -- [0020 A5] The deterministic-source ceiling. Its own budget, its own typed reason: a
+      -- receipt or a lint finding can never confuse this exhaustion with the synthesized one.
+      if (select count(*) from clara.wiki_pages
+          where client_id=p_client and state='active'
+            and slug like 'sources/%')>=v_max_src then
+        raise exception 'wiki client deterministic-source page ceiling reached'
+          using errcode='CLR32',detail=jsonb_build_object(
+            'reason','source_cap_exceeded',
+            'budget_key','max_source_pages_per_client',
+            'limit',v_max_src)::text;
+      end if;
+    -- [0020 A5] The WB-R8 synthesized cap, unchanged in message, code, reason, budget_key and
+    -- limit -- only the population it counts narrows to the non-source pages it was written
+    -- for. It stays inside the same client-row lock (0019/R1-F7), so the serialization
+    -- argument for both counts is the one that was already ratified.
+    elsif (select count(*) from clara.wiki_pages
+        where client_id=p_client and state='active'
+          and slug not like 'sources/%')>=v_max_pages then
+      raise exception 'wiki client page cap reached'
+        using errcode='CLR32',detail=jsonb_build_object(
+          'reason','cap_exceeded','budget_key','max_pages_per_client',
+          'limit',v_max_pages)::text;
+    end if;$new$);
+  if v_next = v_cur then
+    raise exception '0020 A5: publication-core cap-split drift' using errcode = 'CLR10';
+  end if;
+  v_cur := v_next;
+
+  ---- the FINAL body assertion: both classes present, in body order ------------
+  v_norm := regexp_replace(lower(v_cur), '\s+', '', 'g');
+  if -- the unforgeable cut survived the surgery
+     position('v_is_src:=coalesce(p_log_action=''ingest''' in v_norm) = 0
+     -- the reserved namespace is refused, typed
+     or position('reserved_slug_namespace' in v_norm) = 0
+     or position('p_sluglike''sources/%''' in v_norm) = 0
+     -- the new budget is read, on the SAME configuration refusal
+     or position('budget_key=''max_source_pages_per_client''' in v_norm) = 0
+     or position('v_max_srcisnull' in v_norm) = 0
+     or position('budget_unknown' in v_norm) = 0
+     -- the new ceiling refuses with its OWN reason
+     or position('''reason'',''source_cap_exceeded''' in v_norm) = 0
+     -- [A6] ...and it COUNTS the source bucket. Without this the two presence checks above
+     -- were satisfiable by a body whose source-branch count predicate had been inverted or
+     -- dropped: every reason, budget_key and order assertion would still pass while the
+     -- exemption counted the wrong population. The literal is anchored on `)>=v_max_src` so
+     -- it cannot be satisfied by the discriminator's own `p_slug like 'sources/%'`.
+     or position('sluglike''sources/%'')>=v_max_src' in v_norm) = 0
+     -- and the EXISTING synthesized cap is still there, byte-for-byte in its own shape
+     or position('''reason'',''cap_exceeded'',''budget_key'',''max_pages_per_client''' in v_norm) = 0
+     or position('raiseexception''wikiclientpagecapreached''' in v_norm) = 0
+     -- narrowed to the population it was written for
+     or position('slugnotlike''sources/%''' in v_norm) = 0
+     -- BODY ORDER: discriminator -> namespace refusal -> ... -> the two-class cap branch
+     or position('v_is_src:=coalesce(p_log_action=''ingest''' in v_norm)
+        > position('reserved_slug_namespace' in v_norm)
+     or position('reserved_slug_namespace' in v_norm)
+        > position('''reason'',''source_cap_exceeded''' in v_norm)
+     or position('''reason'',''source_cap_exceeded''' in v_norm)
+        > position('''reason'',''cap_exceeded'',''budget_key'',''max_pages_per_client''' in v_norm)
+     -- the discriminator precedes every configuration read it gates
+     or position('v_is_src:=coalesce(p_log_action=''ingest''' in v_norm)
+        > position('budget_key=''max_source_pages_per_client''' in v_norm) then
+    raise exception '0020 A5: publication-core two-class budget drift' using errcode = 'CLR10';
+  end if;
+  execute v_cur;
+end
+$a5core$;
+
+-- ---- (4) THE LINT PATCH, layered on 0019 §cor3's. ---------------------------
+-- L7's soft belt opens a `cap_pages` finding at >=90% of max_pages_per_client (0017:4692-4702).
+-- With source pages exempt, counting ALL active pages would make that finding measure a
+-- population its budget no longer governs -- it would warn, then go critical, on a client whose
+-- synthesized pages number three. The count narrows to exactly the population the budget binds.
+-- The finding_kind, dedupe_key, severity rule and detail keys are untouched, so no lint consumer
+-- and no finding_kind CHECK changes.
+--
+-- No SECOND lint finding is added for the source ceiling, deliberately: 50000 is not an
+-- operational target to warn about at 90%, its breach is already a hard typed refusal carrying
+-- its own reason and budget_key, and adding a kind would mean widening the lint_findings
+-- finding_kind CHECK -- a contract change this amendment does not need.
+--
+-- ---------------------------------------------------------------------------------------
+-- THE SECOND NARROWING, and why the exemption is INCOMPLETE without it (amendment A6).
+--
+-- L's orphan rule (0017:4716-4728) opens an 'orphan_page' finding for every active page with
+-- ZERO clara.wiki_page_refs rows (0017:4721-4722). A deterministic source page has zero refs
+-- BY CONSTRUCTION: record_wiki_source_ingest always passes p_refs='[]'::jsonb (0017:2269). So
+-- WITHOUT this second narrowing every ingested document yields a permanently-open orphan_page
+-- finding AND an L6 'lint_finding_opened' notification -- and A5 has just raised the ceiling
+-- on that population from 40 to 50000.
+--
+-- It is not merely noise: it is SUPERLINEAR. The supersede sweep rescans the WHOLE
+-- v_conditions array once per open finding (0017:4863-4866), and both grow with the source
+-- population, so the daily verb costs O(N^2) in exactly the population A5 unbounded. MEASURED
+-- on the rig (local PG17, one client, steady state): 900 source pages -> 307 ms; 2,700 ->
+-- 10,991 ms. 3x the pages, 35.8x the time. run_lint_all iterates EVERY active client in one
+-- call (0017:4927-4934), so one busy client stalls the firm's whole daily pass. After this
+-- narrowing the same 2,700-page client lints in 3 ms with zero open findings.
+--
+-- It is also SELF-HEALING for pages that already exist: an orphan_page finding whose
+-- condition is no longer emitted is superseded by the next pass through the existing
+-- not-in-v_conditions sweep (0017:4863-4880) -- measured at 4,881 ms for 2,700 stale
+-- findings, once, then 3 ms steady. No backfill, no data fix, nothing to run by hand.
+--
+-- Deliberately NOT done: teaching record_wiki_source_ingest to write a ref. A ref is a
+-- KNOWLEDGE edge between wiki pages; a provenance record has none, and manufacturing one to
+-- satisfy a lint rule would be writing the graph to fit the linter. The page's tie to its
+-- document already lives where it belongs -- in the citation and in the wiki_log ingest row.
+--
+-- Drift-guard: BOTH anchors match EXACTLY ONCE, each replace changes the body, and the final
+-- body still carries the cap_pages finding against max_pages_per_client (narrowed) and the
+-- orphan_page finding (narrowed), in body order.
+do $a5lint$
+declare v_def text; v_cur text; v_next text; v_norm text; v_anchor text;
+begin
+  select pg_get_functiondef('clara.run_client_lint(uuid,text)'::regprocedure) into v_def;
+  v_cur := v_def;
+
+  ---- (a) L7's cap_pages belt: count the population the budget governs --------
+  v_anchor :=
+$old$    select count(*)::bigint into v_pages from clara.wiki_pages
+      where client_id=p_client and state='active';$old$;
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0020 A5: run_client_lint page-count anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_cur, v_anchor,
+$new$    -- [0020 A5] The L7 belt measures the SYNTHESIZED population only -- the population
+    -- max_pages_per_client still governs. Deterministic sources/<document_id> pages carry
+    -- their own ceiling and would otherwise drive this finding critical on volume alone.
+    select count(*)::bigint into v_pages from clara.wiki_pages
+      where client_id=p_client and state='active'
+        and slug not like 'sources/%';$new$);
+  if v_next = v_cur then
+    raise exception '0020 A5: run_client_lint cap_pages narrowing drift' using errcode = 'CLR10';
+  end if;
+  v_cur := v_next;
+
+  ---- (b) [A6] the orphan rule: a provenance record is not an orphan ----------
+  v_anchor := $old$        or (wp.state='active' and not exists($old$;
+  if (length(v_cur) - length(replace(v_cur, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0020 A5: run_client_lint orphan anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_cur, v_anchor,
+$new$        or (wp.state='active' and wp.slug not like 'sources/%' and not exists($new$);
+  if v_next = v_cur then
+    raise exception '0020 A5: run_client_lint orphan narrowing drift' using errcode = 'CLR10';
+  end if;
+  v_cur := v_next;
+
+  ---- the FINAL body assertion: both narrowings present, in body order --------
+  -- Each literal is pinned in a form that CANNOT be satisfied by the other narrowing:
+  -- the L7 one ends the statement (`;`), the orphan one continues into `and not exists(`.
+  v_norm := regexp_replace(lower(v_cur), '\s+', '', 'g');
+  if -- L7 counts the synthesized population, and still raises cap_pages on the same budget
+     position('andslugnotlike''sources/%'';' in v_norm) = 0
+     or position('''finding_kind'',''cap_pages''' in v_norm) = 0
+     or position('''budget_key'',''max_pages_per_client''' in v_norm) = 0
+     -- the orphan rule skips the reserved namespace, and still raises orphan_page
+     or position('wp.slugnotlike''sources/%''andnotexists(' in v_norm) = 0
+     or position('''finding_kind'',''orphan_page''' in v_norm) = 0
+     -- BODY ORDER: each narrowing precedes the finding it narrows, and L7 precedes orphans
+     or position('andslugnotlike''sources/%'';' in v_norm)
+        > position('''finding_kind'',''cap_pages''' in v_norm)
+     or position('wp.slugnotlike''sources/%''andnotexists(' in v_norm)
+        > position('''finding_kind'',''orphan_page''' in v_norm)
+     or position('''finding_kind'',''cap_pages''' in v_norm)
+        > position('''finding_kind'',''orphan_page''' in v_norm) then
+    raise exception '0020 A5: run_client_lint two-narrowing drift' using errcode = 'CLR10';
+  end if;
+  execute v_cur;
+end
+$a5lint$;
+
+-- ---- (5) [A6] THE EXEMPTION'S PREMISE, MADE STRUCTURAL. ----------------------
+-- A5's whole argument is that a sources/* page is a DETERMINISTIC PROVENANCE RECORD: no model
+-- call, no synthesis, no consent surface, machine-generated bytes. Everything above enforces
+-- WHO may publish into the namespace. Nothing enforced WHAT the bytes are.
+--
+-- THE HOLE. record_wiki_source_ingest builds its page content as
+--   coalesce(nullif(btrim(p_note),''), 'Source document: '||filename)      (0017:2255-2256)
+-- and p_note is a CALLER ARGUMENT on a verb granted to clara_runtime. So arbitrary prose can
+-- be written as the page body, stamped synthesis='deterministic', and made permanently EXEMPT
+-- from max_pages_per_client. Worse, the W9 consent gate in the core fires only for
+-- p_synthesis='model' (0017:2040-2044), so that prose PUBLISHES ONTO A CLIENT UNDER A LIVE
+-- SYNTHESIS HOLD — in the same transaction where a model page is refused CLR32/consent_held.
+-- Both halves were driven on the rig before this fix.
+--
+-- THE RULING (owner, 2026-07-25). Require p_note IS NULL on the exempt path. ALL THREE
+-- production callers already pass null — wiki-projection.mjs planDeterministicIngest,
+-- wiki-projection-ops.mjs backfillWikiSources (the ceremony's deterministic backfill) and
+-- §5.3's resolve_and_ingest_wiki_source above — so it costs nothing today and closes the
+-- channel STRUCTURALLY. A documented "callers must pass null" limit would be exactly the model
+-- discipline this project rejects: the cardinal invariant is that guarantees live in the DB,
+-- not in caller convention. If a future lane genuinely needs a human note on a source page it
+-- revisits this deliberately, rather than inheriting a silent hole.
+--
+-- WHY p_note IS NULL AND NOT btrim(p_note)='' . The stricter predicate is the honest one: it
+-- refuses the whole channel rather than the subset that happens to reach the content. A blank
+-- string still travels through the granted surface into _reserve_op's argument hash, and
+-- "sometimes permitted" is the shape of the next hole.
+--
+-- WHY HERE, BEFORE _reserve_op. The refusal is placed immediately after the op-key check and
+-- before every read, every lock and the op reservation, so a noted call reserves nothing,
+-- reads nothing and cannot be converted into an existence probe. The parameter itself is KEPT:
+-- dropping it would change the signature, which 0019 pins by exact identity and which the
+-- grant, the whitelist and the runtime caller all name. Typed, with its own reason
+-- discriminant, in 0020's own §7.1 argument-validation grammar (CLR10 + reason).
+--
+-- Drift-guard: the anchor matches EXACTLY ONCE, the replace changes the body, and the final
+-- body carries the refusal BEFORE the op reservation and before the content coalesce.
+do $a5note$
+declare v_def text; v_next text; v_norm text; v_anchor text;
+begin
+  select pg_get_functiondef(
+    'clara.record_wiki_source_ingest(uuid,uuid,text,text)'::regprocedure) into v_def;
+  v_anchor :=
+$old$  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;$old$;
+  if (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0020 A6: ingest op-key anchor must match exactly once'
+      using errcode = 'CLR10';
+  end if;
+  v_next := replace(v_def, v_anchor,
+$new$  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  -- [0020 A6] THE DETERMINISTIC-CONTENT FLOOR. p_note is the ONE argument on this verb that
+  -- can put caller-chosen bytes into a page body, and a sources/* page is EXEMPT from the
+  -- synthesized cap and outside the W9 model-synthesis consent gate. Refusing it makes
+  -- "deterministic" a structural fact about the content and not a claim about the caller.
+  -- First statement after the op-key check: nothing is read, locked or reserved first.
+  if p_note is not null then
+    raise exception 'a deterministic wiki source page takes no caller note'
+      using errcode='CLR10',detail='{"reason":"source_note_not_permitted"}';
+  end if;$new$);
+  v_norm := regexp_replace(lower(v_next), '\s+', '', 'g');
+  if v_next = v_def
+     or position('p_noteisnotnull' in v_norm) = 0
+     or position('source_note_not_permitted' in v_norm) = 0
+     -- BODY ORDER: the refusal precedes the op reservation AND the content coalesce it guards
+     or position('p_noteisnotnull' in v_norm)
+        > position('clara._reserve_op' in v_norm)
+     or position('p_noteisnotnull' in v_norm)
+        > position('v_content:=coalesce(nullif(btrim(p_note),'''')' in v_norm) then
+    raise exception '0020 A6: record_wiki_source_ingest note-floor drift' using errcode = 'CLR10';
+  end if;
+  execute v_next;
+end
+$a5note$;
+
 
 reset role;
 
@@ -1434,8 +2021,7 @@ begin
     'grant_client_egress|86c35e8d529f2dc3cb824d7f63ba7cf75fda97c287fadf8562dacdf955d03dcf',
     'revoke_client_egress|192339765ddaab2f53f09020e7443b8c5fd236c9518e22362d130569d5c07e07',
     'claim_document_processing_task|f9da98aa7c3a7a37ee79f5e67e523429c83f10bf4247489946f66457e80f312d',
-    '_enqueue_invoice_facts_core|0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e',
-    'record_wiki_source_ingest|0c3adf2dc31ff2780df85b27ae3d5a09f76ae7f98cf7b816d557c74c8fdb484c'] loop
+    '_enqueue_invoice_facts_core|0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e'] loop
     v_sig := split_part(v_txt,'|',1);
     v_pin := split_part(v_txt,'|',2);
     select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
@@ -1452,6 +2038,37 @@ begin
         using errcode='CLR10';
     end if;
   end loop;
+
+  -- [A6] record_wiki_source_ingest is the ONE member of the §6 set that 0020 deliberately
+  -- changes -- the deterministic-content floor (§5.5 / A6). Its pin is therefore not retuned
+  -- to a new opaque hash, which would say only "it is what it is now"; it is made STRICTLY
+  -- STRONGER. Strip exactly the A6 insertion, and what remains must still hash to 0017's
+  -- ORIGINAL pin, byte for byte. So the assertion proves TWO things at once: the A6 floor is
+  -- present in its exact shape, and NOTHING ELSE in that function moved -- including under an
+  -- edit that also carried the A6 text. The stripping pattern is anchored on the A6 marker
+  -- comment and the first `end if;` that follows it, which is the block's own terminator.
+  select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='clara' and p.proname='record_wiki_source_ingest';
+  if v_n<>1 then
+    raise exception '0020 record_wiki_source_ingest must keep exactly one overload (got %)',v_n
+      using errcode='CLR10';
+  end if;
+  select p.prosrc into v_txt from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='clara' and p.proname='record_wiki_source_ingest';
+  if position('[0020 A6] THE DETERMINISTIC-CONTENT FLOOR' in v_txt)=0
+     or position('source_note_not_permitted' in v_txt)=0 then
+    raise exception '0020 A6: the deterministic-content floor is absent from record_wiki_source_ingest'
+      using errcode='CLR10';
+  end if;
+  select encode(sha256(convert_to(regexp_replace(v_txt,
+      '\n  -- \[0020 A6\] THE DETERMINISTIC-CONTENT FLOOR\..*?\n  end if;','',''),'UTF8')),'hex')
+    into v_src;
+  if v_src is distinct from
+      '0c3adf2dc31ff2780df85b27ae3d5a09f76ae7f98cf7b816d557c74c8fdb484c' then
+    raise exception '0020 record_wiki_source_ingest drifted BEYOND the A6 floor (expected %, got %)',
+      '0c3adf2dc31ff2780df85b27ae3d5a09f76ae7f98cf7b816d557c74c8fdb484c',v_src
+      using errcode='CLR10';
+  end if;
   -- The legacy functions' EXECUTE ACLs are a CLOSED SET. §6 promises the ACLs, not only the
   -- bodies, and v1.0's tail pinned none of them: a silent `grant execute ... to clara_runtime`
   -- on grant_client_egress would have passed every assertion in this migration.
@@ -1881,3 +2498,172 @@ begin
   end if;
 end
 $tail$;
+
+-- =====================================================================
+-- §A5 TAIL — the two-class page budget, asserted in-transaction and FAIL-CLOSED.
+-- Same transaction, same discipline as §8: static pins over the PERSISTED catalog (never over
+-- the string this file constructed), then one functional probe inside a forced-rollback
+-- subtransaction. Any failure aborts the apply.
+-- =====================================================================
+do $a5tail$
+declare
+  v_src text; v_n bigint; v_f uuid; v_u uuid; v_c uuid;
+  v_sha text; v_key text; v_slug text; v_detail text; v_ok boolean;
+begin
+  -- ---- the budget row, and the CLOSED budget set (0017 pinned four; A5 makes it five) ----
+  if not exists(select 1 from clara.wiki_budgets
+      where budget_key='max_source_pages_per_client' and value_int=50000) then
+    raise exception '0020 A5: the max_source_pages_per_client budget row is missing or retuned'
+      using errcode='CLR10';
+  end if;
+  if not exists(select 1 from clara.wiki_budgets
+      where budget_key='max_pages_per_client' and value_int=40) then
+    raise exception '0020 A5: the WB-R8 synthesized cap was disturbed' using errcode='CLR10';
+  end if;
+  select count(*) into v_n from clara.wiki_budgets;
+  if v_n<>5 then
+    raise exception '0020 A5: wiki_budgets must carry exactly five rows (got %)',v_n
+      using errcode='CLR10';
+  end if;
+
+  -- ---- the PERSISTED publication core carries BOTH classes ----
+  select regexp_replace(lower(p.prosrc),'\s+','','g') into v_src
+    from pg_proc p where p.oid=
+    'clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,uuid,text,text)'::regprocedure;
+  if position('v_is_src:=coalesce(p_log_action=''ingest''' in v_src)=0
+     or position('reserved_slug_namespace' in v_src)=0
+     or position('''reason'',''source_cap_exceeded''' in v_src)=0
+     or position('budget_key=''max_source_pages_per_client''' in v_src)=0
+     or position('v_max_srcisnull' in v_src)=0
+     or position('budget_unknown' in v_src)=0
+     or position('''reason'',''cap_exceeded'',''budget_key'',''max_pages_per_client''' in v_src)=0
+     or position('slugnotlike''sources/%''' in v_src)=0 then
+    raise exception '0020 A5: the persisted publication core does not carry both budget classes'
+      using errcode='CLR10';
+  end if;
+  -- ---- and 0019's two guards SURVIVED the layering (A5 patches ON them, never OVER them) ----
+  if position('isolation_unsupported' in v_src)=0
+     or position('stale_projected_from_seq' in v_src)=0 then
+    raise exception '0020 A5: a 0019 publication-core guard did not survive the A5 patch'
+      using errcode='CLR10';
+  end if;
+
+  -- ---- [A6] the source-bucket COUNT predicate, not merely the reason token ----
+  -- Without this the four presence checks above are satisfied by a body whose exempt-branch
+  -- count has been inverted or dropped. `)>=v_max_src' anchors it away from the
+  -- discriminator's own `p_slug like 'sources/%'`.
+  if position('sluglike''sources/%'')>=v_max_src' in v_src)=0 then
+    raise exception '0020 A5: the publication core does not COUNT the deterministic-source bucket'
+      using errcode='CLR10';
+  end if;
+
+  -- ---- the PERSISTED lint keeps cap_pages and orphan_page, BOTH narrowed, and 0019's ----
+  select regexp_replace(lower(p.prosrc),'\s+','','g') into v_src
+    from pg_proc p where p.oid='clara.run_client_lint(uuid,text)'::regprocedure;
+  if position('andslugnotlike''sources/%'';' in v_src)=0
+     or position('''finding_kind'',''cap_pages''' in v_src)=0
+     or position('''budget_key'',''max_pages_per_client''' in v_src)=0
+     or position('stale_citation' in v_src)=0
+     -- [A6] the orphan rule skips the reserved namespace: a provenance record has zero refs
+     -- BY CONSTRUCTION, so without this every ingested document is a permanently-open finding
+     -- and the daily verb goes quadratic in document volume.
+     or position('wp.slugnotlike''sources/%''andnotexists(' in v_src)=0
+     or position('''finding_kind'',''orphan_page''' in v_src)=0 then
+    raise exception '0020 A5: run_client_lint lost cap_pages, orphan_page, either A5/A6 narrowing, or the 0019 condition'
+      using errcode='CLR10';
+  end if;
+
+  -- ---- [A6] the PERSISTED ingest verb carries the deterministic-content floor ----
+  select regexp_replace(lower(p.prosrc),'\s+','','g') into v_src
+    from pg_proc p where p.oid=
+    'clara.record_wiki_source_ingest(uuid,uuid,text,text)'::regprocedure;
+  if position('p_noteisnotnull' in v_src)=0
+     or position('source_note_not_permitted' in v_src)=0
+     or position('p_noteisnotnull' in v_src)>position('clara._reserve_op' in v_src) then
+    raise exception '0020 A6: record_wiki_source_ingest lost the p_note floor or its ordering'
+      using errcode='CLR10';
+  end if;
+
+  -- ---- [A6] the bridge THIRD direction, re-read as a receipt ----
+  -- The apply already aborted if this were non-zero; restating it here makes a green tail the
+  -- single artifact §10.3 step 3 can cite for content provenance, not merely set membership.
+  select count(*) into v_n from clara.wiki_pages p
+   where p.slug like 'sources/%'
+     and exists(select 1 from clara.wiki_log l
+       where l.page_id=p.id and l.action='publish');
+  if v_n<>0 then
+    raise exception '0020 A6: % page(s) in the reserved namespace carry a model-path publication',
+      v_n using errcode='CLR10';
+  end if;
+
+  -- ===================================================================
+  -- FUNCTIONAL PROBE A5 — THE MASQUERADE, driven through the REAL granted path.
+  -- publish_wiki_page_version is exactly what the model-fed seeding wiki_fact lane calls, and
+  -- every argument below is one that lane already controls: a model-authored slug in the
+  -- reserved namespace, synthesis='deterministic', engine_id=null, projected_from_seq=null.
+  -- The ONLY term it cannot reach is p_log_action, and that is what refuses it.
+  -- ===================================================================
+  begin
+    v_f:=gen_random_uuid(); v_u:=gen_random_uuid(); v_c:=gen_random_uuid();
+    insert into clara.firms(id,name) values(v_f,'0020 A5 probe firm');
+    insert into clara.users(id,display_name) values(v_u,'0020 A5 probe user');
+    insert into clara.clients(id,firm_id,name,status)
+      values(v_c,v_f,'0020 A5 probe client','active');
+    v_slug:='sources/'||gen_random_uuid()::text;
+    v_sha:=encode(sha256(convert_to('# a5 probe','UTF8')),'hex');
+    v_key:='firms/'||v_f::text||'/wiki/'||v_c::text||'/'||v_sha||'.md';
+    v_ok:=false; v_detail:=null;
+    begin
+      perform clara.publish_wiki_page_version(v_c,v_slug,'period_context','A5 masquerade',
+        null::uuid,'# a5 probe',v_sha,v_key,
+        jsonb_build_array(jsonb_build_object('source_kind','human_note',
+          'detail',jsonb_build_object('note','a5'))),
+        '[]'::jsonb,'deterministic',null::text,null::bigint,'a5probe:'||v_f::text);
+    exception when sqlstate 'CLR32' then
+      get stacked diagnostics v_detail = PG_EXCEPTION_DETAIL;
+      v_ok:=true;
+    end;
+    if not v_ok or coalesce(v_detail,'') not like '%reserved_slug_namespace%' then
+      raise exception '0020 A5: a synthesized page reached the reserved sources/ namespace (detail=%)',
+        coalesce(v_detail,'<none>') using errcode='CLR10';
+    end if;
+    if exists(select 1 from clara.wiki_pages where client_id=v_c) then
+      raise exception '0020 A5: the masquerade refusal still created a page'
+        using errcode='CLR10';
+    end if;
+
+    -- ---- [A6] FUNCTIONAL PROBE — the deterministic-content floor ----
+    -- The document uuid is deliberately BOGUS. If the note refusal fires anyway, the floor
+    -- provably precedes every read, lock and op reservation on this verb; a floor placed later
+    -- would surface CLR02 (not actively filed) first. The negative control that follows -- the
+    -- same bogus document with a NULL note -- must still draw CLR02, so the refusal is
+    -- specific to the note and has not broken the verb's own document floor.
+    v_ok:=false; v_detail:=null;
+    begin
+      perform clara.record_wiki_source_ingest(v_c,gen_random_uuid(),
+        'an operator note that would become page content','a5note:'||v_f::text);
+    exception when sqlstate 'CLR10' then
+      get stacked diagnostics v_detail = PG_EXCEPTION_DETAIL;
+      v_ok:=true;
+    end;
+    if not v_ok or coalesce(v_detail,'') not like '%source_note_not_permitted%' then
+      raise exception '0020 A6: a caller note reached the deterministic ingest path (detail=%)',
+        coalesce(v_detail,'<none>') using errcode='CLR10';
+    end if;
+    v_ok:=false;
+    begin
+      perform clara.record_wiki_source_ingest(v_c,gen_random_uuid(),null,
+        'a5note2:'||v_f::text);
+    exception when sqlstate 'CLR02' then v_ok:=true;
+    end;
+    if not v_ok then
+      raise exception '0020 A6: the p_note floor displaced the ingest verb own document floor'
+        using errcode='CLR10';
+    end if;
+
+    raise exception 'clara_0020_a5_probe_rollback' using errcode='CLR99';
+  exception
+    when sqlstate 'CLR99' then null;   -- expected: fixtures discarded
+  end;
+end
+$a5tail$;

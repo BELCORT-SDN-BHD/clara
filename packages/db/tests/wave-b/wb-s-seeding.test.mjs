@@ -237,7 +237,7 @@ test("S5/Gate R2: the ticked rule is INDISTINGUISHABLE from a hand-signed rule o
 test("S6: deterministic wiki ingest of the prior_gl source works EVEN UNDER a synthesis hold", async () => {
   fail0017(live);
   await setWikiHold({ client: onb.client, reason: "no consent yet" });
-  const r = await recordWikiIngest({ client: onb.client, document: glDoc.documentId, note: "prior GL registered" });
+  const r = await recordWikiIngest({ client: onb.client, document: glDoc.documentId });
   assert.ok(r, "ingest receipt (WB-R10: NO model call, NO consent required)");
   const log = await wikiLogRows(onb.client);
   assert.ok(log.some((l) => l.action === "ingest"), "wiki_log('ingest') appended");
