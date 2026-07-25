@@ -68,10 +68,24 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > probe green (pack dark/lit, replay byte-identical, sightings unchanged, F10
 > serializable via PostgREST); the freeze manifest fully deploy-locked. Evidence:
 > `docs/plan/research/wave-b/` + `docs/ops/wave-b-ceremony-runbook.md`.
-> **Remaining of Wave B: ONLY the live gates O/K/W2/L/R2/F on REAL documents**
-> (WB-R16/R17: the real second client's takeover pack + RPR's management
-> accounts → `bootstrap_client_plan` → B-12; never synthetic). Waves **C–G**
-> below are unchanged; the S/P follow-on eval rides the same real-document window.
+> **Since deploy:** **0018** landed same-day (ADR-038, Gate-K domain) and **0019**
+> (the wiki authority boundary) on 2026-07-25 via the first **runtime-image-first**
+> ceremony (ADR-039) — **live is now Supabase 19 migrations · `clara-runtime`
+> release v26**. **Gates O + K CLOSED on real documents** (2026-07-24, Rome
+> Secretary end to end; kill-mid-interview proven in production).
+> **Gate W2's dependency audit CLOSED live** 2026-07-25 — WB-R21's interim
+> allowance expired when 0019 removed the `_assert_filing_wiki_unreferenced` veto;
+> artifact `packages/db/deploy/wave-b-w2-authority-boundary-audit.sql`.
+> **Gate S DEFERRED on hard evidence** (no MyInvois artifact exists in the corpus).
+>
+> **Remaining of Wave B:** the **0020 ceremony** (typed consent — built, ratcheted
+> five rounds, PR'd; runtime-image-first because the live image predates A5);
+> **W2's remaining three claims**, which need a real wake credential and a real
+> draft — journey work, not a probe; **Gate F** on Rome Public Advisory; the
+> **Bee Creative** run for **P / L / R2 / K** (sole-proprietor CoA support merged,
+> so K is available there as an independent second run on a different entity
+> shape); and owner rulings on **Gate P's proof standard** and the **B-12 seeding
+> period**. Waves **C–G** below are unchanged.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
