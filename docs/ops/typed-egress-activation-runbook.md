@@ -6,9 +6,10 @@ owner verb, and consumption re-verifies the dispatch it is used for. Updated aga
 day for the ratified owner ruling **A5** — contract v1.2 §5.5 — which splits the per-client
 wiki page cap into two budgets. **Nothing in this recipe touches either budget**, and A5
 changes no step below; the note at the end says what to expect instead. Updated a third time
-for owner ruling **A6** — contract v1.3 §5.6 — which completes A5. A6 likewise changes **no
-step below**; it changes what a source page may contain and what the daily lint reports, both
-covered in the same closing note.)*
+for owner ruling **A6** — contract v1.3 §5.6 — which completes A5, and a fourth for owner
+ruling **A7** — contract v1.4 §5.7 — which **corrects** it. Neither changes **any step
+below**; both change what a source page may contain and what the daily lint reports, covered
+in the same closing note.)*
 Activation is deliberately **not** part of the deploy ceremony: 0020 ships with zero
 typed consents and zero activations, and that emptiness is what makes model synthesis
 dark. Lighting a client is a separate, considered act.
@@ -253,18 +254,28 @@ no step of this runbook reads or writes a budget.
   never a client fault. The projection checkpoint deliberately stays behind it; repair the
   row and the event projects on the next cycle.
 
-### What A6 adds (contract v1.3 §5.6)
+### What A6 adds, and what A7 corrects (contract v1.4 §§5.6/5.7)
 
-A6 completes A5. Again: **no step of this runbook changes.** Two operational facts follow.
+A6 completes A5; A7 corrects A6. Again: **no step of this runbook changes.** Three operational
+facts follow.
 
-- **A source page has no human note.** `clara.record_wiki_source_ingest` now refuses a non-null
-  `p_note` with **CLR10 / `source_note_not_permitted`**, and its page body is always
-  `Source document: <filename>`. That is what makes "deterministic provenance record" a fact
-  about the bytes rather than a promise about the caller — the exemption from
-  `max_pages_per_client` rests on it, and so does the fact that these pages are outside the
+- **A source page has no human note, and no filename.** `clara.record_wiki_source_ingest`
+  refuses a non-null `p_note` with **CLR10 / `source_note_not_permitted`** (A6), and — the part
+  A6 got wrong — its title and body no longer contain the document's filename either (A7). They
+  are now exactly `Source: <document_id>` and `Source document: <document_id>`. A filename is
+  **caller-chosen** at upload, so putting it in an exempt, hold-immune page body was the same
+  hole as `p_note` through a different door. That is what makes "deterministic provenance
+  record" a fact about the bytes rather than a promise about the caller — the exemption from
+  `max_pages_per_client` rests on it, and so does the fact that these pages sit outside the
   synthesis-hold gate. If you ever need a human note about a document, it belongs on a
-  synthesized page or in the document record, not in the reserved namespace. Both production
-  callers already pass null, so nothing you run can trip this.
+  synthesized page or in the document record, not in the reserved namespace.
+- **A source page now reads as a uuid, and that is deliberate.** In the wiki list, in
+  `get_wiki_page` and in the agent's context pack, a source page is titled
+  `Source: 3f2b…` rather than `Source: invoice-jan.pdf`. **The filename is not lost** — it is on
+  the document record, where the documents tab already shows it, and the page's own citation
+  carries the `document_id` to join on. This is recorded as residual **A7-R1**: if the wiki
+  surfaces should show a filename again, it must come from a **join at read time**, never from
+  the page's stored bytes.
 - **The daily lint stops reporting source pages as orphans.** Pre-A6, every ingested document
   produced a permanent `orphan_page` finding and a `lint_finding_opened` notification, because
   a provenance record has no wiki refs by construction. On a document-heavy client this was

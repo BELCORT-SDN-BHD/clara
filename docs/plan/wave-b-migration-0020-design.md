@@ -1,5 +1,20 @@
-# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.3 (RATIFIED)
+# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.4 (RATIFIED)
 
+> **Status: RATIFIED v1.4 — v1.3 plus the ratified OWNER RULING A7 (2026-07-25): the exempt
+> page's bytes are made STRUCTURALLY CANONICAL, §5.7.** Ratchet R3 reviewed A5/A6 and found
+> that A6 had fixed a channel rather than the defect. Its bridge proved only that no
+> *model-path publication row* existed, which a pre-0020 `p_note` call satisfies while carrying
+> arbitrary prose; and its central claim — that `p_note` was **the one** caller-controlled
+> content channel — was simply wrong: `documents.original_filename` was copied into the page
+> **body and title** by the same two lines. A7 is the owner's adjudication and is **one** fix,
+> not two checks: a source page's title and body are now derived from fixed text plus the
+> opaque document uuid and from **nothing a caller supplied**, which closes the filename channel
+> outright and lets the apply-time bridge verify **any** historical page by RECONSTRUCTION —
+> subsuming A6's proxy test. A7 also fixes an **idempotency regression A6 introduced**: its
+> floor raised *before* `_reserve_op`, so a delayed exact retry of a legitimate pre-0020 noted
+> call errored instead of replaying its receipt. Two **errata** in §§8/9 are corrected with it.
+> Everything about A1–A6's rulings is otherwise unchanged.
+>
 > **Status: RATIFIED v1.3 — v1.2 plus the ratified OWNER RULING A6 (2026-07-25): what the
 > A5 exemption was still missing, §5.6.** A5 was reviewed adversarially after it was built.
 > The discriminator held; the exemption was incomplete in three places — the daily lint went
@@ -32,6 +47,8 @@
 > | **A3** | A fifth owner RPC, `classify_consent_evidence_document`. v1.0's §7.2 step 1 was **not executable**: no verb could stamp `document_kind='consent_evidence'` without also granting purpose-blind legacy egress. | **§7.1**, **§7.2**, **§8**, **§9.1**, **§9.7** |
 > | **A4** | §6's byte-identity pins hash **exact `prosrc` with SHA-256** and add legacy **ACL** and **relation-structure** pins. v1.0's normalized-md5 pin was neither byte nor semantic identity. | **§6**, **§8** |
 > | **A5** *(owner ruling, 2026-07-25)* | The WB-R8 per-client page cap is **split into two classes**. Deterministic `sources/<document_id>` pages are **exempt** from `max_pages_per_client` and bounded by their own key **`max_source_pages_per_client`** with its own typed reason; the **`sources/` slug namespace is reserved** so the exemption cannot be forged. Lighting ingest would otherwise have un-indexed every busy client at 40 documents. | **§5.5** (new), **§5.3**, **§8**, **§9.6**, **§10.1** |
+> | **A6** *(owner ruling, 2026-07-25)* | Three things the A5 exemption was still missing: the orphan lint narrows to exclude the reserved namespace (it had gone superlinear), a **third** apply-time bridge direction, and a structural **`p_note is null`** floor on the ingest verb. | **§5.6** (new), **§6.1**, **§8**, **§9.7** |
+> | **A7** *(owner ruling, 2026-07-25)* | The exempt page's **bytes are made canonical**: title and body derive from fixed text plus the opaque document uuid and from **no caller-supplied string** — closing `documents.original_filename`, the channel A6 missed, and letting the bridge verify any historical page by **reconstruction** (a **fourth** direction that subsumes the third). The `p_note` floor is kept as defence in depth but moves **behind `_reserve_op`**, restoring op-key replay. | **§5.7** (new), **§5.6**, **§6.1**, **§8**, **§9.7** |
 >
 > Two **errata** are ratified with them: §8's "three partial unique indexes" is wrong
 > (two uniques + one non-unique open-authorization index — see §8), and §3.3/§5.1's
@@ -935,6 +952,144 @@ slug rather than asserting only about `cap_pages`. The R2 build fix is proven by
 cell **with a control** in `wb-0020-tail.test.mjs`, and the §6 strip-and-compare pin lives in
 `wb-0020-legacy.test.mjs`.
 
+> **A7 supersedes two of A6's three parts.** §5.6(b)'s third bridge direction is kept but is no
+> longer the load-bearing test, and §5.6(c)'s claim that `p_note` is "the ONE argument" is
+> **retracted**. §5.6(a) — the orphan-lint narrowing — stands unchanged. See §5.7.
+
+---
+
+### 5.7 The exempt page's bytes, made canonical (AMENDMENT A7, owner ruling, ratified 2026-07-25)
+
+Ratchet **R3** reviewed A5 and A6 together. It confirmed the authorization core clean and the
+A5 discriminator sound, and then found that **A6 had fixed a channel rather than the defect** —
+two MEDIUMs which the owner adjudicated as **one root cause**.
+
+**(a) The bridge proved a proxy, not provenance.** §5.6(b) added a third direction that asks
+whether any `sources/%` page carries a `wiki_log` `action='publish'` row. That catches a
+*model-path supersede*. It does not catch the thing the exemption actually depends on. A
+pre-0020 `record_wiki_source_ingest` call carrying model prose in `p_note` produces a page with
+`action='ingest'`, `synthesis='deterministic'` and **no** `publish` row — so it satisfies all
+three directions, applies clean, and is granted the cap and orphan exemptions over arbitrary
+caller text.
+
+**(b) `p_note` was never the only content channel.** `0017:2255-2256` copies
+`documents.original_filename` into the page **body** and `0017:2259` copies it into the
+**title**. A filename is caller-chosen: intake accepts up to 255 printable characters
+(`packages/runtime/lib/intake.mjs`) and the column carries no content constraint
+(`0007:106`). So a bookkeeper who uploads a document whose filename is prose gets that prose
+published — under a live synthesis hold, into a page exempt from `max_pages_per_client` and
+from the zero-ref orphan lint — with `p_note` **null the whole way**. A6's "only channel" claim
+was wrong, and the cell that blessed it asserted only a **prefix**
+(`/^Source document: /`), which `Source document: <prose filename>` also satisfies.
+
+> **Ruling.** Do not bolt a second check onto a second channel. Make the exempt page's bytes
+> **structurally canonical**: derive title and body from **fixed text plus the document's opaque
+> uuid**, and from no caller-supplied string at all.
+>
+> ```
+> title   = 'Source: '           || <document_id>
+> content = 'Source document: '  || <document_id>
+> ```
+>
+> This is deliberately **0017's own null-filename branch**, promoted from a fallback to the only
+> form: `coalesce(d.original_filename, p_document::text)` becomes `p_document::text`. It is the
+> smallest change that makes the property computable, and a corpus whose documents had no
+> filename already satisfies it.
+
+**Why one change closes both findings.** (b) is closed outright — no caller-controlled string
+reaches the bytes, whatever argument it rode in on. (a) is **subsumed**: with a canonical form
+the bridge stops hunting for a mechanism and instead **reconstructs**. A **fourth** direction
+computes each page's canonical title and body from the document uuid in its slug and compares
+against the stored `wiki_pages.title` and **every** `wiki_page_versions.content`. Any page that
+does not reconstruct is carrying non-canonical bytes — whether they came from a note, from a
+filename, or from a model-path publication — and no request-hash archaeology is needed. That is
+strictly stronger than direction 3, which is kept as belt because it names the mechanism and is
+the cheap index-friendly half. The `p_note is null` floor is likewise kept as **defence in
+depth**: the argument still travels the granted surface into the op-key hash, and "reachable but
+inert" is the shape of the next hole.
+
+**Fail-closed, with a real remediation.** A page that cannot be reconstructed **ABORTS the
+apply**; it is never exempted. The abort names the offending slugs (first 25) and the
+remediation below. The remediation is a **pure re-derivation of a machine artifact** — it
+recomputes title, content, `content_sha256`, `storage_key` and `size_bytes` from the document
+uuid in the slug, touches no other namespace, and is idempotent. It exists because the two
+alternatives do not: `retire_wiki_page` + re-ingest is **impossible** (the publication core
+refuses a retired page's slug, `0017:2075-2077`, and the slug is unique per client), and a
+delete would destroy audit history.
+
+```sql
+-- A7 remediation — run BEFORE re-applying 0020 when its bridge aborts.
+update clara.wiki_page_versions v
+   set content = 'Source document: '||substring(p.slug from 9),
+       content_sha256 = encode(sha256(convert_to(
+         'Source document: '||substring(p.slug from 9),'UTF8')),'hex'),
+       storage_key = 'firms/'||v.firm_id::text||'/wiki/'||v.client_id::text||'/'
+         ||encode(sha256(convert_to(
+           'Source document: '||substring(p.slug from 9),'UTF8')),'hex')||'.md',
+       size_bytes = octet_length('Source document: '||substring(p.slug from 9))
+  from clara.wiki_pages p
+ where p.id = v.page_id
+   and p.slug like 'sources/%'
+   and v.content is distinct from 'Source document: '||substring(p.slug from 9);
+
+update clara.wiki_pages p
+   set title = 'Source: '||substring(p.slug from 9)
+ where p.slug like 'sources/%'
+   and p.title is distinct from 'Source: '||substring(p.slug from 9);
+```
+
+> **Live-deploy consequence, stated rather than discovered at the ceremony.** The 30 pages the
+> 0019 ceremony backfilled were written by the pre-A7 verb from real uploads, so their bodies
+> and titles carry their filenames. **0020 will abort on them**, and §10.3 must run the
+> remediation above as an explicit pre-flight step before the apply. It rewrites DB bytes only;
+> the object-storage blob at each page's *old* `content_sha256` key is left in place and a blob
+> at the new key is not written. Nothing reads it — `get_wiki_page`, `list_wiki_pages`,
+> `get_context_pack` and the dashboard all serve `wiki_page_versions.content` from the database
+> — but the orphaned object is real and is named here rather than left to be found.
+
+**The idempotency regression A6 introduced, and its fix.** A6 placed its floor **before**
+`_reserve_op` so a noted call would "reserve nothing, read nothing". That reasoning was sound
+about leakage and wrong about receipts: **op-key replay is a core invariant of every governed
+verb in this system** (`_reserve_op` / `_finish_op`; R19 — the same intent keeps its `op_key`
+and a retry REPLAYS). With the floor ahead of the reservation, a delayed **exact** retry of a
+legitimate pre-0020 noted call raised `CLR10` instead of returning its stored receipt — a
+governed verb forgetting its own receipt. A7 restores the order: **reserve first**, return the
+dedupe receipt unchanged, and apply the floor only to a **fresh** invocation. Nothing is leaked
+by the change (a null-note caller could already probe document existence through this verb), and
+a refused call's own transaction rolls the reservation back, so a refused key stays reusable.
+The visible consequence, asserted rather than hidden: a *noted* call on a **nonexistent**
+document now draws the verb's own `CLR02` document floor rather than `CLR10`.
+
+**What A7 changes downstream, and what it does not.** No grant. No signature. No new error code.
+No `finding_kind` CHECK. Both budget keys, both typed reasons and every receipt token are
+exactly as A5 ratified them. The **filename is not erased** — it stays on `clara.documents`,
+which is where every human surface already reads it (`apps/dashboard/app/documents/*`,
+`apps/dashboard/app/chat/page.tsx`). What is lost is the filename appearing *in the source
+page's own title and body*: a wiki page list now reads `Source: 3f2b…` rather than
+`Source: invoice-jan.pdf`. **No code depends on it** — the runtime suite (598/598) and the DB
+suite are green without a single call-site change — but it is a human-readability cost, and the
+place to pay it back is a **join, not page bytes**: the page's citation already carries
+`document_id` and `document_sha256`, so any surface that wants the filename can join
+`clara.documents`. Recorded as residual **A7-R1** in §11.
+
+**The §6 trade, restated.** `record_wiki_source_ingest` is a member of §6.1's EXACT-source
+pinned set, and it now carries **two** deliberate edits. Its pin is still not retuned to a new
+opaque hash: **reverse** both edits — strip the floor block, strip the canonical-form comment,
+and substitute 0017's own content/title derivation back — and the remainder must still hash to
+**0017's original pin**, byte for byte.
+
+**Where the proof lives.** `wb-0020-source-budget.test.mjs` gains **F1b** (a hostile filename
+reaches neither body nor title), and **F**, **F2** and **G** are rewritten rather than extended:
+**F** asserts **exact** canonical bytes instead of the prefix that blessed the hole, **F2**
+proves the reordering *and* that an exact retry replays byte-identically, and **G** replaces its
+log-action/label corpus scan with the reconstruction. The half none of them can reach — what the
+**migration** does to a corpus that already exists — is a new reset-gated drill,
+`wb-0020-upgrade.test.mjs`: it builds a 19-migration world with **both** hostile pages, proves
+the apply **aborts** naming both, runs the remediation above **verbatim**, proves the apply then
+**succeeds**, proves the pre-0020 noted op key still **replays** across the upgrade while a
+fresh noted call is refused, and carries a negative control (a canonical pre-0020 corpus
+upgrades untouched, with no remediation).
+
 ---
 
 ## 6. Legacy egress fidelity — the byte-identity closed set
@@ -1126,12 +1281,21 @@ clara_fn_owner` / `reset role`. One transaction; **any failure aborts the apply*
   `resolve_and_ingest_wiki_source` → **`clara_runtime` ONLY**; unreachable by
   `clara_authenticated`, `clara_agent_ro`, `clara_wake_interactive`,
   `clara_wake_proactive`.
-- The four owner RPCs → **`clara_authenticated` ONLY**, and each source contains the
-  `_human_ctx(role_rank('owner'))` floor.
+- The **five** owner RPCs (four in v1.0; **A3** added `classify_consent_evidence_document`)
+  → **`clara_authenticated` ONLY**, and each source contains the
+  `_human_ctx(role_rank('owner'))` floor. *(ERRATUM, A7: v1.0–v1.3 said "four" here and in
+  §9.1/§9.5 while A3 had already made it five. The implementation grants and audits all five;
+  the prose was stale.)*
 - **PUBLIC-execute sweep = 0** over every new function.
-- **No table grant** to any role on the three new relations, nor on
-  `clara.client_egress_consents`, nor on `clara.document_filings` — asserted absent. The
-  DEFINER functions are the only surface.
+- **No table grant** to any role on the three new relations nor on
+  `clara.client_egress_consents` — asserted absent; the DEFINER functions are the only
+  surface. For **`clara.document_filings`** the assertion is **`clara_runtime`-scoped**:
+  `0007:2740-2741` grants `select` on it to `clara_authenticated` and `clara_agent_ro`, those
+  grants are **deliberately preserved**, and it is `clara_runtime` that must hold nothing.
+  *(ERRATUM, A7: v1.0–v1.3 claimed "no table grant … on `clara.document_filings`" without
+  qualification, which contradicts 0007. The tail was always runtime-scoped and correct;
+  removing the legitimate authenticated/agent read grants to match the stale prose would be
+  the bug.)*
 - 0019's clean-end-state wiki closed-set scan **still passes** with 0020's functions
   present (see *Dependencies on 0019*).
 - The existing wiki-leak / sightings / autopost proname scans run over every new
@@ -1236,7 +1400,7 @@ discipline).
   CLR28 `evidence_kind_conflict`.
 - A second live typed consent for the same (client, purpose) → **CLR28**
   `duplicate_live`; a second live activation → **CLR28**.
-- A non-owner caller on any of the four typed RPCs → the owner floor (CLR03/CLR04).
+- A non-owner caller on any of the **five** owner RPCs → the owner floor (CLR03/CLR04).
 - `_reserve_op` same-key/different-args reuse on a typed RPC → **CLR10**.
 
 ### 9.2 Cross-purpose isolation (the blocker the separate relation closes)
@@ -1304,7 +1468,7 @@ discipline).
 
 - Both runtime functions and both resolver functions are EXECUTE-granted to
   `clara_runtime` only; PUBLIC-execute 0; unreachable by `clara_agent_ro` and both wake
-  roles; the four owner RPCs unreachable by `clara_runtime`.
+  roles; the **five** owner RPCs unreachable by `clara_runtime`.
 - No role holds a table grant on the three new relations; a direct `select` as
   `clara_runtime` fails.
 - Cross-firm DEFINER probes on all four runtime functions return the single uniform
@@ -1415,6 +1579,24 @@ DB-first because the runtime rewire READS functions that must exist first, and b
 neither order can light synthesis — there is no silent-loss window in either direction.
 
 1. **Backup-first** → quiesce.
+1b. **(A7) PRE-FLIGHT — canonicalize the existing `sources/` corpus.** The 0019 ceremony
+   backfilled 30 source pages with the pre-A7 verb, whose title and body carried the
+   document's `original_filename`. 0020's bridge **will abort on them**. Run, and expect a
+   non-zero row count on the first run and zero on any re-run:
+   ```
+   select count(*) from clara.wiki_pages p
+    where p.slug like 'sources/%'
+      and (p.title is distinct from 'Source: '||substring(p.slug from 9)
+           or exists(select 1 from clara.wiki_page_versions v
+                      where v.page_id=p.id
+                        and v.content is distinct from
+                            'Source document: '||substring(p.slug from 9)));
+   ```
+   then run the two `update` statements in **§5.7** and re-run the count until it is **0**.
+   This rewrites database bytes only; the object-storage blob at each page's old
+   `content_sha256` key is orphaned and no blob is written at the new key — nothing reads it
+   (every read surface serves `wiki_page_versions.content`), and it is named in §5.7 rather
+   than discovered later.
 2. Apply 0020 (the §8 tail runs in-transaction; any failure aborts) →
    `NOTIFY pgrst, 'reload schema'`.
 3. **Post-verify probes**, run under a `clara_runtime`-role probe:
@@ -1430,19 +1612,28 @@ neither order can light synthesis — there is no silent-loss window in either d
    - **(A5) `clara.wiki_budgets` is a five-row set** — the four WB-R8 values *unchanged*
      plus `max_source_pages_per_client = 50000`. (The 0017 ceremony runbook's "the four
      WB-R8 values" expectation becomes "these four, of five".)
-   - **(A5, corrected by A6)** Three counts, not two. `select count(*) from clara.wiki_pages
-     where slug like 'sources/%'` **equals** the count of pages carrying a `wiki_log`
-     `action='ingest'` row (both directions), **and** the count of `sources/%` pages carrying a
-     `wiki_log` `action='publish'` row is **zero**. The first two are set membership — they say
-     the page was *created* by deterministic ingest. Only the third says every *publication*
-     was, which is the property the exemption actually rests on. The apply aborts on any of the
-     three, so a green apply has already proven them — re-read them as a receipt.
+   - **(A5, corrected by A6, completed by A7)** **Four** counts, not two. `select count(*) from
+     clara.wiki_pages where slug like 'sources/%'` **equals** the count of pages carrying a
+     `wiki_log` `action='ingest'` row (both directions); the count of `sources/%` pages carrying
+     a `wiki_log` `action='publish'` row is **zero**; and — the one that actually settles it —
+     the **reconstruction count from step 1b is zero**: every page's title and every version's
+     body equals its canonical form. The first two are set membership (the page was *created* by
+     deterministic ingest). The third names one mechanism. Only the fourth is a computable
+     property of the bytes themselves, and it is what the exemption rests on. The apply aborts
+     on any of the four, so a green apply has already proven them — re-read them as a receipt.
    - **(A5)** A `clara_runtime`-role `publish_wiki_page_version` probe with slug
      `sources/<any uuid>` refuses `CLR32` / `reserved_slug_namespace` and writes nothing.
-   - **(A6)** A `clara_runtime`-role `record_wiki_source_ingest` probe with a **non-null**
-     `p_note` refuses `CLR10` / `source_note_not_permitted` and writes nothing — including
-     against a document uuid that does not exist, which is what proves the floor precedes every
-     read. The same call with a **null** note is unchanged.
+   - **(A6, reordered by A7)** A `clara_runtime`-role `record_wiki_source_ingest` probe with a
+     **non-null** `p_note` on a **real, filed, verified** document refuses `CLR10` /
+     `source_note_not_permitted` and writes nothing. The same call with a **null** note is
+     unchanged. Note the deliberate A7 ordering change: the same *noted* call against a document
+     uuid that does not exist now draws `CLR02` (the verb's own document floor), because the op
+     reservation — and therefore op-key replay — comes first.
+   - **(A7)** A `clara_runtime`-role null-note `record_wiki_source_ingest` on a document whose
+     `original_filename` is arbitrary text publishes a page whose title is exactly
+     `Source: <document_id>` and whose body is exactly `Source document: <document_id>`, with no
+     fragment of the filename in either. Repeating the **same op key** returns the **same
+     receipt** and writes no second version.
    - **(A6)** `run_client_lint` on the busiest existing client returns promptly and opens **no**
      `orphan_page` finding against any `sources/%` page. On a database that ran the pre-A6 lint,
      expect the first post-deploy pass to **supersede** the accumulated source-page findings —
@@ -1476,7 +1667,8 @@ at the owner's pace, afterwards.
 | **R-6** | A second typed purpose will need per-purpose revocation semantics on any future shared surface. | The typed relation is already per-purpose; the legacy relation stays single-lane. No action now. |
 | **R-7** | **Timing side channel on the runtime DEFINER verbs** (added 2026-07-25 with the §3.3 erratum). Payloads and error shapes are byte-identical across every non-granted cause, and the two coarsest differences are removed (the firm-leading live-activation index; the resolver's two-row cap). Execution is nevertheless **not constant-time**, and SQL cannot make it so. | **Named, not claimed away.** Closing it needs an architectural control — a constant-time gateway, or a rate limit on `prepare_egress_dispatch` / `resolve_document_client` for `clara_runtime` — which is a ruling, not a patch. v1.0's absolute "no timing branch a caller can distinguish" is withdrawn from §3.3 and §5.1. |
 | **R-8** | **The consume must be committed by its caller** (added 2026-07-25 with amendment A2). A PostgreSQL function cannot commit its caller's transaction, so `granted` implies committed only if the caller commits before calling the model. | Closed on the caller side: the runtime's default consume helper runs its own `begin`/`commit` (§3.7), pinned by a unit cell. It remains a **precondition on any other caller** of the verb, stated in §3.4 and §3.6 rather than assumed. |
-| **A5-R1** | **The context pack is not protected, and A5 widened the population that crowds it** (raised with A5, restated plainly with A6). `get_context_pack` ranks by `page_kind`, `period_context` is priority 2 of 6, and every deterministic source page is a recently-updated `period_context`. WB-R8's cap protected model spend **and** pack noise; A5 keeps spend bounded at 40 and raises the pack-crowding ceiling to 50000. On a document-heavy client the six-page pack is, today, six provenance stubs. | **Open, and named as open.** Not fixable inside a budget amendment: what the six-page window selects is WB-R8 / W6 contract surface and needs its own ruling. A6 fixed the *lint* half of the same compounding (§5.6a); the *pack* half is deliberately untouched — no ranking change was attempted. |
+| **A5-R1** | **The context pack is not protected, and A5 widened the population that crowds it** (raised with A5, restated plainly with A6). `get_context_pack` ranks by `page_kind`, `period_context` is priority 2 of 6, and every deterministic source page is a recently-updated `period_context`. WB-R8's cap protected model spend **and** pack noise; A5 keeps spend bounded at 40 and raises the pack-crowding ceiling to 50000. On a document-heavy client the six-page pack is, today, six provenance stubs. | **Open, and named as open.** Not fixable inside a budget amendment: what the six-page window selects is WB-R8 / W6 contract surface and needs its own ruling. A6 fixed the *lint* half of the same compounding (§5.6a); the *pack* half is deliberately untouched — no ranking change was attempted. **A7 makes this cheaper to live with, not worse**: a crowding stub is now `Source: <uuid>`, six tokens instead of six filenames. |
+| **A7-R1** | **A source page no longer names its document in human terms.** A7 removes `documents.original_filename` from the exempt page's title and body, so `get_wiki_page` / `list_wiki_pages` / `get_context_pack` show `Source: 3f2b…` rather than `Source: invoice-jan.pdf`. **No code depends on it** (DB and runtime suites are green with zero call-site changes) — it is a human-readability cost only. | **Open, with the right shape already available.** The filename is **not lost**: it lives on `clara.documents`, and the page's own citation carries `document_id` + `document_sha256`, so any surface that wants it can **join** — which is where a caller-chosen string belongs. Putting it back into exempt page bytes is exactly the defect A7 closed and must not be the fix. If a human surface needs it, the display join is a dashboard/read-verb change (`get_wiki_page` could return the citation's document filename as a *field*, never as page content) and needs its own small ruling. |
 
 ---
 
@@ -1608,3 +1800,57 @@ puts `firm_id` in the predicate; `NOT FOUND` still means CLR11, so foreign and n
 indistinguishable in the **result** as well as now in the **wait**. Proven by a two-session
 cell with a control: firm B holds the row, a plain `FOR UPDATE` on it times out, and the
 cross-firm call still returns CLR11 in single-digit milliseconds.
+
+---
+
+## Changelog v1.3 → v1.4 (owner ruling A7, ratchet R3, ratified 2026-07-25)
+
+Ratchet R3 reviewed the A5/A6 build. It confirmed the authorization core **clean** — §§1–4, the
+resolver, savepoint containment, 0019's guarantees, the R2 document lock, the A5 cap and lint
+predicates — and returned two MEDIUMs against **the fixes themselves**. The owner adjudicated
+them as **one root cause with one fix**: A6 had closed a *channel* rather than made the exempt
+bytes *decidable*. A7 is that adjudication. A third finding is an idempotency regression A6
+introduced and is fixed with it; the NIT is contract prose only, and the implementation was
+right.
+
+| # | What v1.3 assumed | Why it was wrong | Where it landed |
+|---|---|---|---|
+| **A7(a)** *(R3 M1)* | A6's third bridge direction proves content provenance. | It proves the **absence of a model-path publication row**, which is a proxy. A pre-0020 `record_wiki_source_ingest` carrying model prose in `p_note` yields `action='ingest'`, `synthesis='deterministic'` and **no** `publish` row — it satisfies all three directions and is granted the cap and orphan exemptions over arbitrary caller text. | **§5.7**, **§8**, **§10.3**. A **fourth** direction verifies every historical page by **RECONSTRUCTION** against its canonical form, which subsumes the third. Fail-closed: unreconstructable **aborts the apply**, naming the offenders and a remediation that is proven to work. |
+| **A7(b)** *(R3 M2)* | `p_note` is "the ONE argument on this verb that can put caller-chosen bytes into a page body". | **False.** The same two lines copy `documents.original_filename` into the body (`0017:2255-2256`) and into the **title** (`0017:2259`). Intake accepts 255 printable characters with no content constraint, so a prose filename publishes under a live synthesis hold into a cap- and lint-exempt page with `p_note` null the whole way. The battery's prefix-only assertion (`/^Source document: /`) *blessed* those bytes as machine-generated. | **§5.7**, **§5.6** (claim retracted), **§6.1**, **§8**, **§9.7**, **§10.3**. Title and body now derive from **fixed text plus the opaque document uuid** and from no caller-supplied string. The `p_note` floor is kept as defence in depth. |
+| **A7(c)** *(R3, inside M1)* | Placing the floor **before** `_reserve_op` was strictly safer. | It broke **op-key replay**, a core invariant of every governed verb (R19 — the same intent keeps its `op_key` and a retry REPLAYS). A delayed **exact** retry of a legitimate pre-0020 noted call raised CLR10 instead of returning its stored receipt. | **§5.7**. The reservation comes **first** and its dedupe receipt returns unchanged; only a **fresh** invocation reaches the floor. Visible consequence, asserted not hidden: a *noted* call on a nonexistent document now draws the verb's own **CLR02**. |
+
+**Errata ratified with them (prose only — the implementation was already correct).**
+
+| Erratum | v1.3 said | Correct |
+|---|---|---|
+| §§8/9 RPC inventory | "the **four** owner RPCs". | **Five**, since **A3** added `classify_consent_evidence_document`. The migration grants, audits and asserts all five; only the prose was stale. Corrected in **§8** and **§9.1/§9.5**, and in the migration's own grants comment. |
+| §8 table grants | "**No table grant** to any role … nor on `clara.document_filings`". | Contradicts `0007:2740-2741`, which grants `select` on `document_filings` to `clara_authenticated` and `clara_agent_ro`. Those grants are **deliberately preserved**; the promise is **`clara_runtime`-scoped**, which is exactly how the tail has always asserted it. Removing the legitimate read grants to match the stale prose would have been the bug. |
+| Migration header | "Authority: … (v1.0, RATIFIED)". | **v1.4**, RATIFIED — v1.0 plus A1–A7. Corrected in `packages/db/migrations/0020_typed_consent.sql`. |
+
+**Live-deploy consequence, surfaced rather than deferred.** The canonical form changes what a
+source page's bytes **are**, so the 30 pages the 0019 ceremony backfilled — written from real
+uploads, with their filenames in title and body — **will abort 0020's apply**. §10.3 gains an
+explicit pre-flight step **1b** that runs the §5.7 canonicalization and re-checks to zero. The
+alternatives were examined and rejected: `retire_wiki_page` + re-ingest is **impossible** (the
+publication core refuses a retired page's slug and the slug is unique per client), and deleting
+the pages would destroy audit history. Recorded openly: the remediation rewrites database bytes
+only, orphaning the object-storage blob at each page's old `content_sha256` key. Nothing reads
+it — every read surface serves `wiki_page_versions.content` — but it is named in §5.7.
+
+**What A7 costs, named as residual A7-R1.** A source page no longer shows its document's
+filename: `Source: 3f2b…` rather than `Source: invoice-jan.pdf`, in `get_wiki_page`,
+`list_wiki_pages`, `get_context_pack` and the dashboard's wiki surfaces. **No code depends on
+it** — the full DB suite and the runtime suite (598/598) are green with zero call-site changes —
+so this is a human-readability cost, not a break. The filename is not lost: it lives on
+`clara.documents`, the page's citation carries `document_id` and `document_sha256`, and the
+right place to restore it is a **join on a read surface**, never page bytes.
+
+**Where the proof lives.** `wb-0020-source-budget.test.mjs` gains **F1b** (hostile filename) and
+rewrites **F** (exact canonical bytes, replacing the prefix assertion R3 flagged), **F2** (the
+reordering plus a byte-identical replay) and **G** (corpus reconstruction, replacing the
+log-action/label scan R3 flagged). The migration half — what the **apply** does to a corpus that
+already exists — is a new reset-gated drill, `wb-0020-upgrade.test.mjs`, which builds a
+19-migration world carrying **both** hostile pages, proves the apply aborts naming both, runs
+the §5.7 remediation verbatim, proves the apply then succeeds, proves the pre-0020 noted op key
+still **replays** across the upgrade while a fresh noted call is refused, and carries a negative
+control (a canonical pre-0020 corpus upgrades untouched).
