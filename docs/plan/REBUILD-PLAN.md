@@ -78,8 +78,13 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > artifact `packages/db/deploy/wave-b-w2-authority-boundary-audit.sql`.
 > **Gate S DEFERRED on hard evidence** (no MyInvois artifact exists in the corpus).
 >
-> **Remaining of Wave B:** the **0020 ceremony** (typed consent — built, ratcheted
-> five rounds, PR'd; runtime-image-first because the live image predates A5);
+> **0020 (typed consent) DEPLOYED 2026-07-25 and DARK** (ADR-041) — runtime-image-first
+> with a re-quiesce before the preflight; 11/11 post-verify; 30/30 source pages canonical
+> with zero filename fragments left in wiki bytes; the first post-deploy lint pass
+> superseded all 30 stale `orphan_page` findings. **Live = 20 migrations · runtime v27.**
+> All Wave-B migrations are deployed; none is queued.
+>
+> **Remaining of Wave B — operating, not building:**
 > **W2's remaining three claims**, which need a real wake credential and a real
 > draft — journey work, not a probe; **Gate F** on Rome Public Advisory; the
 > **Bee Creative** run for **P / L / R2 / K** (sole-proprietor CoA support merged,
