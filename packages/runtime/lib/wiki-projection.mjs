@@ -321,9 +321,16 @@ export async function resolveAndIngestWikiSourceDefault(client, { firmId, docume
 /** PER-EVENT, PER-LANE surface guards (contract §10.2). EXACT SIGNATURE, never an overloaded-name
  *  to_regproc check — that cannot distinguish signatures, and an overload of a granted name is a
  *  different function. to_regprocedure is a plain catalog read: no EXECUTE needed, so a guard never
- *  fails for a privilege reason. The 0020 ceremony is DB-FIRST, so these are normally true by the
- *  time this image runs; they exist so a rollback or a reversed order degrades to today's behaviour
- *  lane-locally instead of dead-lettering the whole projection. */
+ *  fails for a privilege reason.
+ *
+ *  [R5] The 0020 ceremony is RUNTIME-IMAGE-FIRST, not DB-first — the contract's §10.2 default was
+ *  overruled by its own §10.3 step 4, because the live image predates A5 and would treat
+ *  source_cap_exceeded / reserved_slug_namespace as unrecognised typed refusals and block the firm
+ *  cursor. So these guards are LOAD-BEARING during the ceremony, not a rollback afterthought: this
+ *  image runs against the 19 database between the deploy and the apply, and they are what makes
+ *  that window degrade lane-locally (synthesis holds, resolver skips) instead of dead-lettering the
+ *  whole projection. They are evaluated PER EVENT — never cached at startup — which is why the
+ *  lanes light on the next event after the apply with no restart. */
 export async function hasSynthesisAuthorizationSurfaceDefault(client) {
   const r = await client.query(
     "select to_regprocedure('clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text)') is not null"

@@ -1,4 +1,33 @@
-# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.5 (RATIFIED)
+# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.6 (RATIFIED)
+
+> **Status: RATIFIED v1.6 — v1.5 plus the ratchet-R5 CEREMONY corrections (2026-07-26).**
+> R5 changed no migration behaviour: A1–A8 stand exactly as ratified, and the migration file is
+> byte-identical. What it changed is the **instruments and the order** — the parts that decide
+> whether a human runs the remediation, and what production is doing while they do.
+>
+> **The artifacts.** The go/no-go probe reported **two of the bridge's five directions** while
+> its header promised the whole question; a `sources/` page with canonical bytes and no
+> deterministic-ingest log row read `needs_canonicalization = 0`, `<none>`, *clean*, and the
+> apply then aborted on direction 1 (reproduced). It now reports all five, and flags D1/D2/D3
+> **INVESTIGATE** — `wiki_log` is append-only, so those are facts about how a page was created
+> and no script repairs them. It also **refuses to report at all** under a role RLS can filter,
+> where every count read zero and exit 0, byte-identical to a clean database. The preflight
+> gained the same refusal (hardening: its old failure under a filtered role was an incidental
+> `permission denied` on an unrelated first statement, not a designed gate). A new
+> `wave-b-0020-postverify.sql` replaces §10.3 step 3's prose with **eleven executable probes**,
+> run verbatim by the 19→20 upgrade fixture so CI exercises the file the owner runs.
+>
+> **The ceremony.** §10.3's ordering left the runtime **fully up** between the preflight and the
+> apply. `planDeterministicIngest` calls the pre-A7 `record_wiki_source_ingest` on the
+> `entry.approved` lane with **no surface guard** — correctly, it is 19-era behaviour — so one
+> such event in that window mints a fresh non-canonical page and aborts the apply on a page that
+> did not exist when the probe was read. The ceremony now **re-quiesces before the preflight**
+> and stays quiesced through the apply. Separately, the apply step named no command while the
+> whole rollback posture rests on "the migration is one transaction": that transaction comes
+> from `scripts/migrate.mjs`, not from the file, so a `psql -f` would half-apply 0020 onto
+> production. The runbook now names the runner and forbids `psql -f`.
+>
+> Nothing in this revision reopens A1–A8. See `docs/ops/wave-b-0020-ceremony-runbook.md`.
 
 > **Status: RATIFIED v1.5 — v1.4 plus the ratified OWNER RULING A8 (2026-07-25): the
 > canonicalization is corrected AT THE EVENT SPINE, §5.8.** Ratchet R4 re-derived the whole
@@ -1193,6 +1222,7 @@ upgrade fixture **verbatim** (a copy inside the test would prove the copy, not t
 | Artifact | What it is |
 |---|---|
 | `wave-b-0020-a7-probe.sql` | **Read-only.** Statement 1 asserts the read environment and **refuses to report** if row-level security could filter any of the four source relations for the current role (ratchet R5-C: under `clara_authenticated` every count reads zero, which is byte-identical to a clean database — a silent false-clean in the one artifact a human uses to decide whether to remediate). Statement 2 reports **all five bridge directions**, not two — D1/D2/D3 are set-membership and mechanism facts **no script can repair**, and it says so in the row's `remedy`; D4/D5 are the preflight's job. It also reports the residual **A8-R1 completeness population** as advisory, and lists up to 25 offending slugs per failing check from the *same* predicates, so summary and detail cannot drift. Writes nothing; safe on production at any time. |
+| `wave-b-0020-postverify.sql` | **Read-only, ten probes**, run at ceremony step 7 against the COMMITTED catalog — the 0016 lesson: an in-transaction tail proves the apply, not production. Includes the **DARK receipt** (`prepare_egress_dispatch` byte-identical `unknown` for every active client, *including one holding a live legacy purpose-blind consent*) and a re-read of all five bridge directions. Carries **no psql meta-commands**, because the 19→20 upgrade fixture runs it verbatim through node-postgres — so CI exercises the artifact the owner runs. Proven non-vacuous by injection (a retuned budget, a non-canonical page, a table grant, a fifth `wiki.*` type). |
 | `wave-b-0020-a7-preflight.sql` | **The audited correction.** One `do` block = one statement = one transaction. Registers the correction event type if absent; for every page non-canonical **in the rows or in the spine**, re-derives the title and every version's content/hash/key/size, appends **one envelope per version**, writes an `audit_log` row per page; then **re-asserts bridge directions 4 and 5** and raises if either would still abort. |
 
 The preflight runs at **nineteen** migrations, so it registers the event type itself; 0020
