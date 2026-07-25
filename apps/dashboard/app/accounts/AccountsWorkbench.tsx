@@ -6,7 +6,10 @@
 // accounts read, with an empty state that names the problem; (2) "Apply the template" —
 // COA_TEMPLATE blocks, standard pre-selected, optional not, applied SEQUENTIALLY through the
 // governed upsert_account with a stable per-account op_key (WB-R19) so a retry after a
-// partial failure replays rather than duplicates; (3) an ad-hoc single-account add form.
+// partial failure replays rather than duplicates, behind a PRE-APPLY special-marker check
+// that refuses before the first write (the one failure class a retry cannot clear — see
+// specialMarkerConflicts); (3) an ad-hoc single-account add form, which doubles as the
+// remedy for that refusal.
 // Every figure/count here is either a DB row (the accounts list) or read straight off the
 // fixed template (../shared/coaTemplate) — this module computes no accounting figure.
 
@@ -29,6 +32,8 @@ import {
   withResult,
   applySummary,
   buildMpersLookup,
+  specialMarkerConflicts,
+  markerConflictRefusal,
   type ApplyResult,
 } from "./accountsModel";
 import styles from "./accounts.module.css";
@@ -53,6 +58,8 @@ export function AccountsWorkbench({
   const [applying, setApplying] = useState(false);
   const [progress, setProgress] = useState<{ current: number; total: number } | null>(null);
   const [results, setResults] = useState<ApplyResult[]>([]);
+  /** The pre-apply marker refusal (F2) — set means NOTHING was written. */
+  const [applyBlocked, setApplyBlocked] = useState<string | null>(null);
 
   // --- Add-a-single-account form --------------------------------------------------
   const [code, setCode] = useState("");
@@ -85,7 +92,36 @@ export function AccountsWorkbench({
   async function applyTemplate() {
     const toApply = templateAccounts(selectedBlocks);
     if (toApply.length === 0) return;
+    setApplyBlocked(null);
     setApplying(true);
+
+    // PRE-FLIGHT (F2) — a special marker this selection wants may already sit on a
+    // DIFFERENT code for this client (the operator who applied the company default to a
+    // sole proprietorship, then ticked the sole-proprietor block and re-applied). The DB
+    // would refuse only that one account while the other ~190 landed, and the chart would
+    // then look complete while the opening-balance carry-down — which resolves the marker,
+    // not the code — posted to the wrong account with no error at all. Refuse up front
+    // instead, and read the accounts FRESH rather than trusting possibly-stale state.
+    // FAIL-CLOSED: if the read itself fails we do not apply.
+    let existing: AccountRow[];
+    try {
+      existing = await listAccounts(token, clientId);
+    } catch (e) {
+      setApplying(false);
+      setApplyBlocked(
+        "Apply refused — nothing was written. This client's existing accounts could not be read, " +
+          `so the special-marker pre-flight could not run: ${(e as Error).message}`,
+      );
+      return;
+    }
+    const conflicts = specialMarkerConflicts(toApply, existing);
+    if (conflicts.length > 0) {
+      setApplying(false);
+      setApplyBlocked(markerConflictRefusal(conflicts));
+      setAccounts(existing);
+      return;
+    }
+
     setResults(initApplyResults(toApply));
     setProgress({ current: 0, total: toApply.length });
     for (let i = 0; i < toApply.length; i++) {
@@ -150,6 +186,9 @@ export function AccountsWorkbench({
         accountClass: accountClass || null,
       });
       setAddOk(`${out.account_code} saved.`);
+      // This form is also the REMEDY for a marker refusal (re-save the offending code with
+      // special blank), so a successful save must not leave the old refusal standing.
+      setApplyBlocked(null);
       setCode("");
       setName("");
       setAccountClass("");
@@ -224,9 +263,14 @@ export function AccountsWorkbench({
       <div className={styles.section}>
         <p className={styles.sectionTitle}>Apply the template</p>
         <p className={styles.muted}>
-          Core blocks are pre-selected; optional blocks are for entities that need them (inventory, investments).
-          <code> upsert_account</code> is an upsert, so re-applying is always safe — pressing "Apply selected
-          accounts" again after a partial failure resumes it, never duplicates a landed account.
+          Standard blocks are pre-selected; optional blocks are for entities that need them (inventory,
+          investments). Choosing the sole-proprietorship equity shape unchecks BOTH company-shaped blocks —
+          company equity, and directors/distributions — because a client may hold only one accumulated-equity
+          account, and a business with no shareholders has no directors to pay.
+          <code> upsert_account</code> is an upsert, so pressing "Apply selected accounts" again never
+          duplicates a landed account — it resumes. The one failure a retry cannot clear is a special-marker
+          collision with an account this client already has; that is checked before the first write and
+          refused here, with the remedy.
         </p>
         {COA_TEMPLATE.map((block) => {
           const checked = selectedBlocks.includes(block.key);
@@ -238,7 +282,11 @@ export function AccountsWorkbench({
                     type="checkbox"
                     checked={checked}
                     disabled={applying}
-                    onChange={() => setSelectedBlocks((s) => toggleBlockKey(s, block.key))}
+                    onChange={() => {
+                      // A changed selection may resolve the refusal; never leave a stale one up.
+                      setApplyBlocked(null);
+                      setSelectedBlocks((s) => toggleBlockKey(s, block.key));
+                    }}
                     aria-label={`Include ${block.title}`}
                   />
                   <span className={styles.blockTitle}>{block.title}</span>
@@ -268,6 +316,13 @@ export function AccountsWorkbench({
             </span>
           ) : null}
         </div>
+        {/* The pre-apply marker refusal. Multi-line and deliberately verbatim — it names
+            the account actually holding the marker, which the DB's own message does not. */}
+        {applyBlocked ? (
+          <p className={styles.errorText} style={{ whiteSpace: "pre-wrap" }} role="alert">
+            {applyBlocked}
+          </p>
+        ) : null}
         {results.length > 0 ? (
           <div className={styles.tableWrap} style={{ marginTop: "0.4rem" }}>
             {results.map((r, i) => (

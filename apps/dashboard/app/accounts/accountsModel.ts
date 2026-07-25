@@ -15,12 +15,13 @@ import {
   STANDARD_BLOCKS,
   OPTIONAL_BLOCKS,
   templateAccounts,
+  conflictingBlockKeys,
   type CoaTemplateAccount,
   type CoaTemplateBlock,
 } from "../shared/coaTemplate";
 
 export type { CoaTemplateAccount, CoaTemplateBlock };
-export { COA_TEMPLATE, MPERS_ROLLUPS, STANDARD_BLOCKS, OPTIONAL_BLOCKS };
+export { COA_TEMPLATE, MPERS_ROLLUPS, STANDARD_BLOCKS, OPTIONAL_BLOCKS, conflictingBlockKeys };
 
 // ---------------------------------------------------------------------------
 // Account-code validation (clara.coa_accounts_account_code_check, 0009, verbatim).
@@ -82,8 +83,27 @@ export function defaultSelectedBlockKeys(): string[] {
   return STANDARD_BLOCKS.map((b) => b.key);
 }
 
+/**
+ * Toggle one block in the selection. Selecting a block also DROPS any block declared
+ * mutually exclusive with it (coaTemplate `conflictsWith`) — the entity-shape case: the
+ * company equity block and the sole-proprietorship equity block each carry a
+ * retained-earnings marker, and clara.uq_coa_special is UNIQUE per
+ * (client_id, special_acc_type), so seeding both would refuse with a unique violation
+ * PARTWAY THROUGH the apply loop. The loop does NOT abort on a refusal — it records the
+ * error and carries on — so the operator would not get a truncated run; they would get one
+ * red row among ~200 and a chart that reads as complete while the wrong account holds
+ * accumulated equity. Dropping the conflicting block here is the difference between a
+ * visible checkbox change and that. Deselecting never adds anything back — the operator's
+ * own choice stands.
+ *
+ * SCOPE, stated because it is easy to over-read: this guards the IN-SESSION selection only.
+ * It knows nothing about rows already in clara.coa_accounts. An already-seeded client that
+ * switches entity shape is caught by specialMarkerConflicts() at apply time instead.
+ */
 export function toggleBlockKey(selected: readonly string[], key: string): string[] {
-  return selected.includes(key) ? selected.filter((k) => k !== key) : [...selected, key];
+  if (selected.includes(key)) return selected.filter((k) => k !== key);
+  const drop = new Set(conflictingBlockKeys(key));
+  return [...selected.filter((k) => !drop.has(k)), key];
 }
 
 /** The account count for a given block-key selection — read straight off the fixed
@@ -93,6 +113,91 @@ export function selectionAccountCount(selectedKeys: readonly string[]): number {
 }
 
 export { templateAccounts };
+
+// ---------------------------------------------------------------------------
+// PRE-APPLY MARKER GUARD. toggleBlockKey() only keeps the in-session selection
+// self-consistent; it cannot see rows already in clara.coa_accounts. The real-world
+// path is mundane: `sole-proprietor` is optional and unchecked, so an operator applies
+// the company default to a sole proprietorship first, realises the mistake, ticks the
+// block and re-applies. 150-000 now holds the retained_earnings marker, so 150-CAP hits
+// uq_coa_special and is refused — while the other ~190 accounts land, because the apply
+// loop deliberately continues past a per-account error. The chart then LOOKS complete
+// with no 150-CAP in it, and Gate K's carry-down resolves retained_earnings by marker:
+// the proprietor's accumulated capital posts to an account called "Retained earnings",
+// with no error at all. That silent path is worse than the refusal, so this refuses the
+// whole apply BEFORE the first write.
+// ---------------------------------------------------------------------------
+
+export type MarkerConflict = {
+  /** the special_acc_type both accounts want */
+  marker: string;
+  /** the template account the current selection would seed with it */
+  wantedCode: string;
+  wantedName: string;
+  /** the account already holding it on this client (a DIFFERENT code) */
+  existingCode: string;
+  existingName: string;
+  /** uq_coa_special has NO is_active predicate — an inactive row still holds the slot */
+  existingActive: boolean;
+};
+
+/**
+ * Every special-marker collision between a template selection and the client's existing
+ * accounts. A match on the SAME code is not a conflict — that is an ordinary upsert of the
+ * same row. Inactive rows are reported too, because clara.uq_coa_special is
+ * `unique (client_id, special_acc_type) where special_acc_type is not null` with no
+ * is_active predicate: deactivating the old account does not free the slot.
+ */
+export function specialMarkerConflicts(
+  selection: readonly CoaTemplateAccount[],
+  existing: readonly AccountRow[],
+): MarkerConflict[] {
+  const out: MarkerConflict[] = [];
+  for (const acct of selection) {
+    if (!acct.special) continue;
+    for (const row of existing) {
+      if (row.special_acc_type !== acct.special) continue;
+      if (row.account_code === acct.code) continue;
+      out.push({
+        marker: acct.special,
+        wantedCode: acct.code,
+        wantedName: acct.name,
+        existingCode: row.account_code,
+        existingName: row.name,
+        existingActive: row.is_active,
+      });
+    }
+  }
+  return out;
+}
+
+/**
+ * The operator-facing refusal. It has to do three things the DB's own message cannot:
+ * name the account ACTUALLY holding the marker (upsert_account maps every unique_violation
+ * to "a rounding account already exists for this client" — 0009, deployed, not editable
+ * here); give the remedy; and say that deactivating is not the remedy, because that is
+ * counter-intuitive and undocumented anywhere else.
+ */
+export function markerConflictRefusal(conflicts: readonly MarkerConflict[]): string {
+  const lines = conflicts.map(
+    (c) =>
+      `• "${c.marker}" is already on ${c.existingCode} ${c.existingName}` +
+      `${c.existingActive ? "" : " (inactive — see below)"}, and this selection puts it on ` +
+      `${c.wantedCode} ${c.wantedName}.`,
+  );
+  return [
+    "Apply refused — nothing was written.",
+    "",
+    `This client's chart already carries ${conflicts.length === 1 ? "a special marker" : "special markers"} the selected template wants to put somewhere else. clara.coa_accounts permits exactly one account per client per marker (uq_coa_special):`,
+    ...lines,
+    "",
+    "If this were applied, the DB would refuse only the conflicting account while every other account landed — so the chart would read as complete, and the opening-balance carry-down (which resolves the marker, not the code) would post to the account named above. Retrying would not help either: the refusal aborts that account's whole transaction, including its op-key reservation, so it re-raises identically every time.",
+    "",
+    `Remedy: in "Add a single account" below, re-enter ${[...new Set(conflicts.map((c) => c.existingCode))].join(", ")} with the same name and type but the special field left blank. That clears the marker (upsert_account's on-conflict update writes the blank through). Then apply the template again.`,
+    "",
+    "Deactivating the old account does NOT work: uq_coa_special has no is_active condition, so an inactive row keeps holding the slot — while the carry-down, which only looks at active accounts, then refuses with CLR31.",
+  ].join("\n");
+}
 
 // ---------------------------------------------------------------------------
 // The deterministic op_key (WB-R19: same intent keeps its op_key). Derived from the
