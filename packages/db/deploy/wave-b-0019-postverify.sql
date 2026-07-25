@@ -204,39 +204,90 @@ end $$;
 
 -- ---------------------------------------------------------------------
 -- 9. The §9 closed set holds on the LIVE catalog: no clara function OUTSIDE
---    the whitelist names a wiki relation or carries a call edge into the wiki
---    set. NOT restricted to SECURITY DEFINER — an invoker helper called from a
---    patched definer runs with that definer's authority (ratchet R1 finding 4).
+--    the wiki-touch CAPABILITY SET names a wiki relation or carries a call edge
+--    into that set. NOT restricted to SECURITY DEFINER — an invoker helper
+--    called from a patched definer runs with that definer's authority (ratchet
+--    R1 finding 4).
+--
+--    THE SET GROWS BY EXPLICIT ENUMERATION, AND HERE IS WHY.
+--    This probe first shipped with 0019's twelve signatures hard-coded, and it
+--    false-failed the moment 0020 landed — because 0020's typed-consent verbs
+--    reach wiki state exactly the way the 0020 contract TOLD them to: by calling
+--    the audited writers (record_wiki_source_ingest, set_/clear_wiki_synthesis_hold).
+--    The scan's call-edge half cannot distinguish "reached wiki state through an
+--    AUDITED governed verb" (sanctioned) from "reached it through an unaudited
+--    wrapper" (the defect WB-R21 abolishes) — so authorized callers must be named.
+--    A later migration that adds one MUST add it here, in that same commit.
+--
+--    NOT a weakening. Every enumerated caller is additionally asserted to carry
+--    call edges ONLY and to name NO wiki relation: gaining direct relation access
+--    is still a failure, for them as much as for anyone. Signatures that do not
+--    resolve are skipped, so this file is correct against a database at 19
+--    (before 0020 exists) and at 20+ alike.
 -- ---------------------------------------------------------------------
 do $$
-declare v_bad text;
+declare
+  v_bad text; v_sig text; v_oid oid; v_src text; v_n int := 0;
+  v_relrx  constant text := '\m(wiki_pages|wiki_page_versions|wiki_page_citations|wiki_page_refs|wiki_log|wiki_budgets|wiki_synthesis_holds)\M';
+  v_callrx constant text := '\m(publish_wiki_page_version|_publish_wiki_page_version_core|record_wiki_source_ingest|retire_wiki_page|set_wiki_synthesis_hold|clear_wiki_synthesis_hold|get_wiki_page|list_wiki_pages|get_context_pack|run_client_lint|run_lint_all|mark_wiki_citations_stale|_assert_filing_wiki_unreferenced)\M';
+  -- 0019's twelve — the functions that legitimately TOUCH wiki relations.
+  v_core constant text[] := array[
+    'clara.publish_wiki_page_version(uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,text)',
+    'clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,uuid,text,text)',
+    'clara.record_wiki_source_ingest(uuid,uuid,text,text)',
+    'clara.retire_wiki_page(uuid,text,text)',
+    'clara.set_wiki_synthesis_hold(uuid,text,text)',
+    'clara.clear_wiki_synthesis_hold(uuid,text)',
+    'clara.get_wiki_page(uuid,text)',
+    'clara.list_wiki_pages(uuid)',
+    'clara.get_context_pack(uuid,text)',
+    'clara.run_client_lint(uuid,text)',
+    'clara.run_lint_all(text)',
+    'clara.mark_wiki_citations_stale(uuid,uuid,text,text)'
+  ];
+  -- Later-migration AUTHORIZED CALLERS — call an audited writer, name no relation.
+  -- 0020 (typed consent): the ingest verb, plus the three activation/withdrawal
+  -- RPCs that set or clear the synthesis hold.
+  v_callers constant text[] := array[
+    'clara.resolve_and_ingest_wiki_source(uuid,uuid)',
+    'clara.activate_client_egress_purpose(uuid,text,uuid,text)',
+    'clara.deactivate_client_egress_purpose(uuid,text,text,text)',
+    'clara.revoke_client_egress_purpose(uuid,text,text,text)'
+  ];
+  v_allowed oid[] := '{}';
 begin
+  foreach v_sig in array (v_core || v_callers) loop
+    v_oid := to_regprocedure(v_sig);
+    if v_oid is not null then v_allowed := v_allowed || v_oid; end if;
+  end loop;
+
   select string_agg(sig, E'\n  ') into v_bad from (
     select p.oid::regprocedure::text as sig
       from pg_proc p join pg_namespace n on n.oid = p.pronamespace
      where n.nspname = 'clara'
-       and p.oid not in (
-         to_regprocedure('clara.publish_wiki_page_version(uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,text)'),
-         to_regprocedure('clara._publish_wiki_page_version_core(uuid,uuid,text,text,text,uuid,text,text,text,jsonb,jsonb,text,text,bigint,uuid,text,text)'),
-         to_regprocedure('clara.record_wiki_source_ingest(uuid,uuid,text,text)'),
-         to_regprocedure('clara.retire_wiki_page(uuid,text,text)'),
-         to_regprocedure('clara.set_wiki_synthesis_hold(uuid,text,text)'),
-         to_regprocedure('clara.clear_wiki_synthesis_hold(uuid,text)'),
-         to_regprocedure('clara.get_wiki_page(uuid,text)'),
-         to_regprocedure('clara.list_wiki_pages(uuid)'),
-         to_regprocedure('clara.get_context_pack(uuid,text)'),
-         to_regprocedure('clara.run_client_lint(uuid,text)'),
-         to_regprocedure('clara.run_lint_all(text)'),
-         to_regprocedure('clara.mark_wiki_citations_stale(uuid,uuid,text,text)')
-       )
-       and (p.prosrc ~* '\m(wiki_pages|wiki_page_versions|wiki_page_citations|wiki_page_refs|wiki_log|wiki_budgets|wiki_synthesis_holds)\M'
-            or p.prosrc ~* '\m(publish_wiki_page_version|_publish_wiki_page_version_core|record_wiki_source_ingest|retire_wiki_page|set_wiki_synthesis_hold|clear_wiki_synthesis_hold|get_wiki_page|list_wiki_pages|get_context_pack|run_client_lint|run_lint_all|mark_wiki_citations_stale|_assert_filing_wiki_unreferenced)\M')
+       and not (p.oid = any(v_allowed))
+       and (p.prosrc ~* v_relrx or p.prosrc ~* v_callrx)
      order by 1
   ) t;
   if v_bad is not null then
-    raise exception E'POST-VERIFY 9: clara functions OUTSIDE the wiki whitelist touch the wiki set:\n  %', v_bad;
+    raise exception E'POST-VERIFY 9: clara functions OUTSIDE the wiki-touch capability set reach wiki state:\n  %\n(If one is a new migration''s AUTHORIZED caller, add it to v_callers in that migration''s own commit — never silently.)', v_bad;
   end if;
-  raise notice 'OK 9  closed set holds on the live catalog (all clara fns scanned, not just definers)';
+
+  -- The teeth: an authorized CALLER may hold call edges, never relation access.
+  foreach v_sig in array v_callers loop
+    v_oid := to_regprocedure(v_sig);
+    if v_oid is null then continue; end if;
+    v_n := v_n + 1;
+    select prosrc into v_src from pg_proc where oid = v_oid;
+    if v_src ~* v_relrx then
+      raise exception 'POST-VERIFY 9: authorized caller % NAMES a wiki relation directly — it may only CALL the audited writers', v_sig;
+    end if;
+    if v_src !~* v_callrx then
+      raise exception 'POST-VERIFY 9: % is enumerated as an authorized caller but calls NO audited wiki writer — stale entry, remove it', v_sig;
+    end if;
+  end loop;
+
+  raise notice 'OK 9  closed set holds on the live catalog (all clara fns scanned, not just definers; % authorized caller(s), call-edge-only)', v_n;
 end $$;
 
 -- ---------------------------------------------------------------------
