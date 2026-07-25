@@ -1192,7 +1192,7 @@ upgrade fixture **verbatim** (a copy inside the test would prove the copy, not t
 
 | Artifact | What it is |
 |---|---|
-| `wave-b-0020-a7-probe.sql` | **Read-only.** One row: `source_pages_total`, `bytes_non_canonical` (direction 4), `spine_non_canonical` (direction 5), `needs_canonicalization` (the union), `first_25_offenders`. Writes nothing; safe on production at any time. |
+| `wave-b-0020-a7-probe.sql` | **Read-only.** Statement 1 asserts the read environment and **refuses to report** if row-level security could filter any of the four source relations for the current role (ratchet R5-C: under `clara_authenticated` every count reads zero, which is byte-identical to a clean database — a silent false-clean in the one artifact a human uses to decide whether to remediate). Statement 2 reports **all five bridge directions**, not two — D1/D2/D3 are set-membership and mechanism facts **no script can repair**, and it says so in the row's `remedy`; D4/D5 are the preflight's job. It also reports the residual **A8-R1 completeness population** as advisory, and lists up to 25 offending slugs per failing check from the *same* predicates, so summary and detail cannot drift. Writes nothing; safe on production at any time. |
 | `wave-b-0020-a7-preflight.sql` | **The audited correction.** One `do` block = one statement = one transaction. Registers the correction event type if absent; for every page non-canonical **in the rows or in the spine**, re-derives the title and every version's content/hash/key/size, appends **one envelope per version**, writes an `audit_log` row per page; then **re-asserts bridge directions 4 and 5** and raises if either would still abort. |
 
 The preflight runs at **nineteen** migrations, so it registers the event type itself; 0020
@@ -1808,17 +1808,37 @@ neither order can light synthesis — there is no silent-loss window in either d
    ```
    psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0020-a7-probe.sql
    ```
-   One row comes back:
+   **It refuses to run as the wrong role.** Every relation it reads is under RLS; as
+   `clara_authenticated` or `clara_agent_ro` every count would read **zero**, which is
+   byte-identical to a clean database. Statement 1 proves from the catalog that RLS cannot
+   filter for the current role and raises otherwise (ratchet R5-C). The live ceremony role
+   (`postgres`, `rolbypassrls`) passes; so does `clara_fn_owner`, which reads through an
+   unconditional policy under FORCE RLS.
 
-   | column | what it means | expected NOW | expected AFTER (ii) |
+   A vertical `ord | metric | n | status | remedy` table comes back — **all five bridge
+   directions**, not two, plus the advisory population and up to 25 offending slugs per
+   failing check:
+
+   | metric | what it means | expected NOW | expected AFTER (ii) |
    |---|---|---|---|
    | `source_pages_total` | pages in the reserved `sources/` namespace | ~30 | unchanged |
-   | `bytes_non_canonical` | pages whose STORED title/body are not canonical — **direction 4 aborts on these** | > 0 | **0** |
-   | `spine_non_canonical` | pages whose RECONSTRUCTION EVENTS are stale — **direction 5 aborts on these** | > 0 | **0** |
-   | `needs_canonicalization` | the union — how many pages step (ii) will correct | > 0 | **0** |
-   | `first_25_offenders` | their slugs, so you can eyeball them | a list | `<none>` |
+   | `d1_sources_page_without_ingest_log` | a `sources/` page no deterministic ingest created — **direction 1 aborts** | 0 | 0 |
+   | `d2_ingest_page_outside_namespace` | a deterministic-ingest page outside `sources/` — **direction 2 aborts** | 0 | 0 |
+   | `d3_sources_page_with_model_publication` | a model-path publication in the namespace — **direction 3 aborts** | 0 | 0 |
+   | `d4_bytes_non_canonical` | STORED title/body not canonical — **direction 4 aborts** | > 0 | **0** |
+   | `d5_spine_non_canonical` | RECONSTRUCTION EVENTS stale — **direction 5 aborts** | > 0 | **0** |
+   | `needs_canonicalization (d4 ∪ d5)` | how many pages step (ii) will correct | > 0 | **0** |
+   | `a8r1_versions_without_publication_event` | **advisory, does NOT block** — the residual §11 A8-R1 gap, made visible | 0 | 0 |
 
-   If `needs_canonicalization` is already **0**, skip to step 2 — nothing to do.
+   **D1, D2 and D3 are not remediable by any script** and the preflight will not clear them:
+   they are facts about how a page was *created*, and `wiki_log` is append-only. A non-zero
+   count there means **stop and investigate** — whose page, which caller, when — and rule on
+   the finding before 0020 can apply. Only if D1/D2/D3 are `0` **and**
+   `needs_canonicalization` is `0` is there nothing to do; skip to step 2. An earlier draft of
+   this probe computed D4/D5 alone while promising the whole question, so a D1 violation read
+   as `needs_canonicalization = 0`, `<none>` — clean — and the apply then aborted. Reproduced
+   on the rig, both halves: the old file exits 0 reporting clean, the corrected file names D1,
+   and `migrate` fails with exactly the direction the probe named.
 
    **(ii) CORRECT — the audited preflight. One transaction; safe to re-run.**
    ```
@@ -1859,10 +1879,12 @@ neither order can light synthesis — there is no silent-loss window in either d
      `select count(*) from clara.wiki_pages where slug like 'sources/%'` **equals** the count of
      pages carrying a `wiki_log` `action='ingest'` row (both directions); the count of
      `sources/%` pages carrying a `wiki_log` `action='publish'` row is **zero**; the
-     **`bytes_non_canonical` count from step 1b(iii) is zero** — every page's title and every
-     version's body equals its canonical form; and the **`spine_non_canonical` count from the
+     **`d4_bytes_non_canonical` count from step 1b(iii) is zero** — every page's title and every
+     version's body equals its canonical form; and the **`d5_spine_non_canonical` count from the
      same probe is zero** — every reconstruction event either is canonical or is superseded by a
-     correction envelope. The first two are set membership (the page was *created* by
+     correction envelope. Since ratchet R5 the probe reports all five directly (as `d1`…`d5`),
+     so this receipt is one re-run of step 1b(i), not five hand-written queries. The first two
+     are set membership (the page was *created* by
      deterministic ingest). The third names one mechanism. The fourth is a computable property
      of the live bytes. **The fifth is that same property where a REBUILD reads it**, and it is
      independent of the fourth — canonical rows over a stale spine is exactly the state ratchet
@@ -1920,7 +1942,7 @@ at the owner's pace, afterwards.
 | **R-7** | **Timing side channel on the runtime DEFINER verbs** (added 2026-07-25 with the §3.3 erratum). Payloads and error shapes are byte-identical across every non-granted cause, and the two coarsest differences are removed (the firm-leading live-activation index; the resolver's two-row cap). Execution is nevertheless **not constant-time**, and SQL cannot make it so. | **Named, not claimed away.** Closing it needs an architectural control — a constant-time gateway, or a rate limit on `prepare_egress_dispatch` / `resolve_document_client` for `clara_runtime` — which is a ruling, not a patch. v1.0's absolute "no timing branch a caller can distinguish" is withdrawn from §3.3 and §5.1. |
 | **R-8** | **The consume must be committed by its caller** (added 2026-07-25 with amendment A2). A PostgreSQL function cannot commit its caller's transaction, so `granted` implies committed only if the caller commits before calling the model. | Closed on the caller side: the runtime's default consume helper runs its own `begin`/`commit` (§3.7), pinned by a unit cell. It remains a **precondition on any other caller** of the verb, stated in §3.4 and §3.6 rather than assumed. |
 | **A5-R1** | **The context pack is not protected, and A5 widened the population that crowds it** (raised with A5, restated plainly with A6). `get_context_pack` ranks by `page_kind`, `period_context` is priority 2 of 6, and every deterministic source page is a recently-updated `period_context`. WB-R8's cap protected model spend **and** pack noise; A5 keeps spend bounded at 40 and raises the pack-crowding ceiling to 50000. On a document-heavy client the six-page pack is, today, six provenance stubs. | **Open, and named as open.** Not fixable inside a budget amendment: what the six-page window selects is WB-R8 / W6 contract surface and needs its own ruling. A6 fixed the *lint* half of the same compounding (§5.6a); the *pack* half is deliberately untouched — no ranking change was attempted. **A7 makes this cheaper to live with, not worse**: a crowding stub is now `Source: <uuid>`, six tokens instead of six filenames. |
-| **A8-R1** | **Direction 5 checks the events that EXIST; it does not prove event COMPLETENESS.** A version carrying no `wiki.page_published` envelope at all would not be reconstructible, and direction 5 would not see it — its scope is "whatever the log says about a `sources/` page must be canonical", not "the log says something about every version". | **Named, and out of 0020's scope by construction.** Completeness is a pre-existing property of the 0017 writers (`_publish_wiki_page_version_core` emits one envelope per publication on every path, and the ingest verb's own R1-F6 append makes the deterministic path no exception), which 0020 neither creates nor changes; inventing a synthetic publication envelope for a version that never had one would fabricate history, which is the opposite of what A8 is for. The read-only probe reports the population so a gap is **visible** rather than silent, and the rig's bijection assertion (`wb-r1-followon.test.mjs` [R2-F7]) is where a writer-side regression would surface. |
+| **A8-R1** | **Direction 5 checks the events that EXIST; it does not prove event COMPLETENESS.** A version carrying no `wiki.page_published` envelope at all would not be reconstructible, and direction 5 would not see it — its scope is "whatever the log says about a `sources/` page must be canonical", not "the log says something about every version". | **Named, and out of 0020's scope by construction.** Completeness is a pre-existing property of the 0017 writers (`_publish_wiki_page_version_core` emits one envelope per publication on every path, and the ingest verb's own R1-F6 append makes the deterministic path no exception), which 0020 neither creates nor changes; inventing a synthetic publication envelope for a version that never had one would fabricate history, which is the opposite of what A8 is for. The read-only probe reports the population so a gap is **visible** rather than silent — as `a8r1_versions_without_publication_event`, flagged `VISIBLE (advisory)`, with the offending `slug  version_n=` pairs listed; **[R5-B]** that sentence described an intent, not a shipped file, until the R5 correction put the count in the probe — and the rig's bijection assertion (`wb-r1-followon.test.mjs` [R2-F7]) is where a writer-side regression would surface. |
 | **A7-R1** | **A source page no longer names its document in human terms.** A7 removes `documents.original_filename` from the exempt page's title and body, so `get_wiki_page` / `list_wiki_pages` / `get_context_pack` show `Source: 3f2b…` rather than `Source: invoice-jan.pdf`. **No code depends on it** (DB and runtime suites are green with zero call-site changes) — it is a human-readability cost only. | **Open, with the right shape already available.** The filename is **not lost**: it lives on `clara.documents`, and the page's own citation carries `document_id` + `document_sha256`, so any surface that wants it can **join** — which is where a caller-chosen string belongs. Putting it back into exempt page bytes is exactly the defect A7 closed and must not be the fix. If a human surface needs it, the display join is a dashboard/read-verb change (`get_wiki_page` could return the citation's document filename as a *field*, never as page content) and needs its own small ruling. |
 
 ---

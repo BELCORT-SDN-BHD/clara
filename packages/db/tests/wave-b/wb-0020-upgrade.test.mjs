@@ -46,7 +46,7 @@ import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  rootQuery, opk, endPool, printLaneNotes, noteLane,
+  rootQuery, roleQuery, ROLES, opk, endPool, printLaneNotes, noteLane,
   buildWorld, createClient, recordWikiIngest, seedVerifiedDocument, fileTo,
   eventsOf, shaHex, wikiKey,
 } from "./wb-0020-helpers.mjs";
@@ -75,10 +75,25 @@ function exportPre0020() {
  *  SQL inside the test would prove the copy works and say nothing about what the owner runs. */
 const deploySql = (f) => readFileSync(join(DEPLOY_DIR, f), "utf8");
 
-/** §10.3 step 1b-i — the read-only probe, one row. */
+/**
+ * §10.3 step 1b-i — the read-only probe. TWO statements since ratchet R5: the read-
+ * environment assertion, then a vertical `ord | metric | n | status | remedy` report
+ * covering ALL FIVE bridge directions plus the advisory A8-R1 population. Parsed into
+ * `{ <metric>: Number, status: {...}, offenders: [...] }` so a cell asserts the number the
+ * OWNER sees, from the SHIPPED file — never a paraphrase of it.
+ */
 async function probe() {
-  const r = await rootQuery(deploySql("wave-b-0020-a7-probe.sql"));
-  return r.rows[0];
+  const res = await rootQuery(deploySql("wave-b-0020-a7-probe.sql"));
+  const rows = (Array.isArray(res) ? res[res.length - 1] : res).rows;
+  const out = { status: {}, offenders: [] };
+  for (const r of rows) {
+    if (r.status === "offender") { out.offenders.push(`${r.metric.trim()} ${r.n}`); continue; }
+    const key = r.metric.replace(" (d4 ∪ d5)", "");
+    out[key] = Number(r.n);
+    out.status[key] = r.status;
+  }
+  out.offenderText = out.offenders.join(" | ") || "<none>";
+  return out;
 }
 
 /** §10.3 step 1b-ii — the audited correction. One `do` block, one transaction. */
@@ -312,11 +327,11 @@ test("[0020 A7/A8 upgrade]: both prose channels ABORT the apply; the audited pre
   // This is the exact statement §10.3 puts in front of the owner before anything runs.
   const p0 = await probe();
   assert.equal(p0.source_pages_total, 2, "probe: both source pages counted");
-  assert.equal(p0.bytes_non_canonical, 2, "probe: 2 pages carry non-canonical BYTES (direction 4)");
-  assert.equal(p0.spine_non_canonical, 2, "probe: 2 pages carry a stale RECONSTRUCTION SPINE (direction 5)");
+  assert.equal(p0.d4_bytes_non_canonical, 2, "probe: 2 pages carry non-canonical BYTES (direction 4)");
+  assert.equal(p0.d5_spine_non_canonical, 2, "probe: 2 pages carry a stale RECONSTRUCTION SPINE (direction 5)");
   assert.equal(p0.needs_canonicalization, 2, "probe: 2 pages need canonicalization");
-  assert.match(p0.first_25_offenders, new RegExp(`sources/${noted.documentId}`), "probe names M1");
-  assert.match(p0.first_25_offenders, new RegExp(`sources/${named.documentId}`), "probe names M2");
+  assert.match(p0.offenderText, new RegExp(`sources/${noted.documentId}`), "probe names M1");
+  assert.match(p0.offenderText, new RegExp(`sources/${named.documentId}`), "probe names M2");
 
   // ---- 2. the apply ABORTS, fail-closed, naming both offenders ---------------
   let aborted = null;
@@ -339,10 +354,10 @@ test("[0020 A7/A8 upgrade]: both prose channels ABORT the apply; the audited pre
   // ---- 3. the SHIPPED AUDITED PREFLIGHT, run verbatim ------------------------
   await runPreflight();
   const p2 = await probe();
-  assert.equal(p2.bytes_non_canonical, 0, "preflight: bytes canonical");
-  assert.equal(p2.spine_non_canonical, 0, "preflight: the reconstruction spine is canonical too");
+  assert.equal(p2.d4_bytes_non_canonical, 0, "preflight: bytes canonical");
+  assert.equal(p2.d5_spine_non_canonical, 0, "preflight: the reconstruction spine is canonical too");
   assert.equal(p2.needs_canonicalization, 0, "preflight: nothing left to canonicalize");
-  assert.equal(p2.first_25_offenders, "<none>", "…and the probe says so in words");
+  assert.equal(p2.offenderText, "<none>", "…and the probe says so in words");
 
   const envelopes = await eventsOf(w.firms.A, "wiki.page_canonicalized");
   assert.equal(envelopes.length, 2, "one correction envelope per affected VERSION (two pages, one version each)");
@@ -472,8 +487,8 @@ test("[0020 A8 · ratchet R4 F1]: A7's ROWS-ONLY remediation is REFUSED — cano
   for (const sql of A7_ROWS_ONLY_REMEDIATION) await rootQuery(sql);
 
   const p1 = await probe();
-  assert.equal(p1.bytes_non_canonical, 0, "rows-only: the BYTES are now canonical (direction 4 would pass)");
-  assert.equal(p1.spine_non_canonical, 2, "rows-only: the SPINE is still stale — the F1 defect, MEASURED");
+  assert.equal(p1.d4_bytes_non_canonical, 0, "rows-only: the BYTES are now canonical (direction 4 would pass)");
+  assert.equal(p1.d5_spine_non_canonical, 2, "rows-only: the SPINE is still stale — the F1 defect, MEASURED");
   assert.equal(p1.needs_canonicalization, 2, "…so both pages still need the audited preflight");
 
   // the stale envelopes are really there, carrying the real prose
@@ -571,7 +586,7 @@ test("[0020 A7/A8 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes
   // the probe agrees, in BOTH halves, before anything is applied
   const p0 = await probe();
   assert.equal(p0.needs_canonicalization, 0, "probe: a clean corpus needs nothing");
-  assert.equal(p0.spine_non_canonical, 0, "probe: …including its reconstruction spine");
+  assert.equal(p0.d5_spine_non_canonical, 0, "probe: …including its reconstruction spine");
 
   // and the AUDITED preflight is a no-op on it — it must never touch a canonical page
   await runPreflight();
@@ -606,4 +621,130 @@ test("[0020 A7/A8 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes
     assert.equal(shv.storage_key, v.storage_key, "storage key matches the live row");
     assert.equal(shv.size_bytes, Number(v.size_bytes), "size matches the live row");
   }
+});
+
+// ===========================================================================
+// [RATCHET R5] THE PROBE ITSELF — the artifact whose output decides whether a human runs
+// the remediation. Empirical R5 drove it on a rig and found three gaps, all of the same
+// class this ratchet keeps finding: THE DOCUMENT CLAIMED A PROPERTY THE CODE DID NOT HAVE.
+//   (C) a SILENT FALSE-CLEAN — under an RLS-filtered role every count read zero, which is
+//       byte-identical to a clean database, in the one artifact a human trusts to say
+//       "nothing to do";
+//   (A) the header promised "will 0020 abort and on how many pages" while computing only
+//       directions 4 and 5 — a direction-1 violation read CLEAN and the apply then failed;
+//   (B) §11's A8-R1 ruling said "the probe reports the population so a gap is visible
+//       rather than silent" — and the shipped file did not report it.
+// This cell pins the BEHAVIOUR, not the claim. Each half is proven non-vacuous: the
+// violator is injected, the probe names it, and the migration then fails on exactly the
+// direction the probe named.
+// ===========================================================================
+test("[0020 · ratchet R5]: the PROBE refuses an RLS-blinded read, reports ALL FIVE bridge directions, and makes the A8-R1 completeness gap visible", async (t) => {
+  if (skipUnlessReset(t)) return;
+  const { reset } = await import("../../scripts/reset.mjs");
+  const { migrate } = await import("../../scripts/migrate.mjs");
+  const { seed } = await import("../../scripts/seed.mjs");
+
+  await reset({ log: () => {} });
+  await migrate({ dir: exportPre0020(), log: () => {} });
+  await seed({ log: () => {} });
+
+  const w = await buildWorld();
+  const client = await createClient(w.users.alice, { name: `wb20r5_${opk("x")}`, opKey: opk("cli") });
+  const d = await seedVerifiedDocument({ firm: w.firms.A, kind: "invoice", filename: null });
+  await fileTo(w.users.alice, { document: d.documentId, client });
+  const clean = await recordWikiIngest({ client, document: d.documentId });
+  assert.ok(clean?.page_id, "a canonical source page exists — D4/D5 are 0 from here on");
+
+  // ---- (C) the false-clean. The OLD file reported zeros under clara_authenticated and
+  // exited 0; the shipped one refuses. Root and clara_fn_owner must still report. --------
+  const blinded = await roleQuery(ROLES.authenticated, deploySql("wave-b-0020-a7-probe.sql"))
+    .then(() => null, (e) => e);
+  assert.ok(blinded, "the probe REFUSES to report under an RLS-filtered role");
+  assert.match(blinded.message, /row-level security FILTERS/,
+    "…naming RLS as the reason, not a count");
+  assert.match(blinded.message, /indistinguishable from a clean database/,
+    "…and naming the consequence it is preventing");
+  for (const rel of ["wiki_pages", "wiki_page_versions", "wiki_log", "domain_events"]) {
+    assert.match(blinded.message, new RegExp(`clara\\.${rel}`), `…listing clara.${rel}`);
+  }
+  const asOwner = await roleQuery(ROLES.fnOwner, deploySql("wave-b-0020-a7-probe.sql"));
+  assert.ok(Array.isArray(asOwner) ? asOwner.at(-1).rows.length : asOwner.rows.length,
+    "clara_fn_owner reads through an unconditional policy under FORCE RLS and is NOT refused"
+    + " — the gate must not lock out a role that can see every row");
+
+  // ---- (A) directions 1, 2 and 3 — the three the shipped file did not compute. Each is a
+  // fact about how a page was CREATED; wiki_log is append-only, so NO script can repair
+  // them, which is why the probe's remedy column says INVESTIGATE. -----------------------
+  const inj = await rootQuery(`
+    do $r5$
+    declare f uuid; c uuid; p uuid; src uuid; d uuid := gen_random_uuid(); ct text; sha text;
+    begin
+      select firm_id, client_id, id into f, c, src
+        from clara.wiki_pages where slug like 'sources/%' order by slug limit 1;
+      ct := 'Source document: '||d::text;
+      sha := encode(sha256(convert_to(ct,'UTF8')),'hex');
+      -- D1: a sources/ page with CANONICAL bytes and no deterministic-ingest log row. It is
+      -- invisible to directions 4 and 5 by construction — that is the whole point.
+      insert into clara.wiki_pages(firm_id,client_id,slug,page_kind,title)
+        values (f,c,'sources/'||d::text,'profile','Source: '||d::text) returning id into p;
+      insert into clara.wiki_page_versions(page_id,firm_id,client_id,version_n,content,
+          content_sha256,storage_key,size_bytes,state,synthesis)
+        values (p,f,c,1,ct,sha,'firms/'||f::text||'/wiki/'||c::text||'/'||sha||'.md',
+                octet_length(ct),'published','deterministic');
+      -- D2: a deterministic-ingest log row on a page OUTSIDE the reserved namespace.
+      insert into clara.wiki_pages(firm_id,client_id,slug,page_kind,title)
+        values (f,c,'r5-outside-ns','profile','Outside') returning id into p;
+      insert into clara.wiki_log(firm_id,client_id,page_id,action,actor_kind)
+        values (f,c,p,'ingest','runtime');
+      -- D3: a MODEL-PATH publication row inside the reserved namespace.
+      insert into clara.wiki_log(firm_id,client_id,page_id,action,actor_kind)
+        values (f,c,src,'publish','runtime');
+    end $r5$;
+    select (select slug from clara.wiki_pages where slug like 'sources/%'
+             and not exists(select 1 from clara.wiki_log l where l.page_id=wiki_pages.id
+                             and l.action='ingest')) as d1_slug`);
+  const d1Slug = (Array.isArray(inj) ? inj.at(-1) : inj).rows[0].d1_slug;
+
+  const p = await probe();
+  assert.equal(p.d1_sources_page_without_ingest_log, 1, "direction 1 is REPORTED");
+  assert.equal(p.d2_ingest_page_outside_namespace, 1, "direction 2 is REPORTED");
+  assert.equal(p.d3_sources_page_with_model_publication, 1, "direction 3 is REPORTED");
+  assert.equal(p.needs_canonicalization, 0,
+    "…while d4 ∪ d5 is ZERO — this is EXACTLY the state the old probe called clean, and"
+    + " §10.3's 'if needs_canonicalization is 0, skip to step 2' would have walked into the abort");
+  for (const k of ["d1_sources_page_without_ingest_log", "d2_ingest_page_outside_namespace",
+                   "d3_sources_page_with_model_publication"]) {
+    assert.equal(p.status[k], "BLOCKS THE APPLY", `${k} is flagged as blocking, not context`);
+  }
+  assert.match(p.offenderText, new RegExp(d1Slug), "the D1 offender is NAMED, not just counted");
+  assert.match(p.offenderText, /r5-outside-ns/, "…and the D2 offender");
+
+  // the preflight is NOT the remedy for these, and must not pretend to be: it runs clean and
+  // leaves all three standing.
+  await runPreflight();
+  const pAfter = await probe();
+  assert.equal(pAfter.d1_sources_page_without_ingest_log, 1,
+    "the preflight does NOT clear direction 1 — the probe's remedy column says INVESTIGATE"
+    + " precisely because wiki_log is append-only and no script can undo a creation fact");
+
+  // and the apply fails on EXACTLY the direction the probe named.
+  const err = await migrate({ dir: MIG_DIR, log: () => {} }).then(() => null, (e) => e);
+  assert.ok(err, "0020 ABORTS — the probe's prediction, confirmed by the migration itself");
+  assert.match(err.message, /no deterministic-ingest log row/,
+    "…on direction 1, the one the old probe could not see");
+  assert.equal((await rootQuery("select count(*)::int n from clara.schema_migrations")).rows[0].n,
+    19, "…and rolled back — the database is still at 19");
+
+  // ---- (B) the A8-R1 completeness population, which §11 CLAIMED the probe reported. ----
+  // The D1 page's version carries no publication envelope at all: direction 5 cannot see it
+  // (its scope is "what the log SAYS must be canonical"), so the probe surfaces it as
+  // ADVISORY — visible, and explicitly not a blocker.
+  assert.ok(pAfter.a8r1_versions_without_publication_event >= 1,
+    "a version with no wiki.page_published envelope is REPORTED");
+  assert.equal(pAfter.status.a8r1_versions_without_publication_event, "VISIBLE (advisory)",
+    "…as advisory — it must never be presented as blocking, because fabricating a synthetic"
+    + " publication envelope for a version that never had one would invent history");
+  assert.match(pAfter.offenderText, /version_n=/,
+    "…naming the slug AND the version, so the gap can actually be investigated");
+  noteLane("wb-0020-upgrade", "[R5] probe gaps A, B and C pinned to behaviour on the shipped file");
 });

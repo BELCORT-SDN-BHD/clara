@@ -240,6 +240,10 @@ jobs:
       # remediation is REFUSED because it leaves the append-only reconstruction spine stale,
       # that the SHIPPED audited preflight (packages/db/deploy/wave-b-0020-a7-*.sql) corrects
       # both and is idempotent, and that the index rebuilds CANONICAL from domain_events alone.
+      # [R5] It is also the only proof of the PROBE the owner reads before deciding whether to
+      # remediate: that it REFUSES an RLS-blinded read instead of reporting an all-zero
+      # false-clean, that it reports all FIVE bridge directions (a direction-1 violation read
+      # CLEAN before), and that the A8-R1 completeness gap §11 promises is actually surfaced.
       # It is reset-gated (drops schema clara mid-run) so it SKIPS in the concurrent
       # all-packages sweep above — which is exactly how a bridge or remediation regression could
       # have merged with the advertised suite green. Run it FOR REAL here, ALONE, in its OWN
