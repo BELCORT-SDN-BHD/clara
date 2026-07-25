@@ -218,6 +218,67 @@ export async function revokeClientEgress(sub, { client, reason = "rig revoke", o
 }
 
 // ---------------------------------------------------------------------------
+// 0020 §9.7 — the TYPED egress helpers, ADDED beside the legacy pair, never
+// repurposing it.
+//
+// The two surfaces are deliberately different relations. The legacy pair above governs the
+// PURPOSE-BLIND invoice-facts gate: any live clara.client_egress_consents row for the client
+// satisfies it. The typed pair below governs one named purpose and, on its own, authorizes
+// NOTHING — an owner ACTIVATION is a separate record (§2), and dispatch additionally goes
+// through prepare/consume (§3). A test that reaches for the wrong helper is therefore testing a
+// different gate, which is exactly why the names stay distinct and the legacy signatures are
+// untouched (§6's byte-identity closed set).
+//
+// The wave-b battery has its own contract-blind wrappers (wb-0020-helpers.mjs) with distinct
+// names; these are the §9.7-promised aliases for wave-a-lane tests that need the typed surface.
+// ---------------------------------------------------------------------------
+
+/** Stamp document_kind='consent_evidence' on a verified in-firm document. Owner-floored; grants
+ *  NO egress (the 2026-07-25 §7.1 amendment — before it, only the legacy grant could stamp the
+ *  kind, and it granted invoice-facts egress in the same call). */
+export async function classifyConsentEvidenceDocument(sub, { document, reason = "rig signed consent letter", opKey = null }) {
+  const r = await humanQuery(sub,
+    "select clara.classify_consent_evidence_document(p_document => $1, p_reason => $2, p_op_key => $3) as r",
+    [document, reason, opKey ?? opk("classifyce")]);
+  return r.rows[0].r;
+}
+/** Mint a typed consent. Does NOT activate — a grant alone never authorizes dispatch. */
+export async function grantClientEgressPurpose(sub, {
+  client, purpose = "wiki_synthesis", evidenceDocument, scopeNote = "rig typed consent", opKey = null,
+}) {
+  const r = await humanQuery(sub,
+    `select clara.grant_client_egress_purpose(p_client => $1, p_purpose => $2,
+       p_evidence_document => $3, p_scope_note => $4, p_op_key => $5) as r`,
+    [client, purpose, evidenceDocument, scopeNote, opKey ?? opk("grantpurp")]);
+  return r.rows[0].r;
+}
+/** The positive owner act. `consent` must BE the live typed consent for (client, purpose). */
+export async function activateClientEgressPurpose(sub, { client, purpose = "wiki_synthesis", consent, opKey = null }) {
+  const r = await humanQuery(sub,
+    `select clara.activate_client_egress_purpose(p_client => $1, p_purpose => $2,
+       p_consent => $3, p_op_key => $4) as r`,
+    [client, purpose, consent, opKey ?? opk("actpurp")]);
+  return r.rows[0].r;
+}
+/** A PAUSE: the consent record survives, dispatch does not. */
+export async function deactivateClientEgressPurpose(sub, { client, purpose = "wiki_synthesis", reason = "rig pause", opKey = null }) {
+  const r = await humanQuery(sub,
+    `select clara.deactivate_client_egress_purpose(p_client => $1, p_purpose => $2,
+       p_reason => $3, p_op_key => $4) as r`,
+    [client, purpose, reason, opKey ?? opk("deactpurp")]);
+  return r.rows[0].r;
+}
+/** WITHDRAWAL: revokes the consent, deactivates its activation, invalidates every unconsumed
+ *  authorization and sets the wiki hold — one transaction. */
+export async function revokeClientEgressPurpose(sub, { client, purpose = "wiki_synthesis", reason = "rig withdrawal", opKey = null }) {
+  const r = await humanQuery(sub,
+    `select clara.revoke_client_egress_purpose(p_client => $1, p_purpose => $2,
+       p_reason => $3, p_op_key => $4) as r`,
+    [client, purpose, reason, opKey ?? opk("revpurp")]);
+  return r.rows[0].r;
+}
+
+// ---------------------------------------------------------------------------
 // Approve — the routine (batch) entry point (PINS §1; refuses is_high_stakes).
 // ---------------------------------------------------------------------------
 

@@ -15,6 +15,7 @@ import { randomUUID } from "node:crypto";
 
 import {
   planEvent,
+  consumeEgressDispatchDefault,
   contentSha256,
   wikiStorageKey,
   WIKI_PROJECTION_EVENT_TYPES,
@@ -100,6 +101,57 @@ function authz({ prepare = "granted", consume = "granted", surface = true, synth
     putWiki: okPut, verifyWiki: okVerify,
   };
 }
+/** A client that records every statement, for the transaction-shape cells. */
+function txnStub({ verdict = "granted", failConsume = false } = {}) {
+  const calls = [];
+  return {
+    calls,
+    sqls: () => calls.map((x) => x.sql.trim().split(/\s+/)[0].toLowerCase()),
+    query: async (sql, params) => {
+      calls.push({ sql: String(sql), params });
+      if (/consume_egress_dispatch/.test(String(sql))) {
+        if (failConsume) throw Object.assign(new Error("consume blew up"), { code: "57014" });
+        return { rows: [{ v: { verdict } }], rowCount: 1 };
+      }
+      return { rows: [], rowCount: 0 };
+    },
+  };
+}
+
+// 0020 ratchet R1-F2 — THE COMMIT DISCIPLINE, and why it lives in the helper and not in the loop.
+//
+// A PostgreSQL function cannot commit its caller's transaction. §3.6 claims consumption is the
+// dispatch linearization point, and that claim is only unconditionally true if `granted` implies
+// COMMITTED. The shipped loop happens to be autocommit-safe (a dedicated pg.Client, one statement),
+// but the exported helper is a capability any caller can use — on a pooled or long-open connection
+// a consume could return `granted` from an uncommitted transaction, the model would be called on an
+// authorization the revoker still sees as spendable, and a later rollback would erase the only
+// record that the bytes left. So the helper owns the transaction explicitly.
+test("consumeEgressDispatchDefault commits the consume in its OWN transaction, before the model can be reached", async () => {
+  const c = txnStub();
+  const out = await consumeEgressDispatchDefault(c, {
+    firmId: FIRM, authorizationId: AUTH_ID, clientId: CLIENT,
+    purpose: WIKI_SYNTHESIS_PURPOSE, eventSeq: 42, eventType: "counterparty.created",
+  });
+  assert.deepEqual(out, { verdict: "granted" });
+  assert.deepEqual(c.sqls(), ["begin", "select", "commit"],
+    "begin → consume → commit; `granted` therefore MEANS committed for any caller (§3.6)");
+  const call = c.calls.find((x) => /consume_egress_dispatch/.test(x.sql));
+  assert.deepEqual(call.params, [FIRM, AUTH_ID, CLIENT, WIKI_SYNTHESIS_PURPOSE, 42, "counterparty.created"],
+    "the full dispatch intent is bound, in the pinned argument order (§3.4 amendment)");
+});
+
+test("consumeEgressDispatchDefault ROLLS BACK and rethrows on failure — never a silent `unknown`", async () => {
+  const c = txnStub({ failConsume: true });
+  await assert.rejects(() => consumeEgressDispatchDefault(c, {
+    firmId: FIRM, authorizationId: AUTH_ID, clientId: CLIENT,
+    purpose: WIKI_SYNTHESIS_PURPOSE, eventSeq: 42, eventType: "counterparty.created",
+  }), /consume blew up/);
+  assert.deepEqual(c.sqls(), ["begin", "select", "rollback"], "rolled back, never committed");
+  assert.ok(!c.sqls().includes("commit"),
+    "a failed consume must not leave a committed consumption — and must not be mistaken for a refusal");
+});
+
 /** The 0020 resolver pair, injected. `status` is whatever the serialized DB verb would return. */
 function resolver({ surface = true, status = "projected", throws = null } = {}) {
   const seen = { surface: 0, calls: 0, args: null };
@@ -287,8 +339,20 @@ test("counterparty.created, PREPARED + CONSUMED granted → model synthesis (pro
   assert.deepEqual(a.seen.prepareArgs, {
     firmId: FIRM, clientId: CLIENT, purpose: WIKI_SYNTHESIS_PURPOSE, eventSeq: 42, eventType: "counterparty.created",
   }, "prepare carries firm + client + the typed purpose + the dispatch intent (§3.2/§3.3)");
-  assert.deepEqual(a.seen.consumeArgs, { firmId: FIRM, authorizationId: AUTH_ID },
-    "consume carries the firm and ONLY the opaque authorization id (§3.2: it encodes nothing else)");
+  // 0020 ratchet R1-F1 (ratified §3.4 amendment, 2026-07-25). The consume no longer carries only
+  // the opaque id: it re-presents the EXACT dispatch intent the authorization was minted for, and
+  // the DB refuses a mismatch. v1.0's two-argument form made §3.2's client/purpose/event binding
+  // audit-only — an authorization prepared for client A could be spent on a client-B dispatch and
+  // the DB could not tell. The id stays opaque (it still encodes nothing); what changed is that
+  // the caller must SAY what it is dispatching, and the DB checks.
+  assert.deepEqual(a.seen.consumeArgs, {
+    firmId: FIRM, authorizationId: AUTH_ID, clientId: CLIENT,
+    purpose: WIKI_SYNTHESIS_PURPOSE, eventSeq: 42, eventType: "counterparty.created",
+  }, "consume re-presents the full dispatch intent, byte-for-byte what prepare was given (§3.4)");
+  assert.deepEqual(
+    { ...a.seen.prepareArgs, authorizationId: AUTH_ID },
+    { ...a.seen.consumeArgs },
+    "…and it is the SAME intent — a lane that consumed under a different client/purpose/event would be spending an authorization it was not granted");
   // §3.7 pins the ORDER: the consume is the LAST db interaction before the model, and it comes
   // AFTER the wiki-context read — a third read could never buy what a state transition does.
   assert.deepEqual(a.seen.order, ["surface", "prepare", "consume", "synthesize"],

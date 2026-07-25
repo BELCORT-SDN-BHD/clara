@@ -73,12 +73,23 @@ export const LEGACY_EVENT_TYPES = ["egress.consent_granted", "egress.consent_rev
 /** §3.3/§3.4/§5.1/§5.3 + §10.2 — the four runtime-only DEFINER fns, EXACT sigs. */
 export const RUNTIME_FNS = {
   prepare_egress_dispatch: "clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text)",
-  consume_egress_dispatch: "clara.consume_egress_dispatch(uuid,uuid)",
+  // RATIFIED §3.4 AMENDMENT (2026-07-25, ratchet R1-F1): SIX arguments. v1.0 pinned
+  // (p_firm, p_authorization) and validated only firm + liveness, which made §3.2's
+  // client/purpose/event binding AUDIT DATA — an authorization minted for client A was
+  // consumable during a client-B dispatch and the DB could not tell. Consumption now
+  // re-verifies the dispatch it is being used for.
+  consume_egress_dispatch: "clara.consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text)",
   resolve_document_client: "clara.resolve_document_client(uuid,uuid)",
   resolve_and_ingest_wiki_source: "clara.resolve_and_ingest_wiki_source(uuid,uuid)",
 };
-/** §7.1 — the four owner-floored RPCs (clara_authenticated ONLY) + read sigs. */
+/** §7.1 — the owner-floored RPCs (clara_authenticated ONLY) + read sigs. FIVE after the
+ *  2026-07-25 ratified amendment: classify_consent_evidence_document (ratchet R1-F3) is the
+ *  owner path that stamps document_kind='consent_evidence' and grants NO egress. Without it
+ *  the only live writer of that stamp was the LEGACY grant_client_egress, which in the same
+ *  call authorizes purpose-blind invoice-facts egress — so a client who consented ONLY to wiki
+ *  synthesis could not be onboarded without being granted egress they never agreed to. */
 export const OWNER_FNS = {
+  classify_consent_evidence_document: "clara.classify_consent_evidence_document(uuid,text,text)",
   grant_client_egress_purpose: "clara.grant_client_egress_purpose(uuid,text,uuid,text,text)",
   activate_client_egress_purpose: "clara.activate_client_egress_purpose(uuid,text,uuid,text)",
   deactivate_client_egress_purpose: "clara.deactivate_client_egress_purpose(uuid,text,text,text)",
@@ -135,6 +146,16 @@ export const sourceSlug = (document) => `sources/${document}`;
 // blind module never collides with the SQL lane's parallel additions.
 // ---------------------------------------------------------------------------
 
+/** The OWNER evidence-classification verb (§7.1, 2026-07-25 amendment). Stamps
+ *  document_kind='consent_evidence' on a verified in-firm document and grants NOTHING. */
+export async function classifyConsentEvidence(sub, { document, reason = "rig signed consent letter", opKey = null }) {
+  const r = await humanQuery(sub,
+    `select clara.classify_consent_evidence_document(p_document => $1, p_reason => $2,
+       p_op_key => $3) as r`,
+    [document, reason, opKey ?? opk("cce")]);
+  return r.rows[0].r;
+}
+
 export async function grantPurpose(sub, {
   client, purpose = WIKI_PURPOSE, evidenceDocument, scopeNote = "rig typed consent", opKey = null,
 }) {
@@ -186,10 +207,23 @@ export async function prepareDispatch({
   return r.rows[0].r;
 }
 
-export async function consumeDispatch({ firm, authorization, role = ROLES.runtime }) {
+/** §3.4 (2026-07-25 amendment). Consumption re-presents the FULL dispatch intent, so the DB can
+ *  re-verify that this authorization was minted for exactly this (firm, client, purpose, event).
+ *  Pass `intent` (what `prepareBound` returns) for the ordinary case; pass individual fields to
+ *  drive a deliberate MISMATCH — those cells are the ones that prove the binding is enforced and
+ *  not merely recorded. Every field defaults from `intent` when present. */
+export async function consumeDispatch({
+  firm, authorization, intent = null, client, purpose, eventSeq, eventType, role = ROLES.runtime,
+}) {
+  const i = intent ?? {};
   const r = await roleQuery(role,
-    "select clara.consume_egress_dispatch(p_firm => $1, p_authorization => $2) as r",
-    [firm, authorization]);
+    `select clara.consume_egress_dispatch(p_firm => $1, p_authorization => $2, p_client => $3,
+       p_purpose => $4, p_event_seq => $5::bigint, p_event_type => $6) as r`,
+    [firm ?? i.firm ?? null, authorization,
+      client ?? i.client ?? null,
+      purpose ?? i.purpose ?? WIKI_PURPOSE,
+      eventSeq ?? i.eventSeq ?? null,
+      eventType ?? i.eventType ?? null]);
   return r.rows[0].r;
 }
 
@@ -207,10 +241,27 @@ export async function resolveIngest({ firm, document, role = ROLES.runtime }) {
   return r.rows[0].r;
 }
 
-/** prepare with a REAL dispatch-intent pair drawn from the firm's event head. */
+/** prepare with a REAL dispatch-intent pair drawn from the firm's event head. Returns the DB
+ *  payload VERBATIM — the leakage cells compare it byte-for-byte, so nothing may be added. */
 export async function prepareForLatestEvent({ firm, client, purpose = WIKI_PURPOSE, role = ROLES.runtime }) {
   const ev = await latestEventOf(firm);
   return prepareDispatch({ firm, client, purpose, eventSeq: ev.seq, eventType: ev.eventType, role });
+}
+
+/** prepare, PLUS the exact intent it was prepared for, so the caller can present the SAME intent
+ *  at consume (§3.4, 2026-07-25 amendment). Returns { verdict, intent } — a LOCAL test-lane shape;
+ *  `verdict` is the untouched DB payload. Prefer this wherever a cell goes on to consume: reading
+ *  the intent back off the authorization row would make every cell agree with the row by
+ *  construction, which is exactly the check that must not be vacuous. */
+export async function prepareBound({
+  firm, client, purpose = WIKI_PURPOSE, eventSeq = null, eventType = null, role = ROLES.runtime,
+}) {
+  const ev = (eventSeq == null || eventType == null)
+    ? await latestEventOf(firm)
+    : { seq: eventSeq, eventType };
+  const verdict = await prepareDispatch({
+    firm, client, purpose, eventSeq: ev.seq, eventType: ev.eventType, role });
+  return { verdict, intent: { firm, client, purpose, eventSeq: ev.seq, eventType: ev.eventType } };
 }
 
 // ---------------------------------------------------------------------------
@@ -346,16 +397,28 @@ export function normSrc(src) {
  *  'consent_evidence' AND bytes_verified_at NOT NULL. `_seed_verified_document`
  *  also lands status='ingested', so the fixture satisfies the §1.3 reading AND the
  *  legacy 0014 reading. No filing is required — §1.3 pins only firm + kind +
- *  verified. Returns { documentId, sha256, ... }. */
-export async function consentEvidenceDoc(firm) {
-  return seedVerifiedDocument({ firm, kind: CONSENT_EVIDENCE_KIND });
+ *  verified. Returns { documentId, sha256, ... }.
+ *
+ *  RATCHET R1-F3 (2026-07-25). The document is seeded UNCLASSIFIED and stamped through the
+ *  OWNER verb clara.classify_consent_evidence_document — not by handing `kind` to the
+ *  superuser seed helper. A fixture that applies the stamp itself proves the typed lane works
+ *  only in a world where something else already did the one step the product could not do:
+ *  before this amendment the ONLY live writer of document_kind='consent_evidence' was the
+ *  legacy grant_client_egress, which in the same call mints a purpose-blind consent
+ *  authorizing invoice-facts egress, and set_document_kind refuses the kind outright. So this
+ *  fixture is now also the standing proof that lighting wiki synthesis requires NO legacy
+ *  consent. `sub` must be an OWNER of `firm`. */
+export async function consentEvidenceDoc(sub, { firm }) {
+  const seed = await seedVerifiedDocument({ firm });
+  await classifyConsentEvidence(sub, { document: seed.documentId });
+  return seed;
 }
 
-/** Light synthesis for a client the §7.2 runbook way: grant a typed consent on a
- *  fresh consent_evidence doc, read the live consent id back, activate it. Returns
+/** Light synthesis for a client the §7.2 runbook way: classify the evidence letter, grant a
+ *  typed consent citing it, read the live consent id back, activate it. Returns
  *  { consent, activation, evidence }. Owner-lane throughout (`sub` must be owner). */
 export async function lightSynthesis(sub, { firm, client, purpose = WIKI_PURPOSE }) {
-  const evidence = await consentEvidenceDoc(firm);
+  const evidence = await consentEvidenceDoc(sub, { firm });
   await grantPurpose(sub, { client, purpose, evidenceDocument: evidence.documentId });
   const consent = await livePurposeConsent(client, purpose);
   await activatePurpose(sub, { client, purpose, consent: consent.id });
@@ -391,6 +454,24 @@ export async function backdateAuthExpiry(authId, { seconds = 5 } = {}) {
     await c.query(
       `update clara.${DISPATCH_AUTH_TABLE} set expires_at = now() - ($2 || ' seconds')::interval where id=$1`,
       [authId, String(seconds)]);
+  } finally {
+    await c.query("set session_replication_role = origin").catch(() => {});
+    await c.query("reset all").catch(() => {});
+    c.release();
+  }
+}
+
+/** Set a dispatch authorization's `expires_at` to an EXPLICIT instant (the backdateAuthExpiry
+ *  idiom: superuser + session_replication_role='replica' to silence the immutability trigger).
+ *  Needed by the stale-transaction cell, which must place expiry BETWEEN a transaction's frozen
+ *  now() and the advancing wall clock. Fixture surgery only — never on a lane path. */
+export async function setAuthExpiry(authId, expiresAtIso) {
+  const c = await getPool().connect();
+  try {
+    await c.query("set session_replication_role = replica");
+    await c.query(
+      `update clara.${DISPATCH_AUTH_TABLE} set expires_at = $2::timestamptz where id=$1`,
+      [authId, expiresAtIso]);
   } finally {
     await c.query("set session_replication_role = origin").catch(() => {});
     await c.query("reset all").catch(() => {});
@@ -471,7 +552,8 @@ export const keysOf = (v) => (v && typeof v === "object" && !Array.isArray(v) ? 
 // ---------------------------------------------------------------------------
 
 const CONSUME_SQL =
-  "select clara.consume_egress_dispatch(p_firm => $1, p_authorization => $2) as r";
+  `select clara.consume_egress_dispatch(p_firm => $1, p_authorization => $2, p_client => $3,
+     p_purpose => $4, p_event_seq => $5::bigint, p_event_type => $6) as r`;
 const REVOKE_PURPOSE_SQL =
   `select clara.revoke_client_egress_purpose(p_client => $1, p_purpose => $2,
      p_reason => $3, p_op_key => $4) as r`;
@@ -515,7 +597,10 @@ async function closeAll(...cs) {
  *  refuse. Returns { blocked, consume, revoke }. `blocked` is OBSERVED, not
  *  assumed — a false means the consume never touched the invalidated row, which is
  *  itself reportable. */
-export async function raceRevokeThenConsume({ firm, client, authorization, ownerSub, purpose = WIKI_PURPOSE }) {
+export async function raceRevokeThenConsume({
+  firm, client, authorization, ownerSub, purpose = WIKI_PURPOSE, intent = null,
+}) {
+  const i = intent ?? {};
   const cR = await getPool().connect(); // owner revoke
   const cC = await getPool().connect(); // runtime consume
   const out = { blocked: false, consume: null, revoke: null };
@@ -524,7 +609,9 @@ export async function raceRevokeThenConsume({ firm, client, authorization, owner
     await cR.query(REVOKE_PURPOSE_SQL, [client, purpose, "rig in-flight withdrawal", opk("racerev")]);
 
     const pidC = await openRuntime(cC);
-    const pC = cC.query(CONSUME_SQL, [firm, authorization])
+    const pC = cC.query(CONSUME_SQL,
+      [firm, authorization, i.client ?? client, i.purpose ?? purpose,
+        i.eventSeq ?? null, i.eventType ?? null])
       .then((r) => { out.consume = r.rows[0].r; })
       .catch((e) => { out.consume = { error: e.code ?? e.message }; });
     out.blocked = await waitBlockedByOrThrow(pidC, pidR, { what: "the dispatch-authorization row lock held by the revoke" })
@@ -538,6 +625,75 @@ export async function raceRevokeThenConsume({ firm, client, authorization, owner
     await closeAll(cR, cC);
   }
   return out;
+}
+
+/** §3.2/§3.4 (RATCHET R1-F2) — THE STALE-TRANSACTION cell.
+ *
+ *  `now()` is TRANSACTION-STABLE: it returns the transaction's start time for the whole
+ *  transaction, however long that runs. A consume that compared `expires_at <= now()` therefore
+ *  could not see an authorization that expired AFTER its caller's transaction began — the caller
+ *  simply had to be inside a long-open transaction (a pooled connection with an open txn, a
+ *  batch, a session left mid-work) and the TTL stopped meaning anything.
+ *
+ *  Staged deterministically rather than by waiting 120 seconds: the transaction opens and freezes
+ *  its now() at T; expiry is then placed at T + `graceMs` — a hair AFTER the frozen now(), so a
+ *  now()-based test can NEVER see it as expired — and the transaction then sleeps past it in wall
+ *  time (pg_sleep advances clock_timestamp() and does not advance now()).
+ *
+ *  Returns { consume, txnNow, wallAtConsume, expiresAt }: `txnNow < expiresAt` is the proof that
+ *  the OLD semantics would have granted, and `wallAtConsume > expiresAt` that the new one must
+ *  refuse. */
+export async function consumeInsideStaleTransaction({
+  firm, authorization, intent = null, graceMs = 300, sleepSeconds = 0.9,
+}) {
+  const i = intent ?? {};
+  const c = await getPool().connect();
+  try {
+    await c.query(`set role ${ROLES.runtime}`);
+    await c.query("set statement_timeout = '20s'");
+    await c.query("begin");
+    const txnNow = (await c.query("select now() as t")).rows[0].t;
+    const expiresAt = new Date(new Date(txnNow).getTime() + graceMs).toISOString();
+    await setAuthExpiry(authorization, expiresAt);
+    await c.query("select pg_sleep($1::float8)", [sleepSeconds]);
+    const clocks = (await c.query("select now() as frozen, clock_timestamp() as wall")).rows[0];
+    const r = await c.query(CONSUME_SQL,
+      [firm, authorization, i.client ?? null, i.purpose ?? WIKI_PURPOSE,
+        i.eventSeq ?? null, i.eventType ?? null]);
+    await c.query("commit");
+    return {
+      consume: r.rows[0].r,
+      txnNow: new Date(clocks.frozen).toISOString(),
+      wallAtConsume: new Date(clocks.wall).toISOString(),
+      expiresAt,
+    };
+  } finally {
+    await closeAll(c);
+  }
+}
+
+/** §3.6 (RATCHET R1-F2) — THE ROLLBACK cell. A PostgreSQL function CANNOT commit its caller's
+ *  transaction: `granted` from inside an open transaction is a promise the caller can still take
+ *  back. This driver proves the DB-side limit exactly — consume returns `granted`, the caller
+ *  rolls back, and the authorization is left UNCONSUMED and spendable. That is why the runtime's
+ *  default consume helper owns its own begin/commit (asserted in the runtime suite): the DB half
+ *  alone cannot make §3.6's linearization claim true for an arbitrary caller.
+ *  Returns { consume, consumedAfterRollback }. */
+export async function consumeThenRollback({ firm, authorization, intent = null }) {
+  const i = intent ?? {};
+  const c = await getPool().connect();
+  try {
+    await c.query(`set role ${ROLES.runtime}`);
+    await c.query("set statement_timeout = '20s'");
+    await c.query("begin");
+    const r = await c.query(CONSUME_SQL,
+      [firm, authorization, i.client ?? null, i.purpose ?? WIKI_PURPOSE,
+        i.eventSeq ?? null, i.eventType ?? null]);
+    await c.query("rollback");
+    return { consume: r.rows[0].r };
+  } finally {
+    await closeAll(c);
+  }
 }
 
 /** §5.2/§5.3/§9.4 — `unique(A)` with a CONCURRENT file-to-B. The resolve+ingest

@@ -154,7 +154,7 @@ test("[0020 §1.3]: a typed grant REQUIRES a real, verified, same-firm consent_e
   // (3) a consent_evidence document whose bytes are NOT verified → CLR28. Mint a
   //     verified one, then root-null bytes_verified_at (no writer produces an
   //     unverified doc post-0007; a targeted fixture surgery, noted).
-  const ev = await consentEvidenceDoc(firms.A);
+  const ev = await consentEvidenceDoc(users.alice, { firm: firms.A });
   await unverifyDocumentBytes(ev.documentId);
   await assertRaises("CLR28",
     () => grantPurpose(users.alice, { client: clients.A1, evidenceDocument: ev.documentId, opKey: opk("unverif") }),
@@ -166,7 +166,7 @@ test("[0020 §1.3]: a typed grant REQUIRES a real, verified, same-firm consent_e
 test("[0020 §1.3 / A20-1]: foreign-firm evidence is refused — §9.1 says CLR28, §7.1 says CLR11; asserted CLR28|CLR11 and RECORDED", async () => {
   fail0020(live);
   const { users, firms, clients } = w;
-  const foreign = await consentEvidenceDoc(firms.B);
+  const foreign = await consentEvidenceDoc(users.dave, { firm: firms.B });
   const err = await assertRaisesOneOf(["CLR28", "CLR11"],
     () => grantPurpose(users.alice, { client: clients.A1, evidenceDocument: foreign.documentId, opKey: opk("foreignev") }),
     "typed grant with a foreign-firm consent_evidence document");
@@ -176,7 +176,7 @@ test("[0020 §1.3 / A20-1]: foreign-firm evidence is refused — §9.1 says CLR2
 test("[0020 §1.2 / A20-2]: an OFF-ENUM purpose is refused — §7.1 implies CLR10, §9.1 implies the raw CHECK (23514); asserted CLR10|23514 and RECORDED", async () => {
   fail0020(live);
   const { users, firms, clients } = w;
-  const ev = await consentEvidenceDoc(firms.A);
+  const ev = await consentEvidenceDoc(users.alice, { firm: firms.A });
   const err = await assertRaisesOneOf(["CLR10", PG.checkViolation],
     () => grantPurpose(users.alice, {
       client: clients.A1, purpose: "treatment_synthesis",
@@ -191,13 +191,13 @@ test("[0020 §1.2 / A20-2]: an OFF-ENUM purpose is refused — §7.1 implies CLR
 test("[0020 §1.2 / §9.1]: INSERT-once, one-live-per-(client,purpose) — a second live typed consent refuses CLR28 duplicate_live", async () => {
   fail0020(live);
   const { users, firms, clients } = w;
-  const ev1 = await consentEvidenceDoc(firms.A);
+  const ev1 = await consentEvidenceDoc(users.alice, { firm: firms.A });
   await grantPurpose(users.alice, { client: clients.A2, evidenceDocument: ev1.documentId, scopeNote: "first", opKey: opk("dup1") });
   const c1 = await livePurposeConsent(clients.A2);
   assert.ok(c1?.id, "first typed consent is live");
   assert.equal(c1.purpose, WIKI_PURPOSE, "…carrying the typed purpose");
   assert.equal(c1.evidence_document_id, ev1.documentId, "…bound to the cited evidence document");
-  const ev2 = await consentEvidenceDoc(firms.A);
+  const ev2 = await consentEvidenceDoc(users.alice, { firm: firms.A });
   const err = await assertRaises("CLR28",
     () => grantPurpose(users.alice, { client: clients.A2, evidenceDocument: ev2.documentId, scopeNote: "second", opKey: opk("dup2") }),
     "a second LIVE typed consent for the same (client,purpose)");
@@ -211,7 +211,7 @@ test("[0020 §1.2]: the immutability trigger — DELETE → CLR08; UPDATE outsid
   const { users, firms, clients } = w;
   // A1 carries no live typed consent yet in this file (every §1.3/A20-2 grant
   // refused), so a fresh grant here lands cleanly and gives an INSERT-once row.
-  const ev = await consentEvidenceDoc(firms.A);
+  const ev = await consentEvidenceDoc(users.alice, { firm: firms.A });
   await grantPurpose(users.alice, { client: clients.A1, evidenceDocument: ev.documentId, opKey: opk("immut") });
   const c = await livePurposeConsent(clients.A1);
   assert.ok(c?.id, "a typed consent row exists to probe");
@@ -249,7 +249,7 @@ test("[0020 §1.2]: REVOKE-once — a second revocation of the same typed consen
   const { createClient, seedOpeningCoa } = await import("./wb-fixtures.mjs");
   const client = await createClient(users.alice, { name: `${w.prefix}_rev1`, opKey: opk("cli") });
   await seedOpeningCoa(users.alice, client);
-  const ev = await consentEvidenceDoc(firms.A);
+  const ev = await consentEvidenceDoc(users.alice, { firm: firms.A });
   await grantPurpose(users.alice, { client, evidenceDocument: ev.documentId, opKey: opk("rv1") });
   const c = await livePurposeConsent(client);
   assert.ok(c?.id, "a live typed consent to revoke");

@@ -73,7 +73,7 @@ test("META / [0020 §4.1]: the four purpose-discriminated event types are regist
 test("[0020 §4.1]: every typed event carries the purpose + the consent id, and the EVIDENCE DOCUMENT rides in the PAYLOAD — never the typed document_id column (the 0014 rule)", async () => {
   fail0020(live);
   const client = await freshClient("ev_payload");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev.documentId, opKey: opk("ev_g") });
   const c = await livePurposeConsent(client);
   await activatePurpose(w.users.alice, { client, consent: c.id, opKey: opk("ev_a") });
@@ -114,7 +114,7 @@ test("[0020 §4.1]: every typed event carries the purpose + the consent id, and 
 test("[0020 §4.2/§4.3]: a typed GRANT does NOT activate and emits NO hold transition; ACTIVATION clears the hold; DEACTIVATION sets it; REVOKE sets it", async () => {
   fail0020(live);
   const client = await freshClient("ev_hold");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
 
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev.documentId, opKey: opk("h_g") });
   const c = await livePurposeConsent(client);
@@ -150,12 +150,12 @@ test("[0020 §4.2/§4.3]: a typed GRANT does NOT activate and emits NO hold tran
 test("[0020 §4.3]: the typed hold op keys are DERIVED and REPLAY-SAFE — a revoke of a re-granted consent uses a DIFFERENT key, so a second hold is a genuine transition and not a replayed receipt", async () => {
   fail0020(live);
   const client = await freshClient("ev_replay");
-  const e1 = await consentEvidenceDoc(w.firms.A);
+  const e1 = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: e1.documentId, opKey: opk("rp_g1") });
   const c1 = await livePurposeConsent(client);
   await activatePurpose(w.users.alice, { client, consent: c1.id, opKey: opk("rp_a1") });
   await revokePurpose(w.users.alice, { client, reason: "first", opKey: opk("rp_r1") });
-  const e2 = await consentEvidenceDoc(w.firms.A);
+  const e2 = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: e2.documentId, opKey: opk("rp_g2") });
   const c2 = await livePurposeConsent(client);
   await activatePurpose(w.users.alice, { client, consent: c2.id, opKey: opk("rp_a2") });
@@ -175,7 +175,7 @@ test("[0020 §4.3]: the typed hold op keys are DERIVED and REPLAY-SAFE — a rev
 test("[0020 §4.2 / §6 — THE cross-purpose negative]: a LEGACY null-purpose grant does NOT clear the wiki hold and does NOT authorize wiki synthesis; a legacy revoke does not set it either", async () => {
   fail0020(live);
   const client = await freshClient("ev_legacy");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev.documentId, opKey: opk("lg_g") });
   const c = await livePurposeConsent(client);
   await activatePurpose(w.users.alice, { client, consent: c.id, opKey: opk("lg_a") });

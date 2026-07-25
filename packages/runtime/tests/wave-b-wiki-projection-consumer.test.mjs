@@ -67,7 +67,7 @@ const skip19 = HAS17 && (await probe0019iso()) ? false : "0019 isolation floor a
 async function probe20() {
   const r = await rootQuery(
     `select (to_regprocedure('clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text)') is not null
-         and to_regprocedure('clara.consume_egress_dispatch(uuid,uuid)') is not null
+         and to_regprocedure('clara.consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text)') is not null
          and to_regprocedure('clara.resolve_and_ingest_wiki_source(uuid,uuid)') is not null) as ok`);
   return r.rows[0].ok === true;
 }
@@ -87,14 +87,27 @@ function countingSynth() {
 
 // --- the §7.2 owner runbook, executed on the rig (§9.3(d): the rig lights, production stays dark)
 /** A verified, in-firm `consent_evidence` document — §1.3's three conditions. No filing: a typed
- *  grant only reads the artifact, and a consent artifact must never trip the provenance trigger. */
+ *  grant only reads the artifact, and a consent artifact must never trip the provenance trigger.
+ *
+ *  The document is ingested UNCLASSIFIED and stamped through the OWNER verb
+ *  clara.classify_consent_evidence_document (the 2026-07-25 ratified §7.1 amendment, ratchet
+ *  R1-F3). It deliberately does NOT hand the kind to the superuser seed helper: a fixture that
+ *  stamps the kind itself proves the typed lane works only in a world where something else already
+ *  did the one step the product could not do. Before the amendment the only live writer of that
+ *  stamp was the LEGACY grant_client_egress, which in the same call grants purpose-blind
+ *  invoice-facts egress — so this path is also the proof that lighting wiki synthesis needs no
+ *  legacy consent at all. */
 async function consentEvidenceDoc(firm, owner) {
   const s = sha256hex(randomUUID());
   const r = await rootQuery(
     "select clara._seed_verified_document($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) as r",
     [firm, null, s, "consent.pdf", "application/pdf", 1024, `firms/${firm}/docs/${s}.pdf`, owner, 1,
-      "consent_evidence", null, null]);
-  return r.rows[0].r.document_id;
+      null, null, null]);
+  const documentId = r.rows[0].r.document_id;
+  await humanQuery(owner,
+    "select clara.classify_consent_evidence_document($1,$2,$3) as r",
+    [documentId, "rig: signed WB-R23 re-attestation letter", opk("cce")]);
+  return documentId;
 }
 /** Runbook steps 1→5: ingest the evidence, grant the typed consent, then ACTIVATE it. A grant alone
  *  never authorizes (§2.3), so a cell that only granted would still be dark — both steps are here. */

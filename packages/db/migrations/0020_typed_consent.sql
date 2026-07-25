@@ -32,8 +32,25 @@
 --       through the audited writer. Plus the re-drive gate (a prior document.classified).
 --   §6  Legacy byte-identity: NOTHING in the legacy consent surface or the invoice-facts
 --       claim body is touched. The tail pins their normalized sources by exact digest.
---   §7  The four owner-floored typed RPCs (grant / activate / deactivate / revoke).
+--   §7  The owner-floored typed RPCs (classify-evidence / grant / activate / deactivate /
+--       revoke). classify_consent_evidence_document is the 2026-07-25 ratified amendment
+--       (ratchet R1-F3): without it there was no owner path to stamp document_kind=
+--       'consent_evidence' that did not ALSO grant purpose-blind legacy egress, so a client
+--       who consented only to wiki synthesis could not be onboarded as designed.
 --   §8  The in-transaction fail-closed tail battery. One transaction; any failure aborts.
+--
+-- RATIFIED CONTRACT AMENDMENTS carried by this file (2026-07-25, cross-model ratchet R1):
+--   * §3.4 consume_egress_dispatch takes SIX arguments and re-verifies the dispatch it is
+--     being used for (firm, client, purpose, event_seq, event_type). v1.0's two-argument form
+--     made §3.2's "binds" audit-only — see the §3.4 block comment.
+--   * §3.2/§3.4 time is WALL CLOCK (clock_timestamp), never transaction time.
+--   * §7.1 gains classify_consent_evidence_document (above).
+--   * §7.1 activate/deactivate/revoke verify firm membership FIRST (CLR11) and never lock a
+--     foreign firm's state row.
+--   * §6's byte-identity pins hash EXACT prosrc with SHA-256 and add legacy ACL + relation
+--     structure pins.
+--   * §8's "three partial unique indexes" is an erratum: two uniques + one non-unique
+--     open-authorization index.
 --
 -- SHIPS DARK for MODEL SYNTHESIS, and only that (contract §10.1). With zero typed consents
 -- and zero activations — asserted empirically at the end of this apply — every verdict is
@@ -176,6 +193,16 @@ create unique index uq_client_egress_purpose_activations_one_live
   on clara.client_egress_purpose_activations(client_id,purpose) where deactivated_at is null;
 create index ix_client_egress_purpose_activations_consent
   on clara.client_egress_purpose_activations(consent_id) where deactivated_at is null;
+-- RATCHET R1-F6: a FIRM-LEADING partial index on the live-activation lookup, mirroring the
+-- typed consents' ix_..._firm_live. prepare_egress_dispatch probes
+-- (firm_id, client_id, purpose) where deactivated_at is null; without this the planner drives
+-- the (client_id, purpose) one-live unique and then filters firm_id, so a foreign probe of a
+-- LIT client and a probe of a nonexistent client do measurably different work. This removes
+-- the coarsest of those differences. It does NOT make the function constant-time — see the
+-- honest timing note in §3.3 of the contract; SQL cannot substantiate an absolute claim here.
+create index ix_client_egress_purpose_activations_firm_live
+  on clara.client_egress_purpose_activations(firm_id,client_id,purpose)
+  where deactivated_at is null;
 
 -- =====================================================================
 -- §3.2 THE DISPATCH-AUTHORIZATION RELATION.
@@ -378,19 +405,48 @@ begin
   if v_activation is null then
     return jsonb_build_object('verdict','unknown','authorization_id',null);
   end if;
+  -- RATCHET R1-F2: WALL CLOCK, not transaction time. now() is transaction-stable, so a caller
+  -- inside a long-open transaction would mint an authorization whose stated TTL bears no
+  -- relation to the 120 seconds the contract promises. clock_timestamp() makes the window an
+  -- honest wall-clock 120s for every caller, and consume compares against clock_timestamp() too.
   insert into clara.egress_dispatch_authorizations(firm_id,client_id,purpose,consent_id,
-      activation_id,event_seq,event_type,document_sha256,expires_at)
+      activation_id,event_seq,event_type,document_sha256,issued_at,expires_at)
     values(p_firm,p_client,p_purpose,v_consent,v_activation,p_event_seq,p_event_type,
-      null,now()+c_dispatch_ttl)
+      null,clock_timestamp(),clock_timestamp()+c_dispatch_ttl)
     returning id into v_id;
   return jsonb_build_object('verdict','granted','authorization_id',v_id);
 end $$;
 
 -- =====================================================================
--- §3.4 THE DISPATCH LINEARIZATION POINT.
+-- §3.4 THE DISPATCH LINEARIZATION POINT (RATIFIED AMENDMENT 2026-07-25, ratchet R1-F1/F2).
 --
 -- One key. The last DB interaction before the model call is a STATE TRANSITION the revoker
 -- can observe and invalidate, not a query — that is what a third read could never buy.
+--
+-- WHY THE SIGNATURE IS SIX ARGUMENTS AND NOT TWO. Contract v1.0 pinned
+-- consume_egress_dispatch(p_firm, p_authorization) and listed checks that never touched the
+-- client, the purpose or the dispatch intent the authorization was minted for. §3.2 says the
+-- row "binds" those — but a binding the effect-time verb never re-verifies is AUDIT DATA, not
+-- an enforced use constraint. Two independent cross-model reviews found it. Concretely: same
+-- firm, client A lit and client B dark; an authorization prepared for A, presented during a B
+-- dispatch, was consumed and returned `granted`, and B's context reached the model with no B
+-- consent and no B activation. The DB could not detect the substitution. Clara's cardinal
+-- invariant is that authorization is STRUCTURAL, enforced in the DB, never by model
+-- discipline — an authorization whose scope holds only because the caller kept it in a local
+-- variable is exactly model discipline. So consumption now re-verifies the dispatch it is
+-- being used for: firm, client, purpose, event_seq and event_type must all equal the row's.
+-- A mismatch returns the SAME uniform unknown — never a distinguishing error, never a
+-- "wrong client" oracle.
+--
+-- RATCHET R1-F2 (time): expiry is compared against clock_timestamp(), not now(). now() is
+-- transaction-stable, so a caller inside a long-open transaction saw an authorization that
+-- had expired minutes earlier as still live. The lock predicate also carries firm_id, so a
+-- foreign-firm consume never takes a row lock on another firm's authorization.
+--
+-- A PostgreSQL function CANNOT commit its surrounding transaction, so `granted` implies
+-- committed only if the CALLER's transaction commits. The runtime's default consume helper
+-- therefore runs this in its OWN explicit begin/commit before the model call; that discipline
+-- is the other half of §3.6's linearization claim and is asserted in the runtime suite.
 --
 -- §3.6, stated honestly: an authorization CONSUMED BEFORE a revocation commits MAY dispatch
 -- (the bytes were authorized; the revocation applies from its own commit forward). A
@@ -401,17 +457,33 @@ end $$;
 -- outbound proxy (a different architecture, not in Wave B). The residual window is the
 -- interval between this function committing and the request reaching the socket.
 -- =====================================================================
-create function clara.consume_egress_dispatch(p_firm uuid,p_authorization uuid) returns jsonb
+create function clara.consume_egress_dispatch(p_firm uuid,p_authorization uuid,
+    p_client uuid,p_purpose text,p_event_seq bigint,p_event_type text) returns jsonb
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare a record;
 begin
-  if p_firm is null or p_authorization is null then
+  if p_firm is null or p_authorization is null or p_client is null or p_purpose is null
+     or p_event_seq is null or p_event_type is null then
     return jsonb_build_object('verdict','unknown');
   end if;
+  -- firm_id is IN the lock predicate: a foreign-firm caller never reaches, and never locks,
+  -- another firm's authorization row.
   select * into a from clara.egress_dispatch_authorizations
-    where id=p_authorization for update;
-  if not found or a.firm_id<>p_firm or a.consumed_at is not null
-     or a.invalidated_at is not null or a.expires_at<=now() then
+    where id=p_authorization and firm_id=p_firm for update;
+  if not found then
+    return jsonb_build_object('verdict','unknown');
+  end if;
+  -- THE DISPATCH RE-BINDING. Every field the row records about WHAT this authorization was
+  -- minted for is compared before anything is consumed. A mismatch is not consumed and not
+  -- distinguished: the presented authorization stays live for its legitimate dispatch.
+  if a.client_id is distinct from p_client
+     or a.purpose is distinct from p_purpose
+     or a.event_seq is distinct from p_event_seq
+     or a.event_type is distinct from p_event_type then
+    return jsonb_build_object('verdict','unknown');
+  end if;
+  if a.consumed_at is not null or a.invalidated_at is not null
+     or a.expires_at<=clock_timestamp() then
     return jsonb_build_object('verdict','unknown');
   end if;
   -- The exact consent AND the exact activation must still be live, and the activation must
@@ -423,7 +495,7 @@ begin
         and x.consent_id=a.consent_id) then
     return jsonb_build_object('verdict','unknown');
   end if;
-  update clara.egress_dispatch_authorizations set consumed_at=now() where id=a.id;
+  update clara.egress_dispatch_authorizations set consumed_at=clock_timestamp() where id=a.id;
   return jsonb_build_object('verdict','granted');
 end $$;
 
@@ -452,14 +524,22 @@ end $$;
 -- firm, a nonexistent document, an unverified document and a genuinely unfiled document
 -- alike — the uniform-not-found property is a property of THIS function. Ungranted:
 -- definer-internal only.
+--
+-- RATCHET R1-F6: the distinct-client set is CAPPED AT TWO. `status` conveys zero / one / many
+-- and a client id is released only on `unique`, so a third distinct client can never change any
+-- caller-visible outcome — but aggregating EVERY filing of a large topology makes the response
+-- time a coarse oracle for how many clients a document is filed to. Two rows decide
+-- unresolved | unique | ambiguous, and the cap bounds the work a repeated prober can induce.
 create function clara._active_filing_clients(p_firm uuid,p_document uuid) returns uuid[]
   language sql stable security definer set search_path=clara,pg_temp as $$
-  select coalesce(array_agg(distinct f.client_id),'{}'::uuid[])
-  from clara.documents d
-  join clara.document_filings f on f.document_id=d.id and f.firm_id=d.firm_id
-    and f.retired_at is null
-  where p_firm is not null and p_document is not null
-    and d.id=p_document and d.firm_id=p_firm and d.bytes_verified_at is not null;
+  select coalesce(array_agg(t.client_id),'{}'::uuid[]) from (
+    select distinct f.client_id
+    from clara.documents d
+    join clara.document_filings f on f.document_id=d.id and f.firm_id=d.firm_id
+      and f.retired_at is null
+    where p_firm is not null and p_document is not null
+      and d.id=p_document and d.firm_id=p_firm and d.bytes_verified_at is not null
+    limit 2) t;
 $$;
 
 create function clara.resolve_document_client(p_firm uuid,p_document uuid) returns jsonb
@@ -553,7 +633,7 @@ begin
 end $$;
 
 -- =====================================================================
--- §7.1 THE FOUR OWNER RPCs.
+-- §7.1 THE OWNER RPCs (four in contract v1.0; FIVE after the 2026-07-25 amendment).
 --
 -- All: SECURITY DEFINER · search_path pinned · the OWNER floor in-function via
 -- _human_ctx(role_rank('owner')) · op-keyed through _reserve_op/_finish_op · each emits its
@@ -567,6 +647,69 @@ end $$;
 -- through _human_ctx (CLR03/CLR04). A same-key / different-args op reuse raises CLR10 —
 -- _reserve_op's own code (0004:57, contract comment 0004:45), NOT CLR28.
 -- =====================================================================
+
+-- classify_consent_evidence_document (RATIFIED AMENDMENT 2026-07-25, ratchet R1-F3): the owner
+-- path that STAMPS document_kind='consent_evidence' and grants NO egress of any kind.
+--
+-- WHY IT EXISTS. Contract v1.0 §7.2 step 1 says "ingest the signed re-attestation letter as a
+-- consent_evidence document", but at v1.0 there was no verb that could do that without also
+-- granting legacy egress: grant_client_egress_purpose only READS an already-stamped document;
+-- set_document_kind REFUSES the kind outright ("consent-evidence classification is owned by the
+-- egress consent path", 0016 CLR28); and the only live writer that stamps it is the LEGACY
+-- grant_client_egress (0014), which in the same call mints a purpose-blind consent authorizing
+-- invoice-facts egress. So a client who consented ONLY to wiki synthesis could not be onboarded
+-- without being granted egress they never agreed to — the exact purpose bleed §1.1 exists to
+-- abolish. The positive battery path worked only because a SUPERUSER fixture seeded the stamp;
+-- a fixture is not an operational path.
+--
+-- WHAT IT IS NOT. It mints no consent, no activation and no authorization; it touches neither
+-- consent relation; it emits NO domain event. Emitting document.classified here would be
+-- actively wrong: §5.4's re-drive gate fires on that event, and record_wiki_source_ingest
+-- refuses a consent_evidence source (CLR28), so the event would manufacture a guaranteed
+-- refusal for a document that is not wiki material at all. The 0014 precedent is the same —
+-- grant_client_egress stamps the kind and emits no classification event.
+--
+-- The floors are the 0014 ones, verbatim in substance: same firm, status='ingested',
+-- bytes_verified_at not null, and the kind must be null or ALREADY consent_evidence (you
+-- cannot re-label a coded bill as a consent letter). Idempotent through the op receipt AND
+-- through the null-or-same-kind predicate.
+create function clara.classify_consent_evidence_document(p_document uuid,p_reason text,
+    p_op_key text) returns jsonb
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+declare c record; v_dedupe jsonb; d record; v_prior text;
+begin
+  c:=clara._human_ctx(clara.role_rank('owner'));
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  if p_document is null or p_reason is null or nullif(btrim(p_reason),'') is null then
+    raise exception 'a document and a reason are required' using errcode='CLR10';
+  end if;
+  v_dedupe:=clara._reserve_op(c.firm,'classify_consent_evidence_document',p_op_key,
+    clara._hash(jsonb_build_object('document',p_document,'reason',p_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  -- Locked, and firm-checked BEFORE anything else is read off the row.
+  select * into d from clara.documents where id=p_document for update;
+  if not found or d.firm_id<>c.firm then
+    raise exception 'document not in your firm' using errcode='CLR11';
+  end if;
+  if d.status<>'ingested' or d.bytes_verified_at is null then
+    raise exception 'consent evidence must be an ingested, bytes-verified document'
+      using errcode='CLR28',detail='{"reason":"evidence_mismatch"}';
+  end if;
+  if d.document_kind is not null and d.document_kind<>'consent_evidence' then
+    raise exception 'consent evidence must be an unclassified or consent-evidence document'
+      using errcode='CLR28',detail='{"reason":"evidence_kind_conflict"}';
+  end if;
+  v_prior:=d.document_kind;
+  update clara.documents set document_kind='consent_evidence' where id=p_document;
+  perform clara._audit(c.firm,c.actor,null,null,'classify_consent_evidence_document',null,
+    jsonb_build_object('document',p_document,'prior_kind',v_prior,'reason',btrim(p_reason),
+      'op_key',p_op_key));
+  return clara._finish_op(c.firm,'classify_consent_evidence_document',p_op_key,
+    jsonb_build_object('document_id',p_document,'document_kind','consent_evidence',
+      'prior_kind',v_prior));
+end $$;
 
 -- grant: mints a typed consent. It DOES NOT ACTIVATE — a grant alone never authorizes.
 --
@@ -660,9 +803,17 @@ begin
     clara._hash(jsonb_build_object('client',p_client,'purpose',p_purpose,
       'consent',p_consent)));
   if v_dedupe is not null then return v_dedupe; end if;
+  -- RATCHET R1-F5: FIRM FIRST. §7.1 mandates CLR11 for a client not in your firm, and the
+  -- v1.0 body reached that verdict only AFTER a global (client, purpose) lookup that took
+  -- FOR UPDATE on a foreign firm's live row — cross-firm lock reach, and CLR28 instead of the
+  -- mandated CLR11. Every state-row predicate below now carries firm_id=c.firm as well.
+  if not exists(select 1 from clara.clients where id=p_client and firm_id=c.firm) then
+    raise exception 'client is not in your firm' using errcode='CLR11';
+  end if;
   select * into x from clara.client_egress_purpose_consents
-    where client_id=p_client and purpose=p_purpose and revoked_at is null for update;
-  if not found or x.firm_id<>c.firm then
+    where client_id=p_client and firm_id=c.firm and purpose=p_purpose
+      and revoked_at is null for update;
+  if not found then
     raise exception 'no live typed egress consent for this client and purpose'
       using errcode='CLR28',detail='{"reason":"no_consent"}';
   end if;
@@ -718,9 +869,14 @@ begin
     clara._hash(jsonb_build_object('client',p_client,'purpose',p_purpose,
       'reason',p_reason)));
   if v_dedupe is not null then return v_dedupe; end if;
+  -- RATCHET R1-F5: FIRM FIRST (see activate).
+  if not exists(select 1 from clara.clients where id=p_client and firm_id=c.firm) then
+    raise exception 'client is not in your firm' using errcode='CLR11';
+  end if;
   select * into x from clara.client_egress_purpose_activations
-    where client_id=p_client and purpose=p_purpose and deactivated_at is null for update;
-  if not found or x.firm_id<>c.firm then
+    where client_id=p_client and firm_id=c.firm and purpose=p_purpose
+      and deactivated_at is null for update;
+  if not found then
     raise exception 'no live typed egress activation for this client and purpose'
       using errcode='CLR28',detail='{"reason":"no_activation"}';
   end if;
@@ -730,7 +886,8 @@ begin
   -- invalidated in the SAME transaction as the withdrawal.
   update clara.egress_dispatch_authorizations set invalidated_at=now(),
     invalidated_reason='activation_deactivated'
-    where consent_id=x.consent_id and consumed_at is null and invalidated_at is null;
+    where consent_id=x.consent_id and firm_id=c.firm
+      and consumed_at is null and invalidated_at is null;
   get diagnostics v_invalidated=row_count;
   perform clara.set_wiki_synthesis_hold(p_client,
     'wiki synthesis purpose deactivated','wikihold:purpose:deact:'||x.id::text);
@@ -772,9 +929,14 @@ begin
     clara._hash(jsonb_build_object('client',p_client,'purpose',p_purpose,
       'reason',p_reason)));
   if v_dedupe is not null then return v_dedupe; end if;
+  -- RATCHET R1-F5: FIRM FIRST (see activate).
+  if not exists(select 1 from clara.clients where id=p_client and firm_id=c.firm) then
+    raise exception 'client is not in your firm' using errcode='CLR11';
+  end if;
   select * into x from clara.client_egress_purpose_consents
-    where client_id=p_client and purpose=p_purpose and revoked_at is null for update;
-  if not found or x.firm_id<>c.firm then
+    where client_id=p_client and firm_id=c.firm and purpose=p_purpose
+      and revoked_at is null for update;
+  if not found then
     raise exception 'no live typed egress consent for this client and purpose'
       using errcode='CLR28',detail='{"reason":"no_consent"}';
   end if;
@@ -782,10 +944,12 @@ begin
     revoke_reason=btrim(p_reason) where id=x.id;
   update clara.client_egress_purpose_activations set deactivated_by=c.actor,
     deactivated_at=now(),deactivation_reason='typed egress consent revoked'
-    where consent_id=x.id and deactivated_at is null returning id into v_activation;
+    where consent_id=x.id and firm_id=c.firm and deactivated_at is null
+    returning id into v_activation;
   update clara.egress_dispatch_authorizations set invalidated_at=now(),
     invalidated_reason='consent_revoked'
-    where consent_id=x.id and consumed_at is null and invalidated_at is null;
+    where consent_id=x.id and firm_id=c.firm
+      and consumed_at is null and invalidated_at is null;
   get diagnostics v_invalidated=row_count;
   perform clara.set_wiki_synthesis_hold(p_client,
     'wiki synthesis purpose consent revoked','wikihold:purpose:'||x.id::text);
@@ -845,12 +1009,13 @@ revoke execute on all functions in schema clara from public;
 
 grant execute on function
   clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text),
-  clara.consume_egress_dispatch(uuid,uuid),
+  clara.consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text),
   clara.resolve_document_client(uuid,uuid),
   clara.resolve_and_ingest_wiki_source(uuid,uuid)
 to clara_runtime;
 
 grant execute on function
+  clara.classify_consent_evidence_document(uuid,text,text),
   clara.grant_client_egress_purpose(uuid,text,uuid,text,text),
   clara.activate_client_egress_purpose(uuid,text,uuid,text),
   clara.deactivate_client_egress_purpose(uuid,text,text,text),
@@ -881,10 +1046,11 @@ begin
   v_owner := (select oid from pg_roles where rolname='clara_fn_owner');
   v_runtime_only := array[
     'clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text)',
-    'clara.consume_egress_dispatch(uuid,uuid)',
+    'clara.consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text)',
     'clara.resolve_document_client(uuid,uuid)',
     'clara.resolve_and_ingest_wiki_source(uuid,uuid)'];
   v_owner_only := array[
+    'clara.classify_consent_evidence_document(uuid,text,text)',
     'clara.grant_client_egress_purpose(uuid,text,uuid,text,text)',
     'clara.activate_client_egress_purpose(uuid,text,uuid,text)',
     'clara.deactivate_client_egress_purpose(uuid,text,text,text)',
@@ -951,8 +1117,16 @@ begin
       v_n using errcode='CLR10';
   end if;
 
-  -- The three partial unique indexes + the paired revocation / deactivation CHECKs + the
+  -- The TWO partial unique indexes + the paired revocation / deactivation CHECKs + the
   -- document_sha256-null-for-wiki CHECK + the one-terminal CHECK.
+  --
+  -- CONTRACT ERRATUM (ratified 2026-07-25, ratchet R1). §8 of contract v1.0 says "the three
+  -- partial unique indexes". There are TWO one-live UNIQUE indexes (consents, activations)
+  -- plus one NON-unique partial index on open authorizations
+  -- (ix_egress_dispatch_authorizations_open), which drives §3.5's withdrawal sweep. Making
+  -- that third one unique would be WRONG: §3.3 mints a fresh authorization on every granted
+  -- prepare, so many outstanding authorizations legitimately share one consent_id. The
+  -- erratum is ratified in the contract; the tail asserts what is correct.
   foreach v_txt in array array[
     'uq_client_egress_purpose_consents_one_live',
     'uq_client_egress_purpose_activations_one_live'] loop
@@ -960,6 +1134,18 @@ begin
       raise exception '0020 partial unique index % is missing',v_txt using errcode='CLR10';
     end if;
   end loop;
+  if (select indexdef from pg_indexes where schemaname='clara'
+        and indexname='ix_egress_dispatch_authorizations_open') not like 'CREATE INDEX %' then
+    raise exception '0020 the open-authorization index is missing or was made UNIQUE'
+      using errcode='CLR10';
+  end if;
+  -- RATCHET R1-F6: the firm-leading live-activation index the verdict probe drives.
+  if (select indexdef from pg_indexes where schemaname='clara'
+        and indexname='ix_client_egress_purpose_activations_firm_live')
+      not like '%(firm_id, client_id, purpose) WHERE (deactivated_at IS NULL)%' then
+    raise exception '0020 the firm-leading live-activation index is missing or reshaped'
+      using errcode='CLR10';
+  end if;
   if (select indexdef from pg_indexes where schemaname='clara'
         and indexname='uq_client_egress_purpose_consents_one_live')
       not like '%(client_id, purpose) WHERE (revoked_at IS NULL)%'
@@ -993,7 +1179,7 @@ begin
     end if;
   end loop;
 
-  -- The eight new functions exist, DEFINER, pinned search_path, owned by clara_fn_owner,
+  -- The nine new functions exist, DEFINER, pinned search_path, owned by clara_fn_owner,
   -- and each is a SINGLE overload.
   foreach v_sig in array v_new_fns loop
     if not exists(select 1 from pg_proc p where p.oid=v_sig::regprocedure
@@ -1015,9 +1201,13 @@ begin
   foreach v_txt in array array[
     'clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text)'
       ||'=p_firm uuid, p_client uuid, p_purpose text, p_event_seq bigint, p_event_type text',
-    'clara.consume_egress_dispatch(uuid,uuid)=p_firm uuid, p_authorization uuid',
+    'clara.consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text)'
+      ||'=p_firm uuid, p_authorization uuid, p_client uuid, p_purpose text,'
+      ||' p_event_seq bigint, p_event_type text',
     'clara.resolve_document_client(uuid,uuid)=p_firm uuid, p_document uuid',
     'clara.resolve_and_ingest_wiki_source(uuid,uuid)=p_firm uuid, p_document uuid',
+    'clara.classify_consent_evidence_document(uuid,text,text)'
+      ||'=p_document uuid, p_reason text, p_op_key text',
     'clara.grant_client_egress_purpose(uuid,text,uuid,text,text)'
       ||'=p_client uuid, p_purpose text, p_evidence_document uuid, p_scope_note text, p_op_key text',
     'clara.activate_client_egress_purpose(uuid,text,uuid,text)'
@@ -1231,14 +1421,21 @@ begin
   end loop;
 
   -- ===================================================================
-  -- §6 LEGACY BYTE-IDENTITY — exact-diff pins captured at migration 19.
+  -- §6 LEGACY BYTE-IDENTITY — EXACT-SOURCE pins (RATCHET R1-F4).
+  --
+  -- v1.0's tail hashed md5(regexp_replace(lower(prosrc),'\s+','','g')) and called the result
+  -- "byte identity". It is neither byte identity NOR semantic identity: lowercasing and
+  -- whitespace-stripping reach INSIDE string literals, so changing the refusal discriminant
+  -- '{"reason":"no_consent"}' to '{"reason":"NO_CONSENT"}' — a real, downstream-visible change
+  -- to a case-sensitive token — passed the pin unchanged. The pins below hash the EXACT
+  -- prosrc with SHA-256 and apply NO normalization of any kind.
   -- ===================================================================
   foreach v_txt in array array[
-    'grant_client_egress|58535d7d23269e0cf1af3cc2bf5d5ddb',
-    'revoke_client_egress|b5b1dc10a873d403ebc5ee87626a64fc',
-    'claim_document_processing_task|28e8ab21bc0fe7e414af02faa28c6bb3',
-    '_enqueue_invoice_facts_core|2dcc33922171e0ac8b73c6eddb36f5ef',
-    'record_wiki_source_ingest|6aebf99d7f47b009796e94675e53a46f'] loop
+    'grant_client_egress|86c35e8d529f2dc3cb824d7f63ba7cf75fda97c287fadf8562dacdf955d03dcf',
+    'revoke_client_egress|192339765ddaab2f53f09020e7443b8c5fd236c9518e22362d130569d5c07e07',
+    'claim_document_processing_task|f9da98aa7c3a7a37ee79f5e67e523429c83f10bf4247489946f66457e80f312d',
+    '_enqueue_invoice_facts_core|0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e',
+    'record_wiki_source_ingest|0c3adf2dc31ff2780df85b27ae3d5a09f76ae7f98cf7b816d557c74c8fdb484c'] loop
     v_sig := split_part(v_txt,'|',1);
     v_pin := split_part(v_txt,'|',2);
     select count(*)::int into v_n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
@@ -1247,14 +1444,67 @@ begin
       raise exception '0020 % must keep exactly one overload (got %)',v_sig,v_n
         using errcode='CLR10';
     end if;
-    select md5(regexp_replace(lower(p.prosrc),'\s+','','g')) into v_src
+    select encode(sha256(convert_to(p.prosrc,'UTF8')),'hex') into v_src
       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
       where n.nspname='clara' and p.proname=v_sig;
     if v_src is distinct from v_pin then
-      raise exception '0020 % normalized source drifted (expected %, got %)',v_sig,v_pin,v_src
+      raise exception '0020 % EXACT source drifted (expected %, got %)',v_sig,v_pin,v_src
         using errcode='CLR10';
     end if;
   end loop;
+  -- The legacy functions' EXECUTE ACLs are a CLOSED SET. §6 promises the ACLs, not only the
+  -- bodies, and v1.0's tail pinned none of them: a silent `grant execute ... to clara_runtime`
+  -- on grant_client_egress would have passed every assertion in this migration.
+  select string_agg(x.pin,' ;; ' order by x.pin) into v_txt from (
+    select p.proname||'='||coalesce((select string_agg(a,',' order by a)
+        from unnest(p.proacl::text[]) a),'(null)') as pin
+      from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+     where n.nspname='clara' and p.proname in ('grant_client_egress','revoke_client_egress',
+       'claim_document_processing_task','_enqueue_invoice_facts_core',
+       'record_wiki_source_ingest')) x;
+  if v_txt is distinct from
+     '_enqueue_invoice_facts_core=clara_fn_owner=X/clara_fn_owner'
+     ||' ;; claim_document_processing_task=clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner'
+     ||' ;; grant_client_egress=clara_authenticated=X/clara_fn_owner,clara_fn_owner=X/clara_fn_owner'
+     ||' ;; record_wiki_source_ingest=clara_fn_owner=X/clara_fn_owner,clara_runtime=X/clara_fn_owner'
+     ||' ;; revoke_client_egress=clara_authenticated=X/clara_fn_owner,clara_fn_owner=X/clara_fn_owner' then
+    raise exception '0020 a legacy egress/claim/ingest ACL drifted: %',v_txt
+      using errcode='CLR10';
+  end if;
+  -- The legacy RELATION's full structure — CHECKs, FKs, every index, non-internal triggers,
+  -- the RLS flags and owner, and every policy — pinned by EXACT definition. v1.0's tail pinned
+  -- the column list and one index def, so a trigger drop, an FK relaxation or an RLS/policy
+  -- alteration would have sailed through while the tail reported "byte identity".
+  select encode(sha256(convert_to(
+      coalesce((select string_agg(con.conname||'='||pg_get_constraintdef(con.oid),E'\n'
+          order by con.conname) from pg_constraint con
+         where con.conrelid='clara.client_egress_consents'::regclass),'')
+    ||E'\n--idx--\n'||
+      coalesce((select string_agg(pg_get_indexdef(i.indexrelid),E'\n'
+          order by pg_get_indexdef(i.indexrelid)) from pg_index i
+         where i.indrelid='clara.client_egress_consents'::regclass),'')
+    ||E'\n--trg--\n'||
+      coalesce((select string_agg(pg_get_triggerdef(t.oid),E'\n'
+          order by pg_get_triggerdef(t.oid)) from pg_trigger t
+         where t.tgrelid='clara.client_egress_consents'::regclass and not t.tgisinternal),'')
+    ||E'\n--rls--\n'||
+      (select c.relrowsecurity::text||','||c.relforcerowsecurity::text||','
+              ||pg_get_userbyid(c.relowner) from pg_class c
+        where c.oid='clara.client_egress_consents'::regclass)
+    ||E'\n--pol--\n'||
+      coalesce((select string_agg(pol.polname||'|'||pol.polcmd::text||'|'
+          ||array_to_string(array(select pg_get_userbyid(r) from unnest(pol.polroles) r
+              order by 1),',')||'|'
+          ||coalesce(pg_get_expr(pol.polqual,pol.polrelid),'')||'|'
+          ||coalesce(pg_get_expr(pol.polwithcheck,pol.polrelid),''),E'\n'
+          order by pol.polname) from pg_policy pol
+         where pol.polrelid='clara.client_egress_consents'::regclass),'')
+    ,'UTF8')),'hex') into v_src;
+  if v_src is distinct from
+     '56362c965931283396b6aa13ab5b5429e625ac3331678c36e919af3665cedd11' then
+    raise exception '0020 the legacy consent relation''s structure drifted (got %)',v_src
+      using errcode='CLR10';
+  end if;
   -- Signatures unchanged.
   if (select string_agg(pg_get_function_identity_arguments(p.oid),' | ' order by p.proname)
         from pg_proc p join pg_namespace n on n.oid=p.pronamespace
@@ -1295,13 +1545,32 @@ begin
     insert into clara.firm_memberships(firm_id,user_id,role) values(v_f,v_u,'owner');
     insert into clara.clients(id,firm_id,name,status)
       values(v_c,v_f,'0020 probe A client','active');
-    insert into clara.documents(id,firm_id,sha256,original_filename,document_kind,
+    -- The evidence document is minted UNCLASSIFIED — exactly what an ingested letter looks
+    -- like before anyone says what it is. The owner path stamps it (R1-F3); no fixture
+    -- shortcut, and no legacy egress grant anywhere in this probe.
+    insert into clara.documents(id,firm_id,sha256,original_filename,
         bytes_verified_at,storage_path)
-      values(v_dev,v_f,repeat('a',64),'consent-a.pdf','consent_evidence',now(),
+      values(v_dev,v_f,repeat('a',64),'consent-a.pdf',now(),
         'firms/'||v_f::text||'/docs/'||repeat('a',64)||'.pdf');
     -- clara.jwt_sub() reads the whole claims blob (0002), not an individual claim GUC.
     perform set_config('request.jwt.claims',
       jsonb_build_object('sub',v_u::text)::text,true);
+
+    -- RATCHET R1-F3: the owner classification verb stamps consent_evidence and grants NOTHING.
+    v_r:=clara.classify_consent_evidence_document(v_dev,'probe A signed letter',
+      'probe-a-classify');
+    if v_r->>'document_kind'<>'consent_evidence' then
+      raise exception '0020 probe A: the owner evidence-classification verb did not stamp the kind (got %)',
+        v_r::text using errcode='CLR10';
+    end if;
+    if exists(select 1 from clara.client_egress_consents where firm_id=v_f) then
+      raise exception '0020 probe A: classifying evidence granted LEGACY egress'
+        using errcode='CLR10';
+    end if;
+    if (select count(*) from clara.client_egress_purpose_consents where firm_id=v_f)<>0 then
+      raise exception '0020 probe A: classifying evidence minted a typed consent'
+        using errcode='CLR10';
+    end if;
 
     -- A grant alone must NOT authorize.
     v_r:=clara.grant_client_egress_purpose(v_c,'wiki_synthesis',v_dev,
@@ -1337,12 +1606,39 @@ begin
         using errcode='CLR10';
     end if;
 
+    -- RATCHET R1-F1 — THE DISPATCH RE-BINDING, proved before the happy path so a regression
+    -- cannot hide behind it. A live, unexpired, same-firm authorization minted for THIS client
+    -- is refused when presented for ANOTHER client, for another purpose, or for another
+    -- (seq, type) — and is NOT consumed by the refusal, so its legitimate dispatch still works.
+    v_c2:=gen_random_uuid();
+    insert into clara.clients(id,firm_id,name,status)
+      values(v_c2,v_f,'0020 probe A second client','active');
+    if clara.consume_egress_dispatch(v_f,v_auth,v_c2,'wiki_synthesis',2,'counterparty.created')
+       is distinct from jsonb_build_object('verdict','unknown') then
+      raise exception '0020 probe A: an authorization minted for client A was consumable during a client B dispatch'
+        using errcode='CLR10';
+    end if;
+    if clara.consume_egress_dispatch(v_f,v_auth,v_c,'not_a_purpose',2,'counterparty.created')
+       is distinct from jsonb_build_object('verdict','unknown')
+     or clara.consume_egress_dispatch(v_f,v_auth,v_c,'wiki_synthesis',99,'counterparty.created')
+       is distinct from jsonb_build_object('verdict','unknown')
+     or clara.consume_egress_dispatch(v_f,v_auth,v_c,'wiki_synthesis',2,'entry.approved')
+       is distinct from jsonb_build_object('verdict','unknown') then
+      raise exception '0020 probe A: a mismatched purpose / event_seq / event_type still consumed'
+        using errcode='CLR10';
+    end if;
+    if exists(select 1 from clara.egress_dispatch_authorizations
+        where id=v_auth and (consumed_at is not null or invalidated_at is not null)) then
+      raise exception '0020 probe A: a re-binding refusal BURNED the authorization'
+        using errcode='CLR10';
+    end if;
+
     -- Consume once -> granted; consume twice -> unknown (single use, terminal).
-    if clara.consume_egress_dispatch(v_f,v_auth)
+    if clara.consume_egress_dispatch(v_f,v_auth,v_c,'wiki_synthesis',2,'counterparty.created')
        is distinct from jsonb_build_object('verdict','granted') then
       raise exception '0020 probe A: the first consume did not grant' using errcode='CLR10';
     end if;
-    if clara.consume_egress_dispatch(v_f,v_auth)
+    if clara.consume_egress_dispatch(v_f,v_auth,v_c,'wiki_synthesis',2,'counterparty.created')
        is distinct from jsonb_build_object('verdict','unknown') then
       raise exception '0020 probe A: a consumed authorization was reusable'
         using errcode='CLR10';
@@ -1350,7 +1646,8 @@ begin
     -- A foreign-firm consume of a real authorization is unknown.
     v_r:=clara.prepare_egress_dispatch(v_f,v_c,'wiki_synthesis',3,'counterparty.merged');
     v_auth:=(v_r->>'authorization_id')::uuid;
-    if clara.consume_egress_dispatch(gen_random_uuid(),v_auth)
+    if clara.consume_egress_dispatch(gen_random_uuid(),v_auth,v_c,'wiki_synthesis',3,
+         'counterparty.merged')
        is distinct from jsonb_build_object('verdict','unknown') then
       raise exception '0020 probe A: a cross-firm consume was granted' using errcode='CLR10';
     end if;
@@ -1359,7 +1656,7 @@ begin
     -- activation is deactivated, and a fresh prepare is unknown again.
     perform clara.revoke_client_egress_purpose(v_c,'wiki_synthesis','probe A withdrawal',
       'probe-a-revoke');
-    if clara.consume_egress_dispatch(v_f,v_auth)
+    if clara.consume_egress_dispatch(v_f,v_auth,v_c,'wiki_synthesis',3,'counterparty.merged')
        is distinct from jsonb_build_object('verdict','unknown') then
       raise exception '0020 probe A: an authorization survived its consent revocation'
         using errcode='CLR10';

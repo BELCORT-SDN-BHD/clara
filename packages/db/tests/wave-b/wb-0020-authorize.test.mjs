@@ -10,11 +10,17 @@
 // §3.5's same-transaction invalidation. The RACES live in wb-0020-races.
 // CONTRACT-BLIND; FAILS below 0020.
 //
+// RATIFIED §3.4 AMENDMENT (2026-07-25, ratchet R1-F1/F2). consume_egress_dispatch takes SIX
+// arguments and re-verifies the dispatch it is being used for — firm, client, purpose,
+// event_seq, event_type — against the row before consuming, and compares expiry against
+// clock_timestamp() rather than the caller's transaction-stable now(). v1.0's two-argument form
+// made §3.2's "binds client/purpose/event" AUDIT DATA: an authorization minted for client A was
+// consumable during a client-B dispatch, and B's context reached the model with no B consent.
+//
 // AMBIGUITIES recorded here:
-//   [A20-3] Does prepare VALIDATE (p_event_seq, p_event_type) against
-//           clara.domain_events? §3.2 calls them "dispatch intent"; §8 pins no FK.
-//           Every positive cell passes a REAL pair so both readings pass; one cell
-//           probes a synthetic pair and RECORDS the observed behaviour.
+//   [A20-3] RESOLVED by the amendment. prepare still records (p_event_seq, p_event_type)
+//           without cross-checking clara.domain_events — deliberately, since a runtime-callable
+//           probe of the event log would be a fresh oracle — but CONSUME now enforces them.
 //   [A20-10] §3.2 pins `expires_at NOT NULL` and a 120s TTL but does not say
 //           whether `expires_at` is exposed anywhere. §3.3's allowlist forbids it
 //           in the RETURN; the column itself is asserted present on the row.
@@ -29,9 +35,10 @@ import {
   FORBIDDEN_RETURN_KEYS, TTL_SECONDS,
   grantPurpose, activatePurpose, deactivatePurpose, revokePurpose,
   consentEvidenceDoc, livePurposeConsent, lightSynthesis,
-  prepareDispatch, prepareForLatestEvent, consumeDispatch, latestEventOf,
+  prepareDispatch, prepareForLatestEvent, prepareBound, consumeDispatch, latestEventOf,
   authorizationRow, authorizationsForConsent, authorizationsForClient,
-  backdateAuthExpiry, canonical, keysOf, countRows,
+  backdateAuthExpiry, consumeInsideStaleTransaction, consumeThenRollback,
+  canonical, keysOf, countRows,
   grantClientEgress, revokeClientEgress, grantConsent,
 } from "./wb-0020-helpers.mjs";
 
@@ -111,7 +118,7 @@ test("[0020 §3.3 / §9.1 — THE no-oracle cell]: ALL SIX non-granted states re
   await revokePurpose(w.users.alice, { client: revoked, opKey: opk("nr_rv") });
   // (3) consent live but NEVER activated.
   const unactivated = await freshClient("auth_unact");
-  const evd = await consentEvidenceDoc(w.firms.A);
+  const evd = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client: unactivated, evidenceDocument: evd.documentId, opKey: opk("nr_g") });
   // (4) consent live, activation DEACTIVATED.
   const paused = await freshClient("auth_paused");
@@ -174,7 +181,7 @@ test("[0020 §3.2]: the authorization relation is APPEND-ONLY apart from the two
   fail0020(live);
   const client = await freshClient("auth_immut");
   await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
-  const v = await prepareForLatestEvent({ firm: w.firms.A, client });
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
   const id = v.authorization_id;
   await assertRaisesOneOf([CLR.immutable],
     () => rootQuery(`delete from clara.${DISPATCH_AUTH_TABLE} where id=$1`, [id]),
@@ -187,7 +194,7 @@ test("[0020 §3.2]: the authorization relation is APPEND-ONLY apart from the two
       () => rootQuery(`update clara.${DISPATCH_AUTH_TABLE} set ${set} where id=$1`, params),
       `UPDATE of the ${col} binding column`);
   }
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: id }), CONSUME_GRANTED,
+  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: id, intent }), CONSUME_GRANTED,
     "the row survived every tampering attempt intact and still consumes cleanly");
 });
 
@@ -228,9 +235,9 @@ test("[0020 §3.4 / §9.3(d)]: the no-race baseline — prepare `granted` → co
   fail0020(live);
   const client = await freshClient("auth_happy");
   await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
-  const v = await prepareForLatestEvent({ firm: w.firms.A, client });
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
   assert.equal(v.verdict, "granted");
-  const got = await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id });
+  const got = await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id, intent });
   assert.deepEqual(keysOf(got), ["verdict"], `consume returns EXACTLY one key (got ${JSON.stringify(got)})`);
   assert.deepEqual(got, CONSUME_GRANTED, "…and it is granted");
   const row = await authorizationRow(v.authorization_id);
@@ -242,43 +249,151 @@ test("[0020 §3.4 / §9.3(e)]: SINGLE USE — a second consume of the same autho
   fail0020(live);
   const client = await freshClient("auth_twice");
   await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
-  const v = await prepareForLatestEvent({ firm: w.firms.A, client });
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id }), CONSUME_GRANTED);
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id }), CONSUME_UNKNOWN,
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
+  const C = () => consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id, intent });
+  assert.deepEqual(await C(), CONSUME_GRANTED);
+  assert.deepEqual(await C(), CONSUME_UNKNOWN,
     "the SECOND consume is unknown — a consumed authorization is terminal (§3.2: no reuse path)");
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id }), CONSUME_UNKNOWN,
-    "…and stays unknown");
+  assert.deepEqual(await C(), CONSUME_UNKNOWN, "…and stays unknown");
 });
 
 test("[0020 §3.4 / §9.3(g)]: consuming an authorization prepared for a DIFFERENT firm returns `unknown` — and does NOT consume it", async () => {
   fail0020(live);
   const client = await freshClient("auth_xfirm");
   await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
-  const v = await prepareForLatestEvent({ firm: w.firms.A, client });
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.B, authorization: v.authorization_id }), CONSUME_UNKNOWN,
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
+  assert.deepEqual(
+    await consumeDispatch({ firm: w.firms.B, authorization: v.authorization_id, intent }), CONSUME_UNKNOWN,
     "a firm-B consume of a firm-A authorization is unknown");
   assert.equal((await authorizationRow(v.authorization_id)).consumed_at, null,
     "…and it did NOT burn the authorization — the legitimate owner can still consume it");
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id }), CONSUME_GRANTED,
+  assert.deepEqual(
+    await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id, intent }), CONSUME_GRANTED,
     "the firm-A consume still succeeds");
   // An unknown authorization id is the same uniform unknown — no existence oracle.
   assert.deepEqual(
-    await consumeDispatch({ firm: w.firms.A, authorization: "00000000-0000-4000-8000-0000000000dd" }),
+    await consumeDispatch({
+      firm: w.firms.A, authorization: "00000000-0000-4000-8000-0000000000dd", intent }),
     CONSUME_UNKNOWN, "a nonexistent authorization id returns the SAME unknown");
+});
+
+// ===========================================================================
+// §3.4 (RATIFIED AMENDMENT 2026-07-25, ratchet R1-F1) — THE DISPATCH RE-BINDING.
+//
+// This is the cell the BLOCKER was raised for. Contract v1.0 pinned
+// consume_egress_dispatch(p_firm, p_authorization) and listed checks that never touched the
+// client, the purpose or the dispatch intent the row records. §3.2 said the row "binds" them —
+// but a binding the effect-time verb never re-verifies is AUDIT DATA, not an enforced use
+// constraint. Same firm, client A lit and client B dark: an authorization prepared for A,
+// presented during a B dispatch, was consumed and returned `granted`, and B's context reached
+// the model with no B consent and no B activation. Nothing in the DB could detect it, because
+// the scope held only for as long as the caller kept the id in the right variable.
+// ===========================================================================
+
+test("[0020 §3.4 amendment — THE cross-client cell]: an authorization minted for client A is REFUSED during a client B dispatch, is NOT consumed, and still works for A", async () => {
+  fail0020(live);
+  const a = await freshClient("auth_bindA");
+  const b = await freshClient("auth_bindB");
+  await lightSynthesis(w.users.alice, { firm: w.firms.A, client: a });
+  await lightSynthesis(w.users.alice, { firm: w.firms.A, client: b });
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client: a });
+  assert.equal(v.verdict, "granted", "A is lit — so the refusal below is the BINDING, not fail-closed");
+
+  // B is lit too: the refusal cannot be explained by B lacking consent. The ONLY thing wrong
+  // is that this authorization was not minted for B.
+  assert.deepEqual(
+    await consumeDispatch({ ...intent, authorization: v.authorization_id, client: b }),
+    CONSUME_UNKNOWN,
+    "an authorization prepared for client A cannot be spent on a client-B dispatch, even when B is itself fully lit");
+  const row = await authorizationRow(v.authorization_id);
+  assert.equal(row.consumed_at, null, "…and the refusal did NOT burn it");
+  assert.equal(row.invalidated_at, null, "…nor invalidate it — a mismatch is not a withdrawal");
+  assert.equal(row.client_id, a, "the row still binds client A");
+  assert.deepEqual(
+    await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id, intent }), CONSUME_GRANTED,
+    "…and A's own dispatch still consumes it cleanly");
+});
+
+test("[0020 §3.4 amendment]: a mismatched PURPOSE, event_seq or event_type each refuse with the SAME uniform unknown — and none of them consume", async () => {
+  fail0020(live);
+  const client = await freshClient("auth_bind_fields");
+  await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
+  assert.equal(v.verdict, "granted");
+  const id = v.authorization_id;
+  const mismatches = {
+    purpose: { ...intent, purpose: "treatment_synthesis" },
+    eventSeq: { ...intent, eventSeq: Number(intent.eventSeq) + 1 },
+    eventType: { ...intent, eventType: "entry.approved" },
+    nullClient: { ...intent, client: null },
+    nullEventType: { ...intent, eventType: null },
+  };
+  for (const [label, bad] of Object.entries(mismatches)) {
+    assert.deepEqual(await consumeDispatch({ ...bad, authorization: id }), CONSUME_UNKNOWN,
+      `${label}: a mismatched dispatch intent refuses`);
+    assert.equal(canonical(await consumeDispatch({ ...bad, authorization: id })),
+      canonical(CONSUME_UNKNOWN),
+      `${label}: …with the BYTE-IDENTICAL unknown — a distinguishing error here would be a "which client is this for?" oracle`);
+  }
+  const row = await authorizationRow(id);
+  assert.equal(row.consumed_at, null, "ten refusals later the authorization is still unconsumed");
+  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: id, intent }), CONSUME_GRANTED,
+    "…and the correct intent still consumes it");
+});
+
+// ===========================================================================
+// §3.2/§3.4/§3.6 (RATCHET R1-F2) — TIME AND COMMIT.
+// ===========================================================================
+
+test("[0020 §3.2/§3.4 amendment — THE stale-transaction cell]: a consume inside a LONG-OPEN transaction sees wall-clock expiry, not its own frozen now()", async () => {
+  fail0020(live);
+  const client = await freshClient("auth_stale_txn");
+  await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
+  assert.equal(v.verdict, "granted");
+  const out = await consumeInsideStaleTransaction({
+    firm: w.firms.A, authorization: v.authorization_id, intent });
+  // The staging is the evidence: expiry sits BETWEEN the transaction's frozen now() and the
+  // wall clock at the moment of the consume. A now()-based test could not possibly refuse here.
+  assert.ok(new Date(out.txnNow) < new Date(out.expiresAt),
+    `the transaction's frozen now() (${out.txnNow}) is EARLIER than expires_at (${out.expiresAt}) — under v1.0's now() comparison this consume would have been GRANTED`);
+  assert.ok(new Date(out.wallAtConsume) > new Date(out.expiresAt),
+    `…while the wall clock at consume (${out.wallAtConsume}) is past it`);
+  assert.deepEqual(out.consume, CONSUME_UNKNOWN,
+    "the expired authorization REFUSES — expiry is wall-clock (clock_timestamp), so a caller cannot extend a 120-second TTL indefinitely by holding a transaction open");
+  assert.equal((await authorizationRow(v.authorization_id)).consumed_at, null,
+    "…and expiry still writes nothing: it is derived, not swept");
+});
+
+test("[0020 §3.6 amendment — THE rollback cell]: a consume that its caller ROLLS BACK leaves the authorization unconsumed — which is why the runtime helper owns its own transaction", async () => {
+  fail0020(live);
+  const client = await freshClient("auth_rollback");
+  await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
+  const out = await consumeThenRollback({
+    firm: w.firms.A, authorization: v.authorization_id, intent });
+  assert.deepEqual(out.consume, CONSUME_GRANTED,
+    "inside the caller's open transaction the consume returns granted…");
+  assert.equal((await authorizationRow(v.authorization_id)).consumed_at, null,
+    "…but after the caller's ROLLBACK nothing is consumed: a PostgreSQL function cannot commit its caller's transaction, so `granted` alone is not a durable record that the bytes were authorized");
+  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id, intent }),
+    CONSUME_GRANTED,
+    "the authorization is fully spendable again — §3.6's linearization claim is unconditional only because the RUNTIME's default consume helper runs this in its own begin/commit (asserted in the runtime suite)");
 });
 
 test("[0020 §3.2/§3.4 / §9.3(f)]: TTL — an authorization consumed after `expires_at` returns `unknown`; the pinned window is 120 seconds", async () => {
   fail0020(live);
   const client = await freshClient("auth_ttl");
   await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
-  const v = await prepareForLatestEvent({ firm: w.firms.A, client });
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
   const row = await authorizationRow(v.authorization_id);
   const ttl = (new Date(row.expires_at).getTime() - new Date(row.issued_at).getTime()) / 1000;
   assert.ok(Math.abs(ttl - TTL_SECONDS) < 2,
     `the TTL is the pinned ${TTL_SECONDS}s (observed ${ttl}s) — a single named constant in the migration (§3.2)`);
   // Expiry is TIME-DERIVED (no sweep job, no expiry write): backdate and re-consume.
   await backdateAuthExpiry(v.authorization_id, { seconds: 5 });
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id }), CONSUME_UNKNOWN,
+  assert.deepEqual(
+    await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id, intent }), CONSUME_UNKNOWN,
     "an expired authorization refuses");
   const after = await authorizationRow(v.authorization_id);
   assert.equal(after.consumed_at, null, "…and expiry writes NOTHING — it is derived, not swept");
@@ -294,11 +409,12 @@ test("[0020 §3.5 / §9.3(a)]: a typed REVOKE invalidates EVERY unconsumed autho
   const client = await freshClient("auth_inval");
   const { consent } = await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
   const ev = await latestEventOf(w.firms.A);
+  const intent = { firm: w.firms.A, client, purpose: WIKI_PURPOSE, eventSeq: ev.seq, eventType: ev.eventType };
   const a = await prepareDispatch({ firm: w.firms.A, client, eventSeq: ev.seq, eventType: ev.eventType });
   const b = await prepareDispatch({ firm: w.firms.A, client, eventSeq: ev.seq, eventType: ev.eventType });
   // Consume ONE of them first — §3.5 invalidates only the neither-consumed-nor-
   // already-invalidated rows, and the one-terminal CHECK forbids doing both.
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: a.authorization_id }), CONSUME_GRANTED);
+  assert.deepEqual(await consumeDispatch({ authorization: a.authorization_id, intent }), CONSUME_GRANTED);
 
   await revokePurpose(w.users.alice, { client, reason: "rig withdrawal", opKey: opk("inv_rv") });
 
@@ -309,7 +425,7 @@ test("[0020 §3.5 / §9.3(a)]: a typed REVOKE invalidates EVERY unconsumed autho
   assert.ok(rowB.invalidated_at, "the UNCONSUMED authorization is invalidated by the revoke");
   assert.ok(rowB.invalidated_reason && String(rowB.invalidated_reason).trim() !== "",
     "…with a non-blank invalidated_reason");
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: b.authorization_id }), CONSUME_UNKNOWN,
+  assert.deepEqual(await consumeDispatch({ authorization: b.authorization_id, intent }), CONSUME_UNKNOWN,
     "the invalidated authorization can no longer dispatch");
   assert.equal((await authorizationsForConsent(consent.id)).length, 2, "both rows belong to the revoked consent");
 });
@@ -318,11 +434,11 @@ test("[0020 §3.5 / §9.3(c)]: a DEACTIVATE (a pause, consent left live) also in
   fail0020(live);
   const client = await freshClient("auth_deact");
   await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
-  const v = await prepareForLatestEvent({ firm: w.firms.A, client });
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
   await deactivatePurpose(w.users.alice, { client, reason: "rig pause", opKey: opk("inv_d") });
   assert.ok((await authorizationRow(v.authorization_id)).invalidated_at,
     "the outstanding authorization is invalidated by the deactivation");
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id }), CONSUME_UNKNOWN,
+  assert.deepEqual(await consumeDispatch({ authorization: v.authorization_id, intent }), CONSUME_UNKNOWN,
     "…and refuses at consume");
   assert.ok(await livePurposeConsent(client), "…while the typed CONSENT record survives the pause");
 });
@@ -331,7 +447,7 @@ test("[0020 §3.5 / §9.3(b) — THE regrant cell]: revoke + re-grant + ACTIVATE
   fail0020(live);
   const client = await freshClient("auth_regrant");
   const { consent: c1 } = await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
-  const stale = await prepareForLatestEvent({ firm: w.firms.A, client });
+  const { verdict: stale, intent } = await prepareBound({ firm: w.firms.A, client });
   assert.equal(stale.verdict, "granted", "an authorization is outstanding against consent #1");
 
   await revokePurpose(w.users.alice, { client, reason: "rig withdrawal", opKey: opk("rg_rv") });
@@ -340,7 +456,7 @@ test("[0020 §3.5 / §9.3(b) — THE regrant cell]: revoke + re-grant + ACTIVATE
   assert.equal((await prepareForLatestEvent({ firm: w.firms.A, client })).verdict, "granted",
     "the client is lit again on consent #2 — so this is NOT a fail-closed artefact");
 
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: stale.authorization_id }), CONSUME_UNKNOWN,
+  assert.deepEqual(await consumeDispatch({ authorization: stale.authorization_id, intent }), CONSUME_UNKNOWN,
     "the STRANDED authorization (which names consent #1) still refuses, even though the client is lit again");
   assert.ok((await authorizationRow(stale.authorization_id)).invalidated_at,
     "…because §3.5 invalidated it inside the revoke's own transaction");
@@ -350,12 +466,12 @@ test("[0020 §3.4]: consume RE-CHECKS live consent AND live activation atomicall
   fail0020(live);
   const client = await freshClient("auth_recheck");
   const { consent } = await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
-  const v = await prepareForLatestEvent({ firm: w.firms.A, client });
+  const { verdict: v, intent } = await prepareBound({ firm: w.firms.A, client });
   await deactivatePurpose(w.users.alice, { client, reason: "rig pause", opKey: opk("rc_d") });
   await activatePurpose(w.users.alice, { client, consent: consent.id, opKey: opk("rc_a") });
   assert.equal((await prepareForLatestEvent({ firm: w.firms.A, client })).verdict, "granted",
     "the client is lit again on the SAME consent through a NEW activation");
-  assert.deepEqual(await consumeDispatch({ firm: w.firms.A, authorization: v.authorization_id }), CONSUME_UNKNOWN,
+  assert.deepEqual(await consumeDispatch({ authorization: v.authorization_id, intent }), CONSUME_UNKNOWN,
     "the pre-pause authorization names the DEACTIVATED activation and must still refuse (§3.4 step 2: the named activation must still be live)");
 });
 
@@ -363,25 +479,41 @@ test("[0020 §3.4]: consume RE-CHECKS live consent AND live activation atomicall
 // §3.3 — dispatch-intent recording, and the ACL closed set.
 // ===========================================================================
 
-test("[0020 §3.2 / A20-3]: prepare records the dispatch intent it was given; whether it VALIDATES (event_seq,event_type) against domain_events is contract-silent — the observed behaviour is RECORDED", async () => {
+// RE-AIMED at the 2026-07-25 ratified §3.4 amendment (ratchet R1-F1). Blind, this cell RECORDED
+// that "the dispatch intent is recorded, not validated" — which was true, and was the BLOCKER.
+// It now asserts the enforcement instead of documenting its absence: prepare still records
+// whatever intent it is handed (it mints no cross-reference into clara.domain_events, and the
+// adjudication deliberately did NOT add one — a runtime-callable existence probe over the event
+// log would be a fresh oracle, and it buys nothing the re-binding does not already buy), but
+// CONSUME re-verifies that intent against the row, so a self-inconsistent prepare/consume pair
+// cannot dispatch. Recording without enforcement is what made the binding audit-only.
+test("[0020 §3.2/§3.4 amendment / A20-3]: prepare RECORDS an arbitrary dispatch intent verbatim — and that recorded intent is what CONSUME then enforces", async () => {
   fail0020(live);
   const client = await freshClient("auth_intent");
   await lightSynthesis(w.users.alice, { firm: w.firms.A, client });
-  let synthetic = null;
-  let raised = null;
-  try {
-    synthetic = await prepareDispatch({
-      firm: w.firms.A, client, eventSeq: 9_000_000_001, eventType: "counterparty.created" });
-  } catch (e) { raised = e.code ?? e.message; }
-  if (raised) {
-    noteLane(`[A20-3] prepare_egress_dispatch REFUSED a synthetic (seq,type) pair with ${raised} — it validates the dispatch intent against clara.domain_events. §3.2/§8 pin no such FK; the contract is silent.`);
-  } else if (synthetic?.verdict === "granted") {
-    const row = await authorizationRow(synthetic.authorization_id);
-    assert.equal(Number(row.event_seq), 9_000_000_001, "the synthetic seq was recorded verbatim");
-    noteLane("[A20-3] prepare_egress_dispatch ACCEPTS an arbitrary (seq,type) pair — the dispatch intent is recorded, not validated. Consistent with §3.2's wording; recorded because the contract never says either way.");
-  } else {
-    noteLane(`[A20-3] prepare_egress_dispatch returned ${JSON.stringify(synthetic)} for a synthetic (seq,type) pair — neither a refusal nor a grant; RECORDED`);
-  }
+  const synthetic = await prepareDispatch({
+    firm: w.firms.A, client, eventSeq: 9_000_000_001, eventType: "counterparty.created" });
+  assert.equal(synthetic.verdict, "granted",
+    "prepare does not cross-check (seq,type) against clara.domain_events — §3.2/§8 pin no such FK, and none was added");
+  const row = await authorizationRow(synthetic.authorization_id);
+  assert.equal(Number(row.event_seq), 9_000_000_001, "the synthetic seq was recorded verbatim");
+  assert.equal(row.event_type, "counterparty.created", "…and so was the type");
+
+  // THE POINT: what prepare recorded is now load-bearing at consume.
+  const bound = {
+    firm: w.firms.A, client, purpose: WIKI_PURPOSE,
+    eventSeq: 9_000_000_001, eventType: "counterparty.created",
+  };
+  assert.deepEqual(
+    await consumeDispatch({ ...bound, eventSeq: 9_000_000_002, authorization: synthetic.authorization_id }),
+    CONSUME_UNKNOWN,
+    "a consume that names a DIFFERENT event than the one recorded is refused — the intent is enforced, not decorative");
+  assert.equal((await authorizationRow(synthetic.authorization_id)).consumed_at, null,
+    "…and the refusal did not consume it");
+  assert.deepEqual(
+    await consumeDispatch({ ...bound, authorization: synthetic.authorization_id }), CONSUME_GRANTED,
+    "the intent it WAS minted for consumes cleanly");
+  noteLane("[A20-3] RESOLVED by the 2026-07-25 §3.4 amendment: prepare records (event_seq,event_type) without validating them against clara.domain_events, and consume re-verifies them against the row. The contract's silence is now an explicit ruling — no domain_events cross-check was added, because a runtime-callable probe of the event log is an oracle and the re-binding already prevents spending an authorization on another dispatch.");
 });
 
 test("[0020 §3.3/§3.4 / §9.5]: prepare and consume are EXECUTE-granted to clara_runtime ONLY — clara_authenticated, clara_agent_ro and both wake roles are refused 42501", async () => {
@@ -394,7 +526,9 @@ test("[0020 §3.3/§3.4 / §9.5]: prepare and consume are EXECUTE-granted to cla
       () => prepareDispatch({ firm: w.firms.A, client, eventSeq: ev.seq, eventType: ev.eventType, role }),
       `prepare_egress_dispatch as ${role}`);
     await assertRaisesOneOf(["42501"],
-      () => consumeDispatch({ firm: w.firms.A, authorization: "00000000-0000-4000-8000-0000000000ee", role }),
+      () => consumeDispatch({
+        firm: w.firms.A, authorization: "00000000-0000-4000-8000-0000000000ee",
+        client, purpose: WIKI_PURPOSE, eventSeq: ev.seq, eventType: ev.eventType, role }),
       `consume_egress_dispatch as ${role}`);
   }
   assert.equal(await countRows(DISPATCH_AUTH_TABLE, "where client_id=$1", [client]), 0,

@@ -1,14 +1,17 @@
 # Typed egress activation runbook (migration 0020 · WB-R23)
 
 **Owner-only. Run per client, at the owner's pace, AFTER the 0020 ceremony.**
+*(Updated 2026-07-25 for the ratified contract v1.1 amendments: step 1 now has a real
+owner verb, and consumption re-verifies the dispatch it is used for.)*
 Activation is deliberately **not** part of the deploy ceremony: 0020 ships with zero
 typed consents and zero activations, and that emptiness is what makes model synthesis
 dark. Lighting a client is a separate, considered act.
 
-There is **no consent-granting dashboard surface** and 0020 does not build one. All four
-verbs are owner-RPC-only through PostgREST under an **owner** JWT
-(`clara_authenticated` EXECUTE + an in-function `owner` role floor). They are unreachable
-by `clara_runtime`, `clara_agent_ro` and both wake roles.
+There is **no consent-granting dashboard surface** and 0020 does not build one. All five
+verbs — `classify_consent_evidence_document`, `grant_`, `activate_`, `deactivate_` and
+`revoke_client_egress_purpose` — are owner-RPC-only through PostgREST under an **owner**
+JWT (`clara_authenticated` EXECUTE + an in-function `owner` role floor). They are
+unreachable by `clara_runtime`, `clara_agent_ro` and both wake roles.
 
 ---
 
@@ -30,13 +33,17 @@ whole point of step 3 below — confirm the verdict is still `unknown` after gra
 
 ## The recipe
 
-### 1. Ingest the signed re-attestation letter as consent evidence
+### 1. Ingest the signed re-attestation letter, then classify it as consent evidence
 
-Get the client's signed per-client re-attestation letter into `clara.documents` as a
-`document_kind = 'consent_evidence'` artifact with `bytes_verified_at` set (the ADR-024
-full-provenance discipline; 0014 makes such a document structurally non-egressable —
-`_enqueue_invoice_facts_core` exempts it, so the consent letter itself is never sent to a
-vendor).
+Get the client's signed per-client re-attestation letter into `clara.documents` through
+the normal intake and confirm its bytes are verified. Then stamp it:
+
+```sql
+select clara.classify_consent_evidence_document(
+  '<evidence-doc>', '<why — e.g. "signed WB-R23 re-attestation, 2026-07-25">', '<op key>');
+```
+
+Returns `{"document_id": "...", "document_kind": "consent_evidence", "prior_kind": null}`.
 
 Confirm:
 
@@ -48,17 +55,30 @@ where id = '<evidence-doc>' and firm_id = '<firm>';
 
 You need `document_kind = 'consent_evidence'` **and** a non-null `bytes_verified_at`.
 
-> **Operational coupling to know about.** `clara.grant_client_egress_purpose` is a
-> *reader* of the evidence artifact — it validates the stamp, it does not apply it, and
-> it never mutates `clara.documents`. Today the only verb that stamps
-> `document_kind='consent_evidence'` is the legacy `clara.grant_client_egress`
-> (0014); `clara.set_document_kind` explicitly refuses the kind ("consent-evidence
-> classification is owned by the egress consent path", CLR28). So for a client that has
-> never held a legacy egress consent, the evidence document must be stamped through the
-> legacy grant path (which the firm runs anyway for invoice-facts) before the typed grant
-> can cite it. If a firm ever needs typed wiki consent **without** legacy invoice-facts
-> consent, that gap needs an owner ruling and a small follow-on verb — it is not a
-> workaround to invent at the console.
+Refusals: `CLR10` blank op key or blank reason · `CLR11` the document is not in your firm
+· `CLR28` `evidence_mismatch` (not ingested, or bytes not verified) · `CLR28`
+`evidence_kind_conflict` (the document is already classified as something else — you
+cannot re-label a coded invoice as a consent letter) · `CLR03`/`CLR04` if the caller is
+not an owner. It is idempotent: the same op key with the same arguments replays the
+receipt, and re-classifying an already-`consent_evidence` document is a no-op.
+
+> **What this verb does and does not do.** It stamps the kind and **grants nothing** — no
+> legacy consent, no typed consent, no activation, no authorization. That separation is
+> the point of the verb. `clara.grant_client_egress_purpose` (step 2) is a *reader* of
+> the evidence artifact: it validates the stamp, it never applies it and it never mutates
+> `clara.documents`.
+>
+> **Why it exists (added 2026-07-25).** Until this verb landed, the only live writer of
+> `document_kind='consent_evidence'` was the **legacy** `clara.grant_client_egress`
+> (0014), which in the same call mints a purpose-blind consent authorizing invoice-facts
+> egress — and `clara.set_document_kind` refuses the kind outright ("consent-evidence
+> classification is owned by the egress consent path", CLR28). So a client who consented
+> **only** to wiki synthesis could not be onboarded without being granted egress they
+> never agreed to. Wiki consent now requires no legacy consent at all.
+>
+> The stamp also makes the letter structurally non-egressable in the other direction:
+> 0014's `_enqueue_invoice_facts_core` exempts a `consent_evidence` document, so the
+> consent letter itself is never sent to a vendor.
 
 ### 2. Grant the typed consent
 
@@ -149,6 +169,14 @@ To resume after a pause, run step 4 again against the same still-live consent.
 - A revocation **committed before** an authorization is consumed **must refuse**, and
   does: `consume_egress_dispatch` returns `unknown`, the model is never called, nothing is
   published, and the event records `held_consent`.
+- An authorization can only ever be spent on **the dispatch it was minted for**. Consume
+  re-verifies the firm, the client, the purpose and the exact event before consuming; a
+  mismatch returns the same `unknown` and leaves the authorization untouched. So a
+  cached, injected or misassociated authorization cannot carry one client's data under
+  another client's consent — that binding is enforced in the database, not by the
+  runtime remembering which id belongs to which client.
+- The 120-second TTL is **wall clock**. A caller sitting inside a long-open transaction
+  cannot extend it by holding that transaction open.
 - An authorization **consumed before** the revocation commits **may dispatch**. Those
   bytes were authorized; the revocation applies from its own commit forward.
 - **Absolute cancellation after consumption but before the bytes leave the process is not

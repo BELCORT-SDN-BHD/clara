@@ -132,7 +132,13 @@ const WAVE_B_0020_RUNTIME_FNS = [
 ];
 // The owner floor (admin+) is enforced INSIDE each body; the grant itself is the
 // coarse PostgREST-rpc grant to clara_authenticated, the WAVE_A2_HUMAN_FNS pattern.
+// classify_consent_evidence_document is the 2026-07-25 ratified §7.1 amendment (ratchet R1-F3):
+// the OWNER path that stamps document_kind='consent_evidence' and grants NO egress. Before it,
+// the only live writer of that stamp was the LEGACY grant_client_egress, which in the same call
+// mints a purpose-blind consent authorizing invoice-facts egress — so the runbook's step 1 could
+// not be run at all for a client who consented ONLY to wiki synthesis.
 const WAVE_B_0020_HUMAN_FNS = [
+  "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
   "deactivate_client_egress_purpose", "revoke_client_egress_purpose",
 ];

@@ -40,30 +40,41 @@ let w = null;
 /** §6's closed set: fn → the 19-migration prestate's normalized-prosrc digest,
  *  its expected overload count, and its expected EXACT identity signature.
  *  Captured from clara_0020_rig at migration 19 (2026-07-25). */
+//
+//  RATCHET R1-F4 (2026-07-25). `sha` is the NORMALIZED digest (comments stripped, whitespace
+//  collapsed, lowercased) — useful for a readable diff, but NOT byte identity: normalization
+//  reaches inside string literals, so renaming a case-sensitive refusal token would pass it.
+//  `exact` is the SHA-256 of the UNMODIFIED prosrc, and it is the assertion §6's words actually
+//  promise. Both are checked; only `exact` is load-bearing.
 const BYTE_IDENTICAL = {
   grant_client_egress: {
     sig: "clara.grant_client_egress(uuid,uuid,text,text)",
     len: 2352, sha: "45c9c5fe1e21d6e39c05f6d44b1b45ef5750e7f3d39d8010fa5fa191b54d81fd",
+    exact: "86c35e8d529f2dc3cb824d7f63ba7cf75fda97c287fadf8562dacdf955d03dcf",
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_authenticated=X/clara_fn_owner"],
   },
   revoke_client_egress: {
     sig: "clara.revoke_client_egress(uuid,text,text)",
     len: 1348, sha: "1799808550d7f46fa651081e9f56b65062cddcf6203d1f937de19581242e43ec",
+    exact: "192339765ddaab2f53f09020e7443b8c5fd236c9518e22362d130569d5c07e07",
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_authenticated=X/clara_fn_owner"],
   },
   claim_document_processing_task: {
     sig: "clara.claim_document_processing_task(uuid,text,boolean)",
     len: 3637, sha: "d02763514e282f8f041137cc4aba5f3c8187019f4dfe543cf96edd5e7495acd9",
+    exact: "f9da98aa7c3a7a37ee79f5e67e523429c83f10bf4247489946f66457e80f312d",
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_runtime=X/clara_fn_owner"],
   },
   _enqueue_invoice_facts_core: {
     sig: "clara._enqueue_invoice_facts_core(uuid)",
     len: 4312, sha: "86ff810a99e7bf230017f8565d930b64c16e4f6c6e16cd6084a5cebdff1a27f0",
+    exact: "0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e",
     acl: ["clara_fn_owner=X/clara_fn_owner"],
   },
   record_wiki_source_ingest: {
     sig: "clara.record_wiki_source_ingest(uuid,uuid,text,text)",
     len: 2515, sha: "65609d6f4a9e0399985f5568f960ae6cbcc7457bb372ee38c4520bf20662aaac",
+    exact: "0c3adf2dc31ff2780df85b27ae3d5a09f76ae7f98cf7b816d557c74c8fdb484c",
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_runtime=X/clara_fn_owner"],
   },
 };
@@ -117,6 +128,10 @@ test("[0020 §6 — THE exact-diff pin]: the five closed-set functions have ONE 
     const n = normSrc(facts.src);
     if (sha256(n) !== pin.sha) {
       drift.push(`${name}: prestate len=${pin.len} sha=${pin.sha} → now len=${n.length} sha=${sha256(n)}`);
+    }
+    // R1-F4: the pin §6 actually promises. Normalization is a readability aid, not identity.
+    if (sha256(facts.src) !== pin.exact) {
+      drift.push(`${name}: EXACT prosrc sha ${pin.exact} → ${sha256(facts.src)} (a change invisible to the normalized digest is still a change)`);
     }
     assert.equal(facts.secdef, true, `${name} is still SECURITY DEFINER`);
     assert.equal(facts.owner, ROLES.fnOwner, `${name} is still owned by clara_fn_owner`);
@@ -207,7 +222,7 @@ test("[0020 §6/§9.7 — the wave-a-egress invariant, verbatim]: with a typed c
   const ev2 = await filedDocument(w.users.alice, { firm: w.firms.A, client });
   // A typed consent is live for the SAME client — the exact shape that would have
   // broken the invariant had typed purposes landed on the legacy table.
-  const typedEv = await consentEvidenceDoc(w.firms.A);
+  const typedEv = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: typedEv.documentId, opKey: opk("lg_tp") });
   assert.ok(await livePurposeConsent(client), "the typed consent is live");
 
@@ -254,6 +269,7 @@ test("[0020 §6]: 0020 introduced NO new SQLSTATE — every 0020 function body r
      where n.nspname='clara'
        and p.proname in ('prepare_egress_dispatch','consume_egress_dispatch',
                          'resolve_document_client','resolve_and_ingest_wiki_source',
+                         'classify_consent_evidence_document',
                          'grant_client_egress_purpose','activate_client_egress_purpose',
                          'deactivate_client_egress_purpose','revoke_client_egress_purpose')
        and m[1] !~ '^CLR(0[1-9]|1[0-2]|2[0-9]|3[0-4])$'

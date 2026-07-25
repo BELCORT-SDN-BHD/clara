@@ -60,7 +60,7 @@ after(async () => { printLaneNotes("wb-0020-tail"); await endPool(); });
 // §8 — structural / catalog.
 // ===========================================================================
 
-test("META / [0020 §8]: EXACTLY the eight pinned functions exist, each with ONE overload, SECURITY DEFINER, search_path=clara,pg_temp, owned by clara_fn_owner", async () => {
+test("META / [0020 §8]: EXACTLY the nine pinned functions exist, each with ONE overload, SECURITY DEFINER, search_path=clara,pg_temp, owned by clara_fn_owner", async () => {
   fail0020(live);
   for (const [name, sig] of Object.entries({ ...RUNTIME_FNS, ...OWNER_FNS })) {
     assert.ok(await regProcedure(sig),
@@ -72,7 +72,66 @@ test("META / [0020 §8]: EXACTLY the eight pinned functions exist, each with ONE
     assert.match(String(f.config), /search_path=clara/, `${name} pins search_path=clara,pg_temp`);
     assert.match(String(f.result), /jsonb/i, `${name} returns jsonb`);
   }
-  assert.equal(ALL_0020_FN_NAMES.length, 8, "the closed set is eight functions");
+  // EIGHT in contract v1.0; NINE after the 2026-07-25 ratified §7.1 amendment (ratchet R1-F3)
+  // added clara.classify_consent_evidence_document — the owner path that stamps
+  // document_kind='consent_evidence' and grants NO egress. Without it the only live writer of
+  // that stamp was the LEGACY grant_client_egress, which in the same call authorizes
+  // purpose-blind invoice-facts egress, so §7.2's step 1 could not be executed for a client who
+  // consented ONLY to wiki synthesis.
+  assert.equal(ALL_0020_FN_NAMES.length, 9, "the closed set is nine functions");
+});
+
+test("[0020 §7.1 amendment / R1-F3]: the owner evidence-classification verb stamps consent_evidence, grants NOTHING, and refuses a document already classified as something else", async () => {
+  fail0020(live);
+  const { classifyConsentEvidence, seedVerifiedDocument, filedDocument, assertRaises,
+    detailReason } = await import("./wb-0020-helpers.mjs");
+  const client = await freshClient("cce_owner");
+  const seed = await seedVerifiedDocument({ firm: w.firms.A });
+  const before0 = (await rootQuery(
+    "select document_kind from clara.documents where id=$1", [seed.documentId])).rows[0].document_kind;
+  assert.equal(before0, null, "the letter is INGESTED but UNCLASSIFIED — what a real upload looks like");
+
+  const r = await classifyConsentEvidence(w.users.alice, { document: seed.documentId });
+  assert.equal(r.document_kind, "consent_evidence", "the owner verb stamps the kind");
+  assert.equal(r.prior_kind, null, "…and reports what it replaced");
+  assert.equal((await rootQuery(
+    "select document_kind from clara.documents where id=$1", [seed.documentId])).rows[0].document_kind,
+  "consent_evidence", "the stamp is on the document");
+
+  // THE POINT OF THE AMENDMENT: no egress of any kind was granted.
+  assert.equal(await countRows(LEGACY_CONSENT_TABLE, "where firm_id=$1 and client_id=$2", [w.firms.A, client]), 0,
+    "NO legacy purpose-blind consent — the pre-amendment shortcut was grant_client_egress, which mints one");
+  assert.equal(await countRows("client_egress_purpose_consents", "where client_id=$1", [client]), 0,
+    "…and no typed consent either: classification is not attestation");
+
+  // A coded bill cannot be re-labelled as a consent letter (the 0014 rule, kept).
+  const invoice = await filedDocument(w.users.alice, { firm: w.firms.A, client, kind: "invoice" });
+  const err = await assertRaises("CLR28",
+    () => classifyConsentEvidence(w.users.alice, { document: invoice.documentId }),
+    "classifying an already-classified invoice as consent evidence");
+  assert.equal(detailReason(err), "evidence_kind_conflict", "…with the kind-conflict discriminant");
+});
+
+test("[0020 §7.1 amendment / R1-F3]: the evidence-classification verb is OWNER-floored, firm-scoped (CLR11) and reachable only by clara_authenticated", async () => {
+  fail0020(live);
+  const { classifyConsentEvidence, seedVerifiedDocument, assertRaisesOneOf, assertRaises } =
+    await import("./wb-0020-helpers.mjs");
+  const seed = await seedVerifiedDocument({ firm: w.firms.A });
+  await assertRaisesOneOf(["CLR03", "CLR04"],
+    () => classifyConsentEvidence(w.users.bob, { document: seed.documentId }),
+    "classify_consent_evidence_document as a bookkeeper");
+  await assertRaises("CLR11",
+    () => classifyConsentEvidence(w.users.dave, { document: seed.documentId }),
+    "a firm-B owner classifying a firm-A document");
+  assert.equal((await rootQuery(
+    "select document_kind from clara.documents where id=$1", [seed.documentId])).rows[0].document_kind,
+  null, "neither refused call stamped anything");
+  for (const role of [ROLES.runtime, ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive]) {
+    assert.equal(await roleCanExecute(role, "classify_consent_evidence_document"), false,
+      `${role} cannot reach the evidence-classification verb`);
+  }
+  assert.equal(await roleCanExecute(ROLES.authenticated, "classify_consent_evidence_document"), true,
+    "…and clara_authenticated can (the owner floor is in the body)");
 });
 
 test("[0020 §8]: the four purpose-discriminated event types are registered — and 0020 registered NOTHING else", async () => {
@@ -307,11 +366,11 @@ test("[0020 §3.3/§8]: the FORBIDDEN return keys never appear in a VERDICT payl
   fail0020(live);
   const dark = await freshClient("dark_keys");
   const lit = await freshClient("lit_keys");
-  const { lightSynthesis, consumeDispatch } = await import("./wb-0020-helpers.mjs");
+  const { lightSynthesis, consumeDispatch, prepareBound } = await import("./wb-0020-helpers.mjs");
   await lightSynthesis(w.users.alice, { firm: w.firms.A, client: lit });
-  const granted = await prepareForLatestEvent({ firm: w.firms.A, client: lit });
+  const { verdict: granted, intent } = await prepareBound({ firm: w.firms.A, client: lit });
   const unknown = await prepareForLatestEvent({ firm: w.firms.A, client: dark });
-  const consumed = await consumeDispatch({ firm: w.firms.A, authorization: granted.authorization_id });
+  const consumed = await consumeDispatch({ authorization: granted.authorization_id, intent });
   for (const payload of [granted, unknown, consumed]) {
     for (const k of FORBIDDEN_RETURN_KEYS) {
       assert.ok(!Object.prototype.hasOwnProperty.call(payload ?? {}, k),

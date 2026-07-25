@@ -44,7 +44,11 @@
 //        and does. A revocation committed after it may still dispatch — that residual is documented
 //        (contract §3.6 / R-2), not claimed away. On either boundary refusing, the lane records
 //        held_consent with the UNCHANGED reason token and op key and calls NO model, writes NO
-//        Storage object and publishes NOTHING.
+//        Storage object and publishes NOTHING. The consume presents the FULL dispatch intent
+//        (firm, client, purpose, event seq + type) and runs in its own committed transaction —
+//        the 2026-07-25 ratified §3.4 amendment (ratchet R1-F1/F2): a two-argument consume made
+//        §3.2's client/purpose/event binding audit-only, so an authorization minted for one
+//        client could be spent on another's dispatch.
 //   (ii) DOCUMENT→CLIENT RESOLUTION IS SERVER-SIDE AND SERIALIZED. document.classified no longer
 //        asks an injected resolver for a client id; it calls clara.resolve_and_ingest_wiki_source
 //        INSIDE the effect transaction, where uniqueness is re-decided under a filing-topology lock
@@ -251,11 +255,41 @@ export async function prepareEgressDispatchDefault(
 }
 
 /** THE DISPATCH LINEARIZATION POINT. Single-use and terminal: a second consume of the same id, an
- *  expired id, a foreign-firm id, or an id whose consent/activation stopped being live all return
- *  {verdict:'unknown'} and the lane abandons the dispatch. */
-export async function consumeEgressDispatchDefault(client, { firmId, authorizationId }) {
-  const r = await client.query(
-    "select clara.consume_egress_dispatch($1,$2) as v", [firmId, authorizationId]);
+ *  expired id, a foreign-firm id, an id presented for a DIFFERENT client / purpose / event than the
+ *  one it was minted for, or an id whose consent/activation stopped being live all return
+ *  {verdict:'unknown'} and the lane abandons the dispatch.
+ *
+ *  TWO THINGS THIS HELPER OWNS (0020 ratchet R1-F1/F2):
+ *
+ *  1. It presents the FULL dispatch intent, not just the opaque id. The DB re-verifies that the
+ *     authorization was minted for exactly this (firm, client, purpose, event) before consuming.
+ *     Passing the intent is not a formality — it is what makes the binding structural instead of a
+ *     promise the caller keeps in a local variable.
+ *  2. It runs in its OWN committed transaction. A PostgreSQL function cannot commit its caller's
+ *     transaction, so on a pooled or long-open connection `granted` could otherwise be returned
+ *     from an uncommitted consume — the model would then be called on an authorization the revoker
+ *     can still see as unconsumed, and a later rollback would erase the record that the bytes left.
+ *     The explicit begin/commit makes `granted` MEAN committed for any caller, which is what
+ *     §3.6's linearization claim asserts. On any failure the transaction is rolled back and the
+ *     error propagates: no silent `unknown` that would look like an ordinary refusal.
+ *
+ *  PRECONDITION (already true of the whole plan phase): the connection is NOT inside a caller's
+ *  transaction. Both entry points run planEvent BEFORE their effect `begin`, and readWikiContext
+ *  a few lines above already opens and rolls back its own transaction on this same connection —
+ *  so the plan phase is autocommit by construction, and this helper relies on nothing new. */
+export async function consumeEgressDispatchDefault(
+  client, { firmId, authorizationId, clientId, purpose, eventSeq, eventType }) {
+  await client.query("begin");
+  let r;
+  try {
+    r = await client.query(
+      "select clara.consume_egress_dispatch($1,$2,$3,$4,$5,$6) as v",
+      [firmId, authorizationId, clientId, purpose, eventSeq, eventType]);
+    await client.query("commit");
+  } catch (e) {
+    await client.query("rollback").catch(() => {});
+    throw e;
+  }
   return r.rows[0]?.v ?? { verdict: "unknown" };
 }
 
@@ -276,7 +310,8 @@ export async function resolveAndIngestWikiSourceDefault(client, { firmId, docume
 export async function hasSynthesisAuthorizationSurfaceDefault(client) {
   const r = await client.query(
     "select to_regprocedure('clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text)') is not null"
-    + " and to_regprocedure('clara.consume_egress_dispatch(uuid,uuid)') is not null as surface");
+    + " and to_regprocedure('clara.consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text)')"
+    + " is not null as surface");
   return r.rows[0]?.surface === true;
 }
 export async function hasResolverSurfaceDefault(client) {
@@ -426,8 +461,16 @@ async function planCounterpartySynthesis(client, { firmId, ev, clientId, counter
   // dispatch linearization point: a revocation that committed since phase 1 refuses here, and the
   // model is never called. Abandoning is a TYPED TERMINAL (checkpoint-advancing), never a crash and
   // never a dead-letter loop.
+  //
+  // The SAME dispatch intent that was prepared is presented again (0020 ratchet R1-F1). The DB
+  // refuses an authorization that does not match this exact (client, purpose, event), so a cached,
+  // injected or misassociated authorization cannot be spent on a different client's dispatch — the
+  // binding is enforced in the DB, not by this function keeping the id in the right variable.
   const consumed = await (deps.consumeEgressDispatch ?? consumeEgressDispatchDefault)(
-    client, { firmId, authorizationId });
+    client, {
+      firmId, authorizationId, clientId,
+      purpose: WIKI_SYNTHESIS_PURPOSE, eventSeq: ev.seq, eventType: ev.eventType,
+    });
   if (consumed?.verdict !== "granted") return heldConsent({ clientId, ev });
 
   const out = await (deps.synthesize ?? synthesizeWikiPageDefault)(

@@ -80,7 +80,7 @@ test("[0020 §2.2]: the composite FK (consent_id,firm_id,client_id,purpose) → 
 test("[0020 §2.3 / §9.1 — THE load-bearing activation cell]: a typed consent that is LIVE but NEVER ACTIVATED returns `unknown` — and it does so with NO hold row present at all", async () => {
   fail0020(live);
   const client = await freshClient("act_noact");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev.documentId, opKey: opk("g_noact") });
   const c = await livePurposeConsent(client);
   assert.ok(c?.id, "the typed consent is live");
@@ -96,7 +96,7 @@ test("[0020 §7.2]: the runbook order — grant → verdict STILL unknown → ac
   fail0020(live);
   const lit = await freshClient("act_runbook");
   const dark = await freshClient("act_dark");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client: lit, evidenceDocument: ev.documentId, opKey: opk("g_rb") });
   const c = await livePurposeConsent(lit);
   assert.deepEqual(await prepareForLatestEvent({ firm: w.firms.A, client: lit }), UNKNOWN_VERDICT,
@@ -115,8 +115,8 @@ test("[0020 §7.1]: activation requires p_consent to BE the live typed consent �
   fail0020(live);
   const a = await freshClient("act_bind_a");
   const b = await freshClient("act_bind_b");
-  const evA = await consentEvidenceDoc(w.firms.A);
-  const evB = await consentEvidenceDoc(w.firms.A);
+  const evA = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
+  const evB = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client: a, evidenceDocument: evA.documentId, opKey: opk("g_ba") });
   await grantPurpose(w.users.alice, { client: b, evidenceDocument: evB.documentId, opKey: opk("g_bb") });
   const ca = await livePurposeConsent(a);
@@ -139,7 +139,7 @@ test("[0020 §7.1]: activation requires p_consent to BE the live typed consent �
 test("[0020 §7.1 / §9.1]: a SECOND live activation for the same (client,purpose) refuses CLR28", async () => {
   fail0020(live);
   const client = await freshClient("act_dupe");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev.documentId, opKey: opk("g_du") });
   const c = await livePurposeConsent(client);
   await activatePurpose(w.users.alice, { client, consent: c.id, opKey: opk("a_du1") });
@@ -154,7 +154,7 @@ test("[0020 §7.1 / §9.1]: a SECOND live activation for the same (client,purpos
 test("[0020 §2.3 / §9.1]: DEACTIVATION without revocation (a pause) → verdict `unknown`; the consent stays live; re-activating the SAME consent re-lights it", async () => {
   fail0020(live);
   const client = await freshClient("act_pause");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev.documentId, opKey: opk("g_pa") });
   const c = await livePurposeConsent(client);
   await activatePurpose(w.users.alice, { client, consent: c.id, opKey: opk("a_pa") });
@@ -174,7 +174,7 @@ test("[0020 §2.3 / §9.1]: DEACTIVATION without revocation (a pause) → verdic
 test("[0020 §2.3 — the version-match law]: REVOKE-and-REGRANT never silently re-authorizes; only an explicit activation of the NEW consent does", async () => {
   fail0020(live);
   const client = await freshClient("act_regrant");
-  const ev1 = await consentEvidenceDoc(w.firms.A);
+  const ev1 = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev1.documentId, opKey: opk("g_r1") });
   const c1 = await livePurposeConsent(client);
   await activatePurpose(w.users.alice, { client, consent: c1.id, opKey: opk("a_r1") });
@@ -186,7 +186,7 @@ test("[0020 §2.3 — the version-match law]: REVOKE-and-REGRANT never silently 
   assert.equal(await livePurposeActivation(client), null,
     "§7.1: a typed revoke DEACTIVATES the activation in the same transaction");
 
-  const ev2 = await consentEvidenceDoc(w.firms.A);
+  const ev2 = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev2.documentId, opKey: opk("g_r2") });
   const c2 = await livePurposeConsent(client);
   assert.notEqual(c2.id, c1.id, "the re-grant minted a NEW consent id");
@@ -201,7 +201,7 @@ test("[0020 §2.3 — the version-match law]: REVOKE-and-REGRANT never silently 
 test("[0020 §7.1 / A20-9]: the OWNER floor on ALL FOUR typed RPCs — a bookkeeper is refused CLR03/CLR04 and changes nothing", async () => {
   fail0020(live);
   const client = await freshClient("act_floor");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   // bob is a firm-A BOOKKEEPER (buildWorld) — below the owner floor.
   await assertRaisesOneOf(["CLR03", "CLR04"],
     () => grantPurpose(w.users.bob, { client, evidenceDocument: ev.documentId, opKey: opk("f_g") }),
@@ -224,21 +224,29 @@ test("[0020 §7.1 / A20-9]: the OWNER floor on ALL FOUR typed RPCs — a bookkee
   assert.ok(await livePurposeActivation(client), "…and the activation is still live");
 });
 
-test("[0020 §7.1]: a FOREIGN-FIRM owner cannot reach another firm's client on any typed RPC — CLR11, the no-existence-oracle code", async () => {
+// RATCHET R1-F5 (2026-07-25). Blind, this cell permitted CLR11 *or* CLR28 because activate,
+// deactivate and revoke reached CLR28 first: each searched globally by (client, purpose), took
+// FOR UPDATE on the matching live row — a FOREIGN FIRM's row — and only then compared firm_id.
+// That is cross-firm lock reach and the wrong code: §7.1 mandates CLR11 for a client not in
+// your firm, precisely because CLR28 ("nothing live here") vs CLR11 ("not your client") is
+// itself an existence oracle. Firm membership is now verified FIRST and every state-row
+// predicate carries firm_id, so the widened expectation is retired: CLR11 EXACTLY.
+test("[0020 §7.1 amendment]: a FOREIGN-FIRM owner cannot reach another firm's client on any typed RPC — CLR11 EXACTLY, and no foreign row is ever locked", async () => {
   fail0020(live);
   const client = await freshClient("act_xfirm");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev.documentId, opKey: opk("x_g") });
   const c = await livePurposeConsent(client);
   await activatePurpose(w.users.alice, { client, consent: c.id, opKey: opk("x_a") });
-  // dave OWNS firm B. Every call names a firm-A client.
+  // dave OWNS firm B. Every call names a firm-A client that IS live and IS activated — so a
+  // CLR28 here would prove the body found firm A's row before noticing whose it was.
   for (const [label, fn] of [
     ["grant", () => grantPurpose(w.users.dave, { client, evidenceDocument: ev.documentId, opKey: opk("x_g2") })],
     ["activate", () => activatePurpose(w.users.dave, { client, consent: c.id, opKey: opk("x_a2") })],
     ["deactivate", () => deactivatePurpose(w.users.dave, { client, opKey: opk("x_d2") })],
     ["revoke", () => revokePurpose(w.users.dave, { client, opKey: opk("x_r2") })],
   ]) {
-    await assertRaisesOneOf(["CLR11", "CLR28"], fn, `${label}_client_egress_purpose across firms`);
+    await assertRaises("CLR11", fn, `${label}_client_egress_purpose across firms`);
   }
   assert.ok(await livePurposeActivation(client), "the firm-A client is untouched by the firm-B owner");
 });
@@ -247,8 +255,8 @@ test("[0020 §7.1 — op-key discipline]: a same-key/different-args reuse raises
   fail0020(live);
   const client = await freshClient("act_opk");
   const other = await freshClient("act_opk2");
-  const ev1 = await consentEvidenceDoc(w.firms.A);
-  const ev2 = await consentEvidenceDoc(w.firms.A);
+  const ev1 = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
+  const ev2 = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   const key = opk("shared");
   await grantPurpose(w.users.alice, { client, evidenceDocument: ev1.documentId, scopeNote: "first", opKey: key });
   // SAME key, DIFFERENT args → CLR10 'op_key reused with different args'.
@@ -266,7 +274,7 @@ test("[0020 §7.1 — op-key discipline]: a same-key/different-args reuse raises
 test("[0020 §7.1]: argument validation is CLR10 — a null/blank op key and a blank reason are refused before any effect", async () => {
   fail0020(live);
   const client = await freshClient("act_args");
-  const ev = await consentEvidenceDoc(w.firms.A);
+  const ev = await consentEvidenceDoc(w.users.alice, { firm: w.firms.A });
   await assertRaises("CLR10",
     () => grantPurpose(w.users.alice, { client, evidenceDocument: ev.documentId, opKey: "   " }),
     "grant with a blank op key");

@@ -1,6 +1,24 @@
-# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.0 (RATIFIED)
+# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.1 (RATIFIED)
 
-> **Status: RATIFIED v1.0.** Ratification followed the ADR-037 method: an
+> **Status: RATIFIED v1.1 — v1.0 plus the ratified ratchet-R1 amendments (2026-07-25).**
+> v1.0 was ratified as a *design* contract; ratchet R1 reviewed the BUILD against it,
+> cross-model and repo-grounded, and found four things wrong **with the contract
+> itself**, not merely with the build. All four are amended below, in place, with the
+> v1.0 wording preserved wherever it is still true. Nothing else in this document is
+> rewritten.
+>
+> | # | Amendment | Landed in |
+> |---|---|---|
+> | **A1** | `consume_egress_dispatch` takes **six** arguments and re-verifies the dispatch it is being used for. v1.0's two-argument form made §3.2's client/purpose/event binding **audit-only** — two independent reviews found it, one as a NIT and one as a BLOCKER. | **§3.2**, **§3.4**, **§3.7**, **§8**, **§9.1**, **§10.2** |
+> | **A2** | TTL and expiry are **wall clock** (`clock_timestamp()`), and the runtime's consume helper runs in its **own committed transaction**. v1.0 left §3.6's linearization claim conditional on a caller nobody had audited. | **§3.2**, **§3.4**, **§3.6**, **§3.7**, **§9.3** |
+> | **A3** | A fifth owner RPC, `classify_consent_evidence_document`. v1.0's §7.2 step 1 was **not executable**: no verb could stamp `document_kind='consent_evidence'` without also granting purpose-blind legacy egress. | **§7.1**, **§7.2**, **§8**, **§9.1**, **§9.7** |
+> | **A4** | §6's byte-identity pins hash **exact `prosrc` with SHA-256** and add legacy **ACL** and **relation-structure** pins. v1.0's normalized-md5 pin was neither byte nor semantic identity. | **§6**, **§8** |
+>
+> Two **errata** are ratified with them: §8's "three partial unique indexes" is wrong
+> (two uniques + one non-unique open-authorization index — see §8), and §3.3/§5.1's
+> absolute timing-oracle language is replaced by an honest, bounded statement (§3.3).
+>
+> **Ratification of v1.0** followed the ADR-037 method: an
 > orchestrator draft (v0.1) → a cross-model adversarial design debate (Codex
 > `gpt-5.6-sol`, xhigh, read-only, repo-grounded) which returned **REJECT as a
 > ratification basis** with twelve BINDING AMENDMENTS and four named authorization
@@ -254,6 +272,14 @@ One row per prepared dispatch:
   binding consent and activation to the same (firm, client, purpose).
 - **Dispatch intent:** `event_seq bigint NOT NULL` · `event_type text NOT NULL` —
   the event this authorization was prepared for.
+
+  **AMENDMENT A1 (ratified 2026-07-25).** In v1.0 the word *binds* in this section was
+  **false advertising** for `client_id`, `purpose`, `event_seq` and `event_type`:
+  §3.4 never compared them, so they were recorded for audit and nothing more. The
+  scope of an authorization held only for as long as the caller kept the id in the
+  right local variable — which is model discipline, and Clara's cardinal invariant is
+  that authorization is structural and enforced in the DB. **§3.4 now re-verifies all
+  four**, so *binds* means what it says. See §3.4 for the failure this closes.
 - `document_sha256 text NULL` with `CHECK (purpose <> 'wiki_synthesis' OR
   document_sha256 IS NULL)` — WB-R23's "*+ document hash where applicable*" slot.
   Counterparty synthesis is not document-tied, so it is n/a today; the column exists so
@@ -261,10 +287,18 @@ One row per prepared dispatch:
 - `issued_at timestamptz NOT NULL default now()` · **`expires_at timestamptz NOT NULL`**
   · `consumed_at` · `invalidated_at` + `invalidated_reason`.
 - `CHECK (consumed_at IS NULL OR invalidated_at IS NULL)` — at most one terminal.
-- **TTL: 120 seconds**, a single named constant in the migration, asserted by the tail.
-  The plan→consume gap is one wiki-context read; 120s is generous by orders of
-  magnitude and short enough that a stranded authorization cannot be replayed later.
-  Expiry is time-derived — no sweep job, no expiry write.
+- **TTL: 120 seconds of WALL CLOCK**, a single named constant in the migration,
+  asserted by the tail. The plan→consume gap is one wiki-context read; 120s is generous
+  by orders of magnitude and short enough that a stranded authorization cannot be
+  replayed later. Expiry is time-derived — no sweep job, no expiry write.
+
+  **AMENDMENT A2 (ratified 2026-07-25).** `issued_at` / `expires_at` are stamped from
+  `clock_timestamp()`, and §3.4 compares expiry against `clock_timestamp()` — **never
+  `now()`**. `now()` is transaction-stable: it returns the caller's transaction start
+  time for the whole transaction, so a consume called from a long-open transaction saw
+  an authorization that expired minutes earlier as still live, and the TTL stopped
+  bounding anything. The property this buys is stated plainly: **the 120 seconds are
+  120 seconds of wall clock for every caller, whatever transaction they are in.**
 - **Single use.** A consumed authorization is terminal. If the model call fails and the
   event is re-driven, planning starts over and mints a **new** authorization. There is
   no reuse path.
@@ -301,23 +335,91 @@ lives in the typed-consent table and the audit/event trail, owner-only.
 `expires_at` and any count **never** appear in the return. Asserted by the tail (§8) and
 by a battery cell (§9).
 
+**The timing property, stated honestly (erratum, ratified 2026-07-25).** v1.0 asserted
+"no timing branch a caller can distinguish" here and in §5.1, as an absolute. **That
+claim cannot be substantiated in SQL and is withdrawn.** The *payload* is byte-identical
+across every non-granted cause and that is enforced; *execution* is not constant-time,
+and cannot be made so at this layer — an index hit and an index miss do measurably
+different work, and no amount of SQL changes that. What 0020 claims instead, and what is
+implemented:
+
+- Both non-granted **payloads and error shapes are byte-identical**, always. This is
+  the property the design actually rests on, and it is asserted exhaustively (§9.1).
+- The coarsest observable differences are **removed**: a firm-leading partial index on
+  live activations (`(firm_id, client_id, purpose) where deactivated_at is null`) means
+  the verdict probe is one index descent whether the client is lit, dark, foreign or
+  nonexistent; and §5.1's candidate aggregation is **capped at two rows**, so a
+  document's filing count cannot be inferred from how long the resolver takes.
+- **A residual remains, and is named** (R-7, §11): a determined attacker with precise
+  repeated timings against these DEFINER verbs may still be able to distinguish some
+  states. Closing it needs an architectural control (a constant-time gateway, a rate
+  limit on the runtime verbs), not a SQL patch. Claiming otherwise would be worse than
+  the residual: it would tell a future reader that a control exists where none does.
+  Same discipline as §3.6's honest linearization note.
+
 ### 3.4 `clara.consume_egress_dispatch` — the dispatch linearization point
 
-`clara.consume_egress_dispatch(p_firm uuid, p_authorization uuid) returns jsonb`
+> **AMENDED 2026-07-25 (ratified amendment A1 + A2, ratchet R1).** v1.0 specified
+> `consume_egress_dispatch(p_firm uuid, p_authorization uuid)` and listed exactly five
+> liveness checks — none of which touched the client, the purpose, or the dispatch
+> intent the row records. **This was a weakness in the ratified contract, not a build
+> deviation:** the build matched §3.4 precisely, and two independent cross-model
+> reviews found the same hole from opposite directions (one filed it as a NIT, one as a
+> BLOCKER).
+>
+> **The failure it permitted.** Same firm. Client A is lit; client B is not. An
+> authorization X is prepared for A. During a **B** event, an injected, cached or simply
+> misassociated authorization id — X — is presented to consume. Consume saw a live,
+> same-firm, unexpired, unconsumed row whose consent and activation were both live, and
+> returned `granted`. **B's confidential context then went to the model with no B
+> consent and no B activation, and the database could not detect it.** The same defect
+> permitted cross-event reuse, and would have made cross-purpose reuse live the moment a
+> second purpose was admitted.
+>
+> **Why it had to be fixed rather than documented.** §3.2 says the authorization row
+> *binds* client, purpose and event. If consumption never checks them, that word is
+> false: the binding is audit data, and the actual scope of an authorization is
+> whatever the caller chooses to spend it on. An authorization whose scope holds only
+> because the caller keeps it in the right local variable is exactly the "enforced by
+> model discipline" that Clara's structural invariants exist to abolish.
+
+`clara.consume_egress_dispatch(p_firm uuid, p_authorization uuid, p_client uuid,
+p_purpose text, p_event_seq bigint, p_event_type text) returns jsonb`
 
 Same DEFINER/ACL discipline. Returns `{"verdict":"granted"}` or `{"verdict":"unknown"}` —
 **one key**.
 
 It must, atomically in one transaction:
 
-1. Lock the authorization row.
-2. Return `unknown` unless ALL hold: the row exists; `firm_id = p_firm`;
-   `consumed_at IS NULL`; `invalidated_at IS NULL`; `expires_at > now()`; the named
-   consent is still live (`revoked_at IS NULL`); the named activation is still live
-   (`deactivated_at IS NULL`) and still names that consent.
-3. On success, set `consumed_at = now()` and return `granted`.
+1. Return `unknown` if **any** argument is null.
+2. Lock the authorization row **`where id = p_authorization AND firm_id = p_firm`** —
+   `firm_id` is in the *lock predicate*, so a foreign-firm caller never reaches, and
+   never takes a row lock on, another firm's authorization.
+3. **Re-verify the dispatch this authorization is being used for.** Return `unknown`
+   unless `client_id = p_client` **and** `purpose = p_purpose` **and**
+   `event_seq = p_event_seq` **and** `event_type = p_event_type`. A mismatch is
+   **not** consumed and **not** distinguished — same uniform `unknown`, byte-identical
+   to every other refusal, so it can never become a "which client is this for?" oracle.
+   The presented authorization stays live for its own legitimate dispatch.
+4. Return `unknown` unless ALL hold: `consumed_at IS NULL`; `invalidated_at IS NULL`;
+   **`expires_at > clock_timestamp()`** (A2 — wall clock, never the caller's
+   transaction-stable `now()`); the named consent is still live (`revoked_at IS NULL`);
+   the named activation is still live (`deactivated_at IS NULL`) and still names that
+   consent.
+5. On success, set `consumed_at = clock_timestamp()` and return `granted`.
 
 A second consume of the same id returns `unknown`. There is no "peek" variant.
+
+**What the DB cannot do, stated plainly (A2).** A PostgreSQL function cannot commit its
+caller's transaction. `granted` therefore means *committed* only if the caller's
+transaction commits — a caller may consume, call the model, and then roll back, leaving
+no committed `consumed_at` even though the bytes left. That is a property of the
+capability, not of any particular caller, so it is closed on the **caller** side: the
+runtime's default consume helper runs this verb in its own explicit `begin`/`commit`
+before the model can be reached (§3.7). §3.6's linearization statement is unconditional
+only because of that discipline, and both halves are asserted — the DB-side limit by a
+rig cell that consumes and rolls back, the runtime-side fix by a unit cell that pins the
+helper's statement sequence.
 
 ### 3.5 Invalidation on withdrawal
 
@@ -344,6 +446,17 @@ names a new consent id, and the stranded authorizations name the old one.
   The residual window is the interval between `consume_egress_dispatch` committing and
   the AI-SDK request being written to the socket — normal-case sub-millisecond.
 
+**The commit precondition (A2, ratified 2026-07-25).** The two statements above are
+about *committed* consumption. A PostgreSQL function cannot commit its caller's
+transaction, so "a revocation committed before consumption must refuse" is unconditional
+only if `granted` implies committed — which it does **not** for an arbitrary caller. The
+contract therefore now states the caller-side obligation as part of the guarantee: **the
+consume must run in its own committed transaction, and must return before the model call
+is made.** The runtime's default helper does exactly this (§3.7). A caller that consumes
+inside a longer transaction and later rolls back gets a `granted` that leaves no record —
+the bytes left, the audit trail says they did not. That is a caller defect, and it is now
+a stated precondition rather than an unexamined assumption.
+
 This is a strictly stronger guarantee than as-built (where the window is
 read→context-read→model-call, and the revoker has no way to invalidate anything), and it
 is the strongest guarantee available without changing the egress architecture.
@@ -363,10 +476,16 @@ is the strongest guarantee available without changing the egress architecture.
   `authorization_id`.
 - Immediately before the model call (`deps.synthesize ?? synthesizeWikiPageDefault`),
   and **after** the wiki-context read, call `consume_egress_dispatch(firmId,
-  authorizationId)`. Proceed to the model **only** on `granted`. Otherwise abandon: no
-  `synthesize`, no `putAndVerifyContent`, no `publish` — return `held_consent` with the
-  same reason token. The refusal is a **typed terminal**: a checkpoint-only advance,
-  never a crash, never a dead-letter loop.
+  authorizationId, clientId, 'wiki_synthesis', ev.seq, ev.eventType)` — **the same
+  dispatch intent that was prepared** (A1). Proceed to the model **only** on `granted`.
+  Otherwise abandon: no `synthesize`, no `putAndVerifyContent`, no `publish` — return
+  `held_consent` with the same reason token. The refusal is a **typed terminal**: a
+  checkpoint-only advance, never a crash, never a dead-letter loop.
+- **The default consume helper owns its transaction (A2).** It issues `begin` → consume
+  → `commit`, and on failure `rollback` + rethrow (never a silent `unknown`, which would
+  be indistinguishable from a refusal). This is what makes §3.6's linearization
+  statement true for any caller, not just for the loop's dedicated autocommit
+  `pg.Client`. A consumer-test cell pins the statement sequence.
 - Both calls are behind exact-signature surface guards (§10.2). Absent surface → the
   lane falls back to today's dark held path; the rest of wiki projection stays active.
 - **Injected `deps` cannot stay unchanged.** The consumer tests must model
@@ -467,7 +586,17 @@ status.) A `client_id` is released **only** on `unique`, never on `ambiguous`.
 
 **Uniform not-found.** Foreign-firm, nonexistent, bytes-unverified, and genuinely
 zero-active-filing inputs all return the **identical** `{"status":"unresolved"}` — byte
-for byte, same key set, no error, no timing branch a caller can distinguish.
+for byte, same key set, no error.
+
+**Erratum (ratified 2026-07-25):** v1.0 ended that sentence with "no timing branch a
+caller can distinguish". That absolute is withdrawn — see §3.3's honest timing note and
+residual **R-7**. Concretely here: the distinct-client aggregation is **capped at two
+rows** (`select distinct client_id … limit 2`), because `status` conveys zero/one/many
+and a client id is released only on `unique`, so a third row can never change any
+caller-visible outcome — while aggregating every filing of a large topology made the
+response time a coarse oracle for how many clients a document is filed to. The cap
+bounds the work a repeated prober can induce; it does not make the function
+constant-time, and this contract no longer says it does.
 
 ### 5.2 Why a read-then-mutate resolver is not enough
 
@@ -578,6 +707,32 @@ in a different relation, and the 0015 predicate names `clara.client_egress_conse
 only. This is the property the separate-relation decision buys, and it is why v0.1's
 whole "one-live-index resolution" problem no longer exists.
 
+### 6.1 How "byte-identical" is actually pinned (AMENDMENT A4, ratified 2026-07-25)
+
+v1.0 left the pin mechanism to the build lane, and the build chose
+`md5(regexp_replace(lower(prosrc), '\s+', '', 'g'))`. **That is neither byte identity nor
+semantic identity.** Lowercasing and whitespace-stripping reach *inside string literals*,
+so renaming a case-sensitive downstream token — `'{"reason":"no_consent"}'` to
+`'{"reason":"NO_CONSENT"}'`, say — passed the pin unchanged while breaking every consumer
+that matches on it. The v1.0 tail also pinned only the legacy table's **columns** and one
+index definition: a dropped trigger, a relaxed FK, an RLS/policy alteration or a widened
+function ACL all sailed through while the tail reported "byte identity". The word was
+doing work the assertion did not.
+
+The pins are therefore:
+
+- **Exact `prosrc`, SHA-256, no normalization**, for each of the five closed-set
+  functions. A readable normalized digest may be kept *alongside* it as a diffing aid;
+  only the exact digest is load-bearing.
+- **The legacy functions' EXECUTE ACLs as a closed set** — the full `proacl` of all five,
+  sorted and compared as one string. §6 promises the ACLs, so they are pinned.
+- **The legacy relation's full structure as one digest**: every constraint definition,
+  every index definition, every non-internal trigger definition, the RLS flags and owner,
+  and every policy (name, command, roles, USING, WITH CHECK).
+
+All three are asserted in the migration tail (§8) **and** mirrored against the live
+catalog by the battery, so a later migration cannot quietly widen them either.
+
 ---
 
 ## 7. Re-attestation and activation surface (owner RPC, not UI)
@@ -586,20 +741,50 @@ There is **no consent-granting dashboard surface** and 0020 does not build one. 
 is owner-RPC-only through PostgREST under an owner JWT. The 0020 deliverable is a
 documented runbook, not UI.
 
-### 7.1 The four owner RPCs
+### 7.1 The owner RPCs (four in v1.0; **five** after amendment A3)
 
 All: SECURITY DEFINER · `set search_path = clara, pg_temp` · **owner floor in-function
 via `clara._human_ctx(clara.role_rank('owner'))`** · `revoke all from public` · **GRANT
 EXECUTE to `clara_authenticated` ONLY** (never `clara_runtime`, never the agent or wake
-roles) · op-keyed through `_reserve_op` / `_finish_op` · each emits its §4.1 event and an
-`_audit` row.
+roles) · op-keyed through `_reserve_op` / `_finish_op` · each writes an `_audit` row, and
+each of the four consent verbs emits its §4.1 event.
 
 | Function | Effect |
 |---|---|
+| `classify_consent_evidence_document(p_document, p_reason, p_op_key)` | **AMENDMENT A3.** Stamps `document_kind = 'consent_evidence'` on an in-firm, `status='ingested'`, bytes-verified document and **grants no egress of any kind**. Refuses a document already classified as something else with **CLR28** `evidence_kind_conflict` (you cannot re-label a coded bill as a consent letter — the 0014 rule, kept), an unverified one with **CLR28** `evidence_mismatch`, and a foreign-firm one with **CLR11**. Emits **no domain event** — see below. |
 | `grant_client_egress_purpose(p_client, p_purpose, p_evidence_document, p_scope_note, p_op_key)` | Mints a typed consent (§1.2), evidence validated (§1.3). **Does NOT activate.** Refuses a second live consent for the same (client, purpose) with **CLR28** `duplicate_live`. |
 | `activate_client_egress_purpose(p_client, p_purpose, p_consent, p_op_key)` | Requires `p_consent` to BE the live typed consent for (client, purpose) — a blind activation is impossible. Mints the activation, clears the wiki hold via the audited writer. Refuses a second live activation **CLR28**. |
 | `deactivate_client_egress_purpose(p_client, p_purpose, p_reason, p_op_key)` | Deactivates without revoking consent (a pause). Invalidates unconsumed authorizations (§3.5), sets the hold. |
 | `revoke_client_egress_purpose(p_client, p_purpose, p_reason, p_op_key)` | Revokes the live typed consent, deactivates its activation, invalidates unconsumed authorizations, sets the hold — **all in one transaction**. |
+
+**Why A3 exists — v1.0's §7.2 step 1 was not executable.** The typed grant is a *reader*
+of the evidence artifact: §1.3 deliberately makes it validate the stamp and never apply
+it. But at v1.0 **no verb could apply that stamp without also granting egress**.
+`clara.set_document_kind` refuses the kind outright ("consent-evidence classification is
+owned by the egress consent path", CLR28), and the only live writer of it was the
+**legacy `grant_client_egress`**, which in the same call mints a purpose-blind consent
+that authorizes invoice-facts egress. So a client who consented **only** to wiki
+synthesis could not be onboarded without being granted egress they never agreed to —
+precisely the purpose bleed §1.1 exists to abolish. The typed positive path appeared to
+work only because the rig's superuser fixture applied the stamp itself; a fixture is not
+an operational path, and a battery that depends on one is proving the wrong thing.
+
+**What A3 deliberately does not do.** It emits **no** domain event. Emitting
+`document.classified` would be actively wrong: §5.4's re-drive gate fires on that event,
+and `record_wiki_source_ingest` refuses a `consent_evidence` source (CLR28), so the event
+would manufacture a guaranteed refusal for a document that is not wiki material at all.
+The 0014 precedent agrees — `grant_client_egress` stamps the kind and emits no
+classification event. It also mints no consent, no activation and no authorization, and
+touches neither consent relation: classification is not attestation.
+
+**Firm membership is verified FIRST (amendment, ratchet R1-F5).** `activate`,
+`deactivate` and `revoke` must confirm the client belongs to the caller's firm **before**
+any state lookup, and must carry `firm_id` in **every** state-row predicate. v1.0's
+ordering let each of them search globally by `(client, purpose)`, take `FOR UPDATE` on a
+**foreign firm's** live row, and only then compare `firm_id` — cross-firm lock reach, and
+it returned **CLR28** where §7.1 mandates **CLR11**. That substitution is itself an
+existence oracle: CLR28 means "nothing live here", CLR11 means "not your client", and a
+foreign caller could tell them apart. The battery requires **CLR11 exactly**.
 
 Argument-validation refusals are **CLR10** (missing/blank op key, blank reason);
 client/document-not-in-firm is **CLR11**; state refusals (no live typed consent,
@@ -615,8 +800,12 @@ different-args reuse. v0.1 said CLR28. Every battery cell must expect CLR10.
 
 Ships in `docs/ops/` alongside the ceremony (§10), as an ordered owner recipe:
 
-1. Ingest the signed per-client re-attestation letter as a `consent_evidence` document
-   (the ADR-024 discipline) and confirm `bytes_verified_at`.
+1. Ingest the signed per-client re-attestation letter through the normal document
+   intake, confirm `bytes_verified_at`, then classify it:
+   **`classify_consent_evidence_document(<doc>, <reason>, <op key>)`** (amendment A3).
+   This stamps `document_kind='consent_evidence'` and grants **nothing**. Before A3 this
+   step had no executable form that did not also grant legacy invoice-facts egress — see
+   §7.1.
 2. `grant_client_egress_purpose(client, 'wiki_synthesis', <doc>, <scope note>, <op key>)`.
 3. Confirm the typed consent is live and the client's **verdict is still `unknown`** —
    this is the proof that a grant alone does not authorize.
@@ -646,13 +835,31 @@ clara_fn_owner` / `reset role`. One transaction; **any failure aborts the apply*
 - The three new relations exist with the pinned columns, CHECKs (purpose closed to
   `wiki_synthesis`; the paired revocation/deactivation CHECKs; the
   `document_sha256`-null-for-wiki CHECK; the one-terminal CHECK), composite FKs, and
-  the three partial unique indexes.
+  the partial indexes.
+
+  > **ERRATUM (ratified 2026-07-25).** v1.0 said "the **three** partial unique indexes".
+  > There are **two** one-live UNIQUE indexes — `(client_id, purpose) where revoked_at is
+  > null` on consents and `(client_id, purpose) where deactivated_at is null` on
+  > activations — plus **one NON-unique** partial index on open authorizations
+  > (`(consent_id) where consumed_at is null and invalidated_at is null`), which drives
+  > §3.5's withdrawal sweep. **Do not make the third one unique.** §3.3 mints a fresh
+  > authorization on every granted prepare, so many outstanding authorizations
+  > legitimately share one `consent_id`; a unique index there would make the second
+  > concurrent dispatch for a client fail with a constraint violation. The tail asserts
+  > the two uniques by definition and the third as explicitly non-unique.
+  >
+  > A fourth partial index is added by the timing erratum (§3.3):
+  > `(firm_id, client_id, purpose) where deactivated_at is null` on activations,
+  > firm-leading, which the verdict probe drives. Also non-unique.
 - The immutability and no-truncate triggers exist on all three; FORCE RLS is on with a
   single `clara_fn_owner` policy each.
-- The eight new functions exist with the pinned argument names, types and defaults,
-  `SECURITY DEFINER`, `search_path=clara,pg_temp`, and `clara_fn_owner` ownership.
+- The **nine** new functions (eight in v1.0 + `classify_consent_evidence_document`, A3)
+  exist with the pinned argument names, types and defaults, `SECURITY DEFINER`,
+  `search_path=clara,pg_temp`, and `clara_fn_owner` ownership. The pinned
+  `consume_egress_dispatch` signature is the **six-argument** one (A1).
 - The 120-second TTL constant is present in `prepare_egress_dispatch`'s source.
-- The four new event types are registered.
+- The four new event types are registered — and **only** those four: A3's verb emits
+  none.
 
 **Return-shape**
 - `prepare_egress_dispatch` returns exactly `{verdict, authorization_id}` and its source
@@ -679,14 +886,17 @@ clara_fn_owner` / `reset role`. One transaction; **any failure aborts the apply*
 - The existing wiki-leak / sightings / autopost proname scans run over every new
   function.
 
-**Legacy byte-identity (§6)**
+**Legacy byte-identity (§6, as amended by A4)**
 - `uq_client_egress_consents_one_live` exists with its original definition; a second
   live row for the same client still refuses.
 - `grant_client_egress`, `revoke_client_egress`, `claim_document_processing_task`,
-  `_enqueue_invoice_facts_core` have exactly one overload each, with unchanged argument
-  signatures and unchanged normalized source (exact-diff pins).
-- `client_egress_consents` has no new column.
-- `record_wiki_source_ingest` has unchanged normalized source and one overload.
+  `_enqueue_invoice_facts_core`, `record_wiki_source_ingest` have exactly one overload
+  each, with unchanged argument signatures and **exact `prosrc` SHA-256 pins — no
+  normalization** (§6.1).
+- Their **EXECUTE ACLs** are pinned as one closed-set string.
+- `client_egress_consents` has no new column, **and** its constraints, indexes,
+  non-internal triggers, RLS flags/owner and policies are pinned as one exact
+  structural digest (§6.1).
 
 **Apply-time precondition (empirical, never assumed)**
 - The three new relations are empty at end of apply — **zero typed consents, zero
@@ -719,6 +929,23 @@ discipline).
   an unknown purpose returns `unknown`, never an error.
 - A typed grant with a null / non-`consent_evidence` / bytes-unverified / foreign-firm
   evidence document → **CLR28**.
+- **(A1) The dispatch re-binding.** An authorization minted for client A, presented
+  during a client-B dispatch, returns `unknown`, is **not** consumed, and still consumes
+  cleanly for A. B must itself be **fully lit** in the cell, so the refusal cannot be
+  explained by B lacking consent. The same for a mismatched purpose, `event_seq` and
+  `event_type`, each byte-identical to every other `unknown`.
+- **(A2) Time and commit.** A consume inside a transaction whose `now()` predates
+  expiry, executed after wall-clock expiry, returns `unknown` (the cell must *show* that
+  `now() < expires_at < clock_timestamp()`, or it proves nothing). And a consume that
+  its caller rolls back leaves the authorization unconsumed and spendable — the DB-side
+  limit that §3.7's own-transaction helper closes.
+- **(A3) The owner evidence path.** The positive ladder must start from an
+  **unclassified** ingested document and stamp it through
+  `classify_consent_evidence_document` — never by handing `consent_evidence` to a
+  superuser seed fixture. A cell must assert that doing so grants **no** legacy consent
+  and **no** typed consent, that a bookkeeper is refused (CLR03/CLR04), that a
+  foreign-firm owner gets CLR11, and that an already-classified invoice is refused
+  CLR28 `evidence_kind_conflict`.
 - A second live typed consent for the same (client, purpose) → **CLR28**
   `duplicate_live`; a second live activation → **CLR28**.
 - A non-owner caller on any of the four typed RPCs → the owner floor (CLR03/CLR04).
@@ -811,8 +1038,9 @@ discipline).
 `wave-a-egress` and the 0012/0014 consent tests must pass **unchanged** — that is the
 legacy-fidelity proof. New typed helpers are **added** to `wave-a-fixtures.mjs`
 (`grantClientEgressPurpose`, `activateClientEgressPurpose`,
-`deactivateClientEgressPurpose`, `revokeClientEgressPurpose`); the existing
-`grantClientEgress` / `revokeClientEgress` helpers keep their signatures.
+`deactivateClientEgressPurpose`, `revokeClientEgressPurpose`, plus
+`classifyConsentEvidenceDocument` for A3); the existing `grantClientEgress` /
+`revokeClientEgress` helpers keep their signatures.
 `wave-b-wiki-projection-consumer` and its unit suite change: the default path moves from
 `resolveConsentDefault` to prepare/consume, `document.classified` gains the three-way
 receipt, and the injected `deps` gain the two authorization steps (§3.7).
@@ -834,7 +1062,8 @@ contract will not say it. Before any activation, 0020 **deliberately changes**:
    `egress.consent_granted` no longer clears the wiki hold.
 4. Two **new re-drive subscriptions** (`document.filed`, and a second effect on
    `document.filing_retired`).
-5. The catalog/API surface gains three relations and eight functions.
+5. The catalog/API surface gains three relations and **nine** functions (eight in v1.0
+   plus `classify_consent_evidence_document`, amendment A3).
 
 **What is DARK is MODEL SYNTHESIS.** With zero typed consents and zero activations —
 asserted at apply time (§8) and re-asserted post-apply (§10.3) — the model-egress path is
@@ -851,9 +1080,12 @@ pre-ceremony, undeployed.
 **PR-B (runtime + consumer tests).** The `wiki-projection.mjs` rewire (§3.7, §5.4) plus
 the consumer-test lockstep. Every new DB dependency is behind an **exact-signature**
 guard — `to_regprocedure('clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text)')`
-and the equivalents for `consume_egress_dispatch`, `resolve_document_client`,
-`resolve_and_ingest_wiki_source` — **not** an overloaded-name `to_regproc` check, which
-cannot distinguish signatures. The fallback is **lane-local**: absent synthesis pair →
+and the equivalents for
+`consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text)` (the **six-argument**
+signature, A1), `resolve_document_client`, `resolve_and_ingest_wiki_source` — **not** an
+overloaded-name `to_regproc` check, which cannot distinguish signatures. The exact-arity
+guard is load-bearing for A1: an image carrying the two-argument consume would otherwise
+appear to have the surface it needs. The fallback is **lane-local**: absent synthesis pair →
 the counterparty lane records `held_consent` exactly as today; absent resolver pair →
 `document.classified` stays `skipped_unresolved_client` and the re-drive lanes are
 checkpoint-only. Every other wiki-projection lane stays fully active. **Not a `_vN`
@@ -900,6 +1132,8 @@ at the owner's pace, afterwards.
 | **R-4** | `packages/runtime/lib/egress.mjs` still labels the purpose registry "WA2-R2 envelope" and names `client_egress_consents` as the wiki consent surface. | Cosmetic comment drift; fix in PR-B, no behavioural weight. |
 | **R-5** | The hold is not a plan-time gate. | Deliberate (§4.3): activation is the gate. Revisiting would require a ruling, not a patch. |
 | **R-6** | A second typed purpose will need per-purpose revocation semantics on any future shared surface. | The typed relation is already per-purpose; the legacy relation stays single-lane. No action now. |
+| **R-7** | **Timing side channel on the runtime DEFINER verbs** (added 2026-07-25 with the §3.3 erratum). Payloads and error shapes are byte-identical across every non-granted cause, and the two coarsest differences are removed (the firm-leading live-activation index; the resolver's two-row cap). Execution is nevertheless **not constant-time**, and SQL cannot make it so. | **Named, not claimed away.** Closing it needs an architectural control — a constant-time gateway, or a rate limit on `prepare_egress_dispatch` / `resolve_document_client` for `clara_runtime` — which is a ruling, not a patch. v1.0's absolute "no timing branch a caller can distinguish" is withdrawn from §3.3 and §5.1. |
+| **R-8** | **The consume must be committed by its caller** (added 2026-07-25 with amendment A2). A PostgreSQL function cannot commit its caller's transaction, so `granted` implies committed only if the caller commits before calling the model. | Closed on the caller side: the runtime's default consume helper runs its own `begin`/`commit` (§3.7), pinned by a unit cell. It remains a **precondition on any other caller** of the verb, stated in §3.4 and §3.6 rather than assumed. |
 
 ---
 
@@ -948,3 +1182,33 @@ n/a, slot reserved · 8 → injected deps must change.
 | `clear_wiki_synthesis_hold` grant | debate: `0017:5125` | The runtime grant block is `0017:5126-5134`; the clear at **`0017:5129`**. Substance confirmed: it is granted to `clara_runtime`, not an owner JWT. |
 | `record_wiki_source_ingest` uniqueness check | debate: `0017:2238` | **Confirmed** — `0017:2238-2242` joins `f.client_id = p_client and f.retired_at is null`, never uniqueness. |
 | `revoke_client_egress` nondeterminism | debate: `0014:155` | **Confirmed** — `0014:155-156`, no purpose, no ordering, no `STRICT`. |
+
+---
+
+## Changelog v1.0 → v1.1 (ratchet R1, ratified 2026-07-25)
+
+Ratchet R1 reviewed the **build** against v1.0, cross-model and repo-grounded. Four of its
+findings were contract defects rather than build deviations — the build matched the ratified
+text, and the text was wrong. Those are amendments A1–A4; the rest were build fixes.
+
+| # | What v1.0 said | Why it was wrong | Where it landed |
+|---|---|---|---|
+| **A1** | `consume_egress_dispatch(p_firm, p_authorization)`, validating firm + liveness only (§3.4). | §3.2 said the row *binds* client, purpose and event; §3.4 never compared them, so the binding was **audit-only**. An authorization minted for a lit client A was consumable during a dark client B's dispatch, and B's context reached the model with no B consent. Found independently by two reviews. | **§3.2**, **§3.4** (rewritten), **§3.7**, **§8**, **§9.1**, **§10.2** |
+| **A2** | `expires_at > now()`; §3.6's linearization stated unconditionally. | `now()` is transaction-stable: a caller in a long-open transaction never saw expiry. And a PL/pgSQL function cannot commit its caller's transaction, so `granted` did not imply committed for an arbitrary caller. | **§3.2**, **§3.4**, **§3.6**, **§3.7**, **§9.3**, residual **R-8** |
+| **A3** | Four owner RPCs; §7.2 step 1 "ingest the letter as a `consent_evidence` document". | **Step 1 had no executable form.** Only the legacy `grant_client_egress` could stamp that kind, and it granted purpose-blind invoice-facts egress in the same call; `set_document_kind` refuses the kind. A wiki-only consent could not be onboarded. | **§7.1** (fifth RPC), **§7.2**, **§8**, **§9.1**, **§9.7** |
+| **A4** | "byte-identical", mechanism unspecified; the build chose normalized md5. | Lowercasing + whitespace-stripping reach inside string literals, and the tail pinned neither the legacy ACLs nor the legacy relation's triggers/FKs/RLS/policies — all of which §6 promises. | **§6.1** (new), **§8** |
+
+**Errata ratified with them.**
+
+| Erratum | v1.0 said | Correct |
+|---|---|---|
+| Index count (§8) | "the three partial unique indexes" | **Two** one-live uniques + **one non-unique** open-authorization index (plus A-timing's fourth, also non-unique). Making the third unique would break concurrent dispatch for one client. |
+| Timing (§3.3, §5.1) | "no timing branch a caller can distinguish" | Withdrawn as unachievable in SQL. Payload/error-shape uniformity is enforced; the two coarsest execution differences are removed; the remainder is **named** as residual **R-7**. |
+| Refusal code (§7.1) | CLR11 for client-not-in-firm | Kept — but the ordering is now specified: firm membership is verified **first**, and `firm_id` is in every state-row predicate, so `activate`/`deactivate`/`revoke` neither return CLR28 nor lock a foreign firm's row. |
+
+**Not adopted, with reasons.** (a) A `domain_events` cross-check inside
+`prepare_egress_dispatch` — one review's suggested extra: it would give a runtime-callable
+existence probe over the event log, and A1's re-binding already prevents spending an
+authorization on a different dispatch. (b) The §10.2 two-PR split as a *rewrite of history*:
+the staging requirement stands and is decided at PR time; commits are not restructured
+retroactively.
