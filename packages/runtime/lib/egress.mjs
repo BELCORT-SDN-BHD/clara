@@ -175,19 +175,30 @@ export const AZURE_ENGINE_SNAPSHOT = Object.freeze({
 });
 
 // ---------------------------------------------------------------------------
-// The governed-egress purpose registry (WA2-R2 envelope / Wave B W9). ADDITIVE — this file was
-// the Azure DI OCR adapter and carried no purpose registry, so wiki_synthesis is the first entry;
-// it names the consent discipline for a lane that sends client-confidential data to a model. The
-// wiki-projection consumer resolves the client's consent state before any model call and, when
-// consent is absent/revoked, records the DB-side HELD state (clara.set_wiki_synthesis_hold) — the
-// DB owns the final gate (publish_wiki_page_version refuses synthesis='model' under a live hold).
+// The governed-egress purpose registry (WA-R2 / WA-D1 + ADR-024 for the per-client consent surface;
+// WA2-R14 for the cross-border rescoping; Wave B W9 + WB-R23 / migration 0020 for typed purposes).
+// The earlier "WA2-R2 envelope" label was wrong — WA2-R2 is MyInvois LOCAL intake — and is corrected
+// here (contract §0, residual R-4). ADDITIVE — this file was the Azure DI OCR adapter and carried no
+// purpose registry, so wiki_synthesis is the first entry; it names the consent discipline for a lane
+// that sends client-confidential data to a model.
+//
+// After 0020 the consent surface for THIS purpose is the TYPED relation, never the legacy
+// purpose-blind one: clara.client_egress_consents governs the invoice-facts lane and nothing else,
+// and a typed grant alone does not authorize — an owner ACTIVATION must exist too, and the runtime
+// reaches both only through the DEFINER verbs clara.prepare_egress_dispatch (plan time) and
+// clara.consume_egress_dispatch (the dispatch linearization point). When either boundary is not
+// granted the consumer records the DB-side HELD state (clara.set_wiki_synthesis_hold); the DB owns
+// the final backstop (publish_wiki_page_version refuses synthesis='model' under a live hold).
 // ---------------------------------------------------------------------------
 export const GOVERNED_EGRESS_PURPOSES = Object.freeze({
   wiki_synthesis: Object.freeze({
     purpose: "wiki_synthesis",
     description: "LLM synthesis of a client's CLARA-maintained advisory wiki page (Wave B W9).",
     consentRequired: true,
-    consentSurface: "clara.client_egress_consents (live row = revoked_at is null)",
+    consentSurface:
+      "clara.client_egress_purpose_consents + clara.client_egress_purpose_activations"
+      + " (live = revoked_at/deactivated_at is null), reached ONLY via"
+      + " clara.prepare_egress_dispatch / clara.consume_egress_dispatch",
     heldStatePath: "clara.set_wiki_synthesis_hold / clara.wiki_synthesis_holds",
     dataClass: "client_confidential",
     engineIdRequired: true,

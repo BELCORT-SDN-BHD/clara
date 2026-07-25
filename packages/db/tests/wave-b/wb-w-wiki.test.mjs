@@ -8,7 +8,7 @@ import {
   CLR, CLR28, CLR31, PG, ROLES, rootQuery, roleQuery, opk, getPool,
   assertRaises, assertRaisesOneOf, endPool, printLaneNotes, WB_PACK_CONSUMER,
   fail0017, wbEnsureReady, hasColumn, rlsFlags, detailReason, roleCanExecute,
-  fail0019, has0019, markStale, WB_STALE_REASON,
+  fail0019, has0019, has0020, WB_0020_BUDGET_SEEDS, markStale, WB_STALE_REASON,
   buildWaveBWorld, createClient, filedDocument,
   publishWikiPage, recordWikiIngest, retireWikiPage, getWikiPage, listWikiPages,
   setWikiHold, clearWikiHold, holdRow,
@@ -19,6 +19,7 @@ import { truncateGuardError } from "../rig-txn.mjs";
 
 let live = false;
 let live19 = false;
+let live20 = false;
 let w = null;
 const client = () => w.clients.A1;
 const firm = () => w.firms.A;
@@ -27,6 +28,7 @@ before(async () => {
   live = await wbEnsureReady();
   if (live) w = await buildWaveBWorld();
   live19 = live ? await has0019() : false;
+  live20 = live ? await has0020() : false;
 });
 after(async () => { printLaneNotes("wb-w-wiki"); await endPool(); });
 
@@ -41,7 +43,16 @@ test("META/W7: 0017 applied — wiki tables live; wiki_budgets carries the FOUR 
     assert.equal(Number(await budgetVal(k)), v, `wiki_budgets.${k} = ${v}`);
   }
   const n = await rootQuery("select count(*)::int as n from clara.wiki_budgets");
-  assert.equal(n.rows[0].n, 4, "exactly the four seeded budget rows");
+  // 0020 §A5 adds ONE row (max_source_pages_per_client) and disturbs none of the four above:
+  // the two-class split narrows the POPULATION max_pages_per_client counts, never its value.
+  if (live20) {
+    assert.equal(n.rows[0].n, 5, "the four WB-R8 seeds plus 0020 A5's deterministic-source ceiling");
+    for (const [k, v] of Object.entries(WB_0020_BUDGET_SEEDS)) {
+      assert.equal(Number(await budgetVal(k)), v, `wiki_budgets.${k} = ${v} (0020 A5)`);
+    }
+  } else {
+    assert.equal(n.rows[0].n, 4, "exactly the four seeded budget rows");
+  }
 });
 
 test("W7: budgets are SYSTEM config — no app role holds DML on wiki_budgets; no firm-editable writer exists", async () => {
@@ -213,7 +224,7 @@ test("W3: the writer family is runtime-ONLY; deterministic ingest lands a cited 
     client: client(), firm: firm(), slug: "authp", title: "x", role: ROLES.authenticated,
   }), "publish as clara_authenticated");
   const src = await filedDocument(w.users.alice, { firm: firm(), client: client(), kind: "bank_statement" });
-  const r = await recordWikiIngest({ client: client(), document: src.documentId, note: "statement registered" });
+  const r = await recordWikiIngest({ client: client(), document: src.documentId });
   assert.ok(r, "ingest receipt");
   const pages = await rootQuery(
     `select p.id from clara.wiki_pages p join clara.wiki_page_versions v on v.id=p.current_version_id

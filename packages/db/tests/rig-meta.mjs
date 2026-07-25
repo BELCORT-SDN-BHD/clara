@@ -105,6 +105,57 @@ const WAVE_B_RUNTIME_FNS = [
   "mark_wiki_citations_stale",
 ];
 const WAVE_B_SHARED_READS = ["get_wiki_page", "list_wiki_pages", "trial_balance_as_of"];
+
+// ---------------------------------------------------------------------------
+// 0020 [§7.1/§8] TYPED EGRESS CONSENT — the capability COHORT.
+//
+// WHY A COHORT AND NOT EIGHT LOOSE NAMES. This matrix is a CLOSED SET whose default
+// is "no role may execute anything unlisted", so a new migration's functions have to
+// be admitted by EXPLICIT ENUMERATION — that is the design, and it is what makes an
+// accidental grant to the wrong lane a test failure rather than a silent widening.
+// The compensating assertion for that widening lives in grantMatrixFailures below:
+// the cohort must be WHOLLY present or WHOLLY absent. Wholly absent = 0020 is not
+// applied on this database (the 19-migration rig), so the roster is skipped and this
+// file stays correct at 19 and at 20+ alike. PARTIALLY present = an enumerated name
+// no longer resolves — a DEAD exemption, which must be removed or the function
+// restored, so the closed set cannot silently accumulate them.
+//
+// The wiki half of 0020's authorization (four of these verbs — activate/deactivate/
+// revoke_client_egress_purpose and resolve_and_ingest_wiki_source — reach wiki state
+// by CALLING the audited governed writers) is NOT re-asserted here; a grant matrix is
+// the wrong currency for it. Its teeth are the call-edge-only / no-relation-access
+// assertions in wave-b/wb-0019-tail, wave-b/wb-0019-ratchet [R1-4] and the live
+// ceremony probe deploy/wave-b-0019-postverify.sql probe 9.
+const WAVE_B_0020_RUNTIME_FNS = [
+  "prepare_egress_dispatch", "consume_egress_dispatch",
+  "resolve_document_client", "resolve_and_ingest_wiki_source",
+];
+// The owner floor (admin+) is enforced INSIDE each body; the grant itself is the
+// coarse PostgREST-rpc grant to clara_authenticated, the WAVE_A2_HUMAN_FNS pattern.
+// classify_consent_evidence_document is the 2026-07-25 ratified §7.1 amendment (ratchet R1-F3):
+// the OWNER path that stamps document_kind='consent_evidence' and grants NO egress. Before it,
+// the only live writer of that stamp was the LEGACY grant_client_egress, which in the same call
+// mints a purpose-blind consent authorizing invoice-facts egress — so the runbook's step 1 could
+// not be run at all for a client who consented ONLY to wiki synthesis.
+const WAVE_B_0020_HUMAN_FNS = [
+  "classify_consent_evidence_document",
+  "grant_client_egress_purpose", "activate_client_egress_purpose",
+  "deactivate_client_egress_purpose", "revoke_client_egress_purpose",
+];
+// 0020's UNGRANTED internals — the definer-internal filing helper and the three
+// immutability trigger functions. They are named so their absence from every role
+// set is a DECLARED expectation carried by the cohort check, not a silent default:
+// the main sweep already fails if one of them ever GAINS a grant (expected false),
+// and the cohort check fails if one ever DISAPPEARS.
+const WAVE_B_0020_UNGRANTED_FNS = [
+  "_active_filing_clients",
+  "_tf_egress_purpose_consent_update", "_tf_egress_purpose_activation_update",
+  "_tf_egress_dispatch_authorization_update",
+];
+export const WAVE_B_0020_COHORT = [
+  ...WAVE_B_0020_RUNTIME_FNS, ...WAVE_B_0020_HUMAN_FNS, ...WAVE_B_0020_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -119,6 +170,7 @@ export const ALLOWED = {
     ...WAVE_A_HUMAN_FNS, // [WAVE-A §2] daily-loop governance writers + typed reads
     ...WAVE_A2_HUMAN_FNS, // [WAVE-A2 §6/§7] standing-rules writers + rule/notification/receipt reads
     ...WAVE_A21_HUMAN_FNS, // 0016 [A2.1 §C] compliance-watch human writers + set_document_kind
+    ...WAVE_B_0020_HUMAN_FNS, // 0020 [§7.1] typed-consent owner RPCs (owner floor body-enforced)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -143,6 +195,7 @@ export const ALLOWED = {
     ...WAVE_A_RUNTIME_FNS, // [WAVE-A §2] autodraft admission/settle + sweep-run + candidate reads
     ...WAVE_A2_RUNTIME_FNS, // [WAVE-A2 §6.2] the autopost expiry/nudge reconcile sweep
     ...WAVE_A21_RUNTIME_FNS, // 0016 [A2.1 §C] SST evaluators + classify_document (runtime ONLY; agent zero)
+    ...WAVE_B_0020_RUNTIME_FNS, // 0020 [§3.3/§3.4/§5.1/§5.3] dispatch authorization + the doc->client resolver
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -213,6 +266,18 @@ async function policyHelperNames() {
   return new Set(r.rows.map((row) => row.fn));
 }
 
+/** A declared capability COHORT must be WHOLLY present or WHOLLY absent (see the
+ * WAVE_B_0020_* block). Absent = that migration is not applied on this database, so
+ * its roster entries are correctly unchecked. Partial = a roster entry that no longer
+ * resolves — a DEAD exemption in a closed set. Returns failure strings. */
+function cohortFailures(label, cohort, liveNames) {
+  const missing = cohort.filter((n) => !liveNames.has(n));
+  if (missing.length === 0 || missing.length === cohort.length) return [];
+  return [`${label} capability cohort is PARTIAL — these enumerated names no longer resolve `
+    + `to a clara function: ${missing.join(", ")}. A closed roster must not accumulate dead `
+    + `exemptions: remove the entry, or restore the function.`];
+}
+
 /** T17 — exact per-role EXECUTE + no PUBLIC leak + helpers/cores not app-callable.
  * Legit = the §5 writer/read matrix ∪ the fns actually referenced in RLS policies. */
 export async function grantMatrixFailures() {
@@ -238,6 +303,11 @@ export async function grantMatrixFailures() {
       }
     }
   }
+  // The compensating assertion for every EXPLICIT-ENUMERATION widening of this closed
+  // set: no dead exemptions. (The sweep above iterates the LIVE catalog, so a roster
+  // entry for a function that no longer exists is otherwise invisible.)
+  failures.push(...cohortFailures("0020 typed-consent", WAVE_B_0020_COHORT,
+    new Set(fns.rows.map((f) => f.proname))));
   return failures;
 }
 

@@ -78,7 +78,10 @@ dormant — the surface + seed now both exist); `/ready` green.
 4. Replay probes: one K5 approval, one W3 publish, one S4 tick re-invoked with the SAME
    op_key → byte-identical receipts, zero new rows.
 5. `rule_sightings` count unchanged across the whole pass; `wiki_budgets` = the four
-   WB-R8 values; `wake_fn_allowlist` row count unchanged from 0016.
+   WB-R8 values (this runbook is the **0017** ceremony — migration 0020 amendment A5 adds a
+   FIFTH row, `max_source_pages_per_client = 50000`, and leaves all four WB-R8 values alone,
+   so on a 20-migration database expect **five** rows, four of them these);
+   `wake_fn_allowlist` row count unchanged from 0016.
 6. Storage probe: one wiki put → re-download → sha match (5b took).
 7. **Serializable probe (F10):** via the dashboard (or PostgREST curl) call
    `approve_opening_seed` with a CURRENT plan revision and ONE STALE ENTRY token →

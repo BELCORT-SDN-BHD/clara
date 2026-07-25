@@ -15,9 +15,12 @@
 // retirement EVENT; the lane is gated PER EVENT on the writer's presence so the runtime-image-first
 // ceremony window is silent, and it emits NO event of its own (wiki.citations_staled was dropped).
 // Terminal receipts (checkpoint-advancing, no retry):
-// projected|already_projected|citations_staled|skipped_inactive_client|held_consent|consent_released|
-// skipped_kind|skipped_no_surface|
-// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation + the ENUMERATED
+// projected|already_projected|citations_staled|skipped_inactive_client|held_consent|
+// skipped_kind|skipped_no_surface|skipped_unresolved_client|skipped_ambiguous_client|
+// skipped_unclassified|
+// skipped_declined|skipped_non_wiki_kind|skipped_bad_wiki_fact|skipped_no_citation|
+// skipped_source_cap (0020 §A5 — the DETERMINISTIC-SOURCE ceiling, distinct from skipped_cap so a
+// receipt never confuses "out of synthesized pages" with "out of source pages") + the ENUMERATED
 // typed refusals of TERMINAL_STATUS (incl. CLR32/stale_projected_from_seq -> already_projected, the
 // 0019 §5 monotonic guard). That table is CLOSED (ratchet R2 finding B2): a typed CLR that is NOT in
 // it is NOT terminal, because the old catch-all mapped every unrecognised CLR32 reason to
@@ -26,12 +29,54 @@
 // misconfigured, not the data) NEVER advances the checkpoint and is exempt from the attempt-exhaustion
 // escape, so the firm's cursor waits for the fix and then replays; an UNRECOGNISED typed refusal takes
 // the ordinary dead-letter + retry path. Only a genuine throw dead-letters (matcher idiom). op_keys: model/seeding-fact 'wikiproj:<client>:<seq>';
-// ingest 'wikiingest:<client>:<document>'; consent 'wikihold:/wikirelease:<client>:<seq>'; stale
+// ingest 'wikiingest:<client>:<document>' (the SAME shape the 0020 serialized verb derives
+// server-side, so the two paths share one receipt per (client, document) and can never
+// double-publish); held synthesis 'wikihold:<client>:<seq>'; stale
 // 'wikistale:<client>:<seq>' (the ceremony catch-up uses 'wikistale-catchup:<run_key>:<client>:<document>'
 // — a fixed per-pair key would replay the original receipt forever). P17: never
 // subscribes to / re-synthesizes from wiki.*. Cold start (checkpoint seed + backfill + repair) is a
-// CEREMONY item, never boot. Three reads are INJECTABLE + FAIL CLOSED under the 0008 grants (no
-// runtime document→client link, no SELECT on counterparties/client_egress_consents).
+// CEREMONY item, never boot.
+//
+// MIGRATION 0020 (WB-R23) rewires two things and adds one:
+//   (i)  MODEL SYNTHESIS IS TWO-PHASE. The single plan-time consent READ is gone. The lane now
+//        PREPARES an authorization at plan time (clara.prepare_egress_dispatch → granted|unknown +
+//        an OPAQUE authorization id, and nothing else) and CONSUMES it atomically immediately
+//        before the model call, AFTER the wiki-context read (clara.consume_egress_dispatch). The
+//        consume is the DISPATCH LINEARIZATION POINT: a revocation committed before it MUST refuse,
+//        and does. A revocation committed after it may still dispatch — that residual is documented
+//        (contract §3.6 / R-2), not claimed away. On either boundary refusing, the lane records
+//        held_consent with the UNCHANGED reason token and op key and calls NO model, writes NO
+//        Storage object and publishes NOTHING. The consume presents the FULL dispatch intent
+//        (firm, client, purpose, event seq + type) and runs in its own committed transaction —
+//        the 2026-07-25 ratified §3.4 amendment (ratchet R1-F1/F2): a two-argument consume made
+//        §3.2's client/purpose/event binding audit-only, so an authorization minted for one
+//        client could be spent on another's dispatch.
+//   (ii) DOCUMENT→CLIENT RESOLUTION IS SERVER-SIDE AND SERIALIZED. document.classified no longer
+//        asks an injected resolver for a client id; it calls clara.resolve_and_ingest_wiki_source
+//        INSIDE the effect transaction, where uniqueness is re-decided under a filing-topology lock
+//        pair and the ingest goes through the audited writer in the same transaction. Ambiguity
+//        earns its own receipt (skipped_ambiguous_client) — the discriminant survives operationally
+//        without a candidate identity or a count ever leaving the database.
+//  (iii) TWO RE-DRIVE LANES. document.filing_retired (after its 0019 stale mark) and the NEW
+//        document.filed subscription both attempt the same serialized resolve-and-ingest, so a
+//        document that was ambiguous or unfiled when it was classified is published once the
+//        topology collapses to exactly one client. The attempt is cheap and idempotent: a non-unique
+//        topology is a no-op skip, and the derived op key makes a repeat a replay.
+//        A never-classified document is never ingested (skipped_unclassified). On the
+//        filing_retired lane the ATTEMPT is layered on top of a 0019 effect that must not be lost,
+//        so it runs under its own SAVEPOINT (see planFilingRetiredStale).
+//   Legacy null-purpose egress.consent_granted / egress.consent_revoked are now CHECKPOINT-ONLY for
+//   wiki: an invoice-facts consent must never release a wiki control. The four typed
+//   egress.purpose_* events are subscribed for observability and ordering only — the DB owns their
+//   hold transitions inside the owner-floored RPCs.
+//   Every new DB dependency is behind an EXACT-SIGNATURE surface guard, per LANE: absent synthesis
+//   pair → the counterparty lane records held_consent exactly as before; absent resolver pair →
+//   document.classified stays skipped_unresolved_client and the re-drive lanes are checkpoint-only.
+//   Every other lane stays fully active.
+//
+// The injectable reads FAIL CLOSED under the 0008 grants (no runtime document→client link, no SELECT
+// on counterparties / client_egress_consents / any 0020 consent relation — the DEFINER verbs are the
+// entire surface).
 
 import { createHash, randomUUID } from "node:crypto";
 import { writeFile, rm } from "node:fs/promises";
@@ -45,20 +90,37 @@ import { GOVERNED_EGRESS_PURPOSES } from "./egress.mjs";
 export const WIKI_PROJECTION_CONSUMER = "wiki_projection";
 
 // The subscription SET (the sanctioned deviation from the single-type template, W4), bound from the
-// live event_types registry (0005/0009/0011/0016/0017). All other types (incl. wiki.* — P17) are
-// checkpoint-only advances. document.classified = ingest (client not carried → resolveDocumentClient);
-// entry.approved = ingest of the source doc (carries the client); counterparty.* = model synthesis;
-// egress.consent_* = hold set/clear; seeding.proposal_decided = the deterministic wiki_fact lane (F13);
-// document.filing_retired = the WB-R21 STALE lane (0019 D3) — the authority domain no longer vetoes a
-// retirement under a live wiki citation, so the wiki converges by MARKING its sources from the
-// retirement EVENT. Note this is a document.* type, NOT a wiki.* one: P17 (never re-synthesize from
+// live event_types registry (0005/0009/0011/0016/0017/0020). All other types (incl. wiki.* — P17) are
+// checkpoint-only advances. document.classified = SERIALIZED resolve-and-ingest (0020 §5.4 — the
+// event carries no client, and the resolution is re-decided at effect time); entry.approved = ingest
+// of the source doc (carries the client, UNCHANGED); counterparty.* = two-phase model synthesis;
+// egress.consent_* = legacy, null-purpose, now CHECKPOINT-ONLY for wiki (0020 §4.2);
+// egress.purpose_* = the four typed 0020 events, subscribed for observability and ordering only;
+// seeding.proposal_decided = the deterministic wiki_fact lane (F13);
+// document.filing_retired = the WB-R21 STALE lane (0019 D3) PLUS the 0020 re-drive — the authority
+// domain no longer vetoes a retirement under a live wiki citation, so the wiki converges by MARKING
+// its sources from the retirement EVENT, and 0020 then re-resolves the document for a surviving
+// single client. Note this is a document.* type, NOT a wiki.* one: P17 (never re-synthesize from
 // wiki.*) is untouched, and with wiki.citations_staled dropped the lane emits no event to loop on.
+// document.filed = the NEW 0020 re-drive subscription (0007:2687, emitted by file_document, the
+// intake finalizer, the rule-filed path and approve_wrong_client_correction) — the other half of the
+// topology-change surface. Adding it changes no existing lane's behaviour.
 export const WIKI_PROJECTION_EVENT_TYPES = Object.freeze([
   "document.classified", "entry.approved", "counterparty.created",
   "counterparty.merged", "egress.consent_granted", "egress.consent_revoked",
-  "seeding.proposal_decided", "document.filing_retired",
+  "egress.purpose_consent_granted", "egress.purpose_consent_revoked",
+  "egress.purpose_activated", "egress.purpose_deactivated",
+  "seeding.proposal_decided", "document.filing_retired", "document.filed",
 ]);
 const SUBSCRIBED = new Set(WIKI_PROJECTION_EVENT_TYPES);
+
+/** The reason token a non-granted synthesis verdict parks the client with. It is UNCHANGED from
+ *  as-built (where the 42501 on client_egress_consents made every verdict 'unknown'), and that is
+ *  precisely what makes the 0020 DARK claim true: with zero typed consents and zero activations the
+ *  model-egress path is externally byte-equivalent to today. */
+export const HELD_CONSENT_REASON = "wiki synthesis consent unknown";
+/** The only typed egress purpose 0020 ships (contract §0: a second purpose needs a follow-on ruling). */
+export const WIKI_SYNTHESIS_PURPOSE = "wiki_synthesis";
 
 /** The wiki page_kinds a deterministic seeding fact may claim — 'counterparty' is
  *  excluded (it structurally requires a counterparty_id the fact never carries). */
@@ -101,12 +163,27 @@ const isClaraCode = (err) => typeof err?.code === "string" && /^CLR\d{2}$/.test(
  * reason a future migration adds genuinely cannot be checkpointed away by default.
  *
  * The keys are the reasons the wiki writers actually raise (0017:1999-2153 for the CLR32 family,
- * plus 0019 §1b/§5); the CLR-code table covers the non-CLR32 refusals of the same surface.
+ * plus 0019 §1b/§5 and 0020 §A5); the CLR-code table covers the non-CLR32 refusals of the same
+ * surface.
  * (CLR32/budget_unknown is DELIBERATELY absent — it is a CONFIGURATION_REFUSAL, not terminal.)
  */
 const CLR32_TERMINAL = Object.freeze({
   consent_held: "held_consent",
   cap_exceeded: "skipped_cap",
+  // The 0020 §A5 two-class page budget. `cap_exceeded` now means ONLY the SYNTHESIZED cap
+  // (max_pages_per_client); deterministic sources/<document_id> pages are exempt from it and
+  // carry their own ceiling (max_source_pages_per_client), which refuses with its OWN reason so
+  // the two exhaustion modes are never confused on a receipt. Terminal for exactly the reason
+  // cap_exceeded is — replaying the event meets the identical ceiling — and the DISTINCT status
+  // keeps "this client has 50000 filed source documents" legible as itself, never as "this
+  // client is out of synthesized wiki pages".
+  source_cap_exceeded: "skipped_source_cap",
+  // 0020 §A5 RESERVES the 'sources/' slug namespace for deterministic ingest. REACHABLE from
+  // this consumer: planSeedingWikiFact publishes a slug taken VERBATIM from a model-authored
+  // seeding proposal, so a model can propose one. It is a malformed write, exactly like
+  // bad_state — and enumerating it is what stops it BLOCKING the firm cursor as an
+  // unrecognised typed refusal (the R3-F2 default).
+  reserved_slug_namespace: "skipped_bad_state",
   // The 0019 §5 DB-side monotonic guard: a BENIGN convergence (a newer seq is already published
   // for this slug), not a malformed write — it must not report itself as one.
   stale_projected_from_seq: "already_projected",
@@ -174,24 +251,91 @@ export function isClaraTerminal(err) {
   return terminalStatusFor(err) !== null;
 }
 
-// --- injectable reads (fail-closed defaults under the 0008 grants) -----------------------------
-/** Consent gate. Autocommit read (a 42501 cannot poison a txn) → 'present'|'absent'|'unknown';
- *  clara_runtime has NO SELECT on client_egress_consents today ⇒ 42501 ⇒ 'unknown' ⇒ HELD. */
-export async function resolveConsentDefault(client, { clientId, firmId }) {
-  try {
-    const r = await client.query(
-      "select 1 from clara.client_egress_consents where client_id=$1 and firm_id=$2 and revoked_at is null limit 1",
-      [clientId, firmId]);
-    return r.rowCount > 0 ? "present" : "absent";
-  } catch (err) {
-    if (err?.code === "42501") return "unknown";
-    throw err;
-  }
+// --- injectable authorization + resolution steps (0020) ----------------------------------------
+//
+// resolveConsentDefault is RETIRED. Its raw `select 1 from clara.client_egress_consents ...` against
+// a relation clara_runtime cannot read (42501 → 'unknown') was never an authorization: it read a
+// PURPOSE-BLIND relation, it could not be invalidated by a revoker, and the model call happened after
+// it returned. It is replaced by the two-phase pair below. resolveDocumentClientDefault is likewise
+// retired: the document→client decision now belongs to a serialized DB verb, not to a plan-time read.
+
+/** PLAN-TIME verdict. Returns the DB's two-key payload verbatim: {verdict, authorization_id}. A
+ *  42501 here is a GRANT GAP in the deployment, never bad data — it propagates and takes the
+ *  configuration-refusal path (checkpoint stays behind, leadership released), which is strictly
+ *  safer than swallowing it into a silent hold. */
+export async function prepareEgressDispatchDefault(
+  client, { firmId, clientId, purpose, eventSeq, eventType }) {
+  const r = await client.query(
+    "select clara.prepare_egress_dispatch($1,$2,$3,$4,$5) as v",
+    [firmId, clientId, purpose, eventSeq, eventType]);
+  return r.rows[0]?.v ?? { verdict: "unknown", authorization_id: null };
 }
-/** document→client: no runtime-readable link under 0008 ⇒ null ⇒ skipped_unresolved_client.
- *  (Injectable resolver contract: (pgClient, {documentId, firmId}) → clientId|null.) */
-export async function resolveDocumentClientDefault() {
-  return null;
+
+/** THE DISPATCH LINEARIZATION POINT. Single-use and terminal: a second consume of the same id, an
+ *  expired id, a foreign-firm id, an id presented for a DIFFERENT client / purpose / event than the
+ *  one it was minted for, or an id whose consent/activation stopped being live all return
+ *  {verdict:'unknown'} and the lane abandons the dispatch.
+ *
+ *  TWO THINGS THIS HELPER OWNS (0020 ratchet R1-F1/F2):
+ *
+ *  1. It presents the FULL dispatch intent, not just the opaque id. The DB re-verifies that the
+ *     authorization was minted for exactly this (firm, client, purpose, event) before consuming.
+ *     Passing the intent is not a formality — it is what makes the binding structural instead of a
+ *     promise the caller keeps in a local variable.
+ *  2. It runs in its OWN committed transaction. A PostgreSQL function cannot commit its caller's
+ *     transaction, so on a pooled or long-open connection `granted` could otherwise be returned
+ *     from an uncommitted consume — the model would then be called on an authorization the revoker
+ *     can still see as unconsumed, and a later rollback would erase the record that the bytes left.
+ *     The explicit begin/commit makes `granted` MEAN committed for any caller, which is what
+ *     §3.6's linearization claim asserts. On any failure the transaction is rolled back and the
+ *     error propagates: no silent `unknown` that would look like an ordinary refusal.
+ *
+ *  PRECONDITION (already true of the whole plan phase): the connection is NOT inside a caller's
+ *  transaction. Both entry points run planEvent BEFORE their effect `begin`, and readWikiContext
+ *  a few lines above already opens and rolls back its own transaction on this same connection —
+ *  so the plan phase is autocommit by construction, and this helper relies on nothing new. */
+export async function consumeEgressDispatchDefault(
+  client, { firmId, authorizationId, clientId, purpose, eventSeq, eventType }) {
+  await client.query("begin");
+  let r;
+  try {
+    r = await client.query(
+      "select clara.consume_egress_dispatch($1,$2,$3,$4,$5,$6) as v",
+      [firmId, authorizationId, clientId, purpose, eventSeq, eventType]);
+    await client.query("commit");
+  } catch (e) {
+    await client.query("rollback").catch(() => {});
+    throw e;
+  }
+  return r.rows[0]?.v ?? { verdict: "unknown" };
+}
+
+/** The SERIALIZED resolve-and-ingest. It MUST run inside the caller's effect transaction: the whole
+ *  point is that the uniqueness decision and the ingest share one transaction and one lock set. */
+export async function resolveAndIngestWikiSourceDefault(client, { firmId, documentId }) {
+  const r = await client.query(
+    "select clara.resolve_and_ingest_wiki_source($1,$2) as r", [firmId, documentId]);
+  return r.rows[0]?.r ?? { status: "skipped_unresolved_client" };
+}
+
+/** PER-EVENT, PER-LANE surface guards (contract §10.2). EXACT SIGNATURE, never an overloaded-name
+ *  to_regproc check — that cannot distinguish signatures, and an overload of a granted name is a
+ *  different function. to_regprocedure is a plain catalog read: no EXECUTE needed, so a guard never
+ *  fails for a privilege reason. The 0020 ceremony is DB-FIRST, so these are normally true by the
+ *  time this image runs; they exist so a rollback or a reversed order degrades to today's behaviour
+ *  lane-locally instead of dead-lettering the whole projection. */
+export async function hasSynthesisAuthorizationSurfaceDefault(client) {
+  const r = await client.query(
+    "select to_regprocedure('clara.prepare_egress_dispatch(uuid,uuid,text,bigint,text)') is not null"
+    + " and to_regprocedure('clara.consume_egress_dispatch(uuid,uuid,uuid,text,bigint,text)')"
+    + " is not null as surface");
+  return r.rows[0]?.surface === true;
+}
+export async function hasResolverSurfaceDefault(client) {
+  const r = await client.query(
+    "select to_regprocedure('clara.resolve_document_client(uuid,uuid)') is not null"
+    + " and to_regprocedure('clara.resolve_and_ingest_wiki_source(uuid,uuid)') is not null as surface");
+  return r.rows[0]?.surface === true;
 }
 /** Default model synthesis — the governed-egress envelope (W9, GOVERNED_EGRESS_PURPOSES). Lazy
  *  AI-SDK import (tests inject deps.synthesize). Returns {title, content}. */
@@ -298,6 +442,17 @@ async function planDeterministicIngest(client, { firmId, clientId, documentId })
   };
 }
 
+/** The held-consent terminal, identical at BOTH authorization boundaries: the same reason token and
+ *  the same op key the lane has always used, so a non-granted verdict is externally indistinguishable
+ *  from today's dark behaviour. */
+function heldConsent({ clientId, ev }) {
+  return {
+    status: "held_consent",
+    mutate: (c) => c.query("select clara.set_wiki_synthesis_hold($1,$2,$3) as r",
+      [clientId, HELD_CONSENT_REASON, `wikihold:${clientId}:${ev.seq}`]),
+  };
+}
+
 async function planCounterpartySynthesis(client, { firmId, ev, clientId, counterpartyId, deps }) {
   if (!clientId || !counterpartyId) return skip("skipped_kind");
   if (!(await isClientActive(client, { clientId, firmId }))) return skip("skipped_inactive_client");
@@ -305,16 +460,36 @@ async function planCounterpartySynthesis(client, { firmId, ev, clientId, counter
   const projected = await currentProjectedSeq(client, { firmId, clientId, slug });
   if (projected != null && projected >= ev.seq) return skip("already_projected");
 
-  const consent = await (deps.resolveConsent ?? resolveConsentDefault)(client, { clientId, firmId });
-  if (consent !== "present") {
-    return {
-      status: "held_consent",
-      mutate: (c) => c.query("select clara.set_wiki_synthesis_hold($1,$2,$3) as r",
-        [clientId, `wiki synthesis consent ${consent}`, `wikihold:${clientId}:${ev.seq}`]),
-    };
-  }
+  // LANE-LOCAL fallback: without the exact 0020 pair the lane parks the client exactly as today.
+  const hasAuthz = await (deps.hasSynthesisAuthorizationSurface
+    ?? hasSynthesisAuthorizationSurfaceDefault)(client);
+  if (!hasAuthz) return heldConsent({ clientId, ev });
+
+  // PHASE 1 — prepare. `unknown` covers every non-granted state without distinction; the lane must
+  // not try to tell them apart, and there is nothing in the payload that would let it.
+  const verdict = await (deps.prepareEgressDispatch ?? prepareEgressDispatchDefault)(
+    client, { firmId, clientId, purpose: WIKI_SYNTHESIS_PURPOSE, eventSeq: ev.seq, eventType: ev.eventType });
+  const authorizationId = verdict?.authorization_id ?? null;
+  if (verdict?.verdict !== "granted" || !authorizationId) return heldConsent({ clientId, ev });
 
   const existing = await readWikiContext(client, { clientId, slug });
+
+  // PHASE 2 — consume, AFTER the context read and IMMEDIATELY before the model call. This is the
+  // dispatch linearization point: a revocation that committed since phase 1 refuses here, and the
+  // model is never called. Abandoning is a TYPED TERMINAL (checkpoint-advancing), never a crash and
+  // never a dead-letter loop.
+  //
+  // The SAME dispatch intent that was prepared is presented again (0020 ratchet R1-F1). The DB
+  // refuses an authorization that does not match this exact (client, purpose, event), so a cached,
+  // injected or misassociated authorization cannot be spent on a different client's dispatch — the
+  // binding is enforced in the DB, not by this function keeping the id in the right variable.
+  const consumed = await (deps.consumeEgressDispatch ?? consumeEgressDispatchDefault)(
+    client, {
+      firmId, authorizationId, clientId,
+      purpose: WIKI_SYNTHESIS_PURPOSE, eventSeq: ev.seq, eventType: ev.eventType,
+    });
+  if (consumed?.verdict !== "granted") return heldConsent({ clientId, ev });
+
   const out = await (deps.synthesize ?? synthesizeWikiPageDefault)(
     { kind: "counterparty", counterpartyId, clientId, existing, event: ev, modelId: deps.model ?? WIKI_MODEL });
   const content = String(out?.content ?? "");
@@ -343,19 +518,17 @@ async function planCounterpartySynthesis(client, { firmId, ev, clientId, counter
   };
 }
 
-function planConsentTransition({ ev, clientId, granted }) {
-  if (!clientId) return skip("skipped_kind");
-  if (granted) {
-    return {
-      status: "consent_released",
-      mutate: (c) => c.query("select clara.clear_wiki_synthesis_hold($1,$2) as r", [clientId, `wikirelease:${clientId}:${ev.seq}`]),
-    };
-  }
-  return {
-    status: "held_consent",
-    mutate: (c) => c.query("select clara.set_wiki_synthesis_hold($1,$2,$3) as r",
-      [clientId, "egress consent revoked", `wikihold:${clientId}:${ev.seq}`]),
-  };
+/** LEGACY, NULL-PURPOSE consent events are CHECKPOINT-ONLY for wiki after 0020 (§4.2). They used to
+ *  clear the wiki hold on egress.consent_granted — an invoice-facts consent silently releasing a wiki
+ *  authorization control. That ends: the legacy relation governs the invoice-facts lane and nothing
+ *  else, and typed wiki authorization state is written only by the owner-floored typed RPCs.
+ *  The four typed egress.purpose_* events are ALSO checkpoint-only here: the DB owns their hold
+ *  transitions (§4.3), so the consumer has nothing to do but advance. They are subscribed for
+ *  observability and ordering, not for effect.
+ *  The receipt is the EXISTING generic no-op token: the contract requires "checkpoint-only" and
+ *  enumerates no new token for these lanes, so none is invented. */
+function planConsentCheckpointOnly() {
+  return skip("skipped_kind");
 }
 
 /** The DETERMINISTIC seeding wiki_fact lane (F13): a TICKED seeding.proposal_decided of kind
@@ -425,15 +598,67 @@ export async function hasStaleWriterDefault(client) {
  *  invalidated the provenance, not which verb caused it.
  *  At-least-once safety: op-key dedupe (case a) plus the writer's own `stale_at is null` filter mean
  *  a re-delivery or a rewound-checkpoint redrive never double-marks. */
-async function planFilingRetiredStale(client, { ev, clientId, documentId, deps }) {
+async function planFilingRetiredStale(client, { firmId, ev, clientId, documentId, deps }) {
   // A null key is a checkpoint-only SKIP — never a dead-letter, never a call with nulls.
   if (!clientId || !documentId) return skip("skipped_kind");
   if (!(await (deps.hasStaleWriter ?? hasStaleWriterDefault)(client))) return skip("skipped_no_surface");
+  // 0020 §5.4: AFTER the 0019 effect, attempt the re-drive. 0019 marks a retired filing's citations
+  // stale; it does NOT re-resolve the document for a surviving client, and the document.classified
+  // event is checkpointed permanently — so the re-drive is 0020's, and this is the single genuine
+  // coupling between the two migrations. Both effects share ONE transaction with the checkpoint: a
+  // 40P01 against a concurrent authority function aborts both and the event re-drives (residual R-1).
+  const canRedrive = await (deps.hasResolverSurface ?? hasResolverSurfaceDefault)(client);
   return {
     status: "citations_staled", lane: "filing_retired",
-    mutate: (c) => c.query(
-      "select clara.mark_wiki_citations_stale($1,$2,$3,$4) as r",
-      [clientId, documentId, "source_filing_retired", `wikistale:${clientId}:${ev.seq}`]),
+    mutate: async (c) => {
+      await c.query("select clara.mark_wiki_citations_stale($1,$2,$3,$4) as r",
+        [clientId, documentId, "source_filing_retired", `wikistale:${clientId}:${ev.seq}`]);
+      if (!canRedrive) return null;
+      // The re-drive is an ATTEMPT layered on top of an effect the 0019 contract requires, so it
+      // runs under its OWN SAVEPOINT. Without one, an ENUMERATED terminal refusal from the
+      // serialized verb — CLR32/cap_exceeded when the client is at its wiki page cap, CLR28 on a
+      // consent_evidence document, CLR10 on a non-publishable client — would abort the WHOLE
+      // effect transaction, rolling back mark_wiki_citations_stale, and runTargetEvent would then
+      // CHECKPOINT the event as a terminal convergence: the 0019 §4 stale mark would be lost
+      // permanently and the citation would never converge. The savepoint contains a terminal
+      // refusal and surfaces it on the receipt instead. Anything NOT in the closed terminal table
+      // (a configuration refusal, an unrecognised typed refusal, a 40P01 deadlock, a connection
+      // error) still PROPAGATES, so the whole event rolls back and re-drives exactly as before —
+      // residual R-1 is unchanged.
+      await c.query("savepoint wiki_redrive");
+      try {
+        const r = await (deps.resolveAndIngestWikiSource ?? resolveAndIngestWikiSourceDefault)(
+          c, { firmId, documentId });
+        await c.query("release savepoint wiki_redrive");
+        return { redrive: r?.status ?? null };
+      } catch (err) {
+        await c.query("rollback to savepoint wiki_redrive").catch(() => {});
+        if (isConnErr(err) || terminalStatusFor(err) === null) throw err;
+        await c.query("release savepoint wiki_redrive").catch(() => {});
+        return { redrive: `refused:${err.code}/${claraReason(err) ?? ""}` };
+      }
+    },
+  };
+}
+
+/** The SERIALIZED resolve-and-ingest lane (0020 §5.3/§5.4) — document.classified and the
+ *  document.filed re-drive. The resolution is NOT taken here: it is re-decided inside the effect
+ *  transaction under the filing-topology lock pair, so the receipt is whatever that verb returns
+ *  (projected · skipped_ambiguous_client · skipped_unresolved_client · skipped_unclassified).
+ *  Without the exact resolver pair the lane degrades to today's behaviour: skipped_unresolved_client
+ *  for document.classified, and checkpoint-only for the re-drive. */
+async function planResolvedIngest(client, { firmId, documentId, lane, deps }) {
+  if (!documentId) return skip("skipped_kind");
+  if (!(await (deps.hasResolverSurface ?? hasResolverSurfaceDefault)(client))) {
+    return skip(lane === "redrive" ? "skipped_no_surface" : "skipped_unresolved_client");
+  }
+  return {
+    status: "projected", lane: lane === "redrive" ? "filed_redrive" : "resolved_ingest",
+    mutate: async (c) => {
+      const r = await (deps.resolveAndIngestWikiSource ?? resolveAndIngestWikiSourceDefault)(
+        c, { firmId, documentId });
+      return { status: r?.status ?? "skipped_unresolved_client" };
+    },
   };
 }
 
@@ -442,24 +667,29 @@ export async function planEvent(client, { firmId, ev, deps }) {
   const payload = ev.payload || {};
   switch (ev.eventType) {
     case "entry.approved":
+      // UNCHANGED: the event carries an authoritative client_id, so it keeps calling the audited
+      // writer directly. Requiring uniqueness here would break a document legitimately filed to more
+      // than one client — which is exactly why 0020 put the uniqueness rule in a NEW entry point.
       return planDeterministicIngest(client, { firmId, clientId: ev.clientId, documentId: ev.documentId });
-    case "document.classified": {
-      const resolve = deps.resolveDocumentClient ?? resolveDocumentClientDefault;
-      const clientId = ev.clientId ?? (await resolve(client, { documentId: ev.documentId, firmId }));
-      return planDeterministicIngest(client, { firmId, clientId, documentId: ev.documentId });
-    }
+    case "document.classified":
+      return planResolvedIngest(client, { firmId, documentId: ev.documentId, lane: "classified", deps });
+    case "document.filed":
+      return planResolvedIngest(client, { firmId, documentId: ev.documentId, lane: "redrive", deps });
     case "counterparty.created":
       return planCounterpartySynthesis(client, { firmId, ev, clientId: ev.clientId, counterpartyId: payload.counterparty_id, deps });
     case "counterparty.merged":
       return planCounterpartySynthesis(client, { firmId, ev, clientId: ev.clientId, counterpartyId: payload.survivor_id, deps });
     case "egress.consent_granted":
-      return planConsentTransition({ ev, clientId: ev.clientId, granted: true });
     case "egress.consent_revoked":
-      return planConsentTransition({ ev, clientId: ev.clientId, granted: false });
+    case "egress.purpose_consent_granted":
+    case "egress.purpose_consent_revoked":
+    case "egress.purpose_activated":
+    case "egress.purpose_deactivated":
+      return planConsentCheckpointOnly();
     case "seeding.proposal_decided":
       return planSeedingWikiFact(client, { firmId, ev });
     case "document.filing_retired":
-      return planFilingRetiredStale(client, { ev, clientId: ev.clientId, documentId: ev.documentId, deps });
+      return planFilingRetiredStale(client, { firmId, ev, clientId: ev.clientId, documentId: ev.documentId, deps });
     default:
       return skip("skipped_kind");
   }
@@ -518,9 +748,14 @@ async function runTargetEvent(client, { firmId, ev, deps }) {
   let plan;
   try {
     plan = await planEvent(client, { firmId, ev, deps });
+    // 0020: a lane whose OUTCOME is only decided inside the effect transaction (the serialized
+    // resolve-and-ingest, and the filing-retired re-drive) refines its own receipt by returning
+    // {status?, redrive?} from mutate. Every other lane returns whatever it returned before and its
+    // receipt is unchanged.
+    let effect = null;
     await client.query("begin");
     try {
-      if (plan.mutate) await plan.mutate(client);
+      if (plan.mutate) effect = await plan.mutate(client);
       await writeCheckpoint(client, { consumer: WIKI_PROJECTION_CONSUMER, firmId, seq: ev.seq });
       // F6: a successful (re)projection RESOLVES any dead-letter for this event ATOMICALLY with the
       // effect + checkpoint — so an automatic replay after a repair clears the /ready warning in the
@@ -531,7 +766,13 @@ async function runTargetEvent(client, { firmId, ev, deps }) {
       await client.query("rollback").catch(() => {});
       throw err;
     }
-    return { ok: true, receipt: { status: plan.status, lane: plan.lane ?? null, event: ev.eventType } };
+    const refined = (effect && typeof effect === "object" && typeof effect.status === "string")
+      ? effect.status : plan.status;
+    const receipt = { status: refined, lane: plan.lane ?? null, event: ev.eventType };
+    if (effect && typeof effect === "object" && effect.redrive !== undefined) {
+      receipt.redrive = effect.redrive;
+    }
+    return { ok: true, receipt };
   } catch (err) {
     if (isConnErr(err)) throw err;
     const status = terminalStatusFor(err);
@@ -662,9 +903,10 @@ export async function wikiProjectionRedrive(client, eventId, deps = {}) {
   if (!ev) throw new Error(`wiki_projection redrive: event ${eventId} not found`);
   if (!SUBSCRIBED.has(ev.eventType)) throw new Error(`wiki_projection redrive: event ${eventId} is '${ev.eventType}', not subscribed`);
   const plan = await planEvent(client, { firmId: ev.firmId, ev, deps });
+  let effect = null;
   await client.query("begin");
   try {
-    if (plan.mutate) await plan.mutate(client);
+    if (plan.mutate) effect = await plan.mutate(client);
     await client.query("update clara.relay_dead_letters set status='resolved', resolved_at=now() where consumer=$1 and event_id=$2",
       [WIKI_PROJECTION_CONSUMER, eventId]);
     await client.query("commit");
@@ -672,7 +914,9 @@ export async function wikiProjectionRedrive(client, eventId, deps = {}) {
     await client.query("rollback").catch(() => {});
     throw err;
   }
-  return { resolved: true, consumer: WIKI_PROJECTION_CONSUMER, status: plan.status, eventId };
+  const status = (effect && typeof effect === "object" && typeof effect.status === "string")
+    ? effect.status : plan.status;
+  return { resolved: true, consumer: WIKI_PROJECTION_CONSUMER, status, eventId };
 }
 
 export const CONSUMERS = Object.freeze({

@@ -105,6 +105,11 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
     return { client: o.client, doc: d, batch: b.batch_id ?? b.id };
   };
   const b1 = await glBatch(); // tick/decline pairs + complete
+  // [0020 A6] record_wiki_source_ingest REFUSES a non-null p_note, so the note can no longer be
+  // the field this law moves. The op hash covers (client, document, note); the DOCUMENT moves
+  // instead — two verified, actively-filed sources on the same client.
+  const g4ingA = await filedDocument(w.users.alice, { firm: w.firms.A, client: b1.client, kind: "invoice" });
+  const g4ingB = await filedDocument(w.users.alice, { firm: w.firms.A, client: b1.client, kind: "invoice" });
   const b2 = await glBatch(); // complete pair
   const b3 = await glBatch(); // cancel pair
   const b4 = await glBatch(); // cancel pair
@@ -162,7 +167,7 @@ test("G4/[R2-F8]: EVERY catalog writer invoking _reserve_op has a mutation fixtu
     clear_wiki_synthesis_hold: (k, v) => clearWikiHold({ client: v === "a" ? w.clients.A1 : w.clients.A2, opKey: k }),
     retire_wiki_page: async (k, v) => retireWikiPage(w.users.bob, {
       page: (await pageRow(w.clients.A1, v === "a" ? "g4r1" : "g4r2")).id, reason: "g4", opKey: k }),
-    record_wiki_source_ingest: (k, v) => recordWikiIngest({ client: b1.client, document: b1.doc.documentId, note: `g4 ${v}`, opKey: k }),
+    record_wiki_source_ingest: (k, v) => recordWikiIngest({ client: b1.client, document: (v === "a" ? g4ingA : g4ingB).documentId, opKey: k }),
     mark_wiki_citations_stale: (k, v) => markStale({
       client: w.clients.A1, document: (v === "a" ? g4staleA : g4staleB).documentId, opKey: k }),
     create_seeding_batch: (k, v) => createSeedingBatch({

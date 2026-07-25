@@ -27,12 +27,17 @@
 //            callers, and the one 'get_context_pack' string literal in the tree
 //            (0011:3345) sits INSIDE get_context_pack itself, which is
 //            whitelisted. A future offender is a finding, not a test bug.
+//            [AMENDED at 0020] "the whitelist" is really a CAPABILITY SET that
+//            grows by EXPLICIT ENUMERATION: 0020's four authorized callers hold
+//            call edges into the audited writers by the 0020 contract's own
+//            instruction, so they are named (WB_0020_WHITELIST_SIGS) and then
+//            held to call-edge-ONLY. See the §9 cell below for the full framing.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   ROLES, rootQuery, endPool, printLaneNotes,
-  fail0019, wbEnsureReady19, fnSource,
+  fail0019, wbEnsureReady19, has0020, fnSource, authorizedWikiCallerFacts,
   WB_0019_WHITELIST_SIGS, WB_WIKI_RELATIONS, WB_STALE_RELATIONS, WB_STALE_COLS,
   WB_STALE_FINDING, WB_EVENT_TYPES,
 } from "./wb-fixtures.mjs";
@@ -82,7 +87,7 @@ test("[0019 §9]: the whitelist resolves by EXACT regprocedure identity — ever
   assert.equal(whitelistOids.length, 12, "the whitelist is a closed set of twelve");
 });
 
-test("[0019 §9]: the INVERSE closed-set scan — NO clara fn outside the whitelist names a wiki relation OR carries a call edge", async () => {
+test("[0019 §9]: the INVERSE closed-set scan — NO clara fn outside the wiki-touch CAPABILITY SET names a wiki relation OR carries a call edge", async () => {
   fail0019(live);
   assert.ok(whitelistOids.length === 12, "the whitelist resolved (this cell depends on the previous one)");
   // RATCHET R1 finding 4: the scan is NOT restricted to `p.prosecdef`. A definers-only
@@ -90,6 +95,23 @@ test("[0019 §9]: the INVERSE closed-set scan — NO clara fn outside the whitel
   // authority definer calls it, current_user is still the definer's owner, so the helper
   // carries the definer's authority. This mirrors the migration tail, which was widened
   // the same way; wb-0019-ratchet.test.mjs proves the delta with a live probe.
+  //
+  // THE SET GROWS BY EXPLICIT ENUMERATION, AND HERE IS WHY. This cell first shipped with
+  // 0019's twelve signatures alone, and it false-failed the moment 0020 landed — because
+  // 0020's typed-consent verbs reach wiki state exactly the way the 0020 contract TOLD
+  // them to: by CALLING the audited writers (record_wiki_source_ingest, set_/clear_
+  // wiki_synthesis_hold). The call-edge half cannot distinguish "reached wiki state
+  // through an AUDITED governed verb" (sanctioned) from "reached it through an unaudited
+  // wrapper" (the defect WB-R21 abolishes) — so authorized callers must be NAMED, in
+  // their own migration's commit. The enumeration lives in ONE place
+  // (WB_0020_WHITELIST_SIGS, wb-helpers.mjs), shared with wb-0019-ratchet, wb-0020-tail
+  // and the live ceremony probe (deploy/wave-b-0019-postverify.sql probe 9).
+  //
+  // NOT a weakening: enumeration buys the WEAKER capability only, and the two
+  // compensating assertions below are the teeth. Unresolvable signatures are skipped, so
+  // this cell is correct against a 19-migration database (set = the twelve) and 20+ alike.
+  const callers = await authorizedWikiCallerFacts({ relationRe: RELATION_RE, callEdgeRe: CALL_EDGE_RE });
+  const capabilitySet = [...whitelistOids, ...callers.map((c) => c.oid)];
   const r = await rootQuery(`
     select p.oid::regprocedure::text as sig, p.prosecdef,
            (p.prosrc ~* $2) as names_relation,
@@ -98,9 +120,22 @@ test("[0019 §9]: the INVERSE closed-set scan — NO clara fn outside the whitel
      where n.nspname='clara'
        and not (p.oid::text = any($1::text[]))
        and (p.prosrc ~* $2 or p.prosrc ~* $3)
-     order by 1`, [whitelistOids, RELATION_RE, CALL_EDGE_RE]);
+     order by 1`, [capabilitySet, RELATION_RE, CALL_EDGE_RE]);
   assert.equal(r.rows.length, 0,
-    `clara functions outside the wiki whitelist touching the wiki set:\n${r.rows.map((x) => `  ${x.sig} (secdef=${x.prosecdef} relation=${x.names_relation} call_edge=${x.call_edge})`).join("\n")}`);
+    `clara functions outside the wiki-touch capability set (0019's twelve + ${callers.length} enumerated authorized caller(s)) touching the wiki set:\n${r.rows.map((x) => `  ${x.sig} (secdef=${x.prosecdef} relation=${x.names_relation} call_edge=${x.call_edge})`).join("\n")}\nIf one is a new migration's AUTHORIZED caller, add it to WB_0020_WHITELIST_SIGS in that migration's own commit — never silently.`);
+
+  // TEETH 1 — an authorized CALLER may hold call edges, NEVER relation access.
+  for (const c of callers) {
+    assert.equal(c.namesRelation, false,
+      `the authorized caller ${c.sig} NAMES a wiki relation directly — enumeration grants the CALL-EDGE capability only; direct relation access is still a failure, for an authorized caller as much as for anyone`);
+  }
+  // TEETH 2 — no DEAD exemption: an enumerated caller that calls no audited writer
+  // any more is a stale entry and must be removed, or the set accumulates silently.
+  for (const c of callers) {
+    assert.equal(c.callEdge, true,
+      `${c.sig} is enumerated as an authorized wiki caller but carries NO call edge into the audited set — a dead exemption; remove it from WB_0020_WHITELIST_SIGS`);
+  }
+
   // …and the scan is NOT vacuous: the whitelisted members do trip both halves.
   const positive = await rootQuery(`
     select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace
@@ -228,10 +263,17 @@ test("[0019 amendment 4]: NO event type was registered — not in event_types, n
       join clara.taxonomy_active a on a.version=t.version and a.singleton
      where t.event_type ~ 'citations_staled|wiki.*stale'`);
   assert.equal(tax.rows.length, 0, "…and none in the ACTIVE trigger taxonomy");
+  // [0020 A8] The family is MIGRATION-LEVEL EXACT, not frozen: 0019 registers none (this
+  // cell's point), and 0020 registers exactly ONE — wiki.page_canonicalized, the correction
+  // envelope its bridge direction 5 needs to canonicalize an APPEND-ONLY log. Asserting the
+  // level-appropriate closed set keeps the negative proof (0019 added nothing) while refusing
+  // to false-green a fifth type that neither migration sanctioned.
   assert.deepEqual(
     (await rootQuery("select name from clara.event_types where name like 'wiki.%' order by name")).rows.map((x) => x.name),
-    ["wiki.page_published", "wiki.page_retired", "wiki.source_ingested"],
-    "the wiki event family is EXACTLY the three 0017 types");
+    (await has0020())
+      ? ["wiki.page_canonicalized", "wiki.page_published", "wiki.page_retired", "wiki.source_ingested"]
+      : ["wiki.page_published", "wiki.page_retired", "wiki.source_ingested"],
+    "the wiki event family is EXACTLY the three 0017 types, plus 0020's ONE correction type");
   assert.equal(Object.keys(WB_EVENT_TYPES).filter((k) => /stale/.test(k)).length, 0,
     "the pinned WB_EVENT_TYPES roster is unchanged — the negative proof of amendment 4");
 });

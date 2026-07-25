@@ -155,7 +155,7 @@ test("[R2-F7]: DEEP replay — separate shadow model, HISTORICAL versions, lifec
     citations: [{ source_kind: "document", document_id: cited.documentId, detail: { page: 3, quote: "F7 statement line" } },
       { source_kind: "counterparty", counterparty_id: cp }],
     refs: [{ ref_kind: "wiki_page", ref_page_id: profileId }] });
-  await recordWikiIngest({ client: cW, document: cited.documentId, note: "F7 ingest path" });
+  await recordWikiIngest({ client: cW, document: cited.documentId });
   const vsPageId = (await rootQuery("select id from clara.wiki_pages where client_id=$1 and slug='vendor-story'", [cW])).rows[0].id;
   await retireWikiPage(w.users.bob, { page: vsPageId, reason: "F7 retire" });
   // ---- SEPARATE SHADOW MODEL: pages + PER-VERSION rows, events only ---------

@@ -75,11 +75,23 @@ test("[0019 §4]: document.filing_retired JOINS the wiki-projection subscription
   // no wiki.* type in the subscription set to loop on.
   assert.ok(![...WIKI_PROJECTION_EVENT_TYPES].some((t) => t.startsWith("wiki.")),
     "NO wiki.* type is subscribed — the lane's own effects emit no event, so there is no self-subscription");
+  // MIGRATION 0020 WIDENED THE SET, and 0019's own §4 is unaffected by the widening.
+  // The closed-set assertion below was written when 0019 was the tip; it read "the
+  // 0017 seven PLUS document.filing_retired". 0020 §5.4 adds `document.filed` — the
+  // OTHER half of the filing-topology surface, without which a document classified
+  // while unfiled can only ever be re-driven by a RETIREMENT — and §4.2 adds the four
+  // `egress.purpose_*` typed events for observability and ordering. Each addition is
+  // document.* or egress.*, so the P17 property this cell actually guards (no wiki.*
+  // self-subscription, asserted above) is untouched. Re-aimed, not relaxed: the set is
+  // still pinned EXACTLY, and 0019's own membership claim is asserted first.
   assert.deepEqual([...WIKI_PROJECTION_EVENT_TYPES].sort(), [
     "counterparty.created", "counterparty.merged", "document.classified",
-    "document.filing_retired", "egress.consent_granted", "egress.consent_revoked",
+    "document.filed", "document.filing_retired",
+    "egress.consent_granted", "egress.consent_revoked",
+    "egress.purpose_activated", "egress.purpose_consent_granted",
+    "egress.purpose_consent_revoked", "egress.purpose_deactivated",
     "entry.approved", "seeding.proposal_decided",
-  ], "the subscription set is exactly the 0017 seven PLUS document.filing_retired");
+  ], "the subscription set is the 0017 seven PLUS 0019's document.filing_retired PLUS 0020's document.filed + four egress.purpose_* types");
 });
 
 test("[0019 §4]: the plan is {status:'citations_staled', lane:'filing_retired'} and its mutate calls the writer with the pinned args", async () => {

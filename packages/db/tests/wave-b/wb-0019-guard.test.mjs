@@ -19,6 +19,14 @@
 //            (every deterministic-ingest page, 0017:2264-2269) — is stated as a
 //            guard condition ("the prior published version's projected_from_seq
 //            is not null") and is asserted as a PUBLISH, not a refusal.
+//            [0020 A5] The VEHICLE for that assertion moved. A5 reserves the
+//            'sources/' slug namespace for deterministic ingest, so
+//            publish_wiki_page_version can no longer supersede a source page. The
+//            null-PRIOR case is proven on a non-source page published with a null
+//            seq — the identical guard branch — and the old route is asserted as
+//            the A5 refusal instead. Worth stating plainly: post-A5 a NON-NULL new
+//            seq over an INGEST-MADE null prior is unreachable in production, since
+//            the only writer permitted in that namespace passes null itself.
 //   [D19-10] §5's rollback probe says "in a forced-rollback subtransaction". Here
 //            each refused attempt IS its own autocommit statement, so the raise
 //            rolls the whole statement back by construction — a stronger and
@@ -30,7 +38,7 @@ import assert from "node:assert/strict";
 import {
   CLR31 as CLR_WIKI, ROLES, opk, getPool,
   assertRaises, endPool, printLaneNotes,
-  fail0019, wbEnsureReady19, fnSource, detailReason, waitBlockedByOrThrow,
+  fail0019, wbEnsureReady19, has0020, fnSource, detailReason, waitBlockedByOrThrow,
   buildWaveBWorld, createClient, filedDocument,
   publishWikiPage, recordWikiIngest, pageRow, versionRows, wikiLogRows,
   auditRowsFor, opReceiptRow, eventsOf, shaHex, wikiKey,
@@ -157,19 +165,49 @@ test("[0019 §5]: NULL-SAFE — the new-page branch, a null p_projected_from_seq
   const argPage = await pageRow(c1, "d19-g-null-arg");
   assert.equal((await versionRows(argPage.id)).length, 2,
     "(ii) a null p_projected_from_seq publishes — deterministic ingest must never be blocked");
-  // (iii/[D19-9]) a PRIOR with a null projected_from_seq (the deterministic
-  // ingest shape, 0017:2264-2269) is not comparable, so the guard bypasses.
+  // (iii/[D19-9]) a PRIOR whose projected_from_seq is null is not comparable, so the guard
+  // bypasses. The vehicle is a NON-source page published with a null seq, which reaches the
+  // identical branch (`pv.projected_from_seq is not null` fails ⇒ no refusal).
+  //
+  // [D19-9 / 0020 A5] It USED to be an ingest-made source page. 0020 amendment A5 RESERVES
+  // the 'sources/' slug namespace for deterministic ingest, so publish_wiki_page_version can
+  // no longer supersede a source page — see (iv). The prior-side null case is unchanged and
+  // still fully reachable; only the vehicle moved. Note what A5 also means: a non-null new
+  // seq over an INGEST-made null prior is now unreachable in production entirely, because the
+  // only writer that may touch that slug passes null itself.
+  await pub(c1, "d19-g-null-prior", { content: "# v1 with a null seq", projectedFromSeq: null });
+  const nullPriorPage = await pageRow(c1, "d19-g-null-prior");
+  assert.equal((await versionRows(nullPriorPage.id))[0].projected_from_seq, null,
+    "the prior version carries a NULL projected_from_seq");
+  await pub(c1, "d19-g-null-prior", {
+    content: "# republished over a null-seq prior", projectedFromSeq: 1, opKey: opk("d19gnp") });
+  assert.equal((await versionRows(nullPriorPage.id)).length, 2,
+    "(iii) a supersede over a NULL-seq prior publishes — the guard is null-safe on BOTH sides");
+
+  // (iv) the deterministic-ingest page itself: its version still carries a null seq (the 0019
+  // fact), and under 0020 A5 the reserved namespace is what now refuses the old vehicle.
   const src = await filedDocument(w.users.alice, { firm: w.firms.A, client: c1, kind: "bank_statement" });
-  await recordWikiIngest({ client: c1, document: src.documentId, note: "0019 guard null-prior fixture" });
+  await recordWikiIngest({ client: c1, document: src.documentId });
   const ingestPage = await pageRow(c1, `sources/${src.documentId}`);
   assert.ok(ingestPage, "the deterministic ingest minted its source page");
-  const v0 = (await versionRows(ingestPage.id))[0];
-  assert.equal(v0.projected_from_seq, null, "…whose version carries a NULL projected_from_seq");
-  await pub(c1, `sources/${src.documentId}`, {
-    pageKind: "period_context", content: "# republished over a null-seq prior",
-    projectedFromSeq: 1, opKey: opk("d19gnp") });
-  assert.equal((await versionRows(ingestPage.id)).length, 2,
-    "(iii) a supersede over a NULL-seq prior publishes — the guard is null-safe on BOTH sides");
+  assert.equal((await versionRows(ingestPage.id))[0].projected_from_seq, null,
+    "…whose version carries a NULL projected_from_seq (0017:2264-2269, unchanged by A5)");
+  if (await has0020()) {
+    const err = await assertRaises(CLR_WIKI, () => pub(c1, `sources/${src.documentId}`, {
+      pageKind: "period_context", content: "# a synthesized supersede of a source page",
+      projectedFromSeq: 1, opKey: opk("d19gnp2") }),
+      "publish_wiki_page_version superseding a deterministic source page under 0020 A5");
+    assert.equal(detailReason(err), "reserved_slug_namespace",
+      "(iv) A5: the sources/ namespace belongs to deterministic ingest — the refusal is the"
+      + " NAMESPACE reservation, not the monotonic guard, and it fires BEFORE any seq comparison");
+    assert.equal((await versionRows(ingestPage.id)).length, 1, "…and nothing was written");
+  } else {
+    await pub(c1, `sources/${src.documentId}`, {
+      pageKind: "period_context", content: "# republished over a null-seq prior",
+      projectedFromSeq: 1, opKey: opk("d19gnp2") });
+    assert.equal((await versionRows(ingestPage.id)).length, 2,
+      "(iv) pre-A5: the namespace is unreserved, so the old vehicle still supersedes");
+  }
 });
 
 test("[0019 §5]: op_key dedupe is UNCHANGED — a same-key redelivery replays byte-identically, it never trips the guard", async () => {

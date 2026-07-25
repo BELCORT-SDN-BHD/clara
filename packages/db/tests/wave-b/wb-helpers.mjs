@@ -67,11 +67,17 @@ export const WB_PACK_CONSUMER = process.env.CLARA_WB_PACK_CONSUMER ?? "v25";
 export const PAGE_KINDS = ["profile", "period_context", "treatment",
   "recurring_pattern", "counterparty", "open_question"];
 
-/** W7 — the four WB-R8 seeded budget rows, exact. */
+/** W7 — the four WB-R8 seeded budget rows, exact. UNCHANGED by 0020 §A5, deliberately: A5
+ *  narrows the POPULATION max_pages_per_client counts, never its value. */
 export const WB_BUDGET_SEEDS = {
   max_pages_per_client: 40, max_page_bytes: 8192,
   pack_max_pages: 6, pack_max_bytes: 12288,
 };
+
+/** 0020 §A5 — the FIFTH budget row: the deterministic-source page ceiling. Separate from
+ *  WB_BUDGET_SEEDS so a cell can still assert "the four WB-R8 seeds, exact" against either a
+ *  19- or a 20-migration database. */
+export const WB_0020_BUDGET_SEEDS = { max_source_pages_per_client: 50000 };
 
 /** New firm-scoped tables 0017 adds (full RLS posture asserted per table). */
 export const WB_NEW_TABLES = [
@@ -383,6 +389,106 @@ export function fail0019(live) {
 }
 
 // ---------------------------------------------------------------------------
+// 0020 readiness (TYPED EGRESS CONSENT + DISPATCH AUTHORIZATION, WB-R23 ·
+// WB-R24(iii)) — the SAME FAIL-never-skip discipline as fail0017/18/19, one
+// migration up. The 0020 blind battery (wb-0020-*.test.mjs) is REQUIRED to fail
+// RED against the 19-migration prestate: its pins (the SEPARATE typed-consent
+// relation, owner activation, two-phase prepare/consume authorization, the
+// discriminated doc->client resolver + effect-time serialization + the re-drive)
+// are not built yet. This gate is GATING: without it a 0020 cell could silently
+// pass against a 19-migration database and the blind lane would prove nothing.
+// ---------------------------------------------------------------------------
+
+export async function has0020() {
+  try {
+    const r = await rootQuery("select version from clara.schema_migrations where version ~ '^0020_'");
+    return r.rows.length > 0;
+  } catch { return false; }
+}
+
+/** Best-effort migrate (idempotent) then the 0020 gate. Mirrors wbEnsureReady19. */
+export async function wbEnsureReady20() {
+  try {
+    const { ensureReady } = await import("../rig-docs-fixtures.mjs");
+    await ensureReady();
+  } catch { /* dirty tree — probe the live catalog as-is */ }
+  return has0020();
+}
+
+/** The per-cell 0020 gate: at 19 migrations every 0020 cell FAILS loudly. */
+export function fail0020(live) {
+  if (!live) {
+    throw new Error(
+      "0020 NOT applied (clara.schema_migrations has no '0020_%' row) — the typed-consent + dispatch-authorization pins (WB-R23/WB-R24(iii): the SEPARATE typed relation, owner-only activation, two-phase prepare/consume authorization, the discriminated resolver + effect-time serialization + re-drive) are not built; this battery is REQUIRED to fail against the 19-migration prestate (work-order discipline)",
+    );
+  }
+}
+
+/** [0020 / 0019 §9 COUPLING — raised blind as a FINDING, since ADJUDICATED]
+ *
+ *  0019's clean-end-state closed-set scan fails ANY clara function outside
+ *  WB_0019_WHITELIST_SIGS whose prosrc either names a wiki relation OR carries a
+ *  CALL EDGE into the twelve-member wiki-touch set (0019:1477-1517; mirrored live
+ *  by wb-0019-tail.test.mjs, which additionally asserts the whitelist resolved to
+ *  EXACTLY 12).
+ *
+ *  The 0020 contract's "Dependencies on 0019" row states the obligation for
+ *  RELATION references only ("If any 0020 function's normalized source does
+ *  reference one of those relations word-bounded, 0020 MUST add it to 0019's
+ *  whitelist") and is SILENT on the call-edge half — yet §4.3 REQUIRES the typed
+ *  owner RPCs to call set_/clear_wiki_synthesis_hold and §5.3 REQUIRES
+ *  resolve_and_ingest_wiki_source to call record_wiki_source_ingest. Those calls
+ *  are call edges by construction, so these four functions MUST join the closed
+ *  set or the 0019 scan (and wb-0019-tail's `=== 12`) breaks the moment 0020 lands.
+ *
+ *  THE WIKI-TOUCH SET IS A CAPABILITY SET THAT GROWS BY EXPLICIT ENUMERATION.
+ *  The scan's call-edge half CANNOT distinguish "reached wiki state through an
+ *  AUDITED governed verb" (sanctioned — the 0020 contract's own instruction) from
+ *  "reached it through an unaudited wrapper" (the defect WB-R21 abolishes). So an
+ *  authorized later-migration caller has to be NAMED, in that migration's own
+ *  commit, never silently.
+ *
+ *  That is NOT a weakening, because enumeration here buys only the WEAKER
+ *  capability. Every member is separately asserted (by authorizedWikiCallerFacts
+ *  below, at each widened site) to
+ *    (a) name NO wiki relation — gaining DIRECT relation access is still a
+ *        failure, for an authorized caller as much as for anyone; and
+ *    (b) carry at least ONE call edge — an entry that no longer calls an audited
+ *        writer is a DEAD exemption and must be removed, so the set cannot
+ *        silently accumulate them.
+ *  The live ceremony probe (packages/db/deploy/wave-b-0019-postverify.sql probe 9)
+ *  carries the identical framing against the committed catalog. */
+export const WB_0020_WHITELIST_SIGS = [
+  "clara.activate_client_egress_purpose(uuid,text,uuid,text)",
+  "clara.deactivate_client_egress_purpose(uuid,text,text,text)",
+  "clara.revoke_client_egress_purpose(uuid,text,text,text)",
+  "clara.resolve_and_ingest_wiki_source(uuid,uuid)",
+];
+
+/** Resolve the enumerated later-migration AUTHORIZED CALLERS against the LIVE
+ *  catalog and report the two facts their compensating assertions need.
+ *
+ *  Signatures that do NOT resolve are SKIPPED (the postverify probe-9 idiom), so
+ *  one roster is correct against a database at 19 — where 0020's verbs do not
+ *  exist yet and the capability set is exactly 0019's twelve — and at 20+ alike.
+ *  Resolution is by EXACT regprocedure identity, never by proname, so a future
+ *  overload of an enumerated name is not silently covered.
+ *
+ *  Returns [{ sig, oid, namesRelation, callEdge }] for the RESOLVED members only. */
+export async function authorizedWikiCallerFacts({ relationRe, callEdgeRe, sigs = WB_0020_WHITELIST_SIGS }) {
+  const out = [];
+  for (const sig of sigs) {
+    const r = await rootQuery(
+      `select p.oid::text as oid, (p.prosrc ~* $2) as names_relation, (p.prosrc ~* $3) as call_edge
+         from pg_proc p where p.oid = to_regprocedure($1)`,
+      [sig, relationRe, callEdgeRe]);
+    if (!r.rows[0]) continue; // not built on this database (a 19-migration rig) — skip
+    out.push({ sig, oid: r.rows[0].oid, namesRelation: r.rows[0].names_relation, callEdge: r.rows[0].call_edge });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
 // Small utilities
 // ---------------------------------------------------------------------------
 
@@ -424,7 +530,16 @@ export async function publishWikiPage({
   return r.rows[0].r;
 }
 
-export async function recordWikiIngest({ client, document, note = "rig ingest", opKey = null }) {
+// [0020 A6→A7] p_note defaults to NULL because the DB REFUSES a non-null note
+// (CLR10 / source_note_not_permitted). Note the A7 correction: the note floor is NOT what
+// makes the bytes machine-generated — the CANONICAL FORM is. Title and body are
+// 'Source: '||document_id and 'Source document: '||document_id, derived from the document
+// uuid and from NO caller-supplied string (A6 missed documents.original_filename, which the
+// same two lines used to copy into both). The A5 exemption from max_pages_per_client rests
+// on exactly that. Both production callers already pass null; a cell that WANTS the refusal
+// passes a note explicitly. A7 also moved the floor BEHIND _reserve_op, so an exact retry of
+// a pre-0020 noted call REPLAYS its stored receipt instead of erroring.
+export async function recordWikiIngest({ client, document, note = null, opKey = null }) {
   const r = await roleQuery(ROLES.runtime,
     "select clara.record_wiki_source_ingest(p_client => $1, p_document => $2, p_note => $3, p_op_key => $4) as r",
     [client, document, note, opKey ?? opk("wing")]);
