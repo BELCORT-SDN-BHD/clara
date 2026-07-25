@@ -94,7 +94,59 @@ declare
   v_old_title  text;
   v_n          bigint;
   v_bad        text;
+  v_rel        text;
+  v_oid        oid;
+  v_filtered   boolean;
+  v_super      boolean;
+  v_bypass     boolean;
+  v_blind      text := '';
 begin
+  -- ---- 0. THE READ ENVIRONMENT (ratchet R5-C, extended to this file) ----------------
+  -- The probe refuses to REPORT a number it cannot trust. This file must refuse to
+  -- CERTIFY one. Every relation it drives from is under FORCE row-level security: run it
+  -- as a role RLS filters and the driving cursor selects nothing, so it updates nothing,
+  -- appends nothing, and then its own step-3 re-assertions — which read the SAME filtered
+  -- relations — also see nothing and pass. It would print "0 page(s) canonicalized …
+  -- directions 4 and 5 both clear" and exit 0, certifying a corpus it never looked at.
+  -- That is the identical silent false-clean R5 found in the probe, one artifact later,
+  -- and here it ends with the operator believing the remediation ran.
+  select r.rolsuper, r.rolbypassrls into v_super, v_bypass
+    from pg_roles r where r.rolname = current_user;
+  foreach v_rel in array array['clara.wiki_pages','clara.wiki_page_versions',
+                               'clara.domain_events','clara.audit_log'] loop
+    v_oid := to_regclass(v_rel);
+    if v_oid is null then
+      raise exception 'A7 preflight: relation % does not exist — this is not a Clara database at 0017+', v_rel;
+    end if;
+    select c.relrowsecurity
+       and not coalesce(v_super,false)
+       and not coalesce(v_bypass,false)
+       and not (not c.relforcerowsecurity
+                and pg_has_role(current_user, c.relowner, 'USAGE'))
+       and not (
+         exists(select 1 from pg_policy pol
+                 where pol.polrelid = c.oid and pol.polpermissive
+                   and pol.polcmd in ('r','*')
+                   and pg_get_expr(pol.polqual, pol.polrelid) = 'true'
+                   and (0 = any(pol.polroles)
+                        or exists(select 1 from unnest(pol.polroles) ro
+                                   where ro <> 0 and pg_has_role(current_user, ro, 'USAGE'))))
+         and not exists(select 1 from pg_policy pol
+                 where pol.polrelid = c.oid and not pol.polpermissive
+                   and pol.polcmd in ('r','*')
+                   and (0 = any(pol.polroles)
+                        or exists(select 1 from unnest(pol.polroles) ro
+                                   where ro <> 0 and pg_has_role(current_user, ro, 'USAGE')))))
+      into v_filtered
+      from pg_class c where c.oid = v_oid;
+    if v_filtered then
+      v_blind := v_blind || case when v_blind='' then '' else ', ' end || v_rel;
+    end if;
+  end loop;
+  if v_blind <> '' then
+    raise exception 'A7 preflight: row-level security FILTERS % for role % — this file would silently canonicalize NOTHING and then certify that directions 4 and 5 are clear, because its own re-assertions read the same filtered relations. Re-run as the migration/owner role (the same role `pnpm db:migrate` uses). REFUSING to certify.',
+      v_blind, current_user;
+  end if;
   -- ---- 1. the correction event type (idempotent; 0020 registers the same row) -------
   insert into clara.event_types(name, client_scoped, description)
     values ('wiki.page_canonicalized', true,
@@ -160,7 +212,17 @@ begin
       then v_doc := substring(p.slug from 9)::uuid;
     end if;
 
-    -- lock the page, then its versions, in the publication core's own order.
+    -- LOCK ORDER: the CLIENT row first, THEN the page, then its versions — the publication
+    -- core's own order, ratified by 0019 ratchet R2 finding B1 and asserted by
+    -- wave-b-0019-postverify.sql probe 10 over every wiki_pages locker in the schema.
+    -- This file is a FOURTH locker. Taking the page row without the client-row prefix and then
+    -- calling _append_event (which requests firm_event_seq) inside the page loop is the exact
+    -- wait-for-graph shape 0019 outlawed — `retire_wiki_page` is not a leaf for the same
+    -- reason. A reviewer reproduced the resulting deadlock on a rig against a live publisher.
+    -- The ceremony quiesces before this runs (runbook §4b), so it cannot bite there; the lock
+    -- is taken anyway because the file is re-runnable and must not depend on the operator
+    -- having quiesced.
+    perform 1 from clara.clients c where c.id=p.client_id for update;
     select w.title into v_old_title from clara.wiki_pages w where w.id=p.id for update;
 
     update clara.wiki_pages w set title=c_title, updated_at=now()

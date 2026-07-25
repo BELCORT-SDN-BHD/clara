@@ -77,6 +77,25 @@ Confirm the new release tag holds `WIKI_PROJECTION`, one instance, the expected 
 and `/ready` true with **zero warnings**. This is the cutover point — do not proceed on a
 stale leader.
 
+The world is briefly live here against the **19** database. That is safe and deliberate: it is
+the state production is already in, and every 0020 dependency in the new image sits behind an
+exact-signature guard that reads false at 19.
+
+## 4b. RE-QUIESCE — and this one is not optional
+
+**Stop the machine again before step 5.** Confirm zero non-idle `clara_runtime` sessions.
+
+`planDeterministicIngest` (`packages/runtime/lib/wiki-projection.mjs`) calls
+`clara.record_wiki_source_ingest` on the `entry.approved` lane with **no surface guard** — it is
+19-era behaviour and is meant to be ungated. So a single `entry.approved` carrying a source
+document, arriving between the preflight (step 5) and the apply (step 6), would mint a **fresh**
+`sources/` page through the **pre-A7** verb: filename in the title, caller note in the body.
+Direction 4 then aborts the apply on a page that did not exist when you ran the probe.
+
+That failure is safe — the migration rolls back whole — but it is confusing at 2am and entirely
+avoidable. The preflight takes ~31 ms and the apply ~304 ms on a 30-page corpus, so the quiesced
+window is seconds. Do not trade a real race for them.
+
 ## 5. The A7/A8 canonicalization preflight — LOOK, CORRECT, CONFIRM
 
 The 0019 ceremony backfilled ~30 `sources/*` pages with the pre-A7 verb, whose title and
@@ -137,43 +156,126 @@ written at the new key — nothing reads it (every read surface serves
 
 ## 6. Apply migration 0020 (live: 19 → 20 applied)
 
-The §8 tail runs **in-transaction**; any failure aborts the whole migration. Then
-`NOTIFY pgrst, 'reload schema'`.
+**Apply it through the migration runner, never with `psql -f` on the migration file:**
+
+```
+node packages/db/scripts/migrate.mjs          # or: pnpm --filter @clara/db migrate
+```
+
+This is not a style preference. `0020_typed_consent.sql` contains **no transaction control of
+its own** — the `begin` / `commit` / `rollback` come from `packages/db/scripts/migrate.mjs`
+(lines 149-157), which also records the row in `clara.schema_migrations` and verifies the
+checksum. Run the file through `psql -f` instead and psql wraps each top-level statement in its
+*own* implicit transaction: a failure two-thirds of the way through leaves production
+**half-migrated**, with no `schema_migrations` row saying so, and the entire rollback posture
+below — which rests on "the migration is one transaction" — silently stops being true. (Verified:
+the file has no `begin`/`commit`, and no `CREATE INDEX CONCURRENTLY` or other statement that
+would refuse to run inside a transaction, so the runner's wrapper is both necessary and
+sufficient.)
+
+The §8 tail runs inside that same transaction, so a tail failure aborts the whole migration.
+
+Then reload PostgREST **and verify it took**:
+
+```
+psql -c "notify pgrst, 'reload schema'"
+```
+
+A missed reload is invisible from the database side — the catalog is correct and every probe in
+step 7 passes — while the dashboard keeps 404-ing the new RPCs as PGRST202, which reads exactly
+like a failed migration. Confirm by calling one new verb through PostgREST (or by watching the
+PostgREST log for the reload) before you believe step 7's green.
 
 ## 7. Post-DB verify
 
-Run under a `clara_runtime`-role probe unless stated otherwise (contract §10.3 step 3):
+**Run the file, then the runtime-lane checks by hand.**
 
-- `prepare_egress_dispatch` returns `{"verdict":"unknown","authorization_id":null}` for
-  **every** client including RPR (whose legacy row is live), byte-identical across them.
-- `resolve_document_client` returns the three discriminated shapes on known fixtures, and the
-  identical `unresolved` payload for a foreign-firm probe.
-- The three new relations are **empty**.
-- The invoice-facts lane is still authorized for RPR.
-- **No table grant** to `clara_runtime` on any consent relation.
-- `clara.wiki_budgets` is a **five**-row set — the four WB-R8 values unchanged plus
-  `max_source_pages_per_client = 50000`.
-- Re-run step 5(i): all five directions **0**. The apply aborts on any of them, so a green
-  apply has already proven this — read it as a receipt.
-- `select name from clara.event_types where name like 'wiki.%' order by name` returns
-  **exactly four**: `wiki.page_canonicalized`, `wiki.page_published`, `wiki.page_retired`,
-  `wiki.source_ingested`.
+```
+psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0020-postverify.sql
+```
+
+Ten probes, read-only, raising on the first failed invariant: at 20 with 0019 intact · the
+three typed relations exist **and** are empty (the existence check first, so emptiness cannot
+pass vacuously on a half-applied migration) · no application-role table grant on any consent
+relation · all nine 0020 verbs present **at their exact signatures**, including A1's six-argument
+`consume_egress_dispatch` · `wiki_budgets` is the five-row set with the four WB-R8 **values**
+unchanged · exactly four `wiki.*` event types with the correction type client-scoped/`ignore` in
+the ACTIVE taxonomy · **all five bridge directions read zero on the committed catalog** · the
+**DARK receipt** — `prepare_egress_dispatch` returns byte-identical
+`{"verdict":"unknown","authorization_id":null}` for every active client, *including any holding a
+live legacy purpose-blind consent*, which is the case a bleed would expose · that probe **minted
+nothing** · the legacy relation is intact with no new table grant.
+
+Prose is not enough here and 0019 is why: it shipped an executable post-verify file, and the
+value was not that it caught something — it caught nothing — but that "10/10 green" meant
+something a human did not hand-assemble at 2am. Verified on a rig seeded to mirror live (30
+source pages, one client, one live legacy consent): **10/10**, inside `begin read only`. Proven
+non-vacuous by injection — a retuned budget, one non-canonical page, a table grant to
+`clara_runtime`, and a fifth `wiki.*` type each failed their probe.
+
+The remaining checks need a runtime lane or a wake credential and are **not** in the file (a
+probe that cannot be executed as written is a probe that gets skipped):
+
+**These are REFUSAL probes only. Do not run a probe that writes.** An earlier draft of this
+list told the operator to call a null-note `record_wiki_source_ingest` "to verify the canonical
+title", which **publishes a real page**: measured on the rig, +1 `wiki_pages`, +1
+`wiki_page_versions`, +2 `domain_events`. `domain_events` is append-only, so that is a
+production write you cannot take back, performed as a *verification*, on a database whose page
+count the next step then asserts. The canonical-bytes property is proven by the upgrade fixture
+and re-proven by probe 7 of the file; it does not need a live write. The two refusals below are
+safe precisely because they refuse before writing.
+
 - A `clara_runtime` `publish_wiki_page_version` with slug `sources/<any uuid>` refuses
   `CLR32` / `reserved_slug_namespace` and writes nothing.
 - A `clara_runtime` `record_wiki_source_ingest` with a **non-null** `p_note` on a real filed
-  verified document refuses `CLR10` / `source_note_not_permitted`; the same call with a
-  **null** note is unchanged.
+  verified document refuses `CLR10` / `source_note_not_permitted` and writes nothing. *(Do not
+  then "check the null-note case is unchanged" — that call is the one that writes.)*
+- `resolve_document_client` returns the three discriminated shapes on known fixtures, and the
+  identical `unresolved` payload for a foreign-firm probe. Read-only.
 - `run_client_lint` on the busiest client returns promptly and opens **no** `orphan_page`
   finding against any `sources/%` page. Expect the first post-deploy pass to *supersede* the
   accumulated source-page findings — that pass is proportional to how many there were; every
-  pass after it is not.
+  pass after it is not. (This one does write lint rows; it is a normal scheduled operation, not
+  a synthetic probe, so it is in scope.)
 
-## 8. Verify DARK, then unquiesce
+**Measured on a rig seeded to mirror live** (30 source pages, one client, one live legacy
+consent, all 30 needing canonicalization): probe **~30 ms** · preflight **31 ms**, correcting 30
+pages / 30 titles / 30 version rows and appending 30 correction envelopes · apply **304 ms** ·
+post-verify **10/10**. The quiesced window is seconds, not minutes.
 
-Every counterparty event still records `held_consent` with the **unchanged** reason token
-`wiki synthesis consent unknown` and the unchanged `wikihold:<client>:<seq>` op key; **zero**
-`synthesize` calls; **zero** model-lane publications. Then restart the world and confirm
-`/ready` true with zero warnings, the wiki page count unchanged, and the firm cursor moving.
+## 8. Restart the world, verify DARK, then unquiesce
+
+Start the machine (it has been stopped since 4b) and confirm `WIKI_PROJECTION acquired`,
+`/ready` true with zero warnings, and the firm cursor moving.
+
+**Do NOT expect the wiki page count to hold.** An earlier draft listed "the wiki page count
+unchanged" as a success criterion; it is false by construction and contradicts the contract's
+own §10.1(1), which lists deterministic publication as **deliberate change #1**. A rising
+`sources/*` count after step 8 is the feature working. What must hold is that every new page is
+canonical (`Source: <document_id>` / `Source document: <document_id>`) and charged to
+`max_source_pages_per_client`, not to the 40-page synthesized cap.
+
+Then the DARK receipt from the runtime side: every counterparty event still records
+`held_consent` with the **unchanged** reason token `wiki synthesis consent unknown` and the
+unchanged `wikihold:<client>:<seq>` op key; **zero** `synthesize` calls; **zero** model-lane
+publications. (The DB-side half is probe 8 of step 7, which already proved every client returns
+byte-identical `unknown` — *including* RPR, which holds a live legacy purpose-blind consent and
+is therefore the case a bleed would expose.)
+
+**Be honest about what that observation can and cannot prove.** `clara.wiki_synthesis_holds` is
+**empty** on this database, which is positive evidence that no counterparty synthesis event has
+*ever* reached that lane in production. So "zero synthesize calls, zero model publications" will
+be true after the apply whether the lane is correctly dark or completely broken — the
+observation cannot distinguish them, and recording it as "DARK verified live" would overstate
+it. What is actually verified is the DB-side gate (probe 8, a real discrimination against a real
+legacy consent) plus the rig's consumer battery. Treat step 8's runtime half as *no contrary
+evidence*, not as proof, and say so in the ADR.
+
+**One behaviour change to expect and not be alarmed by:** deterministic ingest is now live on
+`document.classified`, so a uniquely filed classified document mints a `sources/<document_id>`
+page where it previously recorded `skipped_unresolved_client`. That is WB-R23(3), ruled — the
+point of the resolver, not a side effect. New source pages are charged to
+`max_source_pages_per_client` (50,000), not to the 40-page synthesized cap.
 
 ## 9. Aftermath
 
@@ -184,17 +286,29 @@ Append the ADR (live posture, counts, what each probe returned). Refresh
 
 **There is no down-migration.** The forward artifacts are the recovery path:
 
-- **Before step 6** — nothing to roll back. The preflight is idempotent and its corrections
-  are *appends*; a database that ran it and never applied 0020 is a valid 19 database whose
-  source corpus is canonical. That is a strictly better state, not a broken one.
-- **At step 6** — the migration is one transaction. A failed apply rolls back whole; the
-  database is still at 19 and the abort message names the offending direction and the
-  remediation. Fix and re-apply.
-- **After step 6** — roll back the **image**, not the schema. The per-event surface guards
-  mean an older image degrades lane-locally (synthesis holds, resolver skips) rather than
-  dead-lettering — with the caveat from step 3: an image that predates A5 does **not**
-  enumerate the two new terminal tokens and will block the firm cursor if either fires. Roll
-  back only to an A5-aware image.
+- **Abort at step 3 or 4 (the image is bad).** The database is untouched at 19. Redeploy the
+  previous release, start it, confirm `WIKI_PROJECTION acquired`, and stand down — you are
+  exactly where you started. This is the cheapest abort and it is why the image goes first.
+- **Abort at step 5 (the probe stops you, or the preflight raises).** The database is at 19.
+  The preflight is **one transaction**: it either completed or changed nothing, so there is no
+  partial state to reason about. If D1/D2/D3 are non-zero, **stand down and investigate** — do
+  not proceed. To restore service: start the machine, confirm leadership, done. A database that
+  ran the preflight and never applied 0020 is a **valid 19 database whose source corpus is
+  canonical** — strictly better than before, and safe to leave indefinitely, including
+  overnight and including with the runtime back up. Re-running the preflight later is a no-op.
+- **Abort at step 6 (the apply fails).** It rolls back whole *provided you used the runner* —
+  see the warning in step 6, which is the single most important line in this document. The
+  database is still at 19; the abort message names the offending direction and the remediation.
+  Restore service by starting the machine. Then fix the cause and re-run from step 4b.
+- **After step 6, the schema does not roll back — and neither does the image.** Be plain about
+  this: **there is no A5-aware prior release.** Every deployable earlier image, v26 included,
+  predates A5 and therefore does not enumerate `source_cap_exceeded` or
+  `reserved_slug_namespace` in the wiki consumer's closed terminal table; if either fires it is
+  an unrecognised typed refusal and the **firm cursor blocks**. So "roll the image back" is not
+  a recovery path here — it is a second incident. The forward path is the only path: fix, build,
+  deploy. If you must buy time, **stop the machine** (the books and the dashboard's PostgREST
+  reads are unaffected; only projection stops) rather than start an old one.
 - **Data** — the preimage of every canonicalized page is preserved in its
   `wiki.page_canonicalized` envelope's `payload.preimage` and on `clara.documents`. Nothing
-  the ceremony does destroys a provenance record.
+  the ceremony does destroys a provenance record. The orphaned object-storage blob at each
+  page's old `content_sha256` is unreferenced, not lost.
