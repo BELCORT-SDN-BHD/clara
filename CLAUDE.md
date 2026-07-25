@@ -98,36 +98,28 @@ Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
-**Phase 4, mid-WAVE B (knowledge + onboarding).** The waves so far, one line each:
-**Wave A** (daily AP loop) FULLY LIVE — ADR-022/023/024; GATE 3 closed beta-real
-(17/17 replay, AP gate exact RM 1,350,938.21, kill-mid-workflow exactly-once).
-**Wave A2** (sales/AR + MyInvois local parse + SST 3-leg + CN/DN + purchase-only
-bounded auto-posting) FULLY LIVE, §9 eval CLOSED — ADR-025/026/027 (Gate A exact
-RM 1,973,332.91; Gate B exact). **Wave A2.1** (SST registration watch + sales
-autopost lift + classifier gate) CLOSED — ADR-028/029/030, ruling WA21-R13; the RPR
-watch surfaced OVERDUE **unprompted** in production, RM 1,310,276.40 to the sen;
-Gates S/P deferred to REAL documents (PART 2). **Wave B**: the design contract
-`docs/plan/wave-b-contract.md` v1.0 is LAW (ADR-032, rulings WB-R1..R18) and the
-**DB heart — migration 0017 — is MERGED UNDEPLOYED** (ADR-033, PR #67): built by
-blind lanes (a 179-cell contract-blind battery, SQL-unread) and a SIX-round
-cross-model adversarial ratchet to RESOLVED; evidence in
-`docs/plan/research/wave-b/`. **Live posture: Supabase 16 migrations · Fly
-`clara-runtime:wave-b-v25` (chatTurn_v7/autoDraft_v3, ten loops) · dashboard Pages
-`app.clarabook.com` auto-deploys from `main` · `clara-backup` daily (rclone
-1.74.4, zero-501-proven).** The **v25 runtime lanes are BUILT merged undeployed**
-(ADR-034: chatTurn_v7, wiki-aware autoDraft_v3, firmInterview_v1/
-clientOnboarding_v1 on durable WDK-hook parks, the wiki-projection + lint
-consumers; runtime suite 482/482; adjudications in
-`docs/plan/research/wave-b/v25-runtime-lanes-memo.md` — model synthesis ships
-fail-closed DARK pending the runtime consent-read ruling, PART 2). The dashboard
-surfaces + runtime lanes are BUILT (ADR-035, PR #71) and **the WB-R18 CEREMONY
-IS EXECUTED (ADR-036, 2026-07-24): LIVE = Supabase 17 migrations · Fly
-`clara-runtime` wave-b-v25 (ten loops, WIKI_PROJECTION acquired, /ready 200) ·
-wiki backfill 30/30 · every post-verify probe green (pack dark/lit, replay
-byte-identical, sightings unchanged, F10 serializable via PostgREST) · the
-freeze deploy-lock committed (18 v25 entries immutable).** **What remains of
-Wave B is ONLY the live gates O/K/W2/L/R2/F on REAL documents** (WB-R16: a real
-second client + RPR''s management accounts for the B-12 lane; Gate K is
-parse-feasible document-primary — the live OCR must emit `opening_tb.line`
-regions, else the attributed keyed fallback). **Canary `daba7f2e` stays ARMED, due
-2026-08-02 — NEVER answer it.**
+**Phase 4, WAVE B (knowledge + onboarding) — closing out.** The waves so far, one
+line each: **Wave A** (daily AP loop) FULLY LIVE — ADR-022/023/024; GATE 3 closed
+beta-real (17/17 replay, AP gate exact RM 1,350,938.21, kill-mid-workflow
+exactly-once). **Wave A2** (sales/AR + MyInvois local parse + SST 3-leg + CN/DN +
+purchase-only bounded auto-posting) FULLY LIVE, §9 eval CLOSED — ADR-025/026/027
+(Gate A exact RM 1,973,332.91; Gate B exact). **Wave A2.1** (SST registration watch
++ sales autopost lift + classifier gate) CLOSED — ADR-028/029/030, ruling WA21-R13;
+the RPR watch surfaced OVERDUE **unprompted** in production, RM 1,310,276.40 to the
+sen. **Wave B**: contract `docs/plan/wave-b-contract.md` v1.0 is LAW (ADR-032,
+rulings WB-R1..R27); 0017 + the v25 runtime + the dashboard shipped via the WB-R18
+ceremony (ADR-033/034/035/036), then 0018 (Gate-K domain) same-day (ADR-038).
+
+**LIVE POSTURE: Supabase 18 migrations · Fly `clara-runtime:wave-b-v25` (ten loops,
+WIKI_PROJECTION acquired, /ready 200) · dashboard Pages `app.clarabook.com`
+auto-deploys from `main` · `clara-backup` daily (zero-501-proven).**
+
+**Live gates O + K are CLOSED on REAL documents** (2026-07-24, ROME SECRETARY end to
+end through the product; kill-mid-interview proven IN PRODUCTION; carry-down ties to
+the sen; re-run wrote zero). What remains of Wave B: **the 0019 ceremony** (built +
+merged undeployed, runbook + probes ready — `docs/ops/wave-b-0019-ceremony-runbook.md`),
+**0020** (typed consent, ships DARK), **W2's live audit** (unblocked by 0019), and
+owner deferral rulings for **F** and **L/R2/S/P** (usage gates that close by
+OPERATING, not building — WB-R17 permits deferral by ruling).
+
+**Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**
