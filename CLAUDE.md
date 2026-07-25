@@ -110,16 +110,24 @@ sen. **Wave B**: contract `docs/plan/wave-b-contract.md` v1.0 is LAW (ADR-032,
 rulings WB-R1..R27); 0017 + the v25 runtime + the dashboard shipped via the WB-R18
 ceremony (ADR-033/034/035/036), then 0018 (Gate-K domain) same-day (ADR-038).
 
-**LIVE POSTURE: Supabase 18 migrations · Fly `clara-runtime:wave-b-v25` (ten loops,
-WIKI_PROJECTION acquired, /ready 200) · dashboard Pages `app.clarabook.com`
-auto-deploys from `main` · `clara-backup` daily (zero-501-proven).**
+**LIVE POSTURE: Supabase 19 migrations (`0019_wiki_boundary`) · Fly `clara-runtime`
+release v26 (ten loops, WIKI_PROJECTION acquired, /ready 200 zero warnings) ·
+dashboard Pages `app.clarabook.com` auto-deploys from `main` · `clara-backup` daily
+(zero-501-proven).** 0019 landed 2026-07-25 via the first **runtime-image-first**
+ceremony (ADR-039): 10/10 post-verify probes, catch-up zero pairs as predicted.
 
-**Live gates O + K are CLOSED on REAL documents** (2026-07-24, ROME SECRETARY end to
-end through the product; kill-mid-interview proven IN PRODUCTION; carry-down ties to
-the sen; re-run wrote zero). What remains of Wave B: **the 0019 ceremony** (built +
-merged undeployed, runbook + probes ready — `docs/ops/wave-b-0019-ceremony-runbook.md`),
-**0020** (typed consent, ships DARK), **W2's live audit** (unblocked by 0019), and
-owner deferral rulings for **F** and **L/R2/S/P** (usage gates that close by
-OPERATING, not building — WB-R17 permits deferral by ruling).
+**Gates CLOSED on real evidence.** **O + K** (2026-07-24, ROME SECRETARY end to end
+through the product; kill-mid-interview proven IN PRODUCTION; carry-down ties to the
+sen; re-run wrote zero). **W2 claim (1) + (2)-structural** (2026-07-25, audited on the
+live catalog — WB-R21's interim allowance expired when 0019 removed the veto;
+`packages/db/deploy/wave-b-w2-authority-boundary-audit.sql`). **S deferred on hard
+evidence** (no MyInvois artifact exists in the Bee Creative corpus).
+
+What remains of Wave B: **the 0020 ceremony** (built, ratcheted five rounds, PR'd —
+`docs/ops/wave-b-0020-ceremony-runbook.md`, **runtime-image-first**, owner-gated);
+**W2's remaining three claims** (they need a real wake credential and a real draft —
+journey work, not a probe); **Gate F** on Rome Public Advisory; the **Bee Creative**
+run for **P / L / R2 / K**; and owner rulings on **Gate P's proof standard** and the
+**B-12 seeding period**.
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**
