@@ -254,10 +254,12 @@ no step of this runbook reads or writes a budget.
   never a client fault. The projection checkpoint deliberately stays behind it; repair the
   row and the event projects on the next cycle.
 
-### What A6 adds, and what A7 corrects (contract v1.4 §§5.6/5.7)
+### What A6 adds, what A7 corrects, and what A8 corrects again (contract v1.5 §§5.6/5.7/5.8)
 
-A6 completes A5; A7 corrects A6. Again: **no step of this runbook changes.** Three operational
-facts follow.
+A6 completes A5; A7 corrects A6; **A8 corrects A7's remediation**. Again: **no step of this
+runbook changes** — A8 is entirely about the 0020 *deploy ceremony* (the pre-flight that
+canonicalizes the existing corpus, contract §10.3 step 1b), which runs long before any client
+is activated. Three operational facts follow.
 
 - **A source page has no human note, and no filename.** `clara.record_wiki_source_ingest`
   refuses a non-null `p_note` with **CLR10 / `source_note_not_permitted`** (A6), and — the part

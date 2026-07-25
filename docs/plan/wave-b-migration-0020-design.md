@@ -1,5 +1,25 @@
-# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.4 (RATIFIED)
+# Migration 0020 — typed egress consent + dispatch authorization (WB-R23 · WB-R24(iii)) · design contract v1.5 (RATIFIED)
 
+> **Status: RATIFIED v1.5 — v1.4 plus the ratified OWNER RULING A8 (2026-07-25): the
+> canonicalization is corrected AT THE EVENT SPINE, §5.8.** Ratchet R4 re-derived the whole
+> authorization chain independently and found it CONVERGED — no alternate production path
+> around the consume boundary, the canonical form closed across all twelve caller-reachable
+> fields, no third caller-prose channel. It then found that A7's own remediation was right
+> about the rows and wrong about the architecture: `domain_events` is **append-only**, the
+> pre-0020 backfill wrote the filename-bearing title, hash, storage key and size into
+> `wiki.page_published` / `wiki.source_ingested` as well, and A7's two bare `update`s corrected
+> only the tables. So the table bridge passed while a projection **rebuilt from the event log**
+> restored the old title and reconstruction envelope — reopening A7's caller-prose channel in a
+> rebuilt projection and violating the W4/P17 event-only, bit-identical rebuild invariant. A8 is
+> the owner's adjudication: a **fifth** bridge direction that checks the spine, an **audited
+> correction operation** shipped as `packages/db/deploy/wave-b-0020-a7-*.sql` that corrects the
+> rows *and* appends replay-understood correction envelopes, and a **new event type**
+> `wiki.page_canonicalized` that is how you lawfully correct an append-only log. A8 also wires
+> the 19→20 upgrade drill into CI (it had been proposed in a comment and skipped in every
+> normal run — a misleading green) and **corrects §§5.3/8's stale A6 prose**, which described
+> behaviour A7 had already replaced and which a blind lane would have reimplemented.
+> Everything about A1–A7's rulings is otherwise unchanged.
+>
 > **Status: RATIFIED v1.4 — v1.3 plus the ratified OWNER RULING A7 (2026-07-25): the exempt
 > page's bytes are made STRUCTURALLY CANONICAL, §5.7.** Ratchet R3 reviewed A5/A6 and found
 > that A6 had fixed a channel rather than the defect. Its bridge proved only that no
@@ -49,6 +69,7 @@
 > | **A5** *(owner ruling, 2026-07-25)* | The WB-R8 per-client page cap is **split into two classes**. Deterministic `sources/<document_id>` pages are **exempt** from `max_pages_per_client` and bounded by their own key **`max_source_pages_per_client`** with its own typed reason; the **`sources/` slug namespace is reserved** so the exemption cannot be forged. Lighting ingest would otherwise have un-indexed every busy client at 40 documents. | **§5.5** (new), **§5.3**, **§8**, **§9.6**, **§10.1** |
 > | **A6** *(owner ruling, 2026-07-25)* | Three things the A5 exemption was still missing: the orphan lint narrows to exclude the reserved namespace (it had gone superlinear), a **third** apply-time bridge direction, and a structural **`p_note is null`** floor on the ingest verb. | **§5.6** (new), **§6.1**, **§8**, **§9.7** |
 > | **A7** *(owner ruling, 2026-07-25)* | The exempt page's **bytes are made canonical**: title and body derive from fixed text plus the opaque document uuid and from **no caller-supplied string** — closing `documents.original_filename`, the channel A6 missed, and letting the bridge verify any historical page by **reconstruction** (a **fourth** direction that subsumes the third). The `p_note` floor is kept as defence in depth but moves **behind `_reserve_op`**, restoring op-key replay. | **§5.7** (new), **§5.6**, **§6.1**, **§8**, **§9.7** |
+> | **A8** *(owner ruling, 2026-07-25)* | Canonicalization is corrected **at the append-only event spine**, not only in the rows: a **fifth** bridge direction, an **audited correction operation** (two shipped deploy artifacts) replacing A7's two bare `update`s, and the `wiki.page_canonicalized` correction event type. The 19→20 upgrade drill is **wired into CI**, and §§5.3/8's stale A6 prose is corrected. | **§5.8** (new), **§5.3**, **§5.7**, **§8**, **§9.7**, **§10.3**, **§11** |
 >
 > Two **errata** are ratified with them: §8's "three partial unique indexes" is wrong
 > (two uniques + one non-unique open-authorization index — see §8), and §3.3/§5.1's
@@ -686,11 +707,19 @@ lock-order inversion exists against either authority function.
 - The writer's own refusals (client not active/onboarding → CLR10; `consent_evidence`
   document → CLR28; not actively filed / not verified → CLR02) propagate unchanged.
 
-**`record_wiki_source_ingest` is NOT modified.** Making it require uniqueness would break
-the `entry.approved` lane, which carries an authoritative `client_id` on the event and
-must keep working for a document legitimately filed to more than one client. The
-uniqueness requirement belongs to the *resolver-driven* path only, which is why it lives
+**`record_wiki_source_ingest` does not gain a uniqueness requirement.** Making it require
+uniqueness would break the `entry.approved` lane, which carries an authoritative `client_id`
+on the event and must keep working for a document legitimately filed to more than one client.
+The uniqueness requirement belongs to the *resolver-driven* path only, which is why it lives
 in a new entry point.
+
+> **ERRATUM (A8, ratified 2026-07-25).** v1.0–v1.4 said "`record_wiki_source_ingest` is **NOT
+> modified**" — true when written, false from **A7**, which makes exactly **two** edits to it:
+> the canonical source-page form (§5.7) and the `p_note` floor, the latter placed **behind**
+> `_reserve_op`. Its §6.1 pin is not retuned; the tail reverses both edits and re-hashes to
+> 0017's original pin (§8). The sentence above is narrowed to the claim that was actually
+> being made — no *uniqueness* requirement is added to this verb — because a blind lane
+> reading the old wording would have left A7 unimplemented.
 
 **Residual (R-1, §11):** a deadlock (40P01) against a concurrent authority function is
 possible in principle. It aborts the 0020 transaction; the consumer's at-least-once
@@ -930,6 +959,11 @@ exactly the A6 insertion and the remainder must still hash to **0017's original 
 byte. The assertion proves two things at once — the floor is present in its exact shape, and
 nothing else in that function moved, including under an edit that also carried the A6 text.
 
+> **Superseded in part by A7 (see §5.7, "The §6 trade, restated").** From A7 this verb carries
+> **two** edits, not one — the canonical form and the floor — and the tail strips **both**
+> before re-hashing to 0017's pin. The method above is unchanged; only the count is.
+> Implement §5.7 and §8, not this paragraph.
+
 **Rig cost, stated rather than hidden.** The rig's `recordWikiIngest` helper defaulted to a
 non-null note, so six fixtures passed prose the DB now refuses. The helper default becomes
 `null` (matching production) and each fixture is updated. One of them — the `op_key` mutation
@@ -1017,26 +1051,23 @@ alternatives do not: `retire_wiki_page` + re-ingest is **impossible** (the publi
 refuses a retired page's slug, `0017:2075-2077`, and the slug is unique per client), and a
 delete would destroy audit history.
 
-```sql
--- A7 remediation — run BEFORE re-applying 0020 when its bridge aborts.
-update clara.wiki_page_versions v
-   set content = 'Source document: '||substring(p.slug from 9),
-       content_sha256 = encode(sha256(convert_to(
-         'Source document: '||substring(p.slug from 9),'UTF8')),'hex'),
-       storage_key = 'firms/'||v.firm_id::text||'/wiki/'||v.client_id::text||'/'
-         ||encode(sha256(convert_to(
-           'Source document: '||substring(p.slug from 9),'UTF8')),'hex')||'.md',
-       size_bytes = octet_length('Source document: '||substring(p.slug from 9))
-  from clara.wiki_pages p
- where p.id = v.page_id
-   and p.slug like 'sources/%'
-   and v.content is distinct from 'Source document: '||substring(p.slug from 9);
-
-update clara.wiki_pages p
-   set title = 'Source: '||substring(p.slug from 9)
- where p.slug like 'sources/%'
-   and p.title is distinct from 'Source: '||substring(p.slug from 9);
-```
+> ### ⚠ SUPERSEDED BY AMENDMENT A8 (2026-07-25) — DO NOT RUN THE TWO `update`s
+>
+> A7's remediation was **two bare `update` statements** over `wiki_pages` /
+> `wiki_page_versions`. **Ratchet R4 (finding F1) proved them insufficient and unsafe on
+> production:** `clara.domain_events` is append-only, the same pre-0020 ingest wrote the
+> filename-bearing title / hash / storage key / size into `wiki.page_published` and
+> `wiki.source_ingested`, and correcting only the rows leaves that spine stale — so a
+> projection **rebuilt from events** restores the prose. **§5.8 is the ruling that replaces
+> them.** The remediation is now the shipped, audited, idempotent pair
+> `packages/db/deploy/wave-b-0020-a7-probe.sql` (read-only) and
+> `packages/db/deploy/wave-b-0020-a7-preflight.sql`, and migration 0020 gains a **fifth**
+> bridge direction that **refuses** a rows-only remediation fail-closed. The two `update`s
+> survive in the repository only as the upgrade fixture's **negative control**
+> (`wb-0020-upgrade.test.mjs`), where they must FAIL to apply.
+>
+> Everything else in §5.7 — the canonical form, the fourth direction, the floor reordering,
+> the §6 trade, A7-R1 — stands unchanged.
 
 > **Live-deploy consequence, stated rather than discovered at the ceremony.** The 30 pages the
 > 0019 ceremony backfilled were written by the pre-A7 verb from real uploads, so their bodies
@@ -1089,6 +1120,145 @@ the apply **aborts** naming both, runs the remediation above **verbatim**, prove
 **succeeds**, proves the pre-0020 noted op key still **replays** across the upgrade while a
 fresh noted call is refused, and carries a negative control (a canonical pre-0020 corpus
 upgrades untouched, with no remediation).
+
+### 5.8 The correction goes to the EVENT SPINE, not only the rows (AMENDMENT A8, owner ruling, ratified 2026-07-25)
+
+Ratchet **R4** re-derived the authorization chain independently and found it **converged**:
+evidence classification grants nothing; a live purpose-specific consent and an exact-consent
+activation must coexist; prepare binds firm/client/purpose/consent/activation/event; consume
+locks by authorization *and* firm, compares every dispatch field, checks wall-clock expiry and
+the exact live consent/activation, then commits; the runtime commits that consume in its own
+transaction before calling the model; revocation invalidates transactionally. **No alternate
+production path around that boundary exists.** The canonical form is closed across all twelve
+caller-reachable fields, and there is **no third caller-prose channel** in the live writer.
+
+It then found **one new production defect, introduced by A7's own remediation**.
+
+**Canonicalizing the rows leaves the event spine non-canonical.** `clara.domain_events` is
+**append-only**, trigger-enforced (`0005:288-291`). The pre-0020 ingest verb wrote the
+filename-bearing title, content hash, storage key and size into `wiki.page_published`
+(`0017:2280`), and the hash and key into `wiki.source_ingested` (`0017:2277`) — not only into
+the wiki tables. A7's two `update`s correct only the tables. So:
+
+* 0020's table bridge (direction 4) **passes**, while
+* a projection **rebuilt from the event log** — the W4/P17 invariant this entire design rests
+  on, the property `wb-r1-followon.test.mjs:167` and `wb-w-pack.test.mjs` exist to protect, and
+  what a DR restore of the index actually performs — **restores the old filename-bearing title
+  and the old reconstruction envelope**, or fails against the old storage key.
+
+That silently reopens, in a rebuilt projection, exactly the caller-prose channel A7 closed.
+The fix was right about the rows and wrong about the architecture.
+
+> **Ruling.** Correct the log the only way an append-only log may be corrected: **append**.
+> Canonicalization becomes an **audited correction operation** that, in ONE transaction,
+> updates the rows **and** appends a replay-understood **canonical correction envelope** for
+> every affected version. It is the same reverse-not-delete discipline the books use for a
+> posted entry — you never rewrite history, you append the correction. And the migration
+> **checks the spine**, so a rows-only remediation cannot apply.
+
+**The correction event type.** `wiki.page_canonicalized` — client-scoped, taxonomy decision
+`ignore`, the **fourth** `wiki.*` type and the only one 0020 registers. The projection consumer
+does not subscribe `wiki.*` (P17), so nothing routes and no outbox row is minted. Its payload
+uses the **same key names** `wiki.page_published` uses for the corrected fields, so a rebuild
+needs one extra rule and no new field mapping:
+
+```json
+{ "correction": "a7_canonicalization", "reconstruction_schema": 1,
+  "page_id": "...", "slug": "sources/<doc>", "version_id": "...", "version_n": 1,
+  "title": "Source: <doc>", "content": "Source document: <doc>",
+  "content_sha256": "...", "storage_key": "firms/<firm>/wiki/<client>/<sha>.md",
+  "size_bytes": 40,
+  "preimage": { "title": "...", "content": "...", "content_sha256": "...",
+                "storage_key": "...", "size_bytes": 123 } }
+```
+
+**THE REBUILD RULE (normative).** Apply `wiki.page_published` in seq order; then, for each
+`(page_id, version_id)`, apply the **latest** `wiki.page_canonicalized` that is **later in
+seq**. The correction overrides **`title`, `content`, `content_sha256`, `storage_key` and
+`size_bytes` — and nothing else**: not synthesis, engine, `projected_from_seq`, citations,
+refs, `page_kind`, slug or lifecycle state. A correction corrects bytes; it does not republish
+a page. **`payload.preimage` is audit-only and never enters a rebuilt projection.**
+
+**Direction 5 — the spine, made structural.** The apply-time bridge gains a fifth direction:
+for every page in the reserved namespace, **no** `wiki.page_published` / `wiki.source_ingested`
+event may carry a non-canonical title, hash, key or size **unless a later
+`wiki.page_canonicalized` for the same `(page_id, version_id)` supersedes it**. Fail-closed: an
+uncorrected envelope **ABORTS the apply**, names the pages, and names the preflight. Direction 5
+is re-read in the §8 tail as a receipt, exactly as direction 4 is. `page_id` is compared as
+**text**, so no untrusted payload string is ever cast to `uuid`.
+
+**The remediation, as shipped.** Two artifacts, both in `packages/db/deploy/`, both run by the
+upgrade fixture **verbatim** (a copy inside the test would prove the copy, not the artifact):
+
+| Artifact | What it is |
+|---|---|
+| `wave-b-0020-a7-probe.sql` | **Read-only.** One row: `source_pages_total`, `bytes_non_canonical` (direction 4), `spine_non_canonical` (direction 5), `needs_canonicalization` (the union), `first_25_offenders`. Writes nothing; safe on production at any time. |
+| `wave-b-0020-a7-preflight.sql` | **The audited correction.** One `do` block = one statement = one transaction. Registers the correction event type if absent; for every page non-canonical **in the rows or in the spine**, re-derives the title and every version's content/hash/key/size, appends **one envelope per version**, writes an `audit_log` row per page; then **re-asserts bridge directions 4 and 5** and raises if either would still abort. |
+
+The preflight runs at **nineteen** migrations, so it registers the event type itself; 0020
+registers the byte-identical row `on conflict do nothing`. A database that needed the preflight
+and one whose corpus was already canonical therefore **converge on the same catalog at 20** —
+the event-type roster is a function of the migration level and of nothing else, and the §8 tail
+asserts exactly that.
+
+**Idempotent and row-scoped**, by construction: the driving predicate is "this page is not
+canonical, in the rows or in the spine". A second run selects nothing, updates nothing, appends
+nothing. A page that is already canonical is never touched and never gets an envelope. Nothing
+outside `slug like 'sources/%'` is read or written.
+
+**Where the preimage goes, and why.** Into `payload.preimage` of the correction envelope — not
+destroyed, and not put back into page bytes. The property A7 bought is that **caller prose is
+not in exempt page BYTES**: the thing `get_wiki_page` / `list_wiki_pages` / `get_context_pack`
+serve, and the only wiki text a model ever sees. `domain_events` is in **no** wiki read path and
+is **not** an input to synthesis (the projection prompt carries page kind, counterparty id and
+event *type* only — `packages/runtime/lib/wiki-projection.mjs`), and it **already holds the
+non-canonical title forever** in the original `wiki.page_published` payload, where it cannot be
+removed. The one thing that would otherwise be **lost** is a `p_note` body: the publication
+envelope never carried `content`. So the correction records it, deliberately — erasing a
+provenance record was never the goal, and the tension resolves in favour of preserving it
+because the log is not a channel into the model. A **filename** preimage is additionally still
+on `clara.documents`, which is where every human surface already reads it (A7-R1).
+
+**Named honestly:** if an operator has *already* run A7's two `update`s, the `p_note` body is
+**gone before the preflight can see it**. The preflight still repairs the spine and the apply
+still succeeds, but that preimage is unrecoverable. It is why §10.3 names the preflight — never
+the `update`s — and why the upgrade fixture asserts exactly this loss in its negative control.
+
+**A side effect, stated rather than discovered.** Each correction advances the firm's
+`firm_event_seq`, as any append does. Run it inside the quiesced ceremony window (§10.3 step 1),
+where no wake or freshness token straddles it. The orphaned-blob consequence is unchanged from
+A7 and is named there.
+
+**The misleading green (R4 finding F2).** `wb-0020-upgrade.test.mjs` is the only proof of the
+19→20 path and it skips whenever `CLARA_RIG_ALLOW_RESET` is unset — which normal CI leaves
+unset; the CI step existed only as a **comment inside the test file**. A bridge or remediation
+regression could therefore have merged with the advertised suite green, which this repository
+already treats as a defect class in its own right. A8 **wires the step**: *"Wave-B 0020 A7/A8
+upgrade drill (isolated DB)"* in `.github/workflows/ci.yml`, in its own throwaway database,
+beside the C9 / document-pipeline / coding-floor drills — and a skip now prints a loud line on
+stdout saying the upgrade path was **not** proven by that run.
+
+**Where the proof lives.** `wb-0020-upgrade.test.mjs` grows from two cells to three:
+
+1. **the main path** — the probe reports **both** halves; the apply aborts on direction 4 naming
+   the shipped preflight; the preflight corrects rows **and** spine; the apply succeeds; **the
+   index is rebuilt from `domain_events` alone and every logical field is compared** against the
+   live rows (slug, page_kind, title, counterparty, state, version_n, hash, storage key, size,
+   synthesis, engine, `projected_from_seq`, full citation rows, full ref rows, and the bytes
+   re-hashed to the digest); the preimage is preserved; and a second preflight appends nothing
+   and changes nothing;
+2. **the F1 cell** — on its own corpus, A7's rows-only remediation runs verbatim; the probe
+   shows `bytes_non_canonical = 0` while `spine_non_canonical = 2`; the **event-only rebuild
+   disagrees with the live rows by restoring the prose filename into the page title**; and the
+   apply **ABORTS on direction 5**. Before A8 the apply *succeeded* here;
+3. **the clean-corpus control** — no remediation, no envelope, and the event-only rebuild is
+   exact **without any correction in play**.
+
+No existing replay test is weakened: `wb-r1-followon.test.mjs` [R2-F7] and `wb-w-pack.test.mjs`
+W4/P17 are untouched, and their shadow models already produce canonical state because a
+post-0020 corpus has no corrections in it. Two 0019 cells that pinned the `wiki.*` family as
+"exactly the three 0017 types" become **migration-level exact** — three at 19 (0019's negative
+proof, unchanged) and four at 20 — which keeps the closed set closed rather than loosening it.
 
 ---
 
@@ -1264,8 +1434,14 @@ clara_fn_owner` / `reset role`. One transaction; **any failure aborts the apply*
   `search_path=clara,pg_temp`, and `clara_fn_owner` ownership. The pinned
   `consume_egress_dispatch` signature is the **six-argument** one (A1).
 - The 120-second TTL constant is present in `prepare_egress_dispatch`'s source.
-- The four new event types are registered — and **only** those four: A3's verb emits
-  none.
+- The four new typed-consent event types are registered, client-scoped, and in the ACTIVE
+  taxonomy. A3's verb emits none.
+- **(A8)** A **fifth** type, `wiki.page_canonicalized`, is registered — client-scoped, decision
+  `ignore` — as **exactly one** row in each of `event_types` and the active taxonomy. It is the
+  correction envelope direction 5 depends on, and the assertion is the negative proof that the
+  preflight (which registers the identical row at 19) and the migration cannot diverge.
+  *(ERRATUM, A8: v1.0–v1.4 said "the four new event types … and **only** those four", which was
+  true before direction 5 existed. There are **five**, and no more than five.)*
 
 **Return-shape**
 - `prepare_egress_dispatch` returns exactly `{verdict, authorization_id}` and its source
@@ -1308,11 +1484,15 @@ clara_fn_owner` / `reset role`. One transaction; **any failure aborts the apply*
   `_enqueue_invoice_facts_core`, `record_wiki_source_ingest` have exactly one overload
   each, with unchanged argument signatures and **exact `prosrc` SHA-256 pins — no
   normalization** (§6.1).
-  - **A6 exception, and it is stricter, not looser.** `record_wiki_source_ingest` is the one
-    member 0020 deliberately changes (§5.6c). Its pin is **not** retuned: the tail strips
-    exactly the A6 insertion and asserts the remainder still hashes to **0017's original
-    pin**. So the assertion carries both halves — the floor is present in its exact shape,
-    **and** nothing else in that function moved.
+  - **A6/A7 exception, and it is stricter, not looser.** `record_wiki_source_ingest` is the
+    one member 0020 deliberately changes, and after **A7** it carries **two** edits, not one
+    (§5.7): the canonical source-page form, and the `p_note` floor. Its pin is **not** retuned:
+    the tail strips **both** A7 edits — the floor block and the canonical-form comment — and
+    substitutes 0017's own content/title derivation back, then asserts the remainder still
+    hashes to **0017's original pin**. So the assertion carries both halves — both edits are
+    present in their exact shape, **and** nothing else in that function moved.
+    *(ERRATUM, A8: v1.3–v1.4 still said "exactly the A6 insertion", singular. A blind lane
+    reading that would have pinned one edit and dropped the canonical form.)*
 - Their **EXECUTE ACLs** are pinned as one closed-set string.
 - `client_egress_consents` has no new column, **and** its constraints, indexes,
   non-internal triggers, RLS flags/owner and policies are pinned as one exact
@@ -1335,20 +1515,43 @@ clara_fn_owner` / `reset role`. One transaction; **any failure aborts the apply*
   narrowed to the synthesized population, and still carries 0019's `stale_citation`
   condition — **and (A6)** still opens `orphan_page`, narrowed to skip the reserved namespace.
   Both narrowings are pinned in forms that cannot be satisfied by the other.
-- **(A6)** The persisted `record_wiki_source_ingest` carries the `p_note` floor and its
-  `source_note_not_permitted` discriminant, **before** its `_reserve_op` call.
-- **Apply-time bridge, three directions (A6):** no pre-existing page occupies `sources/%`
-  without a deterministic-ingest `wiki_log` row; no deterministic-ingest page lives outside
-  it; and **no `sources/%` page carries a `wiki_log` `action='publish'` row**. The first two
-  are set membership; only the third is content provenance. A single stray page in any
-  direction **aborts the apply**. The third is re-read in the tail as a receipt.
+- **(A6, reordered by A7)** The persisted `record_wiki_source_ingest` carries the **canonical
+  source-page form** (title and body derived from the document uuid alone, with no
+  `original_filename` and no `p_note` coalesce) **and** the `p_note` floor with its
+  `source_note_not_permitted` discriminant — the floor **after** its `_reserve_op` call, so an
+  exact retry of a legitimate pre-0020 noted call still **replays its receipt** (§5.7).
+  *(ERRATUM, A8: v1.3–v1.4 said the floor precedes `_reserve_op`. A7 moved it deliberately,
+  because op-key replay is a core invariant of every governed verb; a blind lane following the
+  stale clause would have reintroduced A6's replay regression.)*
+- **Apply-time bridge, FIVE directions (A6 → A7 → A8):** (1) no pre-existing page occupies
+  `sources/%` without a deterministic-ingest `wiki_log` row; (2) no deterministic-ingest page
+  lives outside it; (3) **no `sources/%` page carries a `wiki_log` `action='publish'` row**;
+  (4) **(A7)** every `sources/%` page's stored title and **every** stored version body equals
+  its **canonical reconstruction** from the document uuid in its slug; (5) **(A8)** no
+  `wiki.page_published` / `wiki.source_ingested` event of a `sources/%` page carries a
+  non-canonical title / hash / storage key / size **unless a later `wiki.page_canonicalized`
+  for the same `(page_id, version_id)` supersedes it**. (1) and (2) are set membership; (3)
+  names one mechanism; (4) is the computable property of the live bytes and subsumes (3); (5)
+  is the same property **where a rebuild reads it**, and is independent of (4) — the rows can
+  be canonical while the spine is stale. A single stray page or envelope in **any** direction
+  **aborts the apply**, and (3), (4) and (5) are re-read in the tail as receipts.
+  *(ERRATUM, A8: v1.3 said "three directions"; A7 made it four and A8 makes it five.)*
 - **Functional probe (rolled back):** a synthesized publication into the reserved namespace,
   driven through `publish_wiki_page_version` — the granted verb the model-fed seeding
   `wiki_fact` lane calls — is refused `CLR32/reserved_slug_namespace` and writes nothing.
-- **Functional probe (rolled back, A6):** `record_wiki_source_ingest` with a non-null `p_note`
-  and a **nonexistent** document uuid is refused `CLR10/source_note_not_permitted` — proving
-  the floor precedes every read — while the same nonexistent document with a **null** note
-  still draws the verb's own `CLR02`, proving the floor displaced nothing.
+- **Functional probe (rolled back, A6 → A7):** `record_wiki_source_ingest` with a non-null
+  `p_note` on a **real, filed, verified** document is refused
+  `CLR10/source_note_not_permitted` and writes nothing; the same call with a **null** note is
+  unchanged. A **noted** call against a document uuid that does **not exist** now draws the
+  verb's own **`CLR02`**, because the op reservation — and therefore op-key replay — comes
+  first. *(ERRATUM, A8: v1.3–v1.4 said that call returns `CLR10`, "proving the floor precedes
+  every read". A7 deliberately inverted that ordering; the reason discriminant is unchanged,
+  the code for the nonexistent-document case is not.)*
+- **Functional probe (rolled back, A7):** a null-note ingest on a document whose
+  `original_filename` is arbitrary text publishes a page whose title is exactly
+  `Source: <document_id>` and whose body is exactly `Source document: <document_id>`, with no
+  fragment of the filename in either; repeating the same op key returns the same receipt and
+  writes no second version.
 
 **Apply-time precondition (empirical, never assumed)**
 - The three new relations are empty at end of apply — **zero typed consents, zero
@@ -1519,6 +1722,21 @@ none of their assertions read the note. One is a genuine substitution rather tha
 actively-filed sources on the same client. A cell that *wants* the refusal passes a note
 explicitly.
 
+**A8 lockstep (2026-07-25).** Three test-side consequences, none of them a weakening.
+(i) `wb-0020-upgrade.test.mjs` runs the SHIPPED deploy artifacts **verbatim** by reading
+`packages/db/deploy/wave-b-0020-a7-{probe,preflight}.sql` off disk — a copy of that SQL inside
+the test would prove the copy, not the artifact the owner runs — and gains the event-only
+shadow rebuild plus the rows-only negative-control cell (§5.8).
+(ii) The two 0019 cells that pinned `event_types` `wiki.%` as "exactly the three 0017 types"
+(`wb-0019-tail`, `wb-0019-consumer`) become **migration-level exact** via the existing
+`has0020()` gate — three at 19, four at 20 — so 0019's negative proof survives intact while a
+fifth, unsanctioned type still fails.
+(iii) `WB_EVENT_TYPES` in `wb-helpers.mjs` is **deliberately not extended**: it is the 0017
+roster that `wb-g-tail` G1 iterates against any database at ≥17, and `wiki.page_canonicalized`
+is a 0020 type. Its registration is asserted by the 0020 tail and by the ceremony probe in
+§10.3, which is where a 0020 pin belongs.
+`wb-r1-followon.test.mjs` [R2-F7] and `wb-w-pack.test.mjs` W4/P17 are **untouched**.
+
 ---
 
 ## 10. Deployment — DB-first, and what "DARK" actually means
@@ -1579,24 +1797,49 @@ DB-first because the runtime rewire READS functions that must exist first, and b
 neither order can light synthesis — there is no silent-loss window in either direction.
 
 1. **Backup-first** → quiesce.
-1b. **(A7) PRE-FLIGHT — canonicalize the existing `sources/` corpus.** The 0019 ceremony
-   backfilled 30 source pages with the pre-A7 verb, whose title and body carried the
-   document's `original_filename`. 0020's bridge **will abort on them**. Run, and expect a
-   non-zero row count on the first run and zero on any re-run:
+1b. **(A7, corrected by A8) PRE-FLIGHT — canonicalize the existing `sources/` corpus, rows
+   AND event spine.** The 0019 ceremony backfilled ~30 source pages with the pre-A7 verb, whose
+   title and body carried the document's `original_filename` — and which wrote those same bytes
+   into the **append-only** event log. 0020's bridge **will abort on them**, on direction 4 and
+   then on direction 5. Three commands, in this order, from the repository root, as the
+   migration/owner role (the same role `pnpm db:migrate` uses):
+
+   **(i) LOOK FIRST — the read-only probe. Writes nothing; safe to run at any time.**
    ```
-   select count(*) from clara.wiki_pages p
-    where p.slug like 'sources/%'
-      and (p.title is distinct from 'Source: '||substring(p.slug from 9)
-           or exists(select 1 from clara.wiki_page_versions v
-                      where v.page_id=p.id
-                        and v.content is distinct from
-                            'Source document: '||substring(p.slug from 9)));
+   psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0020-a7-probe.sql
    ```
-   then run the two `update` statements in **§5.7** and re-run the count until it is **0**.
-   This rewrites database bytes only; the object-storage blob at each page's old
+   One row comes back:
+
+   | column | what it means | expected NOW | expected AFTER (ii) |
+   |---|---|---|---|
+   | `source_pages_total` | pages in the reserved `sources/` namespace | ~30 | unchanged |
+   | `bytes_non_canonical` | pages whose STORED title/body are not canonical — **direction 4 aborts on these** | > 0 | **0** |
+   | `spine_non_canonical` | pages whose RECONSTRUCTION EVENTS are stale — **direction 5 aborts on these** | > 0 | **0** |
+   | `needs_canonicalization` | the union — how many pages step (ii) will correct | > 0 | **0** |
+   | `first_25_offenders` | their slugs, so you can eyeball them | a list | `<none>` |
+
+   If `needs_canonicalization` is already **0**, skip to step 2 — nothing to do.
+
+   **(ii) CORRECT — the audited preflight. One transaction; safe to re-run.**
+   ```
+   psql -v ON_ERROR_STOP=1 -f packages/db/deploy/wave-b-0020-a7-preflight.sql
+   ```
+   It re-derives each page's title and every version's content / hash / storage key / size from
+   the document uuid in the slug and from nothing else, appends **one `wiki.page_canonicalized`
+   correction envelope per version** (carrying the preimage), writes an `audit_log` row per
+   page, and then re-asserts bridge directions 4 and 5 itself — so if it returns without error,
+   the apply will clear both. It prints a `NOTICE` naming the counts. **Do NOT run the two
+   `update` statements that appeared in §5.7 of contract v1.4:** they correct the rows only,
+   leave the append-only spine stale, and 0020 now **refuses** that state (§5.8).
+
+   **(iii) CONFIRM — re-run the probe from (i).** Every count must read **0** and
+   `first_25_offenders` must read `<none>`. Only then proceed to step 2.
+
+   This rewrites database bytes and appends events; the object-storage blob at each page's old
    `content_sha256` key is orphaned and no blob is written at the new key — nothing reads it
-   (every read surface serves `wiki_page_versions.content`), and it is named in §5.7 rather
-   than discovered later.
+   (every read surface serves `wiki_page_versions.content` from the database), and it is named
+   in §5.7 rather than discovered later. Each correction advances the firm's `firm_event_seq`,
+   which is why this belongs inside the quiesced window of step 1.
 2. Apply 0020 (the §8 tail runs in-transaction; any failure aborts) →
    `NOTIFY pgrst, 'reload schema'`.
 3. **Post-verify probes**, run under a `clara_runtime`-role probe:
@@ -1612,15 +1855,24 @@ neither order can light synthesis — there is no silent-loss window in either d
    - **(A5) `clara.wiki_budgets` is a five-row set** — the four WB-R8 values *unchanged*
      plus `max_source_pages_per_client = 50000`. (The 0017 ceremony runbook's "the four
      WB-R8 values" expectation becomes "these four, of five".)
-   - **(A5, corrected by A6, completed by A7)** **Four** counts, not two. `select count(*) from
-     clara.wiki_pages where slug like 'sources/%'` **equals** the count of pages carrying a
-     `wiki_log` `action='ingest'` row (both directions); the count of `sources/%` pages carrying
-     a `wiki_log` `action='publish'` row is **zero**; and — the one that actually settles it —
-     the **reconstruction count from step 1b is zero**: every page's title and every version's
-     body equals its canonical form. The first two are set membership (the page was *created* by
-     deterministic ingest). The third names one mechanism. Only the fourth is a computable
-     property of the bytes themselves, and it is what the exemption rests on. The apply aborts
-     on any of the four, so a green apply has already proven them — re-read them as a receipt.
+   - **(A5, corrected by A6, completed by A7, closed by A8)** **Five** counts, not two.
+     `select count(*) from clara.wiki_pages where slug like 'sources/%'` **equals** the count of
+     pages carrying a `wiki_log` `action='ingest'` row (both directions); the count of
+     `sources/%` pages carrying a `wiki_log` `action='publish'` row is **zero**; the
+     **`bytes_non_canonical` count from step 1b(iii) is zero** — every page's title and every
+     version's body equals its canonical form; and the **`spine_non_canonical` count from the
+     same probe is zero** — every reconstruction event either is canonical or is superseded by a
+     correction envelope. The first two are set membership (the page was *created* by
+     deterministic ingest). The third names one mechanism. The fourth is a computable property
+     of the live bytes. **The fifth is that same property where a REBUILD reads it**, and it is
+     independent of the fourth — canonical rows over a stale spine is exactly the state ratchet
+     R4 found, and it is what would have shipped the defect. The apply aborts on any of the
+     five, so a green apply has already proven them — re-read them as a receipt.
+   - **(A8)** `select name from clara.event_types where name like 'wiki.%' order by name` returns
+     **exactly four**: `wiki.page_canonicalized`, `wiki.page_published`, `wiki.page_retired`,
+     `wiki.source_ingested` — and the first is `client_scoped` with decision `ignore` in the
+     ACTIVE taxonomy. This holds whether or not step 1b(ii) ran: the preflight registers the
+     identical row at 19 and the migration registers it `on conflict do nothing` at 20.
    - **(A5)** A `clara_runtime`-role `publish_wiki_page_version` probe with slug
      `sources/<any uuid>` refuses `CLR32` / `reserved_slug_namespace` and writes nothing.
    - **(A6, reordered by A7)** A `clara_runtime`-role `record_wiki_source_ingest` probe with a
@@ -1668,6 +1920,7 @@ at the owner's pace, afterwards.
 | **R-7** | **Timing side channel on the runtime DEFINER verbs** (added 2026-07-25 with the §3.3 erratum). Payloads and error shapes are byte-identical across every non-granted cause, and the two coarsest differences are removed (the firm-leading live-activation index; the resolver's two-row cap). Execution is nevertheless **not constant-time**, and SQL cannot make it so. | **Named, not claimed away.** Closing it needs an architectural control — a constant-time gateway, or a rate limit on `prepare_egress_dispatch` / `resolve_document_client` for `clara_runtime` — which is a ruling, not a patch. v1.0's absolute "no timing branch a caller can distinguish" is withdrawn from §3.3 and §5.1. |
 | **R-8** | **The consume must be committed by its caller** (added 2026-07-25 with amendment A2). A PostgreSQL function cannot commit its caller's transaction, so `granted` implies committed only if the caller commits before calling the model. | Closed on the caller side: the runtime's default consume helper runs its own `begin`/`commit` (§3.7), pinned by a unit cell. It remains a **precondition on any other caller** of the verb, stated in §3.4 and §3.6 rather than assumed. |
 | **A5-R1** | **The context pack is not protected, and A5 widened the population that crowds it** (raised with A5, restated plainly with A6). `get_context_pack` ranks by `page_kind`, `period_context` is priority 2 of 6, and every deterministic source page is a recently-updated `period_context`. WB-R8's cap protected model spend **and** pack noise; A5 keeps spend bounded at 40 and raises the pack-crowding ceiling to 50000. On a document-heavy client the six-page pack is, today, six provenance stubs. | **Open, and named as open.** Not fixable inside a budget amendment: what the six-page window selects is WB-R8 / W6 contract surface and needs its own ruling. A6 fixed the *lint* half of the same compounding (§5.6a); the *pack* half is deliberately untouched — no ranking change was attempted. **A7 makes this cheaper to live with, not worse**: a crowding stub is now `Source: <uuid>`, six tokens instead of six filenames. |
+| **A8-R1** | **Direction 5 checks the events that EXIST; it does not prove event COMPLETENESS.** A version carrying no `wiki.page_published` envelope at all would not be reconstructible, and direction 5 would not see it — its scope is "whatever the log says about a `sources/` page must be canonical", not "the log says something about every version". | **Named, and out of 0020's scope by construction.** Completeness is a pre-existing property of the 0017 writers (`_publish_wiki_page_version_core` emits one envelope per publication on every path, and the ingest verb's own R1-F6 append makes the deterministic path no exception), which 0020 neither creates nor changes; inventing a synthetic publication envelope for a version that never had one would fabricate history, which is the opposite of what A8 is for. The read-only probe reports the population so a gap is **visible** rather than silent, and the rig's bijection assertion (`wb-r1-followon.test.mjs` [R2-F7]) is where a writer-side regression would surface. |
 | **A7-R1** | **A source page no longer names its document in human terms.** A7 removes `documents.original_filename` from the exempt page's title and body, so `get_wiki_page` / `list_wiki_pages` / `get_context_pack` show `Source: 3f2b…` rather than `Source: invoice-jan.pdf`. **No code depends on it** (DB and runtime suites are green with zero call-site changes) — it is a human-readability cost only. | **Open, with the right shape already available.** The filename is **not lost**: it lives on `clara.documents`, and the page's own citation carries `document_id` + `document_sha256`, so any surface that wants it can **join** — which is where a caller-chosen string belongs. Putting it back into exempt page bytes is exactly the defect A7 closed and must not be the fix. If a human surface needs it, the display join is a dashboard/read-verb change (`get_wiki_page` could return the citation's document filename as a *field*, never as page content) and needs its own small ruling. |
 
 ---
@@ -1854,3 +2107,33 @@ already exists — is a new reset-gated drill, `wb-0020-upgrade.test.mjs`, which
 the §5.7 remediation verbatim, proves the apply then succeeds, proves the pre-0020 noted op key
 still **replays** across the upgrade while a fresh noted call is refused, and carries a negative
 control (a canonical pre-0020 corpus upgrades untouched).
+
+---
+
+## Changelog v1.4 → v1.5 (owner ruling A8, ratchet R4, ratified 2026-07-25)
+
+Ratchet **R4** was a fifth, independent, repo-grounded adversarial pass. It re-derived the
+authorization chain from scratch and returned **CONVERGED** on it: no alternate production path
+around the consume boundary, the canonical form closed across all twelve caller-reachable
+fields, no third caller-prose channel. Three findings remained, all of them about the fix rather
+than the design.
+
+| # | Finding | Severity | Disposition |
+|---|---|---|---|
+| **F1** | **Canonicalizing the rows leaves the append-only EVENT SPINE non-canonical.** The pre-0020 backfill wrote the filename-bearing title / hash / storage key / size into `wiki.page_published` (`0017:2280`) and `wiki.source_ingested` (`0017:2277`); A7's remediation rewrote only `wiki_pages` / `wiki_page_versions`. The table bridge therefore passed while a projection **rebuilt from events** restored the old title and reconstruction envelope — reopening A7's caller-prose channel in a rebuilt projection and violating the W4/P17 invariant. | MEDIUM | **ACCEPTED and fixed structurally, not procedurally** — §5.8. A **fifth** bridge direction refuses a stale spine fail-closed; the remediation becomes an **audited correction operation** (`packages/db/deploy/wave-b-0020-a7-{probe,preflight}.sql`) that corrects the rows *and* appends one `wiki.page_canonicalized` envelope per version, preserving the preimage; a **new event type** makes the correction replay-understood. The upgrade fixture gains an **event-only shadow rebuild that compares every logical field**, plus a cell that runs A7's two `update`s verbatim and proves the apply now **REFUSES** them. No existing replay test is weakened. |
+| **F2** | **The upgrade proof was a misleading green.** `wb-0020-upgrade.test.mjs` skips whenever `CLARA_RIG_ALLOW_RESET` is unset — which normal CI leaves unset — and the CI step existed only as a comment inside the test file. A bridge or remediation regression could have merged with the advertised suite green. | LOW | **ACCEPTED.** The isolated-database step *"Wave-B 0020 A7/A8 upgrade drill (isolated DB)"* is wired into `.github/workflows/ci.yml` beside the C9 / document-pipeline / coding-floor drills, and a skip now prints a loud stdout line saying the upgrade path was not proven by that run. |
+| **F3** | **§§5.3/8's prose still described A6**, which A7 had replaced: the floor "before `_reserve_op`", a "three direction" bridge, a noted nonexistent document returning `CLR10`, "exactly the A6 insertion" (singular), and "`record_wiki_source_ingest` is **NOT modified**". The contract's own stated invariant is that it is sufficient alone for a blind lane — as written, a blind lane would have reintroduced A6's replay regression. | NIT | **ACCEPTED. The prose moved to match the implementation, never the reverse.** Five errata are ratified in place: the post-dedupe floor, the five-direction bridge, the `CLR02` nonexistent-document case, the **two** A7 edits behind the §6.1 pin, and the narrowed §5.3 sentence. |
+
+**Also ratified with A8**
+
+* The event-type roster is a function of the **migration level** and of nothing else: the
+  preflight (which runs at 19) and the migration (at 20) register the byte-identical
+  `wiki.page_canonicalized` row `on conflict do nothing`, and the §8 tail asserts exactly one
+  such row, client-scoped, `ignore` in the ACTIVE taxonomy.
+* The two 0019 cells that pinned the `wiki.*` family as "exactly the three 0017 types" become
+  **migration-level exact** — three at 19 (0019's negative proof, untouched) and four at 20.
+* **§10.3 step 1b is rewritten as three numbered owner commands** — probe, correct, confirm —
+  with the probe's five columns tabulated and their expected values before and after, so the
+  ceremony can be followed at the keyboard without inferring anything.
+* Residual **A8-R1** (direction 5 checks the events that exist, not event completeness) is
+  named in §11.

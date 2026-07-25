@@ -31,7 +31,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   rootQuery, opk, endPool, printLaneNotes,
-  fail0019, wbEnsureReady19,
+  fail0019, wbEnsureReady19, has0020,
   buildWaveBWorld, filedDocument, freshResolution,
   publishWikiPage, pageRow, citationRows, refRows, markStale,
   runClientLint, findingRows, staleOpKey, staleCatchupOpKey, WB_STALE_REASON,
@@ -192,8 +192,12 @@ test("[0019 amendment 4]: NO self-subscription — no wiki stale event type exis
   const t = await rootQuery("select name from clara.event_types where name='wiki.citations_staled'");
   assert.equal(t.rows.length, 0, "clara.event_types carries NO 'wiki.citations_staled'");
   const wiki = await rootQuery("select name from clara.event_types where name like 'wiki.%' order by name");
+  // [0020 A8] Level-exact, not frozen — 0019 registers NONE (the claim this cell makes) and
+  // 0020 registers exactly one correction type. See the same note in wb-0019-tail.
   assert.deepEqual(wiki.rows.map((x) => x.name),
-    ["wiki.page_published", "wiki.page_retired", "wiki.source_ingested"],
+    (await has0020())
+      ? ["wiki.page_canonicalized", "wiki.page_published", "wiki.page_retired", "wiki.source_ingested"]
+      : ["wiki.page_published", "wiki.page_retired", "wiki.source_ingested"],
     "the wiki event family is EXACTLY the three 0017 types — 0019 registers none");
   assert.equal(Object.keys(WB_EVENT_TYPES).filter((k) => /stale/.test(k)).length, 0,
     "the pinned WB_EVENT_TYPES roster is unchanged (the negative proof of amendment 4)");

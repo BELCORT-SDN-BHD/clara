@@ -37,7 +37,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   ROLES, rootQuery, endPool, printLaneNotes,
-  fail0019, wbEnsureReady19, fnSource, authorizedWikiCallerFacts,
+  fail0019, wbEnsureReady19, has0020, fnSource, authorizedWikiCallerFacts,
   WB_0019_WHITELIST_SIGS, WB_WIKI_RELATIONS, WB_STALE_RELATIONS, WB_STALE_COLS,
   WB_STALE_FINDING, WB_EVENT_TYPES,
 } from "./wb-fixtures.mjs";
@@ -263,10 +263,17 @@ test("[0019 amendment 4]: NO event type was registered — not in event_types, n
       join clara.taxonomy_active a on a.version=t.version and a.singleton
      where t.event_type ~ 'citations_staled|wiki.*stale'`);
   assert.equal(tax.rows.length, 0, "…and none in the ACTIVE trigger taxonomy");
+  // [0020 A8] The family is MIGRATION-LEVEL EXACT, not frozen: 0019 registers none (this
+  // cell's point), and 0020 registers exactly ONE — wiki.page_canonicalized, the correction
+  // envelope its bridge direction 5 needs to canonicalize an APPEND-ONLY log. Asserting the
+  // level-appropriate closed set keeps the negative proof (0019 added nothing) while refusing
+  // to false-green a fifth type that neither migration sanctioned.
   assert.deepEqual(
     (await rootQuery("select name from clara.event_types where name like 'wiki.%' order by name")).rows.map((x) => x.name),
-    ["wiki.page_published", "wiki.page_retired", "wiki.source_ingested"],
-    "the wiki event family is EXACTLY the three 0017 types");
+    (await has0020())
+      ? ["wiki.page_canonicalized", "wiki.page_published", "wiki.page_retired", "wiki.source_ingested"]
+      : ["wiki.page_published", "wiki.page_retired", "wiki.source_ingested"],
+    "the wiki event family is EXACTLY the three 0017 types, plus 0020's ONE correction type");
   assert.equal(Object.keys(WB_EVENT_TYPES).filter((k) => /stale/.test(k)).length, 0,
     "the pinned WB_EVENT_TYPES roster is unchanged — the negative proof of amendment 4");
 });

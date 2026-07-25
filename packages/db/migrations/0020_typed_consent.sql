@@ -1,7 +1,7 @@
 -- 0020_typed_consent — TYPED EGRESS CONSENT + DISPATCH AUTHORIZATION (WB-R23 · WB-R24(iii)).
 --
--- Authority: docs/plan/wave-b-migration-0020-design.md (v1.4, RATIFIED — v1.0 plus the
--- ratified amendments A1..A7). Scope is fixed by that contract and is neither widened nor
+-- Authority: docs/plan/wave-b-migration-0020-design.md (v1.5, RATIFIED — v1.0 plus the
+-- ratified amendments A1..A8). Scope is fixed by that contract and is neither widened nor
 -- narrowed here.
 --
 -- WHAT THIS DELIVERS, section by section against the contract:
@@ -97,7 +97,7 @@
 --     (WB-R21) is untouched: 0020 reaches wiki state only through record_wiki_source_ingest,
 --     set_wiki_synthesis_hold and clear_wiki_synthesis_hold — the cardinal invariant
 --     (never hand-write a row when an audited function exists).
---   * AMENDMENTS A5/A6/A7 QUALIFY THAT SENTENCE, and do not weaken it. They add (i) three
+--   * AMENDMENTS A5/A6/A7/A8 QUALIFY THAT SENTENCE, and do not weaken it. They add (i) three
 --     change-of-record patches, each targeting a function that is ALREADY on 0019's twelve-
 --     entry wiki whitelist (_publish_wiki_page_version_core, run_client_lint and
 --     record_wiki_source_ingest) — so the injected fragments land inside whitelisted bodies
@@ -107,7 +107,10 @@
 --     assertion that READS clara.wiki_pages / clara.wiki_log / clara.wiki_page_versions to
 --     prove a precondition. A `do` block is not a function, leaves no callable surface and
 --     cannot be reached by any role — it is not a hole in the boundary, and it writes nothing.
---     No 0020 FUNCTION names a wiki relation, before A5 or after A7.
+--     A8 adds only READS to that same `do` bridge (clara.domain_events joined to
+--     clara.wiki_pages) and one reference-data INSERT into clara.event_types /
+--     clara.trigger_taxonomy, neither of which is a wiki relation.
+--     No 0020 FUNCTION names a wiki relation, before A5 or after A8.
 -- ---------------------------------------------------------------------------------------
 --
 -- Structure mirrors 0017/0018/0019: every DDL + function body runs under
@@ -1207,7 +1210,81 @@ begin
                            and v.content is distinct from
                                'Source document: '||substring(p.slug from 9)))
        order by p.slug limit 25) x;
-    raise exception '0020 A7: % page(s) in the reserved sources/ namespace carry NON-CANONICAL bytes (a pre-0020 caller note, or a caller-chosen original_filename copied into the title/body) and cannot take the deterministic exemption. REMEDIATION: run the A7 canonicalization statement in docs/plan/wave-b-migration-0020-design.md section 5.7 -- it re-derives title, content, content_sha256, storage_key and size_bytes for every sources/ page from the document uuid alone -- then re-apply. First 25 offenders: %',
+    raise exception '0020 A7: % page(s) in the reserved sources/ namespace carry NON-CANONICAL bytes (a pre-0020 caller note, or a caller-chosen original_filename copied into the title/body) and cannot take the deterministic exemption. REMEDIATION: run packages/db/deploy/wave-b-0020-a7-preflight.sql (read packages/db/deploy/wave-b-0020-a7-probe.sql first) -- it re-derives title, content, content_sha256, storage_key and size_bytes for every sources/ page from the document uuid alone AND appends the correction envelopes the append-only event spine needs -- then re-apply. First 25 offenders: %',
+      v_n,coalesce(v_bad,'<none>') using errcode='CLR10';
+  end if;
+  -- [A8] Direction 5 -- THE RECONSTRUCTION SPINE, which direction 4 does not reach.
+  -- Ratchet R4 finding F1. Direction 4 asks the TABLES. The pre-0020 ingest verb wrote the
+  -- filename-bearing title, content hash, storage key and size into the APPEND-ONLY EVENT LOG
+  -- as well (0017:2277 wiki.source_ingested, 0017:2280 wiki.page_published). A remediation
+  -- that rewrites only the rows therefore passes direction 4 while a projection REBUILT FROM
+  -- EVENTS -- the W4/P17 invariant this whole design rests on, and what a DR restore of the
+  -- index actually does -- restores the OLD filename-bearing title and the OLD reconstruction
+  -- envelope, or fails against the OLD storage key. That reopens A7's caller-prose channel in
+  -- the rebuilt projection: such a fix is right about the rows and wrong about the
+  -- architecture. So the exemption's premise is now checked WHERE THE REBUILD READS IT.
+  --
+  -- domain_events is append-only and trigger-enforced (0005:288-291). History is never
+  -- rewritten; a CORRECTION IS APPENDED -- the same reverse-not-delete discipline the books
+  -- use for a posted entry. The rule a rebuild follows, and the rule this direction enforces:
+  -- apply wiki.page_published in seq order, then apply the LATEST wiki.page_canonicalized for
+  -- the same (page_id, version_id) that is LATER in seq; the correction overrides title,
+  -- content, content_sha256, storage_key and size_bytes and NOTHING else (payload.preimage is
+  -- audit-only and never enters a rebuilt projection).
+  --
+  -- Fail-closed and remediable: an uncorrected stale envelope ABORTS the apply and names the
+  -- preflight, which corrects the rows, appends one envelope per version, and re-asserts BOTH
+  -- directions before it returns. page_id is compared as TEXT so no untrusted payload string
+  -- is ever cast to uuid. Scope is exactly the reserved namespace -- an event belonging to a
+  -- non-sources/ page is never examined, and a version carrying no event is out of scope here
+  -- (event COMPLETENESS is a pre-existing property 0020 neither creates nor changes; the
+  -- probe reports it, see docs/plan/wave-b-migration-0020-design.md section 11, A8-R1).
+  select count(*) into v_n
+    from (select w.id, w.firm_id, w.client_id, w.slug,
+                 'Source: '||substring(w.slug from 9)                        as c_title,
+                 encode(sha256(convert_to('Source document: '||substring(w.slug from 9),
+                   'UTF8')),'hex')                                           as c_sha,
+                 octet_length('Source document: '||substring(w.slug from 9)) as c_size
+            from clara.wiki_pages w where w.slug like 'sources/%') c
+    join clara.domain_events e
+      on e.event_type in ('wiki.page_published','wiki.source_ingested')
+     and e.payload->>'page_id' = c.id::text
+   where ((e.payload ? 'title'          and e.payload->>'title'          is distinct from c.c_title)
+       or (e.payload ? 'content_sha256' and e.payload->>'content_sha256' is distinct from c.c_sha)
+       or (e.payload ? 'storage_key'    and e.payload->>'storage_key'    is distinct from
+             'firms/'||c.firm_id::text||'/wiki/'||c.client_id::text||'/'||c.c_sha||'.md')
+       or (e.payload ? 'size_bytes'     and e.payload->>'size_bytes'     is distinct from c.c_size::text))
+     and not exists(
+       select 1 from clara.domain_events k
+        where k.firm_id=e.firm_id and k.event_type='wiki.page_canonicalized'
+          and k.payload->>'page_id'=e.payload->>'page_id'
+          and k.payload->>'version_id'=e.payload->>'version_id'
+          and k.seq > e.seq);
+  if v_n>0 then
+    select string_agg(x.slug,', ' order by x.slug) into v_bad from (
+      select distinct c.slug
+        from (select w.id, w.firm_id, w.client_id, w.slug,
+                     'Source: '||substring(w.slug from 9)                        as c_title,
+                     encode(sha256(convert_to('Source document: '||substring(w.slug from 9),
+                       'UTF8')),'hex')                                           as c_sha,
+                     octet_length('Source document: '||substring(w.slug from 9)) as c_size
+                from clara.wiki_pages w where w.slug like 'sources/%') c
+        join clara.domain_events e
+          on e.event_type in ('wiki.page_published','wiki.source_ingested')
+         and e.payload->>'page_id' = c.id::text
+       where ((e.payload ? 'title'          and e.payload->>'title'          is distinct from c.c_title)
+           or (e.payload ? 'content_sha256' and e.payload->>'content_sha256' is distinct from c.c_sha)
+           or (e.payload ? 'storage_key'    and e.payload->>'storage_key'    is distinct from
+                 'firms/'||c.firm_id::text||'/wiki/'||c.client_id::text||'/'||c.c_sha||'.md')
+           or (e.payload ? 'size_bytes'     and e.payload->>'size_bytes'     is distinct from c.c_size::text))
+         and not exists(
+           select 1 from clara.domain_events k
+            where k.firm_id=e.firm_id and k.event_type='wiki.page_canonicalized'
+              and k.payload->>'page_id'=e.payload->>'page_id'
+              and k.payload->>'version_id'=e.payload->>'version_id'
+              and k.seq > e.seq)
+       order by 1 limit 25) x;
+    raise exception '0020 A8: % append-only reconstruction event(s) in the reserved sources/ namespace still carry PRE-CANONICAL bytes with no later correction envelope. The ROWS may already be canonical -- a bare UPDATE remediation is NOT sufficient, because a projection rebuilt FROM EVENTS would restore the old filename-bearing title and the old reconstruction envelope (the W4/P17 invariant). REMEDIATION: run packages/db/deploy/wave-b-0020-a7-preflight.sql (read packages/db/deploy/wave-b-0020-a7-probe.sql first) -- it corrects the rows AND appends one wiki.page_canonicalized envelope per version -- then re-apply. First 25 pages: %',
       v_n,coalesce(v_bad,'<none>') using errcode='CLR10';
   end if;
 end
@@ -1691,6 +1768,34 @@ with added(name,client_scoped,description,decision,note) as (values
 insert into clara.trigger_taxonomy(version,event_type,decision,note)
 select a.version,x.name,x.decision,x.note from added x
 join inserted_types i on i.name=x.name cross join clara.taxonomy_active a;
+
+-- [A8] THE CORRECTION EVENT TYPE — the fifth type 0020 registers, and the only wiki.* one.
+-- 0017 registered exactly three wiki types; 0019 deliberately registered none (its amendment
+-- 4 negative pin). 0020 registers a FOURTH because direction 5 needs a replay-understood way
+-- to correct an append-only log: you never rewrite a wiki.page_published envelope, you APPEND
+-- a wiki.page_canonicalized that supersedes it for one (page_id, version_id).
+--
+-- ON CONFLICT DO NOTHING is load-bearing, not defensive habit. The A7/A8 preflight
+-- (packages/db/deploy/wave-b-0020-a7-preflight.sql) runs at NINETEEN migrations, before this
+-- file, and must register the IDENTICAL row to append its corrections at all. A database that
+-- needed the preflight and one whose corpus was already canonical therefore converge on the
+-- same catalog at 20 — the event-type roster is a function of the migration level and of
+-- nothing else. The row text here and in the preflight is deliberately byte-identical.
+--
+-- 'ignore' at the taxonomy, like every other wiki type: the projection consumer does not
+-- subscribe wiki.* (P17 — WIKI_PROJECTION_EVENT_TYPES in packages/runtime/lib/
+-- wiki-projection.mjs), so there is nothing to route and no outbox row is minted.
+insert into clara.event_types(name,client_scoped,description)
+  values('wiki.page_canonicalized',true,
+    'A reserved-namespace source page''s bytes were re-derived to their canonical form; '
+    ||'a rebuild applies it over the page''s publication envelope (0020 A8)')
+  on conflict (name) do nothing;
+insert into clara.trigger_taxonomy(version,event_type,decision,note)
+  select a.version,'wiki.page_canonicalized','ignore',
+    'a correction envelope for the wiki index; the projection consumer does not '
+    ||'subscribe wiki.* (P17), so there is nothing to route'
+    from clara.taxonomy_active a
+ on conflict (version,event_type) do nothing;
 
 -- =====================================================================
 -- GRANTS (as the migration role). EXACTLY the contract's matrix and nothing beyond it.
@@ -2745,6 +2850,56 @@ begin
                            'Source document: '||substring(p.slug from 9)));
   if v_n<>0 then
     raise exception '0020 A7: % page(s) in the reserved namespace carry non-canonical bytes',
+      v_n using errcode='CLR10';
+  end if;
+
+  -- ---- [A8] the bridge FIFTH direction, re-read as a receipt ----
+  -- The same restatement for the APPEND-ONLY RECONSTRUCTION SPINE. Direction 4's receipt is
+  -- about the rows a reader serves; this one is about the events a REBUILD replays, and the
+  -- two are independent (ratchet R4 F1: the rows can be canonical while the spine is stale).
+  -- §10.3 step 3 cites BOTH, because the exemption rests on the bytes being machine-generated
+  -- in the live projection AND in any projection rebuilt from the log.
+  select count(*) into v_n
+    from (select w.id, w.firm_id, w.client_id, w.slug,
+                 'Source: '||substring(w.slug from 9)                        as c_title,
+                 encode(sha256(convert_to('Source document: '||substring(w.slug from 9),
+                   'UTF8')),'hex')                                           as c_sha,
+                 octet_length('Source document: '||substring(w.slug from 9)) as c_size
+            from clara.wiki_pages w where w.slug like 'sources/%') c
+    join clara.domain_events e
+      on e.event_type in ('wiki.page_published','wiki.source_ingested')
+     and e.payload->>'page_id' = c.id::text
+   where ((e.payload ? 'title'          and e.payload->>'title'          is distinct from c.c_title)
+       or (e.payload ? 'content_sha256' and e.payload->>'content_sha256' is distinct from c.c_sha)
+       or (e.payload ? 'storage_key'    and e.payload->>'storage_key'    is distinct from
+             'firms/'||c.firm_id::text||'/wiki/'||c.client_id::text||'/'||c.c_sha||'.md')
+       or (e.payload ? 'size_bytes'     and e.payload->>'size_bytes'     is distinct from c.c_size::text))
+     and not exists(
+       select 1 from clara.domain_events k
+        where k.firm_id=e.firm_id and k.event_type='wiki.page_canonicalized'
+          and k.payload->>'page_id'=e.payload->>'page_id'
+          and k.payload->>'version_id'=e.payload->>'version_id'
+          and k.seq > e.seq);
+  if v_n<>0 then
+    raise exception '0020 A8: % reconstruction event(s) in the reserved namespace are still pre-canonical',
+      v_n using errcode='CLR10';
+  end if;
+
+  -- ---- [A8] the correction event type is registered exactly once, client-scoped, ignored ----
+  -- The preflight registers the identical row at 19; this file registers it on-conflict at 20.
+  -- Both paths must land ONE row, client-scoped, with the 'ignore' decision in the ACTIVE
+  -- taxonomy — the negative proof that the preflight and the migration cannot diverge.
+  select count(*)::int into v_n from clara.event_types
+   where name='wiki.page_canonicalized' and client_scoped;
+  if v_n<>1 then
+    raise exception '0020 A8: wiki.page_canonicalized is not registered client-scoped (got %)',
+      v_n using errcode='CLR10';
+  end if;
+  select count(*)::int into v_n from clara.trigger_taxonomy t
+    join clara.taxonomy_active a on a.version=t.version and a.singleton
+   where t.event_type='wiki.page_canonicalized' and t.decision='ignore';
+  if v_n<>1 then
+    raise exception '0020 A8: wiki.page_canonicalized is not ignored in the ACTIVE taxonomy (got %)',
       v_n using errcode='CLR10';
   end if;
 

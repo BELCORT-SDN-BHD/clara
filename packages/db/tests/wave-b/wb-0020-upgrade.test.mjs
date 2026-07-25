@@ -1,4 +1,4 @@
-// Wave-B rig — migration 0020 §A7: THE 19 -> 20 UPGRADE FIXTURE.
+// Wave-B rig — migration 0020 §A7/§A8: THE 19 -> 20 UPGRADE FIXTURE.
 //
 // Everything else in the 0020 batteries runs against a database where 0020 is ALREADY applied,
 // so it can only prove what the verb does from now on. This file proves what the MIGRATION does
@@ -11,51 +11,52 @@
 //        (b) one whose document's original_filename is prose — the M2 channel A6 missed.
 //      Both look identical to A6's bridge: wiki_log action='ingest', synthesis='deterministic',
 //      no action='publish' row. Both would have taken the cap + orphan exemptions.
-//   2. apply 0020 -> it must ABORT, naming both pages, because neither RECONSTRUCTS.
-//   3. run the §5.7 canonicalization remediation the abort message names.
-//   4. apply 0020 again -> it must SUCCEED.
-//   5. the noted call's ORIGINAL op key must still REPLAY its stored receipt — the idempotency
-//      regression A6 introduced by raising ahead of _reserve_op, and the reason A7 moved it.
-//   6. a FRESH noted call is refused, and no prose survives anywhere in the namespace.
+//   2. the shipped READ-ONLY probe reports BOTH halves: non-canonical bytes AND a stale
+//      reconstruction spine.
+//   3. apply 0020 -> it must ABORT on direction 4, naming both pages and the shipped preflight.
+//   4. run the shipped AUDITED preflight -> apply 0020 again -> it must SUCCEED.
+//   5. REBUILD A SHADOW INDEX FROM EVENTS ALONE and compare EVERY logical field against the
+//      live tables. This is the W4/P17 invariant, driven across a correction.
+//   6. the preimage is preserved (not erased) in the correction envelope, and the preflight is
+//      idempotent: a second run appends nothing and changes nothing.
+//   7. the pre-0020 noted op key still REPLAYS its stored receipt, a FRESH noted call is
+//      refused, and no prose survives anywhere in the namespace.
+//
+// The SECOND test is the cell that would have caught ratchet R4 F1: on its OWN corpus it runs
+// A7's ORIGINAL two-`update` remediation verbatim, shows the rows go canonical while the
+// append-only spine stays stale, shows the event-only rebuild then DISAGREES with the live rows
+// by restoring the caller prose, and proves the apply REFUSES that state on direction 5.
+// Before amendment A8 the apply succeeded there. The THIRD test is the negative control: a
+// clean pre-0020 corpus upgrades untouched, with no remediation and no correction envelope.
 //
 // This is the ONLY 0020 test that RESETS the database (drops schema clara), so it is GATED
 // behind CLARA_RIG_ALLOW_RESET=1 and MUST run ALONE — node --test runs files CONCURRENTLY
 // against one shared DB, and a mid-run schema drop would nuke the other suites. It SKIPS in a
-// normal run. Against an isolated database:
+// normal run — LOUDLY, on stdout, so a skip is never mistaken for a pass (ratchet R4 F2).
+// CI runs it FOR REAL in its own throwaway database ("Wave-B 0020 A7/A8 upgrade drill" in
+// .github/workflows/ci.yml), beside the C9 / document-pipeline / coding-floor drills.
+// Locally, against an isolated database:
 //   PGDATABASE=clara_wb20_upgrade CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
 //     CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
-//
-// ---------------------------------------------------------------------------
-// PROPOSED ci.yml step (a SEPARATE step with its OWN throwaway database, exactly like the
-// events / runtime / document-pipeline upgrade drills — this file does NOT edit ci.yml):
-//
-//   - name: Wave-B 0020 A7 upgrade drill (isolated DB)
-//     env:
-//       PGDATABASE: clara_wb20_upgrade_ci
-//       CLARA_RIG_ALLOW_RESET: "1"
-//       CLARA_ALLOW_DESTRUCTIVE: "1"
-//       CLARA_RIG_DB: "1"
-//     run: |
-//       psql -c 'create database clara_wb20_upgrade_ci;'
-//       node --test packages/db/tests/wave-b/wb-0020-upgrade.test.mjs
-//       psql -c 'drop database clara_wb20_upgrade_ci;'
-// ---------------------------------------------------------------------------
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, copyFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, copyFileSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   rootQuery, opk, endPool, printLaneNotes, noteLane,
   buildWorld, createClient, recordWikiIngest, seedVerifiedDocument, fileTo,
+  eventsOf, shaHex, wikiKey,
 } from "./wb-0020-helpers.mjs";
 
 after(async () => { printLaneNotes("wb-0020-upgrade"); await endPool(); });
 
 const RESET_OK = process.env.CLARA_RIG_ALLOW_RESET === "1";
-const MIG_DIR = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "migrations");
+const HERE = dirname(fileURLToPath(import.meta.url));
+const MIG_DIR = join(HERE, "..", "..", "migrations");
+const DEPLOY_DIR = join(HERE, "..", "..", "deploy");
 
 /** The prose that must never survive into an exempt page's bytes. */
 const NOTE_PROSE = "# The client's director admitted the shortfall was deliberate.";
@@ -70,13 +71,27 @@ function exportPre0020() {
   return tmp;
 }
 
+/** The SHIPPED ceremony artifacts, run verbatim — never a paraphrase of them. A copy of this
+ *  SQL inside the test would prove the copy works and say nothing about what the owner runs. */
+const deploySql = (f) => readFileSync(join(DEPLOY_DIR, f), "utf8");
+
+/** §10.3 step 1b-i — the read-only probe, one row. */
+async function probe() {
+  const r = await rootQuery(deploySql("wave-b-0020-a7-probe.sql"));
+  return r.rows[0];
+}
+
+/** §10.3 step 1b-ii — the audited correction. One `do` block, one transaction. */
+const runPreflight = () => rootQuery(deploySql("wave-b-0020-a7-preflight.sql"));
+
 /**
- * THE §5.7 (A7) CANONICALIZATION REMEDIATION, verbatim — the statement the migration's abort
- * message names. It re-derives every sources/ page's title and every version's body, hash,
- * storage key and size from the document uuid in the slug and from NOTHING ELSE. It is a pure
- * re-derivation of a machine artifact, it is idempotent, and it touches no other namespace.
+ * A7's ORIGINAL §5.7 remediation, verbatim, kept as the NEGATIVE CONTROL for amendment A8.
+ * It re-derives the ROWS and touches nothing else. Ratchet R4 F1: that is right about the rows
+ * and wrong about the architecture — `domain_events` is append-only, so the reconstruction
+ * spine stays stale and a rebuilt projection restores the caller prose. The migration must
+ * REFUSE a corpus in this state.
  */
-const A7_REMEDIATION = [
+const A7_ROWS_ONLY_REMEDIATION = [
   `update clara.wiki_page_versions v
       set content = 'Source document: '||substring(p.slug from 9),
           content_sha256 = encode(sha256(convert_to(
@@ -97,6 +112,11 @@ const A7_REMEDIATION = [
 
 function skipUnlessReset(t) {
   if (!RESET_OK) {
+    // [R4-F2] A skipped upgrade proof is a MISLEADING GREEN. Say so on stdout — the CI step
+    // that runs this file for real sets the flag, so a skip here means it was NOT proven.
+    console.log("[wb-0020-upgrade] SKIPPED — CLARA_RIG_ALLOW_RESET is unset."
+      + " The 19->20 upgrade path is NOT proven by this run. CI proves it in the"
+      + " \"Wave-B 0020 A7/A8 upgrade drill (isolated DB)\" step.");
     t.skip("destructive (drops schema clara); set CLARA_RIG_ALLOW_RESET=1 on an ISOLATED DB to run ALONE");
     return true;
   }
@@ -126,10 +146,128 @@ async function buildPre0020Corpus() {
 }
 
 // ===========================================================================
+// The event-only rebuild — the W4/P17 invariant, with A8's correction rule.
+// ===========================================================================
+
+const citeT = (c) => JSON.stringify([c.source_kind, c.document_id ?? null, c.entry_id ?? null,
+  c.counterparty_id ?? null, c.detail ?? {}]);
+const refT = (r) => JSON.stringify([r.ref_kind, r.ref_page_id ?? null, r.counterparty_id ?? null,
+  r.document_id ?? null, r.entry_id ?? null, r.account_code ?? null]);
+
+/**
+ * THE REBUILD RULE, exactly as migration 0020's bridge direction 5 and the preflight state it:
+ *   apply `wiki.page_published` in seq order; then, for each (page_id, version_id), apply the
+ *   LATEST `wiki.page_canonicalized` that is later in seq. The correction overrides title,
+ *   content, content_sha256, storage_key and size_bytes — and NOTHING else. `payload.preimage`
+ *   is audit-only and NEVER enters a rebuilt projection.
+ * NO live table is read here: `eventsOf` reads clara.domain_events and nothing else.
+ */
+async function rebuildIndexFromEvents(firm) {
+  const pages = {};    // page_id -> page fields
+  const versions = {}; // page_id -> version_id -> version fields
+  for (const e of await eventsOf(firm, "wiki.page_published")) {
+    const p = e.payload ?? {};
+    if (!p.page_id) continue;
+    pages[p.page_id] = {
+      slug: p.slug, page_kind: p.page_kind, title: p.title ?? null,
+      counterparty_id: p.counterparty_id ?? null, state: "active",
+      refs: (p.refs ?? []).map(refT).sort(),
+    };
+    (versions[p.page_id] ??= {})[p.version_id] = {
+      version_n: Number(p.version_n),
+      content: null, // the publication envelope never carried the bytes; only their digest
+      content_sha256: p.content_sha256, storage_key: p.storage_key,
+      size_bytes: Number(p.size_bytes), synthesis: p.synthesis,
+      engine_id: p.engine_id ?? null,
+      projected_from_seq: p.projected_from_seq == null ? null : Number(p.projected_from_seq),
+      citations: (p.citations ?? []).map(citeT).sort(),
+      corrected: false,
+    };
+  }
+  for (const e of await eventsOf(firm, "wiki.page_retired")) {
+    const id = (e.payload ?? {}).page_id;
+    if (pages[id]) pages[id].state = "retired";
+  }
+  for (const e of await eventsOf(firm, "wiki.page_canonicalized")) {
+    const p = e.payload ?? {};
+    if (pages[p.page_id]) pages[p.page_id].title = p.title;
+    const v = versions[p.page_id]?.[p.version_id];
+    if (!v) continue;
+    v.content = p.content;
+    v.content_sha256 = p.content_sha256;
+    v.storage_key = p.storage_key;
+    v.size_bytes = Number(p.size_bytes);
+    v.corrected = true;
+    // deliberately NOT applied: synthesis, engine_id, projected_from_seq, citations, refs,
+    // page_kind, slug, state — a correction corrects bytes, it does not republish a page.
+  }
+  return { pages, versions };
+}
+
+/** Compare the event-only rebuild against the LIVE tables, field by field. */
+async function assertRebuildMatchesLive(firm, { expectCorrected }) {
+  const { pages, versions } = await rebuildIndexFromEvents(firm);
+  const live = (await rootQuery(
+    "select to_jsonb(p) as r from clara.wiki_pages p where p.firm_id=$1 and p.slug like 'sources/%'",
+    [firm])).rows.map((x) => x.r);
+  assert.ok(live.length >= 2, "both source pages are live (the comparison is not vacuous)");
+  let correctedSeen = 0;
+  for (const page of live) {
+    const s = pages[page.id];
+    assert.ok(s, `${page.slug}: reconstructible from events ALONE`);
+    assert.equal(s.slug, page.slug, `${page.slug}: slug`);
+    assert.equal(s.page_kind, page.page_kind, `${page.slug}: page_kind`);
+    assert.equal(s.title, page.title, `${page.slug}: TITLE — the field A7 canonicalized`);
+    assert.equal(s.counterparty_id, page.counterparty_id ?? null, `${page.slug}: counterparty`);
+    assert.equal(s.state, page.state, `${page.slug}: lifecycle state`);
+    const liveVersions = (await rootQuery(
+      "select to_jsonb(v) as r from clara.wiki_page_versions v where v.page_id=$1 order by v.version_n",
+      [page.id])).rows.map((x) => x.r);
+    for (const v of liveVersions) {
+      const shv = versions[page.id]?.[v.id];
+      assert.ok(shv, `${page.slug} v${v.version_n}: version reconstructible`);
+      assert.equal(shv.version_n, Number(v.version_n), `${page.slug} v${v.version_n}: version_n`);
+      assert.equal(shv.content_sha256, v.content_sha256, `${page.slug} v${v.version_n}: HASH`);
+      assert.equal(shv.storage_key, v.storage_key, `${page.slug} v${v.version_n}: STORAGE KEY`);
+      assert.equal(shv.size_bytes, Number(v.size_bytes), `${page.slug} v${v.version_n}: SIZE`);
+      assert.equal(shv.synthesis, v.synthesis, `${page.slug} v${v.version_n}: synthesis`);
+      assert.equal(shv.engine_id, v.engine_id ?? null, `${page.slug} v${v.version_n}: engine`);
+      assert.equal(shv.projected_from_seq,
+        v.projected_from_seq == null ? null : Number(v.projected_from_seq),
+        `${page.slug} v${v.version_n}: projected_from_seq`);
+      // the bytes themselves: the correction carries them literally (they are fixed text plus
+      // an opaque uuid), and they must re-hash to the digest the rebuild holds.
+      if (shv.corrected) {
+        correctedSeen += 1;
+        assert.equal(shv.content, v.content, `${page.slug} v${v.version_n}: CONTENT BYTES`);
+        assert.equal(shaHex(shv.content), shv.content_sha256,
+          `${page.slug} v${v.version_n}: the rebuilt bytes re-hash to the rebuilt digest`);
+      }
+      assert.equal(shv.storage_key, wikiKey(page.firm_id, page.client_id, v.content_sha256),
+        `${page.slug} v${v.version_n}: the key is EXACTLY the content-addressed family`);
+      const liveCites = (await rootQuery(
+        "select to_jsonb(c) as r from clara.wiki_page_citations c where c.version_id=$1", [v.id]))
+        .rows.map((x) => citeT(x.r)).sort();
+      assert.equal(JSON.stringify(shv.citations), JSON.stringify(liveCites),
+        `${page.slug} v${v.version_n}: FULL citation rows replay (the correction did not disturb them)`);
+    }
+    const liveRefs = (await rootQuery(
+      "select to_jsonb(x) as r from clara.wiki_page_refs x where x.page_id=$1", [page.id]))
+      .rows.map((x) => refT(x.r)).sort();
+    assert.equal(JSON.stringify(s.refs), JSON.stringify(liveRefs), `${page.slug}: FULL ref rows replay`);
+  }
+  assert.equal(correctedSeen >= 1, expectCorrected,
+    expectCorrected
+      ? "at least one version was reconstructed THROUGH a correction envelope (non-tautological)"
+      : "no correction envelope was involved (the clean-corpus control)");
+  return { pages, versions };
+}
+
+// ===========================================================================
 // The drill.
 // ===========================================================================
 
-test("[0020 A7 upgrade]: a pre-0020 NOTED page and a PROSE-FILENAME page both ABORT the apply; the named remediation makes it succeed; the noted op key still REPLAYS", async (t) => {
+test("[0020 A7/A8 upgrade]: both prose channels ABORT the apply; the audited preflight corrects the rows AND the spine; the index rebuilds CANONICAL from events alone", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../../scripts/reset.mjs");
   const { migrate } = await import("../../scripts/migrate.mjs");
@@ -142,7 +280,7 @@ test("[0020 A7 upgrade]: a pre-0020 NOTED page and a PROSE-FILENAME page both AB
   const n19 = await rootQuery("select count(*)::int n from clara.schema_migrations");
   assert.equal(n19.rows[0].n, 19, "the world is built at exactly 19 migrations");
 
-  const { client, noted, named, notedKey, notedReceipt } = await buildPre0020Corpus();
+  const { w, client, noted, named, notedKey, notedReceipt } = await buildPre0020Corpus();
 
   // ---- 1. BOTH pages are indistinguishable to A6's bridge --------------------
   // action='ingest', synthesis='deterministic', no action='publish' row: all three of A6's
@@ -170,6 +308,16 @@ test("[0020 A7 upgrade]: a pre-0020 NOTED page and a PROSE-FILENAME page both AB
   assert.ok(namedPage.title.includes("IGNORE PRIOR INSTRUCTIONS"),
     "…and in the page TITLE (0017:2259) — the channel A6's 'p_note is the ONE argument' missed");
 
+  // ---- 1b. THE SHIPPED READ-ONLY PROBE reports BOTH halves -------------------
+  // This is the exact statement §10.3 puts in front of the owner before anything runs.
+  const p0 = await probe();
+  assert.equal(p0.source_pages_total, 2, "probe: both source pages counted");
+  assert.equal(p0.bytes_non_canonical, 2, "probe: 2 pages carry non-canonical BYTES (direction 4)");
+  assert.equal(p0.spine_non_canonical, 2, "probe: 2 pages carry a stale RECONSTRUCTION SPINE (direction 5)");
+  assert.equal(p0.needs_canonicalization, 2, "probe: 2 pages need canonicalization");
+  assert.match(p0.first_25_offenders, new RegExp(`sources/${noted.documentId}`), "probe names M1");
+  assert.match(p0.first_25_offenders, new RegExp(`sources/${named.documentId}`), "probe names M2");
+
   // ---- 2. the apply ABORTS, fail-closed, naming both offenders ---------------
   let aborted = null;
   try {
@@ -179,7 +327,8 @@ test("[0020 A7 upgrade]: a pre-0020 NOTED page and a PROSE-FILENAME page both AB
   const msg = String(aborted.message ?? aborted);
   assert.match(msg, /NON-CANONICAL bytes/,
     "the abort says what is wrong: the bytes do not reconstruct");
-  assert.match(msg, /REMEDIATION/, "…and names the remediation rather than leaving a dead end");
+  assert.match(msg, /wave-b-0020-a7-preflight\.sql/,
+    "…and names the SHIPPED remediation rather than leaving a dead end or naming prose");
   assert.match(msg, new RegExp(`sources/${noted.documentId}`),
     "…and names the NOTED page (M1)");
   assert.match(msg, new RegExp(`sources/${named.documentId}`),
@@ -187,15 +336,23 @@ test("[0020 A7 upgrade]: a pre-0020 NOTED page and a PROSE-FILENAME page both AB
   const stillAt19 = await rootQuery("select count(*)::int n from clara.schema_migrations");
   assert.equal(stillAt19.rows[0].n, 19, "the migration rolled back whole: still 19 applied");
 
-  // ---- 3. the named remediation, run verbatim --------------------------------
-  for (const sql of A7_REMEDIATION) await rootQuery(sql);
+  // ---- 3. the SHIPPED AUDITED PREFLIGHT, run verbatim ------------------------
+  await runPreflight();
+  const p2 = await probe();
+  assert.equal(p2.bytes_non_canonical, 0, "preflight: bytes canonical");
+  assert.equal(p2.spine_non_canonical, 0, "preflight: the reconstruction spine is canonical too");
+  assert.equal(p2.needs_canonicalization, 0, "preflight: nothing left to canonicalize");
+  assert.equal(p2.first_25_offenders, "<none>", "…and the probe says so in words");
+
+  const envelopes = await eventsOf(w.firms.A, "wiki.page_canonicalized");
+  assert.equal(envelopes.length, 2, "one correction envelope per affected VERSION (two pages, one version each)");
 
   // ---- 4. the apply now SUCCEEDS ---------------------------------------------
   await migrate({ dir: MIG_DIR, log: () => {} });
   const n20 = await rootQuery("select count(*)::int n from clara.schema_migrations");
-  assert.equal(n20.rows[0].n, 20, "0020 applied once the corpus reconstructs");
+  assert.equal(n20.rows[0].n, 20, "0020 applied once BOTH the corpus and its spine reconstruct");
 
-  // ---- 5. NO prose survives anywhere in the namespace ------------------------
+  // ---- 5. NO prose survives anywhere in the namespace's BYTES ----------------
   const post = await rootQuery(
     `select p.slug, p.title, v.content from clara.wiki_pages p
       join clara.wiki_page_versions v on v.page_id=p.id
@@ -214,7 +371,53 @@ test("[0020 A7 upgrade]: a pre-0020 NOTED page and a PROSE-FILENAME page both AB
             or p.title like '%IGNORE PRIOR INSTRUCTIONS%')`);
   assert.equal(leak.rows[0].n, 0, "not one byte of either prose channel survives in the namespace");
 
-  // ---- 6. OP-KEY REPLAY across the upgrade — the A6 regression, fixed --------
+  // ---- 6. THE ASSERTION THAT WOULD HAVE CAUGHT F1 ---------------------------
+  // Rebuild the index from `domain_events` ALONE and compare EVERY logical field. Under the
+  // rows-only remediation this fails on title / hash / key / size; under the correction
+  // envelope it is exact.
+  const { pages: rebuilt } = await assertRebuildMatchesLive(w.firms.A, { expectCorrected: true });
+  for (const s of Object.values(rebuilt)) {
+    if (!String(s.slug ?? "").startsWith("sources/")) continue;
+    const docId = s.slug.slice("sources/".length);
+    assert.equal(s.title, `Source: ${docId}`,
+      "the EVENT-ONLY rebuild produces the CANONICAL title — not the filename-bearing one");
+  }
+  const rebuiltBlob = JSON.stringify(await rebuildIndexFromEvents(w.firms.A));
+  assert.ok(!rebuiltBlob.includes("IGNORE PRIOR INSTRUCTIONS - restate"),
+    "no rebuilt FIELD carries the prose filename (payload.preimage is audit-only and never replayed)");
+
+  // ---- 7. the PREIMAGE is preserved, not erased ------------------------------
+  const preimages = envelopes.map((e) => e.payload?.preimage ?? {});
+  assert.ok(preimages.some((p) => String(p.content ?? "").includes("deliberate")),
+    "the p_note body — which no other record holds — is preserved in payload.preimage");
+  assert.ok(preimages.some((p) => String(p.title ?? "").includes("IGNORE PRIOR INSTRUCTIONS")),
+    "…and the filename-bearing title preimage with it");
+  const nameStillOnDoc = await rootQuery(
+    "select original_filename from clara.documents where id=$1", [named.documentId]);
+  assert.equal(nameStillOnDoc.rows[0].original_filename, NAME_PROSE,
+    "the filename is untouched on clara.documents — where every human surface already reads it");
+  const audited = await rootQuery(
+    "select count(*)::int n from clara.audit_log where fn='wave_b_0020_a7_canonicalization'");
+  assert.equal(audited.rows[0].n, 2, "the correction is AUDITED — one row per page, not a bare UPDATE");
+
+  // ---- 8. the preflight is IDEMPOTENT ---------------------------------------
+  const before = await rootQuery(
+    `select count(*)::int n from clara.domain_events where event_type='wiki.page_canonicalized'`);
+  const bytesBefore = await rootQuery(
+    `select p.id, p.title, v.id as vid, v.content, v.content_sha256, v.storage_key, v.size_bytes
+       from clara.wiki_pages p join clara.wiki_page_versions v on v.page_id=p.id
+      where p.slug like 'sources/%' order by p.slug, v.version_n`);
+  await runPreflight();
+  const afterN = await rootQuery(
+    `select count(*)::int n from clara.domain_events where event_type='wiki.page_canonicalized'`);
+  const bytesAfter = await rootQuery(
+    `select p.id, p.title, v.id as vid, v.content, v.content_sha256, v.storage_key, v.size_bytes
+       from clara.wiki_pages p join clara.wiki_page_versions v on v.page_id=p.id
+      where p.slug like 'sources/%' order by p.slug, v.version_n`);
+  assert.equal(afterN.rows[0].n, before.rows[0].n, "a second preflight appends NO duplicate envelope");
+  assert.deepEqual(bytesAfter.rows, bytesBefore.rows, "…and changes not one row");
+
+  // ---- 9. OP-KEY REPLAY across the upgrade — the A6 regression, fixed ------
   // The exact same call the runtime made at 19: same client, same document, same NOTE, same op
   // key. Under A6's ordering (floor ahead of _reserve_op) this raised CLR10 and a legitimate
   // delayed retry lost its receipt. Under A7 the reservation comes first, so it REPLAYS.
@@ -228,7 +431,7 @@ test("[0020 A7 upgrade]: a pre-0020 NOTED page and a PROSE-FILENAME page both AB
     [notedReceipt.page_id]);
   assert.equal(versionsAfterReplay.rows[0].n, 1, "…and wrote no second version");
 
-  // ---- 7. …while a FRESH noted call is refused, typed ------------------------
+  // ---- 10. …while a FRESH noted call is refused, typed ----------------------
   let refused = null;
   try {
     await recordWikiIngest({
@@ -240,13 +443,103 @@ test("[0020 A7 upgrade]: a pre-0020 NOTED page and a PROSE-FILENAME page both AB
   assert.match(String(refused.detail ?? ""), /source_note_not_permitted/,
     "…and its own reason discriminant — replay is honoured, new prose is not");
 
-  noteLane("[A7] the 19->20 fixture drives BOTH content channels A6 left open (p_note and"
+  noteLane("[A7/A8] the 19->20 fixture drives BOTH content channels A6 left open (p_note and"
     + " original_filename), proves the apply is fail-closed on a corpus that cannot be"
-    + " reconstructed, proves the named remediation actually works, and proves the op-key"
-    + " replay A6's ordering broke");
+    + " reconstructed, proves the shipped audited preflight corrects the rows AND the"
+    + " append-only reconstruction spine and is idempotent, preserves the preimage the bare"
+    + " UPDATE would have destroyed, rebuilds the index from events ALONE and compares every"
+    + " logical field, and proves the op-key replay A6's ordering broke");
 });
 
-test("[0020 A7 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes, plain filenames) applies with no remediation at all", async (t) => {
+test("[0020 A8 · ratchet R4 F1]: A7's ROWS-ONLY remediation is REFUSED — canonical rows over a stale reconstruction spine cannot apply", async (t) => {
+  if (skipUnlessReset(t)) return;
+  const { reset } = await import("../../scripts/reset.mjs");
+  const { migrate } = await import("../../scripts/migrate.mjs");
+  const { seed } = await import("../../scripts/seed.mjs");
+
+  // THE CELL THAT WOULD HAVE CAUGHT F1. A7 shipped its remediation as two bare `update`s over
+  // wiki_pages / wiki_page_versions. They are right about the ROWS. `domain_events` is
+  // append-only (0005:288-291) and its wiki.page_published / wiki.source_ingested envelopes
+  // still carry the filename-bearing title, hash, key and size — so a projection REBUILT FROM
+  // EVENTS (the W4/P17 invariant, and what a DR restore of the index does) would restore the
+  // caller prose. Before amendment A8 the apply SUCCEEDED in exactly this state.
+  await reset({ log: () => {} });
+  await migrate({ dir: exportPre0020(), log: () => {} });
+  await seed({ log: () => {} });
+  const { w, client, noted, named } = await buildPre0020Corpus();
+
+  // the rows-only remediation, verbatim as A7 shipped it
+  for (const sql of A7_ROWS_ONLY_REMEDIATION) await rootQuery(sql);
+
+  const p1 = await probe();
+  assert.equal(p1.bytes_non_canonical, 0, "rows-only: the BYTES are now canonical (direction 4 would pass)");
+  assert.equal(p1.spine_non_canonical, 2, "rows-only: the SPINE is still stale — the F1 defect, MEASURED");
+  assert.equal(p1.needs_canonicalization, 2, "…so both pages still need the audited preflight");
+
+  // the stale envelopes are really there, carrying the real prose
+  const stale = await rootQuery(
+    `select e.payload->>'title' as title from clara.domain_events e
+      where e.event_type='wiki.page_published' and e.payload->>'slug' like 'sources/%'`);
+  assert.ok(stale.rows.some((r) => String(r.title).includes("IGNORE PRIOR INSTRUCTIONS")),
+    "the append-only log still holds the prose title — this is what a rebuild would restore");
+
+  // and the event-only rebuild proves the consequence, not merely the shape: the index a
+  // restore would produce disagrees with the live rows on exactly the corrected fields.
+  const { pages: badRebuild } = await rebuildIndexFromEvents(w.firms.A);
+  const liveTitle = (await rootQuery(
+    "select title from clara.wiki_pages where slug=$1", [`sources/${named.documentId}`])).rows[0].title;
+  const pageId = (await rootQuery(
+    "select id from clara.wiki_pages where slug=$1", [`sources/${named.documentId}`])).rows[0].id;
+  assert.equal(liveTitle, `Source: ${named.documentId}`, "the LIVE row is canonical after the UPDATE");
+  assert.notEqual(badRebuild[pageId].title, liveTitle,
+    "…and the EVENT-ONLY rebuild disagrees with it — the divergence F1 named, driven");
+  assert.ok(String(badRebuild[pageId].title).includes("IGNORE PRIOR INSTRUCTIONS"),
+    "…by restoring the caller-chosen filename into the rebuilt page title");
+
+  let aborted = null;
+  try {
+    await migrate({ dir: MIG_DIR, log: () => {} });
+  } catch (e) { aborted = e; }
+  assert.ok(aborted, "[A8] 0020 REFUSED a rows-only remediation — the F1 regression is fail-closed");
+  const msg = String(aborted.message ?? aborted);
+  assert.match(msg, /0020 A8/, "…with the A8 direction-5 abort, not direction 4's");
+  assert.match(msg, /reconstruction event/,
+    "…which names the append-only spine as the thing that is stale");
+  assert.match(msg, /wave-b-0020-a7-preflight\.sql/, "…and names the audited preflight");
+  assert.equal((await rootQuery("select count(*)::int n from clara.schema_migrations")).rows[0].n, 19,
+    "still 19 applied: the apply rolled back whole");
+
+  // the preflight recovers this state too — it corrects the SPINE even when the rows are
+  // already canonical, because its predicate is "not canonical in the rows OR in the spine".
+  await runPreflight();
+  const p2 = await probe();
+  assert.equal(p2.needs_canonicalization, 0, "the preflight repairs a rows-only remediation");
+  await migrate({ dir: MIG_DIR, log: () => {} });
+  assert.equal((await rootQuery("select count(*)::int n from clara.schema_migrations")).rows[0].n, 20,
+    "…and the apply then succeeds");
+  await assertRebuildMatchesLive(w.firms.A, { expectCorrected: true });
+
+  // NAMED HONESTLY, because the owner may already have run A7's `update` before reading A8:
+  // the bare UPDATE has ALREADY destroyed the p_note body, so the envelope the preflight can
+  // still append records the post-UPDATE bytes. The spine is repaired; the note preimage is
+  // not recoverable from here. This is the cost of the rows-only path and the reason the
+  // shipped preflight — not the `update` — is the remediation §10.3 names.
+  const envs = await eventsOf(w.firms.A, "wiki.page_canonicalized");
+  assert.equal(envs.length, 2, "one envelope per version, appended over the rows-only state");
+  assert.ok(!envs.some((e) => String(e.payload?.preimage?.content ?? "").includes("deliberate")),
+    "the p_note body is NOT in the preimage here — the bare UPDATE already destroyed it");
+  assert.equal((await rootQuery(
+    "select original_filename from clara.documents where id=$1", [named.documentId])).rows[0].original_filename,
+    NAME_PROSE, "the FILENAME preimage survives regardless — it never left clara.documents");
+  assert.ok(client && noted, "fixture handles used");
+
+  noteLane("[A8/R4-F1] a rows-only remediation leaves the append-only reconstruction spine"
+    + " stale; the event-only rebuild then disagrees with the live rows and restores the"
+    + " caller prose. Direction 5 refuses that state fail-closed, and the shipped preflight"
+    + " recovers it — but the p_note preimage the bare UPDATE destroyed is gone for good");
+});
+
+test("[0020 A7/A8 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes, plain filenames) applies with no remediation at all", async (t) => {
   if (skipUnlessReset(t)) return;
   const { reset } = await import("../../scripts/reset.mjs");
   const { migrate } = await import("../../scripts/migrate.mjs");
@@ -254,7 +547,8 @@ test("[0020 A7 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes, p
 
   // The negative control the abort needs: A7 must not be a blanket "all pre-0020 corpora are
   // bad". A source page whose document had NO filename already reconstructs at 19 — the
-  // canonical form is exactly 0017's own null-filename branch — so it upgrades untouched.
+  // canonical form is exactly 0017's own null-filename branch — so it upgrades untouched,
+  // in its ROWS and in its SPINE.
   await reset({ log: () => {} });
   await migrate({ dir: exportPre0020(), log: () => {} });
   await seed({ log: () => {} });
@@ -274,6 +568,17 @@ test("[0020 A7 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes, p
     "0017's null-filename branch already wrote the canonical body — A7 does not move the form,"
     + " it removes the branch that made it caller-dependent");
 
+  // the probe agrees, in BOTH halves, before anything is applied
+  const p0 = await probe();
+  assert.equal(p0.needs_canonicalization, 0, "probe: a clean corpus needs nothing");
+  assert.equal(p0.spine_non_canonical, 0, "probe: …including its reconstruction spine");
+
+  // and the AUDITED preflight is a no-op on it — it must never touch a canonical page
+  await runPreflight();
+  assert.equal(
+    (await rootQuery("select count(*)::int n from clara.domain_events where event_type='wiki.page_canonicalized'")).rows[0].n,
+    0, "the preflight appended NO envelope against a clean corpus (row-scoped, not blanket)");
+
   await migrate({ dir: MIG_DIR, log: () => {} });
   const n20 = await rootQuery("select count(*)::int n from clara.schema_migrations");
   assert.equal(n20.rows[0].n, 20, "0020 applied clean over the canonical corpus — no remediation needed");
@@ -283,4 +588,22 @@ test("[0020 A7 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes, p
       join clara.wiki_page_versions v on v.id=p.current_version_id where p.id=$1`,
     [receipt.page_id]);
   assert.deepEqual(after.rows[0], before.rows[0], "…and the page's bytes were not touched");
+
+  // the event-only rebuild is exact WITHOUT any correction in play — the other half of the
+  // control: A8's rebuild rule does not depend on a correction existing.
+  const { pages, versions } = await rebuildIndexFromEvents(w.firms.A);
+  const s = pages[receipt.page_id];
+  assert.ok(s, "the clean page reconstructs from events alone");
+  assert.equal(s.title, `Source: ${d.documentId}`, "…with the canonical title, uncorrected");
+  const liveV = (await rootQuery(
+    "select to_jsonb(v) as r from clara.wiki_page_versions v where v.page_id=$1", [receipt.page_id]))
+    .rows.map((x) => x.r);
+  for (const v of liveV) {
+    const shv = versions[receipt.page_id]?.[v.id];
+    assert.ok(shv, "…and every version with it");
+    assert.equal(shv.corrected, false, "…never through a correction envelope");
+    assert.equal(shv.content_sha256, v.content_sha256, "hash matches the live row");
+    assert.equal(shv.storage_key, v.storage_key, "storage key matches the live row");
+    assert.equal(shv.size_bytes, Number(v.size_bytes), "size matches the live row");
+  }
 });

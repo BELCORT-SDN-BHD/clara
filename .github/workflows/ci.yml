@@ -234,6 +234,23 @@ jobs:
           PGDATABASE=clara_s6_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
             node --test tests/s6-upgrade.test.mjs
 
+      # Wave-B migration-0020 A7/A8 upgrade drill (ratchet R4 F2 — the anti-misleading-green
+      # wiring). wb-0020-upgrade.test.mjs is the ONLY proof of the 19→20 path: that the apply is
+      # fail-closed on a corpus whose exempt-page bytes are not canonical, that A7's ROWS-ONLY
+      # remediation is REFUSED because it leaves the append-only reconstruction spine stale,
+      # that the SHIPPED audited preflight (packages/db/deploy/wave-b-0020-a7-*.sql) corrects
+      # both and is idempotent, and that the index rebuilds CANONICAL from domain_events alone.
+      # It is reset-gated (drops schema clara mid-run) so it SKIPS in the concurrent
+      # all-packages sweep above — which is exactly how a bridge or remediation regression could
+      # have merged with the advertised suite green. Run it FOR REAL here, ALONE, in its OWN
+      # throwaway database, like the three drills above.
+      - name: Wave-B 0020 A7/A8 upgrade drill (isolated DB)
+        working-directory: packages/db
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_wb20_upgrade_ci'
+          PGDATABASE=clara_wb20_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+            CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
+
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
       # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap
