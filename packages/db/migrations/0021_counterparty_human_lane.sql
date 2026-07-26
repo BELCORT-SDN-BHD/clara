@@ -126,9 +126,14 @@ begin
     end if;
   end;
 
-  perform clara._audit(c.firm, c.actor, p_client, null, 'create_counterparty', null,
-    jsonb_build_object('counterparty_id', v_id, 'name', v_name, 'kind', p_kind,
-      'created', v_created, 'op_key', p_op_key));
+  -- `p_obo` is ON BEHALF OF A USER — it mirrors wake_credentials.on_behalf_of, which is a
+  -- users(id) reference (0002:234). An earlier draft passed p_client here, which typechecks
+  -- only because audit_log's own column carries no FK (0002:280): a client id would have sat
+  -- silently in a column every reader interprets as a human. The client belongs in `args`,
+  -- exactly as upsert_account records it (0004:395-396).
+  perform clara._audit(c.firm, c.actor, null, null, 'create_counterparty', null,
+    jsonb_build_object('client', p_client, 'counterparty_id', v_id, 'name', v_name,
+      'kind', p_kind, 'created', v_created, 'op_key', p_op_key));
 
   return clara._finish_op(c.firm, 'create_counterparty', p_op_key,
     jsonb_build_object('counterparty_id', v_id, 'created', v_created));
