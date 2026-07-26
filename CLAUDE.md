@@ -115,7 +115,10 @@ release v27 (ten loops, WIKI_PROJECTION acquired, /ready true zero warnings) ·
 dashboard Pages `app.clarabook.com` auto-deploys from `main` · `clara-backup` daily
 (zero-501-proven).** 0019 landed 2026-07-25 (ADR-039) and **0020 the same day**
 (ADR-041) — both runtime-image-first, the second with a re-quiesce before the
-preflight. **All Wave-B migrations are deployed; none is queued.**
+preflight. **0021 (the human counterparty lane, ADR-042) is MERGED and QUEUED —
+not deployed.** Its ceremony is `docs/ops/wave-b-0021-ceremony-runbook.md`: purely
+additive, so **no quiescence and no runtime redeploy** (the runtime cannot call
+the verb). **Gate K's Bee Creative carry-down is blocked on it.**
 
 **Gates CLOSED on real evidence.** **O + K** (Rome Secretary end to end through the
 product; kill-mid-interview proven IN PRODUCTION; carry-down ties to the sen; re-run
@@ -123,10 +126,23 @@ wrote zero). **W2 claim (1) + (2)-structural** (audited on the live catalog; WB-
 interim allowance expired when 0019 removed the veto). **S deferred on hard evidence**
 (no MyInvois artifact exists in the corpus).
 
-What remains of Wave B is **operating, not building**: **W2's three journey-only
-claims** (they need a real wake credential and a real draft), **Gate F** on Rome Public
-Advisory, the **Bee Creative** run for **P / L / R2 / K**, and two owner rulings —
-**Gate P's proof standard** and the **B-12 seeding period**. Every gate journey pins to
-**20 migrations · v27** (WB-R24).
+**Both owner rulings are IN** (WB-R28: Gate P's FRP/FX/personal-name proof accepted,
+with the receipt required to say exactly what it is; WB-R29: B-12 seeds BEFORE
+2025-02-04, no deletion). What remains of Wave B is mostly **operating**: **W2's three
+journey-only claims** (they need a real wake credential and a real draft), **Gate F** on
+Rome Public Advisory (**BLOCKED on owner provisioning** — a membership-free auth account,
+a fresh admission token, real particulars; WB-R30), and the **Bee Creative** run for
+**P / L / R2 / K**. Gate journeys pin to **20 migrations · v27** (WB-R24) — re-pin to 21
+once the 0021 ceremony runs.
+
+**One genuine build item is logged and unfixed: the `opening_tb.line` producer.** The
+opening parser (`packages/runtime/lib/opening-parse.mjs`) reads only
+`document_regions.field_path='opening_tb.line'` and **nothing in the pipeline emits it**,
+so the document-tied carry-down has never worked on any client — Bee Creative's accounts
+extracted perfectly (153 regions, both tables recognised) and still returned
+`no_opening_tb_lines`. Two interview findings need an **`interview_v2`** ceremony (all
+three interview files are freeze-locked): **F1** the SSM validator rejects both printed
+forms of a sole proprietorship's ROBA identity; **F2** `framework` offers only
+MPERS/MFRS, neither of which a non-company entity can honestly claim.
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**

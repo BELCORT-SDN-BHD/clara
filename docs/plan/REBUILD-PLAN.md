@@ -82,15 +82,31 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > with a re-quiesce before the preflight; 11/11 post-verify; 30/30 source pages canonical
 > with zero filename fragments left in wiki bytes; the first post-deploy lint pass
 > superseded all 30 stale `orphan_page` findings. **Live = 20 migrations · runtime v27.**
-> All Wave-B migrations are deployed; none is queued.
 >
-> **Remaining of Wave B — operating, not building:**
-> **W2's remaining three claims**, which need a real wake credential and a real
-> draft — journey work, not a probe; **Gate F** on Rome Public Advisory; the
-> **Bee Creative** run for **P / L / R2 / K** (sole-proprietor CoA support merged,
-> so K is available there as an independent second run on a different entity
-> shape); and owner rulings on **Gate P's proof standard** and the **B-12 seeding
-> period**. Waves **C–G** below are unchanged.
+> **0021 (the human counterparty lane) MERGED 2026-07-26, ceremony NOT YET RUN**
+> (ADR-042, PR #94). Found by the Bee Creative gate, not by review: an opening
+> carry-down seeds payables as `ap_open_item`, which requires a `counterparty_id`,
+> while a counterparty could only be born inside `approve_entry` — so at takeover,
+> before any entry exists, an opening trade creditor was unseedable. The only prior
+> Gate-K run was a company with no payables, so the path had never executed in
+> production. Purely additive, so **no quiescence and no runtime redeploy**
+> (`docs/ops/wave-b-0021-ceremony-runbook.md`).
+>
+> **Remaining of Wave B.** Both owner rulings are IN (WB-R28/R29). **Building:**
+> the **0021 ceremony**, which is the only thing between here and Gate K on Bee
+> Creative. **Operating:** **W2's remaining three claims**, which need a real wake
+> credential and a real draft — journey work, not a probe; **Gate F** on Rome Public
+> Advisory, **blocked on owner account provisioning** (WB-R30), not on engineering;
+> the **Bee Creative** run for **P / L / R2 / K**.
+>
+> **Two findings logged against later waves, not fixed here.** The
+> **`opening_tb.line` producer** does not exist — the opening parser reads a
+> `document_regions.field_path` nothing in the pipeline emits, so the
+> **document-tied** carry-down has never worked on any client (both real seeds are
+> `keyed`). And the interview's SSM validator + `framework` question both assume a
+> **company**, so a sole proprietorship cannot answer either honestly; all three
+> interview files are freeze-locked, so the fix is an **`interview_v2`** ceremony.
+> Waves **C–G** below are unchanged.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
