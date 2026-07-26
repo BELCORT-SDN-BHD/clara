@@ -91,25 +91,9 @@ export async function putCanonical(filePath, key, mime) {
     body: createReadStream(filePath),
     duplex: "half",
   });
-  // SUPABASE WRAPS ITS REAL STATUS INSIDE THE BODY. A duplicate object comes back as
-  // **HTTP 400** with `{"statusCode":"409","error":"Duplicate",...}`, and a permission failure
-  // as HTTP 400 with `{"statusCode":"403",...}`. So `response.status === 409` was NEVER true and
-  // the re-upload path below was unreachable: every duplicate became a fatal `storage_error`.
-  // Found 2026-07-26 by re-uploading an already-ingested document, which is the ordinary case —
-  // a human re-dropping a file they already sent. Read the body ONCE and branch on what it says.
-  if (response.ok) return { created: true, existed: false };
-  const body = await response.text().catch(() => "");
-  let inner = null;
-  try { inner = JSON.parse(body); } catch { /* not JSON — fall through to the raw body */ }
-  if (response.status === 409 || String(inner?.statusCode) === "409" || inner?.error === "Duplicate") {
-    return { created: false, existed: true };
-  }
-  // Carry the BODY, not just the HTTP status: `(400)` alone cannot distinguish a duplicate from
-  // a permission denial from a bad key, and discarding it cost a full day of diagnosis.
-  throw new StorageError(
-    "storage_error",
-    `Storage upload failed (${response.status})${body ? ` ${body.slice(0, 200)}` : ""}`,
-  );
+  if (response.status === 409) return { created: false, existed: true };
+  if (!response.ok) throw new StorageError("storage_error", `Storage upload failed (${response.status})`);
+  return { created: true, existed: false };
 }
 
 async function responseFor(key) {
