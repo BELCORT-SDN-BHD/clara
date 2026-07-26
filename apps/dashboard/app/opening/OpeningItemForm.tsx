@@ -22,6 +22,7 @@ import {
   parseCents,
   type LegInput,
 } from "./openingPayloads";
+import { CounterpartyPicker } from "./CounterpartyPicker";
 import { draftOpeningItem, seedFixedAsset, getActiveFilingResolution } from "../shared/openingApi";
 import type { PgrestError } from "../shared/wire";
 import styles from "./opening.module.css";
@@ -218,10 +219,18 @@ export function OpeningItemForm({
           </label>
         ) : null}
         {isSubledger ? (
-          <label className={styles.field}>
-            <span className={styles.fieldLabel}>counterparty id</span>
-            <input className={styles.input} value={counterparty} onChange={(e) => setCounterparty(e.target.value)} aria-label="Counterparty id" />
-          </label>
+          // 0021. This was a bare "counterparty id" text box expecting a pasted uuid, which
+          // at takeover nobody could fill: a counterparty could only come into existence
+          // inside approve_entry, i.e. by approving a coded entry, and an opening carry-down
+          // has none. The picker lists the client's live parties and mints a new one through
+          // the governed verb. AP names a VENDOR, AR a CUSTOMER — kind-scoped, both indexes.
+          <CounterpartyPicker
+            token={token}
+            clientId={clientId}
+            kind={kind === "ar_open_item" ? "customer" : "vendor"}
+            value={counterparty}
+            onChange={setCounterparty}
+          />
         ) : null}
         {kind === "bank_uncleared" || isSubledger ? (
           <label className={styles.field}>

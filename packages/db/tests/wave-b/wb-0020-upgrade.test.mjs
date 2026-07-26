@@ -6,28 +6,27 @@
 // decides whether the live deploy is safe.
 //
 // WHAT IT DRIVES, end to end:
-//   1. migrate 0001–0019 only, and build TWO deterministic source pages the pre-A7 way:
-//        (a) one published through a non-null p_note  — the M1 channel,
-//        (b) one whose document's original_filename is prose — the M2 channel A6 missed.
+//   1. migrate 0001–0019 only, and build TWO deterministic source pages the pre-A7 way: (a) one
+//      published through a non-null p_note (the M1 channel), (b) one whose document's
+//      original_filename is prose (the M2 channel A6 missed).
 //      Both look identical to A6's bridge: wiki_log action='ingest', synthesis='deterministic',
 //      no action='publish' row. Both would have taken the cap + orphan exemptions.
-//   2. the shipped READ-ONLY probe reports BOTH halves: non-canonical bytes AND a stale
-//      reconstruction spine.
+//   2. the shipped READ-ONLY probe reports BOTH halves: bytes AND a stale spine.
 //   3. apply 0020 -> it must ABORT on direction 4, naming both pages and the shipped preflight.
 //   4. run the shipped AUDITED preflight -> apply 0020 again -> it must SUCCEED.
 //   5. REBUILD A SHADOW INDEX FROM EVENTS ALONE and compare EVERY logical field against the
 //      live tables. This is the W4/P17 invariant, driven across a correction.
-//   6. the preimage is preserved (not erased) in the correction envelope, and the preflight is
+//   6. the preimage is preserved (not erased) in the correction envelope; the preflight is
 //      idempotent: a second run appends nothing and changes nothing.
-//   7. the pre-0020 noted op key still REPLAYS its stored receipt, a FRESH noted call is
-//      refused, and no prose survives anywhere in the namespace.
+//   7. the pre-0020 noted op key still REPLAYS its receipt, a FRESH noted call is refused, and
+//      no prose survives anywhere in the namespace.
 //
 // The SECOND test is the cell that would have caught ratchet R4 F1: on its OWN corpus it runs
 // A7's ORIGINAL two-`update` remediation verbatim, shows the rows go canonical while the
 // append-only spine stays stale, shows the event-only rebuild then DISAGREES with the live rows
-// by restoring the caller prose, and proves the apply REFUSES that state on direction 5.
-// Before amendment A8 the apply succeeded there. The THIRD test is the negative control: a
-// clean pre-0020 corpus upgrades untouched, with no remediation and no correction envelope.
+// by restoring the caller prose, and proves the apply REFUSES that state on direction 5 (before
+// amendment A8 it succeeded). The THIRD is the negative control: a clean pre-0020 corpus
+// upgrades untouched, with no remediation and no correction envelope.
 //
 // This is the ONLY 0020 test that RESETS the database (drops schema clara), so it is GATED
 // behind CLARA_RIG_ALLOW_RESET=1 and MUST run ALONE — node --test runs files CONCURRENTLY
@@ -35,9 +34,8 @@
 // normal run — LOUDLY, on stdout, so a skip is never mistaken for a pass (ratchet R4 F2).
 // CI runs it FOR REAL in its own throwaway database ("Wave-B 0020 A7/A8 upgrade drill" in
 // .github/workflows/ci.yml), beside the C9 / document-pipeline / coding-floor drills.
-// Locally, against an isolated database:
-//   PGDATABASE=clara_wb20_upgrade CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
-//     CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
+// Locally: PGDATABASE=clara_wb20_upgrade CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1
+//   CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
@@ -48,9 +46,10 @@ import {
 } from "./wb-0020-helpers.mjs";
 // The shared apparatus — split out when this file passed the repo's 500-line ceiling.
 import {
-  MIG_DIR, NOTE_PROSE, NAME_PROSE, exportPre0020, deploySql, probe, runPreflight,
+  UPGRADE_DIR, NOTE_PROSE, NAME_PROSE, exportPre0020, deploySql, probe, runPreflight,
   A7_ROWS_ONLY_REMEDIATION, skipUnlessReset, buildPre0020Corpus,
-  rebuildIndexFromEvents, assertRebuildMatchesLive,
+  rebuildIndexFromEvents, assertRebuildMatchesLive, injectDirections123,
+  assertAppliedThrough0020, assertRolledBackBefore0020,
 } from "./wb-0020-upgrade-helpers.mjs";
 
 after(async () => { printLaneNotes("wb-0020-upgrade"); await endPool(); });
@@ -113,7 +112,7 @@ test("[0020 A7/A8 upgrade]: both prose channels ABORT the apply; the audited pre
   // ---- 2. the apply ABORTS, fail-closed, naming both offenders ---------------
   let aborted = null;
   try {
-    await migrate({ dir: MIG_DIR, log: () => {} });
+    await migrate({ dir: UPGRADE_DIR, log: () => {} });
   } catch (e) { aborted = e; }
   assert.ok(aborted, "0020 REFUSED to apply over a corpus it cannot reconstruct");
   const msg = String(aborted.message ?? aborted);
@@ -125,8 +124,7 @@ test("[0020 A7/A8 upgrade]: both prose channels ABORT the apply; the audited pre
     "…and names the NOTED page (M1)");
   assert.match(msg, new RegExp(`sources/${named.documentId}`),
     "…and names the PROSE-FILENAME page (M2) — one predicate, both channels");
-  const stillAt19 = await rootQuery("select count(*)::int n from clara.schema_migrations");
-  assert.equal(stillAt19.rows[0].n, 19, "the migration rolled back whole: still 19 applied");
+  await assertRolledBackBefore0020("the migration rolled back whole");
 
   // ---- 3. the SHIPPED AUDITED PREFLIGHT, run verbatim ------------------------
   await runPreflight();
@@ -140,9 +138,8 @@ test("[0020 A7/A8 upgrade]: both prose channels ABORT the apply; the audited pre
   assert.equal(envelopes.length, 2, "one correction envelope per affected VERSION (two pages, one version each)");
 
   // ---- 4. the apply now SUCCEEDS ---------------------------------------------
-  await migrate({ dir: MIG_DIR, log: () => {} });
-  const n20 = await rootQuery("select count(*)::int n from clara.schema_migrations");
-  assert.equal(n20.rows[0].n, 20, "0020 applied once BOTH the corpus and its spine reconstruct");
+  await migrate({ dir: UPGRADE_DIR, log: () => {} });
+  await assertAppliedThrough0020("0020 applies once BOTH the corpus and its spine reconstruct");
 
   // ---- 4b. THE SHIPPED POST-VERIFY FILE, run verbatim on the upgraded database.
   // This is the artifact the owner runs at step 7 of the ceremony. Running it here is the
@@ -246,10 +243,10 @@ test("[0020 A7/A8 upgrade]: both prose channels ABORT the apply; the audited pre
 
   noteLane("[A7/A8] the 19->20 fixture drives BOTH content channels A6 left open (p_note and"
     + " original_filename), proves the apply is fail-closed on a corpus that cannot be"
-    + " reconstructed, proves the shipped audited preflight corrects the rows AND the"
-    + " append-only reconstruction spine and is idempotent, preserves the preimage the bare"
-    + " UPDATE would have destroyed, rebuilds the index from events ALONE and compares every"
-    + " logical field, and proves the op-key replay A6's ordering broke");
+    + " reconstructed, proves the shipped audited preflight corrects the rows AND the append-only"
+    + " reconstruction spine and is idempotent, preserves the preimage the bare UPDATE would have"
+    + " destroyed, rebuilds the index from events ALONE and compares every logical field, and"
+    + " proves the op-key replay A6's ordering broke");
 });
 
 test("[0020 A8 · ratchet R4 F1]: A7's ROWS-ONLY remediation is REFUSED — canonical rows over a stale reconstruction spine cannot apply", async (t) => {
@@ -299,7 +296,7 @@ test("[0020 A8 · ratchet R4 F1]: A7's ROWS-ONLY remediation is REFUSED — cano
 
   let aborted = null;
   try {
-    await migrate({ dir: MIG_DIR, log: () => {} });
+    await migrate({ dir: UPGRADE_DIR, log: () => {} });
   } catch (e) { aborted = e; }
   assert.ok(aborted, "[A8] 0020 REFUSED a rows-only remediation — the F1 regression is fail-closed");
   const msg = String(aborted.message ?? aborted);
@@ -307,17 +304,15 @@ test("[0020 A8 · ratchet R4 F1]: A7's ROWS-ONLY remediation is REFUSED — cano
   assert.match(msg, /reconstruction event/,
     "…which names the append-only spine as the thing that is stale");
   assert.match(msg, /wave-b-0020-a7-preflight\.sql/, "…and names the audited preflight");
-  assert.equal((await rootQuery("select count(*)::int n from clara.schema_migrations")).rows[0].n, 19,
-    "still 19 applied: the apply rolled back whole");
+  await assertRolledBackBefore0020("the apply rolled back whole");
 
   // the preflight recovers this state too — it corrects the SPINE even when the rows are
   // already canonical, because its predicate is "not canonical in the rows OR in the spine".
   await runPreflight();
   const p2 = await probe();
   assert.equal(p2.needs_canonicalization, 0, "the preflight repairs a rows-only remediation");
-  await migrate({ dir: MIG_DIR, log: () => {} });
-  assert.equal((await rootQuery("select count(*)::int n from clara.schema_migrations")).rows[0].n, 20,
-    "…and the apply then succeeds");
+  await migrate({ dir: UPGRADE_DIR, log: () => {} });
+  await assertAppliedThrough0020("…and the apply then succeeds");
   await assertRebuildMatchesLive(w.firms.A, { expectCorrected: true });
 
   // NAMED HONESTLY, because the owner may already have run A7's `update` before reading A8:
@@ -380,9 +375,8 @@ test("[0020 A7/A8 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes
     (await rootQuery("select count(*)::int n from clara.domain_events where event_type='wiki.page_canonicalized'")).rows[0].n,
     0, "the preflight appended NO envelope against a clean corpus (row-scoped, not blanket)");
 
-  await migrate({ dir: MIG_DIR, log: () => {} });
-  const n20 = await rootQuery("select count(*)::int n from clara.schema_migrations");
-  assert.equal(n20.rows[0].n, 20, "0020 applied clean over the canonical corpus — no remediation needed");
+  await migrate({ dir: UPGRADE_DIR, log: () => {} });
+  await assertAppliedThrough0020("0020 applies clean over the canonical corpus — no remediation needed");
 
   const after = await rootQuery(
     `select p.title, v.content from clara.wiki_pages p
@@ -410,19 +404,18 @@ test("[0020 A7/A8 upgrade]: a CLEAN pre-0020 corpus (canonical bytes, null notes
 });
 
 // ===========================================================================
-// [RATCHET R5] THE PROBE ITSELF — the artifact whose output decides whether a human runs
-// the remediation. Empirical R5 drove it on a rig and found three gaps, all of the same
-// class this ratchet keeps finding: THE DOCUMENT CLAIMED A PROPERTY THE CODE DID NOT HAVE.
+// [RATCHET R5] THE PROBE ITSELF — the artifact whose output decides whether a human runs the
+// remediation. Empirical R5 drove it on a rig and found three gaps, all of the class this
+// ratchet keeps finding: THE DOCUMENT CLAIMED A PROPERTY THE CODE DID NOT HAVE.
 //   (C) a SILENT FALSE-CLEAN — under an RLS-filtered role every count read zero, which is
 //       byte-identical to a clean database, in the one artifact a human trusts to say
 //       "nothing to do";
 //   (A) the header promised "will 0020 abort and on how many pages" while computing only
 //       directions 4 and 5 — a direction-1 violation read CLEAN and the apply then failed;
-//   (B) §11's A8-R1 ruling said "the probe reports the population so a gap is visible
-//       rather than silent" — and the shipped file did not report it.
-// This cell pins the BEHAVIOUR, not the claim. Each half is proven non-vacuous: the
-// violator is injected, the probe names it, and the migration then fails on exactly the
-// direction the probe named.
+//   (B) §11's A8-R1 ruling said "the probe reports the population so a gap is visible rather
+//       than silent" — and the shipped file did not report it.
+// This cell pins BEHAVIOUR, not the claim, and each half is proven non-vacuous: the violator
+// is injected, the probe names it, the migration then fails on exactly that direction.
 // ===========================================================================
 test("[0020 · ratchet R5]: the PROBE refuses an RLS-blinded read, reports ALL FIVE bridge directions, and makes the A8-R1 completeness gap visible", async (t) => {
   if (skipUnlessReset(t)) return;
@@ -461,35 +454,7 @@ test("[0020 · ratchet R5]: the PROBE refuses an RLS-blinded read, reports ALL F
   // ---- (A) directions 1, 2 and 3 — the three the shipped file did not compute. Each is a
   // fact about how a page was CREATED; wiki_log is append-only, so NO script can repair
   // them, which is why the probe's remedy column says INVESTIGATE. -----------------------
-  const inj = await rootQuery(`
-    do $r5$
-    declare f uuid; c uuid; p uuid; src uuid; d uuid := gen_random_uuid(); ct text; sha text;
-    begin
-      select firm_id, client_id, id into f, c, src
-        from clara.wiki_pages where slug like 'sources/%' order by slug limit 1;
-      ct := 'Source document: '||d::text;
-      sha := encode(sha256(convert_to(ct,'UTF8')),'hex');
-      -- D1: a sources/ page with CANONICAL bytes and no deterministic-ingest log row. It is
-      -- invisible to directions 4 and 5 by construction — that is the whole point.
-      insert into clara.wiki_pages(firm_id,client_id,slug,page_kind,title)
-        values (f,c,'sources/'||d::text,'profile','Source: '||d::text) returning id into p;
-      insert into clara.wiki_page_versions(page_id,firm_id,client_id,version_n,content,
-          content_sha256,storage_key,size_bytes,state,synthesis)
-        values (p,f,c,1,ct,sha,'firms/'||f::text||'/wiki/'||c::text||'/'||sha||'.md',
-                octet_length(ct),'published','deterministic');
-      -- D2: a deterministic-ingest log row on a page OUTSIDE the reserved namespace.
-      insert into clara.wiki_pages(firm_id,client_id,slug,page_kind,title)
-        values (f,c,'r5-outside-ns','profile','Outside') returning id into p;
-      insert into clara.wiki_log(firm_id,client_id,page_id,action,actor_kind)
-        values (f,c,p,'ingest','runtime');
-      -- D3: a MODEL-PATH publication row inside the reserved namespace.
-      insert into clara.wiki_log(firm_id,client_id,page_id,action,actor_kind)
-        values (f,c,src,'publish','runtime');
-    end $r5$;
-    select (select slug from clara.wiki_pages where slug like 'sources/%'
-             and not exists(select 1 from clara.wiki_log l where l.page_id=wiki_pages.id
-                             and l.action='ingest')) as d1_slug`);
-  const d1Slug = (Array.isArray(inj) ? inj.at(-1) : inj).rows[0].d1_slug;
+  const d1Slug = await injectDirections123();
 
   const p = await probe();
   assert.equal(p.d1_sources_page_without_ingest_log, 1, "direction 1 is REPORTED");
@@ -514,12 +479,11 @@ test("[0020 · ratchet R5]: the PROBE refuses an RLS-blinded read, reports ALL F
     + " precisely because wiki_log is append-only and no script can undo a creation fact");
 
   // and the apply fails on EXACTLY the direction the probe named.
-  const err = await migrate({ dir: MIG_DIR, log: () => {} }).then(() => null, (e) => e);
+  const err = await migrate({ dir: UPGRADE_DIR, log: () => {} }).then(() => null, (e) => e);
   assert.ok(err, "0020 ABORTS — the probe's prediction, confirmed by the migration itself");
   assert.match(err.message, /no deterministic-ingest log row/,
     "…on direction 1, the one the old probe could not see");
-  assert.equal((await rootQuery("select count(*)::int n from clara.schema_migrations")).rows[0].n,
-    19, "…and rolled back — the database is still at 19");
+  await assertRolledBackBefore0020("…and rolled back");
 
   // ---- (B) the A8-R1 completeness population, which §11 CLAIMED the probe reported. ----
   // The D1 page's version carries no publication envelope at all: direction 5 cannot see it

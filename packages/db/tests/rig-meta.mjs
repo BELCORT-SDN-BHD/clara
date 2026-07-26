@@ -137,6 +137,14 @@ const WAVE_B_0020_RUNTIME_FNS = [
 // the only live writer of that stamp was the LEGACY grant_client_egress, which in the same call
 // mints a purpose-blind consent authorizing invoice-facts egress — so the runbook's step 1 could
 // not be run at all for a client who consented ONLY to wiki synthesis.
+// 0021 [§the human counterparty lane] — the standalone counterparty writer. Before it, a
+// counterparty could only be born inside approve_entry's proposed_counterparty path, so a
+// carry-down could not seed opening payables/receivables at takeover (both open-item kinds
+// require a counterparty_id and no entry exists yet). Found on the Bee Creative live-gate
+// run; the prior Gate-K client had no payables, so ap_open_item had never executed.
+// HUMAN LANE ONLY — bookkeeper floor, same as upsert_account: reference data, not money.
+const WAVE_B_0021_HUMAN_FNS = ["create_counterparty"];
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -154,6 +162,7 @@ const WAVE_B_0020_UNGRANTED_FNS = [
 ];
 export const WAVE_B_0020_COHORT = [
   ...WAVE_B_0020_RUNTIME_FNS, ...WAVE_B_0020_HUMAN_FNS, ...WAVE_B_0020_UNGRANTED_FNS,
+  ...WAVE_B_0021_HUMAN_FNS,
 ];
 
 export const ALLOWED = {
@@ -171,6 +180,7 @@ export const ALLOWED = {
     ...WAVE_A2_HUMAN_FNS, // [WAVE-A2 §6/§7] standing-rules writers + rule/notification/receipt reads
     ...WAVE_A21_HUMAN_FNS, // 0016 [A2.1 §C] compliance-watch human writers + set_document_kind
     ...WAVE_B_0020_HUMAN_FNS, // 0020 [§7.1] typed-consent owner RPCs (owner floor body-enforced)
+    ...WAVE_B_0021_HUMAN_FNS, // 0021 the human counterparty lane (bookkeeper floor)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
