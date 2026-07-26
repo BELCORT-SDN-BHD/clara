@@ -107,6 +107,18 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > **company**, so a sole proprietorship cannot answer either honestly; all three
 > interview files are freeze-locked, so the fix is an **`interview_v2`** ceremony.
 > Waves **C–G** below are unchanged.
+>
+> **STATUS (2026-07-27): WAVE B IS CLOSED ON INTENT (ADR-046).** Closed on real evidence:
+> O ××2 · K(keyed) ××2 · B-12 · W2 (1)+(2)-structural · R2 (1)+(2) · **F** (ADR-045 — firm
+> `39008536` ROME PUBLIC ADVISORY born via the durable 11-Q). Deferred with cause: S / L /
+> K-document-tied → **Phase 5 (synthetic by design)**; R2 (3) / W2 journeys / the first
+> production autopost → the operating runway (real future documents). **The sole engineering
+> between here and Wave C is the extraction slice** — `docs/plan/extraction-slice-contract.md`
+> (DRAFT v0.1, awaiting the owner's grilling): re-extract verb + governed high-stakes verb +
+> the sum-of-stated-components sales tie (0022) → deterministic totals reader → explicit
+> `anchor_missing` guard → **two-reader corroboration LAST and ALONE**. Rationale + refusal
+> record: ADR-044/045/046, `docs/plan/research/wave-b/gate-p-build-refused-2026-07-27.md`,
+> `…/vision-alignment-audit-2026-07-27.md`.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
