@@ -244,6 +244,82 @@ test("[XG4] the fact-state helper is UNTOUCHED — components never enter the co
   assert.equal(Number(state.tax_total_cents), tax, "…including the tax total");
 });
 
+test("[X3/sign] a NEGATIVE component is refused at the write boundary — the convention is a control, not a habit", async () => {
+  gate();
+  // ADR-047 says "every component is stored positive as printed". That was written as an
+  // EMITTER convention, and an emitter convention is not a control. `_normalize_invoice_cents`
+  // (0009:110-121) accepts BOTH `-5.00` and the accounting parenthesis form `(5.00)`, so a
+  // negative discount is persistable — and because the identity SUBTRACTS the discount, a
+  // negative one turns that minus into a plus and TIES a gross the document does not state.
+  const firm = await firmOf(CLIENT);
+  const mk = async () => {
+    const cited = await seedCitedDocument(W.users.alice, {
+      firm, client: CLIENT, quote: rm(11100), kind: "invoice" });
+    await enqueueInvoiceFacts(cited.documentId);
+    const task = await invoiceFactsTask(cited.documentId);
+    await claimTask(task.id, { egressApproved: true });
+    return task.id;
+  };
+  // The exact exploit: net 100.00 + tax 6.00 - (-5.00) = 111.00 ties a stated gross of
+  // 111.00, while the document's own face reads 100.00 + 6.00 - 5.00 = 101.00.
+  assert.equal(10000 + 600 - (-500), 11100, "precondition: the forged identity balances arithmetically");
+  assert.equal(10000 + 600 - 500, 10100, "…while the document's signed arithmetic says 101.00");
+  for (const [label, path, raw] of [
+    ["a minus-signed discount", COMPONENT.discount, "-5.00"],
+    ["a parenthesized discount", COMPONENT.discount, "(5.00)"],
+    ["a negative service charge", COMPONENT.serviceCharge, "-3.77"],
+    ["a negative delivery charge", COMPONENT.delivery, "-15.00"],
+  ]) {
+    const fields = componentFields({ gross: 11100, net: 10000, tax: 600 });
+    fields.push(factField(path, raw, { polygon: [], confidence: 0.9 }));
+    const task = await mk();
+    await assertRaises("CLR10", () => persistInvoiceFacts(task, fields), label);
+    await failInvoiceFacts(task, "engine_error");
+  }
+  // A ZERO component is not negative and stays acceptable — the guard is a sign check, not
+  // a "must be material" check.
+  const zero = componentFields({ gross: 10600, net: 10000, tax: 600, discount: 0 });
+  const ok = await persistInvoiceFacts(await mk(), zero);
+  assert.equal(ok.status, "done", "a stated ZERO discount still persists");
+});
+
+test("[X3/sign] the BELT holds at the floor's read site, whatever wrote the region", async () => {
+  gate();
+  // The write boundary is the buckle; this is the belt. It covers what the write boundary
+  // cannot: a region written before 0022, a root/superuser insert, or a future writer that
+  // forgets. The cell writes the negative region the way the write boundary would never
+  // allow, then proves the sales floor still refuses to post on it.
+  const net = 10000, tax = 600, gross = 11100;
+  const cited = await salesDoc({ gross, net, tax });
+  const ext = (await rootQuery(
+    `select id from clara.document_extractions where document_id=$1 and engine_kind='invoice_facts'
+      and status='done' order by version_n desc limit 1`, [cited.documentId])).rows[0].id;
+  await rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,
+        text_content,engine_confidence,monetary_raw,monetary_cents)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,'-5.00',0.9,'-5.00',-500)`,
+    [await firmOf(CLIENT), ext, COMPONENT.discount]);
+
+  // The forged entry: AR 111.00 / revenue 105.00 / SST 6.00 — balanced, correctly shaped,
+  // and tying against the forged identity. Before the belt this POSTED RM111.00 for a
+  // RM101.00 document.
+  const res = await approveSales(cited, [arLine(gross), revLine(gross - tax), sstLine(tax)]);
+  assert.ok(res.error, "an entry resting on a NEGATIVE component never posts");
+  assert.equal(res.error.code, "CLR21", `the refusal is CLR21 (got ${res.error.code}: ${res.error.message})`);
+  assert.equal(reasonOf(res.error), "tax_tie_failed", "…named tax_tie_failed");
+  // Pin WHICH refusal fired. Without this the cell would still pass if some unrelated floor
+  // happened to reject the entry, and it would go on passing after someone deleted the
+  // belt. The arithmetic is the reason it matters: with the negative discount, tie 2 reads
+  // 10000 + 600 - (-500) = 11100 = gross and tie 3 reads 10500 = gross - tax, so BOTH ties
+  // are satisfied and nothing downstream would have caught this. The belt is the only thing
+  // standing between this document and a RM111.00 post.
+  assert.match(res.error.message, /component is negative/,
+    "…and it is the SIGN BELT that refused, not an unrelated floor");
+  assert.equal(
+    (await rootQuery("select status from clara.journal_entries where id=$1", [res.entry])).rows[0].status,
+    "draft", "…and RM111.00 was not posted for a RM101.00 document");
+});
+
 test("[X3] the WRITE boundary guards the new components exactly as it guards the old ones", async () => {
   gate();
   const firm = await firmOf(CLIENT);

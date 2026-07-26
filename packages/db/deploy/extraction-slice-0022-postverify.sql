@@ -146,13 +146,24 @@ begin
   if v_src is null then
     raise exception 'POST-VERIFY 4: execute_rule_post is GONE';
   end if;
-  if position('X4 DARK GUARD' in v_src) = 0 then
-    raise exception 'POST-VERIFY 4: the X4 dark guard is NOT in execute_rule_post — the OCR-sales anchor lane may be OPEN without X5''s review';
+  -- Assert the FUNCTIONAL SHAPE, not the marker comment. `position('X4 DARK GUARD')` alone
+  -- passes an edit that flipped `if true` to `if false` and left the comment above it —
+  -- i.e. it would certify, on a live deploy, a posting lane that had been silently opened.
+  -- The literal below is the executable disjunct together with its marker, two spaces
+  -- exactly as written in 0022, so the comment can never vouch for the code.
+  if position('if true  -- X4 DARK GUARD' in v_src) = 0 then
+    raise exception 'POST-VERIFY 4: the X4 dark guard DISJUNCT is not in execute_rule_post — the OCR-sales anchor lane may be OPEN without X5''s review (a surviving marker comment is not the guard)';
   end if;
   if position('invoice.service_charge' in v_src) = 0
      or position('invoice.discount' in v_src) = 0
      or position('invoice.delivery' in v_src) = 0 then
     raise exception 'POST-VERIFY 4: the corrected component identity is missing from the anchor block';
+  end if;
+  -- The sign belt inside the anchor block: a NEGATIVE discount turns the identity's
+  -- subtraction into an addition and forges a larger gross that ties. It must be present
+  -- BEFORE X5 removes the dark guard, or the lane opens onto a forgeable identity.
+  if position('coalesce(v_sc,0)<0' in v_src) = 0 then
+    raise exception 'POST-VERIFY 4: the anchor block lost its negative-component belt — X5 would open the lane onto a forgeable identity';
   end if;
   if position('anchor_missing' in v_src)=0 or position('not_corroborated' in v_src)=0
      or position('cn_not_autopostable' in v_src)=0
@@ -194,10 +205,13 @@ end $$;
 
 -- ---------------------------------------------------------------------
 -- 6. THE WRITE BOUNDARY GUARDS THE COMPONENTS EVERYWHERE. Three new field_paths
---    must appear in ALL FOUR of persist_invoice_facts' enumerations (allowlist,
---    normalize-to-cents, duplicate-forfeit, present-but-unparseable) — one
---    missing set is the silent-zero defect. >=4 occurrences per path proves it
---    without depending on formatting.
+--    must appear in ALL SIX of persist_invoice_facts' enumerations (allowlist,
+--    normalize-to-cents, monetary_raw, duplicate-forfeit, present-but-unparseable,
+--    NON-NEGATIVE) — one missing set is either the silent-zero defect or, for the
+--    last one, the forged-identity defect: `_normalize_invoice_cents` accepts
+--    '-5.00' and '(5.00)', and the identity SUBTRACTS the discount, so a negative
+--    discount ties a gross the document does not state. The floor is the EXACT
+--    live count (6), not a margin: at >=4 two enumerations could vanish unseen.
 -- ---------------------------------------------------------------------
 do $$
 declare v_src text;
@@ -207,15 +221,18 @@ begin
   if v_src is null then
     raise exception 'POST-VERIFY 6: persist_invoice_facts is GONE';
   end if;
-  if (length(v_src) - length(replace(v_src, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 4
-     or (length(v_src) - length(replace(v_src, 'invoice.discount', ''))) / length('invoice.discount') < 4
-     or (length(v_src) - length(replace(v_src, 'invoice.delivery', ''))) / length('invoice.delivery') < 4 then
-    raise exception 'POST-VERIFY 6: a component field_path is missing from one of the four write-boundary enumerations (silent-zero defect)';
+  if (length(v_src) - length(replace(v_src, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 6
+     or (length(v_src) - length(replace(v_src, 'invoice.discount', ''))) / length('invoice.discount') < 6
+     or (length(v_src) - length(replace(v_src, 'invoice.delivery', ''))) / length('invoice.delivery') < 6 then
+    raise exception 'POST-VERIFY 6: a component field_path is missing from one of the SIX write-boundary enumerations (silent-zero or forged-identity defect)';
+  end if;
+  if position('must not be negative' in v_src) = 0 then
+    raise exception 'POST-VERIFY 6: persist_invoice_facts lost the non-negative component guard — a negative discount can forge the sales identity';
   end if;
   if position('chr(1)' in v_src)=0 or position('monetary value is malformed' in v_src)=0 then
     raise exception 'POST-VERIFY 6: persist_invoice_facts lost a retained 0015/0016 refusal';
   end if;
-  raise notice 'OK 6  all three components guarded in all four write-boundary enumerations';
+  raise notice 'OK 6  all three components guarded in all six write-boundary enumerations (incl. non-negative)';
 end $$;
 
 -- ---------------------------------------------------------------------

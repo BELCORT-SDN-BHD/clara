@@ -213,6 +213,54 @@ test("[0022] an ACTIVE task is RETURNED, never double-queued", async () => {
     + "simply pressed the button twice");
 });
 
+test("[0022] losing the version to a TERMINAL winner retries — never a receipt with no task", async () => {
+  gate();
+  // The over-budget race, reduced to its deterministic core. Two concurrent callers compute
+  // the same next version; A wins the insert, hits CLR18, and marks its OWN row
+  // failed/budget in the same transaction. B loses `on conflict do nothing` and re-selects
+  // ACTIVE tasks — and finds nothing, because A's row is already terminal. The single-shot
+  // version of this code fell through with a NULL task and finished a receipt carrying no
+  // task, no version and no status, memoized under B's op_key FOREVER.
+  //
+  // The schedule is forced by pre-planting the terminal winner rather than by racing two
+  // sessions: a real race cannot be made deterministic here (the loser's behaviour depends
+  // on commit interleaving), and a flaky cell proving a money-adjacent invariant is worth
+  // less than a deterministic one that drives the identical code path.
+  const doc = await extractedDoc(W.users.alice, { client: W.clients.A1 });
+  const tasks = await laneTasks(doc.documentId);
+  const nextVersion = Math.max(...tasks.map((t) => t.version_n)) + 1;
+  const firm = await rootQuery("select firm_id from clara.documents where id=$1", [doc.documentId]);
+  // The winner: terminal, never claimed, exactly the shape _reserve_processing_call's CLR18
+  // branch leaves behind (workflow_run_id null, started_at null, error_code 'budget').
+  await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status,error_code,finished_at)
+     values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,$3,'invoice_facts','failed','budget',now())`,
+    [firm.rows[0].firm_id, doc.documentId, nextVersion]);
+
+  const res = await requestReextraction(W.users.bob, {
+    document: doc.documentId, reason: "after the budget failure", opKey: opk("rex") });
+
+  assert.ok(res.task_id, "the receipt names a task — NOT the malformed {document_id, reused} shell");
+  assert.ok(res.version_n, "…and a version");
+  assert.ok(res.status, "…and a status");
+  assert.equal(res.version_n, nextVersion + 1,
+    "the retry recomputed the version ABOVE the terminal winner rather than colliding again");
+  assert.equal(res.status, "queued", "…and minted a live task");
+  assert.equal(res.reused, false, "…genuinely fresh, not a recovered in-flight task");
+
+  const committed = await laneTasks(doc.documentId);
+  const fresh = committed.find((t) => t.id === res.task_id);
+  assert.equal(fresh.version_n, nextVersion + 1, "the committed row carries that version");
+  assert.equal(fresh.status, "queued", "…and is queued");
+  // The op receipt must hold the SAME complete shape — that is the thing that was permanent.
+  const receipt = await rootQuery(
+    "select result from clara.op_receipts where fn='request_reextraction' and result->>'task_id'=$1",
+    [res.task_id]);
+  assert.equal(receipt.rows.length, 1, "one stored receipt names the task");
+  assert.ok(receipt.rows[0].result.version_n, "…and the STORED receipt is complete too, not a shell");
+});
+
 test("[0022] NO machine lane can request a re-extraction — this is the whole cost bound", async () => {
   gate();
   // ADR-047 Q4 declined a numeric per-document cap: the per-page cost is noise and a cap is

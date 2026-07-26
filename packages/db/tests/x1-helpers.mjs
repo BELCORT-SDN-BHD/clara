@@ -19,6 +19,11 @@ import {
 } from "./a21-helpers.mjs";
 
 export * from "./a21-helpers.mjs";
+// The generic two-session forced-schedule drivers (the wave-a-race precedent: a
+// concurrency cell imports THIS leaf, a non-concurrency cell imports a21-helpers).
+// `holdThenContend` is what turns "the row lock serializes these calls" from a hope about
+// timing into an assertion — it proves the blocked side really blocked, via pg_blocking_pids.
+export { holdThenContend, concurrentTwoSession, waitBlockedBy, sawDeadlock } from "./rig-docs-race.mjs";
 
 // ---------------------------------------------------------------------------
 // Readiness

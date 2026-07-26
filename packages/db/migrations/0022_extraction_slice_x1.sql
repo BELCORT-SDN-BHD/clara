@@ -47,6 +47,19 @@
 --   * `execute_rule_post` — the anchor block's outcome is `anchor_missing` for every
 --     existing OCR-sales document today (because `v_net is null or v_tax is null` is true
 --     29/29) and the dark guard keeps it `anchor_missing` for every FUTURE one until X5.
+--     THE IN-FLIGHT CASE, STATED PRECISELY (raised by adversarial round 1). Per the repo's
+--     binding D1 rule an execution already inside the OLD body finishes on the OLD body;
+--     a `create or replace` cannot reach into it, and this migration's tail can only
+--     inspect the newly installed body. So the guard ALONE does not make an unattended
+--     OCR-sales post impossible at the deploy instant — the STAGING does, and the claim
+--     rests on it: the old anchor block needs `invoice.total_excl_tax` AND
+--     `invoice.tax_total`, those two paths have zero occurrences across all 29 live
+--     extractions, `persist_invoice_facts` is the only writer that can create them and it
+--     is granted to `clara_runtime` alone, and the pre-X2 mapper does not emit them. No
+--     input that exists at deploy time can satisfy the old body either. THIS IS A
+--     DEPLOY-ORDER OBLIGATION, not an inference: **0022 must be deployed while the pre-X2
+--     runtime is still live.** Deploying X2 first, or concurrently, would create documents
+--     that satisfy the old body and re-open exactly the window this section closes.
 --   * `persist_invoice_facts` — three field_paths that were CLR10-refused become
 --     acceptable; no previously-accepted payload changes shape.
 -- The two new verbs are granted to clara_authenticated only and appear in no wake
@@ -99,6 +112,7 @@ declare
   v_version int;
   v_status  text;
   v_pages   int;
+  v_attempt int;
   v_reused  boolean := false;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
@@ -166,39 +180,66 @@ begin
   if found then
     v_task := t.id; v_version := t.version_n; v_status := t.status; v_reused := true;
   else
-    -- Race-safe next version: the same shape as 0016:3463-3473. `on conflict do nothing`
-    -- plus the re-select is what makes two concurrent presses converge on ONE task rather
-    -- than raising a unique violation at whichever one loses.
-    select coalesce(max(version_n), 0) + 1 into v_version
-      from clara.document_processing_tasks
-      where document_id = p_document and lane = v_lane;
-    insert into clara.document_processing_tasks(firm_id, document_id, engine_id, engine_config,
-        version_n, lane, status)
-      values (d.firm_id, p_document, v_engine, '{}'::jsonb, v_version, v_lane, 'queued')
-      on conflict do nothing returning id into v_task;
-    if v_task is null then
+    -- BOUNDED RETRY (adversarial round 1 — MAJOR). 0016:3463-3473's shape is
+    -- compute-version / insert-on-conflict-do-nothing / re-select-ACTIVE, and it is right
+    -- for the first-extraction path because a losing caller's winner is always still
+    -- active there. It is NOT right here. Losing `on conflict do nothing` does not imply
+    -- the winner is still active: an OVER-BUDGET winner catches CLR18 and marks its own
+    -- row `failed`/`budget` in the same transaction, so a re-select restricted to active
+    -- statuses can legitimately find NOTHING. The single-shot version of this code then
+    -- fell through with a NULL task and finished a receipt carrying no task, no version
+    -- and no status — memoized under that op_key forever.
+    -- So: recompute the version and try again, up to three times. Three is not a magic
+    -- number, it is "more losses than a real operator can generate", and the bound is what
+    -- keeps a pathological loop out of a human-invoked verb.
+    for v_attempt in 1..3 loop
+      select coalesce(max(version_n), 0) + 1 into v_version
+        from clara.document_processing_tasks
+        where document_id = p_document and lane = v_lane;
+      insert into clara.document_processing_tasks(firm_id, document_id, engine_id, engine_config,
+          version_n, lane, status)
+        values (d.firm_id, p_document, v_engine, '{}'::jsonb, v_version, v_lane, 'queued')
+        on conflict do nothing returning id into v_task;
+      if v_task is not null then
+        v_status := 'queued';
+        exit;
+      end if;
+      -- Lost the version. If the winner is still ACTIVE this is the ordinary
+      -- two-people-pressed-the-button case and its task is the honest answer.
       select id, version_n, status into v_task, v_version, v_status
         from clara.document_processing_tasks
         where document_id = p_document and lane = v_lane
           and status in ('queued', 'held_egress', 'running')
         order by id limit 1;
-      v_reused := true;
-    else
-      v_status := 'queued';
-      -- Only the Azure lane consumes the firm page budget; the local XML parse is free.
-      -- KEPT deliberately (see the header): the budget is a standing control on Azure
-      -- spend, not a re-extraction cap, and a breach must refuse here exactly as it does
-      -- on a first extraction (0016:3477-3486).
-      if v_lane = 'invoice_facts' then
-        v_pages := greatest(coalesce(d.page_count, 1), 1);
-        begin
-          perform clara._reserve_processing_call(v_task, v_pages);
-        exception when sqlstate 'CLR18' then
-          update clara.document_processing_tasks set status = 'failed', error_code = 'budget',
-            finished_at = now() where id = v_task;
-          v_status := 'failed';
-        end;
+      if v_task is not null then
+        v_reused := true;
+        exit;
       end if;
+      -- Otherwise the winner already went terminal. Loop: recompute above the row it took.
+    end loop;
+    if v_task is null then
+      -- Three consecutive losses to terminal winners. RAISING rather than returning a
+      -- partial receipt is the whole safety property: the raise rolls back the
+      -- `_reserve_op` reservation in this same transaction, so the SAME op_key retries
+      -- cleanly and a malformed receipt can never be finished. A returned partial would
+      -- be permanent.
+      raise exception 'a concurrent request settled this document — retry'
+        using errcode = 'CLR16';
+    end if;
+    -- Only the Azure lane consumes the firm page budget; the local XML parse is free.
+    -- KEPT deliberately (see the header): the budget is a standing control on Azure
+    -- spend, not a re-extraction cap, and a breach must refuse here exactly as it does
+    -- on a first extraction (0016:3477-3486). Skipped when we recovered someone else's
+    -- in-flight task — that task reserved its own pages.
+    if not v_reused and v_lane = 'invoice_facts' then
+      v_pages := greatest(coalesce(d.page_count, 1), 1);
+      begin
+        perform clara._reserve_processing_call(v_task, v_pages);
+      exception when sqlstate 'CLR18' then
+        update clara.document_processing_tasks set status = 'failed', error_code = 'budget',
+          finished_at = now() where id = v_task;
+        v_status := 'failed';
+      end;
     end if;
   end if;
 
@@ -261,7 +302,15 @@ begin
   -- The caller's OWN firm, always. There is no p_firm argument by design: a firm id
   -- parameter would make cross-firm reach a body check rather than a structural
   -- impossibility, and this verb changes an authority threshold.
-  select high_stakes_amount_cents into v_old from clara.firms where id = c.firm;
+  --
+  -- FOR UPDATE (adversarial round 1 — MAJOR). Without the row lock two concurrent owners
+  -- both read the SAME old value before either writes, and both audit rows then claim the
+  -- same `old_cents`: RM10k->RM100k and RM10k->RM200k, with a final value of RM200k. No
+  -- serial order of those two calls is consistent with both receipts, so the old/new chain
+  -- this verb exists to provide is simply false at exactly the moment it matters — a
+  -- contested change to an authority boundary. The lock serializes the pair, so the second
+  -- caller reads the first's committed value and the chain reads 10k->100k->200k.
+  select high_stakes_amount_cents into v_old from clara.firms where id = c.firm for update;
   if v_old is null then
     raise exception 'firm not found' using errcode = 'CLR11';
   end if;
@@ -467,6 +516,30 @@ begin
       and nullif(btrim(r.monetary_raw),'') is not null and r.monetary_cents is null
   ) then
     raise exception 'invoice-facts monetary value is malformed' using errcode='CLR10';
+  end if;
+  --   (b2) 0022 (X3, adversarial round 1 — FATAL): the three STATED COMPONENTS must be
+  --     NON-NEGATIVE. ADR-047's "every component is stored positive as printed" was written
+  --     as an EMITTER convention, and an emitter convention is not a control.
+  --     `_normalize_invoice_cents` (0009:110-121) accepts BOTH `-5.00` and the accounting
+  --     parenthesis form `(5.00)`, so a negative discount is persistable — and the identity
+  --     SUBTRACTS the discount, which turns that minus into a plus:
+  --         net 100.00 + tax 6.00 - (-5.00) = 111.00  ties against a stated gross of 111.00
+  --     while the document's own face reads 100.00 + 6.00 - 5.00 = 101.00. The tie passes,
+  --     tie 3 accepts revenue = gross - tax, and Clara posts RM111.00 for a RM101.00
+  --     document. Every figure is "read off the document" and the answer is still wrong, so
+  --     the sign convention is enforced HERE, at the write boundary, in cents.
+  --     DELIBERATELY NARROW: only the three NEW component paths. `invoice.rounding` may
+  --     legitimately be negative (a downward rounding adjustment) and net/tax/total are the
+  --     pre-existing 0016 surface, out of X1's scope — widening either would be a change
+  --     this slice was not grilled for.
+  if exists (
+    select 1 from clara.document_regions r
+    where r.extraction_id=v_ext
+      and r.field_path in ('invoice.service_charge','invoice.discount','invoice.delivery')
+      and r.monetary_cents < 0
+  ) then
+    raise exception 'a stated invoice component must not be negative (components are stated positive; the discount subtracts in the identity)'
+      using errcode='CLR10';
   end if;
   --   (2c) a local-facts (MyInvois structured) payload MUST state a type_code — a structured
   --     e-invoice with no document type cannot be polarity-bound. OCR/Azure (invoice_facts)
@@ -698,6 +771,18 @@ begin
     raise exception 'a stated invoice component is present but unreadable'
       using errcode='CLR21',detail='{"reason":"tax_tie_failed"}';
   end if;
+  -- THE BELT on the sign convention (adversarial round 1 — FATAL). The write boundary
+  -- refuses a negative component, and that is the buckle; this is the belt. It costs one
+  -- comparison and it covers the cases the write boundary cannot: a region written before
+  -- 0022 by any path, a root/superuser insert, or a future writer that forgets. The
+  -- identity SUBTRACTS the discount, so a negative one turns a subtraction into an
+  -- addition and forges a larger gross that ties — the money-wrong outcome this floor
+  -- exists to make impossible. Refusing is always correct here: a negative component is
+  -- not a document Clara can read, whatever put it there.
+  if coalesce(v_sc,0) < 0 or coalesce(v_disc,0) < 0 or coalesce(v_dlv,0) < 0 then
+    raise exception 'a stated invoice component is negative (components are stated positive; the discount subtracts in the identity)'
+      using errcode='CLR21',detail='{"reason":"tax_tie_failed"}';
+  end if;
 
   -- TIE 2, corrected (X3 / ADR-047). The 0016 identity was `net + tax + rounding = gross`,
   -- which is simply WRONG for any document that prints a service charge, a discount or a
@@ -796,6 +881,24 @@ alter function clara._assert_sales_invoice_shape_at(uuid,uuid) owner to clara_fn
 --     corroboration micro-migration removes it deliberately, with its own review and its
 --     own before/after measurement on live (contract gate XG5).
 -- Every other line of this function is byte-identical to the 0016 CoR.
+--
+-- WHAT THE GUARD DOES AND DOES NOT PROVE (corrected after adversarial round 1; the earlier
+-- wording overclaimed). The guard makes the NEW body unable to pass the anchor block for
+-- ANY input. It says nothing about a call already executing the OLD body at the moment this
+-- migration commits: per the repo's binding D1 rule that call finishes on the old body, and
+-- no `create or replace` and no tail assertion can reach it. The reason an unattended
+-- OCR-sales post is nevertheless impossible across the deploy is STAGING, and it is worth
+-- stating as a chain rather than a conclusion:
+--   (i)   the OLD anchor block needs BOTH `invoice.total_excl_tax` and `invoice.tax_total`;
+--   (ii)  those paths have zero occurrences across all 29 live extractions;
+--   (iii) `persist_invoice_facts` is the only writer that can create them, and it is
+--         granted to `clara_runtime` alone;
+--   (iv)  the pre-X2 mapper does not emit them.
+-- So no input that exists at deploy time can satisfy the old body either, and the in-flight
+-- window is empty of qualifying documents rather than merely guarded. That argument HOLDS
+-- ONLY IF 0022 lands while the pre-X2 runtime is live — which makes it a deploy-order
+-- obligation this file records and the runbook must carry: **deploy 0022 BEFORE X2, never
+-- after and never concurrently.**
 create or replace function clara.execute_rule_post(p_entry uuid, p_op_key text) returns jsonb
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare
@@ -1235,6 +1338,12 @@ begin
        or v_net is null or v_tax is null
        or (v_sc_c>0 and v_sc is null) or (v_disc_c>0 and v_disc is null)
        or (v_dlv_c>0 and v_dlv is null)
+       -- The sign belt, mirroring the shape floor (adversarial round 1 — FATAL): a
+       -- NEGATIVE discount turns the identity's subtraction into an addition and forges
+       -- a larger gross that ties. The write boundary refuses one; this makes the anchor
+       -- lane refuse one too, so removing the dark guard at X5 cannot open on a forged
+       -- identity even if a component arrived by some other path.
+       or coalesce(v_sc,0)<0 or coalesce(v_disc,0)<0 or coalesce(v_dlv,0)<0
        or (v_net+coalesce(v_sc,0)+coalesce(v_dlv,0)+v_tax+coalesce(v_round,0)
            -coalesce(v_disc,0))<>v_gross
        or v_due_c<>1 or v_due_amt is null or v_due_amt<>v_gross then
@@ -1381,8 +1490,13 @@ begin
   -- that drops the guard without also being the X5 micro-migration fails here at apply.
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara.execute_rule_post(uuid,text)'::regprocedure;
-  if position('X4 DARK GUARD' in v_src) = 0 then
-    raise exception '0022 tail: execute_rule_post has lost the X4 dark guard';
+  -- Assert the FUNCTIONAL SHAPE, not the comment (adversarial round 1 — NOTE). Checking
+  -- only for the words 'X4 DARK GUARD' would pass an edit that flipped `if true` to
+  -- `if false` and left the comment sitting above it — i.e. it would certify a lane that
+  -- had been silently opened. The literal below is the executable disjunct plus its marker,
+  -- two spaces exactly as written, so the comment cannot vouch for the code.
+  if position('if true  -- X4 DARK GUARD' in v_src) = 0 then
+    raise exception '0022 tail: execute_rule_post has lost the X4 dark guard (the `if true` disjunct, not merely its comment)';
   end if;
   -- The D-P6 sentinel vocabulary 0016 pins (grep-asserted there, re-asserted here because
   -- this migration rewrites the whole body).
@@ -1403,10 +1517,22 @@ begin
   -- allowlist but missing from a guard is the silent-zero defect this asserts against.
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb)'::regprocedure;
-  if (length(v_src) - length(replace(v_src, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 4
-     or (length(v_src) - length(replace(v_src, 'invoice.discount', ''))) / length('invoice.discount') < 4
-     or (length(v_src) - length(replace(v_src, 'invoice.delivery', ''))) / length('invoice.delivery') < 4 then
-    raise exception '0022 tail: a component field_path is missing from one of persist_invoice_facts four enumerations';
+  -- The floor is the EXACT live count, not a comfortable margin (adversarial round 1 —
+  -- NOTE). Each of the three paths appears in SIX code positions: the allowlist, the
+  -- normalize-to-cents set, the monetary_raw set, the conflicting-duplicate forfeit, the
+  -- present-but-unparseable refusal, and the non-negative guard. A floor of four passed
+  -- while two of those six could go missing — including the one that stops a negative
+  -- discount forging the identity. Six means removing ANY single enumeration fails the
+  -- apply. If a future change adds a seventh mention, raise this number with it.
+  if (length(v_src) - length(replace(v_src, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 6
+     or (length(v_src) - length(replace(v_src, 'invoice.discount', ''))) / length('invoice.discount') < 6
+     or (length(v_src) - length(replace(v_src, 'invoice.delivery', ''))) / length('invoice.delivery') < 6 then
+    raise exception '0022 tail: a component field_path is missing from one of persist_invoice_facts SIX guarded enumerations';
+  end if;
+  -- …and the negative-component guard specifically, by its own refusal text, so it cannot
+  -- be the enumeration that silently disappears while the count is satisfied elsewhere.
+  if position('must not be negative' in v_src) = 0 then
+    raise exception '0022 tail: persist_invoice_facts lost the non-negative component guard';
   end if;
   if position('chr(1)' in v_src)=0 or position('monetary value is malformed' in v_src)=0
      or position('must state invoice.type_code' in v_src)=0
@@ -1419,8 +1545,11 @@ begin
   if position('invoice.service_charge' in v_src)=0 or position('invoice.discount' in v_src)=0
      or position('invoice.delivery' in v_src)=0
      or position('type_polarity_mismatch' in v_src)=0
-     or position('sst_account_missing' in v_src)=0 then
-    raise exception '0022 tail: _assert_sales_invoice_shape_at is missing a component read / retained floor';
+     or position('sst_account_missing' in v_src)=0
+     -- The sign BELT at the floor's read site: without it a negative component that
+     -- arrived by any path other than persist_invoice_facts forges the identity.
+     or position('coalesce(v_sc,0) < 0' in v_src)=0 then
+    raise exception '0022 tail: _assert_sales_invoice_shape_at is missing a component read / sign belt / retained floor';
   end if;
 
   -- (4) THE SUPPLIER FLOOR AND THE STRUCTURED TIER ARE UNTOUCHED. Asserted positively so

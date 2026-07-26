@@ -13,7 +13,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   ROLES, CLR, rootQuery, roleQuery, opk, endPool, buildWorld, assertRaises,
-  has0022, fail0022, setHighStakes, firmThreshold, auditArgs,
+  has0022, fail0022, setHighStakes, firmThreshold, auditArgs, holdThenContend,
 } from "./x1-helpers.mjs";
 
 let W = null;
@@ -148,6 +148,53 @@ test("[0022] the same op_key replays; a different amount under it is refused", a
     () => setHighStakes(W.users.dave, { cents: 4_000_000, opKey: key }),
     "a different amount under the same op_key");
   assert.equal(Number(await firmThreshold(W.firms.B)), 3_000_000, "…and the threshold did not move");
+});
+
+test("[0022] two concurrent owners produce a TRUE audit chain, not two claims of the same old value", async () => {
+  gate();
+  // Without `for update` on the read, both callers see the SAME old value before either
+  // writes: A records 10k->100k, B records 10k->200k, and the firm ends at 200k. There is
+  // no serial order of those two calls consistent with both receipts — so the old/new chain
+  // this verb exists to provide is false at exactly the moment it matters, a contested
+  // change to an authority boundary.
+  //
+  // The schedule is FORCED, not hoped for: side A takes the row lock and holds it
+  // uncommitted; side B's call is fired-not-awaited and must BLOCK, proven through
+  // pg_blocking_pids; A commits; B then resolves against A's COMMITTED value.
+  const firm = W.firms.S;
+  const sub = W.users.erin; // firm S's owner
+  await setHighStakes(sub, { cents: RM10K, opKey: opk("hs") });
+
+  const call = (cents) => async (c) => {
+    const r = await c.query(
+      "select clara.set_firm_high_stakes_threshold(p_cents => $1::bigint, p_op_key => $2) as r",
+      [cents, opk("hs")]);
+    return r.rows[0].r;
+  };
+  const out = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: sub, run: call(RM100K) },
+    b: { role: ROLES.authenticated, jwtSub: sub, run: call(20_000_000) },
+  });
+
+  assert.ok(out.a.ok, `side A succeeded (got ${out.a.code}: ${out.a.message})`);
+  assert.ok(out.b.ok, `side B succeeded (got ${out.b.code}: ${out.b.message})`);
+  assert.equal(out.provedBlocked, true,
+    "side B BLOCKED on side A's row lock — proven via pg_blocking_pids, not assumed from timing");
+  assert.equal(Number(out.a.receipt.old_cents), RM10K, "A saw 10k");
+  assert.equal(Number(out.a.receipt.new_cents), RM100K, "…and set 100k");
+  assert.equal(Number(out.b.receipt.old_cents), RM100K,
+    "B saw A's COMMITTED 100k as its old value — this is the whole fix; unlocked it would say 10k");
+  assert.equal(Number(out.b.receipt.new_cents), 20_000_000, "…and set 200k");
+  assert.equal(Number(await firmThreshold(firm)), 20_000_000, "the firm ends at 200k");
+
+  // The audit rows form ONE chain with no gap and no fork: 10k -> 100k -> 200k.
+  const chain = await rootQuery(
+    `select args->>'old_cents' o, args->>'new_cents' n from clara.audit_log
+      where fn='set_firm_high_stakes_threshold' and firm_id=$1 order by at, id`, [firm]);
+  const last2 = chain.rows.slice(-2);
+  assert.deepEqual(last2.map((r) => [Number(r.o), Number(r.n)]),
+    [[RM10K, RM100K], [RM100K, 20_000_000]],
+    "every audit row's old_cents is the previous row's new_cents — a real serial history");
 });
 
 test("[0022] NO machine lane can move a firm's high-stakes threshold", async () => {
