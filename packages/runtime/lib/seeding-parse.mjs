@@ -248,17 +248,30 @@ export async function readPriorGlRegions(client, { documentId, firmId }) {
   return r.rows;
 }
 
-// Source (c): the OCR/layout TABLE CELLS of a printed ledger. Same firm scoping and same
-// superseded_by/status guards as (a) — only the field_path family differs. The locator is
-// carried because the COLUMN a cell sits in is recoverable only from its geometry.
+// Source (c): the OCR/layout TABLE CELLS of a printed ledger.
+//
+// PICK THE NEWEST LAYOUT EXTRACTION BY ENGINE — do NOT filter on `superseded_by is null`.
+// `superseded_by` chains PER DOCUMENT, not per engine: `classify_document` writes its own
+// `doc_classify` extraction, which supersedes the `ocr` one that actually holds the layout
+// regions. Measured on live: 36 of 38 `ocr` extractions are superseded, so a
+// `superseded_by is null` filter silently returns ZERO cells for any classified document —
+// i.e. for every document that has reached this lane. That mistake shipped once and was
+// caught only by running the real ceremony (a 422 `no_parse_source` on a ledger with 1,907
+// perfectly good cells); the pure unit tests could not see it because it lives in a predicate.
+// This mirrors the idiom `readExtractionText` (classify.mjs) already uses.
 const SELECT_PRIOR_GL_CELLS_SQL =
-  `select dr.id as region_id, dr.text_content, dr.locator
-     from clara.document_extractions de
+  `with newest as (
+     select e.id, e.firm_id
+       from clara.document_extractions e
+      where e.document_id = $1 and e.firm_id = $2 and e.status = 'done'
+        and e.engine_kind in ('ocr','structured_parse')
+      order by e.extracted_at desc, e.version_n desc, e.id desc
+      limit 1)
+   select dr.id as region_id, dr.text_content, dr.locator
+     from newest e
      join clara.document_regions dr
-       on dr.extraction_id = de.id and dr.firm_id = de.firm_id
-    where de.document_id = $1 and de.firm_id = $2
-      and de.status = 'done' and de.superseded_by is null
-      and dr.field_path like 'tables.%'
+       on dr.extraction_id = e.id and dr.firm_id = e.firm_id
+    where dr.field_path like 'tables.%'
     order by dr.id`;
 
 /** Read the layout table cells for a document (firm-scoped). */
