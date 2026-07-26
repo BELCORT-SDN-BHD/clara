@@ -1,45 +1,58 @@
-# INCIDENT — document intake DOWN (storage step), 2026-07-26 — **RESOLVED**
+# INCIDENT — document intake DOWN, 2026-07-26 — **root cause found; fix is a Pages env var**
 
-> ## ROOT CAUSE (established by probe, not inference)
+> ## ⛔ ROOT CAUSE — CORRECTED. My first two diagnoses were BOTH WRONG.
 >
-> **Supabase Storage's upload path now performs an UPDATE on `storage.objects`, and
-> `storage-provision.sql` withholds UPDATE by design** ("object `INSERT` + `SELECT` only …
-> no `UPDATE`/`DELETE`"). Not a broken credential and not a misconfiguration — a **vendor
-> implementation change meeting a deliberate least-privilege posture.**
+> **The actual cause is not in the database at all.**
+> `NEXT_PUBLIC_CLARA_RUNTIME_URL` is **unset in the Cloudflare Pages build**, so
+> `wire.ts:runtimeBase()` returns `""` and **both the byte `PUT` and `finalize` go
+> same-origin into a Pages Function instead of direct to Fly.** `intake.ts` states the
+> requirement in its own header: *"a deployment MUST set the runtime URL so bytes never
+> transit a serverless function."*
 >
-> The chain, each link probed:
-> - Storage **does** still assume the custom role — a DB-backed `LIST` returns **200** with
->   the runtime's own JWT, and an object `GET` returns real bytes.
-> - The **INSERT itself succeeds**: performed directly as `clara_storage_docs` in a
->   rolled-back transaction, the exact insert the upload needs **works**. Grant and RLS
->   policy are sufficient.
-> - As `clara_storage_docs`, `update storage.objects` and `delete storage.objects` both raise
->   **`42501 permission denied for table objects`** — **byte-identical** to what the Storage
->   API returned. `storage.buckets` raises a *different* message naming `buckets`, so that is
->   a latent gap, **not** this fault.
-> - Nothing on our side changed: **no Fly release since v27** (which uploaded successfully at
->   2026-07-25 20:08Z), and **no `storage.migrations` row since project creation**.
+> Decisive evidence:
+> - The dashboard renders **`runtime: same-origin proxy`** on the page.
+> - The runtime's spool `/data/spool` contains **no `intake-*` files at all** (only
+>   `task-*` from 2026-07-19) — **no bytes ever arrived**, so finalize had nothing to seal.
+> - The 502's body was a **Cloudflare** error page, not a Fly one.
+> - `CLARA_INTAKE_CORS_ORIGINS` on the runtime is **already** `https://app.clarabook.com`
+>   — the direct path was designed and provisioned, then never switched on.
 >
-> ## FIX — `packages/db/deploy/wave-b-storage-update-amendment.sql`
+> **FIX:** set `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev` in the
+> Cloudflare Pages project and **rebuild** (it is a build-time `NEXT_PUBLIC_*` var, so a
+> redeploy is required — changing it without a rebuild does nothing).
 >
-> Grants **UPDATE**, scoped by an RLS policy whose predicate is **mirrored from the insert
-> policy** (built with `EXECUTE` from `pg_get_expr`, so the two cannot drift). DELETE and
-> TRUNCATE stay refused; no base-role inheritance; `storage.buckets` deliberately untouched.
+> ### The two wrong diagnoses, kept because the errors are the lesson
 >
-> **Supabase's own documented pattern was rejected.** Their guide says `grant anon to <role>`,
-> which would inherit anon's DELETE/UPDATE/TRUNCATE on *every* bucket — strictly worse than
-> the posture we already have, and the guide covers read access only.
+> **WRONG #1 — "the storage-role JWT expired."** The README calls the credential
+> *"Rotated, unexpired"* and `storage.mjs:51-54` throws this exact code on expiry, so it
+> was the obvious candidate. Checked before reporting: **valid to 2027-01-15.** Checking
+> is what stopped a wrong report reaching the owner.
 >
-> **Verified on a rig fixture** that reproduces the live surface (same columns, same role
-> attributes, same policy predicate verbatim): **4/4 green**, and **all five negative tests
-> caught** — DELETE leaking in, a base role inherited, `storage.buckets` widened, RLS turned
-> off, the insert policy removed. Two real bugs in the amendment were found *by* that fixture
-> and fixed: an unguarded `pg_has_role` on roles absent from a plain cluster, and the fact
-> that **SQL does not short-circuit `WHERE`** — the existence guard had to become a `CASE`,
-> the one construct whose evaluation order Postgres guarantees.
+> **WRONG #2 — "the upload path needs UPDATE on storage.objects."** This one I did not
+> just think, I **acted on it** and granted UPDATE in production. The reasoning: a `PUT`
+> with the role JWT returned `permission denied for table objects` while the INSERT
+> succeeded. Both observations true; the inference false. **`putCanonical`
+> (storage.mjs:81) uses `method: "POST"`** — the create verb, needing INSERT only. *The
+> function's name says put; the request says POST.* My probe used PUT, which in Supabase
+> Storage is the UPDATE/replace endpoint — so it measured **a verb the runtime never
+> calls**, and its 403 was the correct refusal of a privilege we withhold on purpose.
+> After the grant, intake **still failed**, and a `POST` with the same JWT to a fresh key
+> returned **200** — the create path had been healthy throughout.
 >
-> **APPLIED to live 2026-07-26, 4/4 green.** Confirmed after: UPDATE granted, DELETE and TRUNCATE still refused, the update policy's predicate identical to the insert policy's, `storage.buckets` untouched &mdash; and a write probe returned **200** where it had returned 403. Command in
-> "Applying the fix" below. **See also the destructive-probe warning further down — the diagnostic itself caused a (recovered) data incident.**
+> That same wrong probe also **overwrote a real client document** (see the destructive-probe
+> warning below; recovered byte-identical the same minute).
+>
+> **REVERTED:** `packages/db/deploy/wave-b-storage-update-amendment-REVERT.sql` restores
+> the ratified `INSERT + SELECT only` posture, validated on the rig fixture. Least privilege
+> is not something to give away on a plausible-but-unverified inference.
+>
+> ### The lesson, stated plainly
+>
+> Three times I had a coherent story that fit every observation and was still wrong. What
+> broke the loop each time was **reading the code that actually runs** — the HTTP method in
+> `putCanonical`, the empty env var in `runtimeBase()`, the absent spool files — rather than
+> reasoning from symptoms. **Symptom-driven inference on someone else's API is where this
+> went wrong, twice.**
 
 ---
 
