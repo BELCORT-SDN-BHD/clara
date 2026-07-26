@@ -19,37 +19,23 @@ There is no separate routine decision layer between the orchestrator and workers
 
 In every session, the current main model is the orchestrator.
 
-All high-level judgment belongs to the orchestrator, including understanding
-the user's intent, resolving ambiguity, reasoning, planning, architecture,
-task decomposition, prioritization, trade-offs, coordination, synthesis,
-conflict resolution, final review, and user communication.
+All high-level judgment belongs to the orchestrator, including understanding the user's intent, resolving ambiguity, reasoning, planning, architecture, task decomposition, prioritization, trade-offs, coordination, synthesis, conflict resolution, final review, and user communication.
 
-Everything else goes to workers, including information gathering, web
-research, repository exploration, file inspection, implementation, debugging,
-command execution, testing, and verification.
+Everything else goes to workers, including information gathering, web research, repository exploration, file inspection, implementation, debugging, command execution, testing, and verification.
 
-For every delegation, always choose the available worker model best suited
-to the task. Workers perform the work and return concise results with
-evidence. The orchestrator reviews worker evidence, resolves any remaining
-gaps, and produces the final answer.
+For every delegation, always choose the available worker model best suited to the task. Workers perform the work and return concise results with evidence. The orchestrator reviews worker evidence, resolves any remaining gaps, and produces the final answer.
 
 ## Delegation policy
 
-Heavy implementation may require detailed technical reasoning. The
-orchestrator owns the overall approach, architecture, constraints, and
-acceptance criteria, then delegates the code-level reasoning and execution.
+Heavy implementation may require detailed technical reasoning. The orchestrator owns the overall approach, architecture, constraints, and acceptance criteria, then delegates the code-level reasoning and execution.
 
 - **Methodlogy/Philosophy: Delegate to the most reliable available lane, not a fixed tool — and only when it helps.** Delegate when parallelism or specialist-isolation materially benefits the task; do a bounded, well-specified step yourself rather than dispatch as ceremony.
 
 - Dispatch lanes **All lanes get explicit model overrides, FORBID to Overuse model `fable` as lane's model.**:
  1. **Claude native lane:** select the most suitable native `subagents`, `agent-teammates` or `dynamicworkflow` dispatch that can cover the task. **Model discipline is structural, not habitual: the main model (Fable) is mostly the orchestrator.** Select model + effort by capability:
- - Default worker: claude-sonnet-5, effort xhigh.
- - Use high only for deterministic, low-risk, strongly testable work.
- - Escalate to claude-opus-4-8 xhigh when the task is ambiguous,
-cross-service, long-horizon, security-sensitive, weakly testable,
-or has already defeated Sonnet.
- - Use Fable primarily as orchestrator for exceptionally complex workflows,
-but permit explicit Fable escalation for rare unsolved critical subtasks.
+ - Default worker: claude-sonnet-5, effort xhigh. Use default scoped generalist.
+ - Escalate to claude-opus-5 xhigh when ambiguity, architectural judgment, cross-service coordination, security sensitivity, or weak validation dominates. Its good for complex agentic coding.
+ - Permit explicit Fable escalation for rare unsolved critical subtasks.
  
   Every native dispatch MUST carry an explicit `model` ; max effort tiers up to `xhigh`. 
   
@@ -58,14 +44,13 @@ but permit explicit Fable escalation for rare unsolved critical subtasks.
   Never use a global CLAUDE_CODE_SUBAGENT_MODEL override.
   Pin every dispatch to a full model ID and explicit effort.
   Use independent verification and deterministic quality gates.
- 2. **Codex lane:** for heavy implementation, debugging, test fixing, refactoring, or multi-file edits, prefer a **direct `codex exec` via Bash** (run in the background + watch its output file) — the `codex:codex-rescue` companion queue has been **unreliable** (it has stalled for hours at "starting"). Prefer `--model gpt-5.6-sol --effort xhigh`. Keep Codex tasks focused and specific. See memory `project-rebuild-ops-lessons`.
+ 2. **Codex lane:** for execution-heavy and objectively testable implementation, debugging, test fixing. Prefer a **direct `codex exec` via Bash** (run in the background + watch its output file) — the `codex:codex-rescue` companion queue has been **unreliable** (it has stalled for hours at "starting"). Prefer `--model gpt-5.6-sol --effort xhigh`. Keep Codex tasks focused and specific.
 - **Grill only when it changes scope.** Use the grilling skill (`/grillme`,`/grill-with-docs`,`/loop-me`) when ambiguity would change *what* gets built or its acceptance — not for every bounded task whose spec is already clear.
-- After a worker (Codex or a subagent) finishes, inspect the result yourself before accepting it. Do not blindly trust worker output.
+- After a worker (Codex or a native lanes) finishes, inspect the result yourself before accepting it. Do not blindly trust worker output.
 
 ## Cross-model review
 
-When a substantial change warrants an independent review pass, use the
-review mechanisms that are actually available in this harness.
+When a substantial change warrants an independent review pass, use the review mechanisms that are actually available in this harness.
 - **Methodlogy/Philosophy** — The engineer thinking in review an inplementation: refer mattpock's skill `/code-reviewbymatt` in aspect of the procedures, coding standards and bars of code review.
 - **Native review lanes** — spawn a Claude's native review agent `/code-review` scoped to the diff for a standards/spec pass. It picks up your session effort setting automatically, or you can pass a level explicitly (e.g. "/code-review high").`low` effort runs a single pass over the diff. It's fast and cheap enough to run before every push. `medium` effort reads the changed code in context, runs multiple finder passes from different angles, then verifies every finding before surfacing it. `high` effort runs the finders and verifiers as subagents with fresh context, so they aren't anchored on the reasoning of the agent that just wrote the code. `xhigh` goes even further, sweeping for impacts to code outside of the change itself.
 - **Codex read-only review** —  `/codex:review` for a normal read-only Codex review ,  `/codex:adversarial-review` for a steerable challenge review. These run through the Codex companion queue, which has been unreliable — if it stalls, fall back to a native `/code-review` pass or a direct `codex exec` read-only review.

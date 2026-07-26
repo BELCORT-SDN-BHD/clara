@@ -41,3 +41,34 @@ test("the select is labelled for a screen reader, naming the party kind", () => 
   assert.ok(render("vendor").includes('aria-label="Supplier for this open item"'));
   assert.ok(render("customer").includes('aria-label="Customer for this open item"'));
 });
+
+// ---------------------------------------------------------------------------
+// Found on the live Gate-K run (2026-07-26): the opening page rendered TWO inputs both
+// labelled "Amount in cents" — one on the keyed trial-balance-target form, one on the
+// opening-item form. A sighted user has the section headings to tell them apart; a screen
+// reader announces the same name twice with nothing to distinguish them (WCAG 1.3.1).
+// Pinned here because the two forms live in different files, so nothing else would notice
+// them colliding again.
+// ---------------------------------------------------------------------------
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+test("no two inputs on the opening page share an aria-label", () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const seen = new Map<string, string[]>();
+  for (const f of ["OpeningItemForm.tsx", "OpeningTargets.tsx", "OpeningCeremony.tsx",
+                   "SeedWorkbench.tsx", "CounterpartyPicker.tsx"]) {
+    const src = readFileSync(join(here, f), "utf8");
+    for (const m of src.matchAll(/aria-label="([^"]+)"/g)) {
+      const label = m[1];
+      if (!label) continue;
+      const at = seen.get(label) ?? [];
+      at.push(f);
+      seen.set(label, at);
+    }
+  }
+  const dupes = [...seen.entries()].filter(([, files]) => files.length > 1);
+  assert.deepEqual(dupes, [],
+    `these aria-labels appear on more than one control: ${dupes.map(([l, f]) => `${l} (${f.join(", ")})`).join("; ")}`);
+});
