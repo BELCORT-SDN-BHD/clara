@@ -1,5 +1,10 @@
 # Gate R2 — the tick-list ceremony runbook (prepared 2026-07-26)
 
+> **✅ EXECUTED 2026-07-26 on runtime v29 — claims (1)+(2) CLOSED; claim (3) remains** (needs a
+> seeded rule to code a real future document). Batch `e2831cad`; the forecast below held to the
+> number. Do not re-run against the same GL (`create_seeding_batch` will 409 the duplicate).
+> Receipt: `docs/plan/research/wave-b/live-gate-r2-2026-07-26.md`.
+
 **State when this was written:** the code is MERGED (`40dc88c`, PR #102) but **not deployed**.
 Live is still `clara-runtime` **v27**, which predates both PR #100 (storage duplicate detection)
 and PR #102 (the printed-ledger seeding source). The ceremony cannot run until the runtime

@@ -1,5 +1,10 @@
 # Gate F provisioning — the three owner acts (OWNER-ONLY, not delegable)
 
+> **✅ COMPLETED 2026-07-27 — Gate F is CLOSED (ADR-045).** All three acts were performed and
+> the firm exists (`39008536`, ROME PUBLIC ADVISORY SDN. BHD.). This runbook is retained as the
+> template for any FUTURE firm onboarding; do not re-run it for RPA. Receipt:
+> `docs/plan/research/wave-b/live-gate-f-2026-07-27.md`.
+
 Gate F is *"FIRM onboarding runs live as a durable run"* (wave-b-contract §4). The engineering
 is built and deployed; the gate is blocked on **account provisioning**, which the agent is
 prohibited from performing. This file is the exact sequence, so it is one sitting rather than a
