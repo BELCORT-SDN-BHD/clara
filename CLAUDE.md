@@ -138,9 +138,9 @@ B-12's date — since **superseded**, see below). **Wave B is NOT finished.** Ho
 | **O**, **K** | CLOSED **twice** each (Rome Secretary · Bee Creative). K corroborated afterwards: the client's YA2025 accounts print `BALANCE B/F (65,747.97)`, the exact figure Clara posted |
 | **B-12** | CLOSED on the **still-to-capture checklist**, not an opening carry-down — RPR is a **greenfield 2025 entity** (owner-confirmed), so there was never a prior period. **This supersedes the opening-date half of WB-R29.** 11 of 15 accounts tie to RPR's certified TB to the sen; 4 gaps remain, each blocked on a document absent from the corpus |
 | **W2** | (1) + (2)-structural CLOSED. **(2)-behavioural, (3), (4) remain** — need a live wake credential (0 exist) + a real draft |
-| **P** | **BLOCKED on MULTI-CURRENCY, not on SST evidence.** The 8 OpenAI invoices are genuine (MY FRP 24000037, 8% SST) but are **USD with an RM figure on the TAX LINE ONLY**, and `clara` has **no currency/FX column anywhere**. 712 invoices scanned across both corpora; zero RM-denominated SST documents exist. One path untried: the Bee Creative `2025 claim` schedule is a **7MB scan** that may state RM — OCR is live |
+| **P** | **BLOCKED on a missing tax-fact producer — NOT multi-currency** (that diagnosis was wrong; superseded 2026-07-26). RM-denominated 8%-SST supplier invoices are **already in the DB** (BRIGHTPATH `509e788d`, billed to RPR). The binding constraint: the `sst_purchase_cost` leg must tie to `invoice.tax_total`, and across **all 29 `invoice_facts` extractions that field has been produced 0 times** — Azure DI never returns `TotalTax` on these layouts (the v5 mapper IS live: `invoice.customer_name` appears 6×). Its only other producer is the **MyInvois XML** lane, so **P and S are coupled**. Needs an `invoiceFacts` **v2** (v1 is frozen) |
 | **L** | **BLOCKED — no conflicting real pair exists.** The candidate (Bee Creative YA2024 closing vs YA2025 opening) **agrees to the sen**. Manufacturing a conflict is fabrication |
-| **R2** | **feasible, not started** — the tick-list ceremony over RPR's real prior GL; 0 seeding batches today |
+| **R2** | **CODE SHIPPED (PR #102, `40dc88c`); ceremony QUEUED on a deploy.** My "blocked on a missing producer" claim was **wrong twice**: `seeding-parse.mjs:317-337` always had an xlsx-bytes fallback (I read the SQL, not the caller), and the producer I proposed would have **regressed** it (line 321 short-circuits). The real gap was narrower — the lane took a spreadsheet and nothing else, locking out PDF-only clients. Fixed by **source (c)** `lib/prior-gl-cells.mjs`, reading the `tables.N.cells.M` regions Azure already produces; **column identity comes from `page_polygon` geometry** (`pdftotext` destroys it — Clara never used `pdftotext`). Reads **no figure**: proposals consume only counterparty/account/date/cite. Measured on RPR's real GL (`d7bc9c02`): **125 entries · 22 accounts · 81 `vendor_account_rule` + 34 `wiki_fact`**. **Runtime redeploy required before the ceremony** |
 | **F** | **BLOCKED on three OWNER acts** — `docs/ops/gate-f-provisioning.md` (a membership-free auth account, a fresh admission token, RPA's particulars) |
 
 **Closeable by engineering: R2 and W2's journey claims.** Evidence receipts:
@@ -151,8 +151,28 @@ B-12's date — since **superseded**, see below). **Wave B is NOT finished.** Ho
 misdiagnosed four times; the real defects were `putCanonical` never detecting a duplicate
 (Supabase returns HTTP **400 wrapping `statusCode:409`**) and the error body being discarded.
 Full account, including every wrong diagnosis: `docs/ops/incident-2026-07-26-intake-storage.md`.
-**Open, undiagnosed:** extraction completes but `document_kind` stays pending and no classify
-event fires (doc `0cb7c1f1`).
+**NOTE: that fix is on `main` but NOT in the deployed image** (v27 predates PR #100), so a
+duplicate re-upload still surfaces as `storage_error` on live until the next deploy.
+
+**RESOLVED — the `document_kind` "bug" was NOT a bug.** `_enqueue_invoice_facts_core` is the only
+classify enqueuer and its callers are `file_document` (0009:2343), `confirm_attribution_candidate`
+and `approve_wrong_client_correction` — **never extraction completion**. Classification is gated on
+client attribution *by design*; doc `0cb7c1f1` was ingested and OCR'd but never **filed**. Verified
+non-vacuously (all 32 filed documents have a kind; the one unfiled-and-kindless doc was that one)
+and then **proven by construction**: filing a document created its classify task 14 s later.
+`intake.ts` says so in its own copy — `finalized` renders as *"Stored — not yet filed."*
+
+**★ THE AUTO-DRAFT LANE HAS NEVER DRAFTED IN PRODUCTION.** 55 sweep runs, 29 candidates admitted,
+**0 drafts** — every one `skipped_lane` (`CLR29 lane_changed`). Reasons: **`tier_a_fails` 29/29**,
+`vendor_unresolved`/`ambiguous` 29/29, `already_coded` 17, `no_consent` 17, `high_stakes` 13. The
+single failing Tier-A condition is **Azure's self-reported confidence**: locator `page_polygon`
+29/29 ✓, currency MYR 29/29 ✓, but **0/29 reach the required 0.95** (6 at 0.80–0.90, 18 at
+0.60–0.80, 5 below 0.60). This also explains the **165 wake credentials minted and never
+consumed** (all expired). **Wave A's supervised loop is proven; its AUTONOMOUS half has never
+run on a real document** — and Phase 5 §6 lists *auto-post precision* as a falsifiable gate, so
+this must be fixed before Phase 5 can measure it. Recommended fix: **corroborate by AGREEMENT
+between two independent readers, not by one vendor's confidence score** — the XML tier already
+works this way (it checks `net + tax + rounding = total` and never consults a confidence).
 
 **One genuine build item is logged and unfixed: the `opening_tb.line` producer.** The
 opening parser (`packages/runtime/lib/opening-parse.mjs`) reads only
