@@ -178,6 +178,46 @@ test("[0021] the same op_key REPLAYS its receipt; a different one does not doubl
   assert.equal(n.rows[0].n, 1, "one row, however many times the call arrives");
 });
 
+test("[0021] the op_key covers EVERY argument, so a changed one is refused, not ignored", async () => {
+  fail0021();
+  // `_reserve_op` replays on a matching request hash and raises CLR10 on a differing one, so
+  // an argument left OUT of the hash is one a caller can change under a re-used op_key and
+  // have silently discarded. A bookkeeper fixing a mistyped registration number and pressing
+  // the button again must get an honest refusal, not a stale receipt for the row they were
+  // trying to correct.
+  const key = opk("cp");
+  const name = `Hash Cover ${opk("h")}`;
+  await create(W.users.bob, { client: W.clients.A1, name, reg: "200001011111", opKey: key });
+  for (const [label, args] of [
+    ["a changed registration", { name, reg: "200001012222" }],
+    ["a dropped registration", { name, reg: null }],
+    ["a changed TIN", { name, reg: "200001011111", tin: "C99999999999" }],
+    ["a changed name", { name: `${name} X`, reg: "200001011111" }],
+    ["a changed kind", { name, reg: "200001011111", kind: "customer" }],
+  ]) {
+    await assertRaises(CLR.badRequest,
+      () => create(W.users.bob, { client: W.clients.A1, ...args, opKey: key }),
+      `${label} under the same op_key`);
+  }
+  // …while a byte-identical retry still replays, which is the whole point of the key.
+  const replay = await create(W.users.bob, {
+    client: W.clients.A1, name, reg: "200001011111", opKey: key,
+  });
+  assert.equal(replay.created, true, "an identical retry replays the original receipt");
+});
+
+test("[0021] a blank registration and a NULL registration are the SAME request", async () => {
+  fail0021();
+  // The DB stores '' as NULL (both the row and the hash normalise first), so a UI that sends
+  // an empty box on the retry must not trip the different-args refusal. This is the case that
+  // would break if the hash were taken over the RAW arguments instead of the normalised ones.
+  const key = opk("cp");
+  const name = `Blank Reg ${opk("b")}`;
+  const first = await create(W.users.bob, { client: W.clients.A1, name, reg: null, opKey: key });
+  const again = await create(W.users.bob, { client: W.clients.A1, name, reg: "   ", opKey: key });
+  assert.deepEqual(again, first, "'' and NULL are one request, as they are one stored value");
+});
+
 test("[0021] a client in ANOTHER firm is an honest refusal, not a silent no-op", async () => {
   fail0021();
   const before = await rootQuery("select count(*)::int n from clara.counterparties where client_id=$1",

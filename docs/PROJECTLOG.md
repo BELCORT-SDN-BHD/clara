@@ -315,7 +315,10 @@ client has were therefore unseedable. It went unnoticed because the only prior G
 Secretary, 2026-07-24) was a company with **no payables**: its seed used `equity_net` + `gl_balance`
 only, so the `ap_open_item` path had **never executed in production**. Bee Creative — a sole
 proprietorship with RM105,000.00 owed to LOST INVENTION SDN BHD across two December 2024 invoices —
-hit it on the first attempt. **The rejected workaround:** coding those purchase invoices through
+hit it on the first attempt. The contract was not blind to counterparty creation — it scoped **"mass
+counterparty birthing"** to **B5** (bulk seeding off a prior GL). The miss is a **scoping** one: B4's
+carry-down needs *one* party, before any GL to seed from, and B5's bulk lane is not that door.
+**The rejected workaround:** coding those purchase invoices through
 the daily loop to mint the counterparty as a side effect. That posts YA2024 purchase entries into
 the very period the opening balance is being seeded for — the double-counting shape ruled against
 in WB-R29. The opening lane needs its own door.
@@ -334,9 +337,14 @@ granted. A fourth defect surfaced while writing the behaviour battery: the verb 
 as `_audit`'s `p_obo` argument, which means **on behalf of a USER** (mirroring
 `wake_credentials.on_behalf_of`, a `users(id)` reference). It typechecks only because `audit_log`
 carries no FK there, so a client id would have sat silently in a column every reader interprets as
-a human.
+a human. A fifth, found on self-review before merge: the idempotency **request hash** covered only
+`(client, kind, name)`, so a caller who re-used an op_key while **correcting a mistyped
+registration number** got a silent replay of the stale receipt instead of `_reserve_op`'s honest
+CLR10. The hash now covers every argument that reaches a stored column, taken over the
+**normalised** values so that `''` and NULL remain one request, exactly as they are one stored
+value.
 
-**What ships with it.** An 11-cell behaviour battery driving the verb through the database as a
+**What ships with it.** A 13-cell behaviour battery driving the verb through the database as a
 real firm member; a 6-probe read-only post-verify (`packages/db/deploy/wave-b-0021-postverify.sql`)
 whose probe 4 pins the two index predicates the recovery *silently* depends on and whose probe 6
 states inertness exactly, via `xmin`, refusing to report green once frozen; and the dashboard side

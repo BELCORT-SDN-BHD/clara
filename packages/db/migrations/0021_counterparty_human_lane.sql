@@ -77,18 +77,27 @@ begin
     raise exception 'client is not in your firm' using errcode = 'CLR11';
   end if;
 
+  -- The request hash covers EVERY argument that reaches a stored column, not just the three
+  -- that form the identity. `_reserve_op` replays when the hash matches and raises CLR10
+  -- 'op_key reused with different args' when it does not — so an argument left OUT of the
+  -- hash is one a caller can change under a re-used op_key and have silently ignored. A
+  -- bookkeeper who fixes a mistyped registration number and presses the button again should
+  -- get an honest refusal, not a stale receipt for the row they were trying to correct.
+  -- Normalise the two optional fields FIRST so the hash sees '' and NULL as the same thing,
+  -- exactly as the stored row will.
+  v_reg    := nullif(btrim(coalesce(p_registration_no, '')), '');
+  v_tin    := nullif(btrim(coalesce(p_tin, '')), '');
   v_dedupe := clara._reserve_op(c.firm, 'create_counterparty', p_op_key,
-    clara._hash(jsonb_build_object('c', p_client, 'k', p_kind, 'n', v_name)));
+    clara._hash(jsonb_build_object('c', p_client, 'k', p_kind, 'n', v_name,
+                                   'r', v_reg, 't', v_tin)));
   if v_dedupe is not null then return v_dedupe; end if;
 
   -- Normalisation is byte-identical to the approve_entry birth path (0011:3035-3037), so
   -- a human-created party and a document-born one collide on the SAME unique index rather
   -- than living side by side as near-duplicates.
   v_name_n := lower(regexp_replace(v_name, '[^a-zA-Z0-9]', '', 'g'));
-  v_reg    := nullif(btrim(coalesce(p_registration_no, '')), '');
   v_reg_n  := case when v_reg is null then null
                    else lower(regexp_replace(v_reg, '[^a-zA-Z0-9]', '', 'g')) end;
-  v_tin    := nullif(btrim(coalesce(p_tin, '')), '');
 
   begin
     insert into clara.counterparties(firm_id, client_id, kind, name, name_normalized,
