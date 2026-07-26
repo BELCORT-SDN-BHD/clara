@@ -112,7 +112,7 @@ ceremony (ADR-033/034/035/036), then 0018 (Gate-K domain) same-day (ADR-038).
 
 **LIVE POSTURE: Supabase 21 migrations (`0021_counterparty_human_lane`) · Fly `clara-runtime`
 release v27 (ten loops, WIKI_PROJECTION acquired, /ready true zero warnings) ·
-dashboard Pages `app.clarabook.com` auto-deploys from `main` · `clara-backup` daily
+dashboard Pages `app.clarabook.com` auto-deploys from `main` **and now sets `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`** (without it, intake bytes + finalize transit a Pages Function instead of going direct to Fly — `intake.ts` requires the direct URL for any deployment) · `clara-backup` daily
 (zero-501-proven).** 0019 landed 2026-07-25 (ADR-039) and **0020 the same day**
 (ADR-041) — both runtime-image-first, the second with a re-quiesce before the
 preflight. **0021 (the human counterparty lane) DEPLOYED 2026-07-26 (ADR-042/043)** —
@@ -130,13 +130,29 @@ WB-R22's solo lane refused the first submit `CLR05 · SELF_ATTESTATION` — the 
 expired when 0019 removed the veto). **S deferred on hard evidence** (no MyInvois artifact
 exists in the corpus).
 
-**Both owner rulings are IN** (WB-R28: Gate P's FRP/FX/personal-name proof accepted,
-with the receipt required to say exactly what it is; WB-R29: B-12 seeds BEFORE
-2025-02-04, no deletion). What remains of Wave B is mostly **operating**: **W2's three
-journey-only claims** (they need a real wake credential and a real draft), **Gate F** on
-Rome Public Advisory (**BLOCKED on owner provisioning** — a membership-free auth account,
-a fresh admission token, real particulars; WB-R30), and the **Bee Creative** run for
-**P / L / R2** (**K is closed there**). Gate journeys pin to **21 migrations · v27** (WB-R24).
+**Both owner rulings are IN** (WB-R28: Gate P's FRP/FX/personal-name proof accepted; WB-R29:
+B-12's date — since **superseded**, see below). **Wave B is NOT finished.** Honest gate status:
+
+| gate | state |
+|---|---|
+| **O**, **K** | CLOSED **twice** each (Rome Secretary · Bee Creative). K corroborated afterwards: the client's YA2025 accounts print `BALANCE B/F (65,747.97)`, the exact figure Clara posted |
+| **B-12** | CLOSED on the **still-to-capture checklist**, not an opening carry-down — RPR is a **greenfield 2025 entity** (owner-confirmed), so there was never a prior period. **This supersedes the opening-date half of WB-R29.** 11 of 15 accounts tie to RPR's certified TB to the sen; 4 gaps remain, each blocked on a document absent from the corpus |
+| **W2** | (1) + (2)-structural CLOSED. **(2)-behavioural, (3), (4) remain** — need a live wake credential (0 exist) + a real draft |
+| **P** | **BLOCKED on MULTI-CURRENCY, not on SST evidence.** The 8 OpenAI invoices are genuine (MY FRP 24000037, 8% SST) but are **USD with an RM figure on the TAX LINE ONLY**, and `clara` has **no currency/FX column anywhere**. 712 invoices scanned across both corpora; zero RM-denominated SST documents exist. One path untried: the Bee Creative `2025 claim` schedule is a **7MB scan** that may state RM — OCR is live |
+| **L** | **BLOCKED — no conflicting real pair exists.** The candidate (Bee Creative YA2024 closing vs YA2025 opening) **agrees to the sen**. Manufacturing a conflict is fabrication |
+| **R2** | **feasible, not started** — the tick-list ceremony over RPR's real prior GL; 0 seeding batches today |
+| **F** | **BLOCKED on three OWNER acts** — `docs/ops/gate-f-provisioning.md` (a membership-free auth account, a fresh admission token, RPA's particulars) |
+
+**Closeable by engineering: R2 and W2's journey claims.** Evidence receipts:
+`docs/plan/research/wave-b/gate-p-and-l-evidence-2026-07-26.md`,
+`…/live-gate-b12-rpr-2026-07-26.md`.
+
+**Intake WORKS** — proven end-to-end with a genuinely new document. A 2026-07-26 "outage" was
+misdiagnosed four times; the real defects were `putCanonical` never detecting a duplicate
+(Supabase returns HTTP **400 wrapping `statusCode:409`**) and the error body being discarded.
+Full account, including every wrong diagnosis: `docs/ops/incident-2026-07-26-intake-storage.md`.
+**Open, undiagnosed:** extraction completes but `document_kind` stays pending and no classify
+event fires (doc `0cb7c1f1`).
 
 **One genuine build item is logged and unfixed: the `opening_tb.line` producer.** The
 opening parser (`packages/runtime/lib/opening-parse.mjs`) reads only
