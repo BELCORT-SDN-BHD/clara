@@ -145,6 +145,19 @@ const WAVE_B_0020_RUNTIME_FNS = [
 // HUMAN LANE ONLY — bookkeeper floor, same as upsert_account: reference data, not money.
 const WAVE_B_0021_HUMAN_FNS = ["create_counterparty"];
 
+// 0022 [the extraction slice, block X1] — two human verbs, both HUMAN-LANE ONLY and for
+// different reasons worth stating:
+//   request_reextraction (bookkeeper floor, ADR-047 Q2) — the re-extraction path that did
+//     not exist in 0001..0021, so a corrected mapper could never reach the 29 documents
+//     already extracted. Its ONLY cost bound is that no machine role can execute it
+//     (ADR-047 Q4 declined a numeric cap), which makes this roster entry load-bearing
+//     rather than bookkeeping: clara_runtime / clara_agent_ro / both wake lanes must all
+//     show EXECUTE=false, or a sweep could spend Azure pages in a loop.
+//   set_firm_high_stakes_threshold (owner floor) — pays the PR #109 debt, where the
+//     RM10,000 -> RM100,000 change had to ship as a hand-run SQL file because no governed
+//     verb existed. Raising the threshold widens what one person may approve alone.
+const EXTRACTION_0022_HUMAN_FNS = ["request_reextraction", "set_firm_high_stakes_threshold"];
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -164,6 +177,13 @@ export const WAVE_B_0020_COHORT = [
   ...WAVE_B_0020_RUNTIME_FNS, ...WAVE_B_0020_HUMAN_FNS, ...WAVE_B_0020_UNGRANTED_FNS,
   ...WAVE_B_0021_HUMAN_FNS,
 ];
+// 0022 gets its OWN cohort rather than joining the one above, because the cohort check's
+// whole contract is "wholly present or wholly absent" per MIGRATION BOUNDARY: folding two
+// 0022 names into the 0020 cohort would make a 21-migration database report a PARTIAL
+// cohort — a false failure on a database that is simply one migration behind. Separate
+// cohorts keep this file correct at 21 and at 22+ alike, exactly as the 0020 block's own
+// header describes for 19 and 20+.
+export const EXTRACTION_0022_COHORT = [...EXTRACTION_0022_HUMAN_FNS];
 
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
@@ -181,6 +201,7 @@ export const ALLOWED = {
     ...WAVE_A21_HUMAN_FNS, // 0016 [A2.1 §C] compliance-watch human writers + set_document_kind
     ...WAVE_B_0020_HUMAN_FNS, // 0020 [§7.1] typed-consent owner RPCs (owner floor body-enforced)
     ...WAVE_B_0021_HUMAN_FNS, // 0021 the human counterparty lane (bookkeeper floor)
+    ...EXTRACTION_0022_HUMAN_FNS, // 0022 the extraction slice X1 (bookkeeper + owner floors)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -316,8 +337,9 @@ export async function grantMatrixFailures() {
   // The compensating assertion for every EXPLICIT-ENUMERATION widening of this closed
   // set: no dead exemptions. (The sweep above iterates the LIVE catalog, so a roster
   // entry for a function that no longer exists is otherwise invisible.)
-  failures.push(...cohortFailures("0020 typed-consent", WAVE_B_0020_COHORT,
-    new Set(fns.rows.map((f) => f.proname))));
+  const liveNames = new Set(fns.rows.map((f) => f.proname));
+  failures.push(...cohortFailures("0020 typed-consent", WAVE_B_0020_COHORT, liveNames));
+  failures.push(...cohortFailures("0022 extraction-slice X1", EXTRACTION_0022_COHORT, liveNames));
   return failures;
 }
 

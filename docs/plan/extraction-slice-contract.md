@@ -31,8 +31,15 @@ reconciliation on an extraction tier that corroborates 0/29 real documents build
 - `clara.request_reextraction(p_document, p_reason, p_op_key)` — human-floor
   (**bookkeeper**, ruled ADR-047 Q2), audited, op-key idempotent. Enqueues a NEW
   `invoice_facts` task version for an already-extracted document; the new done extraction
-  supersedes on the invoice_facts chain exactly as version_n already composes. No runtime
-  grant changes ⇒ expected **no-quiescence deploy** (the 0021 shape).
+  supersedes on the invoice_facts chain exactly as version_n already composes.
+  **Deploy shape (amended after adversarial round 2, 2026-07-27): a BRIEF RUNTIME
+  QUIESCE during apply** — stop `clara-runtime`, apply 0022, start. The draft expected
+  the 0021 no-quiescence shape; that rested on "the pre-X2 mapper cannot emit net/tax",
+  which is FALSE (v5's FIELD_MAP has carried `SubTotal→total_excl_tax` /
+  `TotalTax→tax_total` since Wave A2 — the 0/29 is an Azure-layout fact, not a producer
+  impossibility), so an in-flight pre-0022 executor call could finish under the old
+  anchor law (D1). The quiesce closes that window structurally. **0022 before X2 stays
+  binding** regardless.
   **Cost policy (ruled ADR-047 Q4): NO per-document cap, audit-only** — the structural
   bound is that the verb is **human-invoked only**: no workflow, sweep, or machine caller
   may enqueue it, ever. Churn cannot mint authority regardless (corroboration is
