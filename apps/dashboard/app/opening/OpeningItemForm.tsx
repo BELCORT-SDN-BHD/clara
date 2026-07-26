@@ -215,7 +215,7 @@ export function OpeningItemForm({
         {isSubledger || isSigned ? (
           <label className={styles.field}>
             <span className={styles.fieldLabel}>amount (cents){isSigned ? ", signed" : ""}</span>
-            <input className={styles.input} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Amount in cents" />
+            <input className={styles.input} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Opening item amount in cents" />
           </label>
         ) : null}
         {isSubledger ? (

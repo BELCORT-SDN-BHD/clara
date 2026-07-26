@@ -11,7 +11,7 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 | Need | Source of truth |
 |---|---|
-| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` (START HERE block) |
+| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` (START HERE block); ADR-001..021 in `docs/PROJECTLOG-ARCHIVE-ADR-001-021.md` |
 | Live CODE structure (functions, callers, routes) | **codebase-memory graph — query it, don't grep** (`get_architecture` / `search_graph` / `trace_path`; re-index after big changes) |
 | What / why / scope · product invariants (LAW) | `docs/prd/PRD.md` |
 | Target architecture (event spine, structural invariants, runtime, reporting) | `docs/architecture/ARCHITECTURE.md` |
@@ -110,21 +110,25 @@ sen. **Wave B**: contract `docs/plan/wave-b-contract.md` v1.0 is LAW (ADR-032,
 rulings WB-R1..R27); 0017 + the v25 runtime + the dashboard shipped via the WB-R18
 ceremony (ADR-033/034/035/036), then 0018 (Gate-K domain) same-day (ADR-038).
 
-**LIVE POSTURE: Supabase 20 migrations (`0020_typed_consent`) · Fly `clara-runtime`
+**LIVE POSTURE: Supabase 21 migrations (`0021_counterparty_human_lane`) · Fly `clara-runtime`
 release v27 (ten loops, WIKI_PROJECTION acquired, /ready true zero warnings) ·
 dashboard Pages `app.clarabook.com` auto-deploys from `main` · `clara-backup` daily
 (zero-501-proven).** 0019 landed 2026-07-25 (ADR-039) and **0020 the same day**
 (ADR-041) — both runtime-image-first, the second with a re-quiesce before the
-preflight. **0021 (the human counterparty lane, ADR-042) is MERGED and QUEUED —
-not deployed.** Its ceremony is `docs/ops/wave-b-0021-ceremony-runbook.md`: purely
-additive, so **no quiescence and no runtime redeploy** (the runtime cannot call
-the verb). **Gate K's Bee Creative carry-down is blocked on it.**
+preflight. **0021 (the human counterparty lane) DEPLOYED 2026-07-26 (ADR-042/043)** —
+the first Wave-B migration needing **no quiescence and no runtime redeploy**, because
+the runtime holds no EXECUTE on its one new verb. Post-verify 6/6 after a 7/7 read-only
+pre-flight. **All Wave-B migrations are deployed; none is queued.**
 
-**Gates CLOSED on real evidence.** **O + K** (Rome Secretary end to end through the
-product; kill-mid-interview proven IN PRODUCTION; carry-down ties to the sen; re-run
-wrote zero). **W2 claim (1) + (2)-structural** (audited on the live catalog; WB-R21's
-interim allowance expired when 0019 removed the veto). **S deferred on hard evidence**
-(no MyInvois artifact exists in the corpus).
+**Gates CLOSED on real evidence.** **O + K TWICE, on two entity shapes** — Rome Secretary
+(Sdn Bhd) and **Bee Creative (sole proprietorship, 2026-07-26, ADR-043)**: seed finalized,
+four entries approved in ONE transaction, posted TB Dr = Cr = RM 210,000.00, OBE nil, the
+**negative-equity** case (a debit-balance capital account into the single `retained_earnings`
+slot), AP seeded **at invoice level** against a counterparty minted through the new verb.
+WB-R22's solo lane refused the first submit `CLR05 · SELF_ATTESTATION` — the DB, not the UI.
+**W2 claim (1) + (2)-structural** (audited on the live catalog; WB-R21's interim allowance
+expired when 0019 removed the veto). **S deferred on hard evidence** (no MyInvois artifact
+exists in the corpus).
 
 **Both owner rulings are IN** (WB-R28: Gate P's FRP/FX/personal-name proof accepted,
 with the receipt required to say exactly what it is; WB-R29: B-12 seeds BEFORE
@@ -132,8 +136,7 @@ with the receipt required to say exactly what it is; WB-R29: B-12 seeds BEFORE
 journey-only claims** (they need a real wake credential and a real draft), **Gate F** on
 Rome Public Advisory (**BLOCKED on owner provisioning** — a membership-free auth account,
 a fresh admission token, real particulars; WB-R30), and the **Bee Creative** run for
-**P / L / R2 / K**. Gate journeys pin to **20 migrations · v27** (WB-R24) — re-pin to 21
-once the 0021 ceremony runs.
+**P / L / R2** (**K is closed there**). Gate journeys pin to **21 migrations · v27** (WB-R24).
 
 **One genuine build item is logged and unfixed: the `opening_tb.line` producer.** The
 opening parser (`packages/runtime/lib/opening-parse.mjs`) reads only

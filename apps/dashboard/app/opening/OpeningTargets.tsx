@@ -180,7 +180,7 @@ export function OpeningTargets({
             </label>
             <label className={styles.field}>
               <span className={styles.fieldLabel}>amount (cents)</span>
-              <input className={styles.input} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Amount in cents" />
+              <input className={styles.input} inputMode="numeric" value={amount} onChange={(e) => setAmount(e.target.value)} aria-label="Keyed target amount in cents" />
             </label>
           </div>
           <div className={styles.actions}>
