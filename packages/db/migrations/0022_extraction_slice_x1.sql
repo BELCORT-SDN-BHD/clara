@@ -56,19 +56,17 @@
 --   * `execute_rule_post` — the anchor block's outcome is `anchor_missing` for every
 --     existing OCR-sales document today (because `v_net is null or v_tax is null` is true
 --     29/29) and the dark guard keeps it `anchor_missing` for every FUTURE one until X5.
---     THE IN-FLIGHT CASE, STATED PRECISELY (raised by adversarial round 1). Per the repo's
---     binding D1 rule an execution already inside the OLD body finishes on the OLD body;
---     a `create or replace` cannot reach into it, and this migration's tail can only
---     inspect the newly installed body. So the guard ALONE does not make an unattended
---     OCR-sales post impossible at the deploy instant — the STAGING does, and the claim
---     rests on it: the old anchor block needs `invoice.total_excl_tax` AND
---     `invoice.tax_total`, those two paths have zero occurrences across all 29 live
---     extractions, `persist_invoice_facts` is the only writer that can create them and it
---     is granted to `clara_runtime` alone, and the pre-X2 mapper does not emit them. No
---     input that exists at deploy time can satisfy the old body either. THIS IS A
---     DEPLOY-ORDER OBLIGATION, not an inference: **0022 must be deployed while the pre-X2
---     runtime is still live.** Deploying X2 first, or concurrently, would create documents
---     that satisfy the old body and re-open exactly the window this section closes.
+--     THE IN-FLIGHT CASE (full reasoning in the §D header; summarised here so the two
+--     never drift apart again). Per the binding D1 rule an execution already inside the OLD
+--     body finishes on the OLD body; a `create or replace` cannot reach into it and this
+--     migration's tail can only inspect the newly installed body. Do NOT reach for a
+--     staging argument here: the deployed v5 mapper's FIELD_MAP has emitted both
+--     `invoice.total_excl_tax` and `invoice.tax_total` since Wave A2, so the 0/29 is
+--     EMPIRICAL (Azure does not return them on these layouts) and a future document could
+--     satisfy the old body. The window is closed by the §0 QUIESCE GUARD plus the ceremony
+--     it enforces, and by nothing else. Separately and still binding: **deploy 0022 BEFORE
+--     X2, never after and never concurrently** — X2 exists to make those fields arrive
+--     reliably, so shipping it first widens the window instead of narrowing it.
 --   * `persist_invoice_facts` — three field_paths that were CLR10-refused become
 --     acceptable; no previously-accepted payload changes shape.
 -- The two new verbs are granted to clara_authenticated only and appear in no wake
@@ -122,9 +120,19 @@
 do $quiesce$
 declare v_component text; v_beat timestamptz;
 begin
-  -- Defensive: if the relation is somehow absent there is nothing to check and nothing to
-  -- protect against — never let the guard itself be the thing that breaks an apply.
-  if to_regclass('clara.runtime_heartbeats') is null then return; end if;
+  -- FAIL CLOSED on absence (adversarial round 3 — MAJOR). An earlier draft returned early
+  -- here, reasoning that a missing table means there is nothing to protect against. The
+  -- opposite is true. 0006 creates `runtime_heartbeats` and 0006 ALWAYS precedes 0022 in
+  -- the same ordered chain, so by the time this block runs the table's absence is not a
+  -- state the migration system can produce — it is CATALOG DRIFT, e.g. a partial DR
+  -- restore. And drift is precisely the situation in which the runtime may still be alive:
+  -- the control loop's heartbeat write would fail and be swallowed as a transient cycle
+  -- error (control.mjs:206), while the INDEPENDENT rule-post loop keeps calling the old
+  -- executor body. So an absent table is the case where the guard is most needed and least
+  -- able to see anything. Refuse and make a human look.
+  if to_regclass('clara.runtime_heartbeats') is null then
+    raise exception '0022 QUIESCE GUARD: clara.runtime_heartbeats is ABSENT — the catalog has drifted from the migration chain (0006 creates it); refuse rather than guess whether a runtime is live';
+  end if;
   select h.component, h.beat_at into v_component, v_beat
     from clara.runtime_heartbeats h
    where h.beat_at > now() - interval '90 seconds'
@@ -1509,7 +1517,7 @@ alter function clara.execute_rule_post(uuid,text) owner to clara_fn_owner;
 -- ---------------------------------------------------------------------------
 do $tail$
 declare
-  v_acl text; v_cfg text; v_sig text; v_src text; v_role text; v_norm text;
+  v_acl text; v_cfg text; v_sig text; v_src text; v_role text; v_code text;
   v_new_fns text[] := array[
     'clara.request_reextraction(uuid,text,text)',
     'clara.set_firm_high_stakes_threshold(bigint,text)'];
@@ -1575,6 +1583,26 @@ begin
         raise exception '0022 tail: % holds EFFECTIVE EXECUTE on % — this verb is human-invoked only',
           v_role, v_sig;
       end if;
+      -- MEMBERSHIP REACHABILITY (adversarial round 3 — MAJOR, demonstrated not argued).
+      -- `has_function_privilege` answers "does this role inherit the privilege", and that
+      -- is NOT the same question as "can this role reach the verb". PostgreSQL separates
+      -- inherited privileges from SET-capable membership, and this repo runs its login
+      -- shells as INHERIT FALSE / SET TRUE on purpose. So:
+      --     grant clara_authenticated to clara_runtime_login with inherit false, set true;
+      -- passes the ACL whitelist (clara_authenticated is an allowed grantee) AND passes
+      -- has_function_privilege (false, no inheritance) — while that login can simply
+      -- `set role clara_authenticated` and call the verb.
+      -- HONESTY NOTE: Wall B still refuses such a caller — `_human_ctx` sources identity
+      -- ONLY from the request.jwt.claims GUC, which the runtime pool never sets, so the
+      -- call dies at CLR04 with no actor. This probe is therefore BELT, not the wall. It
+      -- is here because the probe's own text advertised "zero effective privilege", and
+      -- the SET path falsified that sentence. A probe must not claim what it does not
+      -- prove.
+      if pg_has_role(v_role, 'clara_authenticated', 'MEMBER')
+         or pg_has_role(v_role, 'clara_authenticated', 'SET') then
+        raise exception '0022 tail: % can reach clara_authenticated by role membership (MEMBER or SET) — it could SET ROLE into the human lane and call %',
+          v_role, v_sig;
+      end if;
     end loop;
   end loop;
 
@@ -1587,13 +1615,18 @@ begin
   -- that drops the guard without also being the X5 micro-migration fails here at apply.
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara.execute_rule_post(uuid,text)'::regprocedure;
-  -- Assert the FUNCTIONAL SHAPE, not the comment (adversarial round 1 — NOTE). Checking
-  -- only for the words 'X4 DARK GUARD' would pass an edit that flipped `if true` to
-  -- `if false` and left the comment sitting above it — i.e. it would certify a lane that
-  -- had been silently opened. The literal below is the executable disjunct plus its marker,
-  -- two spaces exactly as written, so the comment cannot vouch for the code.
-  if position('if true  -- X4 DARK GUARD' in v_src) = 0 then
-    raise exception '0022 tail: execute_rule_post has lost the X4 dark guard (the `if true` disjunct, not merely its comment)';
+  -- The dark guard, in EXECUTABLE TEXT ONLY (rounds 1 and 3). Round 1 matched
+  -- 'X4 DARK GUARD' — a marker comment, which survives flipping `if true` to `if false`.
+  -- Round 2 matched 'if true  -- X4 DARK GUARD', which is better but still anchors half of
+  -- itself in a comment, so it dies the moment anyone reflows the comment and it can still
+  -- be forged by pasting the same text into another comment. What is matched here is the
+  -- disjunct FUSED TO THE CONDITION IT GUARDS, after comments are stripped and whitespace
+  -- normalised: `if true or v_gross is null or v_inv_id is null or v_inv_date is null`.
+  -- That sequence cannot exist in a comment (comments are gone) and cannot survive
+  -- `if false`. The behavioural proof remains x1-anchor.test.mjs.
+  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  if position('iftrueorv_grossisnullorv_inv_idisnullorv_inv_dateisnull' in v_code) = 0 then
+    raise exception '0022 tail: execute_rule_post has lost the X4 dark-guard DISJUNCT from its executable text (a marker comment is not a guard)';
   end if;
   -- THE EXECUTOR'S CALLER SET, PINNED. The §0 quiesce guard and the §D staging argument both
   -- rest on one unstated premise: that stopping `clara-runtime` actually stops every caller
@@ -1615,6 +1648,16 @@ begin
     raise exception '0022 tail: execute_rule_post has unexpected EXECUTE grantee(s): % — the quiesce ceremony assumes clara-runtime is its ONLY caller; widening this set silently invalidates that argument',
       v_acl;
   end if;
+  -- EXACT SET, both directions (adversarial round 3). The check above is a SUBSET test: it
+  -- catches a widened caller set but passes an EMPTIED one. Revoking clara_runtime_login
+  -- would leave this pin green while the product is dark — and a pin that cannot tell
+  -- "correct" from "nothing to check" is not pinning anything.
+  if not exists (select 1 from pg_proc p, lateral aclexplode(p.proacl) a
+                  where p.oid = 'clara.execute_rule_post(uuid,text)'::regprocedure
+                    and a.privilege_type = 'EXECUTE'
+                    and pg_get_userbyid(a.grantee) = 'clara_runtime_login') then
+    raise exception '0022 tail: execute_rule_post has LOST its only sanctioned caller (clara_runtime_login) — the product is dark and this pin is vacuous';
+  end if;
 
   -- The D-P6 sentinel vocabulary 0016 pins (grep-asserted there, re-asserted here because
   -- this migration rewrites the whole body).
@@ -1635,32 +1678,41 @@ begin
   -- allowlist but missing from a guard is the silent-zero defect this asserts against.
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb)'::regprocedure;
-  -- The floor is the EXACT live count, not a comfortable margin (adversarial round 1 —
-  -- NOTE). Each of the three paths appears in SIX code positions: the allowlist, the
-  -- normalize-to-cents set, the monetary_raw set, the conflicting-duplicate forfeit, the
-  -- present-but-unparseable refusal, and the non-negative guard. A floor of four passed
-  -- while two of those six could go missing — including the one that stops a negative
-  -- discount forging the identity. Six means removing ANY single enumeration fails the
-  -- apply. If a future change adds a seventh mention, raise this number with it.
-  if (length(v_src) - length(replace(v_src, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 6
-     or (length(v_src) - length(replace(v_src, 'invoice.discount', ''))) / length('invoice.discount') < 6
-     or (length(v_src) - length(replace(v_src, 'invoice.delivery', ''))) / length('invoice.delivery') < 6 then
-    raise exception '0022 tail: a component field_path is missing from one of persist_invoice_facts SIX guarded enumerations';
+  -- COMMENT-STRIPPED MATCHING (adversarial round 3 — demonstrated, not argued). Every
+  -- syntactic probe below runs against v_code, which is prosrc with `--` comments REMOVED
+  -- and whitespace normalised. Round 2's version matched raw prosrc, and the reviewer broke
+  -- it in the obvious way: delete the real guard, paste its text back as
+  --     -- r.field_path in (...) and r.monetary_cents < 0
+  --     -- must not be negative
+  -- and all three occurrence counts stayed at six while both literal probes passed. A
+  -- probe that cannot tell code from a comment about code proves nothing.
+  --
+  -- AND THE HONEST FRAMING: all of this is BELT. The primary instrument is BEHAVIOURAL —
+  -- x1-tie.test.mjs's two sign cells drive a negative component through the real writer and
+  -- the real sales floor, and x1-anchor.test.mjs drives the dark guard through the real
+  -- executor. Those fail when the guard is actually gone, whatever the text says. These
+  -- tail probes exist to make the apply itself refuse a drifted catalog, not to replace
+  -- the cells.
+  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- The floor is the EXACT live count over the COMMENT-STRIPPED body. Each of the three
+  -- paths appears in SIX code positions: the allowlist, the normalize-to-cents set, the
+  -- monetary_raw set, the conflicting-duplicate forfeit, the present-but-unparseable
+  -- refusal, and the non-negative guard. Six means removing ANY single enumeration fails
+  -- the apply. If a future change adds a seventh CODE mention, raise this number with it.
+  if (length(v_code) - length(replace(v_code, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 6
+     or (length(v_code) - length(replace(v_code, 'invoice.discount', ''))) / length('invoice.discount') < 6
+     or (length(v_code) - length(replace(v_code, 'invoice.delivery', ''))) / length('invoice.delivery') < 6 then
+    raise exception '0022 tail: a component field_path is missing from one of persist_invoice_facts SIX guarded enumerations (counted over EXECUTABLE text)';
   end if;
-  -- …and the negative-component guard specifically, by its own refusal text, so it cannot
-  -- be the enumeration that silently disappears while the count is satisfied elsewhere.
-  if position('must not be negative' in v_src) = 0 then
-    raise exception '0022 tail: persist_invoice_facts lost the non-negative component guard';
-  end if;
-  -- STRONGER (adversarial round 2 — NOTE): the guard's LOAD-BEARING EXPRESSION, as one
-  -- whitespace-normalised literal. Counting occurrences and grepping a refusal string can
-  -- both be satisfied by text sitting in a COMMENT while the executable enumeration is
-  -- gone; this cannot. The normalisation is the 0017 tail's own idiom, so the assertion
-  -- survives reformatting but not deletion.
-  v_norm := regexp_replace(v_src, '\s+', '', 'g');
+  -- The negative-component guard's LOAD-BEARING EXPRESSION, in executable text only.
   if position('r.field_pathin(''invoice.service_charge'',''invoice.discount'',''invoice.delivery'')andr.monetary_cents<0'
-       in v_norm) = 0 then
+       in v_code) = 0 then
     raise exception '0022 tail: the non-negative guard EXPRESSION is gone from persist_invoice_facts (a comment is not a control)';
+  end if;
+  -- …and its refusal message, which must live in a RAISE and not in a comment: the message
+  -- is what an operator sees, so losing it degrades a clear refusal into a mystery.
+  if position('mustnotbenegative' in v_code) = 0 then
+    raise exception '0022 tail: persist_invoice_facts lost the non-negative guard''s refusal message from its executable text';
   end if;
   if position('chr(1)' in v_src)=0 or position('monetary value is malformed' in v_src)=0
      or position('must state invoice.type_code' in v_src)=0

@@ -141,13 +141,32 @@ begin
       if has_function_privilege(v_role, v_sig, 'execute') then
         raise exception 'POST-VERIFY 3: % holds EFFECTIVE EXECUTE on % — a machine lane can reach a human-only verb', v_role, v_sig;
       end if;
+      -- MEMBERSHIP REACHABILITY. `has_function_privilege` asks whether a role INHERITS the
+      -- privilege — not whether it can REACH the verb. PostgreSQL separates inherited
+      -- privileges from SET-capable membership, and this repo runs its login shells as
+      -- INHERIT FALSE / SET TRUE deliberately, so:
+      --     grant clara_authenticated to clara_runtime_login with inherit false, set true;
+      -- passes the ACL whitelist (clara_authenticated is an allowed grantee) AND passes
+      -- has_function_privilege (no inheritance) — while that login can `set role
+      -- clara_authenticated` and call the verb.
+      -- HONEST: Wall B still refuses it — _human_ctx sources identity ONLY from the
+      -- request.jwt.claims GUC, which the runtime pool never sets, so such a call dies at
+      -- CLR04. This is BELT. It is here because this probe's own notice advertised "zero
+      -- effective privilege", and the SET path made that sentence false; a probe must not
+      -- claim what it does not prove.
+      if pg_has_role(v_role, 'clara_authenticated', 'MEMBER')
+         or pg_has_role(v_role, 'clara_authenticated', 'SET') then
+        raise exception 'POST-VERIFY 3: % can reach clara_authenticated by role membership (MEMBER or SET) — it could SET ROLE into the human lane and call %', v_role, v_sig;
+      end if;
     end loop;
   end loop;
   if exists (select 1 from clara.wake_fn_allowlist
               where function_name in ('request_reextraction','set_firm_high_stakes_threshold')) then
     raise exception 'POST-VERIFY 3: a 0022 verb leaked into the wake allowlist';
   end if;
-  raise notice 'OK 3  EXECUTE: clara_authenticated ONLY (whitelist over proacl) + zero EFFECTIVE privilege for every machine role/login shell present; wake allowlist clean';
+  -- The notice states exactly what was proven and nothing more (round 3): an earlier
+  -- version advertised "zero effective privilege", which the SET-membership path falsified.
+  raise notice 'OK 3  EXECUTE: clara_authenticated ONLY (whitelist over proacl); every machine role/login shell present holds NO inherited EXECUTE and NO MEMBER/SET route into clara_authenticated; wake allowlist clean';
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -158,7 +177,7 @@ end $$;
 --    component identity must also already be present (it opens CORRECT at X5).
 -- ---------------------------------------------------------------------
 do $$
-declare v_src text; v_bad text;
+declare v_src text; v_bad text; v_code text;
 begin
   select prosrc into v_src from pg_proc
    where oid = 'clara.execute_rule_post(uuid,text)'::regprocedure;
@@ -170,8 +189,13 @@ begin
   -- i.e. it would certify, on a live deploy, a posting lane that had been silently opened.
   -- The literal below is the executable disjunct together with its marker, two spaces
   -- exactly as written in 0022, so the comment can never vouch for the code.
-  if position('if true  -- X4 DARK GUARD' in v_src) = 0 then
-    raise exception 'POST-VERIFY 4: the X4 dark guard DISJUNCT is not in execute_rule_post — the OCR-sales anchor lane may be OPEN without X5''s review (a surviving marker comment is not the guard)';
+  -- EXECUTABLE TEXT ONLY. Comments are stripped and whitespace normalised BEFORE matching,
+  -- and what is matched is the disjunct fused to the condition it guards. A marker comment
+  -- survives `if false`; a comment cannot survive stripping; and `if false` cannot produce
+  -- this sequence. (The behavioural proof is x1-anchor.test.mjs — this is the belt.)
+  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  if position('iftrueorv_grossisnullorv_inv_idisnullorv_inv_dateisnull' in v_code) = 0 then
+    raise exception 'POST-VERIFY 4: the X4 dark-guard DISJUNCT is not in execute_rule_post''s executable text — the OCR-sales anchor lane may be OPEN without X5''s review (a surviving marker comment is not the guard)';
   end if;
   if position('invoice.service_charge' in v_src) = 0
      or position('invoice.discount' in v_src) = 0
@@ -200,6 +224,16 @@ begin
   if v_bad is not null then
     raise exception 'POST-VERIFY 4: execute_rule_post has unexpected EXECUTE grantee(s): % — the quiesce ceremony assumes clara-runtime is its ONLY caller', v_bad;
   end if;
+  -- EXACT SET, both directions: the check above is a SUBSET test and passes an EMPTIED set
+  -- as happily as a correct one. Revoking clara_runtime_login would leave this probe green
+  -- while the product is dark, and a pin that cannot tell "correct" from "nothing left to
+  -- check" is pinning nothing.
+  if not exists (select 1 from pg_proc p, lateral aclexplode(p.proacl) a
+                  where p.oid = 'clara.execute_rule_post(uuid,text)'::regprocedure
+                    and a.privilege_type = 'EXECUTE'
+                    and pg_get_userbyid(a.grantee) = 'clara_runtime_login') then
+    raise exception 'POST-VERIFY 4: execute_rule_post has LOST its only sanctioned caller (clara_runtime_login) — the product is dark and this pin is vacuous';
+  end if;
   if position('anchor_missing' in v_src)=0 or position('not_corroborated' in v_src)=0
      or position('cn_not_autopostable' in v_src)=0
      or position('purchase_sst_not_autopostable' in v_src)=0
@@ -218,7 +252,7 @@ end $$;
 --    verb probe above and still be the FATAL-2 regression.
 -- ---------------------------------------------------------------------
 do $$
-declare v_src text;
+declare v_src text; v_code text;
 begin
   select prosrc into v_src from pg_proc
    where oid = 'clara._invoice_fact_state_at(uuid,uuid)'::regprocedure;
@@ -249,26 +283,28 @@ end $$;
 --    live count (6), not a margin: at >=4 two enumerations could vanish unseen.
 -- ---------------------------------------------------------------------
 do $$
-declare v_src text;
+declare v_src text; v_code text;
 begin
   select prosrc into v_src from pg_proc
    where oid = 'clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb)'::regprocedure;
   if v_src is null then
     raise exception 'POST-VERIFY 6: persist_invoice_facts is GONE';
   end if;
-  if (length(v_src) - length(replace(v_src, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 6
-     or (length(v_src) - length(replace(v_src, 'invoice.discount', ''))) / length('invoice.discount') < 6
-     or (length(v_src) - length(replace(v_src, 'invoice.delivery', ''))) / length('invoice.delivery') < 6 then
-    raise exception 'POST-VERIFY 6: a component field_path is missing from one of the SIX write-boundary enumerations (silent-zero or forged-identity defect)';
+  -- COMMENT-STRIPPED. Matching raw prosrc was broken by the obvious attack: delete the real
+  -- guard and paste its text back as `--` comments. All three counts stayed at six and both
+  -- literal probes passed. Strip comments FIRST; then a comment about the guard can never
+  -- stand in for the guard. (Belt — the behavioural instrument is x1-tie's sign cells.)
+  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  if (length(v_code) - length(replace(v_code, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 6
+     or (length(v_code) - length(replace(v_code, 'invoice.discount', ''))) / length('invoice.discount') < 6
+     or (length(v_code) - length(replace(v_code, 'invoice.delivery', ''))) / length('invoice.delivery') < 6 then
+    raise exception 'POST-VERIFY 6: a component field_path is missing from one of the SIX write-boundary enumerations, counted over EXECUTABLE text (silent-zero or forged-identity defect)';
   end if;
-  if position('must not be negative' in v_src) = 0 then
-    raise exception 'POST-VERIFY 6: persist_invoice_facts lost the non-negative component guard — a negative discount can forge the sales identity';
+  if position('mustnotbenegative' in v_code) = 0 then
+    raise exception 'POST-VERIFY 6: persist_invoice_facts lost the non-negative guard''s refusal message from its executable text';
   end if;
-  -- The guard's LOAD-BEARING EXPRESSION, as one whitespace-normalised literal. An occurrence
-  -- count and a refusal-string grep can both be satisfied by text sitting in a COMMENT while
-  -- the executable enumeration is gone; this cannot.
   if position('r.field_pathin(''invoice.service_charge'',''invoice.discount'',''invoice.delivery'')andr.monetary_cents<0'
-       in regexp_replace(v_src, '\s+', '', 'g')) = 0 then
+       in v_code) = 0 then
     raise exception 'POST-VERIFY 6: the non-negative guard EXPRESSION is gone from persist_invoice_facts (a comment is not a control)';
   end if;
   if position('chr(1)' in v_src)=0 or position('monetary value is malformed' in v_src)=0 then
