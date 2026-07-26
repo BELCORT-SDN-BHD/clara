@@ -17,7 +17,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
   ROLES, CLR, rootQuery, roleQuery, opk, endPool, buildWorld, assertRaises, firmOf,
-  has0022, fail0022, requestReextraction, extractedDoc, laneTasks, auditArgs,
+  has0022, fail0022, requestReextraction, extractedDoc, laneTasks, auditArgs, holdThenContend,
 } from "./x1-helpers.mjs";
 
 let W = null;
@@ -213,19 +213,15 @@ test("[0022] an ACTIVE task is RETURNED, never double-queued", async () => {
     + "simply pressed the button twice");
 });
 
-test("[0022] losing the version to a TERMINAL winner retries — never a receipt with no task", async () => {
+test("[0022] the version computation starts ABOVE a terminal task (compute-over-terminal, NOT the retry)", async () => {
   gate();
-  // The over-budget race, reduced to its deterministic core. Two concurrent callers compute
-  // the same next version; A wins the insert, hits CLR18, and marks its OWN row
-  // failed/budget in the same transaction. B loses `on conflict do nothing` and re-selects
-  // ACTIVE tasks — and finds nothing, because A's row is already terminal. The single-shot
-  // version of this code fell through with a NULL task and finished a receipt carrying no
-  // task, no version and no status, memoized under B's op_key FOREVER.
-  //
-  // The schedule is forced by pre-planting the terminal winner rather than by racing two
-  // sessions: a real race cannot be made deterministic here (the loser's behaviour depends
-  // on commit interleaving), and a flaky cell proving a money-adjacent invariant is worth
-  // less than a deterministic one that drives the identical code path.
+  // HONEST TITLE (adversarial round 2 — MAJOR). This cell was originally claimed as the
+  // retry proof and it is not one: pre-planting a COMMITTED terminal row at version N means
+  // the verb's own `max(version_n)+1` immediately picks N+1 and its FIRST insert succeeds.
+  // The loop never runs, and the pre-fix single-shot implementation would pass this cell
+  // unchanged. It still earns its place — it proves the version computation counts terminal
+  // rows rather than skipping them — but the retry itself is proven by the NEXT cell, which
+  // forces the conflict for real.
   const doc = await extractedDoc(W.users.alice, { client: W.clients.A1 });
   const tasks = await laneTasks(doc.documentId);
   const nextVersion = Math.max(...tasks.map((t) => t.version_n)) + 1;
@@ -259,6 +255,66 @@ test("[0022] losing the version to a TERMINAL winner retries — never a receipt
     [res.task_id]);
   assert.equal(receipt.rows.length, 1, "one stored receipt names the task");
   assert.ok(receipt.rows[0].result.version_n, "…and the STORED receipt is complete too, not a shell");
+});
+
+test("[0022] the RETRY, forced for real: a conflict lost to a task that goes terminal converges", async () => {
+  gate();
+  // THE ACTUAL RETRY PATH, driven by a forced two-session schedule rather than described.
+  // The schedule reproduces the over-budget race exactly:
+  //   A (root)  begins, inserts a task at version N and HOLDS it uncommitted — the shape a
+  //             caller leaves behind when _reserve_processing_call raises CLR18 and it marks
+  //             its own row failed/budget inside the same transaction;
+  //   B (human) calls the verb. Its snapshot cannot see A's row, so it computes N too, and
+  //             its `insert ... on conflict do nothing` BLOCKS on A's uncommitted unique
+  //             index entry — proven via pg_blocking_pids, not inferred from timing;
+  //   A commits. B wakes: the insert conflicts, do-nothing yields no id, the ACTIVE
+  //             re-select finds nothing (A's row is terminal), and the loop recomputes
+  //             N+1 and succeeds.
+  // Before the fix B fell out of that sequence with a NULL task and finished
+  // `{document_id, reused:true}` into its op receipt — permanently.
+  const doc = await extractedDoc(W.users.alice, { client: W.clients.A1 });
+  const firm = (await rootQuery("select firm_id from clara.documents where id=$1", [doc.documentId])).rows[0].firm_id;
+  const tasks = await laneTasks(doc.documentId);
+  const N = Math.max(...tasks.map((t) => t.version_n)) + 1;
+
+  const out = await holdThenContend({
+    a: {
+      run: (c) => c.query(
+        `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+            version_n,lane,status,error_code,finished_at)
+         values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,$3,'invoice_facts','failed','budget',now())`,
+        [firm, doc.documentId, N]),
+    },
+    b: {
+      role: ROLES.authenticated, jwtSub: W.users.bob,
+      run: async (c) => (await c.query(
+        "select clara.request_reextraction(p_document => $1, p_reason => $2, p_op_key => $3) as r",
+        [doc.documentId, "forced conflict", opk("rex")])).rows[0].r,
+    },
+  });
+
+  assert.ok(out.a.ok, `the holder's insert succeeded (got ${out.a.code}: ${out.a.message})`);
+  assert.equal(out.provedBlocked, true,
+    "the verb BLOCKED on the uncommitted conflicting version — proven via pg_blocking_pids, so "
+    + "the retry path was genuinely entered rather than skipped by a lucky version number");
+  assert.ok(out.b.ok, `the verb succeeded after the holder committed (got ${out.b.code}: ${out.b.message})`);
+
+  const r = out.b.receipt;
+  assert.ok(r.task_id, "the receipt names a task — NOT the malformed {document_id, reused} shell");
+  assert.equal(r.version_n, N + 1, "…at the version ABOVE the terminal winner it lost to");
+  assert.equal(r.status, "queued", "…live");
+  assert.equal(r.reused, false, "…and freshly minted, not a recovered in-flight task");
+
+  const committed = await laneTasks(doc.documentId);
+  assert.equal(committed.filter((t) => t.version_n === N)[0].status, "failed",
+    "the winner it lost to is the terminal budget row");
+  assert.equal(committed.find((t) => t.id === r.task_id).status, "queued", "…and the verb's own task is queued");
+  const receipt = await rootQuery(
+    "select result from clara.op_receipts where fn='request_reextraction' and result->>'task_id'=$1",
+    [r.task_id]);
+  assert.equal(receipt.rows.length, 1, "one stored receipt names the task");
+  assert.ok(receipt.rows[0].result.version_n && receipt.rows[0].result.status,
+    "…and the STORED receipt is complete — that is the thing that used to be permanent");
 });
 
 test("[0022] NO machine lane can request a re-extraction — this is the whole cost bound", async () => {

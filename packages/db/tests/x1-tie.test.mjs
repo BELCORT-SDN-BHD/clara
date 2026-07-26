@@ -273,7 +273,13 @@ test("[X3/sign] a NEGATIVE component is refused at the write boundary — the co
     const fields = componentFields({ gross: 11100, net: 10000, tax: 600 });
     fields.push(factField(path, raw, { polygon: [], confidence: 0.9 }));
     const task = await mk();
-    await assertRaises("CLR10", () => persistInvoiceFacts(task, fields), label);
+    const err = await assertRaises("CLR10", () => persistInvoiceFacts(task, fields), label);
+    // Pin WHICH refusal fired, matching the read-floor cell. persist_invoice_facts raises
+    // CLR10 for a dozen different reasons — a malformed polygon, an unsupported field_path,
+    // a conflicting duplicate — so the SQLSTATE alone would keep this cell green after
+    // someone deleted the sign guard and left some other CLR10 to catch the payload.
+    assert.match(err.message, /must not be negative/,
+      `${label}: it is the NON-NEGATIVE guard that refused, not an unrelated CLR10`);
     await failInvoiceFacts(task, "engine_error");
   }
   // A ZERO component is not negative and stays acceptable — the guard is a sign check, not

@@ -36,7 +36,16 @@
 -- with no override (the supplier floor's `amount_override` hatch has no sales counterpart),
 -- or in which a structural posting barrier switches itself off as a side effect.
 --
--- NO-QUIESCENCE (the 0021 shape). This migration changes NO grant on any machine lane, adds
+-- DEPLOY SHAPE: **A BRIEF RUNTIME QUIESCE** (this is NOT the 0021 no-quiescence shape — see
+-- the §D header for why the earlier claim was withdrawn). Stop `clara-runtime`, apply, start.
+-- The window being closed is small and specific: `execute_rule_post` is a LIVE writer being
+-- replaced by change-of-record, and per the repo's binding D1 rule a call already inside the
+-- OLD body finishes on the OLD body — no `create or replace` reaches into it and no tail
+-- assertion can see it. With the runtime stopped, no in-flight executor call can exist across
+-- the CoR commit, so the old body cannot post after the new one is installed. Everything
+-- BELOW is still true and is why the quiesce only has to be brief:
+--
+-- This migration changes NO grant on any machine lane, adds
 -- no relation, and alters no constraint. The three CoR'd bodies are reachable-identically
 -- for every extraction that exists today:
 --   * `_assert_sales_invoice_shape_at` — ties 2 and 3 are guarded on `v_net`/`v_tax`, which
@@ -882,23 +891,37 @@ alter function clara._assert_sales_invoice_shape_at(uuid,uuid) owner to clara_fn
 --     own before/after measurement on live (contract gate XG5).
 -- Every other line of this function is byte-identical to the 0016 CoR.
 --
--- WHAT THE GUARD DOES AND DOES NOT PROVE (corrected after adversarial round 1; the earlier
--- wording overclaimed). The guard makes the NEW body unable to pass the anchor block for
--- ANY input. It says nothing about a call already executing the OLD body at the moment this
--- migration commits: per the repo's binding D1 rule that call finishes on the old body, and
--- no `create or replace` and no tail assertion can reach it. The reason an unattended
--- OCR-sales post is nevertheless impossible across the deploy is STAGING, and it is worth
--- stating as a chain rather than a conclusion:
---   (i)   the OLD anchor block needs BOTH `invoice.total_excl_tax` and `invoice.tax_total`;
---   (ii)  those paths have zero occurrences across all 29 live extractions;
---   (iii) `persist_invoice_facts` is the only writer that can create them, and it is
---         granted to `clara_runtime` alone;
---   (iv)  the pre-X2 mapper does not emit them.
--- So no input that exists at deploy time can satisfy the old body either, and the in-flight
--- window is empty of qualifying documents rather than merely guarded. That argument HOLDS
--- ONLY IF 0022 lands while the pre-X2 runtime is live — which makes it a deploy-order
--- obligation this file records and the runbook must carry: **deploy 0022 BEFORE X2, never
--- after and never concurrently.**
+-- WHAT THE GUARD DOES AND DOES NOT PROVE (rewritten after adversarial round 2; BOTH earlier
+-- versions of this paragraph were wrong, in different ways, and the second was wrong in a
+-- more dangerous way because it sounded rigorous).
+--
+-- What is true: the guard makes the NEW body unable to pass the anchor block for ANY input.
+--
+-- What it says nothing about: a call already executing the OLD body when this migration
+-- commits. Per the repo's binding D1 rule that call finishes on the old body; no
+-- `create or replace` reaches into it and no tail assertion can see it.
+--
+-- The round-1 wording then claimed the in-flight window was harmless because "the pre-X2
+-- mapper cannot emit `invoice.total_excl_tax` / `invoice.tax_total`". THAT IS FALSE.
+-- `invoiceFacts.v1.azure.mjs`'s FIELD_MAP has mapped `SubTotal -> invoice.total_excl_tax`
+-- and `TotalTax -> invoice.tax_total` since Wave A2 — the deployed v5 mapper, today. The
+-- 0/29 measurement is EMPIRICAL (Azure does not return those fields on the layouts in this
+-- corpus), not STRUCTURAL (the mapper is perfectly able to emit them). A single future
+-- document on a layout where Azure does return both, at >=0.95 confidence with a polygon
+-- and MYR, would satisfy the OLD body's whole stack — Tier-A corroboration, the old
+-- `net + tax + rounding = gross` anchor, the rule gates and the sighting floor — and post.
+-- That is not a defect in 0016: it is 0016's sanctioned law, and changing it is exactly why
+-- X4 exists. But it means the in-flight window is a REAL window, not an empty one.
+--
+-- So the window is closed by CEREMONY, not by staging: **0022 applies under a brief runtime
+-- quiesce** (stop `clara-runtime`, apply, start). With no runtime there is no in-flight
+-- executor call to finish on the old body, and the D1 rule has nothing to act on. The
+-- quiesce is seconds, because this migration takes no long lock and rewrites no table.
+--
+-- The deploy-ORDER obligation stands on its own and is unaffected by the above: **deploy
+-- 0022 BEFORE X2, never after and never concurrently.** X2 exists precisely to make Azure's
+-- net/tax fields arrive reliably, so shipping it first would flood the corpus with documents
+-- that satisfy the old body — turning a narrow, quiesced window into a wide one.
 create or replace function clara.execute_rule_post(p_entry uuid, p_op_key text) returns jsonb
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare
@@ -1433,7 +1456,7 @@ alter function clara.execute_rule_post(uuid,text) owner to clara_fn_owner;
 -- ---------------------------------------------------------------------------
 do $tail$
 declare
-  v_acl text; v_cfg text; v_sig text; v_src text;
+  v_acl text; v_cfg text; v_sig text; v_src text; v_role text; v_norm text;
   v_new_fns text[] := array[
     'clara.request_reextraction(uuid,text,text)',
     'clara.set_firm_high_stakes_threshold(bigint,text)'];
@@ -1463,22 +1486,43 @@ begin
       raise exception '0022 tail: % is not owned by clara_fn_owner', v_sig;
     end if;
 
-    select coalesce(string_agg(pg_get_userbyid(a.grantee), ','), '') into v_acl
-      from pg_proc p, lateral aclexplode(p.proacl) a
-     where p.oid = v_sig::regprocedure and a.grantee = 0;
+    -- HUMAN-INVOKED ONLY, structurally, asserted as a WHITELIST (adversarial round 2 —
+    -- MAJOR). The earlier version blacklisted PUBLIC plus four group roles, which certifies
+    -- nothing: a direct grant to `clara_runtime_login`, `clara_agent_read_login`,
+    -- `clara_wake_write_login` or any role invented later passes a blacklist while the
+    -- notice below still says "clara_authenticated only". A closed set has to be closed.
+    -- Only the owner (which holds EXECUTE implicitly as the definer's owner) and
+    -- clara_authenticated may appear; anything else is NAMED in the failure.
+    select coalesce(string_agg(g, ', ' order by g), '') into v_acl
+      from (select case when a.grantee = 0 then 'PUBLIC'
+                        else pg_get_userbyid(a.grantee) end as g
+              from pg_proc p, lateral aclexplode(p.proacl) a
+             where p.oid = v_sig::regprocedure
+               and a.privilege_type = 'EXECUTE'
+               and (a.grantee = 0
+                    or pg_get_userbyid(a.grantee) not in ('clara_fn_owner', 'clara_authenticated'))
+           ) s;
     if v_acl <> '' then
-      raise exception '0022 tail: % is EXECUTABLE BY PUBLIC', v_sig;
+      raise exception '0022 tail: % has unexpected EXECUTE grantee(s): % (only clara_fn_owner + clara_authenticated may hold it)',
+        v_sig, v_acl;
     end if;
 
-    -- HUMAN-INVOKED ONLY, structurally. This is the whole cost bound on
-    -- request_reextraction (ADR-047 Q4 declined a numeric cap): if no machine lane can
-    -- execute it, no sweep, workflow or wake can spend Azure pages in a loop.
-    if exists (select 1 from pg_proc p, lateral aclexplode(p.proacl) a
-                where p.oid = v_sig::regprocedure
-                  and pg_get_userbyid(a.grantee) in ('clara_runtime','clara_agent_ro',
-                                                     'clara_wake_interactive','clara_wake_proactive')) then
-      raise exception '0022 tail: % is granted to a non-human role', v_sig;
-    end if;
+    -- …and the EFFECTIVE privilege, which is the question that actually matters: a role can
+    -- reach a function through group membership without ever appearing in its ACL. This is
+    -- the whole cost bound on request_reextraction (ADR-047 Q4 declined a numeric cap): if
+    -- no machine lane can execute it, no sweep, workflow or wake can spend Azure pages in a
+    -- loop. Roles are resolved through to_regrole and ABSENT ones are SKIPPED (the probe-9
+    -- idiom) — the login shells do not exist on every database — but a role that IS present
+    -- and holds the privilege fails. Never fail open on a missing role.
+    foreach v_role in array array['clara_runtime', 'clara_agent_ro',
+        'clara_wake_interactive', 'clara_wake_proactive',
+        'clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login'] loop
+      if to_regrole(v_role) is null then continue; end if;
+      if has_function_privilege(v_role, v_sig, 'execute') then
+        raise exception '0022 tail: % holds EFFECTIVE EXECUTE on % — this verb is human-invoked only',
+          v_role, v_sig;
+      end if;
+    end loop;
   end loop;
 
   if exists (select 1 from clara.wake_fn_allowlist
@@ -1533,6 +1577,16 @@ begin
   -- be the enumeration that silently disappears while the count is satisfied elsewhere.
   if position('must not be negative' in v_src) = 0 then
     raise exception '0022 tail: persist_invoice_facts lost the non-negative component guard';
+  end if;
+  -- STRONGER (adversarial round 2 — NOTE): the guard's LOAD-BEARING EXPRESSION, as one
+  -- whitespace-normalised literal. Counting occurrences and grepping a refusal string can
+  -- both be satisfied by text sitting in a COMMENT while the executable enumeration is
+  -- gone; this cannot. The normalisation is the 0017 tail's own idiom, so the assertion
+  -- survives reformatting but not deletion.
+  v_norm := regexp_replace(v_src, '\s+', '', 'g');
+  if position('r.field_pathin(''invoice.service_charge'',''invoice.discount'',''invoice.delivery'')andr.monetary_cents<0'
+       in v_norm) = 0 then
+    raise exception '0022 tail: the non-negative guard EXPRESSION is gone from persist_invoice_facts (a comment is not a control)';
   end if;
   if position('chr(1)' in v_src)=0 or position('monetary value is malformed' in v_src)=0
      or position('must state invoice.type_code' in v_src)=0

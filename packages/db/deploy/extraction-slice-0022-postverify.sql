@@ -99,7 +99,7 @@ end $$;
 --    open here — the 0021 lesson); a NULL acl means EXECUTE TO PUBLIC = FAILURE.
 -- ---------------------------------------------------------------------
 do $$
-declare v_sig text; v_acl aclitem[]; v_bad text; v_have text;
+declare v_sig text; v_acl aclitem[]; v_bad text; v_have text; v_role text;
 begin
   foreach v_sig in array array[
       'clara.request_reextraction(uuid,text,text)',
@@ -108,14 +108,20 @@ begin
     if v_acl is null then
       raise exception 'POST-VERIFY 3: % has a NULL acl — default function privileges are EXECUTE TO PUBLIC', v_sig;
     end if;
-    select string_agg(distinct pg_get_userbyid(a.grantee), ', ') into v_bad
+    -- WHITELIST, not blacklist. The earlier form listed PUBLIC plus four GROUP roles, so a
+    -- direct grant to clara_runtime_login / clara_agent_read_login / clara_wake_write_login
+    -- — or to any role invented after this file was written — sailed through while the
+    -- notice below still announced "clara_authenticated only". On a live deploy that is a
+    -- probe that certifies the opposite of what it prints. Close the set: only the definer's
+    -- owner and clara_authenticated may hold EXECUTE, and anything else is NAMED.
+    select string_agg(distinct case when a.grantee = 0 then 'PUBLIC'
+                                    else pg_get_userbyid(a.grantee) end, ', ') into v_bad
       from aclexplode(v_acl) a
      where a.privilege_type = 'EXECUTE'
        and (a.grantee = 0
-            or pg_get_userbyid(a.grantee) in ('clara_runtime','clara_agent_ro',
-                                              'clara_wake_interactive','clara_wake_proactive'));
+            or pg_get_userbyid(a.grantee) not in ('clara_fn_owner', 'clara_authenticated'));
     if v_bad is not null then
-      raise exception 'POST-VERIFY 3: % is EXECUTABLE by %', v_sig, v_bad;
+      raise exception 'POST-VERIFY 3: % has unexpected EXECUTE grantee(s): % — only clara_fn_owner + clara_authenticated may hold it', v_sig, v_bad;
     end if;
     select string_agg(distinct pg_get_userbyid(a.grantee), ', ') into v_have
       from aclexplode(v_acl) a
@@ -123,12 +129,25 @@ begin
     if v_have is null then
       raise exception 'POST-VERIFY 3: clara_authenticated does NOT hold EXECUTE on % — the human lane cannot call its own verb', v_sig;
     end if;
+    -- EFFECTIVE privilege, separately: a role can reach a function through GROUP MEMBERSHIP
+    -- without appearing in its ACL at all, so an ACL sweep alone cannot answer "can the
+    -- runtime call this". Absent roles are SKIPPED via to_regrole (the probe-9 idiom — the
+    -- login shells are not on every database), but a role that EXISTS and holds the
+    -- privilege fails. Skipping is for absence only; never fail open.
+    foreach v_role in array array['clara_runtime', 'clara_agent_ro',
+        'clara_wake_interactive', 'clara_wake_proactive',
+        'clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login'] loop
+      if to_regrole(v_role) is null then continue; end if;
+      if has_function_privilege(v_role, v_sig, 'execute') then
+        raise exception 'POST-VERIFY 3: % holds EFFECTIVE EXECUTE on % — a machine lane can reach a human-only verb', v_role, v_sig;
+      end if;
+    end loop;
   end loop;
   if exists (select 1 from clara.wake_fn_allowlist
               where function_name in ('request_reextraction','set_firm_high_stakes_threshold')) then
     raise exception 'POST-VERIFY 3: a 0022 verb leaked into the wake allowlist';
   end if;
-  raise notice 'OK 3  EXECUTE: clara_authenticated only, both verbs; wake allowlist clean - read from proacl';
+  raise notice 'OK 3  EXECUTE: clara_authenticated ONLY (whitelist over proacl) + zero EFFECTIVE privilege for every machine role/login shell present; wake allowlist clean';
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -228,6 +247,13 @@ begin
   end if;
   if position('must not be negative' in v_src) = 0 then
     raise exception 'POST-VERIFY 6: persist_invoice_facts lost the non-negative component guard — a negative discount can forge the sales identity';
+  end if;
+  -- The guard's LOAD-BEARING EXPRESSION, as one whitespace-normalised literal. An occurrence
+  -- count and a refusal-string grep can both be satisfied by text sitting in a COMMENT while
+  -- the executable enumeration is gone; this cannot.
+  if position('r.field_pathin(''invoice.service_charge'',''invoice.discount'',''invoice.delivery'')andr.monetary_cents<0'
+       in regexp_replace(v_src, '\s+', '', 'g')) = 0 then
+    raise exception 'POST-VERIFY 6: the non-negative guard EXPRESSION is gone from persist_invoice_facts (a comment is not a control)';
   end if;
   if position('chr(1)' in v_src)=0 or position('monetary value is malformed' in v_src)=0 then
     raise exception 'POST-VERIFY 6: persist_invoice_facts lost a retained 0015/0016 refusal';
