@@ -111,7 +111,9 @@ rulings WB-R1..R27); 0017 + the v25 runtime + the dashboard shipped via the WB-R
 ceremony (ADR-033/034/035/036), then 0018 (Gate-K domain) same-day (ADR-038).
 
 **LIVE POSTURE: Supabase 21 migrations (`0021_counterparty_human_lane`) · Fly `clara-runtime`
-release v27 (ten loops, WIKI_PROJECTION acquired, /ready true zero warnings) ·
+release **v29** (carries PR #100's duplicate-detection fix + PR #102/#104's printed-ledger seeding source) ·
+**FOUR firms** (BELCORT + two RLS fixtures + **ROME PUBLIC ADVISORY `39008536`, born 2026-07-27 via Gate F**) ·
+**BELCORT `high_stakes_amount_cents` = RM100,000** (ADR-044, per-firm — the fixtures and the new firm stay at the RM10,000 default) ·
 dashboard Pages `app.clarabook.com` auto-deploys from `main` **and now sets `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`** (without it, intake bytes + finalize transit a Pages Function instead of going direct to Fly — `intake.ts` requires the direct URL for any deployment) · `clara-backup` daily
 (zero-501-proven).** 0019 landed 2026-07-25 (ADR-039) and **0020 the same day**
 (ADR-041) — both runtime-image-first, the second with a re-quiesce before the
@@ -130,8 +132,9 @@ WB-R22's solo lane refused the first submit `CLR05 · SELF_ATTESTATION` — the 
 expired when 0019 removed the veto). **S deferred on hard evidence** (no MyInvois artifact
 exists in the corpus).
 
-**Both owner rulings are IN** (WB-R28: Gate P's FRP/FX/personal-name proof accepted; WB-R29:
-B-12's date — since **superseded**, see below). **Wave B is NOT finished.** Honest gate status:
+**★ WAVE B IS CLOSED ON INTENT (ADR-046, 2026-07-27)** — every gate that can close on real
+evidence has closed; every deferral names its cause and destination (Phase 5 synthetic, or the
+operating runway). Per-gate honest status:
 
 | gate | state |
 |---|---|
@@ -141,11 +144,20 @@ B-12's date — since **superseded**, see below). **Wave B is NOT finished.** Ho
 | **P** | **BLOCKED — and the obvious fix was BUILT-DESIGNED, ADVERSARIALLY REFUSED, and NOT SHIPPED (2026-07-27; `docs/plan/research/wave-b/gate-p-build-refused-2026-07-27.md`).** Real RM 8%-SST supplier invoices are already in the DB (BRIGHTPATH `509e788d`); the leg must tie to `invoice.tax_total`, produced **0 times across all 29 `invoice_facts` extractions**. Emitting it was refused on three grounds: **(a) it closes nothing** — `509e788d` already has a done extraction, `_enqueue_invoice_facts_core` returns `already_completed`, and there is **no add-region/re-extract verb anywhere in 0001-0021**, so a new mapper reaches only post-deploy documents; **(b) it switches OFF a live barrier** — `anchor_missing` (0016:2704-2721) is today an *unconditional structural refusal* on the OCR-sales unattended lane **precisely because** `tax_total`/`total_excl_tax` are never emitted; **(c) it breaks the LIVE sales approve path** — four dormant ties wake, none accepting `amount_override`, and `net+tax+rounding=gross` **fails on a document carrying a service charge** (LAI LOU MEI: 94.30+5.66+0.02 = 99.98 ≠ 103.75). **CORRECTION: `invoiceFacts.v1.azure.mjs` is NOT frozen** (verified 3 ways incl. running the lint) — no v2 is needed; the earlier "v1 is frozen" claim was wrong. Gate P needs its own staged slice with its own gates, on a FULLY LIVE lane |
 | **L** | **BLOCKED — no conflicting real pair exists.** The candidate (Bee Creative YA2024 closing vs YA2025 opening) **agrees to the sen**. Manufacturing a conflict is fabrication |
 | **R2** | **2 of 3 claims CLOSED on live (ceremony run 2026-07-26, runtime v29; receipt `docs/plan/research/wave-b/live-gate-r2-2026-07-26.md`).** Batch `e2831cad` on RPR's real GL; the runbook's forecast held to the number (115 proposals / 81 rule / 34 wiki / 24 unattributed). **CLAIM (1) CLOSED** — 6 `vendor_account` rules live + signed. **CLAIM (2) CLOSED** — 0 sightings bred from prior GL. **CLAIM (3) NOT CLOSED** — no un-coded document exists from a seeded counterparty AND the autodraft lane has never drafted. **6 of 12 ticks refused `CLR23 registration_conflict`, correctly**: those counterparties already exist carrying real registration numbers, a GL prints none, and the DB refuses to bind name-only to a registered entity (no registration was invented). **Clara published its first 12 `recurring_pattern` knowledge pages** (deterministic, no model) — before this the wiki was a document index only. Original build note: **CODE SHIPPED (PR #102, `40dc88c`); a mid-ceremony defect fixed in PR #104 — `superseded_by` chains per DOCUMENT not per engine, so the layout extraction is always superseded once classified; 11 unit tests stayed green because the defect lived in a SQL predicate.** My "blocked on a missing producer" claim was **wrong twice**: `seeding-parse.mjs:317-337` always had an xlsx-bytes fallback (I read the SQL, not the caller), and the producer I proposed would have **regressed** it (line 321 short-circuits). The real gap was narrower — the lane took a spreadsheet and nothing else, locking out PDF-only clients. Fixed by **source (c)** `lib/prior-gl-cells.mjs`, reading the `tables.N.cells.M` regions Azure already produces; **column identity comes from `page_polygon` geometry** (`pdftotext` destroys it — Clara never used `pdftotext`). Reads **no figure**: proposals consume only counterparty/account/date/cite. Measured on RPR's real GL (`d7bc9c02`): **125 entries · 22 accounts · 81 `vendor_account_rule` + 34 `wiki_fact`**. **Runtime redeploy required before the ceremony** |
-| **F** | **BLOCKED on three OWNER acts** — `docs/ops/gate-f-provisioning.md` (a membership-free auth account, a fresh admission token, RPA's particulars) |
+| **F** | **CLOSED 2026-07-27 (ADR-045)** — firm `39008536` ROME PUBLIC ADVISORY SDN. BHD. born through the `firmInterview_v1` durable run (22 parks; MIA skipped by design). **Durability proven by accident**: the first commit failed on a polluted token file, nothing was consumed, the run RE-PARKED with the same memoized op_key, and a commit-only retry succeeded against the SAME run. Post-verify: 4 firms · owner membership active · 4/4 admissions consumed · 11 plan items · `firm.created` · RLS clean · the new firm at the RM10,000 default (ADR-044 did not leak). Receipt `docs/plan/research/wave-b/live-gate-f-2026-07-27.md` |
 
-**Closeable by engineering: R2 and W2's journey claims.** Evidence receipts:
-`docs/plan/research/wave-b/gate-p-and-l-evidence-2026-07-26.md`,
-`…/live-gate-b12-rpr-2026-07-26.md`.
+**The sole pre-Wave-C engineering is the EXTRACTION SLICE** (`docs/plan/extraction-slice-contract.md`,
+DRAFT v0.1 awaiting the owner's grilling): re-extract verb + `set_firm_high_stakes_threshold` (0022) →
+totals reader → sum-of-stated-components sales tie → explicit `anchor_missing` guard → **two-reader
+corroboration LAST and ALONE (X5)**. R2 claim (3) / W2 journeys / the **first production autopost**
+sit on the OPERATING runway (~3 approved small-ticket bills from one recurring vendor — e.g. KOK LIONG
+RM1,190–2,600; the autopost verbs are fully built with **0 calls ever**, and 5 sighting pairs meet the
+≥3 floor but none can fire: payroll JVs bind no facts lane, the AR-control pair lacks the sales
+evidence class). **Autopost-from-seeding was proposed by the owner and REFUSED under WB-R2** —
+posting authority derives from verified in-system approvals, never another system's claims. Evidence
+receipts: `docs/plan/research/wave-b/gate-p-and-l-evidence-2026-07-26.md`,
+`…/live-gate-b12-rpr-2026-07-26.md`, `…/live-gate-r2-2026-07-26.md`, `…/live-gate-f-2026-07-27.md`,
+`…/gate-p-build-refused-2026-07-27.md`, `…/vision-alignment-audit-2026-07-27.md`.
 
 **Intake WORKS** — proven end-to-end with a genuinely new document. A 2026-07-26 "outage" was
 misdiagnosed four times; the real defects were `putCanonical` never detecting a duplicate
