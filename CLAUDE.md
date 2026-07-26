@@ -44,7 +44,7 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 - **Never Blindly dispatch the main model.** Every subagent/workflow/teammate dispatch carries an explicit `model`; ***omission silently inherits Fable, which is forbidden.*** Codex lanes stay `gpt-5.6-sol`.
 - **Ground before building.** On a new or compacted session, before answering an architecture question or changing code: **query the codebase-memory graph first** for structure, and read the relevant harness row above. For substantial, opt-in-scale work a grounding fan-out (Workflow) can help — but a few targeted graph queries + reads usually suffice.
 - **Query the graph, don't grep.** The codebase-memory graph is the first stop for "where / what / who-calls" questions (~100× cheaper than file-by-file reading). Use Grep/Read to drill into the specific file the graph points you at. Re-index after big code changes. *(stdio MCP, project-scoped in `.mcp.json`.)*
-- **Keep the harness fresh — each artifact for its purpose (before compact / refresh).** Check all the harness status and related docs is sync and refreshed with newest project state like **prd, rebuildplan, projectlog.......etc** , housekeeping anything that is stale or wrong/outdated, its for avoid the project's state, plan, decision, log 's pollution. and also refresh/update the memory record. (btw tidy up the loooong project log. make sure no context pollute in there.)Do a harness-refresh pass before compacting a long session.
+- **Keep the harness fresh — each artifact for its purpose (before compact / refresh).** Check all the harness status and related docs is sync and refreshed with newest project state like **prd, rebuildplan, projectlog.......etc** , housekeeping anything that is stale or wrong/outdated, its for avoid the project's state, plan, decision, log 's pollution. and also refresh/update the memory record. (btw tidy up the loooong project log. make sure no context pollute in there and make sure claudemd is clean.)Always remember to refresh codebase-mcp and Do a harness-refresh pass before compacting a long session.
 - **Grill until crystal-clear.** For any non-trivial plan, bug fix, or feature, use the **`grilling` skill (`/grillme`)** to interview the owner — as many rounds as it takes until the plan is unambiguous and aligned. Resolve ambiguity before writing code.
 - **`main` is PR-only** — land via PR with green CI (never push `main`). Free-tier
   branch protection is not platform-enforced, so the git-base freeze-lint + CI are
@@ -126,8 +126,10 @@ URL) **· `clara-backup` daily.** All Wave-B migrations deployed; none queued.
 | **F** | CLOSED (ADR-045, `live-gate-f-2026-07-27.md`) — durable 11-Q birthed the firm; durability proven by an unstaged fault (failed commit → re-park on the same op_key → clean retry, SAME run) |
 
 **NEXT (the sole pre-Wave-C engineering): the EXTRACTION SLICE** —
-`docs/plan/extraction-slice-contract.md` (DRAFT v0.1, **grill before building**; 4 open owner
-questions). Order: 0022 (`request_reextraction` + `set_firm_high_stakes_threshold` + the
+`docs/plan/extraction-slice-contract.md` (**RATIFIED v1.0 = LAW, ADR-047** — rulings: confidence
+dropped from gating entirely · `request_reextraction` at the BOOKKEEPER floor, human-invoked
+only, no cost cap · X6 = vendor_unresolved diagnose+fix in-slice, own block, never inside X5).
+Order: 0022 (`request_reextraction` + `set_firm_high_stakes_threshold` + the
 sum-of-stated-components sales tie + an explicit `anchor_missing` guard) → the deterministic
 totals reader → **two-reader corroboration LAST and ALONE (X5)** — today Tier-A passes 0/29
 (Azure confidence max 0.837 vs 0.95; polygon + MYR pass 29/29), which is why the autodraft
