@@ -150,3 +150,37 @@ test("structured CSV parsing runs in a worker and emits row/column regions", asy
   assert.equal(result.regions[0].locator_kind, "row_col");
   assert.match(result.regions[1].text_content, /123\.45/);
 });
+
+// ---------------------------------------------------------------------------
+// 2026-07-26 intake outage. Two production failures produced ZERO log lines: the
+// finalize catch discarded `err.message`, keeping only the coarse `failure_code`
+// that reaches the DB. `storage_error` alone cannot distinguish a bad key from a
+// missing config from a refused upload from a failed read-back — so the cause had
+// to be reconstructed from outside the system, and two coherent-but-WRONG
+// diagnoses were reached on the way, one of them acted on in production.
+//
+// Source-level, deliberately: driving finalize to fail needs a DB, a spool and a
+// live storage adapter, and a guard that expensive is a guard that gets deleted.
+// This asserts the cheap, load-bearing property — the failure path SAYS something.
+// ---------------------------------------------------------------------------
+test("the intake finalize failure path logs the error detail, not just the code", async () => {
+  const { readFile } = await import("node:fs/promises");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join: pjoin } = await import("node:path");
+  const src = await readFile(
+    pjoin(dirname(fileURLToPath(import.meta.url)), "..", "lib", "intake.mjs"), "utf8");
+
+  const catchIdx = src.indexOf("const code = failureCode(err);");
+  assert.ok(catchIdx > 0, "the finalize catch still computes a failureCode");
+  const block = src.slice(catchIdx, catchIdx + 900);
+
+  assert.match(block, /console\.error\(/,
+    "the finalize failure path must EMIT something — silence is what made the outage expensive");
+  assert.match(block, /err\?\.message/,
+    "…and it must carry the error MESSAGE (e.g. 'Storage upload failed (403)'), which is the "
+    + "only thing that separates the causes a single coarse code lumps together");
+  assert.match(block, /intake=\$\{intakeId\}/, "…identifying WHICH intake failed");
+  assert.match(block, /code=\$\{code\}/, "…and the terminal code the DB recorded");
+  assert.doesNotMatch(block.split("console.error")[1]?.slice(0, 220) ?? "", /filename|originalFilename/,
+    "…but never the filename: it can identify a client");
+});

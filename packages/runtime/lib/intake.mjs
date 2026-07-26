@@ -195,11 +195,8 @@ export async function beginDocumentIntake(client, principal, input) {
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
-    await callWriter(client, "select clara.fail_document_intake($1,$2,$3) as receipt", [
-      intakeId,
-      "internal",
-      opKey("doc-intake-sidecar-fail"),
-    ]).catch(() => {});
+    await callWriter(client, "select clara.fail_document_intake($1,$2,$3) as receipt",
+      [intakeId, "internal", opKey("doc-intake-sidecar-fail")]).catch(() => {});
     throw err;
   }
   return { intake_id: intakeId, upload_token: uploadToken, expires_at: expiresAt };
@@ -240,11 +237,8 @@ export async function uploadDocumentBytes({ withRuntime, intakeId, token, readab
     if (err?.code === "too_large") {
       if (meta) {
         await withRuntime((client) =>
-          callWriter(client, "select clara.fail_document_intake($1,$2,$3) as receipt", [
-            intakeId,
-            "too_large",
-            opKey("doc-intake-upload-size-fail"),
-          ]),
+          callWriter(client, "select clara.fail_document_intake($1,$2,$3) as receipt",
+            [intakeId, "too_large", opKey("doc-intake-upload-size-fail")]),
         ).catch(() => {});
         await removeIntakeSpool(intakeId);
       }
@@ -404,6 +398,12 @@ export async function finalizeDocumentIntake(options) {
     return finalized;
   } catch (err) {
     const code = failureCode(err);
+    // 2026-07-26 outage: only `code` reaches the DB and the codes are coarse — `storage_error`
+    // covers a bad key, missing config, an expired credential, a refused upload AND a failed
+    // read-back. The err MESSAGE separates them ("Storage upload failed (403)") and was dropped,
+    // so two production failures produced ZERO log lines. `canonicalReached` localises the
+    // failure either side of the storage write. No filename — it can identify a client.
+    console.error(`[clara-runtime] intake FAILED intake=${intakeId} code=${code} canonicalReached=${canonicalReached} detail=${String(err?.message || err)}`);
     if (meta) {
       try {
         await withRuntime((client) =>
