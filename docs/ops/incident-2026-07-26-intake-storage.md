@@ -1,4 +1,39 @@
-# INCIDENT — document intake DOWN, 2026-07-26 — **root cause found; fix is a Pages env var**
+# INCIDENT — 2026-07-26 — **RESOLVED, and "intake is DOWN" was WRONG**
+
+> ## ⚠️ THE HEADLINE CLAIM WAS MY INFERENCE, NOT A FACT
+>
+> **Intake was never down for new documents.** The only file I tested with —
+> `RPRJV202502001 - SECRETARY FEE - RM2,600.pdf` — **was already ingested in Clara**
+> (document `89e9d362`, filed, with an approved entry). Every "failure" was a **duplicate
+> re-upload**, which is the ordinary case: a human re-dropping a file they already sent.
+>
+> ### Two real bugs, both now fixed
+>
+> **1. `putCanonical` could never detect a duplicate.** Supabase returns a duplicate as
+> **HTTP 400 wrapping `{"statusCode":"409","error":"Duplicate"}`** — the real status is in the
+> BODY. The code branched on `response.status === 409`, which is therefore never true, so the
+> "already exists" path was unreachable and every duplicate became a fatal `storage_error`.
+>
+> **2. The error body was discarded.** `Storage upload failed (400)` cannot distinguish a
+> duplicate from a permission denial from a bad key — and 400 is what Supabase returns for all
+> three. Both the upload and read paths now carry the body.
+>
+> **And one real misconfiguration:** `NEXT_PUBLIC_CLARA_RUNTIME_URL` was unset in the
+> Cloudflare Pages build, so bytes and finalize transited a Pages Function — which is why the
+> error arrived as an opaque Cloudflare HTML 502 instead of the runtime's own JSON. Fixing it
+> is what let the true error surface. Genuinely wrong, genuinely worth fixing — but not "the
+> outage", because there was no outage.
+>
+> ### What this cost, and the pattern
+>
+> Four coherent diagnoses. **Three wrong**: expired credential (checked, wrong), needs UPDATE
+> (acted on in production, reverted), same-origin transport (real bug, not the cause). One
+> destructive probe that **overwrote a client document** (recovered byte-identical). And the
+> premise — "intake is down" — was never verified against a document Clara had not already
+> seen. **One control would have collapsed the whole thing: test with a file the system has
+> never seen.**
+
+
 
 > ## ⛔ ROOT CAUSE — CORRECTED. My first two diagnoses were BOTH WRONG.
 >
