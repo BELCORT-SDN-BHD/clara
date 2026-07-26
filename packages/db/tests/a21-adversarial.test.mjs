@@ -36,6 +36,9 @@ import {
   setTurnoverClassification, resolveWatch, fnSource, reviseEntry, setDocumentKind, docKind,
   AP, EXP,
 } from "./a21-helpers.mjs";
+// 0022 / X4: whether the OCR-sales anchor lane is held shut by the extraction-slice dark
+// guard, read off the LIVE catalog. See the notes at the two cells that consult it.
+import { ocrAnchorDarkGuard } from "./x1-helpers.mjs";
 
 const REC = "300-A00";
 const REV = "500-R01";
@@ -245,7 +248,18 @@ test("ADV-3: a LOW-CONFIDENCE classifier verdict is not polarity evidence — th
     "update clara.open_questions set status='dismissed', resolved_by=$2, resolved_at=now(), resolution_text='adv-3 fixture: re-verified at high confidence' where document_id=$1 and origin='classification' and status='open'",
     [cited.documentId, world.users.alice],
   );
-  await postViaRule(draft.entry_id);
+  await postViaRule(draft.entry_id).catch((e) => noteLane(`adv-3 pass-post raised ${e.code}`));
+  // 0022 / X4 — see the note in a21-ocr-envelope's polarity cell. The claim being made here
+  // is about the CLASSIFIER verdict, and it survives either way: at 0022+ the draft clears
+  // polarity and is stopped by the deliberately-armed anchor guard instead, which is exactly
+  // the "identical control set" the cell is about. The predicate reads the live catalog, so
+  // X5's removal of the guard restores the original assertion with no edit.
+  if (await ocrAnchorDarkGuard()) {
+    assert.equal(await lastSkipReason(draft.entry_id), "anchor_missing",
+      "at 0022+ the high-confidence verdict clears POLARITY (the skip is no longer "
+      + "polarity_unverified) and the draft is held by the X4 dark guard instead");
+    return;
+  }
   assert.equal(await entryStatusOf(draft.entry_id), "approved", "the high-confidence verdict admits the identical control set");
 });
 
@@ -292,7 +306,19 @@ test("ADV-5: the OCR sighting floor is RE-DERIVED — reversing the evidence ref
   const draft = await ocrSalesDraft(client, cited, { cp });
   await postViaRule(draft.entry_id).catch((e) => noteLane(`adv-5 post raised ${e.code}`));
   assert.notEqual(await entryStatusOf(draft.entry_id), "approved", "a live rule whose evidence was reversed posts NOTHING");
-  assert.equal(await lastSkipReason(draft.entry_id), "floor_lost", "the skip is NAMED floor_lost");
+  // 0022 / X4 — the floor control is SHADOWED, not removed. The anchor block sits ahead of
+  // it in the ladder (0016: (c) anchors, then (d) customer, then (e2) floor), so while the
+  // extraction-slice dark guard is armed every ocr_sales post returns at `anchor_missing`
+  // and `floor_lost` is unreachable through the executor. The refusal-at-SIGNING half above
+  // — CLR27 / insufficient_evidence — still proves the floor is re-derived and still bites;
+  // the post half re-arms itself when X5 removes the disjunct.
+  if (await ocrAnchorDarkGuard()) {
+    assert.equal(await lastSkipReason(draft.entry_id), "anchor_missing",
+      "at 0022+ the X4 dark guard returns first, so floor_lost is SHADOWED at the executor "
+      + "(still present, still re-derived — see x1-anchor.test.mjs, which asserts exactly that)");
+  } else {
+    assert.equal(await lastSkipReason(draft.entry_id), "floor_lost", "the skip is NAMED floor_lost");
+  }
   void rule;
 });
 

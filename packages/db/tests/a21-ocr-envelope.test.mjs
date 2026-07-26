@@ -30,6 +30,9 @@ import {
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm, fnSource,
 } from "./a21-helpers.mjs";
+// 0022 / X4: whether the OCR-sales anchor lane is held shut by the extraction-slice dark
+// guard, read off the LIVE catalog. See the note at the two PASS-POST halves below.
+import { ocrAnchorDarkGuard } from "./x1-helpers.mjs";
 
 const REC = "300-A00";
 const REV = "500-R01";
@@ -181,7 +184,21 @@ test("§3.3(2) polarity_unverified FAIL-PRE: an unclassified doc skips; PASS-POS
   // time (control 8) and the same draft now posts.
   await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97 });
   const sightBefore = (await sightingRows(client)).length;
-  await postViaRule(draft.entry_id);
+  await postViaRule(draft.entry_id).catch((e) => noteLane(`polarity pass-post raised ${e.code}`));
+  // 0022 / X4 — the PASS-POST half is now conditional on the extraction-slice DARK GUARD,
+  // and deliberately NOT rewritten to a weaker claim. Migration 0022 holds the OCR-sales
+  // anchor block shut unconditionally until X5 ships corroboration-by-agreement, because
+  // X2's net/tax fields would otherwise switch that barrier off as a side effect (contract
+  // §2 X4 / gate XG5; the FATAL 2 of gate-p-build-refused-2026-07-27.md). The predicate is
+  // read from the live catalog, so when X5 deletes the disjunct this cell goes back to
+  // asserting the post with no edit — the 0016 claim is preserved, not retired.
+  if (await ocrAnchorDarkGuard()) {
+    assert.notEqual(await entryStatusOf(draft.entry_id), "approved",
+      "…and at 0022+ the SAME fully-corroborated draft is held by the X4 dark guard instead");
+    assert.equal(await lastSkipReason(draft.entry_id), OCR_SKIP.anchor,
+      "…skipping anchor_missing, which is the live outcome for all 29 existing extractions");
+    return;
+  }
   assert.equal(await entryStatusOf(draft.entry_id), "approved", "with polarity verified the fully-corroborated OCR sales draft POSTS");
   const row = (await rootQuery("select checked_via_rule_id from clara.journal_entries where id=$1", [draft.entry_id])).rows[0];
   assert.equal(row.checked_via_rule_id, rule, "the posted entry stamps the ocr_sales rule as its checker authority");
