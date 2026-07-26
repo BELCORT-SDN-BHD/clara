@@ -104,15 +104,35 @@ account must be chosen per party.
 (`BEING TAKE IN ACCRUAL SALARY*`, `SALARY <month>`, `STATUTORY FOR <month>`,
 `BEING RECORD FOR WAIVER OF`, `BEING INCORPORATED ALLOTMENT`, `PROFIT/(LOSS)`).
 
-**Two open questions for the owner — do NOT guess these:**
+**OWNER RULING (2026-07-26) — both questions answered YES:**
 
-1. **Are `INF ASSET HOLDINGS` and `INF ASSET HOLDINGS SDN BHD` the same entity?** They arrive as
-   two counterparties. If they are one, they want an alias, exactly like the
-   `D & DREAM` → `DARE TO DREAM` case. The `SDN BHD` variant's candidates are `900-R01`
-   (water-purifier rental) / `900-T03` (toll & parking) / `900-W01` (utilities), one occurrence
-   each — nothing in the document distinguishes them.
-2. **`INF ASSET HOLDINGS → 900-O01` is B-12's RM161,120.00 rental-gap counterparty.** Once signed,
-   future INF documents code to rental automatically.
+1. **`INF ASSET HOLDINGS` and `INF ASSET HOLDINGS SDN BHD` ARE the same entity.** They must
+   become ONE counterparty with an alias, exactly like `D & DREAM` → `DARE TO DREAM`.
+2. **`INF ASSET HOLDINGS → 900-O01` (office & warehouse rental) is CONFIRMED**, and it is B-12's
+   RM161,120.00 rental-gap counterparty. Once signed, future INF documents code to rental.
+
+**Execution order for the alias — this matters.** `tick_seeding_proposal` resolves the
+counterparty by `name_normalized`, and the two spellings normalize differently
+(`infassetholdings` vs `infassetholdingssdnbhd`). Ticking both would **birth two counterparties**,
+which is the opposite of the intent. So:
+
+1. **Tick** `INF ASSET HOLDINGS → 900-O01`. This births the single canonical counterparty.
+2. **Decline** every `INF ASSET HOLDINGS SDN BHD` proposal (`900-R01` / `900-T03` / `900-W01`,
+   one occurrence each — nothing in the document distinguishes them, and the ruling makes them
+   the same party anyway).
+3. **Then** attach `INF ASSET HOLDINGS SDN BHD` as an alias of the canonical counterparty
+   (`clara.counterparty_aliases`; `tick_seeding_proposal` writes aliases only from a
+   `payload.aliases[]` array, which the prior-GL parser does not emit — so this is a separate
+   audited step, not part of the tick).
+
+Verify afterwards that RPR has exactly **one** INF counterparty and that the alias resolves:
+
+```sql
+select id, name, name_normalized from clara.counterparties
+ where client_id = 'e2b0f365-…' and name ilike 'INF%';          -- expect ONE row
+select alias, source from clara.counterparty_aliases
+ where counterparty_id = '<that id>';                            -- expect the SDN BHD spelling
+```
 
 Verbs: `clara.tick_seeding_proposal(p_proposal, p_op_key)` /
 `clara.decline_seeding_proposal(...)`, both admin-floored, both op-key idempotent. A tick births
