@@ -1,4 +1,4 @@
-# INCIDENT — document intake DOWN (storage step), 2026-07-26 — **DIAGNOSED, fix ready to apply**
+# INCIDENT — document intake DOWN (storage step), 2026-07-26 — **RESOLVED**
 
 > ## ROOT CAUSE (established by probe, not inference)
 >
@@ -38,8 +38,8 @@
 > that **SQL does not short-circuit `WHERE`** — the existence guard had to become a `CASE`,
 > the one construct whose evaluation order Postgres guarantees.
 >
-> **Remaining: the live apply**, which the session classifier blocks. Command in
-> "Applying the fix" below.
+> **APPLIED to live 2026-07-26, 4/4 green.** Confirmed after: UPDATE granted, DELETE and TRUNCATE still refused, the update policy's predicate identical to the insert policy's, `storage.buckets` untouched &mdash; and a write probe returned **200** where it had returned 403. Command in
+> "Applying the fix" below. **See also the destructive-probe warning further down — the diagnostic itself caused a (recovered) data incident.**
 
 ---
 
@@ -90,8 +90,30 @@ i.e. the app did not return a clean response, though it got far enough to set `s
 **The PUT's actual HTTP status.** `putCanonical` (`packages/runtime/lib/storage.mjs:81-95`)
 throws `storage_error` on any non-OK response and the status never reaches the DB or the log.
 
-This probe answers it and **writes nothing** — it PUTs against an object that already exists, so
-a healthy write path returns **409** (`x-upsert: false`):
+> ## ⛔ THE PROBE BELOW IS WRONG AND DESTRUCTIVE — DO NOT RUN IT
+>
+> **In Supabase Storage, `PUT /object/<bucket>/<path>` is the UPDATE endpoint, not
+> create-if-absent.** It **overwrites** an existing object, and `x-upsert: false` does not
+> prevent it — that header only governs the *create* verb (`POST`). This probe was written
+> believing a PUT against an existing key would 409 and write nothing. It does not: it
+> returns **200 and replaces the object's bytes.**
+>
+> **It was run, and it destroyed one.** `BEE CREATIVE - Management Accounts YA2024.pdf`
+> (138,491 bytes) was replaced with the 5-byte string `probe` at 2026-07-26 10:12:22Z, while
+> `clara.documents` still recorded the original `byte_size` and `sha256` — a silent
+> storage/provenance divergence on a filed client document.
+>
+> **Recovered the same minute:** the original was on disk with a matching hash, re-PUT with the
+> service key, and read back — 138,491 bytes, sha256 `22719184…0b40`, byte-identical to the
+> DB's record. No posted figure ever depended on it (Bee Creative's finalized carry-down used
+> the **keyed** seed, not the document-tied one), so the books were never at risk. The scare is
+> real regardless: a routine "read-only" diagnostic silently rewrote a client record.
+>
+> **The correct probe is below**, under "A SAFE write probe". This one is kept, struck
+> through, because the mistaken reasoning is the lesson.
+
+~~This probe answers it and **writes nothing** — it PUTs against an object that already exists, so
+a healthy write path returns **409** (`x-upsert: false`):~~
 
 ```sh
 KEY=$(psql -At -c "select name from storage.objects where name like '%/docs/%' order by created_at desc limit 1")
@@ -104,9 +126,41 @@ fly ssh console -a clara-runtime -C "/usr/local/bin/node -e \"
     console.log('PUT -> '+r.status); console.log((await r.text()).slice(0,220)); })()\""
 ```
 
-Read it as: **409** → the write path is healthy and the fault is elsewhere in finalize (look at
-`scanFile` and `verifyCanonical`). **401/403** → authorization on INSERT specifically, despite the
-grant and policy. **5xx** → Storage-side write failure. **413** → a size limit.
+~~Read it as: **409** ...~~ *(the reasoning above was wrong — see the warning.)*
+
+## A SAFE write probe
+
+The verbs, which the whole mistake turned on:
+
+| verb | Supabase Storage meaning | needs |
+|---|---|---|
+| `POST /object/<bucket>/<path>` | **create** — fails if the object exists | INSERT |
+| `PUT /object/<bucket>/<path>` | **update / replace** — overwrites | INSERT **and UPDATE** |
+
+`putCanonical` uses **PUT**, which is exactly why the missing UPDATE grant broke intake.
+
+To probe the write path without touching any real document, **POST to a canonical-shaped key
+under a random firm UUID** — it satisfies the RLS predicate, collides with nothing, and is
+deleted afterwards with the service key (the custom role has no DELETE, by design):
+
+```sh
+# 1. create under a throwaway firm uuid
+FIRM=$(python -c "import uuid;print(uuid.uuid4())")
+SHA=$(python -c "print('c'*64)")
+fly ssh console -a clara-runtime -C "/usr/local/bin/node -e \"
+  const j=process.env.CLARA_STORAGE_ROLE_JWT, b=process.env.CLARA_STORAGE_URL;
+  (async()=>{ const r=await fetch(b+'/firms/$FIRM/docs/$SHA.pdf',{method:'POST',
+      headers:{authorization:'Bearer '+j, apikey:j, 'content-type':'application/pdf'},
+      body:Buffer.from('probe')});
+    console.log('POST -> '+r.status); console.log((await r.text()).slice(0,200)); })()\""
+# 2. then DELETE it with the service key (never leave probe objects behind)
+```
+
+Read it as: **200** → the write path is healthy. **403 permission denied for table objects** → a
+missing GRANT (this incident: UPDATE). **new row violates row-level security policy** → the
+grant is fine and the RLS predicate rejected the key. **413** → a size limit.
+
+**Never PUT a key you did not just create.**
 
 ## Two observability defects this exposed — fix regardless of the cause
 
