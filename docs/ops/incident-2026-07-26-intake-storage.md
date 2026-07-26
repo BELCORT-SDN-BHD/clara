@@ -1,3 +1,50 @@
+# INCIDENT — document intake DOWN (storage step), 2026-07-26 — **DIAGNOSED, fix ready to apply**
+
+> ## ROOT CAUSE (established by probe, not inference)
+>
+> **Supabase Storage's upload path now performs an UPDATE on `storage.objects`, and
+> `storage-provision.sql` withholds UPDATE by design** ("object `INSERT` + `SELECT` only …
+> no `UPDATE`/`DELETE`"). Not a broken credential and not a misconfiguration — a **vendor
+> implementation change meeting a deliberate least-privilege posture.**
+>
+> The chain, each link probed:
+> - Storage **does** still assume the custom role — a DB-backed `LIST` returns **200** with
+>   the runtime's own JWT, and an object `GET` returns real bytes.
+> - The **INSERT itself succeeds**: performed directly as `clara_storage_docs` in a
+>   rolled-back transaction, the exact insert the upload needs **works**. Grant and RLS
+>   policy are sufficient.
+> - As `clara_storage_docs`, `update storage.objects` and `delete storage.objects` both raise
+>   **`42501 permission denied for table objects`** — **byte-identical** to what the Storage
+>   API returned. `storage.buckets` raises a *different* message naming `buckets`, so that is
+>   a latent gap, **not** this fault.
+> - Nothing on our side changed: **no Fly release since v27** (which uploaded successfully at
+>   2026-07-25 20:08Z), and **no `storage.migrations` row since project creation**.
+>
+> ## FIX — `packages/db/deploy/wave-b-storage-update-amendment.sql`
+>
+> Grants **UPDATE**, scoped by an RLS policy whose predicate is **mirrored from the insert
+> policy** (built with `EXECUTE` from `pg_get_expr`, so the two cannot drift). DELETE and
+> TRUNCATE stay refused; no base-role inheritance; `storage.buckets` deliberately untouched.
+>
+> **Supabase's own documented pattern was rejected.** Their guide says `grant anon to <role>`,
+> which would inherit anon's DELETE/UPDATE/TRUNCATE on *every* bucket — strictly worse than
+> the posture we already have, and the guide covers read access only.
+>
+> **Verified on a rig fixture** that reproduces the live surface (same columns, same role
+> attributes, same policy predicate verbatim): **4/4 green**, and **all five negative tests
+> caught** — DELETE leaking in, a base role inherited, `storage.buckets` widened, RLS turned
+> off, the insert policy removed. Two real bugs in the amendment were found *by* that fixture
+> and fixed: an unguarded `pg_has_role` on roles absent from a plain cluster, and the fact
+> that **SQL does not short-circuit `WHERE`** — the existence guard had to become a `CASE`,
+> the one construct whose evaluation order Postgres guarantees.
+>
+> **Remaining: the live apply**, which the session classifier blocks. Command in
+> "Applying the fix" below.
+
+---
+
+## Original write-up (kept for the record)
+
 # OPEN INCIDENT — document intake is DOWN (storage step), 2026-07-26
 
 **Impact: no document can enter Clara.** Intake fails at the storage step for every upload.
@@ -78,3 +125,36 @@ grant and policy. **5xx** → Storage-side write failure. **413** → a size lim
 Books, wiki, reads, the runtime's consumer loops, and everything already ingested. B-12's
 still-to-capture checklist (`docs/plan/research/wave-b/live-gate-b12-rpr-2026-07-26.md`) was
 derived from documents read off disk, not through intake, so it stands.
+
+---
+
+## Applying the fix
+
+Live, owner-run (the session classifier blocks live mutations):
+
+```
+python "<scratchpad>/live_psql_file.py" packages/db/deploy/wave-b-storage-update-amendment.sql
+```
+
+Expect `=== storage amendment 1 COMPLETE - 4/4 ===`. It runs in one transaction and aborts
+whole on any failed assertion, so a partial widening of the boundary is not a reachable state.
+
+Then re-test intake end to end by uploading a document through `/documents`. If it still fails
+with `permission denied for table objects`, the next candidate is **`storage.buckets` SELECT**
+(currently denied) — deliberately left out of this amendment because nothing has proven the
+upload needs it, and unproven grants on a security boundary are how boundaries rot.
+
+## Follow-ups this incident earned
+
+1. **Fix the two observability defects** (below) — a failure whose cause is unrecoverable
+   afterwards is its own bug, separate from whatever broke.
+2. **Add a storage write-probe to `/ready`.** This outage reported `ready: true` for ~12 hours.
+   The probe must exercise the *write* privilege, not just reachability — a read-only check
+   would have stayed green throughout this incident.
+3. **Rig-cover the storage grant surface.** The fixture written for this amendment
+   (`scratchpad/storage-fixture.sql`) should become a permanent battery so a vendor change
+   that needs another privilege fails in CI instead of in production.
+4. **Re-read the assumption.** The whole design rests on Supabase honouring a *custom Postgres
+   role* in the Storage JWT. That still works today, but this incident is evidence the contract
+   moves without notice. Worth an owner decision on whether to keep depending on it or move
+   writes to scoped S3 credentials.
