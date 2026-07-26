@@ -1,45 +1,5 @@
 # B-12 — the RPR incremental lane: the STILL-TO-CAPTURE checklist (2026-07-26)
 
-> ## ⚠️ CORRECTED — one checklist row was WRONG, and the method that produced it was flawed
->
-> **Row 1 (900-S04, RM2,600.00) is NOT a gap. It was captured all along.** The
-> `RPRJV-202502/001` voucher is already in Clara — document `89e9d362`, filed, with an
-> **approved** entry `22cdd90a`: `Dr 900-S04 2,600.00 / Cr 420-001 2,600.00`.
->
-> **Why my tie-out missed it.** I filtered the comparison to the certified TB's period,
-> `posting_date between 2025-02-10 and 2025-12-08`. **Clara posted the entry at the voucher
-> date, 2025-02-04; the client's system posted it at period start, 10/2/2025.** Six days
-> apart, on opposite sides of my filter, so the entry was silently excluded and read as
-> missing. Re-run with no date bound, `900-S04` is **3,790.00** — which is exactly the
-> running balance the client's own GL prints at 25/9/2025 (`202509230  3,790.00`).
->
-> **The method lesson, which matters more than the row.** A period-bounded tie-out
-> *silently* drops entries that both systems hold but date differently — and boundary
-> entries are precisely where two systems disagree. A tie-out must reconcile **by account
-> across all dates** and report date differences as their own finding, never let a filter
-> turn a difference into an absence. **This is the same failure shape as concluding absence
-> from a truncated grep**, which is already recorded in memory as a repeat offence.
->
-> **Also corrected: I claimed document intake was DOWN. It was not.** The only document I
-> tested with was this one — already ingested — and Supabase returns a duplicate as
-> **HTTP 400 wrapping `statusCode: 409`**, which `putCanonical` could not detect, so a
-> benign re-upload surfaced as a fatal `storage_error`. Both real bugs, now fixed; but
-> "intake is down" was my inference, not a fact. See
-> `docs/ops/incident-2026-07-26-intake-storage.md`.
->
-> ### The corrected checklist
->
-> | account | certified | in Clara (all dates) | still to capture |
-> |---|---|---|---|
-> | 900-O01 office & warehouse rental | 161,120.00 | — | **161,120.00** |
-> | 530-000 other income | 2,220.15 | — | **2,220.15** |
-> | 900-S04 secretary fee | 6,035.40 | **3,790.00** | **2,245.40** (2/12/2025 strike-off fee) |
-> | 900-B01 bank charges | 12.40 | — | **12.40** |
->
-> Eleven accounts still tie to the sen. Four carry gaps, **not five rows** — and every
-> remaining gap is a document that is genuinely absent from the supplied corpus.
-
-
 Pinned: **21 migrations (`0021_counterparty_human_lane`) · runtime v27.**
 Client: ROME PROPERTIES SDN BHD (`202501005621 (1607035V)`), 29 approved entries,
 2025-02-04 .. 2025-12-03.
