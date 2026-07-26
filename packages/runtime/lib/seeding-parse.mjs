@@ -22,6 +22,8 @@
 // under the line ceiling); re-exported so callers/tests keep one import surface.
 import { UnparseableError, colIndex, readXlsxSheet, looksLikeXlsx } from "./xlsx-reader.mjs";
 export { UnparseableError, colIndex, readXlsxSheet, looksLikeXlsx };
+// Source (c): the OCR table-cell reader for a PRINTED ledger (see prior-gl-cells.mjs).
+import { cellsToEntries } from "./prior-gl-cells.mjs";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const ACCOUNT_RE = "[0-9]{4,8}|[0-9]{3}-[0-9A-Z]{2,4}";
@@ -246,6 +248,25 @@ export async function readPriorGlRegions(client, { documentId, firmId }) {
   return r.rows;
 }
 
+// Source (c): the OCR/layout TABLE CELLS of a printed ledger. Same firm scoping and same
+// superseded_by/status guards as (a) — only the field_path family differs. The locator is
+// carried because the COLUMN a cell sits in is recoverable only from its geometry.
+const SELECT_PRIOR_GL_CELLS_SQL =
+  `select dr.id as region_id, dr.text_content, dr.locator
+     from clara.document_extractions de
+     join clara.document_regions dr
+       on dr.extraction_id = de.id and dr.firm_id = de.firm_id
+    where de.document_id = $1 and de.firm_id = $2
+      and de.status = 'done' and de.superseded_by is null
+      and dr.field_path like 'tables.%'
+    order by dr.id`;
+
+/** Read the layout table cells for a document (firm-scoped). */
+export async function readPriorGlCells(client, { documentId, firmId }) {
+  const r = await client.query(SELECT_PRIOR_GL_CELLS_SQL, [documentId, firmId]);
+  return r.rows;
+}
+
 /** Look up the open seeding batch id that owns a (client, sha) — the 409 target. */
 export async function findOpenBatch(client, { clientId, sha }) {
   const r = await client.query(
@@ -314,12 +335,25 @@ export async function prepareSeeding(client, { clientId, documentId, principal, 
   }
   if (!meta || !meta.sha256) return { http: 404, body: { error: "not_found", message: "not found" } };
 
-  // Source (a): extraction facts; (b): xlsx bytes decided BY BYTES (F-M13). Honest 422 either way.
+  // Source (a): extraction facts; (c): a PRINTED ledger's table cells; (b): xlsx bytes decided
+  // BY BYTES (F-M13). Honest 422 when none applies.
+  //
+  // (c) IS TRIED BEFORE (b) ON PURPOSE and cannot disturb it: a spreadsheet's structured_parse
+  // regions are `sheets.*`, never `tables.*`, so cellsToEntries sees nothing for an xlsx and
+  // returns null. It also returns null for any PDF it cannot POSITIVELY identify as a ledger,
+  // so a non-ledger source still reaches the byte path and still 422s exactly as before.
+  // Trying it first also avoids downloading a large PDF only to discover it is not a workbook.
   let proposals;
+  let unattributedRows = 0;
   try {
     const regions = await readPriorGlRegions(client, { documentId, firmId: principal.firmId });
+    const cells = regions.length > 0 ? [] : await readPriorGlCells(client, { documentId, firmId: principal.firmId });
+    const printed = cells.length > 0 ? cellsToEntries(cells) : null;
     if (regions.length > 0) {
       proposals = entriesToProposals(regionsToEntries(regions));
+    } else if (printed && printed.entries.length > 0) {
+      unattributedRows = printed.unattributed.length;
+      proposals = entriesToProposals(printed.entries);
     } else {
       // No extraction facts: fetch the canonical bytes (bounded by the source cap) and SNIFF
       // for xlsx-ness — mime/filename never gate. A too-large or non-xlsx source is honest 422.
@@ -362,6 +396,10 @@ export async function prepareSeeding(client, { clientId, documentId, principal, 
         batchId: out.batch_id,
         proposal_count: out.proposal_count,
         refused_count: out.refused_count,
+        // NO SILENT CAPS: dated ledger rows that carry no counterparty (internal journals —
+        // payroll accruals, statutory contributions) yield no vendor rule. Reporting the count
+        // is what stops a thin batch from reading as a complete one. 0 on every other source.
+        unattributed_row_count: unattributedRows,
       },
     };
   } catch (err) {
