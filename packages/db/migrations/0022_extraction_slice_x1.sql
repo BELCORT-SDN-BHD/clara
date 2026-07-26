@@ -84,6 +84,59 @@
 -- audit row plus the processing-task trail are the receipts. Do not add event types here.
 
 -- =====================================================================
+-- §0 — THE QUIESCE GUARD. Runs FIRST, before any DDL in this file.
+-- =====================================================================
+--
+-- WHY A GUARD AND NOT A SENTENCE IN A RUNBOOK. This migration replaces
+-- `execute_rule_post`, a live posting writer, by change-of-record. Per the binding D1 rule a
+-- call already inside the OLD body finishes on the OLD body — the CoR cannot reach it and
+-- the tail at the bottom of this file cannot see it. Every earlier draft of this migration
+-- tried to argue that window away and got it wrong twice (see the §D header). The window is
+-- real; what closes it is that no executor call is running when the CoR commits. That is a
+-- CEREMONY step, and a ceremony step that lives only in prose is one somebody eventually
+-- skips at 2am. So the migration refuses instead.
+--
+-- THE THRESHOLD. The `control` component beats on every control cycle —
+-- `CLARA_CTL_POLL_MS`, default **2000ms** (packages/runtime/lib/control.mjs:37, 202-205) —
+-- and the runtime's own health check calls a heartbeat stale at
+-- `CLARA_HEARTBEAT_STALE_MS`, default **30000ms** (packages/runtime/lib/health.mjs:27).
+-- 90 seconds is 45x the write cadence and 3x the runtime's own staleness bound, so a beat
+-- younger than 90s means the runtime is not merely slow, it is UP. Generous on purpose: the
+-- cost of waiting another minute is nothing, and the cost of a false pass is an unattended
+-- post through a body this migration is in the middle of replacing.
+--
+-- WHY THIS IS SAFE ON EVERY RIG, CI AND UPGRADE PATH — the claim, and how it was checked:
+--   * `clara.runtime_heartbeats` is created by 0006 and written ONLY by the live runtime
+--     (control.mjs:202-205 and reconciler.mjs heartbeat(); the table is granted to
+--     clara_runtime alone, 0006:791). On a fresh database it is created inside the very same
+--     `migrate` run that reaches this file, so it is EMPTY here and the guard cannot fire.
+--   * The reset-gated rig drills DROP schema clara and re-migrate: the table goes with the
+--     schema and comes back empty, so those paths are unaffected too.
+--   * The runtime's own test files that write beats (tests/ready.test.mjs,
+--     tests/reconcile.test.mjs) do not migrate — they run against an ALREADY-migrated
+--     database, so their beats land strictly after this guard has run. Verified by reading
+--     both files: neither calls ensureReady()/migrate().
+--   * 0022 is applied at most once per database (the runner skips applied versions), so this
+--     block runs on the transition and never again.
+-- The one path it DOES fire on is the one it exists for: a live project with the runtime up.
+do $quiesce$
+declare v_component text; v_beat timestamptz;
+begin
+  -- Defensive: if the relation is somehow absent there is nothing to check and nothing to
+  -- protect against — never let the guard itself be the thing that breaks an apply.
+  if to_regclass('clara.runtime_heartbeats') is null then return; end if;
+  select h.component, h.beat_at into v_component, v_beat
+    from clara.runtime_heartbeats h
+   where h.beat_at > now() - interval '90 seconds'
+   order by h.beat_at desc limit 1;
+  if v_component is not null then
+    raise exception '0022 QUIESCE GUARD: a runtime heartbeat is fresh (component %, beat_at %) — this migration replaces execute_rule_post, and an in-flight call finishes on the OLD body (D1); stop clara-runtime, wait for heartbeat staleness (>90s), and re-apply',
+      v_component, v_beat;
+  end if;
+end
+$quiesce$;
+
+-- =====================================================================
 -- §A — clara.request_reextraction
 -- =====================================================================
 --
@@ -1542,6 +1595,27 @@ begin
   if position('if true  -- X4 DARK GUARD' in v_src) = 0 then
     raise exception '0022 tail: execute_rule_post has lost the X4 dark guard (the `if true` disjunct, not merely its comment)';
   end if;
+  -- THE EXECUTOR'S CALLER SET, PINNED. The §0 quiesce guard and the §D staging argument both
+  -- rest on one unstated premise: that stopping `clara-runtime` actually stops every caller
+  -- of execute_rule_post. That is true today — the OBSERVED grantees are exactly
+  -- clara_fn_owner (the definer's owner) and clara_runtime_login (the login-direct grant;
+  -- note it is NOT the clara_runtime GROUP) — but nothing has been asserting it, so a future
+  -- migration could grant the executor to another lane and silently invalidate the ceremony
+  -- while every probe here still passed. Whitelist it, and name any offender.
+  select coalesce(string_agg(g, ', ' order by g), '') into v_acl
+    from (select case when a.grantee = 0 then 'PUBLIC'
+                      else pg_get_userbyid(a.grantee) end as g
+            from pg_proc p, lateral aclexplode(p.proacl) a
+           where p.oid = 'clara.execute_rule_post(uuid,text)'::regprocedure
+             and a.privilege_type = 'EXECUTE'
+             and (a.grantee = 0
+                  or pg_get_userbyid(a.grantee) not in ('clara_fn_owner', 'clara_runtime_login'))
+         ) s;
+  if v_acl <> '' then
+    raise exception '0022 tail: execute_rule_post has unexpected EXECUTE grantee(s): % — the quiesce ceremony assumes clara-runtime is its ONLY caller; widening this set silently invalidates that argument',
+      v_acl;
+  end if;
+
   -- The D-P6 sentinel vocabulary 0016 pins (grep-asserted there, re-asserted here because
   -- this migration rewrites the whole body).
   if position('anchor_missing' in v_src)=0 or position('not_corroborated' in v_src)=0

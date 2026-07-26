@@ -158,7 +158,7 @@ end $$;
 --    component identity must also already be present (it opens CORRECT at X5).
 -- ---------------------------------------------------------------------
 do $$
-declare v_src text;
+declare v_src text; v_bad text;
 begin
   select prosrc into v_src from pg_proc
    where oid = 'clara.execute_rule_post(uuid,text)'::regprocedure;
@@ -183,6 +183,22 @@ begin
   -- BEFORE X5 removes the dark guard, or the lane opens onto a forgeable identity.
   if position('coalesce(v_sc,0)<0' in v_src) = 0 then
     raise exception 'POST-VERIFY 4: the anchor block lost its negative-component belt — X5 would open the lane onto a forgeable identity';
+  end if;
+  -- THE EXECUTOR'S CALLER SET. 0022's deploy ceremony is a brief runtime quiesce, and that
+  -- only closes the D1 in-flight window if stopping clara-runtime stops EVERY caller of this
+  -- function. Observed sanctioned set: clara_fn_owner (the definer's owner) + the
+  -- login-direct clara_runtime_login (NOT the clara_runtime group). A later grant to any
+  -- other lane would leave the ceremony arguing about a world that no longer exists, so it
+  -- has to break loudly here rather than quietly at the next deploy.
+  select string_agg(distinct case when a.grantee = 0 then 'PUBLIC'
+                                  else pg_get_userbyid(a.grantee) end, ', ') into v_bad
+    from pg_proc p, lateral aclexplode(p.proacl) a
+   where p.oid = 'clara.execute_rule_post(uuid,text)'::regprocedure
+     and a.privilege_type = 'EXECUTE'
+     and (a.grantee = 0
+          or pg_get_userbyid(a.grantee) not in ('clara_fn_owner', 'clara_runtime_login'));
+  if v_bad is not null then
+    raise exception 'POST-VERIFY 4: execute_rule_post has unexpected EXECUTE grantee(s): % — the quiesce ceremony assumes clara-runtime is its ONLY caller', v_bad;
   end if;
   if position('anchor_missing' in v_src)=0 or position('not_corroborated' in v_src)=0
      or position('cn_not_autopostable' in v_src)=0
