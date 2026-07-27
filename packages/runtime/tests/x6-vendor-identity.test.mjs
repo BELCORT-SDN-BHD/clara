@@ -21,6 +21,7 @@ import {
   splitRegistrationLabel,
   looksLikeRegistration,
   registrationKey,
+  anchorsFromTypedFields,
 } from "../lib/invoice-vendor-identity.mjs";
 import { normalizeAzureInvoice, NORMALIZATION_VERSION } from "../workflows/invoiceFacts.v1.azure.mjs";
 
@@ -35,11 +36,19 @@ const LETTERHEAD_P2 = line("Company No. 202401047756 (1593602-X)", [2.7045, 0.86
 const VENDOR_NAME = line("BRIGHTPATH CONSULTANCY SDN. BHD.", [2.7156, 0.6562, 5.5, 0.6562, 5.5, 0.81, 2.7156, 0.81]);
 const BUYER_NAME = line("ROME PROPERTIES SDN BHD", [0.7179, 2.3752, 2.9, 2.3752, 2.9, 2.52, 0.7179, 2.52]);
 
+/** The typed VendorName / CustomerName regions, measured on the vehicle. VendorName's CONTENT
+ *  there is the OCR garbage (a two-line VendorName) — its GEOMETRY is what attribution
+ *  uses, and it sits 0.015in from the letterhead against 1.33in to the customer block. */
+const ANCHORS = Object.freeze({
+  vendor: { page: 1, ymin: 1.0569, ymax: 1.4968 },
+  customer: { page: 1, ymin: 2.3748, ymax: 2.5232 },
+});
+
 test("the real letterhead is read, and the two-page repeat collapses to ONE emission", () => {
   const { fields, receipt } = readVendorIdentityFromLines([
     page([VENDOR_NAME, LETTERHEAD_P1, BUYER_NAME], 1),
     page([LETTERHEAD_P2], 2),
-  ]);
+  ], ANCHORS);
   assert.equal(fields.length, 1, "the same registration printed twice is one fact");
   assert.equal(fields[0].field_path, "invoice.vendor_registration");
   assert.equal(fields[0].value_raw, "202401047756 (1593602-X)", "the label is stripped, the value stays verbatim");
@@ -48,14 +57,18 @@ test("the real letterhead is read, and the two-page repeat collapses to ONE emis
   assert.deepEqual(fields[0].polygon, [2.7122, 0.886, 4.9757, 0.8825, 4.976, 1.0382, 2.7124, 1.0417]);
   assert.equal(fields[0].confidence, null, "Azure returns no confidence on lines[]");
   assert.equal(receipt.outcome, "matched");
-  assert.equal(receipt.occurrences, 2);
   assert.equal(receipt.ambiguous, 0);
+  // Page 2 prints the SAME letterhead, but Azure types VendorName on page 1 only — so the
+  // page-2 candidate carries no attribution evidence and is refused rather than assumed.
+  // Page 1 already carries the fact, so the document still reads.
+  assert.equal(receipt.occurrences, 1);
+  assert.equal(receipt.no_vendor_anchor, 1);
 });
 
 test("the emitted value normalizes to the registry key the resolver actually matches on", () => {
   // `_resolve_counterparty` compares lower(regexp_replace(reg,'[^a-zA-Z0-9]','','g')). This is
   // the whole point of the block: the registry row for this vendor is 2024010477561593602x.
-  const { fields } = readVendorIdentityFromLines([page([LETTERHEAD_P1])]);
+  const { fields } = readVendorIdentityFromLines([page([LETTERHEAD_P1])], ANCHORS);
   assert.equal(registrationKey(fields[0].value_raw), "2024010477561593602x");
 });
 
@@ -63,7 +76,7 @@ test("TWO DISTINCT registrations emit NOTHING — the buyer's must never become 
   // A bill-to block that prints its own company number is the realistic shape of this hazard.
   // Placed inside the top band deliberately, so uniqueness is doing the work here, not the band.
   const buyerReg = line("Company No. 199801009999 (470001-A)", [5.4, 1.2, 7.6, 1.2, 7.6, 1.35, 5.4, 1.35]);
-  const { fields, receipt } = readVendorIdentityFromLines([page([VENDOR_NAME, LETTERHEAD_P1, buyerReg])]);
+  const { fields, receipt } = readVendorIdentityFromLines([page([VENDOR_NAME, LETTERHEAD_P1, buyerReg])], ANCHORS);
   assert.equal(fields.length, 0, "no identity beats the wrong identity");
   assert.equal(receipt.outcome, "ambiguous");
   assert.equal(receipt.ambiguous, 1);
@@ -74,13 +87,15 @@ test("a registration below the top band is not a letterhead and is refused", () 
   // The band is the second defense: a bill-to or footer registration sits down the page, and a
   // letterhead by convention does not. Measured at y≈0.88 of 11.68in — the default is 25%.
   const footer = line("Company No. 199801009999 (470001-A)", [0.7, 9.5, 2.9, 9.5, 2.9, 9.65, 0.7, 9.65]);
-  const { fields, receipt } = readVendorIdentityFromLines([page([footer])]);
+  const { fields, receipt } = readVendorIdentityFromLines([page([footer])], ANCHORS);
   assert.equal(fields.length, 0);
   assert.equal(receipt.below_band, 1);
   assert.equal(receipt.outcome, "absent");
   // It is an opt, so a document that genuinely prints its letterhead lower can be re-measured
   // rather than argued about.
-  const relaxed = readVendorIdentityFromLines([page([footer])], { topBandFraction: 0.95 });
+  // Attribution is a SEPARATE wall and still applies, so this sub-case relaxes both opts:
+  // the point being pinned is that the band is a threshold, not a hard-coded law.
+  const relaxed = readVendorIdentityFromLines([page([footer])], { vendor: { page: 1, ymin: 9.3, ymax: 9.45 }, customer: null }, { topBandFraction: 0.95 });
   assert.equal(relaxed.fields.length, 1);
 });
 
@@ -92,7 +107,7 @@ test("an SST registration is NOT a company registration — one letter from `ssm
   assert.equal(splitRegistrationLabel("SST No. W10-2408-32000157"), null);
   assert.equal(looksLikeRegistration("W10-2408-32000157"), true, "the GATE would have taken it");
   const sst = line("SST Number : W10-2408-32000157", [5.2097, 3.4108, 8.7642, 3.1613, 8.7828, 3.4242, 5.2282, 3.6746]);
-  const { fields, receipt } = readVendorIdentityFromLines([page([sst], 1, { width: 13.3333, height: 17.7778 })]);
+  const { fields, receipt } = readVendorIdentityFromLines([page([sst], 1, { width: 13.3333, height: 17.7778 })], ANCHORS);
   assert.equal(fields.length, 0, "the vocabulary is the only thing standing here, and it holds");
   assert.equal(receipt.outcome, "absent");
   // The genuine SSM form still reads.
@@ -122,9 +137,13 @@ test("the accept gate refuses a remainder that is not a registration", () => {
   const dated = line("Company No. 2025-10-14", [2.7, 0.88, 4.9, 0.88, 4.9, 1.03, 2.7, 1.03]);
   const priced = line("Company No. RM 5,000.00", [2.7, 1.2, 4.9, 1.2, 4.9, 1.35, 2.7, 1.35]);
   const stub = line("Company No. --", [2.7, 1.5, 4.9, 1.5, 4.9, 1.65, 2.7, 1.65]);
-  const { fields, receipt } = readVendorIdentityFromLines([page([dated, priced, stub])]);
+  const { fields, receipt } = readVendorIdentityFromLines([page([dated, priced, stub])], ANCHORS);
   assert.equal(fields.length, 0);
-  assert.equal(receipt.rejected_gate, 3);
+  // The ISO date and the dash stub reach the gate; the currency amount leads with `RM`, a word
+  // carrying no digit, so the label-continuation guard stops it one step earlier. Two walls,
+  // both counted — which is the point of counting them separately.
+  assert.equal(receipt.rejected_gate, 2);
+  assert.equal(receipt.label_continuation, 1);
   assert.equal(receipt.outcome, "absent");
 });
 
@@ -133,16 +152,16 @@ test("a SPLIT-LINE registration is absent, not guessed at (v1 scope)", () => {
   // out of scope rather than paired by geometry, so nothing is invented.
   const label = line("Company No.", [2.7, 0.88, 3.6, 0.88, 3.6, 1.03, 2.7, 1.03]);
   const value = line("202401047756 (1593602-X)", [3.8, 0.88, 5.5, 0.88, 5.5, 1.03, 3.8, 1.03]);
-  const { fields, receipt } = readVendorIdentityFromLines([page([label, value])]);
+  const { fields, receipt } = readVendorIdentityFromLines([page([label, value])], ANCHORS);
   assert.equal(fields.length, 0);
   assert.equal(receipt.rejected_gate, 1, "the bare label's remainder is empty and the gate refuses it");
 });
 
 test("a line with no usable geometry can never anchor an identity", () => {
-  assert.deepEqual(readVendorIdentityFromLines(null).fields, []);
-  assert.deepEqual(readVendorIdentityFromLines([]).fields, []);
-  assert.deepEqual(readVendorIdentityFromLines([page([line("Company No. 202401047756", [])])]).fields, []);
-  assert.deepEqual(readVendorIdentityFromLines([page([line("Company No. 202401047756", [1, 2, 3, 4])])]).fields, []);
+  assert.deepEqual(readVendorIdentityFromLines(null, ANCHORS).fields, []);
+  assert.deepEqual(readVendorIdentityFromLines([], ANCHORS).fields, []);
+  assert.deepEqual(readVendorIdentityFromLines([page([line("Company No. 202401047756", [])])], ANCHORS).fields, []);
+  assert.deepEqual(readVendorIdentityFromLines([page([line("Company No. 202401047756", [1, 2, 3, 4])])], ANCHORS).fields, []);
 });
 
 // ======================================================================================
@@ -155,10 +174,16 @@ const TOTAL = {
   boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 0, 1, 1, 0, 1] }],
   confidence: 0.9,
 };
+/** Azure's typed VendorName, measured on the vehicle: garbage content, exact geometry. */
+const TYPED_VENDOR_NAME = {
+  content: "CONSULTANCY\nrightpath",
+  boundingRegions: [{ pageNumber: 1, polygon: [1.645, 1.0569, 2.6207, 1.0569, 2.6207, 1.4968, 1.645, 1.4968] }],
+  confidence: 0.922,
+};
 const payload = (typed, lines) => ({
   status: "succeeded",
   analyzeResult: {
-    documents: [{ fields: { InvoiceTotal: TOTAL, ...typed } }],
+    documents: [{ fields: { InvoiceTotal: TOTAL, VendorName: TYPED_VENDOR_NAME, ...typed } }],
     pages: [page(lines)],
   },
 });
@@ -230,4 +255,112 @@ test("a payload with NO pages[].lines[] is a pure widening of v6", () => {
   assert.equal(receipt.emitted, 0);
   assert.equal(receipt.typed_collapsed, 0);
   assert.deepEqual(receipt.candidates, []);
+});
+
+// ======================================================================================
+// The adversarial-review regressions (each cell reproduces a REFUSED finding)
+// ======================================================================================
+
+test("a SOLE BUYER registration is refused — uniqueness and the band both pass it", () => {
+  // The executed wrong-party path: a compact invoice whose only registration sits in a
+  // top-band bill-to block. One key, inside the band, gate-accepted — and resolved to the
+  // WRONG counterparty. Only attribution to the vendor block refuses it.
+  const buyerOnly = line("Company No. 199801009999 (470001-A)", [0.72, 2.55, 2.9, 2.55, 2.9, 2.7, 0.72, 2.7]);
+  const { fields, receipt } = readVendorIdentityFromLines([page([buyerOnly])], ANCHORS);
+  assert.equal(fields.length, 0, "no identity beats the wrong party");
+  assert.equal(receipt.closer_to_customer, 1, "it sits against the customer block, not the vendor's");
+  assert.equal(receipt.outcome, "absent");
+});
+
+test("attribution FAILS CLOSED — no typed VendorName region means no evidence, so no emission", () => {
+  const { fields, receipt } = readVendorIdentityFromLines([page([LETTERHEAD_P1])], { vendor: null, customer: null });
+  assert.equal(fields.length, 0);
+  assert.equal(receipt.no_vendor_anchor, 1);
+  // And a vendor region on ANOTHER page is not evidence about this one.
+  const otherPage = readVendorIdentityFromLines([page([LETTERHEAD_P1])], { vendor: { page: 2, ymin: 1.05, ymax: 1.49 }, customer: null });
+  assert.equal(otherPage.receipt.no_vendor_anchor, 1);
+});
+
+test("attribution uses VendorName's GEOMETRY, never its content", () => {
+  // The insight the whole defense rests on: on the vehicle that typed field reads as OCR
+  // garbage at confidence 0.922 while its region is exact.
+  const anchors = anchorsFromTypedFields({
+    VendorName: { content: "CONSULTANCY\nrightpath", boundingRegions: [{ pageNumber: 1, polygon: [1.645, 1.0569, 2.6207, 1.0569, 2.6207, 1.4968, 1.645, 1.4968] }] },
+    CustomerName: { content: "ROME PROPERTIES SDN BHD", boundingRegions: [{ pageNumber: 1, polygon: [0.7176, 2.3748, 2.6083, 2.3748, 2.6083, 2.5232, 0.7176, 2.5232] }] },
+  });
+  assert.deepEqual(anchors.vendor, { page: 1, ymin: 1.0569, ymax: 1.4968 });
+  assert.deepEqual(anchors.customer, { page: 1, ymin: 2.3748, ymax: 2.5232 });
+  const { fields } = readVendorIdentityFromLines([page([LETTERHEAD_P1])], anchors);
+  assert.equal(fields[0].value_raw, "202401047756 (1593602-X)", "garbage content, sound geometry, correct read");
+  // A typed field with no region yields no anchor at all.
+  assert.equal(anchorsFromTypedFields({ VendorName: { content: "X" } }).vendor, null);
+});
+
+test("a CONTESTED document withdraws the typed row too", () => {
+  // Reader finds two distinct registrations, Azure typed one of them. The typed value is not a
+  // tie-break — it is one of the contested readings, and on this shape it is the wrong one.
+  const second = line("Company No. 199801009999 (470001-A)", [2.7122, 1.3, 4.9757, 1.3, 4.976, 1.45, 2.7124, 1.45]);
+  const out = normalizeAzureInvoice(
+    payload({ VendorTaxId: { content: "199801009999 (470001-A)", confidence: 0.7 } }, [LETTERHEAD_P1, second]),
+  );
+  assert.equal(regOf(out), undefined, "a contested identity resolves nothing");
+  assert.equal(out.envelope.vendor_identity.outcome, "ambiguous");
+  assert.equal(out.envelope.vendor_identity.typed_vs_ambiguous, 1);
+  // The rest of the extraction is untouched.
+  assert.equal(out.fields.find((f) => f.field_path === "invoice.total").value_raw, "435,560.00");
+});
+
+test("a reader refusal that is NOT a contest leaves the typed row standing (v6 behaviour)", () => {
+  // `absent` / `rejected_gate` / the attribution refusals are the reader having nothing to say.
+  // Only a genuine contest carries the authority to withdraw Azure's typed identity.
+  const out = normalizeAzureInvoice(
+    payload({ VendorTaxId: { content: "201801000900", confidence: 0.88 } }, [line("Tel : 017-472 9637", [2.7, 0.88, 4.9, 0.88, 4.9, 1.03, 2.7, 1.03])]),
+  );
+  assert.equal(regOf(out).value_raw, "201801000900");
+  assert.equal(out.envelope.vendor_identity.typed_vs_ambiguous, 0);
+});
+
+test("a page with no usable HEIGHT refuses its candidates — the band never becomes a no-op", () => {
+  // bandLimit=null used to disable the wall silently, which readmitted a footer registration
+  // anywhere on the page. A wall that vanishes when its input goes missing is not a wall.
+  const footer = line("Company No. 199801009999 (470001-A)", [0.7, 9.5, 2.9, 9.5, 2.9, 9.65, 0.7, 9.65]);
+  for (const bad of [{ height: undefined }, { height: 0 }, { height: Number.NaN }]) {
+    const { fields, receipt } = readVendorIdentityFromLines(
+      [{ pageNumber: 1, lines: [footer], unit: "inch", width: 8.2639, ...bad }],
+      { vendor: { page: 1, ymin: 9.3, ymax: 9.45 }, customer: null },
+    );
+    assert.equal(fields.length, 0, `height=${bad.height} must refuse, not admit`);
+    assert.equal(receipt.height_missing, 1);
+  }
+});
+
+test("a tax-qualified LABEL CONTINUATION is not a registration", () => {
+  // Prefix matching alone let the vocabulary's own exclusion be walked around: both of these
+  // emitted an SST registration as the company registration.
+  for (const text of [
+    "Registration No. (SST): W10-2408-32000157",
+    "No. Pendaftaran Cukai Perkhidmatan: W10-2408-32000157",
+    "Company No. GST 001234567890",
+    "Reg No (Tax) 12345678",
+  ]) {
+    const hit = splitRegistrationLabel(text);
+    assert.equal(hit?.continuation, true, `${text} must be flagged as a continuation`);
+    const l = line(text, [2.7122, 0.886, 4.9757, 0.8825, 4.976, 1.0382, 2.7124, 1.0417]);
+    const { fields, receipt } = readVendorIdentityFromLines([page([l])], ANCHORS);
+    assert.equal(fields.length, 0, `${text} must not emit`);
+    assert.equal(receipt.label_continuation, 1);
+  }
+  // The genuine forms still read — a registration begins with its number.
+  for (const [text, expected] of [["SSM No. 202401047756", "202401047756"], ["Co. Reg. No. 1593602-X", "1593602-X"], ["Company No. IG12345678900", "IG12345678900"]]) {
+    const hit = splitRegistrationLabel(text);
+    assert.equal(hit.continuation, false, text);
+    assert.equal(hit.remainder, expected);
+  }
+});
+
+test("a recognised label with unusable geometry is COUNTED, never silently dropped", () => {
+  const { fields, receipt } = readVendorIdentityFromLines([page([line("Company No. 202401047756", [])])], ANCHORS);
+  assert.equal(fields.length, 0);
+  assert.equal(receipt.no_geometry, 1, "a readable document must not look like one that printed nothing");
+  assert.deepEqual(receipt.candidates, [{ label: "company no", outcome: "no_geometry", page: 1 }]);
 });

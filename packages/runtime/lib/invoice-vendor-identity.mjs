@@ -22,7 +22,8 @@
 // THE HAZARD THIS MODULE IS SHAPED AROUND: emitting the BUYER's registration as the vendor's.
 // That is not a missing fact but a WRONG identity — it resolves the counterparty to the wrong
 // party, and every downstream coding decision inherits the error. A missing registration
-// merely returns the lane to where it already is. Three independent defenses, all required:
+// merely returns the lane to where it already is. FOUR independent defenses, all required,
+// and they COMPOSE — none is ever silently skipped when its input is unavailable:
 //
 //   (a) UNIQUENESS-OR-NOTHING over the WHOLE document. Two DISTINCT registration-shaped
 //       candidates anywhere ⇒ emit nothing. Identical candidates collapse, which is the
@@ -30,20 +31,41 @@
 //   (b) THE TOP BAND. A letterhead sits at the top of its page by convention; a bill-to block
 //       does not. Measured at y≈0.88 of an 11.68in page — comfortably inside the default 25%.
 //       An opt, like every other threshold here, so it can be re-measured rather than argued.
-//   (c) RECONCILIATION with the typed emission, because `invoice.vendor_registration` is in
+//       A page whose height is missing or unusable cannot be banded, so its candidates are
+//       REFUSED — the wall never becomes a no-op just because its input went missing. (The
+//       X2 reader's `pixel:no-width` page refusal is the same shape and the right one.)
+//   (c) VENDOR-BLOCK ATTRIBUTION, and this is the one that makes the emission EVIDENCED
+//       rather than merely positional. Uniqueness and the band both pass a document whose
+//       ONLY registration is the buyer's — a compact invoice with a bill-to block near the
+//       top has exactly that shape, and it resolves to the wrong party. So a candidate must
+//       sit next to the typed `VendorName` field's own bounding region, and — when a typed
+//       `CustomerName` region also exists — closer to the vendor's than to the customer's.
+//       THE INSIGHT THAT MAKES THIS WORK: VendorName's GEOMETRY is trustworthy even when its
+//       CONTENT is garbage. On the vehicle that field reads "CONSULTANCY\nrightpath", pure
+//       OCR noise, while its region sits at y=[1.057,1.497] — a 0.015in gap from the
+//       letterhead line, against 1.33in to the customer block. Attribution by position, never
+//       by text. FAIL CLOSED: no typed VendorName region means no attribution evidence, and
+//       no evidence means no emission.
+//   (d) RECONCILIATION with the typed emission, because `invoice.vendor_registration` is in
 //       the DB's conflicting-duplicate forfeit list: two differing values for that one
 //       field_path forfeit the ENTIRE extraction (0016, widened by 0022), destroying the
 //       working `invoice.total` capture along with the new fact. Agreement collapses to one
-//       row; disagreement emits neither.
+//       row; disagreement emits neither — and so does a CONTESTED document: when the reader
+//       finds two distinct registrations, a typed row that picked one of them is not
+//       evidence, it is a coin toss that already landed, and it is withdrawn too.
 //
 // The accept gate is deliberately NOT a new grammar: it is the SAME `looksLikeRegistration`
 // the v3 typed emit has used since Wave A.1, moved here so both callers share one definition
 // rather than drifting apart. Moving it changes no behaviour — `invoiceFacts.v1.azure.mjs`
 // imports it back.
 
-/** How far down a page a letterhead may sit, as a fraction of page height. */
 export const DEFAULT_VENDOR_IDENTITY_OPTS = Object.freeze({
+  /** How far down a page a letterhead may sit, as a fraction of page height. */
   topBandFraction: 0.25,
+  /** Vertical gap allowed between a candidate line and the typed VendorName region, in
+   *  inches. Measured on the vehicle: 0.015in. Generous but bounded — a letterhead block is
+   *  a few lines tall, not a page. */
+  vendorAnchorGapIn: 1.5,
 });
 
 // The CLOSED label vocabulary, EN + BM. Matching is exact-prefix on a form where every run of
@@ -123,11 +145,62 @@ export function splitRegistrationLabel(text) {
     cut = i + 1;
   }
   if (seen < want) return null;
-  return { label, remainder: original.slice(cut).replace(LEADING_SEPARATORS, "").trim() };
+  const remainder = original.slice(cut).replace(LEADING_SEPARATORS, "").trim();
+  // THE REMAINDER MUST BE THE VALUE, not more label. Prefix matching alone lets a tax-qualified
+  // continuation through the vocabulary that was supposed to exclude it: measured bypasses were
+  // `Registration No. (SST): W10-2408-32000157` and `No. Pendaftaran Cukai Perkhidmatan: …`,
+  // both of which emitted an SST registration as the company registration — precisely what the
+  // omission of `sst no` exists to prevent. A registration begins with its number: a leading
+  // parenthesised qualifier, or a leading word carrying no digit, means the label has not ended.
+  if (remainder.startsWith("(")) return { label, remainder, continuation: true };
+  const firstToken = remainder.split(/\s+/)[0] ?? "";
+  if (firstToken && !/[0-9]/.test(firstToken)) return { label, remainder, continuation: true };
+  return { label, remainder, continuation: false };
 }
 
-/** Axis-aligned top edge of a flat polygon, or null when the polygon is unusable. */
-function topOf(polygon) {
+/** Vertical gap between two boxes on the same page (0 when they overlap), or null when the
+ *  anchor is absent or on another page — in which case there is no evidence, not a near miss. */
+function verticalGap(candidate, anchor) {
+  if (!anchor || anchor.page !== candidate.page) return null;
+  return Math.max(0, Math.max(anchor.ymin - candidate.ymax, candidate.ymin - anchor.ymax));
+}
+
+/**
+ * Is this candidate attributable to the VENDOR block? Returns null when it is, else the
+ * reason it is not — so the receipt can say which defense refused it.
+ */
+function vendorAttributionFailure(candidate, anchors, opts) {
+  const vendorGap = verticalGap(candidate, anchors?.vendor);
+  if (vendorGap === null) return "no_vendor_anchor";
+  if (vendorGap > opts.vendorAnchorGapIn) return "vendor_anchor_far";
+  const customerGap = verticalGap(candidate, anchors?.customer);
+  if (customerGap !== null && customerGap < vendorGap) return "closer_to_customer";
+  return null;
+}
+
+/**
+ * The typed VendorName / CustomerName regions, reduced to what attribution needs. Content is
+ * deliberately ignored: on the vehicle VendorName reads as OCR garbage while its geometry is
+ * exact, and geometry is the only thing being asked for here.
+ */
+export function anchorsFromTypedFields(fields) {
+  const regionOf = (field) => {
+    const region = Array.isArray(field?.boundingRegions) ? field.boundingRegions[0] : null;
+    const polygon = region?.polygon;
+    if (!Array.isArray(polygon) || polygon.length < 8 || polygon.length % 2 !== 0) return null;
+    const ys = [];
+    for (let i = 1; i < polygon.length; i += 2) {
+      const y = Number(polygon[i]);
+      if (!Number.isFinite(y)) return null;
+      ys.push(y);
+    }
+    return { page: Number(region.pageNumber || 1), ymin: Math.min(...ys), ymax: Math.max(...ys) };
+  };
+  return { vendor: regionOf(fields?.VendorName), customer: regionOf(fields?.CustomerName) };
+}
+
+/** Vertical extent of a flat polygon, or null when the polygon is unusable. */
+function extentOf(polygon) {
   if (!Array.isArray(polygon) || polygon.length < 8 || polygon.length % 2 !== 0) return null;
   const ys = [];
   for (let i = 1; i < polygon.length; i += 2) {
@@ -135,7 +208,7 @@ function topOf(polygon) {
     if (!Number.isFinite(y)) return null;
     ys.push(y);
   }
-  return Math.min(...ys);
+  return { ymin: Math.min(...ys), ymax: Math.max(...ys) };
 }
 
 /**
@@ -149,7 +222,7 @@ function topOf(polygon) {
  * @param {object} [opts] see DEFAULT_VENDOR_IDENTITY_OPTS
  * @returns {{fields:Array, receipt:object}}
  */
-export function readVendorIdentityFromLines(pages, opts = {}) {
+export function readVendorIdentityFromLines(pages, anchors = null, opts = {}) {
   const settings = { ...DEFAULT_VENDOR_IDENTITY_OPTS, ...opts };
   const receipt = {
     matched: 0,
@@ -157,36 +230,67 @@ export function readVendorIdentityFromLines(pages, opts = {}) {
     ambiguous: 0,
     rejected_gate: 0,
     below_band: 0,
+    height_missing: 0,
+    no_geometry: 0,
+    label_continuation: 0,
+    no_vendor_anchor: 0,
+    vendor_anchor_far: 0,
+    closer_to_customer: 0,
     typed_collapsed: 0,
     typed_disagreement: 0,
+    typed_vs_ambiguous: 0,
     emitted: 0,
     candidates: [],
   };
   const accepted = [];
+  const note = (outcome, hit, pageNumber, extra = {}) => {
+    receipt.candidates.push({ label: hit.label, outcome, page: pageNumber, ...extra });
+  };
 
   for (const page of Array.isArray(pages) ? pages : []) {
     const lines = Array.isArray(page?.lines) ? page.lines : [];
     if (lines.length === 0) continue;
     const pageNumber = Number(page?.pageNumber) || 1;
     const height = Number(page?.height);
-    // With no page height the band cannot be applied. Refusing the page outright would drop
-    // the measured letterhead on any engine result that omits height, so the band is skipped
-    // and the fact is recorded — uniqueness and the accept gate still apply, and the receipt
-    // says the weakest defense was unavailable.
+    // A page with no usable height cannot be banded, and a wall that quietly disappears when
+    // its input is missing is not a wall. Every candidate on such a page is refused.
     const bandLimit = Number.isFinite(height) && height > 0 ? height * settings.topBandFraction : null;
     for (const line of lines) {
       const hit = splitRegistrationLabel(line?.content);
       if (!hit) continue;
-      const top = topOf(line?.polygon);
-      if (top === null) continue; // no geometry: cannot place it, cannot emit it
-      if (bandLimit !== null && top > bandLimit) {
+      if (hit.continuation) {
+        receipt.label_continuation += 1;
+        note("label_continuation", hit, pageNumber);
+        continue;
+      }
+      const extent = extentOf(line?.polygon);
+      if (extent === null) {
+        // A recognised label with unusable geometry is a REFUSAL, and it has to be visible:
+        // silently continuing made a readable document look like one that printed nothing.
+        receipt.no_geometry += 1;
+        note("no_geometry", hit, pageNumber);
+        continue;
+      }
+      if (bandLimit === null) {
+        receipt.height_missing += 1;
+        note("height_missing", hit, pageNumber);
+        continue;
+      }
+      if (extent.ymin > bandLimit) {
         receipt.below_band += 1;
-        receipt.candidates.push({ label: hit.label, outcome: "below_band", page: pageNumber });
+        note("below_band", hit, pageNumber);
         continue;
       }
       if (!looksLikeRegistration(hit.remainder)) {
         receipt.rejected_gate += 1;
-        receipt.candidates.push({ label: hit.label, outcome: "rejected_gate", page: pageNumber });
+        note("rejected_gate", hit, pageNumber);
+        continue;
+      }
+      const candidate = { ...extent, page: pageNumber };
+      const attributionFailure = vendorAttributionFailure(candidate, anchors, settings);
+      if (attributionFailure) {
+        receipt[attributionFailure] += 1;
+        note(attributionFailure, hit, pageNumber, { key: registrationKey(hit.remainder) });
         continue;
       }
       accepted.push({
@@ -196,7 +300,7 @@ export function readVendorIdentityFromLines(pages, opts = {}) {
         polygon: (line.polygon || []).map(Number),
         confidence: line?.confidence == null ? null : Number(line.confidence),
       });
-      receipt.candidates.push({ label: hit.label, outcome: "accepted", page: pageNumber, key: registrationKey(hit.remainder) });
+      note("accepted", hit, pageNumber, { key: registrationKey(hit.remainder) });
     }
   }
 
@@ -207,10 +311,9 @@ export function readVendorIdentityFromLines(pages, opts = {}) {
   }
   const distinct = new Set(accepted.map((c) => c.key));
   if (distinct.size > 1) {
-    // Two different registrations on one document. The second is very often the BUYER's, and
-    // filing it as the vendor's resolves the counterparty to the wrong party — worse by far
-    // than resolving nothing. There is no basis here for preferring one over the other, so
-    // neither is emitted.
+    // Two different registrations, both attributable to the vendor block. There is no basis
+    // for preferring one, so neither is emitted — and the document is now CONTESTED, which
+    // the merge below uses to withdraw a typed row that picked a side.
     receipt.ambiguous += 1;
     receipt.outcome = "ambiguous";
     receipt.distinct_keys = [...distinct];
@@ -246,7 +349,22 @@ export function readVendorIdentityFromLines(pages, opts = {}) {
  */
 export function mergeVendorIdentity(out, identity) {
   const [row] = identity.fields;
-  if (!row) return;
+  if (!row) {
+    // A CONTESTED document withdraws the typed row too. When the reader found two distinct
+    // registrations, Azure's typed value is not a tie-break — it is one of the contested
+    // readings, and on the measured shape (supplier A, buyer B, typed = B) leaving it standing
+    // registration-matches the WRONG counterparty. Only `ambiguous` does this: `absent`,
+    // `rejected_gate` and the attribution refusals are the reader having nothing to say, and a
+    // typed row stands there exactly as it did before this module existed.
+    if (identity.receipt.outcome === "ambiguous") {
+      const contested = out.find((r) => r.field_path === "invoice.vendor_registration");
+      if (contested && String(contested.value_raw ?? "").trim()) {
+        out.splice(out.indexOf(contested), 1);
+        identity.receipt.typed_vs_ambiguous += 1;
+      }
+    }
+    return;
+  }
   const typed = out.find((r) => r.field_path === "invoice.vendor_registration");
   if (!typed) {
     out.push(row);

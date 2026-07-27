@@ -10,7 +10,7 @@ import { createHash } from "node:crypto";
 
 import { readTotalsFromLines } from "../lib/invoice-totals-reader.mjs";
 import { mergeTotalsIntoFields } from "../lib/invoice-totals-merge.mjs";
-import { looksLikeRegistration, readVendorIdentityFromLines, mergeVendorIdentity } from "../lib/invoice-vendor-identity.mjs";
+import { looksLikeRegistration, readVendorIdentityFromLines, mergeVendorIdentity, anchorsFromTypedFields } from "../lib/invoice-vendor-identity.mjs";
 
 const API_VERSION = "2024-11-30";
 const MODEL = "prebuilt-invoice";
@@ -447,8 +447,12 @@ export function normalizeAzureInvoice(payload) {
   // from documents[0] while pages span the whole scan, so on a bundle a letterhead belonging
   // to document B would be filed as document A's supplier — a WRONG identity, which is worse
   // than the missing one it replaces.
+  // Attribution rides the TYPED VendorName/CustomerName regions. Their geometry is what is
+  // being used, never their content — on the vehicle VendorName reads as OCR garbage while
+  // its region sits 0.015in from the letterhead.
+  const anchors = anchorsFromTypedFields(fields);
   const identity = singleDocument
-    ? readVendorIdentityFromLines(result.pages)
+    ? readVendorIdentityFromLines(result.pages, anchors)
     : { fields: [], receipt: { ...readVendorIdentityFromLines([]).receipt, outcome: "multi_document" } };
   mergeVendorIdentity(out, identity);
 
