@@ -70,6 +70,17 @@ freeze lint; the earlier "v1 is frozen" claim was wrong and is retracted in the 
 - **Step zero, before any code:** capture ONE real Azure prebuilt-invoice payload offline
   and verify `pages[].lines[]` carries polygons on the *invoice* model — every repo fixture
   stubs pages as `[{pageNumber:1}]`, so this is an assumption, not an observation.
+- **DONE 2026-07-27** (`docs/plan/research/extraction-slice/step-zero-capture-2026-07-27.md`):
+  verified on two real documents. **Ratified from the measurements (as-built law):**
+  (i) label→amount pairing is THREE-term — reading-order adjacency ∧ |Δy| ≤ 0.15in ∧
+  vertical-box overlap > 0 (each term has a measured counterexample when dropped; all
+  three are opts with these defaults); (ii) a DASH amount = ABSENT, never 0.00; (iii) a
+  reader/typed-field disagreement emits NEITHER (typed fields measured to vary run-to-run);
+  (iv) rounding may emit UNSIGNED when the face's minus glyph never survives OCR — receipt
+  marks `sign:"unsigned"`; consumption is refusal-safe (a wrong-signed rounding can only
+  make the identity refuse, never balance a wrong post). **The rounding-sign decision
+  (sign-agnostic identity vs suppress-unsigned vs a materiality bound on rounding facts)
+  is an X5-design-time owner ruling — not X2's.**
 
 **X3 — the sales-tie correction (in 0022).**
 Replace `net + tax + rounding = gross` with **sum-of-stated-components = total**, where a
@@ -111,7 +122,7 @@ before merge (house law for live-lane code).
 
 | gate | claim |
 |---|---|
-| **XG1** | `request_reextraction('509e788d')` yields a v6 extraction whose `tax_total` region exists; the chat 3-leg draft's `sst_purchase_cost` leg ties EXACTLY; **Gate P closes** with a TB tie to the sen |
+| **XG1** | **AMENDED (owner ruling 2026-07-27**, after step zero found the vehicle's Service Tax (8%) amount is a printed DASH — nil tax; receipt: `step-zero-capture-2026-07-27.md`**):** `request_reextraction('509e788d')` yields a v6 extraction proving the verb + supersede chain + `total_excl_tax`/rounding emission, with `tax_total` correctly ABSENT (dash ≠ 0.00). **Gate P's SST 3-leg close retargets to the FIRST genuinely SST-charging real supplier bill that arrives** (operating runway — "if got sst bill then try it"); on that bill the `sst_purchase_cost` leg ties EXACTLY and Gate P closes with a TB tie to the sen |
 | **XG2** | A service-charge document (the LAI LOU MEI shape) passes the corrected tie with every figure read off its face |
 | **XG3** | The auto-draft lane produces its **first production draft** end-to-end on a re-extracted document — and the receipt names **which of the two blockers fell AND what X6 fix (data or logic) was applied**, with vendor resolution measured against the registered counterparty registry (measured, not assumed) |
 | **XG4** | Zero regression: all 29 pre-existing extractions byte-stable until deliberately re-extracted; the XML tier byte-identical; `sst_output` sales path and `purchase_sst_not_autopostable` unchanged |
