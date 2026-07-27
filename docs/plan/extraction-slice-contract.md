@@ -89,16 +89,23 @@ freeze lint; the earlier "v1 is frozen" claim was wrong and is retracted in the 
   rounding token is counted `sign_unknown` and NEVER emitted.** The sign-capture question
   (better OCR features, sign-agnostic identity, materiality bound) remains an
   X5-design-time owner ruling;
-  (v) a `/tax summary/i` heading opens an exclusion band (opt, default 1.0in vs the
-  0.61in measured block) — summary-block labels anchor nothing (refusal-only; kills the
-  taxable-as-tax mispair);
+  (v) a Tax Summary heading opens an exclusion band (opt, default 1.0in vs the 0.61in
+  measured block) — summary-block labels anchor nothing (refusal-only; kills the
+  taxable-as-tax mispair). The heading match is a NORMALIZED PREFIX match — collapse ALL
+  Unicode whitespace FIRST, then noise-strip, then lowercase-prefix — and that ORDER is
+  load-bearing (G3b: a leading NBSP otherwise shields noise from the stripper and the
+  band never opens). Refusal triggers normalize WIDE; the accept-side vocabulary keeps
+  the opposite order deliberately (failing to match is the safe direction there);
   (vi) geometry is normalized to page-width fractions — algebraically identical on inch
   pages; pixel pages carry the inch tolerances across via the A4-nominal width (recorded
   as an ASSUMPTION; a pixel page with no width refuses);
-  (vii) the accept grammar is ASCII-explicit (never `\s` — U+FEFF class bytes would pass
-  JS and refuse at the DB, killing the whole persist) and every emission re-validates the
-  EXACT composed bytes through the DB-aligned cents parser (strict-subset is
-  invariant-by-test, not by construction);
+  (vii) the accept grammar is ASCII-explicit (never `\s` and never Unicode `trim()` — a
+  U+FEFF at a token EDGE would pass JS and refuse at the DB, killing the whole persist)
+  and every emission re-validates the EXACT composed bytes through the DB-aligned cents
+  parser (strict-subset is invariant-by-test, not by construction). Cents comparison is
+  EXACT BigInt, parsed lexically — Number/Math.round collapsed values a sen apart beyond
+  2^53 into a false agreement. Blankness is DB-ALIGNED (btrim strips spaces, not tabs —
+  a typed `"\t"` is present-and-malformed to Postgres and withdrawable by a dash);
   (viii) a multi-document analyzeResult disables the reader entirely
   (`reason:"multi_document"` — typed fields keep v5 behavior).
 
