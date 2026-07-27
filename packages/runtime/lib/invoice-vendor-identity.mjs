@@ -63,9 +63,14 @@ export const DEFAULT_VENDOR_IDENTITY_OPTS = Object.freeze({
   /** How far down a page a letterhead may sit, as a fraction of page height. */
   topBandFraction: 0.25,
   /** Vertical gap allowed between a candidate line and the typed VendorName region, in
-   *  inches. Measured on the vehicle: 0.015in. Generous but bounded — a letterhead block is
-   *  a few lines tall, not a page. */
-  vendorAnchorGapIn: 1.5,
+   *  inches. Measured on the vehicle: 0.015in — so this default is still 33x generous, while
+   *  being narrow enough that a bill-to block cannot reach the vendor name. That second
+   *  property is what it is for: when Azure fails to type CustomerName there is no customer
+   *  anchor to be "closer to", and this gap becomes the only thing holding the buyer block
+   *  out. At 0.5in the buyer's registration must sit essentially INSIDE the letterhead to
+   *  pass. An opt, so a layout that genuinely prints its number further from the name can be
+   *  re-measured rather than argued about. */
+  vendorAnchorGapIn: 0.5,
 });
 
 // The CLOSED label vocabulary, EN + BM. Matching is exact-prefix on a form where every run of

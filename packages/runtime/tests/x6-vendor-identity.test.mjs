@@ -268,8 +268,27 @@ test("a SOLE BUYER registration is refused — uniqueness and the band both pass
   const buyerOnly = line("Company No. 199801009999 (470001-A)", [0.72, 2.55, 2.9, 2.55, 2.9, 2.7, 0.72, 2.7]);
   const { fields, receipt } = readVendorIdentityFromLines([page([buyerOnly])], ANCHORS);
   assert.equal(fields.length, 0, "no identity beats the wrong party");
-  assert.equal(receipt.closer_to_customer, 1, "it sits against the customer block, not the vendor's");
+  // 1.05in from the vendor name, so the gap wall catches it first. That ordering is the point
+  // of the 0.5in default: it holds even when Azure fails to type CustomerName and there is no
+  // customer anchor to be "closer to".
+  assert.equal(receipt.vendor_anchor_far, 1);
   assert.equal(receipt.outcome, "absent");
+
+  // With NO customer anchor at all — the shape that survives when CustomerName goes untyped —
+  // the gap is the only wall left standing, and it still holds.
+  const noCustomer = readVendorIdentityFromLines([page([buyerOnly])], { vendor: ANCHORS.vendor, customer: null });
+  assert.equal(noCustomer.fields.length, 0);
+  assert.equal(noCustomer.receipt.vendor_anchor_far, 1);
+});
+
+test("a candidate INSIDE the gap but nearer the customer block is still refused", () => {
+  // Both attribution terms are load-bearing, and only this geometry exercises the second one:
+  // 0.40in from the vendor name (inside the 0.5in gap) but 0.32in from the customer's.
+  const between = line("Company No. 199801009999 (470001-A)", [0.72, 1.9, 2.9, 1.9, 2.9, 2.05, 0.72, 2.05]);
+  const { fields, receipt } = readVendorIdentityFromLines([page([between])], ANCHORS);
+  assert.equal(fields.length, 0);
+  assert.equal(receipt.closer_to_customer, 1, "nearer the buyer means it is the buyer's");
+  assert.equal(receipt.vendor_anchor_far, 0, "the gap alone would have let this through");
 });
 
 test("attribution FAILS CLOSED — no typed VendorName region means no evidence, so no emission", () => {
