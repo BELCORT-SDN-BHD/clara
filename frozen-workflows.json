@@ -2,7 +2,7 @@
   "version": 1,
   "workflows": {
     "packages/runtime/lib/malaysian-registration.mjs": {
-      "sha256": "b07bbf682aab55f04d584cde271fc66ba5fe8c6a8684ccce685e64d102868a7a",
+      "sha256": "1ad0f2ecdce9f489f61a14066edf4271a894d10f4a297bf856af39bd73cb1a04",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {

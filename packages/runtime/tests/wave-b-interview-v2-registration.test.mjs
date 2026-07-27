@@ -26,8 +26,11 @@ const ACCEPTED = [
   ["JM0123456-A", "state_prefixed_business", "another state prefix"],
   ["202401001234", "unified_12", "the unified 12-digit form"],
   ["202401001234-K", "unified_12_check", "the unified form with a check letter"],
+  ["LLP0012345-LGN", "llp_registration", "an LLP/PLT general registration"],
+  ["LLP0012345-LCA", "llp_registration", "an LLP professional-practice registration"],
   ["201501005365 (1130695-T)", "combined_unified_and_legacy", "the Gate-F certificate's combined print"],
   ["202401047756 (1593602-X)", "combined_unified_and_legacy", "the X6 letterhead's combined print"],
+  ["201901000001 (LLP0012345-LGN)", "combined_unified_and_legacy", "an LLP's combined print"],
 ];
 
 test("F1: every real Malaysian registration form is accepted and classified", () => {
@@ -39,10 +42,46 @@ test("F1: every real Malaysian registration form is accepted and classified", ()
   }
 });
 
+test("F1: an LLP/PLT registration is accepted in every print it appears in (the fourth family)", () => {
+  // A PLT accounting practice is a common shape for both this product's FIRMS and their clients.
+  // Three leading letters and a three-letter suffix reach none of the other families, so without
+  // its own pattern an LLP hit exactly the re-ask-forever wall the state-prefixed form did.
+  for (const [input, expected] of [
+    ["LLP0012345-LGN", "llp_registration"],
+    ["LLP0012345-LCA", "llp_registration"],
+    ["llp0012345-lgn", "llp_registration"],
+    ["LLP 0012345 - LGN", "llp_registration"],
+    ["LLP0012345", "llp_registration"],
+    ["201901000001 (LLP0012345-LGN)", "combined_unified_and_legacy"],
+  ]) {
+    const v = grammar.classifyBusinessRegistration(input);
+    assert.equal(v.ok, true, `${input} must be accepted`);
+    assert.equal(v.form, expected, `${input} classified`);
+  }
+  // The suffix is matched as a SHAPE, not against a closed list: a list I am not certain of is
+  // the exact mechanism that produced F1 in the first place.
+  assert.equal(grammar.looksLikeBusinessRegistration("LLP0012345-XYZ"), true, "an unenumerated suffix is still an LLP number");
+  // And the family is announced to the person, not just accepted silently.
+  assert.match(grammar.describeBusinessRegistrationForms(), /LLP0012345-LGN/);
+  assert.match(questionOf(firmSeg("ssm"), {}), /LLP0012345-LGN/);
+});
+
+test("F1: the LLP key normalizes to the registry rule too (all four families, one normalizer)", () => {
+  for (const s of ["LLP0012345-LGN", "201901000001 (LLP0012345-LGN)", "llp0012345-lgn"]) {
+    assert.equal(grammar.normalizeRegistration(s), shared.registrationKey(s), `${s} — one normalization rule, pinned`);
+  }
+  assert.equal(grammar.normalizeRegistration("LLP0012345-LGN"), "llp0012345lgn");
+  assert.equal(grammar.normalizeRegistration("201901000001 (LLP0012345-LGN)"), "201901000001llp0012345lgn");
+  // Case- and separator-insensitive, so the same LLP typed three ways is ONE registration.
+  const keys = new Set(["LLP0012345-LGN", "llp0012345 lgn", "LLP0012345LGN"].map(grammar.normalizeRegistration));
+  assert.equal(keys.size, 1, "one registration, however it was punctuated");
+});
+
 test("F1: the fix, shown as a pair — v1 REFUSES exactly what v2 accepts (and v1 is unchanged)", () => {
-  // The bug: a sole proprietor's state-prefixed ROB number, and the combined print the owner's
-  // own SSM certificate carries (recorded in the Gate-F receipt as "finding F1's boundary").
-  for (const input of ["SA1234567-X", "JM0123456-A", "201501005365 (1130695-T)", "202401047756 (1593602-X)"]) {
+  // The bug: a sole proprietor's state-prefixed ROB number, an LLP/PLT number in any print, and
+  // the combined print the owner's own SSM certificate carries (recorded in the Gate-F receipt
+  // as "finding F1's boundary").
+  for (const input of ["SA1234567-X", "JM0123456-A", "LLP0012345-LGN", "LLP0012345-LCA", "201901000001 (LLP0012345-LGN)", "201501005365 (1130695-T)", "202401047756 (1593602-X)"]) {
     assert.equal(v1core.validateSsm(input).ok, false, `v1 refuses ${input} — the bug, still present in the frozen v1`);
     assert.equal(validateBusinessRegistration(input).ok, true, `v2 accepts ${input} — the fix`);
   }
