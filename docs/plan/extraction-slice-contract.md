@@ -71,16 +71,36 @@ freeze lint; the earlier "v1 is frozen" claim was wrong and is retracted in the 
   and verify `pages[].lines[]` carries polygons on the *invoice* model — every repo fixture
   stubs pages as `[{pageNumber:1}]`, so this is an assumption, not an observation.
 - **DONE 2026-07-27** (`docs/plan/research/extraction-slice/step-zero-capture-2026-07-27.md`):
-  verified on two real documents. **Ratified from the measurements (as-built law):**
+  verified on two real documents. **Ratified from the measurements + the adversarial fix
+  round (as-built law):**
   (i) label→amount pairing is THREE-term — reading-order adjacency ∧ |Δy| ≤ 0.15in ∧
   vertical-box overlap > 0 (each term has a measured counterexample when dropped; all
-  three are opts with these defaults); (ii) a DASH amount = ABSENT, never 0.00; (iii) a
-  reader/typed-field disagreement emits NEITHER (typed fields measured to vary run-to-run);
-  (iv) rounding may emit UNSIGNED when the face's minus glyph never survives OCR — receipt
-  marks `sign:"unsigned"`; consumption is refusal-safe (a wrong-signed rounding can only
-  make the identity refuse, never balance a wrong post). **The rounding-sign decision
-  (sign-agnostic identity vs suppress-unsigned vs a materiality bound on rounding facts)
-  is an X5-design-time owner ruling — not X2's.**
+  three are opts with these defaults); a dash may waive adjacency ONLY when the dash
+  itself satisfies the pairing geometry;
+  (ii) a DASH amount = ABSENT, never 0.00 — and a printed dash is a FIRST-CLASS reading:
+  it WITHDRAWS a contradicting typed-field row (`typed_vs_dash`); ambiguous/unparseable
+  are non-readings and do not reconcile (typed stands — v5 semantics);
+  (iii) a reader/typed-field disagreement emits NEITHER (typed fields measured to vary
+  run-to-run);
+  (iv) **REWRITTEN after adversarial F5 (the earlier "unsigned rounding is refusal-safe"
+  claim was PROVEN FALSE on taxless supplier bills — the auto rounding-leg derivation
+  consumes the fact with no identity in the way): rounding emits ONLY with an
+  affirmatively captured sign (the detached-minus case, emitted `-x.xx`); an unsigned
+  rounding token is counted `sign_unknown` and NEVER emitted.** The sign-capture question
+  (better OCR features, sign-agnostic identity, materiality bound) remains an
+  X5-design-time owner ruling;
+  (v) a `/tax summary/i` heading opens an exclusion band (opt, default 1.0in vs the
+  0.61in measured block) — summary-block labels anchor nothing (refusal-only; kills the
+  taxable-as-tax mispair);
+  (vi) geometry is normalized to page-width fractions — algebraically identical on inch
+  pages; pixel pages carry the inch tolerances across via the A4-nominal width (recorded
+  as an ASSUMPTION; a pixel page with no width refuses);
+  (vii) the accept grammar is ASCII-explicit (never `\s` — U+FEFF class bytes would pass
+  JS and refuse at the DB, killing the whole persist) and every emission re-validates the
+  EXACT composed bytes through the DB-aligned cents parser (strict-subset is
+  invariant-by-test, not by construction);
+  (viii) a multi-document analyzeResult disables the reader entirely
+  (`reason:"multi_document"` — typed fields keep v5 behavior).
 
 **X3 — the sales-tie correction (in 0022).**
 Replace `net + tax + rounding = gross` with **sum-of-stated-components = total**, where a
@@ -122,8 +142,8 @@ before merge (house law for live-lane code).
 
 | gate | claim |
 |---|---|
-| **XG1** | **AMENDED (owner ruling 2026-07-27**, after step zero found the vehicle's Service Tax (8%) amount is a printed DASH — nil tax; receipt: `step-zero-capture-2026-07-27.md`**):** `request_reextraction('509e788d')` yields a v6 extraction proving the verb + supersede chain + `total_excl_tax`/rounding emission, with `tax_total` correctly ABSENT (dash ≠ 0.00). **Gate P's SST 3-leg close retargets to the FIRST genuinely SST-charging real supplier bill that arrives** (operating runway — "if got sst bill then try it"); on that bill the `sst_purchase_cost` leg ties EXACTLY and Gate P closes with a TB tie to the sen |
-| **XG2** | A service-charge document (the LAI LOU MEI shape) passes the corrected tie with every figure read off its face |
+| **XG1** | **AMENDED (owner ruling 2026-07-27**, after step zero found the vehicle's Service Tax (8%) amount is a printed DASH — nil tax; receipt: `step-zero-capture-2026-07-27.md`**):** `request_reextraction('509e788d')` yields a v6 extraction proving the verb + supersede chain + `total_excl_tax` emission, with `tax_total` correctly ABSENT (dash ≠ 0.00) and rounding correctly REFUSED (`sign_unknown` — the face's minus glyph never survives OCR). **Gate P's SST 3-leg close retargets to the FIRST genuinely SST-charging real supplier bill that arrives** (operating runway — "if got sst bill then try it"); on that bill the `sst_purchase_cost` leg ties EXACTLY and Gate P closes with a TB tie to the sen |
+| **XG2** | **AMENDED (as-built, 2026-07-27):** the corrected component tie is rig-proven with every LAI LOU MEI figure (x1-tie cell 1: 94.30+3.77+5.66+0.02=103.75 EXACT). On LIVE documents, the reader's sign-capture law (as-built (iv)) means a service-charge document with an UNSIGNED rounding refuses to the human lane by design (reads 103.73 vs stated 103.75 — the two-sen gap IS the suppressed rounding); a service-charge document without a rounding line, or with a sign-captured one, passes fully live |
 | **XG3** | The auto-draft lane produces its **first production draft** end-to-end on a re-extracted document — and the receipt names **which of the two blockers fell AND what X6 fix (data or logic) was applied**, with vendor resolution measured against the registered counterparty registry (measured, not assumed) |
 | **XG4** | Zero regression: all 29 pre-existing extractions byte-stable until deliberately re-extracted; the XML tier byte-identical; `sst_output` sales path and `purchase_sst_not_autopostable` unchanged |
 | **XG5** | `anchor_missing` outcomes change ONLY at X5's deploy, never at X2's — measured on live before/after each |
