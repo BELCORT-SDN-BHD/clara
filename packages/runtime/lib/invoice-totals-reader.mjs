@@ -63,6 +63,27 @@ import { ASCII_SPACE, asciiTrim, centsOfRaw, isDash, isStrictAmount, looksLikeAm
 
 export { centsOfRaw };
 
+/** The three STATED COMPONENTS, as opposed to the totals family.
+ *
+ *  THE DISTINCTION IS SEMANTIC, and K3 is why it has to exist. A totals-family line
+ *  (subtotal, tax, rounding) printed twice RESTATES one fact — the measured receipt prints
+ *  its tax again in a Tax Summary block — so two identical readings collapse into one.
+ *  A COMPONENT line printed twice is two separate charges. A face carrying
+ *  `Delivery RM10.00` on two rows is charging RM20 of delivery, and collapsing them into a
+ *  single RM10 fact makes the reader's own arithmetic disagree with the document by exactly
+ *  the amount it dropped — which then TIES against a gross that is wrong by the same amount.
+ *  Executed: subtotal 100, zero tax, two delivery rows of 10, typed total 110. The visible
+ *  components sum to 120 and the document must refuse; collapsed, it corroborates.
+ *
+ *  So: components do not collapse. More than one occurrence is AMBIGUOUS, whatever the
+ *  values, because this reader cannot tell "the same charge restated" from "two charges" and
+ *  must not guess which. Summing them would be the other guess and is equally unfounded. */
+const COMPONENT_FIELD_PATHS = Object.freeze([
+  "invoice.service_charge",
+  "invoice.discount",
+  "invoice.delivery",
+]);
+
 /** The CLOSED set of field_paths this reader may emit (contract §2 X3 taxonomy; the DB's
  *  allowlist in 0022 is the enforcing copy). `invoice.total` is deliberately absent. */
 export const TOTALS_FIELD_PATHS = Object.freeze([
@@ -87,6 +108,22 @@ export const DEFAULT_READER_OPTS = Object.freeze({
   requireIndexAdjacent: true,
   /** The label box and the amount box must share a horizontal band (positive y overlap). */
   requireVerticalOverlap: true,
+  /** The largest magnitude, in cents, a ROUNDING adjustment may carry.
+   *
+   *  WHY A BOUND AT ALL. Rounding is the only component whose sign is free, which makes it
+   *  the only one that can SUBTRACT — and an unbounded subtraction balances an arbitrarily
+   *  wrong gross. Constructed and executed: a face stating subtotal 200.00, zero tax and a
+   *  detached-minus `Rounding 100.00` certifies `200 - 100 = 100` against a typed total of
+   *  100, and the resulting entry posts with no rounding leg at all because the supplier
+   *  floor validates the JOURNAL, not the extracted figure.
+   *
+   *  The bound is what the word means. A rounding adjustment moves a total to a nearby
+   *  currency unit; Malaysian bills round to the nearest 5 sen, so anything approaching a
+   *  ringgit is not rounding under any reading. 99 sen is deliberately loose — it admits the
+   *  measured 40-sen case with room to spare — while making "rounding" incapable of carrying
+   *  a material amount. A document whose adjustment exceeds it is not refused because the
+   *  figure is wrong; it is refused because whatever that line is, it is not rounding. */
+  maxRoundingCents: 99,
 });
 
 // A4 portrait width. Azure reports PDF geometry in inches but IMAGE geometry in PIXELS
@@ -438,6 +475,12 @@ export function readTotalsFromLines(pages, opts = {}) {
       }
       continue;
     }
+    // K3: a COMPONENT stated more than once is two charges, not one restated fact.
+    if (COMPONENT_FIELD_PATHS.includes(field_path) && found.length > 1) {
+      record("ambiguous", { reason: "repeated_component", occurrences: found.length });
+      receipt.ambiguous += 1;
+      continue;
+    }
     const paired = found.filter((o) => o.status === "paired");
     const nils = found.filter((o) => o.status === "nil");
     if (paired.length === 0) {
@@ -460,7 +503,7 @@ export function readTotalsFromLines(pages, opts = {}) {
       receipt.ambiguous += 1;
       continue;
     }
-    const [{ value_raw, page, polygon, confidence, sign }] = paired;
+  const [{ value_raw, page, polygon, confidence, sign }] = paired;
     // THE EMIT GATE, and the last thing standing between this module and a forfeited
     // extraction. Nothing leaves here whose EXACT emitted bytes fail to normalize under the
     // DB's own grammar — including the detached-minus composition, which is assembled AFTER
@@ -469,6 +512,13 @@ export function readTotalsFromLines(pages, opts = {}) {
     const cents = centsOfRaw(value_raw);
     if (cents === null || (cents < 0 && field_path !== "invoice.rounding")) {
       record("unparseable", { reason: "emit_gate", values: [value_raw] });
+      receipt.unparseable += 1;
+      continue;
+    }
+    // K4: a rounding adjustment that is not a rounding-sized amount. See maxRoundingCents —
+    // the refusal is about what the line can be, not about whether the digits parsed.
+    if (field_path === "invoice.rounding" && (cents > BigInt(settings.maxRoundingCents) || cents < -BigInt(settings.maxRoundingCents))) {
+      record("unparseable", { reason: "rounding_out_of_bounds", values: [value_raw] });
       receipt.unparseable += 1;
       continue;
     }

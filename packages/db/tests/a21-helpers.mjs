@@ -55,6 +55,9 @@ export const OCR_SKIP = {
   customer: "customer_unresolved",
   cn: "cn_not_autopostable",
   purchaseSst: "purchase_sst_not_autopostable",
+  // 0023 (X5): corroboration now requires the document to STATE net and tax, so shapes that
+  // used to reach the anchor block are refused one gate earlier, here.
+  notCorroborated: "not_corroborated",
 };
 
 /** The suspended status the repeated-skip ladder flips a rule into (pin P2(e)). */
