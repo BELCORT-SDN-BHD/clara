@@ -37,8 +37,12 @@ resolution defect: `_resolve_counterparty` would match on registration if the fa
 ## The ruled fix (logic class — pre-authorized, ADR-047 Q3)
 
 **A deterministic vendor-identity reader**, the X2 pattern with a small vocabulary:
-label-anchored `Company No.` / `Co. Reg. No.` / `Registration No.` / `SSM No.` lines (and
-the bare `(1234567-X)` old-format token) → emit `invoice.vendor_registration` with the
+label-anchored `Company No.` / `Co. Reg. No.` / `Registration No.` / `SSM No.` lines →
+emit `invoice.vendor_registration` with the
+(**Bare `(1234567-X)` tokens are RULED OUT** — a label-less token carries no evidence of
+WHOSE registration it is; label-anchoring is what makes the attribution evidenced rather
+than positional. Recorded as an explicitly-deferred vocabulary widening, not a gap; and
+moot for the live lane's only bare-token example, which is `receipt`-kind.)
 line's real geometry — reconciled against the typed emission exactly as X2 reconciles
 totals (collapse on agreement; NEITHER on disagreement — `vendor_registration` is in the
 DB's conflicting-duplicate forfeit list, so an unreconciled collision would forfeit the
