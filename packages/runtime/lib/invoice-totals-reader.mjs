@@ -180,28 +180,29 @@ function boxOf(polygon, scale) {
  * usable width — the frame is then unknowable, and comparing raw pixel counts against an inch
  * tolerance would refuse every pair on the page while looking like a clean read.
  */
-export function pageFrame(page, opts) {
+export function pageFrame(page, opts = {}) {
   const unit = String(page?.unit ?? "inch").toLowerCase();
   const width = Number(page?.width);
   const usableWidth = Number.isFinite(width) && width > 0 ? width : null;
-  if (unit === "pixel" || unit === "pixels") {
-    if (!usableWidth) return null;
-    return {
-      unit,
-      scale: 1 / usableWidth,
-      maxTopDelta: opts.maxTopDeltaIn / A4_WIDTH_IN,
-      taxSummaryBand: opts.taxSummaryBandIn / A4_WIDTH_IN,
-    };
-  }
+  const pixels = unit === "pixel" || unit === "pixels";
+  // A pixel page with no width has no knowable frame; guessing one is how an inch tolerance
+  // ends up compared against raw pixel counts.
+  if (pixels && !usableWidth) return null;
   // Inches (or an engine result that omits the unit, which every pre-X2 fixture does).
   // Dividing coordinates AND tolerances by the same width is an identity on the comparison,
   // so the measured inch calibration is preserved exactly.
-  const scale = usableWidth ? 1 / usableWidth : 1;
+  const scale = pixels ? 1 / usableWidth : usableWidth ? 1 / usableWidth : 1;
+  /** Convert an INCH threshold into this page's frame. THE ONE DEFINITION of that rule —
+   *  every reader's geometric thresholds must come through here. On an inch page it is the
+   *  same division the coordinates get; on a pixel page the threshold is carried across as
+   *  the A4-nominal fraction of width, since pixels have no intrinsic physical size. */
+  const inchToFrame = (inches) => (pixels ? inches / A4_WIDTH_IN : inches * scale);
   return {
-    unit: usableWidth ? unit : "inch",
+    unit: pixels || usableWidth ? unit : "inch",
     scale,
-    maxTopDelta: opts.maxTopDeltaIn * scale,
-    taxSummaryBand: opts.taxSummaryBandIn * scale,
+    inchToFrame,
+    maxTopDelta: inchToFrame(opts.maxTopDeltaIn ?? DEFAULT_READER_OPTS.maxTopDeltaIn),
+    taxSummaryBand: inchToFrame(opts.taxSummaryBandIn ?? DEFAULT_READER_OPTS.taxSummaryBandIn),
   };
 }
 

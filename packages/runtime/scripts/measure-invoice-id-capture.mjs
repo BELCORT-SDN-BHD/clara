@@ -26,11 +26,16 @@
 //               client data and can never enter the repo or CI, so the in-repo tests use
 //               geometry-faithful synthetic fixtures and this mode is run locally against
 //               the real files. Reads nothing but the file you point it at.
+//   vendor    (X6) — the same, for the VENDOR-IDENTITY reader: what registration it read,
+//               what it refused, and the normalized key the counterparty resolver actually
+//               matches on. Check that key against the registry row by eye — the buyer's
+//               registration emitted as the vendor's would resolve the wrong party.
 //
 // USAGE:
 //   node scripts/measure-invoice-id-capture.mjs                 # fixtures (built-in)
 //   node scripts/measure-invoice-id-capture.mjs fixtures --payloads ./raw.json
 //   node scripts/measure-invoice-id-capture.mjs totals --payloads ./raw.json
+//   node scripts/measure-invoice-id-capture.mjs vendor --payloads ./raw.json
 //   node scripts/measure-invoice-id-capture.mjs live            # env DB, read-only
 //
 // The DB connection is resolved ONLY from the environment (DATABASE_URL /
@@ -40,6 +45,7 @@ import { readFileSync } from "node:fs";
 import pg from "pg";
 import { normalizeAzureInvoice } from "../workflows/invoiceFacts.v1.azure.mjs";
 import { TOTALS_FIELD_PATHS } from "../lib/invoice-totals-reader.mjs";
+import { registrationKey } from "../lib/invoice-vendor-identity.mjs";
 
 // --- shared helper: does a normalized payload yield a non-empty invoice.invoice_id? --
 function capturedId(payload) {
@@ -178,6 +184,39 @@ function runTotals(argv) {
   console.log("correct outcome; a WRONG figure is not, and no counter can tell you which you have.");
 }
 
+// --- X6: what the vendor-identity reader made of each payload -------------------------
+// The registration is the fact `_resolve_counterparty` matches a REGISTERED counterparty on,
+// so the key column below is what actually decides whether `vendor_unresolved` falls: it is
+// compared against `counterparties.registration_normalized` verbatim.
+function runVendor(argv) {
+  const payloadArg = argv[argv.indexOf("--payloads") + 1];
+  if (!argv.includes("--payloads") || !payloadArg) {
+    console.error("vendor mode needs real payloads: --payloads <file.json>");
+    process.exit(2);
+  }
+  const raw = JSON.parse(readFileSync(payloadArg, "utf8"));
+  const arr = Array.isArray(raw) ? raw : [raw];
+  console.log(`Vendor-identity reader over ${arr.length} payload(s) from ${payloadArg}\n`);
+  for (const [i, entry] of arr.entries()) {
+    const name = entry.file || entry.name || `payload[${i}]`;
+    const out = normalizeAzureInvoice(entry.payload || entry);
+    const r = out.envelope.vendor_identity ?? {};
+    const reg = out.fields.find((f) => f.field_path === "invoice.vendor_registration");
+    console.log(`== ${name}  (${out.normalizationVersion})`);
+    console.log(`   invoice.vendor_registration  ${JSON.stringify(reg?.value_raw ?? null)}   page=${reg?.page ?? "-"}`);
+    console.log(`   registration key (what the resolver matches on): ${reg ? registrationKey(reg.value_raw) : "-"}`);
+    console.log(
+      `   outcome=${r.outcome} matched=${r.matched} absent=${r.absent} ambiguous=${r.ambiguous} ` +
+      `rejected_gate=${r.rejected_gate} below_band=${r.below_band} typed_collapsed=${r.typed_collapsed} ` +
+      `typed_disagreement=${r.typed_disagreement} emitted=${r.emitted}`,
+    );
+    for (const c of r.candidates ?? []) console.log(`     candidate p${c.page} [${c.outcome}] label=${JSON.stringify(c.label)}${c.key ? " key=" + c.key : ""}`);
+    console.log("");
+  }
+  console.log("Check the key against the registry row by eye. A refusal is a correct outcome;");
+  console.log("the BUYER's registration emitted as the vendor's would resolve the wrong party.");
+}
+
 async function runLive() {
   const url = process.env.DATABASE_URL || process.env.WORKFLOW_POSTGRES_URL;
   const client = new pg.Client(url ? { connectionString: url } : {});
@@ -227,7 +266,9 @@ if (mode === "live") {
   runFixtures(process.argv.slice(2));
 } else if (mode === "totals") {
   runTotals(process.argv.slice(2));
+} else if (mode === "vendor") {
+  runVendor(process.argv.slice(2));
 } else {
-  console.error(`unknown mode '${mode}'. usage: measure-invoice-id-capture.mjs [fixtures|totals|live] [--payloads <file.json>]`);
+  console.error(`unknown mode '${mode}'. usage: measure-invoice-id-capture.mjs [fixtures|totals|vendor|live] [--payloads <file.json>]`);
   process.exit(2);
 }
