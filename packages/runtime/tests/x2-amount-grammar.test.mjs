@@ -190,3 +190,22 @@ test("a Tax Summary heading is matched WIDE — a Unicode space must not reopen 
     assert.equal(receipt.tax_summary_suppressed, 1);
   }
 });
+
+test('a heading whose noise is SHIELDED by a Unicode space still opens the band', () => {
+  // The combined edge: the noise-stripper's class is ASCII, so a leading NBSP shields the '#'
+  // from it. Collapse-then-strip is the only order that survives; strip-then-collapse leaves
+  // '# tax summary', the prefix misses, and the taxable base is emitted as the tax.
+  for (const heading of [' # Tax﻿Summary', ' # Tax Summary', '(1) Tax　Summary']) {
+    const block = [
+      line(heading, [4.2865, 13.8624, 5.705, 13.8547, 5.7065, 14.1375, 4.288, 14.1452]),
+      line('Taxable', [8.4077, 13.7859, 9.3394, 13.7695, 9.3444, 14.053, 8.4126, 14.0694]),
+      line('Tax', [10.1108, 13.7509, 10.5315, 13.7499, 10.5322, 14.0162, 10.1114, 14.0172]),
+      line('Service Tax@6%', [4.3283, 14.1864, 6.097, 14.1581, 6.1016, 14.4482, 4.3329, 14.4689]),
+      line('94.30', [8.5495, 14.1185, 9.2231, 14.1056, 9.2285, 14.3873, 8.5549, 14.3994]),
+      line('5.66', [10.0044, 14.0753, 10.5366, 14.0694, 10.5404, 14.3455, 10.0082, 14.3528]),
+    ];
+    const { fields, receipt } = readTotalsFromLines(onePage(block));
+    assert.equal(byPath(fields)['invoice.tax_total'], undefined, JSON.stringify(heading) + ' must open the band');
+    assert.equal(receipt.tax_summary_suppressed, 1);
+  }
+});

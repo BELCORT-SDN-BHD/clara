@@ -327,4 +327,3 @@ test("a dash never hides an amount-shaped refusal from the counters", () => {
   assert.equal(receipt.unparseable, 1, "AND the refused token is counted in its own right");
   assert.equal(receipt.fields["invoice.rounding"].unparseable_attempt, true);
 });
-

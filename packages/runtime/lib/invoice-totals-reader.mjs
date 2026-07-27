@@ -137,9 +137,16 @@ const IDENTIFIER_WORDS = new Set(["no", "number", "num", "reg", "registration", 
 // space) must still open the band. JavaScript's `\s` covers NBSP, U+FEFF, the U+2000 block and
 // U+3000, so it is exactly the right class here and exactly the wrong one three definitions
 // away in the accept grammar. Same reasoning as AMOUNT_SHAPED's `\s`.
+// ORDER MATTERS, and getting it wrong reopens the hole this guard exists to close. The
+// whitespace collapse runs FIRST, because the noise-stripper's character class is ASCII: on
+// `<NBSP># Tax<FEFF>Summary` a leading non-ASCII space shields the `#` from being stripped, the
+// prefix never matches, the band never opens, and the taxable base is emitted as the tax.
+// Collapse to plain spaces first and the stripper sees ordinary noise it can remove.
 const TAX_SUMMARY_HEADING = /^tax summary/;
 const isTaxSummaryHeading = (text) =>
-  TAX_SUMMARY_HEADING.test(String(text ?? "").replace(LABEL_NOISE_PREFIX, "").replace(/\s+/g, " ").trim().toLowerCase());
+  TAX_SUMMARY_HEADING.test(
+    String(text ?? "").replace(/\s+/g, " ").replace(LABEL_NOISE_PREFIX, "").trim().toLowerCase(),
+  );
 
 // Leading item counts / bullets / punctuation are stripped before matching: the real receipt
 // prints its subtotal label as "11 SubTotal" (the line's own item count runs into the label).
