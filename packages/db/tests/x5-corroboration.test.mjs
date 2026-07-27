@@ -379,15 +379,39 @@ test("[K4] a rounding adjustment larger than 99 sen never corroborates", async (
   assert.equal((await factState(ok.documentId)).corroborated, true, "2 sen of rounding is rounding");
 });
 
-test("[K5] the LIVE CORPUS SHAPES, as a cell: one flips, none is lost", async (t) => {
+test("[K5] the LIVE CORPUS SHAPES, as a cell: NONE flips, and none is lost", async (t) => {
   if (gate(t)) return;
-  // The exact-diff result lived only in the supplied live query. It belongs in the suite, so
-  // a future change to the predicate has to face it here rather than in a report nobody
-  // re-runs. These are the three live shapes that carry any component at all.
+  // The exact-diff result belongs in the suite rather than in a report nobody re-runs — but
+  // it has to be the REAL result, which means modelling the REAL envelopes. The first version
+  // of this cell handed every shape the default `agreedEnvelope()` and asserted the one flip
+  // the pre-K1 predicate produced. That made the suite green while claiming an outcome that
+  // can no longer occur, which is worse than no cell at all: it would have defended the
+  // obsolete behaviour against the correct one.
+  //
+  // Measured on live (read-only, 29 OCR extractions): 0 corroborated before, 0 after. The
+  // document that flipped under the pre-K1 predicate — `5174df8a` — carries NO reader receipt
+  // for either field: its net and tax came from Azure's typed fields alone and the layout
+  // reader read nothing on it. That is exactly the typed-only shape K1 refuses, so its flip
+  // was the false-corroboration path, not a yield loss.
   const shapes = [
-    { name: "5174df8a-class (net + explicit zero tax, identity ties)", gross: 300000, net: 300000, tax: 0, expect: true },
-    { name: "509e788d-class (the vehicle: net stated, tax a printed dash)", gross: 43556000, net: 43556040, tax: null, expect: false },
-    { name: "d3732397-class (net stated, no tax)", gross: 4500000, net: 4500000, tax: null, expect: false },
+    {
+      name: "5174df8a-class — net + explicit zero tax, identity ties, but TYPED-ONLY",
+      gross: 300000, net: 300000, tax: 0,
+      envelope: {}, // the live envelope: no totals_reader receipt at all
+    },
+    {
+      name: "509e788d-class — the vehicle: net AGREED, tax a printed dash",
+      gross: 43556000, net: 43556040, tax: null,
+      envelope: { totals_reader: { fields: {
+        "invoice.total_excl_tax": { outcome: "typed_collapsed", value_raw: "435,560.40", typed_value_raw: "435,560.40" },
+        "invoice.tax_total": { outcome: "absent" },
+      } } },
+    },
+    {
+      name: "d3732397-class — net stated, no tax",
+      gross: 4500000, net: 4500000, tax: null,
+      envelope: {},
+    },
   ];
   let flips = 0;
   for (const shape of shapes) {
@@ -397,16 +421,15 @@ test("[K5] the LIVE CORPUS SHAPES, as a cell: one flips, none is lost", async (t
       factField(COMPONENT.net, rm(shape.net), { confidence: 0.83 }),
     ];
     if (shape.tax !== null) fields.push(factField(COMPONENT.tax, rm(shape.tax), { confidence: 0.83 }));
-    const cited = await factsDoc(world.clients.A1, fields);
+    const cited = await factsDoc(world.clients.A1, fields, { envelope: shape.envelope });
     const got = (await factState(cited.documentId)).corroborated;
-    assert.equal(got, shape.expect, `${shape.name} corroborates=${got}, expected ${shape.expect}`);
+    assert.equal(got, false, `${shape.name} must NOT corroborate (got ${got})`);
     if (got) flips += 1;
-    // NONE of them corroborated before X5 either — `would_lose = 0` measured on live, and the
-    // same claim asserted here from the recomputed pre-X5 verdict.
     assert.equal(await wouldHaveCorroboratedPreX5(cited.documentId), false,
       `${shape.name} did not corroborate pre-X5 either (confidence 0.83 < 0.95) — nothing is LOST`);
   }
-  assert.equal(flips, 1, "exactly one of the three live shapes gains corroboration");
+  assert.equal(flips, 0,
+    "X5 opens nothing on the CURRENT corpus — it opens a lane future two-reader documents can walk through");
 });
 
 test("[K5] the positive flip is CONFIDENCE-INDEPENDENT — a retained 0.95 term turns this red", async (t) => {

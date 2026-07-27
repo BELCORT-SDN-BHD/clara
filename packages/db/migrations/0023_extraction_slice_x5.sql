@@ -1330,7 +1330,11 @@ begin
   -- floor_lost were present but unreachable through the executor. They are now reachable and
   -- must still be exactly what 0016 wrote — the whole point of removing the guard is that
   -- these walls resurface, not that they vanish with it.
-  if position('customer_unresolved' in v_src) = 0 or position('floor_lost' in v_src) = 0 then
+  -- OVER EXECUTABLE TEXT, like every other probe here. This one was still reading raw prosrc,
+  -- which made 'comment-stripped everywhere' false by exactly one check — and it is the check
+  -- that proves the walls the disjunct shadowed came back, so a sentinel parked in a comment
+  -- could have vouched for a control that no longer exists.
+  if position('customer_unresolved' in v_code) = 0 or position('floor_lost' in v_code) = 0 then
     raise exception '0023 tail: a control that was SHADOWED by the dark disjunct did not resurface with it';
   end if;
   -- The D-P6 sentinel vocabulary, re-asserted because this migration rewrites the whole body.

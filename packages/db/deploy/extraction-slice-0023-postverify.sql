@@ -116,7 +116,31 @@ begin
      or position('v_dlv_c<=1and(v_dlv_c=0orv_dlvisnotnull)' in v_code) = 0 then
     raise exception 'POST-VERIFY 2: a component cardinality/parse guard is missing — a silent zero could satisfy the identity';
   end if;
-  raise notice 'OK 2  vendor confidence GONE (identifier + literal); arithmetic agreement, cardinality and the sign belt all present';
+  -- THE AUTHORITY-BEARING TERMS THEMSELVES, and this is the half a probe most easily omits.
+  -- Everything above proves the ARITHMETIC is present. None of it notices if the AGREEMENT
+  -- requirement is deleted — and agreement is the whole of X5's claim. Deleting
+  -- `and v_net_agreed and v_tax_agreed` reopens the typed-only transposition (net 6 / tax 94
+  -- against a total of 100, ties exactly, supplier floor binds an SST leg to the false tax)
+  -- while every other probe here still printed OK. So the conjunction is pinned as EXECUTABLE
+  -- text, fused, along with the evidence it is computed from.
+  if position('andv_net_agreedandv_tax_agreed' in v_code) = 0 then
+    raise exception 'POST-VERIFY 2: the per-field AGREEMENT conjunction is gone from the OCR branch — X5 would certify arithmetic self-consistency, which a transposed typed pair satisfies';
+  end if;
+  if position('v_net_agreed:=coalesce((v_env->''totals_reader''->''fields''->''invoice.total_excl_tax''->>''outcome'')=''typed_collapsed'',false)' in v_code) = 0
+     or position('v_tax_agreed:=coalesce((v_env->''totals_reader''->''fields''->''invoice.tax_total''->>''outcome'')=''typed_collapsed'',false)' in v_code) = 0 then
+    raise exception 'POST-VERIFY 2: the agreement evidence is not read per-field from the reader receipt, or its coalesce-to-false is gone (a missing envelope would make corroborated NULL rather than false)';
+  end if;
+  -- The net/tax sign belt. 0022 scoped its guard to the three components; X5 is what makes
+  -- net and tax authority-bearing, and the typed route bypasses the reader entirely.
+  if position('andv_net>=0andv_tax>=0' in v_code) = 0 then
+    raise exception 'POST-VERIFY 2: the net/tax non-negative belt is gone — typed net -100 with tax 200 ties a total of 100';
+  end if;
+  -- The rounding materiality bound. Rounding is the only free-signed component, so it is the
+  -- only one that can SUBTRACT an arbitrary amount into a tie.
+  if position('coalesce(abs(v_rounding),0)<=99' in v_code) = 0 then
+    raise exception 'POST-VERIFY 2: the rounding magnitude bound is gone — an unbounded signed rounding balances an arbitrarily wrong gross';
+  end if;
+  raise notice 'OK 2  confidence GONE; PER-FIELD agreement conjunction + its coalesced evidence, net/tax sign belt, rounding bound, cardinality and the identity all present';
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -291,6 +315,32 @@ begin
     raise exception 'POST-VERIFY 5: a corroboration/posting function leaked into the wake allowlist';
   end if;
   raise notice 'OK 5  supplier floor + component write boundary untouched; caller set exact; no new key to the lane';
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 5b. THE WRITE BOUNDARY REFUSES A NEGATIVE NET OR TAX (0023 check b3).
+--     X5's predicate belts this, but a belt whose buckle is missing is one
+--     migration away from being the only thing standing. The typed route into
+--     the mapper never meets the reader's own sign handling, so this is where
+--     every producer is actually forced through.
+-- ---------------------------------------------------------------------
+do $$
+declare v_src text; v_code text;
+begin
+  select prosrc into v_src from pg_proc
+   where oid = 'clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb)'::regprocedure;
+  if v_src is null then
+    raise exception 'POST-VERIFY 5b: persist_invoice_facts is GONE';
+  end if;
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  if position('r.field_pathin(''invoice.total_excl_tax'',''invoice.tax_total'')andr.monetary_cents<0' in v_code) = 0 then
+    raise exception 'POST-VERIFY 5b: the (b3) net/tax non-negative guard is gone from the write boundary';
+  end if;
+  raise notice 'OK 5b net/tax non-negative guard present at the write boundary (0023 check b3)';
 end $$;
 
 -- ---------------------------------------------------------------------
