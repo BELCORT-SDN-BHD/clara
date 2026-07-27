@@ -1,6 +1,10 @@
 {
   "version": 1,
   "workflows": {
+    "packages/runtime/lib/malaysian-registration.mjs": {
+      "sha256": "49f8a2672577b5d567ddeddadc1d7207a6519126a330100cc821cde919ba74e8",
+      "note": ""
+    },
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {
       "sha256": "382e1fc75eef8159ba1fc7465c6f7d7858c51a6bd533aaa750d99667a3c87187",
       "note": "",
@@ -291,6 +295,10 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/clientOnboarding.v2.ts": {
+      "sha256": "56ec3d4c5542db7d0e89121f2cf6ed60b4563924ce5065c4c064a690ad1a38e6",
+      "note": ""
+    },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
       "note": "",
@@ -316,6 +324,10 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/firmInterview.v2.ts": {
+      "sha256": "ab9dcecd3b1c36b600e7161d93fd5b113474cd18c83a280d2d24c94426c4b406",
+      "note": ""
+    },
     "packages/runtime/workflows/interview.v1.core.ts": {
       "sha256": "8a4d79337256050dac239d1165e87e778a2f4ee584464c9a56f2981791e23c54",
       "note": "",
@@ -335,6 +347,30 @@
       "sha256": "28c93bb7a7be8c0bcb2d059930c385d64bf76704df623f9626438c935a171582",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/interview.v2.core.ts": {
+      "sha256": "f8d28aec302283c11441e8cd312ded868b56d43c02bf4feae911d170905106c8",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v2.frameworks.ts": {
+      "sha256": "d46ec36ef72d64dd3cede23b6a8fdfacee747a47461494c6da978574d9986909",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v2.planwrite.ts": {
+      "sha256": "0ef619e175d94f77fbebdac32ab1dd877af610fbad452b41f32d94e871a202ca",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v2.questions.ts": {
+      "sha256": "2fe5d7f57246cfaa5dc4dfe04d147a1ed8d4bedab0bffaca62f8c18ccec955de",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v2.rules.ts": {
+      "sha256": "3a9cd8d8ca00a14cafbe199c20afd5958c918e3e4e550f67a0b69b32d98e390e",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v2.segments.ts": {
+      "sha256": "437fae6fa821162fe57630f43d4a5a978b927d56822dabb6fd64796209477f77",
+      "note": ""
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
       "sha256": "f2d3ef98ed9ce533d04252fd5771e463b017c8b66c77ec70d74a457f534bd7b1",

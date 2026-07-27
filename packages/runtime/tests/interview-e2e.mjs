@@ -31,6 +31,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { SignJWT } from "jose";
+import { scriptedAnswers } from "./wave-b-interview-testkit.mjs";
 
 // --- Fail-closed local gate (the intake-e2e precedent). Any PGPORT is accepted (local
 // 55440, CI's 5432 service), but the host MUST be loopback and the database MUST be a
@@ -160,18 +161,14 @@ async function pollRunTerminal(rig, runId, label, deadlineMs = 20000) {
   throw new Error(`pollRunTerminal timeout (${label}); last=${JSON.stringify(last)}`);
 }
 
-// The valid scripted-answer map, reused verbatim from wave-b-interview-client.test.mjs
-// (the closure suite's FORK-3 drive). 'skip' entries exercise the skippable segments.
-const VALID_CLIENT = {
-  legal_name: "Acme Trading SB", entity_type: "sdn_bhd", ssm: "202401001234-K", tin: "C2584563222", msic: "46900",
-  sst_regime: "service_tax", sst_no: "skip", statutory: "skip", banks: "skip", currency: "MYR", fye: "6",
-  framework: "MPERS", coa_seed: "yes", opening_position: "new_first_year", fa_depreciation: "no",
-  turnover: "RM1M-5M", sample_invoices: "skip",
-};
-
-/** Drive a CLIENT interview to its terminal by answering each open park: a 'q' park gets the
- *  scripted value (VALID_CLIENT[seg]); a 'c' confirm park gets 'yes'. Returns the terminal /state. */
-async function driveClientToComplete({ runId, planId }, jwt, deadlineMs = 90000) {
+/** Drive a CLIENT interview to its terminal by answering each open park: a 'q' park gets the next
+ *  scripted answer for its segment; a 'c' confirm park gets 'yes'. Returns the terminal /state.
+ *
+ *  The script lives in the testkit (INTERVIEW_V2_CLIENT_ANSWERS) and is consumed through a
+ *  per-segment QUEUE, because a v2 segment can open more than one 'q' park — the framework answer
+ *  is followed by its edition question. `answers` is injectable so a caller driving one run across
+ *  two drivers can share a single supplier. */
+async function driveClientToComplete({ runId, planId }, jwt, answers = scriptedAnswers(), deadlineMs = 90000) {
   const answered = new Set();
   const end = Date.now() + deadlineMs;
   let lastBody = null;
@@ -188,8 +185,9 @@ async function driveClientToComplete({ runId, planId }, jwt, deadlineMs = 90000)
       await sleep(120);
       continue;
     }
-    const value = pp.phase === "c" ? "yes" : VALID_CLIENT[pp.seg];
-    if (pp.phase === "q" && value === undefined) throw new Error(`no scripted answer for segment '${pp.seg}'`);
+    // `scriptedAnswers` throws by itself when a segment is unscripted or exhausted, and says which
+    // — the v1-era map returned `undefined` and surfaced as a park timeout instead.
+    const value = pp.phase === "c" ? "yes" : answers(pp.seg);
     const res = await postJson("/api/interview/answer", { runId, scope: "client", parkIndex: pp.parkIndex, planId, value }, jwt);
     if (res.status === 200) answered.add(pp.parkIndex);
     else if (res.status !== 409) throw new Error(`answer failed at park ${pp.parkIndex} (${pp.seg}/${pp.phase}): ${res.status} ${JSON.stringify(res.body)}`);
@@ -327,7 +325,10 @@ async function main() {
     const terminalState = await driveClientToComplete({ runId, planId }, jwt);
     assert.equal(terminalState.status, "complete", `full drive → complete (got ${terminalState.status})`);
     assert.equal(terminalState.terminal.outcome, "interview_complete", "typed complete terminal");
-    assert.equal(Number(terminalState.terminal.answered), 13, `13 client segments answered (4 skippables skipped); got ${terminalState.terminal.answered}`);
+    // 15 = the 13 v1-era answered segments + the two v2 (F2) additions this fixture's entity type
+    // reaches: `mpers_eligibility` (the Sdn Bhd-only s.244 screen) and `accounting_basis`. Four
+    // skippables are still skipped. A sole-prop fixture would answer 14 — the screen is not asked.
+    assert.equal(Number(terminalState.terminal.answered), 15, `15 client segments answered (4 skippables skipped); got ${terminalState.terminal.answered}`);
 
     // Plan items: one answered item per must_ask/capture segment; the AMB-11 opening key present;
     // the interview_run binding EXACTLY once; ZERO duplicate item_key values.
@@ -337,17 +338,17 @@ async function main() {
     assert.equal(items.filter((it) => it.item_key === "interview_run").length, 1, "the interview_run binding is present exactly once");
     assert.ok(keys.includes("first_year_zero_opening"), "the AMB-11 new-first-year opening item key is present");
     const business = items.filter((it) => it.item_key !== "interview_run");
-    assert.equal(business.length, 13, `13 business items persisted (one per answered segment); got ${business.length}`);
+    assert.equal(business.length, 15, `15 business items persisted (one per answered segment); got ${business.length}`);
     for (const it of business) assert.equal(it.state, "answered", `segment item ${it.item_key} is answered`);
 
     // onboarding_plans.revision_n advanced monotonically — one update_onboarding_plan CAS per
-    // confirmed segment (13) plus the interview_run binding write (1). No CLR04/CLR06 surfaced to
+    // confirmed segment (15) plus the interview_run binding write (1). No CLR04/CLR06 surfaced to
     // the route (each answer was DB-revalidated as bookkeeper+ — proven by the drive succeeding).
     const planF = await rig.readOnboardingPlan(planId);
-    assert.ok(Number(planF.revision_n) >= n0 + 14, `revision advanced ≥ +14 (bind + 13 answers); n0=${n0} nF=${planF.revision_n}`);
+    assert.ok(Number(planF.revision_n) >= n0 + 16, `revision advanced ≥ +16 (bind + 15 answers); n0=${n0} nF=${planF.revision_n}`);
     assert.equal(planF.state, "open", "the plan stays open post-interview (commit_client_onboarding is the separate human ceremony)");
 
-    console.log("[interview-e2e] PASS (positive): full 13-segment drive → interview_complete, 13 items, no dupes, revision advanced");
+    console.log("[interview-e2e] PASS (positive): full 15-segment v2 drive → interview_complete, 15 items, no dupes, revision advanced");
   }
 
   console.log("\nINTERVIEW E2E: ALL PASS");

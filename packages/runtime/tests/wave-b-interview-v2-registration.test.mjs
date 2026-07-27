@@ -1,0 +1,269 @@
+// interview_v2 / F1 — the Malaysian business-registration grammar, and the pair that shows the
+// bug: the exact inputs the frozen v1 validator refuses and the v2 one accepts.
+//
+// Pure closure logic — no WDK engine, no DB. Serial by runner config.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+
+const { register } = await import("tsx/esm/api");
+register();
+
+const v1core = await import("../workflows/interview.v1.core.ts");
+const core = await import("../workflows/interview.v2.core.ts");
+const q = await import("../workflows/interview.v2.questions.ts");
+const grammar = await import("../lib/malaysian-registration.mjs");
+const shared = await import("../lib/invoice-vendor-identity.mjs");
+const { scriptedAsk, ANSWER } = await import("./wave-b-interview-testkit.mjs");
+
+const { askAndConfirmSegmentV2, questionOf, validateBusinessRegistration } = core;
+const firmSeg = (k) => q.FIRM_SEGMENTS_V2.find((s) => s.key === k);
+
+const ACCEPTED = [
+  ["1475415-P", "legacy_numeric", "the owner-ruled old ROB digits+check-letter form"],
+  ["1050274-A", "legacy_numeric", "the v1 ROC example — still accepted"],
+  ["SA1234567-X", "state_prefixed_business", "the state-prefixed ROB form v1 refused outright"],
+  ["JM0123456-A", "state_prefixed_business", "another state prefix"],
+  ["202401001234", "unified_12", "the unified 12-digit form"],
+  ["202401001234-K", "unified_12_check", "the unified form with a check letter"],
+  ["LLP0012345-LGN", "llp_registration", "an LLP/PLT general registration"],
+  ["LLP0012345-LCA", "llp_registration", "an LLP professional-practice registration"],
+  ["201501005365 (1130695-T)", "combined_unified_and_legacy", "the Gate-F certificate's combined print"],
+  ["202401047756 (1593602-X)", "combined_unified_and_legacy", "the X6 letterhead's combined print"],
+  ["201901000001 (LLP0012345-LGN)", "combined_unified_and_legacy", "an LLP's combined print"],
+];
+
+test("F1: every real Malaysian registration form is accepted and classified", () => {
+  for (const [input, form, why] of ACCEPTED) {
+    const v = grammar.classifyBusinessRegistration(input);
+    assert.equal(v.ok, true, `${input} — ${why}`);
+    assert.equal(v.form, form, `${input} classified`);
+    assert.equal(grammar.looksLikeBusinessRegistration(input), true, input);
+  }
+});
+
+test("F1: an LLP/PLT registration is accepted in every print it appears in (the fourth family)", () => {
+  // A PLT accounting practice is a common shape for both this product's FIRMS and their clients.
+  // Three leading letters and a three-letter suffix reach none of the other families, so without
+  // its own pattern an LLP hit exactly the re-ask-forever wall the state-prefixed form did.
+  for (const [input, expected] of [
+    ["LLP0012345-LGN", "llp_registration"],
+    ["LLP0012345-LCA", "llp_registration"],
+    ["llp0012345-lgn", "llp_registration"],
+    ["LLP 0012345 - LGN", "llp_registration"],
+    ["LLP0012345", "llp_registration"],
+    ["201901000001 (LLP0012345-LGN)", "combined_unified_and_legacy"],
+  ]) {
+    const v = grammar.classifyBusinessRegistration(input);
+    assert.equal(v.ok, true, `${input} must be accepted`);
+    assert.equal(v.form, expected, `${input} classified`);
+  }
+  // The suffix is matched as a SHAPE, not against a closed list: a list I am not certain of is
+  // the exact mechanism that produced F1 in the first place.
+  assert.equal(grammar.looksLikeBusinessRegistration("LLP0012345-XYZ"), true, "an unenumerated suffix is still an LLP number");
+  // And the family is announced to the person, not just accepted silently.
+  assert.match(grammar.describeBusinessRegistrationForms(), /LLP0012345-LGN/);
+  assert.match(questionOf(firmSeg("ssm"), {}), /LLP0012345-LGN/);
+});
+
+test("F1: the LLP key normalizes to the registry rule too (all four families, one normalizer)", () => {
+  for (const s of ["LLP0012345-LGN", "201901000001 (LLP0012345-LGN)", "llp0012345-lgn"]) {
+    assert.equal(grammar.normalizeRegistration(s), shared.registrationKey(s), `${s} — one normalization rule, pinned`);
+  }
+  assert.equal(grammar.normalizeRegistration("LLP0012345-LGN"), "llp0012345lgn");
+  assert.equal(grammar.normalizeRegistration("201901000001 (LLP0012345-LGN)"), "201901000001llp0012345lgn");
+  // Case- and separator-insensitive, so the same LLP typed three ways is ONE registration.
+  const keys = new Set(["LLP0012345-LGN", "llp0012345 lgn", "LLP0012345LGN"].map(grammar.normalizeRegistration));
+  assert.equal(keys.size, 1, "one registration, however it was punctuated");
+});
+
+test("F1: the fix, shown as a pair — v1 REFUSES exactly what v2 accepts (and v1 is unchanged)", () => {
+  // The bug: a sole proprietor's state-prefixed ROB number, an LLP/PLT number in any print, and
+  // the combined print the owner's own SSM certificate carries (recorded in the Gate-F receipt
+  // as "finding F1's boundary").
+  for (const input of ["SA1234567-X", "JM0123456-A", "LLP0012345-LGN", "LLP0012345-LCA", "201901000001 (LLP0012345-LGN)", "201501005365 (1130695-T)", "202401047756 (1593602-X)"]) {
+    assert.equal(v1core.validateSsm(input).ok, false, `v1 refuses ${input} — the bug, still present in the frozen v1`);
+    assert.equal(validateBusinessRegistration(input).ok, true, `v2 accepts ${input} — the fix`);
+  }
+  // And v1's own accepted forms did not regress in v1.
+  assert.equal(v1core.validateSsm("202401001234-K").ok, true);
+  assert.equal(v1core.validateSsm("1050274-A").ok, true);
+});
+
+test("F1: garbage is refused LOUDLY — the reason names the accepted forms", () => {
+  for (const bad of ["", "   ", "hello", "12345", "RM1,234.00", "2026-07-27", "A", "the registered office at 1 Jalan Ampang Kuala Lumpur 50450"]) {
+    const v = validateBusinessRegistration(bad);
+    assert.equal(v.ok, false, `refused: ${JSON.stringify(bad)}`);
+    assert.equal(typeof v.reason, "string");
+    assert.ok(v.reason.length > 0, "a refusal always carries a reason");
+  }
+  // A refusal must SHOW the way out (the v1 failure mode was a shape you could not guess).
+  assert.match(validateBusinessRegistration("hello").reason, /202401001234|SA1234567-X/);
+});
+
+test("F1: an SST registration is NOT a company registration (the X6 exclusion, same hazard here)", () => {
+  // `W10-2408-32000157` is the measured SST number from the X6 corpus. One letter, not two, so
+  // the state-prefixed pattern cannot reach it — and it must not be filed as an SSM number.
+  assert.equal(grammar.looksLikeBusinessRegistration("W10-2408-32000157"), false);
+});
+
+test("F1: normalization IS the counterparty registry's key — pinned to registrationKey, not re-derived", () => {
+  const corpus = [
+    ...ACCEPTED.map(([s]) => s),
+    "W10-2408-32000157", "202401047756(1593602-X)", "hello world", "", "  1050274-a  ",
+  ];
+  for (const s of corpus) {
+    assert.equal(
+      grammar.normalizeRegistration(s),
+      shared.registrationKey(s),
+      `normalizeRegistration and registrationKey must agree on ${JSON.stringify(s)} — two definitions of one rule is how they drift`,
+    );
+  }
+  // The combined print's key is the CONCATENATION — exactly what X6 measured the registry storing.
+  assert.equal(grammar.normalizeRegistration("202401047756 (1593602-X)"), "2024010477561593602x");
+});
+
+test("F1: the shared module gained the new gate ADDITIVELY — looksLikeRegistration is unchanged", () => {
+  assert.equal(typeof shared.looksLikeBusinessRegistration, "function", "the new export is reachable from the shared module");
+  assert.equal(shared.looksLikeBusinessRegistration, grammar.looksLikeBusinessRegistration, "one definition, re-exported");
+  // The invoice lane's gate keeps its own (deliberately looser) behaviour — these cells are the
+  // X6 calibration: it accepts what it always accepted and refuses what it always refused.
+  assert.equal(shared.looksLikeRegistration("202401047756 (1593602-X)"), true);
+  assert.equal(shared.looksLikeRegistration("W10-2408-32000157"), true, "the loose matching gate accepts it; the LABEL vocabulary is what excludes SST there");
+  assert.equal(shared.looksLikeRegistration("RM1,234.00"), false);
+  assert.equal(shared.looksLikeRegistration("2026-07-27"), false);
+  assert.equal(shared.looksLikeRegistration("ab"), false);
+});
+
+test("F1: the recorded answer is verbatim + normalized + form (not a bare string)", async () => {
+  const s = scriptedAsk([ANSWER("202401047756 (1593602-X)"), ANSWER("yes")]);
+  const res = await askAndConfirmSegmentV2(firmSeg("ssm"), s.ask, {});
+  assert.equal(res.outcome, "answered");
+  assert.equal(res.value.registration, "202401047756 (1593602-X)");
+  assert.equal(res.value.normalized, "2024010477561593602x");
+  assert.equal(res.value.form, "combined_unified_and_legacy");
+  assert.equal(res.value.format_verified, true);
+  assert.equal(res.items[0].item_key, "ssm");
+  assert.equal(res.items[0].item_kind, "must_ask");
+  assert.equal(res.items[0].required_for_commit, true);
+});
+
+// ===========================================================================
+// THE ESCAPE HATCH — owner ruling 2026-07-27: "warning + record unverified".
+// ===========================================================================
+
+/** Drive the registration segment with a scripted answer sequence. */
+async function driveSsm(script, prior = {}) {
+  const s = scriptedAsk(script);
+  const res = await askAndConfirmSegmentV2(firmSeg("ssm"), s.ask, prior);
+  return { res, asked: s.asked };
+}
+
+test("hatch: the FIRST unrecognised answer is refused and re-asked WITH the accepted formats", async () => {
+  // One refusal is not negotiable — a person must be told what the shapes are before insisting.
+  const { res, asked } = await driveSsm([ANSWER("ROB-9/2019 KUCHING"), ANSWER("202401001234"), ANSWER("yes")]);
+  assert.equal(res.outcome, "answered");
+  assert.equal(res.value.form, "unified_12", "the corrected answer takes the normal path");
+  assert.equal(res.value.format_verified, true, "a recognised form states verification AFFIRMATIVELY — never left to be inferred from an absent field");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c"], "refusal → re-ask → confirm; NO warning park, NO hatch");
+  assert.match(asked[1].question, /not a Malaysian business registration number/);
+  assert.match(asked[1].question, /SA1234567-X/, "the re-ask shows the accepted formats");
+});
+
+test("hatch: the SAME answer typed again is ACCEPTED behind a warning, recorded format_verified:false", async () => {
+  const insisted = "ROB-9/2019 KUCHING";
+  const { res, asked } = await driveSsm([ANSWER(insisted), ANSWER(insisted), ANSWER("yes"), ANSWER("yes")]);
+  assert.equal(res.outcome, "answered", "onboarding is never blocked by the validator's ignorance");
+  assert.equal(res.value.registration, insisted.toUpperCase(), "recorded EXACTLY as typed (case-normalized only)");
+  assert.equal(res.value.form, "unrecognized");
+  assert.equal(res.value.format_verified, false, "the record is honest about what it is");
+  assert.equal(res.value.normalized, shared.registrationKey(insisted), "still keyed the registry's way, so a later match is possible");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c", "c"], "refusal → insistence → WARNING park → echo confirm");
+  assert.match(asked[2].question, /⚠/, "the acceptance is loud, never silent");
+  assert.match(asked[2].question, /UNVERIFIED/);
+  assert.match(res.echo, /NOT a recognised Malaysian format, recorded with its FORMAT UNVERIFIED/, "the activity trail says so too");
+});
+
+test("hatch: the acknowledgement is PERSISTED next to the answer, and the plan item carries the marker", async () => {
+  const insisted = "ROB-9/2019 KUCHING";
+  const { res } = await driveSsm([ANSWER(insisted), ANSWER(insisted), ANSWER("yes"), ANSWER("yes")]);
+  assert.equal(res.value.warnings.length, 1);
+  assert.equal(res.value.warnings[0].code, "registration_unverified");
+  assert.equal(res.value.warnings[0].acknowledged, true);
+  assert.match(res.value.warnings[0].message, /marked UNVERIFIED for a practitioner to check/);
+  // The marker must survive into the durable plan item — that is where a reviewer will see it.
+  const item = res.items[0];
+  assert.equal(item.item_key, "ssm");
+  assert.equal(item.answer.format_verified, false);
+  assert.equal(item.answer.form, "unrecognized");
+  assert.equal(item.answer.warnings[0].code, "registration_unverified");
+  // And in the FIRM plan the workflow actually writes.
+  const planItems = q.buildFirmPlanItemsV2({ legal_name: "ACME", ssm: res.value });
+  const ssmItem = planItems.find((i) => i.item_key === "ssm");
+  assert.equal(core.isUnverifiedRegistration(ssmItem.answer), true, "one definition of the marker, readable off the plan");
+});
+
+test("hatch: insistence is judged on the REGISTRY KEY — retyping with different punctuation still counts", async () => {
+  const { res, asked } = await driveSsm([ANSWER("rob 9/2019 kuching"), ANSWER("ROB-9/2019-KUCHING"), ANSWER("yes"), ANSWER("yes")]);
+  assert.equal(res.value.format_verified, false, "the same registration, punctuated differently, is insistence — not a fresh answer");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c", "c"]);
+});
+
+test("hatch: a DIFFERENT wrong answer is not insistence — it is refused again", async () => {
+  const { res, asked } = await driveSsm([ANSWER("hello"), ANSWER("goodbye"), ANSWER("hello"), ANSWER("202401001234"), ANSWER("yes")]);
+  assert.equal(res.value.form, "unified_12");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "q", "q", "c"], "three refusals, no hatch — each answer differed from the one before it");
+});
+
+test("hatch: DECLINING the warning re-asks; nothing unverified is recorded", async () => {
+  const insisted = "ROB-9/2019 KUCHING";
+  const { res, asked } = await driveSsm([ANSWER(insisted), ANSWER(insisted), ANSWER("change"), ANSWER("SA1234567-X"), ANSWER("yes")]);
+  assert.equal(res.value.form, "state_prefixed_business");
+  assert.equal(res.value.format_verified, true, "the corrected answer is affirmatively verified, not merely un-flagged");
+  assert.equal(res.value.warnings, undefined, "the abandoned round leaves nothing behind");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c", "q", "c"]);
+});
+
+test("hatch: it is a hatch, not a hole — empty and near-empty insistence keeps re-asking", async () => {
+  // Two blank submissions must NOT record a blank legal identity. Below three alphanumerics there
+  // is no identity to record, only a person hitting enter.
+  for (const nothing of ["", "  ", "--", "a"]) {
+    assert.equal(core.insistUnverifiedRegistration(nothing, nothing), null, `${JSON.stringify(nothing)} is not an identity`);
+  }
+  const { res, asked } = await driveSsm([ANSWER(""), ANSWER(""), ANSWER("1475415-P"), ANSWER("yes")]);
+  assert.equal(res.value.form, "legacy_numeric");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "q", "c"], "the blanks were refused twice — no hatch, no confirm park");
+});
+
+test("hatch: `format_verified` is stated in BOTH directions — the naive-consumer hazard is closed", () => {
+  // The hazard the owner ruled on: `verified` absent on the recognised path is FALSY, so a
+  // consumer writing the natural `if (!answer.format_verified) reject` would have rejected every
+  // correctly-recognised registration. Every accepted registration now states its status.
+  const recognised = validateBusinessRegistration("202401001234");
+  const insisted = core.insistUnverifiedRegistration("ROB-9/2019 KUCHING", "ROB-9/2019 KUCHING");
+  for (const [what, v] of [["recognised", recognised], ["insisted", insisted]]) {
+    assert.equal(typeof v.value.format_verified, "boolean", `${what}: the field is always present and boolean`);
+  }
+  assert.equal(recognised.value.format_verified, true);
+  assert.equal(insisted.value.format_verified, false);
+  // The naive consumer, simulated in both directions.
+  const naiveRejects = (answer) => !answer.format_verified;
+  assert.equal(naiveRejects(recognised.value), false, "a good record is never rejected by the obvious check");
+  assert.equal(naiveRejects(insisted.value), true, "an unverified record IS caught by it");
+  // And the purpose-built reader agrees with both.
+  assert.equal(core.isUnverifiedRegistration(recognised.value), false);
+  assert.equal(core.isUnverifiedRegistration(insisted.value), true);
+});
+
+test("hatch: the client inventory has it too (the same segment, both interviews)", () => {
+  const clientSsm = q.CLIENT_SEGMENTS_V2.find((s) => s.key === "ssm");
+  assert.equal(typeof clientSsm.onInsist, "function");
+  assert.equal(typeof clientSsm.warn, "function");
+  assert.equal(clientSsm.requiredForCommit, true);
+});
+
+test("F1: the question itself lists the accepted forms (a person is told the shapes UP FRONT)", () => {
+  const question = questionOf(firmSeg("ssm"), {});
+  assert.match(question, /SA1234567-X/);
+  assert.match(question, /202401001234/);
+});
