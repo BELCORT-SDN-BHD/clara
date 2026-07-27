@@ -217,3 +217,57 @@ test("a MULTI-DOCUMENT result runs no reader at all", () => {
   assert.equal(out.envelope.totals_reader.emitted, 0);
   assert.equal(out.fields.find((f) => f.field_path === "invoice.total").value_raw, "100.00", "typed stays v5");
 });
+
+test("a typed value that is blank to JS but PRESENT to the DB is withdrawn by a dash", () => {
+  // `btrim` strips spaces, not tabs, so typed "\t" survives it, normalizes to NULL cents and
+  // trips 0022's present-but-malformed refusal — forfeiting the whole extraction. JS `trim()`
+  // calls it blank, which would have left it standing.
+  const out = normalizeAzureInvoice(
+    payloadWith({ InvoiceTotal: TYPED_TOTAL, TotalTax: { content: "\t", confidence: 0.5 } }, TAX_DASH_ROW),
+  );
+  assert.equal(out.fields.some((f) => f.field_path === "invoice.tax_total"), false);
+  assert.equal(out.envelope.totals_reader.typed_vs_dash, 1);
+  assert.equal(out.fields.find((f) => f.field_path === "invoice.total").value_raw, "435,560.00", "the good total survives");
+});
+
+test("a typed value carrying a Unicode space never collapses against a clean reader value", () => {
+  // Both parse to the same cents under a Unicode-aware trim, so the typed row would have been
+  // KEPT — with bytes PostgreSQL normalizes to NULL, forfeiting the persist.
+  const rows = [
+    line("Sub Total (Excluding Tax)", [5.3297, 8.257, 6.8238, 8.2669, 6.8229, 8.3988, 5.3288, 8.389]),
+    line("435,560.40", [7.105, 8.2704, 7.7038, 8.2739, 7.7031, 8.3954, 7.1043, 8.3921]),
+  ];
+  const out = normalizeAzureInvoice(
+    payloadWith({ InvoiceTotal: TYPED_TOTAL, SubTotal: { content: "\uFEFF435,560.40", confidence: 0.84 } }, rows),
+  );
+  assert.equal(out.fields.some((f) => f.field_path === "invoice.total_excl_tax"), false, "neither survives");
+  assert.equal(out.envelope.totals_reader.typed_collapsed, 0);
+  assert.equal(out.envelope.totals_reader.typed_disagreement, 1);
+});
+
+test("two typed/reader readings a SEN apart are a disagreement, not a collapse", () => {
+  const rows = [
+    line("Sub Total (Excluding Tax)", [5.3297, 8.257, 6.8238, 8.2669, 6.8229, 8.3988, 5.3288, 8.389]),
+    line("90,071,992,547,409.91", [7.105, 8.2704, 7.7038, 8.2739, 7.7031, 8.3954, 7.1043, 8.3921]),
+  ];
+  const out = normalizeAzureInvoice(
+    payloadWith({ InvoiceTotal: TYPED_TOTAL, SubTotal: { content: "90,071,992,547,409.90", confidence: 0.84 } }, rows),
+  );
+  assert.equal(out.fields.some((f) => f.field_path === "invoice.total_excl_tax"), false);
+  assert.equal(out.envelope.totals_reader.typed_disagreement, 1);
+  assert.equal(out.envelope.totals_reader.typed_collapsed, 0);
+});
+
+test("a safe-range agreement still collapses to one emission", () => {
+  const rows = [
+    line("Sub Total (Excluding Tax)", [5.3297, 8.257, 6.8238, 8.2669, 6.8229, 8.3988, 5.3288, 8.389]),
+    line("435,560.40", [7.105, 8.2704, 7.7038, 8.2739, 7.7031, 8.3954, 7.1043, 8.3921]),
+  ];
+  const out = normalizeAzureInvoice(
+    payloadWith({ InvoiceTotal: TYPED_TOTAL, SubTotal: { content: "RM 435,560.40", confidence: 0.84 } }, rows),
+  );
+  const nets = out.fields.filter((f) => f.field_path === "invoice.total_excl_tax");
+  assert.equal(nets.length, 1, "agreement on cents, not on text");
+  assert.equal(nets[0].value_raw, "RM 435,560.40", "the typed row survives");
+  assert.equal(out.envelope.totals_reader.typed_collapsed, 1);
+});

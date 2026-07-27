@@ -59,7 +59,7 @@
 // against geometry. `centsOfRaw` is re-exported here because it is also this module's EMIT
 // GATE, and because callers reconciling reader output against typed fields need it.
 
-import { ASCII_SPACE, centsOfRaw, isDash, isStrictAmount, looksLikeAmountAttempt } from "./invoice-amount-grammar.mjs";
+import { ASCII_SPACE, asciiTrim, centsOfRaw, isDash, isStrictAmount, looksLikeAmountAttempt } from "./invoice-amount-grammar.mjs";
 
 export { centsOfRaw };
 
@@ -130,7 +130,16 @@ const IDENTIFIER_WORDS = new Set(["no", "number", "num", "reg", "registration", 
 // refusing to anchor inside the summary costs nothing; what it buys is that an OCR run which
 // drops or mangles the MAIN label — which is precisely what happened to the summary label in
 // the measured capture — can never fall back to the taxable base and call it the tax.
-const TAX_SUMMARY_HEADING = /tax[ \t]*summary/i;
+// WIDE ON PURPOSE, and the mirror image of the accept grammar's ASCII strictness. This is a
+// REFUSAL TRIGGER: matching it closes a region to anchoring, so a match can only ever cost a
+// field and a miss can cost a wrong tax. The safe direction is therefore to match MORE, not
+// less — a heading printed `Tax<NBSP>Summary` (or with a stray U+FEFF, or an ideographic
+// space) must still open the band. JavaScript's `\s` covers NBSP, U+FEFF, the U+2000 block and
+// U+3000, so it is exactly the right class here and exactly the wrong one three definitions
+// away in the accept grammar. Same reasoning as AMOUNT_SHAPED's `\s`.
+const TAX_SUMMARY_HEADING = /^tax summary/;
+const isTaxSummaryHeading = (text) =>
+  TAX_SUMMARY_HEADING.test(String(text ?? "").replace(LABEL_NOISE_PREFIX, "").replace(/\s+/g, " ").trim().toLowerCase());
 
 // Leading item counts / bullets / punctuation are stripped before matching: the real receipt
 // prints its subtotal label as "11 SubTotal" (the line's own item count runs into the label).
@@ -250,7 +259,7 @@ function resolveOccurrence(lines, boxes, labelIndex, pageNumber, fieldPath, fram
     // waiver is GEOMETRIC, not textual: a dash anywhere else on the page (a bullet, a nil in
     // another table) must never license a jump past the true neighbour to a later column.
     if (opts.requireIndexAdjacent && !onlyRowDashesBetween(lines, boxes, labelIndex, j, label)) continue;
-    const text = content(lines[j]).trim();
+    const text = asciiTrim(content(lines[j]));
     if (isStrictAmount(text)) amounts.push({ index: j, box, text });
     else if (isDash(text)) dashes.push({ index: j, box });
     else if (looksLikeAmountAttempt(text)) attempts += 1;
@@ -327,7 +336,7 @@ function taxSummaryBands(lines, boxes, frame) {
   const bands = [];
   for (let i = 0; i < lines.length; i++) {
     if (!boxes[i]) continue;
-    if (!TAX_SUMMARY_HEADING.test(content(lines[i]))) continue;
+    if (!isTaxSummaryHeading(content(lines[i]))) continue;
     bands.push({ top: boxes[i].ymin, bottom: boxes[i].ymin + frame.taxSummaryBand });
   }
   return bands;

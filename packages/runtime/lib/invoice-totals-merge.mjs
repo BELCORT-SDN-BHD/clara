@@ -25,6 +25,7 @@
 //     vendor confidence from gating entirely, so a disagreement is a refusal by construction.
 
 import { centsOfRaw, TOTALS_FIELD_PATHS } from "./invoice-totals-reader.mjs";
+import { isDbBlank } from "./invoice-amount-grammar.mjs";
 
 /**
  * Merge reader emissions into the mapper's field list, in place, reconciling against typed
@@ -41,7 +42,12 @@ export function mergeTotalsIntoFields(out, totals) {
       totals.receipt.emitted += 1;
       continue;
     }
-    if (!String(typed.value_raw ?? "").trim()) {
+    // BLANKNESS IS THE DB'S DEFINITION, not JavaScript's. `_normalize_invoice_cents` treats a
+    // value as "not stated" only when one-argument `btrim` empties it — and that strips SPACES,
+    // not tabs. So a typed "\t" is blank to `trim()` but present-and-malformed to PostgreSQL,
+    // where it normalizes to NULL cents and trips 0022's present-but-malformed refusal. Asking
+    // the wrong question here would treat it as a hole to fill rather than a value to withdraw.
+    if (isDbBlank(typed.value_raw)) {
       Object.assign(typed, row);
       totals.receipt.typed_recovered += 1;
       totals.receipt.emitted += 1;
@@ -71,7 +77,7 @@ export function mergeTotalsIntoFields(out, totals) {
   for (const field_path of TOTALS_FIELD_PATHS) {
     if (totals.receipt.fields?.[field_path]?.outcome !== "nil") continue;
     const typed = out.find((r) => r.field_path === field_path);
-    if (!typed || !String(typed.value_raw ?? "").trim()) continue;
+    if (!typed || isDbBlank(typed.value_raw)) continue;
     out.splice(out.indexOf(typed), 1);
     totals.receipt.typed_vs_dash += 1;
   }

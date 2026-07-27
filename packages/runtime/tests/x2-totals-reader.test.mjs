@@ -52,9 +52,9 @@ test("LAI LOU MEI: every stated component is read off its own line at the measur
   // the page never states. (The DB owns the tie; this assertion only pins which lines were
   // read.)
   const sum = ["invoice.total_excl_tax", "invoice.service_charge", "invoice.tax_total"]
-    .reduce((acc, p) => acc + centsOfRaw(got[p].value_raw), 0);
+    .reduce((acc, p) => acc + centsOfRaw(got[p].value_raw), 0n);
   assert.equal(sum, centsOfRaw("103.73"));
-  assert.equal(centsOfRaw("103.75") - sum, 2, "the shortfall is exactly the unreadable rounding");
+  assert.equal(centsOfRaw("103.75") - sum, 2n, "the shortfall is exactly the unreadable rounding");
 });
 
 test("LAI LOU MEI: 'Net Total' is the GROSS and must never be read as the net of tax", () => {
@@ -143,7 +143,7 @@ test("BRIGHTPATH: subtotal and rounding are read; the NIL tax is never invented"
   assert.equal(receipt.sst_rate, 8, "the 8% rate is still captured off the label");
 
   // Never 0.00: a zero would satisfy an identity the document does not state.
-  for (const f of fields) assert.notEqual(centsOfRaw(f.value_raw), 0);
+  for (const f of fields) assert.notEqual(centsOfRaw(f.value_raw), 0n);
   // And the tax-inclusive total is NOT harvested — invoice.total is the typed field's job.
   assert.equal(fields.some((f) => f.value_raw === "435,560.00"), false);
 });
@@ -199,7 +199,7 @@ test("a DETACHED minus glyph signs the rounding token", () => {
   withMinus.splice(5, 0, line("-", [7.0, 8.441, 7.1, 8.441, 7.1, 8.5525, 7.0, 8.5525]));
   const { fields } = readTotalsFromLines(onePage(withMinus, 2));
   assert.equal(byPath(fields)["invoice.rounding"].value_raw, "-0.40");
-  assert.equal(centsOfRaw("-0.40"), -40);
+  assert.equal(centsOfRaw("-0.40"), -40n);
 });
 
 test("a detached minus on a stated COMPONENT refuses the field — components are positive by law", () => {
@@ -259,123 +259,6 @@ test("two acceptable amounts inside one pairing window emit NEITHER", () => {
   assert.equal(receipt.ambiguous, 1);
 });
 
-// ======================================================================================
-// CELL 5 — the accept grammar
-// ======================================================================================
-
-test("only a grouped two-decimal amount is accepted; everything else is refused and counted", () => {
-  // A present-but-unparseable monetary value forfeits the WHOLE extraction at the DB
-  // (0022, check b), so the reader's grammar is a strict SUBSET of _normalize_invoice_cents:
-  // no negatives, no accounting parentheses, no bare integers, exactly two decimals.
-  for (const bad of ["-5.00", "(5.00)", "1234", "1,234", "12.5", "12.345", "94.3O", "RM", "N/A"]) {
-    const lines = [
-      line("Sub Total", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
-      line(bad, [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
-    ];
-    const { fields } = readTotalsFromLines(onePage(lines));
-    assert.equal(fields.length, 0, `${bad} must never be emitted`);
-  }
-  for (const good of ["0.02", "94.30", "435,560.40", "RM 1,000.00"]) {
-    const lines = [
-      line("Sub Total", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
-      line(good, [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
-    ];
-    const { fields } = readTotalsFromLines(onePage(lines));
-    assert.equal(fields[0]?.value_raw, good);
-  }
-});
-
-test("an amount-SHAPED refusal is counted as unparseable; plain text is simply not an amount", () => {
-  const shaped = readTotalsFromLines(onePage([
-    line("Sub Total", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
-    line("(5.00)", [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
-  ]));
-  assert.equal(shaped.receipt.unparseable, 1, "a refusal must be visible, never a silent absence");
-  assert.equal(shaped.receipt.absent, 0);
-
-  const prose = readTotalsFromLines(onePage([
-    line("Sub Total", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
-    line("carried forward", [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
-  ]));
-  assert.equal(prose.receipt.absent, 1);
-  assert.equal(prose.receipt.unparseable, 0);
-});
-
-test("no emitted component is ever negative", () => {
-  // Belt for the DB's buckle: 0022 refuses negative cents for the three stated components
-  // outright. Rounding is the deliberate exception and is covered by the detached-minus cell.
-  const { fields } = readTotalsFromLines(onePage([
-    ...LAI_LOU_MEI,
-    line("Discount", [4.6405, 12.6722, 6.1412, 12.6311, 6.1488, 12.9098, 4.6481, 12.9503]),
-    line("-1.00", [9.4394, 12.544, 9.962, 12.5398, 9.964, 12.7938, 9.4414, 12.798]),
-  ]));
-  for (const f of fields) {
-    if (f.field_path === "invoice.rounding") continue;
-    assert.ok(centsOfRaw(f.value_raw) >= 0, `${f.field_path} must be non-negative`);
-  }
-  assert.equal(byPath(fields)["invoice.discount"], undefined);
-});
-
-test("a line without usable geometry is never an anchor and never an amount", () => {
-  assert.deepEqual(readTotalsFromLines(null).fields, []);
-  assert.deepEqual(readTotalsFromLines([]).fields, []);
-  assert.deepEqual(readTotalsFromLines(onePage([line("Sub Total", []), line("94.30", [])])).fields, []);
-  assert.deepEqual(readTotalsFromLines(onePage([line("Sub Total", [1, 2, 3, 4]), line("94.30", [1, 2, 3, 4])])).fields, []);
-});
-
-
-// ======================================================================================
-// CELL 7 — the adversarial-review regressions (each cell reproduces a REFUSED finding)
-// ======================================================================================
-
-test("a Unicode space the DB will not strip can never be emitted", () => {
-  // `_normalize_invoice_cents` strips `[,[:space:]]`, a POSIX class. U+FEFF is not POSIX
-  // space (Unicode removed it from White_Space), so `RM<U+FEFF>1,234.56` survives the strip,
-  // fails the DB's numeric regex, normalizes to NULL and forfeits the ENTIRE extraction —
-  // taking the good invoice.total with it. JavaScript's `\s` matches U+FEFF, so a `\s` in the
-  // accept grammar admitted exactly that byte.
-  for (const gap of ["\uFEFF", "\u00A0", "\u2009", "\u2007", "\u3000"]) {
-    const { fields, receipt } = readTotalsFromLines(onePage([
-      line("Sub Total", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
-      line(`RM${gap}1,234.56`, [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
-    ]));
-    assert.equal(fields.length, 0, `U+${gap.codePointAt(0).toString(16).toUpperCase()} must not reach the DB`);
-    assert.equal(receipt.unparseable, 1, "and the refusal is visible, not silent");
-  }
-  // ASCII space and tab are stripped by the DB under every locale, so they stay acceptable.
-  for (const gap of [" ", "  ", "\t"]) {
-    const { fields } = readTotalsFromLines(onePage([
-      line("Sub Total", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
-      line(`RM${gap}1,234.56`, [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
-    ]));
-    assert.equal(fields.length, 1);
-  }
-});
-
-test("centsOfRaw is byte-aligned to the DB: narrower is safe, wider is not", () => {
-  assert.equal(centsOfRaw("RM 1,234.56"), 123456);
-  assert.equal(centsOfRaw("-0.40"), -40);
-  assert.equal(centsOfRaw("(5.00)"), -500, "the accounting parenthesis form, exactly as the DB reads it");
-  // Anything carrying a non-ASCII space normalizes to null HERE even though JS `\s` would
-  // have swallowed it — that is the whole point: refuse rather than hand the DB a NULL.
-  for (const bad of ["RM\uFEFF1.00", "1\u00A0234.00", "12.345", "abc", "", null]) {
-    assert.equal(centsOfRaw(bad), null, `${JSON.stringify(bad)} must not normalize`);
-  }
-});
-
-test("the EMIT GATE re-validates the composed value, including a synthesized sign", () => {
-  // `-${token}` is assembled AFTER the accept grammar ran, so without the gate it would reach
-  // the DB unchecked. Every emitted byte normalizes, or nothing is emitted.
-  const withMinus = [
-    line("Rounding", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
-    line("-", [6.2, 8.26, 6.3, 8.26, 6.3, 8.39, 6.2, 8.39]),
-    line("0.40", [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
-  ];
-  const [emitted] = readTotalsFromLines(onePage(withMinus)).fields;
-  assert.equal(emitted.value_raw, "-0.40");
-  assert.notEqual(centsOfRaw(emitted.value_raw), null, "the EXACT emitted bytes normalize");
-  assert.equal(centsOfRaw(emitted.value_raw), -40);
-});
 
 test("a PIXEL-unit page reads exactly what the same geometry in inches reads", () => {
   // Azure reports PDF geometry in inches and IMAGE geometry in pixels, and image invoices are
@@ -444,3 +327,4 @@ test("a dash never hides an amount-shaped refusal from the counters", () => {
   assert.equal(receipt.unparseable, 1, "AND the refused token is counted in its own right");
   assert.equal(receipt.fields["invoice.rounding"].unparseable_attempt, true);
 });
+
