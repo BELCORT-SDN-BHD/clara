@@ -21,7 +21,7 @@
 
 import { createHook } from "workflow";
 import { CLIENT_SEGMENTS_V2 } from "./interview.v2.questions.js";
-import { askAndConfirmSegmentV2, segmentApplies, hookToken, interviewRunBinding, type AskFn, type Resolution, type PlanItemInput } from "./interview.v2.core.js";
+import { applyPersistOutcome, askAndConfirmSegmentV2, segmentApplies, hookToken, interviewRunBinding, type AskFn, type Resolution, type PlanItemInput } from "./interview.v2.core.js";
 import { mintOpKeyStep, runIdStep, streamPromptStep, streamActivityStep, streamOwnerStep, streamTerminalStep, readPlanStep, updatePlanStep } from "./interview.v1.steps.js";
 import { itemFingerprint, fingerprintMap } from "./interview.v1.writer.js";
 
@@ -139,6 +139,11 @@ export async function clientOnboarding_v2(input: ClientOnboardingV2Input): Promi
       await streamTerminalStep({ outcome: done.kind, planId, clientId, answered });
       return { planId, clientId, outcome: done.kind, answered };
     }
+    // THE VALUE THAT WAS PERSISTED IS THE VALUE LATER SEGMENTS MUST SEE (L4). A re-echo after a
+    // CAS conflict can change the answer or skip it, so `prior` is reconciled from the OUTCOME —
+    // never left holding the optimistic pre-write value. The fold is a pure function in the core
+    // so it can be driven without an engine.
+    applyPersistOutcome(prior, seg.key, done);
     if (done.kind === "skipped") continue; // a re-echo chose to skip a skippable field
     if (done.kind === "written") {
       // Confirmed AND persisted — stream the sanitized echo as an activity chunk (parity with the

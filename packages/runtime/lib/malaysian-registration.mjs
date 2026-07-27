@@ -65,6 +65,15 @@
 //       (1593602-X)` in a live letterhead. Refusing a form the product has already seen twice
 //       on paper would be shipping the same bug with a longer regex.
 //
+// WHAT THIS MODULE CAN AND CANNOT ATTEST, stated here because the recorded field name depends on
+// it. It checks FORM ONLY. It cannot tell you that a well-formed number belongs to the entity
+// being onboarded: a value forged from two unrelated valid halves — `202401047756 (1130695-T)`,
+// each half individually real — is indistinguishable from a genuine combined print, and so is any
+// single valid number that happens to be someone else's. Attesting IDENTITY requires an SSM
+// lookup, which is a future integration and not a regex. That is why the recorded flag is
+// `format_verified` and never `verified`: the durable record must not claim, to a practitioner
+// reading it months later, an assurance nobody performed.
+//
 // NORMALIZATION is the counterparty registry's own key (0009: strip every non-alphanumeric,
 // lowercase) — identical to `registrationKey` in invoice-vendor-identity.mjs, and pinned to it
 // by a test rather than by hope. That rule is what makes the combined print (d) useful rather
@@ -84,12 +93,20 @@ const MAX_LENGTH = 40;
 // Every pattern is tested against the COMPACT form (uppercased, all whitespace removed), so a
 // document typed `202401001234 - K` or `SA 1234567-X` is the same registration as the tight
 // print. Separators inside are tolerated on input and preserved in the recorded verbatim.
+// THE UNIFIED NUMBER IS YEAR-PREFIXED, AND THAT IS STRUCTURE, NOT DECORATION. `^\d{12}$` alone
+// accepted `601112345678` — a mobile number — and `999999999999`, recording either as a
+// format-checked registration. The first four digits are the year of registration, so they must
+// read like a year: 19xx or 20xx. This is a STRUCTURAL constraint on a documented field, not an
+// enumeration of values (contrast the LLP suffix, deliberately left open), so it cannot refuse a
+// real registration unless SSM begins issuing numbers in the 2100s — at which point it is a
+// one-character edit in a NEW module version.
+const YEAR_PREFIX = "(?:19|20)";
 const LEGACY_NUMERIC = /^\d{4,10}-?[A-Z]{1,2}$/; // (a) 1050274-A · 1475415-P
 const STATE_PREFIXED = /^[A-Z]{2}\d{4,10}-?[A-Z]{1,2}$/; // (b) SA1234567-X · JM0123456-A
-const UNIFIED_12 = /^\d{12}$/; // (c) 202401001234
-const UNIFIED_12_CHECK = /^\d{12}-?[A-Z]{1,2}$/; // (c) 202401001234-K
+const UNIFIED_12 = new RegExp(`^${YEAR_PREFIX}\\d{10}$`); // (c) 202401001234
+const UNIFIED_12_CHECK = new RegExp(`^${YEAR_PREFIX}\\d{10}-?[A-Z]{1,2}$`); // (c) 202401001234-K
 const LLP_REGISTRATION = /^LLP\d{4,10}(?:-?[A-Z]{2,4})?$/; // (d) LLP0012345-LGN · LLP0012345-LCA
-const COMBINED = /^(\d{12})[([]([A-Z0-9-]{4,20})[)\]]$/; // (e) 202401047756(1593602-X)
+const COMBINED = new RegExp(`^(${YEAR_PREFIX}\\d{10})[([]([A-Z0-9-]{4,20})[)\\]]$`); // (e) 202401047756(1593602-X)
 
 /** The forms a bracketed COMBINED print may carry inside its brackets: the pre-2019 identifier
  *  of any family. An LLP's combined print carries an LLP number, not a legacy numeric one, so

@@ -24,12 +24,17 @@
 import { createHook } from "workflow";
 import { FIRM_SEGMENTS_V2, buildFirmPlanItemsV2 } from "./interview.v2.questions.js";
 import { askAndConfirmSegmentV2, segmentApplies, hookToken, type AskFn, type Resolution } from "./interview.v2.core.js";
+import { writeFirmPlanWithRetries } from "./interview.v2.planwrite.js";
 import { mintOpKeyStep, runIdStep, streamPromptStep, streamActivityStep, streamOwnerStep, streamTerminalStep, readPlanStep, updatePlanStep, verifyFirmReceiptStep } from "./interview.v1.steps.js";
 import { fingerprintMap } from "./interview.v1.writer.js";
 
 export type FirmInterviewV2Input = { principalUserId: string };
 export type FirmInterviewV2Outcome = {
-  outcome: "firm_created" | "cancelled" | "expired";
+  /** `firm_created` means BOTH halves succeeded: the firm exists AND its profile was written.
+   *  `firm_profile_write_failed` is the honest half-outcome — the firm exists (create_firm already
+   *  returned a verified receipt, and pretending otherwise would be a worse lie) but the plan
+   *  write never landed. Success is never reported for work that did not complete (L6). */
+  outcome: "firm_created" | "firm_profile_write_failed" | "cancelled" | "expired";
   firmId: string | null;
   planId: string | null;
   answered: number;
@@ -129,21 +134,26 @@ export async function firmInterview_v2(input: FirmInterviewV2Input): Promise<Fir
     revision = plan0.revisionToken;
     knownMap = fingerprintMap(plan0.items);
   }
+  // The write, its bounded retries and its exhaustion park live in interview.v2.planwrite.ts —
+  // pure orchestration over injected effects, so the "success only on a landed write" property is
+  // driven by tests rather than asserted by reading. Exhaustion returns `abandoned`, and there is
+  // no path from there to a success terminal (L6).
   const items = buildFirmPlanItemsV2(answers);
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const planOpKey = await mintOpKeyStep(`firm_plan_write#${attempt}`);
-    const write = await updatePlanStep({
+  const write = await writeFirmPlanWithRetries(
+    { ask, mintOpKey: mintOpKeyStep, updatePlan: updatePlanStep },
+    { planId, items, answeredBy, revision, knownItems: knownMap },
+  );
+  if (write.status !== "written") {
+    await streamTerminalStep({
+      outcome: "firm_profile_write_failed",
+      firmId,
       planId,
-      expectedRevision: revision,
-      items,
-      answeredBy,
-      opKey: planOpKey,
-      retryOpKey: `${planOpKey}:retry`,
-      knownItems: knownMap,
+      answered,
+      reason: "stale_conflict",
+      conflictingKeys: write.conflictingKeys,
+      resolution: write.resolution,
     });
-    if (write.status !== "stale_conflict") break;
-    revision = write.revisionToken;
-    if (write.liveItems) knownMap = fingerprintMap(write.liveItems);
+    return { outcome: "firm_profile_write_failed", firmId, planId, answered };
   }
 
   await streamTerminalStep({ outcome: "firm_created", firmId, planId, answered });

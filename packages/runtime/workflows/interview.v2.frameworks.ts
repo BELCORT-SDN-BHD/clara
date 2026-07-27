@@ -69,6 +69,13 @@ export const ENTITY_SYNONYMS_V2: Record<string, string> = {
 const COMPANY_TYPES: readonly EntityType[] = ["sdn_bhd", "bhd"];
 export const isCompanyEntity = (entity: unknown): boolean => COMPANY_TYPES.includes(entity as EntityType);
 
+/** The entities LHDN's business record-keeping rulings (ITA 1967 s.82, PR 5/2000) actually reach.
+ *  Named rather than expressed as "not a company and not an LLP", because that negation silently
+ *  swept in societies and co-operatives, which answer to their own regulators (finding L7). */
+export const UNINCORPORATED_TAX_BASIS_ENTITIES: readonly EntityType[] = ["sole_prop", "partnership"];
+/** Entities whose basis is set by a regulator or constitution, not by a tax ruling. */
+export const REGULATOR_BASIS_ENTITIES: readonly EntityType[] = ["society", "cooperative"];
+
 // ---------------------------------------------------------------------------
 // Axis 1 — framework_code.
 // ---------------------------------------------------------------------------
@@ -256,14 +263,35 @@ export function defaultsFor(entity: unknown, eligibility: MpersEligibility): Ent
 export type MpersEligibility = "eligible" | "ineligible" | "not_determined";
 
 export const ELIGIBILITY_QUESTION =
-  "Is the company a subsidiary, associate or jointly-controlled entity of a listed or SC/BNM-regulated entity, " +
-  "or otherwise required to prepare or lodge financial statements under securities or banking law? (yes / no)\n" +
+  "Does ANY of the following apply to the company? (yes / no)\n" +
+  "  · it is required to prepare or lodge financial statements under securities or banking law " +
+  "(i.e. under an SC- or BNM-administered Act);\n" +
+  "  · it is a subsidiary, associate or jointly-controlled entity of an entity in the point above;\n" +
+  "  · it is a management company under the Interest Schemes Act 2016, or an entity specified as " +
+  "related to one.\n" +
   "This is the CA 2016 s.244 private-entity test: “no” means MPERS is available; “yes” means MFRS applies.";
 
-export const ELIGIBILITY_CHOICES = ["yes", "no"] as const;
+/** `parent_unknown` is NOT an answer the question offers — it is where a bare "subsidiary" lands.
+ *  Being somebody's subsidiary decides nothing on its own: the statutory test turns on WHOSE, and
+ *  a subsidiary of an ordinary unregulated private company remains a private entity. Rather than
+ *  guess in either direction, that input opens the follow-up below. */
+export const ELIGIBILITY_CHOICES = ["yes", "no", "parent_unknown"] as const;
 export const ELIGIBILITY_SYNONYMS: Record<string, string> = {
-  "y": "yes", "true": "yes", "listed": "yes", "regulated": "yes", "subsidiary": "yes",
+  "y": "yes", "true": "yes", "listed": "yes", "regulated": "yes", "interest_scheme": "yes", "interest_schemes": "yes",
   "n": "no", "false": "no", "independent": "no", "none": "no", "standalone": "no",
+  "subsidiary": "parent_unknown", "associate": "parent_unknown", "group": "parent_unknown",
+  "group_company": "parent_unknown", "anak_syarikat": "parent_unknown", "jointly_controlled": "parent_unknown",
+};
+
+/** The follow-up a bare "subsidiary" opens: the limb that actually decides the test. */
+export const ELIGIBILITY_PARENT_QUESTION =
+  "Whose subsidiary/associate is it? Is the PARENT (or any entity in its group) listed, " +
+  "SC/BNM-regulated, or an Interest Schemes Act management company? (yes / no)\n" +
+  "A subsidiary of an ordinary, unregulated private company is itself still a private entity.";
+export const ELIGIBILITY_PARENT_CHOICES = ["yes", "no"] as const;
+export const ELIGIBILITY_PARENT_SYNONYMS: Record<string, string> = {
+  "y": "yes", "true": "yes", "listed": "yes", "regulated": "yes", "public": "yes", "bursa": "yes",
+  "n": "no", "false": "no", "private": "no", "unregulated": "no", "ordinary": "no", "family": "no",
 };
 
 /** The determination recorded by the eligibility segment, read back out of prior answers. */
@@ -367,122 +395,3 @@ export function basisQuestionFor(prior: Readonly<Record<string, unknown>>, subje
     `${lines.join("\n")}`
   );
 }
-
-// ---------------------------------------------------------------------------
-// The rules. Two hard refusals (statutory impossibilities), the rest visible warnings.
-// ---------------------------------------------------------------------------
-
-export type Warning = { code: string; message: string };
-
-/**
- * HARD RULE 1 — an ineligible company cannot apply MPERS. Returns the refusal reason, or null.
- *
- * Fires only on a determination the interview actually HOLDS: a Bhd (ineligible by law) or a
- * Sdn Bhd screened ineligible by the s.244 question. An undetermined Sdn Bhd is not refused —
- * refusing on an assumption is how a correct answer gets blocked.
- */
-export function mpersEligibilityRefusal(code: FrameworkCode, prior: Readonly<Record<string, unknown>>): string | null {
-  if (code !== "MPERS") return null;
-  const entity = prior["entity_type"];
-  const eligibility = eligibilityOf(prior);
-  if (!isCompanyEntity(entity) || eligibility !== "ineligible") return null;
-  const who = entity === "bhd" ? "A public company (Bhd)" : "A Sdn Bhd outside the private-entity scope";
-  return (
-    `${who} is not a “private entity”, so MPERS is not available to it — MFRS applies ` +
-    `(CA 2016 s.244 + the MASB private-entity scope). Answer MFRS, or another option if these are not statutory accounts.`
-  );
-}
-
-/**
- * HARD RULE 2 — a company's TARGET statutory basis cannot be cash or modified cash. Returns the
- * refusal reason, or null.
- *
- * Reached only after the observed-state question has established that the answer describes the
- * basis the entity will REPORT on. When it describes the records AS THEY STAND, nothing is
- * refused: the state is recorded with its explanation and the target is left UNDETERMINED (the
- * memo's observed-state path — an accurate record of a defective book is not an error to block,
- * it is the fact the remediation starts from).
- */
-export function companyCashBasisRefusal(code: BasisCode, prior: Readonly<Record<string, unknown>>): string | null {
-  if (!isCashFamily(code) || !isCompanyEntity(prior["entity_type"])) return null;
-  const label = basisByCode(code)?.label ?? String(code);
-  return (
-    `A company's statutory financial statements must be prepared on the accrual basis under the applicable ` +
-    `MASB-approved standards (CA 2016 s.244) — “${label}” cannot be the basis it reports on. ` +
-    `Answer accrual, or say the cash records are the CURRENT state and it will be recorded as observed with a remediation note.`
-  );
-}
-
-/** The framework-side warnings — visible, acknowledged, and recorded next to the answer. */
-export function frameworkWarnings(code: FrameworkCode, prior: Readonly<Record<string, unknown>>): Warning[] {
-  const entity = prior["entity_type"];
-  const out: Warning[] = [];
-  if (code === "MPERS" && !isCompanyEntity(entity)) {
-    out.push({
-      code: "non_company_mpers",
-      message:
-        "MPERS is a framework for companies under CA 2016 — no approved standard is imposed on an LLP (LLP Act 2012 s.69) " +
-        "or on a business registered under ROBA 1956. Recording “MPERS” here asserts full MPERS compliance; the usual label " +
-        "for these accounts is “MPERS-aligned special purpose”, which asserts alignment without the compliance claim.",
-    });
-  }
-  if (code === "SPECIAL_PURPOSE_TAX_MANAGEMENT" && isCompanyEntity(entity)) {
-    out.push({
-      code: "company_special_purpose",
-      message:
-        "A company's STATUTORY accounts must still be prepared under an applicable MASB-approved framework (CA 2016 s.244). " +
-        "Recording special-purpose tax/management accounts is right for that engagement, but it does not replace the statutory framework.",
-    });
-  }
-  if (code === "UNDETERMINED") {
-    out.push({
-      code: "framework_undetermined",
-      message: "Recorded as UNDETERMINED — a practitioner must determine the framework before any statutory output is produced.",
-    });
-  }
-  return out;
-}
-
-/** The basis-side warnings. */
-export function basisWarnings(code: BasisCode, prior: Readonly<Record<string, unknown>>): Warning[] {
-  const entity = prior["entity_type"];
-  const out: Warning[] = [];
-  if (entity === "llp" && isCashFamily(code)) {
-    out.push({
-      code: "llp_cash_basis",
-      message:
-        "HIGH SEVERITY — LLP Act 2012 s.69 requires records sufficient to show a true and fair profit-and-loss account and " +
-        "balance sheet. A pure cash basis rarely supports that, and LHDN PR 8/2022 expects normal-format statements. Flag this for review.",
-    });
-  }
-  if (!isCompanyEntity(entity) && entity !== "llp" && isCashFamily(code)) {
-    out.push({
-      code: "unincorporated_cash_basis",
-      message:
-        "LHDN PR 5/2000 (Rev) allows a simplified cashbook only for its defined “small business”, and still requires records " +
-        "capable of supporting a true-and-fair profit-and-loss account and balance sheet, including year-end stock and WIP. " +
-        "Confirm the client qualifies, or expect to convert to accrual at the year end.",
-    });
-  }
-  if (code === "UNDETERMINED") {
-    out.push({ code: "basis_undetermined", message: "Recorded as UNDETERMINED — a practitioner must settle the basis before the first close." });
-  }
-  return out;
-}
-
-/** The observed-state question a company + cash answer must pass through before it can be
- *  refused (HARD RULE 2). Data, so the wording is a table edit. */
-export const OBSERVED_STATE_QUESTION =
-  "Is that the basis the accounts will be REPORTED on, or a description of the records as they stand today? " +
-  "(reporting / records_today)";
-
-export const OBSERVED_STATE_CHOICES = ["reporting", "records_today"] as const;
-export const OBSERVED_STATE_SYNONYMS: Record<string, string> = {
-  "report": "reporting", "target": "reporting", "will_report": "reporting", "statutory": "reporting",
-  "records": "records_today", "current": "records_today", "today": "records_today", "as_is": "records_today",
-  "current_state": "records_today", "observed": "records_today",
-};
-
-export const OBSERVED_STATE_NOTE_QUESTION =
-  "Describe the records as they stand and the remediation planned — this is recorded as OBSERVED state, and the " +
-  "reporting basis is left undetermined until a practitioner settles it.";

@@ -96,12 +96,15 @@ export type { AskFn, ItemKind, ItemState, OwnerMarker, PlanItemInput, Prompt, Re
 export function validateBusinessRegistration(raw: unknown): Validation {
   const verdict = classifyBusinessRegistration(raw);
   if (!verdict.ok) return { ok: false, reason: String(verdict.reason) };
-  // `verified: true` is stated AFFIRMATIVELY, not left to be inferred from the absence of a
-  // marker (owner ruling, 2026-07-27). An identity record must say its verification status in
-  // BOTH directions: an absent field is falsy, so a consumer writing the natural
-  // `if (!answer.verified)` would have rejected every correctly-recognised registration.
-  const value = { registration: String(verdict.value), normalized: String(verdict.normalized), form: String(verdict.form), verified: true };
-  return { ok: true, value, echo: `registration ${value.registration}` };
+  // The flag is stated AFFIRMATIVELY, not left to be inferred from an absent marker (owner
+  // ruling): an absent field is falsy, so a consumer writing the natural `if (!answer.X)` would
+  // have rejected every correctly-recognised registration. And it is named `format_verified`,
+  // NEVER `verified`: this lane checks FORM ONLY. A well-formed number can still belong to
+  // somebody else, and a value forged from two individually-valid halves is indistinguishable
+  // from a genuine combined print — telling those apart needs an SSM lookup, a future
+  // integration. A durable record must not claim an assurance nobody performed.
+  const value = { registration: String(verdict.value), normalized: String(verdict.normalized), form: String(verdict.form), format_verified: true };
+  return { ok: true, value, echo: `registration ${value.registration} (format checked — not an SSM identity lookup)` };
 }
 
 /** The accepted-forms sentence, for the question text (a person is told the shapes UP FRONT,
@@ -142,23 +145,34 @@ export function insistUnverifiedRegistration(raw: unknown, previouslyRefused: un
   const registration = String(raw ?? "").trim().replace(/\s+/g, " ").toUpperCase();
   return {
     ok: true,
-    value: { registration, normalized: key, form: "unrecognized", verified: false },
-    echo: `registration ${registration} — NOT a recognised Malaysian format, recorded UNVERIFIED for review`,
+    value: { registration, normalized: key, form: "unrecognized", format_verified: false },
+    echo: `registration ${registration} — NOT a recognised Malaysian format, recorded with its FORMAT UNVERIFIED for review`,
   };
 }
 
-/** True iff a recorded registration answer is the unverified kind (the marker a reviewer, a plan
- *  reader, or a later lane keys off — one definition so nobody re-derives it). */
+/** True iff a recorded registration answer failed the FORMAT check and was recorded on the
+ *  insistence path (the marker a reviewer, a plan reader, or a later lane keys off — one
+ *  definition so nobody re-derives it). Note what it does NOT mean: `false` here says the shape
+ *  was unrecognised, and `true` from its negation says only that the shape was recognised — never
+ *  that the identity was confirmed with SSM. */
 export function isUnverifiedRegistration(value: unknown): boolean {
-  return !!value && typeof value === "object" && (value as { verified?: unknown }).verified === false;
+  return !!value && typeof value === "object" && (value as { format_verified?: unknown }).format_verified === false;
 }
 
 // ---------------------------------------------------------------------------
 // F2 — the v2 segment shape: conditional follow-ups + a visible warning park.
 // ---------------------------------------------------------------------------
 
-/** One acknowledged warning, as it is recorded next to the answer. */
-export type AcknowledgedWarning = { code: string; message: string; acknowledged: true };
+/** One acknowledged warning, as it is recorded next to the answer.
+ *
+ *  `acknowledged_by` is the actor who answered the WARNING park, and it is deliberately separate
+ *  from the segment's `answeredBy` (who answered the echo confirm). In a client run those can be
+ *  different people — bookkeeper A can accept the warning and bookkeeper B can confirm the value —
+ *  and a record that keeps only the second one cannot show who took on the flagged answer. For the
+ *  observed-defective-records path that distinction IS the practitioner approval the memo asks
+ *  for, so discarding it would leave the plan unable to evidence its own most consequential
+ *  acceptance. */
+export type AcknowledgedWarning = { code: string; message: string; acknowledged: true; acknowledged_by: string };
 
 /**
  * A follow-up question asked AFTER a segment's main answer validates and BEFORE its echo
@@ -194,6 +208,39 @@ export type SegmentV2 = Omit<Segment, "question"> & {
   warn?: (value: unknown, prior: Readonly<Record<string, unknown>>) => ReadonlyArray<{ code: string; message: string }>;
 };
 
+/** What persisting one confirmed segment produced (the client workflow's `persistSegment`). */
+export type PersistOutcome =
+  | { kind: "written"; value: unknown; echo: string }
+  | { kind: "skipped" }
+  | { kind: "cancelled" }
+  | { kind: "expired" };
+
+/**
+ * Fold a persist outcome into the accumulated prior answers — the ONE place `prior` is updated
+ * after a write, extracted from the workflow body so it can be driven without an engine.
+ *
+ * WHY IT IS ITS OWN FUNCTION (finding L4). A CAS conflict re-echoes the segment, and the person
+ * can answer DIFFERENTLY the second time. The workflow optimistically recorded the FIRST answer
+ * into `prior` before persisting and never revisited it, so the plan could hold `sole_prop` while
+ * every later segment still read `sdn_bhd` — asking a sole proprietorship the Sdn Bhd-only
+ * private-entity screen and applying company defaults and company statutory rules to it. Replay
+ * reproduced it exactly, because the divergence lived in the workflow's logic, not in timing.
+ * `done.value` is the value that was actually written, and a re-echo that SKIPS must withdraw the
+ * optimistic entry entirely — an answer `prior` holds but the plan does not is the same bug
+ * wearing the other shoe.
+ */
+export function applyPersistOutcome(prior: Record<string, unknown>, key: string, done: PersistOutcome): void {
+  if (done.kind === "written") {
+    prior[key] = done.value;
+    return;
+  }
+  if (done.kind === "skipped") {
+    delete prior[key];
+    return;
+  }
+  // cancelled / expired: the run is terminating and nothing reads `prior` again.
+}
+
 /** Should this segment be asked, given what is known so far? */
 export function segmentApplies(seg: SegmentV2, prior: Readonly<Record<string, unknown>>): boolean {
   return seg.appliesTo ? seg.appliesTo(prior) === true : true;
@@ -212,9 +259,13 @@ export function questionOf(seg: SegmentV2, prior: Readonly<Record<string, unknow
  * (`{ value, warnings }`) rather than losing the acknowledgement. In practice every
  * warning-bearing segment records an object, and the wrap is the fail-safe, not the path.
  */
-export function withWarnings(value: unknown, warnings: ReadonlyArray<{ code: string; message: string }>): unknown {
+export function withWarnings(
+  value: unknown,
+  warnings: ReadonlyArray<{ code: string; message: string }>,
+  acknowledgedBy: string,
+): unknown {
   if (warnings.length === 0) return value;
-  const acknowledged: AcknowledgedWarning[] = warnings.map((w) => ({ code: w.code, message: w.message, acknowledged: true }));
+  const acknowledged: AcknowledgedWarning[] = warnings.map((w) => ({ code: w.code, message: w.message, acknowledged: true, acknowledged_by: acknowledgedBy }));
   const isPlainObject = value !== null && typeof value === "object" && !Array.isArray(value);
   if (!isPlainObject) return { value, warnings: acknowledged };
   const prior = (value as { warnings?: unknown }).warnings;
@@ -303,7 +354,9 @@ export async function askAndConfirmSegmentV2(
         prefix = ""; // declined the warning → re-ask the plain question
         continue;
       }
-      value = withWarnings(value, warnings);
+      // The acknowledger is THIS park's answerer, captured here and not inferred later from the
+      // echo confirm — those can be two different people (finding L5).
+      value = withWarnings(value, warnings, w.answeredBy);
     }
 
     const c = await ask({ seg: seg.key, phase: "c", question: `I recorded: ${echo}. Is that correct? (yes / change)` });
