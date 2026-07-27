@@ -20,9 +20,17 @@
 //               min(text_content))) over field_path='invoice.invoice_id') and report
 //               `with_id / processed`. This equals what the duplicate-bill gate sees.
 //
+//   totals    (X2) — run the DETERMINISTIC TOTALS READER over raw payloads and print, per
+//               document, what it emitted and what it refused. This is the only honest way
+//               to validate the reader against REAL captures: those payloads carry live
+//               client data and can never enter the repo or CI, so the in-repo tests use
+//               geometry-faithful synthetic fixtures and this mode is run locally against
+//               the real files. Reads nothing but the file you point it at.
+//
 // USAGE:
 //   node scripts/measure-invoice-id-capture.mjs                 # fixtures (built-in)
 //   node scripts/measure-invoice-id-capture.mjs fixtures --payloads ./raw.json
+//   node scripts/measure-invoice-id-capture.mjs totals --payloads ./raw.json
 //   node scripts/measure-invoice-id-capture.mjs live            # env DB, read-only
 //
 // The DB connection is resolved ONLY from the environment (DATABASE_URL /
@@ -31,6 +39,7 @@
 import { readFileSync } from "node:fs";
 import pg from "pg";
 import { normalizeAzureInvoice } from "../workflows/invoiceFacts.v1.azure.mjs";
+import { TOTALS_FIELD_PATHS } from "../lib/invoice-totals-reader.mjs";
 
 // --- shared helper: does a normalized payload yield a non-empty invoice.invoice_id? --
 function capturedId(payload) {
@@ -121,6 +130,54 @@ function runFixtures(argv) {
   console.log("POST-DEPLOY gate — re-extract with this mapper, then run `live` mode.");
 }
 
+// --- X2: what the totals reader made of each payload ----------------------------------
+// Prints the emitted regions and the refusal counters exactly as they will ride the
+// extraction envelope, so a real capture can be checked line by line against the printed
+// face of the document before anything is deployed.
+function runTotals(argv) {
+  const payloadArg = argv[argv.indexOf("--payloads") + 1];
+  if (!argv.includes("--payloads") || !payloadArg) {
+    console.error("totals mode needs real payloads: --payloads <file.json> (a raw analyze payload, or an array of them)");
+    process.exit(2);
+  }
+  const raw = JSON.parse(readFileSync(payloadArg, "utf8"));
+  const arr = Array.isArray(raw) ? raw : [raw];
+  const fixtures = arr.map((p, i) => ({ name: p.file || p.name || `payload[${i}]`, payload: p.payload || p }));
+  console.log(`Totals reader over ${fixtures.length} payload(s) from ${payloadArg}\n`);
+  for (const { name, payload } of fixtures) {
+    const out = normalizeAzureInvoice(payload);
+    const receipt = out.envelope.totals_reader ?? {};
+    const pages = payload?.analyzeResult?.pages ?? payload?.pages ?? [];
+    const lineCount = pages.reduce((n, p) => n + (Array.isArray(p.lines) ? p.lines.length : 0), 0);
+    console.log(`== ${name}  (${pages.length} page(s), ${lineCount} line(s), ${out.normalizationVersion})`);
+    for (const path of TOTALS_FIELD_PATHS) {
+      const emitted = out.fields.find((f) => f.field_path === path);
+      const detail = receipt.fields?.[path];
+      if (!emitted && !detail) continue;
+      const label = detail?.labels?.join(" | ") ?? "";
+      console.log(
+        `   ${path.padEnd(24)} ${(emitted?.value_raw ?? "-").padStart(12)}  ` +
+        `[${detail?.outcome ?? "typed-only"}${detail?.reason ? ":" + detail.reason : ""}${detail?.sign ? ", " + detail.sign : ""}]  ${label}`,
+      );
+    }
+    const typedTotal = out.fields.find((f) => f.field_path === "invoice.total");
+    console.log(`   ${"(invoice.total, typed)".padEnd(24)} ${(typedTotal?.value_raw ?? "-").padStart(12)}`);
+    console.log(
+      `   counters: matched=${receipt.matched} absent=${receipt.absent} ambiguous=${receipt.ambiguous} ` +
+      `unparseable=${receipt.unparseable} sign_unknown=${receipt.sign_unknown} ` +
+      `tax_summary_suppressed=${receipt.tax_summary_suppressed}`,
+    );
+    console.log(
+      `             typed_collapsed=${receipt.typed_collapsed} typed_disagreement=${receipt.typed_disagreement} ` +
+      `typed_recovered=${receipt.typed_recovered} typed_vs_dash=${receipt.typed_vs_dash} ` +
+      `emitted=${receipt.emitted} sst_rate=${receipt.sst_rate ?? "-"} units=[${(receipt.units ?? []).join(",")}]` +
+      `${receipt.reason ? " reason=" + receipt.reason : ""}\n`,
+    );
+  }
+  console.log("Check every emitted figure against the printed face of the document. A refusal is a");
+  console.log("correct outcome; a WRONG figure is not, and no counter can tell you which you have.");
+}
+
 async function runLive() {
   const url = process.env.DATABASE_URL || process.env.WORKFLOW_POSTGRES_URL;
   const client = new pg.Client(url ? { connectionString: url } : {});
@@ -168,7 +225,9 @@ if (mode === "live") {
   });
 } else if (mode === "fixtures") {
   runFixtures(process.argv.slice(2));
+} else if (mode === "totals") {
+  runTotals(process.argv.slice(2));
 } else {
-  console.error(`unknown mode '${mode}'. usage: measure-invoice-id-capture.mjs [fixtures|live] [--payloads <file.json>]`);
+  console.error(`unknown mode '${mode}'. usage: measure-invoice-id-capture.mjs [fixtures|totals|live] [--payloads <file.json>]`);
   process.exit(2);
 }

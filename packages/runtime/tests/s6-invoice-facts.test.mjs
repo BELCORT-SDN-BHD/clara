@@ -68,7 +68,11 @@ test("normalizeAzureInvoice NEVER fabricates geometry — a total without a boun
   const out = azure.normalizeAzureInvoice(payload);
   const total = out.fields.find((f) => f.field_path === "invoice.total");
   assert.deepEqual(total.polygon, [], "no boundingRegions => empty polygon (the DB then refuses to corroborate)");
-  assert.deepEqual(out.envelope, {}, "a single eligible invoice carries no ineligibility reason");
+  assert.equal(out.envelope.corroboration_ineligible, undefined, "a single eligible invoice carries no ineligibility reason");
+  // v6 (X2): the envelope also carries the totals reader's refusal counters on EVERY
+  // extraction — the one behavioural delta on a payload whose pages hold no lines[].
+  assert.deepEqual(out.envelope.totals_reader.fields, {}, "no lines[] => the reader read nothing");
+  assert.equal(out.envelope.totals_reader.emitted, 0);
 });
 
 test("normalizeAzureInvoice flags a MULTI-DOCUMENT result as corroboration_ineligible='multi_document'", () => {
@@ -220,7 +224,7 @@ test("vendor_registration: a typed VendorTaxId is emitted as invoice.vendor_regi
   assert.equal(reg.value_raw, "201801000900");
   assert.equal(reg.page, 1);
   assert.equal(reg.confidence, 0.88);
-  assert.equal(out.normalizationVersion, "clara-invoice-norm:v5", "normalization version is bumped to v5 (Wave A2 customer fields)");
+  assert.equal(out.normalizationVersion, "clara-invoice-norm:v6", "normalization version is bumped to v6 (X2 totals reader)");
 });
 
 test("v5 (Wave A2): CustomerName/SubTotal/TotalTax map to AR facts; CustomerTaxId → customer_registration", () => {

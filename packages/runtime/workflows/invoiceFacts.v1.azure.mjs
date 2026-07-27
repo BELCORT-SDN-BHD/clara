@@ -8,6 +8,9 @@
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 
+import { readTotalsFromLines } from "../lib/invoice-totals-reader.mjs";
+import { mergeTotalsIntoFields } from "../lib/invoice-totals-merge.mjs";
+
 const API_VERSION = "2024-11-30";
 const MODEL = "prebuilt-invoice";
 
@@ -37,8 +40,22 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
  *  CustomerTaxId -> invoice.customer_registration (a looksLikeRegistration-gated emit,
  *  mirroring VendorTaxId). None of the new keys match %tin%/%ssm%/%account% — the AB-3
  *  naming boundary (§3.2); customer_taxid stays UBL-only (never emitted here). Bumped so
- *  v5 extractions fold the customer-field mapping into the raw hash. */
-export const NORMALIZATION_VERSION = "clara-invoice-norm:v5";
+ *  v5 extractions fold the customer-field mapping into the raw hash.
+ *  v6 (extraction slice X2, ADR-047): the DETERMINISTIC TOTALS READER
+ *  (lib/invoice-totals-reader.mjs) runs after the typed loop and emits the stated totals
+ *  the typed fields do not carry — measured 0/29 for TotalTax on the live corpus, which is
+ *  why Gate P has no tax leg and the auto-draft lane has never drafted. It reads them
+ *  label-anchored off pages[].lines[] geometry, and every emission carries that line's own
+ *  polygon. Bumped for TWO reasons, both needed: v5 and v6 extractions must stay
+ *  distinguishable (the same document yields more fields under v6), and the version is
+ *  hashed with the raw response, so a re-extraction is a genuinely new fact set rather than
+ *  a silent supersede. The reader's refusal counters ride the envelope as `totals_reader`.
+ *  Also v6: the reader/typed RECONCILIATION (see normalizeAzureInvoice) — Azure types
+ *  SubTotal nondeterministically on the SAME document, so a reader emission can collide
+ *  with a typed one. Two identical readings collapse to one; two different readings emit
+ *  NEITHER. Letting both through would hand the DB conflicting duplicates, and 0016 forfeits
+ *  the WHOLE extraction on those — destroying today's working 29/29 invoice.total capture. */
+export const NORMALIZATION_VERSION = "clara-invoice-norm:v6";
 
 export class DocumentEngineError extends Error {
   constructor(code, message) {
@@ -398,10 +415,31 @@ export function normalizeAzureInvoice(payload) {
     }
   }
 
+  // --- X2: the deterministic totals reader (ADR-047) ------------------------------------
+  // Runs LAST, over pages[].lines[] geometry, and only for the six stated-component paths.
+  // A payload whose pages carry no lines[] (every pre-X2 fixture, and any engine result
+  // without layout regions) yields nothing here, so this is a pure widening: the typed
+  // vocabulary, the recovery paths, pagesUsed and engineConfig are untouched.
+  //
+  // SINGLE-DOCUMENT ONLY. The typed fields above come exclusively from `documents[0]`, while
+  // `result.pages` spans the whole scan. On a multi-document bundle the reader would happily
+  // pair a label on document B's page with an amount there and file it as a component of
+  // document A — two different bills fused into one fact set. `corroboration_ineligible`
+  // blocks Tier A but does NOT stop that region from persisting or from being shown to a
+  // human coder, so the reader simply does not run. Same convention, stated in the receipt.
+  const totals = documents.length <= 1
+    ? readTotalsFromLines(result.pages)
+    : { fields: [], receipt: { ...readTotalsFromLines([]).receipt, reason: "multi_document" } };
+  mergeTotalsIntoFields(out, totals);
+
   let corroborationIneligible = null;
   if (documents.length > 1) corroborationIneligible = "multi_document";
   else if (doc && isCreditNote(doc, fields)) corroborationIneligible = "credit_note";
   const envelope = corroborationIneligible ? { corroboration_ineligible: corroborationIneligible } : {};
+  // The reader's counters ride the extraction envelope so every refusal is inspectable on
+  // live without re-running the engine. The envelope is a free-form jsonb the DB merges
+  // (0022:475) and reads only by named key, so an added key is inert to every consumer.
+  envelope.totals_reader = totals.receipt;
 
   const rawSha256 = createHash("sha256")
     .update(JSON.stringify(payload ?? {}) + "|" + NORMALIZATION_VERSION, "utf8")
