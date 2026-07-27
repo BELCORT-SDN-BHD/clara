@@ -24,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SignJWT } from "jose";
+import { scriptedAnswers } from "./wave-b-interview-testkit.mjs";
 
 if (process.env.CLARA_SKIP_KILL_RESUME === "1") {
   console.log("[kill-resume] skipped (CLARA_SKIP_KILL_RESUME=1)");
@@ -178,16 +179,10 @@ async function pollState(args, jwt, pred, label, deadlineMs = 30000) {
   throw new Error(`pollState timeout (${label}); last=${JSON.stringify(last)}`);
 }
 
-const VALID_CLIENT = {
-  legal_name: "Acme Trading SB", entity_type: "sdn_bhd", ssm: "202401001234-K", tin: "C2584563222", msic: "46900",
-  sst_regime: "service_tax", sst_no: "skip", statutory: "skip", banks: "skip", currency: "MYR", fye: "6",
-  framework: "MPERS", coa_seed: "yes", opening_position: "new_first_year", fa_depreciation: "no",
-  turnover: "RM1M-5M", sample_invoices: "skip",
-};
 
 /** Answer parks until `targetConfirms` segments have been CONFIRMED, then STOP parked at the next
  *  fresh 'q'. Returns the /state body parked at that next question. */
-async function driveUntilConfirms({ runId, planId }, jwt, targetConfirms, deadlineMs = 60000) {
+async function driveUntilConfirms({ runId, planId }, jwt, targetConfirms, answers, deadlineMs = 60000) {
   const answered = new Set();
   let confirms = 0;
   const end = Date.now() + deadlineMs;
@@ -208,7 +203,7 @@ async function driveUntilConfirms({ runId, planId }, jwt, targetConfirms, deadli
       await sleep(120);
       continue;
     }
-    const value = pp.phase === "c" ? "yes" : VALID_CLIENT[pp.seg];
+    const value = pp.phase === "c" ? "yes" : answers(pp.seg);
     const res = await postJson("/api/interview/answer", { runId, scope: "client", parkIndex: pp.parkIndex, planId, value }, jwt);
     if (res.status === 200) {
       answered.add(pp.parkIndex);
@@ -221,7 +216,7 @@ async function driveUntilConfirms({ runId, planId }, jwt, targetConfirms, deadli
   throw new Error("driveUntilConfirms: did not reach the target confirm count");
 }
 
-async function driveToComplete({ runId, planId }, jwt, deadlineMs = 90000) {
+async function driveToComplete({ runId, planId }, jwt, answers, deadlineMs = 90000) {
   const answered = new Set();
   const end = Date.now() + deadlineMs;
   let last = null;
@@ -238,7 +233,7 @@ async function driveToComplete({ runId, planId }, jwt, deadlineMs = 90000) {
       await sleep(120);
       continue;
     }
-    const value = pp.phase === "c" ? "yes" : VALID_CLIENT[pp.seg];
+    const value = pp.phase === "c" ? "yes" : answers(pp.seg);
     const res = await postJson("/api/interview/answer", { runId, scope: "client", parkIndex: pp.parkIndex, planId, value }, jwt);
     if (res.status === 200) answered.add(pp.parkIndex);
     else if (res.status !== 409) throw new Error(`answer failed at park ${pp.parkIndex}: ${res.status} ${JSON.stringify(res.body)}`);
@@ -275,9 +270,15 @@ async function main() {
     const runId = start.body.run_id;
     assert.ok(runId, "run id returned");
 
+    // ONE answer supplier for the WHOLE run, shared across the pre-kill and post-kill drivers.
+    // A driver that built its own would restart a part-consumed segment from the top — and a v2
+    // segment can span more than one park (the framework answer, then its edition question), so
+    // the kill could land mid-segment and the second driver would re-answer the first question.
+    const answers = scriptedAnswers();
+
     // Answer the first 2 segments fully → ≥2 durable answered plan checkpoints; STOP parked at
     // the NEXT question (parkIndex advanced, prompt not consumed).
-    const parkedBefore = await driveUntilConfirms({ runId, planId }, jwt, 2);
+    const parkedBefore = await driveUntilConfirms({ runId, planId }, jwt, 2, answers);
     const parkIndexBefore = parkedBefore.pending_park.parkIndex;
     assert.ok(parkIndexBefore >= 4, `parked past the first 2 segments' q+c parks (parkIndex ${parkIndexBefore} ≥ 4)`);
 
@@ -318,15 +319,18 @@ async function main() {
       assert.equal(Number(planAfter.revision_n), Number(planBefore.revision_n), "revision_n unchanged across the kill (memoized op_keys are idempotent)");
 
       // ----- drive the remaining segments to completion (exactly-once across the kill) -----
-      const terminal = await driveToComplete({ runId, planId }, jwt);
+      const terminal = await driveToComplete({ runId, planId }, jwt, answers);
       assert.equal(terminal.status, "complete", `resumed drive completes (got ${terminal.status})`);
       assert.equal(terminal.terminal.outcome, "interview_complete", "typed complete terminal after resume");
-      assert.equal(Number(terminal.terminal.answered), 13, `total answered equals the single-process count (13); got ${terminal.terminal.answered}`);
+      // 15 under v2 for the sdn_bhd fixture: the 13 v1-era answered segments plus `mpers_eligibility`
+      // and `accounting_basis`. The POINT of the assertion is unchanged — a run driven across a
+      // SIGKILL answers exactly as many segments as one driven in a single process.
+      assert.equal(Number(terminal.terminal.answered), 15, `total answered equals the single-process count (15); got ${terminal.terminal.answered}`);
 
       const itemsFinal = await rig.readOnboardingPlanItems(planId);
       const keysFinal = itemsFinal.map((it) => it.item_key);
       assert.equal(new Set(keysFinal).size, keysFinal.length, "each item_key appears EXACTLY once (exactly-once across the kill)");
-      assert.equal(itemsFinal.filter((it) => it.item_key !== "interview_run").length, 13, "13 business items total after the resumed drive");
+      assert.equal(itemsFinal.filter((it) => it.item_key !== "interview_run").length, 15, "15 business items total after the resumed drive");
       assert.equal(itemsFinal.filter((it) => it.item_key === "interview_run").length, 1, "the interview_run binding is still present exactly once");
 
       console.log("[kill-resume] PASS: SIGKILL mid-park → same-index re-park, byte-identical checkpoints, exactly-once drive to complete");
