@@ -110,6 +110,33 @@ export function factField(fieldPath, valueRaw, { page = 1, polygon = [0, 0, 1, 1
   return { field_path: fieldPath, value_raw: valueRaw, page, polygon, confidence };
 }
 
+/**
+ * The facts an OCR total needs in order to CORROBORATE, from migration 0023 (X5) onward.
+ *
+ * WHY EVERY CORROBORATION FIXTURE GREW TWO ROWS. Before X5 the OCR Tier-A branch accepted a
+ * total on Azure's self-reported confidence, and these fixtures pass `confidence: 0.98`
+ * because that is what a fixture does — so a bare `invoice.total` corroborated. X5 removed
+ * that term entirely (ADR-047 Q1) and replaced it with arithmetic agreement: the document
+ * must STATE its net and its tax, and the closed-taxonomy identity must tie to the sen.
+ *
+ * That is not a test detail, it is the point of the change — a document that states nothing
+ * but a total has proven nothing that a second reader could agree with. A fixture that wants
+ * a corroborated total therefore has to state its arithmetic, exactly as a real document must.
+ * `tax` defaults to 0 because a supplier bill that charges no SST states zero, and
+ * `net + 0 = total` is the identity such a document actually prints.
+ *
+ * NOTE what this deliberately does NOT do: it never fabricates a NON-zero tax. A fixture that
+ * needs a taxed document passes `tax` explicitly, so the arithmetic in the test is visible in
+ * the test rather than hidden here.
+ */
+export function statedIdentityFields(totalCents, { tax = 0 } = {}) {
+  const money = (cents) => `RM ${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+  return [
+    factField("invoice.total_excl_tax", money(totalCents - tax)),
+    factField("invoice.tax_total", money(tax)),
+  ];
+}
+
 /** The invoice_facts extraction's semantic region for a field_path (id + text) —
  *  a Tier-A draft must cite the MACHINE total's region, not the OCR region. */
 export async function factsRegion(document, fieldPath = "invoice.total") {

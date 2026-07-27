@@ -226,7 +226,20 @@ test("§3.3(4) anchor_missing: an ABSENT explicit tax fact skips (zero is allowe
   assert.ok(draft?.entry_id, "the anchor-cell draft exists (mandatory setup)");
   await postViaRule(draft.entry_id).catch((e) => noteLane(`anchor post raised ${e.code}`));
   assert.notEqual(await entryStatusOf(draft.entry_id), "approved", "an OCR sales draft missing an explicit tax fact is NEVER auto-posted");
-  assert.equal(await lastSkipReason(draft.entry_id), OCR_SKIP.anchor, "the skip is NAMED anchor_missing (the corroboration set demands explicit net + explicit tax + a second anchor)");
+  // WHICH WALL CATCHES THIS MOVED AT 0023, and the reason is worth stating rather than
+  // hiding behind an `or`. Before X5 the OCR branch corroborated on vendor confidence alone,
+  // so a tax-less document reached the anchor block and was refused THERE by its
+  // `v_tax is null` disjunct. X5 makes corroboration itself require an explicit tax, so the
+  // executor now refuses one gate EARLIER, at `not_corroborated`, and the anchor block is
+  // never reached for this shape. The document is refused either way — which is the claim
+  // that matters — but the anchor disjunct is now defence in depth behind corroboration
+  // rather than the first wall. Asserted exactly, so a future change that lets this shape
+  // through either gate fails loudly.
+  assert.equal(
+    await lastSkipReason(draft.entry_id),
+    (await ocrAnchorDarkGuard()) ? OCR_SKIP.anchor : OCR_SKIP.notCorroborated,
+    "a document that states no tax is refused — at the anchor block while the dark disjunct stood, at corroboration once X5 required an explicit tax",
+  );
 });
 
 test("§3.3(5) customer_unresolved: a customer that no longer resolves skips — no birth in this lane, ever", async (t) => {

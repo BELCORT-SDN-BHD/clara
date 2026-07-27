@@ -254,7 +254,10 @@ test("§4 the EXECUTOR grants the split NO sanction: a purchase draft carrying a
   assert.notEqual(await entryStatusOf(d3.entry_id), "approved", "a purchase draft carrying the sst_purchase_cost leg is NEVER auto-posted (WA21-R1 — human lanes only this wave)");
   assert.equal(await lastSkipReason(d3.entry_id), OCR_SKIP.purchaseSst, "the skip is NAMED purchase_sst_not_autopostable (a visible skip, not a silent shape mismatch)");
   // The plain 2-leg corroborated sibling posts under the same rule (only the new leg blocks).
-  const cited2 = await purchaseFactsDoc(client, { gross: 10600 });
+  // 0023 (X5): "corroborated" now means the document STATES its arithmetic, so the sibling
+  // states the same net/tax the 3-leg document does. That is not a weaker fixture — it is the
+  // same bill coded two ways, which is exactly what this cell contrasts.
+  const cited2 = await purchaseFactsDoc(client, { gross: 10600, net: 10000, tax: 600 });
   const d2 = await billDraft(client, cited2, { cp, lines: billLines(EXP, AP, 10600) });
   assert.ok(d2?.entry_id, "the 2-leg sibling draft exists (mandatory setup)");
   await postViaRule(d2.entry_id).catch((e) => noteLane(`2-leg post raised ${e.code}`));

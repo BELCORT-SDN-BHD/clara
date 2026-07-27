@@ -10,7 +10,7 @@ import {
   ROLES, humanQuery, roleQuery, rootQuery, wakeQuery, opk, WA_DEFAULTS, ORIGIN,
   seedCitedDocument, filedDocument, freshResolution, billLines, ev,
   wakeDraftEntry, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
-  factField, firmOf, FIELD, CODING_KIND,
+  factField, statedIdentityFields, firmOf, FIELD, CODING_KIND,
 } from "./wave-a-reads.mjs";
 export * from "./wave-a-reads.mjs";
 
@@ -323,6 +323,10 @@ export async function readyFiling(sub, { client, amount = 500000, vendorName = "
     factField(FIELD.currency, "MYR"),
     factField(FIELD.vendorName, vendorName),
     factField(FIELD.invoiceId, `INV-${randomUUID().slice(0, 8)}`),
+    // 0023 (X5): a corroborated OCR total must STATE its arithmetic. This shared AP fixture
+    // models a supplier bill that charges no SST, so it states a zero tax and a net equal to
+    // its total — which is what such a document actually prints.
+    ...statedIdentityFields(amount),
   ]);
   return { ...cited, task, firm, amount, vendorName, registration };
 }
