@@ -51,6 +51,7 @@ import {
   persistInvoiceFacts,
   factField,
   statedIdentityFields,
+  agreedEnvelope,
   factsRegion,
   s6FixReady,
   invoiceFactState,
@@ -108,7 +109,7 @@ async function docWithFacts(sub, { client, total = "RM 5,000.00", currency = "MY
     factField(FIELD.vendorName, "FACTSCO SDN BHD"),
     ...(Number.isFinite(totalCents) && totalCents > 0 ? statedIdentityFields(totalCents) : []),
     ...extra,
-  ]);
+  ], { envelope: agreedEnvelope() });
   return { cited, task };
 }
 
@@ -407,7 +408,7 @@ test("C-8 stale evidence: a facts completion AFTER a Tier-B draft rotates its to
   await persistInvoiceFacts(task.id, [
     factField(FIELD.total, "RM 6,000.00"), factField(FIELD.currency, "MYR"),
     ...statedIdentityFields(600000),
-  ]);
+  ], { envelope: agreedEnvelope() });
   const rotated = (await entryRow(draft.entry_id)).revision_token;
   assert.notEqual(rotated, draft.revision_token, "facts completion rotated the open draft's revision_token (P7)");
   // The OLD token is now stale → CLR06.

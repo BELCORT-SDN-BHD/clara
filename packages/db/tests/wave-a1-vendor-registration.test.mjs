@@ -18,7 +18,7 @@ import {
   markSkip, printSkipCount, firmOf, opk,
   upsertPayableAccount, upsertAccountClassed,
   grantConsent, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
-  persistInvoiceFacts, factField, statedIdentityFields, FIELD,
+  persistInvoiceFacts, factField, statedIdentityFields, agreedEnvelope, FIELD,
   draftEntryV3, approveEntry, freshResolution, billLines, ev, counterpartyRows,
   codingLane, humanPersona, AP, EXP,
 } from "./wave-a-fixtures.mjs";
@@ -97,7 +97,7 @@ async function targetFiling({ registration = null, amount = 700000 } = {}) {
     // Non-monetary: empty polygon is fine (it never corroborates a Tier-A total).
     fields.push(factField("invoice.vendor_registration", registration, { polygon: [], confidence: 0.9 }));
   }
-  await persistInvoiceFacts(task.id, fields);
+  await persistInvoiceFacts(task.id, fields, { envelope: agreedEnvelope() });
   return cited.filingId;
 }
 

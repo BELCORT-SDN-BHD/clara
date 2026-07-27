@@ -131,11 +131,47 @@ export function factField(fieldPath, valueRaw, { page = 1, polygon = [0, 0, 1, 1
  */
 export function statedIdentityFields(totalCents, { tax = 0 } = {}) {
   const money = (cents) => `RM ${(cents / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
+  // CONFIDENCE 0.83, and the number is chosen, not arbitrary: it is just under the LIVE
+  // MAXIMUM (0.837 across 29 real documents), and below the 0.95 the OCR branch used to
+  // demand. That matters for what these fixtures can prove. At the default 0.98 a document
+  // satisfied the OLD confidence term as well as the new identity, so an implementation that
+  // accidentally RETAINED `confidence >= 0.95` alongside X5 would keep every positive cell
+  // green — the suite would certify a term it was supposed to have deleted. At 0.83 the only
+  // thing that can make these documents corroborate is agreement, so a retained confidence
+  // wall turns them RED. It also makes the fixtures model the live corpus rather than an
+  // optimistic one.
   return [
-    factField("invoice.total_excl_tax", money(totalCents - tax)),
-    factField("invoice.tax_total", money(tax)),
+    factField("invoice.total_excl_tax", money(totalCents - tax), { confidence: 0.83 }),
+    factField("invoice.tax_total", money(tax), { confidence: 0.83 }),
   ];
 }
+
+/**
+ * The extraction envelope that records TWO READERS HAVING AGREED on net and tax.
+ *
+ * WHY A FIXTURE HAS TO CARRY THIS. From 0023 the corroboration predicate reads per-field
+ * agreement out of `envelope.totals_reader.fields.<path>.outcome`, and only `typed_collapsed`
+ * — both sources read the field, equal cents — counts. Regions alone are one reader's
+ * assertion; the identity over them proves self-consistency, not agreement. A fixture that
+ * wants a CORROBORATED document must therefore state what the mapper would have stated.
+ *
+ * This is the shape `normalizeAzureInvoice` writes when its layout reader and Azure's typed
+ * field agree, which is the only way a real extraction earns it.
+ */
+export function agreedEnvelope({ extra = {} } = {}) {
+  return {
+    totals_reader: {
+      matched: 2, absent: 0, ambiguous: 0, unparseable: 0,
+      typed_collapsed: 2, typed_disagreement: 0, emitted: 0,
+      fields: {
+        "invoice.total_excl_tax": { outcome: "typed_collapsed" },
+        "invoice.tax_total": { outcome: "typed_collapsed" },
+      },
+    },
+    ...extra,
+  };
+}
+
 
 /** The invoice_facts extraction's semantic region for a field_path (id + text) —
  *  a Tier-A draft must cite the MACHINE total's region, not the OCR region. */

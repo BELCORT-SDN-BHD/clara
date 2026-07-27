@@ -21,7 +21,7 @@ import {
   proposeAutopostRule, signAutopostRule, ruleRowById, postViaRule, lastSkipReason, entryStatusOf,
   upsertPayableAccount, upsertAccountClassed, grantConsent, seedCitedDocument, freshResolution,
   draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
+  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, agreedEnvelope, factsRegion,
   mintInteractive, wakeDraftEntry, checkDefs, rm,
   AP, EXP,
 } from "./a21-helpers.mjs";
@@ -68,7 +68,7 @@ async function purchaseFactsDoc(client, { gross, net = null, tax = null }) {
   ];
   if (net != null) fields.push(factField("invoice.total_excl_tax", rm(net), { polygon: [], confidence: 0.9 }));
   if (tax != null) fields.push(factField("invoice.tax_total", rm(tax), { polygon: [], confidence: 0.9 }));
-  await persistInvoiceFacts(task.id, fields);
+  await persistInvoiceFacts(task.id, fields, { envelope: agreedEnvelope() });
   return cited;
 }
 

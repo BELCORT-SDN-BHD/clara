@@ -77,7 +77,16 @@ begin
   if v_src is null then
     raise exception 'POST-VERIFY 2: _invoice_fact_state_at is GONE';
   end if;
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   if position('v_conf' in v_code) > 0 then
     raise exception 'POST-VERIFY 2: a confidence identifier survives in the EXECUTABLE text of _invoice_fact_state_at — ADR-047 Q1 dropped vendor confidence from gating ENTIRELY';
   end if;
@@ -121,7 +130,16 @@ declare v_src text; v_code text;
 begin
   select prosrc into v_src from pg_proc
    where oid = 'clara._invoice_fact_state_at(uuid,uuid)'::regprocedure;
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   if position('v_locator=''page_polygon''andv_poly_ok' in v_code) = 0
      or position('v_currency=''MYR''' in v_code) = 0
      or position('v_ineligibleisnull' in v_code) = 0
@@ -156,7 +174,16 @@ begin
   if v_src is null then
     raise exception 'POST-VERIFY 4: execute_rule_post is GONE';
   end if;
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   if position('iftrueorv_grossisnullorv_inv_idisnullorv_inv_dateisnull' in v_code) > 0 then
     raise exception 'POST-VERIFY 4: the X4 dark disjunct is STILL in execute_rule_post — 0023 exists to remove it and the deploy did not take';
   end if;
@@ -180,14 +207,16 @@ begin
     raise exception 'POST-VERIFY 4: customer_unresolved no longer follows the anchor block — the ladder order changed under X5';
   end if;
   -- The D-P6 sentinel vocabulary, re-asserted because 0023 rewrites the whole body.
-  if position('anchor_missing' in v_src)=0 or position('not_corroborated' in v_src)=0
-     or position('cn_not_autopostable' in v_src)=0
-     or position('purchase_sst_not_autopostable' in v_src)=0
-     or position('polarity_unverified' in v_src)=0 or position('direction_unproven' in v_src)=0
-     or position('buyer_mismatch' in v_src)=0
-     or position('evidence_class_mismatch' in v_src)=0
-     or position('suspended_pending_resignature' in v_src)=0
-     or position('v_outside_legs' in v_src)=0 then
+  -- OVER EXECUTABLE TEXT. A sentinel parked in a comment is not a gate: deleting the real
+  -- `buyer_mismatch` branch and leaving the word in a block comment satisfied a v_src probe.
+  if position('anchor_missing' in v_code)=0 or position('not_corroborated' in v_code)=0
+     or position('cn_not_autopostable' in v_code)=0
+     or position('purchase_sst_not_autopostable' in v_code)=0
+     or position('polarity_unverified' in v_code)=0 or position('direction_unproven' in v_code)=0
+     or position('buyer_mismatch' in v_code)=0
+     or position('evidence_class_mismatch' in v_code)=0
+     or position('suspended_pending_resignature' in v_code)=0
+     or position('v_outside_legs' in v_code)=0 then
     raise exception 'POST-VERIFY 4: execute_rule_post lost a named skip / retained 0016 gate';
   end if;
   raise notice 'OK 4  dark disjunct GONE; anchor block + identity + sign belt intact; shadowed controls reachable in order';
@@ -202,13 +231,36 @@ declare v_src text; v_code text; v_acl text;
 begin
   select prosrc into v_src from pg_proc
    where oid = 'clara._assert_supplier_bill_shape_at(uuid,uuid)'::regprocedure;
-  if v_src is null or position('sst_purchase_cost' in v_src) = 0
-     or position('amount_override' in v_src) = 0 then
-    raise exception 'POST-VERIFY 5: the supplier-bill floor was disturbed — its exact sst tie is not X5''s to touch';
+  if v_src is null then
+    raise exception 'POST-VERIFY 5: the supplier-bill floor is GONE';
+  end if;
+  -- THE COMPARISON, not the vocabulary: `sst_purchase_cost` surviving as an identifier proves
+  -- nothing about whether the tie still holds, and X5 is what makes tax_total authority-bearing.
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  if position('v_sstp_debit<>v_tax' in v_code) = 0 or position('amount_override' in v_code) = 0 then
+    raise exception 'POST-VERIFY 5: the supplier floor''s SST tie or its override hatch is gone from EXECUTABLE text';
   end if;
   select prosrc into v_src from pg_proc
    where oid = 'clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb)'::regprocedure;
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   if position('r.field_pathin(''invoice.service_charge'',''invoice.discount'',''invoice.delivery'')andr.monetary_cents<0'
        in v_code) = 0 then
     raise exception 'POST-VERIFY 5: persist_invoice_facts lost its non-negative component guard — the write boundary is what makes the identity unforgeable';

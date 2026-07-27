@@ -202,7 +202,16 @@ begin
   -- and what is matched is the disjunct fused to the condition it guards. A marker comment
   -- survives `if false`; a comment cannot survive stripping; and `if false` cannot produce
   -- this sequence. (The behavioural proof is x1-anchor.test.mjs — this is the belt.)
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   if not v_x5 then
     if position('iftrueorv_grossisnullorv_inv_idisnullorv_inv_dateisnull' in v_code) = 0 then
       raise exception 'POST-VERIFY 4: the X4 dark-guard DISJUNCT is not in execute_rule_post''s executable text — the OCR-sales anchor lane may be OPEN without X5''s review (a surviving marker comment is not the guard)';
@@ -330,7 +339,16 @@ begin
   -- guard and paste its text back as `--` comments. All three counts stayed at six and both
   -- literal probes passed. Strip comments FIRST; then a comment about the guard can never
   -- stand in for the guard. (Belt — the behavioural instrument is x1-tie's sign cells.)
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   if (length(v_code) - length(replace(v_code, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 6
      or (length(v_code) - length(replace(v_code, 'invoice.discount', ''))) / length('invoice.discount') < 6
      or (length(v_code) - length(replace(v_code, 'invoice.delivery', ''))) / length('invoice.delivery') < 6 then

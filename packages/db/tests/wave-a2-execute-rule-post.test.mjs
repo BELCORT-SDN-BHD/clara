@@ -30,7 +30,7 @@ import {
   upsertPayableAccount, upsertAccountClassed, grantConsent, seedCitedDocument, freshResolution,
   draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows, codingRuleRows, sightingRows,
   mintInteractive, wakeDraftEntry,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, statedIdentityFields, factsRegion,
+  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, statedIdentityFields, agreedEnvelope, factsRegion,
   AP, EXP,
 } from "./wave-a-fixtures.mjs";
 
@@ -106,7 +106,7 @@ async function draftCorroboratedBill(sub, { client, cp, accountCode = EXP, amoun
     // 0023 (X5): corroboration is now arithmetic agreement, so a fixture that needs a
     // CORROBORATED total has to state the arithmetic — no SST on this bill, hence a zero tax.
     ...statedIdentityFields(amount),
-  ]);
+  ], { envelope: agreedEnvelope() });
   const freg = await factsRegion(cited.documentId, FIELD.total);
   return wakeDraftEntry(cred, {
     client,

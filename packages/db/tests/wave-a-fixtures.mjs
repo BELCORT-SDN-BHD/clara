@@ -10,7 +10,7 @@ import {
   ROLES, humanQuery, roleQuery, rootQuery, wakeQuery, opk, WA_DEFAULTS, ORIGIN,
   seedCitedDocument, filedDocument, freshResolution, billLines, ev,
   wakeDraftEntry, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
-  factField, statedIdentityFields, firmOf, FIELD, CODING_KIND,
+  factField, statedIdentityFields, agreedEnvelope, firmOf, FIELD, CODING_KIND,
 } from "./wave-a-reads.mjs";
 export * from "./wave-a-reads.mjs";
 
@@ -327,7 +327,7 @@ export async function readyFiling(sub, { client, amount = 500000, vendorName = "
     // models a supplier bill that charges no SST, so it states a zero tax and a net equal to
     // its total — which is what such a document actually prints.
     ...statedIdentityFields(amount),
-  ]);
+  ], { envelope: agreedEnvelope() });
   return { ...cited, task, firm, amount, vendorName, registration };
 }
 

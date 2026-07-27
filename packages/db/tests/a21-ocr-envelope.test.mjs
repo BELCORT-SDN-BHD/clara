@@ -32,7 +32,7 @@ import {
 } from "./a21-helpers.mjs";
 // 0022 / X4: whether the OCR-sales anchor lane is held shut by the extraction-slice dark
 // guard, read off the LIVE catalog. See the note at the two PASS-POST halves below.
-import { ocrAnchorDarkGuard } from "./x1-helpers.mjs";
+import { ocrAnchorDarkGuard, agreedEnvelope } from "./x1-helpers.mjs";
 
 const REC = "300-A00";
 const REV = "500-R01";
@@ -129,7 +129,9 @@ async function ocrSalesDoc(client, { cents = 90000, classify = "invoice", omit =
   if (!omit.includes("net")) fields.push(factField("invoice.total_excl_tax", rm(cents), { polygon: [], confidence: 0.9 }));
   if (!omit.includes("tax")) fields.push(factField("invoice.tax_total", "RM 0.00", { polygon: [], confidence: 0.9 })); // explicit ZERO (allowed); omitted = anchor_missing
   if (!omit.includes("amount_due")) fields.push(factField("invoice.amount_due", rm(cents), { polygon: [], confidence: 0.9 })); // the second independent anchor
-  await persistInvoiceFacts(task.id, fields);
+  // 0023 (X5): a corroborated OCR document must carry the reader/typed AGREEMENT the
+  // mapper records — regions alone are one reader's assertion.
+  await persistInvoiceFacts(task.id, fields, { envelope: agreedEnvelope() });
   if (classify) await classifyDocument({ document: cited.documentId, kind: classify, confidence: 0.97 });
   return cited;
 }

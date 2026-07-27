@@ -24,8 +24,8 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, buildWorld, firmOf, rm, grantConsent, seedCitedDocument,
-  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
-  componentFields, LAI_LOU_MEI, COMPONENT, factField,
+  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, failInvoiceFacts,
+  componentFields, LAI_LOU_MEI, COMPONENT, factField, agreedEnvelope,
 } from "./x1-helpers.mjs";
 
 let world = null;
@@ -47,7 +47,7 @@ const gate = (t) => {
 
 /** Seed a filed invoice document and settle ONE done invoice_facts extraction over `fields`
  *  through the REAL writer, so every write-boundary guard actually runs. */
-async function factsDoc(client, fields) {
+async function factsDoc(client, fields, { envelope = agreedEnvelope() } = {}) {
   const sub = world.users.alice;
   const firm = await firmOf(client);
   await grantConsent(sub, { firm, client }).catch(() => {});
@@ -56,7 +56,16 @@ async function factsDoc(client, fields) {
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
   await claimTask(task.id, { egressApproved: true });
-  await persistInvoiceFacts(task.id, fields);
+  try {
+    await persistInvoiceFacts(task.id, fields, { envelope });
+  } catch (e) {
+    // A refused persist leaves the task RUNNING, and the firm's ocr concurrency cap (default
+    // 2) then refuses the next claim — so a cell that proves a write-boundary refusal would
+    // silently starve every cell after it. Release it exactly as the runtime's own failure
+    // path does, then re-raise so the caller still sees the refusal it was testing.
+    await failInvoiceFacts(task.id, "corrupt").catch(() => {});
+    throw e;
+  }
   return cited;
 }
 
@@ -276,4 +285,143 @@ test("[X5] GRAMMAR PARITY: centsOfRaw (JS) and _normalize_invoice_cents (SQL) ag
   const hi = rows.find((r) => r.token === "90,071,992,547,409.91");
   assert.notEqual(lo.cents, hi.cents, "the DB tells these apart");
   assert.notEqual(centsOfRaw(lo.token), centsOfRaw(hi.token), "…and so must the reader");
+});
+
+// ===========================================================================
+// The K-round regressions. Findings 1 and 3 were false-corroboration paths that
+// ended in a posted entry, so these are the cells that matter most in this file.
+// ===========================================================================
+
+test("[K1] TYPED-ONLY net/tax never corroborate — self-consistency is not agreement", async (t) => {
+  if (gate(t)) return;
+  // THE EXECUTED COUNTEREXAMPLE. A real purchase of net 94 / tax 6 / total 100, whose typed
+  // components come back TRANSPOSED to net 6 / tax 94 because Azure was unsure. No layout
+  // lines exist, so the deterministic reader contributes nothing at all. The identity still
+  // ties — 6 + 94 = 100 — and the supplier floor then binds an SST leg to the FALSE tax,
+  // posting Dr expense 6 / Dr SST 94 against a bill that is 94 of expense and 6 of tax.
+  // The 0.95 wall used to refuse this; removing it without requiring agreement removed the
+  // refusal with it.
+  const cited = await factsDoc(world.clients.A1, [
+    factField("invoice.total", rm(10000), { confidence: 0.5 }),
+    factField("invoice.currency", "MYR"),
+    factField(COMPONENT.net, rm(600), { confidence: 0.5 }),
+    factField(COMPONENT.tax, rm(9400), { confidence: 0.5 }),
+  ], { envelope: {} }); // no reader receipt at all — exactly what a typed-only extraction leaves
+  assert.equal((await factState(cited.documentId)).corroborated, false,
+    "one reader is not two, however neatly its arithmetic adds up");
+});
+
+test("[K1] READER-ONLY is equally not agreement", async (t) => {
+  if (gate(t)) return;
+  // The mirror case, asserted so the rule reads as "two sources agreed" rather than
+  // "the typed fields were absent". A reader emission Azure never typed is still one reader.
+  const cited = await factsDoc(world.clients.A1, componentFields({ gross: 10000, net: 9400, tax: 600 }), {
+    envelope: { totals_reader: { fields: {
+      "invoice.total_excl_tax": { outcome: "matched" },
+      "invoice.tax_total": { outcome: "matched" },
+    } } },
+  });
+  assert.equal((await factState(cited.documentId)).corroborated, false,
+    "`matched` is the reader alone; only `typed_collapsed` records two sources agreeing");
+});
+
+test("[K1] agreement is required PER FIELD — one agreed, one not, is not enough", async (t) => {
+  if (gate(t)) return;
+  for (const missing of ["invoice.total_excl_tax", "invoice.tax_total"]) {
+    const fields = {
+      "invoice.total_excl_tax": { outcome: "typed_collapsed" },
+      "invoice.tax_total": { outcome: "typed_collapsed" },
+    };
+    fields[missing] = { outcome: "matched" };
+    const cited = await factsDoc(world.clients.A1, componentFields({ gross: 10000, net: 9400, tax: 600 }),
+      { envelope: { totals_reader: { fields } } });
+    assert.equal((await factState(cited.documentId)).corroborated, false,
+      `${missing} was read by one source only — the identity cannot be anchored on it`);
+  }
+});
+
+test("[K2] a NEGATIVE typed net or tax is refused at the write boundary", async (t) => {
+  if (gate(t)) return;
+  // net -100 with tax 200 against a total of 100 satisfies the identity exactly. The reader's
+  // own sign handling never sees typed fields, so the refusal has to live at the boundary
+  // every producer passes through.
+  for (const [bad, good] of [[COMPONENT.net, COMPONENT.tax], [COMPONENT.tax, COMPONENT.net]]) {
+    let raised = null;
+    await factsDoc(world.clients.A1, [
+      factField("invoice.total", rm(10000)),
+      factField("invoice.currency", "MYR"),
+      factField(bad, "RM -100.00"),
+      factField(good, rm(20000)),
+    ]).catch((e) => { raised = e; });
+    assert.ok(raised, `a negative ${bad} must not persist`);
+    assert.equal(raised.code, "CLR10", "…refused at the write boundary, not merely disbelieved later");
+  }
+});
+
+test("[K4] a rounding adjustment larger than 99 sen never corroborates", async (t) => {
+  if (gate(t)) return;
+  // subtotal 200, zero tax, rounding -100 against a typed total of 100 certifies
+  // `200 - 100 = 100`, and the entry posts with NO rounding leg because the supplier floor
+  // validates the journal rather than the extracted figure. Whatever that line is, it is not
+  // rounding — the bound is what the word means.
+  const cited = await factsDoc(world.clients.A1, [
+    factField("invoice.total", rm(10000)),
+    factField("invoice.currency", "MYR"),
+    factField(COMPONENT.net, rm(20000)),
+    factField(COMPONENT.tax, rm(0)),
+    factField(COMPONENT.rounding, "RM -100.00"),
+  ]);
+  assert.equal((await factState(cited.documentId)).corroborated, false,
+    "a ringgit of rounding is not rounding, and cannot be used to balance a wrong gross");
+
+  const ok = await factsDoc(world.clients.A1,
+    componentFields({ gross: 10375, net: 9430, serviceCharge: 377, tax: 566, rounding: 2 }));
+  assert.equal((await factState(ok.documentId)).corroborated, true, "2 sen of rounding is rounding");
+});
+
+test("[K5] the LIVE CORPUS SHAPES, as a cell: one flips, none is lost", async (t) => {
+  if (gate(t)) return;
+  // The exact-diff result lived only in the supplied live query. It belongs in the suite, so
+  // a future change to the predicate has to face it here rather than in a report nobody
+  // re-runs. These are the three live shapes that carry any component at all.
+  const shapes = [
+    { name: "5174df8a-class (net + explicit zero tax, identity ties)", gross: 300000, net: 300000, tax: 0, expect: true },
+    { name: "509e788d-class (the vehicle: net stated, tax a printed dash)", gross: 43556000, net: 43556040, tax: null, expect: false },
+    { name: "d3732397-class (net stated, no tax)", gross: 4500000, net: 4500000, tax: null, expect: false },
+  ];
+  let flips = 0;
+  for (const shape of shapes) {
+    const fields = [
+      factField("invoice.total", rm(shape.gross), { confidence: 0.83 }),
+      factField("invoice.currency", "MYR"),
+      factField(COMPONENT.net, rm(shape.net), { confidence: 0.83 }),
+    ];
+    if (shape.tax !== null) fields.push(factField(COMPONENT.tax, rm(shape.tax), { confidence: 0.83 }));
+    const cited = await factsDoc(world.clients.A1, fields);
+    const got = (await factState(cited.documentId)).corroborated;
+    assert.equal(got, shape.expect, `${shape.name} corroborates=${got}, expected ${shape.expect}`);
+    if (got) flips += 1;
+    // NONE of them corroborated before X5 either — `would_lose = 0` measured on live, and the
+    // same claim asserted here from the recomputed pre-X5 verdict.
+    assert.equal(await wouldHaveCorroboratedPreX5(cited.documentId), false,
+      `${shape.name} did not corroborate pre-X5 either (confidence 0.83 < 0.95) — nothing is LOST`);
+  }
+  assert.equal(flips, 1, "exactly one of the three live shapes gains corroboration");
+});
+
+test("[K5] the positive flip is CONFIDENCE-INDEPENDENT — a retained 0.95 term turns this red", async (t) => {
+  if (gate(t)) return;
+  // Every figure here carries 0.83, just under the live maximum of 0.837 and well under the
+  // 0.95 the old branch demanded. If an implementation kept the confidence term alongside the
+  // identity, this document could not corroborate and the cell fails — which is the whole
+  // point: the earlier fixture default of 0.98 satisfied BOTH walls and could not tell them
+  // apart.
+  const { gross, net, serviceCharge, tax, rounding } = LAI_LOU_MEI;
+  const low = componentFields({ gross, net, serviceCharge, tax, rounding })
+    .map((f) => ({ ...f, confidence: 0.83 }));
+  const cited = await factsDoc(world.clients.A1, low);
+  assert.equal((await factState(cited.documentId)).corroborated, true,
+    "agreement alone carries this document — no figure on it would pass a 0.95 confidence wall");
+  assert.equal(await wouldHaveCorroboratedPreX5(cited.documentId), false,
+    "…and it provably would NOT have corroborated before X5");
 });

@@ -56,6 +56,17 @@ export function mergeTotalsIntoFields(out, totals) {
     const typedCents = centsOfRaw(typed.value_raw);
     if (typedCents !== null && typedCents === centsOfRaw(row.value_raw)) {
       totals.receipt.typed_collapsed += 1;
+      // STAMP THE AGREEMENT ON THE FIELD, not only on a counter. This outcome is the ONLY
+      // record that TWO INDEPENDENT SOURCES read this field and got the same cents, and from
+      // migration 0023 the corroboration predicate reads exactly here to decide whether the
+      // arithmetic identity is anchored on agreed figures or on one reader talking to itself.
+      // A global tally cannot answer that question per field — it cannot even say WHICH field
+      // agreed — so leaving the detail at the reader's own `matched` made the evidence
+      // unreadable and the predicate unsatisfiable.
+      if (totals.receipt.fields?.[row.field_path]) {
+        totals.receipt.fields[row.field_path].outcome = "typed_collapsed";
+        totals.receipt.fields[row.field_path].typed_value_raw = typed.value_raw;
+      }
       continue;
     }
     out.splice(out.indexOf(typed), 1);

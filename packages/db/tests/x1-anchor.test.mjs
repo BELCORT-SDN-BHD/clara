@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, opk, buildWorld, firmOf, rm, fnSource,
   upsertAccountClassed, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
-  persistInvoiceFacts, factsRegion, grantConsent, freshResolution, ev, approveEntry,
+  persistInvoiceFacts, agreedEnvelope, factsRegion, grantConsent, freshResolution, ev, approveEntry,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, draftEntryV3,
   classifyDocument, postViaRule, lastSkipReason, entryStatusOf, counterpartyRows,
   proposeAutopostRule, signAutopostRule, ruleRowById, seedStatedInvoiceFacts, FIELD,
@@ -126,7 +126,9 @@ async function fullyAnchoredDoc() {
   fields.push(factField("invoice.vendor_registration", CLIENT_REG, { polygon: [], confidence: 0.9 }));
   fields.push(factField("invoice.customer_name", CUSTOMER));
   fields.push(factField("invoice.amount_due", rm(gross), { polygon: [], confidence: 0.9 }));
-  await persistInvoiceFacts(task.id, fields);
+  // 0023 (X5): a corroborated OCR document must carry the reader/typed AGREEMENT the
+  // mapper records — regions alone are one reader's assertion.
+  await persistInvoiceFacts(task.id, fields, { envelope: agreedEnvelope() });
   await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97 });
   return { cited, gross, net, tax, rounding, serviceCharge };
 }

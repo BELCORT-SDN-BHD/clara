@@ -127,9 +127,12 @@ declare
   -- surface for the first time — 0022 deliberately kept them out of it because
   -- corroboration was X5's alone, and this is X5.
   v_sc bigint; v_disc bigint; v_dlv bigint; v_sc_c int; v_disc_c int; v_dlv_c int;
+  -- 0023 (X5, K-round): the reader receipt, and the per-field agreement it records.
+  v_env jsonb; v_net_agreed boolean; v_tax_agreed boolean;
 begin
-  select e2.id, e2.version_n, nullif(btrim(e2.envelope->>'corroboration_ineligible'),''), e2.engine_id
-    into v_ext, v_version, v_ineligible, v_engine
+  select e2.id, e2.version_n, nullif(btrim(e2.envelope->>'corroboration_ineligible'),''), e2.engine_id,
+         e2.envelope
+    into v_ext, v_version, v_ineligible, v_engine, v_env
   from clara.document_extractions e2
   where e2.id = p_extraction and e2.document_id = p_document
     and e2.engine_kind = 'invoice_facts' and e2.status = 'done';
@@ -171,6 +174,47 @@ begin
     where extraction_id = v_ext and field_path = 'invoice.tax_breakdown';
   select count(*)::int, nullif(btrim(min(text_content)),'') into v_type_c, v_type from clara.document_regions
     where extraction_id = v_ext and field_path = 'invoice.type_code';
+  -- 0023 (X5, K-round): PER-FIELD AGREEMENT EVIDENCE, read from the extraction envelope.
+  --
+  -- WHY THIS IS HERE AND WHAT IT FIXES. The first cut of this predicate proved the document
+  -- was ARITHMETICALLY SELF-CONSISTENT and called that agreement. It is not. Azure's typed
+  -- fields survive whenever the deterministic layout reader is absent, ambiguous or
+  -- unparseable, so a typed-only extraction could satisfy the identity with ONE reader having
+  -- read nothing. The executed counterexample: a real bill of net 94 / tax 6 / total 100,
+  -- mis-typed with the components TRANSPOSED to net 6 / tax 94. The identity still ties —
+  -- 6 + 94 = 100 — and the supplier floor then ties its SST leg to the FALSE tax, posting
+  -- Dr expense 6 / Dr SST 94. The 0.95 confidence wall used to refuse that claim; removing it
+  -- without requiring agreement removed the refusal too.
+  --
+  -- So agreement is now required PER FIELD, and only `typed_collapsed` counts: that outcome
+  -- means BOTH sources read the field and their cents were equal. `typed-only` and
+  -- `reader-only` are one reader, and one reader is not corroboration however tidy its
+  -- arithmetic.
+  --
+  -- ON TRUSTING THE ENVELOPE. It arrives through the SAME audited `persist_invoice_facts`
+  -- call as the regions themselves, written by the same runtime writer in the same
+  -- transaction. Reading it is not weaker than reading `document_regions`; both are that
+  -- writer's validated assertions, and neither is reachable by a caller who could not equally
+  -- have written the regions. The alternative — re-deriving agreement in SQL — would mean
+  -- re-implementing the layout reader in the database, which is the thing this architecture
+  -- exists to avoid.
+  --
+  -- COMPONENTS ARE SINGLE-READER BY SOURCE, deliberately: Azure types no service charge,
+  -- discount or delivery at all, so no agreement evidence can exist for them. They are
+  -- bounded instead by the non-negative belt, by the repeated-occurrence refusal in the
+  -- reader (two printed delivery lines are two charges, not one restated fact), and by the
+  -- fact that they can only ever move an identity that is already anchored at both ends by
+  -- an AGREED net, an AGREED tax and the gross.
+  -- COALESCED TO FALSE, and this is not decoration. An extraction with no reader receipt at
+  -- all — which is exactly what a typed-only extraction leaves — makes every `->` NULL, and
+  -- `NULL = 'typed_collapsed'` is NULL rather than false. The whole predicate then evaluates
+  -- to NULL and `corroborated` lands in the envelope as null instead of false. Nothing
+  -- downstream treats null as true, so this was not a live hazard, but a three-valued
+  -- corroboration flag is a trap for the next reader of this code and for any consumer that
+  -- tests `is not false` rather than `= true`. Absence of evidence is FALSE here, explicitly.
+  v_net_agreed := coalesce((v_env->'totals_reader'->'fields'->'invoice.total_excl_tax'->>'outcome') = 'typed_collapsed', false);
+  v_tax_agreed := coalesce((v_env->'totals_reader'->'fields'->'invoice.tax_total'->>'outcome') = 'typed_collapsed', false);
+
   -- 0023 (X5): the stated components, carrying the SAME cardinality guard every other
   -- corroboration fact carries (RESIDUAL-4) — a conflicting duplicate must REJECT
   -- corroboration, never be min()-selected away.
@@ -265,6 +309,16 @@ begin
       and v_ineligible is null
       and v_net is not null and v_net_c = 1
       and v_tax is not null and v_tax_c = 1
+      -- TWO READERS AGREED ON EACH, per field. See the note above: without this the
+      -- predicate proves self-consistency, which a transposed typed pair satisfies.
+      and v_net_agreed and v_tax_agreed
+      -- NET AND TAX ARE NON-NEGATIVE (K-round). 0022 scoped its sign guard to the three
+      -- components because net/tax were not authority-bearing then. At X5 they are, and the
+      -- typed route bypasses the reader's own sign handling entirely: typed net -100 with
+      -- typed tax 200 against a total of 100 satisfies the identity exactly. A negative
+      -- subtotal is not a document this reader can honestly read. Belt; the buckle is the
+      -- write boundary below.
+      and v_net >= 0 and v_tax >= 0
       -- A PRESENT-but-unreadable component must never arrive as a silent zero, and a
       -- duplicate must never be min()-selected away. Read guards mirroring the write
       -- boundary, for the reason given above.
@@ -277,6 +331,14 @@ begin
       -- forges a larger gross that ties exactly. Refusing here means the identity cannot be
       -- satisfied by a component that arrived along some other path.
       and coalesce(v_sc, 0) >= 0 and coalesce(v_disc, 0) >= 0 and coalesce(v_dlv, 0) >= 0
+      -- ROUNDING IS BOUNDED (K-round). It is the only component whose sign is free, so it is
+      -- the only one that can SUBTRACT — and an unbounded subtraction balances an arbitrarily
+      -- wrong gross. Executed: subtotal 200, zero tax, a parsed `Rounding -100.00` and a typed
+      -- total of 100 certifies `200 - 100 = 100`, and the entry posts with no rounding leg
+      -- because the supplier floor validates the JOURNAL, not the extracted figure. 99 sen is
+      -- what the word can mean: an adjustment to a nearby currency unit. The same constant
+      -- lives in the reader; both refuse, because either alone is a single point of failure.
+      and coalesce(abs(v_rounding), 0) <= 99
       -- THE CORRECTED IDENTITY (X3's closed taxonomy, 0022): absent components coalesce to
       -- zero because they were not printed; the discount subtracts; the sum must equal the
       -- stated total EXACTLY.
@@ -332,6 +394,8 @@ declare
   v_cust_name_raw text; v_cust_reg_raw text; v_buyer_fp jsonb; v_buyer_id uuid;
   v_fseen int; v_fdocs int; v_fspan int;
   v_sc bigint; v_disc bigint; v_dlv bigint; v_sc_c int; v_disc_c int; v_dlv_c int;
+  -- 0023 (X5, K-round): the reader receipt, and the per-field agreement it records.
+  v_env jsonb; v_net_agreed boolean; v_tax_agreed boolean;
 begin
   if p_op_key is null or btrim(p_op_key)='' then
     raise exception 'op_key is required' using errcode='CLR10';
@@ -849,6 +913,324 @@ end $$;
 
 alter function clara.execute_rule_post(uuid,text) owner to clara_fn_owner;
 
+-- =====================================================================
+-- §C — the write boundary learns about net and tax (K-round, K2)
+-- =====================================================================
+--
+-- CHANGE OF RECORD of `persist_invoice_facts`, carried forward verbatim from 0022 with ONE
+-- addition: check (b3), refusing a negative `invoice.total_excl_tax` or `invoice.tax_total`.
+-- Everything else — the allowlist, the five existing enumerations, the duplicate forfeit, the
+-- present-but-malformed refusal, (b2)'s component sign guard, the type_code rule, the
+-- reservation and the audit trail — is byte-identical.
+--
+-- WHY IT RIDES X5 AND NOT ITS OWN MIGRATION. It is not a separate feature: it is the write
+-- half of the same sign law whose read half is three lines up in §A. Splitting them would
+-- ship a predicate that belts a value the boundary still accepts, which is the shape of
+-- defect that produces a long argument about which layer was supposed to catch it.
+
+create or replace function clara.persist_invoice_facts(p_task uuid, p_fields jsonb,
+    p_raw_sha256 text, p_normalization_version text, p_pages_used int,
+    p_envelope jsonb default null) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  t record; d record; v_ext uuid; v_existing uuid; v_entry uuid; v_date date;
+  elem jsonb; v_path text; v_raw text; v_page int; v_conf numeric;
+  v_cents bigint; v_region uuid; v_token uuid;
+  v_newstate jsonb; v_p_payable bigint; v_p_expense bigint;
+  v_eflags jsonb; v_ekind text;
+begin
+  select * into t from clara.document_processing_tasks where id=p_task;
+  if not found or t.lane not in ('invoice_facts','local_facts') then
+    raise exception 'invoice-facts task not found' using errcode='CLR16';
+  end if;
+  if t.status='done' then
+    select id into v_existing from clara.document_extractions
+      where document_id=t.document_id and engine_id=t.engine_id
+        and version_n=t.version_n and engine_kind='invoice_facts';
+    return jsonb_build_object('task_id',p_task,'extraction_id',v_existing,
+      'status','done','replayed',true);
+  end if;
+  if jsonb_typeof(p_fields)<>'array' or p_raw_sha256 !~ '^[0-9a-f]{64}$'
+     or p_normalization_version is null or btrim(p_normalization_version)=''
+     or p_pages_used is null or p_pages_used<0 then
+    raise exception 'invoice-facts payload is malformed' using errcode='CLR10';
+  end if;
+
+  perform 1 from clara.document_filings f
+    where f.document_id=t.document_id and f.retired_at is null
+    order by f.id for update;
+  perform 1 from clara.journal_entries e
+    join clara.document_filings f on f.id=e.filing_id
+    where f.document_id=t.document_id and f.retired_at is null and e.status='draft'
+    order by e.id for update of e;
+  select * into t from clara.document_processing_tasks where id=p_task for update;
+  if t.status='done' then
+    select id into v_existing from clara.document_extractions
+      where document_id=t.document_id and engine_id=t.engine_id
+        and version_n=t.version_n and engine_kind='invoice_facts';
+    return jsonb_build_object('task_id',p_task,'extraction_id',v_existing,
+      'status','done','replayed',true);
+  end if;
+  if t.status<>'running' then
+    raise exception 'invoice-facts task is not running' using errcode='CLR16';
+  end if;
+
+  insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
+      version_n,status,page_count,envelope)
+    values(t.firm_id,t.document_id,t.engine_id,
+      'invoice_facts',t.version_n,'done',p_pages_used,
+      coalesce(p_envelope,'{}'::jsonb) || jsonb_build_object('raw_sha256',p_raw_sha256,
+        'normalization_version',p_normalization_version,
+        'field_count',jsonb_array_length(p_fields)))
+    returning id into v_ext;
+
+  for elem in select value from jsonb_array_elements(p_fields) loop
+    if jsonb_typeof(elem)<>'object' or nullif(elem->>'field_path','') is null
+       or not (elem ? 'page') or not (elem ? 'polygon') then
+      raise exception 'invoice-facts field is malformed' using errcode='CLR10';
+    end if;
+    v_path:=elem->>'field_path';
+    -- 0022 (X3): the three stated-component paths join the CLOSED allowlist. The taxonomy
+    -- is closed on purpose (ADR-047): a component read off the face of the document is a
+    -- first-class fact, and anything NOT in the enumeration is not silently absorbed.
+    if v_path not in ('invoice.total','invoice.amount_due','invoice.currency',
+        'invoice.vendor_name','invoice.vendor_registration','invoice.invoice_id',
+        'invoice.invoice_date','invoice.deposit',
+        'invoice.customer_name','invoice.customer_registration','invoice.customer_taxid',
+        'invoice.type_code','invoice.total_excl_tax','invoice.tax_total','invoice.rounding',
+        'invoice.service_charge','invoice.discount','invoice.delivery',
+        'invoice.tax_breakdown','invoice.myinvois_uuid','invoice.myinvois_longid') then
+      raise exception 'unsupported invoice field_path %',v_path using errcode='CLR10';
+    end if;
+    begin
+      v_page:=(elem->>'page')::int;
+      v_conf:=(elem->>'confidence')::numeric;
+    exception when others then
+      raise exception 'invoice-facts page/confidence is malformed' using errcode='CLR10';
+    end;
+    if v_page<1 or v_conf<0 or v_conf>1
+       or jsonb_typeof(elem->'polygon') not in ('array','object') then
+      raise exception 'invoice-facts locator/confidence is invalid' using errcode='CLR10';
+    end if;
+    v_raw:=elem->>'value_raw';
+    v_cents:=case when v_path in ('invoice.total','invoice.amount_due','invoice.deposit',
+                  'invoice.total_excl_tax','invoice.tax_total','invoice.rounding',
+                  'invoice.service_charge','invoice.discount','invoice.delivery')
+                  then clara._normalize_invoice_cents(v_raw) else null end;
+    insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,
+        field_path,text_content,engine_confidence,monetary_raw,monetary_cents)
+      values(t.firm_id,v_ext,'page_polygon',
+        jsonb_build_object('page',v_page,'polygon',elem->'polygon'),
+        v_path,v_raw,v_conf,
+        case when v_path in ('invoice.total','invoice.amount_due','invoice.deposit',
+             'invoice.total_excl_tax','invoice.tax_total','invoice.rounding',
+             'invoice.service_charge','invoice.discount','invoice.delivery')
+             then v_raw end,v_cents)
+      returning id into v_region;
+    if v_path='invoice.invoice_date' and v_raw ~ '^\d{4}-\d{2}-\d{2}$' then
+      begin v_date:=v_raw::date; exception when others then v_date:=null; end;
+    end if;
+  end loop;
+
+  -- FIX-2/3/4 + FIX-3/4/5 v4 (the DB owns the number — REJECT bad facts at the WRITE BOUNDARY
+  -- rather than min()-selecting one at read time, where SQL NULL semantics silently drop a
+  -- blank). All checks are inert for the Azure/OCR corpus (one region per field, no rounding
+  -- fact, no conflicts) and for the MyInvois parser (mapFactsFields emits each path at most
+  -- once + always a type_code), so the AP exact-diff and the live local_facts producer are
+  -- unaffected.
+  --   (a) CONFLICTING duplicates, UNIFORM over EVERY per-field fact: a field appearing more
+  --     than once with ANY differing value — INCLUDING a blank/NULL vs a real value — is a
+  --     contradiction the DB refuses; IDENTICAL duplicates collapse. The v3 checks used
+  --     count(distinct <value>), which IGNORES a NULL/blank (SQL semantics) — so a crafted
+  --     ['', real] pair slipped past and min() then selected the blank -> NULL, re-opening
+  --     polarity (type_code) / direction (customer_taxid) / duplicate-bill (invoice_id/date).
+  --     Coalescing to a control-char SENTINEL (chr(1), never a real cents/text value) makes
+  --     the blank a DISTINCT value, so ['', '02'] / ['', clientTIN] / ['', 'N/A'] all conflict.
+  --     Monetary fields compare on normalized cents; text fields on the trimmed value. The
+  --     text set now also covers invoice_id / invoice_date / tax_breakdown / myinvois_* (a
+  --     conflicting id/date/breakdown was otherwise min-selected past the guard).
+  --     0022 (X3): the three stated components join the MONETARY set — two disagreeing
+  --     service charges must forfeit the extraction, exactly as two disagreeing totals do.
+  if exists (
+    select 1 from clara.document_regions r
+    where r.extraction_id=v_ext
+      and r.field_path in ('invoice.total','invoice.amount_due','invoice.deposit',
+        'invoice.total_excl_tax','invoice.tax_total','invoice.rounding',
+        'invoice.service_charge','invoice.discount','invoice.delivery')
+    group by r.field_path
+    having count(distinct coalesce(r.monetary_cents::text, chr(1))) > 1
+  ) or exists (
+    select 1 from clara.document_regions r
+    where r.extraction_id=v_ext
+      and r.field_path in ('invoice.type_code','invoice.currency','invoice.vendor_name',
+        'invoice.vendor_registration','invoice.customer_name','invoice.customer_registration',
+        'invoice.customer_taxid','invoice.invoice_id','invoice.invoice_date',
+        'invoice.tax_breakdown','invoice.myinvois_uuid','invoice.myinvois_longid')
+    group by r.field_path
+    having count(distinct coalesce(nullif(btrim(r.text_content),''), chr(1))) > 1
+  ) then
+    raise exception 'invoice-facts payload carries conflicting duplicate facts for a single field'
+      using errcode='CLR10';
+  end if;
+  --   (b) a PRESENT-but-malformed monetary value (raw text stated, cents normalize to NULL)
+  --     is REFUSED for every REQUIRED monetary field — never silently treated as zero or
+  --     "not stated" (item 5). Covers amount_due / deposit ('N/A' -> NULL was accepted as
+  --     "no due" and defaulted deposit to 0, re-opening the total/deposit corroboration
+  --     guards) and total_excl_tax / tax_total / rounding (a stated-but-unparseable component
+  --     is a data error). NB: invoice.total is DELIBERATELY EXCLUDED — an unreadable OCR total
+  --     still persists (non-corroborated: v_total NULL => corroborated=false, fail-closed),
+  --     exactly as before; a blank (empty) raw is "not stated" and is unaffected (nullif
+  --     drops it, so an omitted/empty field never trips this).
+  --     0022 (X3): the three stated components join this set for the same reason the other
+  --     components are in it — a component the reader can SEE but cannot PARSE must never
+  --     reach the tie as a zero, because a zero would make a wrong identity balance.
+  if exists (
+    select 1 from clara.document_regions r
+    where r.extraction_id=v_ext
+      and r.field_path in ('invoice.amount_due','invoice.deposit',
+        'invoice.total_excl_tax','invoice.tax_total','invoice.rounding',
+        'invoice.service_charge','invoice.discount','invoice.delivery')
+      and nullif(btrim(r.monetary_raw),'') is not null and r.monetary_cents is null
+  ) then
+    raise exception 'invoice-facts monetary value is malformed' using errcode='CLR10';
+  end if;
+  --   (b2) 0022 (X3, adversarial round 1 — FATAL): the three STATED COMPONENTS must be
+  --     NON-NEGATIVE. ADR-047's "every component is stored positive as printed" was written
+  --     as an EMITTER convention, and an emitter convention is not a control.
+  --     `_normalize_invoice_cents` (0009:110-121) accepts BOTH `-5.00` and the accounting
+  --     parenthesis form `(5.00)`, so a negative discount is persistable — and the identity
+  --     SUBTRACTS the discount, which turns that minus into a plus:
+  --         net 100.00 + tax 6.00 - (-5.00) = 111.00  ties against a stated gross of 111.00
+  --     while the document's own face reads 100.00 + 6.00 - 5.00 = 101.00. The tie passes,
+  --     tie 3 accepts revenue = gross - tax, and Clara posts RM111.00 for a RM101.00
+  --     document. Every figure is "read off the document" and the answer is still wrong, so
+  --     the sign convention is enforced HERE, at the write boundary, in cents.
+  --     DELIBERATELY NARROW: only the three NEW component paths. `invoice.rounding` may
+  --     legitimately be negative (a downward rounding adjustment) and net/tax/total are the
+  --     pre-existing 0016 surface, out of X1's scope — widening either would be a change
+  --     this slice was not grilled for.
+  if exists (
+    select 1 from clara.document_regions r
+    where r.extraction_id=v_ext
+      and r.field_path in ('invoice.service_charge','invoice.discount','invoice.delivery')
+      and r.monetary_cents < 0
+  ) then
+    raise exception 'a stated invoice component must not be negative (components are stated positive; the discount subtracts in the identity)'
+      using errcode='CLR10';
+  end if;
+  --   (b3) 0023 (X5, K-round): NET AND TAX ARE NON-NEGATIVE TOO, and this is where the
+  --     guard finally belongs. 0022 scoped (b2) to the three components on purpose — net and
+  --     tax were not authority-bearing then, and widening a write boundary is not something
+  --     to do speculatively. X5 makes them authority-bearing: they anchor the corroboration
+  --     identity, so a negative one is now a posting hazard rather than an oddity.
+  --
+  --     WHY THE RUNTIME'S OWN SIGN HANDLING DOES NOT COVER THIS. The deterministic reader
+  --     refuses a negative component, but Azure's TYPED SubTotal/TotalTax take a different
+  --     route into the mapper and never meet that code. Executed: typed subtotal -100 with
+  --     typed tax 200 against a total of 100 was accepted by this writer, and the identity
+  --     `-100 + 200 = 100` then corroborated. A negative subtotal is not a document anyone
+  --     can read; refuse it at the boundary, where every producer must pass.
+  --
+  --     `invoice.rounding` is DELIBERATELY EXCLUDED, exactly as in (b2): a rounding
+  --     adjustment may legitimately be negative. Its own hazard — magnitude, not sign — is
+  --     bounded in the corroboration predicate and in the reader.
+  if exists (
+    select 1 from clara.document_regions r
+    where r.extraction_id=v_ext
+      and r.field_path in ('invoice.total_excl_tax','invoice.tax_total')
+      and r.monetary_cents < 0
+  ) then
+    raise exception 'a stated invoice net/tax must not be negative (they anchor the corroboration identity; a negative one forges a tie)'
+      using errcode='CLR10';
+  end if;
+  --   (2c) a local-facts (MyInvois structured) payload MUST state a type_code — a structured
+  --     e-invoice with no document type cannot be polarity-bound. OCR/Azure (invoice_facts)
+  --     carry no type_code and are unaffected.
+  if t.lane='local_facts'
+     and not exists(select 1 from clara.document_regions
+       where extraction_id=v_ext and field_path='invoice.type_code'
+         and nullif(btrim(text_content),'') is not null) then
+    raise exception 'a local-facts payload must state invoice.type_code' using errcode='CLR10';
+  end if;
+
+  -- Only the Azure lane carries a processing-call reservation; the local parse is free.
+  if t.lane='invoice_facts' then
+    perform clara._settle_processing_call(p_task,p_pages_used);
+  end if;
+  update clara.document_processing_tasks set status='done',vendor_op_ref=p_raw_sha256,
+    finished_at=now() where id=p_task;
+  select * into d from clara.documents where id=t.document_id;
+  -- 0016 (P3/WA21-R7): the kind stamp is ONLY-IF-NULL — the facts writer's
+  -- lane default never overwrites a classifier verdict or a human attestation.
+  update clara.documents set
+    document_kind=coalesce(document_kind,
+      case when t.lane='local_facts' then 'e_invoice_xml' else 'invoice' end),
+    financial_date=coalesce(v_date,financial_date) where id=t.document_id;
+
+  v_newstate:=clara._invoice_fact_state(t.document_id);
+  for v_entry in
+    select e.id from clara.journal_entries e
+    join clara.document_filings f on f.id=e.filing_id
+    where f.document_id=t.document_id and f.retired_at is null and e.status='draft'
+    order by e.id
+  loop
+    select coding_kind,coalesce(flags,'{}'::jsonb) into v_ekind,v_eflags
+      from clara.journal_entries where id=v_entry;
+    v_eflags:=v_eflags - 'amount_exception' - 'amount_override';
+    if v_ekind='supplier_bill'
+       and coalesce((v_newstate->>'corroborated')::boolean,false) then
+      select coalesce(sum(l.credit_cents),0) into v_p_payable
+      from clara.journal_lines l join clara.coa_accounts a
+        on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=v_entry and a.account_class='payable';
+      select coalesce(sum(l.debit_cents),0) into v_p_expense
+      from clara.journal_lines l join clara.coa_accounts a
+        on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=v_entry and a.account_type='expense';
+      if v_p_payable<>(v_newstate->>'total_cents')::bigint
+         or v_p_expense<>(v_newstate->>'total_cents')::bigint then
+        v_eflags:=v_eflags||jsonb_build_object('amount_exception',jsonb_build_object(
+          'machine_total_cents',(v_newstate->>'total_cents')::bigint,
+          'proposed_cents',v_p_payable,
+          'fact_hash',v_newstate->>'total_fact_hash','at',now()));
+      end if;
+    end if;
+    update clara.journal_entries set revision_token=gen_random_uuid(),
+      flags=v_eflags,updated_at=now()
+      where id=v_entry and status='draft' returning revision_token into v_token;
+
+    insert into clara.journal_entry_revisions(firm_id,client_id,entry_id,revision_no,
+        revision_token,actor_kind,actor,reason,header,legs,rule_decision_id,evidence_refs)
+      select j.firm_id,j.client_id,j.id,
+        coalesce((select max(r.revision_no)+1 from clara.journal_entry_revisions r
+          where r.entry_id=j.id),0),v_token,'facts',null,'facts_rotated',
+        to_jsonb(j)-'firm_id'-'client_id'-'id'-'created_at'-'updated_at',
+        coalesce((select jsonb_agg(jsonb_build_object('line_no',l.line_no,
+          'account_code',l.account_code,'debit_cents',l.debit_cents,
+          'credit_cents',l.credit_cents,'side',case when l.debit_cents>0 then 'debit'
+            else 'credit' end,'counterparty_id',l.counterparty_id,
+          'description',l.description) order by l.line_no)
+          from clara.journal_lines l where l.entry_id=j.id),'[]'::jsonb),
+        (select rd.id from clara.rule_decisions rd where rd.entry_id=j.id
+          order by rd.created_at desc,rd.id desc limit 1),
+        coalesce((select jsonb_agg(jsonb_build_object('evidence_id',ev.id,
+          'region_id',ev.region_id,'fact_hash',ev.fact_hash,
+          'provenance_tier',ev.provenance_tier) order by ev.id)
+          from clara.entry_evidence ev where ev.entry_id=j.id),'[]'::jsonb)
+      from clara.journal_entries j where j.id=v_entry;
+  end loop;
+  perform clara._audit(t.firm_id,null,null,null,'persist_invoice_facts',null,
+    jsonb_build_object('task',p_task,'document',t.document_id,'extraction',v_ext,
+      'version',t.version_n,'pages',p_pages_used));
+  perform clara._append_event(t.firm_id,'document.invoice_facts_completed',null,null,null,null,
+    null,t.document_id,null,jsonb_build_object('task_id',p_task,
+      'extraction_id',v_ext,'version_n',t.version_n));
+  return jsonb_build_object('task_id',p_task,'extraction_id',v_ext,'status','done');
+end $$;
+
+alter function clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb)
+  owner to clara_fn_owner;
+
 -- ---------------------------------------------------------------------------
 -- §TAIL — in-transaction assertions. The apply proves them or rolls back whole.
 --
@@ -869,7 +1251,16 @@ begin
   -- COMMENT-STRIPPED, for 0022's demonstrated reason: a probe that cannot tell code from a
   -- comment about code proves nothing. The header above DISCUSSES the removed confidence
   -- term by name, so a raw-prosrc probe for its absence would fail on this very file.
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   if position('v_conf' in v_code) > 0 then
     raise exception '0023 tail: a confidence term survives in the EXECUTABLE text of _invoice_fact_state_at — ADR-047 Q1 dropped vendor confidence from gating ENTIRELY';
   end if;
@@ -910,7 +1301,16 @@ begin
   if v_src is null then
     raise exception '0023 tail: execute_rule_post is GONE';
   end if;
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   -- The exact fused sequence 0022's tail REQUIRED must now be absent. Matched over
   -- comment-stripped text for the same reason it was matched that way when it was required.
   if position('iftrueorv_grossisnullorv_inv_idisnullorv_inv_dateisnull' in v_code) > 0 then
@@ -934,14 +1334,16 @@ begin
     raise exception '0023 tail: a control that was SHADOWED by the dark disjunct did not resurface with it';
   end if;
   -- The D-P6 sentinel vocabulary, re-asserted because this migration rewrites the whole body.
-  if position('anchor_missing' in v_src)=0 or position('not_corroborated' in v_src)=0
-     or position('cn_not_autopostable' in v_src)=0
-     or position('purchase_sst_not_autopostable' in v_src)=0
-     or position('polarity_unverified' in v_src)=0 or position('direction_unproven' in v_src)=0
-     or position('buyer_mismatch' in v_src)=0
-     or position('evidence_class_mismatch' in v_src)=0
-     or position('suspended_pending_resignature' in v_src)=0
-     or position('v_outside_legs' in v_src)=0
+  -- OVER EXECUTABLE TEXT. A sentinel parked in a comment is not a gate: deleting the real
+  -- `buyer_mismatch` branch and leaving the word in a block comment satisfied a v_src probe.
+  if position('anchor_missing' in v_code)=0 or position('not_corroborated' in v_code)=0
+     or position('cn_not_autopostable' in v_code)=0
+     or position('purchase_sst_not_autopostable' in v_code)=0
+     or position('polarity_unverified' in v_code)=0 or position('direction_unproven' in v_code)=0
+     or position('buyer_mismatch' in v_code)=0
+     or position('evidence_class_mismatch' in v_code)=0
+     or position('suspended_pending_resignature' in v_code)=0
+     or position('v_outside_legs' in v_code)=0
      or position('pg_exception_detail' in lower(v_src))=0 then
     raise exception '0023 tail: execute_rule_post lost a named skip / retained 0016 gate';
   end if;
@@ -974,13 +1376,41 @@ begin
   -- corroboration change; if either of these moved, something rode along.
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara._assert_supplier_bill_shape_at(uuid,uuid)'::regprocedure;
-  if v_src is null or position('sst_purchase_cost' in v_src) = 0
-     or position('amount_override' in v_src) = 0 then
-    raise exception '0023 tail: the supplier-bill floor was disturbed';
+  if v_src is null then
+    raise exception '0023 tail: the supplier-bill floor is GONE';
+  end if;
+  -- THE COMPARISON, not the vocabulary. Naming `sst_purchase_cost` proves only that the
+  -- identifier survives; the tie itself could have been rewritten around it. X5 makes the
+  -- tax figure authority-bearing, and this floor is what binds an SST leg to it, so what is
+  -- asserted is the equality.
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  if position('v_sstp_debit<>v_tax' in v_code) = 0 then
+    raise exception '0023 tail: the supplier floor no longer ties its SST leg to the stated tax_total — X5 makes that figure authority-bearing';
+  end if;
+  if position('amount_override' in v_code) = 0 then
+    raise exception '0023 tail: the supplier floor lost its amount_override hatch';
   end if;
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb)'::regprocedure;
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   if position('r.field_pathin(''invoice.service_charge'',''invoice.discount'',''invoice.delivery'')andr.monetary_cents<0'
        in v_code) = 0 then
     raise exception '0023 tail: persist_invoice_facts lost its non-negative component guard';
