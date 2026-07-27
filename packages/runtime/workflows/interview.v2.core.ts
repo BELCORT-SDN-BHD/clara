@@ -96,7 +96,11 @@ export type { AskFn, ItemKind, ItemState, OwnerMarker, PlanItemInput, Prompt, Re
 export function validateBusinessRegistration(raw: unknown): Validation {
   const verdict = classifyBusinessRegistration(raw);
   if (!verdict.ok) return { ok: false, reason: String(verdict.reason) };
-  const value = { registration: String(verdict.value), normalized: String(verdict.normalized), form: String(verdict.form) };
+  // `verified: true` is stated AFFIRMATIVELY, not left to be inferred from the absence of a
+  // marker (owner ruling, 2026-07-27). An identity record must say its verification status in
+  // BOTH directions: an absent field is falsy, so a consumer writing the natural
+  // `if (!answer.verified)` would have rejected every correctly-recognised registration.
+  const value = { registration: String(verdict.value), normalized: String(verdict.normalized), form: String(verdict.form), verified: true };
   return { ok: true, value, echo: `registration ${value.registration}` };
 }
 

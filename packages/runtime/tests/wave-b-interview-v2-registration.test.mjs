@@ -142,6 +142,7 @@ test("F1: the recorded answer is verbatim + normalized + form (not a bare string
   assert.equal(res.value.registration, "202401047756 (1593602-X)");
   assert.equal(res.value.normalized, "2024010477561593602x");
   assert.equal(res.value.form, "combined_unified_and_legacy");
+  assert.equal(res.value.verified, true);
   assert.equal(res.items[0].item_key, "ssm");
   assert.equal(res.items[0].item_kind, "must_ask");
   assert.equal(res.items[0].required_for_commit, true);
@@ -163,7 +164,7 @@ test("hatch: the FIRST unrecognised answer is refused and re-asked WITH the acce
   const { res, asked } = await driveSsm([ANSWER("ROB-9/2019 KUCHING"), ANSWER("202401001234"), ANSWER("yes")]);
   assert.equal(res.outcome, "answered");
   assert.equal(res.value.form, "unified_12", "the corrected answer takes the normal path");
-  assert.equal(res.value.verified, undefined, "a recognised form carries no unverified marker — verification is implied by the form");
+  assert.equal(res.value.verified, true, "a recognised form states verification AFFIRMATIVELY — never left to be inferred from an absent field");
   assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c"], "refusal → re-ask → confirm; NO warning park, NO hatch");
   assert.match(asked[1].question, /not a Malaysian business registration number/);
   assert.match(asked[1].question, /SA1234567-X/, "the re-ask shows the accepted formats");
@@ -218,7 +219,7 @@ test("hatch: DECLINING the warning re-asks; nothing unverified is recorded", asy
   const insisted = "ROB-9/2019 KUCHING";
   const { res, asked } = await driveSsm([ANSWER(insisted), ANSWER(insisted), ANSWER("change"), ANSWER("SA1234567-X"), ANSWER("yes")]);
   assert.equal(res.value.form, "state_prefixed_business");
-  assert.equal(res.value.verified, undefined);
+  assert.equal(res.value.verified, true, "the corrected answer is affirmatively verified, not merely un-flagged");
   assert.equal(res.value.warnings, undefined, "the abandoned round leaves nothing behind");
   assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c", "q", "c"]);
 });
@@ -232,6 +233,26 @@ test("hatch: it is a hatch, not a hole — empty and near-empty insistence keeps
   const { res, asked } = await driveSsm([ANSWER(""), ANSWER(""), ANSWER("1475415-P"), ANSWER("yes")]);
   assert.equal(res.value.form, "legacy_numeric");
   assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "q", "c"], "the blanks were refused twice — no hatch, no confirm park");
+});
+
+test("hatch: `verified` is stated in BOTH directions — the naive-consumer hazard is closed", () => {
+  // The hazard the owner ruled on: `verified` absent on the recognised path is FALSY, so a
+  // consumer writing the natural `if (!answer.verified) reject` would have rejected every
+  // correctly-recognised registration. Every accepted registration now states its status.
+  const recognised = validateBusinessRegistration("202401001234");
+  const insisted = core.insistUnverifiedRegistration("ROB-9/2019 KUCHING", "ROB-9/2019 KUCHING");
+  for (const [what, v] of [["recognised", recognised], ["insisted", insisted]]) {
+    assert.equal(typeof v.value.verified, "boolean", `${what}: the field is always present and boolean`);
+  }
+  assert.equal(recognised.value.verified, true);
+  assert.equal(insisted.value.verified, false);
+  // The naive consumer, simulated in both directions.
+  const naiveRejects = (answer) => !answer.verified;
+  assert.equal(naiveRejects(recognised.value), false, "a good record is never rejected by the obvious check");
+  assert.equal(naiveRejects(insisted.value), true, "an unverified record IS caught by it");
+  // And the purpose-built reader agrees with both.
+  assert.equal(core.isUnverifiedRegistration(recognised.value), false);
+  assert.equal(core.isUnverifiedRegistration(insisted.value), true);
 });
 
 test("hatch: the client inventory has it too (the same segment, both interviews)", () => {
