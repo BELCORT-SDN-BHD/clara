@@ -10,6 +10,7 @@ import { createHash } from "node:crypto";
 
 import { readTotalsFromLines } from "../lib/invoice-totals-reader.mjs";
 import { mergeTotalsIntoFields } from "../lib/invoice-totals-merge.mjs";
+import { looksLikeRegistration, readVendorIdentityFromLines, mergeVendorIdentity } from "../lib/invoice-vendor-identity.mjs";
 
 const API_VERSION = "2024-11-30";
 const MODEL = "prebuilt-invoice";
@@ -54,8 +55,19 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
  *  SubTotal nondeterministically on the SAME document, so a reader emission can collide
  *  with a typed one. Two identical readings collapse to one; two different readings emit
  *  NEITHER. Letting both through would hand the DB conflicting duplicates, and 0016 forfeits
- *  the WHOLE extraction on those — destroying today's working 29/29 invoice.total capture. */
-export const NORMALIZATION_VERSION = "clara-invoice-norm:v6";
+ *  the WHOLE extraction on those — destroying today's working 29/29 invoice.total capture.
+ *  v7 (extraction slice X6, ADR-047 Q3): the DETERMINISTIC VENDOR-IDENTITY READER
+ *  (lib/invoice-vendor-identity.mjs) emits `invoice.vendor_registration` from a label-anchored
+ *  letterhead line when the typed `VendorTaxId` is absent — measured on the Gate-P vehicle,
+ *  where Azure typed no tax id at all and typed VendorName came back as OCR garbage, while
+ *  `Company No. 202401047756 (1593602-X)` sat cleanly in the letterhead of both pages and
+ *  normalizes EXACTLY to the registry's registration_normalized. Without it the auto-draft
+ *  lane's second blocker (`vendor_unresolved`) cannot fall: resolution had nothing but a
+ *  mangled name, and name-only matching against a REGISTERED counterparty is refused by
+ *  CLR23 doctrine — correctly. Bumped because the same document now yields a fact it did not
+ *  under v6, so v6 and v7 extractions must stay distinguishable. The reader's counters ride
+ *  the envelope under `vendor_identity`. */
+export const NORMALIZATION_VERSION = "clara-invoice-norm:v7";
 
 export class DocumentEngineError extends Error {
   constructor(code, message) {
@@ -257,14 +269,10 @@ function looksLikeInvoiceNumber(s) {
 // Deliberately permissive on the token shape (the coding lane only uses it to match
 // an EXISTING registered counterparty by normalized registration; a non-match simply
 // falls back to name-only ambiguity, never a wrong resolution).
-function looksLikeRegistration(s) {
-  const v = String(s ?? "").trim();
-  if (v.length < 3 || v.length > 40) return false;
-  if (v.replace(/[^a-zA-Z0-9]/g, "").length < 3) return false; // substantive alnum content
-  if (/^\(?\s*(?:rm|myr|usd|sgd)?\s*[\d,]+\.\d{2}\s*\)?$/i.test(v)) return false; // currency amount
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return false; // ISO date, not a registration
-  return true;
-}
+//
+// v7 (X6): the body MOVED, byte-for-byte, to lib/invoice-vendor-identity.mjs so the typed
+// emits below and the new layout reader share ONE gate instead of two that drift apart.
+// Imported back above; behaviour here is unchanged.
 
 // Trims label noise and surrounding punctuation, returning the invoice-number token.
 function cleanIdToken(s) {
@@ -427,10 +435,22 @@ export function normalizeAzureInvoice(payload) {
   // document A — two different bills fused into one fact set. `corroboration_ineligible`
   // blocks Tier A but does NOT stop that region from persisting or from being shown to a
   // human coder, so the reader simply does not run. Same convention, stated in the receipt.
-  const totals = documents.length <= 1
+  const singleDocument = documents.length <= 1;
+  const totals = singleDocument
     ? readTotalsFromLines(result.pages)
     : { fields: [], receipt: { ...readTotalsFromLines([]).receipt, reason: "multi_document" } };
   mergeTotalsIntoFields(out, totals);
+
+  // --- X6: the deterministic vendor-identity reader (ADR-047 Q3) -------------------------
+  // Runs after the typed VendorTaxId emit above, so a typed row is present to reconcile
+  // against. Single-document only, for the same reason the totals reader is: typed fields come
+  // from documents[0] while pages span the whole scan, so on a bundle a letterhead belonging
+  // to document B would be filed as document A's supplier — a WRONG identity, which is worse
+  // than the missing one it replaces.
+  const identity = singleDocument
+    ? readVendorIdentityFromLines(result.pages)
+    : { fields: [], receipt: { ...readVendorIdentityFromLines([]).receipt, outcome: "multi_document" } };
+  mergeVendorIdentity(out, identity);
 
   let corroborationIneligible = null;
   if (documents.length > 1) corroborationIneligible = "multi_document";
@@ -440,6 +460,7 @@ export function normalizeAzureInvoice(payload) {
   // live without re-running the engine. The envelope is a free-form jsonb the DB merges
   // (0022:475) and reads only by named key, so an added key is inert to every consumer.
   envelope.totals_reader = totals.receipt;
+  envelope.vendor_identity = identity.receipt;
 
   const rawSha256 = createHash("sha256")
     .update(JSON.stringify(payload ?? {}) + "|" + NORMALIZATION_VERSION, "utf8")
