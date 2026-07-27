@@ -408,4 +408,3 @@ const eligibilityEcho = (determination: string): string =>
   determination === "eligible"
     ? "a private entity — MPERS is available (MFRS may still be elected)"
     : "NOT a private entity — MFRS applies";
-
