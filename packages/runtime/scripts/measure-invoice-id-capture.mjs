@@ -164,9 +164,14 @@ function runTotals(argv) {
     console.log(`   ${"(invoice.total, typed)".padEnd(24)} ${(typedTotal?.value_raw ?? "-").padStart(12)}`);
     console.log(
       `   counters: matched=${receipt.matched} absent=${receipt.absent} ambiguous=${receipt.ambiguous} ` +
-      `unparseable=${receipt.unparseable} typed_collapsed=${receipt.typed_collapsed} ` +
-      `typed_disagreement=${receipt.typed_disagreement} typed_recovered=${receipt.typed_recovered} ` +
-      `emitted=${receipt.emitted} sst_rate=${receipt.sst_rate ?? "-"}\n`,
+      `unparseable=${receipt.unparseable} sign_unknown=${receipt.sign_unknown} ` +
+      `tax_summary_suppressed=${receipt.tax_summary_suppressed}`,
+    );
+    console.log(
+      `             typed_collapsed=${receipt.typed_collapsed} typed_disagreement=${receipt.typed_disagreement} ` +
+      `typed_recovered=${receipt.typed_recovered} typed_vs_dash=${receipt.typed_vs_dash} ` +
+      `emitted=${receipt.emitted} sst_rate=${receipt.sst_rate ?? "-"} units=[${(receipt.units ?? []).join(",")}]` +
+      `${receipt.reason ? " reason=" + receipt.reason : ""}\n`,
     );
   }
   console.log("Check every emitted figure against the printed face of the document. A refusal is a");

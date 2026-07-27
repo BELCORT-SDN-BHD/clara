@@ -8,7 +8,8 @@
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 
-import { readTotalsFromLines, centsOfRaw } from "../lib/invoice-totals-reader.mjs";
+import { readTotalsFromLines } from "../lib/invoice-totals-reader.mjs";
+import { mergeTotalsIntoFields } from "../lib/invoice-totals-merge.mjs";
 
 const API_VERSION = "2024-11-30";
 const MODEL = "prebuilt-invoice";
@@ -419,36 +420,17 @@ export function normalizeAzureInvoice(payload) {
   // A payload whose pages carry no lines[] (every pre-X2 fixture, and any engine result
   // without layout regions) yields nothing here, so this is a pure widening: the typed
   // vocabulary, the recovery paths, pagesUsed and engineConfig are untouched.
-  const totals = readTotalsFromLines(result.pages);
-  for (const row of totals.fields) {
-    const typed = out.find((r) => r.field_path === row.field_path);
-    if (!typed) {
-      out.push(row);
-      totals.receipt.emitted += 1;
-      continue;
-    }
-    // A typed field with a bounding region but NO value is the shape that motivated the
-    // invoice_id recovery above; the same rule applies here — the reader fills the hole and
-    // never overrides a real typed hit.
-    if (!String(typed.value_raw ?? "").trim()) {
-      Object.assign(typed, row);
-      totals.receipt.typed_recovered += 1;
-      totals.receipt.emitted += 1;
-      continue;
-    }
-    const typedCents = centsOfRaw(typed.value_raw);
-    const readCents = centsOfRaw(row.value_raw);
-    if (typedCents !== null && typedCents === readCents) {
-      // Same figure read twice. Keep the TYPED row: it carries Azure's own bounding region
-      // and confidence, and the DB collapses identical duplicates anyway.
-      totals.receipt.typed_collapsed += 1;
-      continue;
-    }
-    // Two readers, two answers — refuse both. A disagreement is never adjudicated here (and
-    // ADR-047 Q1 removed the only score that could have adjudicated it).
-    out.splice(out.indexOf(typed), 1);
-    totals.receipt.typed_disagreement += 1;
-  }
+  //
+  // SINGLE-DOCUMENT ONLY. The typed fields above come exclusively from `documents[0]`, while
+  // `result.pages` spans the whole scan. On a multi-document bundle the reader would happily
+  // pair a label on document B's page with an amount there and file it as a component of
+  // document A — two different bills fused into one fact set. `corroboration_ineligible`
+  // blocks Tier A but does NOT stop that region from persisting or from being shown to a
+  // human coder, so the reader simply does not run. Same convention, stated in the receipt.
+  const totals = documents.length <= 1
+    ? readTotalsFromLines(result.pages)
+    : { fields: [], receipt: { ...readTotalsFromLines([]).receipt, reason: "multi_document" } };
+  mergeTotalsIntoFields(out, totals);
 
   let corroborationIneligible = null;
   if (documents.length > 1) corroborationIneligible = "multi_document";

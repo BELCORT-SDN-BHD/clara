@@ -1,17 +1,11 @@
-// X2 — the deterministic totals reader. PURE unit tests, no DB (the wave-b-prior-gl-cells
-// style). Every polygon below is COPIED from a real Azure prebuilt-invoice capture
-// (api 2024-11-30, `unit: "inch"`) of two documents in the live corpus: a 1-page F&B receipt
-// (LAI LOU MEI, page angle -1.31 deg) and page 2 of a 2-page consultancy invoice (BRIGHTPATH,
-// +0.21 deg). Only the geometry and the totals figures are reproduced — the figures already
-// appear in the Wave-B receipts under docs/plan/research — and identifying detail
-// (addresses, the real SST registration) is sanitized or dropped. The raw captures stay OUT
-// of the repo; `scripts/measure-invoice-id-capture.mjs --totals` runs this same reader
-// against them locally.
+// X2 — the deterministic totals reader: GEOMETRY and GRAMMAR. Pure unit tests, no DB (the
+// wave-b-prior-gl-cells style). Fixtures are the real measured polygons; see the testkit.
 //
 // THE DANGEROUS DIRECTION IS A WRONG FIGURE, not a missing one — a stated component feeds a
 // posting-control identity that the DB checks to the sen. So most cells below assert that the
-// reader emits NOTHING, and two of them pin the exact real-world geometry that would produce
-// a wrong number if a pairing term were dropped.
+// reader emits NOTHING, and several pin the exact real-world geometry that would produce a
+// wrong number if a pairing term were dropped. The typed-field reconciliation and the mapper
+// live in `x2-totals-mapper.test.mjs`.
 
 process.env.RELAY_TEST_MODE ??= "1";
 
@@ -19,54 +13,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { readTotalsFromLines, matchTotalsLabel, centsOfRaw } from "../lib/invoice-totals-reader.mjs";
-import { normalizeAzureInvoice, NORMALIZATION_VERSION } from "../workflows/invoiceFacts.v1.azure.mjs";
-
-const line = (content, polygon) => ({ content, polygon });
-const onePage = (lines, pageNumber = 1) => [{ pageNumber, lines }];
-const byPath = (fields) => Object.fromEntries(fields.map((f) => [f.field_path, f]));
-
-// --- the real LAI LOU MEI totals block (measured) --------------------------------------
-// Labels sit at x~4.3-4.7 and right-aligned amounts at x~9.2-9.4; the receipt's skew puts
-// each amount's top-left y 0.07-0.11in ABOVE its own label's, which is why the window is on
-// |delta| and why the row test is box overlap rather than a shared baseline.
-const LAI_LOU_MEI = [
-  line("SST Number : W10-2408-00000000", [5.2097, 3.4108, 8.7642, 3.1613, 8.7828, 3.4242, 5.2282, 3.6746]),
-  line("INVOICE", [6.5144, 3.861, 7.3585, 3.7969, 7.3778, 4.0501, 6.5336, 4.1142]),
-  line("11 SubTotal", [4.2849, 10.7628, 5.6325, 10.7236, 5.6405, 10.9989, 4.2929, 11.0381]),
-  line("94.30", [9.2381, 10.6241, 9.891, 10.6134, 9.8953, 10.8778, 9.2424, 10.8884]),
-  line("Service Charge@4%:", [4.6354, 11.0671, 6.8599, 10.9881, 6.8698, 11.2659, 4.6441, 11.3449]),
-  line("3.77", [9.3868, 10.9297, 9.904, 10.921, 9.9084, 11.1856, 9.3913, 11.1943]),
-  line("Service Tax@6%:", [4.6382, 11.37, 6.5022, 11.3085, 6.5112, 11.5818, 4.6472, 11.6433]),
-  line("5.66", [9.4184, 11.2351, 9.9424, 11.2294, 9.9457, 11.4925, 9.4213, 11.4989]),
-  line("Rounding Adj", [4.6405, 11.6722, 6.1412, 11.6311, 6.1488, 11.9098, 4.6481, 11.9503]),
-  line("0.02", [9.4394, 11.544, 9.962, 11.5398, 9.964, 11.7938, 9.4414, 11.798]),
-  line("Net Total", [4.6553, 11.9596, 6.8507, 11.8895, 6.8602, 12.1862, 4.6648, 12.2542]),
-  line("103.75", [8.4781, 11.8575, 9.9649, 11.8374, 9.9693, 12.1113, 8.4824, 12.1327]),
-  line("Tax Summary", [4.2865, 13.8624, 5.705, 13.8547, 5.7065, 14.1375, 4.288, 14.1452]),
-  line("Taxable", [8.4077, 13.7859, 9.3394, 13.7695, 9.3444, 14.053, 8.4126, 14.0694]),
-  line("Tax", [10.1108, 13.7509, 10.5315, 13.7499, 10.5322, 14.0162, 10.1114, 14.0172]),
-  line("ervice Tax@6%", [4.3283, 14.1864, 6.097, 14.1581, 6.1016, 14.4482, 4.3329, 14.4689]),
-  line("94.30", [8.5495, 14.1185, 9.2231, 14.1056, 9.2285, 14.3873, 8.5549, 14.3994]),
-  line("5.66", [10.0044, 14.0753, 10.5366, 14.0694, 10.5404, 14.3455, 10.0082, 14.3528]),
-];
-
-// --- the real BRIGHTPATH totals block (measured, page 2) --------------------------------
-// The face prints Rounding as "- 0.40" with the minus in its OWN narrow table column, and
-// the Service Tax amount as a dash. OCR captured NEITHER glyph: no dash line, no dash word,
-// and even the table cell for the tax comes back as "". So the fixture is faithful only if
-// it omits them too.
-const BRIGHTPATH = [
-  line("Ringgit Malaysia : Four Hundred Thirty Five Thousand Five", [0.7148, 8.2393, 4.153, 8.2494, 4.1525, 8.3954, 0.7143, 8.3886]),
-  line("Sub Total (Excluding Tax)", [5.3297, 8.257, 6.8238, 8.2669, 6.8229, 8.3988, 5.3288, 8.389]),
-  line("435,560.40", [7.105, 8.2704, 7.7038, 8.2739, 7.7031, 8.3954, 7.1043, 8.3921]),
-  line("Hundred Sixty Only", [0.6803, 8.4063, 1.8293, 8.415, 1.8282, 8.5595, 0.6792, 8.5508]),
-  line("Rounding", [6.313, 8.4327, 6.8735, 8.4366, 6.8727, 8.561, 6.3122, 8.557]),
-  line("0.40", [7.4649, 8.441, 7.6985, 8.4406, 7.6987, 8.5521, 7.465, 8.5525]),
-  line("Service Tax (8%)", [5.8782, 8.5907, 6.8636, 8.5971, 6.8628, 8.726, 5.8774, 8.7196]),
-  line("Total (Inclusive of Tax)", [5.545, 8.7832, 6.8652, 8.7905, 6.8644, 8.9228, 5.5443, 8.9155]),
-  line("435,560.00", [7.1032, 8.7961, 7.6987, 8.7976, 7.6984, 8.918, 7.103, 8.9166]),
-  line("Notes :", [0.6782, 8.958, 1.0629, 8.9619, 1.0617, 9.0808, 0.6771, 9.077]),
-];
+import { line, onePage, byPath, LAI_LOU_MEI, BRIGHTPATH } from "./x2-totals-testkit.mjs";
 
 // ======================================================================================
 // CELL 1 — the receipt geometry
@@ -79,8 +26,12 @@ test("LAI LOU MEI: every stated component is read off its own line at the measur
   assert.equal(got["invoice.total_excl_tax"].value_raw, "94.30", "'11 SubTotal' — the leading item count is stripped");
   assert.equal(got["invoice.service_charge"].value_raw, "3.77");
   assert.equal(got["invoice.tax_total"].value_raw, "5.66");
-  assert.equal(got["invoice.rounding"].value_raw, "0.02");
-  assert.equal(fields.length, 4, "four components printed, four emitted — nothing else");
+  // The receipt's `Rounding Adj 0.02` IS genuinely positive, and it is still refused: nothing
+  // in the OCR states its sign, and the reader does not get to assume one. See the
+  // sign_unknown cell for why an unsigned rounding is not refusal-safe downstream.
+  assert.equal(got["invoice.rounding"], undefined);
+  assert.equal(receipt.fields["invoice.rounding"].outcome, "sign_unknown");
+  assert.equal(fields.length, 3, "four components printed, three readable — the fourth is refused, not guessed");
 
   // Every emission rides the AMOUNT line's own polygon, never the label's and never invented.
   assert.deepEqual(got["invoice.tax_total"].polygon, [9.4184, 11.2351, 9.9424, 11.2294, 9.9457, 11.4925, 9.4213, 11.4989]);
@@ -89,16 +40,21 @@ test("LAI LOU MEI: every stated component is read off its own line at the measur
   assert.equal(got["invoice.tax_total"].confidence, null);
 
   assert.equal(receipt.sst_rate, 6, "the printed rate is captured as diagnostics, not as a region");
-  assert.equal(receipt.matched, 4);
+  assert.equal(receipt.matched, 3);
+  assert.equal(receipt.sign_unknown, 1);
   assert.equal(receipt.ambiguous, 0);
   assert.equal(receipt.unparseable, 0);
 
-  // The document's own identity holds to the sen on what was read — which is the whole point:
-  // 94.30 + 3.77 + 5.66 + 0.02 = 103.75, the stated gross. (The DB owns this tie; asserting
-  // it here only proves the reader picked the right four lines.)
-  const sum = ["invoice.total_excl_tax", "invoice.service_charge", "invoice.tax_total", "invoice.rounding"]
+  // The three readable components pick out exactly the right lines: 94.30 + 3.77 + 5.66 is
+  // 103.73, two sen short of the stated 103.75 gross — the gap being precisely the rounding
+  // the reader refused. So X3's sum-of-components tie REFUSES this document and it goes to a
+  // human. That is the designed outcome, not a defect: the alternative is asserting a sign
+  // the page never states. (The DB owns the tie; this assertion only pins which lines were
+  // read.)
+  const sum = ["invoice.total_excl_tax", "invoice.service_charge", "invoice.tax_total"]
     .reduce((acc, p) => acc + centsOfRaw(got[p].value_raw), 0);
-  assert.equal(sum, centsOfRaw("103.75"));
+  assert.equal(sum, centsOfRaw("103.73"));
+  assert.equal(centsOfRaw("103.75") - sum, 2, "the shortfall is exactly the unreadable rounding");
 });
 
 test("LAI LOU MEI: 'Net Total' is the GROSS and must never be read as the net of tax", () => {
@@ -143,18 +99,28 @@ test("an AGREEING repeat of a totals line collapses to ONE emission", () => {
   assert.equal(receipt.ambiguous, 0);
 });
 
-test("a repeat that DISAGREES drops the field — measured on the real Tax Summary geometry", () => {
-  // Had OCR read the Tax Summary label correctly, its index+1 neighbour is the TAXABLE
-  // column (94.30), not the tax (5.66) — the two columns are two lines apart. The reader must
-  // refuse the field rather than pick a side: 94.30 as a tax on a 103.75 document would tie
-  // to nothing and post a large wrong figure.
+test("a Tax Summary block can never anchor a totals field — the neighbouring column is the BASE", () => {
+  // Inside the summary table the columns are Taxable | Tax, so the line immediately after the
+  // rate label is 94.30 (the base) while the real tax, 5.66, is one further right. The reader
+  // refuses to anchor anywhere in the block; the MAIN totals block still supplies 5.66.
   const corrected = LAI_LOU_MEI.map((l) => (l.content === "ervice Tax@6%" ? line("Service Tax@6%", l.polygon) : l));
   const { fields, receipt } = readTotalsFromLines(onePage(corrected));
-  assert.equal(byPath(fields)["invoice.tax_total"], undefined, "conflicting readings emit NOTHING");
-  assert.equal(receipt.ambiguous, 1);
-  assert.deepEqual(receipt.fields["invoice.tax_total"].values.sort(), ["5.66", "94.30"]);
-  // The other three components are unaffected — one bad field never voids the batch.
-  assert.equal(fields.length, 3);
+  assert.equal(byPath(fields)["invoice.tax_total"].value_raw, "5.66", "read from the main block, not the summary");
+  assert.equal(receipt.tax_summary_suppressed, 1);
+  assert.equal(receipt.fields["invoice.tax_total"].occurrences, 1, "the summary label never became an occurrence");
+});
+
+test("with the MAIN label gone, the Tax Summary still cannot supply the taxable base as tax", () => {
+  // The dangerous variant, and the reason suppression beats relying on a second opinion: an
+  // OCR run that mangles the main label leaves the summary block as the only candidate, and
+  // its adjacent column is 94.30 — a figure 17x the real tax on a 103.75 document.
+  const summaryOnly = LAI_LOU_MEI
+    .filter((l) => !["Service Tax@6%:", "5.66"].includes(l.content) || l.polygon[1] > 13)
+    .map((l) => (l.content === "ervice Tax@6%" ? line("Service Tax@6%", l.polygon) : l));
+  const { fields, receipt } = readTotalsFromLines(onePage(summaryOnly));
+  assert.equal(byPath(fields)["invoice.tax_total"], undefined, "no tax at all beats the wrong tax");
+  assert.equal(receipt.tax_summary_suppressed, 1);
+  assert.equal(fields.some((f) => f.value_raw === "94.30" && f.field_path === "invoice.tax_total"), false);
 });
 
 // ======================================================================================
@@ -167,7 +133,10 @@ test("BRIGHTPATH: subtotal and rounding are read; the NIL tax is never invented"
 
   assert.equal(got["invoice.total_excl_tax"].value_raw, "435,560.40");
   assert.equal(got["invoice.total_excl_tax"].page, 2);
-  assert.equal(got["invoice.rounding"].value_raw, "0.40");
+  // The face reads "- 0.40" with the minus in its own table column; OCR captured no minus
+  // anywhere on the page, so the magnitude survives and the sign does not. Refused.
+  assert.equal(got["invoice.rounding"], undefined);
+  assert.equal(receipt.fields["invoice.rounding"].outcome, "sign_unknown");
   assert.equal(got["invoice.tax_total"], undefined, "the tax amount is a dash OCR never captured — emit nothing");
   assert.notEqual(receipt.fields["invoice.tax_total"].outcome, "matched");
   assert.equal(receipt.fields["invoice.tax_total"].outcome, "absent");
@@ -216,7 +185,10 @@ test("a printed DASH is NIL, never 0.00", () => {
   const { fields, receipt } = readTotalsFromLines(onePage(withDash, 2));
   assert.equal(byPath(fields)["invoice.tax_total"], undefined, "a dash states nothing — it does not state zero");
   assert.equal(receipt.fields["invoice.tax_total"].outcome, "nil");
-  assert.equal(receipt.absent, 1);
+  assert.equal(receipt.fields["invoice.tax_total"].unparseable_attempt, undefined, "a clean nil, nothing refused beside it");
+  // absent-class covers both the nil tax and the unsigned rounding on this page.
+  assert.equal(receipt.absent, 2);
+  assert.equal(receipt.sign_unknown, 1);
 });
 
 test("a DETACHED minus glyph signs the rounding token", () => {
@@ -288,75 +260,6 @@ test("two acceptable amounts inside one pairing window emit NEITHER", () => {
 });
 
 // ======================================================================================
-// CELL 4 — reconciliation with Azure's own typed fields
-// ======================================================================================
-
-/** A full analyzeResult carrying typed fields AND layout lines. */
-function payloadWith(typedFields, lines, pageNumber = 2) {
-  return {
-    status: "succeeded",
-    analyzeResult: {
-      documents: [{ fields: typedFields }],
-      pages: [{ pageNumber, lines }],
-    },
-  };
-}
-
-const TYPED_TOTAL = {
-  content: "435,560.00",
-  valueCurrency: { amount: 435560, currencyCode: "MYR" },
-  boundingRegions: [{ pageNumber: 2, polygon: [7.1, 8.79, 7.7, 8.79, 7.7, 8.92, 7.1, 8.92] }],
-  confidence: 0.656,
-};
-
-test("typed and reader agreeing on a figure yields ONE emission (the typed one)", () => {
-  // Measured hazard: Azure typed SubTotal 435,560.40 on a fresh call to the very document
-  // where the production extraction had none. The collision is real and nondeterministic.
-  const out = normalizeAzureInvoice(
-    payloadWith(
-      {
-        InvoiceTotal: TYPED_TOTAL,
-        SubTotal: { content: "435,560.40", boundingRegions: [{ pageNumber: 2, polygon: [7.105, 8.27, 7.7, 8.27, 7.7, 8.4, 7.105, 8.4] }], confidence: 0.839 },
-      },
-      BRIGHTPATH,
-    ),
-  );
-  const nets = out.fields.filter((f) => f.field_path === "invoice.total_excl_tax");
-  assert.equal(nets.length, 1, "duplicate distinct facts forfeit the extraction — never emit two");
-  assert.equal(nets[0].confidence, 0.839, "the TYPED row survives: it carries Azure's own region + score");
-  assert.equal(out.envelope.totals_reader.typed_collapsed, 1);
-  assert.equal(out.envelope.totals_reader.typed_disagreement, 0);
-  // The reader still contributes the field Azure never typed.
-  assert.equal(out.fields.find((f) => f.field_path === "invoice.rounding").value_raw, "0.40");
-});
-
-test("typed and reader DISAGREEING emits neither, and says so", () => {
-  const out = normalizeAzureInvoice(
-    payloadWith(
-      { InvoiceTotal: TYPED_TOTAL, SubTotal: { content: "435,999.99", confidence: 0.84 } },
-      BRIGHTPATH,
-    ),
-  );
-  assert.equal(out.fields.some((f) => f.field_path === "invoice.total_excl_tax"), false, "the typed row is withdrawn too");
-  assert.equal(out.envelope.totals_reader.typed_disagreement, 1);
-  // invoice.total is untouched — a disagreement on one field never costs the extraction.
-  assert.equal(out.fields.find((f) => f.field_path === "invoice.total").value_raw, "435,560.00");
-});
-
-test("a typed field with a region but NO value is filled by the reader, not duplicated", () => {
-  const out = normalizeAzureInvoice(
-    payloadWith(
-      { InvoiceTotal: TYPED_TOTAL, SubTotal: { content: "", boundingRegions: [{ pageNumber: 2, polygon: [] }], confidence: 0.3 } },
-      BRIGHTPATH,
-    ),
-  );
-  const nets = out.fields.filter((f) => f.field_path === "invoice.total_excl_tax");
-  assert.equal(nets.length, 1);
-  assert.equal(nets[0].value_raw, "435,560.40", "an empty typed hit is a hole, not a disagreement");
-  assert.equal(out.envelope.totals_reader.typed_recovered, 1);
-});
-
-// ======================================================================================
 // CELL 5 — the accept grammar
 // ======================================================================================
 
@@ -420,69 +323,124 @@ test("a line without usable geometry is never an anchor and never an amount", ()
   assert.deepEqual(readTotalsFromLines(onePage([line("Sub Total", [1, 2, 3, 4]), line("94.30", [1, 2, 3, 4])])).fields, []);
 });
 
+
 // ======================================================================================
-// CELL 6 — the mapper: a widening, not a change
+// CELL 7 — the adversarial-review regressions (each cell reproduces a REFUSED finding)
 // ======================================================================================
 
-test("the mapper merges reader emissions and folds the receipt into the envelope at v6", () => {
-  const out = normalizeAzureInvoice(payloadWith({ InvoiceTotal: TYPED_TOTAL }, BRIGHTPATH));
-  const got = byPath(out.fields);
-  assert.equal(got["invoice.total"].value_raw, "435,560.00", "the typed total is untouched");
-  assert.equal(got["invoice.currency"].value_raw, "MYR");
-  assert.equal(got["invoice.total_excl_tax"].value_raw, "435,560.40", "the reader supplies what Azure never typed");
-  assert.equal(got["invoice.rounding"].value_raw, "0.40");
-  assert.equal(got["invoice.tax_total"], undefined);
-  assert.equal(out.normalizationVersion, "clara-invoice-norm:v6");
-  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v6");
-  assert.equal(out.envelope.totals_reader.emitted, 2);
-  assert.equal(out.envelope.totals_reader.sst_rate, 8);
-  assert.equal(out.pagesUsed, 1, "pagesUsed still counts pages, not lines");
+test("a Unicode space the DB will not strip can never be emitted", () => {
+  // `_normalize_invoice_cents` strips `[,[:space:]]`, a POSIX class. U+FEFF is not POSIX
+  // space (Unicode removed it from White_Space), so `RM<U+FEFF>1,234.56` survives the strip,
+  // fails the DB's numeric regex, normalizes to NULL and forfeits the ENTIRE extraction —
+  // taking the good invoice.total with it. JavaScript's `\s` matches U+FEFF, so a `\s` in the
+  // accept grammar admitted exactly that byte.
+  for (const gap of ["\uFEFF", "\u00A0", "\u2009", "\u2007", "\u3000"]) {
+    const { fields, receipt } = readTotalsFromLines(onePage([
+      line("Sub Total", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
+      line(`RM${gap}1,234.56`, [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
+    ]));
+    assert.equal(fields.length, 0, `U+${gap.codePointAt(0).toString(16).toUpperCase()} must not reach the DB`);
+    assert.equal(receipt.unparseable, 1, "and the refusal is visible, not silent");
+  }
+  // ASCII space and tab are stripped by the DB under every locale, so they stay acceptable.
+  for (const gap of [" ", "  ", "\t"]) {
+    const { fields } = readTotalsFromLines(onePage([
+      line("Sub Total", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
+      line(`RM${gap}1,234.56`, [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
+    ]));
+    assert.equal(fields.length, 1);
+  }
 });
 
-test("a payload with NO pages[].lines[] behaves exactly as v5 plus an all-absent receipt", () => {
-  // Every pre-X2 fixture and every non-layout engine result has this shape. The reader must
-  // be a PURE WIDENING: same fields, same order, same geometry, no throw.
-  const legacy = {
-    status: "succeeded",
-    analyzeResult: {
-      documents: [{ fields: {
-        InvoiceTotal: { content: "435,560.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: [0, 0, 1, 0, 1, 1, 0, 1] }], confidence: 0.98 },
-        InvoiceId: { content: "BINV202510-018", confidence: 0.9 },
-        SubTotal: { content: "410,000.00", confidence: 0.9 },
-        TotalTax: { content: "25,560.00", confidence: 0.9 },
-      } }],
-      pages: [{ pageNumber: 1 }],
-    },
-  };
-  const out = normalizeAzureInvoice(legacy);
-  assert.deepEqual(
-    out.fields.map((f) => [f.field_path, f.value_raw]),
-    [
-      ["invoice.total", "435,560.00"],
-      ["invoice.invoice_id", "BINV202510-018"],
-      ["invoice.total_excl_tax", "410,000.00"],
-      ["invoice.tax_total", "25,560.00"],
-      ["invoice.currency", "MYR"],
-    ],
-    "typed vocabulary, values and ORDER are byte-for-byte what v5 produced",
-  );
-  const receipt = out.envelope.totals_reader;
-  assert.deepEqual(
-    { matched: receipt.matched, absent: receipt.absent, ambiguous: receipt.ambiguous, unparseable: receipt.unparseable, emitted: receipt.emitted },
-    { matched: 0, absent: 0, ambiguous: 0, unparseable: 0, emitted: 0 },
-  );
-  assert.deepEqual(receipt.fields, {});
-  assert.equal(out.pagesUsed, 1);
+test("centsOfRaw is byte-aligned to the DB: narrower is safe, wider is not", () => {
+  assert.equal(centsOfRaw("RM 1,234.56"), 123456);
+  assert.equal(centsOfRaw("-0.40"), -40);
+  assert.equal(centsOfRaw("(5.00)"), -500, "the accounting parenthesis form, exactly as the DB reads it");
+  // Anything carrying a non-ASCII space normalizes to null HERE even though JS `\s` would
+  // have swallowed it — that is the whole point: refuse rather than hand the DB a NULL.
+  for (const bad of ["RM\uFEFF1.00", "1\u00A0234.00", "12.345", "abc", "", null]) {
+    assert.equal(centsOfRaw(bad), null, `${JSON.stringify(bad)} must not normalize`);
+  }
 });
 
-test("the reader never touches the corroboration-ineligibility envelope", () => {
-  const credit = normalizeAzureInvoice({
-    status: "succeeded",
-    analyzeResult: {
-      documents: [{ docType: "invoice.creditNote", fields: { InvoiceTotal: TYPED_TOTAL } }],
-      pages: [{ pageNumber: 2, lines: BRIGHTPATH }],
-    },
-  });
-  assert.equal(credit.envelope.corroboration_ineligible, "credit_note");
-  assert.equal(credit.envelope.totals_reader.emitted, 2, "facts are still captured; the DB decides eligibility");
+test("the EMIT GATE re-validates the composed value, including a synthesized sign", () => {
+  // `-${token}` is assembled AFTER the accept grammar ran, so without the gate it would reach
+  // the DB unchecked. Every emitted byte normalizes, or nothing is emitted.
+  const withMinus = [
+    line("Rounding", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
+    line("-", [6.2, 8.26, 6.3, 8.26, 6.3, 8.39, 6.2, 8.39]),
+    line("0.40", [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
+  ];
+  const [emitted] = readTotalsFromLines(onePage(withMinus)).fields;
+  assert.equal(emitted.value_raw, "-0.40");
+  assert.notEqual(centsOfRaw(emitted.value_raw), null, "the EXACT emitted bytes normalize");
+  assert.equal(centsOfRaw(emitted.value_raw), -40);
+});
+
+test("a PIXEL-unit page reads exactly what the same geometry in inches reads", () => {
+  // Azure reports PDF geometry in inches and IMAGE geometry in pixels, and image invoices are
+  // a supported intake type. Comparing an inch tolerance against raw pixel counts refuses
+  // every pair on a photographed bill while looking like a clean read.
+  const scale = 150; // 150 dpi
+  const toPixels = (l) => line(l.content, l.polygon.map((n) => n * scale));
+  const inches = readTotalsFromLines(onePage(LAI_LOU_MEI, 1, { unit: "inch", width: 13.3333 }));
+  const pixels = readTotalsFromLines(onePage(LAI_LOU_MEI.map(toPixels), 1, { unit: "pixel", width: 13.3333 * scale }));
+  assert.deepEqual(
+    pixels.fields.map((f) => [f.field_path, f.value_raw]),
+    inches.fields.map((f) => [f.field_path, f.value_raw]),
+    "same document, same reading, whichever unit the engine chose",
+  );
+  assert.ok(pixels.fields.length >= 3);
+  assert.deepEqual(pixels.receipt.units, ["pixel"]);
+  // Polygons stay in the page's OWN coordinates — scaling is internal to the comparison.
+  assert.equal(byPath(pixels.fields)["invoice.tax_total"].polygon[0], 9.4184 * scale);
+});
+
+test("a pixel page with no width is refused rather than measured in the wrong unit", () => {
+  const { fields, receipt } = readTotalsFromLines(onePage(LAI_LOU_MEI, 1, { unit: "pixel" }));
+  assert.equal(fields.length, 0);
+  assert.deepEqual(receipt.units, ["pixel:no-width"]);
+});
+
+test("unsigned rounding is REFUSED — it is not refusal-safe downstream", () => {
+  // Face: subtotal 100.04, rounding -0.04, tax nil, gross 100.00. OCR loses the minus. On a
+  // taxless supplier bill no identity constrains the rounding leg, so a +0.04 lets the
+  // supplier floor accept a draft whose expense is understated with rounding on the wrong
+  // side — every figure "read off the document" and the posting still wrong.
+  const face = [
+    line("Sub Total", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
+    line("100.04", [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
+    line("Rounding", [5.0, 8.45, 6.0, 8.45, 6.0, 8.6, 5.0, 8.6]),
+    line("0.04", [6.5, 8.46, 6.9, 8.46, 6.9, 8.59, 6.5, 8.59]),
+  ];
+  const { fields, receipt } = readTotalsFromLines(onePage(face));
+  assert.equal(byPath(fields)["invoice.rounding"], undefined);
+  assert.equal(receipt.sign_unknown, 1);
+  assert.equal(receipt.fields["invoice.rounding"].outcome, "sign_unknown");
+  assert.equal(byPath(fields)["invoice.total_excl_tax"].value_raw, "100.04", "the readable component still lands");
+});
+
+test("a dash elsewhere on the page waives NOTHING", () => {
+  // The adjacency waiver exists for a minus printed in its own column. Checked textually it
+  // would let any stray dash — a bullet, a nil in another table — license a jump past the
+  // true neighbour into an unrelated right-hand column.
+  const lines = [
+    line("Sub Total", [1.0, 8.25, 2.0, 8.25, 2.0, 8.4, 1.0, 8.4]),
+    line("-", [3.0, 2.0, 3.1, 2.0, 3.1, 2.15, 3.0, 2.15]), // far up the page, another row entirely
+    line("999.99", [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
+  ];
+  const { fields } = readTotalsFromLines(onePage(lines));
+  assert.equal(fields.length, 0, "an unrelated dash must not license an unrelated amount");
+});
+
+test("a dash never hides an amount-shaped refusal from the counters", () => {
+  const { fields, receipt } = readTotalsFromLines(onePage([
+    line("Rounding", [5.0, 8.25, 6.0, 8.25, 6.0, 8.4, 5.0, 8.4]),
+    line("-", [6.2, 8.26, 6.3, 8.26, 6.3, 8.39, 6.2, 8.39]),
+    line("(0.40)", [6.5, 8.26, 6.9, 8.26, 6.9, 8.39, 6.5, 8.39]),
+  ]));
+  assert.equal(fields.length, 0);
+  assert.equal(receipt.absent, 1, "the dash reads as nil");
+  assert.equal(receipt.unparseable, 1, "AND the refused token is counted in its own right");
+  assert.equal(receipt.fields["invoice.rounding"].unparseable_attempt, true);
 });

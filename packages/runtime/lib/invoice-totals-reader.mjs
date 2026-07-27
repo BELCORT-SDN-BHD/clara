@@ -53,6 +53,15 @@
 // the missing tax amount either (the table cell for it is the empty string), so consuming
 // them would add surface without adding a fact. `invoice.total` is NOT this reader's
 // business — the typed field captures it 29/29 already.
+//
+// The byte-level money grammar — what may be handed to the DB at all — lives next door in
+// `invoice-amount-grammar.mjs`, calibrated against `_normalize_invoice_cents` rather than
+// against geometry. `centsOfRaw` is re-exported here because it is also this module's EMIT
+// GATE, and because callers reconciling reader output against typed fields need it.
+
+import { ASCII_SPACE, centsOfRaw, isDash, isStrictAmount, looksLikeAmountAttempt } from "./invoice-amount-grammar.mjs";
+
+export { centsOfRaw };
 
 /** The CLOSED set of field_paths this reader may emit (contract §2 X3 taxonomy; the DB's
  *  allowlist in 0022 is the enforcing copy). `invoice.total` is deliberately absent. */
@@ -70,11 +79,28 @@ export const DEFAULT_READER_OPTS = Object.freeze({
   /** |Δ top-edge y| between a label line and its amount line, in inches. Measured true
    *  pairs span 0.008-0.139; the nearest wrong neighbour measured is 0.150. */
   maxTopDeltaIn: 0.15,
+  /** How far below a "Tax Summary" heading its repeat block reaches, in inches. Measured on
+   *  the real receipt: heading top 13.855, last summary line bottom 14.469 — 0.61in. The
+   *  default is rounded up to a full inch so a slightly taller block is still covered. */
+  taxSummaryBandIn: 1.0,
   /** The amount must be the very next line in reading order. True on 6/6 measured pairs. */
   requireIndexAdjacent: true,
   /** The label box and the amount box must share a horizontal band (positive y overlap). */
   requireVerticalOverlap: true,
 });
+
+// A4 portrait width. Azure reports PDF geometry in inches but IMAGE geometry in PIXELS
+// (`pages[].unit`), and an image invoice is a fully supported intake type — so a tolerance
+// compared straight against raw coordinates silently refuses every total on a photographed
+// bill (one pixel apart fails a 0.15 test). Coordinates are therefore normalized to
+// FRACTIONS OF THE PAGE WIDTH before any comparison. For an inch page that is algebraically
+// identical to comparing inches, so the measured calibration above is untouched; for a pixel
+// page the ratified inch tolerance is carried across as the same fraction of width.
+// HONEST ASSUMPTION, stated because it is one: a pixel page is assumed to be A4-portrait-
+// shaped, which is what a Malaysian bill scan almost always is. A US-Letter or receipt-strip
+// scan gets a proportionally tighter or looser window. The measured A4 capture reported
+// 8.2639in against A4's nominal 8.2677in — a 0.05% difference, immaterial here.
+const A4_WIDTH_IN = 8.2677;
 
 // Label vocabulary, bilingual EN/BM (the INVOICE_ID_LABEL precedent in
 // invoiceFacts.v1.azure.mjs). Matching is EXACT-PREFIX on the noise-stripped, whitespace-
@@ -97,34 +123,28 @@ const LABEL_VOCABULARY = Object.freeze([
 // right becomes the tax. The same shape covers "Delivery Order No.", "Discount Code", etc.
 const IDENTIFIER_WORDS = new Set(["no", "number", "num", "reg", "registration", "id", "code", "ref", "order", "account"]);
 
+// A TAX SUMMARY heading. Malaysian F&B receipts repeat the tax in a summary table whose
+// columns are Taxable | Tax — and inside that block the line immediately after the rate label
+// is the TAXABLE BASE, not the tax. On the real receipt that is 94.30 sitting exactly where
+// the pairing rule expects 5.66. The main totals block states the same figures correctly, so
+// refusing to anchor inside the summary costs nothing; what it buys is that an OCR run which
+// drops or mangles the MAIN label — which is precisely what happened to the summary label in
+// the measured capture — can never fall back to the taxable base and call it the tax.
+const TAX_SUMMARY_HEADING = /tax[ \t]*summary/i;
+
 // Leading item counts / bullets / punctuation are stripped before matching: the real receipt
 // prints its subtotal label as "11 SubTotal" (the line's own item count runs into the label).
-const LABEL_NOISE_PREFIX = /^[\s\d.,:;#*|()[\]\-‐-―−]+/;
+const LABEL_NOISE_PREFIX = /^[ \t\d.,:;#*|()[\]\-‐-―−]+/;
 
-// A DASH standing alone is the document saying NIL — never zero. Kept as its own token class
-// so a printed "-" can never normalize to 0.00 and satisfy an identity the face refuses.
-const DASH_ONLY = /^[-‐‑‒–—―−]{1,3}$/;
+const SST_RATE = /([0-9]{1,2}(?:\.[0-9]+)?)[ \t]*%/;
 
-// THE ACCEPT GRAMMAR — a strict subset of the DB's `_normalize_invoice_cents` (0009:102-123),
-// which also accepts bare integers, one decimal place and the accounting parenthesis form.
-// Narrower on purpose: exactly two decimals with grouped thousands is the shape a Malaysian
-// totals column prints, and requiring the grouping is what stops a 4-digit reference or a
-// "2025.10"-style token from being read as money. Anything outside it is refused, because a
-// present-but-unparseable monetary value forfeits the entire extraction at the DB.
-const AMOUNT_STRICT = /^(?:RM\s*)?[0-9]{1,3}(?:,[0-9]{3})*\.[0-9]{2}$/;
-
-// Amount-SHAPED but outside the accept grammar (a negative, a parenthesised figure, a bare
-// integer, three decimals, an OCR-mangled digit run). Never emitted — its only job is to make
-// the refusal VISIBLE as `unparseable` instead of silently indistinguishable from "the
-// document printed nothing here" (contract §2 X2: no silent caps).
-const AMOUNT_SHAPED = /^(?:RM|MYR)?[\s(]*[-‐-―−]?\s*[0-9][0-9,.\s]*\)?$/i;
-
-const SST_RATE = /([0-9]{1,2}(?:\.[0-9]+)?)\s*%/;
-
-/** Axis-aligned bounds of a flat Azure polygon [x1,y1,x2,y2,...], or null when unusable.
- *  `x0`/`y0` are the FIRST vertex (top-left) — the coordinate the pairing window uses;
- *  min/max cover all vertices, which is what makes the overlap test skew-tolerant. */
-function boxOf(polygon) {
+/**
+ * Axis-aligned bounds of a flat Azure polygon [x1,y1,x2,y2,...], scaled into page-width
+ * fractions, or null when unusable. `x0`/`y0` are the FIRST vertex (top-left) — the
+ * coordinate the pairing window uses; min/max cover all vertices, which is what makes the
+ * overlap test skew-tolerant.
+ */
+function boxOf(polygon, scale) {
   if (!Array.isArray(polygon) || polygon.length < 8 || polygon.length % 2 !== 0) return null;
   const xs = [];
   const ys = [];
@@ -132,20 +152,51 @@ function boxOf(polygon) {
     const x = Number(polygon[i]);
     const y = Number(polygon[i + 1]);
     if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    xs.push(x);
-    ys.push(y);
+    xs.push(x * scale);
+    ys.push(y * scale);
   }
   return { x0: xs[0], y0: ys[0], xmin: Math.min(...xs), xmax: Math.max(...xs), ymin: Math.min(...ys), ymax: Math.max(...ys) };
 }
 
-/** Inches of shared vertical band between two boxes; <= 0 means different printed rows. */
+/**
+ * The coordinate frame for one page: how to scale its polygons, and the pairing tolerances
+ * expressed in that same frame. Returns null when the page declares pixels but carries no
+ * usable width — the frame is then unknowable, and comparing raw pixel counts against an inch
+ * tolerance would refuse every pair on the page while looking like a clean read.
+ */
+export function pageFrame(page, opts) {
+  const unit = String(page?.unit ?? "inch").toLowerCase();
+  const width = Number(page?.width);
+  const usableWidth = Number.isFinite(width) && width > 0 ? width : null;
+  if (unit === "pixel" || unit === "pixels") {
+    if (!usableWidth) return null;
+    return {
+      unit,
+      scale: 1 / usableWidth,
+      maxTopDelta: opts.maxTopDeltaIn / A4_WIDTH_IN,
+      taxSummaryBand: opts.taxSummaryBandIn / A4_WIDTH_IN,
+    };
+  }
+  // Inches (or an engine result that omits the unit, which every pre-X2 fixture does).
+  // Dividing coordinates AND tolerances by the same width is an identity on the comparison,
+  // so the measured inch calibration is preserved exactly.
+  const scale = usableWidth ? 1 / usableWidth : 1;
+  return {
+    unit: usableWidth ? unit : "inch",
+    scale,
+    maxTopDelta: opts.maxTopDeltaIn * scale,
+    taxSummaryBand: opts.taxSummaryBandIn * scale,
+  };
+}
+
+/** Shared vertical band between two boxes, in the page's frame; <= 0 means different rows. */
 const yOverlap = (a, b) => Math.min(a.ymax, b.ymax) - Math.max(a.ymin, b.ymin);
 
 const content = (line) => String(line?.content ?? "");
 
-/** Lowercased, whitespace-collapsed, leading-noise-stripped label text. */
+/** Lowercased, ASCII-whitespace-collapsed, leading-noise-stripped label text. */
 function normalizeLabel(text) {
-  return String(text ?? "").replace(LABEL_NOISE_PREFIX, "").replace(/\s+/g, " ").trim().toLowerCase();
+  return String(text ?? "").replace(LABEL_NOISE_PREFIX, "").replace(ASCII_SPACE, " ").trim().toLowerCase();
 }
 
 /**
@@ -174,47 +225,15 @@ export function matchTotalsLabel(text) {
 }
 
 /**
- * Cents for the accepted grammar, mirroring `_normalize_invoice_cents` so that "identical"
- * here means identical to the DB (which collapses duplicates on normalized cents, not on
- * text). Returns null for anything the DB would also refuse. Used ONLY to compare two
- * readings of the same field — never to emit a computed figure.
- */
-export function centsOfRaw(raw) {
-  const t = String(raw ?? "").trim().toUpperCase().replace(/MYR|RM/g, "").replace(/[,\s]/g, "");
-  if (!t) return null;
-  let negative = false;
-  let v = t;
-  if (/^\([0-9]+(?:\.[0-9]{1,2})?\)$/.test(v)) {
-    negative = true;
-    v = v.slice(1, -1);
-  } else if (!/^-?[0-9]+(?:\.[0-9]{1,2})?$/.test(v)) {
-    return null;
-  }
-  const n = Number(v);
-  if (!Number.isFinite(n)) return null;
-  const cents = Math.round(n * 100);
-  return negative ? -cents : cents;
-}
-
-/** Is this a bare dash — the document's own "nil"? */
-const isDash = (s) => DASH_ONLY.test(String(s ?? "").trim());
-
-/** Amount-shaped but refused by the accept grammar (drives the `unparseable` counter). */
-function looksLikeAmountAttempt(s) {
-  const t = String(s ?? "").trim();
-  if (!t || t.length > 24 || !/[0-9]/.test(t)) return false;
-  return AMOUNT_SHAPED.test(t);
-}
-
-/**
  * Resolve ONE label occurrence to its amount. Returns a per-occurrence outcome:
  *   {status:'paired', value_raw, page, polygon, confidence, sign}
- *   {status:'nil'}          the document printed a dash — explicitly nothing, not 0.00
- *   {status:'absent'}       nothing in the pairing window that could be an amount
- *   {status:'ambiguous'}    more than one acceptable figure — emit nothing (0016:3609-3615)
- *   {status:'unparseable'}  something amount-shaped sat there and the grammar refused it
+ *   {status:'nil'}           the document printed a dash — explicitly nothing, not 0.00
+ *   {status:'absent'}        nothing in the pairing window that could be an amount
+ *   {status:'ambiguous'}     more than one acceptable figure — emit nothing (0016:3609-3615)
+ *   {status:'unparseable'}   something amount-shaped sat there and the grammar refused it
+ *   {status:'sign_unknown'}  a rounding figure whose printed sign was never captured
  */
-function resolveOccurrence(lines, boxes, labelIndex, pageNumber, fieldPath, opts) {
+function resolveOccurrence(lines, boxes, labelIndex, pageNumber, fieldPath, frame, opts) {
   const label = boxes[labelIndex];
   const amounts = [];
   const dashes = [];
@@ -223,24 +242,26 @@ function resolveOccurrence(lines, boxes, labelIndex, pageNumber, fieldPath, opts
     const box = boxes[j];
     if (!box) continue;
     if (box.x0 <= label.x0) continue; // the amount always sits to the RIGHT of its label
-    if (Math.abs(box.y0 - label.y0) > opts.maxTopDeltaIn) continue;
+    if (Math.abs(box.y0 - label.y0) > frame.maxTopDelta) continue;
     if (opts.requireVerticalOverlap && yOverlap(label, box) <= 0) continue;
-    // READING-ORDER ADJACENCY, modulo sign glyphs. The amount is the next line after its
-    // label on all six measured true pairs; a standalone dash is the one thing that may sit
-    // between them, because a layout that prints its minus in a separate column emits that
-    // glyph as its own line. Any OTHER intervening line means these are not one printed row.
-    if (opts.requireIndexAdjacent && !onlyDashesBetween(lines, labelIndex, j)) continue;
+    // READING-ORDER ADJACENCY, modulo a sign glyph ON THIS ROW. The amount is the next line
+    // after its label on all six measured true pairs; the one thing that may legitimately sit
+    // between them is a minus printed in its own column, which OCR emits as its own line. The
+    // waiver is GEOMETRIC, not textual: a dash anywhere else on the page (a bullet, a nil in
+    // another table) must never license a jump past the true neighbour to a later column.
+    if (opts.requireIndexAdjacent && !onlyRowDashesBetween(lines, boxes, labelIndex, j, label)) continue;
     const text = content(lines[j]).trim();
-    if (AMOUNT_STRICT.test(text)) amounts.push({ index: j, box, text });
+    if (isStrictAmount(text)) amounts.push({ index: j, box, text });
     else if (isDash(text)) dashes.push({ index: j, box });
     else if (looksLikeAmountAttempt(text)) attempts += 1;
   }
 
   if (amounts.length > 1) return { status: "ambiguous" };
   if (amounts.length === 0) {
-    // A DASH is the document saying NIL — explicitly nothing, which is not zero. Several
-    // dashes are one statement; a dash plus an amount-shaped refusal is still a refusal.
-    if (dashes.length > 0) return { status: "nil" };
+    // A DASH is the document saying NIL — explicitly nothing, which is not zero. An
+    // amount-shaped token alongside it is still counted (see the field merge), so a visible
+    // but unreadable component never hides behind the dash as if nothing were printed.
+    if (dashes.length > 0) return { status: "nil", attempted: attempts > 0 };
     return { status: attempts > 0 ? "unparseable" : "absent" };
   }
 
@@ -258,6 +279,19 @@ function resolveOccurrence(lines, boxes, labelIndex, pageNumber, fieldPath, opts
   const minus = dashes.length > 0;
   if (minus && fieldPath !== "invoice.rounding") return { status: "unparseable", reason: "detached_minus_on_component" };
 
+  // ROUNDING WITHOUT AN AFFIRMATIVELY CAPTURED SIGN IS NOT A READING. A layout that prints
+  // "- 0.40" with the minus in its own table column loses that glyph entirely (measured on the
+  // real invoice: no dash line, no dash word, and even the table cell reads "0.40"), so the
+  // magnitude survives and the sign does not. Emitting the bare magnitude is NOT refusal-safe:
+  // on a taxless supplier bill no identity constrains the rounding leg, so a +0.04 where the
+  // face reads -0.04 lets the supplier floor accept a draft whose expense is understated with
+  // the rounding on the wrong side — every figure "read off the document" and the posting
+  // still wrong. There is no signal left to recover from, so the field is refused and counted.
+  // The cost is real and deliberate: a genuinely positive rounding is refused too, and the
+  // document goes to a human. That is the correct price for never stating a figure the face
+  // contradicts.
+  if (!minus && fieldPath === "invoice.rounding") return { status: "sign_unknown" };
+
   return {
     status: "paired",
     value_raw: minus ? `-${hit.text}` : hit.text,
@@ -271,26 +305,46 @@ function resolveOccurrence(lines, boxes, labelIndex, pageNumber, fieldPath, opts
   };
 }
 
-/** True when nothing but standalone dashes lies between two line indices. */
-function onlyDashesBetween(lines, from, to) {
+/**
+ * True when everything between two line indices is a dash that BELONGS TO THIS ROW: sharing
+ * the label's vertical band and sitting horizontally between the label and the candidate.
+ * A dash elsewhere on the page waives nothing.
+ */
+function onlyRowDashesBetween(lines, boxes, from, to, label) {
+  const candidate = boxes[to];
   for (let k = from + 1; k < to; k++) {
     if (!isDash(content(lines[k]))) return false;
+    const box = boxes[k];
+    if (!box) return false;
+    if (yOverlap(label, box) <= 0) return false;
+    if (box.x0 <= label.x0 || box.x0 >= candidate.x0) return false;
   }
   return true;
+}
+
+/** Vertical bands (in the page's own frame) that a Tax Summary heading closes to anchoring. */
+function taxSummaryBands(lines, boxes, frame) {
+  const bands = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (!boxes[i]) continue;
+    if (!TAX_SUMMARY_HEADING.test(content(lines[i]))) continue;
+    bands.push({ top: boxes[i].ymin, bottom: boxes[i].ymin + frame.taxSummaryBand });
+  }
+  return bands;
 }
 
 /**
  * Read the stated totals off `analyzeResult.pages[].lines[]`.
  *
  * UNIQUENESS-OR-NOTHING ACROSS THE WHOLE PAGE SET, not just per label. A totals figure is
- * commonly printed twice (the real receipt repeats its tax in a Tax Summary block), so two
- * label occurrences resolving to the SAME cents collapse to one emission exactly as the DB
- * collapses identical duplicates. Two occurrences resolving to DIFFERENT cents — or one
- * stating a figure while another states a dash — are a contradiction on the face of the
- * document, and the field is dropped. Any ambiguous or unparseable occurrence drops the
- * field outright: partial confidence in a figure is not a reason to emit it.
+ * commonly printed twice, so two label occurrences resolving to the SAME cents collapse to one
+ * emission exactly as the DB collapses identical duplicates. Two occurrences resolving to
+ * DIFFERENT cents — or one stating a figure while another states a dash — are a contradiction
+ * on the face of the document, and the field is dropped. Any ambiguous, unparseable or
+ * unsigned-rounding occurrence drops the field outright: partial confidence in a figure is not
+ * a reason to emit it.
  *
- * @param {Array<{pageNumber?:number, lines?:Array<{content?:string, polygon?:number[], confidence?:number}>}>} pages
+ * @param {Array<{pageNumber?:number, unit?:string, width?:number, lines?:Array<{content?:string, polygon?:number[], confidence?:number}>}>} pages
  * @param {object} [opts] pairing thresholds; see DEFAULT_READER_OPTS
  * @returns {{fields:Array<{field_path:string,value_raw:string,page:number,polygon:number[],confidence:number|null}>,
  *            receipt:object}}
@@ -302,12 +356,16 @@ export function readTotalsFromLines(pages, opts = {}) {
     absent: 0,
     ambiguous: 0,
     unparseable: 0,
+    sign_unknown: 0,
+    tax_summary_suppressed: 0,
     // Filled by the caller's typed-field reconciliation (see normalizeAzureInvoice).
     typed_disagreement: 0,
     typed_collapsed: 0,
     typed_recovered: 0,
+    typed_vs_dash: 0,
     emitted: 0,
     sst_rate: null,
+    units: [],
     fields: {},
   };
   const occurrences = new Map();
@@ -316,15 +374,26 @@ export function readTotalsFromLines(pages, opts = {}) {
     const lines = Array.isArray(page?.lines) ? page.lines : [];
     if (lines.length === 0) continue;
     const pageNumber = Number(page?.pageNumber) || 1;
-    const boxes = lines.map((line) => boxOf(line?.polygon));
+    const frame = pageFrame(page, settings);
+    if (!frame) {
+      if (!receipt.units.includes("pixel:no-width")) receipt.units.push("pixel:no-width");
+      continue;
+    }
+    if (!receipt.units.includes(frame.unit)) receipt.units.push(frame.unit);
+    const boxes = lines.map((line) => boxOf(line?.polygon, frame.scale));
+    const bands = taxSummaryBands(lines, boxes, frame);
     for (let i = 0; i < lines.length; i++) {
       if (!boxes[i]) continue;
       const hit = matchTotalsLabel(content(lines[i]));
       if (!hit) continue; // not a totals label: ignored, never counted (contract §2 X2 D2)
+      if (bands.some((b) => boxes[i].ymin >= b.top && boxes[i].ymin <= b.bottom)) {
+        receipt.tax_summary_suppressed += 1;
+        continue;
+      }
       // The stated rate is captured off the LABEL, so it survives even when the amount is a
       // dash (the real invoice states "Service Tax (8%)" against a nil figure).
       if (hit.sst_rate != null && receipt.sst_rate == null) receipt.sst_rate = hit.sst_rate;
-      const outcome = resolveOccurrence(lines, boxes, i, pageNumber, hit.field_path, settings);
+      const outcome = resolveOccurrence(lines, boxes, i, pageNumber, hit.field_path, frame, settings);
       outcome.label = content(lines[i]).trim();
       if (!occurrences.has(hit.field_path)) occurrences.set(hit.field_path, []);
       occurrences.get(hit.field_path).push(outcome);
@@ -336,42 +405,58 @@ export function readTotalsFromLines(pages, opts = {}) {
     const found = occurrences.get(field_path);
     if (!found || found.length === 0) continue; // never printed: not a refusal, not counted
     const detail = { occurrences: found.length, labels: found.map((o) => o.label) };
-    const blocked = found.find((o) => o.status === "ambiguous" || o.status === "unparseable");
-    if (blocked) {
-      detail.outcome = blocked.status;
-      if (blocked.reason) detail.reason = blocked.reason;
-      receipt[blocked.status] += 1;
+    const record = (outcome, extra = {}) => {
+      Object.assign(detail, { outcome }, extra);
       receipt.fields[field_path] = detail;
+    };
+    // An occurrence the reader could not resolve blocks the field however many others agree.
+    const blocked = found.find((o) => o.status === "ambiguous" || o.status === "unparseable" || o.status === "sign_unknown");
+    if (blocked) {
+      record(blocked.status, blocked.reason ? { reason: blocked.reason } : {});
+      if (blocked.status === "sign_unknown") {
+        receipt.sign_unknown += 1;
+        receipt.absent += 1; // absent-class: nothing is emitted for this field
+      } else {
+        receipt[blocked.status] += 1;
+      }
       continue;
     }
     const paired = found.filter((o) => o.status === "paired");
     const nils = found.filter((o) => o.status === "nil");
     if (paired.length === 0) {
-      detail.outcome = nils.length > 0 ? "nil" : "absent";
+      record(nils.length > 0 ? "nil" : "absent");
       receipt.absent += 1;
-      receipt.fields[field_path] = detail;
+      // A refused amount-shaped token sitting beside the dash is counted in its own right, so
+      // a visible-but-unreadable component never reads as "nothing was printed here". The two
+      // counters therefore describe SIGNALS, not a partition of the fields.
+      if (nils.some((o) => o.attempted)) {
+        detail.unparseable_attempt = true;
+        receipt.unparseable += 1;
+      }
       continue;
     }
     const distinct = new Set(paired.map((o) => centsOfRaw(o.value_raw)));
     if (distinct.has(null) || distinct.size > 1 || nils.length > 0) {
       // Two different figures, or a figure contradicted by a printed dash. The DB would
       // forfeit the whole extraction on the former; both are refused here first.
-      detail.outcome = "ambiguous";
-      detail.values = paired.map((o) => o.value_raw);
-      if (nils.length > 0) detail.reason = "value_vs_nil";
+      record("ambiguous", { values: paired.map((o) => o.value_raw), ...(nils.length > 0 ? { reason: "value_vs_nil" } : {}) });
       receipt.ambiguous += 1;
-      receipt.fields[field_path] = detail;
       continue;
     }
     const [{ value_raw, page, polygon, confidence, sign }] = paired;
-    detail.outcome = "matched";
-    detail.value_raw = value_raw;
-    // The sign of a rounding adjustment is only knowable when the document prints it in a
-    // place OCR captured. Recorded so a consumer can see that an unsigned rounding is a
-    // reading of the glyphs present, not an assertion that the adjustment is positive.
-    if (field_path === "invoice.rounding") detail.sign = sign;
+    // THE EMIT GATE, and the last thing standing between this module and a forfeited
+    // extraction. Nothing leaves here whose EXACT emitted bytes fail to normalize under the
+    // DB's own grammar — including the detached-minus composition, which is assembled AFTER
+    // the accept grammar ran and would otherwise never be re-validated. Components are
+    // additionally checked non-negative in cents, mirroring 0022's write boundary (check b2).
+    const cents = centsOfRaw(value_raw);
+    if (cents === null || (cents < 0 && field_path !== "invoice.rounding")) {
+      record("unparseable", { reason: "emit_gate", values: [value_raw] });
+      receipt.unparseable += 1;
+      continue;
+    }
+    record("matched", { value_raw, ...(field_path === "invoice.rounding" ? { sign } : {}) });
     receipt.matched += 1;
-    receipt.fields[field_path] = detail;
     fields.push({ field_path, value_raw, page, polygon, confidence });
   }
 
