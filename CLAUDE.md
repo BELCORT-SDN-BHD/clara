@@ -127,16 +127,15 @@ URL) **· `clara-backup` daily.** All Wave-B migrations deployed; none queued.
 | **S** | DEFERRED → Phase 5: no MyInvois XML exists in any corpus |
 | **F** | CLOSED (ADR-045, `live-gate-f-2026-07-27.md`) — durable 11-Q birthed the firm; durability proven by an unstaged fault (failed commit → re-park on the same op_key → clean retry, SAME run) |
 
-**NEXT (the sole pre-Wave-C engineering): the EXTRACTION SLICE** —
-`docs/plan/extraction-slice-contract.md` (**RATIFIED v1.0 = LAW, ADR-047** — rulings: confidence
-dropped from gating entirely · `request_reextraction` at the BOOKKEEPER floor, human-invoked
-only, no cost cap · X6 = vendor_unresolved diagnose+fix in-slice, own block, never inside X5).
-Order: 0022 (`request_reextraction` + `set_firm_high_stakes_threshold` + the
-sum-of-stated-components sales tie + an explicit `anchor_missing` guard) → the deterministic
-totals reader → **two-reader corroboration LAST and ALONE (X5)** — today Tier-A passes 0/29
-(Azure confidence max 0.837 vs 0.95; polygon + MYR pass 29/29), which is why the autodraft
-lane has never drafted (0/55 sweeps) and Phase 5 §6's auto-post-precision gate cannot yet be
-measured. **Never lower the 0.95 bar; corroborate by agreement, as the XML tier already does.**
+**THE EXTRACTION SLICE IS CLOSED (ADR-048, 2026-07-28)** — 23 migrations + runtime v32 live;
+corroboration = explicit two-reader agreement (confidence GONE); XG3 open → the runway;
+receipts `docs/plan/research/extraction-slice/slice-close-2026-07-28.md`. `interview_v2`
+live (PR #120; manifest 80/80 locked). **NEXT: the pre-Wave-C SETTLEMENT PROGRAM (ADR-048;
+tasks in memory)** — the runway on the real corpus (autopost · Gate-P SST hunt · W2/R2
+journeys) · Gate S/L/K-doc-tied as LABELED synthetic closures (Phase-5 methodology pulled
+forward, owner-ruled 2026-07-28) · the 0020 consent/wiki ACTIVATION ceremony (owner granted)
+· fail_classify 0024 · the rig-failure triage · Supavisor headroom · SHA-pin · deferrals
+recorded per the owner's three criteria.
 
 **The OPERATING runway (real future documents, interleave any day):** R2 claim (3) · W2
 journeys · the **first production autopost** (~3 approved small-ticket bills of one recurring
