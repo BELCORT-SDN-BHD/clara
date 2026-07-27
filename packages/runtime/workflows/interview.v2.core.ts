@@ -49,7 +49,7 @@ import {
   type SegmentResult,
   type Validation,
 } from "./interview.v1.core.js";
-import { classifyBusinessRegistration, describeBusinessRegistrationForms } from "../lib/malaysian-registration.mjs";
+import { classifyBusinessRegistration, describeBusinessRegistrationForms, normalizeRegistration } from "../lib/malaysian-registration.mjs";
 
 // Everything unchanged is re-exported from ONE place so a v2 module never has to reach back
 // into v1 by hand (and so a reader sees the whole v2 surface in one import).
@@ -104,6 +104,51 @@ export function validateBusinessRegistration(raw: unknown): Validation {
  *  not only after a refusal). */
 export const registrationFormsSentence = (): string => describeBusinessRegistrationForms();
 
+/** The minimum substantive content an UNVERIFIED registration may be recorded with. Mirrors the
+ *  invoice gate's own floor (three alphanumerics): below it there is no identity to record, only
+ *  a person hitting enter, and an escape hatch that accepts "  " is not a hatch but a hole. */
+const MIN_UNVERIFIED_KEY_LENGTH = 3;
+
+/**
+ * THE ESCAPE HATCH (owner ruling, 2026-07-27: "warning + record unverified").
+ *
+ * Called by the driver only when this segment REFUSED an answer and the person has now typed the
+ * same answer again. Returns the value to record, or null to keep re-asking.
+ *
+ * WHY THIS EXISTS. A validator that can only refuse is the shape of finding F1 itself: v1 refused
+ * a legitimate state-prefixed ROB number, and the interview had no way to proceed — the firm was
+ * simply unable to onboard. Widening the grammar fixed the four families we know about; it cannot
+ * fix the family nobody has met yet. So the LAST word belongs to the human in front of the
+ * document, not to the regex: after one refusal that shows the accepted formats, insistence is
+ * taken as "I am looking at the certificate and this is what it says".
+ *
+ * WHAT IT REFUSES TO DO IS THE POINT. It never records the value SILENTLY: the driver raises a
+ * warning park, the acknowledgement is persisted next to the answer, and the record is marked
+ * `form: 'unrecognized', verified: false` so a reviewer sees exactly which identities the product
+ * vouched for and which it merely took down. Onboarding never blocks; the record is never
+ * dishonest about what it is.
+ *
+ * Sameness is judged on the REGISTRY KEY, not the raw string: someone who retypes the same number
+ * with different spacing or punctuation has insisted, not answered afresh.
+ */
+export function insistUnverifiedRegistration(raw: unknown, previouslyRefused: unknown): Validation | null {
+  const key = normalizeRegistration(raw);
+  if (key.length < MIN_UNVERIFIED_KEY_LENGTH) return null;
+  if (key !== normalizeRegistration(previouslyRefused)) return null;
+  const registration = String(raw ?? "").trim().replace(/\s+/g, " ").toUpperCase();
+  return {
+    ok: true,
+    value: { registration, normalized: key, form: "unrecognized", verified: false },
+    echo: `registration ${registration} — NOT a recognised Malaysian format, recorded UNVERIFIED for review`,
+  };
+}
+
+/** True iff a recorded registration answer is the unverified kind (the marker a reviewer, a plan
+ *  reader, or a later lane keys off — one definition so nobody re-derives it). */
+export function isUnverifiedRegistration(value: unknown): boolean {
+  return !!value && typeof value === "object" && (value as { verified?: unknown }).verified === false;
+}
+
 // ---------------------------------------------------------------------------
 // F2 — the v2 segment shape: conditional follow-ups + a visible warning park.
 // ---------------------------------------------------------------------------
@@ -134,6 +179,13 @@ export type SegmentV2 = Omit<Segment, "question"> & {
   appliesTo?: (prior: Readonly<Record<string, unknown>>) => boolean;
   /** Follow-ups, evaluated in order; each may decline (null) for the value in hand. */
   followUps?: ReadonlyArray<(value: unknown, prior: Readonly<Record<string, unknown>>) => FollowUp | null>;
+  /** THE ESCAPE HATCH. Consulted ONLY when `validate` refused AND this segment already refused a
+   *  previous answer: "the person has been shown why, and typed it again — may it be recorded
+   *  as-is?" Returning a value never bypasses anything, because a hatch-recorded value is
+   *  expected to raise a `warn`, so the record is acknowledged and marked. Null keeps re-asking.
+   *  The driver deliberately does NOT decide what "the same answer again" means — that is domain
+   *  judgement (the same registration typed with different punctuation is still insistence). */
+  onInsist?: (raw: unknown, previouslyRefused: unknown, prior: Readonly<Record<string, unknown>>) => Validation | null;
   /** Warnings to surface before the echo-confirm. Empty ⇒ no warning park. */
   warn?: (value: unknown, prior: Readonly<Record<string, unknown>>) => ReadonlyArray<{ code: string; message: string }>;
 };
@@ -191,6 +243,9 @@ export async function askAndConfirmSegmentV2(
   prior: Readonly<Record<string, unknown>>,
 ): Promise<SegmentResult> {
   let prefix = "";
+  // The raw answer this segment last REFUSED — the only state the driver keeps across rounds, and
+  // it exists solely so `onInsist` can tell a fresh wrong answer from a repeated one.
+  let lastRefused: unknown = undefined;
   // Bounded only by human patience (the salvage law): a cancel/expire is the sole non-answer exit.
   for (;;) {
     const q = await ask({ seg: seg.key, phase: "q", question: prefix + questionOf(seg, prior) });
@@ -198,13 +253,20 @@ export async function askAndConfirmSegmentV2(
     if (seg.skippable && isSkip(q.value)) return { outcome: "skipped" };
 
     const v = seg.validate(q.value, prior);
-    if (!v.ok) {
+    // THE ESCAPE HATCH (owner ruling): a refusal re-asks ONCE showing the accepted formats; the
+    // same answer typed again is taken as insistence and recorded — loudly, never silently, since
+    // the value it returns carries the marker its `warn` fires on. lastRefused starts undefined,
+    // so the FIRST refusal can never hatch: a person must have been told why before insisting.
+    const insisted = !v.ok && seg.onInsist && lastRefused !== undefined ? seg.onInsist(q.value, lastRefused, prior) : null;
+    if (!v.ok && !(insisted && insisted.ok)) {
+      lastRefused = q.value;
       prefix = `${v.reason}\n\n`;
       continue;
     }
+    const accepted = insisted && insisted.ok ? insisted : (v as Extract<Validation, { ok: true }>);
 
-    let value = v.value;
-    let echo = v.echo;
+    let value = accepted.value;
+    let echo = accepted.echo;
     let restartReason: string | null = null;
 
     for (const makeFollowUp of seg.followUps ?? []) {

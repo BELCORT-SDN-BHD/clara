@@ -147,6 +147,100 @@ test("F1: the recorded answer is verbatim + normalized + form (not a bare string
   assert.equal(res.items[0].required_for_commit, true);
 });
 
+// ===========================================================================
+// THE ESCAPE HATCH — owner ruling 2026-07-27: "warning + record unverified".
+// ===========================================================================
+
+/** Drive the registration segment with a scripted answer sequence. */
+async function driveSsm(script, prior = {}) {
+  const s = scriptedAsk(script);
+  const res = await askAndConfirmSegmentV2(firmSeg("ssm"), s.ask, prior);
+  return { res, asked: s.asked };
+}
+
+test("hatch: the FIRST unrecognised answer is refused and re-asked WITH the accepted formats", async () => {
+  // One refusal is not negotiable — a person must be told what the shapes are before insisting.
+  const { res, asked } = await driveSsm([ANSWER("ROB-9/2019 KUCHING"), ANSWER("202401001234"), ANSWER("yes")]);
+  assert.equal(res.outcome, "answered");
+  assert.equal(res.value.form, "unified_12", "the corrected answer takes the normal path");
+  assert.equal(res.value.verified, undefined, "a recognised form carries no unverified marker — verification is implied by the form");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c"], "refusal → re-ask → confirm; NO warning park, NO hatch");
+  assert.match(asked[1].question, /not a Malaysian business registration number/);
+  assert.match(asked[1].question, /SA1234567-X/, "the re-ask shows the accepted formats");
+});
+
+test("hatch: the SAME answer typed again is ACCEPTED behind a warning, recorded verified:false", async () => {
+  const insisted = "ROB-9/2019 KUCHING";
+  const { res, asked } = await driveSsm([ANSWER(insisted), ANSWER(insisted), ANSWER("yes"), ANSWER("yes")]);
+  assert.equal(res.outcome, "answered", "onboarding is never blocked by the validator's ignorance");
+  assert.equal(res.value.registration, insisted.toUpperCase(), "recorded EXACTLY as typed (case-normalized only)");
+  assert.equal(res.value.form, "unrecognized");
+  assert.equal(res.value.verified, false, "the record is honest about what it is");
+  assert.equal(res.value.normalized, shared.registrationKey(insisted), "still keyed the registry's way, so a later match is possible");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c", "c"], "refusal → insistence → WARNING park → echo confirm");
+  assert.match(asked[2].question, /⚠/, "the acceptance is loud, never silent");
+  assert.match(asked[2].question, /UNVERIFIED/);
+  assert.match(res.echo, /NOT a recognised Malaysian format, recorded UNVERIFIED/, "the activity trail says so too");
+});
+
+test("hatch: the acknowledgement is PERSISTED next to the answer, and the plan item carries the marker", async () => {
+  const insisted = "ROB-9/2019 KUCHING";
+  const { res } = await driveSsm([ANSWER(insisted), ANSWER(insisted), ANSWER("yes"), ANSWER("yes")]);
+  assert.equal(res.value.warnings.length, 1);
+  assert.equal(res.value.warnings[0].code, "registration_unverified");
+  assert.equal(res.value.warnings[0].acknowledged, true);
+  assert.match(res.value.warnings[0].message, /marked UNVERIFIED for a practitioner to check/);
+  // The marker must survive into the durable plan item — that is where a reviewer will see it.
+  const item = res.items[0];
+  assert.equal(item.item_key, "ssm");
+  assert.equal(item.answer.verified, false);
+  assert.equal(item.answer.form, "unrecognized");
+  assert.equal(item.answer.warnings[0].code, "registration_unverified");
+  // And in the FIRM plan the workflow actually writes.
+  const planItems = q.buildFirmPlanItemsV2({ legal_name: "ACME", ssm: res.value });
+  const ssmItem = planItems.find((i) => i.item_key === "ssm");
+  assert.equal(core.isUnverifiedRegistration(ssmItem.answer), true, "one definition of the marker, readable off the plan");
+});
+
+test("hatch: insistence is judged on the REGISTRY KEY — retyping with different punctuation still counts", async () => {
+  const { res, asked } = await driveSsm([ANSWER("rob 9/2019 kuching"), ANSWER("ROB-9/2019-KUCHING"), ANSWER("yes"), ANSWER("yes")]);
+  assert.equal(res.value.verified, false, "the same registration, punctuated differently, is insistence — not a fresh answer");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c", "c"]);
+});
+
+test("hatch: a DIFFERENT wrong answer is not insistence — it is refused again", async () => {
+  const { res, asked } = await driveSsm([ANSWER("hello"), ANSWER("goodbye"), ANSWER("hello"), ANSWER("202401001234"), ANSWER("yes")]);
+  assert.equal(res.value.form, "unified_12");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "q", "q", "c"], "three refusals, no hatch — each answer differed from the one before it");
+});
+
+test("hatch: DECLINING the warning re-asks; nothing unverified is recorded", async () => {
+  const insisted = "ROB-9/2019 KUCHING";
+  const { res, asked } = await driveSsm([ANSWER(insisted), ANSWER(insisted), ANSWER("change"), ANSWER("SA1234567-X"), ANSWER("yes")]);
+  assert.equal(res.value.form, "state_prefixed_business");
+  assert.equal(res.value.verified, undefined);
+  assert.equal(res.value.warnings, undefined, "the abandoned round leaves nothing behind");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "c", "q", "c"]);
+});
+
+test("hatch: it is a hatch, not a hole — empty and near-empty insistence keeps re-asking", async () => {
+  // Two blank submissions must NOT record a blank legal identity. Below three alphanumerics there
+  // is no identity to record, only a person hitting enter.
+  for (const nothing of ["", "  ", "--", "a"]) {
+    assert.equal(core.insistUnverifiedRegistration(nothing, nothing), null, `${JSON.stringify(nothing)} is not an identity`);
+  }
+  const { res, asked } = await driveSsm([ANSWER(""), ANSWER(""), ANSWER("1475415-P"), ANSWER("yes")]);
+  assert.equal(res.value.form, "legacy_numeric");
+  assert.deepEqual(asked.map((a) => a.phase), ["q", "q", "q", "c"], "the blanks were refused twice — no hatch, no confirm park");
+});
+
+test("hatch: the client inventory has it too (the same segment, both interviews)", () => {
+  const clientSsm = q.CLIENT_SEGMENTS_V2.find((s) => s.key === "ssm");
+  assert.equal(typeof clientSsm.onInsist, "function");
+  assert.equal(typeof clientSsm.warn, "function");
+  assert.equal(clientSsm.requiredForCommit, true);
+});
+
 test("F1: the question itself lists the accepted forms (a person is told the shapes UP FRONT)", () => {
   const question = questionOf(firmSeg("ssm"), {});
   assert.match(question, /SA1234567-X/);

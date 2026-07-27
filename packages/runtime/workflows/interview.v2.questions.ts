@@ -23,6 +23,8 @@
 
 import {
   defaultItem,
+  insistUnverifiedRegistration,
+  isUnverifiedRegistration,
   validateBusinessRegistration,
   validateEmail,
   validateEnum,
@@ -88,6 +90,35 @@ const entityTypeQuestion = (subject: string): string =>
 
 const registrationQuestion = (subject: string): string =>
   `What is ${subject} SSM registration number?\nAccepted: ${registrationFormsSentence()}.`;
+
+/**
+ * The registration segment, shared by both inventories.
+ *
+ * It carries the ESCAPE HATCH (owner ruling 2026-07-27, "warning + record unverified"): the first
+ * unrecognised answer is refused with the accepted formats; the same answer typed again is
+ * recorded, marked `verified: false`, behind a warning the person must acknowledge. Widening the
+ * grammar fixed the four families we know of and cannot fix the one nobody has met — so onboarding
+ * never blocks on the validator's ignorance, and the record says plainly which identities the
+ * product recognised and which it merely took down.
+ */
+const registrationSegment = (subject: string): SegmentV2 => ({
+  key: "ssm",
+  question: registrationQuestion(subject),
+  requiredForCommit: true,
+  skippable: false,
+  validate: validateBusinessRegistration,
+  onInsist: (raw, previouslyRefused) => insistUnverifiedRegistration(raw, previouslyRefused),
+  warn: (value) =>
+    isUnverifiedRegistration(value)
+      ? [{
+          code: "registration_unverified",
+          message:
+            `“${(value as { registration?: string }).registration ?? ""}” is not a registration format this system recognises ` +
+            `(${registrationFormsSentence()}). It will be recorded EXACTLY as you typed it and marked UNVERIFIED for a ` +
+            `practitioner to check against the certificate. Nothing downstream will treat it as a confirmed identity.`,
+        }]
+      : [],
+});
 
 // ---------------------------------------------------------------------------
 // F2 — the framework segment (axis 1) and its follow-ups.
@@ -340,7 +371,7 @@ const eligibilitySegment: SegmentV2 = {
 
 export const FIRM_SEGMENTS_V2: readonly SegmentV2[] = [
   { key: "legal_name", question: "What is the firm's registered legal name?", requiredForCommit: true, skippable: false, validate: validateNonEmpty("legal name") },
-  { key: "ssm", question: registrationQuestion("the firm's"), requiredForCommit: true, skippable: false, validate: validateBusinessRegistration },
+  registrationSegment("the firm's"),
   { key: "entity_type", question: entityTypeQuestion("the firm's"), requiredForCommit: true, skippable: false, validate: validateEnum("entity type", ENTITY_TYPES_V2, ENTITY_SYNONYMS_V2) },
   { key: "address", question: "What is the firm's registered address?", requiredForCommit: true, skippable: false, validate: validateNonEmpty("registered address") },
   { key: "mia", question: "What is the firm's MIA registration number? (optional — reply skip if none)", requiredForCommit: false, skippable: true, validate: validateOptionalText("MIA registration") },
@@ -383,7 +414,7 @@ function nonStraightLineItems(value: unknown): PlanItemInput[] {
 export const CLIENT_SEGMENTS_V2: readonly SegmentV2[] = [
   { key: "legal_name", question: "What is the client's registered legal name?", requiredForCommit: true, skippable: false, validate: validateNonEmpty("legal name") },
   { key: "entity_type", question: entityTypeQuestion("the client's"), requiredForCommit: true, skippable: false, validate: validateEnum("entity type", ENTITY_TYPES_V2, ENTITY_SYNONYMS_V2) },
-  { key: "ssm", question: registrationQuestion("the client's"), requiredForCommit: true, skippable: false, validate: validateBusinessRegistration },
+  registrationSegment("the client's"),
   // turnover MUST precede tin (adjudication 7): the <RM1M exemption reads prior["turnover"].
   { key: "turnover", question: "What is the client's annual turnover band? (<RM1M / RM1M-5M / RM5M-25M / RM25M-100M / RM100M+)", requiredForCommit: true, skippable: false, validate: validateTurnover },
   { key: "tin", question: "What is the client's MyInvois TIN? (required unless turnover < RM1M — reply skip only if exempt)", requiredForCommit: false, skippable: false, validate: tinValidatorGatedByTurnover },
