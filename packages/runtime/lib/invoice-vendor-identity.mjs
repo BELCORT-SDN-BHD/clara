@@ -59,8 +59,19 @@
 // rather than drifting apart. Moving it changes no behaviour — `invoiceFacts.v1.azure.mjs`
 // imports it back.
 
+import { pageFrame } from "./invoice-totals-reader.mjs";
+import { asciiTrim, DASH_CHARS } from "./invoice-amount-grammar.mjs";
+
+// EVERY GEOMETRIC COMPARISON IN EVERY READER MUST BE UNIT-NORMALIZED. Azure reports PDF
+// geometry in inches and IMAGE geometry in pixels, so an inch threshold compared against raw
+// coordinates refuses every candidate on a photographed bill — a legitimate 2px gap on an
+// 1100px page reads as 2.0 "inches". This is the SECOND time that class has fired (X2's
+// pixel-units finding was the first), which is why the normalization is imported from the X2
+// reader rather than written again here: one definition, one place to fix it.
+
 export const DEFAULT_VENDOR_IDENTITY_OPTS = Object.freeze({
-  /** How far down a page a letterhead may sit, as a fraction of page height. */
+  /** How far down a page a letterhead may sit, as a fraction of page height. Unit-free by
+   *  construction: a fraction of the page's own height means the same thing in either unit. */
   topBandFraction: 0.25,
   /** Vertical gap allowed between a candidate line and the typed VendorName region, in
    *  inches. Measured on the vehicle: 0.015in — so this default is still 33x generous, while
@@ -101,7 +112,7 @@ const LABEL_VOCABULARY = Object.freeze([
 const foldForMatch = (s) => String(s ?? "").replace(/[^a-zA-Z0-9]+/g, " ").trim().toLowerCase();
 
 /** Leading separators between a label and its value: `. `, ` : `, ` - `, `# `. */
-const LEADING_SEPARATORS = /^[\s.:#\-–—]+/;
+const LEADING_SEPARATORS = new RegExp(`^[ \t.:#${DASH_CHARS}]+`);
 
 /**
  * A plausible Malaysian company registration / tax id. VERBATIM from
@@ -150,7 +161,7 @@ export function splitRegistrationLabel(text) {
     cut = i + 1;
   }
   if (seen < want) return null;
-  const remainder = original.slice(cut).replace(LEADING_SEPARATORS, "").trim();
+  const remainder = asciiTrim(asciiTrim(original.slice(cut)).replace(LEADING_SEPARATORS, ""));
   // THE REMAINDER MUST BE THE VALUE, not more label. Prefix matching alone lets a tax-qualified
   // continuation through the vocabulary that was supposed to exclude it: measured bypasses were
   // `Registration No. (SST): W10-2408-32000157` and `No. Pendaftaran Cukai Perkhidmatan: …`,
@@ -163,23 +174,48 @@ export function splitRegistrationLabel(text) {
   return { label, remainder, continuation: false };
 }
 
-/** Vertical gap between two boxes on the same page (0 when they overlap), or null when the
- *  anchor is absent or on another page — in which case there is no evidence, not a near miss. */
-function verticalGap(candidate, anchor) {
+/**
+ * TWO-DIMENSIONAL gap between two boxes on the same page — 0 when they overlap in both axes,
+ * else the Euclidean distance between their nearest edges. Null when the anchor is absent or
+ * on another page, which is no evidence rather than a near miss.
+ *
+ * MEASURING ONLY y WAS A WRONG-PARTY PATH. A vendor name printed on the left of a page and a
+ * buyer registration printed on the right can share a horizontal band exactly, and a
+ * y-only gap calls that adjacency: distance 0, attributed, emitted. It also ran the other
+ * way — a remote buyer registration became a second "vendor" candidate and manufactured a
+ * false ambiguity that WITHDREW a correct typed row, forfeiting an identity the document
+ * stated plainly. A page is two-dimensional and so is proximity on it.
+ */
+function boxDistance(candidate, anchor) {
   if (!anchor || anchor.page !== candidate.page) return null;
-  return Math.max(0, Math.max(anchor.ymin - candidate.ymax, candidate.ymin - anchor.ymax));
+  const dx = Math.max(0, anchor.xmin - candidate.xmax, candidate.xmin - anchor.xmax);
+  const dy = Math.max(0, anchor.ymin - candidate.ymax, candidate.ymin - anchor.ymax);
+  return Math.hypot(dx, dy);
 }
 
 /**
  * Is this candidate attributable to the VENDOR block? Returns null when it is, else the
  * reason it is not — so the receipt can say which defense refused it.
+ *
+ * `limit` arrives already converted into the page's own frame; see the unit note above.
  */
-function vendorAttributionFailure(candidate, anchors, opts) {
-  const vendorGap = verticalGap(candidate, anchors?.vendor);
-  if (vendorGap === null) return "no_vendor_anchor";
-  if (vendorGap > opts.vendorAnchorGapIn) return "vendor_anchor_far";
-  const customerGap = verticalGap(candidate, anchors?.customer);
-  if (customerGap !== null && customerGap < vendorGap) return "closer_to_customer";
+function vendorAttributionFailure(candidate, anchors, limit) {
+  const vendorDistance = boxDistance(candidate, anchors?.vendor);
+  if (vendorDistance === null) return "no_vendor_anchor";
+  if (vendorDistance > limit) return "vendor_anchor_far";
+  const customerDistance = boxDistance(candidate, anchors?.customer);
+  // STRICTLY closer, and a tie refuses. The law is "nearer the vendor than the customer";
+  // equidistant is not nearer, and resolving a coin toss in the vendor's favour is exactly
+  // the guess this defense exists to prevent.
+  //
+  // THE MARGIN IS NOT DECORATION. A candidate exactly equidistant between the two blocks
+  // measured 0.024201648132237796 against 0.024201648132237852 — a difference of 5.6e-17,
+  // pure floating-point dust from scaling, and a bare `<` handed the document to the vendor
+  // on the strength of it. A tie decided by rounding error is still a tie. The epsilon sits
+  // ~8 orders above that dust and ~9 orders below any real page feature (coordinates here are
+  // fractions of page width, so this is sub-nanometre on paper).
+  const TIE_EPSILON = 1e-9;
+  if (customerDistance !== null && !(vendorDistance + TIE_EPSILON < customerDistance)) return "closer_to_customer";
   return null;
 }
 
@@ -199,21 +235,44 @@ export function anchorsFromTypedFields(fields) {
       if (!Number.isFinite(y)) return null;
       ys.push(y);
     }
-    return { page: Number(region.pageNumber || 1), ymin: Math.min(...ys), ymax: Math.max(...ys) };
+    const xs = [];
+    for (let i = 0; i < polygon.length; i += 2) {
+      const x = Number(polygon[i]);
+      if (!Number.isFinite(x)) return null;
+      xs.push(x);
+    }
+    return {
+      page: Number(region.pageNumber || 1),
+      xmin: Math.min(...xs), xmax: Math.max(...xs),
+      ymin: Math.min(...ys), ymax: Math.max(...ys),
+    };
   };
   return { vendor: regionOf(fields?.VendorName), customer: regionOf(fields?.CustomerName) };
 }
 
-/** Vertical extent of a flat polygon, or null when the polygon is unusable. */
-function extentOf(polygon) {
+/** Full 2D extent of a flat polygon, scaled into the page's frame, or null when unusable. */
+function extentOf(polygon, scale) {
   if (!Array.isArray(polygon) || polygon.length < 8 || polygon.length % 2 !== 0) return null;
+  const xs = [];
   const ys = [];
-  for (let i = 1; i < polygon.length; i += 2) {
-    const y = Number(polygon[i]);
-    if (!Number.isFinite(y)) return null;
-    ys.push(y);
+  for (let i = 0; i < polygon.length; i += 2) {
+    const x = Number(polygon[i]);
+    const y = Number(polygon[i + 1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+    xs.push(x * scale);
+    ys.push(y * scale);
   }
-  return { ymin: Math.min(...ys), ymax: Math.max(...ys) };
+  return { xmin: Math.min(...xs), xmax: Math.max(...xs), ymin: Math.min(...ys), ymax: Math.max(...ys) };
+}
+
+/** The anchor boxes, scaled into the same frame as the candidates. */
+function scaleAnchor(anchor, scale) {
+  if (!anchor) return null;
+  return {
+    page: anchor.page,
+    xmin: anchor.xmin * scale, xmax: anchor.xmax * scale,
+    ymin: anchor.ymin * scale, ymax: anchor.ymax * scale,
+  };
 }
 
 /**
@@ -236,6 +295,7 @@ export function readVendorIdentityFromLines(pages, anchors = null, opts = {}) {
     rejected_gate: 0,
     below_band: 0,
     height_missing: 0,
+    unit_unresolved: 0,
     no_geometry: 0,
     label_continuation: 0,
     no_vendor_anchor: 0,
@@ -256,10 +316,21 @@ export function readVendorIdentityFromLines(pages, anchors = null, opts = {}) {
     const lines = Array.isArray(page?.lines) ? page.lines : [];
     if (lines.length === 0) continue;
     const pageNumber = Number(page?.pageNumber) || 1;
+    // The page's own coordinate frame — imported from the X2 reader so there is exactly one
+    // definition of how an inch threshold crosses into pixel geometry. A pixel page with no
+    // usable width has no knowable frame, so it is refused rather than measured in the wrong
+    // unit (the X2 `pixel:no-width` precedent).
+    const frame = pageFrame(page);
     const height = Number(page?.height);
     // A page with no usable height cannot be banded, and a wall that quietly disappears when
     // its input is missing is not a wall. Every candidate on such a page is refused.
-    const bandLimit = Number.isFinite(height) && height > 0 ? height * settings.topBandFraction : null;
+    const bandLimit = frame && Number.isFinite(height) && height > 0
+      ? height * settings.topBandFraction * frame.scale
+      : null;
+    const anchorLimit = frame ? frame.inchToFrame(settings.vendorAnchorGapIn) : null;
+    const scaledAnchors = frame
+      ? { vendor: scaleAnchor(anchors?.vendor, frame.scale), customer: scaleAnchor(anchors?.customer, frame.scale) }
+      : null;
     for (const line of lines) {
       const hit = splitRegistrationLabel(line?.content);
       if (!hit) continue;
@@ -268,7 +339,12 @@ export function readVendorIdentityFromLines(pages, anchors = null, opts = {}) {
         note("label_continuation", hit, pageNumber);
         continue;
       }
-      const extent = extentOf(line?.polygon);
+      if (!frame) {
+        receipt.unit_unresolved += 1;
+        note("unit_unresolved", hit, pageNumber);
+        continue;
+      }
+      const extent = extentOf(line?.polygon, frame.scale);
       if (extent === null) {
         // A recognised label with unusable geometry is a REFUSAL, and it has to be visible:
         // silently continuing made a readable document look like one that printed nothing.
@@ -292,7 +368,7 @@ export function readVendorIdentityFromLines(pages, anchors = null, opts = {}) {
         continue;
       }
       const candidate = { ...extent, page: pageNumber };
-      const attributionFailure = vendorAttributionFailure(candidate, anchors, settings);
+      const attributionFailure = vendorAttributionFailure(candidate, scaledAnchors, anchorLimit);
       if (attributionFailure) {
         receipt[attributionFailure] += 1;
         note(attributionFailure, hit, pageNumber, { key: registrationKey(hit.remainder) });

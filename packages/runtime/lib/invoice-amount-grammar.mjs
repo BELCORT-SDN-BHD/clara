@@ -40,7 +40,13 @@ export const isDbBlank = (s) => /^ *$/.test(String(s ?? ""));
 
 // A DASH standing alone is the document saying NIL — never zero. Kept as its own token class
 // so a printed "-" can never normalize to 0.00 and satisfy an identity the face refuses.
-const DASH_ONLY = /^[-‐‑‒–—―−]{1,3}$/;
+/** Every dash glyph OCR produces for a printed minus / nil, as a character-class body so
+ *  callers building their own patterns share ONE list instead of a partial copy. The ASCII
+ *  hyphen is ESCAPED: this string gets interpolated into other classes, and an unescaped
+ *  leading `-` silently becomes a RANGE operator wherever it lands mid-class — `[#-‐]`
+ *  spans every character from `#` to U+2010, which swallows digits and letters whole. */
+export const DASH_CHARS = "\\-‐‑‒–—―−";
+const DASH_ONLY = new RegExp(`^[${DASH_CHARS}]{1,3}$`);
 
 /** THE ACCEPT GRAMMAR — a strict subset of `_normalize_invoice_cents`, which also accepts
  *  bare integers, one decimal place and the accounting parenthesis form. Narrower on purpose:

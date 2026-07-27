@@ -23,6 +23,7 @@ import {
   registrationKey,
   anchorsFromTypedFields,
 } from "../lib/invoice-vendor-identity.mjs";
+import { DASH_CHARS } from "../lib/invoice-amount-grammar.mjs";
 import { normalizeAzureInvoice, NORMALIZATION_VERSION } from "../workflows/invoiceFacts.v1.azure.mjs";
 
 const line = (content, polygon) => ({ content, polygon });
@@ -40,8 +41,8 @@ const BUYER_NAME = line("ROME PROPERTIES SDN BHD", [0.7179, 2.3752, 2.9, 2.3752,
  *  there is the OCR garbage (a two-line VendorName) — its GEOMETRY is what attribution
  *  uses, and it sits 0.015in from the letterhead against 1.33in to the customer block. */
 const ANCHORS = Object.freeze({
-  vendor: { page: 1, ymin: 1.0569, ymax: 1.4968 },
-  customer: { page: 1, ymin: 2.3748, ymax: 2.5232 },
+  vendor: { page: 1, xmin: 1.645, xmax: 2.6207, ymin: 1.0569, ymax: 1.4968 },
+  customer: { page: 1, xmin: 0.7176, xmax: 2.6083, ymin: 2.3748, ymax: 2.5232 },
 });
 
 test("the real letterhead is read, and the two-page repeat collapses to ONE emission", () => {
@@ -73,9 +74,11 @@ test("the emitted value normalizes to the registry key the resolver actually mat
 });
 
 test("TWO DISTINCT registrations emit NOTHING — the buyer's must never become the vendor's", () => {
-  // A bill-to block that prints its own company number is the realistic shape of this hazard.
-  // Placed inside the top band deliberately, so uniqueness is doing the work here, not the band.
-  const buyerReg = line("Company No. 199801009999 (470001-A)", [5.4, 1.2, 7.6, 1.2, 7.6, 1.35, 5.4, 1.35]);
+  // BOTH sit inside the vendor block — overlapping the vendor-name anchor in x as well as y —
+  // so attribution passes both and UNIQUENESS is the wall that refuses. (Placed deliberately:
+  // a second registration off to the right would be caught by the 2D anchor distance instead,
+  // which is a different cell.)
+  const buyerReg = line("Company No. 199801009999 (470001-A)", [1.7, 1.3, 3.5, 1.3, 3.5, 1.45, 1.7, 1.45]);
   const { fields, receipt } = readVendorIdentityFromLines([page([VENDOR_NAME, LETTERHEAD_P1, buyerReg])], ANCHORS);
   assert.equal(fields.length, 0, "no identity beats the wrong identity");
   assert.equal(receipt.outcome, "ambiguous");
@@ -95,7 +98,7 @@ test("a registration below the top band is not a letterhead and is refused", () 
   // rather than argued about.
   // Attribution is a SEPARATE wall and still applies, so this sub-case relaxes both opts:
   // the point being pinned is that the band is a threshold, not a hard-coded law.
-  const relaxed = readVendorIdentityFromLines([page([footer])], { vendor: { page: 1, ymin: 9.3, ymax: 9.45 }, customer: null }, { topBandFraction: 0.95 });
+  const relaxed = readVendorIdentityFromLines([page([footer])], { vendor: { page: 1, xmin: 0.7, xmax: 2.9, ymin: 9.3, ymax: 9.45 }, customer: null }, { topBandFraction: 0.95 });
   assert.equal(relaxed.fields.length, 1);
 });
 
@@ -296,7 +299,7 @@ test("attribution FAILS CLOSED — no typed VendorName region means no evidence,
   assert.equal(fields.length, 0);
   assert.equal(receipt.no_vendor_anchor, 1);
   // And a vendor region on ANOTHER page is not evidence about this one.
-  const otherPage = readVendorIdentityFromLines([page([LETTERHEAD_P1])], { vendor: { page: 2, ymin: 1.05, ymax: 1.49 }, customer: null });
+  const otherPage = readVendorIdentityFromLines([page([LETTERHEAD_P1])], { vendor: { page: 2, xmin: 1.645, xmax: 2.6207, ymin: 1.05, ymax: 1.49 }, customer: null });
   assert.equal(otherPage.receipt.no_vendor_anchor, 1);
 });
 
@@ -307,8 +310,8 @@ test("attribution uses VendorName's GEOMETRY, never its content", () => {
     VendorName: { content: "CONSULTANCY\nrightpath", boundingRegions: [{ pageNumber: 1, polygon: [1.645, 1.0569, 2.6207, 1.0569, 2.6207, 1.4968, 1.645, 1.4968] }] },
     CustomerName: { content: "ROME PROPERTIES SDN BHD", boundingRegions: [{ pageNumber: 1, polygon: [0.7176, 2.3748, 2.6083, 2.3748, 2.6083, 2.5232, 0.7176, 2.5232] }] },
   });
-  assert.deepEqual(anchors.vendor, { page: 1, ymin: 1.0569, ymax: 1.4968 });
-  assert.deepEqual(anchors.customer, { page: 1, ymin: 2.3748, ymax: 2.5232 });
+  assert.deepEqual(anchors.vendor, { page: 1, xmin: 1.645, xmax: 2.6207, ymin: 1.0569, ymax: 1.4968 });
+  assert.deepEqual(anchors.customer, { page: 1, xmin: 0.7176, xmax: 2.6083, ymin: 2.3748, ymax: 2.5232 });
   const { fields } = readVendorIdentityFromLines([page([LETTERHEAD_P1])], anchors);
   assert.equal(fields[0].value_raw, "202401047756 (1593602-X)", "garbage content, sound geometry, correct read");
   // A typed field with no region yields no anchor at all.
@@ -346,7 +349,7 @@ test("a page with no usable HEIGHT refuses its candidates — the band never bec
   for (const bad of [{ height: undefined }, { height: 0 }, { height: Number.NaN }]) {
     const { fields, receipt } = readVendorIdentityFromLines(
       [{ pageNumber: 1, lines: [footer], unit: "inch", width: 8.2639, ...bad }],
-      { vendor: { page: 1, ymin: 9.3, ymax: 9.45 }, customer: null },
+      { vendor: { page: 1, xmin: 0.7, xmax: 2.9, ymin: 9.3, ymax: 9.45 }, customer: null },
     );
     assert.equal(fields.length, 0, `height=${bad.height} must refuse, not admit`);
     assert.equal(receipt.height_missing, 1);
@@ -382,4 +385,86 @@ test("a recognised label with unusable geometry is COUNTED, never silently dropp
   assert.equal(fields.length, 0);
   assert.equal(receipt.no_geometry, 1, "a readable document must not look like one that printed nothing");
   assert.deepEqual(receipt.candidates, [{ label: "company no", outcome: "no_geometry", page: 1 }]);
+});
+
+// ======================================================================================
+// Round-three regressions: proximity is TWO-DIMENSIONAL, and thresholds are unit-normalized
+// ======================================================================================
+
+test("a registration far to the RIGHT is not adjacent, however well its y lines up", () => {
+  // A vendor name on the left and a buyer registration on the right can share a horizontal
+  // band exactly. Measuring y alone calls that adjacency — distance 0 — and emits the buyer's.
+  const farX = line("Company No. 199801009999 (470001-A)", [5.4, 1.1, 7.6, 1.1, 7.6, 1.25, 5.4, 1.25]);
+  const { fields, receipt } = readVendorIdentityFromLines([page([farX])], ANCHORS);
+  assert.equal(fields.length, 0, "same band, three inches away, is not the vendor block");
+  assert.equal(receipt.vendor_anchor_far, 1);
+});
+
+test("a remote registration cannot manufacture a false ambiguity that withdraws a correct row", () => {
+  // The dual of the same defect, and the more expensive one: the buyer's registration became a
+  // second "vendor" candidate, the document read as contested, and the CORRECT typed row was
+  // withdrawn — forfeiting an identity the page stated plainly.
+  const farX = line("Company No. 199801009999 (470001-A)", [5.4, 1.1, 7.6, 1.1, 7.6, 1.25, 5.4, 1.25]);
+  const out = normalizeAzureInvoice(
+    payload({ VendorTaxId: { content: "202401047756 (1593602-X)", confidence: 0.8 } }, [LETTERHEAD_P1, farX]),
+  );
+  assert.equal(regOf(out).value_raw, "202401047756 (1593602-X)", "the correct identity survives");
+  assert.notEqual(out.envelope.vendor_identity.outcome, "ambiguous");
+  assert.equal(out.envelope.vendor_identity.typed_vs_ambiguous, 0);
+});
+
+test("an equidistant candidate is refused — a tie decided by rounding is still a tie", () => {
+  // Measured float dust on this exact geometry: 0.024201648132237796 vs 0.024201648132237852,
+  // a difference of 5.6e-17 that a bare `<` resolved in the vendor's favour.
+  const between = line("Company No. 199801009999 (470001-A)", [0.72, 2.0, 2.9, 2.0, 2.9, 2.15, 0.72, 2.15]);
+  const anchors = {
+    vendor: { page: 1, xmin: 0.72, xmax: 2.9, ymin: 1.5, ymax: 1.8 },
+    customer: { page: 1, xmin: 0.72, xmax: 2.9, ymin: 2.35, ymax: 2.6 },
+  };
+  const { fields, receipt } = readVendorIdentityFromLines([page([between])], anchors);
+  assert.equal(fields.length, 0);
+  assert.equal(receipt.closer_to_customer, 1);
+});
+
+test("a PIXEL page reads exactly what the same geometry in inches reads", () => {
+  // The X2 unit lesson, fired a second time: an inch threshold compared against raw pixels
+  // makes a legitimate 2px gap look like a 2-inch one, refusing every candidate on a
+  // photographed bill. The normalization is imported from the X2 reader, not rewritten.
+  const scale = 1100 / 8.2639; // an A4 page rendered 1100px wide
+  const px = (l) => line(l.content, l.polygon.map((n) => n * scale));
+  const pixelAnchors = {
+    vendor: { page: 1, xmin: 1.645 * scale, xmax: 2.6207 * scale, ymin: 1.0569 * scale, ymax: 1.4968 * scale },
+    customer: null,
+  };
+  const inches = readVendorIdentityFromLines([page([LETTERHEAD_P1])], { vendor: ANCHORS.vendor, customer: null });
+  const pixels = readVendorIdentityFromLines(
+    [{ pageNumber: 1, lines: [px(LETTERHEAD_P1)], unit: "pixel", width: 1100, height: 11.6806 * scale }],
+    pixelAnchors,
+  );
+  assert.equal(pixels.fields.length, 1, "same document, same reading, whichever unit the engine chose");
+  assert.equal(pixels.fields[0].value_raw, inches.fields[0].value_raw);
+  // Polygons stay in the page's OWN coordinates — scaling is internal to the comparison.
+  assert.equal(pixels.fields[0].polygon[0], 2.7122 * scale);
+});
+
+test("a pixel page with no usable width is refused, not measured in the wrong unit", () => {
+  const scale = 1100 / 8.2639;
+  const { fields, receipt } = readVendorIdentityFromLines(
+    [{ pageNumber: 1, lines: [line(LETTERHEAD_P1.content, LETTERHEAD_P1.polygon.map((n) => n * scale))], unit: "pixel", height: 11.6806 * scale }],
+    ANCHORS,
+  );
+  assert.equal(fields.length, 0);
+  assert.equal(receipt.unit_unresolved, 1);
+});
+
+test("the shared dash class is safe to interpolate into another character class", () => {
+  // It is exported as a class BODY, so an unescaped leading `-` would become a RANGE operator
+  // wherever it lands mid-class: `[#-<U+2010>]` spans every character from `#` to U+2010 and
+  // swallows digits and letters whole. That is not hypothetical — it silently emptied every
+  // registration remainder until the hyphen was escaped.
+  const built = new RegExp(`^[ \t.:#${DASH_CHARS}]+`);
+  assert.equal("202401047756".replace(built, ""), "202401047756", "digits must survive the class");
+  assert.equal(". 202401047756".replace(built, ""), "202401047756");
+  assert.equal("- 1234567-A".replace(built, ""), "1234567-A");
+  assert.equal(splitRegistrationLabel("Company No. 202401047756 (1593602-X)").remainder, "202401047756 (1593602-X)");
 });
