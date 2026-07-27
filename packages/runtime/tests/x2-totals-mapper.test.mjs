@@ -271,3 +271,45 @@ test("a safe-range agreement still collapses to one emission", () => {
   assert.equal(nets[0].value_raw, "RM 435,560.40", "the typed row survives");
   assert.equal(out.envelope.totals_reader.typed_collapsed, 1);
 });
+
+test("[K1] an AGREED field is stamped `typed_collapsed` ON THE FIELD, not just counted", () => {
+  // THE EVIDENCE CHAIN FOR CORROBORATION. From migration 0023 the database decides whether a
+  // document may post unattended by reading, per field,
+  // `envelope.totals_reader.fields.<path>.outcome === "typed_collapsed"` — the only record
+  // that TWO INDEPENDENT SOURCES read that field and agreed to the sen. A global counter
+  // cannot answer that: it cannot say WHICH field agreed, and a document with one agreed
+  // field and one typed-only field would look identical to one with two agreed fields.
+  //
+  // This was measured wrong once: the reader wrote `matched` on the field and the merge only
+  // bumped a tally, so the value the predicate keys on was never written by anything and NO
+  // document could ever corroborate. Safe, but silently dead — which is worse than loud.
+  const out = normalizeAzureInvoice(
+    payloadWith(
+      {
+        InvoiceTotal: TYPED_TOTAL,
+        SubTotal: { content: "435,560.40", boundingRegions: [{ pageNumber: 2, polygon: [7.105, 8.27, 7.7, 8.27, 7.7, 8.4, 7.105, 8.4] }], confidence: 0.839 },
+      },
+      BRIGHTPATH,
+    ),
+  );
+  const net = out.envelope.totals_reader.fields["invoice.total_excl_tax"];
+  assert.equal(net.outcome, "typed_collapsed", "the layout reader and the typed field agreed on this one");
+  assert.equal(net.value_raw, "435,560.40");
+  assert.equal(net.typed_value_raw, "435,560.40", "…and the typed side is recorded, so the agreement is auditable");
+  // The tax on this document is a printed dash: no agreement, and the field says so.
+  assert.equal(out.envelope.totals_reader.fields["invoice.tax_total"].outcome, "absent");
+});
+
+test("[K1] a field only ONE source read is never stamped as agreed", () => {
+  // Reader-only (Azure typed nothing) and typed-only (no layout lines) are both one reader.
+  const readerOnly = normalizeAzureInvoice(payloadWith({ InvoiceTotal: TYPED_TOTAL }, BRIGHTPATH));
+  assert.equal(readerOnly.envelope.totals_reader.fields["invoice.total_excl_tax"].outcome, "matched",
+    "the reader read it alone — `matched`, never `typed_collapsed`");
+
+  const typedOnly = normalizeAzureInvoice(payloadWith(
+    { InvoiceTotal: TYPED_TOTAL, SubTotal: { content: "435,560.40", confidence: 0.5 }, TotalTax: { content: "0.00", confidence: 0.5 } },
+    [],
+  ));
+  assert.deepEqual(typedOnly.envelope.totals_reader.fields, {},
+    "no layout lines means the reader has nothing to say about any field, and says nothing");
+});

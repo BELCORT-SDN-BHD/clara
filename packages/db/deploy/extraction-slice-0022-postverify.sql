@@ -177,8 +177,17 @@ end $$;
 --    component identity must also already be present (it opens CORRECT at X5).
 -- ---------------------------------------------------------------------
 do $$
-declare v_src text; v_bad text; v_code text;
+declare v_src text; v_bad text; v_code text; v_x5 boolean;
 begin
+  -- HEAD-CONDITIONAL (added when 0023 landed). This probe pins a guard that 0023 exists to
+  -- REMOVE, so at head 0023+ the original assertion is not merely stale, it asserts the
+  -- opposite of the ratified design. The condition keys off whether 0023 is APPLIED, not off
+  -- the caller's `postverify_allow_later` flag: the flag says "I know I am looking at a later
+  -- database", which an operator can set on a 0022 database by mistake, whereas the
+  -- schema_migrations row is the fact itself. Guard-ABSENCE at 0023+ is asserted by 0023's
+  -- own postverify, which is where that claim belongs; here it is deliberately not re-made.
+  select exists(select 1 from clara.schema_migrations
+                 where version = '0023_extraction_slice_x5') into v_x5;
   select prosrc into v_src from pg_proc
    where oid = 'clara.execute_rule_post(uuid,text)'::regprocedure;
   if v_src is null then
@@ -193,9 +202,26 @@ begin
   -- and what is matched is the disjunct fused to the condition it guards. A marker comment
   -- survives `if false`; a comment cannot survive stripping; and `if false` cannot produce
   -- this sequence. (The behavioural proof is x1-anchor.test.mjs — this is the belt.)
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
-  if position('iftrueorv_grossisnullorv_inv_idisnullorv_inv_dateisnull' in v_code) = 0 then
-    raise exception 'POST-VERIFY 4: the X4 dark-guard DISJUNCT is not in execute_rule_post''s executable text — the OCR-sales anchor lane may be OPEN without X5''s review (a surviving marker comment is not the guard)';
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  if not v_x5 then
+    if position('iftrueorv_grossisnullorv_inv_idisnullorv_inv_dateisnull' in v_code) = 0 then
+      raise exception 'POST-VERIFY 4: the X4 dark-guard DISJUNCT is not in execute_rule_post''s executable text — the OCR-sales anchor lane may be OPEN without X5''s review (a surviving marker comment is not the guard)';
+    end if;
+  else
+    -- At 0023+ the disjunct is gone BY DESIGN. What must still hold here is that the block it
+    -- guarded survived the removal: X5 deletes a term, not the anchor lane.
+    if position('ifv_grossisnullorv_inv_idisnullorv_inv_dateisnull' in v_code) = 0 then
+      raise exception 'POST-VERIFY 4: at 0023+ the anchor block''s own conditions are GONE — X5 removes a disjunct, not the block';
+    end if;
   end if;
   if position('invoice.service_charge' in v_src) = 0
      or position('invoice.discount' in v_src) = 0
@@ -241,7 +267,11 @@ begin
      or position('customer_unresolved' in v_src)=0 then
     raise exception 'POST-VERIFY 4: execute_rule_post lost a named gate from the 0016 ladder';
   end if;
-  raise notice 'OK 4  X4 dark guard ARMED; corrected identity staged; full gate vocabulary present';
+  if v_x5 then
+    raise notice 'OK 4  at 0023+: anchor block intact WITHOUT the dark disjunct (its absence is 0023''s postverify to assert); corrected identity + full gate vocabulary present';
+  else
+    raise notice 'OK 4  X4 dark guard ARMED; corrected identity staged; full gate vocabulary present';
+  end if;
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -252,16 +282,27 @@ end $$;
 --    verb probe above and still be the FATAL-2 regression.
 -- ---------------------------------------------------------------------
 do $$
-declare v_src text; v_code text;
+declare v_src text; v_code text; v_x5 boolean;
 begin
+  -- HEAD-CONDITIONAL, same reasoning as probe 4 and the same key. Before 0023 this probe's
+  -- job is to catch 0022 having quietly touched corroboration; after 0023 the confidence term
+  -- is GONE and the components are PRESENT on this surface deliberately, so the original
+  -- assertions would fail on a correct database. What survives at 0023+ is the half that is
+  -- still 0022's business: the STRUCTURED identity must be untouched either way.
+  select exists(select 1 from clara.schema_migrations
+                 where version = '0023_extraction_slice_x5') into v_x5;
   select prosrc into v_src from pg_proc
    where oid = 'clara._invoice_fact_state_at(uuid,uuid)'::regprocedure;
-  if v_src is null or position('v_net + v_tax + coalesce(v_rounding, 0)' in v_src)=0
-     or position('coalesce(v_conf, 0) >= 0.95' in v_src)=0 then
-    raise exception 'POST-VERIFY 5: _invoice_fact_state_at was disturbed — corroboration changes belong to X5 ALONE';
+  if v_src is null or position('v_net + v_tax + coalesce(v_rounding, 0)' in v_src)=0 then
+    raise exception 'POST-VERIFY 5: _invoice_fact_state_at lost the STRUCTURED identity — that branch is not X5''s to change';
   end if;
-  if position('invoice.service_charge' in v_src) > 0 then
-    raise exception 'POST-VERIFY 5: components leaked into the corroboration surface';
+  if not v_x5 then
+    if position('coalesce(v_conf, 0) >= 0.95' in v_src)=0 then
+      raise exception 'POST-VERIFY 5: _invoice_fact_state_at was disturbed — corroboration changes belong to X5 ALONE';
+    end if;
+    if position('invoice.service_charge' in v_src) > 0 then
+      raise exception 'POST-VERIFY 5: components leaked into the corroboration surface';
+    end if;
   end if;
   select prosrc into v_src from pg_proc
    where oid = 'clara._assert_supplier_bill_shape_at(uuid,uuid)'::regprocedure;
@@ -269,7 +310,11 @@ begin
      or position('amount_override' in v_src)=0 then
     raise exception 'POST-VERIFY 5: the supplier-bill floor was disturbed';
   end if;
-  raise notice 'OK 5  corroboration surface + supplier floor byte-stable (X5''s territory untouched)';
+  if v_x5 then
+    raise notice 'OK 5  at 0023+: structured identity + supplier floor untouched (the OCR branch is now X5''s, asserted by 0023''s own postverify)';
+  else
+    raise notice 'OK 5  corroboration surface + supplier floor byte-stable (X5''s territory untouched)';
+  end if;
 end $$;
 
 -- ---------------------------------------------------------------------
@@ -294,7 +339,16 @@ begin
   -- guard and paste its text back as `--` comments. All three counts stayed at six and both
   -- literal probes passed. Strip comments FIRST; then a comment about the guard can never
   -- stand in for the guard. (Belt — the behavioural instrument is x1-tie's sign cells.)
-  v_code := regexp_replace(regexp_replace(v_src, '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  -- BOTH COMMENT FORMS, and the order matters. Stripping only `--` left `/* ... */` intact,
+  -- which is a complete bypass: `and true /* v_net + ... = v_total */` keeps every positional
+  -- literal visible to the probe while the identity no longer executes, so a body that
+  -- corroborates anything at all still certifies green. Block comments go first (a `--`
+  -- inside one must not truncate it), then line comments, then whitespace.
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
   if (length(v_code) - length(replace(v_code, 'invoice.service_charge', ''))) / length('invoice.service_charge') < 6
      or (length(v_code) - length(replace(v_code, 'invoice.discount', ''))) / length('invoice.discount') < 6
      or (length(v_code) - length(replace(v_code, 'invoice.delivery', ''))) / length('invoice.delivery') < 6 then

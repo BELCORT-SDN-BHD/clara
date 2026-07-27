@@ -18,7 +18,7 @@ import {
   markSkip, printSkipCount, firmOf, opk,
   upsertPayableAccount, upsertAccountClassed,
   grantConsent, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
-  persistInvoiceFacts, factField, FIELD,
+  persistInvoiceFacts, factField, statedIdentityFields, agreedEnvelope, FIELD,
   draftEntryV3, approveEntry, freshResolution, billLines, ev, counterpartyRows,
   codingLane, humanPersona, AP, EXP,
 } from "./wave-a-fixtures.mjs";
@@ -89,12 +89,15 @@ async function targetFiling({ registration = null, amount = 700000 } = {}) {
     factField(FIELD.currency, "MYR"),
     factField(FIELD.vendorName, VENDOR),
     factField(FIELD.invoiceId, `INV-${randomUUID().slice(0, 8)}`),
+    // 0023 (X5): a corroborated OCR total must now STATE its arithmetic — this bill charges
+    // no SST, so it states a zero tax and a net equal to its total.
+    ...statedIdentityFields(amount),
   ];
   if (registration != null) {
     // Non-monetary: empty polygon is fine (it never corroborates a Tier-A total).
     fields.push(factField("invoice.vendor_registration", registration, { polygon: [], confidence: 0.9 }));
   }
-  await persistInvoiceFacts(task.id, fields);
+  await persistInvoiceFacts(task.id, fields, { envelope: agreedEnvelope() });
   return cited.filingId;
 }
 

@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, opk, buildWorld, firmOf, rm, fnSource,
   upsertAccountClassed, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
-  persistInvoiceFacts, factsRegion, grantConsent, freshResolution, ev, approveEntry,
+  persistInvoiceFacts, agreedEnvelope, factsRegion, grantConsent, freshResolution, ev, approveEntry,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, draftEntryV3,
   classifyDocument, postViaRule, lastSkipReason, entryStatusOf, counterpartyRows,
   proposeAutopostRule, signAutopostRule, ruleRowById, seedStatedInvoiceFacts, FIELD,
@@ -126,7 +126,9 @@ async function fullyAnchoredDoc() {
   fields.push(factField("invoice.vendor_registration", CLIENT_REG, { polygon: [], confidence: 0.9 }));
   fields.push(factField("invoice.customer_name", CUSTOMER));
   fields.push(factField("invoice.amount_due", rm(gross), { polygon: [], confidence: 0.9 }));
-  await persistInvoiceFacts(task.id, fields);
+  // 0023 (X5): a corroborated OCR document must carry the reader/typed AGREEMENT the
+  // mapper records — regions alone are one reader's assertion.
+  await persistInvoiceFacts(task.id, fields, { envelope: agreedEnvelope() });
   await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97 });
   return { cited, gross, net, tax, rounding, serviceCharge };
 }
@@ -153,11 +155,24 @@ async function anchoredDraft(cited, { gross, tax, rounding }) {
 
 // ===========================================================================
 
-test("[X4] the dark guard is ARMED and the block still carries the CORRECTED identity", async () => {
+test("[X4/X5] the dark disjunct is present at 0022 and GONE at 0023 — and the identity survives either way", async () => {
   gate();
-  assert.equal(await ocrAnchorDarkGuard(), true,
-    "execute_rule_post carries the X4 dark guard — the OCR-sales anchor lane is structurally shut");
+  // This cell reads the LIVE catalog rather than a migration number, exactly as it did while
+  // the guard was armed: at 0022 it asserts the lane is shut, at 0023 that it is open. The
+  // ONE thing it asserts unconditionally is the part that must never change — that the
+  // equation underneath is the CORRECTED component sum, so whichever side of X5 the database
+  // is on, the lane is never open onto the identity the refusal record proved wrong.
+  const armed = await ocrAnchorDarkGuard();
   const src = await fnSource("execute_rule_post");
+  if (armed) {
+    assert.ok(src.includes("if true"),
+      "at 0022 execute_rule_post carries the dark disjunct — the OCR-sales anchor lane is structurally shut");
+  } else {
+    assert.ok(!src.includes("if true"),
+      "at 0023 the disjunct is gone from the executable text, not merely from its marker comment");
+    assert.ok(src.includes("if v_gross is null or v_inv_id is null or v_inv_date is null"),
+      "…and the block it guarded is intact — X5 removes a term, not the anchor lane");
+  }
   assert.ok(src.includes("anchor_missing"),
     "…and the skip literal is unchanged, because the sentinels grep for exactly that word");
   assert.ok(src.includes("invoice.service_charge") && src.includes("invoice.discount")
@@ -167,7 +182,7 @@ test("[X4] the dark guard is ARMED and the block still carries the CORRECTED ide
     + "not on the one the refusal record showed to be wrong");
 });
 
-test("[X4/XG5] a COMPLETE, arithmetically consistent anchor set STILL skips anchor_missing", async () => {
+test("[X4/XG5] a COMPLETE, arithmetically consistent anchor set: skipped at 0022, PASSES the block at 0023", async () => {
   gate();
   assert.ok(RULE, "the ocr_sales rule is live (mandatory setup)");
   const { cited, gross, tax, rounding } = await fullyAnchoredDoc();
@@ -184,12 +199,24 @@ test("[X4/XG5] a COMPLETE, arithmetically consistent anchor set STILL skips anch
   assert.ok(draft?.entry_id, "the anchored draft exists (mandatory setup)");
   await postViaRule(draft.entry_id).catch(() => {});
 
-  assert.notEqual(await entryStatusOf(draft.entry_id), "approved",
-    "a fully anchored OCR sales draft is STILL not auto-posted — this is the whole point of "
-    + "X4: X2's fields must not open the lane as a side effect");
-  assert.equal(await lastSkipReason(draft.entry_id), "anchor_missing",
-    "…and the skip is still NAMED anchor_missing, so the live outcome is byte-stable against "
-    + "the 29 existing extractions (gate XG5: anchor outcomes change ONLY at X5's deploy)");
+  if (await ocrAnchorDarkGuard()) {
+    assert.notEqual(await entryStatusOf(draft.entry_id), "approved",
+      "a fully anchored OCR sales draft is STILL not auto-posted — this is the whole point of "
+      + "X4: X2's fields must not open the lane as a side effect");
+    assert.equal(await lastSkipReason(draft.entry_id), "anchor_missing",
+      "…and the skip is still NAMED anchor_missing, so the live outcome is byte-stable against "
+      + "the 29 existing extractions (gate XG5: anchor outcomes change ONLY at X5's deploy)");
+  } else {
+    // THE OTHER SIDE OF XG5. The same document, the same draft, the same rule — and at 0023
+    // the anchor block no longer refuses it. That is the ONE outcome X5 is allowed to change,
+    // and this is where it is measured. Whether the entry then posts depends on the controls
+    // BEHIND the anchor block (an existing resolved customer, the re-derived floor) which
+    // were shadowed until now, so the assertion is precise: the refusal is no longer
+    // `anchor_missing`.
+    assert.notEqual(await lastSkipReason(draft.entry_id), "anchor_missing",
+      "at 0023 a complete, arithmetically consistent anchor set PASSES the anchor block — "
+      + "the lane opened exactly once, at X5's deploy, and only for this shape");
+  }
 });
 
 test("[X4] the draft REACHED the anchor block — the earlier controls all passed", async () => {
@@ -208,10 +235,16 @@ test("[X4] the draft REACHED the anchor block — the earlier controls all passe
     assert.notEqual(reason, earlier,
       `the draft did not stop at ${earlier} — it got all the way to the anchor block`);
   }
-  assert.equal(reason, "anchor_missing", "…and stopped there");
+  if (await ocrAnchorDarkGuard()) {
+    assert.equal(reason, "anchor_missing", "…and stopped there");
+  } else {
+    // At 0023 it passes THROUGH the anchor block, so the interesting assertion is the same
+    // one inverted: it did not stop at any earlier control, and it did not stop there either.
+    assert.notEqual(reason, "anchor_missing", "…and at 0023 it passed through the anchor block");
+  }
 });
 
-test("[X4] the two controls the guard SHADOWS are still present in the executor", async () => {
+test("[X4/X5] the two controls the guard SHADOWED are present — and reachable once it is gone", async () => {
   gate();
   // The anchor block returns before controls (d) customer_unresolved and (e2) floor_lost, so
   // while the guard is armed those two are unreachable THROUGH THE EXECUTOR. That is a real
@@ -222,6 +255,18 @@ test("[X4] the two controls the guard SHADOWS are still present in the executor"
   assert.ok(src.includes("customer_unresolved"), "customer_unresolved is still in the executor");
   assert.ok(src.includes("floor_lost"), "floor_lost is still in the executor");
   assert.ok(src.includes("_ocr_sales_floor"), "…and the floor is still re-derived under the client lock");
-  assert.ok(src.indexOf("anchor_missing") < src.indexOf("floor_lost"),
-    "…with the anchor block ahead of them, which is WHY they are shadowed");
+  // COMMENT-STRIPPED, and the reason is not theoretical: this assertion is about the ORDER
+  // of two controls in the executable body, and it broke the moment a migration comment
+  // mentioned one of the sentinels ahead of the code that raises it. A probe about code
+  // order has to read code — the same discipline the migration tails already use.
+  const code = src.replace(/--.*/g, "");
+  assert.ok(code.indexOf("anchor_missing") < code.indexOf("floor_lost"),
+    "…with the anchor block ahead of them, which is WHY they were shadowed");
+  if (!(await ocrAnchorDarkGuard())) {
+    // The point of removing the disjunct is that these two resurface. If X5 had deleted them
+    // along with it, the lane would have opened AND lost its controls in one move — so their
+    // survival is asserted, not assumed, on exactly the side of the change where it matters.
+    assert.ok(src.includes("customer_unresolved") && src.includes("floor_lost"),
+      "at 0023 both controls survived the disjunct's removal — the lane opened, the walls did not fall");
+  }
 });

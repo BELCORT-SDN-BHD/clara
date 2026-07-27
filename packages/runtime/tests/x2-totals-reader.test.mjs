@@ -327,3 +327,94 @@ test("a dash never hides an amount-shaped refusal from the counters", () => {
   assert.equal(receipt.unparseable, 1, "AND the refused token is counted in its own right");
   assert.equal(receipt.fields["invoice.rounding"].unparseable_attempt, true);
 });
+
+// ======================================================================================
+// CELL 9 — the K-round constructions, promoted from the scratch harness
+//
+// These two were reproduced against a throwaway script and fixed, and the script was then
+// deleted — which left the guards defended by nothing. Both are false-corroboration paths
+// that end in a posted entry, so they belong in the committed suite where removing the guard
+// turns something red.
+// ======================================================================================
+
+test("[K3] two DISTINCT printed component rows are two charges, not one restated fact", () => {
+  // THE CONSTRUCTION. A face carrying subtotal 100.00, zero tax, and `Delivery RM10.00` on TWO
+  // rows is charging RM20 of delivery. Collapsing them into a single RM10 fact makes the
+  // reader's arithmetic disagree with the document by exactly the amount it dropped — and it
+  // then TIES against a typed total of 110, which is wrong by the same RM10. The document must
+  // refuse; collapsed, it corroborates and can post.
+  const row = (label, value, y) => [
+    line(label, [5.0, y, 6.0, y, 6.0, y + 0.15, 5.0, y + 0.15]),
+    line(value, [6.5, y + 0.01, 6.9, y + 0.01, 6.9, y + 0.14, 6.5, y + 0.14]),
+  ];
+  const { fields, receipt } = readTotalsFromLines(onePage([
+    ...row("Sub Total", "100.00", 8.0),
+    ...row("Delivery", "10.00", 8.25),
+    ...row("Delivery", "10.00", 8.5),
+  ]));
+  assert.equal(byPath(fields)["invoice.delivery"], undefined,
+    "two delivery rows may not become one delivery fact — the reader cannot tell 'restated' from 'two charges' and must not guess");
+  assert.equal(receipt.fields["invoice.delivery"].outcome, "ambiguous");
+  assert.equal(receipt.fields["invoice.delivery"].reason, "repeated_component");
+  assert.equal(receipt.fields["invoice.delivery"].occurrences, 2);
+  // The subtotal on the same page is unaffected: one bad field never voids the others.
+  assert.equal(byPath(fields)["invoice.total_excl_tax"].value_raw, "100.00");
+});
+
+test("[K3] a TOTALS-FAMILY field still collapses on an identical repeat", () => {
+  // The distinction is semantic and both halves matter. A summary block RESTATES one tax; the
+  // measured receipt does exactly that. If this collapsed like a component, the real document
+  // would stop reading.
+  const row = (label, value, y) => [
+    line(label, [5.0, y, 6.0, y, 6.0, y + 0.15, 5.0, y + 0.15]),
+    line(value, [6.5, y + 0.01, 6.9, y + 0.01, 6.9, y + 0.14, 6.5, y + 0.14]),
+  ];
+  const { fields, receipt } = readTotalsFromLines(onePage([
+    ...row("Service Tax (6%)", "5.66", 8.0),
+    ...row("Service Tax (6%)", "5.66", 9.0),
+  ]));
+  assert.equal(byPath(fields)["invoice.tax_total"].value_raw, "5.66", "one fact, stated twice");
+  assert.equal(receipt.fields["invoice.tax_total"].occurrences, 2);
+  assert.equal(receipt.ambiguous, 0);
+});
+
+test("[K4] a rounding adjustment larger than 99 sen is not rounding", () => {
+  // THE CONSTRUCTION. Subtotal 200.00, zero tax, a detached-minus `Rounding 100.00` and a typed
+  // total of 100.00 certifies `200 - 100 = 100`. The entry then posts with NO rounding leg at
+  // all, because the supplier floor validates the JOURNAL rather than the extracted figure —
+  // so an unbounded signed rounding balances an arbitrarily wrong gross.
+  const roundingRow = (value, y) => [
+    line("Rounding", [5.0, y, 6.0, y, 6.0, y + 0.15, 5.0, y + 0.15]),
+    line("-", [6.2, y + 0.01, 6.3, y + 0.01, 6.3, y + 0.14, 6.2, y + 0.14]),
+    line(value, [6.5, y + 0.01, 6.9, y + 0.01, 6.9, y + 0.14, 6.5, y + 0.14]),
+  ];
+  const big = readTotalsFromLines(onePage(roundingRow("100.00", 8.0)));
+  assert.equal(byPath(big.fields)["invoice.rounding"], undefined, "a ringgit of 'rounding' is refused");
+  assert.equal(big.receipt.fields["invoice.rounding"].outcome, "unparseable");
+  assert.equal(big.receipt.fields["invoice.rounding"].reason, "rounding_out_of_bounds");
+});
+
+test("[K4] the bound is 99 sen exactly — 0.99 reads, 1.00 does not", () => {
+  // A threshold nobody tests at its edge is a threshold nobody knows the value of.
+  const roundingRow = (value, y) => [
+    line("Rounding", [5.0, y, 6.0, y, 6.0, y + 0.15, 5.0, y + 0.15]),
+    line("-", [6.2, y + 0.01, 6.3, y + 0.01, 6.3, y + 0.14, 6.2, y + 0.14]),
+    line(value, [6.5, y + 0.01, 6.9, y + 0.01, 6.9, y + 0.14, 6.5, y + 0.14]),
+  ];
+  const at = readTotalsFromLines(onePage(roundingRow("0.99", 8.0)));
+  assert.equal(byPath(at.fields)["invoice.rounding"].value_raw, "-0.99", "99 sen is inside the bound");
+  assert.equal(centsOfRaw(byPath(at.fields)["invoice.rounding"].value_raw), -99n);
+
+  const over = readTotalsFromLines(onePage(roundingRow("1.00", 8.0)));
+  assert.equal(byPath(over.fields)["invoice.rounding"], undefined, "one ringgit is outside it");
+  assert.equal(over.receipt.fields["invoice.rounding"].reason, "rounding_out_of_bounds");
+
+  // And the measured 40-sen case — the real BRIGHTPATH face — still reads with room to spare.
+  const measured = readTotalsFromLines(onePage(roundingRow("0.40", 8.0)));
+  assert.equal(byPath(measured.fields)["invoice.rounding"].value_raw, "-0.40");
+
+  // The bound is an opt, so a corpus that genuinely rounds harder can be re-measured rather
+  // than argued about — but the DEFAULT is what ships, and that is what these cells pin.
+  const relaxed = readTotalsFromLines(onePage(roundingRow("1.00", 8.0)), { maxRoundingCents: 100 });
+  assert.equal(byPath(relaxed.fields)["invoice.rounding"].value_raw, "-1.00");
+});
