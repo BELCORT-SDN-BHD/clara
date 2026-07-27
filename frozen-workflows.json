@@ -1,6 +1,10 @@
 {
   "version": 1,
   "workflows": {
+    "packages/runtime/lib/malaysian-registration.mjs": {
+      "sha256": "b07bbf682aab55f04d584cde271fc66ba5fe8c6a8684ccce685e64d102868a7a",
+      "note": ""
+    },
     "packages/runtime/workflows/autoDraft.v1.errors.ts": {
       "sha256": "382e1fc75eef8159ba1fc7465c6f7d7858c51a6bd533aaa750d99667a3c87187",
       "note": "",
@@ -291,6 +295,10 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/clientOnboarding.v2.ts": {
+      "sha256": "4ec75c2d086b821399ff6a3e917541d55acf6e997b0483b659b490c21efe6a68",
+      "note": ""
+    },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
       "note": "",
@@ -316,6 +324,10 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/firmInterview.v2.ts": {
+      "sha256": "e7053e0019c13743d3f8d6070275f447948eb5ab96a383fe26da1a1b5e90ac79",
+      "note": ""
+    },
     "packages/runtime/workflows/interview.v1.core.ts": {
       "sha256": "8a4d79337256050dac239d1165e87e778a2f4ee584464c9a56f2981791e23c54",
       "note": "",
@@ -335,6 +347,18 @@
       "sha256": "28c93bb7a7be8c0bcb2d059930c385d64bf76704df623f9626438c935a171582",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/interview.v2.core.ts": {
+      "sha256": "e9d32dfc14368cfab6510d9c7eae159a2c820369bdb42e304a03e7270b34bc94",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v2.frameworks.ts": {
+      "sha256": "d70fb5815c54776d83af487e68d3be7683f53dab86d6fe45bd28281f7a00b357",
+      "note": ""
+    },
+    "packages/runtime/workflows/interview.v2.questions.ts": {
+      "sha256": "7e3f061d985357c253543da34f6f16dec639f6559a68e8219dc2fdb0764ea1a1",
+      "note": ""
     },
     "packages/runtime/workflows/invoiceFacts.v1.behavior.mjs": {
       "sha256": "f2d3ef98ed9ce533d04252fd5771e463b017c8b66c77ec70d74a457f534bd7b1",

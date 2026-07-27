@@ -20,7 +20,9 @@ import { autoDraft_v1 } from "./autoDraft.v1.js";
 import { autoDraft_v2 } from "./autoDraft.v2.js";
 import { autoDraft_v3 } from "./autoDraft.v3.js";
 import { firmInterview_v1 } from "./firmInterview.v1.js";
+import { firmInterview_v2 } from "./firmInterview.v2.js";
 import { clientOnboarding_v1 } from "./clientOnboarding.v1.js";
+import { clientOnboarding_v2 } from "./clientOnboarding.v2.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
@@ -28,8 +30,8 @@ export const workflows = {
   documentIngest: documentIngest_v1,
   invoiceFacts: invoiceFacts_v1,
   autoDraft: autoDraft_v3,
-  firmInterview: firmInterview_v1,
-  clientOnboarding: clientOnboarding_v1,
+  firmInterview: firmInterview_v2,
+  clientOnboarding: clientOnboarding_v2,
 } as const;
 
 // Slice 6 repointed `chatTurn:` v1→v2, then v2→v3 (the GATE-3 live find: v2's
@@ -54,8 +56,18 @@ export const workflows = {
 // a z.literal, and carry the WB-R6(4) wiki framing + citation-visible-reasoning prompt
 // law; the frozen v1–v6/v1–v2 closures stay wiki-dark by construction. Wave B also added
 // the two durable interview classes (FORK-8): firmInterview_v1 + clientOnboarding_v1
-// (hook-per-question parks, P19 plan-checkpoint persistence). Drop a
-// re-export only once zero non-terminal runs of that version remain.
+// (hook-per-question parks, P19 plan-checkpoint persistence). Post-Wave-B repointed BOTH
+// interview classes v1→v2 (interview_v2, F1+F2): v1's registration validator anchored on a
+// leading digit and refused a state-prefixed ROB number outright — a sole-proprietor client
+// could not be onboarded at all — and its framework question offered only MPERS/MFRS, which is
+// a Sdn Bhd's choice presented as everyone's (no approved standard is imposed on an LLP or a
+// ROBA-registered business). v2 accepts every printed registration form and asks two
+// entity-type-aware axes (framework + accounting basis) over a config table. The v1 bodies stay
+// frozen, built and EXPORTED so no parked run is stranded (policy (c)) — this class's parks are
+// the ≥48h kind, so a live run on v1 is the expected case, not a corner one; the engine resumes
+// them by run id. Drop a re-export only once zero non-terminal runs of that version remain.
+export { firmInterview_v1 };
+export { clientOnboarding_v1 };
 export { chatTurn_v1 };
 export { chatTurn_v2 };
 export { chatTurn_v3 };

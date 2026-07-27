@@ -130,8 +130,24 @@ export function looksLikeRegistration(s) {
   return true;
 }
 
+/**
+ * The STRICT sibling of `looksLikeRegistration`, added for the durable onboarding interview
+ * (interview_v2 / F1) and re-exported here so this module remains the one place a reader looks
+ * for "what counts as a Malaysian registration". The two gates are deliberately different and
+ * neither replaces the other: `looksLikeRegistration` above is a MATCHING gate (a loose token
+ * filter whose worst case is a non-match against the registry), while
+ * `looksLikeBusinessRegistration` is a DATA-ENTRY gate that enumerates the printed forms —
+ * legacy `1475415-P`, state-prefixed `SA1234567-X`, unified `202401001234`, and the combined
+ * `202401047756 (1593602-X)` this module measured in a live letterhead. The definition lives in
+ * the dependency-free leaf `malaysian-registration.mjs` because the interview's frozen closure
+ * imports it, and that closure must not swallow this module's own imports (the X2 readers) into
+ * the freeze; see that file's header. `looksLikeRegistration` is untouched.
+ */
+export { looksLikeBusinessRegistration, classifyBusinessRegistration, normalizeRegistration } from "./malaysian-registration.mjs";
+
 /** The DB's own registration key: strip separators, lowercase (0009:359-360). Used ONLY to
- *  decide whether two readings are the same registration — never emitted. */
+ *  decide whether two readings are the same registration — never emitted. Identical in rule to
+ *  `normalizeRegistration` re-exported above; a test pins the two together so they cannot drift. */
 export const registrationKey = (s) => String(s ?? "").replace(/[^a-zA-Z0-9]/g, "").toLowerCase();
 
 /**
