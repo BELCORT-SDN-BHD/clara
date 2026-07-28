@@ -462,10 +462,13 @@ end $function$;
 -- (documents, document_filings) takes them in the same order, the cycle is structurally
 -- impossible, not merely rare-and-recoverable. packages/db/tests/wave-b/wb-0020-resolver.test.mjs
 -- carries two two-session races that already exercise this pair (raceIngestThenFileB,
--- raceIngestThenRetire) with an "either serializes cleanly OR aborts 40P01" assertion —
--- unchanged by this fix (a strict subset of that OR now always holds), but their `blocked`
--- detection describes which specific lock caused the park; updated in the same commit to
--- name the lock this fix actually changes.
+-- raceIngestThenRetire) — updated across the P-round and Q-round to match: their `blocked`
+-- detection now names the lock this fix actually changed (documents, not document_filings,
+-- for the retire pairing), and their outcome assertions are SERIALIZATION-ONLY (a hard
+-- success requirement), not the old "either serializes cleanly OR aborts 40P01" — accepting
+-- 40P01 there would mask this fix's own regression instead of catching it. The R-1 test's
+-- retirement-aborted branch, which represented an outcome this fix makes unreachable, was
+-- removed rather than left as unreachable dead code.
 --
 -- NOT a 0020 §6 byte-identity closed-set member (verified against packages/db/tests/wave-b/
 -- wb-0020-legacy.test.mjs's BYTE_IDENTICAL map: grant_client_egress, revoke_client_egress,

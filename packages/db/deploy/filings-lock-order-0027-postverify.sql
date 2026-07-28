@@ -59,6 +59,19 @@
 -- serialization-only, now that P1 makes the cycle they were hedging against structurally
 -- dead; Q3 fixes 0027_filings_lock_order.sql's own header, which had drifted from its tail.)
 --
+-- R-ROUND (two residuals, the closing round). R1: probe 6 was STILL fail-open at its
+-- default — it recognized ONLY/quoted forms for insert/update/delete but not for MERGE
+-- (fixed), and more structurally, a write-shaped statement in ANY form the `recognized`
+-- regex did not anticipate simply matched nothing and passed through unexamined. Probe 6
+-- now runs a SECOND, deliberately broad `suspicious` regex (any DML verb within 80
+-- characters of a document_filings mention, with FOR UPDATE/FOR NO KEY UPDATE locking
+-- clauses stripped first so a row-lock read never false-positives) and fails on anything
+-- `suspicious` finds that the narrow `recognized`+allowlist escape hatch cannot account
+-- for — negative-tested against a doctored function whose write is built via string
+-- concatenation (so it evades `recognized` but not `suspicious`); it trips the probe.
+-- (R2 is in 0027_filings_lock_order.sql's own §D header — the stale "OR 40P01, unchanged"
+-- description of the resolver race tests, now corrected to match Q1's tightening.)
+--
 -- THE HONEST FRAMING (carried from every prior migration's postverify): this is BELT. The
 -- primary defense is the migration's own in-transaction tail, already run and already
 -- raised on any failure during the ceremony itself. This file re-proves the same claims
@@ -219,6 +232,26 @@ begin
   -- on a non-plain-function oid (e.g. pg_catalog.array_agg) anywhere in the full catalog.
   -- Materializing the already-nspname-filtered set first means pg_get_functiondef() only
   -- ever runs against clara's own (all prokind='f') functions.
+  --
+  -- 0027 R-round (finding 1): TRUE fail-closed, not just a bigger allowlist. Two regexes,
+  -- not one:
+  --   `recognized` — the NARROW, precise escape hatch: the four DML verbs against
+  --     document_filings in every legal spelling this probe knows about (schema-qualified
+  --     or not, ONLY, quoted identifiers). A match here still needs its signature in the
+  --     allowlist to pass.
+  --   `suspicious` — the BROAD net: any of insert/update/delete/merge ANYWHERE within 80
+  --     characters of a document_filings mention, regardless of exact spelling. This is
+  --     what changed: previously, a write-shaped statement in a form `recognized` did not
+  --     anticipate simply never matched anything and passed through UNEXAMINED — not
+  --     flagged, not counted, invisible. Now, `suspicious` catches the near-miss too, and
+  --     the probe fails on anything `suspicious` finds that `recognized`+allowlist cannot
+  --     account for — refusing what it cannot classify, instead of skipping it.
+  -- `FOR UPDATE` / `FOR NO KEY UPDATE` (row-locking clauses, not DML) are stripped before
+  -- the broad scan runs — resolve_and_ingest_wiki_source's own `... for update; perform 1
+  -- from clara.document_filings ...` would otherwise false-positive `suspicious` on the
+  -- word "update" from its documents lock, sitting well within 80 characters of the
+  -- document_filings read two statements later. `recognized` is unaffected either way
+  -- (its verb+INTO/FROM adjacency requirement never matches a bare locking clause).
   with clara_fns as materialized (
     select p.oid, p.oid::regprocedure::text as sig,
            regexp_replace(
@@ -228,26 +261,34 @@ begin
              '\s+', ' ', 'g') as src
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'clara'
+  ),
+  classified as (
+    select oid, sig, src,
+           regexp_replace(src, '\yfor\s+(no\s+key\s+)?update\y', '', 'gi') as src_proximity
+    from clara_fns
   )
   select string_agg(sig, ', ')
     into v_bad_text
-    from clara_fns
-    where (src ~* 'insert\s+into\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y'
-           or src ~* 'update\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y'
-           or src ~* 'delete\s+from\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y'
-           or src ~* 'merge\s+into\s+("?clara"?\.)?"?document_filings"?\y')
-      and sig not in (
-        'clara.file_document(uuid,uuid,text,text)',
-        'clara.finalize_document_intake(uuid,text,text,jsonb,integer,text,uuid,uuid,text)',
-        'clara._seed_verified_document(uuid,uuid,text,text,text,bigint,text,uuid,integer,text,date,uuid)',
-        'clara.confirm_attribution_candidate(uuid,text,boolean)',
-        'clara.approve_wrong_client_correction(uuid,text,text,text)',
-        'clara.retire_document_filing(uuid,text,uuid,text)'
+    from classified
+    where src_proximity ~* '\y(insert|update|delete|merge)\y[\s\S]{0,80}?document_filings\y'
+      and not (
+        (src ~* 'insert\s+into\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y'
+         or src ~* 'update\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y'
+         or src ~* 'delete\s+from\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y'
+         or src ~* 'merge\s+into\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y')
+        and sig in (
+          'clara.file_document(uuid,uuid,text,text)',
+          'clara.finalize_document_intake(uuid,text,text,jsonb,integer,text,uuid,uuid,text)',
+          'clara._seed_verified_document(uuid,uuid,text,text,text,bigint,text,uuid,integer,text,date,uuid)',
+          'clara.confirm_attribution_candidate(uuid,text,boolean)',
+          'clara.approve_wrong_client_correction(uuid,text,text,text)',
+          'clara.retire_document_filing(uuid,text,uuid,text)'
+        )
       );
   if v_bad_text is not null then
-    raise exception '0027 postverify: an UNENUMERATED document_filings writer exists in the deployed catalog: %', v_bad_text;
+    raise exception '0027 postverify: an UNENUMERATED or UNCLASSIFIABLE document_filings write-shaped touch exists in the deployed catalog: %', v_bad_text;
   end if;
-  raise notice '0027 postverify OK (6/6): no unenumerated document_filings writer exists among the STATIC forms this probe can see — the six-signature set is exhaustive against them (dynamic SQL is out of this probe''s reach by construction; the build-time CoR enumeration is the primary defense there)';
+  raise notice '0027 postverify OK (6/6): no unenumerated or unclassifiable document_filings write-shaped touch exists — the six-signature set is exhaustive against every DML-verb-proximate mention this probe can see (dynamic SQL is out of any syntactic probe''s reach by construction; the build-time CoR enumeration is the primary defense there)';
 
   raise notice '0027 postverify: ALL PROBES PASSED — documents-before-document_filings lock order is consistent across every live writer AND the resolve_and_ingest_wiki_source reader';
 end
