@@ -38,14 +38,28 @@
 //
 //   · A trial balance that does not BALANCE is not a trial balance. ΣDr ≠ ΣCr refuses the WHOLE
 //     document — never the "closest" reading, never a plug.
-//   · When the document prints its own grand total, our sums must equal it EXACTLY. This is the
-//     guard against the silent killer: a row Azure dropped, which balances perfectly by itself.
+//   · When the document prints its own total, our sums must equal it EXACTLY. This is the guard
+//     against the silent killer: a row Azure dropped, which balances perfectly by itself.
+//   · When it prints TWO DIFFERENT totals, no total can be preferred without inventing a rule
+//     the document does not state — so the document is refused rather than adjudicated.
+//   · A total row whose money we cannot read EXACTLY is a refusal, never a shrug. The guard
+//     must not evaporate at the moment the document is noisiest.
 //   · ANY line-level refusal forfeits the whole document (F-H5, the house all-or-nothing law).
 //     A partial opening seed is worse than none, because none is obvious.
 //   · Every refusal is COUNTED and NAMED. No silent caps, no survivors-only set.
 //   · A parenthesised or negative figure is REFUSED, never sign-flipped into the other column.
+//   · NONBLANK content in an amount column is either an exact figure or a refusal. "Absent"
+//     means the cell was EMPTY — never "I could not make sense of this", which is how an
+//     OCR-mangled `9OO.00` turned a two-sided row into a clean, balanced, wrong one.
 //   · A printed `0.00` or `-` is the document saying NIL, not a balance. Those rows are skipped
-//     and reported as `nilRows` — they contribute no target and no tie.
+//     and reported as `nilRows` — but they still CLAIM their account code for duplicate
+//     detection, because "this account is nil" is a statement about that account.
+//
+// THE COST OF ALL THAT, STATED PLAINLY: this reader refuses documents a more relaxed one would
+// read. A trial balance with section subtotals, a footer that lands inside the table's column
+// band, an amount column carrying a stray note — each is a refusal, and each sends a human to
+// look at a document that may well be fine. That trade is deliberate and it is not close: a
+// refusal costs an interruption, and a wrong opening balance costs every number after it.
 //
 // ── AND THE PRODUCER CHECKS ITSELF ───────────────────────────────────────────────────────────
 // Every line it emits is re-parsed through `parseOpeningTbLine` — the byte-for-byte mirror of
@@ -60,7 +74,7 @@ import {
   norm,
   rowPolygon,
 } from "./table-cell-geometry.mjs";
-import { asciiTrim, centsOfRaw, isDash, isStrictAmount, looksLikeAmountAttempt } from "./invoice-amount-grammar.mjs";
+import { asciiTrim, centsOfRaw, isDash, isStrictAmount } from "./invoice-amount-grammar.mjs";
 import { namedUnparseableReason, parseOpeningTbLine } from "./opening-parse.mjs";
 
 /** Account-code shapes the opening grammar accepts (0017 `_derive_opening_region_fact`). */
@@ -76,8 +90,19 @@ const TOTAL_LABEL_RE = /^(?:grand\s+)?total\b|^jumlah\b/i;
 // Header synonyms across the Malaysian packages that print a trial balance (UBS, AutoCount,
 // SQL Accounting, MYOB exports). `debit`/`credit` deliberately accept the bare `dr`/`cr` a
 // narrow column prints, and the `(MYR)`/`(RM)` suffix every one of them appends.
+//
+// EVERY `code` SYNONYM MUST NAME AN ACCOUNT — it contains "code", "acc"/"account", or "gl",
+// and that rule is the fix for a real defect, not tidiness. A bare `No` was on this list, and
+// `No` is what a JOURNAL prints over its SERIAL-NUMBER column. A balanced journal headed
+// `No | Description | Debit | Credit` with four-digit line numbers therefore identified as a
+// trial balance and emitted `0001 Cash introduced RM 1,000.00 DR` — a fabricated opening
+// balance whose "account code" was a row counter, canonical enough for 0017 to accept and
+// balanced enough to pass both tie gates. Row VALUES cannot save us here (`0001` is a valid
+// account shape and always will be), so the header token is the only place this is decidable:
+// a serial column must never be read as account evidence.
 const HEADER_SYNONYMS = {
-  code: ["code", "a/c code", "acc code", "account code", "account no", "account no.", "acc no", "gl code", "no"],
+  code: ["code", "a/c code", "acc code", "acc. code", "account code", "account no", "account no.",
+    "acc no", "gl code", "gl account", "kod", "kod akaun"],
   description: ["description", "account description", "account name", "name", "particulars", "account", "acc name"],
   debit: ["debit", "dr", "debit (myr)", "debit (rm)", "debit rm", "dr (myr)", "debit amount"],
   credit: ["credit", "cr", "credit (myr)", "credit (rm)", "credit rm", "cr (myr)", "credit amount"],
@@ -109,19 +134,33 @@ export function readTrialBalanceHeader(row) {
   return complete ? cols : null;
 }
 
+/** The ONLY nonblank content an amount column may carry without stating a figure: a footnote
+ *  marker. Explicit and tiny on purpose — see the ABSENCE rule in `readAmountCell`. */
+const NOTE_MARKER_RE = /^[*†‡#]{1,3}$/;
+
 /**
- * Read ONE amount cell. Returns a typed verdict rather than a number, because the three
+ * Read ONE amount cell. Returns a typed verdict rather than a number, because the four
  * outcomes are genuinely different things and collapsing them is how a nil becomes a zero
  * balance or a mangled token becomes an absence.
- *   { kind:'absent' }              — the column is empty here (the ordinary one-sided row)
+ *   { kind:'absent' }              — the cell is EMPTY or missing (the ordinary one-sided row)
  * · { kind:'nil' }                 — the document printed `-` or `0.00`: no balance, stated
  * · { kind:'amount', raw, cents }  — a strict, positive, comma-grouped figure (BigInt cents)
- * · { kind:'unparseable', raw }    — amount-SHAPED but outside the accept grammar (negative,
- *                                    parenthesised, three decimals, Unicode-space-infected)
+ * · { kind:'unparseable', raw }    — anything else NONBLANK: a parenthesised or negative
+ *                                    figure, three decimals, an ungrouped run, OCR mangling
+ *
+ * ABSENCE MEANS EMPTY, AND NOTHING ELSE. This is the module's most important single rule, and
+ * it is written in blood: the first version fell back to `absent` for any nonblank token that
+ * did not LOOK amount-shaped, which sounds harmless and is not. `9OO.00` — a printed `900.00`
+ * whose zeroes OCR'd as the letter O — is not amount-shaped, so a genuinely TWO-SIDED row read
+ * as cleanly one-sided. Two such rows produced a perfectly balanced, perfectly canonical, and
+ * completely wrong opening seed that the database accepted without complaint, because every
+ * line it was shown was individually valid. The failure was invisible at every downstream
+ * checkpoint. So: an amount column either printed nothing, or it printed something we can read
+ * exactly, or we do not know what this row says — and not knowing is a refusal.
  */
 export function readAmountCell(cell) {
   const raw = stripCurrency(cellText(cell));
-  if (raw === "") return { kind: "absent" };
+  if (raw === "") return { kind: "absent" }; // genuinely empty, or no cell at that column
   if (isDash(raw)) return { kind: "nil" };
   if (isStrictAmount(raw)) {
     const cents = centsOfRaw(raw);
@@ -130,11 +169,8 @@ export function readAmountCell(cell) {
     // A NEGATIVE cannot reach here (AMOUNT_STRICT has no sign) — asserted, not assumed.
     return cents > 0n ? { kind: "amount", raw, cents } : { kind: "unparseable", raw };
   }
-  // Amount-shaped but refused: a parenthesised credit sitting in the Debit column, a minus
-  // sign, `1.234` — every one of them a sign or a scale error waiting to be coerced. Surfaced
-  // as unparseable so a human sees it; NEVER repaired here.
-  if (looksLikeAmountAttempt(raw)) return { kind: "unparseable", raw };
-  return { kind: "absent" }; // ordinary text in an amount column (a stray note) — not a figure
+  if (NOTE_MARKER_RE.test(raw)) return { kind: "absent" }; // a footnote mark states no figure
+  return { kind: "unparseable", raw };
 }
 
 /** The canonical `opening_tb.line` evidence text: `<code> <label> RM <amount> <DR|CR>`. */
@@ -178,13 +214,17 @@ function readDataRow(row, cols) {
   const credit = readAmountCell(cellAt(row, cols.credit));
 
   if (!ACCOUNT_RE.test(accountCode)) {
-    // No account. If the row carries no figure either it is FURNITURE — a page header, a
-    // section caption, a `Balance B/F` line — and skipping it is right. But a FIGURE with no
-    // account is an unexplained balance: an unlabelled section subtotal, a lower-case or
-    // OCR-mangled code, a column we have mislearned. It must not be silently dropped and left
-    // to surface later as a mysterious "does not balance", so it is refused by name.
-    const hasFigure = debit.kind === "amount" || credit.kind === "amount";
-    return hasFigure
+    // No account. If the amount columns are EMPTY (or state a bare nil) this is FURNITURE — a
+    // page header, a section caption, a report title — and skipping it is right. But content
+    // in an amount column with no account is an unexplained balance: an unlabelled section
+    // subtotal, a lower-case or OCR-mangled code, a column we have mislearned. It must not be
+    // silently dropped and left to surface later as a mysterious "does not balance".
+    //
+    // `unparseable` COUNTS AS CONTENT here, not just `amount`. Testing only for a clean figure
+    // was the same hole as the absent-fallback above, one level up: OCR-mangled money on a
+    // code-less row would have been furniture and vanished.
+    const stated = [debit, credit].some((v) => v.kind === "amount" || v.kind === "unparseable");
+    return stated
       ? { kind: "refusal", refusal: refusal(row, "unrecognized_account_code", accountCode || null) }
       : { kind: "furniture" };
   }
@@ -198,8 +238,10 @@ function readDataRow(row, cols) {
     return { kind: "refusal", refusal: refusal(row, "two_sided_row") };
   }
   if (debit.kind !== "amount" && credit.kind !== "amount") {
-    // Both columns say NIL → the document states this account has no opening balance.
-    if (debit.kind === "nil" || credit.kind === "nil") return { kind: "nil" };
+    // Both columns say NIL → the document states this account has no opening balance. The
+    // account code travels with the verdict: a nil row still CLAIMS a code, so it must take
+    // part in duplicate detection like any other statement about that account.
+    if (debit.kind === "nil" || credit.kind === "nil") return { kind: "nil", accountCode };
     // Both columns are simply EMPTY on a row that carries a real account code: a figure that
     // should be here is not. Refused, never read as zero.
     return { kind: "refusal", refusal: refusal(row, "amount_missing") };
@@ -241,10 +283,19 @@ function readDataRow(row, cols) {
 }
 
 /**
- * The document's own printed grand total, when it prints one. A total row is CODE-LESS: the
- * check matters, because a real account can be described "TOTAL CREDITORS CONTROL", and
- * label-matching alone would swallow that line into a summation row and lose a balance
- * silently — the exact failure mode the printed-total guard exists to catch.
+ * The document's own printed total, when it prints one. Returns null (not a total row), a
+ * typed refusal, or the stated pair.
+ *
+ * A total row is CODE-LESS: the check matters, because a real account can be described
+ * "TOTAL CREDITORS CONTROL", and label-matching alone would swallow that line into a summation
+ * row and lose a balance silently — the exact failure mode this guard exists to catch.
+ *
+ * A RECOGNISED TOTAL LABEL WHOSE MONEY WE CANNOT READ IS A REFUSAL, never a shrug. The first
+ * version returned null there, which quietly deleted the guard at precisely the moment the
+ * document was noisiest: a TB printing `1500.00` (ungrouped, outside the accept grammar) with
+ * a whole balanced pair of rows missing came back `status:'ok'`, `printedTotals:null`, and an
+ * incomplete seed. The only reading of "the document states a total I cannot parse" that is
+ * safe is that I have not read this document.
  */
 function readTotalRow(row, cols) {
   if (ACCOUNT_RE.test(cellText(cellAt(row, cols.code)))) return null;
@@ -252,14 +303,20 @@ function readTotalRow(row, cols) {
   if (!TOTAL_LABEL_RE.test(label)) return null;
   const debit = readAmountCell(cellAt(row, cols.debit));
   const credit = readAmountCell(cellAt(row, cols.credit));
-  const cents = (v) => (v.kind === "amount" ? v.cents : v.kind === "nil" ? 0n : null);
-  const d = cents(debit);
-  const c = cents(credit);
-  if (d === null || c === null) return null;
-  // A total row that prints NO figure at all states nothing. Recording it as "the document says
-  // zero" would turn a total row whose cells Azure dropped into a guaranteed refusal of an
-  // otherwise sound trial balance — a false alarm manufactured out of our own missing read.
-  return d === 0n && c === 0n ? null : { debitCents: d, creditCents: c };
+
+  // A bare `TOTAL` caption with BOTH columns empty states nothing at all, and treating it as
+  // "the document says zero" would refuse an otherwise sound trial balance over a caption.
+  if (debit.kind === "absent" && credit.kind === "absent") return null;
+
+  const bad = [debit, credit].find((v) => v.kind === "unparseable");
+  if (bad) return { kind: "refusal", reason: "total_unparseable", detail: bad.raw };
+  // One side stated, the other empty: the document states a total we can only half-read. Not
+  // zero — a printed total is a PAIR, and half of one proves nothing.
+  if (debit.kind === "absent" || credit.kind === "absent") {
+    return { kind: "refusal", reason: "total_incomplete", detail: null };
+  }
+  const cents = (v) => (v.kind === "amount" ? v.cents : 0n);
+  return { kind: "total", debitCents: cents(debit), creditCents: cents(credit) };
 }
 
 const fmt = (cents) => `${cents / 100n}.${String(cents % 100n).padStart(2, "0")}`;
@@ -277,7 +334,11 @@ const fmt = (cents) => `${cents / 100n}.${String(cents % 100n).padStart(2, "0")}
  *   nilRows: number,
  *   totals: {debitCents: bigint, creditCents: bigint},
  *   printedTotals: {debitCents: bigint, creditCents: bigint}|null,
+ *   statedTotals: Array<{debitCents: bigint, creditCents: bigint}>,
  * }}
+ *
+ * `printedTotals` is the document's total ONLY when it stated exactly one; `statedTotals`
+ * always reports every distinct pair it stated, so a multi-total refusal can be read back.
  *
  * `null` means "this is not a trial balance" and is the CONSERVATIVE default: the reader must
  * POSITIVELY identify one (a header carrying code + description + Debit + Credit, no date
@@ -294,8 +355,10 @@ export function cellsToOpeningTb(cells) {
   const lines = [];
   const refusals = [];
   let nilRows = 0;
-  let printedTotals = null;
-  const seenCodes = new Map(); // account code -> index of the first line that claimed it
+  const statedTotals = []; // every DISTINCT total pair the document printed
+  // account code -> index of the emitted line that claimed it, or NIL_CLAIM for a nil row
+  const seenCodes = new Map();
+  const NIL_CLAIM = -1;
 
   for (const row of rows) {
     // A `Code : <account>` block header is the signature of a GENERAL LEDGER. Seeing one means
@@ -313,25 +376,36 @@ export function cellsToOpeningTb(cells) {
 
     const total = readTotalRow(row, cols);
     if (total) {
-      printedTotals = total; // the LAST total row wins: a grand total prints below its subtotals
+      if (total.kind === "refusal") {
+        refusals.push(refusal(row, total.reason, total.detail));
+      } else if (!statedTotals.some((t) => t.debitCents === total.debitCents
+          && t.creditCents === total.creditCents)) {
+        // COLLECT, NEVER OVERWRITE. An identical pair repeated (a total carried across pages)
+        // is one claim and collapses; a DIFFERENT pair is a second claim, adjudicated below.
+        statedTotals.push(total);
+      }
       continue;
     }
 
     const read = readDataRow(row, cols);
     if (read.kind === "furniture") continue;
-    if (read.kind === "nil") { nilRows += 1; continue; }
     if (read.kind === "refusal") { refusals.push(read.refusal); continue; }
 
-    const prior = seenCodes.get(read.line.accountCode);
+    // A nil row and an emitted line both CLAIM an account code, so BOTH take part in duplicate
+    // detection. Skipping nils past this check (as the first version did) left the stated rule
+    // — "a code stated twice is ambiguous" — quietly untrue for exactly the pairing a careless
+    // export produces: the same account listed once as `-` and once with a balance.
+    const claimed = read.kind === "nil" ? read.accountCode : read.line.accountCode;
+    const prior = seenCodes.get(claimed);
     if (prior !== undefined) {
-      // A code stated twice is genuinely ambiguous: neither reading can be preferred without
-      // inventing a rule the document does not state. BOTH are refused — the first is pulled
-      // back out of the emitted set — so a duplicate can never quietly win by being first.
-      refusals.push(refusal(row, "duplicate_account_code", read.line.accountCode));
-      if (lines[prior]) {
+      // Neither reading can be preferred without inventing a rule the document does not state.
+      // BOTH are refused — the first is pulled back out of the emitted set — so a duplicate can
+      // never quietly win by being first.
+      refusals.push(refusal(row, "duplicate_account_code", claimed));
+      if (prior !== NIL_CLAIM && lines[prior]) {
         refusals.push({
           reason: "duplicate_account_code",
-          detail: read.line.accountCode,
+          detail: claimed,
           row_key: `line:${prior}`,
           text: lines[prior].text,
         });
@@ -339,7 +413,12 @@ export function cellsToOpeningTb(cells) {
       }
       continue;
     }
-    seenCodes.set(read.line.accountCode, lines.length);
+    if (read.kind === "nil") {
+      seenCodes.set(claimed, NIL_CLAIM);
+      nilRows += 1;
+      continue;
+    }
+    seenCodes.set(claimed, lines.length);
     lines.push(read.line);
   }
 
@@ -347,6 +426,7 @@ export function cellsToOpeningTb(cells) {
   const kept = lines.filter(Boolean);
   if (kept.length === 0 && refusals.length === 0) return null; // a header and nothing under it
 
+  const printedTotals = statedTotals.length === 1 ? statedTotals[0] : null;
   const result = {
     status: "ok",
     reason: null,
@@ -359,6 +439,7 @@ export function cellsToOpeningTb(cells) {
       creditCents: kept.reduce((a, l) => a + (l.side === "credit" ? l.amountCents : 0n), 0n),
     },
     printedTotals,
+    statedTotals,
   };
 
   const refuse = (reason) => ({ ...result, status: "refused", reason, lines: [], regions: [] });
@@ -368,11 +449,24 @@ export function cellsToOpeningTb(cells) {
   if (refusals.length > 0) {
     return refuse(namedUnparseableReason("trial-balance row(s)", refusals.map((r) => `${r.row_key}(${r.reason})`)));
   }
-  // (2) A TRIAL BALANCE THAT DOES NOT BALANCE IS NOT A TRIAL BALANCE.
+  // (2) TWO DIFFERENT TOTALS = NO TOTAL WE CAN TRUST. The first version took the LAST one, on
+  //     the reasoning that a grand total prints below its subtotals. It is a plausible rule and
+  //     it is not stated by the document, which is exactly what makes it dangerous: a
+  //     `GRAND TOTAL 2,000` followed by a `TOTAL SECTION B 1,000` let the later, smaller claim
+  //     overwrite the real one, and a seed missing half its rows then agreed with it perfectly.
+  //     Choosing between competing totals means inventing a rule; refusing does not. (A plain
+  //     trial balance prints ONE total — a document with sections is likely not one at all.)
+  if (statedTotals.length > 1) {
+    return refuse(
+      `the document states ${statedTotals.length} different totals and none can be preferred: `
+      + statedTotals.map((t) => `DR ${fmt(t.debitCents)} / CR ${fmt(t.creditCents)}`).join(" vs "),
+    );
+  }
+  // (3) A TRIAL BALANCE THAT DOES NOT BALANCE IS NOT A TRIAL BALANCE.
   if (result.totals.debitCents !== result.totals.creditCents) {
     return refuse(`trial balance does not balance: DR ${fmt(result.totals.debitCents)} vs CR ${fmt(result.totals.creditCents)}`);
   }
-  // (3) THE DROPPED-ROW GUARD. A row Azure lost still leaves a self-consistent set, so (2)
+  // (4) THE DROPPED-ROW GUARD. A row Azure lost still leaves a self-consistent set, so (3)
   //     alone cannot see it. The document's own printed total can — and when it disagrees the
   //     honest answer is that we did not read this document, not that we read most of it.
   if (printedTotals

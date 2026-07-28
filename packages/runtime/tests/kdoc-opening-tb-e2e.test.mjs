@@ -33,6 +33,7 @@ import { randomUUID } from "node:crypto";
 import { cellsToOpeningTb } from "../lib/opening-tb-cells.mjs";
 import { parseOpeningTargets } from "../lib/opening-parse.mjs";
 import { readPriorGlCells } from "../lib/seeding-parse.mjs";
+import { ACCOUNTS, BALANCED, tbRow } from "./kdoc-opening-tb-testkit.mjs";
 import * as rig from "./rig.mjs";
 
 async function openingReady() {
@@ -56,38 +57,14 @@ const skip = READY ? false : "Wave-B (0017) opening surface absent";
 
 // --- the synthetic trial balance (geometry per wave-b-prior-gl-cells.test.mjs) --------------
 
-let seq = 0;
-const cell = (x, y, text, page = 1) => ({
-  region_id: `c${String(++seq).padStart(4, "0")}`,
-  text_content: text,
-  locator: { polygon: [x, y, x + 0.5, y, x + 0.5, y + 0.1, x, y + 0.1], page_number: page },
-});
-
-const ACCOUNTS = [
-  ["310-000", "CASH AT BANK", "asset"],
-  ["400-000", "TRADE DEBTORS", "asset"],
-  ["500-000", "TRADE CREDITORS", "liability"],
-  ["900-RE", "RETAINED EARNINGS", "equity"],
-  ["910-000", "SHARE CAPITAL", "equity"],
+/** A balanced synthetic trial balance (DR 130,000.00 = CR 130,000.00, the live Gate-K
+ *  corroboration figure 65,747.97 on retained earnings) plus the document's own printed
+ *  total. Built from the SAME shared builders the pure suites use, so the geometry the rig
+ *  proves is byte-for-byte the geometry the unit cells pin. */
+const trialBalanceCells = () => [
+  ...BALANCED(),
+  ...tbRow(2.9, { code: null, label: "TOTAL", dr: "130,000.00", cr: "130,000.00" }),
 ];
-
-/** A balanced synthetic trial balance: DR 130,000.00 = CR 130,000.00, with the live Gate-K
- *  corroboration figure (65,747.97) sitting on retained earnings. */
-function trialBalanceCells() {
-  const rows = [
-    [0.45, 1.15, "Code"], [1.2, 1.14, "Description"], [5.85, 1.15, "Debit (MYR)"], [6.64, 1.15, "Credit (MYR)"],
-  ].map(([x, y, t]) => cell(x, y, t));
-  const line = (y, code, label, col, amount) => {
-    rows.push(cell(0.45, y, code), cell(1.2, y + 0.01, label), cell(col, y + 0.01, amount));
-  };
-  line(1.43, "310-000", "CASH AT BANK", 5.85, "105,000.00");
-  line(1.71, "400-000", "TRADE DEBTORS", 5.85, "25,000.00");
-  line(1.99, "500-000", "TRADE CREDITORS", 6.64, "24,252.03");
-  line(2.27, "900-RE", "RETAINED EARNINGS", 6.64, "65,747.97");
-  line(2.55, "910-000", "SHARE CAPITAL", 6.64, "40,000.00");
-  rows.push(cell(1.2, 2.9, "TOTAL"), cell(5.85, 2.9, "130,000.00"), cell(6.64, 2.9, "130,000.00"));
-  return rows;
-}
 
 /** The `p_regions` payload the OCR pipeline writes for those cells (`tables.N.cells.M`). */
 const layoutRegions = (cells) =>

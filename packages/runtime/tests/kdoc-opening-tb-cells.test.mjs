@@ -1,22 +1,14 @@
 // Gate K, document-tied (ADR-048 SYNTHETIC closure) — the `opening_tb.line` PRODUCER.
 // PURE unit tests, no DB.
 //
-// THE FIXTURE IS LABELLED SYNTHETIC AND SAYS SO. No real client has a trial balance in this
-// corpus: both real clients' `uq_opening_seed_registry_once` slots are spent, RPR is greenfield,
-// and the demo firms hold zero documents. What is NOT synthetic is the GEOMETRY. The cell
-// positions below reuse the convention measured off RPR's real General Ledger and documented in
-// `wave-b-prior-gl-cells.test.mjs` (Azure `prebuilt-layout`: a left column at x≈0.45, a
-// description column at x≈1.2-2.0, amount columns at x≈5.85 and x≈6.64, rows ~0.28 apart in y
-// with a row's own cells varying by up to ~0.01). A synthetic layout with invented coordinates
-// would prove nothing about a reader whose whole job is geometry.
-//
-// `65,747.97` is deliberate: it is the retained-earnings figure the live Gate-K corroboration
-// closed on (Bee Creative's own YA2025 `BALANCE B/F 65,747.97`). It is here as a tie to that
-// real evidence, not as a claim that this document is real.
+// The fixture is LABELLED SYNTHETIC and its geometry is real — both explained in
+// `kdoc-opening-tb-testkit.mjs`, which owns the cell builders these cells share.
 //
 // The dangerous direction for THIS reader is not a false positive (as it is for the printed
 // ledger) — it is a QUIET one: a trial balance read almost right. So most cells below assert a
-// REFUSAL, and specifically that nothing at all is emitted when anything is wrong.
+// REFUSAL, and specifically that nothing at all is emitted when anything is wrong. The four
+// adversarial attacks that broke the first version live next door in
+// `kdoc-opening-tb-adversarial.test.mjs`.
 
 process.env.RELAY_TEST_MODE ??= "1";
 
@@ -25,42 +17,7 @@ import assert from "node:assert/strict";
 
 import { cellsToOpeningTb, readAmountCell, readTrialBalanceHeader } from "../lib/opening-tb-cells.mjs";
 import { parseOpeningTbLine } from "../lib/opening-parse.mjs";
-
-let seq = 0;
-/** One table cell at (x, y) on a page, in the shape `document_regions` actually stores. */
-const cell = (x, y, text, page = 1) => ({
-  region_id: `c${String(++seq).padStart(4, "0")}`,
-  text_content: text,
-  locator: { polygon: [x, y, x + 0.5, y, x + 0.5, y + 0.1, x, y + 0.1], page_number: page },
-});
-
-/** The measured trial-balance header: Code · Description · Debit · Credit. */
-const HEADER = (y = 1.15, page = 1) => [
-  cell(0.45, y, "Code", page),
-  cell(1.2, y - 0.01, "Description", page),
-  cell(5.85, y, "Debit (MYR)", page),
-  cell(6.64, y, "Credit (MYR)", page),
-];
-
-/** One printed trial-balance row. Exactly one of `dr` / `cr` normally carries a figure. */
-const tbRow = (y, { code, label, dr = null, cr = null }, page = 1) => {
-  const cells = [];
-  if (code !== null) cells.push(cell(0.45, y, code, page));
-  if (label !== null) cells.push(cell(1.2, y + 0.01, label, page));
-  if (dr !== null) cells.push(cell(5.85, y + 0.01, dr, page));
-  if (cr !== null) cells.push(cell(6.64, y, cr, page));
-  return cells;
-};
-
-/** A balanced five-line trial balance: DR 130,000.00 = CR 130,000.00. */
-const BALANCED = () => [
-  ...HEADER(),
-  ...tbRow(1.43, { code: "310-000", label: "CASH AT BANK", dr: "105,000.00" }),
-  ...tbRow(1.71, { code: "400-000", label: "TRADE DEBTORS", dr: "25,000.00" }),
-  ...tbRow(1.99, { code: "500-000", label: "TRADE CREDITORS", cr: "24,252.03" }),
-  ...tbRow(2.27, { code: "900-RE", label: "RETAINED EARNINGS", cr: "65,747.97" }),
-  ...tbRow(2.55, { code: "910-000", label: "SHARE CAPITAL", cr: "40,000.00" }),
-];
+import { BALANCED, HEADER, cell, tbRow } from "./kdoc-opening-tb-testkit.mjs";
 
 // ---------------------------------------------------------------------------
 // Identification — the reader must POSITIVELY recognise a trial balance.
@@ -336,14 +293,27 @@ test("furniture with no figure is still skipped silently — a caption is not a 
   assert.deepEqual(out.refusals, []);
 });
 
-test("a total row that prints NO figure states nothing — it never manufactures a refusal", () => {
+test("a total row with EMPTY amount cells states nothing — it never manufactures a refusal", () => {
+  // Azure dropped the total row's figures. Nothing was stated, so nothing is claimed, and the
+  // ΣDr = ΣCr gate still stands on its own.
   const out = cellsToOpeningTb([
     ...BALANCED(),
-    ...tbRow(2.9, { code: null, label: "TOTAL", dr: "-", cr: "-" }), // the total cells were lost
+    ...tbRow(2.9, { code: null, label: "TOTAL" }),
   ]);
   assert.equal(out.status, "ok", out.reason ?? "");
   assert.equal(out.printedTotals, null);
   assert.equal(out.lines.length, 5);
+});
+
+test("a total row that PRINTS nil under real balances is a refusal, not an empty one", () => {
+  // A dash is the document SAYING zero — quite different from Azure losing the cell. A stated
+  // nil total beneath RM 130,000.00 of balances is a contradiction, so it must not pass.
+  const out = cellsToOpeningTb([
+    ...BALANCED(),
+    ...tbRow(2.9, { code: null, label: "TOTAL", dr: "-", cr: "-" }),
+  ]);
+  assert.equal(out.status, "refused");
+  assert.match(out.reason, /does not match the printed total DR 0\.00 \/ CR 0\.00/);
 });
 
 test("a real account described `TOTAL …` is a LINE, not a summation row", () => {
@@ -356,6 +326,7 @@ test("a real account described `TOTAL …` is a LINE, not a summation row", () =
   assert.equal(out.lines.length, 2);
   assert.equal(out.printedTotals, null, "a coded row is never read as the document's total");
 });
+
 
 // ---------------------------------------------------------------------------
 // The amount grammar seam.
@@ -372,7 +343,10 @@ test("readAmountCell separates absent / nil / amount / unparseable", () => {
   assert.equal(at("RM 1,234.56").cents, 123_456n, "a currency word inside the cell is stripped");
   assert.equal(at("(1,234.56)").kind, "unparseable");
   assert.equal(at("1,234.567").kind, "unparseable");
-  assert.equal(at("see note 4").kind, "absent", "prose in an amount column is not a figure");
+  // PROSE IN AN AMOUNT COLUMN IS NOT AN ABSENCE. This assertion used to read `absent`, and that
+  // was the P1-4 defect in one line: anything nonblank we cannot read exactly must refuse, or a
+  // two-sided row reads as cleanly one-sided. See kdoc-opening-tb-adversarial.test.mjs.
+  assert.equal(at("see note 4").kind, "unparseable");
 });
 
 test("cents are BigInt, so two readings a sen apart never compare equal above 2^53", () => {
