@@ -18,7 +18,7 @@ import {
 } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld, requestReextraction, freshResolution } from "./x1-helpers.mjs";
-import { fileDocument } from "./s6-helpers.mjs";
+import { fileDocument, seedVerifiedDocument } from "./s6-helpers.mjs";
 
 let has0026 = false;
 let w = null;
@@ -366,40 +366,109 @@ test("request_reextraction on an xml document with a settled local_facts extract
 });
 
 // ===========================================================================
-// (6) Amendment: request_reextraction's admission gate widens to a third door — a
-// document with a LIVE FILING and ZERO document_processing_tasks rows ever attempted in
-// its facts lane bootstraps through (gate-s-driver's hold report, recovery vehicle
-// 9e4ab36c). NOT merely "no completed extraction": file_document's own 0009 backstop
-// calls _enqueue_invoice_facts_core on EVERY filing it creates today, so a fresh filing
-// through the CURRENT writer always gets a task moments later — "zero tasks despite a
-// live filing" is a genuinely historical state (9e4ab36c predates the backstop, or was
-// filed through some other operational gap) that the current file_document RPC can no
-// longer produce. The fixture below seeds the filing DIRECTLY (a raw insert, bypassing
-// file_document) for exactly that reason — the same "the current writer cannot produce
-// this state, seed it directly" pattern rig-docs-fixtures.mjs documents for claim-only
-// pre-0007 documents. An UNFILED document still refuses; a filed one with an in-flight
-// task ALSO still refuses (that document is not a bootstrap case — the automatic
-// pipeline already reached it); a filed, zero-task one bootstraps EXACTLY ONCE (the
-// second call is admitted through the ordinary 'reextraction' door instead, once the
-// bootstrapped task settles).
+// (6) Amendment: request_reextraction's admission gate widens to a third door.
+//
+// MEASURED, not assumed: recovery vehicle 9e4ab36c's real live state (gate-s-driver's
+// hold report) is `select lane,status,engine_id from document_processing_tasks where
+// document_id='9e4ab36c-...'` -> exactly ONE row: structured_parse | done |
+// clara-myinvois:v1. Two earlier predicates were each disproven, not merely revised:
+//   - "live filing + zero COMPLETED extractions" — disproven by a real x-receipt-
+//     routing.test.mjs regression (file_document's own 0009 backstop means an ordinary
+//     filed invoice already has a task moments after filing; this predicate silently
+//     absorbed 0025's receipt-only backfill scoping).
+//   - "live filing + zero tasks of ANY lane" — disproven by the live probe itself:
+//     9e4ab36c HAS a task (structured_parse, done) — this predicate REFUSES the exact
+//     document the door exists for.
+// The correct, verified predicate: a LIVE filing, ZERO tasks in THIS document's own
+// facts lane (v_lane), AND ZERO NON-TERMINAL tasks of any lane. 9e4ab36c's one task is
+// structured_parse (a different lane) and DONE (terminal) — it satisfies both clauses
+// and admits. A live (queued/held_egress/running) task in some OTHER lane — a NULL-kind
+// pdf's pending classify verdict — fails the second clause and refuses; that document is
+// mid-pipeline, not a missed enqueue.
+//
+// file_document's backstop means "filed with zero tasks, terminal or otherwise" cannot
+// be reproduced through the CURRENT writer — every fixture below that needs a
+// pre-backstop shape seeds it DIRECTLY (basis='legacy-0007', the house idiom already
+// established for a filing predating the current writer's invariants — the same
+// "the writer can no longer produce this state, seed it directly" pattern
+// rig-docs-fixtures.mjs documents for claim-only pre-0007 documents).
 // ===========================================================================
 
 /** Seed a filing DIRECTLY (bypassing file_document, whose own backstop would
  *  immediately create a facts task and defeat the fixture) — the historical shape
- *  9e4ab36c is actually in: a live filing, zero facts tasks ever attempted.
- *  basis='legacy-0007' is the house idiom for exactly this: a filing predating the
- *  current writer's invariants (ck_document_filings_resolution pairs it with a NULL
- *  resolution_id — no ceremony to fabricate for a fixture that represents "there was
- *  none, historically"). */
-async function seedHistoricalFilingNoTask(firm, client, doc) {
+ *  9e4ab36c is actually in: a live filing, zero facts-lane tasks ever attempted.
+ *  basis='legacy-0007' pairs with a NULL resolution_id (ck_document_filings_resolution)
+ *  — no ceremony to fabricate for a fixture that represents "there was none,
+ *  historically". Optionally seeds a TERMINAL structured_parse task alongside the
+ *  filing — 9e4ab36c's actual measured shape, not the bare zero-task subset of it. */
+async function seedHistoricalFilingNoTask(firm, client, doc, { withDoneStructuredParse = false } = {}) {
   await rootQuery(
     `insert into clara.document_filings(firm_id,document_id,client_id,basis)
      values ($1,$2,$3,'legacy-0007')`,
     [firm, doc, client],
   );
+  if (withDoneStructuredParse) {
+    await rootQuery(
+      `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+          version_n,lane,status,workflow_run_id,started_at,finished_at)
+       values ($1,$2,'clara-myinvois:v1','{}'::jsonb,1,'structured_parse','done','legacy-run',now(),now())`,
+      [firm, doc],
+    );
+  }
 }
 
-test("a filed, never-extracted document bootstraps through request_reextraction's widened gate — admission is honestly diagnosed as filed_bootstrap", async () => {
+test("9e4ab36c's REAL measured shape: a filed document with a TERMINAL structured_parse task and zero facts-lane tasks bootstraps — the terminal task in a DIFFERENT lane does not block it", async () => {
+  requireReady();
+  const doc = await seedXmlDoc(w.firms.A, "real-shape");
+  await seedHistoricalFilingNoTask(w.firms.A, w.clients.A1, doc, { withDoneStructuredParse: true });
+
+  const before = await tasksOf(doc);
+  assert.equal(before.length, 1, "mandatory setup: exactly the one measured row — structured_parse, done");
+  assert.equal(before[0].lane, "structured_parse");
+  assert.equal(before[0].status, "done");
+
+  const result = await requestReextraction(w.users.alice, { document: doc, reason: "0026 amendment: 9e4ab36c real-shape recovery", opKey: opk("realshape") });
+  assert.notEqual(result.task_id, null, "the terminal structured_parse task in a DIFFERENT lane must not block the bootstrap — this is 9e4ab36c's actual state");
+  assert.equal(result.admission, "filed_bootstrap");
+  assert.equal(result.version_n, 1, "the document's first-ever local_facts attempt — the structured_parse lane's own version_n=1 is a separate counter");
+  assert.equal(result.status, "queued");
+
+  const after = await tasksOf(doc);
+  assert.equal(after.length, 2, "the pre-existing structured_parse task PLUS the new local_facts one — the structured_parse row is never touched");
+  const byLane = Object.fromEntries(after.map((t) => [t.lane, t]));
+  assert.equal(byLane.structured_parse.status, "done", "untouched");
+  assert.equal(byLane.local_facts.status, "queued");
+});
+
+test("a filed document with a LIVE (non-terminal) task in a DIFFERENT lane still refuses — a pending classify verdict is mid-pipeline, not a missed enqueue", async () => {
+  requireReady();
+  // A NULL-kind pdf: _enqueue_invoice_facts_core's automatic routing opens a 'classify'
+  // task first (a real, legitimate, in-progress step) — file_document's own backstop
+  // creates it. The kind is then corrected via a RAW update (mirroring x-receipt-
+  // routing.test.mjs's own kindDoc technique) — NOT via set_document_kind, so the stale
+  // classify task is left exactly as it was: live, unclaimed. This is the shape
+  // x-receipt-routing's TOCTOU-B cell already proves must refuse; this cell proves it
+  // directly against THIS migration's predicate, not just as a side effect of another
+  // battery's regression.
+  const seed = await seedVerifiedDocument({ firm: w.firms.A, mime: "application/pdf" });
+  await fileDocument(w.users.alice, {
+    document: seed.documentId,
+    client: w.clients.A1,
+    resolution: await freshResolution(w.users.alice, w.clients.A1, { subjectKind: "document", subjectId: seed.documentId }),
+  });
+  const allTasks = await tasksOf(seed.documentId);
+  const classifyTasks = allTasks.filter((t) => t.lane === "classify");
+  assert.equal(classifyTasks.length, 1, "mandatory setup: file_document's backstop opened a classify task for the NULL-kind document");
+  assert.equal(classifyTasks[0].status, "queued", "mandatory setup: the classify task is LIVE, not terminal");
+
+  await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [seed.documentId]);
+
+  await assertRaises("CLR16",
+    () => requestReextraction(w.users.alice, { document: seed.documentId, reason: "0026 rig live-classify probe", opKey: opk("liveclassify") }),
+    "a filed, kind-corrected document with a still-LIVE classify task in a different lane");
+});
+
+test("a filed, never-extracted document (the bare zero-task subset of 9e4ab36c's shape) bootstraps through request_reextraction's widened gate — admission is honestly diagnosed as filed_bootstrap", async () => {
   requireReady();
   const doc = await seedXmlDoc(w.firms.A, "bootstrap");
   await seedHistoricalFilingNoTask(w.firms.A, w.clients.A1, doc);

@@ -99,22 +99,23 @@
 --
 -- AMENDMENT TO THIS WORK ORDER (ratified 2026-07-28, from gate-s-driver's hold report,
 -- recovery vehicle 9e4ab36c): request_reextraction's admission gate (§G) widens from two
--- doors to three. Vehicle 9e4ab36c has a LIVE filing (file_document already spent) and
--- ZERO document_processing_tasks rows OF ANY LANE — not merely no COMPLETED extraction
--- (file_document's own 0009 backstop calls _enqueue_invoice_facts_core on every filing
--- it creates today, so an ordinary filed-but-not-yet-extracted document always has a
--- task) and not merely no invoice_facts-lane task specifically (a NULL-kind pdf's
--- automatic pipeline legitimately opens a 'classify' task first, mid-flight, not a
--- missed enqueue — narrowing to ANY lane is what keeps this door from re-admitting that
--- document too; a real regression the first draft had, caught by x-receipt-routing's own
--- TOCTOU-B cell). A live filing with literally no task of any kind is a genuinely
--- historical gap, not reproducible through the current writer. Post-0026 there would
--- still be NO door to fire the facts lane for a document in that exact state — this is
--- the recovery seam operators need the first time it happens for real. Every other wall
--- stays exactly as-is (bookkeeper floor, cross-firm refusal, the 3-attempt bound, the
--- audit trail), and the diagnostic now names WHICH of the three doors admitted each call
--- (v_admission), so a bootstrap admission is never confused with an ordinary
--- re-extraction or the receipt backfill.
+-- doors to three. The predicate was rebuilt against 9e4ab36c's MEASURED live state
+-- (`select lane,status,engine_id from document_processing_tasks where
+-- document_id='9e4ab36c-...'` -> exactly one row: structured_parse | done |
+-- clara-myinvois:v1) after two earlier drafts, each disproven — the first by a test
+-- regression, the second by the live probe itself refusing the very document the door
+-- exists for ("the report's claim... was asserted, not measured" — the house lesson:
+-- probe the instrument's real target before declaring the shape). The final predicate:
+-- a LIVE filing AND zero tasks in THIS document's own facts lane AND zero NON-TERMINAL
+-- tasks of any lane. 9e4ab36c admits (its one task is structured_parse and it is DONE —
+-- terminal, and it is not this document's facts lane); a document with a facts-lane
+-- task already present (any status — the 0009-backstop shape) refuses; a document with
+-- a LIVE task in some other lane (a NULL-kind pdf's pending classify verdict) refuses.
+-- Every other wall stays exactly as-is (bookkeeper floor, cross-firm refusal, the
+-- 3-attempt bound, the audit trail), and the diagnostic names WHICH of the three doors
+-- admitted each call (v_admission), so a bootstrap admission is never confused with an
+-- ordinary re-extraction or the receipt backfill. §G's own comment carries the full
+-- verification against all four shapes this door must distinguish.
 --
 -- NOT IN SCOPE (owner-scoped, ledger #32): task #29, the file_document vs
 -- confirm_attribution_candidate opposite-lock-order deadlock. It touches sibling
@@ -1003,44 +1004,57 @@ begin
   --     could reach this verb a 'done' extraction already exists — this door is inert for
   --     every FUTURE receipt.
   --   'filed_bootstrap' (0026 amendment, gate-s-driver's hold report, recovery vehicle
-  --     9e4ab36c) — a document with a LIVE FILING (file_document already spent: a
-  --     human/rule already decided this document belongs to a client) and ZERO
-  --     document_processing_tasks rows OF ANY LANE — never attempted, not merely
-  --     incomplete, and not merely "no invoice_facts one yet". Both qualifiers are
-  --     load-bearing:
+  --     9e4ab36c) — a document with a LIVE FILING (file_document already spent) AND
+  --     ZERO tasks in THIS document's facts lane (v_lane) AND ZERO NON-TERMINAL tasks
+  --     of ANY lane. THREE conditions, all load-bearing, and the shape of each was
+  --     MEASURED against 9e4ab36c's actual live state
+  --     (`select lane,status,engine_id from document_processing_tasks where
+  --     document_id='9e4ab36c-...'`), not assumed — the first two drafts of this door
+  --     were each disproven by a real probe or a real test failure, not by review:
   --       - NOT "no completed extraction": file_document's own backstop (0009) ALREADY
   --         calls _enqueue_invoice_facts_core on every filing it creates today, so a
   --         document filed through the CURRENT writer always has at least a
-  --         queued/failed task moments after filing — checking "no task at all" is what
-  --         keeps this door from re-admitting an ordinary filed-but-not-yet-extracted
-  --         document (an invoice mid-pipeline, or one whose task failed on
-  --         attempt_cap/budget — both already have OTHER doors: the in-flight check
-  --         just below, and the ordinary bounded-retry loop).
-  --       - NOT "no task in v_lane specifically": a NULL-kind pdf's automatic pipeline
-  --         opens a 'classify' task FIRST (a real, legitimate, in-progress step) — such
-  --         a document has a live filing and zero invoice_facts tasks, but it is NOT a
-  --         missed enqueue, it is correctly mid-flight in a DIFFERENT lane waiting on a
-  --         human kind decision. Scoping the check to ANY lane, not just v_lane, is what
-  --         keeps this door from re-admitting that document as if the whole pipeline had
-  --         never touched it (a real regression this amendment's first draft had,
-  --         caught by x-receipt-routing.test.mjs's own TOCTOU-B cell: a kind-corrected
-  --         document with a live filing and only a stale classify task must still refuse
-  --         CLR16, not bootstrap).
-  --     "Zero tasks despite a live filing" can only happen to a document filed before
-  --     the 0009 backstop existed, or filed through some other operational gap — exactly
-  --     9e4ab36c's shape, and not reproducible through the current file_document RPC
-  --     (which self-heals on every fresh filing) — a genuinely historical orphan, the
-  --     same class of state 0007's claim-only-document upgrade drill documents for a
-  --     different table. Before this amendment there was NO door back into the facts
-  --     lane for it. Bounded by the SAME walls as every other call
-  --     here (bookkeeper floor, cross-firm refusal, the 3-attempt bound, the audit
-  --     trail). It is naturally idempotent against a LATE automatic enqueue arriving
-  --     moments later: both land on the SAME in-flight-task check just below, so a human
-  --     bootstrap and a late automatic one never race into two tasks — and once a task
-  --     exists (bootstrapped or not), the NEXT call is admitted through the ordinary
-  --     'reextraction' door once it completes, so this door fires at most once per
-  --     document. The kind gate above already guarantees d.document_kind is non-NULL, so
-  --     the receipt comparison is never against a NULL.
+  --         queued/failed task moments after filing. (Draft 1, disproven by
+  --         x-receipt-routing.test.mjs's own "invoice with no prior extraction still
+  --         refuses CLR16" cell going green when it should refuse.)
+  --       - NOT "zero tasks of ANY lane" either: 9e4ab36c's OWN measured state is ONE
+  --         row — `structured_parse | done | clara-myinvois:v1` — the intake identity
+  --         pass completed; the facts lane specifically never started. "Zero tasks of
+  --         any lane" REFUSES the exact document this door exists for. (Draft 2,
+  --         disproven by the live probe above, not by a test — the lesson is probe the
+  --         real target before declaring the shape matches it.)
+  --       - The CORRECT split: "zero tasks in v_lane" (this document's facts lane
+  --         specifically — invoice_facts or local_facts, whichever its mime maps to)
+  --         admits 9e4ab36c (its one task is structured_parse, a DIFFERENT lane) and
+  --         still refuses an ordinary filed-but-not-yet-extracted document (which
+  --         already has a v_lane task from the 0009 backstop). "Zero NON-TERMINAL tasks
+  --         of any lane" is the second, independent condition that keeps a document
+  --         with a LIVE (queued/held_egress/running) task in some OTHER lane — a
+  --         NULL-kind pdf's classify task, mid-flight, correctly waiting on a human kind
+  --         decision — from bootstrapping too: that document's classify task is
+  --         non-terminal, so this clause refuses it even though it also has zero
+  --         v_lane tasks. A TERMINAL task in another lane (9e4ab36c's done
+  --         structured_parse) does not trip this clause; a LIVE one does.
+  --     Verified against all four shapes this door must distinguish: 9e4ab36c itself
+  --     (terminal structured_parse, zero facts tasks) admits; a document with a LIVE
+  --     classify task pending a kind decision refuses (a non-terminal task means the
+  --     pipeline is in flight and OTHER doors own it — the in-flight check just below,
+  --     the ordinary bounded-retry loop); a document with a facts-lane task already
+  --     present (any status, the 0009-backstop shape) refuses (preserves 0025's
+  --     receipt-only backfill scoping); a document with a live filing and genuinely NO
+  --     task of any kind (predates the 0009 backstop, or some other operational gap —
+  --     not reproducible through the current file_document RPC, which self-heals on
+  --     every fresh filing) admits too — zero of anything is a subset of "zero in
+  --     v_lane and zero non-terminal". Before this amendment there was NO door back
+  --     into the facts lane for either admitted shape. Bounded by the SAME walls as
+  --     every other call here (bookkeeper floor, cross-firm refusal, the 3-attempt
+  --     bound, the audit trail). It is naturally idempotent against a LATE automatic
+  --     enqueue arriving moments later: both land on the SAME in-flight-task check just
+  --     below, so a human bootstrap and a late automatic one never race into two tasks
+  --     — and once a v_lane task exists (bootstrapped or not), the NEXT call is
+  --     admitted through the ordinary 'reextraction' door once it completes, so this
+  --     door fires at most once per document. The kind gate above already guarantees
+  --     d.document_kind is non-NULL, so the receipt comparison is never against a NULL.
   if exists (select 1 from clara.document_extractions e
       where e.document_id = p_document
         and e.engine_kind = 'invoice_facts' and e.status = 'done') then
@@ -1049,8 +1063,10 @@ begin
     v_admission := 'receipt_backfill';
   elsif exists (select 1 from clara.document_filings f
       where f.document_id = p_document and f.retired_at is null)
-     and not exists (select 1 from clara.document_processing_tasks pt
-      where pt.document_id = p_document) then
+     and not exists (select 1 from clara.document_processing_tasks ptf
+      where ptf.document_id = p_document and ptf.lane = v_lane)
+     and not exists (select 1 from clara.document_processing_tasks ptn
+      where ptn.document_id = p_document and ptn.status not in ('done', 'failed')) then
     v_admission := 'filed_bootstrap';
   else
     raise exception 'no completed extraction to re-extract' using errcode = 'CLR16';
@@ -1344,11 +1360,12 @@ begin
     raise exception '0026 tail: request_reextraction lost a retained guard or its bounded-retry shape';
   end if;
   -- The 0026 amendment: the admission gate carries all THREE doors (the pre-existing
-  -- 'reextraction' + 'receipt_backfill', plus the new 'filed_bootstrap' — a live filing
-  -- with ZERO tasks ever attempted in this document's facts lane, never merely "no
-  -- completed extraction" (see the door's own header comment for why that distinction is
-  -- load-bearing)), each setting v_admission, and the diagnostic is threaded through to
-  -- both the audit row and the returned receipt.
+  -- 'reextraction' + 'receipt_backfill', plus the new 'filed_bootstrap' — a live filing,
+  -- zero tasks in THIS document's facts lane, and zero NON-TERMINAL tasks of any lane;
+  -- see the door's own header comment for the measured predicate and why a naive "zero
+  -- tasks of any lane" REFUSES the exact document (9e4ab36c) the door exists for), each
+  -- setting v_admission, and the diagnostic is threaded through to both the audit row
+  -- and the returned receipt.
   if position('v_admission:=''reextraction''' in v_code) = 0
      or position('v_admission:=''receipt_backfill''' in v_code) = 0
      or position('v_admission:=''filed_bootstrap''' in v_code) = 0 then
@@ -1357,8 +1374,11 @@ begin
   if position('exists(select1fromclara.document_filingsfwheref.document_id=p_documentandf.retired_atisnull)' in v_code) = 0 then
     raise exception '0026 tail: request_reextraction''s filed-bootstrap door does not check for a live filing';
   end if;
-  if position('andnotexists(select1fromclara.document_processing_tasksptwherept.document_id=p_document)' in v_code) = 0 then
-    raise exception '0026 tail: request_reextraction''s filed-bootstrap door does not check for ZERO tasks of ANY lane on this document — it must not re-admit a document already carrying a classify (or other lane) task while merely lacking an invoice_facts one';
+  if position('andnotexists(select1fromclara.document_processing_tasksptfwhereptf.document_id=p_documentandptf.lane=v_lane)' in v_code) = 0 then
+    raise exception '0026 tail: request_reextraction''s filed-bootstrap door does not check for ZERO tasks in this document''s own facts lane — it must not re-admit a document that already has a v_lane task (the 0009-backstop shape)';
+  end if;
+  if position('andnotexists(select1fromclara.document_processing_tasksptnwhereptn.document_id=p_documentandptn.statusnotin(''done'',''failed''))' in v_code) = 0 then
+    raise exception '0026 tail: request_reextraction''s filed-bootstrap door does not check for ZERO NON-TERMINAL tasks of any lane — it must not re-admit a document with a LIVE task in a different lane (e.g. a pending classify verdict)';
   end if;
   if position('''admission'',v_admission' in v_code) = 0 then
     raise exception '0026 tail: request_reextraction no longer threads v_admission into the audit row / receipt';
