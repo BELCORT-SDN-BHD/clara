@@ -7,7 +7,7 @@ and every claim the reviews forced to change.
 **Review history.** R1 returned ten findings; v2 answered them. R2 closed 1 and 4, left eight open.
 R3 — the **final design round** — closed 3 and 5 and left nine, having shifted character: the
 reviewer is now half co-writing the build spec. v4's job is a shape with **no impossible laws and no
-false claims**; the 0027/0028 SQL ladders are the next control and will re-verify every §D and §G
+false claims**; the 0028/0029 SQL ladders are the next control and will re-verify every §D and §G
 claim against the rig.
 
 **Cumulative CUTS:** auto-suspension · atomic supersession (now including its column and status) ·
@@ -164,7 +164,7 @@ on that entry.
 Every acquirer takes a *prefix-consistent subsequence* of it, which is what makes the order
 cycle-free:
 
-- **`execute_rule_post` (recut in 0028):** rule → **filing FOR SHARE → entry FOR UPDATE (taken by the
+- **`execute_rule_post` (recut in 0029):** rule → **filing FOR SHARE → entry FOR UPDATE (taken by the
   executor itself, in the live order)** → binding FOR UPDATE + the §A.5 re-resolution and its receipt
   → *then* `_approve_entry_core`, whose filing/entry locks are re-entrant no-ops in the same
   transaction. The binding control now runs **before** the approval transition, which is what r3
@@ -184,8 +184,32 @@ cycle-free:
 **Why this is cycle-free, checkably.** Every path's sequence is a subsequence of the global order, and
 no path takes a lock preceding one it already holds — stronger than v3's "binding last", and unlike
 v3's it is compatible with the control running before the approval transition. The §D rig test
-asserts it; the pre-existing `file_document` / `confirm_attribution_candidate` hazard (task #29) is a
-filing-vs-filing issue predating this design and untouched by it.
+asserts it; the pre-existing `file_document` / `confirm_attribution_candidate` hazard (task #29) was
+CLOSED live in migration 0027 (PR #132) before this build started — every acquirer of `documents` and
+`document_filings` now takes `documents` FIRST, and 0027's own header enumerates the six writers
+(`file_document`, `finalize_document_intake`, `_seed_verified_document`,
+`confirm_attribution_candidate`, `approve_wrong_client_correction`, `retire_document_filing`) plus a
+seventh reader (`resolve_and_ingest_wiki_source`, swapped in the same migration's P-round).
+
+**§A.7 AMENDMENT (task #36 build note, re-verification against the post-0027 live catalog).** None
+of this table's four rows are among 0027's edited functions, so the table above is unchanged and
+still accurate for `persist_invoice_facts` / `_approve_entry_core` / `execute_rule_post` /
+`revise_entry` as READ FROM THE LIVE CATALOG (0027 touches none of their bodies). But the
+re-verification this task's build order requires — CoR against the live post-0027 bodies, not the
+table's prose — surfaces a FIFTH participant this table never named: **`persist_invoice_facts`
+(`0022`, unchanged by 0027) ALSO locks `clara.documents`, via an unconditional `UPDATE
+clara.documents SET document_kind=..., financial_date=...` that runs AFTER its
+`document_filings`/`journal_entries`/task locks, not before them.** 0027's CoR sweep never found this
+because it classified writers strictly by INSERT/UPDATE/DELETE **on `document_filings`**;
+`persist_invoice_facts` never writes `document_filings` (it only takes a `FOR UPDATE` lock on
+existing rows for serialization), so it correctly fell outside that specific sweep — but it is a
+genuine `documents`+`document_filings` two-lock participant in the OPPOSITE order from 0027's law,
+and the same lock-order-inversion class 0027 exists to close is reachable between
+`persist_invoice_facts` and any 0027-fixed function (or, going forward, any 0028/0029 binding-order
+function) racing the same document. **Fixed in 0028** (this build), alongside the binding machinery,
+using the identical hoist-the-lock pattern 0027 established — see 0028's own header for the CoR
+detail. This amendment is the "if §A.7 needs an amendment for 0027's reality" case the task #36 work
+order anticipated.
 
 **Position 0 — the op-receipt (r4 finding 3b).** `_reserve_op` (`0004:46-59`) is
 `insert … on conflict do nothing`, so a concurrent *uncommitted* insert of the same
@@ -193,7 +217,7 @@ filing-vs-filing issue predating this design and untouched by it.
 `0016:1247`, correctly before its own data locks — but v4 had the executor reach it only after
 holding all four. The executor therefore reserves **both** receipts (`execute_rule_post` and
 `approve_entry`, which are distinct `fn` values and so distinct rows) before any data lock, and
-0028 recuts `_approve_entry_core` to skip its own reservation when `p_ctx` carries
+0029 recuts `_approve_entry_core` to skip its own reservation when `p_ctx` carries
 `receipt_preheld: true`. No signature change — `p_ctx` is already `jsonb` — and a ctx without the
 key reserves exactly as today, so the human `approve_entry` path stays byte-identical.
 
@@ -323,16 +347,16 @@ events) · the §B read surface · `create or replace` of `_coding_lane_core` (A
 `execute_rule_post` (A.5) · §F's skip-vocabulary split · `journal_entries.vendor_binding_id` with its
 composite FK. Next free error code looks like **CLR35** — verify as-built before cutting.
 
-**The split** (§10 amendment C): **0027** = everything except A.5. **0028** = A.5 alone.
+**The split** (§10 amendment C): **0028** = everything except A.5. **0029** = A.5 alone.
 
 **The interlock, in three layers** (R3 finding 8 — v3's two were not durable):
 
-1. **Signing gate.** `sign_vendor_identity_binding` refuses `post_control_absent` unless 0028's row
+1. **Signing gate.** `sign_vendor_identity_binding` refuses `post_control_absent` unless 0029's row
    exists in `clara.schema_migrations`. The runner applies migration and ledger row in one
    transaction and records the applied `sha256` (`packages/db/README.md:87`), so a stub cannot fake
    it. With no live binding, `_resolve_vendor_binding` returns nothing and Slots A/B are inert —
-   **0027 alone confers no usable authority.**
-2. **0028 postverify** asserts the gate by name in comment-stripped `prosrc` of `execute_rule_post`.
+   **0028 alone confers no usable authority.**
+2. **0029 postverify** asserts the gate by name in comment-stripped `prosrc` of `execute_rule_post`.
    **Its limit, stated:** postverify runs *outside* the apply transaction, so signing opens the
    moment the ledger row commits, before postverify passes. The mitigating fact is layer 3 plus the
    D1 quiesce below — during the deploy window the application is write-quiesced, and signing is a
@@ -340,11 +364,11 @@ composite FK. Next free error code looks like **CLR35** — verify as-built befo
 3. **A persistent CI assertion — the layer v3 lacked.** A new `scripts/check-binding-post-control.mjs`
    in the same lane as `scripts/check-frozen-workflows.mjs`, asserting that the *current* definition
    of `execute_rule_post` (the latest migration defining it, comment-stripped) contains the binding
-   gate. **This is what catches a later 0029 recut that drops the gate while the 0028 ledger row
-   remains** — the failure mode R3 correctly said postverify alone cannot catch. It fails CI rather
-   than silently re-arming every live binding.
+   gate. **This is what catches a LATER migration's recut that drops the gate while the 0029 ledger
+   row remains** — the failure mode R3 correctly said postverify alone cannot catch. It fails CI
+   rather than silently re-arming every live binding.
 
-**Deploy.** Both 0027 and 0028 replace writer function bodies, so **both require the repo-mandated
+**Deploy.** Both 0028 and 0029 replace writer function bodies, so **both require the repo-mandated
 D1 write-quiesce** for their deploy windows (`packages/db/README.md:95-113`) — v3's list omitted this.
 Two quiesced windows, not one, because the split is deliberate.
 
@@ -376,7 +400,7 @@ Part 1 §10's corrected operational note for which fourth bill satisfies the dwe
 | 5 | **CLOSED** (R3) — band-only F3 and the C.1 residual are honest | Untouched; C.1 remains open and named |
 | 6 | leaking — false attempt bound; Unicode residual unregistered | **Both caps stated with their phases** — enqueue bypassed, **claim-time binds at 3/document** (`0024:210`), matching the measured `509e788d` failure; U+2061–2064 added; completeness registered as a residual (§C.6, Part 1 §3.2) |
 | 7 | leaking — deadlock; stale supersession ceremony | **Total order rebuilt** with `persist_invoice_facts` included and the binding no longer last (Part 1 §4); **supersession purged from both ends** — condition 8 flat, signing touches no predecessor, column and status removed |
-| **3b** *(r4)* | the op-receipt reservation sat outside the total order — a human reserving the predictable executor key then waiting on the entry lock deadlocks against an executor holding entry+binding and waiting on that key | **CLOSED by the v4.1 amendment.** The order gains **position 0**: receipt reservation precedes every data lock, for every acquirer. The executor reserves both receipts (distinct `fn` rows) before any data lock, and 0028 recuts `_approve_entry_core` to skip its own reservation on `p_ctx.receipt_preheld` — no signature change, human path byte-identical (§A.7) |
+| **3b** *(r4)* | the op-receipt reservation sat outside the total order — a human reserving the predictable executor key then waiting on the entry lock deadlocks against an executor holding entry+binding and waiting on that key | **CLOSED by the v4.1 amendment.** The order gains **position 0**: receipt reservation precedes every data lock, for every acquirer. The executor reserves both receipts (distinct `fn` rows) before any data lock, and 0029 recuts `_approve_entry_core` to skip its own reservation on `p_ctx.receipt_preheld` — no signature change, human path byte-identical (§A.7) |
 | 8 | leaking — receipt-chain/congruence incomplete | **§G rebuilt against the live anchors** (`0009:798-810`): extraction FKs use `(id, firm_id, document_id)`; bindings gain the `(id, firm_id, client_id)` anchor; evidence and `compared_to_resolution_id` get congruent FKs; append-only + no-TRUNCATE triggers named |
 | 9 | leaking — `binding_suspended` remained; read contract underspecified | **Purged**; read surface specified as functions with signature, floor, grant, filter, ordering, and distinct-document counting (§B) |
 | 10 | leaking — postverify is not an enduring interlock | **Third layer added**: a persistent CI assertion on the current `execute_rule_post` body; postverify's outside-the-transaction limit stated; **D1 quiesce added for both migrations** (§D) |
