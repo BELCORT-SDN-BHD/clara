@@ -26,8 +26,11 @@
 -- fail_invoice_facts shape (0009:2152-2178), audited, op-key idempotent per the 0021/0022
 -- house pattern, granted to clara_runtime alone (the SAME lane that already holds claim +
 -- classify_document per classify.mjs's own header: "This worker runs entirely as
--- clara_runtime … NO login-direct dance"). Nothing else in the classify lane changes: this
--- migration adds one verb and registers the one event type it needs to emit honestly.
+-- clara_runtime … NO login-direct dance"). This migration adds one verb, registers the one
+-- event type it needs to emit honestly, and — because the new verb opens a race the lane did
+-- not previously have to defend against — CoRs classify_document with a single, minimal,
+-- task-bound guard (§A2 below) closing it. Everything else in the classify lane is
+-- byte-identical (tail-asserted).
 --
 -- WHY NOT A fail_invoice_facts CoR (widen the lane check instead of a new fn). Two different
 -- lanes with two different resource shapes. fail_invoice_facts refunds an Azure page-budget
@@ -69,14 +72,16 @@
 -- Admitting them here would let a caller stamp a classify task 'failed' with an error_code
 -- that lies about what kind of task it is.
 --
--- WHAT THIS DOES NOT DO. No change to classify_document, set_document_kind,
--- persist_document_extraction, claim_document_processing_task, or the classify-lane CHECK
--- constraints — every one of those bodies is byte-identical after this migration (tail-
--- asserted). No wiring of packages/runtime/lib/classify.mjs to CALL the new verb: that is a
--- runtime-side change with its own review surface (when to call it — a bounded retry count on
--- a RUNNING task, distinct from discoverQueued's existing queued-side cap) and is deliberately
--- left to the caller who owns that file. This migration's job is to make the DB terminal state
--- reachable at all; today it is not reachable by ANY caller, machine or human.
+-- WHAT THIS DOES NOT DO. classify_document's CoR (§A2) touches ONLY its task-settle read —
+-- every guard, the kind vocabulary, the human-precedence rule, the low-confidence review
+-- lane, and the verdict/audit/event shape are byte-identical to 0016 (tail-asserted). No
+-- change at all to set_document_kind, persist_document_extraction, claim_document_processing_task,
+-- or the classify-lane CHECK constraints. No wiring of packages/runtime/lib/classify.mjs to
+-- CALL fail_classify: that is a runtime-side change with its own review surface (when to call
+-- it — a bounded retry count on a RUNNING task, distinct from discoverQueued's existing
+-- queued-side cap) and is deliberately left to the caller who owns that file. This migration's
+-- job is to make the DB terminal state reachable AND race-safe; today it is not reachable by
+-- ANY caller, machine or human.
 
 -- =====================================================================
 -- §A — clara.fail_classify
@@ -142,6 +147,182 @@ revoke all on function clara.fail_classify(uuid, text, text) from public;
 grant execute on function clara.fail_classify(uuid, text, text) to clara_runtime;
 
 -- =====================================================================
+-- §A2 — clara.classify_document CoR: THE RACE THIS VERB OPENS, CLOSED.
+--
+-- fail_classify above is a NEW way to move a classify task out from under a caller who
+-- is mid-flight toward classify_document. Before this CoR, classify_document's own
+-- task-settle read only ever looked for a RUNNING row (0016:3224-3227) — if
+-- fail_classify won the race and the task was already 'failed' by the time
+-- classify_document's SELECT ran, `found` was false, and the ORIGINAL body fell straight
+-- through to the no-task ceremony path (WA21-R11) and wrote the verdict ANYWAY: kind set,
+-- document_extractions row inserted, document.classified emitted. The honest terminal
+-- state — the task trail says failed — would then coexist with a document the classifier
+-- successfully classified, which is exactly the two-terminal-states-for-one-attempt
+-- dishonesty a terminal writer exists to prevent (cross-model review finding on this
+-- migration).
+--
+-- THE FIX, MINIMAL AND TASK-BOUND. The settle read now locks the MOST RECENT classify
+-- task for (document, engine) REGARDLESS of status (not only 'running'), and branches on
+-- what it finds:
+--   running -> settle to done, exactly as before.
+--   failed  -> REFUSE. This attempt's task already lost the race; the verdict is not
+--     written, the kind is not touched, no document.classified fires. A fresh attempt
+--     needs a fresh task (the facts-gate re-enqueue already does this on any non-live
+--     status).
+--   anything else (no row at all, or the newest row is 'done'/'queued'/'held_egress')
+--     -> UNCHANGED behaviour, byte-identical to 0016. This is what keeps WA21-R11's live
+--     no-task ceremony (0016:3222-3223; executed 2026-07-23 per the archived ADR) working:
+--     those six documents carried NO classify task row at all, so `found` stays false and
+--     this CoR does not touch that path.
+--
+-- WHY LOCKING THE ROW REGARDLESS OF STATUS CLOSES THE RACE, NOT JUST NARROWS IT. Both
+-- orderings now serialize on the SAME row lock (fail_classify already took `for update`
+-- on the exact task row; this CoR makes classify_document take the same lock on the same
+-- row before deciding anything):
+--   fail_classify first  -> commits 'failed' -> classify_document's lock blocks, then
+--     sees 'failed' post-commit -> refuses. Exactly one terminal event
+--     (document.classify_failed), never document.classified.
+--   classify_document first -> settles 'done', writes the verdict, commits -> fail_classify's
+--     lock blocks, then sees 'done' post-commit -> fail_classify's OWN existing guard
+--     (`status not in ('running','failed')`) refuses with CLR16, unchanged. Exactly one
+--     terminal event (document.classified), never document.classify_failed.
+-- Neither function ever locks `clara.documents` AND `document_processing_tasks` in
+-- opposite orders relative to the other (fail_classify never touches `documents` at all),
+-- so this closes the race without opening a new lock-order deadlock between the two.
+--
+-- Everything else in this body is byte-identical to 0016 (tail-asserted).
+create or replace function clara.classify_document(p_document uuid, p_kind text,
+    p_confidence numeric, p_engine_id text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+declare
+  d record; t record; v_dedupe jsonb; v_ext uuid; v_version int; v_prior text;
+  f record; v_q uuid; v_questions jsonb:='[]'::jsonb; v_set boolean:=false;
+  v_human boolean:=false;
+begin
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  -- ADV-R4#6: the document row is LOCKED for the whole verdict write — the two
+  -- classification writers serialize instead of racing on the kind.
+  select * into d from clara.documents where id=p_document for update;
+  if not found then raise exception 'document not found' using errcode='CLR11'; end if;
+  if p_engine_id is null or p_engine_id not like 'clara-classify-%' then
+    raise exception 'classifier engine must carry the clara-classify- prefix' using errcode='CLR10';
+  end if;
+  -- ADV-R5: the human attestation engine ID is RESERVED for set_document_kind —
+  -- a classifier caller may never mint a human-looking verdict row.
+  if p_engine_id='clara-classify-human:v1' then
+    raise exception 'the human attestation engine id is reserved for set_document_kind'
+      using errcode='CLR10',detail='{"reason":"reserved_engine"}';
+  end if;
+  if p_confidence is null or p_confidence<0 or p_confidence>1 then
+    raise exception 'classifier confidence is malformed' using errcode='CLR10';
+  end if;
+  if p_kind is null or p_kind not in
+     ('invoice','receipt','credit_note','debit_note','bank_statement','payment_voucher',
+      'claim_form','payroll_summary','tax_correspondence','ssm_company_doc',
+      'agreement_contract','e_invoice_xml','management_account','opening_balance_doc',
+      'knowledge_artifact','handwritten_note','consent_evidence','prior_gl','other') then
+    raise exception 'unsupported document kind %',p_kind using errcode='CLR10';
+  end if;
+  -- 0014: consent evidence is a legal artifact owned by the egress-consent path;
+  -- the classifier may neither assign nor overwrite it.
+  if d.document_kind='consent_evidence' or p_kind='consent_evidence' then
+    raise exception 'consent-evidence classification is owned by the egress consent path'
+      using errcode='CLR28';
+  end if;
+  v_dedupe:=clara._reserve_op(d.firm_id,'classify_document',p_op_key,
+    clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,
+      'confidence',p_confidence,'engine',p_engine_id)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  -- 0024 (race fix): lock the MOST RECENT classify task for (document, engine)
+  -- REGARDLESS of status — not only 'running' — so this call serializes against
+  -- fail_classify on the SAME row instead of racing it. See the CoR header above.
+  select * into t from clara.document_processing_tasks
+    where document_id=p_document and lane='classify' and engine_id=p_engine_id
+    order by version_n desc, id desc limit 1 for update;
+  if found and t.status='running' then
+    update clara.document_processing_tasks set status='done',finished_at=now()
+      where id=t.id;
+  elsif found and t.status='failed' then
+    raise exception 'the classify task for this document already failed — enqueue a new attempt before classifying again'
+      using errcode='CLR16';
+  end if;
+  -- found=false, or found with any OTHER status (queued/held_egress/done) — UNCHANGED:
+  -- falls through to the no-task ceremony path exactly as 0016 wrote it (WA21-R11).
+
+  -- the verdict row: engine_kind='doc_classify', NO regions (the verdict rides
+  -- the envelope — nothing here can ever collide with an attribution pattern).
+  select coalesce(max(version_n),0)+1 into v_version from clara.document_extractions
+    where document_id=p_document and engine_id=p_engine_id;
+  insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
+      version_n,status,page_count,envelope)
+    values(d.firm_id,p_document,p_engine_id,'doc_classify',v_version,'done',
+      coalesce(d.page_count,0),
+      jsonb_build_object('verdict_kind',p_kind,'confidence',p_confidence,
+        'low_confidence',p_confidence<0.8,'source','classifier'))
+    returning id into v_ext;
+
+  v_prior:=d.document_kind;
+  -- ADV-R4#6 / ADV-R5: a HUMAN verdict (set_document_kind) is never overwritten
+  -- by the classifier — the classifier's verdict ROW persists above, but the
+  -- kind and the classified event stay with the human correction. Precedence is
+  -- detected by the row's SOURCE MARKER (envelope source='human', written only
+  -- by set_document_kind), never by an engine-id string a caller could supply.
+  v_human:=exists(select 1 from clara.document_extractions hx
+    where hx.document_id=p_document and hx.engine_kind='doc_classify'
+      and hx.status='done' and hx.envelope->>'source'='human');
+  if p_confidence>=0.8 and not v_human then
+    update clara.documents set document_kind=p_kind where id=p_document;
+    v_set:=true;
+    perform clara._audit(d.firm_id,null,null,null,'classify_document',null,
+      jsonb_build_object('document',p_document,'kind',p_kind,'confidence',p_confidence,
+        'engine',p_engine_id,'prior_kind',v_prior,'extraction',v_ext,'op_key',p_op_key));
+    perform clara._append_event(d.firm_id,'document.classified',null,null,null,null,
+      null,p_document,null,
+      jsonb_build_object('document_kind',p_kind,'confidence',p_confidence,
+        'engine_id',p_engine_id,'extraction_id',v_ext,'prior_kind',v_prior,
+        'source','classifier'));
+  elsif v_human then
+    -- human precedence: the verdict ROW persisted above; the kind, the
+    -- classified event, and the review lane all stay with the human correction.
+    perform clara._audit(d.firm_id,null,null,null,'classify_document',null,
+      jsonb_build_object('document',p_document,'kind',p_kind,'confidence',p_confidence,
+        'engine',p_engine_id,'prior_kind',v_prior,'extraction',v_ext,
+        'human_precedence',true,'op_key',p_op_key));
+  else
+    for f in select df.client_id,df.id as filing_id from clara.document_filings df
+        join clara.clients oc on oc.id=df.client_id and oc.status='active'
+        where df.document_id=p_document and df.retired_at is null loop
+      if not exists(select 1 from clara.open_questions q
+          where q.client_id=f.client_id and q.document_id=p_document
+            and q.origin='classification' and q.status='open') then
+        insert into clara.open_questions(firm_id,client_id,scope_kind,scope_id,document_id,
+            origin,question_text,status,opener_kind,opened_by)
+          values(d.firm_id,f.client_id,'document',p_document,p_document,'classification',
+            'What kind of document is this? The classifier was not confident ('
+              ||round(p_confidence*100)::text||'%; best guess: '||p_kind||').',
+            'open','wake',null)
+          returning id into v_q;
+        v_questions:=v_questions||to_jsonb(v_q);
+        perform clara._append_event(d.firm_id,'open_question.opened',f.client_id,null,null,null,
+          null,p_document,null,
+          jsonb_build_object('question_id',v_q,'origin','classification'));
+      end if;
+    end loop;
+    perform clara._audit(d.firm_id,null,null,null,'classify_document',null,
+      jsonb_build_object('document',p_document,'kind',p_kind,'confidence',p_confidence,
+        'engine',p_engine_id,'prior_kind',v_prior,'extraction',v_ext,
+        'low_confidence',true,'questions',v_questions,'op_key',p_op_key));
+  end if;
+  return clara._finish_op(d.firm_id,'classify_document',p_op_key,
+    jsonb_build_object('document_id',p_document,'extraction_id',v_ext,
+      'document_kind',case when v_set then p_kind else v_prior end,
+      'kind_set',v_set,'confidence',p_confidence,'questions',v_questions));
+end $$;
+
+-- =====================================================================
 -- §B — EVENT TAXONOMY (one additive pair against the active version).
 --
 -- 'ignore' — the SAME decision as document.invoice_facts_failed / document.extraction_failed:
@@ -173,8 +354,9 @@ cross join clara.taxonomy_active a;
 -- ---------------------------------------------------------------------------
 do $tail$
 declare
-  v_acl text; v_cfg text; v_role text; v_src text;
+  v_acl text; v_cfg text; v_role text; v_src text; v_code text;
   v_sig constant text := 'clara.fail_classify(uuid,text,text)';
+  v_sig2 constant text := 'clara.classify_document(uuid,text,numeric,text,text)';
 begin
   -- (1) The new verb exists at its exact signature and carries the whole definer posture.
   if to_regprocedure(v_sig) is null then
@@ -241,20 +423,79 @@ begin
     raise exception '0024 tail: document.classify_failed taxonomy pair assertion failed';
   end if;
 
-  -- (4) NOTHING ELSE MOVED. The three bodies this migration's header claims are
-  -- byte-identical actually are — the classify-lane refusal inside the generic terminal
-  -- writer, classify_document's own settle path, and the claim function's lane dispatch.
+  -- (4) NOTHING ELSE MOVED. The generic terminal writer's classify-lane refusal is
+  -- byte-identical to 0016.
   select p.prosrc into v_src from pg_proc p
    where p.oid = 'clara.persist_document_extraction(uuid,text,int,jsonb,jsonb,text,text,text)'::regprocedure;
   if v_src is null or position('classify tasks are settled by classify_document' in v_src) = 0 then
     raise exception '0024 tail: persist_document_extraction lost its classify-lane refusal — fail_classify is meant to be the ONLY other terminal writer for this lane, not a replacement for the refusal';
   end if;
-  select p.prosrc into v_src from pg_proc p
-   where p.oid = 'clara.classify_document(uuid,text,numeric,text,text)'::regprocedure;
-  if v_src is null or position('classifier engine must carry the clara-classify- prefix' in v_src) = 0 then
-    raise exception '0024 tail: classify_document was disturbed';
+
+  -- (5) classify_document's CoR — the RACE GUARD is present in EXECUTABLE TEXT (both
+  -- comment forms stripped, whitespace normalised, the 0022/0023 discipline: a probe that
+  -- cannot tell code from a comment about code proves nothing). This is BELT — the primary
+  -- proof is behavioural (x-fail-classify.test.mjs's two-session lock-order cells) — but an
+  -- apply onto a drifted catalog must still refuse here.
+  select p.prosrc into v_src from pg_proc p where p.oid = v_sig2::regprocedure;
+  if v_src is null then
+    raise exception '0024 tail: classify_document is GONE';
+  end if;
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  -- The settle read now locks the MOST RECENT task for (document,engine) regardless of
+  -- status — the literal 'status=''running''' must be GONE from the SELECT's WHERE clause
+  -- (it survives only in the post-select branch below, checked separately).
+  if position('lane=''classify''andengine_id=p_engine_id' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s settle read no longer locks the most-recent classify task for (document,engine) — the race guard requires locking REGARDLESS of status';
+  end if;
+  if position('orderbyversion_ndesc,iddesclimit1forupdate' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s settle read no longer orders by the newest attempt — it could lock a STALE task row instead of the current one';
+  end if;
+  if position('foundandt.status=''running''' in v_code) = 0
+     or position('foundandt.status=''failed''' in v_code) = 0 then
+    raise exception '0024 tail: classify_document lost the running/failed branch split — the race guard requires both';
+  end if;
+  if position('alreadyfailed' in lower(v_code)) = 0 then
+    raise exception '0024 tail: classify_document lost the honest refusal message for a terminally-failed task';
+  end if;
+  -- Everything else this verb has ever guarded is still there — the definer posture, the
+  -- kind vocabulary, the human-precedence rule, and the low-confidence review lane.
+  if position('classifierenginemustcarrytheclara-classify-prefix' in v_code) = 0
+     or position('humanattestationengineidisreservedforset_document_kind' in v_code) = 0
+     or position('consent-evidenceclassificationisownedbytheegressconsentpath' in v_code) = 0
+     or position('whatkindofdocumentisthis' in lower(v_code)) = 0 then
+    raise exception '0024 tail: classify_document lost a retained 0016 guard/lane';
   end if;
 
-  raise notice '0024: fail_classify installed (clara_runtime only) — the classify lane now has a DB terminal-fail path';
+  -- (6) classify_document's ACL is UNCHANGED by the CoR (CREATE OR REPLACE preserves
+  -- owner/grants, but a future edit could still widen it — assert the same clara_runtime-only
+  -- posture fail_classify carries, both the ACL whitelist and the effective-privilege sweep).
+  select coalesce(string_agg(g, ', ' order by g), '') into v_acl
+    from (select case when a.grantee = 0 then 'PUBLIC'
+                      else pg_get_userbyid(a.grantee) end as g
+            from pg_proc p, lateral aclexplode(p.proacl) a
+           where p.oid = v_sig2::regprocedure
+             and a.privilege_type = 'EXECUTE'
+             and (a.grantee = 0
+                  or pg_get_userbyid(a.grantee) not in ('clara_fn_owner', 'clara_runtime'))
+         ) s;
+  if v_acl <> '' then
+    raise exception '0024 tail: % has unexpected EXECUTE grantee(s) after the CoR: % (only clara_fn_owner + clara_runtime may hold it)',
+      v_sig2, v_acl;
+  end if;
+  foreach v_role in array array['clara_authenticated', 'clara_agent_ro',
+      'clara_wake_interactive', 'clara_wake_proactive',
+      'clara_runtime_login', 'clara_agent_read_login', 'clara_wake_write_login'] loop
+    if to_regrole(v_role) is null then continue; end if;
+    if has_function_privilege(v_role, v_sig2, 'execute') then
+      raise exception '0024 tail: % holds EFFECTIVE EXECUTE on % after the CoR — this verb is clara_runtime-only',
+        v_role, v_sig2;
+    end if;
+  end loop;
+
+  raise notice '0024: fail_classify installed (clara_runtime only); classify_document CoR closes the fail_classify race — the classify lane now has a DB terminal-fail path AND exactly one terminal outcome per attempt';
 end
 $tail$;

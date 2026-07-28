@@ -16,6 +16,12 @@ import {
   classifyDocument, docKind, docTasks, roleCanExecute, fnSource,
   filedDocument, claimTask, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask,
 } from "./a21-helpers.mjs";
+// The generic two-session forced-schedule driver (X7 law: prove the block via
+// pg_blocking_pids before releasing, the x1/rig-docs-race precedent) — for the
+// deterministic fail_classify <-> classify_document lock-order cells below.
+import { holdThenContend } from "./rig-docs-race.mjs";
+
+const CLASSIFY_ENGINE_ID = "clara-classify-llm:v1";
 
 let has0024 = false;
 let world = null;
@@ -229,6 +235,102 @@ test("a nonexistent task id is refused CLR16", async () => {
     (e) => e.code === "CLR16",
     "an absent task id is refused CLR16 (never an existence oracle beyond the honest not-found code)",
   );
+});
+
+// ===========================================================================
+// THE RACE (cross-model review finding): fail_classify opens a new way for a classify
+// task to go terminal WHILE classify_document is mid-flight toward settling the SAME
+// task. Both deterministic lock orders, driven for real via holdThenContend (X7 law:
+// PROVE the block via pg_blocking_pids, never assume a lucky ordering) — exactly one
+// terminal event must ever fire for one attempt, and the loser must refuse honestly
+// rather than silently no-op past the winner's effect.
+// ===========================================================================
+
+test("RACE, lock order 1 — fail_classify holds first: classify_document blocks, then refuses honestly; the document is NEVER classified and only classify_failed fires", async () => {
+  requireReady();
+  const client = world.clients.A1;
+  const { document, taskId } = await runningClassifyTask(client);
+
+  const out = await holdThenContend({
+    a: {
+      role: ROLES.runtime,
+      run: (c) => c.query(
+        "select clara.fail_classify(p_task => $1, p_reason => $2, p_op_key => $3) as receipt",
+        [taskId, "engine_error", opk("race1-fail")],
+      ).then((r) => r.rows[0].receipt),
+    },
+    b: {
+      role: ROLES.runtime,
+      run: (c) => c.query(
+        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5) as receipt",
+        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race1-classify")],
+      ).then((r) => r.rows[0].receipt),
+    },
+  });
+
+  assert.ok(out.provedBlocked, "classify_document genuinely BLOCKED behind fail_classify's row lock (pg_blocking_pids proved it) — not a lucky ordering");
+  assert.equal(out.a.ok, true, `fail_classify (the lock holder) should succeed: ${out.a.message ?? ""}`);
+  assert.equal(out.a.receipt?.status, "failed", "fail_classify's receipt reports failed");
+  assert.equal(out.b.ok, false, "classify_document (the contender) must NOT succeed once its task already failed");
+  assert.equal(out.b.code, "CLR16", `classify_document should refuse CLR16 rather than silently classifying past the loss (got ${out.b.code}: ${out.b.message})`);
+
+  const after = (await docTasks(document.documentId)).find((x) => x.id === taskId);
+  assert.equal(after.status, "failed", "the task stays terminally failed");
+  const verdict = await rootQuery(
+    "select 1 from clara.document_extractions where document_id=$1 and engine_kind='doc_classify' and engine_id=$2",
+    [document.documentId, CLASSIFY_ENGINE_ID],
+  );
+  assert.equal(verdict.rows.length, 0, "NO doc_classify verdict was written — the loser's refusal is honest, not a silent partial effect");
+  assert.equal(await docKind(document.documentId), null, "document_kind was never set — the document was never classified by the losing call");
+  const classifiedEv = await rootQuery(
+    "select 1 from clara.domain_events where event_type='document.classified' and document_id=$1", [document.documentId],
+  );
+  assert.equal(classifiedEv.rows.length, 0, "document.classified never fires for this race");
+  const failedEv = await rootQuery(
+    "select 1 from clara.domain_events where event_type='document.classify_failed' and payload->>'task_id'=$1", [taskId],
+  );
+  assert.equal(failedEv.rows.length, 1, "exactly ONE document.classify_failed fires — one terminal event for one attempt");
+});
+
+test("RACE, lock order 2 — classify_document holds first: fail_classify blocks, then refuses honestly; the document IS classified and only classified fires", async () => {
+  requireReady();
+  const client = world.clients.A1;
+  const { document, taskId } = await runningClassifyTask(client);
+
+  const out = await holdThenContend({
+    a: {
+      role: ROLES.runtime,
+      run: (c) => c.query(
+        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5) as receipt",
+        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race2-classify")],
+      ).then((r) => r.rows[0].receipt),
+    },
+    b: {
+      role: ROLES.runtime,
+      run: (c) => c.query(
+        "select clara.fail_classify(p_task => $1, p_reason => $2, p_op_key => $3) as receipt",
+        [taskId, "engine_error", opk("race2-fail")],
+      ).then((r) => r.rows[0].receipt),
+    },
+  });
+
+  assert.ok(out.provedBlocked, "fail_classify genuinely BLOCKED behind classify_document's row lock (pg_blocking_pids proved it) — not a lucky ordering");
+  assert.equal(out.a.ok, true, `classify_document (the lock holder) should succeed: ${out.a.message ?? ""}`);
+  assert.equal(out.a.receipt?.kind_set, true, "classify_document's receipt reports the kind was set");
+  assert.equal(out.b.ok, false, "fail_classify (the contender) must NOT succeed once its task already settled done");
+  assert.equal(out.b.code, "CLR16", `fail_classify should refuse CLR16 rather than resurrecting a settled task (got ${out.b.code}: ${out.b.message})`);
+
+  const after = (await docTasks(document.documentId)).find((x) => x.id === taskId);
+  assert.equal(after.status, "done", "the task stays settled done");
+  assert.equal(await docKind(document.documentId), "invoice", "the document WAS classified by the winning call");
+  const failedEv = await rootQuery(
+    "select 1 from clara.domain_events where event_type='document.classify_failed' and payload->>'task_id'=$1", [taskId],
+  );
+  assert.equal(failedEv.rows.length, 0, "document.classify_failed never fires for this race");
+  const classifiedEv = await rootQuery(
+    "select 1 from clara.domain_events where event_type='document.classified' and document_id=$1", [document.documentId],
+  );
+  assert.equal(classifiedEv.rows.length, 1, "exactly ONE document.classified fires — one terminal event for one attempt");
 });
 
 // ===========================================================================
