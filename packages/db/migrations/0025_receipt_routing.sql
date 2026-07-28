@@ -36,6 +36,15 @@
 -- moved — including 0017's O8.6 patch, which is exactly the failure mode the header above
 -- guards against.
 --
+-- O2 FIX (cross-model review, second round): §B's document read was a plain SELECT — no
+-- lock. Between that read and the receipt-only backfill decision later in the same
+-- function, a concurrent set_document_kind or classify_document call could commit a kind
+-- change and this call would keep deciding against the stale snapshot, applying the
+-- receipt-only door to a document that is, by the time it actually enqueues, no longer a
+-- receipt. Fixed by locking the row (FOR UPDATE) at the same point classify_document and
+-- set_document_kind already lock it for the identical reason — see §B's own inline comment
+-- for the full reasoning and the lock-order argument.
+--
 -- WHAT THIS DOES NOT DO. No auto-enqueue of EXISTING receipt documents inside this migration
 -- — a data migration inside a DDL migration violates the doors-not-data precedent this repo
 -- holds throughout (0016 QUIESCE-GUARD-era migrations, the "doors, not data" framing in
@@ -235,7 +244,22 @@ begin
   -- The document must belong to the caller's firm. Checked explicitly rather than left to
   -- RLS (the 0021 rule): a cross-firm document id must be an honest refusal, never a silent
   -- no-op, and never an existence oracle either — the same CLR11 covers absent and foreign.
-  select * into d from clara.documents where id = p_document;
+  --
+  -- FOR UPDATE (cross-model review finding on this migration — a real TOCTOU, not
+  -- theoretical): every OTHER kind-dependent decision in this function reads d.document_kind
+  -- from THIS snapshot below, including the receipt-only backfill relaxation. Without a lock,
+  -- a concurrent set_document_kind or classify_document call can commit a kind CHANGE between
+  -- this read and that decision, and this call would keep deciding against the STALE value —
+  -- specifically, a document read as 'receipt' here could be corrected to 'invoice' by a
+  -- concurrent call, and this one would still apply the receipt-only backfill door to what is,
+  -- by the time it actually enqueues, no longer a receipt. classify_document and
+  -- set_document_kind both ALREADY lock this exact row for this exact reason (their own
+  -- ADV-R4#6 comment: "the two classification writers serialize instead of racing on the
+  -- kind") — this verb simply had not joined that serialization. Locking here makes it the
+  -- third writer in that same lock order (documents, then document_processing_tasks — both
+  -- OTHER kind writers touch documents alone, so there is no new cross-function lock-order
+  -- risk), so whichever call commits first is the truth the other one sees.
+  select * into d from clara.documents where id = p_document for update;
   if not found or d.firm_id is distinct from c.firm then
     raise exception 'document is not in your firm' using errcode = 'CLR11';
   end if;
@@ -440,6 +464,12 @@ begin
   -- The backfill relaxation, fused to the condition it modifies — not a bare mention.
   if position('d.document_kind<>''receipt''andnotexists' in v_code) = 0 then
     raise exception '0025 tail: request_reextraction''s receipt backfill relaxation is missing from the no-completed-extraction guard';
+  end if;
+  -- O2 (cross-model review): the document row is locked BEFORE its kind is read for any
+  -- decision — closing the TOCTOU where a concurrent kind-writer could commit a kind change
+  -- between the read and the receipt-only relaxation. Fused to the query, not a bare mention.
+  if position('fromclara.documentswhereid=p_documentforupdate' in v_code) = 0 then
+    raise exception '0025 tail: request_reextraction no longer locks the document row before reading its kind — the O2 TOCTOU fix is missing';
   end if;
   if position('performclara._reserve_processing_call(v_task,v_pages)' in v_code) = 0 then
     raise exception '0025 tail: request_reextraction''s page-budget reservation is missing — the standing cost control must still gate a receipt''s backfill extraction';

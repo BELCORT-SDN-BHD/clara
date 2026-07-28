@@ -12,9 +12,10 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, opk, endPool, buildWorld, assertRaises, firmOf,
+  ROLES, rootQuery, opk, endPool, buildWorld, assertRaises, firmOf,
   requestReextraction, laneTasks, grantConsent, seedCitedDocument, enqueueInvoiceFacts,
   invoiceFactsTask, claimTask, persistInvoiceFacts, factField, rm, printLaneNotes, noteLane,
+  holdThenContend, docKind,
 } from "./x1-helpers.mjs";
 
 let W = null;
@@ -232,4 +233,119 @@ test("the still-excluded kind message names 'invoice-shaped' honestly — a rece
     (e) => e.code === "CLR16" && /invoice-shaped/.test(e.message),
     "a still-excluded kind (payroll_summary) hits the kind-gate refusal, not the backfill seam",
   );
+});
+
+// ===========================================================================
+// THE TOCTOU (round-2 cross-model review finding): request_reextraction's document read
+// was unlocked, so a concurrent kind-writer (set_document_kind, classify_document) could
+// commit a kind change between the read and the receipt-only backfill decision, letting a
+// STALE 'receipt' snapshot open the backfill door for what is, by commit time, no longer a
+// receipt. Both lock orders, driven for real via holdThenContend (X7 law).
+// ===========================================================================
+
+test("TOCTOU order A: request_reextraction holds the document lock FIRST — it legitimately sees 'receipt' and the backfill fires; the concurrent correction still lands after", async () => {
+  requireReady();
+  const client = W.clients.A1;
+  const doc = await kindDoc(W.users.alice, { client, kind: "receipt" });
+
+  const out = await holdThenContend({
+    a: {
+      role: ROLES.authenticated, jwtSub: W.users.bob,
+      run: (c) => c.query(
+        "select clara.request_reextraction(p_document => $1, p_reason => $2, p_op_key => $3) as receipt",
+        [doc.documentId, "backfill order A", opk("toctou-a-rex")],
+      ).then((r) => r.rows[0].receipt),
+    },
+    b: {
+      role: ROLES.authenticated, jwtSub: W.users.bob,
+      run: (c) => c.query(
+        "select clara.set_document_kind(p_document => $1, p_kind => $2, p_reason => $3, p_op_key => $4) as receipt",
+        [doc.documentId, "invoice", "misclassified — this is actually an invoice", opk("toctou-a-setkind")],
+      ).then((r) => r.rows[0].receipt),
+    },
+  });
+
+  assert.ok(out.provedBlocked, "set_document_kind genuinely BLOCKED behind request_reextraction's row lock — not a lucky ordering");
+  assert.equal(out.a.ok, true, `request_reextraction (the lock holder, seeing 'receipt') should succeed: ${out.a.message ?? ""}`);
+  assert.equal(out.a.receipt?.status, "queued", "the backfill fired — it legitimately saw 'receipt' at the moment it held the lock");
+  assert.equal(out.b.ok, true, `set_document_kind should succeed once request_reextraction commits: ${out.b.message ?? ""}`);
+
+  assert.equal(await docKind(doc.documentId), "invoice", "the correction still lands — it simply had to wait its turn");
+  const tasks = await laneTasks(doc.documentId, "invoice_facts");
+  assert.equal(tasks.length, 1, "exactly one invoice_facts task exists — the legitimately-fired backfill");
+});
+
+test("TOCTOU order B: set_document_kind holds the document lock FIRST — request_reextraction blocks, then sees the NEW kind and correctly refuses (no backfill for a non-receipt)", async () => {
+  requireReady();
+  const client = W.clients.A1;
+  const doc = await kindDoc(W.users.alice, { client, kind: "receipt" });
+
+  const out = await holdThenContend({
+    a: {
+      role: ROLES.authenticated, jwtSub: W.users.bob,
+      run: (c) => c.query(
+        "select clara.set_document_kind(p_document => $1, p_kind => $2, p_reason => $3, p_op_key => $4) as receipt",
+        [doc.documentId, "invoice", "misclassified — this is actually an invoice", opk("toctou-b-setkind")],
+      ).then((r) => r.rows[0].receipt),
+    },
+    b: {
+      role: ROLES.authenticated, jwtSub: W.users.bob,
+      run: (c) => c.query(
+        "select clara.request_reextraction(p_document => $1, p_reason => $2, p_op_key => $3) as receipt",
+        [doc.documentId, "backfill order B", opk("toctou-b-rex")],
+      ).then((r) => r.rows[0].receipt),
+    },
+  });
+
+  assert.ok(out.provedBlocked, "request_reextraction genuinely BLOCKED behind set_document_kind's row lock — not a lucky ordering");
+  assert.equal(out.a.ok, true, `set_document_kind (the lock holder) should succeed: ${out.a.message ?? ""}`);
+  assert.equal(out.b.ok, false, "request_reextraction must NOT succeed via the receipt-only backfill once the kind is no longer receipt");
+  assert.equal(out.b.code, "CLR16",
+    `request_reextraction should refuse CLR16 (no completed extraction) — it must see the POST-COMMIT kind ('invoice'), never the stale 'receipt' snapshot (got ${out.b.code}: ${out.b.message})`);
+
+  assert.equal(await docKind(doc.documentId), "invoice", "the kind change stands");
+  const tasks = await laneTasks(doc.documentId, "invoice_facts");
+  assert.equal(tasks.length, 0, "NO task was queued — the backfill door stayed shut for what is, by the time the decision ran, an invoice");
+});
+
+// ===========================================================================
+// THE STRENGTHENING CELL: a pre-0025 receipt already carries a 'failed'/'skipped_kind'
+// terminal row (the shape _enqueue_invoice_facts_core minted for EVERY receipt before this
+// migration). Proves — behaviorally, not just via the static tail probe — that the
+// automatic pipeline now re-drives it at the NEXT version rather than treating the
+// historical row as any kind of block.
+// ===========================================================================
+
+test("a pre-0025 receipt carrying a historical skipped_kind terminal row gets its new task at the NEXT version, untouched history", async () => {
+  requireReady();
+  const client = W.clients.A1;
+  const doc = await kindDoc(W.users.alice, { client, kind: "receipt" });
+  const firm = await firmOf(client);
+
+  // Simulate the historical shape EXACTLY as _enqueue_invoice_facts_core minted it pre-0025
+  // (0016 L3404-3419 / 0025 §A, the skipped_kind receipt: never claimed, attempt_count 0).
+  await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status,error_code,finished_at)
+     values($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,1,'invoice_facts','failed','skipped_kind',now())`,
+    [firm, doc.documentId],
+  );
+  const historical = (await laneTasks(doc.documentId))[0];
+  assert.equal(historical.status, "failed", "mandatory setup: the historical skipped_kind row exists");
+  assert.equal(historical.error_code, "skipped_kind", "mandatory setup: it carries the pre-0025 receipt-exclusion marker");
+  assert.equal(historical.version_n, 1, "mandatory setup: it is version 1 — nothing else has ever run for this document");
+
+  // The automatic pipeline, now that 'receipt' is admitted, re-drives it.
+  await enqueueInvoiceFacts(doc.documentId);
+
+  const tasks = await laneTasks(doc.documentId);
+  assert.equal(tasks.length, 2, "a NEW task was minted alongside the historical one");
+  const fresh = tasks.find((t) => t.version_n === 2);
+  assert.ok(fresh, "the new task is at version 2 — the next version above the historical row");
+  assert.equal(fresh.status, "queued", "the new task is live and queued");
+  assert.equal(fresh.error_code, null, "…and carries no error code");
+
+  const historicalAfter = tasks.find((t) => t.version_n === 1);
+  assert.equal(historicalAfter.status, "failed", "the historical row is UNTOUCHED — its terminal state is a permanent record");
+  assert.equal(historicalAfter.error_code, "skipped_kind", "…and its error_code still names exactly why it was refused, before this migration");
 });
