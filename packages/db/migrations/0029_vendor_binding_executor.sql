@@ -377,19 +377,24 @@ declare
   v_env jsonb; v_net_agreed boolean; v_tax_agreed boolean;
   -- 0029 (Slot C): position-0 receipts and prefix-consistent lock locators.
   v_locator record; v_dedupe jsonb; v_reserved_revision uuid;
-  v_filing uuid; v_approve_op_key text;
+  v_filing uuid; v_approve_op_key text; v_locked_rule_ids uuid[];
   -- 0029 (Slot C): post-time binding pins and typed resolution outcome.
   b record; cpb record; v_facts_envelope jsonb; v_vi jsonb;
   v_facts_extraction uuid; v_ocr_extraction uuid;
   v_draft_resolution uuid; v_draft_binding uuid;
   v_draft_facts uuid; v_draft_ocr uuid;
   v_resolution_facts uuid; v_resolution_ocr uuid;
-  v_vendor_name text; v_invoice_id_norm text; v_f1_current text;
-  v_page_fp jsonb; v_page_counterparty uuid;
+  v_vendor_name text; v_vendor_registration text;
+  v_invoice_id_norm text; v_f1_current text;
+  v_page_fp jsonb; v_page_counterparty uuid; v_page_candidate uuid;
   v_binding_reason text; v_binding_outcome text;
-  v_binding_matches int; v_matching_binding uuid;
-  v_f1_ok boolean; v_f2_ok boolean; v_f3_ok boolean;
+  v_binding_matches int; v_matching_binding uuid; v_matching_f2 text;
+  v_f1_ok boolean; v_f2_ok boolean; v_matching_f2_ok boolean; v_f3_ok boolean;
   v_binding_live boolean; v_page_same boolean:=false;
+  v_page_birth boolean:=false; v_page_ambiguous boolean:=false;
+  v_a1_clean boolean:=false;
+  v_receipt_ambiguous boolean:=false;
+  v_receipt_uncorroborated boolean:=false;
 begin
   if p_op_key is null or btrim(p_op_key)='' then
     raise exception 'op_key is required' using errcode='CLR10';
@@ -416,15 +421,21 @@ begin
   if v_dedupe is not null then return v_dedupe; end if;
 
   -- Total-order law: coding_rules -> document_filings -> journal_entries.
-  -- Lock the client's live autopost set in deterministic id order because the
-  -- exact rule cannot be selected until the entry is authoritative under lock.
-  -- The exact-rule FOR UPDATE below is therefore re-entrant, not a later lock.
-  perform 1
-  from clara.coding_rules
-  where client_id=v_locator.client_id
-    and rule_type='autopost' and status='live'
-  order by id
-  for update;
+  -- Lock the client's live autopost set exactly once and retain the ids from
+  -- that snapshot. PostgreSQL does not allow FOR UPDATE on an aggregate query,
+  -- so the deterministic locking SELECT lives in a derived table and the outer
+  -- aggregate only captures its already-locked rows.
+  select coalesce(
+      array_agg(locked.id order by locked.id),'{}'::uuid[]
+    ) into v_locked_rule_ids
+  from (
+    select cr.id
+    from clara.coding_rules cr
+    where cr.client_id=v_locator.client_id
+      and cr.rule_type='autopost' and cr.status='live'
+    order by cr.id
+    for update
+  ) locked;
 
   -- Identical helper/row/mode to _approve_entry_core: FOR SHARE OF f.
   if v_locator.document_id is not null then
@@ -541,11 +552,14 @@ begin
   end if;
   v_counterparty:=clara._canonical_counterparty(e.client_id,(v_fp->>'counterparty_id')::uuid);
 
-  -- match + LOCK the live autopost rule (count-and-post atomic per rule).
+  -- Exact lookup is intentionally PLAIN: only rows captured and locked by the
+  -- single acquisition above are eligible in this pass. A proposed row that
+  -- became live after that snapshot is a no_live_rule retry, never a new lock
+  -- acquired after filing/entry.
   select * into r from clara.coding_rules
-    where client_id=e.client_id and counterparty_id=v_counterparty
-      and direction=v_direction and rule_type='autopost' and status='live'
-    for update;
+    where id=any(v_locked_rule_ids)
+      and client_id=e.client_id and counterparty_id=v_counterparty
+      and direction=v_direction and rule_type='autopost' and status='live';
   if not found then
     insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
       values(e.firm_id,e.client_id,p_entry,null,'no_live_rule');
@@ -944,13 +958,14 @@ begin
     -- the as-built _binding_f3_holds helper in this same statement makes its own
     -- latest-OCR selection coincide with v_ocr_extraction.
     select fx.id,fx.envelope,ox.id,
-      vn.vendor_name,clara._binding_normalize(ii.invoice_id),
+      vn.vendor_name,vr.vendor_registration,
+      clara._binding_normalize(ii.invoice_id),
       clara._binding_f3_holds(
         e.document_id,cpb.registration_normalized,cpb.name_normalized),
-      bm.match_count,bm.binding_id
+      bm.match_count,bm.binding_id,bm.f2_invoice_prefix
       into v_facts_extraction,v_facts_envelope,v_ocr_extraction,
-        v_vendor_name,v_invoice_id_norm,v_f3_ok,
-        v_binding_matches,v_matching_binding
+        v_vendor_name,v_vendor_registration,v_invoice_id_norm,v_f3_ok,
+        v_binding_matches,v_matching_binding,v_matching_f2
     from (
       select x.id,x.envelope
       from clara.document_extractions x
@@ -974,6 +989,12 @@ begin
         and dr.field_path='invoice.vendor_name'
     ) vn on true
     left join lateral (
+      select nullif(btrim(min(dr.text_content)),'') as vendor_registration
+      from clara.document_regions dr
+      where dr.extraction_id=fx.id
+        and dr.field_path='invoice.vendor_registration'
+    ) vr on true
+    left join lateral (
       select nullif(btrim(min(dr.text_content)),'') as invoice_id
       from clara.document_regions dr
       where dr.extraction_id=fx.id
@@ -981,7 +1002,9 @@ begin
     ) ii on true
     left join lateral (
       select count(*)::int as match_count,
-        min(b2.id::text)::uuid as binding_id
+        (array_agg(b2.id order by b2.id))[1] as binding_id,
+        (array_agg(b2.f2_invoice_prefix order by b2.id))[1]
+          as f2_invoice_prefix
       from clara.vendor_identity_bindings b2
       join clara.counterparties cp2
         on cp2.id=b2.counterparty_id
@@ -991,10 +1014,6 @@ begin
         and b2.status='live' and b2.expires_at>now()
         and b2.f1_vendor_name_norm=
           clara._binding_normalize(vn.vendor_name)
-        and starts_with(
-          clara._binding_normalize(ii.invoice_id),
-          b2.f2_invoice_prefix
-        )
         and cp2.merged_into is null and cp2.retired_at is null
         and cp2.registration_normalized is not distinct from
           b2.registration_at_signing
@@ -1015,9 +1034,14 @@ begin
     v_f1_ok:=v_f1_current is not distinct from b.f1_vendor_name_norm;
     v_f2_ok:=v_invoice_id_norm is not null
       and starts_with(v_invoice_id_norm,b.f2_invoice_prefix);
+    v_matching_f2_ok:=coalesce(v_binding_matches,0)=1
+      and v_invoice_id_norm is not null
+      and starts_with(v_invoice_id_norm,v_matching_f2);
     v_binding_live:=b.status='live' and b.expires_at>now();
 
-    -- Re-run A.1 exactly as 0028's resolver interpreted it.
+    -- Re-run the receipt half of A.1. The allowlist is identical to 0028's.
+    -- For outcome='absent', the four always-present producer counters have
+    -- exact values: absent=1 and matched/typed_collapsed/emitted=0.
     v_vi:=v_facts_envelope->'vendor_identity';
     if jsonb_typeof(v_vi) is distinct from 'object'
        or jsonb_typeof(v_vi->'candidates') is distinct from 'array' then
@@ -1025,70 +1049,141 @@ begin
     elsif exists (
       select 1 from jsonb_object_keys(v_vi) k
       where k not in (
-        'outcome','candidates','below_band','height_missing','unit_unresolved',
-        'no_geometry','rejected_gate','label_continuation','no_vendor_anchor',
-        'vendor_anchor_far','closer_to_customer','ambiguous','typed_disagreement',
-        'typed_vs_ambiguous'
+        'matched','absent','ambiguous','rejected_gate','below_band',
+        'height_missing','unit_unresolved','no_geometry','label_continuation',
+        'no_vendor_anchor','vendor_anchor_far','closer_to_customer',
+        'typed_collapsed','typed_disagreement','typed_vs_ambiguous','emitted',
+        'candidates','outcome','value_raw','occurrences','distinct_keys'
       )
     ) then
       v_binding_reason:='binding_receipt_unrecognized';
-    elsif v_vi->>'outcome' is distinct from 'absent'
-       or jsonb_array_length(v_vi->'candidates')<>0
-       or exists (
-         select 1
-         from unnest(array[
-           'ambiguous','typed_disagreement','typed_vs_ambiguous'
-         ]) k
-         where v_vi ? k and v_vi->k is distinct from '0'::jsonb
-       ) then
-      v_binding_reason:='binding_ambiguous';
-    elsif exists (
-      select 1
-      from unnest(array[
-        'below_band','height_missing','unit_unresolved','no_geometry',
-        'rejected_gate','label_continuation','no_vendor_anchor',
-        'vendor_anchor_far','closer_to_customer'
-      ]) k
-      where v_vi ? k and v_vi->k is distinct from '0'::jsonb
+    elsif v_vi->>'outcome' not in (
+      'absent','ambiguous','matched','typed_disagreement'
     ) then
-      v_binding_reason:='binding_uncorroborated';
-    elsif exists (
-      select 1 from clara.document_regions dr
-      where dr.extraction_id=v_facts_extraction
-        and dr.field_path='invoice.vendor_registration'
-    ) then
-      v_binding_reason:='binding_changed';
+      v_binding_reason:='binding_receipt_unrecognized';
+    else
+      if v_vi->>'outcome'='absent' then
+        if v_vi->'absent' is distinct from '1'::jsonb
+           or v_vi->'matched' is distinct from '0'::jsonb
+           or v_vi->'typed_collapsed' is distinct from '0'::jsonb
+           or v_vi->'emitted' is distinct from '0'::jsonb
+           or v_vi ?| array[
+             'value_raw','occurrences','distinct_keys'
+           ] then
+          v_binding_reason:='binding_receipt_unrecognized';
+        elsif jsonb_array_length(v_vi->'candidates')<>0
+           or exists (
+             select 1
+             from unnest(array[
+               'ambiguous','typed_disagreement','typed_vs_ambiguous'
+             ]) k
+             where v_vi ? k and v_vi->k is distinct from '0'::jsonb
+           ) then
+          v_receipt_ambiguous:=true;
+        elsif exists (
+          select 1
+          from unnest(array[
+            'below_band','height_missing','unit_unresolved','no_geometry',
+            'rejected_gate','label_continuation','no_vendor_anchor',
+            'vendor_anchor_far','closer_to_customer'
+          ]) k
+          where v_vi ? k and v_vi->k is distinct from '0'::jsonb
+        ) then
+          v_receipt_uncorroborated:=true;
+        elsif v_vendor_registration is null then
+          v_a1_clean:=true;
+        end if;
+      elsif v_vi->>'outcome' in ('ambiguous','typed_disagreement') then
+        v_receipt_ambiguous:=true;
+      end if;
     end if;
 
-    -- A.1 condition 5 / A.5 step 5: birth still means self-unresolved.
-    -- A newly self-resolving page may proceed only when it resolves to the
-    -- binding's own canonical counterparty.
-    if v_vendor_name is not null then
+    -- A.1 condition 5 and A.5 step 5 share one page-resolution attempt.
+    -- Crucially, an extracted registration is supplied to the ordinary resolver:
+    -- the previous name-only call could never exercise the equality-success path
+    -- for a registered vendor. A clean absent receipt admits birth or a
+    -- registration_conflict candidate equal to the binding; every other A.1
+    -- failure may proceed only on a genuine ordinary resolution to that same
+    -- counterparty.
+    if v_binding_reason is null and v_vendor_name is not null then
       begin
         v_page_fp:=clara._resolve_counterparty(e.client_id,
-          jsonb_build_object('kind','vendor','new',
-            jsonb_build_object('name',v_vendor_name)));
-      exception when sqlstate 'CLR21' or sqlstate 'CLR23' then
-        v_page_fp:=null;
-        if v_binding_reason is null then
-          v_binding_reason:='binding_ambiguous';
-        end if;
+          jsonb_strip_nulls(jsonb_build_object(
+            'kind','vendor',
+            'new',jsonb_build_object(
+              'name',v_vendor_name,
+              'registration_no',v_vendor_registration))));
+      exception
+        when sqlstate 'CLR21' then
+          v_page_ambiguous:=true;
+          v_page_fp:=null;
+        when sqlstate 'CLR23' then
+          declare
+            v_detail_j jsonb;
+          begin
+            get stacked diagnostics v_detail=pg_exception_detail;
+            begin
+              v_detail_j:=nullif(v_detail,'')::jsonb;
+            exception when others then
+              v_detail_j:=null;
+            end;
+            if coalesce(v_detail_j->>'reason','')='registration_conflict' then
+              begin
+                v_page_candidate:=nullif(
+                  v_detail_j->>'candidate_id','')::uuid;
+              exception when others then
+                v_page_candidate:=null;
+              end;
+            end if;
+            if v_page_candidate is null then
+              v_page_ambiguous:=true;
+            end if;
+            v_page_fp:=null;
+          end;
       end;
     end if;
-    if v_page_fp is not null and v_page_fp->>'decision'<>'birth' then
+    if v_page_fp is not null and v_page_fp->>'decision'='birth' then
+      v_page_birth:=true;
+    elsif v_page_fp is not null
+       and v_page_fp->>'decision'<>'birth' then
       begin
         v_page_counterparty:=clara._canonical_counterparty(
           e.client_id,(v_page_fp->>'counterparty_id')::uuid);
       exception when sqlstate 'CLR23' then
         v_page_counterparty:=null;
+        v_page_ambiguous:=true;
       end;
       v_page_same:=v_page_counterparty is not null
         and v_page_counterparty is not distinct from b.counterparty_id;
-      if not v_page_same and v_binding_reason is null then
+    end if;
+
+    if v_binding_reason is null then
+      if v_receipt_ambiguous then
+        v_binding_reason:='binding_ambiguous';
+      elsif v_a1_clean then
+        if v_page_birth
+           or v_page_candidate is not distinct from b.counterparty_id
+           or v_page_same then
+          null;
+        elsif v_page_candidate is not null
+           or v_page_counterparty is not null then
+          v_binding_reason:='binding_page_resolves_other';
+        elsif v_page_ambiguous then
+          v_binding_reason:='binding_ambiguous';
+        else
+          v_binding_reason:='binding_changed';
+        end if;
+      elsif v_page_same then
+        null;
+      elsif v_page_counterparty is not null then
         v_binding_reason:='binding_page_resolves_other';
+      elsif v_page_ambiguous or v_page_candidate is not null then
+        v_binding_reason:='binding_ambiguous';
+      elsif v_receipt_uncorroborated then
+        v_binding_reason:='binding_uncorroborated';
+      else
+        v_binding_reason:='binding_changed';
       end if;
-    elsif v_page_fp is null and v_binding_reason is null then
-      v_binding_reason:='binding_changed';
     end if;
 
     if b.status='revoked' then
@@ -1111,6 +1206,13 @@ begin
       v_binding_reason:='binding_changed';
     elsif v_ocr_extraction is null and v_binding_reason is null then
       v_binding_reason:='binding_no_corroboration_source';
+    elsif coalesce(v_binding_matches,0)>1
+        and v_binding_reason is null then
+      v_binding_reason:='binding_ambiguous';
+    elsif coalesce(v_binding_matches,0)=1
+        and not coalesce(v_matching_f2_ok,false)
+        and v_binding_reason is null then
+      v_binding_reason:='binding_features_changed';
     elsif (not coalesce(v_f1_ok,false) or not coalesce(v_f2_ok,false))
         and v_binding_reason is null then
       v_binding_reason:='binding_features_changed';
@@ -1119,9 +1221,6 @@ begin
     elsif v_counterparty is distinct from b.counterparty_id
         and v_binding_reason is null then
       v_binding_reason:='binding_changed';
-    elsif coalesce(v_binding_matches,0)>1
-        and v_binding_reason is null then
-      v_binding_reason:='binding_ambiguous';
     elsif (coalesce(v_binding_matches,0)<>1
         or v_matching_binding is distinct from e.vendor_binding_id)
         and v_binding_reason is null then
@@ -1211,8 +1310,11 @@ reset role;
 
 do $tail$
 declare
-  v_src text; v_norm text; v_pos_exec int; v_pos_approve int;
-  v_pos_rule int; v_pos_filing int; v_pos_entry int; v_pos_binding int;
+  v_src text; v_norm text; v_exact_slice text;
+  v_pos_exec int; v_pos_approve int;
+  v_pos_rule int; v_pos_rule_exact int;
+  v_pos_filing int; v_pos_entry int; v_pos_binding int;
+  v_pos_gate int; v_pos_gate_use int; v_pos_approve_call int;
 begin
   select pg_get_functiondef(
     'clara.execute_rule_post(uuid,text)'::regprocedure
@@ -1223,11 +1325,18 @@ begin
       '--[^\n]*','','g'),
     '\s+',' ','g'));
 
-  if position(
+  v_pos_gate:=position(
     'v_binding_live:=b.status=''live'' and b.expires_at>now();'
-    in v_norm
-  )=0 then
-    raise exception '0029 tail: binding liveness gate is absent'
+    in v_norm);
+  v_pos_gate_use:=position('not v_binding_live' in v_norm);
+  v_pos_approve_call:=position(
+    'v_result:=clara._approve_entry_core(' in v_norm);
+  if v_pos_gate=0 or v_pos_gate_use=0 or v_pos_approve_call=0
+     or v_pos_gate>=v_pos_gate_use
+     or v_pos_gate_use>=v_pos_approve_call then
+    raise exception
+      '0029 tail: binding liveness assignment/use/approve order invalid (gate=%, use=%, approve=%)',
+      v_pos_gate,v_pos_gate_use,v_pos_approve_call
       using errcode='CLR10';
   end if;
 
@@ -1235,7 +1344,10 @@ begin
     '_reserve_op(v_locator.firm_id,''execute_rule_post''' in v_norm);
   v_pos_approve:=position(
     '_reserve_op(v_locator.firm_id,''approve_entry''' in v_norm);
-  v_pos_rule:=position('from clara.coding_rules' in v_norm);
+  v_pos_rule:=position('from clara.coding_rules cr' in v_norm);
+  v_pos_rule_exact:=position(
+    'select * into r from clara.coding_rules where id=any(v_locked_rule_ids)'
+    in v_norm);
   v_pos_filing:=position('v_filing:=clara._active_document_filing' in v_norm);
   v_pos_entry:=position(
     'from clara.journal_entries where id=p_entry for update' in v_norm);
@@ -1243,13 +1355,25 @@ begin
     'from clara.vendor_identity_bindings where id=e.vendor_binding_id for update'
     in v_norm);
   if v_pos_exec=0 or v_pos_approve=0 or v_pos_rule=0
+     or v_pos_rule_exact=0
      or v_pos_filing=0 or v_pos_entry=0 or v_pos_binding=0
      or v_pos_exec>=v_pos_rule or v_pos_approve>=v_pos_rule
      or v_pos_rule>=v_pos_filing or v_pos_filing>=v_pos_entry
-     or v_pos_entry>=v_pos_binding then
+     or v_pos_entry>=v_pos_rule_exact
+     or v_pos_rule_exact>=v_pos_binding then
     raise exception
-      '0029 tail: receipt/rule/filing/entry/binding order invalid (exec=%, approve=%, rule=%, filing=%, entry=%, binding=%)',
-      v_pos_exec,v_pos_approve,v_pos_rule,v_pos_filing,v_pos_entry,v_pos_binding
+      '0029 tail: receipt/rule-lock/filing/entry/rule-read/binding order invalid (exec=%, approve=%, rule_lock=%, filing=%, entry=%, rule_read=%, binding=%)',
+      v_pos_exec,v_pos_approve,v_pos_rule,v_pos_filing,v_pos_entry,
+      v_pos_rule_exact,v_pos_binding
+      using errcode='CLR10';
+  end if;
+  v_exact_slice:=substring(
+    v_norm from v_pos_rule_exact
+    for position('if not found then' in substring(v_norm from v_pos_rule_exact))
+  );
+  if position('for update' in v_exact_slice)<>0 then
+    raise exception
+      '0029 tail: exact coding_rules lookup reacquires FOR UPDATE'
       using errcode='CLR10';
   end if;
 

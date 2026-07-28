@@ -161,19 +161,35 @@ export async function seedApprovedEntry(firm, client, cp, doc, { postingDate, ap
   return entry;
 }
 
+// The REAL X6 receipt shape (packages/runtime/lib/invoice-vendor-identity.mjs's
+// readVendorIdentityFromLines) -- every one of these 16 counters is ALWAYS present
+// (initialized to 0 in the receipt object literal), plus `outcome`/`candidates`. A genuine
+// qualifying absent receipt requires absent=1 (incremented exactly once on that path) and
+// matched=typed_collapsed=emitted=0 (P-round Finding C -- the allowlist-only partial shape
+// this fixture used to emit was REJECTED outright by the post-P-round key/value checks,
+// which is exactly the production defect Finding C fixed: a partial synthetic receipt was
+// masking that every REAL envelope carries these keys).
+export const FULL_ABSENT_RECEIPT = {
+  matched: 0, absent: 1, ambiguous: 0, rejected_gate: 0, below_band: 0,
+  height_missing: 0, unit_unresolved: 0, no_geometry: 0, label_continuation: 0,
+  no_vendor_anchor: 0, vendor_anchor_far: 0, closer_to_customer: 0,
+  typed_collapsed: 0, typed_disagreement: 0, typed_vs_ambiguous: 0, emitted: 0,
+  candidates: [], outcome: "absent",
+};
+
 /** A DONE invoice_facts + DONE ocr extraction, wired so F1 (vendor name) and F2 (invoice
  *  prefix) are stable across the window and F3 (page-1 top-band OCR line naming the bound
- *  party's registration) holds. The invoice_facts envelope also carries a genuine A.1-
- *  compliant vendor_identity shape (outcome='absent', empty candidates, no refusal counters)
- *  -- REQUIRED for _resolve_vendor_binding's own admission gate (Slot A), which the dwell/
- *  ceremony batteries never exercise (they only drive _derive_vendor_binding_proposal, which
- *  has no A.1 vendor_identity check at all) but the resolver battery does. */
+ *  party's registration) holds. The invoice_facts envelope carries the FULL real
+ *  vendor_identity receipt shape (FULL_ABSENT_RECEIPT) -- REQUIRED for
+ *  _resolve_vendor_binding's own admission gate (Slot A), which the dwell/ceremony
+ *  batteries never exercise (they only drive _derive_vendor_binding_proposal, which has no
+ *  A.1 vendor_identity check at all) but the resolver/executor batteries do. */
 export async function seedF123Evidence(firm, document, cp, invoiceId) {
   const factsExt = randomUUID();
   await rootQuery(
     `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope)
      values($1,$2,$3,'clara-fixture:v1','invoice_facts',1,'done',1,$4::jsonb)`,
-    [factsExt, firm, document, JSON.stringify({ vendor_identity: { outcome: "absent", candidates: [] } })],
+    [factsExt, firm, document, JSON.stringify({ vendor_identity: FULL_ABSENT_RECEIPT })],
   );
   await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)

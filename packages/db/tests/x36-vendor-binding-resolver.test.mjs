@@ -63,9 +63,13 @@ function requireReady() {
   }
 }
 
-async function resolveOrError(client, document) {
+// P-round (Finding A/E): _resolve_vendor_binding gained a third p_page_candidate
+// parameter and now returns jsonb {outcome:'bound'|'unresolved'|'ambiguous', ...} instead
+// of a bare uuid/null -- the caller (_coding_lane_core) now derives the page candidate
+// itself and passes it in; this resolver no longer re-derives it internally.
+async function resolveOrError(client, document, pageCandidate = null) {
   const r = await rootQuery(
-    "select clara._resolve_vendor_binding($1,$2) as r", [client, document],
+    "select clara._resolve_vendor_binding($1,$2,$3) as r", [client, document, pageCandidate],
   );
   return r.rows[0].r;
 }
@@ -136,8 +140,13 @@ test("x36v.2 a NEW document matching F1+F2+F3 resolves via _resolve_vendor_bindi
   const newDoc = await seedBareDocument(w.firms.A, "v2-new");
   const invoiceId = `${binding.f2_invoice_prefix}-99`;
   await seedF123Evidence(w.firms.A, newDoc.id, cp, invoiceId);
-  const resolved = await resolveOrError(w.clients.A1, newDoc.id);
-  assert.equal(resolved, cp.id, "the new document resolves to the bound counterparty");
+  // The page's bare-name lookup finds cp itself (registration_conflict, candidate=cp.id) --
+  // _coding_lane_core is what derives this in production; the test supplies it directly
+  // to exercise the resolver's own contract in isolation.
+  const resolved = await resolveOrError(w.clients.A1, newDoc.id, cp.id);
+  assert.equal(resolved.outcome, "bound", `expected bound, got: ${JSON.stringify(resolved)}`);
+  assert.equal(resolved.counterparty_id, cp.id, "the new document resolves to the bound counterparty");
+  assert.equal(resolved.binding_id, binding.binding_id);
 });
 
 test("x36v.2b BIRTH STILL ADMITS — a trading-name F1 that matches no counterparty's OWN registration resolves via the original birth path", async () => {
@@ -163,8 +172,9 @@ test("x36v.2b BIRTH STILL ADMITS — a trading-name F1 that matches no counterpa
   assert.equal(birthCheck.rows[0].r.decision, "birth",
     "fixture sanity: the trading name must resolve to birth (matches no registered counterparty)");
 
-  const resolved = await resolveOrError(w.clients.A1, newDoc.id);
-  assert.equal(resolved, cp.id,
+  const resolved = await resolveOrError(w.clients.A1, newDoc.id, null);
+  assert.equal(resolved.outcome, "bound", `expected bound, got: ${JSON.stringify(resolved)}`);
+  assert.equal(resolved.counterparty_id, cp.id,
     "a single, unambiguous live binding still resolves via the original birth path");
 });
 
@@ -181,10 +191,13 @@ test("x36v.3 F2 NEGATIVE — F1 and F3 hold but the invoice prefix does not matc
     "fixture sanity: the wrong-prefix id must not actually share the stored prefix",
   );
   await seedF123Evidence(w.firms.A, newDoc.id, cp, wrongPrefixInvoiceId);
-  const resolved = await resolveOrError(w.clients.A1, newDoc.id);
-  assert.equal(resolved, null,
-    "a document whose invoice_id does not extend the bound F2 prefix must not resolve, "
-    + "even though F1 and F3 both hold -- the matcher is no wider than F1+F2+F3 together");
+  // Same setup as x36v.2 -- the page's bare-name lookup finds cp itself.
+  const resolved = await resolveOrError(w.clients.A1, newDoc.id, cp.id);
+  // A unique F1 match whose F2 fails is reported as 'ambiguous' (P-round Finding B/E) --
+  // never a silent 'unresolved' that would look identical to no evidence existing at all.
+  assert.equal(resolved.outcome, "ambiguous",
+    `a document whose invoice_id does not extend the bound F2 prefix must not resolve as `
+    + `bound, even though F1 and F3 both hold -- got: ${JSON.stringify(resolved)}`);
 });
 
 test("x36v.4 AMBIGUOUS (honest rebuild) — two DIFFERENT registered vendors, both invoiced under the SAME trading name, both live and both matching -> resolves to nothing", async () => {
@@ -232,10 +245,11 @@ test("x36v.4 AMBIGUOUS (honest rebuild) — two DIFFERENT registered vendors, bo
   assert.equal(birthCheck.rows[0].r.decision, "birth",
     "fixture sanity: the trading name must resolve to birth (matches neither cp's own registered name)");
 
-  const resolved = await resolveOrError(w.clients.A1, newDoc.id);
-  assert.equal(resolved, null,
-    "two live bindings independently matching the same document via the birth path must "
-    + "resolve to NOTHING (fail-closed) -- never an error, and never an arbitrary pick");
+  const resolved = await resolveOrError(w.clients.A1, newDoc.id, null);
+  assert.equal(resolved.outcome, "ambiguous",
+    `two live bindings independently matching the same document via the birth path must `
+    + `resolve as ambiguous (fail-closed) -- never bound, never an error, never an `
+    + `arbitrary pick -- got: ${JSON.stringify(resolved)}`);
 });
 
 test("x36v.5 DIFFERENT CANDIDATE REFUSES — the page's own evidence names a DIFFERENT known party than the F1/F2/F3-matching binding", async () => {
@@ -273,8 +287,14 @@ test("x36v.5 DIFFERENT CANDIDATE REFUSES — the page's own evidence names a DIF
   }
   assert.equal(conflictCode, "CLR23", "fixture sanity: cpCompetitor's own name must raise, not birth");
 
-  const resolved = await resolveOrError(w.clients.A1, newDoc.id);
-  assert.equal(resolved, null,
-    "the page's own evidence names cpCompetitor, not cpBound -- REFUSE, never admit the "
-    + "F1/F2/F3-matching but uninvolved binding (the binding_page_resolves_other family)");
+  // The page's evidence points at cpCompetitor -- the resolver is constrained to ONLY
+  // cpCompetitor's own bindings, which has none, so this is a plain non-match (not
+  // 'ambiguous' -- that outcome is reserved for a genuine multi-candidate or F2-mismatch
+  // shape, neither of which applies here: cpBound's binding is excluded by the
+  // candidate-equality wall before it is ever counted).
+  const resolved = await resolveOrError(w.clients.A1, newDoc.id, cpCompetitor.id);
+  assert.equal(resolved.outcome, "unresolved",
+    `the page's own evidence names cpCompetitor, not cpBound -- REFUSE, never admit the `
+    + `F1/F2/F3-matching but uninvolved binding (the binding_page_resolves_other family) -- `
+    + `got: ${JSON.stringify(resolved)}`);
 });

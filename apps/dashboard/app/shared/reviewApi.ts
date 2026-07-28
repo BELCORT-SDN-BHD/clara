@@ -268,10 +268,15 @@ export type VendorBindingDetail = {
   }>;
   resolutions: Array<{
     resolution_id: string; document_id: string | null; entry_id: string | null;
-    phase: "draft" | "post"; outcome: string;
+    // phase 'revision' is Slot B's revise_entry divergence write (A.4) -- distinct from
+    // the admission-time 'draft' write and 0029's post-time 'post' write.
+    phase: "draft" | "revision" | "post"; outcome: "bound" | "divergence" | "refused";
     facts_extraction_id: string | null; ocr_extraction_id: string | null;
     compared_to_resolution_id: string | null;
-    refusal_reason: string | null; divergence: boolean;
+    refusal_reason: string | null;
+    // SQL column is `divergence jsonb` (nullable detail, not a flag) -- the visible
+    // divergence record the owner ruled must render (Part 1 §10 amendment A), not a boolean.
+    divergence: Record<string, unknown> | null;
     created_at: string;
   }>;
 };

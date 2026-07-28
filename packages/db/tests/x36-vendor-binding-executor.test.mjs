@@ -17,7 +17,7 @@ import {
   upsertAccountClassed, upsertPayableAccount, withActor, withSessionAuth,
 } from "./wave-a-fixtures.mjs";
 import {
-  has29, seedApprovedEntry, seedBareDocument, seedF123Evidence,
+  FULL_ABSENT_RECEIPT, has29, seedApprovedEntry, seedBareDocument, seedF123Evidence,
   seedPayableAccount, seedVendorCounterparty,
 } from "./x36-vendor-binding-helpers.mjs";
 
@@ -156,7 +156,9 @@ async function seedBoundDraft(tag) {
   ], {
     envelope: agreedEnvelope({
       extra: {
-        vendor_identity: { outcome: "absent", candidates: [] },
+        // Real X6 receipt shape (P-round Finding C) -- a partial synthetic shape was
+        // itself the production defect the fix closed; use the real vocabulary here.
+        vendor_identity: FULL_ABSENT_RECEIPT,
       },
     }),
   });
@@ -217,10 +219,16 @@ async function seedBoundDraft(tag) {
     [w.clients.A1, cp.id],
   )).rows[0].fp;
 
-  // 0028's as-built _resolve_vendor_binding currently calls min(uuid), which
-  // PostgreSQL does not provide. This fixture therefore stages the already-
-  // stamped Slot-B postcondition directly so this 0029 rig remains isolated to
-  // Slot C and does not silently "fix" Slot B in migration 0029.
+  // KNOWN GAP (O-round finding 7, not yet closed): this fixture stages the
+  // already-stamped Slot-B postcondition directly rather than driving a real
+  // draft through _draft_entry_core, so this file proves Slot C in isolation but
+  // never exercises Slot A/B's OWN admission path end-to-end (that coverage lives
+  // in x36-vendor-binding-resolver.test.mjs at the _resolve_vendor_binding layer,
+  // and in the P-round regression suite at the _coding_lane_core/_draft_entry_core
+  // caller layer for the NEW two-level fix specifically -- but no single test
+  // drives propose->sign->real-wake-draft->Slot-C-post end to end). The min(uuid)
+  // bug this comment used to cite is fixed (task #36 follow-up); the isolation
+  // choice itself remains deliberate, scoping this file to Slot C alone.
   const draft = await withActor({ transaction: true }, async (client) => {
     const inserted = await client.query(
       `insert into clara.journal_entries(
@@ -366,7 +374,9 @@ test("x36e.2 current F1 drift writes refused resolution and never approves", asy
     [
       extraction, w.firms.A, draft.cited.documentId, current + 1,
       JSON.stringify({
-        vendor_identity: { outcome: "absent", candidates: [] },
+        // Real X6 receipt shape (P-round Finding C) -- a partial synthetic shape was
+        // itself the production defect the fix closed; use the real vocabulary here.
+        vendor_identity: FULL_ABSENT_RECEIPT,
       }),
     ],
   );

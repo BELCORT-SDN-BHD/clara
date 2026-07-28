@@ -312,15 +312,16 @@ $$;
 
 create function clara._resolve_vendor_binding(
   p_client uuid,
-  p_document uuid
-) returns uuid
+  p_document uuid,
+  p_page_candidate uuid default null
+) returns jsonb
 language plpgsql stable security definer
 set search_path to clara,pg_temp
 as $$
 declare
-  v_ext record; v_vi jsonb; v_vendor text; v_fp jsonb; v_norm_name text;
-  v_matches int; v_counterparty uuid; v_invoice_id text; v_invoice_id_norm text;
-  v_detail text; v_detail_j jsonb; v_conflict_candidate uuid;
+  v_ext record; v_vi jsonb; v_vendor text; v_norm_name text;
+  v_matches int; v_counterparty uuid; v_binding uuid;
+  v_invoice_id text; v_invoice_id_norm text; v_f2_prefix text;
 begin
   select e.* into v_ext
   from clara.document_extractions e
@@ -329,29 +330,40 @@ begin
     and e.status='done'
   order by e.version_n desc,e.id desc
   limit 1;
-  if not found then return null; end if;
+  if not found then
+    return jsonb_build_object('outcome','unresolved');
+  end if;
 
   v_vi:=v_ext.envelope->'vendor_identity';
   if jsonb_typeof(v_vi) is distinct from 'object'
      or v_vi->>'outcome' is distinct from 'absent'
      or jsonb_typeof(v_vi->'candidates') is distinct from 'array'
      or jsonb_array_length(v_vi->'candidates')<>0 then
-    return null;
+    return jsonb_build_object('outcome','unresolved');
   end if;
 
   if exists (
     select 1 from jsonb_object_keys(v_vi) k
     where k not in (
-      'outcome','candidates','below_band','height_missing','unit_unresolved',
-      'no_geometry','rejected_gate','label_continuation','no_vendor_anchor',
-      'vendor_anchor_far','closer_to_customer','ambiguous','typed_disagreement',
-      'typed_vs_ambiguous'
+      'matched','absent','ambiguous','rejected_gate','below_band',
+      'height_missing','unit_unresolved','no_geometry','label_continuation',
+      'no_vendor_anchor','vendor_anchor_far','closer_to_customer',
+      'typed_collapsed','typed_disagreement','typed_vs_ambiguous','emitted',
+      'candidates','outcome','value_raw','occurrences','distinct_keys'
     )
   ) then
-    return null;
+    return jsonb_build_object('outcome','unresolved');
   end if;
 
-  if exists (
+  -- The current X6 producer always emits these four counters. On the only path
+  -- that sets outcome='absent', it increments absent exactly once before return;
+  -- no accepted row exists, so matched/typed_collapsed/emitted remain zero.
+  if v_vi->'absent' is distinct from '1'::jsonb
+     or v_vi->'matched' is distinct from '0'::jsonb
+     or v_vi->'typed_collapsed' is distinct from '0'::jsonb
+     or v_vi->'emitted' is distinct from '0'::jsonb
+     or v_vi ?| array['value_raw','occurrences','distinct_keys']
+     or exists (
     select 1
     from unnest(array[
       'below_band','height_missing','unit_unresolved','no_geometry',
@@ -361,7 +373,7 @@ begin
     ]) k
     where v_vi ? k and v_vi->k is distinct from '0'::jsonb
   ) then
-    return null;
+    return jsonb_build_object('outcome','unresolved');
   end if;
 
   if exists (
@@ -369,76 +381,32 @@ begin
     where r.extraction_id=v_ext.id
       and r.field_path='invoice.vendor_registration'
   ) then
-    return null;
+    return jsonb_build_object('outcome','unresolved');
   end if;
 
   select nullif(btrim(min(r.text_content)),'') into v_vendor
   from clara.document_regions r
   where r.extraction_id=v_ext.id
     and r.field_path='invoice.vendor_name';
-  if v_vendor is null then return null; end if;
-
-  -- A.1 condition 5 (owner-ruling amendment, task #36 follow-up): the page's own name
-  -- resolution must fail to independently establish identity, in EXACTLY two shapes.
-  --   (1) decision='birth' -- the ORIGINAL case the design was written against: a
-  --       fragmented/unlabelled letterhead whose OCR name text doesn't name-match
-  --       anything at all.
-  --   (2) CLR23 detail.reason='registration_conflict' -- the case the design text
-  --       never enumerated: a CLEAN, exactly-name-matching page against an ALREADY
-  --       REGISTERED vendor (which every bound counterparty is, by construction --
-  --       registration_at_signing is NOT NULL). _resolve_counterparty refuses a
-  --       bare-name proposal against a registered match rather than silently
-  --       picking it, which is correct in general (R2's own wall) -- but it is
-  --       EXACTLY the shape a signed binding exists to corroborate past.
-  -- Shape (2) admits ONLY when detail.candidate_id equals the eventually-matched
-  -- binding's OWN counterparty_id (enforced below by constraining the match query to
-  -- that one candidate when set) -- a DIFFERENT candidate means the page's own
-  -- evidence points at a different, already-known party than the binding names, and
-  -- that is a refusal (the binding_page_resolves_other family, one layer up in 0029's
-  -- post-time control), never an admission. This equality wall is what makes the
-  -- widening SAFER than birth alone: birth carries no page-consistency check at all.
-  begin
-    v_fp:=clara._resolve_counterparty(p_client,
-      jsonb_build_object('kind','vendor','new',
-        jsonb_build_object('name',v_vendor)));
-  exception when sqlstate 'CLR21' then
-    return null;
-  when sqlstate 'CLR23' then
-    get stacked diagnostics v_detail = pg_exception_detail;
-    v_detail_j:=nullif(v_detail,'')::jsonb;
-    if coalesce(v_detail_j->>'reason','')<>'registration_conflict' then
-      return null;
-    end if;
-    v_conflict_candidate:=nullif(v_detail_j->>'candidate_id','')::uuid;
-    if v_conflict_candidate is null then
-      return null;
-    end if;
-  end;
-  if v_conflict_candidate is null
-     and (v_fp is null or v_fp->>'decision' is distinct from 'birth') then
-    return null;
+  if v_vendor is null then
+    return jsonb_build_object('outcome','unresolved');
   end if;
 
   v_norm_name:=clara._binding_normalize(v_vendor);
-  -- F2 (owner-corrected, task #36 follow-up): the original build matched on F1+F3 only,
-  -- treating F2 as propose/sign-time-only ("F2 is a stability feature that resolves nothing
-  -- alone", Part 2 SS C.2). Owner ruling: that read was wrong for THIS resolver -- F2's floor
-  -- is exactly what keeps a shared/generic prefix (an "INV"-style series) from letting one
-  -- binding match documents from an unrelated vendor that merely shares a name+registration
-  -- shape. Matches 0029's post-time re-derivation's own F2 check (starts_with the CURRENT
-  -- document's normalized invoice_id against the binding's stored prefix) so Slot A's
-  -- admission-time match and Slot C's post-time re-match apply the identical predicate.
   select nullif(btrim(min(r.text_content)),'') into v_invoice_id
   from clara.document_regions r
   where r.extraction_id=v_ext.id
     and r.field_path='invoice.invoice_id';
   v_invoice_id_norm:=clara._binding_normalize(v_invoice_id);
-  -- min(uuid) has no default aggregate in Postgres (42883) -- array_agg(...)[1] picks an
-  -- arbitrary element the same way min() would have, which is fine here: v_counterparty is
-  -- only ever RETURNED when v_matches=1 (exactly one candidate, so "arbitrary" == "the one"),
-  -- and thrown away on ambiguity (v_matches<>1 falls through to `return null`).
-  select count(*)::int,(array_agg(b.counterparty_id))[1]
-    into v_matches,v_counterparty
+
+  -- F2 is not a selection key. First count the complete F1+F3 candidate set
+  -- (including the optional page-candidate equality wall); only a unique
+  -- candidate may be checked for F2 consistency afterward.
+  select count(*)::int,
+         (array_agg(b.counterparty_id order by b.id))[1],
+         (array_agg(b.id order by b.id))[1],
+         (array_agg(b.f2_invoice_prefix order by b.id))[1]
+    into v_matches,v_counterparty,v_binding,v_f2_prefix
   from clara.vendor_identity_bindings b
   join clara.counterparties cp
     on cp.id=b.counterparty_id
@@ -448,23 +416,27 @@ begin
     and b.status='live'
     and b.expires_at>now()
     and b.f1_vendor_name_norm=v_norm_name
-    and v_invoice_id_norm is not null
-    and starts_with(v_invoice_id_norm,b.f2_invoice_prefix)
     and cp.merged_into is null
     and cp.retired_at is null
     and cp.registration_normalized is not distinct from b.registration_at_signing
     and clara._binding_f3_holds(
       p_document,cp.registration_normalized,cp.name_normalized)
-    -- registration_conflict admission: the page's own evidence named ONE specific
-    -- existing counterparty (v_conflict_candidate) -- only THAT counterparty's binding
-    -- may resolve. A different (even F1/F2/F3-matching) live binding does not count;
-    -- v_matches stays 0 for it, so the function falls through to `return null` below,
-    -- never an arbitrary or wrong-party admission. NULL under the birth path (no
-    -- constraint, matches ANY qualifying live binding, unchanged from before).
-    and (v_conflict_candidate is null or b.counterparty_id=v_conflict_candidate);
+    and (p_page_candidate is null or b.counterparty_id=p_page_candidate);
 
-  if v_matches=1 then return v_counterparty; end if;
-  return null;
+  if v_matches=0 then
+    return jsonb_build_object('outcome','unresolved');
+  end if;
+  if v_matches>1 then
+    return jsonb_build_object('outcome','ambiguous');
+  end if;
+  if v_invoice_id_norm is null
+     or not starts_with(v_invoice_id_norm,v_f2_prefix) then
+    return jsonb_build_object('outcome','ambiguous');
+  end if;
+  return jsonb_build_object(
+    'outcome','bound',
+    'counterparty_id',v_counterparty,
+    'binding_id',v_binding);
 end
 $$;
 
@@ -1076,29 +1048,116 @@ do $cor$
 declare
   v_def text; v_next text; v_anchor text; v_count int;
 begin
-  -- Slot A: birth may resolve through a live binding; vendor_bound is readiness-neutral.
+  -- Slot A. The PRE-0028 body caught CLR23 around both _resolve_counterparty
+  -- and the birth branch, so registration_conflict jumped past Slot A
+  -- completely. Replace that whole catalog-derived block: only the ordinary
+  -- resolver call is caught, then birth or a parsed registration-conflict
+  -- candidate reaches the one binding resolver call below.
   select pg_get_functiondef(
     'clara._coding_lane_core(uuid,uuid)'::regprocedure) into v_def;
-  v_anchor:=$old$      if v_fp->>'decision'='birth' then
+  v_anchor:=$old$  if v_vendor is null then
+    v_reasons:=array_append(v_reasons,'vendor_unresolved');
+  else
+    begin
+      v_fp:=clara._resolve_counterparty(p_client,
+        jsonb_build_object('kind',v_kind,'new',case when v_vendor_reg is not null
+          then jsonb_build_object('name',v_vendor,'registration_no',v_vendor_reg)
+          else jsonb_build_object('name',v_vendor) end));
+      if v_fp->>'decision'='birth' then
         v_reasons:=array_append(v_reasons,'vendor_unresolved');
       else
         v_counterparty:=(v_fp->>'counterparty_id')::uuid;
-      end if;$old$;
+      end if;
+    exception when sqlstate 'CLR23' then
+      v_reasons:=array_append(v_reasons,'vendor_ambiguous'); v_hard:=true;
+    end;
+  end if;$old$;
   v_count:=(length(v_def)-length(replace(v_def,v_anchor,'')))/length(v_anchor);
   if v_count<>1 then
-    raise exception '0028: _coding_lane_core birth anchor drift (%)',v_count
+    raise exception '0028: _coding_lane_core vendor-resolution anchor drift (%)',v_count
       using errcode='CLR10';
   end if;
-  v_next:=replace(v_def,v_anchor,$new$      if v_fp->>'decision'='birth' then
-        v_counterparty := clara._resolve_vendor_binding(p_client, f.document_id);
-        if v_counterparty is not null then
-          v_reasons := array_append(v_reasons, 'vendor_bound');
-        else
-          v_reasons := array_append(v_reasons, 'vendor_unresolved');
-        end if;
-      else
+  v_next:=replace(v_def,v_anchor,$new$  if v_vendor is null then
+    v_reasons:=array_append(v_reasons,'vendor_unresolved');
+  else
+    declare
+      v_page_candidate uuid;
+      v_binding_result jsonb;
+      v_resolution_refused boolean:=false;
+    begin
+      v_fp:=null;
+      begin
+        v_fp:=clara._resolve_counterparty(p_client,
+          jsonb_build_object('kind',v_kind,'new',case when v_vendor_reg is not null
+            then jsonb_build_object('name',v_vendor,'registration_no',v_vendor_reg)
+            else jsonb_build_object('name',v_vendor) end));
+      exception when sqlstate 'CLR23' then
+        declare
+          v_detail text;
+          v_detail_j jsonb;
+        begin
+          get stacked diagnostics v_detail=pg_exception_detail;
+          begin
+            v_detail_j:=nullif(v_detail,'')::jsonb;
+          exception when others then
+            v_detail_j:=null;
+          end;
+          if coalesce(v_detail_j->>'reason','')<>'registration_conflict' then
+            v_reasons:=array_append(v_reasons,'vendor_ambiguous');
+            v_hard:=true;
+            v_resolution_refused:=true;
+          else
+            begin
+              v_page_candidate:=nullif(
+                v_detail_j->>'candidate_id','')::uuid;
+            exception when others then
+              v_page_candidate:=null;
+            end;
+            if v_page_candidate is null then
+              v_reasons:=array_append(v_reasons,'vendor_ambiguous');
+              v_hard:=true;
+              v_resolution_refused:=true;
+            end if;
+          end if;
+        end;
+      end;
+
+      if v_resolution_refused then
+        null;
+      elsif v_fp is not null and v_fp->>'decision'<>'birth' then
         v_counterparty:=(v_fp->>'counterparty_id')::uuid;
-      end if;$new$);
+      else
+        v_binding_result:=clara._resolve_vendor_binding(
+          p_client,f.document_id,v_page_candidate);
+        if v_binding_result->>'outcome'='bound' then
+          v_counterparty:=(v_binding_result->>'counterparty_id')::uuid;
+          v_reasons:=array_append(v_reasons,'vendor_bound');
+        elsif v_page_candidate is not null then
+          -- Reached via registration_conflict (a name-only match against an
+          -- ALREADY-REGISTERED vendor), but the binding did not confirm it --
+          -- fall back to the SAME pre-existing safe default a name-only match
+          -- against a registered vendor has always produced, whether Slot A
+          -- said 'unresolved' (no live binding at all) or 'ambiguous' (an F1
+          -- collision or F2 mismatch on one candidate): the underlying page
+          -- fact (a known name, unconfirmed legal entity) is identical either
+          -- way, and a vendor with no binding must see byte-identical
+          -- behavior to before this migration (wave-a1-vendor-registration's
+          -- own regression coverage pins this).
+          v_reasons:=array_append(v_reasons,'vendor_ambiguous');
+          v_hard:=true;
+        elsif v_binding_result->>'outcome'='ambiguous' then
+          -- Reached via genuine birth (a name matching no registered
+          -- counterparty at all) but multiple live bindings independently
+          -- match it -- a situation with no pre-existing reason to preserve,
+          -- since it could not occur before this migration.
+          v_reasons:=array_append(v_reasons,'binding_ambiguous');
+          v_hard:=true;
+        else
+          v_reasons:=array_append(v_reasons,'vendor_unresolved');
+        end if;
+      end if;
+    end;
+  end if;$new$);
   v_anchor:=$old$  elsif coalesce(array_length(array_remove(v_reasons,'rule_backed'),1),0)=0 then lane:='ready';$old$;
   v_count:=(length(v_next)-length(replace(v_next,v_anchor,'')))/length(v_anchor);
   if v_count<>1 then
@@ -1141,14 +1200,65 @@ begin
     then p_proposed_counterparty
     else p_proposed_counterparty || jsonb_build_object('kind',v_kind) end;
   if not p_is_human and p_document is not null and v_kind='vendor' then
-    v_binding_counterparty:=clara._resolve_vendor_binding(p_client,p_document);
-    if v_binding_counterparty is not null then
-      select b.id into v_vendor_binding
-      from clara.vendor_identity_bindings b
-      where b.client_id=p_client
-        and b.counterparty_id=v_binding_counterparty
-        and b.status='live' and b.expires_at>now();
-      if found then
+    -- Slot B is a second production resolver caller (the original task design's
+    -- "exactly one" inventory missed it). Re-establish A.1 condition 5 here as
+    -- well, so the new page-candidate parameter cannot be bypassed by drafting.
+    declare
+      v_page_vendor text;
+      v_page_candidate uuid;
+      v_page_fp jsonb;
+      v_binding_result jsonb;
+      v_condition_five boolean:=false;
+    begin
+      select nullif(btrim(min(dr.text_content)),'') into v_page_vendor
+      from clara.document_regions dr
+      where dr.extraction_id=(
+        select x.id from clara.document_extractions x
+        where x.document_id=p_document
+          and x.engine_kind='invoice_facts' and x.status='done'
+        order by x.version_n desc,x.id desc limit 1
+      ) and dr.field_path='invoice.vendor_name';
+      if v_page_vendor is not null then
+        begin
+          v_page_fp:=clara._resolve_counterparty(p_client,
+            jsonb_build_object('kind','vendor','new',
+              jsonb_build_object('name',v_page_vendor)));
+          v_condition_five:=v_page_fp is not null
+            and v_page_fp->>'decision'='birth';
+        exception
+          when sqlstate 'CLR21' then
+            v_condition_five:=false;
+          when sqlstate 'CLR23' then
+            declare
+              v_detail text;
+              v_detail_j jsonb;
+            begin
+              get stacked diagnostics v_detail=pg_exception_detail;
+              begin
+                v_detail_j:=nullif(v_detail,'')::jsonb;
+              exception when others then
+                v_detail_j:=null;
+              end;
+              if coalesce(v_detail_j->>'reason','')='registration_conflict' then
+                begin
+                  v_page_candidate:=nullif(
+                    v_detail_j->>'candidate_id','')::uuid;
+                exception when others then
+                  v_page_candidate:=null;
+                end;
+                v_condition_five:=v_page_candidate is not null;
+              end if;
+            end;
+        end;
+      end if;
+      if v_condition_five then
+        v_binding_result:=clara._resolve_vendor_binding(
+          p_client,p_document,v_page_candidate);
+      end if;
+      if v_binding_result->>'outcome'='bound' then
+        v_binding_counterparty:=
+          (v_binding_result->>'counterparty_id')::uuid;
+        v_vendor_binding:=(v_binding_result->>'binding_id')::uuid;
         v_fingerprint:=clara._resolve_counterparty(p_client,v_proposal);
         if v_fingerprint is null or v_fingerprint->>'decision'='birth' then
           v_proposal:=jsonb_build_object(
@@ -1165,7 +1275,7 @@ begin
                 'proposed_counterparty',v_fingerprint->>'counterparty_id')::text;
         end if;
       end if;
-    end if;
+    end;
   end if;
   if v_fingerprint is null then
     v_fingerprint := clara._resolve_counterparty(p_client,v_proposal);
@@ -1455,7 +1565,7 @@ $cor$;
 revoke all on function clara._tf_vendor_identity_binding_update() from public;
 revoke all on function clara._binding_normalize(text) from public;
 revoke all on function clara._binding_f3_holds(uuid,text,text) from public;
-revoke all on function clara._resolve_vendor_binding(uuid,uuid) from public;
+revoke all on function clara._resolve_vendor_binding(uuid,uuid,uuid) from public;
 revoke all on function clara._binding_common_prefix(text,text,text) from public;
 revoke all on function clara._derive_vendor_binding_proposal(uuid,uuid,uuid) from public;
 

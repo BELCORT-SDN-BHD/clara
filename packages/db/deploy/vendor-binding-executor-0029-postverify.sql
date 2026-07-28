@@ -22,9 +22,13 @@ do $verify$
 declare
   v_n int;
   v_src text; v_norm text; v_identity_args text;
+  v_exact_slice text; v_bm_slice text;
   v_pos_exec int; v_pos_approve int; v_pos_first_lock int;
-  v_pos_rule int; v_pos_filing int; v_pos_entry int; v_pos_binding int;
-  v_pos_marker_if int;
+  v_pos_rule int; v_pos_rule_exact int;
+  v_pos_filing int; v_pos_entry int; v_pos_binding int;
+  v_pos_marker_if int; v_pos_gate int; v_pos_gate_use int;
+  v_pos_approve_call int;
+  v_pos_bm int; v_pos_bm_end int;
 begin
   -- (1) mandatory prior-migration and current-migration checks.
   select count(*)::int into v_n
@@ -42,7 +46,7 @@ begin
       '0029 postverify: migration 0029_vendor_binding_executor is not recorded';
   end if;
   raise notice
-    '0029 postverify OK (1/5): migration chain intact through 0029';
+    '0029 postverify OK (1/6): migration chain intact through 0029';
 
   select pg_get_functiondef(
     'clara.execute_rule_post(uuid,text)'::regprocedure
@@ -58,15 +62,21 @@ begin
 
   -- (2) Layer-2 interlock, by the exact liveness gate installed in 0029.
   -- Keep this literal synchronized with check-binding-post-control.mjs.
-  if position(
+  v_pos_gate:=position(
     'v_binding_live:=b.status=''live'' and b.expires_at>now();'
-    in v_norm
-  )=0 then
+    in v_norm);
+  v_pos_gate_use:=position('not v_binding_live' in v_norm);
+  v_pos_approve_call:=position(
+    'v_result:=clara._approve_entry_core(' in v_norm);
+  if v_pos_gate=0 or v_pos_gate_use=0 or v_pos_approve_call=0
+     or v_pos_gate>=v_pos_gate_use
+     or v_pos_gate_use>=v_pos_approve_call then
     raise exception
-      '0029 postverify: execute_rule_post lacks the binding liveness gate';
+      '0029 postverify: binding liveness assignment/use/approve order invalid (gate=%, use=%, approve=%)',
+      v_pos_gate,v_pos_gate_use,v_pos_approve_call;
   end if;
   raise notice
-    '0029 postverify OK (2/5): exact binding live/unexpired gate is present';
+    '0029 postverify OK (2/6): binding live/unexpired assignment feeds refusal control before approval';
 
   -- (3) Position 0 and the total data-lock order. Both distinct receipt rows
   -- must be reserved strictly before the first data lock, and the first
@@ -75,7 +85,10 @@ begin
     '_reserve_op(v_locator.firm_id,''execute_rule_post''' in v_norm);
   v_pos_approve:=position(
     '_reserve_op(v_locator.firm_id,''approve_entry''' in v_norm);
-  v_pos_rule:=position('from clara.coding_rules' in v_norm);
+  v_pos_rule:=position('from clara.coding_rules cr' in v_norm);
+  v_pos_rule_exact:=position(
+    'select * into r from clara.coding_rules where id=any(v_locked_rule_ids)'
+    in v_norm);
   v_pos_filing:=position(
     'v_filing:=clara._active_document_filing' in v_norm);
   v_pos_entry:=position(
@@ -88,16 +101,26 @@ begin
     nullif(v_pos_entry,0),nullif(v_pos_binding,0));
   if v_pos_exec=0 or v_pos_approve=0 or v_pos_first_lock is null
      or v_pos_exec>=v_pos_first_lock or v_pos_approve>=v_pos_first_lock
-     or v_pos_rule=0 or v_pos_filing=0 or v_pos_entry=0 or v_pos_binding=0
+     or v_pos_rule=0 or v_pos_rule_exact=0
+     or v_pos_filing=0 or v_pos_entry=0 or v_pos_binding=0
      or v_pos_rule>=v_pos_filing or v_pos_filing>=v_pos_entry
-     or v_pos_entry>=v_pos_binding then
+     or v_pos_entry>=v_pos_rule_exact
+     or v_pos_rule_exact>=v_pos_binding then
     raise exception
-      '0029 postverify: receipt/data-lock positions invalid (exec=%, approve=%, first=%, rule=%, filing=%, entry=%, binding=%)',
+      '0029 postverify: receipt/rule-lock/filing/entry/rule-read/binding positions invalid (exec=%, approve=%, first=%, rule_lock=%, filing=%, entry=%, rule_read=%, binding=%)',
       v_pos_exec,v_pos_approve,v_pos_first_lock,
-      v_pos_rule,v_pos_filing,v_pos_entry,v_pos_binding;
+      v_pos_rule,v_pos_filing,v_pos_entry,v_pos_rule_exact,v_pos_binding;
+  end if;
+  v_exact_slice:=substring(
+    v_norm from v_pos_rule_exact
+    for position('if not found then' in substring(v_norm from v_pos_rule_exact))
+  );
+  if position('for update' in v_exact_slice)<>0 then
+    raise exception
+      '0029 postverify: exact coding_rules lookup contains a second FOR UPDATE';
   end if;
   raise notice
-    '0029 postverify OK (3/5): both receipts are position 0; rule -> filing -> entry -> binding is strict';
+    '0029 postverify OK (3/6): both receipts are position 0; coding_rules locks once before filing/entry and the later exact lookup is plain';
 
   -- (4) _approve_entry_core keeps the exact live signature and conditionally
   -- bypasses only its existing reservation. The human wrapper still supplies a
@@ -143,7 +166,7 @@ begin
       '0029 postverify: human approve_entry ctx behavior changed';
   end if;
   raise notice
-    '0029 postverify OK (4/5): core signature unchanged; executor bypass is explicit; human ctx remains unmarked';
+    '0029 postverify OK (4/6): core signature unchanged; executor bypass is explicit; human ctx remains unmarked';
 
   -- (5) The vendor-binding block is marker-guarded. An unbound row therefore
   -- cannot reach the binding row lock or any binding resolution write.
@@ -167,7 +190,37 @@ begin
       v_pos_marker_if,v_pos_binding;
   end if;
   raise notice
-    '0029 postverify OK (5/5): unbound entries cannot reach the binding-control block';
+    '0029 postverify OK (5/6): unbound entries cannot reach the binding-control block';
+
+  -- (6) F1 candidate counting is independent of F2, the complete X6 key set is
+  -- recognized, and step 5 supplies registration before accepting equality.
+  v_pos_bm:=position(
+    'left join lateral ( select count(*)::int as match_count,'
+    in v_norm);
+  v_pos_bm_end:=case when v_pos_bm=0 then 0 else
+    position(') bm on true;' in substring(v_norm from v_pos_bm))
+  end;
+  if v_pos_bm=0 or v_pos_bm_end=0 then
+    raise exception
+      '0029 postverify: binding candidate lateral query is missing';
+  end if;
+  v_bm_slice:=substring(v_norm from v_pos_bm for v_pos_bm_end);
+  if position('starts_with' in v_bm_slice)<>0
+     or position('array_agg(b2.id order by b2.id)' in v_bm_slice)=0
+     or position('v_matching_f2_ok:=' in v_norm)=0
+     or position(
+       'coalesce(v_binding_matches,0)>1' in v_norm)=0
+     or position('''matched'',''absent'',''ambiguous''' in v_norm)=0
+     or position('''typed_collapsed''' in v_norm)=0
+     or position('''emitted''' in v_norm)=0
+     or position(
+       '''registration_no'',v_vendor_registration' in v_norm)=0
+     or position('elsif v_page_same then null;' in v_norm)=0 then
+    raise exception
+      '0029 postverify: F1/F2 two-phase selection, full receipt vocabulary, or step-5 equality source is incomplete';
+  end if;
+  raise notice
+    '0029 postverify OK (6/6): F1 count precedes F2; full X6 receipt keys and registered-page equality are executable';
 
   raise notice
     '0029 postverify: ALL PROBES PASSED — Slot C receipts, lock order, liveness gate, core bypass, and unbound path are installed';

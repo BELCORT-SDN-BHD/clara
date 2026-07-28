@@ -39,62 +39,62 @@ things"; conditions 2–3 are what make it mean the former. The resolver also re
 key set to be a subset of a version-stamped allowlist, refusing `binding_receipt_unrecognized`
 otherwise, so a future X6 counter cannot be silently ignored.
 
-**A.1 AMENDMENT (task #36 build, owner ruling post-blocker, 2026-07-29) — condition 5 widens to
-two admissible shapes, with a wall the original text never needed.** Building the end-to-end live-
-match rig cell this contract itself requires (§D) surfaced a real gap: as written, "returns `birth`"
-is **never satisfiable a second time** for a vendor a binding has already been signed against.
-`_resolve_counterparty`'s bare-name lookup (the resolver deliberately omits `registration_no` — A.1
-condition 4 already established none was extractable) finds the ALREADY-REGISTERED counterparty
-every signed binding names (`registration_at_signing` is `NOT NULL` by construction) and raises
-`CLR23 registration_conflict` rather than returning `birth` — so Slot A's resolver, unconditionally
-catching `CLR21`/`CLR23` and returning null, could never actually admit a bound vendor's later
-document. Confirmed live: `_coding_lane_core`'s own exception handler catches this `CLR23` **one
-level above** the `decision='birth'` branch, so `_resolve_vendor_binding` was never even invoked in
-this shape — not a query bug, a reachability gap in the admission gate itself.
+**A.1 AMENDMENT (task #36 build, two-level owner ruling, 2026-07-29) — condition 5 widens to two
+admissible shapes, and the widening must happen at two levels.** Building the end-to-end live-match
+cell surfaced why the first, single-level repair was dead code. The PRE-0028 `_coding_lane_core`
+body wraps its own `_resolve_counterparty` call **and the entire birth/non-birth branch below it** in
+one `begin … exception when sqlstate 'CLR23'` block. A clean bare name for an already-registered
+vendor therefore raises `registration_conflict` into that outer handler, which appends
+`vendor_ambiguous` and jumps past Slot A. `_resolve_vendor_binding` is never called at all. Catching
+and parsing the same exception inside `_resolve_vendor_binding` cannot repair control flow that
+never reaches the function.
 
-Both cases the amendment resolves are real, and the design text only ever enumerated one of them.
-`decision='birth'` is the **fragmented-letterhead case** the design was written against: OCR text
-that doesn't cleanly name-match anything (EZSEC's own case — `outcome='absent'` because the page
-genuinely offers no confident candidate). The gap is the **clean-name case** the text never
-considered: a page whose vendor-name text reads perfectly and matches an ALREADY-BOUND vendor's own
-registered name EXACTLY — X6 still reports `outcome='absent'` (no *registration* region, condition
-4), but the *name* alone is unambiguous. `_resolve_counterparty`'s refusal here (R2's own wall,
-"ambiguous without a registration number") is correct general-purpose caution against silently
-guessing a registered counterparty from a bare name — but it is precisely the corroboration gap a
-signed binding (F1 name-stability + F2 prefix-stability + F3 page-band identity) exists to close.
+Both admissible condition-5 shapes remain real. `decision='birth'` is the fragmented-letterhead case
+the design was written against: the page name cleanly matches no counterparty. The clean-name case
+is `CLR23` with `detail.reason='registration_conflict'`: the page name exactly identifies a
+registered counterparty, but the ordinary resolver correctly refuses to choose it without a
+registration number. The signed binding closes that corroboration gap only when the exception's
+`candidate_id` agrees with the binding selected by F1/F2/F3.
 
-**Condition 5 (amended): `_resolve_counterparty` on the page's own vendor name must fail to
-independently establish identity, in exactly two shapes:**
+**Level 1 — `_coding_lane_core`.** The CLR23 handler is narrowed to the
+`_resolve_counterparty` call alone. Non-`registration_conflict` CLR23s retain the old result exactly:
+append `vendor_ambiguous`, set the hard flag, and do no binding work. A registration conflict is
+parsed fail-closed; absent, malformed, or non-UUID `candidate_id` gets that same
+`vendor_ambiguous`+hard result. A valid candidate falls through beside the unchanged birth branch.
+Those two paths make exactly one Slot-A call to
+`_resolve_vendor_binding(client,document,page_candidate)`: NULL candidate for birth, parsed candidate
+for registration conflict. The caller consumes the resolver's typed JSONB result:
+`bound` → counterparty + `vendor_bound`; `unresolved` → `vendor_unresolved`; `ambiguous` (including a
+unique F1 candidate that fails F2) → visible `binding_ambiguous` + hard.
 
-1. `decision='birth'` — unchanged, the original fragmented-name case.
-2. `CLR23` with `detail.reason='registration_conflict'` **and** `detail.candidate_id` equal to the
-   counterparty the eventually-matched live binding names. A registration-conflict candidate that is
-   a **different** counterparty than the one F1/F2/F3 would otherwise match is a **refusal**, not an
-   admission — the page's own evidence contradicts the binding, which is the `binding_page_resolves_
-   other` family (0029 §A.5 step 5), never grounds to admit. Implemented by constraining
-   `_resolve_vendor_binding`'s match query to that one candidate whenever shape 2 fires; shape 1
-   carries no such constraint (any live binding may match, unchanged).
+**Level 2 — `_resolve_vendor_binding`.** Its signature is
+`(p_client uuid,p_document uuid,p_page_candidate uuid default null)` and it no longer calls
+`_resolve_counterparty` or parses exceptions. Conditions 1–4 remain local. Candidate selection then
+uses F1 plus the structural/live/F3 predicates; a non-NULL page candidate adds the equality wall
+`binding.counterparty_id = p_page_candidate`. F2 is applied only after that candidate set is proven
+unique (§C.2). NULL candidate preserves the original birth behavior; a non-NULL candidate permits
+only that page-identified counterparty's binding.
 
-This candidate-equality wall is what makes the widening **safer than `birth` alone, not looser**:
-`birth` itself carries no page-consistency check at all (a genuinely new name can coincide with any
-live binding's F1/F2/F3 with nothing to cross-check it against), while shape 2 additionally requires
-the page's own independent name resolution to agree with the binding before F1/F2/F3 are even
-consulted. Consequence for ambiguity (two live bindings independently matching one document):
-reachable only through shape 1 now — shape 2's equality wall caps it at one candidate by
-construction. A same-name collision between two *registered* vendors (shape 2 territory) can no
-longer produce `v_matches>1`; the only way to reach a genuine two-binding collision is two vendors
-each registered under a **distinct** legal name that are *also* both invoiced under one **shared
-trading name** matching neither registration (shape 1). Proven live in the rig (§D): x36v.2/x36v.2b
-(shapes 2 and 1 each admit a clean single match), x36v.3 (F2 still gates both shapes), x36v.4 (the
-honest two-binding collision, shape 1 only), x36v.5 (shape 2's equality wall refusing a same-name
-competitor).
+This candidate-equality wall makes the clean-name widening narrower than birth: birth has no
+independent page candidate, while registration conflict supplies one that must agree. A genuine
+two-binding ambiguity is therefore reachable only through birth—for example, distinct registered
+vendors invoicing under one shared trading name that matches neither legal name.
+
+**Safety invariant.** Vendors WITHOUT a live binding lose nothing: Slot A returns
+null/unresolved and the draft lands `vendor_ambiguous`+hard exactly as before this fix for a
+non-`registration_conflict` CLR23, and exactly as `vendor_unresolved` for a `birth` non-match. The R2
+wall for ordinary (non-binding) resolution is completely untouched. The automation activates ONLY
+when a signed binding exists AND F1 (+ F2, correctly two-phased per §C.2) AND F3 ALL hold AND either
+shape of condition 5 holds. Migration 0029's post-time control re-runs the whole thing again, under
+lock, before any money moves.
 
 ### A.2 Slot A — admission, and the stamping that was cut
 
-At `0015:2431-2447`, after the existing block yields `vendor_unresolved`, call
-`clara._resolve_vendor_binding(p_client, f.document_id)`. On a hit set `v_counterparty` and append
-the visible reason `vendor_bound`; `0015:2484` adds `vendor_bound` to the `array_remove` exemption
-that `rule_backed` already uses.
+At `0015:2431-2447`, the two-level condition-5 block above calls
+`clara._resolve_vendor_binding(p_client,f.document_id,v_page_candidate)`. A `bound` result sets
+`v_counterparty` and appends `vendor_bound`; an `ambiguous` result appends the visible hard reason
+`binding_ambiguous`; an `unresolved` result appends `vendor_unresolved`. `0015:2484` adds
+`vendor_bound` to the `array_remove` exemption that `rule_backed` already uses.
 
 **Admission stamping is CUT** — `_coding_lane_core` returns only `(lane, reasons)` (`0015:2358`), so
 the value never reaches the caller, and delivering it would need a widened signature plus a replaced
@@ -215,11 +215,14 @@ on that entry.
 Every acquirer takes a *prefix-consistent subsequence* of it, which is what makes the order
 cycle-free:
 
-- **`execute_rule_post` (recut in 0029):** rule → **filing FOR SHARE → entry FOR UPDATE (taken by the
-  executor itself, in the live order)** → binding FOR UPDATE + the §A.5 re-resolution and its receipt
-  → *then* `_approve_entry_core`, whose filing/entry locks are re-entrant no-ops in the same
-  transaction. The binding control now runs **before** the approval transition, which is what r3
-  finding 2 required, and the executor stops reading the entry unlocked (`0023:403`);
+- **`execute_rule_post` (recut in 0029):** one deterministic lock of the current live-rule set
+  (capturing those IDs) → **filing FOR SHARE → entry FOR UPDATE (taken by the executor itself, in the
+  live order)** → a plain exact-rule lookup restricted to the captured set → binding FOR UPDATE +
+  the §A.5 re-resolution and its receipt → *then* `_approve_entry_core`, whose filing/entry locks are
+  re-entrant no-ops in the same transaction. A rule that becomes live after the first snapshot is a
+  `no_live_rule` retry, not a second acquisition after filing/entry. The binding control runs
+  **before** the approval transition, which is what r3 finding 2 required, and the executor stops
+  reading the entry unlocked (`0023:403`);
 - **`persist_invoice_facts`:** filing → entry. A prefix. Unchanged;
 - **`_approve_entry_core`:** filing → entry. A prefix. Unchanged;
 - **`revise_entry`:** entry → binding. A subsequence. Consistent;
@@ -330,9 +333,15 @@ residual is honestly stated.
 Bounded by: the cap, the window, corroboration, the divergence surface, and §10 (5). **Not** bounded
 structurally. §10 ruling 9 settled that F3 *may exist*; it says nothing about what F3 cannot see.
 
-**C.2 Shared or generic invoice-number prefix.** F2 is a stability feature that resolves nothing
-alone; the floor (≥6 chars, ≥3 alphabetic, denylist including `binv`) refuses `inv2`. Measured
-unevenness against the real corpus is accepted and argued in Part 1 §3.2.
+**C.2 Shared or generic invoice-number prefix.** F2 is a consistency gate on the binding selected
+by F1, never a selection or ambiguity-reduction key. Candidate selection and counting use F1 plus
+the live/structural/F3 conditions only. Zero candidates means no match; more than one is ambiguous
+regardless of every candidate's F2. Only when that set contains exactly one binding is the current
+normalized invoice id checked with `starts_with(...,binding.f2_invoice_prefix)`; mismatch is a typed
+refusal (`binding_ambiguous` at Slot A, `binding_features_changed` at Slot C), never fall-through and
+never permission to choose a different candidate. F2 still resolves nothing alone; the floor (≥6
+chars, ≥3 alphabetic, denylist including `binv`) refuses `inv2`. Measured unevenness against the real
+corpus is accepted and argued in Part 1 §3.2.
 
 **C.3 A forged document mimicking the pattern.** Must clear filing, the full A.1 precondition, F1,
 F2, F3, two-reader corroboration of net *and* tax (`0023:635-639`), MYR, the entry shape
@@ -477,9 +486,12 @@ untouched — no binding path takes a filing lock).
 
 | # | Found | Disposition |
 |---|---|---|
-| 1 | `_resolve_vendor_binding`'s tiebreak used `min(uuid)` — unsupported in Postgres (`42883`), so the final match query threw unconditionally on any candidate row | Fixed: `(array_agg(b.counterparty_id))[1]` — semantically identical to `min()` here (only ever read when `v_matches=1`) |
-| 2 | The resolver's match query never checked F2 (invoice-prefix), contrary to the intent behind Part 1's stability floor | Fixed: `starts_with` the current document's normalized `invoice_id` against `b.f2_invoice_prefix`, matching 0029's own post-time re-check exactly |
-| 3 | **A.1 condition 5's reachability gap** (this amendment) — `birth` is unsatisfiable a second time for any already-bound vendor; `_coding_lane_core` catches the resulting `CLR23` one level above the Slot A call, so the resolver was never even invoked in this shape | Amended per the owner ruling above: condition 5 admits `birth` **or** `CLR23 registration_conflict` with candidate-id equality to the eventually-matched binding's own counterparty; a different candidate refuses |
+| A | `_coding_lane_core`'s outer CLR23 handler swallowed clean-name `registration_conflict` before Slot A; the attempted resolver-local repair was unreachable | Two-level fix: narrow the caller's catch, parse the candidate fail-closed, pass it to a resolver that no longer calls `_resolve_counterparty` |
+| B | F2 in the candidate WHERE clause hid genuine F1 ambiguity by filtering non-prefix candidates before the count | Select/count on F1+structural+F3; apply F2 only to the unique selected binding, in both 0028 and 0029 |
+| C | Both receipt allowlists omitted four always-present X6 keys and rejected every genuine receipt | Admit the full always-present vocabulary plus the producer's matched/ambiguous path keys identically; for `outcome='absent'`, require `absent=1`, `matched=typed_collapsed=emitted=0`, and no path-only keys |
+| D | `execute_rule_post` reacquired an exact `coding_rules` row after filing/entry, leaving a proposed→live phantom outside the total order | Capture the initially locked live-rule IDs once; the later exact lookup is plain and limited to that set |
+| E | A.5 step-5 equality success was pre-empted; Slot-A ambiguity was silent; UUID selection was unstable/invalid | Supply registration to page resolution, order equality before refusal classification, return typed resolver outcomes, surface hard `binding_ambiguous`, and use ordered `array_agg` |
+| F | The persistent scanner accepted a dead gate string and was blind to later dynamic CoR recuts | Require assignment→use→approve source order and fail closed on post-0029 dynamic executor patches; runtime reachability remains an explicit static-analysis residual |
 
 ## F. Q5 — writing down #30, and naming the missing field
 
