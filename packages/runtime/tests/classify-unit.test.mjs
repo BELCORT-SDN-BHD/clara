@@ -35,6 +35,10 @@ const RUNNING_CLAIM = {
   sha256: "a".repeat(64),
   mime_type: "application/pdf",
   byte_size: 10,
+  // Q1 (cross-model review, 4th round): the fresh-claim receipt's own capability — classify.mjs
+  // reads it straight off the raw claim receipt (not through interpretClaimReceipt's shared
+  // shape) and threads it into the settle as p_claim_secret.
+  claim_secret: "test-claim-secret-abc123",
 };
 
 function mockRuntime(claimReceipt) {
@@ -85,6 +89,9 @@ test("a claimed task classifies then settles via classify_document with the exac
   // passed to claim_document_processing_task as p_workflow_run_id.
   assert.equal(settle.params[6], claimCall.params[1], "param 7 = p_run, the SAME run token the claim itself wrote to the task row");
   assert.match(settle.params[6], /^classify:task-1:[0-9a-f-]{36}$/, "the run token is classify.mjs's own claim:task:uuid shape");
+  // Q1 (round 4): the settle ALSO presents the capability secret — read straight off the
+  // raw claim receipt (RUNNING_CLAIM.claim_secret), never derived or guessed.
+  assert.equal(settle.params[7], "test-claim-secret-abc123", "param 8 = p_claim_secret, the SAME capability the claim receipt returned");
 });
 
 test("classify_document NEVER receives the reserved human engine id (clara-classify-human:v1)", async () => {

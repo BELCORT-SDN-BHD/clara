@@ -113,9 +113,12 @@ async function claimedClassifyTask(documentId) {
   );
   const row = r.rows[0];
   assert.ok(row, `mandatory setup: a classify task exists for ${documentId} (file_document's own auto-enqueue)`);
-  if (row.status === "running") return { id: row.id, runId: (await rootQuery("select workflow_run_id from clara.document_processing_tasks where id=$1", [row.id])).rows[0].workflow_run_id };
+  // Q1: the claim secret is a CAPABILITY, minted and returned ONLY at claim time — no
+  // recovery path exists for an already-running task (by design). Not exercised in
+  // practice (every caller here hits this immediately after auto-enqueue, while queued).
+  if (row.status === "running") return { id: row.id, runId: (await rootQuery("select workflow_run_id from clara.document_processing_tasks where id=$1", [row.id])).rows[0].workflow_run_id, secret: undefined };
   const claimed = await claimTask(row.id, { egressApproved: false });
-  return { id: row.id, runId: claimed.workflow_run_id };
+  return { id: row.id, runId: claimed.workflow_run_id, secret: claimed.claim_secret };
 }
 
 /** A facts-complete OCR sales document. `omit` drops named anchor/direction facts;
@@ -151,7 +154,7 @@ async function ocrSalesDoc(client, { cents = 90000, classify = "invoice", omit =
   await persistInvoiceFacts(task.id, fields, { envelope: agreedEnvelope() });
   if (classify) {
     const cls = await claimedClassifyTask(cited.documentId);
-    await classifyDocument({ document: cited.documentId, kind: classify, confidence: 0.97, task: cls.id, run: cls.runId });
+    await classifyDocument({ document: cited.documentId, kind: classify, confidence: 0.97, task: cls.id, run: cls.runId, secret: cls.secret });
   }
   return cited;
 }
@@ -206,7 +209,7 @@ test("§3.3(2) polarity_unverified FAIL-PRE: an unclassified doc skips; PASS-POS
   // time (control 8) and the same draft now posts. 0024 round 3 (P1): the doc already
   // carries classify-task history (file_document's own auto-enqueue) — bind to it.
   const cls = await claimedClassifyTask(cited.documentId);
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97, task: cls.id, run: cls.runId });
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97, task: cls.id, run: cls.runId, secret: cls.secret });
   const sightBefore = (await sightingRows(client)).length;
   await postViaRule(draft.entry_id).catch((e) => noteLane(`polarity pass-post raised ${e.code}`));
   // 0022 / X4 — the PASS-POST half is now conditional on the extraction-slice DARK GUARD,

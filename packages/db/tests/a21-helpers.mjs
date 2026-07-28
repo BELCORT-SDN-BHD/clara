@@ -221,11 +221,17 @@ export async function resolveWatch(sub, { watch, conclusion, evidence = "rig res
  *  meaning when `task` is null (P1's ceremony branch never reads it) and MUST match the
  *  claim's own workflow_run_id when `task` is set (P2) — callers proving the task-bound path
  *  pass both together via `runningClassifyTask`. */
-export async function classifyDocument({ document, kind, confidence = 0.95, engineId = "clara-classify-llm:v1", opKey = null, task = null, run = null }) {
+// Q1 (round 4): p_claim_secret is ALSO required (no SQL-side default, same P1 discipline) —
+// this wrapper always supplies it (even as `null`) so a plain call through this helper never
+// triggers the arity break; that break is exercised directly (a raw 7-arg query) by its own
+// cell. `secret` MUST be the value the caller's own claim received (workflow_run_id alone is
+// no longer sufficient — Q1) for a task-bound settle to succeed; it is meaningless (and
+// unchecked) when `task` is null.
+export async function classifyDocument({ document, kind, confidence = 0.95, engineId = "clara-classify-llm:v1", opKey = null, task = null, run = null, secret = null }) {
   const r = await roleQuery(
     ROLES.runtime,
-    "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3::numeric, p_engine_id => $4, p_op_key => $5, p_task => $6, p_run => $7) as r",
-    [document, kind, confidence, engineId, opKey ?? opk("clsdoc"), task, run],
+    "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3::numeric, p_engine_id => $4, p_op_key => $5, p_task => $6, p_run => $7, p_claim_secret => $8) as r",
+    [document, kind, confidence, engineId, opKey ?? opk("clsdoc"), task, run, secret],
   );
   return r.rows[0].r;
 }

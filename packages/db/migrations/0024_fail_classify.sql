@@ -147,6 +147,161 @@ revoke all on function clara.fail_classify(uuid, text, text) from public;
 grant execute on function clara.fail_classify(uuid, text, text) to clara_runtime;
 
 -- =====================================================================
+-- §A1b — Q1 (cross-model review, 4th round): P2's run-token binding is NOT claim-owner
+-- binding. clara_runtime holds table-wide SELECT on document_processing_tasks, USING(true)
+-- (0008_runtime_read_surface.sql:49,54 — RLS is deliberately NOT the tenant boundary for
+-- this role, per that migration's own header). workflow_run_id is therefore READABLE by
+-- ANY clara_runtime session, not just the one that claimed the task: a confused (or
+-- malicious) session can `select workflow_run_id from document_processing_tasks where
+-- id=<a task it never claimed>`, then present that exact value back to classify_document's
+-- p_run and settle someone else's claim with an ARBITRARY verdict. Reproduced live before
+-- this fix: a second session read the run token off the table and classify_document
+-- accepted it, stamping document_kind from a verdict the claimant never produced.
+--
+-- THE FIX: the claim mints a CAPABILITY, not just an identifier. claim_document_processing_
+-- task generates a random secret (gen_random_uuid() — the same CSPRNG source already used
+-- pervasively in this codebase for ids/tokens; no new extension), stores ONLY its sha256
+-- digest on the task row (new column, claim_secret_digest — never the secret itself), and
+-- returns the PREIMAGE to the claiming session as a function result, ONLY on a fresh
+-- queued->running transition (never on the held_egress or replay-branch returns — see
+-- below for why). classify_document's task-bound settle (§A2, amended again below) now
+-- takes p_claim_secret (a new REQUIRED arg, same P1 arity discipline: no default, so a
+-- 7-arg call fails to RESOLVE at all rather than silently degrading) and verifies
+-- sha256(p_claim_secret) = t.claim_secret_digest in-txn. p_run is KEPT — it remains useful
+-- for identity/audit (which attempt this was) — but the secret is the sole AUTHORIZATION;
+-- a caller that merely reads the run id off the table can never reconstruct the secret,
+-- because the secret itself is never stored anywhere readable.
+--
+-- WHY NOT MAKE p_run ITSELF THE SECRET (column-level SELECT revocation instead)? Rejected:
+-- brittle against a `select *` reader (a single missed column-list update anywhere
+-- reopens the hole), and workflow_run_id is semantically an IDENTIFIER (it appears in
+-- audit trails, logs, and the claim receipt's own 'replayed' branch) — conflating "the
+-- thing that names this attempt" with "the thing that authorizes settling it" is the wrong
+-- shape even before considering the grant surface.
+--
+-- WHY THE SECRET IS NEVER RE-ISSUED ON REPLAY. The pre-existing replay branch
+-- (`t.status='running' and t.workflow_run_id=p_workflow_run_id`) exists for a caller whose
+-- OWN prior claim call committed but whose response was lost (e.g. a dropped connection) —
+-- and crucially, p_workflow_run_id is a value ONLY that caller could have originated
+-- (it self-generates it before ever calling), UNLESS an attacker read it off the table,
+-- which is exactly the threat this fix closes. If the replay branch also re-issued the
+-- secret, an attacker who merely read (task_id, workflow_run_id) off the table could
+-- replay-claim and fish the secret back out through that exact same door — reopening Q1
+-- one branch over. So the replay branch's response shape is UNCHANGED (no secret field):
+-- a genuine lost-response retry for the classify lane self-heals via the EXISTING
+-- stranded-requeue path (classify.mjs's own header/design — a crashed or lost-response
+-- attempt is recovered by requeue_stranded_document_task minting a FRESH task/run/secret
+-- on the next cycle, never by resurrecting the old claim), so no caller anywhere legitimately
+-- depends on the replay branch returning a secret. This is unconditional for EVERY lane
+-- (not classify-specific) — a single shared claim/capability primitive is simpler and more
+-- auditable than a lane-conditional one, even though only classify's settle checks it today.
+--
+-- claim_document_processing_task is a member of migration 0020's §6 legacy byte-identity
+-- CLOSED SET (contract amendment, this the closed set's THIRD deliberately-changed member —
+-- A7 was record_wiki_source_ingest, A9 was _enqueue_invoice_facts_core in 0025). Read via
+-- pg_get_functiondef against a 24-migration database — the live body already carries 0011's
+-- egress-hold lease-check machinery (kill_switch/no_consent/partial_consent), which 0009's
+-- own file text does NOT show — hand-copying from any single migration file would have
+-- silently reverted that. wb-0020-legacy.test.mjs's restore() is amended to reverse this
+-- edit too (A10) alongside the untouched original pins.
+-- =====================================================================
+alter table clara.document_processing_tasks add column claim_secret_digest bytea;
+
+create or replace function clara.claim_document_processing_task(p_task uuid,
+    p_workflow_run_id text, p_egress_approved boolean) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare
+  t record; d record; v_cap int; v_running int; v_attempts int;
+  v_clients int; v_consented int; v_hold_reason text; v_secret text;
+begin
+  if p_workflow_run_id is null or btrim(p_workflow_run_id)='' then
+    raise exception 'workflow_run_id is required' using errcode='CLR10';
+  end if;
+  select * into t from clara.document_processing_tasks where id=p_task for update;
+  if not found then raise exception 'processing task not found' using errcode='CLR16'; end if;
+  select storage_path,sha256,mime_type,byte_size into d
+    from clara.documents where id=t.document_id;
+
+  -- The lease check precedes EVERY dispatching branch. Only the two EGRESSING lanes
+  -- (ocr, invoice_facts) are kill-switch-gated; invoice_facts additionally requires
+  -- every active filing client to hold a live consent. Local lanes never hold.
+  if t.lane in ('ocr','invoice_facts')
+     and not coalesce(p_egress_approved,false) then
+    v_hold_reason:='kill_switch';
+  elsif t.lane='invoice_facts' then
+    select count(distinct f.client_id)::int,
+      count(distinct f.client_id) filter(where exists(
+        select 1 from clara.client_egress_consents c
+        where c.client_id=f.client_id and c.revoked_at is null))::int
+      into v_clients,v_consented from clara.document_filings f
+      where f.document_id=t.document_id and f.retired_at is null;
+    if coalesce(v_clients,0)=0 or coalesce(v_consented,0)=0 then
+      v_hold_reason:='no_consent';
+    elsif v_consented<v_clients then
+      v_hold_reason:='partial_consent';
+    end if;
+  end if;
+  if v_hold_reason is not null then
+    if t.status in ('queued','running') then
+      update clara.document_processing_tasks set status='held_egress',
+        workflow_run_id=null,started_at=null,vendor_op_ref=null where id=p_task;
+      if t.lane='ocr' then
+        update clara.documents set extraction_status='held_egress' where id=t.document_id;
+      end if;
+    elsif t.status<>'held_egress' then
+      raise exception 'processing task is not dispatchable' using errcode='CLR16';
+    end if;
+    return jsonb_build_object('task_id',p_task,'status','held_egress',
+      'workflow_run_id',null,'payload',jsonb_build_object(
+        'clr','CLR28','reason',v_hold_reason));
+  end if;
+  if t.status='running' and t.workflow_run_id=p_workflow_run_id then
+    return jsonb_build_object('task_id',p_task,'status','running','replayed',true,
+      'document_id',t.document_id,'firm_id',t.firm_id,'lane',t.lane,
+      'storage_path',d.storage_path,'sha256',d.sha256,
+      'mime_type',d.mime_type,'byte_size',d.byte_size);
+  end if;
+  if t.status<>'queued' then raise exception 'processing task is not queued' using errcode='CLR16'; end if;
+  perform pg_advisory_xact_lock(203005001,hashtext(t.firm_id::text));
+  if t.lane='invoice_facts' then
+    select coalesce(sum(attempt_count),0)::int into v_attempts
+      from clara.document_processing_tasks where document_id=t.document_id
+        and lane='invoice_facts';
+    if v_attempts>=3 then
+      update clara.document_processing_tasks set status='failed',error_code='attempt_cap',
+        finished_at=now() where id=p_task;
+      perform clara._refund_processing_call(p_task,'attempt_cap');
+      perform clara._append_event(t.firm_id,'document.invoice_facts_failed',null,null,null,null,
+        null,t.document_id,null,jsonb_build_object('task_id',p_task,'reason','attempt_cap'));
+      return jsonb_build_object('task_id',p_task,'status','failed','reason','attempt_cap');
+    end if;
+  end if;
+  select coalesce(l.ocr_concurrency,2) into v_cap from clara.firms f
+    left join clara.firm_document_limits l on l.firm_id=f.id where f.id=t.firm_id;
+  select count(*)::int into v_running from clara.document_processing_tasks
+    where firm_id=t.firm_id and lane in ('ocr','invoice_facts') and status='running';
+  if t.lane in ('ocr','invoice_facts') and v_running>=v_cap then
+    raise exception 'document-processing concurrency limit reached' using errcode='CLR18';
+  end if;
+  -- Q1: the CAPABILITY minted on this fresh claim — a random preimage whose digest ALONE
+  -- is stored (never the preimage). Returned once, below, to this session only.
+  v_secret:=gen_random_uuid()::text;
+  update clara.document_processing_tasks set status='running',
+    workflow_run_id=p_workflow_run_id,started_at=now(),attempt_count=attempt_count+1,
+    claim_secret_digest=sha256(convert_to(v_secret,'UTF8'))
+    where id=p_task;
+  if t.lane='ocr' then update clara.documents set extraction_status='running' where id=t.document_id; end if;
+  return jsonb_build_object('task_id',p_task,'status','running',
+    'workflow_run_id',p_workflow_run_id,'document_id',t.document_id,
+    'firm_id',t.firm_id,'lane',t.lane,'storage_path',d.storage_path,
+    'sha256',d.sha256,'mime_type',d.mime_type,'byte_size',d.byte_size,
+    'claim_secret',v_secret);
+end $$;
+
+alter function clara.claim_document_processing_task(uuid,text,boolean) owner to clara_fn_owner;
+grant execute on function clara.claim_document_processing_task(uuid,text,boolean) to clara_runtime;
+
+-- =====================================================================
 -- §A2 — clara.classify_document: DROP + RECREATE at a NEW arity. THE RACE THIS VERB
 -- OPENS, CLOSED — TASK-BOUND AND ACTOR-BOUND, not recency-bound.
 --
@@ -214,10 +369,35 @@ grant execute on function clara.fail_classify(uuid, text, text) to clara_runtime
 -- opposite orders relative to the other (fail_classify never touches `documents` at all),
 -- so this closes the race without opening a new lock-order deadlock between the two.
 --
+-- THE FIX, ROUND 4 (Q1). P2 above proved "the caller's own task" — id/document/lane/engine
+-- plus a matching workflow_run_id. That is NOT proof the caller is the task's actual
+-- claimant: clara_runtime holds table-wide SELECT on document_processing_tasks, USING(true)
+-- (0008_runtime_read_surface.sql:49,54 — RLS is deliberately not this role's tenant
+-- boundary), so workflow_run_id is READABLE, not secret. Reproduced live: a second session
+-- read the run token off the table and settled the first session's claim with an arbitrary
+-- verdict. Fix (§A1b above has the full design): classify_document now ALSO takes
+-- p_claim_secret — again NO DEFAULT (same P1 arity discipline: a 7-arg call fails to
+-- resolve, 42883) — and the task-bound settle additionally requires
+-- sha256(p_claim_secret) = t.claim_secret_digest, the digest claim_document_processing_task
+-- stored at claim time. p_run stays as identity/audit; the secret is the sole
+-- authorization — reading the table now yields nothing an attacker can turn into a settle,
+-- because the preimage itself is never stored anywhere readable.
+--
+-- Another ARITY change (this migration's own CREATE, round over round, has produced 6, then
+-- 7, now 8 args) — but the DROP always targets 0016's ORIGINAL 5-arg signature, never the
+-- previous round's: this whole DROP+CREATE pair runs ONCE, in-place, against a freshly
+-- migrated 0001-0023 target where classify_document is STILL 0016's untouched 5-arg
+-- original (0024 is what first changes it, on every fresh apply) — each round's edit only
+-- ever changes what the CREATE produces, in this SAME textual block; the DROP's target
+-- never moves. (Self-caught: an earlier draft of this exact edit changed the DROP to target
+-- the prior round's 7-arg signature, which does not exist yet at the point THIS statement
+-- runs on a fresh apply — reproduced live as a migration failure before landing this fix.)
+--
 -- Everything else in this body is byte-identical to 0016 (tail-asserted).
 drop function clara.classify_document(uuid,text,numeric,text,text);
 create function clara.classify_document(p_document uuid, p_kind text,
-    p_confidence numeric, p_engine_id text, p_op_key text, p_task uuid, p_run text) returns jsonb
+    p_confidence numeric, p_engine_id text, p_op_key text, p_task uuid, p_run text,
+    p_claim_secret text) returns jsonb
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare
   d record; t record; v_dedupe jsonb; v_ext uuid; v_version int; v_prior text;
@@ -271,21 +451,27 @@ begin
   if v_dedupe is not null then return v_dedupe; end if;
 
   if p_task is not null then
-    -- P2: TASK- AND RUN-BOUND — id/document/lane/engine locate a candidate row, but the
-    -- settle only proceeds if t.workflow_run_id MATCHES the run token the caller's OWN
-    -- claim wrote to it (claim_document_processing_task, 0009:2229-2231). A caller
-    -- presenting a task id it never claimed cannot match this token.
+    -- P2: TASK- AND RUN-BOUND — id/document/lane/engine locate a candidate row, and
+    -- t.workflow_run_id must match the identity the caller's OWN claim wrote to it
+    -- (claim_document_processing_task, 0009:2229-2231). Q1: run-token identity alone is
+    -- NOT authorization — clara_runtime holds table-wide SELECT on this table (0008), so
+    -- workflow_run_id is readable by any session, not just the claimant. The settle
+    -- additionally requires sha256(p_claim_secret) = t.claim_secret_digest — the digest of
+    -- the CAPABILITY claim_document_processing_task minted and returned ONLY to the
+    -- claiming session at claim time, never stored anywhere in preimage form. A caller
+    -- that read the run id off the table cannot reconstruct this.
     select * into t from clara.document_processing_tasks
       where id=p_task and document_id=p_document and lane='classify' and engine_id=p_engine_id
       for update;
     if not found then
       raise exception 'classify task not found for this document/engine' using errcode='CLR16';
     end if;
-    if t.status='running' and t.workflow_run_id=p_run then
+    if t.status='running' and t.workflow_run_id=p_run
+       and t.claim_secret_digest=sha256(convert_to(coalesce(p_claim_secret,''),'UTF8')) then
       update clara.document_processing_tasks set status='done',finished_at=now()
         where id=t.id;
     else
-      raise exception 'this classify task is not running under the caller''s own claim — it already settled, a newer attempt exists, or the run token does not match'
+      raise exception 'this classify task is not running under the caller''s own claim — it already settled, a newer attempt exists, the run token does not match, or the claim secret is wrong'
         using errcode='CLR16';
     end if;
   else
@@ -372,9 +558,9 @@ end $$;
 
 -- DROP removed the function's owner/ACL along with it — re-established exactly as 0016
 -- originally set them (clara_runtime only; the sole caller is the classify worker).
-alter function clara.classify_document(uuid,text,numeric,text,text,uuid,text) owner to clara_fn_owner;
-revoke all on function clara.classify_document(uuid,text,numeric,text,text,uuid,text) from public;
-grant execute on function clara.classify_document(uuid,text,numeric,text,text,uuid,text) to clara_runtime;
+alter function clara.classify_document(uuid,text,numeric,text,text,uuid,text,text) owner to clara_fn_owner;
+revoke all on function clara.classify_document(uuid,text,numeric,text,text,uuid,text,text) from public;
+grant execute on function clara.classify_document(uuid,text,numeric,text,text,uuid,text,text) to clara_runtime;
 
 -- =====================================================================
 -- §B — EVENT TAXONOMY (one additive pair against the active version).
@@ -410,7 +596,8 @@ do $tail$
 declare
   v_acl text; v_cfg text; v_role text; v_src text; v_code text;
   v_sig constant text := 'clara.fail_classify(uuid,text,text)';
-  v_sig2 constant text := 'clara.classify_document(uuid,text,numeric,text,text,uuid,text)';
+  v_sig2 constant text := 'clara.classify_document(uuid,text,numeric,text,text,uuid,text,text)';
+  v_sig3 constant text := 'clara.claim_document_processing_task(uuid,text,boolean)';
 begin
   -- (1) The new verb exists at its exact signature and carries the whole definer posture.
   if to_regprocedure(v_sig) is null then
@@ -524,11 +711,20 @@ begin
   end if;
   -- P2: the settle only fires when the run token the caller presents MATCHES the token its
   -- own claim wrote to the task row — never status alone.
-  if position('t.status=''running''andt.workflow_run_id=p_runthenupdateclara.document_processing_taskssetstatus=''done''' in v_code) = 0 then
-    raise exception '0024 tail: classify_document''s task-bound branch lost the run-token-bound running->done settle (P2)';
+  if position('t.status=''running''andt.workflow_run_id=p_run' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s task-bound branch lost the run-token-bound running check (P2)';
   end if;
   if position('runtokendoesnotmatch' in lower(v_code)) = 0 then
     raise exception '0024 tail: classify_document lost the honest refusal naming a run-token mismatch (P2)';
+  end if;
+  -- Q1: run-token identity is not authorization — the settle ALSO requires the CAPABILITY
+  -- (sha256 of the caller's claim secret) to match the digest the claim minted. Fused to
+  -- the SAME conjunction as the run-token check, not a bare mention elsewhere in the body.
+  if position('t.status=''running''andt.workflow_run_id=p_runandt.claim_secret_digest=sha256(convert_to(coalesce(p_claim_secret,''''),''UTF8''))thenupdateclara.document_processing_taskssetstatus=''done''' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s task-bound branch lost the claim-secret-digest check (Q1) — a caller that merely reads the run id off the table could otherwise settle another session''s claim';
+  end if;
+  if position('claimsecretiswrong' in lower(v_code)) = 0 then
+    raise exception '0024 tail: classify_document lost the honest refusal naming a wrong claim secret (Q1)';
   end if;
   -- P1: the no-task ceremony branch (WA21-R11) is DB-enforced to its REAL precondition — the
   -- document carries NO classify-task history AT ALL (any status, any engine), not merely
@@ -572,7 +768,7 @@ begin
   -- close.
   if (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'clara' and p.proname = 'classify_document') <> 1 then
-    raise exception '0024 tail: clara.classify_document has more than one overload — no earlier 5-arg or 6-arg signature may survive alongside the current 7-arg one';
+    raise exception '0024 tail: clara.classify_document has more than one overload — no earlier 5/6/7-arg signature may survive alongside the current 8-arg one';
   end if;
 
   -- (6) classify_document's ACL is UNCHANGED by the CoR (DROP+CREATE loses owner/grants —
@@ -601,6 +797,67 @@ begin
     end if;
   end loop;
 
-  raise notice '0024: fail_classify installed (clara_runtime only); classify_document CoR closes the fail_classify race — the classify lane now has a DB terminal-fail path AND exactly one terminal outcome per attempt';
+  -- (7) §A1b — Q1: the capability column exists, claim_document_processing_task mints +
+  -- stores it ONLY on a fresh claim (never on the replay or held_egress branches — see the
+  -- migration header for why re-issuing on replay would reopen Q1 one branch over), and the
+  -- function's definer posture + ACL are unchanged (create-or-replace preserves them; assert
+  -- explicitly rather than assume).
+  if not exists (select 1 from information_schema.columns
+      where table_schema = 'clara' and table_name = 'document_processing_tasks'
+        and column_name = 'claim_secret_digest' and data_type = 'bytea') then
+    raise exception '0024 tail: clara.document_processing_tasks.claim_secret_digest is missing or the wrong type (Q1)';
+  end if;
+  select p.prosrc into v_src from pg_proc p where p.oid = v_sig3::regprocedure;
+  if v_src is null then
+    raise exception '0024 tail: claim_document_processing_task is GONE';
+  end if;
+  select coalesce(array_to_string(p.proconfig, ','), '') into v_cfg
+    from pg_proc p where p.oid = v_sig3::regprocedure;
+  if replace(v_cfg, ' ', '') not like '%search_path=clara,pg_temp%' then
+    raise exception '0024 tail: % has no pinned search_path (%)', v_sig3, v_cfg;
+  end if;
+  if not (select prosecdef from pg_proc where oid = v_sig3::regprocedure) then
+    raise exception '0024 tail: % is not SECURITY DEFINER', v_sig3;
+  end if;
+  if (select pg_get_userbyid(proowner) from pg_proc where oid = v_sig3::regprocedure)
+     <> 'clara_fn_owner' then
+    raise exception '0024 tail: % is not owned by clara_fn_owner', v_sig3;
+  end if;
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  -- The secret is minted and stored in the SAME update as the fresh queued->running
+  -- transition — fused to that statement, not a bare mention elsewhere in the body.
+  if position('updateclara.document_processing_taskssetstatus=''running'',workflow_run_id=p_workflow_run_id,started_at=now(),attempt_count=attempt_count+1,claim_secret_digest=sha256(convert_to(v_secret,''UTF8''))whereid=p_task' in v_code) = 0 then
+    raise exception '0024 tail: claim_document_processing_task no longer mints+stores the claim-secret digest on the fresh claim transition (Q1)';
+  end if;
+  if position('v_secret:=gen_random_uuid()::text' in v_code) = 0 then
+    raise exception '0024 tail: claim_document_processing_task lost the secret-minting line (Q1)';
+  end if;
+  -- The secret preimage is returned ONLY from the fresh-claim branch's own jsonb — the
+  -- QUOTED jsonb key ''claim_secret'' (distinct from the unquoted column identifier
+  -- claim_secret_digest used elsewhere in the body) must appear EXACTLY once: the replay
+  -- and held_egress branches' own jsonb_build_object calls must never gain it.
+  if (select count(*) from regexp_matches(v_code, '''claim_secret''', 'g')) <> 1 then
+    raise exception '0024 tail: claim_document_processing_task''s quoted ''claim_secret'' jsonb key appears % times, not exactly once — it must be returned ONLY on a fresh claim, never on replay (re-issuing it there would let a table-reader fish it back out, reopening Q1)',
+      (select count(*) from regexp_matches(v_code, '''claim_secret''', 'g'));
+  end if;
+  select coalesce(string_agg(g, ', ' order by g), '') into v_acl
+    from (select case when a.grantee = 0 then 'PUBLIC'
+                      else pg_get_userbyid(a.grantee) end as g
+            from pg_proc p, lateral aclexplode(p.proacl) a
+           where p.oid = v_sig3::regprocedure
+             and a.privilege_type = 'EXECUTE'
+             and (a.grantee = 0
+                  or pg_get_userbyid(a.grantee) not in ('clara_fn_owner', 'clara_runtime'))
+         ) s;
+  if v_acl <> '' then
+    raise exception '0024 tail: % has unexpected EXECUTE grantee(s) after the CoR: % (only clara_fn_owner + clara_runtime may hold it)',
+      v_sig3, v_acl;
+  end if;
+
+  raise notice '0024: fail_classify installed (clara_runtime only); classify_document CoR closes the fail_classify race — the classify lane now has a DB terminal-fail path AND exactly one terminal outcome per attempt; claim_document_processing_task now mints a claim-secret capability (Q1) checked by classify_document''s settle';
 end
 $tail$;
