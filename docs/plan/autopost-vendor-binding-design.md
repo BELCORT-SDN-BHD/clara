@@ -1,18 +1,17 @@
-# Autopost vendor binding — DESIGN v3 (task #33) — PART 1: the authority object
+# Autopost vendor binding — DESIGN v4 (task #33) — PART 1: the authority object
 
 **Part 2 — machinery, adversarial set, build, per-finding register —
 `docs/plan/autopost-vendor-binding-design-part2.md`** (split per repo precedent
 `wave-b-migration-0017-design-part2/3.md`, rather than compressing arguments away).
 
-**v3 (2026-07-28)** answers a second adversarial review, which closed findings 1 and 4 and left eight
-open with live-body evidence. **v3 is a NARROWING, not a defence.** This design serves one binding at
-one firm today, and every optional subsystem was a wall the reviewer kept breaching — so
-auto-suspension, atomic supersession, admission stamping and cross-extraction geometry are **cut**,
-and what they protected is either a named residual or a future wave. Section numbering is preserved
-so both reviews' §-refs resolve. Where a finding killed a claim it is **withdrawn**, not reworded:
-v1's "self-healing" and "structurally impossible" went in v2; v2's "three-attempt cap on
-re-extraction" and "Slot C does not depend on the marker at all" go here. §9/§10 owner rulings remain
-law (amendment A narrowed, amendment D added on the owner's Q9 ruling).
+**v4 (2026-07-28)** answers the third adversarial review — the **final design round**, whose job is a
+shape with **no impossible laws and no false claims**. Rounds 1–3 cumulatively **cut** four
+subsystems (auto-suspension, atomic supersession, admission stamping, cross-extraction geometry) and
+**withdrew** five claims: v1's "self-healing" and "structurally impossible"; v2's "three-attempt cap
+on re-extraction" and "Slot C does not depend on the marker at all"; and now **v3's own lock-order
+law**, which placed the binding lock after the function that performs the approval transition and so
+could never have been obeyed. Section numbering is preserved so every review's §-refs resolve.
+§9/§10 owner rulings remain law (amendment A narrowed, amendment D added on the Q9 ruling).
 
 **Status:** DESIGN ONLY — nothing built, no migration cut, no code changed. **Owner ruling
 implemented:** 2026-07-28 option A — *autodraft MAY resolve a document's vendor from VERIFIED
@@ -102,57 +101,21 @@ reusing that table: `coding_rules.account_code` is `not null`, `ck_coding_rules_
 (`0011:791-792`) keys uniqueness on `(client_id, counterparty_id, rule_type)`. A binding has no
 account; forcing one in corrupts the tier CHECK or invents a sentinel code.
 
-**The feature vocabulary is closed by COLUMNS, not by a `jsonb` blob** (review finding 10). A
-free-form `features jsonb` would make "closed v1 vocabulary" a comment rather than a constraint, and
-a security-definer defect writing an unexpected key would not be rejected structurally. Every
-feature is a typed column with its own CHECK.
+**The feature vocabulary is closed by COLUMNS, not by a `jsonb` blob** (r1 finding 10). A free-form
+`features jsonb` would make "closed vocabulary" a comment rather than a constraint, and a
+security-definer defect writing an unexpected key would not be rejected structurally. Every feature
+is a typed column with its own CHECK.
 
-```
-clara.vendor_identity_bindings
-  id uuid pk · firm_id, client_id uuid not null · counterparty_id uuid not null
-  status text default 'proposed'
-    check in ('proposed','live','revoked','declined','expired','superseded')
-    -- v3: 'suspended_pending_resignature' REMOVED — auto-suspension is cut (§10 amendment A).
-    -- 'superseded' is reserved for the DEFERRED atomic-supersession path (§4) and unused in v3.
-  f1_vendor_name_norm  text not null check (btrim <> '')      -- the ONLY F1 shape
-  f2_invoice_prefix    text not null check (length >= 6)      -- the ONLY F2 shape (§3.2)
-  registration_at_signing text not null   -- counterparty registration_normalized, frozen
-  content_hash text not null · created_by/at · signed_by/at · revoked_by/at/reason
-  expires_at timestamptz not null · supersedes_binding_id uuid
-  foreign key (counterparty_id, firm_id, client_id)
-    references clara.counterparties(id, firm_id, client_id)   -- congruence, not mere existence
-  uq_vendor_binding_one_live unique (client_id, counterparty_id) where status='live'
-  trigger t_vendor_binding_frozen — once status='live', UPDATE of f1/f2/registration_at_signing/
-    content_hash/expires_at RAISES (the _tf_coding_rule_update idiom, 0015:1096)
+**The full DDL contract — every column, CHECK, unique anchor, foreign key and trigger — is Part 2
+ssG**, rebuilt in v4 against the live constraint anchors (`0009:798-810`). It moved there because
+this part is the *authority argument* and ssG is the *build spec*; the round-3 reviewer is now
+checking DDL buildability, and that belongs beside the build list it feeds.
 
-clara.vendor_identity_binding_evidence      -- the 3 approvals, one row each (finding 10)
-  binding_id · firm_id · client_id · entry_id · document_id
-  facts_extraction_id uuid not null · ocr_extraction_id uuid not null  -- PINNED at proposal (§3.3)
-  foreign key (entry_id, firm_id, client_id) references clara.journal_entries(id, firm_id, client_id)
-  unique (binding_id, entry_id)
-
-clara.vendor_binding_resolutions            -- append-only, the rule_post_skips idiom (0015:337-370)
-  id · firm_id · client_id · binding_id · document_id · entry_id
-  phase text not null check in ('draft','revision','post')   -- v3: the POST phase gets its own row
-  facts_extraction_id uuid not null · ocr_extraction_id uuid not null   -- the pins OF THIS PHASE
-  compared_to_resolution_id uuid   -- post rows point at the draft row they were compared against
-  entry_revision_token uuid not null        -- NOT NULL (finding 8)
-  raw_proposal jsonb not null               -- the model's ORIGINAL claim; '{}' when none (finding 8)
-  outcome text not null check in ('bound','divergence','refused')
-  refusal_reason text · divergence jsonb · created_at
-  foreign key (entry_id, firm_id, client_id) references clara.journal_entries(id, firm_id, client_id)
-  foreign key (facts_extraction_id, document_id)
-    references clara.document_extractions(id, document_id)   -- congruence, not mere existence
-  foreign key (ocr_extraction_id, document_id)
-    references clara.document_extractions(id, document_id)
-```
-
-**The post phase writes its own row, before the post proceeds** (v3, findings 2+3+8 unified). v2
-recorded only the draft-time pins while the *decisive* re-resolution happened at post time against
-newer extractions and left no trace — so an auditor could not reconstruct the decision that actually
-authorised the posting. In v3 the post-time re-resolution is a first-class, append-only receipt
-carrying its own pins, its outcome, and `compared_to_resolution_id` naming the draft row it was
-checked against. Slot C consults **that receipt chain**, never a mutable marker.
+Three objects: **`clara.vendor_identity_bindings`** (the authority) · **`..._binding_evidence`**
+(the three approvals, one row each, with the extraction ids pinned at proposal) ·
+**`clara.vendor_binding_resolutions`** (append-only, one row per phase - `draft`, `revision`, `post`
+- each carrying its own pins, the model's `raw_proposal`, the `entry_revision_token`, and for post
+rows the `compared_to_resolution_id` naming the draft row it was checked against).
 
 **Provenance does not ride the fingerprint** (round-1 finding 1, **closed** at round 2). v1's
 `match_fingerprint={"decision":"binding_match"…}` was incompatible with the approval contract:
@@ -194,14 +157,20 @@ enumerated** strip list — no property classes, no locale dependence:
 clara._binding_normalize(t text) :=
   lower(btrim(regexp_replace(
     translate(normalize(t, NFC),
-      U&'\00AD\200B\200C\200D\2060\FEFF\200E\200F\202A\202B\202C\202D\202E'
-      U&'\2066\2067\2068\2069', ''),          -- soft hyphen · ZWSP/ZWNJ/ZWJ/WJ · BOM · bidi
+      U&'\00AD\200B\200C\200D\2060\2061\2062\2063\2064\FEFF'
+      U&'\200E\200F\202A\202B\202C\202D\202E\2066\2067\2068\2069', ''),
     '\s+', ' ', 'g')))
+-- soft hyphen · ZWSP/ZWNJ/ZWJ · word joiner · U+2061..2064 invisible math operators
+-- (r3 finding 5 — FUNCTION APPLICATION and INVISIBLE TIMES were missing) · BOM · LRM/RLM
+-- · bidi embedding/override · bidi isolates.
 ```
 
-The list covers the format codepoints OCR realistically emits. It is a maintained enumeration, not a
-proof of completeness: a codepoint outside it survives normalization and makes F1 compare unequal,
-which refuses. **Fail-closed, and stated as such.**
+**The completeness residual, now registered** (r3 finding 5). This list is *enumerable, not
+provable*: Unicode's invisible-format class can grow, and a codepoint outside the list survives
+normalization. The bounded consequence, stated precisely: a repeated unknown invisible would make F1
+compare **equal** where it should differ — it does not make F1 refuse. F1 is only a stability
+feature, so the identity claim still rests on F3, which no invisible character can satisfy. Bounded,
+not fatal, and it is now in the §E residual register instead of being called complete.
 
 For EZSEC: `ez 易计 ezaccount count` — identical across every bill checked.
 
@@ -256,7 +225,7 @@ an authority a human created, not creation of identity by the page, and it stays
 | document has no done `ocr` extraction | `binding_no_corroboration_source` |
 | canonical counterparty's registration ≠ `registration_at_signing` | `binding_identity_drifted` |
 | counterparty retired or merged away | `binding_counterparty_inactive` |
-| expired / revoked / suspended | `binding_expired` · `binding_revoked` · `binding_suspended` |
+| expired / revoked | `binding_expired` · `binding_revoked` *(v4: `binding_suspended` is PURGED — suspension was cut in v3 and the refusal outlived it, r3 finding 9)* |
 
 ### 3.3 The ceremony — explicit, two verbs, mirroring propose/sign
 
@@ -296,8 +265,11 @@ authority that accrues by counting is the shape ADR-046 refused. Both verbs are 
 5. F1 identical across the window — else `features_unstable`;
 6. F2 meets the §3.2 floor — else `prefix_too_weak`;
 7. F3 holds, attributed, on every window document;
-8. no live binding exists for `(client, counterparty)` **unless** the proposal names it as
-   `supersedes_binding_id` — the relaxation that makes renewal possible without a coverage gap (§4).
+8. **no live binding exists for `(client, counterparty)`.** Flat, with no exception — v4 removes v3's
+   `supersedes_binding_id` relaxation (r3 finding 6), which contradicted §4's deferral of atomic
+   supersession and left a ceremony that could not be built: a proposal naming a live predecessor
+   would either hit `uq_vendor_binding_one_live` at signing or need the very transition §4 defers.
+   Renewal is **revoke, then propose, then sign** — full stop, coverage gap accepted (§4).
 
 **`clara.sign_vendor_identity_binding(p_binding uuid, p_op_key text)`** — floor
 `_human_ctx(role_rank('admin'))`, matching `sign_autopost_rule` (`0016:1781`). It re-derives
@@ -305,8 +277,9 @@ conditions 1–8 against live rows (the ADV-5 discipline at `0016:1820-1830`) **
 requires the re-derived features, evidence window and content hash to equal the stored proposal
 byte-for-byte** — else `proposal_drifted`, re-propose. Without that equality check (finding 6) a
 coherently changed extraction set between proposal and signature could activate a row whose stored
-features no longer describe the evidence. Then `status='live'`, `signed_by`, `signed_at`, atomic
-supersession per §4; audit; `kb_binding.signed`.
+features no longer describe the evidence. Then `status='live'`, `signed_by`, `signed_at`; audit;
+`kb_binding.signed`. **Signing touches no predecessor** — v4 removed v3's supersession step here too
+(r3 finding 6); a live predecessor must already have been revoked for condition 8 to pass.
 
 **The visible receipt:** the sign return carries the derived features in full — the signer reads
 `ez 易计 ezaccount count` and `ezsec-iv-`, plus the evidence document ids and both pinned extraction
@@ -343,36 +316,57 @@ carries bindings and the gap starts costing something.
 destroying it; any bookkeeper who sees something wrong can pull the brake. Sets `status='revoked'`,
 `revoked_by/at/reason`; the row is never deleted (invariant 8).
 
-**The lock order, rebuilt from the live bodies** (finding 7 — v2's claim was false). What the code
-actually does today, verified:
+**The total lock order, rebuilt AGAIN in v4 from every live participant** (r2 finding 7, r3 findings
+2 and 3). v3's law was doubly wrong: it put the binding lock *after* `_approve_entry_core`, which is
+the function that performs the `status='approved'` transition (`0016:1445-1449`) — so the control
+would have run after the post it was meant to gate — and it moved the executor to entry-before-rule,
+which deadlocks against `persist_invoice_facts`. Both are corrected here, and the corrected law is
+one the design can actually obey.
 
-| path | lock sequence, in order |
+Every live acquirer, read from the bodies:
+
+| path | lock sequence, verified |
 |---|---|
-| `execute_rule_post` (`0023`) | reads the entry **unlocked** (`0023:403`) → `coding_rules FOR UPDATE` (`0023:483-487`) → calls `_approve_entry_core` |
-| `_approve_entry_core` (`0016`) | filing `FOR SHARE` (`0016:1257`) → entry `FOR UPDATE` (`0016:1265`) |
-| `revise_entry` (`0016`) | entry `FOR UPDATE` **first** (`0016:4807`) |
+| `persist_invoice_facts` (`0022:452-459`) | `document_filings` **FOR UPDATE** → draft `journal_entries` **FOR UPDATE** → task FOR UPDATE |
+| `_approve_entry_core` (`0016:1257,1265`) | filing **FOR SHARE** → entry **FOR UPDATE** → *(transition at `0016:1445-1449`)* |
+| `execute_rule_post` (`0023:403,483-487`) | entry read **unlocked** → `coding_rules` **FOR UPDATE** → `_approve_entry_core` |
+| `revise_entry` (`0016:4807`) | entry **FOR UPDATE** (no filing) |
 
-So the executor takes the rule *before* the entry, while `revise_entry` takes the entry first. v2
-asserted the opposite and then placed a binding lock "in the same phase as the rule lock" — which
-produces a real cycle: post holds rule→binding and waits on the entry, while revise holds the entry
-and waits on the binding.
+The live system therefore already agrees on **filing → entry**, and the rule is only ever taken by
+the executor, before everything else. v3 proposed entry-before-rule and thereby created the cycle the
+r3 reviewer reconstructed: post holds the entry and waits on the filing inside the approve core,
+while `persist_invoice_facts` holds the filing and waits on that same entry.
 
-**v3 law: the binding lock is acquired LAST, and no path acquires any other lock while holding it.**
-Concretely, `execute_rule_post` is changed (in 0028) to lock the entry `FOR UPDATE` immediately after
-loading it — before the rule — which also closes the pre-existing unlocked-read race the reviewer
-found at `0023:403`. The resulting global order is **entry → filing → rule → binding**, and every
-acquirer conforms:
+**v4 law — one global order, and the binding is NOT last:**
 
-- `execute_rule_post`: entry → rule → *(approve core: filing, entry re-entrant)* → binding, with the
-  binding taken after the approve core's locks so nothing follows it;
-- `revise_entry`: entry → binding (divergence row only);
-- `revoke` / `sign` / lazy expiry: binding alone, and they touch no filing, entry or rule.
+> **`coding_rules` → `document_filings` → `journal_entries` → `vendor_identity_bindings`**
 
-**Why that is cycle-free, checkably:** those four are the only paths that ever lock a binding, and
-**none acquires a filing, entry or rule lock while already holding one**. A lock that is last in
-every acquirer cannot be part of a wait cycle. Falsifiable by grep, with the rig test in Part 2 §D as
-the falsifier if the build drifts. The pre-existing `file_document` /
-`confirm_attribution_candidate` hazard (task #29) is untouched — no binding path takes a filing lock.
+Every acquirer takes a *prefix-consistent subsequence* of it, which is what makes the order
+cycle-free:
+
+- **`execute_rule_post` (recut in 0028):** rule → **filing FOR SHARE → entry FOR UPDATE (taken by the
+  executor itself, in the live order)** → binding FOR UPDATE + the §A.5 re-resolution and its receipt
+  → *then* `_approve_entry_core`, whose filing/entry locks are re-entrant no-ops in the same
+  transaction. The binding control now runs **before** the approval transition, which is what r3
+  finding 2 required, and the executor stops reading the entry unlocked (`0023:403`);
+- **`persist_invoice_facts`:** filing → entry. A prefix. Unchanged;
+- **`_approve_entry_core`:** filing → entry. A prefix. Unchanged;
+- **`revise_entry`:** entry → binding. A subsequence. Consistent;
+- **`revoke` / `sign`:** binding alone. The tail;
+- **the resolver `_resolve_vendor_binding`: takes NO lock at all.** It is `stable` and read-only.
+  v3 let lazy expiry write from inside it, which (as r3 noted) leaves a row lock held across the
+  caller — and Slot B's subsequent FK checks take `FOR KEY SHARE` on parent rows, i.e. locks acquired
+  *after* the binding. Making the resolver lock-free removes that whole class. Expiry is instead a
+  status transition performed only by the verbs (`propose` / `sign` / `revoke`) and by a reconciler
+  pass; every read path independently treats `expires_at <= now()` as not-live, so correctness never
+  depends on the transition having happened yet.
+
+**Why this is cycle-free, checkably.** Every path's sequence is a subsequence of the single global
+order above, and no path takes a lock that precedes one it already holds. That is a stronger and more
+checkable claim than v3's "binding last", and unlike v3's it is compatible with the binding control
+needing to run before the approval transition. The rig test named in Part 2 §D asserts it; the
+pre-existing `file_document` / `confirm_attribution_candidate` hazard (task #29) is a filing-vs-filing
+ordering issue that predates this design and is untouched by it.
 
 **Revocation is a real brake only because of the lock above.** A post-time liveness *read* would not
 be one: the sweep could read the binding live, revocation could commit and truthfully report zero
@@ -442,11 +436,14 @@ The review's contrary reading is recorded rather than erased — it is reasonabl
 what settles it, not the argument. **The `c/o` residual (Part 2 §C.1) is unaffected**: it was never
 about whether F3 may exist, only about what F3 cannot see, and it remains open and named.
 
-**Operational note (not a gate).** The dwell rule (§3.3a) means the **first** production binding needs
-a fourth approved EZSEC bill posted **≥14 days after 25/08/2025** — the existing approvals (25/08,
-25/08, 29/08) span two distinct dates over four days and do not qualify. IV-00744 (`ebb272c7`) and
-the Tier-3 bills (`bb12b995`, `7ecc83c2`, `aef22972`) are filed and corroborated and can serve; the
-runway handles it at build time.
+**Operational note (not a gate), corrected in v4.** v3 said "a fourth bill" without checking that the
+window is ordered by **`approved_at`**, not `posting_date` — r3 was right that this is only
+conditionally true. Read live: the three approvals are `2b2a267a` (posted 29/08, approved last),
+`a8253e24` (25/08), `b93b0f1e` (25/08, approved **first**). A fourth approval evicts `b93b0f1e`,
+leaving `{25/08, 29/08, new}` — three distinct dates, so **one** fourth bill does suffice here, but
+only because the oldest approval happens to be a 25/08 one. The span must reach 14 days from 25/08,
+so the bill must post **on or after 08/09/2025**: **IV-00846 (13/10, `7ecc83c2`) or IV-00847 (14/10,
+`aef22972`) qualify; IV-00744 (25/08) and IV-00745 (03/09) do not.**
 
 **Amendment A (ruling 2) — the human lane surfaces, records, and yields.** On a human-lane draft
 whose document has a live binding match and whose chosen counterparty differs, the DB **never**
