@@ -100,53 +100,42 @@ Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
-**Phase 4 — WAVE B CLOSED ON INTENT (ADR-046, 2026-07-27).** The waves, one line each:
-**Wave A** (daily AP loop) LIVE — ADR-022..024; GATE 3 beta-real (17/17 replay, AP gate exact
-RM 1,350,938.21). **Wave A2** (sales/AR + MyInvois local parse + SST 3-leg + CN/DN + bounded
-auto-post) LIVE, §9 eval closed — ADR-025..027 (Gate A exact RM 1,973,332.91). **Wave A2.1**
-(SST watch + sales autopost lift + classifier gate) CLOSED — ADR-028..030. **Wave B**
-(knowledge + onboarding; contract v1.0 = LAW, ADR-032; migrations 0017–0021 via ADR-033..043)
-**CLOSED on intent — ADR-044/045/046**: every gate that can close on real evidence has closed;
-every deferral names its cause and destination.
+**Phase 4 — pre-Wave-C SETTLEMENT PROGRAM EXECUTED (ADR-048/049, 2026-07-28).** The waves:
+**A** (daily AP loop) LIVE — ADR-022..024 · **A2** (sales/AR + MyInvois + SST 3-leg) LIVE —
+ADR-025..027 · **A2.1** CLOSED — ADR-028..030 · **B** (knowledge + onboarding) CLOSED on
+intent — ADR-044..046 · **the extraction slice** CLOSED — ADR-047/048 (`corroborated` =
+explicit two-reader agreement; confidence GONE).
 
-**LIVE POSTURE: 21 migrations (`0021`) · Fly `clara-runtime` v29 · FOUR firms** (BELCORT —
-real, 3 clients, **high-stakes RM100,000** ADR-044 · ROME PUBLIC ADVISORY `39008536`, born via
-Gate F, empty, RM10k default · Alara Advisory + Borneo Books = slice-era RLS fixtures, never
-repurpose) **· dashboard Pages `app.clarabook.com`** (must set
-`NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev` — intake requires the direct
-URL) **· `clara-backup` daily.** All Wave-B migrations deployed; none queued.
+**LIVE POSTURE: 26 migrations (`0026`) · Fly `clara-runtime` v33 · FOUR firms** (BELCORT —
+real, 3 clients, **high-stakes RM100,000** ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
+Gate-S synthetic sandbox, RM10k default · Alara Advisory + Borneo Books = slice-era RLS
+fixtures, never repurpose) **· dashboard Pages `app.clarabook.com`** (must set
+`NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **· `clara-backup` daily.**
+No migration queued.
 
-| gate | state (receipts in `docs/plan/research/wave-b/`) |
-|---|---|
-| **O · K(keyed) · B-12** | CLOSED — O/K twice each (Rome Secretary · Bee Creative; K corroborated by the client's own YA2025 `BALANCE B/F 65,747.97`); B-12 as the still-to-capture checklist (supersedes WB-R29's date half) |
-| **K document-tied** | DEFERRED → Phase 5 (synthetic): `uq_opening_seed_registry_once` — both real clients' slots spent, RPR greenfield, demo clients hold zero documents; a producer built now has no client to run on |
-| **W2** | (1)+(2)-structural CLOSED (`live-gate-w2-2026-07-25.md`); (2)b/(3)/(4) → the operating runway (need a real wake + draft) |
-| **P** | BLOCKED → **the extraction slice**. `invoice.tax_total` produced 0/29; the naive emit was **adversarially refused on three grounds** (`gate-p-build-refused-2026-07-27.md`) — no re-extract verb exists, `anchor_missing` would silently switch off, and the `net+tax+rounding=gross` tie fails on service-charge documents. `invoiceFacts.v1.azure.mjs` is NOT frozen |
-| **L** | DEFERRED → Phase 5: no conflicting real pair exists (the candidate agrees to the sen); manufacturing one is fabrication |
-| **R2** | 2/3 CLOSED live (`live-gate-r2-2026-07-26.md`): 6 signed `vendor_account` rules · 0 sightings from prior GL · 6/12 ticks correctly refused CLR23 (name-only vs registered identity) · **first 12 `recurring_pattern` knowledge pages** (deterministic — the wiki now holds real client knowledge). Claim (3) → the operating runway |
-| **S** | DEFERRED → Phase 5: no MyInvois XML exists in any corpus |
-| **F** | CLOSED (ADR-045, `live-gate-f-2026-07-27.md`) — durable 11-Q birthed the firm; durability proven by an unstaged fault (failed commit → re-park on the same op_key → clean retry, SAME run) |
+**Settlement scoreboard (ADR-049; receipts `~/.clara-tools/captures/` + `docs/plan/research/`):**
+Gate **L** CLOSED (labelled synthetic, PR #127 — the 0017 `contradiction` detector's first
+coverage; citation producers owe ONE canonical `detail.value` encoding per `subject_key`) ·
+**XG3** CLOSED live (corroborated population 0→9; the §12.2 prediction held exactly) · Gate
+**S** CLOSED (labelled synthetic, Rome only — XML→facts→structured corroboration→signed
+rule→the **first `execute_rule_post` ever, unattended**; the first PRODUCTION autopost is a
+distinct open claim) · **K-doc producer** BUILT (#126, synthetic) · **0024/0025** (claim-secret
+classify settle · receipt auto-routing) + **0026** (lane-widened keys · the filed-bootstrap
+door) DEPLOYED via 5- and 3-round ladders · consent/wiki synthesis ACTIVATED · `interview_v2`
+live (manifest 80/80).
 
-**THE EXTRACTION SLICE IS CLOSED (ADR-048, 2026-07-28)** — 23 migrations + runtime v32 live;
-corroboration = explicit two-reader agreement (confidence GONE); XG3 open → the runway;
-receipts `docs/plan/research/extraction-slice/slice-close-2026-07-28.md`. `interview_v2`
-live (PR #120; manifest 80/80 locked). **NEXT: the pre-Wave-C SETTLEMENT PROGRAM (ADR-048;
-tasks in memory)** — the runway on the real corpus (autopost · Gate-P SST hunt · W2/R2
-journeys) · Gate S/L/K-doc-tied as LABELED synthetic closures (Phase-5 methodology pulled
-forward, owner-ruled 2026-07-28) · the 0020 consent/wiki ACTIVATION ceremony (owner granted)
-· fail_classify 0024 · the rig-failure triage · Supavisor headroom · SHA-pin · deferrals
-recorded per the owner's three criteria.
+**The road to the first production autopost (owner-ruled option A, ADR-049):** the
+vendor-binding design is **RATIFIED v4.1** (`docs/plan/autopost-vendor-binding-design.md` +
+`-part2.md` — F3 = corroboration not option B, amendment D; hand-drafts are never
+autopost-eligible BY DESIGN) → build **0027 + 0028** (0028 recuts `execute_rule_post` AND
+`_approve_entry_core`; D1 quiesce both; `schema_migrations` interlock). Dwell gate: a fourth
+EZSEC bill posted ≥ 08/09/2025 (IV-00846/847 qualify). **Autopost-from-seeding stays REFUSED**
+(WB-R2/ADR-046) — posting authority comes from verified in-system approvals only.
 
-**The OPERATING runway (real future documents, interleave any day):** R2 claim (3) · W2
-journeys · the **first production autopost** (~3 approved small-ticket bills of one recurring
-vendor, e.g. KOK LIONG RM1,190–2,600; verbs fully built, 0 calls ever; 5 floor-met pairs
-cannot fire — payroll JVs bind no facts lane, the AR-control pair lacks sales evidence).
-**Autopost-from-seeding is REFUSED under WB-R2** (ADR-046) — posting authority comes from
-verified in-system approvals only. Intake is proven end-to-end
-(`docs/ops/incident-2026-07-26-intake-storage.md` for the misdiagnosis record).
-
-**Open build items beyond the slice:** `interview_v2` (F1: the SSM validator rejects sole-prop
-ROBA forms; F2: `framework` offers only MPERS/MFRS — all three interview files freeze-locked) ·
-the `opening_tb.line` producer (Phase 5, with a synthetic codes+Dr/Cr trial balance).
+**Open build items (the task ledger is the live status home):** the currency defect (Azure
+types bare-numeral MYR as USD — design in flight; biggest Gate-P blocker; facts-attempt budget
+3/doc, partly spent) · the 0027/0028 build · the filings 40P01 deadlock · `documentIngest.behavior
+_v2` · counterparty-less-approval sighting gap · K-doc production door · CLR23 remedy-text +
+bind-existing-counterparty · the `opening_tb.line` producer (Phase 5).
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**
