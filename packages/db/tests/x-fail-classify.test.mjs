@@ -559,16 +559,21 @@ test("Q1: a session that reads EVERYTHING readable off the table (the run token 
   const client = world.clients.A1;
   const { document, taskId, runId } = await runningClassifyTask(client);
 
-  // The attacker's ENTIRE toolkit: every column clara_runtime's table-wide SELECT exposes,
-  // including the stored digest itself (as if a careless caller tried presenting the digest
-  // AS a secret — a hash is not its own preimage).
-  const row = await rootQuery(
+  // R1 (cross-model review, 5th round): the actual attack boundary is a SECOND
+  // clara_runtime session reading the row itself — not this test's own superuser
+  // rootQuery pretending to be one. roleQuery(ROLES.runtime, ...) opens a genuinely
+  // separate pooled connection, SET ROLE clara_runtime, structurally indistinguishable
+  // from the real claimant's own connection — the same instrument production's threat
+  // model actually exposes. The attacker's ENTIRE toolkit: every column clara_runtime's
+  // table-wide SELECT exposes, including the stored digest itself (as if a careless
+  // caller tried presenting the digest AS a secret — a hash is not its own preimage).
+  const row = await roleQuery(ROLES.runtime,
     "select workflow_run_id, claim_secret_digest from clara.document_processing_tasks where id=$1",
     [taskId],
   );
   const leakedRun = row.rows[0].workflow_run_id;
   const leakedDigestHex = row.rows[0].claim_secret_digest.toString("hex");
-  assert.equal(leakedRun, runId, "mandatory setup: the run token IS readable off the table (confirms the threat surface, not just assumes it)");
+  assert.equal(leakedRun, runId, "mandatory setup: the run token IS readable off the table by a genuine clara_runtime session (confirms the threat surface, not just assumes it)");
 
   await assert.rejects(
     () => classifyDocument({ document: document.documentId, kind: "receipt", confidence: 0.99, task: taskId, run: leakedRun, secret: leakedDigestHex, opKey: opk("q1-digest-attack") }),
@@ -583,12 +588,24 @@ test("Q1: a session that reads EVERYTHING readable off the table (the run token 
 test("Q1: only the preimage the claiming session actually received settles the claim — a table-reader who knows task+run but not the secret is refused, exactly reproducing (then closing) the pre-fix attack", async () => {
   requireReady();
   const client = world.clients.A1;
-  const { document, taskId, runId, runSecret } = await runningClassifyTask(client);
+  const { document, taskId, runSecret } = await runningClassifyTask(client);
+
+  // R1 (cross-model review, 5th round): the run token an attacker would present must come
+  // from a genuine SECOND clara_runtime session reading the table — the claimant fixture's
+  // own return value is the claimant's own local knowledge (it always had it; that proves
+  // nothing about the table being readable), not what an attacker would have had to steal.
+  // Same instrument as the sibling cell above (roleQuery(ROLES.runtime, ...), a genuinely
+  // separate pooled connection).
+  const leaked = await roleQuery(ROLES.runtime,
+    "select workflow_run_id from clara.document_processing_tasks where id=$1",
+    [taskId],
+  );
+  const leakedRun = leaked.rows[0].workflow_run_id;
 
   // The exact attack that succeeded before this fix: read run_id off the table, present it
   // with an ARBITRARY (wrong) secret guess, never having held the true claim.
   await assert.rejects(
-    () => classifyDocument({ document: document.documentId, kind: "receipt", confidence: 0.99, task: taskId, run: runId, secret: "an-attacker-guessed-secret", opKey: opk("q1-wrong-secret") }),
+    () => classifyDocument({ document: document.documentId, kind: "receipt", confidence: 0.99, task: taskId, run: leakedRun, secret: "an-attacker-guessed-secret", opKey: opk("q1-wrong-secret") }),
     (e) => e.code === "CLR16",
     "task+run alone (readable off the table) is no longer sufficient — the wrong secret is refused",
   );
@@ -596,7 +613,7 @@ test("Q1: only the preimage the claiming session actually received settles the c
 
   // The TRUE claimant, presenting the SAME task+run it always did PLUS the secret only its
   // own claim call ever received, settles normally — the legitimate path is unharmed.
-  const ok = await classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: taskId, run: runId, secret: runSecret, opKey: opk("q1-true-claimant") });
+  const ok = await classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: taskId, run: leakedRun, secret: runSecret, opKey: opk("q1-true-claimant") });
   assert.equal(ok.kind_set, true, "the true claimant's own secret settles the task normally");
   assert.equal(await docKind(document.documentId), "invoice", "the legitimate verdict lands");
 });
