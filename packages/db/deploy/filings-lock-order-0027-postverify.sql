@@ -47,6 +47,18 @@
 -- documents-before-clients position check). See 0027_filings_lock_order.sql's own header
 -- for the full P-round summary.
 --
+-- Q-ROUND (b08172f, three residuals, CLOSING round). Probe 6 (Q2) now strips BOTH comment
+-- styles (`--` and `/* */`), recognizes ONLY / MERGE INTO / quoted-identifier forms, and
+-- pins `search_path` to `pg_catalog` before any `regprocedure` cast so the allowlist
+-- comparison cannot silently break on a database whose default search_path already
+-- resolves `clara` unqualified. It also states its own honest limit in-line: a syntactic
+-- sweep cannot prove exhaustiveness against dynamic SQL — that is BELT, the primary
+-- instrument is the build-time CoR enumeration, and the probe fails CLOSED on anything it
+-- cannot classify rather than fail open. (Q1 and Q3 are elsewhere: Q1 tightens two
+-- 40P01-accepting assertions in packages/db/tests/wave-b/wb-0020-resolver.test.mjs to
+-- serialization-only, now that P1 makes the cycle they were hedging against structurally
+-- dead; Q3 fixes 0027_filings_lock_order.sql's own header, which had drifted from its tail.)
+--
 -- THE HONEST FRAMING (carried from every prior migration's postverify): this is BELT. The
 -- primary defense is the migration's own in-transaction tail, already run and already
 -- raised on any failure during the ceremony itself. This file re-proves the same claims
@@ -173,7 +185,32 @@ begin
   -- unstripped scan can be defeated by commenting out the offending DML), and the regex
   -- recognizes BOTH the schema-qualified (`clara.document_filings`) and the bare,
   -- unqualified form (`document_filings`) that is equally legal under every one of these
-  -- functions' own `SET search_path TO 'clara', 'pg_temp'`.
+  -- functions' own `SET search_path TO 'clara', 'pg_temp'`, the ONLY / MERGE INTO forms,
+  -- and quoted identifiers.
+  --
+  -- 0027 Q-round (finding 2, tightened): pin search_path for this probe's OWN session to
+  -- pg_catalog (excluding clara) BEFORE any regprocedure cast — `oid::regprocedure::text`
+  -- prints the UNQUALIFIED name whenever the calling session's search_path already
+  -- resolves it, which would silently break the fully-qualified allowlist below on a
+  -- database whose default search_path happens to include clara.
+  set local search_path to pg_catalog;
+  --
+  -- Comments are stripped in BOTH styles (`-- ...` line comments AND `/* ... */` block
+  -- comments, non-greedy across newlines) before the regex runs — the same
+  -- delete-a-guard-paste-as-comment class 0022 established applies to either comment
+  -- style, and the old strip only handled the first.
+  --
+  -- THE HONEST LIMIT (stated, not hidden): this is a SYNTACTIC sweep over static prosrc.
+  -- It cannot prove exhaustiveness against dynamic SQL (EXECUTE, format(), string-built
+  -- statements) — no regex over source text can. It is BELT. The PRIMARY instrument
+  -- against an unenumerated writer is the build-time CoR enumeration this migration's own
+  -- header records (pg_get_functiondef against the live catalog, classified into
+  -- insert/update/delete on document_filings, independently re-run and confirmed by the
+  -- Codex O-round) — that enumeration found exactly six, by actually reading every
+  -- function's compiled body, not by pattern-matching its text. This probe's job is
+  -- narrower and achievable: catch the STATIC forms perfectly, and fail CLOSED (raise) on
+  -- anything it cannot confidently classify as accounted-for — never fail open by silently
+  -- passing a shape it does not recognize.
   --
   -- The inner CTE is forced MATERIALIZED (a real bug found while first writing this probe):
   -- without it, the planner can evaluate the pg_get_functiondef()-based regex predicates
@@ -184,16 +221,21 @@ begin
   -- ever runs against clara's own (all prokind='f') functions.
   with clara_fns as materialized (
     select p.oid, p.oid::regprocedure::text as sig,
-           regexp_replace(regexp_replace(pg_get_functiondef(p.oid), '--[^\n]*', '', 'g'), '\s+', ' ', 'g') as src
+           regexp_replace(
+             regexp_replace(
+               regexp_replace(pg_get_functiondef(p.oid), '/\*[\s\S]*?\*/', '', 'g'),
+               '--[^\n]*', '', 'g'),
+             '\s+', ' ', 'g') as src
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'clara'
   )
   select string_agg(sig, ', ')
     into v_bad_text
     from clara_fns
-    where (src ~* 'insert\s+into\s+(clara\.)?document_filings\y'
-           or src ~* 'update\s+(clara\.)?document_filings\y'
-           or src ~* 'delete\s+from\s+(clara\.)?document_filings\y')
+    where (src ~* 'insert\s+into\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y'
+           or src ~* 'update\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y'
+           or src ~* 'delete\s+from\s+(only\s+)?("?clara"?\.)?"?document_filings"?\y'
+           or src ~* 'merge\s+into\s+("?clara"?\.)?"?document_filings"?\y')
       and sig not in (
         'clara.file_document(uuid,uuid,text,text)',
         'clara.finalize_document_intake(uuid,text,text,jsonb,integer,text,uuid,uuid,text)',
@@ -205,7 +247,7 @@ begin
   if v_bad_text is not null then
     raise exception '0027 postverify: an UNENUMERATED document_filings writer exists in the deployed catalog: %', v_bad_text;
   end if;
-  raise notice '0027 postverify OK (6/6): no unenumerated document_filings writer exists — the six-signature set is exhaustive';
+  raise notice '0027 postverify OK (6/6): no unenumerated document_filings writer exists among the STATIC forms this probe can see — the six-signature set is exhaustive against them (dynamic SQL is out of this probe''s reach by construction; the build-time CoR enumeration is the primary defense there)';
 
   raise notice '0027 postverify: ALL PROBES PASSED — documents-before-document_filings lock order is consistent across every live writer AND the resolve_and_ingest_wiki_source reader';
 end

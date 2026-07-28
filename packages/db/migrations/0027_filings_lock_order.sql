@@ -65,16 +65,23 @@
 -- order (client attribution / filing, before any coding_rules or journal_entries work
 -- begins) and does not insert a new stage into it.
 --
--- THE 0020 PIN (§6 of docs/plan/wave-b-migration-0020-design.md). The legacy byte-identity
--- closed set is grant_client_egress, revoke_client_egress, resolve_document_client,
--- resolve_and_ingest_wiki_source, record_wiki_source_ingest, _enqueue_invoice_facts_core,
--- and the 0015 claim_document_processing_task body — the egress-consent domain, not the
--- document-filing domain. None of the three functions this migration edits are members.
--- _enqueue_invoice_facts_core (a §6.1 pinned member) IS called by four of the six writers,
--- but always AFTER the filing/document work in the same transaction, and this migration
--- does not touch its body — re-locking `documents` inside it, when the calling writer has
--- already locked the same row moments earlier in the same transaction, is a re-entrant
--- no-op, not a new acquisition. The pin is untouched; nothing to amend.
+-- THE 0020 PIN (§6 of docs/plan/wave-b-migration-0020-design.md, verified against the
+-- ACTUAL BYTE_IDENTICAL map in packages/db/tests/wave-b/wb-0020-legacy.test.mjs — not
+-- trusted from the design doc's prose alone; 0027 Q-round finding 3 caught this section
+-- once contradicting itself against §D/the tail below). The legacy byte-identity closed
+-- set is exactly FIVE functions: grant_client_egress, revoke_client_egress,
+-- claim_document_processing_task, _enqueue_invoice_facts_core, record_wiki_source_ingest —
+-- the egress-consent domain, not the document-filing domain. `resolve_document_client` and
+-- `resolve_and_ingest_wiki_source` are NOT members of this set (they sit in a SEPARATE
+-- closed set instead — the ACL grant list, EXECUTE-to-clara_runtime-ONLY, design doc
+-- line 1487 — which is about WHO may call them, not about their body text). None of the
+-- FOUR functions this migration edits (§A/§B/§C plus §D's resolve_and_ingest_wiki_source)
+-- are byte-identity pinned members; §D's edit needs no restore()/amendment to that map.
+-- _enqueue_invoice_facts_core (a real §6.1 pinned member) IS called by four of the six
+-- writers, but always AFTER the filing/document work in the same transaction, and this
+-- migration does not touch its body — re-locking `documents` inside it, when the calling
+-- writer has already locked the same row moments earlier in the same transaction, is a
+-- re-entrant no-op, not a new acquisition. The pin is untouched; nothing to amend.
 --
 -- CROSS-FUNCTION SAFETY CHECK. Before adding a `documents` FOR UPDATE lock ahead of the
 -- existing first lock in each of the three writers, the live catalog was swept for every
