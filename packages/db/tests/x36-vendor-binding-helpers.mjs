@@ -14,6 +14,15 @@ export async function has28() {
   } catch { return false; }
 }
 
+export async function has29() {
+  try {
+    const r = await rootQuery(
+      "select 1 from clara.schema_migrations where version='0029_vendor_binding_executor'",
+    );
+    return r.rows.length > 0;
+  } catch { return false; }
+}
+
 // buildWorld's fixture COA (cash/AR/sales/expense/rounding) carries no payable-class
 // account, but _assert_supplier_bill_shape_at requires one for any coding_kind='supplier_bill'
 // entry's credit leg. Direct-inserted once per client (PK is client_id+account_code, so this

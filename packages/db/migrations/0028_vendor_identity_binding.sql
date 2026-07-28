@@ -389,7 +389,11 @@ begin
   end if;
 
   v_norm_name:=clara._binding_normalize(v_vendor);
-  select count(*)::int,min(b.counterparty_id)
+  -- min(uuid) has no default aggregate in Postgres (42883) -- array_agg(...)[1] picks an
+  -- arbitrary element the same way min() would have, which is fine here: v_counterparty is
+  -- only ever RETURNED when v_matches=1 (exactly one candidate, so "arbitrary" == "the one"),
+  -- and thrown away on ambiguity (v_matches<>1 falls through to `return null`).
+  select count(*)::int,(array_agg(b.counterparty_id))[1]
     into v_matches,v_counterparty
   from clara.vendor_identity_bindings b
   join clara.counterparties cp

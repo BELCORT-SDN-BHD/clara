@@ -19,13 +19,17 @@ import assert from "node:assert/strict";
 import { humanQuery, namedCall, opk, assertRaises, endPool } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
-import { has28, seedPayableAccount, seedPassingWindow } from "./x36-vendor-binding-helpers.mjs";
+import {
+  has28, has29, seedPayableAccount, seedPassingWindow,
+} from "./x36-vendor-binding-helpers.mjs";
 
 let has0028 = false;
+let has0029 = false;
 let w = null;
 
 before(async () => {
   has0028 = await has28();
+  has0029 = await has29();
   if (!has0028) { noteLane("0028 absent -- x36-vendor-binding-ceremony battery FAILS loudly rather than skipping"); return; }
   w = await buildWorld();
   await seedPayableAccount(w.firms.A, w.clients.A1);
@@ -83,10 +87,16 @@ test("x36c.1 propose_vendor_identity_binding — bookkeeper happy path over a fu
   return r.binding_id;
 });
 
-test("x36c.2 THE INTERLOCK — sign_vendor_identity_binding refuses post_control_absent while 0029 is undeployed", async () => {
+test("x36c.2 THE INTERLOCK — signing is closed before 0029 and opens only after its ledger row", async () => {
   requireReady();
   const cp = await seedPassingWindow(w, "C2");
   const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  if (has0029) {
+    const signed = await sign(w.users.alice, { binding: proposed.binding_id });
+    assert.equal(signed.status, "live",
+      "the exact 0029 ledger row opens the signing interlock");
+    return;
+  }
   await assertRaises("CLR36",
     () => sign(w.users.alice, { binding: proposed.binding_id }),
     "sign before 0029 deploys");

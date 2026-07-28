@@ -119,6 +119,11 @@ jobs:
           node scripts/check-wiki-dynamic-sql.mjs
           node scripts/check-wiki-dynamic-sql.selftest.mjs
 
+      # The 0029 Slot-C durable interlock: the current migration-tree definition
+      # of execute_rule_post must retain the binding live/unexpired gate.
+      - name: Vendor-binding post-control gate (0029 Slot C)
+        run: node scripts/check-binding-post-control.mjs
+
       # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
       # "backed by gitleaks in CI" claim true). Version-pinned to a released
       # gitleaks binary (not a mutable action tag); config + allowlist in
