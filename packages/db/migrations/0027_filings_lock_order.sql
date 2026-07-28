@@ -1,6 +1,8 @@
 -- 0027_filings_lock_order.sql — one consistent documents-before-document_filings lock
--- order across every writer. Closes task #29 (ledger), the pre-existing deadlock the
--- 0025 Q-round reproduced (1/16 concurrent runs → a real 40P01).
+-- order across every writer AND every reader that locks both. Closes task #29 (ledger),
+-- the pre-existing deadlock the 0025 Q-round reproduced (1/16 concurrent runs → a real
+-- 40P01), plus a second cycle and a fourth acquirer the Codex O-round found on review
+-- (all folded in here, in ONE migration, per the P-round instruction — not piecemeal).
 --
 -- THE DEFECT. clara.file_document locks the parent `documents` row FOR UPDATE FIRST,
 -- then inserts into `document_filings`. Three other writers do the opposite: they touch
@@ -85,6 +87,26 @@
 --
 -- error codes: none new. every added statement is a lock acquisition, not a validation —
 -- it changes ORDER, never outcome, on any path that does not race.
+--
+-- THE P-ROUND (Codex O-round, 7816f93, REFUSED — six findings, all fixed here).
+--   P1 (real cycle) — clara.resolve_and_ingest_wiki_source (0020) took document_filings
+--     FOR SHARE before documents FOR UPDATE, the opposite of the new law: §D swaps it.
+--     0020's own design doc already named this cycle as residual R-1 ("bounded and
+--     self-healing"); this closes it structurally instead.
+--   P2 (real cycle) — confirm_attribution_candidate's documents lock (§A) sat AFTER the
+--     client_resolutions insert, which takes `clients` FOR KEY SHARE via its FK — a second
+--     genuine inversion against anything holding documents and wanting clients FOR UPDATE
+--     (approve_wrong_client_correction, retire_document_filing). Hoisted to precede it.
+--   P3 — the tail's own probe for retire_document_filing (§C) checked documents-before-
+--     filing-row but never peek-before-documents; a body that moved the peek later (or
+--     dropped it) would still pass. Now asserts strict peek < lock < filing-row order.
+--   P4 — the §6-pin ACL probe read a NULL proacl (Postgres's own PUBLIC-EXECUTE-by-default
+--     for an unrevoked function) as "owner-only", since aclexplode(NULL) yields no rows.
+--     Now fails explicitly on proacl IS NULL.
+--   P5/P6 — postverify-only findings (the writer sweep's comment-stripping/signature-
+--     allowlist gap, and the soak's untyped loser); fixed in
+--     packages/db/deploy/filings-lock-order-0027-postverify.sql and
+--     packages/db/tests/x27-filings-lock-order.test.mjs respectively, not here.
 
 -- =====================================================================
 -- §A — clara.confirm_attribution_candidate: lock `documents` before the filings touch.
@@ -109,6 +131,18 @@ begin
     where ac.id=p_candidate for update;
   if not found or x.firm_id<>c.firm then raise exception 'candidate not in your firm' using errcode='CLR11'; end if;
   if x.disposition<>'open' then raise exception 'candidate is already disposed' using errcode='CLR20'; end if;
+  -- 0027 P-round (Codex O-round finding 2): the `documents` lock must precede EVERY
+  -- conflicting client acquisition, not just the document_filings insert below — the
+  -- client_resolutions insert immediately after this comment enforces
+  -- client_id REFERENCES clients(id), which takes `clients` FOR KEY SHARE. A concurrent
+  -- retirement/correction that already holds `documents` and then wants `clients` FOR
+  -- UPDATE, racing this function holding `clients` KEY SHARE and wanting `documents`, is a
+  -- second genuine cycle — so the lock is hoisted here, unconditionally (even when
+  -- p_file_document is false and this call will never touch document_filings at all;
+  -- locking a row this txn does not strictly need is the safe direction, never the
+  -- unsafe one). Matches file_document's order for every downstream touch, not only the
+  -- filings insert.
+  perform 1 from clara.documents where id=x.document_id for update;
   insert into clara.client_resolutions(firm_id,client_id,subject_kind,subject_id,
       confidence,method,evidence,resolved_by)
     values(c.firm,x.client_id,'document',x.document_id,1.0,'human',
@@ -116,11 +150,6 @@ begin
   update clara.attribution_candidates set disposition='confirmed',disposed_by=c.actor,
     disposed_at=now() where id=p_candidate;
   if p_file_document then
-    -- 0027 (task #29): lock the parent document BEFORE any document_filings touch —
-    -- matches file_document's existing order. Closes the lock-order inversion against
-    -- file_document (documents-then-filings vs this function's old filings-then-
-    -- documents-via-recompute).
-    perform 1 from clara.documents where id=x.document_id for update;
     select id into v_filing from clara.document_filings
       where document_id=x.document_id and client_id=x.client_id and retired_at is null;
     if v_filing is null then
@@ -408,14 +437,85 @@ begin
 end $function$;
 
 -- =====================================================================
+-- §D — clara.resolve_and_ingest_wiki_source (0020): found in the P-round (Codex O-round
+-- finding 1), not the original CoR sweep — it is a READER, not a document_filings WRITER
+-- (it locks document_filings FOR SHARE, never inserts/updates/deletes it), so §5's
+-- writer-only sweep correctly never flagged it; it still acquires the SAME two locks
+-- (documents, document_filings) every writer above does, in the OLD order — document_filings
+-- FOR SHARE first, documents FOR UPDATE second. That is now the ONLY acquirer of these two
+-- locks still in the wrong order, and it is live production code: the runtime calls it on
+-- every document.classified/document.filed event. Swapped to match.
+--
+-- 0020's own design doc (docs/plan/wave-b-migration-0020-design.md §11, residual R-1) ALREADY
+-- named this exact cycle — "Deadlock (40P01) between resolve_and_ingest_wiki_source and a
+-- concurrent authority function... Bounded and self-healing... Not fixed in 0020" — against
+-- the THEN-inconsistent writer set (some writers documents-first, some filings-first, so a
+-- genuine cycle was only sometimes reachable depending which authority function raced it).
+-- This fix does not just re-bound the residual, it CLOSES it: once every acquirer of
+-- (documents, document_filings) takes them in the same order, the cycle is structurally
+-- impossible, not merely rare-and-recoverable. packages/db/tests/wave-b/wb-0020-resolver.test.mjs
+-- carries two two-session races that already exercise this pair (raceIngestThenFileB,
+-- raceIngestThenRetire) with an "either serializes cleanly OR aborts 40P01" assertion —
+-- unchanged by this fix (a strict subset of that OR now always holds), but their `blocked`
+-- detection describes which specific lock caused the park; updated in the same commit to
+-- name the lock this fix actually changes.
+--
+-- NOT a 0020 §6 byte-identity closed-set member (verified against packages/db/tests/wave-b/
+-- wb-0020-legacy.test.mjs's BYTE_IDENTICAL map: grant_client_egress, revoke_client_egress,
+-- claim_document_processing_task, _enqueue_invoice_facts_core, record_wiki_source_ingest —
+-- five functions, not resolve_and_ingest_wiki_source). No restore()/A12 pin amendment is
+-- needed; there is no exact-hash pin on this function to amend.
+CREATE OR REPLACE FUNCTION clara.resolve_and_ingest_wiki_source(p_firm uuid, p_document uuid)
+ RETURNS jsonb
+ LANGUAGE plpgsql
+ SECURITY DEFINER
+ SET search_path TO 'clara', 'pg_temp'
+AS $function$
+declare v_clients uuid[]; v_client uuid; v_result jsonb;
+begin
+  if p_firm is null or p_document is null then
+    return jsonb_build_object('status','skipped_unresolved_client');
+  end if;
+  -- (1) the phantom guard on the parent row — moved first (0027).
+  perform 1 from clara.documents d
+    where d.id=p_document and d.firm_id=p_firm for update;
+  -- (2) filing topology, FOR SHARE, in the authority functions' own id order.
+  perform 1 from clara.document_filings f
+    where f.document_id=p_document and f.firm_id=p_firm order by f.id for share;
+  -- (3) the AUTHORITATIVE re-read, under both locks, through the shared predicate.
+  v_clients:=clara._active_filing_clients(p_firm,p_document);
+  if cardinality(v_clients)=0 then
+    return jsonb_build_object('status','skipped_unresolved_client');
+  elsif cardinality(v_clients)>1 then
+    return jsonb_build_object('status','skipped_ambiguous_client');
+  end if;
+  v_client:=v_clients[1];
+  -- §5.4: the re-drive fires only for CLASSIFIED documents. A newly filed document that was
+  -- never classified must not be ingested. This gate sits on the unique branch, because §5.3
+  -- states the zero / many outcomes as direct outcomes of the authoritative re-read.
+  if not exists(select 1 from clara.domain_events e
+      where e.firm_id=p_firm and e.event_type='document.classified'
+        and e.document_id=p_document) then
+    return jsonb_build_object('status','skipped_unclassified');
+  end if;
+  -- The op key is derived INSIDE this function, in the BYTE-IDENTICAL shape the consumer
+  -- already uses for entry.approved, so the two paths share ONE op receipt per
+  -- (client, document) and can never double-publish. The audited writer owns the write.
+  v_result:=clara.record_wiki_source_ingest(v_client,p_document,null,
+    'wikiingest:'||v_client::text||':'||p_document::text);
+  return v_result||jsonb_build_object('status','projected');
+end $function$;
+
+-- =====================================================================
 -- TAIL — in-transaction self-verification. Every raise is a real assertion failure, not
 -- a soft warning; a clean run ends with one notice and nothing else.
 -- =====================================================================
 do $tail$
 declare
   v_prior_count int;
-  v_src_a text; v_src_b text; v_src_c text;
-  v_norm_a text; v_norm_b text; v_norm_c text;
+  v_src_a text; v_src_b text; v_src_c text; v_src_d text;
+  v_norm_a text; v_norm_b text; v_norm_c text; v_norm_d text;
+  v_pos_client int; v_pos_lock int; v_pos_touch int; v_pos_peek int;
 begin
   -- (1) mandatory prior-migration check — 0026 must already be applied.
   select count(*) into v_prior_count from clara.schema_migrations where version = '0026_lane_widen';
@@ -423,9 +523,9 @@ begin
     raise exception '0027 tail: migration 0026 is not recorded as applied — apply in order';
   end if;
 
-  -- (2) each of the three edited functions exists with exactly one overload and the
-  -- new `documents` FOR UPDATE lock appears in comment-stripped, whitespace-normalized
-  -- source BEFORE the function's own pre-existing first document_filings acquisition —
+  -- (2) each of the four edited functions exists with exactly one overload and the
+  -- new/reordered `documents` lock appears in comment-stripped, whitespace-normalized
+  -- source strictly BEFORE the function's own conflicting client/filings acquisitions —
   -- the same discipline 0022 established (delete-a-guard-paste-as-comment defeats a raw
   -- text match; strip comments first).
   select pg_get_functiondef(oid) into v_src_a from pg_proc
@@ -434,34 +534,51 @@ begin
     where proname = 'approve_wrong_client_correction' and pronamespace = 'clara'::regnamespace;
   select pg_get_functiondef(oid) into v_src_c from pg_proc
     where proname = 'retire_document_filing' and pronamespace = 'clara'::regnamespace;
-  if v_src_a is null or v_src_b is null or v_src_c is null then
-    raise exception '0027 tail: one of the three edited functions is missing after CREATE OR REPLACE';
+  select pg_get_functiondef(oid) into v_src_d from pg_proc
+    where proname = 'resolve_and_ingest_wiki_source' and pronamespace = 'clara'::regnamespace;
+  if v_src_a is null or v_src_b is null or v_src_c is null or v_src_d is null then
+    raise exception '0027 tail: one of the four edited functions is missing after CREATE OR REPLACE';
   end if;
 
   v_norm_a := regexp_replace(regexp_replace(v_src_a, '--[^\n]*', '', 'g'), '\s+', ' ', 'g');
   v_norm_b := regexp_replace(regexp_replace(v_src_b, '--[^\n]*', '', 'g'), '\s+', ' ', 'g');
   v_norm_c := regexp_replace(regexp_replace(v_src_c, '--[^\n]*', '', 'g'), '\s+', ' ', 'g');
+  v_norm_d := regexp_replace(regexp_replace(v_src_d, '--[^\n]*', '', 'g'), '\s+', ' ', 'g');
 
-  if position('from clara.documents where id=x.document_id for update' in lower(v_norm_a))
-       = 0
-     or position('from clara.documents where id=x.document_id for update' in lower(v_norm_a))
-       >= position('insert into clara.document_filings' in lower(v_norm_a)) then
-    raise exception '0027 tail: confirm_attribution_candidate does not lock documents strictly before the filings insert';
+  -- 0027 P-round (finding 2): the documents lock must precede the client_resolutions
+  -- insert (which takes `clients` FOR KEY SHARE via its FK) too, not only the filings
+  -- insert — both position checks are now asserted.
+  v_pos_lock := position('from clara.documents where id=x.document_id for update' in lower(v_norm_a));
+  v_pos_client := position('insert into clara.client_resolutions' in lower(v_norm_a));
+  v_pos_touch := position('insert into clara.document_filings' in lower(v_norm_a));
+  if v_pos_lock = 0 or v_pos_client = 0 or v_pos_touch = 0
+     or v_pos_lock >= v_pos_client or v_pos_lock >= v_pos_touch then
+    raise exception '0027 tail: confirm_attribution_candidate does not lock documents strictly before BOTH the client_resolutions insert and the filings insert (lock=%, client=%, filings=%)', v_pos_lock, v_pos_client, v_pos_touch;
   end if;
 
-  if position('from clara.documents where id=x.document_id for update' in lower(v_norm_b))
-       = 0
-     or position('from clara.documents where id=x.document_id for update' in lower(v_norm_b))
-       >= position('from clara.document_filings f where f.document_id=x.document_id' in lower(v_norm_b)) then
+  v_pos_lock := position('from clara.documents where id=x.document_id for update' in lower(v_norm_b));
+  v_pos_touch := position('from clara.document_filings f where f.document_id=x.document_id' in lower(v_norm_b));
+  if v_pos_lock = 0 or v_pos_touch = 0 or v_pos_lock >= v_pos_touch then
     raise exception '0027 tail: approve_wrong_client_correction does not lock documents strictly before the document_filings row lock';
   end if;
 
-  if position('select document_id into v_peek_doc from clara.document_filings' in lower(v_norm_c)) = 0
-     or position('from clara.documents where id = v_peek_doc for update' in lower(v_norm_c)) = 0
-     or position('from clara.documents where id = v_peek_doc for update' in lower(v_norm_c))
-       >= position('select * into f from clara.document_filings where id = p_filing_id for update'
-                    in lower(v_norm_c)) then
-    raise exception '0027 tail: retire_document_filing does not peek + lock documents strictly before the filing row lock';
+  -- 0027 P-round (finding 3): assert the PEEK itself precedes the documents lock, not
+  -- only that the documents lock precedes the filing-row lock — a body with the peek
+  -- moved to AFTER the documents lock (or dropped) would satisfy the old two-term check.
+  v_pos_peek := position('select document_id into v_peek_doc from clara.document_filings' in lower(v_norm_c));
+  v_pos_lock := position('from clara.documents where id = v_peek_doc for update' in lower(v_norm_c));
+  v_pos_touch := position('select * into f from clara.document_filings where id = p_filing_id for update' in lower(v_norm_c));
+  if v_pos_peek = 0 or v_pos_lock = 0 or v_pos_touch = 0
+     or v_pos_peek >= v_pos_lock or v_pos_lock >= v_pos_touch then
+    raise exception '0027 tail: retire_document_filing''s peek/lock/filing-row-lock are not in strict order (peek=%, lock=%, filing=%)', v_pos_peek, v_pos_lock, v_pos_touch;
+  end if;
+
+  -- 0027 P-round (finding 1): resolve_and_ingest_wiki_source (§D) now locks documents
+  -- BEFORE document_filings — the swap from 0020's original order.
+  v_pos_lock := position('from clara.documents d' in lower(v_norm_d));
+  v_pos_touch := position('from clara.document_filings f' in lower(v_norm_d));
+  if v_pos_lock = 0 or v_pos_touch = 0 or v_pos_lock >= v_pos_touch then
+    raise exception '0027 tail: resolve_and_ingest_wiki_source does not lock documents strictly before document_filings';
   end if;
 
   -- (3) file_document, finalize_document_intake and _seed_verified_document are
@@ -477,15 +594,19 @@ begin
 
   -- (4) the 0020 §6 closed-set members this migration's callees touch
   -- (_enqueue_invoice_facts_core) must remain untouched — this migration issues no
-  -- CREATE OR REPLACE for it; assert it still exists and is still owner-only (no direct
-  -- EXECUTE grant), the same shape 0025's and 0026's own tails already assert.
-  if exists (select 1 from pg_proc p, lateral aclexplode(p.proacl) a
-              where p.proname = '_enqueue_invoice_facts_core' and p.pronamespace = 'clara'::regnamespace
-                and a.privilege_type = 'EXECUTE'
-                and (a.grantee = 0 or pg_get_userbyid(a.grantee) <> 'clara_fn_owner')) then
-    raise exception '0027 tail: _enqueue_invoice_facts_core (0020 §6 pinned) gained a direct EXECUTE grant — this migration must not touch it';
+  -- CREATE OR REPLACE for it; assert it still exists and is still owner-only. 0027
+  -- P-round (finding 4): a NULL proacl (Postgres's own default privileges — implicit
+  -- PUBLIC EXECUTE on a function unless explicitly REVOKEd) must FAIL this probe, not
+  -- pass it — aclexplode(NULL) returns zero rows, so the old exists(...) form read a
+  -- publicly-executable core as "owner-only".
+  if exists (select 1 from pg_proc p where p.proname = '_enqueue_invoice_facts_core' and p.pronamespace = 'clara'::regnamespace
+              and (p.proacl is null or exists (
+                select 1 from lateral aclexplode(p.proacl) a
+                  where a.privilege_type = 'EXECUTE'
+                    and (a.grantee = 0 or pg_get_userbyid(a.grantee) <> 'clara_fn_owner')))) then
+    raise exception '0027 tail: _enqueue_invoice_facts_core (0020 §6 pinned) gained a direct/PUBLIC EXECUTE grant (or lost its ACL) — this migration must not touch it';
   end if;
 
-  raise notice '0027: documents-before-document_filings lock order now consistent across all six live writers (file_document / finalize_document_intake / _seed_verified_document unchanged as the reference order; confirm_attribution_candidate / approve_wrong_client_correction / retire_document_filing fixed) — task #29 closed';
+  raise notice '0027: documents-before-document_filings lock order now consistent across all six live writers PLUS the resolve_and_ingest_wiki_source reader (file_document / finalize_document_intake / _seed_verified_document unchanged as the reference order; confirm_attribution_candidate / approve_wrong_client_correction / retire_document_filing / resolve_and_ingest_wiki_source fixed) — task #29 closed';
 end
 $tail$;

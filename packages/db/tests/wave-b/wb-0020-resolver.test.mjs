@@ -387,7 +387,7 @@ test("[0020 §5.3 residual R-1 / §9.4 — two-session]: resolve+ingest against 
   assert.ok(out.retireOk || out.retireCode === "40P01",
     `the retirement either commits after the ingest or aborts 40P01 (got ok=${out.retireOk} code=${out.retireCode})`);
   if (!out.blocked) {
-    noteLane("[0020 R-1] NOT OBSERVED: the concurrent retirement did not park on the document_filings row lock held by resolve_and_ingest_wiki_source. §5.3 pins that FOR SHARE as step 1 of the lock order — adjudication item.");
+    noteLane("[0020 R-1, post-0027] NOT OBSERVED: the concurrent retirement did not park on the clara.documents row lock held by resolve_and_ingest_wiki_source (task #29's P-round made this the step-1 lock, was document_filings FOR SHARE pre-0027) — adjudication item.");
   }
   if (out.retireOk) {
     // CONVERGENCE: the consumer's at-least-once delivery re-drives the event.

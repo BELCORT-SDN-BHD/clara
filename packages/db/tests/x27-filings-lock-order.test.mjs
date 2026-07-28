@@ -24,7 +24,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
-import { rootQuery, ROLES, opk, endPool } from "./rig-helpers.mjs";
+import { rootQuery, humanQuery, ROLES, opk, endPool } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld, holdThenContend, concurrentTwoSession, sawDeadlock } from "./x1-helpers.mjs";
 import { seedAttempt, seedCandidate } from "./rig-docs-fixtures.mjs";
@@ -130,7 +130,7 @@ test("§0027.3 SOAK — concurrentTwoSession, file_document vs confirm_attributi
   requireReady();
   const N = 32;
   let deadlocks = 0;
-  const shapes = { bothOk: 0, oneRefused: 0, other: 0 };
+  const shapes = { bothOk: 0, oneRefused: 0 };
   for (let i = 0; i < N; i++) {
     const doc = await seedPdfDoc(w.firms.A, `soak${i}`);
     const candidate = await seedOpenCandidate(w.firms.A, doc, w.clients.A1);
@@ -139,9 +139,25 @@ test("§0027.3 SOAK — concurrentTwoSession, file_document vs confirm_attributi
       b: { role: ROLES.authenticated, jwtSub: w.users.alice, run: (c) => c.query("select clara.confirm_attribution_candidate($1,$2,true) as r", [candidate, opk(`soak-b-${i}`)]) },
     });
     if (sawDeadlock(out)) { deadlocks++; noteLane(`0027 soak iter ${i}: 40P01/40001 observed — ${JSON.stringify(out)}`); continue; }
-    if (out.a.ok && out.b.ok) shapes.bothOk++;
-    else if (out.a.ok !== out.b.ok) shapes.oneRefused++;
-    else shapes.other++;
+    if (out.a.ok && out.b.ok) {
+      shapes.bothOk++;
+    } else if (out.a.ok !== out.b.ok) {
+      // 0027 P-round (finding 6): type the loser. In THIS pair only file_document (a) can
+      // ever lose — it pre-checks document_filings and raises the typed CLR10 BEFORE
+      // attempting its insert, and the documents-first lock now serializes that
+      // check-then-insert critical section atomically against confirm_attribution_
+      // candidate's own documents-first acquisition, so a raw 23505 race is structurally
+      // unreachable here. confirm_attribution_candidate (b) never raises for this shape —
+      // it re-checks v_filing IS NULL and just no-ops the insert when file_document won.
+      // Any OTHER shape (b losing at all; a losing with a code other than CLR10) is a
+      // real regression, not an acceptable race outcome, and must fail loudly rather than
+      // being folded into an unexamined "oneRefused" bucket.
+      assert.equal(out.a.ok, false, `iter ${i}: the loser must be file_document (a), never confirm_attribution_candidate (b) — got a.ok=${out.a.ok} b.ok=${out.b.ok}`);
+      assert.equal(out.a.code, "CLR10", `iter ${i}: file_document's loss must be the typed CLR10 dup-refusal, not an untyped/raw error — got ${JSON.stringify(out.a)}`);
+      shapes.oneRefused++;
+    } else {
+      throw new Error(`iter ${i}: BOTH sides failed non-deadlock — an unexamined regression, not an acceptable soak outcome: a=${JSON.stringify(out.a)} b=${JSON.stringify(out.b)}`);
+    }
     // Exactly one active filing must exist for (doc, clientA1) regardless of which shape —
     // confirm_attribution_candidate's own filing insert is itself guarded by a v_filing IS
     // NULL check, so even a bothOk outcome must not produce two active rows.
@@ -153,4 +169,60 @@ test("§0027.3 SOAK — concurrentTwoSession, file_document vs confirm_attributi
   }
   noteLane(`0027 soak: ${N} runs, 0 skipped, outcome shapes = ${JSON.stringify(shapes)}`);
   assert.equal(deadlocks, 0, `${deadlocks}/${N} soak runs hit a real 40P01/40001 — the lock-order fix did not hold`);
+});
+
+// ---------------------------------------------------------------------------
+// P-round pairs (Codex O-round findings 1 and 2). Both verify the FIX holds — a genuine
+// pre-fix cycle reproduction would need a separate revert-and-test pass on the pre-P-round
+// tree, which this battery does not carry; that scoping choice is stated, not silent.
+// ---------------------------------------------------------------------------
+
+test("§0027.4 P1 pair — holdThenContend, resolve_and_ingest_wiki_source (clara_runtime) HOLDS, retire_document_filing CONTENDS on the same document: retirement blocks on documents, never on document_filings, never 40P01", async () => {
+  requireReady();
+  const doc = await seedPdfDoc(w.firms.A, "p1a");
+  const filed = await humanQuery(w.users.alice, "select clara.file_document($1,$2,null,$3) as r", [doc, w.clients.A1, opk("p1-file")]);
+  const filingId = filed.rows[0].r.filing_id;
+  const rev = await rootQuery("select revision_token from clara.document_filings where id=$1", [filingId]);
+  const out = await holdThenContend({
+    a: { role: ROLES.runtime, run: (c) => c.query("select clara.resolve_and_ingest_wiki_source($1,$2) as r", [w.firms.A, doc]) },
+    b: { role: ROLES.authenticated, jwtSub: w.users.alice, run: (c) => c.query("select clara.retire_document_filing($1,$2,$3,$4) as r", [filingId, "p1 rig retire", rev.rows[0].revision_token, opk("p1-retire")]) },
+  });
+  assert.equal(out.provedBlocked, true, "retire_document_filing must actually BLOCK behind resolve_and_ingest_wiki_source's held documents lock (both documents-first post-0027), not race free");
+  assert.equal(out.a.ok, true, `resolve_and_ingest_wiki_source (the holder) must succeed, got: ${JSON.stringify(out.a)}`);
+  assert.equal(out.b.ok, true, `retire_document_filing must resolve cleanly after the block (no 40P01), got: ${JSON.stringify(out.b)}`);
+});
+
+test("§0027.5 P1 pair — REVERSED holder: retire_document_filing HOLDS, resolve_and_ingest_wiki_source CONTENDS on the same document", async () => {
+  requireReady();
+  const doc = await seedPdfDoc(w.firms.A, "p1b");
+  const filed = await humanQuery(w.users.alice, "select clara.file_document($1,$2,null,$3) as r", [doc, w.clients.A1, opk("p1r-file")]);
+  const filingId = filed.rows[0].r.filing_id;
+  const rev = await rootQuery("select revision_token from clara.document_filings where id=$1", [filingId]);
+  const out = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: w.users.alice, run: (c) => c.query("select clara.retire_document_filing($1,$2,$3,$4) as r", [filingId, "p1 rig retire reversed", rev.rows[0].revision_token, opk("p1r-retire")]) },
+    b: { role: ROLES.runtime, run: (c) => c.query("select clara.resolve_and_ingest_wiki_source($1,$2) as r", [w.firms.A, doc]) },
+  });
+  assert.equal(out.provedBlocked, true, "resolve_and_ingest_wiki_source must actually BLOCK behind retire_document_filing's held documents lock, not race free");
+  assert.equal(out.a.ok, true, `retire_document_filing (the holder) must succeed, got: ${JSON.stringify(out.a)}`);
+  assert.equal(out.b.ok, true, `resolve_and_ingest_wiki_source must resolve cleanly after the block (no 40P01), got: ${JSON.stringify(out.b)}`);
+});
+
+test("§0027.6 P2 pair — holdThenContend, retire_document_filing HOLDS, confirm_attribution_candidate(file=true) for the SAME (document,client) CONTENDS: confirmation blocks on documents, never on clients, never 40P01", async () => {
+  requireReady();
+  const doc = await seedPdfDoc(w.firms.A, "p2a");
+  const filed = await humanQuery(w.users.alice, "select clara.file_document($1,$2,null,$3) as r", [doc, w.clients.A1, opk("p2-file")]);
+  const filingId = filed.rows[0].r.filing_id;
+  const rev = await rootQuery("select revision_token from clara.document_filings where id=$1", [filingId]);
+  // Retiring the SOLE active filing leaves an open citation-blocker check to satisfy — no
+  // journal entries cite it here, so retire proceeds cleanly; the candidate below targets
+  // the SAME (document, client) pair so its documents lock and its clients KEY SHARE both
+  // land on exactly what retire_document_filing touches.
+  const candidate = await seedOpenCandidate(w.firms.A, doc, w.clients.A1);
+  const out = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: w.users.alice, run: (c) => c.query("select clara.retire_document_filing($1,$2,$3,$4) as r", [filingId, "p2 rig retire", rev.rows[0].revision_token, opk("p2-retire")]) },
+    b: { role: ROLES.authenticated, jwtSub: w.users.alice, run: (c) => c.query("select clara.confirm_attribution_candidate($1,$2,true) as r", [candidate, opk("p2-confirm")]) },
+  });
+  assert.equal(out.provedBlocked, true, "confirm_attribution_candidate must actually BLOCK behind retire_document_filing's held documents lock, not race free on clients");
+  assert.equal(out.a.ok, true, `retire_document_filing (the holder) must succeed, got: ${JSON.stringify(out.a)}`);
+  assert.equal(out.b.ok, true, `confirm_attribution_candidate must resolve cleanly after the block (no 40P01), got: ${JSON.stringify(out.b)}`);
 });
