@@ -14,10 +14,11 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  rootQuery, getPool, opk, endPool,
+  rootQuery, getPool, opk, endPool, assertRaises,
 } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
-import { buildWorld, requestReextraction } from "./x1-helpers.mjs";
+import { buildWorld, requestReextraction, freshResolution } from "./x1-helpers.mjs";
+import { fileDocument } from "./s6-helpers.mjs";
 
 let has0026 = false;
 let w = null;
@@ -361,4 +362,110 @@ test("request_reextraction on an xml document with a settled local_facts extract
   assert.notEqual(result.task_id, null, "request_reextraction must open a real task on the xml document — never null, never the old misleading raise");
   assert.equal(result.version_n, 2, "a NEW version on the local_facts lane (version 1 is already 'done') — the per-lane counter, unaffected by the structured_parse lane's own counter");
   assert.equal(result.status, "queued");
+  assert.equal(result.admission, "reextraction", "admitted through the ordinary door — a done extraction already exists to supersede");
+});
+
+// ===========================================================================
+// (6) Amendment: request_reextraction's admission gate widens to a third door — a
+// document with a LIVE FILING and ZERO document_processing_tasks rows ever attempted in
+// its facts lane bootstraps through (gate-s-driver's hold report, recovery vehicle
+// 9e4ab36c). NOT merely "no completed extraction": file_document's own 0009 backstop
+// calls _enqueue_invoice_facts_core on EVERY filing it creates today, so a fresh filing
+// through the CURRENT writer always gets a task moments later — "zero tasks despite a
+// live filing" is a genuinely historical state (9e4ab36c predates the backstop, or was
+// filed through some other operational gap) that the current file_document RPC can no
+// longer produce. The fixture below seeds the filing DIRECTLY (a raw insert, bypassing
+// file_document) for exactly that reason — the same "the current writer cannot produce
+// this state, seed it directly" pattern rig-docs-fixtures.mjs documents for claim-only
+// pre-0007 documents. An UNFILED document still refuses; a filed one with an in-flight
+// task ALSO still refuses (that document is not a bootstrap case — the automatic
+// pipeline already reached it); a filed, zero-task one bootstraps EXACTLY ONCE (the
+// second call is admitted through the ordinary 'reextraction' door instead, once the
+// bootstrapped task settles).
+// ===========================================================================
+
+/** Seed a filing DIRECTLY (bypassing file_document, whose own backstop would
+ *  immediately create a facts task and defeat the fixture) — the historical shape
+ *  9e4ab36c is actually in: a live filing, zero facts tasks ever attempted.
+ *  basis='legacy-0007' is the house idiom for exactly this: a filing predating the
+ *  current writer's invariants (ck_document_filings_resolution pairs it with a NULL
+ *  resolution_id — no ceremony to fabricate for a fixture that represents "there was
+ *  none, historically"). */
+async function seedHistoricalFilingNoTask(firm, client, doc) {
+  await rootQuery(
+    `insert into clara.document_filings(firm_id,document_id,client_id,basis)
+     values ($1,$2,$3,'legacy-0007')`,
+    [firm, doc, client],
+  );
+}
+
+test("a filed, never-extracted document bootstraps through request_reextraction's widened gate — admission is honestly diagnosed as filed_bootstrap", async () => {
+  requireReady();
+  const doc = await seedXmlDoc(w.firms.A, "bootstrap");
+  await seedHistoricalFilingNoTask(w.firms.A, w.clients.A1, doc);
+  // A live filing and ZERO document_processing_tasks rows — exactly vehicle 9e4ab36c's
+  // shape.
+
+  const result = await requestReextraction(w.users.alice, { document: doc, reason: "0026 amendment: filed-bootstrap recovery", opKey: opk("bootstrap") });
+  assert.notEqual(result.task_id, null, "the filed-bootstrap door must open a real task — this is the recovery seam, it must not refuse");
+  assert.equal(result.admission, "filed_bootstrap", "the diagnostic must honestly name the bootstrap door, not silently look like an ordinary re-extraction");
+  assert.equal(result.version_n, 1, "the document's first-ever local_facts attempt");
+  assert.equal(result.status, "queued");
+
+  const tasks = await tasksOf(doc);
+  assert.equal(tasks.length, 1, "exactly one task created by the bootstrap — no duplicate, no phantom structured_parse row this migration didn't seed");
+  assert.equal(tasks[0].lane, "local_facts");
+
+  // EXACTLY ONCE: settle the bootstrapped task, then call again. The second call must be
+  // admitted through the ordinary 'reextraction' door — the bootstrap door does not keep
+  // firing once a completed extraction exists to supersede.
+  await rootQuery(
+    "update clara.document_processing_tasks set status='running',workflow_run_id='rig-run',started_at=now() where id=$1",
+    [result.task_id],
+  );
+  await rootQuery(
+    `select clara.persist_invoice_facts($1,$2::jsonb,$3,'v1',1,'{}'::jsonb) as r`,
+    [
+      result.task_id,
+      JSON.stringify([
+        { field_path: "invoice.type_code", page: 1, polygon: [], value_raw: "01", confidence: 0.99 },
+        { field_path: "invoice.total", page: 1, polygon: [], value_raw: "100.00", confidence: 0.99 },
+      ]),
+      "d".repeat(64),
+    ],
+  );
+  const second = await requestReextraction(w.users.alice, { document: doc, reason: "0026 amendment: second call, post-settle", opKey: opk("bootstrap2") });
+  assert.equal(second.admission, "reextraction", "the SECOND call is admitted through the ordinary door — the bootstrap fired exactly once, not on every call");
+  assert.equal(second.version_n, 2, "a genuine new re-extraction version, distinct from the bootstrap's version 1");
+});
+
+test("an UNFILED document still refuses request_reextraction — the filed-bootstrap door checks for a LIVE FILING, not merely 'no extraction'", async () => {
+  requireReady();
+  const doc = await seedXmlDoc(w.firms.A, "unfiled");
+  // No filing, no task, no extraction — the ordinary "nothing to supersede, no bootstrap
+  // seam either" case. The widened gate must not have quietly become "any document with
+  // no extraction admits" — filing is the load-bearing condition team-lead ruled on.
+  await assertRaises("CLR16",
+    () => requestReextraction(w.users.alice, { document: doc, reason: "0026 rig unfiled probe", opKey: opk("unfiled") }),
+    "an unfiled, never-extracted document");
+});
+
+test("a filed document with an ALREADY-IN-FLIGHT facts task still refuses — the bootstrap door is 'zero tasks', not 'zero extractions', so an ordinary mid-pipeline document does not leak through it (this is the exact regression the amendment's first draft had — x-receipt-routing.test.mjs's invoice/credit_note/debit_note refusal cells caught it)", async () => {
+  requireReady();
+  const doc = await seedXmlDoc(w.firms.A, "inflight");
+  // The REAL file_document RPC — its own 0009 backstop immediately enqueues a real
+  // local_facts task, so this document is filed AND already has one in-flight task, the
+  // shape that must NOT bootstrap.
+  await fileDocument(w.users.alice, {
+    document: doc,
+    client: w.clients.A1,
+    resolution: await freshResolution(w.users.alice, w.clients.A1, { subjectKind: "document", subjectId: doc }),
+  });
+  const tasks = await tasksOf(doc);
+  assert.equal(tasks.length, 1, "mandatory setup: file_document's own backstop created a task");
+  assert.equal(tasks[0].status, "queued");
+
+  await assertRaises("CLR16",
+    () => requestReextraction(w.users.alice, { document: doc, reason: "0026 rig in-flight probe", opKey: opk("inflight") }),
+    "a filed document whose facts task is already in flight (not zero tasks, so no bootstrap door — and not done, so no ordinary door either)");
 });

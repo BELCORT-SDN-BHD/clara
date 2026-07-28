@@ -97,6 +97,25 @@
 -- writer on the SAME lane) — the message is corrected anyway, so it stops naming a cause
 -- it cannot verify.
 --
+-- AMENDMENT TO THIS WORK ORDER (ratified 2026-07-28, from gate-s-driver's hold report,
+-- recovery vehicle 9e4ab36c): request_reextraction's admission gate (§G) widens from two
+-- doors to three. Vehicle 9e4ab36c has a LIVE filing (file_document already spent) and
+-- ZERO document_processing_tasks rows OF ANY LANE — not merely no COMPLETED extraction
+-- (file_document's own 0009 backstop calls _enqueue_invoice_facts_core on every filing
+-- it creates today, so an ordinary filed-but-not-yet-extracted document always has a
+-- task) and not merely no invoice_facts-lane task specifically (a NULL-kind pdf's
+-- automatic pipeline legitimately opens a 'classify' task first, mid-flight, not a
+-- missed enqueue — narrowing to ANY lane is what keeps this door from re-admitting that
+-- document too; a real regression the first draft had, caught by x-receipt-routing's own
+-- TOCTOU-B cell). A live filing with literally no task of any kind is a genuinely
+-- historical gap, not reproducible through the current writer. Post-0026 there would
+-- still be NO door to fire the facts lane for a document in that exact state — this is
+-- the recovery seam operators need the first time it happens for real. Every other wall
+-- stays exactly as-is (bookkeeper floor, cross-firm refusal, the 3-attempt bound, the
+-- audit trail), and the diagnostic now names WHICH of the three doors admitted each call
+-- (v_admission), so a bootstrap admission is never confused with an ordinary
+-- re-extraction or the receipt backfill.
+--
 -- NOT IN SCOPE (owner-scoped, ledger #32): task #29, the file_document vs
 -- confirm_attribution_candidate opposite-lock-order deadlock. It touches sibling
 -- writers on document_filings, not this key, and is tracked separately. This migration
@@ -884,11 +903,18 @@ end $$;
 alter function clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb) owner to clara_fn_owner;
 
 -- =====================================================================
--- §G — clara.request_reextraction CoR: message-only fix. Its version computation was
--- ALREADY correctly per-lane and its bounded-retry loop already raises LOUDLY on
--- exhaustion (never the silent shape the other four sites had) — the one defect was the
--- exhausted-retry message's confident, unverifiable claim of cause. Corrected; no
--- structural change to the retry loop itself.
+-- §G — clara.request_reextraction CoR, TWO edits. (1) The exhausted-retry message fix:
+-- its version computation was ALREADY correctly per-lane and its bounded-retry loop
+-- already raises LOUDLY on exhaustion (never the silent shape the other four sites had)
+-- — the one defect was the message's confident, unverifiable claim of cause. Corrected;
+-- no structural change to the retry loop itself. (2) AMENDMENT, ratified 2026-07-28
+-- (gate-s-driver's hold report, recovery vehicle 9e4ab36c): the admission gate widens
+-- from two doors to three — a document with a LIVE FILING and no completed facts
+-- extraction can now bootstrap through, the recovery seam for a document whose automatic
+-- facts enqueue was genuinely missed (today there is no other door back in). Every other
+-- wall stays exactly as-is: bookkeeper floor, cross-firm refusal, the 3-attempt bound,
+-- the audit trail. The diagnostic is widened alongside it — every call now records WHICH
+-- of the three doors admitted it (v_admission), in both the audit row and the receipt.
 -- =====================================================================
 create or replace function clara.request_reextraction(
     p_document uuid, p_reason text, p_op_key text default null) returns jsonb
@@ -907,6 +933,7 @@ declare
   v_pages   int;
   v_attempt int;
   v_reused  boolean := false;
+  v_admission text;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key) = '' then
@@ -963,22 +990,69 @@ begin
 
   -- A RE-extraction supersedes something. Without a settled extraction there is nothing to
   -- supersede and the ORDINARY pipeline is the right door — routing a first extraction
-  -- through a human verb would hide it from the intake path's own receipts. EXCEPT for
-  -- 'receipt' (0025, owner-ruled AUTO-ROUTE, task #27): every receipt ingested BEFORE this
-  -- migration was structurally REFUSED by §A's kind gate, so it CAN carry no prior
-  -- extraction — the ordinary pipeline was never an available door for that population, so
-  -- this is not "routing a first extraction around intake", it is the ONE-TIME backfill seam
-  -- for documents intake could never have produced a receipt for. It is not a standing
-  -- bypass: a receipt ingested AFTER 0025 gets its first extraction through the ordinary
-  -- automatic pipeline (§A) exactly like every other admitted kind, and by the time a human
-  -- could reach this verb for it a 'done' extraction already exists — so for every FUTURE
-  -- receipt this relaxation is inert, and the refusal is live again in substance if not in
-  -- code (there is simply always something to supersede). The kind gate above already
-  -- guarantees d.document_kind is non-NULL and in the admitted set here, so this comparison
-  -- is never against a NULL.
-  if d.document_kind <> 'receipt' and not exists (select 1 from clara.document_extractions e
-                  where e.document_id = p_document
-                    and e.engine_kind = 'invoice_facts' and e.status = 'done') then
+  -- through a human verb would hide it from the intake path's own receipts. THREE
+  -- admission doors, in priority order; v_admission records WHICH ONE admitted the call —
+  -- the diagnostic must stay honest about that, not just about whether the call succeeded.
+  --   'reextraction' — the ordinary case: a done invoice_facts extraction already exists
+  --     to supersede.
+  --   'receipt_backfill' (0025, owner-ruled AUTO-ROUTE, task #27) — every receipt ingested
+  --     BEFORE that migration was structurally REFUSED by §A's kind gate, so it CAN carry
+  --     no prior extraction; the ordinary pipeline was never an available door for that
+  --     population. Not a standing bypass: a receipt ingested AFTER 0025 gets its first
+  --     extraction through §A like every other admitted kind, and by the time a human
+  --     could reach this verb a 'done' extraction already exists — this door is inert for
+  --     every FUTURE receipt.
+  --   'filed_bootstrap' (0026 amendment, gate-s-driver's hold report, recovery vehicle
+  --     9e4ab36c) — a document with a LIVE FILING (file_document already spent: a
+  --     human/rule already decided this document belongs to a client) and ZERO
+  --     document_processing_tasks rows OF ANY LANE — never attempted, not merely
+  --     incomplete, and not merely "no invoice_facts one yet". Both qualifiers are
+  --     load-bearing:
+  --       - NOT "no completed extraction": file_document's own backstop (0009) ALREADY
+  --         calls _enqueue_invoice_facts_core on every filing it creates today, so a
+  --         document filed through the CURRENT writer always has at least a
+  --         queued/failed task moments after filing — checking "no task at all" is what
+  --         keeps this door from re-admitting an ordinary filed-but-not-yet-extracted
+  --         document (an invoice mid-pipeline, or one whose task failed on
+  --         attempt_cap/budget — both already have OTHER doors: the in-flight check
+  --         just below, and the ordinary bounded-retry loop).
+  --       - NOT "no task in v_lane specifically": a NULL-kind pdf's automatic pipeline
+  --         opens a 'classify' task FIRST (a real, legitimate, in-progress step) — such
+  --         a document has a live filing and zero invoice_facts tasks, but it is NOT a
+  --         missed enqueue, it is correctly mid-flight in a DIFFERENT lane waiting on a
+  --         human kind decision. Scoping the check to ANY lane, not just v_lane, is what
+  --         keeps this door from re-admitting that document as if the whole pipeline had
+  --         never touched it (a real regression this amendment's first draft had,
+  --         caught by x-receipt-routing.test.mjs's own TOCTOU-B cell: a kind-corrected
+  --         document with a live filing and only a stale classify task must still refuse
+  --         CLR16, not bootstrap).
+  --     "Zero tasks despite a live filing" can only happen to a document filed before
+  --     the 0009 backstop existed, or filed through some other operational gap — exactly
+  --     9e4ab36c's shape, and not reproducible through the current file_document RPC
+  --     (which self-heals on every fresh filing) — a genuinely historical orphan, the
+  --     same class of state 0007's claim-only-document upgrade drill documents for a
+  --     different table. Before this amendment there was NO door back into the facts
+  --     lane for it. Bounded by the SAME walls as every other call
+  --     here (bookkeeper floor, cross-firm refusal, the 3-attempt bound, the audit
+  --     trail). It is naturally idempotent against a LATE automatic enqueue arriving
+  --     moments later: both land on the SAME in-flight-task check just below, so a human
+  --     bootstrap and a late automatic one never race into two tasks — and once a task
+  --     exists (bootstrapped or not), the NEXT call is admitted through the ordinary
+  --     'reextraction' door once it completes, so this door fires at most once per
+  --     document. The kind gate above already guarantees d.document_kind is non-NULL, so
+  --     the receipt comparison is never against a NULL.
+  if exists (select 1 from clara.document_extractions e
+      where e.document_id = p_document
+        and e.engine_kind = 'invoice_facts' and e.status = 'done') then
+    v_admission := 'reextraction';
+  elsif d.document_kind = 'receipt' then
+    v_admission := 'receipt_backfill';
+  elsif exists (select 1 from clara.document_filings f
+      where f.document_id = p_document and f.retired_at is null)
+     and not exists (select 1 from clara.document_processing_tasks pt
+      where pt.document_id = p_document) then
+    v_admission := 'filed_bootstrap';
+  else
     raise exception 'no completed extraction to re-extract' using errcode = 'CLR16';
   end if;
 
@@ -1077,12 +1151,12 @@ begin
   perform clara._audit(c.firm, c.actor, null, null, 'request_reextraction', null,
     jsonb_build_object('document_id', p_document, 'lane', v_lane, 'version_n', v_version,
       'task_id', v_task, 'reason', v_reason, 'reused', v_reused, 'status', v_status,
-      'op_key', p_op_key));
+      'admission', v_admission, 'op_key', p_op_key));
 
   return clara._finish_op(c.firm, 'request_reextraction', p_op_key,
     jsonb_strip_nulls(jsonb_build_object(
       'task_id', v_task, 'document_id', p_document, 'version_n', v_version,
-      'status', v_status, 'reused', v_reused,
+      'status', v_status, 'reused', v_reused, 'admission', v_admission,
       'reason', case when v_status = 'failed' then 'budget' end)));
 end $$;
 alter function clara.request_reextraction(uuid, text, text) owner to clara_fn_owner;
@@ -1248,8 +1322,9 @@ begin
     raise exception '0026 tail: persist_invoice_facts lost 0023''s net/tax non-negative guard';
   end if;
 
-  -- (6) request_reextraction — message-only fix confirmed present; the old confident
-  -- claim is GONE (a partial edit that left both phrasings somewhere would fail this).
+  -- (6) request_reextraction — the exhausted-retry message fix confirmed present; the
+  -- old confident claim is GONE (a partial edit that left both phrasings somewhere would
+  -- fail this).
   select p.prosrc into v_src from pg_proc p where p.oid = v_sig_rex::regprocedure;
   if v_src is null then raise exception '0026 tail: request_reextraction is GONE'; end if;
   v_code := regexp_replace(regexp_replace(regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
@@ -1260,13 +1335,33 @@ begin
   if position('aconcurrentrequestsettledthisdocument' in lower(v_code)) > 0 then
     raise exception '0026 tail: request_reextraction still carries the old misleading exhausted-retry message';
   end if;
-  -- The rest of the verb is untouched — bookkeeper floor, cross-firm refusal, the
-  -- receipt backfill relaxation, the O2 lock, the bounded-retry shape itself.
+  -- The rest of the verb is untouched — bookkeeper floor, cross-firm refusal, the O2
+  -- lock, the bounded-retry shape itself.
   if position('_human_ctx(clara.role_rank(''bookkeeper''))' in v_code) = 0
      or position('documentisnotinyourfirm' in lower(v_code)) = 0
      or position('fromclara.documentswhereid=p_documentforupdate' in v_code) = 0
      or position('forv_attemptin1..3loop' in v_code) = 0 then
     raise exception '0026 tail: request_reextraction lost a retained guard or its bounded-retry shape';
+  end if;
+  -- The 0026 amendment: the admission gate carries all THREE doors (the pre-existing
+  -- 'reextraction' + 'receipt_backfill', plus the new 'filed_bootstrap' — a live filing
+  -- with ZERO tasks ever attempted in this document's facts lane, never merely "no
+  -- completed extraction" (see the door's own header comment for why that distinction is
+  -- load-bearing)), each setting v_admission, and the diagnostic is threaded through to
+  -- both the audit row and the returned receipt.
+  if position('v_admission:=''reextraction''' in v_code) = 0
+     or position('v_admission:=''receipt_backfill''' in v_code) = 0
+     or position('v_admission:=''filed_bootstrap''' in v_code) = 0 then
+    raise exception '0026 tail: request_reextraction is missing one of the three admission doors';
+  end if;
+  if position('exists(select1fromclara.document_filingsfwheref.document_id=p_documentandf.retired_atisnull)' in v_code) = 0 then
+    raise exception '0026 tail: request_reextraction''s filed-bootstrap door does not check for a live filing';
+  end if;
+  if position('andnotexists(select1fromclara.document_processing_tasksptwherept.document_id=p_document)' in v_code) = 0 then
+    raise exception '0026 tail: request_reextraction''s filed-bootstrap door does not check for ZERO tasks of ANY lane on this document — it must not re-admit a document already carrying a classify (or other lane) task while merely lacking an invoice_facts one';
+  end if;
+  if position('''admission'',v_admission' in v_code) = 0 then
+    raise exception '0026 tail: request_reextraction no longer threads v_admission into the audit row / receipt';
   end if;
 
   -- (7) ACLs UNCHANGED on all five (CREATE OR REPLACE preserves owner/grants, but a
