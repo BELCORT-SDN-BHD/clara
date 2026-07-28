@@ -39,7 +39,7 @@ import {
   buildWaveBWorld, createClient, seedOpeningCoa,
   UNRESOLVED, AMBIGUOUS, INGEST_STATUS, sourceSlug,
   resolveDocClient, resolveIngest, classifiedDocument, fileTo, retireFilingFor,
-  canonical, keysOf, activeFilingClients, sourcePageVersions, filingRowOf,
+  canonical, keysOf, activeFilingClients, sourcePageVersions,
   opReceiptRow, recordWikiIngest, seedVerifiedDocument, unverifyDocumentBytes,
   raceIngestThenFileB, raceIngestThenRetire,
 } from "./wb-0020-helpers.mjs";
@@ -365,14 +365,17 @@ test("[0020 §5.3 — two-session]: a resolve+ingest in flight holds the phantom
   } else {
     noteLane("[0020 §5.3] NOT OBSERVED: the concurrent file-to-B did not park on the clara.documents row. §5.3 pins that lock as THE phantom guard; without it a new filing can commit inside the decision window — adjudication item.");
   }
-  assert.ok(out.fileOk || out.fileCode === "40P01",
-    `the filing either succeeds after the ingest commits or aborts 40P01 (R-1) — got ok=${out.fileOk} code=${out.fileCode}`);
+  // 0027 Q-round (finding 1): post-0027 both sides of this race are documents-first, so
+  // the cycle this 40P01 allowance existed for is structurally dead. Accepting it here
+  // would mask its recurrence — tightened to a hard success requirement.
+  assert.equal(out.fileOk, true,
+    `post-0027 the filing must succeed after the ingest commits — a 40P01 here would mean the documents-first fix regressed (got ok=${out.fileOk} code=${out.fileCode})`);
   assert.equal((await sourcePageVersions(a, doc.documentId)).versions.length, 1,
     "exactly one version for A — no duplicate, no lost publication");
   assert.equal((await sourcePageVersions(b, doc.documentId)).versions.length, 0, "and none for B");
 });
 
-test("[0020 §5.3 residual R-1 / §9.4 — two-session]: resolve+ingest against a CONCURRENT retire_document_filing either serializes cleanly or aborts 40P01 and CONVERGES on re-drive — no lost publication, no duplicate version", async () => {
+test("[0020 §5.3 residual R-1 CLOSED / §9.4 — two-session]: resolve+ingest against a CONCURRENT retire_document_filing serializes cleanly — the 40P01 residual is DEAD post-0027, not merely self-healing", async () => {
   fail0020(live);
   const a = await freshClient("dl_a");
   const b = await freshClient("dl_b");
@@ -384,22 +387,23 @@ test("[0020 §5.3 residual R-1 / §9.4 — two-session]: resolve+ingest against 
   // The ingest ran while BOTH filings were active, so it must have skipped.
   assert.equal(out.ingest?.status, INGEST_STATUS.ambiguous,
     `the in-flight ingest saw the two-client topology and skipped (got ${JSON.stringify(out.ingest)})`);
-  assert.ok(out.retireOk || out.retireCode === "40P01",
-    `the retirement either commits after the ingest or aborts 40P01 (got ok=${out.retireOk} code=${out.retireCode})`);
+  // 0027 Q-round (finding 1): R-1 named this deadlock a residual — "bounded and
+  // self-healing" — against the pre-0027 writer set. Post-0027 both sides are
+  // documents-first, so the cycle is structurally dead, not merely rare-and-recoverable.
+  // Accepting 40P01 here would mask its recurrence; tightened to a hard requirement.
+  assert.equal(out.retireOk, true,
+    `post-0027 the retirement must commit after the ingest — a 40P01 here would mean R-1's residual regressed from CLOSED back to merely bounded (got ok=${out.retireOk} code=${out.retireCode})`);
   if (!out.blocked) {
-    noteLane("[0020 R-1] NOT OBSERVED: the concurrent retirement did not park on the document_filings row lock held by resolve_and_ingest_wiki_source. §5.3 pins that FOR SHARE as step 1 of the lock order — adjudication item.");
+    noteLane("[0020 R-1, post-0027] NOT OBSERVED: the concurrent retirement did not park on the clara.documents row lock held by resolve_and_ingest_wiki_source (task #29's P-round made this the step-1 lock, was document_filings FOR SHARE pre-0027) — adjudication item.");
   }
-  if (out.retireOk) {
-    // CONVERGENCE: the consumer's at-least-once delivery re-drives the event.
-    const redrive = await resolveIngest({ firm: w.firms.A, document: doc.documentId });
-    assert.equal(redrive.status, INGEST_STATUS.projected,
-      "the re-drive after the retirement converges on a publication for A");
-    assert.equal((await sourcePageVersions(a, doc.documentId)).versions.length, 1,
-      "exactly ONE version — convergence, not duplication");
-  } else {
-    noteLane(`[0020 R-1] the retirement aborted ${out.retireCode}; the deadlock residual is REAL and self-healing on re-drive`);
-    assert.ok(await filingRowOf(doc.documentId, b), "the aborted retirement left B's filing active — a clean rollback");
-  }
+  // CONVERGENCE: the consumer's at-least-once delivery re-drives the event. Always
+  // reachable now (retireOk is asserted true above) — the prior "else, self-healing on
+  // abort" branch represented an outcome that can no longer occur.
+  const redrive = await resolveIngest({ firm: w.firms.A, document: doc.documentId });
+  assert.equal(redrive.status, INGEST_STATUS.projected,
+    "the re-drive after the retirement converges on a publication for A");
+  assert.equal((await sourcePageVersions(a, doc.documentId)).versions.length, 1,
+    "exactly ONE version — convergence, not duplication");
 });
 
 // ===========================================================================
