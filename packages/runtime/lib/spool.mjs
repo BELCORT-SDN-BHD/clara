@@ -127,12 +127,19 @@ export async function mergeTaskMeta(id, patch, { requireExists = false } = {}) {
 }
 
 /**
- * The task genuinely IS still 'running' in Postgres (documentIngest task #28: a
- * transient/retryable failure never persists 'failed' — see documentIngest.behavior_v2
- * .mjs's own header). The sidecar must say the SAME thing, not "running" by convention
- * regardless of what the DB actually committed (the old, single `noteTaskFailure`'s
- * defect a reviewer found: it always stamped "running", even after a TERMINAL failure
- * had already moved the DB to 'failed', leaving the two planes disagreeing).
+ * The task genuinely IS still 'running' in Postgres for every EXISTING call site
+ * (documentIngest task #28: a transient/retryable failure never persists 'failed' — see
+ * documentIngest.behavior_v2.mjs's own header) — so `status` defaults to `"running"`,
+ * preserving every 2/3-arg call exactly (the v1 alias below, the RETRYABLE branch, and
+ * Q4's "DB plane genuinely unknown" branch all still say "running", unchanged).
+ *
+ * R1 residual (the R-round's closing finding): `documentIngest.behavior_v2.mjs`'s
+ * "verified state is neither 'failed' nor 'done'" branch (R1(c)) can have ACTUALLY
+ * CONFIRMED a concrete, non-"running" status (e.g. 'queued', 'held_egress') via its own
+ * re-read — stamping "running" there regardless would falsify the one field this
+ * function exists to keep honest, in the exact branch whose whole point is honesty about
+ * unverified state. That caller passes the VERIFIED status as this 4th argument instead
+ * of relying on the default.
  *
  * `requireExists:true` — Q1: `intake.mjs`'s `makeDocumentServices()` aliases the OLD
  * `noteTaskFailure` name to THIS function, for `invoiceFacts.v1.behavior.mjs`'s own
@@ -143,8 +150,8 @@ export async function mergeTaskMeta(id, patch, { requireExists = false } = {}) {
  * this mode reproduces the throw-and-create-nothing behaviour exactly, so the alias is
  * truly v1-identical, not merely same-shaped.
  */
-export async function noteTransientFailure(taskId, code, note) {
-  return mergeTaskMeta(taskId, { status: "running", lastError: code, ...(note ? { lastErrorNote: note } : {}) }, { requireExists: true });
+export async function noteTransientFailure(taskId, code, note, status = "running") {
+  return mergeTaskMeta(taskId, { status, lastError: code, ...(note ? { lastErrorNote: note } : {}) }, { requireExists: true });
 }
 
 /**

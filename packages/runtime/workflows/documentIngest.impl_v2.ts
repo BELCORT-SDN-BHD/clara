@@ -38,7 +38,11 @@ type DocumentServices = {
   parseStructured(path: string, format: string, task: Record<string, unknown>): Promise<Record<string, unknown>>;
   // v2's split vocabulary (documentIngest.behavior_v2.mjs / spool.mjs's own headers): the
   // sidecar note now reflects which plane the DB actually committed, never a fixed guess.
-  noteTransientFailure(taskId: string, code: string, note?: string): Promise<unknown>;
+  // `status` (R1 residual, the R-round's closing finding): defaults to "running" in
+  // spool.mjs — the honest value for every call site EXCEPT the one branch that re-reads a
+  // CONFIRMED, concrete status that isn't "running" (documentIngest.behavior_v2.mjs's own
+  // R1(c) shape), which passes that verified value through explicitly instead.
+  noteTransientFailure(taskId: string, code: string, note?: string, status?: string): Promise<unknown>;
   noteTerminalFailure(taskId: string, code: string, note?: string): Promise<unknown>;
 };
 

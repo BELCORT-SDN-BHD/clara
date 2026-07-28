@@ -41,7 +41,12 @@ function mockServices({ task = TASK, missingTask = false, download, analyze, par
     downloadCanonical: download ?? (async () => {}),
     analyzeDocument: analyze ?? (async () => ({ pageCount: 1, envelope: { ok: true }, regions: [] })),
     parseStructured: parse ?? (async () => ({ pageCount: 1, envelope: { ok: true }, regions: [] })),
-    noteTransientFailure: async (taskId, code, note) => { calls.noteTransientFailure.push({ taskId, code, note }); },
+    // R1 residual: captures the 4th `status` arg too — the RETRYABLE branch's 2-arg call
+    // site leaves it `undefined` here (the mock doesn't replicate spool.mjs's own
+    // status="running" DEFAULT; that default is proven for real in document-ingest-v2-db
+    // .test.mjs's Q1 cells and the R1(c) rig cell below) — this mock's job is only to
+    // record exactly what documentIngest.behavior_v2.mjs itself passed.
+    noteTransientFailure: async (taskId, code, note, status) => { calls.noteTransientFailure.push({ taskId, code, note, status }); },
     noteTerminalFailure: async (taskId, code, note) => { calls.noteTerminalFailure.push({ taskId, code, note }); },
   };
 }
@@ -108,7 +113,7 @@ test("v2 — TRANSIENT codes (engine_error/timeout/engine_lost/storage_error) ne
       code,
     );
     assert.deepEqual(services.calls.removeTaskMeta, [], `${code}: the sidecar must survive — a retry needs it`);
-    assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code, note: undefined }], code);
+    assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code, note: undefined, status: undefined }], code);
     assert.deepEqual(services.calls.noteTerminalFailure, [], code);
   }
 });
@@ -139,7 +144,7 @@ test("v2 — a download failure (before the vendor call) is classified identical
   const taskId = "33333333-3333-3333-3333-333333333333";
   const services = mockServices({ download: async () => { throw errOf("storage_error"); } });
   await assert.rejects(processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, 1), (err) => !(err instanceof FatalError));
-  assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code: "storage_error", note: undefined }]);
+  assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code: "storage_error", note: undefined, status: undefined }]);
 });
 
 // ======================================================================================
@@ -181,6 +186,10 @@ test("Q4 — a GENUINE persist-'failed' write failure never masks the original e
   const [note] = services.calls.noteTransientFailure;
   assert.equal(note.code, "corrupt");
   assert.ok(note.note && /persist_document_extraction.*itself failed/.test(note.note) && /corrupt/.test(note.note), "BOTH the original diagnosis and the persist failure are recorded, never discarded");
+  // R1 residual: persistErr here was plain 'internal' — never even CLR10/16, so the state
+  // was never re-read at all. "running" is the honest fallback (the DB plane truly is
+  // unverified), not a guess dressed as a fact.
+  assert.equal(note.status, "running", "the DB plane is genuinely unverified here — 'running' is the fallback, not a guess about something confirmed");
 });
 
 test("Q3/R1 — crash-redelivery: a DIFFERENT code replaying the SAME op_key hits CLR10, and the state re-read CONFIRMS status='failed' — detected as already-terminal, not swallowed as a generic error", async () => {
@@ -237,7 +246,7 @@ test("R1 — a CLR10/CLR16 refusal that re-reads as ALREADY-DONE takes the clean
   assert.deepEqual(services.calls.removeTaskMeta, [taskId], "the sidecar is cleared exactly like any other genuine success");
 });
 
-test("R1 — a CLR10/CLR16 refusal that re-reads as NEITHER 'failed' nor 'done' is a genuine fresh problem: never no-op'd, surfaced via the same honest both-errors shape as Q4", async () => {
+test("R1 — a CLR10/CLR16 refusal that re-reads as NEITHER 'failed' nor 'done' is a genuine fresh problem: never no-op'd, surfaced via the same honest both-errors shape as Q4 — AND the sidecar's own status carries the CONFIRMED value, never falsified to 'running'", async () => {
   const taskId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
   const services = mockServices({ analyze: async () => { throw errOf("bad_type", "wrong type"); } });
   await assert.rejects(
@@ -252,9 +261,13 @@ test("R1 — a CLR10/CLR16 refusal that re-reads as NEITHER 'failed' nor 'done' 
   const [note] = services.calls.noteTransientFailure;
   assert.equal(note.code, "bad_type");
   assert.ok(note.note && /processing task is not running/.test(note.note) && /re-read status="queued"/.test(note.note), "both the original diagnosis and the unexplained re-read state are recorded, never silently accepted as a handled redelivery");
+  // R1 residual (the R-round's closing finding): the re-read DID confirm a concrete status
+  // ('queued') — the sidecar must say THAT, not a blanket "running" that would falsify the
+  // one field this whole branch exists to keep honest.
+  assert.equal(note.status, "queued", "the CONFIRMED status rides through — never defaulted to 'running' when something concrete was actually verified");
 });
 
-test("R1 — a CLR10/CLR16 refusal whose state re-read finds NO ROW AT ALL is treated the same as 'anything else' — never assumed to be a handled redelivery from silence", async () => {
+test("R1 — a CLR10/CLR16 refusal whose state re-read finds NO ROW AT ALL is treated the same as 'anything else' — never assumed to be a handled redelivery from silence, and the sidecar falls back to 'running' honestly (nothing else was confirmed)", async () => {
   const taskId = "11111111-2222-3333-4444-555555555555";
   const services = mockServices({ analyze: async () => { throw errOf("limit", "page limit exceeded"); } });
   await assert.rejects(
@@ -269,6 +282,7 @@ test("R1 — a CLR10/CLR16 refusal whose state re-read finds NO ROW AT ALL is tr
   const [note] = services.calls.noteTransientFailure;
   assert.equal(note.code, "limit");
   assert.ok(/re-read status=null/.test(note.note), "an unresolvable re-read is recorded as null, not silently treated as confirmation of anything");
+  assert.equal(note.status, "running", "nothing concrete was confirmed here (the re-read itself came back empty) — 'running' is the honest fallback, not a guess about a status that was never verified");
 });
 
 test("v2 — the temp file is ALWAYS cleaned up: transient, terminal, and success paths alike", async () => {

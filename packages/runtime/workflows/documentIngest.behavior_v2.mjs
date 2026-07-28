@@ -97,12 +97,17 @@
 // Q4 — the persist call's OWN failure must not be read as DB confirmation of anything.
 // If `persist_document_extraction` throws for a reason OTHER than a VERIFIED already-
 // terminal shape above (a genuine connectivity blip, an unexpected error, or an R1 re-read
-// that confirms neither 'failed' nor 'done'), the DB's actual state is UNKNOWN — it may
-// still be 'running'. Stamping the sidecar 'failed' in that case would be a claim Postgres
-// never confirmed, inverting the whole honesty point of this file. That branch uses the
-// TRANSIENT shape instead (`noteTransientFailure`, status stays 'running'), carrying BOTH
-// the original diagnosis and the persist failure in one note — an honest "I don't know",
-// not a guess dressed as a fact.
+// that confirms neither 'failed' nor 'done'), stamping the sidecar 'failed' would be a
+// claim Postgres never confirmed, inverting the whole honesty point of this file. That
+// branch uses the TRANSIENT shape instead (`noteTransientFailure`), carrying BOTH the
+// original diagnosis and the persist failure in one note — an honest "I don't know", not a
+// guess dressed as a fact. The R-round's own closing finding: that honesty has to extend
+// to the sidecar's `status` field too — when the R1 re-read DID confirm a concrete status
+// (e.g. 'queued', 'held_egress'), `noteTransientFailure`'s 4th argument carries THAT value
+// through, rather than defaulting to "running" regardless of what was actually confirmed.
+// Only when the DB plane truly is unverified (persistErr wasn't CLR10/16, or the re-read
+// itself came back empty) does "running" remain the fallback — spool.mjs's own header on
+// `noteTransientFailure` has the full reasoning.
 
 import { FatalError } from "workflow";
 
@@ -250,13 +255,22 @@ export async function processDocumentTaskBehaviorV2(services, withRuntime, taskI
         // Q4 (and R1's "anything else" branch): NOT a verified redelivery — either
         // persistErr wasn't CLR10/16 at all, or the re-read came back neither 'failed' nor
         // 'done' (a genuinely different status, a missing row, or the re-read itself
-        // failing). The DB plane is UNKNOWN in every one of these shapes. Never stamp
-        // 'failed' on a claim Postgres didn't confirm, and never no-op an unverified state
-        // as if it were a known-handled redelivery.
+        // failing). Never stamp 'failed' on a claim Postgres didn't confirm, and never
+        // no-op an unverified state as if it were a known-handled redelivery.
+        //
+        // R1 residual: `noteTransientFailure`'s sidecar `status` field must not default to
+        // "running" here unconditionally — when `verifiedStatus` DID come back concrete
+        // (e.g. 'queued', 'held_egress': R1(c)'s own shape), the DB plane is NOT actually
+        // unknown, just not one of the two specially-handled outcomes, and the sidecar
+        // must say what was actually confirmed, not a guess. Only when `verifiedStatus` is
+        // genuinely null (persistErr wasn't CLR10/16, or the re-read itself came back
+        // empty/failed) does "running" remain the honest fallback — the DB plane truly is
+        // unverified in that case, and "running" is what this task's own claim last said.
         await services.noteTransientFailure(
           taskId, code,
           `persist_document_extraction('failed') itself failed: ${String(persistErr?.message || persistErr)} (original diagnosis: ${code} ${err?.message ?? ""})`
             + (isPossiblyAlreadyTerminalRefusal(persistErr) ? `; re-read status=${JSON.stringify(verifiedStatus)}, not a confirmed redelivery` : ""),
+          verifiedStatus ?? "running",
         ).catch(() => {});
       }
     }

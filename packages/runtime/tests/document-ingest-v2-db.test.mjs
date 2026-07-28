@@ -349,4 +349,9 @@ test("R1(c) (real rig) — an UNCLAIMED (still 'queued') task hits a REAL CLR16 
       && /re-read status="queued"/.test(sidecar.lastErrorNote),
     "the genuine, unverified state is recorded honestly — never mistaken for a handled redelivery",
   );
+  // R1 residual (the R-round's closing finding, real spool.mjs — not a mock): the sidecar's
+  // OWN lifecycle `status` field must say what was ACTUALLY confirmed ('queued'), not the
+  // "running" spool.mjs defaults to for every OTHER caller. Falsifying this field in the
+  // one branch whose whole point is honesty about unverified state was the exact bug.
+  assert.equal(sidecar.status, "queued", "the sidecar's status must match the CONFIRMED Postgres state, never blanket-defaulted to 'running'");
 });
