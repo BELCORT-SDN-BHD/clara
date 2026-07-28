@@ -311,15 +311,27 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/documentIngest.behavior_v2.mjs": {
+      "sha256": "24683ed1f441618601eb8cc480a63afbcb6fd3943b43c0a07a4f23a20bb44f11",
+      "note": ""
+    },
     "packages/runtime/workflows/documentIngest.impl.ts": {
       "sha256": "cded76b08c88f1937a2a5580eee3aa4bd3b23ccd014fbd335521fa7fcbf2007e",
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/documentIngest.impl_v2.ts": {
+      "sha256": "fa8fa0b3eb7677a7102f32cbb9c8cb1af8880c2e3d98bd27b1362d074c98ba43",
+      "note": ""
+    },
     "packages/runtime/workflows/documentIngest.v1.ts": {
       "sha256": "5f9022f564ad5f78b8f49d8cd0fb31a36f1c7981f50acfd90930843a7601aa05",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/documentIngest.v2.ts": {
+      "sha256": "f880a1f2a67475c75657cd50722a3f5f2b919553b433f305160d812af010f59b",
+      "note": ""
     },
     "packages/runtime/workflows/firmInterview.v1.ts": {
       "sha256": "bf7c1a5b1914c8493d378a5c75129d76c6660e3ff64f6cf47bfeabb58d5517e7",
