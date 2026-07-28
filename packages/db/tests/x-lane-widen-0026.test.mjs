@@ -688,3 +688,61 @@ test("P3: persist_document_extraction refuses a misrouted facts-lane task loudly
   );
   assert.equal(events.rows.length, 0, "no document.invoice_facts_completed event ever fired — the facts destruction this finding names never happened");
 });
+
+// ===========================================================================
+// THE Q-ROUND (O-round confirmation on the P-round diff, one residual). See
+// 0026_lane_widen.sql's own header, §E, for the full ordering analysis.
+// ===========================================================================
+
+test("Q1: persist_document_extraction refuses a misrouted facts-lane task even when a PRE-EXISTING successful op_key receipt exists — the lane guard runs before _reserve_op's replay branch, not after", async () => {
+  requireReady();
+  const doc = await seedXmlDoc(w.firms.A, "q1");
+  await rootQuery(
+    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
+        version_n,status,page_count,envelope)
+     values ($1,$2,'clara-myinvois:v1','structured_parse',1,'done',1,'{}'::jsonb)`,
+    [w.firms.A, doc],
+  );
+  const task = (await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status,workflow_run_id,started_at)
+     values ($1,$2,'clara-myinvois:v1','{}'::jsonb,1,'local_facts','running','rig-run',now())
+     returning id`,
+    [w.firms.A, doc],
+  )).rows[0].id;
+
+  const opKey = opk("q1-stale");
+  const pageCount = 1;
+  const envelope = {};
+  const regions = [];
+
+  // Fabricate a PRE-EXISTING SUCCESSFUL op_receipts row — exactly the shape the code
+  // would have left behind BEFORE Q1: a misrouted facts task silently succeeded (mapped
+  // onto engine_kind='structured_parse') instead of refusing, and _finish_op stored that
+  // stale success under this op_key.
+  const fakeExtractionId = randomUUID();
+  const reqHash = (await rootQuery(
+    `select clara._hash(jsonb_build_object('task',$1::uuid,'status','done','pages',$2::int,
+        'envelope',$3::jsonb,'regions',$4::jsonb,'error',null::text,'vendor',null::text)) as h`,
+    [task, pageCount, envelope, regions],
+  )).rows[0].h;
+  await rootQuery(
+    `insert into clara.op_receipts(firm_id,fn,op_key,request_hash,result)
+     values ($1,'persist_document_extraction',$2,$3,$4::jsonb)`,
+    [w.firms.A, opKey, reqHash, JSON.stringify({ task_id: task, extraction_id: fakeExtractionId, status: "done" })],
+  );
+
+  // A retry under the SAME op_key, SAME arguments. Under the pre-Q1 ordering,
+  // _reserve_op's replay branch would find this receipt and return it BEFORE the lane
+  // guard ever ran — replaying stale success forever. Post-Q1, the guard runs first.
+  await assertRaises("CLR16",
+    () => rootQuery(
+      "select clara.persist_document_extraction($1,'done',$2,$3::jsonb,$4::jsonb,null,null,$5) as r",
+      [task, pageCount, envelope, regions, opKey],
+    ),
+    "a misrouted facts-lane task with a PRE-EXISTING successful op_key receipt — must refuse CLR16, never replay the stale success");
+
+  const taskAfter = await rootQuery("select status from clara.document_processing_tasks where id=$1", [task]);
+  assert.equal(taskAfter.rows[0].status, "running",
+    "still untouched — the fabricated stale receipt's task_id was never a real settlement of this task");
+});

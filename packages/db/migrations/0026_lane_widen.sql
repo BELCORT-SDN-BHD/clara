@@ -150,6 +150,18 @@
 --     task 'done' with no invoice facts ever written and no document.invoice_facts_
 --     completed event — silent facts destruction. Now restricted to ocr/structured_parse
 --     only; any other lane is a loud, typed CLR16 refusal.
+--
+-- THE Q-ROUND (O-round confirmation on the P-round diff, one residual): Q1 —
+-- persist_document_extraction's P3 guard originally landed AFTER _reserve_op. _reserve_op
+-- inserts into op_receipts first and its own replay branch returns an EXISTING successful
+-- receipt for a repeated op_key BEFORE any business check runs — so a pre-0026 op_key
+-- that had already succeeded against a misrouted facts task (the old code's silent
+-- structured_parse mapping) would replay that STALE SUCCESS on every retry, never
+-- reaching the P3 guard at all. Moved the guard AHEAD of _reserve_op: t.lane is
+-- task-intrinsic and never changes, so a structurally invalid call must be refused on
+-- EVERY invocation, replay included, never merely on a fresh call. 'none' and 'classify'
+-- keep their own specific, later refusals — they never had this vulnerability (they have
+-- always refused outright, never silently mis-mapped a lane onto the wrong engine_kind).
 -- Checked against the 0020 §6 pinned closed set (grant_client_egress,
 -- revoke_client_egress, claim_document_processing_task, _enqueue_invoice_facts_core,
 -- record_wiki_source_ingest): neither classify_document nor set_document_kind is a
@@ -495,6 +507,23 @@ begin
   select * into t from clara.document_processing_tasks where id=p_task for update;
   if not found then raise exception 'processing task is not running' using errcode='CLR16'; end if;
   if p_op_key is null or btrim(p_op_key)='' then raise exception 'op_key is required' using errcode='CLR10'; end if;
+  -- 0026 Q1 (O-round confirmation, Q-round finding): the lane admission guard moves
+  -- AHEAD of _reserve_op — t.lane is task-intrinsic and never changes for a given task,
+  -- so a structurally invalid call must be refused on EVERY invocation, replay included.
+  -- Before this fix, the guard sat AFTER _reserve_op (below), and _reserve_op's own
+  -- replay branch returns an EXISTING successful receipt for a repeated op_key before
+  -- any business check runs. A pre-0026 op_key that had already succeeded against a
+  -- misrouted facts task — back when the old code silently mapped it onto
+  -- engine_kind='structured_parse' instead of refusing — would replay that STALE SUCCESS
+  -- forever, never reaching the new guard at all. 'none' and 'classify' keep their own
+  -- specific, later refusals unchanged (they never had this vulnerability — they have
+  -- always refused, never silently mis-mapped) — this early check only widens to catch
+  -- the facts lanes (invoice_facts/local_facts) and any future lane value this function
+  -- has no opinion on, before _reserve_op ever sees the call.
+  if t.lane not in ('ocr','structured_parse','none','classify') then
+    raise exception 'persist_document_extraction only settles ocr/structured_parse tasks — % tasks are settled by persist_invoice_facts', t.lane
+      using errcode='CLR16';
+  end if;
   v_dedupe:=clara._reserve_op(t.firm_id,'persist_document_extraction',p_op_key,
     clara._hash(jsonb_build_object('task',p_task,'status',p_status,'pages',p_page_count,
       'envelope',p_envelope,'regions',p_regions,'error',p_error_code,'vendor',p_vendor_op_ref)));
@@ -507,19 +536,6 @@ begin
   -- stamp an attribution-visible engine_kind).
   if t.lane='classify' then
     raise exception 'classify tasks are settled by classify_document' using errcode='CLR16';
-  end if;
-  -- 0026 P3 (O-round finding): this writer settles ocr/structured_parse ONLY. Before this
-  -- guard, ANY lane other than 'none'/'classify' — including a MISROUTED invoice_facts or
-  -- local_facts task — fell through to the v_ekind case below and was silently mapped
-  -- onto 'structured_parse'. Post-widening, that mapping is no longer merely wrong
-  -- metadata: a document can now legitimately carry a REAL structured_parse extraction
-  -- alongside a facts task at the same version_n, so a misrouted facts task's insert
-  -- would CONFLICT-REUSE that real extraction's id, mark the facts task 'done' with no
-  -- invoice facts ever written and no document.invoice_facts_completed event — silent
-  -- facts destruction. A misrouted caller now gets a loud, typed refusal instead.
-  if t.lane not in ('ocr','structured_parse') then
-    raise exception 'persist_document_extraction only settles ocr/structured_parse tasks — % tasks are settled by persist_invoice_facts', t.lane
-      using errcode='CLR16';
   end if;
   v_ekind:=case when t.lane='ocr' then 'ocr' else 'structured_parse' end;
   insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
@@ -1746,17 +1762,25 @@ begin
   -- (10) P3 (O-round finding) — persist_document_extraction is restricted to
   -- ocr/structured_parse; a misrouted facts-lane caller now gets a loud typed refusal
   -- instead of a silent conflict-reuse of the document's real structured_parse row.
+  -- Q1 (O-round confirmation): the guard's POSITION is load-bearing, not just its
+  -- presence — it must precede the _reserve_op call, or a pre-existing successful
+  -- op_key (from before this guard existed) would replay stale success via
+  -- _reserve_op's own replay branch, never reaching the guard at all.
   select p.prosrc into v_src from pg_proc p where p.oid = v_sig_pde::regprocedure;
   if v_src is null then raise exception '0026 tail: persist_document_extraction is GONE'; end if;
   v_code := regexp_replace(regexp_replace(regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
     '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
-  if position('ift.lanenotin(''ocr'',''structured_parse'')then' in v_code) = 0 then
+  if position('ift.lanenotin(''ocr'',''structured_parse'',''none'',''classify'')then' in v_code) = 0 then
     raise exception '0026 tail: persist_document_extraction is missing its ocr/structured_parse-only admission guard (P3)';
   end if;
   if position('onlysettlesocr/structured_parsetasks' in v_code) = 0 then
     raise exception '0026 tail: persist_document_extraction''s lane-admission refusal message is missing or reworded past recognition (P3)';
   end if;
-  raise notice '0026: (10) persist_document_extraction restricted to ocr/structured_parse (P3) — a misrouted invoice_facts/local_facts caller is refused loudly instead of silently conflict-reusing a structured_parse extraction and marking the facts task done with no facts';
+  if position('ift.lanenotin(''ocr'',''structured_parse'',''none'',''classify'')then' in v_code)
+     > position('v_dedupe:=clara._reserve_op(' in v_code) then
+    raise exception '0026 tail: persist_document_extraction''s lane-admission guard runs AFTER _reserve_op (Q1) — a pre-existing successful op_key would replay stale success before the guard ever runs';
+  end if;
+  raise notice '0026: (10) persist_document_extraction restricted to ocr/structured_parse (P3), the guard ordered BEFORE _reserve_op so a replayed op_key can never bypass it (Q1) — a misrouted invoice_facts/local_facts caller is refused loudly instead of silently conflict-reusing a structured_parse extraction and marking the facts task done with no facts';
 
   raise notice '0026: lane joins document_processing_tasks'' unique key, engine_kind joins document_extractions'' — the XML facts lane''s task and extraction can now legitimately coexist alongside the intake structured_parse task/extraction at the same version_n; every ON CONFLICT site that assumed the old 3-column key is widened or (persist_invoice_facts) given one for the first time; every silent/crashing fallback is now impossible-state-loud (CLR35); request_reextraction''s exhausted-retry message no longer names an unverifiable cause; both classification writers'' version mints are kind-scoped, the intake duplicate re-select is engine+lane-pinned, and the generic extraction writer refuses a misrouted facts-lane caller (P1/P2/P3, O-round)';
 end

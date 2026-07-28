@@ -466,12 +466,19 @@ begin
                 regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
                 '--[^' || chr(10) || ']*', '', 'g'),
               '\s+', '', 'g');
-  if position('ift.lanenotin(''ocr'',''structured_parse'')then' in v_code) = 0 then
+  if position('ift.lanenotin(''ocr'',''structured_parse'',''none'',''classify'')then' in v_code) = 0 then
     raise exception 'POST-VERIFY 10: persist_document_extraction is missing its ocr/structured_parse-only admission guard (P3)';
   end if;
   if position('onlysettlesocr/structured_parsetasks' in v_code) = 0 then
     raise exception 'POST-VERIFY 10: persist_document_extraction''s lane-admission refusal message is missing or reworded past recognition (P3)';
   end if;
+  -- Q1 (O-round confirmation): the guard's POSITION is load-bearing, not just its
+  -- presence — it must precede _reserve_op, or a pre-existing successful op_key would
+  -- replay stale success via _reserve_op's own replay branch before the guard ever runs.
+  if position('ift.lanenotin(''ocr'',''structured_parse'',''none'',''classify'')then' in v_code)
+     > position('v_dedupe:=clara._reserve_op(' in v_code) then
+    raise exception 'POST-VERIFY 10: persist_document_extraction''s lane-admission guard runs AFTER _reserve_op (Q1) — a pre-existing successful op_key would replay stale success before the guard ever runs';
+  end if;
 
-  raise notice 'OK 10  the P-round: both classification writers'' version mints kind-scoped (P1); finalize_document_intake''s duplicate-path re-select engine+lane-pinned (P2); persist_document_extraction restricted to ocr/structured_parse (P3)';
+  raise notice 'OK 10  the P-round: both classification writers'' version mints kind-scoped (P1); finalize_document_intake''s duplicate-path re-select engine+lane-pinned (P2); persist_document_extraction restricted to ocr/structured_parse and ordered BEFORE _reserve_op (P3/Q1)';
 end $$;
