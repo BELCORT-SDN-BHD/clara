@@ -112,12 +112,54 @@ const BYTE_IDENTICAL = {
   // edits are present in their exact shape AND that nothing else in this body moved (the
   // read-the-live-body-not-the-file discipline 0025's own header records — a wrong-base CoR
   // would fail THIS reversal in an entirely different way, not just at the final hash).
+  //
+  // AMENDMENT A11 (ratified 2026-07-28, ledger #32, Gate-S critical path — migration 0026).
+  // §6's closed set gains a FOURTH deliberate edit — the THIRD to THIS specific member
+  // (A9 above was the second). 0026 widens document_processing_tasks' unique key to
+  // (document_id,engine_id,version_n,lane); this function's own ON CONFLICT target needed
+  // no edit (it was already the unqualified `on conflict do nothing`, which matches ANY
+  // unique violation regardless of column list), but its FALLBACK does: the re-select is
+  // now unconditional on status (a genuine same-lane conflict may already be terminal by
+  // the time it looks again) and RAISES impossible-state (CLR35) if the colliding row
+  // cannot be found — where it used to silently return {"task_id": null, "status": null},
+  // which is the exact silence Gate-S measured. A new local variable (v_task_status)
+  // replaces the old code's re-use of the `t` record's status field. Same discipline as
+  // A7/A9: `restore` reverses this edit FIRST (it is textually outermost — the 0026 block
+  // wraps around, not inside, A9's own two edits) and then A9's two, and the remainder is
+  // compared against the UNCHANGED 19-migration prestate.
   _enqueue_invoice_facts_core: {
     sig: "clara._enqueue_invoice_facts_core(uuid)",
     len: 4312, sha: "86ff810a99e7bf230017f8565d930b64c16e4f6c6e16cd6084a5cebdff1a27f0",
     exact: "0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e",
     acl: ["clara_fn_owner=X/clara_fn_owner"],
     restore: (src) => src
+      .replace(
+        "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text; v_task_status text;\n",
+        "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text;\n",
+      )
+      .replace(
+        "  if v_task is null then\n"
+        + "    -- 0026 (amendment A11): the widened (document_id,engine_id,version_n,lane) key means a\n"
+        + "    -- conflict HERE is now a genuine same-lane duplicate — a cross-lane collision is\n"
+        + "    -- structurally impossible, lane joins the key. The exact colliding row must exist\n"
+        + "    -- regardless of its current status (it may already be done/failed by the time we look\n"
+        + "    -- again); silence hid this for the product's whole life, so an absent row here is\n"
+        + "    -- impossible-state-loud, not a null task_id.\n"
+        + "    select id,status into v_task,v_task_status from clara.document_processing_tasks\n"
+        + "      where document_id=p_document and engine_id=v_engine and version_n=v_version and lane=v_lane;\n"
+        + "    if v_task is null then\n"
+        + "      raise exception 'impossible state: an ON CONFLICT fired for (document=%,engine=%,version=%,lane=%) but no row exists at that key',\n"
+        + "        p_document,v_engine,v_version,v_lane using errcode='CLR35';\n"
+        + "    end if;\n"
+        + "    return jsonb_build_object('task_id',v_task,'document_id',p_document,'status',v_task_status);\n"
+        + "  end if;",
+        "  if v_task is null then\n"
+        + "    select id,status into v_task,t.status from clara.document_processing_tasks\n"
+        + "      where document_id=p_document and lane=v_lane\n"
+        + "        and status in ('queued','held_egress','running') order by id limit 1;\n"
+        + "    return jsonb_build_object('task_id',v_task,'document_id',p_document,'status',t.status);\n"
+        + "  end if;",
+      )
       .replace(
         "d.document_kind in ('invoice','credit_note','debit_note','receipt')",
         "d.document_kind in ('invoice','credit_note','debit_note')",
@@ -127,6 +169,8 @@ const BYTE_IDENTICAL = {
         "select * into d from clara.documents where id=p_document;",
       ),
     restoreMust: [
+      /v_task_status text;/,
+      /amendment A11/,
       /d\.document_kind in \('invoice','credit_note','debit_note','receipt'\)/,
       /where id=p_document for update;\n {2}if not found then raise exception 'document not found'/,
     ],
