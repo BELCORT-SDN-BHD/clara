@@ -24,6 +24,7 @@ import { setRuntimeRole, acquireLeaderLock } from "./relay.mjs";
 import { makeRuntimeClient, withRuntime as defaultWithRuntime } from "./pools.mjs";
 import { isConnErr, waitForNudge } from "./listen.mjs";
 import { MYINVOIS_ENGINE_ID } from "./myinvois.mjs";
+import { resolveLibWorker } from "./worker-path.mjs";
 import { interpretClaimReceipt } from "../workflows/invoiceFacts.v1.behavior.mjs";
 
 /** The local_facts consumer name — its own advisory lock key. */
@@ -60,10 +61,18 @@ function factsFailureCode(err) {
 // ---------------------------------------------------------------------------
 export function runUblFactsWorker(filePath, task) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL("./structured-worker.mjs", import.meta.url), {
-      workerData: { filePath, format: "xml", task },
-      resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32, stackSizeMb: 4 },
-    });
+    let worker;
+    try {
+      // See lib/worker-path.mjs: the sibling URL is correct from source and wrong in the
+      // deployed bundle, where this module is inlined into .output/server/index.mjs.
+      worker = new Worker(resolveLibWorker("structured-worker.mjs", import.meta.url), {
+        workerData: { filePath, format: "xml", task },
+        resourceLimits: { maxOldGenerationSizeMb: 128, maxYoungGenerationSizeMb: 32, stackSizeMb: 4 },
+      });
+    } catch (err) {
+      reject(Object.assign(err, { code: err?.code ?? "internal" }));
+      return;
+    }
     worker.once("message", (m) =>
       m?.ok ? resolve(m.result) : reject(Object.assign(new Error(m?.error || "UBL facts parse failed"), { code: m?.code || "corrupt" })),
     );
@@ -109,6 +118,12 @@ export async function processLocalFactsTask(withRuntime, taskId, services, deps 
     return { taskId, status: "done" };
   } catch (err) {
     const code = factsFailureCode(err);
+    // Only the coarse `code` reaches `fail_invoice_facts`, and the codes collapse distinct
+    // causes ('internal' covers a missing worker, a thrown adapter and a bad message alike).
+    // The MESSAGE is the part that separates them, so it is logged before it is discarded —
+    // the 2026-07-26 intake lesson, applied to the lane it had not yet reached.
+    // No filename: it can identify a client.
+    console.error(`[clara-runtime] local_facts FAILED task=${taskId} code=${code} retryable=${RETRYABLE.has(code)} detail=${String(err?.message || err)}`);
     if (RETRYABLE.has(code)) throw err; // transient — the loop/reconciler re-drives
     try {
       await withRuntime((c) => c.query("select clara.fail_invoice_facts($1,$2) as receipt", [taskId, code]));
