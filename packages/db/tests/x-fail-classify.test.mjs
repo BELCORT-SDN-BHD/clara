@@ -72,7 +72,10 @@ async function pdfDocUnclassified(client) {
 
 /** Drive a document to a RUNNING classify task (queued -> claimed), via the same
  *  claim_document_processing_task the classify consumer calls (egress-hold does not apply to
- *  the classify lane — classify.mjs L140-142 claims with p_egress_approved=false). */
+ *  the classify lane — classify.mjs L140-142 claims with p_egress_approved=false). Returns
+ *  runId — the workflow_run_id the claim itself wrote to the task row (echoed back in the
+ *  claim receipt, 0009:2235-2239) — 0024 round 3 (P2) requires classify_document's settle to
+ *  present this SAME token back, so every task-bound cell below threads it through. */
 async function runningClassifyTask(client) {
   const cited = await pdfDocUnclassified(client);
   await enqueueInvoiceFacts(cited.documentId);
@@ -80,7 +83,8 @@ async function runningClassifyTask(client) {
   const task = rows.find((t) => t.lane === "classify");
   assert.ok(task, "mandatory setup: a classify task was enqueued for the NULL-kind document");
   const claimed = await claimTask(task.id, { egressApproved: false });
-  return { document: cited, taskId: task.id, claimed };
+  assert.ok(claimed?.workflow_run_id, "mandatory setup: the claim receipt carries workflow_run_id");
+  return { document: cited, taskId: task.id, runId: claimed.workflow_run_id, claimed };
 }
 
 test("META x-fail-classify: migration 0024 present + clara.fail_classify exists", async (t) => {
@@ -249,7 +253,7 @@ test("a nonexistent task id is refused CLR16", async () => {
 test("RACE, lock order 1 — fail_classify holds first: classify_document blocks, then refuses honestly; the document is NEVER classified and only classify_failed fires", async () => {
   requireReady();
   const client = world.clients.A1;
-  const { document, taskId } = await runningClassifyTask(client);
+  const { document, taskId, runId } = await runningClassifyTask(client);
 
   const out = await holdThenContend({
     a: {
@@ -261,13 +265,14 @@ test("RACE, lock order 1 — fail_classify holds first: classify_document blocks
     },
     b: {
       role: ROLES.runtime,
-      // p_task bound to the SAME claimed task (the real worker's call shape post-0024 round
-      // 2): a stale call with NO task id would fall through to the no-task ceremony path
-      // (byte-identical to 0016) and write the verdict anyway once the task is no longer
-      // 'running' — task-binding is what makes THIS call refuse instead.
+      // p_task+p_run bound to the SAME claim (the real worker's call shape post-0024 round
+      // 3): a stale call with NO task id would now be refused outright (P1 — task history
+      // exists) rather than falling through to a no-task ceremony that could write the
+      // verdict anyway once the task is no longer 'running' — task+run-binding is what
+      // makes THIS call refuse honestly instead.
       run: (c) => c.query(
-        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5, p_task => $6) as receipt",
-        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race1-classify"), taskId],
+        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5, p_task => $6, p_run => $7) as receipt",
+        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race1-classify"), taskId, runId],
       ).then((r) => r.rows[0].receipt),
     },
   });
@@ -299,15 +304,15 @@ test("RACE, lock order 1 — fail_classify holds first: classify_document blocks
 test("RACE, lock order 2 — classify_document holds first: fail_classify blocks, then refuses honestly; the document IS classified and only classified fires", async () => {
   requireReady();
   const client = world.clients.A1;
-  const { document, taskId } = await runningClassifyTask(client);
+  const { document, taskId, runId } = await runningClassifyTask(client);
 
   const out = await holdThenContend({
     a: {
       role: ROLES.runtime,
-      // p_task bound to the SAME claimed task — the real worker's call shape.
+      // p_task+p_run bound to the SAME claim — the real worker's call shape.
       run: (c) => c.query(
-        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5, p_task => $6) as receipt",
-        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race2-classify"), taskId],
+        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5, p_task => $6, p_run => $7) as receipt",
+        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race2-classify"), taskId, runId],
       ).then((r) => r.rows[0].receipt),
     },
     b: {
@@ -349,7 +354,7 @@ test("RACE, lock order 2 — classify_document holds first: fail_classify blocks
 test("THREE-ACTOR SCHEDULE (T2 QUEUED): T1 fails, T2 enqueues, T1's late settle refuses — T2 is left completely untouched", async () => {
   requireReady();
   const client = world.clients.A1;
-  const { document, taskId: t1 } = await runningClassifyTask(client);
+  const { document, taskId: t1, runId: run1 } = await runningClassifyTask(client);
 
   // T1 fails (fail_classify wins the race the LLM call was still in flight for).
   await failClassify(t1, { reason: "engine_error", opKey: opk("schedule-a-fail") });
@@ -366,9 +371,11 @@ test("THREE-ACTOR SCHEDULE (T2 QUEUED): T1 fails, T2 enqueues, T1's late settle 
   assert.ok(t2.version_n > t1Row.version_n, "mandatory setup: T2 is the NEWER attempt");
 
   // T1's LATE call finally arrives — the LLM response T1's worker was awaiting when
-  // fail_classify won. It carries T1's OWN task id (the real worker's call shape).
+  // fail_classify won. It carries T1's OWN task id AND run token (the real worker's call
+  // shape) — it refuses on STATUS (no longer running), not on the run token, which still
+  // matches T1's own claim.
   await assert.rejects(
-    () => classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: t1 }),
+    () => classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: t1, run: run1 }),
     (e) => e.code === "CLR16",
     "T1's late settle refuses honestly — it is no longer running",
   );
@@ -389,7 +396,7 @@ test("THREE-ACTOR SCHEDULE (T2 QUEUED): T1 fails, T2 enqueues, T1's late settle 
 test("THREE-ACTOR SCHEDULE (T2 RUNNING): T1 fails, T2 enqueues AND is claimed by a different worker, T1's late settle refuses — T2 stays running, untouched", async () => {
   requireReady();
   const client = world.clients.A1;
-  const { document, taskId: t1 } = await runningClassifyTask(client);
+  const { document, taskId: t1, runId: run1 } = await runningClassifyTask(client);
 
   await failClassify(t1, { reason: "engine_error", opKey: opk("schedule-b-fail") });
   await enqueueInvoiceFacts(document.documentId);
@@ -398,13 +405,13 @@ test("THREE-ACTOR SCHEDULE (T2 RUNNING): T1 fails, T2 enqueues AND is claimed by
   assert.ok(t2, "mandatory setup: T2 was enqueued");
 
   // A DIFFERENT worker instance claims T2 to running — T1's late call must not confuse
-  // T2's activity for its own.
-  await claimTask(t2.id, { egressApproved: false });
+  // T2's activity for its own. Its OWN run token is captured for T2's later legitimate settle.
+  const t2Claimed = await claimTask(t2.id, { egressApproved: false });
   const t2Running = (await docTasks(document.documentId)).find((x) => x.id === t2.id);
   assert.equal(t2Running.status, "running", "mandatory setup: T2 is now running (a different worker claimed it)");
 
   await assert.rejects(
-    () => classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: t1 }),
+    () => classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: t1, run: run1 }),
     (e) => e.code === "CLR16",
     "T1's late settle refuses honestly, even though a DIFFERENT task is currently running for this document",
   );
@@ -416,21 +423,24 @@ test("THREE-ACTOR SCHEDULE (T2 RUNNING): T1 fails, T2 enqueues AND is claimed by
   assert.equal(await docKind(document.documentId), null, "the document was never classified by T1's stale call");
 
   // T2's OWN legitimate settle still works afterward — the fix does not strand T2.
-  const t2Settle = await classifyDocument({ document: document.documentId, kind: "receipt", confidence: 0.9, task: t2.id });
+  const t2Settle = await classifyDocument({ document: document.documentId, kind: "receipt", confidence: 0.9, task: t2.id, run: t2Claimed.workflow_run_id });
   assert.equal(t2Settle.kind_set, true, "T2's OWN task-bound settle succeeds normally");
   assert.equal(await docKind(document.documentId), "receipt", "T2's verdict is the one that actually lands");
 });
 
 // ===========================================================================
-// The happy classify path stays byte-unchanged: classify_document still settles a
-// RUNNING task to 'done' exactly as before — fail_classify does not touch that branch.
+// The happy classify path: classify_document still settles a RUNNING task to 'done'
+// exactly as before — fail_classify does not touch that branch. 0024 round 3 (P1) changed
+// WHICH call shape reaches it: since runningClassifyTask's document now carries classify-
+// task history, the real worker's task+run-bound call is what exercises this path (the
+// no-task ceremony is reserved for a genuinely task-free document — see the P1 cell below).
 // ===========================================================================
 
-test("the happy classify path is untouched: classify_document still settles a running task to done, sets the kind, and a subsequently-failed task never resurrects", async () => {
+test("the happy classify path: classify_document still settles a running task to done, sets the kind, and a subsequently-failed task never resurrects", async () => {
   requireReady();
   const client = world.clients.A1;
-  const { document, taskId } = await runningClassifyTask(client);
-  await classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.93 });
+  const { document, taskId, runId } = await runningClassifyTask(client);
+  await classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.93, task: taskId, run: runId });
   const settled = (await docTasks(document.documentId)).find((x) => x.id === taskId);
   assert.equal(settled.status, "done", "classify_document still settles the claimed task to done (fail_classify never touches this path)");
   assert.equal(await docKind(document.documentId), "invoice", "the kind is still set by classify_document");
@@ -440,6 +450,114 @@ test("the happy classify path is untouched: classify_document still settles a ru
     (e) => e.code === "CLR16",
     "fail_classify refuses a task that already settled done — it is not a second settle path",
   );
+});
+
+// ===========================================================================
+// P-round (cross-model review, round 3) — P1/P2/P3, each closing a hole the round-2 fix
+// (task-binding alone, with a default null) left open.
+// ===========================================================================
+
+test("P1 (arity break): classify_document no longer RESOLVES at 5 args — p_task/p_run carry no default, so an old call shape fails loud (42883) instead of silently taking the unprotected null-task path", async () => {
+  requireReady();
+  const client = world.clients.A1;
+  const { document } = await runningClassifyTask(client);
+  await assert.rejects(
+    () => roleQuery(ROLES.runtime,
+      "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5)",
+      [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("arity-break")]),
+    (e) => e.code === "42883",
+    "a 5-arg call fails to resolve at all — this is what closes round 2's default-null reopening of the original recency race",
+  );
+});
+
+test("P1 (the ceremony's REAL precondition): the no-task path refuses whenever ANY classify-task history exists for the document — task-free documents only, DB-enforced", async () => {
+  requireReady();
+  const client = world.clients.A1;
+  // runningClassifyTask's document already carries one classify task (running) — history exists.
+  const { document } = await runningClassifyTask(client);
+  await assert.rejects(
+    () => classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, opKey: opk("no-task-with-history") }),
+    (e) => e.code === "CLR16",
+    "a document with classify-task history must go through the task-bound path — the no-task ceremony no longer settles it",
+  );
+  assert.equal(await docKind(document.documentId), null, "the refused ceremony call never classified the document");
+
+  // The genuine WA21-R11 shape still works: a document that NEVER had a classify task at
+  // all still classifies through the no-task ceremony.
+  //
+  // FINDING (proven live by this cell, not assumed): pdfDocUnclassified/seedCitedDocument
+  // is NOT actually task-free on this schema — filedDocument calls the REAL audited
+  // clara.file_document writer, which itself calls _enqueue_invoice_facts_core at filing
+  // time (0009), so a NULL-kind filed document already carries a classify task the moment
+  // it is filed. WA21-R11's real population (docs.plan/wave-a2.1-contract.md's "six
+  // mis-stamped documents") predates that infrastructure entirely — they were minted
+  // BEFORE classify-task auto-enqueue existed. seedVerifiedDocument (the rig's
+  // _seed_verified_document path) mints the document row WITHOUT going through
+  // file_document at all — no filing, no enqueue — which is the fixture that actually
+  // matches WA21-R11's real precondition.
+  const { seedVerifiedDocument } = await import("./a21-helpers.mjs");
+  const firm = await firmOf(client);
+  const taskFree = await seedVerifiedDocument({ firm, kind: null });
+  assert.equal((await docTasks(taskFree.documentId)).filter((t) => t.lane === "classify").length, 0,
+    "mandatory setup: the WA21-R11 fixture carries NO classify-task row at all");
+  await classifyDocument({ document: taskFree.documentId, kind: "invoice", confidence: 0.95, opKey: opk("no-task-genuine") });
+  assert.equal(await docKind(taskFree.documentId), "invoice", "a genuinely task-free document still classifies through the no-task ceremony");
+});
+
+test("P2 (run-token binding): a task id without the matching claim's run token is refused CLR16 — presenting an id alone does not prove the caller's own claim", async () => {
+  requireReady();
+  const client = world.clients.A1;
+  const { document, taskId, runId } = await runningClassifyTask(client);
+  await assert.rejects(
+    () => classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: taskId, run: "not-the-real-run-token", opKey: opk("run-mismatch") }),
+    (e) => e.code === "CLR16",
+    "a run-token mismatch is refused — clara_runtime is a group role that can enumerate other claims' task ids, so an id alone must not be sufficient",
+  );
+  const unchanged = (await docTasks(document.documentId)).find((x) => x.id === taskId);
+  assert.equal(unchanged.status, "running", "the task is UNCHANGED — a run-token mismatch never settles it");
+  assert.equal(await docKind(document.documentId), null, "the document was never classified by the mismatched-run call");
+
+  // The SAME task settles normally once the caller presents its OWN run token.
+  const ok = await classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: taskId, run: runId, opKey: opk("run-match") });
+  assert.equal(ok.kind_set, true, "the legitimate run token settles the task normally");
+  assert.equal(await docKind(document.documentId), "invoice");
+});
+
+test("P3 (shape-conditional hash): a pre-0024-shaped op_receipts row (the OLD 4-key hash, no task/run) still replays byte-identically", async () => {
+  requireReady();
+  const client = world.clients.A1;
+  // A genuinely task-free document (the seedVerifiedDocument path, bypassing file_document's
+  // own auto-enqueue — see the P1 cell's finding above) — matching what a REAL pre-0024
+  // classify_document call's target document actually looked like, since task-bound calls
+  // did not exist yet. Task-freeness is not load-bearing for THIS cell (the replay
+  // short-circuits before the task/ceremony branch is ever reached), but it keeps the
+  // fixture honest rather than accidentally resting on an unrelated side effect.
+  const { seedVerifiedDocument } = await import("./a21-helpers.mjs");
+  const firm = await firmOf(client);
+  const doc = await seedVerifiedDocument({ firm, kind: null });
+  const opKey = opk("pre0024-replay");
+  const kind = "invoice";
+  const confidence = 0.91;
+  const storedResult = {
+    document_id: doc.documentId, extraction_id: "00000000-0000-0000-0000-000000000001",
+    document_kind: kind, kind_set: true, confidence, questions: [],
+  };
+  // The EXACT pre-0024 4-key hash shape (document/kind/confidence/engine — no task, no
+  // run) computed via the SAME clara._hash the function itself calls, so this is a
+  // byte-for-byte match to what a REAL pre-0024 call would have reserved. $2/$4 need an
+  // explicit ::text cast — jsonb_build_object is variadic "any", so Postgres cannot infer
+  // a bare placeholder's type from that context (42P18 otherwise).
+  const oldHash = (await rootQuery(
+    "select clara._hash(jsonb_build_object('document',$1::uuid,'kind',$2::text,'confidence',$3::numeric,'engine',$4::text)) as h",
+    [doc.documentId, kind, confidence, CLASSIFY_ENGINE_ID],
+  )).rows[0].h;
+  await rootQuery(
+    "insert into clara.op_receipts(firm_id, fn, op_key, request_hash, result) values ($1,'classify_document',$2,$3,$4::jsonb)",
+    [firm, opKey, oldHash, JSON.stringify(storedResult)],
+  );
+  const replayed = await classifyDocument({ document: doc.documentId, kind, confidence, opKey });
+  assert.deepEqual(replayed, storedResult, "the pre-0024-shaped receipt replays BYTE-IDENTICALLY — a historical op_key is not broken by the new task/run-aware hash shape");
+  assert.equal(await docKind(doc.documentId), null, "the replay never actually re-executes the write — proves this is a stored-receipt return, not a fresh classify (which would have set the kind)");
 });
 
 test("persist_document_extraction's classify-lane refusal is untouched: it still refuses to settle a classify task itself", async () => {

@@ -152,19 +152,21 @@ export async function processClassifyTask(withRuntime, taskId, deps = {}) {
   // re-drives it (the local-facts RETRYABLE branch — classify has no terminal-fail writer).
   const text = await withRuntime((c) => readText(c, { documentId: doc.document_id, firmId: doc.firm_id }));
   const verdict = await classify({ text, modelId });
-  // p_task (0024, race fix round 2): binds the settle to THIS claim's own task — never
-  // "whichever classify task is newest for this document". Without it, a stale call from an
-  // abandoned attempt (this one, if it lost a race to fail_classify or a re-enqueue while the
-  // LLM call above was still in flight) could settle or corrupt a DIFFERENT, newer attempt's
-  // task instead of honestly refusing against its own.
+  // p_task+p_run (0024, race fix round 3 / P1-P2): binds the settle to THIS claim's own task
+  // AND its own run token — never "whichever classify task is newest for this document", and
+  // never a task id alone (clara_runtime is a group role that can enumerate other claims'
+  // tasks). runId is the SAME token this claim already wrote to the task row via
+  // claim_document_processing_task above — classify_document now requires it back to prove
+  // this settle belongs to the claim that produced it, not merely a task id that resolves.
   await withRuntime((c) =>
-    c.query("select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5, p_task => $6) as receipt", [
+    c.query("select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5, p_task => $6, p_run => $7) as receipt", [
       doc.document_id,
       verdict.kind,
       verdict.confidence, // VERBATIM — the DB owns the >=0.8 gate; a low-confidence verdict holds for human review
       CLASSIFY_ENGINE_ID,
       `classify:${taskId}`,
       taskId,
+      runId,
     ]),
   );
   return { taskId, status: "done", kind: verdict.kind, confidence: verdict.confidence };

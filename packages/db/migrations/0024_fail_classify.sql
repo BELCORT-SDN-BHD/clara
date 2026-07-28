@@ -148,51 +148,63 @@ grant execute on function clara.fail_classify(uuid, text, text) to clara_runtime
 
 -- =====================================================================
 -- §A2 — clara.classify_document: DROP + RECREATE at a NEW arity. THE RACE THIS VERB
--- OPENS, CLOSED — TASK-BOUND, not recency-bound.
+-- OPENS, CLOSED — TASK-BOUND AND ACTOR-BOUND, not recency-bound.
 --
 -- fail_classify above is a NEW way to move a classify task out from under a caller who
--- is mid-flight toward classify_document. The FIRST fix drafted here (recorded in the
--- commit history) locked the MOST RECENT classify task for (document, engine) and
--- branched on its status. Cross-model review (round 2) found that "most recent" is
--- itself unsound: a STALE classify_document call — the tail end of an attempt whose task
--- already went terminal — has no way to tell "the newest task for this document" apart
--- from "the task MY claim actually produced this verdict for". Schedule: T1 is claimed
--- and starts an LLM call; fail_classify(T1) commits 'failed'; the facts-gate re-enqueues
--- a fresh T2 (queued, or claimed to running by a DIFFERENT worker); T1's SLOW LLM call
--- finally returns and T1's classify_document call arrives. "Most recent" now resolves to
--- T2, not T1 — so a call that is semantically ABOUT T1 either falls through to the
--- no-task ceremony path (T2 queued: writes T1's STALE verdict unconditionally) or
--- SETTLES T2 to done using T1's stale verdict (T2 running) — a verdict from an abandoned
--- attempt landing on a task it was never claimed against, in both variants.
+-- is mid-flight toward classify_document. Two prior drafts of this fix are recorded in
+-- the commit history and both were found unsound by cross-model review:
+--   ROUND 1 locked the MOST RECENT classify task for (document, engine) and branched on
+--     its status. Unsound: a STALE call — the tail end of an attempt whose task already
+--     went terminal — cannot tell "the newest task for this document" apart from "the
+--     task MY claim actually produced this verdict for" (T1 fails, T2 enqueues, T1's late
+--     call resolves "most recent" to T2 and corrupts it).
+--   ROUND 2 (this migration's first shape) bound the settle to an EXPLICIT p_task — but
+--     with `default null`, an OLD 5-arg CALL SHAPE still resolves against the new 6-arg
+--     function (Postgres completes trailing defaulted parameters), silently taking the
+--     unprotected null-task path. Any caller not yet updated to pass p_task — including
+--     a live runtime image mid-deploy — reopens round 1's exact race with zero warning.
+--     Separately: nothing verified p_task was the CALLER'S OWN claim, only that the id
+--     resolved to a task row matching document/engine — clara_runtime is a GROUP role
+--     (0008 grants it broad reads on document_processing_tasks), so a confused actor
+--     (not necessarily adversarial) presenting a task id it read but never claimed could
+--     settle someone else's in-flight claim.
 --
--- THE FIX: classify_document now takes `p_task` — the id of the task the CALLER claimed
--- and produced this verdict for. This is an ARITY change (5 args -> 6), so `create or
--- replace` cannot do it (a different argument list is a SEPARATE overload, not a
--- replacement, and this codebase's "no orphan overloads" discipline forbids a doubled
--- classify_document existing at all) — DROP the 5-arg function, CREATE the 6-arg one
--- (0019:349 is the house precedent for a function-identity change via DROP; owner/grants
--- are re-established below exactly as they were, since DROP removes them).
+-- THE FIX, ROUND 3 (P1-P3 of the confirmed cross-model review):
+--   (P1) p_task and p_run (below) carry NO DEFAULT. A 5-arg call no longer RESOLVES at
+--     all (42883 undefined function) — a true arity break, not a silently-completable
+--     one. The explicit-NULL no-task ceremony (still legitimate — WA21-R11) is DB-
+--     enforced to its REAL precondition: the document must carry NO classify-task
+--     history whatsoever (any status, any engine, any version) — "task-less documents
+--     only", not merely "no task currently running". A document with ANY task history
+--     must go through the task-bound path; there is no path left that can silently
+--     re-verdict a document mid-flight.
+--   (P2) classify_document now ALSO takes p_run — the workflow_run_id the caller's OWN
+--     claim wrote to the task row (claim_document_processing_task, 0009:2229-2231: the
+--     SAME field classify.mjs already generates fresh per claim attempt as
+--     `classify:${taskId}:${randomUUID()}` and threads through the claim call). The
+--     task-bound settle now requires id/document/lane/engine to match AND
+--     t.workflow_run_id = p_run — proving the caller is presenting the SAME claim token
+--     it minted when it claimed the task, which only the actual claimant can possess.
+--     This makes "the caller's own task" DB-enforced, not comment-enforced: a confused
+--     actor holding a task id but not its run token cannot settle it.
+--   (P3) the op-key request hash used to unconditionally include 'task' (and now 'run')
+--     — which meant a PRE-0024 op_key (recorded under the OLD 5-key hash shape) would
+--     replay as CLR10 "reused with different args" instead of its stored receipt. The
+--     hash is now SHAPE-CONDITIONAL: the null-task path hashes with the EXACT pre-0024
+--     4-key shape (document/kind/confidence/engine, no task, no run); only a task-bound
+--     call's hash gains the task+run keys. A historical op_key still replays byte-
+--     identically regardless of which shape (the old function or this one) is asked.
 --
--- p_task IS PROVIDED (every worker call, once packages/runtime/lib/classify.mjs is
--- updated to pass its own claimed task id — done in this same change): the settle read
--- locks EXACTLY that task by id, never "whichever is newest". If it is not 'running' —
--- failed (fail_classify won), done (already settled, a genuine duplicate call), or any
--- other state — REFUSE. The verdict is not written, the kind is not touched, no
--- document.classified fires, and — critically — NO OTHER task is ever touched, so a
--- stale T1 call can never reach out and mutate T2's row. A fresh attempt needs a fresh
--- task; the facts-gate re-enqueue already provides one on any non-live status.
+-- This remains an ARITY change (5 args -> 7), so `create or replace` cannot do it — DROP
+-- the 5-arg function, CREATE the 7-arg one (0019:349 is the house precedent for a
+-- function-identity change via DROP); owner/grants re-established below, since DROP
+-- removes them.
 --
--- p_task IS NULL (the no-task ceremony path, WA21-R11; every caller that predates this
--- change, or any FUTURE caller with no task in mind): the settle read reverts to EXACTLY
--- 0016's original query — match a 'running' task for (document, engine) in the WHERE
--- clause itself, not "most recent regardless of status" — so this path is byte-identical
--- to pre-0024 behaviour and the six WA21-R11 documents (which carried no classify task
--- row at all) are completely unaffected.
---
--- WHY THIS CLOSES THE RACE COMPLETELY, NOT JUST NARROWS IT. With p_task bound, T1's
--- late-arriving call can ONLY ever examine and lock T1's own row — T2's existence is
--- structurally irrelevant to it, whatever T2's status. Both lock orders on THAT row still
--- serialize against fail_classify exactly as the single-task analysis already proved:
+-- WHY THIS CLOSES THE RACE COMPLETELY. With p_task+p_run bound, T1's late-arriving call
+-- can ONLY ever examine and lock T1's own row (by id) AND only succeeds if its run token
+-- matches T1's actual claim — T2's existence, and any other actor's task id, are
+-- structurally irrelevant to it. Both lock orders on THAT row still serialize against
+-- fail_classify exactly as the single-task analysis already proved:
 --   fail_classify first  -> commits T1 'failed' -> classify_document(p_task=T1)'s lock
 --     blocks, then sees 'failed' post-commit -> refuses. T2 (if it exists) is never read.
 --   classify_document(p_task=T1) first -> settles T1 'done', writes the verdict, commits
@@ -205,7 +217,7 @@ grant execute on function clara.fail_classify(uuid, text, text) to clara_runtime
 -- Everything else in this body is byte-identical to 0016 (tail-asserted).
 drop function clara.classify_document(uuid,text,numeric,text,text);
 create function clara.classify_document(p_document uuid, p_kind text,
-    p_confidence numeric, p_engine_id text, p_op_key text, p_task uuid default null) returns jsonb
+    p_confidence numeric, p_engine_id text, p_op_key text, p_task uuid, p_run text) returns jsonb
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare
   d record; t record; v_dedupe jsonb; v_ext uuid; v_version int; v_prior text;
@@ -244,37 +256,47 @@ begin
     raise exception 'consent-evidence classification is owned by the egress consent path'
       using errcode='CLR28';
   end if;
+  -- P3: the request hash is SHAPE-CONDITIONAL — the null-task path hashes with the
+  -- EXACT pre-0024 4-key shape so a historical op_key still replays byte-identically;
+  -- only a task-bound call's hash gains the task+run identity (so reusing an op_key
+  -- under a DIFFERENT task/run is an honest CLR10, not a silently-ignored argument).
   v_dedupe:=clara._reserve_op(d.firm_id,'classify_document',p_op_key,
-    clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,
-      'confidence',p_confidence,'engine',p_engine_id,'task',p_task)));
+    case when p_task is null then
+      clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,
+        'confidence',p_confidence,'engine',p_engine_id))
+    else
+      clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,
+        'confidence',p_confidence,'engine',p_engine_id,'task',p_task,'run',p_run))
+    end);
   if v_dedupe is not null then return v_dedupe; end if;
 
-  -- 0024 (race fix, round 2): TASK-BOUND when the caller supplies its own claim's task
-  -- id — never "whichever is newest". See the CoR header above for the full reasoning.
   if p_task is not null then
+    -- P2: TASK- AND RUN-BOUND — id/document/lane/engine locate a candidate row, but the
+    -- settle only proceeds if t.workflow_run_id MATCHES the run token the caller's OWN
+    -- claim wrote to it (claim_document_processing_task, 0009:2229-2231). A caller
+    -- presenting a task id it never claimed cannot match this token.
     select * into t from clara.document_processing_tasks
       where id=p_task and document_id=p_document and lane='classify' and engine_id=p_engine_id
       for update;
     if not found then
       raise exception 'classify task not found for this document/engine' using errcode='CLR16';
     end if;
-    if t.status='running' then
+    if t.status='running' and t.workflow_run_id=p_run then
       update clara.document_processing_tasks set status='done',finished_at=now()
         where id=t.id;
     else
-      raise exception 'this classify task is no longer running — it already settled or a newer attempt exists'
+      raise exception 'this classify task is not running under the caller''s own claim — it already settled, a newer attempt exists, or the run token does not match'
         using errcode='CLR16';
     end if;
   else
-    -- NO-TASK CEREMONY (WA21-R11) — byte-identical to 0016: match ONLY a running task in
-    -- the WHERE clause itself, never "most recent regardless of status".
-    select * into t from clara.document_processing_tasks
-      where document_id=p_document and lane='classify' and status='running'
-        and engine_id=p_engine_id
-      order by id limit 1 for update;
-    if found then
-      update clara.document_processing_tasks set status='done',finished_at=now()
-        where id=t.id;
+    -- P1: NO-TASK CEREMONY (WA21-R11) — its REAL precondition, DB-enforced: the document
+    -- must carry NO classify-task history AT ALL (any status, any engine, any version).
+    -- A document with ANY task history must go through the task-bound path above; there
+    -- is nothing left for this path to settle, so it proceeds straight to the verdict.
+    if exists(select 1 from clara.document_processing_tasks
+        where document_id=p_document and lane='classify') then
+      raise exception 'classify task history exists for this document — the no-task ceremony requires a task-free document'
+        using errcode='CLR16';
     end if;
   end if;
 
@@ -350,9 +372,9 @@ end $$;
 
 -- DROP removed the function's owner/ACL along with it — re-established exactly as 0016
 -- originally set them (clara_runtime only; the sole caller is the classify worker).
-alter function clara.classify_document(uuid,text,numeric,text,text,uuid) owner to clara_fn_owner;
-revoke all on function clara.classify_document(uuid,text,numeric,text,text,uuid) from public;
-grant execute on function clara.classify_document(uuid,text,numeric,text,text,uuid) to clara_runtime;
+alter function clara.classify_document(uuid,text,numeric,text,text,uuid,text) owner to clara_fn_owner;
+revoke all on function clara.classify_document(uuid,text,numeric,text,text,uuid,text) from public;
+grant execute on function clara.classify_document(uuid,text,numeric,text,text,uuid,text) to clara_runtime;
 
 -- =====================================================================
 -- §B — EVENT TAXONOMY (one additive pair against the active version).
@@ -388,7 +410,7 @@ do $tail$
 declare
   v_acl text; v_cfg text; v_role text; v_src text; v_code text;
   v_sig constant text := 'clara.fail_classify(uuid,text,text)';
-  v_sig2 constant text := 'clara.classify_document(uuid,text,numeric,text,text,uuid)';
+  v_sig2 constant text := 'clara.classify_document(uuid,text,numeric,text,text,uuid,text)';
 begin
   -- (1) The new verb exists at its exact signature and carries the whole definer posture.
   if to_regprocedure(v_sig) is null then
@@ -500,21 +522,40 @@ begin
   if position('id=p_taskanddocument_id=p_documentandlane=''classify''andengine_id=p_engine_id' in v_code) = 0 then
     raise exception '0024 tail: classify_document''s task-bound lookup no longer locates the caller''s EXACT task';
   end if;
-  if position('t.status=''running''thenupdateclara.document_processing_taskssetstatus=''done''' in v_code) = 0 then
-    raise exception '0024 tail: classify_document''s task-bound branch lost the running->done settle';
+  -- P2: the settle only fires when the run token the caller presents MATCHES the token its
+  -- own claim wrote to the task row — never status alone.
+  if position('t.status=''running''andt.workflow_run_id=p_runthenupdateclara.document_processing_taskssetstatus=''done''' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s task-bound branch lost the run-token-bound running->done settle (P2)';
   end if;
-  if position('alreadysettledoranewerattemptexists' in lower(v_code)) = 0 then
-    raise exception '0024 tail: classify_document lost the honest refusal for a task that is no longer running (settled OR superseded)';
+  if position('runtokendoesnotmatch' in lower(v_code)) = 0 then
+    raise exception '0024 tail: classify_document lost the honest refusal naming a run-token mismatch (P2)';
   end if;
-  -- The no-task ceremony branch (WA21-R11) reverts to the EXACT 0016 query shape — status
-  -- ='running' back INSIDE the WHERE clause, never "most recent regardless of status".
-  if position('document_id=p_documentandlane=''classify''andstatus=''running''andengine_id=p_engine_id' in v_code) = 0 then
-    raise exception '0024 tail: classify_document''s no-task ceremony path no longer matches 0016''s exact query shape — WA21-R11 callers must see byte-identical behaviour';
+  -- P1: the no-task ceremony branch (WA21-R11) is DB-enforced to its REAL precondition — the
+  -- document carries NO classify-task history AT ALL (any status, any engine), not merely
+  -- "no task currently running". A document with any task history must go through the
+  -- task-bound branch above.
+  if position('ifexists(select1fromclara.document_processing_taskswheredocument_id=p_documentandlane=''classify'')then' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s no-task ceremony path lost the task-history existence guard (P1) — WA21-R11''s real precondition must be DB-enforced';
   end if;
-  -- No trace of the round-1 "most recent regardless of status" design survives — that
-  -- shape is exactly what round-2 review found unsound.
+  -- No trace of the round-1 "most recent regardless of status" design, nor round-2's
+  -- "match a running task in the WHERE clause" ceremony shape, survives — both are exactly
+  -- what cross-model review found unsound in turn.
   if position('orderbyversion_ndesc' in v_code) > 0 then
     raise exception '0024 tail: classify_document still orders by version_n desc somewhere — the recency-based settle round-2 review rejected is still present';
+  end if;
+  if position('document_id=p_documentandlane=''classify''andstatus=''running''andengine_id=p_engine_id' in v_code) > 0 then
+    raise exception '0024 tail: classify_document''s ceremony path still carries round-2''s "match a running task" shape — P1 requires the stricter no-history guard instead';
+  end if;
+  -- P3: the op-key request hash is SHAPE-CONDITIONAL — a null-task call hashes with the
+  -- EXACT pre-0024 4-key shape (no task/run keys at all), so a historical op_key still
+  -- replays byte-identically; only a task-bound call's hash gains the task+run identity.
+  if position('casewhenp_taskisnullthenclara._hash(jsonb_build_object(''document'',p_document,''kind'',p_kind,''confidence'',p_confidence,''engine'',p_engine_id))elseclara._hash(jsonb_build_object(''document'',p_document,''kind'',p_kind,''confidence'',p_confidence,''engine'',p_engine_id,''task'',p_task,''run'',p_run))end)' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s op-key hash is no longer shape-conditional on p_task — a pre-0024 op_key would fail to replay byte-identically (P3)';
+  end if;
+  -- P1 (arity break): p_task and p_run carry NO default — a call short of 7 args must fail
+  -- to RESOLVE at all (42883), never silently complete against an unprotected null path.
+  if (select pronargdefaults from pg_proc where oid = v_sig2::regprocedure) <> 0 then
+    raise exception '0024 tail: classify_document still has default argument(s) — a short call must fail to resolve, not silently take the null-task path (P1)';
   end if;
   -- Everything else this verb has ever guarded is still there — the definer posture, the
   -- kind vocabulary, the human-precedence rule, and the low-confidence review lane.
@@ -531,7 +572,7 @@ begin
   -- close.
   if (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
        where n.nspname = 'clara' and p.proname = 'classify_document') <> 1 then
-    raise exception '0024 tail: clara.classify_document has more than one overload — the 5-arg pre-race-fix signature must not survive alongside the 6-arg one';
+    raise exception '0024 tail: clara.classify_document has more than one overload — no earlier 5-arg or 6-arg signature may survive alongside the current 7-arg one';
   end if;
 
   -- (6) classify_document's ACL is UNCHANGED by the CoR (DROP+CREATE loses owner/grants —
