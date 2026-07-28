@@ -1,4 +1,13 @@
-# Autopost vendor binding — DESIGN (task #33)
+# Autopost vendor binding — DESIGN v2 (task #33) — PART 1: the authority object
+
+**Part 2 — the machinery, the v2 adversarial set, the build, and the per-finding register — is
+`docs/plan/autopost-vendor-binding-design-part2.md`.** Split per repo precedent
+(`wave-b-migration-0017-design-part2/3.md`) rather than compressing arguments away.
+
+**v2 (2026-07-28)** answers a Codex adversarial design review that returned ten findings against v1.
+Section numbering is preserved so every §-reference in the review still resolves. Where a finding
+killed a claim, the claim is **withdrawn**, not reworded — v1's "self-healing" and
+"structurally impossible" both go. §9/§10 owner rulings are unchanged and remain law.
 
 **Status:** DESIGN ONLY — decision-ready, nothing built. No migration cut, no code changed.
 **Owner ruling implemented:** 2026-07-28, option A — *autodraft MAY resolve a document's vendor
@@ -90,127 +99,180 @@ floor reads `610-S01 | debit | 3`. That asymmetry is the whole design space.
 
 ### 3.1 The object
 
-A new typed table `clara.vendor_identity_bindings`, mirroring `coding_rules`' lifecycle
-(`proposed → live → revoked`) but **not** reusing that table. Reuse was considered and rejected:
-`coding_rules.account_code` is `not null`, `ck_coding_rules_tier` (`0015:301-306`) partitions rows
-by `rule_type`, and `uq_coding_rules_one_live_vendor` (`0011:791-792`) keys uniqueness on
-`(client_id, counterparty_id, rule_type)`. A binding has no account; forcing one in corrupts the
-tier CHECK or invents a sentinel code. A separate table costs one migration and keeps both honest.
+A new typed table `clara.vendor_identity_bindings`, mirroring `coding_rules`' lifecycle but **not**
+reusing that table: `coding_rules.account_code` is `not null`, `ck_coding_rules_tier`
+(`0015:301-306`) partitions rows by `rule_type`, and `uq_coding_rules_one_live_vendor`
+(`0011:791-792`) keys uniqueness on `(client_id, counterparty_id, rule_type)`. A binding has no
+account; forcing one in corrupts the tier CHECK or invents a sentinel code.
+
+**The feature vocabulary is closed by COLUMNS, not by a `jsonb` blob** (review finding 10). A
+free-form `features jsonb` would make "closed v1 vocabulary" a comment rather than a constraint, and
+a security-definer defect writing an unexpected key would not be rejected structurally. Every
+feature is a typed column with its own CHECK.
 
 ```
 clara.vendor_identity_bindings
   id uuid pk · firm_id, client_id uuid not null · counterparty_id uuid not null
-  status text default 'proposed' check in ('proposed','live','revoked','declined')
-  features jsonb not null              -- §3.2, DB-computed, NEVER caller-supplied
-  registration_at_signing text not null -- counterparty's registration_normalized, frozen (§7.6)
-  evidence_entry_ids uuid[] · evidence_document_ids uuid[]   -- the >=3 approvals
-  content_hash text · created_by/at · signed_by/at · revoked_by/at/reason
-  expires_at timestamptz not null      -- <= created_at + 12 months
-  supersedes_binding_id uuid           -- genealogy, coding_rules shape
+  status text default 'proposed'
+    check in ('proposed','live','revoked','declined','expired','suspended_pending_resignature')
+  f1_vendor_name_norm  text not null check (btrim <> '')      -- the ONLY F1 shape
+  f2_invoice_prefix    text not null check (length >= 6)      -- the ONLY F2 shape (§3.2)
+  registration_at_signing text not null   -- counterparty registration_normalized, frozen
+  content_hash text not null · created_by/at · signed_by/at · revoked_by/at/reason
+  expires_at timestamptz not null · supersedes_binding_id uuid
+  foreign key (counterparty_id, firm_id, client_id)
+    references clara.counterparties(id, firm_id, client_id)   -- congruence, not mere existence
   uq_vendor_binding_one_live unique (client_id, counterparty_id) where status='live'
-  ck_vendor_binding_expiry · ck_vendor_binding_revoked
+  trigger t_vendor_binding_frozen — once status='live', UPDATE of f1/f2/registration_at_signing/
+    content_hash/expires_at RAISES (the _tf_coding_rule_update idiom, 0015:1096)
 
-clara.vendor_binding_resolutions          -- append-only, the rule_post_skips idiom (0015:337-370)
+clara.vendor_identity_binding_evidence      -- the 3 approvals, one row each (finding 10)
+  binding_id · firm_id · client_id · entry_id · document_id
+  facts_extraction_id uuid not null · ocr_extraction_id uuid not null  -- PINNED at proposal (§3.3)
+  foreign key (entry_id, firm_id, client_id) references clara.journal_entries(id, firm_id, client_id)
+  unique (binding_id, entry_id)
+
+clara.vendor_binding_resolutions            -- append-only, the rule_post_skips idiom (0015:337-370)
   id · firm_id · client_id · binding_id · document_id · entry_id
-  facts_extraction_id uuid not null · ocr_extraction_id uuid not null
-  features_matched jsonb not null · divergence jsonb (§10 amendment A) · created_at
+  facts_extraction_id · ocr_extraction_id   -- BOTH pins, per §10 ruling 4
+  entry_revision_token uuid                 -- the revision this resolution justified (finding 8)
+  raw_proposal jsonb                        -- the model's ORIGINAL claim, preserved (finding 8)
+  outcome text check in ('bound','divergence')   -- amendment A's divergence is a row here
+  divergence jsonb · created_at
 ```
 
-**Why a separate resolutions table and not `journal_entries.match_fingerprint`.** A finding, not a
-preference: `_approve_entry_core` **nulls `match_fingerprint` on approval** —
-`update … set proposed_counterparty=null, match_fingerprint=null …` (`0015:1460-1463`). Provenance
-written only into the fingerprint is erased by the very act it justifies. The fingerprint still
-carries the marker while the draft is open; the auditor's durable record is the resolutions row.
+**Provenance does not ride the fingerprint — a v1 error the review caught.** v1 proposed
+`match_fingerprint = {"decision":"binding_match", …}`. That is **incompatible with the existing
+approval contract**: `_approve_entry_core` recomputes `_resolve_counterparty(proposed_counterparty)`
+and raises `CLR23` unless the result is *exactly equal* to the stored fingerprint
+(`0015:1313-1317`), so the first EZSEC approval would have failed — and `execute_rule_post` does not
+convert that `CLR23` into a skip. A `binding_match` decision would also have dropped R2's signed
+`vendor_account` rule snapshot, gated on the decision being one of `registration_match` /
+`name_match_unregistered` / `alias_match` (`0016:4167`). **The fingerprint therefore stays an
+ordinary fingerprint.** The binding reference lives in a dedicated nullable
+`clara.journal_entries.vendor_binding_id` column — provenance only, never an input to resolution —
+and the durable auditor record is the resolutions row, which survives approval's fingerprint nulling
+(`0015:1460-1463`).
 
-### 3.2 The features — and the decision that the DB computes them
+### 3.2 The features — DB-computed, and only F3 proves identity
 
-**Recommendation: the signer never types a pattern.** The proposal names only
-`{client_id, counterparty_id}`; the DB derives the features from the ≥3 approved documents and
-refuses if they disagree. This is the most important choice here and it is what makes the object
-satisfy ADR-046 rather than gesture at it: a hand-authored pattern is a human *claim* about future
-documents; a derived one is a *fact* about documents a human already approved.
+**The signer never types a pattern.** The proposal names only `{client_id, counterparty_id}`; the DB
+derives the features from the evidence window and refuses if they disagree. A hand-authored pattern
+is a human *claim* about future documents; a derived one is a *fact* about documents a human already
+approved — which is what ADR-046 demands.
 
-Closed v1 vocabulary — three features, all required, all exact-match, none fuzzy:
+**What v1 got wrong about the division of labour** (finding 5): v1 presented three features as three
+walls of comparable strength. They are not. F1 is a single typed `invoice.vendor_name` string — not a
+whole-letterhead signature — and F2 is a shared numbering habit. Neither proves *who issued the
+document*. Only F3 does, and only if the identity it finds is attributed to the issuer. v2 states the
+roles plainly: **F1 and F2 are STABILITY features** (is this the same recurring document family?);
+**F3 is the IDENTITY feature** (does this document assert it was issued by the bound party?). A
+binding needs all three, but the identity claim rests on F3 alone.
 
-**F1 `vendor_name_exact`** — `clara._binding_normalize()` of the `invoice.vendor_name` region on the
-pinned facts extraction. The normalizer is deliberately **not** the `[^a-zA-Z0-9]→''` folder
-`_resolve_counterparty` uses (`0015:1163-1165`): that exists for *company-name* matching where
-punctuation is noise, and it would delete the CJK characters that are real evidence here.
+**F1 `vendor_name_norm`** — `clara._binding_normalize()` of the `invoice.vendor_name` region on the
+pinned facts extraction. Deliberately **not** the `[^a-zA-Z0-9]→''` folder `_resolve_counterparty`
+uses (`0015:1163-1165`): that exists for company-name matching where punctuation is noise, and would
+delete the CJK characters that are real evidence here. Unicode handling is specified, not left to
+chance (finding 6) — without it, visually identical OCR compares unequal and the signer's receipt is
+visually ambiguous:
 
 ```sql
-clara._binding_normalize(t text) := lower(btrim(regexp_replace(t, '\s+', ' ', 'g')))
+clara._binding_normalize(t text) :=
+  lower(btrim(regexp_replace(
+    regexp_replace(normalize(t, NFC), '[\p{Cf}]', '', 'g'),   -- strip format/bidi controls
+    '\s+', ' ', 'g')))
 ```
 
-For EZSEC: `ez 易计 ezaccount count` — identical across every bill checked. The fragmentation *is*
-the signature; preserving it is the point.
+For EZSEC: `ez 易计 ezaccount count` — identical across every bill checked.
 
-**F2 `invoice_id_prefix`** — the **longest common prefix** of `invoice.invoice_id` across the
-evidence documents, lowercased (EZSEC: `ezsec-iv-`). Refused unless ≥4 characters **and**
-containing a non-digit — a purely numeric prefix is a date or a counter, not a series.
+**F2 `invoice_prefix`** — the longest common prefix of `invoice.invoice_id` across the evidence
+window, normalized as above. **v1's floor of "≥4 chars with a non-digit" was too weak, and the
+review broke it with real data**: the live ROME PUBLIC ADVISORY series `INV250714` / `INV250810` /
+`INV250910` yields the permitted prefix `inv2`, which matches essentially any invoice from any vendor
+numbering from `INV2`. The v2 floor, all required:
 
-**F3 `registered_identity_present`** — **structural, always on, never configurable.** The new
-document's OCR text must contain the bound counterparty's `registration_normalized` **or** its
-`name_normalized`. For EZSEC both are present (line 5 and line 4).
+- length ≥ 6;
+- ≥ 3 alphabetic characters;
+- the leading alphabetic run is **not** in a closed generic-token denylist — `inv`, `invoice`,
+  `bill`, `tax`, `doc`, `no`, `rcpt`, `receipt`, `cn`, `dn`, `so`, `po`;
+- else `prefix_too_weak`.
 
-F3 is what turns this from pattern-matching into evidence. F1+F2 say "this looks like the usual
-bill"; F3 says "and this document still asserts, in its own text, that it comes from the party the
-human approved." A document that does not print the vendor's identity can never be bound, however
-familiar its layout.
+EZSEC's `ezsec-iv-` passes (9 chars, `ezsec` is not generic). RPA's `inv2` fails twice over. A vendor
+whose numbering is genuinely generic cannot carry a binding — correct, since its numbers distinguish
+nothing.
 
-**Bank-account details were considered and rejected as a feature:** no region for them exists in
-any extraction, so adding one is a new deterministic page reader — option-B-adjacent work with its
-own slice. Recorded as §9 Q6, not smuggled in.
+**F3 `issuer_identity_attributed`** — structural, always on, never configurable, and **attributed**
+(finding 5). The bound counterparty's `registration_normalized` **or** `name_normalized` must appear
+in the document's OCR text **inside the issuer block**, where "issuer block" is defined exactly as X6
+already defines it: within the top band of page 1, and geometrically nearer the typed `VendorName`
+region than the typed `CustomerName` region. v1 searched the *whole* OCR text, which is why the
+review's sibling-company attack worked — a bill from company Y naming the bound firm X anywhere on
+the page (as company secretary, preparer, or payment agent) satisfied an unattributed F3.
 
-**Refusals when features conflict** — each named and visible, never a silent pass:
+**This reuse of X6's geometry is not option B.** Option B was rejected because it would widen what X6
+is willing to *emit* as a vendor registration — letting the machine decide identity from an
+unlabelled number. Here nothing is emitted and no identity is created: a human-signed binding already
+names the counterparty, and X6's band-plus-anchor test is reused as a *predicate* asking "does this
+page assert that party in its issuer block?". If the page cannot be banded, or has no typed
+`VendorName` region to anchor against, F3 **fails closed** — X6's own rule that a wall never degrades
+to a no-op when its input goes missing.
+
+**Bank-account details are OUT** — §10 ruling 6, closed not deferred.
+
+**Refusals** — each named and visible, never a silent pass:
 
 | condition | refusal |
 |---|---|
-| two or more **live bindings on the client** match one document | `binding_ambiguous` (X6 uniqueness-or-nothing) |
-| F1+F2 match, F3 fails | `binding_uncorroborated` |
-| document has **no done `ocr` extraction** | `binding_no_corroboration_source` — the wall never degrades to a no-op when its input goes missing (X6 `height_missing` precedent) |
-| canonical counterparty's registration ≠ `registration_at_signing` | `binding_identity_drifted` (§7.6) |
+| two or more live bindings on the client match one document | `binding_ambiguous` |
+| F1/F2 match but F3 finds no attributed identity | `binding_uncorroborated` |
+| page cannot be banded, or no typed `VendorName` region to anchor F3 | `binding_unattributable` |
+| document has no done `ocr` extraction | `binding_no_corroboration_source` |
+| canonical counterparty's registration ≠ `registration_at_signing` | `binding_identity_drifted` |
 | counterparty retired or merged away | `binding_counterparty_inactive` |
-| `expires_at <= now()` / status not `live` | `binding_expired` / `binding_revoked` |
+| expired / revoked / suspended | `binding_expired` · `binding_revoked` · `binding_suspended` |
 
 ### 3.3 The ceremony — explicit, two verbs, mirroring propose/sign
 
 Automatic-at-the-Nth-approval is **rejected**: under WB-R2 authority is a deliberate human act, and
-authority that accrues by counting is exactly the shape ADR-046 refused. Two verbs, both op-key
-idempotent via `_reserve_op`/`_finish_op`, both audited, both `clara_authenticated`.
+authority that accrues by counting is the shape ADR-046 refused. Both verbs are op-key idempotent via
+`_reserve_op`/`_finish_op`, audited, `clara_authenticated`.
 
 **`clara.propose_vendor_identity_binding(p_proposal jsonb, p_op_key text)`** — floor
-`_human_ctx(role_rank('bookkeeper'))`, matching `propose_autopost_rule` (`0016:1612`). Refuses
-unless **all** hold:
+`_human_ctx(role_rank('bookkeeper'))`, matching `propose_autopost_rule` (`0016:1612`). Refuses unless
+**all** hold:
 
 1. client in the caller's firm; counterparty canonical, not retired, `kind='vendor'`;
-2. **the counterparty carries a `registration_normalized`** — without one there is nothing for F3
-   to corroborate against (see §9 Q3 for what this excludes);
-3. ≥3 **distinct** `journal_entries` on this client: `approved`, `reversed_by is null`,
-   `checked_via_rule_id is null` (never a rule's own output — the H2 carve-out at `0015:1474-1476`),
-   `document_id is not null`, canonical counterparty = this one. Deliberately the *same* evidence
-   predicate `propose_autopost_rule` uses (`0016:1717-1727`), keyed on the counterparty rather than
-   the account, because identity is not account-specific;
-4. every such document has a done `invoice_facts` **and** a done `ocr` extraction;
-5. **F1 byte-identical across all of them** — else `features_unstable`;
-6. **F2's longest common prefix** ≥4 chars with a non-digit — else `prefix_too_weak`;
-7. **F3 holds on every one of them.** A human may have approved a document that does not print the
-   vendor's identity; that document is not evidence for a binding;
-8. no live binding exists for `(client, counterparty)`.
-
-On success: a `proposed` row with the derived features, evidence ids, `registration_at_signing`, a
-content hash, `expires_at = now() + 12 months`; audit; `kb_binding.proposed` on the spine.
+2. the counterparty carries a `registration_normalized` (§10 ruling 3);
+3. **the evidence window** — the **three most recent** qualifying approvals by `approved_at`, where
+   qualifying means `approved`, `reversed_by is null`, `checked_via_rule_id is null` (the H2
+   carve-out, `0015:1474-1476`), `document_id is not null`, canonical counterparty = this one. The
+   window is DB-determined, so the caller cannot cherry-pick — but it is **not** all of history. v1
+   required every historical document to agree, which the review showed makes a binding unrecoverable
+   forever after one old letterhead variant, and falsely claimed the design was self-healing. A
+   most-recent-three window is what actually heals: three approvals of a changed format make the
+   window agree again;
+4. every window document has a done `invoice_facts` **and** a done `ocr` extraction, and **both ids
+   are pinned into `vendor_identity_binding_evidence`** (finding 6) — features derive from *those*
+   extractions, never from "latest", so a later `request_reextraction` cannot steer a proposal's
+   features without a fresh human approval;
+5. F1 identical across the window — else `features_unstable`;
+6. F2 meets the §3.2 floor — else `prefix_too_weak`;
+7. F3 holds, attributed, on every window document;
+8. no live binding exists for `(client, counterparty)` **unless** the proposal names it as
+   `supersedes_binding_id` — the relaxation that makes renewal possible without a coverage gap (§4).
 
 **`clara.sign_vendor_identity_binding(p_binding uuid, p_op_key text)`** — floor
-`_human_ctx(role_rank('admin'))`, matching `sign_autopost_rule` (`0016:1781`). **Re-derives the
-entire floor at signing** — conditions 1–8 again against live rows — so evidence reversed between
-proposal and signature strips the authority before it goes live. This is the ADV-5 discipline
-`sign_autopost_rule` already applies to the OCR-sales floor (`0016:1820-1830`). Then `status='live'`,
-`signed_by`, `signed_at`; audit; `kb_binding.signed`.
+`_human_ctx(role_rank('admin'))`, matching `sign_autopost_rule` (`0016:1781`). It re-derives
+conditions 1–8 against live rows (the ADV-5 discipline at `0016:1820-1830`) **and additionally
+requires the re-derived features, evidence window and content hash to equal the stored proposal
+byte-for-byte** — else `proposal_drifted`, re-propose. Without that equality check (finding 6) a
+coherently changed extraction set between proposal and signature could activate a row whose stored
+features no longer describe the evidence. Then `status='live'`, `signed_by`, `signed_at`, atomic
+supersession per §4; audit; `kb_binding.signed`.
 
 **The visible receipt:** the sign return carries the derived features in full — the signer reads
-`ez 易计 ezaccount count` and `ezsec-iv-`, plus the evidence document ids, *before* it goes live —
-the spine event is queryable, and thereafter every resolved draft writes a
-`vendor_binding_resolutions` row naming the binding, the signer, and both pinned extractions.
+`ez 易计 ezaccount count` and `ezsec-iv-`, plus the evidence document ids and both pinned extraction
+ids — *before* it goes live.
 
 ## 4. Q3 — scope, expiry, revocation
 
@@ -220,117 +282,57 @@ let one client's approvals mint posting authority over another client's books �
 authority leak and a direct violation of client attribution (`ARCHITECTURE.md:75`). The same vendor
 billing two clients needs two bindings and two sets of three approvals. Slower; correct.
 
-**Expiry: 12 months**, matching `ck_coding_rules_autopost_bounds` (`0016:2889-2895`). Letterheads
-and secretarial providers change; an authority nobody re-reads is an authority nobody owns. Renewal
-means signing a successor via `supersedes_binding_id`, which re-runs the whole floor — so renewal is
-itself evidence that the vendor still bills the way it billed.
+**Expiry: 12 months**, matching `ck_coding_rules_autopost_bounds` (`0016:2889-2895`). Letterheads and
+secretarial providers change; an authority nobody re-reads is an authority nobody owns.
+
+**Expiry is a status transition, not just a timestamp** (finding 7). v1 left an expired row at
+`status='live'`, where it kept squatting `uq_vendor_binding_one_live` — so a successor could not even
+be *proposed* (v1 condition 8 forbade it) and renewal degenerated into revoke-then-propose-then-sign,
+opening exactly the coverage gap this section claimed to avoid. Two corrections, both structural:
+
+- the partial unique index cannot carry `expires_at > now()` (a partial-index predicate must be
+  immutable), so **every read path treats `expires_at <= now()` as not-live** and refuses
+  `binding_expired`; the row is additionally transitioned to `status='expired'` by whichever verb
+  next touches it, so the index frees itself;
+- **renewal is ATOMIC SUPERSESSION**: a proposal naming `supersedes_binding_id` is permitted while
+  the predecessor is live (§3.3 condition 8), and `sign_vendor_identity_binding` retires the
+  predecessor and activates the successor **in one transaction under a row lock**. There is no
+  interval in which the client has no binding, and no interval in which two live bindings exist —
+  which also means the ceremony can never be the thing that manufactures `binding_ambiguous`.
 
 **Revocation: `clara.revoke_vendor_identity_binding(p_binding, p_reason, p_op_key)`, floor
 `bookkeeper`** — deliberately a *lower* floor than signing. Creating authority should be harder than
 destroying it; any bookkeeper who sees something wrong can pull the brake. Sets `status='revoked'`,
 `revoked_by/at/reason`; the row is never deleted (invariant 8).
 
-**In-flight drafts on revocation — and it costs nothing.** Existing drafts are **not** retro-edited:
-a draft's `proposed_counterparty` and its resolution row are evidence of what was decided, and
-rewriting evidence to match a later decision is the opposite of an audit trail. They simply stop
-being postable, because `execute_rule_post` **re-derives every gate against live rows** — its
-founding doctrine (`packages/runtime/lib/rule-post.mjs:9-13`) — and the binding is one more gate in
-it. A draft whose binding is no longer live skips `binding_revoked` and sits in the human queue.
+**One serialization point, or revocation is not a brake** (finding 7). v1 assumed a post-time
+liveness *read* made revocation effective. It does not: the sweep can read the binding live,
+revocation can commit and truthfully report zero posted entries, and the sweep can then approve and
+commit a post under the binding it just read. So **the binding row is the lock**. Every path that
+depends on a binding's liveness — `execute_rule_post`, `revoke`, `sign` (including supersession), and
+the lazy expiry transition — takes `select … from clara.vendor_identity_bindings where id = … for
+update` before deciding. This is the identical discipline `execute_rule_post` already applies to the
+`coding_rules` row it matches (`0023:484-487`), so it introduces no new lock-ordering hazard: the
+binding lock is taken in the same phase as the rule lock, after the entry lock.
+
+**In-flight drafts on revocation.** Existing drafts are **not** retro-edited: a draft's
+`proposed_counterparty` and its resolution row are evidence of what was decided, and rewriting
+evidence to match a later decision is the opposite of an audit trail. They simply stop being
+postable, because `execute_rule_post` re-derives against live rows under the lock above. A draft
+whose binding is no longer live skips `binding_revoked` and sits in the human queue.
 **Already-posted entries stand** (reverse-not-delete); the revoke verb returns the count of entries
-posted under that binding, so the revoker knows exactly what to review and can reverse deliberately.
+posted under that binding — accurate, because the lock serializes it against in-flight posts — so the
+revoker knows exactly what to review and can reverse deliberately.
 
-## 5. Q4 — the gate change: exactly where resolution slots in
+## 5. Q4 — the gate change: where resolution slots in
 
-### 5.1 Precondition — absence only, never ambiguity
-
-Consulted **only** when the machine honestly found nothing. All three must hold on the **pinned**
-facts extraction:
-
-1. `envelope->'vendor_identity'->>'outcome' = 'absent'`. If X6 said `ambiguous` or
-   `typed_disagreement` (`invoice-vendor-identity.mjs:415,480`) the binding **never** fires — a
-   contested page outranks a standing authority and a human must look. If `matched` /
-   `typed_collapsed`, normal resolution already works and the binding is never reached;
-2. no `invoice.vendor_registration` region exists;
-3. `_resolve_counterparty` on the page's own vendor name returned `birth` (or the region is absent).
-
-This answers the sub-question directly: **absence only, not ambiguity.**
-
-### 5.2 Slot A — `_coding_lane_core`, the admission gate
-
-At `0015:2431-2447`, after the existing block yields `vendor_unresolved`, call the new private
-resolver `clara._resolve_vendor_binding(p_client, f.document_id)`. On a hit set `v_counterparty` and
-append the reason **`vendor_bound`** — visible, because an auditor must see *which* authority
-resolved the vendor, and the reasons array is where the lane explains itself.
-
-`vendor_bound` must not block admission, so `0015:2484` changes from
-`array_remove(v_reasons,'rule_backed')` to remove `vendor_bound` too. That exemption list exists for
-exactly this purpose (`rule_backed` is informational, not blocking) — a one-expression change with
-an established precedent, not a new concept.
-
-### 5.3 Slot B — the draft, so the model never judges identity
-
-**Not optional: fixing Slot A alone makes the system worse.** Today
-`packages/runtime/workflows/autoDraft.v3.tools.ts:141-163` passes `JSON.stringify(input.vendor)` —
-the model's raw proposal — as `wake_draft_entry`'s `p_proposed_counterparty`. Admit an EZSEC bill
-without changing this and the model proposes `{new:{name:"ez 易计 ezAccount COUNT"}}`,
-`_draft_entry_core` calls `_resolve_counterparty` (`0016:4064`), and a **junk counterparty is born**
-— strictly worse than today's clean refusal.
-
-The fix is DB-side, so it is structural rather than model discipline. In `_draft_entry_core`, when
-`p_document is not null` and the document has a live binding match:
-
-- proposal resolves to the **same** canonical counterparty → proceed unchanged;
-- proposal resolves to a **different existing** counterparty → **`CLR23 vendor_binding_conflict`**
-  on the agent lane. Never silently override a stated identity;
-- proposal would **birth** → on the agent lane (`p_is_human = false`) the birth is **refused** and
-  the binding's counterparty substituted. `proposed_counterparty` is written as the **resolved**
-  form `{"existing_id": <bound cp>, "kind":"vendor"}`, and `match_fingerprint` records
-  `{"decision":"binding_match","binding_id":…}`.
-
-Writing the resolved form (not the model's raw text) is what keeps the most security-critical
-function in the system nearly untouched — see 5.4.
-
-**On the human lane (`p_is_human = true`) the binding is advisory, never blocking** — owner-ruled,
-§10 amendment A. A human who decides the familiar letterhead is now a different entity must be able
-to say so; that judgment is the authority the whole system runs on, and a binding derived from their
-own past approvals must not trap them. The divergence is surfaced and recorded, never suppressed.
-
-### 5.4 Slot C — `execute_rule_post`, minimal by construction
-
-Because Slot B stores the *resolved* `{"existing_id": …}` form, the executor's existing
-`_resolve_counterparty` call (`0023:468-481`) resolves cleanly by id and needs **no change**. Its
-only new work is a **liveness re-check** keyed off `match_fingerprint->>'binding_id'`: a
-binding-resolved entry requires the binding still `live`, unexpired, un-drifted, and its
-counterparty still canonicalizing to the rule's — else a named skip (`binding_revoked` /
-`binding_expired` / `binding_identity_drifted`), placed beside the existing `not_corroborated`
-admission gate (`0023:635-639`).
-
-Everything else is untouched: high-stakes, control-leg-ties-to-gross, account identity enumeration,
-cap, window, expiry, revision, corroboration. **The binding changes who the counterparty is; it
-changes no number and lowers no other gate.**
-
-### 5.5 No workflow body changes; what the auditor sees
-
-`autoDraft.v3` and its tools are **not** modified — the model keeps proposing a vendor exactly as it
-does now and the DB overrides it on bound documents. Deliberate: the frozen workflow manifest stays
-untouched (`scripts/check-frozen-workflows.mjs`), no `_vN` bump is needed, and the guard sits in the
-layer that cannot be prompted around. Three durable artifacts per binding-resolved draft:
-(1) a `clara.vendor_binding_resolutions` row — binding, document, entry, **both pinned extraction
-ids**, features matched, append-only, surviving approval; (2) the spine event
-`counterparty.binding_resolved`; (3) the lane reason `vendor_bound` on `coding_lane` /
-`list_review_queue`, so the review UI says *"vendor resolved by binding signed by \<name\>, from 3
-approvals"* rather than presenting it as though the page proved it.
-
-### 5.6 The two-pin tension, named rather than glossed
-
-F1/F2 read the pinned `invoice_facts` extraction; F3 reads the latest done `ocr` extraction — a
-**different row**. `execute_rule_post`'s ADV-R2 discipline binds exactly one extraction per post
-(`0023:417-445`) precisely to avoid disagreeing evidence. Honest resolution: the resolver pins
-**both**, once, at its top, by the same `order by version_n desc, id desc limit 1` rule, and
-**records both ids**. Zero done `ocr` extractions ⇒ refuse (`binding_no_corroboration_source`),
-never proceed unpinned. Live coverage is 47/47 documents with a done `ocr` extraction, so this costs
-nothing operationally — but the refusal must exist so the wall cannot quietly become a no-op.
-§9 Q4 asks the owner to accept the two-pin or drop F3 for a weaker binding.
+**Moved to Part 2 §A and rebuilt at v2.** The v1 text in this section was wrong in ways the
+adversarial review proved against live code — the fingerprint marker broke
+`_approve_entry_core`'s recompute-and-compare contract (`0015:1313-1317`) and would have raised
+`CLR23` on the *first* EZSEC approval; the post-time control rechecked liveness instead of
+re-resolving current evidence; and the X6 `absent` precondition conflated an empty candidate list
+with nine distinct refusal reasons. Part 2 §A carries the corrected three-slot design, the
+precondition, and the post-time re-derivation. Part 2 §E records each finding's disposition.
 
 ## 6. Q5 — writing down #30, and naming the missing field
 
@@ -376,71 +378,20 @@ the diagnostic the runway needed and did not have on 2026-07-28.
 
 ## 7. Q6 — adversarial: how could this post to the wrong vendor?
 
-Each attack, then the wall. Walls are structural (DB) unless stated.
+**Moved to Part 2 §C and rebuilt at v2.** Two claims made here in v1 are now **withdrawn as false**,
+not reworded: the "self-healing" claim (v1 §7.1 — an all-history evidence rule means one old
+letterhead variant blocks a binding forever, so fresh approvals could never heal it) and the
+"structurally impossible" claim about broad bindings (v1 §7.5 — the review derived the permitted
+4-character prefix `inv2` from the real ROME PUBLIC ADVISORY series, and showed a sibling /
+"issued on behalf of" bill clearing all three features). Part 2 §C carries the v2 attack set,
+including the issuer-attribution attack v1 did not have, and states each residual it does not close.
 
-**7.1 The vendor changes its invoice format.** F1 and/or F2 stop matching → no hit →
-`vendor_unresolved` → human queue. **Fail-closed and self-healing**: after three fresh approvals of
-the new format a successor binding can be signed. A changed letterhead is exactly when you want a
-person to look.
+## 8. Build shape
 
-**7.2 Two vendors share an invoice-number prefix.** F2 alone resolves nothing — F1, a full letterhead
-signature, must match too; and two live bindings matching one document is `binding_ambiguous`,
-refuse. A shared prefix cannot be *authored* into existence either: F2 is the derived longest common
-prefix of approved documents, floored at 4 chars with a non-digit.
-
-**7.3 A forged document mimicking the pattern.** The real threat. To post it must clear, in order:
-intake and filing to the right client; X6 reporting `absent`; F1 exactly; F2 exactly; **F3 — the
-bound party's registration or registered name in its own OCR text**; two-reader corroboration of net
-*and* tax (`0023:635-639`); MYR; the entry shape (exactly one payable credit **equal to the stated
-gross**, ≥1 signed-account debit, zero outside legs — `0023:546-591`); the cap (RM1,700); the monthly
-window (≤3); high-stakes; non-expiry. Stated honestly, that is a **bounded small-ticket exposure with
-a complete audit trail** naming the binding and its signer — and it belongs compared to the status
-quo, not to zero: today the same forgery lands in the review queue and a bookkeeper approves it. The
-binding does not create the exposure; it changes who is in the loop for recurring bills under the
-cap. Ruled by the owner in §10 (5), which declined a probationary expiry in favour of consistency.
-
-**7.4 The client switches secretarial firm mid-year.** New letterhead, new registration → F1 and F3
-both fail → refuse → human codes → new counterparty at approval → three approvals → a new binding may
-be signed. Correct by construction. The nastier variant — **a practice sale where the acquirer keeps
-the template and the numbering** — is caught by F3: the acquirer prints *its own* registration, the
-bound one is gone, refuse. Residual case: transitional stationery still printing the old
-registration, where the invoice itself asserts it is from the old entity, the cap and window bound
-the damage, and the 12-month expiry forces a re-look. **Residual risk, not claimed solved** — the
-§10 amendment-A divergence record is the early-warning channel for it.
-
-**7.5 Authoring a deliberately broad binding to launder many vendors into one counterparty.**
-Structurally impossible: **features are DB-derived, never caller-supplied** (§3.2). F1 must be
-byte-identical across ≥3 approved documents, F2 is a floored longest common prefix, F3 must already
-hold on every one. There is no input through which to widen a pattern.
-
-**7.6 Counterparty merge or identity drift.** `merge_counterparties` (`0015:2242`) can repoint the
-bound counterparty. Every resolution canonicalizes, so a merge is followed — but if the canonical
-counterparty's `registration_normalized` differs from `registration_at_signing`, the resolver refuses
-`binding_identity_drifted` and demands re-signature. Fail-closed: a binding attests to a *specific
-registered identity*, and a merge that changes it invalidates the attestation.
-
-**7.7 Rules breeding rules.** Untouched: the sighting + auto-proposal block is human-only
-(`checked_via_rule_id is null`, `0015:1472-1476`), so binding-resolved rule-posts breed nothing; and
-the binding's evidence predicate excludes rule-checked entries, so a binding can never be born from
-autopost output.
-
-**7.8 An unregistered counterparty.** Refused at proposal (§3.3 condition 2, ruled §10 (3)). Without
-a registration there is nothing for F3 to corroborate, and a name-only binding is exactly the CLR23
-hazard the R2 ceremony proved correct on 6 of 12 ticks.
-
-## 8. Build shape (for the implementation lane, not decided here)
-
-- **Objects:** the two tables · `_binding_normalize` · `_resolve_vendor_binding` (private) · three
-  verbs (`propose`/`sign`/`revoke`, `clara_authenticated`, role-floored, op-key, audited, spine) ·
-  `create or replace` of `_coding_lane_core` / `_draft_entry_core` / `execute_rule_post` (Slots A/B/C
-  + §6.2), split per §10 amendment C. Next free error code looks like **CLR35** — verify as-built.
-- **Rig first, then live:** new-object tests, the §3.2 refusal matrix, the Slot-B birth-refusal, the
-  revocation-stops-in-flight-drafts test, and an exact-diff proving `draft_entry` stays
-  byte-identical for unbound documents.
-- **Live vehicle already standing:** counterparty `348dc9cd`, 3 approvals, rule `90a07e89` live,
-  8 corroborated EZSEC documents, IV-00743 (`671786e5…`, filing `0586d531…`) filed with no open
-  draft. After deploy the resume is a single `request_autodraft(0586d531…)`.
-- **Cross-model review before merge** — security-critical work under the house rules.
+**Moved to Part 2 §D**, which adds the activation interlock (§10 amendment C's split must not let
+0027 confer usable authority before 0028's post-time control exists), the structural constraints
+the sketch owed (closed feature vocabulary, composite firm/client FKs, signed-content immutability),
+and the rig matrix the v2 mechanics require.
 
 ## 9. Open questions — ALL RULED 2026-07-28
 
@@ -470,10 +421,23 @@ whose document has a live binding match and whose chosen counterparty differs, t
 blocks: the human's choice always stands. It must (i) surface a **visible warning citing the
 binding** — its id, its signer, and the counterparty it names — and (ii) **record the divergence
 durably**, so the binding's next reviewer sees that a professional looked at a bound document and
-decided otherwise. Mechanism: a `vendor_binding_resolutions` row carrying a `divergence jsonb`
-naming the human-chosen counterparty and the actor, surfaced on the binding's review view. Repeated
-divergence is the strongest available signal that a binding has gone stale and should be revoked or
-superseded — which makes this the design's cheapest early-warning channel, not merely a courtesy.
+decided otherwise. Mechanism: a `vendor_binding_resolutions` row with `outcome='divergence'` and a
+`divergence jsonb` naming the human-chosen counterparty and the actor.
+
+**v2 correction (finding 9): as written in v1 this control was decorative, and the fix is a real
+consumer.** v1 promised divergence would reach "the binding's next reviewer" while designing no
+review surface, no queue item, no notification and no consumption rule — and `revise_entry` bypassed
+recording entirely, so a bound draft could be revised to another counterparty leaving no trace. v2
+closes both ends: **`revise_entry` writes the divergence row** (Part 2 §A.4), and divergence has a
+**consumer that acts** — after **3 divergences within 30 days** the binding transitions to
+`suspended_pending_resignature` and its `signed_by` is notified, reusing verbatim the mechanism
+`execute_rule_post` already uses to suspend an OCR-sales autopost rule after repeated skips
+(`0023:684-698`). A suspended binding resolves nothing until an admin signs a successor.
+
+**This does not touch the owner's ruling.** The ruling protects the *human's* counterparty choice,
+which remains unblockable in every case. Suspending the *binding* after repeated human disagreement
+is the machine standing down from an authority the professionals keep overriding — the opposite of
+blocking a human.
 
 **Amendment B (ruling 3) — registered-only, and this is status quo preserved, not a new
 restriction.** A binding requires the counterparty to carry a `registration_normalized`
@@ -483,7 +447,10 @@ and no lane they have is closed; they simply do not gain this one. What a determ
 looks like for a party with no SSM number is **a future wave's design problem**, deliberately not
 smuggled into this slice.
 
-**Amendment C (ruling 8) — two migrations, the X5 "last and alone" discipline.**
+**Amendment C (ruling 8) — two migrations, the X5 "last and alone" discipline.** *(v2: the split
+needs an ACTIVATION INTERLOCK — finding 10. 0027 installs Slots A/B and the signing ceremony while
+0028 installs the post-time control; released independently, a bound draft could reach the OLD
+executor with no binding gate at all. The interlock is specified in Part 2 §D.)*
 
 - **0027** — the binding table, `vendor_binding_resolutions`, `_binding_normalize`,
   `_resolve_vendor_binding`, the three verbs, and Slots A (`_coding_lane_core`) and B
