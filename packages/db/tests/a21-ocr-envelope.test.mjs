@@ -101,6 +101,26 @@ async function ocrWorld(client) {
   return built;
 }
 
+/** A classify task already exists the moment seedCitedDocument's underlying
+ *  file_document call runs (kind is null then — file_document itself auto-enqueues via
+ *  _enqueue_invoice_facts_core, 0009). 0024 round 3 (P1) closed the no-task ceremony for
+ *  any document with classify-task history, so every classifyDocument call below must bind
+ *  to a genuine task+run — claim whichever classify task the doc already carries. */
+async function claimedClassifyTask(documentId) {
+  const r = await rootQuery(
+    "select id, status from clara.document_processing_tasks where document_id=$1 and lane='classify' order by created_at desc limit 1",
+    [documentId],
+  );
+  const row = r.rows[0];
+  assert.ok(row, `mandatory setup: a classify task exists for ${documentId} (file_document's own auto-enqueue)`);
+  // Q1: the claim secret is a CAPABILITY, minted and returned ONLY at claim time — no
+  // recovery path exists for an already-running task (by design). Not exercised in
+  // practice (every caller here hits this immediately after auto-enqueue, while queued).
+  if (row.status === "running") return { id: row.id, runId: (await rootQuery("select workflow_run_id from clara.document_processing_tasks where id=$1", [row.id])).rows[0].workflow_run_id, secret: undefined };
+  const claimed = await claimTask(row.id, { egressApproved: false });
+  return { id: row.id, runId: claimed.workflow_run_id, secret: claimed.claim_secret };
+}
+
 /** A facts-complete OCR sales document. `omit` drops named anchor/direction facts;
  *  `classify` (default 'invoice') sets the polarity verdict; null leaves kind NULL. */
 async function ocrSalesDoc(client, { cents = 90000, classify = "invoice", omit = [], customerName = CUSTOMER, typeCode = "01" } = {}) {
@@ -132,7 +152,10 @@ async function ocrSalesDoc(client, { cents = 90000, classify = "invoice", omit =
   // 0023 (X5): a corroborated OCR document must carry the reader/typed AGREEMENT the
   // mapper records — regions alone are one reader's assertion.
   await persistInvoiceFacts(task.id, fields, { envelope: agreedEnvelope() });
-  if (classify) await classifyDocument({ document: cited.documentId, kind: classify, confidence: 0.97 });
+  if (classify) {
+    const cls = await claimedClassifyTask(cited.documentId);
+    await classifyDocument({ document: cited.documentId, kind: classify, confidence: 0.97, task: cls.id, run: cls.runId, secret: cls.secret });
+  }
   return cited;
 }
 
@@ -183,8 +206,10 @@ test("§3.3(2) polarity_unverified FAIL-PRE: an unclassified doc skips; PASS-POS
   assert.notEqual(await entryStatusOf(draft.entry_id), "approved", "an OCR sales draft with NO kind verdict is NEVER auto-posted");
   assert.equal(await lastSkipReason(draft.entry_id), OCR_SKIP.polarity, "the skip is NAMED polarity_unverified (caller-selected coding_kind is never polarity evidence)");
   // PASS-POST: the classifier verifies 'invoice' — the executor re-derives at post
-  // time (control 8) and the same draft now posts.
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97 });
+  // time (control 8) and the same draft now posts. 0024 round 3 (P1): the doc already
+  // carries classify-task history (file_document's own auto-enqueue) — bind to it.
+  const cls = await claimedClassifyTask(cited.documentId);
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97, task: cls.id, run: cls.runId, secret: cls.secret });
   const sightBefore = (await sightingRows(client)).length;
   await postViaRule(draft.entry_id).catch((e) => noteLane(`polarity pass-post raised ${e.code}`));
   // 0022 / X4 — the PASS-POST half is now conditional on the extraction-slice DARK GUARD,

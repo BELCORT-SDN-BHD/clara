@@ -1,0 +1,7 @@
+# Gitleaks false-positive fingerprints (commit-pinned; see gitleaks .gitleaksignore docs).
+# Both findings are the Q1 claim-secret TEST fixtures born in 946a73d — a property access on
+# a runtime-returned claim receipt and a self-labeled synthetic literal. Neither is a
+# credential. The lines carry inline `gitleaks:allow` markers from the follow-up commit on;
+# these fingerprints cover the historical patch where the markers do not yet exist.
+946a73d49cab28baea47d3f7eb4f05d649143468:packages/db/tests/x-fail-classify.test.mjs:generic-api-key:430
+946a73d49cab28baea47d3f7eb4f05d649143468:packages/runtime/tests/classify-unit.test.mjs:generic-api-key:41

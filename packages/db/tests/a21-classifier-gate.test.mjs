@@ -86,8 +86,12 @@ test("P3 grants: classify_document is runtime-ONLY (agent/human/wake denied 4250
   }
   assert.equal(await roleCanExecute("clara_authenticated", "set_document_kind"), true, "clara_authenticated may EXECUTE set_document_kind (bookkeeper+ correction lane)");
   assert.equal(await roleCanExecute("clara_agent_ro", "set_document_kind"), false, "the agent role gets NOTHING (P6)");
+  // 0024 round 3 (P1) made p_task/p_run mandatory (no default), and Q1 (round 4) added
+  // p_claim_secret with the same discipline — the call must supply ALL THREE (even as null)
+  // so the function RESOLVES (else 42883 fires before the privilege check ever runs) and
+  // the cell still proves the intended 42501 denial.
   await assert.rejects(
-    () => roleQuery(ROLES.agentRo, "select clara.classify_document(p_document => gen_random_uuid(), p_kind => 'invoice', p_confidence => 0.9, p_engine_id => 'clara-classify-llm:v1', p_op_key => $1)", [opk("x")]),
+    () => roleQuery(ROLES.agentRo, "select clara.classify_document(p_document => gen_random_uuid(), p_kind => 'invoice', p_confidence => 0.9, p_engine_id => 'clara-classify-llm:v1', p_op_key => $1, p_task => null, p_run => null, p_claim_secret => null)", [opk("x")]),
     (e) => e.code === "42501",
     "the agent role is denied classify_document behaviorally (42501)",
   );
@@ -102,7 +106,13 @@ test("P3 classify_document sets the kind, persists a doc_classify verdict row, a
   const client = world.clients.A1;
   const cited = await pdfDoc(client);
   assert.equal(await docKind(cited.documentId), null, "the fixture doc starts unclassified (mandatory setup)");
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.93 });
+  // pdfDoc(kind=null) -> seedCitedDocument -> the REAL file_document writer, which itself
+  // auto-enqueues a classify task at filing time (kind is null then). 0024 round 3 (P1):
+  // the document already carries classify-task history, so the settle must be task+run-bound.
+  const clsTask = await factsTaskOf(cited.documentId, "classify");
+  assert.ok(clsTask, "mandatory setup: file_document's own auto-enqueue already opened a classify task");
+  const clsClaimed = await claimTask(clsTask.id, { egressApproved: false });
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.93, task: clsTask.id, run: clsClaimed.workflow_run_id, secret: clsClaimed.claim_secret });
   assert.equal(await docKind(cited.documentId), "invoice", "documents.document_kind is set by the audited fn");
   const verdict = (await rootQuery(
     "select to_jsonb(e) as row from clara.document_extractions e where e.document_id=$1 and e.engine_kind='doc_classify' order by e.version_n desc limit 1",
@@ -125,23 +135,56 @@ test("P3 the kind vocabulary is the EXISTING 18-value CHECK: an off-vocabulary k
   const client = world.clients.A1;
   const cited = await pdfDoc(client);
   let err = null;
+  // The off-vocabulary refusal fires on the KIND CHECK, which runs BEFORE the task-bound
+  // branch in classify_document's body — this call needs no task/run/secret to reach it.
   try { await classifyDocument({ document: cited.documentId, kind: "mystery_scroll", confidence: 0.99 }); } catch (e) { err = e; }
   assert.ok(err, "an off-vocabulary kind is refused (the taxonomy is the existing 18-value CHECK, no new values)");
-  // Low confidence: the verdict must NOT stamp the kind.
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.79 }).catch((e) => noteLane(`low-confidence classify raised ${e.code} — acceptable if the refusal is the lane`));
+
+  // Q2 (cross-model review): this call DOES reach the task-bound branch (vocabulary +
+  // confidence both pass) — the document already carries classify-task history (pdfDoc's
+  // own file_document auto-enqueue), so it must bind explicitly like every other call in
+  // this file, not fall through to a `.catch(noteLane)` that masks whatever actually
+  // happened. Asserted HARD below: the low-confidence verdict is genuinely settled, not
+  // silently refused.
+  const clsTask = await factsTaskOf(cited.documentId, "classify");
+  assert.ok(clsTask, "mandatory setup: file_document's own auto-enqueue already opened a classify task");
+  const clsClaimed = await claimTask(clsTask.id, { egressApproved: false });
+  const lowConf = await classifyDocument({
+    document: cited.documentId, kind: "invoice", confidence: 0.79,
+    task: clsTask.id, run: clsClaimed.workflow_run_id, secret: clsClaimed.claim_secret,
+  });
+  assert.equal(lowConf.kind_set, false, "the low-confidence verdict does NOT set the kind (the receipt says so explicitly)");
   assert.equal(await docKind(cited.documentId), null, "a <0.8-confidence classification leaves document_kind NULL (the ADR-023 review lane takes it instead)");
-  const review = await rootQuery(
-    "select 1 from clara.document_processing_tasks t where t.document_id=$1 and t.lane <> 'classify' and to_jsonb(t)::text ilike '%review%' limit 1",
+  // The verdict ROW still persists (classify_document's own contract — a low-confidence
+  // call is not a refusal, it is a settle that declines to stamp the kind).
+  const verdict = (await rootQuery(
+    "select envelope from clara.document_extractions where document_id=$1 and engine_kind='doc_classify' order by version_n desc limit 1",
     [cited.documentId],
-  ).catch(() => ({ rows: [] }));
-  if (!review.rows.length) noteLane("no visible review artifact found for the low-confidence verdict — the ADR-023 lane's carrier is as-built; adjudicate its home");
+  )).rows[0];
+  assert.ok(verdict, "the low-confidence verdict persists as a document_extractions row");
+  assert.equal(verdict.envelope.low_confidence, true, "the envelope honestly marks it low_confidence");
+  // The review lane opens for real: an open_questions row, origin='classification', status
+  // 'open', scoped to the document's actively-filed client (pdfDoc files cited to `client`).
+  const review = await rootQuery(
+    "select client_id, origin, status, question_text from clara.open_questions where document_id=$1 and origin='classification' order by opened_at desc limit 1",
+    [cited.documentId],
+  );
+  assert.equal(review.rows.length, 1, "exactly one classification review question opens for the low-confidence verdict");
+  assert.equal(review.rows[0].status, "open", "the review question is OPEN, not silently pre-resolved");
+  assert.equal(review.rows[0].client_id, client, "the review question is scoped to the document's filed client");
+  assert.match(review.rows[0].question_text, /invoice/, "the question names the classifier's best guess");
 });
 
 test("P3 set_document_kind is the audited HUMAN override: a bookkeeper corrects a kind with a reason", async (t) => {
   if (skipHere(t)) return;
   const client = world.clients.A1;
   const cited = await pdfDoc(client);
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.9 });
+  // pdfDoc(kind=null) already carries classify-task history (file_document's own
+  // auto-enqueue at filing time) — 0024 round 3 (P1) requires the task-bound settle.
+  const clsTask = await factsTaskOf(cited.documentId, "classify");
+  assert.ok(clsTask, "mandatory setup: file_document's own auto-enqueue already opened a classify task");
+  const clsClaimed = await claimTask(clsTask.id, { egressApproved: false });
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.9, task: clsTask.id, run: clsClaimed.workflow_run_id, secret: clsClaimed.claim_secret });
   await setDocumentKind(world.users.bob, { document: cited.documentId, kind: "payment_voucher", reason: "misclassified — this is a voucher" });
   assert.equal(await docKind(cited.documentId), "payment_voucher", "the human override corrects the kind (bookkeeper+)");
 });
@@ -178,7 +221,12 @@ test("§5 NULL kind → classify FIRST: the enqueue opens a 'classify' task (not
   assert.match(classifyTask.engine_id ?? "", /^clara-classify-/, "the classify task snapshots a clara-classify engine");
   // The verdict lands; the facts enqueue now routes (the event consumer re-fires in
   // production — the rig re-runs the idempotent backstop enqueue).
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.95 });
+  //
+  // 0024 round 3 (P1): a classify-task row now exists for this document (the enqueue
+  // above), so the no-task ceremony is closed — the real worker shape (claim, then bind
+  // the settle to that claim's own task+run) is what a caller must present.
+  const claimed = await claimTask(classifyTask.id, { egressApproved: false });
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.95, task: classifyTask.id, run: claimed.workflow_run_id, secret: claimed.claim_secret });
   await enqueueInvoiceFacts(cited.documentId);
   assert.ok(await factsTaskOf(cited.documentId, "invoice_facts"), "with kind='invoice' the facts gate admits invoice_facts");
 });

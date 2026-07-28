@@ -210,12 +210,28 @@ export async function resolveWatch(sub, { watch, conclusion, evidence = "rig res
   return r.rows[0].r;
 }
 
-/** classify_document(p_document, p_kind, p_confidence, p_engine_id, p_op_key) — runtime. */
-export async function classifyDocument({ document, kind, confidence = 0.95, engineId = "clara-classify-llm:v1", opKey = null }) {
+/** classify_document(p_document, p_kind, p_confidence, p_engine_id, p_op_key, p_task, p_run) —
+ *  runtime. 0024 round 3 (P1/P2) removed the SQL-side default on p_task/p_run — this JS
+ *  wrapper always supplies BOTH positions explicitly (even when the value itself is `null`),
+ *  so a caller through this helper never triggers the arity break (42883); that break is
+ *  exercised directly (a raw 5-arg query) by the cell proving P1. `task`/`run` default to
+ *  `null` here for the SAME reason the old comment described: a cell proving the p_task=NULL
+ *  no-task ceremony path passes `task: null` EXPLICITLY; a cell not naming `task` at all gets
+ *  the same null via the default — indistinguishable at the SQL boundary. `run` has no
+ *  meaning when `task` is null (P1's ceremony branch never reads it) and MUST match the
+ *  claim's own workflow_run_id when `task` is set (P2) — callers proving the task-bound path
+ *  pass both together via `runningClassifyTask`. */
+// Q1 (round 4): p_claim_secret is ALSO required (no SQL-side default, same P1 discipline) —
+// this wrapper always supplies it (even as `null`) so a plain call through this helper never
+// triggers the arity break; that break is exercised directly (a raw 7-arg query) by its own
+// cell. `secret` MUST be the value the caller's own claim received (workflow_run_id alone is
+// no longer sufficient — Q1) for a task-bound settle to succeed; it is meaningless (and
+// unchecked) when `task` is null.
+export async function classifyDocument({ document, kind, confidence = 0.95, engineId = "clara-classify-llm:v1", opKey = null, task = null, run = null, secret = null }) {
   const r = await roleQuery(
     ROLES.runtime,
-    "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3::numeric, p_engine_id => $4, p_op_key => $5) as r",
-    [document, kind, confidence, engineId, opKey ?? opk("clsdoc")],
+    "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3::numeric, p_engine_id => $4, p_op_key => $5, p_task => $6, p_run => $7, p_claim_secret => $8) as r",
+    [document, kind, confidence, engineId, opKey ?? opk("clsdoc"), task, run, secret],
   );
   return r.rows[0].r;
 }

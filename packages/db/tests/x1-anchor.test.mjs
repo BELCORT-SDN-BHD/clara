@@ -107,6 +107,26 @@ after(async () => { await endPool(); });
 
 const gate = () => fail0022(live);
 
+/** A classify task already exists the moment seedCitedDocument's underlying file_document
+ *  call runs (kind is null then — file_document itself auto-enqueues via
+ *  _enqueue_invoice_facts_core, 0009). 0024 round 3 (P1) closed the no-task ceremony for
+ *  any document with classify-task history, so the classifyDocument call below must bind to
+ *  a genuine task+run — claim whichever classify task the doc already carries. */
+async function claimedClassifyTask(documentId) {
+  const r = await rootQuery(
+    "select id, status from clara.document_processing_tasks where document_id=$1 and lane='classify' order by created_at desc limit 1",
+    [documentId],
+  );
+  const row = r.rows[0];
+  assert.ok(row, `mandatory setup: a classify task exists for ${documentId} (file_document's own auto-enqueue)`);
+  // Q1: the claim secret is a CAPABILITY, minted and returned ONLY at claim time — no
+  // recovery path exists for an already-running task (by design). Not exercised in
+  // practice (every caller here hits this immediately after auto-enqueue, while queued).
+  if (row.status === "running") return { id: row.id, runId: (await rootQuery("select workflow_run_id from clara.document_processing_tasks where id=$1", [row.id])).rows[0].workflow_run_id, secret: undefined };
+  const claimed = await claimTask(row.id, { egressApproved: false });
+  return { id: row.id, runId: claimed.workflow_run_id, secret: claimed.claim_secret };
+}
+
 /** The document X2 will start producing: every anchor present and the component identity
  *  exact. `amountDue` defaults to the gross (the second independent anchor). */
 async function fullyAnchoredDoc() {
@@ -129,7 +149,9 @@ async function fullyAnchoredDoc() {
   // 0023 (X5): a corroborated OCR document must carry the reader/typed AGREEMENT the
   // mapper records — regions alone are one reader's assertion.
   await persistInvoiceFacts(task.id, fields, { envelope: agreedEnvelope() });
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97 });
+  // 0024 round 3 (P1): the doc already carries classify-task history — bind to it.
+  const cls = await claimedClassifyTask(cited.documentId);
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97, task: cls.id, run: cls.runId, secret: cls.secret });
   return { cited, gross, net, tax, rounding, serviceCharge };
 }
 

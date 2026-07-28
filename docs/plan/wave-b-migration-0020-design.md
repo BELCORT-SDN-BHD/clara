@@ -99,6 +99,7 @@
 > | **A6** *(owner ruling, 2026-07-25)* | Three things the A5 exemption was still missing: the orphan lint narrows to exclude the reserved namespace (it had gone superlinear), a **third** apply-time bridge direction, and a structural **`p_note is null`** floor on the ingest verb. | **§5.6** (new), **§6.1**, **§8**, **§9.7** |
 > | **A7** *(owner ruling, 2026-07-25)* | The exempt page's **bytes are made canonical**: title and body derive from fixed text plus the opaque document uuid and from **no caller-supplied string** — closing `documents.original_filename`, the channel A6 missed, and letting the bridge verify any historical page by **reconstruction** (a **fourth** direction that subsumes the third). The `p_note` floor is kept as defence in depth but moves **behind `_reserve_op`**, restoring op-key replay. | **§5.7** (new), **§5.6**, **§6.1**, **§8**, **§9.7** |
 > | **A8** *(owner ruling, 2026-07-25)* | Canonicalization is corrected **at the append-only event spine**, not only in the rows: a **fifth** bridge direction, an **audited correction operation** (two shipped deploy artifacts) replacing A7's two bare `update`s, and the `wiki.page_canonicalized` correction event type. The 19→20 upgrade drill is **wired into CI**, and §§5.3/8's stale A6 prose is corrected. | **§5.8** (new), **§5.3**, **§5.7**, **§8**, **§9.7**, **§10.3**, **§11** |
+> | **A10** *(cross-model review Q1, 2026-07-28 — the 4th round of the classify_document race review, migration 0024)* | §6's closed set gains a THIRD deliberately-changed member: `claim_document_processing_task` now mints a random claim-secret CAPABILITY on every fresh `queued`→`running` transition, storing ONLY its sha256 digest (new column, `claim_secret_digest`) and returning the preimage ONLY to the claiming session — closing Q1 (`workflow_run_id` is readable by any `clara_runtime` session via 0008's table-wide SELECT, so it alone cannot authorize `classify_document`'s settle). Same discipline as A7/A9: the pin is not retuned — `wb-0020-legacy.test.mjs`'s `restore()` reverses exactly the three insertions and re-hashes the remainder to the UNCHANGED 19-migration prestate. *(Numbered A10, not A9 — A9 is `_enqueue_invoice_facts_core`'s kind-widening + lock fix, ratified the same day on the sibling migration 0025; that entry is not yet in THIS file's history when A10 lands on 0024, hence the visible skip from A8 straight to A10 until the branches combine.)* | **§6**, **§6.1** |
 >
 > Two **errata** are ratified with them: §8's "three partial unique indexes" is wrong
 > (two uniques + one non-unique open-authorization index — see §8), and §3.3/§5.1's
@@ -1523,6 +1524,14 @@ clara_fn_owner` / `reset role`. One transaction; **any failure aborts the apply*
     present in their exact shape, **and** nothing else in that function moved.
     *(ERRATUM, A8: v1.3–v1.4 still said "exactly the A6 insertion", singular. A blind lane
     reading that would have pinned one edit and dropped the canonical form.)*
+  - **A10 exception (2026-07-28, cross-model review Q1, migration 0024)**, a SECOND
+    deliberately-changed member (landed on 0024, ahead of A9's own change to
+    `_enqueue_invoice_facts_core` on the sibling migration 0025): `claim_document_processing_
+    task` mints a claim-secret capability on every fresh claim, storing only its sha256
+    digest and returning the preimage once to the claiming session. Its pin is likewise
+    **not** retuned — the tail reverses exactly the three insertions (the `v_secret` declare,
+    the mint+digest-column update, and the `'claim_secret'` return key) and re-hashes the
+    remainder against the UNCHANGED 19-migration prestate.
 - Their **EXECUTE ACLs** are pinned as one closed-set string.
 - `client_egress_consents` has no new column, **and** its constraints, indexes,
   non-internal triggers, RLS flags/owner and policies are pinned as one exact

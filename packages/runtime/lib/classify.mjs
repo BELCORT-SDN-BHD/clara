@@ -144,6 +144,12 @@ export async function processClassifyTask(withRuntime, taskId, deps = {}) {
   if (!interpreted.claimed) return { taskId, status: interpreted.status };
   const doc = interpreted.doc;
   if (!doc?.document_id || !doc?.firm_id) return { taskId, status: "no_work" };
+  // Q1 (cross-model review, 4th round): the claim mints a CAPABILITY, not just an
+  // identifier — workflow_run_id is readable by any clara_runtime session (0008's
+  // table-wide SELECT), so it alone cannot authorize a settle. claim_secret is returned
+  // ONLY here, on a fresh claim (interpretClaimReceipt's shared shape doesn't carry it —
+  // read it straight off the raw receipt rather than touching that frozen behavior module).
+  const claimSecret = claim?.claim_secret;
 
   const readText = deps.readExtractionText ?? readExtractionText;
   const classify = deps.classify ?? classifyDocumentText;
@@ -152,13 +158,22 @@ export async function processClassifyTask(withRuntime, taskId, deps = {}) {
   // re-drives it (the local-facts RETRYABLE branch — classify has no terminal-fail writer).
   const text = await withRuntime((c) => readText(c, { documentId: doc.document_id, firmId: doc.firm_id }));
   const verdict = await classify({ text, modelId });
+  // p_task+p_run+p_claim_secret (0024, race fix round 3-4 / P1-P2/Q1): binds the settle to
+  // THIS claim's own task, its own run token, AND the capability only this claim was ever
+  // handed — never "whichever classify task is newest for this document", never a task id
+  // alone, and never a run id alone (readable by any clara_runtime session). runId and
+  // claimSecret are the SAME values this claim already produced above — classify_document
+  // now requires both back to prove this settle belongs to the claim that produced it.
   await withRuntime((c) =>
-    c.query("select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5) as receipt", [
+    c.query("select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5, p_task => $6, p_run => $7, p_claim_secret => $8) as receipt", [
       doc.document_id,
       verdict.kind,
       verdict.confidence, // VERBATIM — the DB owns the >=0.8 gate; a low-confidence verdict holds for human review
       CLASSIFY_ENGINE_ID,
       `classify:${taskId}`,
+      taskId,
+      runId,
+      claimSecret,
     ]),
   );
   return { taskId, status: "done", kind: verdict.kind, confidence: verdict.confidence };

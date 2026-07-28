@@ -59,11 +59,44 @@ const BYTE_IDENTICAL = {
     exact: "192339765ddaab2f53f09020e7443b8c5fd236c9518e22362d130569d5c07e07",
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_authenticated=X/clara_fn_owner"],
   },
+  // AMENDMENT A10 (ratified 2026-07-28, cross-model review Q1 — the 4th round on the
+  // classify_document race review). §6's closed set gains a THIRD deliberately-changed
+  // member (A7 was record_wiki_source_ingest, A9 was _enqueue_invoice_facts_core in 0025).
+  // claim_document_processing_task now mints a random claim-secret CAPABILITY on every
+  // fresh queued->running transition, storing ONLY its sha256 digest (new column,
+  // claim_secret_digest) and returning the preimage ONLY to that claiming session — the
+  // structural fix for Q1 (workflow_run_id is readable by any clara_runtime session via
+  // 0008's table-wide SELECT, so it alone cannot authorize classify_document's settle).
+  // Same discipline as A7/A9: the pin is NOT retuned — restore reverses exactly the three
+  // textual insertions (the v_secret declare, the mint+digest-column line pair, and the
+  // 'claim_secret' return key) and re-hashes the remainder against the UNCHANGED
+  // 19-migration prestate, so the cell proves the ratified edit is present in its exact
+  // shape AND that nothing else in this body moved (this function also carries 0011's
+  // egress-hold lease-check machinery, itself already part of the untouched prestate —
+  // the read-the-live-body discipline 0024/0025's own headers record).
   claim_document_processing_task: {
     sig: "clara.claim_document_processing_task(uuid,text,boolean)",
     len: 3637, sha: "d02763514e282f8f041137cc4aba5f3c8187019f4dfe543cf96edd5e7495acd9",
     exact: "f9da98aa7c3a7a37ee79f5e67e523429c83f10bf4247489946f66457e80f312d",
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_runtime=X/clara_fn_owner"],
+    restore: (src) => src
+      .replace(
+        "  t record; d record; v_cap int; v_running int; v_attempts int;\n  v_clients int; v_consented int; v_hold_reason text; v_secret text;\n",
+        "  t record; d record; v_cap int; v_running int; v_attempts int;\n  v_clients int; v_consented int; v_hold_reason text;\n",
+      )
+      .replace(
+        "  -- Q1: the CAPABILITY minted on this fresh claim — a random preimage whose digest ALONE\n  -- is stored (never the preimage). Returned once, below, to this session only.\n  v_secret:=gen_random_uuid()::text;\n  update clara.document_processing_tasks set status='running',\n    workflow_run_id=p_workflow_run_id,started_at=now(),attempt_count=attempt_count+1,\n    claim_secret_digest=sha256(convert_to(v_secret,'UTF8'))\n    where id=p_task;\n",
+        "  update clara.document_processing_tasks set status='running',\n    workflow_run_id=p_workflow_run_id,started_at=now(),attempt_count=attempt_count+1\n    where id=p_task;\n",
+      )
+      .replace(
+        "    'sha256',d.sha256,'mime_type',d.mime_type,'byte_size',d.byte_size,\n    'claim_secret',v_secret);\n",
+        "    'sha256',d.sha256,'mime_type',d.mime_type,'byte_size',d.byte_size);\n",
+      ),
+    restoreMust: [
+      /v_secret:=gen_random_uuid\(\)::text;/,
+      /claim_secret_digest=sha256\(convert_to\(v_secret,'UTF8'\)\)/,
+      /'claim_secret',v_secret\);/,
+    ],
   },
   _enqueue_invoice_facts_core: {
     sig: "clara._enqueue_invoice_facts_core(uuid)",

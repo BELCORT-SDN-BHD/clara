@@ -105,6 +105,50 @@ async function ocrWorld(client) {
   return built;
 }
 
+/** A classify task already exists the moment seedCitedDocument's underlying
+ *  file_document call runs (kind is null then — file_document itself auto-enqueues via
+ *  _enqueue_invoice_facts_core, 0009). 0024 round 3 (P1) closed the no-task ceremony for
+ *  any document with classify-task history, so every classifyDocument call below must bind
+ *  to a genuine task+run — claim whichever classify task the doc already carries. */
+async function claimedClassifyTask(documentId) {
+  const r = await rootQuery(
+    "select id, status from clara.document_processing_tasks where document_id=$1 and lane='classify' order by created_at desc limit 1",
+    [documentId],
+  );
+  const row = r.rows[0];
+  assert.ok(row, `mandatory setup: a classify task exists for ${documentId} (file_document's own auto-enqueue)`);
+  // Q1: the claim secret is a CAPABILITY, minted and returned ONLY at the moment of a
+  // fresh claim — there is no way to recover it for an ALREADY-running task (by design;
+  // that is the whole point). Every actual caller of this helper hits it immediately after
+  // file_document's auto-enqueue, while the task is still 'queued', so this branch is not
+  // exercised in practice — left honest (undefined secret) rather than inventing a
+  // recovery path that cannot exist.
+  if (row.status === "running") return { id: row.id, runId: (await rootQuery("select workflow_run_id from clara.document_processing_tasks where id=$1", [row.id])).rows[0].workflow_run_id, secret: undefined };
+  const claimed = await claimTask(row.id, { egressApproved: false });
+  return { id: row.id, runId: claimed.workflow_run_id, secret: claimed.claim_secret };
+}
+
+/** Mint a FRESH classify task directly (raw SQL) for a document whose SOLE prior classify
+ *  task already went terminal (done/failed) — P1 also closed the "settle a non-running
+ *  task" door (classify_document requires status='running'), so a corrective RE-
+ *  classification (ADV-3's PASS-POST half) needs a genuinely NEW task the way a real
+ *  re-enqueue would mint one; the facts gate itself only opens one when document_kind is
+ *  still null, which does not apply here (the kind is intentionally source-stamped for
+ *  this fixture, never nulled). Mirrors the shape _enqueue_invoice_facts_core inserts. */
+async function reclassifyTask(documentId, firm) {
+  const engineId = "clara-classify-llm:v1";
+  const r = await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id, document_id, engine_id, engine_config, version_n, lane, status)
+     select $1, $2, $3, '{}'::jsonb,
+       coalesce((select max(version_n) from clara.document_processing_tasks where document_id=$2 and engine_id=$3), 0) + 1,
+       'classify', 'queued'
+     returning id`,
+    [firm, documentId, engineId],
+  );
+  const claimed = await claimTask(r.rows[0].id, { egressApproved: false });
+  return { id: r.rows[0].id, runId: claimed.workflow_run_id, secret: claimed.claim_secret };
+}
+
 /** A facts-complete OCR sales doc (invoice_facts lane). `classify` null keeps
  *  the verdict absent; `confidence` drives the ADV-3 quality gate;
  *  `customerName` drives the ADV-4 congruence control. */
@@ -130,7 +174,10 @@ async function ocrSalesDoc(client, { cents = 90000, classify = "invoice", confid
   // 0023 (X5): a corroborated OCR document must carry the reader/typed AGREEMENT the
   // mapper records — regions alone are one reader's assertion.
   ], { envelope: agreedEnvelope() });
-  if (classify) await classifyDocument({ document: cited.documentId, kind: classify, confidence });
+  if (classify) {
+    const cls = await claimedClassifyTask(cited.documentId);
+    await classifyDocument({ document: cited.documentId, kind: classify, confidence, task: cls.id, run: cls.runId, secret: cls.secret });
+  }
   return cited;
 }
 
@@ -245,7 +292,14 @@ test("ADV-3: a LOW-CONFIDENCE classifier verdict is not polarity evidence — th
   // The low-confidence verdict opened the ADR-023 review question (correct,
   // blocking) — the fixture dismisses it below the writer layer so the
   // pass-post half can run (the question lane has its own battery).
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.96 });
+  //
+  // 0024 round 3 (P1): the FIRST classify call already settled its task to 'done' — a
+  // 'done' task can never be re-settled (task-bound requires status='running'), and the
+  // no-task ceremony is closed once ANY task history exists — so this corrective
+  // RE-classification needs a genuinely fresh task, exactly like a real re-enqueue would
+  // mint one (reclassifyTask, defined above).
+  const reclassify = await reclassifyTask(cited.documentId, await firmOf(client));
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.96, task: reclassify.id, run: reclassify.runId, secret: reclassify.secret });
   await rootQuery(
     "update clara.open_questions set status='dismissed', resolved_by=$2, resolved_at=now(), resolution_text='adv-3 fixture: re-verified at high confidence' where document_id=$1 and origin='classification' and status='open'",
     [cited.documentId, world.users.alice],
@@ -813,29 +867,50 @@ test("R5-6 (R4 must-6): a HUMAN kind verdict is never overwritten by the classif
   const sub = world.users.alice;
   const firm = await firmOf(client);
   // (a) human precedence.
+  //
+  // 0024 round 3 (P1): seedCitedDocument's own file_document call already auto-enqueued a
+  // classify task (kind is null at filing time) — both classify_document calls below must
+  // bind to a genuine task+run; the second needs a FRESH task since the first already
+  // settled its own task to 'done' (a 'done' task can never be re-settled).
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97 });
+  const cls1 = await claimedClassifyTask(cited.documentId);
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.97, task: cls1.id, run: cls1.runId, secret: cls1.secret });
   await setDocumentKind(world.users.bob, { document: cited.documentId, kind: "payment_voucher", reason: "r5-6 human correction" });
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.99 });
+  const cls2 = await reclassifyTask(cited.documentId, firm);
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.99, task: cls2.id, run: cls2.runId, secret: cls2.secret });
   assert.equal(await docKind(cited.documentId), "payment_voucher", "the classifier NEVER overwrites an explicit human correction");
   const verdicts = (await rootQuery(
     "select count(*)::int as n from clara.document_extractions where document_id=$1 and engine_kind='doc_classify' and status='done'",
     [cited.documentId])).rows[0].n;
   assert.ok(verdicts >= 3, `the classifier's verdict ROW still persists under human precedence (got ${verdicts})`);
   // (b) engine binding: a verdict under a foreign engine settles NO running task.
+  //
+  // 0024 round 3 (P1): once a document carries ANY classify-task history, the no-task
+  // ceremony is closed entirely — a caller must present p_task (+p_run, P2). So the
+  // "foreign engine, no task" shape this cell originally probed can no longer even reach
+  // classify_document's engine check; it is refused up front (CLR16, task history exists).
+  // Engine binding is now proven the STRICTER way: presenting the REAL claimed task id
+  // together with a MISMATCHED p_engine_id fails the task-bound lookup itself
+  // (document/lane/engine/id must all agree) — so a foreign-engine call no longer even
+  // WRITES an orphaned verdict row, a stronger guarantee than the pre-0024 shape.
   const cited2 = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
   await enqueueInvoiceFacts(cited2.documentId); // NULL kind -> classify task
   const task = (await rootQuery(
     "select to_jsonb(t) as row from clara.document_processing_tasks t where t.document_id=$1 and t.lane='classify' order by t.created_at desc limit 1",
     [cited2.documentId])).rows[0].row;
   assert.ok(task, "the classify task exists (mandatory setup)");
-  await claimTask(task.id, { egressApproved: true });
-  await classifyDocument({ document: cited2.documentId, kind: "invoice", confidence: 0.95, engineId: "clara-classify-other:v9" });
+  const claimed = await claimTask(task.id, { egressApproved: true });
+  await assert.rejects(
+    () => classifyDocument({ document: cited2.documentId, kind: "invoice", confidence: 0.95, engineId: "clara-classify-other:v9", task: task.id, run: claimed.workflow_run_id, secret: claimed.claim_secret }),
+    (e) => e.code === "CLR16",
+    "a foreign-engine call bound to the REAL task id is refused outright — the task-bound lookup requires engine_id to agree too",
+  );
   assert.equal((await rootQuery("select status from clara.document_processing_tasks where id=$1", [task.id])).rows[0].status,
-    "running", "a foreign-engine verdict settles NOTHING (the claimed snapshot binds)");
-  await classifyDocument({ document: cited2.documentId, kind: "invoice", confidence: 0.95, engineId: task.engine_id });
+    "running", "a foreign-engine verdict settles NOTHING (the claimed snapshot binds) — and now writes nothing at all");
+  assert.equal(await docKind(cited2.documentId), null, "no orphaned verdict was written by the foreign-engine attempt");
+  await classifyDocument({ document: cited2.documentId, kind: "invoice", confidence: 0.95, engineId: task.engine_id, task: task.id, run: claimed.workflow_run_id, secret: claimed.claim_secret });
   assert.equal((await rootQuery("select status from clara.document_processing_tasks where id=$1", [task.id])).rows[0].status,
-    "done", "the matching-engine verdict settles the claimed task");
+    "done", "the matching-engine, matching-run verdict settles the claimed task");
 });
 
 test("R5-7 (R4 must-7 / pin P7): closing_transfer is settable through the human REVISE wrapper — draft-only, allow-listed, recorded", async (t) => {
@@ -901,7 +976,13 @@ test("R6-1 (R5 final): the human attestation engine ID is RESERVED — a classif
   );
   assert.equal(await docKind(cited.documentId), null, "the spoof attempt wrote no kind");
   // (2) no phantom precedence: a normal classifier verdict still sets the kind.
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.95 });
+  //
+  // 0024 round 3 (P1): the reserved-engine refusal above fires before the op-key
+  // reservation / task branch, so call (1) needed no task binding — but this call and (3)
+  // below DO reach the task-bound logic, and the document already carries classify-task
+  // history (seedCitedDocument's own file_document auto-enqueue) — bind to it.
+  const cls1 = await claimedClassifyTask(cited.documentId);
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.95, task: cls1.id, run: cls1.runId, secret: cls1.secret });
   assert.equal(await docKind(cited.documentId), "invoice", "with NO real human row the classifier still governs the kind");
   // (3) a REAL set_document_kind row (the source='human' marker) still takes
   // precedence, and the later classifier still persists its own verdict row.
@@ -909,7 +990,8 @@ test("R6-1 (R5 final): the human attestation engine ID is RESERVED — a classif
   const rows0 = (await rootQuery(
     "select count(*)::int as n from clara.document_extractions where document_id=$1 and engine_kind='doc_classify' and status='done'",
     [cited.documentId])).rows[0].n;
-  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.99 });
+  const cls2 = await reclassifyTask(cited.documentId, firm);
+  await classifyDocument({ document: cited.documentId, kind: "invoice", confidence: 0.99, task: cls2.id, run: cls2.runId, secret: cls2.secret });
   assert.equal(await docKind(cited.documentId), "receipt", "the real human verdict (source marker) still wins over a later classifier");
   const rows1 = (await rootQuery(
     "select count(*)::int as n from clara.document_extractions where document_id=$1 and engine_kind='doc_classify' and status='done'",
