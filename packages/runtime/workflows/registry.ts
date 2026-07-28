@@ -15,6 +15,7 @@ import { chatTurn_v5 } from "./chatTurn.v5.js";
 import { chatTurn_v6 } from "./chatTurn.v6.js";
 import { chatTurn_v7 } from "./chatTurn.v7.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
+import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { autoDraft_v1 } from "./autoDraft.v1.js";
 import { autoDraft_v2 } from "./autoDraft.v2.js";
@@ -27,7 +28,7 @@ import { clientOnboarding_v2 } from "./clientOnboarding.v2.js";
 export const workflows = {
   closeExample: closeExampleV1,
   chatTurn: chatTurn_v7,
-  documentIngest: documentIngest_v1,
+  documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   autoDraft: autoDraft_v3,
   firmInterview: firmInterview_v2,
@@ -65,7 +66,14 @@ export const workflows = {
 // entity-type-aware axes (framework + accounting basis) over a config table. The v1 bodies stay
 // frozen, built and EXPORTED so no parked run is stranded (policy (c)) — this class's parks are
 // the ≥48h kind, so a live run on v1 is the expected case, not a corner one; the engine resumes
-// them by run id. Drop a re-export only once zero non-terminal runs of that version remain.
+// them by run id. Post-Wave-B also repointed documentIngest v1→v2 (ledger task #28): v1's
+// behavior closure destroyed its local task sidecar (spool.mjs's task-<id>.json — the ONLY
+// place carrying storageKey/sha256/mime/format for a retry, plus the failure code for
+// diagnosis) on EVERY failed attempt, before the step-retry it invites by throwing ever runs —
+// the retry then finds nothing and fails with a generic "no durable runtime metadata" error,
+// burying the real diagnosis. v2 never removes the sidecar on failure; it records the failure
+// code onto it instead (full rationale in documentIngest.behavior_v2.mjs). Drop a re-export
+// only once zero non-terminal runs of that version remain.
 export { firmInterview_v1 };
 export { clientOnboarding_v1 };
 export { chatTurn_v1 };
@@ -74,6 +82,7 @@ export { chatTurn_v3 };
 export { chatTurn_v4 };
 export { chatTurn_v5 };
 export { chatTurn_v6 };
+export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
 
