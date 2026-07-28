@@ -168,6 +168,18 @@ const EXTRACTION_0022_HUMAN_FNS = ["request_reextraction", "set_firm_high_stakes
 const FAIL_CLASSIFY_0024_RUNTIME_FNS = ["fail_classify"];
 export const FAIL_CLASSIFY_0024_COHORT = [...FAIL_CLASSIFY_0024_RUNTIME_FNS];
 
+// 0028 — the vendor identity binding ceremony (task #36). All five verbs are
+// clara_authenticated, role-floored in-body (bookkeeper for propose/revoke/reads,
+// admin for sign) — same posture as the 0016 autopost-rule ceremony. Its own
+// cohort per the "wholly present or wholly absent" discipline (see 0024's note
+// above): folding it into 0027's would make a 28-migration database report a
+// PARTIAL cohort one migration early.
+const VENDOR_BINDING_0028_HUMAN_FNS = [
+  "propose_vendor_identity_binding", "sign_vendor_identity_binding",
+  "revoke_vendor_identity_binding", "list_vendor_bindings", "get_vendor_binding",
+];
+export const VENDOR_BINDING_0028_COHORT = [...VENDOR_BINDING_0028_HUMAN_FNS];
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -212,6 +224,7 @@ export const ALLOWED = {
     ...WAVE_B_0020_HUMAN_FNS, // 0020 [§7.1] typed-consent owner RPCs (owner floor body-enforced)
     ...WAVE_B_0021_HUMAN_FNS, // 0021 the human counterparty lane (bookkeeper floor)
     ...EXTRACTION_0022_HUMAN_FNS, // 0022 the extraction slice X1 (bookkeeper + owner floors)
+    ...VENDOR_BINDING_0028_HUMAN_FNS, // 0028 the vendor identity binding ceremony + reads
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -352,6 +365,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0020 typed-consent", WAVE_B_0020_COHORT, liveNames));
   failures.push(...cohortFailures("0022 extraction-slice X1", EXTRACTION_0022_COHORT, liveNames));
   failures.push(...cohortFailures("0024 fail_classify", FAIL_CLASSIFY_0024_COHORT, liveNames));
+  failures.push(...cohortFailures("0028 vendor identity binding", VENDOR_BINDING_0028_COHORT, liveNames));
   return failures;
 }
 

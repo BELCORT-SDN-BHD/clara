@@ -434,6 +434,21 @@ only because the oldest approval happens to be a 25/08 one. The span must reach 
 so the bill must post **on or after 08/09/2025**: **IV-00846 (13/10, `7ecc83c2`) or IV-00847 (14/10,
 `aef22972`) qualify; IV-00744 (25/08) and IV-00745 (03/09) do not.**
 
+> **Tightened (task #36 build note — a real misread this arithmetic invited).** `08/09/2025` is a
+> **derived, one-shot consequence of THIS specific live window's dates**, not a fixed cutoff the
+> gate compares anything against. **The dwell predicate condition 3a states — restated here without
+> any ambiguity: it is a property of the THREE-DOCUMENT WINDOW AS A SET, evaluated collectively,
+> never a per-document comparison against any fixed date.** The two conjuncts, both re-derived on
+> every proposal from whichever three documents currently occupy the window: (a) the window's
+> `posting_date` values are exactly **three distinct dates**; (b) `max(posting_date) −
+> min(posting_date) >= 14 days`. `08/09/2025` only ever appears because, in THIS particular
+> instance, the oldest surviving date is `25/08` and `25/08 + 14 days = 08/09` — swap in a
+> DIFFERENT window (different oldest date, or a window that already has three distinct dates
+> without needing a fourth approval) and no such fixed date exists at all. A verb implementation
+> that stores or compares against `08/09/2025` (or any other literal date) is wrong; it must
+> compute `max(posting_date) - min(posting_date)` over whichever three rows the window actually
+> selects, every time.
+
 **Amendment A (ruling 2) — the human lane surfaces, records, and yields.** On a human-lane draft
 whose document has a live binding match and whose chosen counterparty differs, the DB **never**
 blocks: the human's choice always stands. It must (i) surface a **visible warning citing the
