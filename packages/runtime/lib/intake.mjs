@@ -6,6 +6,9 @@ import { detectDocument, IntakeScanError, scanFile } from "./scan.mjs";
 import {
   intakePaths,
   listIntakeMetas,
+  mergeTaskMeta,
+  noteTerminalFailure,
+  noteTransientFailure,
   readIntakeMeta,
   readTaskMeta,
   removeIntakeSpool,
@@ -453,16 +456,12 @@ export async function recoverPendingDocumentIntakes({ withRuntime, enqueue, log 
   return out;
 }
 
-async function updateTask(taskId, patch) {
+// A claim with no sidecar at all is a real bug worth surfacing loud (unlike a failure
+// note via mergeTaskMeta, deliberately lenient since it may race a task with none yet).
+export async function noteDocumentTaskClaim(taskId, status, runId) {
   const current = await readTaskMeta(taskId);
   if (!current) throw Object.assign(new Error(`document task ${taskId} has no durable runtime metadata`), { code: "internal" });
-  const next = { ...current, ...patch, updatedAt: new Date().toISOString() };
-  await writeTaskMeta(taskId, next);
-  return next;
-}
-
-export async function noteDocumentTaskClaim(taskId, status, runId) {
-  return updateTask(taskId, { status, runId: runId ?? null, startedAt: status === "running" ? new Date().toISOString() : undefined });
+  return mergeTaskMeta(taskId, { status, runId: runId ?? null, startedAt: status === "running" ? new Date().toISOString() : undefined });
 }
 
 export async function processDocumentTask(withRuntime, taskId) {
@@ -479,7 +478,8 @@ export function makeDocumentServices() {
     downloadCanonical,
     analyzeDocument,
     parseStructured,
-    noteTaskFailure: (taskId, code) => updateTask(taskId, { status: "running", lastError: code }),
+    noteTaskFailure: noteTransientFailure, // v1 alias, same shape v1 always got
+    noteTransientFailure, noteTerminalFailure, // v2 (task #28) — see spool.mjs's header
   });
 }
 

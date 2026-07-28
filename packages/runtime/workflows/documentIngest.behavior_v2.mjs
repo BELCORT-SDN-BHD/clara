@@ -1,67 +1,86 @@
 // @frozen
 //
 // Behavioral closure for documentIngest_v2 (ledger task #28 — the sidecar-before-retries
-// ordering fix). `services` contains infrastructure adapters only (Storage/Azure/parser/spool),
-// and `withRuntime` is the same injected pool boundary used by chatTurn_v1.
+// ordering fix, REDESIGNED after an adversarial O-round found the first v2 attempt
+// insufficient — see the "WHY A SIDECAR FIX ALONE IS NOT ENOUGH" section below).
 //
-// THE DEFECT THIS FILE FIXES (measured against v1's live body, byte-identical in
-// documentIngest.behavior.mjs — never edited by this file). On a FAILED attempt, v1's catch
-// block did, in order:
-//   1. persist_document_extraction(..., 'failed', ..., code, ...) — records the failure DURABLY
-//      in Postgres (document_processing_tasks.status='failed', .error_code=code). Correct.
-//   2. services.removeTaskMeta(taskId) — DELETES the local JSON sidecar (spool.mjs's
-//      task-<id>.json) that is the ONLY place carrying storageKey/sha256/mime/format/lane: the
-//      transport fields a RETRY needs to re-download and re-attempt the same document, and the
-//      diagnostic record a human reads when a task fails (reconciler-documents.mjs's own
-//      comment: "the sidecar for transport fields... the task-only snapshot no longer carries").
-//   3. throw err — the step FAILS, which is exactly the shape a durable-execution engine's
-//      automatic step-retry acts on: `"use step"` functions are retried by the WDK engine on
-//      throw, calling processDocumentTaskStep(taskId) again — a genuine retry, immediately
-//      following the SAME failed attempt, well before any human "looks".
+// THE ORIGINAL DEFECT (measured against v1's live body, byte-identical in
+// documentIngest.behavior.mjs, never edited by this file). On ANY failed attempt, v1's
+// catch block: (1) persisted the failure to Postgres — `document_processing_tasks.status
+// ='failed'`, unconditionally; (2) deleted the local JSON sidecar (spool.mjs's
+// task-<id>.json — the ONLY place carrying storageKey/sha256/mime/format for a retry);
+// (3) threw — which invites a durable-step retry (`"use step"` functions retry
+// automatically on throw, by default up to 3 times: `workflow`'s own
+// docs/foundations/errors-and-retries.mdx). The retry's first line, readTaskMeta, then
+// found nothing and died with a generic "no durable runtime metadata" error, burying the
+// real diagnostic code.
 //
-// So the sidecar was destroyed BEFORE the retry that needed it, not after: step 2 ran
-// unconditionally on every failure, while step 3's throw is precisely what invites another
-// attempt. That retry's very first line — `readTaskMeta(taskId)` — then finds nothing and
-// throws a NEW, generic "has no durable runtime metadata" error, which is what actually
-// surfaces (the LAST exception wins): the true diagnostic code (`processingFailureCode(err)` —
-// engine_error / timeout / corrupt / encrypted / storage_error / ...) is buried under an
-// unrelated, uninformative one, and the retry cannot even attempt the real work again because
-// it no longer knows where to download from. "A failed ingest's diagnosis is gone by the time
-// anyone looks" is exactly this: destroyed on attempt 1, before attempt 2 (or 3, or a human)
-// ever reads it.
+// WHY A SIDECAR FIX ALONE IS NOT ENOUGH — the O-round's blocker. Step (1) above does not
+// just record a fact; `document_processing_tasks` has a BEFORE UPDATE/DELETE trigger
+// (`_tf_processing_task_update`, 0007_document_pipeline.sql:641) that makes a 'failed' row
+// IMMUTABLE — `raise exception 'terminal document processing task is immutable'
+// using errcode='CLR16'`. `claim_document_processing_task` separately refuses to reclaim
+// anything but a 'queued' row (0024_fail_classify.sql:264), the failed extraction already
+// occupies the (document,engine,version,kind) key so a later success collides at
+// 0026_lane_widen.sql:545 and skips the fact-persisting branch entirely (line 558), and
+// the reservation `_refund_document_reservation` already released cannot be re-settled.
+// So merely PRESERVING the sidecar (the first v2 attempt) fixes the DIAGNOSIS but not the
+// RETRY: a retried attempt can re-download and re-analyze the document successfully, then
+// die at `persist_document_extraction`'s `t.status<>'running'` guard trying to record that
+// success — vendor work spent, DB write refused, workflow still fails. Half a fix.
 //
-// THE FIX. Sidecar destruction moves to ONLY the genuinely terminal SUCCESS outcomes (`lane===
-// 'none'`'s store-only completion, and the download+analyze/parse 'done' completion) — both
-// unchanged from v1, both correct there (nothing will ever look for this task's transport
-// fields again once it is durably 'done'). On FAILURE, the sidecar is never removed: it is
-// instead UPDATED via `services.noteTaskFailure(taskId, code)` — existing vocabulary
-// (lib/intake.mjs's makeDocumentServices, untouched by this change), which already does exactly
-// the right thing (`updateTask(taskId, {status:'running', lastError: code})`): it reads the
-// CURRENT sidecar, merges in the diagnostic code, and writes the WHOLE record back — so
-// storageKey/sha256/mime/format/lane survive intact for the next attempt, and lastError is now
-// readable by anyone inspecting the sidecar without needing the DB at all. v1 only ever called
-// this on the rarer inner failure (the persist-to-DB call itself throwing); v2 calls it on
-// EVERY failure, unconditionally, which is the actual ordering fix.
+// THE REDESIGN: classify retryability BEFORE ever touching Postgres, mirroring the
+// ALREADY-SHIPPED `invoiceFacts.v1.behavior.mjs` (its own header: "Transient vendor/
+// storage faults THROW so the step is retried... A bad/corrupt document is terminal
+// immediately"). `RETRYABLE` below is copied from that file's own set, unchanged — this
+// codebase already has one ratified answer to "which of these 8 codes is transient", and
+// it belongs in exactly one place semantically, not reinvented per workflow.
 //
-// WHY THIS IS SAFE, NOT JUST SAFER. A retry that re-attempts `persist_document_extraction`
-// with the SAME op_key (`doc-extract-failed:<taskId>`) and the SAME failure code replays
-// idempotently — `_reserve_op` returns the cached receipt before the function's own
-// `t.status<>'running'` guard is ever reached (0026_lane_widen.sql), so a second identical
-// failure record is a no-op, never a duplicate write. A retry that reaches a DIFFERENT outcome
-// (a new op_key, or a genuinely different failure) is a live write like any other. Nothing here
-// depends on knowing whether the engine will retry again — the sidecar simply survives until a
-// real 'done' says otherwise, and every attempt in between behaves exactly as if it were the
-// first.
+//   - TRANSIENT (`RETRYABLE`: engine_error/timeout/engine_lost/storage_error) AND the
+//     step's own retry budget is not yet exhausted: persist NOTHING to Postgres — the
+//     task's DB row stays 'running', exactly as the original claim left it. Update the
+//     sidecar (`noteTransientFailure` — spool.mjs) so the diagnosis survives even though
+//     nothing failed durably yet, then re-throw the ORIGINAL error (a plain, retryable
+//     throw). The next attempt's `persist_document_extraction(...,'done',...)` on success
+//     now passes the `t.status<>'running'` guard, because status was NEVER moved off it —
+//     the one property the O-round demanded be VERIFIED, not assumed; the real-rig test
+//     suite proves it against live SQL, not a mock.
+//   - TERMINAL (`corrupt`/`encrypted`/`bad_type`/`limit`/`internal`, OR a transient code on
+//     the LAST allowed attempt — `getStepMetadata().attempt >= TOTAL_ATTEMPTS`, read via
+//     `documentIngest.impl_v2.ts` and passed in as a plain parameter so this function stays
+//     testable without any ambient workflow context): persist 'failed' (the honest,
+//     durable record — Tier B, exactly as the terminal branch always did), keep the
+//     sidecar (diagnostics — the named residual from the first v2 attempt stands
+//     unchanged: no sidecar TTL reaper exists yet, `spool.mjs`'s `sweepSpoolTtl` only
+//     targets `intake-*`), and throw a `FatalError` (from `"workflow"`) instead of a plain
+//     one — `FatalError`'s own contract is exactly "cannot be retried... bubbled up to the
+//     workflow logic", which is what "settle the step so the engine never launches a
+//     doomed retry" means concretely. Recovery for a terminal failure is the re-enqueue
+//     vocabulary (a NEW task row at a new version — the 0026 filed-bootstrap door) — a
+//     human/operator act, never an automatic step retry.
 //
-// THE NAMED RESIDUAL. Sidecars for permanently-failed tasks (ones nothing will ever retry
-// again) are no longer auto-deleted, so they now persist on local disk indefinitely — there is
-// no TTL reaper for `task-<id>.json` today (spool.mjs's `sweepSpoolTtl` only targets
-// `intake-*.{bin,json}`, verified by reading its regex). That is a deliberate, bounded trade:
-// a small JSON file's disk residue against a masked diagnosis and a broken retry, and it is
-// consistent with the file it replaces — v1 already leaves sidecars behind forever for any task
-// that CRASHES before reaching this code at all (the crash never runs any deletion). Recorded
-// here rather than solved: a future TTL sweep for task sidecars (mirroring the intake one) is a
-// separate, independent change, out of this fix's scope.
+// P3 (the op-key/differing-code finding) is now STRUCTURALLY closed, not merely patched:
+// under this split, `persist_document_extraction(...,'failed',...)` is called AT MOST ONCE
+// per task, ever — every transient attempt before the terminal one skips the DB entirely,
+// and a FatalError prevents any attempt AFTER the terminal one. So the "attempt 1 records
+// engine_error, attempt 2 records a DIFFERENT code, the op-key replay swallows it" scenario
+// the O-round found cannot arise by construction. The one residual is the persist-failed
+// call's OWN failure (a DB blip at the exact moment of recording the terminal outcome) —
+// unchanged from v1's exposure, not solved here, but no longer silently swallowed: the
+// caught error is folded into the sidecar's `lastErrorNote` (`noteTerminalFailure`), so a
+// human sees "why did this fail" AND "did Postgres even hear about it", not a bare catch.
+//
+// NAMED RESIDUAL (same class as invoiceFacts_v1's own, unsolved there too): if a TRANSIENT
+// failure recurs on every one of the step's allowed attempts, the LAST one is forced
+// terminal (above) precisely to avoid this — but should that final terminal persist call
+// ITSELF fail (the residual just above), the task can be left at 'running' in Postgres with
+// a workflow run that has already permanently ended. reconciler-documents.mjs only retries
+// a 'running' task whose run is `documentRunState === 'lost'` (RunNotFound) — a run that
+// genuinely completed (even in failure) is not "lost" and is left alone. This is a narrow,
+// pre-existing class of exposure this codebase already carries for invoiceFacts_v1; not
+// introduced here, not solved here.
+
+import { FatalError } from "workflow";
 
 function receipt(row) {
   return row?.receipt ?? row?.result ?? row ?? {};
@@ -78,6 +97,17 @@ function processingFailureCode(err) {
     : "internal";
 }
 
+// Copied VERBATIM from invoiceFacts.v1.behavior.mjs's own `RETRYABLE` — one ratified
+// classification, not reinvented here. `internal` (the catch-all for an uncategorised
+// error) is deliberately NOT retryable, matching that file: fail closed on the unknown.
+const RETRYABLE = new Set(["engine_error", "timeout", "engine_lost", "storage_error"]);
+
+/** The step's own retry budget (documentIngest.impl_v2.ts sets `.maxRetries` to this SAME
+ *  number — single source of truth). 3 is the framework default; stated explicitly rather
+ *  than left implicit, per `workflow`'s own docs. */
+export const MAX_RETRIES = 3;
+const TOTAL_ATTEMPTS = MAX_RETRIES + 1;
+
 async function callWriter(withRuntime, sql, params) {
   return withRuntime(async (client) => {
     const out = await client.query(sql, params);
@@ -85,7 +115,10 @@ async function callWriter(withRuntime, sql, params) {
   });
 }
 
-export async function processDocumentTaskBehaviorV2(services, withRuntime, taskId) {
+/** @param {number} attempt `getStepMetadata().attempt` from the calling step — 1 on the
+ *  first execution, increasing by one on each WDK-driven retry. A plain parameter, not
+ *  read from ambient context here, so this function stays unit-testable in isolation. */
+export async function processDocumentTaskBehaviorV2(services, withRuntime, taskId, attempt) {
   const task = await services.readTaskMeta(taskId);
   if (!task) throw Object.assign(new Error(`document task ${taskId} has no durable runtime metadata`), { code: "internal" });
 
@@ -122,25 +155,31 @@ export async function processDocumentTaskBehaviorV2(services, withRuntime, taskI
     return { taskId, status: "done", lane: task.lane };
   } catch (err) {
     const code = processingFailureCode(err);
-    // THE FIX: record the failure durably in Postgres first (best-effort — a write hiccup here
-    // must never mask the ORIGINAL error, which is why it is swallowed and `err` still governs
-    // what this function ultimately throws)...
+    const exhausted = Number(attempt) >= TOTAL_ATTEMPTS;
+
+    if (RETRYABLE.has(code) && !exhausted) {
+      // TRANSIENT, budget remains: Postgres is never touched — the task stays 'running'
+      // under THIS run's claim, so a retried attempt's eventual 'done' persist will pass
+      // the status guard. Only the local diagnostic record is updated.
+      await services.noteTransientFailure(taskId, code).catch(() => {});
+      throw err;
+    }
+
+    // TERMINAL — either the code itself is not retryable, or the retry budget is spent.
+    // Persist the honest 'failed' record (best-effort: its own failure is folded into the
+    // sidecar note below, never silently swallowed).
+    let persistNote;
     try {
       await callWriter(
         withRuntime,
         "select clara.persist_document_extraction($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8) as receipt",
         [taskId, "failed", 0, "{}", "[]", code, null, opKey("doc-extract-failed", taskId)],
       );
-    } catch {
-      // The original failure stays authoritative; a terminal/replayed persist may refuse a
-      // second failure transition (or the write itself failed) — either way this is not the
-      // error to surface.
+    } catch (persistErr) {
+      persistNote = `persist_document_extraction('failed') itself failed: ${String(persistErr?.message || persistErr)}`;
     }
-    // ...then, UNCONDITIONALLY and REGARDLESS of whether the DB write above succeeded, update
-    // the sidecar in place — never remove it. This is the ordering fix: destruction moves from
-    // "every failure" to "never, on failure" — only a genuine 'done' above ever removes it.
-    await services.noteTaskFailure(taskId, code).catch(() => {});
-    throw err;
+    await services.noteTerminalFailure(taskId, code, persistNote).catch(() => {});
+    throw Object.assign(new FatalError(`document ingest terminally failed (${code}): ${err?.message ?? err}`), { code });
   } finally {
     await services.removeTempFile(tempPath).catch(() => {});
   }

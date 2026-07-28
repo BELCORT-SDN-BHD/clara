@@ -1,27 +1,20 @@
-// documentIngest v1 -> v2 (ledger task #28): the sidecar-before-retries ordering fix. Pure
-// unit tests against processDocumentTaskBehavior[V2] directly (no DB, no WDK) — the function
-// takes `services`/`withRuntime` as plain parameters, so its contract is testable in full
-// isolation. Full rationale in documentIngest.behavior_v2.mjs's own header.
-//
-// Two layers: a fully-mocked `services` double for fast, exhaustive contract cells (section 1),
-// and the REAL spool.mjs-backed sidecar I/O (via lib/intake.mjs's makeDocumentServices, with
-// only the vendor-touching methods faked) for one end-to-end proof that a retry genuinely
-// works post-fix, and genuinely does not pre-fix (section 2) — the strongest form of the
-// "failing-on-v1-shape / passing-on-v2" cell the work order asked for.
+// documentIngest v1 -> v2 (ledger task #28): the sidecar-before-retries ordering fix,
+// REDESIGNED after an O-round adversarial finding (P1, blocker) proved sidecar
+// preservation alone insufficient — see documentIngest.behavior_v2.mjs's own header for
+// the full diagnosis. Pure unit tests against processDocumentTaskBehavior[V2] directly (no
+// DB, no WDK) — the function takes `services`/`withRuntime`/`attempt` as plain parameters,
+// so its contract is testable in full isolation. The load-bearing, end-to-end proofs
+// (a real retry landing 'done' against live SQL; the doomed-retry reproduction on v1) live
+// in document-ingest-v2-db.test.mjs, against a real rig — a mock cannot prove a DB guard.
 
 process.env.RELAY_TEST_MODE ??= "1";
 
-import { after, before, test } from "node:test";
+import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
-import { join } from "node:path";
-import { tmpdir } from "node:os";
-import { randomUUID } from "node:crypto";
+import { FatalError } from "workflow";
 
 import { processDocumentTaskBehavior } from "../workflows/documentIngest.behavior.mjs";
-import { processDocumentTaskBehaviorV2 } from "../workflows/documentIngest.behavior_v2.mjs";
-import { readTaskMeta, removeTaskMeta, writeTaskMeta } from "../lib/spool.mjs";
-import { makeDocumentServices } from "../lib/intake.mjs";
+import { MAX_RETRIES, processDocumentTaskBehaviorV2 } from "../workflows/documentIngest.behavior_v2.mjs";
 
 // ======================================================================================
 // Section 1 — fully-mocked services: fast, exhaustive contract cells
@@ -31,7 +24,7 @@ const TASK = Object.freeze({ storageKey: "canonical/key", sha256: "a".repeat(64)
 
 /** A `services` double recording every call. `analyze`/`download` may be overridden to throw. */
 function mockServices({ task = TASK, missingTask = false, download, analyze, parse } = {}) {
-  const calls = { removeTaskMeta: [], noteTaskFailure: [], removeTempFile: [] };
+  const calls = { removeTaskMeta: [], noteTransientFailure: [], noteTerminalFailure: [], removeTempFile: [] };
   return {
     calls,
     noteClaim: async () => {},
@@ -42,7 +35,8 @@ function mockServices({ task = TASK, missingTask = false, download, analyze, par
     downloadCanonical: download ?? (async () => {}),
     analyzeDocument: analyze ?? (async () => ({ pageCount: 1, envelope: { ok: true }, regions: [] })),
     parseStructured: parse ?? (async () => ({ pageCount: 1, envelope: { ok: true }, regions: [] })),
-    noteTaskFailure: async (taskId, code) => { calls.noteTaskFailure.push({ taskId, code }); },
+    noteTransientFailure: async (taskId, code) => { calls.noteTransientFailure.push({ taskId, code }); },
+    noteTerminalFailure: async (taskId, code, note) => { calls.noteTerminalFailure.push({ taskId, code, note }); },
   };
 }
 
@@ -57,178 +51,164 @@ function mockWithRuntime({ queryThrows = false } = {}) {
     });
 }
 
-const engineError = () => Object.assign(new Error("Azure DI engine error"), { code: "engine_error" });
+const errOf = (code, message = "boom") => Object.assign(new Error(message), { code });
 
 test("v1 (documentIngest.behavior.mjs, unedited) — a failed attempt DESTROYS the sidecar: the pinned defect", async () => {
-  const taskId = randomUUID();
-  const services = mockServices({ analyze: async () => { throw engineError(); } });
-  await assert.rejects(
-    processDocumentTaskBehavior(services, mockWithRuntime(), taskId),
-    (err) => err.code === "engine_error",
-  );
+  const taskId = "11111111-1111-1111-1111-111111111111";
+  const services = mockServicesLikeV1();
+  await assert.rejects(processDocumentTaskBehavior(services, mockWithRuntime(), taskId), (err) => err.code === "engine_error");
   assert.deepEqual(services.calls.removeTaskMeta, [taskId], "v1 removes the sidecar on this very failure, before any retry runs");
-  assert.deepEqual(services.calls.noteTaskFailure, [], "v1 never records the failure onto the sidecar on this path");
 });
 
-test("v2 — a failed attempt NEVER destroys the sidecar; it records the failure code onto it instead", async () => {
-  const taskId = randomUUID();
-  const services = mockServices({ analyze: async () => { throw engineError(); } });
+/** v1's own (unedited) services shape — it still calls `noteTaskFailure`, not the v2 split. */
+function mockServicesLikeV1() {
+  const calls = { removeTaskMeta: [] };
+  return {
+    calls,
+    noteClaim: async () => {},
+    readTaskMeta: async () => TASK,
+    removeTaskMeta: async (taskId) => { calls.removeTaskMeta.push(taskId); },
+    taskTempPath: (taskId) => `/fake-spool/task-${taskId}.bin`,
+    removeTempFile: async () => {},
+    downloadCanonical: async () => {},
+    analyzeDocument: async () => { throw errOf("engine_error", "Azure DI engine error"); },
+    parseStructured: async () => ({}),
+    noteTaskFailure: async () => {},
+  };
+}
+
+// ======================================================================================
+// P1 (blocker) — retryability classification, mirroring invoiceFacts.v1.behavior.mjs's
+// OWN `RETRYABLE` set verbatim: engine_error/timeout/engine_lost/storage_error retry;
+// corrupt/encrypted/bad_type/limit/internal are terminal on the first attempt.
+// ======================================================================================
+
+test("v2 — TRANSIENT codes (engine_error/timeout/engine_lost/storage_error) never touch Postgres, note the sidecar, and re-throw the ORIGINAL retryable error", async () => {
+  for (const code of ["engine_error", "timeout", "engine_lost", "storage_error"]) {
+    const taskId = `xxxxxxxx-xxxx-xxxx-xxxx-${code.padEnd(12, "0").slice(0, 12)}`;
+    const services = mockServices({ analyze: async () => { throw errOf(code); } });
+    await assert.rejects(
+      processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, 1),
+      (err) => err.code === code && !(err instanceof FatalError),
+      code,
+    );
+    assert.deepEqual(services.calls.removeTaskMeta, [], `${code}: the sidecar must survive — a retry needs it`);
+    assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code }], code);
+    assert.deepEqual(services.calls.noteTerminalFailure, [], code);
+  }
+});
+
+test("v2 — TERMINAL codes (corrupt/encrypted/bad_type/limit/internal) persist 'failed', keep the sidecar, and throw a FatalError (settles the step, invites no retry)", async () => {
+  for (const code of ["corrupt", "encrypted", "bad_type", "limit", "internal", "something-uncategorised"]) {
+    const taskId = `yyyyyyyy-yyyy-yyyy-yyyy-000000000000`;
+    const services = mockServices({ analyze: async () => { throw errOf(code === "internal" ? undefined : code); } });
+    await assert.rejects(
+      processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, 1),
+      (err) => err instanceof FatalError,
+      code,
+    );
+    assert.deepEqual(services.calls.removeTaskMeta, [], `${code}: never removed on failure — diagnostics survive`);
+    assert.equal(services.calls.noteTerminalFailure.length, 1, code);
+    assert.equal(services.calls.noteTransientFailure.length, 0, code);
+  }
+});
+
+test("v2 — an uncategorised/unrecognised error code maps to 'internal' and is TERMINAL (fail closed on the unknown)", async () => {
+  const taskId = "22222222-2222-2222-2222-222222222222";
+  const services = mockServices({ analyze: async () => { throw new Error("something truly unexpected"); } });
+  await assert.rejects(processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, 1), (err) => err instanceof FatalError);
+  assert.deepEqual(services.calls.noteTerminalFailure, [{ taskId, code: "internal", note: undefined }]);
+});
+
+test("v2 — a download failure (before the vendor call) is classified identically to an analyze failure", async () => {
+  const taskId = "33333333-3333-3333-3333-333333333333";
+  const services = mockServices({ download: async () => { throw errOf("storage_error"); } });
+  await assert.rejects(processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, 1), (err) => !(err instanceof FatalError));
+  assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code: "storage_error" }]);
+});
+
+// ======================================================================================
+// The retry-budget exhaustion safety net: even a RETRYABLE code becomes terminal on the
+// LAST allowed attempt, using `workflow`'s own getStepMetadata().attempt (threaded in as a
+// plain parameter by documentIngest.impl_v2.ts) — closing the "stuck at running forever"
+// gap a purely code-based split would leave open once WDK's own retries run out.
+// ======================================================================================
+
+test(`v2 — MAX_RETRIES is 3 (the framework default, stated explicitly): TOTAL_ATTEMPTS is 4`, () => {
+  assert.equal(MAX_RETRIES, 3);
+});
+
+test("v2 — a TRANSIENT code on attempts 1-3 stays retryable; the SAME code on attempt 4 (budget exhausted) is forced terminal", async () => {
+  for (const attempt of [1, 2, 3]) {
+    const taskId = `44444444-4444-4444-4444-00000000000${attempt}`;
+    const services = mockServices({ analyze: async () => { throw errOf("timeout"); } });
+    await assert.rejects(processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, attempt), (err) => !(err instanceof FatalError), `attempt ${attempt}`);
+    assert.deepEqual(services.calls.noteTerminalFailure, [], `attempt ${attempt} must not go terminal yet`);
+  }
+  const taskId = "44444444-4444-4444-4444-000000000004";
+  const lastAttempt = mockServices({ analyze: async () => { throw errOf("timeout"); } });
+  await assert.rejects(processDocumentTaskBehaviorV2(lastAttempt, mockWithRuntime(), taskId, 4), (err) => err instanceof FatalError, "attempt 4 (== TOTAL_ATTEMPTS) must be forced terminal");
+  assert.deepEqual(lastAttempt.calls.noteTerminalFailure, [{ taskId, code: "timeout", note: undefined }]);
+  assert.deepEqual(lastAttempt.calls.noteTransientFailure, []);
+});
+
+test("v2 — a persist-'failed' write that itself fails does not mask the original error, and folds a note into the sidecar (P3: never silently swallowed)", async () => {
+  const taskId = "55555555-5555-5555-5555-555555555555";
+  const services = mockServices({ analyze: async () => { throw errOf("corrupt", "the file is corrupt"); } });
   await assert.rejects(
-    processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId),
-    (err) => err.code === "engine_error",
-  );
-  assert.deepEqual(services.calls.removeTaskMeta, [], "the sidecar must survive a failure — a retry needs it");
-  assert.deepEqual(services.calls.noteTaskFailure, [{ taskId, code: "engine_error" }]);
-});
-
-test("v2 — an UNCATEGORISED error still maps to 'internal' and is still recorded, never silently dropped", async () => {
-  const taskId = randomUUID();
-  const services = mockServices({ analyze: async () => { throw new Error("something unexpected"); } });
-  await assert.rejects(processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId));
-  assert.deepEqual(services.calls.noteTaskFailure, [{ taskId, code: "internal" }]);
-  assert.deepEqual(services.calls.removeTaskMeta, []);
-});
-
-test("v2 — a download failure (before the vendor call) behaves identically to an analyze failure", async () => {
-  const taskId = randomUUID();
-  const services = mockServices({ download: async () => { throw Object.assign(new Error("storage read failed"), { code: "storage_error" }); } });
-  await assert.rejects(processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId));
-  assert.deepEqual(services.calls.noteTaskFailure, [{ taskId, code: "storage_error" }]);
-  assert.deepEqual(services.calls.removeTaskMeta, []);
-});
-
-test("v2 — when the DB persist-failure write ITSELF throws, the sidecar is STILL updated and the ORIGINAL error still wins", async () => {
-  const taskId = randomUUID();
-  const services = mockServices({ analyze: async () => { throw engineError(); } });
-  await assert.rejects(
-    processDocumentTaskBehaviorV2(services, mockWithRuntime({ queryThrows: true }), taskId),
-    (err) => err.code === "engine_error" && err.message === "Azure DI engine error",
+    processDocumentTaskBehaviorV2(services, mockWithRuntime({ queryThrows: true }), taskId, 1),
+    (err) => err instanceof FatalError && err.code === "corrupt" && err.message.includes("corrupt"),
     "the DB write's own failure must never mask the real diagnostic error",
   );
-  assert.deepEqual(services.calls.noteTaskFailure, [{ taskId, code: "engine_error" }], "unconditional — runs whether or not the DB write above succeeded");
-  assert.deepEqual(services.calls.removeTaskMeta, []);
+  const [note] = services.calls.noteTerminalFailure;
+  assert.equal(note.code, "corrupt");
+  assert.ok(note.note && /persist_document_extraction.*itself failed/.test(note.note), "the swallowed DB error is logged into the sidecar note, not discarded");
 });
 
-test("v2 — the temp file is ALWAYS cleaned up, success or failure (unchanged from v1 — never the bug)", async () => {
-  const taskId = randomUUID();
-  const failing = mockServices({ analyze: async () => { throw engineError(); } });
-  await assert.rejects(processDocumentTaskBehaviorV2(failing, mockWithRuntime(), taskId));
-  assert.deepEqual(failing.calls.removeTempFile, [`/fake-spool/task-${taskId}.bin`]);
+test("v2 — the temp file is ALWAYS cleaned up: transient, terminal, and success paths alike", async () => {
+  const taskId = "66666666-6666-6666-6666-666666666666";
+  const transient = mockServices({ analyze: async () => { throw errOf("timeout"); } });
+  await assert.rejects(processDocumentTaskBehaviorV2(transient, mockWithRuntime(), taskId, 1));
+  assert.deepEqual(transient.calls.removeTempFile, [`/fake-spool/task-${taskId}.bin`]);
+
+  const terminal = mockServices({ analyze: async () => { throw errOf("corrupt"); } });
+  await assert.rejects(processDocumentTaskBehaviorV2(terminal, mockWithRuntime(), taskId, 1));
+  assert.deepEqual(terminal.calls.removeTempFile, [`/fake-spool/task-${taskId}.bin`]);
 
   const succeeding = mockServices();
-  await processDocumentTaskBehaviorV2(succeeding, mockWithRuntime(), taskId);
+  await processDocumentTaskBehaviorV2(succeeding, mockWithRuntime(), taskId, 1);
   assert.deepEqual(succeeding.calls.removeTempFile, [`/fake-spool/task-${taskId}.bin`]);
 });
 
 test("v2 — a SUCCESSFUL extraction removes the sidecar exactly as v1 does (terminal-success behaviour is unchanged)", async () => {
-  const taskId = randomUUID();
+  const taskId = "77777777-7777-7777-7777-777777777777";
   const services = mockServices();
-  const result = await processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId);
+  const result = await processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, 1);
   assert.deepEqual(result, { taskId, status: "done", lane: "ocr" });
   assert.deepEqual(services.calls.removeTaskMeta, [taskId]);
-  assert.deepEqual(services.calls.noteTaskFailure, []);
+  assert.deepEqual(services.calls.noteTransientFailure, []);
+  assert.deepEqual(services.calls.noteTerminalFailure, []);
 });
 
 test("v2 — the lane==='none' store-only completion removes the sidecar exactly as v1 does", async () => {
-  const taskId = randomUUID();
+  const taskId = "88888888-8888-8888-8888-888888888888";
   const services = mockServices({ task: { ...TASK, lane: "none" } });
-  const result = await processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId);
+  const result = await processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, 1);
   assert.deepEqual(result, { taskId, status: "done", lane: "none" });
   assert.deepEqual(services.calls.removeTaskMeta, [taskId]);
 });
 
 test("v2 — structured_parse lane calls parseStructured, not analyzeDocument, and still succeeds/cleans up the same way", async () => {
-  const taskId = randomUUID();
+  const taskId = "99999999-9999-9999-9999-999999999999";
   let parseCalled = false;
   const services = mockServices({ task: { ...TASK, lane: "structured_parse" }, parse: async () => { parseCalled = true; return { pageCount: 1, envelope: {}, regions: [] }; } });
-  const result = await processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId);
+  const result = await processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, 1);
   assert.equal(parseCalled, true);
   assert.deepEqual(result, { taskId, status: "done", lane: "structured_parse" });
 });
 
 test("v1 and v2 — a missing sidecar at the START throws the SAME 'no durable runtime metadata' error (unchanged base case, both versions)", async () => {
-  const taskId = randomUUID();
-  for (const fn of [processDocumentTaskBehavior, processDocumentTaskBehaviorV2]) {
-    await assert.rejects(fn(mockServices({ missingTask: true }), mockWithRuntime(), taskId), (err) => /has no durable runtime metadata/.test(err.message));
-  }
-});
-
-// ======================================================================================
-// Section 2 — REAL sidecar I/O (lib/spool.mjs + lib/intake.mjs's makeDocumentServices),
-// only the vendor-touching methods faked. This is the end-to-end proof: a real retry, using
-// the REAL read-merge-write sidecar semantics, works after the fix and is broken before it.
-// ======================================================================================
-
-let root;
-let previousSpool;
-
-before(async () => {
-  const base = process.env.CLARA_TEST_TMP_ROOT || tmpdir();
-  await mkdir(base, { recursive: true });
-  root = await mkdtemp(join(base, "clara-doc-ingest-v2-"));
-  previousSpool = process.env.CLARA_SPOOL_DIR;
-  process.env.CLARA_SPOOL_DIR = join(root, "spool");
-});
-
-after(async () => {
-  if (previousSpool === undefined) delete process.env.CLARA_SPOOL_DIR;
-  else process.env.CLARA_SPOOL_DIR = previousSpool;
-  await rm(root, { recursive: true, force: true });
-});
-
-/** The real production DocumentServices, with only the vendor/storage calls faked. */
-function realServicesWith({ download, analyze } = {}) {
-  return {
-    ...makeDocumentServices(),
-    downloadCanonical: download ?? (async () => {}),
-    analyzeDocument: analyze ?? (async () => ({ pageCount: 1, envelope: {}, regions: [] })),
-  };
-}
-
-test("THE FIX, end to end: a real sidecar survives a failed v2 attempt, and a real retry then succeeds using it", async () => {
-  const taskId = randomUUID();
-  await writeTaskMeta(taskId, { taskId, ...TASK, status: "running" });
-
-  // Attempt 1: the vendor call fails.
-  const attempt1 = realServicesWith({ analyze: async () => { throw engineError(); } });
-  await assert.rejects(processDocumentTaskBehaviorV2(attempt1, mockWithRuntime(), taskId), (err) => err.code === "engine_error");
-
-  // The REAL sidecar on disk must still exist, with its transport fields intact AND the
-  // diagnostic code recorded — exactly what a retry (or a human) needs.
-  const afterAttempt1 = await readTaskMeta(taskId);
-  assert.ok(afterAttempt1, "the sidecar must still exist after a failed attempt");
-  assert.equal(afterAttempt1.storageKey, TASK.storageKey);
-  assert.equal(afterAttempt1.sha256, TASK.sha256);
-  assert.equal(afterAttempt1.lastError, "engine_error", "the diagnostic code is readable without touching the DB");
-
-  // Attempt 2 — the retry: the SAME taskId, no re-seeding, the transient error now resolved.
-  const attempt2 = realServicesWith({ analyze: async () => ({ pageCount: 2, envelope: {}, regions: [] }) });
-  const result = await processDocumentTaskBehaviorV2(attempt2, mockWithRuntime(), taskId);
-  assert.deepEqual(result, { taskId, status: "done", lane: "ocr" });
-
-  // A genuine terminal success removes the sidecar — the ONLY point it should ever disappear.
-  assert.equal(await readTaskMeta(taskId), null);
-
-  await removeTaskMeta(taskId).catch(() => {}); // idempotent cleanup safety net
-});
-
-test("THE DEFECT, end to end (v1, unedited): the SAME retry sequence fails on the SECOND attempt with a masked, generic error", async () => {
-  const taskId = randomUUID();
-  await writeTaskMeta(taskId, { taskId, ...TASK, status: "running" });
-
-  const attempt1 = realServicesWith({ analyze: async () => { throw engineError(); } });
-  await assert.rejects(processDocumentTaskBehavior(attempt1, mockWithRuntime(), taskId), (err) => err.code === "engine_error");
-
-  // v1 already deleted the sidecar during attempt 1 — the defect, proven against real spool I/O.
-  assert.equal(await readTaskMeta(taskId), null, "v1's real sidecar is gone after just one failure");
-
-  // Attempt 2 (the retry WDK's step-retry would issue): the vendor call would now succeed, but
-  // it never gets the chance — the function fails before it can even try, on a DIFFERENT,
-  // uninformative error that buries the real "engine_error" diagnosis from attempt 1.
-  const attempt2 = realServicesWith({ analyze: async () => ({ pageCount: 2, envelope: {}, regions: [] }) });
-  await assert.rejects(
-    processDocumentTaskBehavior(attempt2, mockWithRuntime(), taskId),
-    (err) => /has no durable runtime metadata/.test(err.message),
-    "the retry cannot even attempt the real work — its failure reason is generic, not 'engine_error'",
-  );
+  const taskId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+  await assert.rejects(processDocumentTaskBehavior(mockServices({ missingTask: true }), mockWithRuntime(), taskId), (err) => /has no durable runtime metadata/.test(err.message));
+  await assert.rejects(processDocumentTaskBehaviorV2(mockServices({ missingTask: true }), mockWithRuntime(), taskId, 1), (err) => /has no durable runtime metadata/.test(err.message));
 });

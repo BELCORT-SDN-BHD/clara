@@ -6,9 +6,16 @@
 // from the frozen v1 impl module (documentIngest.impl.ts, byte-identical, never edited by this
 // file) and re-exported here so documentIngest.v2.ts has a single impl import, matching v1's
 // own shape. Only the processing step is new.
+//
+// `getStepMetadata().attempt` is read HERE, at the top of the actual step function — the one
+// place `workflow`'s docs guarantee it is valid — and handed to the behavior function as a
+// plain parameter, never read from ambient context deep inside a nested call. `.maxRetries` is
+// set EXPLICITLY on the step (matching MAX_RETRIES, the single source of truth in
+// documentIngest.behavior_v2.mjs) rather than left to the framework default implicitly.
 
+import { getStepMetadata } from "workflow";
 import { claimDocumentTaskStep } from "./documentIngest.impl.js";
-import { processDocumentTaskBehaviorV2 } from "./documentIngest.behavior_v2.mjs";
+import { MAX_RETRIES, processDocumentTaskBehaviorV2 } from "./documentIngest.behavior_v2.mjs";
 
 export { claimDocumentTaskStep };
 
@@ -29,7 +36,10 @@ type DocumentServices = {
   downloadCanonical(key: string, destination: string, sha256: string): Promise<unknown>;
   analyzeDocument(path: string, mime: string, task: Record<string, unknown>): Promise<Record<string, unknown>>;
   parseStructured(path: string, format: string, task: Record<string, unknown>): Promise<Record<string, unknown>>;
-  noteTaskFailure(taskId: string, code: string): Promise<unknown>;
+  // v2's split vocabulary (documentIngest.behavior_v2.mjs / spool.mjs's own headers): the
+  // sidecar note now reflects which plane the DB actually committed, never a fixed guess.
+  noteTransientFailure(taskId: string, code: string): Promise<unknown>;
+  noteTerminalFailure(taskId: string, code: string, note?: string): Promise<unknown>;
 };
 
 function pools(): ClaraPools {
@@ -46,5 +56,7 @@ function services(): DocumentServices {
 
 export async function processDocumentTaskStepV2(taskId: string): Promise<{ taskId: string; status: string; lane: string }> {
   "use step";
-  return processDocumentTaskBehaviorV2(services(), pools().withRuntime, taskId);
+  const { attempt } = getStepMetadata();
+  return processDocumentTaskBehaviorV2(services(), pools().withRuntime, taskId, attempt);
 }
+processDocumentTaskStepV2.maxRetries = MAX_RETRIES;

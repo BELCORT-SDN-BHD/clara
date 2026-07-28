@@ -14,7 +14,7 @@
 // already cover both lanes (release_held_document_tasks / requeue_stranded_document_task
 // key by task, and the 0009 claim/release bodies cover lane in ('ocr','invoice_facts')).
 
-import { listTaskMetas, removeTaskMeta, writeTaskMeta } from "./spool.mjs";
+import { listTaskMetas, mergeTaskMeta, removeTaskMeta, writeTaskMeta } from "./spool.mjs";
 import { verifyCanonical } from "./storage.mjs";
 
 const DOCUMENT_GRACE_MS = Number(process.env.CLARA_DOCUMENT_RECONCILE_GRACE_MS || 15000);
@@ -147,19 +147,21 @@ async function documentTaskSnapshot(client, onlyFirm) {
 async function documentTaskIndex(client, deps) {
   try {
     const rows = await documentTaskSnapshot(client, deps.onlyFirm);
-    const existingRows = await listTaskMetas();
-    // Return (and persist) the MERGED metas: the DB row is authoritative for
-    // lifecycle fields, the sidecar for transport fields (storageKey/sha256/mime)
-    // the task-only snapshot no longer carries — the sweep's later writeTaskMeta
-    // calls spread these merged objects, so returning raw rows would clobber the
-    // sidecar's transport fields (the pre-fix joined query masked exactly that).
+    // Return (and persist) the MERGED metas: the DB row is authoritative for lifecycle
+    // fields, the sidecar for everything the task-only snapshot doesn't carry —
+    // transport (storageKey/sha256/mime) AND diagnostic (lastError/lastErrorNote).
+    //
+    // task #28 (P4): each task's merge base is read FRESH here, right before its own
+    // write — NOT from one bulk `listTaskMetas()` snapshot taken before this loop. A
+    // batch read racing a CONCURRENT noteTransientFailure/noteTerminalFailure call (a
+    // different run, writing that task's OWN sidecar while this sweep is mid-loop) used
+    // to let this sweep write a stale merge back over it, silently erasing `lastError`.
+    // mergeTaskMeta's read-then-write narrows that window to one fs read + one fs write
+    // per task — the same granularity every other sidecar mutator already uses. It does
+    // NOT eliminate the race (a write landing in that exact gap still loses); a hard
+    // guarantee needs real locking or a version/mtime CAS, out of scope here.
     const merged = [];
-    for (const row of rows) {
-      const existing = existingRows.find((meta) => meta?.taskId === row.taskId);
-      const meta = { ...existing, ...row };
-      await writeTaskMeta(row.taskId, meta);
-      merged.push(meta);
-    }
+    for (const row of rows) merged.push(await mergeTaskMeta(row.taskId, row));
     return merged;
   } catch (err) {
     if (!isDocumentSelectUnavailable(err)) throw err;
