@@ -22,6 +22,7 @@ let warnedDocumentSelectGap = false;
 let warnedInvoiceFactsEnqueueGap = false;
 let warnedLocalFactsEnqueueGap = false;
 let warnedClassifyEnqueueGap = false;
+let warnedCorruptSidecarGap = false;
 
 /** True iff the error is the engine's "run id unknown" signal. */
 export function isRunNotFound(err) {
@@ -160,8 +161,27 @@ async function documentTaskIndex(client, deps) {
     // per task — the same granularity every other sidecar mutator already uses. It does
     // NOT eliminate the race (a write landing in that exact gap still loses); a hard
     // guarantee needs real locking or a version/mtime CAS, out of scope here.
+    //
+    // Q2: a corrupt/unreadable ONE sidecar (a malformed task-<id>.json — JSON.parse
+    // throws) must not abort the WHOLE sweep — the bulk `listTaskMetas()` path this
+    // replaced already tolerated exactly this (listJson pushes {corrupt:true,...} and
+    // moves on). Per task, a merge failure REBUILDS that one row from Postgres alone
+    // (the DB row is authoritative for lifecycle fields regardless), losing only the
+    // transport fields until the next successful write re-establishes them; every OTHER
+    // task in the sweep is unaffected.
     const merged = [];
-    for (const row of rows) merged.push(await mergeTaskMeta(row.taskId, row));
+    for (const row of rows) {
+      try {
+        merged.push(await mergeTaskMeta(row.taskId, row));
+      } catch (err) {
+        if (!warnedCorruptSidecarGap) {
+          warnedCorruptSidecarGap = true;
+          deps.log?.(`[reconcile] task sidecar unreadable, rebuilding from Postgres task=${row.taskId}: ${err?.message ?? err}`);
+        }
+        await writeTaskMeta(row.taskId, row);
+        merged.push(row);
+      }
+    }
     return merged;
   } catch (err) {
     if (!isDocumentSelectUnavailable(err)) throw err;

@@ -312,7 +312,7 @@
       "deployed": true
     },
     "packages/runtime/workflows/documentIngest.behavior_v2.mjs": {
-      "sha256": "84e525797df51387460843dc1be619b57d1952b845140704bb6ed0b6581942dd",
+      "sha256": "6359f807af06c2bf1eec403ca81ab13f3c166032bfe089192d8fbc9de75a7c32",
       "note": ""
     },
     "packages/runtime/workflows/documentIngest.impl.ts": {
@@ -321,7 +321,7 @@
       "deployed": true
     },
     "packages/runtime/workflows/documentIngest.impl_v2.ts": {
-      "sha256": "66e7c5461cf772e10bb374805445d1119317e5e6a358d8ba642bac3b4e4669d6",
+      "sha256": "a29ba40a37b9beb7dc34a97af7362a72952626afca5ce0fa1ea8e4bfae783ceb",
       "note": ""
     },
     "packages/runtime/workflows/documentIngest.v1.ts": {

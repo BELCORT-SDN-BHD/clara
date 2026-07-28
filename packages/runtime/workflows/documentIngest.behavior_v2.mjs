@@ -1,8 +1,8 @@
 // @frozen
 //
 // Behavioral closure for documentIngest_v2 (ledger task #28 — the sidecar-before-retries
-// ordering fix, REDESIGNED after an adversarial O-round found the first v2 attempt
-// insufficient — see the "WHY A SIDECAR FIX ALONE IS NOT ENOUGH" section below).
+// ordering fix, REDESIGNED TWICE after adversarial review — see "WHY A SIDECAR FIX ALONE
+// IS NOT ENOUGH" (the O-round blocker) and "CRASH-REDELIVERY" (the Q-round finding) below).
 //
 // THE ORIGINAL DEFECT (measured against v1's live body, byte-identical in
 // documentIngest.behavior.mjs, never edited by this file). On ANY failed attempt, v1's
@@ -32,9 +32,7 @@
 // THE REDESIGN: classify retryability BEFORE ever touching Postgres, mirroring the
 // ALREADY-SHIPPED `invoiceFacts.v1.behavior.mjs` (its own header: "Transient vendor/
 // storage faults THROW so the step is retried... A bad/corrupt document is terminal
-// immediately"). `RETRYABLE` below is copied from that file's own set, unchanged — this
-// codebase already has one ratified answer to "which of these 8 codes is transient", and
-// it belongs in exactly one place semantically, not reinvented per workflow.
+// immediately"). `RETRYABLE` below is copied from that file's own set, unchanged.
 //
 //   - TRANSIENT (`RETRYABLE`: engine_error/timeout/engine_lost/storage_error) AND the
 //     step's own retry budget is not yet exhausted: persist NOTHING to Postgres — the
@@ -43,42 +41,44 @@
 //     nothing failed durably yet, then re-throw the ORIGINAL error (a plain, retryable
 //     throw). The next attempt's `persist_document_extraction(...,'done',...)` on success
 //     now passes the `t.status<>'running'` guard, because status was NEVER moved off it —
-//     the one property the O-round demanded be VERIFIED, not assumed; the real-rig test
-//     suite proves it against live SQL, not a mock.
+//     proved against live SQL, not a mock, in the real-rig test suite.
 //   - TERMINAL (`corrupt`/`encrypted`/`bad_type`/`limit`/`internal`, OR a transient code on
 //     the LAST allowed attempt — `getStepMetadata().attempt >= TOTAL_ATTEMPTS`, read via
 //     `documentIngest.impl_v2.ts` and passed in as a plain parameter so this function stays
-//     testable without any ambient workflow context): persist 'failed' (the honest,
-//     durable record — Tier B, exactly as the terminal branch always did), keep the
-//     sidecar (diagnostics — the named residual from the first v2 attempt stands
-//     unchanged: no sidecar TTL reaper exists yet, `spool.mjs`'s `sweepSpoolTtl` only
-//     targets `intake-*`), and throw a `FatalError` (from `"workflow"`) instead of a plain
-//     one — `FatalError`'s own contract is exactly "cannot be retried... bubbled up to the
-//     workflow logic", which is what "settle the step so the engine never launches a
-//     doomed retry" means concretely. Recovery for a terminal failure is the re-enqueue
-//     vocabulary (a NEW task row at a new version — the 0026 filed-bootstrap door) — a
-//     human/operator act, never an automatic step retry.
+//     testable without ambient workflow context): persist 'failed' (the honest, durable
+//     record — Tier B), keep the sidecar (diagnostics — the named residual from the first
+//     v2 attempt stands unchanged: no sidecar TTL reaper exists yet, `sweepSpoolTtl` only
+//     targets `intake-*`), and throw a `FatalError` instead of a plain one — its own
+//     contract is "cannot be retried... bubbled up to the workflow logic", which is what
+//     "settle the step so the engine never launches a doomed retry" means concretely.
+//     Recovery for a terminal failure is the re-enqueue vocabulary (a NEW task row at a new
+//     version — the 0026 filed-bootstrap door), never an automatic step retry.
 //
-// P3 (the op-key/differing-code finding) is now STRUCTURALLY closed, not merely patched:
-// under this split, `persist_document_extraction(...,'failed',...)` is called AT MOST ONCE
-// per task, ever — every transient attempt before the terminal one skips the DB entirely,
-// and a FatalError prevents any attempt AFTER the terminal one. So the "attempt 1 records
-// engine_error, attempt 2 records a DIFFERENT code, the op-key replay swallows it" scenario
-// the O-round found cannot arise by construction. The one residual is the persist-failed
-// call's OWN failure (a DB blip at the exact moment of recording the terminal outcome) —
-// unchanged from v1's exposure, not solved here, but no longer silently swallowed: the
-// caught error is folded into the sidecar's `lastErrorNote` (`noteTerminalFailure`), so a
-// human sees "why did this fail" AND "did Postgres even hear about it", not a bare catch.
+// CRASH-REDELIVERY (the Q-round finding) — the honest form of the "at most once" claim.
+// A durable step can be RE-EXECUTED after its own body already completed but before the
+// engine durably recorded that completion (a crash between the two). If that happens
+// AFTER the terminal branch's `persist_document_extraction(...,'failed',...)` already
+// committed, the re-execution repeats the WHOLE try block — a fresh download/analyze that
+// may fail with a DIFFERENT code than the first — and reaches the SAME terminal branch
+// again with a DIFFERENT `code`. The op_key (`doc-extract-failed:<taskId>`) is identical
+// (deterministic, keyed only by taskId), so `_reserve_op` (0004_governed_fns.sql:46) sees
+// the SAME key with a DIFFERENT request hash and raises CLR10 "op_key reused with
+// different args" — BEFORE even reaching the status guard. So the claim is not "at most
+// once, ever, full stop" — it is **at most once, except crash-redelivery, where the
+// re-execution's own persist attempt is a DETECTED, HANDLED no-op**: `isAlreadyTerminal
+// Refusal` recognises CLR10 (the op_key/hash mismatch) and CLR16 (the status guard, for
+// any other already-terminal shape) as "an earlier execution already won this task's
+// terminal outcome" rather than a generic failure — it is noted, never re-attempted, and
+// never silently swallowed as an unrelated error.
 //
-// NAMED RESIDUAL (same class as invoiceFacts_v1's own, unsolved there too): if a TRANSIENT
-// failure recurs on every one of the step's allowed attempts, the LAST one is forced
-// terminal (above) precisely to avoid this — but should that final terminal persist call
-// ITSELF fail (the residual just above), the task can be left at 'running' in Postgres with
-// a workflow run that has already permanently ended. reconciler-documents.mjs only retries
-// a 'running' task whose run is `documentRunState === 'lost'` (RunNotFound) — a run that
-// genuinely completed (even in failure) is not "lost" and is left alone. This is a narrow,
-// pre-existing class of exposure this codebase already carries for invoiceFacts_v1; not
-// introduced here, not solved here.
+// Q4 — the persist call's OWN failure must not be read as DB confirmation of anything.
+// If `persist_document_extraction` throws for a reason OTHER than the already-terminal
+// shapes above (a genuine connectivity blip, an unexpected error), the DB's actual state
+// is UNKNOWN — it may still be 'running'. Stamping the sidecar 'failed' in that case would
+// be a claim Postgres never confirmed, inverting the whole honesty point of this file.
+// That branch uses the TRANSIENT shape instead (`noteTransientFailure`, status stays
+// 'running'), carrying BOTH the original diagnosis and the persist failure in one note —
+// an honest "I don't know", not a guess dressed as a fact.
 
 import { FatalError } from "workflow";
 
@@ -107,6 +107,15 @@ const RETRYABLE = new Set(["engine_error", "timeout", "engine_lost", "storage_er
  *  than left implicit, per `workflow`'s own docs. */
 export const MAX_RETRIES = 3;
 const TOTAL_ATTEMPTS = MAX_RETRIES + 1;
+
+/** CLR10 = `_reserve_op`'s op_key-reused-with-different-args refusal (0004_governed_fns.sql
+ *  :57) — the crash-redelivery shape, a DIFFERENT code replaying the SAME op_key. CLR16 =
+ *  `persist_document_extraction`'s own status guard — any OTHER already-terminal shape
+ *  (0026_lane_widen.sql:531). Both mean "an earlier execution already won this outcome",
+ *  never "something is broken". */
+function isAlreadyTerminalRefusal(err) {
+  return err?.code === "CLR10" || err?.code === "CLR16";
+}
 
 async function callWriter(withRuntime, sql, params) {
   return withRuntime(async (client) => {
@@ -166,19 +175,33 @@ export async function processDocumentTaskBehaviorV2(services, withRuntime, taskI
     }
 
     // TERMINAL — either the code itself is not retryable, or the retry budget is spent.
-    // Persist the honest 'failed' record (best-effort: its own failure is folded into the
-    // sidecar note below, never silently swallowed).
-    let persistNote;
     try {
       await callWriter(
         withRuntime,
         "select clara.persist_document_extraction($1,$2,$3,$4::jsonb,$5::jsonb,$6,$7,$8) as receipt",
         [taskId, "failed", 0, "{}", "[]", code, null, opKey("doc-extract-failed", taskId)],
       );
+      // Persist SUCCEEDED (a fresh write, or an identical-args replay) — Postgres is
+      // KNOWN 'failed', with THIS code.
+      await services.noteTerminalFailure(taskId, code).catch(() => {});
     } catch (persistErr) {
-      persistNote = `persist_document_extraction('failed') itself failed: ${String(persistErr?.message || persistErr)}`;
+      if (isAlreadyTerminalRefusal(persistErr)) {
+        // An earlier execution (crash-redelivery) already committed this task's terminal
+        // outcome. The DB plane IS known terminal — just not confirmed to carry THIS
+        // execution's own code, since the earlier one may have recorded a different one.
+        await services.noteTerminalFailure(
+          taskId, code,
+          `redelivery detected: an earlier execution already committed this task's terminal outcome (persist refused: ${persistErr?.code ?? "?"} ${String(persistErr?.message || persistErr)})`,
+        ).catch(() => {});
+      } else {
+        // Q4: a GENUINE persist failure — the DB plane is UNKNOWN, possibly still
+        // 'running'. Never stamp 'failed' on a claim Postgres didn't confirm.
+        await services.noteTransientFailure(
+          taskId, code,
+          `persist_document_extraction('failed') itself failed: ${String(persistErr?.message || persistErr)} (original diagnosis: ${code} ${err?.message ?? ""})`,
+        ).catch(() => {});
+      }
     }
-    await services.noteTerminalFailure(taskId, code, persistNote).catch(() => {});
     throw Object.assign(new FatalError(`document ingest terminally failed (${code}): ${err?.message ?? err}`), { code });
   } finally {
     await services.removeTempFile(tempPath).catch(() => {});

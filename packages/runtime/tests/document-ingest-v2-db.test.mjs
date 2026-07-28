@@ -11,7 +11,7 @@
 
 import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdir, rm } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { Readable } from "node:stream";
@@ -22,7 +22,7 @@ import { beginDocumentIntake, finalizeDocumentIntake, makeDocumentServices, uplo
 import { reconcileDocumentTasks } from "../lib/reconciler.mjs";
 import { processDocumentTaskBehavior } from "../workflows/documentIngest.behavior.mjs";
 import { processDocumentTaskBehaviorV2 } from "../workflows/documentIngest.behavior_v2.mjs";
-import { readTaskMeta, writeTaskMeta } from "../lib/spool.mjs";
+import { readTaskMeta, taskMetaPath, writeTaskMeta } from "../lib/spool.mjs";
 
 const READY = await rig.documentPipelineReady();
 const skip = READY ? false : "Slice-5 (0007) document pipeline surface absent";
@@ -182,4 +182,58 @@ test("P4 (real rig) — the reconciler's merge preserves a fresh noteTransientFa
   const sidecar = await readTaskMeta(taskId);
   assert.equal(sidecar.lastError, "timeout", "the reconciler's own merge must not erase a concurrently-noted failure");
   assert.equal(sidecar.status, "running");
+});
+
+// ======================================================================================
+// Q2 — a corrupt/unreadable ONE sidecar in the sweep must not abort the WHOLE reconciler
+// pass; that one row is rebuilt from Postgres alone (DB is authoritative for lifecycle
+// fields regardless) and every OTHER task in the same sweep is unaffected.
+// ======================================================================================
+
+test("Q2 (real rig) — one corrupt sidecar is rebuilt from Postgres alone; the sweep completes and the healthy task's sidecar survives untouched", { skip }, async () => {
+  const { owner, firm } = await rig.buildFirm("q2corrupt");
+
+  async function admitInFirm(label) {
+    // Distinct bytes per document: finalizeDocumentIntake dedups on (firm_id, sha256) —
+    // two byte-identical uploads in the SAME firm would collapse onto ONE document/task
+    // instead of the two independent tasks this test needs. The label rides as a PDF
+    // comment BEFORE the trailer — countPdfPages requires "%%EOF" to be the literal tail.
+    const bytes = Buffer.from(`%PDF-1.7\n% ${label}\n1 0 obj << /Type /Page >> endobj\nstartxref\n0\n%%EOF\n`);
+    const begun = await rig.asRuntime((client) =>
+      beginDocumentIntake(client, { sub: owner, firmId: firm }, { filename: `${label}.pdf`, mime: "application/pdf", declared_bytes: bytes.length, origin: "documents_tab" }),
+    );
+    await uploadDocumentBytes({ withRuntime, intakeId: begun.intake_id, token: begun.upload_token, readable: Readable.from([bytes]) });
+    const finalized = await finalizeDocumentIntake({ withRuntime, intakeId: begun.intake_id, token: begun.upload_token, enqueue: async () => ({ runId: null }) });
+    await rig.asRuntime((client) => client.query("select clara.claim_document_processing_task($1,$2,$3)", [finalized.task_id, `${label}-run`, true]));
+    return finalized.task_id;
+  }
+
+  const healthyTaskId = await admitInFirm("q2healthy");
+  const corruptTaskId = await admitInFirm("q2corruptone");
+
+  // A real transient failure on the HEALTHY task, exactly like P4 — its sidecar must
+  // survive the sweep byte-for-byte, unaffected by the OTHER task's corruption.
+  globalThis.__claraAzureForTest = throwing("timeout");
+  await assert.rejects(processDocumentTaskBehaviorV2(makeDocumentServices(), withRuntime, healthyTaskId, 1));
+  assert.equal((await readTaskMeta(healthyTaskId)).lastError, "timeout");
+
+  // Corrupt the OTHER task's sidecar directly on disk — malformed JSON, the same shape a
+  // torn/partial write would leave behind. Precondition: readTaskMeta really does throw.
+  await writeFile(taskMetaPath(corruptTaskId), "{ not valid json", { encoding: "utf8", mode: 0o600 });
+  await assert.rejects(readTaskMeta(corruptTaskId), "precondition: the sidecar really is unreadable");
+
+  const result = await rig.asRuntime((client) =>
+    reconcileDocumentTasks(client, { onlyFirm: firm, graceMs: 0, enqueueDocumentIngest: async () => ({ runId: "x" }), getRun: () => ({ status: Promise.resolve("running") }) }),
+  );
+  assert.ok(result, "the sweep returns its usual summary rather than throwing on the corrupt row");
+
+  const healthySidecar = await readTaskMeta(healthyTaskId);
+  assert.equal(healthySidecar.lastError, "timeout", "the healthy task's sidecar is untouched by the OTHER task's corruption");
+  assert.equal(healthySidecar.status, "running");
+
+  const rebuiltSidecar = await readTaskMeta(corruptTaskId);
+  assert.ok(rebuiltSidecar, "the corrupt sidecar is REBUILT, not left broken or missing");
+  assert.equal(rebuiltSidecar.taskId, corruptTaskId);
+  assert.equal(rebuiltSidecar.status, "running", "rebuilt straight from the Postgres row (claimed, never failed)");
+  assert.equal(rebuiltSidecar.lastError, undefined, "the rebuild is DB-only — a corrupt sidecar's diagnostic fields do not survive it, by design (Q2's stated trade-off)");
 });

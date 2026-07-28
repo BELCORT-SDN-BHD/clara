@@ -38,7 +38,7 @@ type DocumentServices = {
   parseStructured(path: string, format: string, task: Record<string, unknown>): Promise<Record<string, unknown>>;
   // v2's split vocabulary (documentIngest.behavior_v2.mjs / spool.mjs's own headers): the
   // sidecar note now reflects which plane the DB actually committed, never a fixed guess.
-  noteTransientFailure(taskId: string, code: string): Promise<unknown>;
+  noteTransientFailure(taskId: string, code: string, note?: string): Promise<unknown>;
   noteTerminalFailure(taskId: string, code: string, note?: string): Promise<unknown>;
 };
 

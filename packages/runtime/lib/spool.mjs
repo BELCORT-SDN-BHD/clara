@@ -95,10 +95,15 @@ export async function readTaskMeta(id) {
 
 /**
  * Read-merge-write ONE task sidecar, patching in `patch` over whatever is CURRENTLY on
- * disk (read immediately before writing, not from an earlier snapshot). LENIENT: a
- * missing sidecar merges onto `{}` rather than throwing — unlike a hand-rolled
- * read-then-throw-if-absent helper, this is safe for a caller (the reconciler; a
- * failure note) that may legitimately encounter a task with no sidecar yet.
+ * disk (read immediately before writing, not from an earlier snapshot). LENIENT by
+ * default: a missing sidecar merges onto `{}` rather than throwing — safe for a caller
+ * (the reconciler) that may legitimately encounter a task with no sidecar yet. Pass
+ * `{requireExists:true}` for a caller whose contract is "this task's sidecar already
+ * exists, or something is badly wrong" (a claim note; a documentIngest failure note) —
+ * see `noteTransientFailure`/`noteTerminalFailure`'s own header for why that mode is
+ * NOT optional for them (Q1: `invoiceFacts_v1` is sidecar-free BY DESIGN, and a lenient
+ * merge there would silently CREATE a phantom sidecar file for a workflow that is
+ * supposed to never have one).
  *
  * THE RACE THIS NARROWS (documentIngest task #28, P4): a caller that reads ALL sidecars
  * up front and writes them back ONE AT A TIME later (a bulk snapshot) can write a STALE
@@ -111,8 +116,11 @@ export async function readTaskMeta(id) {
  * gap still loses. A hard guarantee needs real locking or a version/mtime compare-and-
  * swap, which is a larger change and out of scope here — recorded, not silently claimed.
  */
-export async function mergeTaskMeta(id, patch) {
+export async function mergeTaskMeta(id, patch, { requireExists = false } = {}) {
   const current = await readTaskMeta(id);
+  if (requireExists && !current) {
+    throw Object.assign(new Error(`document task ${id} has no durable runtime metadata`), { code: "internal" });
+  }
   const next = { ...(current ?? {}), ...patch, updatedAt: new Date().toISOString() };
   await writeTaskMeta(id, next);
   return next;
@@ -125,21 +133,32 @@ export async function mergeTaskMeta(id, patch) {
  * regardless of what the DB actually committed (the old, single `noteTaskFailure`'s
  * defect a reviewer found: it always stamped "running", even after a TERMINAL failure
  * had already moved the DB to 'failed', leaving the two planes disagreeing).
+ *
+ * `requireExists:true` — Q1: `intake.mjs`'s `makeDocumentServices()` aliases the OLD
+ * `noteTaskFailure` name to THIS function, for `invoiceFacts.v1.behavior.mjs`'s own
+ * (frozen, deployed) fallback call. That lane is deliberately sidecar-free (PIN-AB-6 —
+ * its own header: "RECEIPT-DRIVEN... never a spool sidecar"), and its OLD updater threw
+ * on a missing sidecar rather than creating one. A lenient merge here would silently
+ * CREATE a phantom `task-<id>.json` for a workflow that structurally never has one —
+ * this mode reproduces the throw-and-create-nothing behaviour exactly, so the alias is
+ * truly v1-identical, not merely same-shaped.
  */
-export async function noteTransientFailure(taskId, code) {
-  return mergeTaskMeta(taskId, { status: "running", lastError: code });
+export async function noteTransientFailure(taskId, code, note) {
+  return mergeTaskMeta(taskId, { status: "running", lastError: code, ...(note ? { lastErrorNote: note } : {}) }, { requireExists: true });
 }
 
 /**
  * The task genuinely IS 'failed' in Postgres — a terminal failure (or a transient one
  * that exhausted its retry budget) that DID persist 'failed'. `note` is optional
- * diagnostic text for the one case the DB write itself could not be trusted (a persist
- * call that raised instead of committing) — recorded here rather than swallowed, so a
- * human reading the sidecar sees BOTH "why did this fail" and "did Postgres even hear
- * about it", never just a silently discarded exception.
+ * diagnostic text for the cases the DB write itself could not be trusted at face value
+ * (a persist call that raised instead of committing, or a crash-redelivery replaying
+ * the SAME terminal branch under a different code — see documentIngest.behavior_v2.mjs)
+ * — recorded here rather than swallowed, so a human reading the sidecar sees BOTH "why
+ * did this fail" and "did Postgres even hear about it", never just a discarded
+ * exception. `requireExists:true` for the same reason as `noteTransientFailure` above.
  */
 export async function noteTerminalFailure(taskId, code, note) {
-  return mergeTaskMeta(taskId, { status: "failed", lastError: code, ...(note ? { lastErrorNote: note } : {}) });
+  return mergeTaskMeta(taskId, { status: "failed", lastError: code, ...(note ? { lastErrorNote: note } : {}) }, { requireExists: true });
 }
 
 async function listJson(prefix) {

@@ -9,12 +9,18 @@
 
 process.env.RELAY_TEST_MODE ??= "1";
 
-import { test } from "node:test";
+import { after, before, test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
 import { FatalError } from "workflow";
 
 import { processDocumentTaskBehavior } from "../workflows/documentIngest.behavior.mjs";
 import { MAX_RETRIES, processDocumentTaskBehaviorV2 } from "../workflows/documentIngest.behavior_v2.mjs";
+import { makeDocumentServices } from "../lib/intake.mjs";
+import { readTaskMeta, writeTaskMeta } from "../lib/spool.mjs";
 
 // ======================================================================================
 // Section 1 — fully-mocked services: fast, exhaustive contract cells
@@ -35,17 +41,18 @@ function mockServices({ task = TASK, missingTask = false, download, analyze, par
     downloadCanonical: download ?? (async () => {}),
     analyzeDocument: analyze ?? (async () => ({ pageCount: 1, envelope: { ok: true }, regions: [] })),
     parseStructured: parse ?? (async () => ({ pageCount: 1, envelope: { ok: true }, regions: [] })),
-    noteTransientFailure: async (taskId, code) => { calls.noteTransientFailure.push({ taskId, code }); },
+    noteTransientFailure: async (taskId, code, note) => { calls.noteTransientFailure.push({ taskId, code, note }); },
     noteTerminalFailure: async (taskId, code, note) => { calls.noteTerminalFailure.push({ taskId, code, note }); },
   };
 }
 
-/** A `withRuntime` double whose `client.query` either always succeeds or always throws. */
-function mockWithRuntime({ queryThrows = false } = {}) {
+/** A `withRuntime` double whose `client.query` either always succeeds or always throws
+ *  `queryError` (defaulting to a generic, non-CLR10/CLR16 failure). */
+function mockWithRuntime({ queryThrows = false, queryError = errOf("internal", "db unavailable") } = {}) {
   return async (fn) =>
     fn({
       query: async () => {
-        if (queryThrows) throw Object.assign(new Error("db unavailable"), { code: "internal" });
+        if (queryThrows) throw queryError;
         return { rows: [{ receipt: { task_id: "x", status: "ok" } }], rowCount: 1 };
       },
     });
@@ -93,7 +100,7 @@ test("v2 — TRANSIENT codes (engine_error/timeout/engine_lost/storage_error) ne
       code,
     );
     assert.deepEqual(services.calls.removeTaskMeta, [], `${code}: the sidecar must survive — a retry needs it`);
-    assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code }], code);
+    assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code, note: undefined }], code);
     assert.deepEqual(services.calls.noteTerminalFailure, [], code);
   }
 });
@@ -124,7 +131,7 @@ test("v2 — a download failure (before the vendor call) is classified identical
   const taskId = "33333333-3333-3333-3333-333333333333";
   const services = mockServices({ download: async () => { throw errOf("storage_error"); } });
   await assert.rejects(processDocumentTaskBehaviorV2(services, mockWithRuntime(), taskId, 1), (err) => !(err instanceof FatalError));
-  assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code: "storage_error" }]);
+  assert.deepEqual(services.calls.noteTransientFailure, [{ taskId, code: "storage_error", note: undefined }]);
 });
 
 // ======================================================================================
@@ -152,17 +159,45 @@ test("v2 — a TRANSIENT code on attempts 1-3 stays retryable; the SAME code on 
   assert.deepEqual(lastAttempt.calls.noteTransientFailure, []);
 });
 
-test("v2 — a persist-'failed' write that itself fails does not mask the original error, and folds a note into the sidecar (P3: never silently swallowed)", async () => {
+test("Q4 — a GENUINE persist-'failed' write failure never masks the original error, and never claims the DB plane it couldn't confirm", async () => {
   const taskId = "55555555-5555-5555-5555-555555555555";
   const services = mockServices({ analyze: async () => { throw errOf("corrupt", "the file is corrupt"); } });
   await assert.rejects(
-    processDocumentTaskBehaviorV2(services, mockWithRuntime({ queryThrows: true }), taskId, 1),
+    processDocumentTaskBehaviorV2(services, mockWithRuntime({ queryThrows: true, queryError: errOf("internal", "db unavailable") }), taskId, 1),
     (err) => err instanceof FatalError && err.code === "corrupt" && err.message.includes("corrupt"),
     "the DB write's own failure must never mask the real diagnostic error",
   );
-  const [note] = services.calls.noteTerminalFailure;
+  // The DB plane is UNKNOWN (a generic failure, not a known-terminal refusal) — Q4:
+  // stamping 'failed' here would be a claim Postgres never confirmed.
+  assert.deepEqual(services.calls.noteTerminalFailure, [], "never stamp 'failed' on an unconfirmed write");
+  const [note] = services.calls.noteTransientFailure;
   assert.equal(note.code, "corrupt");
-  assert.ok(note.note && /persist_document_extraction.*itself failed/.test(note.note), "the swallowed DB error is logged into the sidecar note, not discarded");
+  assert.ok(note.note && /persist_document_extraction.*itself failed/.test(note.note) && /corrupt/.test(note.note), "BOTH the original diagnosis and the persist failure are recorded, never discarded");
+});
+
+test("Q3 — crash-redelivery: a DIFFERENT code replaying the SAME op_key hits CLR10, detected as already-terminal, not swallowed as a generic error", async () => {
+  const taskId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
+  const services = mockServices({ analyze: async () => { throw errOf("encrypted", "the file is encrypted"); } });
+  await assert.rejects(
+    processDocumentTaskBehaviorV2(services, mockWithRuntime({ queryThrows: true, queryError: errOf("CLR10", "op_key reused with different args") }), taskId, 1),
+    (err) => err instanceof FatalError && err.code === "encrypted",
+    "still settles the step — no second attempt is invited",
+  );
+  assert.deepEqual(services.calls.noteTransientFailure, [], "a redelivery refusal is a KNOWN terminal shape, not an unconfirmed write (Q4 does not apply here)");
+  const [note] = services.calls.noteTerminalFailure;
+  assert.equal(note.code, "encrypted");
+  assert.ok(/redelivery detected/.test(note.note) && /CLR10/.test(note.note), "the redelivery is named, not mistaken for a generic DB failure");
+});
+
+test("Q3 — the SAME shape holds for CLR16 (the status guard's own already-terminal refusal)", async () => {
+  const taskId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+  const services = mockServices({ analyze: async () => { throw errOf("bad_type"); } });
+  await assert.rejects(
+    processDocumentTaskBehaviorV2(services, mockWithRuntime({ queryThrows: true, queryError: errOf("CLR16", "processing task is not running") }), taskId, 1),
+    (err) => err instanceof FatalError,
+  );
+  const [note] = services.calls.noteTerminalFailure;
+  assert.ok(/redelivery detected/.test(note.note) && /CLR16/.test(note.note));
 });
 
 test("v2 — the temp file is ALWAYS cleaned up: transient, terminal, and success paths alike", async () => {
@@ -211,4 +246,54 @@ test("v1 and v2 — a missing sidecar at the START throws the SAME 'no durable r
   const taskId = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
   await assert.rejects(processDocumentTaskBehavior(mockServices({ missingTask: true }), mockWithRuntime(), taskId), (err) => /has no durable runtime metadata/.test(err.message));
   await assert.rejects(processDocumentTaskBehaviorV2(mockServices({ missingTask: true }), mockWithRuntime(), taskId, 1), (err) => /has no durable runtime metadata/.test(err.message));
+});
+
+// ======================================================================================
+// Q1 — the noteTaskFailure alias must be v1-IDENTICAL: throw on a missing sidecar and
+// create NOTHING, never silently manufacture a phantom sidecar for a workflow
+// (invoiceFacts_v1) that is sidecar-free by design (PIN-AB-6). Real spool.mjs I/O against
+// a temp dir — no DB needed, this is a pure filesystem contract.
+// ======================================================================================
+
+let q1Root;
+let q1PreviousSpool;
+
+before(async () => {
+  const base = process.env.CLARA_TEST_TMP_ROOT || tmpdir();
+  await mkdir(base, { recursive: true });
+  q1Root = await mkdtemp(join(base, "clara-doc-ingest-v2-q1-"));
+  q1PreviousSpool = process.env.CLARA_SPOOL_DIR;
+  process.env.CLARA_SPOOL_DIR = join(q1Root, "spool");
+});
+
+after(async () => {
+  if (q1PreviousSpool === undefined) delete process.env.CLARA_SPOOL_DIR;
+  else process.env.CLARA_SPOOL_DIR = q1PreviousSpool;
+  await rm(q1Root, { recursive: true, force: true });
+});
+
+test("Q1 — makeDocumentServices().noteTaskFailure (the v1 alias) on a MISSING sidecar throws and creates NOTHING — real spool.mjs, no mock", async () => {
+  const taskId = randomUUID();
+  assert.equal(await readTaskMeta(taskId), null, "precondition: genuinely no sidecar for this id");
+  const services = makeDocumentServices();
+  await assert.rejects(services.noteTaskFailure(taskId, "engine_error"), (err) => /has no durable runtime metadata/.test(err.message));
+  assert.equal(await readTaskMeta(taskId), null, "still nothing on disk — no phantom sidecar was manufactured");
+});
+
+test("Q1 — the SAME alias on an EXISTING sidecar updates it exactly as v1's old updateTask did (status stays 'running')", async () => {
+  const taskId = randomUUID();
+  await writeTaskMeta(taskId, { taskId, lane: "ocr", status: "running" });
+  const services = makeDocumentServices();
+  await services.noteTaskFailure(taskId, "timeout");
+  const meta = await readTaskMeta(taskId);
+  assert.equal(meta.status, "running");
+  assert.equal(meta.lastError, "timeout");
+});
+
+test("Q1 — noteTransientFailure and noteTerminalFailure (v2's own vocabulary) are equally strict: missing sidecar throws, nothing is created", async () => {
+  const taskId = randomUUID();
+  const services = makeDocumentServices();
+  await assert.rejects(services.noteTransientFailure(taskId, "timeout"), (err) => /has no durable runtime metadata/.test(err.message));
+  await assert.rejects(services.noteTerminalFailure(taskId, "corrupt"), (err) => /has no durable runtime metadata/.test(err.message));
+  assert.equal(await readTaskMeta(taskId), null);
 });

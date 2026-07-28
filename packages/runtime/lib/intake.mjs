@@ -456,12 +456,11 @@ export async function recoverPendingDocumentIntakes({ withRuntime, enqueue, log 
   return out;
 }
 
-// A claim with no sidecar at all is a real bug worth surfacing loud (unlike a failure
-// note via mergeTaskMeta, deliberately lenient since it may race a task with none yet).
+// A claim with no sidecar at all is a real bug worth surfacing loud — requireExists:true
+// (unlike the reconciler's own merge, deliberately lenient since it may race a task with
+// none yet; see spool.mjs's own header on mergeTaskMeta).
 export async function noteDocumentTaskClaim(taskId, status, runId) {
-  const current = await readTaskMeta(taskId);
-  if (!current) throw Object.assign(new Error(`document task ${taskId} has no durable runtime metadata`), { code: "internal" });
-  return mergeTaskMeta(taskId, { status, runId: runId ?? null, startedAt: status === "running" ? new Date().toISOString() : undefined });
+  return mergeTaskMeta(taskId, { status, runId: runId ?? null, startedAt: status === "running" ? new Date().toISOString() : undefined }, { requireExists: true });
 }
 
 export async function processDocumentTask(withRuntime, taskId) {
