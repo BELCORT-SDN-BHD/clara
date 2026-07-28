@@ -55,7 +55,9 @@ re-resolves the binding independently before writing any draft (A.3), and Slot C
 before any post (A.5). A task admitted under a binding that has since vanished simply produces no
 draft — Slot B refuses — which is the outcome the stamp was meant to force. **Consequence, stated:**
 there is no durable record of *why* a task was admitted, only of why a draft was written. For a lane
-whose admission grants nothing, that is an acceptable gap; it is listed in §E's residuals.
+whose admission grants nothing, that is an acceptable gap; it is listed in §E's residuals. **This
+deviation from the reviewer's build list was raised explicitly and accepted as final** — §10 ruling
+10; the replacement is not to be built.
 
 ### A.3 Slot B — the draft, so the model never judges identity
 
@@ -173,8 +175,13 @@ specify a frame reconciliation this slice cannot justify.
 **This is a real, unclosed hole, and it is not necessarily forgery** — the document may be entirely
 honest and simply belong to Y. What bounds it: the amount cap, the monthly window, the corroboration
 requirement, the divergence surface (a bookkeeper who notices codes it to Y, and that shows up), and
-the owner's bounded-forgery ruling at §10 (5). What does **not** bound it: anything structural. If
-that is unacceptable, the answer is not a better geometry test — it is §9 Q9, and the slice waits.
+the owner's bounded-forgery ruling at §10 (5). What does **not** bound it: anything structural.
+
+**§10 ruling 9 does not close this.** That ruling settles that F3 *may exist* (it corroborates an
+authority a human created rather than creating identity from the page). It says nothing about what
+F3 *cannot see*, and role-blindness is exactly that. If this residual is later judged unacceptable,
+the answer is a role-aware issuer test with a specified coordinate frame — a piece of work this slice
+does not attempt.
 
 **C.2 Shared or generic invoice-number prefix.** F2 is a stability feature that resolves nothing
 alone; the v3 floor (≥6 chars, ≥3 alphabetic, denylist including `binv`) refuses `inv2`. Measured
@@ -249,9 +256,11 @@ skip-vocabulary split. Next free error code looks like **CLR35** — verify as-b
   posture every other `clara` table carries;
 - congruence FKs on the resolutions table (Part 1 §3.1);
 - **no `admit_autodraft_task` replacement and no `autodraft_attempts` columns** — admission stamping
-  is cut (A.2), so `_coding_lane_core`'s signature is unchanged too. This is a deliberate deviation
-  from the literal build list the reviewer derived from v2, and A.2 argues why the record it would
-  have written is not load-bearing.
+  is cut (A.2), so `_coding_lane_core`'s signature is unchanged too. This deviates from the literal
+  build list the reviewer derived from v2; it was raised as a deviation and **ACCEPTED AS FINAL**
+  (§10 ruling 10) on the argument in A.2 — admission is a queue decision, both later slots re-resolve
+  fail-closed, and a task admitted under vanished authority produces no draft. **Do not build it.**
+  The admission-provenance gap stays in the residual register rather than being engineered away.
 
 **The split** (§10 amendment C): **0027** = everything except A.5. **0028** = A.5 alone.
 
@@ -292,7 +301,8 @@ production binding therefore needs a fourth approved EZSEC bill on a later date 
 three Tier-3 bills are filed and corroborated). This is a cost the dwell rule imposes on the very
 first binding, named here rather than discovered at ceremony time.
 
-**Gates before build:** 0026 lands · **§9 Q9 answered by the owner** · this v3 clears re-review.
+**Gates before build:** 0026 lands · this v3 clears re-review. *(§9 Q9 was a gate until the owner
+ruled it 2026-07-28 — F3 stays, §10 ruling 9 / amendment D. It is closed, not waived.)*
 
 ## E. Finding register — round-2 dispositions
 
@@ -302,7 +312,7 @@ first binding, named here rather than discovered at ceremony time.
 | 2 | not closed — marker dependency overclaimed; `_tf_entry_immutable` omitted → `CLR08` | **Claim withdrawn** (A.5 states the dependency and why it is fail-closed) + **trigger recut named** (A.4, §D) |
 | 3 | not closed — A.1-conditional gate skippable by re-extraction; no F1/F2 skip; admission stamp had no writer | **Control made unconditional on the entry marker** with a step-5 branch for pages that now self-resolve; `binding_features_changed` added; **admission stamping CUT** with its consequence named (A.2, A.5) |
 | 4 | **CLOSED** | Untouched (A.1) |
-| 5 | not closed — predicate-vs-reader not structural; role-blind attribution; frame mismatch; F2 unevenness | **Geometry CUT** (band-only, one extraction); **C.1 named as an unclosed residual**; F2 unevenness argued; **the doctrine question escalated to the owner as §9 Q9** — this design does not settle whether F3 is option B |
+| 5 | not closed — predicate-vs-reader not structural; role-blind attribution; frame mismatch; F2 unevenness | **Geometry CUT** (band-only, one extraction); **C.1 named as an unclosed residual**; F2 unevenness argued; the doctrine question was escalated as §9 Q9 and the **owner RULED F3 stays** (§10 ruling 9 / amendment D: option B is "page creates identity → identity creates authority"; F3 is "human creates authority → page corroborates"). The mechanism is settled; **C.1 stays open** — it was never about whether F3 may exist |
 | 6 | not closed — recency takeover unargued; no-cap claim false; `\p{Cf}` invalid | **Dwell added** (3 distinct dates, ≥14 days) with the residual named (C.7); **false claim withdrawn**, real bounds cited (C.6); **normalizer rewritten** with an enumerated strip list, no property classes |
 | 7 | not closed — no `superseded`/`retired` status; lock claim false; deadlock | **Supersession DEFERRED**, renewal = revoke-then-fresh with the coverage gap accepted as a stated cost; status vocabulary corrected; **lock order rebuilt from live bodies** with a falsifiable last-lock invariant (Part 1 §4) |
 | 8 | not closed — no post-phase receipt; nullable columns; no congruence FKs; warning unwired | **`phase` column + post-phase receipt written before the post proceeds**; `raw_proposal`/`entry_revision_token` **NOT NULL**; congruence FKs; **warning wired into `get_draft_review` by name** (§B) |
@@ -310,7 +320,8 @@ first binding, named here rather than discovered at ceremony time.
 | 10 | not closed — probe proves little; stale-helper reactivation; omitted build items | **Interlock rebuilt on `clara.schema_migrations` + a comment-stripped `prosrc` postverify**; FORCE RLS/ACLs, composite FK, trigger recut all named; `admit_autodraft_task` deliberately excluded with reasons (§D) |
 
 **Residual register — the complete list, each either bounded or named as open.** C.1 legitimate `c/o`
-attribution (**open, no structural bound** — the design's largest known hole, and §9 Q9's stakes) ·
+attribution (**open, no structural bound** — the design's largest known hole; §10 ruling 9 settled
+that F3 may exist, not that it can see roles) ·
 C.7 recency takeover (bounded by dwell + three human approvals; no actor diversity possible at a
 one-person firm) · C.4 transitional stationery after a practice sale · C.3 bounded small-ticket
 forgery (owner-ruled) · C.6 pre-approval re-extraction steering (bounded by `evidence_restated`, the

@@ -7,13 +7,12 @@
 **v3 (2026-07-28)** answers a second adversarial review, which closed findings 1 and 4 and left eight
 open with live-body evidence. **v3 is a NARROWING, not a defence.** This design serves one binding at
 one firm today, and every optional subsystem was a wall the reviewer kept breaching — so
-auto-suspension, atomic supersession, admission stamping and cross-extraction geometry are all
-**cut**, and what they were protecting is either restated as a named residual or moved to a future
-wave. Section numbering is preserved so every §-reference in both reviews still resolves. Where a
-finding killed a claim the claim is **withdrawn**, not reworded: v1's "self-healing" and
-"structurally impossible" went in v2; v2's "three-attempt cap on re-extraction" and "Slot C does not
-depend on the marker at all" go here. §9/§10 owner rulings remain law, with amendment A narrowed on
-orchestrator instruction.
+auto-suspension, atomic supersession, admission stamping and cross-extraction geometry are **cut**,
+and what they protected is either a named residual or a future wave. Section numbering is preserved
+so both reviews' §-refs resolve. Where a finding killed a claim it is **withdrawn**, not reworded:
+v1's "self-healing" and "structurally impossible" went in v2; v2's "three-attempt cap on
+re-extraction" and "Slot C does not depend on the marker at all" go here. §9/§10 owner rulings remain
+law (amendment A narrowed, amendment D added on the owner's Q9 ruling).
 
 **Status:** DESIGN ONLY — nothing built, no migration cut, no code changed. **Owner ruling
 implemented:** 2026-07-28 option A — *autodraft MAY resolve a document's vendor from VERIFIED
@@ -79,19 +78,17 @@ So the identity **is on the page** — registered name on line 4, registration o
 machine correctly declines to swear to it, while a human already swore to it three times in-system:
 counterparty `348dc9cd` (`EZACCOUNT & SECRETARY SDN. BHD.`, reg `202301030264`) was **born at the
 first human approval**, sighting floor `610-S01 | debit | 3`. That asymmetry is the design space —
-and §9's Q9 asks the owner whether reading the page to *confirm* that human's party is itself the
-thing they rejected.
+and §10 ruling 9 settles that reading the page to *confirm* that human's party is not the thing the
+owner rejected.
 
 ## 2. The doctrine the design must satisfy
 
 | source | constraint | satisfied how |
 |---|---|---|
-| `docs/plan/wave-b-contract.md:25-31` (WB-R2, LAW) | "no autopost rules from seeding, ever" | Binding derives **only** from in-system human-approved, unreversed, non-rule-checked entries |
-| `docs/PROJECTLOG.md:32` (ADR-046) | authority from verified in-system approvals, not another system's claims | The evidence set *is* the approvals; it cannot be hand-authored (§3.2) |
+| `wave-b-contract.md:25-31` (WB-R2) · `PROJECTLOG.md:32` (ADR-046) | "no autopost rules from seeding, ever"; authority from verified in-system approvals only | The evidence set *is* the approvals — in-system, human-approved, unreversed, non-rule-checked — and cannot be hand-authored (§3.2) |
 | `PRD.md:129` + `:135-142` (inv. 14, §6a) | wiki informs, typed layer decides | Typed object beside `coding_rules`, not a wiki page (§0) |
-| `PRD.md:116` (inv. 1) | the DB owns every number | The binding resolves an **identity**; no number moves |
-| `PRD.md:117` · `ARCHITECTURE.md:11-14,74-78` | four structural invariants | Provenance *strengthened* — the resolver pins and records its extractions; every new verb role-floored |
-| `PRD.md:124` (inv. 9) | maker/checker on high-stakes | Binding cannot raise an amount; `is_high_stakes` skip (`0023:495-499`) untouched |
+| `PRD.md:116` (inv. 1) · `:124` (inv. 9) | the DB owns every number; maker/checker on high-stakes | The binding resolves an **identity**; no number moves, and `is_high_stakes` (`0023:495-499`) is untouched |
+| `PRD.md:117` · `ARCHITECTURE.md:11-14,74-78` | four structural invariants | Provenance *strengthened* — the resolver pins and records its extractions per phase; every new verb role-floored |
 | `PRD.md:123` (inv. 8) | reverse-not-delete | Bindings revoked never deleted; resolutions append-only |
 | `CLAUDE.md` | one audited fn per mutation class · DB-structural guards · op-key · role floor · `_vN` workflows | §3–§4 + Part 2; **no workflow body changes** (Part 2 §A.6) |
 
@@ -157,17 +154,14 @@ authorised the posting. In v3 the post-time re-resolution is a first-class, appe
 carrying its own pins, its outcome, and `compared_to_resolution_id` naming the draft row it was
 checked against. Slot C consults **that receipt chain**, never a mutable marker.
 
-**Provenance does not ride the fingerprint — a v1 error the review caught.** v1 proposed
-`match_fingerprint = {"decision":"binding_match", …}`. That is **incompatible with the existing
-approval contract**: `_approve_entry_core` recomputes `_resolve_counterparty(proposed_counterparty)`
-and raises `CLR23` unless the result is *exactly equal* to the stored fingerprint
-(`0015:1313-1317`), so the first EZSEC approval would have failed — and `execute_rule_post` does not
-convert that `CLR23` into a skip. A `binding_match` decision would also have dropped R2's signed
-`vendor_account` rule snapshot, gated on the decision being one of `registration_match` /
-`name_match_unregistered` / `alias_match` (`0016:4167`). **The fingerprint therefore stays an
-ordinary fingerprint.** The binding reference lives in a dedicated nullable
-`clara.journal_entries.vendor_binding_id` column — provenance only, never an input to resolution —
-and the durable auditor record is the resolutions row, which survives approval's fingerprint nulling
+**Provenance does not ride the fingerprint** (round-1 finding 1, **closed** at round 2). v1's
+`match_fingerprint={"decision":"binding_match"…}` was incompatible with the approval contract:
+`_approve_entry_core` recomputes `_resolve_counterparty(proposed_counterparty)` and raises `CLR23`
+unless the result equals the stored fingerprint exactly (`0015:1313-1317`) — the first EZSEC approval
+would have failed — and it would also have dropped R2's `vendor_account` snapshot, gated on the
+decision value (`0016:4167`). **The fingerprint stays ordinary.** The binding reference lives in a
+nullable `journal_entries.vendor_binding_id` — provenance only, never an input to resolution — and
+the durable record is the resolutions row, which survives approval's fingerprint nulling
 (`0015:1460-1463`).
 
 ### 3.2 The features — DB-computed, and only F3 proves identity
@@ -177,13 +171,11 @@ derives the features from the evidence window and refuses if they disagree. A ha
 is a human *claim* about future documents; a derived one is a *fact* about documents a human already
 approved — which is what ADR-046 demands.
 
-**What v1 got wrong about the division of labour** (finding 5): v1 presented three features as three
-walls of comparable strength. They are not. F1 is a single typed `invoice.vendor_name` string — not a
-whole-letterhead signature — and F2 is a shared numbering habit. Neither proves *who issued the
-document*. Only F3 does, and only if the identity it finds is attributed to the issuer. v2 states the
-roles plainly: **F1 and F2 are STABILITY features** (is this the same recurring document family?);
-**F3 is the IDENTITY feature** (does this document assert it was issued by the bound party?). A
-binding needs all three, but the identity claim rests on F3 alone.
+**The division of labour, which v1 got wrong** (finding 5): the three features are not walls of
+comparable strength. F1 is a single typed `invoice.vendor_name` string, not a whole-letterhead
+signature; F2 is a shared numbering habit. Neither proves *who issued the document*. So: **F1 and F2
+are STABILITY features** (same recurring document family?), **F3 is the IDENTITY feature** (does this
+document assert the bound party?). All three are required; the identity claim rests on F3 alone.
 
 **F1 `vendor_name_norm`** — `clara._binding_normalize()` of the `invoice.vendor_name` region on the
 pinned facts extraction. Deliberately **not** the `[^a-zA-Z0-9]→''` folder `_resolve_counterparty`
@@ -207,10 +199,9 @@ clara._binding_normalize(t text) :=
     '\s+', ' ', 'g')))
 ```
 
-The list covers the format codepoints OCR realistically emits (soft hyphen, zero-width space /
-non-joiner / joiner, word joiner, BOM, LRM/RLM, the bidi embedding and isolate controls). It is a
-maintained enumeration, not a proof of completeness: a codepoint outside it survives normalization
-and simply makes F1 compare unequal, which refuses. **Fail-closed, and stated as such.**
+The list covers the format codepoints OCR realistically emits. It is a maintained enumeration, not a
+proof of completeness: a codepoint outside it survives normalization and makes F1 compare unequal,
+which refuses. **Fail-closed, and stated as such.**
 
 For EZSEC: `ez 易计 ezaccount count` — identical across every bill checked.
 
@@ -242,20 +233,16 @@ counterparty's `registration_normalized` **or** `name_normalized` must appear, u
 vendor-anchor/customer-anchor comparison on top of the band. The review broke that on two grounds and
 both are conceded:
 
-1. **Coordinate frames.** X6 compares anchors *within one Azure result*. v2 crossed an
-   `invoice_facts` polygon against a separate `ocr` extraction without establishing frame congruence
-   — the same units bug X6's own header warns about twice. v3 removes the cross-extraction geometry
-   entirely: F3 is band-only, inside one extraction.
-2. **Role-blindness.** The band test cannot tell an issuer from a `c/o X`, `prepared by X`, or
-   `company secretary X` line printed in the same letterhead block. That is a **named residual**
-   (Part 2 §C.1), not a wall — and a legitimate one, since such a document is not necessarily a
-   forgery. Mitigations are operational, not structural: the amount cap, the monthly window, the
-   divergence surface (§10 amendment A), and the owner's bounded-forgery ruling at §10 (5).
+1. **Coordinate frames.** X6 compares anchors *within one Azure result*; v2 crossed an
+   `invoice_facts` polygon against a separate `ocr` extraction with no frame congruence — the units
+   bug X6's own header warns about twice. v3 removes the cross-extraction geometry entirely.
+2. **Role-blindness.** The band test cannot tell an issuer from a `c/o X` / `prepared by X` /
+   `company secretary X` line in the same block. **Named residual** (Part 2 §C.1), not a wall — and
+   legitimate, since such a document need not be a forgery. Mitigations are operational: the cap, the
+   window, the divergence surface, and the owner's bounded-forgery ruling at §10 (5).
 
-**An open doctrine question goes with it (§11).** The review argues that *any* boolean over page
-evidence whose result selects posting authority performs the identity decision X6 declined to emit —
-which would make F3 "option B by predicate" regardless of how it is framed. That is a doctrine call
-about the owner's own rejection, not a call this design can make for them.
+**The doctrine question this raised is RULED** — §10 ruling 9 / amendment D: F3 is corroboration of
+an authority a human created, not creation of identity by the page, and it stays.
 
 **Bank-account details are OUT** — §10 ruling 6, closed not deferred.
 
@@ -344,13 +331,12 @@ secretarial providers change; an authority nobody re-reads is an authority nobod
 
 **Renewal is revoke-then-propose-fresh. Atomic supersession is DEFERRED** (v3 narrowing,
 orchestrator-ruled). v2 promised a one-transaction supersession that "retires" the predecessor —
-against a status vocabulary that had no `retired` or `superseded` value, so it would have written a
-state that does not exist. The honest v3 answer is that **renewal has a coverage gap**: revoke, then
-propose, then sign, with an interval in between during which the client has no binding and its bills
-land in the human review queue. **For one binding at one firm that is an accepted operational cost,
-stated as a cost** — a bookkeeper codes a few bills by hand for as long as the ceremony takes.
-Atomic supersession, and the `superseded` status reserved for it, are a **named deferral to a future
-wave**, to be designed when more than one firm carries bindings and the gap starts costing something.
+against a vocabulary with no `retired` or `superseded` value, so it would have written a state that
+does not exist. The honest answer: **renewal has a coverage gap** — revoke, propose, sign, with an
+interval during which the client has no binding and its bills land in the human queue. **For one
+binding at one firm that is an accepted operational cost, stated as a cost.** Atomic supersession and
+its reserved `superseded` status are a **named deferral**, to be designed when more than one firm
+carries bindings and the gap starts costing something.
 
 **Revocation: `clara.revoke_vendor_identity_binding(p_binding, p_reason, p_op_key)`, floor
 `bookkeeper`** — deliberately a *lower* floor than signing. Creating authority should be harder than
@@ -382,12 +368,11 @@ acquirer conforms:
 - `revise_entry`: entry → binding (divergence row only);
 - `revoke` / `sign` / lazy expiry: binding alone, and they touch no filing, entry or rule.
 
-**Why that is cycle-free, checkably:** the only paths that ever lock a binding are those four, and
-**no path anywhere acquires a filing, entry or rule lock while already holding a binding lock**. A
-lock that is always last in every acquirer cannot be part of a wait cycle. This claim is falsifiable
-by grep, and the rig test named in Part 2 §D is what falsifies it if the build drifts. The
-pre-existing `file_document` / `confirm_attribution_candidate` filing-order hazard (task #29) is
-untouched and unrelated — no binding path takes a filing lock.
+**Why that is cycle-free, checkably:** those four are the only paths that ever lock a binding, and
+**none acquires a filing, entry or rule lock while already holding one**. A lock that is last in
+every acquirer cannot be part of a wait cycle. Falsifiable by grep, with the rig test in Part 2 §D as
+the falsifier if the build drifts. The pre-existing `file_document` /
+`confirm_attribution_candidate` hazard (task #29) is untouched — no binding path takes a filing lock.
 
 **Revocation is a real brake only because of the lock above.** A post-time liveness *read* would not
 be one: the sweep could read the binding live, revocation could commit and truthfully report zero
@@ -417,18 +402,8 @@ Eight questions were raised here — maker/checker, human-lane conflict, the reg
 requirement, the two-pin, expiry, bank details, the skip vocabulary, the shipping shape. **All eight
 are closed**, each restated with its ruling and consequence in §10.
 
-**Q9 (NEW, v3, for the owner — it decides whether this design is buildable at all).**
-*Does an F3-shaped predicate fall inside your rejection of option B?* The second review argues it
-does: F3 reads the page for the bound party's bare, unlabelled registration, and its boolean result
-selects posting authority — which is the identity decision X6 deliberately declines to emit, no
-matter that a human signed the binding first and nothing is written back to the extraction. The
-counter-argument is that option B would let the machine *name* a vendor from an unlabelled number on
-any document, whereas F3 can only ever *confirm or refuse* a party a human already named on this
-client, and a false pass resolves to that same human-approved counterparty rather than an arbitrary
-one. **Both readings are defensible and this design cannot settle it** — it is a doctrine call about
-the owner's own ruling, and per `CLAUDE.md` a design-vs-contract collision goes to the owner rather
-than being decided in the lane. If the answer is "yes, that is option B", F3 cannot exist in this
-form and the binding needs a different identity feature or the slice stops.
+**Q9 (raised by v3, RULED 2026-07-28 — §10 ruling 9 / amendment D).** *Does an F3-shaped predicate
+fall inside the rejection of option B?* **The owner ruled it does not: F3 stays.** No longer a gate.
 
 ## 10. Rulings (2026-07-28) — every §9 question closed
 
@@ -446,6 +421,32 @@ section is read subject to it.
 | 6 | bank details as a fourth feature | **OUT — CLOSED, not deferred.** A new page region is option B by the back door | orchestrator |
 | 7 | skip-vocabulary split (§6.2) | **APPROVED** — the zero-consumer grep is the evidence | orchestrator |
 | 8 | shipping shape | **SPLIT** — amendment C | orchestrator |
+| 9 | *(v3)* is an F3-shaped predicate option B? | **NO — F3 STAYS** (裁定：不算 option B) — amendment D | owner |
+| 10 | *(v3)* admission stamping cut instead of `admit_autodraft_task` replaced | **ACCEPTED AS FINAL** — do not build the replacement; the admission-provenance residual stays honestly named | orchestrator |
+
+**Amendment D (ruling 9) — F3 is corroboration, not identity creation.** The reasoning of record,
+because it is the line every future feature in this family will be measured against:
+
+> **Option B was "the page creates identity → identity creates authority." F3 is "the human creates
+> authority → the page only corroborates."** The rejected *direction of authority flow* is what made
+> option B option B.
+
+Three properties keep F3 on the right side of that line: its **failure can only refuse**; its
+**success only releases what a human already approved** (the counterparty was named and signed by a
+professional before any document reached it); and it **emits and stores no new identity evidence** —
+nothing is written back to the extraction, no `invoice.vendor_registration` region is created, and
+X6's emission walls are untouched. A false pass resolves to the *same human-approved counterparty*,
+never an arbitrary one.
+
+The review's contrary reading is recorded rather than erased — it is reasonable, and the ruling is
+what settles it, not the argument. **The `c/o` residual (Part 2 §C.1) is unaffected**: it was never
+about whether F3 may exist, only about what F3 cannot see, and it remains open and named.
+
+**Operational note (not a gate).** The dwell rule (§3.3a) means the **first** production binding needs
+a fourth approved EZSEC bill posted **≥14 days after 25/08/2025** — the existing approvals (25/08,
+25/08, 29/08) span two distinct dates over four days and do not qualify. IV-00744 (`ebb272c7`) and
+the Tier-3 bills (`bb12b995`, `7ecc83c2`, `aef22972`) are filed and corroborated and can serve; the
+runway handles it at build time.
 
 **Amendment A (ruling 2) — the human lane surfaces, records, and yields.** On a human-lane draft
 whose document has a live binding match and whose chosen counterparty differs, the DB **never**
@@ -456,11 +457,10 @@ decided otherwise. Mechanism: a `vendor_binding_resolutions` row with `outcome='
 `divergence jsonb` naming the human-chosen counterparty and the actor.
 
 **v3 (finding 9, orchestrator-narrowed): divergence is VISIBLE-ONLY. Auto-suspension is CUT.** v1
-promised an early warning it never designed; v2 over-corrected into an automatic state change, and
-the review broke that too — `_record_notification_core` is wrapped in `exception when others then
-null` (`0023:690-697`), so "and notifies the signer" was a promise the mechanism cannot keep, and a
-counter of *rows* could be tripped three times by one draft revised three times, or by unrelated
-documents aggregating. v3 keeps only what a read surface can honestly deliver:
+promised an early warning it never designed; v2 over-corrected into an automatic state change and the
+review broke that too — `_record_notification_core` is wrapped in `exception when others then null`
+(`0023:690-697`), so "notifies the signer" was a promise the mechanism cannot keep, and a counter of
+*rows* could be tripped by one draft revised three times. v3 keeps what a read surface can deliver:
 
 - **`revise_entry` writes the divergence row** (Part 2 §A.4) — the recording gap is closed;
 - the binding read surface shows a divergence count **by DISTINCT `document_id`**, not by row, so
