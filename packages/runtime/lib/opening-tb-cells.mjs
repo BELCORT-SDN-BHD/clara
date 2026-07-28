@@ -74,11 +74,11 @@ import {
   norm,
   rowPolygon,
 } from "./table-cell-geometry.mjs";
-import { asciiTrim, centsOfRaw, isDash, isStrictAmount } from "./invoice-amount-grammar.mjs";
 import { namedUnparseableReason, parseOpeningTbLine } from "./opening-parse.mjs";
-
-/** Account-code shapes the opening grammar accepts (0017 `_derive_opening_region_fact`). */
-const ACCOUNT_RE = /^(?:[0-9]{4,8}|[0-9]{3}-[0-9A-Z]{2,4})$/;
+// The token grammar — what ONE CELL may say — lives in its own module (see its header). It is
+// re-exported so callers and tests keep a single import surface for the producer.
+import { ACCOUNT_RE, canonicalTbLineText, readAmountCell } from "./opening-tb-grammar.mjs";
+export { ACCOUNT_RE, canonicalTbLineText, normalizedCellText, readAmountCell } from "./opening-tb-grammar.mjs";
 
 /** `Code : 310-000 CASH AT BANK` — a per-account GENERAL LEDGER block header. Its presence is
  *  proof this is a ledger, not a trial balance, and is a hard disqualifier (see readHeader). */
@@ -111,9 +111,6 @@ const HEADER_SYNONYMS = {
 // balance. Present in the header, it disqualifies the table outright — see readHeader.
 const DATE_SYNONYMS = ["date", "posting date", "txn date", "transaction date", "doc date", "tarikh"];
 
-/** Strip the currency word a package sometimes prints inside the amount cell. */
-const stripCurrency = (s) => asciiTrim(String(s ?? "").replace(/\s+/g, " ")).replace(/^(?:RM|MYR)\s*/i, "");
-
 /**
  * Learn the four column x-positions from a header row, or null when this row is not a trial
  * balance header. ALL FOUR are required: a table without both a Debit and a Credit column
@@ -132,50 +129,6 @@ export function readTrialBalanceHeader(row) {
   }
   const complete = ["code", "description", "debit", "credit"].every((k) => cols[k] !== undefined);
   return complete ? cols : null;
-}
-
-/** The ONLY nonblank content an amount column may carry without stating a figure: a footnote
- *  marker. Explicit and tiny on purpose — see the ABSENCE rule in `readAmountCell`. */
-const NOTE_MARKER_RE = /^[*†‡#]{1,3}$/;
-
-/**
- * Read ONE amount cell. Returns a typed verdict rather than a number, because the four
- * outcomes are genuinely different things and collapsing them is how a nil becomes a zero
- * balance or a mangled token becomes an absence.
- *   { kind:'absent' }              — the cell is EMPTY or missing (the ordinary one-sided row)
- * · { kind:'nil' }                 — the document printed `-` or `0.00`: no balance, stated
- * · { kind:'amount', raw, cents }  — a strict, positive, comma-grouped figure (BigInt cents)
- * · { kind:'unparseable', raw }    — anything else NONBLANK: a parenthesised or negative
- *                                    figure, three decimals, an ungrouped run, OCR mangling
- *
- * ABSENCE MEANS EMPTY, AND NOTHING ELSE. This is the module's most important single rule, and
- * it is written in blood: the first version fell back to `absent` for any nonblank token that
- * did not LOOK amount-shaped, which sounds harmless and is not. `9OO.00` — a printed `900.00`
- * whose zeroes OCR'd as the letter O — is not amount-shaped, so a genuinely TWO-SIDED row read
- * as cleanly one-sided. Two such rows produced a perfectly balanced, perfectly canonical, and
- * completely wrong opening seed that the database accepted without complaint, because every
- * line it was shown was individually valid. The failure was invisible at every downstream
- * checkpoint. So: an amount column either printed nothing, or it printed something we can read
- * exactly, or we do not know what this row says — and not knowing is a refusal.
- */
-export function readAmountCell(cell) {
-  const raw = stripCurrency(cellText(cell));
-  if (raw === "") return { kind: "absent" }; // genuinely empty, or no cell at that column
-  if (isDash(raw)) return { kind: "nil" };
-  if (isStrictAmount(raw)) {
-    const cents = centsOfRaw(raw);
-    if (cents === null) return { kind: "unparseable", raw };
-    if (cents === 0n) return { kind: "nil" };
-    // A NEGATIVE cannot reach here (AMOUNT_STRICT has no sign) — asserted, not assumed.
-    return cents > 0n ? { kind: "amount", raw, cents } : { kind: "unparseable", raw };
-  }
-  if (NOTE_MARKER_RE.test(raw)) return { kind: "absent" }; // a footnote mark states no figure
-  return { kind: "unparseable", raw };
-}
-
-/** The canonical `opening_tb.line` evidence text: `<code> <label> RM <amount> <DR|CR>`. */
-export function canonicalTbLineText({ accountCode, label, raw, side }) {
-  return `${accountCode} ${label} RM ${raw} ${side === "debit" ? "DR" : "CR"}`;
 }
 
 /**

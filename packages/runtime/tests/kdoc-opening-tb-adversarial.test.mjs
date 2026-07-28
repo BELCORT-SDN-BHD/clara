@@ -145,6 +145,55 @@ test("[P1-4] figure-like junk on a CODE-LESS row is refused, not swallowed as fu
   assert.equal(out.refusals[0].reason, "unrecognized_account_code");
 });
 
+test("[P1-4 round 2] a CURRENCY TOKEN alone is stated content we cannot read, never an absence", () => {
+  // The round-1 fix stripped `RM`/`MYR` BEFORE deciding emptiness, so the rewrite decided the
+  // verdict: a bare `RM` collapsed to "" and read as ABSENT. Classification now runs against the
+  // original token, with every character the document printed still present.
+  const at = (text) => readAmountCell({ text_content: text });
+  for (const token of ["RM", "MYR", "rm", "myr", "RM ", " MYR"]) {
+    assert.equal(at(token).kind, "unparseable", `a currency word alone is not an empty cell: ${token}`);
+  }
+  assert.equal(at("RM").raw, "RM", "the refusal reports what the document actually printed");
+});
+
+test("[P1-4 round 2] the marker exception admits ONLY the bare glyph — never a currency-prefixed form", () => {
+  const at = (text) => readAmountCell({ text_content: text });
+  for (const bare of ["#", "*", "†", "‡", "**"]) {
+    assert.equal(at(bare).kind, "absent", `a bare footnote marker states no figure: ${bare}`);
+  }
+  for (const prefixed of ["RM #", "MYR #", "rm *", "RM†", "MYR  ‡"]) {
+    assert.equal(at(prefixed).kind, "unparseable", `currency-prefixed is content, not a marker: ${prefixed}`);
+  }
+  // The same ordering rule applied to NIL: only a bare dash is the document's own "no balance".
+  assert.equal(at("-").kind, "nil");
+  assert.equal(at("RM -").kind, "unparseable", "a currency-prefixed dash states more than a dash");
+});
+
+test("[P1-4 round 2] the `RM #` mirror document — balanced, canonical, and REFUSED", () => {
+  // Codex's round-2 construction: two genuinely two-sided rows whose opposite amounts print as
+  // `RM #`. Under the round-1 fix those read ABSENT, so each row emitted a clean one-sided line,
+  // the pair balanced exactly, and two canonical regions came back `status:'ok'` — rebuilding the
+  // very failure P1-4 was supposed to have closed, through the normalization step instead.
+  const out = cellsToOpeningTb([
+    ...HEADER(),
+    ...tbRow(1.43, { code: "310-000", label: "CASH AT BANK", dr: "1,000.00", cr: "RM #" }),
+    ...tbRow(1.71, { code: "910-000", label: "SHARE CAPITAL", dr: "RM #", cr: "1,000.00" }),
+  ]);
+  assert.equal(out.status, "refused", "both rows state something in BOTH columns");
+  assert.equal(out.refusals.length, 2);
+  for (const r of out.refusals) assert.equal(r.reason, "unparseable_amount");
+  assert.deepEqual(out.regions, [], "not one canonical region may be emitted");
+});
+
+test("[P1-4 round 2] stripping still works for a genuine currency-prefixed FIGURE", () => {
+  // The ordering fix must not cost the real case it exists for: `RM 1,234.56` in an amount cell.
+  const at = (text) => readAmountCell({ text_content: text });
+  assert.equal(at("RM 1,234.56").kind, "amount");
+  assert.equal(at("RM 1,234.56").cents, 123_456n);
+  assert.equal(at("MYR 1,234.56").cents, 123_456n);
+  assert.equal(at("RM 0.00").kind, "nil", "a currency-prefixed zero is still a stated nil");
+});
+
 test("[side note] a NIL row still CLAIMS its code — a nil + a balance is a duplicate", () => {
   const out = cellsToOpeningTb([
     ...HEADER(),
