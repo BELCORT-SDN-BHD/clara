@@ -66,8 +66,18 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
  *  mangled name, and name-only matching against a REGISTERED counterparty is refused by
  *  CLR23 doctrine — correctly. Bumped because the same document now yields a fact it did not
  *  under v6, so v6 and v7 extractions must stay distinguishable. The reader's counters ride
- *  the envelope under `vendor_identity`. */
-export const NORMALIZATION_VERSION = "clara-invoice-norm:v7";
+ *  the envelope under `vendor_identity`.
+ *  v8 (runway measurement, 2026-07-28): the totals vocabulary learns the EZSEC net label.
+ *  EZSEC (~45 bills — the corpus's only family that prints a corroborable MYR breakdown)
+ *  states its net as `Total Payable Excl. SST:`, which exact-prefix-matched NOTHING, so
+ *  `invoice.total_excl_tax` stayed typed-only while its tax half was already
+ *  `typed_collapsed`. X5 requires BOTH halves agreed, so the whole family sat one label short
+ *  of corroborating. Adding the `total payable excl` / `total excl` prefixes gives the reader
+ *  a second reading of the net that the typed field can collapse against. Bumped because the
+ *  same document now yields a fact it did not under v7 (and a differently-sourced one), so v7
+ *  and v8 extractions must stay distinguishable and a re-extraction is a genuinely new fact
+ *  set rather than a silent supersede — the same reason v6 and v7 were bumped. */
+export const NORMALIZATION_VERSION = "clara-invoice-norm:v8";
 
 export class DocumentEngineError extends Error {
   constructor(code, message) {

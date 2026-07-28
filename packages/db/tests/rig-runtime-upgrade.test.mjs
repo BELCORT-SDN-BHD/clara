@@ -118,12 +118,31 @@ test("§3.9 upgrade/cutover: 0001–0005 + data + PENDING intents for ALL THREE 
   // 3. S4-ND9: a SYNTHETIC taxonomy version mapping event types to internal_task
   //    and notification (v1 maps only background_review; the stamping trigger
   //    rejects unmapped (version, type, decision) triples).
+  //
+  //    background_review is mapped to 'client.created', NOT a 'document.%' event type
+  //    (diagnosed via task #10's rig triage). Step 5 below applies EVERY migration in one
+  //    `migrate()` call, so 0007's real, one-time "residual v1 document background work
+  //    cannot survive the semantic repoint" cutover (0007_document_pipeline.sql, ~L2710)
+  //    runs in the SAME batch. That cleanup sweeps ANY pending wake_intents row matching
+  //    `event_type like 'document.%' and decision='background_review'` — with no
+  //    taxonomy_version filter, because at the moment 0007 first shipped against a REAL
+  //    0001-0006 database no OTHER source of that combination could exist (0007's own v2
+  //    taxonomy maps every document.* event to 'ignore' going forward). A synthetic
+  //    document.ingested/background_review intent minted here is therefore
+  //    indistinguishable from genuine pre-0007 residual work and gets legitimately
+  //    consumed by that cleanup before this test's own assertions run — reproduced
+  //    (consumed_by='taxonomy-v2-cutover') and confirmed to predate the extraction slice
+  //    (reproduces identically at 21 migrations). 0007 is an already-applied,
+  //    checksum-pinned migration and must never be edited, so the fix is here: pick an
+  //    event type this one-time cleanup does not match, while still proving the same
+  //    property (a background_review-decision intent survives the FULL upgrade chain).
+  //    client.created fires once already (step 2's createClient) and is unambiguous.
   await rootQuery("insert into clara.taxonomy_versions (version, note) values ($1, 'rig synthetic all-decisions version (S4-ND9)')", [SYNTH_VERSION]);
   await rootQuery(
     `insert into clara.trigger_taxonomy (version, event_type, decision, note) values
-       ($1, 'entry.approved',    'internal_task',     'rig synthetic'),
-       ($1, 'client.resolved',   'notification',      'rig synthetic'),
-       ($1, 'document.ingested', 'background_review', 'rig synthetic')`,
+       ($1, 'entry.approved',  'internal_task',     'rig synthetic'),
+       ($1, 'client.resolved', 'notification',      'rig synthetic'),
+       ($1, 'client.created',  'background_review', 'rig synthetic')`,
     [SYNTH_VERSION],
   );
 
@@ -131,7 +150,7 @@ test("§3.9 upgrade/cutover: 0001–0005 + data + PENDING intents for ALL THREE 
   const intents = {
     internal_task: await insertPendingIntent(await latestEvent(client, "entry.approved"), "internal_task", SYNTH_VERSION),
     notification: await insertPendingIntent(await latestEvent(client, "client.resolved"), "notification", SYNTH_VERSION),
-    background_review: await insertPendingIntent(await latestEvent(client, "document.ingested"), "background_review", SYNTH_VERSION),
+    background_review: await insertPendingIntent(await latestEvent(client, "client.created"), "background_review", SYNTH_VERSION),
   };
   const preSeq = await maxSeq(firm);
   const prePackVersion = Number((await contextPack(owner, client, "pre-0006"))?.books_version);
