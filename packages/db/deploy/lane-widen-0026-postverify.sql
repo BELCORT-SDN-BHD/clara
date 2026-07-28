@@ -42,6 +42,11 @@
 --   8. Neither function's EXECUTE surface moved.
 --   9. The apply added DOORS, not data (the xmin idiom) — no existing document was touched,
 --      enqueued, extracted, posted, or run.
+--   10. THE P-ROUND (O-round findings, all coexisting-rows class): classify_document's
+--      and set_document_kind's version mints are engine_kind-scoped (P1);
+--      finalize_document_intake's duplicate-path re-select is engine+lane-pinned (P2);
+--      persist_document_extraction refuses a misrouted facts-lane task instead of
+--      silently conflict-reusing a structured_parse extraction (P3).
 --
 -- WHY THE PROBES MATCH COMMENT-STRIPPED TEXT. 0022 demonstrated the attack rather than
 -- arguing it: delete a guard, paste its text back as a `--` comment, and every raw-prosrc
@@ -389,4 +394,84 @@ begin
     raise exception 'POST-VERIFY 9: the 0026 apply transaction produced % rule-post run(s)', v_n;
   end if;
   raise notice 'OK 9  the 0026 apply transaction (xid %) touched no document, task, extraction, journal entry, or rule-post run', v_xid;
+end $$;
+
+-- ---------------------------------------------------------------------
+-- 10. THE P-ROUND (O-round findings on the first submitted diff, all the coexisting-
+--     rows class): (a) classify_document's and set_document_kind's verdict version
+--     mints are both scoped to engine_kind='doc_classify', not engine_id alone — a
+--     coexisting different-kind extraction under the same engine_id can no longer
+--     inflate a verdict's version past its own task's. (b) finalize_document_intake's
+--     duplicate-adoption re-select is pinned to (engine_id,lane), not an unscoped
+--     document-wide latest-task lookup that could grab a coexisting different-lane
+--     task. (c) persist_document_extraction is restricted to ocr/structured_parse; a
+--     misrouted facts-lane caller gets a loud typed refusal instead of silently
+--     conflict-reusing a structured_parse extraction.
+-- ---------------------------------------------------------------------
+do $$
+declare v_src text; v_code text;
+begin
+  select prosrc into v_src from pg_proc
+   where oid = 'clara.classify_document(uuid,text,numeric,text,text,uuid,text,text)'::regprocedure;
+  if v_src is null then
+    raise exception 'POST-VERIFY 10: classify_document is GONE';
+  end if;
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  if position('wheredocument_id=p_documentandengine_id=p_engine_idandengine_kind=''doc_classify''' in v_code) = 0 then
+    raise exception 'POST-VERIFY 10: classify_document''s version mint is not scoped to engine_kind=''doc_classify'' (P1)';
+  end if;
+
+  select prosrc into v_src from pg_proc
+   where oid = 'clara.set_document_kind(uuid,text,text,text)'::regprocedure;
+  if v_src is null then
+    raise exception 'POST-VERIFY 10: set_document_kind is GONE';
+  end if;
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  if position('wheredocument_id=p_documentandengine_id=''clara-classify-human:v1''andengine_kind=''doc_classify''' in v_code) = 0 then
+    raise exception 'POST-VERIFY 10: set_document_kind''s version mint is not scoped to engine_kind=''doc_classify'' (P1)';
+  end if;
+  if position('''prior_gl''' in v_code) = 0 then
+    raise exception 'POST-VERIFY 10: set_document_kind lost 0017''s prior_gl vocabulary patch';
+  end if;
+
+  select prosrc into v_src from pg_proc
+   where oid = 'clara.finalize_document_intake(uuid,text,text,jsonb,int,text,uuid,uuid,text)'::regprocedure;
+  if v_src is null then
+    raise exception 'POST-VERIFY 10: finalize_document_intake is GONE';
+  end if;
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  if position('selectidintov_taskfromclara.document_processing_taskswheredocument_id=v_docandengine_id=p_engine_idandlane=p_laneorderbyversion_ndesclimit1' in v_code) = 0 then
+    raise exception 'POST-VERIFY 10: finalize_document_intake''s duplicate-path re-select is not pinned to engine_id+lane (P2)';
+  end if;
+
+  select prosrc into v_src from pg_proc
+   where oid = 'clara.persist_document_extraction(uuid,text,int,jsonb,jsonb,text,text,text)'::regprocedure;
+  if v_src is null then
+    raise exception 'POST-VERIFY 10: persist_document_extraction is GONE';
+  end if;
+  v_code := regexp_replace(
+              regexp_replace(
+                regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+                '--[^' || chr(10) || ']*', '', 'g'),
+              '\s+', '', 'g');
+  if position('ift.lanenotin(''ocr'',''structured_parse'')then' in v_code) = 0 then
+    raise exception 'POST-VERIFY 10: persist_document_extraction is missing its ocr/structured_parse-only admission guard (P3)';
+  end if;
+  if position('onlysettlesocr/structured_parsetasks' in v_code) = 0 then
+    raise exception 'POST-VERIFY 10: persist_document_extraction''s lane-admission refusal message is missing or reworded past recognition (P3)';
+  end if;
+
+  raise notice 'OK 10  the P-round: both classification writers'' version mints kind-scoped (P1); finalize_document_intake''s duplicate-path re-select engine+lane-pinned (P2); persist_document_extraction restricted to ocr/structured_parse (P3)';
 end $$;

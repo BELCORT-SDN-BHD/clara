@@ -17,8 +17,9 @@ import {
   rootQuery, getPool, opk, endPool, assertRaises,
 } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
-import { buildWorld, requestReextraction, freshResolution } from "./x1-helpers.mjs";
-import { fileDocument, seedVerifiedDocument } from "./s6-helpers.mjs";
+import { buildWorld, requestReextraction, freshResolution, classifyDocument, setDocumentKind } from "./x1-helpers.mjs";
+import { fileDocument, seedVerifiedDocument, seedIntake, finalizeIntake } from "./s6-helpers.mjs";
+import { claimTask } from "./s6-fixtures.mjs";
 
 let has0026 = false;
 let w = null;
@@ -537,4 +538,153 @@ test("a filed document with an ALREADY-IN-FLIGHT facts task still refuses — th
   await assertRaises("CLR16",
     () => requestReextraction(w.users.alice, { document: doc, reason: "0026 rig in-flight probe", opKey: opk("inflight") }),
     "a filed document whose facts task is already in flight (not zero tasks, so no bootstrap door — and not done, so no ordinary door either)");
+});
+
+// ===========================================================================
+// THE P-ROUND (O-round findings on the first submitted diff, all the coexisting-rows
+// class). See 0026_lane_widen.sql's own header, §H/§I/§C/§E for the full analysis.
+// ===========================================================================
+
+test("P1: classify_document's verdict version mint is scoped to engine_kind — a coexisting structured_parse extraction under the SAME engine no longer inflates the classify verdict's version past its own task's", async () => {
+  requireReady();
+  const seed = await seedVerifiedDocument({ firm: w.firms.A, mime: "application/pdf" });
+  const doc = seed.documentId;
+
+  // The coexisting-rows shape P1 flags: a structured_parse extraction under the SAME
+  // clara-classify-llm:v1 engine string this document's classify task will also use —
+  // legal post-§A/§B (engine_kind joins the extraction key), and nothing in the schema
+  // prevents an intake task from reusing a classify-shaped engine id (the lane/engine
+  // CHECK only requires a clara-% prefix for structured_parse).
+  await rootQuery(
+    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
+        version_n,status,page_count,envelope)
+     values ($1,$2,'clara-classify-llm:v1','structured_parse',1,'done',1,'{}'::jsonb)`,
+    [w.firms.A, doc],
+  );
+
+  const task = (await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status)
+     values ($1,$2,'clara-classify-llm:v1','{}'::jsonb,1,'classify','queued') returning id`,
+    [w.firms.A, doc],
+  )).rows[0].id;
+  const runId = `wf-p1-${randomUUID()}`;
+  const claim = await claimTask(task, { egressApproved: true, workflowRunId: runId });
+  assert.notEqual(claim.claim_secret, undefined, "mandatory setup: the claim minted a secret");
+
+  const result = await classifyDocument({
+    document: doc, kind: "invoice", confidence: 0.9, engineId: "clara-classify-llm:v1",
+    opKey: opk("p1"), task, run: runId, secret: claim.claim_secret,
+  });
+  assert.notEqual(result.extraction_id, null, "mandatory setup: the classify verdict was persisted");
+
+  const ext = await rootQuery(
+    "select version_n from clara.document_extractions where id=$1",
+    [result.extraction_id],
+  );
+  assert.equal(ext.rows[0].version_n, 1,
+    "the classify verdict mints version_n=1, matching its own task's version_n=1 — the coexisting structured_parse extraction at v1 under the same engine no longer inflates the count");
+});
+
+test("P1: set_document_kind's human-attestation version mint is ALSO scoped to engine_kind — same coexistence, same fix, the dedicated engine_id", async () => {
+  requireReady();
+  const seed = await seedVerifiedDocument({ firm: w.firms.A, mime: "application/pdf" });
+  const doc = seed.documentId;
+
+  // A structured_parse extraction under set_document_kind's OWN dedicated engine id —
+  // nothing in the schema prevents an intake task from using it either.
+  await rootQuery(
+    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
+        version_n,status,page_count,envelope)
+     values ($1,$2,'clara-classify-human:v1','structured_parse',1,'done',1,'{}'::jsonb)`,
+    [w.firms.A, doc],
+  );
+
+  const result = await setDocumentKind(w.users.alice, { document: doc, kind: "invoice", reason: "0026 P1 rig probe" });
+  assert.notEqual(result.extraction_id, null);
+  const ext = await rootQuery(
+    "select version_n from clara.document_extractions where id=$1",
+    [result.extraction_id],
+  );
+  assert.equal(ext.rows[0].version_n, 1,
+    "the human verdict mints version_n=1 — the coexisting structured_parse extraction under the same dedicated engine id no longer inflates the count");
+});
+
+test("P2: finalize_document_intake's duplicate-adoption receipt names the ORIGINAL intake task, not a coexisting different-lane task, even when the coexisting task has a HIGHER version_n", async () => {
+  requireReady();
+  const sha = randomUUID().replace(/-/g, "").padEnd(64, "0").slice(0, 64);
+  const seed = await seedVerifiedDocument({ firm: w.firms.A, sha256: sha, mime: "application/pdf" });
+  const doc = seed.documentId;
+
+  // The ORIGINAL intake task — the shape a fresh finalize_document_intake creation would
+  // have produced for this document (default engine/lane: clara-fixture:v1 / ocr).
+  const intakeTask = (await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status,workflow_run_id,started_at,finished_at)
+     values ($1,$2,'clara-fixture:v1','{}'::jsonb,1,'ocr','done','rig-run',now(),now())
+     returning id`,
+    [w.firms.A, doc],
+  )).rows[0].id;
+
+  // A coexisting task in a DIFFERENT lane, deliberately at a HIGHER version_n — legal
+  // post-§A, and exactly the shape that defeats an unscoped `order by version_n desc
+  // limit 1`: before the fix this re-select would grab THIS row instead.
+  await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status)
+     values ($1,$2,'clara-myinvois:v1','{}'::jsonb,99,'local_facts','queued')`,
+    [w.firms.A, doc],
+  );
+
+  // A second, duplicate intake of the SAME (already-verified) document — the exact
+  // ELSE branch (not v_created, not v_upgraded) whose re-select P2 fixes.
+  const dupIntake = await seedIntake({
+    firm: w.firms.A, uploadedBy: w.users.alice, sha256: sha, status: "verified",
+    mime: "application/pdf", storageKey: `firms/${w.firms.A}/docs/${sha}.pdf`,
+  });
+  const receipt = await finalizeIntake({ intake: dupIntake });
+  assert.equal(receipt.task_id, intakeTask,
+    "the duplicate-adoption receipt must name the ORIGINAL intake task (ocr, v1) — not the coexisting local_facts task at v99, which an unscoped 'order by version_n desc' would have grabbed");
+});
+
+test("P3: persist_document_extraction refuses a misrouted facts-lane task loudly — no conflict-reuse of a real structured_parse extraction, no invoice_facts_completed event", async () => {
+  requireReady();
+  const doc = await seedXmlDoc(w.firms.A, "p3");
+  // The REAL structured_parse extraction a misrouted call could conflict-reuse.
+  await rootQuery(
+    `insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
+        version_n,status,page_count,envelope)
+     values ($1,$2,'clara-myinvois:v1','structured_parse',1,'done',1,'{}'::jsonb)`,
+    [w.firms.A, doc],
+  );
+  // A MISROUTED local_facts task — persist_document_extraction must never settle this;
+  // persist_invoice_facts is its sole legitimate writer.
+  const task = (await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status,workflow_run_id,started_at)
+     values ($1,$2,'clara-myinvois:v1','{}'::jsonb,1,'local_facts','running','rig-run',now())
+     returning id`,
+    [w.firms.A, doc],
+  )).rows[0].id;
+
+  await assertRaises("CLR16",
+    () => rootQuery(
+      "select clara.persist_document_extraction($1,'done',1,'{}'::jsonb,'[]'::jsonb,null,null,$2) as r",
+      [task, opk("p3")],
+    ),
+    "a misrouted local_facts task calling persist_document_extraction");
+
+  const taskAfter = await rootQuery("select status from clara.document_processing_tasks where id=$1", [task]);
+  assert.equal(taskAfter.rows[0].status, "running",
+    "the misrouted task is untouched by the refusal — never falsely marked done");
+  const extractions = await rootQuery(
+    "select engine_kind, version_n from clara.document_extractions where document_id=$1",
+    [doc],
+  );
+  assert.equal(extractions.rows.length, 1, "still exactly the one real structured_parse extraction — never conflict-reused by the misrouted call");
+  const events = await rootQuery(
+    "select 1 from clara.domain_events where event_type='document.invoice_facts_completed' and payload->>'task_id'=$1::text",
+    [task],
+  );
+  assert.equal(events.rows.length, 0, "no document.invoice_facts_completed event ever fired — the facts destruction this finding names never happened");
 });

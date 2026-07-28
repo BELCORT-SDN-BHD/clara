@@ -117,6 +117,44 @@
 -- ordinary re-extraction or the receipt backfill. §G's own comment carries the full
 -- verification against all four shapes this door must distinguish.
 --
+-- THE P-ROUND (O-round findings on the first submitted diff, all the coexisting-rows
+-- class — the SAME structural change, legalizing coexistence, exposed three more sites
+-- that assumed the old lane-blind/kind-blind world):
+--   P1 (§H, §I) — both live classification writers (classify_document, 0024;
+--     set_document_kind, 0016) mint their verdict's version_n via `max(version_n)+1`
+--     scoped to engine_id ALONE, not engine_kind. Post-§A/§B, a structured_parse
+--     extraction can legally coexist under the SAME clara-classify-* engine string (the
+--     lane/engine CHECK only requires a clara-% prefix for structured_parse, it does not
+--     exclude the classify-specific engine ids) — an engine_id-only mint would count
+--     it, minting the classify verdict one version ahead of its own per-lane task,
+--     breaking task/extraction version correspondence. Both mints now scope on
+--     engine_kind='doc_classify' too. set_document_kind's CoR was pulled from the LIVE
+--     body via pg_get_functiondef, not hand-copied from 0016's file text — 0016's
+--     static text lacks 0017's dynamic prior_gl vocabulary patch, and a CoR based on it
+--     would have silently reverted that patch (the exact trap 0025's own header already
+--     names for a different function).
+--   P2 (§C) — finalize_document_intake's duplicate-intake-adoption path re-selected
+--     "the task" via `document_id=v_doc order by version_n desc limit 1` with NO
+--     engine/lane filter at all. Post-widening, a document can legally carry tasks in
+--     several lanes at once, so this could grab a facts/re-extraction task instead of
+--     the intake identity task, or tie-break nondeterministically between two lanes at
+--     the same version_n — persisting the WRONG task_id into the intake receipt. Pinned
+--     to the SAME (engine_id,lane) this call's own fresh-creation branch would have used.
+--   P3 (§E) — persist_document_extraction rejected only lane='none' and lane='classify',
+--     silently mapping every OTHER lane (including a misrouted invoice_facts/local_facts
+--     caller — those lanes have their OWN writer, persist_invoice_facts, and must never
+--     reach this one) onto engine_kind='structured_parse'. Post-widening this is no
+--     longer just wrong metadata: a document can legally carry a REAL structured_parse
+--     extraction at the same version_n a misrouted facts task would target, so the
+--     misrouted insert would CONFLICT-REUSE that real extraction's id, mark the facts
+--     task 'done' with no invoice facts ever written and no document.invoice_facts_
+--     completed event — silent facts destruction. Now restricted to ocr/structured_parse
+--     only; any other lane is a loud, typed CLR16 refusal.
+-- Checked against the 0020 §6 pinned closed set (grant_client_egress,
+-- revoke_client_egress, claim_document_processing_task, _enqueue_invoice_facts_core,
+-- record_wiki_source_ingest): neither classify_document nor set_document_kind is a
+-- member — no amendment to wb-0020-legacy.test.mjs is needed for P1.
+--
 -- NOT IN SCOPE (owner-scoped, ledger #32): task #29, the file_document vs
 -- confirm_attribution_candidate opposite-lock-order deadlock. It touches sibling
 -- writers on document_filings, not this key, and is tracked separately. This migration
@@ -247,8 +285,15 @@ begin
     update clara.document_ingest_reservations set task_id=v_task where intake_id=p_intake;
   else
     perform clara._refund_document_reservation(i.firm_id,p_intake,'duplicate-adopted');
+    -- 0026 P2 (O-round finding): pinned to THIS call's own engine_id + lane — post-
+    -- widening, an unscoped `document_id=v_doc order by version_n desc limit 1` can grab
+    -- a facts/re-extraction task from a DIFFERENT lane entirely (now legal coexistence),
+    -- or tie-break nondeterministically between two lanes at the same version_n,
+    -- persisting the WRONG task_id into the intake receipt. Scoped to the SAME
+    -- (engine_id,lane) a fresh creation on this call would have looked up.
     select id into v_task from clara.document_processing_tasks
-      where document_id=v_doc order by version_n desc limit 1;
+      where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
+      order by version_n desc limit 1;
   end if;
 
   if p_client is not null then
@@ -462,6 +507,19 @@ begin
   -- stamp an attribution-visible engine_kind).
   if t.lane='classify' then
     raise exception 'classify tasks are settled by classify_document' using errcode='CLR16';
+  end if;
+  -- 0026 P3 (O-round finding): this writer settles ocr/structured_parse ONLY. Before this
+  -- guard, ANY lane other than 'none'/'classify' — including a MISROUTED invoice_facts or
+  -- local_facts task — fell through to the v_ekind case below and was silently mapped
+  -- onto 'structured_parse'. Post-widening, that mapping is no longer merely wrong
+  -- metadata: a document can now legitimately carry a REAL structured_parse extraction
+  -- alongside a facts task at the same version_n, so a misrouted facts task's insert
+  -- would CONFLICT-REUSE that real extraction's id, mark the facts task 'done' with no
+  -- invoice facts ever written and no document.invoice_facts_completed event — silent
+  -- facts destruction. A misrouted caller now gets a loud, typed refusal instead.
+  if t.lane not in ('ocr','structured_parse') then
+    raise exception 'persist_document_extraction only settles ocr/structured_parse tasks — % tasks are settled by persist_invoice_facts', t.lane
+      using errcode='CLR16';
   end if;
   v_ekind:=case when t.lane='ocr' then 'ocr' else 'structured_parse' end;
   insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
@@ -1177,6 +1235,255 @@ begin
 end $$;
 alter function clara.request_reextraction(uuid, text, text) owner to clara_fn_owner;
 
+-- =====================================================================
+-- §H — clara.classify_document CoR (P1, O-round finding). The classifier's own verdict
+-- version mint is scoped to engine_kind='doc_classify' — before this, `max(version_n)+1`
+-- read across ALL engine_kind values sharing p_engine_id, so a coexisting structured_parse
+-- extraction under the same clara-classify-* engine string (now legal post-§A/§B) would
+-- inflate the verdict's version past its own per-lane task's version_n, breaking task/
+-- extraction correspondence. Every other line is byte-identical to the live 0024 body.
+-- =====================================================================
+create or replace function clara.classify_document(p_document uuid, p_kind text,
+    p_confidence numeric, p_engine_id text, p_op_key text, p_task uuid, p_run text,
+    p_claim_secret text) returns jsonb
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+declare
+  d record; t record; v_dedupe jsonb; v_ext uuid; v_version int; v_prior text;
+  f record; v_q uuid; v_questions jsonb:='[]'::jsonb; v_set boolean:=false;
+  v_human boolean:=false;
+begin
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  -- ADV-R4#6: the document row is LOCKED for the whole verdict write — the two
+  -- classification writers serialize instead of racing on the kind.
+  select * into d from clara.documents where id=p_document for update;
+  if not found then raise exception 'document not found' using errcode='CLR11'; end if;
+  if p_engine_id is null or p_engine_id not like 'clara-classify-%' then
+    raise exception 'classifier engine must carry the clara-classify- prefix' using errcode='CLR10';
+  end if;
+  -- ADV-R5: the human attestation engine ID is RESERVED for set_document_kind —
+  -- a classifier caller may never mint a human-looking verdict row.
+  if p_engine_id='clara-classify-human:v1' then
+    raise exception 'the human attestation engine id is reserved for set_document_kind'
+      using errcode='CLR10',detail='{"reason":"reserved_engine"}';
+  end if;
+  if p_confidence is null or p_confidence<0 or p_confidence>1 then
+    raise exception 'classifier confidence is malformed' using errcode='CLR10';
+  end if;
+  if p_kind is null or p_kind not in
+     ('invoice','receipt','credit_note','debit_note','bank_statement','payment_voucher',
+      'claim_form','payroll_summary','tax_correspondence','ssm_company_doc',
+      'agreement_contract','e_invoice_xml','management_account','opening_balance_doc',
+      'knowledge_artifact','handwritten_note','consent_evidence','prior_gl','other') then
+    raise exception 'unsupported document kind %',p_kind using errcode='CLR10';
+  end if;
+  -- 0014: consent evidence is a legal artifact owned by the egress-consent path;
+  -- the classifier may neither assign nor overwrite it.
+  if d.document_kind='consent_evidence' or p_kind='consent_evidence' then
+    raise exception 'consent-evidence classification is owned by the egress consent path'
+      using errcode='CLR28';
+  end if;
+  -- P3: the request hash is SHAPE-CONDITIONAL — the null-task path hashes with the
+  -- EXACT pre-0024 4-key shape so a historical op_key still replays byte-identically;
+  -- only a task-bound call's hash gains the task+run identity (so reusing an op_key
+  -- under a DIFFERENT task/run is an honest CLR10, not a silently-ignored argument).
+  v_dedupe:=clara._reserve_op(d.firm_id,'classify_document',p_op_key,
+    case when p_task is null then
+      clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,
+        'confidence',p_confidence,'engine',p_engine_id))
+    else
+      clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,
+        'confidence',p_confidence,'engine',p_engine_id,'task',p_task,'run',p_run))
+    end);
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  if p_task is not null then
+    -- P2: TASK- AND RUN-BOUND — id/document/lane/engine locate a candidate row, and
+    -- t.workflow_run_id must match the identity the caller's OWN claim wrote to it
+    -- (claim_document_processing_task, 0009:2229-2231). Q1: run-token identity alone is
+    -- NOT authorization — clara_runtime holds table-wide SELECT on this table (0008), so
+    -- workflow_run_id is readable by any session, not just the claimant. The settle
+    -- additionally requires sha256(p_claim_secret) = t.claim_secret_digest — the digest of
+    -- the CAPABILITY claim_document_processing_task minted and returned ONLY to the
+    -- claiming session at claim time, never stored anywhere in preimage form. A caller
+    -- that read the run id off the table cannot reconstruct this.
+    select * into t from clara.document_processing_tasks
+      where id=p_task and document_id=p_document and lane='classify' and engine_id=p_engine_id
+      for update;
+    if not found then
+      raise exception 'classify task not found for this document/engine' using errcode='CLR16';
+    end if;
+    if t.status='running' and t.workflow_run_id=p_run
+       and t.claim_secret_digest=sha256(convert_to(coalesce(p_claim_secret,''),'UTF8')) then
+      update clara.document_processing_tasks set status='done',finished_at=now()
+        where id=t.id;
+    else
+      raise exception 'this classify task is not running under the caller''s own claim — it already settled, a newer attempt exists, the run token does not match, or the claim secret is wrong'
+        using errcode='CLR16';
+    end if;
+  else
+    -- P1: NO-TASK CEREMONY (WA21-R11) — its REAL precondition, DB-enforced: the document
+    -- must carry NO classify-task history AT ALL (any status, any engine, any version).
+    -- A document with ANY task history must go through the task-bound path above; there
+    -- is nothing left for this path to settle, so it proceeds straight to the verdict.
+    if exists(select 1 from clara.document_processing_tasks
+        where document_id=p_document and lane='classify') then
+      raise exception 'classify task history exists for this document — the no-task ceremony requires a task-free document'
+        using errcode='CLR16';
+    end if;
+  end if;
+
+  -- the verdict row: engine_kind='doc_classify', NO regions (the verdict rides
+  -- the envelope — nothing here can ever collide with an attribution pattern).
+  -- 0026 P1 (O-round finding): scoped to engine_kind='doc_classify' — post-widening, a
+  -- legal structured_parse extraction can coexist under THIS SAME engine_id (nothing
+  -- prevents an intake task from reusing a clara-classify-* engine string), and an
+  -- engine_id-only mint would count it, minting v2 for a verdict whose own per-lane task
+  -- sits at v1 — breaking task/extraction version correspondence.
+  select coalesce(max(version_n),0)+1 into v_version from clara.document_extractions
+    where document_id=p_document and engine_id=p_engine_id and engine_kind='doc_classify';
+  insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
+      version_n,status,page_count,envelope)
+    values(d.firm_id,p_document,p_engine_id,'doc_classify',v_version,'done',
+      coalesce(d.page_count,0),
+      jsonb_build_object('verdict_kind',p_kind,'confidence',p_confidence,
+        'low_confidence',p_confidence<0.8,'source','classifier'))
+    returning id into v_ext;
+
+  v_prior:=d.document_kind;
+  -- ADV-R4#6 / ADV-R5: a HUMAN verdict (set_document_kind) is never overwritten
+  -- by the classifier — the classifier's verdict ROW persists above, but the
+  -- kind and the classified event stay with the human correction. Precedence is
+  -- detected by the row's SOURCE MARKER (envelope source='human', written only
+  -- by set_document_kind), never by an engine-id string a caller could supply.
+  v_human:=exists(select 1 from clara.document_extractions hx
+    where hx.document_id=p_document and hx.engine_kind='doc_classify'
+      and hx.status='done' and hx.envelope->>'source'='human');
+  if p_confidence>=0.8 and not v_human then
+    update clara.documents set document_kind=p_kind where id=p_document;
+    v_set:=true;
+    perform clara._audit(d.firm_id,null,null,null,'classify_document',null,
+      jsonb_build_object('document',p_document,'kind',p_kind,'confidence',p_confidence,
+        'engine',p_engine_id,'prior_kind',v_prior,'extraction',v_ext,'op_key',p_op_key));
+    perform clara._append_event(d.firm_id,'document.classified',null,null,null,null,
+      null,p_document,null,
+      jsonb_build_object('document_kind',p_kind,'confidence',p_confidence,
+        'engine_id',p_engine_id,'extraction_id',v_ext,'prior_kind',v_prior,
+        'source','classifier'));
+  elsif v_human then
+    -- human precedence: the verdict ROW persisted above; the kind, the
+    -- classified event, and the review lane all stay with the human correction.
+    perform clara._audit(d.firm_id,null,null,null,'classify_document',null,
+      jsonb_build_object('document',p_document,'kind',p_kind,'confidence',p_confidence,
+        'engine',p_engine_id,'prior_kind',v_prior,'extraction',v_ext,
+        'human_precedence',true,'op_key',p_op_key));
+  else
+    for f in select df.client_id,df.id as filing_id from clara.document_filings df
+        join clara.clients oc on oc.id=df.client_id and oc.status='active'
+        where df.document_id=p_document and df.retired_at is null loop
+      if not exists(select 1 from clara.open_questions q
+          where q.client_id=f.client_id and q.document_id=p_document
+            and q.origin='classification' and q.status='open') then
+        insert into clara.open_questions(firm_id,client_id,scope_kind,scope_id,document_id,
+            origin,question_text,status,opener_kind,opened_by)
+          values(d.firm_id,f.client_id,'document',p_document,p_document,'classification',
+            'What kind of document is this? The classifier was not confident ('
+              ||round(p_confidence*100)::text||'%; best guess: '||p_kind||').',
+            'open','wake',null)
+          returning id into v_q;
+        v_questions:=v_questions||to_jsonb(v_q);
+        perform clara._append_event(d.firm_id,'open_question.opened',f.client_id,null,null,null,
+          null,p_document,null,
+          jsonb_build_object('question_id',v_q,'origin','classification'));
+      end if;
+    end loop;
+    perform clara._audit(d.firm_id,null,null,null,'classify_document',null,
+      jsonb_build_object('document',p_document,'kind',p_kind,'confidence',p_confidence,
+        'engine',p_engine_id,'prior_kind',v_prior,'extraction',v_ext,
+        'low_confidence',true,'questions',v_questions,'op_key',p_op_key));
+  end if;
+  return clara._finish_op(d.firm_id,'classify_document',p_op_key,
+    jsonb_build_object('document_id',p_document,'extraction_id',v_ext,
+      'document_kind',case when v_set then p_kind else v_prior end,
+      'kind_set',v_set,'confidence',p_confidence,'questions',v_questions));
+end $$;
+alter function clara.classify_document(uuid,text,numeric,text,text,uuid,text,text) owner to clara_fn_owner;
+
+-- =====================================================================
+-- §I — clara.set_document_kind CoR (P1, O-round finding). The human-attestation verdict's
+-- own version mint is scoped to engine_kind='doc_classify' too, same reasoning as §H —
+-- clara-classify-human:v1 is a DEDICATED engine_id, but nothing in the schema prevents a
+-- structured_parse task from also using it (the lane/engine CHECK only requires a
+-- clara-% prefix), so the same coexisting-different-kind hazard applies. Every other line
+-- is byte-identical to the live 0016 body (as CoR'd by 0017's dynamic prior_gl vocabulary
+-- patch — the live body was pulled via pg_get_functiondef, not hand-copied from 0016's
+-- static file text, precisely to avoid silently reverting that patch).
+-- =====================================================================
+create or replace function clara.set_document_kind(p_document uuid, p_kind text,
+    p_reason text, p_op_key text) returns jsonb
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+declare c record; wk record; d record; v_dedupe jsonb; v_ext uuid; v_version int; v_prior text;
+begin
+  select * into wk from clara.wake_context();
+  if wk.credential_id is not null or exists(select 1 from clara.users u
+      where u.id=clara.jwt_sub() and u.is_agent) then
+    raise exception 'agent identity cannot set a document kind' using errcode='CLR03';
+  end if;
+  c:=clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_op_key is null or btrim(p_op_key)='' then
+    raise exception 'op_key is required' using errcode='CLR10';
+  end if;
+  if p_document is null or p_reason is null or nullif(btrim(p_reason),'') is null then
+    raise exception 'a document and a reason are required' using errcode='CLR10';
+  end if;
+  if p_kind is null or p_kind not in
+     ('invoice','receipt','credit_note','debit_note','bank_statement','payment_voucher',
+      'claim_form','payroll_summary','tax_correspondence','ssm_company_doc',
+      'agreement_contract','e_invoice_xml','management_account','opening_balance_doc',
+      'knowledge_artifact','handwritten_note','consent_evidence','prior_gl','other') then
+    raise exception 'unsupported document kind %',p_kind using errcode='CLR10';
+  end if;
+  -- ADV-R4#6: locked — serialized against the classifier writer.
+  select * into d from clara.documents where id=p_document for update;
+  if not found or d.firm_id<>c.firm then
+    raise exception 'document not in your firm' using errcode='CLR11';
+  end if;
+  if d.document_kind='consent_evidence' or p_kind='consent_evidence' then
+    raise exception 'consent-evidence classification is owned by the egress consent path'
+      using errcode='CLR28';
+  end if;
+  v_dedupe:=clara._reserve_op(c.firm,'set_document_kind',p_op_key,
+    clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,
+      'reason',p_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;
+  v_prior:=d.document_kind;
+  update clara.documents set document_kind=p_kind where id=p_document;
+  -- 0026 P1 (O-round finding): scoped to engine_kind='doc_classify' — same reasoning as
+  -- classify_document's own mint, applied to the human-attestation writer's dedicated
+  -- engine_id.
+  select coalesce(max(version_n),0)+1 into v_version from clara.document_extractions
+    where document_id=p_document and engine_id='clara-classify-human:v1' and engine_kind='doc_classify';
+  insert into clara.document_extractions(firm_id,document_id,engine_id,engine_kind,
+      version_n,status,page_count,envelope)
+    values(c.firm,p_document,'clara-classify-human:v1','doc_classify',v_version,'done',
+      coalesce(d.page_count,0),
+      jsonb_build_object('verdict_kind',p_kind,'confidence',1,
+        'source','human','actor',c.actor,'reason',btrim(p_reason)))
+    returning id into v_ext;
+  perform clara._audit(c.firm,c.actor,null,null,'set_document_kind',null,
+    jsonb_build_object('document',p_document,'kind',p_kind,'prior_kind',v_prior,
+      'reason',p_reason,'extraction',v_ext,'op_key',p_op_key));
+  perform clara._append_event(c.firm,'document.classified',null,c.actor,null,null,
+    null,p_document,null,
+    jsonb_build_object('document_kind',p_kind,'prior_kind',v_prior,
+      'extraction_id',v_ext,'source','human'));
+  return clara._finish_op(c.firm,'set_document_kind',p_op_key,
+    jsonb_build_object('document_id',p_document,'document_kind',p_kind,
+      'prior_kind',v_prior,'extraction_id',v_ext));
+end $$;
+alter function clara.set_document_kind(uuid,text,text,text) owner to clara_fn_owner;
+
 -- ---------------------------------------------------------------------------
 -- §TAIL — in-transaction assertions. The apply proves them or rolls back whole.
 --
@@ -1197,6 +1504,8 @@ declare
   v_sig_pde     constant text := 'clara.persist_document_extraction(uuid,text,int,jsonb,jsonb,text,text,text)';
   v_sig_pif     constant text := 'clara.persist_invoice_facts(uuid,jsonb,text,text,int,jsonb)';
   v_sig_rex     constant text := 'clara.request_reextraction(uuid,text,text)';
+  v_sig_classify constant text := 'clara.classify_document(uuid,text,numeric,text,text,uuid,text,text)';
+  v_sig_setkind  constant text := 'clara.set_document_kind(uuid,text,text,text)';
 begin
   -- (0) DOORS-NOT-DATA: clara.documents, clara.document_processing_tasks and
   -- clara.document_extractions content checksums, compared against the §0 checkpoint
@@ -1398,6 +1707,57 @@ begin
     raise exception '0026 tail: request_reextraction has an unexpected EXECUTE grantee after the CoR';
   end if;
 
-  raise notice '0026: lane joins document_processing_tasks'' unique key, engine_kind joins document_extractions'' — the XML facts lane''s task and extraction can now legitimately coexist alongside the intake structured_parse task/extraction at the same version_n; every ON CONFLICT site that assumed the old 3-column key is widened or (persist_invoice_facts) given one for the first time; every silent/crashing fallback is now impossible-state-loud (CLR35); request_reextraction''s exhausted-retry message no longer names an unverifiable cause';
+  -- (8) P1 (O-round finding) — classify_document's and set_document_kind's verdict
+  -- version mints are both scoped to engine_kind='doc_classify', not engine_id alone.
+  select p.prosrc into v_src from pg_proc p where p.oid = v_sig_classify::regprocedure;
+  if v_src is null then raise exception '0026 tail: classify_document is GONE'; end if;
+  v_code := regexp_replace(regexp_replace(regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+    '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  if position('wheredocument_id=p_documentandengine_id=p_engine_idandengine_kind=''doc_classify''' in v_code) = 0 then
+    raise exception '0026 tail: classify_document''s version mint is not scoped to engine_kind=''doc_classify'' (P1)';
+  end if;
+  if position('fromclara.documentswhereid=p_documentforupdate' in v_code) = 0 then
+    raise exception '0026 tail: classify_document lost the ADV-R4#6 document lock';
+  end if;
+  select p.prosrc into v_src from pg_proc p where p.oid = v_sig_setkind::regprocedure;
+  if v_src is null then raise exception '0026 tail: set_document_kind is GONE'; end if;
+  v_code := regexp_replace(regexp_replace(regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+    '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  if position('wheredocument_id=p_documentandengine_id=''clara-classify-human:v1''andengine_kind=''doc_classify''' in v_code) = 0 then
+    raise exception '0026 tail: set_document_kind''s version mint is not scoped to engine_kind=''doc_classify'' (P1)';
+  end if;
+  if position('''prior_gl''' in v_code) = 0 then
+    raise exception '0026 tail: set_document_kind lost 0017''s prior_gl vocabulary patch — the CoR was built from a stale (0016-file-text) base instead of the live pulled body';
+  end if;
+  raise notice '0026: (8) both classification writers'' verdict version mints scoped to engine_kind=''doc_classify'' (P1) — a coexisting different-kind extraction under the same engine_id can no longer inflate a verdict''s version past its own task''s';
+
+  -- (9) P2 (O-round finding) — finalize_document_intake's duplicate-adoption re-select is
+  -- pinned to THIS call's own engine_id + lane, not an unscoped document-wide latest-task
+  -- lookup that could grab a coexisting different-lane task.
+  select p.prosrc into v_src from pg_proc p where p.oid = v_sig_intake::regprocedure;
+  if v_src is null then raise exception '0026 tail: finalize_document_intake is GONE'; end if;
+  v_code := regexp_replace(regexp_replace(regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+    '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  if position('selectidintov_taskfromclara.document_processing_taskswheredocument_id=v_docandengine_id=p_engine_idandlane=p_laneorderbyversion_ndesclimit1' in v_code) = 0 then
+    raise exception '0026 tail: finalize_document_intake''s duplicate-path re-select is not pinned to engine_id+lane (P2)';
+  end if;
+  raise notice '0026: (9) finalize_document_intake''s duplicate-adoption re-select pinned to (engine_id,lane) (P2) — no longer able to grab a coexisting different-lane task and misreport it as the intake task';
+
+  -- (10) P3 (O-round finding) — persist_document_extraction is restricted to
+  -- ocr/structured_parse; a misrouted facts-lane caller now gets a loud typed refusal
+  -- instead of a silent conflict-reuse of the document's real structured_parse row.
+  select p.prosrc into v_src from pg_proc p where p.oid = v_sig_pde::regprocedure;
+  if v_src is null then raise exception '0026 tail: persist_document_extraction is GONE'; end if;
+  v_code := regexp_replace(regexp_replace(regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
+    '--[^' || chr(10) || ']*', '', 'g'), '\s+', '', 'g');
+  if position('ift.lanenotin(''ocr'',''structured_parse'')then' in v_code) = 0 then
+    raise exception '0026 tail: persist_document_extraction is missing its ocr/structured_parse-only admission guard (P3)';
+  end if;
+  if position('onlysettlesocr/structured_parsetasks' in v_code) = 0 then
+    raise exception '0026 tail: persist_document_extraction''s lane-admission refusal message is missing or reworded past recognition (P3)';
+  end if;
+  raise notice '0026: (10) persist_document_extraction restricted to ocr/structured_parse (P3) — a misrouted invoice_facts/local_facts caller is refused loudly instead of silently conflict-reusing a structured_parse extraction and marking the facts task done with no facts';
+
+  raise notice '0026: lane joins document_processing_tasks'' unique key, engine_kind joins document_extractions'' — the XML facts lane''s task and extraction can now legitimately coexist alongside the intake structured_parse task/extraction at the same version_n; every ON CONFLICT site that assumed the old 3-column key is widened or (persist_invoice_facts) given one for the first time; every silent/crashing fallback is now impossible-state-loud (CLR35); request_reextraction''s exhausted-retry message no longer names an unverifiable cause; both classification writers'' version mints are kind-scoped, the intake duplicate re-select is engine+lane-pinned, and the generic extraction writer refuses a misrouted facts-lane caller (P1/P2/P3, O-round)';
 end
 $tail$;
