@@ -54,43 +54,48 @@
 // Malaysian SST registration evidences a tax regime, not the currency any one invoice states
 // (part 1 §2) — a Malaysian SST-registered vendor can and does invoice in USD.
 //
-// THE FOREIGN VOCABULARY HAS TWO TIERS, and the split is the load-bearing part of this module.
+// THE FOREIGN VOCABULARY — Codes AND symbol forms, ANY boundary-exact hit counts on its own, no
+// further qualification, no punctuation-shaped gate. The design's part 1 §6.2 explicitly
+// requires this for `S$` (a Singapore invoice printing `S$`/`SGD` must refuse) — Malaysia has
+// exactly one currency symbol (`RM`), so a document printing ANY other symbol form is foreign by
+// construction: `S$`, `US$`, `HK$`, `A$`, bare `$`, `€`, `£`, `¥`, `₹`, `₩`, `฿`, `₫`, `₱`.
 //
-// TIER 1 — FOREIGN_TOKENS, UNCONDITIONAL. Codes AND symbol forms, any boundary-exact hit counts
-// on its own. The design's part 1 §6.2 explicitly requires this for `S$` (a Singapore invoice
-// printing `S$`/`SGD` must refuse) — Malaysia has exactly one currency symbol (`RM`), so a
-// document printing ANY other symbol form is foreign by construction: `S$`, `US$`, `HK$`, `A$`,
-// bare `$`, `€`, `£`, `¥`, `₹`, `₩`, `฿`, `₫`, `₱`. Scanning the unconditional-boundary rule
-// against the real corpus turned up TWO genuine false-positive hazards a "just import every ISO
-// code" reader would have shipped with:
-//   - `BHD` (Bahraini Dinar) is a SUBSTRING OF EVERY MALAYSIAN COMPANY NAME: "Sendirian
-//     Berhad" is universally abbreviated "SDN BHD" on the letterhead of nearly every
-//     Malaysian invoice in the corpus, EZSEC's five times over on one document alone.
-//   - `ALL` (Albanian Lek) is the common English word "all" — EZSEC and BUSYSTREET both print
-//     "All cheques should be crossed and made payable to..." in their boilerplate.
-// Both would have turned CG2's EZSEC document `ambiguous` unconditionally — the reader
-// abstaining on exactly the family this design exists to fix, in a way that looks like a
-// passing, deterministic read. The same class of risk rules out a further short list by
-// inspection: `TRY`, `PEN`, `COP`, `MAD`, `BOB`, `GEL`, `TOP`, `SOS`, `RUB`, `RON` are all EXACT
-// three-letter English words or common given names with no boundary-check escape (unlike `AUD`
-// inside `Audit`, these tokens ARE the whole word).
+// TWELVE ISO CODES ARE PERMANENTLY EXCLUDED, FULL STOP: `BHD`, `ALL`, `TRY`, `PEN`, `COP`, `MAD`,
+// `BOB`, `GEL`, `TOP`, `SOS`, `RUB`, `RON`. Each is an EXACT common English word or business term
+// with no boundary-check escape (unlike `AUD` inside `Audit`, these tokens ARE the whole word,
+// so left/right-boundary-exact matching cannot rescue them). Measured hits, both real: `BHD` is a
+// SUBSTRING OF EVERY MALAYSIAN COMPANY NAME ("Sendirian Berhad" is universally abbreviated "SDN
+// BHD", EZSEC's five times over on one document alone); `ALL` is the word "all" in "All cheques
+// should be crossed and made payable to...", printed by both EZSEC and BUSYSTREET. Unconditional
+// inclusion turns CG2's EZSEC document `ambiguous` — the reader abstaining on exactly the family
+// this design exists to fix, invisibly.
 //
-// TIER 2 — CONDITIONAL_FOREIGN_TOKENS, GATED ON AMOUNT-ADJACENCY. Simply DROPPING those ten
-// codes reopens a different hole, and it is a real one, not hypothetical: a document genuinely
-// denominated in one of them — `BHD 100.00` — would then carry NO foreign signal at all, and if
-// Azure's typed field also (wrongly, or by real coincidence on a Bahraini template) said MYR,
-// the two readers would AGREE and a genuinely foreign document would cross the corroboration
-// wall with `typed_collapsed` stamped on it. So these ten codes are not gone from the
-// vocabulary — they are CONDITIONAL: a hit counts only when the token sits directly next to an
-// amount (a digit, at most one run of whitespace away, on either side) — the shape a currency
-// CODE is actually printed in next to a figure ("BHD 100.00", "100.00 BHD"), as opposed to a
-// code-shaped WORD sitting among other words or punctuation ("SDN BHD (202301030264...)", "SDN.
-// BHD. 1292628-P", "All cheques should be crossed..."). Measured against the real EZSEC /
-// BUSYSTREET / MEDICAL corpus (this module's own test suite pins every one of those exact real
-// lines): none of the real "SDN BHD" / "SDN. BHD." occurrences are amount-adjacent (each is
-// followed by a space-then-parenthesis, a full stop, or nothing at all — never a bare digit),
-// and neither real "All cheques" occurrence is either. The exclusion is closed without
-// reopening CG2/CG4.
+// AN EARLIER REVISION TRIED TO RE-ADMIT THOSE TWELVE CONDITIONALLY, gated on "amount-adjacency"
+// (a digit within one whitespace run of the token) — REMOVED, by adversarial finding, because the
+// gate was unsound in BOTH directions at once: `SDN BHD 202301030264` (a bare space before a
+// registration number — an unremarkable, real letterhead shape) counted `BHD` as foreign and
+// re-broke CG2's own target family, while `BHD.100`, `BHD: 100`, `BHD-100`, `(BHD)100`, and a
+// currency code split across two lines all slipped through the SAME gate in the other direction.
+// The predicate encoded today's punctuation, not currency context, and no punctuation-shaped rule
+// closes that gap safely — so the fix is not a better gate, it is no gate: the twelve codes are
+// simply never in FOREIGN_TOKENS, and the hole they leave is NAMED rather than patched over.
+//
+// THE NAMED RESIDUAL (orchestrator ruling, 2026-07-29 — see the currency-reader test suite's own
+// "NAMED RESIDUAL" cell, which is EXPECTED TO PASS: a known, accepted hole passes a test; a
+// surprise would fail one). A document genuinely denominated in one of the twelve excluded
+// currencies is missed as foreign only when THREE INDEPENDENT conditions hold AT ONCE:
+//   (a) its page carries no symbol form (S$/US$/HK$/A$/$/€/£/¥/₹/₩/฿/₫/₱) and no OTHER foreign
+//       code anywhere on the document, AND
+//   (b) it ALSO prints MYR vocabulary somewhere (RM/MYR/RINGGIT), AND
+//   (c) Azure's OWN typed `currencyCode` ALSO says MYR — a coincidental or systematic mistyping.
+// In the far more likely case Azure types the document's TRUE (non-MYR, non-blank) code, the
+// merge law below DISAGREES regardless of what this reader's foreign vocabulary would have said —
+// `isTypedMyr` only ever agrees with a typed value that is EXACTLY `MYR` — so both rows withdraw
+// to the human coding lane, which is the safe direction and the ordinary case. Mitigations that
+// hold regardless of this residual: counterparty resolution (CLR23 doctrine) still governs who
+// the entry books to; corroboration ALSO requires net+tax agreement (migration 0023's other
+// conjuncts), which a currency mistyping has no special reason to also satisfy; and no document
+// reaches posting without human approval regardless of what `corroborated` says.
 //
 // ASCII-WORD-BOUNDARY-EXACT, AND WHY NOT JAVASCRIPT's `\b`. A token is a hit only when the
 // character immediately before AND after it is NOT an ASCII letter — crucially, a DIGIT is
@@ -111,16 +116,14 @@
 import { isDbBlank } from "./invoice-amount-grammar.mjs";
 
 const ASCII_LETTER = /[A-Za-z]/;
-const DIGIT = /[0-9]/;
-const LEADING_WS = /^\s*/;
-const TRAILING_WS = /\s*$/;
 
 /** The MYR accept vocabulary — STRICT, per the currency-defect design's exact list (part 1 §2).
  *  Order does not matter: every hit is counted, not just the first. */
 const MYR_TOKENS = Object.freeze(["MYR", "RM", "RINGGIT"]);
 
-/** TIER 1 — unconditional. Codes AND symbol forms; see the header for the measured BHD/ALL
- *  exclusion and TIER 2 below for how their risk is closed without re-admitting them here. */
+/** The WHOLE foreign vocabulary — unconditional, no gate, no second tier. Codes AND symbol
+ *  forms; see the header for the twelve PERMANENTLY EXCLUDED ISO codes and the named residual
+ *  that exclusion leaves. */
 const FOREIGN_TOKENS = Object.freeze([
   // ISO 4217 alpha codes — curated, not the full standard list (see header).
   "USD", "SGD", "EUR", "GBP", "AUD", "JPY", "CNY", "HKD", "TWD", "THB",
@@ -133,41 +136,14 @@ const FOREIGN_TOKENS = Object.freeze([
   "S$", "US$", "HK$", "A$", "$", "€", "£", "¥", "₹", "₩", "฿", "₫", "₱",
 ]);
 
-/** TIER 2 — CONDITIONAL on amount-adjacency (see `isAmountAdjacent`). Every one of these is an
- *  exact common English word or business term with no word-boundary escape (unlike AUD inside
- *  Audit, these ARE the whole word) — see the header for the measured BHD/ALL false positives
- *  that make unconditional inclusion unsafe. */
-const CONDITIONAL_FOREIGN_TOKENS = Object.freeze([
-  "BHD", "ALL", "TRY", "PEN", "COP", "MAD", "BOB", "GEL", "TOP", "SOS", "RUB", "RON",
-]);
-
 const content = (line) => String(line?.content ?? "");
-
-/**
- * Is there a digit within ONE RUN of whitespace of the token occupying `text[idx, idx+len)`?
- * This is the "amount marker" shape a currency CODE is actually printed in — `BHD 100.00` or
- * `100.00 BHD` — as opposed to a code-shaped WORD sitting among other words or punctuation
- * (`SDN BHD (202301030264...)`, `All cheques...`), where the nearest digit if any sits past a
- * parenthesis, a full stop, or more words — never immediately across a plain whitespace gap.
- * Whitespace is stripped Unicode-tolerantly (`\s`, not the ASCII-only class the accept grammar
- * uses elsewhere): this is a REFUSAL-widening check, not an accept gate, so the safe direction
- * is to match MORE — the same asymmetry `TAX_SUMMARY_HEADING` in invoice-totals-reader.mjs uses.
- */
-function isAmountAdjacent(text, idx, len) {
-  const after = text.slice(idx + len).replace(LEADING_WS, "");
-  if (DIGIT.test(after[0] ?? "")) return true;
-  const before = text.slice(0, idx).replace(TRAILING_WS, "");
-  return DIGIT.test(before[before.length - 1] ?? "");
-}
 
 /**
  * Does `text` contain `token` at an ASCII-word-boundary-exact position? See the header for why
  * this is not `\b`: a digit immediately before or after the token is explicitly NOT a boundary
  * violation (the canonical Malaysian print form is `RM1,700.00`, symbol abutting amount).
- * `requireAmountAdjacent` additionally gates a boundary-passing hit on `isAmountAdjacent` — see
- * TIER 2 in the header for why that exists and what it protects.
  */
-function hasToken(text, token, requireAmountAdjacent = false) {
+function hasToken(text, token) {
   const upper = text.toUpperCase();
   let from = 0;
   for (;;) {
@@ -175,22 +151,18 @@ function hasToken(text, token, requireAmountAdjacent = false) {
     if (idx === -1) return false;
     const before = idx > 0 ? upper[idx - 1] : "";
     const after = idx + token.length < upper.length ? upper[idx + token.length] : "";
-    const boundaryOk = !ASCII_LETTER.test(before) && !ASCII_LETTER.test(after);
-    if (boundaryOk && (!requireAmountAdjacent || isAmountAdjacent(upper, idx, token.length))) return true;
+    if (!ASCII_LETTER.test(before) && !ASCII_LETTER.test(after)) return true;
     from = idx + 1;
   }
 }
 
 /** The first vocabulary token (in list order) this line hits, or null. */
-function firstHit(text, tokens, requireAmountAdjacent = false) {
+function firstHit(text, tokens) {
   for (const token of tokens) {
-    if (hasToken(text, token, requireAmountAdjacent)) return token;
+    if (hasToken(text, token)) return token;
   }
   return null;
 }
-
-/** The first FOREIGN hit on this line — TIER 1 unconditional, else TIER 2 amount-gated. */
-const firstForeignHit = (text) => firstHit(text, FOREIGN_TOKENS) ?? firstHit(text, CONDITIONAL_FOREIGN_TOKENS, true);
 
 /**
  * Read the document's currency off `analyzeResult.pages[].lines[]` — the SAME array X2's totals
@@ -239,7 +211,7 @@ export function readCurrencyFromLines(pages) {
           confidence: line?.confidence == null ? null : Number(line.confidence),
         });
       }
-      const foreignToken = firstForeignHit(text);
+      const foreignToken = firstHit(text, FOREIGN_TOKENS);
       if (foreignToken) {
         if (!receipt.foreign_tokens.includes(foreignToken)) receipt.foreign_tokens.push(foreignToken);
         foreignHits.push({ token: foreignToken, text, page: pageNumber });

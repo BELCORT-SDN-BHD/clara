@@ -1,8 +1,10 @@
 // The currency defect fix — the MAPPER side: reconciling the currency reader against Azure's
 // own typed `invoice.currency`, through `normalizeAzureInvoice`. Pure unit tests, no DB.
 // (currency-defect design part 1 §8 gates CG1/CG2/CG3/CG6/CG9-build-side/CG11-mapper-half; P1-P4
-// are the Codex review-round findings addressed after the first push — see each cell's own
-// comment and `invoice-currency-reader.mjs`'s header for the full rationale of each.)
+// are the Codex review-round findings addressed across two rounds — P2/P3/P4 closed on the first
+// pass, P1 closed on the second after an adversarial finding killed the amount-adjacency gate the
+// first P1 fix tried; see each cell's own comment and `invoice-currency-reader.mjs`'s header,
+// "THE NAMED RESIDUAL", for the final shape and its orchestrator-ruled authority.)
 //
 // Every pinned line is COPIED VERBATIM from a real Azure OCR capture (see currency-reader.test
 // .mjs's header for provenance and the git-exclusion note). CG5/CG7-after/CG10, and CG11's
@@ -167,15 +169,25 @@ test("P2 (mapper level) — RINGGIT page evidence + NO typed currency at all: in
   assert.equal(out.fields.find((f) => f.field_path === "invoice.total").value_raw, "1,700.00");
 });
 
-test("P1 (mapper level) — CG2 regression wall: an EZSEC-shaped doc that ALSO prints its own 'SDN BHD' suffix still agrees (myr, not ambiguous)", () => {
+test("PERMANENT REGRESSION WALL (mapper level, orchestrator ruling 2026-07-29) — an EZSEC-shaped doc printing 'SDN BHD' in ANY of the reviewer's adversarial shapes still agrees (myr, not ambiguous)", () => {
   // The strongest form of the regression check: SDN BHD sits on the SAME document as the
-  // RINGGIT declaration, through the ACTUAL merge path, not just the reader in isolation.
-  const SDN_BHD_LINE = line("EZACCOUNT & SECRETARY SDN BHD (202301030264 (1524187-D))", [0, 1, 1, 1, 1, 2, 0, 2]);
-  const out = normalizeAzureInvoice(payload("MYR", [EZSEC_RINGGIT_LINE, SDN_BHD_LINE]));
-  const row = currencyOf(out);
-  assert.equal(row.value_raw, "MYR");
-  assert.equal(out.envelope.currency_reader.verdict, "myr");
-  assert.equal(out.envelope.currency_reader.typed_collapsed, 1);
+  // RINGGIT declaration, through the ACTUAL merge path, not just the reader in isolation. BHD is
+  // permanently out of FOREIGN_TOKENS (no amount-adjacency gate exists any more — see the
+  // reader's own header for why that gate was removed) so every shape below is unconditionally
+  // safe, including the two the reviewer's adversarial pass used to break: no space at all
+  // before the registration number, and a bare space with no other punctuation.
+  for (const bhdText of [
+    "EZACCOUNT & SECRETARY SDN BHD (202301030264 (1524187-D))",
+    "EZACCOUNT & SECRETARY SDN BHD 202301030264",
+    "EZACCOUNT & SECRETARY SDN BHD202301030264",
+  ]) {
+    const SDN_BHD_LINE = line(bhdText, [0, 1, 1, 1, 1, 2, 0, 2]);
+    const out = normalizeAzureInvoice(payload("MYR", [EZSEC_RINGGIT_LINE, SDN_BHD_LINE]));
+    const row = currencyOf(out);
+    assert.equal(row.value_raw, "MYR", bhdText);
+    assert.equal(out.envelope.currency_reader.verdict, "myr", bhdText);
+    assert.equal(out.envelope.currency_reader.typed_collapsed, 1, bhdText);
+  }
 });
 
 // ======================================================================================

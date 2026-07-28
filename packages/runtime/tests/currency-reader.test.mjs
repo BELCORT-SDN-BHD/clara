@@ -176,14 +176,14 @@ test("RM/AUD-shaped substrings inside ordinary English words are refused, not ju
   }
 });
 
-test("P1 — CONDITIONAL exclusions: on the REAL EZSEC/BUSYSTREET/MEDICAL boilerplate, BHD and ALL never fire even amount-adjacency-gated", () => {
+test("P1 — PERMANENT exclusions: on the REAL EZSEC/BUSYSTREET/MEDICAL boilerplate, BHD and ALL never fire (full stop, no gate)", () => {
   // BHD (Bahraini Dinar) is a substring of "SDN BHD" — universal on Malaysian letterheads. ALL
-  // (Albanian Lek) is the common English word "all". Both are TIER 2 (amount-adjacency-gated,
-  // not dropped outright — see P1/the module header) and every REAL occurrence measured in the
-  // corpus is proven here to stay excluded: none sits directly next to a digit.
+  // (Albanian Lek) is the common English word "all". Both are PERMANENTLY excluded from
+  // FOREIGN_TOKENS (not gated — see the module header for why an amount-adjacency gate was
+  // tried and rejected). Every real occurrence measured in the corpus stays excluded.
   for (const text of [
     'EZACCOUNT & SECRETARY SDN BHD (202301030264 (1524187-D))', // EZSEC letterhead + signature
-    'CNT BEAUTY & AESTHETIC SDN. BHD. 1292628-P', // MEDICAL — a full stop AND a space separate BHD from the digits
+    'CNT BEAUTY & AESTHETIC SDN. BHD. 1292628-P', // MEDICAL
     'CNT BEAUTY & AESTHETIC SDN BHD', // MEDICAL — end of line, nothing follows
     'BUSYSTREET CONSULTANCY SDN BHD', // BUSYSTREET
   ]) {
@@ -191,29 +191,46 @@ test("P1 — CONDITIONAL exclusions: on the REAL EZSEC/BUSYSTREET/MEDICAL boiler
   }
   for (const text of [
     "All cheques should be crossed and made payable to", // EZSEC
-    "1. All cheques should be crossed and made payable to", // BUSYSTREET — the "1." prefix is not digit-adjacent to ALL either
+    "1. All cheques should be crossed and made payable to", // BUSYSTREET
   ]) {
     assert.equal(readCurrencyFromLines(onePage([line(text, [0, 0, 1, 0, 1, 1, 0, 1])])).receipt.verdict, "absent", text);
   }
 });
 
-test("P1 — CG2/CG4 regression wall: the real EZSEC/BUSYSTREET fixtures still read myr after the amount-adjacency gate", () => {
-  // The exact regression Codex named: this change must not flip CG2 or CG4. Re-run both through
-  // the reader directly (the dedicated CG2/CG4 cells above already cover this; this cell pins
-  // the SAME real lines specifically against the conditional-token change).
+test("P1 — CG2/CG4 regression wall: the real EZSEC/BUSYSTREET fixtures still read myr", () => {
   assert.equal(readCurrencyFromLines(onePage([EZSEC_RINGGIT_LINE])).receipt.verdict, "myr");
   assert.equal(readCurrencyFromLines(onePage([BUSYSTREET_AUDIT_LINE, BUSYSTREET_RINGGIT_LINE, BUSYSTREET_TOTAL_RM_LINE])).receipt.verdict, "myr");
 });
 
-test("P1 — an excluded code DOES count as foreign when genuinely amount-adjacent (closes the counterexample class)", () => {
-  const bhd = readCurrencyFromLines(onePage([line("BHD 100 (RM330)", [0, 0, 1, 0, 1, 1, 0, 1])]));
-  assert.equal(bhd.receipt.verdict, "ambiguous", "a genuinely Bahraini-denominated line must not be invisible to the foreign side");
-  assert.deepEqual(bhd.receipt.foreign_tokens, ["BHD"]);
-  // Reversed order and no space also count — the amount marker shape, not a fixed template.
-  const bhdCompact = readCurrencyFromLines(onePage([line("BHD100.00", [0, 0, 1, 0, 1, 1, 0, 1])]));
-  assert.equal(bhdCompact.receipt.verdict, "foreign");
-  const amountFirst = readCurrencyFromLines(onePage([line("100.00 BHD due", [0, 0, 1, 0, 1, 1, 0, 1])]));
-  assert.equal(amountFirst.receipt.verdict, "foreign");
+test("PERMANENT REGRESSION WALLS (orchestrator ruling, 2026-07-29) — the reviewer's false-positive shapes for the amount-adjacency gate that was REMOVED must all still read myr", () => {
+  // The gate that used to make these read `ambiguous` is gone. These four shapes are the exact
+  // adversarial finds that killed it: a bare space before a registration number, no space at
+  // all, a hyphenated document number, and the suffix sitting alone at end-of-line. Every one is
+  // paired with real RM evidence — proving `SDN BHD` in ANY of these shapes can never again drag
+  // a document down to `ambiguous`, however this vocabulary is edited in the future.
+  for (const text of [
+    "EZACCOUNT & SECRETARY SDN BHD 202301030264", // bare space before a registration number, no punctuation at all
+    "EZACCOUNT & SECRETARY SDN BHD202301030264", // no space either — SDN BHD directly abutting the registration
+    "CNT BEAUTY & AESTHETIC SDN BHD 1292628-P", // a hyphenated document number
+    "BUSYSTREET CONSULTANCY SDN BHD", // suffix alone at end-of-line, nothing follows at all
+  ]) {
+    const { receipt } = readCurrencyFromLines(onePage([line(text, [0, 0, 1, 0, 1, 1, 0, 1]), EZSEC_RINGGIT_LINE]));
+    assert.equal(receipt.verdict, "myr", text);
+    assert.ok(!receipt.foreign_tokens.includes("BHD"), `BHD must never be counted as foreign: ${text}`);
+  }
+});
+
+test("NAMED RESIDUAL (orchestrator ruling, 2026-07-29) — BHD 100 (RM330) with no other foreign evidence reads myr: the accepted hole, not a gate", () => {
+  // EXPECTED TO PASS. This is not a bug: a document genuinely denominated in one of the twelve
+  // permanently-excluded currencies, printing NO symbol form and NO other foreign code, is
+  // invisible to the foreign side of this reader — see the module header's "NAMED RESIDUAL" for
+  // the full three-condition improbability chain and why the merge law's typed-disagreement path
+  // is the real safety net for this shape. A surprise finding here would need to FAIL a test;
+  // this one is supposed to pass, by ruling.
+  const { fields, receipt } = readCurrencyFromLines(onePage([line("BHD 100 (RM330)", [0, 0, 1, 0, 1, 1, 0, 1])]));
+  assert.equal(receipt.verdict, "myr");
+  assert.equal(fields[0]?.value_raw, "MYR");
+  assert.deepEqual(receipt.foreign_tokens, [], "BHD is not, and will not be, in the foreign vocabulary");
 });
 
 test("P1 — the design's own §6.2 symbol form: S$ alongside RM reads ambiguous, not myr", () => {
