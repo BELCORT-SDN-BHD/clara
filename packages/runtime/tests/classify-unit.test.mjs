@@ -38,7 +38,7 @@ const RUNNING_CLAIM = {
   // Q1 (cross-model review, 4th round): the fresh-claim receipt's own capability — classify.mjs
   // reads it straight off the raw claim receipt (not through interpretClaimReceipt's shared
   // shape) and threads it into the settle as p_claim_secret.
-  claim_secret: "test-claim-secret-abc123",
+  claim_secret: "test-claim-secret-abc123", // gitleaks:allow — synthetic unit-test fixture, not a credential
 };
 
 function mockRuntime(claimReceipt) {

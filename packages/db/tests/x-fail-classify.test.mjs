@@ -427,7 +427,7 @@ test("THREE-ACTOR SCHEDULE (T2 RUNNING): T1 fails, T2 enqueues AND is claimed by
   assert.equal(await docKind(document.documentId), null, "the document was never classified by T1's stale call");
 
   // T2's OWN legitimate settle still works afterward — the fix does not strand T2.
-  const t2Settle = await classifyDocument({ document: document.documentId, kind: "receipt", confidence: 0.9, task: t2.id, run: t2Claimed.workflow_run_id, secret: t2Claimed.claim_secret });
+  const t2Settle = await classifyDocument({ document: document.documentId, kind: "receipt", confidence: 0.9, task: t2.id, run: t2Claimed.workflow_run_id, secret: t2Claimed.claim_secret }); // gitleaks:allow — property access on the runtime-returned claim receipt, not a credential
   assert.equal(t2Settle.kind_set, true, "T2's OWN task-bound settle succeeds normally");
   assert.equal(await docKind(document.documentId), "receipt", "T2's verdict is the one that actually lands");
 });
