@@ -18,13 +18,18 @@
 // identity: a ledger's Debit and Credit columns collapse into one stream. Azure's table cells
 // each carry a `page_polygon`, so the COLUMN a cell belongs to is recoverable from its x
 // coordinate. Columns are learned from the header row itself — never hard-coded — so a
-// different package's column order still works.
+// different package's column order still works. That structural recovery — group into rows,
+// learn the columns, address a cell by column — now lives in `table-cell-geometry.mjs`, shared
+// with the trial-balance reader (`opening-tb-cells.mjs`); the tolerances below are still THIS
+// reader's, measured on RPR's ledger, and are passed in rather than inherited.
 //
 // CONSERVATIVE BY DESIGN (zero-regression rule). The reader returns null unless it can
 // POSITIVELY identify a general ledger: a header row carrying a date column + a description
 // column, and at least one `Code : <account>` block header. On null the caller falls through
 // to the existing xlsx-bytes path completely unchanged. A PDF that is not a ledger therefore
 // behaves exactly as it does today.
+
+import { cellAt as cellAtX, cellText, groupRows as groupRowsX, norm } from "./table-cell-geometry.mjs";
 
 /** Account-code shapes accepted across the seeding lane (mirrors seeding-parse's ACCOUNT_RE). */
 const ACCOUNT_RE = "[0-9]{4,8}|[0-9]{3}-[0-9A-Z]{2,4}";
@@ -43,18 +48,6 @@ const HEADER_SYNONYMS = {
   counterparty: ["description 1", "description", "particulars", "counterparty", "payee", "name"],
   reference: ["ref. 1/2", "ref", "ref.", "reference", "doc no", "document no"],
 };
-
-const norm = (s) => String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-
-/** Left edge (x) and top edge (y) of a region's page polygon, or null when absent. */
-function anchor(region) {
-  const poly = region?.locator?.polygon;
-  if (!Array.isArray(poly) || poly.length < 2) return null;
-  const x = Number(poly[0]);
-  const y = Number(poly[1]);
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return { x, y, page: Number(region?.locator?.page_number) || 0 };
-}
 
 /**
  * D/M/YYYY → YYYY-MM-DD, or null. The DAY-FIRST reading is not an assumption: RPR's ledger
@@ -75,24 +68,8 @@ export function parseLedgerDate(text) {
   return iso;
 }
 
-/** Group cells into printed rows by page, then by vertical proximity. */
-function groupRows(cells) {
-  const placed = cells
-    .map((c) => ({ ...c, at: anchor(c) }))
-    .filter((c) => c.at !== null)
-    .sort((a, b) => a.at.page - b.at.page || a.at.y - b.at.y || a.at.x - b.at.x);
-  const rows = [];
-  let current = null;
-  for (const cell of placed) {
-    if (!current || cell.at.page !== current.page || cell.at.y - current.y > ROW_TOLERANCE) {
-      current = { page: cell.at.page, y: cell.at.y, cells: [] };
-      rows.push(current);
-    }
-    current.cells.push(cell);
-  }
-  for (const row of rows) row.cells.sort((a, b) => a.at.x - b.at.x);
-  return rows;
-}
+/** Group cells into printed rows by page, then by vertical proximity (this reader's tolerance). */
+const groupRows = (cells) => groupRowsX(cells, ROW_TOLERANCE);
 
 /** Learn column x-positions from a header row, or null when this row is not a ledger header. */
 function readHeader(row) {
@@ -109,22 +86,8 @@ function readHeader(row) {
   return cols.date !== undefined && cols.counterparty !== undefined ? cols : null;
 }
 
-/** The cell whose left edge is nearest a learned column, within tolerance. */
-function cellAt(row, x) {
-  if (x === undefined) return null;
-  let best = null;
-  let bestDelta = COL_TOLERANCE;
-  for (const cell of row.cells) {
-    const delta = Math.abs(cell.at.x - x);
-    if (delta <= bestDelta) {
-      best = cell;
-      bestDelta = delta;
-    }
-  }
-  return best;
-}
-
-const cellText = (cell) => String(cell?.text_content ?? "").replace(/\s+/g, " ").trim();
+/** The cell whose left edge is nearest a learned column, within THIS reader's tolerance. */
+const cellAt = (row, x) => cellAtX(row, x, COL_TOLERANCE);
 
 /**
  * Table-cell regions → normalized GL entries, or null when this is not a general ledger.

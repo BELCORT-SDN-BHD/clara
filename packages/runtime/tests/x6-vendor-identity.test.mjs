@@ -196,8 +196,8 @@ test("typed VendorTaxId ABSENT: the reader supplies the identity — the measure
   const out = normalizeAzureInvoice(payload({}, [VENDOR_NAME, LETTERHEAD_P1]));
   assert.equal(regOf(out).value_raw, "202401047756 (1593602-X)");
   assert.equal(out.envelope.vendor_identity.emitted, 1);
-  assert.equal(out.normalizationVersion, "clara-invoice-norm:v7");
-  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v7");
+  assert.equal(out.normalizationVersion, "clara-invoice-norm:v8");
+  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v8");
 });
 
 test("typed and reader AGREEING collapse to one row, compared the DB's way", () => {

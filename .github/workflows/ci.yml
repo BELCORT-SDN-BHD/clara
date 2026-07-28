@@ -66,7 +66,7 @@ jobs:
       CLARA_ALLOW_DESTRUCTIVE: "1"
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           # Full history so the freeze-lint + migration-history checks can compare
           # against origin/main (append-only-vs-base is the ONLY real protection —
@@ -86,11 +86,11 @@ jobs:
             echo "origin/main does not exist yet (first introduction) — base checks treat all as new"
           fi
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
         with:
           version: 10.33.0
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20.19.5
           cache: pnpm
@@ -135,6 +135,14 @@ jobs:
 
       - name: Build (nitro runtime + next dashboard)
         run: pnpm build
+
+      # MUST run after Build: the image-layout half reads .output/server/index.mjs. The
+      # structured/XML lane was dead in every deployed image because nitro inlines the
+      # worker-spawning modules and the sibling URL then resolves beside the bundle, where
+      # nothing is copied (Gate S, 2026-07-28). Typecheck/lint/tests all read the SOURCE
+      # layout — the one layout that worked — so only a post-build check can see this.
+      - name: Worker-path gate (spawn sites + built-image layout)
+        run: node scripts/check-worker-paths.mjs
 
       # Install the v17 client so pg_dump matches the server (the wrapper picks
       # the highest installed version). ubuntu-latest ships v16, which refuses a

@@ -145,8 +145,16 @@ const A4_WIDTH_IN = 8.2677;
 // free: the real receipt's Tax-Summary repeat reads "ervice Tax@6%" and matches nothing, so
 // the block is skipped rather than mis-anchored. Longest prefix wins, so "rounding adj"
 // resolves before "rounding" and "service charge" can never be read as "service tax".
+// THE `excl` TOKEN IS LOAD-BEARING — never shorten these two prefixes. EZSEC prints
+// `Total Payable Excl. SST:` and `Total Payable Incl. SST:`, so its net and its GROSS differ
+// by one letter. Shortening to "total payable" would match the Incl line, and only the net is
+// read here (the gross comes from Azure's typed field), so the reader would emit the gross AS
+// the net. Where tax is 0.00 — which is every EZSEC bill — net == gross, so that false reading
+// TIES EXACTLY and corroborates: both readers agree on the same wrong figure, which is the one
+// error the corroboration identity cannot catch. The identifier guard is unbothered ("sst" is
+// not an IDENTIFIER_WORD, so the line anchors normally); both pinned in the battery.
 const LABEL_VOCABULARY = Object.freeze([
-  ["invoice.total_excl_tax", ["sub total", "subtotal", "sub-total", "jumlah kecil"]],
+  ["invoice.total_excl_tax", ["sub total", "subtotal", "sub-total", "jumlah kecil", "total payable excl", "total excl"]],
   ["invoice.tax_total", ["service tax", "sst", "cukai perkhidmatan"]],
   ["invoice.rounding", ["rounding adj", "rounding", "pembundaran"]],
   ["invoice.service_charge", ["service charge", "caj perkhidmatan"]],

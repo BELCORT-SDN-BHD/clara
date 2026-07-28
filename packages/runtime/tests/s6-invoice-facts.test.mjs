@@ -224,7 +224,7 @@ test("vendor_registration: a typed VendorTaxId is emitted as invoice.vendor_regi
   assert.equal(reg.value_raw, "201801000900");
   assert.equal(reg.page, 1);
   assert.equal(reg.confidence, 0.88);
-  assert.equal(out.normalizationVersion, "clara-invoice-norm:v7", "normalization version is bumped to v7 (X6 vendor-identity reader)");
+  assert.equal(out.normalizationVersion, "clara-invoice-norm:v8", "normalization version is bumped to v8 (the EZSEC net label joins the totals vocabulary)");
 });
 
 test("v5 (Wave A2): CustomerName/SubTotal/TotalTax map to AR facts; CustomerTaxId → customer_registration", () => {
