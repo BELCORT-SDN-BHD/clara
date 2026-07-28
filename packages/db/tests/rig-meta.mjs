@@ -158,6 +158,16 @@ const WAVE_B_0021_HUMAN_FNS = ["create_counterparty"];
 //     verb existed. Raising the threshold widens what one person may approve alone.
 const EXTRACTION_0022_HUMAN_FNS = ["request_reextraction", "set_firm_high_stakes_threshold"];
 
+// 0024 — clara.fail_classify, the classify lane's missing DB terminal-fail path (ADR-030
+// deferred hardening). Granted to clara_runtime alone, mirroring fail_invoice_facts
+// (S6_RUNTIME_FNS above) — the SAME lane that already holds claim_document_processing_task
+// and classify_document for this lane (classify.mjs: "This worker runs entirely as
+// clara_runtime … NO login-direct dance"). Its own cohort per the 0020/0022 "wholly present
+// or wholly absent" discipline: folding it into an earlier migration's cohort would make a
+// 23-migration database report a PARTIAL cohort, a false failure one migration early.
+const FAIL_CLASSIFY_0024_RUNTIME_FNS = ["fail_classify"];
+export const FAIL_CLASSIFY_0024_COHORT = [...FAIL_CLASSIFY_0024_RUNTIME_FNS];
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -227,6 +237,7 @@ export const ALLOWED = {
     ...WAVE_A2_RUNTIME_FNS, // [WAVE-A2 §6.2] the autopost expiry/nudge reconcile sweep
     ...WAVE_A21_RUNTIME_FNS, // 0016 [A2.1 §C] SST evaluators + classify_document (runtime ONLY; agent zero)
     ...WAVE_B_0020_RUNTIME_FNS, // 0020 [§3.3/§3.4/§5.1/§5.3] dispatch authorization + the doc->client resolver
+    ...FAIL_CLASSIFY_0024_RUNTIME_FNS, // 0024 the classify lane's terminal-fail writer
   ]),
 };
 // RLS policy helpers are legitimately callable broadly (a policy expression runs
@@ -340,6 +351,7 @@ export async function grantMatrixFailures() {
   const liveNames = new Set(fns.rows.map((f) => f.proname));
   failures.push(...cohortFailures("0020 typed-consent", WAVE_B_0020_COHORT, liveNames));
   failures.push(...cohortFailures("0022 extraction-slice X1", EXTRACTION_0022_COHORT, liveNames));
+  failures.push(...cohortFailures("0024 fail_classify", FAIL_CLASSIFY_0024_COHORT, liveNames));
   return failures;
 }
 
