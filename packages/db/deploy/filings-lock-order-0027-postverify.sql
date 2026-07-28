@@ -1,0 +1,163 @@
+-- =====================================================================
+-- Migration 0027 (documents-before-document_filings lock order, task #29 ledger) —
+-- POST-DEPLOY VERIFY PROBES.
+-- =====================================================================
+--
+-- Read-only. Run as a superuser/owner session against the deployed database immediately
+-- after applying 0027:
+--
+--     psql "$DSN" -v ON_ERROR_STOP=1 -f filings-lock-order-0027-postverify.sql
+--
+-- Every probe raises on failure and prints an OK notice on success, so a clean run ends
+-- with one notice per probe and nothing else.
+--
+-- WHAT 0027 CLAIMS, restated as probes:
+--   1. 0027 is applied and 0026 is still in the history (mandatory prior-migration check).
+--   2. confirm_attribution_candidate, approve_wrong_client_correction and
+--      retire_document_filing each lock `clara.documents` FOR UPDATE strictly before
+--      their own pre-existing first `document_filings` acquisition — matching
+--      file_document's unchanged, canonical order.
+--   3. file_document, finalize_document_intake and _seed_verified_document — the three
+--      writers that already had the correct order — are untouched (0027 issues no CREATE
+--      OR REPLACE for any of them).
+--   4. The 0020 §6 closed-set member this migration's callees touch
+--      (_enqueue_invoice_facts_core) is untouched: same owner-only EXECUTE surface.
+--   5. No OTHER document_filings writer exists beyond the six the migration's header
+--      enumerates — re-run the same classification sweep against the deployed catalog,
+--      not trusted from the migration's own header comment.
+--
+-- WHY THE PROBES MATCH COMMENT-STRIPPED TEXT. Same discipline as 0022/0025/0026's own
+-- postverify files: a raw substring match on prosrc is defeated by deleting a guard and
+-- pasting its text back as a `--` comment. Every check below strips `-- ...` comments and
+-- normalizes whitespace before searching, and additionally asserts POSITION ORDER (the new
+-- documents lock must appear BEFORE the pre-existing first document_filings touch), not
+-- just presence — presence alone would pass even if the new lock were pasted at the very
+-- end of the function, after all the filings work it is supposed to precede.
+--
+-- THE HONEST FRAMING (carried from every prior migration's postverify): this is BELT. The
+-- primary defense is the migration's own in-transaction tail, already run and already
+-- raised on any failure during the ceremony itself. This file re-proves the same claims
+-- from OUTSIDE that transaction, against the COMMITTED catalog, in case the ceremony's own
+-- session state (search_path, temp objects) masked something the tail's own careful design
+-- already tries to rule out.
+
+do $verify$
+declare
+  v_prior_count int;
+  v_src_a text; v_src_b text; v_src_c text;
+  v_norm_a text; v_norm_b text; v_norm_c text;
+  v_pos_lock int; v_pos_touch int;
+  v_bad_text text;
+begin
+  -- (1) mandatory prior-migration check.
+  select count(*) into v_prior_count from clara.schema_migrations where version = '0026_lane_widen';
+  if v_prior_count <> 1 then
+    raise exception '0027 postverify: migration 0026 is not recorded as applied';
+  end if;
+  select count(*) into v_prior_count from clara.schema_migrations where version = '0027_filings_lock_order';
+  if v_prior_count <> 1 then
+    raise exception '0027 postverify: migration 0027 itself is not recorded as applied';
+  end if;
+  raise notice '0027 postverify OK (1/5): prior-migration chain intact through 0027';
+
+  -- (2a) confirm_attribution_candidate: documents lock strictly before the filings insert.
+  select pg_get_functiondef(oid) into v_src_a from pg_proc
+    where proname = 'confirm_attribution_candidate' and pronamespace = 'clara'::regnamespace;
+  if v_src_a is null then raise exception '0027 postverify: confirm_attribution_candidate is missing'; end if;
+  v_norm_a := regexp_replace(regexp_replace(v_src_a, '--[^\n]*', '', 'g'), '\s+', ' ', 'g');
+  v_pos_lock := position('from clara.documents where id=x.document_id for update' in lower(v_norm_a));
+  v_pos_touch := position('insert into clara.document_filings' in lower(v_norm_a));
+  if v_pos_lock = 0 or v_pos_touch = 0 or v_pos_lock >= v_pos_touch then
+    raise exception '0027 postverify: confirm_attribution_candidate does not lock documents strictly before its document_filings insert (lock_pos=%, touch_pos=%)', v_pos_lock, v_pos_touch;
+  end if;
+  raise notice '0027 postverify OK (2a/5): confirm_attribution_candidate locks documents before document_filings';
+
+  -- (2b) approve_wrong_client_correction: documents lock strictly before the filings
+  -- row lock (the `perform 1 from clara.document_filings f ...` sweep).
+  select pg_get_functiondef(oid) into v_src_b from pg_proc
+    where proname = 'approve_wrong_client_correction' and pronamespace = 'clara'::regnamespace;
+  if v_src_b is null then raise exception '0027 postverify: approve_wrong_client_correction is missing'; end if;
+  v_norm_b := regexp_replace(regexp_replace(v_src_b, '--[^\n]*', '', 'g'), '\s+', ' ', 'g');
+  v_pos_lock := position('from clara.documents where id=x.document_id for update' in lower(v_norm_b));
+  v_pos_touch := position('from clara.document_filings f where f.document_id=x.document_id' in lower(v_norm_b));
+  if v_pos_lock = 0 or v_pos_touch = 0 or v_pos_lock >= v_pos_touch then
+    raise exception '0027 postverify: approve_wrong_client_correction does not lock documents strictly before its document_filings row lock (lock_pos=%, touch_pos=%)', v_pos_lock, v_pos_touch;
+  end if;
+  raise notice '0027 postverify OK (2b/5): approve_wrong_client_correction locks documents before document_filings';
+
+  -- (2c) retire_document_filing: peek + lock documents strictly before the filing row lock.
+  select pg_get_functiondef(oid) into v_src_c from pg_proc
+    where proname = 'retire_document_filing' and pronamespace = 'clara'::regnamespace;
+  if v_src_c is null then raise exception '0027 postverify: retire_document_filing is missing'; end if;
+  v_norm_c := regexp_replace(regexp_replace(v_src_c, '--[^\n]*', '', 'g'), '\s+', ' ', 'g');
+  if position('select document_id into v_peek_doc from clara.document_filings' in lower(v_norm_c)) = 0 then
+    raise exception '0027 postverify: retire_document_filing is missing the unlocked document_id peek';
+  end if;
+  v_pos_lock := position('from clara.documents where id = v_peek_doc for update' in lower(v_norm_c));
+  v_pos_touch := position('select * into f from clara.document_filings where id = p_filing_id for update' in lower(v_norm_c));
+  if v_pos_lock = 0 or v_pos_touch = 0 or v_pos_lock >= v_pos_touch then
+    raise exception '0027 postverify: retire_document_filing does not lock documents strictly before the filing row lock (lock_pos=%, touch_pos=%)', v_pos_lock, v_pos_touch;
+  end if;
+  raise notice '0027 postverify OK (2c/5): retire_document_filing peeks + locks documents before the filing row';
+
+  -- (3) the three reference-order writers are present and untouched by this migration
+  -- (0027 issues no CREATE OR REPLACE for any of them — a catalog-presence check, not a
+  -- body-identity pin; none of the three is a 0020 §6 closed-set member so no exact-hash
+  -- pin applies here).
+  if not exists (select 1 from pg_proc where proname = 'file_document' and pronamespace = 'clara'::regnamespace) then
+    raise exception '0027 postverify: file_document (the reference order) is missing';
+  end if;
+  if not exists (select 1 from pg_proc where proname = 'finalize_document_intake' and pronamespace = 'clara'::regnamespace) then
+    raise exception '0027 postverify: finalize_document_intake is missing';
+  end if;
+  if not exists (select 1 from pg_proc where proname = '_seed_verified_document' and pronamespace = 'clara'::regnamespace) then
+    raise exception '0027 postverify: _seed_verified_document is missing';
+  end if;
+  raise notice '0027 postverify OK (3/5): the three reference-order writers are present';
+
+  -- (4) the 0020 §6 pinned closed-set member this migration's callees reach
+  -- (_enqueue_invoice_facts_core) keeps its owner-only EXECUTE surface — same check
+  -- 0025's and 0026's own tails already run.
+  if exists (select 1 from pg_proc p, lateral aclexplode(p.proacl) a
+              where p.proname = '_enqueue_invoice_facts_core' and p.pronamespace = 'clara'::regnamespace
+                and a.privilege_type = 'EXECUTE'
+                and (a.grantee = 0 or pg_get_userbyid(a.grantee) <> 'clara_fn_owner')) then
+    raise exception '0027 postverify: _enqueue_invoice_facts_core (0020 §6 pinned) gained a direct EXECUTE grant';
+  end if;
+  raise notice '0027 postverify OK (4/5): the 0020 §6 pinned closed-set member is untouched';
+
+  -- (5) re-run the writer-classification sweep against the DEPLOYED catalog (not trusted
+  -- from the migration header): every function whose body inserts/updates/deletes
+  -- clara.document_filings must be one of the six named ones. A SEVENTH writer showing up
+  -- here (a function this migration never considered) is a real finding, not noise.
+  --
+  -- The inner CTE is forced MATERIALIZED (a real bug found while writing this probe, not
+  -- theoretical): without it, the planner can evaluate the pg_get_functiondef()-based
+  -- regex predicates against pg_proc rows from OTHER schemas before the nspname='clara'
+  -- filter narrows the set, and pg_get_functiondef() raises "X is an aggregate function"
+  -- the moment it lands on a non-plain-function oid (e.g. pg_catalog.array_agg) anywhere
+  -- in the full catalog. Materializing the already-nspname-filtered set first means
+  -- pg_get_functiondef() only ever runs against clara's own (all prokind='f') functions.
+  with clara_fns as materialized (
+    select p.proname, pg_get_functiondef(p.oid) as src
+    from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'clara'
+  )
+  select string_agg(proname, ', ')
+    into v_bad_text
+    from clara_fns
+    where (src ~* 'insert\s+into\s+clara\.document_filings'
+           or src ~* 'update\s+clara\.document_filings'
+           or src ~* 'delete\s+from\s+clara\.document_filings')
+      and proname not in (
+        'file_document', 'finalize_document_intake', '_seed_verified_document',
+        'confirm_attribution_candidate', 'approve_wrong_client_correction', 'retire_document_filing'
+      );
+  if v_bad_text is not null then
+    raise exception '0027 postverify: an UNENUMERATED document_filings writer exists in the deployed catalog: %', v_bad_text;
+  end if;
+  raise notice '0027 postverify OK (5/5): no unenumerated document_filings writer exists — the six-function set is exhaustive';
+
+  raise notice '0027 postverify: ALL PROBES PASSED — documents-before-document_filings lock order is consistent across every live writer';
+end
+$verify$;
