@@ -1,10 +1,13 @@
 // The currency defect fix — the MAPPER side: reconciling the currency reader against Azure's
 // own typed `invoice.currency`, through `normalizeAzureInvoice`. Pure unit tests, no DB.
-// (currency-defect design part 1 §8 gates CG1/CG2/CG3/CG6/CG9-build-side/CG11-fixture-half.)
+// (currency-defect design part 1 §8 gates CG1/CG2/CG3/CG6/CG9-build-side/CG11-mapper-half; P1-P4
+// are the Codex review-round findings addressed after the first push — see each cell's own
+// comment and `invoice-currency-reader.mjs`'s header for the full rationale of each.)
 //
 // Every pinned line is COPIED VERBATIM from a real Azure OCR capture (see currency-reader.test
-// .mjs's header for provenance and the git-exclusion note). CG5/CG7-after/CG10 are the LIVE
-// re-extraction ceremony — explicitly out of scope here, driven by the orchestrator post-deploy.
+// .mjs's header for provenance and the git-exclusion note). CG5/CG7-after/CG10, and CG11's
+// DB/persistence half, are the LIVE re-extraction ceremony — explicitly out of scope here,
+// driven by the orchestrator post-deploy. No DB-side test is added in this file, by design.
 
 process.env.RELAY_TEST_MODE ??= "1";
 
@@ -12,6 +15,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { normalizeAzureInvoice, NORMALIZATION_VERSION } from "../workflows/invoiceFacts.v1.azure.mjs";
+import { MYINVOIS_NORMALIZATION_VERSION } from "../lib/myinvois.mjs";
 
 const line = (content, polygon) => ({ content, polygon });
 
@@ -137,15 +141,41 @@ test("CG6 — a MULTI-DOCUMENT bundle runs no currency reader at all", () => {
   });
   assert.equal(currencyOf(out).value_raw, "USD", "document B's page evidence must never withdraw document A's typed currency");
   assert.equal(out.envelope.currency_reader.reason, "multi_document");
-  assert.equal(out.envelope.currency_reader.emitted, 0);
+  assert.equal(out.envelope.currency_reader.typed_collapsed, 0);
+  assert.equal(out.envelope.currency_reader.typed_disagreement, 0);
 });
 
-test("CG6 — the XML/MyInvois lane is a separate workflow file, untouched by this change (structural, not runtime)", () => {
+test("CG6 — the XML/MyInvois lane's OWN normalization version is untouched by this branch (a real cross-file check, P3)", () => {
   // This mapper is scoped to the Azure OCR engine only (contract precedent, part 1 §6.5). The
-  // MyInvois structured lane runs a DIFFERENT engine and normalization (`clara-myinvois-norm:
-  // v1`) in a DIFFERENT file this branch never edits — asserted here as a standing reminder,
-  // not a runtime check (there is nothing of this mapper's to call from that lane).
-  assert.ok(NORMALIZATION_VERSION.startsWith("clara-invoice-norm:"), "this version governs the Azure OCR lane only");
+  // MyInvois structured lane runs a DIFFERENT engine and normalization in `lib/myinvois.mjs`,
+  // a file this branch makes ZERO edits to (verifiable in the diff) — imported and asserted
+  // here, not just recalled, so a future edit to that file that silently bumps its version
+  // would fail THIS test too, not just be missed. `NORMALIZATION_VERSION` (this file's own,
+  // v9) and `MYINVOIS_NORMALIZATION_VERSION` (untouched, v1) are deliberately DIFFERENT
+  // constants in DIFFERENT files — that separation IS the byte-identity guarantee.
+  assert.equal(MYINVOIS_NORMALIZATION_VERSION, "clara-myinvois-norm:v1");
+  assert.equal(NORMALIZATION_VERSION, "clara-invoice-norm:v9");
+  assert.notEqual(MYINVOIS_NORMALIZATION_VERSION, NORMALIZATION_VERSION);
+});
+
+test("P2 (mapper level) — RINGGIT page evidence + NO typed currency at all: invoice.currency never appears, the doc cannot corroborate on it", () => {
+  const out = normalizeAzureInvoice(payload(undefined, [EZSEC_RINGGIT_LINE]));
+  assert.equal(out.envelope.currency_reader.verdict, "myr", "the reader DOES read myr — the wall is the merge law, not the reader");
+  assert.equal(currencyOf(out), undefined, "no invoice.currency region is manufactured out of the reader's authority alone");
+  assert.equal(out.envelope.currency_reader.typed_collapsed, 0);
+  // The rest of the extraction is untouched.
+  assert.equal(out.fields.find((f) => f.field_path === "invoice.total").value_raw, "1,700.00");
+});
+
+test("P1 (mapper level) — CG2 regression wall: an EZSEC-shaped doc that ALSO prints its own 'SDN BHD' suffix still agrees (myr, not ambiguous)", () => {
+  // The strongest form of the regression check: SDN BHD sits on the SAME document as the
+  // RINGGIT declaration, through the ACTUAL merge path, not just the reader in isolation.
+  const SDN_BHD_LINE = line("EZACCOUNT & SECRETARY SDN BHD (202301030264 (1524187-D))", [0, 1, 1, 1, 1, 2, 0, 2]);
+  const out = normalizeAzureInvoice(payload("MYR", [EZSEC_RINGGIT_LINE, SDN_BHD_LINE]));
+  const row = currencyOf(out);
+  assert.equal(row.value_raw, "MYR");
+  assert.equal(out.envelope.currency_reader.verdict, "myr");
+  assert.equal(out.envelope.currency_reader.typed_collapsed, 1);
 });
 
 // ======================================================================================
@@ -165,20 +195,30 @@ test("CG9 — through the FULL mapper, the reader clears the EUR-mistyped MEDICA
 });
 
 // ======================================================================================
-// CG11 (fixture half) — 39d786a0's real live receipt: typed USD pre-fix, absent post-fix
+// CG11 (MAPPER HALF ONLY, P4) — these two cells prove ONLY what the mapper controls: whether
+// invoice.currency is present in the FIELD LIST the mapper hands to persist_invoice_facts.
+// They do NOT call draft_entry, do NOT observe CLR21, and do NOT prove the DB-side refusal
+// lifts — that persistence/coding-authority half is the LIVE re-extraction ceremony (alongside
+// CG5/CG7-after/CG10), driven by the orchestrator post-deploy, on the real 39d786a0 document
+// with the assignment's own op-key shape (design part 2 §9.3). No DB-side test is added here —
+// out of this lane's scope by design.
 // ======================================================================================
 
-test("CG11 — 39d786a0: WITHOUT page evidence the typed USD stands (the pre-fix shape the live CLR21 observed)", () => {
+test("CG11 (mapper half) — 39d786a0-shaped payload, NO page evidence: the mapper's field list still carries invoice.currency=USD (the pre-fix input shape)", () => {
   // No pages[].lines[] at all: the reader has nothing to read and abstains, so the typed USD
-  // row survives exactly as it did before this reader existed — the shape that reached the
-  // live 400 CLR21 `currency_unsupported` on `draft_entry(... op_key runway-draft-lucy-250001-1)`
-  // (design part 2 §9.3). This is NOT a re-run of that DB call (out of scope, CG5/CG7-after/
-  // CG10 are the live ceremony) — it isolates the ONE variable the fix changes: page evidence.
+  // row survives in the mapper's output exactly as it did before this reader existed. This is
+  // the MAPPER-LEVEL analogue of the pre-fix shape behind the live 400 CLR21
+  // `currency_unsupported` observed on `draft_entry(... op_key runway-draft-lucy-250001-1)` —
+  // it isolates the one variable the fix changes (page evidence), not a claim about draft_entry
+  // itself, which this test never calls.
   const before = normalizeAzureInvoice(payload("USD", []));
-  assert.equal(currencyOf(before).value_raw, "USD");
+  assert.equal(currencyOf(before).value_raw, "USD", "the mapper's field list still contains the typed USD row");
 });
 
-test("CG11 — 39d786a0: WITH its real page evidence, no invoice.currency region survives (the post-fix shape)", () => {
+test("CG11 (mapper half) — 39d786a0's real page evidence: the mapper's field list carries NO invoice.currency row (the post-fix input shape)", () => {
+  // Proves only that persist_invoice_facts would receive a field list with no invoice.currency
+  // region for this document — NOT that explicit_non_myr evaluates false, NOT that CLR21 lifts,
+  // and NOT that draft_entry succeeds. Those are DB-side facts the live ceremony measures.
   const after = normalizeAzureInvoice(payload("USD", [LUCY_JAN_MYR_LINE]));
-  assert.equal(currencyOf(after), undefined, "explicit_non_myr can no longer evaluate true — the terminal CLR21 refusal does not fire");
+  assert.equal(currencyOf(after), undefined, "no invoice.currency row reaches the persist call for this document under v9");
 });

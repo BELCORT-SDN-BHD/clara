@@ -8,8 +8,8 @@
 // `currency_unsupported` refusal on any non-blank non-MYR `invoice.currency` region, with no
 // override — so a bare-numeral Malaysian invoice Azure mis-typed could never be coded at all.
 // The fix is not a new rule; it is to stop laundering the vendor's inference into a
-// page-anchored fact and let the EXISTING merge law (see `mergeCurrencyIntoFields` below,
-// mirroring `invoice-totals-merge.mjs`) arbitrate between two readers instead of trusting one.
+// page-anchored fact and let the merge law below arbitrate between two readers instead of
+// trusting one.
 //
 // DOCUMENT-SCOPE, NOT LABEL-ANCHORED — and this is the one structural way this reader differs
 // from its X2/X6 siblings. A totals figure is meaningless without knowing which label owns it;
@@ -54,26 +54,43 @@
 // Malaysian SST registration evidences a tax regime, not the currency any one invoice states
 // (part 1 §2) — a Malaysian SST-registered vendor can and does invoice in USD.
 //
-// THE FOREIGN VOCABULARY IS A CURATED SET of major/regional ISO 4217 codes, not the full
-// standard list — and that omission is itself measured, not merely cautious. Scanning this
-// reader's own boundary rule (below) against the real corpus turned up TWO genuine false-
-// positive hazards that a "just import every ISO code" reader would have shipped with:
+// THE FOREIGN VOCABULARY HAS TWO TIERS, and the split is the load-bearing part of this module.
+//
+// TIER 1 — FOREIGN_TOKENS, UNCONDITIONAL. Codes AND symbol forms, any boundary-exact hit counts
+// on its own. The design's part 1 §6.2 explicitly requires this for `S$` (a Singapore invoice
+// printing `S$`/`SGD` must refuse) — Malaysia has exactly one currency symbol (`RM`), so a
+// document printing ANY other symbol form is foreign by construction: `S$`, `US$`, `HK$`, `A$`,
+// bare `$`, `€`, `£`, `¥`, `₹`, `₩`, `฿`, `₫`, `₱`. Scanning the unconditional-boundary rule
+// against the real corpus turned up TWO genuine false-positive hazards a "just import every ISO
+// code" reader would have shipped with:
 //   - `BHD` (Bahraini Dinar) is a SUBSTRING OF EVERY MALAYSIAN COMPANY NAME: "Sendirian
 //     Berhad" is universally abbreviated "SDN BHD" on the letterhead of nearly every
 //     Malaysian invoice in the corpus, EZSEC's five times over on one document alone.
 //   - `ALL` (Albanian Lek) is the common English word "all" — EZSEC and BUSYSTREET both print
 //     "All cheques should be crossed and made payable to..." in their boilerplate.
-// Both would have turned CG2's EZSEC document `ambiguous` — the reader abstaining on exactly
-// the family this design exists to fix, in a way that looks like a passing, deterministic read.
-// The same class of risk (an ISO code that is ALSO a common English word or a three-letter
-// business term) rules out a further short list by inspection, in the same spirit as the
-// AUD-inside-Audit trap the word-boundary rule exists for: `TRY`, `PEN`, `COP`, `MAD`, `BOB`,
-// `GEL`, `TOP`, `SOS`, `RUB`, `RON` are all EXACT three-letter English words or common given
-// names with no boundary-check escape (unlike `AUD` inside `Audit`, these tokens ARE the whole
-// word, so the boundary rule cannot rescue them). Widening this list further is safe on
-// accounting-correctness grounds — a false `ambiguous` only costs an abstention, never a wrong
-// posting (part 1 §6.4) — but each addition should be MEASURED against real documents first,
-// exactly as this list was; that measurement is the job, not an afterthought.
+// Both would have turned CG2's EZSEC document `ambiguous` unconditionally — the reader
+// abstaining on exactly the family this design exists to fix, in a way that looks like a
+// passing, deterministic read. The same class of risk rules out a further short list by
+// inspection: `TRY`, `PEN`, `COP`, `MAD`, `BOB`, `GEL`, `TOP`, `SOS`, `RUB`, `RON` are all EXACT
+// three-letter English words or common given names with no boundary-check escape (unlike `AUD`
+// inside `Audit`, these tokens ARE the whole word).
+//
+// TIER 2 — CONDITIONAL_FOREIGN_TOKENS, GATED ON AMOUNT-ADJACENCY. Simply DROPPING those ten
+// codes reopens a different hole, and it is a real one, not hypothetical: a document genuinely
+// denominated in one of them — `BHD 100.00` — would then carry NO foreign signal at all, and if
+// Azure's typed field also (wrongly, or by real coincidence on a Bahraini template) said MYR,
+// the two readers would AGREE and a genuinely foreign document would cross the corroboration
+// wall with `typed_collapsed` stamped on it. So these ten codes are not gone from the
+// vocabulary — they are CONDITIONAL: a hit counts only when the token sits directly next to an
+// amount (a digit, at most one run of whitespace away, on either side) — the shape a currency
+// CODE is actually printed in next to a figure ("BHD 100.00", "100.00 BHD"), as opposed to a
+// code-shaped WORD sitting among other words or punctuation ("SDN BHD (202301030264...)", "SDN.
+// BHD. 1292628-P", "All cheques should be crossed..."). Measured against the real EZSEC /
+// BUSYSTREET / MEDICAL corpus (this module's own test suite pins every one of those exact real
+// lines): none of the real "SDN BHD" / "SDN. BHD." occurrences are amount-adjacent (each is
+// followed by a space-then-parenthesis, a full stop, or nothing at all — never a bare digit),
+// and neither real "All cheques" occurrence is either. The exclusion is closed without
+// reopening CG2/CG4.
 //
 // ASCII-WORD-BOUNDARY-EXACT, AND WHY NOT JAVASCRIPT's `\b`. A token is a hit only when the
 // character immediately before AND after it is NOT an ASCII letter — crucially, a DIGIT is
@@ -86,36 +103,71 @@
 // every one, and the CG4 trap (`Internal Audit`) is caught the same way — `AUD` sits inside
 // `Audit` followed by `I`, a letter, so the RIGHT-boundary check refuses it even though the
 // left one would have passed. Case-INSENSITIVE on purpose: OCR casing carries no signal here,
-// the boundary discipline is what does the actual work.
+// the boundary discipline is what does the actual work. A non-ASCII neighbour (a CJK character,
+// a stray watermark glyph) is NOT an ASCII letter either, so it never blocks a boundary — the
+// false-positive risk this rule defends against is specifically English-word / business-term
+// collision, not adjacency to non-Latin script.
 
 import { isDbBlank } from "./invoice-amount-grammar.mjs";
 
 const ASCII_LETTER = /[A-Za-z]/;
+const DIGIT = /[0-9]/;
+const LEADING_WS = /^\s*/;
+const TRAILING_WS = /\s*$/;
 
 /** The MYR accept vocabulary — STRICT, per the currency-defect design's exact list (part 1 §2).
  *  Order does not matter: every hit is counted, not just the first. */
 const MYR_TOKENS = Object.freeze(["MYR", "RM", "RINGGIT"]);
 
-/** The foreign refusal vocabulary — WIDENED deliberately (part 1 §6.4: for this reader the
- *  foreign vocabulary is the refusal trigger, so normalize wide), but MEASURED against the real
- *  corpus rather than imported wholesale from ISO 4217 — see the header for the two confirmed
- *  hazards (`BHD`, `ALL`) and the further exclusions made by inspection of the same class. */
+/** TIER 1 — unconditional. Codes AND symbol forms; see the header for the measured BHD/ALL
+ *  exclusion and TIER 2 below for how their risk is closed without re-admitting them here. */
 const FOREIGN_TOKENS = Object.freeze([
+  // ISO 4217 alpha codes — curated, not the full standard list (see header).
   "USD", "SGD", "EUR", "GBP", "AUD", "JPY", "CNY", "HKD", "TWD", "THB",
   "IDR", "VND", "PHP", "INR", "KRW", "NZD", "CHF", "AED", "SAR", "QAR",
   "KWD", "BND", "PKR", "BDT", "LKR", "NPR", "MMK", "KHR", "LAK", "EGP",
   "ZAR", "NGN", "SEK", "NOK", "DKK", "PLN", "CZK", "HUF", "MXN", "BRL",
   "ARS", "CLP", "UAH",
+  // Symbol / compound-symbol forms — design part 1 §6.2 names `S$` explicitly; the rest are the
+  // same shape (a currency marker Malaysia never prints, since RM is Malaysia's only symbol).
+  "S$", "US$", "HK$", "A$", "$", "€", "£", "¥", "₹", "₩", "฿", "₫", "₱",
+]);
+
+/** TIER 2 — CONDITIONAL on amount-adjacency (see `isAmountAdjacent`). Every one of these is an
+ *  exact common English word or business term with no word-boundary escape (unlike AUD inside
+ *  Audit, these ARE the whole word) — see the header for the measured BHD/ALL false positives
+ *  that make unconditional inclusion unsafe. */
+const CONDITIONAL_FOREIGN_TOKENS = Object.freeze([
+  "BHD", "ALL", "TRY", "PEN", "COP", "MAD", "BOB", "GEL", "TOP", "SOS", "RUB", "RON",
 ]);
 
 const content = (line) => String(line?.content ?? "");
 
 /**
+ * Is there a digit within ONE RUN of whitespace of the token occupying `text[idx, idx+len)`?
+ * This is the "amount marker" shape a currency CODE is actually printed in — `BHD 100.00` or
+ * `100.00 BHD` — as opposed to a code-shaped WORD sitting among other words or punctuation
+ * (`SDN BHD (202301030264...)`, `All cheques...`), where the nearest digit if any sits past a
+ * parenthesis, a full stop, or more words — never immediately across a plain whitespace gap.
+ * Whitespace is stripped Unicode-tolerantly (`\s`, not the ASCII-only class the accept grammar
+ * uses elsewhere): this is a REFUSAL-widening check, not an accept gate, so the safe direction
+ * is to match MORE — the same asymmetry `TAX_SUMMARY_HEADING` in invoice-totals-reader.mjs uses.
+ */
+function isAmountAdjacent(text, idx, len) {
+  const after = text.slice(idx + len).replace(LEADING_WS, "");
+  if (DIGIT.test(after[0] ?? "")) return true;
+  const before = text.slice(0, idx).replace(TRAILING_WS, "");
+  return DIGIT.test(before[before.length - 1] ?? "");
+}
+
+/**
  * Does `text` contain `token` at an ASCII-word-boundary-exact position? See the header for why
  * this is not `\b`: a digit immediately before or after the token is explicitly NOT a boundary
  * violation (the canonical Malaysian print form is `RM1,700.00`, symbol abutting amount).
+ * `requireAmountAdjacent` additionally gates a boundary-passing hit on `isAmountAdjacent` — see
+ * TIER 2 in the header for why that exists and what it protects.
  */
-function hasToken(text, token) {
+function hasToken(text, token, requireAmountAdjacent = false) {
   const upper = text.toUpperCase();
   let from = 0;
   for (;;) {
@@ -123,18 +175,22 @@ function hasToken(text, token) {
     if (idx === -1) return false;
     const before = idx > 0 ? upper[idx - 1] : "";
     const after = idx + token.length < upper.length ? upper[idx + token.length] : "";
-    if (!ASCII_LETTER.test(before) && !ASCII_LETTER.test(after)) return true;
+    const boundaryOk = !ASCII_LETTER.test(before) && !ASCII_LETTER.test(after);
+    if (boundaryOk && (!requireAmountAdjacent || isAmountAdjacent(upper, idx, token.length))) return true;
     from = idx + 1;
   }
 }
 
 /** The first vocabulary token (in list order) this line hits, or null. */
-function firstHit(text, tokens) {
+function firstHit(text, tokens, requireAmountAdjacent = false) {
   for (const token of tokens) {
-    if (hasToken(text, token)) return token;
+    if (hasToken(text, token, requireAmountAdjacent)) return token;
   }
   return null;
 }
+
+/** The first FOREIGN hit on this line — TIER 1 unconditional, else TIER 2 amount-gated. */
+const firstForeignHit = (text) => firstHit(text, FOREIGN_TOKENS) ?? firstHit(text, CONDITIONAL_FOREIGN_TOKENS, true);
 
 /**
  * Read the document's currency off `analyzeResult.pages[].lines[]` — the SAME array X2's totals
@@ -160,8 +216,6 @@ export function readCurrencyFromLines(pages) {
     citation: null,
     typed_disagreement: 0,
     typed_collapsed: 0,
-    typed_recovered: 0,
-    emitted: 0,
     fields: {},
   };
   const myrHits = [];
@@ -185,7 +239,7 @@ export function readCurrencyFromLines(pages) {
           confidence: line?.confidence == null ? null : Number(line.confidence),
         });
       }
-      const foreignToken = firstHit(text, FOREIGN_TOKENS);
+      const foreignToken = firstForeignHit(text);
       if (foreignToken) {
         if (!receipt.foreign_tokens.includes(foreignToken)) receipt.foreign_tokens.push(foreignToken);
         foreignHits.push({ token: foreignToken, text, page: pageNumber });
@@ -231,32 +285,40 @@ export function readCurrencyFromLines(pages) {
 }
 
 /** DB-aligned "is this typed currency code MYR". Mirrors `isDbBlank`'s discipline of asking the
- *  DB's own question rather than JavaScript's: uppercase + ASCII-trim, since Azure's typed
+ *  DB's own question rather than JavaScript's: uppercase + trim, since Azure's typed
  *  `currencyCode` is always a clean 3-letter ISO code and the only normalization worth doing is
  *  the one that lets `" myr "` and `"MYR"` compare equal without touching anything else. */
 const isTypedMyr = (raw) => String(raw ?? "").trim().toUpperCase() === "MYR";
 
 /**
  * Merge the reader's emission into the mapper's field list, reconciling against Azure's typed
- * `invoice.currency` row — the SAME four-outcome law as `mergeTotalsIntoFields`
- * (invoice-totals-merge.mjs:16-25), applied to a single non-monetary field compared by STRING
- * identity rather than cents (currency codes are not amounts, so `centsOfRaw` does not apply
- * here; the comparison below is the currency-typed equivalent of that file's cents equality).
+ * `invoice.currency` row.
  *
- *   - typed row ABSENT            -> emit the reader's row.
- *   - typed row present but BLANK -> the reader fills the hole (never overrides a real typed
- *     hit — same precedent as invoice_id recovery and the X2/X6 mergers).
- *   - typed says MYR (agree)      -> keep the TYPED row (it carries Azure's own bounding region
- *     and confidence); stamp `typed_collapsed` so migration 0023's corroboration predicate can
- *     see that TWO INDEPENDENT sources agreed, not one reader talking to itself.
- *   - typed says anything else (disagree) -> emit NEITHER. Withdrawal is the whole fix: with no
- *     `invoice.currency` region left, `explicit_non_myr` evaluates false and the terminal CLR21
- *     `currency_unsupported` refusal does not fire, while `corroborated` also stays false — the
- *     fix can only ever REMOVE a document from the corroborated set, never add one (design part
- *     1 §4).
- *   - the reader ABSTAINS (`ambiguous`/`absent`/`foreign`) -> `currency.fields` is empty, this
- *     function returns immediately, and the typed row (if any) stands untouched — v5 semantics,
- *     preserved on purpose.
+ * A DELIBERATE, DOCUMENTED DELTA FROM THE X2 TOTALS LAW — read this before "fixing" it back.
+ * `mergeTotalsIntoFields` (invoice-totals-merge.mjs) has FOUR outcomes, two of which let the
+ * reader emit ON ITS OWN AUTHORITY when Azure typed nothing (absent, or present-but-blank). That
+ * is correct for a totals figure: the DB is indifferent to WHERE `invoice.tax_total` came from,
+ * only to whether it is present and agreed. Currency is different in one load-bearing way — it
+ * is a CORROBORATION WALL INPUT: migration 0023's predicate requires `v_currency = 'MYR'`
+ * before ANY document can reach Tier A, regardless of how well its totals agree. If this reader
+ * were allowed to fill an absent/blank typed currency on its own, a document whose totals
+ * already agree (`typed_collapsed` on net AND tax) but that Azure never typed a currency for
+ * would FLIP from never-corroborable to corroborated the moment this reader ran — a single
+ * reader manufacturing agreement out of nothing, which is exactly the shape the design's part 1
+ * §4 falsifiable claim forbids: **"the fix can only ever REMOVE a document from the
+ * corroborated set, never add one."** So currency has only THREE outcomes, not four:
+ *
+ *   - typed says MYR (AGREE)     -> keep the TYPED row (it carries Azure's own bounding region
+ *     and confidence); stamp `typed_collapsed` so the corroboration predicate can see that TWO
+ *     INDEPENDENT sources agreed, not one reader talking to itself.
+ *   - typed says anything else, non-blank (DISAGREE) -> emit NEITHER. Withdrawal is the whole
+ *     fix: with no `invoice.currency` region left, `explicit_non_myr` evaluates false and the
+ *     terminal CLR21 `currency_unsupported` refusal does not fire, while `corroborated` also
+ *     stays false.
+ *   - typed is ABSENT OR BLANK, OR the reader ABSTAINS (`ambiguous`/`absent`/`foreign`) ->
+ *     NOTHING IS EMITTED, EVER, ON THE READER'S OWN AUTHORITY. An absent typed currency stays
+ *     absent; a blank one stays blank. Only Azure's own typed field may ever assert `MYR` with
+ *     posting-relevant authority — this reader may only agree with it, or refuse it.
  *
  * Mutates `out` and `currency.receipt`; returns nothing.
  *
@@ -268,18 +330,9 @@ export function mergeCurrencyIntoFields(out, currency) {
   if (!row) return; // abstain: nothing to reconcile, the typed row (if any) stands as-is
 
   const typed = out.find((r) => r.field_path === "invoice.currency");
-  if (!typed) {
-    out.push(row);
-    currency.receipt.emitted += 1;
-    return;
-  }
-  // BLANKNESS IS THE DB'S DEFINITION, imported rather than reimplemented — see isDbBlank's own
-  // header in invoice-amount-grammar.mjs. A currency code is never legitimately "\t", so the
-  // same care that field takes for money tokens is free insurance here, at no extra cost.
-  if (isDbBlank(typed.value_raw)) {
-    Object.assign(typed, row);
-    currency.receipt.typed_recovered += 1;
-    currency.receipt.emitted += 1;
+  if (!typed || isDbBlank(typed.value_raw)) {
+    // NO READER-ONLY EMISSION — see the header. A currency reading is never manufactured out
+    // of this reader's authority alone, absent or blank, so nothing happens here at all.
     return;
   }
   if (isTypedMyr(typed.value_raw)) {

@@ -176,14 +176,65 @@ test("RM/AUD-shaped substrings inside ordinary English words are refused, not ju
   }
 });
 
-test("measured false-positive exclusions: BHD (every Malaysian company suffix) and ALL never fire", () => {
+test("P1 — CONDITIONAL exclusions: on the REAL EZSEC/BUSYSTREET/MEDICAL boilerplate, BHD and ALL never fire even amount-adjacency-gated", () => {
   // BHD (Bahraini Dinar) is a substring of "SDN BHD" — universal on Malaysian letterheads. ALL
-  // (Albanian Lek) is the common English word "all". Both are measured hits on the REAL EZSEC /
-  // BUSYSTREET boilerplate (part 1 header) and are deliberately excluded from the vocabulary.
-  const bhd = readCurrencyFromLines(onePage([line('EZACCOUNT & SECRETARY SDN BHD (202301030264 (1524187-D))', [0, 0, 1, 0, 1, 1, 0, 1])]));
-  assert.equal(bhd.receipt.verdict, "absent", "SDN BHD alone must never read as foreign");
-  const all = readCurrencyFromLines(onePage([line("All cheques should be crossed and made payable to", [0, 0, 1, 0, 1, 1, 0, 1])]));
-  assert.equal(all.receipt.verdict, "absent", "the word 'All' alone must never read as foreign");
+  // (Albanian Lek) is the common English word "all". Both are TIER 2 (amount-adjacency-gated,
+  // not dropped outright — see P1/the module header) and every REAL occurrence measured in the
+  // corpus is proven here to stay excluded: none sits directly next to a digit.
+  for (const text of [
+    'EZACCOUNT & SECRETARY SDN BHD (202301030264 (1524187-D))', // EZSEC letterhead + signature
+    'CNT BEAUTY & AESTHETIC SDN. BHD. 1292628-P', // MEDICAL — a full stop AND a space separate BHD from the digits
+    'CNT BEAUTY & AESTHETIC SDN BHD', // MEDICAL — end of line, nothing follows
+    'BUSYSTREET CONSULTANCY SDN BHD', // BUSYSTREET
+  ]) {
+    assert.equal(readCurrencyFromLines(onePage([line(text, [0, 0, 1, 0, 1, 1, 0, 1])])).receipt.verdict, "absent", text);
+  }
+  for (const text of [
+    "All cheques should be crossed and made payable to", // EZSEC
+    "1. All cheques should be crossed and made payable to", // BUSYSTREET — the "1." prefix is not digit-adjacent to ALL either
+  ]) {
+    assert.equal(readCurrencyFromLines(onePage([line(text, [0, 0, 1, 0, 1, 1, 0, 1])])).receipt.verdict, "absent", text);
+  }
+});
+
+test("P1 — CG2/CG4 regression wall: the real EZSEC/BUSYSTREET fixtures still read myr after the amount-adjacency gate", () => {
+  // The exact regression Codex named: this change must not flip CG2 or CG4. Re-run both through
+  // the reader directly (the dedicated CG2/CG4 cells above already cover this; this cell pins
+  // the SAME real lines specifically against the conditional-token change).
+  assert.equal(readCurrencyFromLines(onePage([EZSEC_RINGGIT_LINE])).receipt.verdict, "myr");
+  assert.equal(readCurrencyFromLines(onePage([BUSYSTREET_AUDIT_LINE, BUSYSTREET_RINGGIT_LINE, BUSYSTREET_TOTAL_RM_LINE])).receipt.verdict, "myr");
+});
+
+test("P1 — an excluded code DOES count as foreign when genuinely amount-adjacent (closes the counterexample class)", () => {
+  const bhd = readCurrencyFromLines(onePage([line("BHD 100 (RM330)", [0, 0, 1, 0, 1, 1, 0, 1])]));
+  assert.equal(bhd.receipt.verdict, "ambiguous", "a genuinely Bahraini-denominated line must not be invisible to the foreign side");
+  assert.deepEqual(bhd.receipt.foreign_tokens, ["BHD"]);
+  // Reversed order and no space also count — the amount marker shape, not a fixed template.
+  const bhdCompact = readCurrencyFromLines(onePage([line("BHD100.00", [0, 0, 1, 0, 1, 1, 0, 1])]));
+  assert.equal(bhdCompact.receipt.verdict, "foreign");
+  const amountFirst = readCurrencyFromLines(onePage([line("100.00 BHD due", [0, 0, 1, 0, 1, 1, 0, 1])]));
+  assert.equal(amountFirst.receipt.verdict, "foreign");
+});
+
+test("P1 — the design's own §6.2 symbol form: S$ alongside RM reads ambiguous, not myr", () => {
+  const { fields, receipt } = readCurrencyFromLines(onePage([line("S$100 (RM330)", [0, 0, 1, 0, 1, 1, 0, 1])]));
+  assert.equal(receipt.verdict, "ambiguous");
+  assert.equal(fields.length, 0);
+  assert.deepEqual(receipt.foreign_tokens, ["S$"]);
+});
+
+test("P1 — bare-numeral Singapore invoice (design part 1 §6.2): S$/SGD alone reads foreign, refused", () => {
+  for (const text of ["S$50.00 due", "Amount: SGD 50.00"]) {
+    const { fields, receipt } = readCurrencyFromLines(onePage([line(text, [0, 0, 1, 0, 1, 1, 0, 1])]));
+    assert.equal(receipt.verdict, "foreign", text);
+    assert.equal(fields.length, 0, text);
+  }
+});
+
+test("P1 — other symbol forms Malaysia never prints (US$, HK$, bare $, €, £, ¥) are foreign, unconditionally", () => {
+  for (const text of ["US$21.60 due", "HK$500.00", "Total: $21.60", "€50.00", "£40.00", "¥1000"]) {
+    assert.equal(readCurrencyFromLines(onePage([line(text, [0, 0, 1, 0, 1, 1, 0, 1])])).receipt.verdict, "foreign", text);
+  }
 });
 
 test("document-scope: a hit on page 2 counts exactly as one on page 1", () => {
@@ -210,29 +261,46 @@ test("a matched line with no usable polygon cites an honest empty region, never 
 });
 
 // ======================================================================================
-// mergeCurrencyIntoFields — the four-outcome merge law, unit-level
+// mergeCurrencyIntoFields — the THREE-outcome merge law, unit-level (P2: a deliberate,
+// documented delta from the X2 totals law — see the module header for why hole-filling is
+// unsafe for currency specifically: it is a corroboration WALL input, so a reader-only
+// emission could FLIP a document into `corroborated` that never had two independent sources,
+// violating the design's part 1 §4 claim that this fix can only ever REMOVE a document from
+// the corroborated set, never add one).
 // ======================================================================================
 
 /** A real `myr`-verdict reader result — the shape `mergeCurrencyIntoFields` reconciles. */
 const myrReading = () => readCurrencyFromLines(onePage([LUCY_JAN_MYR_LINE]));
 
-test("merge: typed row ABSENT -> the reader's row is emitted", () => {
+test("merge: typed row ABSENT -> NOTHING is emitted, ever (no reader-only emission)", () => {
   const out = [];
   const currency = myrReading();
   mergeCurrencyIntoFields(out, currency);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].value_raw, "MYR");
-  assert.equal(currency.receipt.emitted, 1);
+  assert.equal(out.length, 0, "an absent typed currency stays absent — the reader never asserts on its own authority");
+  assert.equal(currency.receipt.typed_collapsed, 0);
+  assert.equal(currency.receipt.typed_disagreement, 0);
 });
 
-test("merge: typed row present but BLANK -> the reader fills the hole", () => {
+test("merge: typed row present but BLANK -> still nothing is emitted (blank stays blank)", () => {
   const out = [{ field_path: "invoice.currency", value_raw: "   " }];
   const currency = myrReading();
   mergeCurrencyIntoFields(out, currency);
-  assert.equal(out.length, 1);
-  assert.equal(out[0].value_raw, "MYR");
-  assert.equal(currency.receipt.typed_recovered, 1);
-  assert.equal(currency.receipt.emitted, 1);
+  assert.equal(out.length, 1, "the blank row itself is untouched — not removed, not filled");
+  assert.equal(out[0].value_raw, "   ");
+  assert.equal(currency.receipt.typed_collapsed, 0);
+  assert.equal(currency.receipt.typed_disagreement, 0);
+});
+
+test("P2 regression — a RINGGIT page with NO typed currency at all: still nothing emitted, the document cannot corroborate on currency alone", () => {
+  // The exact counterexample class this fix must never open: real net/tax agreement plus a
+  // reader-only MYR currency reading would flip `corroborated` for a document that never had
+  // two independent sources on ITS currency. `v_currency` must stay '' (coalesced), never 'MYR'.
+  const out = [{ field_path: "invoice.total_excl_tax", value_raw: "1,700.00" }, { field_path: "invoice.tax_total", value_raw: "0.00" }];
+  const currency = readCurrencyFromLines(onePage([EZSEC_RINGGIT_LINE]));
+  assert.equal(currency.receipt.verdict, "myr", "the reader DOES read myr here — the wall is in the merge, not the reader");
+  mergeCurrencyIntoFields(out, currency);
+  assert.equal(out.find((f) => f.field_path === "invoice.currency"), undefined, "no invoice.currency region is ever created out of the reader's authority alone");
+  assert.equal(out.length, 2, "the unrelated totals fields are untouched");
 });
 
 test("merge: typed MYR AGREES -> the typed row is KEPT verbatim, typed_collapsed stamped", () => {
@@ -262,7 +330,7 @@ test("merge: the reader ABSTAINS (ambiguous/absent/foreign) -> the typed row sta
   for (const verdict of ["ambiguous", "absent", "foreign"]) {
     const typedRow = { field_path: "invoice.currency", value_raw: "USD", page: 1, polygon: [], confidence: 0.9 };
     const out = [typedRow];
-    const currency = { fields: [], receipt: { ...readCurrencyFromLines([]).receipt, verdict, typed_disagreement: 0, typed_collapsed: 0, typed_recovered: 0, emitted: 0 } };
+    const currency = { fields: [], receipt: { ...readCurrencyFromLines([]).receipt, verdict, typed_disagreement: 0, typed_collapsed: 0 } };
     mergeCurrencyIntoFields(out, currency);
     assert.equal(out.length, 1, `verdict=${verdict} must leave the typed row standing`);
     assert.equal(out[0], typedRow);
