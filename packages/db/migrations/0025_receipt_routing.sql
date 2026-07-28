@@ -55,26 +55,51 @@
 -- human-invoked one.
 --
 -- LOCK-ORDER EVIDENCE for §A's new lock (no caller creates a documents-vs-tasks inversion;
--- verified against the four REAL callers, grepped across every migration — 0016's own tail
--- DO-block probes are test invocations, not production callers):
+-- verified against the four REAL callers, grepped across every migration and read via
+-- pg_get_functiondef against the live catalog — not the migration file text, which for
+-- claim_document_processing_task and _recompute_document_retention would have missed later
+-- patches — 0016's own tail DO-block probes are test invocations, not production callers):
 --   enqueue_invoice_facts (0009) calls the core FIRST, with NO prior lock of its own — the
 --     core's FOR UPDATE is the first (and, on the failure branch, only) lock this caller ever
 --     takes on clara.documents.
 --   file_document (0009) already locks documents FOR UPDATE BEFORE calling the core (its own
 --     firm-membership check) — the core's lock on the SAME row, SAME transaction, is a safe
 --     RE-ENTRANT re-acquisition, not a second competing lock.
---   confirm_attribution_candidate and approve_wrong_client_correction (0009) NEVER lock
---     clara.documents anywhere in their own bodies before calling the core (they lock
---     attribution_candidates/attribution_attempts and filing_corrections/document_filings/
---     journal_entries respectively) — the core's FOR UPDATE is the first and only documents
---     lock either function ever takes.
+--   confirm_attribution_candidate and approve_wrong_client_correction (0009) — CORRECTED
+--     (cross-model review Q3, 4th round): an earlier draft of this note claimed neither
+--     function ever locks clara.documents before calling the core. False. Both call
+--     clara._recompute_document_retention(p_document) (0007:1349) immediately before the
+--     core, and THAT function's own `update clara.documents set retention_state=...` (both
+--     of its branches) takes the row lock implicitly — so by the time either caller reaches
+--     the core, clara.documents is ALREADY locked, and the core's FOR UPDATE is, exactly
+--     like file_document's, a safe RE-ENTRANT re-acquisition, not a first-time lock. §A's
+--     new lock is re-entrant on EVERY one of the four real call paths — the narrow claim
+--     this note exists to support.
 -- And the core itself never locks clara.document_processing_tasks WITH FOR UPDATE anywhere in
 -- its own body (every task read here is a plain SELECT) — so the core can never itself hold a
 -- tasks lock and THEN reach for a documents lock, the shape a documents-vs-tasks inversion
 -- would require. No caller that reaches the core locks document_processing_tasks first either
 -- (claim_document_processing_task / requeue_stranded_document_task never call the core).
--- Structurally, a deadlock between this new lock and any other writer's lock ordering cannot
--- occur.
+-- Structurally, a deadlock between §A's OWN new lock and any other writer's lock ordering
+-- cannot occur — that is the whole and only claim this note makes.
+--
+-- A SEPARATE, PRE-EXISTING risk surfaced while building this corrected inventory (cross-
+-- model review Q3): file_document (documents FOR UPDATE, THEN an INSERT into
+-- document_filings) and confirm_attribution_candidate (an INSERT into document_filings,
+-- THEN documents FOR UPDATE via _recompute_document_retention) take these two locks in
+-- OPPOSITE order — and document_filings carries a partial unique index,
+-- uq_document_filing_active (document_id,client_id) WHERE retired_at IS NULL, so two
+-- concurrent inserts for the SAME (document,client) genuinely contend. Reproduced LIVE
+-- (concurrentTwoSession, 16 runs against the two functions racing to file the SAME
+-- document to the SAME client): 1/16 runs surfaced a real Postgres-detected 40P01
+-- deadlock; the rest serialized cleanly (one side's insert loses honestly to 23505 once
+-- the other has already committed). This is INDEPENDENT of 0025 and of §A's new lock —
+-- it existed before this migration and is unaffected by it (§A's lock is re-entrant on
+-- both paths, per the corrected inventory above, so it neither creates nor closes this
+-- window). Reported to the owner as its own finding rather than fixed in this migration —
+-- approve_wrong_client_correction shares file_document's/confirm's document_filings write
+-- shape closely enough that it likely carries the same risk and should be checked
+-- alongside it, not patched piecemeal here.
 --
 -- WHAT THIS DOES NOT DO. No auto-enqueue of EXISTING receipt documents inside this migration
 -- — a data migration inside a DDL migration violates the doors-not-data precedent this repo
