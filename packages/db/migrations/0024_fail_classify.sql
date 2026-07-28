@@ -147,52 +147,65 @@ revoke all on function clara.fail_classify(uuid, text, text) from public;
 grant execute on function clara.fail_classify(uuid, text, text) to clara_runtime;
 
 -- =====================================================================
--- §A2 — clara.classify_document CoR: THE RACE THIS VERB OPENS, CLOSED.
+-- §A2 — clara.classify_document: DROP + RECREATE at a NEW arity. THE RACE THIS VERB
+-- OPENS, CLOSED — TASK-BOUND, not recency-bound.
 --
 -- fail_classify above is a NEW way to move a classify task out from under a caller who
--- is mid-flight toward classify_document. Before this CoR, classify_document's own
--- task-settle read only ever looked for a RUNNING row (0016:3224-3227) — if
--- fail_classify won the race and the task was already 'failed' by the time
--- classify_document's SELECT ran, `found` was false, and the ORIGINAL body fell straight
--- through to the no-task ceremony path (WA21-R11) and wrote the verdict ANYWAY: kind set,
--- document_extractions row inserted, document.classified emitted. The honest terminal
--- state — the task trail says failed — would then coexist with a document the classifier
--- successfully classified, which is exactly the two-terminal-states-for-one-attempt
--- dishonesty a terminal writer exists to prevent (cross-model review finding on this
--- migration).
+-- is mid-flight toward classify_document. The FIRST fix drafted here (recorded in the
+-- commit history) locked the MOST RECENT classify task for (document, engine) and
+-- branched on its status. Cross-model review (round 2) found that "most recent" is
+-- itself unsound: a STALE classify_document call — the tail end of an attempt whose task
+-- already went terminal — has no way to tell "the newest task for this document" apart
+-- from "the task MY claim actually produced this verdict for". Schedule: T1 is claimed
+-- and starts an LLM call; fail_classify(T1) commits 'failed'; the facts-gate re-enqueues
+-- a fresh T2 (queued, or claimed to running by a DIFFERENT worker); T1's SLOW LLM call
+-- finally returns and T1's classify_document call arrives. "Most recent" now resolves to
+-- T2, not T1 — so a call that is semantically ABOUT T1 either falls through to the
+-- no-task ceremony path (T2 queued: writes T1's STALE verdict unconditionally) or
+-- SETTLES T2 to done using T1's stale verdict (T2 running) — a verdict from an abandoned
+-- attempt landing on a task it was never claimed against, in both variants.
 --
--- THE FIX, MINIMAL AND TASK-BOUND. The settle read now locks the MOST RECENT classify
--- task for (document, engine) REGARDLESS of status (not only 'running'), and branches on
--- what it finds:
---   running -> settle to done, exactly as before.
---   failed  -> REFUSE. This attempt's task already lost the race; the verdict is not
---     written, the kind is not touched, no document.classified fires. A fresh attempt
---     needs a fresh task (the facts-gate re-enqueue already does this on any non-live
---     status).
---   anything else (no row at all, or the newest row is 'done'/'queued'/'held_egress')
---     -> UNCHANGED behaviour, byte-identical to 0016. This is what keeps WA21-R11's live
---     no-task ceremony (0016:3222-3223; executed 2026-07-23 per the archived ADR) working:
---     those six documents carried NO classify task row at all, so `found` stays false and
---     this CoR does not touch that path.
+-- THE FIX: classify_document now takes `p_task` — the id of the task the CALLER claimed
+-- and produced this verdict for. This is an ARITY change (5 args -> 6), so `create or
+-- replace` cannot do it (a different argument list is a SEPARATE overload, not a
+-- replacement, and this codebase's "no orphan overloads" discipline forbids a doubled
+-- classify_document existing at all) — DROP the 5-arg function, CREATE the 6-arg one
+-- (0019:349 is the house precedent for a function-identity change via DROP; owner/grants
+-- are re-established below exactly as they were, since DROP removes them).
 --
--- WHY LOCKING THE ROW REGARDLESS OF STATUS CLOSES THE RACE, NOT JUST NARROWS IT. Both
--- orderings now serialize on the SAME row lock (fail_classify already took `for update`
--- on the exact task row; this CoR makes classify_document take the same lock on the same
--- row before deciding anything):
---   fail_classify first  -> commits 'failed' -> classify_document's lock blocks, then
---     sees 'failed' post-commit -> refuses. Exactly one terminal event
---     (document.classify_failed), never document.classified.
---   classify_document first -> settles 'done', writes the verdict, commits -> fail_classify's
---     lock blocks, then sees 'done' post-commit -> fail_classify's OWN existing guard
---     (`status not in ('running','failed')`) refuses with CLR16, unchanged. Exactly one
---     terminal event (document.classified), never document.classify_failed.
+-- p_task IS PROVIDED (every worker call, once packages/runtime/lib/classify.mjs is
+-- updated to pass its own claimed task id — done in this same change): the settle read
+-- locks EXACTLY that task by id, never "whichever is newest". If it is not 'running' —
+-- failed (fail_classify won), done (already settled, a genuine duplicate call), or any
+-- other state — REFUSE. The verdict is not written, the kind is not touched, no
+-- document.classified fires, and — critically — NO OTHER task is ever touched, so a
+-- stale T1 call can never reach out and mutate T2's row. A fresh attempt needs a fresh
+-- task; the facts-gate re-enqueue already provides one on any non-live status.
+--
+-- p_task IS NULL (the no-task ceremony path, WA21-R11; every caller that predates this
+-- change, or any FUTURE caller with no task in mind): the settle read reverts to EXACTLY
+-- 0016's original query — match a 'running' task for (document, engine) in the WHERE
+-- clause itself, not "most recent regardless of status" — so this path is byte-identical
+-- to pre-0024 behaviour and the six WA21-R11 documents (which carried no classify task
+-- row at all) are completely unaffected.
+--
+-- WHY THIS CLOSES THE RACE COMPLETELY, NOT JUST NARROWS IT. With p_task bound, T1's
+-- late-arriving call can ONLY ever examine and lock T1's own row — T2's existence is
+-- structurally irrelevant to it, whatever T2's status. Both lock orders on THAT row still
+-- serialize against fail_classify exactly as the single-task analysis already proved:
+--   fail_classify first  -> commits T1 'failed' -> classify_document(p_task=T1)'s lock
+--     blocks, then sees 'failed' post-commit -> refuses. T2 (if it exists) is never read.
+--   classify_document(p_task=T1) first -> settles T1 'done', writes the verdict, commits
+--     -> fail_classify(T1)'s lock blocks, then sees 'done' post-commit -> its own existing
+--     guard (`status not in ('running','failed')`) refuses with CLR16, unchanged.
 -- Neither function ever locks `clara.documents` AND `document_processing_tasks` in
 -- opposite orders relative to the other (fail_classify never touches `documents` at all),
 -- so this closes the race without opening a new lock-order deadlock between the two.
 --
 -- Everything else in this body is byte-identical to 0016 (tail-asserted).
-create or replace function clara.classify_document(p_document uuid, p_kind text,
-    p_confidence numeric, p_engine_id text, p_op_key text) returns jsonb
+drop function clara.classify_document(uuid,text,numeric,text,text);
+create function clara.classify_document(p_document uuid, p_kind text,
+    p_confidence numeric, p_engine_id text, p_op_key text, p_task uuid default null) returns jsonb
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare
   d record; t record; v_dedupe jsonb; v_ext uuid; v_version int; v_prior text;
@@ -233,24 +246,37 @@ begin
   end if;
   v_dedupe:=clara._reserve_op(d.firm_id,'classify_document',p_op_key,
     clara._hash(jsonb_build_object('document',p_document,'kind',p_kind,
-      'confidence',p_confidence,'engine',p_engine_id)));
+      'confidence',p_confidence,'engine',p_engine_id,'task',p_task)));
   if v_dedupe is not null then return v_dedupe; end if;
 
-  -- 0024 (race fix): lock the MOST RECENT classify task for (document, engine)
-  -- REGARDLESS of status — not only 'running' — so this call serializes against
-  -- fail_classify on the SAME row instead of racing it. See the CoR header above.
-  select * into t from clara.document_processing_tasks
-    where document_id=p_document and lane='classify' and engine_id=p_engine_id
-    order by version_n desc, id desc limit 1 for update;
-  if found and t.status='running' then
-    update clara.document_processing_tasks set status='done',finished_at=now()
-      where id=t.id;
-  elsif found and t.status='failed' then
-    raise exception 'the classify task for this document already failed — enqueue a new attempt before classifying again'
-      using errcode='CLR16';
+  -- 0024 (race fix, round 2): TASK-BOUND when the caller supplies its own claim's task
+  -- id — never "whichever is newest". See the CoR header above for the full reasoning.
+  if p_task is not null then
+    select * into t from clara.document_processing_tasks
+      where id=p_task and document_id=p_document and lane='classify' and engine_id=p_engine_id
+      for update;
+    if not found then
+      raise exception 'classify task not found for this document/engine' using errcode='CLR16';
+    end if;
+    if t.status='running' then
+      update clara.document_processing_tasks set status='done',finished_at=now()
+        where id=t.id;
+    else
+      raise exception 'this classify task is no longer running — it already settled or a newer attempt exists'
+        using errcode='CLR16';
+    end if;
+  else
+    -- NO-TASK CEREMONY (WA21-R11) — byte-identical to 0016: match ONLY a running task in
+    -- the WHERE clause itself, never "most recent regardless of status".
+    select * into t from clara.document_processing_tasks
+      where document_id=p_document and lane='classify' and status='running'
+        and engine_id=p_engine_id
+      order by id limit 1 for update;
+    if found then
+      update clara.document_processing_tasks set status='done',finished_at=now()
+        where id=t.id;
+    end if;
   end if;
-  -- found=false, or found with any OTHER status (queued/held_egress/done) — UNCHANGED:
-  -- falls through to the no-task ceremony path exactly as 0016 wrote it (WA21-R11).
 
   -- the verdict row: engine_kind='doc_classify', NO regions (the verdict rides
   -- the envelope — nothing here can ever collide with an attribution pattern).
@@ -322,6 +348,12 @@ begin
       'kind_set',v_set,'confidence',p_confidence,'questions',v_questions));
 end $$;
 
+-- DROP removed the function's owner/ACL along with it — re-established exactly as 0016
+-- originally set them (clara_runtime only; the sole caller is the classify worker).
+alter function clara.classify_document(uuid,text,numeric,text,text,uuid) owner to clara_fn_owner;
+revoke all on function clara.classify_document(uuid,text,numeric,text,text,uuid) from public;
+grant execute on function clara.classify_document(uuid,text,numeric,text,text,uuid) to clara_runtime;
+
 -- =====================================================================
 -- §B — EVENT TAXONOMY (one additive pair against the active version).
 --
@@ -356,7 +388,7 @@ do $tail$
 declare
   v_acl text; v_cfg text; v_role text; v_src text; v_code text;
   v_sig constant text := 'clara.fail_classify(uuid,text,text)';
-  v_sig2 constant text := 'clara.classify_document(uuid,text,numeric,text,text)';
+  v_sig2 constant text := 'clara.classify_document(uuid,text,numeric,text,text,uuid)';
 begin
   -- (1) The new verb exists at its exact signature and carries the whole definer posture.
   if to_regprocedure(v_sig) is null then
@@ -431,7 +463,7 @@ begin
     raise exception '0024 tail: persist_document_extraction lost its classify-lane refusal — fail_classify is meant to be the ONLY other terminal writer for this lane, not a replacement for the refusal';
   end if;
 
-  -- (5) classify_document's CoR — the RACE GUARD is present in EXECUTABLE TEXT (both
+  -- (5) classify_document — the TASK-BOUND RACE GUARD is present in EXECUTABLE TEXT (both
   -- comment forms stripped, whitespace normalised, the 0022/0023 discipline: a probe that
   -- cannot tell code from a comment about code proves nothing). This is BELT — the primary
   -- proof is behavioural (x-fail-classify.test.mjs's two-session lock-order cells) — but an
@@ -440,26 +472,49 @@ begin
   if v_src is null then
     raise exception '0024 tail: classify_document is GONE';
   end if;
+  -- The DROP+CREATE re-establishes the whole definer posture — assert it explicitly rather
+  -- than assuming the CREATE statement's own clauses took effect.
+  select coalesce(array_to_string(p.proconfig, ','), '') into v_cfg
+    from pg_proc p where p.oid = v_sig2::regprocedure;
+  if replace(v_cfg, ' ', '') not like '%search_path=clara,pg_temp%' then
+    raise exception '0024 tail: % has no pinned search_path (%)', v_sig2, v_cfg;
+  end if;
+  if not (select prosecdef from pg_proc where oid = v_sig2::regprocedure) then
+    raise exception '0024 tail: % is not SECURITY DEFINER', v_sig2;
+  end if;
+  if (select pg_get_userbyid(proowner) from pg_proc where oid = v_sig2::regprocedure)
+     <> 'clara_fn_owner' then
+    raise exception '0024 tail: % is not owned by clara_fn_owner', v_sig2;
+  end if;
   v_code := regexp_replace(
               regexp_replace(
                 regexp_replace(v_src, '/\*.*?\*/', '', 'gs'),
                 '--[^' || chr(10) || ']*', '', 'g'),
               '\s+', '', 'g');
-  -- The settle read now locks the MOST RECENT task for (document,engine) regardless of
-  -- status — the literal 'status=''running''' must be GONE from the SELECT's WHERE clause
-  -- (it survives only in the post-select branch below, checked separately).
-  if position('lane=''classify''andengine_id=p_engine_id' in v_code) = 0 then
-    raise exception '0024 tail: classify_document''s settle read no longer locks the most-recent classify task for (document,engine) — the race guard requires locking REGARDLESS of status';
+  -- The task-bound branch: locates the CALLER'S OWN task by id — document_id and engine_id
+  -- still qualify it (a p_task from a different document/engine must not resolve at all),
+  -- but there is no ORDER BY / "most recent" anywhere in this branch.
+  if position('ifp_taskisnotnullthen' in v_code) = 0 then
+    raise exception '0024 tail: classify_document lost the task-bound branch — the race guard requires binding to the CALLER''S task, not recency';
   end if;
-  if position('orderbyversion_ndesc,iddesclimit1forupdate' in v_code) = 0 then
-    raise exception '0024 tail: classify_document''s settle read no longer orders by the newest attempt — it could lock a STALE task row instead of the current one';
+  if position('id=p_taskanddocument_id=p_documentandlane=''classify''andengine_id=p_engine_id' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s task-bound lookup no longer locates the caller''s EXACT task';
   end if;
-  if position('foundandt.status=''running''' in v_code) = 0
-     or position('foundandt.status=''failed''' in v_code) = 0 then
-    raise exception '0024 tail: classify_document lost the running/failed branch split — the race guard requires both';
+  if position('t.status=''running''thenupdateclara.document_processing_taskssetstatus=''done''' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s task-bound branch lost the running->done settle';
   end if;
-  if position('alreadyfailed' in lower(v_code)) = 0 then
-    raise exception '0024 tail: classify_document lost the honest refusal message for a terminally-failed task';
+  if position('alreadysettledoranewerattemptexists' in lower(v_code)) = 0 then
+    raise exception '0024 tail: classify_document lost the honest refusal for a task that is no longer running (settled OR superseded)';
+  end if;
+  -- The no-task ceremony branch (WA21-R11) reverts to the EXACT 0016 query shape — status
+  -- ='running' back INSIDE the WHERE clause, never "most recent regardless of status".
+  if position('document_id=p_documentandlane=''classify''andstatus=''running''andengine_id=p_engine_id' in v_code) = 0 then
+    raise exception '0024 tail: classify_document''s no-task ceremony path no longer matches 0016''s exact query shape — WA21-R11 callers must see byte-identical behaviour';
+  end if;
+  -- No trace of the round-1 "most recent regardless of status" design survives — that
+  -- shape is exactly what round-2 review found unsound.
+  if position('orderbyversion_ndesc' in v_code) > 0 then
+    raise exception '0024 tail: classify_document still orders by version_n desc somewhere — the recency-based settle round-2 review rejected is still present';
   end if;
   -- Everything else this verb has ever guarded is still there — the definer posture, the
   -- kind vocabulary, the human-precedence rule, and the low-confidence review lane.
@@ -470,9 +525,18 @@ begin
     raise exception '0024 tail: classify_document lost a retained 0016 guard/lane';
   end if;
 
-  -- (6) classify_document's ACL is UNCHANGED by the CoR (CREATE OR REPLACE preserves
-  -- owner/grants, but a future edit could still widen it — assert the same clara_runtime-only
-  -- posture fail_classify carries, both the ACL whitelist and the effective-privilege sweep).
+  -- (5b) EXACTLY ONE overload survives the DROP + CREATE arity change (the house "no orphan
+  -- overloads" discipline) — a partial apply or a re-run that skipped the DROP would leave
+  -- two, and the 5-arg one would still be callable with the race this migration exists to
+  -- close.
+  if (select count(*) from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+       where n.nspname = 'clara' and p.proname = 'classify_document') <> 1 then
+    raise exception '0024 tail: clara.classify_document has more than one overload — the 5-arg pre-race-fix signature must not survive alongside the 6-arg one';
+  end if;
+
+  -- (6) classify_document's ACL is UNCHANGED by the CoR (DROP+CREATE loses owner/grants —
+  -- re-established explicitly above — assert the same clara_runtime-only posture
+  -- fail_classify carries, both the ACL whitelist and the effective-privilege sweep).
   select coalesce(string_agg(g, ', ' order by g), '') into v_acl
     from (select case when a.grantee = 0 then 'PUBLIC'
                       else pg_get_userbyid(a.grantee) end as g

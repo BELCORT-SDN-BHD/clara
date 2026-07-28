@@ -211,11 +211,17 @@ export async function resolveWatch(sub, { watch, conclusion, evidence = "rig res
 }
 
 /** classify_document(p_document, p_kind, p_confidence, p_engine_id, p_op_key) — runtime. */
-export async function classifyDocument({ document, kind, confidence = 0.95, engineId = "clara-classify-llm:v1", opKey = null }) {
+// `task` is OMITTED (undefined), not defaulted to null, on purpose (the a21EnsureReady /
+// opKey idiom): a cell proving the p_task=NULL no-task ceremony path passes `task: null`
+// EXPLICITLY; a cell not naming `task` at all gets the SAME null via `?? null` below, which
+// is indistinguishable at the SQL boundary — both mean "no task id supplied". 0024 (race fix
+// round 2) added p_task as the 6th argument; every EXISTING caller that predates it keeps
+// hitting the byte-identical-to-0016 no-task ceremony path.
+export async function classifyDocument({ document, kind, confidence = 0.95, engineId = "clara-classify-llm:v1", opKey = null, task = null }) {
   const r = await roleQuery(
     ROLES.runtime,
-    "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3::numeric, p_engine_id => $4, p_op_key => $5) as r",
-    [document, kind, confidence, engineId, opKey ?? opk("clsdoc")],
+    "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3::numeric, p_engine_id => $4, p_op_key => $5, p_task => $6) as r",
+    [document, kind, confidence, engineId, opKey ?? opk("clsdoc"), task],
   );
   return r.rows[0].r;
 }

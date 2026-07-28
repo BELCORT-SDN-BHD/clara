@@ -261,9 +261,13 @@ test("RACE, lock order 1 — fail_classify holds first: classify_document blocks
     },
     b: {
       role: ROLES.runtime,
+      // p_task bound to the SAME claimed task (the real worker's call shape post-0024 round
+      // 2): a stale call with NO task id would fall through to the no-task ceremony path
+      // (byte-identical to 0016) and write the verdict anyway once the task is no longer
+      // 'running' — task-binding is what makes THIS call refuse instead.
       run: (c) => c.query(
-        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5) as receipt",
-        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race1-classify")],
+        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5, p_task => $6) as receipt",
+        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race1-classify"), taskId],
       ).then((r) => r.rows[0].receipt),
     },
   });
@@ -300,9 +304,10 @@ test("RACE, lock order 2 — classify_document holds first: fail_classify blocks
   const out = await holdThenContend({
     a: {
       role: ROLES.runtime,
+      // p_task bound to the SAME claimed task — the real worker's call shape.
       run: (c) => c.query(
-        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5) as receipt",
-        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race2-classify")],
+        "select clara.classify_document(p_document => $1, p_kind => $2, p_confidence => $3, p_engine_id => $4, p_op_key => $5, p_task => $6) as receipt",
+        [document.documentId, "invoice", 0.95, CLASSIFY_ENGINE_ID, opk("race2-classify"), taskId],
       ).then((r) => r.rows[0].receipt),
     },
     b: {
@@ -331,6 +336,89 @@ test("RACE, lock order 2 — classify_document holds first: fail_classify blocks
     "select 1 from clara.domain_events where event_type='document.classified' and document_id=$1", [document.documentId],
   );
   assert.equal(classifiedEv.rows.length, 1, "exactly ONE document.classified fires — one terminal event for one attempt");
+});
+
+// ===========================================================================
+// THE THREE-ACTOR SCHEDULE (round-2 review finding): task-binding, not just the row
+// lock, is what closes this. Recency-binding ("settle the most recent classify task for
+// this document") is unsound the moment a SECOND attempt exists: T1 fails, a fresh T2 is
+// enqueued, and T1's OWN late-arriving classify_document call must find and refuse
+// against T1 — never reach out and touch T2, whatever T2's state.
+// ===========================================================================
+
+test("THREE-ACTOR SCHEDULE (T2 QUEUED): T1 fails, T2 enqueues, T1's late settle refuses — T2 is left completely untouched", async () => {
+  requireReady();
+  const client = world.clients.A1;
+  const { document, taskId: t1 } = await runningClassifyTask(client);
+
+  // T1 fails (fail_classify wins the race the LLM call was still in flight for).
+  await failClassify(t1, { reason: "engine_error", opKey: opk("schedule-a-fail") });
+  const t1Row = (await docTasks(document.documentId)).find((x) => x.id === t1);
+  assert.equal(t1Row.status, "failed", "mandatory setup: T1 is terminally failed");
+
+  // T2 enqueues — the SAME facts-gate re-enqueue path that fires on a terminal classify
+  // task in production. Left QUEUED (never claimed) for this variant.
+  await enqueueInvoiceFacts(document.documentId);
+  const afterEnqueue = await docTasks(document.documentId);
+  const t2 = afterEnqueue.find((x) => x.lane === "classify" && x.id !== t1);
+  assert.ok(t2, "mandatory setup: T2 was enqueued");
+  assert.equal(t2.status, "queued", "mandatory setup: T2 is queued, not yet claimed");
+  assert.ok(t2.version_n > t1Row.version_n, "mandatory setup: T2 is the NEWER attempt");
+
+  // T1's LATE call finally arrives — the LLM response T1's worker was awaiting when
+  // fail_classify won. It carries T1's OWN task id (the real worker's call shape).
+  await assert.rejects(
+    () => classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: t1 }),
+    (e) => e.code === "CLR16",
+    "T1's late settle refuses honestly — it is no longer running",
+  );
+
+  const after = await docTasks(document.documentId);
+  const t1After = after.find((x) => x.id === t1);
+  const t2After = after.find((x) => x.id === t2.id);
+  assert.equal(t1After.status, "failed", "T1 is unchanged — still terminally failed");
+  assert.equal(t2After.status, "queued", "T2 is COMPLETELY UNTOUCHED — still queued, never settled by T1's stale verdict");
+  assert.equal(await docKind(document.documentId), null, "the document was never classified by T1's stale call");
+  const verdict = await rootQuery(
+    "select 1 from clara.document_extractions where document_id=$1 and engine_kind='doc_classify'",
+    [document.documentId],
+  );
+  assert.equal(verdict.rows.length, 0, "NO doc_classify verdict was written for T1's stale attempt");
+});
+
+test("THREE-ACTOR SCHEDULE (T2 RUNNING): T1 fails, T2 enqueues AND is claimed by a different worker, T1's late settle refuses — T2 stays running, untouched", async () => {
+  requireReady();
+  const client = world.clients.A1;
+  const { document, taskId: t1 } = await runningClassifyTask(client);
+
+  await failClassify(t1, { reason: "engine_error", opKey: opk("schedule-b-fail") });
+  await enqueueInvoiceFacts(document.documentId);
+  const afterEnqueue = await docTasks(document.documentId);
+  const t2 = afterEnqueue.find((x) => x.lane === "classify" && x.id !== t1);
+  assert.ok(t2, "mandatory setup: T2 was enqueued");
+
+  // A DIFFERENT worker instance claims T2 to running — T1's late call must not confuse
+  // T2's activity for its own.
+  await claimTask(t2.id, { egressApproved: false });
+  const t2Running = (await docTasks(document.documentId)).find((x) => x.id === t2.id);
+  assert.equal(t2Running.status, "running", "mandatory setup: T2 is now running (a different worker claimed it)");
+
+  await assert.rejects(
+    () => classifyDocument({ document: document.documentId, kind: "invoice", confidence: 0.95, task: t1 }),
+    (e) => e.code === "CLR16",
+    "T1's late settle refuses honestly, even though a DIFFERENT task is currently running for this document",
+  );
+
+  const after = await docTasks(document.documentId);
+  assert.equal(after.find((x) => x.id === t1).status, "failed", "T1 is unchanged");
+  assert.equal(after.find((x) => x.id === t2.id).status, "running",
+    "T2 is COMPLETELY UNTOUCHED — still running, never wrongly settled 'done' using T1's stale verdict");
+  assert.equal(await docKind(document.documentId), null, "the document was never classified by T1's stale call");
+
+  // T2's OWN legitimate settle still works afterward — the fix does not strand T2.
+  const t2Settle = await classifyDocument({ document: document.documentId, kind: "receipt", confidence: 0.9, task: t2.id });
+  assert.equal(t2Settle.kind_set, true, "T2's OWN task-bound settle succeeds normally");
+  assert.equal(await docKind(document.documentId), "receipt", "T2's verdict is the one that actually lands");
 });
 
 // ===========================================================================

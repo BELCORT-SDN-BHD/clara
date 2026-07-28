@@ -68,12 +68,15 @@ test("a claimed task classifies then settles via classify_document with the exac
   assert.equal(out.kind, "invoice");
   const settle = calls.find((c) => /classify_document/.test(c.sql));
   assert.ok(settle, "classify_document was called");
-  // classify_document(p_document, p_kind, p_confidence, p_engine_id, p_op_key)
+  // classify_document(p_document, p_kind, p_confidence, p_engine_id, p_op_key, p_task)
   assert.equal(settle.params[0], "doc-1", "param 1 = document id (from the claim receipt)");
   assert.equal(settle.params[1], "invoice", "param 2 = the model's kind");
   assert.equal(settle.params[2], 0.93, "param 3 = the model's confidence, VERBATIM");
   assert.equal(settle.params[3], "clara-classify-llm:v1", "param 4 = the classifier engine id");
   assert.equal(settle.params[4], "classify:task-1", "param 5 = the classify:<task> op-key");
+  // 0024 race fix round 2: the CLAIM'S OWN task id, so the settle binds to THIS attempt —
+  // never "whichever classify task is newest for this document".
+  assert.equal(settle.params[5], "task-1", "param 6 = p_task, the claimed task's own id");
 });
 
 test("classify_document NEVER receives the reserved human engine id (clara-classify-human:v1)", async () => {
