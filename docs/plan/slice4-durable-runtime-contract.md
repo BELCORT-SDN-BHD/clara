@@ -256,6 +256,17 @@ test false-greens to background_review-only).
 - **Connection budget (concrete — S4-C12):** engine pool 5 · runtime pool
   5 · read pool 5 · LISTEN 2 = 17 sessions default (env-tunable),
   documented against the Supavisor session-mode ceiling.
+  **Measured correction (2026-07-28, ledger #37):** the "LISTEN 2" line
+  understates the dedicated-client population — `makeRuntimeClient()` is a
+  non-pooled `pg.Client` factory UNCAPPED by `RUNTIME_POOL_MAX`, and TEN
+  modules use it, not the two documented always-on holders (leader,
+  control): autodraft, classify, facts-gate, local-facts, matcher,
+  rule-post, sst-watch, and wiki-projection-ops open transient per-step
+  dedicated clients under the same `clara_runtime_login` (11 idle
+  observed live vs the ~2 implied). True peak-potential is therefore
+  17 + up-to-8 transient dedicated sessions. Measured live posture
+  2026-07-28: 30/60 sessions used — ample headroom — but re-verify this
+  REAL shape (not the 17 headline) before any consumer-adding wave.
 - **Per-attempt read credentials (S4-D8):** the wake credential (kind
   'interactive', session firm, no obo, TTL ≈5 min) is minted PER
   EXECUTION ATTEMPT of a read step — never per turn (a 14-day park
