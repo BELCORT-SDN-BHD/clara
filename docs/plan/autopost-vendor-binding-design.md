@@ -1,4 +1,4 @@
-# Autopost vendor binding — DESIGN v4 (task #33) — PART 1: the authority object
+# Autopost vendor binding — DESIGN v4.1 · RATIFIED (task #33) — PART 1: the authority object
 
 **Part 2 — machinery, adversarial set, build, per-finding register —
 `docs/plan/autopost-vendor-binding-design-part2.md`** (split per repo precedent
@@ -316,57 +316,42 @@ carries bindings and the gap starts costing something.
 destroying it; any bookkeeper who sees something wrong can pull the brake. Sets `status='revoked'`,
 `revoked_by/at/reason`; the row is never deleted (invariant 8).
 
-**The total lock order, rebuilt AGAIN in v4 from every live participant** (r2 finding 7, r3 findings
-2 and 3). v3's law was doubly wrong: it put the binding lock *after* `_approve_entry_core`, which is
-the function that performs the `status='approved'` transition (`0016:1445-1449`) — so the control
-would have run after the post it was meant to gate — and it moved the executor to entry-before-rule,
-which deadlocks against `persist_invoice_facts`. Both are corrected here, and the corrected law is
-one the design can actually obey.
+**The total lock order, rebuilt from every live participant** (r2 finding 7, r3 findings 2–3, r4
+finding 3b). v3's law was doubly wrong — it put the binding lock *after* `_approve_entry_core`, the
+function that performs the `status='approved'` transition (`0016:1445-1449`), so the control would
+have run after the post it gated; and it moved the executor to entry-before-rule, which deadlocks
+against `persist_invoice_facts`. v4 fixed both; v4.1 adds the receipt position below.
 
-Every live acquirer, read from the bodies:
+**Every live acquirer's verified sequence, and the proof that each is a prefix-consistent
+subsequence of the order below, is Part 2 ssA.7** — it is evidence for the law, and it belongs beside
+the rig test that falsifies it.
 
-| path | lock sequence, verified |
-|---|---|
-| `persist_invoice_facts` (`0022:452-459`) | `document_filings` **FOR UPDATE** → draft `journal_entries` **FOR UPDATE** → task FOR UPDATE |
-| `_approve_entry_core` (`0016:1257,1265`) | filing **FOR SHARE** → entry **FOR UPDATE** → *(transition at `0016:1445-1449`)* |
-| `execute_rule_post` (`0023:403,483-487`) | entry read **unlocked** → `coding_rules` **FOR UPDATE** → `_approve_entry_core` |
-| `revise_entry` (`0016:4807`) | entry **FOR UPDATE** (no filing) |
+**v4.1 law — one global order whose FIRST position is the op-receipt, not a data lock:**
 
-The live system therefore already agrees on **filing → entry**, and the rule is only ever taken by
-the executor, before everything else. v3 proposed entry-before-rule and thereby created the cycle the
-r3 reviewer reconstructed: post holds the entry and waits on the filing inside the approve core,
-while `persist_invoice_facts` holds the filing and waits on that same entry.
+> **op-receipt reservation → `coding_rules` → `document_filings` → `journal_entries` →
+> `vendor_identity_bindings`**
 
-**v4 law — one global order, and the binding is NOT last:**
+**Position 0 exists because r4 found the receipt outside the order.** `_reserve_op`
+(`0004:46-59`) is `insert … on conflict (firm_id, fn, op_key) do nothing`, so a *concurrent
+uncommitted* insert of the same key makes the second caller **block on the row** until the first
+commits. `_approve_entry_core` takes its `approve_entry` receipt at `0016:1247` — before its own data
+locks, which is correct — but v4 had the executor reach that reservation only *after* holding all
+four data locks. Concrete deadlock: a human calls `approve_entry` with the predictable executor key
+`rulepost:<entry>:<seq>`, reserving `(firm,'approve_entry',K)`, then waits on the entry lock the
+executor holds; the executor holds entry + binding and waits on K.
 
-> **`coding_rules` → `document_filings` → `journal_entries` → `vendor_identity_bindings`**
+**The fix, stated from the live `_reserve_op` semantics: the executor reserves BOTH receipts at
+position 0, and the core is told its receipt is pre-held.** It cannot simply pre-insert the row and
+let the core reserve normally — the core's `_reserve_op` would then return non-null and the core
+would `return v_dedupe` without ever approving (`0016:1250`). So 0028 also recuts
+`_approve_entry_core` to skip its own reservation when the caller has already taken it. **This needs
+no signature change**: the core's first parameter is already `p_ctx jsonb`, so the executor passes
+`receipt_preheld: true` alongside the identity it already sends. A ctx without that key reserves
+exactly as today, which keeps the human `approve_entry` path byte-identical.
 
-Every acquirer takes a *prefix-consistent subsequence* of it, which is what makes the order
-cycle-free:
-
-- **`execute_rule_post` (recut in 0028):** rule → **filing FOR SHARE → entry FOR UPDATE (taken by the
-  executor itself, in the live order)** → binding FOR UPDATE + the §A.5 re-resolution and its receipt
-  → *then* `_approve_entry_core`, whose filing/entry locks are re-entrant no-ops in the same
-  transaction. The binding control now runs **before** the approval transition, which is what r3
-  finding 2 required, and the executor stops reading the entry unlocked (`0023:403`);
-- **`persist_invoice_facts`:** filing → entry. A prefix. Unchanged;
-- **`_approve_entry_core`:** filing → entry. A prefix. Unchanged;
-- **`revise_entry`:** entry → binding. A subsequence. Consistent;
-- **`revoke` / `sign`:** binding alone. The tail;
-- **the resolver `_resolve_vendor_binding`: takes NO lock at all.** It is `stable` and read-only.
-  v3 let lazy expiry write from inside it, which (as r3 noted) leaves a row lock held across the
-  caller — and Slot B's subsequent FK checks take `FOR KEY SHARE` on parent rows, i.e. locks acquired
-  *after* the binding. Making the resolver lock-free removes that whole class. Expiry is instead a
-  status transition performed only by the verbs (`propose` / `sign` / `revoke`) and by a reconciler
-  pass; every read path independently treats `expires_at <= now()` as not-live, so correctness never
-  depends on the transition having happened yet.
-
-**Why this is cycle-free, checkably.** Every path's sequence is a subsequence of the single global
-order above, and no path takes a lock that precedes one it already holds. That is a stronger and more
-checkable claim than v3's "binding last", and unlike v3's it is compatible with the binding control
-needing to run before the approval transition. The rig test named in Part 2 §D asserts it; the
-pre-existing `file_document` / `confirm_attribution_candidate` hazard (task #29) is a filing-vs-filing
-ordering issue that predates this design and is untouched by it.
+Every acquirer takes a *prefix-consistent subsequence* of that order — enumerated with its verified
+line references in **Part 2 ssA.7**, which also records why the resolver is lock-free and why the
+executor's binding control lands before `_approve_entry_core` rather than after it.
 
 **Revocation is a real brake only because of the lock above.** A post-time liveness *read* would not
 be one: the sweep could read the binding live, revocation could commit and truthfully report zero
@@ -400,6 +385,10 @@ are closed**, each restated with its ruling and consequence in §10.
 fall inside the rejection of option B?* **The owner ruled it does not: F3 stays.** No longer a gate.
 
 ## 10. Rulings (2026-07-28) — every §9 question closed
+
+> **RATIFIED 2026-07-28 pending build — the 0027/0028 SQL ladder is the remaining control.**
+> Four adversarial rounds closed; v4.1 carries the final amendment (§4 position 0). No further design
+> review round. Every §D and §G claim is re-verified against the rig by the build ladder.
 
 Ruled by the **owner** (via AskUserQuestion, 华语) and by the **orchestrator** as marked. These bind
 the build. Where a ruling amends the design above, the amendment is stated here and the earlier

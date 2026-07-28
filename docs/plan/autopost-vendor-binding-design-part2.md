@@ -1,4 +1,4 @@
-# Autopost vendor binding — DESIGN v4 — PART 2: machinery, attacks, build, findings register
+# Autopost vendor binding — DESIGN v4.1 · RATIFIED — PART 2: machinery, attacks, build, register
 
 **Part 1 is `docs/plan/autopost-vendor-binding-design.md`** (the authority object, its ceremony,
 scope and lifecycle, and the §9/§10 owner rulings). This part carries the machinery, the build spec,
@@ -140,6 +140,73 @@ executor's pre-existing unlocked entry read (`0023:403`) is closed by the A.5 re
 
 `autoDraft.v3` and its tools are **not** modified — the guard is in the DB, so the frozen workflow
 manifest stays untouched and no `_vN` bump is needed.
+
+### A.7 The total order — every acquirer's verified sequence
+
+Part 1 §4 states the law; this is its evidence. The order is **op-receipt reservation →
+`coding_rules` → `document_filings` → `journal_entries` → `vendor_identity_bindings`.**
+
+Every live acquirer, read from the bodies:
+
+| path | lock sequence, verified |
+|---|---|
+| `persist_invoice_facts` (`0022:452-459`) | `document_filings` **FOR UPDATE** → draft `journal_entries` **FOR UPDATE** → task FOR UPDATE |
+| `_approve_entry_core` (`0016:1257,1265`) | filing **FOR SHARE** → entry **FOR UPDATE** → *(transition at `0016:1445-1449`)* |
+| `execute_rule_post` (`0023:403,483-487`) | entry read **unlocked** → `coding_rules` **FOR UPDATE** → `_approve_entry_core` |
+| `revise_entry` (`0016:4807`) | entry **FOR UPDATE** (no filing) |
+
+The live system already agrees on **filing → entry**, and the rule is only ever taken by the
+executor, first. v3's entry-before-rule created the cycle r3 reconstructed: post holds the entry and
+waits on the filing inside the approve core, while `persist_invoice_facts` holds the filing and waits
+on that entry.
+
+
+Every acquirer takes a *prefix-consistent subsequence* of it, which is what makes the order
+cycle-free:
+
+- **`execute_rule_post` (recut in 0028):** rule → **filing FOR SHARE → entry FOR UPDATE (taken by the
+  executor itself, in the live order)** → binding FOR UPDATE + the §A.5 re-resolution and its receipt
+  → *then* `_approve_entry_core`, whose filing/entry locks are re-entrant no-ops in the same
+  transaction. The binding control now runs **before** the approval transition, which is what r3
+  finding 2 required, and the executor stops reading the entry unlocked (`0023:403`);
+- **`persist_invoice_facts`:** filing → entry. A prefix. Unchanged;
+- **`_approve_entry_core`:** filing → entry. A prefix. Unchanged;
+- **`revise_entry`:** entry → binding. A subsequence. Consistent;
+- **`revoke` / `sign`:** binding alone. The tail;
+- **the resolver `_resolve_vendor_binding`: takes NO lock at all.** It is `stable` and read-only.
+  v3 let lazy expiry write from inside it, which (as r3 noted) leaves a row lock held across the
+  caller — and Slot B's subsequent FK checks take `FOR KEY SHARE` on parent rows, i.e. locks acquired
+  *after* the binding. Making the resolver lock-free removes that whole class. Expiry is instead a
+  status transition performed only by the verbs (`propose` / `sign` / `revoke`) and by a reconciler
+  pass; every read path independently treats `expires_at <= now()` as not-live, so correctness never
+  depends on the transition having happened yet.
+
+**Why this is cycle-free, checkably.** Every path's sequence is a subsequence of the global order, and
+no path takes a lock preceding one it already holds — stronger than v3's "binding last", and unlike
+v3's it is compatible with the control running before the approval transition. The §D rig test
+asserts it; the pre-existing `file_document` / `confirm_attribution_candidate` hazard (task #29) is a
+filing-vs-filing issue predating this design and untouched by it.
+
+**Position 0 — the op-receipt (r4 finding 3b).** `_reserve_op` (`0004:46-59`) is
+`insert … on conflict do nothing`, so a concurrent *uncommitted* insert of the same
+`(firm_id, fn, op_key)` blocks the second caller on that row. `_approve_entry_core` reserves at
+`0016:1247`, correctly before its own data locks — but v4 had the executor reach it only after
+holding all four. The executor therefore reserves **both** receipts (`execute_rule_post` and
+`approve_entry`, which are distinct `fn` values and so distinct rows) before any data lock, and
+0028 recuts `_approve_entry_core` to skip its own reservation when `p_ctx` carries
+`receipt_preheld: true`. No signature change — `p_ctx` is already `jsonb` — and a ctx without the
+key reserves exactly as today, so the human `approve_entry` path stays byte-identical.
+
+**Executor op-keys are PREDICTABLE, and that is a nuisance, not a leak.** `rule-post.mjs` derives
+`rulepost:<entry>:<seq>`, and `approve_entry` is granted to `clara_authenticated` with a
+caller-supplied op-key, so a firm member *can* reserve `(firm,'approve_entry',K)` first. Reservation
+by a non-executor is therefore **not** impossible by grant, and this design does not pretend it is.
+What it costs: with position 0 in place the executor blocks (or replays) **holding no data locks**,
+so there is no deadlock; the post attempt is skipped, and the next revision produces a new `seq` and
+a new key. The attacker gains no ability to cause a *wrong* post — only a non-post, which is the safe
+direction — and any actor who could do this could equally approve the entry themselves or revoke the
+binding. **Residual: a single post attempt can be denied by an authenticated firm member.** Recorded
+in §E, not engineered against.
 
 ## B. What the auditor sees, as a read contract
 
@@ -309,6 +376,7 @@ Part 1 §10's corrected operational note for which fourth bill satisfies the dwe
 | 5 | **CLOSED** (R3) — band-only F3 and the C.1 residual are honest | Untouched; C.1 remains open and named |
 | 6 | leaking — false attempt bound; Unicode residual unregistered | **Both caps stated with their phases** — enqueue bypassed, **claim-time binds at 3/document** (`0024:210`), matching the measured `509e788d` failure; U+2061–2064 added; completeness registered as a residual (§C.6, Part 1 §3.2) |
 | 7 | leaking — deadlock; stale supersession ceremony | **Total order rebuilt** with `persist_invoice_facts` included and the binding no longer last (Part 1 §4); **supersession purged from both ends** — condition 8 flat, signing touches no predecessor, column and status removed |
+| **3b** *(r4)* | the op-receipt reservation sat outside the total order — a human reserving the predictable executor key then waiting on the entry lock deadlocks against an executor holding entry+binding and waiting on that key | **CLOSED by the v4.1 amendment.** The order gains **position 0**: receipt reservation precedes every data lock, for every acquirer. The executor reserves both receipts (distinct `fn` rows) before any data lock, and 0028 recuts `_approve_entry_core` to skip its own reservation on `p_ctx.receipt_preheld` — no signature change, human path byte-identical (§A.7) |
 | 8 | leaking — receipt-chain/congruence incomplete | **§G rebuilt against the live anchors** (`0009:798-810`): extraction FKs use `(id, firm_id, document_id)`; bindings gain the `(id, firm_id, client_id)` anchor; evidence and `compared_to_resolution_id` get congruent FKs; append-only + no-TRUNCATE triggers named |
 | 9 | leaking — `binding_suspended` remained; read contract underspecified | **Purged**; read surface specified as functions with signature, floor, grant, filter, ordering, and distinct-document counting (§B) |
 | 10 | leaking — postverify is not an enduring interlock | **Third layer added**: a persistent CI assertion on the current `execute_rule_post` body; postverify's outside-the-transaction limit stated; **D1 quiesce added for both migrations** (§D) |
@@ -322,9 +390,12 @@ C.4 transitional stationery after a practice sale · C.3 bounded small-ticket fo
 **A.2 admission-provenance gap** (no durable record of why a task was admitted; accepted, §10 ruling
 10) · **renewal coverage gap** (supersession deferred; accepted operational cost) · **postverify
 timing gap** (signing opens on ledger commit, before postverify; mitigated by the CI assertion and
-the D1 quiesce, not eliminated) · F2 denylist unevenness · the pre-existing `file_document` /
-`confirm_attribution_candidate` filing-order hazard (task #29, untouched — no binding path takes a
-filing lock).
+the D1 quiesce, not eliminated) · **predictable executor op-keys** (an authenticated firm member can
+reserve `rulepost:<entry>:<seq>` under `approve_entry` and deny **one** post attempt; with position 0
+this is a wait/replay holding no data locks, never a deadlock and never a wrong post — and the same
+actor could approve or revoke anyway, so no privilege is gained; §A.7) · F2 denylist unevenness · the
+pre-existing `file_document` / `confirm_attribution_candidate` filing-order hazard (task #29,
+untouched — no binding path takes a filing lock).
 
 ## F. Q5 — writing down #30, and naming the missing field
 
