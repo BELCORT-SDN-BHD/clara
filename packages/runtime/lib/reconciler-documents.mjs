@@ -14,7 +14,7 @@
 // already cover both lanes (release_held_document_tasks / requeue_stranded_document_task
 // key by task, and the 0009 claim/release bodies cover lane in ('ocr','invoice_facts')).
 
-import { listTaskMetas, removeTaskMeta, writeTaskMeta } from "./spool.mjs";
+import { listTaskMetas, mergeTaskMeta, removeTaskMeta, writeTaskMeta } from "./spool.mjs";
 import { verifyCanonical } from "./storage.mjs";
 
 const DOCUMENT_GRACE_MS = Number(process.env.CLARA_DOCUMENT_RECONCILE_GRACE_MS || 15000);
@@ -147,27 +147,55 @@ async function documentTaskSnapshot(client, onlyFirm) {
 async function documentTaskIndex(client, deps) {
   try {
     const rows = await documentTaskSnapshot(client, deps.onlyFirm);
-    const existingRows = await listTaskMetas();
-    // Return (and persist) the MERGED metas: the DB row is authoritative for
-    // lifecycle fields, the sidecar for transport fields (storageKey/sha256/mime)
-    // the task-only snapshot no longer carries — the sweep's later writeTaskMeta
-    // calls spread these merged objects, so returning raw rows would clobber the
-    // sidecar's transport fields (the pre-fix joined query masked exactly that).
+    // Return (and persist) the MERGED metas: the DB row is authoritative for lifecycle
+    // fields, the sidecar for everything the task-only snapshot doesn't carry —
+    // transport (storageKey/sha256/mime) AND diagnostic (lastError/lastErrorNote).
+    //
+    // task #28 (P4): each task's merge base is read FRESH here, right before its own
+    // write — NOT from one bulk `listTaskMetas()` snapshot taken before this loop. A
+    // batch read racing a CONCURRENT noteTransientFailure/noteTerminalFailure call (a
+    // different run, writing that task's OWN sidecar while this sweep is mid-loop) used
+    // to let this sweep write a stale merge back over it, silently erasing `lastError`.
+    // mergeTaskMeta's read-then-write narrows that window to one fs read + one fs write
+    // per task — the same granularity every other sidecar mutator already uses. It does
+    // NOT eliminate the race (a write landing in that exact gap still loses); a hard
+    // guarantee needs real locking or a version/mtime CAS, out of scope here.
+    //
+    // Q2: a corrupt/unreadable ONE sidecar (a malformed task-<id>.json — JSON.parse
+    // throws) must not abort the WHOLE sweep — the bulk `listTaskMetas()` path this
+    // replaced already tolerated exactly this (listJson pushes {corrupt:true,...} and
+    // moves on). Per task, a merge failure REBUILDS that one row from Postgres alone
+    // (the DB row is authoritative for lifecycle fields regardless), losing BOTH the
+    // transport fields (storageKey/sha256/mime/format) AND the diagnostic ones
+    // (lastError/lastErrorNote) that only the sidecar carried — the rebuild is DB-only,
+    // by design, until the next successful write re-establishes them. Every OTHER task in
+    // the sweep is unaffected.
+    //
+    // R2: logged PER OCCURRENCE, not once-per-process — a one-shot warning would hide
+    // every corruption after the first, and repeated corruption (a systemic disk/fs
+    // problem, not a one-off) is exactly the case worth seeing. `corruptRebuilt` also
+    // rides back in the sweep's own return value so a caller can assert on it directly,
+    // without depending on log output.
     const merged = [];
+    let corruptRebuilt = 0;
     for (const row of rows) {
-      const existing = existingRows.find((meta) => meta?.taskId === row.taskId);
-      const meta = { ...existing, ...row };
-      await writeTaskMeta(row.taskId, meta);
-      merged.push(meta);
+      try {
+        merged.push(await mergeTaskMeta(row.taskId, row));
+      } catch (err) {
+        corruptRebuilt += 1;
+        deps.log?.(`[reconcile] task sidecar unreadable, rebuilding from Postgres alone (transport + diagnostic fields dropped) task=${row.taskId}: ${err?.message ?? err}`);
+        await writeTaskMeta(row.taskId, row);
+        merged.push(row);
+      }
     }
-    return merged;
+    return { tasks: merged, corruptRebuilt };
   } catch (err) {
     if (!isDocumentSelectUnavailable(err)) throw err;
     if (!warnedDocumentSelectGap) {
       warnedDocumentSelectGap = true;
       deps.log?.("[reconcile] document task SELECT unavailable; using durable spool task index");
     }
-    return (await listTaskMetas()).filter((row) => row && !row.corrupt && row.taskId);
+    return { tasks: (await listTaskMetas()).filter((row) => row && !row.corrupt && row.taskId), corruptRebuilt: 0 };
   }
 }
 
@@ -184,7 +212,7 @@ async function documentRunState(getRun, runId) {
 /** Reconcile queued-unbound, held-egress, and stranded-running document tasks. */
 export async function reconcileDocumentTasks(client, deps) {
   const log = deps.log ?? (() => {});
-  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentIntegrityWarnings: 0 };
+  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0 };
   if (typeof deps.enqueueDocumentIngest !== "function") return out;
 
   if (process.env.CLARA_DOC_EGRESS_APPROVED === "1") {
@@ -198,7 +226,8 @@ export async function reconcileDocumentTasks(client, deps) {
     }
   }
 
-  const tasks = await documentTaskIndex(client, deps);
+  const { tasks, corruptRebuilt } = await documentTaskIndex(client, deps);
+  out.documentSidecarCorruptRebuilt = corruptRebuilt;
   for (const task of tasks) {
     if (!task?.taskId) continue;
     if (task.status === "held_egress" && process.env.CLARA_DOC_EGRESS_APPROVED === "1") {
