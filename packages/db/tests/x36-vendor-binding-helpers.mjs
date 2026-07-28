@@ -4,7 +4,7 @@
 // x36-vendor-binding-ceremony.test.mjs) shares the exact same fixtures rather than drifting.
 
 import { randomUUID } from "node:crypto";
-import { rootQuery, withActor } from "./rig-helpers.mjs";
+import { rootQuery, withActor, humanQuery, namedCall, opk } from "./rig-helpers.mjs";
 import { COA } from "./rig-fixtures.mjs";
 
 export async function has28() {
@@ -12,6 +12,43 @@ export async function has28() {
     const r = await rootQuery("select 1 from clara.schema_migrations where version ~ '^0028_'");
     return r.rows.length > 0;
   } catch { return false; }
+}
+
+// ---------------------------------------------------------------------------
+// The three granted ceremony verbs, called through the real governed surface
+// (shared by x36-vendor-binding-ceremony and x36-vendor-binding-resolver).
+// ---------------------------------------------------------------------------
+
+export async function propose(sub, { client, counterparty, opKey } = {}) {
+  const specs = [{ name: "p_proposal", cast: "jsonb" }, { name: "p_op_key" }];
+  const r = await humanQuery(sub, namedCall("propose_vendor_identity_binding", specs), [
+    JSON.stringify({ client_id: client, counterparty_id: counterparty }),
+    opKey ?? opk("vbprop"),
+  ]);
+  return r.rows[0].result;
+}
+
+export async function sign(sub, { binding, opKey } = {}) {
+  const specs = [{ name: "p_binding" }, { name: "p_op_key" }];
+  const r = await humanQuery(sub, namedCall("sign_vendor_identity_binding", specs),
+    [binding, opKey ?? opk("vbsign")]);
+  return r.rows[0].result;
+}
+
+export async function revoke(sub, { binding, reason, opKey } = {}) {
+  const specs = [{ name: "p_binding" }, { name: "p_reason" }, { name: "p_op_key" }];
+  const r = await humanQuery(sub, namedCall("revoke_vendor_identity_binding", specs),
+    [binding, reason ?? "rig revoke", opKey ?? opk("vbrevoke")]);
+  return r.rows[0].result;
+}
+
+/** Propose + sign a binding to 'live' over a fully-qualifying window (requires 0029 --
+ *  callers must check has29() first). Returns the live binding's receipt. */
+export async function seedLiveBinding(w, tag) {
+  const cp = await seedPassingWindow(w, tag);
+  const proposed = await propose(w.users.bob, { client: w.clients.A1, counterparty: cp.id });
+  const signed = await sign(w.users.alice, { binding: proposed.binding_id });
+  return { cp, binding: signed };
 }
 
 export async function has29() {
@@ -43,7 +80,14 @@ export async function seedPayableAccount(firm, client) {
 const foldAlnum = (s) => s.toLowerCase().replace(/[^a-zA-Z0-9]/g, "");
 
 export async function seedVendorCounterparty(firm, client, tag) {
-  const name = `EZACCOUNT SECRETARY ${tag}`;
+  // The name must be unique per call, not merely per tag: the resolver battery
+  // (x36-vendor-binding-resolver) exercises _resolve_counterparty's bare-name lookup
+  // directly, which finds ANY existing counterparty sharing the exact name -- a tag-only
+  // name would collide with a same-tagged row left over from a PRIOR run against a
+  // not-freshly-reset scratch DB (fine on CI's always-fresh DB, but a real trap during
+  // local iterative debugging against a persistent one). The random suffix makes this
+  // collision-proof regardless of DB freshness.
+  const name = `EZACCOUNT SECRETARY ${tag} ${randomUUID().slice(0, 6)}`;
   const reg = `2023${randomUUID().replace(/-/g, "").slice(0, 8)}`;
   const r = await rootQuery(
     `insert into clara.counterparties(firm_id,client_id,kind,name,name_normalized,registration_no,registration_normalized,created_by)
@@ -119,13 +163,17 @@ export async function seedApprovedEntry(firm, client, cp, doc, { postingDate, ap
 
 /** A DONE invoice_facts + DONE ocr extraction, wired so F1 (vendor name) and F2 (invoice
  *  prefix) are stable across the window and F3 (page-1 top-band OCR line naming the bound
- *  party's registration) holds. */
+ *  party's registration) holds. The invoice_facts envelope also carries a genuine A.1-
+ *  compliant vendor_identity shape (outcome='absent', empty candidates, no refusal counters)
+ *  -- REQUIRED for _resolve_vendor_binding's own admission gate (Slot A), which the dwell/
+ *  ceremony batteries never exercise (they only drive _derive_vendor_binding_proposal, which
+ *  has no A.1 vendor_identity check at all) but the resolver battery does. */
 export async function seedF123Evidence(firm, document, cp, invoiceId) {
   const factsExt = randomUUID();
   await rootQuery(
-    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count)
-     values($1,$2,$3,'clara-fixture:v1','invoice_facts',1,'done',1)`,
-    [factsExt, firm, document],
+    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope)
+     values($1,$2,$3,'clara-fixture:v1','invoice_facts',1,'done',1,$4::jsonb)`,
+    [factsExt, firm, document, JSON.stringify({ vendor_identity: { outcome: "absent", candidates: [] } })],
   );
   await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)

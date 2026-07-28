@@ -16,11 +16,11 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { humanQuery, namedCall, opk, assertRaises, endPool } from "./rig-helpers.mjs";
+import { opk, assertRaises, endPool } from "./rig-helpers.mjs";
 import { noteLane, printLaneNotes } from "./rig-runtime-helpers.mjs";
 import { buildWorld } from "./x1-helpers.mjs";
 import {
-  has28, has29, seedPayableAccount, seedPassingWindow,
+  has28, has29, seedPayableAccount, seedPassingWindow, propose, sign, revoke,
 } from "./x36-vendor-binding-helpers.mjs";
 
 let has0028 = false;
@@ -44,28 +44,8 @@ function requireReady() {
   }
 }
 
-async function propose(sub, { client, counterparty, opKey } = {}) {
-  const specs = [{ name: "p_proposal", cast: "jsonb" }, { name: "p_op_key" }];
-  const r = await humanQuery(sub, namedCall("propose_vendor_identity_binding", specs), [
-    JSON.stringify({ client_id: client, counterparty_id: counterparty }),
-    opKey ?? opk("vbprop"),
-  ]);
-  return r.rows[0].result;
-}
-
-async function sign(sub, { binding, opKey } = {}) {
-  const specs = [{ name: "p_binding" }, { name: "p_op_key" }];
-  const r = await humanQuery(sub, namedCall("sign_vendor_identity_binding", specs),
-    [binding, opKey ?? opk("vbsign")]);
-  return r.rows[0].result;
-}
-
-async function revoke(sub, { binding, reason, opKey } = {}) {
-  const specs = [{ name: "p_binding" }, { name: "p_reason" }, { name: "p_op_key" }];
-  const r = await humanQuery(sub, namedCall("revoke_vendor_identity_binding", specs),
-    [binding, reason ?? "rig revoke", opKey ?? opk("vbrevoke")]);
-  return r.rows[0].result;
-}
+// propose/sign/revoke now live in x36-vendor-binding-helpers.mjs (shared with the resolver
+// battery, which also needs to drive a binding to 'live').
 
 // ---------------------------------------------------------------------------
 

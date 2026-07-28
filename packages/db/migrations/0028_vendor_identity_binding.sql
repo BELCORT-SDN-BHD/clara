@@ -319,7 +319,8 @@ set search_path to clara,pg_temp
 as $$
 declare
   v_ext record; v_vi jsonb; v_vendor text; v_fp jsonb; v_norm_name text;
-  v_matches int; v_counterparty uuid;
+  v_matches int; v_counterparty uuid; v_invoice_id text; v_invoice_id_norm text;
+  v_detail text; v_detail_j jsonb; v_conflict_candidate uuid;
 begin
   select e.* into v_ext
   from clara.document_extractions e
@@ -377,18 +378,61 @@ begin
     and r.field_path='invoice.vendor_name';
   if v_vendor is null then return null; end if;
 
+  -- A.1 condition 5 (owner-ruling amendment, task #36 follow-up): the page's own name
+  -- resolution must fail to independently establish identity, in EXACTLY two shapes.
+  --   (1) decision='birth' -- the ORIGINAL case the design was written against: a
+  --       fragmented/unlabelled letterhead whose OCR name text doesn't name-match
+  --       anything at all.
+  --   (2) CLR23 detail.reason='registration_conflict' -- the case the design text
+  --       never enumerated: a CLEAN, exactly-name-matching page against an ALREADY
+  --       REGISTERED vendor (which every bound counterparty is, by construction --
+  --       registration_at_signing is NOT NULL). _resolve_counterparty refuses a
+  --       bare-name proposal against a registered match rather than silently
+  --       picking it, which is correct in general (R2's own wall) -- but it is
+  --       EXACTLY the shape a signed binding exists to corroborate past.
+  -- Shape (2) admits ONLY when detail.candidate_id equals the eventually-matched
+  -- binding's OWN counterparty_id (enforced below by constraining the match query to
+  -- that one candidate when set) -- a DIFFERENT candidate means the page's own
+  -- evidence points at a different, already-known party than the binding names, and
+  -- that is a refusal (the binding_page_resolves_other family, one layer up in 0029's
+  -- post-time control), never an admission. This equality wall is what makes the
+  -- widening SAFER than birth alone: birth carries no page-consistency check at all.
   begin
     v_fp:=clara._resolve_counterparty(p_client,
       jsonb_build_object('kind','vendor','new',
         jsonb_build_object('name',v_vendor)));
-  exception when sqlstate 'CLR21' or sqlstate 'CLR23' then
+  exception when sqlstate 'CLR21' then
     return null;
+  when sqlstate 'CLR23' then
+    get stacked diagnostics v_detail = pg_exception_detail;
+    v_detail_j:=nullif(v_detail,'')::jsonb;
+    if coalesce(v_detail_j->>'reason','')<>'registration_conflict' then
+      return null;
+    end if;
+    v_conflict_candidate:=nullif(v_detail_j->>'candidate_id','')::uuid;
+    if v_conflict_candidate is null then
+      return null;
+    end if;
   end;
-  if v_fp is null or v_fp->>'decision' is distinct from 'birth' then
+  if v_conflict_candidate is null
+     and (v_fp is null or v_fp->>'decision' is distinct from 'birth') then
     return null;
   end if;
 
   v_norm_name:=clara._binding_normalize(v_vendor);
+  -- F2 (owner-corrected, task #36 follow-up): the original build matched on F1+F3 only,
+  -- treating F2 as propose/sign-time-only ("F2 is a stability feature that resolves nothing
+  -- alone", Part 2 SS C.2). Owner ruling: that read was wrong for THIS resolver -- F2's floor
+  -- is exactly what keeps a shared/generic prefix (an "INV"-style series) from letting one
+  -- binding match documents from an unrelated vendor that merely shares a name+registration
+  -- shape. Matches 0029's post-time re-derivation's own F2 check (starts_with the CURRENT
+  -- document's normalized invoice_id against the binding's stored prefix) so Slot A's
+  -- admission-time match and Slot C's post-time re-match apply the identical predicate.
+  select nullif(btrim(min(r.text_content)),'') into v_invoice_id
+  from clara.document_regions r
+  where r.extraction_id=v_ext.id
+    and r.field_path='invoice.invoice_id';
+  v_invoice_id_norm:=clara._binding_normalize(v_invoice_id);
   -- min(uuid) has no default aggregate in Postgres (42883) -- array_agg(...)[1] picks an
   -- arbitrary element the same way min() would have, which is fine here: v_counterparty is
   -- only ever RETURNED when v_matches=1 (exactly one candidate, so "arbitrary" == "the one"),
@@ -404,11 +448,20 @@ begin
     and b.status='live'
     and b.expires_at>now()
     and b.f1_vendor_name_norm=v_norm_name
+    and v_invoice_id_norm is not null
+    and starts_with(v_invoice_id_norm,b.f2_invoice_prefix)
     and cp.merged_into is null
     and cp.retired_at is null
     and cp.registration_normalized is not distinct from b.registration_at_signing
     and clara._binding_f3_holds(
-      p_document,cp.registration_normalized,cp.name_normalized);
+      p_document,cp.registration_normalized,cp.name_normalized)
+    -- registration_conflict admission: the page's own evidence named ONE specific
+    -- existing counterparty (v_conflict_candidate) -- only THAT counterparty's binding
+    -- may resolve. A different (even F1/F2/F3-matching) live binding does not count;
+    -- v_matches stays 0 for it, so the function falls through to `return null` below,
+    -- never an arbitrary or wrong-party admission. NULL under the birth path (no
+    -- constraint, matches ANY qualifying live binding, unchanged from before).
+    and (v_conflict_candidate is null or b.counterparty_id=v_conflict_candidate);
 
   if v_matches=1 then return v_counterparty; end if;
   return null;
