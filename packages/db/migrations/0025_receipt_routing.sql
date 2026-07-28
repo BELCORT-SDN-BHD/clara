@@ -73,8 +73,11 @@
 --     of its branches) takes the row lock implicitly — so by the time either caller reaches
 --     the core, clara.documents is ALREADY locked, and the core's FOR UPDATE is, exactly
 --     like file_document's, a safe RE-ENTRANT re-acquisition, not a first-time lock. §A's
---     new lock is re-entrant on EVERY one of the four real call paths — the narrow claim
---     this note exists to support.
+--     new lock is a FIRST-TIME acquisition only on the enqueue_invoice_facts path (R2,
+--     5th round — corrected: an earlier draft said "every one of the four", contradicting
+--     its own enqueue_invoice_facts line above) and RE-ENTRANT on the other three — the
+--     narrow claim this note exists to support either way, since a first-time acquisition
+--     with no lock held before it cannot itself invert against anything.
 -- And the core itself never locks clara.document_processing_tasks WITH FOR UPDATE anywhere in
 -- its own body (every task read here is a plain SELECT) — so the core can never itself hold a
 -- tasks lock and THEN reach for a documents lock, the shape a documents-vs-tasks inversion
