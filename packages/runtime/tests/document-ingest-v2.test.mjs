@@ -47,11 +47,19 @@ function mockServices({ task = TASK, missingTask = false, download, analyze, par
 }
 
 /** A `withRuntime` double whose `client.query` either always succeeds or always throws
- *  `queryError` (defaulting to a generic, non-CLR10/CLR16 failure). */
-function mockWithRuntime({ queryThrows = false, queryError = errOf("internal", "db unavailable") } = {}) {
+ *  `queryError` (defaulting to a generic, non-CLR10/CLR16 failure) for the WRITE call
+ *  (persist_document_extraction). R1: a SEPARATE query — the state re-read
+ *  (`select status from clara.document_processing_tasks`) — is answered independently via
+ *  `taskStatusOnReread`, matched by inspecting the SQL text so both calls can be scripted
+ *  distinctly in one test. Leaving `taskStatusOnReread` undefined simulates the re-read
+ *  itself finding no row (rowCount 0) — the "genuinely couldn't verify" shape. */
+function mockWithRuntime({ queryThrows = false, queryError = errOf("internal", "db unavailable"), taskStatusOnReread } = {}) {
   return async (fn) =>
     fn({
-      query: async () => {
+      query: async (sql) => {
+        if (typeof sql === "string" && /select\s+status\s+from\s+clara\.document_processing_tasks/i.test(sql)) {
+          return taskStatusOnReread === undefined ? { rows: [], rowCount: 0 } : { rows: [{ status: taskStatusOnReread }], rowCount: 1 };
+        }
         if (queryThrows) throw queryError;
         return { rows: [{ receipt: { task_id: "x", status: "ok" } }], rowCount: 1 };
       },
@@ -175,29 +183,92 @@ test("Q4 — a GENUINE persist-'failed' write failure never masks the original e
   assert.ok(note.note && /persist_document_extraction.*itself failed/.test(note.note) && /corrupt/.test(note.note), "BOTH the original diagnosis and the persist failure are recorded, never discarded");
 });
 
-test("Q3 — crash-redelivery: a DIFFERENT code replaying the SAME op_key hits CLR10, detected as already-terminal, not swallowed as a generic error", async () => {
+test("Q3/R1 — crash-redelivery: a DIFFERENT code replaying the SAME op_key hits CLR10, and the state re-read CONFIRMS status='failed' — detected as already-terminal, not swallowed as a generic error", async () => {
   const taskId = "cccccccc-cccc-cccc-cccc-cccccccccccc";
   const services = mockServices({ analyze: async () => { throw errOf("encrypted", "the file is encrypted"); } });
   await assert.rejects(
-    processDocumentTaskBehaviorV2(services, mockWithRuntime({ queryThrows: true, queryError: errOf("CLR10", "op_key reused with different args") }), taskId, 1),
+    processDocumentTaskBehaviorV2(
+      services,
+      mockWithRuntime({ queryThrows: true, queryError: errOf("CLR10", "op_key reused with different args"), taskStatusOnReread: "failed" }),
+      taskId, 1,
+    ),
     (err) => err instanceof FatalError && err.code === "encrypted",
     "still settles the step — no second attempt is invited",
   );
-  assert.deepEqual(services.calls.noteTransientFailure, [], "a redelivery refusal is a KNOWN terminal shape, not an unconfirmed write (Q4 does not apply here)");
+  assert.deepEqual(services.calls.noteTransientFailure, [], "a CONFIRMED redelivery refusal is a KNOWN terminal shape, not an unconfirmed write (Q4 does not apply here)");
   const [note] = services.calls.noteTerminalFailure;
   assert.equal(note.code, "encrypted");
   assert.ok(/redelivery detected/.test(note.note) && /CLR10/.test(note.note), "the redelivery is named, not mistaken for a generic DB failure");
 });
 
-test("Q3 — the SAME shape holds for CLR16 (the status guard's own already-terminal refusal)", async () => {
+test("Q3/R1 — the SAME shape holds for CLR16 (the status guard's own already-terminal refusal), ALSO gated on the re-read confirming status='failed'", async () => {
   const taskId = "dddddddd-dddd-dddd-dddd-dddddddddddd";
   const services = mockServices({ analyze: async () => { throw errOf("bad_type"); } });
   await assert.rejects(
-    processDocumentTaskBehaviorV2(services, mockWithRuntime({ queryThrows: true, queryError: errOf("CLR16", "processing task is not running") }), taskId, 1),
+    processDocumentTaskBehaviorV2(
+      services,
+      mockWithRuntime({ queryThrows: true, queryError: errOf("CLR16", "processing task is not running"), taskStatusOnReread: "failed" }),
+      taskId, 1,
+    ),
     (err) => err instanceof FatalError,
   );
   const [note] = services.calls.noteTerminalFailure;
   assert.ok(/redelivery detected/.test(note.note) && /CLR16/.test(note.note));
+});
+
+// ======================================================================================
+// R1 (the R-round's blocker) — CLR10/CLR16 alone are NEVER proof of redelivery; the bare
+// codes are overloaded with genuinely fresh causes (0026_lane_widen.sql:508-538: missing
+// task, wrong lane, queued/held/done status). The two cells above prove the CONFIRMED-
+// redelivery branch; these prove the other two branches the state re-read must produce.
+// ======================================================================================
+
+test("R1 — a CLR10/CLR16 refusal that re-reads as ALREADY-DONE takes the clean success path: no failure stamp, no contradiction of a fact Postgres already settled", async () => {
+  const taskId = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee";
+  const services = mockServices({ analyze: async () => { throw errOf("corrupt", "the file is corrupt"); } });
+  const result = await processDocumentTaskBehaviorV2(
+    services,
+    mockWithRuntime({ queryThrows: true, queryError: errOf("CLR16", "processing task is not running"), taskStatusOnReread: "done" }),
+    taskId, 1,
+  );
+  assert.deepEqual(result, { taskId, status: "done", lane: "ocr" }, "the task ACTUALLY succeeded — this execution's own failure must not overrule it");
+  assert.deepEqual(services.calls.noteTerminalFailure, [], "never stamp 'failed' on a task the DB confirms is 'done'");
+  assert.deepEqual(services.calls.noteTransientFailure, [], "the state IS confirmed here — this is not an 'unknown DB plane' case");
+  assert.deepEqual(services.calls.removeTaskMeta, [taskId], "the sidecar is cleared exactly like any other genuine success");
+});
+
+test("R1 — a CLR10/CLR16 refusal that re-reads as NEITHER 'failed' nor 'done' is a genuine fresh problem: never no-op'd, surfaced via the same honest both-errors shape as Q4", async () => {
+  const taskId = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+  const services = mockServices({ analyze: async () => { throw errOf("bad_type", "wrong type"); } });
+  await assert.rejects(
+    processDocumentTaskBehaviorV2(
+      services,
+      mockWithRuntime({ queryThrows: true, queryError: errOf("CLR16", "processing task is not running"), taskStatusOnReread: "queued" }),
+      taskId, 1,
+    ),
+    (err) => err instanceof FatalError && err.code === "bad_type",
+  );
+  assert.deepEqual(services.calls.noteTerminalFailure, [], "never claim a redelivery was confirmed when the re-read shows something else entirely");
+  const [note] = services.calls.noteTransientFailure;
+  assert.equal(note.code, "bad_type");
+  assert.ok(note.note && /processing task is not running/.test(note.note) && /re-read status="queued"/.test(note.note), "both the original diagnosis and the unexplained re-read state are recorded, never silently accepted as a handled redelivery");
+});
+
+test("R1 — a CLR10/CLR16 refusal whose state re-read finds NO ROW AT ALL is treated the same as 'anything else' — never assumed to be a handled redelivery from silence", async () => {
+  const taskId = "11111111-2222-3333-4444-555555555555";
+  const services = mockServices({ analyze: async () => { throw errOf("limit", "page limit exceeded"); } });
+  await assert.rejects(
+    processDocumentTaskBehaviorV2(
+      services,
+      mockWithRuntime({ queryThrows: true, queryError: errOf("CLR16", "processing task is not running") }), // taskStatusOnReread left undefined -> rowCount 0
+      taskId, 1,
+    ),
+    (err) => err instanceof FatalError && err.code === "limit",
+  );
+  assert.deepEqual(services.calls.noteTerminalFailure, []);
+  const [note] = services.calls.noteTransientFailure;
+  assert.equal(note.code, "limit");
+  assert.ok(/re-read status=null/.test(note.note), "an unresolvable re-read is recorded as null, not silently treated as confirmation of anything");
 });
 
 test("v2 — the temp file is ALWAYS cleaned up: transient, terminal, and success paths alike", async () => {

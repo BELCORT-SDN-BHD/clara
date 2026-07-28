@@ -22,7 +22,6 @@ let warnedDocumentSelectGap = false;
 let warnedInvoiceFactsEnqueueGap = false;
 let warnedLocalFactsEnqueueGap = false;
 let warnedClassifyEnqueueGap = false;
-let warnedCorruptSidecarGap = false;
 
 /** True iff the error is the engine's "run id unknown" signal. */
 export function isRunNotFound(err) {
@@ -166,30 +165,37 @@ async function documentTaskIndex(client, deps) {
     // throws) must not abort the WHOLE sweep — the bulk `listTaskMetas()` path this
     // replaced already tolerated exactly this (listJson pushes {corrupt:true,...} and
     // moves on). Per task, a merge failure REBUILDS that one row from Postgres alone
-    // (the DB row is authoritative for lifecycle fields regardless), losing only the
-    // transport fields until the next successful write re-establishes them; every OTHER
-    // task in the sweep is unaffected.
+    // (the DB row is authoritative for lifecycle fields regardless), losing BOTH the
+    // transport fields (storageKey/sha256/mime/format) AND the diagnostic ones
+    // (lastError/lastErrorNote) that only the sidecar carried — the rebuild is DB-only,
+    // by design, until the next successful write re-establishes them. Every OTHER task in
+    // the sweep is unaffected.
+    //
+    // R2: logged PER OCCURRENCE, not once-per-process — a one-shot warning would hide
+    // every corruption after the first, and repeated corruption (a systemic disk/fs
+    // problem, not a one-off) is exactly the case worth seeing. `corruptRebuilt` also
+    // rides back in the sweep's own return value so a caller can assert on it directly,
+    // without depending on log output.
     const merged = [];
+    let corruptRebuilt = 0;
     for (const row of rows) {
       try {
         merged.push(await mergeTaskMeta(row.taskId, row));
       } catch (err) {
-        if (!warnedCorruptSidecarGap) {
-          warnedCorruptSidecarGap = true;
-          deps.log?.(`[reconcile] task sidecar unreadable, rebuilding from Postgres task=${row.taskId}: ${err?.message ?? err}`);
-        }
+        corruptRebuilt += 1;
+        deps.log?.(`[reconcile] task sidecar unreadable, rebuilding from Postgres alone (transport + diagnostic fields dropped) task=${row.taskId}: ${err?.message ?? err}`);
         await writeTaskMeta(row.taskId, row);
         merged.push(row);
       }
     }
-    return merged;
+    return { tasks: merged, corruptRebuilt };
   } catch (err) {
     if (!isDocumentSelectUnavailable(err)) throw err;
     if (!warnedDocumentSelectGap) {
       warnedDocumentSelectGap = true;
       deps.log?.("[reconcile] document task SELECT unavailable; using durable spool task index");
     }
-    return (await listTaskMetas()).filter((row) => row && !row.corrupt && row.taskId);
+    return { tasks: (await listTaskMetas()).filter((row) => row && !row.corrupt && row.taskId), corruptRebuilt: 0 };
   }
 }
 
@@ -206,7 +212,7 @@ async function documentRunState(getRun, runId) {
 /** Reconcile queued-unbound, held-egress, and stranded-running document tasks. */
 export async function reconcileDocumentTasks(client, deps) {
   const log = deps.log ?? (() => {});
-  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentIntegrityWarnings: 0 };
+  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0 };
   if (typeof deps.enqueueDocumentIngest !== "function") return out;
 
   if (process.env.CLARA_DOC_EGRESS_APPROVED === "1") {
@@ -220,7 +226,8 @@ export async function reconcileDocumentTasks(client, deps) {
     }
   }
 
-  const tasks = await documentTaskIndex(client, deps);
+  const { tasks, corruptRebuilt } = await documentTaskIndex(client, deps);
+  out.documentSidecarCorruptRebuilt = corruptRebuilt;
   for (const task of tasks) {
     if (!task?.taskId) continue;
     if (task.status === "held_egress" && process.env.CLARA_DOC_EGRESS_APPROVED === "1") {

@@ -61,6 +61,20 @@ async function admitClaimed(label) {
   return { taskId: finalized.task_id, documentId: finalized.document_id, firm };
 }
 
+/** Admit + finalize WITHOUT claiming — the task row and its sidecar both exist (finalize
+ *  writes the initial sidecar itself, lib/intake.mjs:392), but Postgres status stays
+ *  'queued'. Used by the R1(c) cell below to reach a REAL persist('failed') refusal whose
+ *  state re-read confirms neither 'failed' nor 'done'. */
+async function admitUnclaimed(label) {
+  const { owner, firm } = await rig.buildFirm(label);
+  const begun = await rig.asRuntime((client) =>
+    beginDocumentIntake(client, { sub: owner, firmId: firm }, { filename: `${label}.pdf`, mime: "application/pdf", declared_bytes: PDF_BYTES.length, origin: "documents_tab" }),
+  );
+  await uploadDocumentBytes({ withRuntime, intakeId: begun.intake_id, token: begun.upload_token, readable: Readable.from([PDF_BYTES]) });
+  const finalized = await finalizeDocumentIntake({ withRuntime, intakeId: begun.intake_id, token: begun.upload_token, enqueue: async () => ({ runId: null }) });
+  return { taskId: finalized.task_id, documentId: finalized.document_id, firm };
+}
+
 // ======================================================================================
 // P1 REPRODUCED FIRST — v1 (documentIngest.behavior.mjs, byte-identical, unedited): a
 // retry cannot land success even with its sidecar manually preserved. This proves the
@@ -226,6 +240,9 @@ test("Q2 (real rig) — one corrupt sidecar is rebuilt from Postgres alone; the 
     reconcileDocumentTasks(client, { onlyFirm: firm, graceMs: 0, enqueueDocumentIngest: async () => ({ runId: "x" }), getRun: () => ({ status: Promise.resolve("running") }) }),
   );
   assert.ok(result, "the sweep returns its usual summary rather than throwing on the corrupt row");
+  // R2: the corruption is visible in the sweep's OWN return value, not just a log line —
+  // a caller (or a test) can assert on it directly.
+  assert.equal(result.documentSidecarCorruptRebuilt, 1, "the sweep's own summary counts exactly the one corrupt row it rebuilt");
 
   const healthySidecar = await readTaskMeta(healthyTaskId);
   assert.equal(healthySidecar.lastError, "timeout", "the healthy task's sidecar is untouched by the OTHER task's corruption");
@@ -236,4 +253,100 @@ test("Q2 (real rig) — one corrupt sidecar is rebuilt from Postgres alone; the 
   assert.equal(rebuiltSidecar.taskId, corruptTaskId);
   assert.equal(rebuiltSidecar.status, "running", "rebuilt straight from the Postgres row (claimed, never failed)");
   assert.equal(rebuiltSidecar.lastError, undefined, "the rebuild is DB-only — a corrupt sidecar's diagnostic fields do not survive it, by design (Q2's stated trade-off)");
+});
+
+// ======================================================================================
+// R1 (the R-round's blocker) — CLR10/CLR16 alone are NEVER proof of redelivery. Every cell
+// here forces a REAL CLR10/CLR16 out of the real persist_document_extraction guard chain
+// (no mock stands in for the DB, per this file's own header) and proves the state re-read
+// resolves it into the right one of the three branches documentIngest.behavior_v2.mjs's
+// own header enumerates.
+// ======================================================================================
+
+test("R1(a) (real rig) — a SECOND execution reaching the terminal branch with a DIFFERENT code hits a REAL CLR10; the re-read confirms status='failed' and it is handled as redelivery", { skip }, async () => {
+  const { taskId } = await admitClaimed("r1clr10");
+
+  // Execution 1: a real terminal failure commits status='failed' for real.
+  globalThis.__claraAzureForTest = throwing("corrupt", "the document is corrupt");
+  await assert.rejects(processDocumentTaskBehaviorV2(makeDocumentServices(), withRuntime, taskId, 1), (err) => err instanceof FatalError && err.code === "corrupt");
+  assert.equal((await rig.readDocumentTask(taskId)).status, "failed");
+  assert.equal((await rig.readDocumentTask(taskId)).error_code, "corrupt");
+
+  // Execution 2 (the "redelivery"): v2's terminal branch never removes the sidecar, so a
+  // second real call on the SAME taskId is exactly the crash-redelivery shape — a fresh
+  // download/analyze that fails with a DIFFERENT code, reaching the SAME deterministic
+  // op_key ('doc-extract-failed:<taskId>') with a DIFFERENT request hash. _reserve_op
+  // (0004_governed_fns.sql) raises a REAL CLR10 here — not injected, not mocked.
+  globalThis.__claraAzureForTest = throwing("encrypted", "the document is encrypted");
+  await assert.rejects(
+    processDocumentTaskBehaviorV2(makeDocumentServices(), withRuntime, taskId, 1),
+    (err) => err instanceof FatalError && err.code === "encrypted",
+    "the SECOND execution's own diagnosis (encrypted) still settles this attempt, even though Postgres itself never recorded it",
+  );
+
+  // Postgres is untouched by execution 2 — still 'failed'/'corrupt' from execution 1, the
+  // ONLY commit that ever happened at this op_key.
+  const task = await rig.readDocumentTask(taskId);
+  assert.equal(task.status, "failed");
+  assert.equal(task.error_code, "corrupt", "the FIRST execution's commit is the only one Postgres ever recorded");
+
+  // The LOCAL sidecar note, though, records execution 2's own diagnosis + the redelivery.
+  const sidecar = await readTaskMeta(taskId);
+  assert.equal(sidecar.lastError, "encrypted");
+  assert.ok(/redelivery detected/.test(sidecar.lastErrorNote) && /CLR10/.test(sidecar.lastErrorNote), "the redelivery is named, not silently swallowed as a fresh DB failure");
+});
+
+test("R1(b) (real rig) — a genuine post-success sidecar-removal failure hits a REAL CLR16; the re-read confirms status='done' and the clean success path wins, no failure stamp", { skip }, async () => {
+  const { taskId, documentId } = await admitClaimed("r1clr16done");
+  globalThis.__claraAzureForTest = async () => OK_AZURE_PAYLOAD;
+
+  // Real services, EXCEPT removeTaskMeta always fails — simulating a local fs hiccup
+  // striking AFTER persist_document_extraction(...,'done',...) has already committed for
+  // real. That lands this same execution in the catch(err) block with a task Postgres has
+  // ALREADY closed out as 'done' — the terminal branch's own persist('failed') attempt
+  // then hits a REAL CLR16 (t.status<>'running').
+  const services = { ...makeDocumentServices(), removeTaskMeta: async () => { throw Object.assign(new Error("simulated sidecar removal failure"), { code: "internal" }); } };
+
+  const result = await processDocumentTaskBehaviorV2(services, withRuntime, taskId, 1);
+  assert.deepEqual(result, { taskId, status: "done", lane: "ocr" }, "the clean success path wins — the task ACTUALLY succeeded");
+
+  const task = await rig.readDocumentTask(taskId);
+  assert.equal(task.status, "done", "Postgres recorded the real success — the sidecar mishap never reaches it");
+  const extraction = await rig.rootQuery("select status, page_count from clara.document_extractions where document_id=$1", [documentId]);
+  assert.equal(extraction.rows[0].status, "done");
+
+  // The sidecar itself couldn't be cleared (removeTaskMeta always fails in this cell), but
+  // it was NEVER stamped 'failed' — the whole point of R1(b).
+  const sidecar = await readTaskMeta(taskId);
+  assert.ok(sidecar, "removal genuinely failed both times, so something is still on disk");
+  assert.notEqual(sidecar.status, "failed", "never contradict a fact Postgres already settled");
+  assert.equal(sidecar.lastError, undefined, "no failure was ever noted — there wasn't one");
+});
+
+test("R1(c) (real rig) — an UNCLAIMED (still 'queued') task hits a REAL CLR16 at the terminal persist; the re-read confirms NEITHER 'failed' nor 'done' and it is surfaced honestly, never no-op'd", { skip }, async () => {
+  const { taskId } = await admitUnclaimed("r1clr16fresh");
+  assert.equal((await rig.readDocumentTask(taskId)).status, "queued", "precondition: genuinely never claimed");
+
+  // The outer try's OWN persist('done') is what hits the FIRST real CLR16 here (task is
+  // still 'queued', not 'running') — that becomes `err` in the outer catch, classified
+  // 'internal' (CLR16 isn't in the retryable/known-terminal code list), which is terminal
+  // on the first attempt. The terminal branch's persist('failed') call then hits a SECOND
+  // real CLR16 at the exact same guard, for the exact same underlying reason.
+  globalThis.__claraAzureForTest = async () => OK_AZURE_PAYLOAD;
+  await assert.rejects(
+    processDocumentTaskBehaviorV2(makeDocumentServices(), withRuntime, taskId, 1),
+    (err) => err instanceof FatalError && err.code === "internal",
+  );
+
+  const task = await rig.readDocumentTask(taskId);
+  assert.equal(task.status, "queued", "Postgres is untouched — no persist call from THIS execution ever committed");
+
+  const sidecar = await readTaskMeta(taskId);
+  assert.equal(sidecar.lastError, "internal");
+  assert.ok(
+    sidecar.lastErrorNote
+      && /processing task is not running/.test(sidecar.lastErrorNote)
+      && /re-read status="queued"/.test(sidecar.lastErrorNote),
+    "the genuine, unverified state is recorded honestly — never mistaken for a handled redelivery",
+  );
 });

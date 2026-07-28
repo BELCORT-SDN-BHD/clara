@@ -65,20 +65,44 @@
 // the SAME key with a DIFFERENT request hash and raises CLR10 "op_key reused with
 // different args" — BEFORE even reaching the status guard. So the claim is not "at most
 // once, ever, full stop" — it is **at most once, except crash-redelivery, where the
-// re-execution's own persist attempt is a DETECTED, HANDLED no-op**: `isAlreadyTerminal
-// Refusal` recognises CLR10 (the op_key/hash mismatch) and CLR16 (the status guard, for
-// any other already-terminal shape) as "an earlier execution already won this task's
-// terminal outcome" rather than a generic failure — it is noted, never re-attempted, and
-// never silently swallowed as an unrelated error.
+// re-execution's own persist attempt is a DETECTED, HANDLED no-op**.
+//
+// R1 (the R-round's blocker) — CLR10/CLR16 are NOT proof of redelivery by themselves.
+// `persist_document_extraction` raises CLR16 from several genuinely DIFFERENT causes that
+// share the identical errcode and near-identical message (0026_lane_widen.sql:508 "task
+// not found", :531 "status is not running" — which fires for queued/held_egress/done
+// alike, plus the lane-mismatch refusals for store-only/classify tasks at :525/:533/:538).
+// Trusting the bare code would misclassify a GENUINE fresh failure as a handled no-op —
+// noting it away and FatalError-ing a task that was never actually settled — or worse,
+// stamp a local 'failed' over a task Postgres has ALREADY recorded as 'done'. So on
+// catching CLR10/CLR16 here, `readTaskStatus` RE-READS the task's actual row through the
+// runtime's own granted surface (0008_runtime_read_surface.sql:49 — plain SELECT, no new
+// grant needed) before deciding anything:
+//   - status === 'failed' -> a confirmed prior terminal commit. (For CLR10 specifically,
+//     this is doubly certain: `_reserve_op`'s "reused with different args" branch cannot
+//     fire at all unless a committed op_receipts row already exists at this exact op_key —
+//     our own call always supplies a valid, non-empty op_key/status, so no OTHER CLR10 site
+//     in persist_document_extraction can be the source here.) Handled, detected, noted —
+//     never a silent swallow.
+//   - status === 'done' -> the task actually SUCCEEDED. The realistic path there: the
+//     OUTER try's persist('done') committed cleanly, then `removeTaskMeta` itself threw
+//     (e.g. a spool I/O hiccup), landing in this SAME catch(err) with a status Postgres
+//     already closed out as a win. Stamping 'failed' would contradict a fact the DB already
+//     settled. Take the clean success path instead — same shape the top of this function
+//     returns on a first-try win.
+//   - anything else (a genuinely different status, or the re-read itself failing) -> a
+//     fresh, unverified problem. Never no-op what isn't proven — fall through to the SAME
+//     honest shape Q4 uses below.
 //
 // Q4 — the persist call's OWN failure must not be read as DB confirmation of anything.
-// If `persist_document_extraction` throws for a reason OTHER than the already-terminal
-// shapes above (a genuine connectivity blip, an unexpected error), the DB's actual state
-// is UNKNOWN — it may still be 'running'. Stamping the sidecar 'failed' in that case would
-// be a claim Postgres never confirmed, inverting the whole honesty point of this file.
-// That branch uses the TRANSIENT shape instead (`noteTransientFailure`, status stays
-// 'running'), carrying BOTH the original diagnosis and the persist failure in one note —
-// an honest "I don't know", not a guess dressed as a fact.
+// If `persist_document_extraction` throws for a reason OTHER than a VERIFIED already-
+// terminal shape above (a genuine connectivity blip, an unexpected error, or an R1 re-read
+// that confirms neither 'failed' nor 'done'), the DB's actual state is UNKNOWN — it may
+// still be 'running'. Stamping the sidecar 'failed' in that case would be a claim Postgres
+// never confirmed, inverting the whole honesty point of this file. That branch uses the
+// TRANSIENT shape instead (`noteTransientFailure`, status stays 'running'), carrying BOTH
+// the original diagnosis and the persist failure in one note — an honest "I don't know",
+// not a guess dressed as a fact.
 
 import { FatalError } from "workflow";
 
@@ -109,11 +133,12 @@ export const MAX_RETRIES = 3;
 const TOTAL_ATTEMPTS = MAX_RETRIES + 1;
 
 /** CLR10 = `_reserve_op`'s op_key-reused-with-different-args refusal (0004_governed_fns.sql
- *  :57) — the crash-redelivery shape, a DIFFERENT code replaying the SAME op_key. CLR16 =
- *  `persist_document_extraction`'s own status guard — any OTHER already-terminal shape
- *  (0026_lane_widen.sql:531). Both mean "an earlier execution already won this outcome",
- *  never "something is broken". */
-function isAlreadyTerminalRefusal(err) {
+ *  :57). CLR16 = `persist_document_extraction`'s own guards (0026_lane_widen.sql:508/531 —
+ *  task-not-found and status-not-running, PLUS the lane-mismatch refusals at :525/533/538).
+ *  Both codes are OVERLOADED with fresh, non-redelivery causes (R1) — this is a filter that
+ *  decides whether the state re-read in `readTaskStatus` is even worth doing, never a
+ *  verdict on its own. */
+function isPossiblyAlreadyTerminalRefusal(err) {
   return err?.code === "CLR10" || err?.code === "CLR16";
 }
 
@@ -122,6 +147,21 @@ async function callWriter(withRuntime, sql, params) {
     const out = await client.query(sql, params);
     return receipt(out.rows[0]);
   });
+}
+
+/** R1: re-read the task's OWN status through the runtime's granted SELECT
+ *  (0008_runtime_read_surface.sql:49) — the only way to tell a genuine CLR10/CLR16 cause
+ *  apart from a handled redelivery. Never throws: a failed re-read is itself "unverified",
+ *  reported as `status: null` so the caller falls through to the honest, never-guess shape. */
+async function readTaskStatus(withRuntime, taskId) {
+  try {
+    return await withRuntime(async (client) => {
+      const out = await client.query("select status from clara.document_processing_tasks where id=$1", [taskId]);
+      return out.rows[0]?.status ?? null;
+    });
+  } catch {
+    return null;
+  }
 }
 
 /** @param {number} attempt `getStepMetadata().attempt` from the calling step — 1 on the
@@ -185,20 +225,38 @@ export async function processDocumentTaskBehaviorV2(services, withRuntime, taskI
       // KNOWN 'failed', with THIS code.
       await services.noteTerminalFailure(taskId, code).catch(() => {});
     } catch (persistErr) {
-      if (isAlreadyTerminalRefusal(persistErr)) {
-        // An earlier execution (crash-redelivery) already committed this task's terminal
-        // outcome. The DB plane IS known terminal — just not confirmed to carry THIS
-        // execution's own code, since the earlier one may have recorded a different one.
+      let verifiedStatus = null;
+      if (isPossiblyAlreadyTerminalRefusal(persistErr)) {
+        verifiedStatus = await readTaskStatus(withRuntime, taskId);
+      }
+
+      if (verifiedStatus === "failed") {
+        // R1: CONFIRMED — a fresh read shows Postgres already closed this task out as
+        // 'failed'. An earlier execution (crash-redelivery) already committed this task's
+        // terminal outcome. The DB plane IS known terminal — just not confirmed to carry
+        // THIS execution's own code, since the earlier one may have recorded a different one.
         await services.noteTerminalFailure(
           taskId, code,
-          `redelivery detected: an earlier execution already committed this task's terminal outcome (persist refused: ${persistErr?.code ?? "?"} ${String(persistErr?.message || persistErr)})`,
+          `redelivery detected: an earlier execution already committed this task's terminal outcome (persist refused: ${persistErr?.code ?? "?"} ${String(persistErr?.message || persistErr)}; re-read confirms status='failed')`,
         ).catch(() => {});
+      } else if (verifiedStatus === "done") {
+        // R1: CONFIRMED — the task actually SUCCEEDED (a prior attempt's 'done' persist
+        // already committed; THIS execution only failed later, e.g. on its own sidecar
+        // cleanup). Stamping 'failed' here would contradict a fact Postgres already
+        // settled. Take the clean success path — same shape a first-try win returns.
+        await services.removeTaskMeta(taskId).catch(() => {});
+        return { taskId, status: "done", lane: task.lane };
       } else {
-        // Q4: a GENUINE persist failure — the DB plane is UNKNOWN, possibly still
-        // 'running'. Never stamp 'failed' on a claim Postgres didn't confirm.
+        // Q4 (and R1's "anything else" branch): NOT a verified redelivery — either
+        // persistErr wasn't CLR10/16 at all, or the re-read came back neither 'failed' nor
+        // 'done' (a genuinely different status, a missing row, or the re-read itself
+        // failing). The DB plane is UNKNOWN in every one of these shapes. Never stamp
+        // 'failed' on a claim Postgres didn't confirm, and never no-op an unverified state
+        // as if it were a known-handled redelivery.
         await services.noteTransientFailure(
           taskId, code,
-          `persist_document_extraction('failed') itself failed: ${String(persistErr?.message || persistErr)} (original diagnosis: ${code} ${err?.message ?? ""})`,
+          `persist_document_extraction('failed') itself failed: ${String(persistErr?.message || persistErr)} (original diagnosis: ${code} ${err?.message ?? ""})`
+            + (isPossiblyAlreadyTerminalRefusal(persistErr) ? `; re-read status=${JSON.stringify(verifiedStatus)}, not a confirmed redelivery` : ""),
         ).catch(() => {});
       }
     }
