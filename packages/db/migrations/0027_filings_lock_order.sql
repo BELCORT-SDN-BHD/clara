@@ -519,6 +519,24 @@ end $function$;
 -- =====================================================================
 -- TAIL — in-transaction self-verification. Every raise is a real assertion failure, not
 -- a soft warning; a clean run ends with one notice and nothing else.
+--
+-- SPLIT INTO TWO `do` BLOCKS (R2 follow-up, found by CI, not the reviewed P/Q/R rounds):
+-- the repo's own wiki-authority lint (scripts/check-wiki-dynamic-sql.mjs, WB-R21) treats
+-- ANY `do $tag$...$tag$` block containing both a `pg_get_functiondef` call and the bare
+-- word "execute" as a change-of-record patch that installs a callable surface — the CoR
+-- idiom 0017/0018/0019 use to rewrite a live function body dynamically. This tail's ACL
+-- probe below compares `aclexplode(...).privilege_type = 'EXECUTE'` — the Postgres
+-- privilege-type STRING, unrelated to plpgsql's dynamic-SQL EXECUTE statement — but the
+-- lint's gate check is a raw `/\bexecute\b/i` substring test that does not distinguish a
+-- quoted literal from the keyword, so the ONE block that read function bodies via
+-- pg_get_functiondef (for the lock-order position checks) ALSO containing that ACL
+-- literal was enough to trip it: a false "change-of-record patch → <unresolved target>"
+-- finding, since none of THIS block's pg_get_functiondef calls resolve to a literal
+-- ::regprocedure signature (they read a plpgsql variable, exactly as intended for a
+-- read-only self-check, never to build or EXECUTE a rewritten body). Splitting the
+-- pg_get_functiondef-based checks into their own block, with the ACL probe's 'EXECUTE'
+-- literal in a SEPARATE block that calls pg_get_functiondef zero times, satisfies the
+-- lint's actual detection rule without changing what either block asserts.
 -- =====================================================================
 do $tail$
 declare
@@ -602,6 +620,16 @@ begin
     raise exception '0027 tail: an unedited reference-order writer went missing';
   end if;
 
+  raise notice '0027 tail 1/2: lock-order position checks passed for all four edited functions; the three reference-order writers are present';
+end
+$tail$;
+
+-- Second block (see the note above the first `do $tail$`): the ACL probe alone, with no
+-- pg_get_functiondef call in scope, so the wiki-authority lint's CoR-patch gate check
+-- (pg_get_functiondef PRESENT + the bare word "execute" present) cannot fire on it either
+-- — this block satisfies neither half.
+do $tail2$
+begin
   -- (4) the 0020 §6 closed-set members this migration's callees touch
   -- (_enqueue_invoice_facts_core) must remain untouched — this migration issues no
   -- CREATE OR REPLACE for it; assert it still exists and is still owner-only. 0027
@@ -619,4 +647,4 @@ begin
 
   raise notice '0027: documents-before-document_filings lock order now consistent across all six live writers PLUS the resolve_and_ingest_wiki_source reader (file_document / finalize_document_intake / _seed_verified_document unchanged as the reference order; confirm_attribution_candidate / approve_wrong_client_correction / retire_document_filing / resolve_and_ingest_wiki_source fixed) — task #29 closed';
 end
-$tail$;
+$tail2$;
