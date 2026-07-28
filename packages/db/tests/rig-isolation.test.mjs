@@ -540,29 +540,12 @@ test("T18 governed firm-scoped tables have RLS ENABLED and FORCED", async (t) =>
 });
 
 // ===========================================================================
-// T19 — poison a role → the documented reset+re-migrate convergence normalizes it.
-// Destructive (drops schema clara), so gated: set CLARA_RIG_ALLOW_RESET=1 to run
-// (isolated DB only). Plain re-migrate does NOT re-run 0002 — see the lane report.
-// ===========================================================================
-test("T19 poison-role: reset + re-migrate normalizes a poisoned clara role", async (t) => {
-  if (unready(t)) return;
-  if (process.env.CLARA_RIG_ALLOW_RESET !== "1") {
-    t.skip("destructive (drops schema clara); set CLARA_RIG_ALLOW_RESET=1 on an isolated DB to run");
-    return;
-  }
-  const { reset } = await import("../scripts/reset.mjs");
-  const { migrate } = await import("../scripts/migrate.mjs");
-  await rootQuery("alter role clara_agent_ro bypassrls");
-  await reset({ log: () => {} });
-  await migrate({ log: () => {} });
-  const r = await rootQuery("select rolbypassrls, rolsuper, rolcanlogin from pg_roles where rolname = 'clara_agent_ro'");
-  assert.equal(r.rows[0].rolbypassrls, false, "re-migrate normalized NOBYPASSRLS");
-  assert.equal(r.rows[0].rolsuper, false, "clara_agent_ro is NOSUPERUSER");
-  assert.equal(r.rows[0].rolcanlogin, false, "clara_agent_ro is NOLOGIN");
-});
-
-// ===========================================================================
 // T23 — admission gate on create_firm + create_client admin-only (v2 §F)
+//
+// ORDERED BEFORE T19 (rig triage, task #10): T19's reset wipes the module-level
+// `world` every test here reads; running after it, T23 inherited a stale world and
+// raised CLR04 on a dead actor instead of exercising its own assertion. Fix is
+// ordering (T19 now runs last), not a weakened assertion — see T19's note below.
 // ===========================================================================
 test("T23 create_firm is fail-closed on an admission token; create_client is admin-only", async (t) => {
   if (unready(t)) return;
@@ -584,4 +567,27 @@ test("T23 create_firm is fail-closed on an admission token; create_client is adm
   await assertRaises(CLR.authz, () => createClient(users.bob, { name: `${world.prefix}_bkClient`, opKey: opk() }), "bookkeeper create_client");
   const okClient = await createClient(users.alice, { name: `${world.prefix}_adminClient`, opKey: opk() });
   assert.ok(okClient, "admin create_client succeeds");
+});
+
+// ===========================================================================
+// T19 — poison a role → the documented reset+re-migrate convergence normalizes it.
+// Destructive (drops schema clara), so gated: set CLARA_RIG_ALLOW_RESET=1 to run
+// (isolated DB only). Plain re-migrate does NOT re-run 0002 — see the lane report.
+// ORDERED LAST (rig triage, task #10): its reset wipes the module-level `world`.
+// ===========================================================================
+test("T19 poison-role: reset + re-migrate normalizes a poisoned clara role", async (t) => {
+  if (unready(t)) return;
+  if (process.env.CLARA_RIG_ALLOW_RESET !== "1") {
+    t.skip("destructive (drops schema clara); set CLARA_RIG_ALLOW_RESET=1 on an isolated DB to run");
+    return;
+  }
+  const { reset } = await import("../scripts/reset.mjs");
+  const { migrate } = await import("../scripts/migrate.mjs");
+  await rootQuery("alter role clara_agent_ro bypassrls");
+  await reset({ log: () => {} });
+  await migrate({ log: () => {} });
+  const r = await rootQuery("select rolbypassrls, rolsuper, rolcanlogin from pg_roles where rolname = 'clara_agent_ro'");
+  assert.equal(r.rows[0].rolbypassrls, false, "re-migrate normalized NOBYPASSRLS");
+  assert.equal(r.rows[0].rolsuper, false, "clara_agent_ro is NOSUPERUSER");
+  assert.equal(r.rows[0].rolcanlogin, false, "clara_agent_ro is NOLOGIN");
 });

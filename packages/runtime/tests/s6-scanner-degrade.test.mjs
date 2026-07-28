@@ -29,6 +29,18 @@ function tempFile(bytes) {
   return p;
 }
 
+/** Poll `predicate` until it is true or `timeoutMs` elapses (rig triage, task #10 —
+ *  a fixed wall-clock sleep is not a bound on spawn()/backoff timing under box load).
+ *  Never throws: a timeout just stops polling, so the caller's OWN assertion reports
+ *  the true observed state honestly instead of this helper masking a real regression. */
+async function waitUntil(predicate, { timeoutMs = 5000, intervalMs = 10 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate() && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  return predicate();
+}
+
 async function withRealScanPath(addr, extraEnv, fn) {
   const saved = { mode: process.env.RELAY_TEST_MODE, socket: process.env.CLARA_CLAMD_SOCKET, ...Object.fromEntries(Object.keys(extraEnv).map((k) => [k, process.env[k]])) };
   delete process.env.RELAY_TEST_MODE; // exercise the REAL clamd path
@@ -149,7 +161,12 @@ test("startManagedScanner RESTARTS clamd on exit with bounded backoff; done neve
     },
   );
 
-  await new Promise((r) => setTimeout(r, 200)); // ~several fast exit/backoff cycles
+  // Condition-based wait (rig triage, task #10): a fixed 200ms sleep flaked under box
+  // load — spawn()/backoff timing is not guaranteed within any fixed wall-clock window.
+  // Poll until at least 2 restart cycles are OBSERVED, bounded so a genuine regression
+  // (the supervisor stops restarting) still fails the assertion below rather than
+  // hanging the test forever.
+  await waitUntil(() => restarts >= 2);
   await scanner.stop();
 
   try {
