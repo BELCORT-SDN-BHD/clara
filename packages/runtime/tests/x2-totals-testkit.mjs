@@ -52,3 +52,23 @@ export const BRIGHTPATH = [
   line("435,560.00", [7.1032, 8.7961, 7.6987, 8.7976, 7.6984, 8.918, 7.103, 8.9166]),
   line("Notes :", [0.6782, 8.958, 1.0629, 8.9619, 1.0617, 9.0808, 0.6771, 9.077]),
 ];
+
+// EZSEC — the corpus's only family printing a corroborable MYR breakdown (~45 bills), and the
+// reason the vocabulary gained `total payable excl`. Label strings are VERBATIM from the runway
+// measurement of EZSEC-IV-00721 (including the vendor's own "Rouding" typo); the geometry is
+// the standard right-aligned A4 totals column, rows in the printed order.
+//
+// THE TRAP THIS FIXTURE EXISTS TO HOLD: the net and the gross are one letter apart
+// (`Excl.` / `Incl.`) and, because this family charges 0.00 tax, they carry the SAME figure.
+// A prefix that matched both would read the gross as the net and TIE — corroborating a wrong
+// reading. That is why the Incl line is here, with its amount.
+export const EZSEC = [
+  line("Total Payable Excl. SST:", [4.5102, 6.1381, 6.3204, 6.1402, 6.3198, 6.2788, 4.5096, 6.2767]),
+  line("1,700.00", [7.1043, 6.1409, 7.7038, 6.1421, 7.7031, 6.2761, 7.1036, 6.2749]),
+  line("SST Amt @ 6%:", [4.5108, 6.2994, 5.6127, 6.3011, 5.6121, 6.4395, 4.5102, 6.4378]),
+  line("0.00", [7.4102, 6.3018, 7.7041, 6.3026, 7.7035, 6.4362, 7.4096, 6.4354]),
+  line("Rouding Adjustment:", [4.5111, 6.4208, 5.9803, 6.4227, 5.9797, 6.5611, 4.5105, 6.5592]),
+  line("0.00", [7.4104, 6.4231, 7.7043, 6.4239, 7.7037, 6.5575, 7.4098, 6.5567]),
+  line("Total Payable Incl. SST:", [4.5099, 6.6012, 6.3188, 6.6033, 6.3182, 6.7419, 4.5093, 6.7398]),
+  line("1,700.00", [7.1041, 6.6039, 7.7036, 6.6051, 7.7029, 6.7391, 7.1034, 6.7379]),
+];

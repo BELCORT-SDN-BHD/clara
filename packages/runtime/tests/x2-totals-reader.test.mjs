@@ -13,7 +13,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { readTotalsFromLines, matchTotalsLabel, centsOfRaw } from "../lib/invoice-totals-reader.mjs";
-import { line, onePage, byPath, LAI_LOU_MEI, BRIGHTPATH } from "./x2-totals-testkit.mjs";
+import { line, onePage, byPath, LAI_LOU_MEI, BRIGHTPATH, EZSEC } from "./x2-totals-testkit.mjs";
 
 // ======================================================================================
 // CELL 1 — the receipt geometry
@@ -417,4 +417,54 @@ test("[K4] the bound is 99 sen exactly — 0.99 reads, 1.00 does not", () => {
   // than argued about — but the DEFAULT is what ships, and that is what these cells pin.
   const relaxed = readTotalsFromLines(onePage(roundingRow("1.00", 8.0)), { maxRoundingCents: 100 });
   assert.equal(byPath(relaxed.fields)["invoice.rounding"].value_raw, "-1.00");
+});
+
+// ======================================================================================
+// CELL — EZSEC: the net label the vocabulary was missing, and the gross it must never read
+// ======================================================================================
+
+test("EZSEC: 'Total Payable Excl. SST:' is the NET and reads as one", () => {
+  // Verbatim from the runway measurement of EZSEC-IV-00721. Before this label existed in the
+  // vocabulary it matched NOTHING, so total_excl_tax stayed typed-only while tax_total was
+  // already typed_collapsed — and X5 needs BOTH agreed, so ~45 bills sat one label short of
+  // corroborating.
+  const m = matchTotalsLabel("Total Payable Excl. SST:");
+  assert.equal(m.field_path, "invoice.total_excl_tax");
+  assert.equal(m.prefix, "total payable excl");
+  // The generalized form, for a layout that omits "Payable".
+  assert.equal(matchTotalsLabel("Total Excl. SST").field_path, "invoice.total_excl_tax");
+  assert.equal(matchTotalsLabel("Total Excluding Tax").field_path, "invoice.total_excl_tax");
+});
+
+test("EZSEC: the GROSS line is one letter away and must never match", () => {
+  // `Incl.` vs `Excl.` is the whole difference, and on this family tax is 0.00 so both lines
+  // carry 1,700.00. A prefix that matched the gross would emit it as the net and the identity
+  // would TIE — a wrong reading that corroborates. These are the pins that keep the `excl`
+  // token in the prefix.
+  assert.equal(matchTotalsLabel("Total Payable Incl. SST:"), null);
+  assert.equal(matchTotalsLabel("Total Payable:"), null);
+  assert.equal(matchTotalsLabel("Total Payable 1,700.00"), null);
+  assert.equal(matchTotalsLabel("Total"), null);
+});
+
+test("EZSEC: 'excl. sst' does not trip the identifier guard", () => {
+  // The remainder after the prefix is "sst", which is NOT an IDENTIFIER_WORD — so this line
+  // anchors, while a genuine `SST Number : ...` identity still does not.
+  assert.equal(matchTotalsLabel("Total Payable Excl. SST:").field_path, "invoice.total_excl_tax");
+  assert.equal(matchTotalsLabel("SST Number : W10-2408-00000000"), null);
+});
+
+test("EZSEC: the whole block reads the net and the tax, and nothing carries the gross", () => {
+  const { fields } = readTotalsFromLines(onePage(EZSEC));
+  const got = byPath(fields);
+  assert.equal(got["invoice.total_excl_tax"].value_raw, "1,700.00");
+  assert.equal(got["invoice.tax_total"].value_raw, "0.00");
+  // Exactly ONE emission of the net: the Incl line must not have produced a second, which
+  // would be a conflicting duplicate that forfeits the WHOLE extraction at the DB boundary.
+  assert.equal(fields.filter((f) => f.field_path === "invoice.total_excl_tax").length, 1);
+  // The vendor prints "Rouding Adjustment" (its own typo) — unmatched, so rounding is absent
+  // rather than wrong. Harmless here because the figure is 0.00, and fail-closed if it were
+  // not: an unread nonzero adjustment breaks the identity and REFUSES rather than mis-posts.
+  assert.equal(got["invoice.rounding"], undefined);
+  assert.equal(matchTotalsLabel("Rouding Adjustment:"), null);
 });
