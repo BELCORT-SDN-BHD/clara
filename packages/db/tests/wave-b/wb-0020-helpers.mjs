@@ -729,10 +729,15 @@ export async function raceIngestThenFileB({ firm, document, clientB, sub }) {
   return out;
 }
 
-/** §9.4 (R-1) — resolve+ingest against a CONCURRENT retire_document_filing. The
- *  ingest holds document_filings FOR SHARE; the retirement wants the SAME filing
- *  row FOR UPDATE and must park. Either it serializes cleanly, or one side aborts
- *  40P01 — the caller asserts CONVERGENCE, not a single winner.
+/** §9.4 (R-1) — resolve+ingest against a CONCURRENT retire_document_filing. 0027
+ *  (task #29 P-round) made BOTH sides documents-first: the ingest now locks
+ *  clara.documents FOR UPDATE before document_filings FOR SHARE (0020's original order
+ *  was the opposite — see 0027_filings_lock_order.sql §D), and retire_document_filing
+ *  peeks + locks documents before its own filing-row FOR UPDATE. So post-0027 the park
+ *  is on the clara.documents row, not the filing row, and R-1's "or aborts 40P01" arm is
+ *  no longer reachable between these two specifically — the assertion below still
+ *  accepts it (a strict subset of "serializes or 40P01" always holds), so this driver
+ *  and its caller are unchanged; only the blocking LOCK moved.
  *  Returns { ingest, blocked, retireOk, retireCode }. */
 export async function raceIngestThenRetire({ firm, document, clientToRetire, sub }) {
   const f = await filingRowOf(document, clientToRetire);
@@ -748,7 +753,7 @@ export async function raceIngestThenRetire({ firm, document, clientToRetire, sub
     const pR = cR.query(RETIRE_SQL, [f.id, "rig concurrent retirement", f.revision_token, opk("raceret")])
       .then(() => { out.retireOk = true; })
       .catch((e) => { out.retireOk = false; out.retireCode = e.code; });
-    out.blocked = await waitBlockedByOrThrow(pidR, pidI, { what: "the document_filings row lock held by resolve_and_ingest_wiki_source" })
+    out.blocked = await waitBlockedByOrThrow(pidR, pidI, { what: "the clara.documents row lock held by resolve_and_ingest_wiki_source (post-0027: documents-first, was document_filings-first)" })
       .catch(() => false);
 
     await cI.query("commit");
