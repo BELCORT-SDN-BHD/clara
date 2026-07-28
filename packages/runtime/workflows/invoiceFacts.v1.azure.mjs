@@ -11,6 +11,7 @@ import { createHash } from "node:crypto";
 import { readTotalsFromLines } from "../lib/invoice-totals-reader.mjs";
 import { mergeTotalsIntoFields } from "../lib/invoice-totals-merge.mjs";
 import { looksLikeRegistration, readVendorIdentityFromLines, mergeVendorIdentity, anchorsFromTypedFields } from "../lib/invoice-vendor-identity.mjs";
+import { readCurrencyFromLines, mergeCurrencyIntoFields } from "../lib/invoice-currency-reader.mjs";
 
 const API_VERSION = "2024-11-30";
 const MODEL = "prebuilt-invoice";
@@ -24,24 +25,15 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
 
 /** The deterministic normalization-policy version hashed with the raw engine
  *  response (model-drift honesty, S6-D1) — bump when the mapping below changes.
- *  v2 (Wave A): invoice.invoice_id gains a key-value-pair / OCR-content fallback
- *  when the typed InvoiceId field carries no value (WA §11 facts-capture fix).
- *  v3 (Wave A.1): invoice.vendor_registration emitted from the typed `VendorTaxId`
- *  field (non-monetary) so the coding lane can resolve a REGISTERED vendor by
- *  registration number instead of stalling on name-only ambiguity (AB-16).
- *  v4 (Wave A.1): the `features=keyValuePairs` add-on is ENABLED (owner decision
- *  2026-07-21), so the model now returns keyValuePairs and the invoice_id KV recovery
- *  (recoverFromKeyValuePairs) goes live — recovering invoice numbers printed with no
- *  recognizable label. keyValuePairs is a FREE add-on on prebuilt-invoice at
- *  api-version 2024-11-30 (Azure add-on-capabilities version table — only Font/
- *  Formula/HighRes/QueryFields are billable), so it adds no per-page cost. Bumped so
- *  KV-enabled extractions are distinguishable from v3.
- *  v5 (Wave A2): the AR facts vocabulary — CustomerName -> invoice.customer_name,
- *  SubTotal -> invoice.total_excl_tax, TotalTax -> invoice.tax_total (FIELD_MAP), and
- *  CustomerTaxId -> invoice.customer_registration (a looksLikeRegistration-gated emit,
- *  mirroring VendorTaxId). None of the new keys match %tin%/%ssm%/%account% — the AB-3
- *  naming boundary (§3.2); customer_taxid stays UBL-only (never emitted here). Bumped so
- *  v5 extractions fold the customer-field mapping into the raw hash.
+ *  v2 (Wave A): invoice.invoice_id gains a key-value-pair / OCR-content fallback for a typed
+ *  InvoiceId field carrying no value (WA §11 facts-capture fix).
+ *  v3 (Wave A.1): invoice.vendor_registration emitted from the typed `VendorTaxId` field so the
+ *  coding lane can resolve a REGISTERED vendor by number, not name-only ambiguity (AB-16).
+ *  v4 (Wave A.1): `features=keyValuePairs` ENABLED (owner decision 2026-07-21; a FREE add-on on
+ *  prebuilt-invoice at this api-version) — the invoice_id KV recovery goes live.
+ *  v5 (Wave A2): the AR facts vocabulary — CustomerName/SubTotal/TotalTax (FIELD_MAP) and a
+ *  gated CustomerTaxId -> invoice.customer_registration, avoiding the AB-3 %tin%/%ssm%/%account%
+ *  naming boundary (§3.2; customer_taxid stays UBL-only, never emitted here).
  *  v6 (extraction slice X2, ADR-047): the DETERMINISTIC TOTALS READER
  *  (lib/invoice-totals-reader.mjs) runs after the typed loop and emits the stated totals
  *  the typed fields do not carry — measured 0/29 for TotalTax on the live corpus, which is
@@ -76,8 +68,14 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
  *  a second reading of the net that the typed field can collapse against. Bumped because the
  *  same document now yields a fact it did not under v7 (and a differently-sourced one), so v7
  *  and v8 extractions must stay distinguishable and a re-extraction is a genuinely new fact
- *  set rather than a silent supersede — the same reason v6 and v7 were bumped. */
-export const NORMALIZATION_VERSION = "clara-invoice-norm:v8";
+ *  set rather than a silent supersede — the same reason v6 and v7 were bumped.
+ *  v9 (the currency-defect fix, 2026-07-28): the DETERMINISTIC CURRENCY READER
+ *  (lib/invoice-currency-reader.mjs — full rationale there) reconciles against the typed
+ *  `invoice.currency` emission below, a MODEL GUESS measured wrong on 7/40 real documents CLR21
+ *  then refused to code at all. Agreement keeps the typed row + stamps `typed_collapsed`;
+ *  disagreement withdraws BOTH rows, lifting the refusal without ever adding a document to
+ *  `corroborated`. NO DB CHANGE ships here; bumped for the v6/v7/v8 reason — a different fact set. */
+export const NORMALIZATION_VERSION = "clara-invoice-norm:v9";
 
 export class DocumentEngineError extends Error {
   constructor(code, message) {
@@ -466,6 +464,13 @@ export function normalizeAzureInvoice(payload) {
     : { fields: [], receipt: { ...readVendorIdentityFromLines([]).receipt, outcome: "multi_document" } };
   mergeVendorIdentity(out, identity);
 
+  // --- the currency reader (design doc part 1 §3/§4; rationale in its own header). Document-
+  // scope; gated on `singleDocument` anyway so a foreign token on B's page can't withdraw A's row.
+  const currencyReader = singleDocument
+    ? readCurrencyFromLines(result.pages)
+    : { fields: [], receipt: { ...readCurrencyFromLines([]).receipt, reason: "multi_document" } };
+  mergeCurrencyIntoFields(out, currencyReader);
+
   let corroborationIneligible = null;
   if (documents.length > 1) corroborationIneligible = "multi_document";
   else if (doc && isCreditNote(doc, fields)) corroborationIneligible = "credit_note";
@@ -475,6 +480,7 @@ export function normalizeAzureInvoice(payload) {
   // (0022:475) and reads only by named key, so an added key is inert to every consumer.
   envelope.totals_reader = totals.receipt;
   envelope.vendor_identity = identity.receipt;
+  envelope.currency_reader = currencyReader.receipt;
 
   const rawSha256 = createHash("sha256")
     .update(JSON.stringify(payload ?? {}) + "|" + NORMALIZATION_VERSION, "utf8")
