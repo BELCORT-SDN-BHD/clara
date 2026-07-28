@@ -309,6 +309,95 @@ test("TOCTOU order B: set_document_kind holds the document lock FIRST — reques
 });
 
 // ===========================================================================
+// P4 — THE SIBLING TOCTOU (cross-model review, round 3): the automatic core
+// (_enqueue_invoice_facts_core, via its public wrapper enqueue_invoice_facts) had the
+// IDENTICAL unlocked document read O2 fixed on request_reextraction — a concurrent kind
+// writer could commit a kind change between the read and the routing decision, letting the
+// automatic path route on a STALE snapshot. Both lock orders, driven for real via
+// holdThenContend (X7 law), on a NULL-kind document (the automatic core's own
+// classify-vs-invoice_facts branch point, mirroring the human verb's receipt-vs-not branch
+// point above).
+// ===========================================================================
+
+test("P4 TOCTOU order A: enqueue_invoice_facts holds the document lock FIRST — it legitimately sees the NULL kind and opens a classify task; the concurrent kind-set still lands after", async () => {
+  requireReady();
+  const client = W.clients.A1;
+  // A GENUINELY task-free NULL-kind document — seedCitedDocument routes through the real
+  // file_document writer, which itself auto-enqueues via _enqueue_invoice_facts_core AT
+  // FILING TIME (kind is null then), pre-seeding a classify task before the race even
+  // starts. seedVerifiedDocument mints the document row directly, bypassing file_document
+  // entirely, so this race's "a" call is the ONLY thing that can ever open a task here.
+  const { seedVerifiedDocument } = await import("./rig-docs-fixtures.mjs");
+  const doc = await seedVerifiedDocument({ firm: await firmOf(client), kind: null });
+
+  const out = await holdThenContend({
+    a: {
+      role: ROLES.runtime,
+      run: (c) => c.query(
+        "select clara.enqueue_invoice_facts(p_document => $1) as receipt",
+        [doc.documentId],
+      ).then((r) => r.rows[0].receipt),
+    },
+    b: {
+      role: ROLES.authenticated, jwtSub: W.users.bob,
+      run: (c) => c.query(
+        "select clara.set_document_kind(p_document => $1, p_kind => $2, p_reason => $3, p_op_key => $4) as receipt",
+        [doc.documentId, "invoice", "already known — this is an invoice", opk("p4-toctou-a-setkind")],
+      ).then((r) => r.rows[0].receipt),
+    },
+  });
+
+  assert.ok(out.provedBlocked, "set_document_kind genuinely BLOCKED behind enqueue_invoice_facts's row lock — not a lucky ordering");
+  assert.equal(out.a.ok, true, `enqueue_invoice_facts (the lock holder, seeing NULL) should succeed: ${out.a.message ?? ""}`);
+  assert.equal(out.a.receipt?.status, "queued", "the classify lane fired — it legitimately saw NULL at the moment it held the lock");
+  assert.equal(out.b.ok, true, `set_document_kind should succeed once enqueue_invoice_facts commits: ${out.b.message ?? ""}`);
+
+  assert.equal(await docKind(doc.documentId), "invoice", "the correction still lands — it simply had to wait its turn");
+  const classifyTasks = await laneTasks(doc.documentId, "classify");
+  assert.equal(classifyTasks.length, 1, "exactly one classify task exists — the legitimately-fired NULL-kind route");
+  const factsTasks = await laneTasks(doc.documentId, "invoice_facts");
+  assert.equal(factsTasks.length, 0, "no invoice_facts task exists yet — the automatic core only opens ONE lane per call, on the snapshot it actually held the lock for");
+});
+
+test("P4 TOCTOU order B: set_document_kind holds the document lock FIRST — enqueue_invoice_facts blocks, then sees the NEW kind and routes straight to invoice_facts (never the stale NULL-kind classify route)", async () => {
+  requireReady();
+  const client = W.clients.A1;
+  // See order A's comment: a genuinely task-free document (seedVerifiedDocument bypasses
+  // file_document's own auto-enqueue), so a surviving classify task can only mean this
+  // function routed on the stale pre-commit NULL snapshot.
+  const { seedVerifiedDocument } = await import("./rig-docs-fixtures.mjs");
+  const doc = await seedVerifiedDocument({ firm: await firmOf(client), kind: null });
+
+  const out = await holdThenContend({
+    a: {
+      role: ROLES.authenticated, jwtSub: W.users.bob,
+      run: (c) => c.query(
+        "select clara.set_document_kind(p_document => $1, p_kind => $2, p_reason => $3, p_op_key => $4) as receipt",
+        [doc.documentId, "invoice", "already known — this is an invoice", opk("p4-toctou-b-setkind")],
+      ).then((r) => r.rows[0].receipt),
+    },
+    b: {
+      role: ROLES.runtime,
+      run: (c) => c.query(
+        "select clara.enqueue_invoice_facts(p_document => $1) as receipt",
+        [doc.documentId],
+      ).then((r) => r.rows[0].receipt),
+    },
+  });
+
+  assert.ok(out.provedBlocked, "enqueue_invoice_facts genuinely BLOCKED behind set_document_kind's row lock — not a lucky ordering");
+  assert.equal(out.a.ok, true, `set_document_kind (the lock holder) should succeed: ${out.a.message ?? ""}`);
+  assert.equal(out.b.ok, true, `enqueue_invoice_facts should succeed once set_document_kind commits: ${out.b.message ?? ""}`);
+  assert.equal(out.b.receipt?.status, "queued", "the core still queues — but on the POST-COMMIT kind, not the stale NULL snapshot");
+
+  assert.equal(await docKind(doc.documentId), "invoice", "the kind change stands");
+  const classifyTasks = await laneTasks(doc.documentId, "classify");
+  assert.equal(classifyTasks.length, 0, "NO classify task was ever opened — the core must see the POST-COMMIT 'invoice' kind, never the stale NULL snapshot that would have wrongly routed to classify");
+  const factsTasks = await laneTasks(doc.documentId, "invoice_facts");
+  assert.equal(factsTasks.length, 1, "exactly one invoice_facts task exists — routed correctly on the true, post-commit kind");
+});
+
+// ===========================================================================
 // THE STRENGTHENING CELL: a pre-0025 receipt already carries a 'failed'/'skipped_kind'
 // terminal row (the shape _enqueue_invoice_facts_core minted for EVERY receipt before this
 // migration). Proves — behaviorally, not just via the static tail probe — that the

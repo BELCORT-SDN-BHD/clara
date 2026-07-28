@@ -29,12 +29,13 @@
 -- byte-identity CLOSED SET — its exact prosrc SHA-256 is pinned in
 -- packages/db/tests/wave-b/wb-0020-legacy.test.mjs and asserted unchanged since the
 -- 19-migration prestate. This migration is the SECOND deliberate edit to that closed set
--- (the first was A7's record_wiki_source_ingest, within 0020 itself). Per that pin's own
--- discipline the test is amended, not retuned: it reverses exactly this one widening and
--- re-hashes the remainder against the ORIGINAL 19-migration pin, so the cell proves both
--- that the ratified edit is present in its exact shape and that nothing else in the body
--- moved — including 0017's O8.6 patch, which is exactly the failure mode the header above
--- guards against.
+-- (the first was A7's record_wiki_source_ingest, within 0020 itself) — and, like A7, it is
+-- TWO ratified edits landing together: the task #27 kind-widening, and the P4 lock-order fix
+-- below (both shipped in this one migration, both ratified before merge). Per that pin's own
+-- discipline the test is amended, not retuned: it reverses BOTH edits and re-hashes the
+-- remainder against the ORIGINAL 19-migration pin, so the cell proves both that each ratified
+-- edit is present in its exact shape and that nothing else in the body moved — including
+-- 0017's O8.6 patch, which is exactly the failure mode the header above guards against.
 --
 -- O2 FIX (cross-model review, second round): §B's document read was a plain SELECT — no
 -- lock. Between that read and the receipt-only backfill decision later in the same
@@ -44,6 +45,36 @@
 -- receipt. Fixed by locking the row (FOR UPDATE) at the same point classify_document and
 -- set_document_kind already lock it for the identical reason — see §B's own inline comment
 -- for the full reasoning and the lock-order argument.
+--
+-- P4 FIX (cross-model review, THIRD round — the sibling TOCTOU O2 fixed one function of two
+-- for). §A's OWN document read was the identical plain SELECT, no lock: between that read
+-- and §A's own kind-branch decision (invoice_facts vs classify vs skipped_kind), a concurrent
+-- set_document_kind or classify_document call could commit a kind change the core never
+-- sees, routing on a stale snapshot exactly like §B did before O2. Fixed identically — FOR
+-- UPDATE at the same point, closing the automatic path's TOCTOU the same way O2 closed the
+-- human-invoked one.
+--
+-- LOCK-ORDER EVIDENCE for §A's new lock (no caller creates a documents-vs-tasks inversion;
+-- verified against the four REAL callers, grepped across every migration — 0016's own tail
+-- DO-block probes are test invocations, not production callers):
+--   enqueue_invoice_facts (0009) calls the core FIRST, with NO prior lock of its own — the
+--     core's FOR UPDATE is the first (and, on the failure branch, only) lock this caller ever
+--     takes on clara.documents.
+--   file_document (0009) already locks documents FOR UPDATE BEFORE calling the core (its own
+--     firm-membership check) — the core's lock on the SAME row, SAME transaction, is a safe
+--     RE-ENTRANT re-acquisition, not a second competing lock.
+--   confirm_attribution_candidate and approve_wrong_client_correction (0009) NEVER lock
+--     clara.documents anywhere in their own bodies before calling the core (they lock
+--     attribution_candidates/attribution_attempts and filing_corrections/document_filings/
+--     journal_entries respectively) — the core's FOR UPDATE is the first and only documents
+--     lock either function ever takes.
+-- And the core itself never locks clara.document_processing_tasks WITH FOR UPDATE anywhere in
+-- its own body (every task read here is a plain SELECT) — so the core can never itself hold a
+-- tasks lock and THEN reach for a documents lock, the shape a documents-vs-tasks inversion
+-- would require. No caller that reaches the core locks document_processing_tasks first either
+-- (claim_document_processing_task / requeue_stranded_document_task never call the core).
+-- Structurally, a deadlock between this new lock and any other writer's lock ordering cannot
+-- occur.
 --
 -- WHAT THIS DOES NOT DO. No auto-enqueue of EXISTING receipt documents inside this migration
 -- — a data migration inside a DDL migration violates the doors-not-data precedent this repo
@@ -90,7 +121,7 @@ declare
   d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;
   v_lane text; v_engine text;
 begin
-  select * into d from clara.documents where id=p_document;
+  select * into d from clara.documents where id=p_document for update;
   if not found then raise exception 'document not found' using errcode='CLR11'; end if;
   -- 0014: a consent-evidence document is a LEGAL artifact — never facts-extracted.
   if d.document_kind='consent_evidence' then
@@ -438,6 +469,12 @@ begin
   if position('d.document_kindin(''invoice'',''credit_note'',''debit_note'')' in v_code) > 0 then
     raise exception '0025 tail: _enqueue_invoice_facts_core still carries the OLD three-kind gate somewhere — a partial widening';
   end if;
+  -- P4 (cross-model review, third round): the document row is locked BEFORE its kind is
+  -- read for any decision — closing the SAME-SHAPED TOCTOU O2 fixed on request_reextraction.
+  -- Fused to the query, not a bare mention.
+  if position('fromclara.documentswhereid=p_documentforupdate' in v_code) = 0 then
+    raise exception '0025 tail: _enqueue_invoice_facts_core no longer locks the document row before reading its kind — the P4 TOCTOU fix is missing';
+  end if;
   -- 0017's O8.6 inactive-client guard survived the CoR (the read-the-live-body discipline's
   -- own proof, not just a comment about it).
   if position('skipped_client_onboarding' in v_code) = 0
@@ -499,6 +536,6 @@ begin
     raise exception '0025 tail: request_reextraction has an unexpected EXECUTE grantee after the CoR — it must stay clara_authenticated-only';
   end if;
 
-  raise notice '0025: receipt admitted to the invoice_facts kind gate (both the automatic core and the human re-extraction/backfill verb); page-budget reservation confirmed unconditional on lane';
+  raise notice '0025: receipt admitted to the invoice_facts kind gate (both the automatic core and the human re-extraction/backfill verb); page-budget reservation confirmed unconditional on lane; both functions'' document reads are now lock-guarded (O2 + P4) against the classify_document/set_document_kind TOCTOU';
 end
 $tail$;

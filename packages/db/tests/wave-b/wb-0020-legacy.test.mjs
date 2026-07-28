@@ -101,24 +101,34 @@ const BYTE_IDENTICAL = {
   // AMENDMENT (ratified 2026-07-28, owner ruling on task #27 — Gate P blocker: "the facts
   // lane excludes 'receipt', where Malaysian SST actually lives" — AUTO-ROUTE ALL RECEIPTS).
   // Migration 0025 is the SECOND deliberate edit to this closed set (the FIRST being A7's
-  // record_wiki_source_ingest below) — it widens the kind gate's admitted list from three
-  // kinds to four. Same discipline as A7: `restore` REVERSES exactly that one edit and the
-  // remainder is compared against the UNCHANGED 19-migration prestate, so this cell proves
-  // both that the ratified widening is present in its exact shape AND that nothing else in
-  // this body moved (the read-the-live-body-not-the-file discipline 0025's own header
-  // records — a wrong-base CoR would fail THIS reversal in an entirely different way, not
-  // just at the final hash).
+  // record_wiki_source_ingest below), and — like A7 — it is TWO ratified edits, not one:
+  //   (a) widens the kind gate's admitted list from three kinds to four (task #27 itself).
+  //   (b) P4 (cross-model review, third round): locks the document row (FOR UPDATE) before
+  //       reading its kind, closing the SAME-SHAPED TOCTOU O2 closed on request_reextraction
+  //       — a concurrent classify_document/set_document_kind call could otherwise commit a
+  //       kind change this function would route on a stale snapshot of.
+  // Same discipline as A7: `restore` REVERSES BOTH edits and the remainder is compared
+  // against the UNCHANGED 19-migration prestate, so this cell proves both that the ratified
+  // edits are present in their exact shape AND that nothing else in this body moved (the
+  // read-the-live-body-not-the-file discipline 0025's own header records — a wrong-base CoR
+  // would fail THIS reversal in an entirely different way, not just at the final hash).
   _enqueue_invoice_facts_core: {
     sig: "clara._enqueue_invoice_facts_core(uuid)",
     len: 4312, sha: "86ff810a99e7bf230017f8565d930b64c16e4f6c6e16cd6084a5cebdff1a27f0",
     exact: "0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e",
     acl: ["clara_fn_owner=X/clara_fn_owner"],
-    restore: (src) => src.replace(
-      "d.document_kind in ('invoice','credit_note','debit_note','receipt')",
-      "d.document_kind in ('invoice','credit_note','debit_note')",
-    ),
+    restore: (src) => src
+      .replace(
+        "d.document_kind in ('invoice','credit_note','debit_note','receipt')",
+        "d.document_kind in ('invoice','credit_note','debit_note')",
+      )
+      .replace(
+        "select * into d from clara.documents where id=p_document for update;",
+        "select * into d from clara.documents where id=p_document;",
+      ),
     restoreMust: [
       /d\.document_kind in \('invoice','credit_note','debit_note','receipt'\)/,
+      /where id=p_document for update;\n {2}if not found then raise exception 'document not found'/,
     ],
   },
   // AMENDMENTS A6→A7 (ratified 2026-07-25, contract v1.4 §5.6/§5.7). This is the ONE member of
