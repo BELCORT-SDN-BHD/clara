@@ -437,6 +437,15 @@ test("EZSEC: 'Total Payable Excl. SST:' is the NET and reads as one", () => {
 });
 
 test("EZSEC: the GROSS line is one letter away and must never match", () => {
+  // WHAT THE Incl LINE SHOULD DO, decided from the vocabulary's design: NOTHING. It is not a
+  // total_excl_tax, and it is not a "total family" member either — LABEL_VOCABULARY carries no
+  // `invoice.total` entry AT ALL, deliberately. This reader exists to supply what Azure's typed
+  // fields do NOT carry (TotalTax measured 0/29 on the live corpus); `invoice.total` is the one
+  // field the typed path already captures 29/29. A reader-side gross would make a second source
+  // for a field that has never failed, and the mapper's reconciliation emits NEITHER reading
+  // when two disagree — so the only thing a gross label could buy is the occasional loss of the
+  // most reliable fact in the extraction. Ignored is the design, not an omission.
+  //
   // `Incl.` vs `Excl.` is the whole difference, and on this family tax is 0.00 so both lines
   // carry 1,700.00. A prefix that matched the gross would emit it as the net and the identity
   // would TIE — a wrong reading that corroborates. These are the pins that keep the `excl`
