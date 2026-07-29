@@ -21,6 +21,7 @@ import { autoDraft_v1 } from "./autoDraft.v1.js";
 import { autoDraft_v2 } from "./autoDraft.v2.js";
 import { autoDraft_v3 } from "./autoDraft.v3.js";
 import { autoDraft_v4 } from "./autoDraft.v4.js";
+import { autoDraft_v5 } from "./autoDraft.v5.js";
 import { firmInterview_v1 } from "./firmInterview.v1.js";
 import { firmInterview_v2 } from "./firmInterview.v2.js";
 import { clientOnboarding_v1 } from "./clientOnboarding.v1.js";
@@ -31,7 +32,7 @@ export const workflows = {
   chatTurn: chatTurn_v7,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
-  autoDraft: autoDraft_v4,
+  autoDraft: autoDraft_v5,
   firmInterview: firmInterview_v2,
   clientOnboarding: clientOnboarding_v2,
 } as const;
@@ -81,7 +82,20 @@ export const workflows = {
 // ai@7's generic NoOutputGeneratedError, and its own top-level catch settled every failure
 // with a fixed "sweep draft failed" regardless of cause. v4 captures the stream's own error
 // part and forwards the real caught error into the settle record (full rationale in
-// autoDraft.v4.impl.ts / autoDraft.v4.ts). Drop a re-export
+// autoDraft.v4.impl.ts / autoDraft.v4.ts). Post-Wave-B ALSO repointed autoDraft v4->v5
+// (ledger #46, owner ruling 2026-07-29 — THE SST-ZERO PRECEDENT): task
+// 7b389b4f-86af-4c72-ac17-07f1084eccb9 (IV-00743) settled CLR21 coding_incomplete on its
+// second attempt — the model correctly read the bill's stated-but-ZERO "SST Amt @ 6%: 0.00"
+// line and correctly refused to draft, because no chart-of-accounts account carried the
+// sst_purchase_cost special type this pre-v5 rule required for ANY stated tax figure,
+// zero or not. The owner ruled on the client's OWN precedent: the client's four
+// previously-approved EZSEC entries (all printing the identical "SST Amt @ 6%: 0.00" line)
+// are ALL two-leg — a stated-but-zero tax documents "no tax charged", not a visibility
+// split. v5 narrows the three-leg sst_purchase_cost split to a STATED NONZERO tax; a
+// stated ZERO or absent tax takes the two-leg shape (full finding + ruling in
+// autoDraft.v5.prompt.ts's own header). IV-00743 stays parked — its two real, distinct
+// failures predate this rule and remain the control's honest record; this fix targets
+// FRESH filings under the same recurring-vendor family. Drop a re-export
 // only once zero non-terminal runs of that version remain.
 export { firmInterview_v1 };
 export { clientOnboarding_v1 };
@@ -95,5 +109,6 @@ export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
 export { autoDraft_v3 };
+export { autoDraft_v4 };
 
 export const workflowNames: string[] = Object.keys(workflows);
