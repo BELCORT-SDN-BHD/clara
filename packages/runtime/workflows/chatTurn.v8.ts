@@ -90,18 +90,28 @@ const CHATTURN_MODEL_ERROR_PATTERN = new RegExp(
   "s",
 );
 
-/** ledger #46a (the diagnostic twin): reduce a caught top-level error into the settle
- *  record's errorCode STRING. Unlike autoDraft's refusalFromCaughtError (which returns
- *  {code,message} for a jsonb refusal column), settle_chat_turn's errorCode is a plain
- *  string — so only the tag's CODE half is forwarded; the message detail remains
- *  recoverable from the run's own stream chunks. A tagged stream error yields its own
- *  specific code (e.g. "model_stream_error"); anything else falls back to the
- *  pre-existing fixed "model_error" literal — UNCHANGED default for every other failure
- *  class. Pure — no WDK-ambient call, directly unit-testable. */
+/** ledger #46a (the diagnostic twin) — CORRECTED (Codex found live during this batch's
+ *  own review, before merge): clara.agent_tasks.error_code carries a CHECK constraint
+ *  (packages/db/migrations/0006_runtime_core.sql:153) admitting ONLY 'model_error',
+ *  'tool_error', 'timeout', 'engine_lost', 'limit', 'internal' — 'model_stream_error'
+ *  (the tag's own captured code) is NOT in that allowlist. Forwarding it verbatim, as
+ *  the first draft did, would make settle_chat_turn's UPDATE violate the CHECK, and the
+ *  entry.ts catch block's settle(...).catch(() => {}) would swallow that failure —
+ *  leaving the task STUCK NON-TERMINAL instead of recording the diagnostic, exactly the
+ *  opposite of the intent (and worse than v7's always-"model_error" behaviour, which at
+ *  least settled). Unlike autoDraft's refusalFromCaughtError (an UNCONSTRAINED jsonb
+ *  refusal column, where the tag's raw code is safe to forward), every tagged stream
+ *  error here maps to the closest ADMITTED bucket, 'model_error' — the SAME value v7
+ *  always wrote. The real diagnostic value survives elsewhere: consumeChatTurnModelResult
+ *  still captures the genuine upstream cause into the THROWN error's own message (visible
+ *  in the run's workflow_stream_chunks / the WDK step-failure record), which is what
+ *  actually recovered IV-00743's own CLR21 detail live — this function's job is only to
+ *  keep the DB column's CHECK constraint satisfied, never to smuggle an unvalidated
+ *  string into it. Pure — no WDK-ambient call, directly unit-testable. */
 export function errorCodeFromCaughtError(err: unknown): string {
   const rawMessage = err instanceof Error ? err.message : String(err);
   const tagged = CHATTURN_MODEL_ERROR_PATTERN.exec(rawMessage);
-  if (tagged) return tagged[1] || "model_error";
+  if (tagged) return "model_error"; // every tagged code maps to the one ADMITTED bucket it fits
   return "model_error";
 }
 

@@ -74,42 +74,84 @@ const errOf = (name, message) => Object.assign(new Error(message), { name });
 // than silently shipping a workflow/step nothing ever dispatches.
 // ===========================================================================
 
+// Faithful port of @workflow/builders' fast-discovery.js + transform-utils.js (v4.1.2,
+// read directly from node_modules to confirm these four regexes/the algorithm below
+// match byte-for-byte) — NOT a simplified substring-count proxy (a prior draft of this
+// guard only checked literal '"use workflow";' survival, which a single-quoted or
+// semicolonless real directive could still slip past while reporting a false pass; a
+// Codex confirmation pass on this exact PR caught the gap before merge).
 const wdkTemplateLiteralPattern = /`(?:\\[\s\S]|[^`\\])*`/g;
 const wdkCommentPattern = /\/\*[\s\S]*?\*\/|\/\/[^\r\n]*/g;
+const wdkDirectiveLinePattern = /^\s*(['"])(use workflow|use step)\1;?\s*$/;
+const wdkStringDirectiveLinePattern = /^\s*(['"])[^'"]+\1;?\s*$/;
 
-/** Mirrors @workflow/builders' fast-discovery.js detectWorkflowPatterns: blank out
- *  template literals, THEN line/block comments, before searching for the literal
- *  directive strings. A real directive occurrence count that survives this masking
- *  unchanged proves no comment-backtick sequence accidentally swallowed it. */
-function directiveSurvivalCounts(source) {
-  const hasDirectiveSubstring = source.includes("use workflow") || source.includes("use step");
-  const masked =
-    hasDirectiveSubstring && (source.includes("`") || source.includes("/"))
-      ? source.replace(wdkTemplateLiteralPattern, (m) => m.replace(/[^\r\n]/g, " ")).replace(wdkCommentPattern, (m) => m.replace(/[^\r\n]/g, " "))
-      : source;
-  const count = (text, needle) => (text.match(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || []).length;
-  return {
-    rawWorkflow: count(source, '"use workflow";'),
-    survivedWorkflow: count(masked, '"use workflow";'),
-    rawStep: count(source, '"use step";'),
-    survivedStep: count(masked, '"use step";'),
-  };
+/** Mirrors transform-utils.js's hasDirective(source, directive) exactly: a directive
+ *  only counts on its OWN line, immediately after either the start of a function body
+ *  (the previous meaningful line ends with "{") or another string-directive line
+ *  (directive-stacking, e.g. "use strict"; "use step";). */
+function wdkHasDirective(source, directive) {
+  let previousMeaningfulLine;
+  for (const line of source.split(/\r?\n/)) {
+    const trimmedLine = line.trim();
+    if (trimmedLine === "") continue;
+    const directiveMatch = wdkDirectiveLinePattern.exec(trimmedLine);
+    if (directiveMatch) {
+      if (
+        directiveMatch[2] === directive &&
+        (previousMeaningfulLine === undefined || previousMeaningfulLine.endsWith("{") || wdkStringDirectiveLinePattern.test(previousMeaningfulLine))
+      ) {
+        return true;
+      }
+      previousMeaningfulLine = trimmedLine;
+      continue;
+    }
+    previousMeaningfulLine = trimmedLine;
+  }
+  return false;
 }
 
-test("every real \"use workflow\"/\"use step\" directive in the chatTurn v8 closure survives the WDK-style template-literal + comment masking pass — no odd-backtick comment sequence has silently swallowed a directive", () => {
+/** Mirrors fast-discovery.js's processFile: mask template literals THEN comments, then
+ *  run the REAL hasDirective (not a substring check) against the masked source — the
+ *  exact two-stage pipeline @workflow/builders actually runs at build time. */
+function wdkDetectsDirective(source, directive) {
+  const hasSubstring = source.includes(directive);
+  if (!hasSubstring) return false;
+  const masked =
+    source.includes("`") || source.includes("/")
+      ? source.replace(wdkTemplateLiteralPattern, (m) => m.replace(/[^\r\n]/g, " ")).replace(wdkCommentPattern, (m) => m.replace(/[^\r\n]/g, " "))
+      : source;
+  return wdkHasDirective(masked, directive);
+}
+
+test("every real \"use workflow\"/\"use step\" directive in the chatTurn v8 closure is detected by the REAL @workflow/builders algorithm (template-literal mask, then comment mask, then the line-position hasDirective check) — no odd-backtick comment sequence has silently swallowed a directive", () => {
+  const expectedWorkflow = { "chatTurn.v8.ts": true };
+  const expectedStep = { "chatTurn.v8.impl.ts": true };
   for (const file of ["chatTurn.v8.ts", "chatTurn.v8.impl.ts", "chatTurn.v8.infra.ts", "chatTurn.v8.errors.ts", "chatTurn.v8.prompt.ts", "chatTurn.v8.tools.ts"]) {
     const source = readFileSync(new URL(`../workflows/${file}`, import.meta.url), "utf8");
-    const c = directiveSurvivalCounts(source);
-    assert.equal(c.survivedWorkflow, c.rawWorkflow, `${file}: a "use workflow" directive was swallowed by the template-literal/comment mask`);
-    assert.equal(c.survivedStep, c.rawStep, `${file}: a "use step" directive was swallowed by the template-literal/comment mask`);
+    assert.equal(
+      wdkDetectsDirective(source, "use workflow"),
+      Boolean(expectedWorkflow[file]),
+      `${file}: the REAL @workflow/builders algorithm must ${expectedWorkflow[file] ? "" : "NOT "}detect a "use workflow" directive here`,
+    );
+    assert.equal(
+      wdkDetectsDirective(source, "use step"),
+      Boolean(expectedStep[file]),
+      `${file}: the REAL @workflow/builders algorithm must ${expectedStep[file] ? "" : "NOT "}detect a "use step" directive here`,
+    );
   }
 });
 
-test("the workflow entry file specifically carries exactly one real \"use workflow\" directive (chatTurn_v8 itself) and it survives", () => {
-  const source = readFileSync(new URL("../workflows/chatTurn.v8.ts", import.meta.url), "utf8");
-  const c = directiveSurvivalCounts(source);
-  assert.equal(c.rawWorkflow, 1, "chatTurn.v8.ts must declare exactly one workflow entry point");
-  assert.equal(c.survivedWorkflow, 1, "that one entry point must survive the WDK discovery mask");
+test("the real hasDirective port itself recognises both accepted quote styles and the optional trailing semicolon — the exact forms a future edit to this closure might use", () => {
+  const cases = [
+    ['function f() {\n  "use workflow";\n  return 1;\n}', true],
+    ["function f() {\n  'use workflow';\n  return 1;\n}", true],
+    ['function f() {\n  "use workflow"\n  return 1;\n}', true], // no trailing semicolon
+    ['function f() {\n  const x = 1;\n  "use workflow";\n  return x;\n}', false], // not the FIRST statement
+    ['const s = "use workflow";', false], // an assignment, not a directive line
+  ];
+  for (const [source, expected] of cases) {
+    assert.equal(wdkHasDirective(source, "use workflow"), expected, `hasDirective mismatch for: ${JSON.stringify(source)}`);
+  }
 });
 
 // ===========================================================================
@@ -221,7 +263,7 @@ test("chatTurn v8 — an error part whose own `error` field is itself falsy/abse
 // autoDraft.v4.ts's ledger #44 R-round F1 exactly, adapted to a STRING return).
 // ===========================================================================
 
-test("chatTurn v8 (R-round F1) — a REAL WDK step-boundary crossing, BOTH stages replicated (the retry-exhaustion prefix, then FatalError): consumeChatTurnModelResult's tagged message survives, and errorCodeFromCaughtError recovers the ORIGINAL code from the tag (never 'model_error')", async () => {
+test("chatTurn v8 (R-round F1) — a REAL WDK step-boundary crossing, BOTH stages replicated (the retry-exhaustion prefix, then FatalError): consumeChatTurnModelResult's tagged message survives, and errorCodeFromCaughtError maps it to the one ADMITTED bucket ('model_error') — never the raw tag code, which agent_tasks.error_code's CHECK constraint (0006_runtime_core.sql:153) does not admit", async () => {
   // Stage 1: step-handler.js's retry-exhaustion branch prepends its own literal
   // prefix to the thrown error's .message, discarding every other property.
   const original = Object.assign(
@@ -233,12 +275,30 @@ test("chatTurn v8 (R-round F1) — a REAL WDK step-boundary crossing, BOTH stage
   // stored string, copying ONLY .message — no .code, no .cause.
   class FatalError extends Error {}
   const reconstructed = new FatalError(stage1Message);
-  assert.equal(errorCodeFromCaughtError(reconstructed), "model_stream_error");
+  assert.equal(errorCodeFromCaughtError(reconstructed), "model_error");
 });
 
-test("chatTurn v8 (R-round F1) — the SAME tag, at message START with no WDK prefix at all (a direct/non-terminal catch, the OTHER of the two permitted anchors), still parses correctly", () => {
+test("chatTurn v8 (R-round F1) — the SAME tag, at message START with no WDK prefix at all (a direct/non-terminal catch, the OTHER of the two permitted anchors), still parses correctly and still maps to the one ADMITTED bucket", () => {
   const err = new Error("[chatturn_model:model_stream_error] model stream reported an error: direct catch, no WDK boundary");
-  assert.equal(errorCodeFromCaughtError(err), "model_stream_error");
+  assert.equal(errorCodeFromCaughtError(err), "model_error");
+});
+
+test("chatTurn v8 — errorCodeFromCaughtError NEVER returns a value outside clara.agent_tasks.error_code's CHECK-constraint allowlist, for any tagged, untagged, or malformed input", () => {
+  const ADMITTED = new Set(["model_error", "tool_error", "timeout", "engine_lost", "limit", "internal"]);
+  const cases = [
+    new Error("[chatturn_model:model_stream_error] tagged, message start"),
+    new Error(`Step "x" failed after 1 retry: [chatturn_model:model_stream_error] tagged, after singular WDK prefix`),
+    new Error(`Step "x" failed after 7 retries: [chatturn_model:model_stream_error] tagged, after plural WDK prefix`),
+    new Error("[chatturn_model:forged_arbitrary_code] a forged/unexpected tag code must not leak into the column either"),
+    new Error("plain untagged failure"),
+    "a bare string throw",
+    { weird: "object" },
+    null,
+    undefined,
+  ];
+  for (const c of cases) {
+    assert.ok(ADMITTED.has(errorCodeFromCaughtError(c)), `errorCodeFromCaughtError(${JSON.stringify(String(c))}) must return an admitted code`);
+  }
 });
 
 test("chatTurn v8 (R-round F1) — a message WITHOUT the chatturn_model tag (any OTHER caught error, post-boundary) falls back to 'model_error' — UNCHANGED from v7's own fixed literal for every non-stream-error failure class", () => {
