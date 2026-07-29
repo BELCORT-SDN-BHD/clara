@@ -88,8 +88,11 @@
 -- only prevents going negative, not repeated subtraction). Fixed by persisting
 -- reserved_tokens=0,state='idle' onto the clara.autodraft_attempts row directly inside
 -- the terminal branch, unconditionally, before any code path that could return early —
--- durable because a plpgsql function has no internal sub-transaction boundary, so the
--- UPDATE commits together with whichever return statement the call ultimately takes.
+-- durable because the UPDATE runs in the OUTER scope, strictly before the one inner
+-- EXCEPTION-guarded sub-transaction this function has (added by the second O-round fix
+-- below, wrapping the op-key reservation together with the mint pipeline it protects)
+-- -- a rollback-to-savepoint inside that inner block can never touch a write made
+-- before the block opened.
 -- Also fixed in the same pass: this migration's own in-transaction tail check for
 -- "parked precedes the terminal branches" was comparing the PRE-LOCK occurrence of the
 -- parked-branch text against a post-lock-only position, which is vacuously true
@@ -98,6 +101,29 @@
 -- back-ported to the migration's own tail) — the tail now anchors every check to the
 -- SECOND (post-lock) occurrence of the registry re-read statement, exactly as the
 -- postverify file does.
+--
+-- O-ROUND CONFIRMATION, THIRD PASS (Codex, a further scoped read-only review that also
+-- independently confirmed the unreachability finding above via official PostgreSQL
+-- documentation on ON CONFLICT and row locking). Found that the second pass's own fix
+-- did not match its stated boundary: clara._reserve_op's call sat OUTSIDE the new
+-- inner block despite the intended "op-key reservation through final return" scope --
+-- if the handler ever fires, the mint writes roll back but the PENDING op receipt
+-- _reserve_op already inserted (result IS NULL) would survive, orphaned forever, with
+-- every later call replaying it as {"pending":true} rather than ever retrying. Fixed
+-- by opening the inner block immediately before _reserve_op instead of after it, so
+-- its insert is guarded together with the mint pipeline. The tail's own block-boundary
+-- check (and the postverify file's matching probe) was correspondingly fixed: it
+-- previously required 'begin' to open AFTER the reservation call -- backwards -- and
+-- did not rule out a decoy nested block elsewhere satisfying the position check alone;
+-- both now require an exact textual adjacency plus an exactly-one-'begin' count. The
+-- two-occurrence registry-re-read anchor was tightened to require the FIRST occurrence
+-- be strictly before the filing lock too, not just the second one after it (two
+-- post-lock reads would previously have passed). The dynamic constraint probe's test
+-- tuple was corrected from ('idle',NULL,0,NULL) to a non-null task_id/usage_date,
+-- matching what the real reconciliation UPDATE actually leaves in place (it never
+-- touches those two columns). Stale "no internal sub-transaction boundary" phrasing
+-- and mismatched tail-notice counters (1/5, 2/5 alongside later X/6 notices) were also
+-- corrected for honesty.
 
 set role clara_fn_owner;
 
@@ -240,9 +266,10 @@ begin
     -- tokens>0) so the already-refunded settle-failure path (state already 'idle',
     -- reserved_tokens already 0) sees an idempotent, harmless no-op write, while the
     -- never-refunded cancellation path gets its reservation genuinely closed out. Because
-    -- this statement executes and commits together with whichever return the function
-    -- ultimately takes (there is no sub-transaction boundary inside a plpgsql function),
-    -- the reconciliation survives even a same-call early return.
+    -- this statement runs in the OUTER scope -- strictly before the one inner EXCEPTION-
+    -- guarded sub-transaction this function has, which wraps only the mint pipeline
+    -- further below -- it commits together with whichever return the function ultimately
+    -- takes, and survives even if that inner block's handler later fires.
     v_is_retry:=true;
     v_op_key:='autodraft:'||p_filing||':'||p_origin;
     if a.reserved_tokens>0 then
@@ -331,18 +358,6 @@ begin
     return jsonb_build_object('outcome','refused_budget','reason','refused_budget');
   end if;
 
-  -- The op-key is reserved here, immediately before the one mutation (task
-  -- creation) that genuinely needs idempotent replay protection on retry. 0032: the
-  -- retry branch above already assigned v_op_key (and cleared the stale receipt under
-  -- it) when superseding a terminal task; every other path assigns it here for the
-  -- first time, identically to before 0032.
-  if v_op_key is null then
-    v_op_key:='autodraft:'||p_filing||':'||p_origin;
-  end if;
-  v_dedupe:=clara._reserve_op(f.firm_id,'admit_autodraft_task',v_op_key,
-    clara._hash(jsonb_build_object('filing',p_filing,'origin',p_origin)));
-  if v_dedupe is not null then return v_dedupe; end if;
-
   -- O-round confirmation finding #2 (Codex, second scoped pass, High/blocking): a
   -- plpgsql EXCEPTION clause implicitly opens a SAVEPOINT at the START of whatever
   -- block it is attached to -- when this exception clause lived on the function's
@@ -359,7 +374,24 @@ begin
   -- already ran in the OUTER, unguarded scope; a rollback-to-savepoint here can only
   -- ever undo what THIS inner block itself wrote, never anything from before it
   -- opened. No other exception handler exists anywhere else in this function.
+  --
+  -- Third O-round confirmation finding (Codex, third scoped pass, Medium): a build-
+  -- time draft of THIS fix opened the inner block AFTER the op-key reservation call,
+  -- leaving _reserve_op's own insert in the OUTER, unguarded scope -- if the inner
+  -- block's handler ever fires, the mint writes roll back but the PENDING op receipt
+  -- _reserve_op already inserted (result IS NULL) would survive, orphaned forever:
+  -- every subsequent call would replay that pending receipt as {"pending":true}
+  -- rather than ever retrying. The op-key is still reserved "immediately before the
+  -- one mutation sequence that needs idempotent replay protection" -- that sequence
+  -- now begins here, at the top of THIS block, not before it.
   begin
+    if v_op_key is null then
+      v_op_key:='autodraft:'||p_filing||':'||p_origin;
+    end if;
+    v_dedupe:=clara._reserve_op(f.firm_id,'admit_autodraft_task',v_op_key,
+      clara._hash(jsonb_build_object('filing',p_filing,'origin',p_origin)));
+    if v_dedupe is not null then return v_dedupe; end if;
+
     update clara.firm_usage_daily set tokens_used=tokens_used+p_reserve_tokens
       where firm_id=f.firm_id and usage_date=v_today;
     insert into clara.agent_tasks(firm_id,client_id,kind,status,model_snapshot)
@@ -405,7 +437,7 @@ declare
   v_admit_src text;
   v_reread_marker text := 'select aa.*,t.status as task_status into a from clara.autodraft_attempts aa';
   v_filing_lock_marker text := 'select df.* into f from clara.document_filings df where df.id=p_filing and df.retired_at is null for update;';
-  v_pos_lock2 int; v_post_lock text;
+  v_pos_lock2 int; v_pos_first_read int; v_post_lock text;
   v_pos_filing_lock int; v_occurrence_count int; v_scan_from int; v_found int;
   v_pos_completed int; v_pos_terminal int; v_pos_lane_check int; v_pos_opkey int;
   v_terminal_slice text;
@@ -451,6 +483,12 @@ begin
   -- AND the marker must appear EXACTLY twice in the whole body, not merely "at least
   -- twice" (a third occurrence anywhere would mean this scan can no longer be trusted
   -- to have found the true post-lock recheck without also verifying total count).
+  --
+  -- Third O-round confirmation finding (Codex, third scoped pass, Low): checking only
+  -- "the second occurrence is after the lock" does not rule out BOTH occurrences being
+  -- after the lock (e.g. the pre-lock fast-path itself being moved or duplicated) --
+  -- the advertised shape is specifically "one pre-lock, one post-lock", so the FIRST
+  -- occurrence's position must also be captured and proven to be BEFORE the lock.
   v_pos_filing_lock:=position(v_filing_lock_marker in v_admit_src);
   if v_pos_filing_lock=0 then
     raise exception '0032 tail: cannot locate the filing FOR UPDATE lock statement';
@@ -460,14 +498,15 @@ begin
     v_found:=position(v_reread_marker in substring(v_admit_src from v_scan_from));
     exit when v_found=0;
     v_occurrence_count:=v_occurrence_count+1;
+    if v_occurrence_count=1 then v_pos_first_read:=v_scan_from+v_found-1; end if;
     if v_occurrence_count=2 then v_pos_lock2:=v_scan_from+v_found-1; end if;
     v_scan_from:=v_scan_from+v_found-1+length(v_reread_marker);
   end loop;
   if v_occurrence_count<>2 then
     raise exception '0032 tail: the registry re-read must appear EXACTLY twice (pre-lock + post-lock) — found %', v_occurrence_count;
   end if;
-  if v_pos_lock2<=v_pos_filing_lock then
-    raise exception '0032 tail: the SECOND registry re-read must be strictly AFTER the filing FOR UPDATE lock (lock=%, second-read=%)', v_pos_filing_lock, v_pos_lock2;
+  if not (v_pos_first_read < v_pos_filing_lock and v_pos_filing_lock < v_pos_lock2) then
+    raise exception '0032 tail: the two registry re-reads must straddle the filing lock -- one strictly BEFORE, one strictly AFTER (first=%, lock=%, second=%)', v_pos_first_read, v_pos_filing_lock, v_pos_lock2;
   end if;
   v_post_lock:=substring(v_admit_src from v_pos_lock2);
 
@@ -489,7 +528,7 @@ begin
       '0032 tail: registry branch order is wrong (completed=%, terminal=%, opkey=%)',
       v_pos_completed,v_pos_terminal,v_pos_opkey;
   end if;
-  raise notice '0032 tail OK (1/5): post-lock registry branch order (completed -> terminal -> conditional op-key) is intact';
+  raise notice '0032 tail OK (1/6): post-lock registry branch order (completed -> terminal -> conditional op-key) is intact';
 
   -- (3) the parked branch must come BEFORE the new terminal branches, WITHIN the
   -- post-lock section specifically — the 2+-failure governance gate is checked first and
@@ -498,7 +537,7 @@ begin
      or position('elsif found and a.state=''parked'' then' in v_post_lock)>=v_pos_completed then
     raise exception '0032 tail: the POST-LOCK parked governance branch must precede the new terminal branches';
   end if;
-  raise notice '0032 tail OK (2/5): the parked (2+ failure) governance gate still takes precedence over the retry door, in the post-lock section itself';
+  raise notice '0032 tail OK (2/6): the parked (2+ failure) governance gate still takes precedence over the retry door, in the post-lock section itself';
 
   -- (4) the terminal-retry branch reconciles the reservation DURABLY on the attempt row
   -- itself (not just firm_usage_daily) and clears the stale receipt BEFORE falling
@@ -544,6 +583,18 @@ begin
   -- the exception handler is attached to THAT inner block (a nested 'exception when
   -- unique_violation' immediately preceding the function's final 'end'), not the
   -- outer one -- exactly one such handler exists anywhere in the body.
+  --
+  -- Third O-round confirmation finding (Codex, third scoped pass, Medium): a build-time
+  -- draft of THIS check required the inner 'begin' to open AFTER the op-key reservation
+  -- call -- backwards from the fix's OWN corrected boundary (finding #2 of the third
+  -- pass): _reserve_op's own insert must be INSIDE the guarded block too, or a caught
+  -- exception leaves its pending receipt orphaned. The check now requires 'begin' to be
+  -- immediately adjacent to the conditional op-key assignment that starts the guarded
+  -- sequence (proving nothing slips in between), and additionally requires there be
+  -- EXACTLY ONE bare 'begin' anywhere in the post-lock section -- since this migration
+  -- applied cleanly (a syntax error would have failed CREATE FUNCTION outright), any
+  -- 'begin' found must already be validly paired with its own 'end'; finding exactly
+  -- one rules out a decoy nested block elsewhere satisfying the adjacency check alone.
   if (length(v_post_lock)-length(replace(v_post_lock,'exception when unique_violation','')))
      / length('exception when unique_violation') <> 1 then
     raise exception '0032 tail: exactly one ''exception when unique_violation'' handler must exist';
@@ -552,17 +603,14 @@ begin
      <= position('update clara.autodraft_attempts set reserved_tokens=0,state=''idle''' in v_post_lock) then
     raise exception '0032 tail: the exception handler must come AFTER the terminal branch''s durable reconciliation, not wrap it';
   end if;
-  -- the inner block's own 'begin' (opening the exception-guarded region) must itself
-  -- come strictly AFTER the reconciliation UPDATE, and strictly AFTER the op-key
-  -- reservation call -- i.e. only the mint pipeline (the update/insert/insert/audit/
-  -- return sequence that actually needs the unique_violation guard) is nested; the
-  -- reconciliation AND the op-key reservation itself both stay in the outer scope.
-  if position(' begin ' in substring(v_post_lock from v_pos_opkey))=0
-     or position(' begin ' in substring(v_post_lock from v_pos_opkey))
-        <= position('clara._reserve_op(f.firm_id,''admit_autodraft_task'',v_op_key,' in substring(v_post_lock from v_pos_opkey)) then
-    raise exception '0032 tail: the inner exception-guarded block must open AFTER the op-key reservation call, protecting only the mint pipeline';
+  if (length(v_post_lock)-length(replace(v_post_lock,' begin ','')))
+     / length(' begin ') <> 1 then
+    raise exception '0032 tail: exactly one nested ''begin'' must exist in the post-lock section (a decoy block would defeat the adjacency check alone)';
   end if;
-  raise notice '0032 tail OK (5/6): the reconciliation is structurally OUTSIDE the exception-guarded region -- exactly one handler exists, attached to an inner block opened only around the mint pipeline it protects';
+  if position('begin if v_op_key is null then' in v_post_lock)=0 then
+    raise exception '0032 tail: the inner exception-guarded block must open IMMEDIATELY before the conditional op-key assignment, so _reserve_op''s own insert is guarded too';
+  end if;
+  raise notice '0032 tail OK (5/6): the reconciliation is structurally OUTSIDE the exception-guarded region -- exactly one handler exists, attached to a single inner block opened immediately before the op-key reservation, guarding it and the mint pipeline together';
 
   -- (6) is a SEPARATE do block below (no pg_get_functiondef call in it) -- it dynamically
   -- APPLIES the live ck_autodraft_attempts_reservation constraint to real test tuples via
@@ -594,9 +642,15 @@ begin
   -- appended directly rather than after a second literal 'check' keyword.
   execute format('alter table _x0032_reservation_probe add constraint ck_probe %s', v_condef);
 
-  -- THE FIX's exact shape (reserved_tokens=0, state='idle') must be ACCEPTED.
+  -- THE FIX's exact shape (reserved_tokens=0, state='idle') must be ACCEPTED. O-round
+  -- confirmation finding (Codex, third scoped pass, Low): the real reconciliation
+  -- UPDATE never touches task_id or usage_date -- it leaves whatever the row already
+  -- had (the OLD task's id, a real usage_date), never nulls them. Testing with nulls
+  -- here would pass even against a future constraint that required task_id/usage_date
+  -- to be NULL for state='idle', which would reject the real reconciled row -- test
+  -- with a genuinely non-null task_id and usage_date, matching the actual tuple shape.
   insert into _x0032_reservation_probe(state,task_id,reserved_tokens,usage_date)
-    values('idle',null,0,null);
+    values('idle',gen_random_uuid(),0,current_date);
 
   -- Self-check the probe is not vacuous: an INVALID tuple (an 'active' row claiming
   -- reserved_tokens=0, which the constraint's own 'active' branch requires to be > 0)
