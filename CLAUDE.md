@@ -106,7 +106,7 @@ ADR-025..027 · **A2.1** CLOSED — ADR-028..030 · **B** (knowledge + onboardin
 intent — ADR-044..046 · **the extraction slice** CLOSED — ADR-047/048 (`corroborated` =
 explicit two-reader agreement; confidence GONE).
 
-**LIVE POSTURE: 33 migrations (`0034`) · Fly `clara-runtime` v37 · FOUR firms** (BELCORT —
+**LIVE POSTURE: 34 migrations (`0035`) · Fly `clara-runtime` v38 · FOUR firms** (BELCORT —
 real, 3 clients, **high-stakes RM100,000** ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
 Gate-S synthetic sandbox, RM10k default · Alara Advisory + Borneo Books = slice-era RLS
 fixtures, never repurpose) **· dashboard Pages `app.clarabook.com`** (must set
@@ -139,12 +139,18 @@ live (manifest 80/80).
 hand-drafts are never autopost-eligible BY DESIGN; **autopost-from-seeding stays REFUSED**
 (WB-R2/ADR-046) — posting authority comes from verified in-system approvals only.
 
-**Open build items (the task ledger is the live status home):** the drafting-lane trio
-(counterparty-less-approval warning · CLR23 remedy-text · bind-existing-counterparty — were
-blocked behind the binding build, now free) · the hardening register (chatTurn diagnostic
-twin + tax-rule propagation · the reconciler double-dispatch cosmetics · the nonzero-tax DB
-belt · the sweep-vs-human budget-contention design question) · Gate P (waits on the first
-real SST-charging supplier bill — operating runway, not engineering) · the `opening_tb.line`
-producer + K-doc production door (Phase 5, review-gated). **NEXT: Wave C.**
+**The closing batch is DONE (2026-07-29, PRs #143/#144 + the v38 ceremony):** migration
+0035 (the counterparty-less-approval advisory warning — honest header: unreachable via
+sanctioned verbs, reachable via reversal-gated direct construction, the warning is the net ·
+the CLR23 withdraw-and-redraft remedy text) + chatTurn v8 (#46a stream-error capture with
+`error_code` held to the 0006 CHECK allowlist — the diagnostic lives in the tagged message ·
+#46b SST-zero two-leg propagation · #35 bind-existing-counterparty guidance).
+
+**Open build items (the task ledger is the live status home):** the reconciler
+double-dispatch cosmetics + the sweep-vs-human budget contention (→ Wave C) · the
+nonzero-tax DB belt (TRIGGER-BOUND: lands before any binding/rule on a vendor whose bills
+state nonzero tax) · Gate P (waits on the first real SST-charging supplier bill — operating
+runway, not engineering) · the `opening_tb.line` producer + K-doc production door (Phase 5,
+review-gated). **NEXT: Wave C (bank rec) in a fresh session.**
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**
