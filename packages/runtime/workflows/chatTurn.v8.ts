@@ -11,22 +11,28 @@
 // changes, everything else an unmodified version-rename of v7:
 //
 //   #46a (the diagnostic twin) — THIS file's ONLY change: the catch block now
-//   derives its settle errorCode via errorCodeFromCaughtError instead of the fixed
-//   "model_error" literal v7 always used. v7's model-segment step (like autoDraft's
-//   own v3, before ledger #44) swallowed a genuine model-stream error into ai@7's
-//   generic NoOutputGeneratedError, and this catch then recorded EVERY failure as
-//   the same fixed string, discarding whatever the caught error actually said. Now:
-//   chatTurn.v8.impl.ts's consumeChatTurnModelResult (a duplicated, cross-referenced
-//   port of autoDraft.v4.impl.ts's ledger #44 fix — full finding in that file's own
-//   header) captures a genuine stream error and tags it onto the thrown message;
-//   errorCodeFromCaughtError (below) parses that tag back out into a specific
-//   errorCode ("model_stream_error"). Unlike autoDraft's settle (a jsonb refusal
-//   object), settle_chat_turn's errorCode is a plain STRING column — so only the
-//   tag's CODE half is forwarded here; the full message detail remains recoverable
-//   from the run's own workflow_stream_chunks, exactly as ledger #44's IV-00743
-//   recovery demonstrated live. Every OTHER failure class still settles
-//   "model_error", UNCHANGED from v7 — this is a pure widening of ONE previously
-//   swallowed case, never a behavioural change to any other catch path.
+//   derives its settle errorCode via errorCodeFromCaughtError instead of writing
+//   the fixed "model_error" literal inline. v7's model-segment step (like
+//   autoDraft's own v3, before ledger #44) swallowed a genuine model-stream error
+//   into ai@7's generic NoOutputGeneratedError, discarding whatever the upstream
+//   fault actually said. chatTurn.v8.impl.ts's consumeChatTurnModelResult (a
+//   duplicated, cross-referenced port of autoDraft.v4.impl.ts's ledger #44 fix —
+//   full finding in that file's own header) fixes THAT: it captures a genuine
+//   stream error and tags it onto the thrown message, so the real upstream cause
+//   survives into the run's own workflow_stream_chunks / the WDK step-failure
+//   record — exactly what recovered IV-00743's own CLR21 detail live.
+//   errorCodeFromCaughtError's OWN job stops short of writing that captured code
+//   into the DB: clara.agent_tasks.error_code carries a CHECK constraint
+//   (0006_runtime_core.sql:153) admitting only 'model_error'/'tool_error'/
+//   'timeout'/'engine_lost'/'limit'/'internal' — a caught, unvalidated tag value
+//   is NOT safe to write there (a first draft of this file tried to forward it
+//   verbatim; a Codex confirmation pass on this PR caught that it would violate
+//   the CHECK and, worse, leave the task stuck non-terminal, since the catch
+//   block's settle(...).catch(() => {}) swallows that failure silently). Every
+//   caught error — tagged or not — settles error_code = 'model_error', the SAME
+//   value v7 always wrote; error_code does NOT differentiate a stream error from
+//   any other model-segment failure. The diagnostic value #46a actually adds
+//   lives entirely in the tagged MESSAGE, not this column.
 //
 //   #46b (the tax-rule propagation, RULED: propagate) and #35 (bind-existing
 //   counterparty) are BOTH prompt/schema-text-only changes confined entirely to
@@ -61,57 +67,37 @@ import {
   markRunningStep,
   settleStep,
   closeStreamStep,
-  CHATTURN_MODEL_ERROR_TAG,
 } from "./chatTurn.v8.impl.js";
 import { CLARIFY_FRAMING, type ClaraPart } from "./chatTurn.v8.prompt.js";
 import { codingIncompleteRefusal } from "./chatTurn.v8.errors.js";
 
 const MAX_SEGMENTS = 12; // hard bound on clarify round-trips per turn (safety) — v1 value, unchanged.
 
-/** The EXACT literal shape step-handler.js:507 prepends on retry exhaustion — the text
- *  Step, then a quoted step name, then failed after, then a retry count, then the word
- *  retry or retries, then a colon and a space — matched literally (a quoted step
- *  name, a digit count, the two pluralize('retry','retries',N) outputs), never a wildcard
- *  gap, so this can only recognise WDK's OWN exact wrapper text, nothing merely similar.
- *  Cross-referenced from autoDraft.v4.ts's own WDK_RETRY_PREFIX_SOURCE (ledger #44 /
- *  R-round F1) — duplicated, not shared (see chatTurn.v8.impl.ts's header for why). */
-const WDK_RETRY_PREFIX_SOURCE = `Step "[^"]*" failed after \\d+ retr(?:y|ies): `;
-
-/** Matches consumeChatTurnModelResult's own [chatturn_model:code] message tag at
- *  EITHER of exactly two positions — the message's own start, or immediately after WDK's
- *  retry-exhaustion prefix (R-round F1: that prefix is what step-handler.js actually
- *  prepends before the tag ever reaches step.js's FatalError reconstruction). The pattern
- *  stays anchored at the start across BOTH branches, with the prefix branch matched by the
- *  literal shape above rather than a dot-star or any other free-floating scan — an arbitrary vendor
- *  message that happens to CONTAIN the tag text somewhere in its middle, with no exact
- *  prefix immediately before it, can never match. */
-const CHATTURN_MODEL_ERROR_PATTERN = new RegExp(
-  `^(?:${WDK_RETRY_PREFIX_SOURCE})?\\[${CHATTURN_MODEL_ERROR_TAG}:([^\\]]+)\\]\\s(.*)$`,
-  "s",
-);
-
 /** ledger #46a (the diagnostic twin) — CORRECTED (Codex found live during this batch's
- *  own review, before merge): clara.agent_tasks.error_code carries a CHECK constraint
- *  (packages/db/migrations/0006_runtime_core.sql:153) admitting ONLY 'model_error',
- *  'tool_error', 'timeout', 'engine_lost', 'limit', 'internal' — 'model_stream_error'
- *  (the tag's own captured code) is NOT in that allowlist. Forwarding it verbatim, as
- *  the first draft did, would make settle_chat_turn's UPDATE violate the CHECK, and the
- *  entry.ts catch block's settle(...).catch(() => {}) would swallow that failure —
- *  leaving the task STUCK NON-TERMINAL instead of recording the diagnostic, exactly the
- *  opposite of the intent (and worse than v7's always-"model_error" behaviour, which at
- *  least settled). Unlike autoDraft's refusalFromCaughtError (an UNCONSTRAINED jsonb
- *  refusal column, where the tag's raw code is safe to forward), every tagged stream
- *  error here maps to the closest ADMITTED bucket, 'model_error' — the SAME value v7
- *  always wrote. The real diagnostic value survives elsewhere: consumeChatTurnModelResult
- *  still captures the genuine upstream cause into the THROWN error's own message (visible
- *  in the run's workflow_stream_chunks / the WDK step-failure record), which is what
- *  actually recovered IV-00743's own CLR21 detail live — this function's job is only to
- *  keep the DB column's CHECK constraint satisfied, never to smuggle an unvalidated
- *  string into it. Pure — no WDK-ambient call, directly unit-testable. */
-export function errorCodeFromCaughtError(err: unknown): string {
-  const rawMessage = err instanceof Error ? err.message : String(err);
-  const tagged = CHATTURN_MODEL_ERROR_PATTERN.exec(rawMessage);
-  if (tagged) return "model_error"; // every tagged code maps to the one ADMITTED bucket it fits
+ *  own confirmation pass, before merge): a first draft of this function parsed
+ *  consumeChatTurnModelResult's [chatturn_model:code] message tag back out and
+ *  forwarded its captured code verbatim. clara.agent_tasks.error_code carries a CHECK
+ *  constraint (0006_runtime_core.sql:153) admitting only 'model_error'/'tool_error'/
+ *  'timeout'/'engine_lost'/'limit'/'internal' — the tag's own code ('model_stream_error')
+ *  is NOT in that allowlist, so settle_chat_turn's UPDATE would violate the CHECK, and
+ *  the catch block's settle(...).catch(() => {}) would swallow that failure silently,
+ *  leaving the task STUCK NON-TERMINAL instead of recording the diagnostic — worse than
+ *  v7's always-"model_error" behaviour, and the opposite of the intent. Unlike
+ *  autoDraft's refusalFromCaughtError (an UNCONSTRAINED jsonb refusal column, where a
+ *  caught tag's raw code is safe to forward), this function has no admitted value to
+ *  return except 'model_error' — every caught error, tagged or not, maps to it. This is
+ *  NOT dead simplification of a real branch: there never was a second admitted code to
+ *  branch to. The real diagnostic value #46a adds lives entirely in
+ *  consumeChatTurnModelResult's own tagged THROWN message (chatTurn.v8.impl.ts),
+ *  recoverable from the run's workflow_stream_chunks / the WDK step-failure record —
+ *  exactly what recovered IV-00743's own CLR21 detail live. This function's only job is
+ *  to keep the DB column's CHECK constraint satisfied. Pure — directly unit-testable.
+ *  Takes no argument: there is currently no caught-error shape this function reads —
+ *  see the paragraph above for why, and for what a future widening would need to add
+ *  back. The catch block below calls it as a marker of INTENT (the settle errorCode
+ *  for this catch path is deliberately derived, not a bare inline literal), not because
+ *  it inspects anything today. */
+export function errorCodeFromCaughtError(): string {
   return "model_error";
 }
 
@@ -228,7 +214,7 @@ export async function chatTurn_v8(input: { taskId: string }): Promise<{ taskId: 
 
     await settle(outcome, null);
   } catch (err) {
-    await settle("failed", errorCodeFromCaughtError(err)).catch(() => {});
+    await settle("failed", errorCodeFromCaughtError()).catch(() => {});
     throw err instanceof Error ? err : new Error(String(err));
   } finally {
     await closeStreamStep().catch(() => {});

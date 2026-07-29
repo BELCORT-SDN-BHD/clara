@@ -101,9 +101,16 @@ export const workflows = {
 // changes: (#46a, the diagnostic twin) chatTurn.v8.impl.ts's consumeChatTurnModelResult
 // ports the ledger #44 stream-error-capture pattern (duplicated, cross-referenced — a
 // versioned workflow must never couple its shape to another workflow FAMILY's frozen
-// file), and chatTurn.v8.ts's errorCodeFromCaughtError parses the tag back into a
-// specific settle errorCode string instead of v7's fixed "model_error" literal for
-// every failure; (#46b, RULED: propagate) chatTurn adopts the SAME SST-zero precedent
+// file), tagging a genuine caught stream error onto the thrown message so it survives
+// into the run's own workflow_stream_chunks / the WDK step-failure record instead of
+// being swallowed into ai@7's generic NoOutputGeneratedError. clara.agent_tasks.
+// error_code carries a CHECK constraint (0006_runtime_core.sql:153) that does NOT admit
+// the tag's own code — a Codex confirmation pass on this PR caught a first draft
+// forwarding it verbatim, which would have violated the CHECK and left the task stuck
+// non-terminal. error_code therefore settles 'model_error' in EVERY case, tagged or
+// not — the SAME value v7 always wrote; it does not differentiate a stream error from
+// any other failure. The diagnostic value #46a adds lives entirely in the tagged
+// MESSAGE, never this column; (#46b, RULED: propagate) chatTurn adopts the SAME SST-zero precedent
 // as autoDraft_v5 — a STATED NONZERO tax keeps the three-leg sst_purchase_cost split, a
 // STATED ZERO or absent tax takes the two-leg shape — with the human-in-loop context
 // noted (chatTurn is attended; the fix removes friction at the source rather than

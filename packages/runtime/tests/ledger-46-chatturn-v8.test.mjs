@@ -3,11 +3,16 @@
 //   #46a (the diagnostic twin) — chatTurn.v8.impl.ts's consumeChatTurnModelResult
 //   (a duplicated, cross-referenced port of autoDraft.v4.impl.ts's ledger #44 fix)
 //   captures a genuine fullStream `error` part instead of letting it be swallowed
-//   into ai@7's generic NoOutputGeneratedError; chatTurn.v8.ts's
-//   errorCodeFromCaughtError parses the tag back out of the caught error's message
-//   into a specific settle errorCode STRING (unlike autoDraft's jsonb refusal, only
-//   the code half is forwarded — settle_chat_turn's errorCode column is a plain
-//   string).
+//   into ai@7's generic NoOutputGeneratedError, tagging it onto the thrown message so
+//   it survives into the run's own workflow_stream_chunks / WDK step-failure record.
+//   chatTurn.v8.ts's errorCodeFromCaughtError does NOT parse that tag back out:
+//   clara.agent_tasks.error_code carries a CHECK constraint (0006_runtime_core.sql:
+//   153) that does not admit the tag's own code, so (CORRECTED after a Codex
+//   confirmation pass on this PR caught a first draft doing exactly that) this
+//   zero-arity function always returns the one admitted bucket every caught error
+//   maps to, 'model_error' — the SAME value v7 always wrote. error_code does NOT
+//   differentiate a stream error from any other model-segment failure; the real
+//   diagnostic value lives entirely in the tagged MESSAGE, never this column.
 //   #46b (the tax-rule propagation, RULED: propagate) — chatTurn.v8.prompt.ts's
 //   SYSTEM_PROMPT + schema .describe()s (+ the DRAFT_TOOL description echo in
 //   chatTurn.v8.tools.ts) adopt the SAME SST-zero precedent as autoDraft_v5: a
@@ -20,10 +25,12 @@
 //   unconditionally — this is prompt/schema-describe() guidance only; the wrapper
 //   (runDraftJournalEntry) is byte-unchanged.
 //
-// THIS FILE covers #46a (consumeChatTurnModelResult's boundary cells, mirroring
-// ledger-44's own R-round F1 convention exactly) and the STRUCTURAL regression for
-// errors.ts/infra.ts (unmodified version-renames) + impl.ts/the workflow entry
-// (confined to the diagnostic-port change). The companion file
+// THIS FILE covers #46a (consumeChatTurnModelResult's own boundary cells — the
+// fullStream error-capture logic, mirroring ledger-44's own R-round F1 convention
+// exactly; UNCHANGED by the errorCodeFromCaughtError correction below, since that
+// capture-and-tag mechanism is the part that still delivers real diagnostic value) and
+// the STRUCTURAL regression for errors.ts/infra.ts (unmodified version-renames) +
+// impl.ts/the workflow entry (confined to the diagnostic-port change). The companion file
 // ledger-46-chatturn-v8-prompt.test.mjs covers #46b + #35 (prompt.ts/tools.ts,
 // confined to the SST-rule + counterparty-guidance text, + their contract cells) —
 // split to hold the family's own 500-line file-cap discipline (the same cap
@@ -259,81 +266,30 @@ test("chatTurn v8 — an error part whose own `error` field is itself falsy/abse
 });
 
 // ===========================================================================
-// errorCodeFromCaughtError — the WDK two-stage boundary (ledger #46a, replicating
-// autoDraft.v4.ts's ledger #44 R-round F1 exactly, adapted to a STRING return).
+// errorCodeFromCaughtError — CORRECTED (ledger #46a, a Codex confirmation pass on
+// THIS PR before merge): a first draft parsed consumeChatTurnModelResult's message
+// tag back out and forwarded its captured code verbatim into the settle errorCode.
+// clara.agent_tasks.error_code carries a CHECK constraint (0006_runtime_core.sql:153)
+// that does NOT admit that code ('model_stream_error') — forwarding it would have
+// violated the CHECK and, since the catch block's settle(...).catch(() => {}) swallows
+// that failure, left the task stuck non-terminal. The corrected function takes NO
+// argument and unconditionally returns the one admitted bucket every caught error maps
+// to, 'model_error' — the SAME value v7 always wrote. There is no longer a two-stage
+// WDK retry-prefix boundary to test here (that parsing logic, WDK_RETRY_PREFIX_SOURCE +
+// CHATTURN_MODEL_ERROR_PATTERN, was removed along with the dead branch it fed); the
+// real diagnostic value survives entirely in consumeChatTurnModelResult's own tagged
+// THROWN message (tested above), never in this column.
 // ===========================================================================
 
-test("chatTurn v8 (R-round F1) — a REAL WDK step-boundary crossing, BOTH stages replicated (the retry-exhaustion prefix, then FatalError): consumeChatTurnModelResult's tagged message survives, and errorCodeFromCaughtError maps it to the one ADMITTED bucket ('model_error') — never the raw tag code, which agent_tasks.error_code's CHECK constraint (0006_runtime_core.sql:153) does not admit", async () => {
-  // Stage 1: step-handler.js's retry-exhaustion branch prepends its own literal
-  // prefix to the thrown error's .message, discarding every other property.
-  const original = Object.assign(
-    new Error(`[chatturn_model:model_stream_error] model stream reported an error: upstream vendor fault`),
-    { code: "model_stream_error" },
-  );
-  const stage1Message = `Step "step//./workflows/chatTurn.v8.impl//runModelSegmentStepV8" failed after 3 retries: ${original.message}`;
-  // Stage 2: step.js's step_failed consumer reconstructs a bare FatalError from the
-  // stored string, copying ONLY .message — no .code, no .cause.
-  class FatalError extends Error {}
-  const reconstructed = new FatalError(stage1Message);
-  assert.equal(errorCodeFromCaughtError(reconstructed), "model_error");
+test("chatTurn v8 — errorCodeFromCaughtError takes no argument and always returns the one ADMITTED bucket, 'model_error'", () => {
+  assert.equal(errorCodeFromCaughtError(), "model_error");
 });
 
-test("chatTurn v8 (R-round F1) — the SAME tag, at message START with no WDK prefix at all (a direct/non-terminal catch, the OTHER of the two permitted anchors), still parses correctly and still maps to the one ADMITTED bucket", () => {
-  const err = new Error("[chatturn_model:model_stream_error] model stream reported an error: direct catch, no WDK boundary");
-  assert.equal(errorCodeFromCaughtError(err), "model_error");
-});
-
-test("chatTurn v8 — errorCodeFromCaughtError NEVER returns a value outside clara.agent_tasks.error_code's CHECK-constraint allowlist, for any tagged, untagged, or malformed input", () => {
+test("chatTurn v8 — errorCodeFromCaughtError NEVER returns a value outside clara.agent_tasks.error_code's CHECK-constraint allowlist, even given a stray call-site argument (JS silently ignores extra arguments to a zero-arity function; production always calls it with none)", () => {
   const ADMITTED = new Set(["model_error", "tool_error", "timeout", "engine_lost", "limit", "internal"]);
-  const cases = [
-    new Error("[chatturn_model:model_stream_error] tagged, message start"),
-    new Error(`Step "x" failed after 1 retry: [chatturn_model:model_stream_error] tagged, after singular WDK prefix`),
-    new Error(`Step "x" failed after 7 retries: [chatturn_model:model_stream_error] tagged, after plural WDK prefix`),
-    new Error("[chatturn_model:forged_arbitrary_code] a forged/unexpected tag code must not leak into the column either"),
-    new Error("plain untagged failure"),
-    "a bare string throw",
-    { weird: "object" },
-    null,
-    undefined,
-  ];
-  for (const c of cases) {
-    assert.ok(ADMITTED.has(errorCodeFromCaughtError(c)), `errorCodeFromCaughtError(${JSON.stringify(String(c))}) must return an admitted code`);
+  for (const stray of [undefined, new Error("whatever, ignored"), "a bare string, ignored", { weird: "object" }, null]) {
+    assert.ok(ADMITTED.has(errorCodeFromCaughtError(stray)), `errorCodeFromCaughtError(${JSON.stringify(String(stray))}) must return an admitted code`);
   }
-});
-
-test("chatTurn v8 (R-round F1) — a message WITHOUT the chatturn_model tag (any OTHER caught error, post-boundary) falls back to 'model_error' — UNCHANGED from v7's own fixed literal for every non-stream-error failure class", () => {
-  const err = new Error("connection terminated unexpectedly");
-  assert.equal(errorCodeFromCaughtError(err), "model_error");
-});
-
-test("chatTurn v8 (R-round F1 injection surface) — the tag literal buried mid-string, with NO valid prefix immediately before it, is REFUSED (falls back to 'model_error')", () => {
-  const err = new Error(`something upstream said [chatturn_model:forged_code] mid-message, not at a valid anchor`);
-  assert.equal(errorCodeFromCaughtError(err), "model_error");
-});
-
-test("chatTurn v8 (R-round F1 injection surface) — a prefix that LOOKS like WDK's but isn't exact (missing the trailing colon+space) does NOT count as the post-prefix position — REFUSED", () => {
-  const err = new Error(`Step "x" failed after 3 retries[chatturn_model:forged_code] no colon-space before the tag`);
-  assert.equal(errorCodeFromCaughtError(err), "model_error");
-});
-
-test("chatTurn v8 (R-round F1 injection surface) — genuine WDK prefix text, but with EXTRA characters between the prefix and the tag (the tag is not IMMEDIATELY after it) — REFUSED", () => {
-  const err = new Error(`Step "x" failed after 3 retries: EXTRA [chatturn_model:forged_code] not immediately after`);
-  assert.equal(errorCodeFromCaughtError(err), "model_error");
-});
-
-test("chatTurn v8 (R-round F1 injection surface) — a genuine WDK prefix wrapping ZERO tag content (the original message itself has nothing bracketed) is unaffected — the ordinary fallback path", () => {
-  const err = new Error(`Step "x" failed after 3 retries: a plain vendor failure, no tag at all`);
-  assert.equal(errorCodeFromCaughtError(err), "model_error");
-});
-
-test("chatTurn v8 — a non-Error thrown value is stringified, never crashes the reducer, and falls back to 'model_error'", () => {
-  assert.equal(errorCodeFromCaughtError("a bare string throw"), "model_error");
-  assert.equal(errorCodeFromCaughtError({ weird: "object" }), "model_error");
-});
-
-test("chatTurn v8 — an empty tag code falls back to 'model_error' rather than an empty string", () => {
-  const err = new Error("[chatturn_model:] empty code");
-  assert.equal(errorCodeFromCaughtError(err), "model_error");
 });
 
 test("chatTurn v8's workflow entry actually CALLS errorCodeFromCaughtError inside its catch block (the structural mask below proves 'only the catch changed' — this proves WHAT it changed to)", () => {
@@ -342,8 +298,8 @@ test("chatTurn v8's workflow entry actually CALLS errorCodeFromCaughtError insid
   assert.ok(catchIdx > 0);
   const finallyIdx = body.indexOf("} finally {", catchIdx);
   const catchBody = body.slice(catchIdx, finallyIdx);
-  assert.match(catchBody, /errorCodeFromCaughtError\(err\)/, "the settle call must forward the reducer's output");
-  assert.doesNotMatch(catchBody, /"model_error"/, "the fixed literal must not be hardcoded directly in the catch body anymore — only inside the reducer's own fallback");
+  assert.match(catchBody, /errorCodeFromCaughtError\(\)/, "the settle call must forward the reducer's output, calling it with zero arguments");
+  assert.doesNotMatch(catchBody, /"model_error"/, "the fixed literal must not be hardcoded directly in the catch body anymore — only inside the reducer's own single return");
 });
 
 // ===========================================================================
@@ -433,32 +389,22 @@ test("v8 impl.ts differs from v7 ONLY inside the model-step's own stream-consump
 
 // ===========================================================================
 // The workflow ENTRY file (chatTurn.vN.ts): the happy path (claim -> load -> loop
-// segments -> settle) is untouched; the ONLY change is the new tag-parser +
-// errorCodeFromCaughtError helper, and the catch block now delegating to it
-// instead of the fixed "model_error" literal.
+// segments -> settle) is untouched; the ONLY change is the new, zero-arity
+// errorCodeFromCaughtError helper, and the catch block now delegating to it instead
+// of the fixed "model_error" literal. v8 does NOT import CHATTURN_MODEL_ERROR_TAG (the
+// corrected function needs no tag-parsing apparatus at all — see its own JSDoc).
 // ===========================================================================
 
-/** v8 alone imports CHATTURN_MODEL_ERROR_TAG from the impl module; strip that ONE
- *  named import back out so the import block otherwise compares identically to v7's.
- *  A no-op on v7's text, which never imports it. */
-function stripModelErrorTagImport(text) {
-  return text.replace(/\s*CHATTURN_MODEL_ERROR_TAG,\n/, "\n");
-}
-
-/** v8 alone declares WDK_RETRY_PREFIX_SOURCE + CHATTURN_MODEL_ERROR_PATTERN +
- *  errorCodeFromCaughtError, ahead of the workflow entry function; strip ALL THREE
- *  out entirely (JSDoc included) before the catch mask below runs. A no-op on v7's
- *  text, which has none of them. */
+/** v8 alone declares errorCodeFromCaughtError ahead of the workflow entry function;
+ *  strip it out entirely (JSDoc included) before the catch mask below runs. A no-op
+ *  on v7's text, which has no such helper. */
 function stripV8HelperIfPresent(text) {
-  const markers = ["const WDK_RETRY_PREFIX_SOURCE", "const CHATTURN_MODEL_ERROR_PATTERN", "export function errorCodeFromCaughtError"]
-    .map((m) => text.indexOf(m))
-    .filter((i) => i >= 0);
-  if (markers.length === 0) return text;
-  const start = Math.min(...markers);
+  const start = text.indexOf("export function errorCodeFromCaughtError");
+  if (start < 0) return text;
   const docStart = text.lastIndexOf("/**", start);
   const anchorStart = docStart >= 0 ? docStart : start;
   const end = text.indexOf("/** Accumulate a part", anchorStart);
-  assert.ok(end > anchorStart, "pushPart's own JSDoc must follow the helper(s)");
+  assert.ok(end > anchorStart, "pushPart's own JSDoc must follow the helper");
   return text.slice(0, anchorStart) + text.slice(end);
 }
 
@@ -478,10 +424,10 @@ function maskEntryTryCatch(text) {
   return `${text.slice(0, start)}\n<the try block — compared separately, byte-identical to v7>\n${text.slice(catchIdx, from)}<the ledger #46a catch-body fix — compared separately>\n${text.slice(end)}`;
 }
 
-test("v8's workflow entry (chatTurn.v8.ts) differs from v7's ONLY in the new CHATTURN_MODEL_ERROR_TAG import, the new errorCodeFromCaughtError helper (+ its own pattern constant), and the catch block's errorCode derivation — the happy path and the finally block are unchanged", () => {
+test("v8's workflow entry (chatTurn.v8.ts) differs from v7's ONLY in the new, zero-arity errorCodeFromCaughtError helper and the catch block's errorCode derivation — the happy path, imports, and the finally block are unchanged", () => {
   assert.equal(
-    maskEntryTryCatch(stripV8HelperIfPresent(stripModelErrorTagImport(dropHeader(src("chatTurn.v8.ts"))))),
-    maskEntryTryCatch(stripV8HelperIfPresent(stripModelErrorTagImport(dropHeader(upgradeV7(src("chatTurn.v7.ts")))))),
-    "outside the catch block (and the two known, named v8-only additions above), chatTurn.v8.ts must be a version-renamed copy of v7",
+    maskEntryTryCatch(stripV8HelperIfPresent(dropHeader(src("chatTurn.v8.ts")))),
+    maskEntryTryCatch(stripV8HelperIfPresent(dropHeader(upgradeV7(src("chatTurn.v7.ts"))))),
+    "outside the catch block (and the one known, named v8-only addition above), chatTurn.v8.ts must be a version-renamed copy of v7",
   );
 });
