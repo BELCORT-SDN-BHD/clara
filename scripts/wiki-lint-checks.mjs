@@ -664,6 +664,91 @@ function concatChains(text) {
   return out;
 }
 
+/** A statically-known regprocedure signature from one SQL expression. Only a
+ * single literal (optionally cast) is proof; concatenation and format() remain
+ * unresolved and therefore fail-closed. */
+function literalRegprocedureIdentity(expr) {
+  const lit = /^\s*'((?:[^']|'')*)'\s*(?:::\s*(?:text|regprocedure))?\s*$/i.exec(expr);
+  return lit ? signatureIdentity(lit[1].replace(/''/g, "'")) : null;
+}
+
+/** Resolve the latest assignment to `name` before `before`, whatever its shape.
+ * The migration family uses both declaration initializers and later `:=`
+ * assignments. R-round fix: the PREVIOUS version only matched LITERAL-valued
+ * assignments, so a variable first assigned a literal and LATER reassigned a
+ * computed/conditional value (a decoy) was reported as the literal -- the
+ * regex simply never saw the reassignment at all, since it wasn't looking for
+ * assignments in general, only for ones shaped like a literal. Track EVERY
+ * assignment to `name` in program order; only the assignment CLOSEST to
+ * `before` decides the outcome. If that closest assignment is not a plain
+ * string literal (a function call, concatenation, another variable, `case`,
+ * anything computed or conditional), the target is UNRESOLVED -- fail closed,
+ * exactly like an unresolvable literal always has. An EARLIER literal
+ * assignment that a later reassignment has since overwritten must never be
+ * mistaken for the current value. */
+function assignedRegprocedureIdentity(block, name, before) {
+  const prefix = block.slice(0, before);
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // Matches ANY assignment shape -- declaration initializer or later plain
+  // reassignment -- capturing the RHS up to its terminating `;` regardless of
+  // whether that RHS is a literal. This is the general form; literal-ness is
+  // decided AFTER finding the latest one, not as part of matching it.
+  const general = new RegExp(
+    `\\b${escaped}\\s*(?:constant\\s+)?(?:text|regprocedure)?\\s*:=\\s*`
+      + `([\\s\\S]*?);`,
+    "gi",
+  );
+  let latest = null;
+  let m;
+  while ((m = general.exec(prefix))) {
+    if (latest === null || m.index > latest.index) {
+      latest = { index: m.index, rhs: m[1] };
+    }
+  }
+  if (latest === null) return null;
+  // Now, and ONLY now, check whether the LATEST assignment's RHS is a bare
+  // literal (optionally cast). Any other shape -- including one that merely
+  // starts with a quote but isn't a single self-contained literal -- is
+  // unresolved, never silently downgraded to an earlier value.
+  const literal = /^\s*'((?:[^']|'')*)'\s*(?:::\s*(?:text|regprocedure))?\s*$/i.exec(latest.rhs);
+  return literal ? signatureIdentity(literal[1].replace(/''/g, "'")) : null;
+}
+
+/** Resolve one pg_get_functiondef argument using every statically-attributable
+ * shape present in this migration family: a direct signature literal, a
+ * text/regprocedure variable holding that literal, or an `oid` argument whose
+ * SELECT constrains oid to either shape. Everything else returns null. */
+function coRTargetIdentity(block, argText, callStart, callEnd) {
+  const direct = literalRegprocedureIdentity(argText);
+  if (direct) return direct;
+
+  const variable = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:::\s*regprocedure)?\s*$/i.exec(argText);
+  if (variable && variable[1].toLowerCase() !== "oid") {
+    return assignedRegprocedureIdentity(block, variable[1], callStart);
+  }
+
+  // pg_get_functiondef(oid) FROM pg_proc ... WHERE p.oid=<known signature>.
+  // Attribution is limited to this SELECT statement so a signature elsewhere
+  // in the block cannot be borrowed for the wrong call.
+  const statementEnd = block.indexOf(";", callEnd);
+  const statement = block.slice(callEnd, statementEnd < 0 ? block.length : statementEnd);
+  const rhs = /\b(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?oid\s*=\s*('(?:[^']|'')*'\s*::\s*regprocedure|[A-Za-z_][A-Za-z0-9_]*\s*::\s*regprocedure)/i.exec(statement);
+  if (rhs) {
+    const literal = literalRegprocedureIdentity(rhs[1]);
+    if (literal) return literal;
+    const sigVar = /^\s*([A-Za-z_][A-Za-z0-9_]*)/i.exec(rhs[1]);
+    if (sigVar) return assignedRegprocedureIdentity(block, sigVar[1], callStart);
+  }
+  const lhs = /('(?:[^']|'')*'\s*::\s*regprocedure|[A-Za-z_][A-Za-z0-9_]*\s*::\s*regprocedure)\s*=\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?oid\b/i.exec(statement);
+  if (lhs) {
+    const literal = literalRegprocedureIdentity(lhs[1]);
+    if (literal) return literal;
+    const sigVar = /^\s*([A-Za-z_][A-Za-z0-9_]*)/i.exec(lhs[1]);
+    if (sigVar) return assignedRegprocedureIdentity(block, sigVar[1], callStart);
+  }
+  return null;
+}
+
 /**
  * Every CHANGE-OF-RECORD patch: a `do $tag$ … $tag$` block that installs a callable
  * surface — it reads a function body with `pg_get_functiondef` and `execute`s a rewritten
@@ -702,8 +787,7 @@ export function parseCoRPatches(sql, spans = []) {
     while ((t = tre.exec(masked))) {
       const arg = readParens(masked, t.index + t[0].length - 1);
       if (!arg) { targets.push(null); continue; }
-      const lit = /^\s*'((?:[^']|'')*)'\s*::\s*regprocedure\s*$/.exec(arg.text);
-      targets.push(lit ? signatureIdentity(lit[1].replace(/''/g, "'")) : null);
+      targets.push(coRTargetIdentity(block, arg.text, t.index, arg.end));
       tre.lastIndex = arg.end;
     }
     for (const ddl of dynamicCreates) targets.push(parseCreatedIdentity(ddl));

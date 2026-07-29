@@ -215,6 +215,145 @@ export async function proposeAutopostRule(token: string, proposal: Record<string
   return r;
 }
 
+// --- Vendor identity binding (0028; task #36) ------------------------------------
+// The knowledge-based autopost vendor-identity ceremony (design v4.1). Unlike
+// propose/sign_autopost_rule, propose/sign/revoke_vendor_identity_binding never
+// return a typed {status:'refused'} 200 body — every refusal (CLR36, e.g.
+// window_too_recent, evidence_restated, proposal_drifted, post_control_absent,
+// binding_not_live, binding_revoked) is a thrown, CLR-coded exception, so these
+// wrappers stay void-of-narrowing like signCodingRule/declineCodingRule above and
+// let the existing err.clr-rendering refusal UI handle it. Successful calls return
+// the DB's jsonb receipt directly (binding_id/status/F1-F3/evidence on
+// propose+sign; binding_id/status/approved_entries on revoke).
+
+export type VendorBindingReceipt = {
+  binding_id: string;
+  status: "proposed" | "live" | "revoked" | "expired";
+  f1_vendor_name_norm?: string;
+  f2_invoice_prefix?: string | null;
+  registration_at_signing?: string | null;
+  content_hash?: string;
+  evidence?: unknown[];
+};
+
+export type VendorBindingRevocation = {
+  binding_id: string;
+  status: "revoked";
+  approved_entries: number;
+};
+
+export type VendorBindingSummary = {
+  binding_id: string;
+  counterparty_id: string;
+  counterparty_name: string;
+  status: string;
+  f1_vendor_name_norm: string;
+  f2_invoice_prefix: string | null;
+  registration_at_signing: string | null;
+  signed_by: string | null;
+  signed_at: string | null;
+  expires_at: string | null;
+  evidence_count: number;
+  resolution_count: number;
+  divergence_documents: number;
+};
+
+export type VendorBindingDetail = {
+  binding: Record<string, unknown>;
+  counterparty: { counterparty_id: string; counterparty_name: string } | null;
+  evidence: Array<{
+    entry_id: string; document_id: string;
+    facts_extraction_id: string | null; ocr_extraction_id: string | null;
+    posting_date: string;
+  }>;
+  resolutions: Array<{
+    resolution_id: string; document_id: string | null; entry_id: string | null;
+    // phase 'revision' is Slot B's revise_entry divergence write (A.4) -- distinct from
+    // the admission-time 'draft' write and 0029's post-time 'post' write.
+    phase: "draft" | "revision" | "post"; outcome: "bound" | "divergence" | "refused";
+    facts_extraction_id: string | null; ocr_extraction_id: string | null;
+    compared_to_resolution_id: string | null;
+    refusal_reason: string | null;
+    // SQL column is `divergence jsonb` (nullable detail, not a flag) -- the visible
+    // divergence record the owner ruled must render (Part 1 §10 amendment A), not a boolean.
+    divergence: Record<string, unknown> | null;
+    created_at: string;
+  }>;
+};
+
+/** Bookkeeper-floor: propose a binding from the client's THREE most recent
+ *  qualifying approvals (the DB derives F1/F2/F3 + the dwell window — names only
+ *  {client_id, counterparty_id}, per §C). Throws CLR36 on any refusal
+ *  (insufficient_evidence/window_too_recent/evidence_restated/features_unstable/
+ *  prefix_too_weak/binding_conflict/…). */
+export async function proposeVendorIdentityBinding(
+  token: string, clientId: string, counterpartyId: string,
+): Promise<VendorBindingReceipt> {
+  return (await rpc(
+    "propose_vendor_identity_binding",
+    { p_proposal: { client_id: clientId, counterparty_id: counterpartyId }, p_op_key: opKey() },
+    token,
+  )) as VendorBindingReceipt;
+}
+
+/** Admin-floor: sign a proposed binding live. Re-derives the entire floor and
+ *  compares byte-for-byte against the stored proposal (CLR36 proposal_drifted on
+ *  mismatch); refuses CLR36 post_control_absent while migration
+ *  0029_vendor_binding_executor has not been deployed. */
+export async function signVendorIdentityBinding(
+  token: string, bindingId: string,
+): Promise<VendorBindingReceipt> {
+  return (await rpc(
+    "sign_vendor_identity_binding",
+    { p_binding: bindingId, p_op_key: opKey() },
+    token,
+  )) as VendorBindingReceipt;
+}
+
+/** Bookkeeper-floor: revoke a live binding (mandatory reason). Returns the count
+ *  of already-approved entries that were posted under it while live — informational
+ *  only, revocation never unwinds past postings. Refuses CLR36 binding_not_live /
+ *  binding_revoked against a binding that never reached (or has left) 'live'. */
+export async function revokeVendorIdentityBinding(
+  token: string, bindingId: string, reason: string,
+): Promise<VendorBindingRevocation> {
+  return (await rpc(
+    "revoke_vendor_identity_binding",
+    { p_binding: bindingId, p_reason: reason, p_op_key: opKey() },
+    token,
+  )) as VendorBindingRevocation;
+}
+
+/** The one client's bindings, live-first then newest (§D read surface). */
+export async function listVendorBindings(token: string, clientId: string): Promise<VendorBindingSummary[]> {
+  const out = await rpc("list_vendor_bindings", { p_client: clientId }, token);
+  const rows = Array.isArray(out) ? out : [];
+  return rows.map((r) => {
+    const row = r as Record<string, unknown>;
+    return {
+      binding_id: row.binding_id as string,
+      counterparty_id: row.counterparty_id as string,
+      counterparty_name: row.counterparty_name as string,
+      status: row.status as string,
+      f1_vendor_name_norm: row.f1_vendor_name_norm as string,
+      f2_invoice_prefix: (row.f2_invoice_prefix as string) ?? null,
+      registration_at_signing: (row.registration_at_signing as string) ?? null,
+      signed_by: (row.signed_by as string) ?? null,
+      signed_at: (row.signed_at as string) ?? null,
+      expires_at: (row.expires_at as string) ?? null,
+      evidence_count: (row.evidence_count as number) ?? 0,
+      resolution_count: (row.resolution_count as number) ?? 0,
+      divergence_documents: (row.divergence_documents as number) ?? 0,
+    };
+  });
+}
+
+/** One binding's full detail (the row + counterparty + evidence + the append-only
+ *  resolution history — draft-phase and, once 0029 ships, post-phase rows). */
+export async function getVendorBinding(token: string, bindingId: string): Promise<VendorBindingDetail> {
+  return (await rpc("get_vendor_binding", { p_binding: bindingId }, token)) as VendorBindingDetail;
+}
+
 // --- Document bytes (PIN-DELTA-4; runtime signed read path) ---------------------
 
 export type DocumentBytes = { blobUrl: string; mime: string; revoke: () => void };

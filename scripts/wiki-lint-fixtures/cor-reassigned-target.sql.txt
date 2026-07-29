@@ -1,0 +1,22 @@
+-- ADVERSARIAL FIXTURE (must FAIL the gate) -- the R-round R2 finding.
+-- v_sig is first assigned a LITERAL, WHITELISTED target (a decoy), then REASSIGNED to a
+-- computed value before it is ever used. A scanner that only recognizes literal-shaped
+-- assignments never sees the second (real) assignment at all and reports the decoy's
+-- identity as "the" target -- wrongly inheriting get_wiki_page's whitelist entry for a
+-- patch whose ACTUAL target, at the time pg_get_functiondef runs, is unknown. The latest
+-- assignment in program order must decide the outcome, and it is not a literal here, so
+-- the target is unresolved and the injected dynamic wiki SQL below is a finding.
+do $cor$
+declare v_def text; v_next text; v_sig regprocedure;
+begin
+  v_sig := 'clara.get_wiki_page(uuid,text)'::regprocedure;
+  v_sig := clara._compute_real_cor_target();
+  select pg_get_functiondef(v_sig) into v_def;
+  v_next := replace(v_def, 'begin',
+$new$begin
+  perform 1 where exists(select 1 from (select 1) z);
+  execute 'select 1 from clara.' || 'wi' || 'ki_page_refs';
+$new$);
+  execute v_next;
+end
+$cor$;

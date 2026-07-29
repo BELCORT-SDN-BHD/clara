@@ -7,12 +7,20 @@
 // adoption, and wrong-client correction, incl. zero-payable drafts."
 //
 // The supplier-bill floor [C-3/NEW-2, companion §2]: `_assert_supplier_bill_shape`
-// keys on the entry's own immutable coding_kind='supplier_bill' (NEVER on
+// keys on the entry's own coding_kind='supplier_bill' (NEVER on
 // documents.document_kind) AND reversal_of IS NULL → at least one payable-class
 // CREDIT line; EVERY payable-class line (any entry/path) carries counterparty_id;
 // enforced at every approved-transition by a deferred constraint trigger + early
-// writer-body CLR23s. coding_kind is settable ONLY via the wake write-tool
-// (p_coding_kind), so supplier-bill drafts use the wake lane.
+// writer-body CLR23s. coding_kind is set via the wake write-tool (p_coding_kind)
+// at birth, so supplier-bill drafts use the wake lane. NOTE (task #36, 0028):
+// coding_kind is NO LONGER immutable while status stays 'draft' — the vendor
+// identity binding divergence mechanism (`revise_entry`) strips it (along with
+// `vendor_binding_id`) when a human diverges a binding-backed draft's
+// counterparty, by ratified design (`_tf_entry_immutable`'s draft->draft
+// allowset now names both columns). The write floor still fully protects both
+// columns during every OTHER status transition (draft->approved/withdrawn,
+// approved->approved) and still protects every non-allowlisted column at every
+// transition including draft->draft.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -93,14 +101,21 @@ async function supplierBillDraft(sub, { client, amount = ROUTINE_CENTS, vendor =
 // The supplier-bill shape floor + the coding_kind marker.
 // ===========================================================================
 
-test("a supplier_bill draft carries the immutable coding_kind='supplier_bill' marker (set by the wake write tool, NOT derived from document_kind)", async (t) => {
+test("a supplier_bill draft carries the coding_kind='supplier_bill' marker (set by the wake write tool, NOT derived from document_kind); the write floor still blocks every non-allowlisted column", async (t) => {
   if (unready(t)) return;
   const { users, clients } = world;
   const { draft } = await supplierBillDraft(users.alice, { client: clients.A1 });
   const row = await entryRow(draft.entry_id);
   assert.equal(row.coding_kind, CODING_KIND, "the draft's coding_kind is 'supplier_bill'");
-  // Immutable: a draft→draft update of coding_kind is rejected (not in any allow-set).
-  await assertRaises(CLR.immutable, () => rootQuery("update clara.journal_entries set coding_kind=null, updated_at=now() where id=$1", [draft.entry_id]), "coding_kind is immutable post-insert");
+  // coding_kind (task #36, 0028) is now in the draft->draft allowset — the vendor-binding
+  // divergence mechanism relies on exactly this to strip it. Prove the widening is real...
+  await assert.doesNotReject(
+    () => rootQuery("update clara.journal_entries set coding_kind=null, updated_at=now() where id=$1", [draft.entry_id]),
+    "coding_kind is draft->draft mutable by ratified design (0028 Slot B divergence)",
+  );
+  // ...but every column OUTSIDE the allowset is still fully immutable at draft->draft —
+  // posting_date is never in any status transition's allowset, at any migration.
+  await assertRaises(CLR.immutable, () => rootQuery("update clara.journal_entries set posting_date=posting_date-1,updated_at=now() where id=$1", [draft.entry_id]), "posting_date is immutable post-insert");
 });
 
 test("bill-shape happy path: Dr expense / Cr payable + vendor → approve births vendor, stamps counterparty_id on the payable credit line", async (t) => {

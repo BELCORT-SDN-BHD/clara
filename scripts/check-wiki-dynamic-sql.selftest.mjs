@@ -273,6 +273,11 @@ testCase("a patch whose ONLY target is computed -> REJECT (unresolved is never w
     ["<unresolved target>", "wiki_page_refs"]);
 });
 
+testCase("R2: a decoy literal assignment followed by a computed reassignment of the SAME variable -> REJECT, never the decoy's whitelist", () => {
+  expectFinding(scan("cor-reassigned-target.sql.txt"),
+    ["<unresolved target>", "wiki_page_refs"]);
+});
+
 testCase("a `do` block that dynamically CREATEs a function leaves a callable surface -> REJECT", () => {
   expectFinding(scan("do-dynamic-create-function.sql.txt"),
     ["dynamic function-creating", "PROVABLY names", "_shadow_wiki_probe"]);

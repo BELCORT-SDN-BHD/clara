@@ -17,7 +17,7 @@ could never have been obeyed. Section numbering is preserved so every review's �
 implemented:** 2026-07-28 option A — *autodraft MAY resolve a document's vendor from VERIFIED
 IN-SYSTEM HUMAN APPROVALS when X6 page evidence is absent*; the same ruling rejected **option B**
 (widening X6's walls) and **option C** (hand-drafts autopost-eligible). **Branch:**
-`feat/autopost-vendor-binding-design`; migrations **0027 + 0028**, landing after 0026 (task #32).
+`feat/autopost-vendor-binding-design`; migrations **0028 + 0029**, landing after 0027 (task #29/#36).
 
 ## 0. What this decides — and one correction to the framing
 
@@ -343,7 +343,7 @@ executor holds; the executor holds entry + binding and waits on K.
 **The fix, stated from the live `_reserve_op` semantics: the executor reserves BOTH receipts at
 position 0, and the core is told its receipt is pre-held.** It cannot simply pre-insert the row and
 let the core reserve normally — the core's `_reserve_op` would then return non-null and the core
-would `return v_dedupe` without ever approving (`0016:1250`). So 0028 also recuts
+would `return v_dedupe` without ever approving (`0016:1250`). So 0029 also recuts
 `_approve_entry_core` to skip its own reservation when the caller has already taken it. **This needs
 no signature change**: the core's first parameter is already `p_ctx jsonb`, so the executor passes
 `receipt_preheld: true` alongside the identity it already sends. A ctx without that key reserves
@@ -386,7 +386,7 @@ fall inside the rejection of option B?* **The owner ruled it does not: F3 stays.
 
 ## 10. Rulings (2026-07-28) — every §9 question closed
 
-> **RATIFIED 2026-07-28 pending build — the 0027/0028 SQL ladder is the remaining control.**
+> **RATIFIED 2026-07-28 pending build — the 0028/0029 SQL ladder is the remaining control.**
 > Four adversarial rounds closed; v4.1 carries the final amendment (§4 position 0). No further design
 > review round. Every §D and §G claim is re-verified against the rig by the build ladder.
 
@@ -434,6 +434,21 @@ only because the oldest approval happens to be a 25/08 one. The span must reach 
 so the bill must post **on or after 08/09/2025**: **IV-00846 (13/10, `7ecc83c2`) or IV-00847 (14/10,
 `aef22972`) qualify; IV-00744 (25/08) and IV-00745 (03/09) do not.**
 
+> **Tightened (task #36 build note — a real misread this arithmetic invited).** `08/09/2025` is a
+> **derived, one-shot consequence of THIS specific live window's dates**, not a fixed cutoff the
+> gate compares anything against. **The dwell predicate condition 3a states — restated here without
+> any ambiguity: it is a property of the THREE-DOCUMENT WINDOW AS A SET, evaluated collectively,
+> never a per-document comparison against any fixed date.** The two conjuncts, both re-derived on
+> every proposal from whichever three documents currently occupy the window: (a) the window's
+> `posting_date` values are exactly **three distinct dates**; (b) `max(posting_date) −
+> min(posting_date) >= 14 days`. `08/09/2025` only ever appears because, in THIS particular
+> instance, the oldest surviving date is `25/08` and `25/08 + 14 days = 08/09` — swap in a
+> DIFFERENT window (different oldest date, or a window that already has three distinct dates
+> without needing a fourth approval) and no such fixed date exists at all. A verb implementation
+> that stores or compares against `08/09/2025` (or any other literal date) is wrong; it must
+> compute `max(posting_date) - min(posting_date)` over whichever three rows the window actually
+> selects, every time.
+
 **Amendment A (ruling 2) — the human lane surfaces, records, and yields.** On a human-lane draft
 whose document has a live binding match and whose chosen counterparty differs, the DB **never**
 blocks: the human's choice always stands. It must (i) surface a **visible warning citing the
@@ -467,20 +482,23 @@ looks like for a party with no SSM number is **a future wave's design problem**,
 smuggled into this slice.
 
 **Amendment C (ruling 8) — two migrations, the X5 "last and alone" discipline.** *(v2: the split
-needs an ACTIVATION INTERLOCK — finding 10. 0027 installs Slots A/B and the signing ceremony while
-0028 installs the post-time control; released independently, a bound draft could reach the OLD
+needs an ACTIVATION INTERLOCK — finding 10. 0028 installs Slots A/B and the signing ceremony while
+0029 installs the post-time control; released independently, a bound draft could reach the OLD
 executor with no binding gate at all. The interlock is specified in Part 2 §D.)*
 
-- **0027** — the binding table, `vendor_binding_resolutions`, `_binding_normalize`,
+- **0028** — the binding table, `vendor_binding_resolutions`, `_binding_normalize`,
   `_resolve_vendor_binding`, the three verbs, and Slots A (`_coding_lane_core`) and B
   (`_draft_entry_core`). The §6.2 skip-vocabulary split rides here.
-- **0028 — micro-migration, LAST and ALONE** — Slot C only: `execute_rule_post`'s binding liveness
-  re-check. That function has been re-cut three times (`0016:2297` → `0022:986` → `0023:379`) and is
-  the most security-critical in the system; it ships in its own migration with its own review.
+- **0029 — micro-migration, LAST and ALONE** — Slot C only: `execute_rule_post`'s binding liveness
+  re-check. That function has been re-cut three times (`0016:2297` → `0022:986` → `0023:379` →
+  `0027`, task #29's lock-order fix) and is the most security-critical in the system; it ships in
+  its own migration with its own review.
 
 **Build-order constraint — the build starts only when BOTH clear:**
 
-1. **migration 0026 lands** (in flight on `feat/0026-lane-widen`). This design touches none of its
-   surface, but 0027 must be cut against a tree that already carries it.
+1. **migration 0027 lands** (merged to `main`, PR #132, task #29). This design touches none of its
+   surface, but 0028 must be cut against a tree that already carries it — and §A.7's lock
+   enumeration must be re-verified against 0027's documents-before-document_filings law (task #36
+   build note).
 2. **a Codex adversarial design review of this document clears** — fired by the orchestrator on this
    push. Findings are resolved *here, in the design*, before any SQL is written.
