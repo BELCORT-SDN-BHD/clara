@@ -140,18 +140,36 @@ test("ledger #44 — an error part whose own `error` field is itself falsy/absen
 
 // ===========================================================================
 // refusalFromCaughtError — the workflow-level settle-honesty fix (the third swallow),
-// PLUS the R-round F1 finding: a caught error's `.code` property never survives a real
-// WDK step boundary (@workflow/core@4.6.0's step.js reconstructs every terminal step
-// failure as `new FatalError(errorMessage)` — message/stack only, confirmed by
-// constructing the REAL, installed FatalError class below, not an assumption about it).
-// consumeAutoDraftModelResult's own tests above prove it TAGS its thrown message with
-// `[autodraft_model:<code>]`; these prove refusalFromCaughtError reads the code back OUT
-// of that exact tag once the object crossing the boundary is a bare FatalError with
-// nothing left but the tagged message — never bypassing the boundary the real bug lives
-// in.
+// PLUS the R-round F1 finding, TWO layers deep (confirmed against @workflow/core@4.6.0's
+// OWN dist source, both files): step-handler.js:507 PREPENDS `Step "<name>" failed after
+// <N> retries: ` to the thrown error's own message BEFORE step.js reconstructs
+// `new FatalError(<that whole string>)` (message/stack only — .code/.cause never exist on
+// the object this catch actually receives). consumeAutoDraftModelResult's own tag survives
+// stage 1 (it is still inside .message) but is no longer at the message's own start — it
+// now sits right after WDK's prefix. wdkTerminalFatalError() below replicates BOTH stages
+// exactly, in order, with the REAL installed FatalError class — never bypassing the
+// boundary the R-round flagged the first attempt at this test for skipping.
 // ===========================================================================
 
-test("ledger #44 (R-round F1) — a REAL WDK step-boundary crossing: consumeAutoDraftModelResult's tagged message survives WDK's own FatalError(err.message) reconstruction, and refusalFromCaughtError recovers the ORIGINAL code from the tag (never 'internal')", async () => {
+/** Replicates @workflow/core@4.6.0's OWN two-stage terminal-failure construction, in
+ *  order: step-handler.js:507's retry-exhaustion wrapper (`Step "<name>" failed after <N>
+ *  retry`/`retries`: <message>`, pluralize('retry','retries',N) — singular ONLY at N===1)
+ *  builds the string that becomes `eventData.error`; step.js's 'step_failed' consumer then
+ *  does `new FatalError(<that string>)`. Both stages, the REAL FatalError class — this is
+ *  the exact shape refusalFromCaughtError sees in production. */
+function wdkTerminalFatalError(stepName, retryCount, originalMessage) {
+  const word = retryCount === 1 ? "retry" : "retries";
+  return new FatalError(`Step "${stepName}" failed after ${retryCount} ${word}: ${originalMessage}`);
+}
+
+/** Property ABSENCE, asserted properly — `'code' in err` is `false`, never merely
+ *  `err.code === undefined` (which a property explicitly set to `undefined` would also
+ *  satisfy, proving nothing about whether WDK's reconstruction actually omits it). */
+function assertNoOwnOrInheritedProperty(err, prop, why) {
+  assert.equal(prop in err, false, why);
+}
+
+test("ledger #44 (R-round F1) — a REAL WDK step-boundary crossing, BOTH stages replicated (the retry-exhaustion prefix, then FatalError): consumeAutoDraftModelResult's tagged message survives, and refusalFromCaughtError recovers the ORIGINAL code from the tag (never 'internal')", async () => {
   const realError = errOf("AI_APICallError", "The requested model 'openai/gpt-5-mini' does not exist.");
   const { write } = collectingWriter();
   const result = {
@@ -167,25 +185,77 @@ test("ledger #44 (R-round F1) — a REAL WDK step-boundary crossing: consumeAuto
     thrown = err;
   }
 
-  // WDK's OWN reconstruction (step.js's 'step_failed' event consumer, per its own dist
-  // source): `new FatalError(errorMessage)`. Replicated here with the REAL, installed
-  // FatalError class — not a hand-rolled stand-in — so this test proves the actual
-  // boundary, never bypassing it the way the R-round flagged the original test did.
-  const reconstructed = new FatalError(thrown.message);
-  assert.equal(reconstructed.code, undefined, "precondition: the real FatalError class truly carries no .code — the boundary really does strip it");
-  assert.equal(reconstructed.cause, undefined, "precondition: .cause is truly gone too");
+  // Stage 1 + stage 2, in order, exactly as step-handler.js / step.js perform them —
+  // never bypassing the boundary the R-round flagged the original (prefix-less) cell for.
+  const reconstructed = wdkTerminalFatalError("runAutoDraftModelStep", 3, thrown.message);
+  assertNoOwnOrInheritedProperty(reconstructed, "code", "precondition: the real FatalError class truly carries no .code — the boundary really does strip it, not merely set it to undefined");
+  assertNoOwnOrInheritedProperty(reconstructed, "cause", "precondition: .cause is truly gone too, by the same proper absence check");
   assert.ok(reconstructed instanceof Error, "precondition: still an Error for refusalFromCaughtError's own instanceof check");
+  assert.match(reconstructed.message, /^Step "runAutoDraftModelStep" failed after 3 retries: \[autodraft_model:/, "precondition: the tag is NOT at message start once WDK's real prefix is applied — this is exactly what the R-round's ^-only regex missed");
 
   const refusal = refusalFromCaughtError(reconstructed);
-  assert.equal(refusal.code, "model_stream_error", "the code survives via the MESSAGE tag, never the (stripped) .code property");
+  assert.equal(refusal.code, "model_stream_error", "the code survives via the MESSAGE tag at its real, post-prefix position — never the (stripped) .code property");
   assert.match(refusal.message, /openai\/gpt-5-mini/, "the real vendor rejection text still reaches the settle record after the boundary crossing");
   assert.doesNotMatch(refusal.message, /^\[autodraft_model:/, "the tag itself is stripped back out — never leaked into the human-facing settle message");
+  assert.doesNotMatch(refusal.message, /^Step "/, "the WDK retry-prefix noise is ALSO stripped out — the settle message is the bookkeeper-facing diagnosis, not engine plumbing");
+});
+
+test("ledger #44 (R-round F1) — the SAME tag, at message START with no WDK prefix at all (a direct/non-terminal catch, the OTHER of the two permitted anchors), still parses correctly", () => {
+  const tagged = "[autodraft_model:model_stream_error] model stream reported an error: a vendor fault";
+  assert.deepEqual(refusalFromCaughtError(new Error(tagged)), {
+    code: "model_stream_error",
+    message: "model stream reported an error: a vendor fault",
+  });
 });
 
 test("ledger #44 (R-round F1) — a message WITHOUT the autodraft_model tag (any OTHER caught error, post-boundary) falls back to 'internal' but still carries the real message — unchanged from the third-swallow fix", () => {
-  const reconstructed = new FatalError("a DB connectivity blip mid-claim");
-  assert.equal(reconstructed.code, undefined, "precondition: a generic step failure ALSO loses .code at the boundary — this is the common case, not a special one");
-  assert.deepEqual(refusalFromCaughtError(reconstructed), { code: "internal", message: "a DB connectivity blip mid-claim" });
+  const reconstructed = wdkTerminalFatalError("claimAutoDraftStep", 3, "a DB connectivity blip mid-claim");
+  assertNoOwnOrInheritedProperty(reconstructed, "code", "precondition: a generic step failure ALSO loses .code at the boundary — this is the common case, not a special one");
+  assert.deepEqual(refusalFromCaughtError(reconstructed), {
+    code: "internal",
+    message: 'Step "claimAutoDraftStep" failed after 3 retries: a DB connectivity blip mid-claim',
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The injection surface: the pattern is `^`-anchored throughout, with the WDK-prefix
+// branch matched by its EXACT literal shape, never a wildcard scan. A vendor message that
+// merely CONTAINS the tag text somewhere it doesn't belong must never forge a code.
+// ---------------------------------------------------------------------------
+
+test("ledger #44 (R-round F1 injection surface) — the tag literal buried mid-string, with NO valid prefix immediately before it, is REFUSED (falls back to 'internal', the raw text preserved verbatim)", () => {
+  const hostile = "some vendor text [autodraft_model:evil_forged_code] more text after it";
+  assert.deepEqual(refusalFromCaughtError(new Error(hostile)), { code: "internal", message: hostile });
+});
+
+test("ledger #44 (R-round F1 injection surface) — a prefix that LOOKS like WDK's but isn't exact (missing the trailing colon+space) does NOT count as the post-prefix position — REFUSED", () => {
+  const nearMiss = 'Step "runAutoDraftModelStep" failed after 3 retries[autodraft_model:evil] no colon-space before the bracket';
+  assert.deepEqual(refusalFromCaughtError(new Error(nearMiss)), { code: "internal", message: nearMiss });
+});
+
+test("ledger #44 (R-round F1 injection surface) — genuine WDK prefix text, but with EXTRA characters between the prefix and the tag (the tag is not IMMEDIATELY after it) — REFUSED", () => {
+  const notImmediate = 'Step "runAutoDraftModelStep" failed after 3 retries: some other text first [autodraft_model:evil] end';
+  assert.deepEqual(refusalFromCaughtError(new Error(notImmediate)), { code: "internal", message: notImmediate });
+});
+
+test("ledger #44 (R-round F1 injection surface) — a genuine WDK prefix wrapping ZERO tag content (the original message itself has nothing bracketed) is unaffected — the ordinary post-third-swallow-fix path", () => {
+  const ordinary = wdkTerminalFatalError("settleAutoDraftStep", 3, "duplicate key violates unique constraint");
+  assert.deepEqual(refusalFromCaughtError(ordinary), {
+    code: "internal",
+    message: 'Step "settleAutoDraftStep" failed after 3 retries: duplicate key violates unique constraint',
+  });
+});
+
+test("ledger #44 (R-round F1) — the NAMED residual: an upstream message that is ITSELF, verbatim, tag-shaped at a valid position (never produced by consumeAutoDraftModelResult) DOES still parse — documented, not claimed impossible. Consequence: a mislabeled diagnostic `code` string in a settle record only, never an authority or write-path decision (this function's sole output feeds settle_autodraft_task's opaque `refusal` jsonb column)", () => {
+  // Nothing here calls consumeAutoDraftModelResult — this message is constructed exactly
+  // as if SOME OTHER step's own error text had coincidentally been tag-shaped, then wrapped
+  // by the SAME real WDK prefix machinery any step gets. The two-anchor design (by
+  // necessity — see this file's own header) cannot distinguish this from a genuine
+  // consumeAutoDraftModelResult tag, because at the byte level they ARE the same shape.
+  const coincidental = wdkTerminalFatalError("claimAutoDraftStep", 3, "[autodraft_model:forged_by_upstream_text] whatever the vendor actually said");
+  const refusal = refusalFromCaughtError(coincidental);
+  assert.equal(refusal.code, "forged_by_upstream_text", "the residual, made concrete: this code was NEVER assigned by consumeAutoDraftModelResult");
+  assert.equal(refusal.message, "whatever the vendor actually said");
 });
 
 test("ledger #44 — a real Error WITH a string .code (a non-step-crossed error, the fallback path's own contract) forwards BOTH verbatim into the settle refusal", () => {
@@ -285,14 +355,14 @@ function stripModelErrorTagImport(text) {
   return text.replace(/\s*AUTODRAFT_MODEL_ERROR_TAG,\n/, "\n");
 }
 
-/** v4 alone declares AUTODRAFT_MODEL_ERROR_PATTERN + refusalFromCaughtError, ahead of the
- *  workflow entry function; strip BOTH out entirely (JSDoc included) before the try/catch
- *  mask below runs, so neither pollutes the "everything outside the catch body"
- *  comparison. Anchored on whichever of the two markers appears FIRST (their own relative
- *  order is an implementation detail, not something this structural check should assume).
- *  A no-op on v3's text, which has neither. */
+/** v4 alone declares WDK_RETRY_PREFIX_SOURCE + AUTODRAFT_MODEL_ERROR_PATTERN +
+ *  refusalFromCaughtError, ahead of the workflow entry function; strip ALL THREE out
+ *  entirely (JSDoc included) before the try/catch mask below runs, so none pollutes the
+ *  "everything outside the catch body" comparison. Anchored on whichever marker appears
+ *  FIRST (their own relative order is an implementation detail, not something this
+ *  structural check should assume). A no-op on v3's text, which has none of them. */
 function stripRefusalHelperIfPresent(text) {
-  const markers = ["const AUTODRAFT_MODEL_ERROR_PATTERN", "export function refusalFromCaughtError"]
+  const markers = ["const WDK_RETRY_PREFIX_SOURCE", "const AUTODRAFT_MODEL_ERROR_PATTERN", "export function refusalFromCaughtError"]
     .map((m) => text.indexOf(m))
     .filter((i) => i >= 0);
   if (markers.length === 0) return text;

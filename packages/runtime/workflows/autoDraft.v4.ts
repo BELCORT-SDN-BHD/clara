@@ -22,17 +22,31 @@
 // unchanged) — this only widens what the DB-facing settle record says; retry/FatalError
 // semantics are untouched.
 //
-// R-round F1 (Codex, confirmed against @workflow/core@4.6.0's own dist/step.js): a caught
-// error's `.code` property NEVER survives to this catch for a step-originated failure. WDK
-// reconstructs every terminal step failure as `new FatalError(errorMessage)` from its own
-// event log — copying ONLY `.message` (+ `.stack`, when present); `.code` and `.cause` are
-// never serialized into the reconstruction at all. refusalFromCaughtError therefore reads
-// the code from the MESSAGE itself: consumeAutoDraftModelResult (autoDraft.v4.impl.ts) tags
-// its own thrown message with a `[autodraft_model:<code>]` prefix — the one channel proven
-// to survive — and this function parses it back out. A message without that exact prefix
-// (any OTHER caught error) falls back to the error's own `.code` property when present
-// (harmless for a non-step-crossed error, though none such currently occur in this
-// function), then to "internal" — unchanged from before this finding.
+// R-round F1 (Codex, confirmed against @workflow/core@4.6.0's own dist/step.js AND
+// dist/runtime/step-handler.js): a caught error's `.code` property NEVER survives to this
+// catch for a step-originated failure, and the surviving MESSAGE is not bare either. Two
+// stages, both real, both required to reproduce:
+//   (1) step-handler.js:507 (the retry-exhaustion branch, :489/:497) — BEFORE the failure
+//       is even written to the event log, it PREPENDS `Step "<stepName>" failed after
+//       <N> retr(y|ies): ` to the thrown error's own `.message`, discarding every other
+//       property, and stores that whole STRING as `eventData.error`.
+//   (2) step.js's `step_failed` event consumer — reconstructs `new FatalError(errorMessage)`
+//       from that stored string, copying ONLY `.message` (+ `.stack`, when present); no
+//       `.code`, no `.cause` ever exists on the object this catch actually receives.
+// So the tag consumeAutoDraftModelResult (autoDraft.v4.impl.ts) writes onto its own thrown
+// message survives stage (1) intact (still inside `.message`) but is no longer at the
+// message's own start — it now sits immediately after the "Step ... failed after N
+// retries: " prefix stage (1) added. AUTODRAFT_MODEL_ERROR_PATTERN below matches the tag
+// at EITHER position — `^` directly (a message that never went through stage 1, e.g. a
+// direct/non-terminal catch) OR immediately following that exact WDK prefix shape — and
+// nowhere else: the whole pattern stays `^`-anchored throughout, with the prefix itself
+// matched literally (step name in quotes, a digit count, retry/retries) rather than a
+// wildcard scan, so an unrelated vendor message that merely CONTAINS the tag text
+// somewhere in its middle can never match (see this file's own tests for the boundary
+// cases this closes, and the one residual it does NOT — a message that is ITSELF,
+// verbatim, tag-shaped at one of the two valid positions, without ever passing through
+// consumeAutoDraftModelResult, would still parse; the consequence is a mislabeled `code`
+// string in a diagnostic settle record only — never an authority or write-path decision).
 //
 // Schema + steps are otherwise byte-identical to v3: one admitted READY bill per task: claim
 // (begin_autodraft_task: CAS queued->running + context + reserved tokens) -> recover a
@@ -55,10 +69,25 @@ import {
 import { isQuestionShaped } from "./autoDraft.v4.prompt.js";
 import { noDraftRefusal } from "./autoDraft.v4.errors.js";
 
-/** Matches consumeAutoDraftModelResult's own `[autodraft_model:<code>] <message>` tag —
- *  the ONLY channel a step-originated diagnostic code has left once WDK's reconstruction
- *  (`new FatalError(errorMessage)`) has stripped every other property (R-round F1). */
-const AUTODRAFT_MODEL_ERROR_PATTERN = new RegExp(`^\\[${AUTODRAFT_MODEL_ERROR_TAG}:([^\\]]+)\\]\\s(.*)$`, "s");
+/** The EXACT literal shape step-handler.js:507 prepends on retry exhaustion — `Step "<any
+ *  step name>" failed after <N> retry`/`retries`: ` — matched literally (a quoted step
+ *  name, a digit count, the two pluralize('retry','retries',N) outputs), never a wildcard
+ *  gap, so this can only recognise WDK's OWN exact wrapper text, nothing merely similar. */
+const WDK_RETRY_PREFIX_SOURCE = `Step "[^"]*" failed after \\d+ retr(?:y|ies): `;
+
+/** Matches consumeAutoDraftModelResult's own `[autodraft_model:<code>] <message>` tag at
+ *  EITHER of exactly two positions — the message's own start, or immediately after WDK's
+ *  retry-exhaustion prefix (R-round F1: that prefix is what step-handler.js actually
+ *  prepends before the tag ever reaches step.js's FatalError reconstruction). The pattern
+ *  stays `^`-anchored across BOTH branches, with the prefix branch matched by the literal
+ *  shape above rather than `.*` or any other free-floating scan — an arbitrary vendor
+ *  message that happens to CONTAIN the tag text somewhere in its middle, with no exact
+ *  prefix immediately before it, can never match. This is deliberate: an unanchored search
+ *  would let a vendor's own error text forge a settle-record diagnostic code. */
+const AUTODRAFT_MODEL_ERROR_PATTERN = new RegExp(
+  `^(?:${WDK_RETRY_PREFIX_SOURCE})?\\[${AUTODRAFT_MODEL_ERROR_TAG}:([^\\]]+)\\]\\s(.*)$`,
+  "s",
+);
 
 /** ledger #44 (the third swallow + the R-round F1 fix): reduce a caught top-level error into
  *  the settle record's refusal shape. A message carrying consumeAutoDraftModelResult's own

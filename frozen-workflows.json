@@ -117,7 +117,7 @@
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v4.ts": {
-      "sha256": "da841252f12762ed142d6898cce4fe4a4e1c9fd943a09350de9382afabee7f96",
+      "sha256": "fda9fda0b724093b02e83a360af265e0d43197a44f3cd99317a88fe4c120c1e6",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.impl.ts": {
