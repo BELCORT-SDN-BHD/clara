@@ -343,36 +343,54 @@ begin
     clara._hash(jsonb_build_object('filing',p_filing,'origin',p_origin)));
   if v_dedupe is not null then return v_dedupe; end if;
 
-  update clara.firm_usage_daily set tokens_used=tokens_used+p_reserve_tokens
-    where firm_id=f.firm_id and usage_date=v_today;
-  insert into clara.agent_tasks(firm_id,client_id,kind,status,model_snapshot)
-    values(f.firm_id,f.client_id,'autodraft','queued',btrim(p_model)) returning id into v_task;
-  insert into clara.autodraft_attempts(firm_id,client_id,document_id,filing_id,
-      task_id,origin,run_id,state,reserved_tokens,usage_date,last_refusal)
-    values(f.firm_id,f.client_id,f.document_id,p_filing,v_task,p_origin,p_run_id,
-      'active',p_reserve_tokens,v_today,null)
-    on conflict(filing_id) do update set task_id=excluded.task_id,origin=excluded.origin,
-      run_id=excluded.run_id,state='active',reserved_tokens=excluded.reserved_tokens,
-      usage_date=excluded.usage_date,last_refusal=null,updated_at=now();
-  perform clara._audit(f.firm_id,null,null,null,'admit_autodraft_task',null,
-    jsonb_build_object('task',v_task,'filing',p_filing,'origin',p_origin,
-      'run',p_run_id,'reserved_tokens',p_reserve_tokens));
-  return clara._finish_op(f.firm_id,'admit_autodraft_task',v_op_key,
-    jsonb_build_object('outcome',case when v_is_retry then 're_admitted' else 'admitted' end,
-      'task_id',v_task,'reserved_tokens',p_reserve_tokens));
-exception when unique_violation then
-  get stacked diagnostics v_constraint=constraint_name;
-  if v_constraint='uq_autodraft_attempts_filing' then
-    select * into a from clara.autodraft_attempts where filing_id=p_filing;
-    if p_run_id is not null then
-      insert into clara.sweep_run_items(run_id,filing_id,firm_id,client_id,document_id,
-          outcome)
-        values(p_run_id,a.filing_id,a.firm_id,a.client_id,a.document_id,'noop_existing')
-        on conflict do nothing;
+  -- O-round confirmation finding #2 (Codex, second scoped pass, High/blocking): a
+  -- plpgsql EXCEPTION clause implicitly opens a SAVEPOINT at the START of whatever
+  -- block it is attached to -- when this exception clause lived on the function's
+  -- OUTER (top-level) block, an unique_violation caught here would roll back to a
+  -- savepoint established BEFORE the function body even began, undoing EVERY write
+  -- made since, including the terminal branch's reconciliation UPDATE far above (the
+  -- #1 fix). Any exception this handler catches -- for ANY reason, present or future
+  -- -- would silently erase that reconciliation right before returning
+  -- 'noop_existing', reopening the exact double-refund risk #1 closed: the NEXT call
+  -- would find reserved_tokens still nonzero and re-refund. Nesting this
+  -- EXCEPTION-guarded region in its OWN inner BEGIN...END, opened only HERE --
+  -- immediately before the one mutation sequence it exists to protect -- means its
+  -- implicit savepoint is established AFTER the terminal branch's reconciliation
+  -- already ran in the OUTER, unguarded scope; a rollback-to-savepoint here can only
+  -- ever undo what THIS inner block itself wrote, never anything from before it
+  -- opened. No other exception handler exists anywhere else in this function.
+  begin
+    update clara.firm_usage_daily set tokens_used=tokens_used+p_reserve_tokens
+      where firm_id=f.firm_id and usage_date=v_today;
+    insert into clara.agent_tasks(firm_id,client_id,kind,status,model_snapshot)
+      values(f.firm_id,f.client_id,'autodraft','queued',btrim(p_model)) returning id into v_task;
+    insert into clara.autodraft_attempts(firm_id,client_id,document_id,filing_id,
+        task_id,origin,run_id,state,reserved_tokens,usage_date,last_refusal)
+      values(f.firm_id,f.client_id,f.document_id,p_filing,v_task,p_origin,p_run_id,
+        'active',p_reserve_tokens,v_today,null)
+      on conflict(filing_id) do update set task_id=excluded.task_id,origin=excluded.origin,
+        run_id=excluded.run_id,state='active',reserved_tokens=excluded.reserved_tokens,
+        usage_date=excluded.usage_date,last_refusal=null,updated_at=now();
+    perform clara._audit(f.firm_id,null,null,null,'admit_autodraft_task',null,
+      jsonb_build_object('task',v_task,'filing',p_filing,'origin',p_origin,
+        'run',p_run_id,'reserved_tokens',p_reserve_tokens));
+    return clara._finish_op(f.firm_id,'admit_autodraft_task',v_op_key,
+      jsonb_build_object('outcome',case when v_is_retry then 're_admitted' else 'admitted' end,
+        'task_id',v_task,'reserved_tokens',p_reserve_tokens));
+  exception when unique_violation then
+    get stacked diagnostics v_constraint=constraint_name;
+    if v_constraint='uq_autodraft_attempts_filing' then
+      select * into a from clara.autodraft_attempts where filing_id=p_filing;
+      if p_run_id is not null then
+        insert into clara.sweep_run_items(run_id,filing_id,firm_id,client_id,document_id,
+            outcome)
+          values(p_run_id,a.filing_id,a.firm_id,a.client_id,a.document_id,'noop_existing')
+          on conflict do nothing;
+      end if;
+      return jsonb_build_object('outcome','noop_existing','task_id',a.task_id);
     end if;
-    return jsonb_build_object('outcome','noop_existing','task_id',a.task_id);
-  end if;
-  raise;
+    raise;
+  end;
 end $function$;
 
 reset role;
@@ -386,7 +404,9 @@ declare
   v_prior_count int;
   v_admit_src text;
   v_reread_marker text := 'select aa.*,t.status as task_status into a from clara.autodraft_attempts aa';
-  v_pos_first int; v_pos_second_rel int; v_pos_lock2 int; v_post_lock text;
+  v_filing_lock_marker text := 'select df.* into f from clara.document_filings df where df.id=p_filing and df.retired_at is null for update;';
+  v_pos_lock2 int; v_post_lock text;
+  v_pos_filing_lock int; v_occurrence_count int; v_scan_from int; v_found int;
   v_pos_completed int; v_pos_terminal int; v_pos_lane_check int; v_pos_opkey int;
   v_terminal_slice text;
 begin
@@ -419,15 +439,36 @@ begin
   -- The registry re-read statement itself (real code, not a comment) appears exactly
   -- twice — once pre-lock, once post-lock. Find the SECOND occurrence explicitly and
   -- slice from there, so every subsequent search is scoped to post-lock text only.
-  v_pos_first:=position(v_reread_marker in v_admit_src);
-  if v_pos_first=0 then
-    raise exception '0032 tail: cannot locate the registry re-read statement at all';
+  --
+  -- Second O-round confirmation finding (Codex, second scoped pass): merely taking
+  -- "the second occurrence found" is not itself proof that occurrence is genuinely
+  -- POST-lock -- a regression that added a SECOND read still inside the pre-lock
+  -- fast-path (e.g. a defensive re-check before falling through to acquire the lock)
+  -- would satisfy the old logic without ever reaching the real post-lock text. Two
+  -- independent structural facts are now required: the chosen occurrence's position
+  -- must be STRICTLY AFTER the filing's own `for update` lock statement (a genuinely
+  -- unique, real-code anchor -- the lock cannot be acquired before it is requested),
+  -- AND the marker must appear EXACTLY twice in the whole body, not merely "at least
+  -- twice" (a third occurrence anywhere would mean this scan can no longer be trusted
+  -- to have found the true post-lock recheck without also verifying total count).
+  v_pos_filing_lock:=position(v_filing_lock_marker in v_admit_src);
+  if v_pos_filing_lock=0 then
+    raise exception '0032 tail: cannot locate the filing FOR UPDATE lock statement';
   end if;
-  v_pos_second_rel:=position(v_reread_marker in substring(v_admit_src from v_pos_first+1));
-  if v_pos_second_rel=0 then
-    raise exception '0032 tail: cannot locate the SECOND (post-lock) registry re-read — it may have been removed or merged with the pre-lock one';
+  v_occurrence_count:=0; v_scan_from:=1;
+  loop
+    v_found:=position(v_reread_marker in substring(v_admit_src from v_scan_from));
+    exit when v_found=0;
+    v_occurrence_count:=v_occurrence_count+1;
+    if v_occurrence_count=2 then v_pos_lock2:=v_scan_from+v_found-1; end if;
+    v_scan_from:=v_scan_from+v_found-1+length(v_reread_marker);
+  end loop;
+  if v_occurrence_count<>2 then
+    raise exception '0032 tail: the registry re-read must appear EXACTLY twice (pre-lock + post-lock) — found %', v_occurrence_count;
   end if;
-  v_pos_lock2:=v_pos_first+v_pos_second_rel;
+  if v_pos_lock2<=v_pos_filing_lock then
+    raise exception '0032 tail: the SECOND registry re-read must be strictly AFTER the filing FOR UPDATE lock (lock=%, second-read=%)', v_pos_filing_lock, v_pos_lock2;
+  end if;
   v_post_lock:=substring(v_admit_src from v_pos_lock2);
 
   -- (2) the post-lock registry check's branch order: parked stays before the new
@@ -485,27 +526,92 @@ begin
      or position(' return ' in v_terminal_slice)<>0 then
     raise exception '0032 tail: the terminal-retry branch does not durably reconcile the reservation, clear the stale receipt, and fall through correctly';
   end if;
-  raise notice '0032 tail OK (3/5): the terminal-retry branch durably reconciles the reservation on the attempt row itself, clears the stale receipt, and falls through with no early return';
+  raise notice '0032 tail OK (3/6): the terminal-retry branch durably reconciles the reservation on the attempt row itself, clears the stale receipt, and falls through with no early return';
 
   -- (5) the final settlement distinguishes re_admitted from admitted.
   if position('case when v_is_retry then ''re_admitted'' else ''admitted'' end' in v_post_lock)=0 then
     raise exception '0032 tail: the final settlement does not distinguish re_admitted from admitted';
   end if;
-  raise notice '0032 tail OK (4/5): the final settlement honestly distinguishes a retry dispatch from a first-ever one';
+  raise notice '0032 tail OK (4/6): the final settlement honestly distinguishes a retry dispatch from a first-ever one';
 
-  -- (6) the reservation CHECK constraint's own shape confirms reserved_tokens=0 requires
-  -- a non-active state — a defensive cross-check that the fix in (4) actually satisfies
-  -- the live constraint, not just this migration's own assumption about it.
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid='clara.autodraft_attempts'::regclass
-      and conname='ck_autodraft_attempts_reservation'
-      and pg_get_constraintdef(oid) like '%state = ''active''%reserved_tokens > 0%'
-  ) then
-    raise exception '0032 tail: ck_autodraft_attempts_reservation no longer has the expected shape — the reserved_tokens=0,state=''idle'' reconciliation may violate it';
+  -- (6) O-round confirmation finding #2 (Codex, second scoped pass): the terminal
+  -- branch's durable reconciliation (check 3 above) must be structurally OUTSIDE any
+  -- EXCEPTION-guarded region -- a plpgsql EXCEPTION clause implicitly opens a SAVEPOINT
+  -- at the start of ITS OWN block, and a caught exception rolls back to that savepoint,
+  -- undoing every write made since, even ones from earlier in the SAME outer scope if
+  -- the handler sits on that outer scope rather than a nested inner one. Prove the
+  -- reconciliation UPDATE's position is BEFORE the inner block's own 'begin', and that
+  -- the exception handler is attached to THAT inner block (a nested 'exception when
+  -- unique_violation' immediately preceding the function's final 'end'), not the
+  -- outer one -- exactly one such handler exists anywhere in the body.
+  if (length(v_post_lock)-length(replace(v_post_lock,'exception when unique_violation','')))
+     / length('exception when unique_violation') <> 1 then
+    raise exception '0032 tail: exactly one ''exception when unique_violation'' handler must exist';
   end if;
-  raise notice '0032 tail OK (5/5): reserved_tokens=0,state=''idle'' is confirmed compatible with the live ck_autodraft_attempts_reservation constraint';
+  if position('exception when unique_violation'in v_post_lock)
+     <= position('update clara.autodraft_attempts set reserved_tokens=0,state=''idle''' in v_post_lock) then
+    raise exception '0032 tail: the exception handler must come AFTER the terminal branch''s durable reconciliation, not wrap it';
+  end if;
+  -- the inner block's own 'begin' (opening the exception-guarded region) must itself
+  -- come strictly AFTER the reconciliation UPDATE, and strictly AFTER the op-key
+  -- reservation call -- i.e. only the mint pipeline (the update/insert/insert/audit/
+  -- return sequence that actually needs the unique_violation guard) is nested; the
+  -- reconciliation AND the op-key reservation itself both stay in the outer scope.
+  if position(' begin ' in substring(v_post_lock from v_pos_opkey))=0
+     or position(' begin ' in substring(v_post_lock from v_pos_opkey))
+        <= position('clara._reserve_op(f.firm_id,''admit_autodraft_task'',v_op_key,' in substring(v_post_lock from v_pos_opkey)) then
+    raise exception '0032 tail: the inner exception-guarded block must open AFTER the op-key reservation call, protecting only the mint pipeline';
+  end if;
+  raise notice '0032 tail OK (5/6): the reconciliation is structurally OUTSIDE the exception-guarded region -- exactly one handler exists, attached to an inner block opened only around the mint pipeline it protects';
 
-  raise notice '0032 tail: admit_autodraft_task now supersedes a terminal-failed/cancelled/expired task honestly (re_admitted, reservation DURABLY reconciled on the attempt row itself, stale receipt cleared) while a completed task refuses honestly and a live task replays unchanged — the parked governance gate is untouched';
+  -- (6) is a SEPARATE do block below (no pg_get_functiondef call in it) -- it dynamically
+  -- APPLIES the live ck_autodraft_attempts_reservation constraint to real test tuples via
+  -- a throwaway temp table, rather than pattern-matching the constraint definition's text.
+  -- O-round confirmation finding (Codex, second scoped pass): a substring match against
+  -- pg_get_constraintdef's rendering only proves the definition CONTAINS certain
+  -- fragments, never that the reserved_tokens=0,state='idle' tuple is actually ACCEPTED
+  -- by the real, live expression -- a constraint reformatted or logically altered in a
+  -- way that still happens to contain those fragments would pass a substring probe while
+  -- genuinely rejecting the reconciliation shape at runtime.
 end
 $tail$;
+
+do $tail_constraint$
+declare
+  v_condef text;
+begin
+  select pg_get_constraintdef(oid) into v_condef
+    from pg_constraint
+    where conrelid='clara.autodraft_attempts'::regclass
+      and conname='ck_autodraft_attempts_reservation';
+  if v_condef is null then
+    raise exception '0032 tail: ck_autodraft_attempts_reservation is missing entirely';
+  end if;
+  create temp table _x0032_reservation_probe(
+    state text, task_id uuid, reserved_tokens bigint, usage_date date
+  ) on commit drop;
+  -- pg_get_constraintdef already renders the leading CHECK(...) wrapper, so it is
+  -- appended directly rather than after a second literal 'check' keyword.
+  execute format('alter table _x0032_reservation_probe add constraint ck_probe %s', v_condef);
+
+  -- THE FIX's exact shape (reserved_tokens=0, state='idle') must be ACCEPTED.
+  insert into _x0032_reservation_probe(state,task_id,reserved_tokens,usage_date)
+    values('idle',null,0,null);
+
+  -- Self-check the probe is not vacuous: an INVALID tuple (an 'active' row claiming
+  -- reserved_tokens=0, which the constraint's own 'active' branch requires to be > 0)
+  -- must be REJECTED -- if it were accepted, this probe mechanism could never have
+  -- caught a genuinely broken reconciliation shape either.
+  begin
+    insert into _x0032_reservation_probe(state,task_id,reserved_tokens,usage_date)
+      values('active',gen_random_uuid(),0,current_date);
+    raise exception '0032 tail: the live ck_autodraft_attempts_reservation constraint unexpectedly ACCEPTED an active+zero-reservation tuple — this probe would be vacuous';
+  exception when check_violation then
+    null; -- expected: the constraint correctly rejects the invalid tuple
+  end;
+
+  drop table _x0032_reservation_probe;
+  raise notice '0032 tail OK (6/6 overall): reserved_tokens=0,state=''idle'' is genuinely ACCEPTED by the live ck_autodraft_attempts_reservation constraint (dynamically applied, not pattern-matched), and the probe itself correctly rejects an invalid tuple';
+  raise notice '0032 tail: admit_autodraft_task now supersedes a terminal-failed/cancelled/expired task honestly (re_admitted, reservation DURABLY reconciled on the attempt row itself before any exception-guarded region, stale receipt cleared) while a completed task refuses honestly and a live task replays unchanged — the parked governance gate is untouched';
+end
+$tail_constraint$;

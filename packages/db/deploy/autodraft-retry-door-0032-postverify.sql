@@ -37,13 +37,20 @@
 --      clara._tf_agent_task_update's own transition matrix for kind='autodraft' proves
 --      those two statuses are structurally unreachable for this task kind, so the
 --      widening was reverted rather than ship dead code with a false rationale.
---   7. reserved_tokens=0,state='idle' (the terminal branch's reconciliation shape)
---      is compatible with the LIVE ck_autodraft_attempts_reservation CHECK constraint.
+--   7. The terminal branch's durable reconciliation sits structurally OUTSIDE any
+--      EXCEPTION-guarded region -- exactly one 'exception when unique_violation'
+--      handler exists, attached to an INNER block opened only around the mint
+--      pipeline (after the op-key reservation call), never wrapping the
+--      reconciliation.
+--   8. reserved_tokens=0,state='idle' (the terminal branch's reconciliation shape) is
+--      genuinely ACCEPTED by the LIVE ck_autodraft_attempts_reservation CHECK
+--      constraint -- proven by dynamically applying the live expression to a
+--      throwaway temp table, not by pattern-matching its rendered text.
 --
--- O-ROUND CONFIRMATION (Codex, read-only adversarial pass). The as-first-built
--- terminal branch refunded firm_usage_daily but never persisted the clear onto
--- autodraft_attempts.reserved_tokens itself -- a retry that refunded, then hit the lane
--- or budget check and returned early, left the row still reading the OLD
+-- O-ROUND CONFIRMATION, FIRST PASS (Codex, read-only adversarial review). The
+-- as-first-built terminal branch refunded firm_usage_daily but never persisted the
+-- clear onto autodraft_attempts.reserved_tokens itself -- a retry that refunded, then
+-- hit the lane or budget check and returned early, left the row still reading the OLD
 -- reserved_tokens, so the NEXT call re-entered the terminal branch and refunded the
 -- SAME amount again, unboundedly. Probe (4) below was ALSO widened in the same pass to
 -- require the durable per-row UPDATE, not just the firm_usage_daily arithmetic --
@@ -52,6 +59,29 @@
 -- state. Probe (5)'s reservation-call check was also strengthened from an existence
 -- check to a genuine occurrence COUNT (position() alone cannot distinguish "exactly
 -- once" from "at least once").
+--
+-- O-ROUND CONFIRMATION, SECOND PASS (Codex, a further scoped read-only review of the
+-- first fix). A plpgsql EXCEPTION clause implicitly opens a SAVEPOINT at the start of
+-- whatever block it is attached to; the pre-existing 'exception when unique_violation'
+-- handler (inherited from 0011/0031, protecting a concurrent-admission edge case) sat
+-- on the function's OUTER (top-level) block -- so ANY exception it ever caught would
+-- roll back to a savepoint established BEFORE the function body began, silently
+-- undoing the terminal branch's reconciliation right before returning
+-- 'noop_existing', reopening the same double-refund risk the first pass's fix closed.
+-- Fixed by nesting the exception-guarded mint pipeline in its OWN inner BEGIN...END,
+-- opened only immediately before the one mutation sequence it protects -- probe (7)
+-- below. This pass also found the anchor-uniqueness gap in probe (2) (fixed: an
+-- exact-position + exactly-two-occurrences proof, not "the next occurrence found")
+-- and the substring-only weakness in the former probe (7) (fixed: a genuine dynamic
+-- constraint-application test, now probe (8), in its own do block). Independent
+-- empirical investigation (three concurrency shapes via holdThenContend and
+-- concurrentTwoSession against a real terminal-cancelled and a fresh filing) could not
+-- reproduce the SPECIFIC concurrent-admission trigger for this exception handler under
+-- the current INSERT...ON CONFLICT(filing_id) DO UPDATE statement -- Postgres's own
+-- upsert semantics make a same-target unique_violation structurally unlikely from that
+-- statement shape. The structural fix is shipped regardless, as it is correct,
+-- zero-cost, defense-in-depth against ANY exception this handler could ever catch (not
+-- only the originally-described race), present or future.
 --
 -- COMMENT-STRIPPING DISCIPLINE. Every body assertion strips BOTH `--` line
 -- comments and `/* ... */` block comments before normalizing whitespace. A
@@ -70,8 +100,11 @@ declare
   v_admit_src text;
   v_norm text;
   v_reread_marker text := 'select aa.*,t.status as task_status into a from clara.autodraft_attempts aa';
-  v_pos_first int;
-  v_pos_second_rel int;
+  v_filing_lock_marker text := 'select df.* into f from clara.document_filings df where df.id=p_filing and df.retired_at is null for update;';
+  v_pos_filing_lock int;
+  v_occurrence_count int;
+  v_scan_from int;
+  v_found int;
   v_pos_lock int;
   v_post_lock text;
   v_pos_live int;
@@ -96,7 +129,7 @@ begin
   if v_n<>1 then
     raise exception '0032 postverify: migration 0032_autodraft_retry_door is not recorded';
   end if;
-  raise notice '0032 postverify OK (1/7): prior-migration chain intact through 0032';
+  raise notice '0032 postverify OK (1/8): prior-migration chain intact through 0032';
 
   select pg_get_functiondef(
     'clara.admit_autodraft_task(uuid,text,uuid,text,bigint)'::regprocedure)
@@ -115,24 +148,41 @@ begin
   -- `--` line comment, so a comment-only landmark can never be found here (a mistake an
   -- earlier draft of this file made and this note exists to keep from repeating).
   --
-  -- O-round confirmation (Codex): the FIRST version of this anchor used
-  -- 'select df.* into f from clara.document_filings df ...', a real single-occurrence
-  -- landmark, but never proved that the registry re-read ITSELF genuinely appears a
-  -- SECOND time after it -- a regression that deleted the post-lock re-read entirely
-  -- (leaving only the pre-lock fast-path) would still have satisfied every downstream
-  -- probe, because they only ever search "everything after the filing-lock anchor",
-  -- not "the SECOND registry re-read specifically". Anchoring on the SECOND occurrence
-  -- of the re-read statement itself closes that gap: if it is ever removed or merged
-  -- back into one, this probe fails loudly instead of silently under-proving.
-  v_pos_first:=position(v_reread_marker in v_norm);
-  if v_pos_first=0 then
-    raise exception '0032 postverify: cannot locate the registry re-read statement at all';
+  -- O-round confirmation (Codex, first scoped pass): the FIRST version of this anchor
+  -- used 'select df.* into f from clara.document_filings df ...', a real
+  -- single-occurrence landmark, but never proved that the registry re-read ITSELF
+  -- genuinely appears a SECOND time after it -- a regression that deleted the
+  -- post-lock re-read entirely (leaving only the pre-lock fast-path) would still have
+  -- satisfied every downstream probe, because they only ever search "everything after
+  -- the filing-lock anchor", not "the SECOND registry re-read specifically".
+  --
+  -- O-round confirmation (Codex, SECOND scoped pass): taking "the second occurrence
+  -- found by scanning forward" is STILL not proof that occurrence is genuinely
+  -- post-lock -- a regression that added a second read still inside the pre-lock
+  -- fast-path (e.g. a defensive re-check before falling through) would satisfy the old
+  -- logic without ever reaching the real post-lock text. Two independent facts are
+  -- required: the chosen occurrence must be STRICTLY AFTER the filing's own FOR UPDATE
+  -- lock statement (a genuinely unique, real-code anchor -- the lock cannot be
+  -- acquired before it is requested), AND the marker must appear EXACTLY twice in the
+  -- whole body, not merely "at least twice".
+  v_pos_filing_lock:=position(v_filing_lock_marker in v_norm);
+  if v_pos_filing_lock=0 then
+    raise exception '0032 postverify: cannot locate the filing FOR UPDATE lock statement';
   end if;
-  v_pos_second_rel:=position(v_reread_marker in substring(v_norm from v_pos_first+1));
-  if v_pos_second_rel=0 then
-    raise exception '0032 postverify: the registry re-read does not appear a SECOND (post-lock) time -- has it been removed or merged with the pre-lock fast-path?';
+  v_occurrence_count:=0; v_scan_from:=1;
+  loop
+    v_found:=position(v_reread_marker in substring(v_norm from v_scan_from));
+    exit when v_found=0;
+    v_occurrence_count:=v_occurrence_count+1;
+    if v_occurrence_count=2 then v_pos_lock:=v_scan_from+v_found-1; end if;
+    v_scan_from:=v_scan_from+v_found-1+length(v_reread_marker);
+  end loop;
+  if v_occurrence_count<>2 then
+    raise exception '0032 postverify: the registry re-read must appear EXACTLY twice (pre-lock + post-lock) -- found %', v_occurrence_count;
   end if;
-  v_pos_lock:=v_pos_first+v_pos_second_rel;
+  if v_pos_lock<=v_pos_filing_lock then
+    raise exception '0032 postverify: the SECOND registry re-read must be strictly AFTER the filing FOR UPDATE lock (lock=%, second-read=%)', v_pos_filing_lock, v_pos_lock;
+  end if;
   v_post_lock:=substring(v_norm from v_pos_lock);
 
   -- (2) the post-lock registry check's four branches appear in the documented order:
@@ -165,7 +215,7 @@ begin
   -- clara._tf_agent_task_update's own transition matrix proved them structurally
   -- unreachable for kind='autodraft'; reintroducing them would be shipping dead code
   -- with a false rationale again.
-  raise notice '0032 postverify OK (2/7): registry branches classify on task status in order live -> parked -> completed -> terminal, the live-status list is unwidened, and the post-lock re-read is a genuine SECOND occurrence';
+  raise notice '0032 postverify OK (2/8): registry branches classify on task status in order live -> parked -> completed -> terminal, the live-status list is unwidened, and the post-lock re-read is a genuine SECOND occurrence';
 
   -- (3) the parked branch (2+ failure governance) is untouched: it still returns
   -- refused_attempts unconditionally, with no new condition added to it.
@@ -175,7 +225,7 @@ begin
      or position('return jsonb_build_object(''outcome'',''refused_attempts''' in v_post_lock)=0 then
     raise exception '0032 postverify: the parked governance branch drifted from its unconditional refusal';
   end if;
-  raise notice '0032 postverify OK (3/7): the parked (2+ failure) governance gate is untouched and still refuses unconditionally';
+  raise notice '0032 postverify OK (3/8): the parked (2+ failure) governance gate is untouched and still refuses unconditionally';
 
   -- (4) the terminal-retry branch: reconciles any outstanding reservation DURABLY on the
   -- attempt row itself (not merely on firm_usage_daily -- Codex's High/blocking finding:
@@ -206,7 +256,7 @@ begin
   if v_pos_opkey_cond=0 or v_pos_lane_check>=v_pos_opkey_cond then
     raise exception '0032 postverify: cannot locate the conditional op-key assignment after the lane/budget checks';
   end if;
-  raise notice '0032 postverify OK (4/7): the terminal-retry branch durably reconciles the reservation on the attempt row itself, clears the stale receipt, and falls through with no early return';
+  raise notice '0032 postverify OK (4/8): the terminal-retry branch durably reconciles the reservation on the attempt row itself, clears the stale receipt, and falls through with no early return';
 
   -- (5) the op-key reservation call itself exists EXACTLY once (counted, not merely
   -- found -- position() alone cannot distinguish "at least once" from "exactly once"),
@@ -224,29 +274,86 @@ begin
   if position('case when v_is_retry then ''re_admitted'' else ''admitted'' end' in v_post_lock)=0 then
     raise exception '0032 postverify: the final settlement does not distinguish re_admitted from admitted';
   end if;
-  raise notice '0032 postverify OK (5/7): the op-key reservation is conditional-then-called EXACTLY once, and the final settlement is honest about a retry vs a first admission';
+  raise notice '0032 postverify OK (5/8): the op-key reservation is conditional-then-called EXACTLY once, and the final settlement is honest about a retry vs a first admission';
 
   -- (6) the completed branch returns an honest, distinct refusal -- never silently
   -- re-admitting and never replaying a stale receipt.
   if position('return jsonb_build_object(''outcome'',''already_done''' in v_post_lock)=0 then
     raise exception '0032 postverify: the completed-task branch does not return an honest already_done refusal';
   end if;
-  raise notice '0032 postverify OK (6/7): a completed task refuses honestly with a distinct outcome, never a silent re-admit';
+  raise notice '0032 postverify OK (6/8): a completed task refuses honestly with a distinct outcome, never a silent re-admit';
 
-  -- (7) reserved_tokens=0,state='idle' (the terminal branch's reconciliation shape from
-  -- probe 4) is compatible with the LIVE ck_autodraft_attempts_reservation CHECK
-  -- constraint -- a defensive cross-check that the fix satisfies the actual deployed
-  -- constraint, not just this file's assumption about its shape.
-  if not exists (
-    select 1 from pg_constraint
-    where conrelid='clara.autodraft_attempts'::regclass
-      and conname='ck_autodraft_attempts_reservation'
-      and pg_get_constraintdef(oid) like '%state = ''active''%reserved_tokens > 0%'
-  ) then
-    raise exception '0032 postverify: ck_autodraft_attempts_reservation no longer has the expected shape -- the reserved_tokens=0,state=''idle'' reconciliation may violate it';
+  -- (7) O-round confirmation finding #2 (Codex, second scoped pass): the terminal
+  -- branch's durable reconciliation must be structurally OUTSIDE any EXCEPTION-guarded
+  -- region -- a plpgsql EXCEPTION clause implicitly opens a SAVEPOINT at the start of
+  -- ITS OWN block, and a caught exception rolls back to that savepoint, undoing every
+  -- write made since. When this handler lived on the function's OUTER (top-level)
+  -- block, that savepoint was established BEFORE the function body even began -- ANY
+  -- exception it ever caught would silently erase the reconciliation right before
+  -- returning 'noop_existing', reopening the exact double-refund risk probe (4)
+  -- proved closed. Prove exactly one 'exception when unique_violation' handler exists,
+  -- that it comes AFTER the terminal branch's reconciliation UPDATE (never wrapping
+  -- it), and that its own inner 'begin' opens only around the mint pipeline (after the
+  -- op-key reservation call, not before it).
+  if (length(v_post_lock)-length(replace(v_post_lock,'exception when unique_violation','')))
+     / length('exception when unique_violation') <> 1 then
+    raise exception '0032 postverify: exactly one ''exception when unique_violation'' handler must exist';
   end if;
-  raise notice '0032 postverify OK (7/7): reserved_tokens=0,state=''idle'' is confirmed compatible with the live ck_autodraft_attempts_reservation constraint';
+  if position('exception when unique_violation' in v_post_lock)
+     <= position('update clara.autodraft_attempts set reserved_tokens=0,state=''idle''' in v_post_lock) then
+    raise exception '0032 postverify: the exception handler must come AFTER the terminal branch''s durable reconciliation, not wrap it';
+  end if;
+  if position(' begin ' in substring(v_post_lock from v_pos_opkey_cond))=0
+     or position(' begin ' in substring(v_post_lock from v_pos_opkey_cond))
+        <= position('clara._reserve_op(f.firm_id,''admit_autodraft_task'',v_op_key,'
+             in substring(v_post_lock from v_pos_opkey_cond)) then
+    raise exception '0032 postverify: the inner exception-guarded block must open AFTER the op-key reservation call, protecting only the mint pipeline';
+  end if;
+  raise notice '0032 postverify OK (7/8): the reconciliation is structurally OUTSIDE the exception-guarded region -- exactly one handler exists, attached to an inner block opened only around the mint pipeline it protects';
 
-  raise notice '0032 postverify: ALL STRUCTURAL/CATALOG PROBES PASSED — behavioral retry-dispatch and reservation-reconciliation correctness remain the rig suite''s job';
+  raise notice '0032 postverify: probe (8/8) is a SEPARATE do block below (no pg_get_functiondef call in it) -- it dynamically applies the live ck_autodraft_attempts_reservation constraint to real test tuples via a throwaway temp table';
 end
 $verify$;
+
+do $verify_constraint$
+declare
+  v_condef text;
+begin
+  -- (8) reserved_tokens=0,state='idle' (the terminal branch's reconciliation shape) is
+  -- genuinely ACCEPTED by the LIVE ck_autodraft_attempts_reservation CHECK constraint --
+  -- O-round confirmation finding (Codex, second scoped pass): a substring match against
+  -- pg_get_constraintdef's rendering only proves the definition CONTAINS certain
+  -- fragments, never that the target tuple is actually accepted by the real, live
+  -- expression. This dynamically APPLIES the live constraint (pulled fresh, not
+  -- hand-copied) to a throwaway temp table -- a genuine insert test, not a text probe --
+  -- and self-checks that an INVALID tuple is correctly REJECTED, proving the probe
+  -- itself is not vacuous.
+  select pg_get_constraintdef(oid) into v_condef
+    from pg_constraint
+    where conrelid='clara.autodraft_attempts'::regclass
+      and conname='ck_autodraft_attempts_reservation';
+  if v_condef is null then
+    raise exception '0032 postverify: ck_autodraft_attempts_reservation is missing entirely';
+  end if;
+  create temp table _x0032_reservation_probe(
+    state text, task_id uuid, reserved_tokens bigint, usage_date date
+  ) on commit drop;
+  -- pg_get_constraintdef already renders the leading CHECK(...) wrapper.
+  execute format('alter table _x0032_reservation_probe add constraint ck_probe %s', v_condef);
+
+  insert into _x0032_reservation_probe(state,task_id,reserved_tokens,usage_date)
+    values('idle',null,0,null);
+
+  begin
+    insert into _x0032_reservation_probe(state,task_id,reserved_tokens,usage_date)
+      values('active',gen_random_uuid(),0,current_date);
+    raise exception '0032 postverify: the live ck_autodraft_attempts_reservation constraint unexpectedly ACCEPTED an active+zero-reservation tuple -- this probe would be vacuous';
+  exception when check_violation then
+    null; -- expected: the constraint correctly rejects the invalid tuple
+  end;
+
+  drop table _x0032_reservation_probe;
+  raise notice '0032 postverify OK (8/8): reserved_tokens=0,state=''idle'' is genuinely ACCEPTED by the live ck_autodraft_attempts_reservation constraint (dynamically applied, not pattern-matched), and the probe itself correctly rejects an invalid tuple';
+  raise notice '0032 postverify: ALL STRUCTURAL/CATALOG PROBES PASSED — behavioral retry-dispatch and reservation-reconciliation correctness remain the rig suite''s job';
+end
+$verify_constraint$;
