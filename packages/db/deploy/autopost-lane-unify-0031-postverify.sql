@@ -92,7 +92,7 @@ begin
   v_pos_lane:=position(
     'select * into v_lane from clara._coding_lane_core(f.client_id,p_filing);' in v_norm);
   v_pos_opkey:=position(
-    'v_op_key:=''autodraft:''||p_filing||'':''||p_origin;' in v_norm);
+    'clara._reserve_op(f.firm_id,''admit_autodraft_task'',v_op_key,' in v_norm);
   if v_pos_lock=0 or v_pos_recheck=0 or v_pos_lane=0 or v_pos_opkey=0
      or v_pos_lock>=v_pos_recheck or v_pos_recheck>=v_pos_lane
      or v_pos_lane>=v_pos_opkey then
@@ -100,27 +100,39 @@ begin
       '0031 postverify: admit_autodraft_task lock/recheck/lane/op-key order is wrong (lock=%, recheck=%, lane=%, opkey=%)',
       v_pos_lock,v_pos_recheck,v_pos_lane,v_pos_opkey;
   end if;
-  raise notice '0031 postverify OK (2/6): admit_autodraft_task''s lock -> registry recheck -> lane check -> op-key reservation order is intact';
+  raise notice '0031 postverify OK (2/6): admit_autodraft_task''s lock -> registry recheck -> lane check -> the REAL _reserve_op call order is intact';
 
-  -- (3) the not-ready branch (between the lane check and the op-key
-  -- assignment) settles no receipt -- no _finish_op call in that slice.
+  -- (3) O-round confirmation findings 2+4: the slice from the lane check through the
+  -- ACTUAL _reserve_op call (not merely the v_op_key assignment) must contain no
+  -- _finish_op call -- this now spans BOTH the not-ready lane branch AND the budget/
+  -- concurrency-cap refusal branches, since all three must return their outcome
+  -- directly without ever touching op_receipts. There is exactly one _finish_op call
+  -- anywhere in the function (the admitted path's own settlement, probe 4) -- if this
+  -- slice found one, it would necessarily be a SECOND, illegitimate occurrence.
   v_refusal_slice:=substring(v_norm from v_pos_lane for v_pos_opkey-v_pos_lane);
   if position('_finish_op' in v_refusal_slice)<>0 then
-    raise exception '0031 postverify: the not-ready lane branch still settles an op-key receipt -- the stale-cache defect is not fixed';
+    raise exception '0031 postverify: a not-ready or budget-refused branch still settles an op-key receipt -- the stale-cache defect is not fully fixed';
   end if;
   if position('outcome'',''lane_changed' in v_refusal_slice)=0 then
     raise exception '0031 postverify: the not-ready lane branch no longer returns the lane_changed outcome';
   end if;
-  raise notice '0031 postverify OK (3/6): a not-ready lane returns directly, settling no op_receipts row';
+  if position('outcome'',''refused_budget' in v_refusal_slice)=0
+     or (select count(*) from regexp_matches(v_refusal_slice,'outcome'',''refused_budget','g'))<2 then
+    raise exception '0031 postverify: both budget/concurrency-cap refusal branches must return refused_budget directly, ahead of op-key reservation';
+  end if;
+  raise notice '0031 postverify OK (3/6): a not-ready lane AND both budget refusal branches return directly, settling no op_receipts row';
 
   -- (4) the admitted (success) path still reaches _reserve_op/_finish_op --
-  -- idempotency is preserved for the outcome that actually creates a task.
+  -- idempotency is preserved for the outcome that actually creates a task. Exactly
+  -- one _finish_op call exists anywhere in the function (probe 3 already proved the
+  -- refusal slice contains none), so this occurrence can only be the genuine one.
   if position('v_dedupe:=clara._reserve_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0
      or position('outcome'',''admitted' in v_norm)=0
-     or position('return clara._finish_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0 then
-    raise exception '0031 postverify: the admitted (success) path no longer reserves/settles an idempotent op-key receipt';
+     or position('return clara._finish_op(f.firm_id,''admit_autodraft_task''' in v_norm)=0
+     or (select count(*) from regexp_matches(v_norm,'_finish_op\(f\.firm_id,''admit_autodraft_task''','g'))<>1 then
+    raise exception '0031 postverify: the admitted (success) path no longer reserves/settles an idempotent op-key receipt, or a second _finish_op site appeared';
   end if;
-  raise notice '0031 postverify OK (4/6): the admitted path still reserves and settles an idempotent op-key receipt';
+  raise notice '0031 postverify OK (4/6): the admitted path still reserves and settles an idempotent op-key receipt, and it is the ONLY such site';
 
   -- (5) clara.coding_lane (the read verb) still calls the identical
   -- _coding_lane_core -- admission and the read verb consume one law.

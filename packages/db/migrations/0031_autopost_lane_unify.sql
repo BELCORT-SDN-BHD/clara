@@ -39,6 +39,25 @@
 -- the refusal path can no longer be intercepted by a stale cache — never by parallel
 -- maintenance of two computations, because there was only ever one.
 --
+-- O-ROUND CONFIRMATION (two further findings, both fixed here, not deferred):
+-- (1) THE PRE-EXISTING POISON. The reorder alone stops any NEW refusal from being
+-- cached, but does nothing about a lane_changed/refused_budget receipt that was
+-- ALREADY settled under the pre-0031 code — clara._reserve_op replays ANY settled
+-- receipt for a given op-key regardless of which migration wrote it, so a filing
+-- refused before this deploy would stay stuck exactly as before even after the fix
+-- ships. §C below is a one-time, idempotent DELETE clearing every such receipt.
+-- (2) THE BUDGET-REFUSAL BRANCHES CARRIED THE IDENTICAL DEFECT. clara.firm_usage_daily
+-- resets per usage_date and clara.sweep_runs' open count changes as runs close — a
+-- refused_budget outcome is exactly as state-dependent and transient as a lane_changed
+-- one, but the original reorder only moved the LANE check ahead of reservation,
+-- leaving both budget-refusal branches still settling the same state-free
+-- (filing,origin) op-key via clara._finish_op. Neither branch mutates
+-- firm_usage_daily/sweep_runs on the refusal path (only the success path does), so
+-- re-deriving them fresh has no double-charge side effect. Fix: op-key reservation
+-- now happens once, immediately before the ONE mutation that actually needs
+-- idempotent replay protection — task creation itself — after BOTH the lane check
+-- and the budget/concurrency checks.
+--
 -- §B (#40, RULED) — the near_duplicate amount limb (same counterparty + same total_cents
 -- among approved unreversed document-bound entries) permanently blocked the autopost use
 -- case itself: a flat recurring fee (the same vendor billing the same amount every
@@ -68,14 +87,19 @@
 -- deliberate and touches the live posting/admission path directly.
 --
 -- CELLS (packages/db/tests/x31-autopost-lane-unify.test.mjs): (a) a real EZSEC-shaped
--- live evidence window (vendor bound, near_duplicate absent) admits end-to-end — the
--- draft carries coding_kind + vendor_binding_id; (b) a genuinely duplicate upload (same
+-- live evidence window (vendor bound, near_duplicate absent) reaches clara.coding_lane
+-- 'ready' and clara.request_autodraft 'admitted' end-to-end — 0031 does not itself
+-- create the eventual draft (that is Slot A/B's job, proven in 0028/0029/0030's own
+-- batteries); this cell's scope is admission reaching the queued task, not the draft
+-- that a later runtime pass produces from it; (b) a genuinely duplicate upload (same
 -- invoice_id, or same sha256) still flags near_duplicate; (c) same amount + ABSENT
--- invoice_id still flags; (d) same amount + same invoice_id, different docs, still
--- flags; (e) admission (request_autodraft) and the read verb (coding_lane) agree on
--- multiple shapes — proven by direct comparison on the SAME filing at the SAME instant,
--- across a not-ready shape, a shape that becomes ready after a state change, and a ready
--- shape re-checked after a genuine admission.
+-- invoice_id, on either side, still flags; (d) same amount + same invoice_id, different
+-- docs, still flags; (e) admission (request_autodraft) and the read verb (coding_lane)
+-- agree on multiple shapes — proven by direct comparison on the SAME filing at the SAME
+-- instant, across a not-ready shape, a shape that becomes ready after a state change
+-- (with the op_receipts row count asserted at zero across the refusal AND directly
+-- confirmed settled after the real admission), and a ready shape re-checked after a
+-- genuine admission.
 
 set role clara_fn_owner;
 
@@ -189,11 +213,16 @@ begin
       'reasons',v_lane.reasons);
   end if;
 
-  v_op_key:='autodraft:'||p_filing||':'||p_origin;
-  v_dedupe:=clara._reserve_op(f.firm_id,'admit_autodraft_task',v_op_key,
-    clara._hash(jsonb_build_object('filing',p_filing,'origin',p_origin)));
-  if v_dedupe is not null then return v_dedupe; end if;
-
+  -- 0031 O-round confirmation finding 2: the budget/concurrency-cap refusals below
+  -- are EXACTLY the same class of transient, state-dependent fact as the lane check
+  -- above (firm_usage_daily resets per usage_date; sweep_runs' open count changes
+  -- as runs close) -- caching either of them under the same state-free (filing,
+  -- origin) key would freeze a budget refusal past a daily reset or a cleared
+  -- concurrency cap exactly as the lane bug did. Neither refusal branch below
+  -- mutates firm_usage_daily/sweep_runs (only the eventual success path does), so
+  -- re-deriving them fresh on every call has no double-charge side effect. Op-key
+  -- reservation therefore moves to immediately before the one mutation that
+  -- actually needs idempotent replay protection: task creation itself.
   perform pg_advisory_xact_lock(202991617,hashtext(f.firm_id::text));
   select coalesce(fl.daily_token_limit,1000000),fl.sweep_budget_share,
       fl.max_concurrent_sweeps into v_limit,v_share,v_cap
@@ -213,8 +242,7 @@ begin
           jsonb_build_object('clr','CLR29','reason','refused_budget','gate','concurrency'))
         on conflict do nothing;
     end if;
-    return clara._finish_op(f.firm_id,'admit_autodraft_task',v_op_key,
-      jsonb_build_object('outcome','refused_budget','reason','refused_budget'));
+    return jsonb_build_object('outcome','refused_budget','reason','refused_budget');
   end if;
   if (p_origin='sweep' and v_used+p_reserve_tokens>(v_limit*v_share)::bigint)
      or (p_origin='one_click' and v_used+p_reserve_tokens>v_limit) then
@@ -225,9 +253,16 @@ begin
           jsonb_build_object('clr','CLR29','reason','refused_budget'))
         on conflict do nothing;
     end if;
-    return clara._finish_op(f.firm_id,'admit_autodraft_task',v_op_key,
-      jsonb_build_object('outcome','refused_budget','reason','refused_budget'));
+    return jsonb_build_object('outcome','refused_budget','reason','refused_budget');
   end if;
+
+  -- The op-key is reserved here, immediately before the one mutation (task
+  -- creation) that genuinely needs idempotent replay protection on retry.
+  v_op_key:='autodraft:'||p_filing||':'||p_origin;
+  v_dedupe:=clara._reserve_op(f.firm_id,'admit_autodraft_task',v_op_key,
+    clara._hash(jsonb_build_object('filing',p_filing,'origin',p_origin)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
   update clara.firm_usage_daily set tokens_used=tokens_used+p_reserve_tokens
     where firm_id=f.firm_id and usage_date=v_today;
   insert into clara.agent_tasks(firm_id,client_id,kind,status,model_snapshot)
@@ -491,6 +526,33 @@ end $function$;
 reset role;
 
 -- =====================================================================
+-- §C (0031 O-round confirmation finding 1) -- clear PRE-EXISTING poisoned receipts.
+-- The reorder above stops any NEW refusal from being cached, but does nothing for a
+-- lane_changed/refused_budget receipt that was ALREADY settled under the pre-0031 code
+-- for a filing that has since become ready (or whose budget has since reset/cleared) --
+-- that filing would remain permanently stuck exactly as before, since _reserve_op
+-- replays ANY settled receipt regardless of which migration wrote it. This is a
+-- one-time, idempotent cleanup: delete every admit_autodraft_task receipt whose
+-- SETTLED result was a refusal (never an 'admitted' one -- those still gate real
+-- agent_tasks rows and must not be disturbed). A no-op on a fresh database; on a live
+-- upgrade it re-arms every filing an old refusal was silently blocking, matching
+-- exactly what the FIXED code would have done had it always been in effect.
+-- =====================================================================
+set role clara_fn_owner;
+do $cleanup$
+declare v_cleared int;
+begin
+  delete from clara.op_receipts
+    where fn='admit_autodraft_task'
+      and result is not null
+      and result->>'outcome' in ('lane_changed','refused_budget');
+  get diagnostics v_cleared = row_count;
+  raise notice '0031 §C: cleared % pre-existing poisoned admit_autodraft_task receipt(s)',v_cleared;
+end
+$cleanup$;
+reset role;
+
+-- =====================================================================
 -- TAIL — in-transaction self-verification. Every raise is a real assertion failure, not
 -- a soft warning; a clean run ends with one notice and nothing else.
 -- =====================================================================
@@ -520,8 +582,12 @@ begin
     'waiter that lost the filing lock rechecks the registry' in v_admit_src);
   v_pos_lane:=position(
     'select * into v_lane from clara._coding_lane_core(f.client_id,p_filing);' in v_admit_src);
+  -- O-round confirmation finding 4: anchor on the ACTUAL clara._reserve_op(...) CALL,
+  -- not merely the v_op_key:= assignment that precedes it — a mutation that hoisted the
+  -- real reservation call earlier while leaving the assignment text in place would
+  -- otherwise still pass this probe.
   v_pos_opkey:=position(
-    'v_op_key:=''autodraft:''||p_filing||'':''||p_origin;' in v_admit_src);
+    'clara._reserve_op(f.firm_id,''admit_autodraft_task'',v_op_key,' in v_admit_src);
   if v_pos_lock=0 or v_pos_recheck=0 or v_pos_lane=0 or v_pos_opkey=0
      or v_pos_lock>=v_pos_recheck or v_pos_recheck>=v_pos_lane
      or v_pos_lane>=v_pos_opkey then
@@ -529,6 +595,11 @@ begin
       '0031 tail: admit_autodraft_task lock/recheck/lane/op-key order is wrong (lock=%, recheck=%, lane=%, opkey=%)',
       v_pos_lock,v_pos_recheck,v_pos_lane,v_pos_opkey;
   end if;
+  -- The budget/concurrency-cap refusal branches (O-round confirmation finding 2) must
+  -- ALSO precede the real reservation call and return their outcome directly, never via
+  -- _finish_op — the slice check just below already covers this: it now spans from the
+  -- lane check through the real clara._reserve_op(...) call (per the anchor fix above),
+  -- which includes both budget branches in between.
   -- The not-ready branch must return directly (no _finish_op call in its body slice) —
   -- the old cached-refusal shape (a _finish_op call between the lane check and the
   -- op-key assignment) must be verifiably absent.
