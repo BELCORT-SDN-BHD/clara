@@ -252,3 +252,28 @@ value. Both HIGHs orchestrator-verified in-code and fixed; the security oracle s
 Standing Wave-A residuals also carried forward: contract §12 out-of-scope confirmations; the
 per-client egress registry now SHIPS (WA-R2 superseded the S6-R1 RPR-only gate — owner-declared
 2026-07-21); the AB-3 (S6) `engine_kind` pin remains the first statement block of migration 0011.
+
+> **POST-HOC DEFECT (2026-07-29, ledger #39/#40 — found during the vendor-binding runway, fixed
+> by migration 0031, not part of any original Wave-A review round):**
+> **(#39) `admit_autodraft_task`'s stale-cache divergence.** The initial report described a
+> second, forked lane computation; direct inspection of the live catalog disproved that —
+> `admit_autodraft_task` and the `coding_lane` read verb both already called the identical
+> `_coding_lane_core`. The REAL defect, reproduced directly: `admit_autodraft_task` reserved its
+> op-key (`_reserve_op`, keyed purely on `(filing,origin)`, no state hash) BEFORE the lane check,
+> and a NOT-READY outcome settled that same op-key — permanently caching the first-ever admission
+> decision for that `(filing,origin)` pair. A vendor binding going live (or consent granted, or a
+> blocking draft withdrawn) after a refusal was invisible forever: every later
+> `request_autodraft` call replayed the cached refusal while `coding_lane` (uncached) reported the
+> correct state immediately. Migration 0031 §A reorders the lane check to run BEFORE op-key
+> reservation; a NOT-READY outcome now touches no `op_receipts` row at all, so it is re-derived
+> fresh on every call. Only a genuine `'admitted'` outcome (which creates a real `agent_tasks`
+> row) still reserves/settles idempotently.
+> **(#40) `near_duplicate` blocked the autopost use case itself, RULED.** The amount limb (same
+> counterparty + same `total_cents` among approved unreversed entries) fired on every recurring
+> flat-fee vendor — the exact shape autopost exists to serve. Migration 0031 §B: the amount limb
+> does not fire when both documents' extracted `invoice_id` values are PRESENT and DISTINCT and
+> the document `sha256`s differ (a different bill number on a different physical document is "the
+> same fee again," not "the same bill twice"). Same-or-absent `invoice_id`, or the same physical
+> document re-extracted, still flags exactly as before. The `invoice_date` limb is untouched.
+> Both fixes verified against a fresh scratch database (postverify + a dedicated rig battery);
+> see `packages/db/migrations/0031_autopost_lane_unify.sql`'s own header for the full account.
