@@ -106,12 +106,22 @@ ADR-025..027 · **A2.1** CLOSED — ADR-028..030 · **B** (knowledge + onboardin
 intent — ADR-044..046 · **the extraction slice** CLOSED — ADR-047/048 (`corroborated` =
 explicit two-reader agreement; confidence GONE).
 
-**LIVE POSTURE: 26 migrations (`0026`) · Fly `clara-runtime` v33 · FOUR firms** (BELCORT —
+**LIVE POSTURE: 33 migrations (`0034`) · Fly `clara-runtime` v37 · FOUR firms** (BELCORT —
 real, 3 clients, **high-stakes RM100,000** ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
 Gate-S synthetic sandbox, RM10k default · Alara Advisory + Borneo Books = slice-era RLS
 fixtures, never repurpose) **· dashboard Pages `app.clarabook.com`** (must set
 `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **· `clara-backup` daily.**
 No migration queued.
+
+**THE FIRST PRODUCTION AUTOPOST IS DONE (ADR-050, 2026-07-29 08:20:47 UTC):** entry
+`f65eba11` · rule `90a07e89` · RM350 · 38 seconds PDF→posted, unattended, every step
+receipted incl. the draft+post-phase binding resolutions. The full authority chain is
+production-proven: two-reader corroboration → the owner's sighting floor → the signed rule →
+the signed vendor binding `d871c50c` (F1 LCP `ez 易计 ezaccount` · F2 `ezsec-iv-00` ·
+registration pinned · expires 2027-07-29) → the unified lane → autoDraft v5 (SST-zero =
+2-leg, owner-precedent-ruled) → `execute_rule_post`. Six firings; every prior refusal was a
+real control or real defect, none worked around. **Standing law: migration numbers are
+claimed at MERGE time** (the deploy-onto-existing frontier check enforces).
 
 **Settlement scoreboard (ADR-049; receipts `~/.clara-tools/captures/` + `docs/plan/research/`):**
 Gate **L** CLOSED (labelled synthetic, PR #127 — the 0017 `contradiction` detector's first
@@ -124,18 +134,17 @@ classify settle · receipt auto-routing) + **0026** (lane-widened keys · the fi
 door) DEPLOYED via 5- and 3-round ladders · consent/wiki synthesis ACTIVATED · `interview_v2`
 live (manifest 80/80).
 
-**The road to the first production autopost (owner-ruled option A, ADR-049):** the
-vendor-binding design is **RATIFIED v4.1** (`docs/plan/autopost-vendor-binding-design.md` +
-`-part2.md` — F3 = corroboration not option B, amendment D; hand-drafts are never
-autopost-eligible BY DESIGN) → build **0027 + 0028** (0028 recuts `execute_rule_post` AND
-`_approve_entry_core`; D1 quiesce both; `schema_migrations` interlock). Dwell gate: a fourth
-EZSEC bill posted ≥ 08/09/2025 (IV-00846/847 qualify). **Autopost-from-seeding stays REFUSED**
+**Autopost law (ADR-049/050):** the vendor-binding design v4.1 is BUILT AND LIVE
+(`docs/plan/autopost-vendor-binding-design.md` + `-part2.md` are the mechanism of record);
+hand-drafts are never autopost-eligible BY DESIGN; **autopost-from-seeding stays REFUSED**
 (WB-R2/ADR-046) — posting authority comes from verified in-system approvals only.
 
-**Open build items (the task ledger is the live status home):** the currency defect (Azure
-types bare-numeral MYR as USD — design in flight; biggest Gate-P blocker; facts-attempt budget
-3/doc, partly spent) · the 0027/0028 build · the filings 40P01 deadlock · `documentIngest.behavior
-_v2` · counterparty-less-approval sighting gap · K-doc production door · CLR23 remedy-text +
-bind-existing-counterparty · the `opening_tb.line` producer (Phase 5).
+**Open build items (the task ledger is the live status home):** the drafting-lane trio
+(counterparty-less-approval warning · CLR23 remedy-text · bind-existing-counterparty — were
+blocked behind the binding build, now free) · the hardening register (chatTurn diagnostic
+twin + tax-rule propagation · the reconciler double-dispatch cosmetics · the nonzero-tax DB
+belt · the sweep-vs-human budget-contention design question) · Gate P (waits on the first
+real SST-charging supplier bill — operating runway, not engineering) · the `opening_tb.line`
+producer + K-doc production door (Phase 5, review-gated). **NEXT: Wave C.**
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**
