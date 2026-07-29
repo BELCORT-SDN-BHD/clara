@@ -184,7 +184,7 @@ export const FULL_ABSENT_RECEIPT = {
  *  _resolve_vendor_binding's own admission gate (Slot A), which the dwell/ceremony
  *  batteries never exercise (they only drive _derive_vendor_binding_proposal, which has no
  *  A.1 vendor_identity check at all) but the resolver/executor batteries do. */
-export async function seedF123Evidence(firm, document, cp, invoiceId) {
+export async function seedF123Evidence(firm, document, cp, invoiceId, vendorNameText = cp.name) {
   const factsExt = randomUUID();
   await rootQuery(
     `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count,envelope)
@@ -194,7 +194,7 @@ export async function seedF123Evidence(firm, document, cp, invoiceId) {
   await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
      values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'invoice.vendor_name',$3,1.0)`,
-    [firm, factsExt, cp.name],
+    [firm, factsExt, vendorNameText],
   );
   await rootQuery(
     `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
