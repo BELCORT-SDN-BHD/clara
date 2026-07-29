@@ -17,10 +17,22 @@
 // caught error actually said — so even with the step-level fix, a bookkeeper reading
 // autodraft_attempts/sweep_run_items after a failure saw nothing but that one fixed phrase,
 // regardless of cause. This catch now forwards the REAL caught error's own message (and code,
-// when the error carries one — e.g. runAutoDraftModelStep's "model_stream_error") into the
-// settle call. The WDK-facing throw is UNCHANGED (still re-throws the original error/wraps a
-// non-Error unchanged) — this only widens what the DB-facing settle record says; retry/
-// FatalError semantics are untouched.
+// when the message carries one, per the R-round F1 finding below) into the settle call. The
+// WDK-facing throw is UNCHANGED (still re-throws the original error/wraps a non-Error
+// unchanged) — this only widens what the DB-facing settle record says; retry/FatalError
+// semantics are untouched.
+//
+// R-round F1 (Codex, confirmed against @workflow/core@4.6.0's own dist/step.js): a caught
+// error's `.code` property NEVER survives to this catch for a step-originated failure. WDK
+// reconstructs every terminal step failure as `new FatalError(errorMessage)` from its own
+// event log — copying ONLY `.message` (+ `.stack`, when present); `.code` and `.cause` are
+// never serialized into the reconstruction at all. refusalFromCaughtError therefore reads
+// the code from the MESSAGE itself: consumeAutoDraftModelResult (autoDraft.v4.impl.ts) tags
+// its own thrown message with a `[autodraft_model:<code>]` prefix — the one channel proven
+// to survive — and this function parses it back out. A message without that exact prefix
+// (any OTHER caught error) falls back to the error's own `.code` property when present
+// (harmless for a non-step-crossed error, though none such currently occur in this
+// function), then to "internal" — unchanged from before this finding.
 //
 // Schema + steps are otherwise byte-identical to v3: one admitted READY bill per task: claim
 // (begin_autodraft_task: CAS queued->running + context + reserved tokens) -> recover a
@@ -32,6 +44,7 @@
 // guarded by the op_key + the get_coding_attempt recovery).
 
 import {
+  AUTODRAFT_MODEL_ERROR_TAG,
   claimAutoDraftStep,
   recoverAutoDraftStep,
   runAutoDraftModelStep,
@@ -42,18 +55,33 @@ import {
 import { isQuestionShaped } from "./autoDraft.v4.prompt.js";
 import { noDraftRefusal } from "./autoDraft.v4.errors.js";
 
-/** ledger #44 (the third swallow): reduce a caught top-level error into the settle record's
- *  refusal shape — the error's own code (when it carries a readable string one, e.g.
- *  runAutoDraftModelStep's "model_stream_error") and its own message. "sweep draft failed"
- *  is the TRUE last resort (an empty/unreadable message), never the default. Pure — no
- *  WDK-ambient call, directly unit-testable. */
+/** Matches consumeAutoDraftModelResult's own `[autodraft_model:<code>] <message>` tag —
+ *  the ONLY channel a step-originated diagnostic code has left once WDK's reconstruction
+ *  (`new FatalError(errorMessage)`) has stripped every other property (R-round F1). */
+const AUTODRAFT_MODEL_ERROR_PATTERN = new RegExp(`^\\[${AUTODRAFT_MODEL_ERROR_TAG}:([^\\]]+)\\]\\s(.*)$`, "s");
+
+/** ledger #44 (the third swallow + the R-round F1 fix): reduce a caught top-level error into
+ *  the settle record's refusal shape. A message carrying consumeAutoDraftModelResult's own
+ *  `[autodraft_model:<code>]` tag is parsed back into {code, message} — the tag, not the
+ *  `.code` property, since `.code` never survives a step-originated failure crossing the WDK
+ *  boundary (see this file's own header). Anything else falls back to the error's own `.code`
+ *  property when present (harmless, though no current caller in this function crosses zero
+ *  step boundaries), then to "internal". "sweep draft failed" is the TRUE last resort (an
+ *  empty/unreadable message), never the default. Pure — no WDK-ambient call, directly
+ *  unit-testable. */
 export function refusalFromCaughtError(err: unknown): { code: string; message: string } {
-  const message = err instanceof Error ? err.message : String(err);
+  const rawMessage = err instanceof Error ? err.message : String(err);
+  const tagged = AUTODRAFT_MODEL_ERROR_PATTERN.exec(rawMessage);
+  if (tagged) {
+    // The regex's own two capture groups both matched for `tagged` to be non-null at all —
+    // the `?? "internal"` on group 1 is defensive typing hygiene only, never expected to fire.
+    return { code: tagged[1] ?? "internal", message: tagged[2] || "sweep draft failed" };
+  }
   const code =
     err && typeof err === "object" && "code" in err && typeof (err as { code?: unknown }).code === "string"
       ? (err as { code: string }).code
       : "internal";
-  return { code, message: message || "sweep draft failed" };
+  return { code, message: rawMessage || "sweep draft failed" };
 }
 
 export async function autoDraft_v4(input: { taskId: string }): Promise<{ taskId: string; outcome: string }> {

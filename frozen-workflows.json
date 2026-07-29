@@ -101,7 +101,7 @@
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v4.impl.ts": {
-      "sha256": "47dd17760dade5d8f1f16f7af07693feece3a8c266608ff6b657db2a7e39f3e8",
+      "sha256": "ca629292462b10459756e1516a722424347c3c00ddd11e6c599f015228e8ae59",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v4.infra.ts": {
@@ -117,7 +117,7 @@
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v4.ts": {
-      "sha256": "34a410676fecfc3dcc2afbf34fb1be11395fed48447765f334e44561d7845ced",
+      "sha256": "da841252f12762ed142d6898cce4fe4a4e1c9fd943a09350de9382afabee7f96",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.impl.ts": {

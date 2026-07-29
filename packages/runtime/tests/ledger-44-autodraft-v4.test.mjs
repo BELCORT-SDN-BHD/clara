@@ -23,6 +23,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { FatalError } from "workflow";
 
 const { register } = await import("tsx/esm/api");
 register();
@@ -138,10 +139,56 @@ test("ledger #44 — an error part whose own `error` field is itself falsy/absen
 });
 
 // ===========================================================================
-// refusalFromCaughtError — the workflow-level settle-honesty fix (the third swallow).
+// refusalFromCaughtError — the workflow-level settle-honesty fix (the third swallow),
+// PLUS the R-round F1 finding: a caught error's `.code` property never survives a real
+// WDK step boundary (@workflow/core@4.6.0's step.js reconstructs every terminal step
+// failure as `new FatalError(errorMessage)` — message/stack only, confirmed by
+// constructing the REAL, installed FatalError class below, not an assumption about it).
+// consumeAutoDraftModelResult's own tests above prove it TAGS its thrown message with
+// `[autodraft_model:<code>]`; these prove refusalFromCaughtError reads the code back OUT
+// of that exact tag once the object crossing the boundary is a bare FatalError with
+// nothing left but the tagged message — never bypassing the boundary the real bug lives
+// in.
 // ===========================================================================
 
-test("ledger #44 — a real Error WITH a string .code forwards BOTH verbatim into the settle refusal", () => {
+test("ledger #44 (R-round F1) — a REAL WDK step-boundary crossing: consumeAutoDraftModelResult's tagged message survives WDK's own FatalError(err.message) reconstruction, and refusalFromCaughtError recovers the ORIGINAL code from the tag (never 'internal')", async () => {
+  const realError = errOf("AI_APICallError", "The requested model 'openai/gpt-5-mini' does not exist.");
+  const { write } = collectingWriter();
+  const result = {
+    fullStream: streamOf([{ type: "error", error: realError }]),
+    content: rejectedSilently(errOf("AI_NoOutputGeneratedError", "No output generated. Check the stream for errors.")),
+    totalUsage: rejectedSilently(errOf("AI_NoOutputGeneratedError", "No output generated. Check the stream for errors.")),
+  };
+  let thrown;
+  try {
+    await consumeAutoDraftModelResult(result, write);
+    assert.fail("consumeAutoDraftModelResult must throw here");
+  } catch (err) {
+    thrown = err;
+  }
+
+  // WDK's OWN reconstruction (step.js's 'step_failed' event consumer, per its own dist
+  // source): `new FatalError(errorMessage)`. Replicated here with the REAL, installed
+  // FatalError class — not a hand-rolled stand-in — so this test proves the actual
+  // boundary, never bypassing it the way the R-round flagged the original test did.
+  const reconstructed = new FatalError(thrown.message);
+  assert.equal(reconstructed.code, undefined, "precondition: the real FatalError class truly carries no .code — the boundary really does strip it");
+  assert.equal(reconstructed.cause, undefined, "precondition: .cause is truly gone too");
+  assert.ok(reconstructed instanceof Error, "precondition: still an Error for refusalFromCaughtError's own instanceof check");
+
+  const refusal = refusalFromCaughtError(reconstructed);
+  assert.equal(refusal.code, "model_stream_error", "the code survives via the MESSAGE tag, never the (stripped) .code property");
+  assert.match(refusal.message, /openai\/gpt-5-mini/, "the real vendor rejection text still reaches the settle record after the boundary crossing");
+  assert.doesNotMatch(refusal.message, /^\[autodraft_model:/, "the tag itself is stripped back out — never leaked into the human-facing settle message");
+});
+
+test("ledger #44 (R-round F1) — a message WITHOUT the autodraft_model tag (any OTHER caught error, post-boundary) falls back to 'internal' but still carries the real message — unchanged from the third-swallow fix", () => {
+  const reconstructed = new FatalError("a DB connectivity blip mid-claim");
+  assert.equal(reconstructed.code, undefined, "precondition: a generic step failure ALSO loses .code at the boundary — this is the common case, not a special one");
+  assert.deepEqual(refusalFromCaughtError(reconstructed), { code: "internal", message: "a DB connectivity blip mid-claim" });
+});
+
+test("ledger #44 — a real Error WITH a string .code (a non-step-crossed error, the fallback path's own contract) forwards BOTH verbatim into the settle refusal", () => {
   const err = Object.assign(new Error("model stream reported an error: the vendor rejected the request"), { code: "model_stream_error" });
   assert.deepEqual(refusalFromCaughtError(err), {
     code: "model_stream_error",
@@ -149,7 +196,7 @@ test("ledger #44 — a real Error WITH a string .code forwards BOTH verbatim int
   });
 });
 
-test("ledger #44 — a real Error with NO .code falls back to code:'internal' but STILL carries the real message (never the fixed literal)", () => {
+test("ledger #44 — a real Error with NO .code and NO tag falls back to code:'internal' but STILL carries the real message (never the fixed literal)", () => {
   const err = new Error("a DB connectivity blip mid-claim");
   const r = refusalFromCaughtError(err);
   assert.equal(r.code, "internal");
@@ -231,17 +278,29 @@ test("v4 impl.ts differs from v3 ONLY inside the model-step's own stream-consump
 // refusalFromCaughtError instead of a fixed literal.
 // ===========================================================================
 
-/** v4 alone declares refusalFromCaughtError, ahead of the workflow entry function; strip
- *  it out entirely (JSDoc included) before the try/catch mask below runs, so it never
- *  pollutes the "everything outside the catch body" comparison. A no-op on v3's text,
- *  which never had this export. */
+/** v4 alone imports AUTODRAFT_MODEL_ERROR_TAG from the impl module (the R-round F1 fix's
+ *  own symbol) — strip that ONE named import back out so the import block otherwise
+ *  compares identically to v3's. A no-op on v3's text, which never imports it. */
+function stripModelErrorTagImport(text) {
+  return text.replace(/\s*AUTODRAFT_MODEL_ERROR_TAG,\n/, "\n");
+}
+
+/** v4 alone declares AUTODRAFT_MODEL_ERROR_PATTERN + refusalFromCaughtError, ahead of the
+ *  workflow entry function; strip BOTH out entirely (JSDoc included) before the try/catch
+ *  mask below runs, so neither pollutes the "everything outside the catch body"
+ *  comparison. Anchored on whichever of the two markers appears FIRST (their own relative
+ *  order is an implementation detail, not something this structural check should assume).
+ *  A no-op on v3's text, which has neither. */
 function stripRefusalHelperIfPresent(text) {
-  const start = text.indexOf("export function refusalFromCaughtError");
-  if (start < 0) return text;
+  const markers = ["const AUTODRAFT_MODEL_ERROR_PATTERN", "export function refusalFromCaughtError"]
+    .map((m) => text.indexOf(m))
+    .filter((i) => i >= 0);
+  if (markers.length === 0) return text;
+  const start = Math.min(...markers);
   const docStart = text.lastIndexOf("/**", start);
   const anchorStart = docStart >= 0 ? docStart : start;
   const end = text.indexOf("\nexport async function autoDraft_", anchorStart);
-  assert.ok(end > anchorStart, "the workflow entry function must follow the helper");
+  assert.ok(end > anchorStart, "the workflow entry function must follow the helper(s)");
   return text.slice(0, anchorStart) + text.slice(end + 1);
 }
 
@@ -261,11 +320,11 @@ function maskEntryTryCatch(text) {
   return `${text.slice(0, start)}\n<the try block — compared separately, byte-identical to v3>\n${text.slice(catchIdx, from)}<the ledger #44 catch-body fix — compared separately>\n${text.slice(end)}`;
 }
 
-test("v4's workflow entry (autoDraft.v4.ts) differs from v3's ONLY in the new refusalFromCaughtError helper and the catch block's refusal construction — the happy path and the finally block are unchanged", () => {
+test("v4's workflow entry (autoDraft.v4.ts) differs from v3's ONLY in the new AUTODRAFT_MODEL_ERROR_TAG import, the new refusalFromCaughtError helper (+ its own pattern constant), and the catch block's refusal construction — the happy path and the finally block are unchanged", () => {
   assert.equal(
-    maskEntryTryCatch(stripRefusalHelperIfPresent(dropHeader(asVN(src("autoDraft.v4.ts"), 4)))),
-    maskEntryTryCatch(stripRefusalHelperIfPresent(dropHeader(asVN(src("autoDraft.v3.ts"), 3)))),
-    "outside the catch block, autoDraft.v4.ts must be a version-renamed copy of v3",
+    maskEntryTryCatch(stripRefusalHelperIfPresent(stripModelErrorTagImport(dropHeader(asVN(src("autoDraft.v4.ts"), 4))))),
+    maskEntryTryCatch(stripRefusalHelperIfPresent(stripModelErrorTagImport(dropHeader(asVN(src("autoDraft.v3.ts"), 3))))),
+    "outside the catch block (and the two known, named v4-only additions above), autoDraft.v4.ts must be a version-renamed copy of v3",
   );
 });
 

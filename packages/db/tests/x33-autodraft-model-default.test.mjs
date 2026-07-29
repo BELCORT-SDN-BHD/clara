@@ -18,15 +18,20 @@
 // deliberately NOT duplicated here).
 //   x33.a -- the UNCONDITIONAL, catalog-level regression guard: the deployed function
 //            body itself, read straight from pg_proc, never a fixture. Always runs.
-//   x33.b -- drives a real one-click admission end-to-end WHEN primeReadyFiling
-//            reaches ready, and records a finding (not a failure) otherwise, exactly
-//            like wave-a-admission.test.mjs's own established convention for this
-//            fixture's known limitation.
+//   x33.b -- drives a real one-click admission end-to-end. R-round (Codex) F2: unlike
+//            wave-a-admission.test.mjs's own broader suite (which spans many distinct
+//            lane-readiness shapes and genuinely cannot promise READY every time),
+//            THIS fixture's one path (primeReadyFiling -> a plain existing-vendor
+//            match, no vendor-binding/EZSEC machinery involved) was verified reaching
+//            'admitted' reliably while this migration was built -- a silent
+//            note-and-return here would let the cell go green without the
+//            model_snapshot assertion ever running. A non-'admitted' outcome is now a
+//            HARD failure, not a soft finding.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, opk, endPool, printLaneNotes, noteLane, skipUnready, waveAEnsureReady,
+  rootQuery, opk, endPool, printLaneNotes, skipUnready, waveAEnsureReady,
   buildWorld, upsertPayableAccount, upsertAccountClassed, primeReadyFiling, requestAutodraft,
 } from "./wave-a-fixtures.mjs";
 
@@ -70,10 +75,12 @@ test("x33.b a real one-click admission stamps model_snapshot='gpt-5.6-terra' -- 
     registration: "201801009900",
   });
   const admitted = await requestAutodraft(world.users.bob, { filing: rf.filingId });
-  if (admitted.outcome !== "admitted" || !admitted.task_id) {
-    noteLane(`x33.b FINDING(candidate): primeReadyFiling did not reach READY -- one-click admit outcome=${JSON.stringify(admitted)} -- the catalog-level x33.a cell above still proves the fix`);
-    return;
-  }
+  assert.equal(
+    admitted.outcome,
+    "admitted",
+    `one-click admission must reach 'admitted' for this fixture's own path (got ${JSON.stringify(admitted)}) -- a non-admitted outcome would let this cell go green without ever asserting model_snapshot`,
+  );
+  assert.ok(admitted.task_id, "an admitted outcome must carry a task_id");
   const row = (await rootQuery(
     "select model_snapshot from clara.agent_tasks where id=$1",
     [admitted.task_id],

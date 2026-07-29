@@ -32,6 +32,18 @@
 -- error instead of ai@7's generic NoOutputGeneratedError fallback, regardless of model id)
 -- ships alongside this migration as autoDraft v3->v4 (packages/runtime/workflows/
 -- autoDraft.v4.impl.ts's own header carries the full rationale).
+--
+-- D1 WRITE-QUIESCE (R-round F3, packages/db/README.md:95-113). clara.request_autodraft is
+-- a LIVE audited writer — every one-click call reaches admit_autodraft_task and, on a
+-- ready lane, INSERTs a real clara.agent_tasks row. This migration replaces its body, so
+-- the repo-mandated D1 obligation applies: PostgreSQL runs each in-flight PL/pgSQL
+-- execution to completion on the body it STARTED with, so a one-click call that begins
+-- BEFORE this migration commits and finishes AFTER would still admit a task carrying the
+-- OLD, broken 'openai/gpt-5-mini' snapshot — the exact defect this migration exists to
+-- close, re-admitted through the deploy window itself. The deploy ceremony quiesces
+-- one-click writes (stop accepting new request_autodraft RPCs, let in-flight ones drain,
+-- apply, resume) for the same reason 0031 quiesced admit_autodraft_task/_coding_lane_core
+-- — this is an independent window, not covered by any prior migration's quiesce.
 
 set role clara_fn_owner;
 

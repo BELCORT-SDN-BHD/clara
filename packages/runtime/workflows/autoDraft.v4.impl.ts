@@ -163,17 +163,18 @@ export async function recoverAutoDraftStep(taskId: string): Promise<JeReviewPart
   }
 }
 
-/** ledger #44: consume a streamText() result honestly. fullStream's own `error` part (ai@7's
- *  TextStreamErrorPart, `{type:'error', error}`) is captured locally as the loop consumes
- *  it — the one place guaranteed to see the raw part regardless of what ai-sdk's own
- *  internal recovery does afterward. If content/totalUsage then reject, the caller gets the
- *  CAPTURED cause, never a guess, instead of trusting ai-sdk's own (sometimes generic,
- *  cause-less) rejection — confirmed live: a bad/retired model id surfaced ONLY as ai@7's
- *  bare "No output generated. Check the stream for errors." (NoOutputGeneratedError, no
- *  cause), discarding the real AI_APICallError this exact loop had already seen pass
- *  through. Pure — takes the streamText() result + a write callback as plain parameters, no
- *  WDK-ambient call inside (getWritable() throws outside a real workflow/step execution),
- *  so this is directly unit-testable without a WDK context. */
+/** ledger #44 (R-round F1): the tag consumeAutoDraftModelResult writes onto the thrown
+ *  Error's own MESSAGE (never a property) — the ONE channel proven to survive the WDK step
+ *  boundary. `@workflow/core@4.6.0`'s step.js (the 'step_failed' event consumer) reconstructs
+ *  every terminal step failure as `new FatalError(errorMessage)` from the event log, copying
+ *  ONLY `.message` (and `.stack`, when present) — never `.code`, never `.cause` (confirmed by
+ *  reading @workflow/core's own dist/step.js and by constructing a real `FatalError` from the
+ *  installed `workflow` package: it carries no `code`/`cause` property at all). A `.code`
+ *  assigned to the thrown Error here is therefore INVISIBLE to autoDraft.v4.ts's top-level
+ *  catch, which only ever sees the reconstructed FatalError, not this original object.
+ *  refusalFromCaughtError (autoDraft.v4.ts) parses this exact prefix back out. */
+export const AUTODRAFT_MODEL_ERROR_TAG = "autodraft_model";
+
 export async function consumeAutoDraftModelResult(
   result: { fullStream: AsyncIterable<unknown>; content: PromiseLike<unknown>; totalUsage: PromiseLike<unknown> },
   write: (part: unknown) => Promise<void>,
@@ -192,7 +193,11 @@ export async function consumeAutoDraftModelResult(
   } catch (err) {
     if (streamError != null) {
       const detail = streamError instanceof Error ? streamError.message : String(streamError);
-      throw Object.assign(new Error(`model stream reported an error: ${detail}`), {
+      // The [tag:code] prefix rides IN the message — the properties below are kept too
+      // (harmless, and useful to anything that inspects this object BEFORE it crosses the
+      // WDK step boundary — e.g. this file's own tests), but they are not load-bearing for
+      // what autoDraft.v4.ts eventually sees.
+      throw Object.assign(new Error(`[${AUTODRAFT_MODEL_ERROR_TAG}:model_stream_error] model stream reported an error: ${detail}`), {
         code: "model_stream_error",
         cause: streamError,
       });
