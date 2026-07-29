@@ -672,34 +672,46 @@ function literalRegprocedureIdentity(expr) {
   return lit ? signatureIdentity(lit[1].replace(/''/g, "'")) : null;
 }
 
-/** Resolve the latest simple literal assignment to `name` before `before`.
+/** Resolve the latest assignment to `name` before `before`, whatever its shape.
  * The migration family uses both declaration initializers and later `:=`
- * assignments. A concatenated assignment intentionally does not match. */
+ * assignments. R-round fix: the PREVIOUS version only matched LITERAL-valued
+ * assignments, so a variable first assigned a literal and LATER reassigned a
+ * computed/conditional value (a decoy) was reported as the literal -- the
+ * regex simply never saw the reassignment at all, since it wasn't looking for
+ * assignments in general, only for ones shaped like a literal. Track EVERY
+ * assignment to `name` in program order; only the assignment CLOSEST to
+ * `before` decides the outcome. If that closest assignment is not a plain
+ * string literal (a function call, concatenation, another variable, `case`,
+ * anything computed or conditional), the target is UNRESOLVED -- fail closed,
+ * exactly like an unresolvable literal always has. An EARLIER literal
+ * assignment that a later reassignment has since overwritten must never be
+ * mistaken for the current value. */
 function assignedRegprocedureIdentity(block, name, before) {
   const prefix = block.slice(0, before);
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns = [
-    new RegExp(
-      `\\b${escaped}\\s+(?:constant\\s+)?(?:text|regprocedure)\\s*:=\\s*`
-        + `'((?:[^']|'')*)'\\s*(?:::\\s*(?:text|regprocedure))?\\s*;`,
-      "gi",
-    ),
-    new RegExp(
-      `\\b${escaped}\\s*:=\\s*'((?:[^']|'')*)'\\s*`
-        + `(?:::\\s*(?:text|regprocedure))?\\s*;`,
-      "gi",
-    ),
-  ];
+  // Matches ANY assignment shape -- declaration initializer or later plain
+  // reassignment -- capturing the RHS up to its terminating `;` regardless of
+  // whether that RHS is a literal. This is the general form; literal-ness is
+  // decided AFTER finding the latest one, not as part of matching it.
+  const general = new RegExp(
+    `\\b${escaped}\\s*(?:constant\\s+)?(?:text|regprocedure)?\\s*:=\\s*`
+      + `([\\s\\S]*?);`,
+    "gi",
+  );
   let latest = null;
-  for (const re of patterns) {
-    let m;
-    while ((m = re.exec(prefix))) {
-      if (latest === null || m.index > latest.index) {
-        latest = { index: m.index, value: m[1] };
-      }
+  let m;
+  while ((m = general.exec(prefix))) {
+    if (latest === null || m.index > latest.index) {
+      latest = { index: m.index, rhs: m[1] };
     }
   }
-  return latest ? signatureIdentity(latest.value.replace(/''/g, "'")) : null;
+  if (latest === null) return null;
+  // Now, and ONLY now, check whether the LATEST assignment's RHS is a bare
+  // literal (optionally cast). Any other shape -- including one that merely
+  // starts with a quote but isn't a single self-contained literal -- is
+  // unresolved, never silently downgraded to an earlier value.
+  const literal = /^\s*'((?:[^']|'')*)'\s*(?:::\s*(?:text|regprocedure))?\s*$/i.exec(latest.rhs);
+  return literal ? signatureIdentity(literal[1].replace(/''/g, "'")) : null;
 }
 
 /** Resolve one pg_get_functiondef argument using every statically-attributable

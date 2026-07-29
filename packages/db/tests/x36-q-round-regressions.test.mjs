@@ -549,3 +549,55 @@ test("Q2-2 a typed skip deletes the derived, never-used approve_entry reservatio
     0,
   );
 });
+
+test("R1 a pre-existing approve_entry receipt at the SAME predictable key settles the executor's own receipt, never leaving it orphaned", async () => {
+  requireReady();
+  // _reserve_op refuses a key reused with a DIFFERENT request hash (CLR10) --
+  // so the shortcut this finding is about can only fire for the SAME entry at
+  // the SAME revision the executor's own locator read observes (a human
+  // racing in with the exact predictable rulepost:<entry>:<seq> key for the
+  // SAME entry the executor is about to process, both computing the identical
+  // hash). Reproducing the live race deterministically without a two-session
+  // harness: pre-seed the approve_entry receipt, SETTLED, using the EXACT
+  // hash formula execute_rule_post's own second _reserve_op call will compute
+  // for this entry+revision+null-attestation -- this is what a genuinely-won
+  // race leaves behind, without depending on timing.
+  const document = await seedBareDocument(w.firms.A, "r1-collision");
+  const entry = await seedApprovedEntry(
+    w.firms.A, w.clients.A1, bound.cp.id, document,
+    { postingDate: "2026-03-15" },
+  );
+  const revisionToken = (await rootQuery(
+    "select revision_token from clara.journal_entries where id=$1",
+    [entry],
+  )).rows[0].revision_token;
+  const predictableKey = `rulepost:${entry}:1`;
+  const racedResult = { entry_id: entry, status: "approved", note: "raced human approval" };
+  await rootQuery(
+    `insert into clara.op_receipts(firm_id,fn,op_key,request_hash,result)
+     values($1,'approve_entry',$2,
+       clara._hash(jsonb_build_object('e',$3::uuid,'rev',$4::uuid,'att',null)),
+       $5::jsonb)`,
+    [w.firms.A, predictableKey, entry, revisionToken, JSON.stringify(racedResult)],
+  );
+
+  const first = await post(entry, predictableKey);
+  assert.deepEqual(first, racedResult,
+    "the shortcut returns the pre-existing approve_entry receipt's own result");
+
+  const executorReceipt = (await rootQuery(
+    `select result
+       from clara.op_receipts
+      where firm_id=$1 and fn='execute_rule_post' and op_key=$2`,
+    [w.firms.A, predictableKey],
+  )).rows[0];
+  assert.ok(executorReceipt, "the executor's own receipt row exists");
+  assert.deepEqual(executorReceipt.result, racedResult,
+    "the executor's own receipt is SETTLED, not left at result=NULL");
+
+  // Replay: a SECOND execute_rule_post call with the identical key must
+  // return the recorded result directly -- never {pending:true}.
+  const second = await post(entry, predictableKey);
+  assert.deepEqual(second, racedResult);
+  assert.equal(second.pending, undefined);
+});

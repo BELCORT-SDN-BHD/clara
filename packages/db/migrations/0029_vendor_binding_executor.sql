@@ -457,7 +457,16 @@ begin
   v_dedupe:=clara._reserve_op(v_locator.firm_id,'approve_entry',v_approve_op_key,
     clara._hash(jsonb_build_object('e',p_entry,'rev',v_reserved_revision,
       'att',null)));
-  if v_dedupe is not null then return v_dedupe; end if;
+  if v_dedupe is not null then
+    -- The approve_entry receipt already exists (e.g. a human raced in and used
+    -- the same predictable rulepost:<entry>:<seq> key, or a prior attempt at
+    -- this exact executor op_key already reserved it). The executor's OWN
+    -- receipt, just reserved above with a null v_dedupe, must not be left
+    -- orphaned at result=NULL -- settle it with the same outcome so a replay of
+    -- THIS execute_rule_post call returns the recorded result, never pending.
+    return clara._finish_op(
+      v_locator.firm_id,'execute_rule_post',p_op_key,v_dedupe);
+  end if;
 
   -- Total-order law: coding_rules -> document_filings -> journal_entries.
   -- Lock the client's live autopost set exactly once and retain the ids from
