@@ -20,6 +20,7 @@ import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
 import { autoDraft_v1 } from "./autoDraft.v1.js";
 import { autoDraft_v2 } from "./autoDraft.v2.js";
 import { autoDraft_v3 } from "./autoDraft.v3.js";
+import { autoDraft_v4 } from "./autoDraft.v4.js";
 import { firmInterview_v1 } from "./firmInterview.v1.js";
 import { firmInterview_v2 } from "./firmInterview.v2.js";
 import { clientOnboarding_v1 } from "./clientOnboarding.v1.js";
@@ -30,7 +31,7 @@ export const workflows = {
   chatTurn: chatTurn_v7,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
-  autoDraft: autoDraft_v3,
+  autoDraft: autoDraft_v4,
   firmInterview: firmInterview_v2,
   clientOnboarding: clientOnboarding_v2,
 } as const;
@@ -72,7 +73,15 @@ export const workflows = {
 // diagnosis) on EVERY failed attempt, before the step-retry it invites by throwing ever runs —
 // the retry then finds nothing and fails with a generic "no durable runtime metadata" error,
 // burying the real diagnosis. v2 never removes the sidecar on failure; it records the failure
-// code onto it instead (full rationale in documentIngest.behavior_v2.mjs). Drop a re-export
+// code onto it instead (full rationale in documentIngest.behavior_v2.mjs). Post-Wave-B also
+// repointed autoDraft v3→v4 (ledger #44 / GH #42): the first production one-click autodraft
+// run died in its model step — a bad admission-time model-id default (config, migration
+// 0033_autodraft_model_default) COMPOUNDED by a real swallow: v3's model step piped every
+// fullStream part through uninspected, so a genuine vendor rejection could surface only as
+// ai@7's generic NoOutputGeneratedError, and its own top-level catch settled every failure
+// with a fixed "sweep draft failed" regardless of cause. v4 captures the stream's own error
+// part and forwards the real caught error into the settle record (full rationale in
+// autoDraft.v4.impl.ts / autoDraft.v4.ts). Drop a re-export
 // only once zero non-terminal runs of that version remain.
 export { firmInterview_v1 };
 export { clientOnboarding_v1 };
@@ -85,5 +94,6 @@ export { chatTurn_v6 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
+export { autoDraft_v3 };
 
 export const workflowNames: string[] = Object.keys(workflows);
