@@ -192,8 +192,21 @@ begin
   raise notice
     '0029 postverify OK (5/7): unbound entries cannot reach the binding-control block';
 
-  -- (6) F1 candidate counting is independent of F2, the complete X6 key set is
-  -- recognized, and step 5 supplies registration before accepting equality.
+  -- (6) F1 candidate counting is independent of F2 (a separate, later
+  -- consistency check on the uniquely selected candidate -- 0030 changed BOTH
+  -- to starts_with, but never merged them into one predicate), the complete
+  -- X6 key set is recognized, and step 5 supplies registration before
+  -- accepting equality.
+  --
+  -- 0030 UPDATE: the F1 site inside this SAME lateral changed from equality
+  -- (b2.f1_vendor_name_norm=clara._binding_normalize(vn.vendor_name)) to
+  -- starts_with(clara._binding_normalize(vn.vendor_name),
+  -- b2.f1_vendor_name_norm) -- F1 is now the window's LCP (design v4.1 §3.2
+  -- correction), matched the same way F2 always was. This probe now asserts
+  -- starts_with IS present for the F1 site specifically (not merely present
+  -- anywhere in the slice, which would also true of F2's own starts_with a
+  -- few lines below) -- see packages/db/deploy/vendor-binding-f1-lcp-0030-
+  -- postverify.sql for the dedicated, more precise starts_with-per-site probe.
   v_pos_bm:=position(
     'left join lateral ( select count(*)::int as match_count,'
     in v_norm);
@@ -205,7 +218,10 @@ begin
       '0029 postverify: binding candidate lateral query is missing';
   end if;
   v_bm_slice:=substring(v_norm from v_pos_bm for v_pos_bm_end);
-  if position('starts_with' in v_bm_slice)<>0
+  if position(
+       'starts_with(clara._binding_normalize(vn.vendor_name), b2.f1_vendor_name_norm)'
+       in v_bm_slice)=0
+     or position('b2.f1_vendor_name_norm= clara._binding_normalize(vn.vendor_name)' in v_bm_slice)<>0
      or position('array_agg(b2.id order by b2.id)' in v_bm_slice)=0
      or position('v_matching_f2_ok:=' in v_norm)=0
      or position(

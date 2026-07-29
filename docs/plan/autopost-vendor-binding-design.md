@@ -147,6 +147,26 @@ delete the CJK characters that are real evidence here. Unicode handling is speci
 chance (finding 6) — without it, visually identical OCR compares unequal and the signer's receipt is
 visually ambiguous:
 
+**0030 correction — byte-equality does not hold in general, and F1 adopts F2's own LCP
+discipline.** The claim below ("identical across every bill checked") was measured on a subset.
+The real live founding of the first binding hit `features_unstable` on the actual EZSEC evidence
+window, and the measured cause is that `invoice.vendor_name` is **not byte-stable** across the
+family — the window's three fragments read `"ez\n易计\nezAccount\nCOUNT"` /
+`"ez\n易计\nezAccount"` / `"ez\n易计\nezAccount\nCOUNT YOUR VICTORY"`, a **suffix-truncation**
+variance in the logo tagline that is scan-dependent and inherent to this letterhead — more
+approvals never converge to full equality. Owner ruling (migration 0030, task #36 runway): **F1
+becomes the longest common prefix (LCP) of the window's three normalized fragments**, using the
+SAME `clara._binding_common_prefix` helper F2 already uses. Suffix-truncation is exactly the
+variance class LCP is built to absorb: a truncated tail can never disagree with a shared prefix.
+A floor (`clara._binding_f1_floor_holds`, immutable) refuses a degenerate LCP — `>=8` normalized
+characters AND at least one token that is not itself short/structural filler (a non-ASCII
+character, e.g. a CJK logo fragment, or a longer ASCII word outside a small corporate-form
+denylist) — under the same `features_unstable` refusal, unchanged vocabulary. MATCHING follows
+the same shift: a document's own normalized fragment must **start with** the stored F1, mirroring
+F2's `starts_with(invoice_id_norm, f2_prefix)` byte-for-byte in style, at every site (Slot A and
+both of 0029's post-time F1 checks). **F1 remains a STABILITY feature, never an identity proof —
+F3 alone carries that**, unchanged from the division of labour below.
+
 **v3 correction — v2's normalizer was not buildable.** PostgreSQL's ARE flavour supports
 `normalize(t, NFC)` but **does not implement `\p{UnicodeProperty}` classes**, so `[\p{Cf}]` is an
 invalid pattern, not a `Cf` stripper. v3 uses an `immutable` DB function with an **explicitly
@@ -172,7 +192,8 @@ compare **equal** where it should differ — it does not make F1 refuse. F1 is o
 feature, so the identity claim still rests on F3, which no invisible character can satisfy. Bounded,
 not fatal, and it is now in the §E residual register instead of being called complete.
 
-For EZSEC: `ez 易计 ezaccount count` — identical across every bill checked.
+For EZSEC: not identical across the window (0030 correction, above) — the LCP of the three real
+fragments is `ez 易计 ezaccount`, which is what a live binding actually stores as F1.
 
 **F2 `invoice_prefix`** — the longest common prefix of `invoice.invoice_id` across the evidence
 window, normalized as above. **v1's floor of "≥4 chars with a non-digit" was too weak, and the
@@ -262,7 +283,7 @@ authority that accrues by counting is the shape ADR-046 refused. Both verbs are 
    created *after* that document's entry was approved. Re-extracting after approval does not
    silently change what a binding rests on; it disqualifies the document until a human approves the
    restated evidence;
-5. F1 identical across the window — else `features_unstable`;
+5. F1 is the window's LCP and clears its floor (0030 correction, §3.2) — else `features_unstable`;
 6. F2 meets the §3.2 floor — else `prefix_too_weak`;
 7. F3 holds, attributed, on every window document;
 8. **no live binding exists for `(client, counterparty)`.** Flat, with no exception — v4 removes v3's
@@ -282,8 +303,8 @@ features no longer describe the evidence. Then `status='live'`, `signed_by`, `si
 (r3 finding 6); a live predecessor must already have been revoked for condition 8 to pass.
 
 **The visible receipt:** the sign return carries the derived features in full — the signer reads
-`ez 易计 ezaccount count` and `ezsec-iv-`, plus the evidence document ids and both pinned extraction
-ids — *before* it goes live.
+`ez 易计 ezaccount` (0030: the window's LCP, not a byte-identical string) and `ezsec-iv-`, plus the
+evidence document ids and both pinned extraction ids — *before* it goes live.
 
 ## 4. Q3 — scope, expiry, revocation
 

@@ -455,6 +455,12 @@ composite FK. Next free error code looks like **CLR35** — verify as-built befo
 D1 write-quiesce** for their deploy windows (`packages/db/README.md:95-113`) — v3's list omitted this.
 Two quiesced windows, not one, because the split is deliberate.
 
+**0030 (F1 LCP, task #36 runway) — a third, independent D1 quiesce.** 0030 replaces
+`_derive_vendor_binding_proposal` and `_resolve_vendor_binding` (both 0028) plus
+`execute_rule_post` (0029, Slot C) — all three sit on the live posting path. Per the same
+repo-mandated D1 discipline and the precedent above, 0030's deploy window is quiesced on its own,
+not folded into either prior window, because the recut is deliberate and independent of both.
+
 **Rig first, then live.** The A.1 precondition matrix (genuine-absent vs each refusal counter); Part 1
 §3.2's refusal matrix; the F2 floor against the real RPA series; F3 against a `c/o` fixture,
 **expected to PASS and recorded as the C.1 residual**; the Slot-B birth-refusal; **an approval test
@@ -522,6 +528,7 @@ untouched — no binding path takes a filing lock).
 | K | The pre-existing-approve-receipt shortcut in `execute_rule_post` returned without finishing the just-reserved executor receipt, orphaning it at `result=NULL` exactly like finding H | The shortcut now finishes the executor's own receipt with the replayed `approve_entry` result before returning; a deterministic hash-matching cell reproduces the race without a two-session harness |
 | L | `assignedRegprocedureIdentity` only matched literal-shaped assignments, so a variable first given a literal then reassigned to a computed value was reported by its stale literal — a decoy | Track every assignment to the target variable in program order; only the LATEST one decides the outcome, and a non-literal latest assignment is unresolved regardless of any earlier literal; reassignment self-tests added for both the binding checker and the wiki lint |
 | M | The three new tables' redundant `revoke all ... from public, clara_authenticated, ...` (removing privileges nobody held) forced Postgres to materialize `relacl`, which requires the owner's own grants explicit; `pg_dump` never re-emits a redundant owner self-grant, so a DR full-profile backup/restore round-trip came back owner-implicit — CI's grant-matrix (check 4.6) correctly refused the mismatch | Drop the revoke statement entirely; a table untouched by any GRANT/REVOKE keeps `relacl` NULL from creation, matching the existing `coding_rules`/`op_receipts` convention. Verified by a real local two-database backup(full)→restore-full→acl-baseline→`dr-verify.mjs` round-trip: 254 PASS/0 FAIL, including the relation-grant matrix at 702 rows identical; both postverifies needed no change since probe (2) already asserts the real `role_table_grants` invariant, not the revoke statement's presence |
+| N | (post-merge, live founding) F1's byte-equality claim did not hold in general — the real EZSEC evidence window's three `invoice.vendor_name` fragments are suffix-truncation variants of the same logo tagline (scan-dependent), so `propose_vendor_identity_binding` refused `features_unstable` on real evidence and blocked the founding | Migration 0030 (CoR patch against the live 0001-0029 catalog): F1 adopts F2's own LCP discipline — stored F1 = `_binding_common_prefix` of the window's three normalized fragments, floored (`_binding_f1_floor_holds`: ≥8 chars AND ≥1 non-filler token) under the same `features_unstable` refusal; matching everywhere becomes `starts_with(document's fragment, stored F1)`, mirroring F2's own `starts_with` exactly, at all three call sites (`_derive_vendor_binding_proposal`, `_resolve_vendor_binding` Slot A, and both of `execute_rule_post`'s post-time F1 sites). F1 remains a stability feature only; F3 alone carries identity, unchanged |
 
 ## F. Q5 — writing down #30, and naming the missing field
 
