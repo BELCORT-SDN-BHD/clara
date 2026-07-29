@@ -46,7 +46,7 @@ begin
       '0029 postverify: migration 0029_vendor_binding_executor is not recorded';
   end if;
   raise notice
-    '0029 postverify OK (1/6): migration chain intact through 0029';
+    '0029 postverify OK (1/7): migration chain intact through 0029';
 
   select pg_get_functiondef(
     'clara.execute_rule_post(uuid,text)'::regprocedure
@@ -76,7 +76,7 @@ begin
       v_pos_gate,v_pos_gate_use,v_pos_approve_call;
   end if;
   raise notice
-    '0029 postverify OK (2/6): binding live/unexpired assignment feeds refusal control before approval';
+    '0029 postverify OK (2/7): binding live/unexpired assignment feeds refusal control before approval';
 
   -- (3) Position 0 and the total data-lock order. Both distinct receipt rows
   -- must be reserved strictly before the first data lock, and the first
@@ -120,7 +120,7 @@ begin
       '0029 postverify: exact coding_rules lookup contains a second FOR UPDATE';
   end if;
   raise notice
-    '0029 postverify OK (3/6): both receipts are position 0; coding_rules locks once before filing/entry and the later exact lookup is plain';
+    '0029 postverify OK (3/7): both receipts are position 0; coding_rules locks once before filing/entry and the later exact lookup is plain';
 
   -- (4) _approve_entry_core keeps the exact live signature and conditionally
   -- bypasses only its existing reservation. The human wrapper still supplies a
@@ -166,7 +166,7 @@ begin
       '0029 postverify: human approve_entry ctx behavior changed';
   end if;
   raise notice
-    '0029 postverify OK (4/6): core signature unchanged; executor bypass is explicit; human ctx remains unmarked';
+    '0029 postverify OK (4/7): core signature unchanged; executor bypass is explicit; human ctx remains unmarked';
 
   -- (5) The vendor-binding block is marker-guarded. An unbound row therefore
   -- cannot reach the binding row lock or any binding resolution write.
@@ -190,7 +190,7 @@ begin
       v_pos_marker_if,v_pos_binding;
   end if;
   raise notice
-    '0029 postverify OK (5/6): unbound entries cannot reach the binding-control block';
+    '0029 postverify OK (5/7): unbound entries cannot reach the binding-control block';
 
   -- (6) F1 candidate counting is independent of F2, the complete X6 key set is
   -- recognized, and step 5 supplies registration before accepting equality.
@@ -220,7 +220,59 @@ begin
       '0029 postverify: F1/F2 two-phase selection, full receipt vocabulary, or step-5 equality source is incomplete';
   end if;
   raise notice
-    '0029 postverify OK (6/6): F1 count precedes F2; full X6 receipt keys and registered-page equality are executable';
+    '0029 postverify OK (6/7): F1 count precedes F2; full X6 receipt keys and registered-page equality are executable';
+
+  -- (7) Every typed skip is settled through the private helper: one skip row,
+  -- deletion of the never-used approve receipt, and _finish_op on the executor
+  -- receipt. No direct skip insert remains in execute_rule_post, while the
+  -- posted success path still settles itself exactly as before.
+  select pg_get_functiondef(
+    'clara._settle_rule_post_skip(uuid,uuid,uuid,uuid,text,text,text)'::regprocedure
+  ) into v_src;
+  v_norm:=lower(regexp_replace(
+    regexp_replace(
+      regexp_replace(v_src,'/\*[\s\S]*?\*/','','g'),
+      '--[^\n]*','','g'),
+    '\s+',' ','g'));
+  if position('insert into clara.rule_post_skips(' in v_norm)=0
+     or position(
+       'delete from clara.op_receipts where firm_id=p_firm and fn=''approve_entry'' and op_key=p_approve_op_key;'
+       in v_norm)=0
+     or position(
+       'return clara._finish_op( p_firm,''execute_rule_post'',p_op_key,v_result);'
+       in v_norm)=0
+     or exists (
+       select 1
+       from pg_proc p, lateral aclexplode(p.proacl) a
+       where p.oid=
+         'clara._settle_rule_post_skip(uuid,uuid,uuid,uuid,text,text,text)'::regprocedure
+         and a.grantee=0
+         and a.privilege_type='EXECUTE'
+     ) then
+    raise exception
+      '0029 postverify: _settle_rule_post_skip body or private ACL is incomplete';
+  end if;
+
+  select pg_get_functiondef(
+    'clara.execute_rule_post(uuid,text)'::regprocedure
+  ) into v_src;
+  v_norm:=lower(regexp_replace(
+    regexp_replace(
+      regexp_replace(v_src,'/\*[\s\S]*?\*/','','g'),
+      '--[^\n]*','','g'),
+    '\s+',' ','g'));
+  if regexp_count(
+       v_norm,'return clara\._settle_rule_post_skip\('
+     )<>32
+     or position('insert into clara.rule_post_skips' in v_norm)<>0
+     or position(
+       'return clara._finish_op( e.firm_id,''execute_rule_post'',p_op_key,v_result);'
+       in v_norm)=0 then
+    raise exception
+      '0029 postverify: executor skip settlement coverage or posted success settlement drifted';
+  end if;
+  raise notice
+    '0029 postverify OK (7/7): all 32 skips settle/replay and delete the unused approve receipt; posted success remains independently settled';
 
   raise notice
     '0029 postverify: ALL PROBES PASSED — Slot C receipts, lock order, liveness gate, core bypass, and unbound path are installed';

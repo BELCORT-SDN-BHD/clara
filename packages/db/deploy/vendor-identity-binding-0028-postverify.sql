@@ -31,6 +31,9 @@
 --      longer carries not_eligible_shape.
 --  11. Slot A narrows the CLR23 catch to ordinary resolution, passes the parsed
 --      page candidate to the resolver, and surfaces binding_ambiguous as hard.
+--  12. Slot B distinguishes an explicit existing_id from every deferred `new`
+--      proposal, never re-resolves the raw bound clean-name proposal, stamps the
+--      control leg, and keeps both human and unbound fallbacks outside the block.
 --
 -- COMMENT-STRIPPING DISCIPLINE. Every body assertion strips BOTH `--` line
 -- comments and `/* ... */` block comments before normalizing whitespace. A
@@ -70,7 +73,7 @@ begin
   if v_n<>1 then
     raise exception '0028 postverify: migration 0028_vendor_identity_binding is not recorded';
   end if;
-  raise notice '0028 postverify OK (1/11): prior-migration chain intact through 0028';
+  raise notice '0028 postverify OK (1/12): prior-migration chain intact through 0028';
 
   -- (2) all three base tables are FORCE RLS with no direct app-role grants.
   select count(*)::int into v_n
@@ -99,7 +102,7 @@ begin
   if v_bad is not null then
     raise exception '0028 postverify: binding base tables gained direct app-role grants: %',v_bad;
   end if;
-  raise notice '0028 postverify OK (2/11): three binding tables are FORCE RLS and owner-only';
+  raise notice '0028 postverify OK (2/12): three binding tables are FORCE RLS and owner-only';
 
   -- (3) journal provenance column and exact composite FK.
   if not exists (
@@ -122,7 +125,7 @@ begin
   ) then
     raise exception '0028 postverify: fk_je_vendor_binding is missing or not tenant-congruent';
   end if;
-  raise notice '0028 postverify OK (3/11): journal vendor_binding_id and congruent FK exist';
+  raise notice '0028 postverify OK (3/12): journal vendor_binding_id and congruent FK exist';
 
   -- (4) the exact normalizer is immutable.
   select count(*)::int into v_n
@@ -132,7 +135,7 @@ begin
   if v_n<>1 then
     raise exception '0028 postverify: _binding_normalize(text) is missing or not IMMUTABLE';
   end if;
-  raise notice '0028 postverify OK (4/11): _binding_normalize is IMMUTABLE';
+  raise notice '0028 postverify OK (4/12): _binding_normalize is IMMUTABLE';
 
   -- (5) admission resolver is stable, definer-owned, and owner-private. A NULL
   -- proacl is a failure because it implies PUBLIC EXECUTE on functions.
@@ -170,7 +173,7 @@ begin
     raise exception
       '0028 postverify: resolver still owns page resolution or lacks candidate/F1-count/F2-order controls';
   end if;
-  raise notice '0028 postverify OK (5/11): JSONB admission resolver is STABLE/private and keeps page resolution at the caller';
+  raise notice '0028 postverify OK (5/12): JSONB admission resolver is STABLE/private and keeps page resolution at the caller';
 
   -- (6a) mutation verbs: exact one overload, authenticated-only explicit grant,
   -- and the documented executable human-floor call.
@@ -264,7 +267,7 @@ begin
       raise exception '0028 postverify: read verb % lacks its floor or exact grant',v_sig;
     end if;
   end loop;
-  raise notice '0028 postverify OK (6/11): mutation/read verbs have exact floors and grants; signing interlock is executable';
+  raise notice '0028 postverify OK (6/12): mutation/read verbs have exact floors and grants; signing interlock is executable';
 
   -- (7) recut sweep scope: exactly one overload for every named body.
   select string_agg(x.proname||'='||x.n,', ') into v_bad
@@ -283,7 +286,7 @@ begin
   if v_bad is not null then
     raise exception '0028 postverify: recut overload sweep failed: %',v_bad;
   end if;
-  raise notice '0028 postverify OK (7/11): every recut surface still has exactly one overload';
+  raise notice '0028 postverify OK (7/12): every recut surface still has exactly one overload';
 
   -- (8) immutable-entry draft allowlist has both divergence-cleared columns.
   select pg_get_functiondef('clara._tf_entry_immutable()'::regprocedure)
@@ -298,7 +301,7 @@ begin
      or position('old.status = ''draft'' and new.status = ''draft''' in v_norm)=0 then
     raise exception '0028 postverify: _tf_entry_immutable draft allowlist lacks coding_kind/vendor_binding_id';
   end if;
-  raise notice '0028 postverify OK (8/11): draft divergence columns are trigger-allowlisted';
+  raise notice '0028 postverify OK (8/12): draft divergence columns are trigger-allowlisted';
 
   -- (9) A.7 amendment: documents lock must be strictly before the first
   -- document_filings lock. Presence without order is not enough.
@@ -316,7 +319,7 @@ begin
   if v_pos_lock=0 or v_pos_touch=0 or v_pos_lock>=v_pos_touch then
     raise exception '0028 postverify: persist_invoice_facts documents lock is not strictly before document_filings (lock=%, filings=%)',v_pos_lock,v_pos_touch;
   end if;
-  raise notice '0028 postverify OK (9/11): persist_invoice_facts locks documents before document_filings';
+  raise notice '0028 postverify OK (9/12): persist_invoice_facts locks documents before document_filings';
 
   -- (10) executor delta is exactly the vocabulary split, not additive.
   select pg_get_functiondef(
@@ -332,7 +335,7 @@ begin
      or position('not_eligible_shape' in v_norm)<>0 then
     raise exception '0028 postverify: execute_rule_post eligibility vocabulary split is incomplete';
   end if;
-  raise notice '0028 postverify OK (10/11): executor eligibility vocabulary is fully split';
+  raise notice '0028 postverify OK (10/12): executor eligibility vocabulary is fully split';
 
   -- (11) The ordinary resolver's CLR23 catch must finish before the Slot-A
   -- binding call, which receives the parsed page candidate and exposes a named
@@ -360,7 +363,67 @@ begin
       '0028 postverify: Slot-A resolve/catch/binding order or hard binding_ambiguous branch is missing (resolve=%, catch=%, binding=%)',
       v_pos_resolve,v_pos_catch,v_pos_binding;
   end if;
-  raise notice '0028 postverify OK (11/11): Slot A catches CLR23 before, not around, candidate-constrained binding resolution';
+  raise notice '0028 postverify OK (11/12): Slot A catches CLR23 before, not around, candidate-constrained binding resolution';
+
+  -- (12) Q-round Slot B repair. An explicit existing_id is compared directly
+  -- to the binding's canonical counterparty; every deferred `new` proposal goes
+  -- straight to the binding-selected existing_id before ordinary resolution.
+  -- The whole block remains agent-only, and the ordinary fallback after it is
+  -- what preserves the pre-0028 unbound path.
+  select pg_get_functiondef(
+    'clara._draft_entry_core(uuid,uuid,uuid,text,boolean,uuid,uuid,date,text,jsonb,uuid,text,jsonb,text,bigint,jsonb,jsonb,jsonb,text)'::regprocedure)
+    into v_src;
+  v_norm:=lower(regexp_replace(
+    regexp_replace(
+      regexp_replace(v_src,'/\*[\s\S]*?\*/','','g'),
+      '--[^\n]*','','g'),
+    '\s+',' ','g'));
+  v_pos_resolve:=position(
+    'if not p_is_human and p_document is not null and v_kind=''vendor'' then'
+    in v_norm);
+  v_pos_catch:=position(
+    'if v_proposal?''existing_id'' then' in v_norm);
+  v_pos_binding:=position(
+    'v_proposal:=jsonb_build_object( ''existing_id'',v_binding_counterparty,''kind'',''vendor'');'
+    in v_norm);
+  v_pos_touch:=position(
+    'if v_fingerprint is null then v_fingerprint := clara._resolve_counterparty(p_client,v_proposal); end if;'
+    in v_norm);
+  if v_pos_resolve=0 or v_pos_catch=0 or v_pos_binding=0
+     or v_pos_touch=0
+     or v_pos_resolve>=v_pos_catch
+     or v_pos_catch>=v_pos_binding
+     or v_pos_binding>=v_pos_touch
+     or position(
+       'v_explicit_canonical:=clara._canonical_counterparty(' in v_norm)=0
+     or position('raise exception ''vendor_binding_conflict''' in v_norm)=0
+     or position(
+       'if v_vendor_binding is not null then update clara.journal_lines l set counterparty_id=v_binding_counterparty'
+       in v_norm)=0
+     or position(
+       'v_fingerprint:=clara._resolve_counterparty(p_client,v_proposal); if v_fingerprint is null'
+       in v_norm)<>0 then
+    raise exception
+      '0028 postverify: Slot-B explicit/deferred split, control-leg stamp, or agent/unbound guard is incomplete (guard=%, explicit=%, override=%, fallback=%)',
+      v_pos_resolve,v_pos_catch,v_pos_binding,v_pos_touch;
+  end if;
+  v_pos_lock:=position(
+    'v_seq := clara._append_event(p_firm,''entry.drafted''' in v_norm);
+  v_pos_touch:=case when v_pos_lock=0 then 0 else position(
+    'perform clara._append_event(p_firm,''counterparty.binding_resolved'''
+    in substring(v_norm from v_pos_lock))
+  end;
+  v_pos_resolve:=case when v_pos_lock=0 then 0 else position(
+    'perform clara.assert_books_current(p_firm,p_client,p_books_version,v_seq);'
+    in substring(v_norm from v_pos_lock))
+  end;
+  if v_pos_lock=0 or v_pos_touch=0 or v_pos_resolve=0
+     or v_pos_touch>=v_pos_resolve then
+    raise exception
+      '0028 postverify: binding resolution event is not between entry.drafted and the wake stale-window check (entry=%, binding=%, check=%)',
+      v_pos_lock,v_pos_touch,v_pos_resolve;
+  end if;
+  raise notice '0028 postverify OK (12/12): bound `new` proposals bypass raw re-resolution; explicit ids conflict directly; event order and human/unbound paths remain safe';
 
   raise notice '0028 postverify: ALL STRUCTURAL/CATALOG PROBES PASSED -- behavioral correctness remains the rig suite''s job';
 end

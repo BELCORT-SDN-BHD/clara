@@ -11,17 +11,16 @@
 //
 // STATIC LIMIT, INTENTIONAL STOP-GAP. Source position plus a downstream use is
 // stronger than bare string containment, but it cannot prove PL/pgSQL runtime
-// reachability. This scanner also cannot reconstruct the result of the repo's
-// dynamic change-of-record pattern. It therefore FAILS CLOSED when any
-// post-0029 migration dynamically targets execute_rule_post: a human must prove
-// the gate survives or extend this checker before the migration may merge.
+// reachability. The scanner therefore FAILS CLOSED on every post-0029 dynamic
+// CoR target it cannot attribute and on every attributed execute_rule_post recut:
+// a human must prove the gate survives or extend this checker before merge.
 //
 // SCOPE: every packages/db/migrations/*.sql file, in filename order.
 // No dependencies — Node built-ins plus the repo's shared SQL lexer only.
 
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   maskComments,
   parseCoRPatches,
@@ -50,16 +49,16 @@ function normalizeBody(body) {
   return maskComments(body).replace(/\s+/g, " ").toLowerCase();
 }
 
-function main() {
-  const files = readdirSync(MIGRATIONS_DIR)
-    .filter((file) => file.endsWith(".sql"))
-    .sort();
-
+/** Check an ordered migration source set. Exported so the self-test exercises
+ * the exact certification logic without writing a fake migration into the tree. */
+export function checkBindingPostControlSources(sources) {
   let current = null;
   let definitions = 0;
   const dynamicRecuts = [];
-  for (const file of files) {
-    const sql = readFileSync(join(MIGRATIONS_DIR, file), "utf8");
+  const unresolvedRecuts = [];
+
+  for (const { file, sql } of [...sources].sort((a, b) =>
+    a.file.localeCompare(b.file))) {
     const functions = parseFunctions(sql);
     for (const fn of functions) {
       if (fn.identity !== EXECUTOR_IDENTITY) continue;
@@ -68,28 +67,47 @@ function main() {
     }
     if (file > EXECUTOR_MIGRATION) {
       for (const patch of parseCoRPatches(sql, functions)) {
-        if (!patch.targets.includes(EXECUTOR_IDENTITY)) continue;
-        dynamicRecuts.push(`${file}:${patch.line}`);
+        if (patch.targets.includes(null)) {
+          unresolvedRecuts.push(`${file}:${patch.line}`);
+        }
+        if (patch.targets.includes(EXECUTOR_IDENTITY)) {
+          dynamicRecuts.push(`${file}:${patch.line}`);
+        }
       }
     }
   }
 
+  if (unresolvedRecuts.length > 0) {
+    return {
+      ok: false,
+      message:
+        "binding-post-control: FAIL — post-0029 dynamic CoR patch(es) have "
+        + `unresolved target identity: ${unresolvedRecuts.join(", ")}.\n\n`
+        + "An unparseable target is not evidence that execute_rule_post is "
+        + "untouched. Use a statically attributable regprocedure literal (directly "
+        + "or through one literal-valued signature variable), or extend this "
+        + "checker before certifying the migration tree.",
+    };
+  }
+
   if (dynamicRecuts.length > 0) {
-    console.error(
-      "binding-post-control: FAIL — post-0029 dynamic CoR patch(es) target "
+    return {
+      ok: false,
+      message:
+        "binding-post-control: FAIL — post-0029 dynamic CoR patch(es) target "
         + `clara.${EXECUTOR_IDENTITY}: ${dynamicRecuts.join(", ")}.\n\n`
         + "Static function parsing cannot see the installed body. Prove Slot C "
         + "survives and update this checker before certifying the migration tree.",
-    );
-    return 1;
+    };
   }
 
   if (current === null) {
-    console.error(
-      "binding-post-control: FAIL — no static "
+    return {
+      ok: false,
+      message:
+        "binding-post-control: FAIL — no static "
         + "clara.execute_rule_post(uuid,text) definition exists in the migration tree.",
-    );
-    return 1;
+    };
   }
 
   const body = normalizeBody(current.body);
@@ -103,26 +121,43 @@ function main() {
     || gatePos >= usePos
     || usePos >= approvePos
   ) {
-    console.error(
-      "binding-post-control: FAIL — the current execute_rule_post(uuid,text) "
+    return {
+      ok: false,
+      message:
+        "binding-post-control: FAIL — the current execute_rule_post(uuid,text) "
         + `definition (${current.file}:${current.line}) lacks migration 0029's `
         + "binding live/unexpired assignment -> refusal-use -> approve-call "
         + "source order.\n\n"
         + "A later CREATE OR REPLACE has dropped the post-time authority check "
         + "while the 0029 schema_migrations interlock would remain open. Carry "
         + "Slot C forward verbatim before merging the recut.",
-    );
-    return 1;
+    };
   }
 
-  console.log(
-    "binding-post-control: OK — "
+  return {
+    ok: true,
+    message:
+      "binding-post-control: OK — "
       + `${definitions} execute_rule_post(uuid,text) definition(s) scanned; `
       + `current body ${current.file}:${current.line} retains the 0029 `
       + "binding live/unexpired assignment -> refusal-use -> approve-call order, "
       + "with no post-0029 dynamic executor recut.",
-  );
-  return 0;
+  };
 }
 
-process.exit(main());
+export function main({ migrationsDir = MIGRATIONS_DIR } = {}) {
+  const sources = readdirSync(migrationsDir)
+    .filter((file) => file.endsWith(".sql"))
+    .sort()
+    .map((file) => ({
+      file,
+      sql: readFileSync(join(migrationsDir, file), "utf8"),
+    }));
+  const result = checkBindingPostControlSources(sources);
+  (result.ok ? console.log : console.error)(result.message);
+  return result.ok ? 0 : 1;
+}
+
+const invoked = process.argv[1]
+  && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
+if (invoked) process.exit(main());

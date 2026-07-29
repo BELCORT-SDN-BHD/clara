@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "pnpm -r --if-present typecheck",
-    "lint": "node scripts/check-frozen-workflows.mjs && node scripts/check-leaks.mjs && node scripts/check-wiki-dynamic-sql.mjs && node scripts/check-wiki-dynamic-sql.selftest.mjs && node scripts/check-binding-post-control.mjs && eslint scripts eslint.config.mjs && pnpm -r --if-present lint",
+    "lint": "node scripts/check-frozen-workflows.mjs && node scripts/check-leaks.mjs && node scripts/check-wiki-dynamic-sql.mjs && node scripts/check-wiki-dynamic-sql.selftest.mjs && node scripts/check-binding-post-control.mjs && node scripts/check-binding-post-control.selftest.mjs && eslint scripts eslint.config.mjs && pnpm -r --if-present lint",
     "build": "pnpm -r --if-present build",
     "test": "pnpm -r --if-present test",
     "db:migrate": "pnpm --filter @clara/db migrate",
@@ -27,7 +27,8 @@
     "leaks:scan": "node scripts/check-leaks.mjs",
     "wiki:dynsql": "node scripts/check-wiki-dynamic-sql.mjs",
     "wiki:dynsql:selftest": "node scripts/check-wiki-dynamic-sql.selftest.mjs",
-    "binding:post-control": "node scripts/check-binding-post-control.mjs"
+    "binding:post-control": "node scripts/check-binding-post-control.mjs",
+    "binding:post-control:selftest": "node scripts/check-binding-post-control.selftest.mjs"
   },
   "devDependencies": {
     "@eslint/js": "9.39.5",

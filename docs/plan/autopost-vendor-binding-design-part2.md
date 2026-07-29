@@ -121,6 +121,21 @@ snapshot survives its decision-value gate (`0016:4167`).
 Every branch writes a `phase='draft'` resolution row carrying `raw_proposal` and
 `entry_revision_token`, both NOT NULL. Human lane: advisory, never blocking (§10 amendment A).
 
+**Q-round clarification (task #36).** The frozen production tool schema legitimately admits
+both `{existing_id}` and `{new:{name,registration_no?}}`; the wrapper passes either shape through
+unchanged. Only `existing_id` is an explicit caller identity choice. On a bound path Slot B
+canonicalizes and compares that id directly, raising `vendor_binding_conflict` on disagreement.
+Every `new` shape is deferred identity: Slot B goes straight to the binding-selected
+`{"existing_id":...,"kind":"vendor"}` and resolves only that safe form. It never re-runs the raw
+clean-name proposal that already produced `registration_conflict`. The draft's control leg is
+stamped with the binding counterparty before the revision snapshot is written.
+
+The real wake-drive cell also found an event-order bug invisible to staged fixtures:
+`counterparty.binding_resolved` originally preceded `entry.drafted`, so the wake's final
+`assert_books_current(...,entry_drafted_seq)` treated that first event as an intervening write and
+raised `CLR12`. The binding event now follows `entry.drafted` in the same transaction, outside that
+stale-window interval. Human and unbound paths emit no binding event and remain unchanged.
+
 ### A.4 `revise_entry` — divergence must also remove autopost eligibility
 
 R3 finding 1 is the sharpest of the round. v3 had `revise_entry` clear `vendor_binding_id` on
@@ -275,6 +290,12 @@ holding all four. The executor therefore reserves **both** receipts (`execute_ru
 `receipt_preheld: true`. No signature change — `p_ctx` is already `jsonb` — and a ctx without the
 key reserves exactly as today, so the human `approve_entry` path stays byte-identical.
 
+**Q-round skip settlement.** A reserved executor that returned a typed skip used to leave both
+receipts at `result=NULL`, making a same-key replay return `{pending:true}` forever. Every skip now
+routes through private `_settle_rule_post_skip`: it writes the existing `rule_post_skips` row,
+deletes the never-consumed `approve_entry` reservation, and `_finish_op`s the
+`execute_rule_post` receipt with the typed skip. The posted success path is unchanged.
+
 **Executor op-keys are PREDICTABLE, and that is a nuisance, not a leak.** `rule-post.mjs` derives
 `rulepost:<entry>:<seq>`, and `approve_entry` is granted to `clara_authenticated` with a
 caller-supplied op-key, so a firm member *can* reserve `(firm,'approve_entry',K)` first. Reservation
@@ -426,7 +447,9 @@ composite FK. Next free error code looks like **CLR35** — verify as-built befo
    of `execute_rule_post` (the latest migration defining it, comment-stripped) contains the binding
    gate. **This is what catches a LATER migration's recut that drops the gate while the 0029 ledger
    row remains** — the failure mode R3 correctly said postverify alone cannot catch. It fails CI
-   rather than silently re-arming every live binding.
+   rather than silently re-arming every live binding. Q-round hardening resolves direct literals,
+   literal-valued signature variables, and signature-constrained OID lookups; any genuinely
+   unparseable post-0029 CoR target is itself a certification failure, never an ignored `null`.
 
 **Deploy.** Both 0028 and 0029 replace writer function bodies, so **both require the repo-mandated
 D1 write-quiesce** for their deploy windows (`packages/db/README.md:95-113`) — v3's list omitted this.
@@ -492,6 +515,10 @@ untouched — no binding path takes a filing lock).
 | D | `execute_rule_post` reacquired an exact `coding_rules` row after filing/entry, leaving a proposed→live phantom outside the total order | Capture the initially locked live-rule IDs once; the later exact lookup is plain and limited to that set |
 | E | A.5 step-5 equality success was pre-empted; Slot-A ambiguity was silent; UUID selection was unstable/invalid | Supply registration to page resolution, order equality before refusal classification, return typed resolver outcomes, surface hard `binding_ambiguous`, and use ordered `array_agg` |
 | F | The persistent scanner accepted a dead gate string and was blind to later dynamic CoR recuts | Require assignment→use→approve source order and fail closed on post-0029 dynamic executor patches; runtime reachability remains an explicit static-analysis residual |
+| G | Slot B re-ran the raw clean-name proposal after a binding matched, reproducing the same uncaught `registration_conflict` and aborting every common bound wake draft | Treat only `existing_id` as explicit and compare its canonical id directly; every `new` proposal goes straight to the binding-selected safe form, with a real wake positive and explicit-id conflict cell |
+| H | Every executor skip orphaned both position-0 receipts, so same-key replay returned `{pending:true}` forever | Route all 32 skip returns through `_settle_rule_post_skip`, settle the executor result, and delete the unused approve reservation; replay and orphan queries are merge-blocking cells |
+| I | A literal-valued variable passed to `pg_get_functiondef` parsed as target `null`, so the persistent checker silently ignored a later executor recut | Resolve every statically attributable real CoR shape; fail loud on unresolved targets; exercise the exact checker with computed-target and unresolved-target self-tests |
+| J | The binding-resolution event preceded `entry.drafted`, so the wake stale-window check rejected its own new event as `CLR12` | Emit `counterparty.binding_resolved` immediately after `entry.drafted` in the same transaction; postverify pins event order and the unstaged wake-to-post cell proves it |
 
 ## F. Q5 — writing down #30, and naming the missing field
 

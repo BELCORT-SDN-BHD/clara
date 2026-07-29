@@ -1208,6 +1208,8 @@ begin
       v_page_candidate uuid;
       v_page_fp jsonb;
       v_binding_result jsonb;
+      v_explicit_counterparty uuid;
+      v_explicit_canonical uuid;
       v_condition_five boolean:=false;
     begin
       select nullif(btrim(min(dr.text_content)),'') into v_page_vendor
@@ -1259,21 +1261,39 @@ begin
         v_binding_counterparty:=
           (v_binding_result->>'counterparty_id')::uuid;
         v_vendor_binding:=(v_binding_result->>'binding_id')::uuid;
-        v_fingerprint:=clara._resolve_counterparty(p_client,v_proposal);
-        if v_fingerprint is null or v_fingerprint->>'decision'='birth' then
-          v_proposal:=jsonb_build_object(
-            'existing_id',v_binding_counterparty,'kind','vendor');
-          v_fingerprint:=clara._resolve_counterparty(p_client,v_proposal);
+        -- The production tool schema admits both {existing_id} and {new:{...}}.
+        -- Only existing_id is an explicit identity choice. Compare that choice
+        -- directly; every `new` shape still defers identity to Slot B, including
+        -- the common bare clean-name proposal that raised registration_conflict
+        -- above and MUST NOT be sent through the raw resolver a second time.
+        if v_proposal?'existing_id' then
+          begin
+            v_explicit_counterparty:=
+              (v_proposal->>'existing_id')::uuid;
+          exception when others then
+            raise exception 'counterparty proposal is malformed'
+              using errcode='CLR21',
+                detail='{"reason":"vendor_malformed"}';
+          end;
+          v_explicit_canonical:=clara._canonical_counterparty(
+            p_client,v_explicit_counterparty);
+          if v_explicit_canonical
+              is distinct from v_binding_counterparty then
+            raise exception 'vendor_binding_conflict'
+              using errcode='CLR23',
+                detail=jsonb_build_object(
+                  'reason','vendor_binding_conflict',
+                  'binding_counterparty',v_binding_counterparty,
+                  'proposed_counterparty',
+                    v_explicit_counterparty)::text;
+          end if;
+        else
           v_binding_override:=true;
-        elsif clara._canonical_counterparty(
-            p_client,(v_fingerprint->>'counterparty_id')::uuid)
-            is distinct from v_binding_counterparty then
-          raise exception 'vendor_binding_conflict'
-            using errcode='CLR23',
-              detail=jsonb_build_object('reason','vendor_binding_conflict',
-                'binding_counterparty',v_binding_counterparty,
-                'proposed_counterparty',v_fingerprint->>'counterparty_id')::text;
         end if;
+        v_proposal:=jsonb_build_object(
+          'existing_id',v_binding_counterparty,'kind','vendor');
+        v_fingerprint:=clara._resolve_counterparty(
+          p_client,v_proposal);
       end if;
     end;
   end if;
@@ -1305,6 +1325,35 @@ begin
         coalesce((p_flags->>'closing_transfer')::boolean,false),
         v_vendor_binding)$new$);
 
+  v_anchor:=$old$  insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,
+      credit_cents,description)
+    select v_entry,x.idx,(x.elem->>'account_code'),
+      (x.elem->>'debit_cents')::bigint,(x.elem->>'credit_cents')::bigint,
+      x.elem->>'description'
+    from jsonb_array_elements(v_lines) with ordinality as x(elem,idx);
+  perform clara._assert_balanced(v_entry);$old$;
+  v_count:=(length(v_next)-length(replace(v_next,v_anchor,'')))/length(v_anchor);
+  if v_count<>1 then
+    raise exception '0028: _draft_entry_core line-stamp anchor drift (%)',v_count
+      using errcode='CLR10';
+  end if;
+  v_next:=replace(v_next,v_anchor,$new$  insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,
+      credit_cents,description)
+    select v_entry,x.idx,(x.elem->>'account_code'),
+      (x.elem->>'debit_cents')::bigint,(x.elem->>'credit_cents')::bigint,
+      x.elem->>'description'
+    from jsonb_array_elements(v_lines) with ordinality as x(elem,idx);
+  if v_vendor_binding is not null then
+    update clara.journal_lines l
+      set counterparty_id=v_binding_counterparty
+    from clara.coa_accounts a
+    where l.entry_id=v_entry
+      and a.client_id=l.client_id
+      and a.account_code=l.account_code
+      and a.account_class in ('payable','receivable');
+  end if;
+  perform clara._assert_balanced(v_entry);$new$);
+
   v_anchor:=$old$  perform clara._audit(p_firm,p_actor,p_obo,p_wake_kind,'draft_entry',v_entry,
     jsonb_build_object('client',p_client,'filing',v_filing,'task',v_task,'op_key',p_op_key));$old$;
   v_count:=(length(v_next)-length(replace(v_next,v_anchor,'')))/length(v_anchor);
@@ -1332,15 +1381,33 @@ begin
       v_facts_extraction,v_ocr_extraction,v_token,
       coalesce(p_proposed_counterparty,'{}'::jsonb),'bound'
     );
+  end if;
+
+  perform clara._audit(p_firm,p_actor,p_obo,p_wake_kind,'draft_entry',v_entry,
+    jsonb_build_object('client',p_client,'filing',v_filing,'task',v_task,'op_key',p_op_key));$new$);
+
+  v_anchor:=$old$  v_seq := clara._append_event(p_firm,'entry.drafted',p_client,p_actor,p_obo,p_wake_kind,
+    v_entry,p_document,p_resolution,'{}'::jsonb);
+  if not p_is_human then
+    perform clara.assert_books_current(p_firm,p_client,p_books_version,v_seq);
+  end if;$old$;
+  v_count:=(length(v_next)-length(replace(v_next,v_anchor,'')))/length(v_anchor);
+  if v_count<>1 then
+    raise exception '0028: _draft_entry_core event-order anchor drift (%)',v_count
+      using errcode='CLR10';
+  end if;
+  v_next:=replace(v_next,v_anchor,$new$  v_seq := clara._append_event(p_firm,'entry.drafted',p_client,p_actor,p_obo,p_wake_kind,
+    v_entry,p_document,p_resolution,'{}'::jsonb);
+  if v_vendor_binding is not null then
     perform clara._append_event(p_firm,'counterparty.binding_resolved',
       p_client,p_actor,p_obo,p_wake_kind,v_entry,p_document,p_resolution,
       jsonb_build_object('binding_id',v_vendor_binding,
         'counterparty_id',v_binding_counterparty,'phase','draft',
         'binding_override',v_binding_override));
   end if;
-
-  perform clara._audit(p_firm,p_actor,p_obo,p_wake_kind,'draft_entry',v_entry,
-    jsonb_build_object('client',p_client,'filing',v_filing,'task',v_task,'op_key',p_op_key));$new$);
+  if not p_is_human then
+    perform clara.assert_books_current(p_firm,p_client,p_books_version,v_seq);
+  end if;$new$);
 
   v_anchor:=$old$  return clara._finish_op(p_firm,'draft_entry',p_op_key,v_receipt);$old$;
   v_count:=(length(v_next)-length(replace(v_next,v_anchor,'')))/length(v_anchor);

@@ -1,9 +1,12 @@
 -- 0029_vendor_binding_executor.sql -- Slot C vendor-binding post control (task #36).
 --
--- This migration deliberately recuts exactly two functions:
+-- This migration deliberately recuts exactly two writer functions and adds one
+-- private settlement helper:
 --   * clara._approve_entry_core: receipt_preheld only; no signature change.
 --   * clara.execute_rule_post: position-0 receipts, total-order locks, and the
 --     marker-keyed post-time binding re-resolution before approval.
+--   * clara._settle_rule_post_skip: atomically records a typed skip, removes the
+--     never-consumed approve_entry reservation, and settles the executor receipt.
 --
 -- 0028 is immutable as-built ground truth. No Slot A/B object is changed here.
 
@@ -351,6 +354,42 @@ begin
 end $function$
 ;
 
+CREATE OR REPLACE FUNCTION clara._settle_rule_post_skip(
+  p_firm uuid,
+  p_client uuid,
+  p_entry uuid,
+  p_rule uuid,
+  p_reason text,
+  p_op_key text,
+  p_approve_op_key text
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'clara', 'pg_temp'
+AS $function$
+declare
+  v_result jsonb;
+begin
+  insert into clara.rule_post_skips(
+    firm_id,client_id,entry_id,rule_id,reason
+  ) values (
+    p_firm,p_client,p_entry,p_rule,p_reason
+  );
+  delete from clara.op_receipts
+  where firm_id=p_firm
+    and fn='approve_entry'
+    and op_key=p_approve_op_key;
+  v_result:=jsonb_build_object(
+    'entry_id',p_entry,'status','skipped','reason',p_reason);
+  return clara._finish_op(
+    p_firm,'execute_rule_post',p_op_key,v_result);
+end
+$function$;
+
+REVOKE ALL ON FUNCTION clara._settle_rule_post_skip(
+  uuid,uuid,uuid,uuid,text,text,text
+) FROM PUBLIC;
+
 CREATE OR REPLACE FUNCTION clara.execute_rule_post(p_entry uuid, p_op_key text)
  RETURNS jsonb
  LANGUAGE plpgsql
@@ -456,34 +495,30 @@ begin
     raise exception 'entry not found' using errcode='CLR11';
   end if;
   if e.revision_token is distinct from v_reserved_revision then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'stale_revision');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped',
-      'reason','stale_revision');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'stale_revision',
+      p_op_key,v_approve_op_key);
   end if;
 
   if e.status<>'draft' then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'not_a_draft');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','not_a_draft');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'not_a_draft',
+      p_op_key,v_approve_op_key);
   end if;
   if e.coding_kind is null then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'ineligible_no_coding_kind');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped',
-      'reason','ineligible_no_coding_kind');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'ineligible_no_coding_kind',
+      p_op_key,v_approve_op_key);
   end if;
   if e.document_id is null then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'ineligible_no_document');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped',
-      'reason','ineligible_no_document');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'ineligible_no_document',
+      p_op_key,v_approve_op_key);
   end if;
   if e.proposed_counterparty is null then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'ineligible_no_counterparty');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped',
-      'reason','ineligible_no_counterparty');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'ineligible_no_counterparty',
+      p_op_key,v_approve_op_key);
   end if;
 
   -- ADV-R2 (R1#1): ONE BOUND EXTRACTION per document per post, resolved BEFORE
@@ -502,10 +537,9 @@ begin
     where t.document_id=e.document_id
       and t.lane in ('invoice_facts','local_facts') and t.status='done';
   if v_lane_n>1 then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'evidence_lane_ambiguous');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped',
-      'reason','evidence_lane_ambiguous');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'evidence_lane_ambiguous',
+      p_op_key,v_approve_op_key);
   end if;
   select t.lane,x.id into v_doc_lane,v_fx
     from clara.document_processing_tasks t
@@ -519,10 +553,9 @@ begin
   -- The post path NEVER proceeds unpinned: a later/concurrent extraction commit
   -- could otherwise be picked up mid-post by the live selectors.
   if v_fx is null then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'facts_missing');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped',
-      'reason','facts_missing');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'facts_missing',
+      p_op_key,v_approve_op_key);
   end if;
 
   -- direction (client-aware, pinned to the ONE bound extraction — ADV-R3#1) —
@@ -530,9 +563,9 @@ begin
   begin
     v_direction:=clara._document_direction_at(e.document_id,e.client_id,v_fx);
   exception when sqlstate 'CLR30' then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'direction_unresolved');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','direction_unresolved');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'direction_unresolved',
+      p_op_key,v_approve_op_key);
   end;
   v_kind:=case when v_direction='sales' then 'customer' else 'vendor' end;
 
@@ -541,14 +574,14 @@ begin
     v_fp:=clara._resolve_counterparty(e.client_id,
       e.proposed_counterparty || jsonb_build_object('kind',v_kind));
   exception when sqlstate 'CLR23' then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'counterparty_ambiguous');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','counterparty_ambiguous');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'counterparty_ambiguous',
+      p_op_key,v_approve_op_key);
   end;
   if v_fp is null or v_fp->>'decision'='birth' then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'counterparty_unresolved');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','counterparty_unresolved');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'counterparty_unresolved',
+      p_op_key,v_approve_op_key);
   end if;
   v_counterparty:=clara._canonical_counterparty(e.client_id,(v_fp->>'counterparty_id')::uuid);
 
@@ -561,23 +594,23 @@ begin
       and client_id=e.client_id and counterparty_id=v_counterparty
       and direction=v_direction and rule_type='autopost' and status='live';
   if not found then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,null,'no_live_rule');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','no_live_rule');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,null,'no_live_rule',
+      p_op_key,v_approve_op_key);
   end if;
 
   -- RE-DERIVE every gate against live rows -----------------------------------
   if clara.is_high_stakes(p_entry) then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'high_stakes');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','high_stakes');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,'high_stakes',
+      p_op_key,v_approve_op_key);
   end if;
   -- 0016 P2(e)/P6: CN autopost is IMPOSSIBLE — a sales_credit_note draft skips
   -- by NAME (the 0015 control-shape refusal was incidental; this is the law).
   if v_direction='sales' and e.coding_kind='sales_credit_note' then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'cn_not_autopostable');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','cn_not_autopostable');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,'cn_not_autopostable',
+      p_op_key,v_approve_op_key);
   end if;
   -- 0016 P4 (WA21-R1): the sst_purchase_cost visibility leg is NOT sanctioned
   -- for autopost — human lanes only. A purchase draft carrying one skips by
@@ -585,9 +618,9 @@ begin
   if v_direction='purchase' and exists(select 1 from clara.journal_lines l
       join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
       where l.entry_id=p_entry and coalesce(a.special_acc_type,'')='sst_purchase_cost') then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'purchase_sst_not_autopostable');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','purchase_sst_not_autopostable');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,
+      'purchase_sst_not_autopostable',p_op_key,v_approve_op_key);
   end if;
   -- FIX-1+7 (adversarial laundering — COUNT+IDENTITY enumeration, REPLACING the v2
   -- Σ|dr−cr| tolerance). N tiny decoy legs could inflate a sum tolerance (each extra leg
@@ -631,9 +664,9 @@ begin
     where l.entry_id=p_entry;
   if v_ctrl_total<>1 or v_ctrl_ok<>1
      or (v_gross is not null and v_ctrl_amount<>v_gross) then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'control_shape');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','control_shape');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,'control_shape',
+      p_op_key,v_approve_op_key);
   end if;
 
   -- (b) signed-account legs by side; (c) sst_output legs + tied magnitude; (d) rounding
@@ -660,15 +693,15 @@ begin
      or v_outside_legs>0
      or v_sst_legs>1 or (v_sst_legs=1 and (v_tax is null or v_sst_amt<>v_tax))
      or v_round_legs>1 or v_round_imb>5 then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'account_mismatch');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','account_mismatch');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,'account_mismatch',
+      p_op_key,v_approve_op_key);
   end if;
   select coalesce(sum(debit_cents),0) into v_total from clara.journal_lines where entry_id=p_entry;
   if v_total>r.amount_cap_cents then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'over_cap');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','over_cap');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,'over_cap',
+      p_op_key,v_approve_op_key);
   end if;
   v_window_start:=case when r.frequency_window='monthly'
     then (date_trunc('month',now() at time zone 'utc') at time zone 'utc')
@@ -676,19 +709,19 @@ begin
   select count(*)::int into v_count from clara.rule_post_runs
     where rule_id=r.id and posted_at>=v_window_start;
   if v_count>=r.window_max_posts then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'window_exhausted');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','window_exhausted');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,'window_exhausted',
+      p_op_key,v_approve_op_key);
   end if;
   if r.expires_at<=now() then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'expired');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','expired');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,'expired',
+      p_op_key,v_approve_op_key);
   end if;
   if e.revision_token is null then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'no_revision');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','no_revision');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,'no_revision',
+      p_op_key,v_approve_op_key);
   end if;
 
   -- FIX v5 (item 5 — CORROBORATION-REQUIRED to auto-post): the confidence ladder auto-posts
@@ -708,9 +741,9 @@ begin
   -- still fires first for a shaped-but-non-corroborated draft; a CLEAN-shaped non-corroborated
   -- draft (the residual-5 laundering path) lands here.
   if not coalesce((v_state->>'corroborated')::boolean,false) then
-    insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-      values(e.firm_id,e.client_id,p_entry,r.id,'not_corroborated');
-    return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','not_corroborated');
+    return clara._settle_rule_post_skip(
+      e.firm_id,e.client_id,p_entry,r.id,'not_corroborated',
+      p_op_key,v_approve_op_key);
   end if;
 
   -- ADV-1: the DOCUMENT's ACTUAL evidence class, derived from its latest done
@@ -725,11 +758,9 @@ begin
     v_doc_class:=case v_doc_lane when 'local_facts' then 'structured'
                                  when 'invoice_facts' then 'ocr_sales' end;
     if v_doc_class is null or v_doc_class is distinct from r.evidence_class then
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'evidence_class_mismatch');
-      return jsonb_build_object('entry_id',p_entry,'status','skipped',
-        'reason','evidence_class_mismatch','document_class',v_doc_class,
-        'rule_class',r.evidence_class);
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'evidence_class_mismatch',
+        p_op_key,v_approve_op_key);
     end if;
   end if;
 
@@ -754,9 +785,7 @@ begin
        or coalesce((v_verdict->>'low_confidence')::boolean,false)
        or not ((v_verdict->>'source')='human'
                or coalesce((v_verdict->>'confidence')::numeric,0)>=0.8) then
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'polarity_unverified');
-      select count(*)::int into v_skips from clara.rule_post_skips
+      select count(*)::int+1 into v_skips from clara.rule_post_skips
         where rule_id=r.id and reason in ('polarity_unverified','direction_unproven')
           and created_at>=now()-interval '30 days';
       if v_skips>=3 then
@@ -771,8 +800,9 @@ begin
         exception when others then null;
         end;
       end if;
-      return jsonb_build_object('entry_id',p_entry,'status','skipped',
-        'reason','polarity_unverified','rule_suspended',v_suspended);
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'polarity_unverified',
+        p_op_key,v_approve_op_key);
     end if;
     -- (b) hard direction evidence — every field reads the ONE BOUND extraction
     -- (v_fx, resolved once above; ADV-R2 R1#1).
@@ -810,9 +840,7 @@ begin
         or exists(select 1 from clara.client_aliases al where al.client_id=e.client_id
             and al.retired_at is null and al.alias_normalized=v_cust_name)));
     if not (v_hard_ok and v_name_ok) or v_buyer_hit then
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'direction_unproven');
-      select count(*)::int into v_skips from clara.rule_post_skips
+      select count(*)::int+1 into v_skips from clara.rule_post_skips
         where rule_id=r.id and reason in ('polarity_unverified','direction_unproven')
           and created_at>=now()-interval '30 days';
       if v_skips>=3 then
@@ -827,8 +855,9 @@ begin
         exception when others then null;
         end;
       end if;
-      return jsonb_build_object('entry_id',p_entry,'status','skipped',
-        'reason','direction_unproven','rule_suspended',v_suspended);
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'direction_unproven',
+        p_op_key,v_approve_op_key);
     end if;
     -- (b2) ADV-4: stated-buyer <-> signed-counterparty CONGRUENCE. Control (b)
     -- proves only that the buyer is NOT the client; the invoice's stated buyer
@@ -859,10 +888,9 @@ begin
     end if;
     if v_buyer_id is null
        or v_buyer_id is distinct from clara._canonical_counterparty(e.client_id,r.counterparty_id) then
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'buyer_mismatch');
-      return jsonb_build_object('entry_id',p_entry,'status','skipped',
-        'reason','buyer_mismatch');
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'buyer_mismatch',
+        p_op_key,v_approve_op_key);
     end if;
     -- (c) full multi-anchor corroboration.
     v_net:=nullif(v_state->>'total_excl_tax_cents','')::bigint;
@@ -907,17 +935,17 @@ begin
        or (v_net+coalesce(v_sc,0)+coalesce(v_dlv,0)+v_tax+coalesce(v_round,0)
            -coalesce(v_disc,0))<>v_gross
        or v_due_c<>1 or v_due_amt is null or v_due_amt<>v_gross then
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'anchor_missing');
-      return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','anchor_missing');
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'anchor_missing',
+        p_op_key,v_approve_op_key);
     end if;
     -- (d) an EXISTING resolved customer, re-derived live (no birth ever).
     if not exists(select 1 from clara.counterparties cp where cp.id=r.counterparty_id
         and cp.client_id=e.client_id and cp.kind='customer'
         and cp.merged_into is null and cp.retired_at is null) then
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'customer_unresolved');
-      return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','customer_unresolved');
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'customer_unresolved',
+        p_op_key,v_approve_op_key);
     end if;
     -- (e2) ADV-5: the sighting FLOOR re-derived atomically at post time, under
     -- the client serialization lock (the same advisory lock the approve core
@@ -929,9 +957,9 @@ begin
       from clara._ocr_sales_floor(e.client_id,
         clara._canonical_counterparty(e.client_id,r.counterparty_id),r.account_code) f;
     if coalesce(v_fseen,0)<6 or coalesce(v_fdocs,0)<6 or v_fspan is null or v_fspan<60 then
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'floor_lost');
-      return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','floor_lost');
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'floor_lost',
+        p_op_key,v_approve_op_key);
     end if;
   end if;
 
@@ -1240,13 +1268,9 @@ begin
     );
 
     if v_binding_reason is not null then
-      insert into clara.rule_post_skips(
-        firm_id,client_id,entry_id,rule_id,reason
-      ) values (
-        e.firm_id,e.client_id,p_entry,r.id,v_binding_reason
-      );
-      return jsonb_build_object(
-        'entry_id',p_entry,'status','skipped','reason',v_binding_reason);
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,v_binding_reason,
+        p_op_key,v_approve_op_key);
     end if;
   end if;
 
@@ -1267,9 +1291,9 @@ begin
       if coalesce(v_detail,'') not like '%not_a_draft%' then
         raise;   -- propagate every non-race CLR10 (e.g. sst_account_missing)
       end if;
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'not_a_draft');
-      return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','not_a_draft');
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'not_a_draft',
+        p_op_key,v_approve_op_key);
     when sqlstate 'CLR21' then
       -- RESIDUAL-2: the supplier-bill shape floor refuses a non-01 supplier document
       -- (type_polarity_mismatch) inside the approve core. The executor degrades that to a
@@ -1278,13 +1302,13 @@ begin
       if coalesce(v_detail,'') not like '%type_polarity_mismatch%' then
         raise;
       end if;
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'type_polarity_mismatch');
-      return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','type_polarity_mismatch');
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'type_polarity_mismatch',
+        p_op_key,v_approve_op_key);
     when sqlstate 'CLR06' then
-      insert into clara.rule_post_skips(firm_id,client_id,entry_id,rule_id,reason)
-        values(e.firm_id,e.client_id,p_entry,r.id,'stale_revision');
-      return jsonb_build_object('entry_id',p_entry,'status','skipped','reason','stale_revision');
+      return clara._settle_rule_post_skip(
+        e.firm_id,e.client_id,p_entry,r.id,'stale_revision',
+        p_op_key,v_approve_op_key);
   end;
 
   -- Receipt (rule snapshot at post time, for the audit join) + the typed event.
@@ -1374,6 +1398,37 @@ begin
   if position('for update' in v_exact_slice)<>0 then
     raise exception
       '0029 tail: exact coding_rules lookup reacquires FOR UPDATE'
+      using errcode='CLR10';
+  end if;
+  if regexp_count(
+       v_norm,'return clara\._settle_rule_post_skip\('
+     )<>32
+     or position('insert into clara.rule_post_skips' in v_norm)<>0
+     or position(
+       'return clara._finish_op( e.firm_id,''execute_rule_post'',p_op_key,v_result);'
+       in v_norm)=0 then
+    raise exception
+      '0029 tail: skip settlement coverage or posted success settlement drifted'
+      using errcode='CLR10';
+  end if;
+
+  select pg_get_functiondef(
+    'clara._settle_rule_post_skip(uuid,uuid,uuid,uuid,text,text,text)'::regprocedure
+  ) into v_src;
+  v_norm:=lower(regexp_replace(
+    regexp_replace(
+      regexp_replace(v_src,'/\*[\s\S]*?\*/','','g'),
+      '--[^\n]*','','g'),
+    '\s+',' ','g'));
+  if position('insert into clara.rule_post_skips(' in v_norm)=0
+     or position(
+       'delete from clara.op_receipts where firm_id=p_firm and fn=''approve_entry'' and op_key=p_approve_op_key;'
+       in v_norm)=0
+     or position(
+       'return clara._finish_op( p_firm,''execute_rule_post'',p_op_key,v_result);'
+       in v_norm)=0 then
+    raise exception
+      '0029 tail: _settle_rule_post_skip body is incomplete'
       using errcode='CLR10';
   end if;
 

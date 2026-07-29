@@ -664,6 +664,79 @@ function concatChains(text) {
   return out;
 }
 
+/** A statically-known regprocedure signature from one SQL expression. Only a
+ * single literal (optionally cast) is proof; concatenation and format() remain
+ * unresolved and therefore fail-closed. */
+function literalRegprocedureIdentity(expr) {
+  const lit = /^\s*'((?:[^']|'')*)'\s*(?:::\s*(?:text|regprocedure))?\s*$/i.exec(expr);
+  return lit ? signatureIdentity(lit[1].replace(/''/g, "'")) : null;
+}
+
+/** Resolve the latest simple literal assignment to `name` before `before`.
+ * The migration family uses both declaration initializers and later `:=`
+ * assignments. A concatenated assignment intentionally does not match. */
+function assignedRegprocedureIdentity(block, name, before) {
+  const prefix = block.slice(0, before);
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const patterns = [
+    new RegExp(
+      `\\b${escaped}\\s+(?:constant\\s+)?(?:text|regprocedure)\\s*:=\\s*`
+        + `'((?:[^']|'')*)'\\s*(?:::\\s*(?:text|regprocedure))?\\s*;`,
+      "gi",
+    ),
+    new RegExp(
+      `\\b${escaped}\\s*:=\\s*'((?:[^']|'')*)'\\s*`
+        + `(?:::\\s*(?:text|regprocedure))?\\s*;`,
+      "gi",
+    ),
+  ];
+  let latest = null;
+  for (const re of patterns) {
+    let m;
+    while ((m = re.exec(prefix))) {
+      if (latest === null || m.index > latest.index) {
+        latest = { index: m.index, value: m[1] };
+      }
+    }
+  }
+  return latest ? signatureIdentity(latest.value.replace(/''/g, "'")) : null;
+}
+
+/** Resolve one pg_get_functiondef argument using every statically-attributable
+ * shape present in this migration family: a direct signature literal, a
+ * text/regprocedure variable holding that literal, or an `oid` argument whose
+ * SELECT constrains oid to either shape. Everything else returns null. */
+function coRTargetIdentity(block, argText, callStart, callEnd) {
+  const direct = literalRegprocedureIdentity(argText);
+  if (direct) return direct;
+
+  const variable = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:::\s*regprocedure)?\s*$/i.exec(argText);
+  if (variable && variable[1].toLowerCase() !== "oid") {
+    return assignedRegprocedureIdentity(block, variable[1], callStart);
+  }
+
+  // pg_get_functiondef(oid) FROM pg_proc ... WHERE p.oid=<known signature>.
+  // Attribution is limited to this SELECT statement so a signature elsewhere
+  // in the block cannot be borrowed for the wrong call.
+  const statementEnd = block.indexOf(";", callEnd);
+  const statement = block.slice(callEnd, statementEnd < 0 ? block.length : statementEnd);
+  const rhs = /\b(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?oid\s*=\s*('(?:[^']|'')*'\s*::\s*regprocedure|[A-Za-z_][A-Za-z0-9_]*\s*::\s*regprocedure)/i.exec(statement);
+  if (rhs) {
+    const literal = literalRegprocedureIdentity(rhs[1]);
+    if (literal) return literal;
+    const sigVar = /^\s*([A-Za-z_][A-Za-z0-9_]*)/i.exec(rhs[1]);
+    if (sigVar) return assignedRegprocedureIdentity(block, sigVar[1], callStart);
+  }
+  const lhs = /('(?:[^']|'')*'\s*::\s*regprocedure|[A-Za-z_][A-Za-z0-9_]*\s*::\s*regprocedure)\s*=\s*(?:[A-Za-z_][A-Za-z0-9_]*\s*\.\s*)?oid\b/i.exec(statement);
+  if (lhs) {
+    const literal = literalRegprocedureIdentity(lhs[1]);
+    if (literal) return literal;
+    const sigVar = /^\s*([A-Za-z_][A-Za-z0-9_]*)/i.exec(lhs[1]);
+    if (sigVar) return assignedRegprocedureIdentity(block, sigVar[1], callStart);
+  }
+  return null;
+}
+
 /**
  * Every CHANGE-OF-RECORD patch: a `do $tag$ … $tag$` block that installs a callable
  * surface — it reads a function body with `pg_get_functiondef` and `execute`s a rewritten
@@ -702,8 +775,7 @@ export function parseCoRPatches(sql, spans = []) {
     while ((t = tre.exec(masked))) {
       const arg = readParens(masked, t.index + t[0].length - 1);
       if (!arg) { targets.push(null); continue; }
-      const lit = /^\s*'((?:[^']|'')*)'\s*::\s*regprocedure\s*$/.exec(arg.text);
-      targets.push(lit ? signatureIdentity(lit[1].replace(/''/g, "'")) : null);
+      targets.push(coRTargetIdentity(block, arg.text, t.index, arg.end));
       tre.lastIndex = arg.end;
     }
     for (const ddl of dynamicCreates) targets.push(parseCreatedIdentity(ddl));
