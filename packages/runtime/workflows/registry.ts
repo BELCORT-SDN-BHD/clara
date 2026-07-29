@@ -14,6 +14,7 @@ import { chatTurn_v4 } from "./chatTurn.v4.js";
 import { chatTurn_v5 } from "./chatTurn.v5.js";
 import { chatTurn_v6 } from "./chatTurn.v6.js";
 import { chatTurn_v7 } from "./chatTurn.v7.js";
+import { chatTurn_v8 } from "./chatTurn.v8.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -29,7 +30,7 @@ import { clientOnboarding_v2 } from "./clientOnboarding.v2.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  chatTurn: chatTurn_v7,
+  chatTurn: chatTurn_v8,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   autoDraft: autoDraft_v5,
@@ -95,8 +96,26 @@ export const workflows = {
 // stated ZERO or absent tax takes the two-leg shape (full finding + ruling in
 // autoDraft.v5.prompt.ts's own header). IV-00743 stays parked — its two real, distinct
 // failures predate this rule and remain the control's honest record; this fix targets
-// FRESH filings under the same recurring-vendor family. Drop a re-export
-// only once zero non-terminal runs of that version remain.
+// FRESH filings under the same recurring-vendor family. The SAME ceremony ALSO repointed
+// chatTurn v7->v8 (the owner-approved closing batch, 2026-07-29) — THREE functional
+// changes: (#46a, the diagnostic twin) chatTurn.v8.impl.ts's consumeChatTurnModelResult
+// ports the ledger #44 stream-error-capture pattern (duplicated, cross-referenced — a
+// versioned workflow must never couple its shape to another workflow FAMILY's frozen
+// file), and chatTurn.v8.ts's errorCodeFromCaughtError parses the tag back into a
+// specific settle errorCode string instead of v7's fixed "model_error" literal for
+// every failure; (#46b, RULED: propagate) chatTurn adopts the SAME SST-zero precedent
+// as autoDraft_v5 — a STATED NONZERO tax keeps the three-leg sst_purchase_cost split, a
+// STATED ZERO or absent tax takes the two-leg shape — with the human-in-loop context
+// noted (chatTurn is attended; the fix removes friction at the source rather than
+// relying on review alone); (#35, bind-existing counterparty) the draft tool's prompt +
+// schema guidance now prefers an existing counterparty_id (discoverable via
+// list_journal_entries/get_journal_entry) over proposing a new name when the vendor is
+// already established — the DB write floor already accepted `{existing_id}`
+// unconditionally (Slot B consumes it; the four EZSEC approvals used it via the
+// runway's driver), so this is prompt/schema-describe() guidance only; the wrapper
+// (runDraftJournalEntry) is byte-unchanged and the DB-side reconciliation walls stay
+// the enforcement. Drop a re-export only once zero non-terminal runs of that version
+// remain.
 export { firmInterview_v1 };
 export { clientOnboarding_v1 };
 export { chatTurn_v1 };
@@ -105,6 +124,7 @@ export { chatTurn_v3 };
 export { chatTurn_v4 };
 export { chatTurn_v5 };
 export { chatTurn_v6 };
+export { chatTurn_v7 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };

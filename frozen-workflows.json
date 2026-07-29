@@ -339,6 +339,30 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/chatTurn.v8.errors.ts": {
+      "sha256": "822dc0944180562e2a268482004d3595c1c1a191e7e164de1b07a15634f0d7cf",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v8.impl.ts": {
+      "sha256": "8a0e63ee5c5db3c30e4238ce25f194101cb9c1cf4bc66116070f17a663cf3797",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v8.infra.ts": {
+      "sha256": "543405d3d18f541762cbfd511ec3efce3462c19e6e9d2cff49eb675c2307510e",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v8.prompt.ts": {
+      "sha256": "18fa46678ba33454a26b9ef51498247f12abbc6f229f423aed5d0ebf53a451b0",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v8.tools.ts": {
+      "sha256": "3d19fce7dd5dedb6ac81b59616b7b20f613a37fb027f29e7dac9da366e708d96",
+      "note": ""
+    },
+    "packages/runtime/workflows/chatTurn.v8.ts": {
+      "sha256": "1a0b73bdd011303f658986609ba84a781fb84f348b093408d7ec2412774ff289",
+      "note": ""
+    },
     "packages/runtime/workflows/clientOnboarding.v1.ts": {
       "sha256": "e0c03498363833b0585904af1f41b77677efb2c81cad107e979623e7d95baa39",
       "note": "",
