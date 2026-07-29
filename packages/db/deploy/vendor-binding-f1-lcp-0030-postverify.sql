@@ -187,6 +187,15 @@ begin
     raise exception
       '0030 postverify: executor other-binding lateral lacks F1 starts_with or retains equality';
   end if;
+  -- O-round confirmation finding 4: this site must carry the SAME explicit
+  -- NULL guard as F2's/v_f1_ok's own starts_with idiom (WHERE already
+  -- excludes a NULL result, so this is a source-discipline probe, not a
+  -- behavioral one).
+  if v_bm_slice !~
+       'clara\._binding_normalize\s*\(\s*vn\.vendor_name\s*\)\s+is\s+not\s+null' then
+    raise exception
+      '0030 postverify: executor other-binding lateral lacks the explicit F1 NULL guard';
+  end if;
 
   -- (5b) Independently isolate the bound entry's own F1 assignment/re-check,
   -- ending strictly before F2. This prevents one starts_with site from masking

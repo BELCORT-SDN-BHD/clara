@@ -75,6 +75,7 @@ as $$
           tok ~ '[^\x00-\x7F]'
           or (length(tok) >= 4 and lower(tok) not in (
             'sdn','bhd','pte','ltd','inc','llc','corp','plc',
+            'berhad','sendirian','bumiputera',
             'the','and','of','for','group','trading','holdings',
             'enterprise','enterprises','company','resources','services'
           ))
@@ -1112,7 +1113,12 @@ begin
       where b2.client_id=e.client_id
         and b2.status='live' and b2.expires_at>now()
         -- 0030: F1 is now the window's LCP; the OTHER binding's stored F1
-        -- must be a prefix of the document's own normalized fragment.
+        -- must be a prefix of the document's own normalized fragment. The
+        -- explicit NULL guard mirrors F2's/v_f1_ok's own starts_with idiom
+        -- (O-round confirmation finding 4) -- WHERE already excludes a NULL
+        -- starts_with() result, so this is belt-and-suspenders, not a
+        -- behavior change.
+        and clara._binding_normalize(vn.vendor_name) is not null
         and starts_with(clara._binding_normalize(vn.vendor_name),
           b2.f1_vendor_name_norm)
         and cp2.merged_into is null and cp2.retired_at is null
@@ -1456,6 +1462,26 @@ begin
   end if;
   if clara._binding_f1_floor_holds('sdn bhd') then
     raise exception '0030 tail: the floor must refuse an LCP made entirely of corporate-form filler tokens';
+  end if;
+  -- O-round confirmation finding 2: 'sdn bhd' alone is only 7 chars, so it was
+  -- refused by the LENGTH gate without ever exercising the token-denylist
+  -- branch -- a floor body reduced to `length(...)>=8` would still pass every
+  -- prior check here. This case is >=8 chars AND every token is denylisted,
+  -- so ONLY the token branch can refuse it.
+  if clara._binding_f1_floor_holds('trading enterprise group') then
+    raise exception '0030 tail: an LCP >=8 chars whose EVERY token is denylisted corporate-form filler must still be refused (the token branch, not just length, must fire)';
+  end if;
+  -- O-round confirmation finding 1: the spelled-out Malaysian corporate forms
+  -- (berhad/sendirian), not just their abbreviations (bhd/sdn), must also be
+  -- denylisted -- else a genuinely non-distinguishing LCP like "abc berhad"
+  -- would pass on "abc" alone if "berhad" were wrongly treated as a real
+  -- distinguishing token (it is over the 4-char floor, so a missing denylist
+  -- entry would silently rescue an under-distinguishing LCP).
+  if clara._binding_f1_floor_holds('sendirian berhad') then
+    raise exception '0030 tail: the spelled-out Malaysian corporate forms (sendirian/berhad) must be denylisted exactly like their sdn/bhd abbreviations';
+  end if;
+  if not clara._binding_f1_floor_holds('acme resources sdn bhd') then
+    raise exception '0030 tail: the floor must still ADMIT a genuinely distinguishing ASCII token ("acme") alongside denylisted corporate-form filler';
   end if;
 
   -- (4) the three edited functions all carry the 0030 F1 patch marker (a cheap CoR

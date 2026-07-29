@@ -426,6 +426,65 @@ test("x30.2b a non-prefix post-time fragment refuses and never approves", async 
   assert.equal(entryStatus, "draft");
 });
 
+// O-round confirmation finding 3: neither cell above proves the POSITIVE side of
+// starts_with -- both use wholly disjoint fragments, which fail identically under
+// starts_with, a reversed starts_with, or the retired equality predicate. Reverting
+// every matching site to equality would leave x30.2a/x30.2b green. These two cells
+// close that gap: a fragment that genuinely EXTENDS the stored F1 with a brand-new
+// suffix (never seen in the 3-document evidence window, so equality could never
+// have admitted it) must resolve/post -- the actual behavioral point of the fix.
+
+test("x30.2c a genuine suffix extension of the stored F1 resolves bound at Slot A", async (t) => {
+  if (requireReady(t)) return;
+  assert.ok(ezCp && ezBinding, "x30.1 must establish the live EZSEC binding");
+  const doc = await seedBareDocument(w.firms.A, "x30-slot-a-positive-suffix");
+  await seedF123Evidence(
+    w.firms.A,
+    doc.id,
+    ezCp,
+    `${ezBinding.f2_invoice_prefix}-SLOTAPOS`,
+    "ez\n易计\nezAccount\nNEVER SEEN BEFORE SUFFIX",
+  );
+  const result = await resolve(w.clients.A1, doc.id, ezCp.id);
+  assert.equal(
+    result.outcome,
+    "bound",
+    `a document whose fragment genuinely extends the stored F1 must resolve, got: ${JSON.stringify(result)}`,
+  );
+  assert.equal(result.counterparty_id, ezCp.id);
+  assert.equal(result.binding_id, ezBinding.binding_id);
+});
+
+test("x30.2d a genuine suffix extension of the stored F1 posts successfully at post-time", async (t) => {
+  if (requireReady(t)) return;
+  assert.ok(ezCp && ezBinding, "x30.1 must establish the live EZSEC binding");
+  // Reuses the live autopost rule x30.2b already established for ezCp -- a second
+  // live rule for the same (client, counterparty, account) would be an unrelated
+  // ambiguity, not this cell's concern.
+  const draft = await seedBoundDraft(
+    ezCp,
+    ezBinding,
+    "ez\n易计\nezAccount\nDRAFT TIME",
+    "POST2",
+  );
+  await restateVendorName(draft, "ez\n易计\nezAccount\nFINAL POST TIME SUFFIX");
+  const result = await post(draft.entry_id);
+  assert.equal(
+    result.status,
+    "posted",
+    `a document whose CURRENT fragment genuinely extends the stored F1 must post, got: ${JSON.stringify(result)}`,
+  );
+  const resolution = await postResolution(draft.entry_id);
+  assert.equal(resolution.phase, "post");
+  assert.equal(resolution.outcome, "bound");
+  assert.equal(resolution.refusal_reason, null);
+  const entryStatus = (await rootQuery(
+    "select status from clara.journal_entries where id=$1",
+    [draft.entry_id],
+  )).rows[0].status;
+  assert.equal(entryStatus, "approved");
+});
+
 test("x30.3 the degenerate exact LCP 'in' refuses features_unstable / CLR36", async (t) => {
   if (requireReady(t)) return;
   const { cp } = await seedWindow("X30-FLOOR", [
@@ -459,4 +518,59 @@ test("x30.4 identical fragments retain the full normalized F1", async (t) => {
     counterparty: cp.id,
   });
   assert.equal(proposed.f1_vendor_name_norm, expected);
+});
+
+test("x30.5 an LCP long enough to clear the length floor but made ENTIRELY of denylisted corporate-form tokens still refuses features_unstable", async (t) => {
+  if (requireReady(t)) return;
+  // Distinct from x30.3 ("in"): that fixture's LCP is only 2 chars, so the LENGTH
+  // gate alone refuses it without ever reaching the token-denylist branch (O-round
+  // confirmation finding 2 -- a floor body reduced to length(...)>=8 would still
+  // pass x30.3 and every other prior cell). This window's LCP clears the length
+  // floor comfortably (25 normalized chars); only the token-denylist branch can
+  // refuse it.
+  const { cp } = await seedWindow("X30-DENYLIST", [
+    "TRADING ENTERPRISE GROUP ALPHA DIVISION",
+    "TRADING ENTERPRISE GROUP BETA DIVISION",
+    "TRADING ENTERPRISE GROUP GAMMA DIVISION",
+  ]);
+  let error = null;
+  try {
+    await propose(w.users.bob, {
+      client: w.clients.A1,
+      counterparty: cp.id,
+    });
+  } catch (e) {
+    error = e;
+  }
+  assert.ok(error, "an LCP made entirely of denylisted corporate-form tokens must raise");
+  assert.equal(error.code, "CLR36");
+  assert.match(error.message, /features_unstable/);
+});
+
+test("x30.6 the spelled-out Malaysian corporate forms (sendirian/berhad) are denylisted exactly like their sdn/bhd abbreviations", async (t) => {
+  if (requireReady(t)) return;
+  // O-round confirmation finding 1: the floor's denylist originally carried only
+  // the ABBREVIATED corporate-form tokens (sdn/bhd), so a spelled-out LCP like
+  // "abc berhad" would have wrongly passed on "berhad" alone (6 chars, not
+  // denylisted) even though it is exactly as structural/non-distinguishing as
+  // "bhd". Both spelled-out forms are now denylisted; this window's LCP is long
+  // enough to clear the length floor and its only two tokens are both denylisted
+  // corporate-form words, so it must still refuse.
+  const { cp } = await seedWindow("X30-SPELLEDOUT", [
+    "SENDIRIAN BERHAD ALPHA",
+    "SENDIRIAN BERHAD BETA",
+    "SENDIRIAN BERHAD GAMMA",
+  ]);
+  let error = null;
+  try {
+    await propose(w.users.bob, {
+      client: w.clients.A1,
+      counterparty: cp.id,
+    });
+  } catch (e) {
+    error = e;
+  }
+  assert.ok(error, "an LCP made entirely of spelled-out Malaysian corporate-form tokens must raise");
+  assert.equal(error.code, "CLR36");
+  assert.match(error.message, /features_unstable/);
 });
