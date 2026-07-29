@@ -172,11 +172,26 @@ create policy p_vendor_binding_resolutions_owner
   on clara.vendor_binding_resolutions
   for all to clara_fn_owner using (true) with check (true);
 
-revoke all on clara.vendor_identity_bindings,
-  clara.vendor_identity_binding_evidence,
-  clara.vendor_binding_resolutions
-  from public, clara_authenticated, clara_agent_ro, clara_runtime,
-       clara_wake_interactive, clara_wake_proactive;
+-- DR round-trip fix (R-round follow-up): no GRANT/REVOKE statement targets these
+-- three tables. A freshly created table already starts with an EMPTY (implicit
+-- NULL) relacl -- nobody but the owner has any privilege, matching every other
+-- private/root-only table in this schema (clara.coding_rules, clara.op_receipts:
+-- neither is ever touched by a grant or revoke, and both show a NULL relacl). An
+-- explicit `revoke all ... from public, clara_authenticated, ...` here would be a
+-- pure no-op on privileges actually held (none of those roles were ever granted
+-- anything on a brand-new table) -- but issuing ANY grant/revoke statement forces
+-- Postgres to MATERIALIZE relacl, and materializing it requires explicitly listing
+-- the OWNER's own full privilege set too (an explicit ACL that omitted the owner
+-- would lock the owner out). That explicit clara_fn_owner self-grant is exactly
+-- what a DR backup/restore round-trip cannot reproduce: pg_dump never emits a
+-- redundant owner self-grant, so the restored catalog comes back with relacl
+-- NULL again -- source-explicit vs target-implicit, and the DR grant-matrix
+-- (packages/backup's full-profile verifier, check 4.6) correctly refuses a
+-- backup that cannot restore grant-identical. Leaving these three tables
+-- untouched by any GRANT/REVOKE keeps relacl NULL from creation onward, exactly
+-- like coding_rules/op_receipts, and postverify probe (2) already asserts the
+-- REAL invariant (no role_table_grants row for any of the restricted roles),
+-- not the presence of this statement.
 
 -- Once signed, the derived authority content is frozen for the rest of the
 -- row's life. Lifecycle verbs may still move status and write their actor/time fields.
