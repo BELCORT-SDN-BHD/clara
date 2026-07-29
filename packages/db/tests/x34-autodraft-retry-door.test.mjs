@@ -1,27 +1,27 @@
-// Migration 0032 -- the admission retry door (ledger #45, GitHub #43).
+// Migration 0034 -- the admission retry door (ledger #45, GitHub #43).
 //
-//   x32.a  a terminal-FAILED task (via settle_autodraft_task's own failure branch)
+//   x34.a  a terminal-FAILED task (via settle_autodraft_task's own failure branch)
 //          admits a genuinely NEW task on retry ('re_admitted'), the op receipt is
 //          rewritten to point at it, attempt_count survives the supersede
 //          (governance is not reset), and the new task dispatches + settles clean.
-//   x32.b  a LIVE task's replay semantics are byte-identical to before 0032 --
+//   x34.b  a LIVE task's replay semantics are byte-identical to before 0034 --
 //          queued/running/cancel_requested short-circuit to noop_existing, never
 //          re-admitted; held/awaiting_input are proven GENUINELY UNREACHABLE for
 //          kind='autodraft' (a build-time draft widened the live-status list to
 //          include them, but clara._tf_agent_task_update's own transition matrix
 //          rejects any such transition with CLR13 -- the widening was reverted,
 //          not shipped as dead code).
-//   x32.c  a COMPLETED task refuses honestly ('already_done') -- never a silent
+//   x34.c  a COMPLETED task refuses honestly ('already_done') -- never a silent
 //          re-admit, and the ORIGINAL admission receipt is left byte-untouched.
-//   x32.d  reservation reconciliation on BOTH terminal paths, immediate case: a
+//   x34.d  reservation reconciliation on BOTH terminal paths, immediate case: a
 //          genuine settle-failure (already refunded -- no double-refund) and a
-//          generic cancel_agent_task cancellation (never refunded before 0032 --
+//          generic cancel_agent_task cancellation (never refunded before 0034 --
 //          proven not to leak once the retry door reconciles it), each retry
 //          landing back on a lane-ready filing that succeeds all the way through.
-//   x32.e  the parked (2-failure) governance gate is untouched -- a retry consumes
+//   x34.e  the parked (2-failure) governance gate is untouched -- a retry consumes
 //          one of the two strikes, and a filing parked on the second genuine
 //          failure still refuses (refused_attempts), never re_admitted.
-//   x32.f  O-round confirmation (Codex, High/blocking): a cancellation's retry
+//   x34.f  O-round confirmation (Codex, High/blocking): a cancellation's retry
 //          that is ITSELF refused (lane_changed) must not re-refund the same
 //          reservation on a later call -- the first-built fix only cleared
 //          firm_usage_daily, never the attempt row's own reserved_tokens, so a
@@ -67,10 +67,10 @@ async function has31() {
   }
 }
 
-async function has32() {
+async function has34() {
   try {
     const r = await rootQuery(
-      "select 1 from clara.schema_migrations where version='0032_autodraft_retry_door'",
+      "select 1 from clara.schema_migrations where version='0034_autodraft_retry_door'",
     );
     return r.rows.length > 0;
   } catch {
@@ -81,12 +81,12 @@ async function has32() {
 async function requireReady() {
   if (!await has31()) {
     throw new Error(
-      "0031_autopost_lane_unify is not applied -- x32 requires the post-0031 admission prestate",
+      "0031_autopost_lane_unify is not applied -- x34 requires the post-0031 admission prestate",
     );
   }
-  if (!await has32()) {
+  if (!await has34()) {
     throw new Error(
-      "0032_autodraft_retry_door is not applied -- this battery must fail against the pre-0032 behavior",
+      "0034_autodraft_retry_door is not applied -- this battery must fail against the pre-0034 behavior",
     );
   }
 }
@@ -131,12 +131,12 @@ async function todaysUsage(firm) {
 
 /** cancel_agent_task(p_task, p_op_key) -- the GENERIC verb (chat_turn/wake/autodraft
  *  share it), with NO autodraft_attempts awareness at all -- the second, independent
- *  gap 0032 must reconcile alongside a genuine settle_autodraft_task failure. */
+ *  gap 0034 must reconcile alongside a genuine settle_autodraft_task failure. */
 async function cancelAgentTask(sub, { task, opKey = null }) {
   const r = await humanQuery(
     sub,
     "select clara.cancel_agent_task(p_task => $1, p_op_key => $2) as r",
-    [task, opKey ?? opk("x32-cancel")],
+    [task, opKey ?? opk("x34-cancel")],
   );
   return r.rows[0].r;
 }
@@ -148,14 +148,14 @@ before(async () => {
     client: w.clients.A1,
     code: "400-000",
     name: "Trade Creditors",
-    opKey: opk("x32-ap"),
+    opKey: opk("x34-ap"),
   });
   await upsertAccountClassed(w.users.alice, {
     client: w.clients.A1,
     code: "500-A01",
     name: "Prof Fees",
     type: "expense",
-    opKey: opk("x32-exp"),
+    opKey: opk("x34-exp"),
   });
   await grantConsent(w.users.alice, {
     firm: w.firms.A,
@@ -165,10 +165,10 @@ before(async () => {
 
 after(async () => { await endPool(); });
 
-test("x32.a a terminal-FAILED task retries into a genuinely NEW task, re_admitted, dispatched for real, attempt accounting correct", async () => {
+test("x34.a a terminal-FAILED task retries into a genuinely NEW task, re_admitted, dispatched for real, attempt accounting correct", async () => {
   const rf = await primeReadyFiling(w.users.alice, {
     client: w.clients.A1,
-    vendorName: `X32-A ${randomUUID().slice(0, 8)} SDN BHD`,
+    vendorName: `X34-A ${randomUUID().slice(0, 8)} SDN BHD`,
     registration: `2026${randomUUID().replaceAll("-", "").slice(0, 8)}`,
   });
 
@@ -177,7 +177,7 @@ test("x32.a a terminal-FAILED task retries into a genuinely NEW task, re_admitte
   const task1 = first.task_id;
 
   await beginAutodraft({ task: task1 });
-  await settleAutodraft({ task: task1, outcome: "failed", tokens: 1000, refusal: { reason: "x32.a rig fail" } });
+  await settleAutodraft({ task: task1, outcome: "failed", tokens: 1000, refusal: { reason: "x34.a rig fail" } });
   assert.equal(await taskStatus(task1), "failed");
 
   const afterFail = await attemptRow(rf.filingId);
@@ -186,7 +186,7 @@ test("x32.a a terminal-FAILED task retries into a genuinely NEW task, re_admitte
   assert.equal(Number(afterFail.reserved_tokens), 0, "settle_autodraft_task's own failure branch already refunded");
   assert.equal(afterFail.task_id, task1, "the registry row still points at the failed task (settle keys on task_id)");
 
-  // Pre-0032 this call would silently replay the OLD 'admitted' receipt: same task_id,
+  // Pre-0034 this call would silently replay the OLD 'admitted' receipt: same task_id,
   // nothing dispatched, attempt_count frozen -- exactly ledger #45/#43's sin.
   const retry = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick, reserveTokens: 55000 });
   assert.equal(retry.outcome, "re_admitted", `the retry must be honestly labeled, not a plain 'admitted' or a replay: ${JSON.stringify(retry)}`);
@@ -223,10 +223,10 @@ test("x32.a a terminal-FAILED task retries into a genuinely NEW task, re_admitte
   assert.equal(Number(settled.reserved_tokens), 0);
 });
 
-test("x32.b a LIVE task (queued, then running, then cancel_requested) replays unchanged -- never re-admitted; held/awaiting_input are genuinely unreachable for autodraft, not merely untested", async () => {
+test("x34.b a LIVE task (queued, then running, then cancel_requested) replays unchanged -- never re-admitted; held/awaiting_input are genuinely unreachable for autodraft, not merely untested", async () => {
   const rf = await primeReadyFiling(w.users.alice, {
     client: w.clients.A1,
-    vendorName: `X32-B ${randomUUID().slice(0, 8)} SDN BHD`,
+    vendorName: `X34-B ${randomUUID().slice(0, 8)} SDN BHD`,
     registration: `2026${randomUUID().replaceAll("-", "").slice(0, 8)}`,
   });
   const first = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick });
@@ -259,7 +259,7 @@ test("x32.b a LIVE task (queued, then running, then cancel_requested) replays un
   assert.equal(attempt.task_id, task1);
   assert.equal(Number(attempt.attempt_count), 0, "a live replay never touches attempt_count");
 
-  // held/awaiting_input were considered for the live-status list during 0032's build
+  // held/awaiting_input were considered for the live-status list during 0034's build
   // and DROPPED: clara._tf_agent_task_update's own transition matrix for
   // kind='autodraft' proves they are structurally unreachable (queued only ever
   // reaches running/cancel_requested/cancelled; running only completed/failed/
@@ -275,10 +275,10 @@ test("x32.b a LIVE task (queued, then running, then cancel_requested) replays un
   }
 });
 
-test("x32.c a COMPLETED task refuses honestly ('already_done'); the ORIGINAL admission receipt is left byte-untouched", async () => {
+test("x34.c a COMPLETED task refuses honestly ('already_done'); the ORIGINAL admission receipt is left byte-untouched", async () => {
   const rf = await primeReadyFiling(w.users.alice, {
     client: w.clients.A1,
-    vendorName: `X32-C ${randomUUID().slice(0, 8)} SDN BHD`,
+    vendorName: `X34-C ${randomUUID().slice(0, 8)} SDN BHD`,
     registration: `2026${randomUUID().replaceAll("-", "").slice(0, 8)}`,
   });
   const first = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick });
@@ -315,13 +315,13 @@ test("x32.c a COMPLETED task refuses honestly ('already_done'); the ORIGINAL adm
   assert.equal(attempt.state, "idle");
 });
 
-test("x32.d reservation reconciliation across the supersede -- a genuine settle-failure (already refunded, no double-refund) and a cancel_agent_task cancellation (never refunded before 0032, proven not to leak)", async () => {
+test("x34.d reservation reconciliation across the supersede -- a genuine settle-failure (already refunded, no double-refund) and a cancel_agent_task cancellation (never refunded before 0034, proven not to leak)", async () => {
   const firm = w.firms.A;
 
   // ---- d1: settle('failed') already refunded -- the retry must NOT refund again. ----
   const rf1 = await primeReadyFiling(w.users.alice, {
     client: w.clients.A1,
-    vendorName: `X32-D1 ${randomUUID().slice(0, 8)} SDN BHD`,
+    vendorName: `X34-D1 ${randomUUID().slice(0, 8)} SDN BHD`,
     registration: `2026${randomUUID().replaceAll("-", "").slice(0, 8)}`,
   });
   const before1 = await todaysUsage(firm);
@@ -331,7 +331,7 @@ test("x32.d reservation reconciliation across the supersede -- a genuine settle-
   assert.equal(afterAdmit1 - before1, 40000, "the admission reserves exactly the requested tokens");
 
   await beginAutodraft({ task: first1.task_id });
-  await settleAutodraft({ task: first1.task_id, outcome: "failed", tokens: 1000, refusal: { reason: "x32.d1 rig fail" } });
+  await settleAutodraft({ task: first1.task_id, outcome: "failed", tokens: 1000, refusal: { reason: "x34.d1 rig fail" } });
   const afterSettle1 = await todaysUsage(firm);
   assert.equal(afterSettle1 - before1, 0, "settle_autodraft_task's own failure branch already refunded the reservation net to zero");
   const registryAfterSettle1 = await attemptRow(rf1.filingId);
@@ -348,7 +348,7 @@ test("x32.d reservation reconciliation across the supersede -- a genuine settle-
   // ---- d2: cancel_agent_task never refunds -- the retry itself must reconcile it. ----
   const rf2 = await primeReadyFiling(w.users.alice, {
     client: w.clients.A1,
-    vendorName: `X32-D2 ${randomUUID().slice(0, 8)} SDN BHD`,
+    vendorName: `X34-D2 ${randomUUID().slice(0, 8)} SDN BHD`,
     registration: `2026${randomUUID().replaceAll("-", "").slice(0, 8)}`,
   });
   const before2 = await todaysUsage(firm);
@@ -368,7 +368,7 @@ test("x32.d reservation reconciliation across the supersede -- a genuine settle-
   const afterCancel2 = await todaysUsage(firm);
   assert.equal(afterCancel2 - before2, 40000, "cancel_agent_task does NOT refund -- the reservation is still outstanding immediately after cancellation");
   const registryAfterCancel2 = await attemptRow(rf2.filingId);
-  assert.equal(registryAfterCancel2.state, "active", "the registry row is STALE ('active') after a generic cancellation -- 0032 must read task_status, not state, to see through this");
+  assert.equal(registryAfterCancel2.state, "active", "the registry row is STALE ('active') after a generic cancellation -- 0034 must read task_status, not state, to see through this");
   assert.equal(Number(registryAfterCancel2.reserved_tokens), 40000, "the stale row still carries the un-refunded reservation");
 
   const retry2 = await admitAutodraft({ filing: rf2.filingId, origin: ORIGIN.oneClick, reserveTokens: 27000 });
@@ -386,16 +386,16 @@ test("x32.d reservation reconciliation across the supersede -- a genuine settle-
   assert.equal(Number(registryAfterRetry2.reserved_tokens), 27000);
 });
 
-test("x32.e the parked (2-failure) governance gate is untouched -- a retry consumes one strike, and a parked filing still refuses via refused_attempts, never re_admitted", async () => {
+test("x34.e the parked (2-failure) governance gate is untouched -- a retry consumes one strike, and a parked filing still refuses via refused_attempts, never re_admitted", async () => {
   const rf = await primeReadyFiling(w.users.alice, {
     client: w.clients.A1,
-    vendorName: `X32-E ${randomUUID().slice(0, 8)} SDN BHD`,
+    vendorName: `X34-E ${randomUUID().slice(0, 8)} SDN BHD`,
     registration: `2026${randomUUID().replaceAll("-", "").slice(0, 8)}`,
   });
   const first = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick });
   assert.equal(first.outcome, "admitted", JSON.stringify(first));
   await beginAutodraft({ task: first.task_id });
-  await settleAutodraft({ task: first.task_id, outcome: "failed", tokens: 1000, refusal: { reason: "x32.e rig fail 1" } });
+  await settleAutodraft({ task: first.task_id, outcome: "failed", tokens: 1000, refusal: { reason: "x34.e rig fail 1" } });
   assert.equal(Number((await attemptRow(rf.filingId)).attempt_count), 1);
 
   const retry = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick });
@@ -406,7 +406,7 @@ test("x32.e the parked (2-failure) governance gate is untouched -- a retry consu
   );
 
   await beginAutodraft({ task: retry.task_id });
-  await settleAutodraft({ task: retry.task_id, outcome: "failed", tokens: 1000, refusal: { reason: "x32.e rig fail 2" } });
+  await settleAutodraft({ task: retry.task_id, outcome: "failed", tokens: 1000, refusal: { reason: "x34.e rig fail 2" } });
   const parked = await attemptRow(rf.filingId);
   assert.equal(parked.state, "parked", `two genuine failures (across one retry-door supersede) must still park: ${JSON.stringify(parked)}`);
   assert.equal(Number(parked.attempt_count), 2);
@@ -416,11 +416,11 @@ test("x32.e the parked (2-failure) governance gate is untouched -- a retry consu
   assert.equal(await liveTasks(rf.filingId), 0, "no task is minted for a parked filing, retry door or not");
 });
 
-test("x32.f O-round confirmation (Codex): a cancellation whose retry is ITSELF refused (lane_changed) must NOT re-refund the same reservation on a later call", async () => {
+test("x34.f O-round confirmation (Codex): a cancellation whose retry is ITSELF refused (lane_changed) must NOT re-refund the same reservation on a later call", async () => {
   const firm = w.firms.A;
   const primed = await primeReadyFiling(w.users.alice, {
     client: w.clients.A1,
-    vendorName: `X32-F ${randomUUID().slice(0, 8)} SDN BHD`,
+    vendorName: `X34-F ${randomUUID().slice(0, 8)} SDN BHD`,
     registration: `2026${randomUUID().replaceAll("-", "").slice(0, 8)}`,
   });
 
@@ -444,7 +444,7 @@ test("x32.f O-round confirmation (Codex): a cancellation whose retry is ITSELF r
          firm_id,client_id,status,posting_date,memo,origin,document_id,
          filing_id,source_doc_sha256,maker_actor
        ) values (
-         $1,$2,'draft','2026-03-15','x32.f open-draft blocker','agent',$3,$4,$5,$6
+         $1,$2,'draft','2026-03-15','x34.f open-draft blocker','agent',$3,$4,$5,$6
        ) returning id`,
       [firm, w.clients.A1, primed.documentId, primed.filingId, primed.sha256, w.users.alice],
     );
@@ -454,8 +454,8 @@ test("x32.f O-round confirmation (Codex): a cancellation whose retry is ITSELF r
          entry_id,line_no,account_code,debit_cents,credit_cents,
          description,counterparty_id
        ) values
-         ($1,1,$2,50000,0,'x32.f blocker expense',$4),
-         ($1,2,$3,0,50000,'x32.f blocker payable',$4)`,
+         ($1,1,$2,50000,0,'x34.f blocker expense',$4),
+         ($1,2,$3,0,50000,'x34.f blocker payable',$4)`,
       [entry, EXP, AP, primed.counterpartyId],
     );
     return entry;
@@ -487,7 +487,7 @@ test("x32.f O-round confirmation (Codex): a cancellation whose retry is ITSELF r
     await client.query(
       `update clara.journal_entries
        set status='withdrawn', withdrawn_by=$2, withdrawn_at=now(),
-           withdrawal_reason='x32.f blocker resolved'
+           withdrawal_reason='x34.f blocker resolved'
        where id=$1`,
       [draft, w.users.alice],
     );

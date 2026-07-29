@@ -1,4 +1,4 @@
--- 0032_autodraft_retry_door.sql — the admission door cannot retry a terminal-failed
+-- 0034_autodraft_retry_door.sql — the admission door cannot retry a terminal-failed
 -- autodraft task (ledger #45, GitHub #43). Owner ruling, parallel to #44's model-step
 -- diagnosis: request_autodraft on a filing whose task has terminally FAILED replays the
 -- settled 'admitted' receipt as a silent no-op — same task_id returned, reserved_tokens
@@ -51,7 +51,7 @@
 -- discipline (the house pattern, task #26's filed-bootstrap door) rather than a bespoke
 -- vocabulary. The 'parked' governance gate (2+ genuine failures) is completely
 -- untouched — it is checked BEFORE the new terminal branches and still refuses
--- unconditionally, exactly as before 0032.
+-- unconditionally, exactly as before 0034.
 --
 -- CoR DISCIPLINE. The body below was pulled via pg_get_functiondef against the live
 -- 31-migration database (0001-0031, 0031 merged and deployed as PR #138), not
@@ -59,20 +59,20 @@
 --
 -- D1 WRITE-QUIESCE. clara.admit_autodraft_task is the live admission path — the same
 -- surface 0031 recut. Per the repo-mandated D1 write-quiesce
--- (packages/db/README.md:95-113), 0032's deploy requires its own quiesced window,
+-- (packages/db/README.md:95-113), 0034's deploy requires its own quiesced window,
 -- independent of 0031's, because this recut is deliberate and lands separately.
 --
--- CELLS (packages/db/tests/x32-autodraft-retry-door.test.mjs): a terminal-failed task
+-- CELLS (packages/db/tests/x34-autodraft-retry-door.test.mjs): a terminal-failed task
 -- (via clara.settle_autodraft_task's own failure path) admits a genuinely NEW task on
 -- retry, dispatches for real, and attempt accounting (clara.autodraft_attempts.
 -- attempt_count) continues correctly once that new task itself settles; a live task's
--- replay semantics are byte-identical to before 0032 (a fresh regression cell, not just
+-- replay semantics are byte-identical to before 0034 (a fresh regression cell, not just
 -- reliance on wave-a-admission.test.mjs); a completed task refuses honestly
 -- ('already_done'), never silently re-admitting or replaying; the token-reservation
 -- reconciliation is proven on BOTH paths — a genuine settle-failure (already refunded,
 -- no double-refund) and a generic cancel_agent_task cancellation (never refunded until
--- 0032's own reconciliation, proven not to leak); a cancellation whose retry is then
--- REFUSED (lane or budget) does not re-refund on a subsequent call (x32.f).
+-- 0034's own reconciliation, proven not to leak); a cancellation whose retry is then
+-- REFUSED (lane or budget) does not re-refund on a subsequent call (x34.f).
 --
 -- O-ROUND CONFIRMATION (Codex, read-only adversarial pass, one High/blocking finding
 -- fixed here; details in the fixed code's own comment at the terminal branch). The
@@ -129,7 +129,7 @@ set role clara_fn_owner;
 
 -- =====================================================================
 -- clara.admit_autodraft_task (0011, recut by 0031 for the lane-check reorder, now by
--- 0032 for the terminal-task retry door).
+-- 0034 for the terminal-task retry door).
 -- =====================================================================
 CREATE OR REPLACE FUNCTION clara.admit_autodraft_task(p_filing uuid, p_origin text, p_run_id uuid, p_model text, p_reserve_tokens bigint)
  RETURNS jsonb
@@ -186,10 +186,10 @@ begin
     raise exception 'open sweep run not found' using errcode='CLR11';
   end if;
   -- A waiter that lost the filing lock rechecks the registry before touching op receipts.
-  -- 0032 (ledger #45/#43): this is now the ONLY authoritative registry decision -- the
+  -- 0034 (ledger #45/#43): this is now the ONLY authoritative registry decision -- the
   -- pre-lock fast-path above stays exactly as it was (an optimization that skips lock
   -- contention for the common live/parked cases; anything it does not recognize simply
-  -- falls through to acquire the lock, same as before 0032). Reading a.task_status
+  -- falls through to acquire the lock, same as before 0034). Reading a.task_status
   -- (agent_tasks.status via the LEFT JOIN) DIRECTLY, not a.state alone, matters: a task
   -- cancelled through the generic clara.cancel_agent_task verb (which has no autodraft
   -- awareness at all) leaves a.state='active' STALE forever -- the live-status branch
@@ -220,7 +220,7 @@ begin
     end if;
     return jsonb_build_object('outcome','refused_attempts','reason','refused_attempts');
   elsif found and a.task_status='completed' then
-    -- 0032: the work already exists -- an honest refusal, never a silent re-admit and
+    -- 0034: the work already exists -- an honest refusal, never a silent re-admit and
     -- never a replayed stale receipt that would misreport what happened (the #43 sin).
     if p_run_id is not null then
       insert into clara.sweep_run_items(run_id,filing_id,firm_id,client_id,document_id,
@@ -230,7 +230,7 @@ begin
     end if;
     return jsonb_build_object('outcome','already_done','task_id',a.task_id);
   elsif found and a.task_status in ('failed','cancelled','expired') then
-    -- 0032: SUPERSEDE. Before this migration, the registry check recognized only
+    -- 0034: SUPERSEDE. Before this migration, the registry check recognized only
     -- 'active'+live-status and 'parked' -- a task that failed once (settle_autodraft_task
     -- sets state='idle' after exactly one failure, only parking at two) matched NEITHER
     -- branch and fell all the way through to the op-key replay below, which found the
@@ -446,7 +446,7 @@ begin
   select count(*) into v_prior_count from clara.schema_migrations
     where version = '0031_autopost_lane_unify';
   if v_prior_count <> 1 then
-    raise exception '0032 tail: migration 0031_autopost_lane_unify is not recorded as applied — apply in order';
+    raise exception '0034 tail: migration 0031_autopost_lane_unify is not recorded as applied — apply in order';
   end if;
 
   select pg_get_functiondef('clara.admit_autodraft_task(uuid,text,uuid,text,bigint)'::regprocedure)
@@ -491,7 +491,7 @@ begin
   -- occurrence's position must also be captured and proven to be BEFORE the lock.
   v_pos_filing_lock:=position(v_filing_lock_marker in v_admit_src);
   if v_pos_filing_lock=0 then
-    raise exception '0032 tail: cannot locate the filing FOR UPDATE lock statement';
+    raise exception '0034 tail: cannot locate the filing FOR UPDATE lock statement';
   end if;
   v_occurrence_count:=0; v_scan_from:=1;
   loop
@@ -503,10 +503,10 @@ begin
     v_scan_from:=v_scan_from+v_found-1+length(v_reread_marker);
   end loop;
   if v_occurrence_count<>2 then
-    raise exception '0032 tail: the registry re-read must appear EXACTLY twice (pre-lock + post-lock) — found %', v_occurrence_count;
+    raise exception '0034 tail: the registry re-read must appear EXACTLY twice (pre-lock + post-lock) — found %', v_occurrence_count;
   end if;
   if not (v_pos_first_read < v_pos_filing_lock and v_pos_filing_lock < v_pos_lock2) then
-    raise exception '0032 tail: the two registry re-reads must straddle the filing lock -- one strictly BEFORE, one strictly AFTER (first=%, lock=%, second=%)', v_pos_first_read, v_pos_filing_lock, v_pos_lock2;
+    raise exception '0034 tail: the two registry re-reads must straddle the filing lock -- one strictly BEFORE, one strictly AFTER (first=%, lock=%, second=%)', v_pos_first_read, v_pos_filing_lock, v_pos_lock2;
   end if;
   v_post_lock:=substring(v_admit_src from v_pos_lock2);
 
@@ -525,19 +525,19 @@ begin
   if v_pos_completed=0 or v_pos_terminal=0 or v_pos_opkey=0
      or v_pos_completed>=v_pos_terminal or v_pos_terminal>=v_pos_opkey then
     raise exception
-      '0032 tail: registry branch order is wrong (completed=%, terminal=%, opkey=%)',
+      '0034 tail: registry branch order is wrong (completed=%, terminal=%, opkey=%)',
       v_pos_completed,v_pos_terminal,v_pos_opkey;
   end if;
-  raise notice '0032 tail OK (1/6): post-lock registry branch order (completed -> terminal -> conditional op-key) is intact';
+  raise notice '0034 tail OK (1/6): post-lock registry branch order (completed -> terminal -> conditional op-key) is intact';
 
   -- (3) the parked branch must come BEFORE the new terminal branches, WITHIN the
   -- post-lock section specifically — the 2+-failure governance gate is checked first and
   -- takes precedence unconditionally.
   if position('elsif found and a.state=''parked'' then' in v_post_lock)=0
      or position('elsif found and a.state=''parked'' then' in v_post_lock)>=v_pos_completed then
-    raise exception '0032 tail: the POST-LOCK parked governance branch must precede the new terminal branches';
+    raise exception '0034 tail: the POST-LOCK parked governance branch must precede the new terminal branches';
   end if;
-  raise notice '0032 tail OK (2/6): the parked (2+ failure) governance gate still takes precedence over the retry door, in the post-lock section itself';
+  raise notice '0034 tail OK (2/6): the parked (2+ failure) governance gate still takes precedence over the retry door, in the post-lock section itself';
 
   -- (4) the terminal-retry branch reconciles the reservation DURABLY on the attempt row
   -- itself (not just firm_usage_daily) and clears the stale receipt BEFORE falling
@@ -555,7 +555,7 @@ begin
     'select * into v_lane from clara._coding_lane_core(f.client_id,p_filing);'
     in v_post_lock);
   if v_pos_lane_check=0 or v_pos_terminal>=v_pos_lane_check then
-    raise exception '0032 tail: cannot locate the lane-check anchor immediately after the terminal branch';
+    raise exception '0034 tail: cannot locate the lane-check anchor immediately after the terminal branch';
   end if;
   v_terminal_slice:=substring(v_post_lock from v_pos_terminal for v_pos_lane_check-v_pos_terminal);
   if position('v_is_retry:=true;' in v_terminal_slice)=0
@@ -563,15 +563,15 @@ begin
      or position('tokens_used=greatest(0,tokens_used-a.reserved_tokens)' in v_terminal_slice)=0
      or position('update clara.autodraft_attempts set reserved_tokens=0,state=''idle''' in v_terminal_slice)=0
      or position(' return ' in v_terminal_slice)<>0 then
-    raise exception '0032 tail: the terminal-retry branch does not durably reconcile the reservation, clear the stale receipt, and fall through correctly';
+    raise exception '0034 tail: the terminal-retry branch does not durably reconcile the reservation, clear the stale receipt, and fall through correctly';
   end if;
-  raise notice '0032 tail OK (3/6): the terminal-retry branch durably reconciles the reservation on the attempt row itself, clears the stale receipt, and falls through with no early return';
+  raise notice '0034 tail OK (3/6): the terminal-retry branch durably reconciles the reservation on the attempt row itself, clears the stale receipt, and falls through with no early return';
 
   -- (5) the final settlement distinguishes re_admitted from admitted.
   if position('case when v_is_retry then ''re_admitted'' else ''admitted'' end' in v_post_lock)=0 then
-    raise exception '0032 tail: the final settlement does not distinguish re_admitted from admitted';
+    raise exception '0034 tail: the final settlement does not distinguish re_admitted from admitted';
   end if;
-  raise notice '0032 tail OK (4/6): the final settlement honestly distinguishes a retry dispatch from a first-ever one';
+  raise notice '0034 tail OK (4/6): the final settlement honestly distinguishes a retry dispatch from a first-ever one';
 
   -- (6) O-round confirmation finding #2 (Codex, second scoped pass): the terminal
   -- branch's durable reconciliation (check 3 above) must be structurally OUTSIDE any
@@ -597,20 +597,20 @@ begin
   -- one rules out a decoy nested block elsewhere satisfying the adjacency check alone.
   if (length(v_post_lock)-length(replace(v_post_lock,'exception when unique_violation','')))
      / length('exception when unique_violation') <> 1 then
-    raise exception '0032 tail: exactly one ''exception when unique_violation'' handler must exist';
+    raise exception '0034 tail: exactly one ''exception when unique_violation'' handler must exist';
   end if;
   if position('exception when unique_violation'in v_post_lock)
      <= position('update clara.autodraft_attempts set reserved_tokens=0,state=''idle''' in v_post_lock) then
-    raise exception '0032 tail: the exception handler must come AFTER the terminal branch''s durable reconciliation, not wrap it';
+    raise exception '0034 tail: the exception handler must come AFTER the terminal branch''s durable reconciliation, not wrap it';
   end if;
   if (length(v_post_lock)-length(replace(v_post_lock,' begin ','')))
      / length(' begin ') <> 1 then
-    raise exception '0032 tail: exactly one nested ''begin'' must exist in the post-lock section (a decoy block would defeat the adjacency check alone)';
+    raise exception '0034 tail: exactly one nested ''begin'' must exist in the post-lock section (a decoy block would defeat the adjacency check alone)';
   end if;
   if position('begin if v_op_key is null then' in v_post_lock)=0 then
-    raise exception '0032 tail: the inner exception-guarded block must open IMMEDIATELY before the conditional op-key assignment, so _reserve_op''s own insert is guarded too';
+    raise exception '0034 tail: the inner exception-guarded block must open IMMEDIATELY before the conditional op-key assignment, so _reserve_op''s own insert is guarded too';
   end if;
-  raise notice '0032 tail OK (5/6): the reconciliation is structurally OUTSIDE the exception-guarded region -- exactly one handler exists, attached to a single inner block opened immediately before the op-key reservation, guarding it and the mint pipeline together';
+  raise notice '0034 tail OK (5/6): the reconciliation is structurally OUTSIDE the exception-guarded region -- exactly one handler exists, attached to a single inner block opened immediately before the op-key reservation, guarding it and the mint pipeline together';
 
   -- (6) is a SEPARATE do block below (no pg_get_functiondef call in it) -- it dynamically
   -- APPLIES the live ck_autodraft_attempts_reservation constraint to real test tuples via
@@ -633,14 +633,14 @@ begin
     where conrelid='clara.autodraft_attempts'::regclass
       and conname='ck_autodraft_attempts_reservation';
   if v_condef is null then
-    raise exception '0032 tail: ck_autodraft_attempts_reservation is missing entirely';
+    raise exception '0034 tail: ck_autodraft_attempts_reservation is missing entirely';
   end if;
-  create temp table _x0032_reservation_probe(
+  create temp table _x0034_reservation_probe(
     state text, task_id uuid, reserved_tokens bigint, usage_date date
   ) on commit drop;
   -- pg_get_constraintdef already renders the leading CHECK(...) wrapper, so it is
   -- appended directly rather than after a second literal 'check' keyword.
-  execute format('alter table _x0032_reservation_probe add constraint ck_probe %s', v_condef);
+  execute format('alter table _x0034_reservation_probe add constraint ck_probe %s', v_condef);
 
   -- THE FIX's exact shape (reserved_tokens=0, state='idle') must be ACCEPTED. O-round
   -- confirmation finding (Codex, third scoped pass, Low): the real reconciliation
@@ -649,7 +649,7 @@ begin
   -- here would pass even against a future constraint that required task_id/usage_date
   -- to be NULL for state='idle', which would reject the real reconciled row -- test
   -- with a genuinely non-null task_id and usage_date, matching the actual tuple shape.
-  insert into _x0032_reservation_probe(state,task_id,reserved_tokens,usage_date)
+  insert into _x0034_reservation_probe(state,task_id,reserved_tokens,usage_date)
     values('idle',gen_random_uuid(),0,current_date);
 
   -- Self-check the probe is not vacuous: an INVALID tuple (an 'active' row claiming
@@ -657,15 +657,15 @@ begin
   -- must be REJECTED -- if it were accepted, this probe mechanism could never have
   -- caught a genuinely broken reconciliation shape either.
   begin
-    insert into _x0032_reservation_probe(state,task_id,reserved_tokens,usage_date)
+    insert into _x0034_reservation_probe(state,task_id,reserved_tokens,usage_date)
       values('active',gen_random_uuid(),0,current_date);
-    raise exception '0032 tail: the live ck_autodraft_attempts_reservation constraint unexpectedly ACCEPTED an active+zero-reservation tuple — this probe would be vacuous';
+    raise exception '0034 tail: the live ck_autodraft_attempts_reservation constraint unexpectedly ACCEPTED an active+zero-reservation tuple — this probe would be vacuous';
   exception when check_violation then
     null; -- expected: the constraint correctly rejects the invalid tuple
   end;
 
-  drop table _x0032_reservation_probe;
-  raise notice '0032 tail OK (6/6 overall): reserved_tokens=0,state=''idle'' is genuinely ACCEPTED by the live ck_autodraft_attempts_reservation constraint (dynamically applied, not pattern-matched), and the probe itself correctly rejects an invalid tuple';
-  raise notice '0032 tail: admit_autodraft_task now supersedes a terminal-failed/cancelled/expired task honestly (re_admitted, reservation DURABLY reconciled on the attempt row itself before any exception-guarded region, stale receipt cleared) while a completed task refuses honestly and a live task replays unchanged — the parked governance gate is untouched';
+  drop table _x0034_reservation_probe;
+  raise notice '0034 tail OK (6/6 overall): reserved_tokens=0,state=''idle'' is genuinely ACCEPTED by the live ck_autodraft_attempts_reservation constraint (dynamically applied, not pattern-matched), and the probe itself correctly rejects an invalid tuple';
+  raise notice '0034 tail: admit_autodraft_task now supersedes a terminal-failed/cancelled/expired task honestly (re_admitted, reservation DURABLY reconciled on the attempt row itself before any exception-guarded region, stale receipt cleared) while a completed task refuses honestly and a live task replays unchanged — the parked governance gate is untouched';
 end
 $tail_constraint$;

@@ -1,19 +1,19 @@
 -- =====================================================================
--- Migration 0032 (the admission retry door, ledger #45 / GitHub #43) --
+-- Migration 0034 (the admission retry door, ledger #45 / GitHub #43) --
 -- POST-DEPLOY VERIFY PROBES.
 -- =====================================================================
 --
 -- Read-only. Run as a superuser/owner session against the deployed database
--- immediately after applying 0032:
+-- immediately after applying 0034:
 --
 --   psql "$DSN" -v ON_ERROR_STOP=1 \
---     -f autodraft-retry-door-0032-postverify.sql
+--     -f autodraft-retry-door-0034-postverify.sql
 --
 -- Every probe raises on failure and prints an OK notice on success, so a clean
 -- run ends with one notice per probe and nothing else.
 --
--- WHAT 0032 CLAIMS, restated as structural/catalog probes:
---   1. The mandatory 0031 prior migration and 0032 itself are recorded.
+-- WHAT 0034 CLAIMS, restated as structural/catalog probes:
+--   1. The mandatory 0031 prior migration and 0034 itself are recorded.
 --   2. The post-lock registry check classifies on the task's OWN status
 --      (agent_tasks.status via the LEFT JOIN), not autodraft_attempts.state
 --      alone -- live/completed/failed-cancelled-expired/parked are four
@@ -107,10 +107,10 @@
 --
 -- THE HONEST FRAMING. This file is BELT, not exhaustive proof of the
 -- reconciliation arithmetic or the end-to-end retry dispatch. Those are
--- behavioral rig responsibilities (packages/db/tests/x32-autodraft-retry-
+-- behavioral rig responsibilities (packages/db/tests/x34-autodraft-retry-
 -- door.test.mjs). These probes re-check committed catalog structure and
 -- executable source shape from outside the migration transaction, on top of
--- 0032's own in-transaction tail assertions.
+-- 0034's own in-transaction tail assertions.
 
 do $verify$
 declare
@@ -140,15 +140,15 @@ begin
   from clara.schema_migrations
   where version='0031_autopost_lane_unify';
   if v_n<>1 then
-    raise exception '0032 postverify: migration 0031_autopost_lane_unify is not recorded';
+    raise exception '0034 postverify: migration 0031_autopost_lane_unify is not recorded';
   end if;
   select count(*)::int into v_n
   from clara.schema_migrations
-  where version='0032_autodraft_retry_door';
+  where version='0034_autodraft_retry_door';
   if v_n<>1 then
-    raise exception '0032 postverify: migration 0032_autodraft_retry_door is not recorded';
+    raise exception '0034 postverify: migration 0034_autodraft_retry_door is not recorded';
   end if;
-  raise notice '0032 postverify OK (1/8): prior-migration chain intact through 0032';
+  raise notice '0034 postverify OK (1/8): prior-migration chain intact through 0034';
 
   select pg_get_functiondef(
     'clara.admit_autodraft_task(uuid,text,uuid,text,bigint)'::regprocedure)
@@ -160,7 +160,7 @@ begin
     '\s+',' ','g'));
 
   -- Anchor the post-lock registry recheck. The live/parked branch TEXT is IDENTICAL
-  -- between the pre-lock fast-path and the post-lock authoritative check (0032 left the
+  -- between the pre-lock fast-path and the post-lock authoritative check (0034 left the
   -- pre-lock path untouched by design), so position() against the WHOLE body would find
   -- the pre-lock occurrence first and silently under-prove the intended order. The
   -- anchor itself must be real code, not a comment -- v_norm has already stripped every
@@ -191,7 +191,7 @@ begin
   -- FIRST occurrence's position is now also captured and proven to be BEFORE the lock.
   v_pos_filing_lock:=position(v_filing_lock_marker in v_norm);
   if v_pos_filing_lock=0 then
-    raise exception '0032 postverify: cannot locate the filing FOR UPDATE lock statement';
+    raise exception '0034 postverify: cannot locate the filing FOR UPDATE lock statement';
   end if;
   v_occurrence_count:=0; v_scan_from:=1;
   loop
@@ -203,10 +203,10 @@ begin
     v_scan_from:=v_scan_from+v_found-1+length(v_reread_marker);
   end loop;
   if v_occurrence_count<>2 then
-    raise exception '0032 postverify: the registry re-read must appear EXACTLY twice (pre-lock + post-lock) -- found %', v_occurrence_count;
+    raise exception '0034 postverify: the registry re-read must appear EXACTLY twice (pre-lock + post-lock) -- found %', v_occurrence_count;
   end if;
   if not (v_pos_first_read < v_pos_filing_lock and v_pos_filing_lock < v_pos_lock) then
-    raise exception '0032 postverify: the two registry re-reads must straddle the filing lock -- one strictly BEFORE, one strictly AFTER (first=%, lock=%, second=%)', v_pos_first_read, v_pos_filing_lock, v_pos_lock;
+    raise exception '0034 postverify: the two registry re-reads must straddle the filing lock -- one strictly BEFORE, one strictly AFTER (first=%, lock=%, second=%)', v_pos_first_read, v_pos_filing_lock, v_pos_lock;
   end if;
   v_post_lock:=substring(v_norm from v_pos_lock);
 
@@ -229,18 +229,18 @@ begin
      or v_pos_live>=v_pos_parked or v_pos_parked>=v_pos_completed
      or v_pos_completed>=v_pos_terminal then
     raise exception
-      '0032 postverify: registry branch order is wrong (live=%, parked=%, completed=%, terminal=%)',
+      '0034 postverify: registry branch order is wrong (live=%, parked=%, completed=%, terminal=%)',
       v_pos_live,v_pos_parked,v_pos_completed,v_pos_terminal;
   end if;
   -- v_pos_live was only found because the exact, unwidened list
   -- ('queued','running','cancel_requested') is immediately followed by the closing
   -- paren in the source -- a widened list (...,'held','awaiting_input') would not have
   -- matched this literal at all, so finding it already proves the branch was not
-  -- widened. held/awaiting_input were considered during 0032's build and dropped once
+  -- widened. held/awaiting_input were considered during 0034's build and dropped once
   -- clara._tf_agent_task_update's own transition matrix proved them structurally
   -- unreachable for kind='autodraft'; reintroducing them would be shipping dead code
   -- with a false rationale again.
-  raise notice '0032 postverify OK (2/8): registry branches classify on task status in order live -> parked -> completed -> terminal, the live-status list is unwidened, and the post-lock re-read is a genuine SECOND occurrence';
+  raise notice '0034 postverify OK (2/8): registry branches classify on task status in order live -> parked -> completed -> terminal, the live-status list is unwidened, and the post-lock re-read is a genuine SECOND occurrence';
 
   -- (3) the parked branch (2+ failure governance) is untouched: it still returns
   -- refused_attempts unconditionally, with no new condition added to it.
@@ -248,9 +248,9 @@ begin
        'elsif found and a.state=''parked'' then if p_run_id is not null then insert into clara.sweep_run_items'
        in v_post_lock)=0
      or position('return jsonb_build_object(''outcome'',''refused_attempts''' in v_post_lock)=0 then
-    raise exception '0032 postverify: the parked governance branch drifted from its unconditional refusal';
+    raise exception '0034 postverify: the parked governance branch drifted from its unconditional refusal';
   end if;
-  raise notice '0032 postverify OK (3/8): the parked (2+ failure) governance gate is untouched and still refuses unconditionally';
+  raise notice '0034 postverify OK (3/8): the parked (2+ failure) governance gate is untouched and still refuses unconditionally';
 
   -- (4) the terminal-retry branch: reconciles any outstanding reservation DURABLY on the
   -- attempt row itself (not merely on firm_usage_daily -- Codex's High/blocking finding:
@@ -267,7 +267,7 @@ begin
     'select * into v_lane from clara._coding_lane_core(f.client_id,p_filing);'
     in v_post_lock);
   if v_pos_lane_check=0 or v_pos_terminal>=v_pos_lane_check then
-    raise exception '0032 postverify: cannot locate the lane-check anchor immediately after the terminal branch';
+    raise exception '0034 postverify: cannot locate the lane-check anchor immediately after the terminal branch';
   end if;
   v_terminal_slice:=substring(v_post_lock from v_pos_terminal for v_pos_lane_check-v_pos_terminal);
   if position('v_is_retry:=true;' in v_terminal_slice)=0
@@ -275,13 +275,13 @@ begin
      or position('update clara.autodraft_attempts set reserved_tokens=0,state=''idle''' in v_terminal_slice)=0
      or position('delete from clara.op_receipts where firm_id=a.firm_id and fn=''admit_autodraft_task''' in v_terminal_slice)=0
      or position(' return ' in v_terminal_slice)<>0 then
-    raise exception '0032 postverify: the terminal-retry branch does not durably reconcile+clear+fall-through correctly';
+    raise exception '0034 postverify: the terminal-retry branch does not durably reconcile+clear+fall-through correctly';
   end if;
   v_pos_opkey_cond:=position('if v_op_key is null then' in v_post_lock);
   if v_pos_opkey_cond=0 or v_pos_lane_check>=v_pos_opkey_cond then
-    raise exception '0032 postverify: cannot locate the conditional op-key assignment after the lane/budget checks';
+    raise exception '0034 postverify: cannot locate the conditional op-key assignment after the lane/budget checks';
   end if;
-  raise notice '0032 postverify OK (4/8): the terminal-retry branch durably reconciles the reservation on the attempt row itself, clears the stale receipt, and falls through with no early return';
+  raise notice '0034 postverify OK (4/8): the terminal-retry branch durably reconciles the reservation on the attempt row itself, clears the stale receipt, and falls through with no early return';
 
   -- (5) the op-key reservation call itself exists EXACTLY once (counted, not merely
   -- found -- position() alone cannot distinguish "at least once" from "exactly once"),
@@ -289,24 +289,24 @@ begin
   v_pos_opkey_call:=position(
     'clara._reserve_op(f.firm_id,''admit_autodraft_task'',v_op_key,' in v_post_lock);
   if v_pos_opkey_call=0 or v_pos_opkey_cond>=v_pos_opkey_call then
-    raise exception '0032 postverify: the conditional op-key assignment must precede the actual reservation call';
+    raise exception '0034 postverify: the conditional op-key assignment must precede the actual reservation call';
   end if;
   if (length(v_post_lock)-length(replace(v_post_lock,
         'clara._reserve_op(f.firm_id,''admit_autodraft_task'',v_op_key,','')))
       / length('clara._reserve_op(f.firm_id,''admit_autodraft_task'',v_op_key,') <> 1 then
-    raise exception '0032 postverify: clara._reserve_op(...,''admit_autodraft_task'',...) must be called EXACTLY once in the post-lock section';
+    raise exception '0034 postverify: clara._reserve_op(...,''admit_autodraft_task'',...) must be called EXACTLY once in the post-lock section';
   end if;
   if position('case when v_is_retry then ''re_admitted'' else ''admitted'' end' in v_post_lock)=0 then
-    raise exception '0032 postverify: the final settlement does not distinguish re_admitted from admitted';
+    raise exception '0034 postverify: the final settlement does not distinguish re_admitted from admitted';
   end if;
-  raise notice '0032 postverify OK (5/8): the op-key reservation is conditional-then-called EXACTLY once, and the final settlement is honest about a retry vs a first admission';
+  raise notice '0034 postverify OK (5/8): the op-key reservation is conditional-then-called EXACTLY once, and the final settlement is honest about a retry vs a first admission';
 
   -- (6) the completed branch returns an honest, distinct refusal -- never silently
   -- re-admitting and never replaying a stale receipt.
   if position('return jsonb_build_object(''outcome'',''already_done''' in v_post_lock)=0 then
-    raise exception '0032 postverify: the completed-task branch does not return an honest already_done refusal';
+    raise exception '0034 postverify: the completed-task branch does not return an honest already_done refusal';
   end if;
-  raise notice '0032 postverify OK (6/8): a completed task refuses honestly with a distinct outcome, never a silent re-admit';
+  raise notice '0034 postverify OK (6/8): a completed task refuses honestly with a distinct outcome, never a silent re-admit';
 
   -- (7) O-round confirmation finding #2 (Codex, second scoped pass): the terminal
   -- branch's durable reconciliation must be structurally OUTSIDE any EXCEPTION-guarded
@@ -333,22 +333,22 @@ begin
   -- adjacency check alone.
   if (length(v_post_lock)-length(replace(v_post_lock,'exception when unique_violation','')))
      / length('exception when unique_violation') <> 1 then
-    raise exception '0032 postverify: exactly one ''exception when unique_violation'' handler must exist';
+    raise exception '0034 postverify: exactly one ''exception when unique_violation'' handler must exist';
   end if;
   if position('exception when unique_violation' in v_post_lock)
      <= position('update clara.autodraft_attempts set reserved_tokens=0,state=''idle''' in v_post_lock) then
-    raise exception '0032 postverify: the exception handler must come AFTER the terminal branch''s durable reconciliation, not wrap it';
+    raise exception '0034 postverify: the exception handler must come AFTER the terminal branch''s durable reconciliation, not wrap it';
   end if;
   if (length(v_post_lock)-length(replace(v_post_lock,' begin ','')))
      / length(' begin ') <> 1 then
-    raise exception '0032 postverify: exactly one nested ''begin'' must exist in the post-lock section (a decoy block would defeat the adjacency check alone)';
+    raise exception '0034 postverify: exactly one nested ''begin'' must exist in the post-lock section (a decoy block would defeat the adjacency check alone)';
   end if;
   if position('begin if v_op_key is null then' in v_post_lock)=0 then
-    raise exception '0032 postverify: the inner exception-guarded block must open IMMEDIATELY before the conditional op-key assignment, so _reserve_op''s own insert is guarded too';
+    raise exception '0034 postverify: the inner exception-guarded block must open IMMEDIATELY before the conditional op-key assignment, so _reserve_op''s own insert is guarded too';
   end if;
-  raise notice '0032 postverify OK (7/8): the reconciliation is structurally OUTSIDE the exception-guarded region -- exactly one handler exists, attached to a single inner block opened immediately before the op-key reservation, guarding it and the mint pipeline together';
+  raise notice '0034 postverify OK (7/8): the reconciliation is structurally OUTSIDE the exception-guarded region -- exactly one handler exists, attached to a single inner block opened immediately before the op-key reservation, guarding it and the mint pipeline together';
 
-  raise notice '0032 postverify: probe (8/8) is a SEPARATE do block below (no pg_get_functiondef call in it) -- it dynamically applies the live ck_autodraft_attempts_reservation constraint to real test tuples via a throwaway temp table';
+  raise notice '0034 postverify: probe (8/8) is a SEPARATE do block below (no pg_get_functiondef call in it) -- it dynamically applies the live ck_autodraft_attempts_reservation constraint to real test tuples via a throwaway temp table';
 end
 $verify$;
 
@@ -370,13 +370,13 @@ begin
     where conrelid='clara.autodraft_attempts'::regclass
       and conname='ck_autodraft_attempts_reservation';
   if v_condef is null then
-    raise exception '0032 postverify: ck_autodraft_attempts_reservation is missing entirely';
+    raise exception '0034 postverify: ck_autodraft_attempts_reservation is missing entirely';
   end if;
-  create temp table _x0032_reservation_probe(
+  create temp table _x0034_reservation_probe(
     state text, task_id uuid, reserved_tokens bigint, usage_date date
   ) on commit drop;
   -- pg_get_constraintdef already renders the leading CHECK(...) wrapper.
-  execute format('alter table _x0032_reservation_probe add constraint ck_probe %s', v_condef);
+  execute format('alter table _x0034_reservation_probe add constraint ck_probe %s', v_condef);
 
   -- O-round confirmation finding (Codex, THIRD scoped pass, Low): the real
   -- reconciliation UPDATE never touches task_id or usage_date -- it leaves whatever
@@ -384,19 +384,19 @@ begin
   -- Testing with nulls would pass even against a future constraint requiring
   -- task_id/usage_date to be NULL for state='idle', which would reject the real
   -- reconciled row -- test with a genuinely non-null task_id and usage_date.
-  insert into _x0032_reservation_probe(state,task_id,reserved_tokens,usage_date)
+  insert into _x0034_reservation_probe(state,task_id,reserved_tokens,usage_date)
     values('idle',gen_random_uuid(),0,current_date);
 
   begin
-    insert into _x0032_reservation_probe(state,task_id,reserved_tokens,usage_date)
+    insert into _x0034_reservation_probe(state,task_id,reserved_tokens,usage_date)
       values('active',gen_random_uuid(),0,current_date);
-    raise exception '0032 postverify: the live ck_autodraft_attempts_reservation constraint unexpectedly ACCEPTED an active+zero-reservation tuple -- this probe would be vacuous';
+    raise exception '0034 postverify: the live ck_autodraft_attempts_reservation constraint unexpectedly ACCEPTED an active+zero-reservation tuple -- this probe would be vacuous';
   exception when check_violation then
     null; -- expected: the constraint correctly rejects the invalid tuple
   end;
 
-  drop table _x0032_reservation_probe;
-  raise notice '0032 postverify OK (8/8): reserved_tokens=0,state=''idle'' is genuinely ACCEPTED by the live ck_autodraft_attempts_reservation constraint (dynamically applied, not pattern-matched), and the probe itself correctly rejects an invalid tuple';
-  raise notice '0032 postverify: ALL STRUCTURAL/CATALOG PROBES PASSED — behavioral retry-dispatch and reservation-reconciliation correctness remain the rig suite''s job';
+  drop table _x0034_reservation_probe;
+  raise notice '0034 postverify OK (8/8): reserved_tokens=0,state=''idle'' is genuinely ACCEPTED by the live ck_autodraft_attempts_reservation constraint (dynamically applied, not pattern-matched), and the probe itself correctly rejects an invalid tuple';
+  raise notice '0034 postverify: ALL STRUCTURAL/CATALOG PROBES PASSED — behavioral retry-dispatch and reservation-reconciliation correctness remain the rig suite''s job';
 end
 $verify_constraint$;
