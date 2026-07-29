@@ -96,6 +96,30 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/autoDraft.v4.errors.ts": {
+      "sha256": "9835751f607fcfd536753de73845b02100d6b1b93cc009ce1a2e7bf10c328c4c",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v4.impl.ts": {
+      "sha256": "ca629292462b10459756e1516a722424347c3c00ddd11e6c599f015228e8ae59",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v4.infra.ts": {
+      "sha256": "7beb489a6354193c5d1d89e2f12e6cfb892ef6298ced983d4303e893fff4b0f9",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v4.prompt.ts": {
+      "sha256": "43f1f80ef4f3519584e2df33ebaf16ba3ac6153675793e512ea5ac9984bf7e4c",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v4.tools.ts": {
+      "sha256": "cd836f1c0fdc4aa2970e5e9fc83984875816f3e89b17ebebbfbbefaef440d4ed",
+      "note": ""
+    },
+    "packages/runtime/workflows/autoDraft.v4.ts": {
+      "sha256": "fda9fda0b724093b02e83a360af265e0d43197a44f3cd99317a88fe4c120c1e6",
+      "note": ""
+    },
     "packages/runtime/workflows/chatTurn.impl.ts": {
       "sha256": "015cf3c0fc5181c6706dc6f5e4e86361f419e25faf8f27f585a08a1ee23e22b6",
       "note": "",
