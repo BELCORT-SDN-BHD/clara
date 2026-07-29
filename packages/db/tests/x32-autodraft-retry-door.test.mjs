@@ -5,17 +5,29 @@
 //          rewritten to point at it, attempt_count survives the supersede
 //          (governance is not reset), and the new task dispatches + settles clean.
 //   x32.b  a LIVE task's replay semantics are byte-identical to before 0032 --
-//          queued/running/cancel_requested AND the newly widened held/
-//          awaiting_input all short-circuit to noop_existing, never re-admitted.
+//          queued/running/cancel_requested short-circuit to noop_existing, never
+//          re-admitted; held/awaiting_input are proven GENUINELY UNREACHABLE for
+//          kind='autodraft' (a build-time draft widened the live-status list to
+//          include them, but clara._tf_agent_task_update's own transition matrix
+//          rejects any such transition with CLR13 -- the widening was reverted,
+//          not shipped as dead code).
 //   x32.c  a COMPLETED task refuses honestly ('already_done') -- never a silent
 //          re-admit, and the ORIGINAL admission receipt is left byte-untouched.
-//   x32.d  reservation reconciliation on BOTH terminal paths: a genuine
-//          settle-failure (already refunded -- no double-refund) and a generic
-//          cancel_agent_task cancellation (never refunded before 0032 -- proven
-//          not to leak once the retry door reconciles it).
+//   x32.d  reservation reconciliation on BOTH terminal paths, immediate case: a
+//          genuine settle-failure (already refunded -- no double-refund) and a
+//          generic cancel_agent_task cancellation (never refunded before 0032 --
+//          proven not to leak once the retry door reconciles it), each retry
+//          landing back on a lane-ready filing that succeeds all the way through.
 //   x32.e  the parked (2-failure) governance gate is untouched -- a retry consumes
 //          one of the two strikes, and a filing parked on the second genuine
 //          failure still refuses (refused_attempts), never re_admitted.
+//   x32.f  O-round confirmation (Codex, High/blocking): a cancellation's retry
+//          that is ITSELF refused (lane_changed) must not re-refund the same
+//          reservation on a later call -- the first-built fix only cleared
+//          firm_usage_daily, never the attempt row's own reserved_tokens, so a
+//          refused retry left the row re-enterable and re-refundable forever.
+//          Reduction-tested: reverting the durable per-row UPDATE reproduces the
+//          leak here.
 //
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 
@@ -24,10 +36,12 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
   admitAutodraft,
+  AP,
   attemptRow,
   beginAutodraft,
   buildWorld,
   endPool,
+  EXP,
   grantConsent,
   humanQuery,
   opk,
@@ -37,6 +51,7 @@ import {
   settleAutodraft,
   upsertAccountClassed,
   upsertPayableAccount,
+  withActor,
 } from "./wave-a-fixtures.mjs";
 
 let w = null;
@@ -399,4 +414,90 @@ test("x32.e the parked (2-failure) governance gate is untouched -- a retry consu
   const blocked = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick });
   assert.equal(blocked.outcome, "refused_attempts", `the parked branch must take precedence over the terminal-retry branch: ${JSON.stringify(blocked)}`);
   assert.equal(await liveTasks(rf.filingId), 0, "no task is minted for a parked filing, retry door or not");
+});
+
+test("x32.f O-round confirmation (Codex): a cancellation whose retry is ITSELF refused (lane_changed) must NOT re-refund the same reservation on a later call", async () => {
+  const firm = w.firms.A;
+  const primed = await primeReadyFiling(w.users.alice, {
+    client: w.clients.A1,
+    vendorName: `X32-F ${randomUUID().slice(0, 8)} SDN BHD`,
+    registration: `2026${randomUUID().replaceAll("-", "").slice(0, 8)}`,
+  });
+
+  const beforeAll = await todaysUsage(firm);
+  const first = await admitAutodraft({ filing: primed.filingId, origin: ORIGIN.oneClick, reserveTokens: 40000 });
+  assert.equal(first.outcome, "admitted", JSON.stringify(first));
+  assert.equal((await todaysUsage(firm)) - beforeAll, 40000);
+
+  // Cancel the (still-queued) task -- reserved_tokens=40000 is now genuinely
+  // outstanding on the row, never refunded by cancel_agent_task itself.
+  const cancelled = await cancelAgentTask(w.users.bob, { task: first.task_id });
+  assert.equal(cancelled.status, "cancelled", JSON.stringify(cancelled));
+
+  // Open an unresolved draft on the SAME filing (the x31.e technique) so the retry's
+  // own lane check refuses it -- the exact shape that exposes an early return AFTER
+  // the terminal branch's refund but BEFORE the success-path upsert would ever reset
+  // reserved_tokens.
+  const draft = await withActor({ transaction: true }, async (client) => {
+    const inserted = await client.query(
+      `insert into clara.journal_entries(
+         firm_id,client_id,status,posting_date,memo,origin,document_id,
+         filing_id,source_doc_sha256,maker_actor
+       ) values (
+         $1,$2,'draft','2026-03-15','x32.f open-draft blocker','agent',$3,$4,$5,$6
+       ) returning id`,
+      [firm, w.clients.A1, primed.documentId, primed.filingId, primed.sha256, w.users.alice],
+    );
+    const entry = inserted.rows[0].id;
+    await client.query(
+      `insert into clara.journal_lines(
+         entry_id,line_no,account_code,debit_cents,credit_cents,
+         description,counterparty_id
+       ) values
+         ($1,1,$2,50000,0,'x32.f blocker expense',$4),
+         ($1,2,$3,0,50000,'x32.f blocker payable',$4)`,
+      [entry, EXP, AP, primed.counterpartyId],
+    );
+    return entry;
+  });
+
+  const beforeRefusedRetry = await todaysUsage(firm);
+  const refusedRetry1 = await admitAutodraft({ filing: primed.filingId, origin: ORIGIN.oneClick, reserveTokens: 40000 });
+  assert.equal(refusedRetry1.outcome, "lane_changed", `the retry itself must be refused by the open draft, exercising the exact early-return path: ${JSON.stringify(refusedRetry1)}`);
+  const afterRefusedRetry = await todaysUsage(firm);
+  assert.equal(afterRefusedRetry - beforeRefusedRetry, -40000, "the terminal branch's refund fires exactly once, even though this call itself is refused");
+
+  const reconciled = await attemptRow(primed.filingId);
+  assert.equal(Number(reconciled.reserved_tokens), 0, "the reservation must be DURABLY cleared on the attempt row itself, not left at the old amount for the next call to re-refund");
+  assert.equal(reconciled.state, "idle", "a non-active state is required by ck_autodraft_attempts_reservation once reserved_tokens=0");
+
+  // THE ACTUAL DEFECT, reproduced directly: a second call while still blocked must NOT
+  // subtract another 40,000 -- the guard (a.reserved_tokens>0) must see 0 this time.
+  const refusedRetry2 = await admitAutodraft({ filing: primed.filingId, origin: ORIGIN.oneClick, reserveTokens: 40000 });
+  assert.equal(refusedRetry2.outcome, "lane_changed", JSON.stringify(refusedRetry2));
+  const afterSecondRefusedRetry = await todaysUsage(firm);
+  assert.equal(
+    afterSecondRefusedRetry, afterRefusedRetry,
+    `a second refused retry must NOT re-refund -- firm_usage_daily moved by ${afterSecondRefusedRetry - afterRefusedRetry} when it should be unchanged`,
+  );
+
+  // Resolve the blocker and confirm the door still genuinely works end-to-end once the
+  // lane clears -- the fix must not have broken the success path it sits in front of.
+  await withActor({ transaction: true }, async (client) => {
+    await client.query(
+      `update clara.journal_entries
+       set status='withdrawn', withdrawn_by=$2, withdrawn_at=now(),
+           withdrawal_reason='x32.f blocker resolved'
+       where id=$1`,
+      [draft, w.users.alice],
+    );
+  });
+  const finalRetry = await admitAutodraft({ filing: primed.filingId, origin: ORIGIN.oneClick, reserveTokens: 22000 });
+  assert.equal(finalRetry.outcome, "re_admitted", JSON.stringify(finalRetry));
+  assert.notEqual(finalRetry.task_id, first.task_id);
+  const afterFinal = await todaysUsage(firm);
+  assert.equal(
+    afterFinal - beforeAll, 22000,
+    "net across the whole cell: +40000 (first admit) -40000 (single genuine refund) +22000 (final successful retry) = +22000 from baseline, proving no leak and no double-refund end to end",
+  );
 });

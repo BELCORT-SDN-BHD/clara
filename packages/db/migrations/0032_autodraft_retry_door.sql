@@ -71,7 +71,33 @@
 -- ('already_done'), never silently re-admitting or replaying; the token-reservation
 -- reconciliation is proven on BOTH paths — a genuine settle-failure (already refunded,
 -- no double-refund) and a generic cancel_agent_task cancellation (never refunded until
--- 0032's own reconciliation, proven not to leak).
+-- 0032's own reconciliation, proven not to leak); a cancellation whose retry is then
+-- REFUSED (lane or budget) does not re-refund on a subsequent call (x32.f).
+--
+-- O-ROUND CONFIRMATION (Codex, read-only adversarial pass, one High/blocking finding
+-- fixed here; details in the fixed code's own comment at the terminal branch). The
+-- as-first-built reconciliation only decremented clara.firm_usage_daily.tokens_used; it
+-- never persisted the clear onto clara.autodraft_attempts.reserved_tokens itself, which
+-- was reset ONLY by the success-path UPSERT at the very end of the function. If the
+-- SAME retry call that ran the refund then hit the lane check or a budget refusal and
+-- returned early — a live possibility, not a hypothetical — the row still read the OLD
+-- reserved_tokens, so the NEXT call re-entered the terminal branch and refunded the
+-- identical amount again, unboundedly, on every subsequent refused retry: a silent,
+-- unbounded corruption of the firm's shared daily token counter that could erase OTHER
+-- tasks' legitimate same-day usage (greatest(0,...) does not protect against this — it
+-- only prevents going negative, not repeated subtraction). Fixed by persisting
+-- reserved_tokens=0,state='idle' onto the clara.autodraft_attempts row directly inside
+-- the terminal branch, unconditionally, before any code path that could return early —
+-- durable because a plpgsql function has no internal sub-transaction boundary, so the
+-- UPDATE commits together with whichever return statement the call ultimately takes.
+-- Also fixed in the same pass: this migration's own in-transaction tail check for
+-- "parked precedes the terminal branches" was comparing the PRE-LOCK occurrence of the
+-- parked-branch text against a post-lock-only position, which is vacuously true
+-- regardless of the actual post-lock order (the identical bug this migration's own
+-- postverify file had already caught and fixed in itself, but had not yet been
+-- back-ported to the migration's own tail) — the tail now anchors every check to the
+-- SECOND (post-lock) occurrence of the registry re-read statement, exactly as the
+-- postverify file does.
 
 set role clara_fn_owner;
 
@@ -197,6 +223,26 @@ begin
     -- brand-new task was actually dispatched. No RETURN here -- control falls through to
     -- the lane check, the budget checks, and the existing task-mint pipeline below,
     -- unchanged, which is what actually dispatches the fresh attempt.
+    --
+    -- O-round confirmation finding (Codex, High/blocking): refunding firm_usage_daily
+    -- alone is NOT idempotent, because autodraft_attempts.reserved_tokens itself was only
+    -- ever cleared by the success-path UPSERT far below -- if THIS retry itself then hits
+    -- the lane check or a budget refusal and returns early (a live possibility: the lane
+    -- may have changed, or the firm's daily budget may be exhausted), the row still reads
+    -- reserved_tokens=<the old amount>, so the NEXT call re-enters this same branch and
+    -- refunds the identical amount a second time -- unboundedly, on every subsequent
+    -- refused retry, silently corrupting the firm's shared daily counter (greatest(0,...)
+    -- does not make this safe: it can erase OTHER tasks' legitimate same-day usage). The
+    -- reconciliation must therefore be made DURABLE on the attempt row itself, right here,
+    -- before any code path that could return early -- reserved_tokens=0 plus a non-active
+    -- state (ck_autodraft_attempts_reservation requires state IN ('idle','parked') for a
+    -- reserved_tokens=0 row). This UPDATE is unconditional (not gated behind reserved_
+    -- tokens>0) so the already-refunded settle-failure path (state already 'idle',
+    -- reserved_tokens already 0) sees an idempotent, harmless no-op write, while the
+    -- never-refunded cancellation path gets its reservation genuinely closed out. Because
+    -- this statement executes and commits together with whichever return the function
+    -- ultimately takes (there is no sub-transaction boundary inside a plpgsql function),
+    -- the reconciliation survives even a same-call early return.
     v_is_retry:=true;
     v_op_key:='autodraft:'||p_filing||':'||p_origin;
     if a.reserved_tokens>0 then
@@ -206,6 +252,8 @@ begin
       update clara.firm_usage_daily set tokens_used=greatest(0,tokens_used-a.reserved_tokens)
         where firm_id=a.firm_id and usage_date=a.usage_date;
     end if;
+    update clara.autodraft_attempts set reserved_tokens=0,state='idle',updated_at=now()
+      where filing_id=p_filing;
     delete from clara.op_receipts where firm_id=a.firm_id and fn='admit_autodraft_task'
       and op_key=v_op_key;
   end if;
@@ -337,7 +385,10 @@ do $tail$
 declare
   v_prior_count int;
   v_admit_src text;
-  v_pos_lock2 int; v_pos_completed int; v_pos_terminal int; v_pos_opkey int;
+  v_reread_marker text := 'select aa.*,t.status as task_status into a from clara.autodraft_attempts aa';
+  v_pos_first int; v_pos_second_rel int; v_pos_lock2 int; v_post_lock text;
+  v_pos_completed int; v_pos_terminal int; v_pos_lane_check int; v_pos_opkey int;
+  v_terminal_slice text;
 begin
   -- (1) mandatory prior-migration check — 0031 must already be applied.
   select count(*) into v_prior_count from clara.schema_migrations
@@ -348,56 +399,113 @@ begin
 
   select pg_get_functiondef('clara.admit_autodraft_task(uuid,text,uuid,text,bigint)'::regprocedure)
     into v_admit_src;
+  -- O-round confirmation finding (Codex, discovered the hard way): a bare string search
+  -- against the RAW function definition can be tripped by this tail's OWN explanatory
+  -- comments -- an earlier draft's prose ("...before any code path that could return
+  -- early...") contained the literal substring ' return ' and made the "no early return"
+  -- check below fail against a CORRECT body. Strip comments first, exactly as the
+  -- external postverify file already does, so only executable code is ever searched.
+  v_admit_src:=lower(regexp_replace(
+    regexp_replace(
+      regexp_replace(v_admit_src,'/\*[\s\S]*?\*/','','g'),
+      '--[^\n]*','','g'),
+    '\s+',' ','g'));
+
+  -- Isolate the POST-LOCK registry recheck. O-round confirmation finding (Codex): the
+  -- live/parked branch TEXT is IDENTICAL between the pre-lock fast-path and the post-lock
+  -- authoritative check, so an unanchored position() search finds the pre-lock occurrence
+  -- first — comparing that against a post-lock-only position (like v_pos_completed) is
+  -- ALWAYS true regardless of the actual post-lock order, making the assertion vacuous.
+  -- The registry re-read statement itself (real code, not a comment) appears exactly
+  -- twice — once pre-lock, once post-lock. Find the SECOND occurrence explicitly and
+  -- slice from there, so every subsequent search is scoped to post-lock text only.
+  v_pos_first:=position(v_reread_marker in v_admit_src);
+  if v_pos_first=0 then
+    raise exception '0032 tail: cannot locate the registry re-read statement at all';
+  end if;
+  v_pos_second_rel:=position(v_reread_marker in substring(v_admit_src from v_pos_first+1));
+  if v_pos_second_rel=0 then
+    raise exception '0032 tail: cannot locate the SECOND (post-lock) registry re-read — it may have been removed or merged with the pre-lock one';
+  end if;
+  v_pos_lock2:=v_pos_first+v_pos_second_rel;
+  v_post_lock:=substring(v_admit_src from v_pos_lock2);
 
   -- (2) the post-lock registry check's branch order: parked stays before the new
   -- terminal branches (the 2+-failure governance gate must never be bypassed by the
   -- retry door), 'completed' before 'failed/cancelled/expired', and the op-key
-  -- reservation strictly after all of them.
-  v_pos_lock2:=position(
-    'a waiter that lost the filing lock rechecks the registry before touching op receipts.'
-    in v_admit_src);
-  if v_pos_lock2=0 then
-    v_pos_lock2:=position('for update;' in v_admit_src);
-  end if;
+  -- reservation strictly after all of them — all positions relative to v_post_lock, so
+  -- the pre-lock occurrences of the same branch text can never satisfy this check.
   v_pos_completed:=position(
-    'elsif found and a.task_status=''completed'' then' in v_admit_src);
+    'elsif found and a.task_status=''completed'' then' in v_post_lock);
   v_pos_terminal:=position(
     'elsif found and a.task_status in (''failed'',''cancelled'',''expired'') then'
-    in v_admit_src);
+    in v_post_lock);
   v_pos_opkey:=position(
-    'if v_op_key is null then' in v_admit_src);
-  if v_pos_lock2=0 or v_pos_completed=0 or v_pos_terminal=0 or v_pos_opkey=0
-     or v_pos_lock2>=v_pos_completed or v_pos_completed>=v_pos_terminal
-     or v_pos_terminal>=v_pos_opkey then
+    'if v_op_key is null then' in v_post_lock);
+  if v_pos_completed=0 or v_pos_terminal=0 or v_pos_opkey=0
+     or v_pos_completed>=v_pos_terminal or v_pos_terminal>=v_pos_opkey then
     raise exception
-      '0032 tail: registry branch order is wrong (lock=%, completed=%, terminal=%, opkey=%)',
-      v_pos_lock2,v_pos_completed,v_pos_terminal,v_pos_opkey;
+      '0032 tail: registry branch order is wrong (completed=%, terminal=%, opkey=%)',
+      v_pos_completed,v_pos_terminal,v_pos_opkey;
   end if;
-  raise notice '0032 tail OK (1/4): registry branch order (lock -> completed -> terminal -> conditional op-key) is intact';
+  raise notice '0032 tail OK (1/5): post-lock registry branch order (completed -> terminal -> conditional op-key) is intact';
 
-  -- (3) the parked branch must come BEFORE the new terminal branches — the 2+-failure
-  -- governance gate is checked first and takes precedence unconditionally.
-  if position('elsif found and a.state=''parked'' then' in v_admit_src)
-     >= v_pos_completed then
-    raise exception '0032 tail: the parked governance branch must precede the new terminal branches';
+  -- (3) the parked branch must come BEFORE the new terminal branches, WITHIN the
+  -- post-lock section specifically — the 2+-failure governance gate is checked first and
+  -- takes precedence unconditionally.
+  if position('elsif found and a.state=''parked'' then' in v_post_lock)=0
+     or position('elsif found and a.state=''parked'' then' in v_post_lock)>=v_pos_completed then
+    raise exception '0032 tail: the POST-LOCK parked governance branch must precede the new terminal branches';
   end if;
-  raise notice '0032 tail OK (2/4): the parked (2+ failure) governance gate still takes precedence over the retry door';
+  raise notice '0032 tail OK (2/5): the parked (2+ failure) governance gate still takes precedence over the retry door, in the post-lock section itself';
 
-  -- (4) the terminal-retry branch reconciles the reservation and clears the stale
-  -- receipt BEFORE falling through (no return statement in its own body).
-  if position('v_is_retry:=true;' in v_admit_src)=0
-     or position('delete from clara.op_receipts where firm_id=a.firm_id and fn=''admit_autodraft_task''' in v_admit_src)=0
-     or position('tokens_used=greatest(0,tokens_used-a.reserved_tokens)' in v_admit_src)=0 then
-    raise exception '0032 tail: the terminal-retry branch does not reconcile the reservation or clear the stale receipt';
+  -- (4) the terminal-retry branch reconciles the reservation DURABLY on the attempt row
+  -- itself (not just firm_usage_daily) and clears the stale receipt BEFORE falling
+  -- through (no return statement in its own body). O-round confirmation finding (Codex,
+  -- High/blocking): a refund that only touched firm_usage_daily was not idempotent across
+  -- an early lane/budget return — the attempt row's own reserved_tokens/state must be
+  -- durably cleared in this same branch, unconditionally, or a refused retry re-refunds
+  -- the same amount on every subsequent call. The slice must end at the lane check's
+  -- first real statement, NOT at the far-later conditional op-key assignment — the
+  -- lane-check and budget-check blocks in between each have their OWN 'return'
+  -- statements, and slicing all the way to v_pos_opkey would swallow them, making the
+  -- "no early return" assertion below pass vacuously (the exact bug this migration's
+  -- own postverify file already caught and fixed in itself; ported here too).
+  v_pos_lane_check:=position(
+    'select * into v_lane from clara._coding_lane_core(f.client_id,p_filing);'
+    in v_post_lock);
+  if v_pos_lane_check=0 or v_pos_terminal>=v_pos_lane_check then
+    raise exception '0032 tail: cannot locate the lane-check anchor immediately after the terminal branch';
   end if;
-  raise notice '0032 tail OK (3/4): the terminal-retry branch reconciles any outstanding reservation and clears the stale receipt';
+  v_terminal_slice:=substring(v_post_lock from v_pos_terminal for v_pos_lane_check-v_pos_terminal);
+  if position('v_is_retry:=true;' in v_terminal_slice)=0
+     or position('delete from clara.op_receipts where firm_id=a.firm_id and fn=''admit_autodraft_task''' in v_terminal_slice)=0
+     or position('tokens_used=greatest(0,tokens_used-a.reserved_tokens)' in v_terminal_slice)=0
+     or position('update clara.autodraft_attempts set reserved_tokens=0,state=''idle''' in v_terminal_slice)=0
+     or position(' return ' in v_terminal_slice)<>0 then
+    raise exception '0032 tail: the terminal-retry branch does not durably reconcile the reservation, clear the stale receipt, and fall through correctly';
+  end if;
+  raise notice '0032 tail OK (3/5): the terminal-retry branch durably reconciles the reservation on the attempt row itself, clears the stale receipt, and falls through with no early return';
 
   -- (5) the final settlement distinguishes re_admitted from admitted.
-  if position('case when v_is_retry then ''re_admitted'' else ''admitted'' end' in v_admit_src)=0 then
+  if position('case when v_is_retry then ''re_admitted'' else ''admitted'' end' in v_post_lock)=0 then
     raise exception '0032 tail: the final settlement does not distinguish re_admitted from admitted';
   end if;
-  raise notice '0032 tail OK (4/4): the final settlement honestly distinguishes a retry dispatch from a first-ever one';
+  raise notice '0032 tail OK (4/5): the final settlement honestly distinguishes a retry dispatch from a first-ever one';
 
-  raise notice '0032 tail: admit_autodraft_task now supersedes a terminal-failed/cancelled/expired task honestly (re_admitted, reservation reconciled, stale receipt cleared) while a completed task refuses honestly and a live task replays unchanged — the parked governance gate is untouched';
+  -- (6) the reservation CHECK constraint's own shape confirms reserved_tokens=0 requires
+  -- a non-active state — a defensive cross-check that the fix in (4) actually satisfies
+  -- the live constraint, not just this migration's own assumption about it.
+  if not exists (
+    select 1 from pg_constraint
+    where conrelid='clara.autodraft_attempts'::regclass
+      and conname='ck_autodraft_attempts_reservation'
+      and pg_get_constraintdef(oid) like '%state = ''active''%reserved_tokens > 0%'
+  ) then
+    raise exception '0032 tail: ck_autodraft_attempts_reservation no longer has the expected shape — the reserved_tokens=0,state=''idle'' reconciliation may violate it';
+  end if;
+  raise notice '0032 tail OK (5/5): reserved_tokens=0,state=''idle'' is confirmed compatible with the live ck_autodraft_attempts_reservation constraint';
+
+  raise notice '0032 tail: admit_autodraft_task now supersedes a terminal-failed/cancelled/expired task honestly (re_admitted, reservation DURABLY reconciled on the attempt row itself, stale receipt cleared) while a completed task refuses honestly and a live task replays unchanged — the parked governance gate is untouched';
 end
 $tail$;
