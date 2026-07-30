@@ -122,6 +122,15 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
+> **STATUS (2026-07-29): THE PRE-WAVE-C PROGRAM IS COMPLETE — WAVE C IS NEXT (fresh session).**
+> The extraction slice CLOSED (ADR-047/048) → the settlement program EXECUTED (ADR-049) → **the
+> first production autopost DONE** (ADR-050: entry `f65eba11`, RM350, 38s PDF→posted unattended)
+> → the closing batch LANDED 2026-07-29 (PRs #143/#144: migration 0035 drafting-trio + chatTurn
+> v8; one quiesced ceremony). **Live pin: 34 migrations (`0035`) · runtime v38 · four firms ·
+> `/ready` green.** Owed to Wave C: the reconciler double-dispatch cosmetics + the sweep budget
+> contention; the nonzero-tax DB belt stays TRIGGER-BOUND (PROJECTLOG PART 2). Undecided for the
+> Wave-C grilling: structured-sales autopost as a tail slice (PRD §4.95).
+
 **Wave C — money movement.** Bank statement ingest, parity-checked matching + exclusivity, reconciliation tie-out, receipt/payment allocation (intrinsic), aging + statements, the self-reconcile learn loop (advisory, human-gated).
 **Wave D — assets + adjustments.** FA register from coding (intrinsic), depreciation runs (scheduled + close-gated), disposal, recurring/reversing adjustments, periodic closing-stock at close.
 **Wave E — periods + statements.** Serialized year-end close with structural pre-close gates, segmented continuity reads, ordered reverse guards, carry-forward; the honest FS pack (SoFP/SoCI/SOCE/cash-flow/notes); the reporting engine (spec → DB reads → renderers → auditable artifacts).
