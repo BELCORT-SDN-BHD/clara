@@ -39,9 +39,20 @@ test("consumer name + subscribed event types are the fixed spine identity", () =
   assert.deepEqual([...AUTODRAFT_EVENT_TYPES], ["document.invoice_facts_completed", "document.invoice_facts_failed"]);
 });
 
-test("admissionNeedsStart enqueues ONLY on 'admitted' — every no-op/refusal outcome does not", () => {
+test("admissionNeedsStart enqueues on 'admitted' AND 're_admitted' — every no-op/refusal outcome does not", () => {
   assert.equal(admissionNeedsStart("admitted"), true);
-  for (const o of ["noop_existing", "refused_budget", "refused_attempts", "lane_changed", "skipped_lane", undefined, ""]) {
+  assert.equal(admissionNeedsStart("re_admitted"), true, "the 0034 supersede outcome mints a real queued task and must enqueue");
+  for (const o of [
+    "noop_existing",
+    "refused_budget",
+    "refused_attempts",
+    "lane_changed",
+    "skipped_lane",
+    "already_done",
+    "skipped_direction",
+    undefined,
+    "",
+  ]) {
     assert.equal(admissionNeedsStart(o), false, `${o} must not enqueue`);
   }
 });

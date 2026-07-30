@@ -268,6 +268,29 @@ jobs:
           PGDATABASE=clara_wb20_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
             CLARA_RIG_DB=1 node --test tests/wave-b/wb-0020-upgrade.test.mjs
 
+      # Wave-C-a migration-0037 subledger upgrade drill (the same anti-misleading-green
+      # wiring as the four drills above). x37-0037-upgrade.test.mjs is the ONLY proof that
+      # 0037's §0 live probes, its §J backfill (including the reversal-unwind pass), and its
+      # D1/D2 tail asserts have ever run against DATA: the in-suite battery
+      # (x37-wave-c-a-subledger.test.mjs) runs on a database where 0037 was applied to an
+      # EMPTY schema, so every backfill row count there is zero and every tail assert is
+      # vacuous. This drill applies 0001→0036, builds a real book through the audited verbs
+      # (typed bill · sales invoice · sales credit note · multi-counterparty JV · opening
+      # incl. a K6 supersede and a withdrawn opening draft · an approved reversal pair · a
+      # counterparty MERGED after approval), THEN applies 0037 onto it and asserts the
+      # decomposition, the created_in_migration provenance, the non-vacuous tie, and the
+      # backfill's idempotency on re-run. It also drives the §0 probe ABORT (a violating
+      # corpus must refuse the migration and roll back atomically). Reset-gated (it drops
+      # schema clara), so it SKIPS in the concurrent all-packages sweep above — which is
+      # exactly how a backfill regression could otherwise merge with the suite green. Run it
+      # FOR REAL here, ALONE, in its OWN throwaway database.
+      - name: Wave-C-a 0037 subledger upgrade drill (isolated DB)
+        working-directory: packages/db
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x37_upgrade_ci'
+          PGDATABASE=clara_x37_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+            CLARA_RIG_DB=1 node --test tests/x37-0037-upgrade.test.mjs
+
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
       # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap

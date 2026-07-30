@@ -42,11 +42,14 @@ const RECONNECT_MAX_MS = 5000;
 // Pure helpers — no DB, fully unit-testable.
 // ---------------------------------------------------------------------------
 
-/** True iff an admission outcome should enqueue a run. ONLY 'admitted' starts a workflow;
+/** True iff an admission outcome should enqueue a run. 'admitted' AND 're_admitted' (the 0034
+ *  supersede outcome) both start a workflow: a re_admitted task is a REAL queued agent_tasks
+ *  row, minted exactly like a fresh admit, and must be enqueued exactly like one — leaving it
+ *  un-enqueued means the one-click retry mints a row that never runs (design §4.10).
  *  noop_existing / refused_budget / refused_attempts / lane_changed all wrote their own
  *  sweep_run_item and must NOT enqueue (idempotency + no double-spend). Pure. */
 export function admissionNeedsStart(outcome) {
-  return outcome === "admitted";
+  return outcome === "admitted" || outcome === "re_admitted";
 }
 
 // ---------------------------------------------------------------------------

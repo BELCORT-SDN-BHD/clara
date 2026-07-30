@@ -355,6 +355,12 @@ test("§2 COVERAGE: an opening-balance entry is EXCLUDED from observed turnover 
     [client, users.alice, res, CASH, INC],
   )).rows[0].id;
   // …then the 0003 trigger's draft→approved allowlist shape (lines freeze once the parent approves).
+  // [0037 / Wave C-a, fixture-budget entry] This raw approve survives belt-1 (the
+  // deferred "every approved entry's control nets equal its open_items" trigger)
+  // UNCHANGED and deliberately: both legs are CASH (asset) and INC (income), so the
+  // entry carries ZERO control-class (payable/receivable) lines — the classifier
+  // produces no rows and the belt's comparison is vacuous. No item may be written
+  // here; writing one would BREAK the belt, not satisfy it.
   await rootQuery(
     "update clara.journal_entries set status='approved', checker_actor=$2, approved_at=now() where id=$1",
     [entryId, users.bob]);
