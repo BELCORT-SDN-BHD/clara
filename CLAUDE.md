@@ -100,57 +100,45 @@ Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
-**Phase 4 — pre-Wave-C SETTLEMENT PROGRAM EXECUTED (ADR-048/049, 2026-07-28).** The waves:
-**A** (daily AP loop) LIVE — ADR-022..024 · **A2** (sales/AR + MyInvois + SST 3-leg) LIVE —
-ADR-025..027 · **A2.1** CLOSED — ADR-028..030 · **B** (knowledge + onboarding) CLOSED on
-intent — ADR-044..046 · **the extraction slice** CLOSED — ADR-047/048 (`corroborated` =
-explicit two-reader agreement; confidence GONE).
+**Phase 4 — WAVE C (money movement) IS OPEN under a ratified contract (ADR-051,
+2026-07-30).** Closed behind it: **A/A2/A2.1** LIVE (ADR-022..030) · **B** closed on intent
+(ADR-044..046) · **the extraction slice** (ADR-047/048; `corroborated` = explicit two-reader
+agreement, confidence GONE) · **the settlement program** (ADR-049) · **the first production
+autopost** (ADR-050 — RM350, 38s PDF→posted unattended, the full authority chain
+production-proven) · **C0** (ADR-051, migration 0036: the #52 nonzero-tax belt ·
+losing-dispatch no-ops · budget visibility · the sales mis-route gate · MSIC→context pack).
 
-**LIVE POSTURE: 34 migrations (`0035`) · Fly `clara-runtime` v38 · FOUR firms** (BELCORT —
+**LIVE POSTURE: 35 migrations (`0036`) · Fly `clara-runtime` v38 · FOUR firms** (BELCORT —
 real, 3 clients, **high-stakes RM100,000** ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
-Gate-S synthetic sandbox, RM10k default · Alara Advisory + Borneo Books = slice-era RLS
-fixtures, never repurpose) **· dashboard Pages `app.clarabook.com`** (must set
-`NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **· `clara-backup` daily.**
-No migration queued.
+Gate-S synthetic sandbox, RM10k default — its only client is literally "Fictional Test
+Services"; do not confuse with BELCORT's real clients ROME PROPERTIES / ROME SECRETARY ·
+Alara Advisory + Borneo Books = slice-era RLS fixtures, never repurpose) **· dashboard Pages
+`app.clarabook.com`** (must set `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`)
+**· `clara-backup` daily · Supavisor 31/60 measured 2026-07-29.** No migration queued.
 
-**THE FIRST PRODUCTION AUTOPOST IS DONE (ADR-050, 2026-07-29 08:20:47 UTC):** entry
-`f65eba11` · rule `90a07e89` · RM350 · 38 seconds PDF→posted, unattended, every step
-receipted incl. the draft+post-phase binding resolutions. The full authority chain is
-production-proven: two-reader corroboration → the owner's sighting floor → the signed rule →
-the signed vendor binding `d871c50c` (F1 LCP `ez 易计 ezaccount` · F2 `ezsec-iv-00` ·
-registration pinned · expires 2027-07-29) → the unified lane → autoDraft v5 (SST-zero =
-2-leg, owner-precedent-ruled) → `execute_rule_post`. Six firings; every prior refusal was a
-real control or real defect, none worked around. **Standing law: migration numbers are
-claimed at MERGE time** (the deploy-onto-existing frontier check enforces).
-
-**Settlement scoreboard (ADR-049; receipts `~/.clara-tools/captures/` + `docs/plan/research/`):**
-Gate **L** CLOSED (labelled synthetic, PR #127 — the 0017 `contradiction` detector's first
-coverage; citation producers owe ONE canonical `detail.value` encoding per `subject_key`) ·
-**XG3** CLOSED live (corroborated population 0→9; the §12.2 prediction held exactly) · Gate
-**S** CLOSED (labelled synthetic, Rome only — XML→facts→structured corroboration→signed
-rule→the **first `execute_rule_post` ever, unattended**; the first PRODUCTION autopost is a
-distinct open claim) · **K-doc producer** BUILT (#126, synthetic) · **0024/0025** (claim-secret
-classify settle · receipt auto-routing) + **0026** (lane-widened keys · the filed-bootstrap
-door) DEPLOYED via 5- and 3-round ladders · consent/wiki synthesis ACTIVATED · `interview_v2`
-live (manifest 80/80).
+**WAVE C — `docs/plan/wave-c-contract.md` is the mechanism of record** (owner rulings
+WC-R1..R12 + verified ground truth + the build order + open items — read it before ANY
+Wave C work; do not re-grill what it ratifies). Shape: **C-a** subledger + allocation
+(NEXT — fresh session, design-first) → **C-b** bank identity/statement ingest/matching →
+**C-c** tie-out/aging/learn-loop. Acceptance: labelled-synthetic in Rome first, then one
+real BELCORT month (ROME PROPERTIES holds statements 202504–202512). The
+`coding_kind` roadmap (which document kinds earn a typed lane, and when) lives in
+`docs/plan/REBUILD-PLAN.md`.
 
 **Autopost law (ADR-049/050):** the vendor-binding design v4.1 is BUILT AND LIVE
 (`docs/plan/autopost-vendor-binding-design.md` + `-part2.md` are the mechanism of record);
 hand-drafts are never autopost-eligible BY DESIGN; **autopost-from-seeding stays REFUSED**
-(WB-R2/ADR-046) — posting authority comes from verified in-system approvals only.
+(WB-R2/ADR-046). **The OCR-sales nine-control envelope is BUILT** (0016 §3.3 + the sighting
+floor + post-time re-derivation) — what is missing is the unattended sales drafter, and
+**the floor accrues ONLY from chatTurn drafts tagged `sales_invoice`** (manual drafts bind
+vendor-kind counterparties and accrue nothing usable) — contract §7-A. **Standing law:
+migration numbers are claimed at MERGE time** (the frontier check enforces). Malaysian tax
+facts are primary-source-verified in `docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`
+— **rates/thresholds/phase dates live in effective-dated policy tables, never in prose.**
 
-**The closing batch is DONE (2026-07-29, PRs #143/#144 + the v38 ceremony):** migration
-0035 (the counterparty-less-approval advisory warning — honest header: unreachable via
-sanctioned verbs, reachable via reversal-gated direct construction, the warning is the net ·
-the CLR23 withdraw-and-redraft remedy text) + chatTurn v8 (#46a stream-error capture with
-`error_code` held to the 0006 CHECK allowlist — the diagnostic lives in the tagged message ·
-#46b SST-zero two-leg propagation · #35 bind-existing-counterparty guidance).
-
-**Open build items (the task ledger is the live status home):** the reconciler
-double-dispatch cosmetics + the sweep-vs-human budget contention (→ Wave C) · the
-nonzero-tax DB belt (TRIGGER-BOUND: lands before any binding/rule on a vendor whose bills
-state nonzero tax) · Gate P (waits on the first real SST-charging supplier bill — operating
-runway, not engineering) · the `opening_tb.line` producer + K-doc production door (Phase 5,
-review-gated). **NEXT: Wave C (bank rec) in a fresh session.**
+**Open build items (the contract + PROJECTLOG PART 2 are the live registers):** Wave C-a
+(the F3 debt-payer) · Gate P (operating runway — now also owns the capitalised/mixed-purchase
+tax-allocation question 0036 §A named) · the contract §7-A runtime follow-up bundle · the
+`opening_tb.line` producer + K-doc production door (Phase 5, review-gated).
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**

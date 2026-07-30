@@ -158,7 +158,14 @@ Lands **before** any Wave C schema. Bundled to avoid migration-number contention
 3. **`statementFacts_v1`** — a brand-new frozen workflow class (cannot extend `invoiceFacts_v1`;
    bodies are immutable) + registry repoint + `pnpm freeze:update`. Also opens the
    `bank_statement` → `skipped_kind` dead end (`0026:392-410`) **[L]**.
-4. Both ingest paths per **WC-R4**, corroborated per **WC-R7**.
+4. Both ingest paths per **WC-R4**, corroborated per **WC-R7**. **Two named design questions for
+   the C-b grilling** (session audit 2026-07-30 — raised this session, never ruled): (a) does
+   bank-statement OCR need its **own egress consent class**? Bank data is materially more
+   sensitive than an invoice, and 0020's typed-consent machinery already supports purpose-scoped
+   classes. (b) The interview already captures a **`banks` item** (`interview.v2.questions.ts`) —
+   C-b's `bank_accounts` seeding should consume it rather than re-asking.
+   ⚠️ Research caveat: `docs/plan/research/wave-c/eval-research-dossier.md` is **unratified with
+   at least one confirmed finding-code mislabel** — treat it as leads, never citations.
 5. `bank_matches` (match-group model, cents invariant per **WC-R2**) + `bank_match_audit`
    (**PORT**, not rebuild — `02-salvage-manifest.md:43`) **[L]**.
 6. `match_bank_line` / `unmatch_bank_line` with the four parity RAISEs: wrong account, wrong
@@ -204,7 +211,13 @@ Lands **before** any Wave C schema. Bundled to avoid migration-number contention
 3. **Sighting-pool segregation.** Pools must be segregated by posting shape, subledger domain, party
    role, polarity and account. *An approved staff claim must never help a vendor invoice rule reach
    its sighting floor.* This is a control requirement, not a nicety.
-4. **MSIC is collected and then dropped — LANDED, 0036 §E (2026-07-30).** It appeared only in
+4. **The dead close-model guards** (session audit 2026-07-30). `_correction_period_state` is a
+   permanent stub, so its three call-site guards (`0007:2559`, `0009:2464`, `0027:263`) are
+   **permanently-false dead code that reads as live protection** — it already misled one analysis
+   lane this session into citing a "closed-period hard-block" that does not exist. Cleanup (either
+   delete the guards or replace the stub with the real predicate) belongs to the **close wave**
+   that builds the period model; until then, any reader must treat those guards as inert.
+5. **MSIC is collected and then dropped — LANDED, 0036 §E (2026-07-30).** It appeared only in
    `interview.v1/v2`; zero occurrences in migrations 0001..0035, so it never reached
    `get_context_pack`. **[V]** Fixed as a CoR **patch** (not a rebuild — 0017/0018/0019 each
    rewrote the live pack body via dynamic SQL; a rebuild would have reverted all three): the pack's
@@ -214,6 +227,13 @@ Lands **before** any Wave C schema. Bundled to avoid migration-number contention
    end-to-end in the human lane. Note the live data reality: only the synthetic sandbox client has
    an answered MSIC today — the three real BELCORT clients predate the interview_v2 question, so
    their backfill is an owner action through a sanctioned verb, never a hand INSERT.
+   **Scope note (session audit 2026-07-30):** the early phrasing said "MSIC + business
+   description" — the interview captures **no business-description item at all** (verified:
+   `interview.v2.questions.ts` item keys), so msic-only §E was the full deliverable, not a
+   narrowing. A business-description interview item is a possible future interview addition.
+   **POST-CEREMONY ACTION: backfill MSIC for the three real BELCORT clients** through a
+   sanctioned lane against their committed plans — the pack carries the key from the moment 0036
+   deploys, but it reads null until the answers exist.
 
 ---
 
@@ -271,6 +291,26 @@ satisfy that leg in one sitting. And the advertised "6 distinct documents" is no
 `distinct_docs` is returned but **no caller reads it**; all three sites bind `distinct_invoices`
 **[L]** — the enforced rule is *stricter* than advertised.
 
+**The runtime follow-up bundle for closing this lane** (session audit 2026-07-30 — each item was
+found this session and none is scheduled elsewhere; they travel TOGETHER when the unattended sales
+drafter is built, except the last which can ride any earlier chatTurn bump):
+1. The new frozen `autoDraft_vN`: `coding_kind` from the model, a sales prompt shape, a
+   **customer** counterparty proposal (C0's §D direction gate already protects the interim).
+2. **The signing-time surface for tax-silent invoices**: before a rule is signed, show the owner
+   what fraction of the accrued sightings' documents are tax-silent — i.e. how often the signed
+   rule would refuse `not_corroborated`. Without it the owner signs a rule that then refuses most
+   invoices (§7-A item 3).
+3. The floor's two comment/doc defects above — correct the `_ocr_sales_floor` header comment
+   (posting-date basis) and either read `distinct_docs` or delete it from the return shape.
+4. True caller-run-identity for `settle_autodraft_task`: a 6-arity settle (a defaulted 6th param
+   would make every 5-arg call planner-ambiguous) + the new `autoDraft_vN` passing the run id.
+   Optional hardening — C0 §B's DB-side ownership check covers the practical case.
+5. Optional refusal copy: add `tax_leg_missing` to `Clr21Reason` + `CLR21_REASON_MESSAGES`
+   (`autoDraft.v5.errors.ts`) — today it falls back to the generic CLR21 message.
+6. **`chatTurn_v9`, one prompt line** (independent of the drafter): tell the chat lane to code a
+   counter/cash purchase as a generic `journal_entry` instead of retrying `supplier_bill` into a
+   loud-but-useless CLR23 dead end. Never edit v8.
+
 ### B. The structural hole this audit found: `coding_kind` has no roadmap
 The classifier recognises **17 document kinds**; the books can code **3**. Searching PRD,
 REBUILD-PLAN, ARCHITECTURE and all three project logs for a statement of where the other 14 land
@@ -286,7 +326,10 @@ earn a typed lane in which wave — *including the explicit decision that `claim
 
 **Five behaviours have no home in any artifact** (real holes, not deferrals): staff advances · staff
 allowances · self-billed e-Invoice obligation detection · withholding tax *as a mechanic* · foreign
-currency. **[L]**
+currency. **[L]** **Destination (session audit 2026-07-30): a PRD §4 amendment naming each with its
+wave, drafted at the WAVE C CLOSE alongside the wave's ADRs — before Wave D starts.** (Foreign
+currency already carries WC-R5's explicit re-deferral; self-billed detection has verified primary-
+source trigger rules waiting in `my-tax-verified-2026-07-29.md` §1.6 when it is built.)
 
 **Worth knowing, on the credit side:** the COA template already carries an expert Malaysian
 treatment vocabulary built *ahead* of the engines that will consume it — a four-way entertainment
