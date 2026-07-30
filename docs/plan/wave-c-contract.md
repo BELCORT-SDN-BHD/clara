@@ -3,6 +3,9 @@
 > **Status: RATIFIED IN PART, 2026-07-29.** The owner ruled every fork in §2 during the Wave-C
 > grilling session. §3 (ground truth) is verified. §4 (the slicing) follows from §2 and is the
 > build order of record. §7 items remain open and are named as open.
+> **Execution: C0 CLOSED (0036, ADR-051) · C-a CLOSED AND LIVE (0037, ADR-052, 2026-07-30 —
+> the F3 debt paid; mechanism of record `docs/plan/wave-c-a-subledger-design.md` v2, rulings
+> WCA-R1..R9) · NEXT: C-b** (the two named C-b grilling questions in §4 C-b item 4 stand).
 >
 > **Authority:** the owner's rulings in §2 govern. On any conflict between this document and an
 > earlier plan artifact, this document governs for Wave C only; `docs/prd/PRD.md` §6 (LAW) governs
@@ -117,6 +120,13 @@ Lands **before** any Wave C schema. Bundled to avoid migration-number contention
 29 free, runtime holds 11** ✅ (the runbook's `~27` was a code walk of v25; live is v38).
 
 ### C-a — the subledger slice
+
+> **CLOSED AND LIVE (ADR-052, 2026-07-30; migration 0037; PR #150).** Every item below landed;
+> the mechanism of record is `docs/plan/wave-c-a-subledger-design.md` (v2, WCA-R1..R9) — read
+> it before touching the subledger. C-b interop notes: settlement is carried by the C-a
+> composites; bank-line exclusivity (this contract §4 C-b item 5-6) is the settlement
+> duplicate control whose absence is the named C-a→C-b interval; `bank_matches` matches
+> ENTRIES whose subledger effect already exists.
 
 **Owner-ruled additions (2026-07-30, from the C0 review ladder's out-of-scope findings):**
 - **`reconcile_sweep_runs` force-complete guard.** The recovery pass (0011:2709) force-completes
