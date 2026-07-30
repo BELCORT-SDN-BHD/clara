@@ -119,6 +119,21 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > `anchor_missing` guard → **two-reader corroboration LAST and ALONE**. Rationale + refusal
 > record: ADR-044/045/046, `docs/plan/research/wave-b/gate-p-build-refused-2026-07-27.md`,
 > `…/vision-alignment-audit-2026-07-27.md`.
+>
+> **STATUS (2026-07-30): WAVE C IS OPEN under a ratified contract (ADR-051).**
+> `docs/plan/wave-c-contract.md` is the mechanism of record — owner rulings **WC-R1..R12**
+> (the C-a/C-b/C-c split · match groups with a cents-invariant exclusivity · the tie-out as a
+> close-wave-ready receipt · both ingest paths · multi-currency re-ruled OUT · exact-zero
+> tie-out · the balance-chain-as-second-reader corroboration strengthening · shared-but-visible
+> attempt budget · the retained `coding_kind` axis with `customer_receipt`/`supplier_payment` ·
+> no employee counterparty · Rome-then-BELCORT acceptance · structured sales autopost out of
+> the wave), the verified ground truth, and the open items. **C0 is CLOSED**: migration 0036
+> live 2026-07-30 (35 migrations · runtime v38 · postverify 6/6) — the #52 nonzero-tax belt,
+> the #51 losing-dispatch no-ops, the #53 budget visibility, the sales mis-route gate, and
+> MSIC→context pack, built through a four-lane review ladder (3-lens Claude adversarial +
+> independent Codex; four BLOCKERs caught, each invisible to the lane before it). **NEXT:
+> C-a (subledger + allocation), fresh session, design-first.** The extraction-slice /
+> settlement history above stands as written (ADR-047..050 closed it all).
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
