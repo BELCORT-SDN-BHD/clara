@@ -13,6 +13,14 @@
 // facts task). The held-egress bulk release + the stranded requeue are DB-side and
 // already cover both lanes (release_held_document_tasks / requeue_stranded_document_task
 // key by task, and the 0009 claim/release bodies cover lane in ('ocr','invoice_facts')).
+//
+// WAVE C-b (design part2 §5): two MORE lanes — 'statement_facts' (pdf/image, vendor egress
+// under the typed statement_extraction consent) and 'statement_parse' (csv/ofx, a free
+// in-process parse) — both dispatched to the ONE statementFacts_v1 workflow, which branches
+// on the lane inside. The same change turns `enqueueForLane` from a fall-through into an
+// EXPLICIT ALLOWLIST: an unrecognised lane returns undefined and warns once instead of
+// being driven into documentIngest. Read that function's own header for why the old default
+// was a live hazard rather than a tidy-up.
 
 import { listTaskMetas, mergeTaskMeta, removeTaskMeta, writeTaskMeta } from "./spool.mjs";
 import { verifyCanonical } from "./storage.mjs";
@@ -22,6 +30,9 @@ let warnedDocumentSelectGap = false;
 let warnedInvoiceFactsEnqueueGap = false;
 let warnedLocalFactsEnqueueGap = false;
 let warnedClassifyEnqueueGap = false;
+let warnedStatementFactsEnqueueGap = false;
+/** Lanes this image does not recognise at all, warned once each (see enqueueForLane). */
+const warnedUnknownLanes = new Set();
 
 /** True iff the error is the engine's "run id unknown" signal. */
 export function isRunNotFound(err) {
@@ -32,19 +43,43 @@ function documentOp(prefix, taskId) {
   return `${prefix}:${taskId}`;
 }
 
-/** The re-enqueue driver for a task's lane. 'invoice_facts' rides its own workflow
- *  (invoiceFacts_v1); 'local_facts' rides the non-frozen MyInvois consumer (Wave A2 — no
- *  WDK workflow); 'classify' rides the non-frozen classify consumer (Wave A2.1 — no WDK
- *  workflow, its OWN leader loop discovers + drives queued tasks), so the shared reconciler
- *  has NO dispatch role for it and MUST NOT fall through to documentIngest (that would start
- *  an Azure DI OCR run for a classify task — real vendor egress — which then fails at
- *  persist_document_extraction, CLR16). Returns the injected enqueue fn, or undefined when the
- *  lane is owned elsewhere / the supervisor has not wired that lane. */
+/** The re-enqueue driver for a task's lane — an EXPLICIT ALLOWLIST (Wave C-b, design part2
+ *  §5 [R1]). It used to FALL THROUGH to documentIngest for anything it did not recognise.
+ *  That default was safe only while every unknown lane happened to be an OCR-shaped one; it
+ *  stopped being safe the moment a lane existed whose whole point is that it must not run
+ *  through a consentless generic OCR pass. Deploy order is runtime-image-FIRST, so this
+ *  image demonstrably runs against a database that will later gain lanes it has never heard
+ *  of — and under the old default, a `statement_facts` task appearing in that window would
+ *  have been driven straight into documentIngest: real Azure egress on a bank statement,
+ *  outside the typed consent gate entirely. An unknown lane now returns undefined and warns
+ *  ONCE; the task simply waits for the image that owns it.
+ *
+ *  Per lane: 'ocr'/'structured_parse'/'none' ride documentIngest; 'invoice_facts' rides its
+ *  own workflow (invoiceFacts_v1); 'statement_facts'/'statement_parse' ride statementFacts_v1
+ *  (ONE workflow, branching on the lane inside — design §4.3); 'local_facts' rides the
+ *  non-frozen MyInvois consumer (Wave A2 — no WDK workflow); 'classify' rides the non-frozen
+ *  classify consumer (Wave A2.1 — its OWN leader loop discovers + drives queued tasks), so
+ *  the shared reconciler has NO dispatch role for it and MUST NOT fall through to
+ *  documentIngest (that would start an Azure DI OCR run for a classify task — real vendor
+ *  egress — which then fails at persist_document_extraction, CLR16).
+ *
+ *  Returns the injected enqueue fn, or undefined when the lane is owned elsewhere / the
+ *  supervisor has not wired that lane / the lane is unknown to this image. */
 function enqueueForLane(deps, lane) {
+  if (lane === "ocr" || lane === "structured_parse" || lane === "none") return deps.enqueueDocumentIngest;
   if (lane === "invoice_facts") return deps.enqueueInvoiceFacts;
+  if (lane === "statement_facts" || lane === "statement_parse") return deps.enqueueStatementFacts;
   if (lane === "local_facts") return deps.enqueueLocalFacts;
   if (lane === "classify") return undefined; // owned by the classify leader loop, never documentIngest
-  return deps.enqueueDocumentIngest;
+  if (!warnedUnknownLanes.has(String(lane))) {
+    warnedUnknownLanes.add(String(lane));
+    (deps.log ?? (() => {}))(
+      `[reconcile] unknown document lane '${lane}' — NOT dispatched. This image does not own that lane; `
+      + "it is never fallen through to documentIngest (that would start a generic OCR run outside the lane's own "
+      + "consent/egress controls). Deploy the image that owns it.",
+    );
+  }
+  return undefined;
 }
 
 /** DB-first intake/reservation reclamation. Sidecars remain a fast resume index,
@@ -258,6 +293,10 @@ export async function reconcileDocumentTasks(client, deps) {
         if (task.lane === "local_facts" && !warnedLocalFactsEnqueueGap) {
           warnedLocalFactsEnqueueGap = true;
           log("[reconcile] local_facts re-enqueue skipped: deps.enqueueLocalFacts not wired — a MyInvois facts task is NEVER driven through documentIngest (supervisor must provide enqueueLocalFacts)");
+        }
+        if ((task.lane === "statement_facts" || task.lane === "statement_parse") && !warnedStatementFactsEnqueueGap) {
+          warnedStatementFactsEnqueueGap = true;
+          log("[reconcile] statement re-enqueue skipped: deps.enqueueStatementFacts not wired — a bank-statement task is NEVER driven through documentIngest (that would run a generic OCR pass outside the typed statement_extraction consent gate; supervisor must provide enqueueStatementFacts)");
         }
         if (task.lane === "classify" && !warnedClassifyEnqueueGap) {
           warnedClassifyEnqueueGap = true;

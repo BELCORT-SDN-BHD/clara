@@ -1,0 +1,355 @@
+// CORROBORATION + the persist payload contract for the bank-statement lane
+// (Wave C-b design §3, §4.2, §4.3). This module owns two things and nothing else:
+//
+//   1. THE VERDICT. Given two independent reads (or one read plus the chain, on the
+//      structured lane), decide whether the statement is CORROBORATED — and when it is not,
+//      name the refusal with one of the design's own codes, in the design's own order.
+//   2. THE PAYLOAD. Build the exact jsonb `clara.persist_statement_facts(p_task, p_payload)`
+//      consumes, so `bank_statements` / `bank_statement_lines` are written from a shape
+//      whose keys are the COLUMN NAMES of design §4.2 — one mapping, stated once.
+//
+// WHY THE VERDICT IS COMPUTED RUNTIME-SIDE AND SHIPPED, not re-derived in the DB. The DB
+// cannot see the two reads: reader-1 lives in stored layout geometry, reader-2 in a vendor
+// response that never becomes a row. What the DB CAN and DOES re-derive is everything that
+// binds money — the chain, the printed totals, continuity, period sanity, provenance. So
+// the runtime's job here is narrow and honest: prove the two readers said the same thing,
+// hash what they agreed, and hand the DB numbers it re-checks for itself. The corroboration
+// receipt is evidence, never authority (`corroborated` is an explicit two-reader agreement,
+// ADR-047/048 — confidence is GONE).
+//
+// REFUSAL ORDER (design §4.3, and it matters — the first true one wins so the practitioner
+// sees the ROOT cause rather than a downstream symptom):
+//   header_unreadable   — an endpoint or another load-bearing header field is missing from
+//                         EITHER read. Endpoints come from PRINTED LABELS; a reader that
+//                         cannot produce them independently refuses (§3). Never derived.
+//   totals_unreadable   — the printed TOTAL DEBIT / TOTAL CREDIT pair is missing on the OCR
+//                         path. MANDATORY there: it is the one control that catches an
+//                         adjacent omission the running balance cannot see (§3).
+//   readers_disagree    — the two reads differ on the full header or on the per-line numeric
+//                         skeleton (entry_date, amount, running balance, equal counts).
+//   chain_broken        — the agreed read does not satisfy the statement identity.
+// Descriptions are NEVER part of the set: they are uncorroborated prose (§4.2).
+//
+// THE ZERO-LINE CASE IS LEGAL [C]. One month of the real corpus has no activity at all. A
+// zero-line statement still corroborates its FULL header, and `line_count = 0 ⇒ opening =
+// closing` is checked by the chain like any other closure. The degenerate case is a cell,
+// not an exception path.
+
+import { createHash } from "node:crypto";
+import { chainReceipt } from "./statement-grammar.mjs";
+import { HEADER_FIELDS } from "./statement-layout-reader.mjs";
+
+/** Absence of a printed currency reads MYR (WC-R5 — the 0023 posture). Applied HERE, once,
+ *  after both readers have reported what they actually saw. */
+const DEFAULT_CURRENCY = "MYR";
+
+export class StatementRefusal extends Error {
+  constructor(code, message, detail = {}) {
+    super(message);
+    this.name = "StatementRefusal";
+    this.code = code;
+    this.detail = detail;
+  }
+}
+
+const currency = (header) => header?.currency ?? DEFAULT_CURRENCY;
+
+/** The header fields that must be present in BOTH reads before anything else is judged. */
+function missingHeaderFields(header) {
+  return HEADER_FIELDS.filter((field) => field !== "total_debit_cents" && field !== "total_credit_cents")
+    .filter((field) => {
+      const value = field === "currency" ? currency(header) : header?.[field];
+      return value === null || value === undefined || value === "";
+    });
+}
+
+function missingTotals(header) {
+  return ["total_debit_cents", "total_credit_cents"].filter(
+    (field) => !Number.isSafeInteger(header?.[field]),
+  );
+}
+
+/** Header disagreements, by field name. `currency` is compared AFTER the MYR default, so a
+ *  statement neither reader saw a currency on agrees on MYR — while an explicit foreign
+ *  code on one side and silence on the other correctly disagrees. */
+function headerDisagreements(a, b) {
+  return HEADER_FIELDS.filter((field) => {
+    const left = field === "currency" ? currency(a) : a?.[field];
+    const right = field === "currency" ? currency(b) : b?.[field];
+    return left !== right;
+  });
+}
+
+/**
+ * Per-line numeric-skeleton disagreements. entry_date and amount_cents are compared
+ * ALWAYS. running_balance_cents is compared always TOO on the two-reader path: a printed
+ * statement prints one on every row, so a reader that could not read it has not read the
+ * row — treating a one-sided null as agreement would let a half-read line into the chain
+ * with no printed witness for its step.
+ */
+function lineDisagreements(a, b) {
+  const left = Array.isArray(a) ? a : [];
+  const right = Array.isArray(b) ? b : [];
+  if (left.length !== right.length) return [`line_count:${left.length}vs${right.length}`];
+  const out = [];
+  for (const [index, l] of left.entries()) {
+    const r = right[index];
+    const n = index + 1;
+    if (l?.entry_date !== r?.entry_date) out.push(`line_${n}_entry_date`);
+    if (l?.amount_cents !== r?.amount_cents) out.push(`line_${n}_amount_cents`);
+    if (
+      !Number.isSafeInteger(l?.running_balance_cents)
+      || !Number.isSafeInteger(r?.running_balance_cents)
+      || l.running_balance_cents !== r.running_balance_cents
+    ) out.push(`line_${n}_running_balance_cents`);
+  }
+  return out;
+}
+
+/**
+ * PREFLIGHT ONE READ, before the second one is paid for.
+ *
+ * `header_unreadable` and `totals_unreadable` fire when EITHER read is short of the field —
+ * so checking reader-1 ALONE is a strict subset of the two-reader verdict and can never
+ * reach a different conclusion. Running it before reader-2 is therefore free of semantic
+ * consequence and buys two things that matter: a statement reader-1 cannot read never costs
+ * a vendor call, and — more importantly — it never CONSUMES A GOVERNED-EGRESS
+ * AUTHORIZATION, which is a single-use record of a client's data leaving.
+ *
+ * Returns null when the read is fit to corroborate, or `{code, detail}` naming the refusal.
+ * `requireTotals` is false on the structured lane: a format with no printed-totals field
+ * (OFX) must not be refused for a field it cannot have (design §4.3).
+ */
+export function preflightRead(read, { requireTotals = true } = {}) {
+  const header = read?.header ?? {};
+  const missing = missingHeaderFields(header);
+  if (missing.length) {
+    return { code: "header_unreadable", detail: { missing_fields: missing, reader: read?.receipt?.reader ?? null } };
+  }
+  if (!requireTotals) return null;
+  const totals = missingTotals(header);
+  return totals.length
+    ? { code: "totals_unreadable", detail: { missing_fields: totals, reader: read?.receipt?.reader ?? null } }
+    : null;
+}
+
+/**
+ * THE TWO-READER VERDICT (the OCR lane). Throws a `StatementRefusal` carrying one of the
+ * design's named codes, or returns the AGREED read plus its receipt.
+ *
+ * The agreed read is taken from reader-1 for the numeric skeleton (it is arithmetic over
+ * committed geometry, so it is the one a reviewer can re-derive from rows Clara already
+ * stores) and from reader-2 for DESCRIPTIONS only (§4.3 — "descriptions come from reader-2
+ * and are never load-bearing"). Every load-bearing number is identical by construction:
+ * they were just proved equal.
+ */
+export function corroborateTwoReaders(reader1, reader2) {
+  const h1 = reader1?.header ?? {};
+  const h2 = reader2?.header ?? {};
+
+  const missing = [...new Set([...missingHeaderFields(h1), ...missingHeaderFields(h2)])];
+  if (missing.length) {
+    throw new StatementRefusal("header_unreadable", "the printed statement header could not be read in full", {
+      missing_fields: missing,
+    });
+  }
+  const totals = [...new Set([...missingTotals(h1), ...missingTotals(h2)])];
+  if (totals.length) {
+    throw new StatementRefusal("totals_unreadable", "the printed TOTAL DEBIT / TOTAL CREDIT cross-check is missing", {
+      missing_fields: totals,
+    });
+  }
+  const headerDiff = headerDisagreements(h1, h2);
+  const lineDiff = lineDisagreements(reader1?.lines, reader2?.lines);
+  if (headerDiff.length || lineDiff.length) {
+    throw new StatementRefusal("readers_disagree", "the two readers did not agree on the statement facts", {
+      header_fields: headerDiff,
+      // Bounded: a wholly-garbled read must not put thousands of tokens into a refusal.
+      line_fields: lineDiff.slice(0, 25),
+      line_field_count: lineDiff.length,
+    });
+  }
+
+  const header = { ...h1, currency: currency(h1), line_count: (reader1.lines ?? []).length };
+  const lines = (reader1.lines ?? []).map((line, index) => ({
+    ...line,
+    line_no: index + 1,
+    description: reader2?.lines?.[index]?.description ?? line.description ?? null,
+  }));
+  const chain = chainReceipt(header, lines);
+  if (!chain.closes || chain.totals_ok === false) {
+    throw new StatementRefusal("chain_broken", "the statement's own balance chain does not close", { chain });
+  }
+  return {
+    header,
+    lines,
+    corroboration: {
+      corroborated: true,
+      method: "two_reader",
+      header_fields: [...HEADER_FIELDS],
+      line_count: lines.length,
+      chain,
+      reader1_receipt: reader1?.receipt ?? null,
+      reader2_receipt: reader2?.receipt ?? null,
+    },
+  };
+}
+
+/**
+ * THE CHAIN-IS-SECOND-READER VERDICT (the structured lane, WC-R7). One deterministic parse
+ * of bytes the BANK produced; what stands in for a second reader is the statement identity
+ * itself. Printed totals are checked WHEN PRESENT — a CSV export that carries them is held
+ * to them; OFX, which has no such field, is not refused for a field its format lacks.
+ */
+export function corroborateChain(reader) {
+  const header = { ...(reader?.header ?? {}), currency: currency(reader?.header) };
+  const lines = (reader?.lines ?? []).map((line, index) => ({ ...line, line_no: index + 1 }));
+  header.line_count = lines.length;
+
+  const missing = missingHeaderFields(header);
+  if (missing.length) {
+    throw new StatementRefusal("header_unreadable", "the statement file does not state its full header", {
+      missing_fields: missing,
+    });
+  }
+  const chain = chainReceipt(header, lines);
+  if (!chain.closes || chain.totals_ok === false) {
+    throw new StatementRefusal("chain_broken", "the statement's own balance chain does not close", { chain });
+  }
+  return {
+    header,
+    lines,
+    corroboration: {
+      corroborated: true,
+      method: "chain_second_reader",
+      header_fields: [...HEADER_FIELDS],
+      line_count: lines.length,
+      chain,
+      reader1_receipt: reader?.receipt ?? null,
+      reader2_receipt: null,
+    },
+  };
+}
+
+/**
+ * `facts_hash` — the sha256 of the AGREED READ (design §4.2: "the agreed corroborated read,
+ * hashed — who agreed is provable later"). Canonicalized by construction: fixed key order,
+ * fixed field set, no whitespace. DESCRIPTIONS ARE EXCLUDED deliberately — they are
+ * uncorroborated prose, so including them would make the hash of an agreement depend on
+ * something the readers never had to agree on.
+ */
+export function statementFactsHash(header, lines) {
+  const canonical = {
+    header: Object.fromEntries([...HEADER_FIELDS, "line_count"].map((field) => [field, header?.[field] ?? null])),
+    lines: (lines ?? []).map((line) => [
+      line.line_no,
+      line.entry_date,
+      line.value_date ?? null,
+      line.amount_cents,
+      line.running_balance_cents ?? null,
+    ]),
+  };
+  return createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
+}
+
+/**
+ * THE PERSIST PAYLOAD CONTRACT — the exact jsonb `clara.persist_statement_facts(p_task,
+ * p_payload)` consumes (design §4.3). Keys are the COLUMN NAMES of §4.2 so the DB verb maps
+ * one-to-one and nothing is renamed in flight:
+ *
+ * {
+ *   "ingest_mode":  "ocr" | "structured",           -- bank_statements.ingest_mode
+ *   "facts_hash":   "<sha256 hex>",                 -- bank_statements.facts_hash
+ *   "reader1": { "extraction_id": uuid|null, "source": text, "engine_id": text|null },
+ *   "reader2": { "extraction_id": uuid|null, "source": text, "engine_id": text|null,
+ *                "raw_sha256": hex|null, "normalization_version": text|null,
+ *                "pages_used": int|null },
+ *   "corroboration": { "corroborated": true, "method": text, "header_fields": [...],
+ *                      "line_count": int, "chain": {...}, ...receipts },
+ *   "header": {
+ *      "institution_code": text, "institution_name": text|null,
+ *      "account_number": text, "account_number_normalized": text,
+ *      "currency": "MYR",
+ *      "period_start": date, "period_end": date, "statement_date": date,
+ *      "opening_cents": int, "closing_cents": int,
+ *      "total_debit_cents": int|null, "total_credit_cents": int|null,
+ *      "line_count": int
+ *   },
+ *   "lines": [ { "line_no": int, "entry_date": date, "value_date": date|null,
+ *                "description": text|null, "amount_cents": int (<>0, + = into the account),
+ *                "running_balance_cents": int|null } ]
+ * }
+ *
+ * The DB re-derives the chain, the printed-totals cross-check, both-edge continuity, period
+ * sanity, the duplicate/overlap refusals, the line-date bounds and the account binding from
+ * these numbers — the payload is EVIDENCE, never an instruction. `reader2.extraction_id` is
+ * null on the structured lane by construction (there is no second reader), which is how the
+ * DB tells `ingest_mode='structured'` apart from a half-built OCR read.
+ */
+export function buildStatementPersistPayload({ ingestMode, agreed, reader1, reader2 }) {
+  const factsHash = statementFactsHash(agreed.header, agreed.lines);
+  return {
+    ingest_mode: ingestMode,
+    facts_hash: factsHash,
+    reader1: {
+      extraction_id: reader1?.extraction_id ?? null,
+      source: reader1?.source ?? null,
+      engine_id: reader1?.engine_id ?? null,
+    },
+    reader2: {
+      extraction_id: reader2?.extraction_id ?? null,
+      source: reader2?.source ?? null,
+      engine_id: reader2?.engine_id ?? null,
+      raw_sha256: reader2?.raw_sha256 ?? null,
+      normalization_version: reader2?.normalization_version ?? null,
+      pages_used: reader2?.pages_used ?? null,
+    },
+    corroboration: agreed.corroboration,
+    header: {
+      institution_code: agreed.header.institution_code,
+      institution_name: agreed.header.institution_name ?? null,
+      account_number: agreed.header.account_number,
+      account_number_normalized: agreed.header.account_number_normalized,
+      currency: agreed.header.currency,
+      period_start: agreed.header.period_start,
+      period_end: agreed.header.period_end,
+      statement_date: agreed.header.statement_date,
+      opening_cents: agreed.header.opening_cents,
+      closing_cents: agreed.header.closing_cents,
+      total_debit_cents: agreed.header.total_debit_cents ?? null,
+      total_credit_cents: agreed.header.total_credit_cents ?? null,
+      line_count: agreed.lines.length,
+    },
+    lines: agreed.lines.map((line) => ({
+      line_no: line.line_no,
+      entry_date: line.entry_date,
+      value_date: line.value_date ?? null,
+      description: line.description ?? null,
+      amount_cents: line.amount_cents,
+      running_balance_cents: line.running_balance_cents ?? null,
+    })),
+  };
+}
+
+/** The design §4.3 refusal taxonomy. A code OUTSIDE this set is never handed to
+ *  `fail_statement_facts` — `ck_processing_task_error_code_0016` (widened by the migration)
+ *  would refuse the row, and a task that cannot record its own failure is a stuck task. */
+export const STATEMENT_FAILURE_CODES = Object.freeze([
+  "header_unreadable",
+  "totals_unreadable",
+  "readers_disagree",
+  "chain_broken",
+  "continuity_mismatch",
+  "duplicate_period",
+  "overlapping_period",
+  "non_myr_statement",
+  "account_unregistered",
+  "account_inactive",
+  "statement_multi_client",
+  "period_invalid",
+  "line_date_out_of_period",
+]);
+
+export function isStatementFailureCode(code) {
+  return STATEMENT_FAILURE_CODES.includes(String(code ?? ""));
+}

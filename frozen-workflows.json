@@ -480,6 +480,18 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/statementFacts.v1.behavior.mjs": {
+      "sha256": "e64cedb1cade1980d55b4e664b1e8125e7ab1f8317194738e9ed4eb6e08b3062",
+      "note": ""
+    },
+    "packages/runtime/workflows/statementFacts.v1.impl.ts": {
+      "sha256": "c891cda8dd7253bf2cc561839d0bbac53e0e56fe85f2ae61ab4d1137ca6664bf",
+      "note": ""
+    },
+    "packages/runtime/workflows/statementFacts.v1.ts": {
+      "sha256": "a9aac58999eda533682194ca7e431e4ccc2b88d3b9d7f8f7dbd64e847ee36e58",
+      "note": ""
+    },
     "packages/runtime/workflows/steps.ts": {
       "sha256": "ffaf17b5787f4238c54da8e79959acc591d7bb7b4ec55e0c3da614b8d286da52",
       "note": "",

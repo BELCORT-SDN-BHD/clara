@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { join } from "node:path";
-import { analyzeDocument, AZURE_ENGINE_SNAPSHOT } from "./egress.mjs";
+import { analyzeDocument } from "./egress.mjs";
 import { detectDocument, IntakeScanError, scanFile } from "./scan.mjs";
 import {
   intakePaths,
@@ -21,19 +21,13 @@ import {
 } from "./spool.mjs";
 import { downloadCanonical, putCanonical, StorageError, verifyCanonical } from "./storage.mjs";
 import { parseStructured } from "./structured.mjs";
-import { MYINVOIS_ENGINE_SNAPSHOT } from "./myinvois.mjs";
+import { laneSnapshot } from "./intake-lanes.mjs";
 import { processDocumentTaskBehavior } from "../workflows/documentIngest.behavior.mjs";
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const CAPABILITY_TTL_MS = 15 * 60_000;
 const activeIntakes = new Set();
 const NOOP_LOG = /** @type {(message: string) => void} */ (() => {});
-
-const STRUCTURED_ENGINE_SNAPSHOT = Object.freeze({
-  engineId: "clara-structured:v1",
-  engineConfig: { provider: "clara", parser: "values-only", version: 1 },
-  versionN: 1,
-});
 
 const MIME_ALIASES = new Map([
   ["application/pdf", "application/pdf"],
@@ -46,6 +40,11 @@ const MIME_ALIASES = new Map([
   ["text/xml", "application/xml"],
   ["text/csv", "text/csv"],
   ["text/tab-separated-values", "text/tab-separated-values"],
+  // OFX / QFX (Wave C-b §4.3). Every spelling a portal may declare canonicalizes to ONE
+  // value: the declared MIME is compared byte-for-byte against the DETECTED one, so an
+  // alias table admitting two spellings would reject half the uploads it appears to allow.
+  ...["application/x-ofx", "application/ofx", "application/vnd.intu.qfx", "application/x-qfx"]
+    .map((declared) => [declared, "application/x-ofx"]),
   ["application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
   ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"],
 ]);
@@ -145,14 +144,6 @@ async function replayFinalizationWithoutSidecar(withRuntime, intakeId, token) {
       [intakeId, hash, fixedOp],
     );
   });
-}
-
-function laneSnapshot(format) {
-  if (["xlsx", "docx", "csv", "tsv"].includes(format)) {
-    return { lane: "structured_parse", ...STRUCTURED_ENGINE_SNAPSHOT };
-  }
-  if (format === "xml") return { lane: "structured_parse", ...MYINVOIS_ENGINE_SNAPSHOT }; // facts pass = separate local_facts task
-  return { lane: "ocr", ...AZURE_ENGINE_SNAPSHOT };
 }
 
 function failureCode(err) {
