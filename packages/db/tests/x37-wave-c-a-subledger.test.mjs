@@ -25,30 +25,50 @@
 //   x37.h  unallocate -> re-allocate (exact-negation pairs, no double-undo)
 //   x37.i  the two-sided bound, BOTH directions (over-allocation AND inflation)
 //   x37.j  group law refusals: cross-counterparty + non-zero net per domain
-//   x37.k  the concurrent allocation race (two sessions; the locks hold)
+//   x37.k  the concurrent races (two sessions, blocking PROVEN): allocate vs
+//          allocate, and reverse vs allocate (the client advisory rung)
 //   x37.l  the reversal matrix (clean unwind / settled refused / receipt refused
-//          / high-stakes draft mirror approved later fires the hook)
+//          / high-stakes draft mirror approved later fires the hook / a revise of a
+//          mirror is refused reversal_mirror_not_revisable / an allocation against a
+//          reversed entry's item is refused allocation_target_reversed and the
+//          reversal unwind applies instead)
 //   x37.m  wrong-client correction of an open-itemed bill -> mirror unwind, ties
 //   x37.n  the WCA-R9b named refusals (counterparty kind; cross-domain contra)
-//   x37.o  the credit-note wall on allocate_payment
+//   x37.o  the credit-note wall on allocate_payment + its approve-time re-derivation
 //   x37.p  the A+ belt: a rule-stamped settlement row violates the CHECK
 //   x37.q  the A+ core refusal, named: settlement_not_autopostable
 //   x37.r  no draft verb can make a settlement kind (WCA-R6/R7)
 //   x37.s  authority catalog: composites authenticated-ONLY; cores ungranted;
-//          zero wake allowlist entries
+//          zero wake allowlist entries; the section-4.9 lock-order acquisition
+//          sequence, pinned off prosrc for all four composites + both patched verbs
 //   x37.t  approve_entry passes NO checked_via_rule_id; execute_rule_post stays
 //          login-direct only
-//   x37.u  the high-stakes threshold: draft -> a DISTINCT checker approves -> ties
+//   x37.u  the high-stakes threshold: draft -> a DISTINCT checker approves -> ties,
+//          plus the FIVE staleness axes that refuse CLR10 allocation_stale at the
+//          checker's approve (counterparty / settlement_item_count /
+//          settlement_amount / outstanding / proposal_unpinned)
 //   x37.v  the solo-firm high-stakes variant (attestation)
 //   x37.w  the WCA-R8 EVIDENCE PIN (three employee claims still breed a
 //          vendor_account proposal -- the debt's live witness, not a fix)
 //   x37.x  CLR26: an open client-scope question blocks money movement too
-//   x37.y  outbox law: a failed composite leaves ZERO events/items/allocations
+//   x37.y  outbox law: a composite that fails AFTER its entry insert (the CLR26
+//          block, inside the core) leaves ZERO events/items/allocations/entries
+//   x37.y2 input validation: a duplicated item in one allocation set, refused by
+//          name BEFORE any write (the cell x37.y used to be, retitled honestly)
 //   x37.z  decomposition correctness: a multi-counterparty generic JV and an
 //          opening entry, classifier output vs materialised rows
 //   x37.aa the structural belt: grain uniqueness (the backfill's idempotency),
 //          append-only, force-RLS, the item_kind matrix, the allocation surface
 //   x37.ab allocate_payment end-to-end (the AP mirror) with a discount received
+//   x37.ac the SIX settlement-floor CLR23 refusals, one named reason each, plus the
+//          deferred-trigger proof that the floor really fires at commit
+//   x37.ad belt-1 REFUSES a raw-approved control entry with no item
+//          (subledger_entry_untied) -- the belt's positive half is every other cell
+//   x37.ae a REAL sales_credit_note end to end: the classifier's ladder-3 branch and
+//          the kind matrix's negative sign on a live AR lane
+//   x37.af the section-4.10 sweep force-complete guard: a recovered run completes the
+//          DRAFTED task and leaves the non-drafted running task alone (both directions)
+//   x37.ag the composites refuse a control-class discount account (both domains)
 //
 // Serial discipline: --test-concurrency=1 (the race cell drives two sessions of
 // the shared pool by hand, and the identity assertions are cumulative).
@@ -68,6 +88,7 @@ import {
   uniqueIndexDefs, rlsFlags, entryStatusOf, normalize,
   openQuestion, resolveOpenQuestion, proposeCorrection, approveCorrection,
   assertRaisesOneOf, HIGH_STAKES_CENTS,
+  reviseEntry, mergeCounterparties, openSweepRun, reconcileSweepRuns,
 } from "./a21-helpers.mjs";
 import { holdThenContend, sawDeadlock, GUARD } from "./wave-a-race.mjs";
 
@@ -97,11 +118,14 @@ const CLR05 = "CLR05";
 const CLR10 = "CLR10";
 const CLR26 = "CLR26";
 
-/** Belt-2's SQLSTATE is contract-SILENT (the design says the new refusals reuse
- *  existing codes and names no code for the deferred bound/group belts). This is
- *  the plausible existing-code set; the cell records the actual as an interface
- *  expectation rather than inventing a CLR. */
-const BELT_CODES = [CLR10, "CLR07", "CLR08", "23514"];
+/** Belt-2's SQLSTATE. The design is contract-SILENT about it (it says the new
+ *  refusals reuse existing codes and names none for the deferred bound/group belts),
+ *  so the first run of this battery recorded the ACTUAL code as a lane note. It is
+ *  CLR10 for both belt-2 arms (the two-sided bound and the group law) -- observed on
+ *  the integration run, and now PINNED rather than left as a tolerant any-of set. A
+ *  tolerant set is how a belt that starts raising 23514 (a bare CHECK, i.e. the
+ *  named refusal was LOST) keeps passing; this pin turns that into a red cell. */
+const BELT_CODES = [CLR10];
 
 let has37 = false;
 let world = null;
@@ -471,7 +495,7 @@ async function purchaseDoc(sub, { client, gross }) {
 
 /** A TYPED supplier_bill, approved -- the only lane that mints coding_kind
  *  ='supplier_bill' is the wake drafter (the human verb carries no coding kind). */
-async function approvedSupplierBill(sub, { client, cp, cents, control = AP1 }) {
+async function approvedSupplierBill(sub, { client, cp, cents, control = AP1, checker = null, attestation = null }) {
   const firm = await firmOf(client);
   const cited = await purchaseDoc(sub, { client, gross: cents });
   const cred = await mintInteractive(firm);
@@ -482,7 +506,12 @@ async function approvedSupplierBill(sub, { client, cp, cents, control = AP1 }) {
     vendor: { existing_id: cp }, evidence: [ev(region?.id ?? cited.regionId, region?.text_content ?? cited.quote, FIELD.total)],
     codingKind: "supplier_bill", opKey: opk("x37-bill"),
   });
-  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x37-billa") });
+  const args = { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x37-billa") };
+  // A wake-drafted bill is AGENT-MADE, so at/above the high-stakes threshold the CLR05 floor
+  // demands an attestation from whoever approves it -- checker distinctness does not clear an
+  // agent maker. Callers that build a high-stakes fixture pass one.
+  if (attestation != null) args.attestation = attestation;
+  await approveEntry(checker ?? sub, args);
   return { entry: d.entry_id, ...cited };
 }
 
@@ -710,11 +739,16 @@ test("x37.g apply_open_items nets a credit against an invoice with ZERO GL movem
     client,
     applications: [{ source_item_id: credItem.id, target_item_id: inv.item, amount_cents: 30000 }],
   });
-  let group = groupOf(receipt);
-  if (!group) {
-    noteLane(`x37.g apply_open_items' receipt did not name its application_group under group_id/application_group/group (got ${JSON.stringify(receipt)}) -- derived from the written rows; an interface expectation for adjudication`);
-    group = await groupForItem(credItem.id);
-  }
+  // The receipt NAMES its group (`group_id`) -- asserted, not merely hoped for: a verb
+  // whose receipt stops naming the group it wrote is a real interface regression for
+  // C-c's workbench, and the derived fallback below would have hidden it.
+  assert.ok(
+    groupOf(receipt),
+    `apply_open_items' receipt names its application_group under group_id (got ${JSON.stringify(receipt)})`,
+  );
+  // The fallback stays as a belt: if the receipt ever loses the field the cell fails on the
+  // assertion above rather than on an opaque null-group query three lines later.
+  const group = groupOf(receipt) ?? (await groupForItem(credItem.id));
   assert.ok(group, "the apply wrote an application_group");
   assert.equal(await controlGl(client, "ar"), glBefore, "an apply moves the GL by ZERO -- it is a subledger event, not a posting");
   assert.equal(await outstandingOf(inv.item), 50000, "the invoice falls to RM500 outstanding");
@@ -920,6 +954,57 @@ test("x37.k concurrent allocation race: the second session BLOCKS (proven) and t
   assert.equal(out.b.ok, false, "session B did NOT also allocate the same outstanding -- the second full allocation is refused");
   noteLane(`x37.k losing session code=${out.b.code} reason=${String(out.b.message).slice(0, 160)}`);
   assert.equal(await outstandingOf(item), 0, "the item is settled EXACTLY once (outstanding zero, never negative)");
+
+  // -------------------------------------------------------------------------
+  // THE SECOND RACE: REVERSE vs ALLOCATE. The first race is allocate-vs-allocate,
+  // which the composites serialize on the client advisory rung they both take.
+  // reverse_entry historically took NEITHER advisory rung -- only the JE row lock,
+  // which a composite settling a PRE-EXISTING item never touches. So the two verbs
+  // ran fully concurrently past each other's reads: reverse checks "does this
+  // entry's item carry allocations?" and allocates writes "yes it does", in either
+  // order, and the loser is a reversed entry whose items carry live allocations
+  // pointing at an unwind that has already been written. This schedule proves the
+  // rung closed it -- and it proves it the only way a lock claim CAN be proven:
+  // by observing the second session BLOCK (pg_blocking_pids), because a schedule
+  // that never blocked would pass against no locking at all.
+  // -------------------------------------------------------------------------
+  const target = await openArItem(users.alice, { client, cp, cents: 41000, memo: "x37 reverse-vs-allocate target" });
+  const reverseSide = (c) => (async () => {
+    await c.query(GUARD);
+    const r = await c.query(
+      "select clara.reverse_entry(p_entry => $1, p_reason => $2, p_op_key => $3) as r",
+      [target.entry, "x37 race reversal", opk("x37-raceRev")],
+    );
+    return r.rows[0].r;
+  })();
+  const allocateSide = (c) => (async () => {
+    await c.query(GUARD);
+    const r = await c.query(
+      `select clara.allocate_receipt(p_client => $1, p_counterparty => $2, p_posting_date => $3::date,
+         p_memo => $4, p_bank_account => $5, p_amount_cents => $6::bigint,
+         p_allocations => $7::jsonb, p_op_key => $8, p_control_account => $9) as r`,
+      [client, cp, "2026-04-21", "x37 race receipt vs reversal", BANK, 41000,
+        JSON.stringify([{ item_id: target.item, amount_cents: 41000 }]), opk("x37-raceAlloc"), AR1],
+    );
+    return r.rows[0].r;
+  })();
+
+  const rr = await holdThenContend({
+    a: { role: ROLES.authenticated, jwtSub: users.bob, run: reverseSide },
+    b: { role: ROLES.authenticated, jwtSub: users.alice, run: allocateSide },
+  });
+  assert.ok(rr.provedBlocked, "the allocating session BLOCKED on the reversing session's client advisory rung (blocking-pid proven) -- reverse and allocate are serialized");
+  assert.ok(!sawDeadlock(rr), `no deadlock in either direction (a=${rr.a?.code ?? "ok"} b=${rr.b?.code ?? "ok"})`);
+  assert.equal(rr.a.ok, true, `the reversal committed (got ${rr.a.code} -- ${rr.a.message})`);
+  assert.equal(rr.b.ok, false, "the allocation that woke up behind it did NOT settle a claim the books had just withdrawn");
+  assert.equal(
+    /allocation_target_reversed/.test(String(rr.b.message)), true,
+    `the loser is refused by NAME -- allocation_target_reversed (got ${rr.b.code}: ${String(rr.b.message).slice(0, 200)})`,
+  );
+  assert.equal(
+    (await rootQuery("select count(*)::int as n from clara.open_item_allocations where item_id=$1", [target.item])).rows[0].n,
+    0, "and it wrote no allocation row at all -- the reversed entry's unwind stands alone",
+  );
   await assertTies(client, "x37.k allocation race");
 });
 
@@ -989,6 +1074,30 @@ test("x37.l reversal matrix: clean unwind / settled refused until unallocated / 
   assert.ok(bigMirror, "the high-stakes reversal produced a mirror");
   assert.equal(bigMirror.status, "draft", "a high-stakes reversal mirror stays a DRAFT for a checker");
   assert.equal((await itemsOf(bigMirror.id)).length, 0, "a DRAFT mirror materialises NOTHING -- only approved is in the books");
+
+  // (4b) THE MIRROR IS NOT REVISABLE. The sanctioned sequence high-stakes reverse ->
+  // revise_entry(the draft mirror, new amounts) -> approve_entry would otherwise break the
+  // unwind identity SILENTLY: revise rewrites the legs wholesale (and does not carry
+  // counterparty_id onto them), so the "exact negation" the whole reversal story rests on
+  // would become whatever the reviser typed. The refusal is the cheap structural guard;
+  // belt-1's legs-derived arm is the expensive one behind it.
+  const revised = await caught(() => reviseEntry(users.bob, {
+    entry: bigMirror.id, expectedRevision: bigMirror.revision_token,
+    lines: [
+      { account_code: AR2, debit_cents: 0, credit_cents: 1000, description: "revised mirror ar" },
+      { account_code: REVN, debit_cents: 1000, credit_cents: 0, description: "revised mirror rev" },
+    ],
+    opKey: opk("x37-revmirror"),
+  }));
+  assert.ok(revised, "revising a REVERSAL MIRROR must be refused -- an unwind is a negation, not a draft to edit");
+  assert.equal(revised.code, CLR10, `the mirror-revise refusal is CLR10 (got ${revised.code} -- ${revised.message})`);
+  assert.equal(
+    reasonOf(revised), "reversal_mirror_not_revisable",
+    `the named reason is reversal_mirror_not_revisable (got ${reasonOf(revised)})`,
+  );
+  assert.ok(/withdraw/i.test(String(revised.message)), `the message names the remedy -- withdraw the mirror and re-reverse (got: ${revised.message})`);
+  assert.equal(await entryStatusOf(bigMirror.id), "draft", "the refused revise left the mirror a draft");
+
   await approveEntry(users.alice, {
     entry: bigMirror.id, expectedRevision: bigMirror.revision_token,
     attestation: "x37 reviewed high-stakes reversal", opKey: opk("x37-rev5a"),
@@ -997,6 +1106,62 @@ test("x37.l reversal matrix: clean unwind / settled refused until unallocated / 
   const bigUnwind = await itemsOf(bigMirror.id);
   assert.equal(bigUnwind.length, 1, "approving the mirror fires the hook through approve path 1");
   assert.equal(Number(bigUnwind[0].amount_cents), -HIGH_STAKES_CENTS, "the deferred unwind is still the exact negation");
+
+  // (5) THE REVERSED TARGET IS NOT ALLOCATABLE -- the real-cash half. `clean` was reversed
+  // in (1): its item still reads +RM350 outstanding (the unwind is a SEPARATE item, and
+  // outstanding is per item, never netted across the pair), so without a reversed_by read
+  // every settlement verb would happily pay real money against a claim the books have
+  // already withdrawn. All THREE verbs must refuse under one named reason, and the message
+  // must point at the route that IS correct: apply the unwind.
+  assert.equal(await outstandingOf(clean.item), 35000, "the reversed entry's item still reads its full outstanding (this is exactly why the guard is needed)");
+  const cleanUnwindItem = unwind[0].id;
+
+  const rcptRev = await caught(() => allocateReceipt(sub, {
+    client, counterparty: cp, amountCents: 35000,
+    allocations: [{ item_id: clean.item, amount_cents: 35000 }],
+  }));
+  assert.ok(rcptRev, "allocate_receipt must REFUSE an item whose entry has been reversed");
+  assert.equal(rcptRev.code, CLR10, `the reversed-target refusal is CLR10 (got ${rcptRev.code} -- ${rcptRev.message})`);
+  assert.equal(reasonOf(rcptRev), "allocation_target_reversed", `the named reason is allocation_target_reversed (got ${reasonOf(rcptRev)})`);
+  assert.ok(/unwind|revers/i.test(String(rcptRev.message)), `the message points at the reversal unwind (got: ${rcptRev.message})`);
+
+  // The AP mirror of the same law, on its own reversed bill.
+  const apCp = await birthCounterparty(sub, { client, name: `X37 REVAPCO ${randomUUID().slice(0, 6)}` });
+  const apRev = await openApItem(sub, { client, cp: apCp, cents: 28000, memo: "x37 reversible purchase" });
+  await reverseEntry(users.bob, { entry: apRev.entry, reason: "x37 ap unwind", opKey: opk("x37-rev6") });
+  const payRev = await caught(() => allocatePayment(sub, {
+    client, counterparty: apCp, amountCents: 28000,
+    allocations: [{ item_id: apRev.item, amount_cents: 28000 }],
+  }));
+  assert.ok(payRev, "allocate_payment must REFUSE an item whose entry has been reversed");
+  assert.equal(reasonOf(payRev), "allocation_target_reversed", `the AP arm carries the same named reason (got ${reasonOf(payRev)})`);
+
+  // apply_open_items too -- an UNRELATED credit may not be set off against a withdrawn claim.
+  const strayEntry = await approvedGeneric(sub, {
+    client, cp, cpKind: "customer", debit: REVN, credit: AR1, cents: 12000, memo: "x37 stray credit",
+  });
+  const strayItem = (await itemsOf(strayEntry))[0];
+  const applyRev = await caught(() => applyOpenItems(sub, {
+    client, applications: [{ source_item_id: strayItem.id, target_item_id: clean.item, amount_cents: 12000 }],
+  }));
+  assert.ok(applyRev, "apply_open_items must REFUSE an unrelated credit against a reversed entry's item");
+  assert.equal(reasonOf(applyRev), "allocation_target_reversed", `the apply arm carries the same named reason (got ${reasonOf(applyRev)})`);
+
+  // (6) ...AND THE ROUTE THE MESSAGE NAMES ACTUALLY WORKS. The item's OWN reversal unwind
+  // applies against it: both sides go to zero, the GL never moves, and the pair leaves no
+  // phantom outstanding behind. This is the whole point of refusing (5) rather than
+  // silently allowing cash to chase a withdrawn claim -- so it is asserted here, not
+  // assumed. (It is also the boundary the guard must respect: the unwind's own entry is
+  // the MIRROR, which carries reversal_of, not reversed_by.)
+  const glBeforeUnwind = await controlGl(client, "ar");
+  const unwindApply = await applyOpenItems(sub, {
+    client, reason: "x37 apply the reversal unwind",
+    applications: [{ source_item_id: cleanUnwindItem, target_item_id: clean.item, amount_cents: 35000 }],
+  });
+  assert.ok(groupOf(unwindApply), "the unwind application commits and names its group");
+  assert.equal(await outstandingOf(clean.item), 0, "the reversed entry's item is closed by its own unwind");
+  assert.equal(await outstandingOf(cleanUnwindItem), 0, "and the unwind item is consumed exactly");
+  assert.equal(await controlGl(client, "ar"), glBeforeUnwind, "applying an unwind moves the GL by ZERO -- it is a subledger event");
   await assertTies(client, "x37.l reversal matrix");
 });
 
@@ -1117,6 +1282,34 @@ test("x37.o the credit-note wall: allocate_payment REFUSES an item whose documen
   assert.equal(err.code, CLR10, `the wall refuses CLR10 (got ${err.code} -- ${err.message})`);
   assert.equal(reasonOf(err), "credit_note_item", `the named reason is credit_note_item (got ${reasonOf(err)})`);
   assert.equal(await outstandingOf(item.id), 60000, "the refused payment moved nothing");
+
+  // THE APPROVE-TIME RE-DERIVATION (the TOCTOU half). set_document_kind can flip a
+  // document invoice -> credit_note at ANY moment, and the WCA-R7 draft window is a wide
+  // one: the composite's read happens when the maker proposes, the money moves when the
+  // checker approves, and between those two the wall has to be re-asked where the cash
+  // actually leaves. A maker-time-only wall is a wall with a scheduled opening.
+  const cp2 = await birthCounterparty(sub, { client, name: `X37 CNLATECO ${randomUUID().slice(0, 6)}`, registration: "201801370111" });
+  const big = await approvedSupplierBill(sub, {
+    client, cp: cp2, cents: HIGH_STAKES_CENTS, checker: world.users.bob,
+    attestation: "x37 reviewed the high-stakes agent-drafted bill",
+  });
+  const bigItem = (await itemsOf(big.entry))[0];
+  const draftPay = await allocatePayment(sub, {
+    client, counterparty: cp2, amountCents: HIGH_STAKES_CENTS,
+    allocations: [{ item_id: bigItem.id, amount_cents: HIGH_STAKES_CENTS }],
+  });
+  assert.equal(draftPay.status, "draft", "at the threshold the payment waits for a checker (the window this probe needs)");
+  // ...and the mis-code is discovered DURING that window (the x36c0 raw-stamp fixture idiom).
+  await rootQuery("update clara.documents set document_kind='credit_note' where id=$1", [big.documentId]);
+  const rev = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [draftPay.entry_id])).rows[0].revision_token;
+  const late = await caught(() => approveEntry(world.users.bob, {
+    entry: draftPay.entry_id, expectedRevision: rev, opKey: opk("x37-cnlate"),
+  }));
+  assert.ok(late, "the checker's approve must be REFUSED once the target's document is a credit note");
+  assert.equal(late.code, CLR10, `the approve-time wall refuses CLR10 (got ${late.code} -- ${late.message})`);
+  assert.equal(reasonOf(late), "credit_note_item", `the approve-time wall carries the SAME named reason (got ${reasonOf(late)})`);
+  assert.equal(await entryStatusOf(draftPay.entry_id), "draft", "the refused approve left the settlement a draft");
+  assert.equal(await outstandingOf(bigItem.id), HIGH_STAKES_CENTS, "and moved nothing against the mis-coded item");
   await assertTies(client, "x37.o credit-note wall");
 });
 
@@ -1293,6 +1486,69 @@ test("x37.s authority: the composites are authenticated-ONLY with no wake entrie
       assert.equal(await roleCanExecute(role, fn), false, `${role} must NOT execute clara.${fn} -- the classifier is an internal, ungranted helper`);
     }
   }
+
+  // ---------------------------------------------------------------------
+  // THE LOCK-ORDER PIN (design section 4.9, as amended to the AS-BUILT order).
+  //
+  // A total lock order is a claim about ACQUISITION SEQUENCE, and the only place that
+  // sequence exists is the function bodies. A prose paragraph in a design doc cannot fail;
+  // this can. Every future verb that touches open_items has to slot into the same ladder or
+  // turn one of these pins red -- which is the whole point, because the failure mode a lock
+  // order prevents (a deadlock between two lawful callers) is exactly the kind that shows up
+  // once, in production, under load, and never in a serial test run.
+  //
+  // The ladder, in acquisition order:
+  //   op-receipt -> advisory 203005003 (client:counterparty) -> advisory 203005004 (client)
+  //   -> open_items (batch FOR UPDATE ... ORDER BY id) -> journal_entries
+  // with ONE named exception, stated in the design's amended section 4.9: a verb that locks
+  // a PRE-EXISTING journal_entries row (reverse_entry, approve_wrong_client_correction)
+  // takes that row lock BEFORE the client advisory -- because the core does, and inverting
+  // it in one verb would be the deadlock. The composites never lock a pre-existing entry:
+  // they lock only the entry they just inserted, which no other session can see.
+  const positions = (src, needles) => needles.map((n) => src.indexOf(n));
+  const ordered = (src, needles, label) => {
+    const at = positions(src, needles);
+    at.forEach((p, i) => assert.ok(p >= 0, `${label}: the body must contain the rung "${needles[i]}" (not found)`));
+    for (let i = 1; i < at.length; i++) {
+      assert.ok(
+        at[i - 1] < at[i],
+        `${label}: "${needles[i - 1]}" must be acquired BEFORE "${needles[i]}" (got ${at[i - 1]} vs ${at[i]}) -- the total lock order is inverted`,
+      );
+    }
+  };
+
+  for (const fn of ["allocate_receipt", "allocate_payment"]) {
+    ordered(await fnSource(fn), [
+      "clara._reserve_op(",                       // the op-receipt rung
+      "pg_advisory_xact_lock(203005003",          // client:counterparty
+      "pg_advisory_xact_lock(203005004",          // client
+      "for update",                               // the open_items batch lock
+      "insert into clara.journal_entries",        // its OWN new entry, last
+    ], `${fn} lock order`);
+  }
+  for (const fn of ["unallocate_group", "apply_open_items"]) {
+    // These two never reach the core and never insert an entry, so their ladder is the tail
+    // of the same order: receipt -> client advisory -> open_items batch.
+    ordered(await fnSource(fn), [
+      "clara._reserve_op(",
+      "pg_advisory_xact_lock(203005004",
+      "for update",
+    ], `${fn} lock order`);
+  }
+  // The two PATCHED verbs -- the named exception. JE row lock FIRST (as the core does),
+  // then the client advisory, and only THEN the subledger read the advisory exists to make
+  // safe. A body that probed the subledger before taking 203005004 would be back to the
+  // check-then-act window the concurrency cell proves is closed.
+  ordered(await fnSource("reverse_entry"), [
+    "from clara.journal_entries where id=p_entry for update",
+    "pg_advisory_xact_lock(203005004",
+    "clara._subledger_allocated_items_present(",
+  ], "reverse_entry lock order");
+  ordered(await fnSource("approve_wrong_client_correction"), [
+    "for update of je",
+    "pg_advisory_xact_lock(203005004",
+    "clara._subledger_allocated_items_present(",
+  ], "approve_wrong_client_correction lock order");
 });
 
 // ===========================================================================
@@ -1378,6 +1634,129 @@ test("x37.u a settlement at EXACTLY the high-stakes threshold leaves a draft; a 
     plain, null,
     `WCA-R7: a DISTINCT checker must be able to approve the composite-born draft through the ordinary verb with NO attestation (the composite must stamp last_human_editor on its draft) -- got ${plain?.code}/${reasonOf(plain ?? {})}`,
   );
+
+  // =========================================================================
+  // THE STALENESS AXES. WCA-R7 buys /queue muscle memory with a WINDOW: the composite
+  // validates when the maker proposes, the money moves when the checker approves, and
+  // between the two the world is free to move. The stored proposal is a statement ABOUT a
+  // world; the hook's job at approve is to re-derive that world under the locks and refuse
+  // if it moved -- never to silently re-aim somebody's money at whatever the entry now says.
+  //
+  // Five axes, one reason token (`allocation_stale` -- the remedy is identical in every
+  // case: re-run the allocation), discriminated by `axis` in DETAIL. Four of them move the
+  // SETTLEMENT ENTRY (the draft window is also a revise window, and revise_entry rewrites
+  // legs wholesale WITHOUT carrying counterparty_id, 0016:4836-4840); the fifth moves the
+  // TARGET (another human allocates the same invoice first). The perturbations are applied
+  // to the DRAFT by direct construction rather than through revise_entry, deliberately: a
+  // draft's lines are mutable by anything with write access (t_jl_immutable guards only the
+  // POST-APPROVAL row), so direct surgery is the strictly WIDER threat model -- it covers
+  // revise_entry and anything else that ever learns to touch a draft.
+  // =========================================================================
+  const axisOf = (err) => {
+    const m = /"axis"\s*:\s*"([a-z_]+)"/.exec(err?.detail ?? "");
+    return m ? m[1] : null;
+  };
+  /** A fresh at-threshold settlement DRAFT + its target, ready to be perturbed. */
+  const stageDraft = async (tag) => {
+    const party = await birthCounterparty(users.alice, { client, name: `X37 STALE${tag} ${randomUUID().slice(0, 6)}`, kind: "customer" });
+    const target = await openArItem(users.alice, { client, cp: party, cents: threshold, control: AR2, checker: users.bob });
+    const draft = await allocateReceipt(users.alice, {
+      client, counterparty: party, amountCents: threshold,
+      allocations: [{ item_id: target.item, amount_cents: threshold }],
+    });
+    assert.equal(draft.status, "draft", `x37.u/${tag}: the at-threshold composite left a draft (mandatory setup)`);
+    return { party, target, draft };
+  };
+  const checkerApprove = async (entry, tag) => {
+    const token = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [entry])).rows[0].revision_token;
+    return caught(() => approveEntry(users.bob, { entry, expectedRevision: token, opKey: opk(`x37-stale-${tag}`) }));
+  };
+  const assertStale = async (err, axis, tag, entry, targetItem, targetOutstanding) => {
+    assert.ok(err, `x37.u/${tag}: the checker's approve must be REFUSED once the world moved`);
+    assert.equal(err.code, CLR10, `x37.u/${tag}: the refusal is CLR10 (got ${err.code} -- ${err.message})`);
+    assert.equal(reasonOf(err), "allocation_stale", `x37.u/${tag}: the named reason is allocation_stale (got ${reasonOf(err)})`);
+    assert.equal(axisOf(err), axis, `x37.u/${tag}: the DETAIL names axis='${axis}' (got ${axisOf(err)}) -- the axes must be distinguishable to the maker`);
+    assert.equal(await entryStatusOf(entry), "draft", `x37.u/${tag}: the refused approve left the settlement a draft`);
+    assert.equal((await itemsOf(entry)).length, 0, `x37.u/${tag}: and materialised NOTHING`);
+    assert.equal(await outstandingOf(targetItem), targetOutstanding, `x37.u/${tag}: the target is untouched`);
+  };
+
+  // AXIS 1 -- COUNTERPARTY. The control leg is re-stamped to a different customer, so the
+  // settlement item this entry now mints belongs to somebody else than the proposal names.
+  {
+    const s = await stageDraft("cp");
+    const other = await birthCounterparty(users.alice, { client, name: `X37 STALEOTHER ${randomUUID().slice(0, 6)}`, kind: "customer" });
+    await rootQuery(
+      "update clara.journal_lines set counterparty_id=$2 where entry_id=$1 and counterparty_id is not null",
+      [s.draft.entry_id, other],
+    );
+    await assertStale(await checkerApprove(s.draft.entry_id, "cp"), "counterparty", "cp", s.draft.entry_id, s.target.item, threshold);
+  }
+  // AXIS 2 -- SETTLEMENT ITEM COUNT. The single control credit is split across two
+  // customers, so the entry now carries TWO ar items and the proposal describes neither.
+  {
+    const s = await stageDraft("cnt");
+    const other = await birthCounterparty(users.alice, { client, name: `X37 STALESPLIT ${randomUUID().slice(0, 6)}`, kind: "customer" });
+    // ONE transaction: the balance constraint trigger is DEFERRED, so a perturbation split
+    // across two autocommit statements would die on the intermediate unbalanced state
+    // instead of reaching the approve this axis is about.
+    await withActor({ transaction: true }, async (c) => {
+      const ctrl = (await c.query(
+        "select line_no from clara.journal_lines where entry_id=$1 and counterparty_id is not null order by line_no limit 1",
+        [s.draft.entry_id],
+      )).rows[0];
+      await c.query("update clara.journal_lines set credit_cents=credit_cents-1000 where entry_id=$1 and line_no=$2", [s.draft.entry_id, ctrl.line_no]);
+      await c.query(
+        `insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description,counterparty_id)
+         values($1,99,$2,0,1000,'x37 split control leg',$3)`,
+        [s.draft.entry_id, AR1, other],
+      );
+    });
+    await assertStale(await checkerApprove(s.draft.entry_id, "cnt"), "settlement_item_count", "cnt", s.draft.entry_id, s.target.item, threshold);
+  }
+  // AXIS 3 -- SETTLEMENT AMOUNT, revised DOWN. The entry now discharges less than the
+  // proposal allocates: paying RM(threshold) of invoices out of a smaller receipt is how a
+  // subledger silently stops tying.
+  {
+    const s = await stageDraft("amt");
+    await withActor({ transaction: true }, async (c) => {
+      await c.query("update clara.journal_lines set debit_cents=debit_cents-1000 where entry_id=$1 and debit_cents>0", [s.draft.entry_id]);
+      await c.query("update clara.journal_lines set credit_cents=credit_cents-1000 where entry_id=$1 and credit_cents>0", [s.draft.entry_id]);
+    });
+    await assertStale(await checkerApprove(s.draft.entry_id, "amt"), "settlement_amount", "amt", s.draft.entry_id, s.target.item, threshold);
+  }
+  // AXIS 4 -- OUTSTANDING (CX-M1). Nothing is perturbed at all: a SECOND human simply
+  // allocates part of the same invoice through the ordinary lane while the first proposal
+  // waits in the queue. "Still fits" would accept this silently whenever the remainder
+  // happened to be large enough; only EQUALITY against the outstanding the composite
+  // actually saw means "nothing moved".
+  {
+    const s = await stageDraft("out");
+    const interim = await allocateReceipt(users.alice, {
+      client, counterparty: s.party, amountCents: 1000,
+      allocations: [{ item_id: s.target.item, amount_cents: 1000 }],
+    });
+    assert.equal(interim.status, "approved", "the intervening partial receipt is below the threshold and commits in-call (mandatory setup)");
+    assert.equal(await outstandingOf(s.target.item), threshold - 1000, "the target's outstanding really moved between maker and checker");
+    await assertStale(await checkerApprove(s.draft.entry_id, "out"), "outstanding", "out", s.draft.entry_id, s.target.item, threshold - 1000);
+  }
+  // AXIS 5 -- PROPOSAL UNPINNED, fail-CLOSED. A proposal carrying no expected outstanding
+  // was not written by the composites this migration ships (a pre-fix draft parked in the
+  // queue across the deploy, or a hand-built one). It cannot be equality-checked, so it is
+  // refused rather than approved on a weaker test.
+  {
+    const s = await stageDraft("pin");
+    await rootQuery(
+      `update clara.journal_entries e
+          set flags = jsonb_set(e.flags, '{settlement_allocation,allocations}', (
+                select coalesce(jsonb_agg(x.elem - 'expected_outstanding_cents'), '[]'::jsonb)
+                  from jsonb_array_elements(e.flags->'settlement_allocation'->'allocations') as x(elem)))
+        where e.id=$1`,
+      [s.draft.entry_id],
+    );
+    await assertStale(await checkerApprove(s.draft.entry_id, "pin"), "proposal_unpinned", "pin", s.draft.entry_id, s.target.item, threshold);
+  }
+  await assertTies(client, "x37.u staleness axes");
 });
 
 // ===========================================================================
@@ -1406,8 +1785,19 @@ test("x37.v the solo-firm high-stakes settlement rides the attestation path to a
     allocations: [{ item_id: item, amount_cents: threshold }],
     attestation: attest,
   });
-  noteLane(`x37.v solo composite returned status='${receipt.status}' for an at-threshold settlement (design allows draft-then-self-approve OR in-call attested approve)`);
-  if (receipt.status === "draft") {
+  // THE AS-BUILT BRANCH, PINNED. The design allowed either shape (draft-then-self-approve,
+  // or an in-call attested approve); the build chose the FIRST -- at/above the threshold the
+  // composite always leaves a draft, in a solo firm exactly as in a two-checker one, and the
+  // attestation is spent on the ordinary approve_entry that follows. That is the better of
+  // the two (one high-stakes path, not two) and it is now asserted rather than tolerated: a
+  // build that started auto-approving attested settlements in-call would be a real widening
+  // of what one person can do in one call, and a shape-tolerant cell would not see it.
+  assert.equal(
+    receipt.status, "draft",
+    `at/above the threshold the composite leaves a DRAFT even in a solo firm with an attestation in hand (got '${receipt.status}')`,
+  );
+  assert.equal((await itemsOf(receipt.entry_id)).length, 0, "the solo draft materialises nothing either");
+  {
     const rev = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [receipt.entry_id])).rows[0].revision_token;
     await approveEntry(sub, {
       entry: receipt.entry_id, expectedRevision: rev, attestation: attest, opKey: opk("x37-solo-approve"),
@@ -1422,16 +1812,17 @@ test("x37.v the solo-firm high-stakes settlement rides the attestation path to a
   // The negative half: a solo high-stakes settlement WITHOUT an attestation must
   // not slip through the maker-checker floor.
   const { item: item2 } = await openArItem(sub, { client, cp, cents: threshold, control: AR2, attestation: attest });
+  // With the draft branch pinned above, the unattested call cannot reach an approve at all,
+  // so the assertion is the END STATE both readings agree on: never approved. (A build that
+  // ever moves to the in-call attested-approve shape would refuse this call CLR05 instead --
+  // which this assertion would ALSO catch, because a raised error is not a draft.)
   const noAttest = await allocateReceipt(sub, {
     client, counterparty: cp, amountCents: threshold,
     allocations: [{ item_id: item2, amount_cents: threshold }],
-  }).catch((e) => e);
-  if (noAttest instanceof Error) {
-    assert.equal(noAttest.code, CLR05, `an unattested solo high-stakes settlement refuses CLR05 (got ${noAttest.code} -- ${noAttest.message})`);
-  } else {
-    assert.equal(noAttest.status, "draft", "without an attestation the unapproved settlement can only be a draft, never approved");
-    assert.equal(await entryStatusOf(noAttest.entry_id), "draft", "and it really is one");
-  }
+  });
+  assert.equal(noAttest.status, "draft", "without an attestation the settlement can only be a draft, never approved");
+  assert.equal(await entryStatusOf(noAttest.entry_id), "draft", "and it really is one");
+  assert.equal(await outstandingOf(item2), threshold, "and its target is untouched while it waits");
   await assertTies(client, "x37.v solo unattested");
 });
 
@@ -1525,12 +1916,20 @@ test("x37.x CLR26: an open CLIENT-scope question blocks allocate_receipt, and re
 });
 
 // ===========================================================================
-// x37.y -- THE OUTBOX LAW. A composite that refuses mid-flight rolls its events
-// back with everything else: zero new items, zero allocations, zero open_item.*
-// events, zero new approved entries. An aborted composite leaves no trace but
-// the op-receipt reservation, which itself vanishes with the rollback.
+// x37.y -- THE OUTBOX LAW, PROVEN PAST THE FIRST WRITE. A composite that refuses
+// mid-flight rolls its events back with everything else: zero new items, zero
+// allocations, zero open_item.* events, zero new entries of ANY status.
+//
+// The instrument matters more than the claim here. The v1 cell drove this with a
+// duplicated allocation line -- an input-validation refusal that fires in the
+// argument-normalisation block, BEFORE the composite has written a single row.
+// "Nothing survived" is then arithmetically true of a call that never wrote
+// anything, and the outbox law was never exercised at all. This version uses the
+// CLR26 open-question block, which lives inside _approve_entry_core: the composite
+// has already inserted its settlement entry, its lines and its op-receipt
+// reservation by the time it raises. THAT is a rollback with something to roll back.
 // ===========================================================================
-test("x37.y outbox law: a failed composite leaves ZERO events, ZERO items and ZERO allocations behind", async (t) => {
+test("x37.y outbox law: a composite that fails AFTER inserting its entry leaves ZERO events, items, allocations and entries", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
@@ -1544,20 +1943,59 @@ test("x37.y outbox law: a failed composite leaves ZERO events, ZERO items and ZE
     // EVERY status, not just approved: a composite that created its settlement
     // entry and then refused must leave no draft behind either.
     entries: (await rootQuery("select count(*)::int as n from clara.journal_entries where client_id=$1", [client])).rows[0].n,
+    lines: (await rootQuery("select count(*)::int as n from clara.journal_lines where client_id=$1", [client])).rows[0].n,
+    // The op-receipt reservation is part of the claim: a rolled-back reservation
+    // VANISHES (0004:43-60), which is what makes a retry with the same key legal.
+    receipts: (await rootQuery(
+      "select count(*)::int as n from clara.op_receipts r join clara.clients c on c.firm_id=r.firm_id where c.id=$1 and r.fn like 'allocate%'",
+      [client],
+    )).rows[0].n,
   });
-  const before = await snap();
 
-  // Over-allocate. Whether the refusal lands before or after the entry insert is
-  // the composite's business; the invariant asserted here is the outbox law --
-  // nothing at all survives an aborted composite.
+  // The block is a CLIENT-scope open question -- resolved in a finally, because left open it
+  // would poison every later approve on this client (the x37.x discipline).
+  const q = await openQuestion(sub, { client, scopeKind: "client", scopeId: client, question: "x37.y which account is this receipt?" });
+  const qid = q?.question_id ?? q?.id ?? q;
+  try {
+    const before = await snap();
+    const err = await caught(() => allocateReceipt(sub, {
+      client, counterparty: cp, amountCents: 20000,
+      allocations: [{ item_id: item, amount_cents: 20000 }],
+    }));
+    assert.ok(err, "the composite refused (mandatory setup for an outbox-law probe)");
+    assert.equal(err.code, CLR26, `the refusal is the CLR26 block, i.e. it fired INSIDE the core, past the entry insert (got ${err.code} -- ${err.message})`);
+    const after = await snap();
+    assert.deepEqual(after, before, `the aborted composite left NOTHING behind (before=${JSON.stringify(before)} after=${JSON.stringify(after)})`);
+    assert.equal(await outstandingOf(item), 20000, "and the target it was about to settle is untouched");
+    await assertTies(client, "x37.y outbox rollback");
+  } finally {
+    await resolveOpenQuestion(sub, { question: qid, resolution: "x37.y answered" }).catch(() => {});
+  }
+});
+
+// ===========================================================================
+// x37.y2 -- INPUT VALIDATION (the cell x37.y used to be, retitled to what it
+// actually proves). A duplicated item in one allocation set is refused by NAME in
+// the normalisation block -- before the op-key is even reserved -- so a caller
+// gets `allocations_duplicated` rather than a two-line group that over-allocates
+// past zero and dies in belt-2 with a message about bounds.
+// ===========================================================================
+test("x37.y2 input validation: the same open item twice in ONE allocation set is refused by name, before any write", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const cp = await birthCounterparty(sub, { client, name: `X37 DUPARGCO ${randomUUID().slice(0, 6)}`, kind: "customer" });
+  const { item } = await openArItem(sub, { client, cp, cents: 20000 });
+
   const err = await caught(() => allocateReceipt(sub, {
     client, counterparty: cp, amountCents: 20000,
-    allocations: [{ item_id: item, amount_cents: 20000 }, { item_id: item, amount_cents: 20000 }],
+    allocations: [{ item_id: item, amount_cents: 10000 }, { item_id: item, amount_cents: 10000 }],
   }));
-  assert.ok(err, "the malformed/over-allocating composite refused");
-  const after = await snap();
-  assert.deepEqual(after, before, `the aborted composite left NOTHING behind (before=${JSON.stringify(before)} after=${JSON.stringify(after)})`);
-  await assertTies(client, "x37.y outbox rollback");
+  assert.ok(err, "one item stated twice in a single allocation set must be refused");
+  assert.equal(err.code, CLR10, `the refusal is CLR10 (got ${err.code} -- ${err.message})`);
+  assert.equal(reasonOf(err), "allocations_duplicated", `the named reason is allocations_duplicated (got ${reasonOf(err)})`);
+  assert.equal(await outstandingOf(item), 20000, "nothing moved");
+  await assertTies(client, "x37.y2 input validation");
 });
 
 // ===========================================================================
@@ -1648,9 +2086,22 @@ test("x37.z the classifier decomposes a multi-counterparty generic JV per party,
   assert.equal(Number(obRows[0].amount_cents), 64000, "from the control-leg net, never from opening_items as an independent source");
 
   // The read-only diff surface the ceremony's mandatory dry-run precheck uses.
-  const preview = await rootQuery("select * from clara._subledger_decompose_preview($1,$2)", [client, "ap"]);
-  assert.ok(preview.rowCount > 0, "the read-only decompose preview returns this client's ap decomposition");
+  // The read-only diff surface the ceremony's mandatory dry-run precheck uses. Listing its
+  // columns proves nothing; the GO/NO-GO the owner actually reads is diff_cents, so that is
+  // what is asserted. On a database whose every approved entry was decomposed by the hook,
+  // EVERY row must read zero -- a single nonzero row means classifier output and
+  // materialised rows have diverged, which is precisely the condition the precheck exists to
+  // catch before a ceremony starts. Both domains, not just one.
+  const preview = await rootQuery("select * from clara._subledger_decompose_preview($1,$2)", [client, null]);
+  assert.ok(preview.rowCount > 0, "the read-only decompose preview returns this client's decomposition (non-vacuous)");
   noteLane(`x37.z decompose preview columns: ${preview.fields.map((f) => f.name).join(",")}`);
+  const drift = preview.rows.filter((r) => Number(r.diff_cents) !== 0);
+  assert.equal(
+    drift.length, 0,
+    `every preview row must read diff_cents=0 -- classified equals materialised (drifted: ${JSON.stringify(drift.slice(0, 3))})`,
+  );
+  const apRows = preview.rows.filter((r) => r.domain === "ap");
+  assert.ok(apRows.length > 0, "the preview covers the ap domain (the JV + opening rows above)");
   await assertTies(client, "x37.z decomposition correctness");
 });
 
@@ -1776,6 +2227,383 @@ test("x37.ab allocate_payment mirrors the receipt end to end, discount received 
   )).rows[0].n);
   assert.equal(bankAfter, bankBefore - 98000, "exactly the cash left the bank");
   await assertTies(client, "x37.ab allocate_payment");
+});
+
+// ===========================================================================
+// x37.ac -- THE SIX SETTLEMENT-FLOOR REFUSALS, ONE NAMED REASON EACH. The two
+// shape floors are the taxonomy's teeth: a `customer_receipt` that recognises
+// income, or a `supplier_payment` that carries an expense leg, is not a
+// settlement at all -- it is a purchase somebody typed the wrong kind onto, and
+// letting it through would mint a settlement item against an obligation that was
+// never discharged.
+//
+// Driven by DIRECT CONSTRUCTION, because no verb can build these shapes (the
+// composites are the only settlement writers and they emit the correct legs by
+// construction) -- and the floors exist precisely for the world where something
+// else learns to write one. Each probe calls the floor's own entry point on a
+// draft, which isolates ONE refusal per probe; the deferred TRIGGER (the thing
+// that actually runs in production) is proven separately at the end, where the
+// entry is really approved and the refusal really arrives at COMMIT.
+// ===========================================================================
+test("x37.ac the two settlement floors refuse all SIX wrong shapes, each with its own named CLR23 reason, and the deferred trigger fires at commit", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+  const customer = await birthCounterparty(sub, { client, name: `X37 FLOORCUST ${randomUUID().slice(0, 6)}`, kind: "customer" });
+  const vendor = await birthCounterparty(sub, { client, name: `X37 FLOORVEND ${randomUUID().slice(0, 6)}` });
+
+  /** A DRAFT entry of `kind` with the given legs, built by hand. Drafts materialise
+   *  nothing, so this pollutes no tie-out; the floors read the legs regardless of status. */
+  const draftShaped = async (kind, lines, cp) => withActor({ transaction: true }, async (c) => {
+    const r = await c.query(
+      `insert into clara.journal_entries(firm_id,client_id,status,coding_kind,posting_date,memo,origin,maker_actor)
+       values($1,$2,'draft',$3,'2026-04-25',$4,'manual',$5) returning id`,
+      [firm, client, kind, `x37 floor probe ${kind}`, sub],
+    );
+    const id = r.rows[0].id;
+    let n = 0;
+    for (const l of lines) {
+      n += 1;
+      await c.query(
+        `insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description,counterparty_id)
+         values($1,$2,$3,$4,$5,$6,$7)`,
+        [id, n, l.code, l.dr ?? 0, l.cr ?? 0, l.d ?? "probe", l.cp ? cp : null],
+      );
+    }
+    return id;
+  });
+  const floorRefusal = async (fn, entry) => caught(() => rootQuery(`select clara.${fn}($1)`, [entry]));
+  const assertFloor = async (err, reason, label) => {
+    assert.ok(err, `${label}: the floor must refuse this shape`);
+    assert.equal(err.code, "CLR23", `${label}: the refusal is CLR23, the leg-SHAPE family (got ${err.code} -- ${err.message})`);
+    assert.equal(reasonOf(err), reason, `${label}: the named reason is ${reason} (got ${reasonOf(err)})`);
+  };
+
+  // --- customer_receipt: three ways to get the shape wrong. ---
+  await assertFloor(
+    await floorRefusal("_assert_customer_receipt_shape", await draftShaped("customer_receipt", [
+      { code: BANK, dr: 10000 }, { code: AR1, cr: 6000, cp: true }, { code: AR2, cr: 4000, cp: true },
+    ], customer)),
+    "receipt_control_shape", "x37.ac receipt/two control legs",
+  );
+  await assertFloor(
+    await floorRefusal("_assert_customer_receipt_shape", await draftShaped("customer_receipt", [
+      { code: BANK, dr: 10000 }, { code: AR1, cr: 7000, cp: true }, { code: REVN, cr: 3000 },
+    ], customer)),
+    "receipt_income_leg", "x37.ac receipt/income leg (the F3-3 foreclosure)",
+  );
+  await assertFloor(
+    await floorRefusal("_assert_customer_receipt_shape", await draftShaped("customer_receipt", [
+      { code: BANK, dr: 10000 }, { code: AR1, cr: 7000, cp: true }, { code: AP1, cr: 3000, cp: true },
+    ], customer)),
+    "receipt_payable_leg", "x37.ac receipt/payable leg (a cross-domain contra)",
+  );
+
+  // --- supplier_payment: the exact mirror, three ways. ---
+  await assertFloor(
+    await floorRefusal("_assert_supplier_payment_shape", await draftShaped("supplier_payment", [
+      { code: AP1, dr: 6000, cp: true }, { code: AP2, dr: 4000, cp: true }, { code: BANK, cr: 10000 },
+    ], vendor)),
+    "payment_control_shape", "x37.ac payment/two control legs",
+  );
+  await assertFloor(
+    await floorRefusal("_assert_supplier_payment_shape", await draftShaped("supplier_payment", [
+      { code: AP1, dr: 7000, cp: true }, { code: EXPN, dr: 3000 }, { code: BANK, cr: 10000 },
+    ], vendor)),
+    "payment_expense_leg", "x37.ac payment/expense leg (a counter purchase is not a settlement)",
+  );
+  await assertFloor(
+    await floorRefusal("_assert_supplier_payment_shape", await draftShaped("supplier_payment", [
+      { code: AP1, dr: 7000, cp: true }, { code: AR1, dr: 3000, cp: true }, { code: BANK, cr: 10000 },
+    ], vendor)),
+    "payment_receivable_leg", "x37.ac payment/receivable leg (a cross-domain contra)",
+  );
+
+  // --- THE DEFERRED TRIGGER, for real. The six probes above call the floor directly, which
+  // proves the LOGIC; this proves the WIRING -- that an approved row carrying a wrong shape
+  // actually dies at COMMIT, which is the only thing that protects the books from a future
+  // writer. The congruent settlement item is inserted alongside so belt-1 is satisfied and
+  // the refusal that arrives is unambiguously the floor's (both control legs carry the same
+  // customer, so the classifier yields exactly one -RM100 ar item).
+  const wired = await caught(() => withActor({ transaction: true }, async (c) => {
+    // Draft FIRST, then the lines, then the status flip: t_jl_immutable refuses a line
+    // written against an already-approved entry (CLR08), so the forgery has to follow the
+    // same order a real approve path does.
+    const r = await c.query(
+      `insert into clara.journal_entries(firm_id,client_id,status,coding_kind,posting_date,memo,origin,maker_actor)
+       values($1,$2,'draft','customer_receipt','2026-04-25','x37 floor trigger probe','manual',$3) returning id`,
+      [firm, client, sub],
+    );
+    const id = r.rows[0].id;
+    await c.query(
+      `insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description,counterparty_id)
+       values($1,1,$2,10000,0,'bank',null),($1,2,$3,0,6000,'ar one',$5),($1,3,$4,0,4000,'ar two',$5)`,
+      [id, BANK, AR1, AR2, customer],
+    );
+    await c.query(
+      "update clara.journal_entries set status='approved',checker_actor=$2,approved_at=now() where id=$1",
+      [id, world.users.bob],
+    );
+    await c.query(
+      `insert into clara.open_items(firm_id,client_id,domain,counterparty_id,entry_id,item_kind,item_date,amount_cents,created_by)
+       values($1,$2,'ar',$3,$4,'settlement','2026-04-25',-10000,$5)`,
+      [firm, client, customer, id, sub],
+    );
+  }));
+  assert.ok(wired, "an APPROVED customer_receipt with two control legs must die at commit");
+  assert.equal(wired.code, "CLR23", `the deferred floor trigger is what refuses it (got ${wired.code} -- ${wired.message})`);
+  assert.equal(reasonOf(wired), "receipt_control_shape", `and it carries the same named reason as the direct call (got ${reasonOf(wired)})`);
+  await assertTies(client, "x37.ac settlement floors");
+});
+
+// ===========================================================================
+// x37.ad -- BELT-1 REFUSES. Every other cell in this file is belt-1's POSITIVE
+// half: hundreds of approved entries whose items match the classifier exactly.
+// None of them can tell you the belt would notice if they did not. This one
+// forges the exact shape a forgotten fifth approve path would leave behind -- an
+// approved entry with a control leg and NO open item -- and requires the named
+// refusal at COMMIT. Without this cell the belt could be a no-op and the suite
+// would be just as green.
+// ===========================================================================
+test("x37.ad belt-1 REFUSES a raw-approved control entry that materialised no item (subledger_entry_untied)", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+  const cp = await birthCounterparty(sub, { client, name: `X37 UNTIEDCO ${randomUUID().slice(0, 6)}` });
+
+  const err = await caught(() => withActor({ transaction: true }, async (c) => {
+    const r = await c.query(
+      `insert into clara.journal_entries(firm_id,client_id,status,posting_date,memo,origin,maker_actor)
+       values($1,$2,'draft','2026-04-26','x37 belt-1 negative probe','manual',$3) returning id`,
+      [firm, client, sub],
+    );
+    const id = r.rows[0].id;
+    await c.query(
+      `insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description,counterparty_id)
+       values($1,1,$2,45000,0,'expense',null),($1,2,$3,0,45000,'payable',$4)`,
+      [id, EXPN, AP1, cp],
+    );
+    // The forgery: the status flip WITHOUT the hook -- exactly what a fifth approve path
+    // that nobody taught about the subledger would do.
+    await c.query(
+      "update clara.journal_entries set status='approved',checker_actor=$2,approved_at=now() where id=$1",
+      [id, world.users.bob],
+    );
+  }));
+  assert.ok(err, "an approved control entry with no open item must be refused at COMMIT");
+  assert.equal(err.code, CLR10, `belt-1's refusal is CLR10 (got ${err.code} -- ${err.message})`);
+  assert.equal(reasonOf(err), "subledger_entry_untied", `the named reason is subledger_entry_untied (got ${reasonOf(err)})`);
+  assert.ok(/materialise|open item/i.test(String(err.message)), `the message says what was forgotten (got: ${err.message})`);
+  await assertTies(client, "x37.ad belt-1 negative");
+});
+
+// ===========================================================================
+// x37.ae -- A REAL sales_credit_note, END TO END. x37.aa asserts the `credit_note`
+// kind exists in the DDL matrix; that is a statement about text. This cell drives
+// the ladder-3 branch on a LIVE AR lane -- a cited, facts-complete document, the
+// wake drafter carrying the coding kind, a human approve through the ordinary
+// verb -- and requires the item the classifier mints to be NEGATIVE, because a
+// credit note reduces what the customer owes. It is the only cell in the file
+// where the sign law and the kind matrix are exercised by a real document rather
+// than by construction.
+// ===========================================================================
+test("x37.ae a REAL sales_credit_note mints ONE negative ar `credit_note` item, classifier-congruent, and the sign matrix refuses the positive twin", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+  const cp = await birthCounterparty(sub, { client, name: `X37 CNCUSTOMER ${randomUUID().slice(0, 6)}`, kind: "customer" });
+  const cents = 47000;
+
+  // A facts-complete document stating a ZERO tax and a net equal to its total -- the shape
+  // the sales floor ties against for a 2-leg credit note (no type_code is stated, so the
+  // type<->polarity binding is inert, exactly as it is for the live OCR corpus).
+  const cited = await purchaseDoc(sub, { client, gross: cents });
+  const cred = await mintInteractive(firm);
+  const region = await factsRegion(cited.documentId, FIELD.total);
+  const d = await wakeDraftEntry(cred, {
+    client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
+    // CREDIT-NOTE POLARITY: Cr receivable control (gross), Dr revenue (net) -- the mirror of
+    // an invoice. The sales floor refuses invoice polarity on a CN outright.
+    lines: [
+      { account_code: AR1, debit_cents: 0, credit_cents: cents, description: "cn-ar" },
+      { account_code: REVN, debit_cents: cents, credit_cents: 0, description: "cn-rev" },
+    ],
+    document: cited.documentId, sha256: cited.sha256,
+    vendor: { existing_id: cp, kind: "customer" },
+    evidence: [ev(region?.id ?? cited.regionId, region?.text_content ?? cited.quote, FIELD.total)],
+    codingKind: "sales_credit_note", opKey: opk("x37-cn"),
+  });
+  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x37-cna") });
+
+  const items = await itemsOf(d.entry_id);
+  assert.equal(items.length, 1, `a sales credit note mints exactly one item (got ${items.length})`);
+  assert.equal(items[0].domain, "ar", "it lands in the ar domain");
+  assert.equal(items[0].item_kind, "credit_note", "the typed anchor gives item_kind='credit_note' (ladder 3)");
+  assert.equal(Number(items[0].amount_cents), -cents, "and it is NEGATIVE -- a credit note reduces what the customer owes");
+  assert.equal(items[0].counterparty_id, cp, "bound to the customer it credits");
+
+  const rows = await classifyRows(d.entry_id);
+  assert.equal(rows.length, 1, "the classifier produces exactly one row");
+  assert.equal(rows[0].item_kind, "credit_note", "classifier kind agrees");
+  assert.equal(Number(rows[0].amount_cents), -cents, "classifier sign agrees -- the materialised row IS its output");
+
+  // THE SIGN MATRIX, the other way round: a POSITIVE credit_note item is refused by the DDL
+  // CHECK itself, so no writer -- present or future -- can mint one.
+  const other = await birthCounterparty(sub, { client, name: `X37 CNSIGNCO ${randomUUID().slice(0, 6)}`, kind: "customer" });
+  const sign = await caught(() => rootQuery(
+    `insert into clara.open_items(firm_id,client_id,domain,counterparty_id,entry_id,item_kind,item_date,amount_cents,created_by)
+     values($1,$2,'ar',$3,$4,'credit_note','2026-04-27',$5,$6)`,
+    [firm, client, other, d.entry_id, cents, sub],
+  ));
+  assert.ok(sign, "a POSITIVE credit_note item must be refused");
+  assert.equal(sign.code, "23514", `the item_kind sign matrix (a CHECK) is what refuses it (got ${sign.code} -- ${sign.message})`);
+  await assertTies(client, "x37.ae real sales credit note");
+});
+
+// ===========================================================================
+// x37.af -- THE SECTION-4.10 SWEEP FORCE-COMPLETE GUARD. The defect: the recovery
+// pass force-completed EVERY still-running task in a run the moment ANY filing in
+// that run was recovered, so a live task's real outcome was discarded on the
+// `completed` replay branch and its attempt wedged at state='active' with a live
+// reservation -- which 0034 then reads as `already_done` forever. The guard is one
+// predicate (complete only tasks that actually DRAFTED), and a one-predicate fix
+// is exactly the kind that a later refactor drops silently, so BOTH directions are
+// asserted here: the drafted task completes AND the non-drafted one is left alone.
+// ===========================================================================
+test("x37.af the sweep force-complete guard: recovery completes ONLY the task that drafted, and leaves the still-running one alone", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+
+  // Two filings, both genuinely admitted to ONE open sweep run, both with a RUNNING task.
+  // The rows are staged directly: the admission lane's own gates (budget, consent, vendor
+  // readiness) are proven in the wave-A batteries and are not what is under test here --
+  // the reconciler's completion predicate is.
+  const stage = async (tag, drafted) => {
+    const cited = await purchaseDoc(sub, { client, gross: 30000 });
+    // An autodraft task is CREATED queued with a model snapshot (0011's admission trigger
+    // demands exactly that shape), and only then moves to running -- the same two steps
+    // admit_autodraft_task + begin_autodraft_task take.
+    const task = (await rootQuery(
+      `insert into clara.agent_tasks(firm_id,client_id,kind,status,workflow_run_id,model_snapshot)
+       values($1,$2,'autodraft','queued',$3,'x37-sweep-model') returning id`,
+      [firm, client, `x37-sweep-${tag}-${randomUUID().slice(0, 8)}`],
+    )).rows[0].id;
+    await rootQuery("update clara.agent_tasks set status='running' where id=$1", [task]);
+    await rootQuery(
+      `insert into clara.autodraft_attempts(firm_id,client_id,document_id,filing_id,task_id,origin,run_id,state,reserved_tokens,usage_date)
+       values($1,$2,$3,$4,$5,'sweep',$6,'active',1000,current_date)`,
+      [firm, client, cited.documentId, cited.filingId, task, run],
+    );
+    let entry = null;
+    if (drafted) {
+      // A REAL draft entry through the human verb, then the coding_attempts row that binds
+      // it to the task -- the exact shape the recovery branch looks for.
+      const d = await draftEntryV3(sub, {
+        client, resolution: await manualRes(sub, client), memo: `x37 sweep recovery ${tag}`,
+        lines: [
+          { account_code: EXPN, debit_cents: 30000, credit_cents: 0, description: "dr" },
+          { account_code: BANK, debit_cents: 0, credit_cents: 30000, description: "cr" },
+        ],
+        opKey: opk("x37-sweepdraft"),
+      });
+      entry = d.entry_id;
+      await rootQuery(
+        `insert into clara.coding_attempts(firm_id,client_id,task_id,filing_id,document_id,entry_id,part_payload)
+         values($1,$2,$3,$4,$5,$6,'{}'::jsonb)`,
+        [firm, client, task, cited.filingId, cited.documentId, entry],
+      );
+    }
+    return { task, filing: cited.filingId, entry };
+  };
+  await openSweepRun({ firm, expected: 2 });
+  const run = (await rootQuery(
+    "select id from clara.sweep_runs where firm_id=$1 and state='open' order by created_at desc limit 1", [firm],
+  )).rows[0].id;
+  const drafted = await stage("drafted", true);
+  const running = await stage("running", false);
+
+  const statusOf = async (task) => (await rootQuery("select status from clara.agent_tasks where id=$1", [task])).rows[0].status;
+  assert.equal(await statusOf(drafted.task), "running", "both tasks start RUNNING (mandatory setup)");
+  assert.equal(await statusOf(running.task), "running", "…including the one that never drafted");
+
+  await reconcileSweepRuns();
+
+  // DIRECTION 1 -- the recovery really happened (otherwise direction 2 proves nothing: a
+  // reconciler that completed NOTHING would also leave the second task running).
+  const item = await rootQuery(
+    "select outcome, entry_id from clara.sweep_run_items where run_id=$1 and filing_id=$2", [run, drafted.filing],
+  );
+  assert.equal(item.rowCount, 1, "the recovery pass minted the drafted filing's sweep_run_item (the branch under test really ran)");
+  assert.equal(item.rows[0].outcome, "drafted", "…as 'drafted'");
+  assert.equal(item.rows[0].entry_id, drafted.entry, "…binding the recovered draft");
+  assert.equal(await statusOf(drafted.task), "completed", "the task that DRAFTED is completed");
+
+  // DIRECTION 2 -- the guard. Without the coding_attempts predicate this task would have
+  // been completed too, discarding a live outcome and wedging its attempt at `already_done`.
+  assert.equal(
+    await statusOf(running.task), "running",
+    "the still-running task that never drafted is LEFT ALONE -- one recovered filing may not force-complete its neighbours",
+  );
+  assert.equal(
+    (await rootQuery("select count(*)::int as n from clara.sweep_run_items where run_id=$1 and filing_id=$2", [run, running.filing])).rows[0].n,
+    0, "and no item was minted for it",
+  );
+  await assertTies(client, "x37.af sweep guard");
+});
+
+// ===========================================================================
+// x37.ag -- THE DISCOUNT ACCOUNT IS NOT A CONTROL ACCOUNT. Both composites take a
+// settlement-discount leg and check it is active and of the right TYPE. Type alone
+// is not enough: account_class is orthogonal to account_type in this schema (the
+// 0015 CHECK admits `receivable`/`payable` on any type), so an expense account
+// carrying a control class would ride in as a discount leg and quietly add a
+// SECOND control leg to the settlement -- which the entry's own item then nets
+// into, moving the subledger by the discount. The refusal must be the composite's
+// named one, at the point the caller can act on it, not a floor refusal three
+// steps later about a leg the caller never knowingly added.
+// ===========================================================================
+test("x37.ag a control-class discount account is refused by NAME in both composites", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const customer = await birthCounterparty(sub, { client, name: `X37 DISCCUST ${randomUUID().slice(0, 6)}`, kind: "customer" });
+  const vendor = await birthCounterparty(sub, { client, name: `X37 DISCVEND ${randomUUID().slice(0, 6)}` });
+  const inv = await openArItem(sub, { client, cp: customer, cents: 50000 });
+  const bill = await openApItem(sub, { client, cp: vendor, cents: 50000 });
+
+  // Two accounts of the RIGHT type and the WRONG class, created through the sanctioned
+  // writer (which does not police type-vs-class -- that is the whole point of the probe).
+  const DISCA_BAD = "574-C37";
+  const DISCR_BAD = "684-C37";
+  await upsertAccountClassed(sub, { client, code: DISCA_BAD, name: "Discount Allowed (control-classed, x37)", type: "expense", accountClass: "receivable", opKey: opk("discabad") });
+  await upsertAccountClassed(sub, { client, code: DISCR_BAD, name: "Discount Received (control-classed, x37)", type: "income", accountClass: "payable", opKey: opk("discrbad") });
+
+  const rcpt = await caught(() => allocateReceipt(sub, {
+    client, counterparty: customer, amountCents: 48000,
+    allocations: [{ item_id: inv.item, amount_cents: 50000 }],
+    discountCents: 2000, discountAccount: DISCA_BAD,
+  }));
+  assert.ok(rcpt, "a receipt discount booked to a receivable-class account must be refused");
+  assert.equal(rcpt.code, CLR10, `the refusal is CLR10 (got ${rcpt.code} -- ${rcpt.message})`);
+  assert.equal(reasonOf(rcpt), "discount_account_invalid", `the named reason is discount_account_invalid (got ${reasonOf(rcpt)})`);
+  assert.equal(await outstandingOf(inv.item), 50000, "the refused receipt moved nothing");
+
+  const pay = await caught(() => allocatePayment(sub, {
+    client, counterparty: vendor, amountCents: 48000,
+    allocations: [{ item_id: bill.item, amount_cents: 50000 }],
+    discountCents: 2000, discountAccount: DISCR_BAD,
+  }));
+  assert.ok(pay, "a payment discount booked to a payable-class account must be refused");
+  assert.equal(pay.code, CLR10, `the refusal is CLR10 (got ${pay.code} -- ${pay.message})`);
+  assert.equal(reasonOf(pay), "discount_account_invalid", `the named reason is discount_account_invalid (got ${reasonOf(pay)})`);
+  assert.equal(await outstandingOf(bill.item), 50000, "the refused payment moved nothing");
+
+  await assertTies(client, "x37.ag control-class discount accounts");
   await assertTies(world.clients.A2, "x37 final sweep A2");
   await assertTies(world.clients.S1, "x37 final sweep S1");
 });

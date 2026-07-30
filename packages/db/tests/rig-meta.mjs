@@ -301,9 +301,22 @@ export const GOVERNED_TABLES = [
   "attribution_attempts", "attribution_candidates", "attribution_candidate_regions",
   "filing_corrections", "filing_correction_items", "firm_document_limits",
   "document_ingest_reservations",
-  // Wave C-a subledger (0037) — signed open items + balanced-pair allocations.
-  "open_items", "open_item_allocations",
 ];
+
+// ---------------------------------------------------------------------------
+// 0037 [Wave C-a] — the subledger TABLE COHORT. Same "wholly present or wholly absent"
+// discipline the 0020/0022/0024/0028 FUNCTION cohorts carry, applied to tables, and for
+// exactly the same reason: GOVERNED_TABLES is a closed roster whose (a) branch demands
+// every entry EXIST, so listing these two unconditionally turns every pre-0037 database
+// (the 34-migration rig, an older CI leg, a partially-migrated scratch DB) into a MISSING-
+// table failure that says nothing about RLS. Gating on to_regclass keeps T18 bimodal-green
+// at 36 and at 37+ alike.
+//
+// Nothing is lost by gating. When the tables EXIST they are folded into `governed` below,
+// so the (a) branch still asserts rls+force on both; when they do NOT exist the derive
+// branch (b) has nothing to look at either. And a PARTIAL cohort (one table present, one
+// absent) is itself reported — that shape can only mean a half-applied 0037.
+export const SUBLEDGER_0037_TABLES = ["open_items", "open_item_allocations"];
 
 // The ONLY clara base tables that legitimately carry no RLS (migration bookkeeping + the
 // Slice-1 placeholder). Everything else in the schema MUST be RLS-enabled AND forced.
@@ -421,14 +434,26 @@ export async function governedRlsFailures() {
   );
   const present = new Map(rows.rows.map((r) => [r.relname, r]));
   const problems = [];
+  // The 0037 table cohort: wholly present (→ governed, fully asserted) or wholly absent
+  // (→ 0037 is not applied on this database, so the roster entries are correctly unchecked).
+  // Anything between the two is a half-applied migration and is reported as such.
+  const cohortLive = SUBLEDGER_0037_TABLES.filter((t) => present.has(t));
+  if (cohortLive.length !== 0 && cohortLive.length !== SUBLEDGER_0037_TABLES.length) {
+    problems.push(
+      `0037 wave C-a subledger table cohort is PARTIAL — present: ${cohortLive.join(", ") || "(none)"}; `
+      + `missing: ${SUBLEDGER_0037_TABLES.filter((t) => !present.has(t)).join(", ")}. `
+      + "A closed roster must not accumulate dead entries: either 0037 applied (both tables) or it did not.",
+    );
+  }
+  const roster = [...GOVERNED_TABLES, ...(cohortLive.length === SUBLEDGER_0037_TABLES.length ? SUBLEDGER_0037_TABLES : [])];
   // (a) every governed table must EXIST and be RLS-forced.
-  for (const tbl of GOVERNED_TABLES) {
+  for (const tbl of roster) {
     const r = present.get(tbl);
     if (!r) problems.push(`${tbl}: MISSING from schema clara`);
     else if (!r.relrowsecurity || !r.relforcerowsecurity) problems.push(`${tbl}: rls=${r.relrowsecurity} force=${r.relforcerowsecurity}`);
   }
   // (b) any OTHER clara base table (a future one) must be forced too, unless explicitly exempt.
-  const governed = new Set(GOVERNED_TABLES);
+  const governed = new Set(roster);
   for (const r of rows.rows) {
     if (governed.has(r.relname) || RLS_EXEMPT.has(r.relname)) continue;
     if (!r.relrowsecurity || !r.relforcerowsecurity) {

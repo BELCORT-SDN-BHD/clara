@@ -198,11 +198,22 @@ appear unnoticed.
 
 - **`clara._subledger_decompose_preview(client, domain)`** — read-only set-returning wrapper
   over the classifier, shipped in 0037 AND runnable as plain SELECT text.
-- **The mandatory read-only dry-run precheck (WCA-R9a)**: before the ceremony, run the
-  preview SQL via `live_ro` across all four firms × both domains against live; every
-  client × domain must tie to the sen. **Green diff = GO; anything else = the ceremony does
-  not start.** This is how WC-R11's "not first against real books" survives a single shared
-  database **[RV]**.
+- **The mandatory dry-run precheck (WCA-R9a)**: before the ceremony, run
+  `packages/db/scripts/subledger-dryrun.sql` against live with
+  `python ~/.clara-tools/live_psql_file.py <path>`. **Corrected 2026-07-30:** the runner is
+  `live_psql_file.py`, **not `live_ro.py`** — `live_ro.py` runs `psql -c` (one statement
+  string) and cannot run a file, and **there is no read-only database role in this estate**
+  (both helpers open the same owner DSN). The script's read-only property is enforced by the
+  script (`begin transaction read only` … `rollback`), not by the credential. It is
+  estate-wide (one run, not one per firm), it executes the SECURITY DEFINER
+  `_canonical_counterparty` (which raises CLR23 on a broken merge chain — a real finding, and
+  `ON_ERROR_STOP` aborts on it), and it ends in **one machine-checkable `gate` row plus a
+  POSITIVE visibility census** so an empty or RLS-scoped session reads NOT-GO instead of
+  false-green. Its §1 tie models the classifier asymmetrically — non-reversal entries from
+  their own legs, reversals as the negation of the ORIGINAL's decomposition — so it can
+  actually fail; the earlier symmetric form was an identity. **`gate = GO` and nothing else
+  starts the ceremony.** This is how WC-R11's "not first against real books" survives a single
+  shared database **[RV]**.
 - The migration backfill: same classifier, **entries-driven**, `status='approved'` only,
   deterministic, idempotent via the grain unique. Live probes BEFORE the DDL section runs
   (in-migration asserts + the precheck): no approved control-leg line with NULL
@@ -289,11 +300,44 @@ segregation stays a later wave).
   fix the mis-code first). Residual exposure recorded: a mis-coded CN *as* a bill still
   mints a payable item until `supplier_credit_note` lands — the refusal converts the §3 trap
   from "a path to real cash" back into a visible coding error **[RV]**.
-- **Locks (total order extended)**: op-receipt → `coding_rules` → `document_filings` →
-  `journal_entries` → **`open_items` (batch: `FOR UPDATE ... ORDER BY id`) → groups**;
-  `unallocate`/`apply_open_items` also take the client advisory lock
-  (`pg_advisory_xact_lock(203005004, ...)`) so they serialize against composite approves —
-  the write-skew race both reviews found **[RV]**. The order doc + a catalog test pin it.
+- **Locks (total order extended) — AMENDED 2026-07-30 to the AS-BUILT order.** v2 first
+  wrote `journal_entries` **before** `open_items`. The build inverted those two rungs, for a
+  reason the design had not seen: the allocate composites must take the two advisory locks
+  *before* they touch an item (otherwise an `allocate_*` that locked items and then called
+  the core — which takes `203005004` — inverts against an `unallocate_group` that takes
+  `203005004` and then locks the same items), and the settlement entry they then insert is a
+  brand-new row. The order of record is now:
+
+  > op-receipt → advisory `203005003` (client:counterparty) → advisory `203005004` (client)
+  > → **`open_items` (batch: `FOR UPDATE ... ORDER BY id`) → `journal_entries` → groups**
+
+  with the advisory rung read as a *partial* order over who takes what:
+  **firm (`203005002`) → client (`203005004`) → client:counterparty (`203005003`)**.
+  `approve_wrong_client_correction` is the only body that takes the firm rung.
+  `reverse_entry` and `approve_wrong_client_correction` take `203005004` **after** their
+  `journal_entries` row locks — the same relative order `_approve_entry_core` has used since
+  0029/0035, so adding the rung inverts nothing.
+
+  **Two named invariants hold the inversion safe. Both are review-gating for any future verb:**
+  1. **A composite locks only its own freshly-inserted entry row.** It inserts the settlement
+     entry and the core then takes `FOR UPDATE` on that same brand-new id; no composite ever
+     row-locks a *pre-existing* `journal_entries` row. That is precisely why the composites
+     may take `open_items` before `journal_entries` while `reverse_entry` and
+     `approve_wrong_client_correction` take `journal_entries` first — the two orders never
+     meet on the same object. **Any future verb that locks a PRE-EXISTING entry must take
+     `journal_entries` before `open_items`.**
+  2. **The core's own internal order is pre-existing and is not reordered by this wave.**
+     `_approve_entry_core` takes the document filing, then the entry row, then the advisory
+     pair — a 0029/0035-era sequence that predates the subledger and that several other verbs
+     are already ordered against. C-a extends the order with new rungs at the **end**; it does
+     not renumber the ones that were already there.
+
+  `unallocate`/`apply_open_items` take the client advisory lock so they serialize against
+  composite approves — the write-skew race both reviews found **[RV]**. `reverse_entry` and
+  `approve_wrong_client_correction` take it too, so the allocated-items reverse refusal is a
+  serialized read rather than a check-then-act window. The §K order header restates all of
+  this at the call sites; an x37 catalog cell pins the acquisition sequence in `prosrc` for
+  all four composites and the patched verbs.
 - **Op-keys**: each composite reserves its own key over the **hash of the full normalized
   request** (`0004:43-60` semantics — a rolled-back reservation vanishes, retries re-execute
   cleanly **[RV]**); the approve step gets a derived sub-key with `receipt_preheld:true`

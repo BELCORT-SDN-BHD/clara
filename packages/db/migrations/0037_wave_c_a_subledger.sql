@@ -183,6 +183,13 @@
 --       0017-SPLICED TEXT (0017:473-480, the active_completion_client join form) -- 0011's
 --       three-line form NO LONGER EXISTS in the live body, and anchoring on it would
 --       silently no-op.
+--     clara.revise_entry(uuid,jsonb,jsonb,jsonb,uuid,text,jsonb,jsonb) -> created 0009:1750,
+--       recut 0011:2815, 0015:2080 and 0016:4765, then PATCHED TWICE: 0017:291-308 (the
+--       R1-F1 CLR31 opening-boundary preflight) and 0028:1443-1532 (FOUR regions -- the
+--       binding-divergence declarations, the resolution read, the coding_kind /
+--       vendor_binding_id strip plus the vendor_binding_resolutions row, and the
+--       binding_resolved event). The `create function` grep stops at 0016 and is wrong by
+--       five changes of record; the patch below probes 0017's AND 0028's own markers first.
 -- Every patch below carries a two-sided probe: POSITIVE for the prior change-of-record's
 -- markers BEFORE the splice, and POSITIVE for its own additions (counted, exactly once)
 -- AFTER. Anchor drift aborts the deploy rather than shipping green.
@@ -195,8 +202,8 @@
 -- execution to completion on the body it STARTED with, so a writer call that begins before
 -- this commits and finishes after it runs on the OLD body -- and would therefore approve an
 -- entry WITHOUT materialising its open items, leaving the belt to fail that transaction at
--- commit. This migration replaces or patches FIVE live writer bodies
--- (_approve_entry_core, reverse_entry, approve_wrong_client_correction,
+-- commit. This migration replaces or patches SIX live writer bodies
+-- (_approve_entry_core, reverse_entry, revise_entry, approve_wrong_client_correction,
 -- _approve_opening_entry, reconcile_sweep_runs).
 --
 -- IT ALSO TAKES ACCESS EXCLUSIVE ON clara.journal_entries, NAMED HERE BECAUSE IT IS THE
@@ -211,13 +218,23 @@
 -- statement safe rather than lucky. Deploy through the repo's quiesced-apply ceremony, never
 -- a bare migrate against a live target.
 --
--- THE MANDATORY READ-ONLY DRY-RUN PRECHECK (WCA-R9a). Before the ceremony starts, run
--- packages/db/scripts/subledger-dryrun.sql against live through live_ro, for all four firms
--- and both domains. It is a strictly read-only SELECT that inlines this migration's
--- classifier logic (it cannot reference 0037 objects -- they do not exist yet) and reports
--- the per-client-per-domain tie diff plus the four structural probes. GREEN DIFF = GO;
--- ANYTHING ELSE = THE CEREMONY DOES NOT START. That is how WC-R11's "new money-movement code
--- must not first execute against real books" survives a single shared database.
+-- THE MANDATORY DRY-RUN PRECHECK (WCA-R9a). Before the ceremony starts, run
+-- packages/db/scripts/subledger-dryrun.sql against live with
+--     python ~/.clara-tools/live_psql_file.py packages/db/scripts/subledger-dryrun.sql
+-- for the whole estate (the script is estate-wide: it groups by client and needs no
+-- per-firm invocation). THE RUNNER IS live_psql_file.py, NOT live_ro.py, and the reason is
+-- stated rather than assumed: live_ro.py runs psql with -c (ONE statement string) and cannot
+-- run a file at all, and there is NO read-only database role in this estate -- both helpers
+-- open the same owner DSN. The read-only property of this precheck is therefore enforced BY
+-- THE SCRIPT (it opens `begin transaction read only` and ends with `rollback`), not by the
+-- credential. The script does execute clara._canonical_counterparty, which is SECURITY
+-- DEFINER and RAISES CLR23 on a broken merge chain -- a hard error there is a real finding
+-- about the corpus, not a script bug, and with ON_ERROR_STOP set it aborts the run.
+-- It inlines this migration's classifier logic (it cannot reference 0037 objects -- they do
+-- not exist yet) and reports the per-client-per-domain tie diff plus the structural probes,
+-- ending in ONE machine-checkable GO / NO-GO row. GO = the ceremony may start; ANYTHING
+-- ELSE = THE CEREMONY DOES NOT START. That is how WC-R11's "new money-movement code must not
+-- first execute against real books" survives a single shared database.
 --
 -- =====================================================================================
 -- MIGRATION NUMBER. Named 0037 provisionally against a live frontier of 0036 (35
@@ -238,46 +255,71 @@
 -- taxonomy) -> TAIL PART 1 and PART 2. The letters match the narrative sections A, B and C
 -- above: B's belt is implemented across A.2 and H.1, and C's hook across E and H.1-H.4.
 --
--- CELLS (packages/db/tests/x37-wave-c-a-subledger.test.mjs, one file, header-prose-then-cells):
---   x37.a  RM100 three ways: company card -> NO item; employee claim -> NO domain='ap' item
---          (the credit lands on a non-payable-class liability created via add_coa_account in
---          setup -- no template row exists for it); director-paid -> director current
---          account, same assertion form. None may appear in supplier AP aging.
---   x37.b  partial settlement; batch receipt over N invoices; credit-note application;
---          over-payment residue (= the settlement item's own outstanding); unallocate ->
---          re-allocate; zero-GL apply_open_items.
---   x37.c  the two-sided bound, BOTH directions: over-allocation past zero AND inflation
---          past face value.
---   x37.d  group law: same-canonical-counterparty only, and zero-net per (client, domain).
---   x37.e  concurrent allocation race -- the locks hold (advisory 203005003/203005004 then
---          open_items FOR UPDATE ORDER BY id).
---   x37.f  reversal: unsettled invoice -> clean unwind that ties; SETTLED invoice ->
---          REFUSED until unallocated; a receipt carrying allocations -> refused;
---          a high-stakes draft mirror -> approved later, the hook fires;
---          a wrong-client correction of an open-itemed bill -> mirror unwind, ties.
---   x37.g  the identity from zero and after EVERY cell: SUM(items) = the control GL balance
---          per client x domain, summed over EVERY account of that account_class.
---   x37.h  the A+ belt: the CHECK refuses a rule-stamped settlement row; the core refusal is
---          NAMED; no draft verb can make a settlement kind. Plus the authority catalog cells
---          (core private ACL, wrapper passes no rule id, executor login-direct).
---   x37.i  the high-stakes threshold cell: a settlement at EXACTLY the threshold in a
---          2-checker firm goes draft -> a distinct checker approves -> it ties (WCA-R7);
---          and a stale outstanding at that approve refuses CLR10 allocation_stale.
---   x37.j  the WCA-R8 evidence pin: three employee claims -> the vendor_account proposal row
---          EXISTS. Labelled as the design's section-5.3 debt evidence, NOT as a defect --
---          the human signature gate is the standing defense and wholesale pool segregation
---          is a later wave.
---   x37.k  outbox rollback: a failed composite leaves ZERO events, items and allocations.
---   x37.l  the CLR26 pin -- a blocking client-scope open question blocks money movement too
---          (settlements inherit 0035:290-296). Intended, named, and pinned.
---   x37.m  the sweep force-complete guard + the re_admitted consumer cell; the four adapted
---          fixtures stay green (x36-vendor-binding-helpers.mjs:154-157,
---          x31-autopost-lane-unify.test.mjs:264-267, a21-watch.test.mjs:358-360,
---          x35-drafting-trio.test.mjs:244 -- each adapted to a non-control shape or to
---          matching items; NO bypass GUC exists and none will).
---   x37.n  backfill: a rig-seeded book including opening (with a K6 supersede and a WITHDRAWN
---          opening draft), reversal pairs, and multi-counterparty generic JVs decomposes,
---          ties, and is idempotent on re-run.
+-- CELLS -- THE AS-BUILT MANIFEST. This list is the BUILT cell roster of
+-- packages/db/tests/x37-wave-c-a-subledger.test.mjs, in file order, and it is kept in sync
+-- with that file's own header. (The v1 manifest that stood here described a DIFFERENT,
+-- planned lettering and claimed a section-4.10 sweep-guard cell that did not exist -- a
+-- manifest that names cells nobody wrote is worse than no manifest, because the next reader
+-- takes coverage on trust. The sweep-guard cell is x37.af below, built.)
+--   x37.a  the identity holds FROM ZERO (a fresh client, both domains)
+--   x37.b  the RM100 three ways: company card / employee claim / director-paid -- none of
+--          the three may mint a domain='ap' item (WC-R10)
+--   x37.c  a typed supplier_bill mints exactly ONE ap `bill` item; ties
+--   x37.d  partial settlement (allocate_receipt) + the typed events
+--   x37.e  a batch receipt clearing N open AR items in one group
+--   x37.f  over-payment: the residue IS the settlement item's outstanding
+--   x37.g  credit application via apply_open_items -- ZERO GL movement
+--   x37.h  unallocate -> re-allocate (exact-negation pairs, no double-undo)
+--   x37.i  the two-sided bound, BOTH directions (over-allocation AND inflation)
+--   x37.j  group law refusals: cross-counterparty + non-zero net per domain
+--   x37.k  the concurrent races (two sessions, blocking PROVEN): allocate vs allocate, and
+--          reverse vs allocate (the client advisory rung)
+--   x37.l  the reversal matrix (clean unwind / settled refused / receipt refused / a
+--          high-stakes draft mirror approved later fires the hook / a revise of a mirror is
+--          refused reversal_mirror_not_revisable / an allocation against a reversed entry's
+--          item is refused allocation_target_reversed and the unwind applies instead)
+--   x37.m  wrong-client correction of an open-itemed bill -> mirror unwind, ties
+--   x37.n  the WCA-R9b named refusals (counterparty kind; cross-domain contra)
+--   x37.o  the credit-note wall on allocate_payment + its approve-time re-derivation
+--   x37.p  the A+ belt: a rule-stamped settlement row violates the CHECK
+--   x37.q  the A+ core refusal, named: settlement_not_autopostable
+--   x37.r  no draft verb can make a settlement kind (WCA-R6/R7)
+--   x37.s  authority catalog: composites authenticated-ONLY; cores ungranted; zero wake
+--          allowlist entries; the section-4.9 lock-order acquisition-sequence pins, off
+--          prosrc, for all four composites and both patched verbs
+--   x37.t  approve_entry passes NO checked_via_rule_id; execute_rule_post stays login-direct
+--   x37.u  the high-stakes threshold: draft -> a DISTINCT checker approves -> ties, plus the
+--          FIVE staleness axes that refuse CLR10 allocation_stale at the checker's approve
+--          (counterparty / settlement_item_count / settlement_amount / outstanding /
+--          proposal_unpinned)
+--   x37.v  the solo-firm high-stakes variant (attestation)
+--   x37.w  the WCA-R8 EVIDENCE PIN (three employee claims still breed a vendor_account
+--          proposal -- the debt's live witness, not a fix)
+--   x37.x  CLR26: an open client-scope question blocks money movement too (settlements
+--          inherit 0035:290-296). Intended, named, and pinned.
+--   x37.y  outbox law: a composite that fails AFTER its entry insert (the CLR26 block, inside
+--          the core) leaves ZERO events/items/allocations/entries
+--   x37.y2 input validation: a duplicated item in one allocation set, refused by name BEFORE
+--          any write (the cell x37.y used to be, retitled honestly)
+--   x37.z  decomposition correctness: a multi-counterparty generic JV and an opening entry,
+--          classifier output vs materialised rows
+--   x37.aa the structural belt: grain uniqueness (the backfill's idempotency), append-only,
+--          force-RLS, the item_kind matrix, the allocation surface
+--   x37.ab allocate_payment end-to-end (the AP mirror) with a discount received
+--   x37.ac the SIX settlement-floor CLR23 refusals, one named reason each, plus the
+--          deferred-trigger proof that the floor really fires at commit
+--   x37.ad belt-1 REFUSES a raw-approved control entry with no item
+--          (subledger_entry_untied) -- the belt's positive half is every other cell
+--   x37.ae a REAL sales_credit_note end to end: the classifier's ladder-3 branch and the kind
+--          matrix's negative sign on a live AR lane
+--   x37.af the section-4.10 sweep force-complete guard: a recovered run completes the DRAFTED
+--          task and leaves the non-drafted running task alone (both directions)
+--   x37.ag the composites refuse a control-class discount account (both domains)
+-- The four adapted fixtures stay green (x36-vendor-binding-helpers.mjs:154-157,
+-- x31-autopost-lane-unify.test.mjs:264-267, a21-watch.test.mjs:358-360,
+-- x35-drafting-trio.test.mjs:244 -- each adapted to a non-control shape or to matching
+-- items; NO bypass GUC exists and none will). The from-zero upgrade drill against a real
+-- pre-0037 book lives in its own reset-gated file beside the other four house drills.
 
 -- =====================================================================================
 -- SECTION 0 -- THE PRE-DDL LIVE PROBES (design section 4.4).
@@ -293,7 +335,7 @@
 -- =====================================================================================
 do $probe$
 declare
-  v_null_cp int; v_kind_bad int; v_cross int; v_mirror_bad int;
+  v_null_cp int; v_kind_bad int; v_cross int; v_mirror_bad int; v_matrix_bad int;
 begin
   -- PROBE 1 -- every control-class line on an approved entry must carry a counterparty.
   -- A control leg with no counterparty contributes to the GL control balance but can produce
@@ -330,14 +372,28 @@ begin
   -- cross-domain contra: a real GL event that must ride a clearing account, one entry per
   -- domain. After 0037 it refuses at approve; a pre-existing one would decompose into two
   -- domains and is an owner decision, not an engineering one.
+  --
+  -- COUNTED ON NETS, NOT ON LEGS. The runtime refusal this probe is the twin of counts
+  -- `count(distinct cl.domain)` over CLASSIFIER output, and the classifier DROPS zero nets.
+  -- A leg-counting probe therefore refuses to apply on a corpus the running system would
+  -- happily accept -- an entry carrying a receivable leg pair that nets to zero has one
+  -- domain, not two. The two must state the same law or the probe is not a probe.
   select count(*)::int into v_cross from (
-    select e.id
-    from clara.journal_entries e
-    join clara.journal_lines l on l.entry_id=e.id
-    join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
-    where e.status='approved' and a.account_class in ('payable','receivable')
-    group by e.id
-    having count(distinct a.account_class)>1
+    select z2.id from (
+      select e.id,
+             case a.account_class when 'receivable' then 'ar' else 'ap' end as dom,
+             sum(case when a.account_class='receivable'
+                      then l.debit_cents-l.credit_cents
+                      else l.credit_cents-l.debit_cents end)::bigint as amt
+      from clara.journal_entries e
+      join clara.journal_lines l on l.entry_id=e.id
+      join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where e.status='approved' and a.account_class in ('payable','receivable')
+      group by 1,2
+    ) z2
+    where z2.amt <> 0
+    group by z2.id
+    having count(distinct z2.dom)>1
   ) z;
   if v_cross <> 0 then
     raise exception '0037 probe 3: % approved entry(ies) carry control nets in BOTH the receivable and payable domains -- split them via a clearing account, one entry per domain, before applying 0037', v_cross;
@@ -386,7 +442,46 @@ begin
     raise exception '0037 probe 4: % approved reversal mirror(s) are not the exact per-(domain,counterparty) negation of their original -- the unwind lemma the backfill tie relies on does not hold for this corpus', v_mirror_bad;
   end if;
 
-  raise notice '0037 probe OK (0/4): no counterparty-less control line, no kind contradiction, no cross-domain control entry, and every approved reversal mirror is an exact negation';
+  -- PROBE 5 -- THE KIND-MATRIX SIGN LAW, on the live book, BEFORE ck_open_items_kind_matrix
+  -- exists to enforce it. The matrix says a 'bill' is a POSITIVE ap claim, an 'invoice' a
+  -- POSITIVE ar claim and a 'credit_note' a NEGATIVE ar claim. Nothing in the pre-0037 schema
+  -- says so: account_class is a per-client CHART property that can be reclassified with
+  -- add_coa_account / the chart verbs, and a typed entry whose control net came out on the
+  -- wrong side (a supplier_bill whose payable net is negative -- e.g. a supplier credit
+  -- mis-coded AS a bill, the very trap section 4.9's credit-note wall names) would decompose
+  -- into a row the backfill INSERT cannot write. Without this probe that lands as a raw CHECK
+  -- violation in the middle of section J with no remedy attached.
+  --
+  -- Only the three typed anchors are testable here: the settlement kinds cannot exist yet
+  -- (section A.1 widens the CHECK below this block), and opening / reversal_unwind /
+  -- adjustment admit EITHER sign by design.
+  select count(*)::int into v_matrix_bad from (
+    select e.id as eid,
+           case a.account_class when 'receivable' then 'ar' else 'ap' end as dom,
+           clara._canonical_counterparty(e.client_id,l.counterparty_id) as cp,
+           case e.coding_kind when 'supplier_bill' then 'bill'
+                              when 'sales_invoice' then 'invoice'
+                              else 'credit_note' end as k,
+           sum(case when a.account_class='receivable'
+                    then l.debit_cents-l.credit_cents
+                    else l.credit_cents-l.debit_cents end)::bigint as amt
+    from clara.journal_entries e
+    join clara.journal_lines l on l.entry_id=e.id
+    join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+    where e.status='approved' and a.account_class in ('payable','receivable')
+      and e.reversal_of is null and not e.is_opening_balance
+      and e.coding_kind in ('supplier_bill','sales_invoice','sales_credit_note')
+    group by 1,2,3,4
+  ) z
+  where z.amt <> 0
+    and not ((z.k='bill'        and z.dom='ap' and z.amt > 0)
+          or (z.k='invoice'     and z.dom='ar' and z.amt > 0)
+          or (z.k='credit_note' and z.dom='ar' and z.amt < 0));
+  if v_matrix_bad <> 0 then
+    raise exception '0037 probe 5: % classified (kind, domain, sign) triple(s) contradict the open-item kind matrix (a bill must be a positive payable net, an invoice a positive receivable net, a credit note a negative receivable net) -- reverse and re-code the affected entries through the sanctioned verbs, or correct the account_class of the control account they touch, before applying 0037', v_matrix_bad;
+  end if;
+
+  raise notice '0037 probe OK (0/5): no counterparty-less control line, no kind contradiction, no cross-domain control NET, every approved reversal mirror is an exact negation, and every typed entry decomposes on the kind matrix''s side';
 end
 $probe$;
 
@@ -829,14 +924,35 @@ begin
   -- typed shape floors. The original's status join is not defensive padding -- an opening
   -- entry can be WITHDRAWN after its draft-time opening_items row exists (0017:3463-3471),
   -- so every subledger read in this migration joins status='approved'.
+  --
+  -- CANONICALISED AND AGGREGATED PER PARTY. The original's items store the counterparty that
+  -- was canonical AT WRITE TIME; a merge_counterparties performed afterwards does NOT repoint
+  -- history, exactly as it does not for journal_lines. Reading the stored id raw would emit
+  -- an unwind row under a merged-away party while every other ladder (and the mirror's own
+  -- control legs) speaks the canonical one -- so the belts would refuse the mirror with a
+  -- wrong diagnosis and reverse_entry would be permanently wedged for that entry. The
+  -- TWO-PARTY COLLAPSE follows from the same law: if the original carried items for A and B
+  -- and A was later merged into B, ONE canonical party now owes the whole thing, so the
+  -- negation is aggregated per canonical party (min(oi.id) carries the lineage of the
+  -- collapsed set) and a set that nets to zero produces no row at all -- the same
+  -- zero-net-drop every other ladder applies, and required here because amount_cents <> 0 is
+  -- a CHECK.
   if e.reversal_of is not null then
     return query
-      select oi.domain, oi.counterparty_id, 'reversal_unwind'::text,
-             (-oi.amount_cents)::bigint, null::uuid, oi.id
+      select oi.domain,
+             clara._canonical_counterparty(e.client_id, oi.counterparty_id) as cp,
+             'reversal_unwind'::text,
+             (-sum(oi.amount_cents))::bigint,
+             null::uuid,
+             -- min(uuid) is not an aggregate in PostgreSQL 17; the house idiom for a
+             -- deterministic pick is the text cast (0035:196 uses the same form).
+             min(oi.id::text)::uuid
       from clara.open_items oi
       join clara.journal_entries orig on orig.id = oi.entry_id
       where oi.entry_id = e.reversal_of and orig.status = 'approved'
-      order by oi.domain, oi.counterparty_id;
+      group by 1, 2
+      having sum(oi.amount_cents) <> 0
+      order by 1, 2;
     return;
   end if;
 
@@ -934,10 +1050,12 @@ revoke all on function clara._subledger_classify_entry(uuid) from public;
 create function clara._subledger_on_approve(p_entry uuid) returns void
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
-  e record; r record; al record;
+  e record; r record; al record; si record;
   v_actor uuid; v_domains int; v_cp_kind text; v_item uuid;
-  v_prop jsonb; v_group uuid; v_settle uuid; v_settle_dom text;
+  v_prop jsonb; v_group uuid; v_settle uuid; v_settle_dom text; v_settle_n int;
   v_out bigint; v_amt bigint; v_total bigint := 0; v_ids uuid[];
+  v_exp bigint; v_pairs int := 0; v_prop_sum bigint; v_prop_cp uuid;
+  v_doc_kind text; v_rev_by uuid;
 begin
   select * into e from clara.journal_entries where id = p_entry;
   if not found then return; end if;
@@ -1010,11 +1128,53 @@ begin
              where oa.application_group = v_group) then
     return;
   end if;
-  select oi.id into v_settle from clara.open_items oi
+  -- min(uuid) is not an aggregate in PostgreSQL 17; the text cast is the house idiom.
+  select count(*)::int, min(oi.id::text)::uuid into v_settle_n, v_settle
+    from clara.open_items oi
     where oi.entry_id = p_entry and oi.domain = v_settle_dom;
-  if v_settle is null then
+  if v_settle_n = 0 then
     raise exception 'the settlement entry produced no open item to allocate against'
       using errcode='CLR10',detail='{"reason":"settlement_item_missing"}';
+  end if;
+  select * into si from clara.open_items oi where oi.id = v_settle;
+
+  -- (3a) PROPOSAL CONGRUENCE, RE-DERIVED UNDER THE LOCKS (WCA-R7's real cost). The draft
+  -- window between the composite's validation and the checker's approve is also a REVISE
+  -- window: revise_entry rewrites the entry's lines wholesale and does not carry
+  -- counterparty_id onto the re-inserted legs (0016:4836-4840), so a revised settlement draft
+  -- can reach this point pointing at a DIFFERENT customer, at a different gross, or at a
+  -- shape that produces more than one control item. The stored proposal is a statement about
+  -- a world; if the world moved, the honest answer is one named refusal the maker can act on,
+  -- never a silent re-aim of somebody's money. All of it rides ONE reason token
+  -- ('allocation_stale') because the remedy is identical in every case: re-run the
+  -- allocation.
+  if v_settle_n <> 1 then
+    raise exception 'this settlement entry now carries % control items in the % domain; the stored allocation proposal no longer describes it -- re-run the allocation', v_settle_n, v_settle_dom
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','allocation_stale','axis','settlement_item_count',
+          'settlement_items',v_settle_n)::text;
+  end if;
+  v_prop_cp := clara._canonical_counterparty(e.client_id,
+    (v_prop ->> 'counterparty_id')::uuid);
+  if v_prop_cp is null
+     or clara._canonical_counterparty(e.client_id, si.counterparty_id)
+        is distinct from v_prop_cp then
+    raise exception 'this settlement entry no longer settles the counterparty the allocation proposal names; re-run the allocation'
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','allocation_stale','axis','counterparty',
+          'proposed_counterparty_id',v_prop_cp,
+          'settlement_counterparty_id',si.counterparty_id)::text;
+  end if;
+  -- The settlement item is exactly -gross by construction, so the proposal can never allocate
+  -- more than the entry as it NOW stands actually settles -- an amount revised DOWN is caught
+  -- here, an amount revised UP is caught by the per-item outstanding equality below.
+  select coalesce(sum((x.elem ->> 'amount_cents')::bigint), 0) into v_prop_sum
+    from jsonb_array_elements(v_prop -> 'allocations') as x(elem);
+  if v_prop_sum > -si.amount_cents then
+    raise exception 'the stored allocations (% cents) exceed what this settlement entry now discharges (% cents); re-run the allocation', v_prop_sum, -si.amount_cents
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','allocation_stale','axis','settlement_amount',
+          'allocated_cents',v_prop_sum,'settlement_gross_cents',-si.amount_cents)::text;
   end if;
 
   -- LOCK ORDER: the advisory client lock is already held by every caller that reaches here
@@ -1028,19 +1188,61 @@ begin
   end if;
 
   for al in select (x.elem ->> 'item_id')::uuid as item_id,
-                  (x.elem ->> 'amount_cents')::bigint as amt
+                  (x.elem ->> 'amount_cents')::bigint as amt,
+                  (x.elem ->> 'expected_outstanding_cents')::bigint as exp_out
            from jsonb_array_elements(v_prop -> 'allocations') as x(elem)
            order by 1 loop
     v_out := clara._subledger_outstanding(al.item_id);
-    -- RE-VALIDATION AT THE MOMENT OF APPROVAL. Between the composite's validation and a
-    -- checker's approve, another human may have allocated the same invoice. The proposal is
-    -- then STALE and the honest answer is a named refusal the maker can act on -- never a
-    -- silent partial application and never an over-allocation the belt would have to catch.
-    if v_out is null or v_out <= 0 or al.amt > v_out then
-      raise exception 'the stored allocation no longer fits this item''s outstanding; re-run the allocation'
+    v_exp := al.exp_out;
+    -- RE-VALIDATION AT THE MOMENT OF APPROVAL, ON EQUALITY -- not on "still fits". Between
+    -- the composite's validation and a checker's approve, another human may have allocated
+    -- the same invoice. A "still fits" test silently accepts a world where the outstanding
+    -- MOVED but happens to remain large enough, which quietly changes what the maker
+    -- proposed; equality against the outstanding the composite actually saw is the only test
+    -- that means "nothing moved". FAIL-CLOSED on an absent pin: a proposal with no
+    -- expected_outstanding_cents was not written by the composites this migration ships.
+    if v_exp is null then
+      raise exception 'the stored allocation proposal carries no expected outstanding for open item %; re-run the allocation', al.item_id
         using errcode='CLR10',
-          detail=jsonb_build_object('reason','allocation_stale','item_id',al.item_id,
-            'requested_cents',al.amt,'outstanding_cents',v_out)::text;
+          detail=jsonb_build_object('reason','allocation_stale','axis','proposal_unpinned',
+            'item_id',al.item_id)::text;
+    end if;
+    if v_out is null or v_out <= 0 or al.amt > v_out or v_out is distinct from v_exp then
+      raise exception 'this item''s outstanding moved since the allocation was proposed (proposed against %, now %); re-run the allocation', v_exp, v_out
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','allocation_stale','axis','outstanding',
+            'item_id',al.item_id,'requested_cents',al.amt,
+            'expected_outstanding_cents',v_exp,'outstanding_cents',v_out)::text;
+    end if;
+    -- THE APPROVE-TIME TWIN of the composites' reversed-target refusal. reverse_entry only
+    -- refuses an entry whose items carry non-zero NET allocations, and a DRAFT proposal has
+    -- written none -- so the target of a high-stakes proposal can legitimately be reversed
+    -- between maker and checker. Allocating cash against a claim that no longer exists is
+    -- the defect the composites refuse; it must be refused here too, under the same token.
+    select je.reversed_by into v_rev_by from clara.journal_entries je
+      join clara.open_items oi on oi.entry_id = je.id where oi.id = al.item_id;
+    if v_rev_by is not null then
+      raise exception 'open item % belongs to an entry that has since been reversed; apply the reversal unwind instead of settling it', al.item_id
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','allocation_target_reversed',
+            'item_id',al.item_id,'reversed_by',v_rev_by)::text;
+    end if;
+    -- THE CREDIT-NOTE WALL, RE-DERIVED (the approve-time re-derivation house pattern).
+    -- set_document_kind can flip a document invoice -> credit_note at any moment, including
+    -- inside the WCA-R7 draft window, so the composite's read is a TOCTOU snapshot and the
+    -- wall has to be re-asked where the money actually moves. Same named reason as the
+    -- composite's, because it is the same wall.
+    if v_settle_dom = 'ap' then
+      select d.document_kind into v_doc_kind
+        from clara.open_items oi
+        join clara.journal_entries je on je.id = oi.entry_id
+        join clara.documents d on d.id = je.document_id
+        where oi.id = al.item_id;
+      if v_doc_kind = 'credit_note' then
+        raise exception 'open item % comes from a document classified as a credit note; fix the coding before paying against it', al.item_id
+          using errcode='CLR10',
+            detail=jsonb_build_object('reason','credit_note_item','item_id',al.item_id)::text;
+      end if;
     end if;
     -- THE BALANCED PAIR. -X against the settled item, +X against the settlement item. The
     -- group therefore nets to exactly zero per (client, domain) BY CONSTRUCTION, which is
@@ -1054,13 +1256,20 @@ begin
       values (e.firm_id, e.client_id, v_settle_dom, v_settle, v_group, 'allocate',
         al.amt, null, v_actor);
     v_total := v_total + al.amt;
+    v_pairs := v_pairs + 1;
   end loop;
 
-  perform clara._append_event(e.firm_id, 'open_item.allocated', e.client_id, v_actor,
-    null, null, p_entry, e.document_id, null,
-    jsonb_build_object('application_group', v_group, 'domain', v_settle_dom,
-      'settlement_item_id', v_settle, 'allocated_cents', v_total,
-      'residue_cents', -clara._subledger_outstanding(v_settle)));
+  -- NO PAIRS, NO EVENT. A pure on-account receipt (every sen residue, nothing applied) writes
+  -- no allocation row at all, and an open_item.allocated event naming a group that does not
+  -- exist in clara.open_item_allocations is a lie in the stream -- C-c's aging and the
+  -- reconciliation workbench both read the group back.
+  if v_pairs > 0 then
+    perform clara._append_event(e.firm_id, 'open_item.allocated', e.client_id, v_actor,
+      null, null, p_entry, e.document_id, null,
+      jsonb_build_object('application_group', v_group, 'domain', v_settle_dom,
+        'settlement_item_id', v_settle, 'allocated_cents', v_total,
+        'residue_cents', -clara._subledger_outstanding(v_settle)));
+  end if;
 end $$;
 revoke all on function clara._subledger_on_approve(uuid) from public;
 
@@ -1072,6 +1281,12 @@ revoke all on function clara._subledger_on_approve(uuid) from public;
 -- packages/db/scripts/subledger-dryrun.sql inlines the same logic for the PRE-0037 live run,
 -- where none of these objects exist yet.
 -- p_domain null means both domains.
+--
+-- THE MATERIALISED SIDE IS CANONICALISED AND SUMMED, never joined on the stored id. Items
+-- store the counterparty that was canonical at write; a later merge_counterparties does not
+-- repoint history. A raw join would report a phantom diff (the whole classified amount as
+-- "unmaterialised", plus an invisible orphan) for every entry whose party has since been
+-- merged -- which is precisely the corpus a diff surface exists to be trusted on.
 -- =====================================================================
 create function clara._subledger_decompose_preview(p_client uuid, p_domain text)
   returns table(entry_id uuid, posting_date date, domain text, counterparty_id uuid,
@@ -1080,13 +1295,17 @@ create function clara._subledger_decompose_preview(p_client uuid, p_domain text)
   language sql stable security definer set search_path = clara, pg_temp as $$
   select e.id, e.posting_date, cl.domain, cl.counterparty_id, cl.item_kind,
          cl.amount_cents,
-         oi.amount_cents,
-         cl.amount_cents - coalesce(oi.amount_cents, 0)
+         it.amt,
+         cl.amount_cents - coalesce(it.amt, 0)
   from clara.journal_entries e
   cross join lateral clara._subledger_classify_entry(e.id) cl
-  left join clara.open_items oi
-    on oi.entry_id = e.id and oi.domain = cl.domain
-   and oi.counterparty_id = cl.counterparty_id
+  left join lateral (
+    select sum(oi.amount_cents)::bigint as amt
+    from clara.open_items oi
+    where oi.entry_id = e.id and oi.domain = cl.domain
+      and clara._canonical_counterparty(oi.client_id, oi.counterparty_id)
+          = cl.counterparty_id
+  ) it on true
   where e.client_id = p_client and e.status = 'approved'
     and (p_domain is null or cl.domain = p_domain)
   order by e.posting_date, e.id, cl.domain, cl.counterparty_id;
@@ -1125,7 +1344,7 @@ revoke all on function clara._subledger_decompose_preview(uuid,text) from public
 
 create function clara._tf_subledger_entry_belt() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare v_id uuid; v_bad int;
+declare v_id uuid; v_bad int; v_legs_bad int;
 begin
   v_id := new.id;
   -- RE-QUERY BY ID. A row that is no longer approved at commit (there is no such transition
@@ -1134,18 +1353,70 @@ begin
                  where je.id = v_id and je.status = 'approved') then
     return null;
   end if;
+
+  -- ARM 1 -- CLASSIFIER CONGRUENCE: the entry's items are exactly the rows the ONE classifier
+  -- would produce, same grain, same amount, same KIND. The item side is aggregated by
+  -- CANONICAL counterparty because items store the party that was canonical AT WRITE and a
+  -- later merge does not repoint history -- joining the stored id raw would make every
+  -- post-merge entry fail this belt (and would wedge reverse_entry on it forever with a
+  -- diagnosis about the subledger being untied, which would be false).
   select count(*)::int into v_bad from (
     select 1 from clara._subledger_classify_entry(v_id) cl
     full outer join (
-      select oi.domain as d, oi.counterparty_id as cp,
-             oi.amount_cents as amt, oi.item_kind as k
+      select oi.domain as d,
+             clara._canonical_counterparty(oi.client_id, oi.counterparty_id) as cp,
+             sum(oi.amount_cents)::bigint as amt,
+             min(oi.item_kind) as k,
+             count(distinct oi.item_kind)::int as kn
       from clara.open_items oi where oi.entry_id = v_id
-    ) it on it.d = cl.domain and it.cp = cl.counterparty_id
+      group by 1, 2
+    ) it on it.d = cl.domain and it.cp is not distinct from cl.counterparty_id
     where cl.amount_cents is distinct from it.amt
        or cl.item_kind is distinct from it.k
+       or coalesce(it.kn, 1) <> 1
   ) z;
   if v_bad > 0 then
     raise exception 'approved entry % does not tie to its open items (% divergent grain row(s)) -- an approve path did not materialise the subledger', v_id, v_bad
+      using errcode='CLR10',detail='{"reason":"subledger_entry_untied"}';
+  end if;
+
+  -- ARM 2 -- LEGS CONGRUENCE. The entry's OWN control legs, netted per (domain, canonical
+  -- counterparty) and zero-nets dropped, must equal its items. Arm 1 alone is TAUTOLOGICAL on
+  -- ladder 1: a reversal mirror's items are derived from the ORIGINAL's items, so an entry
+  -- whose own legs have been rewritten -- reverse a high-stakes entry, revise_entry the draft
+  -- mirror to different amounts (revise carries reversal_of ZERO times and re-inserts legs
+  -- without counterparty_id, 0016:4836-4840), then approve it -- ties to arm 1 perfectly
+  -- while the GL and the subledger have silently parted company. This arm is derived from the
+  -- LEDGER, so it holds for EVERY entry including mirrors, and it is what makes the section-3
+  -- identity a structural fact rather than a property of the write path. The cheap guard in
+  -- clara.revise_entry refuses that sequence at its source; this is the belt behind it.
+  select count(*)::int into v_legs_bad from (
+    select 1 from (
+      select case a.account_class when 'receivable' then 'ar' else 'ap' end as d,
+             clara._canonical_counterparty(l.client_id, l.counterparty_id) as cp,
+             sum(case when a.account_class = 'receivable'
+                      then l.debit_cents - l.credit_cents
+                      else l.credit_cents - l.debit_cents end)::bigint as amt
+      from clara.journal_lines l
+      join clara.coa_accounts a
+        on a.client_id = l.client_id and a.account_code = l.account_code
+      where l.entry_id = v_id and a.account_class in ('payable','receivable')
+      group by 1, 2
+      having sum(case when a.account_class = 'receivable'
+                      then l.debit_cents - l.credit_cents
+                      else l.credit_cents - l.debit_cents end) <> 0
+    ) lg
+    full outer join (
+      select oi.domain as d,
+             clara._canonical_counterparty(oi.client_id, oi.counterparty_id) as cp,
+             sum(oi.amount_cents)::bigint as amt
+      from clara.open_items oi where oi.entry_id = v_id
+      group by 1, 2
+    ) it on it.d = lg.d and it.cp is not distinct from lg.cp
+    where lg.amt is distinct from it.amt
+  ) z;
+  if v_legs_bad > 0 then
+    raise exception 'approved entry % does not tie to its open items on its OWN control legs (% divergent grain row(s)) -- the ledger and the subledger disagree about who owes what', v_id, v_legs_bad
       using errcode='CLR10',detail='{"reason":"subledger_entry_untied"}';
   end if;
   return null;
@@ -1229,6 +1500,24 @@ begin
       using errcode='CLR10',detail='{"reason":"subledger_item_kind_mismatch"}';
   end if;
 
+  -- (c) CLASSIFIER CONGRUENCE -- the exact complement of belt-1's arm 1. Belt-1 fires only on
+  -- a journal_entries write, so a LONE `insert into clara.open_items` against an entry that
+  -- was approved in some EARLIER transaction touches no journal_entries row and dodges it
+  -- completely: a second bill item for the same party under a merged-away counterparty id
+  -- would sail past the grain unique, past every FK, and past belt-1, and it would break the
+  -- section-3 identity on the spot. Every item must be a row the ONE classifier would have
+  -- produced for its own entry -- same domain, same canonical party, same amount, same kind.
+  if not exists (
+    select 1 from clara._subledger_classify_entry(i.entry_id) cl
+    where cl.domain = i.domain
+      and cl.counterparty_id
+          = clara._canonical_counterparty(i.client_id, i.counterparty_id)
+      and cl.amount_cents = i.amount_cents
+      and cl.item_kind = i.item_kind) then
+    raise exception 'open item % is not a row the classifier produces for entry % -- the subledger would no longer be derivable from the ledger', i.id, i.entry_id
+      using errcode='CLR10',detail='{"reason":"subledger_item_not_classified"}';
+  end if;
+
   -- (a) THE TWO-SIDED, SIGN-AWARE BOUND. sign(amount) * outstanding must stay within
   -- [0, abs(amount)]: no over-allocation past zero AND no inflation past face value. The
   -- second half is the one v1 lacked, and it is what stops a credit item being "settled"
@@ -1250,13 +1539,37 @@ create constraint trigger t_open_items_belt
 
 create function clara._tf_subledger_alloc_belt() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
-declare a record; i record; v_out bigint; v_sign int; v_bad int; v_parties int;
+declare a record; i record; src record; v_out bigint; v_sign int; v_bad int; v_parties int;
 begin
   -- RE-QUERY BY ID (0009:524-529).
   select * into a from clara.open_item_allocations oa where oa.id = new.id;
   if not found then return null; end if;
   select * into i from clara.open_items oi where oi.id = a.item_id;
   if not found then return null; end if;
+
+  -- (d) AN UNALLOCATION IS AN EXACT NEGATION OF ONE PRIOR ROW, and the CHECK that pairs
+  -- operation_kind with reverses_allocation_id cannot say WHICH row or by HOW MUCH -- a
+  -- constraint cannot join. Without this, an 'unallocate' row could name any allocation in
+  -- the estate, carry any amount, and still satisfy every declarative rule on the table:
+  -- the group would net to zero (its own pair does), the FKs would hold, and the undo would
+  -- have moved money between items. The four clauses are: SAME item, EXACT negation, the
+  -- target is a real allocation or application (never another unallocate -- an undo of an
+  -- undo is a re-allocation, and unallocate_group refuses it by name), and the target has no
+  -- OTHER reverser (uq_oia_reverses_once is the structural half of no-double-undo; this is
+  -- the half that survives a future partial index change).
+  if a.operation_kind = 'unallocate' then
+    select * into src from clara.open_item_allocations oa
+      where oa.id = a.reverses_allocation_id;
+    if not found
+       or src.item_id <> a.item_id
+       or src.amount_cents <> -a.amount_cents
+       or src.operation_kind not in ('allocate','apply')
+       or exists (select 1 from clara.open_item_allocations o2
+                  where o2.reverses_allocation_id = src.id and o2.id <> a.id) then
+      raise exception 'unallocation % is not the exact negation of one live allocation row', a.id
+        using errcode='CLR10',detail='{"reason":"subledger_unallocation_not_exact"}';
+    end if;
+  end if;
 
   -- (a) the affected item's two-sided bound, re-checked at the ALLOCATION's commit. This is
   -- the half v1's single entry-side belt could not see: unallocate and apply_open_items
@@ -1820,6 +2133,14 @@ begin
   v_next:=replace(v_def,
 $old$  if p_reason is null or btrim(p_reason)='' then raise exception 'a reversal reason is required' using errcode='CLR10'; end if;$old$,
 $new$  if p_reason is null or btrim(p_reason)='' then raise exception 'a reversal reason is required' using errcode='CLR10'; end if;
+  -- 0037: SERIALIZE REVERSE AGAINST ALLOCATION. The refusal below reads the subledger; the
+  -- section-4.9 composites write it. reverse_entry holds only the JE row lock, which the
+  -- composites never take on a PRE-EXISTING entry, so without this rung the check-then-act
+  -- window is wide open: a concurrent allocate_receipt commits its pairs between this read
+  -- and the mirror's approve, and the entry is reversed with live allocations pointing at
+  -- items whose unwind has already been written. Same client advisory id, same order the
+  -- core and the composites use -- JE row lock FIRST, then 203005004 -- so no rung inverts.
+  perform pg_advisory_xact_lock(203005004,hashtext(o.client_id::text));
   -- 0037 (design 4.5): an entry whose open items carry non-zero NET allocations is not
   -- reversible in one step. Unallocate first, then reverse -- which keeps the unwind
   -- trivially total (unwind items are exact negations, so no allocation is ever stranded).
@@ -1827,8 +2148,22 @@ $new$  if p_reason is null or btrim(p_reason)='' then raise exception 'a reversa
     raise exception 'open items on this entry carry allocations; unallocate them first'
       using errcode='CLR10',detail='{"reason":"allocated_items_present"}';
   end if;$new$);
-  if v_next=v_def or position('allocated_items_present' in v_next)=0 then
+  if v_next=v_def or position('allocated_items_present' in v_next)=0
+     or position('pg_advisory_xact_lock(203005004,hashtext(o.client_id::text))' in v_next)=0 then
     raise exception '0037 section H.2: reverse_entry reason-check anchor drift -- the reverse refusal was not installed'
+      using errcode='CLR10';
+  end if;
+  -- SECOND ANCHOR, counted the same way as the first (0036 review F4): replace() rewrites
+  -- EVERY occurrence, so a body carrying two copies would take two splices while a
+  -- position()>0 post-check stayed green. Both anchors in this patch are now counted.
+  if (length(v_next)-length(replace(v_next,
+      $a$    update clara.journal_entries set reversed_by=v_mirror,reversal_reason=p_reason,
+      updated_at=now() where id=p_entry;
+    v_status:='approved';$a$,'')))
+     / length($a$    update clara.journal_entries set reversed_by=v_mirror,reversal_reason=p_reason,
+      updated_at=now() where id=p_entry;
+    v_status:='approved';$a$) <> 1 then
+    raise exception '0037 section H.2 prestate: the reverse_entry inline-approve anchor must appear exactly once in the live body'
       using errcode='CLR10';
   end if;
   v_prior:=v_next;
@@ -1850,6 +2185,83 @@ $new$    update clara.journal_entries set reversed_by=v_mirror,reversal_reason=p
   execute v_next;
 end
 $rev37$;
+
+-- =====================================================================
+-- SECTION H.2b -- clara.revise_entry: a CHANGE-OF-RECORD PATCH, the cheap guard behind
+-- belt-1's arm 2.
+--
+-- THE HOLE. A fully sanctioned sequence breaks the section-3 identity with no unsanctioned
+-- step anywhere in it: reverse a HIGH-STAKES entry (the mirror stays a DRAFT), then
+-- revise_entry that draft mirror to different lines, then approve_entry it. The classifier's
+-- ladder 1 decomposes the mirror from the ORIGINAL's items -- it never looks at the mirror's
+-- own legs -- so the items say one thing and the GL says another, and belt-1's classifier arm
+-- (which compares those same two derived-from-the-same-place quantities) ties perfectly.
+-- revise_entry contains the string `reversal_of` ZERO times: nothing in it knows a mirror is
+-- special, and its line re-insert additionally drops counterparty_id from every leg
+-- (0016:4836-4840), so even an amount-preserving revise strips the attribution the subledger
+-- is built on.
+--
+-- TWO FIXES, both shipped: belt-1's ARM 2 (structural -- the entry's own control legs must
+-- tie to its items, which holds for mirrors and for every future path) and THIS guard, which
+-- refuses the sequence at its source so the human gets a remedy instead of a commit-time
+-- belt failure with no path forward.
+--
+-- PATCHED, NEVER REBUILT. The dual grep (0036:381-413): `create (or replace )?function
+-- clara.revise_entry` last hits 0016:4765 -- but that is NOT its last definition. 0017:291-308
+-- splices the R1-F1 CLR31 opening-boundary preflight in dynamically, and 0028:1443-1532
+-- splices FOUR more regions (the binding-divergence declarations, the resolution read, the
+-- coding_kind/vendor_binding_id strip + the vendor_binding_resolutions row, and the
+-- binding_resolved event). A rebuild from 0016's text would silently delete all five. Both
+-- prior changes of record are probed POSITIVELY before this patch touches anything.
+-- =====================================================================
+do $rev37b$
+declare v_def text; v_next text;
+begin
+  select pg_get_functiondef(
+    'clara.revise_entry(uuid,jsonb,jsonb,jsonb,uuid,text,jsonb,jsonb)'::regprocedure) into v_def;
+  if position('opening_entry_k_family_only' in v_def)=0
+     or position('v_binding_divergence' in v_def)=0
+     or position('clara.vendor_binding_resolutions' in v_def)=0 then
+    raise exception '0037 section H.2b prestate: the live clara.revise_entry body is missing a 0017 R1-F1 or 0028 binding-divergence marker -- refusing to patch a body this migration cannot account for'
+      using errcode='CLR10';
+  end if;
+  if position('reversal_mirror_not_revisable' in v_def)<>0 then
+    raise exception '0037 section H.2b prestate: clara.revise_entry already carries the reversal-mirror guard -- 0037 has already been applied to this database'
+      using errcode='CLR10';
+  end if;
+  if (length(v_def)-length(replace(v_def,
+      $a$  if e.revision_token is distinct from p_expected_revision then
+    raise exception 'stale revision token' using errcode='CLR06';
+  end if;$a$,'')))
+     / length($a$  if e.revision_token is distinct from p_expected_revision then
+    raise exception 'stale revision token' using errcode='CLR06';
+  end if;$a$) <> 1 then
+    raise exception '0037 section H.2b prestate: the revise_entry revision-token anchor must appear exactly once in the live body'
+      using errcode='CLR10';
+  end if;
+  v_next:=replace(v_def,
+$old$  if e.revision_token is distinct from p_expected_revision then
+    raise exception 'stale revision token' using errcode='CLR06';
+  end if;$old$,
+$new$  if e.revision_token is distinct from p_expected_revision then
+    raise exception 'stale revision token' using errcode='CLR06';
+  end if;
+  -- 0037 (design 4.5 / the section-3 identity): a REVERSAL MIRROR is not editable. Its
+  -- subledger decomposition is derived from the ORIGINAL's items, so revising its lines makes
+  -- the ledger and the subledger disagree by construction -- and this function has no concept
+  -- of reversal_of, so nothing else here would notice. The remedy is the honest one: withdraw
+  -- the mirror and re-reverse the original with the lines you actually want.
+  if e.reversal_of is not null then
+    raise exception 'a reversal mirror cannot be revised; withdraw the mirror and re-reverse the original'
+      using errcode='CLR10',detail='{"reason":"reversal_mirror_not_revisable"}';
+  end if;$new$);
+  if v_next=v_def or position('reversal_mirror_not_revisable' in v_next)=0 then
+    raise exception '0037 section H.2b: revise_entry revision-token anchor drift -- the reversal-mirror guard was not installed'
+      using errcode='CLR10';
+  end if;
+  execute v_next;
+end
+$rev37b$;
 
 -- =====================================================================
 -- SECTION H.3 -- clara.approve_wrong_client_correction: a CHANGE-OF-RECORD PATCH.
@@ -1894,6 +2306,15 @@ begin
 $old$    if it.action='reverse' then
       v_mirror:=null; v_adopted:=false;$old$,
 $new$    if it.action='reverse' then
+      -- 0037: SERIALIZE REVERSE AGAINST ALLOCATION, exactly as reverse_entry now does. This
+      -- body already holds the FIRM advisory rung (203005002) and the captured entries' JE
+      -- row locks; neither serializes against a section-4.9 composite, which takes the CLIENT
+      -- rung and locks only its OWN freshly-inserted entry. Taking 203005004 here -- AFTER
+      -- the JE row locks above, so the JE -> advisory order the core uses is preserved --
+      -- closes the check-then-act window on the refusal below. The full rung is
+      -- firm(203005002) -> client(203005004); advisory xact locks are re-entrant, so taking
+      -- it once per captured item costs nothing after the first.
+      perform pg_advisory_xact_lock(203005004,hashtext(o.client_id::text));
       -- 0037 (design 4.5): the same reverse refusal reverse_entry carries. A correction that
       -- moves a filing between clients still REVERSES the entries it captures, so an
       -- allocated open item must be unallocated first here too.
@@ -1902,8 +2323,19 @@ $new$    if it.action='reverse' then
           using errcode='CLR10',detail='{"reason":"allocated_items_present"}';
       end if;
       v_mirror:=null; v_adopted:=false;$new$);
-  if v_next=v_def or position('allocated_items_present' in v_next)=0 then
+  if v_next=v_def or position('allocated_items_present' in v_next)=0
+     or position('pg_advisory_xact_lock(203005004,hashtext(o.client_id::text))' in v_next)=0 then
     raise exception '0037 section H.3: approve_wrong_client_correction reverse-branch anchor drift -- the reverse refusal was not installed'
+      using errcode='CLR10';
+  end if;
+  -- SECOND ANCHOR, counted like the first (0036 review F4) -- replace() rewrites every
+  -- occurrence, so an uncounted anchor can take two splices under a green position() check.
+  if (length(v_next)-length(replace(v_next,
+      $a$      update clara.journal_entries set reversed_by=v_mirror,reversal_reason=x.reason,
+        updated_at=now() where id=o.id;$a$,'')))
+     / length($a$      update clara.journal_entries set reversed_by=v_mirror,reversal_reason=x.reason,
+        updated_at=now() where id=o.id;$a$) <> 1 then
+    raise exception '0037 section H.3 prestate: the mirror-approve anchor must appear exactly once in the live body'
       using errcode='CLR10';
   end if;
   v_prior:=v_next;
@@ -2043,7 +2475,9 @@ $sweep37$;
 -- a judgement about which obligation a payment discharges, and judgement is the one thing the
 -- agent never makes.
 --
--- THE LOCK ORDER, extended and stated once for all four:
+-- THE LOCK ORDER, extended and stated once for all four -- AS BUILT, which is not the order
+-- design v2 section 4.9 first wrote (it named journal_entries before open_items; the design
+-- carries the amendment and the reason):
 --   op-receipt  ->  advisory 203005003 (client:counterparty)  ->  advisory 203005004 (client)
 --   ->  open_items (batch: FOR UPDATE ... ORDER BY id)  ->  journal_entries  ->  groups
 -- The two advisory ids are the EXISTING ones _approve_entry_core already takes, in the
@@ -2055,6 +2489,31 @@ $sweep37$;
 -- reach the core at all; acquiring the same locks earlier in the allocate path is the
 -- refinement that makes the single total order true for every actor. Advisory transaction
 -- locks are re-entrant, so the core re-taking them inside the composite is free.
+--
+-- THE ADVISORY RUNG, WHOLE, so no reader has to reconstruct it from four call sites:
+--   firm (203005002)  ->  client (203005004)  ->  client:counterparty (203005003)
+-- read as a PARTIAL order over who takes what, not as a sequence anyone walks end to end.
+-- approve_wrong_client_correction is the only body that takes the firm rung (0027-era, before
+-- everything else it does); the composites and _approve_entry_core take
+-- 203005003 then 203005004 with no firm rung at all; reverse_entry and
+-- approve_wrong_client_correction now take 203005004 AFTER their journal_entries row locks,
+-- which is the same relative order _approve_entry_core has always used (JE row lock at
+-- 0035-era, advisory after) -- so adding the rung inverts nothing.
+--
+-- TWO NAMED INVARIANTS hold this together, and a future verb that breaks either one is the
+-- thing to catch in review:
+--   (1) A COMPOSITE LOCKS ONLY ITS OWN FRESHLY-INSERTED ENTRY ROW. It inserts the settlement
+--       entry and the core then takes FOR UPDATE on that same brand-new id; no composite ever
+--       row-locks a PRE-EXISTING journal_entries row. That is precisely why the composites
+--       may take open_items BEFORE journal_entries while reverse_entry and
+--       approve_wrong_client_correction take journal_entries first: the two orders never meet
+--       on the same object. ANY FUTURE VERB THAT LOCKS A PRE-EXISTING ENTRY MUST TAKE
+--       journal_entries BEFORE open_items.
+--   (2) THE CORE'S OWN INTERNAL ORDER IS PRE-EXISTING AND IS NOT REORDERED BY THIS WAVE.
+--       _approve_entry_core takes the document filing, then the entry row, then the advisory
+--       pair -- a 0029/0035-era sequence that predates the subledger and that several other
+--       verbs are already ordered against. Wave C-a extends the order with new rungs at the
+--       END; it does not renumber the ones that were already there.
 --
 -- OP-KEYS. Each composite reserves its own key over the hash of the FULL NORMALIZED request
 -- -- every argument that reaches a stored column or a decision, with the allocation array
@@ -2094,8 +2553,8 @@ create function clara.allocate_receipt(
 declare
   c record; v_dedupe jsonb; v_firm uuid; v_cp uuid; v_cp_kind text;
   v_memo text; v_disc bigint; v_gross bigint; v_ctrl text; v_ctrl_n int;
-  v_allocs jsonb; v_n int; v_dis int; v_sum bigint; v_residue bigint;
-  v_ids uuid[]; al record; v_out bigint; i record;
+  v_allocs jsonb; v_prop_allocs jsonb; v_n int; v_dis int; v_sum bigint; v_residue bigint;
+  v_ids uuid[]; al record; v_out bigint; i record; v_rev_by uuid;
   v_group uuid; v_entry uuid; v_rev uuid; v_line int; v_status text; v_approve_key text;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
@@ -2165,13 +2624,41 @@ begin
       using errcode='CLR10',detail='{"reason":"allocations_exceed_receipt"}';
   end if;
 
+  -- THE REQUEST HASH CARRIES EVERY ARGUMENT THAT REACHES A STORED COLUMN OR A DECISION, and
+  -- p_control_account is both: it decides WHICH receivable control account the entry credits.
+  -- Omitting it would let the same op_key replayed with a different control account return
+  -- the FIRST call's receipt while the caller believes the second request landed -- a silent
+  -- wrong-account post with a green receipt, which is exactly the failure mode op hashes
+  -- exist to prevent.
   v_dedupe := clara._reserve_op(c.firm, 'allocate_receipt', p_op_key,
     clara._hash(jsonb_build_object('client', p_client, 'counterparty', v_cp,
       'posting_date', p_posting_date, 'memo', v_memo, 'bank_account', p_bank_account,
       'amount_cents', p_amount_cents, 'discount_cents', v_disc,
-      'discount_account', p_discount_account, 'attestation', p_attestation,
-      'allocations', v_allocs)));
+      'discount_account', p_discount_account, 'control_account', p_control_account,
+      'attestation', p_attestation, 'allocations', v_allocs)));
   if v_dedupe is not null then return v_dedupe; end if;
+
+  -- PRE-RESERVE THE DERIVED APPROVE SUB-KEY HERE, BEFORE ANY LOCK. _reserve_op writes an
+  -- op_receipts row, so it can BLOCK on a concurrent inserter of the same key. Taking that
+  -- block while already holding the two client advisory locks (as the original build did, at
+  -- the bottom of this body) makes a deadlock reachable: two sessions, each holding the other
+  -- session's next rung. Claiming the sub-key namespace first -- before 203005003 -- closes
+  -- the window entirely, and it costs nothing, because the reservation is rolled back with
+  -- everything else if this call fails (0004:43-60). The hash pins the COMPOSITE's own key
+  -- rather than (entry, revision), which do not exist yet; the core never re-checks it
+  -- (receipt_preheld:true skips its own reserve) and its only jobs are to claim the namespace
+  -- against a later human approve_entry replay and to be finished by the core's _finish_op.
+  -- ON THE WCA-R7 DRAFT BRANCH the core is never called, so the sub-key stays CLAIMED BUT
+  -- UNFINISHED for the life of the draft. That is the honest cost of moving the reservation
+  -- ahead of the locks, and it is the safe direction: the namespace stays reserved, and the
+  -- checker approves through their OWN op_key on the ordinary /queue lane.
+  v_approve_key := p_op_key || ':approve';
+  if clara._reserve_op(c.firm, 'approve_entry', v_approve_key,
+       clara._hash(jsonb_build_object('composite', 'allocate_receipt',
+         'op_key', p_op_key))) is not null then
+    raise exception 'the derived approve op key is already in use'
+      using errcode='CLR10',detail='{"reason":"approve_key_collision"}';
+  end if;
 
   -- LOCKS, in the total order. See the section header for why the two advisory locks are
   -- taken HERE rather than left to the core.
@@ -2208,12 +2695,18 @@ begin
     raise exception 'the receipt account must be an active, asset-typed, non-control account on this chart'
       using errcode='CLR10',detail='{"reason":"bank_account_invalid"}';
   end if;
+  -- account_class IS NULL on the discount account too, for the same reason it is demanded of
+  -- the bank leg: a control-class account admitted here would put a SECOND receivable leg on
+  -- a customer_receipt, which the shape floor refuses at commit with a message about the
+  -- floor rather than about the account the caller actually got wrong -- and, worse, a
+  -- payable-class "discount" account would build a cross-domain contra out of a settlement.
   if v_disc > 0 then
     if p_discount_account is null
        or not exists (select 1 from clara.coa_accounts a
                       where a.client_id = p_client and a.account_code = p_discount_account
-                        and a.is_active and a.account_type = 'expense') then
-      raise exception 'a receipt discount must be booked to an active expense account'
+                        and a.is_active and a.account_type = 'expense'
+                        and a.account_class is null) then
+      raise exception 'a receipt discount must be booked to an active, non-control expense account'
         using errcode='CLR10',detail='{"reason":"discount_account_invalid"}';
     end if;
   elsif p_discount_account is not null then
@@ -2227,6 +2720,7 @@ begin
   if v_ids is not null then
     perform 1 from clara.open_items oi where oi.id = any(v_ids) order by oi.id for update;
   end if;
+  v_prop_allocs := '[]'::jsonb;
   for al in select (x.elem->>'item_id')::uuid as item_id,
                   (x.elem->>'amount_cents')::bigint as amt
            from jsonb_array_elements(v_allocs) as x(elem) order by 1 loop
@@ -2244,6 +2738,24 @@ begin
       raise exception 'open item % belongs to a different customer', al.item_id
         using errcode='CLR10',detail='{"reason":"allocation_counterparty_mismatch"}';
     end if;
+    -- THE REVERSED-ENTRY WALL, on the real-cash path. An entry that has been REVERSED is out
+    -- of the books; its item's outstanding is a number the reversal has already answered with
+    -- an unwind item of the exact opposite sign. Receipting against it would take real money
+    -- in against a claim that no longer exists, leave the unwind permanently un-applied, and
+    -- show the customer as paid on an invoice that was cancelled. The remedy is the sanctioned
+    -- one and the message names it: apply the unwind to the item (apply_open_items), which
+    -- takes both to zero with no GL movement at all.
+    --
+    -- READ SEPARATELY, not folded into the credit-note wall's `join clara.documents`: that
+    -- join is INNER and silently skips every entry with no document -- which is every generic
+    -- JV, every opening entry and every entry born outside a filing. A wall that cannot see
+    -- document-less entries is not a wall.
+    select je.reversed_by into v_rev_by
+      from clara.journal_entries je where je.id = i.entry_id;
+    if v_rev_by is not null then
+      raise exception 'open item % belongs to an entry that has been reversed; apply the reversal unwind to it instead of receipting against it', al.item_id
+        using errcode='CLR10',detail='{"reason":"allocation_target_reversed"}';
+    end if;
     v_out := clara._subledger_outstanding(al.item_id);
     if v_out is null or v_out <= 0 then
       raise exception 'open item % has nothing outstanding to receipt against', al.item_id
@@ -2253,6 +2765,14 @@ begin
       raise exception 'allocation of % exceeds the % outstanding on open item %', al.amt, v_out, al.item_id
         using errcode='CLR10',detail='{"reason":"allocation_exceeds_outstanding"}';
     end if;
+    -- PIN THE OUTSTANDING THIS VALIDATION ACTUALLY SAW into the stored proposal. On the
+    -- WCA-R7 draft branch the hook re-validates at the CHECKER's approve, and "still fits"
+    -- is not the same statement as "nothing moved": an intervening partial allocation that
+    -- leaves room would silently change what the maker proposed. The pin rides the PROPOSAL,
+    -- never the op hash -- the hash must stay a function of the CALLER's request alone, or a
+    -- legitimate retry of the identical request would be rejected as different args.
+    v_prop_allocs := v_prop_allocs || jsonb_build_object('item_id', al.item_id,
+      'amount_cents', al.amt, 'expected_outstanding_cents', v_out);
   end loop;
 
   -- THE SETTLEMENT ENTRY. Dr bank (amount) [+ Dr discount] / Cr receivable control (gross).
@@ -2265,7 +2785,8 @@ begin
       'customer_receipt', c.actor, c.actor,
       jsonb_build_object('settlement_allocation', jsonb_build_object(
         'domain', 'ar', 'counterparty_id', v_cp, 'group', v_group,
-        'allocations', v_allocs, 'residue_cents', v_residue, 'proposed_by', c.actor)))
+        'control_account', v_ctrl,
+        'allocations', v_prop_allocs, 'residue_cents', v_residue, 'proposed_by', c.actor)))
     returning id into v_entry;
   v_line := 1;
   insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents,
@@ -2292,13 +2813,7 @@ begin
     -- at that moment.
     v_status := 'draft';
   else
-    v_approve_key := p_op_key || ':approve';
-    if clara._reserve_op(c.firm, 'approve_entry', v_approve_key,
-         clara._hash(jsonb_build_object('e', v_entry, 'rev', v_rev,
-           'att', p_attestation))) is not null then
-      raise exception 'the derived approve op key is already in use'
-        using errcode='CLR10',detail='{"reason":"approve_key_collision"}';
-    end if;
+    -- The sub-key was pre-reserved at the top of this body, before any lock (see there).
     perform clara._approve_entry_core(
       jsonb_build_object('actor', c.actor, 'firm', c.firm, 'receipt_preheld', true),
       v_entry, v_rev, p_attestation, v_approve_key);
@@ -2308,11 +2823,12 @@ begin
   perform clara._audit(c.firm, c.actor, null, null, 'allocate_receipt', v_entry,
     jsonb_build_object('client', p_client, 'counterparty', v_cp, 'group', v_group,
       'amount_cents', p_amount_cents, 'discount_cents', v_disc,
+      'control_account', v_ctrl, 'bank_account', p_bank_account,
       'allocated_cents', v_sum, 'residue_cents', v_residue, 'status', v_status,
       'op_key', p_op_key));
   return clara._finish_op(c.firm, 'allocate_receipt', p_op_key,
     jsonb_build_object('entry_id', v_entry, 'status', v_status,
-      'group_id', v_group, 'residue_cents', v_residue));
+      'group_id', v_group, 'control_account', v_ctrl, 'residue_cents', v_residue));
 end $$;
 
 -- The EXACT MIRROR for AP. Dr payable control (gross) / Cr bank (amount) [+ Cr discount
@@ -2327,8 +2843,8 @@ create function clara.allocate_payment(
 declare
   c record; v_dedupe jsonb; v_firm uuid; v_cp uuid; v_cp_kind text;
   v_memo text; v_disc bigint; v_gross bigint; v_ctrl text; v_ctrl_n int;
-  v_allocs jsonb; v_n int; v_dis int; v_sum bigint; v_residue bigint;
-  v_ids uuid[]; al record; v_out bigint; i record; v_doc_kind text;
+  v_allocs jsonb; v_prop_allocs jsonb; v_n int; v_dis int; v_sum bigint; v_residue bigint;
+  v_ids uuid[]; al record; v_out bigint; i record; v_doc_kind text; v_rev_by uuid;
   v_group uuid; v_entry uuid; v_rev uuid; v_line int; v_status text; v_approve_key text;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
@@ -2392,13 +2908,27 @@ begin
       using errcode='CLR10',detail='{"reason":"allocations_exceed_payment"}';
   end if;
 
+  -- p_control_account is in the hash for the reason its AR twin states: it decides WHICH
+  -- payable control account the entry debits, so a replay under the same key with a different
+  -- control account must not return the first call's receipt.
   v_dedupe := clara._reserve_op(c.firm, 'allocate_payment', p_op_key,
     clara._hash(jsonb_build_object('client', p_client, 'counterparty', v_cp,
       'posting_date', p_posting_date, 'memo', v_memo, 'bank_account', p_bank_account,
       'amount_cents', p_amount_cents, 'discount_cents', v_disc,
-      'discount_account', p_discount_account, 'attestation', p_attestation,
-      'allocations', v_allocs)));
+      'discount_account', p_discount_account, 'control_account', p_control_account,
+      'attestation', p_attestation, 'allocations', v_allocs)));
   if v_dedupe is not null then return v_dedupe; end if;
+
+  -- The derived approve sub-key is pre-reserved BEFORE any lock, exactly as in the AR twin
+  -- (see the full reasoning there): _reserve_op can block on a concurrent inserter, and
+  -- blocking on it while holding the two client advisory locks makes a deadlock reachable.
+  v_approve_key := p_op_key || ':approve';
+  if clara._reserve_op(c.firm, 'approve_entry', v_approve_key,
+       clara._hash(jsonb_build_object('composite', 'allocate_payment',
+         'op_key', p_op_key))) is not null then
+    raise exception 'the derived approve op key is already in use'
+      using errcode='CLR10',detail='{"reason":"approve_key_collision"}';
+  end if;
 
   perform pg_advisory_xact_lock(203005003, hashtext(p_client::text||':'||v_cp::text));
   perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
@@ -2428,13 +2958,16 @@ begin
       using errcode='CLR10',detail='{"reason":"bank_account_invalid"}';
   end if;
   -- THE ONE ASYMMETRY: a supplier settlement discount is INCOME (a discount received), where a
-  -- customer settlement discount is an expense (a discount given).
+  -- customer settlement discount is an expense (a discount given). account_class IS NULL is
+  -- demanded here too -- a control-class "discount" account would put a second payable leg on
+  -- the payment, or a receivable one, which is a cross-domain contra dressed as a discount.
   if v_disc > 0 then
     if p_discount_account is null
        or not exists (select 1 from clara.coa_accounts a
                       where a.client_id = p_client and a.account_code = p_discount_account
-                        and a.is_active and a.account_type = 'income') then
-      raise exception 'a payment discount must be booked to an active income account'
+                        and a.is_active and a.account_type = 'income'
+                        and a.account_class is null) then
+      raise exception 'a payment discount must be booked to an active, non-control income account'
         using errcode='CLR10',detail='{"reason":"discount_account_invalid"}';
     end if;
   elsif p_discount_account is not null then
@@ -2447,6 +2980,7 @@ begin
   if v_ids is not null then
     perform 1 from clara.open_items oi where oi.id = any(v_ids) order by oi.id for update;
   end if;
+  v_prop_allocs := '[]'::jsonb;
   for al in select (x.elem->>'item_id')::uuid as item_id,
                   (x.elem->>'amount_cents')::bigint as amt
            from jsonb_array_elements(v_allocs) as x(elem) order by 1 loop
@@ -2461,6 +2995,18 @@ begin
     if clara._canonical_counterparty(p_client, i.counterparty_id) <> v_cp then
       raise exception 'open item % belongs to a different supplier', al.item_id
         using errcode='CLR10',detail='{"reason":"allocation_counterparty_mismatch"}';
+    end if;
+    -- THE REVERSED-ENTRY WALL, on the real-cash path -- and on THIS side it is money going
+    -- OUT. Paying against an item whose entry has been reversed pays a bill the books have
+    -- already cancelled. Read as its OWN statement rather than folded into the credit-note
+    -- join below: that join is INNER on clara.documents and cannot see a document-less entry
+    -- at all, which is every generic JV and every opening entry. The remedy named in the
+    -- message is the sanctioned one -- apply the unwind item to this item, zero GL movement.
+    select je.reversed_by into v_rev_by
+      from clara.journal_entries je where je.id = i.entry_id;
+    if v_rev_by is not null then
+      raise exception 'open item % belongs to an entry that has been reversed; apply the reversal unwind to it instead of paying against it', al.item_id
+        using errcode='CLR10',detail='{"reason":"allocation_target_reversed"}';
     end if;
     -- THE CREDIT-NOTE WALL (Wave-C contract section 3, discharged). supplier_credit_note has
     -- no coding home yet, so a supplier CN mis-coded AS a bill still mints a payable item --
@@ -2486,6 +3032,10 @@ begin
       raise exception 'allocation of % exceeds the % outstanding on open item %', al.amt, v_out, al.item_id
         using errcode='CLR10',detail='{"reason":"allocation_exceeds_outstanding"}';
     end if;
+    -- The outstanding THIS validation saw, pinned into the proposal so the hook can require
+    -- EQUALITY at the checker's approve rather than "still fits" (see the AR twin).
+    v_prop_allocs := v_prop_allocs || jsonb_build_object('item_id', al.item_id,
+      'amount_cents', al.amt, 'expected_outstanding_cents', v_out);
   end loop;
 
   v_group := gen_random_uuid();
@@ -2495,7 +3045,8 @@ begin
       'supplier_payment', c.actor, c.actor,
       jsonb_build_object('settlement_allocation', jsonb_build_object(
         'domain', 'ap', 'counterparty_id', v_cp, 'group', v_group,
-        'allocations', v_allocs, 'residue_cents', v_residue, 'proposed_by', c.actor)))
+        'control_account', v_ctrl,
+        'allocations', v_prop_allocs, 'residue_cents', v_residue, 'proposed_by', c.actor)))
     returning id into v_entry;
   v_line := 1;
   insert into clara.journal_lines(entry_id, line_no, account_code, debit_cents,
@@ -2519,13 +3070,7 @@ begin
   if clara.is_high_stakes(v_entry) then
     v_status := 'draft';
   else
-    v_approve_key := p_op_key || ':approve';
-    if clara._reserve_op(c.firm, 'approve_entry', v_approve_key,
-         clara._hash(jsonb_build_object('e', v_entry, 'rev', v_rev,
-           'att', p_attestation))) is not null then
-      raise exception 'the derived approve op key is already in use'
-        using errcode='CLR10',detail='{"reason":"approve_key_collision"}';
-    end if;
+    -- The sub-key was pre-reserved at the top of this body, before any lock (see there).
     perform clara._approve_entry_core(
       jsonb_build_object('actor', c.actor, 'firm', c.firm, 'receipt_preheld', true),
       v_entry, v_rev, p_attestation, v_approve_key);
@@ -2535,11 +3080,12 @@ begin
   perform clara._audit(c.firm, c.actor, null, null, 'allocate_payment', v_entry,
     jsonb_build_object('client', p_client, 'counterparty', v_cp, 'group', v_group,
       'amount_cents', p_amount_cents, 'discount_cents', v_disc,
+      'control_account', v_ctrl, 'bank_account', p_bank_account,
       'allocated_cents', v_sum, 'residue_cents', v_residue, 'status', v_status,
       'op_key', p_op_key));
   return clara._finish_op(c.firm, 'allocate_payment', p_op_key,
     jsonb_build_object('entry_id', v_entry, 'status', v_status,
-      'group_id', v_group, 'residue_cents', v_residue));
+      'group_id', v_group, 'control_account', v_ctrl, 'residue_cents', v_residue));
 end $$;
 
 -- =====================================================================
@@ -2729,6 +3275,23 @@ begin
     end if;
     select * into si from clara.open_items oi where oi.id = al.s;
     select * into ti from clara.open_items oi where oi.id = al.t;
+    -- THE REVERSED-ENTRY WALL, with the ONE exception that makes reversal survivable. An item
+    -- whose entry has been reversed is a claim the books have cancelled, and applying an
+    -- unrelated credit to it (or applying it, as a credit, to something else) launders a
+    -- cancelled position into a live one. But the SANCTIONED remedy for a reversed allocated
+    -- entry is exactly an application: the mirror's reversal_unwind item against the original
+    -- item, both to zero, zero GL movement. So the wall admits precisely that pair -- the two
+    -- items must be each other's unwind lineage -- and refuses everything else. Read from
+    -- journal_entries directly on both sides: apply_open_items touches documents nowhere and
+    -- must not start.
+    if si.reversal_unwind_of is distinct from ti.id
+       and ti.reversal_unwind_of is distinct from si.id then
+      if exists (select 1 from clara.journal_entries je
+                 where je.id in (si.entry_id, ti.entry_id) and je.reversed_by is not null) then
+        raise exception 'one of open items % / % belongs to a reversed entry; the only application a reversed entry admits is its own unwind', al.s, al.t
+          using errcode='CLR10',detail='{"reason":"allocation_target_reversed"}';
+      end if;
+    end if;
     v_sout := clara._subledger_outstanding(al.s);
     v_tout := clara._subledger_outstanding(al.t);
     -- The SOURCE must have a NEGATIVE outstanding (a credit the client holds) and the TARGET
@@ -2853,6 +3416,7 @@ do $tail$
 declare
   v_prior int; r record; v_src text;
   v_core text; v_rev text; v_awcc text; v_aoe text; v_rsr text; v_cls text; v_draft text;
+  v_revise text; v_pin text;
   v_a int; v_b int; v_c int; v_d int; v_e int; v_f int; v_n int;
   v_paths text[]; v_writers text[]; v_alloc_writers text[]; v_callers text[];
   v_oid_hook oid;
@@ -2878,6 +3442,9 @@ begin
   select pg_get_functiondef('clara._approve_opening_entry(uuid,uuid,uuid,text,integer)'::regprocedure) into v_aoe;
   select pg_get_functiondef('clara.reconcile_sweep_runs()'::regprocedure) into v_rsr;
   select pg_get_functiondef('clara._subledger_classify_entry(uuid)'::regprocedure) into v_cls;
+  select pg_get_functiondef(
+    'clara.revise_entry(uuid,jsonb,jsonb,jsonb,uuid,text,jsonb,jsonb)'::regprocedure)
+    into v_revise;
   select pg_get_functiondef(p.oid) into v_draft from pg_proc p
     join pg_namespace n on n.oid = p.pronamespace
     where n.nspname='clara' and p.proname='_draft_entry_core';
@@ -2888,6 +3455,7 @@ begin
   v_rsr  :=lower(regexp_replace(regexp_replace(regexp_replace(v_rsr  ,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g'));
   v_cls  :=lower(regexp_replace(regexp_replace(regexp_replace(v_cls  ,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g'));
   v_draft:=lower(regexp_replace(regexp_replace(regexp_replace(v_draft,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g'));
+  v_revise:=lower(regexp_replace(regexp_replace(regexp_replace(v_revise,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g'));
 
   -- (2) SECTION B, layer 2 -- the settlement refusal exists EXACTLY ONCE, with CLR10 and its
   -- named reason attached, and it sits AFTER the locked revision check (so a benign status
@@ -2968,6 +3536,113 @@ begin
     raise exception '0037 tail: _approve_opening_entry ordering is wrong (status_flip=%, hook=%, seed_approval=%)', v_a, v_b, v_c;
   end if;
 
+  -- (3c) SECTION H.2b -- revise_entry keeps BOTH its prior changes of record (0017's R1-F1
+  -- boundary and 0028's binding-divergence surgery) and carries the reversal-mirror guard
+  -- exactly once, positioned after the revision-token check so a stale token still reports
+  -- CLR06 first.
+  if position('opening_entry_k_family_only' in v_revise)=0
+     or position('v_binding_divergence' in v_revise)=0
+     or position('clara.vendor_binding_resolutions' in v_revise)=0 then
+    raise exception '0037 tail: revise_entry lost a 0017 R1-F1 or 0028 binding-divergence marker -- section H.2b rebuilt the body instead of patching it';
+  end if;
+  v_n:=(length(v_revise)-length(replace(v_revise,'"reason":"reversal_mirror_not_revisable"','')))
+    / length('"reason":"reversal_mirror_not_revisable"');
+  if v_n <> 1 then
+    raise exception '0037 tail: the reversal-mirror guard must appear exactly once in revise_entry -- found %', v_n;
+  end if;
+  v_a:=position('if e.revision_token is distinct from p_expected_revision then' in v_revise);
+  v_b:=position('if e.reversal_of is not null then' in v_revise);
+  v_c:=position('delete from clara.journal_lines where entry_id=p_entry;' in v_revise);
+  if v_a=0 or v_b=0 or v_c=0 or not (v_a < v_b and v_b < v_c) then
+    raise exception '0037 tail: revise_entry ordering is wrong (revision=%, mirror_guard=%, line_rewrite=%)', v_a, v_b, v_c;
+  end if;
+
+  -- (3d) THE EXACT SPLICED-REGION PINS. Every assert above this point is a TOKEN census: it
+  -- says the addition is somewhere in the body, in some order. These say something stronger
+  -- and different -- that the body contains EXACTLY the text this migration spliced,
+  -- contiguously, once. The expected text is RESTATED here and pushed through the SAME
+  -- normalizer the body went through, so a future edit to a splice that forgets to edit its
+  -- pin fails the deploy instead of shipping a body nobody actually asserted. (A whole-body
+  -- hash was considered and rejected: it would also pin the PostgreSQL functiondef renderer's
+  -- formatting, turning a server upgrade into a migration failure on a from-zero rebuild,
+  -- while adding nothing about the regions this migration is responsible for.)
+  v_pin:=btrim(lower(regexp_replace(regexp_replace(regexp_replace(
+$p1$  if p_reason is null or btrim(p_reason)='' then raise exception 'a reversal reason is required' using errcode='CLR10'; end if;
+  perform pg_advisory_xact_lock(203005004,hashtext(o.client_id::text));
+  if clara._subledger_allocated_items_present(p_entry) then
+    raise exception 'open items on this entry carry allocations; unallocate them first'
+      using errcode='CLR10',detail='{"reason":"allocated_items_present"}';
+  end if;$p1$,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g')));
+  if (length(v_rev)-length(replace(v_rev,v_pin,'')))/length(v_pin) <> 1 then
+    raise exception '0037 tail: reverse_entry does not carry the spliced reverse-refusal region verbatim, exactly once';
+  end if;
+  v_pin:=btrim(lower(regexp_replace(regexp_replace(regexp_replace(
+$p2$    update clara.journal_entries set reversed_by=v_mirror,reversal_reason=p_reason,
+      updated_at=now() where id=p_entry;
+    perform clara._subledger_on_approve(v_mirror);
+    v_status:='approved';$p2$,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g')));
+  if (length(v_rev)-length(replace(v_rev,v_pin,'')))/length(v_pin) <> 1 then
+    raise exception '0037 tail: reverse_entry does not carry the spliced inline-approve hook region verbatim, exactly once';
+  end if;
+  v_pin:=btrim(lower(regexp_replace(regexp_replace(regexp_replace(
+$p3$  if e.revision_token is distinct from p_expected_revision then
+    raise exception 'stale revision token' using errcode='CLR06';
+  end if;
+  if e.reversal_of is not null then
+    raise exception 'a reversal mirror cannot be revised; withdraw the mirror and re-reverse the original'
+      using errcode='CLR10',detail='{"reason":"reversal_mirror_not_revisable"}';
+  end if;$p3$,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g')));
+  if (length(v_revise)-length(replace(v_revise,v_pin,'')))/length(v_pin) <> 1 then
+    raise exception '0037 tail: revise_entry does not carry the spliced reversal-mirror guard region verbatim, exactly once';
+  end if;
+  v_pin:=btrim(lower(regexp_replace(regexp_replace(regexp_replace(
+$p4$    if it.action='reverse' then
+      perform pg_advisory_xact_lock(203005004,hashtext(o.client_id::text));
+      if clara._subledger_allocated_items_present(o.id) then
+        raise exception 'open items on this entry carry allocations; unallocate them first'
+          using errcode='CLR10',detail='{"reason":"allocated_items_present"}';
+      end if;
+      v_mirror:=null; v_adopted:=false;$p4$,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g')));
+  if (length(v_awcc)-length(replace(v_awcc,v_pin,'')))/length(v_pin) <> 1 then
+    raise exception '0037 tail: approve_wrong_client_correction does not carry the spliced reverse-branch region verbatim, exactly once';
+  end if;
+  v_pin:=btrim(lower(regexp_replace(regexp_replace(regexp_replace(
+$p5$      update clara.journal_entries set reversed_by=v_mirror,reversal_reason=x.reason,
+        updated_at=now() where id=o.id;
+      perform clara._subledger_on_approve(v_mirror);$p5$,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g')));
+  if (length(v_awcc)-length(replace(v_awcc,v_pin,'')))/length(v_pin) <> 1 then
+    raise exception '0037 tail: approve_wrong_client_correction does not carry the spliced mirror-approve hook region verbatim, exactly once';
+  end if;
+  v_pin:=btrim(lower(regexp_replace(regexp_replace(regexp_replace(
+$p6$        where a.run_id=sr.id and a.task_id=t.id
+          and t.status in ('running','cancel_requested')
+          and exists(select 1 from clara.coding_attempts ca where ca.task_id=t.id);$p6$,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g')));
+  if (length(v_rsr)-length(replace(v_rsr,v_pin,'')))/length(v_pin) <> 1 then
+    raise exception '0037 tail: reconcile_sweep_runs does not carry the spliced force-complete guard region verbatim, exactly once';
+  end if;
+  v_pin:=btrim(lower(regexp_replace(regexp_replace(regexp_replace(
+$p7$  if v_checked_via_rule is not null
+     and e.coding_kind in ('customer_receipt','supplier_payment') then
+    raise exception 'a settlement entry is never autopostable'
+      using errcode='CLR10',detail='{"reason":"settlement_not_autopostable"}';
+  end if;$p7$,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g')));
+  if (length(v_core)-length(replace(v_core,v_pin,'')))/length(v_pin) <> 1 then
+    raise exception '0037 tail: _approve_entry_core does not carry the settlement refusal region verbatim, exactly once';
+  end if;
+  v_pin:=btrim(lower(regexp_replace(regexp_replace(regexp_replace(
+$p8$  update clara.journal_entries set status='approved',checker_actor=p_checker,
+    approved_at=now(),self_approval_attestation=v_attest,updated_at=now()
+    where id=p_entry;
+  if e.reversal_of is not null then
+    update clara.journal_entries set reversed_by=p_entry,
+      reversal_reason=coalesce(e.reversal_reason,'opening supersede'),
+      updated_at=now() where id=e.reversal_of and reversed_by is null;
+  end if;
+  perform clara._subledger_on_approve(p_entry);$p8$,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g')));
+  if (length(v_aoe)-length(replace(v_aoe,v_pin,'')))/length(v_pin) <> 1 then
+    raise exception '0037 tail: _approve_opening_entry does not carry the status-flip / linkage / hook region verbatim, exactly once';
+  end if;
+
   -- (4) SECTION I -- the sweep guard, spliced into the 0017 body, exactly once.
   if position('active_recovery_client.status=''active''' in v_rsr)=0
      or position('active_completion_client.status=''active''' in v_rsr)=0
@@ -3003,11 +3678,16 @@ begin
   -- (6) THE FOUR-PATH CENSUS (design 4.3). Every live body that flips a journal entry to
   -- approved must be one of the four AND must call the hook. A fifth path cannot appear
   -- unnoticed, and one of the four losing its hook fails the deploy.
+  -- MATCHED BY REGEX, NOT BY A LITERAL LIKE. The normalizer collapses runs of whitespace but
+  -- does not remove the optional spaces PostgreSQL and human authors both put around `=`, so
+  -- `set status = 'approved'` -- a legal, ordinary spelling -- would have been invisible to
+  -- the literal form. A census that a fifth approve path can dodge by adding one space is
+  -- not a census.
   select array_agg(p.proname order by p.proname) into v_paths
   from pg_proc p join pg_namespace n on n.oid = p.pronamespace
   where n.nspname='clara'
     and lower(regexp_replace(regexp_replace(regexp_replace(p.prosrc,'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g'))
-        like '%update clara.journal_entries set status=''approved''%';
+        ~ 'update +clara\.journal_entries +set +status *= *''approved''';
   if v_paths is distinct from array['_approve_entry_core','_approve_opening_entry',
       'approve_wrong_client_correction','reverse_entry']::text[] then
     raise exception '0037 tail: the approve-path census is not the pinned FOUR -- found %', v_paths;
@@ -3021,39 +3701,59 @@ begin
   end if;
 
   -- (7) THE WHOLE-SCHEMA LEAK SCAN. The subledger tables have exactly the writers this
-  -- migration ships, and the hook has exactly the four callers above. A functiondef error on
-  -- any one proc is reported and skipped, never silently treated as a pass.
+  -- migration ships, and the hook has exactly the four callers above.
+  --
+  -- THREE THINGS THIS SCAN DOES DIFFERENTLY FROM ITS FIRST CUT, each because the first cut
+  -- could be walked past:
+  --   * IT FAILS CLOSED. A pg_get_functiondef error used to raise a NOTICE and `continue` --
+  --     i.e. a body that could not be read was counted as a body with no writes in it, which
+  --     is exactly backwards for a scan whose whole job is to find an unexpected writer. The
+  --     scan is restricted to prokind='f' (there is no aggregate or window function in this
+  --     schema; the restriction says so rather than assuming it) and ANY remaining read
+  --     failure aborts the migration.
+  --   * IT CENSUSES BY SIGNATURE, not by bare proname. Two overloads of one name are two
+  --     bodies; naming them identically in the census makes the array comparison ambiguous
+  --     about which one was seen. regprocedure renders the signature, and the EXPECTED arrays
+  --     are built through the same cast so the two sides can never disagree about spelling.
+  --   * IT MATCHES BY REGEX. `insert into clara.open_items (` with a space before the paren
+  --     is the same statement and was invisible to the literal form.
   select p.oid into v_oid_hook from pg_proc p join pg_namespace n on n.oid=p.pronamespace
     where n.nspname='clara' and p.proname='_subledger_on_approve';
   v_writers:=array[]::text[]; v_alloc_writers:=array[]::text[]; v_callers:=array[]::text[];
-  for r in select p.oid, p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='clara' order by p.proname loop
+  for r in select p.oid, p.proname, (p.oid::regprocedure)::text as sig
+      from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.prokind='f' order by p.proname, p.oid loop
     begin
       v_src := lower(regexp_replace(regexp_replace(regexp_replace(
         pg_get_functiondef(r.oid),'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),'\s+',' ','g'));
     exception when others then
-      raise notice '0037 tail: SKIP % (functiondef error: %)', r.proname, sqlerrm;
-      continue;
+      raise exception '0037 tail: the whole-schema leak scan could not read the body of % (%) -- a body this scan cannot read is a body it cannot clear, and this assertion fails closed', r.proname, sqlerrm;
     end;
-    if position('insert into clara.open_items(' in v_src) > 0 then
-      v_writers := v_writers || r.proname;
+    if v_src ~ 'insert into clara\.open_items *\(' then
+      v_writers := v_writers || r.sig;
     end if;
-    if position('insert into clara.open_item_allocations(' in v_src) > 0 then
-      v_alloc_writers := v_alloc_writers || r.proname;
+    if v_src ~ 'insert into clara\.open_item_allocations *\(' then
+      v_alloc_writers := v_alloc_writers || r.sig;
     end if;
-    if r.oid <> v_oid_hook and position('clara._subledger_on_approve(' in v_src) > 0 then
-      v_callers := v_callers || r.proname;
+    if r.oid <> v_oid_hook and v_src ~ 'clara\._subledger_on_approve *\(' then
+      v_callers := v_callers || r.sig;
     end if;
   end loop;
-  if v_writers is distinct from array['_subledger_on_approve']::text[] then
+  if v_writers is distinct from array[
+      ('clara._subledger_on_approve(uuid)'::regprocedure)::text] then
     raise exception '0037 tail: clara.open_items has writers beyond the classifier hook -- %', v_writers;
   end if;
-  if v_alloc_writers is distinct from array['_subledger_on_approve','apply_open_items',
-      'unallocate_group']::text[] then
+  if v_alloc_writers is distinct from array[
+      ('clara._subledger_on_approve(uuid)'::regprocedure)::text,
+      ('clara.apply_open_items(uuid,jsonb,text,text)'::regprocedure)::text,
+      ('clara.unallocate_group(uuid,uuid,text,text)'::regprocedure)::text] then
     raise exception '0037 tail: clara.open_item_allocations has writers beyond the three sanctioned verbs -- %', v_alloc_writers;
   end if;
-  if v_callers is distinct from array['_approve_entry_core','_approve_opening_entry',
-      'approve_wrong_client_correction','reverse_entry']::text[] then
+  if v_callers is distinct from array[
+      ('clara._approve_entry_core(jsonb,uuid,uuid,text,text)'::regprocedure)::text,
+      ('clara._approve_opening_entry(uuid,uuid,uuid,text,integer)'::regprocedure)::text,
+      ('clara.approve_wrong_client_correction(uuid,text,text,text)'::regprocedure)::text,
+      ('clara.reverse_entry(uuid,text,text)'::regprocedure)::text] then
     raise exception '0037 tail: the subledger hook has callers beyond the pinned four -- %', v_callers;
   end if;
 
@@ -3066,10 +3766,10 @@ begin
   raise notice '0037 tail OK (1/8): prior-migration chain intact through 0035''s recut of _approve_entry_core';
   raise notice '0037 tail OK (2/8): the settlement_not_autopostable refusal is present exactly once, CLR10 + named reason, NULL-safe, ordered after the revision check and before the reversal linkage';
   raise notice '0037 tail OK (3/8): the subledger hook is in _approve_entry_core exactly once, ungated on checked_via_rule_id, and 0035''s two edits survived the recut';
-  raise notice '0037 tail OK (4/8): reverse_entry, approve_wrong_client_correction and _approve_opening_entry carry their additions once each with every prior change-of-record marker intact';
+  raise notice '0037 tail OK (4/8): reverse_entry, revise_entry, approve_wrong_client_correction and _approve_opening_entry carry their additions once each with every prior change-of-record marker intact, and all EIGHT spliced regions match their restated text verbatim, exactly once';
   raise notice '0037 tail OK (5/8): the sweep force-complete guard is spliced into the 0017 completion UPDATE exactly once, with all three R2-F6 active-client guards intact';
   raise notice '0037 tail OK (6/8): the classifier precedence ladder is pinned reversal < opening < adjustment < typed < settlement < else, with the approved-status join on the unwind path';
-  raise notice '0037 tail OK (7/8): the approve-path census is exactly FOUR, each calling the hook, and the whole-schema scan finds no other writer of either subledger table and no fifth caller of the hook';
+  raise notice '0037 tail OK (7/8): the approve-path census is exactly FOUR (matched by regex, whitespace-tolerant), each calling the hook, and the fail-closed whole-schema scan by SIGNATURE finds no other writer of either subledger table and no fifth caller of the hook';
   raise notice '0037 tail OK (8/8): _draft_entry_core''s allowlist is still invoice-only -- no draft verb can mint a settlement kind';
 end
 $tail$;
@@ -3081,22 +3781,37 @@ $tail$;
 -- =====================================================================
 do $acl$
 declare
-  v_fn text; v_role text; v_def text; v_n int; v_bad int; v_bad2 int;
+  v_fn text; v_role text; v_def text; v_n int; v_bad int; v_bad2 int; v_vals text[];
 begin
   -- (A) THE CONSTRAINT CATALOG. Named, not token-counted: a CHECK that exists under a
   -- different definition is not the CHECK this migration claims to have added.
+  --
+  -- ck_je_coding_kind is asserted on its EXACT ADMITTED VALUE SET, not on five substring
+  -- probes. A substring test is a one-way assertion: it proves the five values 0037 needs are
+  -- there and says nothing at all about a SIXTH that someone added -- and a sixth coding kind
+  -- is a sixth classifier branch that does not exist, i.e. an entry class the subledger
+  -- silently drops on the floor (ladder 6: no rows) while its control legs move the GL. The
+  -- set is extracted from the constraint text and compared whole.
   select pg_get_constraintdef(con.oid) into v_def from pg_constraint con
     where con.conrelid='clara.journal_entries'::regclass and con.conname='ck_je_coding_kind';
-  if v_def is null or v_def not like '%customer_receipt%' or v_def not like '%supplier_payment%'
-     or v_def not like '%supplier_bill%' or v_def not like '%sales_invoice%'
-     or v_def not like '%sales_credit_note%' then
-    raise exception '0037 tail: ck_je_coding_kind is not the widened five-value form -- %', v_def;
+  if v_def is null then
+    raise exception '0037 tail: ck_je_coding_kind is absent';
   end if;
+  select array_agg(m[1] order by m[1]) into v_vals
+    from regexp_matches(v_def, '''([a-z_]+)''', 'g') as m;
+  if v_vals is distinct from array['customer_receipt','sales_credit_note','sales_invoice',
+      'supplier_bill','supplier_payment']::text[] then
+    raise exception '0037 tail: ck_je_coding_kind does not admit EXACTLY the five values 0037 classifies -- found % in %', v_vals, v_def;
+  end if;
+  -- The settlement CHECK must bind the rule id AND name BOTH settlement kinds. Naming only
+  -- one of them would leave the other autopostable through the durable half of the belt while
+  -- every token census still passed.
   select pg_get_constraintdef(con.oid) into v_def from pg_constraint con
     where con.conrelid='clara.journal_entries'::regclass
       and con.conname='ck_je_settlement_not_rule_checked';
-  if v_def is null or v_def not like '%checked_via_rule_id%' then
-    raise exception '0037 tail: ck_je_settlement_not_rule_checked is absent or does not bind checked_via_rule_id -- %', v_def;
+  if v_def is null or v_def not like '%checked_via_rule_id%'
+     or v_def not like '%customer_receipt%' or v_def not like '%supplier_payment%' then
+    raise exception '0037 tail: ck_je_settlement_not_rule_checked is absent, does not bind checked_via_rule_id, or does not name both settlement kinds -- %', v_def;
   end if;
   -- ck_je_flags_shape was CHECKED, not assumed: it is a pure jsonb_typeof test, so the
   -- composites' settlement_allocation proposal key needs no widening. Pinned so a future
@@ -3134,6 +3849,24 @@ begin
       raise exception '0037 tail: trigger % is not a deferred AFTER INSERT OR UPDATE constraint trigger', v_fn;
     end if;
   end loop;
+  -- BELT-2's TWO TRIGGERS ARE PINNED TOO. They fire AFTER INSERT only (an item and an
+  -- allocation are both append-only, so there is no UPDATE to catch), but their DEFERRED-ness
+  -- is exactly as load-bearing as belt-1's: an IMMEDIATE belt would fire between the two rows
+  -- of a balanced pair and refuse the group for not netting to zero -- i.e. it would make
+  -- every legitimate allocation impossible. Unpinned, a future migration recreating them
+  -- without `deferrable initially deferred` would break every settlement in the system, and
+  -- nothing in this file would have said so.
+  if not exists (select 1 from pg_trigger t
+                 where t.tgrelid='clara.open_items'::regclass and t.tgname='t_open_items_belt'
+                   and t.tgdeferrable and t.tginitdeferred and (t.tgtype & 4) > 0) then
+    raise exception '0037 tail: t_open_items_belt is not a deferred AFTER INSERT constraint trigger';
+  end if;
+  if not exists (select 1 from pg_trigger t
+                 where t.tgrelid='clara.open_item_allocations'::regclass
+                   and t.tgname='t_open_item_allocations_belt'
+                   and t.tgdeferrable and t.tginitdeferred and (t.tgtype & 4) > 0) then
+    raise exception '0037 tail: t_open_item_allocations_belt is not a deferred AFTER INSERT constraint trigger';
+  end if;
 
   -- (C) ACLs. The four composites are human-only; every internal is granted to nobody.
   foreach v_fn in array array[
@@ -3159,6 +3892,12 @@ begin
       raise exception '0037 acl: % is not owned by clara_fn_owner', v_fn;
     end if;
   end loop;
+  -- The definer-only roster now also carries the SIX trigger functions and the two thin
+  -- 1-arity wrappers. PostgreSQL grants EXECUTE to PUBLIC on every new function by default
+  -- and ALTER DEFAULT PRIVILEGES does not stop it (the T17b-proven mechanism); a trigger
+  -- function needs no caller EXECUTE at all -- the trigger machinery runs it as the table
+  -- owner -- so any grant on one is pure surface. Section L revokes them; this is where that
+  -- revoke stops being a hope.
   foreach v_fn in array array[
       'clara._subledger_classify_entry(uuid)',
       'clara._subledger_on_approve(uuid)',
@@ -3166,7 +3905,15 @@ begin
       'clara._subledger_outstanding(uuid)',
       'clara._subledger_allocated_items_present(uuid)',
       'clara._assert_customer_receipt_shape_at(uuid,uuid)',
-      'clara._assert_supplier_payment_shape_at(uuid,uuid)'] loop
+      'clara._assert_supplier_payment_shape_at(uuid,uuid)',
+      'clara._assert_customer_receipt_shape(uuid)',
+      'clara._assert_supplier_payment_shape(uuid)',
+      'clara._tf_assert_customer_receipt_shape()',
+      'clara._tf_assert_supplier_payment_shape()',
+      'clara._tf_subledger_entry_belt()',
+      'clara._tf_subledger_item_belt()',
+      'clara._tf_subledger_alloc_belt()',
+      'clara._tf_open_items_validate()'] loop
     foreach v_role in array array['clara_authenticated','clara_agent_ro','clara_runtime',
         'clara_wake_interactive','clara_wake_proactive'] loop
       if pg_catalog.has_function_privilege(v_role::name, v_fn, 'execute') then
@@ -3176,6 +3923,45 @@ begin
     if exists (select 1 from pg_proc p, unnest(coalesce(p.proacl,'{}'::aclitem[])) acl
                where p.oid = v_fn::regprocedure and acl::text like '=%') then
       raise exception '0037 acl: % still carries a PUBLIC grant', v_fn;
+    end if;
+  end loop;
+  -- THE FIVE SURGICAL BODIES keep their as-built authority. The 0037 header claims a tail ACL
+  -- assert for them; this is it. _approve_entry_core and _approve_opening_entry are private
+  -- cores reached only through their own definer wrappers -- a CREATE OR REPLACE preserves an
+  -- existing ACL, but a hand-edited redeploy that dropped and recreated one would silently
+  -- hand PUBLIC an approve path straight past every wrapper's role floor
+  -- (0016:5068 / 0029:1445 precedent).
+  foreach v_fn in array array[
+      'clara._approve_entry_core(jsonb,uuid,uuid,text,text)',
+      'clara._approve_opening_entry(uuid,uuid,uuid,text,integer)'] loop
+    foreach v_role in array array['clara_authenticated','clara_agent_ro','clara_runtime',
+        'clara_wake_interactive','clara_wake_proactive'] loop
+      if pg_catalog.has_function_privilege(v_role::name, v_fn, 'execute') then
+        raise exception '0037 acl: % is granted to % -- it is a private core reached only through its wrapper', v_fn, v_role;
+      end if;
+    end loop;
+    if exists (select 1 from pg_proc p, unnest(coalesce(p.proacl,'{}'::aclitem[])) acl
+               where p.oid = v_fn::regprocedure and acl::text like '=%') then
+      raise exception '0037 acl: % still carries a PUBLIC grant', v_fn;
+    end if;
+    if (select pg_get_userbyid(proowner) from pg_proc where oid = v_fn::regprocedure)
+       <> 'clara_fn_owner' then
+      raise exception '0037 acl: % is not owned by clara_fn_owner', v_fn;
+    end if;
+  end loop;
+  -- The three PATCHED bodies keep their human floor and their owner: a dynamic patch runs
+  -- CREATE OR REPLACE, which preserves both, and this says so out loud rather than trusting
+  -- it.
+  foreach v_fn in array array[
+      'clara.reverse_entry(uuid,text,text)',
+      'clara.revise_entry(uuid,jsonb,jsonb,jsonb,uuid,text,jsonb,jsonb)',
+      'clara.approve_wrong_client_correction(uuid,text,text,text)'] loop
+    if not pg_catalog.has_function_privilege('clara_authenticated', v_fn, 'execute') then
+      raise exception '0037 acl: the patch to % dropped its clara_authenticated grant', v_fn;
+    end if;
+    if (select pg_get_userbyid(proowner) from pg_proc where oid = v_fn::regprocedure)
+       <> 'clara_fn_owner' then
+      raise exception '0037 acl: % is not owned by clara_fn_owner after the patch', v_fn;
     end if;
   end loop;
   -- ZERO wake-role and zero agent table grants on either subledger table.
@@ -3190,23 +3976,57 @@ begin
      or not pg_catalog.has_table_privilege('clara_authenticated','clara.open_item_allocations','select') then
     raise exception '0037 acl: clara_authenticated cannot read the subledger tables';
   end if;
+  -- SELECT AND NOTHING ELSE. clara_authenticated reads the subledger through RLS; every WRITE
+  -- goes through a SECURITY DEFINER verb owned by clara_fn_owner. A stray INSERT/UPDATE/
+  -- DELETE/TRUNCATE grant to ANY non-owner role would let a human bypass belt-1 entirely (a
+  -- lone item insert touches no journal_entries row), so the absence is asserted rather than
+  -- inferred from the fact that this file grants none.
+  foreach v_fn in array array['clara.open_items','clara.open_item_allocations'] loop
+    foreach v_role in array array['clara_authenticated','clara_agent_ro','clara_runtime',
+        'clara_wake_interactive','clara_wake_proactive'] loop
+      if pg_catalog.has_table_privilege(v_role::name, v_fn, 'insert')
+         or pg_catalog.has_table_privilege(v_role::name, v_fn, 'update')
+         or pg_catalog.has_table_privilege(v_role::name, v_fn, 'delete')
+         or pg_catalog.has_table_privilege(v_role::name, v_fn, 'truncate') then
+        raise exception '0037 acl: % holds a DML grant on % -- the subledger is written by definer verbs only', v_role, v_fn;
+      end if;
+    end loop;
+    if exists (select 1 from pg_class cc, unnest(coalesce(cc.relacl,'{}'::aclitem[])) acl
+               where cc.oid = v_fn::regclass and acl::text like '=%') then
+      raise exception '0037 acl: % carries a PUBLIC table grant', v_fn;
+    end if;
+  end loop;
 
   -- (D) THE BACKFILL TIES -- both directions, sen-exact (WCA-R4).
-  -- (D1) per-entry x domain x counterparty: every classified row is materialised at the same
-  -- amount and kind, and every materialised row is still classified.
+  -- (D1) per-entry x domain x CANONICAL counterparty: every classified row is materialised at
+  -- the same amount and kind, and every materialised row is still classified. Both directions
+  -- canonicalise the stored item counterparty before comparing, for the reason belt-1 and the
+  -- preview do: items hold the party that was canonical AT WRITE, and merge_counterparties
+  -- does not repoint history. A raw comparison would fail this assert on any estate where a
+  -- merge has ever followed an approval -- i.e. it would report the backfill as broken when
+  -- what actually happened is that two names became one.
   select count(*)::int into v_bad from (
     select 1
     from clara.journal_entries e
     cross join lateral clara._subledger_classify_entry(e.id) cl
-    left join clara.open_items oi on oi.entry_id = e.id and oi.domain = cl.domain
-      and oi.counterparty_id = cl.counterparty_id
+    left join lateral (
+      select sum(oi.amount_cents)::bigint as amt, min(oi.item_kind) as k,
+             count(distinct oi.item_kind)::int as kn
+      from clara.open_items oi
+      where oi.entry_id = e.id and oi.domain = cl.domain
+        and clara._canonical_counterparty(oi.client_id, oi.counterparty_id)
+            = cl.counterparty_id
+    ) it on true
     where e.status = 'approved'
-      and (oi.amount_cents is distinct from cl.amount_cents
-        or oi.item_kind is distinct from cl.item_kind)
+      and (it.amt is distinct from cl.amount_cents
+        or it.k is distinct from cl.item_kind
+        or coalesce(it.kn, 1) <> 1)
   ) z;
   select count(*)::int into v_bad2 from clara.open_items oi
     where not exists (select 1 from clara._subledger_classify_entry(oi.entry_id) cl
-                      where cl.domain = oi.domain and cl.counterparty_id = oi.counterparty_id);
+                      where cl.domain = oi.domain
+                        and cl.counterparty_id
+                            = clara._canonical_counterparty(oi.client_id, oi.counterparty_id));
   if v_bad <> 0 or v_bad2 <> 0 then
     raise exception '0037 tail: the backfill does not reproduce the classifier exactly (% unmaterialised/divergent, % orphaned item(s))', v_bad, v_bad2;
   end if;
