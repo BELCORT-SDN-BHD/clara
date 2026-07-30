@@ -62,10 +62,14 @@ after(async () => { printLaneNotes("wb-0020-tail"); await endPool(); });
 
 test("META / [0020 §8]: EXACTLY the nine pinned functions exist, each with ONE overload, SECURITY DEFINER, search_path=clara,pg_temp, owned by clara_fn_owner", async () => {
   fail0020(live);
+  // 0038 (WCB-R1, design v2.1): prepare_egress_dispatch and consume_egress_dispatch each
+  // gain ONE additional sha-bound overload (6-arg / 7-arg); every other member stays single.
+  const OVERLOADS_0038 = { prepare_egress_dispatch: 2, consume_egress_dispatch: 2 };
   for (const [name, sig] of Object.entries({ ...RUNTIME_FNS, ...OWNER_FNS })) {
     assert.ok(await regProcedure(sig),
       `${sig} resolves via to_regprocedure — the EXACT signature §10.2's runtime guard will use`);
-    assert.equal(await overloadCount(name), 1, `clara.${name} has exactly ONE overload`);
+    assert.equal(await overloadCount(name), OVERLOADS_0038[name] ?? 1,
+      `clara.${name} has exactly ${OVERLOADS_0038[name] ?? 1} overload(s)`);
     const f = await fnFacts(sig);
     assert.equal(f.secdef, true, `${name} is SECURITY DEFINER`);
     assert.equal(f.owner, ROLES.fnOwner, `${name} is owned by clara_fn_owner`);
@@ -78,7 +82,10 @@ test("META / [0020 §8]: EXACTLY the nine pinned functions exist, each with ONE 
   // that stamp was the LEGACY grant_client_egress, which in the same call authorizes
   // purpose-blind invoice-facts egress, so §7.2's step 1 could not be executed for a client who
   // consented ONLY to wiki synthesis.
-  assert.equal(ALL_0020_FN_NAMES.length, 9, "the closed set is nine functions");
+  // 0038 (WCB-R1): prepare/consume gain ONE sha-bound overload each (6-arg / 7-arg); the
+  // 0020-era arities stay byte-identical. The NAME census stays nine; the overload census
+  // in the meta cell below carries the two additions.
+  assert.equal(ALL_0020_FN_NAMES.length, 9, "the closed set is nine function NAMES");
 });
 
 test("[0020 §7.1 amendment / R1-F3]: the owner evidence-classification verb stamps consent_evidence, grants NOTHING, and refuses a document already classified as something else", async () => {

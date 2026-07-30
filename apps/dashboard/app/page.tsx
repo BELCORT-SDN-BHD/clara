@@ -31,6 +31,9 @@ export default function Home() {
       <p>
         <a href="/seeding">Seeding tick-list (Wave-B prior-GL ceremony)</a>
       </p>
+      <p>
+        <a href="/bank">Bank (Wave C-b: identity, statement ingest, matching)</a>
+      </p>
     </main>
   );
 }

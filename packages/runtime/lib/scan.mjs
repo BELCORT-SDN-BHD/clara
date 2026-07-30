@@ -171,6 +171,50 @@ async function validateOoxml(path) {
   return { format, ext: format, mime: format === "xlsx" ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "application/vnd.openxmlformats-officedocument.wordprocessingml.document", pages };
 }
 
+// --- OFX (Wave C-b design §4.3) -------------------------------------------------------
+//
+// WHY OFX NEEDS ITS OWN DETECTION. Until now an OFX upload had exactly two fates, both
+// wrong: rejected outright ("file signature is not in the intake allowlist"), or — for the
+// XML-flavoured OFX 2.x carrying a .xml extension — MISROUTED into the MyInvois/UBL lane,
+// where a bank statement would be parsed as an e-invoice. Neither is a statement.
+//
+// OFX comes in two dialects and both are detected here:
+//   * 1.x — a plain-text header block (`OFXHEADER:100`, `DATA:OFXSGML`) followed by SGML
+//     with UNCLOSED leaf tags. It is not XML and must never be handed to an XML validator.
+//   * 2.x — well-formed XML, usually announced by an `<?OFX ...?>` processing instruction,
+//     with `<OFX>` as the root element.
+//
+// The detection is SIGNATURE-based, not extension-based, so a .qfx/.txt/.xml wrapper cannot
+// change what the file is. The entity guard (`assertNoEntities`) still applies to both
+// dialects: an OFX file has no legitimate reason to declare a DOCTYPE or an ENTITY, and
+// refusing them here keeps this lane off the entity-expansion surface entirely.
+//
+// PAGES = 1: an OFX file is a record stream, not a paginated document, and the page count
+// feeds the vendor page budget — which this lane never spends (the structured statement
+// parse is in-process and free).
+function looksLikeOfx(prefix) {
+  const text = prefix.toString("latin1").replace(/^\uFEFF/, "").trimStart();
+  if (/^OFXHEADER\s*:/i.test(text)) return true; // 1.x SGML header block
+  if (/<\?OFX\b/i.test(text)) return true; // 2.x processing instruction
+  return /^(?:<\?xml[^>]*\?>\s*)?<OFX\b/i.test(text); // 2.x root element
+}
+
+async function validateOfx(path) {
+  // latin1 never throws, which matters: OFX 1.x exports from Malaysian banking portals are
+  // frequently CP1252 rather than UTF-8, and refusing them for an encoding a statement lane
+  // can read perfectly well would be a false rejection.
+  let carry = "";
+  let sawBody = false;
+  for await (const chunk of createReadStream(path, { highWaterMark: 64 * 1024 })) {
+    const text = carry + chunk.toString("latin1");
+    assertNoEntities(text);
+    sawBody ||= /<(?:OFX|STMTTRN|BANKTRANLIST)\b/i.test(text);
+    carry = text.slice(-64);
+  }
+  if (!sawBody) throw new IntakeScanError("bad_type", "file announces OFX but carries no OFX body", 415);
+  return { format: "ofx", ext: "ofx", mime: "application/x-ofx", pages: 1 };
+}
+
 function validateDelimited(prefix, ext) {
   let text;
   try {
@@ -197,6 +241,10 @@ export async function detectDocument(path, { originalFilename, prefix: suppliedP
   if (starts(prefix, [0x49, 0x49, 0x2a, 0x00]) || starts(prefix, [0x4d, 0x4d, 0x00, 0x2a])) return { format: "tiff", ext: "tiff", mime: "image/tiff", pages: 1 };
   if (prefix.length >= 12 && prefix.subarray(4, 8).toString("ascii") === "ftyp" && /heic|heix|hevc|mif1/.test(prefix.subarray(8, 32).toString("ascii"))) return { format: "heic", ext: "heic", mime: "image/heic", pages: 1 };
   if (starts(prefix, [0x50, 0x4b, 0x03, 0x04])) return validateOoxml(path);
+  // OFX is tested BEFORE both the delimited and the plain-XML branches: an OFX 2.x file
+  // carrying a .xml extension is still a bank statement, and the XML branch would send it to
+  // the MyInvois/UBL lane (Wave C-b design §4.3).
+  if (looksLikeOfx(prefix)) return validateOfx(path);
   if (ext === "csv" || ext === "tsv") return validateDelimited(prefix, ext);
   const text = prefix.toString("utf8").replace(/^\uFEFF/, "").trimStart();
   if (ext === "xml" && text.startsWith("<")) {

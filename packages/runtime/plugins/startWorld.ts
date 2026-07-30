@@ -22,6 +22,7 @@ import { start, getRun } from "workflow/api";
 import { workflows } from "../workflows/registry.js";
 import { makeDocumentServices, recoverPendingDocumentIntakes } from "../lib/intake.mjs";
 import { makeInvoiceFactsServices } from "../workflows/invoiceFacts.v1.services.mjs";
+import { makeStatementFactsServices } from "../workflows/statementFacts.v1.services.mjs";
 import { stopIntakeIngress } from "../lib/spool.mjs";
 import { startManagedScanner } from "../lib/scan.mjs";
 
@@ -65,6 +66,11 @@ export default definePlugin(() => {
   };
   (globalThis as unknown as { __claraDocumentServices?: unknown }).__claraDocumentServices = makeDocumentServices();
   (globalThis as unknown as { __claraInvoiceFactsServices?: unknown }).__claraInvoiceFactsServices = makeInvoiceFactsServices();
+  // Wave C-b: the statement lane's own bundle — reader-1 (the deterministic pass over the
+  // STORED layout geometry, no egress), the reader-2 vendor adapter, the csv/ofx parsers,
+  // and the corroborator/payload builder. Kept OUT of the frozen closure so parser and
+  // vendor tuning against real Maybank output is never a workflow-version change (AB-16).
+  (globalThis as unknown as { __claraStatementFactsServices?: unknown }).__claraStatementFactsServices = makeStatementFactsServices();
   // The MyInvois local_facts consumer reuses the document services (temp-file lifecycle +
   // canonical download); the UBL facts parse runs in its own worker thread.
   const localFactsServices = makeDocumentServices();
@@ -122,6 +128,14 @@ export default definePlugin(() => {
         // references resolve through the registry `workflows` object (freeze-lint
         // enqueue-provenance law — a direct workflow-file import handed to start() fails CI).
         enqueueInvoiceFacts: (taskId: string) => start(workflows.invoiceFacts, [{ task_id: taskId }]),
+        // Wave C-b: BOTH statement lanes ('statement_facts' pdf/image, 'statement_parse'
+        // csv/ofx) route to the ONE statementFacts_v1 workflow, which branches on the
+        // claimed task's own lane. `enqueueForLane` is now an explicit allowlist, so if this
+        // dep were ever missing a statement task would WAIT (warned once) rather than be
+        // driven into documentIngest's consentless generic OCR pass. Resolved through the
+        // registry `workflows` object (freeze-lint enqueue-provenance law — a direct
+        // workflow-file import handed to start() fails CI).
+        enqueueStatementFacts: (taskId: string) => start(workflows.statementFacts, [{ task_id: taskId }]),
         // The MyInvois local_facts lane (Wave A2) has NO WDK workflow — a facts task is
         // driven by processLocalFactsTask directly (claim/parse/persist). The claim gate
         // makes this reconciler belt idempotent against the local_facts leader loop below.

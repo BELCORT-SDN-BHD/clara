@@ -18,6 +18,7 @@ import { chatTurn_v8 } from "./chatTurn.v8.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
+import { statementFacts_v1 } from "./statementFacts.v1.js";
 import { autoDraft_v1 } from "./autoDraft.v1.js";
 import { autoDraft_v2 } from "./autoDraft.v2.js";
 import { autoDraft_v3 } from "./autoDraft.v3.js";
@@ -33,6 +34,7 @@ export const workflows = {
   chatTurn: chatTurn_v8,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
+  statementFacts: statementFacts_v1,
   autoDraft: autoDraft_v5,
   firmInterview: firmInterview_v2,
   clientOnboarding: clientOnboarding_v2,
@@ -122,7 +124,17 @@ export const workflows = {
 // runway's driver), so this is prompt/schema-describe() guidance only; the wrapper
 // (runDraftJournalEntry) is byte-unchanged and the DB-side reconciliation walls stay
 // the enforcement. Drop a re-export only once zero non-terminal runs of that version
-// remain.
+// remain. Wave C-b ADDS a brand-new class, `statementFacts: statementFacts_v1` — nothing is
+// repointed and no existing body is touched. One workflow serves BOTH statement lanes
+// (`statement_facts` pdf/image, two independent readers behind a typed governed-egress
+// dispatch; `statement_parse` csv/ofx, one deterministic in-process parse where THE CHAIN
+// IS THE SECOND READER, WC-R7), branching on the claimed task's own lane — the
+// documentIngest ocr/structured_parse precedent. It opens the `bank_statement` ->
+// `skipped_kind` dead end 0026 left behind. DEPLOY ORDER IS BINDING (design part2 §5): this
+// runtime image ships FIRST, then migration 0038, then the consent ceremony — which is also
+// why `enqueueForLane` (lib/reconciler-documents.mjs) became an explicit allowlist in the
+// same change, so a migration-before-runtime window can never route a bank statement into a
+// consentless generic OCR run.
 export { firmInterview_v1 };
 export { clientOnboarding_v1 };
 export { chatTurn_v1 };

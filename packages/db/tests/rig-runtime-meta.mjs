@@ -89,11 +89,17 @@ export async function s4GrantAudit() {
 
 /** No clara proname may carry two overloads (orphan-overload sweep, §6 item 7). */
 export async function overloadFailures() {
+  // AMENDMENT 0038 (WCB-R1, design v2.1): prepare/consume_egress_dispatch each carry
+  // EXACTLY TWO ratified overloads (the 0020 wiki arity + the 0038 sha-bound arity).
+  // Anything else with >1, or these two with a third, is still an orphan.
+  const RATIFIED = { prepare_egress_dispatch: 2, consume_egress_dispatch: 2 };
   const r = await rootQuery(
     `select p.proname, count(*)::int as n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'clara' group by p.proname having count(*) > 1`,
   );
-  return r.rows.map((x) => `clara.${x.proname} has ${x.n} overloads`);
+  return r.rows
+    .filter((x) => x.n !== (RATIFIED[x.proname] ?? 1))
+    .map((x) => `clara.${x.proname} has ${x.n} overloads`);
 }
 
 /** proargnames of a clara fn: null when absent, else one array per overload. */

@@ -103,14 +103,16 @@ test("a filed receipt document enqueues an invoice_facts task (not skipped_kind)
 // (2) The gate NARROWS, it does not vanish — an excluded kind still yields skipped_kind.
 // ===========================================================================
 
-test("an EXCLUDED kind (bank_statement) still yields the skipped_kind terminal — the gate narrows, not vanishes", async () => {
+test("an EXCLUDED kind (payment_voucher) still yields the skipped_kind terminal — the gate narrows, not vanishes", async () => {
+  // 0038 amendment: bank_statement now HAS a home (the statement lanes) -- the probe kind
+  // moves to payment_voucher, which stays excluded. The law under test is unchanged.
   requireReady();
   const client = W.clients.A1;
-  const doc = await kindDoc(W.users.alice, { client, kind: "bank_statement" });
+  const doc = await kindDoc(W.users.alice, { client, kind: "payment_voucher" });
   await enqueueInvoiceFacts(doc.documentId);
   const tasks = await laneTasks(doc.documentId, "invoice_facts");
   const runnable = tasks.filter((t) => ["queued", "held_egress", "running", "done"].includes(t.status));
-  assert.equal(runnable.length, 0, "NO runnable/completed invoice_facts task exists for a bank_statement (the gate still holds)");
+  assert.equal(runnable.length, 0, "NO runnable/completed invoice_facts task exists for a payment_voucher (the gate still holds)");
   const skipped = tasks.find((t) => t.status === "failed" && t.error_code === "skipped_kind");
   assert.ok(skipped, "the skipped_kind receipt still lives on the task trail for a still-excluded kind");
   const full = await rootQuery("select attempt_count from clara.document_processing_tasks where id=$1", [skipped.id]);
