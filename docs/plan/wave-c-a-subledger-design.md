@@ -312,8 +312,14 @@ segregation stays a later wave).
   > → **`open_items` (batch: `FOR UPDATE ... ORDER BY id`) → `journal_entries` → groups**
 
   with the advisory rung read as a *partial* order over who takes what:
-  **firm (`203005002`) → client (`203005004`) → client:counterparty (`203005003`)**.
-  `approve_wrong_client_correction` is the only body that takes the firm rung.
+  **firm (`203005002`) → client:counterparty (`203005003`) → client (`203005004`)** — the same
+  003-before-004 order the line above states, and the order EVERY acquisition site actually
+  uses (`_approve_entry_core` and both allocate composites take 003 then 004; the 0011 sweep
+  takes one or the other, never 004 then 003; `reverse_entry`, `unallocate_group`,
+  `apply_open_items` and `approve_wrong_client_correction` take only 004).
+  `approve_wrong_client_correction` is the only body that takes the firm rung — and it takes
+  no 003 at all, so `002 → 003` is stated for completeness rather than because any body walks
+  it.
   `reverse_entry` and `approve_wrong_client_correction` take `203005004` **after** their
   `journal_entries` row locks — the same relative order `_approve_entry_core` has used since
   0029/0035, so adding the rung inverts nothing.

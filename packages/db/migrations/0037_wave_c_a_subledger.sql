@@ -1300,11 +1300,17 @@ create function clara._subledger_decompose_preview(p_client uuid, p_domain text)
   from clara.journal_entries e
   cross join lateral clara._subledger_classify_entry(e.id) cl
   left join lateral (
+    -- ONE aggregation law across every surface (belt-1's two arms, this preview, the tail's
+    -- D1): the item side drops a zero net exactly as the classifier does. Here it can never
+    -- change diff_cents -- every classifier row is nonzero by construction, so a zero-summing
+    -- group reads as unmaterialised either way -- and it is written this way so the four
+    -- surfaces cannot drift into disagreeing about what a materialised group is.
     select sum(oi.amount_cents)::bigint as amt
     from clara.open_items oi
     where oi.entry_id = e.id and oi.domain = cl.domain
       and clara._canonical_counterparty(oi.client_id, oi.counterparty_id)
           = cl.counterparty_id
+    having sum(oi.amount_cents) <> 0
   ) it on true
   where e.client_id = p_client and e.status = 'approved'
     and (p_domain is null or cl.domain = p_domain)
@@ -1360,6 +1366,17 @@ begin
   -- later merge does not repoint history -- joining the stored id raw would make every
   -- post-merge entry fail this belt (and would wedge reverse_entry on it forever with a
   -- diagnosis about the subledger being untied, which would be false).
+  --
+  -- THE ITEM SIDE DROPS ZERO NETS, exactly as every classifier ladder does. Without that the
+  -- belt fires on a CANONICAL ZERO-NET COLLAPSE, which is a lawful state and not a breach: an
+  -- entry that credited party A +100 and debited party B -100 minted two legitimate items,
+  -- and a later merge of A into B makes the classifier net them to zero and emit no row at
+  -- all. The two items still exist (history is never repointed), they still sum to what the
+  -- ledger says for that canonical group (zero), and the section-3 identity is untouched --
+  -- so the next UPDATE to touch this entry (a reverse stamping reversed_by, say) must not be
+  -- refused with a diagnosis about a subledger that is in fact perfectly tied. A REAL breach
+  -- still fires: if the classifier says the group is nonzero and the items sum to zero, the
+  -- classifier row survives with no item side to match and the amount comparison catches it.
   select count(*)::int into v_bad from (
     select 1 from clara._subledger_classify_entry(v_id) cl
     full outer join (
@@ -1370,6 +1387,7 @@ begin
              count(distinct oi.item_kind)::int as kn
       from clara.open_items oi where oi.entry_id = v_id
       group by 1, 2
+      having sum(oi.amount_cents) <> 0
     ) it on it.d = cl.domain and it.cp is not distinct from cl.counterparty_id
     where cl.amount_cents is distinct from it.amt
        or cl.item_kind is distinct from it.k
@@ -1407,11 +1425,15 @@ begin
                       else l.credit_cents - l.debit_cents end) <> 0
     ) lg
     full outer join (
+      -- Zero nets dropped on BOTH sides, for the reason arm 1 states: the legs side already
+      -- drops them (the `having` above), so an item side that kept a zero-net canonical
+      -- collapse would report a divergence between two sides that agree.
       select oi.domain as d,
              clara._canonical_counterparty(oi.client_id, oi.counterparty_id) as cp,
              sum(oi.amount_cents)::bigint as amt
       from clara.open_items oi where oi.entry_id = v_id
       group by 1, 2
+      having sum(oi.amount_cents) <> 0
     ) it on it.d = lg.d and it.cp is not distinct from lg.cp
     where lg.amt is distinct from it.amt
   ) z;
@@ -1454,6 +1476,7 @@ create trigger t_open_items_validate before insert on clara.open_items
 create function clara._tf_subledger_item_belt() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare i record; e record; v_out bigint; v_sign int; v_kind text;
+        v_sum bigint; v_gkind text; v_kinds int; v_cp uuid;
 begin
   -- RE-QUERY BY ID (0009:524-529).
   select * into i from clara.open_items oi where oi.id = new.id;
@@ -1500,21 +1523,35 @@ begin
       using errcode='CLR10',detail='{"reason":"subledger_item_kind_mismatch"}';
   end if;
 
-  -- (c) CLASSIFIER CONGRUENCE -- the exact complement of belt-1's arm 1. Belt-1 fires only on
-  -- a journal_entries write, so a LONE `insert into clara.open_items` against an entry that
-  -- was approved in some EARLIER transaction touches no journal_entries row and dodges it
-  -- completely: a second bill item for the same party under a merged-away counterparty id
-  -- would sail past the grain unique, past every FK, and past belt-1, and it would break the
-  -- section-3 identity on the spot. Every item must be a row the ONE classifier would have
-  -- produced for its own entry -- same domain, same canonical party, same amount, same kind.
-  if not exists (
+  -- (c) CLASSIFIER CONGRUENCE, ASSERTED ON THE GROUP AGGREGATE -- the exact complement of
+  -- belt-1's arm 1. Belt-1 fires only on a journal_entries write, so a LONE
+  -- `insert into clara.open_items` against an entry that was approved in some EARLIER
+  -- transaction touches no journal_entries row and dodges it completely: a second item for
+  -- the same party would sail past every FK and past belt-1, and it would break the section-3
+  -- identity on the spot.
+  --
+  -- WHY THE AGGREGATE AND NOT THE ROW. The grain unique is keyed on the STORED counterparty
+  -- id, and merges never repoint history -- so once A has merged into B, an entry already
+  -- carrying an item that names A can accept a SECOND item naming B at a different grain key.
+  -- Row-wise that duplicate is indistinguishable from the real thing (the classifier's one
+  -- row for the canonical group has exactly its amount and its kind, so a per-row test says
+  -- yes), while the group it lands in now sums to twice what the ledger says. Only equality
+  -- on the (entry, domain, CANONICAL counterparty) SUM can see it -- which is also the grain
+  -- belt-1 and the tail assert on, so all three now speak one law. The kind census is carried
+  -- across for the same reason: a group must be one kind, exactly as the classifier emits it.
+  v_cp := clara._canonical_counterparty(i.client_id, i.counterparty_id);
+  select sum(oi.amount_cents)::bigint, min(oi.item_kind), count(distinct oi.item_kind)::int
+    into v_sum, v_gkind, v_kinds
+    from clara.open_items oi
+    where oi.entry_id = i.entry_id and oi.domain = i.domain
+      and clara._canonical_counterparty(oi.client_id, oi.counterparty_id) = v_cp;
+  if v_kinds is distinct from 1 or not exists (
     select 1 from clara._subledger_classify_entry(i.entry_id) cl
     where cl.domain = i.domain
-      and cl.counterparty_id
-          = clara._canonical_counterparty(i.client_id, i.counterparty_id)
-      and cl.amount_cents = i.amount_cents
-      and cl.item_kind = i.item_kind) then
-    raise exception 'open item % is not a row the classifier produces for entry % -- the subledger would no longer be derivable from the ledger', i.id, i.entry_id
+      and cl.counterparty_id = v_cp
+      and cl.amount_cents = v_sum
+      and cl.item_kind = v_gkind) then
+    raise exception 'open item % leaves its (entry, domain, counterparty) group at % / kind %, which is not what the classifier produces for entry % -- the subledger would no longer be derivable from the ledger', i.id, v_sum, coalesce(v_gkind,'(mixed)'), i.entry_id
       using errcode='CLR10',detail='{"reason":"subledger_item_not_classified"}';
   end if;
 
@@ -3192,6 +3229,7 @@ declare
   c record; v_dedupe jsonb; v_firm uuid; v_reason text; v_apps jsonb;
   v_ids uuid[]; v_group uuid; v_n int; v_doms int; v_parties int; v_dom text;
   al record; si record; ti record; v_sout bigint; v_tout bigint; v_total bigint := 0;
+  v_orig uuid;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key) = '' then
@@ -3275,22 +3313,57 @@ begin
     end if;
     select * into si from clara.open_items oi where oi.id = al.s;
     select * into ti from clara.open_items oi where oi.id = al.t;
-    -- THE REVERSED-ENTRY WALL, with the ONE exception that makes reversal survivable. An item
-    -- whose entry has been reversed is a claim the books have cancelled, and applying an
-    -- unrelated credit to it (or applying it, as a credit, to something else) launders a
-    -- cancelled position into a live one. But the SANCTIONED remedy for a reversed allocated
-    -- entry is exactly an application: the mirror's reversal_unwind item against the original
-    -- item, both to zero, zero GL movement. So the wall admits precisely that pair -- the two
-    -- items must be each other's unwind lineage -- and refuses everything else. Read from
-    -- journal_entries directly on both sides: apply_open_items touches documents nowhere and
-    -- must not start.
-    if si.reversal_unwind_of is distinct from ti.id
-       and ti.reversal_unwind_of is distinct from si.id then
-      if exists (select 1 from clara.journal_entries je
-                 where je.id in (si.entry_id, ti.entry_id) and je.reversed_by is not null) then
-        raise exception 'one of open items % / % belongs to a reversed entry; the only application a reversed entry admits is its own unwind', al.s, al.t
-          using errcode='CLR10',detail='{"reason":"allocation_target_reversed"}';
+    -- THE REVERSED-ENTRY WALL, with the ONE exception that makes reversal survivable -- and
+    -- the exception is an ENTRY-LEVEL LINEAGE LAW, not an exact-id one. An item whose entry
+    -- has been reversed is a claim the books have cancelled, and applying an unrelated credit
+    -- to it (or applying it, as a credit, to something else) launders a cancelled position
+    -- into a live one. The SANCTIONED remedy for a reversed entry is exactly an application:
+    -- the mirror's reversal_unwind item against the original entry's item(s), everything to
+    -- zero, zero GL movement.
+    --
+    -- WHY THE ORIGINAL ENTRY AND NOT THE reversal_unwind_of POINTER. An exact-id test carries
+    -- two defects, one of them a hole.
+    --   (a) THE HOLE. An unwind item's OWN entry is the MIRROR, which carries reversal_of and
+    --       never reversed_by. So a pair of (unwind, some UNRELATED LIVE invoice) failed the
+    --       id test, fell through to the reversed-entry probe, found nothing reversed on
+    --       either side -- and committed. The unwind then settled a live claim while the item
+    --       it was minted to cancel stayed open at full face value. The wall has to be a wall
+    --       from the unwind's side too, and only its lineage can say so.
+    --   (b) THE MANY-TO-ONE CLOSURE. When a merge collapses two parties of one original into
+    --       one canonical party, the mirror mints ONE unwind for the whole collapsed set, and
+    --       reversal_unwind_of can name only min(id) of it. An exact-id test therefore left
+    --       every OTHER original item permanently unclosable by the only instrument that
+    --       exists for it.
+    -- The law: an item of kind 'reversal_unwind' pairs ONLY with items anchored to the entry
+    -- its own entry reverses. Same domain and ONE canonical counterparty already hold across
+    -- the whole set (the two refusals above), so the entry is the remaining degree of freedom.
+    -- reversal_unwind_of stays as LINEAGE -- which item headed the collapsed set -- and is
+    -- never again read as an authorisation. A NON-unwind pair cannot enter the exemption at
+    -- all (the branch is keyed on item_kind, which belt-2 ties to the entry's reversal_of), so
+    -- the wall below still refuses a pair where EITHER side's entry has been reversed. Read
+    -- from journal_entries directly on both sides: apply_open_items touches documents nowhere
+    -- and must not start.
+    if si.item_kind = 'reversal_unwind' or ti.item_kind = 'reversal_unwind' then
+      if si.item_kind = 'reversal_unwind' then
+        select je.reversal_of into v_orig
+          from clara.journal_entries je where je.id = si.entry_id;
+        if v_orig is null or ti.entry_id is distinct from v_orig then
+          raise exception 'open item % is a reversal unwind; it discharges only the entry it reverses, and open item % does not belong to that entry', al.s, al.t
+            using errcode='CLR10',detail='{"reason":"unwind_lineage_mismatch"}';
+        end if;
       end if;
+      if ti.item_kind = 'reversal_unwind' then
+        select je.reversal_of into v_orig
+          from clara.journal_entries je where je.id = ti.entry_id;
+        if v_orig is null or si.entry_id is distinct from v_orig then
+          raise exception 'open item % is a reversal unwind; it discharges only the entry it reverses, and open item % does not belong to that entry', al.t, al.s
+            using errcode='CLR10',detail='{"reason":"unwind_lineage_mismatch"}';
+        end if;
+      end if;
+    elsif exists (select 1 from clara.journal_entries je
+                  where je.id in (si.entry_id, ti.entry_id) and je.reversed_by is not null) then
+      raise exception 'one of open items % / % belongs to a reversed entry; the only application a reversed entry admits is its own unwind', al.s, al.t
+        using errcode='CLR10',detail='{"reason":"allocation_target_reversed"}';
     end if;
     v_sout := clara._subledger_outstanding(al.s);
     v_tout := clara._subledger_outstanding(al.t);
@@ -3419,7 +3492,7 @@ declare
   v_revise text; v_pin text;
   v_a int; v_b int; v_c int; v_d int; v_e int; v_f int; v_n int;
   v_paths text[]; v_writers text[]; v_alloc_writers text[]; v_callers text[];
-  v_oid_hook oid;
+  v_oid_hook oid; v_marker text;
 begin
   -- (1) MANDATORY PRIOR-MIGRATION CHECK. The deepest TRUE content dependency across the five
   -- bodies this migration recuts or patches is 0035's recut of clara._approve_entry_core; the
@@ -3540,11 +3613,26 @@ begin
   -- boundary and 0028's binding-divergence surgery) and carries the reversal-mirror guard
   -- exactly once, positioned after the revision-token check so a stale token still reports
   -- CLR06 first.
-  if position('opening_entry_k_family_only' in v_revise)=0
-     or position('v_binding_divergence' in v_revise)=0
-     or position('clara.vendor_binding_resolutions' in v_revise)=0 then
-    raise exception '0037 tail: revise_entry lost a 0017 R1-F1 or 0028 binding-divergence marker -- section H.2b rebuilt the body instead of patching it';
-  end if;
+  -- ONE MARKER PER SPLICED REGION, not one per migration. 0028 spliced revise_entry in FOUR
+  -- places (0028:1446-1531) -- the declaration block, the binding-divergence derivation after
+  -- _resolve_counterparty, the UPDATE that strips the two divergence columns plus the
+  -- vendor_binding_resolutions row it writes, and the counterparty.binding_resolved event --
+  -- and 0017 spliced the K-family lifecycle boundary before the op reservation. A marker set
+  -- that named only three of those five could lose the event region (an entire change of
+  -- record: the divergence stops being observable in the stream) and still pass. Each region
+  -- now owns a marker that appears NOWHERE else in the body, so dropping any one of them
+  -- fails the deploy. Whole-body pins are still rejected for the reason (3d) states.
+  foreach v_marker in array array[
+      'opening_entry_k_family_only',
+      'v_binding_divergence boolean:=false',
+      'v_binding_divergence:=v_binding_counterparty is not null',
+      'coding_kind=case when v_binding_divergence then null else coding_kind end',
+      'clara.vendor_binding_resolutions',
+      '''counterparty.binding_resolved'''] loop
+    if position(v_marker in v_revise)=0 then
+      raise exception '0037 tail: revise_entry lost the 0017/0028 spliced region marked by "%" -- section H.2b rebuilt the body instead of patching it', v_marker;
+    end if;
+  end loop;
   v_n:=(length(v_revise)-length(replace(v_revise,'"reason":"reversal_mirror_not_revisable"','')))
     / length('"reason":"reversal_mirror_not_revisable"');
   if v_n <> 1 then
@@ -4005,6 +4093,13 @@ begin
   -- does not repoint history. A raw comparison would fail this assert on any estate where a
   -- merge has ever followed an approval -- i.e. it would report the backfill as broken when
   -- what actually happened is that two names became one.
+  -- BOTH DIRECTIONS DROP ZERO NETS ON THE ITEM SIDE, the same law belt-1's two arms and the
+  -- preview apply. A canonical zero-net collapse (two items of one entry whose parties later
+  -- merged into one, netting to zero) is a LAWFUL state: the classifier emits no row for that
+  -- group, the items still exist because history is never repointed, and the group's
+  -- contribution to the identity is zero on both sides. Direction 2 is therefore expressed on
+  -- the GROUP rather than the row -- a row-wise orphan test would report exactly that lawful
+  -- state as a broken backfill and abort a correct deploy.
   select count(*)::int into v_bad from (
     select 1
     from clara.journal_entries e
@@ -4016,19 +4111,24 @@ begin
       where oi.entry_id = e.id and oi.domain = cl.domain
         and clara._canonical_counterparty(oi.client_id, oi.counterparty_id)
             = cl.counterparty_id
+      having sum(oi.amount_cents) <> 0
     ) it on true
     where e.status = 'approved'
       and (it.amt is distinct from cl.amount_cents
         or it.k is distinct from cl.item_kind
         or coalesce(it.kn, 1) <> 1)
   ) z;
-  select count(*)::int into v_bad2 from clara.open_items oi
-    where not exists (select 1 from clara._subledger_classify_entry(oi.entry_id) cl
-                      where cl.domain = oi.domain
-                        and cl.counterparty_id
-                            = clara._canonical_counterparty(oi.client_id, oi.counterparty_id));
+  select count(*)::int into v_bad2 from (
+    select oi.entry_id as eid, oi.domain as dom,
+           clara._canonical_counterparty(oi.client_id, oi.counterparty_id) as cp
+    from clara.open_items oi
+    group by 1, 2, 3
+    having sum(oi.amount_cents) <> 0
+  ) g
+  where not exists (select 1 from clara._subledger_classify_entry(g.eid) cl
+                    where cl.domain = g.dom and cl.counterparty_id = g.cp);
   if v_bad <> 0 or v_bad2 <> 0 then
-    raise exception '0037 tail: the backfill does not reproduce the classifier exactly (% unmaterialised/divergent, % orphaned item(s))', v_bad, v_bad2;
+    raise exception '0037 tail: the backfill does not reproduce the classifier exactly (% unmaterialised/divergent, % orphaned item group(s))', v_bad, v_bad2;
   end if;
 
   -- (D2) THE IDENTITY, per client x domain, summed over EVERY account of that account_class

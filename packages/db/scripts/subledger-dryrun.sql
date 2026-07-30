@@ -34,10 +34,11 @@
 --
 -- HOW THE CEREMONY USES IT.
 --   1. Run it. Capture the whole output with the run.
---   2. SECTION 0 must show a NON-ZERO estate. A session that can see nothing produces zero
---      rows in every probe below, and zero rows is what GREEN looks like -- so a positive
---      visibility census is the only thing standing between "clean corpus" and "empty
---      session". It is a GATE, not a header.
+--   2. SECTION 0 must show the EXPECTED estate: firms = :expected_firms (pinned at the top,
+--      overridable with -v), and a non-zero entry/line census. A session that can see nothing
+--      -- or only part of the estate -- produces zero rows in every probe below, and zero rows
+--      is what GREEN looks like, so this census is the only thing standing between "clean
+--      corpus" and "empty (or half-visible) session". It is a GATE, not a header.
 --   3. SECTIONS 1-6 must each return ZERO rows.
 --   4. SECTION 7 is the informational census; capture it for the post-apply diff.
 --   5. SECTION 8 prints ONE machine-checkable row. `gate = GO` and nothing else starts the
@@ -58,17 +59,35 @@
 \pset pager off
 \timing off
 
+-- THE EXPECTED FIRM COUNT -- a pinned NUMBER, not a "> 0". Section 0 exists to tell an empty
+-- session apart from a clean corpus, and "> 0" only does half that job: a PARTIALLY visible
+-- session -- one firm of four, because a policy, a search_path or a wrong DSN scoped it --
+-- passes a positive census and then returns zero rows from every probe below, which reads as
+-- a perfect green over a corpus it never scanned. Equality is the only form that catches it.
+-- 4 = the live estate at the C-a ceremony (BELCORT, ROME PUBLIC ADVISORY, Alara Advisory,
+-- Borneo Books). A rig or a future estate states its own count on the command line rather
+-- than editing this file:
+--     psql -v expected_firms=1 -f packages/db/scripts/subledger-dryrun.sql
+-- (and the ceremony's runner takes the same -v). If the live count ever changes, the honest
+-- fix is to change this default in the same commit that changes the estate.
+\if :{?expected_firms}
+\else
+\set expected_firms 4
+\endif
+
 begin transaction read only;
 
 -- =====================================================================================
--- SECTION 0 -- THE VISIBILITY CENSUS. POSITIVE gate: these numbers must be NON-ZERO.
+-- SECTION 0 -- THE VISIBILITY CENSUS. POSITIVE gate: the entry and line counts must be
+-- NON-ZERO, and the FIRM count must equal :expected_firms EXACTLY (see the \set at the top --
+-- "> 0" would pass a partially-visible session, which is the failure this census exists for).
 --
 -- Every other probe in this file passes by returning nothing. A session that sees an empty
 -- database -- wrong target, an RLS-scoped role, a typo in the DSN -- returns nothing from all
 -- of them and reads as a perfect green. This section is the only thing that can tell those
 -- two states apart, which is why it runs first and why its numbers go in the GO/NO-GO row.
 -- =====================================================================================
-select 'SECTION 0 -- visibility census (ALL must be > 0)' as probe,
+select 'SECTION 0 -- visibility census (firms must EQUAL the pin; the rest > 0)' as probe,
        (select count(*) from clara.firms)                                    as firms,
        (select count(*) from clara.clients)                                  as clients,
        (select count(*) from clara.journal_entries where status='approved')  as approved_entries,
@@ -521,15 +540,17 @@ order by client_id, domain, counterparty_id, posting_date, entry_id;
 -- SECTION 8 -- THE GATE. ONE row, machine-checkable. `gate` must read exactly GO.
 --
 -- It restates every number above rather than re-deriving them, so the gate can never disagree
--- with the sections a human just read. Note that `visible` is part of the AND: a session that
--- saw nothing fails here even though every probe above returned zero rows, which is the whole
+-- with the sections a human just read. Note that `visible` is part of the AND, and that its
+-- firm test is an EQUALITY against the pin: a session that saw nothing -- or saw one firm of
+-- four -- fails here even though every probe above returned zero rows, which is the whole
 -- reason section 0 exists.
 -- =====================================================================================
-select case when :n_firms > 0 and :n_approved > 0 and :n_control_lines > 0
+select case when :n_firms = :expected_firms and :n_approved > 0 and :n_control_lines > 0
              and :n_sec1 = 0 and :n_sec2 = 0 and :n_sec3 = 0
              and :n_sec4 = 0 and :n_sec5 = 0 and :n_sec6 = 0
             then 'GO' else 'NO-GO' end                       as gate,
-       (:n_firms > 0 and :n_approved > 0 and :n_control_lines > 0) as visible,
+       (:n_firms = :expected_firms and :n_approved > 0 and :n_control_lines > 0) as visible,
+       :expected_firms as expected_firms,
        :n_firms as firms, :n_approved as approved_entries,
        :n_control_lines as approved_control_lines,
        :n_sec1 as tie_diffs, :n_sec2 as counterparty_less_lines,

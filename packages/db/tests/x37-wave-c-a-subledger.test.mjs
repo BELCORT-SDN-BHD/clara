@@ -68,6 +68,15 @@
 //          the kind matrix's negative sign on a live AR lane
 //   x37.af the section-4.10 sweep force-complete guard: a recovered run completes the
 //          DRAFTED task and leaves the non-drafted running task alone (both directions)
+//   x37.ah the unwind lineage law: a reversal unwind may NOT be applied to an
+//          unrelated live invoice (unwind_lineage_mismatch); a non-unwind item still
+//          hits the reversed-entry wall; the sanctioned pair still closes to zero
+//   x37.ai one unwind closes BOTH items of a merge-collapsed original -- entry-level
+//          pairing, since reversal_unwind_of can only ever name min(id) of the set
+//   x37.aj a merge that nets an entry's items to zero is LAWFUL: no belt false
+//          positive, the entry still reverses, the mirror mints nothing, books tie
+//   x37.ak a canonical-duplicate item is row-wise indistinguishable and dies on
+//          belt-2's AGGREGATE congruence check (belt-1 never sees a lone item insert)
 //   x37.ag the composites refuse a control-class discount account (both domains)
 //
 // Serial discipline: --test-concurrency=1 (the race cell drives two sessions of
@@ -114,7 +123,9 @@ const BIRTHC = "682-C37"; // the birth fixture's credit
 const EMPP = "271-C37"; // "amount due to employee" -- LIABILITY, NON-payable-class (WC-R10)
 const DIRC = "272-C37"; // director current account -- LIABILITY, NON-payable-class
 
-const CLR05 = "CLR05";
+// (There is no CLR05 constant: the maker-checker floor is exercised by BUILDING the
+// lawful shape -- a distinct checker, or the solo firm's attestation -- never by
+// asserting its SQLSTATE, so a bound constant here would only be dead weight.)
 const CLR10 = "CLR10";
 const CLR26 = "CLR26";
 
@@ -2554,6 +2565,296 @@ test("x37.af the sweep force-complete guard: recovery completes ONLY the task th
     0, "and no item was minted for it",
   );
   await assertTies(client, "x37.af sweep guard");
+});
+
+// ===========================================================================
+// x37.ah -- THE UNWIND IS NOT A FLOATING CREDIT. A reversal_unwind item is a
+// negative position, so every arithmetic guard in apply_open_items (source must be
+// negative, both sides move toward zero, the group nets zero, one party, one
+// domain) is SATISFIED by pointing it at any live invoice of the same customer --
+// and its own entry is the MIRROR, which carries reversal_of and never
+// reversed_by, so the reversed-entry wall found nothing to complain about either.
+// The unwind would have settled a LIVE claim while the item it was minted to
+// cancel stayed open at full face value: cash the client still owes, discharged
+// against paper. The lineage law is what refuses it, and it has to be stated on
+// the ORIGINAL ENTRY (see x37.ai for why the exact-id pointer cannot).
+// ===========================================================================
+test("x37.ah an unwind may not be applied to an UNRELATED live invoice -- refused by name, and the sanctioned pair still works", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const cp = await birthCounterparty(sub, { client, name: `X37 UNWINDCO ${randomUUID().slice(0, 6)}`, kind: "customer" });
+
+  // The reversed claim and its unwind...
+  const reversed = await openArItem(sub, { client, cp, cents: 35000, memo: "x37 unwind-law reversed sale" });
+  await reverseEntry(world.users.bob, { entry: reversed.entry, reason: "x37 unwind-law reversal", opKey: opk("x37-ahrev") });
+  const mirror = (await rootQuery("select id from clara.journal_entries where reversal_of=$1", [reversed.entry])).rows[0].id;
+  const unwind = (await itemsOf(mirror))[0];
+  assert.equal(unwind.item_kind, "reversal_unwind", "the mirror minted the unwind (mandatory setup)");
+  assert.equal(Number(unwind.amount_cents), -35000, "…as the exact negation");
+
+  // ...and a SECOND, entirely live invoice for the SAME customer. Same domain, same
+  // canonical party, and small enough that the two-sided bound is satisfied on both
+  // sides -- so nothing but the lineage law stands between the unwind and it.
+  const live = await openArItem(sub, { client, cp, cents: 20000, memo: "x37 unwind-law live sale" });
+
+  const stolen = await caught(() => applyOpenItems(sub, {
+    client, reason: "x37 unwind against an unrelated live invoice",
+    applications: [{ source_item_id: unwind.id, target_item_id: live.item, amount_cents: 20000 }],
+  }));
+  assert.ok(stolen, "applying a reversal unwind to an UNRELATED live invoice must be REFUSED");
+  assert.equal(stolen.code, CLR10, `the refusal is CLR10 (got ${stolen.code} -- ${stolen.message})`);
+  assert.equal(
+    reasonOf(stolen), "unwind_lineage_mismatch",
+    `the named reason is unwind_lineage_mismatch (got ${reasonOf(stolen)} -- ${stolen.message})`,
+  );
+  assert.ok(/unwind/i.test(String(stolen.message)), `the message says what an unwind may discharge (got: ${stolen.message})`);
+  assert.equal(await outstandingOf(live.item), 20000, "the refused apply left the live invoice untouched");
+  assert.equal(await outstandingOf(unwind.id), -35000, "…and the unwind still carries its whole negation");
+  assert.equal(await outstandingOf(reversed.item), 35000, "…and the reversed claim is still open, which is exactly why the theft mattered");
+
+  // THE EXEMPTION CANNOT BE ENTERED BY A NON-UNWIND ITEM. An ordinary credit note for
+  // the same customer, aimed at the reversed entry's item, still hits the wall under
+  // its own name -- the branch is keyed on item_kind, not on "one of these is odd".
+  const strayEntry = await approvedGeneric(sub, {
+    client, cp, cpKind: "customer", debit: REVN, credit: AR1, cents: 15000, memo: "x37 unwind-law stray credit",
+  });
+  const stray = (await itemsOf(strayEntry))[0];
+  const wall = await caught(() => applyOpenItems(sub, {
+    client, reason: "x37 stray credit against a reversed claim",
+    applications: [{ source_item_id: stray.id, target_item_id: reversed.item, amount_cents: 15000 }],
+  }));
+  assert.ok(wall, "a NON-unwind credit against a reversed entry's item is still refused");
+  assert.equal(
+    reasonOf(wall), "allocation_target_reversed",
+    `…under the reversed-entry wall's own name (got ${reasonOf(wall)} -- ${wall.message})`,
+  );
+
+  // AND THE ROUTE THE LAW LEAVES OPEN WORKS: the unwind against its OWN original.
+  const glBefore = await controlGl(client, "ar");
+  await applyOpenItems(sub, {
+    client, reason: "x37 apply the unwind to its own original",
+    applications: [{ source_item_id: unwind.id, target_item_id: reversed.item, amount_cents: 35000 }],
+  });
+  assert.equal(await outstandingOf(reversed.item), 0, "the reversed claim closes against its own unwind");
+  assert.equal(await outstandingOf(unwind.id), 0, "…consuming the unwind exactly");
+  assert.equal(await controlGl(client, "ar"), glBefore, "…with ZERO GL movement");
+  await assertTies(client, "x37.ah unwind lineage law");
+});
+
+// ===========================================================================
+// x37.ai -- THE MANY-TO-ONE CLOSURE, and why the lineage law is stated on the
+// ENTRY rather than on reversal_unwind_of. When a merge collapses two parties of
+// ONE original into one canonical party, the mirror mints exactly ONE unwind for
+// the whole collapsed set, and its reversal_unwind_of column can name only min(id)
+// of it -- a POINTER, not the set. A law keyed on that pointer therefore closes
+// exactly one of the original items and leaves every other one permanently
+// unclosable by the only instrument that exists for it (the reversed-entry wall
+// refuses every other application against it, by design). Entry-level pairing is
+// what makes the remedy total.
+// ===========================================================================
+test("x37.ai one unwind closes BOTH items of a merge-collapsed original -- entry-level pairing, not a min(id) pointer", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+  const partyP = await birthCounterparty(sub, { client, name: `X37 COLLAPSEP ${randomUUID().slice(0, 6)}` });
+  const partyQ = await birthCounterparty(sub, { client, name: `X37 COLLAPSEQ ${randomUUID().slice(0, 6)}` });
+
+  // A multi-COUNTERPARTY generic JV -- two payable legs, two parties, TWO control
+  // accounts. No verb builds this (draft_entry stamps ONE resolved counterparty on
+  // every control line), so it is constructed with its congruent items exactly as
+  // x37.z does, and belt-1 accepts the pair at commit.
+  const jv = await withActor({ transaction: true }, async (c) => {
+    const r = await c.query(
+      `insert into clara.journal_entries(firm_id,client_id,status,posting_date,memo,origin,maker_actor)
+       values($1,$2,'draft','2026-04-08','x37 collapse accrual','manual',$3) returning id`,
+      [firm, client, sub],
+    );
+    const id = r.rows[0].id;
+    await c.query(
+      `insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description,counterparty_id)
+       values($1,1,$2,90000,0,'accrued expense',null),
+             ($1,2,$3,0,50000,'party P',$4),
+             ($1,3,$5,0,40000,'party Q',$6)`,
+      [id, EXPN, AP1, partyP, AP2, partyQ],
+    );
+    await c.query(
+      "update clara.journal_entries set status='approved',checker_actor=$2,approved_at=now() where id=$1",
+      [id, world.users.bob],
+    );
+    await c.query(
+      `insert into clara.open_items(firm_id,client_id,domain,counterparty_id,entry_id,item_kind,item_date,amount_cents,created_by)
+       values($1,$2,'ap',$3,$4,'adjustment','2026-04-08',50000,$6),
+             ($1,$2,'ap',$5,$4,'adjustment','2026-04-08',40000,$6)`,
+      [firm, client, partyP, id, partyQ, sub],
+    );
+    return id;
+  });
+  const originals = await itemsOf(jv);
+  assert.equal(originals.length, 2, "the JV carries TWO same-domain items (mandatory setup)");
+
+  // THE MERGE, after approval: one canonical party now owes the whole RM900.
+  await mergeCounterparties(sub, { client, survivor: partyQ, merged: partyP, reason: "x37 collapse duplicate", opKey: opk("x37-aimerge") });
+
+  await reverseEntry(world.users.bob, { entry: jv, reason: "x37 collapse reversal", opKey: opk("x37-airev") });
+  const mirror = (await rootQuery("select id from clara.journal_entries where reversal_of=$1", [jv])).rows[0].id;
+  const unwind = await itemsOf(mirror);
+  assert.equal(unwind.length, 1, `the mirror mints ONE unwind for the collapsed set (got ${unwind.length})`);
+  assert.equal(Number(unwind[0].amount_cents), -90000, "…the negation of the whole RM900");
+  assert.equal(unwind[0].counterparty_id, partyQ, "…booked to the canonical survivor");
+  // THE POINTER IS A POINTER. It names ONE of the two originals -- so an exact-id
+  // pairing law could never have closed the other, which is the defect being fixed.
+  assert.ok(
+    originals.some((o) => o.id === unwind[0].reversal_unwind_of),
+    "the unwind's lineage names one of the two originals",
+  );
+  assert.equal(
+    originals.filter((o) => o.id === unwind[0].reversal_unwind_of).length, 1,
+    "…exactly ONE of them -- the other is unreachable through the pointer",
+  );
+
+  // ONE application closes BOTH, in one group, with zero GL movement.
+  const glBefore = await controlGl(client, "ap");
+  const closure = await applyOpenItems(sub, {
+    client, reason: "x37 unwind the collapsed accrual",
+    applications: originals.map((o) => ({
+      source_item_id: unwind[0].id, target_item_id: o.id, amount_cents: Number(o.amount_cents),
+    })),
+  });
+  assert.ok(groupOf(closure), "the closure commits and names its application group");
+  for (const o of originals) {
+    assert.equal(await outstandingOf(o.id), 0, `original item ${o.id} is closed to zero by the single unwind`);
+  }
+  assert.equal(await outstandingOf(unwind[0].id), 0, "…and the unwind is consumed exactly");
+  assert.equal(await controlGl(client, "ap"), glBefore, "…with ZERO GL movement (it is a subledger event)");
+  await assertTies(client, "x37.ai many-to-one unwind closure");
+});
+
+// ===========================================================================
+// x37.aj -- THE CANONICAL ZERO-NET COLLAPSE IS LAWFUL, NOT A BREACH. An entry may
+// legitimately carry +X for one party and -X for another in the same domain (a
+// reclass between two suppliers). If those two parties are LATER merged, the
+// classifier -- which nets per CANONICAL party and drops zero nets, as every
+// ladder does -- stops producing any row for that entry, while its two items go on
+// existing (history is never repointed). Both sides still say the same thing: the
+// group contributes zero. A belt whose ITEM side kept the zero net would read that
+// agreement as a divergence and refuse the next UPDATE to touch the entry -- which
+// in practice means reverse_entry would be permanently wedged on it, with a
+// diagnosis about an untied subledger that is false.
+// ===========================================================================
+test("x37.aj a merge that nets an entry's two items to zero does NOT false-positive the belt -- the entry still reverses, and the books tie", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+  const partyR = await birthCounterparty(sub, { client, name: `X37 NETR ${randomUUID().slice(0, 6)}` });
+  const partyS = await birthCounterparty(sub, { client, name: `X37 NETS ${randomUUID().slice(0, 6)}` });
+
+  // A same-domain reclass: RM150 moved OFF party S and ONTO party R. The two control
+  // legs balance each other, so the entry needs no other line at all.
+  const reclass = await withActor({ transaction: true }, async (c) => {
+    const r = await c.query(
+      `insert into clara.journal_entries(firm_id,client_id,status,posting_date,memo,origin,maker_actor)
+       values($1,$2,'draft','2026-04-09','x37 supplier reclass','manual',$3) returning id`,
+      [firm, client, sub],
+    );
+    const id = r.rows[0].id;
+    await c.query(
+      `insert into clara.journal_lines(entry_id,line_no,account_code,debit_cents,credit_cents,description,counterparty_id)
+       values($1,1,$2,0,15000,'onto party R',$3),
+             ($1,2,$4,15000,0,'off party S',$5)`,
+      [id, AP1, partyR, AP2, partyS],
+    );
+    await c.query(
+      "update clara.journal_entries set status='approved',checker_actor=$2,approved_at=now() where id=$1",
+      [id, world.users.bob],
+    );
+    await c.query(
+      `insert into clara.open_items(firm_id,client_id,domain,counterparty_id,entry_id,item_kind,item_date,amount_cents,created_by)
+       values($1,$2,'ap',$3,$4,'adjustment','2026-04-09',15000,$6),
+             ($1,$2,'ap',$5,$4,'adjustment','2026-04-09',-15000,$6)`,
+      [firm, client, partyR, id, partyS, sub],
+    );
+    return id;
+  });
+  assert.equal((await itemsOf(reclass)).length, 2, "the reclass carries +RM150 and -RM150 (mandatory setup)");
+  assert.equal((await classifyRows(reclass)).length, 2, "…and the classifier produces both rows while the parties are distinct");
+
+  // THE MERGE. R into S: one canonical party, and the entry's canonical net is now ZERO.
+  await mergeCounterparties(sub, { client, survivor: partyS, merged: partyR, reason: "x37 net-zero duplicate", opKey: opk("x37-ajmerge") });
+  assert.equal(
+    (await classifyRows(reclass)).length, 0,
+    "post-merge the classifier produces NO row for the entry -- the canonical net is zero and every ladder drops a zero net",
+  );
+  assert.equal((await itemsOf(reclass)).length, 2, "…while both items still exist (a merge never repoints history)");
+
+  // THE CELL: reverse_entry UPDATEs journal_entries, which fires belt-1 on this entry.
+  // Un-fixed, arm 1 saw a materialised group with no classifier row and arm 2 saw an
+  // item side its own legs side had already dropped -- both refused
+  // `subledger_entry_untied` over a book that is exactly tied.
+  const apBefore = await controlGl(client, "ap");
+  const itemsBefore = await itemsSum(client, "ap");
+  await reverseEntry(world.users.bob, { entry: reclass, reason: "x37 reclass reversed after a merge", opKey: opk("x37-ajrev") });
+  const mirror = (await rootQuery("select id from clara.journal_entries where reversal_of=$1", [reclass])).rows[0];
+  assert.ok(mirror, "reverse_entry SUCCEEDS on an entry whose items canonically net to zero");
+  assert.equal(
+    (await itemsOf(mirror.id)).length, 0,
+    "the mirror mints NO unwind -- negating a zero net produces no row, exactly as the classifier says",
+  );
+  assert.equal(await controlGl(client, "ap"), apBefore, "the reversal moved the ap control by zero (it was a zero net)");
+  assert.equal(await itemsSum(client, "ap"), itemsBefore, "…and the item side by zero too");
+  await assertTies(client, "x37.aj canonical zero-net collapse");
+});
+
+// ===========================================================================
+// x37.ak -- THE CANONICAL DUPLICATE ITEM. The grain unique is keyed on the STORED
+// counterparty id, and merges never repoint history -- so once A has merged into
+// B, an entry already carrying an item that names A will accept a SECOND item
+// naming B: a different grain key, a live FK, the right domain, the right kind,
+// and an amount the classifier really does produce for that canonical group. Every
+// ROW-WISE test says yes. The group it lands in now sums to twice what the ledger
+// says, and belt-1 never sees it (a lone open_items insert touches no
+// journal_entries row). Only an AGGREGATE congruence check catches it.
+// ===========================================================================
+test("x37.ak a canonical-duplicate item is row-wise indistinguishable and still dies on belt-2's AGGREGATE congruence check", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+  const dupOld = await birthCounterparty(sub, { client, name: `X37 DUPOLD ${randomUUID().slice(0, 6)}` });
+  const dupNew = await birthCounterparty(sub, { client, name: `X37 DUPNEW ${randomUUID().slice(0, 6)}` });
+  const bill = await openApItem(sub, { client, cp: dupOld, cents: 33000, memo: "x37 duplicate-item base" });
+
+  await mergeCounterparties(sub, { client, survivor: dupNew, merged: dupOld, reason: "x37 duplicate supplier", opKey: opk("x37-akmerge") });
+
+  // ROW-WISE INDISTINGUISHABLE, asserted rather than claimed: the classifier really
+  // does produce a row with exactly the domain, canonical party, amount and kind the
+  // duplicate would carry -- so the per-row congruence test that shipped first would
+  // have waved it through.
+  const cls = await classifyRows(bill.entry);
+  assert.equal(cls.length, 1, "post-merge the entry classifies to ONE canonical row");
+  assert.equal(cls[0].counterparty_id, dupNew, "…under the survivor");
+  assert.equal(Number(cls[0].amount_cents), 33000, "…at the full amount");
+  assert.equal(cls[0].item_kind, "adjustment", "…and the same kind the duplicate would claim");
+
+  const dup = await caught(() => withActor({ transaction: true }, async (c) => {
+    await c.query(
+      `insert into clara.open_items(firm_id,client_id,domain,counterparty_id,entry_id,item_kind,item_date,amount_cents,created_by)
+       values($1,$2,'ap',$3,$4,'adjustment','2026-04-10',33000,$5)`,
+      [firm, client, dupNew, bill.entry, sub],
+    );
+  }));
+  assert.ok(dup, "a second item under the SURVIVOR on an entry already carrying one under the merged-away id must be refused");
+  await assertRaisesOneOf(BELT_CODES, () => Promise.reject(dup), "belt-2 aggregate classifier congruence");
+  assert.equal(
+    reasonOf(dup), "subledger_item_not_classified",
+    `the named reason is subledger_item_not_classified (got ${reasonOf(dup)} -- ${dup.message})`,
+  );
+  noteLane(`x37.ak canonical-duplicate refusal SQLSTATE ${dup.code} / ${reasonOf(dup)}`);
+  assert.equal((await itemsOf(bill.entry)).length, 1, "the aborted insert left exactly the one lawful item");
+  assert.equal(await outstandingOf(bill.item), 33000, "…untouched");
+  await assertTies(client, "x37.ak canonical-duplicate item");
 });
 
 // ===========================================================================
