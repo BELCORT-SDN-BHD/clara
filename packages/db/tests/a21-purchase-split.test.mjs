@@ -255,9 +255,22 @@ test("§4 the EXECUTOR grants the split NO sanction: a purchase draft carrying a
   assert.equal(await lastSkipReason(d3.entry_id), OCR_SKIP.purchaseSst, "the skip is NAMED purchase_sst_not_autopostable (a visible skip, not a silent shape mismatch)");
   // The plain 2-leg corroborated sibling posts under the same rule (only the new leg blocks).
   // 0023 (X5): "corroborated" now means the document STATES its arithmetic, so the sibling
-  // states the same net/tax the 3-leg document does. That is not a weaker fixture — it is the
-  // same bill coded two ways, which is exactly what this cell contrasts.
-  const cited2 = await purchaseFactsDoc(client, { gross: 10600, net: 10000, tax: 600 });
+  // states its net/tax explicitly. That is not a weaker fixture — it is the same bill coded
+  // two ways, which is exactly what this cell contrasts.
+  //
+  // 0036 §A (ledger #52) AMENDMENT — the sibling now states a ZERO tax rather than the
+  // 3-leg document's RM6.00. This cell's INTENT is unchanged and is what drove the edit:
+  // it proves the autopost refusal is specific to the sst_purchase_cost LEG, not to
+  // 2-leg-ness. Before 0036 that contrast happened to be drawn with a nonzero-tax
+  // document, and 0036's nonzero-tax belt now REFUSES exactly that shape at approve
+  // (CLR21 / tax_leg_missing) — deliberately, because a bill whose document states a real
+  // SST amount must not autopost down the untested 2-leg path (Gate P's territory). Coding
+  // the sibling as a stated-ZERO-tax document (net === gross, tax === 0) keeps the document
+  // stating its arithmetic — so it still corroborates, which is what this cell needs — and
+  // lands it on the ADR-050 owner-ruled SST-zero shape, so the leg-vs-no-leg contrast is
+  // drawn on a shape the books actually accept. The nonzero counterpart is not lost: it is
+  // now asserted as a REFUSAL in packages/db/tests/x36c0-wave-c0-belts.test.mjs (x36c0.a).
+  const cited2 = await purchaseFactsDoc(client, { gross: 10600, net: 10600, tax: 0 });
   const d2 = await billDraft(client, cited2, { cp, lines: billLines(EXP, AP, 10600) });
   assert.ok(d2?.entry_id, "the 2-leg sibling draft exists (mandatory setup)");
   await postViaRule(d2.entry_id).catch((e) => noteLane(`2-leg post raised ${e.code}`));
