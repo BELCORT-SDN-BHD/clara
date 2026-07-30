@@ -1,10 +1,12 @@
 // 0036_wave_c0_deferred_belts.sql — the Wave-C0 clearing batch, four deferred ledger items.
 //
 //   §A (#52) the nonzero-tax belt: a supplier bill whose DOCUMENT states a nonzero tax,
-//            carries NO sst_purchase_cost leg, and debits an EXPENSE account is refused
-//            (CLR21 / tax_leg_missing). Stated-ZERO, stated-nothing, no-document and a
-//            purely CAPITALISED (asset-debit) purchase all still pass the belt; every
-//            leg-PRESENT outcome is byte-stable; the reversal gating is intact.
+//            carries NO sst_purchase_cost leg, and whose debit side is PURELY
+//            expense-typed is refused (CLR21 / tax_leg_missing). Stated-ZERO,
+//            stated-nothing, no-document, a purely CAPITALISED (asset-debit) purchase
+//            AND a MIXED asset+expense bill are all carved out (review F1 — the belt
+//            must not claim a shape with no compliant remedy); every leg-PRESENT
+//            outcome is byte-stable; the reversal gating is intact.
 //   §B (#51) settle_autodraft_task: the three losing-dispatch shapes are honest NO-OPS with
 //            a receipt instead of exceptions; a never-begun task keeps its CLR13.
 //   §C (#53) the shared attempt budget is VISIBLE on list_review_queue (used / remaining /
@@ -255,21 +257,22 @@ test("x36c0.a2 §A: a purely CAPITALISED purchase (asset debit) is NOT claimed b
 });
 
 // ===========================================================================
-// x36c0.a3 — §A THE MIXED BASIS STILL REFUSES. asset + expense debits on a
-// nonzero-tax document: part of the cost is being expensed, so an expense-typed
-// sst_purchase_cost split IS a coherent remedy, and how much of the stated tax is
-// capitalised vs expensed is exactly the human judgement being forced.
-// WHO owns the refusal is layered (verified on the rig 2026-07-30): on a
-// corroborated document the draft-time W1 amount comparator fires FIRST — its
-// expense-only sum (5600) mismatches the corroborated gross (10600), stamping
-// amount_exception at draft, so approve refuses CLR21/amount_conflict before the
-// shape assert runs. The belt (tax_leg_missing) is the SECOND line: it owns the
-// refusal only once a governed amount_override clears W1 (a distinct-second-checker
-// flow this cell does not exercise). The SAFETY property — a mixed bill on a
-// nonzero-tax document can never reach approved — holds at whichever layer fires,
-// and that is what this cell asserts: refusal from a NAMED member of that chain.
+// x36c0.a3 — §A THE MIXED CARVE-OUT (restated for review F1). asset + expense debits
+// on a nonzero-tax document: the belt must NEVER claim this shape, because the only
+// shape it accepts — an expense-typed sst_purchase_cost leg tied to the FULL stated
+// tax — would expense the capitalised portion's share and understate the asset, and
+// a PARTIAL leg fails the full-tie. There is no compliant remedy in this schema (the
+// tax-allocation model is Gate-P territory), and a belt must not claim a shape it
+// cannot offer a remedy for. Codex's counterexample: Dr equipment 10,600 / Dr
+// service 5,300 / Cr AP 15,900 on a document stating 900 tax — correct, and it
+// would have had NO approvable representation under the unconditional belt.
+// NOT SILENTLY GREEN either: on this cell's CORROBORATED fixture the draft-time W1
+// comparator (0009:1355-1363, expense-centric) stamps amount_exception (expense-sum
+// 5600 <> gross 10600) and approve refuses CLR21/amount_conflict — the pre-existing
+// owner, unchanged by 0036. The cell asserts BOTH halves: refused by W1, and the
+// refusal is never the belt's.
 // ===========================================================================
-test("x36c0.a3 §A: a MIXED asset+expense bill on a nonzero-tax document still REFUSES (CLR21 / tax_leg_missing)", async (t) => {
+test("x36c0.a3 §A: a MIXED asset+expense bill is CARVED OUT of the belt (never tax_leg_missing) and still refuses on the pre-existing W1 comparator", async (t) => {
   if (skipHere(t)) return;
   const client = world.clients.A1;
   const cp = await makeVendor(world.users.alice, { client, name: `BELTMIX ${randomUUID().slice(0, 6)}`, reg: "201801360008" });
@@ -283,14 +286,14 @@ test("x36c0.a3 §A: a MIXED asset+expense bill on a nonzero-tax document still R
   if (!d?.entry_id) return;
 
   const err = await tryApprove(d.entry_id, d.revision_token, "belt-mix");
-  assert.ok(err, "a mixed asset+expense bill on a nonzero-tax document must be REFUSED");
-  assert.equal(err.code, CLR21, `the mixed refusal rides the CLR21 family at every layer (got ${err.code}: ${err.message})`);
+  assert.ok(err, "a mixed asset+expense bill on this CORROBORATED nonzero-tax fixture must be REFUSED (by W1, not the belt)");
   const reason = reasonOf(err);
-  assert.ok(reason === "amount_conflict" || reason === "tax_leg_missing",
-    `the refusal must come from a NAMED member of the chain — W1 first (amount_conflict), the belt second (tax_leg_missing). Got ${reason}`);
-  noteLane(`x36c0.a3: the mixed bill refused CLR21/${reason} — ${reason === "amount_conflict"
-    ? "the pre-existing W1 expense-centric comparator fired first; the belt stands behind it for the governed-override path"
-    : "the belt owns it directly (W1 was not stamped on this fixture)"}`);
+  assert.notEqual(reason, "tax_leg_missing",
+    "the belt must NEVER claim a mixed debit side — its only satisfying shape understates the asset, and no compliant remedy exists (review F1)");
+  assert.equal(err.code, CLR21, `the pre-existing W1 refusal rides CLR21 (got ${err.code}: ${err.message})`);
+  assert.equal(reason, "amount_conflict",
+    `on the corroborated path the W1 expense-centric comparator owns the refusal (got ${reason})`);
+  noteLane("x36c0.a3: the mixed bill is carved out of the belt and refused CLR21/amount_conflict by the pre-existing W1 comparator — unchanged by 0036");
   assert.notEqual(await entryStatusOf(d.entry_id), "approved", "the mixed bill never reaches approved");
 });
 
@@ -496,12 +499,23 @@ test("x36c0.f1 §B: a settle for a CANCELLED task is an honest NO-OP (task_super
   assert.equal(r?.reason, "task_superseded", `the receipt must name the reason (got ${r?.reason})`);
   assert.equal(r?.outcome, "not_settled", "the receipt's outcome must be not_settled, never a fabricated success");
 
-  // Nothing moved: not the task, not the attempt count, not the reservation.
+  // The task and the attempt COUNT are untouched — but the RESERVATION is not "nothing"
+  // (review F3): a one-click task cancelled mid-run has no re-admission and no sweep
+  // recovery coming, so if the registry still points at this task the no-op must release
+  // the reservation (reserved_tokens -> 0, state -> 'idle') or the firm's daily budget
+  // stays consumed forever. attempt_count stays put: a cancelled task never settled, so
+  // no attempt was spent.
   const afterStatus = (await rootQuery("select status from clara.agent_tasks where id=$1", [task])).rows[0]?.status;
   assert.equal(afterStatus, "cancelled", "the cancelled task must not be flipped by a losing settle");
   const after = await attemptRow(rf.filingId);
   assert.equal(Number(after?.attempt_count ?? 0), Number(before?.attempt_count ?? 0),
     "attempt_count must NOT move — a losing dispatch must never spend somebody else's attempt");
+  assert.equal(Number(after?.reserved_tokens ?? -1), 0,
+    `the still-owned reservation must be RELEASED by the no-op (got reserved_tokens=${after?.reserved_tokens})`);
+  assert.equal(after?.state, "idle",
+    `the released attempt row returns to 'idle' (got ${after?.state})`);
+  assert.equal(r?.released_reservation, true,
+    "the receipt must say it released the reservation — visible, never silent");
   // And the no-op is VISIBLE: an audit row records it rather than it vanishing.
   const audit = (await rootQuery(
     "select args from clara.audit_log where fn='settle_autodraft_task' and args->>'task'=$1 order by id desc limit 1", [task],
@@ -509,6 +523,7 @@ test("x36c0.f1 §B: a settle for a CANCELLED task is an honest NO-OP (task_super
   assert.ok(audit, "the no-op must leave an audit row — an honest receipt, not a silent return");
   assert.equal(audit.args.settled, false, "the audit row records settled:false");
   assert.equal(audit.args.reason, "task_superseded", "the audit row names the same reason as the receipt");
+  assert.equal(audit.args.released_reservation, true, "the audit row records the release too");
 });
 
 test("x36c0.f2 §B: a settle whose per-filing registry has been repointed at a NEWER task is an honest NO-OP (registry_superseded)", async (t) => {
@@ -739,10 +754,10 @@ test("x36c0.h §D: a SALES-direction filing is excluded from the purchase-only s
   } catch (e) {
     noteLane(`x36c0.h: _document_direction raised ${e.code} on the fixture — the gate deliberately treats that as "not provably sales"`);
   }
-  if (dir !== "sales") {
-    noteLane(`x36c0.h: the sales fixture resolved direction='${dir}', not 'sales' — the §D gate could not be exercised; inspect the client-identity fixture`);
-    return;
-  }
+  // Review F6: MANDATORY, not an early return. A silently-skipping fixture would leave
+  // BOTH §D gates untested while CI stayed green — a fixture regression must fail loudly.
+  assert.equal(dir, "sales",
+    `mandatory setup: the sales fixture must resolve direction='sales' or the §D gate goes untested (got '${dir}') — inspect the client-identity fixture`);
 
   // (1) EXCLUDED from the enumeration the unattended purchase-only drafter consumes.
   const candidates = await listAutodraftCandidates();
@@ -793,8 +808,10 @@ test("x36c0.h §D: a SALES-direction filing is excluded from the purchase-only s
 // now carries it; absence reads null. Seeded via root (the onboarding verbs span a
 // durable-run flow this DB-scoped cell does not exercise; the CHECK constraints on
 // both tables still bind a root INSERT, so the seeded shape is the committed shape).
-// Read in the HUMAN lane — the pack is SECURITY INVOKER, so this proves the surface
-// a real member reads, not a root artifact.
+// Read in the HUMAN lane — the pack is SECURITY DEFINER (review F7 corrected an
+// INVOKER misstatement here), so the human read proves the real member surface while
+// the definer body needs no table grant on the onboarding tables; tenant scoping
+// stays bound to the function's own authorized client.
 // ===========================================================================
 test("x36c0.i §E: a committed plan's answered msic surfaces as pack.client.msic; no plan reads null; the 0017/0016 markers survive", async (t) => {
   if (skipHere(t)) return;
@@ -832,11 +849,16 @@ test("x36c0.i §E: a committed plan's answered msic surfaces as pack.client.msic
   assert.equal(pack2.client.msic, null,
     `a client with no committed plan must read msic null, never a fabricated value (got ${JSON.stringify(pack2.client.msic)})`);
 
-  // The patch lost nothing: one marker from each post-0016 surgery §E must preserve.
+  // The patch lost nothing: a marker from EVERY post-0016 surgery must survive (review
+  // F2 — 0016/0017 alone would re-bless a body reverted past 0018/0019).
   const def = await rootQuery(
     "select pg_get_functiondef('clara.get_context_pack(uuid,text)'::regprocedure) as d");
   const body = def.rows[0].d;
   assert.ok(body.includes("sst_registration_watch"), "the 0016 sst_registration_watch block survived the §E patch");
   assert.ok(body.includes("'wiki'"), "the 0017 wiki block survived the §E patch");
-  noteLane("x36c0.i: pack.client.msic live end-to-end — answered '62010' surfaces, absent reads null, 0016/0017 markers intact");
+  assert.ok(body.includes("-'bound_scope_kind'-'bound_scope_id'"),
+    "the 0018 resolution-exclusion strip survived the §E patch");
+  assert.ok(body.includes("'stale_at',wc.stale_at") && body.includes("'has_stale_sources'"),
+    "the 0019 wiki-boundary stale annotations survived the §E patch");
+  noteLane("x36c0.i: pack.client.msic live end-to-end — answered '62010' surfaces, absent reads null, 0016/0017/0018/0019 markers intact");
 });

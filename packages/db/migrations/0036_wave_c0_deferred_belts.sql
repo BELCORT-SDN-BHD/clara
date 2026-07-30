@@ -99,20 +99,31 @@
 -- EXACTLY WHICH CURRENTLY-PASSING ENTRIES NOW REFUSE — the enumeration the work order
 -- demanded, derived from the code because live cannot be queried from this lane:
 --   (1) any supplier_bill draft, reversal_of null, whose bound document states a NONZERO
---       invoice.tax_total, which carries ZERO sst_purchase_cost legs, AND which carries at
---       least one EXPENSE-typed debit leg — at clara.approve_entry, at
+--       invoice.tax_total, which carries ZERO sst_purchase_cost legs, AND whose DEBIT SIDE
+--       IS PURELY EXPENSE-TYPED (at least one expense-typed debit leg and NO non-expense
+--       debit leg) — at clara.approve_entry, at
 --       clara.execute_rule_post (which reaches this assert through
 --       clara._approve_entry_core, 0029:241), and again at COMMIT through the deferred
 --       constraint trigger t_je_supplier_bill_shape (0009:534-537), whose 1-arg delegate
 --       pins p_extraction null.
 --   (2) NOTHING ELSE. Zero-stated, absent-tax, document-less, non-supplier_bill, and
 --       every reversal mirror are all untouched; every shape that already carries an
---       sstp leg keeps its existing three outcomes byte-for-byte; and a bill whose debit
---       side is PURELY non-expense (a capitalised purchase) is deliberately untouched —
---       the belt's own comment carries the full reasoning, in short: the only
---       belt-satisfying shape would expense capitalisable cost, so an unconditional belt
---       would block a RIGHT entry rather than a wrong one, with no override available.
---       A MIXED asset+expense bill DOES refuse (the allocation is a human judgement).
+--       sstp leg keeps its existing three outcomes byte-for-byte; and any bill with a
+--       NON-EXPENSE DEBIT LEG — a purely capitalised purchase, or a MIXED asset+expense
+--       bill — is deliberately untouched. The belt's own comment carries the full
+--       reasoning; in short, the only belt-satisfying shape is a debit to the
+--       expense-typed sst_purchase_cost account tied to the FULL stated tax, so on a
+--       mixed bill it would expense the capitalised portion's share of the tax and
+--       understate the asset, and on an UNCORROBORATED document there is not even an
+--       amount_override path — an unconditional belt would leave a correct mixed entry
+--       with NO approvable shape at all, blocking a RIGHT entry rather than a wrong one.
+--       Mixed and pure-asset bills are therefore GATE-P TERRITORY: the tax-allocation
+--       model they need does not exist yet, and a belt must not claim a shape it cannot
+--       offer a compliant remedy for. They are not silently green either — on a
+--       CORROBORATED document the draft-time W1 comparator (0009:1355-1363) is
+--       expense-centric, so an expense-sum that differs from the stated gross stamps
+--       amount_exception and approve refuses CLR21/amount_conflict, and where evidence
+--       lands verified the expense=gross tie below refuses CLR23.
 --
 -- THE ONE EXISTING TEST THIS INVALIDATES, named rather than quietly broken.
 -- packages/db/tests/a21-purchase-split.test.mjs, the executor cell's final assertion
@@ -414,20 +425,21 @@
 --
 -- CELLS (packages/db/tests/x36c0-wave-c0-belts.test.mjs), plus one amendment to
 -- packages/db/tests/a21-purchase-split.test.mjs named in §A above:
---   x36c0.a  stated-NONZERO tax + no sst_purchase_cost leg + an expense debit -> REFUSED,
---            CLR21 tax_leg_missing, at approve.
+--   x36c0.a  stated-NONZERO tax + no sst_purchase_cost leg + a PURELY expense-typed debit
+--            side -> REFUSED, CLR21 tax_leg_missing, at approve.
 --   x36c0.a2 the CAPITALISED-purchase carve-out: a purely asset-debit bill on the same
 --            nonzero-tax document is never claimed by the belt (never tax_leg_missing).
 --            Rig-verified 2026-07-30: on a CORROBORATED document the draft-time W1
 --            amount comparator (0009:1355-1363, already expense-centric) fires FIRST —
 --            CLR21/amount_conflict; the verified-total tie (CLR23) and plain approval
 --            are the other pre-0036 outcomes. The cell accepts and NAMES all three.
---   x36c0.a3 the MIXED asset+expense bill still refuses — the allocation of the stated
---            tax is a human judgement. Rig-verified: W1 owns the direct path
---            (CLR21/amount_conflict, expense-sum 5600 <> gross 10600); the belt
---            (tax_leg_missing) is the SECOND line, reachable via a governed
---            amount_override. The cell asserts refusal from a named chain member and
---            that the bill never reaches approved.
+--   x36c0.a3 the MIXED asset+expense CARVE-OUT: the belt never CLAIMS a mixed bill
+--            (never tax_leg_missing), because the only shape it would accept ties the
+--            FULL stated tax into an expense account and so understates the capitalised
+--            portion — Gate-P territory. Mixed is not silently green either: on the
+--            CORROBORATED path the pre-existing W1 comparator owns it
+--            (CLR21/amount_conflict, expense-sum 5600 <> gross 10600, rig-verified
+--            2026-07-30) and the bill never reaches approved.
 --   x36c0.b  stated-ZERO tax + no leg -> APPROVES (the ADR-050 owner-ruled shape).
 --   x36c0.c  NO extraction / no stated tax + no leg -> APPROVES (absence is not a claim).
 --   x36c0.d  the existing sstp-leg paths are unchanged: a correctly tied 3-leg approves;
@@ -580,8 +592,8 @@ revoke all on function clara._autodraft_attempt_budget(uuid) from public;
 -- =====================================================================
 -- §A (#52) — clara._assert_supplier_bill_shape_at CoR (same 2-arity, ACL preserved).
 -- The 0016:3817 body verbatim EXCEPT the new `else` branch on the sst-leg conditional (the
--- nonzero-stated-tax belt) and the one declared int it counts into. Nothing else in this
--- function is touched. REBUILT rather than patched, and that is verified rather than
+-- nonzero-stated-tax belt) and the two declared ints its debit-side census counts into.
+-- Nothing else in this function is touched. REBUILT rather than patched, and that is verified rather than
 -- assumed: no migration in the tree patches this body dynamically (0017:5950, 0022:1740 and
 -- 0023:1382 read its prosrc to ASSERT on it, and 0023's own header states "NO change to
 -- _assert_supplier_bill_shape_at"), so 0016 genuinely is its last definition.
@@ -594,11 +606,13 @@ declare
   v_type text; v_round_imb bigint; v_leg_n int;
   v_sst_legs int;
   v_sstp_legs int; v_sstp_credit bigint; v_sstp_debit bigint; v_tax bigint;
-  -- 0036 §A: how many EXPENSE-typed debit legs the entry carries. The belt below fires
-  -- only when there is at least one, because sst_purchase_cost is CHECK-pinned to
-  -- account_type='expense' (ck_coa_sst_purchase_cost_expense, 0016:124-125) — see the
-  -- belt's own comment for why a purely capitalised purchase must NOT be refused.
-  v_exp_debit_legs int;
+  -- 0036 §A: the DEBIT-SIDE TYPE CENSUS. The belt below fires only when the debit side is
+  -- PURELY expense-typed — at least one expense-typed debit leg AND no non-expense debit
+  -- leg — because sst_purchase_cost is CHECK-pinned to account_type='expense'
+  -- (ck_coa_sst_purchase_cost_expense, 0016:124-125) and must carry the FULL stated tax.
+  -- See the belt's own comment for why a capitalised or MIXED debit side must NOT be
+  -- refused (it would have no approvable shape at all).
+  v_exp_debit_legs int; v_nonexp_debit_legs int;
 begin
   select * into e from clara.journal_entries where id = p_entry;
   if not found then return; end if;
@@ -724,9 +738,10 @@ begin
       -- states no tax_total_cents at all, and null never raises. A STATED ZERO
       -- ("SST Amt @ 6%: 0.00") is v_tax=0 and also never raises — the 2-leg form is the
       -- owner-ruled correct shape for it (ADR-050, the client's own four approved EZSEC
-      -- bills). Only a stated, nonzero figure with no leg to carry it raises; `<> 0`
-      -- rather than `> 0` because a negative stated tax is equally a nonzero claim the
-      -- entry is ignoring.
+      -- bills). Only a stated, nonzero figure with no leg to carry it — on a PURELY
+      -- expense-typed debit side, see the carve-out below — raises; `<> 0` rather than
+      -- `> 0` because a negative stated tax is equally a nonzero claim the entry is
+      -- ignoring.
       --
       -- CLR21, not CLR23, BY PRECEDENT INSIDE THIS FUNCTION: CLR23 carries the leg-shape
       -- refusals, while the only two checks that compare the entry against the document's
@@ -739,29 +754,60 @@ begin
       -- This branch inherits `e.reversal_of is null` from the enclosing conditional, so a
       -- reversal mirror of a legitimately 2-leg original is never caught by it.
       --
-      -- THE CAPITALISED-PURCHASE CARVE-OUT, and why the belt is NOT unconditional. The
-      -- only shape that satisfies this belt is a debit to the client's sst_purchase_cost
-      -- account, which is CHECK-pinned to account_type='expense'
-      -- (ck_coa_sst_purchase_cost_expense, 0016:124-125) and is one-per-client. For a bill
-      -- whose debit side is a purchase of an ASSET (0016's own rounding-leg comment names
-      -- this shape explicitly: "leaves the open-ended expense/asset debit side untouched
-      -- (asset-debit bills exist)"), the stated tax is part of the asset's cost, so the
-      -- ONLY belt-satisfying shape would move that tax OUT of the asset and into an
-      -- expense account — understating the asset. There is no other split available and no
-      -- override (`amount_override` relaxes only the verified-total tie below), so an
-      -- unconditional belt would leave a legitimate, currently-approvable entry with NO
-      -- approvable shape at all: it would not prevent a wrong number, it would prevent a
-      -- RIGHT one. The belt therefore fires ONLY when the entry carries at least one
-      -- expense-typed debit leg — i.e. when some part of the cost is being expensed and an
-      -- expense-typed split is a coherent remedy. That still covers every shape the belt
-      -- exists for: the pure 2-leg Dr expense(gross) / Cr payable(gross) bill (the whole
-      -- ADR-050 precedent family), and the MIXED asset+expense bill (where the allocation
-      -- of the stated tax between capitalised and expensed cost is precisely a human
-      -- judgement, so refusing to a human is correct). A purely capitalised purchase keeps
-      -- its pre-0036 behaviour exactly. Note this carve-out cannot be used to slip a
-      -- WRONG total past the floor: when verified 'invoice.total' evidence exists, the tie
-      -- immediately below already requires expense debits to equal the supported gross, so
-      -- an asset-debit bill refuses there (CLR23) on that path today and still does.
+      -- THE CARVE-OUT: THE BELT FIRES ONLY ON A PURELY EXPENSE-TYPED DEBIT SIDE, and why
+      -- an unconditional belt would be WRONG rather than merely strict. The only shape
+      -- that satisfies this belt is a debit to the client's sst_purchase_cost account,
+      -- which is CHECK-pinned to account_type='expense'
+      -- (ck_coa_sst_purchase_cost_expense, 0016:124-125), is one-per-client, and — by the
+      -- leg-present branch immediately above — must equal the FULL stated tax to the sen.
+      -- That full-tie is what makes the belt unsatisfiable on any debit side that is not
+      -- purely expense:
+      --   * PURE ASSET (a capitalised purchase — 0016's own rounding-leg comment names the
+      --     shape explicitly: "leaves the open-ended expense/asset debit side untouched
+      --     (asset-debit bills exist)"): the stated tax is part of the asset's cost, so
+      --     the only belt-satisfying shape would move it OUT of the asset into an expense
+      --     account, understating the asset.
+      --   * MIXED asset+expense (e.g. Dr equipment 10,600 / Dr service expense 5,300 /
+      --     Cr payable 15,900 on a document stating 900 of tax): a PARTIAL
+      --     sst_purchase_cost leg carrying only the expensed portion's 300 refuses on the
+      --     full-tie above, and a leg carrying the whole 900 expense-types the asset's 600
+      --     — understating the asset again. There is NO shape that both satisfies the belt
+      --     and states the asset correctly, because the tax-ALLOCATION model that would be
+      --     needed (how much of a stated tax belongs to capitalised vs expensed cost) does
+      --     not exist in this schema at all.
+      -- And there is no override to fall back on: `amount_override` relaxes only the
+      -- verified-total tie below, and on an UNCORROBORATED document there is no W1
+      -- exception to override in the first place. So an unconditional belt would leave a
+      -- legitimate, currently-approvable entry with NO approvable shape whatsoever: it
+      -- would not prevent a wrong number, it would prevent a RIGHT one — against this
+      -- belt's own philosophy. A belt must not claim a shape it cannot offer a compliant
+      -- remedy for.
+      -- The belt therefore fires ONLY when the debit side is PURELY expense-typed: at
+      -- least one expense-typed debit leg AND zero non-expense debit legs. That still
+      -- covers every shape the belt exists for — the pure 2-leg Dr expense(gross) /
+      -- Cr payable(gross) bill, which is the whole ADR-050/EZSEC production class and the
+      -- ONLY shape autoDraft ever emits. Pure-asset and MIXED bills keep their pre-0036
+      -- behaviour exactly and are named as GATE-P TERRITORY (Gate P waits on the first
+      -- real SST-charging supplier bill, which is when the allocation model has to be
+      -- designed with the owner).
+      -- CARVED OUT IS NOT SILENTLY GREEN, and this is the part that makes the carve-out
+      -- safe rather than merely convenient: on a CORROBORATED document the draft-time W1
+      -- comparator (0009:1355-1363) is already EXPENSE-centric — it sums account_type=
+      -- 'expense' debits only — so any bill whose expense debits differ from the stated
+      -- gross (which is every mixed and every pure-asset bill) stamps amount_exception at
+      -- draft and approve refuses CLR21/amount_conflict. Where evidence instead lands
+      -- verified without corroboration, the expense=gross tie immediately below refuses
+      -- CLR23. The carve-out can therefore never be used to slip a WRONG total past the
+      -- floor; what it declines to do is force a CORRECT mixed entry into a shape that
+      -- does not exist.
+      -- ONE NAMED RESIDUAL, reported rather than hidden: the non-expense census counts
+      -- every non-expense debit leg, including a `rounding` special account if a client's
+      -- chart types theirs as something other than expense (the seeded one is
+      -- 'expense' — seeds/0002_core_seed.sql:131 — so this is inert for every seeded
+      -- client). Such a bill would be carved out on a 1-sen leg. It is left as-is
+      -- deliberately: the census is a plain type test with no special-account exceptions,
+      -- and the materiality cap above bounds the leg to sen. Named so a future reader can
+      -- tighten it on purpose instead of discovering it.
       -- WHAT REMAINS AN OWNER QUESTION, reported not decided: whether a capitalised
       -- purchase's stated SST should be visible in the books at all (it would need a
       -- non-expense sst_purchase_cost variant, i.e. a CHECK + chart change), and how a
@@ -770,11 +816,14 @@ begin
         else nullif((case when p_extraction is null
           then clara._invoice_fact_state(e.document_id)
           else clara._invoice_fact_state_at(e.document_id, p_extraction) end)->>'tax_total_cents','')::bigint end;
-      select count(*)::int into v_exp_debit_legs
+      select (count(*) filter (where a.account_type='expense'))::int,
+             (count(*) filter (where a.account_type<>'expense'))::int
+        into v_exp_debit_legs, v_nonexp_debit_legs
       from clara.journal_lines l
       join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
-      where l.entry_id=p_entry and a.account_type='expense' and l.debit_cents>0;
-      if v_tax is not null and v_tax <> 0 and v_exp_debit_legs > 0 then
+      where l.entry_id=p_entry and l.debit_cents>0;
+      if v_tax is not null and v_tax <> 0
+         and v_exp_debit_legs > 0 and v_nonexp_debit_legs = 0 then
         raise exception 'a supplier bill whose document states a nonzero tax total requires one tied sst_purchase_cost debit leg'
           using errcode='CLR21',detail='{"reason":"tax_leg_missing"}';
       end if;
@@ -809,6 +858,8 @@ create or replace function clara.settle_autodraft_task(p_task uuid,p_outcome tex
   language plpgsql security definer set search_path=clara,pg_temp as $$
 declare
   t record; a record; v_actual bigint; v_item_outcome text; v_attempts int;
+  -- 0036 §B (review F3): whether the superseded no-op released a still-active reservation.
+  v_released_reservation boolean;
 begin
   if p_task is null or p_outcome is null
      or p_outcome not in ('drafted','skipped_lane','noop_existing','failed')
@@ -831,17 +882,31 @@ begin
   -- again, and ends a run FAILED that actually did its work: the "cosmetically failed run"
   -- symptom. A losing dispatch is NORMAL, so this is a NO-OP WITH AN HONEST RECEIPT —
   -- settled:false plus a named reason, in both the return value and the audit trail.
-  -- NOTHING is written: no token accounting, no attempt_count, no sweep_run_items row.
-  -- That is deliberate and it does not leak the reservation: every writer that can take
-  -- ownership already closes it out (clara.reconcile_sweep_runs zeroes reserved_tokens
-  -- when it releases an attempt; 0034's supersede branch reconciles any outstanding
-  -- reservation DURABLY on the attempt row before it can return early).
+  -- ONE thing IS written here, and the original "nothing is written" justification was
+  -- INCOMPLETE (review F3): the no-other-writer argument held only when a later
+  -- re-admission (0034 supersede) or a sweep recovery (reconcile_sweep_runs) eventually
+  -- touched the attempt row. A ONE-CLICK task cancelled mid-run has neither — its attempt
+  -- row would sit state='active' with reserved_tokens charged against the firm's daily
+  -- budget FOREVER unless the human happened to retry. Pre-0036 the same leak existed but
+  -- the CLR13 raise at least failed the run loudly; converting it to a quiet no-op without
+  -- the release would have made a pre-existing leak invisible. So: if the per-filing
+  -- registry row STILL points at THIS task and is still active — meaning no newer dispatch
+  -- owns the filing and nobody else will ever release it — zero the reservation and return
+  -- the row to 'idle'. attempt_count is deliberately UNTOUCHED (a cancelled task never
+  -- settled, so no attempt was consumed; reconcile_sweep_runs' attempt_count=0 reset is a
+  -- different case — recovered DRAFT evidence). If the registry moved (0034 repointed
+  -- task_id on re-admission), we touch NOTHING: the newer dispatch's accounting stands.
   if t.status in ('cancelled','expired') then
+    update clara.autodraft_attempts set reserved_tokens=0, state='idle'
+      where task_id=p_task and state='active';
+    v_released_reservation := found;
     perform clara._audit(t.firm_id,null,null,null,'settle_autodraft_task',p_entry,
       jsonb_build_object('task',p_task,'outcome',p_outcome,'settled',false,
-        'reason','task_superseded','task_status',t.status));
+        'reason','task_superseded','task_status',t.status,
+        'released_reservation',v_released_reservation));
     return jsonb_build_object('task_id',p_task,'status',t.status,'settled',false,
-      'outcome','not_settled','reason','task_superseded');
+      'outcome','not_settled','reason','task_superseded',
+      'released_reservation',v_released_reservation);
   end if;
   -- UNCHANGED, and deliberately so: 'queued' (a settle for a task that was never begun),
   -- 'held' and 'awaiting_input' are NOT losing dispatches — they are internal-contract
@@ -991,6 +1056,14 @@ begin
     raise exception '0036 section C prestate: clara.list_review_queue already carries the autodraft budget key -- 0036 has already been applied to this database'
       using errcode='CLR10';
   end if;
+  -- Review F4: the anchor must occur EXACTLY ONCE. replace() rewrites every occurrence,
+  -- so a drifted body carrying two copies would get two spliced keys while the post-check
+  -- below (a mere position() > 0) stayed green. $e36$'s fail-closed pattern, applied here.
+  if (length(v_def)-length(replace(v_def,'''tier'',p.tier,''finding_id'',p.finding_id)','')))
+     / length('''tier'',p.tier,''finding_id'',p.finding_id)') <> 1 then
+    raise exception '0036 section C prestate: the list_review_queue row-payload anchor must appear exactly once in the live body'
+      using errcode='CLR10';
+  end if;
   v_next:=replace(v_def,
     '''tier'',p.tier,''finding_id'',p.finding_id)',
     '''tier'',p.tier,''finding_id'',p.finding_id,'
@@ -1053,6 +1126,13 @@ begin
   end if;
   if position('clara._autodraft_sales_direction(' in v_def)<>0 then
     raise exception '0036 section D prestate: clara.list_autodraft_candidates already carries the direction predicate -- 0036 has already been applied to this database'
+      using errcode='CLR10';
+  end if;
+  -- Review F4: the order-by anchor must occur EXACTLY ONCE (see section C's identical
+  -- guard for the reasoning -- replace() rewrites every occurrence).
+  if (length(v_def)-length(replace(v_def,chr(10) || '  order by f.firm_id,f.filed_at,f.id;','')))
+     / length(chr(10) || '  order by f.firm_id,f.filed_at,f.id;') <> 1 then
+    raise exception '0036 section D prestate: the list_autodraft_candidates order-by anchor must appear exactly once in the live body'
       using errcode='CLR10';
   end if;
   v_next:=replace(v_def,
@@ -1421,7 +1501,12 @@ reset role;
 -- THE FIX, additive and honest: the pack's `client` object gains ONE key, 'msic', read
 -- from the LATEST COMMITTED client-scoped plan's answered/resolved 'msic' item. No plan,
 -- no item, or an unanswered item -> the key is null. Nothing else in the pack moves; no
--- grant changes; the pack stays SECURITY INVOKER exactly as it was.
+-- grant changes; the pack stays SECURITY DEFINER exactly as it was (0016:4263 —
+-- pg_get_functiondef preserves the property through the splice), which is precisely why
+-- the msic subquery needs NO new table grant on onboarding_plans/onboarding_plan_items:
+-- the definer-owned body reads them, and tenant scoping stays bound to the function's own
+-- already-authorized client (p2.client_id = cl.id). (Review F7 corrected an INVOKER
+-- misstatement here.)
 --
 -- PATCHED, NOT REBUILT — the same law as §C/§D and for a sharper reason: 0016:4262 is the
 -- last CREATE of clara.get_context_pack, but 0017 (the wiki block), 0018 (the
@@ -1445,6 +1530,21 @@ begin
   end if;
   if position('''wiki''' in v_def)=0 then
     raise exception '0036 section E prestate: get_context_pack is missing the 0017 wiki block -- a rebuilt/reverted body must abort rather than be re-blessed'
+      using errcode='CLR10';
+  end if;
+  -- 0018's resolution-exclusion surgery: the serialized resolutions must EXCLUDE the
+  -- binding columns. A body reverted to post-0017 would carry the wiki block but not this
+  -- exclusion -- and re-blessing it would leak bound_scope_kind/bound_scope_id back into
+  -- the agent's context pack. (Review F2: the original probes covered 0016/0017 only.)
+  if position('-''bound_scope_kind''-''bound_scope_id''' in v_def)=0 then
+    raise exception '0036 section E prestate: get_context_pack is missing the 0018 resolution-exclusion surgery (the bound_scope_kind/bound_scope_id strip) -- a body reverted past 0018 must abort rather than be re-blessed'
+      using errcode='CLR10';
+  end if;
+  -- 0019's wiki-boundary surgery: the citation stale annotations and the page-level
+  -- has_stale_sources flag. Same reasoning.
+  if position('''stale_at'',wc.stale_at' in v_def)=0
+     or position('''has_stale_sources''' in v_def)=0 then
+    raise exception '0036 section E prestate: get_context_pack is missing a 0019 wiki-boundary marker (citation stale_at / has_stale_sources) -- a body reverted past 0019 must abort rather than be re-blessed'
       using errcode='CLR10';
   end if;
   if position('''msic''' in v_def)<>0 then
@@ -1508,6 +1608,7 @@ do $tail$
 declare
   v_prior_count int;
   v_shape_src text; v_settle_src text; v_queue_src text; v_cand_src text; v_admit_src text;
+  v_pack_src text;
   v_pos_gate int; v_pos_belt int; v_pos_sstp int; v_pos_verified int;
   v_pos_lock int; v_pos_dir int; v_pos_lane int; v_pos_reserve int;
   v_cap int; v_n int;
@@ -1548,13 +1649,27 @@ begin
   if position('using errcode=''clr21'',detail=''{"reason":"tax_leg_missing"}''' in v_shape_src)=0 then
     raise exception '0036 tail: the section A belt is not raised as CLR21 with detail reason tax_leg_missing';
   end if;
-  if position('if v_tax is not null and v_tax <> 0 and v_exp_debit_legs > 0 then' in v_shape_src)=0 then
-    raise exception '0036 tail: the section A belt does not test v_tax is not null AND v_tax <> 0 AND an expense-typed debit leg exists -- absence, a stated zero, or a purely capitalised purchase could now raise';
+  -- THE FULL PREDICATE, as one anchored string: a stated nonzero tax AND a debit side that
+  -- is PURELY expense-typed (at least one expense debit leg AND zero non-expense debit
+  -- legs). The non-expense conjunct is the F1 correction and it is load-bearing, so this
+  -- probe is written to FAIL on the pre-correction body (which tested only
+  -- `v_exp_debit_legs > 0`): without it, a MIXED asset+expense bill on a nonzero-tax
+  -- document has no approvable shape at all -- a partial sst_purchase_cost leg fails the
+  -- full-tie above, a full one expense-types the capitalised portion, and an
+  -- uncorroborated document offers no override -- so the belt would block a RIGHT entry.
+  if position('if v_tax is not null and v_tax <> 0 and v_exp_debit_legs > 0 and v_nonexp_debit_legs = 0 then' in v_shape_src)=0 then
+    raise exception '0036 tail: the section A belt does not test v_tax is not null AND v_tax <> 0 AND a PURELY expense-typed debit side (v_exp_debit_legs > 0 AND v_nonexp_debit_legs = 0) -- absence, a stated zero, a capitalised purchase or a MIXED asset+expense bill could now raise with no approvable shape available';
   end if;
-  -- The expense-debit gate must be counted from account_type, on DEBIT legs only. A count
-  -- over all legs would let a bill whose only expense-typed line is a CREDIT satisfy it.
-  if position('where l.entry_id=p_entry and a.account_type=''expense'' and l.debit_cents>0' in v_shape_src)=0 then
-    raise exception '0036 tail: the section A expense-debit-leg count is not derived from account_type=expense with debit_cents>0';
+  -- The census must be counted from account_type, on DEBIT legs only, and both directions
+  -- must be counted from the SAME scan. A count over all legs would let a bill whose only
+  -- expense-typed line is a CREDIT satisfy the positive half, and a non-expense count that
+  -- ignored debit_cents>0 would carve out every bill with an income/liability CREDIT leg --
+  -- i.e. every bill, since the payable credit is liability-class.
+  if position('into v_exp_debit_legs, v_nonexp_debit_legs from clara.journal_lines l' in v_shape_src)=0
+     or position('filter (where a.account_type=''expense''))::int' in v_shape_src)=0
+     or position('filter (where a.account_type<>''expense''))::int' in v_shape_src)=0
+     or position('where l.entry_id=p_entry and l.debit_cents>0;' in v_shape_src)=0 then
+    raise exception '0036 tail: the section A debit-side census is not two account_type filters over one DEBIT-legs-only scan';
   end if;
 
   -- (3) §A POSITION, which is the whole safety argument: the belt is the ELSE of the
@@ -1708,11 +1823,35 @@ begin
     raise exception '0036 tail: the section D run-bound receipt does not write outcome skipped_lane (the only CHECK-admitted value for a skip) carrying the sales_direction refusal token';
   end if;
 
-  raise notice '0036 tail OK (1/5): prior-migration chain intact through 0034 recut of admit_autodraft_task';
-  raise notice '0036 tail OK (2/5): section A -- the nonzero-tax belt is present exactly once, CLR21/tax_leg_missing, positioned inside the reversal-gated block after the sstp count and before the verified-total tie; every pre-existing refusal survives';
-  raise notice '0036 tail OK (3/5): section B -- the three losing-dispatch shapes are honest no-ops, the never-begun CLR13 survives, and the park cap is now the ONE shared function (value 2, unchanged)';
-  raise notice '0036 tail OK (4/5): section C -- the queue read carries the additive autodraft attempt-budget key with every pre-existing key, the paging machinery, AND every 0017 change-of-record marker (lint lane, seven active-client guards, ADR-031 draft rank) intact';
-  raise notice '0036 tail OK (5/5): section D -- the direction gate is on both the enumerator (via the CLR30-trapping helper, with 0017 O8.2 active-client guard join preserved) and admission, ordered lock < direction < lane < op-key, with no receipt settled on the refusal path';
+  -- (§E) THE PACK SURFACE (review F2: §E was absent from the tail). The installed body
+  -- carries the 'msic' literal EXACTLY TWICE — once as the client-object KEY and once in
+  -- the subquery's item_key='msic' predicate; both ride in on the single splice, so any
+  -- other count means a doubled or partial install. (The first cut of this assertion
+  -- expected ONE and correctly failed the deploy on the rig — the guard guarding itself.)
+  -- Every post-0016 surgery must also have survived the splice: 0017's wiki block, 0018's
+  -- bound_scope exclusion, 0019's stale annotations.
+  select pg_get_functiondef('clara.get_context_pack(uuid,text)'::regprocedure)
+    into v_pack_src;
+  if (length(v_pack_src)-length(replace(v_pack_src,'''msic''','')))/length('''msic''') <> 2 then
+    raise exception '0036 tail: get_context_pack must carry exactly TWO msic literals after section E (the client-object key and the item_key predicate)';
+  end if;
+  if (length(v_pack_src)-length(replace(v_pack_src,'''msic'',(select','')))/length('''msic'',(select') <> 1 then
+    raise exception '0036 tail: the msic client-object KEY must appear exactly once in get_context_pack after section E';
+  end if;
+  if position('sst_registration_watch' in v_pack_src)=0
+     or position('''wiki''' in v_pack_src)=0
+     or position('-''bound_scope_kind''-''bound_scope_id''' in v_pack_src)=0
+     or position('''stale_at'',wc.stale_at' in v_pack_src)=0
+     or position('''has_stale_sources''' in v_pack_src)=0 then
+    raise exception '0036 tail: a post-0016 get_context_pack surgery marker (0016 watch / 0017 wiki / 0018 bound_scope strip / 0019 stale annotations) did not survive the section E splice';
+  end if;
+
+  raise notice '0036 tail OK (1/6): prior-migration chain intact through 0034 recut of admit_autodraft_task';
+  raise notice '0036 tail OK (2/6): section A -- the nonzero-tax belt is present exactly once, CLR21/tax_leg_missing, narrowed to a PURELY expense-typed debit side (mixed and capitalised bills carved out as Gate-P territory), positioned inside the reversal-gated block after the sstp count and before the verified-total tie; every pre-existing refusal survives';
+  raise notice '0036 tail OK (3/6): section B -- the three losing-dispatch shapes are honest no-ops (the cancelled/expired no-op releases a still-owned active reservation), the never-begun CLR13 survives, and the park cap is now the ONE shared function (value 2, unchanged)';
+  raise notice '0036 tail OK (4/6): section C -- the queue read carries the additive autodraft attempt-budget key with every pre-existing key, the paging machinery, AND every 0017 change-of-record marker (lint lane, seven active-client guards, ADR-031 draft rank) intact';
+  raise notice '0036 tail OK (5/6): section D -- the direction gate is on both the enumerator (via the CLR30-trapping helper, with 0017 O8.2 active-client guard join preserved) and admission, ordered lock < direction < lane < op-key, with no receipt settled on the refusal path';
+  raise notice '0036 tail OK (6/6): section E -- the pack carries the msic key exactly once and every post-0016 surgery marker (0017 wiki, 0018 bound_scope strip, 0019 stale annotations) survived the splice';
 end
 $tail$;
 
@@ -1784,8 +1923,12 @@ begin
   -- well try the cast first), so a regex conjunct would provide NO ordering protection and a
   -- future producer writing a non-numeric tax fact could turn this diagnostic into a failed
   -- quiesced deploy. A CASE evaluates its condition before its branch, which is the property
-  -- actually wanted. The predicate set also mirrors the belt EXACTLY, expense-debit leg
-  -- included, so the count reported is the count that would now refuse — no more, no less.
+  -- actually wanted. The predicate set also mirrors the belt EXACTLY — BOTH halves of the
+  -- debit-side census included (at least one expense-typed debit leg, and NO non-expense
+  -- debit leg) — so the count reported is the count that would now refuse: no more, no
+  -- less. A probe that omitted the non-expense half would over-report by every mixed and
+  -- every capitalised bill in the corpus, i.e. would warn the owner about shapes the belt
+  -- deliberately carves out.
   -- =====================================================================
   select count(*)::int into v_live_approved
   from clara.journal_entries e
@@ -1799,7 +1942,10 @@ begin
       where l.entry_id=e.id and coalesce(a.special_acc_type,'')='sst_purchase_cost')
     and exists(select 1 from clara.journal_lines l
       join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
-      where l.entry_id=e.id and a.account_type='expense' and l.debit_cents>0);
+      where l.entry_id=e.id and a.account_type='expense' and l.debit_cents>0)
+    and not exists(select 1 from clara.journal_lines l
+      join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=e.id and a.account_type<>'expense' and l.debit_cents>0);
   select count(*)::int into v_live_draft
   from clara.journal_entries e
   where e.coding_kind='supplier_bill' and e.status='draft' and e.reversal_of is null
@@ -1812,7 +1958,10 @@ begin
       where l.entry_id=e.id and coalesce(a.special_acc_type,'')='sst_purchase_cost')
     and exists(select 1 from clara.journal_lines l
       join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
-      where l.entry_id=e.id and a.account_type='expense' and l.debit_cents>0);
+      where l.entry_id=e.id and a.account_type='expense' and l.debit_cents>0)
+    and not exists(select 1 from clara.journal_lines l
+      join clara.coa_accounts a on a.client_id=l.client_id and a.account_code=l.account_code
+      where l.entry_id=e.id and a.account_type<>'expense' and l.debit_cents>0);
   if v_live_approved = 0 then
     raise notice '0036 probe (i): ZERO already-approved supplier bills sit in the shape section A now refuses -- the live corpus is clean, as expected (invoice.tax_total has had no nonzero occurrences)';
   else

@@ -117,6 +117,21 @@ Lands **before** any Wave C schema. Bundled to avoid migration-number contention
 29 free, runtime holds 11** ✅ (the runbook's `~27` was a code walk of v25; live is v38).
 
 ### C-a — the subledger slice
+
+**Owner-ruled additions (2026-07-30, from the C0 review ladder's out-of-scope findings):**
+- **`reconcile_sweep_runs` force-complete guard.** The recovery pass (0011:2709) force-completes
+  tasks in `('running','cancel_requested')` with **no `exists(coding_attempts)` guard** — one
+  recovered filing completes every other still-running task in the run, the live run's real outcome
+  is discarded on the `completed` replay branch, and its attempt row wedges (`state='active'` with a
+  live reservation, which 0034 then reads as `already_done` forever). A stronger literal match for
+  "the reconciler double-dispatch" than anything in settle. Fix = one predicate
+  (`and exists(select 1 from clara.coding_attempts ca where ca.task_id=t.id)`), plus a test that a
+  recovered filing completes ONLY tasks that actually drafted. **[V]** by the C0 implement lane.
+- **`admissionNeedsStart` recognises `re_admitted`.** `packages/runtime/lib/autodraft.mjs:48`
+  returns true only for `"admitted"`, so 0034's `re_admitted` outcome mints an `agent_tasks` row
+  that is **never enqueued** — the one-click retry §C made visible may never actually run. Runtime
+  fix (non-frozen lib) + the missing outcome in the consumer unit test's enumeration
+  (`wave-a-autodraft-consumer.test.mjs:44`). Pre-existing 0034 defect; it blunts §C. **[V]**
 1. Taxonomy per **WC-R9**: `customer_receipt` + `supplier_payment`, with their shape asserts.
 2. Open items: **signed** subledger items + **signed** allocations. Partial settlement, credit
    items, overpayment/on-account residue, reversal lineage, control-account tie-out.
