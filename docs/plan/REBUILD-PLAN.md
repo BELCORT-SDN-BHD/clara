@@ -131,9 +131,14 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > live 2026-07-30 (35 migrations · runtime v38 · postverify 6/6) — the #52 nonzero-tax belt,
 > the #51 losing-dispatch no-ops, the #53 budget visibility, the sales mis-route gate, and
 > MSIC→context pack, built through a four-lane review ladder (3-lens Claude adversarial +
-> independent Codex; four BLOCKERs caught, each invisible to the lane before it). **NEXT:
-> C-a (subledger + allocation), fresh session, design-first.** The extraction-slice /
-> settlement history above stands as written (ADR-047..050 closed it all).
+> independent Codex; four BLOCKERs caught, each invisible to the lane before it). **C-a is
+> CLOSED AND LIVE (ADR-052, 2026-07-30: migration 0037 · 36 total · runtime stays v38 — the
+> AR/AP open-item subledger + balanced-pair allocation, all four approve paths hooked, the F3
+> debt PAID on the live book; design of record `docs/plan/wave-c-a-subledger-design.md` v2,
+> rulings WCA-R1..R9; a FOUR-round two-model review ladder closed 10+ blocker-class findings,
+> the last set red-proofed). NEXT: C-b (bank identity · statement ingest · matching), fresh
+> session, design-first — the two named C-b grilling questions stand (contract §4 C-b item 4).**
+> The extraction-slice / settlement history above stands as written (ADR-047..050 closed it all).
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
