@@ -137,6 +137,51 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 **Wave F — tax.** The SST engine per the practice map (periods, payment basis, dual-registrant exports, SST-02, bad-debt relief); the payroll deadline calendar; **last: the draft tax computation** (add-backs, CA, chargeable income, forms — the slice allowed to slip to v1.1).
 **Wave G — the OS surface.** Proactive inbox (allowlisted wakes), cross-scope needs-you, ⌘K Ask/Do/Go + ActionPanels, plan-as-document for close/onboarding, exports UI, generative-UI completion + parity CI gates, the design floors.
 
+### The `coding_kind` roadmap — where each classified document lands
+
+> **Added 2026-07-29** (Wave-C grilling). The classifier recognises **17 `document_kind` values**
+> (`0007_document_pipeline.sql:33-37`) while the books can code **3 `coding_kind` values**
+> (`0015_ar_myinvois_rules.sql:217-219`). Until now **no artifact stated where the other 14 land** —
+> a search of PRD, this plan, ARCHITECTURE and all three project logs returned zero hits. That
+> absence is what produced the receipt-routing seam: ADR-ruled receipt auto-routing (0025) sends
+> every receipt into the paid OCR lane, and those receipts are now read and then strand, because a
+> counter purchase has no payable credit and so cannot be a `supplier_bill`. **This table closes
+> that gap.** Rulings marked **[R]** are ratified in `docs/plan/wave-c-contract.md`; **[P]** are
+> proposed and await the owner.
+
+**The law this table encodes:** `coding_kind` means *"which control account this entry touches, and
+in which direction"* — **not** "what kind of document this is". A document kind earns a typed coding
+lane **only** when a wrong posting would silently corrupt a subledger. Everything else rides the
+generic lane (`coding_kind` NULL), which carries every LAW invariant — client attribution,
+provenance binding, balance, maker/checker, reverse-not-delete — but breeds no rule sightings and
+is permanently ineligible for autopost. **A new `coding_kind` is always a migration, never an agent
+decision.**
+
+| `document_kind` | Destination | Wave |
+|---|---|---|
+| `invoice` | `supplier_bill` · `sales_invoice` | **LIVE** |
+| `e_invoice_xml` | `sales_invoice` via the structured (XML-only) lane | **LIVE** |
+| `credit_note` | `sales_credit_note` LIVE; purchase side → `supplier_credit_note`, added additively **[P]** | LIVE / post-C-a |
+| `debit_note` | rides `sales_invoice` deliberately — identical subledger effect **[R]** | **LIVE** |
+| `payment_voucher` | `supplier_payment` (settlement kind) **[R]** | **C-a** |
+| `bank_statement` | **Not a coding kind.** Becomes statement lines that MATCH entries; settlement is carried by `customer_receipt`/`supplier_payment` **[R]** | **C-b** |
+| `receipt` | `cash_purchase` — zero control legs, creates no AP. **Blocked**: "paid at the counter?" is not extractable today (no payment-method field; `invoice.amount_due` is a consistency test). Interim: generic lane **[R]** | post-C-a |
+| `claim_form` | **Generic lane, permanently** — a non-`payable`-class "due to employee/director" liability by account convention (WC-R10). The real want is tier-2 rule breeding, not a typed kind **[P]** | — |
+| `payroll_summary` | **Generic lane, permanently** for the journal; the statutory deadline calendar is Wave F (PRD §4.16 — no payroll engine) **[P]** | F (calendar only) |
+| `handwritten_note` · `other` | Generic lane **[P]** | — |
+| `management_account` | **Never a coding kind** — carry-down + TB tie-out input | B |
+| `opening_balance_doc` | **Never a coding kind** — carry-forward | B |
+| `ssm_company_doc` | **Never a coding kind** — onboarding/identity | B |
+| `agreement_contract` · `knowledge_artifact` | **Never a coding kind** — client wiki | B |
+| `tax_correspondence` | **Never a coding kind** — wiki + tax lane | B / F |
+
+**The honest gap this table exposes is not tier 3, it is tier 2.** The agent may already (1)
+transcribe any document into the generic lane interactively, and (2) propose a rule after ≥3
+human-approved sightings for a human to sign — but **(2) exists only for supplier bills and sales
+invoices**, because sightings breed only on control-account entries. Generic-lane entries breed
+nothing, so the long tail gets no compounding autonomy. **Extending sighting breeding to
+generic-lane shapes is the highest-value autonomy work after Wave C** — not widening this table.
+
 **Doctrine/skills:** regenerated fresh against the real tool registry per wave (registry-generated catalog + drift lint), never copied wholesale from `belcort/` (the domain gold — SST ladder, carry-down interview, CN/DN polarity — is extracted deliberately, per the salvage manifest).
 
 ## Risks (top 8)
