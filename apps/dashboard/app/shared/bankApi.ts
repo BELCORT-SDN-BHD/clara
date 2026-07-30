@@ -153,7 +153,7 @@ export async function remapBankAccountCoa(
 ): Promise<void> {
   await rpc(
     "remap_bank_account_coa",
-    { p_client: clientId, p_bank_account: bankAccountId, p_coa_account_code: coaAccountCode, p_op_key: opKey() },
+    { p_client: clientId, p_bank_account: bankAccountId, p_new_coa_account_code: coaAccountCode, p_op_key: opKey() },
     token,
   );
 }

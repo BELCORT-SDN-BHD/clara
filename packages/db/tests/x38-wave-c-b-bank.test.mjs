@@ -1431,64 +1431,251 @@ test("x38.y reader1/reader2 disagreement on a line amount refuses readers_disagr
 });
 
 // ===========================================================================
-// x38.z -- ● BUDGET / ATTEMPT-CAP / CONCURRENCY apply to the statement_facts
-// lane, joining the existing s6-metering-proven machinery (SS4.3). Probed in
-// the s6-metering honest-fallback style: the exact lever is contract-silent
-// where the design does not pin a number, so a miss is a recorded finding, not
-// a hard failure.
+// x38.z1 -- ● BUDGET. Exhausting the firm's page budget fails a FRESH
+// statement_facts enqueue outright, named 'budget' (0038 --
+// _enqueue_invoice_facts_core reserves pages for BOTH azure lanes now and
+// converts a CLR18 page-budget refusal from _reserve_processing_call into a
+// graceful terminal task row, in the SAME call, before the task ever queues).
+// pages_per_day carries a `> 0` CHECK (0007:367), so "no budget left" is
+// staged the way production reaches it: a legal cap the day's reservations
+// have already consumed, never a zero cap. The terminal verdict must reach
+// the spine as the STATEMENT twin -- and never as the invoice twin (the
+// enqueue_invoice_facts wrapper's phantom emit, suppressed by E2b).
 // ===========================================================================
-test("x38.z budget/attempt-cap/OCR-concurrency accounting apply to the statement_facts lane", async (t) => {
+test("x38.z1 budget: an exhausted page budget fails a fresh statement_facts enqueue with error_code 'budget'", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A2;
   const firm = await firmOf(client);
+  const prior = await rootQuery("select pages_per_day from clara.firm_document_limits where firm_id=$1", [firm]);
+  const priorLimit = prior.rows[0]?.pages_per_day ?? null;
+  // The fn's own day-window ledger (0009:593-603): settled rows count settled_pages,
+  // everything else its reservation, refunded rows drop out.
+  const usedPages = async () => {
+    const r = await rootQuery(
+      `select coalesce(sum(pages),0)::int as used from (
+         select case when state='settled' then settled_pages else pages_reserved end::bigint as pages
+           from clara.document_ingest_reservations
+           where firm_id=$1 and state<>'refunded'
+             and created_at >= (date_trunc('day',now() at time zone 'utc') at time zone 'utc')
+         union all
+         select case when state='settled' then settled_pages else pages_reserved end::bigint
+           from clara.processing_call_reservations
+           where firm_id=$1 and state<>'refunded'
+             and created_at >= (date_trunc('day',now() at time zone 'utc') at time zone 'utc')
+       ) q`, [firm]);
+    return r.rows[0].used;
+  };
+  try {
+    let used = await usedPages();
+    if (used === 0) {
+      // Consume at least one page so `cap = used` stays legal under the CHECK.
+      await freshRegisteredAccount(sub, client, "z1");
+      const seedFiled = await filedStatementPdf(sub, { client });
+      const seedTask = await enqueueStatement(seedFiled.documentId);
+      assert.equal(seedTask?.status, "queued", `x38.z1 seed enqueue reserves the day's first page (got ${JSON.stringify(seedTask)})`);
+      used = await usedPages();
+    }
+    assert.ok(used >= 1, `x38.z1: the day ledger shows at least one consumed page (got ${used})`);
+    const upserted = await rootQuery(
+      `insert into clara.firm_document_limits(firm_id, pages_per_day) values ($1, $2)
+         on conflict (firm_id) do update set pages_per_day = $2`,
+      [firm, used],
+    );
+    assert.equal(upserted.rowCount, 1, "the budget upsert affects exactly one row");
+    const readback = await rootQuery("select pages_per_day from clara.firm_document_limits where firm_id=$1", [firm]);
+    assert.equal(readback.rows[0].pages_per_day, used, "the firm's page cap reads back exactly exhausted");
 
-  // Budget: drive the firm's page budget to zero (the s6-metering lever) and
-  // prove the statement lane is NOT exempt.
-  const hasLimits = await rootQuery("select 1 from information_schema.tables where table_schema='clara' and table_name='firm_document_limits'");
-  if (hasLimits.rowCount) {
-    await rootQuery("update clara.firm_document_limits set pages_per_day = 0 where firm_id=$1", [firm]).catch(() => {});
-    await freshRegisteredAccount(sub, client, "z1");
     const filed = await filedStatementPdf(sub, { client });
-    let refused = false;
-    let task = null;
-    try {
-      task = await enqueueStatement(filed.documentId);
-      if (task) await claimTask(task.id, { egressApproved: true });
-    } catch (e) {
-      refused = e.code === "CLR18";
-      if (!refused) noteLane(`x38.z budget probe raised ${e.code} (expected CLR18 or a graceful failed('budget')) -- inspect`);
-    }
-    const row = task ? await statementTask(filed.documentId, LANE_OCR) : null;
-    if (!(refused || row?.status === "failed")) {
-      noteLane(`x38.z FINDING(candidate): a statement_facts task reserved/claimed with pages_per_day=0 (status=${row?.status}) -- the budget lever may not cover this lane, or the lever itself is a different one (contract-silent). Verify at runtime/L4 level.`);
-    }
-    await rootQuery("update clara.firm_document_limits set pages_per_day = 1000 where firm_id=$1", [firm]).catch(() => {});
-  } else {
-    noteLane("x38.z firm_document_limits absent -- cannot force the statement_facts budget lever on this schema");
-  }
+    const task = await enqueueStatement(filed.documentId);
+    assert.ok(task, "x38.z1 mandatory setup: the enqueue call returns a task row");
+    assert.equal(task.status, "failed", `an exhausted page budget fails the enqueue call itself, before the task ever queues (got ${JSON.stringify(task)})`);
+    assert.equal(task.error_code, "budget", `the failure is named 'budget' (got ${JSON.stringify(task)})`);
 
-  // Attempt-cap: three FAILED attempts on the SAME document/lane, then a fourth
-  // claim/enqueue must land attempt_cap (the 0016 v_attempts>=3 idiom, part1
-  // fact 3 / part2 SS5 CHECK widenings).
-  const filed2 = await filedStatementPdf(sub, { client });
-  for (let i = 0; i < 3; i++) {
-    const t2 = await enqueueStatement(filed2.documentId);
-    if (!t2) { noteLane("x38.z attempt-cap probe: no task returned on a re-enqueue -- interface expectation"); break; }
-    await claimTask(t2.id, { egressApproved: true }).catch(() => {});
-    await failStatementFacts(t2.id, "chain_broken").catch(() => {});
-  }
-  const afterThree = await statementTask(filed2.documentId, LANE_OCR);
-  if (afterThree) {
-    const fourth = await caught(() => enqueueStatement(filed2.documentId));
-    const row = await statementTask(filed2.documentId, LANE_OCR);
-    if (fourth || row?.error_code === "attempt_cap") {
-      noteLane(`x38.z attempt_cap proven (${fourth ? "raised" : "row"})`);
+    const twin = await rootQuery(
+      "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.statement_facts_failed' and payload->>'reason'='budget'",
+      [filed.documentId]);
+    // One emit PER refused enqueue call -- filing itself enqueues once and the explicit
+    // call re-attempts, so >=1 is the honest floor (each refusal reports itself).
+    assert.ok(twin.rows[0].n >= 1, "x38.z1: the budget verdict reaches the spine as the STATEMENT twin");
+    const phantom = await rootQuery(
+      "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.invoice_facts_failed'",
+      [filed.documentId]);
+    assert.equal(phantom.rows[0].n, 0, "x38.z1: the invoice twin never fires for a statement document (the E2b wrapper suppress)");
+  } finally {
+    if (priorLimit == null) {
+      await rootQuery("delete from clara.firm_document_limits where firm_id=$1", [firm]).catch(() => {});
     } else {
-      noteLane(`x38.z attempt-cap probe: three failed attempts did not visibly trip attempt_cap on a fourth enqueue (got ${JSON.stringify(row)}) -- lever/threshold may differ; inspect`);
+      await rootQuery("update clara.firm_document_limits set pages_per_day=$2 where firm_id=$1", [firm, priorLimit]).catch(() => {});
     }
   }
-  assert.ok(true, "x38.z budget/attempt-cap probes recorded (levers partly contract-silent -- see lane notes)");
+});
+
+// ===========================================================================
+// x38.z2 -- ● ATTEMPT CAP. Three failed attempts on one document's
+// statement_facts lane exhaust the 0016 v_attempts>=3 idiom (part1 fact 3 /
+// part2 SS5 CHECK widenings, now lane-keyed per 0038 E3). The terminal state
+// must land attempt_cap; the spine event -- wherever it fires -- must name
+// the STATEMENT twin ('document.statement_facts_failed'), never the invoice
+// one, per the 0038 E3 postcheck.
+// ===========================================================================
+test("x38.z2 attempt cap: three failed attempts trip attempt_cap, and the terminal event follows the statement-facts lane", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A2;
+  const filed = await filedStatementPdf(sub, { client });
+  let lastReceipt = null;
+  let task = await enqueueStatement(filed.documentId);
+  assert.ok(task, "x38.z2 mandatory setup: the initial enqueue queues a task");
+  for (let i = 0; i < 3; i++) {
+    assert.equal(task.status, "queued", `x38.z2 round ${i + 1}: a queued task exists to claim (got ${JSON.stringify(task)})`);
+    await claimTask(task.id, { egressApproved: true });
+    await failStatementFacts(task.id, "engine_lost");
+    lastReceipt = await enqueueInvoiceFacts(filed.documentId);
+    task = await statementTask(filed.documentId, LANE_OCR);
+  }
+  // The next processing attempt must be refused named attempt_cap. It may be observed either
+  // as the terminal row this loop's last re-enqueue itself minted (0038:5949-5960's own
+  // enqueue-time cap, which fires first in the ordinary claim->fail->re-enqueue cycle traced
+  // above), or -- if a task instead reached 'queued' with the running sum already at 3 -- via
+  // one more explicit claim tripping the claim-time belt (0038 E3, claim_document_processing_
+  // task:6167-6183). Both are legitimate readings of "the next attempt is refused"; this loop
+  // is written to converge to whichever the live body actually takes.
+  if (task.status === "queued") {
+    const capped = await caught(() => claimTask(task.id, { egressApproved: true }));
+    assert.ok(capped, "x38.z2: a claim against a task whose lane-sum has reached 3 attempts must be refused");
+    task = await statementTask(filed.documentId, LANE_OCR);
+  }
+  assert.equal(task.status, "failed", `x38.z2: after three failed attempts the document's task lands failed (got ${JSON.stringify(task)})`);
+  assert.equal(task.error_code, "attempt_cap", `x38.z2: the terminal error_code is attempt_cap (got ${JSON.stringify(task)} -- last enqueue receipt ${JSON.stringify(lastReceipt)})`);
+
+  // HARD PIN (adjudicated 2026-07-31): the ENQUEUE-time cap branch is the one a capped
+  // statement actually reaches (the running sum reads 3 before the fourth task is minted),
+  // and after the as-built fix it emits the STATEMENT twin itself. Every engine_lost round
+  // above also emitted this event type via fail_statement_facts, so the pin discriminates on
+  // the payload's reason: the NEWEST event for this document must be the cap emit, proving
+  // the terminal verdict -- not merely the last per-round fail -- reached the spine.
+  const ev = await rootQuery(
+    "select event_type, payload->>'reason' as reason from clara.domain_events where document_id=$1 order by seq desc limit 1",
+    [filed.documentId],
+  );
+  assert.equal(ev.rows[0]?.event_type, "document.statement_facts_failed",
+    `x38.z2: the attempt-cap terminal event follows the statement-facts lane, never the invoice twin (got ${JSON.stringify(ev.rows[0] ?? null)})`);
+  assert.equal(ev.rows[0]?.reason, "attempt_cap",
+    `x38.z2: the newest spine event carries reason=attempt_cap -- the cap verdict itself, not a per-round engine_lost fail (got ${JSON.stringify(ev.rows[0] ?? null)})`);
+  const phantom = await rootQuery(
+    "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.invoice_facts_failed'",
+    [filed.documentId]);
+  assert.equal(phantom.rows[0].n, 0, "x38.z2: the invoice twin never fires for a statement document across the whole retry arc (the E2b wrapper suppress)");
+});
+
+// ===========================================================================
+// x38.z3 -- ● OCR CONCURRENCY. ocr_concurrency=1 lets exactly one statement_
+// facts claim through and refuses a second in-flight claim for the same firm
+// (0038:6186-6193, the widened v_cap/v_running check now covering
+// 'statement_facts' alongside 'ocr'/'invoice_facts'). The second claim is
+// driven by a DIRECT roleQuery call (never claimIfQueued, whose harness-
+// hygiene reaper would settle a stale runner and silently retry past the
+// refusal this cell exists to prove).
+// ===========================================================================
+test("x38.z3 OCR concurrency: ocr_concurrency=1 admits one claim and refuses a second in-flight claim", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A2;
+  const firm = await firmOf(client);
+  const prior = await rootQuery("select ocr_concurrency from clara.firm_document_limits where firm_id=$1", [firm]);
+  const priorLimit = prior.rows[0]?.ocr_concurrency ?? null;
+  let task1 = null; let task2 = null;
+  try {
+    await rootQuery(
+      `insert into clara.firm_document_limits(firm_id, ocr_concurrency) values ($1, 1)
+         on conflict (firm_id) do update set ocr_concurrency = 1`,
+      [firm],
+    );
+    const readback = await rootQuery("select ocr_concurrency from clara.firm_document_limits where firm_id=$1", [firm]);
+    assert.equal(readback.rows[0].ocr_concurrency, 1, "the firm's OCR concurrency reads back as one");
+
+    await freshRegisteredAccount(sub, client, "z3a");
+    const filedA = await filedStatementPdf(sub, { client });
+    task1 = await enqueueStatement(filedA.documentId);
+    assert.ok(task1, "x38.z3 mandatory setup: the first statement task enqueues");
+    await claimTask(task1.id, { egressApproved: true });
+    assert.equal((await statementTask(filedA.documentId, LANE_OCR)).status, "running", "x38.z3 mandatory setup: the first claim is running, saturating the cap of one");
+
+    await freshRegisteredAccount(sub, client, "z3b");
+    const filedB = await filedStatementPdf(sub, { client });
+    task2 = await enqueueStatement(filedB.documentId);
+    assert.ok(task2, "x38.z3 mandatory setup: a second statement task enqueues, queued behind the cap");
+
+    const err = await caught(() => roleQuery(
+      ROLES.runtime,
+      "select clara.claim_document_processing_task(p_task => $1, p_workflow_run_id => $2, p_egress_approved => $3) as r",
+      [task2.id, `x38-z3-${randomUUID()}`, true],
+    ));
+    assert.ok(err, "a second claim while the firm's OCR concurrency cap (1) is already saturated must be refused");
+    assert.match(String(err.message), /concurrency limit/, `the refusal names the concurrency limit (got ${err.message})`);
+  } finally {
+    if (task1) await failStatementFacts(task1.id, "engine_lost").catch(() => {});
+    if (task2) {
+      // task2 never left 'queued' -- its claim attempt raised before any state change, so
+      // fail_statement_facts (which requires status='running') has nothing to settle here;
+      // best-effort cleanup only, never a swallowed product assertion.
+      await failStatementFacts(task2.id, "engine_lost").catch(() => {});
+    }
+    if (priorLimit == null) {
+      await rootQuery("delete from clara.firm_document_limits where firm_id=$1", [firm]).catch(() => {});
+    } else {
+      await rootQuery("update clara.firm_document_limits set ocr_concurrency=$2 where firm_id=$1", [firm, priorLimit]).catch(() => {});
+    }
+  }
+});
+
+// ===========================================================================
+// x38.z4 -- ● THE MULTI-CLIENT GATE ACTS ON THE QUEUED TASK. As-built ladder
+// fix (2026-07-31, 0038:5915-5923): filing a document to a SECOND active
+// client flips its in-flight QUEUED statement_facts task to failed/
+// statement_multi_client IN PLACE, rather than leaving the vendor read live
+// beside a fresh terminal receipt.
+// ===========================================================================
+test("x38.z4 the multi-client gate acts on the QUEUED task: a second filing flips the in-flight statement_facts task in place", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const clientA1 = world.clients.A1;
+  const clientA2 = world.clients.A2;
+  const firm = world.firms.A;
+  await freshRegisteredAccount(sub, clientA1, "z4a1");
+  const seed = await seedVerifiedDocument({ firm, kind: "bank_statement" });
+  await fileDocument(sub, { document: seed.documentId, client: clientA1, resolution: await freshResolution(sub, clientA1, { subjectKind: "document", subjectId: seed.documentId }) });
+
+  const task = await enqueueStatement(seed.documentId);
+  assert.ok(task, "x38.z4 mandatory setup: the single-client filing enqueues a statement_facts task");
+  assert.equal(task.status, "queued", "x38.z4 mandatory setup: the task lands queued while only one active filing exists");
+
+  await fileDocument(sub, { document: seed.documentId, client: clientA2, resolution: await freshResolution(sub, clientA2, { subjectKind: "document", subjectId: seed.documentId }) });
+  await enqueueInvoiceFacts(seed.documentId);
+
+  const after = await statementTask(seed.documentId, LANE_OCR);
+  assert.equal(after.status, "failed", `x38.z4: the ORIGINAL queued task flips to failed once a second active filing appears (got ${JSON.stringify(after)})`);
+  assert.equal(after.error_code, "statement_multi_client", `x38.z4: the terminal error_code names statement_multi_client (got ${JSON.stringify(after)})`);
+  assert.equal(after.id, task.id, "x38.z4: the SAME task row was flipped in place, not superseded by a fresh one");
+
+  const still = await rootQuery(
+    "select count(*)::int n from clara.document_processing_tasks where document_id=$1 and lane=$2 and status in ('queued','running')",
+    [seed.documentId, LANE_OCR],
+  );
+  assert.equal(still.rows[0].n, 0, "x38.z4: no queued or running statement_facts task remains for the document");
+
+  // The gate verdict reaches the spine as the STATEMENT twin (the core's single emit
+  // site), and the invoice twin never fires for a statement document (the E2b wrapper
+  // suppress -- before it, this exact re-enqueue emitted a phantom invoice failure).
+  const twin = await rootQuery(
+    "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.statement_facts_failed' and payload->>'reason'='statement_multi_client'",
+    [seed.documentId]);
+  assert.ok(twin.rows[0].n >= 1, "x38.z4: the multi-client verdict reaches the spine as the STATEMENT twin");
+  const phantom = await rootQuery(
+    "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.invoice_facts_failed'",
+    [seed.documentId]);
+  assert.equal(phantom.rows[0].n, 0, "x38.z4: the invoice twin never fires for a statement document");
 });
 
 // ===========================================================================

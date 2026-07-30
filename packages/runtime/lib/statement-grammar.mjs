@@ -192,18 +192,20 @@ export function withinPeriod(iso, period = {}) {
  * PAIR (code, digits-only number) and never the number alone.
  */
 export const INSTITUTIONS = Object.freeze([
+  // NOTE: codes are the clara.bank_institutions SEED vocabulary -- the two lists MUST
+  // agree (a code the DB does not seed refuses header_unreadable for that whole bank).
   { code: "MBB", name: "Malayan Banking Berhad", patterns: [/\bmaybank\b/i, /\bmalayan banking\b/i] },
   { code: "CIMB", name: "CIMB Bank Berhad", patterns: [/\bcimb\b/i] },
   { code: "PBB", name: "Public Bank Berhad", patterns: [/\bpublic bank\b/i] },
   { code: "RHB", name: "RHB Bank Berhad", patterns: [/\brhb\b/i] },
   { code: "HLB", name: "Hong Leong Bank Berhad", patterns: [/\bhong leong\b/i] },
-  { code: "AMBANK", name: "AmBank (M) Berhad", patterns: [/\bambank\b/i, /\bam bank\b/i] },
+  { code: "AMB", name: "AmBank (M) Berhad", patterns: [/\bambank\b/i, /\bam bank\b/i] },
   { code: "BIMB", name: "Bank Islam Malaysia Berhad", patterns: [/\bbank islam\b/i] },
   { code: "BMMB", name: "Bank Muamalat Malaysia Berhad", patterns: [/\bmuamalat\b/i] },
   { code: "BSN", name: "Bank Simpanan Nasional", patterns: [/\bbank simpanan\b/i, /\bbsn\b/i] },
   { code: "AGRO", name: "Bank Pertanian Malaysia Berhad (Agrobank)", patterns: [/\bagrobank\b/i] },
   { code: "AFFIN", name: "Affin Bank Berhad", patterns: [/\baffin\b/i] },
-  { code: "ABMB", name: "Alliance Bank Malaysia Berhad", patterns: [/\balliance bank\b/i] },
+  { code: "ALB", name: "Alliance Bank Malaysia Berhad", patterns: [/\balliance bank\b/i] },
   { code: "OCBC", name: "OCBC Bank (Malaysia) Berhad", patterns: [/\bocbc\b/i] },
   { code: "HSBC", name: "HSBC Bank Malaysia Berhad", patterns: [/\bhsbc\b/i] },
   { code: "UOB", name: "United Overseas Bank (Malaysia) Bhd", patterns: [/\buob\b/i, /\bunited overseas\b/i] },

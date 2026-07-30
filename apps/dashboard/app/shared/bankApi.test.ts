@@ -114,7 +114,7 @@ test("deactivateBankAccount / remapBankAccountCoa post the named args verbatim",
   assert.equal(bodies[0]?.p_reason, "closed by the bank");
   await remapBankAccountCoa("jwt", "c1", "acc1", "602-000");
   assert.ok(urls[1]?.includes("/rpc/remap_bank_account_coa"));
-  assert.equal(bodies[1]?.p_coa_account_code, "602-000");
+  assert.equal(bodies[1]?.p_new_coa_account_code, "602-000"); // the verbs as-built arg name
 });
 
 test("enterBankStatement posts p_header/p_lines verbatim under enter_bank_statement", async (t) => {

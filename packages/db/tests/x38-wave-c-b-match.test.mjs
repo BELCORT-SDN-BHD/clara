@@ -147,7 +147,7 @@ import { holdThenContend, sawDeadlock } from "./rig-docs-race.mjs";
 import {
   GUARD, BANKCOA1, BANKCOA2, AR1, AP1, EXPN, REVN, LOANP, CHARGEX, ADJX, ADJINC, BADADJ,
   CLR10, CLR11, CLR26, hasBankMatching, caught,
-  addBankAccount, enterStatement, voidBankStatement,
+  addBankAccount, deactivateBankAccount, enterStatement, voidBankStatement,
   matchBankLine, unmatchBankMatch, settleFromBankLine, completePendingMatch, matchIdOf,
   matchRow, lineMemberRows, entryMemberRows, lineGroupStatus, assertGroupTies,
   auditRowsMentioning, bankEventTypes, bankEventPayloads, maxBankSeq, openItemsOf, outstandingOf,
@@ -1166,13 +1166,29 @@ test("x38.u pending-match at EXACTLY the threshold: line owned at draft, a disti
     memo: "x38.u maker-cancel",
   });
   const pendingMatch2 = matchIdOf(receipt2);
-  await unmatchBankMatch(sub, { client, match: pendingMatch2, reason: "x38.u maker cancels the reservation" });
+  const draftEntry2 = idOf(receipt2, "entry_id", "entry");
+  const cancelReceipt2 = await unmatchBankMatch(sub, { client, match: pendingMatch2, reason: "x38.u maker cancels the reservation" });
+  assert.equal(
+    cancelReceipt2.draft_withdrawn ?? cancelReceipt2.draftWithdrawn, true,
+    `unmatch_bank_match's receipt carries draft_withdrawn:true for a pending maker-cancel (got ${JSON.stringify(cancelReceipt2)})`,
+  );
   const cancelledRow = await matchRow(pendingMatch2);
   assert.equal(cancelledRow.status, "unmatched", "unmatch_bank_match cancels a PENDING group exactly as it does a live one");
   assert.equal((await lineGroupStatus(line2.id)).length, 0, "the maker-cancel releases the line back to unowned");
+  // AS-BUILT LADDER FIX (2026-07-31): cancelling a PENDING reservation closes BOTH sides
+  // atomically -- the anchored draft is withdrawn in the SAME transaction as the unmatch, not
+  // left stranded approvable.
+  const draftRow2After = (await rootQuery("select status, withdrawal_reason from clara.journal_entries where id=$1", [draftEntry2])).rows[0];
+  assert.equal(draftRow2After.status, "withdrawn", "the maker-cancel ALSO withdraws the anchored draft in the same transaction (the one-door law)");
+  assert.ok(
+    String(draftRow2After.withdrawal_reason ?? "").startsWith("bank match reservation cancelled:"),
+    `the withdrawal_reason names the bank-match cancellation as its cause (got ${JSON.stringify(draftRow2After.withdrawal_reason)})`,
+  );
 
-  // REJECT PATH: a fresh threshold reservation, its draft entry WITHDRAWN
-  // (the checker's rejection) -- the group must still be cancellable.
+  // REJECT PATH (as-built ladder fix, 2026-07-31): THE ONE-DOOR LAW. A draft anchoring a
+  // PENDING bank-match reservation can no longer be withdrawn alone -- that would strand the
+  // owned statement line. withdraw_draft refuses named (pending_match_present); the checker's
+  // rejection instead goes through unmatch_bank_match, which withdraws the draft atomically.
   const inv3 = await counterpartyStampedItem(sub, {
     client, domain: "ar", cp, cpKind: "customer", cents: HIGH_STAKES_CENTS, control: AR1, checker: world.users.bob,
   });
@@ -1189,10 +1205,68 @@ test("x38.u pending-match at EXACTLY the threshold: line owned at draft, a disti
   const pendingMatch3 = matchIdOf(receipt3);
   const draftEntry3 = idOf(receipt3, "entry_id", "entry");
   const draftRow3 = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [draftEntry3])).rows[0];
-  await withdrawDraft(world.users.bob, { entry: draftEntry3, reason: "x38.u checker rejects", expectedRevision: draftRow3.revision_token, opKey: opk("x38-u-reject") });
-  await unmatchBankMatch(sub, { client, match: pendingMatch3, reason: "x38.u cancel after reject" });
+  const rejectDenied = await caught(() => withdrawDraft(world.users.bob, {
+    entry: draftEntry3, reason: "x38.u checker rejects (a lone withdrawal attempt)",
+    expectedRevision: draftRow3.revision_token, opKey: opk("x38-u-reject-lone"),
+  }));
+  assert.ok(rejectDenied, "withdraw_draft on a draft anchoring a PENDING bank-match reservation must refuse -- the one-door law");
+  assert.equal(rejectDenied.code, CLR10, `the refusal is CLR10 (got ${rejectDenied.code} -- ${rejectDenied.message})`);
+  assert.equal(reasonOf(rejectDenied), "pending_match_present", `the named reason is pending_match_present (got ${reasonOf(rejectDenied)})`);
+
+  const cancelReceipt3 = await unmatchBankMatch(sub, { client, match: pendingMatch3, reason: "x38.u cancel after reject, through the one door" });
+  assert.equal(
+    cancelReceipt3.draft_withdrawn ?? cancelReceipt3.draftWithdrawn, true,
+    "unmatch_bank_match withdraws the draft in the SAME transaction as the reject-path cancel",
+  );
   const rejectedRow = await matchRow(pendingMatch3);
-  assert.equal(rejectedRow.status, "unmatched", "a checker-REJECTED draft leaves the pending group cancellable the same way");
+  assert.equal(rejectedRow.status, "unmatched", "a checker-REJECTED draft leaves the pending group cancellable through unmatch_bank_match");
+  const draftRow3After = (await rootQuery("select status, withdrawal_reason from clara.journal_entries where id=$1", [draftEntry3])).rows[0];
+  assert.equal(draftRow3After.status, "withdrawn", "unmatch_bank_match withdrew the draft -- the checker's rejection lands through the one door");
+  assert.ok(
+    String(draftRow3After.withdrawal_reason ?? "").startsWith("bank match reservation cancelled:"),
+    `the withdrawal_reason names the bank-match cancellation as its cause (got ${JSON.stringify(draftRow3After.withdrawal_reason)})`,
+  );
+
+  // RED-TEAM (as-built ladder fix, 2026-07-31): a hand-flipped group bypasses BOTH named doors
+  // -- a direct fn-owner UPDATE flips a PENDING group straight to 'unmatched' WITHOUT touching
+  // its anchored draft. The cascade FK still frees the line (bank_match_line_members.
+  // group_status CASCADEs off bank_matches.status), but the draft is left ORPHANED: still
+  // 'draft', still anchoring a now-cancelled reservation. The structural backstop is a DEFERRED
+  // constraint trigger on journal_entries (fires draft->approved, AFTER UPDATE, at commit):
+  // approving that orphan must be refused.
+  const inv4 = await counterpartyStampedItem(sub, {
+    client, domain: "ar", cp, cpKind: "customer", cents: HIGH_STAKES_CENTS, control: AR1, checker: world.users.bob,
+  });
+  const stmt4 = await enterStatement(sub, {
+    client, bankAccount: bankAcct.A1.primary, periodStart: "2026-09-01", periodEnd: "2026-09-30", opening: 0,
+    specs: [{ amountCents: HIGH_STAKES_CENTS, entryDate: "2026-09-04", description: "x38.u belt red-team fixture" }],
+  });
+  const line4 = stmt4.lines[0];
+  const receipt4 = await settleFromBankLine(sub, {
+    client, line: line4.id, counterparty: cp,
+    allocations: [{ item_id: inv4.item, amount_cents: HIGH_STAKES_CENTS }],
+    memo: "x38.u belt red-team",
+  });
+  const pendingMatch4 = matchIdOf(receipt4);
+  const draftEntry4 = idOf(receipt4, "entry_id", "entry");
+  assert.equal((await matchRow(pendingMatch4)).status, "pending", "x38.u belt red-team mandatory setup: the reservation is pending");
+
+  await rootQuery(
+    `update clara.bank_matches set status='unmatched', unmatched_by=$1, unmatched_at=now(),
+       unmatched_reason=$2 where id=$3 and status='pending'`,
+    [world.users.alice, "x38.u red-team hand-flip (bypassing both named doors)", pendingMatch4],
+  );
+  assert.equal((await matchRow(pendingMatch4)).status, "unmatched", "x38.u belt red-team mandatory setup: the hand-flip landed");
+  assert.equal((await lineGroupStatus(line4.id)).length, 0, "the cascade FK freed the line even though the draft was never touched");
+  assert.equal(await entryStatusOf(draftEntry4), "draft", "x38.u belt red-team mandatory setup: the orphaned draft is UNTOUCHED, still draft");
+
+  const draftRow4 = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [draftEntry4])).rows[0];
+  const beltErr = await caught(() => approveEntry(world.users.bob, {
+    entry: draftEntry4, expectedRevision: draftRow4.revision_token, opKey: opk("x38-u-belt-approve"),
+  }));
+  assert.ok(beltErr, "approving an orphaned reservation draft must be refused by the structural belt, at commit if not sooner");
+  assert.equal(reasonOf(beltErr), "orphaned_reservation_draft", `the named reason is orphaned_reservation_draft (got ${reasonOf(beltErr)} -- ${beltErr.message})`);
+  noteLane(`x38.u belt red-team observed code=${beltErr.code} message=${String(beltErr.message).slice(0, 200)}`);
 });
 
 // ===========================================================================
@@ -1532,23 +1606,148 @@ test("x38.ac every bank.* event payload carries identifiers only -- no account n
 });
 
 // ===========================================================================
-// x38.ad -- TABLE ACL PINS. Force RLS + zero agent/wake grants on the match
-// surface (the 0037 idiom this design explicitly reuses).
+// x38.ad -- TABLE ACL PINS, ADJUDICATED (mirrors x38.al's shape in the sibling
+// bank-identity/ingest file exactly): clara_authenticated holds a DIRECT
+// firm-scoped SELECT under FORCE RLS, never DML; the agent/runtime/wake roles
+// hold NOTHING at all on the match surface.
 // ===========================================================================
-test("x38.ad the bank match/settle tables force RLS and grant nothing to the agent or wake roles", async (t) => {
+test("x38.ad the bank match/settle tables: human SELECT-only under forced RLS; zero agent/runtime/wake grants", async (t) => {
   if (skipHere(t)) return;
   const tables = ["bank_matches", "bank_match_line_members", "bank_match_entry_members", "bank_match_audit"];
+  const noAccessRoles = [ROLES.agentRo, ROLES.runtime, ROLES.wakeInteractive, ROLES.wakeProactive];
   for (const tbl of tables) {
     const flags = await rlsFlags(tbl);
     assert.ok(flags, `clara.${tbl} exists`);
     assert.equal(flags.rls, true, `clara.${tbl} has row-level security ENABLED`);
     assert.equal(flags.force, true, `clara.${tbl} FORCES row-level security (even the owner role respects policies)`);
-    for (const role of [ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive]) {
-      const priv = await rootQuery(
-        "select bool_or(pg_catalog.has_table_privilege($1, c.oid, 'SELECT')) as ok from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='clara' and c.relname=$2",
-        [role, tbl],
+
+    const sel = await rootQuery(`select has_table_privilege($1, $2, 'SELECT') as ok`, [ROLES.authenticated, `clara.${tbl}`]);
+    assert.equal(sel.rows[0].ok, true, `${ROLES.authenticated} holds the design's direct firm-scoped SELECT on clara.${tbl}`);
+    const dml = await rootQuery(
+      `select bool_or(has_table_privilege($1, $2, priv)) as ok
+         from unnest(array['INSERT','UPDATE','DELETE','TRUNCATE']) priv`,
+      [ROLES.authenticated, `clara.${tbl}`],
+    );
+    assert.notEqual(dml.rows[0].ok, true, `${ROLES.authenticated} must hold NO direct DML on clara.${tbl}`);
+
+    for (const role of noAccessRoles) {
+      const r = await rootQuery(
+        `select bool_or(has_table_privilege($1, $2, priv)) as ok
+           from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE']) priv`,
+        [role, `clara.${tbl}`],
       );
-      assert.equal(priv.rows[0].ok, false, `${role} holds ZERO privilege on clara.${tbl} -- "no agent grants anywhere in the bank schema" (design S7)`);
+      assert.notEqual(r.rows[0].ok, true, `${role} must hold NO direct table privilege on clara.${tbl} -- "no agent grants anywhere in the bank schema" (design S7)`);
     }
   }
+});
+
+// ===========================================================================
+// x38.ae -- DEACTIVATE IS REFUSED WHILE MATCHED; THE FREED-COA RE-REGISTER
+// PATH CANNOT DOUBLE-CONSUME AN ENTRY (design section 4.1's deactivate-while-
+// matched refusal + the COA-pooled exclusivity bound: one GL movement never
+// clears two lines, even across bank-account generations sharing a chart
+// account).
+// ===========================================================================
+test("x38.ae deactivate is refused while matched; the freed-COA re-register path cannot double-consume an entry", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const aeCoa = "173-AE1";
+  await upsertAccountClassed(sub, { client, code: aeCoa, name: "x38.ae bank gl", type: "asset", opKey: opk("ae-gl") });
+
+  const acctA = await addBankAccount(sub, { client, coaAccountCode: aeCoa, accountNumber: `1077A${randomUUID().slice(0, 6)}` });
+  const bankA = idOf(acctA, "bank_account_id", "id");
+  assert.ok(bankA, "x38.ae mandatory setup: account A registers on the fresh COA");
+
+  const entry = await plainEntry(sub, { client, debit: aeCoa, credit: REVN, cents: 24000, memo: "x38.ae live-match fixture" });
+  const stmtA = await enterStatement(sub, {
+    client, bankAccount: bankA, periodStart: "2026-06-01", periodEnd: "2026-06-30", opening: 0,
+    specs: [{ amountCents: 24000, entryDate: "2026-06-10" }],
+  });
+  const lineA = stmtA.lines[0];
+  const receiptA = await matchBankLine(sub, { client, lines: [lineA.id], entries: [{ entry_id: entry, matched_cents: 24000 }] });
+  const matchA = matchIdOf(receiptA);
+  assert.ok(matchA, "x38.ae mandatory setup: account A's line is matched live");
+
+  // (a) deactivate refuses while a live match group survives on the account.
+  const deactDenied = await caught(() => deactivateBankAccount(sub, { client, bankAccount: bankA, reason: "x38.ae attempt while matched" }));
+  assert.ok(deactDenied, "deactivate_bank_account must refuse while a pending/live match group survives on the account");
+  assert.equal(deactDenied.code, CLR10, `the refusal is CLR10 (got ${deactDenied.code} -- ${deactDenied.message})`);
+  assert.equal(reasonOf(deactDenied), "bank_account_has_live_matches", `the named reason is bank_account_has_live_matches (got ${reasonOf(deactDenied)})`);
+
+  // (b) unmatch frees the account; deactivate now succeeds; a NEW bank account re-registers
+  // on the SAME (now-freed) chart account -- "deactivate-and-remap is a real remedy".
+  await unmatchBankMatch(sub, { client, match: matchA, reason: "x38.ae freeing the account for deactivation" });
+  await deactivateBankAccount(sub, { client, bankAccount: bankA, reason: "x38.ae now unmatched" });
+
+  const acctB = await addBankAccount(sub, { client, coaAccountCode: aeCoa, accountNumber: `1077B${randomUUID().slice(0, 6)}` });
+  const bankB = idOf(acctB, "bank_account_id", "id");
+  assert.ok(bankB, "add_bank_account re-registers the freed COA under a new bank-account generation");
+
+  const stmtB = await enterStatement(sub, {
+    client, bankAccount: bankB, periodStart: "2026-07-01", periodEnd: "2026-07-31", opening: 0,
+    specs: [
+      { amountCents: 24000, entryDate: "2026-07-08", description: "x38.ae re-match against the same entry" },
+      { amountCents: 24000, entryDate: "2026-07-09", description: "x38.ae the double-consume attempt" },
+    ],
+  });
+  const [lineB1, lineB2] = stmtB.lines;
+
+  // Re-matching the SAME already-approved entry through the new bank-account generation
+  // succeeds -- the unmatch genuinely freed the entry's own per-side gross, not just the
+  // account row's slot.
+  const receiptB = await matchBankLine(sub, { client, lines: [lineB1.id], entries: [{ entry_id: entry, matched_cents: 24000 }] });
+  const matchB = matchIdOf(receiptB);
+  assert.ok(matchB, "the SAME entry re-matches cleanly through the new bank-account generation on the freed COA");
+  await assertGroupTies(matchB, "x38.ae re-match after the COA generation change");
+
+  // A SECOND +X line against the SAME entry must NOT double-consume it -- the bound is on the
+  // ENTRY'S OWN GL movement (its debit-side gross, already exhausted by matchB), not on which
+  // bank-account generation is asking.
+  const doubleConsume = await caught(() => matchBankLine(sub, {
+    client, lines: [lineB2.id], entries: [{ entry_id: entry, matched_cents: 24000 }],
+  }));
+  assert.ok(doubleConsume, "a second +X line against the SAME entry must be refused -- one GL movement never clears two lines even across account generations");
+  assert.equal(reasonOf(doubleConsume), "already_matched", `the named reason is already_matched (got ${reasonOf(doubleConsume)})`);
+});
+
+// ===========================================================================
+// x38.af -- THE SIX /bank READ RPCs' CROSS-FIRM TENANCY (0038 SECTION R: every
+// reader is SECURITY DEFINER, carries firm_id = c.firm in every predicate, and
+// "cross-firm probes return zero rows, never a discriminating error"). A
+// firm-B owner (dave) targeting firm-A objects on all six readers.
+// ===========================================================================
+test("x38.af the six /bank read RPCs return empty for a firm-B actor over firm-A objects, never a discriminating error", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const dave = world.users.dave;
+
+  const cp = await birthCounterparty(sub, { client, name: `X38 READCROSS ${randomUUID().slice(0, 6)}`, kind: "customer" });
+  const inv = await counterpartyStampedItem(sub, { client, domain: "ar", cp, cpKind: "customer", cents: 8800, control: AR1 });
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: bankAcct.A1.primary, periodStart: "2026-06-01", periodEnd: "2026-06-30", opening: 0,
+    specs: [{ amountCents: 8800, entryDate: "2026-06-21", description: "x38.af cross-firm read probe" }],
+  });
+
+  const probes = [
+    ["list_bank_accounts", () => humanQuery(dave, "select clara.list_bank_accounts(p_client => $1) as r", [client])],
+    ["list_bank_account_proposals", () => humanQuery(dave, "select clara.list_bank_account_proposals(p_client => $1) as r", [client])],
+    ["list_bank_statements", () => humanQuery(dave, "select clara.list_bank_statements(p_client => $1, p_bank_account => $2) as r", [client, bankAcct.A1.primary])],
+    ["get_bank_statement", () => humanQuery(dave, "select clara.get_bank_statement(p_statement => $1) as r", [stmt.statementId])],
+    ["list_open_items_by_counterparty", () => humanQuery(dave, "select clara.list_open_items_by_counterparty(p_client => $1, p_domain => $2, p_counterparty => $3) as r", [client, "ar", cp])],
+    ["list_bank_match_candidates", () => humanQuery(dave, "select clara.list_bank_match_candidates(p_client => $1, p_bank_account => $2) as r", [client, bankAcct.A1.primary])],
+  ];
+  for (const [label, run] of probes) {
+    const res = await run();
+    const r = res.rows[0].r;
+    const isEmpty = r === null || (Array.isArray(r) && r.length === 0) || (typeof r === "object" && r !== null && !Array.isArray(r) && Object.keys(r).length === 0);
+    assert.ok(isEmpty, `${label}: a firm-B actor over a firm-A object must get empty, not a discriminating error (got ${JSON.stringify(r)})`);
+  }
+
+  // Mandatory setup check: the SAME reads, as the firm-A owner, are non-empty -- the probes
+  // above are proving TENANCY, not a universally-broken reader.
+  const own = await humanQuery(sub, "select clara.list_bank_accounts(p_client => $1) as r", [client]);
+  assert.ok(Array.isArray(own.rows[0].r) && own.rows[0].r.length > 0, "x38.af mandatory setup: the firm-A owner's OWN list_bank_accounts read is non-empty");
+  assert.equal(await outstandingOf(inv.item), 8800, "x38.af mandatory setup: the firm-A open item exists and is untouched by the cross-firm probes");
 });

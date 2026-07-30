@@ -286,15 +286,25 @@ async function processOcrLane(services, withRuntime, taskId, doc) {
     const payload = services.buildStatementPersistPayload({
       ingestMode: "ocr",
       agreed,
-      reader1: { extraction_id: reader1?.extraction_id ?? null, source: "layout_geometry", engine_id: reader1?.engine_id ?? null },
-      reader2: {
-        extraction_id: null,
-        source: "azure_bank_statement",
-        engine_id: reader2?.engineId ?? null,
-        raw_sha256: reader2?.rawSha256 ?? null,
-        normalization_version: reader2?.normalizationVersion ?? null,
-        pages_used: reader2?.pagesUsed ?? null,
+      reader1: {
+        meta: {
+          extraction_id: reader1?.extraction_id ?? null,
+          source: "layout_geometry",
+          engine_id: reader1?.engine_id ?? "clara-statement-layout:v1",
+        },
+        read: reader1,
       },
+      reader2: {
+        meta: {
+          extraction_id: null,
+          source: "azure_bank_statement",
+          engine_id: reader2?.engineId ?? "azure-di:prebuilt-bankStatement:2024-11-30",
+          raw_sha256: reader2?.rawSha256 ?? null,
+          normalization_version: reader2?.normalizationVersion ?? null,
+        },
+        read: reader2,
+      },
+      pagesUsed: reader2?.pagesUsed ?? 0,
     });
     await callWriter(withRuntime, "select clara.persist_statement_facts($1,$2::jsonb) as receipt", [
       taskId,
@@ -320,8 +330,17 @@ async function processStructuredLane(services, withRuntime, taskId, doc) {
     const payload = services.buildStatementPersistPayload({
       ingestMode: "structured",
       agreed,
-      reader1: { extraction_id: null, source: reader?.receipt?.reader ?? "structured", engine_id: null },
+      reader1: {
+        meta: {
+          extraction_id: null,
+          source: reader?.receipt?.reader ?? "structured",
+          // the DB refuses a reader1 with no engine id; the parse lane's is its own name
+          engine_id: "clara-statement-parse:v1",
+        },
+        read: reader,
+      },
       reader2: null,
+      pagesUsed: 0,
     });
     await callWriter(withRuntime, "select clara.persist_statement_facts($1,$2::jsonb) as receipt", [
       taskId,

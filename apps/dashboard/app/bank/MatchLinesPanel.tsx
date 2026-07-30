@@ -13,8 +13,7 @@ import { listAccounts, type AccountRow } from "../accounts/api";
 import { type BankStatementLineRow, type BankStatementRow, type MatchCandidateEntryRow } from "./model";
 import {
   isEligibleAdjustmentCoaAccount, upsertEntryAllocation, matchGroupTiePreview,
-  anyPeriodException, describeBankRefusal, type EntryAllocation, type BankAdjustment,
-} from "./matchModel";
+  anyPeriodException, describeBankRefusal, type EntryAllocation, type BankAdjustment, parseCentsInput } from "./matchModel";
 import { fmtCents } from "../shared/fmt";
 import styles from "./bank.module.css";
 
@@ -105,7 +104,7 @@ export function MatchLinesPanel({
               <input
                 type="number" className={`${styles.input} ${styles.amountInput}`} value={current === 0 ? "" : current / 100}
                 placeholder="0.00" aria-label={`Matched amount for entry ${c.entry_id}`}
-                onChange={(e) => setAmount(c.entry_id, Math.round((Number(e.target.value) || 0) * 100))}
+                onChange={(e) => setAmount(c.entry_id, parseCentsInput(e.target.value))}
               />
             </div>
           );
@@ -121,7 +120,7 @@ export function MatchLinesPanel({
           <input
             type="number" className={`${styles.input} ${styles.amountInput}`} value={a.amount_cents === 0 ? "" : a.amount_cents / 100}
             placeholder="0.00" aria-label={`Adjustment amount ${i + 1}`}
-            onChange={(e) => updateAdjustment(i, { amount_cents: Math.round((Number(e.target.value) || 0) * 100) })}
+            onChange={(e) => updateAdjustment(i, { amount_cents: parseCentsInput(e.target.value) })}
           />
           <button className={styles.linkButton} onClick={() => removeAdjustment(i)}>remove</button>
         </div>

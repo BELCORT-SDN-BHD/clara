@@ -214,16 +214,22 @@ const BANK_0038_HUMAN_FNS = [
   "match_bank_line", "unmatch_bank_match", "settle_from_bank_line", "complete_pending_match",
 ];
 const BANK_0038_RUNTIME_FNS = ["persist_statement_facts", "fail_statement_facts"];
+const BANK_0038_READ_FNS = [
+  "list_bank_accounts", "list_bank_account_proposals", "list_bank_statements",
+  "get_bank_statement", "list_open_items_by_counterparty", "list_bank_match_candidates",
+];
 const BANK_0038_UNGRANTED_FNS = [
   "_assert_bank_coa_candidate", "_bank_entry_side_capacity", "_bank_live_match_present",
   "_bank_live_statement_on_document", "_bank_match_adjustment_entry", "_bank_match_audit",
   "_bank_match_coa", "_persist_statement_core", "_stmt_header_norm", "_stmt_lines_norm",
   "_tf_bank_match_congruence", "_tf_bank_match_entry_exhaustion", "_tf_bank_match_group_tie",
   "_tf_bank_statement_belt", "_tf_bank_statement_void_belt", "_tf_je_bank_match_reversal_belt",
-  "_tf_stamp_bmlm_account",
+  "_tf_stamp_bmlm_account", "_tf_je_bank_pending_orphan_belt", "_tf_bank_member_no_delete",
+  "_tf_bank_statement_transition", "_tf_bank_statement_no_delete",
 ];
 export const BANK_0038_COHORT = [
-  ...BANK_0038_HUMAN_FNS, ...BANK_0038_RUNTIME_FNS, ...BANK_0038_UNGRANTED_FNS,
+  ...BANK_0038_HUMAN_FNS, ...BANK_0038_RUNTIME_FNS, ...BANK_0038_READ_FNS,
+  ...BANK_0038_UNGRANTED_FNS,
 ];
 
 const WAVE_B_0020_HUMAN_FNS = [
@@ -273,6 +279,7 @@ export const ALLOWED = {
     ...VENDOR_BINDING_0028_HUMAN_FNS, // 0028 the vendor identity binding ceremony + reads
     ...SUBLEDGER_0037_HUMAN_FNS, // 0037 the Wave C-a settlement composites (human judgement only)
     ...BANK_0038_HUMAN_FNS, // 0038 the Wave C-b bank verbs (human judgement only)
+    ...BANK_0038_READ_FNS, // 0038 the /bank read surface (definer + _human_ctx + firm predicates)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.

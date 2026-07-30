@@ -194,6 +194,10 @@ insert into clara.bank_institutions (code, name) values
   ('HLB',   'Hong Leong Bank Berhad'),
   ('AMB',   'AmBank (M) Berhad'),
   ('BIMB',  'Bank Islam Malaysia Berhad'),
+  -- as-built ladder fix 2026-07-31, Codex wave: BMMB joins the seed. The catalog grows
+  -- ADDITIVELY and never renames -- a code already written into a bank_accounts row is an
+  -- identity, so a rename would silently re-point live rows at a different institution.
+  ('BMMB',  'Bank Muamalat Malaysia Berhad'),
   ('OCBC',  'OCBC Bank (Malaysia) Berhad'),
   ('UOB',   'United Overseas Bank (Malaysia) Bhd'),
   ('HSBC',  'HSBC Bank Malaysia Berhad'),
@@ -437,6 +441,81 @@ create index ix_bank_statements_client on clara.bank_statements (client_id, stat
 create trigger t_bank_statements_no_truncate before truncate
   on clara.bank_statements for each statement execute function clara._tf_no_truncate();
 
+-- -------------------------------------------------------------------------------------
+-- THE TRANSITION GUARD (as-built ladder fix 2026-07-31, Codex wave). "_tf_append_only would
+-- block the legitimate void UPDATE outright" is a true statement about the GENERIC guard, and
+-- the file took it as licence to leave this table with NO row-level write guard at all --
+-- which is a much larger hole than the one it dodged. A statement header is a corroborated,
+-- books-bearing fact: its period, its opening and closing balances, its line count and its
+-- reader provenance are what every downstream tie is computed against. Nothing in the
+-- lifecycle may edit them, and until now nothing said so structurally -- a stray
+-- `update clara.bank_statements set closing_cents = ...` as the fn-owner would have sailed
+-- through, and the DEFERRED belt only re-derives the chain, so a header edited in step with
+-- its lines would have been certified rather than refused.
+--
+-- EXACTLY TWO UPDATE SHAPES ARE LAWFUL, and they are the two the verbs actually perform:
+--   (a) THE VOID STAMP -- live -> void, setting voided_by / voided_at / voided_reason and
+--       nothing else (clara.void_bank_statement). superseded_by does not move at void: the
+--       replacement does not exist yet, which the live-partial-unique index guarantees.
+--   (b) THE SUPERSESSION WIRE -- a void row gaining superseded_by EXACTLY ONCE, status still
+--       'void', void stamps untouched (clara._persist_statement_core's re-ingest lineage
+--       write, which is monotone by its own `superseded_by is null` predicate).
+-- Everything else -- an un-void, a re-void, a second supersession, a period edit, a balance
+-- edit, a tenancy move -- raises CLR08. THE IMMUTABLE SET IS COMPARED WHOLE, as a jsonb of
+-- the row minus the five lifecycle columns, so a column added to this table by a later
+-- migration is protected by default rather than by somebody remembering to extend a list.
+-- -------------------------------------------------------------------------------------
+create function clara._tf_bank_statement_transition() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_old jsonb; v_new jsonb;
+begin
+  v_old := to_jsonb(old) - 'status' - 'superseded_by' - 'voided_by' - 'voided_at' - 'voided_reason';
+  v_new := to_jsonb(new) - 'status' - 'superseded_by' - 'voided_by' - 'voided_at' - 'voided_reason';
+  if v_old is distinct from v_new then
+    raise exception 'bank statements are immutable outside the void/supersede transitions'
+      using errcode='CLR08',
+        detail=jsonb_build_object('reason','statement_immutable','statement_id',old.id)::text;
+  end if;
+  -- (a) THE VOID STAMP.
+  if old.status = 'live' and new.status = 'void'
+     and new.voided_by is not null and new.voided_at is not null
+     and nullif(btrim(coalesce(new.voided_reason,'')),'') is not null
+     and new.superseded_by is not distinct from old.superseded_by then
+    return new;
+  end if;
+  -- (b) THE SUPERSESSION WIRE, once and once only.
+  if old.status = 'void' and new.status = 'void'
+     and old.superseded_by is null and new.superseded_by is not null
+     and new.voided_by is not distinct from old.voided_by
+     and new.voided_at is not distinct from old.voided_at
+     and new.voided_reason is not distinct from old.voided_reason then
+    return new;
+  end if;
+  raise exception 'bank statements are immutable outside the void/supersede transitions'
+    using errcode='CLR08',
+      detail=jsonb_build_object('reason','statement_transition_illegal',
+        'statement_id',old.id,'from_status',old.status,'to_status',new.status)::text;
+end $$;
+revoke all on function clara._tf_bank_statement_transition() from public;
+create trigger t_bank_statements_transition before update on clara.bank_statements
+  for each row execute function clara._tf_bank_statement_transition();
+
+-- A STATEMENT IS NEVER DELETED -- void it (the journal_entries "reverse, not delete" law,
+-- 0003:361, restated for the statement header because the same argument holds: a deleted
+-- statement takes its lines, and with them the provenance every match on those lines cites).
+-- Row-level so the message can name the row; the statement-level TRUNCATE guard above covers
+-- the other door.
+create function clara._tf_bank_statement_no_delete() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  raise exception 'bank statement % is never deleted (void it, and re-ingest supersedes it)', old.id
+    using errcode='CLR08',
+      detail=jsonb_build_object('reason','statement_never_deleted','statement_id',old.id)::text;
+end $$;
+revoke all on function clara._tf_bank_statement_no_delete() from public;
+create trigger t_bank_statements_no_delete before delete on clara.bank_statements
+  for each row execute function clara._tf_bank_statement_no_delete();
+
 alter table clara.bank_statements enable row level security;
 alter table clara.bank_statements force row level security;
 create policy p_bank_statements_owner on clara.bank_statements
@@ -466,7 +545,16 @@ create table clara.bank_statement_lines (
   value_date             date,
   description            text,
   amount_cents           bigint      not null check (amount_cents <> 0),
-  running_balance_cents  bigint      not null,
+  -- NULLABLE (as-built ladder fix 2026-07-31, Codex wave). The lines normalizer admits a line
+  -- with NO printed running balance on the structured and human-keyed lanes -- a CSV export
+  -- routinely carries none, and a hand-keyed month cannot invent one -- so a NOT NULL here
+  -- would have made those two lanes unwritable at exactly the shape they were designed to
+  -- accept. The OCR lane's mandatory-per-row requirement is unchanged and stays where it
+  -- belongs: a VERB-time refusal (`chain_broken`, _persist_statement_core step 8), because it
+  -- is a property of that LANE, not a static invariant of the column. Every consumer of this
+  -- column (the core's chain walk and the statement belt's per-row walk) already SKIPS the
+  -- comparison when the value is absent rather than null-trapping on it.
+  running_balance_cents  bigint,
   -- Denormalized bank_account_id, congruence-FK'd against the STATEMENT's own (design
   -- SS4.2) -- this single FK proves both "the statement exists" and "this line's account
   -- equals its statement's account" in one shot, off bank_statements' 4-key anchor above.
@@ -523,6 +611,22 @@ create table clara.bank_matches (
   origin              text        not null default 'human' check (origin in ('human','rule')),
   matched_via_rule_id uuid,
   draft_entry_id      uuid,
+  -- THE DEFERRED-ANCILLARY PAYLOAD (as-built ladder fix 2026-07-31, Codex wave). At/above the
+  -- high-stakes threshold the settlement is a DRAFT the checker has not seen yet -- so the
+  -- bank charge and the difference adjustments that ride the same human act must not be posted
+  -- yet either. Posting them at settle time put real, approved money in the books for a
+  -- settlement that might be rejected, and left them behind as orphans when it was. They are
+  -- therefore VALIDATED at settle time and CARRIED here, then created by
+  -- clara.complete_pending_match at the pending->live flip, in the same transaction as the
+  -- member row that ties them.
+  --
+  -- WHY A PLAIN NULLABLE COLUMN AND NO CHECK. The honest constraint would be "null unless
+  -- status='pending'", and it is NOT expressible as a table CHECK here: status moves under it
+  -- (complete_pending_match clears the payload IN THE SAME UPDATE that flips to 'live', and
+  -- a CHECK evaluating the new row would see the flipped status against a payload it is
+  -- watching disappear). The lifecycle is owned by the two verbs and asserted by the group-tie
+  -- belt's pending arm instead, which is where every other pending-shape law already lives.
+  pending_ancillaries jsonb,
   created_by          uuid        not null references clara.users(id),
   created_at          timestamptz not null default now(),
   completed_at        timestamptz,
@@ -654,6 +758,18 @@ create trigger t_bmlm_stamp_account before insert on clara.bank_match_line_membe
 -- cascaded column is belt/verb territory, not this file's.
 create trigger t_bmlm_no_truncate before truncate
   on clara.bank_match_line_members for each statement execute function clara._tf_no_truncate();
+-- DELETE is blocked outright (as-built ladder fix): the member tables are the exclusivity
+-- and exhaustion record; nothing ever deletes a member (unmatch flips the GROUP, the
+-- cascade rewrites group_status). UPDATE must stay open for that cascade.
+create function clara._tf_bank_member_no_delete() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+begin
+  raise exception 'bank match members are never deleted; unmatch the group instead'
+    using errcode='CLR08';
+end $$;
+revoke all on function clara._tf_bank_member_no_delete() from public;
+create trigger t_bmlm_no_delete before delete on clara.bank_match_line_members
+  for each row execute function clara._tf_bank_member_no_delete();
 
 alter table clara.bank_match_line_members enable row level security;
 alter table clara.bank_match_line_members force row level security;
@@ -715,6 +831,8 @@ create index ix_bmem_entry on clara.bank_match_entry_members (entry_id);
 
 create trigger t_bmem_no_truncate before truncate
   on clara.bank_match_entry_members for each statement execute function clara._tf_no_truncate();
+create trigger t_bmem_no_delete before delete on clara.bank_match_entry_members
+  for each row execute function clara._tf_bank_member_no_delete();
 
 alter table clara.bank_match_entry_members enable row level security;
 alter table clara.bank_match_entry_members force row level security;
@@ -989,7 +1107,7 @@ grant select on clara.bank_match_audit to clara_authenticated;
 --         "lines":  [ <LineRead>, ... ]
 --       },
 --       "reader2": {                        -- OCR LANE ONLY; absent on the structured lane
---         "engine_id": "azure-di:prebuilt-bankStatement:2024-11-30",
+--         "engine_id": "azure-di:prebuilt-bankStatement.us:2024-11-30",
 --         "header": <HeaderRead>,
 --         "lines":  [ <LineRead>, ... ]
 --       }
@@ -2304,7 +2422,11 @@ begin
 
   -- THE PER-ROW RUNNING STEPS, where the bank printed them. This is the arm that localises a
   -- break, and it is also the only arm that can tell a REORDERED row set from a merely
-  -- mis-summed one.
+  -- mis-summed one. "Where the bank printed them" is literal and load-bearing now that the
+  -- column is nullable (as-built ladder fix 2026-07-31, Codex wave): an absent running balance
+  -- SKIPS this comparison instead of null-trapping it, and the derived walk (v_run) continues
+  -- across the gap, so a structured or hand-keyed lane with no printed balances still has its
+  -- opening+movements=closing identity proved above.
   v_run := s.opening_cents;
   for ln in select bl.line_no, bl.amount_cents, bl.running_balance_cents
             from clara.bank_statement_lines bl
@@ -2710,6 +2832,15 @@ begin
     raise exception 'bank account % is already inactive', p_bank_account
       using errcode = 'CLR16', detail = '{"reason":"bank_account_already_inactive"}';
   end if;
+  -- AS-BUILT LADDER FIX (2026-07-31): the same live-match refusal remap carries. A live or
+  -- pending group surviving on a deactivated account is the enabling half of the
+  -- pool-vs-capacity divergence (the COA frees for re-registration while the old groups
+  -- keep consuming) -- and professionally, an account with unresolved matching is not DONE.
+  if exists (select 1 from clara.bank_matches bm
+      where bm.bank_account_id = p_bank_account and bm.status in ('pending','live')) then
+    raise exception 'bank account % still holds pending/live match groups; unmatch them before deactivating', p_bank_account
+      using errcode='CLR10', detail='{"reason":"bank_account_has_live_matches"}';
+  end if;
 
   update clara.bank_accounts set active = false, deactivated_by = c.actor,
       deactivated_at = now(), deactivated_reason = p_reason
@@ -2958,11 +3089,12 @@ set role clara_fn_owner;
 --                               period_start, period_end, status ck ('live','void'), ...)
 --   clara.bank_statement_lines (id, firm_id, client_id, statement_id, bank_account_id,
 --                               line_no, entry_date, value_date, description,
---                               amount_cents <> 0, running_balance_cents)
+--                               amount_cents <> 0, running_balance_cents NULLABLE)
 --   clara.bank_matches         (id, firm_id, client_id, bank_account_id,
 --                               status ck ('pending','live','unmatched'),
 --                               origin ck ('human','rule'), matched_via_rule_id,
---                               draft_entry_id, created_by, created_at, completed_at,
+--                               draft_entry_id, pending_ancillaries jsonb,
+--                               created_by, created_at, completed_at,
 --                               unmatched_by, unmatched_at, unmatched_reason,
 --                               unique (id, firm_id, client_id, status)  <- cascade anchor)
 --   clara.bank_match_line_members  (id, firm_id, client_id, match_id, line_id,
@@ -2992,16 +3124,23 @@ set role clara_fn_owner;
 --   group therefore CANNOT carry the member that would make it tie; a literal reading makes
 --   the reservation unbuildable, which cannot be what WCB-R3 ruled.
 --   THE READING BUILT HERE: the exact tie is asserted on 'live' groups. On a 'pending'
---   group the belt asserts the RESERVATION SHAPE instead -- at least one line member and a
---   non-null draft_entry_id, i.e. "a real line is being held against a real draft" -- and
---   clara.complete_pending_match asserts the exact tie BY NAME at the pending->live flip,
---   after which the live arm holds it forever. The tie is never skipped; it is asserted at
---   the first moment it is assertable. Cells: the pending walk in design part2 section 6
---   ("line owned at draft, checker approves, complete_pending_match ties").
---   NOTE the reservation is NOT "zero entry members": at high stakes the SETTLEMENT is a
---   draft but the same call's bank-charge / difference adjustment entries are ordinary
---   small entries that approve immediately, so they are lawful members of a pending group
---   from birth.
+--   group the belt asserts the RESERVATION SHAPE instead -- at least one line member, a
+--   non-null draft_entry_id, and ZERO entry members, i.e. "a real line is being held against
+--   a real draft AND NOTHING HAS POSTED YET" -- and clara.complete_pending_match asserts the
+--   exact tie BY NAME at the pending->live flip, after which the live arm holds it forever.
+--   The tie is never skipped; it is asserted at the first moment it is assertable. Cells: the
+--   pending walk in design part2 section 6 ("line owned at draft, checker approves,
+--   complete_pending_match ties").
+--   ZERO ENTRY MEMBERS IS THE SHAPE (as-built ladder fix 2026-07-31, Codex wave, correcting
+--   this file's own earlier reading). The first cut let the same call's bank-charge and
+--   difference-adjustment entries post immediately and join the pending group, on the ground
+--   that they are "ordinary small entries". They are not ordinary in this position: they are
+--   parts of ONE human act whose principal half the checker has not approved. Posting them at
+--   settle time books real money against a settlement that may be rejected, and a cancelled
+--   reservation then leaves them stranded in the GL with no group and no remedy but a manual
+--   reversal. So the ancillaries are validated at settle time, CARRIED on
+--   bank_matches.pending_ancillaries, and created at the flip -- which makes "a pending group
+--   holds no entry member" true, assertable, and the thing the belt now says.
 --
 -- (T2) THE POSTING-DATE EXCEPTION HAS NO ACK CHANNEL ON THE COMPLETION PATH.
 --   match_bank_line takes p_ack_period_exceptions and REFUSES an unacknowledged
@@ -3143,12 +3282,28 @@ begin
   -- THE PENDING ARM (tension T1 in the file header, resolved in the open). A pending group
   -- is a RESERVATION: the line is owned the moment the maker acts, and the settlement entry
   -- that will balance it is still a draft, which section 4.5 forbids as a member. What is
-  -- assertable now is the reservation's shape -- a real line held against a real draft --
-  -- and clara.complete_pending_match asserts the exact tie by name at the flip.
+  -- assertable now is the reservation's shape -- a real line held against a real draft, with
+  -- NOTHING POSTED against it yet -- and clara.complete_pending_match asserts the exact tie by
+  -- name at the flip.
+  --
+  -- ZERO ENTRY MEMBERS (as-built ladder fix 2026-07-31, Codex wave). The bank charge and the
+  -- difference adjustments are now DEFERRED to the flip and carried on
+  -- bank_matches.pending_ancillaries until then, so a pending group carrying an entry member
+  -- is malformed by construction: either somebody posted an ancillary early, or a member
+  -- landed on a reservation that has no business holding one. Both are the same refusal.
+  -- Note complete_pending_match writes its members at group_status='pending' and flips in the
+  -- SAME transaction -- this belt is DEFERRED and re-queries by id, so it judges the group as
+  -- 'live' at commit and takes the live arm, never this one.
   if g.status = 'pending' then
     if g.draft_entry_id is null then
       raise exception 'bank match % is pending but names no draft entry; a reservation with nothing to complete would hold the line forever', v_match
         using errcode='CLR10',detail='{"reason":"pending_match_unanchored"}';
+    end if;
+    if v_en > 0 then
+      raise exception 'bank match % is still pending but already holds % journal entry member(s); a reservation posts nothing until it completes -- its charge and adjustments ride pending_ancillaries', v_match, v_en
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','pending_match_unanchored','match_id',v_match,
+            'entry_members',v_en)::text;
     end if;
     return null;
   end if;
@@ -3224,9 +3379,16 @@ begin
     into v_pos, v_neg
     from clara.bank_match_entry_members em
     join clara.bank_matches bm2 on bm2.id = em.match_id
+    join clara.bank_accounts ba2 on ba2.id = bm2.bank_account_id
     where em.entry_id = m.entry_id
       and bm2.status in ('pending','live')
-      and bm2.bank_account_id = g.bank_account_id;
+      -- POOL KEYED ON THE COA, NOT THE ACCOUNT ID (as-built ladder fix, 2026-07-31, converged
+      -- money+lineage finding): capacity is measured per COA code, and the where-active
+      -- partial uniques let a DEACTIVATED account (still holding live groups) share a COA
+      -- with a fresh live one -- an account-id pool would then count each group set
+      -- separately and let one GL movement clear two lines. Joining on the COA makes the
+      -- pool's key the capacity's key, always.
+      and ba2.coa_account_code = v_coa and ba2.client_id = m.client_id;
 
   cap := clara._bank_entry_side_capacity(m.entry_id, v_coa);
 
@@ -3463,6 +3625,10 @@ create constraint trigger t_bank_statements_void_belt
 -- already-reversed row asserts nothing new, and 0037's belt already re-runs on every
 -- approved-row UPDATE. Narrowing to the transition keeps this belt off the hot path of
 -- every ordinary approval.
+--
+-- IT COVERS BOTH ATTACHMENTS (as-built ladder fix 2026-07-31, Codex wave): membership AND a
+-- pending group's draft anchor. See the body for why a membership-only reading left the
+-- highest-value case -- the high-stakes reservation -- uncovered.
 -- ---------------------------------------------------------------------
 create function clara._tf_je_bank_match_reversal_belt() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
@@ -3472,12 +3638,20 @@ begin
   v_id := new.id;
   select je.reversed_by into v_rev from clara.journal_entries je where je.id = v_id;
   if v_rev is null then return null; end if;
+  -- THE DRAFT ANCHOR COUNTS TOO (as-built ladder fix 2026-07-31, Codex wave). A pending
+  -- group's settlement is NOT a member -- section 4.5 forbids a draft member -- it hangs off
+  -- the group's draft_entry_id. So a membership-only belt was blind to exactly the entry a
+  -- pending reservation is holding a statement line against: approve that draft, reverse it,
+  -- and the group is left pointing at a reversed anchor with the line still owned. The arm is
+  -- read off clara.bank_matches, which covers both attachments in one pass.
   select count(*)::int, min(bm.id::text)::uuid into v_n, v_match
-    from clara.bank_match_entry_members mm
-    join clara.bank_matches bm on bm.id = mm.match_id
-    where mm.entry_id = v_id and bm.status in ('pending','live');
+    from clara.bank_matches bm
+    where bm.status in ('pending','live')
+      and (bm.draft_entry_id = v_id
+           or exists (select 1 from clara.bank_match_entry_members mm
+                      where mm.match_id = bm.id and mm.entry_id = v_id));
   if v_n > 0 then
-    raise exception 'entry % is a member of % pending or live bank match(es); unmatch first, then reverse', v_id, v_n
+    raise exception 'entry % rides % pending or live bank match(es), as a member or as a reservation''s draft anchor; unmatch first, then reverse', v_id, v_n
       using errcode='CLR10',
         detail=jsonb_build_object('reason','live_bank_match_present','entry_id',v_id,
           'matches',v_n,'match_id',v_match)::text;
@@ -3958,8 +4132,10 @@ begin
     if en.amt > 0 and en.amt > cap.dr_cents - coalesce((
          select sum(em.matched_cents) from clara.bank_match_entry_members em
          join clara.bank_matches bm on bm.id = em.match_id
+         join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
          where em.entry_id = en.entry_id and em.matched_cents > 0
-           and bm.status in ('pending','live') and bm.bank_account_id = v_bank), 0) then
+           and bm.status in ('pending','live')
+           and ba2.coa_account_code = v_coa and ba2.client_id = p_client), 0) then
       raise exception 'journal entry % has no unmatched debit cents left on %', en.entry_id, v_coa
         using errcode='CLR10',
           detail=jsonb_build_object('reason','already_matched','side','debit',
@@ -3968,8 +4144,10 @@ begin
     if en.amt < 0 and -en.amt > cap.cr_cents - coalesce((
          select sum(-em.matched_cents) from clara.bank_match_entry_members em
          join clara.bank_matches bm on bm.id = em.match_id
+         join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
          where em.entry_id = en.entry_id and em.matched_cents < 0
-           and bm.status in ('pending','live') and bm.bank_account_id = v_bank), 0) then
+           and bm.status in ('pending','live')
+           and ba2.coa_account_code = v_coa and ba2.client_id = p_client), 0) then
       raise exception 'journal entry % has no unmatched credit cents left on %', en.entry_id, v_coa
         using errcode='CLR10',
           detail=jsonb_build_object('reason','already_matched','side','credit',
@@ -4124,6 +4302,13 @@ end $$;
 -- clara.complete_pending_match then flips pending->live. The maker cancels through
 -- clara.unmatch_bank_match, which works on 'pending'. v1's high_stakes_two_step refusal is
 -- WITHDRAWN -- it contradicted WCB-R3's one-transaction ruling.
+--
+-- AND ON THAT BRANCH THE ANCILLARIES ARE DEFERRED, NOT POSTED (as-built ladder fix
+-- 2026-07-31, Codex wave). The bank charge and the difference adjustments are validated here
+-- and carried on bank_matches.pending_ancillaries; clara.complete_pending_match creates them
+-- at the flip, in the transaction that also ties the group. Posting them at settle time would
+-- book money for a settlement no checker has approved, and strand it in the GL if the
+-- reservation is cancelled. The reasoning is written out where the branch is taken, below.
 -- =====================================================================
 create function clara.settle_from_bank_line(
     p_client uuid, p_line uuid, p_counterparty uuid, p_allocations jsonb,
@@ -4365,34 +4550,106 @@ begin
       using errcode='CLR10',detail='{"reason":"settlement_composite_no_entry"}';
   end if;
 
-  -- The payment-side bank charge, as its own adjustment entry in this same transaction.
-  if v_domain = 'ap' and v_charge > 0 then
-    v_charge_entry := clara._bank_match_adjustment_entry(
-      v_ctx, p_client, v_coa, p_charge_account, -v_charge, v_pd,
-      'Bank charge on ' || v_memo,
-      jsonb_build_object('bank_match', jsonb_build_object(
-        'line_id', p_line, 'kind', 'bank_charge')),
-      p_op_key || ':charge:approve', p_attestation);
-  end if;
+  -- ---------------------------------------------------------------
+  -- THE BRANCH IS DECIDED HERE, BEFORE ANY ANCILLARY IS POSTED (as-built ladder fix
+  -- 2026-07-31, Codex wave). The composite's own answer -- approved, or a draft awaiting a
+  -- checker -- decides whether this act BOOKS anything beyond the settlement itself.
+  --
+  -- WHY IT MOVED. The first cut posted the bank charge and the difference adjustments
+  -- unconditionally, before the group was even written, on the reading that they are
+  -- "ordinary approved entries in both branches". At high stakes that puts real money in the
+  -- books for a settlement the checker has not seen and may reject -- and if the maker then
+  -- cancels the reservation, those entries are stranded in the GL with no group, no line and
+  -- no remedy but a hand-driven reversal nobody prompted. They are not independent facts:
+  -- a bank charge on a payment and a difference adjustment on a receipt are PARTS of the one
+  -- act whose principal half is still a draft. So on the pending branch they are VALIDATED
+  -- now (a bad account must refuse while the human is still here to be told) and CARRIED on
+  -- the group; clara.complete_pending_match creates them at the flip.
+  -- ---------------------------------------------------------------
+  v_match_status := case when v_status = 'approved' then 'live' else 'pending' end;
 
-  -- The difference adjustments, on either side.
-  v_i := 0;
-  for aj in select (x.elem->>'account_code') as acc,
-                   (x.elem->>'amount_cents')::bigint as amt,
-                   (x.elem->>'memo') as memo
-            from jsonb_array_elements(v_adjs) with ordinality as x(elem, ord)
-            order by x.ord loop
-    v_i := v_i + 1;
-    v_adj_entry := clara._bank_match_adjustment_entry(
-      v_ctx, p_client, v_coa, aj.acc, aj.amt, v_pd,
-      coalesce(aj.memo, 'Bank settlement difference'),
-      jsonb_build_object('bank_match', jsonb_build_object(
-        'line_id', p_line, 'kind', 'adjustment', 'index', v_i)),
-      p_op_key || ':adj:' || v_i || ':approve', p_attestation);
-    perform clara._finish_op(c.firm, 'bank_match_adjustment',
-      p_op_key || ':adj:' || v_i, jsonb_build_object('entry_id', v_adj_entry));
-    v_adj_entries := v_adj_entries || v_adj_entry;
-  end loop;
+  if v_match_status = 'live' then
+    -- The payment-side bank charge, as its own adjustment entry in this same transaction.
+    if v_domain = 'ap' and v_charge > 0 then
+      v_charge_entry := clara._bank_match_adjustment_entry(
+        v_ctx, p_client, v_coa, p_charge_account, -v_charge, v_pd,
+        'Bank charge on ' || v_memo,
+        jsonb_build_object('bank_match', jsonb_build_object(
+          'line_id', p_line, 'kind', 'bank_charge')),
+        p_op_key || ':charge:approve', p_attestation);
+    end if;
+
+    -- The difference adjustments, on either side.
+    v_i := 0;
+    for aj in select (x.elem->>'account_code') as acc,
+                     (x.elem->>'amount_cents')::bigint as amt,
+                     (x.elem->>'memo') as memo
+              from jsonb_array_elements(v_adjs) with ordinality as x(elem, ord)
+              order by x.ord loop
+      v_i := v_i + 1;
+      v_adj_entry := clara._bank_match_adjustment_entry(
+        v_ctx, p_client, v_coa, aj.acc, aj.amt, v_pd,
+        coalesce(aj.memo, 'Bank settlement difference'),
+        jsonb_build_object('bank_match', jsonb_build_object(
+          'line_id', p_line, 'kind', 'adjustment', 'index', v_i)),
+        p_op_key || ':adj:' || v_i || ':approve', p_attestation);
+      perform clara._finish_op(c.firm, 'bank_match_adjustment',
+        p_op_key || ':adj:' || v_i, jsonb_build_object('entry_id', v_adj_entry));
+      v_adj_entries := v_adj_entries || v_adj_entry;
+    end loop;
+  else
+    -- THE PENDING BRANCH POSTS NOTHING AND VALIDATES EVERYTHING. The account tests are the
+    -- SAME tests clara._bank_match_adjustment_entry runs at build time -- active, non-control
+    -- (account_class is null), expense- or income-typed, and never the bank account itself --
+    -- under the SAME refusal token, because the remedy is the same one: name a real expense or
+    -- income account. Deferring the write must never defer the diagnosis: a maker who typed a
+    -- dead account learns it now, in the call they made, not days later when a checker's
+    -- approval fails on a body they never saw.
+    if v_domain = 'ap' and v_charge > 0
+       and (p_charge_account = v_coa
+            or not exists (select 1 from clara.coa_accounts a
+                           where a.client_id = p_client and a.account_code = p_charge_account
+                             and a.is_active and a.account_class is null
+                             and a.account_type in ('expense','income'))) then
+      raise exception 'a bank match adjustment must be booked to an active, non-control expense or income account that is not the bank account itself'
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','adjustment_account_invalid',
+            'account_code',p_charge_account)::text;
+    end if;
+    for aj in select (x.elem->>'account_code') as acc,
+                     (x.elem->>'amount_cents')::bigint as amt
+              from jsonb_array_elements(v_adjs) with ordinality as x(elem, ord)
+              order by x.ord loop
+      if aj.acc = v_coa
+         or not exists (select 1 from clara.coa_accounts a
+                        where a.client_id = p_client and a.account_code = aj.acc
+                          and a.is_active and a.account_class is null
+                          and a.account_type in ('expense','income')) then
+        raise exception 'a bank match adjustment must be booked to an active, non-control expense or income account that is not the bank account itself'
+          using errcode='CLR10',
+            detail=jsonb_build_object('reason','adjustment_account_invalid',
+              'account_code',aj.acc)::text;
+      end if;
+    end loop;
+    -- AND THE DERIVED SUB-KEYS ARE CLOSED, NOT ABANDONED. They were reserved before the first
+    -- lock (the branch is not knowable until the composite answers), and on THIS branch
+    -- nothing will ever spend them: complete_pending_match creates the ancillaries under ITS
+    -- OWN op_key, because a receipt another transaction reserved is not that call's to spend.
+    -- Leaving them open would be precisely the "op_receipts row nobody can ever finish" this
+    -- verb's own reservation note refuses to create, so each is finished with an honest
+    -- deferral marker instead.
+    if v_domain = 'ap' and v_charge > 0 then
+      perform clara._finish_op(c.firm, 'approve_entry', p_op_key || ':charge:approve',
+        jsonb_build_object('deferred', true, 'to', 'complete_pending_match'));
+    end if;
+    for v_i in 1 .. jsonb_array_length(v_adjs) loop
+      perform clara._finish_op(c.firm, 'bank_match_adjustment', p_op_key || ':adj:' || v_i,
+        jsonb_build_object('deferred', true, 'to', 'complete_pending_match'));
+      perform clara._finish_op(c.firm, 'approve_entry',
+        p_op_key || ':adj:' || v_i || ':approve',
+        jsonb_build_object('deferred', true, 'to', 'complete_pending_match'));
+    end loop;
+  end if;
 
   -- ---------------------------------------------------------------
   -- THE BANK ROWS, LAST (part2 section 4.9). The line is locked here and the group is
@@ -4402,12 +4659,32 @@ begin
   perform 1 from clara.bank_statement_lines l where l.id = p_line for update;
   perform 1 from clara.bank_statements s where s.id = ln.statement_id for share;
 
-  v_match_status := case when v_status = 'approved' then 'live' else 'pending' end;
   v_match := gen_random_uuid();
   insert into clara.bank_matches(id, firm_id, client_id, bank_account_id, status, origin,
-      matched_via_rule_id, draft_entry_id, created_by, completed_at)
+      matched_via_rule_id, draft_entry_id, pending_ancillaries, created_by, completed_at)
     values (v_match, c.firm, p_client, v_bank, v_match_status, 'human', null,
       case when v_match_status = 'pending' then v_entry else null end,
+      -- THE CARRIED ANCILLARY PAYLOAD, on the pending branch only. Every field is one this
+      -- call already validated: the charge account and each adjustment account against the
+      -- coa (just above), the posting date against the statement period (step 11 of the
+      -- read), the adjustment array canonicalised into v_adjs by the same normalisation the
+      -- request hash used. complete_pending_match builds from THIS, never from a second
+      -- caller opinion -- the checker approves the act the maker made.
+      --
+      -- charge_cents IS DOMAIN-AWARE and that is not a detail: on the RECEIPT side the charge
+      -- rides C-a's expense slot INSIDE the settlement entry (the section header's asymmetry)
+      -- and no separate entry is ever minted, so carrying a non-zero charge here would make
+      -- complete_pending_match post a charge entry settle would never have posted, and the
+      -- group would then fail its own tie. Only the PAYMENT side has an ancillary charge.
+      case when v_match_status = 'pending' then jsonb_build_object(
+          'domain', v_domain,
+          'charge_cents', case when v_domain = 'ap' then v_charge else 0 end,
+          'charge_account', case when v_domain = 'ap' and v_charge > 0
+                                 then p_charge_account end,
+          'adjustments', v_adjs,
+          'posting_date', v_pd,
+          'memo', v_memo)
+        else null end,
       c.actor, case when v_match_status = 'live' then now() else null end);
 
   begin
@@ -4431,24 +4708,27 @@ begin
       -- and none is written -- the sign convention is the arithmetic.
       values (c.firm, p_client, v_match, v_entry, v_settle_cents, 'live', false);
   end if;
-  -- The charge and the difference adjustments are ordinary approved entries in BOTH
-  -- branches, so they join the group immediately -- including while it is pending. That is
-  -- the reason the group-tie belt's pending arm asserts the reservation shape rather than
-  -- "zero entry members" (tension T1 in the file header).
-  if v_charge_entry is not null then
-    insert into clara.bank_match_entry_members(firm_id, client_id, match_id, entry_id,
-        matched_cents, group_status, posting_date_exception)
-      values (c.firm, p_client, v_match, v_charge_entry, -v_charge, v_match_status, false);
+  -- The charge and the difference adjustments join the group ON THE LIVE BRANCH ONLY (as-built
+  -- ladder fix 2026-07-31, Codex wave). On the pending branch they have not been created --
+  -- they ride pending_ancillaries until clara.complete_pending_match posts them at the flip --
+  -- which is what makes "a pending group holds ZERO entry members" a shape the group-tie belt
+  -- can assert (tension T1 in the file header, as corrected there).
+  if v_match_status = 'live' then
+    if v_charge_entry is not null then
+      insert into clara.bank_match_entry_members(firm_id, client_id, match_id, entry_id,
+          matched_cents, group_status, posting_date_exception)
+        values (c.firm, p_client, v_match, v_charge_entry, -v_charge, 'live', false);
+    end if;
+    v_i := 0;
+    for aj in select (x.elem->>'amount_cents')::bigint as amt
+              from jsonb_array_elements(v_adjs) with ordinality as x(elem, ord)
+              order by x.ord loop
+      v_i := v_i + 1;
+      insert into clara.bank_match_entry_members(firm_id, client_id, match_id, entry_id,
+          matched_cents, group_status, posting_date_exception)
+        values (c.firm, p_client, v_match, v_adj_entries[v_i], aj.amt, 'live', false);
+    end loop;
   end if;
-  v_i := 0;
-  for aj in select (x.elem->>'amount_cents')::bigint as amt
-            from jsonb_array_elements(v_adjs) with ordinality as x(elem, ord)
-            order by x.ord loop
-    v_i := v_i + 1;
-    insert into clara.bank_match_entry_members(firm_id, client_id, match_id, entry_id,
-        matched_cents, group_status, posting_date_exception)
-      values (c.firm, p_client, v_match, v_adj_entries[v_i], aj.amt, v_match_status, false);
-  end loop;
 
   perform clara._bank_match_audit(c.firm, p_client, v_match,
     case when v_match_status = 'live' then 'settle' else 'settle_pending' end,
@@ -4459,6 +4739,10 @@ begin
       'settlement_status', v_status,
       'charge_cents', v_charge, 'charge_entry_id', v_charge_entry,
       'adjustments', v_adjs, 'adjustment_entry_ids', to_jsonb(v_adj_entries),
+      -- Says out loud that this act posted its ancillaries or carried them: on the pending
+      -- branch charge_entry_id is null and adjustment_entry_ids is empty because nothing was
+      -- created, not because nothing was asked for.
+      'ancillaries_deferred', v_match_status = 'pending',
       'bank_account_id', v_bank, 'account_code', v_coa,
       'posting_date', v_pd, 'op_key', p_op_key));
   perform clara._audit(c.firm, c.actor, null, null, 'settle_from_bank_line', v_entry,
@@ -4481,6 +4765,7 @@ begin
       'settlement_cents', v_settle_cents,
       'charge_entry_id', v_charge_entry,
       'adjustment_entry_ids', to_jsonb(v_adj_entries),
+      'ancillaries_deferred', v_match_status = 'pending',
       'group_id', v_res->>'group_id', 'residue_cents', v_res->>'residue_cents'));
 end $$;
 
@@ -4506,8 +4791,19 @@ end $$;
 -- ratified signature carries no ack flag. A draft revised across the period end still
 -- completes, and the fact rides the member row, the audit payload and the /bank banner.
 --
+-- IT ALSO POSTS THE DEFERRED ANCILLARIES (as-built ladder fix 2026-07-31, Codex wave). The
+-- bank charge and the difference adjustments that settle_from_bank_line validated and carried
+-- on bank_matches.pending_ancillaries are CREATED HERE, from the stored payload and nothing
+-- else, in the same transaction as the flip -- so the whole human act lands together or not at
+-- all, and a cancelled reservation leaves no orphan entries behind. Their members are written
+-- BEFORE the parity derivation, which is what keeps the derived amount exact: v_need is
+-- whatever the group still needs once every ancillary is counted, i.e. the settlement entry's
+-- own signed bank amount.
+--
 -- LOCK ORDER: this verb LOCKS A PRE-EXISTING ENTRY, so it rides match_bank_line's order --
--- journal_entries FOR UPDATE -> advisory 203005004 -> bank rows.
+-- journal_entries FOR UPDATE -> advisory 203005004 -> (ancillary journal_entries writes) ->
+-- bank rows. The ancillaries are NEW entries nobody else can hold, and they are built before
+-- the statement-line locks, so design 4.9's "bank rows LAST" survives intact.
 -- =====================================================================
 create function clara.complete_pending_match(
     p_client uuid, p_match uuid, p_op_key text) returns jsonb
@@ -4516,6 +4812,10 @@ declare
   c record; v_dedupe jsonb; v_firm uuid; g record; e record; st_max date;
   v_coa text; cap record; v_lines bigint; v_entries bigint; v_need bigint;
   v_exc boolean; v_pos bigint; v_neg bigint;
+  -- The deferred-ancillary state (as-built ladder fix 2026-07-31, Codex wave).
+  v_anc jsonb; v_ctx jsonb; v_line uuid; v_pd date; v_memo text;
+  v_charge bigint; v_charge_account text; v_charge_entry uuid;
+  v_adj_entry uuid; v_adj_entries uuid[] := '{}'::uuid[]; v_i int; v_key text; aj record;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key) = '' then
@@ -4535,10 +4835,56 @@ begin
   if not found or g.client_id <> p_client or g.firm_id <> c.firm then
     raise exception 'bank match % is not in this client', p_match using errcode='CLR11';
   end if;
+  -- THE ANCHOR IS STILL DEMANDED HERE (this is the precheck's own role, distinct from the
+  -- group-tie belt's pending arm, which additionally asserts that nothing has posted yet):
+  -- there is nothing to complete without a draft to complete it with.
   if g.draft_entry_id is null then
     raise exception 'bank match % names no draft entry to complete', p_match
       using errcode='CLR10',detail='{"reason":"pending_match_unanchored"}';
   end if;
+
+  -- ALL SUB-KEY RESERVATIONS BEFORE THE FIRST LOCK (as-built ladder fix 2026-07-31, Codex
+  -- wave) -- settle_from_bank_line's own discipline, and 0037:2678-2698's deadlock reasoning.
+  -- THE DEFERRED ANCILLARIES ARE CREATED BY THIS CALL, so their op keys derive from THIS
+  -- call's op_key: settle's derived namespace belongs to settle's transaction, and a receipt
+  -- another transaction reserved is not this one's to spend.
+  -- The payload is read here from the UNLOCKED probe only to learn the SHAPE (how many keys to
+  -- claim). Everything actually written below is built from the authoritative read under the
+  -- group lock; if a concurrent completion or cancellation won the race, this call refuses
+  -- there, on `match_not_pending`, before any of these keys is spent.
+  if g.pending_ancillaries is not null then
+    if coalesce((g.pending_ancillaries->>'charge_cents')::bigint, 0) > 0 then
+      if clara._reserve_op(c.firm, 'approve_entry', p_op_key || ':charge:approve',
+           clara._hash(jsonb_build_object('composite', 'complete_pending_match',
+             'op_key', p_op_key, 'leg', 'charge'))) is not null then
+        raise exception 'the derived charge approve op key is already in use'
+          using errcode='CLR10',detail='{"reason":"approve_key_collision"}';
+      end if;
+    end if;
+    v_i := 0;
+    for aj in select (x.elem->>'account_code') as acc,
+                     (x.elem->>'amount_cents')::bigint as amt
+              from jsonb_array_elements(
+                     coalesce(g.pending_ancillaries->'adjustments','[]'::jsonb))
+                   with ordinality as x(elem, ord)
+              order by x.ord loop
+      v_i := v_i + 1;
+      v_key := p_op_key || ':adj:' || v_i;
+      if clara._reserve_op(c.firm, 'bank_match_adjustment', v_key,
+           clara._hash(jsonb_build_object('op_key', p_op_key, 'i', v_i,
+             'account_code', aj.acc, 'amount_cents', aj.amt))) is not null then
+        raise exception 'the derived adjustment op key % is already in use', v_key
+          using errcode='CLR10',detail='{"reason":"adjustment_key_collision"}';
+      end if;
+      if clara._reserve_op(c.firm, 'approve_entry', v_key || ':approve',
+           clara._hash(jsonb_build_object('composite', 'complete_pending_match',
+             'op_key', p_op_key, 'i', v_i))) is not null then
+        raise exception 'the derived approve op key %:approve is already in use', v_key
+          using errcode='CLR10',detail='{"reason":"approve_key_collision"}';
+      end if;
+    end loop;
+  end if;
+
   perform 1 from clara.journal_entries je where je.id = g.draft_entry_id for update;
   perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
   -- Re-read the group UNDER the lock: another session may have completed or cancelled it
@@ -4576,6 +4922,81 @@ begin
           'reversal_of',e.reversal_of)::text;
   end if;
 
+  -- ---------------------------------------------------------------
+  -- THE DEFERRED ANCILLARIES, CREATED HERE (as-built ladder fix 2026-07-31, Codex wave).
+  --
+  -- settle_from_bank_line validated the bank charge and the difference adjustments and then
+  -- CARRIED them on the group rather than posting them, because at high stakes the settlement
+  -- they belong to was still a draft. The checker has now approved it -- the floors above are
+  -- exactly that proof -- so this is the first lawful moment for the rest of the act to reach
+  -- the books, and it reaches them in the SAME transaction that ties the group.
+  --
+  -- IT BUILDS FROM THE STORED PAYLOAD AND NOTHING ELSE. No argument of this verb can add,
+  -- remove or re-price an ancillary: the checker approves the act the maker made, and a
+  -- second opinion smuggled in at completion time would be a change no maker ever saw.
+  --
+  -- PLACED BEFORE THE BANK ROW LOCKS on purpose (design 4.9): these are journal_entries
+  -- writes, and the law is "bank rows LAST". The member rows they need go in with them --
+  -- inserting a member takes only the new row plus a key-share on the group this call already
+  -- holds FOR UPDATE, so nothing here inverts an acquisition order.
+  --
+  -- ATTESTATION IS NULL, STATED RATHER THAN HIDDEN. This verb's ratified signature carries no
+  -- attestation argument, so an ancillary large enough to be HIGH-STAKES in a solo-checker
+  -- firm would refuse CLR05 here. That bound is real and it is the right one: a bank charge or
+  -- a rounding difference of that size is not an ancillary at all, and it should be posted as
+  -- its own attested entry rather than smuggled through a completion.
+  -- ---------------------------------------------------------------
+  v_coa := clara._bank_match_coa(p_match);
+  if v_coa is null then
+    raise exception 'bank match % has no mapped GL bank account', p_match
+      using errcode='CLR10',detail='{"reason":"bank_account_unmapped"}';
+  end if;
+  v_anc := g.pending_ancillaries;
+  if v_anc is not null then
+    v_ctx := jsonb_build_object('actor', c.actor, 'firm', c.firm);
+    v_pd := (v_anc->>'posting_date')::date;
+    v_memo := coalesce(nullif(btrim(coalesce(v_anc->>'memo','')),''), 'Bank settlement');
+    v_charge := coalesce((v_anc->>'charge_cents')::bigint, 0);
+    v_charge_account := v_anc->>'charge_account';
+    -- The group's line, for the provenance stamp settle would have written. A settlement-born
+    -- group holds exactly one line member; the text-cast min is the house idiom for a
+    -- deterministic pick either way (min(uuid) is not an aggregate in PostgreSQL 17).
+    select min(mm.line_id::text)::uuid into v_line from clara.bank_match_line_members mm
+      where mm.match_id = p_match;
+    if v_charge > 0 then
+      v_charge_entry := clara._bank_match_adjustment_entry(
+        v_ctx, p_client, v_coa, v_charge_account, -v_charge, v_pd,
+        'Bank charge on ' || v_memo,
+        jsonb_build_object('bank_match', jsonb_build_object(
+          'line_id', v_line, 'kind', 'bank_charge')),
+        p_op_key || ':charge:approve', null);
+      insert into clara.bank_match_entry_members(firm_id, client_id, match_id, entry_id,
+          matched_cents, group_status, posting_date_exception)
+        values (c.firm, p_client, p_match, v_charge_entry, -v_charge, 'pending', false);
+    end if;
+    v_i := 0;
+    for aj in select (x.elem->>'account_code') as acc,
+                     (x.elem->>'amount_cents')::bigint as amt,
+                     (x.elem->>'memo') as memo
+              from jsonb_array_elements(coalesce(v_anc->'adjustments','[]'::jsonb))
+                   with ordinality as x(elem, ord)
+              order by x.ord loop
+      v_i := v_i + 1;
+      v_adj_entry := clara._bank_match_adjustment_entry(
+        v_ctx, p_client, v_coa, aj.acc, aj.amt, v_pd,
+        coalesce(aj.memo, 'Bank settlement difference'),
+        jsonb_build_object('bank_match', jsonb_build_object(
+          'line_id', v_line, 'kind', 'adjustment', 'index', v_i)),
+        p_op_key || ':adj:' || v_i || ':approve', null);
+      perform clara._finish_op(c.firm, 'bank_match_adjustment',
+        p_op_key || ':adj:' || v_i, jsonb_build_object('entry_id', v_adj_entry));
+      v_adj_entries := v_adj_entries || v_adj_entry;
+      insert into clara.bank_match_entry_members(firm_id, client_id, match_id, entry_id,
+          matched_cents, group_status, posting_date_exception)
+        values (c.firm, p_client, p_match, v_adj_entry, aj.amt, 'pending', false);
+    end loop;
+  end if;
+
   -- Bank rows LAST.
   perform 1 from clara.bank_statement_lines l
     where l.id in (select mm.line_id from clara.bank_match_line_members mm
@@ -4587,11 +5008,7 @@ begin
     join clara.bank_statements s on s.id = l.statement_id
     where mm.match_id = p_match;
 
-  v_coa := clara._bank_match_coa(p_match);
-  if v_coa is null then
-    raise exception 'bank match % has no mapped GL bank account', p_match
-      using errcode='CLR10',detail='{"reason":"bank_account_unmapped"}';
-  end if;
+  -- v_coa was resolved above, before the ancillaries were built off it.
   cap := clara._bank_entry_side_capacity(e.id, v_coa);
   if cap.dr_cents = 0 and cap.cr_cents = 0 then
     raise exception 'the settlement of bank match % has no movement on bank account %', p_match, v_coa
@@ -4600,6 +5017,13 @@ begin
           'account_code',v_coa)::text;
   end if;
 
+  -- THE DERIVATION IS UNCHANGED AND STILL EXACT, because the ancillary members were written
+  -- ABOVE (as-built ladder fix 2026-07-31, Codex wave): v_entries now counts them, so what is
+  -- left for the settlement is precisely the equation settle's live branch already satisfies
+  -- in one transaction -- line total = settlement member + ancillary members. On the receipt
+  -- side that reads L - A; on the payment side L - (A - C) = L + C - A. Both are the
+  -- settlement entry's OWN signed bank amount, which is what the parity test below then
+  -- proves the entry actually carries.
   select coalesce(sum(mm.amount_cents), 0)::bigint into v_lines
     from clara.bank_match_line_members mm where mm.match_id = p_match;
   select coalesce(sum(mm.matched_cents), 0)::bigint into v_entries
@@ -4619,8 +5043,10 @@ begin
     into v_pos, v_neg
     from clara.bank_match_entry_members em
     join clara.bank_matches bm on bm.id = em.match_id
+    join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
     where em.entry_id = e.id and bm.status in ('pending','live')
-      and bm.bank_account_id = g.bank_account_id;
+      -- pool by COA, the same as the belt and the match pre-checks (see the belt's note)
+      and ba2.coa_account_code = v_coa and ba2.client_id = g.client_id;
   if (v_need > 0 and v_pos + v_need > cap.dr_cents)
      or (v_need < 0 and v_neg - v_need > cap.cr_cents) then
     raise exception 'the settlement of bank match % cannot supply % cents on % -- it carries % debit / % credit there and % / % are already matched', p_match, v_need, v_coa, cap.dr_cents, cap.cr_cents, v_pos, v_neg
@@ -4636,14 +5062,21 @@ begin
       matched_cents, group_status, posting_date_exception)
     values (c.firm, p_client, p_match, e.id, v_need, 'pending', v_exc);
   -- The flip LAST, so the ON UPDATE CASCADE carries every member -- including the row just
-  -- written -- from 'pending' to 'live' in one statement.
-  update clara.bank_matches set status = 'live', completed_at = now()
+  -- written AND the ancillary members above -- from 'pending' to 'live' in one statement.
+  -- pending_ancillaries is cleared in the SAME statement: the payload is a reservation-time
+  -- carrier, and leaving it behind on a live group would be a second, stale account of money
+  -- that has now actually posted.
+  update clara.bank_matches
+    set status = 'live', completed_at = now(), pending_ancillaries = null
     where id = p_match;
 
   perform clara._bank_match_audit(c.firm, p_client, p_match, 'complete', c.actor, null,
     jsonb_build_object('entry_id', e.id, 'matched_cents', v_need,
       'line_cents', v_lines, 'entry_cents', v_entries + v_need,
       'account_code', v_coa, 'posting_date', e.posting_date,
+      'charge_entry_id', v_charge_entry,
+      'adjustment_entry_ids', to_jsonb(v_adj_entries),
+      'ancillaries_posted', v_anc is not null,
       'period_end', st_max, 'posting_date_exception', v_exc, 'op_key', p_op_key));
   perform clara._audit(c.firm, c.actor, null, null, 'complete_pending_match', e.id,
     jsonb_build_object('client', p_client, 'match_id', p_match,
@@ -4656,6 +5089,8 @@ begin
   return clara._finish_op(c.firm, 'complete_pending_match', p_op_key,
     jsonb_build_object('match_id', p_match, 'status', 'live', 'entry_id', e.id,
       'matched_cents', v_need,
+      'charge_entry_id', v_charge_entry,
+      'adjustment_entry_ids', to_jsonb(v_adj_entries),
       'period_exceptions', case when v_exc then 1 else 0 end));
 end $$;
 
@@ -4669,7 +5104,10 @@ end $$;
 -- IT WORKS ON 'pending' AS WELL AS 'live' (design section 4.6): the maker cancels a
 -- reservation the same way the bookkeeper unmatches a live group, and a checker-REJECTED
 -- draft leaves the group cancellable by the same verb. There is no second cancel path to
--- keep in step.
+-- keep in step, AND NO STATE IN WHICH CANCELLATION IS REFUSED (as-built ladder fix
+-- 2026-07-31, Codex wave): a still-draft settlement is withdrawn with the group, an
+-- already-approved one is left standing and unwound afterwards through the ordinary
+-- unallocate_group + reverse_entry pair. The body says which, and why, where it happens.
 --
 -- THE FLIP TO 'unmatched' CASCADES group_status onto every member row through the composite
 -- FK, which is what RELEASES the partial unique index -- the line becomes matchable again
@@ -4686,6 +5124,7 @@ create function clara.unmatch_bank_match(
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   c record; v_dedupe jsonb; v_firm uuid; g record; v_reason text;
+  v_draft_probe uuid; v_draft_status text; v_draft_withdrawn boolean := false;
   v_lines jsonb; v_entries jsonb; v_ln int; v_en int;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
@@ -4708,9 +5147,25 @@ begin
       'reason', v_reason)));
   if v_dedupe is not null then return v_dedupe; end if;
 
-  -- This verb locks NO pre-existing journal entry, so it takes the client rung and then the
-  -- bank rows -- the same relative order every matcher uses, which is what makes the two
-  -- serialize instead of racing.
+  -- AS-BUILT LADDER FIX (2026-07-31, money-lens BLOCKER): cancelling a PENDING reservation
+  -- must close BOTH sides atomically. A pending group anchors a real, allocation-pinned
+  -- settlement DRAFT in /queue; releasing the line while leaving that draft approvable
+  -- reopens the approved-but-unmatched interval at exactly the money WCB-R3 protects (the
+  -- checker approves the orphan AND the re-settled twin -> one deposit posts twice). So:
+  -- unmatch of a pending group WITHDRAWS its draft in the same transaction, WHERE THAT DRAFT
+  -- IS STILL A DRAFT (the one-way lifecycle note below covers the approved case, which is a
+  -- cancellation too -- just not a withdrawal). The symmetric door (withdraw_draft under a
+  -- pending group refuses and points here) is the E7d splice; the approve-time orphan belt is
+  -- the structural backstop.
+  --
+  -- LOCK ORDER: the draft entry is a PRE-EXISTING journal_entries row, so per the section-K
+  -- law it is locked BEFORE the advisory rung (the reverse_entry relative order). A plain
+  -- SELECT of bank_matches (no lock) finds the draft id; the authoritative re-read of the
+  -- group under FOR UPDATE happens after the rung as before.
+  select bm.draft_entry_id into v_draft_probe from clara.bank_matches bm where bm.id = p_match;
+  if v_draft_probe is not null then
+    perform 1 from clara.journal_entries je where je.id = v_draft_probe for update;
+  end if;
   perform pg_advisory_xact_lock(203005004, hashtext(p_client::text));
   select * into g from clara.bank_matches bm where bm.id = p_match for update;
   if not found or g.client_id <> p_client or g.firm_id <> c.firm then
@@ -4720,6 +5175,48 @@ begin
     raise exception 'bank match % is already unmatched; re-matching writes a NEW group', p_match
       using errcode='CLR10',
         detail=jsonb_build_object('reason','already_unmatched','match_id',p_match)::text;
+  end if;
+  -- The probe and the locked truth must agree (the group's draft anchor never changes after
+  -- birth -- no writer updates draft_entry_id -- so a mismatch is concurrent-DDL-grade).
+  if g.draft_entry_id is distinct from v_draft_probe then
+    raise exception 'bank match % changed its draft anchor mid-flight; retry', p_match
+      using errcode='CLR16';
+  end if;
+  -- THE LIFECYCLE IS ONE-WAY AND IT IS TOLD HONESTLY (as-built ladder fix 2026-07-31, Codex
+  -- wave). A cancellation ALWAYS proceeds -- there is no state in which the maker is stuck
+  -- holding a statement line they cannot release:
+  --   * draft still a DRAFT -> it is withdrawn here, in this transaction, and the pair closes
+  --     together (the receipt says draft_withdrawn: true).
+  --   * draft already APPROVED (the checker acted while the maker was cancelling) -> the line
+  --     is still released and the group still unmatches, but the draft is NOT withdrawn: it is
+  --     approved money, and this verb does not un-approve money. The receipt says
+  --     draft_withdrawn: false, and the sanctioned unwind afterwards is the ordinary pair --
+  --     clara.unallocate_group, then clara.reverse_entry -- which the bank refusals stop
+  --     REFUSING the moment this group is no longer pending or live.
+  -- The earlier reading refused the cancellation outright in the second case, which wedged the
+  -- exact race it was describing: the group stayed pending, so _bank_live_match_present kept
+  -- refusing the reversal, and complete_pending_match was the ONLY door left -- forcing the
+  -- human to complete a match they had just decided was wrong.
+  if g.status = 'pending' and g.draft_entry_id is not null then
+    select je.status into v_draft_status from clara.journal_entries je
+      where je.id = g.draft_entry_id;
+    if v_draft_status = 'draft' then
+      -- Withdraw the anchored draft: the SAME column set clara.withdraw_draft writes
+      -- (status/withdrawn_by/at/reason + the proposal/fingerprint clears, 0009:1899-1901),
+      -- done here as the fn-owner so the pair closes in ONE transaction. The entry row is
+      -- already locked above. The entry.withdrawn event fires exactly as the verb would.
+      update clara.journal_entries
+        set status = 'withdrawn', withdrawn_by = c.actor, withdrawn_at = now(),
+            withdrawal_reason = 'bank match reservation cancelled: ' || v_reason,
+            proposed_counterparty = null, match_fingerprint = null, updated_at = now()
+        where id = g.draft_entry_id and status = 'draft';
+      perform clara._append_event(c.firm, 'entry.withdrawn', p_client, c.actor, null, null,
+        g.draft_entry_id, null, null, '{}'::jsonb);
+      v_draft_withdrawn := true;
+    end if;
+    -- v_draft_status = 'approved' falls through DELIBERATELY: the cancellation proceeds and
+    -- the approved entry is left standing (see the lifecycle note above). No branch, no
+    -- refusal -- the absence is the ruling, so it is written down rather than left as a gap.
   end if;
 
   -- Capture the member set BEFORE the flip: the audit row is the queryable record of what
@@ -4733,9 +5230,13 @@ begin
     into v_entries, v_en
     from clara.bank_match_entry_members mm where mm.match_id = p_match;
 
+  -- pending_ancillaries dies WITH the reservation (as-built ladder fix 2026-07-31, Codex
+  -- wave): a cancelled group's carried charge and adjustments were never posted and never will
+  -- be, and a payload left behind on an unmatched group would read as money still owed to the
+  -- books by a group that no longer exists.
   update clara.bank_matches
     set status = 'unmatched', unmatched_by = c.actor, unmatched_at = now(),
-        unmatched_reason = v_reason
+        unmatched_reason = v_reason, pending_ancillaries = null
     where id = p_match;
 
   perform clara._bank_match_audit(c.firm, p_client, p_match, 'unmatch', c.actor, v_reason,
@@ -4754,7 +5255,9 @@ begin
       'previous_status', g.status, 'line_members', v_ln, 'entry_members', v_en));
   return clara._finish_op(c.firm, 'unmatch_bank_match', p_op_key,
     jsonb_build_object('match_id', p_match, 'status', 'unmatched',
-      'previous_status', g.status, 'line_members', v_ln, 'entry_members', v_en));
+      'previous_status', g.status, 'line_members', v_ln, 'entry_members', v_en,
+      'draft_withdrawn', v_draft_withdrawn,
+      'draft_entry_id', g.draft_entry_id));
 end $$;
 
 
@@ -5725,7 +6228,11 @@ begin
     elsif d.document_kind='bank_statement' then
       -- 0038 arm 1: the statementFacts_v1 OCR lane. This is the arm that closes the
       -- bank_statement -> skipped_kind dead end 0026:392-410 left behind.
-      v_lane:='statement_facts'; v_engine:='azure-di:prebuilt-bankStatement:2024-11-30';
+      -- as-built ladder fix 2026-07-31, Codex wave: the stamp names `prebuilt-bankStatement.us`,
+      -- which is the model the runtime ACTUALLY invokes. Provenance must name the engine that
+      -- received the egress -- a stamp naming a model nobody called is a false receipt, and the
+      -- ".us" suffix is the whole model identity here, not a regional decoration.
+      v_lane:='statement_facts'; v_engine:='azure-di:prebuilt-bankStatement.us:2024-11-30';
     else
       -- (adjudication #11): the skipped_kind receipt lives on the task trail —
       -- a terminal failed row (never claimed, attempt_count 0 so it never
@@ -5829,6 +6336,14 @@ begin
       end if;
     end if;
     if v_gate is not null then
+      -- AS-BUILT LADDER FIX (2026-07-31): the gate ACTS ON any in-flight queued task rather
+      -- than writing a receipt beside it -- the ordering rationale above promises the vendor
+      -- read stops, so it stops: the queued row flips to the gate verdict in this same
+      -- transaction (never-claimed failed rows are legal for both gate codes -- the widened
+      -- binding CHECK). A running task is past claiming and settles through its own persist.
+      update clara.document_processing_tasks
+        set status='failed', error_code=v_gate, finished_at=now()
+        where document_id=p_document and lane=v_lane and status='queued';
       select id into v_task from clara.document_processing_tasks
         where document_id=p_document and lane=v_lane
           and status='failed' and error_code=v_gate
@@ -5843,6 +6358,14 @@ begin
             v_version,v_lane,'failed',v_gate,now())
           returning id into v_task;
       end if;
+      -- 0038 as-built fix (2026-07-31): every statement-lane terminal receipt this core
+      -- mints reaches the spine as the STATEMENT twin with its reason. The wrapper
+      -- (enqueue_invoice_facts, recut in E2b) no longer emits its invoice twin for
+      -- statement lanes, so this is the single emit site on every caller path --
+      -- file_document's direct core calls included.
+      perform clara._append_event(d.firm_id,'document.statement_facts_failed',
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason',v_gate));
       return jsonb_build_object('task_id',v_task,'document_id',p_document,
         'status','failed','reason',v_gate);
     end if;
@@ -5863,6 +6386,18 @@ begin
         version_n,lane,status,error_code,finished_at)
       values(d.firm_id,p_document,v_engine,'{}'::jsonb,
         v_version,v_lane,'failed','attempt_cap',now()) returning id into v_task;
+    -- 0038 as-built fix (2026-07-31, regression-cells lane finding): THIS branch, not the
+    -- claim-time belt, is the one a capped statement actually reaches -- the running attempt
+    -- sum already reads 3 when the next enqueue fires, so the pre-fail intercepts before any
+    -- claim exists to emit. Without an emit here the statement feed never learns its document
+    -- died. Statement lanes only: the invoice lane's enqueue-time cap has been event-silent
+    -- since 0026, and lighting it now would wake the autodraft consumer on a path Wave A
+    -- never exercised -- that silence stays, recorded here as a pre-existing residual.
+    if v_lane in ('statement_facts','statement_parse') then
+      perform clara._append_event(d.firm_id, 'document.statement_facts_failed',
+        null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_task,'reason','attempt_cap'));
+    end if;
     return jsonb_build_object('task_id',v_task,'document_id',p_document,
       'status','failed','reason','attempt_cap');
   end if;
@@ -5896,6 +6431,15 @@ begin
     exception when sqlstate 'CLR18' then
       update clara.document_processing_tasks set status='failed',error_code='budget',
         finished_at=now() where id=v_task;
+      -- 0038 as-built fix (2026-07-31): the statement lane's budget verdict reaches the
+      -- spine as the STATEMENT twin (single emit site -- the wrapper, recut in E2b,
+      -- suppresses its invoice twin for statement lanes). The invoice lane keeps its
+      -- pre-existing shape: silent here, emitted by the wrapper.
+      if v_lane='statement_facts' then
+        perform clara._append_event(d.firm_id,'document.statement_facts_failed',
+          null,null,null,null,
+          null,p_document,null,jsonb_build_object('task_id',v_task,'reason','budget'));
+      end if;
       return jsonb_build_object('task_id',v_task,'document_id',p_document,
         'status','failed','reason','budget');
     end;
@@ -5946,6 +6490,259 @@ begin
   end if;
 end
 $e2_router_post$;
+
+-- =====================================================================================
+-- SECTION E2b -- TWO PRE-EXISTING BODIES THE GATE FLIP AND THE LANE-AWARE EVENT LAW
+-- EXPOSED (as-built regression cells, 2026-07-31).
+--
+-- (1) clara._tf_processing_task_update (live body = 0011's; 0016+ never touched it): its
+--     queued->failed transition allowlist predates the enqueue-time typed-consent gate, so
+--     the gate's in-place flip of a queued task to statement_multi_client/consent_inactive
+--     died with CLR16 the first time a regression cell actually drove it. The allowlist
+--     gains exactly the two never-claimed gate codes (the ck_processing_task_binding_0038
+--     vocabulary); every other line of the body is carried byte-identical from 0011.
+-- (2) clara.enqueue_invoice_facts (live body = 0009's): the wrapper emitted its invoice
+--     twin for ANY failed receipt -- including statement-lane receipts, which is both the
+--     exact phantom invoice failure the lane-aware event law (E3) exists to prevent AND a
+--     double-emit on top of the core's own statement-twin sites. The wrapper now looks up
+--     the receipt task's lane and stays silent for statement lanes; the CORE owns every
+--     statement-lane terminal emit (gate verdicts, budget, attempt_cap -- each at its mint
+--     site), so each path emits exactly once with the correct twin.
+-- =====================================================================================
+do $e2b_pre$
+declare v_src text;
+begin
+  select p.prosrc into v_src from pg_proc p
+    where p.oid='clara._tf_processing_task_update()'::regprocedure;
+  if position('new.error_code in (''budget'',''attempt_cap'')' in v_src)=0 then
+    raise exception '0038 E2b prestate: _tf_processing_task_update no longer carries the 0011 queued->failed allowlist this recut widens -- a later migration touched it; re-derive this recut from the live body' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+    where p.oid='clara.enqueue_invoice_facts(uuid)'::regprocedure;
+  if position('document.invoice_facts_failed' in v_src)=0
+     or position('statement_facts' in v_src)>0 then
+    raise exception '0038 E2b prestate: enqueue_invoice_facts is not the 0009 unconditional-emit body this recut scopes -- re-derive from the live body' using errcode='CLR10';
+  end if;
+end $e2b_pre$;
+
+set role clara_fn_owner;
+
+create or replace function clara._tf_processing_task_update() returns trigger
+  language plpgsql security definer set search_path=clara,pg_temp as $$
+declare v_ok boolean;
+begin
+  if tg_op='DELETE' then raise exception 'document processing tasks are not deleted' using errcode='CLR08'; end if;
+  if old.status in ('done','failed') then raise exception 'terminal document processing task is immutable' using errcode='CLR16'; end if;
+  if new.id<>old.id or new.firm_id<>old.firm_id or new.document_id<>old.document_id
+     or new.engine_id<>old.engine_id or new.engine_config<>old.engine_config
+     or new.version_n<>old.version_n or new.lane<>old.lane or new.created_at<>old.created_at then
+    raise exception 'document processing task identity/config is immutable' using errcode='CLR08';
+  end if;
+  if new.status<>old.status then
+    -- 0038 E2b: queued->failed widens by the two enqueue-time gate verdicts -- the gate
+    -- flips an in-flight queued task in place when a later filing invalidates its consent
+    -- basis. Both are never-claimed codes (ck_processing_task_binding_0038); the flip is
+    -- the only writer that uses them on this transition.
+    v_ok:=(old.status='queued' and new.status in ('running','held_egress'))
+      or (old.status='queued' and new.status='failed'
+          and new.error_code in ('budget','attempt_cap','consent_inactive','statement_multi_client'))
+      or (old.status='held_egress' and new.status='queued')
+      or (old.status='running' and new.status in ('done','failed','queued','held_egress'));
+    if not v_ok then
+      raise exception 'illegal document processing transition % -> %',old.status,new.status
+        using errcode='CLR16';
+    end if;
+  end if;
+  new.updated_at:=now();
+  return new;
+end $$;
+
+create or replace function clara.enqueue_invoice_facts(p_document uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_result jsonb; v_firm uuid; v_lane text;
+begin
+  v_result:=clara._enqueue_invoice_facts_core(p_document);
+  if v_result->>'status'='failed' then
+    -- 0038 E2b: lane-aware. The core owns every STATEMENT-lane terminal emit at its mint
+    -- sites; this wrapper emitting its invoice twin for a statement receipt was a phantom
+    -- invoice failure (it would wake the autodraft consumer for a bank statement) and a
+    -- double-emit. Invoice lanes keep the wrapper emit byte-for-byte.
+    select lane into v_lane from clara.document_processing_tasks
+      where id=(v_result->>'task_id')::uuid;
+    if coalesce(v_lane,'') not in ('statement_facts','statement_parse') then
+      select firm_id into v_firm from clara.documents where id=p_document;
+      perform clara._append_event(v_firm,'document.invoice_facts_failed',null,null,null,null,
+        null,p_document,null,jsonb_build_object('task_id',v_result->>'task_id',
+          'reason',v_result->>'reason'));
+    end if;
+  end if;
+  return v_result;
+end $$;
+
+reset role;
+
+do $e2b_post$
+declare v_src text;
+begin
+  select p.prosrc into v_src from pg_proc p
+    where p.oid='clara._tf_processing_task_update()'::regprocedure;
+  if position('''budget'',''attempt_cap'',''consent_inactive'',''statement_multi_client''' in v_src)=0 then
+    raise exception '0038 E2b postcheck: the queued->failed allowlist did not gain the gate codes' using errcode='CLR10';
+  end if;
+  select p.prosrc into v_src from pg_proc p
+    where p.oid='clara.enqueue_invoice_facts(uuid)'::regprocedure;
+  if position('not in (''statement_facts'',''statement_parse'')' in v_src)=0 then
+    raise exception '0038 E2b postcheck: the wrapper is not statement-lane-suppressed' using errcode='CLR10';
+  end if;
+  if (select p.proowner::regrole::text from pg_proc p
+      where p.oid='clara.enqueue_invoice_facts(uuid)'::regprocedure) <> 'clara_fn_owner'
+   or (select p.proowner::regrole::text from pg_proc p
+      where p.oid='clara._tf_processing_task_update()'::regprocedure) <> 'clara_fn_owner' then
+    raise exception '0038 E2b postcheck: a recut body changed owner' using errcode='CLR10';
+  end if;
+end $e2b_post$;
+
+-- =====================================================================================
+-- SECTION E2c -- THE OTHER THREE CALLER-SIDE INVOICE-TWIN EMITTERS (as-built regression
+-- cells, 2026-07-31 -- x38.z4 caught the first one live). The 0027-lineage filing verbs
+-- (file_document, confirm_attribution_candidate, approve_wrong_client_correction) each
+-- carry the same idiom as the 0009 wrapper: "core receipt says failed -> emit the invoice
+-- twin". For a statement-lane receipt that is the phantom invoice failure E2b just closed
+-- on the wrapper path -- and a double-emit on top of the core's own statement-twin sites.
+-- Each emit's guard gains a task-lane test, spliced surgically so every other byte of
+-- these three live bodies is carried forward untouched.
+-- =====================================================================================
+-- Three sibling splices, deliberately UNROLLED (never a loop): the binding-post-control
+-- gate attributes every pg_get_functiondef target statically -- a direct regprocedure
+-- literal or ONE literal-valued signature variable -- and a loop-fed variable is
+-- unattributable by design (fail-closed).
+set role clara_fn_owner;
+do $e2c38a$
+declare
+  v_sig text := 'clara.file_document(uuid,uuid,text,text)';
+  v_def text; v_frm text; v_to text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid=v_sig::regprocedure;
+  if v_def is null then
+    raise exception '0038 E2c prestate: % is GONE', v_sig using errcode='CLR10';
+  end if;
+  v_frm := $f1$  if v_facts->>'status'='failed' then
+    perform clara._append_event(c.firm,'document.invoice_facts_failed',null,c.actor,null,null,
+      null,p_document,null,jsonb_build_object('task_id',v_facts->>'task_id',
+        'reason',v_facts->>'reason'));
+  end if;$f1$;
+  v_cnt := (length(v_def)-length(replace(v_def,v_frm,'')))/length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '0038 E2c prestate: the invoice-twin emit block appears % times in % (expected exactly once) -- the body drifted; re-derive this splice', v_cnt, v_sig
+      using errcode='CLR10';
+  end if;
+  v_to := $t1$  if v_facts->>'status'='failed'
+     -- 0038 E2c: statement-lane terminal receipts emit their own STATEMENT twin inside
+     -- the core; this caller-side invoice-twin emit stays for the invoice lanes only.
+     and coalesce((select t38.lane from clara.document_processing_tasks t38
+       where t38.id=(v_facts->>'task_id')::uuid),'')
+       not in ('statement_facts','statement_parse') then
+    perform clara._append_event(c.firm,'document.invoice_facts_failed',null,c.actor,null,null,
+      null,p_document,null,jsonb_build_object('task_id',v_facts->>'task_id',
+        'reason',v_facts->>'reason'));
+  end if;$t1$;
+  v_def := replace(v_def, v_frm, v_to);
+  execute v_def;
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid=v_sig::regprocedure;
+  if position('not in (''statement_facts'',''statement_parse'')' in v_def)=0 then
+    raise exception '0038 E2c postcheck: % did not gain the statement-lane suppress', v_sig
+      using errcode='CLR10';
+  end if;
+  if (select p.proowner::regrole::text from pg_proc p where p.oid=v_sig::regprocedure)
+      <> 'clara_fn_owner' then
+    raise exception '0038 E2c postcheck: % changed owner', v_sig using errcode='CLR10';
+  end if;
+end $e2c38a$;
+
+do $e2c38b$
+declare
+  v_sig text := 'clara.confirm_attribution_candidate(uuid,text,boolean)';
+  v_def text; v_frm text; v_to text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid=v_sig::regprocedure;
+  if v_def is null then
+    raise exception '0038 E2c prestate: % is GONE', v_sig using errcode='CLR10';
+  end if;
+  v_frm := $f2$    if v_facts->>'status'='failed' then
+      perform clara._append_event(c.firm,'document.invoice_facts_failed',null,c.actor,null,null,
+        null,x.document_id,null,jsonb_build_object('task_id',v_facts->>'task_id',
+          'reason',v_facts->>'reason'));
+    end if;$f2$;
+  v_cnt := (length(v_def)-length(replace(v_def,v_frm,'')))/length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '0038 E2c prestate: the invoice-twin emit block appears % times in % (expected exactly once) -- the body drifted; re-derive this splice', v_cnt, v_sig
+      using errcode='CLR10';
+  end if;
+  v_to := $t2$    if v_facts->>'status'='failed'
+       -- 0038 E2c: statement-lane terminal receipts emit their own STATEMENT twin inside
+       -- the core; this caller-side invoice-twin emit stays for the invoice lanes only.
+       and coalesce((select t38.lane from clara.document_processing_tasks t38
+         where t38.id=(v_facts->>'task_id')::uuid),'')
+         not in ('statement_facts','statement_parse') then
+      perform clara._append_event(c.firm,'document.invoice_facts_failed',null,c.actor,null,null,
+        null,x.document_id,null,jsonb_build_object('task_id',v_facts->>'task_id',
+          'reason',v_facts->>'reason'));
+    end if;$t2$;
+  v_def := replace(v_def, v_frm, v_to);
+  execute v_def;
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid=v_sig::regprocedure;
+  if position('not in (''statement_facts'',''statement_parse'')' in v_def)=0 then
+    raise exception '0038 E2c postcheck: % did not gain the statement-lane suppress', v_sig
+      using errcode='CLR10';
+  end if;
+  if (select p.proowner::regrole::text from pg_proc p where p.oid=v_sig::regprocedure)
+      <> 'clara_fn_owner' then
+    raise exception '0038 E2c postcheck: % changed owner', v_sig using errcode='CLR10';
+  end if;
+end $e2c38b$;
+
+do $e2c38c$
+declare
+  v_sig text := 'clara.approve_wrong_client_correction(uuid,text,text,text)';
+  v_def text; v_frm text; v_to text; v_cnt int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid=v_sig::regprocedure;
+  if v_def is null then
+    raise exception '0038 E2c prestate: % is GONE', v_sig using errcode='CLR10';
+  end if;
+  v_frm := $f3$  if v_facts->>'status'='failed' then
+    perform clara._append_event(c.firm,'document.invoice_facts_failed',null,c.actor,null,null,
+      null,x.document_id,null,jsonb_build_object('task_id',v_facts->>'task_id',
+        'reason',v_facts->>'reason'));
+  end if;$f3$;
+  v_cnt := (length(v_def)-length(replace(v_def,v_frm,'')))/length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '0038 E2c prestate: the invoice-twin emit block appears % times in % (expected exactly once) -- the body drifted; re-derive this splice', v_cnt, v_sig
+      using errcode='CLR10';
+  end if;
+  v_to := $t3$  if v_facts->>'status'='failed'
+     -- 0038 E2c: statement-lane terminal receipts emit their own STATEMENT twin inside
+     -- the core; this caller-side invoice-twin emit stays for the invoice lanes only.
+     and coalesce((select t38.lane from clara.document_processing_tasks t38
+       where t38.id=(v_facts->>'task_id')::uuid),'')
+       not in ('statement_facts','statement_parse') then
+    perform clara._append_event(c.firm,'document.invoice_facts_failed',null,c.actor,null,null,
+      null,x.document_id,null,jsonb_build_object('task_id',v_facts->>'task_id',
+        'reason',v_facts->>'reason'));
+  end if;$t3$;
+  v_def := replace(v_def, v_frm, v_to);
+  execute v_def;
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid=v_sig::regprocedure;
+  if position('not in (''statement_facts'',''statement_parse'')' in v_def)=0 then
+    raise exception '0038 E2c postcheck: % did not gain the statement-lane suppress', v_sig
+      using errcode='CLR10';
+  end if;
+  if (select p.proowner::regrole::text from pg_proc p where p.oid=v_sig::regprocedure)
+      <> 'clara_fn_owner' then
+    raise exception '0038 E2c postcheck: % changed owner', v_sig using errcode='CLR10';
+  end if;
+end $e2c38c$;
+reset role;
 
 -- =====================================================================================
 -- SECTION E3 -- clara.claim_document_processing_task: LANE-LIST WIDENINGS, AND NOTHING ELSE.
@@ -6080,7 +6877,13 @@ begin
       update clara.document_processing_tasks set status='failed',error_code='attempt_cap',
         finished_at=now() where id=p_task;
       perform clara._refund_processing_call(p_task,'attempt_cap');
-      perform clara._append_event(t.firm_id,'document.invoice_facts_failed',null,null,null,null,
+      -- 0038 as-built fix: the terminal event follows the LANE -- a statement task's cap
+      -- must fire the statement feed (its subscribed twin), never wake the autodraft
+      -- consumer with a phantom invoice failure.
+      perform clara._append_event(t.firm_id,
+        case when t.lane='statement_facts' then 'document.statement_facts_failed'
+             else 'document.invoice_facts_failed' end,
+        null,null,null,null,
         null,t.document_id,null,jsonb_build_object('task_id',p_task,'reason','attempt_cap'));
       return jsonb_build_object('task_id',p_task,'status','failed','reason','attempt_cap');
     end if;
@@ -6144,6 +6947,11 @@ begin
   end if;
   if position('claim_secret_digest' in v_src)=0 then
     raise exception '0038 E3 postcheck: the recut dropped 0024''s claim_secret capability' using errcode='CLR10';
+  end if;
+  -- as-built fix: the attempt-cap terminal event must follow the lane -- both twins named.
+  if position('document.statement_facts_failed' in v_src)=0
+     or position('document.invoice_facts_failed' in v_src)=0 then
+    raise exception '0038 E3 postcheck: the attempt-cap branch does not name BOTH lane terminal event types' using errcode='CLR10';
   end if;
 end
 $e3_claim_post$;
@@ -6480,17 +7288,32 @@ set role clara_fn_owner;
 -- 0037:3416-3419).
 -- =====================================================================================
 
--- TRUE when this entry is a member of a bank match group that is still pending or live.
+-- TRUE when this entry is a member of a bank match group that is still pending or live, OR
+-- when it is the DRAFT ANCHOR of a pending reservation.
 -- The reverse refusal's predicate (design 4.6): a matched entry is a statement line's
 -- counterparty in a tie that the group model owns; reversing it out from under the group would
 -- strand the line at full amount in a group that no longer ties. The remedy is honest and
 -- one step: unmatch, then reverse.
+--
+-- THE SECOND ARM (as-built ladder fix 2026-07-31, Codex wave). A pending group holds its
+-- settlement through bank_matches.draft_entry_id, never as a member -- section 4.5 forbids a
+-- draft member -- so the membership arm alone said "not matched" about the entry a
+-- reservation is holding a real statement line against. Once the checker approves that draft
+-- it is an ordinary approved entry, and reverse_entry would have taken it out from under a
+-- live-in-all-but-name reservation. Reading both attachments is what makes "unmatch first"
+-- the single remedy on every path. Note this also makes the refusal one-way honest: cancel
+-- the reservation and the arm falls away, which is what unblocks the sanctioned unwind
+-- (unallocate_group + reverse_entry) after an approve-then-cancel.
 create function clara._bank_live_match_present(p_entry uuid) returns boolean
   language sql stable security definer set search_path = clara, pg_temp as $$
   select exists (
     select 1 from clara.bank_match_entry_members m
     where m.entry_id = p_entry
-      and m.group_status in ('pending','live'));
+      and m.group_status in ('pending','live'))
+      or exists (
+    select 1 from clara.bank_matches bm
+    where bm.draft_entry_id = p_entry
+      and bm.status = 'pending');
 $$;
 revoke all on function clara._bank_live_match_present(uuid) from public;
 
@@ -6794,6 +7617,417 @@ $new$  if jsonb_array_length(v_blockers) > 0 then
 end
 $rdf38$;
 
+-- =====================================================================================
+-- SECTION E7d -- clara.withdraw_draft: the ONE-DOOR law for pending reservations (as-built
+-- ladder fix, 2026-07-31, money-lens BLOCKER). A draft anchoring a PENDING bank match must
+-- not be withdrawable out from under its reservation (a stranded line the maker cannot
+-- release) -- cancellation goes through unmatch_bank_match, which withdraws the draft in
+-- the same transaction. Lineage: 0009 first cut, 0017 R1-F1 dynamic splice (the CLR31
+-- opening boundary) -- PATCH-only, the 0036 dual-grep law; the anchor is 0009's own
+-- draft-status refusal, which the 0017 splice did not touch.
+-- =====================================================================================
+set role clara_fn_owner;
+do $wd38$
+declare v_def text; v_next text; v_anchor text;
+begin
+  select pg_get_functiondef('clara.withdraw_draft(uuid,text,uuid,text)'::regprocedure)
+    into v_def;
+  if position('opening_entry_k_family_only' in v_def)=0 then
+    raise exception '0038 section E7d prestate: the live clara.withdraw_draft body is missing 0017''s R1-F1 marker -- refusing to patch a body this migration cannot account for'
+      using errcode='CLR10';
+  end if;
+  if position('pending_match_present' in v_def)<>0 then
+    raise exception '0038 section E7d prestate: clara.withdraw_draft already carries the pending-match refusal -- 0038 has already been applied to this database'
+      using errcode='CLR10';
+  end if;
+  v_anchor := $a$  if e.status<>'draft' then raise exception 'only a draft can be withdrawn' using errcode='CLR22'; end if;$a$;
+  if (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0038 section E7d prestate: the draft-status anchor must appear exactly once in the live body'
+      using errcode='CLR10';
+  end if;
+  v_next := replace(v_def, v_anchor, v_anchor || $b$
+  -- 0038 (WCB-R3, the one-door law): a draft anchoring a PENDING bank-match reservation is
+  -- cancelled through unmatch_bank_match (which withdraws it atomically), never alone --
+  -- a lone withdrawal strands the owned statement line.
+  if exists (select 1 from clara.bank_matches bm
+      where bm.draft_entry_id = p_entry and bm.status = 'pending') then
+    raise exception 'this draft anchors a pending bank-match reservation; cancel via unmatch_bank_match (it withdraws the draft in the same transaction)'
+      using errcode='CLR10',
+        detail='{"reason":"pending_match_present"}';
+  end if;$b$);
+  if v_next = v_def or position('pending_match_present' in v_next)=0 then
+    raise exception '0038 section E7d: withdraw_draft anchor drift -- the pending-match refusal was not installed'
+      using errcode='CLR10';
+  end if;
+  execute v_next;
+end
+$wd38$;
+
+-- The structural backstop behind BOTH doors: an entry that is the draft anchor of a
+-- NON-pending group (an orphaned reservation) can never reach the books. The normal checker
+-- path approves while the group is still 'pending' and passes untouched.
+create function clara._tf_je_bank_pending_orphan_belt() returns trigger
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare v_match uuid;
+begin
+  select bm.id into v_match from clara.bank_matches bm
+    where bm.draft_entry_id = new.id and bm.status = 'unmatched'
+    limit 1;
+  if v_match is not null then
+    raise exception 'entry % anchors CANCELLED bank-match reservation %; its allocation proposal died with the reservation -- redraft through settle_from_bank_line', new.id, v_match
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','orphaned_reservation_draft','match_id',v_match)::text;
+  end if;
+  return null;
+end $$;
+revoke all on function clara._tf_je_bank_pending_orphan_belt() from public;
+create constraint trigger t_je_bank_pending_orphan_belt
+  after update on clara.journal_entries
+  deferrable initially deferred
+  for each row
+  when (new.status = 'approved' and old.status = 'draft')
+  execute function clara._tf_je_bank_pending_orphan_belt();
+
+-- =====================================================================================
+-- SECTION E7e -- THE TWO RE-KIND DOORS: clara.set_document_kind and clara.classify_document
+-- (as-built ladder fix 2026-07-31, Codex wave).
+--
+-- THE HOLE. E7b and E7c closed the two FILING doors -- a live statement's document cannot be
+-- re-filed to another client, and its filing cannot be retired. Both refuse for one reason:
+-- a live bank_statements row is a books-bearing fact that binds (document_id,
+-- source_doc_sha256, filing_id), and moving the ground under it is a rewrite, not a
+-- correction. But the DOCUMENT KIND is ground too, and it was left open. `bank_statement` is
+-- what routed this document to the statement lane in the first place (the E2 router reads
+-- documents.document_kind); re-kinding it to 'invoice' after the statement is live leaves a
+-- live statement, its lines, and every match and settlement on those lines citing a document
+-- the schema now says is something else entirely -- and it re-arms the invoice lane on a
+-- document whose money has already been booked through the bank lane.
+--
+-- BOTH WRITERS, BECAUSE THERE ARE TWO. clara.set_document_kind is the human attestation and
+-- clara.classify_document is the machine verdict; either can move the kind, so a refusal on
+-- one door is a refusal on half the problem (the ADV-R4#6 lesson that put a document-row lock
+-- in BOTH bodies in the first place).
+--
+-- A SAME-KIND WRITE STAYS LEGAL. Re-classifying a bank statement AS a bank statement changes
+-- nothing about the ground and refusing it would break ordinary re-runs -- including the
+-- classifier's own idempotent replays. The refusal is on the CHANGE, tested null-safely with
+-- IS DISTINCT FROM so an unclassified document (kind null) is treated as a change, which it is.
+--
+-- CoR: both bodies were last recut by 0026 (its SS H and SS I, both `create or replace` over
+-- the live catalog, carrying 0024's task/claim-secret capability check and 0017's prior_gl
+-- vocabulary patch forward). The prestate probes below are POSITIVE for those predecessors'
+-- own markers before either body is touched, exactly as E7/E7b/E7c/E7d do.
+--
+-- ANCHOR: the consent-evidence refusal, which sits in BOTH bodies -- after the document row
+-- is locked and read, after the argument validation, and before the op-key reservation and
+-- the kind UPDATE. That placement is what makes the new refusal cost no write and take no
+-- further lock, and it is the same "refuse at the top" discipline E7b's provenance refusal
+-- follows.
+-- =====================================================================================
+set role clara_fn_owner;
+do $sdk38$
+declare v_def text; v_next text; v_anchor text;
+begin
+  select pg_get_functiondef('clara.set_document_kind(uuid,text,text,text)'::regprocedure)
+    into v_def;
+  if position('clara-classify-human:v1' in v_def)=0
+     or position('''prior_gl''' in v_def)=0 then
+    raise exception '0038 section E7e prestate: the live clara.set_document_kind body is missing its human-attestation engine id or 0017''s prior_gl vocabulary patch -- refusing to patch a body this migration cannot account for'
+      using errcode='CLR10';
+  end if;
+  if position($q$engine_kind='doc_classify'$q$ in v_def)=0 then
+    raise exception '0038 section E7e prestate: the live clara.set_document_kind body is missing 0026''s doc_classify-scoped version mint -- refusing to patch a body this migration cannot account for'
+      using errcode='CLR10';
+  end if;
+  if position('live_bank_statement_present' in v_def)<>0 then
+    raise exception '0038 section E7e prestate: clara.set_document_kind already carries the bank-statement refusal -- 0038 has already been applied to this database'
+      using errcode='CLR10';
+  end if;
+  v_anchor := $a$  if d.document_kind='consent_evidence' or p_kind='consent_evidence' then
+    raise exception 'consent-evidence classification is owned by the egress consent path'
+      using errcode='CLR28';
+  end if;$a$;
+  -- EXACTLY ONCE (0036 review F4): replace() rewrites every occurrence, so a drifted body
+  -- carrying two copies would take two splices while a position()>0 post-check stayed green.
+  if (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0038 section E7e prestate: the consent-evidence anchor must appear exactly once in the live clara.set_document_kind body'
+      using errcode='CLR10';
+  end if;
+  v_next := replace(v_def, v_anchor, v_anchor || $b$
+  -- 0038 (design 4.2 / part2 section 5): A LIVE BANK STATEMENT PINS THE DOCUMENT KIND. The
+  -- kind is what routed this document to the statement lane; changing it under a live
+  -- statement leaves that statement, its lines and every match on them citing a document the
+  -- schema now calls something else. Same family as the filing refusals in
+  -- approve_wrong_client_correction and retire_document_filing, same remedy: void the
+  -- statement first (which itself requires zero pending/live match groups on its lines,
+  -- WCB-R5), then re-classify, then re-ingest. A SAME-KIND write is untouched.
+  if p_kind is distinct from d.document_kind
+     and clara._bank_live_statement_on_document(p_document) then
+    raise exception 'a live bank statement is bound to this document; void it before re-classifying'
+      using errcode='CLR10',detail='{"reason":"live_bank_statement_present"}';
+  end if;$b$);
+  if v_next = v_def or position('live_bank_statement_present' in v_next)=0
+     or position('clara._bank_live_statement_on_document(p_document)' in v_next)=0 then
+    raise exception '0038 section E7e: set_document_kind consent-evidence anchor drift -- the bank-statement refusal was not installed'
+      using errcode='CLR10';
+  end if;
+  execute v_next;
+end
+$sdk38$;
+
+do $cld38$
+declare v_def text; v_next text; v_anchor text;
+begin
+  select pg_get_functiondef(
+    'clara.classify_document(uuid,text,numeric,text,text,uuid,text,text)'::regprocedure)
+    into v_def;
+  if position('claim_secret_digest' in v_def)=0
+     or position('reserved_engine' in v_def)=0 then
+    raise exception '0038 section E7e prestate: the live clara.classify_document body is missing 0024''s claim-secret capability check or the reserved-engine refusal -- refusing to patch a body this migration cannot account for'
+      using errcode='CLR10';
+  end if;
+  if position($q$engine_kind='doc_classify'$q$ in v_def)=0 then
+    raise exception '0038 section E7e prestate: the live clara.classify_document body is missing 0026''s doc_classify-scoped version mint -- refusing to patch a body this migration cannot account for'
+      using errcode='CLR10';
+  end if;
+  if position('live_bank_statement_present' in v_def)<>0 then
+    raise exception '0038 section E7e prestate: clara.classify_document already carries the bank-statement refusal -- 0038 has already been applied to this database'
+      using errcode='CLR10';
+  end if;
+  v_anchor := $a$  if d.document_kind='consent_evidence' or p_kind='consent_evidence' then
+    raise exception 'consent-evidence classification is owned by the egress consent path'
+      using errcode='CLR28';
+  end if;$a$;
+  if (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor) <> 1 then
+    raise exception '0038 section E7e prestate: the consent-evidence anchor must appear exactly once in the live clara.classify_document body'
+      using errcode='CLR10';
+  end if;
+  v_next := replace(v_def, v_anchor, v_anchor || $b$
+  -- 0038 (design 4.2 / part2 section 5): the machine half of the same law. A classifier
+  -- verdict that DIFFERS from the kind a live bank statement was ingested under is refused
+  -- here rather than allowed to land -- and it is refused at the top, before the verdict row
+  -- and before the op-key reservation, because the remedy is not "try again with more
+  -- confidence", it is "void the statement first". Note the refusal is deliberately on the
+  -- PROPOSED kind, not on whether this particular call would have written it: a low-confidence
+  -- differing verdict on a live-statement document is a classification the firm must resolve
+  -- against the statement, not an open question to file quietly. A same-kind verdict -- the
+  -- ordinary idempotent re-run -- passes untouched.
+  if p_kind is distinct from d.document_kind
+     and clara._bank_live_statement_on_document(p_document) then
+    raise exception 'a live bank statement is bound to this document; void it before re-classifying'
+      using errcode='CLR10',detail='{"reason":"live_bank_statement_present"}';
+  end if;$b$);
+  if v_next = v_def or position('live_bank_statement_present' in v_next)=0
+     or position('clara._bank_live_statement_on_document(p_document)' in v_next)=0 then
+    raise exception '0038 section E7e: classify_document consent-evidence anchor drift -- the bank-statement refusal was not installed'
+      using errcode='CLR10';
+  end if;
+  execute v_next;
+end
+$cld38$;
+
+reset role;
+
+-- =====================================================================================
+-- SECTION R -- THE /bank READ SURFACE (part2 section 4.7; as-built ladder fix 2026-07-31:
+-- the dashboard shipped against six ASSUMED reader names that no lane built). Every reader:
+-- SECURITY DEFINER, opens with _human_ctx, carries firm_id = c.firm in EVERY predicate
+-- (the list_review_queue idiom -- a definer body never sees the RLS policies), granted to
+-- clara_authenticated ONLY. Cross-firm probes return zero rows, never a discriminating error.
+-- =====================================================================================
+set role clara_fn_owner;
+
+create function clara.list_bank_accounts(p_client uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  return coalesce((select jsonb_agg(jsonb_build_object(
+      'id', ba.id, 'bank_code', ba.bank_code,
+      'bank_name', bi.name, 'bank_name_display', ba.bank_name_display,
+      'account_number', ba.account_number,
+      'account_number_normalized', ba.account_number_normalized,
+      'coa_account_code', ba.coa_account_code, 'coa_account_name', ca.name,
+      'active', ba.active, 'created_at', ba.created_at,
+      'deactivated_at', ba.deactivated_at, 'deactivated_reason', ba.deactivated_reason)
+      order by ba.active desc, ba.created_at)
+    from clara.bank_accounts ba
+    join clara.bank_institutions bi on bi.code = ba.bank_code
+    left join clara.coa_accounts ca on ca.client_id = ba.client_id
+      and ca.account_code = ba.coa_account_code
+    where ba.firm_id = c.firm and ba.client_id = p_client), '[]'::jsonb);
+end $$;
+
+create function clara.list_bank_account_proposals(p_client uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  return coalesce((select jsonb_agg(jsonb_build_object(
+      'id', bp.id, 'bank_code', bp.bank_code, 'bank_name', bi.name,
+      'account_number_normalized', bp.account_number_normalized,
+      'currency', bp.header->>'currency',
+      'period_start', bp.header->>'period_start', 'period_end', bp.header->>'period_end',
+      'statement_date', bp.header->>'statement_date',
+      'opening_cents', bp.header->'opening_cents', 'closing_cents', bp.header->'closing_cents',
+      'reason', bp.reason, 'existing_bank_account_id', bp.existing_bank_account_id,
+      'existing_bank_account_display', (select ba.bank_name_display || ' ' || ba.account_number
+          from clara.bank_accounts ba where ba.id = bp.existing_bank_account_id
+            and ba.firm_id = c.firm),
+      'document_id', bp.document_id, 'created_at', bp.created_at)
+      order by bp.created_at desc)
+    from clara.bank_account_proposals bp
+    join clara.bank_institutions bi on bi.code = bp.bank_code
+    where bp.firm_id = c.firm and bp.client_id = p_client and bp.status = 'open'), '[]'::jsonb);
+end $$;
+
+-- The statement tie (part2 4.7 banner): the bank COA's GL balance at period_end (approved
+-- entries only, posting_date <= period_end -- the practitioner's first number) beside the
+-- statement's own closing, plus this statement's still-unmatched line sum. READ-ONLY
+-- arithmetic over already-owned numbers -- the DB computes it, the UI only renders it.
+create function clara.list_bank_statements(p_client uuid, p_bank_account uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record; v_coa text;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select ba.coa_account_code into v_coa from clara.bank_accounts ba
+    where ba.id = p_bank_account and ba.firm_id = c.firm and ba.client_id = p_client;
+  if not found then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(jsonb_build_object(
+      'id', bs.id, 'bank_account_id', bs.bank_account_id, 'document_id', bs.document_id,
+      'period_start', bs.period_start, 'period_end', bs.period_end,
+      'statement_date', bs.statement_date,
+      'opening_cents', bs.opening_cents, 'closing_cents', bs.closing_cents,
+      'total_debit_cents', bs.total_debit_cents, 'total_credit_cents', bs.total_credit_cents,
+      'line_count', bs.line_count, 'status', bs.status, 'ingest_mode', bs.ingest_mode,
+      'superseded_by', bs.superseded_by, 'voided_by', bs.voided_by,
+      'voided_at', bs.voided_at, 'voided_reason', bs.voided_reason,
+      'created_at', bs.created_at,
+      'tie', jsonb_build_object(
+        'gl_balance_cents', (select coalesce(sum(jl.debit_cents - jl.credit_cents), 0)
+           from clara.journal_lines jl
+           join clara.journal_entries je on je.id = jl.entry_id
+           where je.firm_id = c.firm and je.client_id = p_client
+             and je.status = 'approved' and je.posting_date <= bs.period_end
+             and jl.account_code = v_coa),
+        'unmatched_cents', (select coalesce(sum(l.amount_cents), 0)
+           from clara.bank_statement_lines l
+           where l.statement_id = bs.id and l.firm_id = c.firm
+             and not exists (select 1 from clara.bank_match_line_members mm
+               where mm.line_id = l.id and mm.group_status in ('pending','live')))))
+      order by bs.period_end desc)
+    from clara.bank_statements bs
+    where bs.firm_id = c.firm and bs.client_id = p_client
+      and bs.bank_account_id = p_bank_account), '[]'::jsonb);
+end $$;
+
+create function clara.get_bank_statement(p_statement uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record; v_stmt jsonb; v_lines jsonb; v_client uuid; v_acct uuid;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select bs.client_id, bs.bank_account_id into v_client, v_acct
+    from clara.bank_statements bs
+    where bs.id = p_statement and bs.firm_id = c.firm;
+  if not found then return null; end if;
+  select x.elem into v_stmt
+    from jsonb_array_elements(clara.list_bank_statements(v_client, v_acct)) as x(elem)
+    where x.elem->>'id' = p_statement::text;
+  select coalesce(jsonb_agg(jsonb_build_object(
+      'id', l.id, 'statement_id', l.statement_id, 'line_no', l.line_no,
+      'entry_date', l.entry_date, 'value_date', l.value_date,
+      'description', l.description, 'amount_cents', l.amount_cents,
+      'running_balance_cents', l.running_balance_cents,
+      'match_state', coalesce(mm.group_status, 'unmatched'),
+      'match_id', mm.match_id)
+      order by l.line_no), '[]'::jsonb)
+    into v_lines
+    from clara.bank_statement_lines l
+    left join clara.bank_match_line_members mm on mm.line_id = l.id
+      and mm.group_status in ('pending','live')
+    where l.statement_id = p_statement and l.firm_id = c.firm;
+  return jsonb_build_object('statement', v_stmt, 'lines', v_lines);
+end $$;
+
+create function clara.list_open_items_by_counterparty(
+    p_client uuid, p_domain text, p_counterparty uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  if p_domain not in ('ar','ap') then
+    raise exception 'domain must be ar or ap' using errcode='CLR10';
+  end if;
+  return coalesce((select jsonb_agg(jsonb_build_object(
+      'id', oi.id, 'domain', oi.domain, 'counterparty_id', oi.counterparty_id,
+      'item_kind', oi.item_kind, 'item_date', oi.item_date, 'due_date', oi.due_date,
+      'amount_cents', oi.amount_cents,
+      'outstanding_cents', clara._subledger_outstanding(oi.id),
+      'entry_id', oi.entry_id)
+      order by oi.item_date, oi.id)
+    from clara.open_items oi
+    where oi.firm_id = c.firm and oi.client_id = p_client
+      and oi.domain = p_domain
+      and oi.counterparty_id = clara._canonical_counterparty(c.firm, p_counterparty)
+      and clara._subledger_outstanding(oi.id) <> 0), '[]'::jsonb);
+end $$;
+
+create function clara.list_bank_match_candidates(
+    p_client uuid, p_bank_account uuid) returns jsonb
+  language plpgsql security definer set search_path = clara, pg_temp as $$
+declare c record; v_coa text;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select ba.coa_account_code into v_coa from clara.bank_accounts ba
+    where ba.id = p_bank_account and ba.firm_id = c.firm and ba.client_id = p_client;
+  if not found then return '[]'::jsonb; end if;
+  return coalesce((select jsonb_agg(t.row_j order by t.posting_date desc) from (
+    select je.posting_date, jsonb_build_object(
+      'entry_id', je.id, 'posting_date', je.posting_date, 'memo', je.memo,
+      'coding_kind', je.coding_kind,
+      'counterparty_id', (select min(jl2.counterparty_id::text)::uuid from clara.journal_lines jl2
+         where jl2.entry_id = je.id and jl2.counterparty_id is not null),
+      'high_stakes', false,
+      'debit_remaining_cents', greatest(0,
+        (select coalesce(sum(jl.debit_cents), 0) from clara.journal_lines jl
+          where jl.entry_id = je.id and jl.account_code = v_coa)
+        - (select coalesce(sum(em.matched_cents), 0)
+           from clara.bank_match_entry_members em
+           join clara.bank_matches bm on bm.id = em.match_id
+           join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+           where em.entry_id = je.id and em.matched_cents > 0
+             and bm.status in ('pending','live')
+             and ba2.coa_account_code = v_coa and ba2.client_id = p_client)),
+      'credit_remaining_cents', greatest(0,
+        (select coalesce(sum(jl.credit_cents), 0) from clara.journal_lines jl
+          where jl.entry_id = je.id and jl.account_code = v_coa)
+        - (select coalesce(sum(-em.matched_cents), 0)
+           from clara.bank_match_entry_members em
+           join clara.bank_matches bm on bm.id = em.match_id
+           join clara.bank_accounts ba2 on ba2.id = bm.bank_account_id
+           where em.entry_id = je.id and em.matched_cents < 0
+             and bm.status in ('pending','live')
+             and ba2.coa_account_code = v_coa and ba2.client_id = p_client))) as row_j
+    from clara.journal_entries je
+    where je.firm_id = c.firm and je.client_id = p_client
+      and je.status = 'approved' and je.reversed_by is null and je.reversal_of is null
+      and exists (select 1 from clara.journal_lines jl
+        where jl.entry_id = je.id and jl.account_code = v_coa
+          and (jl.debit_cents <> 0 or jl.credit_cents <> 0))
+  ) t where (t.row_j->>'debit_remaining_cents')::bigint > 0
+         or (t.row_j->>'credit_remaining_cents')::bigint > 0), '[]'::jsonb);
+end $$;
+
+do $racl$ declare f text; begin
+  foreach f in array array['clara.list_bank_accounts(uuid)','clara.list_bank_account_proposals(uuid)',
+      'clara.list_bank_statements(uuid,uuid)','clara.get_bank_statement(uuid)',
+      'clara.list_open_items_by_counterparty(uuid,text,uuid)','clara.list_bank_match_candidates(uuid,uuid)'] loop
+    execute format('revoke all on function %s from public', f);
+    execute format('grant execute on function %s to clara_authenticated', f);
+    execute format('alter function %s owner to clara_fn_owner', f);
+  end loop;
+end $racl$;
+
 reset role;
 
 -- =====================================================================================
@@ -6844,6 +8078,50 @@ begin
      or position('The wiki VETO is gone' in v_rdf)=0
      or position('live citation blockers' in v_rdf)=0 then
     raise exception '0038 tail: clara.retire_document_filing is missing its 0038 refusal or one of 0019/0027''s changes of record'
+      using errcode='CLR10';
+  end if;
+
+  ---- (1b) THE TWO RE-KIND DOORS (section E7e, as-built ladder fix 2026-07-31, Codex wave).
+  ---- Same law as (a) above, on the other axis: the DOCUMENT KIND is what routed this document
+  ---- to the statement lane, so it is as load-bearing as the filing. Both writers are asserted
+  ---- -- the human attestation and the machine verdict -- because a refusal on one door is a
+  ---- refusal on half the problem. Each is checked BOTH for its own 0038 refusal AND for the
+  ---- predecessor markers the splice probed, so a patch that installed cleanly while reverting
+  ---- 0017's vocabulary or 0024/0026's own changes of record fails here.
+  select pg_get_functiondef('clara.set_document_kind(uuid,text,text,text)'::regprocedure)
+    into v_src;
+  if position('live_bank_statement_present' in v_src)=0
+     or position('clara._bank_live_statement_on_document(p_document)' in v_src)=0
+     or position('''prior_gl''' in v_src)=0
+     or position($q$engine_kind='doc_classify'$q$ in v_src)=0 then
+    raise exception '0038 tail: clara.set_document_kind is missing its 0038 re-kind refusal or one of 0017/0026''s changes of record'
+      using errcode='CLR10';
+  end if;
+  -- ORDERED, both-present (the same non-vacuous form as the lock-order pins below): the
+  -- refusal must sit after the document row lock, so it reads a kind nobody can move under it.
+  if not (position('for update;' in v_src) > 0
+          and position('clara._bank_live_statement_on_document(p_document)' in v_src) > 0
+          and position('for update;' in v_src)
+              < position('clara._bank_live_statement_on_document(p_document)' in v_src)) then
+    raise exception '0038 tail: clara.set_document_kind must lock the document row BEFORE reading the bank statement -- ADV-R4#6''s serialization is what makes the refusal exact'
+      using errcode='CLR10';
+  end if;
+  select pg_get_functiondef(
+    'clara.classify_document(uuid,text,numeric,text,text,uuid,text,text)'::regprocedure)
+    into v_src;
+  if position('live_bank_statement_present' in v_src)=0
+     or position('clara._bank_live_statement_on_document(p_document)' in v_src)=0
+     or position('claim_secret_digest' in v_src)=0
+     or position('reserved_engine' in v_src)=0
+     or position($q$engine_kind='doc_classify'$q$ in v_src)=0 then
+    raise exception '0038 tail: clara.classify_document is missing its 0038 re-kind refusal or one of 0024/0026''s changes of record'
+      using errcode='CLR10';
+  end if;
+  if not (position('for update;' in v_src) > 0
+          and position('clara._bank_live_statement_on_document(p_document)' in v_src) > 0
+          and position('for update;' in v_src)
+              < position('clara._bank_live_statement_on_document(p_document)' in v_src)) then
+    raise exception '0038 tail: clara.classify_document must lock the document row BEFORE reading the bank statement -- ADV-R4#6''s serialization is what makes the refusal exact'
       using errcode='CLR10';
   end if;
 
@@ -6990,7 +8268,7 @@ begin
       using errcode='CLR10';
   end if;
 
-  raise notice '0038 section E tail part 1 OK: three splices carry their own refusals AND every prior change of record; the router, claim, release and reserve recuts hold their lineage; five CHECK widenings and four consent CHECKs in place; the dispatch boundary carries exactly two arities per verb';
+  raise notice '0038 section E tail part 1 OK: FIVE splices (reverse_entry, approve_wrong_client_correction, retire_document_filing, set_document_kind, classify_document) carry their own refusals AND every prior change of record, each ordered behind its own lock; the router, claim, release and reserve recuts hold their lineage; five CHECK widenings and four consent CHECKs in place; the dispatch boundary carries exactly two arities per verb';
 end
 $e8_tail_1$;
 
@@ -7975,7 +9253,7 @@ begin
   -- so a raise there would abort an unrelated filing -- the refusal records as a terminal
   -- never-claimed failed task, the skipped_kind idiom, which the binding CHECK must admit.
   if v_vals is distinct from array['attempt_cap','budget','consent_inactive','skipped_kind','statement_multi_client']::text[] then
-    raise exception '0038 tail: ck_processing_task_binding_0038''s never-claimed error_code allowlist is not EXACTLY (attempt_cap, budget, consent_inactive, skipped_kind) -- found %', v_vals;
+    raise exception '0038 tail: ck_processing_task_binding_0038''s never-claimed error_code allowlist is not EXACTLY (attempt_cap, budget, consent_inactive, skipped_kind, statement_multi_client) -- found %', v_vals;
   end if;
 
   -- ---------------------------------------------------------------------------------------

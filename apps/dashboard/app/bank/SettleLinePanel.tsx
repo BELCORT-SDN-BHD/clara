@@ -15,8 +15,7 @@ import { listOpenItemsByCounterparty } from "../shared/bankApi";
 import { type BankStatementLineRow, type BankStatementRow, type OpenItemRow } from "./model";
 import {
   isEligibleAdjustmentCoaAccount, settlementDomainFor, describeBankRefusal,
-  REFUND_WORKAROUND_MESSAGE, type BankAdjustment,
-} from "./matchModel";
+  REFUND_WORKAROUND_MESSAGE, type BankAdjustment, parseCentsInput } from "./matchModel";
 import { listAccounts, type AccountRow } from "../accounts/api";
 import { fmtCents } from "../shared/fmt";
 import styles from "./bank.module.css";
@@ -138,7 +137,7 @@ export function SettleLinePanel({
                 type="number" className={`${styles.input} ${styles.amountInput}`}
                 value={allocations[it.id] ? allocations[it.id]! / 100 : ""} placeholder="0.00"
                 aria-label={`Allocate to item ${it.id}`}
-                onChange={(e) => setAlloc(it.id, Math.round((Number(e.target.value) || 0) * 100))}
+                onChange={(e) => setAlloc(it.id, parseCentsInput(e.target.value))}
               />
             </div>
           ))}
@@ -158,7 +157,7 @@ export function SettleLinePanel({
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>charge (optional)</span>
                   <input type="number" className={styles.input} value={chargeCents ? chargeCents / 100 : ""} placeholder="0.00"
-                    onChange={(e) => setChargeCents(Math.round((Number(e.target.value) || 0) * 100))} aria-label="Charge amount" />
+                    onChange={(e) => setChargeCents(parseCentsInput(e.target.value))} aria-label="Charge amount" />
                 </label>
                 <label className={styles.field}>
                   <span className={styles.fieldLabel}>charge account</span>
@@ -186,7 +185,7 @@ export function SettleLinePanel({
                   <input
                     type="number" className={`${styles.input} ${styles.amountInput}`} value={a.amount_cents === 0 ? "" : a.amount_cents / 100}
                     placeholder="0.00" aria-label={`Payment adjustment amount ${i + 1}`}
-                    onChange={(e) => setAdjustments((list) => list.map((row, idx) => (idx === i ? { ...row, amount_cents: Math.round((Number(e.target.value) || 0) * 100) } : row)))}
+                    onChange={(e) => setAdjustments((list) => list.map((row, idx) => (idx === i ? { ...row, amount_cents: parseCentsInput(e.target.value) } : row)))}
                   />
                   <button className={styles.linkButton} onClick={() => setAdjustments((list) => list.filter((_, idx) => idx !== i))}>remove</button>
                 </div>

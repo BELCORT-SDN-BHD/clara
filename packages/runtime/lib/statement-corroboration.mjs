@@ -286,41 +286,36 @@ export function statementFactsHash(header, lines) {
  * null on the structured lane by construction (there is no second reader), which is how the
  * DB tells `ingest_mode='structured'` apart from a half-built OCR read.
  */
-export function buildStatementPersistPayload({ ingestMode, agreed, reader1, reader2 }) {
-  const factsHash = statementFactsHash(agreed.header, agreed.lines);
-  return {
-    ingest_mode: ingestMode,
-    facts_hash: factsHash,
-    reader1: {
-      extraction_id: reader1?.extraction_id ?? null,
-      source: reader1?.source ?? null,
-      engine_id: reader1?.engine_id ?? null,
-    },
-    reader2: {
-      extraction_id: reader2?.extraction_id ?? null,
-      source: reader2?.source ?? null,
-      engine_id: reader2?.engine_id ?? null,
-      raw_sha256: reader2?.raw_sha256 ?? null,
-      normalization_version: reader2?.normalization_version ?? null,
-      pages_used: reader2?.pages_used ?? null,
-    },
-    corroboration: agreed.corroboration,
+export function buildStatementPersistPayload({ ingestMode, agreed, reader1, reader2, pagesUsed = 0 }) {
+  // THE DB ENVELOPE (as-built ladder fix, 2026-07-31, runtime-lens BLOCKER): `_persist_
+  // statement_core` parses `p_payload #> '{readers,reader1}'` with PER-READER header/lines/
+  // engine_id and re-derives two-reader agreement ITSELF -- so each reader ships its OWN
+  // read, not the agreed view. reader2 is ABSENT (not null) on the structured lane -- that
+  // absence is how the DB tells ingest_mode='structured' from a half-built OCR read.
+  // pages_used rides top-level: the DB settles the page reservation from it, so a vendor
+  // read that reported pages must not settle at zero (the budget-blindness fix).
+  const shipReader = (meta, read) => ({
+    engine_id: meta?.engine_id ?? null,
+    extraction_id: meta?.extraction_id ?? null,
+    source: meta?.source ?? null,
+    ...(meta?.raw_sha256 !== undefined ? { raw_sha256: meta.raw_sha256 } : {}),
+    ...(meta?.normalization_version !== undefined
+      ? { normalization_version: meta.normalization_version } : {}),
     header: {
-      institution_code: agreed.header.institution_code,
-      institution_name: agreed.header.institution_name ?? null,
-      account_number: agreed.header.account_number,
-      account_number_normalized: agreed.header.account_number_normalized,
-      currency: agreed.header.currency,
-      period_start: agreed.header.period_start,
-      period_end: agreed.header.period_end,
-      statement_date: agreed.header.statement_date,
-      opening_cents: agreed.header.opening_cents,
-      closing_cents: agreed.header.closing_cents,
-      total_debit_cents: agreed.header.total_debit_cents ?? null,
-      total_credit_cents: agreed.header.total_credit_cents ?? null,
-      line_count: agreed.lines.length,
+      institution_code: read?.header?.institution_code ?? null,
+      account_number: read?.header?.account_number ?? null,
+      ...(read?.header?.currency != null ? { currency: read.header.currency } : {}),
+      period_start: read?.header?.period_start ?? null,
+      period_end: read?.header?.period_end ?? null,
+      statement_date: read?.header?.statement_date ?? null,
+      opening_cents: read?.header?.opening_cents ?? null,
+      closing_cents: read?.header?.closing_cents ?? null,
+      total_debit_cents: read?.header?.total_debit_cents ?? null,
+      total_credit_cents: read?.header?.total_credit_cents ?? null,
+      ...(read?.header?.opening_label != null ? { opening_label: read.header.opening_label } : {}),
+      ...(read?.header?.closing_label != null ? { closing_label: read.header.closing_label } : {}),
     },
-    lines: agreed.lines.map((line) => ({
+    lines: (read?.lines ?? []).map((line) => ({
       line_no: line.line_no,
       entry_date: line.entry_date,
       value_date: line.value_date ?? null,
@@ -328,6 +323,15 @@ export function buildStatementPersistPayload({ ingestMode, agreed, reader1, read
       amount_cents: line.amount_cents,
       running_balance_cents: line.running_balance_cents ?? null,
     })),
+  });
+  const readers = { reader1: shipReader(reader1?.meta ?? reader1, reader1?.read ?? reader1) };
+  if (reader2) readers.reader2 = shipReader(reader2?.meta ?? reader2, reader2?.read ?? reader2);
+  return {
+    pages_used: Number.isFinite(pagesUsed) && pagesUsed > 0 ? Math.trunc(pagesUsed) : 0,
+    ingest_mode: ingestMode,
+    facts_hash: statementFactsHash(agreed.header, agreed.lines),
+    corroboration: agreed.corroboration,
+    readers,
   };
 }
 

@@ -51,6 +51,22 @@ export type GroupTiePreview = {
   ties: boolean;
 };
 
+/** Parse a human money string ("1,234.56") into integer cents WITHOUT floating point on
+ *  the write path -- the DB owns every number, and a float dollar intermediate can corrupt
+ *  the cents before the DB ever sees them (the as-built Codex-wave finding). Returns 0 for
+ *  anything unparseable, mirroring the old `Number(...) || 0` tolerance. */
+export function parseCentsInput(text: string): number {
+  const t = String(text ?? "").replace(/[,\s]/g, "");
+  const m = /^(-?)(\d*)(?:\.(\d{0,2})\d*)?$/.exec(t);
+  if (!m || (m[2] === "" && !m[3])) return 0;
+  const sign = m[1] === "-" ? -1n : 1n;
+  const whole = BigInt(m[2] || "0");
+  const frac = BigInt((m[3] ?? "").padEnd(2, "0") || "0");
+  const cents = sign * (whole * 100n + frac);
+  const asNumber = Number(cents);
+  return Number.isSafeInteger(asNumber) ? asNumber : 0;
+}
+
 export function matchGroupTiePreview(
   selectedLines: readonly BankStatementLineRow[],
   entryAllocations: readonly EntryAllocation[],

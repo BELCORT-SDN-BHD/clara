@@ -185,3 +185,49 @@ citations not carried (the extraction envelope retains the full read; `facts_has
 reader extraction ids prove who agreed) · reader-2 engine availability (named fallback) ·
 the interview `banks` item stays free-text (v3 restructure declined) · `bank_
 institutions` is a seeded reference, additively grown by migration.
+
+**v2.2 AS-BUILT AMENDMENTS (the fix wave after the as-built review ladder, 2026-07-31 —
+sources: the opus/Codex as-built findings, the contract-blind regression cells, and the
+0037-predecessor machine diff; the mechanism of record stays the 0038 file):**
+- **Ancillaries DEFER at high stakes** (Codex B1): settle validates the charge/adjustment
+  accounts inline but posts NOTHING beside a pending reservation — the payload rides
+  `bank_matches.pending_ancillaries` (jsonb, cleared on unmatch and on complete) and
+  `complete_pending_match` posts charge + adjustment entries itself before its parity
+  derivation. The stored `charge_cents` is DOMAIN-AWARE (AP only): the AR-side charge
+  already rides the settlement entry's expense slot, so a flat carry would double-post
+  and break the group tie. The pending reservation law is now ZERO entry members + the
+  draft anchor; settle's pre-reserved ancillary receipts close as
+  `{"deferred":true,"to":"complete_pending_match"}`.
+- **The pending draft joins the reversal protection** (Codex B2): `_bank_live_match_present`
+  and the entry-reversal belt now see pending anchors; the `pending_draft_already_approved`
+  refusal is REMOVED — cancel-after-approve proceeds one-way (group dies, approved entry
+  stands, `draft_withdrawn:false`), because the refusal wedged the exact race it described.
+- **Re-kind splices (E7e)**: `classify_document` + `set_document_kind` refuse
+  `live_bank_statement_present` — a document with a live statement cannot quietly become a
+  different kind (void first). Classify refuses on ANY differing proposed kind, low-
+  confidence verdicts included (stricter than the ladder asked; the remedy is identical).
+- **`running_balance_cents` is nullable as-built**; both consumers were already null-safe —
+  the OCR mandatory-per-row rule lives in the core's chain walk (`chain_broken`), not in
+  a NOT NULL.
+- **Statement lifecycle triggers**: `_tf_bank_statement_transition` (live→void with stamps;
+  void gains `superseded_by` exactly once) + `_tf_bank_statement_no_delete`; the immutable
+  set is `to_jsonb(old)` minus the five lifecycle columns, so future columns are protected
+  by default.
+- **BMMB seeds; the OCR engine literal is `azure-di:prebuilt-bankStatement.us:2024-11-30`
+  everywhere** — provenance names the model actually invoked.
+- **THE LANE-AWARE TERMINAL-EVENT LAW (closed end-to-end by the regression cells):** every
+  statement-lane terminal receipt minted by the router core reaches the spine as
+  `document.statement_facts_failed` with its reason, AT ITS MINT SITE — the typed-consent
+  gate verdicts (`statement_multi_client`/`consent_inactive`), the page-budget catch
+  (`budget`), and the enqueue-time attempt cap (`attempt_cap`, the branch a capped
+  statement actually reaches; the claim-time belt is unreachable on the ordinary
+  claim→fail→re-enqueue cycle). Symmetrically, the invoice twin NEVER fires for a
+  statement document: the 0009 wrapper (E2b) and the three 0027-lineage filing verbs
+  (E2c: `file_document`, `confirm_attribution_candidate`, `approve_wrong_client_correction`)
+  gained a task-lane suppress on their caller-side emit. The invoice lane's enqueue-time
+  cap silence (0026) is preserved as a recorded pre-existing residual.
+- **The task transition belt widens** (E2b): `queued→failed` now admits the two
+  never-claimed gate codes — the gate's in-place flip of a queued task died CLR16 the
+  first time a cell drove it.
+- **`complete_pending_match` uses the text-cast min idiom** for its line pick
+  (`min(uuid)` is not an aggregate); caught by the completion cells on first execution.
