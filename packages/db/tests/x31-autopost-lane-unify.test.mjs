@@ -267,6 +267,21 @@ async function seedApprovedFactEntry(cited, cp, {
        where id=$1`,
       [entry, w.users.bob],
     );
+    // 0037 (Wave C-a): belt-1 is a DEFERRED constraint trigger -- at COMMIT every
+    // approved entry's per-(domain,counterparty) control nets must equal its
+    // open_items rows. This fixture raw-approves (no verb runs, so the subledger
+    // hook never fires), and its payable credit leg would otherwise stand with no
+    // item behind it. Write the congruent row the classifier would produce for a
+    // supplier_bill (ap / 'bill' / +gross) in the SAME transaction. Guarded on the
+    // table existing so the suite stays green at pre-0037 schemas.
+    const hasSubledger = (await client.query("select to_regclass('clara.open_items') as rel")).rows[0].rel != null;
+    if (hasSubledger) {
+      await client.query(
+        `insert into clara.open_items(firm_id,client_id,domain,counterparty_id,entry_id,item_kind,item_date,amount_cents,created_by)
+         values($1,$2,'ap',$3,$4,'bill',$5::date,$6::bigint,$7)`,
+        [w.firms.A, w.clients.A1, cp.id, entry, postingDate, amount, w.users.alice],
+      );
+    }
     return entry;
   });
 }

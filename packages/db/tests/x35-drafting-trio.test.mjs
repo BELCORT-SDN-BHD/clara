@@ -241,6 +241,14 @@ test("x35.c O-round counterexample: a reversal-shaped, control-class-free suppli
       [firm, client, users.alice, coa.A1.expense, coa.A1.sales],
     )
   ).rows[0].id;
+  // [0037 / Wave C-a, fixture-budget entry] This raw approve survives belt-1 (the
+  // deferred "every approved entry's control nets equal its open_items" trigger)
+  // UNCHANGED and deliberately: both legs are coa.A1.expense and coa.A1.sales, so
+  // the entry carries ZERO control-class (payable/receivable) lines -- the
+  // classifier produces no rows and the belt's comparison is vacuous. Writing an
+  // item here would BREAK the belt, not satisfy it. (The same holds for x35.c's
+  // counterexample entry itself, which is control-class-free BY CONSTRUCTION --
+  // that is the whole point of the shape.)
   await rootQuery(`update clara.journal_entries set status='approved', checker_actor=$1, approved_at=now() where id=$2`, [users.alice, orig]);
 
   // The counterexample itself: coding_kind='supplier_bill', reversal_of=orig,

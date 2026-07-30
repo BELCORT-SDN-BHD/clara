@@ -180,6 +180,28 @@ const VENDOR_BINDING_0028_HUMAN_FNS = [
 ];
 export const VENDOR_BINDING_0028_COHORT = [...VENDOR_BINDING_0028_HUMAN_FNS];
 
+// 0037 — the Wave C-a subledger (design: docs/plan/wave-c-a-subledger-design.md §4.9).
+// Four human composites, clara_authenticated ONLY (bookkeeper floor in-body): which
+// obligation a payment discharges is a judgement, and the agent never makes one — no
+// wake role, no runtime, no agent_ro. Its own cohort per the "wholly present or wholly
+// absent" discipline. The UNGRANTED names are declared the 0020 way: the main sweep
+// fails if one ever GAINS a grant, the cohort check fails if one ever DISAPPEARS.
+const SUBLEDGER_0037_HUMAN_FNS = [
+  "allocate_receipt", "allocate_payment", "unallocate_group", "apply_open_items",
+];
+const SUBLEDGER_0037_UNGRANTED_FNS = [
+  "_subledger_outstanding", "_subledger_allocated_items_present",
+  "_subledger_classify_entry", "_subledger_on_approve", "_subledger_decompose_preview",
+  "_assert_customer_receipt_shape_at", "_assert_supplier_payment_shape_at",
+  "_assert_customer_receipt_shape", "_assert_supplier_payment_shape",
+  "_tf_assert_customer_receipt_shape", "_tf_assert_supplier_payment_shape",
+  "_tf_subledger_entry_belt", "_tf_subledger_item_belt", "_tf_subledger_alloc_belt",
+  "_tf_open_items_validate",
+];
+export const SUBLEDGER_0037_COHORT = [
+  ...SUBLEDGER_0037_HUMAN_FNS, ...SUBLEDGER_0037_UNGRANTED_FNS,
+];
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -225,6 +247,7 @@ export const ALLOWED = {
     ...WAVE_B_0021_HUMAN_FNS, // 0021 the human counterparty lane (bookkeeper floor)
     ...EXTRACTION_0022_HUMAN_FNS, // 0022 the extraction slice X1 (bookkeeper + owner floors)
     ...VENDOR_BINDING_0028_HUMAN_FNS, // 0028 the vendor identity binding ceremony + reads
+    ...SUBLEDGER_0037_HUMAN_FNS, // 0037 the Wave C-a settlement composites (human judgement only)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -278,6 +301,8 @@ export const GOVERNED_TABLES = [
   "attribution_attempts", "attribution_candidates", "attribution_candidate_regions",
   "filing_corrections", "filing_correction_items", "firm_document_limits",
   "document_ingest_reservations",
+  // Wave C-a subledger (0037) — signed open items + balanced-pair allocations.
+  "open_items", "open_item_allocations",
 ];
 
 // The ONLY clara base tables that legitimately carry no RLS (migration bookkeeping + the
@@ -366,6 +391,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0022 extraction-slice X1", EXTRACTION_0022_COHORT, liveNames));
   failures.push(...cohortFailures("0024 fail_classify", FAIL_CLASSIFY_0024_COHORT, liveNames));
   failures.push(...cohortFailures("0028 vendor identity binding", VENDOR_BINDING_0028_COHORT, liveNames));
+  failures.push(...cohortFailures("0037 wave C-a subledger", SUBLEDGER_0037_COHORT, liveNames));
   return failures;
 }
 
