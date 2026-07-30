@@ -1,6 +1,6 @@
 # Wave C-b — bank identity, statement ingest, matching: design (v2, review-hardened)
 
-> **Status: v2, 2026-07-31 — REVIEW-HARDENED, pending owner sign-off of the §7 note.**
+> **Status: v2.1, 2026-07-31 — REVIEW-HARDENED + AS-BUILT (owner GO recorded; §7 note accepted; as-built amendments in part2 §7).**
 > Forks WCB-R1..R6 owner-ruled in the C-b grilling (2026-07-30). This document executes
 > `docs/plan/wave-c-contract.md` §4 C-b (WC-R1..R12 not re-opened) on the C-a substrate
 > (`0037`, WCA-R1..R9). On conflict the contract governs for Wave C; `docs/prd/PRD.md` §6

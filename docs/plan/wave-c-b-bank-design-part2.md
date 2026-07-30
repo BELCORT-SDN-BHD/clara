@@ -150,6 +150,32 @@ schema · no chat surface · no `_coding_lane_core` widening, no duplicate-guard
 · no `sales_invoice` split · `bank-match` namespace, never `reconciler` · deployed
 workflow bodies untouched (new `_v1` files only).
 
+**v2.1 AS-BUILT AMENDMENTS (assembly + rig, 2026-07-31 — each caught by a contract-blind
+cell or an integration seam; the mechanism of record is the 0038 file itself):**
+- **Entry members are PER SIDE** (cell x38.h, the loan-drawdown-net-of-fee shape): the §4.5
+  unique becomes `(match_id, entry_id, side_positive)` with a generated `side_positive`
+  column — a single net member would lose per-side consumption and let a later line falsely
+  re-consume an exhausted side. The verb's duplicate refusal narrows to same-entry-same-side.
+- **Owner GO recorded (2026-07-31): the §7 pending-match note is accepted**; v1's
+  `high_stakes_two_step` refusal is withdrawn as designed in v2 §4.6.
+- **`bank_account_proposals` carries a lifecycle** (task_id · reason incl.
+  `account_inactive` · existing_bank_account_id · status open/resolved + resolved_*) — two
+  build lanes independently converged on it; the no-lifecycle composition is superseded.
+- **`bank_match_audit` is match-scoped** (actions match/settle/settle_pending/complete/
+  unmatch); statement voids ride the GENERIC `_audit` trail — §4.5's "void" wording is
+  read as the statement action it names, recorded on the trail that owns statements.
+- **An EIGHTH event type registers**: `document.statement_facts_failed` (deliberately in
+  the document.* namespace so the bank.* ID-only payload scan stays money-scoped).
+- **Null-safe endpoint guards**: the §4.3 header/line normalizers use `IS DISTINCT FROM`
+  on `jsonb_typeof` — a missing key must diagnose `header_unreadable`, never slip to a
+  23502 (cell x38.w's catch).
+- **The chain-lock pin points at the ONE shared core** (`_persist_statement_core`), with
+  persist/enter pinned on their call edge into it; the settle pin asserts DELEGATION to
+  both C-a composites and the ABSENCE of any advisory rung in settle's own body.
+- **Consent-verb arities as-built**: prepare 5→6-arg, consume 6→7-arg (the design's
+  "6-arg overloads" was off by one for consume); `statement_multi_client` also joins the
+  never-claimed binding allowlist (the router runs inside filing transactions).
+
 **Named residuals (v2):** the unmatched-duplicate-entry window (C-c tie-out closes it;
 the `/bank` tie banner surfaces it meanwhile) · the refund quadrants ride the documented
 workaround until a refund composite wave · intake's kind-blind OCR egress stays on the
