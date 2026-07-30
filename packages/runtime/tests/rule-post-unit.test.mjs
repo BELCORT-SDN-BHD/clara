@@ -56,6 +56,35 @@ test("the group role is restored even when execute_rule_post raises", async () =
   assert.equal(client.queries[client.queries.length - 1].sql, "set role clara_runtime", "finally restored the group role");
 });
 
+// In a real aborted transaction every statement — including SET ROLE — raises 25P02. The
+// effect's ORIGINAL error must reach the dead-letter reason; the role-restore failure is
+// swallowed (the caller re-sets the role after rollback).
+test("an aborted-transaction SET ROLE failure does not mask the effect's original error", async () => {
+  const client = {
+    queries: [],
+    query(sql, params) {
+      client.queries.push({ sql: sql.trim(), params });
+      if (/execute_rule_post/.test(sql)) return Promise.reject(new Error("CLR-original-reason"));
+      if (/^set role/.test(sql.trim())) return Promise.reject(new Error("current transaction is aborted (25P02)"));
+      return Promise.resolve({ rows: [{}] });
+    },
+  };
+  await assert.rejects(applyRulePostEffects(client, { entryId: "e", seq: 2 }), /CLR-original-reason/);
+});
+
+test("with NO effect error in flight, a role-restore failure still surfaces (never a silent login-identity checkpoint)", async () => {
+  const client = {
+    queries: [],
+    query(sql) {
+      client.queries.push({ sql: sql.trim() });
+      if (/execute_rule_post/.test(sql)) return Promise.resolve({ rows: [{ result: { posted: true } }] });
+      if (/^set role/.test(sql.trim())) return Promise.reject(new Error("role restore failed"));
+      return Promise.resolve({ rows: [{}] });
+    },
+  };
+  await assert.rejects(applyRulePostEffects(client, { entryId: "e", seq: 3 }), /role restore failed/);
+});
+
 test("consumer identity constants are pinned", () => {
   assert.equal(RULE_POST_CONSUMER, "rule_post");
   assert.equal(RULE_POST_EVENT_TYPE, "entry.drafted");

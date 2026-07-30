@@ -47,12 +47,26 @@ const RECONNECT_MAX_MS = 5000;
  */
 export async function applyRulePostEffects(client, { entryId, seq }) {
   await client.query("reset role"); // -> clara_runtime_login (the session's login identity)
+  let result;
+  let effectErr;
   try {
     const r = await client.query("select clara.execute_rule_post($1, $2) as result", [entryId, `rulepost:${entryId}:${seq}`]);
-    return r.rows[0]?.result ?? null;
-  } finally {
-    await client.query("set role clara_runtime"); // back to the group for the checkpoint write
+    result = r.rows[0]?.result ?? null;
+  } catch (err) {
+    effectErr = err;
   }
+  try {
+    await client.query("set role clara_runtime"); // back to the group for the checkpoint write
+  } catch (roleErr) {
+    // After an effect error the transaction is aborted, so SET ROLE itself raises 25P02 —
+    // rethrowing it here would replace the effect's error as the dead-letter reason (the
+    // caller restores the role again after rollback). With NO effect error in flight a
+    // role-restore failure must still surface: the checkpoint write may never run as the
+    // login identity.
+    if (!effectErr) throw roleErr;
+  }
+  if (effectErr) throw effectErr;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
