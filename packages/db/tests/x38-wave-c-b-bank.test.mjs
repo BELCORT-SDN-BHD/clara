@@ -1665,13 +1665,17 @@ test("x38.z4 the multi-client gate acts on the QUEUED task: a second filing flip
   );
   assert.equal(still.rows[0].n, 0, "x38.z4: no queued or running statement_facts task remains for the document");
 
-  // The gate verdict reaches the spine as the STATEMENT twin (the core's single emit
-  // site), and the invoice twin never fires for a statement document (the E2b wrapper
-  // suppress -- before it, this exact re-enqueue emitted a phantom invoice failure).
-  const twin = await rootQuery(
+  // The gate verdict reaches the spine as the STATEMENT twin EXACTLY ONCE (delta-review
+  // round 2: only the acting branches -- the flip, a fresh insert -- emit; a re-read of the
+  // existing terminal receipt emits nothing, so dark re-tries can never spam the feed), and
+  // the invoice twin never fires for a statement document (the E2b wrapper suppress --
+  // before it, this exact re-enqueue emitted a phantom invoice failure).
+  const twinCount = async () => (await rootQuery(
     "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.statement_facts_failed' and payload->>'reason'='statement_multi_client'",
-    [seed.documentId]);
-  assert.ok(twin.rows[0].n >= 1, "x38.z4: the multi-client verdict reaches the spine as the STATEMENT twin");
+    [seed.documentId])).rows[0].n;
+  assert.equal(await twinCount(), 1, "x38.z4: the multi-client verdict reaches the spine as EXACTLY ONE statement twin (the flip acted; the later re-enqueue only re-read)");
+  await enqueueInvoiceFacts(seed.documentId);
+  assert.equal(await twinCount(), 1, "x38.z4: another dark re-try emits NOTHING -- the verdict already reached the spine when its receipt was minted");
   const phantom = await rootQuery(
     "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type='document.invoice_facts_failed'",
     [seed.documentId]);
@@ -2079,4 +2083,36 @@ test("x38.al bank relations: human SELECT-only under forced RLS; zero agent/runt
       assert.equal(flags.force, true, `clara.${tbl} FORCEs row level security (the owner is not exempt)`);
     }
   }
+});
+
+// ===========================================================================
+// x38.am -- THE XML ARM IS NO LONGER KIND-BLIND (delta-review round 2,
+// 2026-07-31). A bank_statement on an XML mime used to ride the myinvois
+// local_facts lane into the INVOICE parser -- wrong worker, wrong events, a
+// phantom autodraft wake if it happened to parse. C-b has no xml statement
+// parser (the structured lane is csv/ofx by design 4.3), so the honest
+// verdict is the same terminal skipped_type a csv non-statement gets:
+// no task row, no lane, no event -- never a misroute.
+// ===========================================================================
+test("x38.am a bank_statement xml is skipped_type at the router -- never routed into the invoice parser", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const firm = await firmOf(client);
+  const seed = await seedVerifiedDocument({ firm, kind: "bank_statement", mime: "application/xml", filename: "statement.xml" });
+  await fileDocument(sub, {
+    document: seed.documentId, client,
+    resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: seed.documentId }),
+  });
+  const receipt = await enqueueInvoiceFacts(seed.documentId);
+  assert.equal(receipt?.status, "skipped_type",
+    `the router's xml arm refuses a bank_statement with the terminal skipped_type verdict (got ${JSON.stringify(receipt)})`);
+  const tasks = await rootQuery(
+    "select count(*)::int as n from clara.document_processing_tasks where document_id=$1",
+    [seed.documentId]);
+  assert.equal(tasks.rows[0].n, 0, "no processing task of ANY lane was minted for the statement xml");
+  const events = await rootQuery(
+    "select count(*)::int as n from clara.domain_events where document_id=$1 and event_type in ('document.invoice_facts_failed','document.statement_facts_failed')",
+    [seed.documentId]);
+  assert.equal(events.rows[0].n, 0, "no terminal lane event fires -- skipped_type is a receipt, not a failure");
 });

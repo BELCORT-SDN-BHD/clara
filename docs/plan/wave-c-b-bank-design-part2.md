@@ -231,3 +231,49 @@ sources: the opus/Codex as-built findings, the contract-blind regression cells, 
   first time a cell drove it.
 - **`complete_pending_match` uses the text-cast min idiom** for its line pick
   (`min(uuid)` is not an aggregate); caught by the completion cells on first execution.
+
+**Delta-review round (2026-07-31, opus + Codex adversarial on the fix-wave diff):** verdict
+no-blocker; the two MAJORs are FIXED (the deferred-ancillary arc now has an end-to-end cell
+— x38.ag: high-stakes AP + charge + adjustment through complete, replay-safe; the OCR
+reader-2 engine fallback ships null so the DB's `coalesce(engine_id, task_engine_id)`
+records the TRUE engine, never a hardcoded literal). Recorded residuals from that round:
+`confirm_attribution_candidate`/`approve_wrong_client_correction`'s E2c suppressions are
+text-postchecked only (the identical idiom is behaviourally proven on `file_document` by
+x38.z4) · the core's statement-twin emits carry `actor=null` even when a human filing
+caused them (the core has no actor context; the task id in the payload is the join key) ·
+a task already RUNNING when the multi-client gate fires is not re-gated — consent
+revocation is still caught at egress by prepare/consume, `statement_multi_client` is not
+(pre-existing shape; the gate flip covers queued rows) · `parseCentsInput` deliberately
+rejects scientific notation (documented at the fn; the tie preview + DB re-derivation make
+silent-zero a UX bound, not a money hazard) · the runtime no longer ships `facts_hash`
+(the core derives its own from the read it re-normalizes; the shipped key was dead).
+
+**Delta-review round 2 (2026-07-31, the Codex adversarial pass on the same diff —
+adjudicated finding by finding):**
+- **ACCEPTED, structural:** `ck_bank_matches_pending_ancillaries` — `pending_ancillaries
+  is null or status='pending'` IS a table CHECK (the earlier "not expressible because
+  status moves under it" reasoning was WRONG: a CHECK sees only the new row, and every
+  legitimate writer clears the payload in the same UPDATE that moves status). The leak
+  class is now refused, not conventioned away; the x38.u red-team proves the refusal.
+- **ACCEPTED:** the typed-consent gate emits EXACTLY ONCE per verdict instance — only the
+  acting branches (the queued-row flip, a fresh terminal insert) emit; a re-read of an
+  existing receipt returns silently, and the acting row is named by version order, never
+  uuid order. x38.z4 pins count==1 across repeated dark re-tries.
+- **ACCEPTED:** the XML router arm is kind-aware — a bank_statement xml gets the terminal
+  `skipped_type` receipt (no xml statement parser exists in C-b), never the myinvois
+  invoice lane. Cell x38.am.
+- **ACCEPTED:** the belt widening is LANE-SCOPED — the two gate codes are admitted on
+  queued→failed only for the statement lanes.
+- **ACCEPTED:** `parseCentsInput` rejects >2 decimals outright (no silent truncation;
+  the sen is the atom).
+- **REBUTTED (ratified residual, not a blocker):** "complete→unmatch→re-settle
+  double-posts" — unmatching a live group deliberately leaves approved journals standing
+  (reverse-not-delete); a re-settle against the SAME items refuses on outstanding (C-a
+  allocation law), so the exposure is the already-named unmatched-duplicate-entry window,
+  closed by C-c tie-out and surfaced meanwhile by the /bank tie banner.
+- **REBUTTED as pre-merge scope (named residual + open item):** re-kind task hygiene — a
+  document re-kinded while a task of the OLD lane is queued/running keeps that stale task
+  (pre-existing 0026 shape; E7e already refuses the destructive direction once a live
+  statement exists). A stale task's terminal event is noise, not money; the autodraft wake
+  for the new kind re-arms on the next filing/re-fire. Candidate C-c mechanism: retire
+  queued tasks whose lane no longer matches the kind at re-kind time.

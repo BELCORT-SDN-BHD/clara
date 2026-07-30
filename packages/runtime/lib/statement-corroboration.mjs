@@ -35,7 +35,6 @@
 // closing` is checked by the chain like any other closure. The degenerate case is a cell,
 // not an exception path.
 
-import { createHash } from "node:crypto";
 import { chainReceipt } from "./statement-grammar.mjs";
 import { HEADER_FIELDS } from "./statement-layout-reader.mjs";
 
@@ -232,34 +231,12 @@ export function corroborateChain(reader) {
 }
 
 /**
- * `facts_hash` — the sha256 of the AGREED READ (design §4.2: "the agreed corroborated read,
- * hashed — who agreed is provable later"). Canonicalized by construction: fixed key order,
- * fixed field set, no whitespace. DESCRIPTIONS ARE EXCLUDED deliberately — they are
- * uncorroborated prose, so including them would make the hash of an agreement depend on
- * something the readers never had to agree on.
- */
-export function statementFactsHash(header, lines) {
-  const canonical = {
-    header: Object.fromEntries([...HEADER_FIELDS, "line_count"].map((field) => [field, header?.[field] ?? null])),
-    lines: (lines ?? []).map((line) => [
-      line.line_no,
-      line.entry_date,
-      line.value_date ?? null,
-      line.amount_cents,
-      line.running_balance_cents ?? null,
-    ]),
-  };
-  return createHash("sha256").update(JSON.stringify(canonical), "utf8").digest("hex");
-}
-
-/**
  * THE PERSIST PAYLOAD CONTRACT — the exact jsonb `clara.persist_statement_facts(p_task,
  * p_payload)` consumes (design §4.3). Keys are the COLUMN NAMES of §4.2 so the DB verb maps
  * one-to-one and nothing is renamed in flight:
  *
  * {
  *   "ingest_mode":  "ocr" | "structured",           -- bank_statements.ingest_mode
- *   "facts_hash":   "<sha256 hex>",                 -- bank_statements.facts_hash
  *   "reader1": { "extraction_id": uuid|null, "source": text, "engine_id": text|null },
  *   "reader2": { "extraction_id": uuid|null, "source": text, "engine_id": text|null,
  *                "raw_sha256": hex|null, "normalization_version": text|null,
@@ -326,10 +303,13 @@ export function buildStatementPersistPayload({ ingestMode, agreed, reader1, read
   });
   const readers = { reader1: shipReader(reader1?.meta ?? reader1, reader1?.read ?? reader1) };
   if (reader2) readers.reader2 = shipReader(reader2?.meta ?? reader2, reader2?.read ?? reader2);
+  // Delta-review minor (2026-07-31): NO facts_hash in the payload. `_persist_statement_core`
+  // derives its own hash from the agreed read it re-computes (0038 §4.2) and never read the
+  // shipped key — and a runtime-side hash computed over the renumbered `agreed` view while
+  // the wire carries raw per-reader reads is a disagreement trap the day anyone wires it up.
   return {
     pages_used: Number.isFinite(pagesUsed) && pagesUsed > 0 ? Math.trunc(pagesUsed) : 0,
     ingest_mode: ingestMode,
-    facts_hash: statementFactsHash(agreed.header, agreed.lines),
     corroboration: agreed.corroboration,
     readers,
   };

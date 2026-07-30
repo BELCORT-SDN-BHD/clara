@@ -1251,8 +1251,19 @@ test("x38.u pending-match at EXACTLY the threshold: line owned at draft, a disti
   const draftEntry4 = idOf(receipt4, "entry_id", "entry");
   assert.equal((await matchRow(pendingMatch4)).status, "pending", "x38.u belt red-team mandatory setup: the reservation is pending");
 
+  // The hand-flip must ALSO null pending_ancillaries -- ck_bank_matches_pending_ancillaries
+  // (delta-review round 2) refuses a non-pending row that still carries the payload, so even
+  // this red-team bypass cannot leak it. Prove the CHECK first, then flip legally.
+  await assert.rejects(
+    () => rootQuery(
+      "update clara.bank_matches set status='unmatched' where id=$1 and status='pending'",
+      [pendingMatch4]),
+    (e) => /ck_bank_matches_pending_ancillaries/.test(String(e.message ?? e)),
+    "a status flip that forgets the ancillary payload refuses on the CHECK -- the leak class is structural, not conventional",
+  );
   await rootQuery(
-    `update clara.bank_matches set status='unmatched', unmatched_by=$1, unmatched_at=now(),
+    `update clara.bank_matches set status='unmatched', pending_ancillaries=null,
+       unmatched_by=$1, unmatched_at=now(),
        unmatched_reason=$2 where id=$3 and status='pending'`,
     [world.users.alice, "x38.u red-team hand-flip (bypassing both named doors)", pendingMatch4],
   );
@@ -1750,4 +1761,101 @@ test("x38.af the six /bank read RPCs return empty for a firm-B actor over firm-A
   const own = await humanQuery(sub, "select clara.list_bank_accounts(p_client => $1) as r", [client]);
   assert.ok(Array.isArray(own.rows[0].r) && own.rows[0].r.length > 0, "x38.af mandatory setup: the firm-A owner's OWN list_bank_accounts read is non-empty");
   assert.equal(await outstandingOf(inv.item), 8800, "x38.af mandatory setup: the firm-A open item exists and is untouched by the cross-firm probes");
+});
+
+// ===========================================================================
+// x38.ag -- THE DEFERRED-ANCILLARY ARC END TO END (delta-review MAJOR-1,
+// 2026-07-31: the wave's highest-value new money path had zero executed
+// coverage -- every prior high-stakes settle was AR with allocations only, so
+// pending_ancillaries only ever carried {charge_cents:0, adjustments:[]}).
+// A high-stakes AP settlement carrying a wire fee AND a difference adjustment:
+// settle posts NOTHING beside the pending reservation (zero entry members;
+// the payload rides bank_matches.pending_ancillaries, domain-aware), the
+// checker approves the settlement draft through the ordinary /queue verb,
+// and complete_pending_match posts the charge + adjustment entries BEFORE its
+// parity derivation, ties the group, and clears the payload. Replayed
+// complete is a same-receipt no-op (the ancillaries never double-post).
+// ===========================================================================
+test("x38.ag deferred ancillaries: a high-stakes AP settle with charge+adjustment posts them at COMPLETE, ties, and replays safely", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const CHARGE = 2000;
+  const ADJ = -500; // SIGNED bank effect of the difference adjustment (an extra 500 out)
+  const cp = await birthCounterparty(sub, { client, name: `X38 DEFANCCO ${randomUUID().slice(0, 6)}` });
+  const bill = await counterpartyStampedItem(sub, {
+    client, domain: "ap", cp, cpKind: "vendor", cents: HIGH_STAKES_CENTS, control: AP1, checker: world.users.bob,
+  });
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: bankAcct.A1.primary, periodStart: "2026-07-01", periodEnd: "2026-07-31",
+    opening: 3 * HIGH_STAKES_CENTS,
+    specs: [{
+      amountCents: -(HIGH_STAKES_CENTS + CHARGE + 500), entryDate: "2026-07-08",
+      description: "x38.ag wire + fee + difference, one combined withdrawal",
+    }],
+  });
+  const line = stmt.lines[0];
+
+  const receipt = await settleFromBankLine(sub, {
+    client, line: line.id, counterparty: cp, controlAccount: AP1,
+    allocations: [{ item_id: bill.item, amount_cents: HIGH_STAKES_CENTS }],
+    memo: "x38.ag deferred-ancillary settlement",
+    chargeCents: CHARGE, chargeAccount: CHARGEX,
+    adjustments: [{ account_code: ADJX, amount_cents: ADJ, memo: "x38.ag FX difference" }],
+  });
+  const pendingMatch = matchIdOf(receipt);
+  const draftEntry = idOf(receipt, "entry_id", "entry");
+  assert.ok(pendingMatch, "the threshold settle returns the reservation's match id");
+  assert.equal(
+    receipt.ancillaries_deferred ?? receipt.ancillariesDeferred, true,
+    `settle's receipt says the ancillaries were DEFERRED, not posted (got ${JSON.stringify(receipt)})`,
+  );
+
+  // The reservation law: zero entry members, the draft anchor, and the payload on the row.
+  assert.equal((await entryMemberRows(pendingMatch)).length, 0,
+    "a pending reservation holds ZERO entry members -- nothing posted beside the draft");
+  assert.equal(await entryStatusOf(draftEntry), "draft", "the settlement entry stays a draft for the checker");
+  const anc = (await rootQuery(
+    "select pending_ancillaries as p from clara.bank_matches where id=$1", [pendingMatch])).rows[0].p;
+  assert.ok(anc, "pending_ancillaries carries the deferred payload while the group is pending");
+  assert.equal(Number(anc.charge_cents), CHARGE, `the AP branch carries the charge (got ${JSON.stringify(anc)})`);
+  assert.equal(anc.charge_account, CHARGEX, "the charge account rides the payload");
+  assert.equal((anc.adjustments ?? []).length, 1, "exactly one adjustment rides the payload");
+  assert.equal(anc.domain, "ap", "the payload records its domain for legibility");
+
+  // The checker approves through the ORDINARY verb; then complete posts the ancillaries.
+  const rev = (await rootQuery("select revision_token from clara.journal_entries where id=$1", [draftEntry])).rows[0];
+  await approveEntry(world.users.bob, { entry: draftEntry, expectedRevision: rev.revision_token, opKey: opk("x38-ag-approve") });
+
+  const completeKey = opk("x38-ag-complete");
+  const completed = await completePendingMatch(sub, { client, match: pendingMatch, opKey: completeKey });
+  const chargeEntry = completed.charge_entry_id ?? completed.chargeEntryId;
+  const adjEntries = completed.adjustment_entry_ids ?? completed.adjustmentEntryIds ?? [];
+  assert.ok(chargeEntry, `complete's receipt names the charge entry it posted (got ${JSON.stringify(completed)})`);
+  assert.equal(adjEntries.length, 1, `complete's receipt names exactly one adjustment entry (got ${JSON.stringify(completed)})`);
+
+  const liveRow = await matchRow(pendingMatch);
+  assert.equal(liveRow.status, "live", "pending -> live with the ancillaries posted");
+  assert.equal(liveRow.pending_ancillaries ?? null, null, "the payload is CLEARED in the same flip");
+  const members = await entryMemberRows(pendingMatch);
+  assert.equal(members.length, 3,
+    `the live group holds THREE entry members: settlement + charge + adjustment (got ${members.length})`);
+  const byEntry = new Map(members.map((m) => [m.entry_id, Number(m.matched_cents)]));
+  assert.equal(byEntry.get(draftEntry), -HIGH_STAKES_CENTS, "the settlement member carries the allocation-side bank effect");
+  assert.equal(byEntry.get(chargeEntry), -CHARGE, "the charge member carries the fee's bank effect");
+  assert.equal(byEntry.get(adjEntries[0]), ADJ, "the adjustment member carries its SIGNED bank effect");
+  assert.equal(await entryStatusOf(chargeEntry), "approved", "the charge entry posts approved (below threshold)");
+  assert.equal(await entryStatusOf(adjEntries[0]), "approved", "the adjustment entry posts approved (below threshold)");
+  await assertGroupTies(pendingMatch, "x38.ag deferred ancillaries completed");
+  assert.equal(await outstandingOf(bill.item), 0, "the bill clears at its own gross -- the fee and difference never touch it");
+
+  // Replay with the SAME op key: the dedupe returns before the ancillary reservations --
+  // no second charge entry, no fourth member.
+  const replay = await completePendingMatch(sub, { client, match: pendingMatch, opKey: completeKey });
+  assert.ok(replay, "the replayed complete returns a receipt, not an error");
+  assert.equal((await entryMemberRows(pendingMatch)).length, 3, "the replay posted NOTHING new");
+  const chargeCount = (await rootQuery(
+    "select count(*)::int as n from clara.bank_match_entry_members where match_id=$1 and entry_id=$2",
+    [pendingMatch, chargeEntry])).rows[0].n;
+  assert.equal(chargeCount, 1, "exactly one charge member exists after the replay");
 });

@@ -620,12 +620,13 @@ create table clara.bank_matches (
   -- clara.complete_pending_match at the pending->live flip, in the same transaction as the
   -- member row that ties them.
   --
-  -- WHY A PLAIN NULLABLE COLUMN AND NO CHECK. The honest constraint would be "null unless
-  -- status='pending'", and it is NOT expressible as a table CHECK here: status moves under it
-  -- (complete_pending_match clears the payload IN THE SAME UPDATE that flips to 'live', and
-  -- a CHECK evaluating the new row would see the flipped status against a payload it is
-  -- watching disappear). The lifecycle is owned by the two verbs and asserted by the group-tie
-  -- belt's pending arm instead, which is where every other pending-shape law already lives.
+  -- THE LIFECYCLE IS A TABLE CHECK (delta-review round, 2026-07-31: an earlier draft of
+  -- this comment claimed "null unless pending" was not expressible because status moves
+  -- under it -- WRONG: a CHECK evaluates the NEW row only, and every legitimate writer
+  -- clears the payload IN THE SAME UPDATE that moves status, so the constraint holds at
+  -- every commit point: settle inserts (pending, payload), complete flips (live, null),
+  -- unmatch flips (unmatched, null)). An out-of-band status write that forgets the payload
+  -- now refuses instead of leaking unasserted residue.
   pending_ancillaries jsonb,
   created_by          uuid        not null references clara.users(id),
   created_at          timestamptz not null default now(),
@@ -641,6 +642,8 @@ create table clara.bank_matches (
     references clara.journal_entries(id, firm_id, client_id),
   -- THE CASCADE ANCHOR (design SS4.5), consumed by both member tables' group_status FK
   -- with ON UPDATE CASCADE.
+  constraint ck_bank_matches_pending_ancillaries
+    check (pending_ancillaries is null or status = 'pending'),
   constraint uq_bank_matches_id_firm_client_status unique (id, firm_id, client_id, status),
   -- The account-congruence anchor, consumed by bank_match_line_members' bank_account_id FK.
   constraint uq_bank_matches_id_firm_client_account unique (id, firm_id, client_id, bank_account_id),
@@ -6198,7 +6201,7 @@ create or replace function clara._enqueue_invoice_facts_core(p_document uuid) re
 declare
   d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;
   v_lane text; v_engine text; v_task_status text;
-  v_engine_kind text; v_stmt_clients uuid[]; v_stmt_client uuid; v_gate text;
+  v_engine_kind text; v_stmt_clients uuid[]; v_stmt_client uuid; v_gate text; v_flip int;
 begin
   select * into d from clara.documents where id=p_document for update;
   if not found then raise exception 'document not found' using errcode='CLR11'; end if;
@@ -6255,6 +6258,14 @@ begin
         'status','skipped_kind','document_kind',d.document_kind);
     end if;
   elsif lower(coalesce(d.mime_type,'')) in ('application/xml','text/xml') then
+    -- Delta-review round 2 (2026-07-31): the XML arm was KIND-BLIND -- a bank_statement
+    -- xml rode the myinvois local lane into the INVOICE parser (wrong worker, wrong
+    -- events, a phantom autodraft wake if it happened to parse). No xml statement parser
+    -- exists in C-b (the structured lane is csv/ofx by design 4.3), so the honest verdict
+    -- is the same terminal skipped_type a csv non-statement gets: never a misroute.
+    if d.document_kind='bank_statement' then
+      return jsonb_build_object('document_id',p_document,'status','skipped_type');
+    end if;
     v_lane:='local_facts'; v_engine:='clara-myinvois:v1';
   elsif lower(coalesce(d.mime_type,'')) in ('text/csv','application/csv',
       'application/x-ofx','application/ofx') then
@@ -6344,11 +6355,21 @@ begin
       update clara.document_processing_tasks
         set status='failed', error_code=v_gate, finished_at=now()
         where document_id=p_document and lane=v_lane and status='queued';
-      select id into v_task from clara.document_processing_tasks
-        where document_id=p_document and lane=v_lane
-          and status='failed' and error_code=v_gate
-        order by id limit 1;
-      if v_task is null then
+      get diagnostics v_flip = row_count;
+      if v_flip = 0 then
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
+        if v_task is not null then
+          -- Re-read of an EXISTING terminal receipt: this call acted on nothing, so it
+          -- emits nothing (delta-review round 2, 2026-07-31: the unconditional emit here
+          -- re-fired on every dark re-try and, picked by uuid order, could name an older
+          -- task than the one the verdict actually acted on). The verdict reached the
+          -- spine when its receipt was minted; re-reads only report it.
+          return jsonb_build_object('task_id',v_task,'document_id',p_document,
+            'status','failed','reason',v_gate);
+        end if;
         select coalesce(max(version_n),0)+1 into v_version
           from clara.document_processing_tasks
           where document_id=p_document and lane=v_lane;
@@ -6357,9 +6378,17 @@ begin
           values(d.firm_id,p_document,v_engine,'{}'::jsonb,
             v_version,v_lane,'failed',v_gate,now())
           returning id into v_task;
+      else
+        -- The flip acted: name the newest flipped row (version order, never uuid order).
+        select id into v_task from clara.document_processing_tasks
+          where document_id=p_document and lane=v_lane
+            and status='failed' and error_code=v_gate
+          order by version_n desc limit 1;
       end if;
       -- 0038 as-built fix (2026-07-31): every statement-lane terminal receipt this core
-      -- mints reaches the spine as the STATEMENT twin with its reason. The wrapper
+      -- mints reaches the spine as the STATEMENT twin with its reason -- and EXACTLY ONCE
+      -- per verdict instance: only the two acting branches (the flip, the fresh insert)
+      -- reach this emit; the re-read branch returned above. The wrapper
       -- (enqueue_invoice_facts, recut in E2b) no longer emits its invoice twin for
       -- statement lanes, so this is the single emit site on every caller path --
       -- file_document's direct core calls included.
@@ -6542,10 +6571,15 @@ begin
     -- 0038 E2b: queued->failed widens by the two enqueue-time gate verdicts -- the gate
     -- flips an in-flight queued task in place when a later filing invalidates its consent
     -- basis. Both are never-claimed codes (ck_processing_task_binding_0038); the flip is
-    -- the only writer that uses them on this transition.
+    -- the only writer that uses them on this transition, and it only ever acts on the
+    -- statement lanes -- so the widening is LANE-SCOPED (delta-review round 2,
+    -- 2026-07-31): a queued invoice/classify/ocr task still cannot be flipped to a gate
+    -- verdict by any future writer.
     v_ok:=(old.status='queued' and new.status in ('running','held_egress'))
       or (old.status='queued' and new.status='failed'
-          and new.error_code in ('budget','attempt_cap','consent_inactive','statement_multi_client'))
+          and (new.error_code in ('budget','attempt_cap')
+               or (new.error_code in ('consent_inactive','statement_multi_client')
+                   and new.lane in ('statement_facts','statement_parse'))))
       or (old.status='held_egress' and new.status='queued')
       or (old.status='running' and new.status in ('done','failed','queued','held_egress'));
     if not v_ok then
@@ -6586,8 +6620,9 @@ declare v_src text;
 begin
   select p.prosrc into v_src from pg_proc p
     where p.oid='clara._tf_processing_task_update()'::regprocedure;
-  if position('''budget'',''attempt_cap'',''consent_inactive'',''statement_multi_client''' in v_src)=0 then
-    raise exception '0038 E2b postcheck: the queued->failed allowlist did not gain the gate codes' using errcode='CLR10';
+  if position('''consent_inactive'',''statement_multi_client''' in v_src)=0
+     or position('new.lane in (''statement_facts'',''statement_parse'')' in v_src)=0 then
+    raise exception '0038 E2b postcheck: the queued->failed allowlist did not gain the LANE-SCOPED gate codes' using errcode='CLR10';
   end if;
   select p.prosrc into v_src from pg_proc p
     where p.oid='clara.enqueue_invoice_facts(uuid)'::regprocedure;

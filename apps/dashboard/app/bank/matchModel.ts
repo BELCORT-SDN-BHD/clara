@@ -55,9 +55,15 @@ export type GroupTiePreview = {
  *  the write path -- the DB owns every number, and a float dollar intermediate can corrupt
  *  the cents before the DB ever sees them (the as-built Codex-wave finding). Returns 0 for
  *  anything unparseable, mirroring the old `Number(...) || 0` tolerance. */
+/** Money input accepts digits, one dot with AT MOST two decimals, an optional leading
+ *  minus — deliberately NOT the full `<input type="number">` grammar (`1e3` reads as 0,
+ *  like any other garbage) and never a silent truncation (`1.999` is REJECTED to 0, not
+ *  read as 199 — the sen is the atom, a third decimal is user error, delta-review round 2).
+ *  A zeroed amount cannot post: the tie preview shows a non-zero diff and the DB
+ *  re-derives the same sum and refuses, so the narrowing is a UX bound, not a money hazard. */
 export function parseCentsInput(text: string): number {
   const t = String(text ?? "").replace(/[,\s]/g, "");
-  const m = /^(-?)(\d*)(?:\.(\d{0,2})\d*)?$/.exec(t);
+  const m = /^(-?)(\d*)(?:\.(\d{0,2}))?$/.exec(t);
   if (!m || (m[2] === "" && !m[3])) return 0;
   const sign = m[1] === "-" ? -1n : 1n;
   const whole = BigInt(m[2] || "0");

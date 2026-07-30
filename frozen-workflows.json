@@ -481,7 +481,7 @@
       "deployed": true
     },
     "packages/runtime/workflows/statementFacts.v1.behavior.mjs": {
-      "sha256": "1faf6d8c52ee1acd462e62d7444f8607ddde59cfc720b665a2b42de5e254bfff",
+      "sha256": "8dd5d812ade149778a9d65c67d456cbc1692a51b48c158ce0cc3cfa0528fed64",
       "note": ""
     },
     "packages/runtime/workflows/statementFacts.v1.impl.ts": {

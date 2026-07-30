@@ -298,7 +298,13 @@ async function processOcrLane(services, withRuntime, taskId, doc) {
         meta: {
           extraction_id: null,
           source: "azure_bank_statement",
-          engine_id: reader2?.engineId ?? "azure-di:prebuilt-bankStatement:2024-11-30",
+          // Delta-review MAJOR-2 (2026-07-31): NEVER a hardcoded engine literal here. The
+          // snapshot always stamps engineId; if it ever doesn't, shipping null lets the DB's
+          // own coalesce(reader2.engine_id, p_task_engine_id) record the task's TRUE engine —
+          // a hardcoded fallback becomes a false provenance receipt the day the model
+          // env-override or snapshot shape changes. (This file imports nothing by design,
+          // so the snapshot constant cannot be referenced from here.)
+          engine_id: reader2?.engineId ?? null,
           raw_sha256: reader2?.rawSha256 ?? null,
           normalization_version: reader2?.normalizationVersion ?? null,
         },
