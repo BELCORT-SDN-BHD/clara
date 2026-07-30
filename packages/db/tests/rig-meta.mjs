@@ -202,6 +202,30 @@ export const SUBLEDGER_0037_COHORT = [
   ...SUBLEDGER_0037_HUMAN_FNS, ...SUBLEDGER_0037_UNGRANTED_FNS,
 ];
 
+// 0038 Wave C-b (WCB-R1..R6, design v2.1). The bank verbs are HUMAN JUDGEMENT ONLY --
+// which entry a bank line clears is a judgement, and the agent never makes one: no wake
+// role, no clara_agent_ro. The two statement-facts writers are the workflow's own
+// (clara_runtime), the persist_invoice_facts precedent. UNGRANTED internals declared the
+// 0020 way: the main sweep fails if one ever GAINS a grant, the cohort check fails if one
+// ever DISAPPEARS.
+const BANK_0038_HUMAN_FNS = [
+  "add_bank_account", "deactivate_bank_account", "reactivate_bank_account",
+  "remap_bank_account_coa", "enter_bank_statement", "void_bank_statement",
+  "match_bank_line", "unmatch_bank_match", "settle_from_bank_line", "complete_pending_match",
+];
+const BANK_0038_RUNTIME_FNS = ["persist_statement_facts", "fail_statement_facts"];
+const BANK_0038_UNGRANTED_FNS = [
+  "_assert_bank_coa_candidate", "_bank_entry_side_capacity", "_bank_live_match_present",
+  "_bank_live_statement_on_document", "_bank_match_adjustment_entry", "_bank_match_audit",
+  "_bank_match_coa", "_persist_statement_core", "_stmt_header_norm", "_stmt_lines_norm",
+  "_tf_bank_match_congruence", "_tf_bank_match_entry_exhaustion", "_tf_bank_match_group_tie",
+  "_tf_bank_statement_belt", "_tf_bank_statement_void_belt", "_tf_je_bank_match_reversal_belt",
+  "_tf_stamp_bmlm_account",
+];
+export const BANK_0038_COHORT = [
+  ...BANK_0038_HUMAN_FNS, ...BANK_0038_RUNTIME_FNS, ...BANK_0038_UNGRANTED_FNS,
+];
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -248,6 +272,7 @@ export const ALLOWED = {
     ...EXTRACTION_0022_HUMAN_FNS, // 0022 the extraction slice X1 (bookkeeper + owner floors)
     ...VENDOR_BINDING_0028_HUMAN_FNS, // 0028 the vendor identity binding ceremony + reads
     ...SUBLEDGER_0037_HUMAN_FNS, // 0037 the Wave C-a settlement composites (human judgement only)
+    ...BANK_0038_HUMAN_FNS, // 0038 the Wave C-b bank verbs (human judgement only)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -264,6 +289,7 @@ export const ALLOWED = {
     "begin_document_intake_verification", "verify_document_intake", "fail_document_intake",
     "finalize_document_intake", "upgrade_legacy_document", "claim_document_processing_task",
     "release_held_document_tasks", "requeue_stranded_document_task",
+    ...BANK_0038_RUNTIME_FNS, // 0038 the statement-facts writers (the persist_invoice_facts precedent)
     "persist_document_extraction", "complete_stored_document_task",
     "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
     "refund_ingest_reservation", "record_attribution_attempt",
@@ -405,6 +431,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0024 fail_classify", FAIL_CLASSIFY_0024_COHORT, liveNames));
   failures.push(...cohortFailures("0028 vendor identity binding", VENDOR_BINDING_0028_COHORT, liveNames));
   failures.push(...cohortFailures("0037 wave C-a subledger", SUBLEDGER_0037_COHORT, liveNames));
+  failures.push(...cohortFailures("0038 wave C-b bank", BANK_0038_COHORT, liveNames));
   return failures;
 }
 

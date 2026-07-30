@@ -5223,7 +5223,7 @@ begin
   -- 0020 section 4.3: the hold transition lives INSIDE the owner-floored RPC and goes through
   -- the audited writer (never a hand-written row). Only activation clears it.
   -- 0038 (WCB-R1, the follow-on ruling 0020:870-872 demanded): the coupling is
-  -- PURPOSE-DISCRIMINATED. clara.wiki_synthesis_holds is keyed on the CLIENT ALONE
+  -- PURPOSE-DISCRIMINATED. The wiki hold row is keyed on the CLIENT ALONE
   -- (0017:2335-2337), so it cannot represent "held for wiki, released for statements" -- and a
   -- statement_extraction activation that cleared it would silently release a wiki control the
   -- client never lifted. The hold is wiki's, and only wiki's, transition.
@@ -5699,7 +5699,7 @@ declare
 begin
   select * into d from clara.documents where id=p_document for update;
   if not found then raise exception 'document not found' using errcode='CLR11'; end if;
-  -- 0014: a consent-evidence document is a LEGAL artifact -- never facts-extracted.
+  -- 0014: a consent-evidence document is a LEGAL artifact — never facts-extracted.
   if d.document_kind='consent_evidence' then
     return jsonb_build_object('document_id',p_document,'status','skipped_consent_evidence');
   end if;
@@ -5712,7 +5712,7 @@ begin
       'status','skipped_client_onboarding');
   end if;
   -- 0015: mime chooses the engine family. 0016 (P3/WA21-R7): the DOCUMENT KIND
-  -- gates the facts engines -- only invoice-shaped kinds reach invoice_facts;
+  -- gates the facts engines — only invoice-shaped kinds reach invoice_facts;
   -- a NULL kind classifies FIRST; xml stays rule-classified into the local lane.
   -- 0038 (design 4.3): 'bank_statement' now has TWO homes -- the vendor OCR lane for a
   -- pdf/image and the free local parse lane for a csv/ofx export.
@@ -5727,7 +5727,7 @@ begin
       -- bank_statement -> skipped_kind dead end 0026:392-410 left behind.
       v_lane:='statement_facts'; v_engine:='azure-di:prebuilt-bankStatement:2024-11-30';
     else
-      -- (adjudication #11): the skipped_kind receipt lives on the task trail --
+      -- (adjudication #11): the skipped_kind receipt lives on the task trail —
       -- a terminal failed row (never claimed, attempt_count 0 so it never
       -- consumes attempts), reused idempotently on re-invocation.
       select id into v_task from clara.document_processing_tasks
@@ -5778,9 +5778,10 @@ begin
     -- invoice_facts extraction) and WRONG for either statement lane -- a fully ingested
     -- statement would read as un-extracted on every re-fire and re-buy a vendor read. The map
     -- preserves the two existing lanes exactly and names the two new ones.
-    v_engine_kind := case v_lane
-                       when 'statement_facts' then 'statement_facts'
-                       when 'statement_parse' then 'statement_parse'
+    v_engine_kind := case when v_lane in ('statement_facts','statement_parse')
+                       then 'statement_facts'  -- BOTH statement lanes settle a
+                       -- statement_facts extraction (the lane records how the read was
+                       -- bought; the engine_kind what it is -- the 0026:709 precedent)
                        else 'invoice_facts' end;
     select e.id into v_task from clara.document_extractions e
       where e.document_id=p_document and e.engine_kind=v_engine_kind and e.status='done'
@@ -5872,7 +5873,7 @@ begin
     on conflict do nothing returning id into v_task;
   if v_task is null then
     -- 0026 (amendment A11): the widened (document_id,engine_id,version_n,lane) key means a
-    -- conflict HERE is now a genuine same-lane duplicate -- a cross-lane collision is
+    -- conflict HERE is now a genuine same-lane duplicate — a cross-lane collision is
     -- structurally impossible, lane joins the key. The exact colliding row must exist
     -- regardless of its current status (it may already be done/failed by the time we look
     -- again); silence hid this for the product's whole life, so an absent row here is
@@ -6092,7 +6093,7 @@ begin
   if t.lane in ('ocr','invoice_facts','statement_facts') and v_running>=v_cap then
     raise exception 'document-processing concurrency limit reached' using errcode='CLR18';
   end if;
-  -- Q1: the CAPABILITY minted on this fresh claim -- a random preimage whose digest ALONE
+  -- Q1: the CAPABILITY minted on this fresh claim — a random preimage whose digest ALONE
   -- is stored (never the preimage). Returned once, below, to this session only.
   v_secret:=gen_random_uuid()::text;
   update clara.document_processing_tasks set status='running',

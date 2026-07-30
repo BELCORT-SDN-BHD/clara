@@ -46,6 +46,82 @@ let w = null;
 //  reaches inside string literals, so renaming a case-sensitive refusal token would pass it.
 //  `exact` is the SHA-256 of the UNMODIFIED prosrc, and it is the assertion §6's words actually
 //  promise. Both are checked; only `exact` is load-bearing.
+// =========================================================================
+// AMENDMENT 0038 (Wave C-b, ratified WCB-R1 + design v2.1, 2026-07-31). TWO members of the
+// closed set gain a further deliberate edit: claim_document_processing_task's kill-switch /
+// attempt-cap / concurrency lane lists widen to statement_facts (the attempt-cap sum
+// re-keys per lane), and _enqueue_invoice_facts_core gains the two statement arms, the
+// csv/ofx mime dispatch, the per-lane already_completed engine-kind map, the enqueue-time
+// typed-consent gate and the statement page-budget reservation. Same discipline as
+// A7/A9/A10/A11: the pins are NOT retuned. The reversal pairs below are MACHINE-DERIVED
+// from the migration files (predecessor body vs the 0038 recut body) and mechanically
+// verified to reconstruct the predecessor EXACTLY; they reverse outermost-first, then the
+// existing A10/A11/A9 reversals run unchanged and the remainder must hash to the untouched
+// 19-migration prestate.
+const RESTORE_0038 = {
+"claim": [
+[
+"  -- The lease check precedes EVERY dispatching branch. Only the EGRESSING lanes\n  -- (ocr, invoice_facts and -- 0038 -- statement_facts) are kill-switch-gated; invoice_facts\n  -- additionally requires every active filing client to hold a live LEGACY consent. Local\n  -- lanes (structured_parse, local_facts, classify, statement_parse) never hold.\n  --\n  -- 0038 (design 4.3/4.4): statement_facts joins the KILL SWITCH and nothing else here. The\n  -- typed (consent, activation) it needs is checked at ENQUEUE -- the 0020 section 6\n  -- byte-identity battery asserts this body carries no call edge into the typed-consent\n  -- surface, and the two questions are orthogonal anyway: the switch asks whether the vendor is\n  -- safe right now, the typed gate asks whether this client authorized this purpose. Widening\n  -- the LEGACY branch below to statement_facts would make a purpose-blind consent authorize a\n  -- statement-specific read, which is what 0020 section 1 built a separate relation to prevent.\n  if t.lane in ('ocr','invoice_facts','statement_facts')\n     and not coalesce(p_egress_approved,false) then",
+"  -- The lease check precedes EVERY dispatching branch. Only the two EGRESSING lanes\n  -- (ocr, invoice_facts) are kill-switch-gated; invoice_facts additionally requires\n  -- every active filing client to hold a live consent. Local lanes never hold.\n  if t.lane in ('ocr','invoice_facts')\n     and not coalesce(p_egress_approved,false) then"
+],
+[
+"  -- 0038: the attempt cap is now PER EGRESSING LANE. The sum was keyed on the literal\n  -- 'invoice_facts' while the branch it guards was too; widening the branch without re-keying\n  -- the sum would let one lane's attempts cap the other's.\n  if t.lane in ('invoice_facts','statement_facts') then\n    select coalesce(sum(attempt_count),0)::int into v_attempts",
+"  if t.lane='invoice_facts' then\n    select coalesce(sum(attempt_count),0)::int into v_attempts"
+],
+[
+"        and lane=t.lane;\n    if v_attempts>=3 then",
+"        and lane='invoice_facts';\n    if v_attempts>=3 then"
+],
+[
+"    where firm_id=t.firm_id and lane in ('ocr','invoice_facts','statement_facts')\n      and status='running';\n  if t.lane in ('ocr','invoice_facts','statement_facts') and v_running>=v_cap then\n    raise exception 'document-processing concurrency limit reached' using errcode='CLR18';",
+"    where firm_id=t.firm_id and lane in ('ocr','invoice_facts') and status='running';\n  if t.lane in ('ocr','invoice_facts') and v_running>=v_cap then\n    raise exception 'document-processing concurrency limit reached' using errcode='CLR18';"
+]
+],
+"router": [
+[
+"  v_engine_kind text; v_stmt_clients uuid[]; v_stmt_client uuid; v_gate text;\nbegin",
+"begin"
+],
+[
+"  -- 0038 (design 4.3): 'bank_statement' now has TWO homes -- the vendor OCR lane for a\n  -- pdf/image and the free local parse lane for a csv/ofx export.\n  if lower(coalesce(d.mime_type,''))='application/pdf'",
+"  if lower(coalesce(d.mime_type,''))='application/pdf'"
+],
+[
+"    elsif d.document_kind='bank_statement' then\n      -- 0038 arm 1: the statementFacts_v1 OCR lane. This is the arm that closes the\n      -- bank_statement -> skipped_kind dead end 0026:392-410 left behind.\n      v_lane:='statement_facts'; v_engine:='azure-di:prebuilt-bankStatement:2024-11-30';\n    else",
+"    else"
+],
+[
+"  elsif lower(coalesce(d.mime_type,'')) in ('text/csv','application/csv',\n      'application/x-ofx','application/ofx') then\n    -- 0038 arm 2 (design 4.3): the csv/ofx mimes JOIN the dispatch. They dead-ended at\n    -- skipped_type before the kind test could ever run. ONLY a bank statement routes; every\n    -- other kind keeps the byte-identical skipped_type verdict it has today, so nothing that\n    -- is not a statement changes behaviour.\n    if d.document_kind='bank_statement' then\n      v_lane:='statement_parse'; v_engine:='clara-statement-parse:v1';\n    else\n      return jsonb_build_object('document_id',p_document,'status','skipped_type');\n    end if;\n  else",
+"  else"
+],
+[
+"    -- 0038 (design 4.3): PER-LANE engine-kind. This short-circuit was hard-coded to\n    -- 'invoice_facts', which is correct for invoice_facts AND for local_facts (both settle an\n    -- invoice_facts extraction) and WRONG for either statement lane -- a fully ingested\n    -- statement would read as un-extracted on every re-fire and re-buy a vendor read. The map\n    -- preserves the two existing lanes exactly and names the two new ones.\n    v_engine_kind := case when v_lane in ('statement_facts','statement_parse')\n                       then 'statement_facts'  -- BOTH statement lanes settle a\n                       -- statement_facts extraction (the lane records how the read was\n                       -- bought; the engine_kind what it is -- the 0026:709 precedent)\n                       else 'invoice_facts' end;\n    select e.id into v_task from clara.document_extractions e",
+"    select e.id into v_task from clara.document_extractions e"
+],
+[
+"      where e.document_id=p_document and e.engine_kind=v_engine_kind and e.status='done'\n      order by e.version_n desc limit 1;",
+"      where e.document_id=p_document and e.engine_kind='invoice_facts' and e.status='done'\n      order by e.version_n desc limit 1;"
+],
+[
+"    end if;\n  end if;\n  -- 0038 (design 4.3/4.4, WCB-R1): THE ENQUEUE-TIME TYPED-CONSENT GATE, statement lanes only.\n  -- It is here rather than in the claim body because the ratified 0020 section 6 byte-identity\n  -- battery asserts claim_document_processing_task carries no call edge into the typed-consent\n  -- surface -- and because enqueue is the earlier, more honest place: an unauthorized client\n  -- should never have a task queued in their name at all. Both verdicts write the terminal\n  -- NEVER-CLAIMED failed receipt (the skipped_kind idiom), never a raise: this function runs\n  -- inside file_document / finalize_document_intake / confirm_attribution_candidate /\n  -- approve_wrong_client_correction, and a raise would abort an unrelated filing transaction.\n  --\n  -- ORDERING, decided here because the design does not fix it: the gate runs AFTER the\n  -- already_completed short-circuit (an ingested statement raises no consent question and must\n  -- not generate noise on a re-fire) and BEFORE the in-flight short-circuit. The other order\n  -- has a real hole: a statement enqueued while one client held it, then filed to a SECOND\n  -- client, would hit the in-flight branch and return the queued task, so the vendor read\n  -- would proceed on a document with no answerable consent client. A re-fire whose gate now\n  -- fails should say so even while a task is queued.\n  if v_lane in ('statement_facts','statement_parse') then\n    select array_agg(distinct f.client_id) into v_stmt_clients\n      from clara.document_filings f\n      where f.document_id=p_document and f.retired_at is null;\n    if coalesce(array_length(v_stmt_clients,1),0)>1 then\n      v_gate:='statement_multi_client';\n    elsif coalesce(array_length(v_stmt_clients,1),0)=0 then\n      -- Zero active filings: no client exists who could have authorized this read. Fail closed.\n      v_gate:='consent_inactive';\n    else\n      v_stmt_client:=v_stmt_clients[1];\n      if not exists(select 1 from clara.client_egress_purpose_activations a\n          join clara.client_egress_purpose_consents c\n            on c.id=a.consent_id and c.firm_id=a.firm_id and c.client_id=a.client_id\n              and c.purpose=a.purpose\n          where a.firm_id=d.firm_id and a.client_id=v_stmt_client\n            and a.purpose='statement_extraction'\n            and a.deactivated_at is null and c.revoked_at is null) then\n        v_gate:='consent_inactive';\n      end if;\n    end if;\n    if v_gate is not null then\n      select id into v_task from clara.document_processing_tasks\n        where document_id=p_document and lane=v_lane\n          and status='failed' and error_code=v_gate\n        order by id limit 1;\n      if v_task is null then\n        select coalesce(max(version_n),0)+1 into v_version\n          from clara.document_processing_tasks\n          where document_id=p_document and lane=v_lane;\n        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,\n            engine_config,version_n,lane,status,error_code,finished_at)\n          values(d.firm_id,p_document,v_engine,'{}'::jsonb,\n            v_version,v_lane,'failed',v_gate,now())\n          returning id into v_task;\n      end if;\n      return jsonb_build_object('task_id',v_task,'document_id',p_document,\n        'status','failed','reason',v_gate);\n    end if;",
+"    end if;"
+],
+[
+"  -- Only the AZURE lanes consume the page budget; classify, the local parse and the local\n  -- statement parse reserve nothing. 0038 adds statement_facts to the reserving set, which is\n  -- what \"the statement lane joins every existing spend control\" means concretely.\n  if v_lane in ('invoice_facts','statement_facts') then\n    v_pages := greatest(coalesce(d.page_count,1),1);",
+"  -- Only the Azure lane consumes the page budget; classify + the local parse\n  -- reserve nothing.\n  if v_lane='invoice_facts' then\n    v_pages := greatest(coalesce(d.page_count,1),1);"
+]
+]
+};
+function applyRestore0038(member, src) {
+  for (const [frm, to] of RESTORE_0038[member]) {
+    if (src.split(frm).length !== 2) {
+      throw new Error(`0038 restore(${member}): pair not found exactly once -- the live body drifted from the ratified 0038 shape: ${frm.slice(0, 100)}`);
+    }
+    src = src.replace(frm, to);
+  }
+  return src;
+}
+
 const BYTE_IDENTICAL = {
   grant_client_egress: {
     sig: "clara.grant_client_egress(uuid,uuid,text,text)",
@@ -79,7 +155,7 @@ const BYTE_IDENTICAL = {
     len: 3637, sha: "d02763514e282f8f041137cc4aba5f3c8187019f4dfe543cf96edd5e7495acd9",
     exact: "f9da98aa7c3a7a37ee79f5e67e523429c83f10bf4247489946f66457e80f312d",
     acl: ["clara_fn_owner=X/clara_fn_owner", "clara_runtime=X/clara_fn_owner"],
-    restore: (src) => src
+    restore: (src) => applyRestore0038("claim", src)
       .replace(
         "  t record; d record; v_cap int; v_running int; v_attempts int;\n  v_clients int; v_consented int; v_hold_reason text; v_secret text;\n",
         "  t record; d record; v_cap int; v_running int; v_attempts int;\n  v_clients int; v_consented int; v_hold_reason text;\n",
@@ -93,6 +169,8 @@ const BYTE_IDENTICAL = {
         "    'sha256',d.sha256,'mime_type',d.mime_type,'byte_size',d.byte_size);\n",
       ),
     restoreMust: [
+      /lane in \('ocr','invoice_facts','statement_facts'\)/,
+      /if t\.lane in \('invoice_facts','statement_facts'\) then/,
       /v_secret:=gen_random_uuid\(\)::text;/,
       /claim_secret_digest=sha256\(convert_to\(v_secret,'UTF8'\)\)/,
       /'claim_secret',v_secret\);/,
@@ -132,7 +210,7 @@ const BYTE_IDENTICAL = {
     len: 4312, sha: "86ff810a99e7bf230017f8565d930b64c16e4f6c6e16cd6084a5cebdff1a27f0",
     exact: "0165a1f471a6f29e01ff759f982d19175d0553ed4a811971b42d2dd197dd103e",
     acl: ["clara_fn_owner=X/clara_fn_owner"],
-    restore: (src) => src
+    restore: (src) => applyRestore0038("router", src)
       .replace(
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text; v_task_status text;\n",
         "  d record; t record; v_task uuid; v_version int; v_attempts int; v_pages int;\n  v_lane text; v_engine text;\n",
