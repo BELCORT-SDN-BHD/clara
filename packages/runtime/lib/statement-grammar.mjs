@@ -76,9 +76,10 @@ export function houseNormalizeIdentifier(text) {
  *
  * Accepted: `1,234.56` · `1234.56` · `RM1,234.56` · `MYR 1,234.56` · `1,234.56-` ·
  * `500.00+` · `(1,234.56)` (accounting negative) · `1,234.56 DR` · `1,234.56CR` · `1,234`
- * (whole ringgit) · `.00` (Maybank prints ZERO with no integer part — the real 202504
- * statement's every endpoint reads `.00`, found by the first real C-b acceptance month;
- * a leading-dot decimal is a genuine printed zero-magnitude figure, not OCR noise).
+ * (whole ringgit) · `.00` / `.50` (a LEADING-DOT decimal: Maybank prints zero with no
+ * integer part — the real 202504 statement's every endpoint reads `.00`, found by the
+ * first real C-b acceptance month — and the same form with a nonzero fraction is an
+ * equally genuine sub-ringgit figure, not OCR noise).
  * Anything else is null — a statement figure we cannot read is a refusal
  * (`header_unreadable` / `totals_unreadable` / a line skeleton that will not corroborate),
  * never an assumption.

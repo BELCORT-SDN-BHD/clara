@@ -173,15 +173,56 @@ function tableCells(regions) {
 /** Table cells as HEADER-SCAN pseudo-lines, in (table, cell) order — the real Maybank
  *  header block is itself a table, so the label→value adjacency the line scan needs lives
  *  in consecutive CELLS there, not in page lines. Text-only: the header finders never
- *  read geometry. */
+ *  read geometry.
+ *
+ *  LEDGER TABLES ARE EXCLUDED (PR #155 review BLOCKER, empirically reproduced): a
+ *  transaction table's own text is full of header-label look-alikes — `BALANCE B/F` as a
+ *  first-row description IS an opening-balance needle, and a per-page subtotal row IS a
+ *  printed-totals needle with NO cross-reader backstop — so feeding it to the label scan
+ *  can slurp an adjacent unrelated number into the header. A table is ledger-shaped
+ *  exactly when its cells carry an addressable transaction header (an entry-date synonym
+ *  PLUS an amount column or a debit/credit pair — the same rule `readColumns` posts).
+ *  The real header table (`TARIKH PENYATA` / `NOMBOR AKAUN` / values) carries none. */
+function ledgerShapedTables(byTable) {
+  const out = new Set();
+  // WORD-BOUNDED CONTAINS, never whole-cell equality: the real Maybank column headers are
+  // TRILINGUAL COMBINED CELLS (`JUMLAH URUSNIAGA 银码 TRANSACTION AMOUNT`) that no exact
+  // match ever hits — and an undetected ledger table is the DANGEROUS direction (its text
+  // feeds the header scan), while over-detection merely skips cells the page lines already
+  // answer. So detection is deliberately greedy: any cell CONTAINING a column synonym as a
+  // whole word counts.
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const hasSyn = (texts, syns) => syns.some((s) => {
+    const re = new RegExp(`(?:^|[^a-z0-9])${esc(s)}(?:[^a-z0-9]|$)`);
+    return texts.some((t) => re.test(t));
+  });
+  for (const [table, cells] of byTable) {
+    const texts = cells.map((c) => normText(c.text)).filter(Boolean);
+    if (hasSyn(texts, COLUMN_SYNONYMS.entry_date)
+        && (hasSyn(texts, COLUMN_SYNONYMS.amount)
+            || (hasSyn(texts, COLUMN_SYNONYMS.debit) && hasSyn(texts, COLUMN_SYNONYMS.credit)))) {
+      out.add(table);
+    }
+  }
+  return out;
+}
+
 function cellScanLines(regions) {
-  return regions
+  const cells = regions
     .filter((r) => r.field_path.startsWith("tables."))
     .map((r) => {
       const m = /^tables\.(\d+)\.cells\.(\d+)$/.exec(r.field_path);
       return { text: r.text_content, table: m ? Number(m[1]) : 0, cell: m ? Number(m[2]) : 0 };
     })
-    .sort((a, b) => a.table - b.table || a.cell - b.cell)
+    .sort((a, b) => a.table - b.table || a.cell - b.cell);
+  const byTable = new Map();
+  for (const c of cells) {
+    if (!byTable.has(c.table)) byTable.set(c.table, []);
+    byTable.get(c.table).push(c);
+  }
+  const ledger = ledgerShapedTables(byTable);
+  return cells
+    .filter((c) => !ledger.has(c.table))
     .map((c) => ({ text: c.text, page: 0, y: 0, x: 0 }));
 }
 
@@ -247,13 +288,19 @@ function readPeriod(lines) {
 }
 
 /** A plausible printed ACCOUNT token for a look-ahead region: an optional leading `:`
- *  then digits/dashes/spaces ONLY. `normalizeAccountNumber` alone strips every non-digit,
- *  so a date region (`30/04/25` → "300425", six digits) in the look-ahead window would
- *  silently become an account number — the slash must disqualify, not vanish. */
+ *  then digits/dashes/spaces ONLY — and NEVER anything that reads as a printed date in
+ *  ANY separator, and never fewer than EIGHT digits. `normalizeAccountNumber` alone
+ *  strips every non-digit, so a date region in the look-ahead window (`30/04/25`,
+ *  `30-04-25`, `30 04 25` — all "300425", six digits) would silently become an account
+ *  number (PR #155 review MAJOR: the slash-only guard missed the dash/space forms). Every
+ *  DDMMYY shape is six digits, and no Malaysian bank prints an account shorter than
+ *  eight, so the digit floor closes the class the date-parse test cannot see. */
 function accountToken(text) {
   const s = String(text ?? "").trim().replace(/^[:\s]+/, "");
   if (!s || !/^[\d\s-]+$/.test(s)) return null;
-  return normalizeAccountNumber(s);
+  if (parseStatementDate(s.replace(/\s+/g, "/").replace(/-/g, "/"), {})) return null;
+  const normalized = normalizeAccountNumber(s);
+  return normalized && normalized.length >= 8 ? normalized : null;
 }
 
 /** The printed account number, from its own label. Never a bare digit run: an unlabelled

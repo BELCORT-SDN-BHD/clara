@@ -100,3 +100,54 @@ test("an explicitly printed period range still wins over the derivation", () => 
   assert.equal(read.header.period_end, "2025-03-31", "the printed range is authoritative; derivation is absence-only");
   assert.ok(!read.receipt.notes.includes("period_derived_from_statement_date"));
 });
+
+test("dash- and space-separated dates in the account look-ahead are refused too (review MAJOR: the slash-only guard)", () => {
+  for (const decoy of ["30-04-25", "30 04 25", ": 30-04-2025"]) {
+    const regions = [
+      { field_path: "pages.1.lines.0", text_content: "NOMBOR AKAUN", locator: { page_number: 1, polygon: [0, 0, 0, 0] } },
+      { field_path: "pages.1.lines.1", text_content: decoy, locator: { page_number: 1, polygon: [0, 10, 0, 10] } },
+    ];
+    const read = readStatementFromLayout(regions);
+    assert.equal(read.header.account_number_normalized, null,
+      `${JSON.stringify(decoy)} must never normalize into an account number`);
+  }
+});
+
+test("a seven-digit look-ahead token is refused; a genuine account still reads through a dashed print", () => {
+  const probe = (value) => readStatementFromLayout([
+    { field_path: "pages.1.lines.0", text_content: "NOMBOR AKAUN", locator: { page_number: 1, polygon: [0, 0, 0, 0] } },
+    { field_path: "pages.1.lines.1", text_content: value, locator: { page_number: 1, polygon: [0, 10, 0, 10] } },
+  ]).header.account_number_normalized;
+  assert.equal(probe("1234567"), null, "below the eight-digit floor — a stray short digit run is not an account");
+  assert.equal(probe("5144-0099-0011"), "514400990011", "a dash-grouped genuine account reads");
+});
+
+test("LEDGER-shaped table cells never feed the header scan: BALANCE B/F and subtotal rows cannot poison the header (review BLOCKER)", () => {
+  const cell = (t, i, text) => ({
+    field_path: `tables.${t}.cells.${i}`, text_content: text,
+    locator: { page_number: 1, polygon: [0, 0, 0, 0] },
+  });
+  const regions = [
+    { field_path: "pages.1.lines.0", text_content: "Maybank", locator: { page_number: 1, polygon: [0, 0, 0, 0] } },
+    { field_path: "pages.1.lines.1", text_content: "STATEMENT DATE : 30/04/2025", locator: { page_number: 1, polygon: [0, 10, 0, 10] } },
+    // The HEADER table — no transaction columns; its account adjacency must still read.
+    cell(0, 0, "NOMBOR AKAUN"),
+    cell(0, 1, "514400990011"),
+    // The TRANSACTION table — carries an addressable column header, a BALANCE B/F first
+    // row whose next cell is an unrelated credit figure, and a per-page subtotal row.
+    cell(1, 0, "ENTRY DATE"), cell(1, 1, "DESCRIPTION"), cell(1, 2, "AMOUNT"), cell(1, 3, "STATEMENT BALANCE"),
+    cell(1, 4, "BALANCE B/F"), cell(1, 5, "5,000.00"),
+    cell(1, 6, "02/04/2025"), cell(1, 7, "SOME PAYMENT"), cell(1, 8, "+100.00"), cell(1, 9, "5,100.00"),
+    cell(1, 10, "TOTAL DEBIT"), cell(1, 11, "999.99"),
+    cell(1, 12, "TOTAL CREDIT"), cell(1, 13, "888.88"),
+  ];
+  const read = readStatementFromLayout(regions);
+  assert.equal(read.header.account_number_normalized, "514400990011",
+    "the header table's label→value adjacency still reads");
+  assert.notEqual(read.header.opening_cents, 500000,
+    "BALANCE B/F inside the ledger table must NOT slurp the adjacent credit into opening");
+  assert.equal(read.header.opening_cents, null, "opening stays honestly unread — refusal, never a guess");
+  assert.notEqual(read.header.total_debit_cents, 99999, "a per-page subtotal row must not become the printed totals");
+  assert.equal(read.header.total_debit_cents, null);
+  assert.equal(read.header.total_credit_cents, null);
+});
