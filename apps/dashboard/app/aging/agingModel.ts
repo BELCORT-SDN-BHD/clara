@@ -118,7 +118,7 @@ export const AGING_BUCKET_LABELS: { key: keyof Pick<AgingBucketRow, "current_cen
   { key: "current_cents", label: "current (0-30)" },
   { key: "d31_60_cents", label: "31-60" },
   { key: "d61_90_cents", label: "61-90" },
-  { key: "d91_plus_cents", label: "91+" },
+  { key: "d91_plus_cents", label: "91+" }, // gitleaks:allow — a bucket column name, not a key
 ];
 
 /** A row is "worth showing" when it carries any non-zero, non-null bucket —
