@@ -232,14 +232,28 @@ export function entriesToProposals(entries) {
 // DB reads + the route core (clara_runtime).
 // ---------------------------------------------------------------------------
 
+// NEWEST PRODUCER, NEVER `superseded_by is null` (PR #154 — the same bug class this very
+// file's readPriorGlCells below already documents shipping once: kind-blind supersede
+// makes the bare filter return zero rows for every classified document). Worse here than
+// anywhere: the route falls back to the OCR-cells path whenever this returns empty, so
+// the failure mode was SILENT SUBSTITUTION of the inferior source, never a visible error.
+// The newest done extraction that CARRIES `prior_gl.line` rows wins.
 const SELECT_PRIOR_GL_REGIONS_SQL =
-  `select dr.id as region_id, de.id as extraction_id, dr.text_content
-     from clara.document_extractions de
+  `with newest as (
+     select de.id, de.firm_id
+       from clara.document_extractions de
+      where de.document_id = $1 and de.firm_id = $2 and de.status = 'done'
+        and exists (
+          select 1 from clara.document_regions dr
+           where dr.extraction_id = de.id and dr.firm_id = de.firm_id
+             and dr.field_path = 'prior_gl.line')
+      order by de.extracted_at desc, de.version_n desc, de.id desc
+      limit 1)
+   select dr.id as region_id, de.id as extraction_id, dr.text_content
+     from newest de
      join clara.document_regions dr
        on dr.extraction_id = de.id and dr.firm_id = de.firm_id
-    where de.document_id = $1 and de.firm_id = $2
-      and de.status = 'done' and de.superseded_by is null
-      and dr.field_path = 'prior_gl.line'
+    where dr.field_path = 'prior_gl.line'
     order by dr.id`;
 
 /** Read the authoritative prior-GL line regions for a document (firm-scoped). */
