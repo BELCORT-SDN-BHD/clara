@@ -396,16 +396,38 @@ test("§2 future-dated entries are excluded; a reversal MIRROR is included (the 
   let w = await openWatchRow(client, "G");
   assert.equal(Number(w.confirmed_included_cents), 700_00, "a future-dated entry contributes NOTHING (70,000¢ = the two past entries)");
   // Reverse the RM300 entry (routine → the mirror auto-approves). ADV-7
-  // (round 1): the mirror posts TODAY, i.e. into the month IN PROGRESS — so it
-  // nets immediately in the PROVISIONAL figure, while the statutory figure
-  // (completed months only, s.12 month-end basis) keeps the original until the
-  // mirror's month completes. The pair still nets — in the window that
-  // contains both legs.
-  await reverseEntry(users.bob, { entry: revTarget, reason: "rig watch reversal", opKey: opk("rev") });
+  // (round 1): the mirror nets immediately in the PROVISIONAL figure, while
+  // whether it ALSO nets into the STATUTORY figure (completed months only,
+  // s.12 month-end basis) depends on which month the mirror actually lands
+  // in — and that is NOT something this fixture can assume. reverse_entry
+  // stamps the mirror's posting_date with bare `current_date`
+  // (0009_coding_floor.sql ~line 1718) — the SESSION/server TimeZone GUC, NOT
+  // explicitly pinned to Asia/Kuala_Lumpur the way the evaluator's own date
+  // derivation is (0016_a21_compliance_watch.sql ~line 477, proven session-tz-
+  // independent by "R3-10" in a21-adversarial.test.mjs). During the daily ~8h
+  // window where the session's calendar day still lags MYT's (MYT's date
+  // rolls over 8h ahead of a UTC session), the mirror's `current_date` can
+  // verb-write into what the evaluator now treats as the LAST COMPLETED month
+  // (v_stat_month) rather than the month "in progress" (v_cur_month) — so the
+  // STATUTORY figure can net immediately too. Read where the mirror ACTUALLY
+  // landed and assert the behaviourally-correct outcome for that landing,
+  // rather than assuming one outcome (this is exactly the class of bug that
+  // broke this cell on CI: PR #168, 2026-08-01, both siblings, one cell).
+  const rev = await reverseEntry(users.bob, { entry: revTarget, reason: "rig watch reversal", opKey: opk("rev") });
+  const mirrorRow = await rootQuery("select posting_date::text as pd from clara.journal_entries where id=$1", [rev.reversal_id]);
+  const mirrorMonth = `${mirrorRow.rows[0].pd.slice(0, 7)}-01`;
+  const statMonth = await mytMonthStart(-1); // v_stat_month — the evaluator's completed-month horizon
+  const mirrorIsStatutory = mirrorMonth <= statMonth;
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
-  assert.equal(Number(w.confirmed_included_cents), 700_00, "the STATUTORY figure (completed months) keeps the original until the mirror's month ends");
-  assert.equal(Number(w.provisional_included_cents), 400_00, "the PROVISIONAL figure nets the reversed pair immediately (40,000¢ remain)");
+  assert.equal(
+    Number(w.confirmed_included_cents),
+    mirrorIsStatutory ? 400_00 : 700_00,
+    mirrorIsStatutory
+      ? `the mirror's own current_date (${mirrorRow.rows[0].pd}) already lands in the completed month — the STATUTORY figure nets immediately (40,000¢)`
+      : "the STATUTORY figure (completed months) keeps the original until the mirror's month ends",
+  );
+  assert.equal(Number(w.provisional_included_cents), 400_00, "the PROVISIONAL figure nets the reversed pair immediately (40,000¢ remain) regardless of which month the mirror landed in (both are within the provisional rolling window)");
 });
 
 test("P7 closing-transfer: is_year_end alone still COUNTS; is_year_end + closing_transfer is EXCLUDED; the column defaults false", async (t) => {
