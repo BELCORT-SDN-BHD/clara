@@ -109,9 +109,13 @@ production-proven) · **C0** (ADR-051, migration 0036: the #52 nonzero-tax belt 
 losing-dispatch no-ops · budget visibility · the sales mis-route gate · MSIC→context pack) ·
 **C-a** (ADR-052, migration 0037: the AR/AP open-item subledger + balanced-pair allocation —
 **the F3 debt PAID on the live book**; design of record
-`docs/plan/wave-c-a-subledger-design.md` v2, rulings WCA-R1..R9).
+`docs/plan/wave-c-a-subledger-design.md` v2, rulings WCA-R1..R9) · **C-b** (ADR-053,
+migrations 0038+0039: bank identity + statement ingest + matching, ACCEPTED per WC-R11 —
+nine real RPR months chained to the sen, 13 production settlements, 41 honestly-unmatched
+lines = the C-c working set; design of record `docs/plan/wave-c-b-bank-design.md` v2.2
++ `-part2.md`, rulings WCB-R1..R6).
 
-**LIVE POSTURE: 36 migrations (`0037`) · Fly `clara-runtime` v38 · FOUR firms** (BELCORT —
+**LIVE POSTURE: 38 migrations (`0039`) · Fly `clara-runtime` v50 · FOUR firms** (BELCORT —
 real, 3 clients, **high-stakes RM100,000** ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
 Gate-S synthetic sandbox, RM10k default — its only client is literally "Fictional Test
 Services"; do not confuse with BELCORT's real clients ROME PROPERTIES / ROME SECRETARY ·
@@ -124,10 +128,13 @@ WC-R1..R12 + verified ground truth + the build order + open items — read it be
 Wave C work; do not re-grill what it ratifies). Shape: **C-a** subledger + allocation
 (**LIVE**, ADR-052 — settlements are human verbs `allocate_receipt`/`allocate_payment`/
 `unallocate_group`/`apply_open_items`; settlement kinds are composite-born only, never
-draftable, never autopostable) → **C-b** bank identity/statement ingest/matching (**NEXT** —
-fresh session, design-first; two named grilling questions in contract §4 C-b item 4) →
-**C-c** tie-out/aging/learn-loop. Acceptance: labelled-synthetic in Rome first, then one
-real BELCORT month (ROME PROPERTIES holds statements 202504–202512). The
+draftable, never autopostable) → **C-b** bank identity/statement ingest/matching (**CLOSED
++ ACCEPTED**, ADR-053 — the statement lanes refuse rather than guess: unsigned single-column
+amounts REFUSED by design; `enter_bank_statement` binds to a FILED document only) →
+**C-c** tie-out/aging/learn-loop (**NEXT** — fresh session, design-first; the tie-out is a
+receipt shaped for a future close wave per WC-R3; the learn loop is advisory, human-gated).
+Acceptance: labelled-synthetic in Rome first, then the real BELCORT book (WC-R11 —
+C-b ran ALL NINE RPR months 202504–202512). The
 `coding_kind` roadmap (which document kinds earn a typed lane, and when) lives in
 `docs/plan/REBUILD-PLAN.md`.
 
@@ -142,11 +149,13 @@ migration numbers are claimed at MERGE time** (the frontier check enforces). Mal
 facts are primary-source-verified in `docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`
 — **rates/thresholds/phase dates live in effective-dated policy tables, never in prose.**
 
-**Open build items (the contract + PROJECTLOG PART 2 are the live registers):** Wave C-b
-(bank) · Gate P (operating runway — now also owns the capitalised/mixed-purchase
-tax-allocation question 0036 §A named) · the contract §7-A runtime follow-up bundle · C-a
-residuals (§5.3 pool segregation with the WCA-R8 pin as evidence · the `due_date` producer →
-C-c · MSIC backfill) · the `opening_tb.line` producer + K-doc production door (Phase 5,
-review-gated).
+**Open build items (the contract + PROJECTLOG PART 2 are the live registers):** Wave C-c
+(tie-out · aging · learn loop — the 41 unmatched lines are its working set; the ROME PUBLIC
+payment-allocation question is PARKED with the owner, ADR-053) · Gate P (operating runway —
+now also owns the capitalised/mixed-purchase tax-allocation question 0036 §A named) · the
+contract §7-A runtime follow-up bundle + §7-B PRD amendment (both owed at the WAVE C close) ·
+C-a residuals (§5.3 pool segregation with the WCA-R8 pin as evidence · the `due_date`
+producer → C-c · MSIC backfill) · the `opening_tb.line` producer + K-doc production door
+(Phase 5, review-gated).
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**

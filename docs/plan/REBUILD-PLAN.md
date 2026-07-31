@@ -139,6 +139,25 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > the last set red-proofed). NEXT: C-b (bank identity · statement ingest · matching), fresh
 > session, design-first — the two named C-b grilling questions stand (contract §4 C-b item 4).**
 > The extraction-slice / settlement history above stands as written (ADR-047..050 closed it all).
+>
+> **STATUS (2026-07-31): C-b IS CLOSED AND ACCEPTED (ADR-053).** Migration **0038** (PR #153:
+> `bank_accounts` + `coa_accounts.is_bank_account` · provenance-bound `bank_statements`/
+> `bank_statement_lines` with the balance-chain identity · `statementFacts_v1` (new frozen class)
+> · both ingest lanes per WC-R4, corroborated per WC-R7 · `bank_matches` groups with the WC-R2
+> cents invariant + `bank_match_audit` (PORT) · `match_bank_line`/`unmatch_bank_line` with the
+> four parity RAISEs · the `/bank` two-pane workbench) shipped through the full ladder (design
+> v2.2, WCB-R1..R6, two delta rounds). **Acceptance per WC-R11 ran both halves:** Rome-sandbox
+> labelled synthetic, then ALL NINE real ROME PROPERTIES months 202504→202512 through the OCR
+> lane — the running-balance chain tied to the sen across the year, December closing the account
+> to zero; 13 settlements through the production verbs; 27/36 open items closed; **41 honestly-
+> unmatched lines (−RM653,894.70) = C-c's working set.** The acceptance drove seven fix classes
+> (PRs #154–#164, migration **0039**: null-defers-to-chain in the persist core; the real-Maybank
+> grammar; kind-honest supersede reads; reader-2 per-account schema + line completion; refusal
+> observability). **Live pin: 38 migrations (`0039`) · runtime v50 · four firms · `/ready` green.**
+> **NEXT: C-c (tie-out · aging · learn loop), design-first** — the tie-out receipt per WC-R3,
+> period-chained `bank_reconciliations` (GAP1-3), aging 30/60/90 + statements, the advisory
+> learn loop (`matched_via_rule_id`/`origin` already on `bank_matches`). Owed at the WAVE C
+> close: the PRD §4 five-no-home amendment (contract §7-B) + the §7-A bundle disposition.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
