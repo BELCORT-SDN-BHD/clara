@@ -256,8 +256,18 @@ export function responseTextLines(result) {
 export function normalizeAzureBankStatement(payload) {
   const result = payload?.analyzeResult || payload || {};
   const doc = Array.isArray(result.documents) ? result.documents[0] : null;
-  const fields = doc?.fields ?? {};
+  const topFields = doc?.fields ?? {};
+  // THE REAL prebuilt-bankStatement.us SCHEMA (probed live, 2026-07-31): the per-account
+  // typed facts — AccountNumber, BeginningBalance, EndingBalance, Transactions — live
+  // under `fields.Accounts[].valueObject`, NOT at the top level, and the response carries
+  // NO statement-date fields and NO tables at all. Reading the top level returned zero
+  // transactions for every real statement; only the label completion masked it for the
+  // header. One account per statement is the design shape; extra accounts are receipted
+  // and the registered-account identity check downstream refuses a mismatch.
+  const accounts = Array.isArray(topFields.Accounts?.valueArray) ? topFields.Accounts.valueArray : [];
+  const fields = { ...topFields, ...(accounts[0]?.valueObject ?? {}) };
   const receipt = { reader: "azure_bank_statement", typed: !!doc, rows_seen: 0, rows_skipped: 0, completed_from_labels: [] };
+  if (accounts.length > 1) receipt.accounts_in_response = accounts.length;
 
   const periodStart = fieldDate(fields.StatementStartDate);
   const periodEnd = fieldDate(fields.StatementEndDate);
