@@ -1031,7 +1031,7 @@ test("x40.j resolve with matched_booking: the line ends matched, drops out of ex
 // counterpart line (the bank's own correcting entry); the pair NETS ZERO by
 // construction and is enumerated CLOSED on the receipt (part2 finding 2).
 // ---------------------------------------------------------------------------
-test("x40.k a corrective-pair resolution nets zero and is enumerated as a closed pair", async (t) => {
+test("x40.k a corrective-pair resolution nets zero and is enumerated as a closed pair: both stored legs and both SNAPSHOT legs name each other, a second resolve is already_resolved, and a competing claim on a paired counterpart is refused", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const owner = world.users.alice;
@@ -1039,38 +1039,229 @@ test("x40.k a corrective-pair resolution nets zero and is enumerated as a closed
   const acct = await freshAccount(sub, client, "k1");
   // The bank double-charged, then corrected itself -- two lines, opposite
   // signs, neither ever books (genuine bank error, WCC-R2's narrow door).
+  // A THIRD, unpaired -400 line rides an OPEN exception beside them: it is the
+  // control for the enumeration asserts below (a leg with NO counterpart), and
+  // the claimant for the competing-claim refusal at the end.
   const stmt = await enterStatement(sub, {
     client, bankAccount: acct.bankAccountId, periodStart: "2031-07-01", periodEnd: "2031-07-31", opening: 0,
     specs: [
       { amountCents: -400, entryDate: "2031-07-11", description: "erroneous double charge" },
       { amountCents: 400, entryDate: "2031-07-12", description: "the bank's own reversal" },
+      { amountCents: -400, entryDate: "2031-07-13", description: "an unrelated disputed charge" },
     ], keepPeriod: true,
   });
   const ex1 = idOf(await exceptLine(owner, { client, line: stmt.lines[0].id, kind: "bank_error", reason: "x40.k the erroneous charge" }), "exception_id", "id");
   const ex2 = idOf(await exceptLine(owner, { client, line: stmt.lines[1].id, kind: "bank_error", reason: "x40.k the bank's own reversal" }), "exception_id", "id");
+  const ex3 = idOf(await exceptLine(owner, { client, line: stmt.lines[2].id, kind: "disputed", reason: "x40.k the unrelated dispute (no counterpart)" }), "exception_id", "id");
   // CX2 [folds into A2, landed]: the corrective pair resolves BOTH exceptions ATOMICALLY in ONE
   // call -- both lines locked, the counterpart's exception auto-flips resolved/bank_corrective_
   // line naming THIS line back -- reciprocity by construction, not by two separate calls. A
   // second resolveException on ex2 is no longer reachable here (its exception is already
   // resolved by the first call).
-  await resolveException(owner, {
+  const pairReceipt = await resolveException(owner, {
     client, exception: ex1, disposition: "bank_corrective_line", note: "x40.k the offsetting reversal names its pair",
     counterpartLine: stmt.lines[1].id,
   });
-  assert.equal((await exceptionRow(ex1))?.status, "resolved");
-  assert.equal((await exceptionRow(ex2))?.status, "resolved");
+  assert.equal(pairReceipt?.counterpart_exception_id, ex2, "x40.k CX2: the receipt names the counterpart EXCEPTION this same call closed (F10's event key, from the receipt side)");
+
+  // THE STORED RECIPROCITY, BOTH ROWS (delta-round finding #8: the cell used to check only the
+  // two statuses + the net, so deleting counterpart_line_id from the enumeration -- or from the
+  // WRITE -- left it green).
+  const row1 = await exceptionRow(ex1);
+  const row2 = await exceptionRow(ex2);
+  assert.equal(row1?.status, "resolved");
+  assert.equal(row2?.status, "resolved");
+  assert.equal(row1?.resolution_disposition, "bank_corrective_line", "x40.k leg 1's stored disposition");
+  assert.equal(row2?.resolution_disposition, "bank_corrective_line", "x40.k leg 2's stored disposition -- CX2 wrote it, the caller never named it");
+  assert.equal(row1?.counterpart_line_id, stmt.lines[1].id, "x40.k leg 1 names leg 2's LINE back");
+  assert.equal(row2?.counterpart_line_id, stmt.lines[0].id, "x40.k leg 2 names leg 1's LINE back -- reciprocity is STORED, not merely asserted by the caller");
 
   // Both lines stay resolved-and-unmatched -- they STILL ride excepted(P) (the
   // term counts open OR resolved-unmatched), netting to zero by construction.
+  // The third (open, unpaired) line carries the whole -400.
   const excepted = await exceptedOf(acct.bankAccountId, "2031-07-31");
-  assert.equal(excepted, 0, "x40.k the corrective pair nets exactly zero inside excepted(P)");
+  assert.equal(excepted, -400, "x40.k the corrective pair nets exactly zero inside excepted(P); only the unpaired open line remains");
   const expected = await recomputeClosing(client, acct.bankAccountId, acct.coaCode, "2031-07-31");
   assert.equal(expected, Number((await statementRow(stmt.statementId)).closing_cents));
   const receipt = await completeRecon(sub, { client, statement: stmt.statementId });
   const recon = await reconRow(idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id"));
   assert.equal(recon.status, "complete");
   const snapshot = recon.snapshot ?? {};
-  noteLane(`x40.k snapshot keys: ${Object.keys(snapshot).join(",")} -- expecting the corrective pair enumerated CLOSED, not open`);
+
+  // THE SNAPSHOT LEGS, EXACTLY (finding #8). Removing counterpart_line_id from the enumeration
+  // must turn this cell RED -- the whole point of enumerating a pair as a closed unit is that a
+  // later reader can re-check the two legs without re-deriving anything.
+  const exRows = snapshot.exceptions ?? [];
+  assert.equal(exRows.length, 3, `x40.k the snapshot enumerates all three excepted lines (got ${JSON.stringify(exRows)})`);
+  const legOf = (lineId) => exRows.find((e) => e.line_id === lineId);
+  assert.equal(legOf(stmt.lines[0].id)?.counterpart_line_id, stmt.lines[1].id, "x40.k snapshot leg 1 carries its counterpart_line_id");
+  assert.equal(legOf(stmt.lines[1].id)?.counterpart_line_id, stmt.lines[0].id, "x40.k snapshot leg 2 carries its counterpart_line_id");
+  assert.equal(legOf(stmt.lines[2].id)?.counterpart_line_id, null, "x40.k the unpaired open leg carries NO counterpart -- the key is not decoration");
+  // 0040 FIX WAVE F7: and each leg says whether its pair actually CLOSES inside this period.
+  assert.equal(legOf(stmt.lines[0].id)?.pair_complete_in_period, true, "x40.k (F7) leg 1's counterpart sits on a statement inside this period");
+  assert.equal(legOf(stmt.lines[1].id)?.pair_complete_in_period, true, "x40.k (F7) leg 2's counterpart sits on a statement inside this period");
+  assert.equal(legOf(stmt.lines[2].id)?.pair_complete_in_period, false, "x40.k (F7) an unpaired leg is never 'pair complete'");
+  assert.equal(
+    exRows.reduce((n, e) => n + Number(e.amount_cents), 0), Number(recon.excepted_cents),
+    "x40.k the enumeration still sums to the stored term (the belt's own law, re-asserted from outside)",
+  );
+
+  // A SECOND RESOLVE OF THE SAME EXCEPTION IS REFUSED BY NAME (finding #8): idempotency here is
+  // op-key dedupe, never a silent re-write of a closed pair.
+  const twice = await caught(() => resolveException(owner, {
+    client, exception: ex1, disposition: "bank_corrective_line", note: "x40.k resolving a closed leg a second time",
+    counterpartLine: stmt.lines[1].id, opKey: opk("x40-k-twice"),
+  }));
+  assertReason(twice, null, "already_resolved", "x40.k a second resolve of an already-resolved exception is refused BY NAME");
+
+  // A COMPETING CLAIM ON A PAIRED COUNTERPART (finding #8). The third line is genuinely
+  // offsetting (-400 against +400) and on the same account, so it clears every arithmetic gate
+  // -- and is still refused, because leg 2's governing exception is a corrective resolution that
+  // names leg 1 back, not this claimant. Without this refusal, N lines could each claim to be
+  // closed against the same small reversal (the money lens' three-way chain).
+  const competing = await caught(() => resolveException(owner, {
+    client, exception: ex3, disposition: "bank_corrective_line", note: "x40.k a third line claiming the already-paired reversal",
+    counterpartLine: stmt.lines[1].id, opKey: opk("x40-k-compete"),
+  }));
+  assertReason(competing, null, "counterpart_not_reciprocal", "x40.k a competing claim on an already-paired counterpart is refused -- the pair does not close back to the claimant");
+  assert.equal((await exceptionRow(ex3))?.status, "open", "x40.k the refused claimant's own exception is untouched");
+  noteLane(`x40.k snapshot keys: ${Object.keys(snapshot).join(",")}; pair legs asserted CLOSED + reciprocal, competing claim refused`);
+});
+
+// ---------------------------------------------------------------------------
+// x40.k-R -- THE CORRECTIVE-PAIR REFUSAL LADDER, RED-PROOF (0040 FIX WAVE F3, the
+// delta round). resolve_bank_line_exception's `bank_corrective_line` arm is the
+// one door in C-c whose whole content is arithmetic + reciprocity, and until this
+// cell NOT ONE of its four refusals had a test: counterpart_required,
+// counterpart_not_offsetting, corrective_pair_unbalanced and the
+// uq_ble_counterpart_in_use translation could each have been deleted with every
+// battery still green. Each arm below is driven to its OWN token, and the
+// unbalanced arm additionally asserts the errdetail's numbers (a refusal that
+// names the wrong sum is a refusal a human cannot act on).
+// ---------------------------------------------------------------------------
+test("x40.k-R the corrective-pair refusals: counterpart_required (null), counterpart_not_offsetting (cross-account), corrective_pair_unbalanced (with its numbers), and counterpart_already_paired (the second claim on one counterpart)", async (t) => {
+  if (skipHere(t)) return;
+  const owner = world.users.alice;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const acct = await freshAccount(sub, client, "kr1");
+  const other = await freshAccount(sub, client, "kr2");
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: acct.bankAccountId, periodStart: "2031-09-01", periodEnd: "2031-09-30", opening: 0,
+    specs: [
+      { amountCents: -400, entryDate: "2031-09-03", description: "kr the erroneous charge" },
+      { amountCents: 400, entryDate: "2031-09-04", description: "kr the bank's own reversal" },
+      { amountCents: -400, entryDate: "2031-09-05", description: "kr a second erroneous charge" },
+      { amountCents: 350, entryDate: "2031-09-06", description: "kr a NEAR-offsetting credit" },
+    ], keepPeriod: true,
+  });
+  // A line on a DIFFERENT bank account, exactly offsetting the first -- the cross-account probe.
+  const stmtOther = await enterStatement(sub, {
+    client, bankAccount: other.bankAccountId, periodStart: "2031-09-01", periodEnd: "2031-09-30", opening: 0,
+    specs: [{ amountCents: 400, entryDate: "2031-09-07", description: "kr an offsetting credit on ANOTHER account" }],
+    keepPeriod: true,
+  });
+  const exA = idOf(await exceptLine(owner, { client, line: stmt.lines[0].id, kind: "bank_error", reason: "x40.k-R leg A" }), "exception_id", "id");
+  const exB = idOf(await exceptLine(owner, { client, line: stmt.lines[1].id, kind: "bank_error", reason: "x40.k-R leg B" }), "exception_id", "id");
+  const exC = idOf(await exceptLine(owner, { client, line: stmt.lines[2].id, kind: "bank_error", reason: "x40.k-R leg C" }), "exception_id", "id");
+  await exceptLine(owner, { client, line: stmt.lines[3].id, kind: "bank_error", reason: "x40.k-R the near-offsetting credit" });
+  await exceptLine(owner, { client, line: stmtOther.lines[0].id, kind: "bank_error", reason: "x40.k-R the off-account credit" });
+
+  // (1) counterpart_required -- the disposition without its counterpart at all.
+  const nullCp = await caught(() => resolveException(owner, {
+    client, exception: exA, disposition: "bank_corrective_line", note: "x40.k-R no counterpart named",
+    opKey: opk("x40-kr-null"),
+  }));
+  assertReason(nullCp, null, "counterpart_required", "x40.k-R a corrective resolution naming NO counterpart is refused");
+  // ...and a line cannot be its own counterpart (the same token, the degenerate pair).
+  const selfCp = await caught(() => resolveException(owner, {
+    client, exception: exA, disposition: "bank_corrective_line", note: "x40.k-R naming itself",
+    counterpartLine: stmt.lines[0].id, opKey: opk("x40-kr-self"),
+  }));
+  assertReason(selfCp, null, "counterpart_required", "x40.k-R a line cannot be its own corrective counterpart");
+
+  // (2) counterpart_not_offsetting -- exactly offsetting, but on ANOTHER bank account.
+  // excepted(P) is account-scoped, so a cross-account "pair" puts exactly ONE leg in the term
+  // and the design's "nets to zero by construction" is simply false.
+  const crossAcct = await caught(() => resolveException(owner, {
+    client, exception: exA, disposition: "bank_corrective_line", note: "x40.k-R an off-account counterpart",
+    counterpartLine: stmtOther.lines[0].id, opKey: opk("x40-kr-cross"),
+  }));
+  assertReason(crossAcct, null, "counterpart_not_offsetting", "x40.k-R a corrective pair must close INSIDE one bank account");
+
+  // (3) corrective_pair_unbalanced -- same account, both excepted, -400 against +350. The
+  // errdetail must carry BOTH amounts and their sum, or the human cannot see which side is
+  // wrong.
+  const unbalanced = await caught(() => resolveException(owner, {
+    client, exception: exA, disposition: "bank_corrective_line", note: "x40.k-R a near-offsetting counterpart",
+    counterpartLine: stmt.lines[3].id, opKey: opk("x40-kr-unbal"),
+  }));
+  assertReason(unbalanced, null, "corrective_pair_unbalanced", "x40.k-R -400 against +350 does not net to zero");
+  const detail = JSON.parse(unbalanced.detail ?? "{}");
+  assert.equal(Number(detail.line_amount_cents), -400, "x40.k-R the refusal names THIS line's amount");
+  assert.equal(Number(detail.counterpart_amount_cents), 350, "x40.k-R the refusal names the counterpart's amount");
+  assert.equal(Number(detail.sum_cents), -50, "x40.k-R the refusal names the residual the human must explain");
+
+  // (4) counterpart_already_paired -- the uq_ble_counterpart_in_use translation. Leg A closes
+  // against leg B; leg B is then excepted AFRESH (lawful -- the unique is scoped to OPEN rows),
+  // so a third line's claim reaches the WRITE with a genuinely open counterpart and is stopped
+  // by the index alone. This is the arm that keeps N lines from all naming one small reversal.
+  await resolveException(owner, {
+    client, exception: exA, disposition: "bank_corrective_line", note: "x40.k-R the real pair",
+    counterpartLine: stmt.lines[1].id, opKey: opk("x40-kr-pair"),
+  });
+  assert.equal((await exceptionRow(exB))?.counterpart_line_id, stmt.lines[0].id, "x40.k-R mandatory setup: the real pair is stored reciprocally");
+  await exceptLine(owner, { client, line: stmt.lines[1].id, kind: "disputed", reason: "x40.k-R leg B is disputed again, on a fresh open exception", opKey: opk("x40-kr-reexcept") });
+  const claimed = await caught(() => resolveException(owner, {
+    client, exception: exC, disposition: "bank_corrective_line", note: "x40.k-R a second claim on the same counterpart",
+    counterpartLine: stmt.lines[1].id, opKey: opk("x40-kr-claim"),
+  }));
+  assertReason(claimed, null, "counterpart_already_paired", "x40.k-R (F6) a counterpart already spoken for by another pair is refused under its OWN token -- not the misleading counterpart_not_reciprocal");
+  assert.equal((await exceptionRow(exC))?.status, "open", "x40.k-R the refused claimant's exception is untouched");
+});
+
+// ---------------------------------------------------------------------------
+// x40.k-P -- pair_complete_in_period, THE DISCRIMINATING HALF (0040 FIX WAVE F7,
+// the delta round). A corrective pair only "nets to zero by construction" inside
+// a period when BOTH legs are inside it. resolve_bank_line_exception demands the
+// same bank account and an exact offset -- it does NOT demand the same statement,
+// and it should not: the bank's own correction routinely lands the following
+// month. When it does, exactly ONE leg rides excepted(P) here and the other
+// arrives next period, and the enumeration must say so -- otherwise a reader sees
+// a counterpart_line_id and reasonably concludes the pair closed.
+// ---------------------------------------------------------------------------
+test("x40.k-P a corrective pair whose counterpart sits on a LATER statement enumerates pair_complete_in_period=false, and the single leg genuinely rides excepted(P)", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const owner = world.users.alice;
+  const client = world.clients.A1;
+  const acct = await freshAccount(sub, client, "kp1");
+  const stmtJul = await enterStatement(sub, {
+    client, bankAccount: acct.bankAccountId, periodStart: "2036-07-01", periodEnd: "2036-07-31", opening: 0,
+    specs: [{ amountCents: -400, entryDate: "2036-07-20", description: "kp the erroneous charge" }], keepPeriod: true,
+  });
+  const stmtAug = await enterStatement(sub, {
+    client, bankAccount: acct.bankAccountId, periodStart: "2036-08-01", periodEnd: "2036-08-31", opening: -400,
+    specs: [{ amountCents: 400, entryDate: "2036-08-04", description: "kp the bank's own reversal, NEXT MONTH" }], keepPeriod: true,
+  });
+  const exJul = idOf(await exceptLine(owner, { client, line: stmtJul.lines[0].id, kind: "bank_error", reason: "x40.k-P the July charge" }), "exception_id", "id");
+  await exceptLine(owner, { client, line: stmtAug.lines[0].id, kind: "bank_error", reason: "x40.k-P the August reversal" });
+  await resolveException(owner, {
+    client, exception: exJul, disposition: "bank_corrective_line", note: "x40.k-P the correction landed the following month",
+    counterpartLine: stmtAug.lines[0].id, opKey: opk("x40-kp-pair"),
+  });
+
+  // July carries exactly ONE leg: -400 of genuinely open excepted money, not a closed pair.
+  assert.equal(await exceptedOf(acct.bankAccountId, "2036-07-31"), -400, "x40.k-P mandatory setup: only the July leg is inside July's excepted(P)");
+  const expected = await recomputeClosing(client, acct.bankAccountId, acct.coaCode, "2036-07-31");
+  assert.equal(expected, Number((await statementRow(stmtJul.statementId)).closing_cents), "x40.k-P mandatory setup: July still ties on the single leg");
+  const receipt = await completeRecon(sub, { client, statement: stmtJul.statementId, opKey: opk("x40-kp-complete") });
+  const recon = await reconRow(idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id"));
+  const legs = recon.snapshot?.exceptions ?? [];
+  assert.equal(legs.length, 1, `x40.k-P July enumerates one leg only (got ${JSON.stringify(legs)})`);
+  assert.equal(legs[0].counterpart_line_id, stmtAug.lines[0].id, "x40.k-P the leg still names its counterpart -- the pair is real");
+  assert.equal(legs[0].pair_complete_in_period, false, "x40.k-P (F7) ...and says plainly that the pair does NOT close inside this period -- a counterpart_line_id alone would read as 'settled, nets to zero', which is false here by exactly RM4.00");
+  assert.equal(Number(recon.excepted_cents), -400, "x40.k-P the certified excepted term is the single leg, not zero");
 });
 
 // ---------------------------------------------------------------------------
@@ -1079,7 +1270,7 @@ test("x40.k a corrective-pair resolution nets zero and is enumerated as a closed
 // acknowledged BY ID (part2 finding 8/20 -- the plug the design exists to
 // challenge).
 // ---------------------------------------------------------------------------
-test("x40.l an outstanding side older than 60 days refuses recon_outstanding_stale; acknowledging it by id completes", async (t) => {
+test("x40.l an outstanding side older than 60 days refuses recon_outstanding_stale; the PREVIEW still says can_complete with the blocker NAMED beside its id list, and acknowledging it by id completes", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
@@ -1096,8 +1287,31 @@ test("x40.l an outstanding side older than 60 days refuses recon_outstanding_sta
     "select e.id from clara.journal_entries e join clara.journal_lines l on l.entry_id=e.id where l.client_id=$1 and l.account_code=$2 and e.status='approved' order by e.posting_date limit 1",
     [client, acct.coaCode],
   );
-  const receipt = await completeRecon(sub, { client, statement: stmt.statementId, ackOutstanding: [staleEntry.rows[0].id] });
+
+  // 0040 FIX WAVE F1 [the delta round's MAJOR 3] -- THE PREVIEW'S VERDICT, END TO END FROM THE
+  // RPC SURFACE. recon_outstanding_stale is the ONE blocker whose remedy is a caller ARGUMENT,
+  // and this read carries no acknowledgement set of its own -- so it must NAME the blocker and
+  // hand back the exact ids the verb accepts, while still saying can_complete=true. The first
+  // cut folded it into the hard gate, which made a fully-tied month carrying one 61-day item
+  // permanently un-completable through the pane: the pane refuses to send when the server says
+  // can_complete=false, so the human could never check the box the verb was waiting for. This is
+  // the stale-but-otherwise-clean shape, and it must read as completable-with-an-acknowledgement.
+  const preview = await getBankReconciliation(sub, { statement: stmt.statementId });
+  assert.equal(preview?.preview, true, "x40.l mandatory setup: no receipt yet, so this read is the live preview");
+  assert.ok((preview.blockers ?? []).includes("recon_outstanding_stale"), `x40.l the preview still NAMES the stale blocker (got ${JSON.stringify(preview.blockers)})`);
+  assert.deepEqual(preview.blockers, ["recon_outstanding_stale"], "x40.l mandatory setup: the month is otherwise CLEAN -- the stale challenge is the only blocker, so can_complete below is testing exactly the F1 rule");
+  assert.deepEqual(preview.stale_outstanding_ids, [staleEntry.rows[0].id], "x40.l the preview hands back the exact id the verb's p_ack_outstanding accepts");
+  assert.equal(preview.can_complete, true, "x40.l (F1) a stale-but-otherwise-clean month reads can_complete=true -- the blocker is a challenge to acknowledge, not a wall");
+
+  const receipt = await completeRecon(sub, { client, statement: stmt.statementId, ackOutstanding: preview.stale_outstanding_ids });
   assert.equal((await reconRow(idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id"))).status, "complete", "the ack-by-id path completes -- the duplicate-payment plug is CHALLENGED, not silently totalled");
+
+  // ...and a HARD blocker still vetoes. The same read on the now-complete receipt returns
+  // can_complete=false naming recon_already_complete, so F1 narrowed exactly one token and
+  // nothing else.
+  const after = await getBankReconciliation(sub, { statement: stmt.statementId });
+  assert.equal(after.can_complete, false, "x40.l a hard blocker still vetoes -- F1 excused recon_outstanding_stale ONLY");
+  assert.deepEqual(after.blockers, ["recon_already_complete"], "x40.l the completed receipt names why it is not a completable preview");
 });
 
 // ---------------------------------------------------------------------------
@@ -1469,11 +1683,26 @@ test("x40.y remap_bank_account_coa and deactivate_bank_account both refuse recon
 });
 
 // ---------------------------------------------------------------------------
-// x40.z -- settled-period refusals: BOTH unmatch_bank_match AND
-// complete_pending_match refuse recon_period_settled on a member line whose
-// statement is reconciled.
+// x40.z -- settled-period refusals, THE TWO HALVES THAT LIVE IN THE CONCURRENT
+// BATTERY: the unmatch_bank_match VERB splice, and the settled-authority BELT
+// itself with nothing disabled at all.
+//
+// RECUT AGAIN (0040 FIX WAVE F3/F13, the delta round). Two changes:
+//   * The belt's OWN refusal is now asserted here, LIVE -- a raw member INSERT
+//     onto a line inside a reconciled period, no trigger disabled anywhere,
+//     refused at COMMIT under the recon_period_settled token. That is the
+//     structural law; everything else in this family is a verb-side door in
+//     front of it, and until this assert existed the belt's live behaviour was
+//     covered only by cells that had disabled it.
+//   * The complete_pending_match half MOVED OUT, to
+//     x40-0040-upgrade.test.mjs's reset-gated isolation. It has to stage its
+//     prestate through `ALTER TABLE ... DISABLE TRIGGER`, which takes an ACCESS
+//     EXCLUSIVE lock on clara.bank_match_line_members -- a table other packages'
+//     suites write concurrently against the same shared CI database. A lock that
+//     coarse does not belong in the concurrent battery, and the drill file gives
+//     it a throwaway database of its own. See x40.z-CPM there.
 // ---------------------------------------------------------------------------
-test("x40.z unmatch_bank_match AND complete_pending_match both refuse recon_period_settled on a reconciled member line", async (t) => {
+test("x40.z unmatch_bank_match refuses recon_period_settled on a reconciled member line, and the settled-authority BELT refuses a raw member insert onto one with nothing disabled", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
@@ -1486,90 +1715,54 @@ test("x40.z unmatch_bank_match AND complete_pending_match both refuse recon_peri
   const unmatchDenied = await caught(() => unmatchBankMatch(sub, { client, match: matchIdOf(matchReceipt), reason: "x40.z attempt after reconciliation" }));
   assertReason(unmatchDenied, null, "recon_period_settled", "x40.z unmatch_bank_match refuses on a reconciled member");
 
-  // The pending-arm sibling. RECUT (fix-wave x40.z, Codex CX10): the ORIGINAL cut computed
-  // `pendingDenied` and only noteLane'd it -- the promised second refusal (this test's OWN
-  // title: "AND complete_pending_match both refuse recon_period_settled") was never asserted.
+  // ---------------------------------------------------------------------------
+  // THE BELT ITSELF, LIVE (0040 FIX WAVE F3, the delta round). Every other cell in this family
+  // exercises a VERB's spliced guard; the structural law is the DEFERRED belt behind them, and
+  // the only honest way to reach it is a raw member INSERT that no verb would ever emit. NOTHING
+  // is disabled here -- the belt is exactly as CI ships it -- so if the belt's own arm were
+  // deleted, weakened back to statement scope, or given a wider exception carve-out, this commit
+  // would SUCCEED and the cell turns red.
   //
-  // WHY NO LAWFUL SEQUENCE OF AUDITED VERBS CAN REACH IT (fix-wave-current, Cluster A fully
-  // landed -- A1/A4/A5/A6 all present in 0040 as read at fix time). A period can NEVER complete
-  // while ANY of its own lines carries a PENDING reservation (recon_line_reserved, checked
-  // before the chain law -- x40.t), and the chain law then refuses recon_prior_missing on every
-  // LATER period on the SAME account too (x40.r) -- so "the pending line's own statement, or
-  // anything after it on the same account, reaches 'complete'" is structurally unreachable while
-  // the reservation stays pending. Voiding the pending line's own statement to free it up is
-  // ALSO closed: void_bank_statement refuses while any line rides a pending OR live match
-  // (0038:2258-2266). And attaching a FRESH reservation to an already-settled line (the
-  // corrective-pair door this cell tried before A4 landed) is closed too: A4 narrowed the belt's
-  // member-INSERT carve-out to (status='resolved' AND disposition IN ('matched_booking',
-  // 'written_off_adjustment')) ONLY (0040 FIX WAVE A4) -- and by A1's OWN narrowed completion
-  // precondition, a line resolved matched_booking/written_off_adjustment can only be settled
-  // while STILL live-matched (never unmatched-and-settled, which is exactly what A1 closed) --
-  // so a line carrying that exact exemption can never simultaneously be free for a NEW
-  // reservation on an account with an active covering complete recon. Every reachable path
-  // circles back to the same wall.
-  //
-  // So this half stages the belt's PRESTATE directly (the x40.q precedent: "0038 guards this row
-  // TWICE ... both have to stand down for the length of the forged [state] ... both are
-  // re-enabled immediately" -- testing a defense-in-depth check that the audited verbs
-  // themselves now provably never reach). t_bmlm_settled_authority (0040:2609-2612) is disabled
-  // for exactly the length of ONE staging insert -- a pending bank_matches/bank_match_line_
-  // members pair on a line whose statement is ALREADY complete -- then re-enabled immediately,
-  // so complete_pending_match's OWN belt (and its own S4.3-spliced guard, which fires first) are
-  // exercised completely normally.
+  // The forged shape (honestly labelled, the x40.q precedent): a pending bank_matches +
+  // bank_match_line_members pair on a line whose own statement already carries a complete
+  // reconciliation. A real (unapproved) draft entry backs the reservation so the 0038 group
+  // belts are all satisfied and recon_period_settled is the ONLY law left to break.
   const acct2 = await freshAccount(sub, client, "z2");
   const stmtC = await enterStatement(sub, { client, bankAccount: acct2.bankAccountId, periodStart: "2032-11-01", periodEnd: "2032-11-30", opening: 0, specs: [{ amountCents: -900, entryDate: "2032-11-11" }], keepPeriod: true });
-  await exceptLine(sub, { client, line: stmtC.lines[0].id, kind: "bank_error", reason: "x40.z the line this cell later stages a forced reservation onto" });
+  await exceptLine(sub, { client, line: stmtC.lines[0].id, kind: "bank_error", reason: "x40.z the line this cell forges a reservation onto" });
   const settledReceipt = await completeRecon(sub, { client, statement: stmtC.statementId });
   assert.equal((await reconRow(idOf(settledReceipt, "reconciliation_id", "reconciliation_id", "recon_id", "id"))).status, "complete", "x40.z mandatory setup: the open-excepted line settles the period cleanly");
-  assert.equal((await lineGroupStatus(stmtC.lines[0].id)).length, 0, "x40.z mandatory setup: the line carries no live/pending member of its own -- free for the staged insert");
+  assert.equal((await lineGroupStatus(stmtC.lines[0].id)).length, 0, "x40.z mandatory setup: the line carries no live/pending member of its own -- free for the forged insert");
 
-  const stagedMatch = randomUUID();
-  // A real (unapproved) draft entry to back the reservation -- complete_pending_match's own
-  // preflight ("a reservation with nothing to complete would hold the line forever") refuses a
-  // NULL draft_entry_id before it ever reaches the recon_period_settled check this cell is
-  // staging for, and uq_bank_matches_draft_entry (one draft backs at most one reservation) is
-  // satisfied by a fresh, never-otherwise-used draft.
-  const stagedDraft = await draftEntryV3(sub, {
-    client, resolution: await manualRes(sub, client), memo: "x40.z staged pending reservation's draft",
+  const forgedMatch = randomUUID();
+  const forgedDraft = await draftEntryV3(sub, {
+    client, resolution: await manualRes(sub, client), memo: "x40.z forged pending reservation's draft",
     postingDate: "2032-11-11",
     lines: [
-      { account_code: EXPN, debit_cents: 900, credit_cents: 0, description: "staged dr" },
-      { account_code: acct2.coaCode, debit_cents: 0, credit_cents: 900, description: "staged cr" },
+      { account_code: EXPN, debit_cents: 900, credit_cents: 0, description: "forged dr" },
+      { account_code: acct2.coaCode, debit_cents: 0, credit_cents: 900, description: "forged cr" },
     ],
-    opKey: opk("x40-z-stageddraft"),
+    opKey: opk("x40-z-forgeddraft"),
   });
-  // MEASURED THIS SESSION (rig verification), two fixes over the original cut:
-  // (1) withActor only wraps an EXPLICIT begin/commit when transaction:true -- without it,
-  //     each c.query() autocommits as its OWN statement, so the bank_matches INSERT alone
-  //     trips a DIFFERENT (deferred, but atomic-per-statement) group-tie belt ("bank match %
-  //     holds no statement line", match_group_empty, 0038:3280-3283) before the member row
-  //     ever lands. transaction:true makes both inserts ONE atomic commit.
-  // (2) Postgres refuses `ALTER TABLE ... ENABLE TRIGGER` while the SAME transaction still
-  //     carries a PENDING deferred trigger event for that table ("cannot ALTER TABLE ...
-  //     because it has pending trigger events", 55006) -- the group-tie belt's OWN deferred
-  //     event (queued by the member-row INSERT, and NOT the trigger being disabled) is still
-  //     pending until commit. So the disable/insert/insert/COMMIT happens in ONE transaction,
-  //     and the re-enable happens as a SEPARATE, later, plain statement -- exactly the x40.q
-  //     precedent's own two-step shape ("both are re-enabled immediately", read literally as
-  //     "immediately after commit", not "inside the same transaction").
-  await withActor({ transaction: true }, async (c) => {
-    await c.query("alter table clara.bank_match_line_members disable trigger t_bmlm_settled_authority");
+  // withActor only wraps an EXPLICIT begin/commit when transaction:true -- without it each
+  // c.query() autocommits as its OWN statement, so the bank_matches INSERT alone trips the
+  // 0038 group-tie belt ("bank match % holds no statement line", match_group_empty) before the
+  // member row ever lands. transaction:true makes both inserts ONE atomic commit, which is also
+  // what puts the settled-authority belt's deferred event at COMMIT where it belongs.
+  const beltDenied = await caught(() => withActor({ transaction: true }, async (c) => {
     await c.query(
       `insert into clara.bank_matches(id, firm_id, client_id, bank_account_id, status, origin, draft_entry_id, created_by)
        values ($1, (select firm_id from clara.clients where id=$2), $2, $3, 'pending', 'human', $5, $4)`,
-      [stagedMatch, client, acct2.bankAccountId, sub, stagedDraft.entry_id],
+      [forgedMatch, client, acct2.bankAccountId, sub, forgedDraft.entry_id],
     );
     await c.query(
       `insert into clara.bank_match_line_members(firm_id, client_id, match_id, line_id, bank_account_id, amount_cents, group_status, created_by)
        values ((select firm_id from clara.clients where id=$1), $1, $2, $3, $4, -900, 'pending', $5)`,
-      [client, stagedMatch, stmtC.lines[0].id, acct2.bankAccountId, sub],
+      [client, forgedMatch, stmtC.lines[0].id, acct2.bankAccountId, sub],
     );
-  });
-  await withActor({}, (c) => c.query("alter table clara.bank_match_line_members enable trigger t_bmlm_settled_authority"));
-  assert.equal((await lineGroupStatus(stmtC.lines[0].id))[0], "pending", "x40.z mandatory setup: the staged reservation landed pending");
-
-  const pendingDenied = await caught(() => completePendingMatch(sub, { client, match: stagedMatch }));
-  assertReason(pendingDenied, null, "recon_period_settled", "x40.z complete_pending_match ALSO refuses recon_period_settled -- flipping this reservation live would move a term the receipt above already certified");
+  }));
+  assertReason(beltDenied, "CLR10", "recon_period_settled", "x40.z the settled-authority BELT refuses a raw member insert onto a reconciled line at COMMIT, with nothing disabled -- the structural law behind every verb splice in this family");
+  assert.equal((await lineGroupStatus(stmtC.lines[0].id)).length, 0, "x40.z the refused transaction left NOTHING behind -- the belt aborts the whole commit, not just its own row");
 });
 
 // ---------------------------------------------------------------------------
@@ -1608,6 +1801,182 @@ test("x40.z-A6 a same-transaction match_bank_line + complete_bank_reconciliation
   const recon = await reconRow(idOf(result, "reconciliation_id", "reconciliation_id", "recon_id", "id"));
   assert.equal(recon?.status, "complete", "the receipt is a genuine complete reconciliation, not a partial/refused state");
   assert.equal((await lineGroupStatus(stmt.lines[0].id))[0], "live", "the line the same transaction just matched stayed live -- the belt never unwound it");
+});
+
+// ---------------------------------------------------------------------------
+// x40.z-A6v2 -- THE STALLED-TRANSACTION RED-PROOF (0040 FIX WAVE A6-v2, the delta
+// round's BLOCKER 1). A6's first cut identified "a receipt born in THIS
+// transaction" by TIMESTAMP -- `br.completed_at < transaction_timestamp()` --
+// which answers a different question: "was it completed before my transaction
+// STARTED?". A transaction that began an hour ago and idled therefore treated
+// every receipt certified in the meantime as not-yet-settled, and the structural
+// backstop stopped backstopping precisely when two sessions overlapped.
+//
+// THE SCHEDULE, forced by hand (the two-session idiom: T1 is an explicit
+// begin/commit on one pooled connection; T2 is an ordinary autocommitting call
+// on ANOTHER, driven from inside T1's open window):
+//   T1 BEGIN; select 1   -- transaction_timestamp() is now fixed, and EARLY
+//   T2                    -- certifies the period (its receipt is NEWER than T1's start)
+//   T1 <the act>; COMMIT  -- the deferred belt re-queries here
+//
+// HALF (a), THE DISCRIMINATOR: the act is a raw member INSERT onto a line inside
+// the just-certified period, with NOTHING disabled -- the same forged shape
+// x40.z uses, and the only shape that reaches the belt without a verb's own
+// splice answering first. Under the timestamp form this commit SUCCEEDS (the
+// belt cannot see T2's receipt at all) and a certified line silently gains a
+// membership; under the GUC form it is refused by name.
+//
+// HALF (b), THE DELTA ROUND'S OWN ILLUSTRATION -- AND THE SECOND HOLE IT
+// UNCOVERED, NOW CLOSED (0040 FIX WAVE A4-v2, adjudicated).
+// The scenario: T1 stalls, T2 certifies, T1 then resolves the line
+// matched_booking and matches it in one transaction. That is the shape of the
+// resolved-then-booked door FIX WAVE A4 ratified (design 4.2) -- and A4's own
+// neutrality claim ("arithmetically neutral for every completed receipt") holds
+// only when the resolution happens AFTER certification, because excepted(P) is
+// cutoff-gated: a resolution stamped after the cutoff still reads OPEN to the
+// receipt's own re-derivation, so nothing moves.
+// A STALLED transaction breaks exactly that. resolve_bank_line_exception stamps
+// resolved_at = now() = the TRANSACTION's start, and bank_matches.created_at
+// likewise -- so a T1 that began before certification writes rows stamped BEFORE
+// the receipt's cutoff, and the receipt's own as-of re-derivation SEES them:
+// excepted(P) collapses, outstanding follows, and a certified receipt stops
+// reproducing under its own cutoff. No money moves and closing still reproduces,
+// but a receipt that no longer verifies is a receipt that has stopped being one.
+// A4-v2 narrows the door: the carve-out admits only a resolution whose
+// resolved_at POST-DATES every covering receipt's completed_at (the covering set
+// is the very one the shared settled predicate counts). So this half is now a
+// REFUSAL, and the receipt is left strict-clean -- which is what the two asserts
+// at the end measure.
+// ---------------------------------------------------------------------------
+test("x40.z-A6v2 a STALLED transaction cannot move a period certified after it began: the belt identifies its own receipt by the writer's transaction-local declaration, not by a timestamp", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const owner = world.users.alice;
+  const client = world.clients.A1;
+
+  // ---- HALF (a): the discriminating act -------------------------------------
+  const acctA = await freshAccount(sub, client, "a6a");
+  const stmtA = await enterStatement(sub, {
+    client, bankAccount: acctA.bankAccountId, periodStart: "2035-03-01", periodEnd: "2035-03-31", opening: 0,
+    specs: [{ amountCents: 1000, entryDate: "2035-03-09", description: "a6v2 the disputed credit" }], keepPeriod: true,
+  });
+  await exceptLine(owner, { client, line: stmtA.lines[0].id, kind: "disputed", reason: "x40.z-A6v2 an open dispute settles the period" });
+  const draftA = await draftEntryV3(sub, {
+    client, resolution: await manualRes(sub, client), memo: "x40.z-A6v2 the forged reservation's draft",
+    postingDate: "2035-03-09",
+    lines: [
+      { account_code: acctA.coaCode, debit_cents: 1000, credit_cents: 0, description: "a6v2 dr" },
+      { account_code: REVN, debit_cents: 0, credit_cents: 1000, description: "a6v2 cr" },
+    ],
+    opKey: opk("x40-a6v2-draft"),
+  });
+
+  const forgedMatch = randomUUID();
+  let certifiedA = null;
+  let clock = null;
+  const denied = await caught(() => withActor({ transaction: true }, async (c) => {
+    // T1 STARTS AND STALLS. The bare select is load-bearing: transaction_timestamp() is fixed by
+    // the first command of the transaction, not by BEGIN, so this is what makes T1 genuinely
+    // "older" than the receipt T2 is about to write.
+    await c.query("select 1");
+    // T2, on a DIFFERENT pooled connection, autocommitting: the period is certified NOW, while
+    // T1 sits open.
+    certifiedA = await completeRecon(sub, { client, statement: stmtA.statementId, opKey: opk("x40-a6v2-complete") });
+    // THE DISCRIMINATOR, MEASURED IN T1'S OWN SESSION: what the OLD predicate would have said.
+    // `br.completed_at < transaction_timestamp()` is evaluated in the writing transaction, so
+    // reading both clocks HERE is reading exactly the expression the belt used to run.
+    clock = (await c.query(
+      `select transaction_timestamp() as t1,
+              (select br.completed_at from clara.bank_reconciliations br where br.id = $1) as cutoff`,
+      [idOf(certifiedA, "reconciliation_id", "reconciliation_id", "recon_id", "id"),
+      ])).rows[0];
+    // T1 RESUMES and forges a membership onto the freshly-certified line.
+    await c.query(
+      `insert into clara.bank_matches(id, firm_id, client_id, bank_account_id, status, origin, draft_entry_id, created_by)
+       values ($1, (select firm_id from clara.clients where id=$2), $2, $3, 'pending', 'human', $5, $4)`,
+      [forgedMatch, client, acctA.bankAccountId, sub, draftA.entry_id],
+    );
+    await c.query(
+      `insert into clara.bank_match_line_members(firm_id, client_id, match_id, line_id, bank_account_id, amount_cents, group_status, created_by)
+       values ((select firm_id from clara.clients where id=$1), $1, $2, $3, $4, 1000, 'pending', $5)`,
+      [client, forgedMatch, stmtA.lines[0].id, acctA.bankAccountId, sub],
+    );
+  }));
+  assert.ok(certifiedA, "x40.z-A6v2 mandatory setup: T2 really did certify the period while T1 was open");
+  // THE DISCRIMINATION, STATED AS A FACT ABOUT THE TWO CLOCKS: the receipt was completed AFTER
+  // T1's transaction_timestamp, so `br.completed_at < transaction_timestamp()` is FALSE for it
+  // and the old predicate would have dropped it out of the settled set entirely. The refusal
+  // asserted next therefore cannot be produced by the timestamp form -- only by an identity that
+  // asks "is this MY receipt?" instead of "was this written before I started?".
+  assert.ok(
+    new Date(clock.cutoff) > new Date(clock.t1),
+    `x40.z-A6v2 mandatory discrimination: the receipt's cutoff (${clock.cutoff}) must be strictly AFTER T1's transaction_timestamp (${clock.t1}) -- otherwise the schedule is not the stalled-transaction class and proves nothing about A6-v2`,
+  );
+  assertReason(denied, "CLR10", "recon_period_settled", "x40.z-A6v2 (A6-v2): the stalled transaction's membership is REFUSED -- under the old timestamp identity this receipt was invisible to the belt and the commit succeeded, silently giving a certified line a member");
+  assert.equal((await lineGroupStatus(stmtA.lines[0].id)).length, 0, "x40.z-A6v2 nothing landed on the certified line");
+
+  // ---- HALF (b): the ratified resolved-then-booked door, same schedule -------
+  const acctB = await freshAccount(sub, client, "a6b");
+  const entryB = await plainEntry(sub, { client, debit: acctB.coaCode, credit: REVN, cents: 1000, postingDate: "2035-04-08", memo: "x40.z-A6v2 the booking that turns up later" });
+  const stmtB = await enterStatement(sub, {
+    client, bankAccount: acctB.bankAccountId, periodStart: "2035-04-01", periodEnd: "2035-04-30", opening: 0,
+    specs: [{ amountCents: 1000, entryDate: "2035-04-09", description: "a6v2b the disputed credit" }], keepPeriod: true,
+  });
+  const exB = idOf(await exceptLine(owner, { client, line: stmtB.lines[0].id, kind: "disputed", reason: "x40.z-A6v2 open at certification, booked afterwards" }), "exception_id", "id");
+  // mandatory setup: the unmatched entry is neutral in the identity (it moves gl' and capacity'
+  // equally), so the month ties on the open exception alone.
+  const expectedB = await recomputeClosing(client, acctB.bankAccountId, acctB.coaCode, "2035-04-30");
+  assert.equal(expectedB, Number((await statementRow(stmtB.statementId)).closing_cents), "x40.z-A6v2 mandatory setup: April ties before certification");
+
+  let certifiedB = null;
+  const stalledDenied = await caught(() => withActor({ role: ROLES.authenticated, jwtSub: owner, transaction: true }, async (c) => {
+    await c.query("select 1"); // T1 starts and stalls
+    certifiedB = await completeRecon(sub, { client, statement: stmtB.statementId, opKey: opk("x40-a6v2b-complete") });
+    // Both of these SUCCEED as statements -- the belt is deferred, so the law is answered at
+    // COMMIT, which is the only place the whole shape (resolution + membership + covering
+    // receipt) is visible at once.
+    await c.query(
+      "select clara.resolve_bank_line_exception(p_exception => $1, p_disposition => $2, p_note => $3, p_op_key => $4) as r",
+      [exB, "matched_booking", "x40.z-A6v2 the entry was simply late in the books", opk("x40-a6v2b-resolve")],
+    );
+    await c.query(
+      "select clara.match_bank_line(p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb, p_adjustments => null, p_ack_period_exceptions => false, p_op_key => $4) as r",
+      [client, JSON.stringify([stmtB.lines[0].id]), JSON.stringify([{ entry_id: entryB, matched_cents: 1000 }]), opk("x40-a6v2b-match")],
+    );
+  }));
+  const reconB = idOf(certifiedB, "reconciliation_id", "reconciliation_id", "recon_id", "id");
+  assert.ok(certifiedB, "x40.z-A6v2 (b) mandatory setup: T2 really did certify April while T1 was open");
+  assertReason(stalledDenied, "CLR10", "recon_period_settled", "x40.z-A6v2 (b) (A4-v2): the resolved-then-booked door REFUSES a STALLED transaction -- its resolved_at is stamped at the transaction's start, BEFORE the covering receipt's cutoff, so the receipt's own re-derivation would have seen it");
+
+  // NOTHING LANDED, and the receipt is exactly what it was.
+  assert.equal((await lineGroupStatus(stmtB.lines[0].id)).length, 0, "x40.z-A6v2 (b): the whole stalled transaction rolled back -- no membership on the certified line");
+  assert.equal((await exceptionRow(exB))?.status, "open", "x40.z-A6v2 (b): ...and the exception is still open, so excepted(P) is untouched");
+  assert.equal(Number((await reconRow(reconB)).excepted_cents), 1000, "x40.z-A6v2 (b): the stored receipt still certifies the excepted RM10.00 it was written against");
+
+  // THE STRICT CONTRACT HOLDS FOR THE CLASS. This is the point of the closure: after the refusal
+  // the receipt still reproduces byte-exact under its own cutoff, with zero strict diffs.
+  const vB = (await humanQuery(sub, "select clara.verify_bank_reconciliation($1) as v", [reconB])).rows[0].v;
+  assert.deepEqual(vB.diffs, [], `x40.z-A6v2 (b): zero strict diffs -- the stalled resolve-then-book can no longer make a certified receipt stop reproducing (got ${JSON.stringify(vB.diffs)})`);
+  assert.equal(vB.verified, true, "x40.z-A6v2 (b): the April receipt verifies under its own cutoff");
+
+  // ...AND THE LAWFUL FLOW IS UNTOUCHED. The SAME act, in a FRESH transaction started after
+  // certification, carries resolved_at > completed_at and is admitted -- A4's door is narrowed,
+  // not closed. (x40.ac-A3 asserts the same door end-to-end, including the verify half.)
+  await withActor({ role: ROLES.authenticated, jwtSub: owner, transaction: true }, async (c) => {
+    await c.query(
+      "select clara.resolve_bank_line_exception(p_exception => $1, p_disposition => $2, p_note => $3, p_op_key => $4) as r",
+      [exB, "matched_booking", "x40.z-A6v2 the same act, in a transaction that began AFTER certification", opk("x40-a6v2b-resolve2")],
+    );
+    await c.query(
+      "select clara.match_bank_line(p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb, p_adjustments => null, p_ack_period_exceptions => false, p_op_key => $4) as r",
+      [client, JSON.stringify([stmtB.lines[0].id]), JSON.stringify([{ entry_id: entryB, matched_cents: 1000 }]), opk("x40-a6v2b-match2")],
+    );
+  });
+  assert.equal((await lineGroupStatus(stmtB.lines[0].id))[0], "live", "x40.z-A6v2 (b): the LAWFUL resolve-then-book (fresh txn, resolved_at > the covering cutoff) still passes -- A4-v2 narrows the door, it does not shut it");
+  const vB2 = (await humanQuery(sub, "select clara.verify_bank_reconciliation($1) as v", [reconB])).rows[0].v;
+  assert.deepEqual(vB2.diffs, [], `x40.z-A6v2 (b): and the receipt is STILL strict-clean after the lawful booking -- that is what "arithmetically neutral for every completed receipt" means (got ${JSON.stringify(vB2.diffs)})`);
+  const liveB = (await rootQuery("select clara._bank_recon_terms($1, now()) as t", [stmtB.statementId])).rows[0].t;
+  assert.equal(Number(liveB.excepted_cents), 0, "x40.z-A6v2 (b) mandatory discrimination: TODAY the line is matched and excepted(P) is zero -- the live view moved, so the strict-clean verify above is not a tautology");
 });
 
 // ---------------------------------------------------------------------------
@@ -1848,6 +2217,192 @@ test("x40.ac verify_bank_reconciliation reproduces the certified receipt byte-ex
   assert.equal(v.reconciliation_id, reconId, "verify_bank_reconciliation resolved the same receipt");
   assert.deepEqual(v.diffs, [], `x40.ac no named STRICT term diverged (got ${JSON.stringify(v.diffs)})`);
   assert.equal(v.verified, true, "x40.ac the certified receipt reproduces BYTE-EXACT under its own completed_at cutoff -- the back-dated approval never silently diverges it");
+});
+
+// ---------------------------------------------------------------------------
+// x40.ac-CX1v2 -- THE LAWFUL STRAGGLER, BUILT AS A REAL COMMIT-ORDER RACE
+// (0040 FIX WAVE F8-AMENDED, the delta round's BLOCKER 2).
+//
+// CX1's own rationale names this class and then the first cut's strict set
+// contradicted it. `now()` is transaction-START, so an approval whose
+// transaction began BEFORE certification and committed AFTER it carries
+// approved_at <= cutoff and is invisible to the receipt at the moment it is
+// written -- and fully visible to any later re-derivation under that same
+// cutoff. clara._bank_recon_terms puts such an unmatched entry in gl(P) AND in
+// unmatched capacity'(P) by the same signed amount, so gl' moves by X,
+// outstanding moves by X, and (gl' - outstanding) does not move at all. The old
+// strict five compared gl' and outstanding SEPARATELY and therefore reported
+// verified=false on a lawful, unmoved book. CX1-v2's strict set binds the
+// DIFFERENCE and reports the two columns individually under 'informational'.
+//
+// x40.ac (above) reaches the same end state by approving in a FRESH transaction
+// after completion -- which produces approved_at > cutoff, i.e. NOT the
+// straggler class at all, and cannot exercise this. This cell forces the real
+// schedule: T1 begins and stalls, T2 certifies, T1 approves and commits.
+// ---------------------------------------------------------------------------
+test("x40.ac-CX1v2 a lawful straggler (approval txn begun before certification, committed after) leaves verify STRICT-CLEAN while gl' and outstanding each drift by its amount -- reported as informational, never as a failure", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const acct = await freshAccount(sub, client, "cx1");
+  const entry = await plainEntry(sub, { client, debit: acct.coaCode, credit: REVN, cents: 5600, postingDate: "2035-05-08", memo: "x40.ac-CX1v2 the matched receipt" });
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: acct.bankAccountId, periodStart: "2035-05-01", periodEnd: "2035-05-31", opening: 0,
+    specs: [{ amountCents: 5600, entryDate: "2035-05-09" }], keepPeriod: true,
+  });
+  await matchBankLine(sub, { client, lines: [stmt.lines[0].id], entries: [{ entry_id: entry, matched_cents: 5600 }] });
+
+  // THE STRAGGLER, drafted (not yet approved) and posting INSIDE the period.
+  const straggler = await draftEntryV3(sub, {
+    client, resolution: await manualRes(sub, client), memo: "x40.ac-CX1v2 the stalled approval",
+    postingDate: "2035-05-10",
+    lines: [
+      { account_code: EXPN, debit_cents: 1234, credit_cents: 0, description: "straggler dr" },
+      { account_code: acct.coaCode, debit_cents: 0, credit_cents: 1234, description: "straggler cr" },
+    ],
+    opKey: opk("x40-cx1-draft"),
+  });
+
+  // THE SCHEDULE. T1 opens and stalls (fixing its transaction_timestamp, which is what
+  // approve_entry stamps as approved_at); T2 certifies on another connection; T1 then approves
+  // and commits -- approved_at <= cutoff, committed after certification.
+  let receipt = null;
+  await withActor({ role: ROLES.authenticated, jwtSub: sub, transaction: true }, async (c) => {
+    await c.query("select 1");
+    receipt = await completeRecon(sub, { client, statement: stmt.statementId, opKey: opk("x40-cx1-complete") });
+    await c.query(
+      "select clara.approve_entry(p_entry => $1, p_expected_revision => $2, p_op_key => $3) as r",
+      [straggler.entry_id, straggler.revision_token, opk("x40-cx1-approve")],
+    );
+  });
+  const reconId = idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id");
+  const stored = await reconRow(reconId);
+
+  // MANDATORY SETUP -- the straggler really is one: approved BEFORE the cutoff by its own
+  // stamp, and genuinely absent from what the receipt stored.
+  const approvedAt = (await rootQuery("select approved_at from clara.journal_entries where id=$1", [straggler.entry_id])).rows[0].approved_at;
+  assert.ok(new Date(approvedAt) <= new Date(stored.completed_at), `x40.ac-CX1v2 mandatory setup: the straggler's approved_at (${approvedAt}) is at or before the receipt's cutoff (${stored.completed_at}) -- otherwise this is x40.ac's schedule, not CX1's straggler class`);
+  assert.equal(Number(stored.gl_balance_cents), 5600, "x40.ac-CX1v2 mandatory setup: the receipt certified gl' WITHOUT the straggler");
+  assert.equal(Number(stored.outstanding_cents), 0, "x40.ac-CX1v2 mandatory setup: and outstanding at zero");
+
+  const v = (await humanQuery(sub, "select clara.verify_bank_reconciliation($1) as v", [reconId])).rows[0].v;
+  // THE STRICT HALF IS CLEAN -- this is the whole ratified claim.
+  assert.deepEqual(v.diffs, [], `x40.ac-CX1v2 the straggler moves NO strict quantity (got ${JSON.stringify(v.diffs)}) -- (gl' - outstanding) is invariant by construction`);
+  assert.equal(v.verified, true, "x40.ac-CX1v2 a lawful straggler must never make a receipt read unverified");
+  // ...AND THE PER-COLUMN DRIFT IS REPORTED, with both numbers, so the reviewer sees the stall.
+  assert.equal(v.informational?.per_column_drift_present, true, "x40.ac-CX1v2 the informational half REPORTS the drift -- silence would be indistinguishable from 'nothing happened'");
+  const drift = Object.fromEntries((v.informational?.per_column_drift ?? []).map((d) => [d.term, d]));
+  assert.equal(Number(drift.gl_balance_cents?.stored), 5600, "x40.ac-CX1v2 gl' as certified");
+  assert.equal(Number(drift.gl_balance_cents?.recomputed), 4366, "x40.ac-CX1v2 gl' as re-derived under the cutoff -- the straggler is now visible");
+  assert.equal(Number(drift.outstanding_cents?.stored), 0, "x40.ac-CX1v2 outstanding as certified");
+  assert.equal(Number(drift.outstanding_cents?.recomputed), -1234, "x40.ac-CX1v2 outstanding as re-derived -- moved by the SAME amount, which is why the difference did not move");
+  noteLane(`x40.ac-CX1v2 straggler drift: gl' 5600->4366, outstanding 0->-1234, strict diffs=${JSON.stringify(v.diffs)}, enumeration keys=${JSON.stringify(v.informational?.keys)}`);
+});
+
+// ---------------------------------------------------------------------------
+// x40.ac-A3 -- THE CARRIED EXCEPTION, RESOLVED AFTER CERTIFICATION (0040 FIX
+// WAVE F14, the delta round's coverage gap). A3 [R2c] cutoff-gated the exception
+// lateral -- "open" means resolved_at is null OR resolved_at > cutoff, and a row
+// created after the cutoff is not in the receipt's world at all -- and the ONLY
+// thing that ever exercised the gate was a same-period read. This is the full
+// A7 scenario, both halves: certify a month whose line rides an OPEN exception,
+// then resolve it matched_booking and book it (one transaction, the ratified
+// door), and demand that the certified receipt still re-derives byte-exact while
+// the live world has genuinely moved on.
+// ---------------------------------------------------------------------------
+test("x40.ac-A3 a carried exception resolved and booked AFTER certification leaves the April receipt strict-clean under its own cutoff, and the as-of enumeration still reads the exception OPEN", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const owner = world.users.alice;
+  const client = world.clients.A1;
+  const acct = await freshAccount(sub, client, "a3v");
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: acct.bankAccountId, periodStart: "2035-06-01", periodEnd: "2035-06-30", opening: 0,
+    specs: [{ amountCents: -3000, entryDate: "2035-06-12", description: "a3 an unexplained debit" }], keepPeriod: true,
+  });
+  const exId = idOf(await exceptLine(owner, { client, line: stmt.lines[0].id, kind: "disputed", reason: "x40.ac-A3 open at certification" }), "exception_id", "id");
+  const expected = await recomputeClosing(client, acct.bankAccountId, acct.coaCode, "2035-06-30");
+  assert.equal(expected, Number((await statementRow(stmt.statementId)).closing_cents), "x40.ac-A3 mandatory setup: the month ties on the open exception alone");
+  const receipt = await completeRecon(sub, { client, statement: stmt.statementId });
+  const reconId = idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id");
+  const stored = await reconRow(reconId);
+  assert.equal(Number(stored.excepted_cents), -3000, "x40.ac-A3 mandatory setup: the receipt certifies the carried exception");
+  const storedLeg = (stored.snapshot?.exceptions ?? [])[0];
+  assert.equal(storedLeg?.status, "open", "x40.ac-A3 mandatory setup: the stored enumeration records it OPEN");
+
+  // AFTER certification: the entry turns up, and the exception is resolved matched_booking +
+  // matched in ONE transaction (the resolved-then-booked door -- the belt's own carve-out).
+  const entry = await plainEntry(sub, { client, debit: EXPN, credit: acct.coaCode, cents: 3000, postingDate: "2035-06-20", memo: "x40.ac-A3 the entry turns up, well after certification" });
+  await withActor({ role: ROLES.authenticated, jwtSub: owner, transaction: true }, async (c) => {
+    await c.query(
+      "select clara.resolve_bank_line_exception(p_exception => $1, p_disposition => $2, p_note => $3, p_op_key => $4) as r",
+      [exId, "matched_booking", "x40.ac-A3 it was a genuine payment, simply late in the books", opk("x40-a3v-resolve")],
+    );
+    await c.query(
+      "select clara.match_bank_line(p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb, p_adjustments => null, p_ack_period_exceptions => false, p_op_key => $4) as r",
+      [client, JSON.stringify([stmt.lines[0].id]), JSON.stringify([{ entry_id: entry, matched_cents: -3000 }]), opk("x40-a3v-match")],
+    );
+  });
+  assert.equal((await lineGroupStatus(stmt.lines[0].id))[0], "live", "x40.ac-A3 mandatory setup: the post-certification booking landed live");
+
+  // THE LIVE WORLD MOVED -- without this the verify below proves nothing.
+  const live = (await rootQuery("select clara._bank_recon_terms($1, now()) as t", [stmt.statementId])).rows[0].t;
+  assert.equal(Number(live.excepted_cents), 0, "x40.ac-A3 mandatory discrimination: TODAY the line is matched and excepted(P) is zero");
+  assert.equal(Number(live.gl_prime_cents), -3000, "x40.ac-A3 mandatory discrimination: and the booking is in today's gl'");
+
+  // THE RECEIPT DID NOT. Every strict quantity reproduces, and the as-of enumeration still reads
+  // the exception OPEN -- resolved_at is after the cutoff, so A3's gate holds.
+  const v = (await humanQuery(sub, "select clara.verify_bank_reconciliation($1) as v", [reconId])).rows[0].v;
+  assert.deepEqual(v.diffs, [], `x40.ac-A3 the April receipt reproduces byte-exact under its own cutoff (got ${JSON.stringify(v.diffs)})`);
+  assert.equal(v.verified, true, "x40.ac-A3 verified");
+  const asOf = (await rootQuery("select clara._bank_recon_terms($1, $2::timestamptz) as t", [stmt.statementId, stored.completed_at])).rows[0].t;
+  assert.equal(Number(asOf.excepted_cents), -3000, "x40.ac-A3 (A3's gate): re-derived under the cutoff, excepted(P) still carries the line");
+  assert.equal((asOf.snapshot?.exceptions ?? [])[0]?.status, "open", "x40.ac-A3 (A3's gate): and the as-of enumeration still describes the exception as OPEN -- a resolution AFTER the cutoff is not in this receipt's world");
+  assert.equal((asOf.snapshot?.exceptions ?? [])[0]?.resolution_disposition, null, "x40.ac-A3 (A3's gate): with no disposition, because there was none at the cutoff");
+  noteLane(`x40.ac-A3 informational after the post-certification resolve: differs=${v.informational?.snapshot_enumeration_differs} keys=${JSON.stringify(v.informational?.keys)}`);
+});
+
+// ---------------------------------------------------------------------------
+// x40.ac-MIX -- THE MIXED GROUP'S ENUMERATION (0040 FIX WAVE F14; the A8/CX5
+// line-side predicate, previously asserted nowhere). A +1,000 April line matched
+// to a +600 April entry AND a +400 MAY entry is not "matched only later": its
+// true residual at April is -400, and it already appears -- correctly -- as an
+// outstanding_group_items row. The pre-A8 reading ("SOME entry member posts after
+// P.end") ALSO emitted the whole +1,000 as an outstanding_line_side, describing a
+// world that did not exist. This cell pins the corrected shape from both sides:
+// exactly one group residual of -400, and NO line side at all.
+// ---------------------------------------------------------------------------
+test("x40.ac-MIX a mixed group (one April line, an April entry and a May entry) enumerates ONLY its -400 group residual -- never a full line side", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const acct = await freshAccount(sub, client, "mix");
+  const aprEntry = await plainEntry(sub, { client, debit: acct.coaCode, credit: REVN, cents: 600, postingDate: "2035-07-06", memo: "x40.ac-MIX the April tranche" });
+  const mayEntry = await plainEntry(sub, { client, debit: acct.coaCode, credit: REVN, cents: 400, postingDate: "2035-08-06", memo: "x40.ac-MIX the May tranche" });
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: acct.bankAccountId, periodStart: "2035-07-01", periodEnd: "2035-07-31", opening: 0,
+    specs: [{ amountCents: 1000, entryDate: "2035-07-10", description: "mix one line, two tranches" }], keepPeriod: true,
+  });
+  // ackPeriodExceptions: the SECOND tranche posts after this statement's period end, which is
+  // exactly the acknowledged posting-date exception (x40.f's door) -- and it is what MAKES this
+  // a mixed group. Without the ack, match_bank_line refuses outright and the shape is
+  // unbuildable.
+  await matchBankLine(sub, {
+    client, lines: [stmt.lines[0].id],
+    entries: [{ entry_id: aprEntry, matched_cents: 600 }, { entry_id: mayEntry, matched_cents: 400 }],
+    ackPeriodExceptions: true,
+  });
+  const expected = await recomputeClosing(client, acct.bankAccountId, acct.coaCode, "2035-07-31");
+  assert.equal(expected, Number((await statementRow(stmt.statementId)).closing_cents), "x40.ac-MIX mandatory setup: July ties (gl' 600, uncleared -400)");
+
+  const receipt = await completeRecon(sub, { client, statement: stmt.statementId });
+  const recon = await reconRow(idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id"));
+  const snap = recon.snapshot ?? {};
+  assert.equal(Number(recon.outstanding_cents), -400, "x40.ac-MIX the stored term is the RESIDUAL, not the line");
+  assert.equal((snap.outstanding_group_items ?? []).length, 1, `x40.ac-MIX exactly one group residual (got ${JSON.stringify(snap.outstanding_group_items)})`);
+  assert.equal(Number((snap.outstanding_group_items ?? [])[0]?.uncleared_cents), -400, "x40.ac-MIX and it is -400 -- the May tranche still to clear");
+  assert.deepEqual(snap.outstanding_line_sides ?? [], [], "x40.ac-MIX (A8/CX5): NO line side -- a group with an in-period entry member is not 'matched only later', and emitting the whole +1000 beside the -400 residual would describe a world that does not exist");
+  assert.deepEqual(snap.outstanding_entry_sides ?? [], [], "x40.ac-MIX both entries are fully consumed by the live group, so nothing rides the entry-side enumeration");
 });
 
 // ===========================================================================
@@ -2272,9 +2827,11 @@ test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO ve
 // list_bank_line_suggestions/list_bank_rule_candidates/list_bank_rules -> a
 // PLAIN jsonb array; get_bank_reconciliation -> SQL null on an unfound
 // statement). PLUS list_bank_rules as the ninth probe (assembly's additive
-// tenth read RPC, order item 6/D4 -- never swept here before).
+// read RPC, order item 6/D4 -- never swept here before) and, since the delta
+// round (#9), verify_bank_reconciliation as the TENTH -- the one rig-meta.mjs's
+// grant catalog already counted and this sweep did not.
 // ---------------------------------------------------------------------------
-test("x40.an all nine C-c read RPCs return empty for a firm-B actor over firm-A objects, never a discriminating error", async (t) => {
+test("x40.an all TEN C-c read RPCs return empty for a firm-B actor over firm-A objects, never a discriminating error", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
@@ -2283,7 +2840,8 @@ test("x40.an all nine C-c read RPCs return empty for a firm-B actor over firm-A 
   const cp = await birthCounterparty(sub, { client, name: `X40AN CO ${randomUUID().slice(0, 6)}`, kind: "customer" });
   const inv = await dateStampedItem(sub, { client, domain: "ar", cp, cpKind: "customer", cents: 4400, control: AR1, postingDate: "2034-05-01" });
   const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2034-05-01", periodEnd: "2034-05-31", opening: 0, specs: [], keepPeriod: true });
-  await completeRecon(sub, { client, statement: stmt.statementId });
+  const anReceipt = await completeRecon(sub, { client, statement: stmt.statementId });
+  const anRecon = idOf(anReceipt, "reconciliation_id", "reconciliation_id", "recon_id", "id");
 
   const arOut = await arAging(dave, { client, asOf: "2034-05-31" });
   assert.deepEqual(arOut?.counterparties, [], `ar_aging: expected an empty 'counterparties' array (got ${JSON.stringify(arOut)})`);
@@ -2298,6 +2856,12 @@ test("x40.an all nine C-c read RPCs return empty for a firm-B actor over firm-A 
   assert.deepEqual(await listBankLineSuggestions(dave, { statement: stmt.statementId }), [], "list_bank_line_suggestions: expected a bare empty array");
   assert.deepEqual(await listBankRuleCandidates(dave, { client }), [], "list_bank_rule_candidates: expected a bare empty array");
   assert.deepEqual(await listBankRules(dave, { client }), [], "list_bank_rules: expected a bare empty array (the ninth probe, D4/A9's additive read RPC)");
+  // 0040 FIX WAVE F14 [the delta round's #9]: THE TENTH READ. rig-meta.mjs's grant catalog has
+  // named verify_bank_reconciliation among the ten C-c reads since A7 landed, but this sweep
+  // still claimed and probed nine -- so deleting the verifier's OWN firm predicate would have
+  // left the tenancy battery green. It is called here as firm B over firm A's reconciliation.
+  const anVerify = (await humanQuery(dave, "select clara.verify_bank_reconciliation($1) as v", [anRecon])).rows[0].v;
+  assert.equal(anVerify, null, "verify_bank_reconciliation: expected SQL null (the reconciliation is not this actor's firm's) -- never a discriminating error, and never a recomputation of another firm's money");
   assert.equal(await outstandingOf(inv.item), 4400, "x40.an mandatory setup: the firm-A invoice is untouched by the cross-firm probes");
 });
 
@@ -2421,6 +2985,9 @@ test("x40.ap the seven new bank.* event types are registered, in the taxonomy, a
     "reconciliation_id", "statement_id", "bank_account_id", "prior_reconciliation_id",
     "first_period", "outstanding_items", "exception_items",
     "exception_id", "line_id", "kind", "resolution_disposition", "counterpart_line_id",
+    // 0040 FIX WAVE F10 (the delta round): the CX2 arm's second resolved row, so an event-only
+    // reader can rebuild the closed corrective pair. An identifier, like every other key here.
+    "counterpart_exception_id",
     "rule_id", "client_id", "withdrawn",
   ]);
   const rows = await tieoutEventPayloads(client);
@@ -2468,12 +3035,17 @@ test("x40.aq bank_reconciliations/bank_line_exceptions/bank_rules: human SELECT-
     }
   }
   const verbs = ["complete_bank_reconciliation", "void_bank_reconciliation", "except_bank_line", "resolve_bank_line_exception", "propose_bank_rule", "sign_bank_rule", "retire_bank_rule", "set_counterparty_terms"];
-  for (const fn of verbs) {
+  // 0040 FIX WAVE F14 [the delta round's #9]: verify_bank_reconciliation is a READ, and the same
+  // wall applies to it -- it recomputes a client's whole bank identity under a stored cutoff, so
+  // a machine role holding EXECUTE on it would be an agent reading money by another door. A7
+  // added it to rig-meta.mjs's catalog; it joins this loop now.
+  const guarded = [...verbs, "verify_bank_reconciliation"];
+  for (const fn of guarded) {
     assert.equal(await roleCanExecute(ROLES.authenticated, fn), true, `clara_authenticated may execute clara.${fn}`);
     for (const role of noAccessRoles) {
       assert.equal(await roleCanExecute(role, fn), false, `${role} must NOT execute clara.${fn} -- money/exception/rule authority stays human-only`);
     }
   }
-  const wake = await rootQuery("select count(*)::int as n from clara.wake_fn_allowlist where function_name = any($1)", [verbs]);
-  assert.equal(wake.rows[0].n, 0, "ZERO wake_fn_allowlist entries name any of the eight new C-c verbs");
+  const wake = await rootQuery("select count(*)::int as n from clara.wake_fn_allowlist where function_name = any($1)", [guarded]);
+  assert.equal(wake.rows[0].n, 0, "ZERO wake_fn_allowlist entries name any of the eight new C-c verbs or the A7 verifier");
 });

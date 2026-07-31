@@ -37,11 +37,14 @@ function mkView(p: Partial<BankReconciliationView> = {}): BankReconciliationView
 
 // --- toBankReconciliationView mode inference + defensive mapping ---------------
 
-test("toBankReconciliationView infers 'receipt' mode from a complete/void status, 'preview' otherwise", () => {
+test("[F5 fix] toBankReconciliationView infers 'receipt' mode from a complete status only, 'preview' otherwise — 'void' is DELETED from the fallback", () => {
   const complete = toBankReconciliationView({ statement_id: "s1", status: "complete", recon_id: "r1" });
   assert.equal(complete.mode, "receipt");
-  const voided = toBankReconciliationView({ statement_id: "s1", status: "void", recon_id: "r1" });
-  assert.equal(voided.mode, "receipt");
+  // post-C6 the primary envelope's status is never 'void' — the voided_
+  // receipt sidecar is the ONE shape for a void. A stray status:'void'
+  // near-miss now degrades to 'preview', never a fabricated receipt view.
+  const strayVoid = toBankReconciliationView({ statement_id: "s1", status: "void", recon_id: "r1" });
+  assert.equal(strayVoid.mode, "preview", "a real server never emits this shape anymore; a near-miss degrades safely");
   const openish = toBankReconciliationView({ statement_id: "s1", status: "open" });
   assert.equal(openish.mode, "preview");
   const absent = toBankReconciliationView({ statement_id: "s1" });
@@ -125,6 +128,18 @@ test("[D8/CX9 fix] canCompleteReconciliation is keyed OFF THE SERVER VERDICT ONL
   );
 });
 
+test("[F1 fix — NEW CONTRACT] can_complete:true WITH stale ids present is now a REACHABLE server verdict (recon_outstanding_stale is excluded from the DB's own can_complete computation while still named in blockers) — the ack gate alone decides", () => {
+  const staleOnly = { status: "open" as const, can_complete: true, stale_outstanding_ids: ["a", "b"] };
+  assert.equal(canCompleteReconciliation(staleOnly, new Set()), false, "can_complete:true alone never unlocks it — every id must still be acked");
+  assert.equal(canCompleteReconciliation(staleOnly, new Set(["a"])), false, "partial acks still block it");
+  assert.equal(canCompleteReconciliation(staleOnly, new Set(["a", "b"])), true, "can_complete:true + every stale id acked unlocks it — the DB's new remedy path");
+});
+
+test("[F1 fix — NEW CONTRACT] a fixture with stale ids AND can_complete:false (an OTHER, genuine blocker) stays disabled no matter how many ids are acked", () => {
+  const genuinelyBlocked = { status: "open" as const, can_complete: false, stale_outstanding_ids: ["a"] };
+  assert.equal(canCompleteReconciliation(genuinelyBlocked, new Set(["a"])), false, "can_complete:false wins regardless of full ack coverage — a DIFFERENT blocker is still live");
+});
+
 // --- void-unwind composition (design §3/§7) --------------------------------------
 
 test("deriveVoidUnwindCount counts only LATER, LIVE, COMPLETE recons on the SAME account", () => {
@@ -200,6 +215,20 @@ test("[D7 fix] shapeOk is false when a known collection is missing — a fail-cl
   assert.equal(drifted.snapshot.shapeOk, false, "missing collections must never masquerade as a clean period");
 });
 
+test("[F15/CX6#4 fix] shapeOk is an EXACT allowlist — the two intentionally-ignored arrays don't trip it, but any OTHER unknown array key does", () => {
+  const withIgnoredArrays = toBankReconciliationView({ statement_id: "s1", status: "open", snapshot: {
+    outstanding_entry_sides: [], outstanding_group_items: [], outstanding_line_sides: [], exceptions: [], bank_uncleared_opening: [],
+    reversal_pairs_excluded: [{ pair: 1 }], acknowledged_outstanding: ["id1"],
+  } });
+  assert.equal(withIgnoredArrays.snapshot.shapeOk, true, "reversal_pairs_excluded/acknowledged_outstanding are named-allowlisted, not just any extra key");
+
+  const withUnknownArray = toBankReconciliationView({ statement_id: "s1", status: "open", snapshot: {
+    outstanding_entry_sides: [], outstanding_group_items: [], outstanding_line_sides: [], exceptions: [], bank_uncleared_opening: [],
+    outstanding_adjustments: [{ surprise: true }],
+  } });
+  assert.equal(withUnknownArray.snapshot.shapeOk, false, "a FUTURE, unmapped collection must fail closed even though every known array is present");
+});
+
 // --- [D8/CX9 — LANDED] can_complete/blockers; [C1 — LANDED] the distinct
 //     opening/closing keys and derived_closing_cents ----------------------------
 
@@ -216,7 +245,7 @@ test("[D8/CX9 — LANDED] can_complete/blockers map when present; absent still r
   assert.deepEqual(absent.blockers, []);
 });
 
-test("[C1 — LANDED] the distinct opening_anchor_cents/statement_opening_cents/statement_closing_cents keys map directly; a near-miss flat shape still degrades safely", () => {
+test("[C1 — LANDED] the distinct opening_anchor_cents/statement_opening_cents/statement_closing_cents keys map directly", () => {
   const landed = toBankReconciliationView({
     statement_id: "s1", status: "complete",
     opening_anchor_cents: 5000000, statement_opening_cents: 5200000, statement_closing_cents: 5000000,
@@ -224,10 +253,14 @@ test("[C1 — LANDED] the distinct opening_anchor_cents/statement_opening_cents/
   assert.equal(landed.terms.opening_anchor_cents, 5000000);
   assert.equal(landed.terms.statement_opening_cents, 5200000, "distinct from the anchor — the real, now-landed key");
   assert.equal(landed.terms.statement_closing_cents, 5000000);
+});
 
+test("[F16/CX6#5 fix] opening_anchor_cents NEVER falls back to the legacy flat opening_cents — a near-miss shape fails CLOSED to null rather than conflating the two", () => {
   const nearMiss = toBankReconciliationView({ statement_id: "s1", status: "complete", opening_cents: 5000000, closing_cents: 4800000 });
-  assert.equal(nearMiss.terms.opening_anchor_cents, 5000000, "the flat opening_cents/closing_cents pair still resolves the anchor/closing");
-  assert.equal(nearMiss.terms.statement_opening_cents, null, "no distinct statement opening on a near-miss shape — never fabricated from the anchor");
+  assert.equal(nearMiss.terms.opening_anchor_cents, null, "the OLD conflation is dead — opening_cents is never treated as the anchor");
+  // closing_cents keeps its OWN legacy fallback — only the anchor's
+  // conflation with opening_cents is in scope for this fix.
+  assert.equal(nearMiss.terms.statement_closing_cents, 4800000, "closing_cents's fallback is untouched by this fix");
 });
 
 test("[C1 — LANDED] computed_closing_cents reads derived_closing_cents on a PREVIEW — distinct from statement_closing_cents, never conflated", () => {

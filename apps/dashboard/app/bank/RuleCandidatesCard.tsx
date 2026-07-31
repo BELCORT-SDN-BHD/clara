@@ -161,13 +161,36 @@ export function RuleCandidatesCard({ token, clientId }: { token: string; clientI
   );
 }
 
+/** [D2/A4 fix; F14 extraction] CandidateProposalBuilder's readiness gate,
+ *  pulled out PURE so it is directly unit-testable: match_settle needs a
+ *  chosen counterparty; coding needs BOTH an account code and a non-blank
+ *  narration template. Nothing is ever sent defaulted — Propose stays
+ *  disabled until every required field for the CHOSEN kind is filled. */
+export function bankRuleProposalReady(
+  kind: BankRuleKind,
+  fields: { counterpartyId: string; accountCode: string; narrationTemplate: string },
+): boolean {
+  return kind === "match_settle"
+    ? fields.counterpartyId !== ""
+    : fields.accountCode !== "" && fields.narrationTemplate.trim() !== "";
+}
+
+/** [F14 fix] the coding picker's account list — ACTIVE accounts only. An
+ *  inactive account is not a lawful posting target (the /accounts page's own
+ *  active/inactive law); pulled out pure so the filter itself is directly
+ *  testable, the isEligibleXCoaAccount precedent (bank/matchModel.ts). */
+export function activeAccountsOnly(accounts: readonly AccountRow[]): AccountRow[] {
+  return accounts.filter((a) => a.is_active);
+}
+
 /** [D2/A4 fix] the per-candidate kind selector + proposal builder — the
  *  human, not the census, decides what the pattern breeds: match_settle
  *  needs {domain, counterparty_id} (0040:3172-3191, domain's counterparty
  *  kind must agree — ar↔customer, ap↔vendor); coding needs {account_code,
  *  narration_template} (0040:3192-3214). Nothing is ever sent defaulted —
- *  Propose stays disabled until the required fields are filled. */
-function CandidateProposalBuilder({
+ *  Propose stays disabled until the required fields are filled (see
+ *  bankRuleProposalReady above). */
+export function CandidateProposalBuilder({
   token, clientId, busy, onPropose,
 }: {
   token: string;
@@ -195,9 +218,11 @@ function CandidateProposalBuilder({
     listAccounts(token, clientId).then(setAccounts).catch(() => setAccounts([]));
   }, [token, clientId, kind]);
 
-  const ready = kind === "match_settle"
-    ? counterpartyId !== ""
-    : accountCode !== "" && narrationTemplate.trim() !== "";
+  // [F14 fix] see activeAccountsOnly above — the coding picker never offers
+  // an inactive account, regardless of what the server's raw list returns.
+  const activeAccounts = activeAccountsOnly(accounts);
+
+  const ready = bankRuleProposalReady(kind, { counterpartyId, accountCode, narrationTemplate });
 
   function submit() {
     if (kind === "match_settle") onPropose("match_settle", { domain, counterparty_id: counterpartyId });
@@ -225,7 +250,7 @@ function CandidateProposalBuilder({
         <>
           <select className={styles.select} value={accountCode} onChange={(e) => setAccountCode(e.target.value)} aria-label="Account">
             <option value="">Select…</option>
-            {accounts.map((a) => <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.name}</option>)}
+            {activeAccounts.map((a) => <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.name}</option>)}
           </select>
           <input className={styles.input} placeholder="Narration template" value={narrationTemplate} onChange={(e) => setNarrationTemplate(e.target.value)} aria-label="Narration template" />
         </>

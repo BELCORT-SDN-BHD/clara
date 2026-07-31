@@ -88,14 +88,17 @@ export type ReconTermSet = {
  *  construction — completion refuses otherwise — so it is read as 0 rather
  *  than left null, which would fail-close a receipt that is definitionally
  *  tied. Reads the C1 distinct keys FIRST (opening_anchor_cents/statement_
- *  opening_cents/statement_closing_cents), falling back to the current flat
- *  opening_cents/closing_cents pair while that DB-lane change is in flight. */
+ *  opening_cents/statement_closing_cents). [F16/CX6#5 fix] the anchor NEVER
+ *  falls back to the legacy `opening_cents` — distinct quantities (anchor =
+ *  self-closing carry-down identity; opening_cents/statement_opening_cents =
+ *  the statement's own printed figure); a near-miss shape with no anchor key
+ *  fails CLOSED to null. `closing_cents` keeps its own legacy fallback. */
 function toTermSet(raw: unknown): ReconTermSet {
   const o = rec(raw);
   const snap = rec(o.snapshot);
   const st = rec(snap.terms);
   const isReceipt = o.preview === false || s(o.status) === "complete" || s(o.status) === "void";
-  const openingAnchor = numOrNull(o.opening_anchor_cents) ?? numOrNull(o.opening_cents) ?? numOrNull(snap.opening_anchor_cents);
+  const openingAnchor = numOrNull(o.opening_anchor_cents) ?? numOrNull(snap.opening_anchor_cents);
   const closing = numOrNull(o.statement_closing_cents) ?? numOrNull(o.closing_cents) ?? numOrNull(snap.statement_closing_cents);
   // [C1 — LANDED, re-verified against 0040:4043-4262] `closing_cents` now
   // means the SAME thing on both branches — the statement's own printed
@@ -246,12 +249,13 @@ export function toBankReconciliationView(raw: unknown): BankReconciliationView {
   const o = rec(raw);
   const status = s(o.status);
   // `preview` is the DB's own label and wins; status is the fallback for a
-  // shape that predates it.
+  // shape that predates it. [F5 fix] 'void' deleted — post-C6 the primary
+  // envelope's status is never 'void' (voided_receipt is the ONE void shape).
   const mode: ReconMode = o.preview === false
     ? "receipt"
     : o.preview === true
       ? "preview"
-      : status === "complete" || status === "void"
+      : status === "complete"
         ? "receipt"
         : "preview";
   return {

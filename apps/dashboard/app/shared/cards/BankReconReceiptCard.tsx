@@ -62,7 +62,12 @@ export function BankReconReceiptCard({ token, part }: { token: string | null; pa
             {data.snapshot.outstanding_lines.length} outstanding line{data.snapshot.outstanding_lines.length === 1 ? "" : "s"} ·{" "}
             {data.snapshot.exceptions.length} exception{data.snapshot.exceptions.length === 1 ? "" : "s"}
           </p>
-          {data.status === "void" ? <p className={styles.refusalNote}>Voided{data.voided_reason ? `: ${data.voided_reason}` : ""}.</p> : null}
+          {/* [F5 parity fix] this card reads the SAME get_bank_reconciliation
+              envelope as ReconciliationPanel — post-C6 its primary status is
+              never 'void' (the voided_receipt sidecar is the ONE void
+              shape, not rendered by this read-only card); the dead
+              status==='void' banner is deleted here too, for the same
+              reason it was deleted there. */}
           <p className={styles.hint}>Every figure above is the DB&apos;s (design §3) — this card renders it verbatim. Complete/void/except acts happen on the /bank workbench, which owns the full ack-list and ordered-unwind surfaces.</p>
         </>
       ) : null}

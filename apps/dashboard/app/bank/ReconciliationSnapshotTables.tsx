@@ -26,15 +26,16 @@ export function SnapshotTables({
   resolveErr?: { id: string; message: string; reason: string | null } | null;
 }) {
   const snap = snapshot;
+  // [F15/CX6#4 fix] shapeOk gates FIRST, unconditionally — a known-but-
+  // unmapped or an UNKNOWN collection must never read as "a clean period"
+  // NOR render a partial table just because some mapped collection had a
+  // row (shapeOk is an exact allowlist now; see reconSnapshotModel.ts).
+  if (!snap.shapeOk) {
+    return <p className={styles.errorText}>The reconciliation snapshot came back in an unexpected shape — showing nothing rather than claiming a clean period.</p>;
+  }
   const hasAny = snap.outstanding_entries.length + snap.outstanding_group_items.length
     + snap.outstanding_lines.length + snap.exceptions.length + snap.opening_lineage.length > 0;
   if (!hasAny) {
-    // [D7 fix] a known-but-unmapped collection must never read as "a clean
-    // period" — shapeOk is false only when the raw snapshot is missing one
-    // of the five collections this mapper expects as an array.
-    if (!snap.shapeOk) {
-      return <p className={styles.errorText}>The reconciliation snapshot came back in an unexpected shape — showing nothing rather than claiming a clean period.</p>;
-    }
     return <p className={styles.emptyState}>Nothing outstanding, excepted, or carried from opening — a clean period.</p>;
   }
   return (

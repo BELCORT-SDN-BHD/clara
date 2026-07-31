@@ -131,3 +131,88 @@ The catches that mattered:
   §9 cells (+ the stale-challenge cell) · the §10 unwind-cost residual · the uncleared
   preflight's registered-COA scope + unrecoverable-shape report · the INSERT-scoped COA
   assert · a prose sign error · this file's own blocker recount.
+
+## Rounds 3–4 — the BUILD, the as-built ladder, and the fix-wave delta (2026-08-01)
+
+**The build** (branch `feat/wave-c-c-tieout`): a preflight verification lane (every splice
+anchor byte-verified; two corrections — the 0039 `with ordinality` marker lands ×2, and
+allocations are written in `_subledger_on_approve`/`unallocate_group`/`apply_open_items`,
+so the `effective_date` NOT NULL demanded those three insert-site splices in the SAME
+migration) → a 7-lane fan-out (tables · identity core · doors/RPCs · splices · the
+contract-blind x40 battery · runtime · dashboard) → assembly under a 12-adjudication order
+(4 build defects caught by the battery incl. a migration that could never apply and a verb
+unusable on first call) → composite battery green.
+
+**Round 3 — the as-built ladder** (3-lens opus + Codex `gpt-5.6-sol`, read-only, on the
+committed build): 13+15+16 findings, FOUR ship-blockers — the takeover tie
+double-subtracted uncleared (its cell false-green, built to the same wrong formula) ·
+/aging rendered empty over RM143,650 (envelope + key mismatches; no mapper was ever bound
+to the shipped SQL) · the learn-loop card sent a guaranteed refusal · and the root defect
+all four lanes converged on: **the exception door verified its disposition once, at the
+write, and never again.** Also: three green-by-construction cells guarding blocker-grade
+laws, and the `effective_date` backfill had executed against zero rows in every run. All
+findings adjudicated in the fix-wave order; notable rulings:
+- **CX1 (the books-cutoff blocker) → ratified deviation:** no books-version machinery; the
+  algebra makes money divergence inexpressible for the straggler class (an unmatched entry
+  moves `gl'` and `capacity'` equally; matched-into-settled is refused), so the verifier
+  binds the stored money terms strictly and reports enumeration drift as informational.
+- The consent-door aim (a `clara_runtime`-granted verb) was refused at review — it landed
+  on `classify_consent_evidence_document` (owner floor) instead; the WA2-R9 sighting
+  carve-out was RED-PROVEN live (an unpatched chain bred a real `vendor_account` rule from
+  four stamped approvals; patched: zero).
+
+**The fix wave** (clusters A–E + the Codex appendix): the exception-door lifecycle
+re-stated (governing-row readers · the atomic reciprocal corrective pair, structural to
+the composite FK · the cutoff-gated exception lateral · the belt split kept honest) · the
+corrected tie · `opening_anchor_cents` (receipts self-close every period, the differenced
+arm deleted) · `verify_bank_reconciliation` · the server-side `can_complete`/`blockers`
+verdict · the aging surface rebuilt against the literal SQL envelopes. Lane-caught en
+route: every Resolve click had sent an EMPTY exception id (the snapshot's key is
+`exception_id`) · all ten blocker appends were untyped `text[] || literal` (runtime crash
+on the first blocked preview — green until then by luck) · the preview's derived-closing
+remap.
+
+**Round 4 — the delta on the fix wave** (opus 14 + Codex 9 findings): the merge gate was
+three — `can_complete` had swept the ack-remediable stale blocker into its veto (the ack
+flow unreachable from /bank); the same-txn exclusion was timestamp-keyed (a stalled
+transaction could slip a member into a settled period → replaced with a TXN-LOCAL GUC
+identity, exact and subxact-safe); and the corrective-pair/narrowed-door laws had no
+red-proof cells. Two adjudications AMENDED on Codex's algebra:
+- **CX1-v2:** the strict-five per-column bind is false for a lawful straggler
+  (`approved_at ≤ cutoff`, committed after): `gl'` and `outstanding` each move by X while
+  their DIFFERENCE is invariant. The ratified strict set is `opening_anchor · excepted ·
+  closing · (gl' − outstanding) · opening · bank_uncleared_opening`; per-column drift is
+  informational, with the rationale in the verifier's header.
+- **The A4-door closure (the final micro-fix):** a STALLED resolve+match stamps rows
+  before the receipt's cutoff, breaking strict reproducibility for that schedule class —
+  the resolved-then-booked carve-out now admits only resolutions whose `resolved_at`
+  post-dates every covering receipt's `completed_at` (the lawful fresh-txn flow is
+  untouched; the stalled schedule refuses `recon_period_settled`).
+
+**Ratified deviations register (as-built, binding):** the `p_via_rule` overloads carry NO
+defaults (empty overlap by construction — the E1.3 precedent) · `apply_open_items` writes
+fresh pairs, never negations — the date-inversion guard is structurally unneeded there;
+its `effective_date` is act-dated (`current_date` producer / `created_at::date` backfill) ·
+C6: a void receipt rides as a `voided_receipt` SIDECAR on the live preview (the body-status
+alternative would make a voided period un-re-completable) · the proposed→retired
+withdrawal transition exists (`withdrawn`, reason mandatory) · `disposition_unbooked` is
+belt-owned · the preview carries the verdict keys (`can_complete`/`blockers` +
+`derived_closing_cents` + the three distinct opening/closing keys) · `list_bank_rules`
+serves the card (no `get_bank_rule`) · `counterpart_already_paired` names the
+already-recorded-pair refusal distinctly.
+
+**Named residuals (rounds 3–4):** the `bank_rule_suggested` stamp has NO lawful writer —
+`_draft_entry_core` drops arbitrary flags keys; the carve-out ships inert and correct; the
+producer is its own audited suggestion-accept verb, a named follow-up · the
+`matched_booking`/`written_off_adjustment` dispositions are UI-disabled pending a
+composite resolve-and-book verb · the completing-recon GUC holds ONE receipt id (a
+two-recon single transaction would over-exclude; unreachable from any shipped caller) ·
+the F9 coa-shared belt arm is a pure backstop (verbs refuse first) · `BankReconReceiptCard`
+shows no void history (display-only) · `reverse_entry` stamps mirrors at session-TZ
+`current_date` while the SST evaluator pins MYT (a UTC runtime posts 00:00–08:00 MYT
+reversals dated the prior day — cosmetic, month-end-relevant; candidate future splice) ·
+`sst-watch-consumer.test.mjs` carries a 2027 date literal (slow-burn rot class) · the
+lineage correction: `_approve_entry_core` is 0015→0016→0017(dynamic)→0029→0035→0037
+(receipt_preheld/binding markers are 0029-born). Pre-ceremony law: the opening-anchor
+census is a CHECKLIST artifact (`docs/ops/wave-c-c-0040-ceremony-checklist.md`) — the tie
+is deliberately unconditional.

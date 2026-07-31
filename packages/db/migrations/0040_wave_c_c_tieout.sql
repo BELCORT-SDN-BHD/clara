@@ -1399,6 +1399,20 @@ begin
              -- 0040 FIX WAVE A2: the pair is enumerated as a CLOSED UNIT -- a later reader can
              -- re-check that the two legs name each other and net to zero without re-deriving.
              'counterpart_line_id', gx.counterpart_line_id,
+             -- 0040 FIX WAVE F7 [the delta round]: ...AND WHETHER THE PAIR ACTUALLY CLOSES INSIDE
+             -- THIS PERIOD. "Nets to zero by construction" is only true of THIS period's excepted
+             -- total when BOTH legs are inside it; a counterpart sitting on a LATER statement is
+             -- lawful (the resolve verb only demands the same bank account) and leaves exactly one
+             -- leg riding excepted(P) here, with the other arriving next period. The reader could
+             -- previously not tell those two shapes apart from the enumeration alone -- both print
+             -- a counterpart_line_id -- so the answer is carried explicitly. The gate is the same
+             -- one this whole lateral's WHERE uses (a LIVE statement whose period_end <= P.end),
+             -- so "in this period" means the same thing everywhere in the snapshot.
+             'pair_complete_in_period', (gx.counterpart_line_id is not null and exists (
+                 select 1 from clara.bank_statement_lines cl
+                   join clara.bank_statements cst on cst.id = cl.statement_id
+                  where cl.id = gx.counterpart_line_id
+                    and cst.status = 'live' and cst.period_end <= s.period_end)),
              'entry_date', l.entry_date,
              'age_days', (s.period_end - l.entry_date),
              'amount_cents', l.amount_cents)
@@ -1971,6 +1985,20 @@ begin
         detail=jsonb_build_object('reason','recon_already_complete','statement_id',p_statement)::text;
   end;
 
+  -- 0040 FIX WAVE A6-v2 [the delta round's BLOCKER 1]. THE WRITER DECLARES ITS OWN RECEIPT.
+  -- clara._tf_bank_settled_authority_belt is DEFERRED: it re-queries at COMMIT, by which time the
+  -- receipt this very transaction just inserted is visible to it and looks exactly like a period
+  -- somebody else settled. The lawful same-transaction order (match the last line, THEN complete)
+  -- would therefore refuse at commit, naming the line the caller had just matched. The first cut
+  -- excluded receipts by timestamp (`completed_at < transaction_timestamp()`), which answers a
+  -- DIFFERENT question -- "was it completed before my transaction started?" -- and let a stalled
+  -- older transaction move money out of a period a newer transaction had already certified.
+  -- A transaction-local GUC carrying THIS receipt's id is the exact identity: is_local => true
+  -- scopes it to this transaction (and unwinds with a rolled-back subtransaction), the belt
+  -- excludes that one id and nothing else, and no other writer sets it. It is set AFTER the
+  -- INSERT deliberately -- a failed insert leaves no id to declare.
+  perform set_config('clara.completing_recon', v_recon::text, true);
+
   -- THE RECORD. clara.bank_match_audit's action vocabulary is UNCHANGED by C-c (design section
   -- 10): a reconciliation is not a match act, so it rides the generic _audit plus its own event
   -- type. The event payload is IDENTIFIERS AND COUNTS ONLY -- clara.domain_events is
@@ -2330,6 +2358,29 @@ begin
   -- and is not the same-transaction book-then-reconcile order (match first, then complete) that
   -- FIX WAVE A6 deliberately keeps lawful.
   if tg_op = 'INSERT' then
+    -- 0040 FIX WAVE F9 [the delta round]: THE SHARED-COA QUESTION IS ASKED FIRST, AND BY NAME.
+    -- clara._bank_recon_terms pools EVERY bank account of this client on this COA (its own header
+    -- says so: "the pool is keyed the way capacity is keyed, always"), and it is the VERB's
+    -- recon_coa_shared refusal that makes COA scope and account scope coincide. If a receipt ever
+    -- reaches this belt on a shared COA -- a second account gaining a live statement inside the
+    -- same transaction, a splice regression, a hand-written row -- the whole-snapshot compare
+    -- below WOULD still refuse it, but under the generic recon_snapshot_incoherent token, which
+    -- tells a human nothing about the actual cause. Re-running the verb's own count first, with
+    -- the verb's own predicate byte-for-byte, means the receipt is refused under the name that
+    -- carries its remedy.
+    select count(*)::int into v_n
+      from (select ba2.id from clara.bank_accounts ba2
+             where ba2.client_id = r.client_id and ba2.firm_id = r.firm_id
+               and ba2.coa_account_code = r.coa_account_code
+               and exists (select 1 from clara.bank_statements bs2
+                            where bs2.bank_account_id = ba2.id and bs2.status = 'live')) x;
+    if v_n > 1 then
+      raise exception 'reconciliation % certifies GL account %, which carries live statements on % different bank accounts; one COA account backs one reconcilable bank account', r.id, r.coa_account_code, v_n
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','recon_coa_shared','reconciliation_id',r.id,
+            'account_code',r.coa_account_code,'bank_account_count',v_n)::text;
+    end if;
+
     v_fresh := clara._bank_recon_terms(r.statement_id, r.completed_at);
     if v_fresh is null then
       raise exception 'reconciliation %''s terms could not be re-derived under its own cutoff', r.id
@@ -2372,13 +2423,14 @@ create constraint trigger t_bank_reconciliations_belt
 --       the act (design sections 3/7/10).
 --       ADDING a membership on a settled line is ALLOWED IFF that line carries a RESOLVED
 --       exception whose disposition is matched_booking or written_off_adjustment [0040 FIX WAVE
---       A4], and that is not a loophole -- it is the ratified resolved-then-booked door
---       (design 4.2), and nothing wider. It is arithmetically neutral for every completed
---       receipt: excepted(P) counts "open OR bank_corrective_line-with-the-line-unmatched", so a
---       booking-linked line's full amount simply moves from excepted into the matched-line total,
---       and every all-time term downstream is unchanged. Any OTHER add is unreachable on a
---       healthy book (completion required every line to be matched or settled-by-exception) and
---       is refused here so it stays unreachable.
+--       A4] AND whose resolution POST-DATES every covering receipt [0040 FIX WAVE A4-v2], and
+--       that is not a loophole -- it is the ratified resolved-then-booked door (design 4.2), and
+--       nothing wider. It is arithmetically neutral for every completed receipt: excepted(P)
+--       counts "open OR bank_corrective_line-with-the-line-unmatched", so a booking-linked line's
+--       full amount simply moves from excepted into the matched-line total, and every all-time
+--       term downstream is unchanged. Any OTHER add is unreachable on a healthy book (completion
+--       required every line to be matched or settled-by-exception) and is refused here so it
+--       stays unreachable.
 --       THE SETTLED SET is account-scoped and all-time, byte-identical to the two verb splices
 --       [A5], and EXCLUDES a receipt born in this transaction [A6].
 --
@@ -2408,6 +2460,9 @@ declare
   -- predicate stay identical to the verbs' instead of drifting by one alias.
   m record; x record; ln record; v_st record;
   v_n int; v_ids uuid[]; v_rank int;
+  -- 0040 FIX WAVE A4-v2: the NEWEST covering receipt's cutoff. The resolved-then-booked door
+  -- admits only a resolution that post-dates it -- see the door's own note below.
+  v_cover_at timestamptz;
 begin
   -- ---------------------------------------------------------------
   -- ARM (a) -- THE MEMBER TABLES.
@@ -2426,9 +2481,28 @@ begin
     -- belt is deferred and re-queries at COMMIT, so `match_bank_line(last line);
     -- complete_bank_reconciliation(stmt)` in one transaction saw its own receipt and refused the
     -- line it had just matched -- forbidding exactly the same-transaction book-then-reconcile act
-    -- complete_bank_reconciliation's own cutoff note says it supports. completed_at IS
-    -- transaction_timestamp() for the in-txn row, so the test is exact rather than a heuristic.
-    select count(*)::int into v_n
+    -- complete_bank_reconciliation's own cutoff note says it supports.
+    --
+    -- 0040 FIX WAVE A6-v2 [the delta round's BLOCKER 1]: TIMESTAMPS WERE THE WRONG IDENTITY, and
+    -- the difference moved money. The first cut asked `br.completed_at < transaction_timestamp()`
+    -- -- "was this receipt completed before MY transaction started?" -- which is NOT the question.
+    -- A transaction that started an hour ago and idled sees EVERY receipt certified in the
+    -- meantime as "not yet settled": T1 begins and stalls; T2 certifies a +1,000 open-excepted
+    -- line; T1 then resolves it matched_booking and matches it, all in one transaction. T1's older
+    -- transaction timestamp made T2's freshly-certified receipt invisible to this belt, so
+    -- outstanding and excepted both fell by 1,000 AFTER certification -- the exact breach the
+    -- settled-period law exists to make impossible.
+    -- The identity that actually answers "born in THIS transaction" is the WRITER'S OWN
+    -- DECLARATION: complete_bank_reconciliation sets the transaction-local GUC
+    -- clara.completing_recon to its receipt's id immediately after the INSERT, and both arms here
+    -- exclude EXACTLY THAT ONE ID and nothing else. set_config(..., is_local => true) is
+    -- transaction-scoped and subtransaction-safe (it rolls back with the subxact that set it), so
+    -- there is no xid-wraparound, clock-skew or timestamp-collision class left. It is not a bypass
+    -- hatch either: the tables are SELECT-only for every human role (no DML grant anywhere), so
+    -- the only way to reach a member write is through a verb -- and unmatch_bank_match /
+    -- complete_pending_match carry the SAME settled predicate WITHOUT this exclusion (TAIL 4b
+    -- pins that asymmetry), so a hand-set GUC buys nothing.
+    select count(*)::int, max(br.completed_at) into v_n, v_cover_at
       from clara.bank_statement_lines l
       join clara.bank_statements st on st.id = l.statement_id
       join clara.bank_reconciliations br
@@ -2436,7 +2510,7 @@ begin
        and br.status = 'complete'
        and br.period_end >= st.period_end
       where l.id = m.line_id
-        and br.completed_at < transaction_timestamp();
+        and br.id is distinct from nullif(current_setting('clara.completing_recon', true), '')::uuid;
     if v_n = 0 then return null; end if;
     if tg_op = 'INSERT' then
       -- 0040 FIX WAVE A4 [A14]: THE RESOLVED-THEN-BOOKED DOOR, AND ONLY THAT DOOR. The arm used
@@ -2444,14 +2518,30 @@ begin
       -- only thing keeping an OPEN-excepted line out of a new match on a settled period was the
       -- verb-side line_excepted re-check, which is precisely the verb-guards-the-belt layering
       -- the ladder rejected. The ratified door is the resolved-then-booked case and nothing else.
+      --
+      -- 0040 FIX WAVE A4-v2 [the delta round, adjudicated]: ...AND THE RESOLUTION MUST POST-DATE
+      -- EVERY COVERING RECEIPT. A4's own neutrality claim -- "arithmetically neutral for every
+      -- completed receipt" -- is true only when the resolution happens AFTER certification, so
+      -- that the receipt's own as-of re-derivation cannot see it (excepted(P) is cutoff-gated:
+      -- resolved_at > cutoff still reads OPEN). A STALLED transaction breaks that silently:
+      -- resolve_bank_line_exception stamps resolved_at = now() = the TRANSACTION's start, and
+      -- bank_matches.created_at likewise, so a transaction that began before certification and
+      -- commits after it writes rows stamped BEFORE the cutoff. The receipt's re-derivation then
+      -- sees the resolution and the match, excepted(P) collapses to zero, outstanding follows,
+      -- and a certified receipt stops reproducing under its own cutoff -- measured, red-proved
+      -- (x40.z-A6v2 half (b)), and closed here. v_cover_at is the NEWEST covering receipt's
+      -- cutoff, drawn from the very rows the settled predicate above counted, so "post-dates
+      -- every covering receipt" is exactly what is asked. A null resolved_at cannot pass either
+      -- (null > x is null), which is correct: arm (b) below requires resolved rows to carry one.
       if not exists (select 1 from clara.bank_line_exceptions ex
                       where ex.line_id = m.line_id
                         and ex.status = 'resolved'
-                        and ex.resolution_disposition in ('matched_booking','written_off_adjustment')) then
+                        and ex.resolution_disposition in ('matched_booking','written_off_adjustment')
+                        and ex.resolved_at > v_cover_at) then
         raise exception 'statement line % lies in a reconciled period; a new match on it would change what that receipt certified', m.line_id
           using errcode='CLR10',
             detail=jsonb_build_object('reason','recon_period_settled','line_id',m.line_id,
-              'match_id',m.match_id)::text;
+              'match_id',m.match_id,'covering_cutoff',v_cover_at)::text;
       end if;
       return null;
     end if;
@@ -2466,9 +2556,11 @@ begin
     if not found then return null; end if;
     -- The law is about the group's LINES: an entry member changes the tie of a group whose
     -- lines may sit in a settled period, which is the same breach seen from the other side.
-    -- 0040 FIX WAVE A5 + A6: the same account-scoped all-time predicate, and the same
-    -- same-transaction exclusion, as the line-member arm above.
-    select count(*)::int, coalesce(array_agg(distinct l.id), '{}'::uuid[]) into v_n, v_ids
+    -- 0040 FIX WAVE A5 + A6/A6-v2: the same account-scoped all-time predicate, and the same
+    -- transaction-local-GUC same-transaction exclusion (see the line-member arm's own note for
+    -- why a timestamp was the wrong identity), as the line-member arm above.
+    select count(*)::int, coalesce(array_agg(distinct l.id), '{}'::uuid[]), max(br.completed_at)
+      into v_n, v_ids, v_cover_at
       from clara.bank_match_line_members lm
       join clara.bank_statement_lines l on l.id = lm.line_id
       join clara.bank_statements st on st.id = l.statement_id
@@ -2477,21 +2569,27 @@ begin
        and br.status = 'complete'
        and br.period_end >= st.period_end
       where lm.match_id = m.match_id
-        and br.completed_at < transaction_timestamp();
+        and br.id is distinct from nullif(current_setting('clara.completing_recon', true), '')::uuid;
     if v_n = 0 then return null; end if;
     if tg_op = 'INSERT' then
-      -- 0040 FIX WAVE A4: the resolved-then-booked door, and only that door.
+      -- 0040 FIX WAVE A4 + A4-v2: the resolved-then-booked door, and only that door -- and only
+      -- for a resolution that post-dates every covering receipt (the line-member arm above
+      -- carries the full note). v_cover_at is the NEWEST cutoff over every covering receipt of
+      -- every line in this group, which is the conservative and correct reading of "every": a
+      -- group's lines share one account, and an entry member changes the tie of the whole group.
       select count(*)::int into v_n
         from unnest(v_ids) as u(line_id)
         where not exists (select 1 from clara.bank_line_exceptions ex
                            where ex.line_id = u.line_id
                              and ex.status = 'resolved'
-                             and ex.resolution_disposition in ('matched_booking','written_off_adjustment'));
+                             and ex.resolution_disposition in ('matched_booking','written_off_adjustment')
+                             and ex.resolved_at > v_cover_at);
       if v_n > 0 then
         raise exception 'bank match % holds % statement line(s) in a reconciled period; a new entry member would change what that receipt certified', m.match_id, v_n
           using errcode='CLR10',
             detail=jsonb_build_object('reason','recon_period_settled','match_id',m.match_id,
-              'entry_id',m.entry_id,'settled_line_ids',to_jsonb(v_ids))::text;
+              'entry_id',m.entry_id,'settled_line_ids',to_jsonb(v_ids),
+              'covering_cutoff',v_cover_at)::text;
       end if;
       return null;
     end if;
@@ -3264,8 +3362,11 @@ revoke all on function clara.except_bank_line(uuid, text, text, uuid, text) from
 --                            already bank_corrective_line naming THIS line back and its line is
 --                            still unmatched (`counterpart_not_reciprocal`).
 --   * USED ONCE           -- uq_ble_counterpart_in_use; a second claim on the same counterpart is
---                            translated back into `counterpart_not_reciprocal` rather than a raw
---                            23505.
+--                            translated back into `counterpart_already_paired` rather than a raw
+--                            23505 [0040 FIX WAVE F6 -- its OWN token, distinct from
+--                            counterpart_not_reciprocal: "already spoken for by another pair" and
+--                            "does not close back to you" are different facts with different
+--                            remedies, and collapsing them sends the human after the wrong one].
 -- `counterpart_required` (no line named) and `counterpart_not_excepted` (the named line is not
 -- this client's, or carries no exception at all) survive unchanged.
 create function clara.resolve_bank_line_exception(
@@ -3426,6 +3527,15 @@ begin
                              and m2.group_status in ('pending','live')) then
       -- The pair already exists and already names THIS line back, and that leg is still
       -- unmatched, so both legs genuinely ride excepted(P). Nothing further to write.
+      --
+      -- 0040 FIX WAVE F6 [the delta round]: THIS ARM IS UNREACHABLE THROUGH THE VERB TODAY, AND
+      -- IT STAYS. It describes a world where the counterpart is ALREADY resolved naming this line
+      -- back while THIS exception is still open -- but CX2's own arm above resolves BOTH legs in
+      -- one call, so the only constructor that could ever have produced a half-closed pair is
+      -- gone. It is kept rather than deleted for two reasons: it is the CX2 constructor's own
+      -- postcondition stated as code (delete it and a CX2-written pair becomes unreadable to any
+      -- later re-resolution path), and it is the idempotent answer if a future disposition ever
+      -- writes one leg at a time. Unreachable-by-construction, not dead-by-accident.
       v_cp_exception := null;
     else
       raise exception 'counterpart line % does not close this pair: its governing exception is neither open nor a corrective resolution naming line % back', p_counterpart_line, ex.line_id
@@ -3453,11 +3563,20 @@ begin
     end if;
   exception when unique_violation then
     -- uq_ble_counterpart_in_use: this counterpart is already the named other half of a different
-    -- pair. Translated back into the named refusal so the racing path and the ordinary path look
+    -- pair. Translated back into a named refusal so the racing path and the ordinary path look
     -- the same to the human (the 0038:4080-4084 idiom); the index name is deliberately not cited.
+    --
+    -- 0040 FIX WAVE F6 [the delta round]: THE TOKEN IS ITS OWN, not counterpart_not_reciprocal.
+    -- The two states are different facts with different remedies and the first cut collapsed
+    -- them: `counterpart_not_reciprocal` means "the line you named does not close back to YOU"
+    -- (fix the pairing -- name the right line, or resolve the counterpart's own exception first),
+    -- while THIS means "the line you named is already spoken for by SOMEBODY ELSE'S pair" (the
+    -- three-way-chain refusal uq_ble_counterpart_in_use exists for -- find the real offsetting
+    -- line, or unwind the other pair). A human told "not reciprocal" about a perfectly reciprocal
+    -- pair goes looking for the wrong thing.
     raise exception 'counterpart line % is already the named other half of another corrective pair', p_counterpart_line
       using errcode='CLR10',
-        detail=jsonb_build_object('reason','counterpart_not_reciprocal','exception_id',p_exception,
+        detail=jsonb_build_object('reason','counterpart_already_paired','exception_id',p_exception,
           'line_id',ex.line_id,'counterpart_line_id',p_counterpart_line)::text;
   end;
 
@@ -3467,10 +3586,17 @@ begin
       'counterpart_exception', v_cp_exception, 'op_key', p_op_key));
   -- Key name 'resolution_disposition' (not the shorthand 'disposition') matches BOTH the
   -- underlying column name and S1's payload-key inference (s10-notes.md:233).
+  -- 0040 FIX WAVE F10 [the delta round]: the CX2 arm resolves TWO exception rows in one call, and
+  -- the event stream carried only one of them -- so an event-only reader (the agent's own view of
+  -- domain_events is firm-wide) saw a corrective pair as a single-leg act and could never rebuild
+  -- the closed unit. The counterpart's EXCEPTION id is the missing identifier; it is null on every
+  -- non-CX2 path, which is itself the fact "this call closed one leg only". Identifier, not money:
+  -- TAIL 6's allowlist gains the key and the site count is unchanged at seven.
   perform clara._append_event(c.firm, 'bank.line_exception_resolved', ex.client_id, c.actor,
     null, null, null, null, null,
     jsonb_build_object('exception_id', p_exception, 'line_id', ex.line_id,
-      'resolution_disposition', p_disposition, 'counterpart_line_id', p_counterpart_line));
+      'resolution_disposition', p_disposition, 'counterpart_line_id', p_counterpart_line,
+      'counterpart_exception_id', v_cp_exception));
   return clara._finish_op(c.firm, 'resolve_bank_line_exception', p_op_key,
     jsonb_build_object('exception_id', p_exception, 'status', 'resolved',
       'disposition', p_disposition,
@@ -4022,6 +4148,9 @@ declare
   v_precondition boolean; v_chain_ok boolean; v_prior uuid; v_prior_end date; v_stale jsonb;
   v_blockers text[] := '{}'::text[]; v_n int; v_shared uuid[]; v_coa text;
   v_voided jsonb := null;
+  -- 0040 FIX WAVE F1 [the delta round]: the HARD blockers -- every blocker whose remedy is not a
+  -- caller argument. See the verdict note below.
+  v_hard text[] := '{}'::text[];
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   select * into v_stmt from clara.bank_statements s where s.id = p_statement and s.firm_id = c.firm;
@@ -4164,9 +4293,18 @@ begin
   -- which was wrong in two directions at once: a PENDING reservation counted as membership, so
   -- precondition_met came back true for a state the verb refuses outright with
   -- recon_line_reserved; and a nonzero difference did not enter the verdict at all. Every gate
-  -- below is the verb's own gate, run in the verb's own order, so a green button means the verb
-  -- will accept -- and a grey one says WHICH refusal it would raise. The verb still
-  -- re-establishes all of it under lock and its refusal remains the only authority.
+  -- below is one of the verb's own gates, so a green button means the verb will accept -- and a
+  -- grey one says WHICH refusal it would raise. The verb still re-establishes all of it under
+  -- lock and its refusal remains the only authority.
+  --
+  -- 0040 FIX WAVE F11 [the delta round] -- TWO CORRECTIONS TO WHAT THIS BLOCK USED TO CLAIM:
+  --   (1) THE ORDER IS NOT THE VERB'S. The verb raises the FIRST refusal it meets and stops; this
+  --       read evaluates EVERY gate and returns them ALL, because a human wants the whole list of
+  --       what is wrong with the month, not a one-at-a-time march. The gates below are therefore
+  --       written in a reading order (statement, lines, chain, opening, uncleared, stale,
+  --       difference), which is close to but NOT identical with the verb's ladder. Any claim that
+  --       'blockers[0] is what the verb will say' is false, and nothing may be built on it.
+  --   (2) can_complete IS NOT "blockers IS EMPTY" -- see the verdict note at the return below.
   -- ---------------------------------------------------------------
   -- EVERY APPEND BELOW CASTS ITS LITERAL ::text, and that is load-bearing, not decoration.
   -- `text[] || 'literal'` is AMBIGUOUS to the parser -- with an untyped literal it resolves to
@@ -4286,12 +4424,31 @@ begin
     v_blockers := v_blockers || 'recon_difference_nonzero'::text;
   end if;
 
+  -- ---------------------------------------------------------------
+  -- 0040 FIX WAVE F1 [the delta round's MAJOR 3]: THE ACK-REMEDIABLE BLOCKER IS NOT A VETO.
+  -- recon_outstanding_stale is the ONE refusal in the whole ladder whose remedy is a CALLER
+  -- ARGUMENT rather than a change to the book: complete_bank_reconciliation(p_ack_outstanding)
+  -- accepts exactly the ids this read returns in stale_outstanding_ids and completes. Because
+  -- this read carries no acknowledgement set of its own it ALWAYS names that blocker when a
+  -- stale side exists -- so folding it into the hard gate made can_complete permanently false
+  -- for a fully-tied month carrying one 61-day item, and the pane (which refuses to send when
+  -- the server says can_complete=false) could never let a human check the box the verb was
+  -- waiting for. The duplicate-payment challenge became an unremovable wall instead of a
+  -- challenge.
+  -- So the verdict is computed over the HARD blockers only, while the blocker itself is STILL
+  -- RETURNED BY NAME beside its id list -- the caller is told "you may complete, and here is
+  -- exactly what you are being asked to acknowledge to do it". Nothing is hidden and nothing is
+  -- decided here: the verb re-derives the stale set under lock and refuses if the ids do not
+  -- cover it, so a caller that ignores the list still gets the honest refusal.
+  -- ---------------------------------------------------------------
+  v_hard := array(select b from unnest(v_blockers) as b where b <> 'recon_outstanding_stale');
+
   return jsonb_build_object(
     'preview', true, 'available', true, 'statement_id', p_statement,
     'first_period', v_terms->'first_period',
     'precondition_met', v_precondition, 'chain_ok', v_chain_ok,
     'stale_outstanding_ids', v_stale,
-    'can_complete', (coalesce(array_length(v_blockers, 1), 0) = 0),
+    'can_complete', (coalesce(array_length(v_hard, 1), 0) = 0),
     'blockers', to_jsonb(v_blockers),
     'bank_account_id', v_terms->'bank_account_id',
     'coa_account_code', v_terms->'coa_account_code',
@@ -4338,11 +4495,42 @@ revoke all on function clara.get_bank_reconciliation(uuid) from public;
 --   byte-exact forever -- provable), and reports snapshot-ENUMERATION diffs as informational
 --   (stored history vs live classification)."
 --
--- SO: the four identity terms (opening_anchor, gl', outstanding, excepted) plus closing are
--- compared EXACTLY and any inequality is returned as a NAMED diff with both numbers. Differences
--- in the snapshot's ENUMERATIONS are returned under 'informational' and NEVER make verified
--- false -- a stored snapshot is history, and the classification a later world puts on the same
--- rows is not evidence that the certified money moved.
+-- CX1-v2 [0040 FIX WAVE F8-AMENDED, the delta round's BLOCKER 2] -- THE STRICT SET IS NOT THE
+-- FIVE COLUMNS, AND SAYING IT WAS MADE THE VERIFIER A LIAR ABOUT ITS OWN ALGEBRA. Read CX1's
+-- rationale again, carefully: it proves the straggler is neutral in the DIFFERENCE, and says
+-- nothing whatever about the two columns individually. And the difference is exactly where the
+-- cancellation lives. A lawful straggler -- an approval stalled before advisory 004, carrying
+-- approved_at <= cutoff, committing after certification -- lands in gl(P) AND in unmatched
+-- capacity'(P) by the same signed amount X (clara._bank_recon_terms puts every unconsumed entry
+-- in both), because it is unmatched BY CONSTRUCTION: joining a certified period post-hoc is what
+-- the settled-period law refuses. So gl' moves by X, outstanding (= uncleared + capacity') moves
+-- by X, and (gl' - outstanding) does not move at all. Worked, from the x40.ac fixture: a +5,600
+-- certified receipt with a later -1,234 straggler re-derives gl' 4,366 and outstanding -1,234 --
+-- two "strict" columns differ, closing is still 5,600, and no money moved. Under the old strict
+-- five that receipt reports verified=false: a false alarm on a lawful book, which is worse than
+-- no verifier, because a verifier that cries wolf on the ordinary case gets ignored on the real
+-- one.
+--
+-- THE RATIFIED STRICT SET IS THEREFORE SIX QUANTITIES, EACH ONE PROVABLY INVARIANT:
+--   1. opening_anchor_cents               -- the account's own first-live-statement print.
+--   2. excepted_cents                     -- fully cutoff-gated since FIX WAVE A3.
+--   3. closing_cents                      -- the certified figure, reached through the identity.
+--   4. (gl_prime_cents - outstanding_cents) AS ONE BOUND QUANTITY -- the straggler-invariant.
+--   5. opening_cents                      -- the statement's printed opening (copied at birth,
+--                                            re-read from the same immutable statement row).
+--   6. snapshot.bank_uncleared_opening_cents -- the K-seeded pre-cutover instrument total; it is
+--                                            a MONEY scalar carried inside the snapshot object
+--                                            rather than a receipt column, and leaving it in the
+--                                            informational half meant the takeover anchor's own
+--                                            ingredient could drift silently.
+-- and gl_balance_cents and outstanding_cents INDIVIDUALLY drop to 'informational', reported with
+-- both numbers under per_column_drift so a reviewer sees the straggler rather than being told
+-- nothing -- but they never make verified false, because their difference is what the receipt
+-- actually certified and it is checked strictly one line above.
+--
+-- Differences in the snapshot's ENUMERATIONS are likewise returned under 'informational' and
+-- NEVER make verified false -- a stored snapshot is history, and the classification a later world
+-- puts on the same rows is not evidence that the certified money moved.
 --
 -- IT RAISES NOTHING (bookkeeper-floor read): a verifier that refuses cannot report what it found.
 -- =====================================================================================
@@ -4352,6 +4540,9 @@ declare
   c record; r record; t jsonb; v_diffs jsonb := '[]'::jsonb;
   v_stored_snap jsonb; v_fresh_snap jsonb; v_info jsonb; v_keys text[] := '{}'::text[];
   k text;
+  -- CX1-v2: the two columns that dropped OUT of the strict set (see the header's straggler
+  -- proof) are still MEASURED and still REPORTED -- under 'informational', never as a failure.
+  v_drift jsonb := '[]'::jsonb;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   select * into r from clara.bank_reconciliations br
@@ -4364,27 +4555,49 @@ begin
       'status', r.status, 'cutoff', r.completed_at, 'verified', false,
       'diffs', jsonb_build_array(jsonb_build_object('term', 'terms_underivable',
         'stored', null, 'recomputed', null)),
-      'informational', jsonb_build_object('snapshot_enumeration_differs', null, 'keys', '[]'::jsonb));
+      'informational', jsonb_build_object('snapshot_enumeration_differs', null, 'keys', '[]'::jsonb,
+        'per_column_drift', '[]'::jsonb, 'per_column_drift_present', null));
   end if;
 
-  -- THE STRICT HALF: four terms + closing, byte-exact.
+  -- THE STRICT HALF (CX1-v2): the SIX provably-invariant quantities the header enumerates.
   if r.opening_anchor_cents is distinct from (t->>'opening_anchor_cents')::bigint then
     v_diffs := v_diffs || jsonb_build_object('term','opening_anchor_cents',
       'stored', r.opening_anchor_cents, 'recomputed', (t->>'opening_anchor_cents')::bigint);
   end if;
-  if r.gl_balance_cents is distinct from (t->>'gl_prime_cents')::bigint then
-    v_diffs := v_diffs || jsonb_build_object('term','gl_balance_cents',
-      'stored', r.gl_balance_cents, 'recomputed', (t->>'gl_prime_cents')::bigint);
-  end if;
-  if r.outstanding_cents is distinct from (t->>'outstanding_cents')::bigint then
-    v_diffs := v_diffs || jsonb_build_object('term','outstanding_cents',
-      'stored', r.outstanding_cents, 'recomputed', (t->>'outstanding_cents')::bigint);
+  -- (4) THE STRAGGLER-INVARIANT, AS ONE BOUND QUANTITY. gl' and outstanding each move by the
+  -- straggler's own signed amount; their DIFFERENCE is what the receipt certified and cannot
+  -- move without money moving. Compared here; each column's individual drift is reported below
+  -- under 'informational'.
+  if (r.gl_balance_cents - r.outstanding_cents) is distinct from
+     ((t->>'gl_prime_cents')::bigint - (t->>'outstanding_cents')::bigint) then
+    v_diffs := v_diffs || jsonb_build_object('term','gl_less_outstanding_cents',
+      'stored', (r.gl_balance_cents - r.outstanding_cents),
+      'recomputed', ((t->>'gl_prime_cents')::bigint - (t->>'outstanding_cents')::bigint),
+      'stored_gl_balance_cents', r.gl_balance_cents,
+      'stored_outstanding_cents', r.outstanding_cents,
+      'recomputed_gl_balance_cents', (t->>'gl_prime_cents')::bigint,
+      'recomputed_outstanding_cents', (t->>'outstanding_cents')::bigint);
   end if;
   if r.excepted_cents is distinct from (t->>'excepted_cents')::bigint then
     v_diffs := v_diffs || jsonb_build_object('term','excepted_cents',
       'stored', r.excepted_cents, 'recomputed', (t->>'excepted_cents')::bigint);
   end if;
-  -- closing is the statement's certified figure; the recomputation reaches it through the
+  -- (5) the statement's PRINTED opening, copied onto the receipt at birth. Immutable on both
+  -- sides (the statement row is frozen by 0038's own transition guard), so any inequality here
+  -- is a rewritten statement or a rewritten receipt -- never a timing artefact.
+  if r.opening_cents is distinct from (t->>'statement_opening_cents')::bigint then
+    v_diffs := v_diffs || jsonb_build_object('term','opening_cents',
+      'stored', r.opening_cents, 'recomputed', (t->>'statement_opening_cents')::bigint);
+  end if;
+  -- (6) the K-seeded pre-cutover uncleared total. A money scalar that lives in the snapshot
+  -- rather than in a column, and the takeover anchor's own ingredient -- strict, not narrative.
+  if (r.snapshot#>>'{bank_uncleared_opening_cents}')::bigint is distinct from
+     (t#>>'{snapshot,bank_uncleared_opening_cents}')::bigint then
+    v_diffs := v_diffs || jsonb_build_object('term','snapshot.bank_uncleared_opening_cents',
+      'stored', (r.snapshot#>>'{bank_uncleared_opening_cents}')::bigint,
+      'recomputed', (t#>>'{snapshot,bank_uncleared_opening_cents}')::bigint);
+  end if;
+  -- (3) closing is the statement's certified figure; the recomputation reaches it through the
   -- identity, so a mismatch here is the whole receipt failing to close under its own cutoff.
   if r.closing_cents is distinct from (
        coalesce((t->>'statement_closing_cents')::bigint,0) - coalesce((t->>'difference_cents')::bigint,0)
@@ -4395,7 +4608,19 @@ begin
                      - coalesce((t->>'difference_cents')::bigint,0)));
   end if;
 
-  -- THE INFORMATIONAL HALF: enumeration drift, named by key, never a failure (CX1).
+  -- THE INFORMATIONAL HALF: enumeration drift, named by key, never a failure (CX1) -- PLUS
+  -- (CX1-v2) the two per-column figures whose individual movement is the lawful straggler
+  -- signature. Reported with both numbers so a reviewer can see the stall for what it is, and
+  -- so a REAL divergence (which would also break the bound quantity above) is never invisible.
+  if r.gl_balance_cents is distinct from (t->>'gl_prime_cents')::bigint then
+    v_drift := v_drift || jsonb_build_object('term','gl_balance_cents',
+      'stored', r.gl_balance_cents, 'recomputed', (t->>'gl_prime_cents')::bigint);
+  end if;
+  if r.outstanding_cents is distinct from (t->>'outstanding_cents')::bigint then
+    v_drift := v_drift || jsonb_build_object('term','outstanding_cents',
+      'stored', r.outstanding_cents, 'recomputed', (t->>'outstanding_cents')::bigint);
+  end if;
+
   v_stored_snap := coalesce(r.snapshot, '{}'::jsonb) - 'acknowledged_outstanding';
   v_fresh_snap  := coalesce(t->'snapshot', '{}'::jsonb) - 'acknowledged_outstanding';
   for k in select jsonb_object_keys(v_stored_snap) union select jsonb_object_keys(v_fresh_snap) loop
@@ -4405,7 +4630,9 @@ begin
   end loop;
   v_info := jsonb_build_object(
     'snapshot_enumeration_differs', (coalesce(array_length(v_keys,1),0) > 0),
-    'keys', to_jsonb(v_keys));
+    'keys', to_jsonb(v_keys),
+    'per_column_drift', v_drift,
+    'per_column_drift_present', (jsonb_array_length(v_drift) > 0));
 
   return jsonb_build_object(
     'reconciliation_id', p_recon, 'statement_id', r.statement_id,
@@ -7167,10 +7394,38 @@ begin
       raise exception '0040 tail: the settled-authority belt carries the settled predicate % time(s), expected exactly 2 (the line-member arm and the entry-member arm)', v_hits
         using errcode='CLR10';
     end if;
-    v_hits := (length(v_norm) - length(replace(v_norm, 'br.completed_at < transaction_timestamp()', '')))
-              / length('br.completed_at < transaction_timestamp()');
+    -- 0040 FIX WAVE A6-v2: the exclusion is the TRANSACTION-LOCAL GUC, never a timestamp. The
+    -- timestamp form (`br.completed_at < transaction_timestamp()`) answered "completed before my
+    -- transaction STARTED", which let a stalled older transaction move money out of a period a
+    -- newer transaction had already certified -- so the old literal is pinned ABSENT as well as
+    -- the new one pinned present, on both arms.
+    if position('completed_at < transaction_timestamp()' in v_norm) <> 0 then
+      raise exception '0040 tail: the settled-authority belt is back to excluding same-transaction receipts BY TIMESTAMP -- a stalled older transaction would again be able to move money out of an already-certified period (FIX WAVE A6-v2)'
+        using errcode='CLR10';
+    end if;
+    v_hits := (length(v_norm) - length(replace(v_norm,
+                $a6$br.id is distinct from nullif(current_setting('clara.completing_recon', true), '')::uuid$a6$, '')))
+              / length($a6$br.id is distinct from nullif(current_setting('clara.completing_recon', true), '')::uuid$a6$);
     if v_hits <> 2 then
-      raise exception '0040 tail: the settled-authority belt excludes same-transaction receipts on % arm(s), expected exactly 2 -- FIX WAVE A6 forbids the belt refusing a lawful match-and-complete transaction', v_hits
+      raise exception '0040 tail: the settled-authority belt excludes the writer-declared same-transaction receipt on % arm(s), expected exactly 2 -- FIX WAVE A6 forbids the belt refusing a lawful match-and-complete transaction', v_hits
+        using errcode='CLR10';
+    end if;
+    -- ...and the DECLARER is complete_bank_reconciliation, and only it. A belt exclusion whose
+    -- GUC nobody sets is dead code; a GUC a SECOND writer could set is a hatch.
+    v_norm := lower(regexp_replace(regexp_replace(regexp_replace(
+      pg_get_functiondef('clara.complete_bank_reconciliation(uuid,uuid[],text)'::regprocedure),
+      '/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'), '\s+',' ','g'));
+    if position($a6w$set_config('clara.completing_recon', v_recon::text, true)$a6w$ in v_norm) = 0 then
+      raise exception '0040 tail: clara.complete_bank_reconciliation no longer declares its own receipt id into the transaction-local clara.completing_recon GUC -- the belt''s same-transaction exclusion has nothing to exclude, and a lawful match-and-complete transaction refuses at commit'
+        using errcode='CLR10';
+    end if;
+    select count(*)::int into v_n
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     where n.nspname = 'clara' and p.prokind = 'f'
+       and p.prosrc like '%clara.completing_recon%'
+       and p.proname <> '_tf_bank_settled_authority_belt';
+    if v_n <> 1 then
+      raise exception '0040 tail: % clara function(s) besides the settled-authority belt name clara.completing_recon, expected exactly 1 (complete_bank_reconciliation) -- a second writer of that GUC is a bypass hatch', v_n
         using errcode='CLR10';
     end if;
   end;
@@ -7186,6 +7441,25 @@ begin
          / length($bd$ex.resolution_disposition in ('matched_booking','written_off_adjustment')$bd$);
   if v_n <> 2 then
     raise exception '0040 tail: the settled-authority belt scopes its resolved-then-booked door on % arm(s), expected exactly 2', v_n
+      using errcode='CLR10';
+  end if;
+  -- 0040 FIX WAVE A4-v2 [the delta round, adjudicated]: ...AND BOTH ARMS ALSO DEMAND THAT THE
+  -- RESOLUTION POST-DATES EVERY COVERING RECEIPT. Without this second half the door admits a
+  -- STALLED transaction (resolved_at = the transaction's START, which can precede a receipt
+  -- certified while it idled), whose rows the receipt's OWN cutoff-gated re-derivation then sees
+  -- -- collapsing excepted(P) and leaving a certified receipt that no longer reproduces. The
+  -- disposition literal is unchanged, so it is pinned separately from this one: losing EITHER
+  -- half re-opens a different hole, and a count on the disposition alone could not tell.
+  v_n := (length(v_src) - length(replace(v_src, 'ex.resolved_at > v_cover_at', '')))
+         / length('ex.resolved_at > v_cover_at');
+  if v_n <> 2 then
+    raise exception '0040 tail: the settled-authority belt gates its resolved-then-booked door on the covering receipt''s cutoff on % arm(s), expected exactly 2 -- FIX WAVE A4-v2 forbids a stalled transaction booking into an already-certified period', v_n
+      using errcode='CLR10';
+  end if;
+  -- ...and v_cover_at is the MAX over the very rows the settled predicate counted, never a
+  -- second, looser derivation.
+  if position('max(br.completed_at)' in v_src) = 0 then
+    raise exception '0040 tail: the settled-authority belt no longer derives its covering cutoff from the settled predicate''s own rows (max(br.completed_at)) -- a separately-derived cutoff can disagree with the set it gates'
       using errcode='CLR10';
   end if;
 
@@ -7467,8 +7741,10 @@ declare
     -- reconciliation lifecycle
     'reconciliation_id','statement_id','bank_account_id','prior_reconciliation_id',
     'first_period','outstanding_items','exception_items',
-    -- the exception door
+    -- the exception door (0040 FIX WAVE F10: counterpart_exception_id -- the CX2 arm's SECOND
+    -- resolved row, an identifier, so an event-only reader can rebuild the closed pair)
     'exception_id','line_id','kind','resolution_disposition','counterpart_line_id',
+    'counterpart_exception_id',
     -- the rule lifecycle
     'rule_id','client_id','withdrawn'];
 begin

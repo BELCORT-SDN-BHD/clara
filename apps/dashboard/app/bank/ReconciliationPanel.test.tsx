@@ -65,20 +65,34 @@ function completeButtonTag(html: string): string {
   return m![0];
 }
 
-test("the ack list gates the complete button: disabled until every stale id is acknowledged", () => {
-  const view = mkView({ status: "open", stale_outstanding_ids: ["stale-a", "stale-b"] });
+test("[F1 fix — NEW CONTRACT] the ack list gates the complete button: disabled until every stale id is acknowledged, WITH can_complete:true and recon_outstanding_stale named in blockers (the server's own new remedy shape — no longer an impossible combination)", () => {
+  const view = mkView({
+    status: "open", can_complete: true, blockers: ["recon_outstanding_stale"],
+    stale_outstanding_ids: ["stale-a", "stale-b"],
+  });
 
   const none = render(createElement(ReconciliationView, { view, ackedStaleIds: new Set<string>()}));
-  assert.ok(completeButtonTag(none).includes("disabled"), "zero acks must stay disabled");
+  assert.ok(completeButtonTag(none).includes("disabled"), "zero acks must stay disabled even though can_complete is true");
   assert.ok(none.includes("2 unacknowledged"), "the unacknowledged count renders");
+  assert.ok(none.includes("recon_outstanding_stale"), "the named blocker still renders, informationally");
 
   const partial = render(createElement(ReconciliationView, { view, ackedStaleIds: new Set(["stale-a"]) }));
   assert.ok(completeButtonTag(partial).includes("disabled"), "one of two acked must still be disabled");
   assert.ok(partial.includes("1 unacknowledged"));
 
   const full = render(createElement(ReconciliationView, { view, ackedStaleIds: new Set(["stale-a", "stale-b"]) }));
-  assert.ok(!completeButtonTag(full).includes("disabled"), "both acked must be enabled");
+  assert.ok(!completeButtonTag(full).includes("disabled"), "both acked + can_complete:true unlocks it — the DB's new remedy path, end to end from this view");
   assert.ok(full.includes("all acknowledged"));
+});
+
+test("[F1 fix — NEW CONTRACT] a fixture with stale ids present AND can_complete:false (some OTHER, genuine blocker) stays disabled regardless of acks", () => {
+  const view = mkView({
+    status: "open", can_complete: false, blockers: ["recon_outstanding_stale", "recon_difference_nonzero"],
+    stale_outstanding_ids: ["stale-a"],
+  });
+  const html = render(createElement(ReconciliationView, { view, ackedStaleIds: new Set(["stale-a"]) }));
+  assert.ok(completeButtonTag(html).includes("disabled"), "can_complete:false wins even with every stale id acked — a DIFFERENT blocker is still live");
+  assert.ok(html.includes("recon_difference_nonzero"), "the other, genuine blocker renders");
 });
 
 test("[D8/CX9 — LANDED] complete is gated OFF THE SERVER can_complete VERDICT — precondition_met/chain_ok no longer gate the button, only its banners", () => {
@@ -136,7 +150,10 @@ test("a preview with a well-formed voided_receipt renders the preview as PRIMARY
     status: "open", can_complete: true,
     voided_receipt: {
       reconciliation_id: "r-old", status: "void",
-      opening_cents: 1234500, closing_cents: 1200000,
+      // [F16/CX6#5 fix] a MID-CHAIN void: the statement's own printed
+      // opening (52,000) differs from its self-closing anchor (50,000) —
+      // exactly the scenario the fix names; both must render, distinctly.
+      opening_anchor_cents: 5000000, opening_cents: 5200000, closing_cents: 1200000,
       gl_balance_cents: -50000, outstanding_cents: 0, excepted_cents: 0,
       completed_by: "user1", completed_at: "2026-04-15T00:00:00Z",
       voided_by: "user2", voided_at: "2026-04-20T00:00:00Z", voided_reason: "duplicate upload",
@@ -148,6 +165,8 @@ test("a preview with a well-formed voided_receipt renders the preview as PRIMARY
   assert.ok(html.includes("Previous receipt (voided)"), "the prior void is surfaced, collapsed");
   assert.ok(html.includes("duplicate upload"), "the void reason renders verbatim");
   assert.ok(html.includes("<details"), "collapsed, not always-open");
+  assert.ok(html.includes(fmtCents(5000000)) && html.includes(fmtCents(5200000)), "the anchor AND the statement's printed opening both render, as DISTINCT figures");
+  assert.ok(html.includes("opening anchor"), "the anchor has its own labelled row");
 });
 
 test("[fail-closed] a view with no voided_receipt renders no previous-receipt section at all", () => {

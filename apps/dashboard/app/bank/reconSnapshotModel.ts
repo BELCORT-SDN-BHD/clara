@@ -134,11 +134,13 @@ export type BankReconciliationSnapshot = {
   outstanding_lines: ReconOutstandingLineSide[];
   exceptions: ReconExceptionEntry[];
   opening_lineage: ReconOpeningLineage[];
-  /** [D7] false when the raw snapshot is missing one of the FIVE known
-   *  collections as an array — a shape-drift signal. The caller must treat
-   *  an all-empty snapshot as "unavailable" when this is false, never as
-   *  "a clean period" (a known-but-unmapped collection must never silently
-   *  read as nothing outstanding). */
+  /** [D7; F15/CX6#4] false when the raw snapshot is missing one of the FIVE
+   *  known collections as an array, OR carries any OTHER array-valued key
+   *  beyond the two intentionally-ignored ones (reversal_pairs_excluded,
+   *  acknowledged_outstanding) — an EXACT allowlist, not just a floor. The
+   *  caller must treat shapeOk===false as "unavailable" UNCONDITIONALLY
+   *  (never partially rendering whatever mapped OK), and never as "a clean
+   *  period" just because the mapped arrays happen to be empty. */
   shapeOk: boolean;
 };
 
@@ -147,10 +149,24 @@ const SNAPSHOT_ARRAY_KEYS = [
   "exceptions", "bank_uncleared_opening",
 ] as const;
 
+// [F15/CX6#4 fix] the two arrays this lane deliberately never maps into
+// BankReconciliationSnapshot — 0040:1515 reversal_pairs_excluded, 0040:1516/
+// 1946 acknowledged_outstanding (appended by ack_stale_outstanding_items) —
+// present-but-ignored is fine; shapeOk must still hold for these two ONLY.
+const SNAPSHOT_IGNORED_ARRAY_KEYS = ["reversal_pairs_excluded", "acknowledged_outstanding"] as const;
+const SNAPSHOT_ALLOWED_ARRAY_KEYS: ReadonlySet<string> =
+  new Set<string>([...SNAPSHOT_ARRAY_KEYS, ...SNAPSHOT_IGNORED_ARRAY_KEYS]);
+
 export function toSnapshot(raw: unknown): BankReconciliationSnapshot {
   const o = rec(raw);
+  // [F15/CX6#4 fix] shapeOk is now an EXACT allowlist over every ARRAY-
+  // VALUED key: the five known collections must all be present as arrays,
+  // AND no other array-valued key may appear beyond the two ignored above.
+  // A future, unmapped collection (e.g. 'outstanding_adjustments') must fail
+  // closed here — never render as if the period were silently clean.
   const shapeOk = typeof raw === "object" && raw !== null
-    && SNAPSHOT_ARRAY_KEYS.every((k) => Array.isArray(o[k]));
+    && SNAPSHOT_ARRAY_KEYS.every((k) => Array.isArray(o[k]))
+    && Object.keys(o).every((k) => !Array.isArray(o[k]) || SNAPSHOT_ALLOWED_ARRAY_KEYS.has(k));
   return {
     outstanding_entries: arr(o.outstanding_entry_sides).map(toOutstandingEntrySide),
     outstanding_group_items: arr(o.outstanding_group_items).map(toOutstandingGroupItem),
@@ -173,6 +189,10 @@ export function toSnapshot(raw: unknown): BankReconciliationSnapshot {
 export type VoidedReceiptRow = {
   reconciliation_id: string | null;
   status: string;
+  /** [F16/CX6#5 fix] the self-closing carry-down ANCHOR (0040:4103) — its
+   *  OWN key, distinct from `opening_cents` below (the statement's own
+   *  printed figure); fails closed to null when absent, never conflated. */
+  opening_anchor_cents: number | null;
   opening_cents: number | null;
   closing_cents: number | null;
   gl_balance_cents: number | null;
@@ -194,6 +214,7 @@ export function toVoidedReceiptRow(raw: unknown): VoidedReceiptRow | null {
   return {
     reconciliation_id: s(o.reconciliation_id) ?? s(o.id),
     status,
+    opening_anchor_cents: numOrNull(o.opening_anchor_cents),
     opening_cents: numOrNull(o.opening_cents) ?? numOrNull(o.statement_opening_cents),
     closing_cents: numOrNull(o.closing_cents) ?? numOrNull(o.statement_closing_cents),
     gl_balance_cents: numOrNull(o.gl_balance_cents),

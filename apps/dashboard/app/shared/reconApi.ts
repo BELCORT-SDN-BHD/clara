@@ -38,9 +38,13 @@ const opKey = () => crypto.randomUUID();
 // ---------------------------------------------------------------------------
 
 /** get_bank_reconciliation(p_statement) — the receipt + snapshot when a
- *  complete/void recon exists on this statement, or the DERIVED open preview
- *  otherwise (design §6). Never null in the open-statement case (a preview
- *  always exists); null only degrades a truly empty response. */
+ *  COMPLETE recon exists on this statement, or the DERIVED open preview
+ *  otherwise (design §6). [F5 fix — was "complete/void"] a void receipt is
+ *  NEVER the primary body: once no complete recon exists, the primary body
+ *  is always the live preview (re-completion reachable), with the newest
+ *  void's own columns/snapshot carried under `voided_receipt` (the C6
+ *  amendment). Never null in the open-statement case (a preview always
+ *  exists); null only degrades a truly empty response. */
 export async function getBankReconciliation(token: string, statementId: string): Promise<BankReconciliationView | null> {
   const out = await rpc("get_bank_reconciliation", { p_statement: statementId }, token);
   if (!out) return null;

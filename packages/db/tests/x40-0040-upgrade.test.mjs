@@ -35,6 +35,12 @@
 // identical rule the backfill just derived, so no deploy-timing split survives. A second
 // test proves the backfill's hard safety net aborts atomically on a corpus it cannot
 // honestly resolve.
+//
+// AND ONE LODGER (0040 FIX WAVE F13): x40.z-CPM, at the foot of this file. It is not an
+// upgrade drill at all -- it is the complete_pending_match settled-period splice, which can
+// only be reached by disabling a member-table belt (an ACCESS EXCLUSIVE lock) and therefore
+// cannot run inside the concurrent battery. It lives here purely for the isolation this
+// reset-gated file already has, and it applies 0040 in full before it starts.
 // ===========================================================================
 
 import { test, after } from "node:test";
@@ -51,6 +57,12 @@ import {
   freshResolution, draftEntryV3, approveEntry, counterpartyRows, normalize,
 } from "./a21-helpers.mjs";
 import * as wb from "./wave-b/wb-fixtures.mjs";
+// 0040 FIX WAVE F13: x40.z's staged half moved here for the isolation this reset-gated file
+// already has. It needs the x38 bank toolkit (stateless by construction -- see that module's
+// header), never a re-implementation.
+import {
+  caught, addBankAccount, enterStatement, completePendingMatch, lineGroupStatus,
+} from "./x38-match-fixtures.mjs";
 
 after(async () => {
   printLaneNotes("x40-0040-upgrade");
@@ -374,4 +386,149 @@ test("0040 upgrade drill (abort side): an 'allocate' row orphaned from any item_
     0, "...and 0040 is not recorded as applied",
   );
   noteLane("0040 backfill hard-safety-net ABORT verified: an orphaned allocate row -- unbuildable through the audited verbs -- blocks the apply and rolls back atomically");
+});
+
+// ===========================================================================
+// x40.z-CPM -- THE complete_pending_match SETTLED-PERIOD SPLICE, DISCRIMINATED
+// (0040 FIX WAVE F13 + F18, the delta round's MAJOR 7).
+//
+// WHY IT LIVES IN *THIS* FILE AND NOT IN x40-wave-c-c-tieout.test.mjs (F13).
+// The only way to reach this guard is to stage its prestate by hand -- a PENDING
+// reservation on a line whose statement is already reconciled -- and no lawful
+// sequence of audited verbs can produce one (the walk-through is below). Staging
+// means `ALTER TABLE clara.bank_match_line_members DISABLE TRIGGER`, which takes
+// an ACCESS EXCLUSIVE lock on a table other packages' suites write concurrently
+// against the same shared CI database. A lock that coarse has no business in the
+// concurrent battery. This file is RESET-GATED (it drops schema clara) and
+// therefore already runs ALONE against its OWN throwaway database -- exactly the
+// isolation this cell needs, at no extra cost.
+//
+// WHY NO LAWFUL SEQUENCE OF AUDITED VERBS CAN REACH IT (Cluster A as shipped:
+// A1/A4/A5/A6 all live). A period can NEVER complete while ANY of its own lines
+// carries a PENDING reservation (recon_line_reserved, checked before the chain
+// law), and the chain law then refuses recon_prior_missing on every LATER period
+// on the SAME account too -- so "the pending line's own statement, or anything
+// after it on that account, reaches complete" is structurally unreachable while
+// the reservation stays pending. Voiding the pending line's statement to free it
+// is closed as well (void_bank_statement refuses while any line rides a pending
+// OR live match). And attaching a FRESH reservation to an already-settled line
+// is closed by A4: the belt's member-INSERT carve-out admits ONLY a line whose
+// exception is RESOLVED as matched_booking / written_off_adjustment, and by A1's
+// narrowed completion precondition such a line can only have settled its period
+// while STILL live-matched -- so it is never simultaneously free for a new
+// reservation. Every reachable path circles back to the same wall. This is a
+// defence-in-depth guard, staged honestly.
+//
+// AND WHY THE BELT IS DISABLED FOR THE **ACT**, NOT ONLY FOR THE STAGING (F18).
+// The previous cut re-enabled t_bmlm_settled_authority before calling the verb,
+// so the deferred belt was armed during the act -- and complete_pending_match's
+// own member UPDATE (pending -> live) queues that belt, which raises the SAME
+// recon_period_settled token at commit. The cell was therefore green whether or
+// not the S4.3 splice existed at all: delete the splice and the belt answers in
+// its place. Here BOTH member-table belts stay disabled across the act, so the
+// spliced guard is the ONLY thing left that can raise -- and it must, which is
+// what "the verb refuses" actually means. The belt's own live behaviour is
+// proven separately, and with nothing disabled, by x40.z in the main battery.
+// ===========================================================================
+test("x40.z-CPM complete_pending_match's OWN spliced guard refuses recon_period_settled -- proven with both settled-authority belts disabled across the act, so nothing else can raise it", async (t) => {
+  if (skipUnlessReset(t)) return;
+  const { migrate } = await freshDb();
+  await migrate({ dir: MIG_DIR, log: () => {} }); // ...and 0040 on top: this cell tests 0040 itself
+  assert.ok(await columnExists("open_item_allocations", "effective_date"), "x40.z-CPM mandatory setup: 0040 is applied");
+
+  const w = await wb.buildWaveBWorld();
+  const sub = w.users.alice; // firm A's OWNER -- except_bank_line sits at the owner floor
+  const firm = w.firms.A;
+  const client = await createClient(sub, { name: `u40_cpm_${randomUUID().slice(0, 6)}`, opKey: opk("u40ccli") });
+  await buildChart(sub, client);
+  await grantConsent(sub, { firm, client }).catch(() => {});
+
+  // An isolated bank account: every S3 term is ACCOUNT-scoped and ALL-TIME, so the drill's own
+  // subledger book (on BANK) must not be able to reach this month's identity.
+  const CPMCOA = "161-U40";
+  await upsertAccountClassed(sub, { client, code: CPMCOA, name: "x40.z-CPM bank gl", type: "asset", opKey: opk("u40cpmgl") });
+  const added = await addBankAccount(sub, { client, bankCode: "MBB", accountNumber: `1099${randomUUID().slice(0, 10)}`, coaAccountCode: CPMCOA });
+  const bankAccountId = idOf(added, "bank_account_id", "id");
+
+  // A month whose single line is settled by an OPEN exception -- the identity ties on excepted(P)
+  // alone (closing -900 = anchor 0 + gl' 0 - outstanding 0 + excepted -900), so the period
+  // certifies while the line carries NO membership of its own.
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: bankAccountId, periodStart: "2033-11-01", periodEnd: "2033-11-30", opening: 0,
+    specs: [{ amountCents: -900, entryDate: "2033-11-11", description: "u40 cpm the disputed debit" }],
+    keepPeriod: true,
+  });
+  await humanQuery(sub, namedCall("except_bank_line", [
+    { name: "p_line" }, { name: "p_kind" }, { name: "p_reason" }, { name: "p_op_key" },
+  ]), [stmt.lines[0].id, "bank_error", "u40 cpm the line this cell forges a reservation onto", opk("u40cpmexc")]);
+  const receipt = (await humanQuery(sub, namedCall("complete_bank_reconciliation", [
+    { name: "p_statement" }, { name: "p_ack_outstanding", cast: "uuid[]" }, { name: "p_op_key" },
+  ]), [stmt.statementId, [], opk("u40cpmcomplete")])).rows[0].result;
+  assert.equal(
+    (await rootQuery("select status from clara.bank_reconciliations where id=$1", [idOf(receipt, "reconciliation_id", "id")])).rows[0].status,
+    "complete", "x40.z-CPM mandatory setup: the open-excepted line settles the period cleanly",
+  );
+  assert.equal((await lineGroupStatus(stmt.lines[0].id)).length, 0, "x40.z-CPM mandatory setup: the line carries no live/pending member -- free for the forged insert");
+
+  // A real (unapproved) draft backs the reservation: complete_pending_match's own preflight
+  // (a reservation with nothing to complete would hold the line forever) refuses a NULL
+  // draft_entry_id long before it reaches the guard under test.
+  const forgedDraft = await draftEntryV3(sub, {
+    client, resolution: await manualRes(sub, client), memo: "u40 cpm forged reservation's draft",
+    postingDate: "2033-11-11",
+    lines: [
+      { account_code: EXPN, debit_cents: 900, credit_cents: 0, description: "cpm dr" },
+      { account_code: CPMCOA, debit_cents: 0, credit_cents: 900, description: "cpm cr" },
+    ],
+    opKey: opk("u40cpmdraft"),
+  });
+
+  const forgedMatch = randomUUID();
+  const belts = [
+    ["bank_match_line_members", "t_bmlm_settled_authority"],
+    ["bank_match_entry_members", "t_bmem_settled_authority"],
+  ];
+  try {
+    // Postgres refuses ALTER TABLE ... ENABLE/DISABLE TRIGGER while the SAME transaction still
+    // carries a pending deferred trigger event for that table (55006), so the disable, the
+    // staging transaction, the act and the re-enable are each their own transaction.
+    for (const [tbl, trg] of belts) {
+      await withActor({}, (c) => c.query(`alter table clara.${tbl} disable trigger ${trg}`));
+    }
+    // withActor only wraps an explicit begin/commit when transaction:true -- without it the
+    // bank_matches INSERT autocommits alone and trips the 0038 group-tie belt (match_group_empty)
+    // before the member row lands.
+    await withActor({ transaction: true }, async (c) => {
+      await c.query(
+        `insert into clara.bank_matches(id, firm_id, client_id, bank_account_id, status, origin, draft_entry_id, created_by)
+         values ($1, (select firm_id from clara.clients where id=$2), $2, $3, 'pending', 'human', $5, $4)`,
+        [forgedMatch, client, bankAccountId, sub, forgedDraft.entry_id],
+      );
+      await c.query(
+        `insert into clara.bank_match_line_members(firm_id, client_id, match_id, line_id, bank_account_id, amount_cents, group_status, created_by)
+         values ((select firm_id from clara.clients where id=$1), $1, $2, $3, $4, -900, 'pending', $5)`,
+        [client, forgedMatch, stmt.lines[0].id, bankAccountId, sub],
+      );
+    });
+    assert.equal((await lineGroupStatus(stmt.lines[0].id))[0], "pending", "x40.z-CPM mandatory setup: the forged reservation landed pending");
+
+    // THE ACT, with both belts still disabled (F18): only the S4.3 splice can raise now.
+    const denied = await caught(() => completePendingMatch(sub, { client, match: forgedMatch, opKey: opk("u40cpmact") }));
+    assert.ok(denied, "x40.z-CPM complete_pending_match must refuse -- flipping this reservation live would move a term the receipt already certified");
+    assert.equal(denied.code, "CLR10", `x40.z-CPM expected CLR10 (got ${denied.code} -- ${denied.message})`);
+    assert.equal(
+      JSON.parse(denied.detail ?? "{}").reason, "recon_period_settled",
+      `x40.z-CPM the refusal must be the VERB's OWN spliced recon_period_settled guard -- with both settled-authority belts disabled nothing else can produce it (got ${denied.detail})`,
+    );
+    assert.equal((await lineGroupStatus(stmt.lines[0].id))[0], "pending", "x40.z-CPM the reservation is untouched -- the verb refused before mutating the member row (which is also why the disabled belts cannot be what raised)");
+    assert.equal(
+      (await rootQuery("select status from clara.journal_entries where id=$1", [forgedDraft.entry_id])).rows[0].status,
+      "draft", "x40.z-CPM ...and the backing draft was never approved -- the refusal is strictly BEFORE the verb's own writes",
+    );
+    noteLane("x40.z-CPM: the complete_pending_match splice refused recon_period_settled with both member belts disabled -- the guard is the verb's own, not the belt answering in its place");
+  } finally {
+    for (const [tbl, trg] of belts) {
+      await withActor({}, (c) => c.query(`alter table clara.${tbl} enable trigger ${trg}`)).catch(() => {});
+    }
+  }
 });

@@ -13,7 +13,7 @@ import type { PgrestError } from "../shared/wire";
 import { arAging, apAging, customerStatement, supplierStatement } from "../shared/agingApi";
 import {
   agingScreenState, agingRowHasBalance, agingRowHasOverdueItem, AGING_BUCKET_LABELS,
-  type AgingBucketRow, type AgingDomain, type AgingTotals, type StatementLineRow,
+  type AgingBucketRow, type AgingDomain, type AgingTotals, type StatementLineRow, type ScreenState,
 } from "./agingModel";
 import { fmtCents, fmtDeltaCents } from "../shared/fmt";
 import styles from "./aging.module.css";
@@ -42,6 +42,11 @@ export function AgingWorkbench({ token, clientId, clientName }: { token: string;
   const reload = useCallback(async () => {
     setLoading(true);
     setLoadErr(null);
+    // [F17/CX6#6 fix] a domain/as-of TRANSITION clears rows AND totals up
+    // front — the prior domain's money must never linger through the
+    // loading window into a different domain's screen.
+    setRows([]);
+    setTotals(null);
     try {
       const fn = domain === "ar" ? arAging : apAging;
       const read = await fn(token, clientId, asOf);
@@ -50,7 +55,11 @@ export function AgingWorkbench({ token, clientId, clientName }: { token: string;
       setAvailable(read.available);
     } catch (e) {
       setLoadErr((e as Error).message);
+      // [F17/CX6#6 fix] the catch also nulls totals explicitly (belt and
+      // suspenders alongside the up-front clear above) — a failed reload
+      // must never leave the PRIOR successful load's footer totals in state.
       setRows([]);
+      setTotals(null);
     } finally {
       setLoading(false);
     }
@@ -88,50 +97,10 @@ export function AgingWorkbench({ token, clientId, clientName }: { token: string;
           <p className={styles.sectionTitle}>
             {domain === "ar" ? "Customers" : "Vendors"} as of {asOf} ({visibleRows.length})
           </p>
-          {state === "loading" ? (
-            <p className={styles.muted}>Loading…</p>
-          ) : state === "unavailable" ? (
-            <p className={styles.errorText}>The aging report came back in an unexpected shape — showing nothing rather than guessing. Try reloading.</p>
-          ) : state === "empty" ? (
-            <p className={styles.emptyState}>No open {domain === "ar" ? "receivables" : "payables"} as of this date.</p>
-          ) : (
-            <div className={styles.tableWrap}>
-              <table className={styles.table}>
-                <thead>
-                  <tr>
-                    <th>counterparty</th>
-                    {AGING_BUCKET_LABELS.map((b) => <th key={b.key} className={styles.num}>{b.label}</th>)}
-                    <th className={styles.num}>total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {visibleRows.map((r) => (
-                    <tr
-                      key={r.counterparty_id}
-                      className={`${styles.counterpartyRow} ${r.counterparty_id === selectedCounterpartyId ? styles.counterpartyRowActive : ""}`}
-                      onClick={() => setSelectedCounterpartyId(r.counterparty_id)}
-                    >
-                      <td>
-                        {r.counterparty_name ?? r.counterparty_id.slice(0, 8)}
-                        {agingRowHasOverdueItem(r) ? <span className={styles.overdueTag}>overdue</span> : null}
-                      </td>
-                      {AGING_BUCKET_LABELS.map((b) => <td key={b.key} className={styles.num}>{fmtCents(r[b.key])}</td>)}
-                      <td className={styles.num}><strong>{fmtCents(r.total_cents)}</strong></td>
-                    </tr>
-                  ))}
-                </tbody>
-                {totals ? (
-                  <tfoot>
-                    <tr>
-                      <td><strong>total</strong></td>
-                      {AGING_BUCKET_LABELS.map((b) => <td key={b.key} className={styles.num}>{fmtCents(totals[b.key])}</td>)}
-                      <td className={styles.num}><strong>{fmtCents(totals.total_cents)}</strong></td>
-                    </tr>
-                  </tfoot>
-                ) : null}
-              </table>
-            </div>
-          )}
+          <AgingListBody
+            state={state} domain={domain} visibleRows={visibleRows} totals={totals}
+            selectedCounterpartyId={selectedCounterpartyId} onSelect={setSelectedCounterpartyId}
+          />
         </section>
 
         <section className={styles.detailPane}>
@@ -142,6 +111,72 @@ export function AgingWorkbench({ token, clientId, clientName }: { token: string;
           )}
         </section>
       </div>
+    </div>
+  );
+}
+
+/** [F17/CX6#6 fix] the list pane's body, split out PURE (no hooks, no
+ *  network — the ReconciliationView precedent) precisely so its render
+ *  branches are directly testable. The root cause of the stale-total bug
+ *  was a MISSING 'error' branch here: `state` could read "error" while this
+ *  fell through to the default table arm and rendered whatever `totals` the
+ *  caller still had in hand. Every ScreenState arm is now explicit — no
+ *  default table arm exists that a new/renamed state could silently fall
+ *  into, and 'error' renders NO money at all. */
+export function AgingListBody({
+  state, domain, visibleRows, totals, selectedCounterpartyId, onSelect,
+}: {
+  state: ScreenState;
+  domain: AgingDomain;
+  visibleRows: AgingBucketRow[];
+  totals: AgingTotals | null;
+  selectedCounterpartyId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  if (state === "loading") return <p className={styles.muted}>Loading…</p>;
+  if (state === "error") return <p className={styles.errorText}>Could not load this aging report — showing nothing rather than stale figures from a prior read.</p>;
+  if (state === "unavailable") {
+    return <p className={styles.errorText}>The aging report came back in an unexpected shape — showing nothing rather than guessing. Try reloading.</p>;
+  }
+  if (state === "empty") {
+    return <p className={styles.emptyState}>No open {domain === "ar" ? "receivables" : "payables"} as of this date.</p>;
+  }
+  return (
+    <div className={styles.tableWrap}>
+      <table className={styles.table}>
+        <thead>
+          <tr>
+            <th>counterparty</th>
+            {AGING_BUCKET_LABELS.map((b) => <th key={b.key} className={styles.num}>{b.label}</th>)}
+            <th className={styles.num}>total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {visibleRows.map((r) => (
+            <tr
+              key={r.counterparty_id}
+              className={`${styles.counterpartyRow} ${r.counterparty_id === selectedCounterpartyId ? styles.counterpartyRowActive : ""}`}
+              onClick={() => onSelect(r.counterparty_id)}
+            >
+              <td>
+                {r.counterparty_name ?? r.counterparty_id.slice(0, 8)}
+                {agingRowHasOverdueItem(r) ? <span className={styles.overdueTag}>overdue</span> : null}
+              </td>
+              {AGING_BUCKET_LABELS.map((b) => <td key={b.key} className={styles.num}>{fmtCents(r[b.key])}</td>)}
+              <td className={styles.num}><strong>{fmtCents(r.total_cents)}</strong></td>
+            </tr>
+          ))}
+        </tbody>
+        {totals ? (
+          <tfoot>
+            <tr>
+              <td><strong>total</strong></td>
+              {AGING_BUCKET_LABELS.map((b) => <td key={b.key} className={styles.num}>{fmtCents(totals[b.key])}</td>)}
+              <td className={styles.num}><strong>{fmtCents(totals.total_cents)}</strong></td>
+            </tr>
+          </tfoot>
+        ) : null}
+      </table>
     </div>
   );
 }

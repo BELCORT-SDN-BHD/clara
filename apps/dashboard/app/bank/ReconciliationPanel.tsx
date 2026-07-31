@@ -155,9 +155,10 @@ export function ReconciliationView({
             {view.completed_by ? ` by ${shortId(view.completed_by)}` : ""}
             {view.completed_at ? ` · ${new Date(view.completed_at).toLocaleString()}` : ""}
           </p>
-          {view.status === "void" ? (
-            <p className={styles.banner}>Voided{view.voided_reason ? `: ${view.voided_reason}` : ""}.</p>
-          ) : null}
+          {/* [F5 fix] the body-level "Voided:" banner is DELETED — post-C6 a
+              primary receipt is always COMPLETE (see reconModel's mode
+              comment); the voided_receipt sidecar below is the ONE shape
+              for a void, with its own "Voided" banner. */}
         </div>
       ) : null}
 
@@ -192,7 +193,11 @@ export function ReconciliationView({
             <table className={styles.table}>
               <thead><tr><th>term</th><th className={styles.num}>cents</th></tr></thead>
               <tbody>
-                <tr><td>opening</td><td className={styles.num}>{fmtCents(view.voided_receipt.opening_cents)}</td></tr>
+                {/* [F16/CX6#5 fix] the anchor is its OWN labelled row — a
+                    mid-chain void can print a DIFFERENT opening than its
+                    self-closing anchor; conflating them was the bug. */}
+                <tr><td>opening anchor</td><td className={styles.num}>{fmtCents(view.voided_receipt.opening_anchor_cents)}</td></tr>
+                <tr><td>opening (statement)</td><td className={styles.num}>{fmtCents(view.voided_receipt.opening_cents)}</td></tr>
                 <tr><td>closing</td><td className={styles.num}>{fmtCents(view.voided_receipt.closing_cents)}</td></tr>
                 <tr><td>gl balance</td><td className={styles.num}>{fmtCents(view.voided_receipt.gl_balance_cents)}</td></tr>
                 <tr><td>outstanding</td><td className={styles.num}>{fmtDeltaCents(view.voided_receipt.outstanding_cents)}</td></tr>
