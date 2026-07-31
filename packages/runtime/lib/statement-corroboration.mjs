@@ -48,6 +48,14 @@ export class StatementRefusal extends Error {
     this.name = "StatementRefusal";
     this.code = code;
     this.detail = detail;
+    // The DB's refusal taxonomy is deliberately bounded — `fail_statement_facts` records
+    // the CODE and drops the field-level detail (which fields disagreed, by how much). The
+    // C-b acceptance spent a live round-trip per diagnosis without this line: the detail
+    // must reach the OPERATOR somewhere, and the process log is that somewhere. Bounded at
+    // 2000 chars so a wholly-garbled read cannot flood the log stream.
+    try {
+      console.log(`[statement-refusal] ${code}: ${JSON.stringify(detail).slice(0, 2000)}`);
+    } catch { /* diagnostics must never mask the refusal itself */ }
   }
 }
 
