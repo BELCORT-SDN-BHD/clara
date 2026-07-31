@@ -87,9 +87,21 @@ const COLUMN_SYNONYMS = Object.freeze({
 
 /**
  * Read the document's stored OCR layout regions (reader-1's substrate). Scoped to the
- * NEWEST done, non-superseded `ocr` extraction — deliberately NOT the matcher's
- * read-ALL-extractions shape: a statement is one coherent document and concatenating two
- * engines' regions would interleave them by position and garble the table.
+ * NEWEST done `ocr` extraction that no LATER OCR read has replaced — deliberately NOT the
+ * matcher's read-ALL-extractions shape: a statement is one coherent document and
+ * concatenating two engines' regions would interleave them by position and garble the table.
+ *
+ * SUPERSEDE IS JUDGED KIND-HONESTLY (C-b acceptance finding, 2026-07-31). The 0017
+ * authoritative-extraction trigger points `superseded_by` at whatever done extraction is
+ * newest REGARDLESS OF KIND — so in the ordinary pipeline order (intake OCR → classify →
+ * human kind-stamp) every statement's layout geometry arrives here already "superseded" by
+ * a doc_classify verdict, and a bare `superseded_by is null` filter starves reader-1 on
+ * EVERY real document. A classify verdict replaces prior CLASSIFY authority, not the page's
+ * geometry: only a LATER OCR read replaces that. Hence the filter below excludes an ocr row
+ * only when its superseder is itself engine_kind='ocr'; newest-first ordering then picks the
+ * latest genuine re-OCR when one exists. (The trigger's kind-blind scope is ledgered for
+ * adjudication — PROJECTLOG PART 2; this read is correct under both the current and a
+ * kind-scoped trigger.)
  *
  * ORDERING mirrors `classify.mjs`'s own note: `version_n` is allocated per
  * (document_id, engine_id), so ordering by `extracted_at` first makes newest genuinely win.
@@ -100,7 +112,10 @@ export async function readStatementLayoutRegions(client, { documentId, firmId })
        select e.id, e.firm_id, e.engine_id
          from clara.document_extractions e
         where e.document_id = $1 and e.firm_id = $2 and e.status = 'done'
-          and e.engine_kind = 'ocr' and e.superseded_by is null
+          and e.engine_kind = 'ocr'
+          and not exists (
+            select 1 from clara.document_extractions s
+             where s.id = e.superseded_by and s.engine_kind = 'ocr')
         order by e.extracted_at desc, e.version_n desc, e.id desc
         limit 1)
      select e.id as extraction_id, e.engine_id, r.field_path, r.text_content, r.locator
