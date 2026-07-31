@@ -39,7 +39,7 @@
 import { createReadStream } from "node:fs";
 import { createHash } from "node:crypto";
 
-import { readHeaderFromTextLines } from "../lib/statement-layout-reader.mjs";
+import { readHeaderFromTextLines, readStatementFromLayout } from "../lib/statement-layout-reader.mjs";
 import { applySign, parseMoneyCents, parseStatementDate, normalizeAccountNumber, matchInstitution } from "../lib/statement-grammar.mjs";
 
 const API_VERSION = "2024-11-30";
@@ -196,6 +196,34 @@ function fieldCurrencyCode(field) {
   return code ? String(code).toUpperCase() : null;
 }
 
+/** The response's pages + tables as INTAKE-SHAPED regions, so the line completion can run
+ *  the exact deterministic grammar reader-1 uses over THIS response's own recognition. */
+export function responseLayoutRegions(result) {
+  const out = [];
+  const pages = Array.isArray(result?.pages) ? result.pages : [];
+  pages.forEach((page, pi) => {
+    (page.lines ?? []).forEach((line, li) => {
+      const polygon = Array.isArray(line.polygon) ? line.polygon : line.boundingRegions?.[0]?.polygon ?? [];
+      out.push({
+        field_path: `pages.${Number(page.pageNumber || pi + 1)}.lines.${li}`,
+        text_content: String(line.content ?? ""),
+        locator: { page_number: Number(page.pageNumber || pi + 1), polygon },
+      });
+    });
+  });
+  (Array.isArray(result?.tables) ? result.tables : []).forEach((table, ti) => {
+    (table.cells ?? []).forEach((cell, ci) => {
+      const br = cell.boundingRegions?.[0] ?? {};
+      out.push({
+        field_path: `tables.${ti}.cells.${ci}`,
+        text_content: String(cell.content ?? ""),
+        locator: { page_number: Number(br.pageNumber || 1), polygon: Array.isArray(br.polygon) ? br.polygon : [] },
+      });
+    });
+  });
+  return out;
+}
+
 /** The response's own printed lines, in reading order — the substrate for the shared
  *  label-anchored header completion. Same shape `readHeaderFromTextLines` expects. */
 export function responseTextLines(result) {
@@ -299,6 +327,19 @@ export function normalizeAzureBankStatement(payload) {
       amount_cents: hasDeposit ? Math.abs(deposit) : -Math.abs(withdrawal),
       running_balance_cents: fieldCents(t.Balance),
     });
+  }
+  // THE LINE COMPLETION (owner ruling B, 2026-07-31 — the same doctrine as the header
+  // completion above, extended to transaction rows): the typed Transactions field WINS
+  // wherever it spoke; when it is EMPTY but this response's own recognized content carries
+  // a ledger table (the real Maybank trilingual layout — Azure's structuring returns zero
+  // transactions while its recognition is complete), the SAME deterministic grammar
+  // reader-1 runs parses THIS RESPONSE'S regions. The two readers keep two independent
+  // RECOGNITIONS and share one grammar; the chain identity + printed totals remain the
+  // grammar-independent floor. Receipted, never silent.
+  if (lines.length === 0) {
+    const completed = readStatementFromLayout(responseLayoutRegions(result));
+    for (const line of completed.lines ?? []) lines.push(line);
+    if (lines.length > 0) receipt.lines_completed_from_content = lines.length;
   }
   header.line_count = lines.length;
 
