@@ -201,3 +201,24 @@ test("one stray amount-vocabulary cell cannot exclude the whole header table (re
     "a disclaimer containing an amount word shares the table; the header must still read");
   assert.equal(read.header.statement_date, "2025-04-30");
 });
+
+test("zero-amount ceremony rows are skipped-and-counted (the real 202512 account-closure month)", () => {
+  const cell = (t, i, col, text, y) => ({
+    field_path: `tables.${t}.cells.${i}`, text_content: text,
+    locator: { page_number: 1, polygon: [col * 20, y, col * 20 + 18, y] },
+  });
+  const read = readStatementFromLayout([
+    { field_path: "pages.1.lines.0", text_content: "Maybank", locator: { page_number: 1, polygon: [0, 0, 0, 0] } },
+    { field_path: "pages.1.lines.1", text_content: "STATEMENT DATE : 31/12/2025", locator: { page_number: 1, polygon: [0, 2, 0, 2] } },
+    { field_path: "pages.1.lines.2", text_content: "BEGINNING BALANCE : 10.00", locator: { page_number: 1, polygon: [0, 3, 0, 3] } },
+    { field_path: "pages.1.lines.3", text_content: "ENDING BALANCE : .00", locator: { page_number: 1, polygon: [0, 4, 0, 4] } },
+    { field_path: "pages.1.lines.4", text_content: "TOTAL DEBIT : 10.00", locator: { page_number: 1, polygon: [0, 5, 0, 5] } },
+    { field_path: "pages.1.lines.5", text_content: "TOTAL CREDIT : .00", locator: { page_number: 1, polygon: [0, 6, 0, 6] } },
+    cell(0, 0, 0, "ENTRY DATE", 20), cell(0, 1, 1, "DESCRIPTION", 20), cell(0, 2, 2, "AMOUNT", 20), cell(0, 3, 3, "STATEMENT BALANCE", 20),
+    cell(0, 4, 0, "05/12/2025", 30), cell(0, 5, 1, "FINAL DEBIT", 30), cell(0, 6, 2, "10.00-", 30), cell(0, 7, 3, ".00", 30),
+    cell(0, 8, 0, "05/12/2025", 40), cell(0, 9, 1, "CLOSE ACCOUNT", 40), cell(0, 10, 2, ".00", 40), cell(0, 11, 3, ".00", 40),
+  ]);
+  assert.equal(read.lines.length, 1, "the zero-amount CLOSE ACCOUNT row never becomes a line");
+  assert.equal(read.lines[0].amount_cents, -1000);
+  assert.equal(read.receipt.line_rows_skipped, 1, "skipped-and-counted, never silently dropped");
+});
