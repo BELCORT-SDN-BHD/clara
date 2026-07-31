@@ -15,6 +15,8 @@ import { SweepReceiptCard } from "../shared/cards/SweepReceiptCard";
 import { KbRuleProposalCard } from "../shared/cards/KbRuleProposalCard";
 import { OpenQuestionCard } from "../shared/cards/OpenQuestionCard";
 import { RulePostReceiptCard } from "../shared/cards/RulePostReceiptCard";
+import { BankReconReceiptCard } from "../shared/cards/BankReconReceiptCard";
+import { BankRuleProposalCard } from "../shared/cards/BankRuleProposalCard";
 import styles from "./chat.module.css";
 
 /** Matches CLARIFY_FRAMING in the runtime (chatTurn.prompt.ts:31) — used only for
@@ -233,6 +235,14 @@ export function TranscriptParts({
         // card hydrates the rule_post_runs receipt on mount (like sweep_receipt).
         if (p.type === "rule_post_receipt") {
           return <RulePostReceiptCard key={`rulepost:${p.run_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        // Wave C-c (design v2.1 §7): identifier-only; each card hydrates on mount
+        // (bank_recon_receipt keys on statement_id — parts.ts explains why).
+        if (p.type === "bank_recon_receipt") {
+          return <BankReconReceiptCard key={`recon:${p.statement_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        if (p.type === "bank_rule_proposal") {
+          return <BankRuleProposalCard key={`bankrule:${p.rule_id}:${i}`} token={token ?? null} part={p} />;
         }
         // tool_result / tool_error resolve their call's chip — render nothing (the
         // one place this is declared is partCatalog's STATUS_RESOLVER_TYPES).

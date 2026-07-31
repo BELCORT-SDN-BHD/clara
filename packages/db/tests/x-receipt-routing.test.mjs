@@ -219,7 +219,12 @@ test("existing behavior is BYTE-STABLE for credit_note and debit_note: both stil
     const res = await requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk(`rex-${kind}`) });
     assert.equal(res.status, "queued", `${kind} re-extraction still works exactly as before 0025`);
 
-    await rootQuery("update clara.documents set document_kind='bank_statement' where id=$1", [doc.documentId]);
+    // AMENDMENT 0040 (WCC splice register 12): 'bank_statement' is NO LONGER an excluded
+    // kind -- request_reextraction now routes a statement re-fire through the E2 router
+    // (inheriting the typed-consent gate, the page budget and the attempt cap). The cell's
+    // subject is that a STILL-excluded kind is still refused, so it uses one:
+    // 'payroll_summary', the same kind the sibling cell below names.
+    await rootQuery("update clara.documents set document_kind='payroll_summary' where id=$1", [doc.documentId]);
     await assertRaises("CLR16",
       () => requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk(`rex-${kind}-excluded`) }),
       `${kind}'s document forcibly re-kinded to an excluded kind is still refused`);

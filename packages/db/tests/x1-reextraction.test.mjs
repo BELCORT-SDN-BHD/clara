@@ -133,7 +133,10 @@ test("[0022] the kind gate and the mime gate both refuse, by name", async () => 
   const client = W.clients.A1;
   const doc = await extractedDoc(W.users.alice, { client });
 
-  await rootQuery("update clara.documents set document_kind='bank_statement' where id=$1", [doc.documentId]);
+  // AMENDMENT 0040 (WCC splice register 12): 'bank_statement' gained its OWN re-fire path
+  // through the E2 router, so it is no longer a refusing kind. The kind gate itself is
+  // unchanged and is still proven here, with a kind that remains excluded.
+  await rootQuery("update clara.documents set document_kind='payroll_summary' where id=$1", [doc.documentId]);
   await assertRaises("CLR16",
     () => requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("rex") }),
     "re-extracting a non-invoice kind through the invoice engine");

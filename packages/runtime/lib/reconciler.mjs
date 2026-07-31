@@ -166,8 +166,21 @@ export async function reconcileTasks(client, deps) {
   }
 
   // B) cancel_requested -> abort + settle (safety net alongside the control listener).
+  // Dispatch the settle by KIND (2026-07-31 C-b acceptance-night finding (2), named in
+  // PROJECTLOG: "the leader cancel path misuses settle_chat_turn for autodraft tasks").
+  // settle_chat_turn raises CLR10 ('settle_chat_turn is for chat turns only') the instant
+  // t.kind <> 'chat_turn' (0006:1021); that raise was UNCAUGHT here, so it propagated out
+  // of reconcileTasks -> runReconcilerSweep and aborted the ENTIRE sweep cycle (sections
+  // C/D below and every other sweeper in runReconcilerSweep never ran) — the row stayed
+  // 'cancel_requested' forever, got re-selected next poll, and re-threw: the two-day
+  // Section-I zombie that also starved the document reconciler. NB: kind='wake' can never
+  // reach 'cancel_requested' in the first place — clara._tf_agent_task_update's transition
+  // matrix (0006:465-472) gives wake only held->cancelled DIRECTLY, and cancel_agent_task
+  // (0006:845-849) only sets 'cancel_requested' when the task is running/awaiting_input,
+  // neither of which a wake task (always created 'held', 0006:422) ever is — so this query
+  // structurally only ever sees chat_turn/autodraft rows.
   const cancels = await client.query(
-    `select id, workflow_run_id from clara.agent_tasks
+    `select id, kind, workflow_run_id from clara.agent_tasks
       where status = 'cancel_requested' and ($1::uuid is null or firm_id = $1)
       order by created_at limit 20`,
     [onlyFirm],
@@ -180,8 +193,24 @@ export async function reconcileTasks(client, deps) {
         log(`[reconcile] cancel run ${t.workflow_run_id} noop: ${err?.message ?? err}`);
       }
     }
-    await settleTaskTerminal(client, t.id, "cancelled", null);
-    out.cancelled += 1;
+    try {
+      if (t.kind === "autodraft") {
+        // settle_autodraft_task (0036 CoR) has NO 'cancelled' outcome — its outcome
+        // CHECK is drafted|skipped_lane|noop_existing|failed (0036:864-868) — so a
+        // cancelled autodraft settles 'failed' with the cancellation named in the
+        // refusal, matching terminalForAutodraft's own engine==='cancelled' arm below.
+        await settleAutoDraftTerminal(client, t.id, "failed", null, { code: "internal", reason: "cancelled" });
+      } else {
+        await settleTaskTerminal(client, t.id, "cancelled", null);
+      }
+      out.cancelled += 1;
+    } catch (err) {
+      // Isolated PER TASK, same as section A's re-enqueue try/catch: one task's settle
+      // failure must never abort the rest of this sweep (that isolation IS the fix —
+      // an unexpected kind or a transient error now retries next cycle instead of
+      // starving every sweeper after this one).
+      log(`[reconcile] cancel-settle failed task=${t.id} kind=${t.kind}: ${err?.message ?? err}`);
+    }
   }
 
   // C) open task with a run -> settle from engine truth when the engine is terminal.

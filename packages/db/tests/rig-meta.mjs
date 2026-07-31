@@ -232,6 +232,44 @@ export const BANK_0038_COHORT = [
   ...BANK_0038_UNGRANTED_FNS,
 ];
 
+// 0040 Wave C-c (WCC-R1..R8, design v2.1). The tie-out, exception-door and rule verbs are
+// HUMAN JUDGEMENT ONLY -- whether a month ties, whether a bank line is a bank error, and
+// whether a coding pattern becomes a signed rule are all professional judgements, and the
+// agent never makes one: no wake role, no clara_runtime, no clara_agent_ro (design SS10,
+// "zero agent grants on every new table", restated for the verbs that write them). The TEN
+// reads are the /bank + /aging surface, definer + _human_ctx(bookkeeper) + firm predicates
+// (verify_bank_reconciliation joined at the 0040 fix wave, item A7).
+// UNGRANTED internals declared the 0020 way: the main sweep fails if one ever GAINS a grant,
+// the cohort check fails if one ever DISAPPEARS.
+const TIEOUT_0040_HUMAN_FNS = [
+  "complete_bank_reconciliation", "void_bank_reconciliation",
+  "except_bank_line", "resolve_bank_line_exception",
+  "propose_bank_rule", "sign_bank_rule", "retire_bank_rule",
+  "set_counterparty_terms",
+];
+const TIEOUT_0040_READ_FNS = [
+  "ar_aging", "ap_aging", "customer_statement", "supplier_statement",
+  "list_unmatched_lines", "get_bank_reconciliation", "list_bank_line_suggestions",
+  "list_bank_rule_candidates", "list_bank_rules",
+  // 0040 FIX WAVE A7: the bitemporal receipt law's missing verifier. A READ (bookkeeper floor,
+  // raises nothing) that recomputes _bank_recon_terms under a stored receipt's own completed_at
+  // and reports the diff -- so the same wall applies: human lane only, no machine role.
+  "verify_bank_reconciliation",
+];
+const TIEOUT_0040_UNGRANTED_FNS = [
+  "_bank_recon_terms", "_tf_bank_recon_belt", "_tf_bank_settled_authority_belt",
+  "_subledger_outstanding_asof", "_bank_rule_pattern_norm", "_bank_rule_sightings",
+  "_bank_desc_word_match", "_bank_rule_regex_escape", "_bank_line_class_hint",
+  "_aging_core", "_statement_core",
+  "_tf_bank_reconciliation_transition", "_tf_bank_reconciliation_no_delete",
+  "_tf_bank_line_exception_transition", "_tf_stamp_ble_account",
+  "_tf_bank_line_exception_no_delete",
+  "_tf_bank_rule_transition", "_tf_bank_rule_no_delete",
+];
+export const TIEOUT_0040_COHORT = [
+  ...TIEOUT_0040_HUMAN_FNS, ...TIEOUT_0040_READ_FNS, ...TIEOUT_0040_UNGRANTED_FNS,
+];
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -280,6 +318,8 @@ export const ALLOWED = {
     ...SUBLEDGER_0037_HUMAN_FNS, // 0037 the Wave C-a settlement composites (human judgement only)
     ...BANK_0038_HUMAN_FNS, // 0038 the Wave C-b bank verbs (human judgement only)
     ...BANK_0038_READ_FNS, // 0038 the /bank read surface (definer + _human_ctx + firm predicates)
+    ...TIEOUT_0040_HUMAN_FNS, // 0040 the Wave C-c tie-out / exception / rule verbs (human judgement only)
+    ...TIEOUT_0040_READ_FNS, // 0040 the /bank recon + /aging read surface
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -439,6 +479,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0028 vendor identity binding", VENDOR_BINDING_0028_COHORT, liveNames));
   failures.push(...cohortFailures("0037 wave C-a subledger", SUBLEDGER_0037_COHORT, liveNames));
   failures.push(...cohortFailures("0038 wave C-b bank", BANK_0038_COHORT, liveNames));
+  failures.push(...cohortFailures("0040 wave C-c tie-out", TIEOUT_0040_COHORT, liveNames));
   return failures;
 }
 

@@ -152,6 +152,54 @@ test("structured CSV parsing runs in a worker and emits row/column regions", asy
 });
 
 // ---------------------------------------------------------------------------
+// 2026-07-31 C-b acceptance-night finding (4): "the intake CSV probe refuses
+// single-column preamble rows — real bank CSV exports with banner lines may be
+// refused at transport." detectDocument's validateDelimited sniff used to require
+// EVERY one of the first 20 non-blank lines to split into >=2 fields, so a leading
+// title/banner line with no delimiter (exactly what statement-parse.mjs's
+// parseStatementCsv already treats as PREAMBLE and skips at parse) failed the intake
+// probe before the parser that already handles it ever ran. Fixed: leading width<2
+// rows are tolerated uncounted; the strictness still applies from the first
+// genuinely-delimited row onward.
+// ---------------------------------------------------------------------------
+
+test("intake CSV probe tolerates a leading single-column banner row (real-shaped bank export)", async () => {
+  const file = join(root, "maybank-statement.csv");
+  await writeFile(
+    file,
+    [
+      "MAYBANK ISLAMIC BERHAD",
+      "STATEMENT OF ACCOUNT",
+      "Date,Description,Amount,Balance",
+      "01/04/2025,OPENING BALANCE,0.00,1000.00",
+      "02/04/2025,SALARY,5000.00,6000.00",
+      "03/04/2025,WITHDRAWAL,-200.00,5800.00",
+    ].join("\r\n"),
+  );
+  const result = await detectDocument(file, { originalFilename: "maybank-statement.csv" });
+  assert.equal(result.format, "csv");
+  assert.equal(result.mime, "text/csv");
+});
+
+test("intake CSV probe still refuses a genuinely inconsistent body (banner tolerance is not a general relax)", async () => {
+  const file = join(root, "broken-statement.csv");
+  await writeFile(
+    file,
+    [
+      "MAYBANK ISLAMIC BERHAD", // the tolerated leading banner
+      "Date,Description,Amount,Balance", // width 4
+      "01/04/2025,OPENING BALANCE,0.00,1000.00", // width 4
+      "a ragged line with no delimiter at all", // width 1 — AFTER the body started
+      "02/04/2025,SALARY,5000.00,6000.00", // width 4
+    ].join("\n"),
+  );
+  await assert.rejects(
+    detectDocument(file, { originalFilename: "broken-statement.csv" }),
+    (err) => err.code === "bad_type",
+  );
+});
+
+// ---------------------------------------------------------------------------
 // 2026-07-26 intake outage. Two production failures produced ZERO log lines: the
 // finalize catch discarded `err.message`, keeping only the coarse `failure_code`
 // that reaches the DB. `storage_error` alone cannot distinguish a bad key from a

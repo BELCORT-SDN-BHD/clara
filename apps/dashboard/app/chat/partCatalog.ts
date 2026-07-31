@@ -119,6 +119,17 @@ export const PART_CATALOG = {
     renderBranch: true,
     fixtures: [{ type: "rule_post_receipt", run_id: "run-9999" }],
   },
+  // --- Wave C-c additions (design v2.1 §7): identifier-only; each card
+  // hydrates authoritative state on mount. bank_recon_receipt keys on
+  // statement_id (parts.ts explains why, not recon_id).
+  bank_recon_receipt: {
+    renderBranch: true,
+    fixtures: [{ type: "bank_recon_receipt", statement_id: "stmt-1010", client_id: "client-1111" }],
+  },
+  bank_rule_proposal: {
+    renderBranch: true,
+    fixtures: [{ type: "bank_rule_proposal", rule_id: "rule-1111", client_id: "client-1111" }],
+  },
 } satisfies Record<string, CatalogEntry>;
 
 export type RenderBranchType = keyof typeof PART_CATALOG;

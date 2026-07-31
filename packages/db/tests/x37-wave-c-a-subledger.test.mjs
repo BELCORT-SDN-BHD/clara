@@ -614,6 +614,67 @@ test("x37.c a typed supplier_bill mints exactly ONE ap `bill` item, classifier-c
 });
 
 // ===========================================================================
+// x37.c2 -- THE POSITIVE due_date BIRTH-STAMP (fix-wave E3, asbuilt-authority.md
+// finding 7). WCC-R4 (design section 4.4, register entry 7a): a typed
+// invoice/bill item is stamped `due_date = posting_date + payment_terms_days`
+// AT BIRTH (append-only -- open_items never back-fills). x40.ae (Wave C-c)
+// already proves the NEGATIVE half (an out-of-scope item kind is never
+// stamped) against this suite's own fixture world, which cannot cheaply mint a
+// TYPED entry -- so it left this positive half explicitly OWED. This cell pays
+// it here, the one fixture world that CAN mint a typed supplier_bill through
+// the wake lane, using the exact numbers named in the finding: terms 30,
+// item_date 2033-03-05 -> due_date 2033-04-04 EXACT.
+//
+// GATED LOCALLY (not by has37/skipHere alone): the due_date PRODUCER and
+// set_counterparty_terms are BOTH 0040-vintage (0037 ships the due_date COLUMN
+// with "NO PRODUCER", 0037:717); this suite's own has0037() gate does not
+// distinguish "37-39 applied" from "37-40 applied". Skip gracefully rather
+// than hard-fail if 0040's objects are not yet part of the applied chain.
+// ===========================================================================
+test("x37.c2 due_date is stamped at BIRTH for a REAL typed supplier_bill: terms 30, item_date 2033-03-05 -> due_date 2033-04-04 exact", async (t) => {
+  if (skipHere(t)) return;
+  const has0040Terms = await rootQuery(
+    "select 1 from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname='set_counterparty_terms' limit 1",
+  );
+  if (has0040Terms.rowCount === 0) {
+    markSkip();
+    t.skip("clara.set_counterparty_terms not found -- 0040 is not (yet) part of the applied migration chain");
+    return;
+  }
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  // registration grepped clean against every other cell's in this file (0001/0077/0088/0099/0111
+  // are all claimed elsewhere -- 0099 collided with x37.ab's PAYCO and cost it "counterparty was
+  // born", the exact neighbor-perturbation this note now guards against by name).
+  const cp = await birthCounterparty(sub, { client, name: `X37C2 BILLCO ${randomUUID().slice(0, 6)}`, registration: "201801370042" });
+
+  await humanQuery(
+    sub,
+    namedCall("set_counterparty_terms", [{ name: "p_counterparty" }, { name: "p_days" }, { name: "p_op_key" }]),
+    [cp, 30, opk("x37c2-terms")],
+  );
+  const cents = 180000; // RM1,800 -- comfortably under the RM10k high-stakes default
+  const firm = await firmOf(client);
+  const cited = await purchaseDoc(sub, { client, gross: cents });
+  const cred = await mintInteractive(firm);
+  const region = await factsRegion(cited.documentId, FIELD.total);
+  const d = await wakeDraftEntry(cred, {
+    client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
+    lines: billLines(EXPN, AP1, cents), document: cited.documentId, sha256: cited.sha256,
+    vendor: { existing_id: cp }, evidence: [ev(region?.id ?? cited.regionId, region?.text_content ?? cited.quote, FIELD.total)],
+    codingKind: "supplier_bill", postingDate: "2033-03-05", opKey: opk("x37c2-bill"),
+  });
+  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x37c2-billa") });
+
+  const items = await itemsOf(d.entry_id);
+  assert.equal(items.length, 1, "the typed supplier_bill mints exactly one ap item");
+  assert.equal(items[0].item_kind, "bill", "item_kind='bill' -- the ONLY typed kind this fixture can mint besides 'invoice'");
+  assert.equal(items[0].item_date, "2033-03-05", "x37.c2 mandatory setup: item_date falls back to the entry's posting_date");
+  assert.equal(items[0].due_date, "2033-04-04", "x37.c2: due_date = item_date(2033-03-05) + 30 days = 2033-04-04 EXACT, stamped at birth from the terms in effect at approval");
+  await assertTies(client, "x37.c2 due_date birth-stamp");
+});
+
+// ===========================================================================
 // x37.d -- PARTIAL SETTLEMENT. RM1,000 invoice, RM400 receipt: the invoice's
 // outstanding falls to RM600, the settlement item is minted at FULL GROSS
 // (-RM400) and its own outstanding is zero, the pair nets to zero, and the
@@ -870,9 +931,13 @@ test("x37.i the two-sided bound holds BOTH ways: over-allocation is refused, and
   const inflation = await caught(() => withActor({ transaction: true }, async (c) => {
     const g = randomUUID();
     await c.query(
-      `insert into clara.open_item_allocations(firm_id,client_id,domain,item_id,application_group,operation_kind,amount_cents,reason,created_by)
-       values($1,$2,'ar',$3,$4,'apply',50000,'x37 inflation probe',$6),
-              ($1,$2,'ar',$5,$4,'apply',-50000,'x37 inflation probe',$6)`,
+      // AMENDMENT 0040: effective_date is NOT NULL (the as-of grain C-c added). A forged
+      // insert that omits it dies at 23502 BEFORE the belt runs, which would silently
+      // retire this cell's real subject -- the two-sided bound. Supplied so the BELT is
+      // still what refuses.
+      `insert into clara.open_item_allocations(firm_id,client_id,domain,item_id,application_group,operation_kind,amount_cents,effective_date,reason,created_by)
+       values($1,$2,'ar',$3,$4,'apply',50000,current_date,'x37 inflation probe',$6),
+              ($1,$2,'ar',$5,$4,'apply',-50000,current_date,'x37 inflation probe',$6)`,
       [firm, client, atFace.item, g, settle.id, sub],
     );
   }));
@@ -917,8 +982,10 @@ test("x37.j group law: a cross-counterparty apply is refused, and a non-zero-net
   // again instead of the group law.
   const lonely = await caught(() => withActor({ transaction: true }, async (c) => {
     await c.query(
-      `insert into clara.open_item_allocations(firm_id,client_id,domain,item_id,application_group,operation_kind,amount_cents,reason,created_by)
-       values($1,$2,'ar',$3,$4,'apply',-20000,'x37 non-zero-net probe',$5)`,
+      // AMENDMENT 0040: effective_date is NOT NULL -- supplied so the BELT, not the
+      // column's own constraint, is what refuses this group.
+      `insert into clara.open_item_allocations(firm_id,client_id,domain,item_id,application_group,operation_kind,amount_cents,effective_date,reason,created_by)
+       values($1,$2,'ar',$3,$4,'apply',-20000,current_date,'x37 non-zero-net probe',$5)`,
       [firm, client, invAlpha.item, randomUUID(), sub],
     );
   }));

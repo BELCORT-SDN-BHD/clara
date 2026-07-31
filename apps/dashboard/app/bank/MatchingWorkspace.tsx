@@ -8,18 +8,27 @@
 
 import { useState } from "react";
 import type { BankStatementLineRow, BankStatementRow } from "./model";
+import type { CounterpartyKind } from "../shared/counterpartyApi";
 import { MatchLinesPanel } from "./MatchLinesPanel";
 import { SettleLinePanel } from "./SettleLinePanel";
 import styles from "./bank.module.css";
 
 export function MatchingWorkspace({
-  token, clientId, statement, selectedLines, onDone,
+  token, clientId, statement, selectedLines, onDone, viaRuleId, suggestedCounterpartyId, suggestedKind,
 }: {
   token: string;
   clientId: string;
   statement: BankStatementRow;
   selectedLines: BankStatementLineRow[];
   onDone: () => void;
+  /** Wave C-c suggestion-chip pre-fill (design §7): a confirmed
+   *  `list_bank_line_suggestions` match/settle chip carries the signed rule
+   *  id through to whichever panel submits, plus (for a settle-shaped
+   *  proposal) the proposed counterparty/domain — defaulting this workspace
+   *  straight into "settle" mode instead of the usual single-line default. */
+  viaRuleId?: string | null;
+  suggestedCounterpartyId?: string | null;
+  suggestedKind?: CounterpartyKind | null;
 }) {
   const canSettle = selectedLines.length === 1;
   const [mode, setMode] = useState<"match" | "settle">(canSettle ? "settle" : "match");
@@ -40,9 +49,12 @@ export function MatchingWorkspace({
         ) : null}
       </div>
       {mode === "match" ? (
-        <MatchLinesPanel token={token} clientId={clientId} statement={statement} selectedLines={selectedLines} onDone={onDone} />
+        <MatchLinesPanel token={token} clientId={clientId} statement={statement} selectedLines={selectedLines} onDone={onDone} viaRuleId={viaRuleId} />
       ) : (
-        <SettleLinePanel token={token} clientId={clientId} statement={statement} line={selectedLines[0]!} onDone={onDone} />
+        <SettleLinePanel
+          token={token} clientId={clientId} statement={statement} line={selectedLines[0]!} onDone={onDone}
+          viaRuleId={viaRuleId} initialCounterpartyId={suggestedCounterpartyId} initialKind={suggestedKind}
+        />
       )}
     </div>
   );

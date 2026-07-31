@@ -219,6 +219,16 @@ export async function voidBankStatement(
 // line's bank account, §4.6) but not the caller-facing jsonb array element;
 // `{account_code, amount_cents}` mirrors 0037's own array-of-object convention
 // (allocate_receipt's p_allocations, `{item_id, amount_cents}[]`).
+//
+// C-c splice register #4 (design §5, migration 0040): match_bank_line +
+// settle_from_bank_line each gain a NEW OVERLOAD — same name, the existing
+// arg list PLUS a trailing `p_via_rule uuid default null`. viaRuleId is
+// OMITTED from the body entirely on a plain human match/settle (0038's
+// original arity resolves, unchanged behaviour); it is sent only when the
+// caller confirms a `list_bank_line_suggestions` match/settle chip
+// (shared/reconApi.ts), so PostgREST resolves the 0040 overload, the DB
+// validates the signed same-client rule and stamps `origin='rule'` on the
+// match (design §4.3/§5) — this file never sets `origin` itself.
 // ---------------------------------------------------------------------------
 
 export type MatchEntryInput = { entry_id: string; matched_cents: number };
@@ -229,18 +239,20 @@ export async function matchBankLine(
   args: {
     clientId: string; lineIds: string[]; entries: MatchEntryInput[];
     adjustments?: BankAdjustmentInput[] | null; ackPeriodExceptions?: boolean;
+    /** C-c splice #4: the signed `bank_rules` row this match was confirmed
+     *  from (shared/reconApi.ts's `list_bank_line_suggestions`). Omitted
+     *  (not merely null) on every ordinary human match. */
+    viaRuleId?: string | null;
   },
 ): Promise<{ match_id: string }> {
-  const out = (await rpc(
-    "match_bank_line",
-    {
-      p_client: args.clientId, p_lines: args.lineIds, p_entries: args.entries,
-      p_adjustments: args.adjustments ?? null,
-      p_ack_period_exceptions: args.ackPeriodExceptions ?? false,
-      p_op_key: opKey(),
-    },
-    token,
-  )) as { match_id?: string; id?: string } | null;
+  const body: Record<string, unknown> = {
+    p_client: args.clientId, p_lines: args.lineIds, p_entries: args.entries,
+    p_adjustments: args.adjustments ?? null,
+    p_ack_period_exceptions: args.ackPeriodExceptions ?? false,
+    p_op_key: opKey(),
+  };
+  if (args.viaRuleId) body.p_via_rule = args.viaRuleId;
+  const out = (await rpc("match_bank_line", body, token)) as { match_id?: string; id?: string } | null;
   const id = out?.match_id ?? out?.id;
   if (!id) throw new Error("match_bank_line returned no match_id");
   return { match_id: id };
@@ -282,23 +294,24 @@ export async function settleFromBankLine(
     postingDate?: string | null; chargeCents?: number; chargeAccount?: string | null;
     adjustments?: BankAdjustmentInput[] | null; attestation?: string | null;
     controlAccount?: string | null;
+    /** C-c splice #4 — see matchBankLine's own comment; omitted on every
+     *  ordinary human settle. */
+    viaRuleId?: string | null;
   },
 ): Promise<SettleReceipt> {
-  return (await rpc(
-    "settle_from_bank_line",
-    {
-      p_client: args.clientId, p_line: args.lineId, p_counterparty: args.counterpartyId,
-      p_allocations: args.allocations, p_memo: args.memo,
-      p_posting_date: args.postingDate ?? null,
-      p_charge_cents: args.chargeCents ?? 0,
-      p_charge_account: args.chargeAccount ?? null,
-      p_adjustments: args.adjustments ?? null,
-      p_attestation: args.attestation ?? null,
-      p_control_account: args.controlAccount ?? null,
-      p_op_key: opKey(),
-    },
-    token,
-  )) as SettleReceipt;
+  const body: Record<string, unknown> = {
+    p_client: args.clientId, p_line: args.lineId, p_counterparty: args.counterpartyId,
+    p_allocations: args.allocations, p_memo: args.memo,
+    p_posting_date: args.postingDate ?? null,
+    p_charge_cents: args.chargeCents ?? 0,
+    p_charge_account: args.chargeAccount ?? null,
+    p_adjustments: args.adjustments ?? null,
+    p_attestation: args.attestation ?? null,
+    p_control_account: args.controlAccount ?? null,
+    p_op_key: opKey(),
+  };
+  if (args.viaRuleId) body.p_via_rule = args.viaRuleId;
+  return (await rpc("settle_from_bank_line", body, token)) as SettleReceipt;
 }
 
 /** Validates the now-approved entry (all §4.5 floors + parity) and flips

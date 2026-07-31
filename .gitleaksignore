@@ -5,3 +5,6 @@
 # these fingerprints cover the historical patch where the markers do not yet exist.
 946a73d49cab28baea47d3f7eb4f05d649143468:packages/db/tests/x-fail-classify.test.mjs:generic-api-key:430
 946a73d49cab28baea47d3f7eb4f05d649143468:packages/runtime/tests/classify-unit.test.mjs:generic-api-key:41
+# 0040 aging bucket-key literals (d91_plus_cents / b91_plus_cents) — generic-api-key false positives
+5da818ec4032d9349cefd4d04327436c071c8687:apps/dashboard/app/aging/agingModel.ts:generic-api-key:61
+6a70323b3dd3e3324d051fbbe5f7fef73cdce3d8:apps/dashboard/app/aging/agingModel.ts:generic-api-key:121
