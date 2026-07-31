@@ -159,7 +159,9 @@ export function parseStatementCsv(text) {
     const at = (key) => (columns[key] === undefined ? "" : (cells[columns[key]] ?? ""));
     const entryDate = parseStatementDate(at("entry_date"), { start: header.period_start, end: header.period_end });
     const amount = csvRowAmount(columns, at);
-    if (!entryDate || amount === null) {
+    if (!entryDate || amount === null || amount === 0) {
+      // Zero-amount ceremony rows (account-closure months) are skipped-and-counted --
+      // the DB's line law requires non-zero movement; same rule as the layout reader.
       receipt.rows_skipped += 1;
       continue;
     }

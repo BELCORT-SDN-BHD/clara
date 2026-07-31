@@ -466,7 +466,10 @@ function readLines(cells, period) {
       continue;
     }
     const amount = readRowAmount(row, columns, at);
-    if (amount === null) {
+    if (amount === null || amount === 0) {
+      // Zero-amount rows are CEREMONY, not movement (the real 202512 account-closure month
+      // prints nine 0.00 settle/close rows): the DB's line law requires non-zero
+      // amount_cents, and the typed vendor read skips them too. Skipped-and-counted.
       skipped += 1;
       continue;
     }
