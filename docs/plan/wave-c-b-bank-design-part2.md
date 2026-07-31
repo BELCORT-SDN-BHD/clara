@@ -3,8 +3,8 @@
 > **This file continues `wave-c-b-bank-design.md` (v2, 2026-07-31)** — same status, same
 > authority, same evidence grading (**[V]/[G]/[C]/[RV]/[R1]**). Part 1 carries §1–§4.6
 > (the debt, grounded facts, the three identities, identity/statement/ingest/consent/
-> match-model/verbs). This part carries §4.7–§7. Both files together are the C-b
-> mechanism of record.
+> match-model/verbs). This part carries §4.7–§7; **`-part3.md` carries the acceptance
+> round (2026-07-31)**. All three files together are the C-b mechanism of record.
 
 ### 4.7 `/bank` (WCB-R4)
 
@@ -52,6 +52,13 @@ Outbox law: an aborted verb leaves zero events.
   prosrc for all writers.
 
 ## 5. The migration + runtime (number claimed at merge — expected 0038)
+
+> **[As shipped: `0038` claimed at merge, plus the acceptance round's `0039`
+> (`_persist_statement_core` null-defers-to-chain splice) — see part 3.
+> A boundary this section never stated, now proven load-bearing: `statementFacts.v1`'s
+> SERVICES/engine/libs are process-injected and OUTSIDE the frozen closure (the AB-16
+> precedent) — the behavior/impl/ts closure IS frozen. That is what made ten runtime
+> behaviour PRs in one day legal with zero `_vN` recuts.]**
 
 **Deploy order is BINDING [R1]: runtime image FIRST** (statementFacts_v1 + registry +
 freeze manifest + `enqueueForLane` branch — whose default changes from
@@ -185,6 +192,10 @@ citations not carried (the extraction envelope retains the full read; `facts_has
 reader extraction ids prove who agreed) · reader-2 engine availability (named fallback) ·
 the interview `banks` item stays free-text (v3 restructure declined) · `bank_
 institutions` is a seeded reference, additively grown by migration.
+*[Acceptance correction on "reader-2 engine availability": availability never failed —
+the response SCHEMA (per-account nesting, #159) and an empty typed array (#158) were the
+real failure modes (part 3); seam A stays unbuilt but the risk it was named for did not
+occur.]*
 
 **v2.2 AS-BUILT AMENDMENTS (the fix wave after the as-built review ladder, 2026-07-31 —
 sources: the opus/Codex as-built findings, the contract-blind regression cells, and the
@@ -208,7 +219,10 @@ sources: the opus/Codex as-built findings, the contract-blind regression cells, 
   confidence verdicts included (stricter than the ladder asked; the remedy is identical).
 - **`running_balance_cents` is nullable as-built**; both consumers were already null-safe —
   the OCR mandatory-per-row rule lives in the core's chain walk (`chain_broken`), not in
-  a NOT NULL.
+  a NOT NULL. *[FALSE as proven live — the acceptance round recut BOTH consumers: pre-#160
+  `lineDisagreements` treated any null as disagreement, and pre-`0039`
+  `_persist_statement_core` compared skeletons by whole-jsonb equality. See part 3
+  (#160/#162).]*
 - **Statement lifecycle triggers**: `_tf_bank_statement_transition` (live→void with stamps;
   void gains `superseded_by` exactly once) + `_tf_bank_statement_no_delete`; the immutable
   set is `to_jsonb(old)` minus the five lifecycle columns, so future columns are protected
@@ -280,7 +294,10 @@ adjudicated finding by finding):**
 
 **Owner ruling (2026-07-31, the reader-2 line fork):** Azure's typed bank-statement model
 returns ZERO transactions for the real Maybank trilingual layout while its own recognition
-is complete (proven by the header completion + the refusal log `line_count: 4 vs 0`). The
+is complete (proven by the header completion + the refusal log `line_count: 4 vs 0`).
+*[Evidentiary premise CORRECTED by #159, 23 minutes later: the model had read 5 rows all
+along under `fields.Accounts[].valueObject` — the zero was OUR top-level normalizer read.
+The ruling STANDS as law for the genuinely-empty-array case; see part 3.]* The
 owner ruled **option B**: the engine's ratified completion-pass doctrine extends from the
 header to the TRANSACTION LINES — typed wins wherever it spoke; an empty typed array
 completes from THIS response's own recognized regions through the same deterministic
@@ -294,3 +311,12 @@ zero-magnitude money · dwibahasa label/value splits + header-table adjacency ·
 statement-month period derivation (both readers, absence-only) · trilingual combined
 column headers (word-bounded synonym containment, specificity before position, row-local
 ledger detection) · the statement-refusal detail log.
+
+---
+
+## ACCEPTANCE ROUND → part 3
+
+**The acceptance round (2026-07-31 — PRs #154–#164 + migration `0039`, the nine real RPR
+months) lives in `wave-c-b-bank-design-part3.md`** — split there by the repo's 500-line
+ceiling, the PROJECTLOG precedent (split, never prune). All three files together are the
+C-b mechanism of record.

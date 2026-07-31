@@ -113,7 +113,7 @@ losing-dispatch no-ops · budget visibility · the sales mis-route gate · MSIC�
 migrations 0038+0039: bank identity + statement ingest + matching, ACCEPTED per WC-R11 —
 nine real RPR months chained to the sen, 13 production settlements, 41 honestly-unmatched
 lines = the C-c working set; design of record `docs/plan/wave-c-b-bank-design.md` v2.2
-+ `-part2.md`, rulings WCB-R1..R6).
++ `-part2.md` + `-part3.md`, rulings WCB-R1..R6).
 
 **LIVE POSTURE: 38 migrations (`0039`) · Fly `clara-runtime` v50 · FOUR firms** (BELCORT —
 real, 3 clients, **high-stakes RM100,000** ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
