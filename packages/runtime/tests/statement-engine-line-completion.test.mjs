@@ -74,3 +74,43 @@ test("typed Transactions WIN when they spoke — the completion never runs besid
   assert.equal(read.lines[0].description, "TYPED ROW");
   assert.equal(read.receipt.lines_completed_from_content, undefined, "no completion when typed spoke");
 });
+
+test("the REAL prebuilt-bankStatement schema: per-account nesting reads (probed live 2026-07-31)", () => {
+  const read = normalizeAzureBankStatement({
+    analyzeResult: {
+      documents: [{
+        fields: {
+          BankName: { valueString: "Maybank" },
+          Accounts: { type: "array", valueArray: [{
+            valueObject: {
+              AccountNumber: { valueString: "514400990011" },
+              BeginningBalance: { content: "0.00" },
+              EndingBalance: { content: "150.00" },
+              Transactions: { valueArray: [
+                { valueObject: { Description: { valueString: "BALANCE B/F" } } },
+                { valueObject: {
+                  Date: { valueDate: "2025-06-10" },
+                  Description: { valueString: "CLEARING CHQ DEP" },
+                  DepositAmount: { content: "150.00" },
+                  Balance: { content: "150.00" },
+                } },
+              ] },
+            },
+          }] },
+        },
+      }],
+      pages: [{ pageNumber: 1, lines: [
+        { content: "TARIKH PENYATA / STATEMENT DATE : 30/06/2025", polygon: [0, 2, 40, 2] },
+        { content: "TOTAL DEBIT : .00", polygon: [0, 5, 40, 5] },
+        { content: "TOTAL CREDIT : 150.00", polygon: [0, 6, 40, 6] },
+      ] }],
+    },
+  });
+  assert.equal(read.header.account_number_normalized, "514400990011", "the account reads from Accounts[0]");
+  assert.equal(read.header.opening_cents, 0);
+  assert.equal(read.header.closing_cents, 15000);
+  assert.equal(read.lines.length, 1, "the dated row parses; the dateless BALANCE B/F row is skipped-and-counted");
+  assert.equal(read.receipt.rows_skipped, 1);
+  assert.equal(read.header.period_start, "2025-06-01", "period derives from the label-completed statement date");
+  assert.equal(read.receipt.lines_completed_from_content, undefined, "typed spoke — no completion");
+});
