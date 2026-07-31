@@ -20,6 +20,7 @@ import { bankScreenState, describeBankRefusal, isEligibleBankCoaAccount } from "
 import { fmtCents, fmtDeltaCents, shortId } from "../shared/fmt";
 import { StatementDetail } from "./StatementDetail";
 import { AddBankAccountPanel } from "./AddBankAccountPanel";
+import { RuleCandidatesCard } from "./RuleCandidatesCard";
 import styles from "./bank.module.css";
 
 export function BankWorkbench({ token, clientId, clientName }: { token: string; clientId: string; clientName?: string | null }) {
@@ -121,6 +122,8 @@ export function BankWorkbench({ token, clientId, clientName }: { token: string; 
 
       <AddBankAccountPanel token={token} clientId={clientId} eligibleCoa={eligibleCoa} onAdded={() => void reload()} />
 
+      <RuleCandidatesCard token={token} clientId={clientId} />
+
       <div className={styles.layout}>
         <section className={styles.listPane}>
           <p className={styles.sectionTitle}>Accounts &amp; statements</p>
@@ -197,7 +200,13 @@ export function BankWorkbench({ token, clientId, clientName }: { token: string; 
 
         <section className={styles.detailPane}>
           {selectedStatementId ? (
-            <StatementDetail token={token} clientId={clientId} statementId={selectedStatementId} onChanged={() => void reload()} />
+            <StatementDetail
+              token={token} clientId={clientId} statementId={selectedStatementId}
+              statements={statements.filter(
+                (s) => s.bank_account_id === (statements.find((x) => x.id === selectedStatementId)?.bank_account_id ?? ""),
+              )}
+              onChanged={() => void reload()}
+            />
           ) : (
             <p className={styles.detailEmpty}>Select a statement to see its lines and the matching workspace.</p>
           )}

@@ -7,7 +7,7 @@
 // firm's threshold the composite leaves a pending-match reservation (WCA-R7) —
 // rendered generically here since the receipt shape is not pinned (bankApi.ts).
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { PgrestError } from "../shared/wire";
 import { settleFromBankLine, type SettleReceipt } from "../shared/bankApi";
 import { listCounterparties, type CounterpartyRow, type CounterpartyKind } from "../shared/counterpartyApi";
@@ -21,17 +21,26 @@ import { fmtCents } from "../shared/fmt";
 import styles from "./bank.module.css";
 
 export function SettleLinePanel({
-  token, clientId, statement, line, onDone,
+  token, clientId, statement, line, onDone, viaRuleId, initialCounterpartyId, initialKind,
 }: {
   token: string;
   clientId: string;
   statement: BankStatementRow;
   line: BankStatementLineRow;
   onDone: () => void;
+  /** Wave C-c (design §5 splice #4): a confirmed `match_settle` suggestion's
+   *  signed rule id — omitted on an ordinary human settle. */
+  viaRuleId?: string | null;
+  /** Wave C-c suggestion chip pre-fill (design §7): the rule's proposed
+   *  counterparty/domain, applied ONCE on mount — a later manual Customer/
+   *  Vendor toggle clears it like any ordinary kind change. */
+  initialCounterpartyId?: string | null;
+  initialKind?: CounterpartyKind | null;
 }) {
-  const [kind, setKind] = useState<CounterpartyKind>(line.amount_cents > 0 ? "customer" : "vendor");
+  const [kind, setKind] = useState<CounterpartyKind>(initialKind ?? (line.amount_cents > 0 ? "customer" : "vendor"));
   const [counterparties, setCounterparties] = useState<CounterpartyRow[]>([]);
-  const [counterpartyId, setCounterpartyId] = useState("");
+  const [counterpartyId, setCounterpartyId] = useState(initialCounterpartyId ?? "");
+  const isFirstKindRun = useRef(true);
   const [openItems, setOpenItems] = useState<OpenItemRow[]>([]);
   const [allocations, setAllocations] = useState<Record<string, number>>({});
   const [coaAccounts, setCoaAccounts] = useState<AccountRow[]>([]);
@@ -51,7 +60,14 @@ export function SettleLinePanel({
     listAccounts(token, clientId).then(setCoaAccounts).catch(() => setCoaAccounts([]));
   }, [token, clientId]);
   useEffect(() => {
-    setCounterpartyId("");
+    // Skip the reset on the very first run so a suggestion-chip pre-fill
+    // survives mount; any LATER kind/client/token change clears it, same as
+    // an ordinary Customer/Vendor toggle always has.
+    if (isFirstKindRun.current) {
+      isFirstKindRun.current = false;
+    } else {
+      setCounterpartyId("");
+    }
     setOpenItems([]);
     listCounterparties(token, clientId, kind).then(setCounterparties).catch(() => setCounterparties([]));
   }, [token, clientId, kind]);
@@ -81,6 +97,7 @@ export function SettleLinePanel({
         chargeCents, chargeAccount: chargeAccount || null,
         adjustments: adjustments.length ? adjustments : null,
         attestation: attestation || null,
+        viaRuleId: viaRuleId ?? null,
       });
       setReceipt(out);
       onDone();
@@ -109,6 +126,7 @@ export function SettleLinePanel({
 
   return (
     <div>
+      {viaRuleId ? <p className={styles.hint}>Confirming a suggested rule settlement — submitting will stamp this settlement &lsquo;via rule&rsquo; (design §4.3).</p> : null}
       <div className={styles.actions}>
         <button className={kind === "customer" ? styles.button : styles.buttonSecondary} onClick={() => setKind("customer")}>Customer</button>
         <button className={kind === "vendor" ? styles.button : styles.buttonSecondary} onClick={() => setKind("vendor")}>Vendor</button>

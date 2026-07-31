@@ -86,3 +86,17 @@ test("wave-a2 rule_post_receipt is registered and renders non-empty", () => {
   assert.ok(html.includes("Posted by rule"), "the id-only card state must render");
   assert.ok(!html.includes(FALLBACK_UNSUPPORTED_PREFIX), "rule_post_receipt must not hit the unsupported fallback");
 });
+
+// Belt-and-braces: the two Wave C-c parts (bank_recon_receipt/bank_rule_proposal,
+// design v2.1 §7) are registered and render non-empty.
+test("wave-c-c bank_recon_receipt and bank_rule_proposal are registered and render non-empty", () => {
+  for (const t of ["bank_recon_receipt", "bank_rule_proposal"]) {
+    assert.ok(RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]), `${t} must be registered`);
+  }
+  const recon = render([{ type: "bank_recon_receipt", statement_id: "stmt-1010", client_id: "client-1111" }]);
+  assert.ok(recon.includes("Bank reconciliation"), "the id-only receipt card state must render");
+  assert.ok(!recon.includes(FALLBACK_UNSUPPORTED_PREFIX));
+  const rule = render([{ type: "bank_rule_proposal", rule_id: "rule-1111", client_id: "client-1111" }]);
+  assert.ok(rule.includes("Bank rule proposal"), "the id-only proposal card state must render");
+  assert.ok(!rule.includes(FALLBACK_UNSUPPORTED_PREFIX));
+});

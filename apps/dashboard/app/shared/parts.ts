@@ -79,7 +79,26 @@ export type OpenQuestionPart = { type: "open_question"; question_id: string; cli
  *  an approval — every rule-post is reversible). Mirrors `SweepReceiptPart`. */
 export type RulePostReceiptPart = { type: "rule_post_receipt"; run_id: string };
 
-/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 members. */
+// --- Wave C-c additions (design v2.1 §7) -----------------------------------------
+// Identifier-only, mirroring the Wave-A/A2 receipt/proposal idiom exactly. NOTE (see
+// build-0040/u1-notes.md): design §7 names "new ClaraPart members + catalog entries"
+// without naming them — C-c ships no new machine lane, so nothing in the runtime
+// emits these on the wire TODAY. They are declared here by analogy (a completed
+// reconciliation is a receipt, a bank rule proposal is a proposal — the SweepReceiptPart/
+// KbRuleProposalPart shape) so the surface exists the day a chat turn references one; both
+// cards hydrate authoritative state on mount, same as every other Wave-A/A2 part.
+
+/** A completed (or voided) bank reconciliation's receipt (design §4.1/§6).
+ *  Keyed on `statement_id`, NOT `recon_id` — the only read RPC the design
+ *  names is `get_bank_reconciliation(statement)` (§6; recons are born 1:1 on
+ *  a live statement, WCC-R1), so that is the id this part can actually
+ *  hydrate with. */
+export type BankReconReceiptPart = { type: "bank_recon_receipt"; statement_id: string; client_id: string };
+
+/** A bank_rules proposal (design §4.3) — match_settle or coding. */
+export type BankRuleProposalPart = { type: "bank_rule_proposal"; rule_id: string; client_id: string };
+
+/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 + 2 Wave-C-c members. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
@@ -97,4 +116,7 @@ export type ClaraPart =
   | KbRuleProposalPart
   | OpenQuestionPart
   // --- Wave-A2 addition ---
-  | RulePostReceiptPart;
+  | RulePostReceiptPart
+  // --- Wave C-c additions ---
+  | BankReconReceiptPart
+  | BankRuleProposalPart;

@@ -170,6 +170,37 @@ export const BANK_REFUSAL_COPY: Record<string, string> = {
   allocations_duplicated: "The same open item appears twice in one allocation set.",
   allocations_exceed_receipt: "The allocations exceed the settlement amount (plus any discount/charge).",
   amount_invalid: "The amount must be a positive whole number of cents.",
+  // Wave C-c tie-out (design v2.1 §5) — complete/void_bank_reconciliation.
+  recon_prior_missing: "No prior reconciliation is on record — a first-period exemption must be claimed explicitly.",
+  recon_period_gap: "A prior statement's period is missing from the chain — a gap month must be filled before this one can complete.",
+  recon_line_unsettled: "Not every line of this statement is a live match member or under an open exception yet.",
+  recon_line_reserved: "A pending match reservation is still open on a line — complete or cancel it first.",
+  recon_difference_nonzero: "The §3 identity does not close to zero on the stored terms.",
+  recon_opening_mismatch: "The opening anchor does not tie to the prior receipt's closing (or the takeover carry-down).",
+  recon_outstanding_stale: "An outstanding item is older than 60 days and has not been acknowledged by id.",
+  recon_coa_shared: "More than one bank account shares this COA code with a live statement — remap before completing.",
+  recon_uncleared_off_account: "A pre-cutover opening item's entry carries no leg on a registered bank-account COA.",
+  statement_not_live: "This statement is not live (it was voided or superseded).",
+  recon_already_complete: "This statement already has a complete reconciliation.",
+  recon_chain_order: "Reconciliations must be voided newest-first — this is not the tail of the chain.",
+  recon_already_void: "This reconciliation is already void.",
+  recon_period_settled: "This line's period is already reconciled — void the recon chain back to correct it.",
+  recon_frontier_backfill: "This statement's period is earlier than the account's earliest complete reconciliation.",
+  reason_required: "A reason is required for this action.",
+  // Wave C-c — except_bank_line / resolve_bank_line_exception.
+  line_already_matched: "This line is already a live match member — it cannot be excepted.",
+  line_already_excepted: "This line already has an open exception.",
+  line_excepted: "This line has an open exception — resolve it before matching.",
+  already_resolved: "This exception is already resolved.",
+  resolution_note_required: "A resolution note is required.",
+  disposition_unbooked: "The 'matched to a booking' disposition requires the line to be a live match member.",
+  // Wave C-c — propose/sign/retire_bank_rule.
+  rule_evidence_insufficient: "Fewer than 3 congruent sightings back this pattern yet — the DB re-derives the count.",
+  rule_pattern_already_signed: "A signed rule already covers this exact pattern.",
+  rule_not_proposed: "This rule is not in the proposed state.",
+  rule_not_signed: "This rule is not signed (or already retired).",
+  // Wave C-c — set_counterparty_terms.
+  terms_out_of_range: "Payment terms must be between 1 and 365 days.",
 };
 
 export function describeBankRefusal(reason: string | null | undefined): string | null {

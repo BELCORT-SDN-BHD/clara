@@ -227,7 +227,22 @@ function validateDelimited(prefix, ext) {
   const delimiter = ext === "tsv" ? "\t" : lines.some((l) => l.includes(",")) ? "," : lines.some((l) => l.includes(";")) ? ";" : null;
   if (!delimiter) throw new IntakeScanError("bad_type", "delimited text has no stable delimiter", 415);
   const widths = lines.map((line) => line.split(delimiter).length);
-  if (widths.some((n) => n < 2) || new Set(widths).size > 2) throw new IntakeScanError("bad_type", "delimited text parse probe failed", 415);
+  // A real bank CSV export routinely opens with one or more single-column BANNER/title
+  // rows above the transaction header (institution name, "Account Statement", a blank
+  // separator) before the genuinely delimited header+data rows begin. This is a
+  // lightweight shape sniff, not the parser — statement-parse.mjs's `parseStatementCsv`
+  // already scans past exactly this preamble and skips-and-counts it at parse time (its
+  // own header comment names the preamble explicitly) — so refusing the file HERE, before
+  // the parser that already handles it ever runs, was the transport-layer bug (2026-07-31
+  // C-b acceptance-night finding (4)). Leading width<2 rows are tolerated UNCOUNTED; the
+  // strictness (no row under 2 fields, at most 2 distinct widths) still applies, but only
+  // from the first genuinely-delimited row onward — a real transaction table still has to
+  // be internally consistent, and a width-1 row appearing AFTER the body has started (not
+  // a leading banner) still refuses.
+  const bodyStart = widths.findIndex((n) => n >= 2);
+  if (bodyStart === -1) throw new IntakeScanError("bad_type", "delimited text has no stable delimiter", 415);
+  const bodyWidths = widths.slice(bodyStart);
+  if (bodyWidths.some((n) => n < 2) || new Set(bodyWidths).size > 2) throw new IntakeScanError("bad_type", "delimited text parse probe failed", 415);
   return { format: ext, ext, mime: ext === "tsv" ? "text/tab-separated-values" : "text/csv", pages: 1 };
 }
 

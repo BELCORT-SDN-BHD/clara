@@ -176,6 +176,21 @@ test("matchBankLine passes adjustments + the ack flag through when supplied", as
   assert.equal(seenBody.p_ack_period_exceptions, true);
 });
 
+test("matchBankLine omits p_via_rule on a plain human match, sends it when confirmed from a suggestion (C-c splice #4)", async (t) => {
+  const bodies: Record<string, unknown>[] = [];
+  t.mock.method(globalThis, "fetch", async (_u: string, init?: RequestInit) => {
+    bodies.push(JSON.parse(String(init?.body)));
+    return jsonRes({ match_id: "m1" });
+  });
+  setup();
+  await matchBankLine("jwt", { clientId: "c1", lineIds: ["l1"], entries: [{ entry_id: "e1", matched_cents: -1000 }] });
+  assert.ok(!("p_via_rule" in (bodies[0] ?? {})), "the 0038 arity is untouched when no rule was confirmed");
+  await matchBankLine("jwt", {
+    clientId: "c1", lineIds: ["l1"], entries: [{ entry_id: "e1", matched_cents: -1000 }], viaRuleId: "rule1",
+  });
+  assert.equal(bodies[1]?.p_via_rule, "rule1", "the 0040 overload resolves when a suggestion was confirmed");
+});
+
 test("unmatchBankMatch posts p_reason under unmatch_bank_match", async (t) => {
   let seenUrl = "";
   let seenBody: Record<string, unknown> = {};
@@ -208,6 +223,21 @@ test("settleFromBankLine sends the full pinned arg list with its stated defaults
   assert.equal(seenBody.p_attestation, null);
   assert.equal(seenBody.p_control_account, null);
   assert.equal(receipt.status, "approved");
+  assert.ok(!("p_via_rule" in seenBody), "the 0038 arity is untouched when no rule was confirmed");
+});
+
+test("settleFromBankLine sends p_via_rule when confirmed from a suggestion (C-c splice #4)", async (t) => {
+  let seenBody: Record<string, unknown> = {};
+  t.mock.method(globalThis, "fetch", async (_u: string, init?: RequestInit) => {
+    seenBody = JSON.parse(String(init?.body));
+    return jsonRes({ entry_id: "e1", match_id: "m1", status: "approved" });
+  });
+  setup();
+  await settleFromBankLine("jwt", {
+    clientId: "c1", lineId: "l1", counterpartyId: "cp1",
+    allocations: [{ item_id: "i1", amount_cents: 10000 }], memo: "settle inv-1", viaRuleId: "rule1",
+  });
+  assert.equal(seenBody.p_via_rule, "rule1");
 });
 
 test("completePendingMatch posts p_match under complete_pending_match", async (t) => {

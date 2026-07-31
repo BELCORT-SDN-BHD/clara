@@ -870,9 +870,13 @@ test("x37.i the two-sided bound holds BOTH ways: over-allocation is refused, and
   const inflation = await caught(() => withActor({ transaction: true }, async (c) => {
     const g = randomUUID();
     await c.query(
-      `insert into clara.open_item_allocations(firm_id,client_id,domain,item_id,application_group,operation_kind,amount_cents,reason,created_by)
-       values($1,$2,'ar',$3,$4,'apply',50000,'x37 inflation probe',$6),
-              ($1,$2,'ar',$5,$4,'apply',-50000,'x37 inflation probe',$6)`,
+      // AMENDMENT 0040: effective_date is NOT NULL (the as-of grain C-c added). A forged
+      // insert that omits it dies at 23502 BEFORE the belt runs, which would silently
+      // retire this cell's real subject -- the two-sided bound. Supplied so the BELT is
+      // still what refuses.
+      `insert into clara.open_item_allocations(firm_id,client_id,domain,item_id,application_group,operation_kind,amount_cents,effective_date,reason,created_by)
+       values($1,$2,'ar',$3,$4,'apply',50000,current_date,'x37 inflation probe',$6),
+              ($1,$2,'ar',$5,$4,'apply',-50000,current_date,'x37 inflation probe',$6)`,
       [firm, client, atFace.item, g, settle.id, sub],
     );
   }));
@@ -917,8 +921,10 @@ test("x37.j group law: a cross-counterparty apply is refused, and a non-zero-net
   // again instead of the group law.
   const lonely = await caught(() => withActor({ transaction: true }, async (c) => {
     await c.query(
-      `insert into clara.open_item_allocations(firm_id,client_id,domain,item_id,application_group,operation_kind,amount_cents,reason,created_by)
-       values($1,$2,'ar',$3,$4,'apply',-20000,'x37 non-zero-net probe',$5)`,
+      // AMENDMENT 0040: effective_date is NOT NULL -- supplied so the BELT, not the
+      // column's own constraint, is what refuses this group.
+      `insert into clara.open_item_allocations(firm_id,client_id,domain,item_id,application_group,operation_kind,amount_cents,effective_date,reason,created_by)
+       values($1,$2,'ar',$3,$4,'apply',-20000,current_date,'x37 non-zero-net probe',$5)`,
       [firm, client, invAlpha.item, randomUUID(), sub],
     );
   }));

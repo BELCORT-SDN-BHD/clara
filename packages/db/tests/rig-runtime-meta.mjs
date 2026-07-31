@@ -92,7 +92,15 @@ export async function overloadFailures() {
   // AMENDMENT 0038 (WCB-R1, design v2.1): prepare/consume_egress_dispatch each carry
   // EXACTLY TWO ratified overloads (the 0020 wiki arity + the 0038 sha-bound arity).
   // Anything else with >1, or these two with a third, is still an orphan.
-  const RATIFIED = { prepare_egress_dispatch: 2, consume_egress_dispatch: 2 };
+  // AMENDMENT 0040 (WCC, design v2.1 SS5 splice register 4): match_bank_line and
+  // settle_from_bank_line each gain a ratified SECOND arity carrying p_via_rule. The new
+  // arities carry NO defaults, so the two candidates can never both match one call --
+  // asserted by 0040's own S4.Z pronargdefaults census, which is what makes a second
+  // overload safe here rather than the ambiguity this sweep exists to catch.
+  const RATIFIED = {
+    prepare_egress_dispatch: 2, consume_egress_dispatch: 2,
+    match_bank_line: 2, settle_from_bank_line: 2,
+  };
   const r = await rootQuery(
     `select p.proname, count(*)::int as n from pg_proc p join pg_namespace n on n.oid = p.pronamespace
       where n.nspname = 'clara' group by p.proname having count(*) > 1`,
