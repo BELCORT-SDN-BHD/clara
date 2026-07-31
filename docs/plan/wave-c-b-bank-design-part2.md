@@ -277,3 +277,20 @@ adjudicated finding by finding):**
   statement exists). A stale task's terminal event is noise, not money; the autodraft wake
   for the new kind re-arms on the next filing/re-fire. Candidate C-c mechanism: retire
   queued tasks whose lane no longer matches the kind at re-kind time.
+
+**Owner ruling (2026-07-31, the reader-2 line fork):** Azure's typed bank-statement model
+returns ZERO transactions for the real Maybank trilingual layout while its own recognition
+is complete (proven by the header completion + the refusal log `line_count: 4 vs 0`). The
+owner ruled **option B**: the engine's ratified completion-pass doctrine extends from the
+header to the TRANSACTION LINES — typed wins wherever it spoke; an empty typed array
+completes from THIS response's own recognized regions through the same deterministic
+grammar reader-1 runs. The two readers keep two independent RECOGNITIONS and share one
+grammar; the chain identity + printed totals stay the grammar-independent floor; the
+completion is receipted (`lines_completed_from_content`). **The LLM-structured read stays
+the named fallback seam (option A)** — a future build item with refusal-biased prompt +
+review; when it lands it becomes the preferred reader-2 substitution and B demotes to the
+last resort. Real-corpus grammar hardening this round (each pinned by cells): `.00`
+zero-magnitude money · dwibahasa label/value splits + header-table adjacency ·
+statement-month period derivation (both readers, absence-only) · trilingual combined
+column headers (word-bounded synonym containment, specificity before position, row-local
+ledger detection) · the statement-refusal detail log.
