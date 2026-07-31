@@ -76,7 +76,10 @@ export function houseNormalizeIdentifier(text) {
  *
  * Accepted: `1,234.56` · `1234.56` · `RM1,234.56` · `MYR 1,234.56` · `1,234.56-` ·
  * `500.00+` · `(1,234.56)` (accounting negative) · `1,234.56 DR` · `1,234.56CR` · `1,234`
- * (whole ringgit). Anything else is null — a statement figure we cannot read is a refusal
+ * (whole ringgit) · `.00` (Maybank prints ZERO with no integer part — the real 202504
+ * statement's every endpoint reads `.00`, found by the first real C-b acceptance month;
+ * a leading-dot decimal is a genuine printed zero-magnitude figure, not OCR noise).
+ * Anything else is null — a statement figure we cannot read is a refusal
  * (`header_unreadable` / `totals_unreadable` / a line skeleton that will not corroborate),
  * never an assumption.
  */
@@ -105,6 +108,9 @@ export function parseMoneyCents(text) {
   }
   // The body must now be a plain grouped decimal. A stray letter, a second decimal point,
   // or a thousands group of the wrong width is a REFUSAL: OCR noise must not become a number.
+  // The leading-dot form (`.00`, `.50`) is Maybank's printed zero-magnitude — normalize it
+  // to `0.xx` rather than widening the main pattern.
+  if (/^\.\d{1,2}$/.test(s)) s = `0${s}`;
   if (!/^\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?$|^\d+(?:\.\d{1,2})?$/.test(s)) return null;
   const [whole, frac = ""] = s.replace(/,/g, "").split(".");
   const cents = Number(whole) * 100 + Number((frac + "00").slice(0, 2));
