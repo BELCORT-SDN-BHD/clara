@@ -91,20 +91,13 @@ const COLUMN_SYNONYMS = Object.freeze({
  * matcher's read-ALL-extractions shape: a statement is one coherent document and
  * concatenating two engines' regions would interleave them by position and garble the table.
  *
- * SUPERSEDE IS JUDGED KIND-HONESTLY (C-b acceptance finding, 2026-07-31). The 0017
- * authoritative-extraction trigger points `superseded_by` at whatever done extraction is
- * newest REGARDLESS OF KIND — so in the ordinary pipeline order (intake OCR → classify →
- * human kind-stamp) every statement's layout geometry arrives here already "superseded" by
- * a doc_classify verdict, and a bare `superseded_by is null` filter starves reader-1 on
- * EVERY real document. A classify verdict replaces prior CLASSIFY authority, not the page's
- * geometry: only a LATER OCR read replaces that. Hence the filter below excludes an ocr row
- * only when its superseder is itself engine_kind='ocr'; newest-first ordering then picks the
- * latest genuine re-OCR when one exists. (The trigger's kind-blind scope is ledgered for
- * adjudication — PROJECTLOG PART 2; this read is correct under both the current and a
- * kind-scoped trigger.)
- *
- * ORDERING mirrors `classify.mjs`'s own note: `version_n` is allocated per
- * (document_id, engine_id), so ordering by `extracted_at` first makes newest genuinely win.
+ * SUPERSEDE IS JUDGED KIND-HONESTLY (C-b acceptance, 2026-07-31): the 0017 authority
+ * trigger supersedes KIND-BLIND, so in real pipeline order (OCR → classify → kind-stamp)
+ * the geometry always arrives "superseded" by a doc_classify verdict and a bare
+ * `superseded_by is null` filter starves reader-1 on EVERY real document. Only a LATER OCR
+ * read replaces geometry — the filter excludes an ocr row only when its superseder is
+ * itself ocr-kind; newest-first then picks the latest genuine re-OCR. (Trigger scope
+ * ledgered in PROJECTLOG PART 2; ordering per classify.mjs — extracted_at first.)
  */
 export async function readStatementLayoutRegions(client, { documentId, firmId }) {
   const r = await client.query(
@@ -230,34 +223,43 @@ function cellScanLines(regions) {
 // `parseMoneyCents`/`parseStatementDate` refuse anything they cannot read EXACTLY — which is
 // the right behaviour, and which makes an unstripped tail a silent `header_unreadable`.
 function labelled(lines, prefixes) {
+  const all = labelledAll(lines, prefixes);
+  if (!all.length) return null;
+  return { ...all[0], next: all[0].nexts[0] ?? "" };
+}
+
+/** Every label hit, each with its stripped tail + an eight-region look-ahead (the real
+ *  202509 prints `ENDING BALANCE :` and `29,660.41` seven cells apart). */
+function labelledAll(lines, prefixes) {
+  const out = [];
   for (const [index, line] of lines.entries()) {
     const n = normText(line.text);
     const hit = prefixes.find((p) => n.startsWith(p) || n.includes(`/ ${p}`) || n.includes(`${p} :`));
     if (!hit) continue;
-    const tail = n.slice(n.indexOf(hit) + hit.length)
-      .replace(/^[\s:.\-–]+/, "")
-      .replace(/[\s,;|"']+$/, "")
-      .trim();
-    // `nexts` carries SIX following regions, not one: the real Maybank layout prints
-    // `NOMBOR AKAUN` and its digits five regions apart, the dwibahasa label block between.
-    return {
-      tail,
-      next: lines[index + 1]?.text ?? "",
-      nexts: lines.slice(index + 1, index + 7).map((l) => l.text),
-      line: line.text,
-    };
+    out.push({
+      tail: n.slice(n.indexOf(hit) + hit.length).replace(/^[\s:.\-–]+/, "").replace(/[\s,;|"']+$/, "").trim(),
+      nexts: lines.slice(index + 1, index + 9).map((l) => l.text),
+    });
+  }
+  return out;
+}
+
+function labelledMoney(lines, prefixes) {
+  // EVERY label occurrence gets a chance (the real 202509 prints the label on page lines
+  // with no nearby value AND in a summary table seven cells from its figure -- first-hit-
+  // wins starved the one that carries the value). Look-aheads are STRICT whole-region
+  // money literals, so prose and dates can never be slurped.
+  for (const found of labelledAll(lines, prefixes)) {
+    const tail = parseMoneyCents(found.tail);
+    if (tail) return tail;
+    for (const t of found.nexts) {
+      const m = parseMoneyCents(String(t ?? "").trim().replace(/^[:\s]+/, ""));
+      if (m) return m;
+    }
   }
   return null;
 }
 
-/** A labelled MONEY figure — the label's own tail first, then the following region. */
-function labelledMoney(lines, prefixes) {
-  const found = labelled(lines, prefixes);
-  if (!found) return null;
-  return parseMoneyCents(found.tail) ?? parseMoneyCents(found.next);
-}
-
-/** A labelled DATE — same two-region tolerance. */
 function labelledDate(lines, prefixes, period) {
   const found = labelled(lines, prefixes);
   if (!found) return null;
