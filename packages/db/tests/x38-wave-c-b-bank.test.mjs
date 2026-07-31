@@ -2116,3 +2116,42 @@ test("x38.am a bank_statement xml is skipped_type at the router -- never routed 
     [seed.documentId]);
   assert.equal(events.rows[0].n, 0, "no terminal lane event fires -- skipped_type is a receipt, not a failure");
 });
+
+// ===========================================================================
+// x38.an -- 0039: THE NULL-DEFERS-TO-CHAIN LAW AT THE DB (the authority's half
+// of PR #160's runtime law; found by the first real active month -- Azure's
+// per-account typed rows carry NO Balance slot). One-sided null running
+// balances persist (the chain walk stays the witness); two NUMBERS that
+// differ still refuse readers_disagree.
+// ===========================================================================
+test("x38.an one-sided null running balances persist; a bilateral numeric conflict still refuses", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A2;
+  await lightStatementConsent(sub, { firm: await firmOf(client), client }).catch(() => {});
+  const acct = await freshRegisteredAccount(sub, client, "an1");
+
+  const ch = chain({ month: "2027-01" });
+  const h = header({ bankCode: "MBB", accountNumberDigits: acct.digitsOnly, periodStart: "2027-01-01", periodEnd: "2027-01-31", ch });
+  const filed = await filedStatementPdf(sub, { client });
+  const task = await enqueueStatement(filed.documentId);
+  await claimTask(task.id, { egressApproved: true });
+  const payload = agreeingPayload(h, ch);
+  for (const l of payload.reader2.lines) l.running_balance_cents = null;
+  const result = await persistStatementFacts(task.id, payload);
+  assert.notEqual(result?.status, "failed", `schema-absent reader-2 balances persist (got ${JSON.stringify(result)})`);
+  const st = await rootQuery("select line_count, status from clara.bank_statements where document_id=$1", [filed.documentId]);
+  assert.equal(st.rows[0]?.status, "live", "the statement is live; the chain walk witnessed the balances");
+  assert.equal(Number(st.rows[0]?.line_count), 3);
+
+  const acct2 = await freshRegisteredAccount(sub, client, "an2");
+  const ch2 = chain({ month: "2027-02" });
+  const h2 = header({ bankCode: "MBB", accountNumberDigits: acct2.digitsOnly, periodStart: "2027-02-01", periodEnd: "2027-02-28", ch: ch2 });
+  const filed2 = await filedStatementPdf(sub, { client });
+  const task2 = await enqueueStatement(filed2.documentId);
+  await claimTask(task2.id, { egressApproved: true });
+  const payload2 = agreeingPayload(h2, ch2);
+  payload2.reader2.lines[0].running_balance_cents = (payload2.reader1.lines[0].running_balance_cents ?? 0) + 111;
+  const outcome = await persistExpectFailure(task2.id, payload2, "readers_disagree", "x38.an bilateral numeric conflict");
+  noteLane(`x38.an bilateral conflict lands via ${outcome.via}`);
+});
