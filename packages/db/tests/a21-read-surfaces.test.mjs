@@ -27,7 +27,7 @@ import {
   buildWorld, firmOf, opk, wakeQuery,
   a21EnsureReady, skip16, metaProbe0016,
   evaluateSstWatch, evaluateAllWatches, freshWatchClient, approvedTurnoverEntry, openWatchRow,
-  evalRunCount, collectRowKind,
+  evalRunCount, collectRowKind, mytMonthDate,
   getDraftReview, withdrawDraft, draftEntryV3, approveEntry, freshResolution, contextPack,
   listReviewQueue, humanPersona, mintInteractive, wakeDraftEntry,
   upsertPayableAccount, upsertAccountClassed, seedCitedDocument, billLines, ev, FIELD,
@@ -57,7 +57,9 @@ async function crossedWatchClient() {
   if (watchClient) return watchClient;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_reads_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: "2026-06-09" });
+  // Anchored to the DB's OWN Asia/Kuala_Lumpur clock (n=-1, the last completed
+  // month) — never a fixed calendar month; see a21-watch-anchors.mjs.
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: await mytMonthDate(-1, 9) });
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.equal(w?.state, "crossed", "the reads fixture watch is crossed (mandatory setup)");

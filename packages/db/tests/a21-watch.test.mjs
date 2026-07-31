@@ -31,6 +31,7 @@ import {
   evaluateSstWatch, evaluateAllWatches,
   freshWatchClient, approvedTurnoverEntry, openWatchRow, latestEvalRun, evalRunCount,
   ackWatch,
+  mytMonthDate, mytMonthStart, mytLastDayOfMonth, mytApplicationDue,
   CASH, INC, INC2, INC_I,
   checkDefs, uniqueIndexDefs, rlsFlags, roleCanExecute, fnSource,
   reverseEntry, draftEntryV3, approveEntry, freshResolution,
@@ -246,9 +247,12 @@ test("§2 BOUNDARY: exactly RM 500,000.00 is NOT crossed (early_warning); +1 sen
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_boundary_${randomUUID().slice(0, 6)}` });
-  // RM 499,999.99 + RM 0.01 = exactly RM 500,000.00 in June-2026.
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 49_999_999, date: "2026-06-03" });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 1, date: "2026-06-04" });
+  // RM 499,999.99 + RM 0.01 = exactly RM 500,000.00 in the last COMPLETED MYT
+  // month (n=-1) — anchored to the DB's OWN Asia/Kuala_Lumpur clock, never a
+  // fixed calendar month (see a21-watch-anchors.mjs; this is the exact rot
+  // class that broke this cell at a real month rollover).
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 49_999_999, date: await mytMonthDate(-1, 3) });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 1, date: await mytMonthDate(-1, 4) });
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "G");
   assert.ok(w, "a watch case exists for (client, G) after evaluation");
@@ -258,25 +262,25 @@ test("§2 BOUNDARY: exactly RM 500,000.00 is NOT crossed (early_warning); +1 sen
   assert.equal(w.future_method_status, "not_assessed", "future method is not_assessed without an attestation (WA21-R6 — never inferred)");
   assert.equal(Number(w.unknown_or_mixed_cents), 0, "nothing lands in the unknown bucket (every active account is classified)");
   // +1 sen → crossed.
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 1, date: "2026-06-05" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 1, date: await mytMonthDate(-1, 5) });
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
   assert.equal(Number(w.confirmed_included_cents), 50_000_001, "confirmed-included is 50,000,001¢");
   assert.equal(w.state, "crossed", "RM 500,000.01 EXCEEDS the threshold (crossed)");
-  assert.equal(w.earliest_crossing_month, "2026-06-01", "earliest crossing month = June-2026");
-  assert.equal(w.application_due, "2026-07-31", "application due = last day of crossing-month + 1 (s.13(1))");
+  assert.equal(w.earliest_crossing_month, await mytMonthStart(-1), "earliest crossing month = the last completed month");
+  assert.equal(w.application_due, await mytApplicationDue(-1), "application due = last day of crossing-month + 1 (s.13(1))");
 });
 
 test("§2 TIER: RM 399,999.99 is monitored; RM 400,000.00 exactly (≥80%) is early_warning", async (t) => {
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_tier_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 39_999_999, date: "2026-06-02" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 39_999_999, date: await mytMonthDate(-1, 2) });
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "G");
   assert.ok(w, "a monitored watch row exists below 80%");
   assert.equal(w.state, "monitored", "RM 399,999.99 (<80%) is monitored");
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 1, date: "2026-06-02" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 1, date: await mytMonthDate(-1, 2) });
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
   assert.equal(w.state, "early_warning", "RM 400,000.00 exactly (≥80% of threshold) is early_warning");
@@ -286,8 +290,8 @@ test("§2 TRI-STATE default: an UNCLASSIFIED income account lands in unknown_or_
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_tristate_${randomUUID().slice(0, 6)}`, unclassified: [INC2] });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 700_00, date: "2026-05-10", account: INC }); // RM700 confirmed
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 300_00, date: "2026-05-11", account: INC2 }); // RM300 unknown (no row!)
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 700_00, date: await mytMonthDate(-2, 10), account: INC }); // RM700 confirmed
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 300_00, date: await mytMonthDate(-2, 11), account: INC2 }); // RM300 unknown (no row!)
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.ok(w, "the watch row exists");
@@ -303,8 +307,8 @@ test("§2 PER-GROUP: G and I never aggregate — RM300k+RM300k across two groups
     name: `a21_groups_${randomUUID().slice(0, 6)}`,
     groups: { [INC]: "G", [INC_I]: "I" },
   });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 30_000_000, date: "2026-06-08", account: INC });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 30_000_000, date: "2026-06-09", account: INC_I });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 30_000_000, date: await mytMonthDate(-1, 8), account: INC });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 30_000_000, date: await mytMonthDate(-1, 9), account: INC_I });
   await evaluateSstWatch(client);
   const g = await openWatchRow(client, "G");
   const i = await openWatchRow(client, "I");
@@ -315,7 +319,7 @@ test("§2 PER-GROUP: G and I never aggregate — RM300k+RM300k across two groups
   assert.ok(g.state !== "crossed" && g.state !== "overdue", `600k across two groups crosses neither (G=${g.state})`);
   assert.ok(i.state !== "crossed" && i.state !== "overdue", `600k across two groups crosses neither (I=${i.state})`);
   // Push ONLY G over: +RM200,000.01.
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 20_000_001, date: "2026-06-10", account: INC });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 20_000_001, date: await mytMonthDate(-1, 10), account: INC });
   await evaluateSstWatch(client);
   const g2 = await openWatchRow(client, "G");
   const i2 = await openWatchRow(client, "I");
@@ -368,7 +372,7 @@ test("§2 COVERAGE: an opening-balance entry is EXCLUDED from observed turnover 
   assert.equal(flag.is_opening_balance, true, "the fixture opening-balance entry is flagged (mandatory setup)");
   assert.equal(flag.status, "approved", "the opening-balance entry is approved (mandatory setup)");
   // A normal observed entry beside it.
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 200_00, date: "2026-05-20" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 200_00, date: await mytMonthDate(-2, 20) });
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.ok(w, "the watch row exists");
@@ -380,12 +384,13 @@ test("§2 future-dated entries are excluded; a reversal MIRROR is included (the 
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_futrev_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 400_00, date: "2026-05-05" });
-  const revTarget = await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 300_00, date: "2026-05-06" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 400_00, date: await mytMonthDate(-2, 5) });
+  const revTarget = await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 300_00, date: await mytMonthDate(-2, 6) });
   // Future-dated: excluded by the evaluator. If the draft lane itself refuses a
   // future posting date the exclusion is upstream-enforced — either way the
-  // asserted figure is identical (noted, not failed).
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 900_00, date: "2027-01-15" })
+  // asserted figure is identical (noted, not failed). A year out (n=+12) so
+  // this stays genuinely future-dated no matter when the suite runs.
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 900_00, date: await mytMonthDate(12, 15) })
     .catch((e) => noteLane(`future-dated draft refused ${e.code} — exclusion enforced upstream of the evaluator`));
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "G");
@@ -413,10 +418,11 @@ test("P7 closing-transfer: is_year_end alone still COUNTS; is_year_end + closing
   assert.match(col.rows[0].column_default ?? "", /false/, "closing_transfer defaults false (backfill posture)");
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_closing_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 500_00, date: "2026-04-10" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 500_00, date: await mytMonthDate(-3, 10) });
   // A year-end revenue CORRECTION (is_year_end, NOT closing_transfer) — still counts.
+  const yearEndDate = await mytLastDayOfMonth(-3);
   await approvedTurnoverEntry({
-    maker: users.alice, checker: users.bob, client, cents: 100_00, date: "2026-04-30",
+    maker: users.alice, checker: users.bob, client, cents: 100_00, date: yearEndDate,
     flags: { is_year_end: true },
   });
   // The closing TRANSFER (is_year_end + closing_transfer, P7 flags-style): debits
@@ -430,7 +436,7 @@ test("P7 closing-transfer: is_year_end alone still COUNTS; is_year_end + closing
       { account_code: "3000", debit_cents: 0, credit_cents: 600_00, description: "to retained earnings" },
     ],
     flags: { is_year_end: true, closing_transfer: true },
-    postingDate: "2026-04-30", memo: "year-end closing transfer", opKey: opk("ct"),
+    postingDate: yearEndDate, memo: "year-end closing transfer", opKey: opk("ct"),
   });
   await approveEntry(users.bob, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("cta") });
   const ct = (await rootQuery("select closing_transfer, is_year_end from clara.journal_entries where id=$1", [d.entry_id])).rows[0];
@@ -471,13 +477,14 @@ test("§2.4 NOTHING BLOCKS: approvals proceed while a crossed watch is open (the
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_noblock_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: "2026-06-06" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: await mytMonthDate(-1, 6) });
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.equal(w?.state, "crossed", "the watch is open + crossed (mandatory setup)");
   // An ordinary approval on the SAME client while crossed — must simply work.
+  const okDate = await mytMonthDate(-1, 20);
   await assert.doesNotReject(
-    () => approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 250_00, date: "2026-06-20" }),
+    () => approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 250_00, date: okDate }),
     "an approval on a crossed-watch client is NEVER blocked by the watch (§2.4 hard-nots)",
   );
 });
@@ -486,7 +493,7 @@ test("§2 RLS isolation: a firm-B admin can neither ACK nor read firm A's watch;
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_rls_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: "2026-06-07" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: await mytMonthDate(-1, 7) });
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.ok(w, "firm A's watch exists (mandatory setup)");
