@@ -6,30 +6,33 @@
 // financial figure — the one exception, matching the tieBannerState precedent
 // in ./model.ts, is a single equality check (`ties = difference_cents === 0`)
 // on numbers the DB already computed, never a new sum.
+//
+// READ SHAPE — re-pinned against the LANDED 0040 text (re-verify pass): the
+// envelope is FLAT, both branches carry `opening_cents`/`statement_opening_
+// cents`/`opening_anchor_cents` and `closing_cents`/`statement_closing_cents`
+// under their own distinct names, plus a server-computed `can_complete` +
+// `blockers[]` (D8/CX9 — LANDED, no longer pending-DB) and an `available`
+// flag (a third `recon_coa_shared` shape sets `available:false` with no
+// `terms`/`snapshot` at all — this file's existing shapeOk/reconTieState
+// fail-closed arms already degrade that safely). The snapshot's shapes
+// (entry-side 'cents', outstanding_group_items, the real exceptions keys)
+// live in ./reconSnapshotModel.ts, which also now carries `voided_receipt`
+// (VoidedReceiptRow) — LANDED: once a statement has no COMPLETE receipt,
+// get_bank_reconciliation returns the live PREVIEW as the primary body (so
+// re-completion is reachable again) plus the newest VOID receipt's stored
+// columns/snapshot under this key. Grep-verified present in
+// 0040_wave_c_c_tieout.sql (the C6 amendment) — mapped fail-closed
+// (absent/malformed ⇒ null, never rendered, never guessed).
 
-// READ SHAPE — PINNED AGAINST THE REAL MIGRATION (0040, assembly).
-// This file was written before 0040 existed and guessed at
-// get_bank_reconciliation's JSON. It has since been CORRECTED against the
-// shipped SQL, which is authoritative. The real envelope is FLAT (never a
-// nested `terms` object) and identical in both branches except for the
-// `preview` flag:
-//   preview:false (a persisted receipt) — reconciliation_id · statement_id ·
-//     bank_account_id · coa_account_code · prior_statement_id ·
-//     prior_reconciliation_id · period_start · period_end · status ·
-//     opening_cents · gl_balance_cents · closing_cents · outstanding_cents ·
-//     excepted_cents · completed_by · completed_at · first_period ·
-//     precondition_met · chain_ok · stale_outstanding_ids · snapshot
-//   preview:true (the live derivation) — the same money keys plus
-//     difference_cents, and no completed_*/reconciliation_id.
-// The `snapshot` object carries: terms{gl_prime_cents · uncleared_cents ·
-// capacity_prime_cents · outstanding_cents · excepted_cents ·
-// matched_line_cents} · outstanding_entry_sides · outstanding_line_sides ·
-// outstanding_group_items · exceptions · bank_uncleared_opening ·
-// reversal_pairs_excluded · acknowledged_outstanding · the opening-anchor
-// terms · cutoff.
-// Every mapper stays DEFENSIVE (the model.ts toXxx idiom) and keeps the old
-// key names as fallbacks, so a near-miss shape still renders rather than
-// throwing — but the FIRST key read on every line below is the real one.
+import {
+  toSnapshot, toVoidedReceiptRow,
+  type BankReconciliationSnapshot, type ReconOutstandingEntrySide, type ReconOutstandingGroupItem,
+  type ReconOutstandingLineSide, type ReconOpeningLineage, type ReconExceptionEntry, type VoidedReceiptRow,
+} from "./reconSnapshotModel";
+export type {
+  BankReconciliationSnapshot, ReconOutstandingEntrySide, ReconOutstandingGroupItem,
+  ReconOutstandingLineSide, ReconOpeningLineage, ReconExceptionEntry, VoidedReceiptRow,
+};
 
 // ---------------------------------------------------------------------------
 // Defensive helpers (the model.ts/reviewCardTypes.ts idiom, kept local so this
@@ -65,6 +68,10 @@ function rec(v: unknown): Record<string, unknown> {
 
 export type ReconTermSet = {
   opening_anchor_cents: number | null;
+  /** [C1 — LANDED] the statement's own PRINTED opening — distinct from the
+   *  anchor above, its own top-level key in both branches (0040:4053/4251).
+   *  null on a near-miss shape, never fabricated from the anchor. */
+  statement_opening_cents: number | null;
   gl_prime_cents: number | null;
   uncleared_total_cents: number | null;
   unmatched_capacity_prime_cents: number | null;
@@ -80,79 +87,37 @@ export type ReconTermSet = {
  *  On a completed receipt `difference_cents` is absent and is exactly zero by
  *  construction — completion refuses otherwise — so it is read as 0 rather
  *  than left null, which would fail-close a receipt that is definitionally
- *  tied. */
+ *  tied. Reads the C1 distinct keys FIRST (opening_anchor_cents/statement_
+ *  opening_cents/statement_closing_cents), falling back to the current flat
+ *  opening_cents/closing_cents pair while that DB-lane change is in flight. */
 function toTermSet(raw: unknown): ReconTermSet {
   const o = rec(raw);
   const snap = rec(o.snapshot);
   const st = rec(snap.terms);
   const isReceipt = o.preview === false || s(o.status) === "complete" || s(o.status) === "void";
-  const opening = numOrNull(o.opening_cents) ?? numOrNull(snap.opening_anchor_cents);
-  const closing = numOrNull(o.closing_cents) ?? numOrNull(snap.statement_closing_cents);
+  const openingAnchor = numOrNull(o.opening_anchor_cents) ?? numOrNull(o.opening_cents) ?? numOrNull(snap.opening_anchor_cents);
+  const closing = numOrNull(o.statement_closing_cents) ?? numOrNull(o.closing_cents) ?? numOrNull(snap.statement_closing_cents);
+  // [C1 — LANDED, re-verified against 0040:4043-4262] `closing_cents` now
+  // means the SAME thing on both branches — the statement's own printed
+  // figure (identical to statement_closing_cents) — never the derived one.
+  // The preview's actual COMPUTED value lives under its own honest name,
+  // `derived_closing_cents` (0040:4255-4257). A receipt has no such key
+  // because completion required the difference to be exactly zero, so
+  // computed IS the statement figure by construction; a preview with the
+  // key absent (shape drift) fails closed to null, never silently reusing
+  // `closing`, which would hide a real difference.
+  const computedClosing = isReceipt ? closing : numOrNull(o.derived_closing_cents);
   return {
-    opening_anchor_cents: opening,
+    opening_anchor_cents: openingAnchor,
+    statement_opening_cents: numOrNull(o.statement_opening_cents),
     gl_prime_cents: numOrNull(o.gl_balance_cents) ?? numOrNull(st.gl_prime_cents),
     uncleared_total_cents: numOrNull(st.uncleared_cents) ?? numOrNull(o.outstanding_cents),
     unmatched_capacity_prime_cents:
       numOrNull(st.capacity_prime_cents) ?? numOrNull(o.unmatched_capacity_prime_cents),
     excepted_cents: numOrNull(o.excepted_cents) ?? numOrNull(st.excepted_cents),
-    computed_closing_cents: closing,
-    statement_closing_cents: numOrNull(snap.statement_closing_cents) ?? closing,
+    computed_closing_cents: computedClosing,
+    statement_closing_cents: closing,
     difference_cents: numOrNull(o.difference_cents) ?? (isReceipt ? 0 : null),
-  };
-}
-
-export type ReconOutstandingEntrySide = {
-  entry_id: string;
-  posting_date: string | null;
-  age_days: number | null;
-  amount_cents: number | null;
-};
-
-function toOutstandingEntrySide(raw: unknown): ReconOutstandingEntrySide {
-  const o = rec(raw);
-  return {
-    entry_id: s(o.entry_id) ?? s(o.id) ?? "",
-    posting_date: s(o.posting_date),
-    age_days: numOrNull(o.age_days),
-    amount_cents: numOrNull(o.amount_cents),
-  };
-}
-
-export type ReconOutstandingLineSide = {
-  line_id: string;
-  statement_id: string | null;
-  entry_date: string | null;
-  description: string | null;
-  amount_cents: number | null;
-  age_days: number | null;
-};
-
-function toOutstandingLineSide(raw: unknown): ReconOutstandingLineSide {
-  const o = rec(raw);
-  return {
-    line_id: s(o.line_id) ?? s(o.id) ?? "",
-    statement_id: s(o.statement_id),
-    entry_date: s(o.entry_date),
-    description: s(o.description),
-    amount_cents: numOrNull(o.amount_cents),
-    age_days: numOrNull(o.age_days),
-  };
-}
-
-export type ReconOpeningLineage = {
-  opening_item_id: string;
-  item_ref: string | null;
-  item_date: string | null;
-  entry_id: string | null;
-};
-
-function toOpeningLineage(raw: unknown): ReconOpeningLineage {
-  const o = rec(raw);
-  return {
-    opening_item_id: s(o.opening_item_id) ?? s(o.id) ?? "",
-    item_ref: s(o.item_ref),
-    item_date: s(o.item_date),
-    entry_id: s(o.entry_id),
   };
 }
 
@@ -226,24 +191,6 @@ export function exceptionKindLabel(k: string): string {
 export type ReconMode = "receipt" | "preview";
 export type ReconStatus = "complete" | "void" | "open";
 
-export type BankReconciliationSnapshot = {
-  outstanding_entries: ReconOutstandingEntrySide[];
-  outstanding_lines: ReconOutstandingLineSide[];
-  exceptions: BankLineExceptionRow[];
-  opening_lineage: ReconOpeningLineage[];
-};
-
-function toSnapshot(raw: unknown): BankReconciliationSnapshot {
-  const o = rec(raw);
-  return {
-    outstanding_entries: arr(o.outstanding_entry_sides ?? o.outstanding_entries).map(toOutstandingEntrySide),
-    outstanding_lines: arr(o.outstanding_line_sides ?? o.outstanding_lines).map(toOutstandingLineSide),
-    exceptions: arr(o.exceptions).map(toBankLineException),
-    // The bank_uncleared opening lineage (the takeover carry-down instruments).
-    opening_lineage: arr(o.bank_uncleared_opening ?? o.opening_lineage).map(toOpeningLineage),
-  };
-}
-
 /** The derived identity preview OR the persisted receipt, from
  *  get_bank_reconciliation(statement) (design §6). `mode` is inferred (never
  *  trusted from a caller-set flag): a `status` of 'complete'/'void' reads as a
@@ -276,11 +223,23 @@ export type BankReconciliationView = {
    *  whose recon is complete — or the first-period exemption. null =
    *  unreported. */
   chain_ok: boolean | null;
+  /** [D8/CX9 — LANDED] the server-side completion verdict, superseding the
+   *  old precondition_met/chain_ok client-side inference. null (unreported)
+   *  reads as "cannot complete" — fail-closed, never re-derived. */
+  can_complete: boolean | null;
+  /** [D8/CX9 — LANDED] named reasons the server refuses (a pending match, a
+   *  nonzero difference, …) — rendered verbatim, never invented. */
+  blockers: string[];
   completed_by: string | null;
   completed_at: string | null;
   voided_by: string | null;
   voided_at: string | null;
   voided_reason: string | null;
+  /** [voided_receipt follow-up — LANDED] the newest VOID receipt on this
+   *  statement, present only when get_bank_reconciliation returns the live
+   *  preview as primary because no COMPLETE receipt exists — null on every
+   *  other shape. */
+  voided_receipt: VoidedReceiptRow | null;
 };
 
 export function toBankReconciliationView(raw: unknown): BankReconciliationView {
@@ -312,11 +271,14 @@ export function toBankReconciliationView(raw: unknown): BankReconciliationView {
     stale_outstanding_ids: strArr(o.stale_outstanding_ids),
     precondition_met: boolOrNull(o.precondition_met),
     chain_ok: boolOrNull(o.chain_ok),
+    can_complete: boolOrNull(o.can_complete),
+    blockers: strArr(o.blockers),
     completed_by: s(o.completed_by),
     completed_at: s(o.completed_at),
     voided_by: s(o.voided_by),
     voided_at: s(o.voided_at),
     voided_reason: s(o.voided_reason),
+    voided_receipt: toVoidedReceiptRow(o.voided_receipt),
   };
 }
 
@@ -350,20 +312,20 @@ export function outstandingStaleUnacked(
   return view.stale_outstanding_ids.filter((id) => !acked.has(id));
 }
 
-/** design §5 `complete_bank_reconciliation`'s preconditions, PREVIEWED so the
- *  workbench can disable the button before the DB asks. Fail-closed (the
- *  F-H6/OpeningDryRunCard law): a null (unreported) precondition/chain does
- *  NOT enable the button — only an EXPLICIT `true` does. A first-period
- *  exemption is a real, reportable state (design §3), so the DB is expected
- *  to say `chain_ok: true` for it, never omit the field. This is a preview
- *  gate only — the DB's own refusal is the authority either way. */
+/** [D8/CX9] keyed OFF THE SERVER VERDICT ONLY — `can_complete` supersedes the
+ *  old client-side precondition_met/chain_ok inference (pending ≠ live and a
+ *  nonzero difference are now named blockers from the DB, not re-derived
+ *  here). Fail-closed: `can_complete !== true` (including null/unreported)
+ *  never enables the button. The stale-ack gate stays a SEPARATE, additional
+ *  check — which ids are acknowledged is inherently client-tracked state the
+ *  read RPC cannot pre-compute. This is a preview gate only — the DB's own
+ *  refusal at complete_bank_reconciliation is the authority either way. */
 export function canCompleteReconciliation(
-  view: Pick<BankReconciliationView, "status" | "precondition_met" | "chain_ok" | "stale_outstanding_ids">,
+  view: Pick<BankReconciliationView, "status" | "can_complete" | "stale_outstanding_ids">,
   ackedStaleIds: ReadonlySet<string>,
 ): boolean {
   if (view.status !== "open") return false;
-  if (view.precondition_met !== true) return false;
-  if (view.chain_ok !== true) return false;
+  if (view.can_complete !== true) return false;
   return view.stale_outstanding_ids.every((id) => ackedStaleIds.has(id));
 }
 

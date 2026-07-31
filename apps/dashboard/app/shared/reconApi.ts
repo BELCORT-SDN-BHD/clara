@@ -62,12 +62,28 @@ export async function listBankRuleCandidates(token: string, clientId: string): P
   return (Array.isArray(out) ? out : []).map(toBankRuleCandidate);
 }
 
-/** NOT in the design's §6 read table — ASSUMED so the `bank_rule_proposal`
- *  ClaraPart card (shared/cards/BankRuleProposalCard.tsx) has a single-row
- *  hydrate, mirroring get_coding_rule/get_open_question's convention
- *  (reviewApi.ts). Also reused to refresh a rule row after sign/retire. */
-export async function getBankRule(token: string, ruleId: string): Promise<BankRuleRow> {
-  return toBankRule(await rpc("get_bank_rule", { p_rule: ruleId }, token));
+/** [D4/A9 fix] `get_bank_rule` does not exist on the server — grep-verified
+ *  against every `create function clara.<name>(` in packages/db/migrations:
+ *  it is the only rpc() name this dashboard calls with no matching function,
+ *  so the `bank_rule_proposal` ClaraPart card (shared/cards/
+ *  BankRuleProposalCard.tsx) 404'd on every mount. `list_bank_rules(p_client)`
+ *  already returns everything the card needs (client-scoped, one row per
+ *  rule); this reads through THAT and picks the one row by id — no RPC is
+ *  missing, only this wire fn was calling the wrong name. `retired_reason`
+ *  is expected on the list_bank_rules envelope (a DB-lane addition landing
+ *  alongside this fix, tracked separately from this dashboard change) — if
+ *  it is absent when this runs, `toBankRule` degrades it to null, same as
+ *  any other missing key, never a crash. */
+export async function getBankRule(token: string, clientId: string, ruleId: string): Promise<BankRuleRow | null> {
+  const out = await rpc("list_bank_rules", { p_client: clientId }, token);
+  const row = (Array.isArray(out) ? out : []).find(
+    (r) => rec(r).rule_id === ruleId || rec(r).id === ruleId,
+  );
+  return row ? toBankRule(row) : null;
+}
+
+function rec(v: unknown): Record<string, unknown> {
+  return (v ?? {}) as Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,22 +134,23 @@ export async function exceptBankLine(
   return toBankLineException(out);
 }
 
-/** resolve_bank_line_exception(exc, disposition, note, op_key), OWNER floor.
- *  design §4.2: `matched_booking`/`written_off_adjustment` require an in-txn
- *  booking match; `bank_corrective_line` requires naming its counterpart line
- *  (the pair nets to zero, enumerated closed). The design's verb-table row
- *  states only the 4 base args — OPEN QUESTION (recorded loudly in this
- *  lane's notes): how the in-txn booking match / named counterpart line rides
- *  the SAME transaction is not pinned anywhere. `bookingEntries`/
- *  `counterpartLineId` are sent ONLY when the caller supplies them, so wiring
- *  the real extra-argument shape at integration is a one-line change here,
- *  never a UI rewrite. Refuses already_resolved/resolution_note_required/
- *  disposition_unbooked. */
+/** resolve_bank_line_exception(exc, disposition, note, counterpart_line?,
+ *  op_key), OWNER floor (0040:3002-3004 — the REAL, five-arg signature:
+ *  p_exception, p_disposition, p_note, p_counterpart_line, p_op_key). design
+ *  §4.2: `bank_corrective_line` requires naming its counterpart line;
+ *  `matched_booking`/`written_off_adjustment` require the line to already be
+ *  a live matched member in this SAME transaction (design §5, D3 fix — the
+ *  door for that is unbuilt this wave; both stay owner-floor-only, disabled
+ *  client-side). [D5/A12 fix] `p_booking_entries` is DELETED — the verb has
+ *  no such parameter; PostgREST resolves by exact named-argument set, so
+ *  sending it would 404 instead of returning the named refusal. Re-add only
+ *  against a real signature change, never speculatively. Refuses
+ *  already_resolved/resolution_note_required/counterpart_required/
+ *  counterpart_not_excepted/disposition_unbooked (at commit). */
 export async function resolveBankLineException(
   token: string,
   args: {
     clientId: string; exceptionId: string; disposition: BankLineExceptionDisposition; note: string;
-    bookingEntries?: { entry_id: string; matched_cents: number }[] | null;
     counterpartLineId?: string | null;
   },
 ): Promise<BankLineExceptionRow> {
@@ -141,7 +158,6 @@ export async function resolveBankLineException(
     p_exception: args.exceptionId, p_disposition: args.disposition,
     p_note: args.note, p_op_key: opKey(),
   };
-  if (args.bookingEntries) body.p_booking_entries = args.bookingEntries;
   if (args.counterpartLineId) body.p_counterpart_line = args.counterpartLineId;
   const out = await rpc("resolve_bank_line_exception", body, token);
   return toBankLineException(out);

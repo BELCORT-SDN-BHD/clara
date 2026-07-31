@@ -12,10 +12,10 @@ import { useCallback, useEffect, useState } from "react";
 import type { PgrestError } from "../shared/wire";
 import { arAging, apAging, customerStatement, supplierStatement } from "../shared/agingApi";
 import {
-  agingScreenState, agingRowHasBalance, isOverdueMarker, AGING_BUCKET_LABELS,
-  type AgingBucketRow, type AgingDomain, type StatementLineRow,
+  agingScreenState, agingRowHasBalance, agingRowHasOverdueItem, AGING_BUCKET_LABELS,
+  type AgingBucketRow, type AgingDomain, type AgingTotals, type StatementLineRow,
 } from "./agingModel";
-import { fmtCents } from "../shared/fmt";
+import { fmtCents, fmtDeltaCents } from "../shared/fmt";
 import styles from "./aging.module.css";
 
 function todayIso(): string {
@@ -33,6 +33,8 @@ export function AgingWorkbench({ token, clientId, clientName }: { token: string;
   const [domain, setDomain] = useState<AgingDomain>("ar");
   const [asOf, setAsOf] = useState(todayIso());
   const [rows, setRows] = useState<AgingBucketRow[]>([]);
+  const [totals, setTotals] = useState<AgingTotals | null>(null);
+  const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [selectedCounterpartyId, setSelectedCounterpartyId] = useState<string | null>(null);
@@ -42,7 +44,10 @@ export function AgingWorkbench({ token, clientId, clientName }: { token: string;
     setLoadErr(null);
     try {
       const fn = domain === "ar" ? arAging : apAging;
-      setRows(await fn(token, clientId, asOf));
+      const read = await fn(token, clientId, asOf);
+      setRows(read.rows);
+      setTotals(read.totals);
+      setAvailable(read.available);
     } catch (e) {
       setLoadErr((e as Error).message);
       setRows([]);
@@ -54,7 +59,7 @@ export function AgingWorkbench({ token, clientId, clientName }: { token: string;
   useEffect(() => { setSelectedCounterpartyId(null); void reload(); }, [reload]);
 
   const visibleRows = rows.filter(agingRowHasBalance);
-  const state = agingScreenState({ loading, error: !!loadErr, totalRows: visibleRows.length });
+  const state = agingScreenState({ loading, error: !!loadErr, totalRows: visibleRows.length, available });
   const selectedRow = rows.find((r) => r.counterparty_id === selectedCounterpartyId) ?? null;
 
   return (
@@ -85,6 +90,8 @@ export function AgingWorkbench({ token, clientId, clientName }: { token: string;
           </p>
           {state === "loading" ? (
             <p className={styles.muted}>Loading…</p>
+          ) : state === "unavailable" ? (
+            <p className={styles.errorText}>The aging report came back in an unexpected shape — showing nothing rather than guessing. Try reloading.</p>
           ) : state === "empty" ? (
             <p className={styles.emptyState}>No open {domain === "ar" ? "receivables" : "payables"} as of this date.</p>
           ) : (
@@ -106,13 +113,22 @@ export function AgingWorkbench({ token, clientId, clientName }: { token: string;
                     >
                       <td>
                         {r.counterparty_name ?? r.counterparty_id.slice(0, 8)}
-                        {typeof r.overdue_cents === "number" && r.overdue_cents !== 0 ? <span className={styles.overdueTag}>overdue</span> : null}
+                        {agingRowHasOverdueItem(r) ? <span className={styles.overdueTag}>overdue</span> : null}
                       </td>
                       {AGING_BUCKET_LABELS.map((b) => <td key={b.key} className={styles.num}>{fmtCents(r[b.key])}</td>)}
                       <td className={styles.num}><strong>{fmtCents(r.total_cents)}</strong></td>
                     </tr>
                   ))}
                 </tbody>
+                {totals ? (
+                  <tfoot>
+                    <tr>
+                      <td><strong>total</strong></td>
+                      {AGING_BUCKET_LABELS.map((b) => <td key={b.key} className={styles.num}>{fmtCents(totals[b.key])}</td>)}
+                      <td className={styles.num}><strong>{fmtCents(totals.total_cents)}</strong></td>
+                    </tr>
+                  </tfoot>
+                ) : null}
               </table>
             </div>
           )}
@@ -142,6 +158,7 @@ function CounterpartyStatementPane({
   const [from, setFrom] = useState(() => yearBefore(asOf));
   const [to, setTo] = useState(asOf);
   const [lines, setLines] = useState<StatementLineRow[]>([]);
+  const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -150,7 +167,9 @@ function CounterpartyStatementPane({
     setErr(null);
     try {
       const fn = domain === "ar" ? customerStatement : supplierStatement;
-      setLines(await fn(token, clientId, row.counterparty_id, from, to));
+      const read = await fn(token, clientId, row.counterparty_id, from, to);
+      setLines(read.rows);
+      setAvailable(read.available);
     } catch (e) {
       setErr((e as PgrestError).message ?? String(e));
       setLines([]);
@@ -160,6 +179,8 @@ function CounterpartyStatementPane({
   }, [token, clientId, domain, row.counterparty_id, from, to]);
 
   useEffect(() => { void reload(); }, [reload]);
+
+  const state = agingScreenState({ loading, error: !!err, totalRows: lines.length, available });
 
   return (
     <div>
@@ -176,30 +197,28 @@ function CounterpartyStatementPane({
         </label>
       </div>
       {err ? <p className={styles.errorText}>{err}</p> : null}
-      {loading && lines.length === 0 ? (
+      {state === "loading" ? (
         <p className={styles.muted}>Loading…</p>
-      ) : lines.length === 0 ? (
+      ) : state === "unavailable" ? (
+        <p className={styles.errorText}>This statement came back in an unexpected shape — showing nothing rather than guessing.</p>
+      ) : state === "empty" ? (
         <p className={styles.emptyState}>No items in this range.</p>
       ) : (
         <div className={styles.tableWrap}>
           <table className={styles.table}>
             <thead>
               <tr>
-                <th>date</th><th>kind</th><th>description</th>
-                <th className={styles.num}>amount</th><th className={styles.num}>outstanding</th><th className={styles.num}>running balance</th>
+                <th>date</th><th>type</th><th>label</th>
+                <th className={styles.num}>delta</th><th className={styles.num}>running balance</th>
               </tr>
             </thead>
             <tbody>
-              {lines.map((l) => (
-                <tr key={l.item_id}>
-                  <td>{l.item_date ?? "—"}</td>
-                  <td>{l.item_kind ?? "—"}</td>
-                  <td>
-                    {l.description ?? "—"}
-                    {isOverdueMarker(l.due_date, asOf) ? <span className={styles.overdueTag}>overdue</span> : null}
-                  </td>
-                  <td className={styles.num}>{fmtCents(l.amount_cents)}</td>
-                  <td className={styles.num}>{fmtCents(l.outstanding_cents)}</td>
+              {lines.map((l, i) => (
+                <tr key={`${l.row_type ?? "row"}-${l.allocation_id ?? l.item_id ?? i}-${i}`}>
+                  <td>{l.event_date ?? "—"}</td>
+                  <td>{l.row_type ?? "—"}</td>
+                  <td>{l.label ?? "—"}</td>
+                  <td className={styles.num}>{fmtDeltaCents(l.delta_cents)}</td>
                   <td className={styles.num}>{fmtCents(l.running_balance_cents)}</td>
                 </tr>
               ))}

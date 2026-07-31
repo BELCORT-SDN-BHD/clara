@@ -101,11 +101,14 @@ import {
   endPool, printLaneNotes, printSkipCount, noteLane, markSkip, ROLES,
   a21EnsureReady, buildWorld, firmOf,
   upsertAccountClassed, upsertPayableAccount, grantConsent,
-  draftEntryV3, approveEntry,
+  draftEntryV3, approveEntry, insertUser, addMember,
   idOf, reasonOf, HIGH_STAKES_CENTS,
   roleCanExecute, fnSource, rlsFlags,
 } from "./a21-helpers.mjs";
 import { holdThenContend, sawDeadlock } from "./rig-docs-race.mjs";
+// fix-wave E7/CX12: the REAL Gate-K onboarding-plan lifecycle (K1..K14), for x40.m/x40.n's
+// takeover-opening fixtures -- a different fixture world than this suite's own buildWorld().
+import * as wb from "./wave-b/wb-fixtures.mjs";
 import {
   EXPN as X38_EXPN, REVN as X38_REVN,
   GUARD, hasBankMatching, caught,
@@ -340,6 +343,12 @@ async function listBankRuleCandidates(sub, { client }) {
   const r = await humanQuery(sub, "select clara.list_bank_rule_candidates(p_client => $1) as r", [client]);
   return r.rows[0].r;
 }
+// fix-wave E5 [A10]: the NINTH read RPC (assembly order item 6, D4/A9) -- an ADDITIVE rule
+// register, not in the design's original SS6 table, that x40.an's tenancy sweep never covered.
+async function listBankRules(sub, { client }) {
+  const r = await humanQuery(sub, "select clara.list_bank_rules(p_client => $1) as r", [client]);
+  return r.rows[0].r;
+}
 
 // ---------------------------------------------------------------------------
 // Readbacks (root -- superuser bypasses RLS; fixtures/asserts only, never a lane).
@@ -536,113 +545,124 @@ async function controlGlAsOf(client, domain, asOf) {
 }
 
 // ---------------------------------------------------------------------------
-// IA-16: the forged Gate-K opening-anchor shape (minimal congruent rows, root
-// direct-insert, bypassing the K1-K14 onboarding-plan lifecycle entirely).
+// IA-16, REBUILT (fix-wave E7/CX12): the takeover opening world through the
+// REAL Gate-K doors (wave-b/wb-fixtures.mjs, the K1..K14 onboarding-plan
+// lifecycle) -- no trigger disable, no root lineage insert. The original
+// fixture forged is_opening_balance via a root-side `disable trigger
+// t_je_immutable` window, which the header honestly recorded as a debt: the
+// REAL K3 writer (0017 `draft_opening_item`) sets is_opening_balance at DRAFT
+// time and would refuse the forged shape entirely (0017 R1-F1's
+// `opening_entry_k_family_only`, CLR31). Every row below is minted by an
+// audited verb: beginOnboarding (K1, wb.onboardingClient) mints a fresh
+// client + plan; create_opening_seed opens a KEYED (no-document) registry;
+// draft_opening_item (K3) drafts the gl_balance anchor / bank_uncleared /
+// balancing equity_net items; approve_opening_seed (K5) approves the whole
+// batch in one serializable transaction. Verified against the live K3 writer
+// (0017:3246-3396): gl_balance/bank_uncleared both auto-contra into OBE, and
+// K5's own tie assert (_assert_opening_tie) requires the WHOLE seed's OBE net
+// to be EXACTLY zero -- so every takeover fixture below carries a balancing
+// equity_net item whose amount is the exact sum of the other items' own
+// signed legs (proof: each item's OBE contra is the exact negation of its own
+// leg, so summing the legs gives the exact debit needed to zero OBE).
 // ---------------------------------------------------------------------------
 
-async function forgeOpeningSeed(client) {
-  const firm = await firmOf(client);
-  const root = await withActor({}, async (c) => {
-    // INTEGRATION FIX: uq_onboarding_plans_one_open admits ONE open plan per client, so a
-    // second forging cell on the same client must REUSE the plan the first one minted.
-    let plan = await c.query(
-      "select id from clara.onboarding_plans where firm_id=$1 and client_id=$2 limit 1",
-      [firm, client],
-    );
-    if (plan.rowCount === 0) {
-      plan = await c.query(
-        "insert into clara.onboarding_plans(firm_id, scope_kind, client_id) values ($1,'client',$2) returning id",
-        [firm, client],
-      );
-    }
-    const anyUser = (await c.query("select id from clara.users limit 1")).rows[0].id;
-    // uq_opening_seed_registry_once admits ONE seed per plan -- reuse, same as the plan.
-    let seed = await c.query(
-      "select id from clara.opening_seed_registry where plan_id=$1 limit 1", [plan.rows[0].id]);
-    if (seed.rowCount === 0) {
-      seed = await c.query(
-        "insert into clara.opening_seed_registry(firm_id, client_id, plan_id, as_of, created_by) values ($1,$2,$3,$4,$5) returning id",
-        [firm, client, plan.rows[0].id, "2027-01-01", anyUser],
-      );
-    }
-    return { planId: plan.rows[0].id, seedId: seed.rows[0].id, createdBy: anyUser };
-  });
-  return root;
+/** A fresh onboarding client (K1) with its own bank COA code, ready for a K3/K5 opening
+ *  set -- PLUS TWO admin-rank actors, mirroring buildWaveBWorld's own `hana` pattern:
+ *  approve_opening_seed (K5) is admin-floor and refuses a SELF-approval whenever the
+ *  firm carries >=2 eligible checkers (world.users' own firm A does: alice+bob+carol);
+ *  commit_client_onboarding (K14) is ALSO admin-floor and additionally refuses ANY
+ *  plan CONTRIBUTOR (the K3 drafter `sub` AND the K5 `approver` both become
+ *  contributors, per 0017's own R2-F4/R3-F3 notes) as its own committer -- so a THIRD
+ *  distinct actor is minted for that step.
+ *  MEASURED THIS SESSION (rig verification): the bank_accounts row itself must be
+ *  deferred until AFTER commit -- add_bank_account requires clients.status='active'
+ *  (0038's own tenancy+status check), and an in-progress onboarding client is
+ *  status='onboarding' until commit_client_onboarding (K14) flips it -- registering the
+ *  bank account any earlier reads the misleading "client not in your firm" (CLR11). */
+async function realTakeoverWorld(sub, tag) {
+  const onb = await wb.onboardingClient(sub, `x40_${tag}_${randomUUID().slice(0, 6)}`);
+  const firm = await firmOf(onb.client);
+  await wb.seedOpeningCoa(sub, onb.client);
+  await grantConsent(sub, { firm, client: onb.client }).catch(() => {});
+  _acctSeq += 1;
+  const tagUp = `${tag}`.toUpperCase().replace(/[^0-9A-Z]/g, "").slice(0, 3).padEnd(2, "X");
+  const coaCode = `${100 + (_acctSeq % 900)}-C${tagUp}`;
+  await upsertAccountClassed(sub, { client: onb.client, code: coaCode, name: `x40 takeover bank gl ${tag}`, type: "asset", opKey: opk(`x40-bgl-${tag}`) });
+  // randomUUID-suffixed, like every other synthetic identity in this suite -- insertUser's
+  // email is a bare (prefix, tag) concatenation with no other uniqueness source, and a fixed
+  // tag alone collided against clara.users' unique email index (MEASURED THIS SESSION).
+  const idSuffix = randomUUID().slice(0, 8);
+  const approver = await insertUser(`x40${tag}${idSuffix}`, "admin");
+  await addMember(sub, { firm, user: approver, role: "admin", opKey: opk(`x40-${tag}-admin-${idSuffix}`) });
+  const committer = await insertUser(`x40${tag}${idSuffix}`, "commit");
+  await addMember(sub, { firm, user: committer, role: "admin", opKey: opk(`x40-${tag}-commit-${idSuffix}`) });
+  return { client: onb.client, plan: onb.plan, firm, coaCode, approver, committer, tag };
 }
-/** A forged K carry-down `gl_balance` opening-anchor entry on `coaCode`:
- *  Dr/Cr coaCode `amountCents` (signed: + = debit-positive on the bank
- *  account) vs the OBEX contra, then is_opening_balance flipped root-side
- *  (IA-16). Returns {entry, itemId}. */
-async function forgeOpeningAnchor(sub, { client, seedId, coaCode, amountCents, itemKey, postingDate = "2027-01-01" }) {
-  const abs = Math.abs(amountCents);
-  const lines = amountCents >= 0
-    ? [{ account_code: coaCode, debit_cents: abs, credit_cents: 0, description: "anchor-dr" },
-      { account_code: OBEX, debit_cents: 0, credit_cents: abs, description: "anchor-cr" }]
-    : [{ account_code: OBEX, debit_cents: abs, credit_cents: 0, description: "anchor-dr" },
-      { account_code: coaCode, debit_cents: 0, credit_cents: abs, description: "anchor-cr" }];
-  const d = await draftEntryV3(sub, {
-    client, resolution: await manualRes(sub, client), memo: "x40 forged opening anchor", postingDate, lines,
-    opKey: opk("x40-anchor"),
+
+/** K14: commit the onboarding through the THIRD, non-contributor admin, THEN register
+ *  the bank_accounts row now that the client is active. Called AFTER the opening set
+ *  (realOpeningSet) is approved. Returns bankAccountId. */
+async function activateTakeoverBank(sub, w) {
+  await wb.commitOnboarding(w.committer, {
+    client: w.client, plan: w.plan, expectedPlanRevision: await wb.planRevision(w.plan),
+    opKey: opk(`x40-${w.tag}-commit`),
   });
-  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x40-anchora") });
-  await withActor({}, async (c) => {
-    // ADJUDICATION 11, HONESTLY RECORDED. Reviewed against the REAL opening writer: 0017's K3
-    // `draft_opening_item` sets is_opening_balance at DRAFT time, and 0017's R1-F1 splice makes
-    // `approve_entry` REFUSE any entry carrying the flag (`opening_entry_k_family_only`, CLR31)
-    // -- so this forged shape cannot arise through the audited verbs in EITHER order, and the
-    // flip has to stand `t_je_immutable` down for its own statement. THE CELL'S ASSERTIONS ARE
-    // UNCHANGED (they are about 0040's takeover tie, not about Gate-K), but the fixture
-    // PROVENANCE is a recorded debt: x40.m/x40.n owe a rebuild through the real K1-K14
-    // lifecycle (wave-b/wb-fixtures.mjs buildWaveBWorld), a different fixture world than this
-    // suite's buildWorld().
-    await c.query("alter table clara.journal_entries disable trigger t_je_immutable");
-    try {
-      await c.query("update clara.journal_entries set is_opening_balance=true where id=$1", [d.entry_id]);
-    } finally {
-      await c.query("alter table clara.journal_entries enable trigger t_je_immutable");
-    }
-    // INTEGRATION FIX: clara.journal_entries carries no created_by column (the actor lives
-    // on the audit trail, not the row) -- the opening item's created_by comes from the seed.
-    const created = (await c.query("select created_by from clara.opening_seed_registry where id=$1", [seedId])).rows[0].created_by;
-    const firm = await firmOf(client);
-    await c.query(
-      `insert into clara.opening_items(firm_id, client_id, seed_id, item_kind, item_key, entry_id, item_date, amount_cents, created_by)
-       values ($1,$2,$3,'gl_balance',$4,$5,$6,$7,$8)`,
-      [firm, client, seedId, itemKey, d.entry_id, postingDate, amountCents, created],
-    );
-  });
-  return { entry: d.entry_id };
+  const n = `1099${randomUUID().slice(0, 10)}`;
+  const added = await addBankAccount(sub, { client: w.client, bankCode: "MBB", accountNumber: n, coaAccountCode: w.coaCode });
+  return idOf(added, "bank_account_id", "id");
 }
-/** A forged `bank_uncleared` pre-cutover instrument: an ORDINARY approved
- *  entry with a leg on `coaCode` (never is_opening_balance), tagged via a
- *  Gate-K opening_items row of item_kind='bank_uncleared' (IA-16). Passing an
- *  OFF-account coaCode (one the entry carries NO leg on) builds the
- *  x40.n red-team probe directly. */
-async function forgeBankUncleared(sub, { client, seedId, coaCode, offAccountCode = null, amountCents, itemKey, postingDate = "2027-01-01" }) {
-  const legAccount = offAccountCode ?? coaCode;
-  const abs = Math.abs(amountCents);
-  const lines = amountCents >= 0
-    ? [{ account_code: legAccount, debit_cents: abs, credit_cents: 0, description: "unc-dr" },
-      { account_code: OBEX, debit_cents: 0, credit_cents: abs, description: "unc-cr" }]
-    : [{ account_code: OBEX, debit_cents: abs, credit_cents: 0, description: "unc-dr" },
-      { account_code: legAccount, debit_cents: 0, credit_cents: abs, description: "unc-cr" }];
-  const d = await draftEntryV3(sub, {
-    client, resolution: await manualRes(sub, client), memo: "x40 forged bank_uncleared", postingDate, lines,
-    opKey: opk("x40-unc"),
-  });
-  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x40-unca") });
-  await withActor({}, async (c) => {
-    const created = (await c.query("select created_by from clara.opening_seed_registry where id=$1", [seedId])).rows[0].created_by;
-    const firm = await firmOf(client);
-    await c.query(
-      // ck_opening_items_bank_detail (0017:1168-1170): a bank_uncleared item's lineage
-      // (item_ref + item_date) is never null -- it is the instrument's own reference.
-      `insert into clara.opening_items(firm_id, client_id, seed_id, item_kind, item_key, entry_id, item_ref, item_date, amount_cents, created_by)
-       values ($1,$2,$3,'bank_uncleared',$4,$5,$6,$7,$8,$9)`,
-      [firm, client, seedId, itemKey, d.entry_id, `CHQ-${itemKey}`, postingDate, amountCents, created],
-    );
-  });
-  return { entry: d.entry_id };
+
+/** The K3/K5 opening set: `items` is an array of {amountCents, itemKey,
+ *  itemKind: 'gl_balance'|'bank_uncleared', legCode?} (legCode defaults to
+ *  `coaCode` -- x40.n's off-account red-team probe passes a DIFFERENT one, on
+ *  purpose). Drafts every item through draft_opening_item (as `sub`), records
+ *  its own keyed target, then drafts+targets the OBE-balancing equity_net
+ *  item and approves the whole batch through approve_opening_seed (K5) as
+ *  the DISTINCT `approver`. Returns {seed, entries: {itemKey: entryId}}. */
+async function realOpeningSet(sub, { client, plan, coaCode, approver, items, asOf = "2027-01-01" }) {
+  const seedReceipt = await wb.createOpeningSeed(sub, { client, plan, asOf, tieDocument: null, tieSha256: null });
+  const seed = seedReceipt.seed_id ?? seedReceipt.id;
+  let obeNet = 0;
+  const entries = {};
+  const revMap = {};
+  for (const it of items) {
+    const legCode = it.legCode ?? coaCode;
+    const abs = Math.abs(it.amountCents);
+    const lines = it.amountCents >= 0
+      ? [{ account_code: legCode, debit_cents: abs, credit_cents: 0 }]
+      : [{ account_code: legCode, debit_cents: 0, credit_cents: abs }];
+    const item = { item_kind: it.itemKind, item_key: it.itemKey };
+    // ck_opening_items_bank_detail (0017:1168-1170): a bank_uncleared item's lineage
+    // (item_ref + item_date) is never null -- it is the instrument's own reference.
+    if (it.itemKind === "bank_uncleared") { item.item_ref = `CHQ-${it.itemKey}`; item.item_date = asOf; }
+    // MEASURED THIS SESSION (rig verification): a KEYED (no-document) opening seed is
+    // SEED-BOUND (0018 [AMB-0018-1], WB-R24(i)) -- draft_opening_item's assert_client_resolved
+    // requires bound_scope_kind IS NULL for a GENERIC resolution, but a keyed seed's
+    // _draft_opening_item_core actually calls assert_client_resolved_bound, which requires the
+    // OPPOSITE: bound_scope_kind='opening_seed' naming THIS seed. A plain manualRes() (unbound)
+    // reads "client attribution not established" (CLR01) every time. wb.keyedRes mints (and
+    // caches, once per seed) the bound resolution record_opening_keyed_resolution produces.
+    const receipt = await wb.draftOpeningItem(sub, { client, seed, item, lines, resolution: wb.keyedRes(sub, { client, seed }) });
+    entries[it.itemKey] = receipt.entry_id;
+    revMap[receipt.entry_id] = receipt.revision_token;
+    await wb.recordOpeningTarget(sub, {
+      seed, line: { line_key: it.itemKey, account_code: legCode, debit_cents: lines[0].debit_cents, credit_cents: lines[0].credit_cents },
+    });
+    obeNet += it.amountCents;
+  }
+  if (obeNet !== 0) {
+    const balReceipt = await wb.draftOpeningItem(sub, {
+      client, seed, item: { item_kind: "equity_net", item_key: "obe-balance", amount_cents: obeNet },
+      resolution: wb.keyedRes(sub, { client, seed }),
+    });
+    entries["obe-balance"] = balReceipt.entry_id;
+    revMap[balReceipt.entry_id] = balReceipt.revision_token;
+    await wb.recordOpeningTarget(sub, {
+      seed, line: { line_key: "obe-balance", account_code: wb.WB_COA.re, debit_cents: obeNet < 0 ? -obeNet : 0, credit_cents: obeNet > 0 ? obeNet : 0 },
+    });
+  }
+  await wb.approveOpeningSeed(approver, { seed, planRevision: await wb.planRevision(plan), tieSha256: null, entryRevisions: revMap });
+  return { seed, entries };
 }
 
 // ===========================================================================
@@ -1028,13 +1048,14 @@ test("x40.k a corrective-pair resolution nets zero and is enumerated as a closed
   });
   const ex1 = idOf(await exceptLine(owner, { client, line: stmt.lines[0].id, kind: "bank_error", reason: "x40.k the erroneous charge" }), "exception_id", "id");
   const ex2 = idOf(await exceptLine(owner, { client, line: stmt.lines[1].id, kind: "bank_error", reason: "x40.k the bank's own reversal" }), "exception_id", "id");
+  // CX2 [folds into A2, landed]: the corrective pair resolves BOTH exceptions ATOMICALLY in ONE
+  // call -- both lines locked, the counterpart's exception auto-flips resolved/bank_corrective_
+  // line naming THIS line back -- reciprocity by construction, not by two separate calls. A
+  // second resolveException on ex2 is no longer reachable here (its exception is already
+  // resolved by the first call).
   await resolveException(owner, {
     client, exception: ex1, disposition: "bank_corrective_line", note: "x40.k the offsetting reversal names its pair",
     counterpartLine: stmt.lines[1].id,
-  });
-  await resolveException(owner, {
-    client, exception: ex2, disposition: "bank_corrective_line", note: "x40.k the reciprocal naming",
-    counterpartLine: stmt.lines[0].id,
   });
   assert.equal((await exceptionRow(ex1))?.status, "resolved");
   assert.equal((await exceptionRow(ex2))?.status, "resolved");
@@ -1080,70 +1101,90 @@ test("x40.l an outstanding side older than 60 days refuses recon_outstanding_sta
 });
 
 // ---------------------------------------------------------------------------
-// x40.m -- THE TAKEOVER OPENING ANCHOR: a nonzero-opening statement names its
-// K carry-down gl_balance entry (IA-16); the belt asserts
-// anchor_amount - Sum(bank_uncleared) = S_first.opening and refuses
-// `recon_opening_mismatch` in BOTH mismatch directions.
+// x40.m -- THE TAKEOVER OPENING ANCHOR (fix-wave E7/CX12, REBUILT through the
+// REAL Gate-K doors; B1's CORRECTED algebra). 0040 FIX WAVE B1 [M1]:
+// opening_tie_delta_cents = anchor_amount - opening_anchor (ONE subtraction --
+// the uncleared double-subtraction dies). opening_anchor is the account's OWN
+// first-live-statement printed opening_cents, so the tie is now a direct
+// cross-check between the K3 anchor's own GL amount and whatever a human
+// printed as the takeover month's opening -- and the still-uncleared
+// instrument participates in the ORDINARY S3 identity exactly like any other
+// timing item (x40.b/c's own precedent), never in the tie itself.
 // ---------------------------------------------------------------------------
-test("x40.m the takeover opening anchor: the identity ties when anchor - bank_uncleared = the statement's printed opening, and refuses recon_opening_mismatch both directions otherwise", async (t) => {
+test("x40.m the takeover opening anchor: the identity ties when the K3 anchor equals the account's own first-statement printed opening (B1), refuses recon_opening_mismatch on a misstated print, and the pre-cutover cheque clears cleanly the following month", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
-  const client = world.clients.A2; // an isolated client -- the takeover shape must not pollute other cells' first-period exemptions
-  const acct = await freshAccount(sub, client, "m1");
-  const seed = await forgeOpeningSeed(client);
-  // Books cash at takeover: RM50,000 (the anchor). ONE uncleared cheque of
-  // RM2,000, already reduced in the books (a -2000 leg on c) but not yet
-  // cleared by the bank -- so the BANK's own opening is HIGHER by 2000:
-  // anchor(50000) - uncleared(-2000) = 52000 = S_first.opening.
-  await forgeOpeningAnchor(sub, { client, seedId: seed.seedId, coaCode: acct.coaCode, amountCents: 50000, itemKey: "x40m-anchor" });
-  const unc = await forgeBankUncleared(sub, { client, seedId: seed.seedId, coaCode: acct.coaCode, amountCents: -2000, itemKey: "x40m-unc1" });
+  const w = await realTakeoverWorld(sub, "m1");
+  // Books cash at takeover: RM50,000 (the K3 anchor). ONE uncleared cheque of RM2,000, already
+  // reduced in the books but not yet cleared by the bank.
+  const opened = await realOpeningSet(sub, {
+    client: w.client, plan: w.plan, coaCode: w.coaCode, approver: w.approver,
+    items: [
+      { itemKind: "gl_balance", itemKey: "x40m-anchor", amountCents: 50000 },
+      { itemKind: "bank_uncleared", itemKey: "x40m-unc1", amountCents: -2000 },
+    ],
+  });
+  w.bankAccountId = await activateTakeoverBank(sub, w);
 
-  const stmtWrong = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2031-01-01", periodEnd: "2031-01-31", opening: 51000, specs: [], keepPeriod: true });
-  const wrongDenied = await caught(() => completeRecon(sub, { client, statement: stmtWrong.statementId }));
-  assertReason(wrongDenied, null, "recon_opening_mismatch", "x40.m a MISSTATED opening (neither too high nor too low correctly) refuses the takeover tie");
+  const stmtWrong = await enterStatement(sub, { client: w.client, bankAccount: w.bankAccountId, periodStart: "2031-01-01", periodEnd: "2031-01-31", opening: 51000, specs: [], keepPeriod: true });
+  const wrongDenied = await caught(() => completeRecon(sub, { client: w.client, statement: stmtWrong.statementId }));
+  assertReason(wrongDenied, null, "recon_opening_mismatch", "x40.m a MISSTATED opening (anchor_amount 50000 minus this statement's OWN printed opening 51000 is nonzero) refuses the takeover tie");
 
-  // INTEGRATION FIX: the MISSTATED January statement is still live, so a February statement
-  // opening at the corrected 52000 breaks 0038's continuity chain. The design's own remedy
-  // for a statement read wrong is void + re-ingest (WCB-R5) -- so the corrected statement is
-  // January's own re-ingest, which also keeps the first-period exemption where it belongs.
-  await voidBankStatement(sub, { client, statement: stmtWrong.statementId, reason: "x40.m the printed opening was misstated" });
-  const stmtRight = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2031-01-01", periodEnd: "2031-01-31", opening: 52000, specs: [], keepPeriod: true });
-  // INTEGRATION FIX: a pre-cutover cheque still uncleared four years later IS a stale
-  // outstanding item and the build challenges it by name (recon_outstanding_stale) -- the
-  // duplicate-payment plug the wave exists to catch. The takeover cell acknowledges it by
-  // its own entry id, which is the design's own remedy, and the tie is unchanged.
-  const stale = await caught(() => completeRecon(sub, { client, statement: stmtRight.statementId }));
-  assertReason(stale, null, "recon_outstanding_stale", "x40.m the four-year-old pre-cutover cheque is CHALLENGED before the month can be certified");
-  const receipt = await completeRecon(sub, { client, statement: stmtRight.statementId, ackOutstanding: [unc.entry] });
-  const recon = await reconRow(idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id"));
-  assert.equal(recon.status, "complete", "the correctly-tied takeover opening completes once the stale cheque is acknowledged");
-  assert.equal(Number(recon.opening_cents), 52000, "opening_cents = the statement's own printed opening (the anchor basis, S3/S4.1)");
+  // The design's own remedy for a statement read wrong is void + re-ingest (WCB-R5) -- the
+  // corrected statement is January's own re-ingest, which also keeps opening_anchor (the
+  // account's first-LIVE-statement lookup) pointed at the corrected print.
+  await voidBankStatement(sub, { client: w.client, statement: stmtWrong.statementId, reason: "x40.m the printed opening was misstated" });
+  const stmtJan = await enterStatement(sub, { client: w.client, bankAccount: w.bankAccountId, periodStart: "2031-01-01", periodEnd: "2031-01-31", opening: 50000, specs: [], keepPeriod: true });
+  // A pre-cutover cheque still uncleared IS a stale outstanding item and the build challenges it
+  // by name (recon_outstanding_stale) -- the duplicate-payment plug the wave exists to catch.
+  const stale = await caught(() => completeRecon(sub, { client: w.client, statement: stmtJan.statementId }));
+  assertReason(stale, null, "recon_outstanding_stale", "x40.m the still-uncleared pre-cutover cheque is CHALLENGED before the month can be certified");
+  const receiptJan = await completeRecon(sub, { client: w.client, statement: stmtJan.statementId, ackOutstanding: [opened.entries["x40m-unc1"]] });
+  const reconJan = await reconRow(idOf(receiptJan, "reconciliation_id", "reconciliation_id", "recon_id", "id"));
+  assert.equal(reconJan.status, "complete", "the correctly-tied takeover opening completes once the stale cheque is acknowledged");
+  assert.equal(Number(reconJan.opening_cents), 50000, "opening_cents = the statement's own printed opening = the anchor amount (B1's corrected tie)");
+
+  // CARRY ONE MONTH: the cheque clears. February's opening chains from January's own printed
+  // closing (50000, since January carried zero lines); the uncleared entry's line now appears on
+  // February's statement and is matched -- books=bank, February ties too, with the SAME
+  // opening_anchor (January's own opening, unchanged) still closing the takeover tie.
+  const stmtFeb = await enterStatement(sub, { client: w.client, bankAccount: w.bankAccountId, periodStart: "2031-02-01", periodEnd: "2031-02-28", opening: 50000, specs: [{ amountCents: -2000, entryDate: "2031-02-10" }], keepPeriod: true });
+  await matchBankLine(sub, { client: w.client, lines: [stmtFeb.lines[0].id], entries: [{ entry_id: opened.entries["x40m-unc1"], matched_cents: -2000 }] });
+  const receiptFeb = await completeRecon(sub, { client: w.client, statement: stmtFeb.statementId });
+  const reconFeb = await reconRow(idOf(receiptFeb, "reconciliation_id", "reconciliation_id", "recon_id", "id"));
+  assert.equal(reconFeb.status, "complete", "x40.m February: the cheque cleared -- books=bank, and the takeover tie still holds under the SAME opening_anchor");
+  assert.equal(Number(reconFeb.outstanding_cents), 0, "x40.m February: nothing outstanding once the cheque is matched");
 });
 
 // ---------------------------------------------------------------------------
-// x40.n -- `bank_uncleared` OFF-ACCOUNT probe: a bank_uncleared opening item
-// whose entry carries NO leg on a REGISTERED bank-account COA -> the
-// completion preflight refuses `recon_uncleared_off_account`, reporting the
-// unrecoverable shape BY ITEM ID (part2 finding 14).
+// x40.n -- `bank_uncleared` OFF-ACCOUNT probe (fix-wave E7/CX12, REBUILT
+// through the REAL Gate-K doors): a bank_uncleared opening item whose entry
+// carries NO leg on a REGISTERED bank-account COA -> the completion preflight
+// refuses `recon_uncleared_off_account`, reporting the unrecoverable shape BY
+// ITEM ID (part2 finding 14). Independent of B1's algebra -- a structural
+// refusal, not an arithmetic one -- so this cell's construction is unchanged
+// by the takeover-tie fix; only its fixture provenance moves to the real K3/K5
+// doors.
 // ---------------------------------------------------------------------------
 test("x40.n a bank_uncleared opening item off a registered bank-account COA refuses recon_uncleared_off_account, reporting the item id", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
-  const client = world.clients.A2;
-  const acct = await freshAccount(sub, client, "n1");
-  const seed = await forgeOpeningSeed(client);
-  await forgeOpeningAnchor(sub, { client, seedId: seed.seedId, coaCode: acct.coaCode, amountCents: 20000, itemKey: "x40n-anchor" });
-  // A bank_uncleared item whose entry's OWN leg is off-account (a plain
-  // expense COA, never a registered bank_accounts row).
-  const off = await forgeBankUncleared(sub, {
-    client, seedId: seed.seedId, coaCode: acct.coaCode, offAccountCode: EXPN,
-    amountCents: -900, itemKey: "x40n-offacct",
+  const w = await realTakeoverWorld(sub, "n1");
+  // A bank_uncleared item whose entry's OWN leg is OFF-ACCOUNT (the seeded expense COA, never a
+  // registered bank_accounts row).
+  const opened = await realOpeningSet(sub, {
+    client: w.client, plan: w.plan, coaCode: w.coaCode, approver: w.approver,
+    items: [
+      { itemKind: "gl_balance", itemKey: "x40n-anchor", amountCents: 20000 },
+      { itemKind: "bank_uncleared", itemKey: "x40n-offacct", amountCents: -900, legCode: wb.WB_COA.expense },
+    ],
   });
+  w.bankAccountId = await activateTakeoverBank(sub, w);
 
-  const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2031-03-01", periodEnd: "2031-03-31", opening: 20000, specs: [], keepPeriod: true });
-  const denied = await caught(() => completeRecon(sub, { client, statement: stmt.statementId }));
+  const stmt = await enterStatement(sub, { client: w.client, bankAccount: w.bankAccountId, periodStart: "2031-03-01", periodEnd: "2031-03-31", opening: 20000, specs: [], keepPeriod: true });
+  const denied = await caught(() => completeRecon(sub, { client: w.client, statement: stmt.statementId }));
   assertReason(denied, null, "recon_uncleared_off_account", "x40.n the preflight refuses an off-account bank_uncleared item");
-  const offItem = await rootQuery("select id from clara.opening_items where entry_id=$1", [off.entry]);
+  const offItem = await rootQuery("select id from clara.opening_items where entry_id=$1", [opened.entries["x40n-offacct"]]);
   noteLane(`x40.n off-account item id ${offItem.rows[0]?.id}; refusal detail: ${denied?.message}`);
 });
 
@@ -1445,21 +1486,198 @@ test("x40.z unmatch_bank_match AND complete_pending_match both refuse recon_peri
   const unmatchDenied = await caught(() => unmatchBankMatch(sub, { client, match: matchIdOf(matchReceipt), reason: "x40.z attempt after reconciliation" }));
   assertReason(unmatchDenied, null, "recon_period_settled", "x40.z unmatch_bank_match refuses on a reconciled member");
 
-  // The pending-arm sibling: a fresh pending group whose line already sits on
-  // a reconciled statement (constructed by completing THIS statement, then
-  // hand-testing complete_pending_match against the same settled line via a
-  // second, still-pending group would require a double claim on one line --
-  // exclusivity forbids it -- so this half instead proves the refusal on a
-  // genuinely reconciled-period pending match built on a SEPARATE line of the
-  // SAME (now-settled) statement).
+  // The pending-arm sibling. RECUT (fix-wave x40.z, Codex CX10): the ORIGINAL cut computed
+  // `pendingDenied` and only noteLane'd it -- the promised second refusal (this test's OWN
+  // title: "AND complete_pending_match both refuse recon_period_settled") was never asserted.
+  //
+  // WHY NO LAWFUL SEQUENCE OF AUDITED VERBS CAN REACH IT (fix-wave-current, Cluster A fully
+  // landed -- A1/A4/A5/A6 all present in 0040 as read at fix time). A period can NEVER complete
+  // while ANY of its own lines carries a PENDING reservation (recon_line_reserved, checked
+  // before the chain law -- x40.t), and the chain law then refuses recon_prior_missing on every
+  // LATER period on the SAME account too (x40.r) -- so "the pending line's own statement, or
+  // anything after it on the same account, reaches 'complete'" is structurally unreachable while
+  // the reservation stays pending. Voiding the pending line's own statement to free it up is
+  // ALSO closed: void_bank_statement refuses while any line rides a pending OR live match
+  // (0038:2258-2266). And attaching a FRESH reservation to an already-settled line (the
+  // corrective-pair door this cell tried before A4 landed) is closed too: A4 narrowed the belt's
+  // member-INSERT carve-out to (status='resolved' AND disposition IN ('matched_booking',
+  // 'written_off_adjustment')) ONLY (0040 FIX WAVE A4) -- and by A1's OWN narrowed completion
+  // precondition, a line resolved matched_booking/written_off_adjustment can only be settled
+  // while STILL live-matched (never unmatched-and-settled, which is exactly what A1 closed) --
+  // so a line carrying that exact exemption can never simultaneously be free for a NEW
+  // reservation on an account with an active covering complete recon. Every reachable path
+  // circles back to the same wall.
+  //
+  // So this half stages the belt's PRESTATE directly (the x40.q precedent: "0038 guards this row
+  // TWICE ... both have to stand down for the length of the forged [state] ... both are
+  // re-enabled immediately" -- testing a defense-in-depth check that the audited verbs
+  // themselves now provably never reach). t_bmlm_settled_authority (0040:2609-2612) is disabled
+  // for exactly the length of ONE staging insert -- a pending bank_matches/bank_match_line_
+  // members pair on a line whose statement is ALREADY complete -- then re-enabled immediately,
+  // so complete_pending_match's OWN belt (and its own S4.3-spliced guard, which fires first) are
+  // exercised completely normally.
   const acct2 = await freshAccount(sub, client, "z2");
-  const stmt2 = await enterStatement(sub, { client, bankAccount: acct2.bankAccountId, periodStart: "2032-11-01", periodEnd: "2032-11-30", opening: 0, specs: [{ amountCents: -HIGH_STAKES_CENTS, entryDate: "2032-11-09" }], keepPeriod: true });
-  const cp = await birthCounterparty(sub, { client, name: `X40Z CO ${randomUUID().slice(0, 6)}` });
-  const bill = await dateStampedItem(sub, { client, domain: "ap", cp, cpKind: "vendor", cents: HIGH_STAKES_CENTS, control: AP1, postingDate: "2032-11-01", checker: world.users.bob });
-  const settleReceipt = await settleFromBankLine(sub, { client, line: stmt2.lines[0].id, counterparty: cp, controlAccount: AP1, allocations: [{ item_id: bill.item, amount_cents: HIGH_STAKES_CENTS }], memo: "x40.z pending on a soon-reconciled statement" });
-  await completeRecon(sub, { client, statement: stmt2.statementId, ackOutstanding: [] }).catch((e) => noteLane(`x40.z second-account complete may itself refuse recon_line_reserved first (${reasonOf(e)}) -- the pending-vs-settled ordering is the point of this half`));
-  const pendingDenied = await caught(() => completePendingMatch(sub, { client, match: matchIdOf(settleReceipt) }));
-  noteLane(`x40.z complete_pending_match on a period that completed AROUND the pending reservation: code=${pendingDenied?.code} reason=${reasonOf(pendingDenied)}`);
+  const stmtC = await enterStatement(sub, { client, bankAccount: acct2.bankAccountId, periodStart: "2032-11-01", periodEnd: "2032-11-30", opening: 0, specs: [{ amountCents: -900, entryDate: "2032-11-11" }], keepPeriod: true });
+  await exceptLine(sub, { client, line: stmtC.lines[0].id, kind: "bank_error", reason: "x40.z the line this cell later stages a forced reservation onto" });
+  const settledReceipt = await completeRecon(sub, { client, statement: stmtC.statementId });
+  assert.equal((await reconRow(idOf(settledReceipt, "reconciliation_id", "reconciliation_id", "recon_id", "id"))).status, "complete", "x40.z mandatory setup: the open-excepted line settles the period cleanly");
+  assert.equal((await lineGroupStatus(stmtC.lines[0].id)).length, 0, "x40.z mandatory setup: the line carries no live/pending member of its own -- free for the staged insert");
+
+  const stagedMatch = randomUUID();
+  // A real (unapproved) draft entry to back the reservation -- complete_pending_match's own
+  // preflight ("a reservation with nothing to complete would hold the line forever") refuses a
+  // NULL draft_entry_id before it ever reaches the recon_period_settled check this cell is
+  // staging for, and uq_bank_matches_draft_entry (one draft backs at most one reservation) is
+  // satisfied by a fresh, never-otherwise-used draft.
+  const stagedDraft = await draftEntryV3(sub, {
+    client, resolution: await manualRes(sub, client), memo: "x40.z staged pending reservation's draft",
+    postingDate: "2032-11-11",
+    lines: [
+      { account_code: EXPN, debit_cents: 900, credit_cents: 0, description: "staged dr" },
+      { account_code: acct2.coaCode, debit_cents: 0, credit_cents: 900, description: "staged cr" },
+    ],
+    opKey: opk("x40-z-stageddraft"),
+  });
+  // MEASURED THIS SESSION (rig verification), two fixes over the original cut:
+  // (1) withActor only wraps an EXPLICIT begin/commit when transaction:true -- without it,
+  //     each c.query() autocommits as its OWN statement, so the bank_matches INSERT alone
+  //     trips a DIFFERENT (deferred, but atomic-per-statement) group-tie belt ("bank match %
+  //     holds no statement line", match_group_empty, 0038:3280-3283) before the member row
+  //     ever lands. transaction:true makes both inserts ONE atomic commit.
+  // (2) Postgres refuses `ALTER TABLE ... ENABLE TRIGGER` while the SAME transaction still
+  //     carries a PENDING deferred trigger event for that table ("cannot ALTER TABLE ...
+  //     because it has pending trigger events", 55006) -- the group-tie belt's OWN deferred
+  //     event (queued by the member-row INSERT, and NOT the trigger being disabled) is still
+  //     pending until commit. So the disable/insert/insert/COMMIT happens in ONE transaction,
+  //     and the re-enable happens as a SEPARATE, later, plain statement -- exactly the x40.q
+  //     precedent's own two-step shape ("both are re-enabled immediately", read literally as
+  //     "immediately after commit", not "inside the same transaction").
+  await withActor({ transaction: true }, async (c) => {
+    await c.query("alter table clara.bank_match_line_members disable trigger t_bmlm_settled_authority");
+    await c.query(
+      `insert into clara.bank_matches(id, firm_id, client_id, bank_account_id, status, origin, draft_entry_id, created_by)
+       values ($1, (select firm_id from clara.clients where id=$2), $2, $3, 'pending', 'human', $5, $4)`,
+      [stagedMatch, client, acct2.bankAccountId, sub, stagedDraft.entry_id],
+    );
+    await c.query(
+      `insert into clara.bank_match_line_members(firm_id, client_id, match_id, line_id, bank_account_id, amount_cents, group_status, created_by)
+       values ((select firm_id from clara.clients where id=$1), $1, $2, $3, $4, -900, 'pending', $5)`,
+      [client, stagedMatch, stmtC.lines[0].id, acct2.bankAccountId, sub],
+    );
+  });
+  await withActor({}, (c) => c.query("alter table clara.bank_match_line_members enable trigger t_bmlm_settled_authority"));
+  assert.equal((await lineGroupStatus(stmtC.lines[0].id))[0], "pending", "x40.z mandatory setup: the staged reservation landed pending");
+
+  const pendingDenied = await caught(() => completePendingMatch(sub, { client, match: stagedMatch }));
+  assertReason(pendingDenied, null, "recon_period_settled", "x40.z complete_pending_match ALSO refuses recon_period_settled -- flipping this reservation live would move a term the receipt above already certified");
+});
+
+// ---------------------------------------------------------------------------
+// x40.z-A6 -- FIX-WAVE CLUSTER A RED-PROOF (addendum item 3a): a same-transaction
+// book-then-reconcile succeeds. A6 [R4/CX4] excludes a receipt born in THIS
+// transaction from both belt arms (br.completed_at < transaction_timestamp()),
+// closing the contradiction the design's own cutoff note names at 0040:1810-1816
+// ("now() is transaction_timestamp ... which is what a same-transaction
+// book-then-reconcile act requires") against the belt that used to forbid the
+// very act it describes. AS READ AT FIX TIME, A6 IS ALREADY LANDED in 0040
+// (0040 FIX WAVE A6 markers at the member/entry arms) -- this cell therefore runs
+// GREEN, not red; it is kept as the coordinator's requested positive proof and
+// should be watched for regression, not treated as pending work.
+// ---------------------------------------------------------------------------
+test("x40.z-A6 a same-transaction match_bank_line + complete_bank_reconciliation succeeds (A6: the belt excludes a receipt born in this txn)", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const client = world.clients.A1;
+  const acct = await freshAccount(sub, client, "a6r");
+  const entry = await plainEntry(sub, { client, debit: acct.coaCode, credit: REVN, cents: 4100, postingDate: "2032-12-05", memo: "x40 A6 same-txn book-then-reconcile" });
+  const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2032-12-01", periodEnd: "2032-12-31", opening: 0, specs: [{ amountCents: 4100, entryDate: "2032-12-06" }], keepPeriod: true });
+
+  const result = await withActor({ role: ROLES.authenticated, jwtSub: sub, transaction: true }, async (c) => {
+    await c.query(
+      `select clara.match_bank_line(p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb,
+         p_adjustments => null, p_ack_period_exceptions => false, p_op_key => $4) as r`,
+      [client, JSON.stringify([stmt.lines[0].id]), JSON.stringify([{ entry_id: entry, matched_cents: 4100 }]), opk("x40-a6-match")],
+    );
+    const r = await c.query(
+      "select clara.complete_bank_reconciliation(p_statement => $1, p_ack_outstanding => $2::uuid[], p_op_key => $3) as r",
+      [stmt.statementId, [], opk("x40-a6-complete")],
+    );
+    return r.rows[0].r;
+  });
+  assert.ok(result, "the same-transaction book-then-reconcile act succeeds (A6 fix)");
+  const recon = await reconRow(idOf(result, "reconciliation_id", "reconciliation_id", "recon_id", "id"));
+  assert.equal(recon?.status, "complete", "the receipt is a genuine complete reconciliation, not a partial/refused state");
+  assert.equal((await lineGroupStatus(stmt.lines[0].id))[0], "live", "the line the same transaction just matched stayed live -- the belt never unwound it");
+});
+
+// ---------------------------------------------------------------------------
+// x40.z-A1 -- FIX-WAVE CLUSTER A RED-PROOF (addendum item 3b): void the receipt,
+// unmatch the member, and the now-stale matched_booking line reads UNSETTLED.
+// A1 [R1=M4] narrows BOTH readers (the completion precondition and excepted(P))
+// to (status='open' OR resolution_disposition='bank_corrective_line' with the
+// line still unmatched) -- a matched_booking/written_off_adjustment line that
+// gets unmatched falls to the honest recon_line_unsettled refusal instead of
+// silently keeping its old settled reading. CX3 extends the SAME narrowing to
+// list_unmatched_lines (0040:4021-4025 as read at fix time), so the stale line
+// also REAPPEARS in that report. AS READ AT FIX TIME, A1/CX3 ARE ALREADY LANDED
+// -- this cell runs GREEN, not red; kept as the coordinator's requested
+// positive proof and should be watched for regression.
+// ---------------------------------------------------------------------------
+test("x40.z-A1 void -> unmatch -> a stale matched_booking line reads UNSETTLED: re-completion refuses recon_line_unsettled AND the line reappears in list_unmatched_lines", async (t) => {
+  if (skipHere(t)) return;
+  const sub = world.users.alice;
+  const owner = world.users.alice;
+  const client = world.clients.A1;
+  const acct = await freshAccount(sub, client, "a1r");
+  const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2033-04-01", periodEnd: "2033-04-30", opening: 0, specs: [{ amountCents: -1800, entryDate: "2033-04-08" }], keepPeriod: true });
+  const exReceipt = await exceptLine(owner, { client, line: stmt.lines[0].id, kind: "bank_error", reason: "x40 A1 red-proof: initially thought a bank error" });
+  const exId = idOf(exReceipt, "exception_id", "id");
+  const entry = await plainEntry(sub, { client, debit: EXPN, credit: acct.coaCode, cents: 1800, postingDate: "2033-04-10", memo: "x40 A1 red-proof: the entry turns up" });
+  // resolve matched_booking + match, ONE transaction (x40.j's pattern -- the belt's
+  // disposition_unbooked law is satisfied at commit).
+  await withActor({ role: ROLES.authenticated, jwtSub: owner, transaction: true }, async (c) => {
+    await c.query(
+      "select clara.resolve_bank_line_exception(p_exception => $1, p_disposition => $2, p_note => $3, p_op_key => $4) as r",
+      [exId, "matched_booking", "x40 A1 red-proof: the entry was simply late in the books", opk("x40-a1r-resolve")],
+    );
+    await c.query(
+      "select clara.match_bank_line(p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb, p_adjustments => null, p_ack_period_exceptions => false, p_op_key => $4) as r",
+      [client, JSON.stringify([stmt.lines[0].id]), JSON.stringify([{ entry_id: entry, matched_cents: -1800 }]), opk("x40-a1r-match")],
+    );
+  });
+  // CAPTURE THE MATCH ID FROM THE TABLE, NOT FROM A RECEIPT: the withActor block above ran the
+  // match through a raw c.query() whose result was never returned out of the callback, and
+  // completeRecon's OWN receipt carries no match_id at all -- matchIdOf(receipt) on it silently
+  // resolves to null on every build. The line's now-live member row is the only honest source.
+  const liveMatchId = (await rootQuery(
+    "select match_id from clara.bank_match_line_members where line_id=$1 and group_status='live'",
+    [stmt.lines[0].id],
+  )).rows[0]?.match_id;
+  assert.ok(liveMatchId, "x40 A1 red-proof mandatory setup: the live match id resolved from the member table");
+
+  const receipt = await completeRecon(sub, { client, statement: stmt.statementId });
+  const reconId = idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id");
+  assert.equal((await reconRow(reconId)).status, "complete", "x40 A1 red-proof mandatory setup: the period settles over the live matched_booking line");
+
+  // VOID the receipt, then UNMATCH the now-unsettled member -- both lawful once the receipt is
+  // void (recon_period_settled no longer finds a complete recon covering this period).
+  await voidRecon(owner, { client, recon: reconId, reason: "x40 A1 red-proof: voiding to re-test the stale disposition" });
+  await unmatchBankMatch(sub, { client, match: liveMatchId, reason: "x40 A1 red-proof: unmatching the now-void member" });
+  assert.equal((await lineGroupStatus(stmt.lines[0].id)).length, 0, "x40 A1 red-proof mandatory setup: the line carries no live/pending member after unmatch");
+
+  // THE STALE DISPOSITION. The exception row STILL reads resolved/matched_booking (unmatch
+  // never touches bank_line_exceptions) -- CX3/A1's point exactly: a matched_booking/
+  // written_off_adjustment line that gets unmatched must fall to recon_line_unsettled, not
+  // silently keep riding the (now-false) "this line was excepted" reading.
+  assert.equal((await exceptionRow(exId))?.status, "resolved", "x40 A1 red-proof mandatory setup: the exception row is untouched by unmatch, still resolved/matched_booking");
+
+  const denied = await caught(() => completeRecon(sub, { client, statement: stmt.statementId, opKey: opk("x40-a1r-recomplete") }));
+  assertReason(denied, null, "recon_line_unsettled", "x40 A1 red-proof: RE-completion refuses recon_line_unsettled -- a stale matched_booking line, now unmatched, is no longer settled by the mere existence of its old exception row (A1's narrowed completion-precondition reader)");
+
+  const unmatched = await listUnmatchedLines(sub, { client });
+  const rows = Array.isArray(unmatched) ? unmatched : (unmatched?.lines ?? unmatched?.rows ?? []);
+  const reappeared = rows.some((r) => (r.line_id ?? r.id) === stmt.lines[0].id);
+  assert.ok(reappeared, "x40 A1 red-proof (CX3): the stale line REAPPEARS in list_unmatched_lines -- its exclusion narrows to (status='open' OR corrective-unmatched), not 'any exception ever'");
 });
 
 // ---------------------------------------------------------------------------
@@ -1482,30 +1700,55 @@ test("x40.aa a statement backfilled earlier than the account's frontier refuses 
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// x40.ab -- WRITE-SKEW PAIR: two sessions racing except-vs-match on the SAME
+// x40.ab -- WRITE-SKEW PAIR: two sessions racing except-vs-settle on the SAME
 // line (design S4.2: "closed against write-skew at the LOCK, not just the
 // belt" -- except/resolve take FOR UPDATE, the spliced match/settle re-check
 // exceptions after the line lock). The two-session driver from
 // rig-docs-race.mjs (holdThenContend), the x38.g/x38.l precedent.
+//
+// RECUT (fix-wave E4/R6): the ORIGINAL cut raced except_bank_line against
+// match_bank_line -- but BOTH verbs take pg_advisory_xact_lock(203005004,
+// hashtext(client)) as their OWN first statement (0040:2917,
+// match_bank_line's 0038 pin re-asserted at 0040:5903), so a session B that
+// blocks on session A's held 004 is EXPLAINED IN FULL before either side ever
+// reaches the shared line's FOR UPDATE -- the observed block cannot
+// distinguish "the fine-grained line lock discriminates the write-skew" from
+// "the coarse client-wide advisory rung alone serializes everything, and the
+// fine-grained mechanism could be deleted with no observable effect on this
+// cell." (asbuilt-races.md finding 6.)
+//
+// settle_from_bank_line is the DISCRIMINATING partner: S4.Z's own gate
+// (0040:5936-5938) asserts settle_from_bank_line's OWN body takes NO
+// 203005003/203005004 rung directly -- its only path to 004 is transitively,
+// via the C-a composite (allocate_payment/allocate_receipt) it calls, and
+// even then the line itself is locked LAST ("THE BANK ROWS, LAST",
+// 0038:4657-4662/4662), strictly AFTER that composite has already run in
+// full and posted real money. So this cut proves the write-skew law by a
+// SPECIFIC, otherwise-unreachable OUTCOME rather than by mere blocking: hold
+// with except_bank_line (mints the exception, holds the line FOR UPDATE),
+// contend with settle_from_bank_line. The contender can only be refused with
+// reason 'line_excepted' by the S4.4c post-lock re-check (0040:4634-4637),
+// which runs strictly AFTER settle's own line lock succeeds and strictly
+// AFTER its composite has already drafted+approved a real settlement entry
+// (rolled back whole by the raise) -- a refusal that can be produced by NO
+// mechanism other than the post-lock re-check under test, independent of
+// whatever ALSO explains the blocking. Closes the R6 gap directly: "no
+// line_excepted-from-settle test in the file."
 // ---------------------------------------------------------------------------
-test("x40.ab a concurrent except-vs-match race on one line BLOCKS (proven) and exactly one side wins", async (t) => {
+test("x40.ab a concurrent except-vs-settle race on one line BLOCKS (proven), and the loser is refused SPECIFICALLY by the post-lock line_excepted re-check -- not merely by advisory 004", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
+  const checker = world.users.bob;
   const client = world.clients.A1;
   const acct = await freshAccount(sub, client, "ab1");
-  const entry = await plainEntry(sub, { client, debit: acct.coaCode, credit: REVN, cents: 3300, postingDate: "2033-01-05", memo: "x40.ab race target" });
-  const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2033-01-01", periodEnd: "2033-01-31", opening: 0, specs: [{ amountCents: 3300, entryDate: "2033-01-06" }], keepPeriod: true });
+  // The line: money OUT to a vendor (a negative line -- the settle side this
+  // cell needs), below HIGH_STAKES so settle_from_bank_line goes LIVE in one
+  // call (no second-checker detour to thread through the race).
+  const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2033-01-01", periodEnd: "2033-01-31", opening: 0, specs: [{ amountCents: -3300, entryDate: "2033-01-06" }], keepPeriod: true });
   const line = stmt.lines[0].id;
+  const cp = await birthCounterparty(sub, { client, name: `X40AB CO ${randomUUID().slice(0, 6)}` });
+  const bill = await dateStampedItem(sub, { client, domain: "ap", cp, cpKind: "vendor", cents: 3300, control: AP1, postingDate: "2033-01-01", checker });
 
-  const matchSide = (c) => (async () => {
-    await c.query(GUARD);
-    const r = await c.query(
-      `select clara.match_bank_line(p_client => $1, p_lines => $2::jsonb, p_entries => $3::jsonb,
-         p_adjustments => null, p_ack_period_exceptions => false, p_op_key => $4) as r`,
-      [client, JSON.stringify([line]), JSON.stringify([{ entry_id: entry, matched_cents: 3300 }]), opk("x40-ab-match")],
-    );
-    return r.rows[0].r;
-  })();
   const exceptSide = (c) => (async () => {
     await c.query(GUARD);
     const r = await c.query(
@@ -1515,42 +1758,96 @@ test("x40.ab a concurrent except-vs-match race on one line BLOCKS (proven) and e
     );
     return r.rows[0].r;
   })();
+  const settleSide = (c) => (async () => {
+    await c.query(GUARD);
+    const r = await c.query(
+      `select clara.settle_from_bank_line(p_client => $1, p_line => $2, p_counterparty => $3,
+         p_allocations => $4::jsonb, p_memo => $5, p_control_account => $6, p_op_key => $7) as r`,
+      [client, line, cp, JSON.stringify([{ item_id: bill.item, amount_cents: 3300 }]), "x40.ab race settle", AP1, opk("x40-ab-settle")],
+    );
+    return r.rows[0].r;
+  })();
 
+  // HOLD with except (mints the exception + releases the line's FOR UPDATE only at commit),
+  // CONTEND with settle -- the discriminating direction (settle's post-lock re-check is the
+  // ONLY code path that can produce 'line_excepted' once it resumes).
   const out = await holdThenContend({
-    a: { role: ROLES.authenticated, jwtSub: world.users.alice, run: matchSide },
-    b: { role: ROLES.authenticated, jwtSub: world.users.alice, run: exceptSide },
+    a: { role: ROLES.authenticated, jwtSub: world.users.alice, run: exceptSide },
+    b: { role: ROLES.authenticated, jwtSub: world.users.alice, run: settleSide },
   });
-  noteLane(`x40.ab schedule: a(match).ok=${out.a?.ok} (${out.a?.code ?? ""} ${out.a?.message ?? ""}) b(except).ok=${out.b?.ok} (${out.b?.code ?? ""} ${out.b?.message ?? ""}) provedBlocked=${out.provedBlocked}`);
-  assert.ok(out.provedBlocked, `x40.ab: the second session BLOCKED on the first's line lock -- no check-then-act window between except and match (a=${out.a?.ok}/${out.a?.code ?? ""} b=${out.b?.ok}/${out.b?.code ?? ""})`);
+  noteLane(`x40.ab schedule: a(except).ok=${out.a?.ok} (${out.a?.code ?? ""} ${out.a?.message ?? ""}) b(settle).ok=${out.b?.ok} (${out.b?.code ?? ""} ${out.b?.message ?? ""}) provedBlocked=${out.provedBlocked}`);
+  assert.ok(out.provedBlocked, `x40.ab: the second session BLOCKED on the first's held lock (a=${out.a?.ok}/${out.a?.code ?? ""} b=${out.b?.ok}/${out.b?.code ?? ""})`);
   assert.ok(!sawDeadlock(out), `no deadlock either direction (a=${out.a?.code ?? "ok"} b=${out.b?.code ?? "ok"})`);
-  const winners = [out.a.ok, out.b.ok].filter(Boolean).length;
-  assert.equal(winners, 1, "exactly one side won the line -- the loser's belt/lock catches the write-skew, never both");
-  noteLane(`x40.ab a.ok=${out.a.ok} (${out.a.code ?? ""}) b.ok=${out.b.ok} (${out.b.code ?? ""})`);
+
+  // THE DISCRIMINATING ASSERT. Not "b failed" (which 004 alone would explain) but "b failed
+  // with EXACTLY line_excepted" -- a reason string that only the S4.4c post-lock re-check can
+  // raise, and only AFTER settle's own line lock succeeded (which requires the exception's
+  // holder -- session a -- to have already committed). This is unreachable by advisory
+  // contention alone: 004 can only make b WAIT, never manufacture this specific refusal.
+  assert.equal(out.a.ok, true, `the exception won (got ${out.a.code} -- ${out.a.message})`);
+  assert.equal(out.b.ok, false, "the settle that woke up behind it must be refused, never silently succeed over a freshly-minted exception");
+  // holdThenContend flattens `${e.message} ${e.detail ?? ""}` into ONE string (rig-docs-race.mjs
+  // `enter`/the catch arm), so the DETAIL json rides inside out.b.message, not a separate
+  // .detail field -- reasonOf's own regex still finds it there.
+  assert.equal(reasonOf({ detail: out.b.message }), "line_excepted", `x40.ab the settle loser is refused BY THE POST-LOCK RE-CHECK specifically (got code=${out.b.code} message=${out.b.message}) -- discriminating the line lock from mere 004 serialization`);
 });
 
 // ---------------------------------------------------------------------------
 // x40.ac -- THE BITEMPORAL RE-DERIVATION: complete a recon, then approve a
-// BACK-DATED entry into the already-certified period; get_bank_reconciliation
-// must reproduce the ORIGINAL receipt BYTE-EXACT under its own completed_at
-// cutoff -- the live /bank PREVIEW changes, the RECEIPT never does (S3, the
-// codex-blocker "no stable books cutoff", finding 37).
+// BACK-DATED entry into the already-certified period; the receipt must
+// reproduce BYTE-EXACT under its own completed_at cutoff -- the live /bank
+// PREVIEW changes, the RECEIPT never does (S3, the codex-blocker "no stable
+// books cutoff", finding 37; A7's ratified refinement, CX1).
+//
+// REBUILT (fix-wave A7, asbuilt-authority.md finding 6 + asbuilt-races.md
+// finding 2). The original cut was tautological in two ways: (a) it compared
+// two `get_bank_reconciliation` reads of the SAME immutable stored row --
+// that branch (0040 FIX WAVE C6) returns `v_receipt.snapshot` verbatim and
+// re-derives nothing, so the assert could not fail if the bitemporal gates
+// were deleted whole; (b) the statement carried ZERO lines, so every one of
+// the identity's terms was 0 before AND after -- "byte-exact" proved nothing
+// a `do $$ begin end $$` block would not also satisfy.
+// Fixed, per A7's now-landed verb: a NON-EMPTY, genuinely matched statement;
+// `clara.verify_bank_reconciliation` (the real recompute, under the receipt's
+// OWN completed_at) asserted `verified=true` with an EMPTY diffs array --
+// CX1's ratified contract is the four STORED TERMS + closing compared
+// STRICTLY (byte-exact, provable: an unmatched straggler entry moves gl and
+// capacity equally, net zero in gl'); AND the LIVE preview at now() is
+// independently shown to have moved (gl_cents, the RAW term outside the
+// prime-cancellation), so the cutoff is proven discriminating in BOTH
+// directions -- not merely "nothing happened".
 // ---------------------------------------------------------------------------
-test("x40.ac get_bank_reconciliation reproduces the certified receipt byte-exact even after a later back-dated approval", async (t) => {
+test("x40.ac verify_bank_reconciliation reproduces the certified receipt byte-exact (the four stored terms + closing) on a NON-EMPTY statement, even after a later back-dated approval -- and the live preview DOES move", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
   const acct = await freshAccount(sub, client, "ac1");
-  const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2033-02-01", periodEnd: "2033-02-28", opening: 0, specs: [], keepPeriod: true });
+  const entry = await plainEntry(sub, { client, debit: acct.coaCode, credit: REVN, cents: 5600, postingDate: "2033-02-08", memo: "x40.ac a real matched line -- NOT a zero-line month" });
+  const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2033-02-01", periodEnd: "2033-02-28", opening: 0, specs: [{ amountCents: 5600, entryDate: "2033-02-09" }], keepPeriod: true });
+  await matchBankLine(sub, { client, lines: [stmt.lines[0].id], entries: [{ entry_id: entry, matched_cents: 5600 }] });
   const receipt = await completeRecon(sub, { client, statement: stmt.statementId });
-  const before = await getBankReconciliation(sub, { statement: stmt.statementId });
+  const reconId = idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id");
+
+  const liveBefore = (await rootQuery("select clara._bank_recon_terms($1, now()) as t", [stmt.statementId])).rows[0].t;
+  const glBefore = Number(liveBefore.gl_cents);
 
   // A back-dated approval into the ALREADY-CERTIFIED period, well after
   // completed_at -- an entry the certified receipt could never have seen.
   await plainEntry(sub, { client, debit: EXPN, credit: acct.coaCode, cents: 1234, postingDate: "2033-02-10", memo: "x40.ac a back-dated approval after certification" });
 
-  const after = await getBankReconciliation(sub, { statement: stmt.statementId });
-  assert.deepEqual(after, before, "x40.ac the certified receipt reproduces BYTE-EXACT under its own completed_at cutoff -- the back-dated approval never silently diverges it");
-  assert.equal(idOf(after, "reconciliation_id", "recon_id", "id"), idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id"), "the SAME receipt id, unchanged");
+  // THE LIVE WORLD DID MOVE. gl_cents is the RAW gl term (before the capacity-prime
+  // cancellation CX1's algebra relies on) -- it must reflect the straggler immediately, or the
+  // "byte-exact" assert below would be proving nothing (there was nothing left to diverge from).
+  const liveAfter = (await rootQuery("select clara._bank_recon_terms($1, now()) as t", [stmt.statementId])).rows[0].t;
+  const glAfter = Number(liveAfter.gl_cents);
+  assert.equal(glAfter - glBefore, -1234, "x40.ac mandatory setup: the live preview's gl_cents moved by EXACTLY the back-dated entry's own credit to the bank account -- the world genuinely changed");
+
+  // THE RECEIPT DOES NOT MOVE. verify_bank_reconciliation recomputes _bank_recon_terms UNDER
+  // THE RECEIPT'S OWN completed_at cutoff and compares the four stored terms + closing STRICTLY.
+  const v = (await humanQuery(sub, "select clara.verify_bank_reconciliation($1) as v", [reconId])).rows[0].v;
+  assert.equal(v.reconciliation_id, reconId, "verify_bank_reconciliation resolved the same receipt");
+  assert.deepEqual(v.diffs, [], `x40.ac no named STRICT term diverged (got ${JSON.stringify(v.diffs)})`);
+  assert.equal(v.verified, true, "x40.ac the certified receipt reproduces BYTE-EXACT under its own completed_at cutoff -- the back-dated approval never silently diverges it");
 });
 
 // ===========================================================================
@@ -1616,8 +1913,10 @@ test("x40.ae due_date is stamped at BIRTH for invoice/bill only, using the terms
   // CAN reach, which is also the side that would silently mis-age a book:
   //   (1) an item OUT of the invoice/bill scope is NEVER stamped, even with live terms;
   //   (2) the producer itself reads payment_terms_days and is scoped to invoice/bill.
-  // OWED (recorded, not silently dropped): a positive birth-stamp cell against a REAL typed
-  // invoice/bill, built in the x37 fixture world.
+  // PAID (fix-wave E3, asbuilt-authority.md finding 7): the positive half -- a REAL typed
+  // supplier_bill, terms 30, item_date 2033-03-05 -> due_date 2033-04-04 EXACT -- now lives at
+  // x37-wave-c-a-subledger.test.mjs cell x37.c2, the one fixture world that can mint a typed
+  // entry cheaply.
   const after = await dateStampedItem(sub, { client, domain: "ar", cp, cpKind: "customer", cents: 22000, control: AR1, postingDate: "2033-03-05" });
   const afterRow = await openItemRow(after.item);
   assert.equal(afterRow.item_kind, "adjustment", "x40.ae: an UNTYPED control entry mints an 'adjustment' item (WCA-R2) -- the fixture cannot reach 'invoice' without a typed sales_invoice");
@@ -1626,7 +1925,7 @@ test("x40.ae due_date is stamped at BIRTH for invoice/bill only, using the terms
   const producer = await fnSource("_subledger_on_approve");
   assert.ok(producer.includes("payment_terms_days"), "x40.ae: the birth stamp reads the counterparty's payment_terms_days");
   assert.ok(producer.includes("item_kind in ('invoice','bill')"), "x40.ae: the birth stamp is scoped to invoice/bill -- a settlement can never read overdue");
-  noteLane("x40.ae OWED: a positive due_date birth-stamp cell against a REAL typed sales_invoice/supplier_bill entry (x37 fixture world)");
+  noteLane("x40.ae: the positive due_date birth-stamp cell against a REAL typed supplier_bill entry lives at x37-wave-c-a-subledger.test.mjs cell x37.c2 (fix-wave E3)");
 });
 
 // ---------------------------------------------------------------------------
@@ -1877,13 +2176,34 @@ test("x40.al match_bank_line's p_via_rule overload stamps origin='rule' and matc
 // x40.am -- THE SIGHTING CARVE-OUT: a bank_rule_suggested-stamped draft
 // approved THREE TIMES breeds NO vendor_account autopost proposal (part2
 // finding 29, the WA2-R9 wall applied).
+//
+// REBUILT (fix-wave E1/A2, asbuilt-authority.md finding 2). Two independent
+// breaks in the original cut, both traced to the migration text: (1) the
+// stamp targeted a column, `journal_entries.bank_rule_suggested`, that does
+// not exist -- the build carries the marker as a KEY INSIDE `flags` instead
+// (0040 S5: `not (coalesce(e.flags,'{}'::jsonb) ? 'bank_rule_suggested')`),
+// so the UPDATE raised 42703 and was swallowed by `.catch()` -- every draft
+// approved UNSTAMPED, and the carve-out conjunct was never evaluated false.
+// (2) the query asked for `rule_type='autopost'`, but the shape this fixture
+// actually breeds is `rule_type='vendor_account'` (0037_wave_c_a_subledger.sql
+// `values(c.firm,e.client_id,'vendor_account',v_counterparty,...)`) --
+// independently vacuous even if the stamp had landed. Fixed: stamp through
+// `flags` (the lawful draft-state allowset, 0016 `_tf_entry_immutable`), no
+// `.catch()` on the stamp's own rowCount, and the correct `rule_type`. PLUS
+// the positive control the finding names: an IDENTICAL unstamped trio on a
+// SECOND counterparty must breed EXACTLY ONE proposal -- proving the carve-out
+// really discriminates the stamped case rather than the cell being vacuous by
+// some other route (e.g. the whole sighting mechanism being dead).
 // ---------------------------------------------------------------------------
-test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO vendor_account autopost proposal", async (t) => {
+test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO vendor_account autopost proposal -- an identical unstamped trio on a second counterparty breeds exactly one", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
   const acct = await freshAccount(sub, client, "am1");
-  const cp = await birthCounterparty(sub, { client, name: `X40AM CO ${randomUUID().slice(0, 6)}` });
+  const cpStamped = await birthCounterparty(sub, { client, name: `X40AM STAMPED CO ${randomUUID().slice(0, 6)}` });
+  const cpControl = await birthCounterparty(sub, { client, name: `X40AM CONTROL CO ${randomUUID().slice(0, 6)}` });
+  const fakeRuleId = randomUUID();
+
   for (let i = 0; i < 3; i++) {
     const d = await draftEntryV3(sub, {
       client, resolution: await manualRes(sub, client), memo: `x40.am suggestion-stamped draft ${i}`, postingDate: `2034-04-0${i + 1}`,
@@ -1891,23 +2211,43 @@ test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO ve
         { account_code: EXPN, debit_cents: 500, credit_cents: 0, description: "coding-suggestion dr" },
         { account_code: acct.coaCode, debit_cents: 0, credit_cents: 500, description: "coding-suggestion cr" },
       ],
-      vendor: { existing_id: cp }, opKey: opk(`x40-am-draft-${i}`),
+      vendor: { existing_id: cpStamped }, opKey: opk(`x40-am-draft-${i}`),
     });
-    // Stamp bank_rule_suggested (the origin marker except() logic reads at
-    // approve time -- IA reads this as a column on journal_entries or a
-    // sibling tag row; forged directly, root-side, since the ordinary
-    // suggestion-accept UI flow is out of this DB-only suite's reach).
-    await withActor({}, (c) => c.query(
-      "update clara.journal_entries set bank_rule_suggested = $2 where id=$1",
-      [d.entry_id, randomUUID()],
-    )).catch((e) => noteLane(`x40.am bank_rule_suggested stamp column probe: ${e.message} -- adjudicate the exact stamp shape at integration`));
+    // Stamp bank_rule_suggested THROUGH THE LAWFUL COLUMN: flags is in
+    // _tf_entry_immutable's draft->draft allowset (0016:4956), and the carve-out
+    // reads it as a KEY, not a value -- any non-null value under that key qualifies.
+    const stamped = await withActor({}, (c) => c.query(
+      "update clara.journal_entries set flags = coalesce(flags,'{}'::jsonb) || jsonb_build_object('bank_rule_suggested', $2::text) where id=$1",
+      [d.entry_id, fakeRuleId],
+    ));
+    assert.equal(stamped.rowCount, 1, `x40.am: the bank_rule_suggested stamp landed on draft ${i} (no swallowed error)`);
     await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk(`x40-am-approve-${i}`) });
   }
   const proposals = await rootQuery(
-    "select count(*)::int as n from clara.coding_rules where client_id=$1 and rule_type='autopost' and counterparty_id=$2",
-    [client, cp],
-  ).catch(() => ({ rows: [{ n: 0 }] }));
+    "select count(*)::int as n from clara.coding_rules where client_id=$1 and rule_type='vendor_account' and counterparty_id=$2",
+    [client, cpStamped],
+  );
   assert.equal(proposals.rows[0].n, 0, "x40.am: three suggestion-stamped approvals breed ZERO vendor_account autopost proposals -- the sighting carve-out excludes them from the pool");
+
+  // THE POSITIVE CONTROL. An IDENTICAL trio, UNSTAMPED, on a different counterparty -- if the
+  // carve-out (or the whole sighting mechanism) were dead, this would ALSO breed zero and the
+  // cell above would be proving nothing. It must breed exactly one.
+  for (let i = 0; i < 3; i++) {
+    const d = await draftEntryV3(sub, {
+      client, resolution: await manualRes(sub, client), memo: `x40.am UNSTAMPED control draft ${i}`, postingDate: `2034-04-1${i + 1}`,
+      lines: [
+        { account_code: EXPN, debit_cents: 500, credit_cents: 0, description: "coding-control dr" },
+        { account_code: acct.coaCode, debit_cents: 0, credit_cents: 500, description: "coding-control cr" },
+      ],
+      vendor: { existing_id: cpControl }, opKey: opk(`x40-am-ctrl-${i}`),
+    });
+    await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk(`x40-am-ctrla-${i}`) });
+  }
+  const controlProposals = await rootQuery(
+    "select count(*)::int as n from clara.coding_rules where client_id=$1 and rule_type='vendor_account' and counterparty_id=$2",
+    [client, cpControl],
+  );
+  assert.equal(controlProposals.rows[0].n, 1, "x40.am POSITIVE CONTROL: an identical UNSTAMPED trio breeds EXACTLY ONE vendor_account proposal -- the sighting mechanism is alive, and the carve-out above is the reason the stamped trio bred none");
 });
 
 // ===========================================================================
@@ -1915,10 +2255,26 @@ test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO ve
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
-// x40.an -- PER-RPC CROSS-FIRM ZERO-ROWS for all EIGHT read RPCs (S6 header:
+// x40.an -- PER-RPC CROSS-FIRM ZERO-ROWS for all NINE read RPCs (S6 header:
 // "cross-firm probes return zero rows, never a discriminating error").
+//
+// REBUILT (fix-wave E5/A10, asbuilt-authority.md finding 10). The original cut's
+// "isEmpty" predicate was a tautology for any object payload: its last clause,
+// `(r.rows ?? r.counterparties ?? r.suggestions ?? []).length === 0`, reads ANY
+// object lacking those three keys as "empty" -- including a fully populated
+// leak the RPC never emitted those keys for. It happened to be honest only
+// because every probe's ACTUAL shape today is one of {array, null, an object
+// keyed 'counterparties'/'rows'} -- a future RPC returning e.g. {items:[...]}
+// would pass while leaking. Fixed: one exact, per-RPC shape assertion, read
+// straight off each function's own jsonb_build_object in 0040 (ar_aging/
+// ap_aging -> _aging_core's 'counterparties' key; customer_statement/
+// supplier_statement -> _statement_core's 'rows' key; list_unmatched_lines/
+// list_bank_line_suggestions/list_bank_rule_candidates/list_bank_rules -> a
+// PLAIN jsonb array; get_bank_reconciliation -> SQL null on an unfound
+// statement). PLUS list_bank_rules as the ninth probe (assembly's additive
+// tenth read RPC, order item 6/D4 -- never swept here before).
 // ---------------------------------------------------------------------------
-test("x40.an all eight C-c read RPCs return empty for a firm-B actor over firm-A objects, never a discriminating error", async (t) => {
+test("x40.an all nine C-c read RPCs return empty for a firm-B actor over firm-A objects, never a discriminating error", async (t) => {
   if (skipHere(t)) return;
   const sub = world.users.alice;
   const client = world.clients.A1;
@@ -1929,23 +2285,19 @@ test("x40.an all eight C-c read RPCs return empty for a firm-B actor over firm-A
   const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2034-05-01", periodEnd: "2034-05-31", opening: 0, specs: [], keepPeriod: true });
   await completeRecon(sub, { client, statement: stmt.statementId });
 
-  const probes = [
-    ["ar_aging", () => arAging(dave, { client, asOf: "2034-05-31" })],
-    ["ap_aging", () => apAging(dave, { client, asOf: "2034-05-31" })],
-    ["customer_statement", () => customerStatementRpc(dave, { client, cp, from: "2034-01-01", to: "2034-12-31" })],
-    ["supplier_statement", () => supplierStatementRpc(dave, { client, cp, from: "2034-01-01", to: "2034-12-31" })],
-    ["list_unmatched_lines", () => listUnmatchedLines(dave, { client })],
-    ["get_bank_reconciliation", () => getBankReconciliation(dave, { statement: stmt.statementId })],
-    ["list_bank_line_suggestions", () => listBankLineSuggestions(dave, { statement: stmt.statementId })],
-    ["list_bank_rule_candidates", () => listBankRuleCandidates(dave, { client })],
-  ];
-  for (const [label, run] of probes) {
-    const r = await run();
-    const isEmpty = r === null || (Array.isArray(r) && r.length === 0)
-      || (typeof r === "object" && r !== null && !Array.isArray(r) && Object.keys(r).length === 0)
-      || (typeof r === "object" && r !== null && (r.rows ?? r.counterparties ?? r.suggestions ?? []).length === 0);
-    assert.ok(isEmpty, `${label}: a firm-B actor over a firm-A object must get empty, not a discriminating error (got ${JSON.stringify(r)})`);
-  }
+  const arOut = await arAging(dave, { client, asOf: "2034-05-31" });
+  assert.deepEqual(arOut?.counterparties, [], `ar_aging: expected an empty 'counterparties' array (got ${JSON.stringify(arOut)})`);
+  const apOut = await apAging(dave, { client, asOf: "2034-05-31" });
+  assert.deepEqual(apOut?.counterparties, [], `ap_aging: expected an empty 'counterparties' array (got ${JSON.stringify(apOut)})`);
+  const custOut = await customerStatementRpc(dave, { client, cp, from: "2034-01-01", to: "2034-12-31" });
+  assert.deepEqual(custOut?.rows, [], `customer_statement: expected an empty 'rows' array (got ${JSON.stringify(custOut)})`);
+  const suppOut = await supplierStatementRpc(dave, { client, cp, from: "2034-01-01", to: "2034-12-31" });
+  assert.deepEqual(suppOut?.rows, [], `supplier_statement: expected an empty 'rows' array (got ${JSON.stringify(suppOut)})`);
+  assert.deepEqual(await listUnmatchedLines(dave, { client }), [], "list_unmatched_lines: expected a bare empty array");
+  assert.equal(await getBankReconciliation(dave, { statement: stmt.statementId }), null, "get_bank_reconciliation: expected SQL null (statement not found for this firm)");
+  assert.deepEqual(await listBankLineSuggestions(dave, { statement: stmt.statementId }), [], "list_bank_line_suggestions: expected a bare empty array");
+  assert.deepEqual(await listBankRuleCandidates(dave, { client }), [], "list_bank_rule_candidates: expected a bare empty array");
+  assert.deepEqual(await listBankRules(dave, { client }), [], "list_bank_rules: expected a bare empty array (the ninth probe, D4/A9's additive read RPC)");
   assert.equal(await outstandingOf(inv.item), 4400, "x40.an mandatory setup: the firm-A invoice is untouched by the cross-firm probes");
 });
 
@@ -1994,8 +2346,27 @@ test("x40.ao lock-order prosrc pins: complete_bank_reconciliation/void_bank_reco
 // ---------------------------------------------------------------------------
 // x40.ap -- EVENT REGISTRATION + ID-ONLY PAYLOAD ALLOWLIST for the seven new
 // event types (design S4.5).
+//
+// REBUILT (fix-wave E6/A11, asbuilt-authority.md finding 11). Three
+// independent weaknesses in the original cut, all fixed: (1) ALLOWED_KEYS
+// admitted money figures (opening_cents/closing_cents/outstanding_cents/
+// excepted_cents) and free text (reason) that the design (S4.5, "identifiers
+// only") and the migration's own TAIL 6 gate both refuse -- the cell was
+// strictly LOOSER than the thing it claims to police, so it could never catch
+// a regression TAIL 6 wouldn't. Fixed: ALLOWED_KEYS is now the EXACT copy of
+// TAIL 6's own `v_allowed` array (0040 TAIL 6), read straight off the live
+// migration text, not re-derived. (2) both the resolve and the complete were
+// swallowed (`.catch(() => {})`), so the fixture never actually reached most
+// of the seven event types -- only bank.line_excepted was guaranteed. Fixed:
+// a REAL reciprocal bank_corrective_line pair (x40.k's pattern, buildable now
+// that A2 landed) resolves without needing a live match, so except+resolve
+// succeed for real; complete+void a genuine receipt; propose+sign+retire a
+// real coding rule -- all SEVEN types fire, asserted by name. (3) the loop
+// iterated `rows` with no assertion it ever found any -- `noteLane` recorded
+// the count without ever failing on zero. Fixed: assert.ok(rows.length>=1)
+// AND that every one of the seven types was actually observed.
 // ---------------------------------------------------------------------------
-test("x40.ap the seven new bank.* event types are registered, in the taxonomy, and carry identifiers only", async (t) => {
+test("x40.ap the seven new bank.* event types are registered, in the taxonomy, all SEVEN actually fire, and every payload carries identifiers only", async (t) => {
   if (skipHere(t)) return;
   const types = [
     "bank.reconciliation_completed", "bank.reconciliation_voided",
@@ -2011,28 +2382,61 @@ test("x40.ap the seven new bank.* event types are registered, in the taxonomy, a
   const sub = world.users.alice;
   const client = world.clients.A1;
   const acct = await freshAccount(sub, client, "ap1");
-  const stmt = await enterStatement(sub, { client, bankAccount: acct.bankAccountId, periodStart: "2034-06-01", periodEnd: "2034-06-30", opening: 0, specs: [{ amountCents: -700, entryDate: "2034-06-05", description: "IBG TRANSFER\nSOME PAYEE REF1" }], keepPeriod: true });
-  const exReceipt = await exceptLine(sub, { client, line: stmt.lines[0].id, kind: "disputed", reason: "x40.ap event probe" });
-  await resolveException(sub, { client, exception: idOf(exReceipt, "exception_id", "id"), disposition: "written_off_adjustment", note: "x40.ap event probe resolution", counterpartLine: null }).catch(() => {});
-  await completeRecon(sub, { client, statement: stmt.statementId }).catch(() => {});
+  // A GENUINE reciprocal corrective pair (x40.k's pattern) -- resolves without a live match, so
+  // except/resolve both fire FOR REAL. The description substrings (REF1/REF2) are the sensitive-
+  // token leak probe's target.
+  const stmt = await enterStatement(sub, {
+    client, bankAccount: acct.bankAccountId, periodStart: "2034-06-01", periodEnd: "2034-06-30", opening: 0,
+    specs: [
+      { amountCents: -700, entryDate: "2034-06-05", description: "IBG TRANSFER\nSOME PAYEE REF1" },
+      { amountCents: 700, entryDate: "2034-06-06", description: "BANK REVERSAL REF2" },
+    ], keepPeriod: true,
+  });
+  const ex1 = idOf(await exceptLine(sub, { client, line: stmt.lines[0].id, kind: "disputed", reason: "x40.ap event probe (leg 1)" }), "exception_id", "id");
+  await exceptLine(sub, { client, line: stmt.lines[1].id, kind: "disputed", reason: "x40.ap event probe (leg 2)" });
+  // CX2 [folds into A2, landed]: ONE call resolves BOTH exceptions atomically -- the counterpart
+  // auto-flips resolved/bank_corrective_line naming this line back. A second resolveException
+  // call is no longer reachable (its exception is already resolved).
+  await resolveException(sub, { client, exception: ex1, disposition: "bank_corrective_line", note: "x40.ap event probe resolution (leg 1)", counterpartLine: stmt.lines[1].id });
 
+  const receipt = await completeRecon(sub, { client, statement: stmt.statementId });
+  const reconId = idOf(receipt, "reconciliation_id", "reconciliation_id", "recon_id", "id");
+  await voidRecon(sub, { client, recon: reconId, reason: "x40.ap event probe: voiding the receipt to observe bank.reconciliation_voided" });
+
+  // MEASURED THIS SESSION (rig verification): propose_bank_rule's evidence is DERIVED
+  // in-verb (x40.ah), not a caller claim -- it genuinely refuses rule_evidence_insufficient
+  // below the >=3-sighting floor. A FRESH account (x40.aj/x40.ah's own multilineStatement
+  // idiom) carries three matching, unmatched, unexcepted lines to clear it.
+  const acctRule = await freshAccount(sub, client, "ap2");
+  await multilineStatement(sub, client, acctRule.bankAccountId, { tag: "AP1", count: 3 });
+  const pattern = { tokens: ["EPF", "PAYMENT", "AP1"], direction: "debit" };
+  const proposed = await proposeRule(sub, { client, kind: "coding", pattern, proposal: { account_code: EXPN, narration_template: "x40.ap event probe rule" } });
+  const ruleId = idOf(proposed, "rule_id", "id");
+  await signRule(sub, { client, rule: ruleId });
+  await retireRule(sub, { client, rule: ruleId, reason: "x40.ap event probe: retiring to observe bank.rule_retired" });
+
+  // TAIL 6's OWN allowlist, copied verbatim (0040: the `v_allowed` array inside the tail6 do
+  // block) -- this cell can never be looser than the gate it exists to shadow-test.
   const ALLOWED_KEYS = new Set([
-    "reconciliation_id", "recon_id", "statement_id", "bank_account_id", "firm_id", "client_id", "status",
-    "first_period", "outstanding_items", "exception_items", "withdrawn", "counterpart_line_id",
-    "resolution_disposition",
-    "exception_id", "line_id", "kind", "disposition", "rule_id", "op_key",
-    "opening_cents", "closing_cents", "outstanding_cents", "excepted_cents",
-    "prior_reconciliation_id", "prior_statement_id", "reason", "voided_by", "coa_account_code",
+    "reconciliation_id", "statement_id", "bank_account_id", "prior_reconciliation_id",
+    "first_period", "outstanding_items", "exception_items",
+    "exception_id", "line_id", "kind", "resolution_disposition", "counterpart_line_id",
+    "rule_id", "client_id", "withdrawn",
   ]);
   const rows = await tieoutEventPayloads(client);
+  assert.ok(rows.length >= 1, "x40.ap: the fixture must actually have produced tie-out event rows -- an empty scan proves nothing");
+  const observedTypes = new Set(rows.map((r) => r.event_type));
+  for (const type of types) {
+    assert.ok(observedTypes.has(type), `x40.ap: event type ${type} was never observed -- the fixture must exercise all seven, not just bank.line_excepted`);
+  }
   for (const row of rows) {
     for (const k of Object.keys(row.payload ?? {})) {
-      assert.ok(ALLOWED_KEYS.has(k), `${row.event_type} payload key "${k}" is not on the allowlist (got keys ${Object.keys(row.payload).join(",")})`);
+      assert.ok(ALLOWED_KEYS.has(k), `${row.event_type} payload key "${k}" is not on TAIL 6's allowlist (got keys ${Object.keys(row.payload).join(",")})`);
     }
     const text = JSON.stringify(row.payload ?? {});
-    assert.ok(!text.includes("REF1"), `${row.event_type} payload leaks a line description substring`);
+    assert.ok(!text.includes("REF1") && !text.includes("REF2"), `${row.event_type} payload leaks a line description substring`);
   }
-  noteLane(`x40.ap tie-out event rows observed: ${rows.length}`);
+  noteLane(`x40.ap tie-out event rows observed: ${rows.length}, types: ${[...observedTypes].sort().join(",")}`);
 });
 
 // ---------------------------------------------------------------------------

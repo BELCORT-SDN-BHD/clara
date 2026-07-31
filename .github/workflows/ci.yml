@@ -291,6 +291,32 @@ jobs:
           PGDATABASE=clara_x37_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
             CLARA_RIG_DB=1 node --test tests/x37-0037-upgrade.test.mjs
 
+      # Wave-C-c migration-0040 effective_date backfill upgrade drill (fix-wave E2 — the same
+      # anti-misleading-green wiring as the x37-0037-upgrade drill above). x40-0040-upgrade.
+      # test.mjs is the ONLY proof that 0040's clara.open_item_allocations.effective_date
+      # backfill has ever run against DATA: the in-suite battery (x40-wave-c-c-tieout.test.mjs)
+      # runs on a database where 0040 was applied before any of ITS OWN fixtures existed, so the
+      # backfill's own risk — the migration's own header names it "the ONE statement in this
+      # migration that will touch 36 rows of live money-adjacent data inside a quiesce window" —
+      # is structurally untested by every other battery. This drill applies 0001→0039, builds a
+      # real subledger book through the audited C-a composites (allocate_payment,
+      # apply_open_items, unallocate_group), THEN applies 0040 onto it and asserts the
+      # backfilled effective_date per the producer law (0040 FIX WAVE C4): 'allocate' rows =
+      # the settlement entry's own posting_date; 'apply'/'unallocate' rows = the row's own
+      # created_at::date — plus that the LIVE producer going forward answers the identical rule
+      # (no deploy-timing-dependent split). It also drives the backfill's hard-safety-net ABORT
+      # (an allocation row orphaned from any item_kind='settlement' member must refuse the
+      # migration and roll back atomically). Reset-gated (it drops schema clara), so it SKIPS in
+      # the concurrent all-packages sweep above — which is exactly how a backfill regression
+      # could otherwise merge with the suite green. Run it FOR REAL here, ALONE, in its OWN
+      # throwaway database.
+      - name: Wave-C-c 0040 effective_date backfill upgrade drill (isolated DB)
+        working-directory: packages/db
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x40_upgrade_ci'
+          PGDATABASE=clara_x40_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+            CLARA_RIG_DB=1 node --test tests/x40-0040-upgrade.test.mjs
+
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
       # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap

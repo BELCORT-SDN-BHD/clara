@@ -9,7 +9,7 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import type { PgrestError } from "../shared/wire";
 import { getBankStatement, voidBankStatement, unmatchBankMatch, completePendingMatch } from "../shared/bankApi";
-import { listBankLineSuggestions, exceptBankLine } from "../shared/reconApi";
+import { getBankReconciliation, listBankLineSuggestions, exceptBankLine } from "../shared/reconApi";
 import { DocViewer } from "../shared/cards/DocViewer";
 import {
   statementStatusLabel, tieBannerState, tieVarianceCents, lineMatchLabel,
@@ -23,7 +23,7 @@ import {
 import type { CounterpartyKind } from "../shared/counterpartyApi";
 import { fmtCents, fmtDeltaCents } from "../shared/fmt";
 import { MatchingWorkspace } from "./MatchingWorkspace";
-import { ReconciliationPanel } from "./ReconciliationPanel";
+import { ReconciliationPanel, voidUnwindCountFor } from "./ReconciliationPanel";
 import styles from "./bank.module.css";
 
 /** A confirmed match/settle suggestion chip's pre-fill (design §7) — cleared
@@ -38,9 +38,10 @@ export function StatementDetail({
   clientId: string;
   statementId: string;
   /** the account's full sibling statement list (already loaded by
-   *  BankWorkbench) — passed through ONLY so ReconciliationPanel can compose
-   *  the void-unwind count (design §3/§7); StatementDetail itself reads none
-   *  of it directly. */
+   *  BankWorkbench) — threaded to ReconciliationPanel for its own void-unwind
+   *  count AND read directly here [D6 fix] for the SAME composition
+   *  (voidUnwindCountFor), so the unmatch/cancel buttons below warn before
+   *  the act too, not only the void button. */
   statements: readonly BankStatementRow[];
   onChanged: () => void;
 }) {
@@ -58,6 +59,7 @@ export function StatementDetail({
   const [exceptOpenLineId, setExceptOpenLineId] = useState<string | null>(null);
   const [exceptBusy, setExceptBusy] = useState(false);
   const [exceptErr, setExceptErr] = useState<{ id: string; message: string; reason: string | null } | null>(null);
+  const [voidUnwindCount, setVoidUnwindCount] = useState<number | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -73,6 +75,23 @@ export function StatementDetail({
   }, [token, statementId]);
 
   useEffect(() => { setSelected(new Set()); void reload(); }, [reload]);
+
+  // [D6 fix] the ordered-unwind warning, surfaced BEFORE a settled-period
+  // unmatch/cancel, not only after a recon_period_settled refusal (design
+  // §3/§7) — meaningful only once THIS statement's own reconciliation is
+  // complete (the exact condition unmatch_bank_match's belt refuses on).
+  useEffect(() => {
+    if (!statement) { setVoidUnwindCount(null); return; }
+    let cancelled = false;
+    (async () => {
+      const own = await getBankReconciliation(token, statementId).catch(() => null);
+      if (cancelled) return;
+      if (own?.status !== "complete") { setVoidUnwindCount(null); return; }
+      const n = await voidUnwindCountFor(token, statements, statement.statement);
+      if (!cancelled) setVoidUnwindCount(n);
+    })();
+    return () => { cancelled = true; };
+  }, [token, statementId, statements, statement]);
 
   async function runLine(id: string, fn: () => Promise<unknown>) {
     setLineBusy(id);
@@ -181,6 +200,7 @@ export function StatementDetail({
           lineErr={lineErr}
           onUnmatch={(matchId, id) => runLine(id, () => unmatchBankMatch(token, clientId, matchId, "unmatched from /bank"))}
           onCompletePending={(matchId, id) => runLine(id, () => completePendingMatch(token, clientId, matchId))}
+          voidUnwindCount={voidUnwindCount}
           suggestions={suggestions}
           onChipSelect={(lineId, ruleId, counterpartyId, kind) => {
             setSelected(new Set([lineId]));
@@ -211,7 +231,7 @@ export function StatementDetail({
 }
 
 function LinesTable({
-  lines, selected, onToggle, lineBusy, lineErr, onUnmatch, onCompletePending,
+  lines, selected, onToggle, lineBusy, lineErr, onUnmatch, onCompletePending, voidUnwindCount,
   suggestions, onChipSelect, exceptOpenLineId, onToggleExceptForm, onExcept, exceptBusy, exceptErr,
 }: {
   lines: BankStatementLineRow[];
@@ -221,6 +241,10 @@ function LinesTable({
   lineErr: { id: string; message: string; reason: string | null } | null;
   onUnmatch: (matchId: string, lineId: string) => void;
   onCompletePending: (matchId: string, lineId: string) => void;
+  /** [D6 fix] > 0 iff THIS statement's own reconciliation is complete and N
+   *  later, same-account receipts are also complete — chain order would
+   *  force voiding all N before an unmatch/cancel here is even reachable. */
+  voidUnwindCount: number | null;
   suggestions: BankLineSuggestionRow[];
   onChipSelect: (lineId: string, ruleId: string, counterpartyId: string, kind: CounterpartyKind) => void;
   exceptOpenLineId: string | null;
@@ -268,6 +292,9 @@ function LinesTable({
                     ) : (
                       <button className={styles.linkButton} onClick={() => onToggleExceptForm(l.id)}>except…</button>
                     )}
+                    {(l.match_state === "live" || l.match_state === "pending") && typeof voidUnwindCount === "number" && voidUnwindCount > 0 ? (
+                      <div className={styles.hint}>this period is reconciled — voiding {voidUnwindCount} receipt{voidUnwindCount === 1 ? "" : "s"} first is required</div>
+                    ) : null}
                     {lineErr?.id === l.id ? <div className={styles.errorText}>{lineErr.message}{describeBankRefusal(lineErr.reason) ? ` — ${describeBankRefusal(lineErr.reason)}` : ""}</div> : null}
                   </td>
                 </tr>

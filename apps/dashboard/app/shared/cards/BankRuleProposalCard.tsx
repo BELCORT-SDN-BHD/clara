@@ -18,7 +18,7 @@ import { shortId } from "../fmt";
 import styles from "./cards.module.css";
 
 export function BankRuleProposalCard({ token, part }: { token: string | null; part: BankRuleProposalPart }) {
-  const loader = useCallback((t: string) => getBankRule(t, part.rule_id), [part.rule_id]);
+  const loader = useCallback((t: string) => getBankRule(t, part.client_id, part.rule_id), [part.client_id, part.rule_id]);
   const { data, loading, busy, err, clr, act } = useCard(token, loader);
   const [retireReason, setRetireReason] = useState("");
 

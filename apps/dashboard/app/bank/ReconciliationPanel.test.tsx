@@ -19,13 +19,14 @@ function mkView(p: Partial<BankReconciliationView> = {}): BankReconciliationView
     first_period_exemption: false, period_start: "2026-05-01", period_end: "2026-05-31",
     status: "open",
     terms: {
-      opening_anchor_cents: 1234500, gl_prime_cents: 9876500, uncleared_total_cents: -321000,
+      opening_anchor_cents: 1234500, statement_opening_cents: null, gl_prime_cents: 9876500, uncleared_total_cents: -321000,
       unmatched_capacity_prime_cents: 45600, excepted_cents: -7800,
       computed_closing_cents: 10827300, statement_closing_cents: 10827300, difference_cents: 0,
     },
-    snapshot: { outstanding_entries: [], outstanding_lines: [], exceptions: [], opening_lineage: [] },
-    stale_outstanding_ids: [], precondition_met: true, chain_ok: true,
+    snapshot: { outstanding_entries: [], outstanding_group_items: [], outstanding_lines: [], exceptions: [], opening_lineage: [], shapeOk: true },
+    stale_outstanding_ids: [], precondition_met: true, chain_ok: true, can_complete: true, blockers: [],
     completed_by: null, completed_at: null, voided_by: null, voided_at: null, voided_reason: null,
+    voided_receipt: null,
     ...p,
   };
 }
@@ -80,17 +81,22 @@ test("the ack list gates the complete button: disabled until every stale id is a
   assert.ok(full.includes("all acknowledged"));
 });
 
-test("the ack list gates complete even with zero stale items, on precondition/chain", () => {
-  const unsettled = mkView({ status: "open", precondition_met: false });
-  const html1 = render(createElement(ReconciliationView, { view: unsettled, ackedStaleIds: new Set<string>()}));
-  assert.ok(completeButtonTag(html1).includes("disabled"), "unsettled lines must disable complete");
+test("[D8/CX9 — LANDED] complete is gated OFF THE SERVER can_complete VERDICT — precondition_met/chain_ok no longer gate the button, only its banners", () => {
+  const unverdicted = mkView({ status: "open", can_complete: null });
+  const html0 = render(createElement(ReconciliationView, { view: unverdicted, ackedStaleIds: new Set<string>()}));
+  assert.ok(completeButtonTag(html0).includes("disabled"), "a null verdict (a near-miss shape) must fail closed, never assume ready");
 
-  const gap = mkView({ status: "open", chain_ok: false });
+  const blocked = mkView({ status: "open", can_complete: false, blockers: ["recon_difference_nonzero"] });
+  const html1 = render(createElement(ReconciliationView, { view: blocked, ackedStaleIds: new Set<string>()}));
+  assert.ok(completeButtonTag(html1).includes("disabled"), "a named blocker must disable complete");
+  assert.ok(html1.includes("recon_difference_nonzero"), "the blocker renders verbatim");
+
+  const gap = mkView({ status: "open", can_complete: true, chain_ok: false });
   const html2 = render(createElement(ReconciliationView, { view: gap, ackedStaleIds: new Set<string>()}));
-  assert.ok(completeButtonTag(html2).includes("disabled"), "a period gap must disable complete");
-  assert.ok(html2.includes("recon_period_gap"));
+  assert.ok(!completeButtonTag(html2).includes("disabled"), "an explicit server can_complete:true enables it even though the retired chain_ok banner still renders informationally");
+  assert.ok(html2.includes("recon_period_gap"), "the old banner still renders as information, just no longer gates the button");
 
-  const ready = mkView({ status: "open", precondition_met: true, chain_ok: true, stale_outstanding_ids: [] });
+  const ready = mkView({ status: "open", can_complete: true, stale_outstanding_ids: [] });
   const html3 = render(createElement(ReconciliationView, { view: ready, ackedStaleIds: new Set<string>()}));
   assert.ok(!completeButtonTag(html3).includes("disabled"), "a clean, ready preview enables complete");
 });
@@ -120,4 +126,32 @@ test("a snapshot with unrecognised nested shapes still renders, degrades fields,
   assert.equal(view.snapshot.outstanding_entries.length, 0, "a non-array snapshot field degrades to empty, not a crash");
   assert.equal(view.snapshot.exceptions.length, 1, "a malformed exception row still maps to a safe defensive row");
   assert.doesNotThrow(() => render(createElement(ReconciliationView, { view, ackedStaleIds: new Set<string>()})));
+});
+
+// --- [voided_receipt follow-up, LANDED] the collapsed "previous receipt
+//     (voided)" section — preview/complete stays primary --------------------------
+
+test("a preview with a well-formed voided_receipt renders the preview as PRIMARY, plus a collapsed previous-receipt section", () => {
+  const view = mkView({
+    status: "open", can_complete: true,
+    voided_receipt: {
+      reconciliation_id: "r-old", status: "void",
+      opening_cents: 1234500, closing_cents: 1200000,
+      gl_balance_cents: -50000, outstanding_cents: 0, excepted_cents: 0,
+      completed_by: "user1", completed_at: "2026-04-15T00:00:00Z",
+      voided_by: "user2", voided_at: "2026-04-20T00:00:00Z", voided_reason: "duplicate upload",
+      snapshot: { outstanding_entries: [], outstanding_group_items: [], outstanding_lines: [], exceptions: [], opening_lineage: [], shapeOk: true },
+    },
+  });
+  const html = render(createElement(ReconciliationView, { view, ackedStaleIds: new Set<string>()}));
+  assert.ok(!completeButtonTag(html).includes("disabled"), "re-completion is reachable — the preview stays the PRIMARY, actionable flow");
+  assert.ok(html.includes("Previous receipt (voided)"), "the prior void is surfaced, collapsed");
+  assert.ok(html.includes("duplicate upload"), "the void reason renders verbatim");
+  assert.ok(html.includes("<details"), "collapsed, not always-open");
+});
+
+test("[fail-closed] a view with no voided_receipt renders no previous-receipt section at all", () => {
+  const view = mkView({ status: "open", voided_receipt: null });
+  const html = render(createElement(ReconciliationView, { view, ackedStaleIds: new Set<string>()}));
+  assert.ok(!html.includes("Previous receipt (voided)"));
 });

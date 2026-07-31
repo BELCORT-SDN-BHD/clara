@@ -14,15 +14,35 @@ import { useCallback, useEffect, useState } from "react";
 import type { PgrestError } from "../shared/wire";
 import { getBankReconciliation, completeBankReconciliation, voidBankReconciliation, resolveBankLineException } from "../shared/reconApi";
 import {
-  reconTieState, canCompleteReconciliation, outstandingStaleUnacked, exceptionDispositionLabel, exceptionKindLabel,
-  deriveVoidUnwindCount, EXCEPTION_DISPOSITIONS, type BankReconciliationView, type BankLineExceptionDisposition,
+  reconTieState, canCompleteReconciliation, outstandingStaleUnacked,
+  deriveVoidUnwindCount, type BankReconciliationView, type BankLineExceptionDisposition,
 } from "./reconModel";
+import { SnapshotTables } from "./ReconciliationSnapshotTables";
 import { describeBankRefusal, toggleInSet } from "./matchModel";
 import type { BankStatementRow } from "./model";
 import { fmtCents, fmtDeltaCents, shortId } from "../shared/fmt";
 import styles from "./bank.module.css";
 
 type ActionErr = { message: string; reason: string | null } | null;
+
+/** [D6 fix] the ordered-unwind count for ONE statement (design §3/§7) —
+ *  shared by this panel's own void button AND StatementDetail's unmatch/
+ *  cancel buttons: later, same-account, live statements whose own recon is
+ *  complete (chain-order forces voiding those first). No new RPC. */
+export async function voidUnwindCountFor(
+  token: string,
+  statements: readonly BankStatementRow[],
+  statement: Pick<BankStatementRow, "id" | "bank_account_id" | "period_end">,
+): Promise<number> {
+  const later = statements.filter(
+    (st) => st.bank_account_id === statement.bank_account_id && st.id !== statement.id
+      && st.status === "live" && st.period_end > statement.period_end,
+  );
+  const pairs = await Promise.all(
+    later.map(async (st) => [st.id, (await getBankReconciliation(token, st.id).catch(() => null))?.status ?? "open"] as const),
+  );
+  return deriveVoidUnwindCount(statements, statement, new Map(pairs));
+}
 
 /** PURE presentational view — testable with a fixture, no network. */
 export function ReconciliationView({
@@ -42,7 +62,7 @@ export function ReconciliationView({
   voiding?: boolean;
   voidErr?: ActionErr;
   voidUnwindCount?: number | null;
-  onResolveException?: (exceptionId: string, disposition: BankLineExceptionDisposition, note: string) => void;
+  onResolveException?: (exceptionId: string, disposition: BankLineExceptionDisposition, note: string, counterpartLineId?: string | null) => void;
   resolving?: string | null;
   resolveErr?: { id: string; message: string; reason: string | null } | null;
 }) {
@@ -94,6 +114,11 @@ export function ReconciliationView({
           {view.precondition_met === false ? (
             <p className={styles.banner}>Not every line of this statement is a live match member or under an open exception yet.</p>
           ) : null}
+          {view.blockers.length > 0 ? (
+            <ul className={styles.hint}>
+              {view.blockers.map((b) => <li key={b}>{b}{describeBankRefusal(b) ? ` — ${describeBankRefusal(b)}` : ""}</li>)}
+            </ul>
+          ) : null}
 
           {view.stale_outstanding_ids.length > 0 ? (
             <div className={styles.section}>
@@ -133,153 +158,69 @@ export function ReconciliationView({
           {view.status === "void" ? (
             <p className={styles.banner}>Voided{view.voided_reason ? `: ${view.voided_reason}` : ""}.</p>
           ) : null}
+        </div>
+      ) : null}
 
-          <SnapshotTables view={view} onResolveException={onResolveException} resolving={resolving} resolveErr={resolveErr} />
+      {/* [D3 fix] rendered in BOTH modes now — a preview's exceptions must be
+          resolvable BEFORE completion, not only after (the exception door
+          was previously a one-way trap: nowhere to resolve one until the
+          statement was already complete, and open exceptions block
+          completion in the first place). */}
+      <SnapshotTables snapshot={view.snapshot} onResolveException={onResolveException} resolving={resolving} resolveErr={resolveErr} />
 
-          {view.status === "complete" ? (
-            <div className={styles.section}>
-              <p className={styles.sectionTitle}>Void this reconciliation</p>
-              {typeof voidUnwindCount === "number" && voidUnwindCount > 0 ? (
-                <p className={styles.banner}>This will void {voidUnwindCount} receipt{voidUnwindCount === 1 ? "" : "s"} — every complete reconciliation on this account after this period, newest-first (design §3 the ordered-unwind cost).</p>
-              ) : null}
-              <div className={styles.actions}>
-                <input className={styles.input} placeholder="Void reason" value={voidReason ?? ""} onChange={(e) => onVoidReasonChange?.(e.target.value)} aria-label="Void reconciliation reason" style={{ flex: 1 }} />
-                <button className={styles.buttonDanger} disabled={voiding || !(voidReason ?? "").trim()} onClick={() => onVoid?.()}>
-                  {voiding ? "Voiding…" : "Void reconciliation"}
-                </button>
-              </div>
-              {voidErr ? (
-                <p className={styles.errorText}>{voidErr.message}{describeBankRefusal(voidErr.reason) ? ` — ${describeBankRefusal(voidErr.reason)}` : ""}</p>
-              ) : null}
-            </div>
+      {/* [voided_receipt follow-up] the preview/complete flow stays PRIMARY —
+          re-completion is reachable — with the prior void collapsed beneath
+          it, read-only (no onResolveException: a frozen snapshot is not a
+          live one). Renders only once the DB lane lands `voided_receipt`;
+          absent or malformed today, by design (toVoidedReceiptRow's own
+          fail-closed law). */}
+      {view.voided_receipt ? (
+        <details className={styles.section}>
+          <summary className={styles.sectionTitle} style={{ cursor: "pointer" }}>
+            Previous receipt (voided){view.voided_receipt.voided_at ? ` — ${new Date(view.voided_receipt.voided_at).toLocaleString()}` : ""}
+          </summary>
+          <p className={styles.muted}>
+            {view.voided_receipt.reconciliation_id ? `receipt ${shortId(view.voided_receipt.reconciliation_id)} · ` : ""}
+            completed{view.voided_receipt.completed_by ? ` by ${shortId(view.voided_receipt.completed_by)}` : ""}
+            {view.voided_receipt.completed_at ? ` · ${new Date(view.voided_receipt.completed_at).toLocaleString()}` : ""}
+          </p>
+          <p className={styles.banner}>
+            Voided{view.voided_receipt.voided_by ? ` by ${shortId(view.voided_receipt.voided_by)}` : ""}
+            {view.voided_receipt.voided_reason ? `: ${view.voided_receipt.voided_reason}` : ""}.
+          </p>
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead><tr><th>term</th><th className={styles.num}>cents</th></tr></thead>
+              <tbody>
+                <tr><td>opening</td><td className={styles.num}>{fmtCents(view.voided_receipt.opening_cents)}</td></tr>
+                <tr><td>closing</td><td className={styles.num}>{fmtCents(view.voided_receipt.closing_cents)}</td></tr>
+                <tr><td>gl balance</td><td className={styles.num}>{fmtCents(view.voided_receipt.gl_balance_cents)}</td></tr>
+                <tr><td>outstanding</td><td className={styles.num}>{fmtDeltaCents(view.voided_receipt.outstanding_cents)}</td></tr>
+                <tr><td>excepted</td><td className={styles.num}>{fmtDeltaCents(view.voided_receipt.excepted_cents)}</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <SnapshotTables snapshot={view.voided_receipt.snapshot} />
+        </details>
+      ) : null}
+
+      {view.mode === "receipt" && view.status === "complete" ? (
+        <div className={styles.section}>
+          <p className={styles.sectionTitle}>Void this reconciliation</p>
+          {typeof voidUnwindCount === "number" && voidUnwindCount > 0 ? (
+            <p className={styles.banner}>This will void {voidUnwindCount} receipt{voidUnwindCount === 1 ? "" : "s"} — every complete reconciliation on this account after this period, newest-first (design §3 the ordered-unwind cost).</p>
+          ) : null}
+          <div className={styles.actions}>
+            <input className={styles.input} placeholder="Void reason" value={voidReason ?? ""} onChange={(e) => onVoidReasonChange?.(e.target.value)} aria-label="Void reconciliation reason" style={{ flex: 1 }} />
+            <button className={styles.buttonDanger} disabled={voiding || !(voidReason ?? "").trim()} onClick={() => onVoid?.()}>
+              {voiding ? "Voiding…" : "Void reconciliation"}
+            </button>
+          </div>
+          {voidErr ? (
+            <p className={styles.errorText}>{voidErr.message}{describeBankRefusal(voidErr.reason) ? ` — ${describeBankRefusal(voidErr.reason)}` : ""}</p>
           ) : null}
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function SnapshotTables({
-  view, onResolveException, resolving, resolveErr,
-}: {
-  view: BankReconciliationView;
-  onResolveException?: (exceptionId: string, disposition: BankLineExceptionDisposition, note: string) => void;
-  resolving?: string | null;
-  resolveErr?: { id: string; message: string; reason: string | null } | null;
-}) {
-  const snap = view.snapshot;
-  const hasAny = snap.outstanding_entries.length + snap.outstanding_lines.length + snap.exceptions.length + snap.opening_lineage.length > 0;
-  if (!hasAny) return <p className={styles.emptyState}>Nothing outstanding, excepted, or carried from opening — a clean period.</p>;
-  return (
-    <>
-      {snap.outstanding_entries.length > 0 ? (
-        <div className={styles.section}>
-          <p className={styles.sectionTitle}>Outstanding entry-side ({snap.outstanding_entries.length})</p>
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead><tr><th>entry</th><th>posting date</th><th className={styles.num}>amount</th><th className={styles.num}>age</th></tr></thead>
-              <tbody>
-                {snap.outstanding_entries.map((e) => (
-                  <tr key={e.entry_id}>
-                    <td>{shortId(e.entry_id)}</td><td>{e.posting_date ?? "—"}</td>
-                    <td className={styles.num}>{fmtCents(e.amount_cents)}</td>
-                    <td className={styles.num}>{e.age_days ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
-
-      {snap.outstanding_lines.length > 0 ? (
-        <div className={styles.section}>
-          <p className={styles.sectionTitle}>Outstanding line-side ({snap.outstanding_lines.length})</p>
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead><tr><th>line</th><th>entry date</th><th>description</th><th className={styles.num}>amount</th><th className={styles.num}>age</th></tr></thead>
-              <tbody>
-                {snap.outstanding_lines.map((l) => (
-                  <tr key={l.line_id}>
-                    <td>{shortId(l.line_id)}</td><td>{l.entry_date ?? "—"}</td><td>{l.description ?? "—"}</td>
-                    <td className={styles.num}>{fmtCents(l.amount_cents)}</td>
-                    <td className={styles.num}>{l.age_days ?? "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
-
-      {snap.opening_lineage.length > 0 ? (
-        <div className={styles.section}>
-          <p className={styles.sectionTitle}>Opening carry-down lineage ({snap.opening_lineage.length})</p>
-          <div className={styles.tableWrap}>
-            <table className={styles.table}>
-              <thead><tr><th>opening item</th><th>ref</th><th>date</th><th>entry</th></tr></thead>
-              <tbody>
-                {snap.opening_lineage.map((o) => (
-                  <tr key={o.opening_item_id}>
-                    <td>{shortId(o.opening_item_id)}</td><td>{o.item_ref ?? "—"}</td><td>{o.item_date ?? "—"}</td>
-                    <td>{o.entry_id ? shortId(o.entry_id) : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : null}
-
-      {snap.exceptions.length > 0 ? (
-        <div className={styles.section}>
-          <p className={styles.sectionTitle}>Exceptions ({snap.exceptions.length})</p>
-          {snap.exceptions.map((exc) => (
-            <ExceptionRow key={exc.id} exc={exc} onResolve={onResolveException} busy={resolving === exc.id} err={resolveErr?.id === exc.id ? resolveErr : null} />
-          ))}
-        </div>
-      ) : null}
-    </>
-  );
-}
-
-function ExceptionRow({
-  exc, onResolve, busy, err,
-}: {
-  exc: BankReconciliationView["snapshot"]["exceptions"][number];
-  onResolve?: (exceptionId: string, disposition: BankLineExceptionDisposition, note: string) => void;
-  busy?: boolean;
-  err?: { message: string; reason: string | null } | null;
-}) {
-  const [disposition, setDisposition] = useState<BankLineExceptionDisposition>("matched_booking");
-  const [note, setNote] = useState("");
-  const open = exc.status === "open";
-  return (
-    <div className={styles.candidateRow} style={{ flexDirection: "column", alignItems: "stretch" }}>
-      <div className={styles.accountMain}>
-        <span className={styles.accountName}>
-          {exceptionKindLabel(exc.kind)} · line {shortId(exc.line_id)}
-          <span className={`${styles.band} ${open ? styles.bandYou : styles.bandReady}`} style={{ marginLeft: "0.4rem" }}>{exc.status}</span>
-        </span>
-        <span className={styles.accountSub}>{exc.reason}</span>
-      </div>
-      {!open ? (
-        <p className={styles.okText}>
-          Resolved{exc.resolution_disposition ? ` — ${exceptionDispositionLabel(exc.resolution_disposition)}` : ""}
-          {exc.resolution_note ? `: ${exc.resolution_note}` : ""}
-        </p>
-      ) : onResolve ? (
-        <div className={styles.actions}>
-          <select className={styles.select} value={disposition} onChange={(e) => setDisposition(e.target.value as BankLineExceptionDisposition)} aria-label={`Disposition for exception ${exc.id}`}>
-            {EXCEPTION_DISPOSITIONS.map((d) => <option key={d} value={d}>{exceptionDispositionLabel(d)}</option>)}
-          </select>
-          <input className={styles.input} placeholder="Resolution note" value={note} onChange={(e) => setNote(e.target.value)} aria-label={`Resolution note for exception ${exc.id}`} style={{ flex: 1 }} />
-          <button className={styles.buttonSecondary} disabled={busy || !note.trim()} onClick={() => onResolve(exc.id, disposition, note.trim())}>
-            {busy ? "Resolving…" : "Resolve (owner)"}
-          </button>
-        </div>
-      ) : null}
-      {err ? <p className={styles.errorText}>{err.message}{describeBankRefusal(err.reason) ? ` — ${describeBankRefusal(err.reason)}` : ""}</p> : null}
     </div>
   );
 }
@@ -331,17 +272,7 @@ export function ReconciliationPanel({
   useEffect(() => {
     if (!view || view.mode !== "receipt" || view.status !== "complete") { setVoidUnwindCount(null); return; }
     let cancelled = false;
-    (async () => {
-      const later = statements.filter(
-        (st) => st.bank_account_id === statement.bank_account_id && st.id !== statement.id
-          && st.status === "live" && st.period_end > statement.period_end,
-      );
-      const pairs = await Promise.all(
-        later.map(async (st) => [st.id, (await getBankReconciliation(token, st.id).catch(() => null))?.status ?? "open"] as const),
-      );
-      if (cancelled) return;
-      setVoidUnwindCount(deriveVoidUnwindCount(statements, statement, new Map(pairs)));
-    })();
+    voidUnwindCountFor(token, statements, statement).then((n) => { if (!cancelled) setVoidUnwindCount(n); });
     return () => { cancelled = true; };
   }, [view, statements, statement, token]);
 
@@ -378,11 +309,11 @@ export function ReconciliationPanel({
     }
   }
 
-  async function doResolve(exceptionId: string, disposition: BankLineExceptionDisposition, note: string) {
+  async function doResolve(exceptionId: string, disposition: BankLineExceptionDisposition, note: string, counterpartLineId?: string | null) {
     setResolving(exceptionId);
     setResolveErr(null);
     try {
-      await resolveBankLineException(token, { clientId, exceptionId, disposition, note });
+      await resolveBankLineException(token, { clientId, exceptionId, disposition, note, counterpartLineId });
       await reload();
       onChanged();
     } catch (e) {
@@ -411,7 +342,7 @@ export function ReconciliationPanel({
       voiding={voiding}
       voidErr={voidErr}
       voidUnwindCount={voidUnwindCount}
-      onResolveException={(id, d, n) => void doResolve(id, d, n)}
+      onResolveException={(id, d, n, cp) => void doResolve(id, d, n, cp)}
       resolving={resolving}
       resolveErr={resolveErr}
     />

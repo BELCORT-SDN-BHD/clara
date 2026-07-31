@@ -9,24 +9,40 @@
 // one (owner). The DB's own floor/uniqueness refusal is the authority either
 // way — this UI's disabled state is a preview.
 //
-// SUBSTRATE GAP, RECORDED LOUDLY (see build-0040/u1-notes.md): the design's
-// §6 read table names NO `list_bank_rules(client)` — only the breeding
-// census. So a rule this card just proposed (or one proposed in an earlier
-// session) cannot be RE-LISTED here; this card tracks only rules IT minted
-// THIS SESSION (their ids came back from propose_bank_rule's own return
-// value) and offers sign/retire on those. A rule proposed elsewhere (chat, a
-// different tab) is invisible to this card until a list RPC exists.
+// SESSION-LOCAL SCOPE (unchanged by the D2/D4 fix-wave pass): `list_bank_
+// rules(client)` exists and reconApi.getBankRule now reads through it (D4
+// fix — see shared/reconApi.ts / shared/cards/BankRuleProposalCard.tsx), but
+// THIS card still tracks only rules IT minted this session (their ids come
+// back from propose_bank_rule's own return value) — a rule proposed
+// elsewhere (chat, a different tab, an earlier session) is invisible here.
+// Wiring list_bank_rules into this card's own list is a real, separate
+// enhancement, not part of this fix wave's D2 scope (label + kind selector +
+// proposal builder) — recorded loudly rather than silently left stale.
 
 import { useCallback, useEffect, useState } from "react";
 import type { PgrestError } from "../shared/wire";
 import { listBankRuleCandidates, proposeBankRule, signBankRule, retireBankRule } from "../shared/reconApi";
 import {
   bankRuleProposalLabel, candidateMeetsEvidenceFloor, RULE_EVIDENCE_FLOOR,
-  type BankRuleCandidateRow, type BankRuleRow,
+  type BankRuleCandidateRow, type BankRuleRow, type BankRuleKind,
 } from "./reconModel";
 import { describeBankRefusal } from "./matchModel";
+import { listCounterparties, type CounterpartyRow } from "../shared/counterpartyApi";
+import { listAccounts, type AccountRow } from "../accounts/api";
 import { shortId } from "../shared/fmt";
 import styles from "./bank.module.css";
+
+/** [D2/A4 fix] `list_bank_rule_candidates` carries only pattern/sighting_
+ *  count/sample_line_ids (0040:3847-3849) — no kind, no proposal. The label
+ *  is the pattern's own tokens/direction, never the defaulted "coding"/{}
+ *  bankRuleProposalLabel would render for a candidate. */
+function candidatePatternLabel(c: Pick<BankRuleCandidateRow, "pattern">): string {
+  const p = (c.pattern ?? {}) as Record<string, unknown>;
+  const toks = Array.isArray(p.tokens) ? p.tokens.filter((t): t is string => typeof t === "string") : [];
+  const direction = typeof p.direction === "string" ? p.direction : null;
+  if (toks.length === 0) return "(pattern)";
+  return `${toks.join(" ")}${direction ? ` · ${direction}` : ""}`;
+}
 
 type ActionErr = { id: string; message: string; reason: string | null } | null;
 
@@ -52,12 +68,20 @@ export function RuleCandidatesCard({ token, clientId }: { token: string; clientI
 
   useEffect(() => { void reload(); }, [reload]);
 
-  async function doPropose(c: BankRuleCandidateRow, key: string) {
+  // [D2/A4 fix] kind/proposal come from the human's OWN choice in
+  // CandidateProposalBuilder below — never c.kind/c.proposal (the census
+  // carries neither; sending them defaulted refused 100% of the time).
+  async function doPropose(c: BankRuleCandidateRow, key: string, kind: BankRuleKind, proposal: Record<string, unknown>) {
     setBusyKey(key);
     setErr(null);
     try {
-      const rule = await proposeBankRule(token, { clientId, kind: c.kind as "match_settle" | "coding", pattern: c.pattern, proposal: c.proposal });
-      setProposedThisSession((rows) => [rule, ...rows]);
+      const rule = await proposeBankRule(token, { clientId, kind, pattern: c.pattern, proposal });
+      // propose_bank_rule's own return is thin ({rule_id, status, sighting_
+      // count} — 0040:3268-3269); echo what was actually accepted (the verb
+      // canonicalizes proposal server-side, but refusal would already have
+      // thrown) so this session's list shows the real kind/proposal, not the
+      // mapper's defaults.
+      setProposedThisSession((rows) => [{ ...rule, kind, pattern: c.pattern, proposal }, ...rows]);
       await reload();
     } catch (e) {
       const pe = e as PgrestError;
@@ -108,14 +132,17 @@ export function RuleCandidatesCard({ token, clientId }: { token: string; clientI
           const key = `cand:${i}`;
           const ready = candidateMeetsEvidenceFloor(c);
           return (
-            <div key={key} className={styles.candidateRow}>
+            <div key={key} className={styles.candidateRow} style={{ flexDirection: "column", alignItems: "stretch" }}>
               <div className={styles.accountMain}>
-                <span className={styles.accountName}>{bankRuleProposalLabel(c)}</span>
+                <span className={styles.accountName}>{candidatePatternLabel(c)}</span>
                 <span className={styles.accountSub}>{c.sighting_count ?? 0} sighting{(c.sighting_count ?? 0) === 1 ? "" : "s"}{!ready ? ` (needs ${RULE_EVIDENCE_FLOOR})` : ""}</span>
               </div>
-              <button className={styles.buttonSecondary} disabled={!ready || busyKey === key} onClick={() => void doPropose(c, key)}>
-                {busyKey === key ? "Proposing…" : "Propose (bookkeeper)"}
-              </button>
+              {ready ? (
+                <CandidateProposalBuilder
+                  token={token} clientId={clientId} busy={busyKey === key}
+                  onPropose={(kind, proposal) => void doPropose(c, key, kind, proposal)}
+                />
+              ) : null}
               {err?.id === key ? <p className={styles.errorText}>{err.message}{describeBankRefusal(err.reason) ? ` — ${describeBankRefusal(err.reason)}` : ""}</p> : null}
             </div>
           );
@@ -130,6 +157,82 @@ export function RuleCandidatesCard({ token, clientId }: { token: string; clientI
           ))}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+/** [D2/A4 fix] the per-candidate kind selector + proposal builder — the
+ *  human, not the census, decides what the pattern breeds: match_settle
+ *  needs {domain, counterparty_id} (0040:3172-3191, domain's counterparty
+ *  kind must agree — ar↔customer, ap↔vendor); coding needs {account_code,
+ *  narration_template} (0040:3192-3214). Nothing is ever sent defaulted —
+ *  Propose stays disabled until the required fields are filled. */
+function CandidateProposalBuilder({
+  token, clientId, busy, onPropose,
+}: {
+  token: string;
+  clientId: string;
+  busy: boolean;
+  onPropose: (kind: BankRuleKind, proposal: Record<string, unknown>) => void;
+}) {
+  const [kind, setKind] = useState<BankRuleKind>("match_settle");
+  const [domain, setDomain] = useState<"ar" | "ap">("ar");
+  const [counterparties, setCounterparties] = useState<CounterpartyRow[]>([]);
+  const [counterpartyId, setCounterpartyId] = useState("");
+  const [accounts, setAccounts] = useState<AccountRow[]>([]);
+  const [accountCode, setAccountCode] = useState("");
+  const [narrationTemplate, setNarrationTemplate] = useState("");
+
+  useEffect(() => {
+    if (kind !== "match_settle") return;
+    setCounterpartyId("");
+    listCounterparties(token, clientId, domain === "ar" ? "customer" : "vendor")
+      .then(setCounterparties).catch(() => setCounterparties([]));
+  }, [token, clientId, kind, domain]);
+
+  useEffect(() => {
+    if (kind !== "coding") return;
+    listAccounts(token, clientId).then(setAccounts).catch(() => setAccounts([]));
+  }, [token, clientId, kind]);
+
+  const ready = kind === "match_settle"
+    ? counterpartyId !== ""
+    : accountCode !== "" && narrationTemplate.trim() !== "";
+
+  function submit() {
+    if (kind === "match_settle") onPropose("match_settle", { domain, counterparty_id: counterpartyId });
+    else onPropose("coding", { account_code: accountCode, narration_template: narrationTemplate.trim() });
+  }
+
+  return (
+    <div className={styles.actions} style={{ flexWrap: "wrap" }}>
+      <select className={styles.select} value={kind} onChange={(e) => setKind(e.target.value as BankRuleKind)} aria-label="Rule kind">
+        <option value="match_settle">match/settle</option>
+        <option value="coding">coding</option>
+      </select>
+      {kind === "match_settle" ? (
+        <>
+          <select className={styles.select} value={domain} onChange={(e) => setDomain(e.target.value as "ar" | "ap")} aria-label="Domain">
+            <option value="ar">AR (customer)</option>
+            <option value="ap">AP (vendor)</option>
+          </select>
+          <select className={styles.select} value={counterpartyId} onChange={(e) => setCounterpartyId(e.target.value)} aria-label="Counterparty">
+            <option value="">Select…</option>
+            {counterparties.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </>
+      ) : (
+        <>
+          <select className={styles.select} value={accountCode} onChange={(e) => setAccountCode(e.target.value)} aria-label="Account">
+            <option value="">Select…</option>
+            {accounts.map((a) => <option key={a.account_code} value={a.account_code}>{a.account_code} — {a.name}</option>)}
+          </select>
+          <input className={styles.input} placeholder="Narration template" value={narrationTemplate} onChange={(e) => setNarrationTemplate(e.target.value)} aria-label="Narration template" />
+        </>
+      )}
+      <button className={styles.buttonSecondary} disabled={!ready || busy} onClick={submit}>
+        {busy ? "Proposing…" : "Propose (bookkeeper)"}
+      </button>
     </div>
   );
 }

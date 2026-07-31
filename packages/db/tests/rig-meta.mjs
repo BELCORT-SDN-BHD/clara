@@ -236,8 +236,9 @@ export const BANK_0038_COHORT = [
 // HUMAN JUDGEMENT ONLY -- whether a month ties, whether a bank line is a bank error, and
 // whether a coding pattern becomes a signed rule are all professional judgements, and the
 // agent never makes one: no wake role, no clara_runtime, no clara_agent_ro (design SS10,
-// "zero agent grants on every new table", restated for the verbs that write them). The nine
-// reads are the /bank + /aging surface, definer + _human_ctx(bookkeeper) + firm predicates.
+// "zero agent grants on every new table", restated for the verbs that write them). The TEN
+// reads are the /bank + /aging surface, definer + _human_ctx(bookkeeper) + firm predicates
+// (verify_bank_reconciliation joined at the 0040 fix wave, item A7).
 // UNGRANTED internals declared the 0020 way: the main sweep fails if one ever GAINS a grant,
 // the cohort check fails if one ever DISAPPEARS.
 const TIEOUT_0040_HUMAN_FNS = [
@@ -250,6 +251,10 @@ const TIEOUT_0040_READ_FNS = [
   "ar_aging", "ap_aging", "customer_statement", "supplier_statement",
   "list_unmatched_lines", "get_bank_reconciliation", "list_bank_line_suggestions",
   "list_bank_rule_candidates", "list_bank_rules",
+  // 0040 FIX WAVE A7: the bitemporal receipt law's missing verifier. A READ (bookkeeper floor,
+  // raises nothing) that recomputes _bank_recon_terms under a stored receipt's own completed_at
+  // and reports the diff -- so the same wall applies: human lane only, no machine role.
+  "verify_bank_reconciliation",
 ];
 const TIEOUT_0040_UNGRANTED_FNS = [
   "_bank_recon_terms", "_tf_bank_recon_belt", "_tf_bank_settled_authority_belt",

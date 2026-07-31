@@ -272,6 +272,14 @@ create table clara.bank_reconciliations (
   period_end               date        not null,
   status                   text        not null default 'complete' check (status in ('complete', 'void')),
   opening_cents            bigint      not null,
+  -- 0040 FIX WAVE C1 [M6+M7]: THE SIXTH MONEY COLUMN. opening_cents is the STATEMENT's printed
+  -- opening; this is the section-3 OPENING ANCHOR (the account's FIRST live statement's
+  -- opening_cents), which is the term the identity actually uses. Storing both is what lets the
+  -- belt assert section 3's DIRECT form on the stored row of EVERY period --
+  -- opening_anchor + gl' - outstanding + excepted = closing -- instead of the differenced form
+  -- that only telescopes when a reader also holds the previous receipt. A mid-chain receipt now
+  -- verifies ALONE, which is what a receipt is for.
+  opening_anchor_cents     bigint      not null,
   gl_balance_cents         bigint      not null,
   closing_cents            bigint      not null,
   -- BINDING (design SS4.1): outstanding_cents := Sum-over-g uncleared(g,P) +
@@ -431,6 +439,17 @@ create table clara.bank_line_exceptions (
   resolution_disposition   text        check (resolution_disposition in
                               ('matched_booking', 'bank_corrective_line', 'written_off_adjustment')),
   resolution_note          text,
+  -- 0040 FIX WAVE A2/CX2 [R3+M3+A15]: THE CORRECTIVE PAIR, MADE STRUCTURAL. Before this column
+  -- the bank_corrective_line disposition named its counterpart only in an audit/event payload,
+  -- so nothing could ever re-check the pair: an owner could park an arbitrary unbooked amount
+  -- inside excepted(P) by "pairing" a -RM120,000 payroll run with a -RM50 fee, across two bank
+  -- accounts, with no arithmetic anywhere. The column carries the counterpart LINE, and the
+  -- composite FK below makes SAME-BANK-ACCOUNT structural rather than verb-only (bank_account_id
+  -- is this row's own trigger-stamped account, so the FK cannot be satisfied by a line on any
+  -- other account). Netting-to-zero and reciprocity are the verb's asserts, taken under the
+  -- two-line FOR UPDATE; the partial unique below stops one line being the named counterpart of
+  -- two different pairs (the three-way chain A->B, C->B the money lens found).
+  counterpart_line_id      uuid,
   constraint fk_ble_client foreign key (client_id, firm_id)
     references clara.clients(id, firm_id),
   -- Account congruence through the LINE (0038:569-570's 4-key anchor) and, independently,
@@ -443,6 +462,12 @@ create table clara.bank_line_exceptions (
     references clara.bank_statement_lines(id, firm_id, client_id, bank_account_id),
   constraint fk_ble_statement foreign key (statement_id, firm_id, client_id, bank_account_id)
     references clara.bank_statements(id, firm_id, client_id, bank_account_id),
+  -- 0040 FIX WAVE A2: the counterpart line, account-congruent through the SAME 4-key anchor.
+  -- This is the same-bank-account law, declared rather than merely asserted.
+  constraint fk_ble_counterpart_line
+    foreign key (counterpart_line_id, firm_id, client_id, bank_account_id)
+    references clara.bank_statement_lines(id, firm_id, client_id, bank_account_id),
+  constraint ck_ble_counterpart_not_self check (counterpart_line_id is distinct from line_id),
   -- 2-key: clara.documents carries no client_id column (dropped 0007:1106; re-verified S0
   -- probe 9) -- "firm/client-validated" in the design's prose is therefore a firm-only
   -- congruence at the DDL layer, same shape as 0038's own fk_bank_statements_document.
@@ -457,12 +482,22 @@ create table clara.bank_line_exceptions (
   -- neither.
   constraint ck_ble_resolution check (
     (status = 'open' and resolved_by is null and resolved_at is null
-      and resolution_disposition is null and resolution_note is null)
+      and resolution_disposition is null and resolution_note is null
+      and counterpart_line_id is null)
     or (status = 'resolved' and resolved_by is not null and resolved_at is not null
         and resolution_disposition is not null
-        and resolution_note is not null and btrim(resolution_note) <> ''))
+        and resolution_note is not null and btrim(resolution_note) <> ''
+        -- 0040 FIX WAVE A2: the counterpart is present IFF the disposition is the corrective
+        -- pair. matched_booking / written_off_adjustment may never carry one; bank_corrective_line
+        -- may never lack one -- `counterpart_required` becomes a DDL fact, not only a verb check.
+        and (counterpart_line_id is null) = (resolution_disposition <> 'bank_corrective_line')))
 );
 create unique index uq_ble_line_open on clara.bank_line_exceptions (line_id) where status = 'open';
+-- 0040 FIX WAVE A2: ONE OPEN COUNTERPART USE. A statement line may be the named counterpart of
+-- at most ONE corrective resolution -- otherwise N lines could all name the same small offsetting
+-- line and each claim to be closed against it (the money lens' three-way chain).
+create unique index uq_ble_counterpart_in_use on clara.bank_line_exceptions (counterpart_line_id)
+  where counterpart_line_id is not null;
 create index ix_ble_statement on clara.bank_line_exceptions (statement_id, status);
 create index ix_ble_client on clara.bank_line_exceptions (client_id, status);
 
@@ -491,10 +526,12 @@ create function clara._tf_bank_line_exception_transition() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare v_old jsonb; v_new jsonb;
 begin
+  -- 0040 FIX WAVE A2: counterpart_line_id joins the resolution-lifecycle set (it is written by
+  -- the SAME open->resolved UPDATE that sets the disposition, and never afterwards).
   v_old := to_jsonb(old) - 'status' - 'resolved_by' - 'resolved_at'
-                         - 'resolution_disposition' - 'resolution_note';
+                         - 'resolution_disposition' - 'resolution_note' - 'counterpart_line_id';
   v_new := to_jsonb(new) - 'status' - 'resolved_by' - 'resolved_at'
-                         - 'resolution_disposition' - 'resolution_note';
+                         - 'resolution_disposition' - 'resolution_note' - 'counterpart_line_id';
   if v_old is distinct from v_new then
     raise exception 'bank line exceptions are immutable outside the open->resolved transition'
       using errcode = 'CLR08',
@@ -749,25 +786,29 @@ comment on column clara.counterparties.payment_terms_days is
 -- estate where a claim happens to carry a later posting_date than its own settlement, and
 -- this migration does not risk that on the unambiguous half.
 --
--- THE 'apply' HALF IS NOT A LITERAL MATCH TO THE SUBSTRATE -- STATED LOUDLY, PER THE VERIFY-
--- DON''T-GUESS MANDATE, RATHER THAN SILENTLY IMPROVISED. clara.apply_open_items
--- (0037:3225-3400) creates NO open_items row at all -- it only inserts INTO
--- open_item_allocations, pairing two EXISTING items. Its own header comment (0037:721-724)
--- names "the canonical case" as applying a credit_note to an invoice, and NEITHER side of
--- that canonical pair is ever item_kind='adjustment' (credit_note and invoice are their own
--- distinct kinds, per ck_open_items_kind_matrix, 0037:764-769) -- so a literal
--- item_kind IN ('settlement','adjustment') join, which correctly resolves 'allocate', finds
--- NO anchor at all for the canonical 'apply' shape. Step 2b below instead takes the LATEST
--- posting_date among the journal entries behind EVERY item in the row''s own
--- application_group (MAX(), across possibly several source/target pairs sharing one group)
--- -- mathematically the earliest date at which BOTH sides of every offset in the group could
--- have existed (an as-of read before that date cannot honestly show the offset applied).
--- This is a REASONED SUBSTITUTION for the design's item-kind-based wording, not a verbatim
--- implementation of it -- flagged as an OPEN QUESTION in s10-notes.md for the
--- assembler/owner to confirm or correct BEFORE apply_open_items (if ever spliced) is made to
--- write this column going forward, and backed by a hard safety net below: the migration
--- REFUSES to proceed (raises, names the row count) rather than SET NOT NULL over any row
--- either derivation could not resolve.
+-- THE 'apply' HALF: RESOLVED, AND ALIGNED ON ACT-DATING [0040 FIX WAVE C4 / M5].
+-- clara.apply_open_items (0037:3225-3400) creates NO open_items row at all -- it only inserts
+-- INTO open_item_allocations, pairing two EXISTING items, with ZERO GL movement by
+-- construction (WCA-R3 pair mechanics). There is no settlement/adjustment entry anywhere in
+-- its transaction to anchor on, which is why the design's literal "the anchor settlement/
+-- adjustment entry's posting_date" wording does not resolve for it at all.
+--
+-- THE DEFECT THIS ARM USED TO CARRY, and the fix. An earlier draft of step 2b took
+-- MAX(posting_date) over the journal entries behind the group's items -- the ECONOMIC date --
+-- while the SPLICED PRODUCER (S4.9) stamps current_date, the ACT date. The same act therefore
+-- answered ap_aging(as_of => ...) two different ways depending on whether it happened before
+-- or after this migration deployed: a RM12,000 credit note applied to a February invoice would
+-- show the invoice net under the backfilled row and gross under a row written a day later.
+-- Two identical books, two different aging answers, decided by deploy timing.
+--
+-- ONE SEMANTICS, BOTH HALVES: the producer stays current_date (the ratified assembly
+-- adjudication 3, restated in the S4.9 header -- an application is a HUMAN JUDGEMENT made today
+-- about two existing positions, and dating it into a closed month would retroactively change
+-- what an as-of read of that month reported), and the BACKFILL re-derives to the row's own
+-- created_at::date -- which is exactly "the day the human made the judgement" for a row already
+-- in the book. That is the identical rule the 'unallocate' arm above already uses, and it makes
+-- the 36 live rows and every future row answer the same question. The hard safety net below is
+-- retained unchanged.
 -- =====================================================================================
 alter table clara.open_item_allocations add column effective_date date;
 
@@ -792,20 +833,13 @@ update clara.open_item_allocations oa
  where oa.application_group = anchor.application_group
    and oa.operation_kind = 'allocate';
 
--- Step 2b -- 'apply' rows: MAX(posting_date) over the journal entries behind every item in
--- the row's own application_group (the reasoned fallback; see the section header).
-update clara.open_item_allocations oa
-   set effective_date = grp.anchor_date
-  from (
-    select oa2.application_group, max(je.posting_date) as anchor_date
-      from clara.open_item_allocations oa2
-      join clara.open_items oi on oi.id = oa2.item_id
-      join clara.journal_entries je on je.id = oi.entry_id
-     where oa2.operation_kind = 'apply'
-     group by oa2.application_group
-  ) grp
- where oa.application_group = grp.application_group
-   and oa.operation_kind = 'apply';
+-- Step 2b -- 'apply' rows: the row's own created_at::date [0040 FIX WAVE C4 / M5]. ACT-DATED,
+-- byte-for-byte the same rule the spliced producer (S4.9) applies going forward, so the
+-- backfilled rows and the future rows answer an as-of read identically. See the section header
+-- for why the economic-date derivation this replaces was a deploy-timing-dependent answer.
+update clara.open_item_allocations
+   set effective_date = created_at::date
+ where operation_kind = 'apply';
 
 -- THE HARD SAFETY NET. STOP LOUDLY rather than guess: any row still null here is either an
 -- operation_kind outside the three handled above, or a group whose items could not be joined
@@ -831,14 +865,15 @@ comment on column clara.open_item_allocations.effective_date is
   'The as-of grain _subledger_outstanding_asof(item, as_of) sums against (design SS4.4). '
   'Producer law: operation_kind=''unallocate'' writes the row''s own created_at::date (not '
   'retroactive, matching reverse_entry''s current-date mirror). '
-  'operation_kind in (''allocate'',''apply'') writes the posting_date of the journal entry '
-  'behind the row''s application_group -- for ''allocate'' this is the singular settlement '
-  'item''s entry (unambiguous); for ''apply'' this migration''s backfill used MAX(posting_date) '
-  'over the group''s items (an OPEN QUESTION for the apply_open_items producer -- see '
-  's10-notes.md and this column''s migration comment in 0040 for the full reasoning) since the '
-  'design''s literal "settlement/adjustment item" wording does not resolve for apply''s '
-  'canonical credit_note-to-invoice case. NEVER caller-supplied; always derived at write time '
-  'by the producing verb.';
+  'operation_kind=''allocate'' writes the posting_date of the journal entry behind the '
+  'row''s application_group -- the singular item_kind=''settlement'' member''s entry '
+  '(unambiguous, targeted, never MAX()). '
+  'operation_kind=''apply'' writes the row''s own created_at::date: apply_open_items is the ONE '
+  'allocation writer with no GL entry to anchor on (zero-movement pair mechanics, WCA-R3), so '
+  'an application dates itself by the ACT, exactly as unallocate does -- the producer stamps '
+  'current_date and this migration''s backfill re-derived the pre-existing rows to '
+  'created_at::date, which is the same rule applied to a row already in the book (0040 FIX '
+  'WAVE C4). NEVER caller-supplied; always derived at write time by the producing verb.';
 
 
 -- #####################################################################################
@@ -939,9 +974,10 @@ set role clara_fn_owner;
 --             This comment is the pin.]
 --
 --   excepted(P) = SUM signed amount_cents of ALL lines of A on LIVE statements with
---             period_end <= P.end whose exception is OPEN, or RESOLVED WITH THE LINE STILL
---             UNMATCHED. All-time, like every other term [ladder row 1]. Summed PER LINE, not
---             per exception row -- unique(line_id) where status='open' still admits several
+--             period_end <= P.end whose GOVERNING exception, READ AS OF THE CUTOFF, is OPEN or
+--             is RESOLVED AS bank_corrective_line WITH THE LINE STILL UNMATCHED [0040 FIX WAVE
+--             A1+A3]. All-time, like every other term [ladder row 1]. Summed PER LINE, not per
+--             exception row -- unique(line_id) where status='open' still admits several
 --             historical resolved rows on one line, and summing those would double count.
 --
 -- THE OPENING ANCHOR (delta round, the takeover case). opening_anchor = the account's FIRST
@@ -951,9 +987,25 @@ set role clara_fn_owner;
 -- (clara.opening_items.entry_id is UNIQUE and NOT NULL, 0017:1131 -- one entry per item; the
 -- gl_balance branch writes its typed legs plus the OBE contra, 0017:3246-3275), and the
 -- takeover tie is
---       anchor_amount - SUM(bank_uncleared entry movement on c) = S_first.opening_cents
--- which the verb refuses by the name recon_opening_mismatch. bank_uncleared entries stay IN
--- gl' and IN capacity' -- they are pre-cutover instruments that WILL match future lines.
+--       anchor_amount = S_first.opening_cents
+-- which the verb refuses by the name recon_opening_mismatch.
+--
+-- THE TIE HAS EXACTLY ONE SUBTRACTION, AND THAT IS THE WHOLE POINT [0040 FIX WAVE B1 / M1].
+-- An earlier draft subtracted the bank_uncleared movement a SECOND time
+-- (anchor - uncleared = opening), which refused every correctly-seeded takeover account.
+-- The proof it was wrong, in the build's own terms: both anchor_amount and the bank_uncleared
+-- movement are measured here as approved journal movement on the SAME account c, so the books'
+-- cash at cutover is B = anchor_amount + uncleared_opening, and the reconciliation relation
+-- bank = books - uncleared gives O = B - U = anchor_amount. Worked: a bank opening of
+-- RM50,000.00 with one outstanding RM2,000.00 cheque already written means book cash of
+-- RM48,000.00, so K's carry-down on c must be RM50,000.00 and U = -RM200,000c -- the corrected
+-- tie reads 5000000 - 5000000 = 0 and passes; the doubled form read +200000 and refused
+-- forever, and the ONLY way to pass it was to certify a falsified statement opening of 52,000
+-- (a bank opening those books cannot produce) which would then carry a permanent RM2,000
+-- books-vs-bank divergence down the whole receipt chain as "tied".
+-- bank_uncleared entries stay IN gl' and IN capacity' -- they are pre-cutover instruments that
+-- WILL match future lines -- and bank_uncleared_opening_cents is retained as a DIAGNOSTIC in
+-- the terms and in the refusal detail, never as a term of the tie.
 --
 -- SUPERSEDED OPENING ITEMS NEED NO SPECIAL CASE, and that is a substrate fact, not an
 -- assumption: 0017's correction ceremony approves a REVERSAL MIRROR of the superseded item's
@@ -1028,6 +1080,31 @@ begin
     where ba.client_id = v_client and ba.firm_id = v_firm and ba.coa_account_code = v_coa;
 
   -- ---------------------------------------------------------------
+  -- THE LIVE GROUP SET, AS OF THE CUTOFF. Defined ONCE and reused by every term below, so
+  -- "live" cannot mean two different things in two different queries.
+  --   * created at or before the cutoff, and
+  --   * already flipped to live at or before the cutoff (completed_at, falling back to
+  --     created_at for the groups match_bank_line stamps at birth), and
+  --   * still live now, OR unmatched only AFTER the cutoff -- a group that was live when the
+  --     receipt was written stays in that receipt's derivation forever.
+  -- A group PENDING at the cutoff is excluded outright: it holds no entry member by
+  -- construction (0038's group-tie belt, pending arm), and its line lies in a period the
+  -- completion refuses under recon_line_reserved.
+  --
+  -- 0040 FIX WAVE A8/CX5: this block MOVED UP from below the enumerations. The bank_uncleared
+  -- opening lineage's `consumed` flag must be derived through THIS cutoff-live set, not through
+  -- present-day membership, so it has to exist before the first consumer.
+  -- ---------------------------------------------------------------
+  select coalesce(array_agg(bm.id), '{}'::uuid[]) into v_live_matches
+    from clara.bank_matches bm
+    where bm.bank_account_id = any(v_accounts)
+      and bm.created_at <= p_cutoff
+      and coalesce(bm.completed_at, bm.created_at) <= p_cutoff
+      and (bm.status = 'live'
+           or (bm.status = 'unmatched' and bm.completed_at is not null
+               and bm.unmatched_at > p_cutoff));
+
+  -- ---------------------------------------------------------------
   -- THE OPENING ANCHOR. The account's FIRST live statement is the takeover boundary.
   -- ---------------------------------------------------------------
   select bs.id, bs.opening_cents into v_first_id, v_first_opening
@@ -1047,6 +1124,10 @@ begin
     where oi.client_id = v_client and oi.firm_id = v_firm
       and oi.item_kind = 'gl_balance' and oi.state = 'active'
       and je.status = 'approved' and je.approved_at is not null and je.approved_at <= p_cutoff
+      -- 0040 FIX WAVE B2 [M10]: the anchor set is subtracted OUT of gl(P), and gl(P) itself is
+      -- posting-date-gated -- so an anchor entry posting AFTER this period end is not in gl and
+      -- must not be subtracted from it, or gl' is understated by the whole carry-down.
+      and je.posting_date <= s.period_end
       and exists (select 1 from clara.journal_lines jl
                   where jl.entry_id = oi.entry_id and jl.account_code = v_coa);
 
@@ -1069,38 +1150,25 @@ begin
              coalesce((select sum(jl.debit_cents - jl.credit_cents)
                        from clara.journal_lines jl
                        where jl.entry_id = oi.entry_id and jl.account_code = v_coa), 0)::bigint as amt,
+             -- 0040 FIX WAVE A8/CX5: CONSUMED-LINEAGE THROUGH THE CUTOFF-LIVE MATCH SET, not
+             -- through present-day membership. Reading group_status in ('pending','live') NOW
+             -- made this flag a live-world fact inside a bitemporal receipt: an item cleared
+             -- (or a group unmatched) six months after certification silently rewrote what the
+             -- receipt said had cleared. v_live_matches is the same as-of set every other term
+             -- uses, and a PENDING group is deliberately not consumption at all.
              exists (select 1 from clara.bank_match_entry_members em
                      where em.entry_id = oi.entry_id
-                       and em.group_status in ('pending','live')) as consumed
+                       and em.match_id = any(v_live_matches)) as consumed
       from clara.opening_items oi
       join clara.journal_entries je on je.id = oi.entry_id
       where oi.client_id = v_client and oi.firm_id = v_firm
         and oi.item_kind = 'bank_uncleared' and oi.state = 'active'
         and je.status = 'approved' and je.approved_at is not null and je.approved_at <= p_cutoff
+        -- 0040 FIX WAVE B2 [M10]: same posting-date gate as the anchor set above.
+        and je.posting_date <= s.period_end
         and exists (select 1 from clara.journal_lines jl
                     where jl.entry_id = oi.entry_id and jl.account_code = v_coa)
     ) t;
-
-  -- ---------------------------------------------------------------
-  -- THE LIVE GROUP SET, AS OF THE CUTOFF. Defined ONCE and reused by every term below, so
-  -- "live" cannot mean two different things in two different queries.
-  --   * created at or before the cutoff, and
-  --   * already flipped to live at or before the cutoff (completed_at, falling back to
-  --     created_at for the groups match_bank_line stamps at birth), and
-  --   * still live now, OR unmatched only AFTER the cutoff -- a group that was live when the
-  --     receipt was written stays in that receipt's derivation forever.
-  -- A group PENDING at the cutoff is excluded outright: it holds no entry member by
-  -- construction (0038's group-tie belt, pending arm), and its line lies in a period the
-  -- completion refuses under recon_line_reserved.
-  -- ---------------------------------------------------------------
-  select coalesce(array_agg(bm.id), '{}'::uuid[]) into v_live_matches
-    from clara.bank_matches bm
-    where bm.bank_account_id = any(v_accounts)
-      and bm.created_at <= p_cutoff
-      and coalesce(bm.completed_at, bm.created_at) <= p_cutoff
-      and (bm.status = 'live'
-           or (bm.status = 'unmatched' and bm.completed_at is not null
-               and bm.unmatched_at > p_cutoff));
 
   -- ---------------------------------------------------------------
   -- gl(P) and gl'(P).
@@ -1174,11 +1242,27 @@ begin
            coalesce(c.cons_neg, 0)::bigint as cons_neg
       from ent e left join cons c on c.entry_id = e.entry_id
   ), sides as (
+    -- 0040 FIX WAVE C2 [M8]: net_zero_consumed marks a GROSS two-sided entry whose two residual
+    -- sides cancel exactly AND which a live group has actually consumed -- e.g. dr 1000 / cr 400
+    -- on c, fully matched by a +600 line (cons_pos = 600), leaving debit +400 and credit -400.
+    -- Both sides are non-zero, both would be enumerated, both would eventually cross the 60-day
+    -- floor and demand their own p_ack_outstanding id -- for an entry that is finished. That is
+    -- the "the list must converge, not grow" defect the reversal-pair filter already answers for
+    -- the other gross idiom; this is the same filter extended to the consumed-pair idiom. The
+    -- SUM is untouched (the pair contributes exactly zero to capacity'), so the belt's
+    -- enumeration-sums-to-the-term assert still holds. An entry with NO live consumption is
+    -- deliberately NOT filtered: an unconsumed wash entry is a real outstanding item to look at.
     select j.entry_id, j.posting_date, 'debit'::text as side,
-           (j.dr - j.cons_pos)::bigint as cents from joined j
+           (j.dr - j.cons_pos)::bigint as cents,
+           (((j.dr - j.cons_pos) - (j.cr - j.cons_neg)) = 0
+            and (j.cons_pos + j.cons_neg) > 0) as net_zero_consumed
+      from joined j
     union all
     select j.entry_id, j.posting_date, 'credit'::text,
-           (-(j.cr - j.cons_neg))::bigint from joined j
+           (-(j.cr - j.cons_neg))::bigint,
+           (((j.dr - j.cons_pos) - (j.cr - j.cons_neg)) = 0
+            and (j.cons_pos + j.cons_neg) > 0)
+      from joined j
   )
   select coalesce(sum(x.cents), 0)::bigint,
          coalesce(jsonb_agg(jsonb_build_object(
@@ -1186,7 +1270,8 @@ begin
              'age_days', (s.period_end - x.posting_date),
              'side', x.side, 'cents', x.cents)
            order by x.posting_date, x.entry_id, x.side)
-           filter (where x.cents <> 0 and not (x.entry_id = any(v_rev_excluded))), '[]'::jsonb)
+           filter (where x.cents <> 0 and not x.net_zero_consumed
+                     and not (x.entry_id = any(v_rev_excluded))), '[]'::jsonb)
     into v_cap_prime, v_entry_sides
     from sides x;
 
@@ -1245,9 +1330,18 @@ begin
     from g;
 
   -- THE OUTSTANDING LINE-SIDE MEMBERS (design section 3's snapshot spec, named separately):
-  -- a line already printed by P.end that is matched only to entries posting after it. This is
+  -- a line already printed by P.end that is matched ONLY to entries posting after it. This is
   -- C-b's acknowledged posting_date_exception seen from the receipt (0038:812-816) -- an
   -- honest timing item enumerated by name, never a refusal [ladder row 4].
+  --
+  -- 0040 FIX WAVE A8/CX5: the predicate is "NO entry member of this group posts (and is visible)
+  -- at or before P.end", NOT the old "SOME entry member posts after P.end". The old reading
+  -- emitted a FULL line side for a MIXED group: a +1,000 April line matched to a +600 April
+  -- entry and a +400 May entry is not "matched only later" at all -- its true residual is -400
+  -- and it already appears, correctly, as an outstanding_group_items row. Emitting the whole
+  -- +1,000 alongside it described a world that did not exist. Mixed groups now appear ONLY as
+  -- their group-item residual. The entry visibility gate mirrors the uncleared CTE's ent_in
+  -- exactly, so "posts by P.end" means the same thing in both places.
   select coalesce(jsonb_agg(jsonb_build_object(
              'line_id', l.id, 'statement_id', l.statement_id, 'match_id', lm.match_id,
              'entry_date', l.entry_date, 'age_days', (s.period_end - l.entry_date),
@@ -1259,9 +1353,12 @@ begin
     join clara.bank_statements st on st.id = l.statement_id
     where lm.match_id = any(v_live_matches)
       and st.status = 'live' and st.period_end <= s.period_end
-      and exists (select 1 from clara.bank_match_entry_members em
-                  join clara.journal_entries je on je.id = em.entry_id
-                  where em.match_id = lm.match_id and je.posting_date > s.period_end);
+      and not exists (select 1 from clara.bank_match_entry_members em
+                      join clara.journal_entries je on je.id = em.entry_id
+                      where em.match_id = lm.match_id
+                        and je.status = 'approved' and je.approved_at is not null
+                        and je.approved_at <= p_cutoff
+                        and je.posting_date <= s.period_end);
 
   -- ---------------------------------------------------------------
   -- excepted(P). ALL-TIME, PER LINE. "open, OR resolved with the line still unmatched" is the
@@ -1275,11 +1372,33 @@ begin
   -- most recent resolved one), so the line is counted once and described once. unique(line_id)
   -- where status='open' guarantees at most one open row; several historical resolved rows on
   -- one line are legal, and summing per exception row rather than per line would double count.
+  --
+  -- 0040 FIX WAVE A3 [R2c]: THE LATERAL IS CUTOFF-GATED. This was the ONE term with no
+  -- bitemporal gate at all, which made the ratified receipt law ("verification recomputes under
+  -- the cutoff and reproduces the receipt byte-exactly forever") already false: an April line
+  -- excepted for -RM4,104.00, certified, then resolved matched_booking and booked in June, would
+  -- re-derive to excepted_cents = 0 under April's own completed_at. Status and disposition are
+  -- now read AS-OF -- "open" means resolved_at is null OR resolved_at > cutoff -- mirroring the
+  -- bm.unmatched_at idiom the live-match set already uses, and a row CREATED after the cutoff is
+  -- not in the receipt's world at all.
+  --
+  -- 0040 FIX WAVE A1 [R1=M4]: THE PREDICATE IS NARROWED to "open, or bank_corrective_line with
+  -- the line still unmatched". The old "open OR (any disposition AND unmatched)" arm let a
+  -- BOOKKEEPER re-arm owner-floor excepted money with no owner act: except a -RM80,000 line,
+  -- resolve it matched_booking against a real booking (correct, the line leaves this term and
+  -- enters the matched-line total in the same instant), then unmatch the group while the period
+  -- is still open -- the line falls back into excepted(P) under a disposition that reads
+  -- "matched booking" on the receipt. bank_corrective_line is the ONLY disposition the design
+  -- says lawfully leaves a line unmatched; a stale matched_booking / written_off_adjustment line
+  -- now falls to the honest recon_line_unsettled refusal instead.
   select coalesce(sum(l.amount_cents), 0)::bigint,
          coalesce(jsonb_agg(jsonb_build_object(
              'exception_id', gx.id, 'line_id', l.id, 'statement_id', l.statement_id,
              'kind', gx.kind, 'status', gx.status,
              'resolution_disposition', gx.resolution_disposition,
+             -- 0040 FIX WAVE A2: the pair is enumerated as a CLOSED UNIT -- a later reader can
+             -- re-check that the two legs name each other and net to zero without re-deriving.
+             'counterpart_line_id', gx.counterpart_line_id,
              'entry_date', l.entry_date,
              'age_days', (s.period_end - l.entry_date),
              'amount_cents', l.amount_cents)
@@ -1288,17 +1407,28 @@ begin
     from clara.bank_statement_lines l
     join clara.bank_statements st on st.id = l.statement_id
     join lateral (
-      select x.id, x.kind, x.status, x.resolution_disposition
+      select x.id, x.kind,
+             case when x.resolved_at is null or x.resolved_at > p_cutoff
+                  then 'open' else 'resolved' end as status,
+             case when x.resolved_at is null or x.resolved_at > p_cutoff
+                  then null else x.resolution_disposition end as resolution_disposition,
+             case when x.resolved_at is null or x.resolved_at > p_cutoff
+                  then null else x.counterpart_line_id end as counterpart_line_id
         from clara.bank_line_exceptions x
        where x.line_id = l.id
-       order by (x.status = 'open') desc, x.created_at desc, x.id desc
+         and x.created_at <= p_cutoff
+       order by (case when x.resolved_at is null or x.resolved_at > p_cutoff
+                      then 1 else 0 end) desc,
+                x.created_at desc, x.id desc
        limit 1
     ) gx on true
     where st.bank_account_id = any(v_accounts)
       and st.status = 'live' and st.period_end <= s.period_end
       and (gx.status = 'open'
-           or not exists (select 1 from clara.bank_match_line_members lm
-                          where lm.line_id = l.id and lm.match_id = any(v_live_matches)));
+           or (gx.resolution_disposition = 'bank_corrective_line'
+               and not exists (select 1 from clara.bank_match_line_members lm
+                               where lm.line_id = l.id
+                                 and lm.match_id = any(v_live_matches))));
 
   -- THE MATCHED-LINE TOTAL. Not a term of the identity -- an INDEPENDENT witness of it. The
   -- identity is algebraically equal to
@@ -1347,7 +1477,10 @@ begin
     'opening_anchor_cents',      v_opening_anchor,
     'anchor_amount_cents',       v_anchor_amount,
     'bank_uncleared_opening_cents', v_uncleared_opening,
-    'opening_tie_delta_cents',   (v_anchor_amount - v_uncleared_opening - v_opening_anchor),
+    -- 0040 FIX WAVE B1 [M1]: ONE subtraction. See the header's worked proof -- the uncleared
+    -- instruments are already inside the carry-down, so subtracting them again refused every
+    -- correctly-seeded takeover account.
+    'opening_tie_delta_cents',   (v_anchor_amount - v_opening_anchor),
     'gl_cents',                  v_gl,
     'gl_prime_cents',            v_gl_prime,
     'uncleared_cents',           v_uncleared,
@@ -1593,11 +1726,21 @@ begin
 
   -- ---------------------------------------------------------------
   -- THE PRECONDITION, THE ONE PERIOD-SCOPED TEST (WCC-R2, strict completion). Every line of S
-  -- is a member of a LIVE group, or carries an exception row. A line under a RESOLVED
-  -- exception counts: bank_corrective_line deliberately leaves both legs resolved-and-unmatched
-  -- and they ride excepted(P) netting to zero, so demanding an OPEN exception here would make
-  -- the ratified resolution unreachable [ladder row 2, the disposition hole].
+  -- is a member of a LIVE group, or carries an exception that genuinely settles it. A line under
+  -- a RESOLVED exception counts ONLY when the resolution is bank_corrective_line: that
+  -- disposition deliberately leaves both legs resolved-and-unmatched and they ride excepted(P)
+  -- netting to zero, so demanding an OPEN exception here would make the ratified resolution
+  -- unreachable [ladder row 2, the disposition hole].
   -- A PENDING reservation refuses UNDER ITS OWN NAME with its own remedy [ladder row 11].
+  --
+  -- 0040 FIX WAVE A1 [R1=M4]: the exception arm was "ANY exception row, open or resolved, ANY
+  -- disposition", which is strictly wider than the term that pays for it. A line resolved
+  -- matched_booking and then UNMATCHED (lawful while the period is open) stayed "settled" here
+  -- while excepted(P) had stopped counting it -- so RM80,000 of real bank movement could leave
+  -- the books and be certified as tied by a bookkeeper-floor verb with no owner act anywhere.
+  -- The arm now reads the GOVERNING exception row through the SAME open-wins-then-newest
+  -- ordering _bank_recon_terms' excepted(P) lateral uses, so the two readers cannot disagree
+  -- about which row governs, and admits exactly the two states that settle an unmatched line.
   -- ---------------------------------------------------------------
   select count(*)::int, coalesce(array_agg(l.id order by l.line_no), '{}'::uuid[])
     into v_n, v_ids
@@ -1620,9 +1763,14 @@ begin
       and not exists (select 1 from clara.bank_match_line_members lm
                        join clara.bank_matches bm on bm.id = lm.match_id
                       where lm.line_id = l.id and bm.status = 'live')
-      and not exists (select 1 from clara.bank_line_exceptions x where x.line_id = l.id);
+      and not coalesce((select (gx.status = 'open'
+                                or gx.resolution_disposition = 'bank_corrective_line')
+                          from clara.bank_line_exceptions gx
+                         where gx.line_id = l.id
+                         order by (gx.status = 'open') desc, gx.created_at desc, gx.id desc
+                         limit 1), false);
   if v_n > 0 then
-    raise exception '% line(s) of this statement are neither matched into the books nor under an exception', v_n
+    raise exception '% line(s) of this statement are neither matched into the books nor under an exception that settles them', v_n
       using errcode='CLR10',
         detail=jsonb_build_object('reason','recon_line_unsettled','statement_id',p_statement,
           'line_count',v_n,'line_ids',to_jsonb(v_ids))::text;
@@ -1677,21 +1825,28 @@ begin
 
   -- ---------------------------------------------------------------
   -- recon_opening_mismatch, BOTH ARMS.
-  --   (a) THE TAKEOVER TIE (design section 3): anchor_amount - SUM(bank_uncleared movement on c)
-  --       must equal the FIRST live statement's opening. Asserted unconditionally, because for
-  --       a zero-opening account it reads 0 - 0 = 0 and costs nothing -- and because a client
-  --       that seeded uncleared instruments on a bank COA with no matching carry-down is
-  --       exactly the silent shape this refusal exists to catch.
+  --   (a) THE TAKEOVER TIE (design section 3, as corrected by 0040 FIX WAVE B1 [M1]):
+  --       anchor_amount must equal the FIRST live statement's opening. The bank_uncleared
+  --       movement is NOT subtracted -- it is already inside the carry-down (both are approved
+  --       journal movement on the same account c), and subtracting it a second time refused
+  --       every correctly-seeded takeover account; see _bank_recon_terms' header for the worked
+  --       proof. Asserted unconditionally, because for a zero-opening account it reads 0 - 0 = 0
+  --       and costs nothing -- and because a client that seeded uncleared instruments on a bank
+  --       COA with no matching carry-down is exactly the silent shape this refusal exists to
+  --       catch. B3 (the deploy checklist's pre-ceremony probe) measures S_first.opening_cents
+  --       and the opening_items census per live account BEFORE the ceremony, because an account
+  --       whose first live statement opens nonzero with NO K opening world at all refuses here
+  --       forever, and that is the intended answer.
   --   (b) THE CHAIN ARM: down the chain the anchor rides the receipts, so this statement's
   --       printed opening must equal the prior receipt's CERTIFIED closing. A statement whose
   --       opening disagrees with the certified history is not continuous with it, whatever the
   --       ingest-time continuity check said at the time.
   -- ---------------------------------------------------------------
   if (t->>'opening_tie_delta_cents')::bigint <> 0 then
-    raise exception 'the opening anchor does not tie: carry-down % less uncleared instruments % is not the first statement opening %',
+    raise exception 'the opening anchor does not tie: the carry-down on this bank GL account is % but the first live statement opens at % (uncleared instruments seeded: %)',
         (t->>'anchor_amount_cents')::bigint,
-        (t->>'bank_uncleared_opening_cents')::bigint,
-        (t->>'opening_anchor_cents')::bigint
+        (t->>'opening_anchor_cents')::bigint,
+        (t->>'bank_uncleared_opening_cents')::bigint
       using errcode='CLR10',
         detail=jsonb_build_object('reason','recon_opening_mismatch','arm','takeover_tie',
           'statement_id',p_statement,
@@ -1774,14 +1929,19 @@ begin
   -- a stored draft, so there is no dead state to reconcile and no superseded_by to leave
   -- writerless [ladder row 19].
   --
-  -- opening_cents carries the STATEMENT's printed opening (design 4.1's literal wording), and
-  -- gl_balance_cents carries gl'(P) -- the ALL-TIME, anchor-excluded GL balance at P.end. The
-  -- belt below asserts the stored-terms identity in the FIRST-PERIOD form when there is no
-  -- prior, and in the DIFFERENCED form down the chain; because the chain arm also asserts
-  -- opening = prior closing, the differenced form telescopes back to
-  -- opening_anchor + gl' - outstanding + excepted at the head, which is section 3's identity
-  -- exactly. Both readings of design 4.1/5 are therefore satisfied at once, and no sixth money
-  -- column is needed.
+  -- opening_cents carries the STATEMENT's printed opening (design 4.1's literal wording),
+  -- opening_anchor_cents carries the section-3 OPENING ANCHOR, and gl_balance_cents carries
+  -- gl'(P) -- the ALL-TIME, anchor-excluded GL balance at P.end.
+  --
+  -- 0040 FIX WAVE C1 [M6+M7]: the belt below asserts section 3's DIRECT form on the stored row
+  -- of EVERY period -- opening_anchor + gl' - outstanding + excepted = closing -- and KEEPS the
+  -- chain assert opening_cents = prior.closing_cents. The DIFFERENCED arm it used to run down
+  -- the chain was algebraically sound but meant a mid-chain receipt did not verify ALONE: its
+  -- opening_cents was the statement's printed opening while its other three terms were all-time,
+  -- so a reviewer checking one receipt's own five numbers saw a break that was not a break (a
+  -- May receipt reading opening 0 / gl' -30,000 / outstanding 0 / excepted 0 / closing 30,000
+  -- looks like a RM60,000 error and is not). Storing the anchor costs one bigint and makes the
+  -- receipt self-closing, which is what a receipt is for.
   -- ---------------------------------------------------------------
   v_snapshot := (t->'snapshot') || jsonb_build_object('acknowledged_outstanding', to_jsonb(v_ack));
   v_recon := gen_random_uuid();
@@ -1789,11 +1949,13 @@ begin
     insert into clara.bank_reconciliations(
         id, firm_id, client_id, bank_account_id, statement_id, coa_account_code,
         prior_statement_id, prior_reconciliation_id, period_start, period_end, status,
-        opening_cents, gl_balance_cents, closing_cents, outstanding_cents, excepted_cents,
+        opening_cents, opening_anchor_cents, gl_balance_cents, closing_cents,
+        outstanding_cents, excepted_cents,
         completed_by, completed_at, snapshot)
       values (v_recon, c.firm, v_client, s.bank_account_id, p_statement, v_coa,
         v_prior_stmt, v_prior_recon, s.period_start, s.period_end, 'complete',
         s.opening_cents,
+        (t->>'opening_anchor_cents')::bigint,
         (t->>'gl_prime_cents')::bigint,
         s.closing_cents,
         (t->>'outstanding_cents')::bigint,
@@ -1962,20 +2124,24 @@ end $$;
 -- against itself and against the immutable receipt before it, never against a book that has
 -- moved on.
 --
--- THE IDENTITY, IN TWO ARMS, and they are the same law:
---   first period (no prior receipt):
---     opening_cents + gl_balance_cents - outstanding_cents + excepted_cents = closing_cents
---     -- with opening_cents = the statement's printed opening = the section-3 opening anchor,
---        because a first statement's opening IS the anchor.
---   down the chain:
---     opening_cents + (gl' - prior.gl') - (outstanding - prior.outstanding)
---                   + (excepted - prior.excepted) = closing_cents
---     -- section 3's all-time identity, DIFFERENCED against the prior receipt. Combined with
---        the chain assert opening_cents = prior.closing_cents, it telescopes back to the head,
---        so the whole chain is anchored to opening_anchor + gl' - outstanding + excepted.
---        Mixed cutoffs are safe: a back-dated approval that lands between two completions
---        moves gl' and outstanding by the SAME amount when the entry is unmatched, and the
---        settled-period law makes matching it into an already-reconciled period unreachable.
+-- THE IDENTITY, ONE ARM, EVERY PERIOD [0040 FIX WAVE C1 / M6+M7]:
+--     opening_anchor_cents + gl_balance_cents - outstanding_cents + excepted_cents
+--       = closing_cents
+-- -- section 3's identity, stated DIRECTLY on the stored row, with the chain assert
+--    opening_cents = prior.closing_cents kept beside it. The DIFFERENCED chain arm this
+--    replaces was algebraically sound (it telescoped under the chain assert) but it made a
+--    mid-chain receipt unverifiable ALONE, because its opening_cents was the statement's
+--    printed opening while gl'/outstanding/excepted were all-time terms. Now the receipt closes
+--    on its own five numbers in every period, and the chain assert still binds it to its
+--    predecessor.
+--
+-- AND, AT INSERT ONLY, THE CANONICAL BINDING [0040 FIX WAVE A8/CX5]. The belt re-derives
+-- clara._bank_recon_terms(statement, completed_at) and compares the WHOLE snapshot jsonb
+-- against the stored one (minus the acknowledged_outstanding key the verb appends), instead of
+-- sampling a few sums out of it. Sum-sampling could not see a snapshot that carried the right
+-- totals over the wrong ids, dates, ages, line-side membership, opening lineage or reversal
+-- exclusions -- and the snapshot is the evidence a professional reads. The cheap sum tails
+-- below are kept as tripwires; THIS is the executable bind.
 --
 -- RE-QUERY BY ID (0009:524-529, as 0038:3220-3226 restates it): at deferred time the NEW tuple
 -- is a snapshot of the row as it was when the trigger was QUEUED.
@@ -1985,6 +2151,7 @@ create function clara._tf_bank_recon_belt() returns trigger
 declare
   r record; p record; st record; ba record; sn jsonb;
   v_lhs bigint; v_sum bigint; v_n int;
+  v_fresh jsonb; v_canon_stored jsonb; v_canon_fresh jsonb;
 begin
   select * into r from clara.bank_reconciliations br where br.id = new.id;
   if not found then return null; end if;
@@ -2079,21 +2246,19 @@ begin
     end if;
   end if;
 
-  -- (5) THE STORED-TERMS IDENTITY. Two arms, one law (see the header).
-  if r.prior_reconciliation_id is null then
-    v_lhs := r.opening_cents + r.gl_balance_cents - r.outstanding_cents + r.excepted_cents;
-  else
-    v_lhs := r.opening_cents
-             + (r.gl_balance_cents  - p.gl_balance_cents)
-             - (r.outstanding_cents - p.outstanding_cents)
-             + (r.excepted_cents    - p.excepted_cents);
-  end if;
+  -- (5) THE STORED-TERMS IDENTITY, IN SECTION 3'S DIRECT FORM, EVERY PERIOD [0040 FIX WAVE C1].
+  -- One arm, one law: the receipt closes on its OWN stored terms whether or not a reader holds
+  -- the receipt before it. The chain assert at (4) above still binds opening_cents to the prior
+  -- certified closing, so the two laws together say everything the differenced arm said and one
+  -- thing it could not.
+  v_lhs := r.opening_anchor_cents + r.gl_balance_cents - r.outstanding_cents + r.excepted_cents;
   if v_lhs <> r.closing_cents then
     raise exception 'reconciliation % does not close: % against a certified closing of %', r.id, v_lhs, r.closing_cents
       using errcode='CLR10',
         detail=jsonb_build_object('reason','recon_identity_broken','reconciliation_id',r.id,
           'computed_cents',v_lhs,'closing_cents',r.closing_cents,
-          'opening_cents',r.opening_cents,'gl_balance_cents',r.gl_balance_cents,
+          'opening_cents',r.opening_cents,'opening_anchor_cents',r.opening_anchor_cents,
+          'gl_balance_cents',r.gl_balance_cents,
           'outstanding_cents',r.outstanding_cents,'excepted_cents',r.excepted_cents)::text;
   end if;
 
@@ -2104,7 +2269,9 @@ begin
      or (sn#>>'{terms,outstanding_cents}')::bigint is distinct from r.outstanding_cents
      or (sn#>>'{terms,excepted_cents}')::bigint   is distinct from r.excepted_cents
      or (sn->>'statement_closing_cents')::bigint  is distinct from r.closing_cents
-     or (sn->>'statement_opening_cents')::bigint  is distinct from r.opening_cents then
+     or (sn->>'statement_opening_cents')::bigint  is distinct from r.opening_cents
+     -- 0040 FIX WAVE C1: the sixth money column binds to the snapshot like the other five.
+     or (sn->>'opening_anchor_cents')::bigint     is distinct from r.opening_anchor_cents then
     raise exception 'reconciliation %''s snapshot terms do not equal its stored terms', r.id
       using errcode='CLR10',detail='{"reason":"recon_snapshot_incoherent"}';
   end if;
@@ -2133,9 +2300,8 @@ begin
   -- identity read from the other end (see _bank_recon_terms' matched_line_cents note). It costs
   -- one subtraction and it catches a term that was mis-stored in a way the first arm cannot see
   -- -- for instance gl' and outstanding both wrong by the same amount.
-  if (sn->>'opening_anchor_cents') is not null
-     and (sn#>>'{terms,matched_line_cents}') is not null then
-    v_lhs := (sn->>'opening_anchor_cents')::bigint
+  if (sn#>>'{terms,matched_line_cents}') is not null then
+    v_lhs := r.opening_anchor_cents
              + (sn#>>'{terms,matched_line_cents}')::bigint
              + r.excepted_cents;
     if v_lhs <> r.closing_cents then
@@ -2143,6 +2309,42 @@ begin
         using errcode='CLR10',
           detail=jsonb_build_object('reason','recon_identity_broken','arm','matched_line_witness',
             'reconciliation_id',r.id,'computed_cents',v_lhs,'closing_cents',r.closing_cents)::text;
+    end if;
+  end if;
+
+  -- (7) THE CANONICAL BINDING, AT INSERT ONLY [0040 FIX WAVE A8/CX5, answering CX11]. Everything
+  -- above samples the snapshot; this BINDS it. Re-derive the whole terms object under the
+  -- receipt's OWN stored cutoff and compare the snapshot jsonb WHOLE. A snapshot that carried the
+  -- right totals over invented ids, wrong dates, wrong ages, a full line side for a mixed group,
+  -- a stale opening lineage or a mis-scoped reversal exclusion passed every sum check and would
+  -- still read to a professional as evidence; this cannot.
+  --
+  -- THE CANONICALISER is one key wide: complete_bank_reconciliation appends
+  -- acknowledged_outstanding to the derivation's snapshot (the derivation always emits '[]'),
+  -- so both sides are compared with that key stripped and nothing else is normalised away.
+  --
+  -- INSERT ONLY, for the same reason (2) is insert-only: a receipt is bitemporal truth, and the
+  -- only moment at which the live book and the certified snapshot are the same world is the
+  -- moment of certification. This runs at COMMIT of the inserting transaction, so a transaction
+  -- that certified a period and THEN moved the world underneath it refuses -- which is correct,
+  -- and is not the same-transaction book-then-reconcile order (match first, then complete) that
+  -- FIX WAVE A6 deliberately keeps lawful.
+  if tg_op = 'INSERT' then
+    v_fresh := clara._bank_recon_terms(r.statement_id, r.completed_at);
+    if v_fresh is null then
+      raise exception 'reconciliation %''s terms could not be re-derived under its own cutoff', r.id
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','recon_snapshot_incoherent','arm','canonical_binding',
+            'reconciliation_id',r.id,'statement_id',r.statement_id)::text;
+    end if;
+    v_canon_stored := sn - 'acknowledged_outstanding';
+    v_canon_fresh  := (v_fresh->'snapshot') - 'acknowledged_outstanding';
+    if v_canon_stored is distinct from v_canon_fresh then
+      raise exception 'reconciliation %''s stored snapshot is not what the derivation produces under its own cutoff', r.id
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','recon_snapshot_incoherent','arm','canonical_binding',
+            'reconciliation_id',r.id,'statement_id',r.statement_id,
+            'cutoff',r.completed_at)::text;
     end if;
   end if;
   return null;
@@ -2168,13 +2370,17 @@ create constraint trigger t_bank_reconciliations_belt
 --       pending one changes what the certified receipt certified, so it refuses -- undo is
 --       voiding the chain back, newest first, and /bank says "this will void N receipts" before
 --       the act (design sections 3/7/10).
---       ADDING a membership on a settled line is ALLOWED IFF that line carries an exception
---       row, and that is not a loophole -- it is the ratified resolved-then-booked door
---       (design 4.2). It is arithmetically neutral for every completed receipt: excepted(P)
---       counts "open OR resolved-with-the-line-unmatched", so the line's full amount simply
---       moves from excepted into the matched-line total, and every all-time term downstream is
---       unchanged. Any OTHER add is unreachable on a healthy book (completion required every
---       line to be matched or excepted) and is refused here so it stays unreachable.
+--       ADDING a membership on a settled line is ALLOWED IFF that line carries a RESOLVED
+--       exception whose disposition is matched_booking or written_off_adjustment [0040 FIX WAVE
+--       A4], and that is not a loophole -- it is the ratified resolved-then-booked door
+--       (design 4.2), and nothing wider. It is arithmetically neutral for every completed
+--       receipt: excepted(P) counts "open OR bank_corrective_line-with-the-line-unmatched", so a
+--       booking-linked line's full amount simply moves from excepted into the matched-line total,
+--       and every all-time term downstream is unchanged. Any OTHER add is unreachable on a
+--       healthy book (completion required every line to be matched or settled-by-exception) and
+--       is refused here so it stays unreachable.
+--       THE SETTLED SET is account-scoped and all-time, byte-identical to the two verb splices
+--       [A5], and EXCLUDES a receipt born in this transaction [A6].
 --
 --   (b) EXCEPTION WRITES CARRY THEIR VERB'S MARKS. The exception door sits at the OWNER floor
 --       (WCC-R2 as the ladder made it structural, row 36): a bookkeeper may not acknowledge
@@ -2194,7 +2400,13 @@ create constraint trigger t_bank_reconciliations_belt
 create function clara._tf_bank_settled_authority_belt() returns trigger
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
-  m record; x record; ln record; st record;
+  -- 0040 FIX WAVE A5: the statement record is v_st, NOT st. The settled predicate this belt now
+  -- shares byte-for-byte with unmatch_bank_match / complete_pending_match uses the SQL alias
+  -- `st`, and plpgsql resolves a qualified identifier against its DECLARED VARIABLES FIRST --
+  -- the sql_variable_conflict trap 0038:3185-3188 names and this file already sidesteps once
+  -- (the `q` alias in complete_bank_reconciliation). Renaming the variable is what lets the
+  -- predicate stay identical to the verbs' instead of drifting by one alias.
+  m record; x record; ln record; v_st record;
   v_n int; v_ids uuid[]; v_rank int;
 begin
   -- ---------------------------------------------------------------
@@ -2203,15 +2415,39 @@ begin
   if tg_table_name = 'bank_match_line_members' then
     select * into m from clara.bank_match_line_members mm where mm.id = new.id;
     if not found then return null; end if;
+    -- 0040 FIX WAVE A5 [R5]: THE SETTLED SET IS ACCOUNT-SCOPED AND ALL-TIME, byte-identical to
+    -- the predicate the two verb splices use (unmatch_bank_match / complete_pending_match). The
+    -- old "a complete recon of the LINE'S OWN statement" scope made the structural backstop
+    -- strictly WEAKER than the door it backs -- a line whose own month carried no receipt but
+    -- which is priced into a LATER complete receipt on the same account was waved through here
+    -- while the verb refused it. TAIL 2 pins the three predicates identical.
+    --
+    -- 0040 FIX WAVE A6 [R4/CX4]: a receipt born in THIS transaction is not a settled period. The
+    -- belt is deferred and re-queries at COMMIT, so `match_bank_line(last line);
+    -- complete_bank_reconciliation(stmt)` in one transaction saw its own receipt and refused the
+    -- line it had just matched -- forbidding exactly the same-transaction book-then-reconcile act
+    -- complete_bank_reconciliation's own cutoff note says it supports. completed_at IS
+    -- transaction_timestamp() for the in-txn row, so the test is exact rather than a heuristic.
     select count(*)::int into v_n
       from clara.bank_statement_lines l
-      join clara.bank_reconciliations br on br.statement_id = l.statement_id
-                                        and br.status = 'complete'
-      where l.id = m.line_id;
+      join clara.bank_statements st on st.id = l.statement_id
+      join clara.bank_reconciliations br
+        on br.bank_account_id = st.bank_account_id
+       and br.status = 'complete'
+       and br.period_end >= st.period_end
+      where l.id = m.line_id
+        and br.completed_at < transaction_timestamp();
     if v_n = 0 then return null; end if;
     if tg_op = 'INSERT' then
-      -- The resolved-then-booked door, and only that door.
-      if not exists (select 1 from clara.bank_line_exceptions ex where ex.line_id = m.line_id) then
+      -- 0040 FIX WAVE A4 [A14]: THE RESOLVED-THEN-BOOKED DOOR, AND ONLY THAT DOOR. The arm used
+      -- to admit ANY exception row ever -- open, or resolved as bank_corrective_line -- so the
+      -- only thing keeping an OPEN-excepted line out of a new match on a settled period was the
+      -- verb-side line_excepted re-check, which is precisely the verb-guards-the-belt layering
+      -- the ladder rejected. The ratified door is the resolved-then-booked case and nothing else.
+      if not exists (select 1 from clara.bank_line_exceptions ex
+                      where ex.line_id = m.line_id
+                        and ex.status = 'resolved'
+                        and ex.resolution_disposition in ('matched_booking','written_off_adjustment')) then
         raise exception 'statement line % lies in a reconciled period; a new match on it would change what that receipt certified', m.line_id
           using errcode='CLR10',
             detail=jsonb_build_object('reason','recon_period_settled','line_id',m.line_id,
@@ -2230,17 +2466,27 @@ begin
     if not found then return null; end if;
     -- The law is about the group's LINES: an entry member changes the tie of a group whose
     -- lines may sit in a settled period, which is the same breach seen from the other side.
+    -- 0040 FIX WAVE A5 + A6: the same account-scoped all-time predicate, and the same
+    -- same-transaction exclusion, as the line-member arm above.
     select count(*)::int, coalesce(array_agg(distinct l.id), '{}'::uuid[]) into v_n, v_ids
       from clara.bank_match_line_members lm
       join clara.bank_statement_lines l on l.id = lm.line_id
-      join clara.bank_reconciliations br on br.statement_id = l.statement_id
-                                        and br.status = 'complete'
-      where lm.match_id = m.match_id;
+      join clara.bank_statements st on st.id = l.statement_id
+      join clara.bank_reconciliations br
+        on br.bank_account_id = st.bank_account_id
+       and br.status = 'complete'
+       and br.period_end >= st.period_end
+      where lm.match_id = m.match_id
+        and br.completed_at < transaction_timestamp();
     if v_n = 0 then return null; end if;
     if tg_op = 'INSERT' then
+      -- 0040 FIX WAVE A4: the resolved-then-booked door, and only that door.
       select count(*)::int into v_n
         from unnest(v_ids) as u(line_id)
-        where not exists (select 1 from clara.bank_line_exceptions ex where ex.line_id = u.line_id);
+        where not exists (select 1 from clara.bank_line_exceptions ex
+                           where ex.line_id = u.line_id
+                             and ex.status = 'resolved'
+                             and ex.resolution_disposition in ('matched_booking','written_off_adjustment'));
       if v_n > 0 then
         raise exception 'bank match % holds % statement line(s) in a reconciled period; a new entry member would change what that receipt certified', m.match_id, v_n
           using errcode='CLR10',
@@ -2280,9 +2526,9 @@ begin
   end if;
 
   -- (c) an OPEN exception's statement is live.
-  select * into st from clara.bank_statements bs where bs.id = x.statement_id;
-  if x.status = 'open' and (not found or st.status <> 'live') then
-    raise exception 'bank line exception % is open against a % statement; an open dispute needs a statement that still stands', x.id, coalesce(st.status,'missing')
+  select * into v_st from clara.bank_statements bs where bs.id = x.statement_id;
+  if x.status = 'open' and (not found or v_st.status <> 'live') then
+    raise exception 'bank line exception % is open against a % statement; an open dispute needs a statement that still stands', x.id, coalesce(v_st.status,'missing')
       using errcode='CLR10',
         detail=jsonb_build_object('reason','exception_statement_not_live','exception_id',x.id,
           'statement_id',x.statement_id)::text;
@@ -2995,17 +3241,41 @@ revoke all on function clara.except_bank_line(uuid, text, text, uuid, text) from
 -- resolve_bank_line_exception: disposition-linked resolution (design SS4.2, ladder round-2
 -- "no disposition may leave a term-less hole"). matched_booking / written_off_adjustment
 -- both require the line to be a LIVE matched member NOW (else disposition_unbooked);
--- bank_corrective_line requires a named, already-excepted counterpart line (else
--- counterpart_required / counterpart_not_excepted -- the EXACT operative rule this lane was
--- given: "unless that line carries an open-or-resolved exception in the SAME txn scope",
--- i.e. re-read fresh under this transaction's locks, not "created inside this call").
+-- bank_corrective_line requires a named counterpart line that genuinely CLOSES the pair.
+--
+-- 0040 FIX WAVE A2 + CX2 [R3+M3+A15]: bank_corrective_line IS NOW STRUCTURAL. It used to check
+-- one thing only -- that the named line carried SOME exception row -- with no amount comparison,
+-- no sign comparison, no bank-account scoping, no reciprocity, no uniqueness, and no persisted
+-- link at all (the counterpart lived in an audit payload, so the receipt's own snapshot could
+-- not enumerate the pair and no later verification was possible). Two owner clicks could
+-- therefore park an arbitrary unbooked amount inside excepted(P) and still certify
+-- difference_cents = 0: except a -RM120,000.00 payroll run and a -RM50.00 double-charged fee,
+-- resolve each naming the other, and RM119,950.00 of unexplained bank movement rides the
+-- certified plug under a disposition that reads "closed, netted pair" to any professional.
+-- Three-way chains (A->B, C->B) were equally legal, and so were cross-account "pairs".
+--
+-- WHAT IT ASSERTS NOW, all under the two-line FOR UPDATE this verb already takes:
+--   * SAME BANK ACCOUNT   -- and structurally, through the counterpart FK's 4-key congruence.
+--   * EXACTLY OFFSETTING  -- the two lines' amount_cents sum to precisely zero
+--                            (`corrective_pair_unbalanced`).
+--   * RECIPROCAL          -- the counterpart's governing exception is either OPEN (in which case
+--                            CX2 resolves BOTH in this one call, so reciprocity holds BY
+--                            CONSTRUCTION rather than by trusting a second call to arrive), or is
+--                            already bank_corrective_line naming THIS line back and its line is
+--                            still unmatched (`counterpart_not_reciprocal`).
+--   * USED ONCE           -- uq_ble_counterpart_in_use; a second claim on the same counterpart is
+--                            translated back into `counterpart_not_reciprocal` rather than a raw
+--                            23505.
+-- `counterpart_required` (no line named) and `counterpart_not_excepted` (the named line is not
+-- this client's, or carries no exception at all) survive unchanged.
 create function clara.resolve_bank_line_exception(
     p_exception uuid, p_disposition text, p_note text,
     p_counterpart_line uuid default null, p_op_key text default null) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
   c record; v_dedupe jsonb; v_note text; ex record; ln record;
-  v_live int; v_cp_exists int; v_cp_exc int;
+  v_live int;
+  tl record; cp record; cpx record; v_cp_exception uuid; v_cp_note text;
 begin
   c := clara._human_ctx(clara.role_rank('owner'));
   if p_op_key is null or btrim(p_op_key) = '' then
@@ -3094,29 +3364,107 @@ begin
     end if;
   end if;
 
+  -- THE CORRECTIVE PAIR, ASSERTED UNDER THE TWO-LINE LOCK [0040 FIX WAVE A2 + CX2].
   if p_disposition = 'bank_corrective_line' then
-    select count(*)::int into v_cp_exists from clara.bank_statement_lines l
+    -- This line, re-read UNDER the lock: the authority statement is made where the lock is held.
+    select l.id, l.bank_account_id, l.amount_cents, l.statement_id into tl
+      from clara.bank_statement_lines l where l.id = ex.line_id;
+
+    select l.id, l.bank_account_id, l.amount_cents, l.statement_id into cp
+      from clara.bank_statement_lines l
       where l.id = p_counterpart_line and l.firm_id = c.firm and l.client_id = ex.client_id;
-    if v_cp_exists = 0 then
+    if not found then
       raise exception 'counterpart line not found for this client'
         using errcode='CLR10',detail='{"reason":"counterpart_not_excepted"}';
     end if;
-    select count(*)::int into v_cp_exc from clara.bank_line_exceptions e
-      where e.line_id = p_counterpart_line and e.status in ('open', 'resolved');
-    if v_cp_exc = 0 then
+
+    -- SAME BANK ACCOUNT. excepted(P) is account-scoped, so a cross-account "pair" puts exactly
+    -- one leg in the term and the design's "nets to zero by construction" is simply false.
+    if cp.bank_account_id is distinct from tl.bank_account_id then
+      raise exception 'counterpart line % is on a different bank account; a corrective pair closes within one account', p_counterpart_line
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','counterpart_not_offsetting','exception_id',p_exception,
+            'line_id',ex.line_id,'counterpart_line_id',p_counterpart_line)::text;
+    end if;
+
+    -- EXACTLY OFFSETTING. This is the whole arithmetic content of the ratified disposition, and
+    -- it lived nowhere before this fix.
+    if (tl.amount_cents + cp.amount_cents) <> 0 then
+      raise exception 'the corrective pair does not net to zero: % and % sum to % cents', tl.amount_cents, cp.amount_cents, (tl.amount_cents + cp.amount_cents)
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','corrective_pair_unbalanced','exception_id',p_exception,
+            'line_id',ex.line_id,'counterpart_line_id',p_counterpart_line,
+            'line_amount_cents',tl.amount_cents,'counterpart_amount_cents',cp.amount_cents,
+            'sum_cents',(tl.amount_cents + cp.amount_cents))::text;
+    end if;
+
+    -- THE COUNTERPART'S GOVERNING EXCEPTION -- the same open-wins-then-newest ordering
+    -- _bank_recon_terms uses, locked so the reciprocity decision cannot be raced.
+    select x.id, x.status, x.resolution_disposition, x.counterpart_line_id into cpx
+      from clara.bank_line_exceptions x
+      where x.line_id = p_counterpart_line
+      order by (x.status = 'open') desc, x.created_at desc, x.id desc
+      limit 1
+      for update;
+    if not found then
       raise exception 'counterpart line % carries no exception (open or resolved)', p_counterpart_line
         using errcode='CLR10',detail='{"reason":"counterpart_not_excepted"}';
     end if;
+
+    if cpx.status = 'open' then
+      -- CX2's arm: BOTH legs resolve in this one call, each naming the other. There is no window
+      -- in which one leg is closed against a counterpart that never closes back.
+      v_cp_exception := cpx.id;
+      -- NB: no '--' inside this literal. Several tail scans normalise a body by stripping
+      -- line comments before parsing it, and a '--' inside a string literal would eat the
+      -- rest of the line from the scanner's point of view.
+      v_cp_note := 'corrective pair with line ' || ex.line_id::text || ': ' || v_note;
+    elsif cpx.resolution_disposition = 'bank_corrective_line'
+          and cpx.counterpart_line_id = ex.line_id
+          and not exists (select 1 from clara.bank_match_line_members m2
+                           where m2.line_id = p_counterpart_line
+                             and m2.group_status in ('pending','live')) then
+      -- The pair already exists and already names THIS line back, and that leg is still
+      -- unmatched, so both legs genuinely ride excepted(P). Nothing further to write.
+      v_cp_exception := null;
+    else
+      raise exception 'counterpart line % does not close this pair: its governing exception is neither open nor a corrective resolution naming line % back', p_counterpart_line, ex.line_id
+        using errcode='CLR10',
+          detail=jsonb_build_object('reason','counterpart_not_reciprocal','exception_id',p_exception,
+            'line_id',ex.line_id,'counterpart_line_id',p_counterpart_line,
+            'counterpart_exception_id',cpx.id)::text;
+    end if;
   end if;
 
-  update clara.bank_line_exceptions
-    set status = 'resolved', resolved_by = c.actor, resolved_at = now(),
-        resolution_disposition = p_disposition, resolution_note = v_note
-    where id = p_exception;
+  begin
+    update clara.bank_line_exceptions
+      set status = 'resolved', resolved_by = c.actor, resolved_at = now(),
+          resolution_disposition = p_disposition, resolution_note = v_note,
+          counterpart_line_id = case when p_disposition = 'bank_corrective_line'
+                                     then p_counterpart_line else null end
+      where id = p_exception;
+
+    if v_cp_exception is not null then
+      update clara.bank_line_exceptions
+        set status = 'resolved', resolved_by = c.actor, resolved_at = now(),
+            resolution_disposition = 'bank_corrective_line', resolution_note = v_cp_note,
+            counterpart_line_id = ex.line_id
+        where id = v_cp_exception;
+    end if;
+  exception when unique_violation then
+    -- uq_ble_counterpart_in_use: this counterpart is already the named other half of a different
+    -- pair. Translated back into the named refusal so the racing path and the ordinary path look
+    -- the same to the human (the 0038:4080-4084 idiom); the index name is deliberately not cited.
+    raise exception 'counterpart line % is already the named other half of another corrective pair', p_counterpart_line
+      using errcode='CLR10',
+        detail=jsonb_build_object('reason','counterpart_not_reciprocal','exception_id',p_exception,
+          'line_id',ex.line_id,'counterpart_line_id',p_counterpart_line)::text;
+  end;
 
   perform clara._audit(c.firm, c.actor, null, null, 'resolve_bank_line_exception', null,
     jsonb_build_object('exception', p_exception, 'disposition', p_disposition,
-      'counterpart_line', p_counterpart_line, 'op_key', p_op_key));
+      'counterpart_line', p_counterpart_line,
+      'counterpart_exception', v_cp_exception, 'op_key', p_op_key));
   -- Key name 'resolution_disposition' (not the shorthand 'disposition') matches BOTH the
   -- underlying column name and S1's payload-key inference (s10-notes.md:233).
   perform clara._append_event(c.firm, 'bank.line_exception_resolved', ex.client_id, c.actor,
@@ -3125,7 +3473,10 @@ begin
       'resolution_disposition', p_disposition, 'counterpart_line_id', p_counterpart_line));
   return clara._finish_op(c.firm, 'resolve_bank_line_exception', p_op_key,
     jsonb_build_object('exception_id', p_exception, 'status', 'resolved',
-      'disposition', p_disposition));
+      'disposition', p_disposition,
+      'counterpart_line_id', p_counterpart_line,
+      -- Non-null when THIS call also closed the counterpart's open exception (CX2's arm).
+      'counterpart_exception_id', v_cp_exception));
 end $$;
 revoke all on function clara.resolve_bank_line_exception(uuid, text, text, uuid, text) from public;
 
@@ -3610,10 +3961,15 @@ end $$;
 revoke all on function clara.supplier_statement(uuid, uuid, date, date) from public;
 
 -- list_unmatched_lines: the cross-statement unmatched report (design SS6, "[V: does not
--- exist today]"). Every UNMATCHED, UNEXCEPTED line (literally both, per this lane's work
--- order -- a line that ever carried ANY exception, open or resolved, never reappears here;
--- see s30-notes.md for the rare unmatch-after-matched_booking-resolution edge case this
--- leaves open).
+-- exist today]"). Every line that is neither in a live/pending group nor SETTLED BY ITS
+-- GOVERNING EXCEPTION.
+--
+-- 0040 FIX WAVE A1/CX3: the exclusion used to be "ever carried ANY exception, open or resolved",
+-- which is exactly the s30-notes edge case now closed: a line resolved matched_booking and then
+-- unmatched was invisible in the ONLY cross-statement report a bookkeeper has, so the stale state
+-- could not even be seen, let alone repaired. The predicate is now the SAME governing-exception
+-- reading the completion precondition and excepted(P) use -- open, or bank_corrective_line -- so
+-- a stale booking-linked line REAPPEARS here as what it is: unmatched work.
 create function clara.list_unmatched_lines(p_client uuid) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare c record;
@@ -3632,91 +3988,283 @@ begin
     where l.firm_id = c.firm and l.client_id = p_client and s.status = 'live'
       and not exists (select 1 from clara.bank_match_line_members m
         where m.line_id = l.id and m.group_status in ('pending', 'live'))
-      and not exists (select 1 from clara.bank_line_exceptions e where e.line_id = l.id)
+      and not coalesce((select (e.status = 'open'
+                                or e.resolution_disposition = 'bank_corrective_line')
+                          from clara.bank_line_exceptions e
+                         where e.line_id = l.id
+                         order by (e.status = 'open') desc, e.created_at desc, e.id desc
+                         limit 1), false)
     ), '[]'::jsonb);
 end $$;
 revoke all on function clara.list_unmatched_lines(uuid) from public;
 
--- get_bank_reconciliation: the receipt + snapshot when one exists (status='complete'), else
--- the DERIVED LIVE PREVIEW via S2's clara._bank_recon_terms, labelled "preview":true (design
--- SS6). now() is the only honest cutoff for a preview -- there is no completed_at yet.
+-- get_bank_reconciliation: the receipt + snapshot when one exists, else the DERIVED LIVE
+-- PREVIEW via S2's clara._bank_recon_terms, labelled "preview":true (design SS6). now() is the
+-- only honest cutoff for a preview -- there is no completed_at yet.
+--
+-- THREE FIX-WAVE CHANGES TO THIS RPC'S CONTRACT:
+--   C1/M7 -- opening_anchor_cents, statement_opening_cents and statement_closing_cents are
+--     DISTINCT KEYS IN BOTH BRANCHES. The preview used to return the ANCHOR under the key
+--     `opening_cents` and a DERIVED closing under `closing_cents`, while the receipt branch
+--     returned the statement's PRINTED opening and closing under the same two names -- so on a
+--     second-period statement printed 52,000/50,000 over a zero-anchored account the pane showed
+--     0.00 / (not-yet-the-bank's-closing) and then SNAPPED to 52,000/50,000 the moment Complete
+--     was pressed. Two quantities under one key is how a number becomes a rumour. `opening_cents`
+--     and `closing_cents` now mean THE STATEMENT'S PRINTED FIGURES in both branches; the preview's
+--     computed closing survives under its own honest name, derived_closing_cents.
+--   C3/M9 -- recon_coa_shared IS A PREVIEW GATE TOO (labelled unavailable, never mixed books).
+--   C6/A13 -- a VOIDED receipt is readable, AS A SIDECAR (see the amendment below).
+--   D8/CX9 -- the preview emits a server-side can_complete + named blockers[].
 create function clara.get_bank_reconciliation(p_statement uuid) returns jsonb
   language plpgsql security definer set search_path = clara, pg_temp as $$
 declare
-  c record; v_stmt record; v_receipt record; v_terms jsonb;
-  v_precondition boolean; v_chain_ok boolean; v_prior uuid; v_stale jsonb;
+  c record; v_stmt record; v_receipt record; v_void record; v_terms jsonb;
+  v_precondition boolean; v_chain_ok boolean; v_prior uuid; v_prior_end date; v_stale jsonb;
+  v_blockers text[] := '{}'::text[]; v_n int; v_shared uuid[]; v_coa text;
+  v_voided jsonb := null;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   select * into v_stmt from clara.bank_statements s where s.id = p_statement and s.firm_id = c.firm;
   if not found then return null; end if;
 
+  -- 0040 FIX WAVE C6 [A13]: A VOIDED RECEIPT IS READABLE. The read used to demand
+  -- status='complete', so a voided receipt fell through to the live preview and was readable
+  -- NOWHERE -- while the pane's void banner, the card's void note and the model's
+  -- status='void' -> mode='receipt' path were all dead code. A receipt is the record of what was
+  -- certified and then withdrawn; that is the whole reason it is never deleted.
+  --
+  -- C6 AMENDMENT (owner ruling, fix wave): READABLE AS A SIDECAR, NOT AS THE BODY. The first cut
+  -- returned the newest receipt of ANY status as the body, which closed the readability hole and
+  -- opened a worse one: once a statement carried a void receipt this RPC never produced a live
+  -- preview again, so the pane could see the withdrawn certificate but could no longer drive the
+  -- RE-COMPLETION the void exists to make possible. A void is the START of corrective work, not
+  -- the end of it. So the selection law is now:
+  --   * a COMPLETE receipt exists -> it is the body, exactly as before (unchanged behaviour);
+  --   * otherwise -> the LIVE PREVIEW is the body, byte-for-byte as if no receipt had ever been
+  --     written, and the newest VOID receipt rides alongside it under 'voided_receipt'.
+  -- 'voided_receipt' is ALWAYS PRESENT on the preview branches (null when there is no void
+  -- receipt) so a caller never has to distinguish "absent key" from "no void"; it is deliberately
+  -- absent on the complete-receipt branch, which is unchanged.
   select * into v_receipt from clara.bank_reconciliations r
     where r.statement_id = p_statement and r.firm_id = c.firm and r.status = 'complete';
   if found then
     return jsonb_build_object(
-      'preview', false, 'reconciliation_id', v_receipt.id, 'statement_id', p_statement,
+      'preview', false, 'available', true,
+      'reconciliation_id', v_receipt.id, 'statement_id', p_statement,
       'bank_account_id', v_receipt.bank_account_id, 'coa_account_code', v_receipt.coa_account_code,
       'prior_statement_id', v_receipt.prior_statement_id,
       'prior_reconciliation_id', v_receipt.prior_reconciliation_id,
       'period_start', v_receipt.period_start, 'period_end', v_receipt.period_end,
       'status', v_receipt.status,
-      'opening_cents', v_receipt.opening_cents, 'gl_balance_cents', v_receipt.gl_balance_cents,
-      'closing_cents', v_receipt.closing_cents, 'outstanding_cents', v_receipt.outstanding_cents,
+      -- THE THREE OPENING/CLOSING QUANTITIES, EACH UNDER ITS OWN NAME [C1/M7].
+      'opening_cents', v_receipt.opening_cents,
+      'statement_opening_cents', v_receipt.opening_cents,
+      'opening_anchor_cents', v_receipt.opening_anchor_cents,
+      'closing_cents', v_receipt.closing_cents,
+      'statement_closing_cents', v_receipt.closing_cents,
+      'gl_balance_cents', v_receipt.gl_balance_cents,
+      'outstanding_cents', v_receipt.outstanding_cents,
       'excepted_cents', v_receipt.excepted_cents,
       'completed_by', v_receipt.completed_by, 'completed_at', v_receipt.completed_at,
+      -- Always null on this branch (ck_bank_reconciliations_void forbids a void stamp on a
+      -- complete receipt); emitted so the key set matches the 'voided_receipt' sidecar's.
+      'voided_by', v_receipt.voided_by, 'voided_at', v_receipt.voided_at,
+      'voided_reason', v_receipt.voided_reason,
       -- A COMPLETED receipt is bitemporal truth: its preconditions were true at
       -- completion, by construction (the verb refused otherwise). Reported as facts so a
       -- caller never has to branch on the preview flag to read the same gate.
       'first_period', (v_receipt.prior_statement_id is null),
       'precondition_met', true, 'chain_ok', true,
       'stale_outstanding_ids', '[]'::jsonb,
+      -- A live receipt is not a completable preview, and it names why.
+      'can_complete', false,
+      'blockers', jsonb_build_array('recon_already_complete'),
       'snapshot', v_receipt.snapshot);
   end if;
 
-  -- DERIVED LIVE PREVIEW. v_terms' shape is S2's clara._bank_recon_terms, CONFIRMED this
-  -- session against its live body (s20-identity.sql:486-536): it does NOT share the receipt
-  -- table's column names 1:1 (e.g. 'gl_prime_cents' not 'gl_balance_cents', no top-level
-  -- computed 'closing_cents' -- only 'difference_cents' = statement.closing minus the
-  -- identity's computed value). Re-shaped into the SAME envelope the complete-receipt branch
-  -- above returns, so a caller never has to branch on field names by 'preview' -- plus the
-  -- preview-only 'difference_cents' (meaningless on a completed receipt, since completion
-  -- requires it to be exactly zero; genuinely useful here to show "not yet zero").
+  -- THE VOID SIDECAR (C6 amendment). No complete receipt exists, so the body below is the live
+  -- preview; the newest withdrawn certificate rides beside it. Newest by the act that withdrew
+  -- it, then by the act that wrote it, so a statement that has been certified and voided more
+  -- than once surfaces the most recent withdrawal rather than an arbitrary row.
+  select * into v_void from clara.bank_reconciliations r
+    where r.statement_id = p_statement and r.firm_id = c.firm and r.status = 'void'
+    order by r.voided_at desc nulls last, r.completed_at desc, r.id desc
+    limit 1;
+  if found then
+    v_voided := jsonb_build_object(
+      'reconciliation_id', v_void.id, 'statement_id', v_void.statement_id,
+      'bank_account_id', v_void.bank_account_id, 'coa_account_code', v_void.coa_account_code,
+      'prior_statement_id', v_void.prior_statement_id,
+      'prior_reconciliation_id', v_void.prior_reconciliation_id,
+      'period_start', v_void.period_start, 'period_end', v_void.period_end,
+      'status', v_void.status,
+      'opening_cents', v_void.opening_cents,
+      'statement_opening_cents', v_void.opening_cents,
+      'opening_anchor_cents', v_void.opening_anchor_cents,
+      'closing_cents', v_void.closing_cents,
+      'statement_closing_cents', v_void.closing_cents,
+      'gl_balance_cents', v_void.gl_balance_cents,
+      'outstanding_cents', v_void.outstanding_cents,
+      'excepted_cents', v_void.excepted_cents,
+      'completed_by', v_void.completed_by, 'completed_at', v_void.completed_at,
+      'voided_by', v_void.voided_by, 'voided_at', v_void.voided_at,
+      'voided_reason', v_void.voided_reason,
+      'first_period', (v_void.prior_statement_id is null),
+      'snapshot', v_void.snapshot);
+  end if;
+
+  -- ---------------------------------------------------------------
+  -- 0040 FIX WAVE C3 [M9]: recon_coa_shared, ON THE PREVIEW PATH TOO. gl(P) is COA-scoped and
+  -- S.closing is ACCOUNT-scoped; the VERB refuses when two accounts on one COA both carry live
+  -- statements, but the preview called the derivation with no such guard and would happily render
+  -- two books' lines inside one difference. A preview that mixes books is worse than no preview,
+  -- because it is the number a human looks at before deciding. Returned as a LABELLED UNAVAILABLE
+  -- state -- the fail-closed arm the recon pane already knows how to render -- never as money.
+  -- ---------------------------------------------------------------
+  select ba.coa_account_code into v_coa
+    from clara.bank_accounts ba where ba.id = v_stmt.bank_account_id;
+  select coalesce(array_agg(x.id), '{}'::uuid[]) into v_shared
+    from (select ba2.id from clara.bank_accounts ba2
+           where ba2.client_id = v_stmt.client_id and ba2.firm_id = c.firm
+             and ba2.coa_account_code = v_coa
+             and exists (select 1 from clara.bank_statements bs2
+                          where bs2.bank_account_id = ba2.id and bs2.status = 'live')) x;
+  if coalesce(array_length(v_shared, 1), 0) > 1 then
+    return jsonb_build_object(
+      'preview', true, 'available', false,
+      'unavailable_reason', 'recon_coa_shared',
+      'statement_id', p_statement,
+      'bank_account_id', v_stmt.bank_account_id, 'coa_account_code', v_coa,
+      'bank_account_ids', to_jsonb(v_shared),
+      'period_start', v_stmt.period_start, 'period_end', v_stmt.period_end,
+      'precondition_met', false, 'chain_ok', false,
+      'stale_outstanding_ids', '[]'::jsonb,
+      'can_complete', false,
+      'blockers', jsonb_build_array('recon_coa_shared'),
+      -- The sidecar rides here too. It is STORED, statement-scoped history -- not a derivation
+      -- over the shared COA -- and the verb refuses recon_coa_shared at completion, so any
+      -- receipt that exists was certified while this COA was NOT shared. Carrying it keeps the
+      -- preview key set stable across the available/unavailable arms, which is what stops a
+      -- caller branching on which arm it got.
+      'voided_receipt', v_voided);
+  end if;
+
+  -- DERIVED LIVE PREVIEW. v_terms' shape is S2's clara._bank_recon_terms: it does NOT share the
+  -- receipt table's column names 1:1 (e.g. 'gl_prime_cents' not 'gl_balance_cents'). Re-shaped
+  -- into the SAME envelope the receipt branch above returns, so a caller never has to branch on
+  -- field names by 'preview' -- plus the preview-only 'difference_cents' and
+  -- 'derived_closing_cents' (both meaningless on a completed receipt, since completion requires
+  -- the difference to be exactly zero; genuinely useful here to show "not yet zero").
   v_terms := clara._bank_recon_terms(p_statement, now());
   if v_terms is null then return null; end if;
 
-  -- THE TWO COMPLETION GATES, ANSWERED BY THE DB (assembly fix). Without these the /bank
-  -- pane cannot honestly enable its Complete button: the design's own precondition and
-  -- chain law are DB facts, and a UI that guessed at them would either fail closed forever
-  -- or invent an authority it does not have. Both are cheap existence reads over the same
-  -- world _bank_recon_terms just measured; the VERB re-establishes both under lock and its
-  -- refusal remains the only authority.
-  --
-  -- precondition (design SS3): every line of THIS statement is a member of a live group or
-  -- carries an exception row (open or resolved -- the ratified bank_corrective_line
-  -- disposition leaves both legs resolved and unmatched, riding excepted(P)).
+  -- ---------------------------------------------------------------
+  -- 0040 FIX WAVE D8 [CX9]: THE COMPLETION VERDICT IS THE SERVER'S, AND ITS BLOCKERS ARE NAMED.
+  -- The pane used to derive "can I press Complete?" from precondition_met + chain_ok alone,
+  -- which was wrong in two directions at once: a PENDING reservation counted as membership, so
+  -- precondition_met came back true for a state the verb refuses outright with
+  -- recon_line_reserved; and a nonzero difference did not enter the verdict at all. Every gate
+  -- below is the verb's own gate, run in the verb's own order, so a green button means the verb
+  -- will accept -- and a grey one says WHICH refusal it would raise. The verb still
+  -- re-establishes all of it under lock and its refusal remains the only authority.
+  -- ---------------------------------------------------------------
+  -- EVERY APPEND BELOW CASTS ITS LITERAL ::text, and that is load-bearing, not decoration.
+  -- `text[] || 'literal'` is AMBIGUOUS to the parser -- with an untyped literal it resolves to
+  -- anyarray||anyarray and fails at RUNTIME with `malformed array literal`, only on the path
+  -- where the blocker actually fires. The ::text pins the anyarray||anyelement operator. Caught
+  -- by driving a preview whose completion is genuinely blocked; every green run before that had
+  -- can_complete=true and appended nothing, so the whole verdict path was untested by luck.
+  if v_stmt.status <> 'live' then
+    v_blockers := v_blockers || 'statement_not_live'::text;
+  end if;
+
+  -- recon_line_reserved: a PENDING hold is a refusal, NOT membership.
+  select count(*)::int into v_n
+    from clara.bank_statement_lines l
+   where l.statement_id = p_statement
+     and exists (select 1 from clara.bank_match_line_members lm
+                  join clara.bank_matches bm on bm.id = lm.match_id
+                 where lm.line_id = l.id and bm.status = 'pending');
+  if v_n > 0 then
+    v_blockers := v_blockers || 'recon_line_reserved'::text;
+  end if;
+
+  -- recon_line_unsettled (design SS3): every line of THIS statement is a member of a LIVE group,
+  -- or its GOVERNING exception is open or bank_corrective_line -- byte-for-byte the verb's
+  -- narrowed precondition [0040 FIX WAVE A1].
   select not exists (
     select 1 from clara.bank_statement_lines l
      where l.statement_id = p_statement
        and not exists (select 1 from clara.bank_match_line_members lm
-                        where lm.line_id = l.id and lm.group_status in ('pending','live'))
-       and not exists (select 1 from clara.bank_line_exceptions e where e.line_id = l.id))
+                        join clara.bank_matches bm on bm.id = lm.match_id
+                       where lm.line_id = l.id and bm.status = 'live')
+       and not coalesce((select (gx.status = 'open'
+                                 or gx.resolution_disposition = 'bank_corrective_line')
+                           from clara.bank_line_exceptions gx
+                          where gx.line_id = l.id
+                          order by (gx.status = 'open') desc, gx.created_at desc, gx.id desc
+                          limit 1), false))
     into v_precondition;
+  if not v_precondition then
+    v_blockers := v_blockers || 'recon_line_unsettled'::text;
+  end if;
 
-  -- chain (design SS3): the first live statement on the account claims the exemption;
-  -- otherwise the ADJACENT predecessor must carry a complete reconciliation.
+  -- chain (design SS3): the first live statement on the account claims the exemption; otherwise
+  -- the ADJACENT predecessor must exist (else recon_period_gap) and must carry a complete
+  -- reconciliation (else recon_prior_missing), and this statement must open where that receipt
+  -- certified its closing (else recon_opening_mismatch, the chain arm).
   if coalesce((v_terms->>'first_period')::boolean, false) then
     v_chain_ok := true;
   else
-    select bs.id into v_prior from clara.bank_statements bs
-     where bs.bank_account_id = (v_terms->>'bank_account_id')::uuid
-       and bs.status = 'live' and bs.period_end = v_stmt.period_start - 1;
-    v_chain_ok := v_prior is not null and exists (
-      select 1 from clara.bank_reconciliations br
-       where br.statement_id = v_prior and br.status = 'complete');
+    select bs.id, bs.period_end into v_prior, v_prior_end
+      from clara.bank_statements bs
+     where bs.bank_account_id = v_stmt.bank_account_id and bs.status = 'live'
+       and bs.period_end < v_stmt.period_start
+     order by bs.period_end desc, bs.id desc
+     limit 1;
+    if v_prior is null or v_prior_end <> (v_stmt.period_start - 1) then
+      v_chain_ok := false;
+      v_blockers := v_blockers || 'recon_period_gap'::text;
+    elsif not exists (select 1 from clara.bank_reconciliations br
+                       where br.statement_id = v_prior and br.status = 'complete') then
+      v_chain_ok := false;
+      v_blockers := v_blockers || 'recon_prior_missing'::text;
+    else
+      v_chain_ok := true;
+      if exists (select 1 from clara.bank_reconciliations br
+                  where br.statement_id = v_prior and br.status = 'complete'
+                    and br.closing_cents <> v_stmt.opening_cents) then
+        v_blockers := v_blockers || 'recon_opening_mismatch'::text;
+      end if;
+    end if;
+  end if;
+
+  -- recon_opening_mismatch, the takeover arm: the section-3 tie, asserted unconditionally by the
+  -- verb and therefore reported unconditionally here.
+  if coalesce((v_terms->>'opening_tie_delta_cents')::bigint, 0) <> 0
+     and not ('recon_opening_mismatch' = any(v_blockers)) then
+    v_blockers := v_blockers || 'recon_opening_mismatch'::text;
+  end if;
+
+  -- recon_uncleared_off_account: a K-seeded uncleared instrument the identity can never see.
+  if exists (
+    select 1 from clara.opening_items oi
+      join clara.journal_entries je on je.id = oi.entry_id
+     where oi.client_id = v_stmt.client_id and oi.firm_id = c.firm
+       and oi.item_kind = 'bank_uncleared' and oi.state = 'active'
+       and je.status = 'approved'
+       and not exists (
+         select 1 from clara.journal_lines jl
+          join clara.bank_accounts ba3 on ba3.client_id = oi.client_id
+                                      and ba3.coa_account_code = jl.account_code
+         where jl.entry_id = oi.entry_id)) then
+    v_blockers := v_blockers || 'recon_uncleared_off_account'::text;
   end if;
 
   -- The stale challenge list, by the SAME ids p_ack_outstanding accepts (entry / line /
-  -- match) and the SAME 60-day floor the verb applies. Ids only -- no money.
+  -- match) and the SAME 60-day floor the verb applies. Ids only -- no money. It blocks BECAUSE
+  -- this read carries no acknowledgement set: the verb accepts these ids and clears them, so the
+  -- caller's remedy is to pass them, and the list beside the blocker is exactly that argument.
   select coalesce(jsonb_agg(x.id), '[]'::jsonb) into v_stale from (
     select e.elem->>'entry_id' as id
       from jsonb_array_elements(v_terms->'snapshot'->'outstanding_entry_sides') as e(elem)
@@ -3729,26 +4277,144 @@ begin
     select e.elem->>'match_id'
       from jsonb_array_elements(v_terms->'snapshot'->'outstanding_group_items') as e(elem)
      where (e.elem->>'age_days')::int > 60) x;
+  if jsonb_array_length(v_stale) > 0 then
+    v_blockers := v_blockers || 'recon_outstanding_stale'::text;
+  end if;
+
+  -- recon_difference_nonzero: WCC-R2's exact zero. The gate the old verdict ignored entirely.
+  if coalesce((v_terms->>'difference_cents')::bigint, 0) <> 0 then
+    v_blockers := v_blockers || 'recon_difference_nonzero'::text;
+  end if;
 
   return jsonb_build_object(
-    'preview', true, 'statement_id', p_statement,
+    'preview', true, 'available', true, 'statement_id', p_statement,
     'first_period', v_terms->'first_period',
     'precondition_met', v_precondition, 'chain_ok', v_chain_ok,
     'stale_outstanding_ids', v_stale,
+    'can_complete', (coalesce(array_length(v_blockers, 1), 0) = 0),
+    'blockers', to_jsonb(v_blockers),
     'bank_account_id', v_terms->'bank_account_id',
     'coa_account_code', v_terms->'coa_account_code',
     'period_start', v_terms->'period_start', 'period_end', v_terms->'period_end',
-    'opening_cents', v_terms->'opening_anchor_cents',
+    -- THE THREE OPENING/CLOSING QUANTITIES, EACH UNDER ITS OWN NAME [C1/M7], and opening_cents /
+    -- closing_cents now mean the SAME thing they mean on a receipt.
+    'opening_cents', v_terms->'statement_opening_cents',
+    'statement_opening_cents', v_terms->'statement_opening_cents',
+    'opening_anchor_cents', v_terms->'opening_anchor_cents',
+    'closing_cents', v_terms->'statement_closing_cents',
+    'statement_closing_cents', v_terms->'statement_closing_cents',
+    'derived_closing_cents', to_jsonb(
+        coalesce((v_terms->>'statement_closing_cents')::bigint, 0)
+        - coalesce((v_terms->>'difference_cents')::bigint, 0)),
     'gl_balance_cents', v_terms->'gl_prime_cents',
     'outstanding_cents', v_terms->'outstanding_cents',
     'excepted_cents', v_terms->'excepted_cents',
-    'closing_cents', to_jsonb(
-        coalesce((v_terms->>'statement_closing_cents')::bigint, 0)
-        - coalesce((v_terms->>'difference_cents')::bigint, 0)),
     'difference_cents', v_terms->'difference_cents',
+    -- THE VOID SIDECAR (C6 amendment): null when this statement has never been certified, the
+    -- newest withdrawn certificate otherwise. The BODY is the live preview either way, so a
+    -- voided period is re-completable straight off this one read.
+    'voided_receipt', v_voided,
     'snapshot', v_terms->'snapshot');
 end $$;
 revoke all on function clara.get_bank_reconciliation(uuid) from public;
+
+-- =====================================================================================
+-- verify_bank_reconciliation -- 0040 FIX WAVE A7 [R2b + A6], under CX1's ratified refinement.
+--
+-- WHY IT EXISTS. Design SS3's bitemporal law reads: "Verification recomputes under the cutoff and
+-- must reproduce the receipt byte-exactly forever." Every ingredient was built -- the derivation
+-- is cutoff-aware, and completed_at IS the stored cutoff -- but NOTHING on any read path ever
+-- called the derivation with a completed receipt's cutoff, and the only cell that claimed to
+-- prove the law compared two reads of the same immutable row on a zero-line month. A law defended
+-- by a tautology is not defended. This is the missing half: the recompute, and the diff.
+--
+-- CX1's RATIFIED RATIONALE, RECORDED VERBATIM because it is what decides WHICH half is strict:
+--   "completed_at is not an airtight visibility boundary (now() = txn-START; an approval stalled
+--   before 004 can carry approved_at <= cutoff yet commit after certification). NO books-version
+--   machinery (rejected as disproportionate). The ALGEBRA makes money divergence inexpressible
+--   for the straggler class: an unmatched entry moves gl' and capacity' equally (net 0); a
+--   matched entry cannot join a certified period post-hoc (settled-period + exclusivity).
+--   Therefore: A7's verifier compares the FOUR STORED TERMS + closing STRICTLY (must be
+--   byte-exact forever -- provable), and reports snapshot-ENUMERATION diffs as informational
+--   (stored history vs live classification)."
+--
+-- SO: the four identity terms (opening_anchor, gl', outstanding, excepted) plus closing are
+-- compared EXACTLY and any inequality is returned as a NAMED diff with both numbers. Differences
+-- in the snapshot's ENUMERATIONS are returned under 'informational' and NEVER make verified
+-- false -- a stored snapshot is history, and the classification a later world puts on the same
+-- rows is not evidence that the certified money moved.
+--
+-- IT RAISES NOTHING (bookkeeper-floor read): a verifier that refuses cannot report what it found.
+-- =====================================================================================
+create function clara.verify_bank_reconciliation(p_recon uuid) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  c record; r record; t jsonb; v_diffs jsonb := '[]'::jsonb;
+  v_stored_snap jsonb; v_fresh_snap jsonb; v_info jsonb; v_keys text[] := '{}'::text[];
+  k text;
+begin
+  c := clara._human_ctx(clara.role_rank('bookkeeper'));
+  select * into r from clara.bank_reconciliations br
+    where br.id = p_recon and br.firm_id = c.firm;
+  if not found then return null; end if;
+
+  t := clara._bank_recon_terms(r.statement_id, r.completed_at);
+  if t is null then
+    return jsonb_build_object('reconciliation_id', p_recon, 'statement_id', r.statement_id,
+      'status', r.status, 'cutoff', r.completed_at, 'verified', false,
+      'diffs', jsonb_build_array(jsonb_build_object('term', 'terms_underivable',
+        'stored', null, 'recomputed', null)),
+      'informational', jsonb_build_object('snapshot_enumeration_differs', null, 'keys', '[]'::jsonb));
+  end if;
+
+  -- THE STRICT HALF: four terms + closing, byte-exact.
+  if r.opening_anchor_cents is distinct from (t->>'opening_anchor_cents')::bigint then
+    v_diffs := v_diffs || jsonb_build_object('term','opening_anchor_cents',
+      'stored', r.opening_anchor_cents, 'recomputed', (t->>'opening_anchor_cents')::bigint);
+  end if;
+  if r.gl_balance_cents is distinct from (t->>'gl_prime_cents')::bigint then
+    v_diffs := v_diffs || jsonb_build_object('term','gl_balance_cents',
+      'stored', r.gl_balance_cents, 'recomputed', (t->>'gl_prime_cents')::bigint);
+  end if;
+  if r.outstanding_cents is distinct from (t->>'outstanding_cents')::bigint then
+    v_diffs := v_diffs || jsonb_build_object('term','outstanding_cents',
+      'stored', r.outstanding_cents, 'recomputed', (t->>'outstanding_cents')::bigint);
+  end if;
+  if r.excepted_cents is distinct from (t->>'excepted_cents')::bigint then
+    v_diffs := v_diffs || jsonb_build_object('term','excepted_cents',
+      'stored', r.excepted_cents, 'recomputed', (t->>'excepted_cents')::bigint);
+  end if;
+  -- closing is the statement's certified figure; the recomputation reaches it through the
+  -- identity, so a mismatch here is the whole receipt failing to close under its own cutoff.
+  if r.closing_cents is distinct from (
+       coalesce((t->>'statement_closing_cents')::bigint,0) - coalesce((t->>'difference_cents')::bigint,0)
+     ) then
+    v_diffs := v_diffs || jsonb_build_object('term','closing_cents',
+      'stored', r.closing_cents,
+      'recomputed', (coalesce((t->>'statement_closing_cents')::bigint,0)
+                     - coalesce((t->>'difference_cents')::bigint,0)));
+  end if;
+
+  -- THE INFORMATIONAL HALF: enumeration drift, named by key, never a failure (CX1).
+  v_stored_snap := coalesce(r.snapshot, '{}'::jsonb) - 'acknowledged_outstanding';
+  v_fresh_snap  := coalesce(t->'snapshot', '{}'::jsonb) - 'acknowledged_outstanding';
+  for k in select jsonb_object_keys(v_stored_snap) union select jsonb_object_keys(v_fresh_snap) loop
+    if (v_stored_snap->k) is distinct from (v_fresh_snap->k) then
+      v_keys := v_keys || k;
+    end if;
+  end loop;
+  v_info := jsonb_build_object(
+    'snapshot_enumeration_differs', (coalesce(array_length(v_keys,1),0) > 0),
+    'keys', to_jsonb(v_keys));
+
+  return jsonb_build_object(
+    'reconciliation_id', p_recon, 'statement_id', r.statement_id,
+    'status', r.status, 'cutoff', r.completed_at,
+    'verified', (jsonb_array_length(v_diffs) = 0),
+    'diffs', v_diffs,
+    'informational', v_info);
+end $$;
+revoke all on function clara.verify_bank_reconciliation(uuid) from public;
 
 -- list_bank_line_suggestions: signed-rule evaluations over a statement's unmatched,
 -- unexcepted lines. <=1 suggestion per (line, kind) -- "most specific wins" (longer token
@@ -3874,6 +4540,12 @@ begin
       'created_by', r.created_by, 'created_at', r.created_at,
       'signed_by', r.signed_by, 'signed_at', r.signed_at,
       'retired_by', r.retired_by, 'retired_at', r.retired_at,
+      -- 0040 FIX WAVE D4 [A9]: retired_reason is emitted. The /bank rule card renders it, and
+      -- for a WITHDRAWN (never-signed) rule the reason is the entire content of the act -- a
+      -- withdrawal with no visible reason is an unexplained disappearance. This is a READ over
+      -- clara.bank_rules under FORCE RLS, not an event payload: TAIL 6's sensitive-token
+      -- blocklist governs clara._append_event payloads only, and nothing here emits one.
+      'retired_reason', r.retired_reason,
       -- The WITHDRAWAL arm (order item 10) is visible as a derived flag rather than a fourth
       -- status: a withdrawn rule is retired without ever having been signed.
       'withdrawn', (r.status = 'retired' and r.signed_at is null))
@@ -3894,7 +4566,7 @@ do $racl$ declare f text; begin
       'clara.customer_statement(uuid,uuid,date,date)','clara.supplier_statement(uuid,uuid,date,date)',
       'clara.list_unmatched_lines(uuid)','clara.get_bank_reconciliation(uuid)',
       'clara.list_bank_line_suggestions(uuid)','clara.list_bank_rule_candidates(uuid)',
-      'clara.list_bank_rules(uuid)'] loop
+      'clara.list_bank_rules(uuid)','clara.verify_bank_reconciliation(uuid)'] loop
     execute format('revoke all on function %s from public', f);
     execute format('grant execute on function %s to clara_authenticated', f);
     execute format('alter function %s owner to clara_fn_owner', f);
@@ -3904,8 +4576,9 @@ end $racl$;
 reset role;
 
 -- =====================================================================================
--- TAIL -- this lane's OWN self-verifying assertions, scoped to the 15 functions this file
--- creates (6 write verbs + 9 read RPCs, list_bank_rules added at assembly per order item 6). This is NOT a substitute for the assembled 0040's
+-- TAIL -- this lane's OWN self-verifying assertions, scoped to the 16 functions this file
+-- creates (6 write verbs + 10 read RPCs: list_bank_rules added at assembly per order item 6,
+-- verify_bank_reconciliation added by 0040 FIX WAVE A7). This is NOT a substitute for the assembled 0040's
 -- own unified tail (payload-key allowlist across ALL seven bank.* event types, the full
 -- lock-order prosrc pin set across every new verb in the migration, etc, per design SS9) --
 -- it verifies what THIS file alone can prove, and s30-notes.md hands the assembler the exact
@@ -3927,7 +4600,7 @@ declare
     'clara.customer_statement(uuid,uuid,date,date)','clara.supplier_statement(uuid,uuid,date,date)',
     'clara.list_unmatched_lines(uuid)','clara.get_bank_reconciliation(uuid)',
     'clara.list_bank_line_suggestions(uuid)','clara.list_bank_rule_candidates(uuid)',
-    'clara.list_bank_rules(uuid)'];
+    'clara.list_bank_rules(uuid)','clara.verify_bank_reconciliation(uuid)'];
   v_owner_fns text[] := array['clara.except_bank_line(uuid,text,text,uuid,text)',
     'clara.resolve_bank_line_exception(uuid,text,text,uuid,text)',
     'clara.sign_bank_rule(uuid,text)','clara.retire_bank_rule(uuid,text,text)'];
@@ -3938,7 +4611,9 @@ declare
       jsonb_build_array('line_already_matched','line_already_excepted','statement_not_live'),
     'clara.resolve_bank_line_exception(uuid,text,text,uuid,text)',
       jsonb_build_array('already_resolved','resolution_note_required','disposition_unbooked',
-        'counterpart_required','counterpart_not_excepted'),
+        'counterpart_required','counterpart_not_excepted',
+        -- 0040 FIX WAVE A2: the three refusals that make bank_corrective_line structural.
+        'corrective_pair_unbalanced','counterpart_not_reciprocal','counterpart_not_offsetting'),
     'clara.propose_bank_rule(uuid,text,jsonb,jsonb,text)',
       jsonb_build_array('rule_evidence_insufficient','rule_pattern_already_signed'),
     'clara.sign_bank_rule(uuid,text)', jsonb_build_array('rule_not_proposed'),
@@ -3947,7 +4622,7 @@ declare
   v_key text; v_tok text; v_toks jsonb;
 begin
   -- (1) ROLE FLOORS. Every owner-floor verb's body must contain
-  -- "role_rank('owner')"; every bookkeeper-floor verb (including all 8 reads) must contain
+  -- "role_rank('owner')"; every bookkeeper-floor verb (including all 10 reads) must contain
   -- "role_rank('bookkeeper')".
   foreach f in array v_owner_fns loop
     select pg_get_functiondef(f::regprocedure) into v_src;
@@ -4032,7 +4707,7 @@ declare
     'clara.customer_statement(uuid,uuid,date,date)','clara.supplier_statement(uuid,uuid,date,date)',
     'clara.list_unmatched_lines(uuid)','clara.get_bank_reconciliation(uuid)',
     'clara.list_bank_line_suggestions(uuid)','clara.list_bank_rule_candidates(uuid)',
-    'clara.list_bank_rules(uuid)'];
+    'clara.list_bank_rules(uuid)','clara.verify_bank_reconciliation(uuid)'];
 begin
   -- GRANT MATRIX: every one of the 15 public functions this section creates reaches
   -- clara_authenticated and NO other app-facing role, and PUBLIC holds nothing.
@@ -4052,7 +4727,7 @@ begin
       raise exception '0040/S3 tail: % is EXECUTE-granted to clara_runtime -- no runtime path into this data bypasses the human verbs', f;
     end if;
   end loop;
-  raise notice '0040/S3 tail OK: the clara_authenticated-only grant matrix holds across all 15 functions';
+  raise notice '0040/S3 tail OK: the clara_authenticated-only grant matrix holds across all 16 functions';
 end
 $tail_acl$;
 
@@ -5206,16 +5881,25 @@ begin
     raise exception '0040 S4.8 prestate: the negation INSERT appears % times (expected exactly once) -- the body drifted', v_cnt using errcode='CLR10';
   end if;
 
-  v_to := $t$  -- 0040 (C-c, design section 4.4): effective_date = current_date, NOT the source row's.
+  v_to := $t$  -- 0040 (C-c, design section 4.4): effective_date is the ACT date, NOT the source row's.
   -- An unallocation is the house reverse-not-delete shape: corrected history is NOT
   -- retroactive. Copying the original allocation's effective_date would rewrite what an as-of
   -- read of a CLOSED month reports, which is precisely what reverse_entry's current-date
   -- mirror refuses to do for the GL. The negation is a current-period act and dates itself.
+  --
+  -- 0040 FIX WAVE C5 [R9]: greatest(current_date, oa.effective_date), never a bare current_date.
+  -- An 'allocate' row carries its settlement ENTRY's posting_date, and nothing in the book
+  -- forbids that being in the future. A bare current_date would then sort the NEGATION BEFORE
+  -- the allocation it negates inside _subledger_outstanding_asof, and an as-of read taken
+  -- between the two dates would see only the reversal: a RM10,000 bill settled by an entry
+  -- posted 2026-09-30 and unallocated on 2026-08-05 would report as RM20,000 outstanding at
+  -- 2026-08-31. greatest() keeps the negation at or after what it undoes, which is the only
+  -- reading under which an as-of series is monotone in the acts that produced it.
   insert into clara.open_item_allocations(firm_id, client_id, domain, item_id,
       application_group, operation_kind, reverses_allocation_id, amount_cents, effective_date,
       reason, created_by)
     select oa.firm_id, oa.client_id, oa.domain, oa.item_id, v_new, 'unallocate', oa.id,
-           -oa.amount_cents, current_date, v_reason, c.actor
+           -oa.amount_cents, greatest(current_date, oa.effective_date), v_reason, c.actor
     from clara.open_item_allocations oa
     where oa.application_group = p_group order by oa.id;$t$;
 
@@ -5245,7 +5929,17 @@ end $s4_08$;
 -- for the same reason unallocate takes it: an application is a HUMAN JUDGEMENT made today
 -- about two existing positions, and dating it into a closed month would retroactively change
 -- what an as-of read of that month reported. Recorded as an owner-visible decision in the
--- notes, not smuggled.
+-- notes, not smuggled. 0040 FIX WAVE C4 aligns the BACKFILL to the same act-dating rule
+-- (created_at::date for a row already in the book), so both halves now answer identically.
+--
+-- 0040 FIX WAVE C5 [R9] DOES NOT APPLY HERE, and that is a structural fact rather than an
+-- omission: R9's hazard is a NEGATION row sorting before the allocation it negates, and the
+-- greatest(current_date, negated_row.effective_date) guard exists to stop that. apply_open_items
+-- writes no negation -- it inserts a FRESH BALANCED PAIR (+amt on the source, -amt on the
+-- target) between two pre-existing items, sets no reverses_allocation_id, and stamps BOTH rows
+-- with the SAME date, so there is no antecedent allocation to take a greatest() against and no
+-- ordering to invert. unallocate_group (S4.8) carries the guard, because it is the only writer
+-- with an `oa` to be later than.
 -- --------------------------------------------------------------------------------------------
 do $s4_09$
 declare
@@ -5937,8 +6631,26 @@ begin
        or position('pg_advisory_xact_lock(203005004' in (v_map->>v_key)) <> 0 then
       raise exception '0040 S4.Z: settle_from_bank_line arity % takes an advisory rung in its own body -- the nesting deadlock window is re-opened', v_key;
     end if;
-    if position('clara.bank_line_exceptions' in (v_map->>v_key)) = 0 then
+    -- 0040 FIX WAVE E4 [R6]: THE POSITION ASSERT, not merely presence. The match arities have
+    -- carried an ordered check since assembly; the settle arities only checked that the string
+    -- clara.bank_line_exceptions appeared SOMEWHERE in the body, which a re-check taken BEFORE
+    -- the line lock would satisfy just as well -- and a check taken before the lock is a read of
+    -- a world that can change, i.e. exactly the write-skew the law exists to close. The anchor is
+    -- the line lock itself, matched literally under 0038's own normalisation.
+    v_a := position('perform 1 from clara.bank_statement_lines l where l.id = p_line for update'
+                    in (v_map->>v_key));
+    if v_a = 0 then
+      raise exception '0040 S4.Z: settle_from_bank_line arity % no longer takes its single-line FOR UPDATE lock in the expected shape -- the exception re-check has no anchor to be ordered against', v_key;
+    end if;
+    v_c := position('clara.bank_line_exceptions' in (v_map->>v_key));
+    if v_c = 0 then
       raise exception '0040 S4.Z: settle_from_bank_line arity % does not re-check bank_line_exceptions -- the write-skew law (finding 38) is unenforced', v_key;
+    end if;
+    if v_c < v_a then
+      raise exception '0040 S4.Z: settle_from_bank_line arity % re-checks bank_line_exceptions BEFORE its line lock (exc=%, lock=%) -- an authority statement taken before the lock is unlocked, and the write-skew law (finding 38) is unenforced', v_key, v_c, v_a;
+    end if;
+    if position('line_excepted' in (v_map->>v_key)) = 0 then
+      raise exception '0040 S4.Z: settle_from_bank_line arity % lost the named line_excepted refusal', v_key;
     end if;
   end loop;
 
@@ -6419,6 +7131,106 @@ begin
       using errcode='CLR10';
   end if;
 
+  -- (4b) THE SETTLED-SCOPE PREDICATE IS BYTE-IDENTICAL IN THE BELT AND IN BOTH VERBS
+  -- [0040 FIX WAVE A5 / R5]. The belt sits on the member tables precisely so that "no live-group
+  -- membership change on a settled line" holds STRUCTURALLY -- but it used to scope "settled" to
+  -- a complete recon of the line's OWN statement while the verbs scoped it account-wide and
+  -- all-time, so the structural backstop was strictly WEAKER than the door it backs. A backstop
+  -- that admits what the door refuses is not a backstop. Pinned by normalising all three bodies
+  -- with the house recipe and demanding the SAME predicate text in each; the belt additionally
+  -- carries FIX WAVE A6's same-transaction exclusion, which is asserted separately below.
+  declare
+    v_pred constant text :=
+      'br.bank_account_id = st.bank_account_id and br.status = ''complete'' and br.period_end >= st.period_end';
+    v_norm text; v_sig text; v_hits int;
+  begin
+    foreach v_sig in array array['clara._tf_bank_settled_authority_belt()',
+                                 'clara.unmatch_bank_match(uuid,uuid,text,text)',
+                                 'clara.complete_pending_match(uuid,uuid,text)'] loop
+      v_norm := lower(regexp_replace(regexp_replace(regexp_replace(
+        pg_get_functiondef(v_sig::regprocedure),'/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'),
+        '\s+',' ','g'));
+      v_hits := (length(v_norm) - length(replace(v_norm, v_pred, ''))) / length(v_pred);
+      if v_hits = 0 then
+        raise exception '0040 tail: % does not carry the account-scoped all-time settled predicate verbatim -- the belt and the two verbs must judge the SAME set (FIX WAVE A5)', v_sig
+          using errcode='CLR10';
+      end if;
+    end loop;
+    -- The belt carries it on BOTH member arms, and both arms exclude a receipt born in this
+    -- transaction (FIX WAVE A6) -- otherwise a same-transaction book-then-reconcile act refuses
+    -- at commit naming the line the caller just matched.
+    v_norm := lower(regexp_replace(regexp_replace(regexp_replace(
+      pg_get_functiondef('clara._tf_bank_settled_authority_belt()'::regprocedure),
+      '/\*[\s\S]*?\*/','','g'),'--[^\n]*','','g'), '\s+',' ','g'));
+    v_hits := (length(v_norm) - length(replace(v_norm, v_pred, ''))) / length(v_pred);
+    if v_hits <> 2 then
+      raise exception '0040 tail: the settled-authority belt carries the settled predicate % time(s), expected exactly 2 (the line-member arm and the entry-member arm)', v_hits
+        using errcode='CLR10';
+    end if;
+    v_hits := (length(v_norm) - length(replace(v_norm, 'br.completed_at < transaction_timestamp()', '')))
+              / length('br.completed_at < transaction_timestamp()');
+    if v_hits <> 2 then
+      raise exception '0040 tail: the settled-authority belt excludes same-transaction receipts on % arm(s), expected exactly 2 -- FIX WAVE A6 forbids the belt refusing a lawful match-and-complete transaction', v_hits
+        using errcode='CLR10';
+    end if;
+  end;
+
+  -- (4c) THE RESOLVED-THEN-BOOKED DOOR IS THE ONLY DOOR [0040 FIX WAVE A4 / A14]. Both INSERT
+  -- arms must scope their exception admission to a RESOLVED, booking-linked disposition; an
+  -- unscoped "any exception row exists" arm would readmit an OPEN-excepted line to a new match on
+  -- a settled period with only the verb-side line_excepted re-check standing in the way.
+  select p.prosrc into v_src from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='clara' and p.proname='_tf_bank_settled_authority_belt';
+  v_n := (length(v_src) - length(replace(v_src,
+            $bd$ex.resolution_disposition in ('matched_booking','written_off_adjustment')$bd$, '')))
+         / length($bd$ex.resolution_disposition in ('matched_booking','written_off_adjustment')$bd$);
+  if v_n <> 2 then
+    raise exception '0040 tail: the settled-authority belt scopes its resolved-then-booked door on % arm(s), expected exactly 2', v_n
+      using errcode='CLR10';
+  end if;
+
+  -- (4d) THE THREE NARROWED EXCEPTION READERS [0040 FIX WAVE A1 / CX3]. The completion
+  -- precondition, excepted(P) and the cross-statement unmatched report must all admit exactly
+  -- "open, or bank_corrective_line". A reader that widens back to "any exception row" lets a
+  -- bookkeeper re-arm owner-floor excepted money by unmatching a resolved booking.
+  foreach v_fn in array array['clara.complete_bank_reconciliation(uuid,uuid[],text)',
+                              'clara._bank_recon_terms(uuid,timestamptz)',
+                              'clara.list_unmatched_lines(uuid)'] loop
+    select pg_get_functiondef(v_fn::regprocedure) into v_src;
+    if position('bank_corrective_line' in v_src) = 0 then
+      raise exception '0040 tail: % no longer narrows its exception reader to the bank_corrective_line disposition -- FIX WAVE A1''s stale-disposition hole is re-opened', v_fn
+        using errcode='CLR10';
+    end if;
+  end loop;
+
+  -- (4e) THE EXCEPTION LATERAL IS CUTOFF-GATED [0040 FIX WAVE A3 / R2c]. excepted(P) was the one
+  -- term with no bitemporal gate at all, which made the ratified receipt law false on its face.
+  select pg_get_functiondef('clara._bank_recon_terms(uuid,timestamptz)'::regprocedure) into v_src;
+  if position('x.resolved_at > p_cutoff' in v_src) = 0
+     or position('x.created_at <= p_cutoff' in v_src) = 0 then
+    raise exception '0040 tail: clara._bank_recon_terms'' exception lateral lost its as-of gate (resolved_at vs cutoff, created_at <= cutoff)'
+      using errcode='CLR10';
+  end if;
+
+  -- (4f) THE VERIFIER EXISTS AND RECOMPUTES UNDER THE RECEIPT'S OWN CUTOFF [0040 FIX WAVE A7].
+  -- Design SS3's bitemporal law had no verifier at all; storage alone is not verification.
+  select pg_get_functiondef('clara.verify_bank_reconciliation(uuid)'::regprocedure) into v_src;
+  if position('clara._bank_recon_terms(r.statement_id, r.completed_at)' in v_src) = 0
+     or position('informational' in v_src) = 0 then
+    raise exception '0040 tail: clara.verify_bank_reconciliation does not recompute _bank_recon_terms under the receipt''s own completed_at, or lost its informational arm'
+      using errcode='CLR10';
+  end if;
+
+  -- (4g) THE RECON BELT BINDS THE WHOLE SNAPSHOT AT INSERT [0040 FIX WAVE A8 / CX5, answering
+  -- CX11]. Sum-sampling a snapshot cannot see wrong ids, wrong dates or wrong membership.
+  select p.prosrc into v_src from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+   where n.nspname='clara' and p.proname='_tf_bank_recon_belt';
+  if position('canonical_binding' in v_src) = 0
+     or position('clara._bank_recon_terms(r.statement_id, r.completed_at)' in v_src) = 0 then
+    raise exception '0040 tail: the recon belt no longer binds the stored snapshot to a fresh canonical derivation at INSERT'
+      using errcode='CLR10';
+  end if;
+
   -- (5) THE BELT CATALOG: four constraint triggers, all DEFERRABLE INITIALLY DEFERRED.
   select count(*)::int into v_n from pg_trigger t join pg_class c on c.oid=t.tgrelid
     join pg_namespace n on n.oid=c.relnamespace
@@ -6745,7 +7557,7 @@ declare
     'clara.supplier_statement(uuid,uuid,date,date)',
     'clara.list_unmatched_lines(uuid)','clara.get_bank_reconciliation(uuid)',
     'clara.list_bank_line_suggestions(uuid)','clara.list_bank_rule_candidates(uuid)',
-    'clara.list_bank_rules(uuid)',
+    'clara.list_bank_rules(uuid)','clara.verify_bank_reconciliation(uuid)',
     -- S4's T4: the two NEW overloads join the sweep by exact signature.
     'clara.match_bank_line(uuid,jsonb,jsonb,jsonb,boolean,text,uuid)',
     'clara.settle_from_bank_line(uuid,uuid,uuid,jsonb,text,date,bigint,text,jsonb,text,text,text,uuid)'];
@@ -6844,7 +7656,7 @@ begin
     end if;
   end if;
 
-  raise notice '0040 tail 7 OK: three tables SELECT-only to the human lane under FORCE RLS with zero machine grants; 19 human functions clara_authenticated-only and owner-correct; 11 internal helpers owner-only; no wake-allowlist row';
+  raise notice '0040 tail 7 OK: three tables SELECT-only to the human lane under FORCE RLS with zero machine grants; 20 human functions clara_authenticated-only and owner-correct; 11 internal helpers owner-only; no wake-allowlist row';
 end
 $tail7$;
 
