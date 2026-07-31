@@ -170,6 +170,62 @@ function tableCells(regions) {
     .map((r) => ({ text_content: r.text_content, locator: r.locator }));
 }
 
+/** Table cells as HEADER-SCAN pseudo-lines, in (table, cell) order — the real Maybank
+ *  header block is itself a table, so the label→value adjacency the line scan needs lives
+ *  in consecutive CELLS there, not in page lines. Text-only: the header finders never
+ *  read geometry.
+ *
+ *  LEDGER TABLES ARE EXCLUDED (PR #155 review BLOCKER, empirically reproduced): a
+ *  transaction table's own text is full of header-label look-alikes — `BALANCE B/F` as a
+ *  first-row description IS an opening-balance needle, and a per-page subtotal row IS a
+ *  printed-totals needle with NO cross-reader backstop — so feeding it to the label scan
+ *  can slurp an adjacent unrelated number into the header. A table is ledger-shaped
+ *  exactly when its cells carry an addressable transaction header (an entry-date synonym
+ *  PLUS an amount column or a debit/credit pair — the same rule `readColumns` posts).
+ *  The real header table (`TARIKH PENYATA` / `NOMBOR AKAUN` / values) carries none. */
+function ledgerShapedTables(byTable) {
+  const out = new Set();
+  // WORD-BOUNDED CONTAINS, never whole-cell equality: the real Maybank column headers are
+  // TRILINGUAL COMBINED CELLS (`JUMLAH URUSNIAGA 银码 TRANSACTION AMOUNT`) that no exact
+  // match ever hits — and an undetected ledger table is the DANGEROUS direction (its text
+  // feeds the header scan), while over-detection merely skips cells the page lines already
+  // answer. So detection is deliberately greedy: any cell CONTAINING a column synonym as a
+  // whole word counts.
+  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const hasSyn = (texts, syns) => syns.some((s) => {
+    const re = new RegExp(`(?:^|[^a-z0-9])${esc(s)}(?:[^a-z0-9]|$)`);
+    return texts.some((t) => re.test(t));
+  });
+  for (const [table, cells] of byTable) {
+    const texts = cells.map((c) => normText(c.text)).filter(Boolean);
+    if (hasSyn(texts, COLUMN_SYNONYMS.entry_date)
+        && (hasSyn(texts, COLUMN_SYNONYMS.amount)
+            || (hasSyn(texts, COLUMN_SYNONYMS.debit) && hasSyn(texts, COLUMN_SYNONYMS.credit)))) {
+      out.add(table);
+    }
+  }
+  return out;
+}
+
+function cellScanLines(regions) {
+  const cells = regions
+    .filter((r) => r.field_path.startsWith("tables."))
+    .map((r) => {
+      const m = /^tables\.(\d+)\.cells\.(\d+)$/.exec(r.field_path);
+      return { text: r.text_content, table: m ? Number(m[1]) : 0, cell: m ? Number(m[2]) : 0 };
+    })
+    .sort((a, b) => a.table - b.table || a.cell - b.cell);
+  const byTable = new Map();
+  for (const c of cells) {
+    if (!byTable.has(c.table)) byTable.set(c.table, []);
+    byTable.get(c.table).push(c);
+  }
+  const ledger = ledgerShapedTables(byTable);
+  return cells
+    .filter((c) => !ledger.has(c.table))
+    .map((c) => ({ text: c.text, page: 0, y: 0, x: 0 }));
+}
+
 /** The first line whose normalized text starts with one of `prefixes`, with the label
  *  stripped off — plus the NEXT line, because a label and its figure are as often printed
  *  in two regions as in one. */
@@ -189,7 +245,16 @@ function labelled(lines, prefixes) {
       .replace(/^[\s:.\-–]+/, "")
       .replace(/[\s,;|"']+$/, "")
       .trim();
-    return { tail, next: lines[index + 1]?.text ?? "", line: line.text };
+    // `nexts` carries the SIX following regions, not one: the real Maybank layout (C-b
+    // acceptance, 202504) prints `NOMBOR AKAUN` and its value FIVE regions apart — the
+    // dwibahasa label block (`戶號 : ACCOUNT NUMBER`, `ACCOUNT`, `NUMBER`) sits between
+    // the Malay label and the digits. Callers decide how strictly to read each candidate.
+    return {
+      tail,
+      next: lines[index + 1]?.text ?? "",
+      nexts: lines.slice(index + 1, index + 7).map((l) => l.text),
+      line: line.text,
+    };
   }
   return null;
 }
@@ -222,13 +287,34 @@ function readPeriod(lines) {
   return null;
 }
 
+/** A plausible printed ACCOUNT token for a look-ahead region: an optional leading `:`
+ *  then digits/dashes/spaces ONLY — and NEVER anything that reads as a printed date in
+ *  ANY separator, and never fewer than EIGHT digits. `normalizeAccountNumber` alone
+ *  strips every non-digit, so a date region in the look-ahead window (`30/04/25`,
+ *  `30-04-25`, `30 04 25` — all "300425", six digits) would silently become an account
+ *  number (PR #155 review MAJOR: the slash-only guard missed the dash/space forms). Every
+ *  DDMMYY shape is six digits, and no Malaysian bank prints an account shorter than
+ *  eight, so the digit floor closes the class the date-parse test cannot see. */
+function accountToken(text) {
+  const s = String(text ?? "").trim().replace(/^[:\s]+/, "");
+  if (!s || !/^[\d\s-]+$/.test(s)) return null;
+  if (parseStatementDate(s.replace(/\s+/g, "/").replace(/-/g, "/"), {})) return null;
+  const normalized = normalizeAccountNumber(s);
+  return normalized && normalized.length >= 8 ? normalized : null;
+}
+
 /** The printed account number, from its own label. Never a bare digit run: an unlabelled
- *  12-digit token on a bank letterhead is as likely a branch or a reference number. */
+ *  12-digit token on a bank letterhead is as likely a branch or a reference number. The
+ *  label's own tail keeps the permissive parse (label-anchored, same-region value); the
+ *  look-ahead regions use the STRICT token shape — the real corpus separates the label
+ *  from the digits by up to five dwibahasa regions (C-b acceptance, 202504). */
 function readAccountNumber(lines) {
   const found = labelled(lines, LABELS.account_number);
   if (!found) return null;
-  for (const printed of [found.tail, found.next]) {
-    const normalized = normalizeAccountNumber(printed);
+  const tailNormalized = normalizeAccountNumber(found.tail);
+  if (tailNormalized) return { printed: String(found.tail).trim(), normalized: tailNormalized };
+  for (const printed of found.nexts ?? []) {
+    const normalized = accountToken(printed);
     if (normalized) return { printed: String(printed).trim(), normalized };
   }
   return null;
@@ -314,7 +400,26 @@ export function readStatementFromLayout(regions) {
   const lines = pageLines(rows);
   const receipt = { reader: "layout_geometry", region_count: rows.length, unread: [], notes: [] };
 
-  const header = readHeaderFromTextLines(lines);
+  // The HEADER scan reads the page lines first, then the table cells as pseudo-lines in
+  // cell order (C-b acceptance, 202504): the real Maybank layout carries its cleanest
+  // label→value adjacency INSIDE a header table (`NOMBOR AKAUN` in one cell, the digits
+  // two cells later), which the pages.* substrate never sees. Page lines stay first so a
+  // page-adjacent value keeps winning when both exist; the finders are label-anchored and
+  // refusal-biased, so extra scan text can only fill fields, never corrupt them.
+  const headerScan = lines.concat(cellScanLines(rows));
+  const header = readHeaderFromTextLines(headerScan);
+
+  // A REAL Maybank monthly statement prints NO period range — only the statement date
+  // (C-b acceptance, 202504: every header token present, no `01/04 to 30/04` anywhere).
+  // The month convention is derivable: the period is the statement date's own month up to
+  // the statement date. Derivation is honest by construction — every line date is checked
+  // against the period here AND re-checked in the DB core, and month-to-month continuity
+  // binds the endpoints, so a wrong derivation refuses loudly instead of mis-filing.
+  if (!header.period_start && !header.period_end && header.statement_date) {
+    header.period_start = `${header.statement_date.slice(0, 8)}01`;
+    header.period_end = header.statement_date;
+    receipt.notes.push("period_derived_from_statement_date");
+  }
   for (const field of HEADER_FIELDS) if (header[field] === null || header[field] === undefined) receipt.unread.push(field);
 
   const parsed = readLines(tableCells(rows), { start: header.period_start, end: header.period_end });

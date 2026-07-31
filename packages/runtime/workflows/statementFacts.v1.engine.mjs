@@ -267,6 +267,17 @@ export function normalizeAzureBankStatement(payload) {
     }
   }
 
+  // The SAME statement-month derivation reader-1 applies (statement-layout-reader.mjs):
+  // a real Maybank monthly statement prints no period range, only the statement date, so
+  // BOTH readers derive `(first of the statement month, statement date)` from their OWN
+  // date read — agreement stays a genuine two-reader property, and a date the readers
+  // disagree on still refuses. Line dates + the DB core re-check the derived window.
+  if (!header.period_start && !header.period_end && header.statement_date) {
+    header.period_start = `${header.statement_date.slice(0, 8)}01`;
+    header.period_end = header.statement_date;
+    receipt.period_derived_from_statement_date = true;
+  }
+
   const lines = [];
   for (const item of fields.Transactions?.valueArray ?? []) {
     receipt.rows_seen += 1;
