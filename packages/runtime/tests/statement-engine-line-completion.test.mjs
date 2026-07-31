@@ -114,3 +114,22 @@ test("the REAL prebuilt-bankStatement schema: per-account nesting reads (probed 
   assert.equal(read.header.period_start, "2025-06-01", "period derives from the label-completed statement date");
   assert.equal(read.receipt.lines_completed_from_content, undefined, "typed spoke — no completion");
 });
+
+test("a one-sided null running balance defers to the chain; a bilateral numeric conflict still refuses", async () => {
+  const { corroborateTwoReaders } = await import("../lib/statement-corroboration.mjs");
+  const header = {
+    institution_code: "MBB", institution_name: "Malayan Banking Berhad",
+    account_number: "514400990011", account_number_normalized: "514400990011",
+    currency: "MYR", period_start: "2025-06-01", period_end: "2025-06-30",
+    statement_date: "2025-06-30", opening_cents: 0, closing_cents: 15000,
+    total_debit_cents: 5000, total_credit_cents: 20000, line_count: 2,
+  };
+  const line = (amount, run) => ({ line_no: run === undefined ? 1 : undefined, entry_date: "2025-06-10", value_date: null, description: "X", amount_cents: amount, running_balance_cents: run });
+  const r1 = { header, lines: [ { ...line(20000), line_no: 1, running_balance_cents: 20000 }, { ...line(-5000), line_no: 2, running_balance_cents: 15000 } ] };
+  const r2null = { header, lines: [ { ...line(20000), line_no: 1, running_balance_cents: null }, { ...line(-5000), line_no: 2, running_balance_cents: null } ] };
+  const agreed = corroborateTwoReaders(r1, r2null);
+  assert.equal(agreed.lines.length, 2, "schema-absent balances agree; the chain witnesses the steps");
+  const r2wrong = { header, lines: [ { ...line(20000), line_no: 1, running_balance_cents: 99999 }, { ...line(-5000), line_no: 2, running_balance_cents: 15000 } ] };
+  assert.throws(() => corroborateTwoReaders(r1, r2wrong), (e) => e.code === "readers_disagree",
+    "two NUMBERS that differ still refuse — only absence defers");
+});

@@ -90,9 +90,15 @@ function headerDisagreements(a, b) {
 /**
  * Per-line numeric-skeleton disagreements. entry_date and amount_cents are compared
  * ALWAYS. running_balance_cents is compared always TOO on the two-reader path: a printed
- * statement prints one on every row, so a reader that could not read it has not read the
- * row — treating a one-sided null as agreement would let a half-read line into the chain
- * with no printed witness for its step.
+ * statement prints one on every row — but a reader's SOURCE may carry no per-row balance
+ * slot at all (probed live 2026-07-31: Azure's per-account typed transactions have
+ * Date/Description/amounts and NO Balance field), and a schema absence is not a failed
+ * read of the printed page. So: a running-balance disagreement fires when BOTH readers
+ * carry a number and the numbers differ; a ONE-SIDED null defers that row's balance
+ * witness to the CHAIN IDENTITY, which re-derives every step from the agreed opening +
+ * amounts and must close over whatever printed balances exist (WC-R7's own logic — the
+ * chain is a reader), and the DB core walks the same chain again at persist. Dates and
+ * amounts stay strictly bilateral: those have no independent re-derivation.
  */
 function lineDisagreements(a, b) {
   const left = Array.isArray(a) ? a : [];
@@ -105,9 +111,9 @@ function lineDisagreements(a, b) {
     if (l?.entry_date !== r?.entry_date) out.push(`line_${n}_entry_date`);
     if (l?.amount_cents !== r?.amount_cents) out.push(`line_${n}_amount_cents`);
     if (
-      !Number.isSafeInteger(l?.running_balance_cents)
-      || !Number.isSafeInteger(r?.running_balance_cents)
-      || l.running_balance_cents !== r.running_balance_cents
+      Number.isSafeInteger(l?.running_balance_cents)
+      && Number.isSafeInteger(r?.running_balance_cents)
+      && l.running_balance_cents !== r.running_balance_cents
     ) out.push(`line_${n}_running_balance_cents`);
   }
   return out;
