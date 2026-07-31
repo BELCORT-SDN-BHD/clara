@@ -104,18 +104,31 @@ const SELECT_OPENING_SEED_SQL =
   `select id, firm_id, client_id, plan_id, state, tie_document_id, tie_document_sha256
      from clara.opening_seed_registry where id = $1`;
 
-// The authoritative extraction is the sole done + non-superseded run for the document
-// (the 0017 authority trigger maintains exactly one). Firm-scoped defense-in-depth on
-// top of the permissive runtime RLS. `documents` is deliberately NOT joined (no runtime
-// grant); the writer re-binds the tie document itself.
+// NEWEST PRODUCER, NEVER `superseded_by is null` (PR #154, the C-b acceptance lesson —
+// the third sighting of this bug class after statement reader-1 and readPriorGlCells):
+// the 0017 authority trigger supersedes KIND-BLIND, so a later doc_classify verdict
+// "supersedes" the extraction that actually holds these typed regions and the bare filter
+// returns zero rows for every classified document. The selector here is the typed regions
+// themselves: the newest done extraction that CARRIES `opening_tb.line` rows wins, so a
+// re-run of the producer replaces an older run and no verdict of another kind can starve
+// it. Firm-scoped defense-in-depth on top of the permissive runtime RLS. `documents` is
+// deliberately NOT joined (no runtime grant); the writer re-binds the tie document itself.
 const SELECT_TIE_REGIONS_SQL =
-  `select dr.id as region_id, de.id as extraction_id, dr.text_content
-     from clara.document_extractions de
+  `with newest as (
+     select de.id, de.firm_id
+       from clara.document_extractions de
+      where de.document_id = $1 and de.firm_id = $2 and de.status = 'done'
+        and exists (
+          select 1 from clara.document_regions dr
+           where dr.extraction_id = de.id and dr.firm_id = de.firm_id
+             and dr.field_path = 'opening_tb.line')
+      order by de.extracted_at desc, de.version_n desc, de.id desc
+      limit 1)
+   select dr.id as region_id, de.id as extraction_id, dr.text_content
+     from newest de
      join clara.document_regions dr
        on dr.extraction_id = de.id and dr.firm_id = de.firm_id
-    where de.document_id = $1 and de.firm_id = $2
-      and de.status = 'done' and de.superseded_by is null
-      and dr.field_path = 'opening_tb.line'
+    where dr.field_path = 'opening_tb.line'
     order by dr.id`;
 
 /** Load an opening seed by id (null when absent). */
