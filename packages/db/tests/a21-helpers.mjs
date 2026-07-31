@@ -317,6 +317,10 @@ export async function notificationsMatching(fragment) {
   return r.rows.map((x) => x.row).filter((row) => JSON.stringify(row).includes(fragment));
 }
 
+// SST-watch month anchors (rot guard against the evaluator's REAL Asia/Kuala_
+// Lumpur wall clock — see a21-watch-anchors.mjs for the mechanism/why).
+export * from "./a21-watch-anchors.mjs";
+
 // ---------------------------------------------------------------------------
 // Watch fixtures — synthetic clients whose turnover arithmetic is fully pinned.
 // Deterministic amounts; the debit side always lands on an EXPLICITLY-EXCLUDED
