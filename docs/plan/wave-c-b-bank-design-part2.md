@@ -294,3 +294,21 @@ zero-magnitude money · dwibahasa label/value splits + header-table adjacency ·
 statement-month period derivation (both readers, absence-only) · trilingual combined
 column headers (word-bounded synonym containment, specificity before position, row-local
 ledger detection) · the statement-refusal detail log.
+
+**ACCEPTANCE ROUND CLOSED (2026-07-31, ADR-053 — the wave's definition of done met):**
+sandbox synthetic first (structured lane live · full ledger surface · consent fail-closed
+then lit), then ALL NINE real RPR months 202504–202512 OCR-ingested (unbroken continuity
+chain, 54 lines, December = the real account closure to zero) and 13 settlements through
+the production verbs (nine ≥RM100k via pending→attested-approve→complete — the solo-firm
+passthrough x38.v proved — incl. one deposit settling two invoices exactly). 41 lines stay
+honestly unmatched (payroll/statutory/inter-co with no booked counterpart; the ROME PUBLIC
+payment→bill allocation awaits the owner). The acceptance forced seven shipped fixes
+(PRs #154–#164 + migration 0039), each a real-corpus shape no synthetic battery had seen:
+kind-honest supersede reads · the real-Maybank grammar family (`.00` zero-magnitude ·
+dwibahasa label/value splits · statement-month period derivation · trilingual combined
+column headers, specificity-first, row-local ledger detection · split label/value money
+via labelledAll · zero-amount closure-ceremony rows skipped in both parsers) · Azure's
+per-account typed schema (probed live on-machine; line completion per owner ruling B, the
+LLM-structured read stays seam A) · null-defers-to-chain in BOTH halves (runtime PR #160 +
+DB 0039) · refusal observability (bounded log + machine ndjson sink). The per-statement
+tie-banner drift across months is the DESIGNED shape — C-c's tie-out owns closing it.

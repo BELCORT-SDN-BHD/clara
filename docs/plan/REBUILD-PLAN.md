@@ -136,8 +136,11 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > AR/AP open-item subledger + balanced-pair allocation, all four approve paths hooked, the F3
 > debt PAID on the live book; design of record `docs/plan/wave-c-a-subledger-design.md` v2,
 > rulings WCA-R1..R9; a FOUR-round two-model review ladder closed 10+ blocker-class findings,
-> the last set red-proofed). NEXT: C-b (bank identity · statement ingest · matching), fresh
-> session, design-first — the two named C-b grilling questions stand (contract §4 C-b item 4).**
+> the last set red-proofed). C-b CLOSED, LIVE AND ACCEPTED (ADR-053, 2026-07-31): 0038+0039, statementFacts_v1,
+> runtime v50 — nine real RPR months OCR-ingested chain-to-the-sen, 13 production settlements
+> (incl. the solo-firm high-stakes attested flow), 41 lines honestly unmatched; seven
+> acceptance-driven fixes PRs #154–#164. NEXT: C-c (tie-out · aging · learn loop), fresh
+> session, design-first — feeders named in PROJECTLOG PART 2.**
 > The extraction-slice / settlement history above stands as written (ADR-047..050 closed it all).
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
