@@ -151,3 +151,53 @@ test("LEDGER-shaped table cells never feed the header scan: BALANCE B/F and subt
   assert.equal(read.header.total_debit_cents, null);
   assert.equal(read.header.total_credit_cents, null);
 });
+
+test("entry_date maps to the ENTRY DATE column in BOTH column orders (review: specificity beats position)", () => {
+  const build = (invert) => {
+    // `col` is the PRINTED COLUMN position (x); the flat cell index only names the region.
+    const colX = (col) => invert ? 60 - col * 20 : col * 20;
+    const cellRow = (i, col, text, y) => ({
+      field_path: `tables.0.cells.${i}`, text_content: text,
+      locator: { page_number: 1, polygon: [colX(col), y, colX(col) + 18, y] },
+    });
+    return [
+      { field_path: "pages.1.lines.0", text_content: "Maybank", locator: { page_number: 1, polygon: [0, 0, 0, 0] } },
+      { field_path: "pages.1.lines.1", text_content: "STATEMENT DATE : 30/04/2025", locator: { page_number: 1, polygon: [0, 5, 0, 5] } },
+      { field_path: "pages.1.lines.2", text_content: "BEGINNING BALANCE : 100.00", locator: { page_number: 1, polygon: [0, 6, 0, 6] } },
+      { field_path: "pages.1.lines.3", text_content: "ENDING BALANCE : 200.00", locator: { page_number: 1, polygon: [0, 7, 0, 7] } },
+      { field_path: "pages.1.lines.4", text_content: "TOTAL DEBIT : .00", locator: { page_number: 1, polygon: [0, 8, 0, 8] } },
+      { field_path: "pages.1.lines.5", text_content: "TOTAL CREDIT : 100.00", locator: { page_number: 1, polygon: [0, 9, 0, 9] } },
+      cellRow(0, 0, "TARIKH NILAI 仄過賬日期 VALUE DATE", 20),
+      cellRow(1, 1, "TARIKH MASUK 進支日期 ENTRY DATE", 20),
+      cellRow(2, 2, "JUMLAH URUSNIAGA 银码 TRANSACTION AMOUNT", 20),
+      cellRow(3, 3, "BAKI PENYATA 結單存餘 STATEMENT BALANCE", 20),
+      cellRow(4, 0, "02/04/2025", 30),
+      cellRow(5, 1, "01/04/2025", 30),
+      cellRow(6, 2, "+100.00", 30),
+      cellRow(7, 3, "200.00", 30),
+    ];
+  };
+  for (const invert of [false, true]) {
+    const read = readStatementFromLayout(build(invert));
+    assert.equal(read.lines.length, 1, `one transaction parses (invert=${invert})`);
+    assert.equal(read.lines[0].entry_date, "2025-04-01",
+      `entry_date comes from the ENTRY DATE column, never the VALUE DATE one (invert=${invert})`);
+    assert.equal(read.lines[0].value_date, "2025-04-02", `value_date likewise (invert=${invert})`);
+  }
+});
+
+test("one stray amount-vocabulary cell cannot exclude the whole header table (review: row-local ledger detection)", () => {
+  const cell = (i, text) => ({
+    field_path: `tables.0.cells.${i}`, text_content: text,
+    locator: { page_number: 1, polygon: [(i % 2) * 40, Math.floor(i / 2) * 10, (i % 2) * 40 + 30, Math.floor(i / 2) * 10] },
+  });
+  const read = readStatementFromLayout([
+    { field_path: "pages.1.lines.0", text_content: "Maybank", locator: { page_number: 1, polygon: [0, 0, 0, 0] } },
+    cell(0, "TARIKH PENYATA"), cell(1, "30/04/25"),
+    cell(2, "NOMBOR AKAUN"), cell(3, "514400990011"),
+    cell(4, "SILA SEMAK AMAUN ANDA"), cell(5, "TERIMA KASIH"),
+  ]);
+  assert.equal(read.header.account_number_normalized, "514400990011",
+    "a disclaimer containing an amount word shares the table; the header must still read");
+  assert.equal(read.header.statement_date, "2025-04-30");
+});
