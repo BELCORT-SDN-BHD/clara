@@ -27,6 +27,7 @@ import {
   freshWatchClient, approvedTurnoverEntry, openWatchRow, watchEventRows, watchEventCount,
   ackWatch, snoozeWatch, resolveWatch, recordFutureAttestation,
   evalRunCount, latestEvalRun, firmOf,
+  mytMonthDate, mytMonthStart, mytApplicationDue,
 } from "./a21-helpers.mjs";
 
 let has16 = false;
@@ -58,7 +59,7 @@ test("§2 ACK is an overlay: it stamps who/when + an 'acknowledged' event, and N
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_ack_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: "2026-06-04" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: await mytMonthDate(-1, 4) });
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.equal(w?.state, "crossed", "crossed watch (mandatory setup)");
@@ -79,7 +80,7 @@ test("§2 SNOOZE is bounded and dated: >60 days is REFUSED; a valid snooze stamp
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_snz_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 45_000_000, date: "2026-06-05" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 45_000_000, date: await mytMonthDate(-1, 5) });
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.equal(w?.state, "early_warning", "early_warning watch (mandatory setup)");
@@ -99,7 +100,7 @@ test("§2 RESOLVE demands a TYPED conclusion: an untyped conclusion refuses; 're
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_res_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: "2026-06-06" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: await mytMonthDate(-1, 6) });
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.equal(w?.state, "crossed", "crossed watch (mandatory setup)");
@@ -128,24 +129,28 @@ test("§2 EARLIEST CROSSING: cumulative months cross at the right month-end; a B
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_backdate_${randomUUID().slice(0, 6)}` });
-  // Feb-2026 RM300k, Jun-2026 RM250k → first >500k month-end is Jun-2026.
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 30_000_000, date: "2026-02-10" });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 25_000_001, date: "2026-06-10" });
+  // Anchored to the DB's OWN Asia/Kuala_Lumpur clock (see a21-watch-anchors.mjs)
+  // — never a fixed calendar month. n=-5 (5 months back) RM300k, n=-1 (the last
+  // completed month) RM250k → first >500k month-end is the n=-1 month.
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 30_000_000, date: await mytMonthDate(-5, 10) });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 25_000_001, date: await mytMonthDate(-1, 10) });
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "G");
   assert.equal(w?.state, "crossed", "the cumulative rolling test crosses");
-  assert.equal(w.earliest_crossing_month, "2026-06-01", "earliest crossing = June-2026 (Feb alone was 300k)");
-  assert.equal(w.application_due, "2026-07-31", "application due = 2026-07-31 (last day of M+1)");
-  // Acknowledge — then a BACKDATED approved posting makes April the crossing month.
+  assert.equal(w.earliest_crossing_month, await mytMonthStart(-1), "earliest crossing = the last completed month (n=-5 alone was 300k)");
+  assert.equal(w.application_due, await mytApplicationDue(-1), "application due = last day of M+1");
+  // Acknowledge — then a BACKDATED approved posting makes n=-3 the crossing month.
   await ackWatch(users.alice, { watch: w.id, rationale: "seen; monitoring" });
   const rearmBefore = await watchEventCount(w.id, "re_armed");
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 25_000_001, date: "2026-04-15" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 25_000_001, date: await mytMonthDate(-3, 15) });
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
-  // Rung 3 — earlier backdated crossing: Feb 300k + Apr 250k… = 550k at Apr month-end.
-  assert.equal(w.earliest_crossing_month, "2026-04-01", "the backdated posting moves the earliest crossing EARLIER (April-2026)");
-  // Rung 4 — due-date worsening: due moves 2026-07-31 → 2026-05-31 (now past ⇒ overdue).
-  assert.equal(w.application_due, "2026-05-31", "the statutory due date worsens with the earlier crossing");
+  // Rung 3 — earlier backdated crossing: n=-5 300k + n=-3 250k… = 550k at n=-3 month-end.
+  assert.equal(w.earliest_crossing_month, await mytMonthStart(-3), "the backdated posting moves the earliest crossing EARLIER");
+  // Rung 4 — due-date worsening: due moves earlier (now past ⇒ overdue, since
+  // n=-3's due date — the last day of month n=-2 — is always in the past
+  // relative to "today", which sits in month n=0).
+  assert.equal(w.application_due, await mytApplicationDue(-3), "the statutory due date worsens with the earlier crossing");
   assert.equal(w.state, "overdue", "a due date already past escalates the case to overdue DESPITE the acknowledgement");
   assert.ok((await watchEventCount(w.id, "re_armed")) > rearmBefore, "the backdated earlier crossing RE-ARMS the acknowledged watch (a re_armed event is appended)");
 });
@@ -154,13 +159,15 @@ test("§2 RE-ARM rungs 1+2: an acked early_warning re-arms on CROSSING; an acked
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_rungs12_${randomUUID().slice(0, 6)}` });
-  // Stage 1 — early_warning (RM450k), ack, then cross (rung 1).
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 45_000_000, date: "2026-06-03" });
+  // Stage 1 — early_warning (RM450k), ack, then cross (rung 1). Anchored to the
+  // DB's OWN Asia/Kuala_Lumpur clock (n=-1, the last completed month) — never
+  // a fixed calendar month; see a21-watch-anchors.mjs.
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 45_000_000, date: await mytMonthDate(-1, 3) });
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "G");
   assert.equal(w?.state, "early_warning", "early_warning (mandatory setup)");
   await ackWatch(users.alice, { watch: w.id, rationale: "watching" });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 5_000_001, date: "2026-06-11" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 5_000_001, date: await mytMonthDate(-1, 11) });
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
   assert.equal(w.state, "crossed", "the crossing fires through the acknowledgement (rung 1 — never suppressed)");
@@ -169,10 +176,10 @@ test("§2 RE-ARM rungs 1+2: an acked early_warning re-arms on CROSSING; an acked
   // Stage 2 — ack at crossed F0=50,000,001; rung = F0 + 10pp of threshold = 55,000,001.
   await ackWatch(users.alice, { watch: w.id, rationale: "crossed acknowledged; preparing registration" });
   const rearm0 = await watchEventCount(w.id, "re_armed");
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 4_999_999, date: "2026-06-12" }); // → 55,000,000 (BELOW the rung)
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 4_999_999, date: await mytMonthDate(-1, 12) }); // → 55,000,000 (BELOW the rung)
   await evaluateSstWatch(client);
   assert.equal(await watchEventCount(w.id, "re_armed"), rearm0, "growth BELOW +10pp of threshold does NOT re-arm (55,000,000 < 55,000,001)");
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 2, date: "2026-06-13" }); // → 55,000,002 (past the rung)
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 2, date: await mytMonthDate(-1, 13) }); // → 55,000,002 (past the rung)
   await evaluateSstWatch(client);
   assert.ok((await watchEventCount(w.id, "re_armed")) > rearm0, "growth past +10pp of threshold RE-ARMS the acknowledged watch (rung 2)");
   const w2 = await openWatchRow(client, "G");
@@ -183,7 +190,7 @@ test("§2 RE-ARM rung 5: snooze EXPIRY re-arms — a lapsed snoozed_until stops 
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_rung5_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: "2026-06-07" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 50_000_001, date: await mytMonthDate(-1, 7) });
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.equal(w?.state, "crossed", "crossed watch (mandatory setup)");
@@ -205,12 +212,13 @@ test("§2 RE-ARM rung 6 + WA21-R6: an attestation drives future_method_status; i
   if (skip16(t, has16)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `a21_rung6_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 45_000_000, date: "2026-06-08" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 45_000_000, date: await mytMonthDate(-1, 8) });
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "G");
   assert.equal(w?.future_method_status, "not_assessed", "no attestation ⇒ not_assessed (WA21-R6 — never inferred from trends)");
-  // A live below-threshold attestation (admin+; expires next year).
-  await recordFutureAttestation(users.alice, { client, serviceGroup: "G", expectedCents: 30_000_000, horizonStart: "2026-08-01", expiresAt: "2027-07-31" });
+  // A live below-threshold attestation (admin+; expires a year out — anchored
+  // to the DB's OWN clock so it stays genuinely live no matter when this runs).
+  await recordFutureAttestation(users.alice, { client, serviceGroup: "G", expectedCents: 30_000_000, horizonStart: await mytMonthStart(1), expiresAt: await mytMonthDate(12, 31) });
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
   assert.equal(w.future_method_status, "attested_below", "a live below-threshold attestation shows attested_below");
@@ -219,9 +227,12 @@ test("§2 RE-ARM rung 6 + WA21-R6: an attestation drives future_method_status; i
   // EXPIRY: record a superseding attestation that is ALREADY expired (recording
   // historical paperwork is legitimate data entry). If the writer refuses a past
   // expiry, fall back to a root INSERT (append-only admits inserts).
+  // Expired relative to the DB's OWN clock — the last completed month's start
+  // is always strictly before "today", no matter when this runs.
+  const alreadyExpired = await mytMonthStart(-1);
   let recorded = true;
   try {
-    await recordFutureAttestation(users.alice, { client, serviceGroup: "G", expectedCents: 30_000_000, horizonStart: "2026-08-01", expiresAt: "2026-07-01" });
+    await recordFutureAttestation(users.alice, { client, serviceGroup: "G", expectedCents: 30_000_000, horizonStart: await mytMonthStart(1), expiresAt: alreadyExpired });
   } catch (e) {
     recorded = false;
     noteLane(`record_future_attestation refused a past expiry (${e.code}) — falling back to a root insert (interface note)`);
@@ -230,8 +241,8 @@ test("§2 RE-ARM rung 6 + WA21-R6: an attestation drives future_method_status; i
     const firm = await firmOf(client);
     await rootQuery(
       `insert into clara.sst_future_attestations (firm_id, client_id, service_group, expected_cents, horizon_start, evidence_note, reviewer, as_of, expires_at)
-       values ($1, $2, 'G', 30000000, '2026-08-01', 'rig expired attestation', 'rig reviewer', current_date, '2026-07-01')`,
-      [firm, client],
+       values ($1, $2, 'G', 30000000, $3, 'rig expired attestation', 'rig reviewer', current_date, $4)`,
+      [firm, client, await mytMonthStart(1), alreadyExpired],
     );
   }
   await evaluateSstWatch(client);

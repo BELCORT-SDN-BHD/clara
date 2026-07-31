@@ -34,6 +34,7 @@ import {
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, classifyDocument, rm, reasonOf,
   freshWatchClient, approvedTurnoverEntry, evaluateSstWatch, openWatchRow, watchEventRows,
   setTurnoverClassification, resolveWatch, fnSource, reviseEntry, setDocumentKind, docKind,
+  mytMonthDate, mytMonthStart, mytApplicationDue,
   AP, EXP,
 } from "./a21-helpers.mjs";
 // 0022 / X4: whether the OCR-sales anchor lane is held shut by the extraction-slice dark
@@ -412,8 +413,14 @@ test("ADV-7: a CURRENT-month crossing is PROVISIONAL only; a completed-month cro
   if (skipHere(t)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `adv7_${randomUUID().slice(0, 6)}` });
-  // Over the threshold ENTIRELY inside the month in progress.
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: THRESHOLD_CENTS + 1, date: "2026-07-15" });
+  // Over the threshold ENTIRELY inside the month in progress. Anchored to the
+  // DB's OWN Asia/Kuala_Lumpur clock (n=0), never a fixed calendar month — a
+  // hardcoded literal here is exactly what rotted this cell across a real
+  // month rollover (see a21-watch-anchors.mjs). Day 1 of the CURRENT month —
+  // never a later day — because the evaluator excludes any posting_date >
+  // v_today (0016 §2 "future-dated entries are excluded"); day 1 of the month
+  // in progress is <= today by construction, no matter what day it is today.
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: THRESHOLD_CENTS + 1, date: await mytMonthDate(0, 1) });
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "G");
   assert.ok(w, "the watch exists on activity");
@@ -422,35 +429,39 @@ test("ADV-7: a CURRENT-month crossing is PROVISIONAL only; a completed-month cro
   assert.equal(w.application_due, null, "no statutory deadline starts before the month ends");
   assert.equal(w.provisional_crossed, true, "the provisional signal IS raised (visibility without a statutory claim)");
   assert.equal(Number(w.provisional_included_cents), THRESHOLD_CENTS + 1, "the provisional figure is exact to the sen");
-  // The same amount in a COMPLETED month crosses with the statutory countdown.
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: THRESHOLD_CENTS + 1, date: "2026-06-15" });
+  // The same amount in a COMPLETED month (n=-1, the last completed MYT month)
+  // crosses with the statutory countdown.
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: THRESHOLD_CENTS + 1, date: await mytMonthDate(-1, 15) });
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
   assert.equal(w.state, "crossed", "a completed-month crossing IS statutory");
-  assert.equal(w.earliest_crossing_month, "2026-06-01", "the crossing month is the completed month");
-  assert.equal(w.application_due, "2026-07-31", "application due the last day of the following month (s.13(1))");
+  assert.equal(w.earliest_crossing_month, await mytMonthStart(-1), "the crossing month is the completed month");
+  assert.equal(w.application_due, await mytApplicationDue(-1), "application due the last day of the following month (s.13(1))");
 });
 
 test("ADV-8: an ended-month attested_above future method creates liability + the deadline (earlier-of-the-two-methods)", async (t) => {
   if (skipHere(t)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `adv8_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 100_00, date: "2026-06-05" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 100_00, date: await mytMonthDate(-1, 5) });
   // A signed above-threshold 12-month attestation, as-of LAST month (its month
   // has ended). The audited writer stamps as_of=current_date, so the ended-month
   // record rides a root insert (append-only admits inserts; interface note).
+  // Anchored to the DB's OWN Asia/Kuala_Lumpur clock (never a fixed calendar
+  // month — see a21-watch-anchors.mjs) so the "ended" premise stays true no
+  // matter when the suite runs.
   const firm = await firmOf(client);
   await rootQuery(
     `insert into clara.sst_future_attestations (firm_id, client_id, service_group, expected_cents, horizon_start, evidence_note, reviewer, as_of, expires_at)
-     values ($1, $2, 'G', $3, '2026-07-01', 'adv-8 signed 12-month mandate above threshold', 'adv reviewer', '2026-06-20', '2027-06-20')`,
-    [firm, client, THRESHOLD_CENTS + 10_000_00],
+     values ($1, $2, 'G', $3, $4, 'adv-8 signed 12-month mandate above threshold', 'adv reviewer', $5, $6)`,
+    [firm, client, THRESHOLD_CENTS + 10_000_00, await mytMonthStart(0), await mytMonthDate(-1, 20), await mytMonthDate(11, 20)],
   );
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.equal(w.future_method_status, "attested_above", "the future method reads attested_above");
   assert.equal(w.state, "crossed", "an ended-month attested_above IS liability — never a mere label");
-  assert.equal(w.earliest_crossing_month, "2026-06-01", "the crossing month is the attestation's (ended) month");
-  assert.equal(w.application_due, "2026-07-31", "the same statutory deadline engine drives the future method");
+  assert.equal(w.earliest_crossing_month, await mytMonthStart(-1), "the crossing month is the attestation's (ended) month");
+  assert.equal(w.application_due, await mytApplicationDue(-1), "the same statutory deadline engine drives the future method");
   const kinds = (await watchEventRows(w.id)).map((e) => e.event_kind);
   assert.ok(kinds.includes("created") || kinds.includes("tier_change"), `the transition trail exists (got ${kinds.join(",")})`);
 });
@@ -459,7 +470,9 @@ test("ADV-9: a crossed group never disappears — reclassifying the account keep
   if (skipHere(t)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `adv9_${randomUUID().slice(0, 6)}`, groups: { [INC]: "G", [INC_I]: "I" } });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: THRESHOLD_CENTS + 1, date: "2026-06-10", account: INC_I });
+  // Anchored to the DB's OWN Asia/Kuala_Lumpur clock (n=-1, the last completed
+  // month) — never a fixed calendar month; see a21-watch-anchors.mjs.
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: THRESHOLD_CENTS + 1, date: await mytMonthDate(-1, 10), account: INC_I });
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "I");
   assert.equal(w?.state, "crossed", "group I crossed (mandatory setup)");
@@ -468,7 +481,7 @@ test("ADV-9: a crossed group never disappears — reclassifying the account keep
   // month (admin+ with evidence — the ADV-10 floor).
   await setTurnoverClassification(users.alice, {
     client, accountCode: INC_I, classification: "excluded", serviceGroup: "I",
-    reason: "adv-9 reclassification", evidence: "adv-9 evidence", effectiveFrom: "2026-07-01",
+    reason: "adv-9 reclassification", evidence: "adv-9 evidence", effectiveFrom: await mytMonthStart(0),
   });
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "I");
@@ -481,14 +494,16 @@ test("ADV-10: watch-lowering is admin+ WITH evidence — group reassignment and 
   if (skipHere(t)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `adv10_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: THRESHOLD_CENTS + 1, date: "2026-06-11" });
+  // Anchored to the DB's OWN Asia/Kuala_Lumpur clock (n=-1, the last completed
+  // month) — never a fixed calendar month; see a21-watch-anchors.mjs.
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: THRESHOLD_CENTS + 1, date: await mytMonthDate(-1, 11) });
   await evaluateSstWatch(client);
   const w = await openWatchRow(client, "G");
   assert.equal(w?.state, "crossed", "crossed watch (mandatory setup)");
   // (a) a BOOKKEEPER may not reassign the service group (turnover splitting).
   let err = null;
   try {
-    await setTurnoverClassification(users.bob, { client, accountCode: INC, classification: "included", serviceGroup: "I", effectiveFrom: "2026-07-10" });
+    await setTurnoverClassification(users.bob, { client, accountCode: INC, classification: "included", serviceGroup: "I", effectiveFrom: await mytMonthDate(0, 10) });
   } catch (e) { err = e; }
   assert.ok(err, "a bookkeeper's service-group reassignment is refused");
   assert.equal(err.code, "CLR04", `the refusal is the admin floor (got ${err.code})`);
@@ -502,14 +517,14 @@ test("ADV-10: watch-lowering is admin+ WITH evidence — group reassignment and 
   // (c) an ADMIN lowering WITHOUT evidence is refused.
   err = null;
   try {
-    await setTurnoverClassification(users.alice, { client, accountCode: INC, classification: "excluded", evidence: "", effectiveFrom: "2026-07-11" });
+    await setTurnoverClassification(users.alice, { client, accountCode: INC, classification: "excluded", evidence: "", effectiveFrom: await mytMonthDate(0, 11) });
   } catch (e) { err = e; }
   assert.ok(err, "an evidence-less lowering is refused even for admin");
   assert.equal(err.code, "CLR10", `the refusal demands evidence (got ${err.code})`);
   // (d) the ADMIN path with evidence works (the floor blocks roles, not the firm).
   await setTurnoverClassification(users.alice, {
     client, accountCode: INC, classification: "included", serviceGroup: "I",
-    evidence: "adv-10 admin group review", effectiveFrom: "2026-07-12",
+    evidence: "adv-10 admin group review", effectiveFrom: await mytMonthDate(0, 12),
   });
 });
 
@@ -620,12 +635,15 @@ test("R3-3 (R1#8): liability is STICKY — attestation expiry/replacement re-arm
   if (skipHere(t)) return;
   const { users } = world;
   const client = await freshWatchClient(users.alice, { name: `r33_${randomUUID().slice(0, 6)}` });
-  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 100_00, date: "2026-06-05" });
+  await approvedTurnoverEntry({ maker: users.alice, checker: users.bob, client, cents: 100_00, date: await mytMonthDate(-1, 5) });
   const firm = await firmOf(client);
+  // Anchored to the DB's OWN Asia/Kuala_Lumpur clock throughout (never a fixed
+  // calendar month — see a21-watch-anchors.mjs) so "ended month" / "still live"
+  // / "now expired" stay true no matter when the suite runs.
   await rootQuery(
     `insert into clara.sst_future_attestations (firm_id, client_id, service_group, expected_cents, horizon_start, evidence_note, reviewer, as_of, expires_at)
-     values ($1, $2, 'G', $3, '2026-07-01', 'r3-3 above-threshold mandate', 'r3 reviewer', '2026-06-20', '2027-06-20')`,
-    [firm, client, THRESHOLD_CENTS + 10_000_00],
+     values ($1, $2, 'G', $3, $4, 'r3-3 above-threshold mandate', 'r3 reviewer', $5, $6)`,
+    [firm, client, THRESHOLD_CENTS + 10_000_00, await mytMonthStart(0), await mytMonthDate(-1, 20), await mytMonthDate(11, 20)],
   );
   await evaluateSstWatch(client);
   let w = await openWatchRow(client, "G");
@@ -634,23 +652,29 @@ test("R3-3 (R1#8): liability is STICKY — attestation expiry/replacement re-arm
   // REPLACEMENT: a newer below-threshold attestation must NOT erase liability.
   await rootQuery(
     `insert into clara.sst_future_attestations (firm_id, client_id, service_group, expected_cents, horizon_start, evidence_note, reviewer, as_of, expires_at)
-     values ($1, $2, 'G', 100, '2026-08-01', 'r3-3 later below-threshold view', 'r3 reviewer', current_date, '2027-07-01')`,
-    [firm, client],
+     values ($1, $2, 'G', 100, $3, 'r3-3 later below-threshold view', 'r3 reviewer', current_date, $4)`,
+    [firm, client, await mytMonthStart(1), await mytMonthStart(12)],
   );
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
   assert.equal(w.state, "crossed", "a below-threshold REPLACEMENT never rewrites crossed back to monitored");
-  assert.equal(w.earliest_crossing_month, "2026-06-01", "the crossed month survives the replacement");
+  assert.equal(w.earliest_crossing_month, await mytMonthStart(-1), "the crossed month survives the replacement");
   assert.equal(w.application_due, dueBefore, "the statutory deadline survives the replacement");
-  // EXPIRY: expire every attestation — liability still survives; freshness re-arms.
+  // EXPIRY: expire every attestation (a month strictly before "today" — always
+  // in the past by construction) — liability still survives; freshness re-arms.
   await ackWatchSafe(users.alice, w.id);
+  const expiredMonth = await mytMonthStart(-1);
+  // Multi-statement text (SET .. UPDATE .. RESET) rules out the parameterized
+  // (extended-protocol) form — rootQuery's simple-query path is used instead,
+  // matching the pre-existing idiom (client id already rode this way); the date
+  // is a pad2-controlled 'YYYY-MM-DD' from a21-watch-anchors.mjs, never raw input.
   await rootQuery(
-    "set session_replication_role = replica; update clara.sst_future_attestations set expires_at='2026-07-01' where client_id='" + client + "'; reset session_replication_role",
+    `set session_replication_role = replica; update clara.sst_future_attestations set expires_at='${expiredMonth}' where client_id='${client}'; reset session_replication_role`,
   );
   await evaluateSstWatch(client);
   w = await openWatchRow(client, "G");
   assert.equal(w.state, "crossed", "attestation EXPIRY never erases the crossed liability");
-  assert.equal(w.earliest_crossing_month, "2026-06-01", "the crossed month survives expiry");
+  assert.equal(w.earliest_crossing_month, await mytMonthStart(-1), "the crossed month survives expiry");
   assert.equal(w.future_method_status, "expired", "the future-method FRESHNESS flag flips to expired");
   assert.equal(w.acknowledged_at, null, "the expiry re-armed the acknowledged watch (freshness, not liability)");
 });
