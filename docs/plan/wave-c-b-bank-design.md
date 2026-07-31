@@ -274,6 +274,18 @@ still corroborates its full header (the degenerate-case cell **[R1]**). Descript
 from reader-2 and are never load-bearing. Structured lane: the parse is deterministic and
 **the chain is the second reader** (WC-R7); printed totals when present are checked.
 
+> **[ACCEPTANCE-ROUND AMENDMENT 2026-07-31 — the real corpus recut both paragraphs above;
+> the mechanism of record is `wave-c-b-bank-design-part3.md`.]** Reader-2's typed facts live
+> PER-ACCOUNT (`fields.Accounts[].valueObject`; the response carries NO statement-date
+> fields and NO tables), and an EMPTY typed transaction array completes from the response's
+> OWN recognition through reader-1's grammar (owner ruling B, receipted
+> `lines_completed_from_content`). "Period bounds" may be DERIVED (statement-month → the
+> statement date), absence-only, by each reader from its own date read — a printed range
+> always wins. And the per-line skeleton compares `running_balance_cents` only when BOTH
+> readers carry a number: a one-sided null defers that row's balance witness to the CHAIN
+> identity (runtime #160 + migration `0039`); `entry_date`/`amount_cents` stay strict and
+> bilateral always.
+
 **Account binding order [R1]:** binding (and any proposal) happens only AFTER header
 corroboration — an uncorroborated header can never emit a proposal. No live
 `bank_accounts` row for the corroborated (bank identity, digits-only number) →
