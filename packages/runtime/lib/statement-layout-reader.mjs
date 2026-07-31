@@ -150,7 +150,7 @@ export async function readStatementLayout(client, { documentId, firmId }) {
   };
 }
 
-/** Page-line regions (`pages.N.lines.M`) in printed reading order — the header substrate. */
+/** Page-line regions in printed reading order — the header substrate. */
 function pageLines(regions) {
   return regions
     .filter((r) => r.field_path.startsWith("pages."))
@@ -183,19 +183,20 @@ function tableCells(regions) {
  *  exactly when its cells carry an addressable transaction header (an entry-date synonym
  *  PLUS an amount column or a debit/credit pair — the same rule `readColumns` posts).
  *  The real header table (`TARIKH PENYATA` / `NOMBOR AKAUN` / values) carries none. */
+/** Word-bounded synonym containment — the ONE matching idiom for column/ledger
+ *  detection: Maybank's trilingual combined cells (`JUMLAH URUSNIAGA 银码 TRANSACTION
+ *  AMOUNT`) never hit whole-cell equality, and both consumers fail safe on over-match. */
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function containsSynonym(text, syns) {
+  return syns.some((s) => new RegExp(`(?:^|[^a-z0-9])${escRe(s)}(?:[^a-z0-9]|$)`).test(text));
+}
+
 function ledgerShapedTables(byTable) {
   const out = new Set();
-  // WORD-BOUNDED CONTAINS, never whole-cell equality: the real Maybank column headers are
-  // TRILINGUAL COMBINED CELLS (`JUMLAH URUSNIAGA 银码 TRANSACTION AMOUNT`) that no exact
-  // match ever hits — and an undetected ledger table is the DANGEROUS direction (its text
-  // feeds the header scan), while over-detection merely skips cells the page lines already
-  // answer. So detection is deliberately greedy: any cell CONTAINING a column synonym as a
-  // whole word counts.
-  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const hasSyn = (texts, syns) => syns.some((s) => {
-    const re = new RegExp(`(?:^|[^a-z0-9])${esc(s)}(?:[^a-z0-9]|$)`);
-    return texts.some((t) => re.test(t));
-  });
+  // An undetected ledger table is the DANGEROUS direction (its text feeds the header
+  // scan); over-detection merely skips cells the page lines already answer — so
+  // detection is deliberately greedy.
+  const hasSyn = (texts, syns) => texts.some((t) => containsSynonym(t, syns));
   for (const [table, cells] of byTable) {
     const texts = cells.map((c) => normText(c.text)).filter(Boolean);
     if (hasSyn(texts, COLUMN_SYNONYMS.entry_date)
@@ -245,10 +246,8 @@ function labelled(lines, prefixes) {
       .replace(/^[\s:.\-–]+/, "")
       .replace(/[\s,;|"']+$/, "")
       .trim();
-    // `nexts` carries the SIX following regions, not one: the real Maybank layout (C-b
-    // acceptance, 202504) prints `NOMBOR AKAUN` and its value FIVE regions apart — the
-    // dwibahasa label block (`戶號 : ACCOUNT NUMBER`, `ACCOUNT`, `NUMBER`) sits between
-    // the Malay label and the digits. Callers decide how strictly to read each candidate.
+    // `nexts` carries SIX following regions, not one: the real Maybank layout prints
+    // `NOMBOR AKAUN` and its digits five regions apart, the dwibahasa label block between.
     return {
       tail,
       next: lines[index + 1]?.text ?? "",
@@ -329,8 +328,14 @@ function readColumns(row) {
   for (const cell of row.cells) {
     const text = normText(cellText(cell));
     if (!text) continue;
+    // WORD-BOUNDED CONTAINS (the real 202506 active month): the trilingual combined
+    // headers (`TARIKH MASUK 進支日期 ENTRY DATE`) never hit an exact match, so the whole
+    // table read ZERO rows and only the chain refusal caught it. First hit per key wins
+    // in x-order, so `TARIKH NILAI … VALUE DATE` (also containing bare `tarikh`) cannot
+    // steal entry_date from the leftward `TARIKH MASUK`, nor `JUMLAH URUSNIAGA` steal
+    // description from the leftward `BUTIR URUSNIAGA`.
     for (const [key, syns] of Object.entries(COLUMN_SYNONYMS)) {
-      if (cols[key] === undefined && syns.includes(text)) cols[key] = cell.at.x;
+      if (cols[key] === undefined && containsSynonym(text, syns)) cols[key] = cell.at.x;
     }
   }
   const hasAmount = cols.amount !== undefined || (cols.debit !== undefined && cols.credit !== undefined);
