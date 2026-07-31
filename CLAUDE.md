@@ -100,53 +100,40 @@ Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
-**Phase 4 — WAVE C (money movement) IS OPEN under a ratified contract (ADR-051,
-2026-07-30).** Closed behind it: **A/A2/A2.1** LIVE (ADR-022..030) · **B** closed on intent
-(ADR-044..046) · **the extraction slice** (ADR-047/048; `corroborated` = explicit two-reader
-agreement, confidence GONE) · **the settlement program** (ADR-049) · **the first production
-autopost** (ADR-050 — RM350, 38s PDF→posted unattended, the full authority chain
-production-proven) · **C0** (ADR-051, migration 0036: the #52 nonzero-tax belt ·
-losing-dispatch no-ops · budget visibility · the sales mis-route gate · MSIC→context pack) ·
-**C-a** (ADR-052, migration 0037: the AR/AP open-item subledger + balanced-pair allocation —
-**the F3 debt PAID on the live book**; design of record
-`docs/plan/wave-c-a-subledger-design.md` v2, rulings WCA-R1..R9).
+**Phase 4 — WAVE C (money movement) IS OPEN under a ratified contract (ADR-051).**
+Closed behind it: **A/A2/A2.1** LIVE (ADR-022..030) · **B** closed on intent (ADR-044..046) ·
+the extraction slice (ADR-047/048; `corroborated` = explicit two-reader agreement) · the
+settlement program (ADR-049) · the first production autopost (ADR-050) · **C0** (ADR-051,
+0036) · **C-a** (ADR-052, 0037, the F3 debt paid) · **C-b (ADR-053, 0038+0039 — bank
+identity, statement ingest, matching: nine real RPR months OCR-ingested chain-to-the-sen,
+13 production settlements incl. the solo-firm high-stakes attested flow, 41 lines honestly
+unmatched; seven acceptance-driven reader/law fixes PRs #154–#164).**
 
-**LIVE POSTURE: 36 migrations (`0037`) · Fly `clara-runtime` v38 · FOUR firms** (BELCORT —
-real, 3 clients, **high-stakes RM100,000** ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
-Gate-S synthetic sandbox, RM10k default — its only client is literally "Fictional Test
-Services"; do not confuse with BELCORT's real clients ROME PROPERTIES / ROME SECRETARY ·
-Alara Advisory + Borneo Books = slice-era RLS fixtures, never repurpose) **· dashboard Pages
-`app.clarabook.com`** (must set `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`)
-**· `clara-backup` daily · Supavisor 31/60 measured 2026-07-29.** No migration queued.
+**LIVE POSTURE: 38 migrations (`0039`) · Fly `clara-runtime` v50 · FOUR firms** (BELCORT —
+real, 3 clients, high-stakes RM100,000 ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
+Gate-S synthetic sandbox, RM10k default — its only client is "Fictional Test Services"; do
+not confuse with BELCORT's real ROME PROPERTIES / ROME SECRETARY · Alara + Borneo =
+slice-era RLS fixtures, never repurpose) **· dashboard Pages `app.clarabook.com`**
+(needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **· `clara-backup`
+daily.** No migration queued.
 
-**WAVE C — `docs/plan/wave-c-contract.md` is the mechanism of record** (owner rulings
-WC-R1..R12 + verified ground truth + the build order + open items — read it before ANY
-Wave C work; do not re-grill what it ratifies). Shape: **C-a** subledger + allocation
-(**LIVE**, ADR-052 — settlements are human verbs `allocate_receipt`/`allocate_payment`/
-`unallocate_group`/`apply_open_items`; settlement kinds are composite-born only, never
-draftable, never autopostable) → **C-b** bank identity/statement ingest/matching (**NEXT** —
-fresh session, design-first; two named grilling questions in contract §4 C-b item 4) →
-**C-c** tie-out/aging/learn-loop. Acceptance: labelled-synthetic in Rome first, then one
-real BELCORT month (ROME PROPERTIES holds statements 202504–202512). The
-`coding_kind` roadmap (which document kinds earn a typed lane, and when) lives in
-`docs/plan/REBUILD-PLAN.md`.
+**WAVE C — `docs/plan/wave-c-contract.md` is the mechanism of record** (WC-R1..R12 — read
+it before ANY Wave C work; do not re-grill what it ratifies). **NEXT: C-c (tie-out ·
+aging · learn loop), fresh session, design-first** — feeders named in PROJECTLOG PART 2.
+C-b's mechanism of record: `wave-c-b-bank-design.md` v2.2 + `-part2.md` + `-part3.md`
+(WCB-R1..R6 + the as-built/delta blocks + the acceptance round — never re-grill).
 
-**Autopost law (ADR-049/050):** the vendor-binding design v4.1 is BUILT AND LIVE
-(`docs/plan/autopost-vendor-binding-design.md` + `-part2.md` are the mechanism of record);
-hand-drafts are never autopost-eligible BY DESIGN; **autopost-from-seeding stays REFUSED**
-(WB-R2/ADR-046). **The OCR-sales nine-control envelope is BUILT** (0016 §3.3 + the sighting
-floor + post-time re-derivation) — what is missing is the unattended sales drafter, and
-**the floor accrues ONLY from chatTurn drafts tagged `sales_invoice`** (manual drafts bind
-vendor-kind counterparties and accrue nothing usable) — contract §7-A. **Standing law:
-migration numbers are claimed at MERGE time** (the frontier check enforces). Malaysian tax
-facts are primary-source-verified in `docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`
-— **rates/thresholds/phase dates live in effective-dated policy tables, never in prose.**
+**Autopost law (ADR-049/050):** vendor-binding v4.1 BUILT AND LIVE; hand-drafts are never
+autopost-eligible BY DESIGN; autopost-from-seeding stays REFUSED (WB-R2/ADR-046). The
+OCR-sales envelope is BUILT; the missing piece is the unattended sales drafter, and the
+floor accrues ONLY from chatTurn drafts tagged `sales_invoice` — contract §7-A. **Standing
+law: migration numbers are claimed at MERGE time.** Malaysian tax facts live in
+effective-dated policy tables, never in prose
+(`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
 
-**Open build items (the contract + PROJECTLOG PART 2 are the live registers):** Wave C-b
-(bank) · Gate P (operating runway — now also owns the capitalised/mixed-purchase
-tax-allocation question 0036 §A named) · the contract §7-A runtime follow-up bundle · C-a
-residuals (§5.3 pool segregation with the WCA-R8 pin as evidence · the `due_date` producer →
-C-c · MSIC backfill) · the `opening_tb.line` producer + K-doc production door (Phase 5,
-review-gated).
+**Open build items (the contract + PROJECTLOG PART 2 are the live registers):** Wave C-c
+(NEXT) · Gate P (operating runway; owns the capitalised/mixed-purchase tax-allocation
+question) · the contract §7-A runtime bundle · the `opening_tb.line` producer + K-doc door
+(Phase 5, review-gated) · the ROME PUBLIC payment-allocation owner ruling (8 bills).
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**
