@@ -136,8 +136,8 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > AR/AP open-item subledger + balanced-pair allocation, all four approve paths hooked, the F3
 > debt PAID on the live book; design of record `docs/plan/wave-c-a-subledger-design.md` v2,
 > rulings WCA-R1..R9; a FOUR-round two-model review ladder closed 10+ blocker-class findings,
-> the last set red-proofed). NEXT: C-b (bank identity · statement ingest · matching), fresh
-> session, design-first — the two named C-b grilling questions stand (contract §4 C-b item 4).**
+> the last set red-proofed). C-b followed the same arc and closed 2026-07-31 — see the
+> STATUS block below.**
 > The extraction-slice / settlement history above stands as written (ADR-047..050 closed it all).
 >
 > **STATUS (2026-07-31): C-b IS CLOSED AND ACCEPTED (ADR-053).** Migration **0038** (PR #153:
