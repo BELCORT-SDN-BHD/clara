@@ -54,7 +54,14 @@ export class StatementRefusal extends Error {
     // must reach the OPERATOR somewhere, and the process log is that somewhere. Bounded at
     // 2000 chars so a wholly-garbled read cannot flood the log stream.
     try {
-      console.log(`[statement-refusal] ${code}: ${JSON.stringify(detail).slice(0, 2000)}`);
+      const line = `[statement-refusal] ${code}: ${JSON.stringify(detail).slice(0, 2000)}`;
+      console.log(line);
+      // The process log stream is lossy under sidecar noise (proved during the C-b
+      // acceptance); a local NDJSON sink makes the last refusals queryable on the machine.
+      import("node:fs").then((fs) =>
+        fs.appendFileSync("/tmp/statement-refusals.ndjson",
+          `${JSON.stringify({ at: new Date().toISOString(), code, detail }).slice(0, 4000)}\n`),
+      ).catch(() => {});
     } catch { /* diagnostics must never mask the refusal itself */ }
   }
 }
