@@ -150,7 +150,7 @@ export async function readStatementLayout(client, { documentId, firmId }) {
   };
 }
 
-/** Page-line regions (`pages.N.lines.M`) in printed reading order — the header substrate. */
+/** Page-line regions in printed reading order — the header substrate. */
 function pageLines(regions) {
   return regions
     .filter((r) => r.field_path.startsWith("pages."))
@@ -175,34 +175,27 @@ function tableCells(regions) {
  *  in consecutive CELLS there, not in page lines. Text-only: the header finders never
  *  read geometry.
  *
- *  LEDGER TABLES ARE EXCLUDED (PR #155 review BLOCKER, empirically reproduced): a
- *  transaction table's own text is full of header-label look-alikes — `BALANCE B/F` as a
- *  first-row description IS an opening-balance needle, and a per-page subtotal row IS a
- *  printed-totals needle with NO cross-reader backstop — so feeding it to the label scan
- *  can slurp an adjacent unrelated number into the header. A table is ledger-shaped
- *  exactly when its cells carry an addressable transaction header (an entry-date synonym
- *  PLUS an amount column or a debit/credit pair — the same rule `readColumns` posts).
- *  The real header table (`TARIKH PENYATA` / `NOMBOR AKAUN` / values) carries none. */
+ *  LEDGER TABLES ARE EXCLUDED (PR #155 review BLOCKER): a transaction table's text is
+ *  full of header-label look-alikes (`BALANCE B/F` IS an opening needle; a subtotal row
+ *  IS a totals needle with no cross-reader backstop) — feeding it to the label scan can
+ *  slurp an adjacent unrelated number into the header. */
+/** Word-bounded synonym containment — the ONE matching idiom for column/ledger detection:
+ *  trilingual combined cells never hit whole-cell equality; consumers fail safe on over-match. */
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function containsSynonym(text, syns) {
+  return syns.some((s) => new RegExp(`(?:^|[^a-z0-9])${escRe(s)}(?:[^a-z0-9]|$)`).test(text));
+}
+
 function ledgerShapedTables(byTable) {
   const out = new Set();
-  // WORD-BOUNDED CONTAINS, never whole-cell equality: the real Maybank column headers are
-  // TRILINGUAL COMBINED CELLS (`JUMLAH URUSNIAGA 银码 TRANSACTION AMOUNT`) that no exact
-  // match ever hits — and an undetected ledger table is the DANGEROUS direction (its text
-  // feeds the header scan), while over-detection merely skips cells the page lines already
-  // answer. So detection is deliberately greedy: any cell CONTAINING a column synonym as a
-  // whole word counts.
-  const esc = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const hasSyn = (texts, syns) => syns.some((s) => {
-    const re = new RegExp(`(?:^|[^a-z0-9])${esc(s)}(?:[^a-z0-9]|$)`);
-    return texts.some((t) => re.test(t));
-  });
+  // ROW-LOCAL, by the SAME addressability rule readColumns posts (PR #156 review: a
+  // table-wide word sweep let ONE stray amount-vocabulary cell — a disclaimer sharing the
+  // header table — exclude the whole header table and silently revert header_unreadable).
+  // A table is ledger-shaped iff some geometry-grouped ROW of it maps as a transaction
+  // header; a stray word cannot fabricate an addressable row.
   for (const [table, cells] of byTable) {
-    const texts = cells.map((c) => normText(c.text)).filter(Boolean);
-    if (hasSyn(texts, COLUMN_SYNONYMS.entry_date)
-        && (hasSyn(texts, COLUMN_SYNONYMS.amount)
-            || (hasSyn(texts, COLUMN_SYNONYMS.debit) && hasSyn(texts, COLUMN_SYNONYMS.credit)))) {
-      out.add(table);
-    }
+    const rows = groupRowsX(cells.map((c) => ({ text_content: c.text, locator: c.locator })), ROW_TOLERANCE);
+    if (rows.some((row) => readColumns(row) !== null)) out.add(table);
   }
   return out;
 }
@@ -212,7 +205,7 @@ function cellScanLines(regions) {
     .filter((r) => r.field_path.startsWith("tables."))
     .map((r) => {
       const m = /^tables\.(\d+)\.cells\.(\d+)$/.exec(r.field_path);
-      return { text: r.text_content, table: m ? Number(m[1]) : 0, cell: m ? Number(m[2]) : 0 };
+      return { text: r.text_content, locator: r.locator, table: m ? Number(m[1]) : 0, cell: m ? Number(m[2]) : 0 };
     })
     .sort((a, b) => a.table - b.table || a.cell - b.cell);
   const byTable = new Map();
@@ -245,10 +238,8 @@ function labelled(lines, prefixes) {
       .replace(/^[\s:.\-–]+/, "")
       .replace(/[\s,;|"']+$/, "")
       .trim();
-    // `nexts` carries the SIX following regions, not one: the real Maybank layout (C-b
-    // acceptance, 202504) prints `NOMBOR AKAUN` and its value FIVE regions apart — the
-    // dwibahasa label block (`戶號 : ACCOUNT NUMBER`, `ACCOUNT`, `NUMBER`) sits between
-    // the Malay label and the digits. Callers decide how strictly to read each candidate.
+    // `nexts` carries SIX following regions, not one: the real Maybank layout prints
+    // `NOMBOR AKAUN` and its digits five regions apart, the dwibahasa label block between.
     return {
       tail,
       next: lines[index + 1]?.text ?? "",
@@ -287,14 +278,11 @@ function readPeriod(lines) {
   return null;
 }
 
-/** A plausible printed ACCOUNT token for a look-ahead region: an optional leading `:`
- *  then digits/dashes/spaces ONLY — and NEVER anything that reads as a printed date in
- *  ANY separator, and never fewer than EIGHT digits. `normalizeAccountNumber` alone
- *  strips every non-digit, so a date region in the look-ahead window (`30/04/25`,
- *  `30-04-25`, `30 04 25` — all "300425", six digits) would silently become an account
- *  number (PR #155 review MAJOR: the slash-only guard missed the dash/space forms). Every
- *  DDMMYY shape is six digits, and no Malaysian bank prints an account shorter than
- *  eight, so the digit floor closes the class the date-parse test cannot see. */
+/** A plausible printed ACCOUNT token for a look-ahead region: an optional leading `:`,
+ *  digits/dashes/spaces ONLY, never anything that reads as a date in ANY separator, and
+ *  never fewer than EIGHT digits (every DDMMYY shape is six; no Malaysian bank prints
+ *  fewer than eight — PR #155 review MAJOR: `30-04-25`/`30 04 25` both normalize to a
+ *  six-digit "300425" that the slash-only guard missed). */
 function accountToken(text) {
   const s = String(text ?? "").trim().replace(/^[:\s]+/, "");
   if (!s || !/^[\d\s-]+$/.test(s)) return null;
@@ -303,11 +291,9 @@ function accountToken(text) {
   return normalized && normalized.length >= 8 ? normalized : null;
 }
 
-/** The printed account number, from its own label. Never a bare digit run: an unlabelled
- *  12-digit token on a bank letterhead is as likely a branch or a reference number. The
- *  label's own tail keeps the permissive parse (label-anchored, same-region value); the
- *  look-ahead regions use the STRICT token shape — the real corpus separates the label
- *  from the digits by up to five dwibahasa regions (C-b acceptance, 202504). */
+/** The printed account number, from its own label — never a bare digit run. The label's
+ *  own tail keeps the permissive parse; look-ahead regions use the STRICT token shape
+ *  (the real corpus separates label from digits by up to five dwibahasa regions). */
 function readAccountNumber(lines) {
   const found = labelled(lines, LABELS.account_number);
   if (!found) return null;
@@ -325,12 +311,30 @@ function readAccountNumber(lines) {
  *  happened and HOW MUCH moved — either a single signed amount column, or a debit/credit
  *  pair. Without both axes this is some other table and we must not guess. */
 function readColumns(row) {
+  // WORD-BOUNDED CONTAINS (real 202506: trilingual combined headers never hit an exact
+  // match — the table read ZERO rows; only the chain refusal caught it), in TWO PASSES,
+  // specificity before position (PR #156 review: x-order alone collapsed entry_date onto
+  // an inverted VALUE DATE column): multi-word synonyms claim their cells first regardless
+  // of order; bare single-word synonyms then fill unmapped keys from unclaimed cells.
   const cols = {};
-  for (const cell of row.cells) {
-    const text = normText(cellText(cell));
-    if (!text) continue;
-    for (const [key, syns] of Object.entries(COLUMN_SYNONYMS)) {
-      if (cols[key] === undefined && syns.includes(text)) cols[key] = cell.at.x;
+  const claimed = new Set();
+  const passes = [
+    (syns) => syns.filter((s) => s.includes(" ") || s.includes("/")),
+    (syns) => syns.filter((s) => !s.includes(" ") && !s.includes("/")),
+  ];
+  for (const pick of passes) {
+    for (const cell of row.cells) {
+      if (claimed.has(cell)) continue;
+      const text = normText(cellText(cell));
+      if (!text) continue;
+      for (const [key, syns] of Object.entries(COLUMN_SYNONYMS)) {
+        if (cols[key] !== undefined) continue;
+        if (containsSynonym(text, pick(syns))) {
+          cols[key] = cell.at.x;
+          claimed.add(cell);
+          break;
+        }
+      }
     }
   }
   const hasAmount = cols.amount !== undefined || (cols.debit !== undefined && cols.credit !== undefined);
