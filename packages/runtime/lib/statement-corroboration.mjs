@@ -60,8 +60,7 @@ export class StatementRefusal extends Error {
       // acceptance); a local NDJSON sink makes the last refusals queryable on the machine.
       import("node:fs").then((fs) =>
         fs.appendFileSync("/tmp/statement-refusals.ndjson",
-          JSON.stringify({ at: new Date().toISOString(), code, detail }).slice(0, 4000) + "
-"),
+          `${JSON.stringify({ at: new Date().toISOString(), code, detail }).slice(0, 4000)}\n`),
       ).catch(() => {});
     } catch { /* diagnostics must never mask the refusal itself */ }
   }
