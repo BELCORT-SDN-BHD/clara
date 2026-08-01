@@ -270,6 +270,59 @@ export const TIEOUT_0040_COHORT = [
   ...TIEOUT_0040_HUMAN_FNS, ...TIEOUT_0040_READ_FNS, ...TIEOUT_0040_UNGRANTED_FNS,
 ];
 
+// 0041 [Wave D-a — the fixed-asset register] — the human verbs are HUMAN LANE ONLY (every
+// one of them is professional judgement: enrolment, particulars, the depreciation authority
+// ceremony, disposal, the client year end). The MACHINE half is exactly two names:
+// run_depreciation_period (the leader's sweep, design §3.4 — clara_runtime only, never a
+// human) and depreciation_run_due, the sweep's due PROBE, which is the one 0041 function
+// granted to BOTH lanes because the /assets surface asks the same question the sweep does.
+// run_depreciation_manual is its human twin — identical mechanics, _human_ctx(bookkeeper) —
+// and must NEVER reach a machine role, or the maker-checker ladder would have a bypass.
+const FA_0041_HUMAN_FNS = [
+  "upsert_fa_account_profile", "retire_fa_account_profile",
+  "complete_fixed_asset_particulars", "revise_fixed_asset_particulars",
+  "propose_depreciation_authority", "sign_depreciation_authority", "retire_depreciation_authority",
+  "run_depreciation_manual", "dispose_fixed_asset", "set_client_fy_end",
+];
+// The /assets read surface: definer + _human_ctx(bookkeeper) + firm predicates, the
+// BANK_0038_READ_FNS pattern. No machine role reads the register.
+const FA_0041_READ_FNS = [
+  "list_fixed_assets", "get_fixed_asset", "list_depreciation_runs", "get_depreciation_run",
+  "get_depreciation_authority", "fa_register_tie",
+];
+const FA_0041_RUNTIME_FNS = ["run_depreciation_period"];
+const FA_0041_SHARED_FNS = ["depreciation_run_due"]; // BOTH lanes, by design §3.4
+// UNGRANTED internals declared the 0020 way: the main sweep fails if one ever GAINS a grant,
+// the cohort check fails if one ever DISAPPEARS. _fa_on_approve is the load-bearing one —
+// it is the approve hook, and a grant on it would let a caller drive register state outside
+// an approve transaction.
+const FA_0041_UNGRANTED_FNS = [
+  "_fa_on_approve", "_fa_run_period_core", "_fa_compute_charges", "_fa_asset_charges",
+  "_fa_asset_json", "_fa_accumulated", "_fa_accumulated_total", "_fa_lineage_accumulated",
+  // The round-3 read layer: ONE lineage-accumulated read (`_fa_accumulated_at` over
+  // `_fa_own_ledger`) behind every "accumulated" question, so no frozen bake can stand in for
+  // an effective-dated read (fold F1/F2).
+  "_fa_own_ledger", "_fa_accumulated_at",
+  "_fa_included_at", "_fa_particulars_complete", "_fa_validate_particulars",
+  "_fa_first_chargeable_month", "_fa_uncharged_months",
+  // The ONE due oracle (fold F3) — `_fa_first_due_month` replaces `_fa_first_uncharged_month`:
+  // due-ness is what the arithmetic emits, never a bare month-coverage scan.
+  "_fa_first_due_month", "_fa_lineage_first_due_month",
+  // Reversal dispatch discriminates on the ENTRY and unwinds revision lineage (fold F4/F6);
+  // `_fa_reversal_blocked` is called from BOTH `reverse_entry` and the approve-time hook.
+  "_fa_reversal_lineage", "_fa_reversal_blocked",
+  "_fa_pending_unposted",
+  "_fa_range_covered", "_fa_oldest_unmet_period", "_fa_disposal_draft_outstanding",
+  "_fa_fy_open_for", "_fa_fy_end_for", "_fa_month_start", "_fa_month_end", "_fa_month_diff",
+  "_fa_ym_date", "_fa_today",
+  "_tf_fa_movement_belt", "_tf_fa_depreciation_append_only", "_tf_fa_run_immutable",
+  "_tf_fa_authority_transition", "_tf_fa_profile_no_delete",
+];
+export const FA_0041_COHORT = [
+  ...FA_0041_HUMAN_FNS, ...FA_0041_READ_FNS, ...FA_0041_RUNTIME_FNS,
+  ...FA_0041_SHARED_FNS, ...FA_0041_UNGRANTED_FNS,
+];
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -320,6 +373,9 @@ export const ALLOWED = {
     ...BANK_0038_READ_FNS, // 0038 the /bank read surface (definer + _human_ctx + firm predicates)
     ...TIEOUT_0040_HUMAN_FNS, // 0040 the Wave C-c tie-out / exception / rule verbs (human judgement only)
     ...TIEOUT_0040_READ_FNS, // 0040 the /bank recon + /aging read surface
+    ...FA_0041_HUMAN_FNS, // 0041 the Wave D-a fixed-asset verbs (human judgement only)
+    ...FA_0041_READ_FNS, // 0041 the /assets read surface
+    ...FA_0041_SHARED_FNS, // 0041 the due probe — the one name BOTH lanes hold (design §3.4)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -337,6 +393,8 @@ export const ALLOWED = {
     "finalize_document_intake", "upgrade_legacy_document", "claim_document_processing_task",
     "release_held_document_tasks", "requeue_stranded_document_task",
     ...BANK_0038_RUNTIME_FNS, // 0038 the statement-facts writers (the persist_invoice_facts precedent)
+    ...FA_0041_RUNTIME_FNS, // 0041 the depreciation sweep's run verb (the leader's SET ROLE lane)
+    ...FA_0041_SHARED_FNS, // 0041 the due probe
     "persist_document_extraction", "complete_stored_document_task",
     "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
     "refund_ingest_reservation", "record_attribution_attempt",
@@ -480,6 +538,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0037 wave C-a subledger", SUBLEDGER_0037_COHORT, liveNames));
   failures.push(...cohortFailures("0038 wave C-b bank", BANK_0038_COHORT, liveNames));
   failures.push(...cohortFailures("0040 wave C-c tie-out", TIEOUT_0040_COHORT, liveNames));
+  failures.push(...cohortFailures("0041 wave D-a fixed-asset register", FA_0041_COHORT, liveNames));
   return failures;
 }
 

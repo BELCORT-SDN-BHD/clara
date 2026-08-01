@@ -241,10 +241,21 @@ test("T10a posted entries are immutable / append-only (raw superuser DML → CLR
   // the concurrently-running writer files before reaching the guard — retry the
   // transient race so the assertion observes the append-only guard's CLR08 (Slice-3:
   // the event suite raised the concurrent write pressure that exposes this).
-  const tjl = await truncateGuardError("truncate clara.journal_lines");
-  assert.equal(tjl && tjl.code, CLR.immutable, "TRUNCATE journal_lines → CLR08");
+  // [0041] journal_lines is now FK-referenced too (fixed_assets.acquisition_line_id names
+  // the birth LINE, design §1.1), so — exactly like journal_entries below — a BARE truncate
+  // stops at the FK restriction (0A000) before the guard; CASCADE reaches the BEFORE TRUNCATE
+  // trigger and the append-only law answers CLR08.
+  // BOTH ARMS ARE ASSERTED for both tables: dropping the bare arm would leave the FK
+  // restriction — the OUTER of the two defences — untested, and a later migration that
+  // silently dropped the referencing FK would still pass on the cascade arm alone.
+  const tjlBare = await truncateGuardError("truncate clara.journal_lines");
+  assert.equal(tjlBare && tjlBare.code, "0A000", "bare TRUNCATE journal_lines → 0A000 (FK restriction, before the guard)");
+  const tjl = await truncateGuardError("truncate clara.journal_lines cascade");
+  assert.equal(tjl && tjl.code, CLR.immutable, "TRUNCATE journal_lines CASCADE → CLR08");
   // journal_entries is FK-referenced (journal_lines), so a BARE truncate hits the FK
   // restriction; CASCADE reaches the BEFORE TRUNCATE trigger → CLR08 (append-only).
+  const tjeBare = await truncateGuardError("truncate clara.journal_entries");
+  assert.equal(tjeBare && tjeBare.code, "0A000", "bare TRUNCATE journal_entries → 0A000 (FK restriction, before the guard)");
   const tje = await truncateGuardError("truncate clara.journal_entries cascade");
   assert.equal(tje && tje.code, CLR.immutable, "TRUNCATE journal_entries CASCADE → CLR08");
 });
