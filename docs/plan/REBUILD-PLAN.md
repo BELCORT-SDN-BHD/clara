@@ -190,6 +190,18 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > render. Acceptance findings AF-1..AF-5 registered (design part2 + PROJECTLOG PART 2); the
 > §7-B PRD amendment landed; the §7-A bundle stays parked for the unattended sales drafter.
 > **NEXT: Wave D (assets + adjustments), design-first, fresh session.**
+>
+> **STATUS (2026-08-01, the same day): WAVE D OPENED — the contract is RATIFIED (ADR-055;
+> `docs/plan/wave-d-contract.md` = the mechanism of record, WD-R1..R15).** Grounded by an 8-lane
+> census + live probes (`fixed_assets`: full schema, zero rows, zero day-two writers); every fork
+> owner-ruled in one grilling session — acquisition soft-birth · no capitalisation wall · three
+> methods (real reducing-balance evidence) · per-client cadence default monthly · one authority
+> doctrine for both new posters (admin+-signed, first-run ramp, receipts, high-stakes to a
+> checker) · close gate = named Wave-E deferral · disposal full + partial (cost-portion, sen-exact)
+> · staff advances = the B-lite register, ruled on a commissioned cross-model research record
+> (`docs/plan/research/wave-d/staff-advance-research-2026-08-01.md`) · closing stock → Wave E ·
+> CA metadata inert · ALL FOUR Wave-C residuals ride (WD-R13). **Split: D-a (FA register, 0041) →
+> D-b (adjustments + advances, 0042). NEXT: `wave-d-a-fa-design.md` + its design ladder.**
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
@@ -203,8 +215,8 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > Wave-C grilling: structured-sales autopost as a tail slice (PRD §4.95).
 
 **Wave C — money movement.** Bank statement ingest, parity-checked matching + exclusivity, reconciliation tie-out, receipt/payment allocation (intrinsic), aging + statements, the self-reconcile learn loop (advisory, human-gated).
-**Wave D — assets + adjustments.** FA register from coding (intrinsic), depreciation runs (scheduled + close-gated), disposal, recurring/reversing adjustments, periodic closing-stock at close.
-**Wave E — periods + statements.** Serialized year-end close with structural pre-close gates, segmented continuity reads, ordered reverse guards, carry-forward; the honest FS pack (SoFP/SoCI/SOCE/cash-flow/notes); the reporting engine (spec → DB reads → renderers → auditable artifacts).
+**Wave D — assets + adjustments** *(OPEN, ADR-055; `docs/plan/wave-d-contract.md` = WD-R1..R15; splits D-a FA/0041 → D-b adjustments+advances/0042)*. FA register from coding (intrinsic, soft-birth per WD-R1), depreciation runs (scheduled; the close gate is a NAMED Wave-E deferral per WD-R6), disposal (full + partial per WD-R7), CA metadata (inert per WD-R12), recurring/reversing adjustments (signed templates per WD-R8), staff advances (the B-lite register per WD-R10, §7-B). *Closing stock moved → Wave E (WD-R11).*
+**Wave E — periods + statements.** Serialized year-end close with structural pre-close gates, segmented continuity reads, ordered reverse guards, carry-forward; the honest FS pack (SoFP/SoCI/SOCE/cash-flow/notes); the reporting engine (spec → DB reads → renderers → auditable artifacts). *Owns by inheritance:* periodic closing-stock at close + its completeness check (WD-R11) · the depreciation close gate over D's receipts (WD-R6) · the segment-aware FA tie-out (the REBUILD-rated `fa_control_tie_out`).
 **Wave F — tax.** The SST engine per the practice map (periods, payment basis, dual-registrant exports, SST-02, bad-debt relief); the payroll deadline calendar; **last: the draft tax computation** (add-backs, CA, chargeable income, forms — the slice allowed to slip to v1.1).
 **Wave G — the OS surface.** Proactive inbox (allowlisted wakes), cross-scope needs-you, ⌘K Ask/Do/Go + ActionPanels, plan-as-document for close/onboarding, exports UI, generative-UI completion + parity CI gates, the design floors.
 
