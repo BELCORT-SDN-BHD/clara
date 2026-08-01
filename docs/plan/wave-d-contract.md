@@ -175,9 +175,15 @@ read RPCs, no /assets surface. **[V]** (grep + live probes converge.)
    staff-master mapping is Wave F's (research record §3).
 3. **`account_class` stays binary** (wave-c-contract debt #1) — WD-R10's register is beside the
    GL precisely so this wall stays untouched; the eventual facing is still owed, still later.
-4. **Statutory advance/deduction limits** (EA 1955 s.22/s.24 class) — pending the web-lane annex
-   in the research record; if verified rules bind advance issuance/recovery, they land as
-   effective-dated policy VISIBILITY (never silent computation), wave assignment at that reading.
+4. **Statutory advance/deduction limits — VERIFIED (research record Lane 2, EA 1955 primary
+   text):** s.22 caps an advance at the prior month's earned wages · s.24(2)(c) payroll-deduction
+   recovery is lawful only interest-free · s.27 bans interest on salary advances outright. These
+   land as effective-dated policy VISIBILITY (never silent computation) — the s.22 ceiling
+   surfaces if advance-request UX is ever built; the interest ban is a compliance floor the
+   register design already satisfies (no interest field exists). The Xero-class payroll trap is
+   named for Wave F: deduction repayment posts through the register's application verb, never a
+   payroll-engine deduction target. MPERS presentation wording stays UNVERIFIED (inference only)
+   — verify from a real illustrative-FS note before the Wave-E FS pack cites it.
 5. **Sighting-pool segregation §5.3** (wave-c-contract debt #3) — unchanged; nothing in D touches
    the vendor pool (WD-R10 keeps employees out of counterparties entirely, which is the point).
 
@@ -195,9 +201,11 @@ acceptance's first act; the sandbox synthetic half runs first, always.
 
 ## 7. Open items at ratification
 
-- **The web-research annex** (Malaysian EA 1955 statutory specifics, MPERS presentation notes,
-  AI-native product census) appends to the research record when the lane returns; if anything
-  contradicts WD-R10 it goes to the owner before the D-a design ladder, not after.
+- **The web-research annex LANDED** (research record Lane 2, 2026-08-01): **no contradiction
+  with WD-R10** — convergent validation (ERPNext IS a register-over-GL; Odoo's community
+  independently reinvented the pattern; no system anywhere models an employee advance as a
+  counterparty). One nuance recorded for the D-b ladder's eyes (the lane's crossover-trigger
+  framing), the ruling not re-opened; EA 1955 facts verified (§5 debt 4).
 - **Gate P** rides unchanged (operating runway; owns the capitalised/mixed-purchase tax-allocation
   question — adjacent to D-a's acquisition work but explicitly NOT this wave's item).
 - **The §7-A bundle** stays parked for the unattended sales drafter (unchanged).
