@@ -126,14 +126,16 @@ daily.** No migration queued.
 read it before ANY Wave D work; do not re-grill what it ratifies). Split: **D-a (FA register,
 migration 0041) → D-b (adjustments + staff advances, 0042)**; all four Wave-C residuals ride
 (WD-R13); closing stock → Wave E (WD-R11); staff advances = the B-lite register ruled on
-`docs/plan/research/wave-d/staff-advance-research-2026-08-01.md`. **NEXT: the D-a design doc
-(`wave-d-a-fa-design.md`) + its review ladder, then the 0041 build.** The Wave C records
-(never re-grill): the contract `docs/plan/wave-c-contract.md` (WC-R1..R12) · C-a
-`wave-c-a-subledger-design.md` v2 (WCA-R1..R9) · C-b `wave-c-b-bank-design.md` v2.2 +
-parts 2–3 (WCB-R1..R6) · C-c `wave-c-c-tieout-design.md` v2.1 + part2 (WCC-R1..R8 +
-rounds 1–4 + the acceptance round AF-1..AF-5). Open registers: PROJECTLOG PART 2
-(AF-1..AF-3 now ASSIGNED into Wave D per WD-R13 · Gate P · the §7-A bundle parked for the
-unattended sales drafter).
+`docs/plan/research/wave-d/staff-advance-research-2026-08-01.md` (two lanes; EA 1955 verified).
+**The D-a design is RATIFIED: `wave-d-a-fa-design.md` v2.1 + `-part2.md` (the TWO-round
+adversarial ladder record — never re-derive its folds or certified-clean surfaces). NEXT: the
+0041 BUILD per that design, then the round-3 as-built ladder → ceremony → acceptance
+(WD-R14: sandbox, then RPR + ROME SECRETARY real registers).** The Wave C records (never
+re-grill): the contract `wave-c-contract.md` (WC-R1..R12) · C-a `wave-c-a-subledger-design.md`
+v2 (WCA-R1..R9) · C-b `wave-c-b-bank-design.md` v2.2 + parts 2–3 (WCB-R1..R6) · C-c
+`wave-c-c-tieout-design.md` v2.1 + part2 (WCC-R1..R8 + rounds 1–4 + AF-1..AF-5). Open
+registers: PROJECTLOG PART 2 (AF-1..AF-3 ASSIGNED into Wave D per WD-R13 · Gate P · the
+§7-A bundle parked for the unattended sales drafter).
 
 **Autopost law (ADR-049/050):** vendor-binding v4.1 BUILT AND LIVE; hand-drafts are never
 autopost-eligible BY DESIGN; autopost-from-seeding stays REFUSED (WB-R2/ADR-046). The
