@@ -1,0 +1,141 @@
+# Wave D-a design — PART 2: the review-ladder record
+
+> Companion to `wave-d-a-fa-design.md` (v2.1). Rounds are append-only; the main doc carries
+> only the buildable mechanism. Full lens outputs are session artifacts (never committed);
+> this file is the durable record of what each round found and how it was folded.
+
+## Round 1 (2026-08-01) — v1 → v2
+
+**Lanes:** three native adversarial lenses (opus/xhigh: accounting 6B/11M/3m · structure
+6B/7M/5m · integration 6B/9M/6m) + Codex gpt-5.6-sol/xhigh (14B/12M). The orchestrator
+probe-verified the five load-bearing substrate claims before folding: the
+`_subledger_on_approve` early return (0037:1122-1123) · the `journal_entries.origin` CHECK
+(0003:108) · the `event_types` FK (0005:83) · the carry-down's hardcoded `'straight_line'`
+(0017:3456, `v_method` discarded) · the `clara_runtime` inherit-false grant (0006:78) +
+`set role clara_runtime` (relay.mjs:153).
+
+**Convergent blockers folded (all four lanes or ≥2):** the v1 tail splice was dead code for
+every non-settlement entry → splice before the settlement early-return · K-family
+double-birth at K5 + the K6 hand-off wedge → `is_opening_balance` exclusions on both hook
+arms · ledger rows minted at run time broke register↔GL for every ramp → materialise at
+approve from a flags proposal · client-scoped due periods silently lost late-completed
+assets → per-asset due-ness · no FY datum existed for the RB law/annual cadence → client FY
+columns · v1's belt (on `journal_lines`) fired at draft-commit or never → `journal_entries`
+@approved, all three account roles · `origin='depreciation_run'` violated the live CHECK ·
+"widen the spine enum" misread event prose for substrate → event_types + taxonomy rows ·
+the disposal GUC died across the maker-checker gap → proposal-shaped disposal · no birth
+identity existed → `acquisition_line_id` UNIQUE · multi-period op-keys collided → one
+period per call.
+
+**Codex-unique folds:** the NOT-NULL `description` birth-abort → placeholder · the
+carry-down baseline lower bound (catch-up would double-depreciate carried history) · the K
+`gl_balance` belt door hole → refused on enrolled accounts · ramp satisfiable by a
+zero-entry run → nonzero + un-reversed · dependency-ordered reversal (acquisition refuses
+while disposal descendants exist) · runtime-first was not actually dormant on 0040 →
+feature-detection · profile pairwise distinctness.
+
+**Lens conflicts resolved:** disposal month CHARGED (integration + practice-map §2.6-C over
+v1's charge-to-prior-month; the stub-at-disposal mechanism makes it free) · belt widened to
+all three roles (accounting's hand-journal hole over structure's cost-only reading — the
+structure lens had only cleared the run's own legs).
+
+## Round 2 — the delta (2026-08-01) — v2 → v2.1
+
+**Lanes:** native opus/xhigh delta (8B/12M/6m) + Codex gpt-5.6-sol/xhigh delta (8B/3M),
+both instructed to attack the FOLDS and the new mechanisms, not re-review. Convergence was
+near-total on the heavy findings; each arm added unique ones.
+
+**Fold-fidelity verdicts (spot-checked by both arms):** CLOSED clean — splice reachability ·
+K-family exclusions · origin CHECK · event registration · carry-down literal recut ·
+description placeholder · baseline lower bound · K gl_balance refusal · dormancy probe ·
+pairwise distinctness · MYT anchor claim · five-marker census claim. PARTIAL/NOT-CLOSED —
+everything below.
+
+**Round-2 blockers → v2.1 folds:**
+1. **Receipt lifecycle** (both arms): v2 minted receipts at run time under a
+   (client, period) unique — the sweep re-called drafted periods into a unique violation
+   every cycle (permanently for high-stakes clients), and the design's own correction door
+   (reverse + re-run) was blocked by its own constraint. → Receipts mint AT APPROVE beside
+   the ledger rows, 1:1 with the entry, NO (client, period) unique; eligibility/coverage
+   never read from receipts; a nothing-due run persists nothing; the run verb refuses while
+   an earlier period's draft is outstanding (draft-N blocks N+1 — which also pins the RB
+   sequencing).
+2. **`is_live`/unwind slot collision** (both): the unwind row's default-true `is_live`
+   collided with the freed slot; and `is_live` in the as-of read made `Accumulated()` wrong
+   in BOTH time directions (a June read lost a March charge unwound in August; a September
+   read double-voided). → Unwind rows born dead; `is_live` exists ONLY for the uniqueness
+   index; the read is a signed sum over ALL rows by `effective_date`.
+3. **Split effective dating** (both; native worked a RM100,000 false break on a certified
+   as-of): successors had no effective-from; `superseded_at` was wall-clock. →
+   `effective_from date` on successors + `superseded_at date`, both = the governing entry's
+   posting date; the as-of inclusion rule restated over them.
+4. **Immutability allowlist** (both): `disposal_entry_id`/`superseded_at` were not mutable
+   post-approval — the first disposal would raise CLR13. → The full transition table in
+   §1.1 (lifecycle columns unconditional; particulars while incomplete, evaluated on OLD).
+5. **Enrolment watermark** (native): enrolling an account with history made every
+   pre-enrolment entry un-reversible (`reversed_by` UPDATE trips the belt with no openable
+   door). → `enrolled_at` watermark; belt scoped to entries approved at/after it; door (a)
+   status-blind.
+6. **Cadence never consumed** (both): `annual` was stored and surfaced but the period
+   generator was months-only — the ratified compliance-only shape silently became monthly.
+   → The generator is a function of cadence; annual posts once at FY end; the mid-FY
+   disposal stub is that asset's only in-year charge (which also closed the native arm's
+   annual-overcharge-on-disposal finding).
+7. **RB completions** (both): carried-asset basis collided with the `baseline_as_of`
+   refusal (the acceptance's own RB asset could not run); intra-FY rate revision had two
+   readings (only one prospective); the ×m/12 arm had no sen law; "last charged month" was
+   unknowable under disposal/life-end. → The `greatest(FY_open−1, baseline_as_of)` basis;
+   month-segmented prospective entitlements (Σ segments); floor+absorb sen law; the true-up
+   rides whichever charge terminates the FY, including the disposal stub.
+8. **Machine-born high-stakes** (native, verified against 0037:1992-2010): with
+   `last_human_editor` NULL, `_approve_entry_core` accepts ANY approver + an attestation —
+   WD-R5's distinct-checker intent did not bind. → Both verbs stamp `last_human_editor`
+   (run: the authority signer; disposal: the maker), putting the signer/maker on the
+   distinct-checker arm; the §7 cell approves AS the signer and must refuse.
+9. **Partial-disposal reversal undefined** (Codex): → defined (both successors unwound,
+   original restored, stub unwound; refused when a successor carries later state) + cell.
+10. **Proposal ingress/authenticity unstated** (both, as MAJOR/BLOCKER): the verbs insert
+    `journal_entries` directly (the `allocate_receipt` precedent); `_draft_entry_core` is
+    never widened; authenticity is structural and tail-censused (§9.5) — the hook
+    additionally validates authority + the durable op-receipt binding (the disposal's
+    issuer proof that survives the maker-checker gap).
+
+**Round-2 majors → v2.1 folds:** the non-unique `end loop;` anchor → the multi-line
+live-body anchor, count 1 · the RB true-up/stub interaction stated · the carry-down FOURTH
+recut part (zero-accumulated assets and land refused at `_validate_entry_lines` — the
+zero/NULL accum leg is omitted, OBE absorbs) · successors carry `acquisition_line_id` NULL ·
+`revise_entry` = the sixth recut with its marker census · receipts carry `entry_id` (ramp
+predicate restated over entries; no receipt join) · pending-disposal freeze (the run skips
+assets with an outstanding disposal draft — the month-boundary un-approvable-draft race) ·
+annual mid-FY disposal correction (subsumed by fold 6) · K6 same-item hand-off = a NAMED
+refusal (`fixed_asset_lifecycle_advanced`), other-item green · posting path stated
+(`_approve_entry_core`; the four-caller re-pin survives; CLR26/attestation refusals leave
+the period due honestly) · `revise_fixed_asset_particulars` full signature with
+`p_effective_from` · run-vs-dispose serialization actually installed in §4.1 (the rung was
+only on the run in v2) · tenant congruence on birth (by-construction from the entry's own
+legs + a congruence CHECK) · the §7 composition cells (the round-2 list).
+
+**Round-2 minors folded:** unwound rows keep `superseded_by NULL` (the 0017 CHECK is safe —
+stated) · taxonomy decision `'ignore'` ×3 stated · `fa_register_tie` named with a signature ·
+`rate_bps` bounded 1..10000 · the one-asset-per-line no-merge-door convention stated ·
+profile unique `WHERE active` + reactivation semantics.
+
+**Clean surfaces both arms certified (recorded so nobody re-litigates):** proposal forgery is
+structurally impossible TODAY (no `journal_entries` table grants anywhere in the chain;
+`_draft_entry_core`'s INSERT carries no flags column — 0016:4079-4090) — v2.1 §9.5 makes the
+facts censused law so a later migration cannot silently re-open them · ramp flap cannot occur
+(the 203005004 rung serializes the mode decision, the post, and any reversal; the total lock
+order cannot invert because depreciation/disposal entries carry no control leg) · the
+stub-vs-run index collision resolves to the pending-disposal freeze + `disposal_stale`.
+
+## Standing observations for the build
+
+- The 0041 tail must re-pin: the four-caller census · the five markers on
+  `_subledger_on_approve` + the new FA marker · every recut lineage
+  (`reverse_entry` ×5 splices · `revise_entry` ×7 markers · `_draft_opening_item_core` ×4
+  parts · `_assert_fa_baseline` · the immutability trigger transition table) · the
+  single-writer censuses (origin `'scheduled_run'`; the two proposal keys).
+- The build's contract-blind lane authors x41 cells from the CONTRACT + this design's laws,
+  never from the migration text (the C-b lesson: three production bugs were caught only by
+  contract-authored cells).
+- Round 3 (as-built) runs on the assembled migration + runtime before merge, per house law.
