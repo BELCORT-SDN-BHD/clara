@@ -101,7 +101,7 @@ read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this f
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
 **Phase 4 — WAVE C (money movement) IS CLOSED (ADR-051..054); WAVE D (assets + adjustments)
-is NEXT, design-first.** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent
+IS OPEN under a ratified contract (ADR-055).** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent
 (ADR-044..046) · the extraction slice (ADR-047/048; `corroborated` = explicit two-reader
 agreement) · the settlement program (ADR-049) · the first production autopost (ADR-050) ·
 **C0** (ADR-051, 0036) · **C-a** (ADR-052, 0037, the F3 debt paid) · **C-b** (ADR-053,
@@ -122,14 +122,18 @@ slice-era RLS fixtures, never repurpose) **· dashboard Pages `app.clarabook.com
 (needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **· `clara-backup`
 daily.** No migration queued.
 
-**NEXT: WAVE D (assets + adjustments), design-first, fresh session** — grounding → grilling
-→ design ladder per the house arc. The Wave C records (never re-grill): the contract
-`docs/plan/wave-c-contract.md` (WC-R1..R12) · C-a `wave-c-a-subledger-design.md` v2
-(WCA-R1..R9) · C-b `wave-c-b-bank-design.md` v2.2 + parts 2–3 (WCB-R1..R6) · C-c
-`wave-c-c-tieout-design.md` v2.1 + part2 (WCC-R1..R8 + rounds 1–4 + the acceptance round
-AF-1..AF-5). Open registers: PROJECTLOG PART 2 (the C-c acceptance findings AF-1..AF-3 as
-follow-ups · Gate P · the §7-A bundle
-parked for the unattended sales drafter).
+**WAVE D — `docs/plan/wave-d-contract.md` is the mechanism of record** (WD-R1..R15, ADR-055 —
+read it before ANY Wave D work; do not re-grill what it ratifies). Split: **D-a (FA register,
+migration 0041) → D-b (adjustments + staff advances, 0042)**; all four Wave-C residuals ride
+(WD-R13); closing stock → Wave E (WD-R11); staff advances = the B-lite register ruled on
+`docs/plan/research/wave-d/staff-advance-research-2026-08-01.md`. **NEXT: the D-a design doc
+(`wave-d-a-fa-design.md`) + its review ladder, then the 0041 build.** The Wave C records
+(never re-grill): the contract `docs/plan/wave-c-contract.md` (WC-R1..R12) · C-a
+`wave-c-a-subledger-design.md` v2 (WCA-R1..R9) · C-b `wave-c-b-bank-design.md` v2.2 +
+parts 2–3 (WCB-R1..R6) · C-c `wave-c-c-tieout-design.md` v2.1 + part2 (WCC-R1..R8 +
+rounds 1–4 + the acceptance round AF-1..AF-5). Open registers: PROJECTLOG PART 2
+(AF-1..AF-3 now ASSIGNED into Wave D per WD-R13 · Gate P · the §7-A bundle parked for the
+unattended sales drafter).
 
 **Autopost law (ADR-049/050):** vendor-binding v4.1 BUILT AND LIVE; hand-drafts are never
 autopost-eligible BY DESIGN; autopost-from-seeding stays REFUSED (WB-R2/ADR-046). The
@@ -139,11 +143,11 @@ law: migration numbers are claimed at MERGE time.** Malaysian tax facts live in
 effective-dated policy tables, never in prose
 (`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
 
-**Open build items (PROJECTLOG PART 2 is the live register):** Gate P (operating runway;
-owns the capitalised/mixed-purchase tax-allocation question) · the C-c acceptance findings
-AF-1..AF-3 (the unborn-item allocation guard · the composite resolve-and-book verb, which
-also owns the non-P&L match-split shape · the GUC one-receipt width, documented) · the
-`bank_rule_suggested` producer verb · the §7-A runtime bundle (parked for the unattended
-sales drafter) · the `opening_tb.line` producer + K-doc door (Phase 5, review-gated).
+**Open build items (PROJECTLOG PART 2 is the live register):** the Wave D build itself
+(D-a: FA register + AF-1 guard + MYT splice, 0041 · D-b: adjustments + advances + AF-2
+composite + `bank_rule_suggested` producer, 0042 — all per WD-R13) · Gate P (operating
+runway; owns the capitalised/mixed-purchase tax-allocation question) · the §7-A runtime
+bundle (parked for the unattended sales drafter) · the `opening_tb.line` producer + K-doc
+door (Phase 5, review-gated).
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**
