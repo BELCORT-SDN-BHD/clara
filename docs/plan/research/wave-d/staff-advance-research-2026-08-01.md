@@ -280,3 +280,57 @@ If the product requirement itself is still negotiable, inspect real client data 
 If every sampled client shows at most one open advance per person, always settled one-to-one with explicit references, and Clara only needs aggregate balances, A is defensible. The first genuine overlapping or partially applied case is decisive evidence for B—and after that case has been booked under A, faithful retrofitting is already harder.
 
 **Final ruling: B-lite—an append-only, per-disbursement staff-advance register with explicit GL-linked applications, DB-derived outstanding/age, managed-account protection, and an as-of GL tie-out. Leave AR/AP binary and leave employee counterparties nonexistent.**
+
+---
+
+## Lane 2 — web census + Malaysian statutory annex (native sonnet lane, returned 2026-08-01)
+
+**Verdict against WD-R10: NO CONTRADICTION — convergent validation.** ERPNext's Employee
+Advance doctype IS a register-over-GL (advance row: `advance_amount → paid_amount →
+claimed_amount → return_amount`, outstanding always DERIVED `paid − (claimed + return)`,
+GL fires only on Payment/Journal Entry events — structurally Clara's fixed-assets idiom);
+Odoo's community independently reinvented the same register (`hr_expense_advance_clearing`
+OCA module) precisely because plain GL convention could not express partial clears —
+evidence the register is the right escalation, not overengineering. Xero/QuickBooks are
+pure GL-account convention (QB practitioner shape: parent "Employee Advances" asset +
+sub-account per employee — Clara's executed 350-xxx precedent). **No system anywhere models
+an employee advance as a counterparty/vendor relationship** — universal convergence on
+person-scoped current-asset tracking; WC-R10/WD-R10's no-employee-counterparty law matches
+every mature system checked. Sources: docs.frappe.io/hr/employee-advance ·
+apps.odoo.com hr_expense_advance_clearing · accountingtools.com / accountingcoach.com ·
+Xero Central + practitioner guides.
+
+**One honest nuance recorded (not a contradiction):** the lane's synthesis places the
+GL-convention→register crossover trigger at *partial-claim/outstanding-per-advance
+reconciliation*, and judges Clara's stated low-volume simple-repayment profile as
+GL-convention territory *today*. The ruling record (Lane 1) weighed the additional argument
+the lane does not address — retrofit provenance loss (historical allocations must be
+invented once overlapping advances have been booked under convention-only) — and the owner
+ratified B-lite on that record. The nuance stands here for the D-b design ladder's eyes;
+WD-R10 is not re-opened.
+
+**Malaysian statutory facts — PRIMARY-TEXT VERIFIED (Employment Act 1955, full text:
+asean.org MA6 Employment Act PDF):**
+- **s.22** — an employer may not advance wages-not-yet-earned in any one month exceeding the
+  wages earned in the immediately preceding month. A hard statutory ceiling
+  (`advance_amount ≤ prior-month wages`) — a VISIBILITY rule if advance-request UX is ever
+  built (effective-dated policy surface, never silent computation).
+- **s.24(2)(c)** — payroll-deduction recovery of a s.22 advance is lawful ONLY if no
+  interest is charged.
+- **s.27** — interest on salary advances is prohibited unconditionally. Net: Malaysian staff
+  advances are non-interest-bearing BY LAW — a compliance floor, not a design choice.
+
+**Implementation trap named for the D-b design:** Xero's payroll deduction line items can
+only post to a LIABILITY account, never an asset — the asset-vs-liability posting-target
+mismatch any automated payroll-deduction repayment must design around (Clara's Wave-F
+payroll application producer should post through the register's application verb, not
+through a payroll-engine deduction target).
+
+**Open verification item (flagged honest, unresolved):** the exact MPERS/CA2016
+illustrative-FS presentation wording for staff/director advances ("other receivables"
+sub-line convention) is INFERENCE — both illustrative-FS PDF pulls returned unparseable
+binary. Verify from a real illustrative-FS note before the Wave-E FS pack cites it.
+
+**AI-native vendor census (Digits/Puzzle/Zeni/Basis):** no schema-level public docs exist;
+no evidence any does more than ledger-convention + categorization automation. Recorded as
+absence-of-evidence, not evidence-of-absence.
