@@ -201,7 +201,17 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > · staff advances = the B-lite register, ruled on a commissioned cross-model research record
 > (`docs/plan/research/wave-d/staff-advance-research-2026-08-01.md`) · closing stock → Wave E ·
 > CA metadata inert · ALL FOUR Wave-C residuals ride (WD-R13). **Split: D-a (FA register, 0041) →
-> D-b (adjustments + advances, 0042). NEXT: `wave-d-a-fa-design.md` + its design ladder.**
+> D-b (adjustments + advances, 0042).**
+>
+> **STATUS (2026-08-01, later): the D-a DESIGN is RATIFIED — `wave-d-a-fa-design.md` v2.1 +
+> `-part2.md` (PR #175).** Two adversarial rounds: r1 (3 opus lenses + Codex; ~18 blocker-class
+> incl. the dead tail-splice, the K-family double-birth, ledger-rows-before-approval; five
+> load-bearing claims probe-verified against the SQL) → v2 → r2 delta (native 8B/12M/6m +
+> Codex 8B/3M on the folds: the receipt-lifecycle wedge, the is_live slot collision, split
+> effective dating, the immutability transition table, the enrolment watermark, cadence
+> consumption, the RB completions, the machine-born high-stakes arm) → v2.1, all folded;
+> part2 = the durable round record incl. the certified-clean surfaces. **NEXT: the 0041 BUILD
+> (fresh session, multi-lane) → round-3 as-built ladder → ceremony → acceptance (WD-R14).**
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
