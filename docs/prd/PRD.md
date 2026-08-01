@@ -94,6 +94,17 @@ One-firm-per-user; the last active owner cannot be removed.
 
 **Human-signed bounded auto-posting — direction (Wave A2.1, ADR-028/029/030):** the standing-rule auto-post lane (§2 — always under a signing admin's authority, never agent-approved) was purchase-only in Wave A2 and **lifts to the sales direction**: structured (MyInvois) sales under the existing bounds, and OCR-sourced sales only inside a **nine-control compensating-control envelope** (distinct evidence class, positive polarity evidence independent of the caller's coding kind, hard direction evidence, full multi-anchor corroboration, tighter proof). A **purchase leg carrying stated SST stays human-lane only** — never auto-posted (WA21-R1/R2).
 
+**Named future behaviours with their waves (the Wave-C-close §7-B amendment, ADR-054):** five real
+behaviours previously had no home in any artifact; each is now named with the wave that owns it —
+**staff advances → Wave D** (a non-`payable`-class advance/repayment mechanic on the WC-R10
+convention, the shape the C-c ROME PUBLIC advance already exercises) · **staff allowances → Wave F**
+(payroll-calendar adjacent; coded, never computed) · **self-billed e-Invoice obligation detection →
+Wave F** (the verified primary-source trigger rules wait in
+`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md` §1.6) · **withholding tax as a mechanic →
+Wave F** (the COA template's `430-WHT` payable is the prepared landing) · **foreign currency → its
+own wave after G** (WC-R5's fail-closed re-deferral stands until then). Naming is scoping, not
+build: each row is re-openable at its wave's grilling.
+
 ---
 
 ## 5. Core user journeys
