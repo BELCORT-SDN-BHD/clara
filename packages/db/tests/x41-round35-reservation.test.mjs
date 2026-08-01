@@ -3,10 +3,12 @@
 //
 //   x41.s6  (e) the reservation is TWO-directional: the bank COA doors refuse an
 //           FA-reserved code, and do not over-refuse an ordinary one.
-//   x41.s7  (f) a code baked on a LIVE register row is reserved even when no ACTIVE
-//           profile mentions it — version-forward frees the profile, never the fact;
-//           and a disposal entry never soft-births a register row. Once the row is
-//           UNWOUND the code is released, so the predicate is a fact, not a ratchet.
+//   x41.s7  (f) a code baked on a register row is reserved even when no ACTIVE profile
+//           mentions it — version-forward frees the profile, never the fact; and a
+//           disposal entry never soft-births a register row. [ROUND-4] An UNWOUND row
+//           does NOT release its codes either: an EVER-USED FA code stays role-reserved,
+//           because the tie's per-pair census cannot describe one code in two roles on
+//           one client's books — and the register must still tie after the next movement.
 //   x41.s8  (g) proceeds may not be routed into a RETIRED or VERSION-FORWARDED FA code
 //           that a live register row still posts to.
 //
@@ -30,6 +32,7 @@ import {
   x41EnsureReady, skip41, caught, refusesAxis, refusesOneOf, reasonToken,
   T, COST, COST2, ACCUM, ACCUM2, EXPENSE2, BANK, GAIN, LOSS, mon, dayIn,
   upsertFaProfile, retireFaProfile, disposeAsset, disposeAndSettle, reverseAndSettle,
+  faRegisterTie, tieAccts, tieSumBy,
   faWorld, faRow, faRows, profileRows,
   freshFaClient, buyAsset, completeSL, liveAuthority, earnRamp, runAndSettle,
 } from "./x41-round35-helpers.mjs";
@@ -111,24 +114,23 @@ test("x41.s6 the reservation is two-directional: add_bank_account and remap_bank
     "select coa_account_code as c from clara.bank_accounts where id=$1", [bankAccount])).rows[0].c, BANK,
   "…the account still points at its original ordinary code");
 
-  // …and the third door does not over-refuse on an ordinary code.
+  // …and the third door does not over-refuse on an ordinary code. [ROUND-4] This is the
+  // cell's NO-OVER-REFUSAL control, so it MUST SUCCEED: admitting "some unrelated refusal"
+  // here would let the everyday banking path fail for any reason at all while the cell
+  // still reported the guard as well-scoped.
   await deactivateBankAccount(w.users.alice, { client, bankAccount, reason: "x41 s6 park" });
   const back = await caught(() => reactivateBank(w.users.alice, { client, bankAccount }));
-  if (back) {
-    assert.notEqual(reasonToken(back), T.profileInvalid,
-      `reactivating a bank account on an ORDINARY code must not carry the FA reservation refusal (got ${back.message})`);
-    noteLane(`x41.s6 reactivate_bank_account on the ordinary code refused for an unrelated reason (${reasonToken(back) ?? back.code}) — recorded`);
-  } else {
-    assert.equal((await rootQuery("select active from clara.bank_accounts where id=$1", [bankAccount])).rows[0].active, true,
-      "…reactivation restores the ordinary account (the guard is about FA codes, not about banking)");
-  }
+  assert.ok(!back,
+    `reactivate_bank_account on an ORDINARY code must SUCCEED — the FA reservation is about FA codes, not about banking. Got reason='${reasonToken(back) ?? "(none)"}' code=${back?.code} — ${back?.message}`);
+  assert.equal((await rootQuery("select active from clara.bank_accounts where id=$1", [bankAccount])).rows[0].active, true,
+    "…and the ordinary account really is active again");
 });
 
 // ===========================================================================
 // x41.s7 — (f) A BAKED CODE IS RESERVED WHILE A LIVE ROW POSTS TO IT.
 // ===========================================================================
 
-test("x41.s7 version-forward frees the PROFILE, never the FACT: a code still baked on a live register row cannot be re-enrolled, a disposal entry never soft-births, and unwinding the row RELEASES the code", async (t) => {
+test("x41.s7 version-forward frees the PROFILE, never the FACT: a code baked on a register row cannot be re-enrolled in another role, a disposal entry never soft-births, and UNWINDING the row does not release it either — an ever-used FA code stays reserved, and the register still ties through the next movement", async (t) => {
   if (skipHere(t)) return;
   const client = await freshFaClient("s7");
   const start = mon(-3);
@@ -183,8 +185,13 @@ test("x41.s7 version-forward frees the PROFILE, never the FACT: a code still bak
   assert.equal(after.filter((r) => r.acquisition_entry_id === sold.entryId).length, 0,
     "…no register row was born FROM the disposal entry — the phantom's exact mechanical signature");
 
-  // (4) NO RATCHET. The reservation is a FACT about live rows, not a permanent burn: once
-  // the row is unwound, the code is free again.
+  // (4) [ROUND-4] AN EVER-USED FA CODE STAYS ROLE-RESERVED. The earlier reading — that
+  // unwinding a row releases its codes — made the reservation a fact about LIVE rows
+  // only, and that is precisely the shape the tie cannot survive: `fa_register_tie`
+  // asserts per (asset_account, accumulated_account) PAIR, and a client whose chart lets
+  // one code be a cost account today and an accumulated account tomorrow has a census
+  // that must describe the same code in two roles over one history. The register row is
+  // unwound, not deleted — its baked codes are still a fact of this client's books.
   const c2 = await freshFaClient("s7rel");
   const { entry: acq, asset: a2 } = await buyAsset({ client: c2, cents: 90_000, postingDate: dayIn(start, 2), memo: "x41 s7 release" });
   await completeSL(c2, a2.id, { life: 36, start: start.start, description: "x41 s7 release" });
@@ -194,9 +201,28 @@ test("x41.s7 version-forward frees the PROFILE, never the FACT: a code still bak
   }), T.profileInvalid, ["reserved_account", "role_overlap"], "mandatory setup: the code is reserved while the row is live");
   await reverseAndSettle(w.users.alice, { entry: acq, reason: "x41 s7 undo acquisition", opKey: opk("x41s7rel") });
   assert.equal((await faRow(a2.id)).status, "unwound", "the acquisition reverses cleanly (no charges, no descendants)");
-  await upsertFaProfile(w.users.alice, { client: c2, assetAccount: ACCUM, accumAccount: null, expenseAccount: null });
-  assert.equal((await activeProfilesOn(c2, ACCUM)).length, 1,
-    "…and the freed code is now ADMITTED — an UNWOUND row reserves nothing, so the predicate cannot become a one-way ratchet on a firm's chart");
+  await refusesAxis(() => upsertFaProfile(w.users.alice, {
+    client: c2, assetAccount: ACCUM, accumAccount: null, expenseAccount: null,
+  }), T.profileInvalid, ["reserved_account", "role_overlap"],
+  "re-enrolling as a COST account a code an UNWOUND register row still carries as its accumulated-depreciation account — the row is reversed, not erased, and a code this client's register has EVER posted to may not come back in a different role");
+  assert.equal((await activeProfilesOn(c2, ACCUM)).length, 0, "…and no enrolment landed on the ever-used code");
+
+  // …AND THE REGISTER STILL MOVES. A reservation predicate is only worth having if the
+  // everyday path after it is effortless: the next acquisition on the still-enrolled cost
+  // account births normally, and the tie — the instrument WD-R14 pre-flights with — is
+  // clean at an as-of past the reversal mirror, with the unwound row contributing nothing
+  // to either side.
+  const { asset: a3 } = await buyAsset({ client: c2, cents: 120_000, postingDate: dayIn(mon(-1), 6), memo: "x41 s7 first movement" });
+  assert.equal((await faRow(a3.id)).status, "active", "the FIRST MOVEMENT after the refused reuse births a normal register row");
+  const asOf = dayIn(mon(1), 28); // past every mirror this database can hold
+  const tie = await faRegisterTie(w.users.alice, c2, asOf);
+  const rows = tieAccts(tie, COST);
+  assert.ok(rows.length >= 1, "…and the enrolled cost account appears in the tie");
+  assert.equal(tieSumBy(rows, /^register_cost/, "the tie register cost"), 120_000,
+    "…the register reports the LIVE asset's cost alone — the unwound row is out of the as-of window, not netted against it");
+  assert.equal(tieSumBy(rows, /^cost_diff/, "the tie cost difference"), 0, "…cost difference EXACTLY zero");
+  assert.equal(tieSumBy(rows, /^accum_diff/, "the tie accumulated difference"), 0, "…accumulated difference EXACTLY zero");
+  assert.equal(tie.tie, true, `fa_register_tie is GREEN after the reuse attempt and the next movement (got ${JSON.stringify(tie.accounts ?? tie)})`);
 });
 
 // ===========================================================================
@@ -238,9 +264,14 @@ test("x41.s8 proceeds may never be routed into an FA code a live register row st
   const b = await fixture("s8ret");
   const retired = await caught(() => retireFaProfile(w.users.alice, { client: b.client, assetAccount: COST }));
   if (retired) {
-    assert.ok(`${retired.message ?? ""} ${retired.detail ?? ""}`.match(/fa_|profile|asset/i),
-      `retiring a profile whose asset is still live is refused BY AN FA NAME (got code=${retired.code} — ${retired.message})`);
-    noteLane(`x41.s8 retire_fa_account_profile REFUSED while a live register row posts to the profile: '${reasonToken(retired) ?? retired.code}' — the hole is closed at the retirement door`);
+    // [ROUND-4] EXACTLY ENUMERATED, by the DETAIL discriminant. The old free-text match
+    // (`/fa_|profile|asset/i` over message+detail) admitted almost any failure this verb
+    // could throw — including one that has nothing to do with the live register row —
+    // and would have reported the hole as "closed upstream" on the strength of a word.
+    const tok = reasonToken(retired);
+    assert.ok([T.profileInvalid, T.enrolledDeactivation].includes(tok),
+      `retiring a profile whose asset is still live may be refused ONLY by one of the named FA reasons '${T.profileInvalid}' / '${T.enrolledDeactivation}' — anything else is an unrelated failure the disposal-door arm below would then be crediting to this guard. Got reason='${tok ?? "(none)"}' code=${retired.code} — ${retired.message}`);
+    noteLane(`x41.s8 retire_fa_account_profile REFUSED while a live register row posts to the profile: '${tok}' — the hole is closed at the retirement door`);
     assert.equal((await activeProfilesOn(b.client, COST)).length, 1, "…and the profile stayed active");
   } else {
     assert.equal((await activeProfilesOn(b.client, COST)).length, 0, "the retirement went through (the interval is closed)");
@@ -255,11 +286,16 @@ test("x41.s8 proceeds may never be routed into an FA code a live register row st
   // ---- ARM C — NO OVER-REFUSAL. The ordinary shape still posts on both clients, so the
   // guard above is about the reserved account and nothing else.
   for (const [label, f] of [["version-forwarded", a], ["retired", b]]) {
-    const sold = await disposeAndSettle(w.users.alice, {
-      client: f.client, asset: f.asset, disposalDate: dayIn(mon(-1), 12), proceedsCents: 100_000,
-      proceedsAccount: BANK, gainAccount: GAIN, lossAccount: LOSS, memo: `x41 s8 ${label} sale`,
+    let sold = null;
+    const err = await caught(async () => {
+      sold = await disposeAndSettle(w.users.alice, {
+        client: f.client, asset: f.asset, disposalDate: dayIn(mon(-1), 12), proceedsCents: 100_000,
+        proceedsAccount: BANK, gainAccount: GAIN, lossAccount: LOSS, memo: `x41 s8 ${label} sale`,
+      });
     });
+    assert.ok(!err,
+      `the lawful trio (bank / gain / loss) MUST still dispose the asset on the ${label} client — this is the arm that proves the two refusals above are about the reserved account and nothing else. Got reason='${reasonToken(err) ?? "(none)"}' — ${err?.message}`);
     assert.equal((await faRow(f.asset)).status, "disposed",
-      `the lawful trio (bank / gain / loss) still disposes the asset on the ${label} client (mode '${sold.mode}')`);
+      `…and the register row really flips disposed on the ${label} client (mode '${sold.mode}')`);
   }
 });

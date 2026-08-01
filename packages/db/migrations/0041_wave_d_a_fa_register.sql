@@ -189,7 +189,11 @@ begin
       'clara.upsert_account(uuid,text,text,text,text,text,text)',
       'clara.list_review_queue(jsonb,jsonb,integer)',
       'clara.approve_opening_correction(uuid,jsonb,text,text)',
-      'clara._assert_bank_coa_candidate(uuid,text)',
+      -- clara._assert_bank_coa_candidate was listed here until round 4 and is NOT a splice
+      -- subject: G4 replaced the abandoned verb-splice approach with the table-level belt on
+      -- clara.bank_accounts, and this probe's own refusal text ("SECTION S4 cannot splice it")
+      -- was therefore false about it. Removed rather than reworded -- an exact-count file must
+      -- not carry a probe that asserts something the migration does not do.
       'clara._approve_entry_core(jsonb,uuid,uuid,text,text)'] loop
     if to_regprocedure(v_names) is null then
       raise exception '0041 probe 7: % is not present at that exact signature -- SECTION S4 cannot splice it', v_names;
@@ -263,7 +267,7 @@ begin
     raise exception '0041 probe 13: % D-a function name(s) already exist (%) -- partial or duplicate re-apply', v_n, v_names;
   end if;
 
-  raise notice '0041 SECTION 0 probe OK (0/13): 0040 is the applied frontier; none of the 4 relations, 10 columns, 3 event names or 21 functions pre-exist; the fixed_assets baseline, the 3 replaced CHECKs, the immutability trigger, the 12 splice subjects, the taxonomy singleton, both FK anchors and the four-caller census are all present in their expected shape; every existing fixed_assets row is a straight_line K-family carry-down.';
+  raise notice '0041 SECTION 0 probe OK (0/13): 0040 is the applied frontier; none of the 4 relations, 10 columns, 3 event names or 21 functions pre-exist; the fixed_assets baseline, the 3 replaced CHECKs, the immutability trigger, the 11 splice subjects, the taxonomy singleton, both FK anchors and the four-caller census are all present in their expected shape; every existing fixed_assets row is a straight_line K-family carry-down.';
 end
 $probe$;
 
@@ -1609,7 +1613,14 @@ begin
     -- THE CAP REFUSES, IT DOES NOT TRUNCATE [round-3.5 fold G8]. This answer gates a DISPOSAL;
     -- silently stopping the walk would return "nothing owed" for a lineage too deep to read,
     -- which is the failure mode the whole precondition exists to prevent.
-    if v_hops >= 64 then
+    -- ...AND IT REFUSES AT THE SAME DEPTH THE OTHER READER DOES [round-4 fold G8b]. v_hops is
+    -- the number of supersede edges ALREADY taken, so this node was reached by edge v_hops.
+    -- The earlier `>= 64` refused the node at the END of a lawful 64-hop chain, while
+    -- clara._fa_lineage_walk (which checks before taking the NEXT edge) admitted it -- so a
+    -- 64-hop lineage was readable for accumulated depreciation but un-disposable, with the two
+    -- readers disagreeing about the same chain. Both now admit exactly 64 hops and refuse the
+    -- 65th.
+    if v_hops > 64 then
       raise exception 'fixed-asset lineage for % exceeds 64 supersede hops -- the register cannot answer what it still owes', p_asset
         using errcode = 'CLR37',
           detail = jsonb_build_object('reason', 'fa_lineage_too_deep', 'asset_id', p_asset)::text;
@@ -1636,6 +1647,124 @@ create function clara._fa_ancestors_first_due_month(p_asset uuid, p_through date
     from clara.fixed_assets f
    where f.id = p_asset and f.supersedes_asset_id is not null $$;
 revoke all on function clara._fa_ancestors_first_due_month(uuid, date) from public;
+
+-- =====================================================================================
+-- S2.2c -- THE DISPOSAL STUB, LINEAGE-WIDE [round-4 fold G2b]. THE ONE BODY BOTH THE VERB
+-- AND THE APPROVE-TIME HOOK CALL, so the freshness fingerprint compares like with like.
+--
+-- WHAT ROUND 3.5 GOT HALF RIGHT. G2 correctly found that an ANCESTOR's owed months inside the
+-- disposal period are never charged once the successor is disposed (the sweep would post GL
+-- depreciation against a register the as-of read no longer holds). Its remedy -- refuse and
+-- name the period -- is right for an ENDED period and UNEXECUTABLE for the current one: the
+-- round-4 lens reproduced a revise-then-dispose on BOTH cadences where the refusal named a
+-- period that clara.run_depreciation_manual rejects twice over (`not_ended` for the FY,
+-- `not_cadence_aligned` for the named month), leaving an annually-cadenced asset un-disposable
+-- for up to a whole financial year.
+--
+-- THE FOLD: the disposal period is STUB TERRITORY FOR THE WHOLE LINEAGE, not just for the
+-- disposed row. Ancestor months inside [period open .. disposal month end] ride this stub as
+-- PER-ASSET ledger rows (the wire shape already carries asset_id, and the hook already mints
+-- from it per asset); ancestor months from an ENDED period keep the G2 refusal, whose remedy
+-- IS executable. Nothing is charged twice: clara._fa_asset_charges is the same one oracle the
+-- run verb asks, and the hook re-checks clara._fa_range_covered per row before inserting.
+--
+-- THE SPLIT-SIBLING WORRY IS UNREACHABLE, and this is why the pro-rating in
+-- clara._fa_accumulated_periods_through stays exact. An ancestor superseded by a SPLIT has no
+-- owed months left after the split: the split's own disposal ran this same body, so its stub
+-- covered that ancestor through the split month, and clara._fa_asset_charges bounds a
+-- superseded row at month_start(superseded_at - 1) thereafter. So every ancestor that can
+-- still contribute a stub month is reached through REVISION hops only, where the cost share is
+-- exactly 1 -- which is what makes "+ v_stub_total" the right accumulated correction on both
+-- sides of the maker-checker gap.
+--
+-- ACCOUNT SYMMETRY IS ASSERTED, NOT ASSUMED. The entry posts ONE expense debit and ONE
+-- accumulated credit, on the DISPOSED row's codes; revise and split both copy the three codes
+-- forward, so a lineage cannot diverge today -- but if one ever did, the stub would silently
+-- post an ancestor's depreciation to the wrong pair of accounts and break the tie. Named
+-- refusal instead.
+-- =====================================================================================
+create function clara._fa_disposal_stub(p_asset uuid, p_disposal_date date) returns jsonb
+  language plpgsql stable security definer set search_path = clara, pg_temp as $$
+declare
+  v_client uuid; v_cur uuid; v_accum text; v_expense text;
+  v_own jsonb; v_charges jsonb; v_total bigint; v_pd_open date; v_early date;
+  au record; anc record; v_one jsonb; v_hops int := 0;
+begin
+  select f.client_id, f.supersedes_asset_id, f.accum_depr_account_code,
+         f.depr_expense_account_code
+    into v_client, v_cur, v_accum, v_expense
+    from clara.fixed_assets f where f.id = p_asset;
+  if v_client is null then
+    return jsonb_build_object('charges', '[]'::jsonb, 'amount_cents', 0);
+  end if;
+  -- THIS ROW'S OWN STUB, UNCHANGED: terminal (so an RB asset's FY true-up rides this last
+  -- charge) and through the disposal month.
+  v_own := clara._fa_asset_charges(p_asset, p_disposal_date, true);
+  v_charges := v_own -> 'charges';
+  v_total := (v_own ->> 'amount_cents')::bigint;
+  if v_cur is null then
+    return jsonb_build_object('charges', v_charges, 'amount_cents', v_total);
+  end if;
+  -- NO CADENCE, NO PERIOD, NO EXTENSION. Without a live authority nothing is ever due, the
+  -- G2 precondition is vacuous (design SS4.1's "no authority required"), and there is no
+  -- "disposal period" for an ancestor month to be inside of. The stub stays this row's own.
+  select * into au from clara.fa_depreciation_authorities
+    where client_id = v_client and status = 'live';
+  if not found then
+    return jsonb_build_object('charges', v_charges, 'amount_cents', v_total);
+  end if;
+  -- The SAME derivation clara.dispose_fixed_asset uses for its refusal bound; stated in both
+  -- places because the verb needs it before this call and the hook has only the proposal.
+  v_pd_open := case when au.cadence = 'monthly'
+                    then clara._fa_month_start(p_disposal_date)
+                    else clara._fa_fy_open_for(v_client, p_disposal_date) end;
+  -- ENDED-PERIOD MONTHS ARE STILL REFUSED, AND THE BACKSTOP LIVES HERE TOO. In the verb this
+  -- is unreachable (the precondition refuses first, over the whole lineage); at APPROVE time
+  -- the world can have moved -- an ancestor's earlier period reversed in the maker-checker gap
+  -- -- and folding an ENDED period's months into a stub dated at the disposal would route real
+  -- expense around the run verb's maker-checker ladder and date it into the wrong period.
+  v_early := clara._fa_ancestors_first_due_month(p_asset, v_pd_open - 1);
+  if v_early is not null then
+    raise exception 'this asset''s lineage has an uncharged depreciation period (% .. %) at or before the disposal month; run that period first, then dispose',
+      v_early, clara._fa_month_end(v_early)
+      using errcode = 'CLR38',
+        detail = jsonb_build_object('reason', 'period_earlier_unmet',
+          'asset_id', p_asset, 'period_start', v_early,
+          'period_end', clara._fa_month_end(v_early))::text;
+  end if;
+  -- ...so every month the ancestor walk can now emit is >= v_pd_open. (The per-month amount
+  -- clara._fa_asset_charges emits for a non-terminal call does not depend on p_through -- the
+  -- shrinking-horizon property round 4 measured corpus-wide -- so "no month at or before
+  -- v_pd_open - 1" at the smaller bound is the same statement at the larger one.)
+  while v_cur is not null loop
+    if v_hops > 64 then
+      raise exception 'fixed-asset lineage for % exceeds 64 supersede hops -- the register cannot answer what its ancestors still owe', p_asset
+        using errcode = 'CLR37',
+          detail = jsonb_build_object('reason', 'fa_lineage_too_deep', 'asset_id', p_asset)::text;
+    end if;
+    select f.id as id, f.supersedes_asset_id as parent,
+           f.accum_depr_account_code as accum, f.depr_expense_account_code as expense
+      into anc from clara.fixed_assets f where f.id = v_cur;
+    exit when anc.id is null;
+    -- RUN-TERRITORY ARITHMETIC (p_terminal = false): an ancestor's segment is closed by its own
+    -- supersede bound, so on the annual cadence the pre-revision FY segment IS exactly this.
+    v_one := clara._fa_asset_charges(anc.id, p_disposal_date, false);
+    if jsonb_array_length(v_one -> 'charges') > 0 then
+      if anc.accum is distinct from v_accum or anc.expense is distinct from v_expense then
+        raise exception 'fixed asset % posts depreciation to different accounts than its descendant % -- the disposal stub cannot charge both on one pair of legs', anc.id, p_asset
+          using errcode = 'CLR37',
+            detail = jsonb_build_object('reason', 'fa_lineage_accounts_diverge',
+              'asset_id', anc.id, 'descendant_id', p_asset)::text;
+      end if;
+      v_charges := v_charges || (v_one -> 'charges');
+      v_total := v_total + (v_one ->> 'amount_cents')::bigint;
+    end if;
+    v_cur := anc.parent;
+    v_hops := v_hops + 1;
+  end loop;
+  return jsonb_build_object('charges', v_charges, 'amount_cents', v_total);
+end $$;
+revoke all on function clara._fa_disposal_stub(uuid, date) from public;
 
 -- =====================================================================================
 -- S2.3 -- THE CLIENT-WIDE PERIOD COMPUTATION. Per-asset due-ness (design SS3.1) means the
@@ -1914,8 +2043,18 @@ revoke all on function clara._fa_reversal_blocked(uuid) from public;
 --     role, but nothing stopped add_bank_account pointing a bank account AT an enrolled FA
 --     code -- the whole INT-M3 footgun, entered through the other door.
 -- ONE PREDICATE, THREE CONSUMERS. A code is FA-RESERVED for a client iff it sits on an ACTIVE
--- profile in any role OR is baked on any NON-UNWOUND register row. The role and the owning
--- cost account ride along so the enrolment topology check can say WHICH law was broken.
+-- profile in any role OR is baked on ANY register row. The role and the owning cost account
+-- ride along so the enrolment topology check can say WHICH law was broken.
+--
+-- EVERY REGISTER ROW, INCLUDING UNWOUND ONES [round-4 fold G4b]. The first cut excluded
+-- `status = 'unwound'` on the reasoning that a reversed acquisition never really happened, so
+-- its codes should return to the pool. That contradicts the acceptance instrument:
+-- clara.fa_register_tie enumerates its (cost, accumulated) pairs from EVERY fixed_assets row
+-- with no status filter and no as-of, so an unwound row's pair is a permanent tie row. Unwind
+-- an A/B asset, re-use B as another profile's COST account (which the exclusion expressly
+-- admitted), post the first debit to B, and the surviving A/B tie row reads that debit as
+-- accumulated-account movement and goes unexplained-red forever. An EVER-USED FA code stays
+-- role-reserved: a code is cheap, an unexplainable tie is not.
 -- =====================================================================================
 create function clara._fa_reserved_roles(p_client uuid)
   returns table(account_code text, fa_role text, owner_asset_code text)
@@ -1934,17 +2073,15 @@ create function clara._fa_reserved_roles(p_client uuid)
   union
   select f.asset_account_code, 'cost', f.asset_account_code
     from clara.fixed_assets f
-    where f.client_id = p_client and f.status <> 'unwound' and f.asset_account_code is not null
+    where f.client_id = p_client and f.asset_account_code is not null
   union
   select f.accum_depr_account_code, 'accum', f.asset_account_code
     from clara.fixed_assets f
-    where f.client_id = p_client and f.status <> 'unwound'
-      and f.accum_depr_account_code is not null
+    where f.client_id = p_client and f.accum_depr_account_code is not null
   union
   select f.depr_expense_account_code, 'expense', f.asset_account_code
     from clara.fixed_assets f
-    where f.client_id = p_client and f.status <> 'unwound'
-      and f.depr_expense_account_code is not null $$;
+    where f.client_id = p_client and f.depr_expense_account_code is not null $$;
 revoke all on function clara._fa_reserved_roles(uuid) from public;
 
 -- THE LEAF RUNG [round-3.5 fold G4]. The reservation fact spans two tables that two different
@@ -1979,7 +2116,7 @@ begin
   select rr.fa_role, rr.owner_asset_code into v_role, v_owner
     from clara._fa_reserved_roles(p_client) rr where rr.account_code = p_code limit 1;
   if v_role is not null then
-    raise exception 'chart account % is reserved by the fixed-asset register (% role, profile %) and cannot back a bank account; retire the fixed-asset enrolment first, or pick a different account', p_code, v_role, v_owner
+    raise exception 'chart account % is reserved by the fixed-asset register (% role, cost account %) and cannot back a bank account; pick a different account -- a code this client has ever carried on a register row stays reserved, so retiring the enrolment does not release it', p_code, v_role, v_owner
       using errcode = 'CLR10',
         detail = jsonb_build_object('reason', 'coa_account_fa_reserved', 'account_code', p_code,
           'fa_role', v_role, 'fa_profile_asset_account', v_owner)::text;
@@ -2178,11 +2315,15 @@ begin
           detail = jsonb_build_object('reason', 'disposal_stale', 'axis', 'lifecycle',
             'asset_id', a.id, 'status', a.status)::text;
     end if;
-    -- FRESHNESS on the stub, same doctrine as the run arm.
-    v_recomp := clara._fa_asset_charges(a.id, v_dispose_date, true);
-    select coalesce(jsonb_agg(x order by x ->> 'period_start'), '[]'::jsonb)
+    -- FRESHNESS on the stub, same doctrine as the run arm. THE SAME ONE BODY THE VERB CALLED
+    -- [round-4 fold G2b] -- the stub now spans the lineage (ancestor months inside the disposal
+    -- period ride it), so re-deriving it from clara._fa_asset_charges alone would refuse every
+    -- revised asset's disposal as stale. Sorted by (asset, period) because the array is no
+    -- longer single-asset and a period-only sort is not a total order across rows.
+    v_recomp := clara._fa_disposal_stub(a.id, v_dispose_date);
+    select coalesce(jsonb_agg(x order by x ->> 'asset_id', x ->> 'period_start'), '[]'::jsonb)
       into v_want from jsonb_array_elements(v_recomp -> 'charges') x;
-    select coalesce(jsonb_agg(x order by x ->> 'period_start'), '[]'::jsonb)
+    select coalesce(jsonb_agg(x order by x ->> 'asset_id', x ->> 'period_start'), '[]'::jsonb)
       into v_have from jsonb_array_elements(coalesce(v_prop -> 'stub_charges', '[]'::jsonb)) x;
     if v_want is distinct from v_have then
       raise exception 'the register moved since this disposal was proposed; withdraw this draft and re-issue the disposal'
@@ -2214,11 +2355,15 @@ begin
             nullif(v_prop ->> 'accum_relieved_cents', '')::bigint,
             'recomputed_cents', v_disp_accum)::text;
     end if;
-    -- THE STUB MATERIALISES HERE, beside the disposal, from the same one hook.
+    -- THE STUB MATERIALISES HERE, beside the disposal, from the same one hook. PER ASSET
+    -- ALREADY: the wire shape has always carried asset_id and this loop has always minted from
+    -- it, which is why the G2b lineage extension needed no new mechanism here -- an ancestor's
+    -- month lands on the ANCESTOR's row, and the entry's single expense/accumulated leg pair
+    -- carries the total (clara._fa_disposal_stub refuses a lineage whose account codes diverge).
     for d in select (x ->> 'asset_id')::uuid as asset_id, (x ->> 'period_start')::date as ps,
                     (x ->> 'period_end')::date as pe, (x ->> 'amount_cents')::bigint as amt
              from jsonb_array_elements(coalesce(v_prop -> 'stub_charges', '[]'::jsonb)) x
-             order by 2 loop
+             order by 1, 2 loop
       if clara._fa_range_covered(d.asset_id, d.ps, d.pe) then
         raise exception 'a live depreciation charge already covers % .. % for asset %', d.ps, d.pe, d.asset_id
           using errcode = 'CLR38',
@@ -2627,7 +2772,7 @@ begin
         and rr.owner_asset_code <> p_asset_account
       limit 1;
     if v_clash is not null then
-      raise exception 'another enrolled profile or live register row for this client already uses % as its accumulated-depreciation account (cost account %); the register ties per (cost, accumulated) pair and cannot share one accumulated account', p_accum_account, v_clash
+      raise exception 'another enrolled profile or register row for this client already uses % as its accumulated-depreciation account (cost account %); the register ties per (cost, accumulated) pair and cannot share one accumulated account', p_accum_account, v_clash
         using errcode = 'CLR37',
           detail = jsonb_build_object('reason', 'fa_profile_invalid', 'axis', 'accum_shared',
             'account_code', p_accum_account, 'other_profile_asset_account', v_clash)::text;
@@ -2641,7 +2786,7 @@ begin
       where rr.account_code = d.code and rr.fa_role <> d.want_role
       limit 1;
     if v_clash is not null then
-      raise exception 'account % is already spoken for in a DIFFERENT fixed-asset role for this client (%); cost, accumulated-depreciation and depreciation-expense roles must not overlap -- and a role a live register row still carries counts, whatever the profile now says', d.code, v_clash
+      raise exception 'account % is already spoken for in a DIFFERENT fixed-asset role for this client (%); cost, accumulated-depreciation and depreciation-expense roles must not overlap -- and a role ANY register row of this client carries counts, whatever the profile now says', d.code, v_clash
         using errcode = 'CLR37',
           detail = jsonb_build_object('reason', 'fa_profile_invalid', 'axis', 'role_overlap',
             'account_code', d.code, 'other_profile_asset_account', v_clash)::text;
@@ -3606,17 +3751,21 @@ begin
     v_pd_open := case when au.cadence = 'monthly'
                       then clara._fa_month_start(p_disposal_date)
                       else clara._fa_fy_open_for(p_client, p_disposal_date) end;
-    -- TWO BOUNDS, BECAUSE THE DISPOSAL PERIOD MEANS TWO DIFFERENT THINGS [round-3.5 fold G2].
-    -- For THIS row, months inside the disposal period are STUB territory -- the stub below
-    -- charges them, which is why its bound stops at the period open. For an ANCESTOR they are
-    -- RUN territory, and nothing will ever charge them once this successor is disposed: revise
-    -- mid-month, dispose the successor in that same month, and the superseded predecessor still
-    -- owed the disposal month -- passing every check here, then posting GL depreciation for a
-    -- register row the as-of read no longer holds, with no correction path. The stub is
-    -- unchanged (it charges the disposed row and nothing else); the ANCESTORS are asked through
-    -- the disposal DATE, and their owed months are RUN territory with a named remedy.
-    v_unmet := least(clara._fa_lineage_first_due_month(p_asset, v_pd_open - 1),
-                     clara._fa_ancestors_first_due_month(p_asset, p_disposal_date));
+    -- ONE BOUND, AND IT IS THE ENDED PERIOD [round-3.5 fold G2, folded again at round 4].
+    -- G2 widened the ANCESTOR bound to the disposal DATE, on the reasoning that an ancestor's
+    -- months inside the disposal period are RUN territory that nothing will ever charge once
+    -- this successor is disposed. The gap was real; the remedy was not reachable. A period that
+    -- has not ENDED cannot be run (clara.run_depreciation_manual answers `not_ended`, and on
+    -- the annual cadence the month the refusal named is also `not_cadence_aligned`), so a
+    -- lawful sale of an asset revised earlier this financial year was refused for up to a year
+    -- with an instruction nobody could follow.
+    -- The disposal period is STUB TERRITORY FOR THE WHOLE LINEAGE (S2.2c): ancestor months
+    -- inside it ride clara._fa_disposal_stub below as their own per-asset ledger rows, exactly
+    -- as the disposed row's do. What remains refusable is what was always executable -- an
+    -- ENDED period still owed by ANY row of this lineage, which run_depreciation_manual really
+    -- can close. clara._fa_lineage_first_due_month walks this row AND every ancestor, so the
+    -- single call is the whole precondition.
+    v_unmet := clara._fa_lineage_first_due_month(p_asset, v_pd_open - 1);
     if v_unmet is not null then
       raise exception 'this asset''s lineage has an uncharged depreciation period (% .. %) at or before the disposal month; run that period first, then dispose',
         v_unmet, clara._fa_month_end(v_unmet)
@@ -3633,7 +3782,11 @@ begin
   -- stub covers belongs to the DISPOSAL's own period (a mid-FY disposal on the annual cadence
   -- charges that FY's in-service months -- SS3.1's "the stub is that asset's only in-year
   -- charge"). The one non-vacuous case -- incomplete particulars -- was refused above.
-  v_stub := clara._fa_asset_charges(p_asset, p_disposal_date, true);
+  -- AND IT COVERS THE LINEAGE, NOT ONLY THIS ROW [round-4 fold G2b]: S2.2c appends every
+  -- ANCESTOR's owed months inside the same period as their own per-asset charge rows. ONE body,
+  -- called here and again by the approve-time hook, so the freshness fingerprint compares the
+  -- same shape it was taken over.
+  v_stub := clara._fa_disposal_stub(p_asset, p_disposal_date);
   v_stub_total := (v_stub ->> 'amount_cents')::bigint;
 
   v_disp_cost := coalesce(p_cost_portion_cents, fa.cost_cents);
@@ -4024,7 +4177,8 @@ declare c record; r record; v_rows jsonb := '[]'::jsonb; v_tie boolean := true;
         v_incomplete int; v_reg_cost bigint; v_reg_accum bigint;
         v_gl_cost bigint; v_gl_accum bigint; v_pre_cost bigint; v_pre_accum bigint;
         v_pending int; v_pending_tot int := 0; v_before_baseline boolean;
-        v_enrolled timestamptz; v_prev_asset text; v_cost_row boolean;
+        v_enrolled timestamptz; v_enrolled_accum timestamptz;
+        v_prev_asset text; v_cost_row boolean;
 begin
   c := clara._human_ctx(clara.role_rank('viewer'));
   if not exists (select 1 from clara.clients cl where cl.id = p_client and cl.firm_id = c.firm) then
@@ -4106,25 +4260,37 @@ begin
     -- entry approved under the earlier interval, which the register really does hold, is then
     -- reported as unexplained "pre-enrolment" GL. The account's history starts at the FIRST time
     -- it was ever enrolled; that is the only watermark that makes this column mean what it says.
+    --
+    -- TWO WATERMARKS, BECAUSE THE TWO COLUMNS ASK ABOUT TWO DIFFERENT ACCOUNTS [round-4 fold
+    -- G8b]. One watermark keyed on the COST code drove both columns, so an accumulated account
+    -- that joined the register LATER than the cost account inherited the cost account's earlier
+    -- date: enrol A/B at t1, let ordinary account C move at t1.5, then version-forward to A/C at
+    -- t2, and C's pre-enrolment movement -- which the register genuinely cannot hold -- was
+    -- measured against t1, silently dropped out of the explained column, and reported as an
+    -- unexplained accumulated difference. The accumulated watermark is the first time THIS PAIR
+    -- was ever enrolled, which is the exact history of the accumulated code in this role.
     select min(p.enrolled_at) into v_enrolled from clara.fa_account_profiles p
       where p.client_id = p_client and p.asset_account_code = r.asset_code;
+    select min(p.enrolled_at) into v_enrolled_accum from clara.fa_account_profiles p
+      where p.client_id = p_client and p.asset_account_code = r.asset_code
+        and p.accum_depr_account_code is not distinct from r.accum_code;
     if v_enrolled is null then
-      v_pre_cost := 0; v_pre_accum := 0;
+      v_pre_cost := 0;
     else
       select coalesce(sum(l.debit_cents - l.credit_cents), 0) into v_pre_cost
         from clara.journal_lines l join clara.journal_entries j on j.id = l.entry_id
         where l.client_id = p_client and l.account_code = r.asset_code and v_cost_row
           and j.status = 'approved' and j.posting_date <= p_as_of
           and coalesce(j.approved_at, j.created_at) < v_enrolled;
-      if r.accum_code is null then
-        v_pre_accum := 0;
-      else
-        select coalesce(sum(l.credit_cents - l.debit_cents), 0) into v_pre_accum
-          from clara.journal_lines l join clara.journal_entries j on j.id = l.entry_id
-          where l.client_id = p_client and l.account_code = r.accum_code
-            and j.status = 'approved' and j.posting_date <= p_as_of
-            and coalesce(j.approved_at, j.created_at) < v_enrolled;
-      end if;
+    end if;
+    if r.accum_code is null or v_enrolled_accum is null then
+      v_pre_accum := 0;
+    else
+      select coalesce(sum(l.credit_cents - l.debit_cents), 0) into v_pre_accum
+        from clara.journal_lines l join clara.journal_entries j on j.id = l.entry_id
+        where l.client_id = p_client and l.account_code = r.accum_code
+          and j.status = 'approved' and j.posting_date <= p_as_of
+          and coalesce(j.approved_at, j.created_at) < v_enrolled_accum;
     end if;
     if v_reg_cost <> v_gl_cost or v_reg_accum <> v_gl_accum then v_tie := false; end if;
     v_rows := v_rows || jsonb_build_object('asset_account', r.asset_code,
@@ -5412,7 +5578,12 @@ begin
       ('registry_not_open', 1), ('opening_item.superseded', 1),
       ('clara._record_onboarding_contributor', 1),
       ('get diagnostics v_asset_transition_count=row_count;', 1),
-      ('non_correction_draft_present', 1), ('entry_count', 1)) as t(marker, want) loop
+      ('non_correction_draft_present', 1), ('entry_count', 1),
+      -- ...INCLUDING THE ONE THE PRE-CENSUS COUNTED AND THIS BLOCK USED TO DROP [round-4
+      -- record fix]. The splice rewrites the very UPDATE that carries superseded_by_asset_id,
+      -- so its count is exactly what a botched replace() would disturb -- and re-asserting it
+      -- after the surgery is the only half that proves anything.
+      ('superseded_by_asset_id', 1)) as t(marker, want) loop
     v_cnt := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
     if v_cnt <> r.want then
       raise exception '0041 S4.11 postcheck: approve_opening_correction lost marker "%" (now %, expected %)', r.marker, v_cnt, r.want
@@ -5424,7 +5595,7 @@ begin
     raise exception '0041 S4.11 postcheck: approve_opening_correction changed owner'
       using errcode = 'CLR10';
   end if;
-  raise notice '0041 S4.11 OK: the K6 hand-off stamps superseded_at from the correction entry''s posting date; all twelve pre-existing markers (0017 + both 0018 splices) survived at their measured counts.';
+  raise notice '0041 S4.11 OK: the K6 hand-off stamps superseded_at from the correction entry''s posting date; all thirteen pre-existing markers (0017 + both 0018 splices) survived at their measured counts, re-asserted at the same counts the pre-census took.';
 end $s4_11$;
 
 reset role;
@@ -6015,7 +6186,7 @@ begin
       'clara._fa_range_covered(uuid,date,date)',
       'clara._fa_first_chargeable_month(uuid)',
       'clara._fa_first_due_month(uuid,date)', 'clara._fa_lineage_first_due_month(uuid,date)',
-      'clara._fa_ancestors_first_due_month(uuid,date)',
+      'clara._fa_ancestors_first_due_month(uuid,date)', 'clara._fa_disposal_stub(uuid,date)',
       'clara._fa_revision_closure(uuid[])',
       'clara._fa_reversal_lineage(uuid)', 'clara._fa_reversal_blocked(uuid)',
       'clara._fa_reserved_roles(uuid)', 'clara._fa_lock_roles(uuid)',
@@ -6090,7 +6261,7 @@ end $tail12$;
 --       "never acquire 203005004 while holding a later rung" cannot be violated from here.
 -- =====================================================================================
 do $tail13$
-declare r record; v_src text; v_n int;
+declare r record; v_src text; v_n int; v_seed text[]; v_tail text; v_names text;
 begin
   -- (a) THE CONSUMERS.
   for r in select * from (values
@@ -6158,12 +6329,94 @@ begin
       raise exception '0041 tail 13(c): % acquires an advisory lock AFTER it takes (or fires) the fa-roles LEAF -- that is a rung taken under a leaf, which is how this ladder deadlocks. Move the acquisition above "%"', r.sig, r.anchor;
     end if;
   end loop;
-  -- ...and the one body the bank doors reach AFTER the belt has fired takes no lock at all.
-  select p.prosrc into v_src from pg_proc p
-    where p.oid = 'clara._enqueue_invoice_facts_core(uuid)'::regprocedure;
-  if position('pg_advisory_xact_lock' in v_src) <> 0 then
-    raise exception '0041 tail 13(c): clara._enqueue_invoice_facts_core now takes an advisory lock, and add_bank_account calls it while holding the fa-roles leaf';
+  -- ...AND THE SAME PROPERTY, PROVEN TRANSITIVELY OVER THE WHOLE SCHEMA [round-4 fold G4c].
+  -- The positional scan above is depth 1, and the shipped code already broke the law it states:
+  -- add_bank_account calls clara._enqueue_invoice_facts_core after the INSERT that fires the
+  -- belt, and THAT body -- clean in its own prosrc -- calls clara._reserve_processing_call,
+  -- which takes the firm METERING rung 203005001. A depth-1 census certified a false property
+  -- and would have stayed green through exactly the edit it exists to catch.
+  --
+  -- The lock posture is NOT restructured: a whole-schema census establishes that the one rung
+  -- reachable under the leaf has no cycle partner, in BOTH directions.
+  --   (i)  DOWN -- every clara function transitively reachable from a call site AFTER the
+  --        anchor in the five leaf-path bodies, intersected with the advisory acquirers, must
+  --        be exactly {clara._reserve_processing_call}, and that body must take ONLY 203005001
+  --        (never a house ladder rung, never the leaf).
+  --   (ii) UP -- nothing transitively reachable from any 203005001 holder may write
+  --        clara.bank_accounts or take the fa-roles leaf. With (i) that closes the cycle: the
+  --        only order that exists is leaf-then-203005001, never the reverse.
+  -- The call graph is over-approximated by TEXTUAL containment of `clara.<name>(` and keyed on
+  -- proname (so every overload counts). Over-approximation is the safe direction for both
+  -- claims -- a spurious edge can only make the census stricter, never blinder.
+  create temp table _fa_lock_edge on commit drop as
+    select caller.proname::text as caller, callee.proname::text as callee
+      from pg_proc caller join pg_proc callee
+        on callee.pronamespace = 'clara'::regnamespace and caller.oid <> callee.oid
+       and position('clara.' || callee.proname || '(' in caller.prosrc) <> 0
+     where caller.pronamespace = 'clara'::regnamespace;
+  v_seed := '{}'::text[];
+  for r in select * from (values
+      ('clara.add_bank_account(uuid,text,text,text,text,uuid,text)',
+        'insert into clara.bank_accounts('),
+      ('clara.remap_bank_account_coa(uuid,uuid,text,text)',
+        'update clara.bank_accounts set coa_account_code'),
+      ('clara.reactivate_bank_account(uuid,uuid,text)',
+        'update clara.bank_accounts set active = true'),
+      ('clara.upsert_fa_account_profile(uuid,text,text,text,text)',
+        'clara._fa_lock_roles('),
+      ('clara.retire_fa_account_profile(uuid,text,text)',
+        'clara._fa_lock_roles(')
+    ) as t(sig, anchor) loop
+    select p.prosrc into v_src from pg_proc p where p.oid = r.sig::regprocedure;
+    v_tail := substr(v_src, position(r.anchor in v_src) + length(r.anchor));
+    v_seed := v_seed || array(select p.proname::text from pg_proc p
+                              where p.pronamespace = 'clara'::regnamespace
+                                and position('clara.' || p.proname || '(' in v_tail) <> 0);
+  end loop;
+  if coalesce(array_length(v_seed, 1), 0) = 0 then
+    raise exception '0041 tail 13(c): the under-leaf seed set is EMPTY -- the anchors no longer sit above any call, so this census would pass vacuously';
   end if;
+  create temp table _fa_lock_down on commit drop as
+    with recursive reach(fn) as (
+      select distinct unnest(v_seed) collate "C"
+      union
+      select e.callee from _fa_lock_edge e join reach r2 on r2.fn = e.caller)
+    select fn from reach;
+  select coalesce(string_agg(d.fn, ', ' order by d.fn), '') into v_names
+    from _fa_lock_down d join pg_proc p
+      on p.proname = d.fn and p.pronamespace = 'clara'::regnamespace
+   where p.prosrc like '%pg_advisory_xact_lock%';
+  if v_names <> '_reserve_processing_call' then
+    raise exception '0041 tail 13(c): the advisory acquirers reachable UNDER the fa-roles leaf are {%} -- expected exactly {_reserve_processing_call}. A new rung under the leaf re-opens the deadlock this ladder is built to make impossible; hoist the acquisition above the belt, or re-derive this census.', v_names;
+  end if;
+  select p.prosrc into v_src from pg_proc p
+    where p.oid = 'clara._reserve_processing_call(uuid,integer)'::regprocedure;
+  if position('203005001' in v_src) = 0 or position('203005002' in v_src) <> 0
+     or position('203005003' in v_src) <> 0 or position('203005004' in v_src) <> 0
+     or position(':fa-roles' in v_src) <> 0 then
+    raise exception '0041 tail 13(c): clara._reserve_processing_call no longer takes ONLY the 203005001 metering rung -- the one lock reachable under the leaf changed shape';
+  end if;
+  create temp table _fa_lock_up on commit drop as
+    with recursive reach(fn) as (
+      select p.proname::text collate "C" from pg_proc p
+        where p.pronamespace = 'clara'::regnamespace and p.prosrc like '%203005001%'
+      union
+      select e.callee from _fa_lock_edge e join reach r2 on r2.fn = e.caller)
+    select fn from reach;
+  select count(*)::int into v_n from _fa_lock_up;
+  if v_n = 0 then
+    raise exception '0041 tail 13(c): no function holds the 203005001 rung -- the UP census has no subject and would pass vacuously';
+  end if;
+  select coalesce(string_agg(u.fn, ', ' order by u.fn), '') into v_names
+    from _fa_lock_up u join pg_proc p
+      on p.proname = u.fn and p.pronamespace = 'clara'::regnamespace
+   where p.prosrc like '%insert into clara.bank_accounts%'
+      or p.prosrc like '%update clara.bank_accounts%'
+      or p.prosrc like '%:fa-roles%';
+  if v_names <> '' then
+    raise exception '0041 tail 13(c): {%} is reachable from a 203005001 holder AND writes clara.bank_accounts or takes the fa-roles leaf -- that is the cycle partner the leaf-last order has no answer for (leaf-then-metering one side, metering-then-leaf the other)', v_names;
+  end if;
+  drop table _fa_lock_edge; drop table _fa_lock_down; drop table _fa_lock_up;
   -- The three FA-side bodies on the leaf path take no ladder rung of their own.
   for r in select * from (values
       ('clara._fa_lock_roles(uuid)'), ('clara._fa_assert_code_unreserved(uuid,text)'),
@@ -6190,7 +6443,7 @@ begin
   if position($x$not (e.flags ? 'fa_disposal')$x$ in v_src) = 0 then
     raise exception '0041 tail 13: the soft-birth arm no longer excludes fa_disposal entries -- a disposal''s accumulated-debit leg can birth a phantom register row again';
   end if;
-  raise notice '0041 tail 13 OK: three consumers read the one reservation predicate (and the disposal verb reads the profile table no more); the bank side is belted at the table, gated on active, undeferred; the fa-roles key has exactly one taker and no body on its path acquires ANY advisory lock after taking or firing it (leaf-last, proven positionally); soft-birth excludes disposals.';
+  raise notice '0041 tail 13 OK: three consumers read the one reservation predicate (and the disposal verb reads the profile table no more); the bank side is belted at the table, gated on active, undeferred; the fa-roles key has exactly one taker and no body on its path acquires ANY advisory lock after taking or firing it (leaf-last, proven positionally AND by a transitive whole-schema census in both directions -- the only rung reachable under the leaf is 203005001 in clara._reserve_processing_call, and no 203005001 holder reaches a clara.bank_accounts writer or the leaf); soft-birth excludes disposals.';
 end $tail13$;
 
 do $tail_final$

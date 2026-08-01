@@ -312,10 +312,14 @@ const FA_0041_UNGRANTED_FNS = [
   "_fa_included_at", "_fa_particulars_complete", "_fa_validate_particulars",
   "_fa_first_chargeable_month", "_fa_uncharged_months",
   // The ONE due oracle (fold F3) — `_fa_first_due_month` replaces `_fa_first_uncharged_month`:
-  // due-ness is what the arithmetic emits, never a bare month-coverage scan. `_fa_ancestors_…`
-  // (fold G2) asks it of the ancestors only: this row's months inside the disposal period are
-  // stub territory, an ancestor's are run territory.
+  // due-ness is what the arithmetic emits, never a bare month-coverage scan. Round 4 (fold G2b)
+  // settled where the disposal period's boundary sits: the period is STUB territory for the
+  // WHOLE lineage, so `_fa_disposal_stub` appends every ancestor's owed months inside it as
+  // per-asset charge rows (ONE body, called by the verb and again by the approve hook), while
+  // `_fa_ancestors_first_due_month` is now the ENDED-period backstop that keeps an ancestor's
+  // earlier months in run territory, where the remedy is executable.
   "_fa_first_due_month", "_fa_lineage_first_due_month", "_fa_ancestors_first_due_month",
+  "_fa_disposal_stub",
   // Reversal dispatch discriminates on the ENTRY and unwinds revision lineage (fold F4/F6);
   // `_fa_reversal_blocked` is called from BOTH `reverse_entry` and the approve-time hook. Fold
   // G5 gave the closure a seeded entry point so the SPLIT arm reuses it rather than forking it.
@@ -325,7 +329,9 @@ const FA_0041_UNGRANTED_FNS = [
   "_fa_fy_open_for", "_fa_fy_end_for", "_fa_month_start", "_fa_month_end", "_fa_month_diff",
   "_fa_ym_date", "_fa_today",
   // Fold G4 — the ONE reservation predicate (an account is FA-reserved iff an ACTIVE profile
-  // names it in any role OR a NON-UNWOUND register row bakes it), its leaf serialization rung,
+  // names it in any role OR ANY register row bakes it; round 4 dropped the unwound exclusion,
+  // because fa_register_tie's pair census has no status filter and keeps an unwound row's pair
+  // forever, so releasing its codes made a re-use unexplainable), its leaf serialization rung,
   // the shared bank-side refusal, and the belt that puts that refusal on clara.bank_accounts
   // itself rather than on the three doors that happen to exist today.
   "_fa_reserved_roles", "_fa_lock_roles", "_fa_assert_code_unreserved", "_tf_fa_bank_reserved",

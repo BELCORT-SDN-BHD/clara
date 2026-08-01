@@ -173,10 +173,16 @@ test("x41.s4 the WHOLE-DB fa_register_tie sweep at three as-ofs: unexplained dif
     }
     const swept = await tieSweep(asOf);
     assert.ok(swept.length > 0, `the sweep found register-bearing clients to measure at ${asOf} (a vacuous sweep proves nothing)`);
+    // [ROUND-4] ZERO ERRORS, ASSERTED. A client whose tie THROWS is not "unmeasured" —
+    // it is a client whose books nobody can assert, and the pre-flight that was supposed
+    // to say so would have stayed green while quietly demoting it to a lane note. The
+    // note stays for diagnosis; the assertion is what makes the sweep an instrument.
     const errs = swept.filter((r) => r.err);
     if (errs.length) {
       noteLane(`x41.s4 at ${asOf} the tie REFUSED for ${errs.length} client(s): ${errs.slice(0, 5).map((e) => `${e.client_name}: ${e.err}`).join(" | ")}`);
     }
+    assert.deepEqual(errs.map((e) => ({ client: e.client, name: e.client_name, err: e.err })), [],
+      `at as_of ${asOf}: fa_register_tie must RETURN for every register-bearing client in the database. A refusal here is a book WD-R14's pre-flight cannot measure at all.`);
     const rows = sweepAccountRows(swept.filter((r) => !r.err));
     seen.clients = Math.max(seen.clients, swept.length);
     seen.rows += rows.length;
