@@ -128,7 +128,7 @@ daily.** No migration queued.
 (WCA-R1..R9) · C-b `wave-c-b-bank-design.md` v2.2 + parts 2–3 (WCB-R1..R6) · C-c
 `wave-c-c-tieout-design.md` v2.1 + part2 (WCC-R1..R8 + rounds 1–4 + the acceptance round
 AF-1..AF-5). Open registers: PROJECTLOG PART 2 (the C-c acceptance findings AF-1..AF-3 as
-follow-ups · the owner's RM5,000-bill one-line confirmation · Gate P · the §7-A bundle
+follow-ups · Gate P · the §7-A bundle
 parked for the unattended sales drafter).
 
 **Autopost law (ADR-049/050):** vendor-binding v4.1 BUILT AND LIVE; hand-drafts are never
