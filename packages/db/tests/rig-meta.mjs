@@ -298,23 +298,37 @@ const FA_0041_SHARED_FNS = ["depreciation_run_due"]; // BOTH lanes, by design §
 // an approve transaction.
 const FA_0041_UNGRANTED_FNS = [
   "_fa_on_approve", "_fa_run_period_core", "_fa_compute_charges", "_fa_asset_charges",
-  "_fa_asset_json", "_fa_accumulated", "_fa_accumulated_total", "_fa_lineage_accumulated",
-  // The round-3 read layer: ONE lineage-accumulated read (`_fa_accumulated_at` over
-  // `_fa_own_ledger`) behind every "accumulated" question, so no frozen bake can stand in for
-  // an effective-dated read (fold F1/F2).
-  "_fa_own_ledger", "_fa_accumulated_at",
+  "_fa_asset_json", "_fa_accumulated", "_fa_accumulated_total",
+  // The round-3 read layer: ONE lineage walk (`_fa_lineage_walk`) behind every "accumulated"
+  // question, so no frozen bake can stand in for a computed read (fold F1/F2). Round 3.5 (fold
+  // G1) gave that walk a SECOND reader — `_fa_own_ledger_periods` nets a reversal against the
+  // PERIOD it corrected rather than the date the correction posted — and exactly two consumers
+  // (the reducing-balance FY-open basis, the disposal's accumulated relief) ask through
+  // `_fa_accumulated_periods_through`. Every as-of read keeps effective-date semantics.
+  // `_fa_lineage_accumulated` is GONE: its one caller moved, and a second unreferenced money
+  // reader beside the new one is the drift surface fold F3 exists to prevent.
+  "_fa_own_ledger", "_fa_own_ledger_periods", "_fa_lineage_walk",
+  "_fa_accumulated_at", "_fa_accumulated_periods_through",
   "_fa_included_at", "_fa_particulars_complete", "_fa_validate_particulars",
   "_fa_first_chargeable_month", "_fa_uncharged_months",
   // The ONE due oracle (fold F3) — `_fa_first_due_month` replaces `_fa_first_uncharged_month`:
-  // due-ness is what the arithmetic emits, never a bare month-coverage scan.
-  "_fa_first_due_month", "_fa_lineage_first_due_month",
+  // due-ness is what the arithmetic emits, never a bare month-coverage scan. `_fa_ancestors_…`
+  // (fold G2) asks it of the ancestors only: this row's months inside the disposal period are
+  // stub territory, an ancestor's are run territory.
+  "_fa_first_due_month", "_fa_lineage_first_due_month", "_fa_ancestors_first_due_month",
   // Reversal dispatch discriminates on the ENTRY and unwinds revision lineage (fold F4/F6);
-  // `_fa_reversal_blocked` is called from BOTH `reverse_entry` and the approve-time hook.
-  "_fa_reversal_lineage", "_fa_reversal_blocked",
+  // `_fa_reversal_blocked` is called from BOTH `reverse_entry` and the approve-time hook. Fold
+  // G5 gave the closure a seeded entry point so the SPLIT arm reuses it rather than forking it.
+  "_fa_revision_closure", "_fa_reversal_lineage", "_fa_reversal_blocked",
   "_fa_pending_unposted",
   "_fa_range_covered", "_fa_oldest_unmet_period", "_fa_disposal_draft_outstanding",
   "_fa_fy_open_for", "_fa_fy_end_for", "_fa_month_start", "_fa_month_end", "_fa_month_diff",
   "_fa_ym_date", "_fa_today",
+  // Fold G4 — the ONE reservation predicate (an account is FA-reserved iff an ACTIVE profile
+  // names it in any role OR a NON-UNWOUND register row bakes it), its leaf serialization rung,
+  // the shared bank-side refusal, and the belt that puts that refusal on clara.bank_accounts
+  // itself rather than on the three doors that happen to exist today.
+  "_fa_reserved_roles", "_fa_lock_roles", "_fa_assert_code_unreserved", "_tf_fa_bank_reserved",
   "_tf_fa_movement_belt", "_tf_fa_depreciation_append_only", "_tf_fa_run_immutable",
   "_tf_fa_authority_transition", "_tf_fa_profile_no_delete",
 ];

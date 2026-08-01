@@ -223,4 +223,16 @@ test("K8: post-approval the register row is IMMUTABLE except the disposal allowl
     `immutability trigger errcode (got ${err.code})`);
   await rootQuery("update clara.fixed_assets set status='disposed', disposed_at=current_date where id=$1", [faId]);
   assert.equal((await faRow(faId)).status, "disposed", "the Wave-D disposal allowlist (disposed_at/status/updated_at) passes");
+
+  // [ROUND-3.5 · fix ledger G7 · FIXTURE HYGIENE] The probe above is a RAW allowlist
+  // write: it flips the row to 'disposed' with `disposal_entry_id` NULL and no disposal
+  // entry anywhere in the GL, so from Wave D-a onwards this client reads permanently RED
+  // on `clara.fa_register_tie` (−500,000 cost / −100,000 accumulated) and pollutes the
+  // whole-DB sweep x41.s4 uses as a WD-R14 pre-flight. The allowlist is symmetric — the
+  // same three columns are unconditionally mutable — so the probe RESTORES the row it
+  // borrowed, and the restore is itself an assertion: the allowlist admits the way back.
+  await rootQuery("update clara.fixed_assets set status='active', disposed_at=null where id=$1", [faId]);
+  const restored = await faRow(faId);
+  assert.equal(restored.status, "active", "…and the same allowlist admits the restore, leaving the fixture tie-clean");
+  assert.equal(restored.disposed_at, null, "…with disposed_at cleared, so no sweep sees a disposal that never happened");
 });

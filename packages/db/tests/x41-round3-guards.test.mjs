@@ -15,6 +15,14 @@
 //   x41.q7  the smalls: the issuer op-receipt binding names the CLIENT, and the
 //           NULL-accum-with-carried-accumulated shape is either unreachable or named.
 //
+// [ROUND-3.5 · fix ledger G7] TWO pins in this file were DEFECTIVE and are re-cut here:
+// q6 proved the index EXISTS but never that the plan USES it, and q7(a) was VACUOUS —
+// its ±700-char `client_id` window matched the unrelated `<alias>.client_id <> e.client_id`
+// tenancy checks that sit beside every anchor, so it passed on a body whose whole
+// request-hash re-derivation had been deleted. Both re-cuts MEASURE: q6 reads the planner's
+// own answer, q7(a) proves its predicate discriminating against mutants built from the live
+// body in the cell's own setup. No other cell in this file is touched.
+//
 // CONTRACT-BLIND (see x41-fa-fixtures.mjs / x41-round3-helpers.mjs headers).
 
 import { test, before, after } from "node:test";
@@ -27,7 +35,11 @@ import {
   disposeAndSettle,
   reviseParticulars, faWorld, faRow, entryRowOf, entryLinesOf, profileRows, columnExists,
   freshFaClient, buyAsset, completeSL,
-} from "./x41-round3-helpers.mjs";
+  // [ROUND-3.5 · G7] the two re-cut pins' instruments (x41-round35-helpers.mjs).
+  explainPlan, flatPlan, nodeTypes,
+  decomment, lookupSpans, clientBoundIssuerLookups, cutRequestHashConjuncts, round3Pin,
+  CLIENT_IN_HASH_G,
+} from "./x41-round35-helpers.mjs";
 import { addBankAccount } from "./x38-match-fixtures.mjs";
 
 let live = false;
@@ -308,6 +320,29 @@ test("x41.q6 the outstanding-disposal-draft probe is CLIENT-scoped and index-bac
   assert.ok(/client_id/.test(def), `…keyed by client_id (got ${def})`);
   assert.ok(/draft/.test(def), `…and restricted to drafts (got ${def})`);
   noteLane(`x41.q6 the outstanding-disposal index is ${idx.map((r) => r.indexname).join(", ")}`);
+
+  // [ROUND-3.5 · G7] AN INDEX THAT EXISTS IS NOT AN INDEX THAT IS USED. Ask the planner
+  // itself about the predicate the probe rides — a future rewrite (an added OR arm, a
+  // wrapped expression, a lost `flags ?` operator) would silently revert to a Seq Scan
+  // per asset inside the sweep and leave every assertion above green.
+  const probe = `select 1 from clara.journal_entries e
+     where e.client_id = '00000000-0000-0000-0000-000000000000'::uuid
+       and e.status = 'draft' and e.flags ? 'fa_disposal'`;
+  noteLane(`x41.q6 the NATURAL plan for the outstanding-disposal predicate: ${nodeTypes(await explainPlan(probe)).join(" > ")}`);
+  // `enable_seqscan = off` does not FORBID a sequential scan — it only prices it out of
+  // reach. A predicate the partial index cannot serve still plans as a Seq Scan, so this
+  // measures index USABILITY and stays deterministic on a rig whose journal_entries is
+  // too small for the planner to prefer an index naturally.
+  const nodes = flatPlan(await explainPlan(probe, { noSeqScan: true }));
+  assert.ok(!nodes.some((n) => n["Node Type"] === "Seq Scan" && n["Relation Name"] === "journal_entries"),
+    `the outstanding-disposal predicate must NEVER plan as a Seq Scan over clara.journal_entries (F10) — got ${nodeTypes(nodes).join(" > ")}`);
+  const used = nodes.map((n) => n["Index Name"]).filter(Boolean);
+  assert.ok(used.length >= 1,
+    `…it plans as an Index / Index-Only / Bitmap-Index scan (got ${nodeTypes(nodes).join(" > ")})`);
+  const names = idx.map((r) => r.indexname);
+  assert.ok(used.some((n) => names.includes(n)),
+    `…and the index it rides is F10's own partial index (expected one of ${names.join(", ")}; the planner chose ${used.join(", ")})`);
+  noteLane(`x41.q6 the planner rides '${used.join(", ")}' for the outstanding-disposal predicate (Seq Scan absent)`);
 });
 
 test("x41.q7 the smalls: the issuer op-receipt binding names the CLIENT, and a NULL-accum register row can never carry accumulated depreciation through a D-a door", async (t) => {
@@ -315,13 +350,48 @@ test("x41.q7 the smalls: the issuer op-receipt binding names the CLIENT, and a N
   // (a) the op-receipt binding. A firm-only match lets ANY op-receipt of the same firm
   // authenticate a proposal for a different client of that firm; the binding must also
   // pin the client. This is a CATALOG census (the x41.k1 idiom), not a body read.
+  //
+  // [ROUND-3.5 · G7] RE-PINNED, AND PROVEN DISCRIMINATING. The round-3 assertion looked
+  // for `client_id` anywhere in a ±700-char window around each `op_key =` anchor and
+  // quantified with `some()`; every anchor sits beside an unrelated
+  // `<alias>.client_id <> e.client_id` tenancy check, so it answered TRUE on a body with
+  // the entire request-hash re-derivation removed. The pin below demands the exact
+  // client-bound re-derivation fragment inside EVERY op-receipt lookup, and the three
+  // mutants — built here from the live body — prove the predicate rejects the defect.
   const src = await fnSource("_fa_on_approve");
   assert.ok(src && src.length > 0, "the approve-time hook body is readable from the catalog");
-  const anchors = [...src.matchAll(/op_key\s*=/g)].map((m) => m.index);
-  assert.ok(anchors.length > 0, "…and it really binds an op_key (the issuer authenticity half)");
-  const bound = anchors.some((i) => /client_id/.test(src.slice(Math.max(0, i - 700), i + 300)));
-  assert.ok(bound,
-    "every issuer op-receipt lookup sits in a predicate that also names client_id — a firm-only match is a cross-client oracle (STR minor)");
+  const live = decomment(src);
+  const spans = lookupSpans(live);
+  assert.ok(spans.length >= 2,
+    `the approve-time hook carries BOTH issuer op-receipt lookups — the depreciation proposal's and the disposal proposal's (found ${spans.length}). If the fix lane factored them into a helper, this cell must follow them there, not be relaxed.`);
+  assert.equal(clientBoundIssuerLookups(live), true,
+    "EVERY issuer op-receipt lookup re-derives the request hash INCLUDING `'client', <entry>.client_id` — a firm-only match is a cross-client oracle (STR minor)");
+
+  // MUTATION PROOF 1 — the firm-only binding: the client leaves the hash at BOTH sites,
+  // while the neighbouring `<alias>.client_id <> e.client_id` tenancy checks stay put —
+  // the defect class the STR-minor fold exists to kill.
+  const mutFirmOnly = live.replace(CLIENT_IN_HASH_G, "");
+  assert.notEqual(mutFirmOnly, live, "the mutation really changed the body (the fragment under test is present)");
+  assert.equal(clientBoundIssuerLookups(mutFirmOnly), false,
+    "MUTATION PROOF: the pin REJECTS a body whose request hash no longer names the client — the round-3 window matched the unrelated tenancy checks instead and was vacuous");
+
+  // MUTATION PROOF 2 — a HALF-bound body: only the LAST lookup loses the client. `some()`
+  // would still answer true; `every()` is the quantifier the law needs.
+  const hits = [...live.matchAll(CLIENT_IN_HASH_G)]
+    .filter((m) => spans.some(([a, b]) => m.index >= a && m.index < b));
+  assert.ok(hits.length >= 2, `each issuer lookup carries its own client-bound fragment (found ${hits.length} inside the lookup windows)`);
+  const last = hits[hits.length - 1];
+  const mutHalfBound = live.slice(0, last.index) + live.slice(last.index + last[0].length);
+  assert.equal(clientBoundIssuerLookups(mutHalfBound), false,
+    "MUTATION PROOF: the pin REJECTS a body bound at one issuer lookup and not the other — `every()`, never `some()`");
+
+  // MUTATION PROOF 3 — the whole request-hash conjunct cut: an op_key match alone, with no
+  // re-derivation at all (the shape the STR-minor fold exists to kill).
+  const mutNoRehash = cutRequestHashConjuncts(live);
+  assert.notEqual(mutNoRehash, live, "the NO-REHASH mutation really changed the body");
+  assert.equal(clientBoundIssuerLookups(mutNoRehash), false,
+    "MUTATION PROOF: the pin REJECTS a body that matches the op_key without re-deriving the request hash at all");
+  noteLane(`x41.q7(a) mutation matrix over ${spans.length} issuer lookup(s) — live:true firm_only:false half_bound:false no_rehash:false. For the record, the ROUND-3 pin answers no_rehash:${round3Pin(mutNoRehash)} firm_only:${round3Pin(mutFirmOnly)} on the same comment-blanked mutants (the round-3.5 lens measured it TRUE on the raw body — either way it cannot tell the fixed body from the defective one).`);
 
   // (b) the NULL-accum shape. On a non-depreciable (land) profile the accum account is
   // NULL by construction, so the disposal omits the accumulated leg. Through the D-a

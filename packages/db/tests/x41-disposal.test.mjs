@@ -10,11 +10,11 @@ import assert from "node:assert/strict";
 import {
   opk, noteLane, endPool, printLaneNotes, printSkipCount, approveEntry, idOf, x41EnsureReady,
   skip41, refuses, T, COST, EXPENSE, BANK, GAIN, LOSS, AR1, AP1, OTHER, mon, dayIn,
-  disposeAsset, runPeriod, reviseParticulars, getFixedAsset, listFixedAssets, faRegisterTie,
+  disposeAsset, runPeriod, getFixedAsset, listFixedAssets, faRegisterTie,
   faWorld, faRow, faRows, entryRowOf, entryLinesOf, eventCount, accumulatedAt,
   registerAccumulatedAt, liveRanges,
   assertNoOverlaps, freshFaClient, buyAsset, completeSL, liveAuthority, earnRamp, runAndSettle,
-  disposeAndSettle,
+  disposeAndSettle, reverseAndSettle,
 } from "./x41-fa-world.mjs";
 
 let live = false;
@@ -242,6 +242,9 @@ test("x41.g6 stale disposal proposals are refused AT APPROVE by name", async (t)
   const start = mon(-3);
   const { asset } = await buyAsset({ client, cents: 24_000_000, postingDate: dayIn(start, 1) });
   await completeSL(client, asset.id, { life: 12, start: start.start, description: "x41 g6" });
+  await liveAuthority(client);
+  const ramp = await earnRamp(client, start); // month −3 charged
+  await runAndSettle(client, mon(-2)); // …and month −2, so the disposal's own precondition is met
   const drafted = await disposeAsset(w.users.alice, {
     client, asset: asset.id, disposalDate: mon(-1).end, proceedsCents: 30_000_000,
     proceedsAccount: BANK, memo: "x41 stale disposal",
@@ -250,18 +253,27 @@ test("x41.g6 stale disposal proposals are refused AT APPROVE by name", async (t)
   assert.equal((await entryRowOf(entry)).status, "draft", "the high-stakes disposal drafts");
 
   // The register moves on underneath the outstanding proposal.
-  await reviseParticulars(w.users.alice, {
-    client, asset: asset.id,
-    particulars: { method: "straight_line", useful_life_months: 6, residual_cents: 0, start_date: start.start },
-    effectiveFrom: mon(0).start,
+  // [ASSEMBLY · round-3.5 fold G6] The lever here USED to be a particulars revision. G6
+  // closed that door at its source — `revise_fixed_asset_particulars` now refuses while an
+  // un-dead disposal draft is outstanding, expressly so that a mid-flight revision is
+  // refused HONESTLY at the revise door instead of confusingly at approve. The staleness
+  // law itself is unchanged and still owned by this cell; only the lever moves, to an act
+  // the design still permits inside the maker-checker gap: reversing one of THIS asset's
+  // own posted depreciation charges. That re-opens the period, so the stub the proposal
+  // froze is no longer the stub the register would compute — the `stub` axis of
+  // disposal_stale, distinct from x41.s3's `accum` axis (an ANCESTOR acting in the gap).
+  await reverseAndSettle(w.users.alice, {
+    entry: ramp.entryId, reason: "x41 g6 correction inside the maker-checker gap", opKey: opk("x41g6rev"),
   });
   const e = await entryRowOf(entry);
   // [ASSEMBLY] the disposal stamps last_human_editor = the MAKER (round-2 fold 8), so a
   // high-stakes disposal is approved by a DISTINCT checker — alice raised it, hana checks.
-  await refuses(() => approveEntry(w.users.hana, {
+  const stale = await refuses(() => approveEntry(w.users.hana, {
     entry, expectedRevision: e.revision_token, opKey: opk("x41g6"),
   }), T.disposalStale, "approving a disposal proposal whose register state changed since it was made");
-  assert.equal((await faRow(asset.id)).status, "superseded", "the refused approve executed NOTHING (the revision's supersede is all that happened)");
+  noteLane(`x41.g6 the staleness axis the reversal-in-the-gap lever fires: '${/"axis"\s*:\s*"([a-z0-9_]+)"/.exec(String(stale?.detail ?? ""))?.[1] ?? "(none)"}'`);
+  assert.equal((await faRow(asset.id)).status, "active",
+    "the refused approve executed NOTHING (the asset is still an ACTIVE register row — no disposal, no partial state)");
 });
 
 // ===========================================================================
