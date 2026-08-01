@@ -201,6 +201,42 @@ belt-owned · the preview carries the verdict keys (`can_complete`/`blockers` +
 serves the card (no `get_bank_rule`) · `counterpart_already_paired` names the
 already-recorded-pair refusal distinctly.
 
+## The acceptance round (WCC-R6, 2026-08-01) — executed, both halves; the wave's close record
+
+Log of record: `~/.clara-tools/captures/wcc-r6-acceptance-log-2026-08-01.md` (never committed);
+ADR-054 minutes the close. Thirteen complete receipts at difference exactly 0 (sandbox July ×2
+around the SS9 drill + Aug/Sep/Oct synthetic · RPR Apr→Dec ×9), every one `verify` byte-exact;
+`list_unmatched_lines` empty on both clients; Σ buckets = the AP control at today/Oct-31/Dec-31;
+statements render. The learn loop ran end-to-end on both books: derived-evidence breeding,
+owner-signed rules, ≤1/(line,kind) chips with honest gaps (the bare-M2UBIZ PERKESO line takes no
+chip), and the `p_via_rule` settle overload recording **`origin='rule'`** on three live sandbox
+matches — the §2 engineering pin proven in production.
+
+**Acceptance findings (none re-opens a ruling; all registered in PART 2):**
+- **AF-1 [tie, silent]:** `allocate_payment`/`allocate_receipt` accept allocations whose
+  effective_date (the anchor's posting_date) predates the target item's `item_date`. The pair then
+  straddles interim as-of boundaries and **Σbuckets=control breaks silently at those dates**
+  (measured live: RPR Aug-31/Sep-30 before conformance). Candidate guard: refuse — or demand an
+  explicit override on — allocations to not-yet-born items. Because unallocation is act-dated by
+  the house retroactivity law, the corrected book keeps two documented historical scars at those
+  as-ofs (heal at as-of ≥ 2026-08-01).
+- **AF-2 [shape]:** the match-adjustment lane is P&L-only by 0038 law; a lawful non-P&L split (the
+  WCC-R9 advance leg) takes the two-entry one-group idiom (hand-draft + `allocate_payment`, one
+  `match_bank_line` group). The parked composite resolve-and-book verb should own this shape.
+- **AF-3 [GUC width, confirmed]:** the completing-recon GUC's one-receipt width is REAL — a single
+  transaction completing three recons over-excludes at the deferred settled-authority belt and
+  refuses (`recon_period_settled` wording). One recon per transaction — the shipped UI's own
+  shape — is the lawful driver; the residual stays documented, not fixed.
+- **AF-4 [record]:** WCC-R9's figures (8 bills / RM26,500 / RM30,000 advance) are EXACT under
+  **born-bills-only FIFO** — each payment reaches only bills in existence at its date. The
+  memo-blind date-blind spread (executed first) deviates and was conformed through the ruling's
+  own reversal path (`unallocate_group` + a RM10,000 reclass + `apply_open_items`). The register
+  entry for WCC-R9 now states the born-only reading explicitly.
+- **AF-5 [evidence note]:** hand-drafted receivable/payable births take item_kind `adjustment`, so
+  the WCC-R4 due-date stamp's live-positive case (invoice/bill only, by design — finding 33) waits
+  for the first post-0040 chat-lane bill; the negative scoping cases are live-proven and the
+  positive case stays rig-proven (the terms→birth-stamp cell).
+
 **Named residuals (rounds 3–4):** the `bank_rule_suggested` stamp has NO lawful writer —
 `_draft_entry_core` drops arbitrary flags keys; the carve-out ships inert and correct; the
 producer is its own audited suggestion-accept verb, a named follow-up · the

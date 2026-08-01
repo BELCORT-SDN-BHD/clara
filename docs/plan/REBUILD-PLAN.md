@@ -173,10 +173,23 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > (PR #168 — July literals + the session-TZ mirror skew; would have redded every PR from
 > Aug 1 forever). **The 0040 ceremony EXECUTED 2026-08-01** (owner GO): image v52 first →
 > quiesce → 0040 applied (39 total; the 36-row backfill in-txn) → postverify 8/8 →
-> `/ready` green. **Live = 39 migrations (`0040`) · runtime v52.** NEXT: the WCC-R6
-> acceptance (sandbox synthetic → nine RPR recons at exact zero; Aug/Oct/Dec gated on the
-> owner's ROME PUBLIC ledger pull) → ADR-054 + the §7-B amendment = the WAVE C close;
-> then **Wave D (assets + adjustments)**.
+> `/ready` green. **Live = 39 migrations (`0040`) · runtime v52.**
+>
+> **STATUS (2026-08-01, later the same day): THE WCC-R6 ACCEPTANCE EXECUTED BOTH HALVES —
+> WAVE C IS CLOSED (ADR-054).** Sandbox first: the FIRST production reconciliation receipt
+> (July 2026, difference 0), the full SS9 void/re-complete drill (sidecar · unmatch-first
+> refusal · human-keyed re-ingest on the same document · the old receipt stays void), a fresh
+> 3-month synthetic CSV corpus through the structured lane, the learn loop end-to-end with
+> **three live `origin='rule'` matches** via the `p_via_rule` settle overload, three recons
+> at 0. Real book: the seven named recurring rules bred+signed · 26 correct chips · all 41
+> C-b-remainder lines booked and matched (accruals zeroed to the sen; IWIFI per WCC-R7;
+> attested ≥RM100k) · **WCC-R9 executed born-bills-only** (8 bills/RM26,500 settled ·
+> Dec-02 open · the RM30,000 advance in `350-003`; the first date-blind spread conformed via
+> the ruling's own reversal path) · **ALL NINE months Apr→Dec complete at difference exactly
+> 0, all verified byte-exact** · unmatched empty · Σ aging = the AP control · statements
+> render. Acceptance findings AF-1..AF-5 registered (design part2 + PROJECTLOG PART 2); the
+> §7-B PRD amendment landed; the §7-A bundle stays parked for the unattended sales drafter.
+> **NEXT: Wave D (assets + adjustments), design-first, fresh session.**
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
