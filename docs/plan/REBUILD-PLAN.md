@@ -158,6 +158,25 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > period-chained `bank_reconciliations` (GAP1-3), aging 30/60/90 + statements, the advisory
 > learn loop (`matched_via_rule_id`/`origin` already on `bank_matches`). Owed at the WAVE C
 > close: the PRD §4 five-no-home amendment (contract §7-B) + the §7-A bundle disposition.
+>
+> **STATUS (2026-08-01): C-c IS BUILT AND LIVE — the acceptance is the wave's remaining
+> gate.** Design ratified same-day (`wave-c-c-tieout-design.md` v2.1 + `-part2.md`, owner
+> rulings **WCC-R1..R8**, a two-round design ladder + a two-round as-built ladder — the
+> part2 rounds-1..4 record carries all ~95 findings and every ratified deviation). Built
+> and merged in ONE session (PR #169, squash `d216942`, migration **0040** claimed):
+> `bank_reconciliations` (receipt-is-the-row, self-closing every period, bitemporal
+> cutoff) · the owner-floor exception door + atomic reciprocal corrective pair ·
+> `bank_rules` + suggestions-as-reads + the WA2-R9 sighting carve-out (red-proven live) ·
+> as-of aging on `open_item_allocations.effective_date` · `verify_bank_reconciliation` ·
+> 13 CoR splices · `/bank` recon pane + `/aging` · the x40 51-cell battery + the
+> x40-0040-upgrade drill (own CI step). En route: the a21 month-boundary fixture rot fixed
+> (PR #168 — July literals + the session-TZ mirror skew; would have redded every PR from
+> Aug 1 forever). **The 0040 ceremony EXECUTED 2026-08-01** (owner GO): image v52 first →
+> quiesce → 0040 applied (39 total; the 36-row backfill in-txn) → postverify 8/8 →
+> `/ready` green. **Live = 39 migrations (`0040`) · runtime v52.** NEXT: the WCC-R6
+> acceptance (sandbox synthetic → nine RPR recons at exact zero; Aug/Oct/Dec gated on the
+> owner's ROME PUBLIC ledger pull) → ADR-054 + the §7-B amendment = the WAVE C close;
+> then **Wave D (assets + adjustments)**.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).

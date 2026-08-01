@@ -107,9 +107,13 @@ settlement program (ADR-049) · the first production autopost (ADR-050) · **C0*
 0036) · **C-a** (ADR-052, 0037, the F3 debt paid) · **C-b (ADR-053, 0038+0039 — bank
 identity, statement ingest, matching: nine real RPR months OCR-ingested chain-to-the-sen,
 13 production settlements incl. the solo-firm high-stakes attested flow, 41 lines honestly
-unmatched; seven acceptance-driven reader/law fixes PRs #154–#164).**
+unmatched; seven acceptance-driven reader/law fixes PRs #154–#164) · **C-c BUILT + LIVE
+(PR #169, migration 0040, ceremony 2026-08-01 — the reconciliation receipt, exception
+door, learn loop, aging; design of record `wave-c-c-tieout-design.md` v2.1 + `-part2.md`,
+rulings WCC-R1..R8 + the full four-round ladder record; acceptance per WCC-R6 is the
+wave's REMAINING gate — ADR-054 waits on it).**
 
-**LIVE POSTURE: 38 migrations (`0039`) · Fly `clara-runtime` v50 · FOUR firms** (BELCORT —
+**LIVE POSTURE: 39 migrations (`0040`) · Fly `clara-runtime` v52 · FOUR firms** (BELCORT —
 real, 3 clients, high-stakes RM100,000 ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
 Gate-S synthetic sandbox, RM10k default — its only client is "Fictional Test Services"; do
 not confuse with BELCORT's real ROME PROPERTIES / ROME SECRETARY · Alara + Borneo =
@@ -118,10 +122,13 @@ slice-era RLS fixtures, never repurpose) **· dashboard Pages `app.clarabook.com
 daily.** No migration queued.
 
 **WAVE C — `docs/plan/wave-c-contract.md` is the mechanism of record** (WC-R1..R12 — read
-it before ANY Wave C work; do not re-grill what it ratifies). **NEXT: C-c (tie-out ·
-aging · learn loop), fresh session, design-first** — feeders named in PROJECTLOG PART 2.
-C-b's mechanism of record: `wave-c-b-bank-design.md` v2.2 + `-part2.md` + `-part3.md`
-(WCB-R1..R6 + the as-built/delta blocks + the acceptance round — never re-grill).
+it before ANY Wave C work; do not re-grill what it ratifies). **NEXT: the C-c ACCEPTANCE
+(WCC-R6), fresh session** — sandbox labelled-synthetic first, then all nine RPR recons at
+exact zero (`docs/ops/wave-c-c-0040-ceremony-checklist.md` §post-ceremony is the program;
+Aug/Oct/Dec gated on the owner's ROME PUBLIC ledger pull); then ADR-054 + the §7-B PRD
+amendment = the WAVE C close. Design records (never re-grill): C-b =
+`wave-c-b-bank-design.md` v2.2 + parts 2–3 (WCB-R1..R6); C-c =
+`wave-c-c-tieout-design.md` v2.1 + part2 (WCC-R1..R8 + every as-built adjudication).
 
 **Autopost law (ADR-049/050):** vendor-binding v4.1 BUILT AND LIVE; hand-drafts are never
 autopost-eligible BY DESIGN; autopost-from-seeding stays REFUSED (WB-R2/ADR-046). The
@@ -131,9 +138,12 @@ law: migration numbers are claimed at MERGE time.** Malaysian tax facts live in
 effective-dated policy tables, never in prose
 (`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
 
-**Open build items (the contract + PROJECTLOG PART 2 are the live registers):** Wave C-c
-(NEXT) · Gate P (operating runway; owns the capitalised/mixed-purchase tax-allocation
-question) · the contract §7-A runtime bundle · the `opening_tb.line` producer + K-doc door
-(Phase 5, review-gated) · the ROME PUBLIC payment-allocation owner ruling (8 bills).
+**Open build items (the contract + PROJECTLOG PART 2 are the live registers):** the C-c
+acceptance (NEXT) · the ROME PUBLIC payment-allocation owner ruling (8 bills; gates
+Aug/Oct/Dec) · Gate P (operating runway; owns the capitalised/mixed-purchase
+tax-allocation question) · the contract §7-A runtime bundle + §7-B PRD amendment (at the
+WAVE C close) · the C-c build residuals (PART 2: the `bank_rule_suggested` producer verb ·
+the composite resolve-and-book verb) · the `opening_tb.line` producer + K-doc door
+(Phase 5, review-gated).
 
 **Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**
