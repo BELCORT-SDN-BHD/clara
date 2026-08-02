@@ -171,3 +171,110 @@ survives the belt (resolved_by rank read off the ROW) · the sub-key discipline 
 pair arithmetic (leg swap + period_end+1) across month/FY/leap boundaries · sorted advance
 row locks serialize over-application · non-control template lines keep the subledger/FA
 hooks indifferent · the day-1/day-2 split-month pin itself.
+
+---
+
+## Round 2 (2026-08-02) — v2 delta, three lanes
+
+**Lanes:** fold-integration (native opus-5 xhigh) DO-NOT-SHIP 4B/4M/3m · fresh-attack (native
+sonnet-5 xhigh) DO-NOT-SHIP 3B/4M/1m · Codex (gpt-5.6-sol xhigh) DO-NOT-SHIP — 15 findings.
+Round 2 attacked the round-1 folds themselves; convergence was high. Labels: FI/FA/C2.
+
+### Folded — the v3 mechanism changes
+
+1. **The composition law rebuilt on preheld-aware cores** [FI1+C2-1 BLOCKER]: `_reserve_op`'s
+   live body RAISES CLR10 on a same-transaction re-reserve with a different hash (and returns
+   a `{pending:true}` stub on a match — the delegate would no-op). v3: keys spent by a
+   reserving PUBLIC verb (`:draft`,`:settle`,`:match`,`:resolve`) are NOT pre-reserved — the
+   callee reserves them; keys spent through `receipt_preheld:true` core calls
+   (`:draft:approve`,`:settle:approve`) ARE pre-reserved; unreachable branches finish their
+   keys with the 0038 deferral-marker idiom. The §8 "re-reservation replays" item became a
+   probe that it RAISES. AF-2's settle path goes through a factored preheld-aware
+   `_settle_from_bank_line_core` (public wrapper reserves-then-delegates — CoR).
+2. **The widening COLLAPSED to two touch points** [FI2+C2-3 BLOCKER]: on the non-high-stakes
+   path the composite resolves FIRST, so every `line_excepted` wall sees status='resolved' —
+   `match_bank_line` is untouched. Only (a) the settle core's wall (reads the declaration from
+   its own p_ctx — no GUC, no table channel) and (b) the belt's member-INSERT arm (the pending
+   group row exists by then; one join) widen. The flip/exception/cascade arms need no
+   widening (resolved+live commit-lawfully). v2's "one predicate, six arms" was wrong twice
+   over — two sites cannot read a group row that doesn't exist, and three don't need it.
+3. **Pair correction rebuilt as a private pair core** [FI3+C2-5 BLOCKER, FA2 BLOCKER]:
+   `reverse_adjustment_pair` does NOT call `reverse_entry` (whose splice-guard would refuse
+   its own remedy, and whose high-stakes branch strands two separate drafts). A private
+   `_pair_reverse_core` births both mirrors itself (the 13-column recipe, invoking the same
+   guard HELPERS the splices use — allocation/bank-match/FA walls — without touching the
+   monolith): low-stakes → both approved + both `reversed_by` stamped atomically; high-stakes
+   → both mirrors DRAFT under a linked pair receipt, and ONE checker verb
+   (`approve_pair_reversal`) approves both atomically (distinct-checker law intact).
+   `_wdb_reversal_blocked` needs no bypass — `reverse_entry` is simply never the pair path.
+4. **`auto_reversed_by` DELETED** [FI4+C2-4 BLOCKER, C2-13 MAJOR]: the occurrence-side stamp
+   required an immutability-trigger recut that also contradicted the contract's
+   "posters never touch journal_entries immutability". Pair state derives one-way from the
+   mirror's UNIQUE `auto_reversal_of` FK — no occurrence column, no trigger recut, boundary
+   clean.
+5. **Corrections are hook-born ONLY** [C2-6 BLOCKER]: a manual correction-kind debit would
+   misdispatch into soft-birth. The proposal kind set is `payroll_deduction`/`bank_return`/
+   `claim`; `correction` rows are minted only by the reversal arm. The reversal-correction
+   amount = the original's uncorrected remainder (original − Σ prior leaf corrections; zero
+   remainder → no row) [FA1 BLOCKER, C2-7]; `reverse_entry` on a correction-carrying entry
+   refuses (`correction_entry_irreversible`; remedy: book an offsetting application).
+6. **Reopen-on-unmatch gets an identity + a ledger** [C2-10 BLOCKER, FI6]: the group gains an
+   immutable `resolution_exception_id` (stamped at creation on the non-HS path, at the flip on
+   the HS path; survives unmatch); reopen targets exactly that row; a pre-check refuses
+   `exception_reopen_blocked` when a newer open exception exists on the line; the reopen
+   erases the five resolution columns but mints `bank.line_exception_reopened` + an audit row
+   carrying the erased owner act.
+7. **The flip clears `pending_resolution` in its own UPDATE** [FI5] (and stamps
+   `resolution_exception_id` in the same statement); the receipt carries the executed
+   declaration.
+8. **`_acct_role_reserved` is a LOCK-FREE stable reader** [FI7]; `_fa_lock_roles` is taken
+   ONLY by enrolment/propose/retire doors — never on posting/approve paths; tail 13(c)
+   re-pinned at the new membership. Advance-domain reservation admits RETIRED same-domain
+   history for RE-ENROLMENT (a retired enrolment must not block its own code forever) while
+   template/bank checks refuse only ACTIVE advance enrolments [C2-9 MAJOR]; the FA arm stays
+   exactly 0041's law (active profiles ∪ register rows — v2 overstated it).
+9. **The tie equation written out** [FA3 BLOCKER]: `staff_advance_tie` groups by ACCOUNT_CODE
+   and walks EVERY enrolment generation that ever held the code (the FA G8 law restated for
+   the enrolment_id key); the as-of base gates on issue_date [C2-8: base effect = amount only
+   when issue_date <= as_of]; retire+re-enrol-at-historical-as-of is an acceptance drill.
+10. **Row-lock-before-rung law for AF-2** [C2-2 MAJOR]: the composite row-locks every
+    PRE-EXISTING journal entry it will pass to match BEFORE acquiring the rungs (the
+    match_bank_line precondition); transaction-new entries are exempt by construction.
+11. **The FYE guard scoped + race-closed + sign-time freshness** [FA4+C2-12 MAJOR]:
+    "annual-cadence" qualifies BOTH nouns (a live MONTHLY authority does not block — the
+    sandbox's live monthly authority is the acceptance cell); `set_client_fy_end` takes the
+    203005004 rung; `sign_adjustment_template` revalidates cadence/end_date against the
+    CURRENT FYE under the same rung (a proposed annual template survives an FYE change but
+    cannot sign stale).
+12. **`line_fingerprint` DROPPED** [FA5 MAJOR]: line_id points at immutable rows; the
+    approve-time predicate re-match covers staleness; the flags are `{rule_id, line_id}`.
+13. **The G12 recut narrows to cost_cents ONLY** [C2-11 MAJOR — corrects a round-1 over-fold]:
+    the live 0041-recut validator bodies already check `useful_life_months` method-
+    conditionally (a global null-refusal would break `method='none'`); both sites gain only
+    `v_cost IS NULL OR` disjuncts.
+14. **Surfaces named for S1 + the parked state** [FA6+FA7 MAJOR]: /rules gains the
+    AdjustmentTemplatePanel (list/propose/sign/retire + per-template due/blocked from
+    `adjustment_run_due` — the `blocked[]` list's named consumer); the recon exceptions table
+    badges "resolution parked" via a read join on the group's `pending_resolution` (the /bank
+    pending-group chase already surfaces the draft — C2 verified).
+15. **Smalls**: arm (0) `role='reversal'` → return, stated + the nested-hook invocation note +
+    the census wording (approve PATHS stay FOUR; the hook-CALLER census goes to FIVE; bounded
+    recursion assert) [FI8, FI10] · ramp wording ("the corrected occurrence stops counting;
+    the ramp un-earns only when it was the sole earner") + the two-occurrence cell [FI9] ·
+    mirror `maker_actor = template.signed_by` [FI11] · `void_effective_date` = the reversal
+    mirror's posting_date [FA8] · the G14 advisory pinned to one `_fa_split_month_advisory`
+    helper invoked from `_fa_asset_json` + the revise response, qualifying edges = revision
+    successors with effective_from past day 1 (partial-disposal splits excluded) [C2-14] ·
+    the stale "awaiting sign-off" header language removed [C2-15].
+
+### Verified sound in round 2 (cumulative with round 1's list)
+
+The mirror hook re-entry is finite and mint-free (role='reversal' misses both mutation arms;
+eligibility keeps every register indifferent) — the load-bearing dependency now stated in
+§2.6 · mirror-never-earns for both mirror kinds · the advisory-rung re-entrancy half of the
+composition law · the §2.6 splice anchor + hazard · void-after-corrections does not
+double-subtract · concurrent-open reopen collisions are historical-only (the belt refuses
+ordinary open+matched) · completed-recon refusal precedes the reopen arm · the K6 CoR anchor
+is identifiable and the 64/65 math unchanged · end_date validation is expressible against
+the live period helpers · G4 catch-up/ramp interaction (occurrence #1 always drafts,
+including after retire+re-propose) · the pending-group chase surface exists (/bank).
