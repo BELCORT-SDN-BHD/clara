@@ -105,3 +105,84 @@ the mirror key · CLR05 binding only under high stakes (the low-stakes same-acto
 approval is lawful) · the splice anchors + the six-marker census · `_wdb_reversal_blocked`
 as the arithmetically-correct 7th splice · the D-a clone targets carry what the doc claims ·
 the §8 tail list judged "unusually complete for a design doc" (native lens).
+
+---
+
+## Round 6 (2026-08-02) — v6 dry-check, two lanes
+
+**Lanes:** verify (native opus-5 xhigh) DO-NOT-SHIP 5B/4M/5m · Codex (gpt-5.6-sol xhigh)
+DO-NOT-SHIP 5B/2M/1m. One genuine money defect (the solo-lane ramp hole) + spec
+literalness; both SOUND lists confirm 12/13 round-5 folds landed clean. Labels: V6/C6.
+
+### Folded — the v7 changes
+
+1. **The UNIFIED ramp clock** [V6-1+V6-2 BLOCKER — the money defect]: the round-5 reset law
+   covered only the pair lane; a solo (non-auto-reverse) occurrence corrected via plain
+   `reverse_entry` mints no receipt, leaving the ramp earned — the sweep would re-post the
+   corrected occurrence. v7: an occurrence counts only when `approved_at >
+   coalesce(GREATEST(max completed_at of the template's COMPLETED pair receipts, max
+   approved_at of the reversing MIRROR of any of the template's occurrence entries),
+   '-infinity')` — both correction lanes reset the clock; the re-run DRAFTS. The receipt
+   gains `template_id uuid NOT NULL` + `completed_at timestamptz` (the predicate was
+   inexpressible without them — created_at is the PENDING moment on the high-stakes path).
+   The predicate is written literally in §2.3; the solo-correction cell added.
+2. **The stale "sole earner" parenthetical replaced** [V6-3+C6-1 BLOCKER] with the clock
+   law verbatim.
+3. **The poster admission law written out** [V6-4 BLOCKER + C6-5]: unmet(template, period)
+   ⇔ no approved un-reversed role='occurrence' entry for the pair; blocked(template) ⇔
+   `_adj_occurrence_outstanding(client, template)` (a draft outstanding — `blocked[]`'s
+   only v1 reason); the window = [start_date, coalesce(end_date,'infinity')] with
+   **start_date ALSO validated at propose as a cadence period-START** (the first eligible
+   period begins at it); tokens `period_already_met` / `occurrence_draft_outstanding` /
+   `period_out_of_window`. **The canonical period triple** {period_start, period_end,
+   period_label} used by hashes, events, receipts and memos; labels: monthly
+   `to_char(period_end,'Mon YYYY')`, annual `'FY'||to_char(period_end,'YYYY')` [V6-14].
+4. **The §4/§9 settle-key contradiction fixed** [V6-5+C6-2 BLOCKER]: `<op>:settle` is
+   composite-reserved pre-lock and spent by the core preheld; `<op>:settle:approve` is
+   DELETED from the composite-reserved set (the allocate cores' own, inside the settle
+   core's discipline). The matrix's NEW-key rows carry literal `jsonb_build_object` field
+   lists; the callee-owned rows are ADJUDICATED as "the callee's live law — harvested at
+   build, never duplicated into this doc" (duplication rots; the harvest step + x42 own
+   the literals).
+5. **Return envelopes + JSON schemas** [C6-3 BLOCKER, V6-8 MAJOR]: `p_draft` =
+   {posting_date, memo, lines, counterparty?, resolution?}; the AF-2 disposition enum =
+   ('matched_booking','written_off_adjustment'); `book_staff_advance_application` keeps the
+   WCA-R7 branch with the envelope stated per-branch — posted → {status:'posted', entry_id,
+   application_ids[]} (the hook ran in-verb); drafted → {status:'drafted', entry_id,
+   application_ids: []} (ids born at the checker's approval). House convention stated once:
+   every other envelope follows its cited precedent's live shape, pinned at harvest + x42.
+6. **`ea1955_policy` uses the 0016 system-reference idiom** [C6-4 BLOCKER]: a GLOBAL table
+   (no firm_id), system-maintained (writes only by migrations), authenticated-read policy —
+   NOT the firm-scoped owner/human pair (§2.1's blanket sentence scoped to the six
+   firm-scoped tables); the three literal seed rows written (effective_from 2026-08-01,
+   effective_to null, note + source_note citing the EA 1955 primary text).
+7. **The refusal-token table** [V6-6 MAJOR]: §9 gains one row per refusal (site → errcode →
+   detail.reason) covering every §7 cell's token — the migration author and the
+   contract-blind suite author must land on the same strings.
+8. **Enrolment attestation is text** [V6-7+C6-7 MAJOR]: `p_attestation text` (non-blank
+   required alongside `p_confirm_dedicated`) stored in `enrolment_attestation`; the
+   `staff_advance_accounts` DDL block written (incl. person_label, retired_reason, actor +
+   op-key columns); the `bank_matches` ALTER typed (`pending_resolution jsonb`,
+   `resolution_exception_id uuid REFERENCES clara.bank_line_exceptions(id)`) [V6-9].
+9. **Trigger-wording fixes** [V6-10/11/12 minor]: the receipt's MUTABLE set = {status,
+   completed_at} (the 0041 idiom's subtracted array — everything else immutable after
+   INSERT); the receipt is INSERTed `pending` with both correction ids AFTER the drafts are
+   born, then → `approving`; the `resolution_exception_id` guard is immutable-once-non-null
+   (old non-null AND distinct → raise), not null→value-only.
+10. **Smalls**: the annual symmetry cell reworded to assert the FALSE pin [V6-13] · payload
+    policy = a typed-primitive allowlist; the reopened payload = {exception_id, line_id,
+    match_id} [C6-6] · the G13 citation fixed (the seven positions inlined by name) [C6-8].
+
+### Verified sound in round 6 (cumulative)
+
+12/13 round-5 folds landed clean (both lanes; the 13th — the op-key matrix — is the §4/§9
+contradiction above) · the ramp-vs-mirror axis (role='reversal' never counts) · the
+ramp-vs-catch-up axis (independent predicates; the boundary day ruled) · cancelled receipts
+do not reset the clock; pair-corrected occurrences are doubly excluded · every cited
+external anchor is real and says what the doc claims (both lanes re-verified the full
+anchor set) · §9's signatures internally consistent outside the named findings · the AF-2
+substrate matches the live code (dispositions, floors, 12/13-arg settle targets) · the
+runtime increment arithmetic (the 5th due-check) · the seven admission sites + reopen
+identity survive unchanged · `resolution_exception_id`'s writer/trigger/census re-pin ·
+headers-FALSE + mirror copying · suggestion dedup · the temporal cap · the deferred
+re-query shape · the edge set · mode-in-flags · the event+taxonomy contract · RLS ×7.
