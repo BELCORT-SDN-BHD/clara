@@ -242,6 +242,38 @@ exceeds 64 edges) so x41.u4's deliberate over-cap fixture can coexist with the z
 **Closing state:** DB 1535/1510/0-fail twice + a UTC CI simulation · upgrade drill 1/1 ·
 runtime 986/986 · dashboard 488/488 · all gates.
 
+## The ceremony + the acceptance round (2026-08-02, ADR-056)
+
+**Ceremony (owner GO):** dashboard auto-deployed from main (/assets live) → runtime **v53**
+first, provably dormant on 0040 → quiesce (beats stale 118–120s) → 0041 applied live (40
+total; the thirteen tail censuses in-txn on production) → fifteen postverify probes green
+(grants exact; both belts live; RLS forced; register empty) → restart → /ready 200 ·
+Supavisor **38/60** (D-a added zero sessions).
+
+**Sandbox acceptance (ROME PUBLIC ADVISORY, labelled synthetic) — every drill green through
+the production verbs:** soft-birth + queue chase + placeholder · completion · authority with
+the Dec-31 fallback SURFACED · the ramp (first run DRAFTED at exactly RM100.00; ledger row +
+receipt minted AT approve; July POSTED autonomously; August honestly period_not_ended) ·
+late-completion catch-up (a second June receipt, lawful) · RB at the exact sen floor
+(13,333 = floor(160,000/12)) · the mid-year 20%→10% prospective revision (supersede-forward,
+history intact) · partial disposal sen-exact + the partial REVERSAL (original restored,
+successors unwound, the stub flipped dead beside its born-dead unwind row) · a high-stakes
+disposal DRAFTED with the register untouched through the maker-checker window, executed only
+at the attested approve · the AF-1 wall by name (`allocation_to_unborn_item`, the deposit
+remedy verbatim) + the deposit route green · `fa_register_tie` TRUE, diffs EXACTLY 0, at
+TWO as-ofs.
+
+**The WD-R14 real half — the NAMED DEVIATION (owner-ruled 2026-08-02):** the raw YA2025
+documents for both real registers were measured — RPR (TB/BS/GL/P&L to 08-12-2025) is a
+P&L-only book with premises and equipment RENTED; RS (BS/GL/P&L 05-05-2025→31-03-2026)
+prints its Cost/AccDeprn/NBV columns EMPTY; the "RM20,000" supplier invoice is a mis-named
+RM2,000 SSM service fee. **Neither company has ever owned a fixed asset.** Under the
+never-fabricate law both real registers stay honestly empty; the carry-down's first real
+firing + the ≥1 real reducing-balance asset DEFER, named, to the first asset-owning client.
+The sandbox half had already fired every mechanism (incl. RB) under the ADR-048 sanction
+WD-R7 itself invokes. Recorded: **RS's real FYE is 31 MARCH** — the first genuine
+non-December FY for `set_client_fy_end` when RS ever holds assets.
+
 ## Standing observations for the ceremony + acceptance (from the ladder)
 
 - WD-R14 pre-flight: before enrolling ANY real cost account, assert zero approved non-opening
