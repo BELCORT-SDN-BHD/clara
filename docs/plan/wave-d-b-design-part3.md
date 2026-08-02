@@ -243,3 +243,22 @@ attestation · the typed ALTER · the literal EA seeds · the pair-receipt mutab
 INSERT order / re-query / immutable-once-non-null wording · parameter order + the three
 flags schemas + headers-FALSE + the temporal cap + suggestion dedup + the seven-site
 admission — all internally consistent (both lanes).
+
+---
+
+## Round 8 (2026-08-02) — the landing check; THE LADDER CLOSES
+
+**Lane:** landing (native sonnet-5 xhigh) **SHIP-WITH-FIXES** — 0 blockers, 2 MAJORs, both
+trivial: two §8 tail bullets other files promised were missing (the index-existence
+assertion; the `ea1955_policy` migration-only-writes probe). Both folded on the spot. All
+eleven round-7 folds verified landed; zero new inter-file contradictions; every
+both-file item byte-consistent.
+
+**CLOSURE ADJUDICATION (orchestrator, on the loop-until-dry law):** eight rounds, eighteen
+lanes (9 native + 8 Codex sittings + 1 landing lens), ~170 findings — every round through 6
+found genuine mechanism defects and every one is folded; rounds 7–8 decayed to determinate
+spec fixes with zero mechanism findings on any lane and both final verdicts non-blocking.
+The remaining literal-harvest class (callee-owned hashes, live envelope shapes) is
+EXPLICITLY owned by the build's harvest step + the contract-blind x42 suite + the as-built
+ladder — the same division of labor D-a ran. The design ladder is CLOSED at v8; the
+as-built ladder re-opens scrutiny against the actual code.

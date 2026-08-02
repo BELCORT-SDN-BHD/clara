@@ -406,7 +406,9 @@ INSERT census re-pinned at its new four-name membership + the `resolution_except
 set-once trigger asserted** · the K-boundary vacuity probe · the belt open-branch predicate
 pin · the event-type + taxonomy-coverage registration probe (emission sites + counts) · the
 receipt-flip-precedes-core-calls assert + the deferred-trigger re-query probe · the
-`cost_cents` prestate probe · the ramp-reset predicate probe (the pair-receipt clock). **The CoR
+`cost_cents` prestate probe · the ramp-reset predicate probe (the unified clock) · **the
+two hot-loop partial indexes asserted to exist with their WHERE clauses (ABI §C)** · **the
+`ea1955_policy` migration-only-writes probe (no granted fn writes it)**. **The CoR
 register**: `reverse_entry` +`_wdb_reversal_blocked` · `revise_entry` (flags + pair
 membership) · `withdraw_draft` (pair refusal) · `settle_from_bank_line` +
 `allocate_receipt`/`allocate_payment` → core factorings · `_subledger_on_approve`
