@@ -1682,28 +1682,48 @@ revoke all on function clara._fa_ancestors_first_due_month(uuid, date) from publ
 -- forward, so a lineage cannot diverge today -- but if one ever did, the stub would silently
 -- post an ancestor's depreciation to the wrong pair of accounts and break the tie. Named
 -- refusal instead.
+--
+-- ONE MONEY CLOCK FOR THE WHOLE STUB, WALKED ROOT-FIRST [round-4.6 fold H1]. Each row's
+-- arithmetic reads its OWN money clock (cost - residual - the accumulated depreciation the
+-- LEDGER holds), and a stub proposes charges the ledger does not hold yet. The round-4 body
+-- computed the disposed row first and then added each ancestor segment independently, so every
+-- segment spent the same remaining money over again: cost 300 sen, life 4 revised to 3 at
+-- month 2, disposed in month 3 proposed 75 (ancestor) + 100 + 200 (successor, whose final month
+-- absorbs "its" whole remainder) = 375 against a cost of 300 -- accumulated depreciation ABOVE
+-- cost, a negative NBV and a fabricated gain, on a lineage every other instrument called
+-- healthy. The fold is a SHARED PROJECTED BALANCE: the lineage's remaining money is read ONCE
+-- in the disposed row's frame, the segments are computed ROOT-FIRST (which for a revision
+-- lineage is calendar order -- an ancestor's months are closed at month_start(superseded_at-1)
+-- and the successor's open there), and every block -- including the disposed row's terminal
+-- true-up -- is clamped against what is left after the blocks already proposed. The stub can
+-- therefore terminate the lineage at exactly cost - residual and can never pass it.
 -- =====================================================================================
 create function clara._fa_disposal_stub(p_asset uuid, p_disposal_date date) returns jsonb
   language plpgsql stable security definer set search_path = clara, pg_temp as $$
 declare
-  v_client uuid; v_cur uuid; v_accum text; v_expense text;
-  v_own jsonb; v_charges jsonb; v_total bigint; v_pd_open date; v_early date;
-  au record; anc record; v_one jsonb; v_hops int := 0;
+  v_client uuid; v_parent uuid; v_cur uuid; v_accum text; v_expense text;
+  v_cost bigint; v_res bigint; v_cap bigint; v_room bigint; v_amt bigint;
+  v_own jsonb; v_cand jsonb := '[]'::jsonb; v_charges jsonb := '[]'::jsonb;
+  v_total bigint := 0; v_pd_open date; v_early date; v_rem_start date; v_rem_end date;
+  au record; anc record; b record; v_one jsonb; v_hops int := 1;
+  v_path uuid[] := '{}'::uuid[]; v_n int; v_i int;
 begin
   select f.client_id, f.supersedes_asset_id, f.accum_depr_account_code,
-         f.depr_expense_account_code
-    into v_client, v_cur, v_accum, v_expense
+         f.depr_expense_account_code, f.cost_cents, coalesce(f.residual_cents, 0)
+    into v_client, v_parent, v_accum, v_expense, v_cost, v_res
     from clara.fixed_assets f where f.id = p_asset;
   if v_client is null then
     return jsonb_build_object('charges', '[]'::jsonb, 'amount_cents', 0);
   end if;
-  -- THIS ROW'S OWN STUB, UNCHANGED: terminal (so an RB asset's FY true-up rides this last
-  -- charge) and through the disposal month.
+  -- THIS ROW'S OWN STUB: terminal (so an RB asset's FY true-up rides this last charge) and
+  -- through the disposal month. COMPUTED HERE, APPENDED LAST [H1]: computing it before any
+  -- ancestor is read keeps the refusal ORDER this body always had (an unreadable lineage
+  -- refuses out of clara._fa_accumulated_total, above the local hop cap), while the money it
+  -- is allowed to spend is decided only after every earlier segment has taken its share.
   v_own := clara._fa_asset_charges(p_asset, p_disposal_date, true);
-  v_charges := v_own -> 'charges';
-  v_total := (v_own ->> 'amount_cents')::bigint;
-  if v_cur is null then
-    return jsonb_build_object('charges', v_charges, 'amount_cents', v_total);
+  if v_parent is null then
+    return jsonb_build_object('charges', v_own -> 'charges',
+                              'amount_cents', (v_own ->> 'amount_cents')::bigint);
   end if;
   -- NO CADENCE, NO PERIOD, NO EXTENSION. Without a live authority nothing is ever due, the
   -- G2 precondition is vacuous (design SS4.1's "no authority required"), and there is no
@@ -1711,7 +1731,8 @@ begin
   select * into au from clara.fa_depreciation_authorities
     where client_id = v_client and status = 'live';
   if not found then
-    return jsonb_build_object('charges', v_charges, 'amount_cents', v_total);
+    return jsonb_build_object('charges', v_own -> 'charges',
+                              'amount_cents', (v_own ->> 'amount_cents')::bigint);
   end if;
   -- The SAME derivation clara.dispose_fixed_asset uses for its refusal bound; stated in both
   -- places because the verb needs it before this call and the hook has only the proposal.
@@ -1723,29 +1744,64 @@ begin
   -- the world can have moved -- an ancestor's earlier period reversed in the maker-checker gap
   -- -- and folding an ENDED period's months into a stub dated at the disposal would route real
   -- expense around the run verb's maker-checker ladder and date it into the wrong period.
+  --
+  -- AND THE PERIOD IT NAMES IS THE CADENCE'S, NOT THE MONTH'S [round-4.6 fold H2]. The remedy
+  -- is "run that period first", and clara.run_depreciation_manual accepts EXACTLY the authority's
+  -- own window -- a whole calendar month under the monthly cadence, the client's whole financial
+  -- year under the annual one, refusing anything else `not_cadence_aligned`. Naming the bare
+  -- month on an annually-cadenced client sent a professional to a verb that refuses the range it
+  -- was handed, which is the same unexecutable-remedy defect round 4 folded out of the OPEN
+  -- period. Normalising here makes the message runnable verbatim on both cadences.
   v_early := clara._fa_ancestors_first_due_month(p_asset, v_pd_open - 1);
   if v_early is not null then
+    v_rem_start := case when au.cadence = 'monthly' then clara._fa_month_start(v_early)
+                        else clara._fa_fy_open_for(v_client, v_early) end;
+    v_rem_end := case when au.cadence = 'monthly' then clara._fa_month_end(v_early)
+                      else clara._fa_fy_end_for(v_client, v_early) end;
     raise exception 'this asset''s lineage has an uncharged depreciation period (% .. %) at or before the disposal month; run that period first, then dispose',
-      v_early, clara._fa_month_end(v_early)
+      v_rem_start, v_rem_end
       using errcode = 'CLR38',
         detail = jsonb_build_object('reason', 'period_earlier_unmet',
-          'asset_id', p_asset, 'period_start', v_early,
-          'period_end', clara._fa_month_end(v_early))::text;
+          'asset_id', p_asset, 'period_start', v_rem_start,
+          'period_end', v_rem_end)::text;
   end if;
   -- ...so every month the ancestor walk can now emit is >= v_pd_open. (The per-month amount
   -- clara._fa_asset_charges emits for a non-terminal call does not depend on p_through -- the
   -- shrinking-horizon property round 4 measured corpus-wide -- so "no month at or before
   -- v_pd_open - 1" at the smaller bound is the same statement at the larger one.)
+  --
+  -- THE PATH IS COLLECTED FIRST so it can be WALKED ROOT-FIRST [H1]. v_hops counts the supersede
+  -- edges ALREADY TAKEN to reach the node being read, and this walk is seeded at the PARENT --
+  -- edge 1 -- so the counter starts at one. That makes the cap admit exactly 64 edges and refuse
+  -- the 65th, which is what clara._fa_lineage_walk and clara._fa_lineage_first_due_month already
+  -- do [round-4.6 fold H4]: the round-4 form seeded a parent-based counter at zero and so
+  -- admitted 65, leaving this reader one hop out of step with the other two.
+  v_cur := v_parent;
   while v_cur is not null loop
     if v_hops > 64 then
       raise exception 'fixed-asset lineage for % exceeds 64 supersede hops -- the register cannot answer what its ancestors still owe', p_asset
         using errcode = 'CLR37',
           detail = jsonb_build_object('reason', 'fa_lineage_too_deep', 'asset_id', p_asset)::text;
     end if;
-    select f.id as id, f.supersedes_asset_id as parent,
-           f.accum_depr_account_code as accum, f.depr_expense_account_code as expense
+    select f.id as id, f.supersedes_asset_id as parent
       into anc from clara.fixed_assets f where f.id = v_cur;
     exit when anc.id is null;
+    v_path := v_path || anc.id;
+    v_cur := anc.parent;
+    v_hops := v_hops + 1;
+  end loop;
+  -- THE LINEAGE'S REMAINING MONEY, READ ONCE, IN THE DISPOSED ROW'S FRAME [H1]. This is the
+  -- same figure clara._fa_asset_charges uses as its own money clock for this row (its accumulated
+  -- read is lineage-wide), so a lineage-wide stub and a single-row stub agree by construction.
+  -- Every ancestor that can still contribute a month is reached through REVISION hops, where the
+  -- cost share is exactly 1 -- the split case is unreachable, for the reason recorded above.
+  v_cap := v_cost - v_res - clara._fa_accumulated_total(p_asset);
+  if v_cap < 0 then v_cap := 0; end if;
+  v_n := coalesce(array_length(v_path, 1), 0);
+  for v_i in reverse v_n .. 1 loop
+    select f.id as id, f.accum_depr_account_code as accum,
+           f.depr_expense_account_code as expense
+      into anc from clara.fixed_assets f where f.id = v_path[v_i];
     -- RUN-TERRITORY ARITHMETIC (p_terminal = false): an ancestor's segment is closed by its own
     -- supersede bound, so on the annual cadence the pre-revision FY segment IS exactly this.
     v_one := clara._fa_asset_charges(anc.id, p_disposal_date, false);
@@ -1756,11 +1812,26 @@ begin
             detail = jsonb_build_object('reason', 'fa_lineage_accounts_diverge',
               'asset_id', anc.id, 'descendant_id', p_asset)::text;
       end if;
-      v_charges := v_charges || (v_one -> 'charges');
-      v_total := v_total + (v_one ->> 'amount_cents')::bigint;
+      v_cand := v_cand || (v_one -> 'charges');
     end if;
-    v_cur := anc.parent;
-    v_hops := v_hops + 1;
+  end loop;
+  -- ROOT-FIRST, DISPOSED ROW LAST -- which for a revision lineage is calendar order.
+  v_cand := v_cand || (v_own -> 'charges');
+  -- ONE CLAMP OVER THE ORDERED CANDIDATES [H1]. Each block spends what the lineage still has;
+  -- the block that exhausts it takes the remainder and everything after it is dropped. Blocks
+  -- are emitted per contiguous month-run in ascending order inside each row, so the clamp lands
+  -- on the LATEST months -- which is where a life-end / disposal true-up belongs.
+  for b in select (x ->> 'asset_id')::uuid as aid, (x ->> 'period_start')::date as ps,
+                  (x ->> 'period_end')::date as pe, (x ->> 'amount_cents')::bigint as amt, t.ord
+             from jsonb_array_elements(v_cand) with ordinality as t(x, ord)
+            order by t.ord loop
+    v_room := v_cap - v_total;
+    exit when v_room <= 0;
+    v_amt := least(b.amt, v_room);
+    if v_amt <= 0 then continue; end if;
+    v_charges := v_charges || jsonb_build_object('asset_id', b.aid,
+      'period_start', b.ps, 'period_end', b.pe, 'amount_cents', v_amt);
+    v_total := v_total + v_amt;
   end loop;
   return jsonb_build_object('charges', v_charges, 'amount_cents', v_total);
 end $$;
@@ -3583,6 +3654,7 @@ declare
   v_disp_accum bigint; v_nbv bigint; v_gain bigint; v_entry uuid; v_rev uuid;
   v_line int := 0; v_status text; v_memo text; v_dr bigint; v_cr bigint;
   au record; v_pd_open date; v_unmet date; v_bake bigint; v_ledger_at bigint;
+  v_rem_start date; v_rem_end date;
 begin
   c := clara._human_ctx(clara.role_rank('bookkeeper'));
   if p_op_key is null or btrim(p_op_key) = '' then
@@ -3767,12 +3839,24 @@ begin
     -- single call is the whole precondition.
     v_unmet := clara._fa_lineage_first_due_month(p_asset, v_pd_open - 1);
     if v_unmet is not null then
+      -- THE NAMED PERIOD IS THE CADENCE'S OWN WINDOW [round-4.6 fold H2]. The oracle answers in
+      -- MONTHS -- it is a month-grain arithmetic -- but the remedy this message sends a
+      -- professional to is clara.run_depreciation_manual, which accepts EXACTLY the authority's
+      -- window and refuses anything else `not_cadence_aligned`. On an annually-cadenced client a
+      -- bare month is refused by the very verb the refusal names, so the message was unfollowable
+      -- for the same reason the OPEN-period arm was before round 4 folded it. Normalised here, the
+      -- remedy runs verbatim on both cadences; x41.t3 already pins the monthly shape, which this
+      -- leaves byte-identical (the oracle's answer IS a month start).
+      v_rem_start := case when au.cadence = 'monthly' then clara._fa_month_start(v_unmet)
+                          else clara._fa_fy_open_for(p_client, v_unmet) end;
+      v_rem_end := case when au.cadence = 'monthly' then clara._fa_month_end(v_unmet)
+                        else clara._fa_fy_end_for(p_client, v_unmet) end;
       raise exception 'this asset''s lineage has an uncharged depreciation period (% .. %) at or before the disposal month; run that period first, then dispose',
-        v_unmet, clara._fa_month_end(v_unmet)
+        v_rem_start, v_rem_end
         using errcode = 'CLR38',
           detail = jsonb_build_object('reason', 'period_earlier_unmet',
-            'asset_id', p_asset, 'period_start', v_unmet,
-            'period_end', clara._fa_month_end(v_unmet))::text;
+            'asset_id', p_asset, 'period_start', v_rem_start,
+            'period_end', v_rem_end)::text;
     end if;
   end if;
 
@@ -6345,15 +6429,37 @@ begin
   --   (ii) UP -- nothing transitively reachable from any 203005001 holder may write
   --        clara.bank_accounts or take the fa-roles leaf. With (i) that closes the cycle: the
   --        only order that exists is leaf-then-203005001, never the reverse.
-  -- The call graph is over-approximated by TEXTUAL containment of `clara.<name>(` and keyed on
-  -- proname (so every overload counts). Over-approximation is the safe direction for both
-  -- claims -- a spurious edge can only make the census stricter, never blinder.
+  -- THE CALL GRAPH RECOGNISES QUALIFIED **AND BARE** CALLS [round-4.6 fold H3]. Every body in
+  -- this schema runs `set search_path = clara`, so `_helper(...)` and `clara._helper(...)` are
+  -- the SAME call -- and a census keyed on the exact text `clara.<name>(` was blind to the bare
+  -- form in both directions at once: a lock-taking helper called bare from under the leaf, or a
+  -- bare `update bank_accounts` reached from a 203005001 holder, and this block stayed green
+  -- while certifying that neither exists. The pattern below is whitespace-tolerant (`clara . f (`
+  -- is one call) and refuses a foreign qualification (`other.f(` is not a clara edge, because the
+  -- lookbehind bars a preceding dot). It remains an OVER-approximation -- a name mentioned in a
+  -- comment counts as an edge -- which is the safe direction for both claims: a spurious edge can
+  -- only make the census stricter, never blinder. Keyed on proname, so every overload counts.
+  -- (Measured on the assembly corpus: 1,578 edges vs the old form's 1,565 -- a strict superset --
+  -- built in ~46 ms rather than ~680 ms, because the bodies are tokenised once instead of being
+  -- scanned once per candidate callee.)
+  --
+  -- THE PATTERN IS ONLY SOUND FOR SIMPLE IDENTIFIERS, so that is asserted rather than assumed.
+  select coalesce(string_agg(distinct p.proname::text, ', '), '') into v_names from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace and p.proname::text !~ '^[a-z_][a-z0-9_]*$';
+  if v_names <> '' then
+    raise exception '0041 tail 13(c): {%} are not simple lower-case identifiers -- the call-graph pattern this census is built on cannot recognise them, so the transitive claim would be blind exactly where it is hardest to read', v_names;
+  end if;
   create temp table _fa_lock_edge on commit drop as
-    select caller.proname::text as caller, callee.proname::text as callee
-      from pg_proc caller join pg_proc callee
-        on callee.pronamespace = 'clara'::regnamespace and caller.oid <> callee.oid
-       and position('clara.' || callee.proname || '(' in caller.prosrc) <> 0
-     where caller.pronamespace = 'clara'::regnamespace;
+    with tok as (
+      select p.proname::text as caller,
+             (regexp_matches(lower(p.prosrc),
+                '(?<![a-z0-9_.])(?:clara[[:space:]]*\.[[:space:]]*)?([a-z_][a-z0-9_]*)[[:space:]]*\(',
+                'g'))[1] as callee
+        from pg_proc p where p.pronamespace = 'clara'::regnamespace)
+    select distinct t.caller, t.callee from tok t
+      where exists (select 1 from pg_proc q where q.pronamespace = 'clara'::regnamespace
+                      and q.proname::text = t.callee)
+        and t.callee <> t.caller;
   v_seed := '{}'::text[];
   for r in select * from (values
       ('clara.add_bank_account(uuid,text,text,text,text,uuid,text)',
@@ -6369,9 +6475,12 @@ begin
     ) as t(sig, anchor) loop
     select p.prosrc into v_src from pg_proc p where p.oid = r.sig::regprocedure;
     v_tail := substr(v_src, position(r.anchor in v_src) + length(r.anchor));
-    v_seed := v_seed || array(select p.proname::text from pg_proc p
-                              where p.pronamespace = 'clara'::regnamespace
-                                and position('clara.' || p.proname || '(' in v_tail) <> 0);
+    v_seed := v_seed || array(
+      select distinct m[1] from regexp_matches(lower(v_tail),
+               '(?<![a-z0-9_.])(?:clara[[:space:]]*\.[[:space:]]*)?([a-z_][a-z0-9_]*)[[:space:]]*\(',
+               'g') m
+       where exists (select 1 from pg_proc p where p.pronamespace = 'clara'::regnamespace
+                       and p.proname::text = m[1]));
   end loop;
   if coalesce(array_length(v_seed, 1), 0) = 0 then
     raise exception '0041 tail 13(c): the under-leaf seed set is EMPTY -- the anchors no longer sit above any call, so this census would pass vacuously';
@@ -6407,14 +6516,70 @@ begin
   if v_n = 0 then
     raise exception '0041 tail 13(c): no function holds the 203005001 rung -- the UP census has no subject and would pass vacuously';
   end if;
+  -- THE WRITE TEST IS QUALIFIED **AND BARE** TOO [round-4.6 fold H3], for the same search_path
+  -- reason: `update bank_accounts set ...` inside a clara body writes clara.bank_accounts, and
+  -- two exact qualified strings could not see it. Whitespace-tolerant, all three write verbs,
+  -- and boundary-guarded so a sibling table (bank_accounts_history, say) is not swept in.
+  -- MEASURED BEFORE IT IS TRUSTED, for the same reason the dynamic-SQL control below is: the UP
+  -- census asserts an EMPTY answer, which a matcher that recognises nothing would also produce.
+  -- The literals pin the bare + spaced forms and the sibling-table boundary; the count pins that
+  -- the pattern still finds the writers this schema is known to have.
+  if not ('update bank_accounts set active = true'
+            ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from|merge[[:space:]]+into)[[:space:]]+(only[[:space:]]+)?(clara[[:space:]]*\.[[:space:]]*)?bank_accounts(?![a-z0-9_])')
+     or not ('update  clara . bank_accounts set x'
+            ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from|merge[[:space:]]+into)[[:space:]]+(only[[:space:]]+)?(clara[[:space:]]*\.[[:space:]]*)?bank_accounts(?![a-z0-9_])')
+     or ('update clara.bank_accounts_history set x'
+            ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from|merge[[:space:]]+into)[[:space:]]+(only[[:space:]]+)?(clara[[:space:]]*\.[[:space:]]*)?bank_accounts(?![a-z0-9_])') then
+    raise exception '0041 tail 13(c): the clara.bank_accounts write detector no longer recognises the bare/whitespaced forms (or now sweeps in a sibling table) -- an empty UP census from it would be silence, not evidence';
+  end if;
+  select count(*)::int into v_n from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace
+      and p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from|merge[[:space:]]+into)[[:space:]]+(only[[:space:]]+)?(clara[[:space:]]*\.[[:space:]]*)?bank_accounts(?![a-z0-9_])';
+  if v_n < 3 then
+    raise exception '0041 tail 13(c): the clara.bank_accounts write detector finds only % body/bodies schema-wide -- the three anchored writers alone should trip it, so the UP census below would pass vacuously', v_n;
+  end if;
   select coalesce(string_agg(u.fn, ', ' order by u.fn), '') into v_names
     from _fa_lock_up u join pg_proc p
       on p.proname = u.fn and p.pronamespace = 'clara'::regnamespace
-   where p.prosrc like '%insert into clara.bank_accounts%'
-      or p.prosrc like '%update clara.bank_accounts%'
+   where p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from|merge[[:space:]]+into)[[:space:]]+(only[[:space:]]+)?(clara[[:space:]]*\.[[:space:]]*)?bank_accounts(?![a-z0-9_])'
       or p.prosrc like '%:fa-roles%';
   if v_names <> '' then
     raise exception '0041 tail 13(c): {%} is reachable from a 203005001 holder AND writes clara.bank_accounts or takes the fa-roles leaf -- that is the cycle partner the leaf-last order has no answer for (leaf-then-metering one side, metering-then-leaf the other)', v_names;
+  end if;
+  -- ...AND THE WHOLE CENSUS FAILS CLOSED ON DYNAMIC SQL [round-4.6 fold H3]. Everything above is
+  -- a TEXTUAL reading of function bodies. A body inside the measured closure that builds its
+  -- statement at run time (EXECUTE, or a format(...) fed to one) is a hole straight through both
+  -- claims -- it can call a lock taker, or write clara.bank_accounts, with nothing in its source
+  -- for this block to see -- so the honest posture is to refuse rather than certify. The closure
+  -- is the DOWN set, the UP set, and the five leaf-path bodies whose tails seed DOWN (dynamic SQL
+  -- in a tail hides a seed). A body that legitimately needs it may be listed in the allowlist
+  -- below, which is deliberately a LIST OF NAMES WITH REASONS, not a predicate: adding one is an
+  -- adjudication somebody has to write down. Today the closure is 19 bodies and the list is empty.
+  --
+  -- ...AND THE INSTRUMENT IS MEASURED BEFORE IT IS TRUSTED. No clara body uses dynamic SQL today
+  -- (0/504 schema-wide, which the wiki-dynamic-SQL gate independently keeps true), so a pattern
+  -- that had quietly stopped matching ANYTHING would look exactly like a clean census. The
+  -- positive/negative control below is what makes the empty answer above evidence rather than
+  -- silence.
+  if not ('  execute ''select 1'';' ~* '(?<![a-z0-9_])(execute|format)(?![a-z0-9_])')
+     or not ('perform f(format(''%I'', t));' ~* '(?<![a-z0-9_])(execute|format)(?![a-z0-9_])')
+     or ('v_executed := my_format_x;' ~* '(?<![a-z0-9_])(execute|format)(?![a-z0-9_])') then
+    raise exception '0041 tail 13(c): the dynamic-SQL detector no longer recognises EXECUTE/format (or now fires on ordinary identifiers) -- an empty result from it would be silence, not evidence';
+  end if;
+  select coalesce(string_agg(x.fn, ', ' order by x.fn), '') into v_names from (
+      select fn from _fa_lock_down
+      union select fn from _fa_lock_up
+      union select unnest(array['add_bank_account', 'remap_bank_account_coa',
+                               'reactivate_bank_account', 'upsert_fa_account_profile',
+                               'retire_fa_account_profile'])) x(fn)
+    join pg_proc p on p.proname = x.fn and p.pronamespace = 'clara'::regnamespace
+   where p.prosrc ~* '(?<![a-z0-9_])(execute|format)(?![a-z0-9_])'
+     and x.fn <> all (array[]::text[]);  -- ADJUDICATED DYNAMIC-SQL ALLOWLIST (empty: no body in
+                                         -- this closure builds SQL at run time). Each entry must
+                                         -- carry a comment naming WHY its dynamic statement
+                                         -- cannot take a lock or write clara.bank_accounts.
+  if v_names <> '' then
+    raise exception '0041 tail 13(c): {%} sit inside the measured lock closure AND build SQL at run time (EXECUTE/format) -- a textual call-graph census cannot see through that, so this block will not certify the leaf-last property over them. Either keep the dynamic statement out of the closure, or add the body to the adjudicated allowlist beside this check with a reason.', v_names;
   end if;
   drop table _fa_lock_edge; drop table _fa_lock_down; drop table _fa_lock_up;
   -- The three FA-side bodies on the leaf path take no ladder rung of their own.
@@ -6443,7 +6608,7 @@ begin
   if position($x$not (e.flags ? 'fa_disposal')$x$ in v_src) = 0 then
     raise exception '0041 tail 13: the soft-birth arm no longer excludes fa_disposal entries -- a disposal''s accumulated-debit leg can birth a phantom register row again';
   end if;
-  raise notice '0041 tail 13 OK: three consumers read the one reservation predicate (and the disposal verb reads the profile table no more); the bank side is belted at the table, gated on active, undeferred; the fa-roles key has exactly one taker and no body on its path acquires ANY advisory lock after taking or firing it (leaf-last, proven positionally AND by a transitive whole-schema census in both directions -- the only rung reachable under the leaf is 203005001 in clara._reserve_processing_call, and no 203005001 holder reaches a clara.bank_accounts writer or the leaf); soft-birth excludes disposals.';
+  raise notice '0041 tail 13 OK: three consumers read the one reservation predicate (and the disposal verb reads the profile table no more); the bank side is belted at the table, gated on active, undeferred; the fa-roles key has exactly one taker and no body on its path acquires ANY advisory lock after taking or firing it (leaf-last, proven positionally AND by a transitive whole-schema census in both directions -- QUALIFIED AND BARE calls, qualified and bare clara.bank_accounts writes, and FAILING CLOSED on dynamic SQL anywhere in the measured closure: the only rung reachable under the leaf is 203005001 in clara._reserve_processing_call, and no 203005001 holder reaches a clara.bank_accounts writer or the leaf); soft-birth excludes disposals.';
 end $tail13$;
 
 do $tail_final$

@@ -341,7 +341,11 @@ test("T11 routine reversal: mirror is approved with swapped legs, original stays
 
   const rev = await reverseEntry(users.bob, { entry, reason: "correction", opKey: opk() });
   const mirror = rev.reversal_id;
-  const m = await rootQuery("select status, reversal_of, posting_date = current_date as today from clara.journal_entries where id = $1", [mirror]);
+  // "Today" is the DB's Asia/Kuala_Lumpur business date, never the session's `current_date`:
+  // 0041's S4.4 splice re-dates the reversal mirror onto the MYT clock (the a21 DB-clock law),
+  // so a UTC-session CI runner between 16:00 and 24:00 UTC reads a `current_date` a day BEHIND
+  // the date the mirror legitimately carries — which is exactly the day-early bug the splice fixed.
+  const m = await rootQuery("select status, reversal_of, posting_date = (now() at time zone 'Asia/Kuala_Lumpur')::date as today from clara.journal_entries where id = $1", [mirror]);
   assert.equal(m.rows[0].status, "approved", "routine mirror is approved");
   assert.equal(m.rows[0].reversal_of, entry, "mirror links to the original");
   assert.equal(m.rows[0].today, true, "mirror posting_date is today (never back-dated)");

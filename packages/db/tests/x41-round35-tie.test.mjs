@@ -8,6 +8,10 @@
 //   x41.s4  G7(c) — the WHOLE-DB `fa_register_tie` sweep, at THREE as-ofs, through the
 //           production instrument, with an explicit NAMED allow-list. Unexplained reds
 //           must be EMPTY; an explained red must belong to a fixture named right here.
+//           [ROUND-4.6] A tie REFUSAL is held to the same bar and one class narrower:
+//           zero, save the single deliberately over-cap lineage x41.u4 leaves standing
+//           to prove the ratified 64-hop boundary — and that one must PROVE itself
+//           over-cap against the register before it is excused.
 //
 // WHY. `fa_register_tie` is the wave's assertion instrument and WD-R14's pre-flight: a
 // professional who meets one false red stops trusting the green ones. Per-fixture tie
@@ -58,6 +62,55 @@ const ALLOWED_RED = [
 ];
 
 const allowedBy = (name) => ALLOWED_RED.find((a) => a.match.test(name ?? ""));
+
+// ---------------------------------------------------------------------------
+// [ROUND-4.6] THE REFUSAL ALLOW-LIST — a SEPARATE list from ALLOWED_RED (which
+// governs differences), and EVIDENCE-GATED rather than name-gated.
+//
+// WHY IT EXISTS. Round-4.6 adjudication 4 aligned `_fa_disposal_stub`'s local walk
+// with both other lineage readers: exactly 64 edges admitted, the 65th refused
+// `fa_lineage_too_deep`. x41.u4 proves the FAR side of that boundary, and the only
+// way to show it is to leave a real 65-edge lineage standing — `revise_fixed_asset_
+// particulars` mints the 65th edge and no verb unwinds a revision, so from then on
+// `fa_register_tie` refuses for that fixture client permanently. On a FRESH database
+// — CI's model, and acceptance's — s4 runs before u4 and sees nothing at all; only a
+// re-run of the same rig meets it.
+//
+// WHY IT IS STILL AN INSTRUMENT. The round-4 hardening below (errors must be ZERO)
+// stands for every other client: a book the tie cannot answer for is a book nobody
+// can assert, and it must never be demoted to a lane note. This ONE class is named
+// AND PROVEN — the client must really hold a lineage past the ratified cap, measured
+// against the register itself. A refusal that merely carries the fixture's name, or
+// names a different cause, is still a DEFECT.
+// ---------------------------------------------------------------------------
+
+const ALLOWED_REFUSAL = [
+  {
+    match: /^x41_u4_/,
+    err: /exceeds 64 supersede hops/,
+    why: "x41.u4's DELIBERATE over-cap lineage — the 65th edge that proves the ratified 64-hop cap (round-4.6 adjudication 4). Verified over-cap against the register, never taken on the name.",
+  },
+];
+
+/** The deepest supersede chain (in EDGES) this client holds, read off the register. */
+async function deepestLineage(client) {
+  const r = await rootQuery(
+    `with recursive chain(id, hops) as (
+       select f.id, 0
+         from clara.fixed_assets f
+        where f.client_id = $1
+          and not exists (select 1 from clara.fixed_assets p where p.superseded_by_asset_id = f.id)
+       union all
+       select f.superseded_by_asset_id, c.hops + 1
+         from chain c
+         join clara.fixed_assets f on f.id = c.id
+        where f.superseded_by_asset_id is not null
+     )
+     select coalesce(max(hops), 0)::int as hops from chain`,
+    [client],
+  );
+  return Number(r.rows[0].hops);
+}
 
 // ===========================================================================
 // x41.s5 — THE K6 HAND-OFF LEAVES THE AS-OF WINDOW (G3).
@@ -163,7 +216,7 @@ test("x41.s4 the WHOLE-DB fa_register_tie sweep at three as-ofs: unexplained dif
   // than an open-ended excuse.
   const asOfs = [mon(-1).end, dayIn(mon(0), 1), dayIn(mon(1), 28)];
   const settled = asOfs[asOfs.length - 1];
-  const seen = { clients: 0, rows: 0, flagged: 0, explained: 0, a6: 0 };
+  const seen = { clients: 0, rows: 0, flagged: 0, explained: 0, a6: 0, overCap: 0 };
 
   for (const asOf of asOfs) {
     const windows = await openReversalWindows(asOf);
@@ -181,8 +234,24 @@ test("x41.s4 the WHOLE-DB fa_register_tie sweep at three as-ofs: unexplained dif
     if (errs.length) {
       noteLane(`x41.s4 at ${asOf} the tie REFUSED for ${errs.length} client(s): ${errs.slice(0, 5).map((e) => `${e.client_name}: ${e.err}`).join(" | ")}`);
     }
-    assert.deepEqual(errs.map((e) => ({ client: e.client, name: e.client_name, err: e.err })), [],
-      `at as_of ${asOf}: fa_register_tie must RETURN for every register-bearing client in the database. A refusal here is a book WD-R14's pre-flight cannot measure at all.`);
+    // [ROUND-4.6] …with exactly ONE tolerated class, and the tolerance is EARNED, not
+    // asserted: the client must carry the fixture's own name AND the cap's own words AND
+    // really hold a lineage past the cap when the register is walked here. Anything that
+    // fails any of the three falls straight through to the zero-refusals assertion below.
+    const overCap = [];
+    for (const e of errs) {
+      const a = ALLOWED_REFUSAL.find((x) => x.match.test(e.client_name ?? "") && x.err.test(e.err ?? ""));
+      if (!a) continue;
+      const hops = await deepestLineage(e.client);
+      assert.ok(hops > 64,
+        `at as_of ${asOf}: client '${e.client_name}' (${e.client}) claims the deliberate over-cap exemption, but its deepest supersede chain is ${hops} edge(s) — at or inside the ratified 64-hop cap. This exemption is EVIDENCE-gated: a refusal that is not really over-cap is a defect, not a fixture.`);
+      seen.overCap += 1;
+      noteLane(`x41.s4 allow-listed REFUSAL at ${asOf}: '${e.client_name}' holds a ${hops}-edge lineage, past the ratified 64-hop cap — ${a.why.slice(0, 90)}…`);
+      overCap.push(e);
+    }
+    assert.deepEqual(errs.filter((e) => !overCap.includes(e))
+      .map((e) => ({ client: e.client, name: e.client_name, err: e.err })), [],
+    `at as_of ${asOf}: fa_register_tie must RETURN for every register-bearing client in the database. A refusal here is a book WD-R14's pre-flight cannot measure at all.`);
     const rows = sweepAccountRows(swept.filter((r) => !r.err));
     seen.clients = Math.max(seen.clients, swept.length);
     seen.rows += rows.length;
@@ -226,7 +295,9 @@ test("x41.s4 the WHOLE-DB fa_register_tie sweep at three as-ofs: unexplained dif
     }
   }
 
-  noteLane(`x41.s4 swept ${seen.clients} register-bearing client(s) × ${asOfs.length} as-of(s) = ${seen.rows} account rows; ${seen.explained} explained red(s), ${seen.a6} open-A6-window row(s), ${seen.flagged} before_baseline row(s), 0 unexplained`);
+  noteLane(`x41.s4 swept ${seen.clients} register-bearing client(s) × ${asOfs.length} as-of(s) = ${seen.rows} account rows; ${seen.explained} explained red(s), ${seen.a6} open-A6-window row(s), ${seen.flagged} before_baseline row(s), ${seen.overCap} proven over-cap refusal(s), 0 unexplained`);
   assert.equal(ALLOWED_RED.length, 1,
     "the allow-list stays MINIMAL: exactly one deliberate fixture. Growing it is a decision, not a convenience — a new entry needs a reason a professional would accept.");
+  assert.equal(ALLOWED_REFUSAL.length, 1,
+    "the REFUSAL allow-list stays MINIMAL too: exactly one deliberate over-cap fixture, and it must prove itself over-cap. A second entry is a decision — a book the tie cannot answer for is the one thing this sweep exists to surface.");
 });

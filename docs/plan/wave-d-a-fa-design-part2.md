@@ -218,6 +218,30 @@ refusal's executable remedy; ladder convergence with no month charged twice).
 DB suite 1531/1506/0-fail TWICE · the isolated 0041 upgrade drill 1/1 · runtime 986/986 ·
 dashboard 488/488 (16 routes) · all seven root gates + typecheck + lint · x41 family 99 cells.
 
+## Round 4.6 — the merge gate, honoured
+
+The final Codex merge gate on PR #177 returned DO-NOT-MERGE (1B/2M/1m) and CI failed on both
+runs — both correctly. Folds (H1–H4 + the CI re-pin): **the lineage-wide stub could
+depreciate beyond cost** (the successor's money clock read only PERSISTED accumulation; the
+Codex worked case 375 where the cap is 300) → `_fa_disposal_stub` walks ROOT-FIRST with ONE
+shared projected-accumulated clamp across every block (measured: 375 → 300 = cost − residual
+exactly; the RB life-end variant 1,016,666 → 1,000,000) · the ended-period refusal now names
+the CADENCE window at both sites (annual names the FY pair `run_depreciation_manual` accepts
+verbatim) · the TAIL 13c census recognises bare + qualified calls and bank writes and FAILS
+CLOSED on dynamic SQL in the closure (strict-superset edge set, zero old edges lost) · the
+local walk admits exactly 64 edges like both other readers. **The CI red was the MYT splice
+WORKING:** CI ran at 23:1x UTC = 07:1x MYT — inside the exact 00:00–08:00 window — and the
+pre-existing T11 cell asserted the UTC date the splice exists to leave behind; T11 now derives
+today from the DB's MYT clock (proven on a UTC-timezone database). A green CI OUTSIDE the
+16:00–24:00 UTC window does not exercise the splice — the acceptance does. Blind
+corroboration: x41.u1–u4 (life-end across a revision both methods, sen-exact; the annual
+executable remedy driven to green; the 64/65 boundary) green on first contact.
+**s4 amendment ratified:** the whole-DB sweep gains a second, EVIDENCE-GATED exemption
+(count-capped at 1, admitted only when a recursive register walk proves the lineage really
+exceeds 64 edges) so x41.u4's deliberate over-cap fixture can coexist with the zero-error law.
+**Closing state:** DB 1535/1510/0-fail twice + a UTC CI simulation · upgrade drill 1/1 ·
+runtime 986/986 · dashboard 488/488 · all gates.
+
 ## Standing observations for the ceremony + acceptance (from the ladder)
 
 - WD-R14 pre-flight: before enrolling ANY real cost account, assert zero approved non-opening
@@ -236,6 +260,12 @@ dashboard 488/488 (16 routes) · all seven root gates + typecheck + lint · x41 
   disposal draft per asset (an abandoned draft freezes charging AND revision until withdrawn) ·
   `fixed_assets.cost_cents` should become NOT NULL (the CHECK passes on NULL; backstopped by
   `fa_lineage_cost_invalid` today) · which lineage row owns the split month after a mid-month
-  revision is UNRULED (x41.s2 lane-notes the observed allocation; pin at the D-b grilling).
+  revision is UNRULED (x41.s2 lane-notes the observed allocation; pin at the D-b grilling) ·
+  the 64-edge lineage cap is READER-side only — `revise_fixed_asset_particulars` will mint the
+  65th edge and permanently brick that client's tie/disposal with no unwind verb (65 deliberate
+  audited revisions of one asset; guard the writer or provide an unwind at D-b).
+- Rig hygiene: every full-suite run leaves x41.u4's deliberate over-cap lineage behind on a
+  persistent rig DB — rebuild the rig periodically; CI (fresh DB per run) is unaffected. The
+  runtime suite locally needs PGPORT=5432 exported (one file defaults to the CI port 55432).
 - The wave-a-autodraft-db "no-ops cleanly" cell asserts a globally-empty corpus — green on a
   pristine DB and in CI; misleading on any shared image.
