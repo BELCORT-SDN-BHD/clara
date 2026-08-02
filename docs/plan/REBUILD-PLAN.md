@@ -224,7 +224,19 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > **The WD-R14 real half closed on a NAMED deviation (owner-ruled): both real registers hold
 > ZERO fixed assets** (measured from the raw YA2025 docs — nothing was fabricated); the
 > carry-down's first real firing + the real RB asset defer to the first asset-owning client;
-> RS's real FYE = 31 March. **NEXT: D-b (0042) — contract scope + the D-a ladder residuals.**
+> RS's real FYE = 31 March.
+>
+> **STATUS (2026-08-02, later): the D-b DESIGN is CLOSED (ADR-057, PR #180).** The design of
+> record = `wave-d-b-design.md` v8 (sixteen owner rulings WDB-G1..G16) + `wave-d-b-design-abi.md`
+> (the builder ABI: signatures, seven DDL blocks, the op-key matrix with literal hashes, the
+> refusal-token table) + the EIGHT-round ladder record (`-part2.md`/`-part3.md`: 18 lanes, ~170
+> findings, rounds 7–8 mechanism-clean; the split-month research record behind G14). The D-a
+> ladder residuals are RULED IN (G10 disposal guard · G11 64-edge writer cap ×3 · G12
+> cost_cents NOT NULL · G14 split-month pinned to the as-built law). **NEXT: the D-b BUILD —
+> harvest → 0042 + contract-blind x42 + runtime + surfaces → as-built ladder → build PR (0042
+> claims at ITS merge) → ceremony → acceptance** (sandbox full corpus; real = one owner-named
+> recurring template's ramp + auto-reversal on a real month; advances close on the G8 named
+> deferral).
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
