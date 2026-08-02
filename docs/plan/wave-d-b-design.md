@@ -1,10 +1,11 @@
 # Wave D-b — adjustments + staff advances (migration 0042): the design
 
-> **Status: v5 — grilled 2026-08-02 (WDB-G1..G16), rounds 1–4 of the design ladder folded
-> (eleven lanes, ~110 findings; the full record + every adjudication lives in
-> `wave-d-b-design-part2.md`).** Contract: `wave-d-contract.md` §4 D-b (WD-R8/R9/R10/R13).
-> Grounding: the 10-lane census + `research/wave-d/split-month-research-2026-08-02.md`.
-> Precedent of record: the 0041 authority/poster/belt family. `0042` is claimed at MERGE.
+> **Status: v6 — grilled 2026-08-02 (WDB-G1..G16), rounds 1–5 of the design ladder folded
+> (thirteen lanes, ~130 findings; the record: `wave-d-b-design-part2.md` rounds 1–4,
+> `wave-d-b-design-part3.md` rounds 5+).** Contract: `wave-d-contract.md` §4 D-b
+> (WD-R8/R9/R10/R13). Grounding: the 10-lane census +
+> `research/wave-d/split-month-research-2026-08-02.md`. Precedent of record: the 0041
+> authority/poster/belt family. §9 is the builder ABI appendix. `0042` is claimed at MERGE.
 
 ---
 
@@ -37,8 +38,11 @@ firm_id, client_id, status (`proposed`,`live`,`retired`), name, cadence
 (`monthly`,`annual`), start_date, end_date (nullable; when set, MUST be a cadence
 period-END for the client, validated at propose), auto_reverse boolean, lines jsonb (≥2,
 balanced to the sen, positive cents — an occurrence ALWAYS carries a charge), memo_template,
-actor+op-key columns, content_hash, created_at. Transition trigger + no-delete +
+actor+op-key columns, content_hash (= `_hash({name, cadence, start_date, end_date,
+auto_reverse, lines, memo_template})`), created_at. Transition trigger + no-delete +
 no-truncate. Partial unique (client_id, content_hash) WHERE status IN ('proposed','live').
+**Every new table in 0042 (the six state tables + `ea1955_policy`) gets enable + FORCE row
+level security with the owner/human policy pair (0041:680-685)** — asserted in the tail.
 
 Line eligibility (validated at propose; re-derived at every occurrence AND at approve —
 **the SOLE soft-birth immunity of the auto-mirror**, §2.6): account exists · `is_active` ·
@@ -60,21 +64,29 @@ template OR ANNUAL-cadence depreciation authority exists (monthly ones are FY-in
 and do NOT block — the sandbox's live monthly authority is the cell).
 
 ### 2.3 The poster
-`clara._adj_run_occurrence_core(...)` mirrors `_fa_run_period_core`: `_reserve_op` + the
-EAGER derived reservations — `:approve` AND, when auto_reverse, `:mirror:approve` (both
-before any lock; the committed reservations are lawfully spent preheld by a LATER approving
-transaction in draft mode) → 203005004 → template live → period cadence-aligned + ENDED
-(MYT) → per-template sequencing. Direct INSERT (SS9.5): status='draft',
+`clara._adj_run_occurrence_core` (§9 signatures) mirrors `_fa_run_period_core`:
+`_reserve_op` + the EAGER derived reservations — `:approve` AND `:mirror:approve`
+**unconditionally** (both before any lock; the non-auto_reverse branch closes the mirror
+key with a deferral marker; a committed reservation is lawfully spent preheld by a LATER
+approving transaction in draft mode) → 203005004 → template live → period cadence-aligned +
+ENDED (MYT) → per-template sequencing. Direct INSERT (SS9.5): status='draft',
 origin='scheduled_run', posting_date = period_end, maker_actor = actor, last_human_editor =
-template.signed_by, `flags.recurring_adjustment = {template_id, op_key, role:'occurrence',
-auto_reverse, reversal_date, period_start, period_end}`, lines from the template.
-Exact-balance assert. **Mode**: `post` iff ramp-earned AND NOT high-stakes AND NOT catch-up
-(forced-draft ⇔ `period_end < (signed_at AT TIME ZONE 'Asia/Kuala_Lumpur')::date`; the
-boundary day follows the ramp law). **Ramp** (per-template, derived): EXISTS ≥1 OTHER
-approved un-reversed occurrence entry; #1 always drafts. Auto-post spends `:approve` via
-`_approve_entry_core(receipt_preheld)`. **Due oracle** `adjustment_run_due(p_client)`:
-oldest unmet (template, period) among non-blocked live templates + `blocked[]` (rendered on
-/rules). Machine verb clara_runtime-only; human twin bookkeeper+.
+template.signed_by, **`is_opening_balance = is_year_end = tax_affecting = FALSE, always`**
+(templates are ordinary periodic adjustments; year-end/tax-affecting adjustments are
+hand-draft territory — a stated v1 boundary, so template-lane CLR05 is amount-driven only),
+`flags.recurring_adjustment = {template_id, op_key, role:'occurrence', auto_reverse,
+reversal_date, period_start, period_end, mode}` (**`mode` is stamped by the poster**),
+lines from the template. Exact-balance assert. **Mode**: `post` iff ramp-earned AND NOT
+high-stakes AND NOT catch-up (forced-draft ⇔ `period_end < (signed_at AT TIME ZONE
+'Asia/Kuala_Lumpur')::date`; the boundary day follows the ramp law). **Ramp** (per-template,
+derived): EXISTS ≥1 OTHER approved un-reversed occurrence entry **approved AFTER the
+template's latest completed `adjustment_pair_reversals` receipt** — a completed pair
+correction resets the ramp clock (D-a's "a reversal un-earns until a fresh reviewed run
+passes", at template grain), so the corrected period's re-run DRAFTS; #1 always drafts.
+Auto-post spends `:approve` via `_approve_entry_core(receipt_preheld)`. **Due oracle**
+`adjustment_run_due(p_client)`: oldest unmet (template, period) among non-blocked live
+templates + `blocked[]` (rendered on /rules). Machine verb `run_adjustment_occurrence`
+(clara_runtime-only); human twin `run_adjustment_manual` (bookkeeper+); both §9.
 
 ### 2.4 Auto-reversal — the pair
 On approval of an auto_reverse occurrence, `_adj_on_approve` births the mirror: INSERT
@@ -99,14 +111,18 @@ the correction dead-end, ladder-verified).
 defense arm refuse reversing/approving EITHER half individually. A solo (non-auto-reverse)
 occurrence has NO pair — plain `reverse_entry` is its path; `reverse_adjustment_pair`
 refuses it (`not_an_auto_pair`). The sanctioned machine:
-- `clara.adjustment_pair_reversals` — id, firm, client, occurrence_id, mirror_id, both
-  correction-draft ids, maker, status (`pending` → **`approving` (TRANSACTION-ONLY)** →
-  `completed` | `cancelled`), op_key, created_at; ONE active pair per occurrence;
-  transition trigger + no-delete + no-truncate + a DEFERRED trigger refusing a committed
-  `approving`. **The receipt IS the authorization channel**: the hook's defense arm refuses
-  a pair draft unless its receipt is `approving`; `revise_entry` (CoR) refuses any draft
-  named by a pending/approving pair receipt (the corrections carry no flags — membership is
-  the discriminator).
+- `clara.adjustment_pair_reversals` — id, firm, client, occurrence_id, mirror_id,
+  **occurrence_correction_id, mirror_correction_id**, maker, status, op_key, created_at;
+  ONE active pair per occurrence. **The lawful edge set (0041:650-663 idiom, everything
+  else raises): `pending→approving`, `approving→completed`, `pending→cancelled`**; frozen
+  columns = {occurrence_id, mirror_id, occurrence_correction_id, mirror_correction_id,
+  maker, op_key}; no-delete + no-truncate; the DEFERRED no-commit-`approving` trigger
+  **re-queries by id** (the 0038:3255 idiom — it raises only when the FINAL committed state
+  is `approving`; a NEW-tuple test would refuse every lawful run; tail probe asserts the
+  re-query). **The receipt IS the authorization channel**: the hook's defense arm refuses a
+  pair draft unless its receipt is `approving`; `revise_entry` (CoR) refuses any draft
+  named by a pending/approving pair receipt; **`withdraw_draft` (CoR) refuses a pair draft
+  (`pair_draft_locked`; remedy names `cancel_pair_reversal`)**.
 - `reverse_adjustment_pair(p_client, p_occurrence, p_reason, p_op_key)` (bookkeeper+) →
   `_pair_reverse_core` births both correction mirrors (the 13-column recipe,
   `origin='reversal'`, maker_actor = last_human_editor = the CALLER, MYT dates; guards:
@@ -127,11 +143,17 @@ refuses it (`not_an_auto_pair`). The sanctioned machine:
   emits `entry.withdrawn` ×2, receipt → `cancelled`.
 
 ### 2.5 Receipts + events
-`clara.adjustment_runs` (fully immutable + no-delete/no-truncate), minted after the mirror:
-id, firm, client, template_id, period, mode, entry_id (unique), reversal_entry_id,
-amount_cents, op_key, created_at. **0042 registers `adjustment.posted` AND
-`bank.line_exception_reopened` in `clara.event_types`** with the 0040-probe-6-style
-prestate/postcheck (unregistered names fail at RUN time otherwise).
+`clara.adjustment_runs` (fully immutable + no-delete/no-truncate), minted after the mirror
+in arm (2): id, firm, client, template_id, period_start/period_end (dates), **mode (read
+from the flags stamp)**, entry_id (unique), reversal_entry_id, amount_cents, op_key,
+created_at. **The event contract**: 0042 registers `adjustment.posted` (emitted in arm (2)
+after the receipt, one per occurrence, identifiers-only payload {template_id, run_id,
+period, amount_cents, reversal_entry_id}) AND `bank.line_exception_reopened` (the §4
+reopen) in `clara.event_types` **AND `clara.trigger_taxonomy` at `taxonomy_active`
+(decision 'ignore' — the 0041:978-996 CTE)**, with the 0040-probe-6-style prestate/
+postcheck extended to taxonomy coverage; emission sites + counts pinned in the tail. Ruled:
+staff-advance register mutations ride the generic `entry.*` events (the register rows are
+hook-derived from entries, which carry the events — no named register events in v1).
 
 ### 2.6 The approve-hook bindings
 `_adj_on_approve` splices after `perform clara._fa_on_approve(p_entry);`, above the
@@ -142,11 +164,14 @@ regardless), so an eligibility violation RAISES, never skips. **(1)** `reversal_
 NULL` → the pair defense (refuse approving a pair-correction draft unless its receipt is
 `approving`), else return. **(2)** role='occurrence' → re-validate on SEVEN axes before
 minting — origin · issuer op-receipt (hash from client+template+period) · template live ·
-line-set byte-equal · cadence+ended · mode · **line_eligibility** — refusing
-`adjustment_stale` with the named axis; then the mirror (§2.4) + the receipt (§2.5).
-**(3)** `flags ? 'bank_rule_suggested'` → the S4 approve-time re-validation (§5) — hosted
-here so no new splice exists and the census is unchanged. **`revise_entry` (CoR)** refuses
-any draft carrying a D-b proposal flag OR named by a pending/approving pair receipt.
+line-set byte-equal · cadence+ended · **mode (refuse a `mode='post'` stamp when the
+forced-draft predicate or `is_high_stakes` NOW holds; the ramp is never re-derived at
+approve)** · **line_eligibility** — refusing `adjustment_stale` with the named axis; then
+the mirror (§2.4) + the receipt + event (§2.5). **(3)** `flags ? 'bank_rule_suggested'` →
+the S4 approve-time re-validation (§5) — hosted here so no new splice exists.
+**`revise_entry` (CoR)** refuses any draft carrying a D-b proposal flag (the three keys:
+`recurring_adjustment`, `staff_advance_application`, `bank_rule_suggested`) OR named by a
+pending/approving pair receipt.
 
 ### 2.7 Runtime · 2.8 Surface
 Leader 5th due-check `adjustmentRunDue` + `reconciler-adjustments.mjs` (feature-detect,
@@ -164,7 +189,8 @@ re-reads the approved balance under the rung. Validation: active · asset · non
 not the bank door · unreserved per `_acct_role_reserved` (a RETIRED same-code advance
 enrolment does NOT block re-enrolment) · **approved GL balance = 0** (enrol-clean-only;
 pre-existing balances defer to the attested-baseline debt) · `p_confirm_dedicated` (G15).
-Retire refuses while any advance has outstanding > 0. The bank belt
+Retire refuses while any advance has outstanding > 0. The attestation persists as
+`enrolment_attestation` (text) on the enrolment row. The bank belt
 (`_fa_assert_code_unreserved`, CoR) reads the shared union — a bank account can never bind
 an actively enrolled advance code.
 
@@ -173,8 +199,9 @@ an actively enrolled advance code.
 {purpose, reference} via `complete_staff_advance_particulars`; {voided_by_entry_id,
 void_effective_date} hook-only): id, firm, client, **enrolment_id** (immutable FK),
 account_code, disbursement_line_id (unique, NOT NULL), entry_id, issue_date, amount_cents
-(>0), purpose/reference, void columns (void_effective_date = the reversal mirror's
-posting_date), created_at. `clara.staff_advance_applications` (pure append-only +
+(>0), purpose/reference (via `complete_staff_advance_particulars(p_client, p_advance,
+p_purpose, p_reference, p_op_key)` — bookkeeper+, set-once, refuses already-set), void
+columns (void_effective_date = the reversal mirror's posting_date), created_at. `clara.staff_advance_applications` (pure append-only +
 no-delete/no-truncate): id, firm, client, advance_id, enrolment_id, application_line_id,
 entry_id, kind (`payroll_deduction`,`bank_return`,`claim`,`correction`), amount_cents (>0),
 effective_date (= the entry's posting_date, hook-derived), reverses_application_id
@@ -188,14 +215,17 @@ void_effective_date ≤ as_of)` — originals persist at every later as-of even 
 no stored outstanding.
 
 ### 3.3 Proposal, hook, belt
-`book_staff_advance_application(...)` (bookkeeper+; the three proposal kinds) drafts
-directly with the flags proposal; WCA-R7 branch. **Line-shaped allocations**
-`[{line_no, advance_id, amount_cents}]`. `clara._adv_on_approve` (after `_adj_on_approve`):
+`book_staff_advance_application` (§9; bookkeeper+; the three proposal kinds) drafts
+directly with **`flags.staff_advance_application = {kind, reason, allocations:
+[{line_no, advance_id, amount_cents}]}`** (the named third key); WCA-R7 branch.
+`clara._adv_on_approve` (after `_adj_on_approve`):
 **(1) reversal FIRST, return** — reversed application entry → one correction per ORIGINAL
 row at the **uncorrected remainder** (zero → no row), dated at the mirror's posting_date;
 reversed disbursement → the void stamp. **(2)** credit legs → mint from the proposal; the
 authoritative guards re-derive HERE under the held client rung + sorted advance row locks
-(coverage equality · cumulative cap · no-predate). **(3)** debit legs (`NOT
+(coverage equality · **the TEMPORAL cap: the application must fit outstanding at ITS OWN
+effective_date AND hold the cap at every date boundary ≥ it — a backdated application can
+never drive any historical outstanding negative** · no-predate). **(3)** debit legs (`NOT
 is_opening_balance AND reversal_of IS NULL`) → soft-birth. `_wdb_reversal_blocked` also
 refuses: reversing a disbursement with net applications ≠ 0, and reversing a
 correction-carrying entry (`correction_entry_irreversible`). The DEFERRED movement belt
@@ -209,8 +239,8 @@ only, explained columns; the tie groups by ACCOUNT_CODE walking EVERY enrolment 
 and **its GL side is scoped to the union of the code's enrolment windows [enrolled_at,
 retired_at]** (matching the belt watermark; out-of-window movements ride an explained
 column — a repurposed retired code cannot permanently break the surface).
-`clara.ea1955_policy` (effective-dated, source_note) surfaces advisory notes. /advances
-clones /aging; row_kind `staff_advance_incomplete`; part `staff_advance`.
+`clara.ea1955_policy` (§9 DDL + seed; the seventh RLS'd table) surfaces advisory notes.
+/advances clones /aging; row_kind `staff_advance_incomplete`; part `staff_advance`.
 
 ## 4. S3 — The AF-2 composite (WD-R13)
 
@@ -242,7 +272,12 @@ match BEFORE the rungs (0037 invariant (1)), then 203005003 → 203005004 → 20
 (inline resolution mint, confidence 1.0; the advance payload as its flags proposal) →
 approve via the core → allocate via the cores → one match group live at commit
 (`match_bank_line` untouched — the walls see status='resolved'). **The group is stamped
-`resolution_exception_id` (immutable) at CREATION on every path.**
+`resolution_exception_id` in the CREATING TRANSACTION on every path — the group is created
+by the callee verb/core and the COMPOSITE UPDATEs it before commit; a NEW narrow
+`bank_matches` BEFORE-UPDATE trigger enforces the column set-once (null→value only) —
+additive, the table has no update guard today. 0038's four-name `bank_matches` INSERT
+census is re-pinned at its new membership (`_settle_from_bank_line_core` replaces
+`settle_from_bank_line`).**
 
 **High-stakes (G9): the settlement leg ONLY** — refuse `p_draft`/`p_adjustments`/
 `p_advance_applications`/`p_charge_cents`+`p_charge_account`
@@ -283,11 +318,14 @@ resolution row (the 0041/0037 precedent); the hand-draft mints inline; the ARCHI
 ## 5. S4 — The `bank_rule_suggested` producer (WD-R13)
 
 `clara.accept_bank_rule_suggestion(p_client, p_line, p_rule, p_op_key)` — bookkeeper+:
-line row-lock · the un-dead-suggested-draft dedup guard · rule SIGNED + kind='coding' +
-client · live re-derivation · direct-INSERT draft with `flags = {'bank_rule_suggested':
-{rule_id, line_id}}`. The approve-time re-validation is **`_adj_on_approve` arm (3)**
-(§2.6): signed rule · line unmatched/un-excepted · statement live · predicate re-match ·
-legs equal derived → `suggestion_stale`. The S5 carve-out withholds sighting accrual; the
+line row-lock · **the dedup law: at most ONE `bank_rule_suggested` entry per line across
+`status IN ('draft','approved') AND reversed_by IS NULL` — a partial unique expression
+index over the flags line_id plus the friendly row-locked precheck** (an approved-but-
+unmatched suggestion blocks a second accept) · rule SIGNED + kind='coding' + client · live
+re-derivation · direct-INSERT draft with `flags = {'bank_rule_suggested': {rule_id,
+line_id}}`. The approve-time re-validation is **`_adj_on_approve` arm (3)** (§2.6): signed
+rule · line unmatched/un-excepted · statement live · predicate re-match · legs equal
+derived → `suggestion_stale`. 0040's S5 sighting carve-out withholds sighting accrual; the
 chip upgrades; the SS9.5-mirror tail guard covers the key.
 
 ## 6. S5 — The D-a residual fixes
@@ -297,7 +335,9 @@ chip upgrades; the SS9.5-mirror tail guard covers the key.
    0017:3439, CoR); CLR37; 64/65 parity cells (G11).
 3. `cost_cents` NOT NULL — **with a prestate probe** (count NULL rows, named remedy before
    the ALTER; the now-dead `ck_fa_residual` cost-null disjunct is left deliberately, noted)
-   + BOTH 0017 validator sites gain cost-only `IS NULL` disjuncts (G12).
+   + BOTH 0017 validator sites — **the CLR10 composer site (0017:3345 area) AND the CLR31
+   seed/activation site (0017:3426 area), anchors measured against the LIVE bodies (0041
+   already spliced their CLR31 arms)** — gain cost-only `IS NULL` disjuncts (G12).
 4. Split-month (G14): no arithmetic change; `_fa_split_month_advisory(asset)` (revision
    successors with effective_from past day 1; disposal splits excluded) via `_fa_asset_json`
    + the revise response. Derived, never stored.
@@ -307,22 +347,25 @@ chip upgrades; the SS9.5-mirror tail guard covers the key.
 **Sandbox, in full:** propose→sign → end_date + content-hash refusals → catch-up (all
 draft) → ramp draft → ONE approval births the pair (`auto_reversal_of` · CLR05 symmetry ·
 the signer-approves-own high-stakes cell · the annual `is_year_end`-symmetry cell · event
-order) → auto-post + receipt → two-occurrence ramp cell → pair correction low-stakes AND
-high-stakes (single-half approve refused unless `approving` · `approve_pair_reversal`
-atomic · `cancel_pair_reversal` · `revise_entry`-on-pair-draft refused · solo
-`not_an_auto_pair`) → per-axis `adjustment_stale` refusals (all SEVEN incl.
+order) → auto-post + receipt → two-occurrence ramp cell → **the ramp-reset cell (3-occurrence
+template → pair-correct one → the next sweep DRAFTS, never posts)** → pair correction
+low-stakes AND high-stakes (single-half approve refused unless `approving` ·
+`approve_pair_reversal` atomic · `cancel_pair_reversal` · `revise_entry`-on-pair-draft AND
+`withdraw_draft`-on-pair-draft refused · solo `not_an_auto_pair`) → per-axis `adjustment_stale` refusals (all SEVEN incl.
 line_eligibility: enrol/reserve a template account during the draft window) → retire-with-
 draft refusal → FYE guard (annual blocks; monthly does NOT) → sign-time revalidation →
 enrolment (clean-only · concurrency · re-enrol · retire-with-outstanding ·
 bank-on-enrolled-code) → soft-birth + chase → applications (partial · multi-advance · three
 kinds · hook-born corrections at the remainder · correction-of-correction refusal · the
-cumulative-cap cell · over-application concurrency · bare-credit refuse · the watermark
-boundary pair) → the two advance-reversal refusals → disbursement void → tie at 0 ×2 + the
+cumulative-cap cell · **the backdated-after-application and backdated-before-later-
+correction temporal-cap cells** · over-application concurrency · bare-credit refuse · the
+watermark boundary pair · the particulars set-once cell) → the two advance-reversal refusals → disbursement void → tie at 0 ×2 + the
 retire/re-enrol historical as-of drill → AF-2 non-HS both dispositions → AF-2 park (charge
 refused · pending `bank_corrective_line` refused) → parked-cancel drill (declaration
 cleared · id intact · exception open · draft withdrawn) → flip (declarant-resolved) →
 post-flip unmatch REOPENS (exact id · newer-open refusal · the event) → parked-line direct
-resolve refuses → producer accept → suggestion dedup + per-axis staleness → `revise_entry`
+resolve refuses → producer accept → suggestion dedup (sequential AND concurrent
+approved-but-unmatched duplicates) + per-axis staleness → `revise_entry`
 per-flag-key refusals → S5 drills (second-disposal · 65th ×3 · NULL-cost both doors · G14
 advisory + pair). **Real half:** ≥1 owner-named template signed on a real client, ramp
 approved on a real month, auto-reversal proven next period; advances close on the G8
@@ -340,9 +383,12 @@ hook-CALLER census = FOUR + bounded recursion · `scheduled_run` census: **write
 positional splice asserts · the `pending_resolution` CHECK + `resolution_exception_id`
 immutability + cancel-leaves-id probe · S4.Z re-pinned on the cores · the SS9.5 grep · the
 no-wake census · the `_reserve_op` RAISES probe · leaf census (§2.1 membership) ·
-per-table triggers asserted for ALL SIX new state tables · the K-boundary vacuity probe ·
-the belt open-branch predicate pin · the event-type registration probe · the
-receipt-flip-precedes-core-calls assert · the `cost_cents` prestate probe. **The CoR
+per-table triggers AND forced RLS asserted for ALL SEVEN new tables · **the `bank_matches`
+INSERT census re-pinned at its new four-name membership + the `resolution_exception_id`
+set-once trigger asserted** · the K-boundary vacuity probe · the belt open-branch predicate
+pin · the event-type + taxonomy-coverage registration probe (emission sites + counts) · the
+receipt-flip-precedes-core-calls assert + the deferred-trigger re-query probe · the
+`cost_cents` prestate probe · the ramp-reset predicate probe (the pair-receipt clock). **The CoR
 register**: `reverse_entry` +`_wdb_reversal_blocked` · `revise_entry` (flags + pair
 membership) · `withdraw_draft` (pair refusal) · `settle_from_bank_line` +
 `allocate_receipt`/`allocate_payment` → core factorings · `_subledger_on_approve`
@@ -356,3 +402,81 @@ consumer · no new frozen workflow class · the posters touch neither `journal_e
 immutability nor the belts (G16 literal). Debts: segment tie → E · staff master → F ·
 account_class binary · MPERS wording → E · the attested-baseline mechanism · the
 ARCHITECTURE §0.1 alignment note.
+
+## 9. The builder ABI appendix (signatures · schemas · the op-key matrix)
+
+**Public verbs (defaults last; every act op-keyed; floors via `_human_ctx` unless noted):**
+- `propose_adjustment_template(p_client uuid, p_name text, p_cadence text, p_start_date
+  date, p_end_date date, p_auto_reverse boolean, p_lines jsonb, p_memo_template text,
+  p_op_key text)` → bookkeeper+; returns {template_id, status, content_hash}.
+- `sign_adjustment_template(p_client uuid, p_template uuid, p_op_key text)` /
+  `retire_adjustment_template(p_client uuid, p_template uuid, p_reason text, p_op_key
+  text)` → admin+; return the row envelope.
+- `run_adjustment_occurrence(p_client uuid, p_template uuid, p_period_start date,
+  p_period_end date, p_op_key text)` → EXECUTE clara_runtime ONLY, no `_human_ctx` ·
+  `run_adjustment_manual(same args)` → bookkeeper+. Both delegate to
+  `_adj_run_occurrence_core(p_client, p_template, p_period_start, p_period_end, p_op_key,
+  p_actor, p_firm, p_verb)`; return {status: 'posted'|'drafted', entry_id, run_id?,
+  reversal_entry_id?, mode}.
+- `adjustment_run_due(p_client uuid)` → jsonb {due, template_id?, period_start?,
+  period_end?, blocked: [{template_id, reason}]} — clara_runtime + clara_authenticated.
+- `reverse_adjustment_pair(p_client uuid, p_occurrence uuid, p_reason text, p_op_key
+  text)` → bookkeeper+ · `approve_pair_reversal(p_client uuid, p_pair uuid, p_op_key text,
+  p_attestation text default null)` → bookkeeper+ (distinct checker via the core) ·
+  `cancel_pair_reversal(p_client uuid, p_pair uuid, p_reason text, p_op_key text)` →
+  bookkeeper+.
+- `enrol_staff_advance_account(p_client uuid, p_account_code text, p_person_label text,
+  p_confirm_dedicated boolean, p_op_key text)` / `retire_staff_advance_account(p_client
+  uuid, p_enrolment uuid, p_reason text, p_op_key text)` → admin+.
+- `book_staff_advance_application(p_client uuid, p_posting_date date, p_memo text,
+  p_lines jsonb, p_allocations jsonb, p_kind text, p_reason text, p_op_key text)` →
+  bookkeeper+; p_kind IN ('payroll_deduction','bank_return','claim'); returns {status,
+  entry_id, application_ids[]}.
+- `complete_staff_advance_particulars(p_client uuid, p_advance uuid, p_purpose text,
+  p_reference text, p_op_key text)` → bookkeeper+, set-once.
+- `staff_advance_summary(p_client uuid, p_as_of date)` ·
+  `staff_advance_statement(p_client uuid, p_account_code text, p_from date, p_to date)` ·
+  `staff_advance_tie(p_client uuid, p_as_of date)` → viewer+ reads (grant-loop idiom).
+- `resolve_and_book_bank_line(p_client uuid, p_exception uuid, p_disposition text, p_note
+  text, p_draft jsonb default null, p_allocations jsonb default null, p_adjustments jsonb
+  default null, p_advance_applications jsonb default null, p_charge_cents bigint default
+  0, p_charge_account text default null, p_attestation text default null, p_op_key text
+  default null)` → owner; returns the settle envelope + {resolution_exception_id,
+  branch: 'live'|'pending'}.
+- `accept_bank_rule_suggestion(p_client uuid, p_line uuid, p_rule uuid, p_op_key text)` →
+  bookkeeper+; returns {entry_id}.
+
+**The three flags keys (proposal schemas; `revise_entry` refuses all three):**
+`recurring_adjustment = {template_id, op_key, role: 'occurrence'|'reversal', auto_reverse,
+reversal_date, period_start, period_end, mode: 'post'|'draft'}` ·
+`staff_advance_application = {kind, reason, allocations: [{line_no int, advance_id uuid,
+amount_cents bigint}]}` · `bank_rule_suggested = {rule_id, line_id}`.
+
+**Template `lines` JSON**: `[{account_code text, debit_cents bigint≥0, credit_cents
+bigint≥0, description text?}]`, ≥2 rows, exactly one of debit/credit positive per row,
+Σdebit=Σcredit. `memo_template` is VERBATIM text (no interpolation in v1); the occurrence
+memo = memo_template || ' — ' || period label; the mirror memo prefixes 'Auto-reversal: '.
+
+**`clara.ea1955_policy`**: (fact text PK-part, effective_from date PK-part, effective_to
+date null, note text NOT NULL, source_note text NOT NULL) — seeded with the three s.22/
+s.24(2)(c)/s.27 rows citing the EA 1955 primary text (the research record); system-
+maintained; RLS'd; read by the summary as-of the query date (the sst_threshold idiom).
+
+**The op-key matrix** (hash = the 0041:3440 `_hash(jsonb_build_object(...))` shape; the
+non-null rule ONCE: a derived pre-reservation that returns non-null RAISES
+`approve_key_collision`, never replays):
+
+| key | fn | hash over | reserver | spender | closer |
+|---|---|---|---|---|---|
+| poster `<op>` | run verb | {client, template, period} | the core's `_reserve_op` | the core | `_finish_op` |
+| `<op>:approve` | approve_entry | {template, period, role:'occurrence'} | the core, eager pre-lock | `_approve_entry_core` preheld (post mode) | spent; DRAFT mode: claimed-but-unfinished for the draft's life (0041:3412) |
+| `<op>:mirror:approve` | approve_entry | {template, period, role:'reversal'} | the core, eager pre-lock, UNCONDITIONAL | the mirror flip preheld (possibly a later transaction) | spent; non-auto_reverse: deferral marker |
+| pair `<op>` | reverse_adjustment_pair | {occurrence} | its `_reserve_op` | itself | `_finish_op` |
+| `<op>:occ:approve` / `<op>:mir:approve` | approve_entry | {pair, half} | `_pair_reverse_core`, pre-lock | the core preheld (low-stakes now; high-stakes at `approve_pair_reversal`) | spent; cancel: deferral markers |
+| `approve_pair_reversal <op>` / `cancel_pair_reversal <op>` | each verb | {pair} | its `_reserve_op` | itself | `_finish_op` |
+| composite `<op>` | resolve_and_book_bank_line | the full arg set | its `_reserve_op` | itself | `_finish_op` |
+| `<op>:draft` / `<op>:settle` / `<op>:match` / `<op>:resolve` | the callee verbs/cores | the callee's own law | THE CALLEE | the callee | the callee |
+| `<op>:draft:approve` / `<op>:settle:approve` | approve_entry | the callee's law | the composite, pre-lock | the cores preheld | spent or deferral marker |
+| `<op>:settle:*` descendants | allocate/approve | the settle core's law | THE CORE | the core | the core's markers |
+| producer `<op>` | accept_bank_rule_suggestion | {rule, line} | its `_reserve_op` | itself | `_finish_op` |
+| reconciler op keys | run_adjustment_occurrence | — | `adj:<client>:<template>:<period_start>:<rand8>` (the random suffix is load-bearing: abandoned reservations stay harmless) | | |
