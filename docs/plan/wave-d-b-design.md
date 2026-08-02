@@ -287,8 +287,10 @@ refuses `disposition_unbooked`).
 UPDATE clears `pending_resolution` + stamps `resolution_exception_id` in one statement.
 **Post-flip unmatch reopens**: releasing a LIVE group carrying `resolution_exception_id`
 transitions exactly that exception resolved→open — after the `exception_reopen_blocked`
-pre-check (a newer open exception on the line) and behind the completed-recon... the
-settled-period arm's parked-case admission; the reopen erases the SIX-column resolution set
+pre-check (a newer open exception on the line), and subject to the existing settled-period
+law (a reconciled line's live release still requires the void/re-complete path first — the
+parked-case admissions apply to PENDING groups only); the reopen erases the SIX-column
+resolution set
 (counterpart_line_id included — already null for booking dispositions) and mints
 `bank.line_exception_reopened` + an audit row carrying the erased owner act. Supersedes
 x40.z-A1 (test updated at build). The recon exceptions table badges **"resolution parked"**
