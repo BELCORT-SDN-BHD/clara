@@ -100,8 +100,8 @@ Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
-**Phase 4 — WAVE C (money movement) IS CLOSED (ADR-051..054); WAVE D (assets + adjustments)
-IS OPEN under a ratified contract (ADR-055).** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent
+**Phase 4 — WAVE C (money movement) IS CLOSED (ADR-051..054); WAVE D IS OPEN (ADR-055):
+D-a (FA register) IS CLOSED (ADR-056, 2026-08-02) — D-b (adjustments + advances, 0042) is NEXT.** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent
 (ADR-044..046) · the extraction slice (ADR-047/048; `corroborated` = explicit two-reader
 agreement) · the settlement program (ADR-049) · the first production autopost (ADR-050) ·
 **C0** (ADR-051, 0036) · **C-a** (ADR-052, 0037, the F3 debt paid) · **C-b** (ADR-053,
@@ -114,23 +114,30 @@ born-bills-only (the RM30,000 related-party advance in `350-003`), aging tied to
 unmatched empty. Design of record `wave-c-c-tieout-design.md` v2.1 + `-part2.md`
 (WCC-R1..R8 + rounds 1–4 + the acceptance round AF-1..AF-5).
 
-**LIVE POSTURE: 39 migrations (`0040`) · Fly `clara-runtime` v52 · FOUR firms** (BELCORT —
+**LIVE POSTURE: 40 migrations (`0041`) · Fly `clara-runtime` v53 · FOUR firms** (BELCORT —
 real, 3 clients, high-stakes RM100,000 ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
 Gate-S synthetic sandbox, RM10k default — its only client is "Fictional Test Services"; do
 not confuse with BELCORT's real ROME PROPERTIES / ROME SECRETARY · Alara + Borneo =
-slice-era RLS fixtures, never repurpose) **· dashboard Pages `app.clarabook.com`**
-(needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **· `clara-backup`
-daily.** No migration queued.
+slice-era RLS fixtures, never repurpose) **· dashboard Pages `app.clarabook.com` incl.
+/assets** (needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **·
+`clara-backup` daily.** No migration queued — D-b claims `0042` at merge. Both REAL FA
+registers are honestly EMPTY (ADR-056: neither RPR nor RS has ever owned a fixed asset);
+the sandbox register carries the labelled-synthetic acceptance corpus + a live monthly
+depreciation authority.
 
 **WAVE D — `docs/plan/wave-d-contract.md` is the mechanism of record** (WD-R1..R15, ADR-055 —
-read it before ANY Wave D work; do not re-grill what it ratifies). Split: **D-a (FA register,
-migration 0041) → D-b (adjustments + staff advances, 0042)**; all four Wave-C residuals ride
-(WD-R13); closing stock → Wave E (WD-R11); staff advances = the B-lite register ruled on
-`docs/plan/research/wave-d/staff-advance-research-2026-08-01.md` (two lanes; EA 1955 verified).
-**The D-a design is RATIFIED: `wave-d-a-fa-design.md` v2.1 + `-part2.md` (the TWO-round
-adversarial ladder record — never re-derive its folds or certified-clean surfaces). NEXT: the
-0041 BUILD per that design, then the round-3 as-built ladder → ceremony → acceptance
-(WD-R14: sandbox, then RPR + ROME SECRETARY real registers).** The Wave C records (never
+read it before ANY Wave D work; do not re-grill what it ratifies). **D-a (FA register, 0041)
+IS CLOSED — ADR-056:** built through a FOUR-round as-built ladder + two Codex merge-gate
+sittings (`wave-d-a-fa-design.md` v2.1 + `-part2.md` = the full record incl. ceremony +
+acceptance — never re-derive or re-litigate), deployed (v53), sandbox-accepted in full; the
+WD-R14 real half closed on a NAMED deviation (both real registers hold ZERO fixed assets —
+measured from the raw YA2025 docs; the carry-down's first real firing + the real RB asset
+defer to the first asset-owning client; RS's real FYE = 31 March). **NEXT: D-b (adjustments +
+staff advances, 0042)** — its contract scope plus the D-a ladder residuals (the
+second-disposal-draft guard · the writer-side 64-edge lineage cap · `cost_cents` NOT NULL ·
+the split-month allocation ruling, grill at D-b). Staff advances = the B-lite register ruled
+on `docs/plan/research/wave-d/staff-advance-research-2026-08-01.md` (EA 1955 verified);
+closing stock → Wave E (WD-R11). The Wave C records (never
 re-grill): the contract `wave-c-contract.md` (WC-R1..R12) · C-a `wave-c-a-subledger-design.md`
 v2 (WCA-R1..R9) · C-b `wave-c-b-bank-design.md` v2.2 + parts 2–3 (WCB-R1..R6) · C-c
 `wave-c-c-tieout-design.md` v2.1 + part2 (WCC-R1..R8 + rounds 1–4 + AF-1..AF-5). Open
@@ -145,11 +152,10 @@ law: migration numbers are claimed at MERGE time.** Malaysian tax facts live in
 effective-dated policy tables, never in prose
 (`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
 
-**Open build items (PROJECTLOG PART 2 is the live register):** the Wave D build itself
-(D-a: FA register + AF-1 guard + MYT splice, 0041 · D-b: adjustments + advances + AF-2
-composite + `bank_rule_suggested` producer, 0042 — all per WD-R13) · Gate P (operating
-runway; owns the capitalised/mixed-purchase tax-allocation question) · the §7-A runtime
-bundle (parked for the unattended sales drafter) · the `opening_tb.line` producer + K-doc
-door (Phase 5, review-gated).
+**Open build items (PROJECTLOG PART 2 is the live register):** **D-b** (adjustments +
+advances + the AF-2 composite + the `bank_rule_suggested` producer, 0042 — plus the D-a
+ladder residuals) · Gate P (operating runway; owns the capitalised/mixed-purchase
+tax-allocation question) · the §7-A runtime bundle (parked for the unattended sales
+drafter) · the `opening_tb.line` producer + K-doc door (Phase 5, review-gated).
 
-**Canary `daba7f2e` stays ARMED, due 2026-08-02 — NEVER answer it.**
+**Canary `daba7f2e` was due 2026-08-02 — NEVER answer it, even past due.**
