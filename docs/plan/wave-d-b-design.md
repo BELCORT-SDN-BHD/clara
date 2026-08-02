@@ -367,13 +367,13 @@ boundary INTERPRETATION awaiting sign-off (§9 item 2). Debts carried: segment-a
 staff master → F · account_class binary · MPERS FS wording → E · the attested-baseline
 mechanism for pre-existing advance balances (new, from enrol-clean-only).
 
-## 9. Owner sign-off items (pending)
+## 9. Owner addenda (ratified 2026-08-02, post-round-1)
 
-1. **G7's related-party clause is attestation, not structure.** No DB fact distinguishes a
-   related-party account; the enrolment verb enforces every structural check that exists and
-   takes `p_confirm_dedicated` as the admin's attestation for relatedness. Confirm this
-   narrower posture (or commission a firm-maintained never-enrol list as new machinery).
-2. **The AF-2 boundary interpretation.** The contract says "posters never touch the
-   settlement belts"; AF-2 is a residual VERB (WD-R13), not a poster, and its named recuts
-   (§4) are the only lawful way to deliver the ruled composite. Confirm the interpretation
-   (recorded as a WDB addendum), or re-scope.
+1. **WDB-G15 — the G7 related-party clause is attestation, not structure.** No DB fact
+   distinguishes a related-party account; the enrolment verb enforces every structural check
+   that exists and records the admin's `p_confirm_dedicated` attestation for relatedness.
+   Ruled: the attestation posture stands; no never-enrol list is built.
+2. **WDB-G16 — the AF-2 boundary interpretation.** The contract's "posters never touch the
+   settlement belts" binds the two POSTERS (which touch neither immutability nor the belts);
+   AF-2's named CoR recuts (§4, the register in §8) are the WD-R13-authorized delivery of the
+   ruled composite. Ruled: interpretation ratified.
