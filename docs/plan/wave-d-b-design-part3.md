@@ -186,3 +186,60 @@ runtime increment arithmetic (the 5th due-check) · the seven admission sites + 
 identity survive unchanged · `resolution_exception_id`'s writer/trigger/census re-pin ·
 headers-FALSE + mirror copying · suggestion dedup · the temporal cap · the deferred
 re-query shape · the edge set · mode-in-flags · the event+taxonomy contract · RLS ×7.
+
+---
+
+## Round 7 (2026-08-02) — v7 dry-check, two lanes
+
+**Lanes:** verify (native opus-5 xhigh) **SHIP-WITH-FIXES** 0B/4M/7m — the ladder's first
+non-blocking verdict · Codex (gpt-5.6-sol xhigh) DO-NOT-SHIP 5B/3M (the same finding set
+labeled harder). **Zero mechanism defects on either lane; every item is ABI completion
+with a determinate fix.** Both SOUND lists verified: the unified ramp clock is expressible
+as written (journal_entries carries every needed column); the solo lane's concurrency is
+already closed by reverse_entry's own client rung; all round-6 folds landed.
+
+### Folded — the v8 changes (all surgical)
+
+1. **Pre-lock-knowable hashes** [N1+C1, N2]: `<op>:draft:approve` hashes
+   `('composite','resolve_and_book_bank_line','op_key',p_op_key,'leg','draft')` (the live
+   0038 idiom — never an entry id); the pair half keys hash
+   `('occurrence', p_occurrence, 'half', ...)` (knowable from the args; no pre-minted
+   uuid needed).
+2. **The matrix completes** [C2]: rows for `book_staff_advance_application`'s `<op>` +
+   eager `<op>:approve` (the WCA-R7 spend/draft-branch closure) · literal hashes for the
+   template/enrolment/particulars verbs · the composite's hash field list written out.
+3. **`start_date` joins the sign-time revalidation** [N4+C3]: `template_fy_stale`; the
+   propose→FYE-change→sign window closes; the cell rides §7.
+4. **`p_advance_applications` schema pinned** [C4]: null | the exact
+   `staff_advance_application` payload shape, copied VERBATIM into the hand-draft's flags;
+   line_no refers to `p_draft.lines`; park-branch refusal unchanged.
+5. **ABI §D completes** [C5+N8]: DDL blocks for ALL SEVEN new tables (the five state
+   tables consolidated from prose into DDL form) + the typed `bank_matches` ALTER; §9's
+   pointer reworded to match.
+6. **Return envelopes + read shapes** [C6]: retire/particulars envelopes; the three reads'
+   exact row schemas (summary + policy_notes · statement · tie incl. out_of_window +
+   explained).
+7. **The event payloads land in both files** [N5+N6+C7]: `adjustment.posted` carries
+   period_start+period_end (the canonical pair — never a bare `period`);
+   `bank.line_exception_reopened = {exception_id, line_id, match_id}`; ABI §G is the
+   single owner.
+8. **The token table completes** [N11+C8]: `disposition_unbooked` (inherited) ·
+   `proposal_not_revisable` (the D-b revise arm; the FA arm keeps its live token) ·
+   `template_duplicate` · `template_fy_stale` · `disposition_unsupported` (branch-neutral,
+   argument-time — the live branch cell added).
+9. **The hot-loop indexes** [N3]: the two partial indexes (the D-a F10 measured law)
+   named in ABI §C, referenced in §2.3, §8-pinned.
+10. **`ea1955_policy` posture exact** [N7]: no-truncate + enable/FORCE RLS + the OWNER
+    policy + `GRANT SELECT TO clara_authenticated` + the migration-only-writes probe.
+11. **Single-owner matrix** [N10]: §4's duplicate table cut to a pointer at ABI §E (the
+    round-6 anti-duplication adjudication applied to ourselves).
+
+### Verified sound in round 7 (cumulative)
+
+The unified pair/solo ramp clock + `template_id`/`completed_at` + cancelled-exclusion +
+both reset cells · the admission window/unmet/blocked definitions + start-date validation
++ label formulas · the settle-key single owner · the WCA-R7 envelopes · the enrolment text
+attestation · the typed ALTER · the literal EA seeds · the pair-receipt mutable set /
+INSERT order / re-query / immutable-once-non-null wording · parameter order + the three
+flags schemas + headers-FALSE + the temporal cap + suggestion dedup + the seven-site
+admission — all internally consistent (both lanes).

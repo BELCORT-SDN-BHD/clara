@@ -58,7 +58,8 @@ and approve paths are never takers (leaf-LAST; tail 13(c) re-pinned at this memb
 
 ### 2.2 Verbs + lifecycle guards
 `propose_adjustment_template` (bookkeeper+) · `sign_adjustment_template` (admin+;
-revalidates cadence + end_date against the CURRENT FYE under the 203005004 rung) ·
+revalidates cadence + **start_date** + end_date against the CURRENT FYE under the
+203005004 rung — `template_fy_stale`; the propose→FYE-change→sign window closes) ·
 `retire_adjustment_template` (admin+, reason; refuses while an occurrence draft is
 outstanding). Signing stamps signed_by (the `last_human_editor` identity).
 **`set_client_fy_end` (CoR)**: takes 203005004, then refuses while a live ANNUAL-cadence
@@ -76,7 +77,9 @@ ENDED (MYT) → **the admission law** (tokens are §9-table rows): the period mu
 period) ⇔ NO approved un-reversed role='occurrence' entry exists for the pair
 (`period_already_met`) · not blocked(template) ⇔ no outstanding occurrence draft, via
 `_adj_occurrence_outstanding(client, template)` — the 0041:1301 shape and `blocked[]`'s
-only v1 reason (`occurrence_draft_outstanding`). **The canonical period triple**
+only v1 reason (`occurrence_draft_outstanding`). **The two hot-loop partial indexes back
+these predicates + the ramp (ABI §C — the D-a F10 measured law); §8-pinned.** **The
+canonical period triple**
 {period_start, period_end, period_label} rides hashes, events, receipts and memos; labels:
 monthly `to_char(period_end,'Mon YYYY')`, annual `'FY'||to_char(period_end,'YYYY')`.
 Direct INSERT (SS9.5): status='draft',
@@ -169,9 +172,9 @@ refuses it (`not_an_auto_pair`). The sanctioned machine:
 in arm (2): id, firm, client, template_id, period_start/period_end (dates), **mode (read
 from the flags stamp)**, entry_id (unique), reversal_entry_id, amount_cents, op_key,
 created_at. **The event contract**: 0042 registers `adjustment.posted` (emitted in arm (2)
-after the receipt, one per occurrence, typed-primitive allowlist payload {template_id, run_id,
-period, amount_cents, reversal_entry_id}) AND `bank.line_exception_reopened` (the §4
-reopen) in `clara.event_types` **AND `clara.trigger_taxonomy` at `taxonomy_active`
+after the receipt, one per occurrence, typed-primitive allowlist payload — ABI §G: {template_id,
+run_id, period_start, period_end, amount_cents, reversal_entry_id}) AND `bank.line_exception_reopened` (the §4 reopen;
+payload {exception_id, line_id, match_id} — ABI §G) in `clara.event_types` **AND `clara.trigger_taxonomy` at `taxonomy_active`
 (decision 'ignore' — the 0041:978-996 CTE)**, with the 0040-probe-6-style prestate/
 postcheck extended to taxonomy coverage; emission sites + counts pinned in the tail. Ruled:
 staff-advance register mutations ride the generic `entry.*` events (the register rows are
@@ -268,21 +271,9 @@ column — a repurposed retired code cannot permanently break the surface).
 
 `clara.resolve_and_book_bank_line(...)` — owner floor.
 
-**The op-key table (each key: reserver → sole spender; closer named):**
-
-| key | fn | reserver | spender | closed by |
-|---|---|---|---|---|
-| `<op>` (composite) | resolve_and_book_bank_line | its own `_reserve_op` | itself | `_finish_op` |
-| `<op>:draft` | draft path | the CALLEE (public reserving path) | the callee | callee |
-| `<op>:draft:approve` | approve_entry | composite, BEFORE first lock | `_approve_entry_core` preheld | spent or deferral-marker |
-| `<op>:settle` | settle core | composite (core runs preheld) | `_settle_from_bank_line_core` | core |
-| `<op>:settle:*` (the core's descendants: `:approve`, `:adj:i(:approve)`, `:charge:approve`) | allocate/approve | the CORE (its existing discipline) | the core | the core's deferral markers |
-| `<op>:match` | match_bank_line | the CALLEE | the callee | callee |
-| `<op>:resolve` | resolve_bank_line_exception | the CALLEE | the callee | callee |
-| poster `:approve` / `:mirror:approve` | approve_entry | the POSTER, eagerly, pre-lock | the core preheld (occurrence / mirror flip) | spent (mirror key pends across transactions in draft mode) |
-| pair `<op>` + `:occ:approve` + `:mir:approve` | pair verbs | `_pair_reverse_core` pre-lock | the core preheld | spent / cancel marker |
-| `approve_pair_reversal` `<op>` · `cancel_pair_reversal` `<op>` | each verb | its own `_reserve_op` | itself | `_finish_op` |
-
+**The op-key matrix is SINGLE-OWNED by ABI §E** (one row per physical key with its literal
+pre-lock-knowable hash fields, reserver, sole spender and closer — the round-7 law; two
+same-purpose tables was the duplication hazard round 6 adjudicated against).
 Rules: keys spent by a still-public reserving verb are never pre-reserved by the caller;
 `receipt_preheld` keys are reserved before the reserver's first lock; the `_reserve_op`
 RAISES-on-mismatch probe rides §8. **Cores**: `_settle_from_bank_line_core` +
@@ -386,8 +377,9 @@ kinds · hook-born corrections at the remainder · correction-of-correction refu
 cumulative-cap cell · **the backdated-after-application and backdated-before-later-
 correction temporal-cap cells** · over-application concurrency · bare-credit refuse · the
 watermark boundary pair · the particulars set-once cell) → the two advance-reversal refusals → disbursement void → tie at 0 ×2 + the
-retire/re-enrol historical as-of drill → AF-2 non-HS both dispositions → AF-2 park (charge
-refused · pending `bank_corrective_line` refused) → parked-cancel drill (declaration
+retire/re-enrol historical as-of drill → AF-2 non-HS both dispositions →
+`disposition_unsupported` on BOTH branches (`bank_corrective_line` at argument time) →
+AF-2 park (charge refused) → parked-cancel drill (declaration
 cleared · id intact · exception open · draft withdrawn) → flip (declarant-resolved) →
 post-flip unmatch REOPENS (exact id · newer-open refusal · the event) → parked-line direct
 resolve refuses → producer accept → suggestion dedup (sequential AND concurrent
@@ -431,7 +423,8 @@ ARCHITECTURE §0.1 alignment note.
 
 ## 9. The builder ABI appendix
 
-The full ABI — every public signature, JSON schema, return envelope, the op-key matrix
-with literal hashes, the refusal-token table, and the new-table DDL blocks — lives in
+The full ABI — every public signature and return envelope, the flags/JSON schemas, the
+single-owner op-key matrix with literal hashes, the refusal-token table, all seven
+new-table DDL blocks, the event payloads, and the hot-loop indexes — lives in
 **`wave-d-b-design-abi.md`** (split at the 500-line ceiling; it is part of THIS design of
 record and rides the same ladder).
