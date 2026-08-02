@@ -62,6 +62,7 @@ const FIXTURE_BASE: QueueRow = {
   lane: null, auto: false, rule_backed: false, high_stakes: false, aged_since: null,
   amount_cents: null, period: null, question_text: null, created_at: null,
   id: "fixture-row", coding_kind: null, watch_id: null, tier: null, finding_id: null,
+  asset_id: null,
 };
 
 function fx(overrides: Partial<QueueRow>): QueueRow {
@@ -92,6 +93,15 @@ const FIXTURES = {
     finding_id: "l1000000-0000-4000-8000-000000000001", tier: "critical",
     question_text: "Lint: contradiction", aged_since: "2026-07-01T00:00:00Z",
   }),
+  // 0041 (Wave D-a, design v2.1 §6): one row per register row with incomplete
+  // particulars whose status is pending/active (disposed/superseded/unwound
+  // rows never chase). Title rides the DB's placeholder description, exactly
+  // like open_question/compliance_watch ride question_text (pin sheet §6).
+  fixed_asset_incomplete: fx({
+    row_kind: "fixed_asset_incomplete", id: "fixture-asset",
+    asset_id: "a1000000-0000-4000-8000-000000000001",
+    question_text: "Fixed asset (particulars pending) — 170-000 RM12,000.00",
+  }),
 } as const;
 
 /** NOT a catalog key — proves the honest degrade path for a row_kind the catalog
@@ -113,6 +123,9 @@ const TITLES = {
   // — the plain-language mapping (findingKindCopy) is the DETAIL card's job, not the
   // row's.
   lint_finding: (row: QueueRow) => row.question_text ?? "Lint finding",
+  // 0041: the DB's own placeholder description rides question_text, exactly
+  // like open_question/compliance_watch above (pin sheet §6).
+  fixed_asset_incomplete: (row: QueueRow) => row.question_text ?? "Fixed asset (particulars pending)",
 } as const satisfies Record<string, (row: QueueRow) => string>;
 
 /** The honest fallback title for a row_kind with no catalog entry — the id-only
@@ -216,11 +229,32 @@ function UncodedFilingDetail({ token, row }: QueueDetailProps): ReactElement {
   return createElement(LaneSummaryInner, { token, clientId: row.client_id, filingId: row.filing_id });
 }
 
+/** 0041 (Wave D-a, design v2.1 §6): a LIGHT panel only — the full completion
+ *  form/schedule/dispose surfaces live on the /assets workbench, not inline
+ *  here (pin sheet: "Detail = a light asset panel linking to /assets"). */
+function FixedAssetIncompleteDetail({ row }: QueueDetailProps): ReactElement {
+  if (!row.asset_id) return createElement(FallbackPanel, { row });
+  const qs = new URLSearchParams();
+  if (row.client_id) qs.set("client_id", row.client_id);
+  qs.set("asset_id", row.asset_id);
+  const href = `/assets?${qs.toString()}`;
+  return createElement(
+    "div", null,
+    createElement("div", { className: queueStyles.sectionHeader }, TITLES.fixed_asset_incomplete(row)),
+    createElement("p", { className: queueStyles.muted }, row.client_id ? `client ${shortId(row.client_id)}` : ""),
+    createElement(
+      "p", { className: queueStyles.detailEmpty },
+      "This asset's particulars are incomplete — complete them on the assets workbench (no inline completion form here).",
+    ),
+    createElement("a", { className: queueStyles.linkButton, href }, "Open in the assets workbench →"),
+  );
+}
+
 // --- the catalog ------------------------------------------------------------------
 
 /** Every row_kind `clara.list_review_queue` emits (0011 base + 0016 compliance_watch
- *  + 0017 lint_finding). The queueKindCatalog.test.tsx parity probe asserts the
- *  DEPLOYED function never emits a literal outside this set. */
+ *  + 0017 lint_finding + 0041 fixed_asset_incomplete). The queueKindCatalog.test.tsx
+ *  parity probe asserts the DEPLOYED function never emits a literal outside this set. */
 export const QUEUE_KIND_CATALOG: Record<string, QueueKindEntry> = {
   draft: { row_kind: "draft", title: TITLES.draft, RowAccessory: null, Detail: DraftDetail, fixture: FIXTURES.draft },
   uncoded_filing: {
@@ -239,6 +273,10 @@ export const QUEUE_KIND_CATALOG: Record<string, QueueKindEntry> = {
   lint_finding: {
     row_kind: "lint_finding", title: TITLES.lint_finding, RowAccessory: LintSeverityAccessory,
     Detail: LintFindingDetail, fixture: FIXTURES.lint_finding,
+  },
+  fixed_asset_incomplete: {
+    row_kind: "fixed_asset_incomplete", title: TITLES.fixed_asset_incomplete, RowAccessory: null,
+    Detail: FixedAssetIncompleteDetail, fixture: FIXTURES.fixed_asset_incomplete,
   },
 };
 

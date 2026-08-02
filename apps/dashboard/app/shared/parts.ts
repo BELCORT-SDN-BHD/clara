@@ -98,7 +98,25 @@ export type BankReconReceiptPart = { type: "bank_recon_receipt"; statement_id: s
 /** A bank_rules proposal (design §4.3) — match_settle or coding. */
 export type BankRuleProposalPart = { type: "bank_rule_proposal"; rule_id: string; client_id: string };
 
-/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 + 2 Wave-C-c members. */
+// --- Wave D-a additions (design v2.1 §6/§7; 0041-interface-contract.md §7) ------
+// Identifier-only, mirroring the receipt idiom exactly (SweepReceiptPart/
+// BankReconReceiptPart). D-a ships no new chatTurn machine lane — chatTurn.v8
+// stays FROZEN, untouched — so nothing in the runtime emits these on the wire
+// TODAY; they are declared here by analogy (parts.ts:82-90's own precedent
+// restated) so the surface exists the day a chat turn references one. Both
+// cards hydrate authoritative state on mount, same as every other receipt part.
+
+/** A fixed asset's register row (design §1/§6). Identifier-only; the card
+ *  hydrates get_fixed_asset(asset_id) on mount — every cents figure is
+ *  DB-projected (schedule/charges/accumulated), never summed here. */
+export type FixedAssetPart = { type: "fixed_asset"; client_id: string; asset_id: string; label?: string };
+
+/** A depreciation run's receipt (design §1.5/§3.2/§6): minted at approve,
+ *  never editable — a correction reverses the period entry and re-runs.
+ *  Identifier-only; the card hydrates get_depreciation_run(run_id) on mount. */
+export type DepreciationRunReceiptPart = { type: "depreciation_run_receipt"; client_id: string; run_id: string; label?: string };
+
+/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 + 2 Wave-C-c + 2 Wave-D-a members. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
@@ -119,4 +137,7 @@ export type ClaraPart =
   | RulePostReceiptPart
   // --- Wave C-c additions ---
   | BankReconReceiptPart
-  | BankRuleProposalPart;
+  | BankRuleProposalPart
+  // --- Wave D-a additions ---
+  | FixedAssetPart
+  | DepreciationRunReceiptPart;

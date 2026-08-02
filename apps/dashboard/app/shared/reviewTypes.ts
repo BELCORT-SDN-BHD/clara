@@ -25,7 +25,12 @@ function strArr(v: unknown): string[] {
 
 // --- list_review_queue (FINAL pin) --------------------------------------------
 
-export type QueueRowKind = "draft" | "uncoded_filing" | "open_question" | "coding_task" | "compliance_watch";
+export type QueueRowKind =
+  | "draft" | "uncoded_filing" | "open_question" | "coding_task" | "compliance_watch"
+  // 0041 additive (Wave D-a, design v2.1 §6) — optional-but-consistent, not load-bearing
+  // (this union is already aspirational/incomplete: `lint_finding`, added 0017, is missing
+  // too; QueueRow.row_kind's real type stays `QueueRowKind | string` below).
+  | "fixed_asset_incomplete";
 export type QueueSection = "needs_review" | "needs_you";
 export type QueueLane = "ready" | "needs_review" | "needs_you" | null;
 
@@ -59,6 +64,13 @@ export type QueueRow = {
   // to null, exactly like watch_id above. `tier` doubles as the lint severity slot
   // for a lint_finding row (info/warn/critical) — no new envelope key needed for it.
   finding_id: string | null;
+  // 0041 additive key (Wave D-a, design v2.1 §6 / 0041-interface-contract.md §6):
+  // the fixed_asset_incomplete row's identifying id. OPTIONAL (not a required field)
+  // so the existing local `mkRow()` fixture helpers in app/queue/model.test.ts and
+  // app/queue/QueueRowView.test.tsx — outside this lane's touch scope — keep
+  // typechecking unchanged; a pre-0041 envelope (or either of those fixtures)
+  // degrades this to undefined, never a crash.
+  asset_id?: string | null;
 };
 
 export type QueueCounts = {

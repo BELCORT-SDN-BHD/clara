@@ -317,6 +317,31 @@ jobs:
           PGDATABASE=clara_x40_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
             CLARA_RIG_DB=1 node --test tests/x40-0040-upgrade.test.mjs
 
+      # Wave-D-a migration-0041 FA-register deploy-onto-existing drill (the same
+      # anti-misleading-green wiring as the drills above). x41-0041-upgrade.test.mjs is the
+      # ONLY proof that 0041 lands safely on a database that ALREADY has a book: the in-suite
+      # x41 battery applies 0041 to a schema carrying only what its own cells build afterwards,
+      # so every register-touching claim it makes is a claim about rows 0041 has already seen.
+      # 0041's real risk is the ceremony — a shared database with four live firms, a K-seeded
+      # fixed-asset register, ordinary approved history on accounts about to be enrolled, and a
+      # `_draft_opening_item_core` / `_assert_fa_baseline` pair that must keep working. This
+      # drill applies 0001→0040, builds that book through the audited verbs (a carry-down
+      # fixed asset with its whole opening set approved, cost/accum/expense history, a reversal
+      # pair), THEN applies 0041 onto it and asserts: nothing births retroactively · the
+      # carried baseline and the GL are untouched · the enrolment watermark keeps PRE-enrolment
+      # history reversible while the belt refuses POST-enrolment hand journals · the K6
+      # correction door still opens · the widened method CHECK and the carry-down recut accept
+      # reducing_balance and none. Reset-gated (it drops schema clara), so it SKIPS in the
+      # concurrent all-packages sweep above — which is exactly how a deploy regression could
+      # otherwise merge with the suite green. Run it FOR REAL here, ALONE, in its OWN
+      # throwaway database.
+      - name: Wave-D-a 0041 FA-register upgrade drill (isolated DB)
+        working-directory: packages/db
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x41_upgrade_ci'
+          PGDATABASE=clara_x41_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+            CLARA_RIG_DB=1 node --test tests/x41-0041-upgrade.test.mjs
+
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
       # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap

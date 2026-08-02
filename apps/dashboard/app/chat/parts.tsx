@@ -17,6 +17,8 @@ import { OpenQuestionCard } from "../shared/cards/OpenQuestionCard";
 import { RulePostReceiptCard } from "../shared/cards/RulePostReceiptCard";
 import { BankReconReceiptCard } from "../shared/cards/BankReconReceiptCard";
 import { BankRuleProposalCard } from "../shared/cards/BankRuleProposalCard";
+import { FixedAssetCard } from "../shared/cards/FixedAssetCard";
+import { DepreciationRunReceiptCard } from "../shared/cards/DepreciationRunReceiptCard";
 import styles from "./chat.module.css";
 
 /** Matches CLARIFY_FRAMING in the runtime (chatTurn.prompt.ts:31) — used only for
@@ -243,6 +245,14 @@ export function TranscriptParts({
         }
         if (p.type === "bank_rule_proposal") {
           return <BankRuleProposalCard key={`bankrule:${p.rule_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        // Wave D-a (design v2.1 §6/§7): identifier-only; each card hydrates on
+        // mount via get_fixed_asset / get_depreciation_run.
+        if (p.type === "fixed_asset") {
+          return <FixedAssetCard key={`fa:${p.asset_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        if (p.type === "depreciation_run_receipt") {
+          return <DepreciationRunReceiptCard key={`farun:${p.run_id}:${i}`} token={token ?? null} part={p} />;
         }
         // tool_result / tool_error resolve their call's chip — render nothing (the
         // one place this is declared is partCatalog's STATUS_RESOLVER_TYPES).

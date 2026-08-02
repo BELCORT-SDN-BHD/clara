@@ -139,3 +139,133 @@ stub-vs-run index collision resolves to the pending-disposal freeze + `disposal_
   never from the migration text (the C-b lesson: three production bugs were caught only by
   contract-authored cells).
 - Round 3 (as-built) runs on the assembled migration + runtime before merge, per house law.
+
+## Round 3 (2026-08-02) — the as-built ladder (build commits 6828ddb → a659019 → 25bd280)
+
+**Build:** four parallel lanes (migration opus/xhigh · contract-blind x41 opus/xhigh · runtime
+sonnet/xhigh · dashboard sonnet/xhigh) under an orchestrator-pinned interface contract. The
+first x41-vs-0041 run went 27/60 → 60/60 with THREE class-(a) migration defects caught
+contract-blind (the C-b lesson, a third time): the disposal per-asset precondition folded away
+"by construction" · the reversal dependency refusal unfollowable · the RB Σ-segments law
+unreachable (the design's OWN RM14,000 worked figure charged RM2,000).
+
+**Lanes:** three native lenses (opus/xhigh: accounting 1B/3M · structure 3B/2M · integration
+1B/5M) + Codex gpt-5.6-sol/xhigh (5B/2M). DO-NOT-SHIP ×3, SHIP-WITH-FIXES ×1. The structural
+spine held everywhere (splices, grants, RLS, authenticity, lock order); the defects clustered
+in TWO shapes — frozen snapshots standing in for effective-dated/lineage reads, and row-shape
+(not entry-shape) reversal dispatch. Headline folds (F1–F10): the lineage-accumulated read
+(a revision successor's bake went stale — RM1,200,000 in the GL, gone from the register) ·
+no frozen arithmetic snapshots (the correction law had under-depreciated with the tie GREEN) ·
+ONE due oracle, due ⇔ compute (a sub-RM1 asset had wedged a whole client's ladder) ·
+entry-shape dispatch + the revision-chain closure (revise-then-reverse-acquisition had become
+PERMANENTLY un-reversible) · immutable enrolment intervals (`retired_at`, version-forward,
+the belt at `approved_at` closed both ends — the same-transaction retire TOCTOU) · client-wide
+role topology + bank reservation · the verb-side reversal guard (the TENTH splice, one
+`_fa_reversal_blocked` for verb AND hook) · pre-birth act dates · tie explained columns.
+**Adjudications:** the eager `:approve` reservation STANDS (TAIL 7's 0037 deadlock law; the
+lazy-reservation fold withdrawn on evidence) · A1's figures corrected (RM40,000 then
+64,000/51,200/40,960 — the code was conformant, the record wrong) · `_fa_lineage_accumulated`
+deleted (one walk, two wrappers) · RB charge blocks flush per FY · `p_memo` out of the
+disposal request hash · expense codes deliberately not unique.
+
+## Round 3.5 — the delta ladder on the fix surgery
+
+Two native delta lenses + Codex, DO-NOT-SHIP ×3, while certifying the surgery core sound
+(deep-lineage conservation EXACT; due ⇔ compute over 1,246 clients; the due probe measured
+~0.84 ms/asset — affordable DAILY, never at the 2s cycle). Folds (G1–G8): the as-of read is
+not "accumulated of this asset" — a [charge, mirror) window counts original + replacement
+(2,800,000 where truth was 1,400,000; an INCREASING RB projection; the tie green on the
+doubled figure) → the PERIOD-NET companion read (unwinds joined to their ORIGINAL's period;
+the §1.3 is_live law verbatim) routing exactly two consumers + the approve-time
+`accum_relieved_cents` re-derivation (`disposal_stale` axis `accum`) · K6's writer never
+stamped `superseded_at` (the acceptance instrument read 2× on the exact WD-R14 carry-down
+shape) → the S1.8 derived-or-refuse backfill + the ELEVENTH splice + TAIL 12 · ONE reservation
+predicate (profile roles ∪ codes baked on register rows) for topology, disposal hardening AND
+an undeferred bank-side TABLE belt (leaf key `client:fa-roles` last; the live remap verb
+genuinely holds 203005004+203005006 first — the 0038 file text was stale) · the split-reversal
+arm reuses the certified closure · freeze symmetry + the shrinking-horizon probe. **A6
+extended with figures:** the window class covers full-disposal reversal; accum_diff −10,000
+inside the correction window, EXACTLY 0/0 once the mirror lands; ZERO at any settled as-of —
+the G1 re-route made the window VISIBLE where the defect had masked it by doubling. Re-green:
+1524/1499/0-fail TWICE (fresh + populated); the x41.s4 whole-DB sweep excuses the A6 class
+STRUCTURALLY and hard-asserts zero windows at a settled as-of.
+
+## Round 4 — the dry check, and the closing folds
+
+One native verify lens + Codex over the surgery only, plus the ninth cell (G5's admission)
+from a fresh blind lane. SHIP-WITH-FIXES ×2, NO blockers, no wrong number anywhere — wrapper
+equivalence proven old-vs-new over all 262 corpus assets (zero divergence); the blind G5 cells
+green first-contact (a revision below a split births exactly ONE lineage row; the refusal
+lives at the VERB; the restored original keeps its history). Closing folds: G2's ancestors
+bound had refused a CURRENT-period disposal with a remedy the run verb itself rejects (annual
+cadence: un-disposable up to a year) → ancestor months INSIDE the disposal cadence period
+ride the STUB as per-asset rows through ONE `_fa_disposal_stub` body for verb and hook (the
+design's own mid-FY-stub law across a revision segment boundary); ENDED periods keep the
+executable refusal · TAIL 13(c) deepened to a TRANSITIVE whole-schema advisory census, both
+directions (~0.7 s; DOWN closure 6 members, the only acquirer the lawful 203005001 chain) ·
+unwound rows STAY reserved (an ever-used FA code is role-reserved for good — the tie's pair
+census is permanent) · separate cost/accum pre-enrolment watermarks (measured: explains
+24,000,000 sen exactly where the single watermark explained 0) · the 64-hop cap admits
+exactly 64 in both readers · fingerprints totally ordered by (asset_id, period_start) at all
+four sites. **Cell re-pins ratified by the orchestrator:** x41.s2 → the SUCCESS (the per-asset
+ancestor stub row pinned by entry id); x41.s3's fixture moved mid-month so `disposal_stale`
+stays provable; the token order `period_earlier_unmet` before `disposal_stale` recorded (the
+actionable root cause first). Blind corroboration: x41.t1–t4 green on first contact with the
+implementation, incl. the two properties the fix lane could not self-certify (the ended-period
+refusal's executable remedy; ladder convergence with no month charged twice).
+
+**Closing state:** migration sha256 `d4765676…` applied = on-disk, four from-zero rebuilds ·
+DB suite 1531/1506/0-fail TWICE · the isolated 0041 upgrade drill 1/1 · runtime 986/986 ·
+dashboard 488/488 (16 routes) · all seven root gates + typecheck + lint · x41 family 99 cells.
+
+## Round 4.6 — the merge gate, honoured
+
+The final Codex merge gate on PR #177 returned DO-NOT-MERGE (1B/2M/1m) and CI failed on both
+runs — both correctly. Folds (H1–H4 + the CI re-pin): **the lineage-wide stub could
+depreciate beyond cost** (the successor's money clock read only PERSISTED accumulation; the
+Codex worked case 375 where the cap is 300) → `_fa_disposal_stub` walks ROOT-FIRST with ONE
+shared projected-accumulated clamp across every block (measured: 375 → 300 = cost − residual
+exactly; the RB life-end variant 1,016,666 → 1,000,000) · the ended-period refusal now names
+the CADENCE window at both sites (annual names the FY pair `run_depreciation_manual` accepts
+verbatim) · the TAIL 13c census recognises bare + qualified calls and bank writes and FAILS
+CLOSED on dynamic SQL in the closure (strict-superset edge set, zero old edges lost) · the
+local walk admits exactly 64 edges like both other readers. **The CI red was the MYT splice
+WORKING:** CI ran at 23:1x UTC = 07:1x MYT — inside the exact 00:00–08:00 window — and the
+pre-existing T11 cell asserted the UTC date the splice exists to leave behind; T11 now derives
+today from the DB's MYT clock (proven on a UTC-timezone database). A green CI OUTSIDE the
+16:00–24:00 UTC window does not exercise the splice — the acceptance does. Blind
+corroboration: x41.u1–u4 (life-end across a revision both methods, sen-exact; the annual
+executable remedy driven to green; the 64/65 boundary) green on first contact.
+**s4 amendment ratified:** the whole-DB sweep gains a second, EVIDENCE-GATED exemption
+(count-capped at 1, admitted only when a recursive register walk proves the lineage really
+exceeds 64 edges) so x41.u4's deliberate over-cap fixture can coexist with the zero-error law.
+**Closing state:** DB 1535/1510/0-fail twice + a UTC CI simulation · upgrade drill 1/1 ·
+runtime 986/986 · dashboard 488/488 · all gates.
+
+## Standing observations for the ceremony + acceptance (from the ladder)
+
+- WD-R14 pre-flight: before enrolling ANY real cost account, assert zero approved non-opening
+  GL movement on it (the tie's pre-enrolment columns EXPLAIN such history, never absorb it);
+  confirm no legitimate manual depreciation-expense journals remain (the belt covers all three
+  roles at enrolment); check for parked depreciation/disposal DRAFTS (an abandoned draft is a
+  client-wide sequencing stop by design — §3.2).
+- Annual cadence windows open on the FIRST of the month after the FYE month (probed: FYE
+  Apr-28 ⇒ 2025-05-01..2026-04-28); acceptance scripts must not assume FYE-date+1. The FY
+  helpers are ungranted internals — capture the window as a literal, never call them inline
+  as `clara_authenticated`.
+- The dashboard parity test needs PGPORT=5432 locally (defaults to the CI port).
+- clara_wccv_main is a STALE 0040 image (intermediate checksum) — never a migrate target or
+  drill baseline.
+- Wave-D-b register items from the ladder: `dispose_fixed_asset` admits a SECOND outstanding
+  disposal draft per asset (an abandoned draft freezes charging AND revision until withdrawn) ·
+  `fixed_assets.cost_cents` should become NOT NULL (the CHECK passes on NULL; backstopped by
+  `fa_lineage_cost_invalid` today) · which lineage row owns the split month after a mid-month
+  revision is UNRULED (x41.s2 lane-notes the observed allocation; pin at the D-b grilling) ·
+  the 64-edge lineage cap is READER-side only — `revise_fixed_asset_particulars` will mint the
+  65th edge and permanently brick that client's tie/disposal with no unwind verb (65 deliberate
+  audited revisions of one asset; guard the writer or provide an unwind at D-b).
+- Rig hygiene: every full-suite run leaves x41.u4's deliberate over-cap lineage behind on a
+  persistent rig DB — rebuild the rig periodically; CI (fresh DB per run) is unaffected. The
+  runtime suite locally needs PGPORT=5432 exported (one file defaults to the CI port 55432).
+- The wave-a-autodraft-db "no-ops cleanly" cell asserts a globally-empty corpus — green on a
+  pristine DB and in CI; misleading on any shared image.

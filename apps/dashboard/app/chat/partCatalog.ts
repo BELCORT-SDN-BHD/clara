@@ -130,6 +130,16 @@ export const PART_CATALOG = {
     renderBranch: true,
     fixtures: [{ type: "bank_rule_proposal", rule_id: "rule-1111", client_id: "client-1111" }],
   },
+  // --- Wave D-a additions (design v2.1 §6/§7): identifier-only; each card
+  // hydrates authoritative state on mount, mirroring the receipt idiom.
+  fixed_asset: {
+    renderBranch: true,
+    fixtures: [{ type: "fixed_asset", client_id: "client-1111", asset_id: "asset-1212" }],
+  },
+  depreciation_run_receipt: {
+    renderBranch: true,
+    fixtures: [{ type: "depreciation_run_receipt", client_id: "client-1111", run_id: "run-1313" }],
+  },
 } satisfies Record<string, CatalogEntry>;
 
 export type RenderBranchType = keyof typeof PART_CATALOG;

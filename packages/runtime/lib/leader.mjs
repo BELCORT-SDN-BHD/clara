@@ -45,6 +45,12 @@ const SST_RECONCILE_MS = Number.isFinite(SST_RECONCILE_MS_ENV) && SST_RECONCILE_
 // due-check permanently false and silently DISABLE the Wave-B wiki lint belt.
 const LINT_RECONCILE_MS_ENV = Number(process.env.CLARA_LINT_RECONCILE_MS);
 const LINT_RECONCILE_MS = Number.isFinite(LINT_RECONCILE_MS_ENV) && LINT_RECONCILE_MS_ENV > 0 ? LINT_RECONCILE_MS_ENV : 24 * 3600000;
+// Finite-guarded like the SST/lint cadence: junk or non-positive CLARA_FA_RECONCILE_MS falls
+// back to 24h — a NaN here would make the due-check permanently false and silently DISABLE the
+// Wave D-a depreciation-run belt. This gates only the DAILY cadence; reconciler-fa.mjs's own
+// feature-detect + per-client depreciation_run_due probe decide whether there is anything to do.
+const FA_RECONCILE_MS_ENV = Number(process.env.CLARA_FA_RECONCILE_MS);
+const FA_RECONCILE_MS = Number.isFinite(FA_RECONCILE_MS_ENV) && FA_RECONCILE_MS_ENV > 0 ? FA_RECONCILE_MS_ENV : 24 * 3600000;
 
 /** True iff the daily autopost-rule expiry sweep is due (pure — the since-last-run
  *  guard; lastRunMs=0 makes the first cycle after (re)boot run it immediately, which
@@ -71,6 +77,15 @@ export function lintReconcileDue(lastRunMs, nowMs, intervalMs = LINT_RECONCILE_M
   return nowMs - lastRunMs >= intervalMs;
 }
 
+/** True iff the daily depreciation-run sweep is due (pure — the since-last-run guard;
+ *  lastRunMs=0 makes the first cycle after (re)boot run it immediately, which is safe:
+ *  reconciler-fa.mjs feature-detects 0041 itself and per-client depreciation_run_due is
+ *  idempotent recomputation, so an extra run is a no-op). Wave D-a §3.4 (WD-R4/R5/R6) —
+ *  this predicate only gates CADENCE, never the migration's presence. */
+export function depreciationRunDue(lastRunMs, nowMs, intervalMs = FA_RECONCILE_MS) {
+  return nowMs - lastRunMs >= intervalMs;
+}
+
 /**
  * Start the leader loop. Returns { stop, done }. `onHalt` (default process.exit(2))
  * fires on a taxonomy HALT. Deps: { enqueueChatTurn, getRun, log }.
@@ -92,6 +107,7 @@ export function startLeaderLoop(deps) {
     let lastAutopostRun = 0; // 0 ⇒ the first cycle after boot runs the daily autopost sweep
     let lastSstRun = 0; // 0 ⇒ the first cycle after boot runs the SST repair belt (catches pre-existing crossings post-0016)
     let lastLintRun = 0; // 0 ⇒ the first cycle after boot runs the wiki lint belt (catches pre-existing conditions post-0017, WB-R8 daily cadence)
+    let lastFaRun = 0; // 0 ⇒ first cycle after boot runs the depreciation sweep (reconciler-fa.mjs feature-detects 0041 itself, so a pre-0041 boot is a cheap no-op)
     while (!stopRef.stop) {
       const client = makeRuntimeClient();
       let connErr = null;
@@ -114,16 +130,19 @@ export function startLeaderLoop(deps) {
             const autopostDue = autopostReconcileDue(lastAutopostRun, Date.now());
             const sstDue = sstReconcileDue(lastSstRun, Date.now());
             const lintDue = lintReconcileDue(lastLintRun, Date.now());
+            const faDue = depreciationRunDue(lastFaRun, Date.now());
             const swept = await runReconcilerSweep(client, {
               ...deps,
               prune: iteration % PRUNE_EVERY === 0,
               autopostRules: autopostDue,
               sstWatches: sstDue,
               lintBelt: lintDue,
+              faRuns: faDue,
             });
             if (autopostDue && swept.autopostOk) lastAutopostRun = Date.now(); // a failed autopost sweep retries next cycle
             if (sstDue && swept.sstOk) lastSstRun = Date.now(); // a failed SST belt retries next cycle
             if (lintDue && swept.lintOk) lastLintRun = Date.now(); // a failed lint belt retries next cycle
+            if (faDue && swept.faOk) lastFaRun = Date.now(); // a failed FA sweep retries next cycle
             // NB: the 'world' heartbeat is NOT written here (S4-AB7b / ND5) — relay
             // leadership must not gate /ready. The engine heartbeat is a dedicated
             // task in the supervisor; the leader only beats 'reconciler' (via the sweep).

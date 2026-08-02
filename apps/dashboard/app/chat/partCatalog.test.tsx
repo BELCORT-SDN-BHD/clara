@@ -100,3 +100,17 @@ test("wave-c-c bank_recon_receipt and bank_rule_proposal are registered and rend
   assert.ok(rule.includes("Bank rule proposal"), "the id-only proposal card state must render");
   assert.ok(!rule.includes(FALLBACK_UNSUPPORTED_PREFIX));
 });
+
+// Belt-and-braces: the two Wave D-a parts (fixed_asset/depreciation_run_receipt,
+// design v2.1 §6/§7) are registered and render non-empty.
+test("wave-d-a fixed_asset and depreciation_run_receipt are registered and render non-empty", () => {
+  for (const t of ["fixed_asset", "depreciation_run_receipt"]) {
+    assert.ok(RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]), `${t} must be registered`);
+  }
+  const asset = render([{ type: "fixed_asset", client_id: "client-1111", asset_id: "asset-1212" }]);
+  assert.ok(asset.includes("Fixed asset"), "the id-only asset card state must render");
+  assert.ok(!asset.includes(FALLBACK_UNSUPPORTED_PREFIX));
+  const run = render([{ type: "depreciation_run_receipt", client_id: "client-1111", run_id: "run-1313" }]);
+  assert.ok(run.includes("Depreciation run"), "the id-only run receipt card state must render");
+  assert.ok(!run.includes(FALLBACK_UNSUPPORTED_PREFIX));
+});

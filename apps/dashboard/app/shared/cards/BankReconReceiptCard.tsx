@@ -62,12 +62,44 @@ export function BankReconReceiptCard({ token, part }: { token: string | null; pa
             {data.snapshot.outstanding_lines.length} outstanding line{data.snapshot.outstanding_lines.length === 1 ? "" : "s"} ·{" "}
             {data.snapshot.exceptions.length} exception{data.snapshot.exceptions.length === 1 ? "" : "s"}
           </p>
-          {/* [F5 parity fix] this card reads the SAME get_bank_reconciliation
-              envelope as ReconciliationPanel — post-C6 its primary status is
-              never 'void' (the voided_receipt sidecar is the ONE void
-              shape, not rendered by this read-only card); the dead
-              status==='void' banner is deleted here too, for the same
-              reason it was deleted there. */}
+          {/* [F5 parity fix, STILL true] this card reads the SAME get_bank_
+              reconciliation envelope as ReconciliationPanel — post-C6 its
+              primary status is never 'void'; the dead status==='void' banner
+              stays deleted, for the same reason it was deleted there.
+              [Wave D-a ride-along, design §5.6 — REVERSES the prior call]
+              voided_receipt itself IS now rendered below: a condensed,
+              read-only echo of ReconciliationPanel.tsx:178-209's "Previous
+              receipt (voided)" section (no onResolveException — a frozen
+              snapshot is not a live one). */}
+          {data.voided_receipt ? (
+            <details className={styles.section}>
+              <summary className={styles.sectionTitle} style={{ cursor: "pointer" }}>
+                Previous receipt (voided){data.voided_receipt.voided_at ? ` — ${new Date(data.voided_receipt.voided_at).toLocaleString()}` : ""}
+              </summary>
+              <p className={styles.muted}>
+                {data.voided_receipt.reconciliation_id ? `receipt ${shortId(data.voided_receipt.reconciliation_id)} · ` : ""}
+                completed{data.voided_receipt.completed_by ? ` by ${shortId(data.voided_receipt.completed_by)}` : ""}
+                {data.voided_receipt.completed_at ? ` · ${new Date(data.voided_receipt.completed_at).toLocaleString()}` : ""}
+              </p>
+              <p className={styles.errorText}>
+                Voided{data.voided_receipt.voided_by ? ` by ${shortId(data.voided_receipt.voided_by)}` : ""}
+                {data.voided_receipt.voided_reason ? `: ${data.voided_receipt.voided_reason}` : ""}.
+              </p>
+              <div className={styles.tableWrap}>
+                <table className={styles.table}>
+                  <thead><tr><th>term</th><th className={styles.num}>cents</th></tr></thead>
+                  <tbody>
+                    <tr><td>opening anchor</td><td className={styles.num}>{fmtCents(data.voided_receipt.opening_anchor_cents)}</td></tr>
+                    <tr><td>opening (statement)</td><td className={styles.num}>{fmtCents(data.voided_receipt.opening_cents)}</td></tr>
+                    <tr><td>closing</td><td className={styles.num}>{fmtCents(data.voided_receipt.closing_cents)}</td></tr>
+                    <tr><td>gl balance</td><td className={styles.num}>{fmtCents(data.voided_receipt.gl_balance_cents)}</td></tr>
+                    <tr><td>outstanding</td><td className={styles.num}>{fmtDeltaCents(data.voided_receipt.outstanding_cents)}</td></tr>
+                    <tr><td>excepted</td><td className={styles.num}>{fmtDeltaCents(data.voided_receipt.excepted_cents)}</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </details>
+          ) : null}
           <p className={styles.hint}>Every figure above is the DB&apos;s (design §3) — this card renders it verbatim. Complete/void/except acts happen on the /bank workbench, which owns the full ack-list and ordered-unwind surfaces.</p>
         </>
       ) : null}

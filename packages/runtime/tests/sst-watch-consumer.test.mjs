@@ -37,12 +37,17 @@ after(async () => {
 
 // A future-method attestation above the 'G' threshold (RM 500,000 = 50,000,000 cents), valid
 // (expires in the future) — enough for the evaluator to evaluate group 'G' and write a watch.
+// p_expires_at is computed FROM THE DATABASE'S OWN CLOCK (never a bare literal — was hardcoded
+// '2027-12-31', a ticking fixture: once wall-clock time passed that date the attestation would
+// silently read as EXPIRED and this test's "valid (expires in the future)" premise would break
+// with no compile-time or CI signal; the control-lease.test.mjs:66 DB-clock-relative precedent).
 async function attestFutureMethod(owner, firm, client) {
+  const expiresAt = (await rootQuery("select (now() + interval '2 years')::date as d")).rows[0].d;
   await humanQuery(
     owner,
     `select clara.record_future_attestation(p_client=>$1,p_service_group=>$2,p_expected_cents=>$3,
        p_horizon_start=>$4::date,p_evidence=>$5,p_expires_at=>$6::date,p_op_key=>$7) as r`,
-    [client, "G", 60000000, "2026-07-01", "sst-watch rig attestation", "2027-12-31", opk("att")],
+    [client, "G", 60000000, "2026-07-01", "sst-watch rig attestation", expiresAt, opk("att")],
   );
 }
 
