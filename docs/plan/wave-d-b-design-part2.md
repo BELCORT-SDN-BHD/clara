@@ -382,3 +382,105 @@ helpers; opening/allocation/bank/FA unreachable by template eligibility on a val
 the remaining round-2 folds landed consistently (one-way linkage, hook-born corrections at
 the remainder, generation-grouped tie, issue-date gating, FYE scoping, fingerprint drop,
 cost-only G12, surfaces).
+
+---
+
+## Round 4 (2026-08-02) — v4 dry-check, two lanes
+
+**Lanes:** verify (native opus-5 xhigh) DO-NOT-SHIP 2B/8M/6m · Codex (gpt-5.6-sol xhigh)
+DO-NOT-SHIP 4B/4M/1m. Convergence near-total again; the SOUND lists settled the deepest
+re-entrancy and CLR05-symmetry questions. Labels: V4/C4.
+
+### Folded — the v5 mechanism changes
+
+1. **The pair receipt becomes the structural authorization channel** [V4-1+C4-2 BLOCKER]:
+   the hook cannot see caller identity (one-arg signature), so the RECEIPT carries it — the
+   pair verbs transition the locked receipt to a TRANSACTION-ONLY `approving` state before
+   their core calls; the hook's defense arm refuses a pair draft unless its receipt is
+   `approving`; a DEFERRED final-state trigger forbids committing `approving` (pending →
+   approving → completed, all-or-nothing). Subsumes the ordering fix.
+2. **Pair drafts are refused in `revise_entry` by RECEIPT MEMBERSHIP** [C4-1 BLOCKER]: the
+   13-column recipe carries no flags, so the flags-based refusal missed them; the recut
+   refuses any draft named by a pending/approving pair receipt; `approve_pair_reversal`
+   additionally re-derives both corrections byte-exactly under the draft + original locks
+   (re-derive, never trust).
+3. **`resolution_exception_id` stamps at group CREATION on every path** [V4-2+C4-3 BLOCKER]
+   (the HS park stamps it beside `pending_resolution`); the five non-p_ctx admission arms
+   read the immutable id + the named exception's own state (open ⇒ admit the park INSERT
+   and the pending→unmatched cancel; resolved-with-booking ⇒ admit the pending→live
+   cascade); `pending_resolution` is the in-flight declaration only; the cancel leaves the
+   id intact (tail probe).
+4. **The op-key TABLE is written INTO the doc** [V4-3+C4-4 BLOCKER]: one row per key —
+   (key, fn, request-hash, reserver, sole spender, closing branch) — covering the poster's
+   `:approve`, the mirror's `:mirror:approve` (**reserved EAGERLY BY THE POSTER** beside its
+   own key when auto_reverse — reserving inside the hook would sit under the outer core's
+   203005004, defeating reserve-before-lock; the committed reservation is lawfully spent
+   preheld by a LATER approving transaction in draft mode), the pair receipt key, both pair
+   half keys (reserved by `_pair_reverse_core` before its locks), `approve_pair_reversal`'s
+   and `cancel_pair_reversal`'s own keys, and the AF-2 set from round 3.
+5. **Pair-verb contracts completed** [C4-5 MAJOR]: `approve_pair_reversal(p_client, p_pair,
+   p_op_key, p_attestation default null)` (defaulted arg last);
+   `cancel_pair_reversal(p_client, p_pair, p_reason, p_op_key)` — bookkeeper+, non-blank
+   reason, locks receipt→both drafts→rung, writes the withdrawal column set INLINE as
+   fn-owner (the 0038:5207 idiom — it never calls `withdraw_draft`, the self-refusing-remedy
+   trap [V4-7]), emits `entry.withdrawn` ×2, receipt → `cancelled`.
+6. **The leaf census corrected** [C4-6 MAJOR]: the live bank belt
+   (`_fa_assert_code_unreserved`) KEEPS its leaf acquisition; the pinned census is "every
+   door that writes role-claiming state" — the bank belt + FA/advance enrolment/retire +
+   adjustment propose/retire; posting/approve paths remain non-takers.
+7. **The `scheduled_run` writer census corrected** [C4-7+V4-11 MAJOR]: writers =
+   `_fa_run_period_core` + `_adj_run_occurrence_core` + `_adj_on_approve` (the mirror
+   INSERT); `_pair_reverse_core`'s corrections are `origin='reversal'` (asserted).
+8. **All six new state tables get named triggers** [C4-8 MAJOR]: templates (transition) ·
+   adjustment_runs (immutable) · staff_advances (append-only + two set-once allowlists) ·
+   applications (pure append-only) · enrolments (no-delete, version-forward) · pair
+   receipts (transition + deferred no-commit-approving) — each with no-delete AND
+   no-truncate, all asserted in the tail.
+9. **Arm/axis completions** [V4-4/5/6 MAJOR]: arm (0)'s rationale rewritten (it exists only
+   to keep arm (2) off the mirror; soft-birth immunity is carried by §2.1 eligibility ALONE
+   — `_fa_on_approve` has already run and `_adv_on_approve` runs later regardless — so an
+   eligibility violation RAISES, never skips) · eligibility is the SEVENTH
+   `adjustment_stale` axis (`line_eligibility`) with its enrol-during-draft-window cell ·
+   the suggestion approve-time re-validation is HOSTED as `_adj_on_approve` arm (3) keyed
+   on the `bank_rule_suggested` flag (no new splice; census unchanged).
+10. **Attestation + flag symmetry pinned** [V4-9 MAJOR]: the mirror copies
+    `is_opening_balance`/`is_year_end`/`tax_affecting` verbatim (reverse_entry's recipe) so
+    `is_high_stakes` is provably equal; the attestation passed to the mirror's core call is
+    the occurrence row's just-stamped `self_approval_attestation`, re-read after the outer
+    UPDATE; the annual high-stakes symmetry cell added.
+11. **Event-type law** [V4-8 MAJOR]: 0042 registers `adjustment.posted` +
+    `bank.line_exception_reopened` in `clara.event_types` with the 0040-probe-6-style
+    prestate/postcheck (an unregistered `_append_event` fails at RUN time, not migration
+    time).
+12. **Bijection cells** [V4-10 MAJOR, C4-9 m]: per-axis `adjustment_stale` refusals · the
+    two advance-reversal refusals · `revise_entry` per-key + pair-membership refusals · the
+    belt watermark boundary pair · the pending `bank_corrective_line` refusal · the
+    cumulative-correction-cap cell.
+13. **Smalls** [V4-12..16]: the admission bullet split into SEVEN sites, each annotated
+    with its evidence channel (p_ctx · pre-flip group row · commit-time group row + the
+    immutable id) · the reopen wording (status flips; FIVE columns null; the trigger's
+    comparison set is those five + status) · the `cost_cents` prestate probe + the
+    `ck_fa_residual` dead-disjunct note · the event ORDER stated + asserted (the mirror's
+    events precede the occurrence's; the receipt minted after both) · **the tie's GL side
+    is scoped to the union of the code's enrolment windows** [enrolled_at, retired_at]
+    (matching the belt watermark) with an out-of-window explained column — a repurposed
+    retired code can no longer permanently break the tie surface.
+
+### Verified sound in round 4 (cumulative)
+
+The nested `_approve_entry_core` re-entry is finite and state-safe (preheld skips
+re-reservation; eligibility makes the counterparty/document/sighting arms unreachable; the
+rungs are re-entrant; the outer invocation re-reads nothing the mirror mutates) · solo
+attestation threading is lawful (stamped before the hook; lands on both rows; distinct-
+checker stamps null on both) · CLR05 cannot diverge on equal headers, and any mirror-side
+refusal aborts the WHOLE approving statement (no committed half-pair is possible — the
+intended semantics, now stated) · five of seven admission sites have sufficient local
+evidence as designed · pending groups never hold entry members, so only the LINE-member
+INSERT arm widens at park time; the flip's entry members satisfy the EXISTING resolved-door
+predicate (resolved_at post-dates every covering completed_at) · `v_cover_at` is the belt
+INSERT door's cutoff only; the verb-side settled guards are plain EXISTS · the reopen
+recut of the transition trigger is genuinely required · pair corrections carry no D-b
+flags, so arm (1) is the right discriminator and the (0)(1)(2)(3) order stands · the
+`_pair_reverse_core` vacuity argument extends to both `_wdb_reversal_blocked` advance
+refusals · `withdraw_draft` remains the lawful escape for an occurrence draft (retire
+cannot wedge) · the hook-CALLER census genuinely stays at FOUR; recursion bounds at depth 2.
