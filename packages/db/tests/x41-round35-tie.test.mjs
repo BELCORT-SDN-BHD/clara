@@ -246,6 +246,7 @@ test("x41.s4 the WHOLE-DB fa_register_tie sweep at three as-ofs: unexplained dif
       assert.ok(hops > 64,
         `at as_of ${asOf}: client '${e.client_name}' (${e.client}) claims the deliberate over-cap exemption, but its deepest supersede chain is ${hops} edge(s) — at or inside the ratified 64-hop cap. This exemption is EVIDENCE-gated: a refusal that is not really over-cap is a defect, not a fixture.`);
       seen.overCap += 1;
+      (seen.overCapClients ??= new Set()).add(e.client);
       noteLane(`x41.s4 allow-listed REFUSAL at ${asOf}: '${e.client_name}' holds a ${hops}-edge lineage, past the ratified 64-hop cap — ${a.why.slice(0, 90)}…`);
       overCap.push(e);
     }
@@ -300,4 +301,11 @@ test("x41.s4 the WHOLE-DB fa_register_tie sweep at three as-ofs: unexplained dif
     "the allow-list stays MINIMAL: exactly one deliberate fixture. Growing it is a decision, not a convenience — a new entry needs a reason a professional would accept.");
   assert.equal(ALLOWED_REFUSAL.length, 1,
     "the REFUSAL allow-list stays MINIMAL too: exactly one deliberate over-cap fixture, and it must prove itself over-cap. A second entry is a decision — a book the tie cannot answer for is the one thing this sweep exists to surface.");
+  // [ROUND-4.7] The rule cap above bounds the LIST; this bounds the POPULATION. Each
+  // persistent-rig run leaves one more x41.u4 over-cap client behind (this file runs
+  // before x41-round46 alphabetically, so a run's sweep sees only PRIOR runs' leftovers:
+  // fresh DB = 0, second run = 1, third = 2). More than 2 unique exempted clients means
+  // a stale rig — rebuild it (the part2 rig-hygiene law), never widen this bound.
+  assert.ok((seen.overCapClients?.size ?? 0) <= 2,
+    `the over-cap exemption excused ${seen.overCapClients?.size} distinct client(s); at most 2 can exist on a healthy rig (0 fresh, +1 per prior persistent-rig run). Rebuild the rig database rather than letting unmeasurable books accumulate.`);
 });

@@ -773,11 +773,10 @@ alter table clara.journal_entries add constraint journal_entries_origin_check
 -- year's depreciation into the wrong period with nothing visible to say so.
 alter table clara.clients add column fy_end_month int;
 alter table clara.clients add column fy_end_day int;
-alter table clara.clients add constraint ck_clients_fy_end check (
-  (fy_end_month is null and fy_end_day is null)
-  or (fy_end_month between 1 and 12 and fy_end_day between 1 and 31
-      and not (fy_end_month = 2 and fy_end_day > 29)
-      and not (fy_end_month in (4, 6, 9, 11) and fy_end_day > 30)));
+-- Written in pg_get_constraintdef's FIXED-POINT form (measured: the BETWEEN spelling
+-- re-associates its AND-chain on dump->restore and fails the DR round-trip's 4.6 parity
+-- check by one paren level; this exact text survives dump->restore byte-identical).
+alter table clara.clients add constraint ck_clients_fy_end CHECK ((((fy_end_month IS NULL) AND (fy_end_day IS NULL)) OR ((fy_end_month >= 1) AND (fy_end_month <= 12) AND ((fy_end_day >= 1) AND (fy_end_day <= 31)) AND (NOT ((fy_end_month = 2) AND (fy_end_day > 29))) AND (NOT ((fy_end_month = ANY (ARRAY[4, 6, 9, 11])) AND (fy_end_day > 30))))));
 
 -- THE OUTSTANDING-DISPOSAL-DRAFT INDEX [round-3 fold F10]. clara._fa_disposal_draft_outstanding
 -- is asked once per candidate asset inside the sweep's per-client hot loop; without this the
