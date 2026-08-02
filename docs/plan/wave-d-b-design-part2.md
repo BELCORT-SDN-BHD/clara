@@ -278,3 +278,107 @@ ordinary open+matched) · completed-recon refusal precedes the reopen arm · the
 is identifiable and the 64/65 math unchanged · end_date validation is expressible against
 the live period helpers · G4 catch-up/ramp interaction (occurrence #1 always drafts,
 including after retire+re-propose) · the pending-group chase surface exists (/bank).
+
+---
+
+## Round 3 (2026-08-02) — v3 dry-check, two lanes
+
+**Lanes:** verify (native opus-5 xhigh) DO-NOT-SHIP 3B/6M/5m · Codex (gpt-5.6-sol xhigh)
+DO-NOT-SHIP 3B/1M. Convergence near-total; the SOUND lists now cover most load-bearing
+mechanisms. Labels: V/C3.
+
+### Folded — the v4 mechanism changes
+
+1. **Every D-b approval routes through `_approve_entry_core` + `receipt_preheld` + a
+   pre-reserved derived key** — the ratified 0041:3559 poster shape — for the mirror flip,
+   `_pair_reverse_core`'s low-stakes flips, and `approve_pair_reversal` [V1+V2 BLOCKER,
+   C3-3]. Consequences: the approve-path census stays the pinned FOUR literally; the
+   hook-CALLER census stays FOUR (no direct `_subledger_on_approve` call — the core makes
+   it); CLR05 maker-checker is restored on the mirror. G2's one-act law under high stakes:
+   the occurrence approval's attestation threads to the mirror's flip (same actor, same
+   attestation; distinct-checker satisfied when checker ≠ signer since the mirror's
+   last_human_editor = the signer). New §7 cell: signer-approves-own-occurrence at high
+   stakes.
+2. **The op-key table is written out, and the core factoring is complete** [V3+C3-1
+   BLOCKER]: preheld-aware `_settle_from_bank_line_core` AND `_allocate_receipt_core` /
+   `_allocate_payment_core` (public wrappers reserve-then-delegate; the S4.Z behavioral pins
+   move to the cores; the public arities re-pin to delegation + defaults + ACLs). One table
+   row per derived key: fn, single spender, closing branch; the settle core's own
+   descendants (`:approve`, `:adj:i(:approve)`, `:charge:approve`) stay the core's, closed
+   by its existing deferral markers — the composite never names them.
+3. **The parked-declaration admission is recut across SIX arms, not two** [C3-2 BLOCKER]:
+   the settle core's `line_excepted` wall (p_ctx declaration) · the belt's line-member
+   INSERT arm · `complete_pending_match`'s settled-period guard · BOTH member pending→live
+   cascade UPDATE arms · `unmatch_bank_match` + the line-member pending→unmatched cascade
+   arm (the §7 parked-cancel escape is a promise, so cancellation admits the exact case
+   too). Each admits ONLY the parked-declaration case (the Codex-verified predicate shape,
+   `resolved_at > v_cover_at` semantics on the resolved door); ordinary groups and
+   live→unmatched releases keep their unconditional refusals. Rationale of scope: an OPEN
+   exception inside a COMPLETED reconciliation is lawful C-c state — precisely the class the
+   parked resolution serves — so the settled-period machinery must admit the park's flip
+   AND cancel.
+4. **The pair machine gets a real receipt + single-half defenses** [C3-3+V5 BLOCKER]:
+   `clara.adjustment_pair_reversals` (id, firm, client, occurrence_id, mirror_id, both
+   correction-draft ids, maker, status `pending`→`completed`/`cancelled`, op_key,
+   created_at; ONE active pair per occurrence via partial unique; transition trigger). Both
+   correction mirrors stamp `maker_actor = last_human_editor =` the pair CALLER
+   (reverse_entry's recipe) so exactly one distinct checker approves both.
+   `approve_pair_reversal(p_client, p_pair, p_attestation default null, p_op_key)` — the
+   solo-firm attestation branch exists. Single-half defenses: the hook defense arm refuses
+   an ordinary `approve_entry` on a pair-correction draft (remedy names
+   `approve_pair_reversal`); `withdraw_draft` (CoR) refuses a pair draft, remedy naming the
+   atomic `cancel_pair_reversal` (withdraws both drafts + cancels the receipt).
+5. **The high-stakes refusal set includes the charge** [C3-4 MAJOR]:
+   `p_charge_cents`/`p_charge_account` join `pending_branch_ancillary_unsupported` (the AP
+   path's separate charge entry would ride `pending_ancillaries` past the settlement-only
+   boundary).
+6. **`_pair_reverse_core`'s guard set itemized** [V4 MAJOR, C3-SOUND]: the three helper
+   walls (`_subledger_allocated_items_present`, `_bank_live_match_present`,
+   `_fa_reversal_blocked`) as defense-in-depth; the K-family boundary by VACUITY (pair
+   members are origin='scheduled_run', never opening-balance — pinned as a tail probe, no
+   0017 extraction); the 203005004 rung AFTER both JE row locks; MYT posting dates (no
+   `current_date`); `_assert_balanced`; the double-reverse guards inline;
+   `_wdb_reversal_blocked` deliberately NOT invoked (locking others out is its purpose).
+7. **Enrolment takes the client rung** [V6 MAJOR]: `enrol_staff_advance_account` acquires
+   203005004 BEFORE `_fa_lock_roles` (leaf stays last) and re-reads the approved balance
+   under the rung — the concurrent-approval enrol race closes; concurrency cell added.
+8. **The bank-side reservation belt widens to the shared union** [V7 MAJOR]:
+   `_fa_assert_code_unreserved` (CoR) reads `_acct_role_reserved` (FA text kept, an
+   advance-domain refusal added); a bank account can no longer bind to an actively enrolled
+   advance code; cell added.
+9. **The CoR register completes** [V8 MAJOR]: + `_subledger_on_approve` (the six-marker
+   prestate census at measured counts + the multi-line anchor), `_fa_asset_json`, the
+   bank-reserved belt, `withdraw_draft`, the allocate cores + settle core factorings.
+10. **Per-table immutability named** [V9 MAJOR]: staff_advances (append-only; set-once
+    allowlist {purpose, reference} via the completion verb; hook-only {voided_by_entry_id,
+    void_effective_date}) · staff_advance_applications (pure append-only) ·
+    adjustment_runs (fully immutable) · adjustment_pair_reversals (transition-only) ·
+    the templates/enrolments clones as already stated — each with no-delete/no-truncate,
+    pinned in the tails.
+11. **Smalls** [V10-14]: the zero-charge-noop cell DROPPED (schema-impossible — template
+    lines are positive and balanced; occurrences always charge) · seven missing cells added
+    (end_date alignment · content-hash dedup · retire-with-outstanding ·
+    correction-of-correction + cap · pending `bank_corrective_line` refusal · the
+    parked-cancel drill · suggestion dedup) · the reopen clear-set is SIX columns
+    (counterpart_line_id included — already null for booking dispositions, but the arm is
+    written against the trigger's own comparison set) · a solo (non-auto-reverse)
+    occurrence has NO pair: plain `reverse_entry` is its path, `_wdb_reversal_blocked` does
+    not fire, and `reverse_adjustment_pair` refuses it by name (`not_an_auto_pair`) · the
+    parked-state vacuity reason stated (the belt's open-branch arm is write-triggered on
+    the exception row) + a tail probe pinning that predicate + the accidental-guard cell
+    (direct resolve on a parked line refuses `disposition_unbooked`).
+
+### Verified sound in round 3 (cumulative)
+
+The belt member-INSERT widening predicate as-coded (deferred trigger re-queries by id; the
+group INSERT precedes the member INSERT; `v_n = 0` short-circuit scopes it to reconciled
+lines) · the rung order 203005003→203005004→203005006 is the as-built partial order · the
+row-lock-before-rung law is 0037's ratified invariant (1) · the §2.6 splice anchor
+(multi-line, pinned at one occurrence) · `_reserve_op` raises-on-mismatch (the §8 probe
+measures the right thing) · the `:fa-roles` leaf reuse keeps taker-count at one · both legs
+of the pair-linkage reasoning · the 13-column recipe count · resolve-first ordering (the
+two-touch-point collapse for the UNRECONCILED case) · the guard-helper inventory (three
+helpers; opening/allocation/bank/FA unreachable by template eligibility on a valid pair) ·
+the remaining round-2 folds landed consistently (one-way linkage, hook-born corrections at
+the remainder, generation-grouped tie, issue-date gating, FYE scoping, fingerprint drop,
+cost-only G12, surfaces).
