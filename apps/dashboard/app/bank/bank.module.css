@@ -82,3 +82,7 @@
 .tiePreviewOff { color: #b3261e; }
 .candidateRow { display: flex; gap: 0.5rem; align-items: center; justify-content: space-between; border: 1px solid #eee; border-radius: 4px; padding: 0.3rem 0.5rem; margin: 0.2rem 0; }
 .amountInput { width: 7rem; text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Wave D-b (design §4) — the AF-2 composite's hand-draft sub-form, the same
+   dashed-box "propose" idiom /rules + /advances already use. */
+.propose { border: 1px dashed #b9c2da; border-radius: 6px; padding: 0.6rem 0.75rem; margin: 0.4rem 0; background: #fafbff; }

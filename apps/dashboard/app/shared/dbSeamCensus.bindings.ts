@@ -1,5 +1,5 @@
 // ===========================================================================
-// [WAVE D-b SPLIT — D-b1 (0043, staff advances)] THE PER-SLICE SEAM-CENSUS LEDGER.
+// [WAVE D-b SPLIT — D-b3 (0044, the AF-2 composite + the producer)] THE PER-SLICE SEAM-CENSUS LEDGER.
 //
 // dbSeamCensus.test.ts's rig subtest diffs the dashboard's mapped reads against the SHIPPED
 // catalog. Under the split the catalog is a slice's catalog, so a ledger that names a later
@@ -7,9 +7,9 @@
 //
 // WHAT ACTUALLY MAKES THIS WORK IS THE DASHBOARD SURFACE SPLIT, NOT THIS FILE. Measured
 // (scratchpad work/bindingsProbe.mts + a direct rpcNames()-vs-catalog set difference on this
-// slice's own rig): with the whole dashboard present, a D-b1 (0043, staff advances) rig fails the census's FIRST
+// slice's own rig): with the whole dashboard present, a D-b3 (0044, the AF-2 composite + the producer) rig fails the census's FIRST
 // hard wall — "the dashboard calls RPCs that do not exist in the shipped catalog" — naming
-// THIRTEEN verbs, and no edit to this ledger can fix that. THE COUNT IS PER-FRONTIER, and it is the
+// ELEVEN verbs, and no edit to this ledger can fix that. THE COUNT IS PER-FRONTIER, and it is the
 // cheapest sanity check that each slice's surface half is the right size (142 distinct rpc("…")
 // names scraped from the whole dashboard, against each frontier's clara catalog):
 //     D-b0 (0042) 20 unknown · D-b1 (0043) 13 · D-b3 (0044) 11 · D-b2 (0045) 0
@@ -42,8 +42,8 @@
 //   OPAQUE_READS: drop `adjustment_run_due` (the read ships with D-b2's adjustmentApi.ts).
 //   PHANTOM_BRANCHING_ALLOW: drop the whole `list_adjustment_templates` entry (same reason).
 //   UNCONSUMED_BASELINE: drop `adjustment_run_due`, `get_adjustment_run`, `list_adjustment_runs`.
-//   UNCONSUMED_BASELINE.fa_register_tie: UNCHANGED from the whole-unit line — D-b1's S5.19
-//     recut is what puts the two gl_foreign_register_* keys there in the first place.
+//   Nothing else moves: D-b3's two new verbs are ACTIONS (they carry p_op_key), so the
+//     census classifies them out of the read set entirely and neither direction sees them.
 //
 // RENDER_DEAD is INVARIANT across all four slices (measured) and is not trimmed.
 // AT MERGE: D-b2's variant is the whole-unit file BYTE-FOR-BYTE — the ledger reassembles.

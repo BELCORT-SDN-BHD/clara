@@ -1544,7 +1544,13 @@ test("x37.r no draft verb can make a settlement kind: the wake drafter refuses, 
 test("x37.s authority: the composites are authenticated-ONLY with no wake entries; the subledger cores are ungranted to every app role", async (t) => {
   if (skipHere(t)) return;
   const composites = ["allocate_receipt", "allocate_payment", "unallocate_group", "apply_open_items"];
-  const cores = ["_subledger_classify_entry", "_subledger_on_approve", "_subledger_decompose_preview"];
+  // 0042 (D-b SS4, [L3/V3+C3-1]) factored the two allocation composites into preheld-aware
+  // CORES so the AF-2 composite can pre-reserve their op keys and call them. The census of
+  // ungranted subledger internals therefore GREW by two: the cores now hold the money-moving
+  // body, so a grant on one would be a bypass of the bookkeeper+ floor that lives in the
+  // public wrapper. Pinned at the NEW membership, not at 0037's three.
+  const cores = ["_subledger_classify_entry", "_subledger_on_approve", "_subledger_decompose_preview",
+    "_allocate_receipt_core", "_allocate_payment_core"];
   const otherRoles = [ROLES.runtime, ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive];
 
   for (const fn of composites) {
@@ -1595,7 +1601,13 @@ test("x37.s authority: the composites are authenticated-ONLY with no wake entrie
     }
   };
 
-  for (const fn of ["allocate_receipt", "allocate_payment"]) {
+  // 0042 (design SS4 "public wrappers reserve-then-delegate; S4.Z pins move to the cores",
+  // [L3/V3+C3-1]) moved the two allocation BODIES into clara._allocate_{receipt,payment}_core.
+  // The ladder is a claim about the body that ACQUIRES, so the pin follows it there -- not one
+  // rung dropped, same order, same needles. The wrapper keeps its own pin below, because a pin
+  // that only watched the core would let a future build quietly re-inline the ladder into the
+  // public verb and escape this cell entirely.
+  for (const fn of ["_allocate_receipt_core", "_allocate_payment_core"]) {
     ordered(await fnSource(fn), [
       "clara._reserve_op(",                       // the op-receipt rung
       "pg_advisory_xact_lock(203005003",          // client:counterparty
@@ -1603,6 +1615,24 @@ test("x37.s authority: the composites are authenticated-ONLY with no wake entrie
       "for update",                               // the open_items batch lock
       "insert into clara.journal_entries",        // its OWN new entry, last
     ], `${fn} lock order`);
+  }
+  // THE WRAPPER PIN. Each public verb is now a delegator: the bookkeeper+ floor, then the core
+  // call, and NOTHING that acquires. `receipt_preheld=false` is what keeps the public path's
+  // receipt identical to its pre-0042 one (the core still reserves under the verb's own fn
+  // name), so a replayed op_key still returns the receipt the caller remembers.
+  for (const fn of ["allocate_receipt", "allocate_payment"]) {
+    const src = await fnSource(fn);
+    ordered(src, [
+      "clara._human_ctx(clara.role_rank('bookkeeper'))", // the floor stays in the wrapper ...
+      `clara._${fn}_core(`,                              // ... above the delegation
+    ], `${fn} delegation order`);
+    assert.ok(src.includes("'receipt_preheld', false"),
+      `clara.${fn} must hand the core receipt_preheld=false -- otherwise the core skips its own clara._reserve_op and the public path posts with NO op receipt at all`);
+    for (const rung of ["clara._reserve_op(", "pg_advisory_xact_lock(203005003",
+      "pg_advisory_xact_lock(203005004", "for update", "insert into clara.journal_entries"]) {
+      assert.ok(!src.includes(rung),
+        `clara.${fn} must acquire NOTHING in its own body -- found the rung "${rung}", so the ladder has been re-inlined above the core and the core's pin no longer covers the live path`);
+    }
   }
   for (const fn of ["unallocate_group", "apply_open_items"]) {
     // These two never reach the core and never insert an entry, so their ladder is the tail

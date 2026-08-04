@@ -102,6 +102,38 @@ function toOpeningLineage(raw: unknown): ReconOpeningLineage {
 // resolution_note. `exception_id` is the real key to resolve against — a
 // prior version of this mapper read `.id`, which is always absent here, so
 // every "Resolve" click sent an empty p_exception to the RPC.
+/** Wave D-b (design §4, ABI §A/§D): the "declared, pending checker flip"
+ *  shape a HIGH-STAKES resolve_and_book_bank_line park stamps onto the
+ *  owning bank_matches group (`pending_resolution jsonb`). Present on this
+ *  exception's row when — and only when — this exception is the NAMED
+ *  declaration on a still-pending group (`status='pending'`); the "resolution
+ *  parked" badge (design §4's parked-declaration admission) keys off this,
+ *  never a client-side guess. NAMING NOTE: the design/ABI do not pin the
+ *  EXACT key this snapshot's `exceptions[]` row carries this object under —
+ *  `pending_resolution` is the literal ABI §D column name, assumed to ride
+ *  through verbatim (the same "read the DB's own column name" posture every
+ *  other field in this file takes); absent/malformed degrades to null,
+ *  never guessed (the house fail-closed law). */
+export type PendingResolution = {
+  exception_id: string | null;
+  disposition: string | null;
+  note: string | null;
+  declared_by: string | null;
+  declared_at: string | null;
+};
+
+function toPendingResolution(raw: unknown): PendingResolution | null {
+  if (raw === null || typeof raw !== "object") return null;
+  const o = rec(raw);
+  return {
+    exception_id: s(o.exception_id),
+    disposition: s(o.disposition),
+    note: s(o.note),
+    declared_by: s(o.declared_by),
+    declared_at: s(o.declared_at),
+  };
+}
+
 export type ReconExceptionEntry = {
   exception_id: string;
   line_id: string;
@@ -112,6 +144,7 @@ export type ReconExceptionEntry = {
   entry_date: string | null;
   age_days: number | null;
   amount_cents: number | null;
+  pending_resolution: PendingResolution | null;
 };
 function toReconExceptionEntry(raw: unknown): ReconExceptionEntry {
   const o = rec(raw);
@@ -125,6 +158,7 @@ function toReconExceptionEntry(raw: unknown): ReconExceptionEntry {
     entry_date: s(o.entry_date),
     age_days: numOrNull(o.age_days),
     amount_cents: numOrNull(o.amount_cents),
+    pending_resolution: toPendingResolution(o.pending_resolution),
   };
 }
 

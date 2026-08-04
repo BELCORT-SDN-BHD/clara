@@ -2034,19 +2034,49 @@ test("x40.z-A1 void -> unmatch -> a stale matched_booking line reads UNSETTLED: 
   await unmatchBankMatch(sub, { client, match: liveMatchId, reason: "x40 A1 red-proof: unmatching the now-void member" });
   assert.equal((await lineGroupStatus(stmt.lines[0].id)).length, 0, "x40 A1 red-proof mandatory setup: the line carries no live/pending member after unmatch");
 
-  // THE STALE DISPOSITION. The exception row STILL reads resolved/matched_booking (unmatch
-  // never touches bank_line_exceptions) -- CX3/A1's point exactly: a matched_booking/
-  // written_off_adjustment line that gets unmatched must fall to recon_line_unsettled, not
-  // silently keep riding the (now-false) "this line was excepted" reading.
-  assert.equal((await exceptionRow(exId))?.status, "resolved", "x40 A1 red-proof mandatory setup: the exception row is untouched by unmatch, still resolved/matched_booking");
+  // ===================================================================
+  // [CROSS-SECTION EDIT — 0042 as-built ladder round 4. Reported, not silent.]
+  // THE STALE DISPOSITION IS NO LONGER REACHABLE, and that is the whole point of
+  // the D-b change: `clara.unmatch_bank_match` now REOPENS every booking-claiming
+  // exception on the lines it releases, whether or not the group carries
+  // `resolution_exception_id` (only the AF-2 composite ever stamped it at birth,
+  // and THIS fixture books through the older two-step pair, so round 3's
+  // identity-column-keyed reopen did not reach it). S4.9's own header already
+  // declares that it "supersedes the x40.z-A1 stale-survives posture"; round 3
+  // superseded it only for stamped groups, and round 4 finishes the job.
+  //
+  // WHY SUPERSEDING IT IS RIGHT AND NOT A LOSS OF COVER. The state this cell used
+  // to characterise — an exception still claiming `matched_booking` while its
+  // line sits in no live match — IS the `disposition_unbooked` breach the
+  // deferred authority belt has declared unlawful since 0040. It survived only
+  // because the belt fires on writes to clara.bank_line_exceptions while a
+  // release writes clara.bank_matches: a two-table predicate enforced on one
+  // table. It is now enforced from both sides, so the release either reopens or
+  // refuses. A1/CX3's NARROWING is untouched and still load-bearing — this cell
+  // simply now exercises its `status='open'` arm instead of an incoherent one.
+  //
+  // The assertions below are MEASURED against the as-built, not assumed.
+  const after = await exceptionRow(exId);
+  assert.equal(after?.status, "open",
+    "x40.z-A1 (D-b): the release REOPENED the exception rather than leaving it claiming a booking on an unmatched line");
+  assert.equal(after?.resolution_disposition, null, "…with all five resolution columns erased together");
 
-  const denied = await caught(() => completeRecon(sub, { client, statement: stmt.statementId, opKey: opk("x40-a1r-recomplete") }));
-  assertReason(denied, null, "recon_line_unsettled", "x40 A1 red-proof: RE-completion refuses recon_line_unsettled -- a stale matched_booking line, now unmatched, is no longer settled by the mere existence of its old exception row (A1's narrowed completion-precondition reader)");
+  // The line is excepted-and-open again, which is a lawful, reconcilable state:
+  // excepted(P) counts it exactly as it did before the booking ever happened.
+  const reterms = (await rootQuery("select clara._bank_recon_terms($1, now()) as t", [stmt.statementId])).rows[0].t;
+  assert.equal(Number(reterms.excepted_cents), -1800,
+    "x40.z-A1 (D-b): the reopened line is back in excepted(P) at its own amount — the release put the line exactly where the receipt first found it");
 
+  const redone = await completeRecon(sub, { client, statement: stmt.statementId, opKey: opk("x40-a1r-recomplete") });
+  assert.ok(idOf(redone, "reconciliation_id", "reconciliation_id", "recon_id", "id"),
+    "x40.z-A1 (D-b): re-completion SUCCEEDS — an open exception on an unmatched line is settled state, and the incoherent stale reading that used to force recon_line_unsettled can no longer be built");
+
+  // CX3's narrowing, from the other side: an OPEN exception is excepted, not
+  // unmatched, so the line does NOT appear in list_unmatched_lines.
   const unmatched = await listUnmatchedLines(sub, { client });
   const rows = Array.isArray(unmatched) ? unmatched : (unmatched?.lines ?? unmatched?.rows ?? []);
-  const reappeared = rows.some((r) => (r.line_id ?? r.id) === stmt.lines[0].id);
-  assert.ok(reappeared, "x40 A1 red-proof (CX3): the stale line REAPPEARS in list_unmatched_lines -- its exclusion narrows to (status='open' OR corrective-unmatched), not 'any exception ever'");
+  assert.equal(rows.some((r) => (r.line_id ?? r.id) === stmt.lines[0].id), false,
+    "x40.z-A1 (D-b/CX3): and it is reported as EXCEPTED, not as unmatched — the two reports still partition the line set");
 });
 
 // ---------------------------------------------------------------------------
@@ -2749,6 +2779,21 @@ test("x40.al match_bank_line's p_via_rule overload stamps origin='rule' and matc
 // SECOND counterparty must breed EXACTLY ONE proposal -- proving the carve-out
 // really discriminates the stamped case rather than the cell being vacuous by
 // some other route (e.g. the whole sighting mechanism being dead).
+//
+// [WAVE D-b SPLIT — D-b3 (0044)] THIS CELL STAYS AT ITS C-c CUT, AND ITS D-b REWRITE
+// DEFERS TO D-b2 (0045). The wave's rewrite gives it a three-arm shape whose ARM A calls
+// `clara.accept_bank_rule_suggestion` — the `bank_rule_suggested` producer — through the
+// authenticated lane. 0044 CREATES that verb but deliberately WITHHOLDS its
+// `grant execute … to clara_authenticated` (the confirming round's CF-B3-1 ≡ Codex CX1: its
+// approve-time re-validation is `clara._adj_on_approve` arm (3), a D-b2 body, and a reachable
+// producer without it can mint a staff advance nobody incurred). Arm A would therefore fail
+// 42501 here, and arm B's `{rule_id, line_id}` stamp asserts a refusal — CLR39
+// `suggestion_stale` — that only arm (3) can raise. This is the same rule the eight producer
+// test cells in four x42 files already follow: **a cell whose subject is the GRANTED verb
+// ships with the grant.** The two hunks this file needs at 0044 — x40.z-A1's reopen and
+// x40.ap's `match_id` allowlist — ARE shipped, because both are 0044's own behaviour.
+// D-b2 MUST bring the rest: the five helpers (`acceptSuggestion`, `revisionOf`,
+// `sightingCount`, `vendorAccountProposals`, `lineDateOf`) and the arm A/B/C rewrite below.
 // ---------------------------------------------------------------------------
 test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO vendor_account autopost proposal -- an identical unstamped trio on a second counterparty breeds exactly one", async (t) => {
   if (skipHere(t)) return;
@@ -2989,6 +3034,19 @@ test("x40.ap the seven new bank.* event types are registered, in the taxonomy, a
     // reader can rebuild the closed corrective pair. An identifier, like every other key here.
     "counterpart_exception_id",
     "rule_id", "client_id", "withdrawn",
+    // [CROSS-SECTION EDIT — 0042 as-built ladder round 4. Reported, not silent.]
+    // `bank.line_exception_reopened` is a 0042 (D-b) event, and this scan's own
+    // `bank.line_%` pattern catches it. Its payload is {exception_id, line_id,
+    // match_id}; `match_id` is an IDENTIFIER of exactly the kind this allowlist
+    // exists to permit (bank.match_unmatched carries the same key), so the list
+    // was simply stale, not breached. It surfaced only now because round 4 makes
+    // the reopen fire for bookings made through the two-step door, which is the
+    // door this file's fixtures use — before that the event never fired here and
+    // the "all SEVEN fire" arm was passing on the 0040 set alone.
+    // WORTH THE LEDGER: 0040's tail6 gate is the authority this cell shadows, and
+    // it does NOT re-run over D-b's new event type, so a genuinely leaky D-b
+    // payload would have been caught by this cell and by nothing else.
+    "match_id",
   ]);
   const rows = await tieoutEventPayloads(client);
   assert.ok(rows.length >= 1, "x40.ap: the fixture must actually have produced tie-out event rows -- an empty scan proves nothing");

@@ -12,13 +12,16 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { PgrestError } from "../shared/wire";
-import { getBankReconciliation, completeBankReconciliation, voidBankReconciliation, resolveBankLineException } from "../shared/reconApi";
+import {
+  getBankReconciliation, completeBankReconciliation, voidBankReconciliation, resolveBankLineException,
+  resolveAndBookBankLine, type ResolveAndBookBankLineDisposition,
+} from "../shared/reconApi";
 import {
   reconTieState, canCompleteReconciliation, outstandingStaleUnacked,
   deriveVoidUnwindCount, type BankReconciliationView, type BankLineExceptionDisposition,
 } from "./reconModel";
-import { SnapshotTables } from "./ReconciliationSnapshotTables";
-import { describeBankRefusal, toggleInSet } from "./matchModel";
+import { SnapshotTables, type ResolveAndBookArgs, type ExceptionActionErr } from "./ReconciliationSnapshotTables";
+import { describeBankRefusal, parseRefusalAxis, toggleInSet } from "./matchModel";
 import type { BankStatementRow } from "./model";
 import { fmtCents, fmtDeltaCents, shortId } from "../shared/fmt";
 import styles from "./bank.module.css";
@@ -46,11 +49,16 @@ export async function voidUnwindCountFor(
 
 /** PURE presentational view — testable with a fixture, no network. */
 export function ReconciliationView({
-  view, ackedStaleIds, onToggleAck, onComplete, completing, completeErr,
+  view, token, clientId, ackedStaleIds, onToggleAck, onComplete, completing, completeErr,
   voidReason, onVoidReasonChange, onVoid, voiding, voidErr, voidUnwindCount,
-  onResolveException, resolving, resolveErr,
+  onResolveException, resolving, resolveErr, onResolveAndBook, resolvingBook, resolveBookErr,
 }: {
   view: BankReconciliationView;
+  /** [round-3 fix] the AF-2 SETTLEMENT leg reads this client's counterparties
+   *  and open items, so the live snapshot needs both; the voided-receipt reuse
+   *  below deliberately passes neither (it renders no controls at all). */
+  token?: string | null;
+  clientId?: string | null;
   ackedStaleIds: ReadonlySet<string>;
   onToggleAck?: (id: string) => void;
   onComplete?: () => void;
@@ -64,7 +72,11 @@ export function ReconciliationView({
   voidUnwindCount?: number | null;
   onResolveException?: (exceptionId: string, disposition: BankLineExceptionDisposition, note: string, counterpartLineId?: string | null) => void;
   resolving?: string | null;
-  resolveErr?: { id: string; message: string; reason: string | null } | null;
+  resolveErr?: ExceptionActionErr | null;
+  /** Wave D-b (design §4) the AF-2 composite — threaded straight to SnapshotTables. */
+  onResolveAndBook?: (exceptionId: string, disposition: ResolveAndBookBankLineDisposition, note: string, args: ResolveAndBookArgs) => void;
+  resolvingBook?: string | null;
+  resolveBookErr?: ExceptionActionErr | null;
 }) {
   const tie = reconTieState(view);
   const tieBand = tie === "tied" ? styles.bandReady : tie === "variance" ? styles.bandYou : styles.bandNeutral;
@@ -167,7 +179,11 @@ export function ReconciliationView({
           was previously a one-way trap: nowhere to resolve one until the
           statement was already complete, and open exceptions block
           completion in the first place). */}
-      <SnapshotTables snapshot={view.snapshot} onResolveException={onResolveException} resolving={resolving} resolveErr={resolveErr} />
+      <SnapshotTables
+        snapshot={view.snapshot} token={token} clientId={clientId}
+        onResolveException={onResolveException} resolving={resolving} resolveErr={resolveErr}
+        onResolveAndBook={onResolveAndBook} resolvingBook={resolvingBook} resolveBookErr={resolveBookErr}
+      />
 
       {/* [voided_receipt follow-up] the preview/complete flow stays PRIMARY —
           re-completion is reachable — with the prior void collapsed beneath
@@ -258,7 +274,9 @@ export function ReconciliationPanel({
   const [voidErr, setVoidErr] = useState<ActionErr>(null);
   const [voidUnwindCount, setVoidUnwindCount] = useState<number | null>(null);
   const [resolving, setResolving] = useState<string | null>(null);
-  const [resolveErr, setResolveErr] = useState<{ id: string; message: string; reason: string | null } | null>(null);
+  const [resolveErr, setResolveErr] = useState<ExceptionActionErr | null>(null);
+  const [resolvingBook, setResolvingBook] = useState<string | null>(null);
+  const [resolveBookErr, setResolveBookErr] = useState<ExceptionActionErr | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -323,9 +341,40 @@ export function ReconciliationPanel({
       onChanged();
     } catch (e) {
       const pe = e as PgrestError;
-      setResolveErr({ id: exceptionId, message: pe.message ?? String(e), reason: pe.reason ?? null });
+      setResolveErr({ id: exceptionId, message: pe.message ?? String(e), reason: pe.reason ?? null, axis: parseRefusalAxis(pe.pgDetails) });
     } finally {
       setResolving(null);
+    }
+  }
+
+  /** Wave D-b (design §4) the AF-2 composite. `branch:'pending'` means the
+   *  DB parked the declaration only (G9) — reload() alone surfaces that: the
+   *  exception's own `pending_resolution` (re-hydrated from the fresh
+   *  snapshot) drives the "resolution parked" badge, never a client-invented
+   *  toast (the house state-driven-not-toast-driven law).
+   *
+   *  [round-3 fix] `allocations` is forwarded — it is the SETTLEMENT leg, the
+   *  only leg that can park and therefore the only producer of the
+   *  `pending_resolution` this panel already badges. Dropping it (as this
+   *  handler used to) made the badge unreachable from every dashboard act. */
+  async function doResolveAndBook(exceptionId: string, disposition: ResolveAndBookBankLineDisposition, note: string, args: ResolveAndBookArgs) {
+    setResolvingBook(exceptionId);
+    setResolveBookErr(null);
+    try {
+      await resolveAndBookBankLine(token, {
+        clientId, exceptionId, disposition, note,
+        draft: args.draft, allocations: args.allocations, adjustments: args.adjustments,
+        advanceApplications: args.advanceApplications ?? null,
+        ackPeriodExceptions: args.ackPeriodExceptions ?? false,
+        chargeCents: args.chargeCents, chargeAccount: args.chargeAccount,
+      });
+      await reload();
+      onChanged();
+    } catch (e) {
+      const pe = e as PgrestError;
+      setResolveBookErr({ id: exceptionId, message: pe.message ?? String(e), reason: pe.reason ?? null, axis: parseRefusalAxis(pe.pgDetails) });
+    } finally {
+      setResolvingBook(null);
     }
   }
 
@@ -336,6 +385,8 @@ export function ReconciliationPanel({
   return (
     <ReconciliationView
       view={view}
+      token={token}
+      clientId={clientId}
       ackedStaleIds={ackedStaleIds}
       onToggleAck={(id) => setAckedStaleIds((s) => toggleInSet(s, id))}
       onComplete={() => void doComplete()}
@@ -350,6 +401,9 @@ export function ReconciliationPanel({
       onResolveException={(id, d, n, cp) => void doResolve(id, d, n, cp)}
       resolving={resolving}
       resolveErr={resolveErr}
+      onResolveAndBook={(id, d, n, args) => void doResolveAndBook(id, d, n, args)}
+      resolvingBook={resolvingBook}
+      resolveBookErr={resolveBookErr}
     />
   );
 }

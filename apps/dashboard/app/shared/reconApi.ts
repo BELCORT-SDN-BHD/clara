@@ -22,13 +22,16 @@
 // idiom). CORRECT AT INTEGRATION against the real migration (see this lane's
 // build-0040/u1-notes.md for the full assumed-name register).
 
-import { rpc } from "./wire";
+import { rpc, type PgrestError } from "./wire";
+import { af2Admission, type Af2DraftInput } from "../bank/resolveBookModel";
+import type { SettleAllocationInput, BankAdjustmentInput } from "./bankApi";
 import {
   toBankReconciliationView, toBankLineException, toBankRule, toBankRuleCandidate,
-  toBankLineSuggestion, toUnmatchedLine,
+  toBankLineSuggestion, toUnmatchedLine, toResolveAndBookBankLineResult,
   type BankReconciliationView, type BankLineExceptionRow, type BankLineExceptionKind,
   type BankLineExceptionDisposition, type BankRuleRow, type BankRuleKind,
   type BankRuleCandidateRow, type BankLineSuggestionRow, type UnmatchedLineRow,
+  type ResolveAndBookBankLineResult,
 } from "../bank/reconModel";
 
 const opKey = () => crypto.randomUUID();
@@ -207,3 +210,108 @@ export async function setCounterpartyTerms(
     token,
   );
 }
+
+// ---------------------------------------------------------------------------
+// Wave D-b (design `wave-d-b-design.md` §4/§5; the builder ABI
+// `wave-d-b-design-abi.md` §A) — the AF-2 composite + the S4 producer.
+// ---------------------------------------------------------------------------
+
+export type ResolveAndBookBankLineDisposition = "matched_booking" | "written_off_adjustment";
+
+/** ONE draft shape, defined once in resolveBookModel.ts and re-exported here —
+ *  the admission predicate and this wire client must not be able to hold two
+ *  different opinions about what a hand-draft is.
+ *
+ *  `counterparty` is typed `unknown` on purpose: ABI §A names it `counterparty?`
+ *  and the verb feeds it to `clara._resolve_counterparty`, which reads a
+ *  PROPOSAL OBJECT (`{existing_id}` / `{new: {...}}`) — the composite tests
+ *  `jsonb_typeof(p_draft->'counterparty') = 'object'`. The previous
+ *  `string | null` here promised a spelling the verb does not accept. Nothing in
+ *  this dashboard sets the key today; a future caller must send the proposal. */
+export type ResolveAndBookBankLineDraft = Af2DraftInput;
+
+/** resolve_and_book_bank_line(...) — owner floor (ABI §A). `p_disposition IN
+ *  ('matched_booking','written_off_adjustment')` ONLY — `bank_corrective_
+ *  line` always refuses here (`disposition_unsupported`; use `resolveBank
+ *  LineException` above).
+ *
+ *  TWO LEGS, ONE PER CALL, DERIVED FROM WHAT IS SUPPLIED (there is no leg
+ *  selector): `draft` ⇒ the hand-draft leg; a non-empty `allocations` ⇒ the
+ *  settlement leg. Naming both refuses; naming NEITHER refuses `no_booking` —
+ *  the round-3 defect, see resolveBookModel.ts.
+ *
+ *  THE PARK IS NOT AN ACT YOU CAN REQUEST [WDB-G9]. Only the SETTLEMENT leg can
+ *  park, and only the DB decides it does: the settle core builds the entry, asks
+ *  `is_high_stakes`, and answers `branch:'pending'`. On that branch the
+ *  ancillaries (charge / difference adjustments) refuse
+ *  `pending_branch_ancillary_unsupported`, and a high-stakes HAND-DRAFT refuses
+ *  the same token on axis `draft`. This client therefore never promises a park —
+ *  it sends a settlement and renders the branch the DB returns. */
+export async function resolveAndBookBankLine(
+  token: string,
+  args: {
+    clientId: string; exceptionId: string; disposition: ResolveAndBookBankLineDisposition; note: string;
+    draft?: ResolveAndBookBankLineDraft | null;
+    allocations?: readonly SettleAllocationInput[] | null;
+    adjustments?: readonly BankAdjustmentInput[] | null;
+    advanceApplications?: { kind: string; reason: string; allocations: { line_no: number; advance_id: string; amount_cents: number }[] } | null;
+    ackPeriodExceptions?: boolean;
+    chargeCents?: number | null;
+    chargeAccount?: string | null;
+    attestation?: string | null;
+  },
+): Promise<ResolveAndBookBankLineResult> {
+  // [round-3 fix — the walled-corridor class, third recurrence] THE SAME BODY
+  // the UI's controls read decides here too, so this client can never send a
+  // request the surface has already told the user is inadmissible, and the two
+  // can never drift apart into "the button promised X, the verb refused X".
+  // It is deliberately a SUBSET of the DB's law (argument shape only) — see
+  // resolveBookModel.ts's header. Everything stateful stays the DB's call and
+  // its refusal is rendered verbatim.
+  const admission = af2Admission({
+    disposition: args.disposition, note: args.note, draft: args.draft ?? null,
+    allocations: args.allocations ?? null, adjustments: args.adjustments ?? null,
+    advanceApplications: args.advanceApplications ?? null,
+    ackPeriodExceptions: args.ackPeriodExceptions ?? false,
+    chargeCents: args.chargeCents ?? 0, chargeAccount: args.chargeAccount ?? null,
+  });
+  if (!admission.admitted) {
+    const err = new Error(`resolve_and_book_bank_line refused before sending: ${admission.message}`) as PgrestError;
+    err.clr = "CLR10";
+    err.reason = admission.reason;
+    err.pgDetails = JSON.stringify({ reason: admission.reason, axis: admission.axis });
+    throw err;
+  }
+  const out = await rpc(
+    "resolve_and_book_bank_line",
+    {
+      p_client: args.clientId, p_exception: args.exceptionId, p_disposition: args.disposition, p_note: args.note,
+      // An EMPTY adjustments array is sent as null, never as `[]`: the
+      // settlement leg counts `_bank_adjustments_norm(...)` on the park branch,
+      // and "no adjustments" must be indistinguishable from "the caller never
+      // named any" so a park is never refused `ancillaries` over an empty list.
+      p_draft: args.draft ?? null, p_allocations: args.allocations ?? null,
+      p_adjustments: args.adjustments && args.adjustments.length > 0 ? args.adjustments : null,
+      p_advance_applications: args.advanceApplications ?? null,
+      p_ack_period_exceptions: args.ackPeriodExceptions ?? false, p_charge_cents: args.chargeCents ?? 0,
+      p_charge_account: args.chargeAccount ?? null, p_attestation: args.attestation ?? null, p_op_key: opKey(),
+    },
+    token,
+  );
+  return toResolveAndBookBankLineResult(out);
+}
+
+// [WAVE D-b SPLIT — D-b3 (0044)] THE SECOND WRAPPER IS NOT HERE, AND THAT IS THE POINT.
+// `acceptBankRuleSuggestion(...)` — the `bank_rule_suggested` producer's client, and the
+// /bank coding chip in StatementDetail.tsx that calls it — DEFER TO D-b2 (0045) together
+// with the DB grant they need. 0044 CREATES `clara.accept_bank_rule_suggestion` but
+// deliberately WITHHOLDS its `grant execute … to clara_authenticated`: the verb's
+// approve-time re-validation is `clara._adj_on_approve` arm (3), a D-b2 body, and a
+// reachable producer without it can mint a staff advance nobody incurred (the confirming
+// round's CF-B3-1 ≡ Codex CX1, found twice independently and probed on a rig). Between
+// 0044 and 0045 a wrapper here would be a live button whose RPC Postgres refuses at the
+// ROLE level — `permission denied for function accept_bank_rule_suggestion`, SQLSTATE
+// 42501 — which carries no `reason` key for `describeBankRefusal` to map, so the user
+// would meet a raw driver error. `../bank/matchModel.ts`'s `suggestion_outstanding` /
+// `suggestion_stale` copy needs no change and is already here: it is a message map keyed
+// by reason string, inert while nothing raises those reasons.
