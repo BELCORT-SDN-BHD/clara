@@ -1,5 +1,12 @@
 # Wave D-b design — the builder ABI appendix
 
+> ⚠️ **DESIGN-TIME record. The AS-BUILT truth is [`wave-d-b-asbuilt.md`](./wave-d-b-asbuilt.md)
+> (+ `-part2.md`).** The build shipped as a **four-slice split** (`0042`/`0043`/`0044` LIVE,
+> `0045` D-b2 HELD), not the single `0042` monolith; the `bank_rule_suggested` producer's grant
+> moved to `0045`. **See ADR-058.** This appendix's completeness claim is four rounds stale
+> (as-built ladder r11) — signatures and tokens here are design-time, and the live catalog is
+> the authority. Body unchanged on purpose.
+
 > Part of the `wave-d-b-design.md` design of record (§9 points here). Same authority, same
 > ladder. Adjudication (round 6): rows marked "the callee's live law" are deliberately NOT
 > duplicated — those are 0037/0038/0040 live facts, harvested at build and pinned by x42.
