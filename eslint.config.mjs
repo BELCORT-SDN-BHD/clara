@@ -55,6 +55,27 @@ export default tseslint.config(
     extends: [tseslint.configs.recommended],
   },
 
+  // SPLIT-WAVE FORKS — `no-unused-vars` off, and ONLY that rule.
+  //
+  // A fork (`x<NN>b<S>-*.test.mjs`) is a slice's share of a test file whose cells span more
+  // than one migration slice. It is produced MECHANICALLY (`slices/forks/work/forktool.py`),
+  // and the tool's whole safety argument is that it MOVES cells and never EDITS them: a
+  // fork's prologue is byte-identical to its parent's, so every fork of a file imports the
+  // same fixtures, in the same order, with the same names — and the tool asserts that
+  // invariant (plus cell conservation: 418 cells, no cell assigned twice) as its own
+  // correctness check. A fork therefore carries bindings only the SIBLING slice's cells use.
+  // They are the declared, measured cost of the idiom, not oversights.
+  //
+  // Trimming them by hand would break the property the split is verified on and make the
+  // forks non-regenerable — the byte-identical prologue is the evidence, so the lint yields
+  // here rather than the evidence. Scoped to the fork filename pattern, and to this one rule,
+  // so the wave's OWN new files (`x42-*`, `x42x-*`) stay fully linted: the two genuine
+  // findings in those were fixed at source, not silenced.
+  {
+    files: ["packages/db/tests/x4[0-9]b[0-9]-*.test.mjs"],
+    rules: { "no-unused-vars": "off" },
+  },
+
   // Runtime TypeScript only — layer the two TYPE-CHECKED promise-safety rules.
   {
     files: ["packages/runtime/**/*.ts"],

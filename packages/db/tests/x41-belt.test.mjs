@@ -10,7 +10,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, opk, endPool, printLaneNotes, printSkipCount, x41EnsureReady, skip41, refuses,
+  rootQuery, opk, endPool, noteLane, printLaneNotes, printSkipCount, x41EnsureReady, skip41, refuses,
   refusesOneOf, humanCall, T, COST, COST2, ACCUM2, EXPENSE, EXPENSE2, LAND, BANK, mon, dayIn,
   upsertFaProfile, retireFaProfile, faWorld, faRow, profileRows, freshFaClient, approvedEntry,
   buyAsset,
@@ -32,13 +32,27 @@ after(async () => {
 
 const skipHere = (t) => skip41(t, live, "the Wave-D-a enrolment/belt battery");
 
+/** A function body with its SQL comments removed (block comments first, then line
+ *  comments). A census must count what a body DOES, not what it SAYS — the same
+ *  two-instrument lesson 0042's own tail records. */
+const stripSqlComments = (src) => (src ?? "")
+  .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+
+/** {name, src} for every clara function matching `predicate` (a pg_proc SQL predicate),
+ *  each body already comment-stripped. */
+const strippedBodies = async (predicate) => (await rootQuery(
+  `select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+    where n.nspname='clara' and (${predicate}) order by 1`,
+)).rows.map((x) => ({ name: x.proname, src: stripSqlComments(x.prosrc) }));
+
 test("x41.b6 re-typing or re-classing a COA account that backs an ACTIVE profile is refused by name — the §5.6 guard on the account door", async (t) => {
   if (skipHere(t)) return;
   const client = await freshFaClient("b6");
   const sub = w.users.alice;
 
   // [ASSEMBLY · adjudication A3] MEASURED: no deactivation door exists on coa_accounts
-  // anywhere in the chain — `upsert_account` is the ONLY writer and it upserts is_active=true.
+  // anywhere in the chain — `upsert_account` is the only writer of is_active and it upserts
+  // is_active=true (the two bank verbs write is_bank_account only; the census below proves it).
   // Deactivation is therefore a FORWARD guard, and the §5.6 rule that is reachable today is
   // the one over the RESULTING row: an actively-enrolled account cannot be re-typed or
   // re-classed out from under its profile. The lane's raw `is_active=false` fallback is VOID
@@ -49,11 +63,35 @@ test("x41.b6 re-typing or re-classing a COA account that backs an ACTIVE profile
   )).rows.map((x) => x.a).join(" | ");
   assert.ok(!/(p_active|p_is_active)\b/.test(args),
     `upsert_account still carries NO active flag — deactivation is a forward guard (args: ${args})`);
-  assert.equal((await rootQuery(
-    `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='clara' and p.proname ~ '^(deactivate|retire|archive)_.*_account$'
-        and p.proname not like '%bank%'`,
-  )).rowCount, 0, "…and no COA deactivation verb exists to route around it");
+  // [0042 · design §8 tail] THE CENSUS NOW TESTS THE PROPERTY IT MEANT, NOT A NAME SHAPE.
+  // The original screen was `^(deactivate|retire|archive)_.*_account$` minus %bank%, and
+  // 0042 adds clara.retire_staff_advance_account — which matches the SHAPE and is not a COA
+  // door at all: it retires a staff-advance ENROLMENT row (clara.staff_advance_accounts,
+  // design §2.1) and never reads or writes clara.coa_accounts. Bumping the expected count to
+  // 1 would have greened a GENUINE COA deactivation verb arriving later, so the cell instead
+  // enumerates every WRITER of clara.coa_accounts and proves none of them can switch
+  // is_active off. The name screen is KEPT as a cheap second net — a name-shaped verb now
+  // passes only by proving it never touches the chart table.
+  const coaWriters = (await strippedBodies(
+    `p.prosrc ~* '(insert[[:space:]]+into|update|delete[[:space:]]+from)[[:space:]]+clara[.]coa_accounts'`,
+  )).filter((f) => /(insert\s+into|update|delete\s+from)\s+clara\.coa_accounts/i.test(f.src));
+  assert.ok(coaWriters.length > 0,
+    "NON-VACUOUS: the clara.coa_accounts writer census really did find the chart's writers");
+  for (const f of coaWriters) {
+    const kills = f.src.match(/is_active\s*:?=\s*(?!true\b)[a-z_]+/gi) ?? [];
+    assert.deepEqual(kills, [],
+      `clara.${f.name} writes clara.coa_accounts but never sets is_active OFF (got: ${kills.join(", ")}) — deactivation stays a forward guard`);
+    assert.ok(!/delete\s+from\s+clara\.coa_accounts/i.test(f.src),
+      `…and clara.${f.name} never DELETES a chart account to route around the guard either`);
+  }
+  const nameShaped = await strippedBodies(
+    `p.proname ~ '^(deactivate|retire|archive)_.*_account$' and p.proname not like '%bank%'`);
+  for (const f of nameShaped) {
+    assert.ok(!/clara\.coa_accounts/i.test(f.src),
+      `clara.${f.name} is SHAPED like a COA deactivation verb but must not touch clara.coa_accounts — 0042's retire_staff_advance_account retires an enrolment, not a chart account`);
+  }
+  noteLane(`x41.b6 coa_accounts writers = ${coaWriters.map((f) => f.name).join(", ")}`
+    + `; name-shaped NON-COA verbs = ${nameShaped.map((f) => f.name).join(", ") || "(none)"}`);
 
   const upsert = (type, klass) => humanCall(sub, "upsert_account", [
     { name: "p_client" }, { name: "p_code" }, { name: "p_name" }, { name: "p_type" },

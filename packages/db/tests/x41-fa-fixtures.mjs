@@ -169,10 +169,15 @@ export function lastEndedFy(fyMonth = 12, fyDay = 31) {
   // The FY closing (a.y, fyMonth, fyDay) has ended once the anchor month is past it.
   const closeY = a.m > fyMonth ? a.y : a.y - 1;
   const close = dstr(closeY, fyMonth, fyDay);
-  const openTotal = closeY * 12 + fyMonth - 11; // 12 months back, inclusive
-  const openY = Math.floor((openTotal - 1) / 12);
-  const openM = openTotal - openY * 12;
-  return { open: dstr(openY, openM, 1), close, openY, openM, closeY, closeM: fyMonth };
+  // day AFTER the PREVIOUS year's own end (S5.26, round-8 M4 F1) -- byte-identical to the
+  // old month-truncated formula whenever fyDay is a true month-end (31, or Feb-29 in a leap
+  // year), and now CORRECT for any other lawful fyDay too.
+  const prevCloseStr = dstr(closeY - 1, fyMonth, fyDay);
+  const [py, pm, pd] = prevCloseStr.split('-').map(Number);
+  const openDt = new Date(Date.UTC(py, pm - 1, pd + 1));
+  const open = dstr(openDt.getUTCFullYear(), openDt.getUTCMonth() + 1, openDt.getUTCDate());
+  const openY = openDt.getUTCFullYear(); const openM = openDt.getUTCMonth() + 1;
+  return { open, close, openY, openM, closeY, closeM: fyMonth };
 }
 
 // ---------------------------------------------------------------------------

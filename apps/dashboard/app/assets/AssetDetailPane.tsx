@@ -14,13 +14,17 @@
 import { useCallback, useEffect, useState } from "react";
 import type { PgrestError } from "../shared/wire";
 import { getFixedAsset, completeFixedAssetParticulars, reviseFixedAssetParticulars, disposeFixedAsset } from "../shared/assetsApi";
-import type { AssetRow, ChargeRow, ScheduleRow, FixedAssetParticulars } from "./assetsModel";
+import { getDraftReview, withdrawDraft } from "../chat/review";
+import type { AssetRow, ChargeRow, ScheduleRow, FixedAssetParticulars, SplitMonthAdvisory } from "./assetsModel";
+import { assetIsDisposable, assetHasSplitMonthAdvisory } from "./assetsModel";
 import { fmtCents, shortId } from "../shared/fmt";
+// [round-5 fix] the DB owns the date, never the browser. `todayIso()` here was the
+// browser's UTC date, so between 00:00 and 08:00 MYT every date DEFAULT on this
+// pane — in-service date, revision effective-from, DISPOSAL DATE — proposed
+// yesterday. Across a month boundary that puts the disposal month, and therefore
+// the last charged month, in the wrong period. See shared/businessDate.ts.
+import { businessToday } from "../shared/businessDate";
 import styles from "./assets.module.css";
-
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 type AssetDetail = { asset: AssetRow | null; lineage: AssetRow[]; charges: ChargeRow[]; schedule: ScheduleRow[]; uncharged_due: string[] };
 
@@ -71,6 +75,8 @@ export function AssetDetailPane({
         <p className={styles.hint}>Uncharged periods: {detail.uncharged_due.join(", ")}</p>
       ) : null}
 
+      {assetHasSplitMonthAdvisory(live) ? <SplitMonthPanel rows={live.split_month_advisory} /> : null}
+
       {!live.particulars_complete ? (
         <ParticularsForm token={token} clientId={clientId} assetId={live.id} onDone={() => { void reload(); onChanged(); }} />
       ) : (
@@ -81,7 +87,18 @@ export function AssetDetailPane({
       {detail && detail.charges.length > 0 ? <ChargesTable charges={detail.charges} /> : null}
       {detail && detail.lineage.length > 0 ? <LineageList lineage={detail.lineage} /> : null}
 
-      {live.status === "active" && live.particulars_complete ? (
+      {/* [round-5 fix] KEYED ON THE DB'S VERDICT, NOT ON AN ID. The guard used to be
+          gated on `disposal_draft_entry_id` — a key no function emitted — so it could
+          never render, and the ELSE arm offered a dispose form whose only possible
+          outcome on a frozen row was the CLR39 refusal. The freeze verdict now comes
+          from `_fa_asset_json`, which asks the guard's OWN function; the id only
+          decides whether the inline withdraw affordance is offered. */}
+      {live.disposal_draft_outstanding ? (
+        <DisposalDraftGuard
+          token={token} clientId={clientId} entryId={live.disposal_draft_entry_id}
+          onDone={() => { void reload(); onChanged(); }}
+        />
+      ) : assetIsDisposable(live) ? (
         <DisposeForm token={token} clientId={clientId} assetId={live.id} onDone={() => { void reload(); onChanged(); }} />
       ) : null}
     </div>
@@ -148,7 +165,7 @@ function useMethodFields(initial: "straight_line" | "reducing_balance" | "none" 
   const [usefulLifeMonths, setUsefulLifeMonths] = useState("60");
   const [rateBps, setRateBps] = useState("");
   const [residualCents, setResidualCents] = useState("0");
-  const [startDate, setStartDate] = useState(todayIso());
+  const [startDate, setStartDate] = useState(businessToday());
   const [description, setDescription] = useState("");
 
   const particulars = (): FixedAssetParticulars => ({
@@ -204,15 +221,21 @@ function ReviseParticularsForm({
   token, clientId, assetId, onDone,
 }: { token: string; clientId: string; assetId: string; onDone: () => void }) {
   const f = useMethodFields();
-  const [effectiveFrom, setEffectiveFrom] = useState(todayIso());
+  const [effectiveFrom, setEffectiveFrom] = useState(businessToday());
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // [round-5 fix] the receipt's WDB-G14 advisory, shown AT THE MOMENT OF THE ACT
+  // (0042 S5.5's stated purpose). Held in state deliberately: `onDone()` reloads
+  // the pane, and the reviewer must still be able to read what their own revision
+  // just did to the changeover month.
+  const [receiptAdvisory, setReceiptAdvisory] = useState<SplitMonthAdvisory[]>([]);
 
   const submit = async () => {
     setBusy(true);
     setErr(null);
     try {
-      await reviseFixedAssetParticulars(token, clientId, assetId, f.particulars(), effectiveFrom);
+      const receipt = await reviseFixedAssetParticulars(token, clientId, assetId, f.particulars(), effectiveFrom);
+      setReceiptAdvisory(receipt.split_month_advisory);
       onDone();
     } catch (e) {
       setErr((e as PgrestError).message ?? String(e));
@@ -233,6 +256,7 @@ function ReviseParticularsForm({
       <MethodFields f={f} />
       <button className={styles.button} disabled={busy} onClick={() => void submit()}>{busy ? "Saving…" : "Revise particulars"}</button>
       {err ? <p className={styles.errorText}>{err}</p> : null}
+      <SplitMonthPanel rows={receiptAdvisory} />
     </div>
   );
 }
@@ -283,7 +307,7 @@ function MethodFields({ f }: { f: ReturnType<typeof useMethodFields> }) {
 function DisposeForm({
   token, clientId, assetId, onDone,
 }: { token: string; clientId: string; assetId: string; onDone: () => void }) {
-  const [disposalDate, setDisposalDate] = useState(todayIso());
+  const [disposalDate, setDisposalDate] = useState(businessToday());
   const [proceedsCents, setProceedsCents] = useState("0");
   const [proceedsAccount, setProceedsAccount] = useState("");
   const [gainAccount, setGainAccount] = useState("");
@@ -347,6 +371,112 @@ function DisposeForm({
       </div>
       <button className={styles.button} disabled={busy} onClick={() => void submit()}>{busy ? "Disposing…" : "Dispose asset"}</button>
       {err ? <p className={styles.errorText}>{err}</p> : null}
+    </div>
+  );
+}
+
+/** The second-draft guard's UI face (Wave D-b, design §6.1, G10):
+ *  `dispose_fixed_asset` refuses a second draft while an earlier one is
+ *  still outstanding (`disposal_draft_outstanding`) — this panel is that
+ *  outstanding draft's withdraw affordance, so a corrected re-dispose has a
+ *  door. Reuses the EXISTING generic draft primitives (getDraftReview +
+ *  withdrawDraft, ../chat/review) rather than inventing a new asset-specific
+ *  withdraw verb — the same cross-lane reuse DocReviewCard.tsx already
+ *  establishes (it pulls getDraftReview from chat/review too, and is itself
+ *  mounted from BOTH /chat and /queue). */
+function DisposalDraftGuard({
+  token, clientId, entryId, onDone,
+}: { token: string; clientId: string; entryId: string | null; onDone: () => void }) {
+  const [revisionToken, setRevisionToken] = useState<string | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const reload = useCallback(async () => {
+    setLoadErr(null);
+    if (!entryId) { setRevisionToken(null); return; }
+    try {
+      const review = await getDraftReview(token, entryId, clientId);
+      setRevisionToken(review?.revision_token ?? null);
+    } catch (e) {
+      setLoadErr((e as PgrestError).message ?? String(e));
+      setRevisionToken(null);
+    }
+  }, [token, entryId, clientId]);
+
+  useEffect(() => { void reload(); }, [reload]);
+
+  const withdraw = async () => {
+    if (!entryId || !revisionToken || !reason.trim()) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await withdrawDraft(token, entryId, reason.trim(), revisionToken);
+      onDone();
+    } catch (e) {
+      setErr((e as PgrestError).message ?? String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.section}>
+      <p className={styles.sectionTitle}>Disposal draft outstanding</p>
+      <p className={styles.hint}>
+        A disposal draft{entryId ? ` (entry ${shortId(entryId)})` : ""} is still outstanding on this asset — a second
+        disposal is refused (`disposal_draft_outstanding`) until this one is approved or withdrawn.
+      </p>
+      {loadErr ? <p className={styles.errorText}>{loadErr}</p> : null}
+      {entryId && revisionToken === null && !loadErr ? <p className={styles.muted}>Loading the outstanding draft…</p> : null}
+      {entryId ? (
+        <div className={styles.actions}>
+          <input
+            className={styles.input} placeholder="Withdrawal reason" value={reason}
+            onChange={(e) => setReason(e.target.value)} aria-label="Disposal draft withdrawal reason" style={{ flex: 1 }}
+          />
+          <button className={styles.buttonSecondary} disabled={busy || !revisionToken || !reason.trim()} onClick={() => void withdraw()}>
+            {busy ? "Withdrawing…" : "Withdraw draft"}
+          </button>
+        </div>
+      ) : (
+        /* The DB says this row is frozen but did not name the draft. State that
+           plainly and send the reader to the queue rather than showing an inert
+           button — the freeze is the fact, the id is only a convenience. */
+        <p className={styles.muted}>The register did not name the outstanding draft — find and withdraw it on /queue.</p>
+      )}
+      {err ? <p className={styles.errorText}>{err}</p> : null}
+      <p className={styles.hint}>Withdrawing clears the way for a fresh, corrected disposal draft — or review it directly on /queue.</p>
+    </div>
+  );
+}
+
+/** WDB-G14 (design §6.4) — THE MID-MONTH CHANGEOVER ADVISORY, ON A SURFACE.
+ *  The 2026-08-02 owner ruling pinned the month-grain convention (a revision
+ *  effective after day 1 leaves the WHOLE changeover month with the predecessor)
+ *  ON CONDITION that the changeover is escalated where a professional can see it.
+ *  `_fa_asset_json` emits it on every /assets read and
+ *  `revise_fixed_asset_particulars` returns it in the receipt; until now NO
+ *  dashboard code rendered either, so the condition the ruling carries was not met
+ *  on any surface. Every field below is the DB's own — the note text included. */
+export function SplitMonthPanel({ rows }: { rows: SplitMonthAdvisory[] }) {
+  if (rows.length === 0) return null;
+  return (
+    <div className={styles.section}>
+      <p className={styles.sectionTitle}>Mid-month changeover ({rows.length}) — review for materiality</p>
+      {rows.map((r, i) => (
+        <div key={`${r.asset_id ?? i}-${r.effective_from ?? i}`}>
+          <p className={styles.muted}>
+            revision effective {r.effective_from ?? "—"} · changeover month {r.changeover_month_start ?? "—"} → {r.changeover_month_end ?? "—"}
+            {" · month charged to "}<strong>{r.month_charged_to ?? "—"}</strong>
+          </p>
+          <p className={styles.muted}>
+            predecessor last chargeable month {r.predecessor_last_chargeable_month ?? "—"} · successor first {r.successor_first_chargeable_month ?? "—"}
+          </p>
+          {r.note ? <p className={styles.hint}>{r.note}</p> : null}
+        </div>
+      ))}
     </div>
   );
 }

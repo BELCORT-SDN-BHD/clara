@@ -140,6 +140,13 @@ function toQueueRow(raw: unknown): QueueRow {
     watch_id: s(o.watch_id),
     tier: s(o.tier),
     finding_id: s(o.finding_id),
+    // [D-b0 fix] `asset_id` was declared on QueueRow (0041) but never actually
+    // mapped here — every fixed_asset_incomplete row's detail link degraded to
+    // FallbackPanel even on a real 0041 envelope. 0042's shared authorities are
+    // what make the key reachable at this frontier (dbSeamCensus DIRECTION 2),
+    // so the mapping ships with them. The staff-advance sibling (`advance_id`)
+    // arrives with D-b1, which is the migration that emits it.
+    asset_id: s(o.asset_id),
   };
 }
 

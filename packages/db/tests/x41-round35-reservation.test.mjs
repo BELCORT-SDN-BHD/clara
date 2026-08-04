@@ -3,12 +3,15 @@
 //
 //   x41.s6  (e) the reservation is TWO-directional: the bank COA doors refuse an
 //           FA-reserved code, and do not over-refuse an ordinary one.
-//   x41.s7  (f) a code baked on a register row is reserved even when no ACTIVE profile
+//   x41.s7  (f) a code baked on a LIVE register row is reserved even when no ACTIVE profile
 //           mentions it — version-forward frees the profile, never the fact; and a
-//           disposal entry never soft-births a register row. [ROUND-4] An UNWOUND row
-//           does NOT release its codes either: an EVER-USED FA code stays role-reserved,
-//           because the tie's per-pair census cannot describe one code in two roles on
-//           one client's books — and the register must still tie after the next movement.
+//           disposal entry never soft-births a register row. [ROUND-4, OVERTURNED by the
+//           owner ruling of 2026-08-03 / WDB-R1 item 2] A TERMINAL row — unwound, disposed
+//           or superseded — DOES release its codes. Round 4 pinned the opposite ("an
+//           ever-used FA code stays role-reserved"); that made the reservation permanent
+//           with no verb able to lift it, and the measured cost was an advance entry that
+//           could never be reversed. The cell now pins BOTH halves — live reserves,
+//           terminal releases — and still measures the tie through the next movement.
 //   x41.s8  (g) proceeds may not be routed into a RETIRED or VERSION-FORWARDED FA code
 //           that a live register row still posts to.
 //
@@ -130,7 +133,7 @@ test("x41.s6 the reservation is two-directional: add_bank_account and remap_bank
 // x41.s7 — (f) A BAKED CODE IS RESERVED WHILE A LIVE ROW POSTS TO IT.
 // ===========================================================================
 
-test("x41.s7 version-forward frees the PROFILE, never the FACT: a code baked on a register row cannot be re-enrolled in another role, a disposal entry never soft-births, and UNWINDING the row does not release it either — an ever-used FA code stays reserved, and the register still ties through the next movement", async (t) => {
+test("x41.s7 version-forward frees the PROFILE, never the FACT: a code baked on a LIVE register row cannot be re-enrolled in another role and a disposal entry never soft-births — but UNWINDING the row DOES release it (owner ruling 2026-08-03), and the register still ties through the next movement", async (t) => {
   if (skipHere(t)) return;
   const client = await freshFaClient("s7");
   const start = mon(-3);
@@ -185,27 +188,48 @@ test("x41.s7 version-forward frees the PROFILE, never the FACT: a code baked on 
   assert.equal(after.filter((r) => r.acquisition_entry_id === sold.entryId).length, 0,
     "…no register row was born FROM the disposal entry — the phantom's exact mechanical signature");
 
-  // (4) [ROUND-4] AN EVER-USED FA CODE STAYS ROLE-RESERVED. The earlier reading — that
-  // unwinding a row releases its codes — made the reservation a fact about LIVE rows
-  // only, and that is precisely the shape the tie cannot survive: `fa_register_tie`
-  // asserts per (asset_account, accumulated_account) PAIR, and a client whose chart lets
-  // one code be a cost account today and an accumulated account tomorrow has a census
-  // that must describe the same code in two roles over one history. The register row is
-  // unwound, not deleted — its baked codes are still a fact of this client's books.
+  // (4) [ROUND-4, OVERTURNED BY THE OWNER RULING OF 2026-08-03 — WDB-R1 item 2.]
+  //
+  // WHAT THIS CELL USED TO PIN, AND WHY IT IS WRONG. Round 4 read the reservation as a fact
+  // about every row that EVER existed: "an ever-used FA code stays role-reserved", on the
+  // reasoning that `fa_register_tie` censuses per (asset_account, accumulated_account) pair
+  // and cannot describe one code in two roles across one history. The reasoning about the
+  // TIE is sound and is measured at the foot of this cell. The conclusion drawn from it was
+  // not: it made `clara._fa_reserved_roles` reserve a code PERMANENTLY, through disposal,
+  // supersession and unwinding alike, with no verb anywhere able to release it. The measured
+  // consequence (D-b ladder round 3) is an accounting-correctness one: a code a fixed asset
+  // once carried can never be re-enrolled as a staff-advance account, so a historical advance
+  // entry becomes permanently un-reversible — a correction the books MUST record and cannot.
+  // The owner ruled: fix it at the root. 0042 S5.15 gates the three register-row disjuncts on
+  // `clara._fa_status_holds_account_role`, so pending/active rows reserve and the three
+  // TERMINAL statuses (disposed, superseded, unwound) release.
+  //
+  // THIS CELL THEREFORE NOW PINS BOTH HALVES, because a release that released too much would
+  // be the worse defect: the LIVE row still refuses (the mandatory setup below is the same
+  // assertion round 4 made, unchanged, and it still passes), and only the terminal row lets go.
   const c2 = await freshFaClient("s7rel");
   const { entry: acq, asset: a2 } = await buyAsset({ client: c2, cents: 90_000, postingDate: dayIn(start, 2), memo: "x41 s7 release" });
   await completeSL(c2, a2.id, { life: 36, start: start.start, description: "x41 s7 release" });
   await upsertFaProfile(w.users.alice, { client: c2, assetAccount: COST, accumAccount: ACCUM2, expenseAccount: EXPENSE2 });
   await refusesAxis(() => upsertFaProfile(w.users.alice, {
     client: c2, assetAccount: ACCUM, accumAccount: null, expenseAccount: null,
-  }), T.profileInvalid, ["reserved_account", "role_overlap"], "mandatory setup: the code is reserved while the row is live");
+  }), T.profileInvalid, ["reserved_account", "role_overlap"],
+  "THE HALF THAT DID NOT CHANGE: while the register row is LIVE, the code it baked is reserved and a different-role re-enrolment is refused");
   await reverseAndSettle(w.users.alice, { entry: acq, reason: "x41 s7 undo acquisition", opKey: opk("x41s7rel") });
   assert.equal((await faRow(a2.id)).status, "unwound", "the acquisition reverses cleanly (no charges, no descendants)");
-  await refusesAxis(() => upsertFaProfile(w.users.alice, {
+  // THE RULED RELEASE. The row is unwound — the acquisition entry was reversed, so the GL
+  // carries nothing on either code and the row can never post again. It lets the code go.
+  await upsertFaProfile(w.users.alice, {
     client: c2, assetAccount: ACCUM, accumAccount: null, expenseAccount: null,
-  }), T.profileInvalid, ["reserved_account", "role_overlap"],
-  "re-enrolling as a COST account a code an UNWOUND register row still carries as its accumulated-depreciation account — the row is reversed, not erased, and a code this client's register has EVER posted to may not come back in a different role");
-  assert.equal((await activeProfilesOn(c2, ACCUM)).length, 0, "…and no enrolment landed on the ever-used code");
+  });
+  assert.equal((await activeProfilesOn(c2, ACCUM)).length, 1,
+    "an UNWOUND row RELEASES its baked codes — the enrolment that round 4 refused forever is now admitted (owner ruling 2026-08-03)");
+  // …AND IT IS RELEASED FOR THE RIGHT REASON, not because the guard stopped working. The
+  // still-LIVE profile's own codes are untouched by the gate and are still reserved.
+  await refusesAxis(() => upsertFaProfile(w.users.alice, {
+    client: c2, assetAccount: ACCUM2, accumAccount: null, expenseAccount: null,
+  }), T.profileInvalid, ["reserved_account", "role_overlap", "accum_shared"],
+  "…while the ACTIVE profile's accumulated code is still reserved — the gate released the terminal ROW, it did not disarm the predicate");
 
   // …AND THE REGISTER STILL MOVES. A reservation predicate is only worth having if the
   // everyday path after it is effortless: the next acquisition on the still-enrolled cost

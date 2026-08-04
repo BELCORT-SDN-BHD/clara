@@ -18,20 +18,17 @@ import {
 import { fmtCents, fmtDeltaCents } from "../shared/fmt";
 import styles from "./aging.module.css";
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function yearBefore(dateIso: string): string {
-  const d = new Date(`${dateIso}T00:00:00Z`);
-  if (Number.isNaN(d.getTime())) return dateIso;
-  d.setUTCFullYear(d.getUTCFullYear() - 1);
-  return d.toISOString().slice(0, 10);
-}
+// [round-5 fix, censused door 2 of 4] the DB owns the date, never the browser.
+// `ar_aging`/`ap_aging` filter on `p_as_of`, so the browser's UTC date made this
+// register omit everything dated today for the first eight hours of every MYT day
+// — the same defect round 3 fixed in advancesApi and round 5 found again in
+// /advances. Fixed at the invariant this time: ONE clock, shared.
+// See shared/businessDate.ts.
+import { businessToday, yearBefore } from "../shared/businessDate";
 
 export function AgingWorkbench({ token, clientId, clientName }: { token: string; clientId: string; clientName?: string | null }) {
   const [domain, setDomain] = useState<AgingDomain>("ar");
-  const [asOf, setAsOf] = useState(todayIso());
+  const [asOf, setAsOf] = useState(businessToday());
   const [rows, setRows] = useState<AgingBucketRow[]>([]);
   const [totals, setTotals] = useState<AgingTotals | null>(null);
   const [available, setAvailable] = useState(true);

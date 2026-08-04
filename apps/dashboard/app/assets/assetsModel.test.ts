@@ -10,7 +10,8 @@ import assert from "node:assert/strict";
 import {
   toAssetRow, toListFixedAssetsRead, toGetFixedAssetRead, toListDepreciationRunsRead,
   toGetDepreciationRunRead, toDepreciationAuthorityRead, toFaRegisterTieRead,
-  assetIsIncomplete, assetHasUnchargedDue, assetIsDisposable, fyEndLabel, assetsScreenState,
+  assetIsIncomplete, assetHasUnchargedDue, assetIsDisposable, assetHasSplitMonthAdvisory,
+  fyEndLabel, assetsScreenState,
 } from "./assetsModel";
 
 // --- toAssetRow: the pin-sheet §3 ASSET shape -----------------------------------
@@ -187,9 +188,42 @@ test("assetHasUnchargedDue reads the DB's own count, never a client-derived one"
 });
 
 test("assetIsDisposable requires active status AND complete particulars", () => {
-  assert.equal(assetIsDisposable({ status: "active", particulars_complete: true }), true);
-  assert.equal(assetIsDisposable({ status: "active", particulars_complete: false }), false);
-  assert.equal(assetIsDisposable({ status: "disposed", particulars_complete: true }), false);
+  const base = { disposal_draft_outstanding: false };
+  assert.equal(assetIsDisposable({ ...base, status: "active", particulars_complete: true }), true);
+  assert.equal(assetIsDisposable({ ...base, status: "active", particulars_complete: false }), false);
+  assert.equal(assetIsDisposable({ ...base, status: "disposed", particulars_complete: true }), false);
+});
+
+// [round-5 fix] THE CELL THAT FAILS WITHOUT THE FIX. The UI predicate used to be
+// NARROWER than the verb it fronts: on a row the DB has frozen under WDB-G10 it
+// still said "disposable", so /assets offered a dispose form whose only possible
+// outcome was the CLR39 `disposal_draft_outstanding` refusal — and the panel that
+// names the remedy was gated on a key no function emitted, so it never rendered.
+test("assetIsDisposable is FALSE while the DB reports an outstanding disposal draft", () => {
+  assert.equal(
+    assetIsDisposable({ status: "active", particulars_complete: true, disposal_draft_outstanding: true }),
+    false,
+    "a frozen row must not be offered a dispose form that can only be refused",
+  );
+});
+
+test("toAssetRow reads the WDB-G10 freeze and the WDB-G14 advisory the DB actually emits", () => {
+  const row = toAssetRow({
+    id: "a1", status: "active", particulars_complete: true,
+    disposal_draft_outstanding: true, disposal_draft_entry_id: "e9",
+    uncharged_due: ["2026-05-01", "2026-06-01"], uncharged_due_count: 2,
+    split_month_advisory: [{ effective_from: "2026-03-14", month_charged_to: "predecessor", note: "…" }],
+    split_month_advisory_count: 1,
+  });
+  assert.equal(row.disposal_draft_outstanding, true);
+  assert.equal(row.disposal_draft_entry_id, "e9");
+  assert.deepEqual(row.uncharged_due, ["2026-05-01", "2026-06-01"]);
+  assert.equal(row.split_month_advisory.length, 1);
+  assert.equal(row.split_month_advisory[0]?.month_charged_to, "predecessor");
+  assert.equal(assetHasSplitMonthAdvisory(row), true);
+  // A row the DB does NOT freeze reads false — never "the key was absent, so maybe".
+  assert.equal(toAssetRow({ id: "a2" }).disposal_draft_outstanding, false);
+  assert.equal(assetHasSplitMonthAdvisory(toAssetRow({ id: "a2" })), false);
 });
 
 // --- screen state, including the [D1-style] fail-closed 'unavailable' arm -------

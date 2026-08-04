@@ -11,6 +11,15 @@
 // LITERALLY from 0041-interface-contract.md §3 (the orchestrator-pinned read
 // shapes, binding on every D-a build lane) — a future drift from the shipped
 // migration is itself a pin violation to report, not silently patch around.
+//
+// [round-5 fix] THE ASSUMPTION THAT WAS NEVER LANDED. This file used to carry
+// `disposal_draft_entry_id` as a NAMED ASSUMPTION — a key no function in the
+// schema emitted — and AssetDetailPane gated a 72-line panel on it, so the panel
+// could never render while its ELSE arm offered a dispose form whose only possible
+// outcome on that row was a CLR39 refusal. 0042 S5.4 now projects the freeze from
+// `_fa_disposal_draft_outstanding` (the guard's OWN function) plus the draft id,
+// so the key is measured, not assumed. `dbSeamCensus.test.ts` diffs every mapper
+// below against the SHIPPED catalog so no successor can re-introduce the shape.
 
 function s(v: unknown): string | null {
   return typeof v === "string" ? v : null;
@@ -66,7 +75,51 @@ export type AssetRow = {
   disposed_at: string | null;
   disposal_entry_id: string | null;
   uncharged_due_count: number | null;
+  /** WD-R6: WHICH months this row owes, not only how many. `_fa_asset_json`
+   *  projects both from one arithmetic pass precisely so a professional can see
+   *  the months on the register row itself (0041's fold F3). */
+  uncharged_due: string[];
+  /** Wave D-b (design §6.1, WDB-G10): the second-disposal FREEZE, as the DB
+   *  itself judges it — `_fa_asset_json` asks the guard's own
+   *  `_fa_disposal_draft_outstanding`, so this verdict and the CLR39 refusal
+   *  `dispose_fixed_asset` would raise cannot disagree. TRUE ⇒ a dispose is
+   *  refused on this row until the outstanding draft is approved or withdrawn. */
+  disposal_draft_outstanding: boolean;
+  /** The outstanding draft's entry id when the DB can name it (it is allowed to
+   *  be null while the verdict is true). Drives the inline withdraw affordance
+   *  ONLY — the panel itself is keyed on the verdict, never on this. */
+  disposal_draft_entry_id: string | null;
+  /** WDB-G14 (design §6.4): the mid-month changeover advisory, DERIVED per read
+   *  and never stored. Non-empty ⇒ a revision took effect after day 1, so the
+   *  whole changeover month stayed with the predecessor. The 2026-08-02 owner
+   *  ruling pinned the month-grain arithmetic ON CONDITION that this is
+   *  reviewer-visible; an advisory no surface renders is not visible. */
+  split_month_advisory: SplitMonthAdvisory[];
+  split_month_advisory_count: number | null;
 };
+
+/** One mid-month changeover (WDB-G14). Every field is a DB-owned calendar fact or
+ *  a DB-read chargeable-month boundary — nothing here is computed client-side. */
+export type SplitMonthAdvisory = {
+  asset_id: string | null; predecessor_asset_id: string | null; effective_from: string | null;
+  changeover_month_start: string | null; changeover_month_end: string | null;
+  month_charged_to: string | null; predecessor_last_chargeable_month: string | null;
+  successor_first_chargeable_month: string | null; note: string | null;
+};
+
+export function toSplitMonthAdvisory(raw: unknown): SplitMonthAdvisory {
+  const o = rec(raw);
+  return {
+    asset_id: s(o.asset_id), predecessor_asset_id: s(o.predecessor_asset_id),
+    effective_from: s(o.effective_from),
+    changeover_month_start: s(o.changeover_month_start),
+    changeover_month_end: s(o.changeover_month_end),
+    month_charged_to: s(o.month_charged_to),
+    predecessor_last_chargeable_month: s(o.predecessor_last_chargeable_month),
+    successor_first_chargeable_month: s(o.successor_first_chargeable_month),
+    note: s(o.note),
+  };
+}
 
 export function toAssetRow(raw: unknown): AssetRow {
   const o = rec(raw);
@@ -96,6 +149,11 @@ export function toAssetRow(raw: unknown): AssetRow {
     disposed_at: s(o.disposed_at),
     disposal_entry_id: s(o.disposal_entry_id),
     uncharged_due_count: numOrNull(o.uncharged_due_count),
+    uncharged_due: strArr(o.uncharged_due),
+    disposal_draft_outstanding: bool(o.disposal_draft_outstanding),
+    disposal_draft_entry_id: s(o.disposal_draft_entry_id),
+    split_month_advisory: arr(o.split_month_advisory).map(toSplitMonthAdvisory),
+    split_month_advisory_count: numOrNull(o.split_month_advisory_count),
   };
 }
 
@@ -396,9 +454,24 @@ export function assetHasUnchargedDue(row: Pick<AssetRow, "uncharged_due_count">)
   return (row.uncharged_due_count ?? 0) > 0;
 }
 
-/** The dispose action is only offered on a live, complete asset. */
-export function assetIsDisposable(row: Pick<AssetRow, "status" | "particulars_complete">): boolean {
-  return row.status === "active" && row.particulars_complete;
+/** The dispose action is only offered on a live, complete, UNFROZEN asset.
+ *
+ *  [round-5 fix] this predicate used to read `active && particulars_complete` —
+ *  NARROWER than the DB's own gate, which since WDB-G10 also refuses while a
+ *  disposal draft is outstanding. A UI predicate that is narrower than the verb it
+ *  fronts offers acts that can only be refused. The freeze term is the DB's own
+ *  verdict (`_fa_asset_json` asks the guard's function), never a re-derivation. */
+export function assetIsDisposable(
+  row: Pick<AssetRow, "status" | "particulars_complete" | "disposal_draft_outstanding">,
+): boolean {
+  return row.status === "active" && row.particulars_complete && !row.disposal_draft_outstanding;
+}
+
+/** WDB-G14: does this row carry a mid-month changeover a reviewer must see? */
+export function assetHasSplitMonthAdvisory(
+  row: Pick<AssetRow, "split_month_advisory" | "split_month_advisory_count">,
+): boolean {
+  return (row.split_month_advisory_count ?? row.split_month_advisory.length) > 0;
 }
 
 // ---------------------------------------------------------------------------

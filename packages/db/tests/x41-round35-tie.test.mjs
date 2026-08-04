@@ -4,14 +4,21 @@
 //   x41.s5  G3 — the K6 opening-correction hand-off: `approve_opening_correction`
 //           supersedes a carry-down register row, and the corrected PREDECESSOR must
 //           leave the as-of window. It only can if the hand-off stamps `superseded_at`,
-//           so the cell also censuses the whole register for the NULL.
-//   x41.s4  G7(c) — the WHOLE-DB `fa_register_tie` sweep, at THREE as-ofs, through the
-//           production instrument, with an explicit NAMED allow-list. Unexplained reds
-//           must be EMPTY; an explained red must belong to a fixture named right here.
-//           [ROUND-4.6] A tie REFUSAL is held to the same bar and one class narrower:
-//           zero, save the single deliberately over-cap lineage x41.u4 leaves standing
-//           to prove the ratified 64-hop boundary — and that one must PROVE itself
-//           over-cap against the register before it is excused.
+//           so the cell also censuses the register (scoped, see below) for the NULL.
+//   x41.s4  G7(c) — the x41-FAMILY-SCOPED `fa_register_tie` sweep, at THREE as-ofs,
+//           through the production instrument, with an explicit NAMED allow-list.
+//           Unexplained reds must be EMPTY; an explained red must belong to a fixture
+//           named right here. [ROUND-4.6] A tie REFUSAL is held to the same bar and one
+//           class narrower: zero, save the single deliberately over-cap lineage x41.u4
+//           leaves standing to prove the ratified 64-hop boundary — and that one must
+//           PROVE itself over-cap against the register before it is excused.
+//   x41.s4z [round-7, task #62, WDB-R4] THE SCOPE ITSELF, PINNED. A cell the fix did
+//           not have to write proves the scoping law is load-bearing rather than
+//           cosmetic: a deliberately-broken register on a client OUTSIDE the x41
+//           family's own naming convention is invisible to the sweep, and IS a real
+//           unexplained defect when measured directly through the same production
+//           instrument. Re-widening the sweep back to whole-DB is exactly what would
+//           make this cell (and x41.s4 itself) red again.
 //
 // WHY. `fa_register_tie` is the wave's assertion instrument and WD-R14's pre-flight: a
 // professional who meets one false red stops trusting the green ones. Per-fixture tie
@@ -19,6 +26,21 @@
 // in 0017 and double-counted every corrected carry-down at EVERY as-of, on exactly the
 // real-client shape acceptance will run, and no cell in the battery saw it. A sweep with
 // a named allow-list is the cheapest instrument that does.
+//
+// [round-7, task #62] SCOPED TO THE x41 FAMILY, NOT WHOLE-DATABASE. x41.s4 and x41.s5's
+// register-wide orphan census used to run with no client predicate at all — sound only
+// on a database this file owns outright, which CI's shared-database model never is
+// (`pnpm -r --if-present test` runs every package's suite against ONE Postgres).
+// Measured offender: x42-reservation-authority.test.mjs / x42-reservation-role.test.mjs
+// plant RAW, deliberately-unbacked `clara.fixed_assets` rows on their own `x42v_...`
+// clients (x42-ra-helpers.mjs's `plantRow`) to exercise the reservation-authority
+// predicate in isolation — by design, never through the acquisition/disposal writers,
+// so a raw `superseded` plant never runs the K6 hand-off that stamps `superseded_at`
+// either. Run the x42 battery first on one shared database and both cells here go red
+// on `x42v_...` clients they were never about. The fix scopes both to the x41 family's
+// own naming convention (`X41_FAMILY_NAME_RE`, x41-round35-helpers.mjs — the ONE place
+// the law lives) rather than widening either allow-list, per the work order's own
+// instruction and the maintenance-debt lesson an ever-growing allow-list would be.
 //
 // CONTRACT-BLIND (see x41-fa-fixtures.mjs / x41-round3-helpers.mjs headers).
 
@@ -30,6 +52,7 @@ import {
   faRegisterTie, listFixedAssets, assetRowsOf, tieAccts, tieSumBy,
   faWorld, faRow, faRows, glNet, entryRowOf, openingItemRowsOf, kSeededFaClient,
   tieSweep, sweepAccountRows, isRed, isExplained, openReversalWindows, inReversalWindow,
+  X41_FAMILY_NAME_RE, createClient, buildFaChart, grantConsent, uniqTag,
 } from "./x41-round35-helpers.mjs";
 
 let live = false;
@@ -192,22 +215,32 @@ test("x41.s5 approve_opening_correction hands the register over: the corrected p
   const shown = listed.filter((r) => r.id === k.assetId || r.id === succ.id);
   noteLane(`x41.s5 list_fixed_assets shows ${shown.length} row(s) of the corrected pair (statuses: ${shown.map((r) => r.status).join(", ")})`);
 
-  // ---- The census that makes the whole class unrepresentable, corpus-wide: the backfill
-  // AND the recut writer together. A superseded row with no superseded_at is a register
-  // row that never leaves the as-of window.
+  // ---- The census that makes the whole class unrepresentable across the x41 FAMILY's
+  // OWN register rows: the backfill AND the recut writer together. A superseded row with
+  // no superseded_at is a register row that never leaves the as-of window.
+  //
+  // [round-7, task #62] SCOPED to `X41_FAMILY_NAME_RE`, not the whole `clara.fixed_assets`
+  // table — a raw, deliberately-unbacked `superseded` plant from a DIFFERENT family (see
+  // x42-ra-helpers.mjs's `plantRow`, which never runs the K6 hand-off this census is about)
+  // has no superseded_at by design and is not a G3 defect at all; scoping is what keeps
+  // this census a statement about the K6 writer rather than about every raw fixture any
+  // OTHER battery ever plants on a shared database. Same law, same constant, as x41.s4's
+  // scoped sweep and its x41.s4z pin below.
   const orphans = await rootQuery(
     `select f.id, f.client_id, f.description from clara.fixed_assets f
-      where f.status = 'superseded' and f.superseded_at is null`,
+       join clara.clients c on c.id = f.client_id
+      where f.status = 'superseded' and f.superseded_at is null and c.name ~ $1`,
+    [X41_FAMILY_NAME_RE],
   );
   assert.equal(orphans.rowCount, 0,
-    `NO register row anywhere is 'superseded' with a NULL superseded_at (G3: the 0041 backfill + the recut K6 writer). Offenders: ${JSON.stringify(orphans.rows)}`);
+    `NO register row of the x41 family is 'superseded' with a NULL superseded_at (G3: the 0041 backfill + the recut K6 writer). Offenders: ${JSON.stringify(orphans.rows)}`);
 });
 
 // ===========================================================================
-// x41.s4 — THE WHOLE-DB SWEEP, WITH A NAMED ALLOW-LIST (G7(c)).
+// x41.s4 — THE x41-FAMILY-SCOPED SWEEP, WITH A NAMED ALLOW-LIST (G7(c)).
 // ===========================================================================
 
-test("x41.s4 the WHOLE-DB fa_register_tie sweep at three as-ofs: unexplained differences are EMPTY, every explained one belongs to a fixture named in this cell's allow-list, and every A6 correction window has shut by the settled as-of", async (t) => {
+test("x41.s4 the x41-family-scoped fa_register_tie sweep at three as-ofs: unexplained differences are EMPTY, every explained one belongs to a fixture named in this cell's allow-list, and every A6 correction window has shut by the settled as-of", async (t) => {
   if (skipHere(t)) return;
   // THREE as-ofs, and the third is load-bearing. Two of them sit in the past, where a
   // reversal mirror dated on TODAY's business date can still be pending (the A6 window
@@ -286,7 +319,7 @@ test("x41.s4 the WHOLE-DB fa_register_tie sweep at three as-ofs: unexplained dif
       cost_diff: r.costDiff, accum_diff: r.accumDiff,
       pre_cost: r.preCost, pre_accum: r.preAccum, keys: r.keys,
     })), [],
-    `at as_of ${asOf}: EVERY register-vs-GL difference in the whole database is either zero or fully explained by the tie's own pre-enrolment column. An unexplained red is what a WD-R14 pre-flight would surface on a real firm's books with no column to point at.`);
+    `at as_of ${asOf}: EVERY register-vs-GL difference across the x41 family's own register-bearing clients is either zero or fully explained by the tie's own pre-enrolment column. An unexplained red is what a WD-R14 pre-flight would surface on a real firm's books with no column to point at.`);
 
     for (const r of explained) {
       const allow = allowedBy(r.clientName);
@@ -308,4 +341,68 @@ test("x41.s4 the WHOLE-DB fa_register_tie sweep at three as-ofs: unexplained dif
   // a stale rig — rebuild it (the part2 rig-hygiene law), never widen this bound.
   assert.ok((seen.overCapClients?.size ?? 0) <= 2,
     `the over-cap exemption excused ${seen.overCapClients?.size} distinct client(s); at most 2 can exist on a healthy rig (0 fresh, +1 per prior persistent-rig run). Rebuild the rig database rather than letting unmeasurable books accumulate.`);
+});
+
+// ===========================================================================
+// x41.s4z — THE SCOPE ITSELF, PINNED (round-7, task #62, WDB-R4).
+// ===========================================================================
+//
+// WHAT THE FIX DID NOT THINK OF, ASKED OF ITS OWN FIX. Scoping x41.s4/x41.s5 to
+// `X41_FAMILY_NAME_RE` (x41-round35-helpers.mjs) makes them un-pollutable by a sibling
+// family's fixtures — but a scope that merely narrows COULD also be vacuous: it would
+// stay green even if the whole sweep body were deleted, or if the name predicate
+// silently matched nothing. This cell asks the two questions the scoping fix's own path
+// does not: (i) is the exclusion REAL — does a client outside the family, carrying a
+// genuinely broken register, actually vanish from the sweep; and (ii) is what got
+// excluded really the shape the sweep exists to catch — does the SAME production
+// instrument, asked directly and without the scope in the way, call it a real red. Both
+// arms verified is what makes "re-widening the scope is what would turn this red again"
+// a measured fact rather than an assertion.
+test("x41.s4z the sweep's x41-family scope is REAL, not vacuous: a deliberately-broken register on a client OUTSIDE the family (the exact x42v_ shape that caused task #62) is invisible to tieSweep, and IS a genuine unexplained tie failure when the production instrument is asked about it directly — re-widening the scope to whole-DB is exactly what would make this cell, and x41.s4 itself, red again", async (t) => {
+  if (skipHere(t)) return;
+
+  // A client OUTSIDE the x41 family, named in the exact shape of the measured offender
+  // (x42-adv-world.mjs's `x42v_<label>_<tag>` — never `x41_...`), carrying a fixed-asset
+  // register row planted RAW (no acquisition entry, no GL leg at all — the same shape
+  // x42-ra-helpers.mjs's `plantRow` uses to test the reservation predicate in isolation,
+  // never a defect in the writer that would normally back one).
+  const foreignName = `x42v_s4zscope_${uniqTag()}`;
+  assert.doesNotMatch(foreignName, new RegExp(X41_FAMILY_NAME_RE),
+    "mandatory setup: this fixture's own name must sit OUTSIDE the scope under test, or the pin proves nothing");
+  const foreign = await createClient(w.users.alice, { name: foreignName, opKey: opk("x41s4zcli") });
+  await buildFaChart(w.users.alice, foreign);
+  await grantConsent(w.users.alice, { firm: w.firms.A, client: foreign }).catch(() => {});
+  const brokenCost = 424_200; // a distinctive figure with no GL counterpart anywhere
+  await rootQuery(
+    `insert into clara.fixed_assets
+       (firm_id, client_id, description, acquired_date, cost_cents, useful_life_months,
+        depreciation_method, asset_account_code, accum_depr_account_code,
+        depr_expense_account_code, status)
+     select cl.firm_id, cl.id, 'x41.s4z deliberately-broken register row (never through a writer)',
+            current_date - 400, $2::bigint, 60, 'straight_line', $3::text, $4::text, $5::text, 'active'
+       from clara.clients cl where cl.id = $1::uuid`,
+    [foreign, brokenCost, COST, ACCUM, EXPENSE],
+  );
+  const asOf = dayIn(mon(0), 1);
+
+  // (i) ASKED DIRECTLY — the SAME production instrument x41.s4 drives, with the scope out
+  // of the way entirely — this really is what the sweep exists to catch: a register that
+  // holds money the GL never moved.
+  const direct = await faRegisterTie(w.users.alice, foreign, asOf);
+  const directAccts = tieAccts(direct, COST);
+  assert.ok(directAccts.length >= 1, "mandatory setup: the planted register row appears in its OWN client's tie");
+  assert.equal(tieSumBy(directAccts, /^register_cost/, "the direct tie's register cost"), brokenCost,
+    `the direct tie reports the register cost we planted (${brokenCost}), to the cent`);
+  assert.equal(tieSumBy(directAccts, /^cost_diff/, "the direct tie's cost difference"), brokenCost,
+    `…and the FULL difference against a GL that never moved (${brokenCost}), to the cent — this is a real unexplained defect, not a benign fixture`);
+  assert.equal(direct.tie, false,
+    `fa_register_tie itself calls this client NOT tying (got ${JSON.stringify(direct.accounts ?? direct)}) — confirming what got excluded below really would have been an unexplained red`);
+
+  // (ii) THE SWEEP NEVER SEES IT. tieSweep enumerates only c.name ~ X41_FAMILY_NAME_RE, and
+  // this client's name was asserted OUTSIDE that pattern above.
+  const swept = await tieSweep(asOf);
+  const seenIds = swept.map((r) => r.client);
+  assert.ok(!seenIds.includes(foreign),
+    `the x41-family-scoped sweep must NOT enumerate '${foreignName}' (${foreign}) — it sits outside X41_FAMILY_NAME_RE ('${X41_FAMILY_NAME_RE}'). If this ever fails, the scope has been re-widened back toward whole-DB (task #62's regression), and x41.s4 would go red on this fixture's own kind the next time a sibling battery runs first on a shared database.`);
+  noteLane(`x41.s4z planted '${foreignName}' with an unexplained ${brokenCost}-cent register/GL gap (fa_register_tie.tie=false, verified directly) and confirmed the scoped sweep never enumerates it — the scoping law is load-bearing, not cosmetic`);
 });

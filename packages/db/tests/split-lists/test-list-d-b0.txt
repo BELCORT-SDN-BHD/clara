@@ -1,0 +1,90 @@
+# WAVE D-b SPLIT — D-b0 TEST LIST  (0042_wave_d_b0_shared_authorities)
+#
+# 30 runnable test files · 146 cells. EVERY cell was MEASURED green on this slice's
+# rig (clara_0041_asm + the chain through 0042), F1 fork lane, 2026-08-04.
+# [E21 RESIDUAL, executed] +1 file / +3 cells: x42b0-r9-n2.test.mjs (f3, f6, f7), forked
+# out of x42-r9-n2 per ERRATA-E19-E25.md E21's own remedy. See PARTITION.md's appended
+# "E21 residual EXECUTED" section.
+#
+# CI (E17 IS BINDING): every run sets CLARA_MIGRATIONS_DIR at the migrations copy the DB was
+# built from. In this slice's own PR that is packages/db/migrations, so the default resolves
+# and nothing needs setting; a multi-chain checkout MUST set it or the rig's ensureReady()
+# re-migrate fails its history-integrity check and eats exactly one cell (x42-s5c-awcc).
+#
+# THE CELL FLOOR (machine-read by ci.yml's db-slice-frontiers leg — the totality gate is
+# FILE-granular and cannot see a cell deleted inside a still-listed file). MEASURED whole on
+# clara_wc_b0 (0041_asm + this slice's chain), E17 honoured, --test-concurrency=1:
+#   149 pass / 0 fail / 4 skip over 32 files. Raise it when you add cells; NEVER lower it to
+#   go green.
+#!cells-floor: 149
+#
+# THE RESET-GATED DRILL RUNS ALONE, in its own throwaway DB — NOT in this list:
+#   PGDATABASE=clara_x42_b0_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+#     CLARA_RIG_DB=1 node --test tests/x42-0042-b0-upgrade.test.mjs
+#
+# DASHBOARD: D-b0 ships NO new dashboard surface (it is authorities only).
+#   Its dbSeamCensus.bindings.ts variant is bindings/dbSeamCensus.bindings.b0.ts.
+
+# --- WHOLE FILES (22) — every cell in the file belongs to this slice ---
+x41-0041-upgrade.test.mjs
+x41-belt.test.mjs
+x41-depreciation.test.mjs
+x41-disposal.test.mjs
+x41-reducing-balance.test.mjs
+x41-reversal.test.mjs
+x41-round3-arith.test.mjs
+x41-round3-guards.test.mjs
+x41-round3-lifecycle.test.mjs
+x41-round3-tie.test.mjs
+x41-round35-basis.test.mjs
+x41-round35-disposal.test.mjs
+x41-round35-g5.test.mjs
+x41-round35-reservation.test.mjs
+x41-round35-tie.test.mjs
+x41-round4-g2.test.mjs
+x41-round46.test.mjs
+x41-wave-d-a-fa.test.mjs
+x42-r7-fa-stamp.test.mjs
+x42-s5-residuals.test.mjs
+x42-s5-seam.test.mjs
+x42-s5c-awcc.test.mjs
+
+# --- FORKS (8) — this slice's share of a file whose cells span slices ---
+x41b0-surface.test.mjs
+x42b0-period-class.test.mjs
+x42b0-r7-s5-census.test.mjs
+x42b0-r7-s5-clock.test.mjs
+x42b0-r8-fy.test.mjs
+x42b0-r8-tails.test.mjs
+x42b0-r9-n2.test.mjs
+x42b0-s5c-clock.test.mjs
+
+# --- CROSS-SLICE CONTRACTS (2) — frontier-aware; each asserts what is TRUE here ---
+x42x-b0-b1-reservation-union.test.mjs
+x42x-b3-b2-hook-order.test.mjs
+
+# --- HELPER MODULES this slice's files import (not runnable; ship with the slice) ---
+#   NEW in this slice: x41-fa-fixtures.mjs, x41-fa-world.mjs, x41-round3-helpers.mjs, x41-round35-helpers.mjs, x41-round4-helpers.mjs, x41-surface-helpers.mjs, x42-s5-helpers.mjs
+#   NEW in this slice, drill-side: x42-split-upgrade-kit.mjs — the shared upgrade-drill kit.
+#     ALL FOUR drills import it, so it MUST land with the FIRST slice; it is on no list's
+#     runnable roster because it declares no cells.
+#   plus the pre-D-b shared rig: a21-helpers.mjs, rig-helpers.mjs, rig-meta.mjs,
+#   x38-match-fixtures.mjs, wave-a/wave-b fixtures (all already on main).
+#
+# [E21 RESIDUAL CAVEAT, measured] x42b0-r9-n2.test.mjs's prologue is byte-identical to the
+# original x42-r9-n2.test.mjs's, which ALSO imports x42-af2-world.mjs, x42-r8-seam-kit.mjs
+# and x42-r10-o3-kit.mjs — D-b3-only modules — and x42-af2-world.mjs itself imports a FOURTH,
+# x42-af2-helpers.mjs. This fork's own kept cells (f3/f6/f7) never call into any of them (they
+# only use rootQuery / the x41-fa-world.mjs helpers, both already covered above); the import is
+# dead weight the "prologue intact, no cell rewritten" fork idiom carries forward rather than
+# trims. A true D-b0-only checkout therefore needs ALL FOUR files present (unused):
+#     x42-af2-world.mjs · x42-af2-helpers.mjs · x42-r8-seam-kit.mjs · x42-r10-o3-kit.mjs
+# THE LAW (measured the hard way — carrying only the three NAMED modules gives
+# ERR_MODULE_NOT_FOUND on x42-af2-helpers.mjs and the fork runs 0 pass / 1 fail, before a
+# single cell executes):
+#     a fork's shipping set is the transitive closure of its prologue.
+# Not "the modules its kept cells call", and not "the modules its prologue names" — the
+# CLOSURE. Node resolves the whole import graph before any test gating runs.
+
+# --- RETIRED HERE: the whole-unit files these forks replace ---
+#   x42-0042-upgrade.test.mjs  (2 cells) -> SUPERSEDED by the four per-slice drills

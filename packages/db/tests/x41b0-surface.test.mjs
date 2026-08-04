@@ -1,3 +1,24 @@
+// ===========================================================================
+// [WAVE D-b SPLIT — D-b0 (0042, shared authorities)] A FORK OF `x41-surface.test.mjs`.
+//
+// THE SPLIT MOVES CELLS; IT NEVER EDITS THEM. Every `test(...)` block below is
+// byte-for-byte the block of the same name in x41-surface.test.mjs; the prologue
+// (imports, world builder, before/after, module-level helpers) is byte-for-byte the
+// original's (bar any substitution named below) and is shared by every fork of this
+// file. The ONLY authored bytes in this file are this banner.
+//
+// CELLS HERE (9): x41.j1, x41.j2, x41.k2, x41.k3, x41.l1, x41.l2, x41.l3, x41.l4, x41.m1
+// CELLS IN THE SIBLING FORK(S): b2 → D-b2
+//
+// WHY THIS CUT: measured, not argued — each cell here is green on clara_f1_b0 (0041 template + 0042)
+// and its subject is shipped by that slice. The sibling cells stay red until their
+// own slice ships; keeping them in one file is what would make a slice's CI red for
+// a reason that has nothing to do with the slice.
+//
+// AT MERGE: this fork REPLACES its share of the original — the original file is
+// deleted in the FIRST slice PR that lands a fork of it, and every fork of
+// x41-surface.test.mjs lands with its own slice.
+// ===========================================================================
 // 0041 Wave D-a — the FA REGISTER battery, part 5: THE RIDE-ALONGS (AF-1's hard
 // refuse · the reverse_entry MYT splice, WD-R13) · THE STRUCTURAL CENSUSES (design
 // §9.5: exactly one 'scheduled_run' writer, exactly two proposal-key writers, the
@@ -9,7 +30,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  rootQuery, humanQuery, namedCall, opk, noteLane, getPool, ROLES, CLR, endPool, printLaneNotes,
+  rootQuery, humanQuery, namedCall, opk, noteLane, ROLES, CLR, endPool, printLaneNotes,
   printSkipCount, reverseEntry, draftEntryV3, approveEntry, roleCanExecute, idOf,
   collectRowKind, listReviewQueue, human, counterpartyRows, normalize, x41EnsureReady, skip41,
   refuses, caught, T, ACCUM, EXPENSE, BANK, AR1, AP1, OTHER, mon, dayIn, disposeAsset,
@@ -18,7 +39,9 @@ import {
   freshFaClient, buyAsset, approvedEntry, approvedControlEntry, completeSL, liveAuthority,
   earnRamp, runAndSettle,
 } from "./x41-fa-world.mjs";
-import { waitBlockedByOrThrow } from "./wave-b/wb-fixtures.mjs";
+import {
+  DISPOSE_SQL, RUN_SQL, raceOnRung, beginHuman, beginRuntime, rungFixture,
+} from "./x41-surface-helpers.mjs";
 
 let live = false;
 let w = null;
@@ -167,49 +190,22 @@ test("x41.j2 the reverse_entry MYT splice: a reversal mirror is dated by the Asi
 // structural, and these keep a later migration from silently re-opening it.
 // ===========================================================================
 
+/** A body with its SQL comments removed — block comments first, then line comments. A
+ *  census must count what a body DOES, not what it SAYS: 0042's `_pair_reverse_core` names
+ *  'scheduled_run' four times in COMMENTS while writing origin='reversal', and the raw
+ *  `prosrc like` instrument counted it as a writer. The two-instrument lesson, tail 3. */
+const stripSqlComments = (src) => (src ?? "")
+  .replace(/\/\*[\s\S]*?\*\//g, " ").replace(/--[^\n]*/g, " ");
+
+/** Every clara function whose COMMENT-STRIPPED body both inserts a journal entry and names
+ *  `fragment` — the structural-census instrument (design §9.5, re-cut for 0042). */
 async function bodiesNaming(fragment) {
   const r = await rootQuery(
-    `select p.proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-      where n.nspname='clara' and p.prosrc like '%' || $1 || '%'
-        and p.prosrc like '%insert into clara.journal_entries%' order by 1`,
-    [fragment],
-  );
-  return r.rows.map((x) => x.proname);
+    "select p.proname, p.prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara'");
+  return r.rows.map((x) => ({ n: x.proname, b: stripSqlComments(x.prosrc) }))
+    .filter((x) => x.b.includes("insert into clara.journal_entries") && x.b.includes(fragment))
+    .map((x) => x.n).sort();
 }
-
-test("x41.k1 single-writer censuses: exactly ONE function body inserts origin='scheduled_run', and exactly one each writes the depreciation_charges and fa_disposal proposal keys", async (t) => {
-  if (skipHere(t)) return;
-  const originWriters = await bodiesNaming("scheduled_run");
-  assert.equal(originWriters.length, 1,
-    `exactly ONE function inserts origin='scheduled_run' (the issuer-authenticity half, design §1.6) — got: ${originWriters.join(", ")}`);
-  const chargeWriters = await bodiesNaming("depreciation_charges");
-  assert.equal(chargeWriters.length, 1,
-    `exactly ONE function writes the depreciation_charges proposal key (design §9.5) — got: ${chargeWriters.join(", ")}`);
-  const disposalWriters = await bodiesNaming("fa_disposal");
-  assert.equal(disposalWriters.length, 1,
-    `exactly ONE function writes the fa_disposal proposal key (design §9.5) — got: ${disposalWriters.join(", ")}`);
-  assert.notEqual(chargeWriters[0], disposalWriters[0], "…and they are TWO distinct audited verbs, not one widened door");
-
-  const core = (await rootQuery(
-    "select prosrc from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname='_draft_entry_core'",
-  )).rows.map((x) => x.prosrc).join(" ");
-  assert.ok(!core.includes("depreciation_charges"), "_draft_entry_core does not name depreciation_charges — it is NEVER widened");
-  assert.ok(!core.includes("fa_disposal"), "_draft_entry_core does not name fa_disposal either");
-
-  // [ASSEMBLY] MEASURED against the shared 0040 rig: clara.journal_entries has carried the
-  // same nine grants since long before D-a (clara_fn_owner holds the full owner set; the two
-  // read roles hold SELECT), and 0041 adds none. The structural claim that actually holds —
-  // and the one proposal forgery depends on — is that NO role but the function owner may
-  // WRITE the table, so a proposal can only be minted from inside a definer verb.
-  const writeGrants = (await rootQuery(
-    `select grantee, privilege_type from information_schema.role_table_grants
-      where table_schema='clara' and table_name='journal_entries'
-        and privilege_type in ('INSERT','UPDATE','DELETE','TRUNCATE')
-        and grantee <> 'clara_fn_owner' order by 1, 2`,
-  )).rows;
-  assert.deepEqual(writeGrants, [],
-    `NO role but clara_fn_owner may write clara.journal_entries — proposal forgery stays structurally impossible (got ${JSON.stringify(writeGrants)})`);
-});
 
 test("x41.k2 the generic drafter cannot persist EITHER proposal key: draft_entry(p_flags) drops both", async (t) => {
   if (skipHere(t)) return;
@@ -396,71 +392,9 @@ test("x41.l4 the queue chases INCOMPLETE register rows only: row_kind='fixed_ass
 // x41.m — SERIALIZATION under the 203005004 client rung (design §3.2/§4.1).
 // ===========================================================================
 
-const DISPOSE_SQL = `select clara.dispose_fixed_asset(p_client => $1, p_asset => $2,
-  p_disposal_date => $3::date, p_proceeds_cents => $4::bigint, p_proceeds_account => $5,
-  p_gain_account => $6, p_loss_account => $7, p_memo => $8, p_op_key => $9) as r`;
-const RUN_SQL = `select clara.run_depreciation_period(p_client => $1, p_period_start => $2::date,
-  p_period_end => $3::date, p_op_key => $4) as r`;
-
-/** Two sessions on the SAME client: A takes the rung and holds it; B contends and is
- *  PROVEN blocked before A commits. Returns {a, b, provedBlocked}. */
-async function raceOnRung({ first, second }) {
-  const c1 = await getPool().connect();
-  const c2 = await getPool().connect();
-  const out = { a: null, b: null, provedBlocked: false };
-  try {
-    const pid1 = (await c1.query("select pg_backend_pid() as pid")).rows[0].pid;
-    await first.begin(c1);
-    await c1.query(first.sql, first.params);
-
-    const pid2 = (await c2.query("select pg_backend_pid() as pid")).rows[0].pid;
-    await second.begin(c2);
-    await c2.query("set statement_timeout = '20s'");
-    const p2 = c2.query(second.sql, second.params)
-      .then((r) => { out.b = { ok: true, result: r.rows[0].r }; })
-      .catch((e) => { out.b = { ok: false, code: e.code, detail: e.detail, message: e.message }; });
-
-    try {
-      await waitBlockedByOrThrow(pid2, pid1, { what: "the 203005004 client advisory rung" });
-      out.provedBlocked = true;
-    } catch (e) {
-      noteLane(`x41.m block not observed (${e.message}) — the rung placement is a FINDING`);
-    }
-    await c1.query("commit");
-    out.a = { ok: true };
-    await p2;
-    if (out.b?.ok) await c2.query("commit").catch((e) => { out.b = { ok: false, code: e.code }; });
-    else await c2.query("rollback").catch(() => {});
-  } finally {
-    for (const c of [c1, c2]) {
-      await c.query("rollback").catch(() => {});
-      await c.query("reset role").catch(() => {});
-      await c.query("reset all").catch(() => {});
-      c.release();
-    }
-  }
-  return out;
-}
-
-const beginHuman = (sub) => async (c) => {
-  await c.query(`set role ${ROLES.authenticated}`);
-  await c.query("begin");
-  await c.query("select set_config('request.jwt.claims', $1, true)", [JSON.stringify({ sub, role: "authenticated" })]);
-};
-const beginRuntime = async (c) => {
-  await c.query(`set role ${ROLES.runtime}`);
-  await c.query("begin");
-};
-
-async function rungFixture(label) {
-  const client = await freshFaClient(label);
-  const start = mon(-3);
-  const { asset } = await buyAsset({ client, cents: 360_000, postingDate: dayIn(start, 1) });
-  await completeSL(client, asset.id, { life: 36, start: start.start, description: `x41 ${label}` });
-  await liveAuthority(client);
-  await earnRamp(client, start);
-  return { client, asset: asset.id, next: mon(-2) };
-}
+// The two-session race machinery (DISPOSE_SQL · RUN_SQL · raceOnRung · beginHuman ·
+// beginRuntime · rungFixture) lives in x41-surface-helpers.mjs — extracted verbatim when
+// the 0042 census re-pin above pushed this file past the repo's 500-line ceiling.
 
 test("x41.m1 run-then-dispose and dispose-then-run BOTH serialize on the client rung: the second session is PROVEN blocked, and the asset ends with no overlapping and no double charge", async (t) => {
   if (skipHere(t)) return;

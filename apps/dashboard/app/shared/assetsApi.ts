@@ -20,9 +20,10 @@
 import { rpc } from "./wire";
 import {
   toListFixedAssetsRead, toGetFixedAssetRead, toListDepreciationRunsRead, toGetDepreciationRunRead,
-  toDepreciationAuthorityRead, toFaRegisterTieRead,
+  toDepreciationAuthorityRead, toFaRegisterTieRead, toSplitMonthAdvisory,
   type ListFixedAssetsRead, type GetFixedAssetRead, type ListDepreciationRunsRead, type GetDepreciationRunRead,
   type DepreciationAuthorityRead, type FaRegisterTieRead, type FixedAssetParticulars, type DepreciationCadence,
+  type SplitMonthAdvisory,
 } from "../assets/assetsModel";
 
 const opKey = () => crypto.randomUUID();
@@ -102,15 +103,41 @@ export async function completeFixedAssetParticulars(
 
 /** revise_fixed_asset_particulars — the MPERS-17.19 prospective door (design
  *  §2.3): refuses `fa_revise_effective_conflict` if p_effective_from ≤ a live
- *  charge's period_end. */
+ *  charge's period_end.
+ *
+ *  [round-5 fix] RETURNS THE RECEIPT, which this used to discard as `void`.
+ *  0042 S5.5 puts the WDB-G14 mid-month changeover advisory IN the receipt
+ *  precisely so "the professional who performed a mid-month revision is told
+ *  about the changeover month AT THE MOMENT OF THE ACT rather than only on a
+ *  later read" (the section's own words). A `Promise<void>` wrapper threw that
+ *  away, so the DB emitted the escalation on both channels the design names and
+ *  ZERO surfaces rendered either — the condition the owner attached to the
+ *  month-grain ruling was not met anywhere. */
+export type ReviseFixedAssetParticularsReceipt = {
+  asset_id: string | null;
+  successor_asset_id: string | null;
+  effective_from: string | null;
+  client_id: string | null;
+  split_month_advisory: SplitMonthAdvisory[];
+};
+
 export async function reviseFixedAssetParticulars(
   token: string, clientId: string, assetId: string, particulars: FixedAssetParticulars, effectiveFrom: string,
-): Promise<void> {
-  await rpc(
+): Promise<ReviseFixedAssetParticularsReceipt> {
+  const out = await rpc(
     "revise_fixed_asset_particulars",
     { p_client: clientId, p_asset: assetId, p_particulars: particulars, p_effective_from: effectiveFrom, p_op_key: opKey() },
     token,
   );
+  const o = (out ?? {}) as Record<string, unknown>;
+  const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+  return {
+    asset_id: str(o.asset_id),
+    successor_asset_id: str(o.successor_asset_id),
+    effective_from: str(o.effective_from),
+    client_id: str(o.client_id),
+    split_month_advisory: (Array.isArray(o.split_month_advisory) ? o.split_month_advisory : []).map(toSplitMonthAdvisory),
+  };
 }
 
 export async function proposeDepreciationAuthority(
