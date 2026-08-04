@@ -127,14 +127,44 @@ function assertMonthsWithin(pic, windowKeys, atLeast, label) {
   return all;
 }
 
+/** The exact calendar date one day after `dayIn(m, day)` — the S5.26 law
+ *  (`_fa_fy_open_for`: "FY open = the day after the PREVIOUS year's actual end"),
+ *  derived independently here from the same (month, day) arithmetic the DB body
+ *  applies, never by pasting an observed DB output back in. Shared by every fixture
+ *  in this file that needs an annual-cadence FY's EXACT open date. */
+function dayAfterFyEnd(m, day) {
+  const endStr = dayIn(m, day);
+  const [y, mo, d] = endStr.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, mo - 1, d + 1));
+  return dstr(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate());
+}
+
 /** The t2 construction, at an arbitrary offset: an FYE `back` months ago on the 28th, so
- *  the financial year IN PROGRESS opened on the 1st of the following month and closes
- *  twelve months later — an open period no run can ever clear, which is what makes the
- *  disposal stub the only charger in the year. Returns that open window. */
+ *  the financial year IN PROGRESS closes twelve months later — an open period no run can
+ *  ever clear, which is what makes the disposal stub the only charger in the year.
+ *
+ *  Returns THREE dates, not one, because two different laws need two different points:
+ *   - `open`/`close`: the EXACT-DAY window `_fa_fy_open_for`/`_fa_fy_end_for` (S5.26) name
+ *     for this FY — the only pair a verbatim comparison against the DB's own window (a
+ *     `run_depreciation_manual` cadence-alignment check, an oracle readback) may use.
+ *   - `assetStart`: where a FIXTURE may safely BUY or START an asset so its schedule lands
+ *     in THIS (open, unended) year. `_fa_asset_charges` reads every asset's first
+ *     chargeable month through `_fa_month_start()` — MONTH-GRAIN, always truncated to the
+ *     1st (S5.27 keeps the reducing-balance FY-segment reader on this same grain
+ *     deliberately) — so an asset started mid-month on `open` itself (a day inside the
+ *     FYE month, before FY_DAY) truncates BACKWARD across the FY boundary into the year
+ *     that JUST ended, not the one in progress. The first month whose OWN month-start is
+ *     unambiguously past the FYE month, on any calendar, is the 1st of the month right
+ *     after it — which is what `assetStart` names. (Measured: buying at `open` put the
+ *     asset's first chargeable month in the FY ending `dayIn(mon(-back), FY_DAY)` — already
+ *     ended as of today — and depreciation_run_due reported due:true where the cell
+ *     expects false.) */
 async function openFyFrom(client, back) {
   await setClientFyEnd(w.users.alice, { client, month: mon(-back).m, day: FY_DAY });
   const close = shift(-back + 12);
-  return { open: mon(-back + 1).start, close: dstr(close.y, close.m, FY_DAY) };
+  const open = dayAfterFyEnd(mon(-back), FY_DAY);
+  const assetStart = mon(-back + 1).start;
+  return { open, close: dstr(close.y, close.m, FY_DAY), assetStart };
 }
 
 // ===========================================================================
@@ -156,8 +186,8 @@ test("x41.u1 straight-line annual: a life-shortening revision then a disposal wh
   const RATE1 = Math.floor(CENTS / L1); //  75,000
   const RATE2 = Math.floor(CENTS / L2); // 100,000
 
-  const { asset } = await buyAsset({ client, cents: CENTS, postingDate: fy.open, memo: "x41 u1" });
-  await completeSL(client, asset.id, { life: L1, start: fy.open, description: "x41 u1" });
+  const { asset } = await buyAsset({ client, cents: CENTS, postingDate: fy.assetStart, memo: "x41 u1" });
+  await completeSL(client, asset.id, { life: L1, start: fy.assetStart, description: "x41 u1" });
   await liveAuthority(client, "annual");
   assert.equal((await runDue(client)).due, false,
     `mandatory setup: no ENDED financial year is owed (the year in progress runs ${fy.open}..${fy.close}) — every month in this cell lives inside the OPEN period`);
@@ -167,7 +197,7 @@ test("x41.u1 straight-line annual: a life-shortening revision then a disposal wh
 
   await reviseParticulars(w.users.alice, {
     client, asset: asset.id, effectiveFrom: mon(-2).start,
-    particulars: { method: "straight_line", useful_life_months: L2, residual_cents: 0, start_date: fy.open },
+    particulars: { method: "straight_line", useful_life_months: L2, residual_cents: 0, start_date: fy.assetStart },
   });
   const pred = await faRow(asset.id);
   assert.equal(pred.status, "superseded", "mandatory setup: the life-shortening revision superseded the predecessor");
@@ -235,7 +265,9 @@ test("x41.u2 reducing balance annual: a rate-and-life revision then a terminatin
   const fy = await openFyFrom(client, 4);
 
   // basis = cost − Accumulated(greatest(FY_open − 1 day, baseline)) = the full cost:
-  // the asset is acquired ON the FY open, so nothing precedes it.
+  // the asset is acquired at the FY's first chargeable month (fy.assetStart — the RB
+  // segment reader's own _fa_fy_month_open_for lands on the identical month, S5.27), so
+  // nothing precedes it.
   //   ancestor segment = ONE month at 20% → round(300,000 × 20%) × 1/12 =  5,000
   //   successor segment runs at 10% until the LIFE-END clamp terminates it at
   //   NBV − residual (design §3.1 "RB terminates at life end") — so the lineage owes
@@ -245,15 +277,15 @@ test("x41.u2 reducing balance annual: a rate-and-life revision then a terminatin
   const RATE2_BPS = 1000;
   const ANCESTOR = Math.round(CENTS * RATE1_BPS / 10_000) / 12; // 60,000 / 12 = 5,000
 
-  const { asset } = await buyAsset({ client, cents: CENTS, postingDate: fy.open, memo: "x41 u2" });
-  await completeRB(client, asset.id, { life: 4, rateBps: RATE1_BPS, residual: 0, start: fy.open, description: "x41 u2" });
+  const { asset } = await buyAsset({ client, cents: CENTS, postingDate: fy.assetStart, memo: "x41 u2" });
+  await completeRB(client, asset.id, { life: 4, rateBps: RATE1_BPS, residual: 0, start: fy.assetStart, description: "x41 u2" });
   await liveAuthority(client, "annual");
   assert.equal((await runDue(client)).due, false,
     `mandatory setup: no ENDED financial year is owed (the year in progress runs ${fy.open}..${fy.close})`);
 
   await reviseParticulars(w.users.alice, {
     client, asset: asset.id, effectiveFrom: mon(-2).start,
-    particulars: { method: "reducing_balance", useful_life_months: 3, rate_bps: RATE2_BPS, residual_cents: 0, start_date: fy.open },
+    particulars: { method: "reducing_balance", useful_life_months: 3, rate_bps: RATE2_BPS, residual_cents: 0, start_date: fy.assetStart },
   });
   const pred = await faRow(asset.id);
   assert.equal(pred.status, "superseded", "mandatory setup: the mid-FY rate/life revision superseded the predecessor");
@@ -316,7 +348,11 @@ test("x41.u3 annual cadence: an ancestor owing an ENDED FINANCIAL YEAR is refuse
   // where the ended-period refusal can fire on this cadence.
   await setClientFyEnd(w.users.alice, { client, month: mon(-1).m, day: FY_DAY });
   const fy = lastEndedFy(mon(-1).m, FY_DAY);
-  assert.equal(fy.open, mon(-12).start, `mandatory setup: the ended FY opens ${mon(-12).start} (got ${fy.open})`);
+  // S5.26: FY open is the day AFTER the PREVIOUS year's actual end, not a month start —
+  // derived here from the same (month, day) arithmetic dayAfterFyEnd applies, one FY
+  // (12 months) before the ended FY's own close (mon(-1) - 12 = mon(-13)).
+  const expectOpen = dayAfterFyEnd(mon(-1 - 12), FY_DAY);
+  assert.equal(fy.open, expectOpen, `mandatory setup: the ended FY opens ${expectOpen} (got ${fy.open})`);
   assert.equal(fy.close, dayIn(mon(-1), FY_DAY), `…and closes ${dayIn(mon(-1), FY_DAY)} (got ${fy.close})`);
 
   const CENTS = 1_200_000;
@@ -420,10 +456,10 @@ test("x41.u4 the 64-edge lineage boundary: a 64-hop revision chain disposes lawf
   const CENTS = 300_000;
   const LIFE = 120;
   const MONTHLY = Math.floor(CENTS / LIFE); // 2,500
-  const particulars = { method: "straight_line", useful_life_months: LIFE, residual_cents: 0, start_date: fy.open };
+  const particulars = { method: "straight_line", useful_life_months: LIFE, residual_cents: 0, start_date: fy.assetStart };
 
-  const { asset } = await buyAsset({ client, cents: CENTS, postingDate: fy.open, memo: "x41 u4 deep" });
-  await completeSL(client, asset.id, { life: LIFE, start: fy.open, description: "x41 u4" });
+  const { asset } = await buyAsset({ client, cents: CENTS, postingDate: fy.assetStart, memo: "x41 u4 deep" });
+  await completeSL(client, asset.id, { life: LIFE, start: fy.assetStart, description: "x41 u4" });
   await liveAuthority(client, "annual");
   assert.equal((await runDue(client)).due, false,
     `mandatory setup: the whole chain lives inside ONE open financial year (${fy.open}..${fy.close}) — no run can land a charge on it, so every hop stays lawful and the stub is the only charger`);

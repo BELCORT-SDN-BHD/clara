@@ -21,7 +21,8 @@ import assert from "node:assert/strict";
 import {
   rootQuery, noteLane, endPool, printLaneNotes, printSkipCount, x41EnsureReady, skip41, caught,
   ACCUM, EXPENSE, BANK, GAIN, LOSS, mon, dayIn, dstr, lastEndedFy, reviseParticulars, runPeriod,
-  disposeAsset, setClientFyEnd, runDue, getAuthority, faWorld, faRow, faRows, chargeRows,
+  disposeAsset, setClientFyEnd, runDue, getAuthority, retireAuthorityVerb, authorityRows,
+  faWorld, faRow, faRows, chargeRows,
   entryRowOf, accumulatedAt, glNet, liveRanges, assertNoOverlaps, freshFaClient, buyAsset,
   completeRB, completeSL, liveAuthority, earnRamp, runAndSettle, kSeededFaClient,
 } from "./x41-fa-world.mjs";
@@ -273,12 +274,19 @@ test("x41.f1 annual cadence at a 30 June FYE: ONE entry at FY end, per-asset sub
 test("x41.f2 the FYE fallback is SURFACED: a client with no explicit year end reports the Dec-31 default as a fallback, not as a fact", async (t) => {
   if (skipHere(t)) return;
   const client = await freshFaClient("f2");
-  await liveAuthority(client, "annual");
+  const annual = await liveAuthority(client, "annual");
   const auth = await getAuthority(w.users.alice, client);
   assert.equal(Number(auth.fy_end?.month), 12, "the fallback FYE month is December");
   assert.equal(Number(auth.fy_end?.day), 31, "…on the 31st");
   assert.equal(auth.fy_end?.fallback, true, "…and it is SURFACED as a fallback (design §1.6) — the card must not present it as a stated fact");
 
+  // [0042 · D-b design §2.2] set_client_fy_end now REFUSES while a live ANNUAL-cadence
+  // depreciation authority exists — an annual cadence derives its period from this very
+  // setting, so moving it underneath a live annual machine would silently redefine periods
+  // already met. This cell is about the FALLBACK→stated-fact transition, not the guard, so it
+  // takes the guard's OWN named remedy: retire the annual machine, then move the year end.
+  // (The guard itself is pinned in x41.f3.)
+  await retireAuthorityVerb(w.users.hana, { client, authority: annual.id, reason: "x41 f2 move the FYE" });
   await setClientFyEnd(w.users.alice, { client, month: 3, day: 31 });
   const after = await getAuthority(w.users.alice, client);
   assert.equal(Number(after.fy_end?.month), 3, "the setter moved the FYE month");
@@ -290,4 +298,40 @@ test("x41.f2 the FYE fallback is SURFACED: a client with no explicit year end re
   assert.ok(err, "set_client_fy_end must REFUSE an out-of-range month (13)");
   noteLane(`x41.f2 set_client_fy_end(month=13) refused with code=${err.code} detail=${err.detail ?? "(none)"}`);
   assert.equal(Number((await getAuthority(w.users.alice, client)).fy_end?.month), 3, "…and the refusal changed nothing");
+});
+
+test("x41.f3 the 0042 FYE guard on the AUTHORITY axis: a live ANNUAL-cadence depreciation authority BLOCKS set_client_fy_end and names the retire remedy; a live MONTHLY one deliberately does not", async (t) => {
+  if (skipHere(t)) return;
+  // [0042 · D-b design §2.2] The recut guard has TWO arms. x42.t6 owns the ADJUSTMENT-TEMPLATE
+  // arm; the DEPRECIATION-AUTHORITY arm is D-a's own object, so it is pinned here — the cell
+  // this file has always been the natural home for. ABI §F assigns no refusal token to either
+  // arm, so (like the month=13 cell above) this one pins the BEHAVIOUR — it must refuse, the
+  // year end must not move, and the remedy the refusal NAMES must actually open the door —
+  // and records the errcode/detail that fired rather than guessing at a token.
+  const annualClient = await freshFaClient("f3a");
+  const annual = await liveAuthority(annualClient, "annual");
+  const err = await caught(() => setClientFyEnd(w.users.alice, { client: annualClient, month: 6, day: 30 }));
+  assert.ok(err, "moving the FYE under a live ANNUAL-cadence depreciation authority must REFUSE");
+  const blob = `${err.message ?? ""} ${err.detail ?? ""} ${err.hint ?? ""}`;
+  assert.ok(/annual/i.test(blob), `…naming the ANNUAL cadence as the blocker (got: ${blob})`);
+  assert.ok(/retire/i.test(blob), `…and naming the RETIRE remedy, not just the refusal (got: ${blob})`);
+  assert.equal((await getAuthority(w.users.alice, annualClient)).fy_end?.fallback, true,
+    "…and the refusal left the year end unset — still the surfaced Dec-31 fallback");
+  noteLane(`x41.f3 set_client_fy_end under a live ANNUAL authority refused with code=${err.code} detail=${err.detail ?? "(none)"}`);
+
+  // The remedy the message names really is a route, not a dead end.
+  await retireAuthorityVerb(w.users.hana, { client: annualClient, authority: annual.id, reason: "x41 f3 remedy" });
+  await setClientFyEnd(w.users.alice, { client: annualClient, month: 6, day: 30 });
+  assert.equal(Number((await getAuthority(w.users.alice, annualClient)).fy_end?.month), 6,
+    "retiring the annual authority is the stated route — the year end then moves");
+  assert.equal((await authorityRows(annualClient)).filter((a) => a.status === "live").length, 0,
+    "…and no live authority is left behind by the remedy");
+
+  // A MONTHLY cadence is FY-INDEPENDENT and must NOT block: refusing on one would make the
+  // guard unfollowable on a client whose only live machine is monthly (design §2.2).
+  const monthlyClient = await freshFaClient("f3m");
+  await liveAuthority(monthlyClient);
+  await setClientFyEnd(w.users.alice, { client: monthlyClient, month: 6, day: 30 });
+  assert.equal(Number((await getAuthority(w.users.alice, monthlyClient)).fy_end?.month), 6,
+    "a live MONTHLY authority does NOT block the setter — the design's own named cell");
 });

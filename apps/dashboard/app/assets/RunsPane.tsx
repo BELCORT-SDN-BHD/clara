@@ -13,20 +13,20 @@ import { assetsScreenState, type DepreciationRunRow } from "./assetsModel";
 import { fmtCents } from "../shared/fmt";
 import styles from "./assets.module.css";
 
-function todayIso(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-function firstOfMonth(dateIso: string): string {
-  return `${dateIso.slice(0, 7)}-01`;
-}
+// [round-5 fix] the DB owns the date, never the browser. `run_depreciation_manual`
+// takes a PERIOD, and this pane defaulted it from the browser's UTC date: for the
+// first eight hours of every MYT day the proposed period was the previous day, and
+// on the 1st of a month the proposed period was the WHOLE PREVIOUS MONTH — a
+// depreciation run posted into the wrong period. See shared/businessDate.ts.
+import { businessToday, firstOfMonth } from "../shared/businessDate";
 
 export function RunsPane({ token, clientId }: { token: string; clientId: string }) {
   const [runs, setRuns] = useState<DepreciationRunRow[]>([]);
   const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [periodStart, setPeriodStart] = useState(() => firstOfMonth(todayIso()));
-  const [periodEnd, setPeriodEnd] = useState(() => todayIso());
+  const [periodStart, setPeriodStart] = useState(() => firstOfMonth(businessToday()));
+  const [periodEnd, setPeriodEnd] = useState(() => businessToday());
   const [busy, setBusy] = useState(false);
   const [runErr, setRunErr] = useState<string | null>(null);
 

@@ -190,10 +190,14 @@ test("x41.t2 annual cadence: a mid-FY revision then a disposal inside that SAME 
   const m4 = mon(-4);
   const FY_DAY = 28;
   await setClientFyEnd(w.users.alice, { client, month: m4.m, day: FY_DAY });
-  // The cadence window the run verb itself recognises opens on the FIRST of the month
-  // AFTER the FYE month (probed, not assumed: `run_depreciation_manual` refuses a
-  // mis-aligned range by name and states the window it does accept).
-  const fyOpen = mon(-3).start;
+  // The cadence window the run verb itself recognises opens the DAY AFTER the previous
+  // financial year end (S5.26 — was "the 1st of the following month", correct only when
+  // FY_DAY happens to be a true month-end; probed, not assumed: `run_depreciation_manual`
+  // refuses a mis-aligned range by name and states the window it does accept).
+  const fyEndPrev = dstr(m4.y, m4.m, FY_DAY);
+  const [fyEy, fyEm, fyEd] = fyEndPrev.split("-").map(Number);
+  const fyOpenDt = new Date(Date.UTC(fyEy, fyEm - 1, fyEd + 1));
+  const fyOpen = dstr(fyOpenDt.getUTCFullYear(), fyOpenDt.getUTCMonth() + 1, fyOpenDt.getUTCDate());
   const m8 = shift(8);
   const fyClose = dstr(m8.y, m8.m, FY_DAY);
 

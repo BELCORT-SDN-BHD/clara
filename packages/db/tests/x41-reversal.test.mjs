@@ -11,11 +11,11 @@ import {
   opk, noteLane, endPool, printLaneNotes, printSkipCount,
   approveEntry, reverseEntry, idOf, runRowsCount,
   x41EnsureReady, skip41, refuses,
-  T, BANK,
+  T, BANK, ACCUM, EXPENSE,
   mon, dayIn,
   disposeAsset, runPeriod,
   faWorld, faRow, faRows, chargeRows, entryRowOf,
-  accumulatedAt, liveRanges,
+  accumulatedAt, liveRanges, glNet, rootQuery,
   freshFaClient, buyAsset, completeSL, liveAuthority, earnRamp, runAndSettle, disposeAndSettle,
   reverseAndSettle,
 } from "./x41-fa-world.mjs";
@@ -109,10 +109,29 @@ test("x41.i2 dependency order: an acquisition with disposal/split DESCENDANTS re
   assert.equal((await liveRanges(asset.id)).length, 0, "…and the stub charge is UNWOUND");
 });
 
-test("x41.i3 depreciation unwind is EFFECTIVE-DATED at the mirror's posting date, and the period may then be RE-RUN lawfully", async (t) => {
+// RECUT BY 0042 (as-built ladder round 6). THE OVERTURN, recorded here rather than in a
+// commit message, because this cell used to PIN the law that was overturned.
+//
+// What it asserted before: "the unwind is effective-dated at the MIRROR's posting date, NOT
+// the original period", proved by reading the register as at the charge's own period end and
+// still finding the charge there. That was a faithful reading of 0041 §5.2 — and composed with
+// this very cell's next act (the lawful re-run) it was a DOUBLE. Measured on a rig before the
+// fix: monthly straight-line 360,000/36, month 1 reversed, the D-a due oracle re-proposing the
+// month, the re-run AUTO-POSTING because the ramp was already earned — the month then carried
+// 20,000 of accumulated depreciation and 20,000 of expense against a 10,000 charge, in the GL
+// AND in the register, with clara.fa_register_tie certifying accum_diff_cents = 0 because both
+// sides had been made wrong together.
+//
+// What it asserts now: the mirror of a REGISTERED period-dated posting is dated with the entry
+// it corrects (clara._wdb_correction_posting_date), so the unwind carries the charge's OWN
+// effective_date and the corrected period's books actually clear. The 0041 law it does NOT
+// overturn is still pinned below: the unwind is effective-dated at the mirror, the read is
+// signed and never filters on is_live, and the period is re-runnable afterwards.
+test("x41.i3 depreciation unwind is EFFECTIVE-DATED at the mirror's posting date — and 0042 dates that mirror with the charge it corrects, so the corrected period clears and the lawful re-run does not double it", async (t) => {
   if (skipHere(t)) return;
   const { client, asset, start, monthly } = await disposableAsset("i3");
   const runEntry = (await chargeRows(asset.id))[0].entry_id;
+  const runRow = await entryRowOf(runEntry);
   const beforeAt = await accumulatedAt(asset.id, start.end);
   assert.equal(beforeAt, monthly, "the ramp charge is visible at its own period end");
 
@@ -125,18 +144,43 @@ test("x41.i3 depreciation unwind is EFFECTIVE-DATED at the mirror's posting date
   assert.equal(originals[0].is_live, false, "…and the original charge was flipped is_live=false in the same block");
   const mirror = await entryRowOf(unwinds[0].entry_id);
   assert.equal(unwinds[0].effective_date, mirror.posting_date,
-    "the unwind is effective-dated at the MIRROR's posting date, not the original period");
+    "the unwind is effective-dated at the MIRROR's posting date (the 0041 §5.2 law, untouched)");
 
-  // The signed read: an as-of BEFORE the mirror still sees the charge; after it, zero.
-  const dayBefore = start.end;
-  assert.equal(await accumulatedAt(asset.id, dayBefore), monthly,
-    "an as-of read BEFORE the mirror still carries the charge (is_live never appears in the read)");
-  assert.equal(await accumulatedAt(asset.id, mirror.posting_date), 0, "…and from the mirror's date the accumulation is back to zero");
+  // THE OVERTURNED CLAUSE, asserted in its new direction. Before 0042 the mirror carried MYT
+  // today and this equality was false by construction.
+  assert.equal(String(mirror.posting_date), String(runRow.posting_date),
+    "0042: the mirror of a depreciation charge is dated WITH the charge it corrects — otherwise the corrected period never moves and the re-run below lands on top of a figure that never left");
+  assert.equal(await accumulatedAt(asset.id, start.end), 0,
+    "so as at the charge's own period end the register is FLAT — that is what 'corrected' has to mean for a period figure");
 
-  // The period may now be RE-RUN (the unique index frees the slot after unwind).
+  // THE 0041 READING LAW ITSELF, still pinned — and pinned STRUCTURALLY, because with charge
+  // and unwind now sharing one effective_date no as-of read can tell an effective-dated reader
+  // from an is_live-filtered one. The register's own reader is asked directly.
+  const readerSrc = await rootQuery(
+    "select prosrc from pg_proc where pronamespace='clara'::regnamespace and proname='_fa_accumulated'");
+  assert.equal(readerSrc.rows.length, 1, "the register's as-of reader exists");
+  assert.equal(/\bis_live\b/.test(readerSrc.rows[0].prosrc), false,
+    "the as-of read is SIGNED and effective-dated: is_live never appears in it — it exists solely for the uniqueness index (round-2 fold 2)");
+
+  // The period may now be RE-RUN (the unique index frees the slot after unwind)…
   const rerun = await runPeriod({ client, periodStart: start.start, periodEnd: start.end });
   assert.notEqual(rerun.status, "noop", "the corrected period is due again and re-runs lawfully (design §1.3/§1.5)");
   assert.ok((await runRowsCount(client)) >= 1, "a corrected re-run mints a SECOND receipt for the same period — no (client, period) unique exists");
+  // …SETTLED, because a re-run whose ramp was un-earned by the very correction under test
+  // DRAFTS, and a draft writes no register row at all — asserting money against an unapproved
+  // draft would read zero and call it correct.
+  if (rerun.status === "drafted") {
+    const dr = await entryRowOf(rerun.entry_id);
+    await approveEntry(w.users.hana, {
+      entry: rerun.entry_id, expectedRevision: dr.revision_token, opKey: opk("x41i3apr") });
+  }
+  // …and THE MONEY, which is the assertion this cell never made and the defect lived in.
+  assert.equal(await accumulatedAt(asset.id, start.end), monthly,
+    "THE STATUTORY FIGURE: after correct-and-re-run the month carries ONE charge, never two");
+  assert.equal(-(await glNet(client, ACCUM, start.end)), monthly,
+    "…and the GL's accumulated depreciation at that date agrees to the sen");
+  assert.equal(await glNet(client, EXPENSE, start.end), monthly,
+    "…as does the expense side");
 });
 
 test("x41.i4 partial-disposal reversal: BOTH successors unwound, the original restored, the stub unwound — and refused when a successor has later state", async (t) => {

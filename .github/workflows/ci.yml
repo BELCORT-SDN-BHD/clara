@@ -342,6 +342,77 @@ jobs:
           PGDATABASE=clara_x41_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
             CLARA_RIG_DB=1 node --test tests/x41-0041-upgrade.test.mjs
 
+      # Wave-D-b migration-0042 deploy-onto-existing drill (the same anti-misleading-green
+      # wiring as the drills above). x42-0042-upgrade.test.mjs is the ONLY proof that 0042
+      # lands safely on a database that ALREADY has a book: the in-suite x42 battery applies
+      # 0042 to a schema carrying only what its own cells build afterwards, so every claim it
+      # makes about pre-existing rows is a claim about rows 0042 has already seen. 0042's real
+      # risk is the ceremony — a shared database with four live firms, a populated fixed-asset
+      # register the SS6.3 `cost_cents SET NOT NULL` alter is about to constrain, and 74 live
+      # clara.bank_matches rows the SS4 alters widen with pending_resolution +
+      # resolution_exception_id. This drill applies 0001→0041, builds that book through the
+      # audited verbs (FA lineage, a live depreciation authority, bank statements carrying
+      # both pending and live matches with exceptions, posted history), THEN applies 0042 onto
+      # it and asserts: the SS6.3 NULL-cost prestate probe fires its NAMED remedy rather than a
+      # bare constraint error · all seven new relations land with FORCE RLS and their belts ·
+      # both hot-loop partial indexes exist with their exact WHERE clauses · both new event
+      # types register with taxonomy coverage · every pre-existing bank match is untouched
+      # (both new columns NULL) · the ea1955 reference seed is present · and the pre-0042
+      # surfaces (a depreciation run, an ordinary bank settle) still work. Reset-gated (it
+      # drops schema clara), so it SKIPS in the concurrent all-packages sweep above — which is
+      # exactly how a deploy regression could otherwise merge with the suite green. Run it FOR
+      # REAL here, ALONE, in its OWN throwaway database.
+      # [WAVE D-b SPLIT] The whole-unit x42-0042-upgrade drill is GONE — census §6 adjudicated
+      # ONE DRILL PER SLICE, four drills, because each slice's deploy risk is different and each
+      # slice's frontier is different. THIS job applies every migration on disk, so the drill that
+      # is TRUE here is the one belonging to the HIGHEST D-b slice actually in the tree: D-b0's on
+      # the first PR, then D-b1's, then D-b3's, and finally D-b2's whole-chain drill (0001..0041,
+      # book built through the audited verbs, then the WHOLE 0042→0043→0044→0045 chain applied onto
+      # it with every slice's post-state re-asserted as a regression floor).
+      #
+      # DERIVED, NEVER PINNED. Naming one drill file here would make this step red for the whole
+      # multi-day rollout — the D-b2 drill only arrives in the LAST PR. The three EARLIER frontiers
+      # need a slice-shaped migrations directory and therefore stay in the `db-slice-frontiers`
+      # matrix job below, which is the only place they remain provable once the later slices land.
+      #
+      # SELECTED BY STABLE NAME, NEVER BY NUMBER [light re-confirm RC2/LENS-1]. This step used to
+      # read the highest migration number on disk and treat EVERY number ≤ it as a D-b slice.
+      # That is wrong twice over, and both are deploy blockers: (1) a lawful HOTFIX claiming 0043
+      # after D-b0 lands as 0042 made CI demand tests/x42-0043-b1-upgrade.test.mjs — a file that
+      # does not exist yet — and reject the hotfix; (2) a D-b0 renumbered to 0043 by such a
+      # hotfix collided with D-b1's still-template 0043 candidate. Migration NUMBERS are claimed
+      # at merge time (RENUMBER.md); the slice NAME never moves. So the loop keys on the name,
+      # takes the number FROM THE FILE IT FOUND, and the candidate list never needs renumbering.
+      - name: Wave-D-b split upgrade drill at the frontier ON DISK (isolated DB)
+        working-directory: packages/db
+        run: |
+          DRILL=""; DRILL_N=""
+          for tag in b0:wave_d_b0_shared_authorities b1:wave_d_b1_staff_advances \
+                     b3:wave_d_b3_af2_composite b2:wave_d_b2_recurring_adjustments; do
+            bn="${tag%%:*}"; nm="${tag##*:}"
+            m="$(ls migrations/[0-9][0-9][0-9][0-9]_${nm}.sql 2>/dev/null | head -1)"
+            [ -n "$m" ] || continue
+            n="$(basename "$m" | cut -c1-4)"
+            f="x42-${n}-${bn}-upgrade"
+            # Every D-b slice ships its migration AND its drill in the same PR, and a renumbered
+            # slice RENAMES its drill to match (RENUMBER.md §2(4)). A slice migration on disk
+            # without the drill that carries its number is a broken PR — say so, rather than
+            # silently running an EARLIER slice's drill against a LATER frontier (which fails on
+            # the leak probe, loudly but confusingly).
+            if [ ! -f "tests/$f.test.mjs" ]; then
+              echo "$(basename "$m") is on disk but tests/$f.test.mjs is not — every Wave D-b slice ships with its own drill, and a renumbered slice renames the drill to its new number (RENUMBER.md §2(4))"; exit 1
+            fi
+            # highest number wins, whatever order the names were declared in
+            if [ -z "$DRILL_N" ] || [ "$n" -gt "$DRILL_N" ]; then DRILL="$f"; DRILL_N="$n"; fi
+          done
+          if [ -z "$DRILL" ]; then
+            echo "no Wave-D-b slice migration on disk yet (matched by name, not by number) — nothing to drill"; exit 0
+          fi
+          echo "--- highest Wave-D-b slice on disk: $DRILL_N · drill: $DRILL ---"
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_split_upgrade_ci'
+          PGDATABASE=clara_x42_split_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+            CLARA_RIG_DB=1 node --test "tests/$DRILL.test.mjs"
+
       # Slice-5 intake transport e2e (§6 gates of record: SSE liveness under parse
       # load, load ceilings, and the full stream→scan→storage→finalizer→WDK-OCR
       # chain) — in its OWN throwaway DB. The WDK world does NOT self-bootstrap
@@ -430,3 +501,327 @@ jobs:
           CLARA_DR_SOURCE_URL="postgres://postgres@localhost:5432/drci_source" \
           CLARA_DR_TARGET_URL="postgres://postgres@localhost:5433/drci_target" \
             node packages/db/scripts/dr-verify.mjs
+
+  # ===========================================================================
+  # [WAVE D-b SPLIT] PER-SLICE FRONTIER JOB.
+  #
+  # THE PROBLEM THIS EXISTS FOR. Once 0045 is on main, nothing in the pipeline above ever
+  # proves again that 0042 ALONE is deployable — the `ci` job only ever applies every migration
+  # on disk. But the split's whole promise is that each slice ships on its own, days apart, onto
+  # a live database. A regression that makes 0043 depend on something 0044 ships would be
+  # invisible until the deploy. This job keeps every intermediate frontier honest, forever.
+  #
+  # IT LANDS AT THE FIRST SLICE'S PR, FULLY POPULATED, AND THAT IS SAFE. Step (0) is a PRESENCE
+  # GATE: a leg whose slice is not in the tree yet SKIPS — green, loud, and named — instead of
+  # failing red for the days between slices. The gate is also what stops the d-b2 leg silently
+  # degrading to "whatever is on disk" while 0045 is held: no D-b2 migration, no leg.
+  #
+  # NONE-OR-ALL, NOT ALL-OR-SKIP [light re-confirm RC5]. The gate used to skip whenever ANY of
+  # the three artifacts was missing, which made a PARTIAL landing — migration + drill, list
+  # forgotten — pass GREEN with the leg never running. A slice is present or it is not: the gate
+  # now skips only when NONE of its three artifacts is on disk, and FAILS BY NAME on any
+  # in-between, listing what is there and what is missing.
+  #
+  # AND IT KEYS ON THE SLICE NAME, NEVER ON A PINNED NUMBER [light re-confirm RC2/RC4]. The
+  # frontier and the drill filename are DERIVED from the migration file the leg finds, so a
+  # merge-time renumber (RENUMBER.md) needs no edit here at all — which is the whole point,
+  # since a stale `frontier:` pin would silently run a leg at a frontier nobody declared.
+  #
+  # Each matrix leg gets its OWN runner and therefore its OWN ephemeral postgres:17 service —
+  # genuinely isolated, never a shared database. Each ready leg:
+  #   1. materialises a SLICE-SHAPED migrations directory (0001..<that slice's frontier>) and
+  #      asserts the top of that chain really IS the declared frontier;
+  #   2. migrates a fresh clara_ci from it;
+  #   3. runs that slice's test list with CLARA_MIGRATIONS_DIR pointed at that copy —
+  #      E17 IS BINDING: several tests call the rig's ensureReady(), which re-runs migrate()
+  #      and fails a migration-history integrity check ("applied migration X is MISSING from
+  #      disk") when an applied version has no file in the directory it is given. Getting this
+  #      wrong costs exactly one cell (x42-s5c-awcc) and looks like a real regression — and then
+  #      asserts the list's OWN declared cell floor, so a DELETED cell inside a still-listed file
+  #      can no longer pass the file-granular totality gate unnoticed;
+  #   4. runs that slice's reset-gated upgrade drill ALONE, in its own throwaway DB.
+  #
+  # The lists are data, not code: packages/db/tests/split-lists/test-list-d-bN.txt, one file
+  # per line, `#` comments ignored, plus two machine-readable `#!` directives the gates read
+  # (`#!cells-floor:` and `#!floor-rerun:`). A file added to the corpus and to no list fails
+  # the separate db-split-partition-total job below.
+  #
+  # DB NAMES USE `dbtag`, NEVER `slice`: d-b0 is not a legal bare SQL identifier.
+  db-slice-frontiers:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # `migname` is the slice's STABLE migration suffix — the identity that survives a
+          # merge-time renumber. The frontier number and the drill filename are derived from it.
+          - slice: d-b0
+            dbtag: b0
+            migname: wave_d_b0_shared_authorities
+          - slice: d-b1
+            dbtag: b1
+            migname: wave_d_b1_staff_advances
+          - slice: d-b3
+            dbtag: b3
+            migname: wave_d_b3_af2_composite
+          - slice: d-b2
+            dbtag: b2
+            migname: wave_d_b2_recurring_adjustments
+
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: clara_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGHOST: localhost
+      PGPORT: "5432"
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: clara_ci
+      CLARA_ALLOW_DESTRUCTIVE: "1"
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # (0) THE PRESENCE GATE — NONE-OR-ALL. The four slices land days apart; this job is fully
+      # populated from the first PR. A leg whose slice is nowhere in the tree SKIPS; a leg whose
+      # slice is HALF in the tree FAILS. Nothing in between passes silently.
+      - name: Is the ${{ matrix.slice }} slice in the tree yet?
+        id: gate
+        run: |
+          MIG="$(ls packages/db/migrations/[0-9][0-9][0-9][0-9]_${{ matrix.migname }}.sql 2>/dev/null | head -1)"
+          LIST="packages/db/tests/split-lists/test-list-${{ matrix.slice }}.txt"
+          have=0; miss=""
+          if [ -n "$MIG" ]; then have=$((have+1)); else miss="$miss packages/db/migrations/NNNN_${{ matrix.migname }}.sql"; fi
+          if [ -f "$LIST" ]; then have=$((have+1)); else miss="$miss $LIST"; fi
+          # The drill's NUMBER comes from the migration that was actually found — never a pin.
+          # With no migration on disk there is no number to look for, so the drill counts as
+          # absent, which is the "none" case and skips.
+          DRILL=""
+          if [ -n "$MIG" ]; then
+            N="$(basename "$MIG" | cut -c1-4)"
+            DRILL="x42-${N}-${{ matrix.dbtag }}-upgrade"
+            if [ -f "packages/db/tests/$DRILL.test.mjs" ]; then have=$((have+1))
+            else miss="$miss packages/db/tests/$DRILL.test.mjs"; fi
+          else
+            miss="$miss packages/db/tests/x42-NNNN-${{ matrix.dbtag }}-upgrade.test.mjs"
+          fi
+          if [ "$have" = "0" ]; then
+            echo "${{ matrix.slice }} has NOT landed yet (none of its three artifacts is on disk) — this leg skips (green, by design)."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [ "$have" != "3" ]; then
+            # RC5: a PARTIAL landing used to skip GREEN. It is a broken PR, not an absent slice.
+            echo "PARTIAL LANDING: the ${{ matrix.slice }} slice has $have of its 3 artifacts on disk."
+            echo "missing:"; for m in $miss; do echo "  · $m"; done
+            echo "A Wave D-b slice ships its migration, its test list and its upgrade drill in ONE PR."
+            echo "Skipping this leg would leave the slice's whole frontier unproven — failing instead."
+            exit 1
+          fi
+          echo "frontier=$(basename "$MIG" | cut -c1-4)" >> "$GITHUB_OUTPUT"
+          echo "drill=$DRILL" >> "$GITHUB_OUTPUT"
+          echo "migfile=$(basename "$MIG")" >> "$GITHUB_OUTPUT"
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+          echo "${{ matrix.slice }} IS in the tree as $(basename "$MIG") — running its frontier leg with drill $DRILL."
+
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          version: 10.33.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        if: steps.gate.outputs.ready == 'true'
+        with:
+          node-version: 20.19.5
+          cache: pnpm
+
+      - name: Install
+        if: steps.gate.outputs.ready == 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Install PostgreSQL 17 client
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client-17
+          psql --version
+
+      # (1) the slice-shaped migrations copy: every migration numbered at or below THIS SLICE'S
+      # OWN migration, whatever number that turned out to be. A numeric compare rather than a
+      # glob, so a new migration cannot silently join an EARLIER slice's chain. The top of the
+      # copied chain is then asserted to BE this slice's own file — by NAME, not by number — so
+      # a leg can never run at a frontier that is not the one it is named for.
+      - name: Materialise the ${{ matrix.slice }} migrations chain (0001..${{ steps.gate.outputs.frontier }})
+        id: chain
+        if: steps.gate.outputs.ready == 'true'
+        run: |
+          FRONTIER="${{ steps.gate.outputs.frontier }}"
+          SLICE_MIG="$(mktemp -d)"
+          for f in packages/db/migrations/[0-9][0-9][0-9][0-9]_*.sql; do
+            n="$(basename "$f" | cut -c1-4)"
+            if [ "$n" -le "$FRONTIER" ]; then cp "$f" "$SLICE_MIG/"; fi
+          done
+          TOP="$(ls "$SLICE_MIG" | tail -1)"
+          test "$TOP" = "${{ steps.gate.outputs.migfile }}" || {
+            echo "the ${{ matrix.slice }} chain tops out at $TOP, not this slice's own ${{ steps.gate.outputs.migfile }}"; exit 1; }
+          echo "dir=$SLICE_MIG" >> "$GITHUB_OUTPUT"
+          echo "--- ${{ matrix.slice }} chain: $(ls "$SLICE_MIG" | wc -l) migrations, frontier $TOP ---"
+          ls "$SLICE_MIG" | tail -3
+
+      # (2) migrate the fresh service DB from that copy ONLY.
+      - name: Migrate clara_ci at the ${{ matrix.slice }} frontier
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: packages/db
+        env:
+          CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
+        run: |
+          node scripts/migrate.mjs
+          psql -tAc "select count(*) || ' migrations applied, frontier ' || max(version) from clara.schema_migrations"
+
+      # (3) the slice's list. E17: CLARA_MIGRATIONS_DIR must name the copy the DB was built
+      # from, or the rig's ensureReady() re-migrate fails its history-integrity check.
+      - name: Run the ${{ matrix.slice }} test list
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: packages/db
+        env:
+          CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
+        run: |
+          set -o pipefail
+          LIST="tests/split-lists/test-list-${{ matrix.slice }}.txt"
+          test -f "$LIST" || { echo "missing $LIST"; exit 1; }
+          FILES=""
+          # `|| [ -n "$f" ]`: a list whose last line lost its newline must not lose its last file.
+          while read -r f || [ -n "$f" ]; do
+            case "$f" in ''|'#'*) continue;; esac
+            test -f "tests/$f" || { echo "list names a file that does not exist: tests/$f"; exit 1; }
+            FILES="$FILES tests/$f"
+          done < "$LIST"
+          echo "--- ${{ matrix.slice }}: $(echo $FILES | wc -w) test files ---"
+          # CLARA_RIG_ALLOW_RESET is deliberately NOT set here: the reset-gated drill must SKIP in
+          # this sweep and run ALONE in (4). CLARA_ALLOW_DESTRUCTIVE *is* set, at job level, because
+          # the rig battery needs it — every reset gate keys on CLARA_RIG_ALLOW_RESET, never on it.
+          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee /tmp/list-run.txt
+          # (3b) THE CELL FLOOR. The totality gate below is FILE-granular: a DELETED cell inside a
+          # still-listed file passes it. Each list therefore declares its own measured floor and the
+          # run must meet it. Raise the floor in the list when you add cells; never lower it to go
+          # green.
+          FLOOR="$(grep -E '^#!cells-floor:' "$LIST" | head -1 | awk '{print $2}')"
+          test -n "$FLOOR" || { echo "$LIST declares no '#!cells-floor:' — every list must"; exit 1; }
+          PASS="$(grep -E '^# pass ' /tmp/list-run.txt | tail -1 | awk '{print $3}')"
+          FAIL="$(grep -E '^# fail ' /tmp/list-run.txt | tail -1 | awk '{print $3}')"
+          echo "--- ${{ matrix.slice }}: $PASS pass / $FAIL fail · declared floor $FLOOR ---"
+          test "$FAIL" = "0" || { echo "the ${{ matrix.slice }} list is not green"; exit 1; }
+          test -n "$PASS" && [ "$PASS" -ge "$FLOOR" ] || {
+            echo "CELL FLOOR BREACHED: the ${{ matrix.slice }} list passed ${PASS:-?} cells, floor $FLOOR — a cell was deleted or silently skipped"; exit 1; }
+
+      # (4) the slice's OWN deploy drill, alone, in its own throwaway database.
+      # DB NAME FROM `dbtag`: `clara_d-b0_upgrade_ci` is not a legal identifier.
+      - name: ${{ matrix.slice }} upgrade drill (isolated DB)
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: packages/db
+        env:
+          CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
+        run: |
+          PGDATABASE=postgres psql -v ON_ERROR_STOP=1 -c 'create database clara_x42_${{ matrix.dbtag }}_upgrade_ci'
+          PGDATABASE=clara_x42_${{ matrix.dbtag }}_upgrade_ci CLARA_RIG_ALLOW_RESET=1 \
+            CLARA_ALLOW_DESTRUCTIVE=1 CLARA_RIG_DB=1 \
+            node --test tests/${{ steps.gate.outputs.drill }}.test.mjs
+
+  # ===========================================================================
+  # [WAVE D-b SPLIT] THE PARTITION IS TOTAL — a standing, DATABASE-FREE gate.
+  #
+  # Every x41/x42 test file in the corpus must appear in EXACTLY ONE slice list (helpers, the
+  # cross-slice contracts and the four reset-gated drills excepted). A file that joins the corpus
+  # and no list would otherwise never run again under the split — the silent-coverage-loss shape
+  # the whole split has to be defended against.
+  #
+  # ITS OWN JOB, NOT THE d-b2 LEG. The frontier matrix skips a leg whose slice has not landed;
+  # hanging this gate off the d-b2 leg would hold the corpus unguarded until 0045 lands, which is
+  # exactly the multi-day window it exists to police. It needs no database and no node.
+  #
+  # ONE DECLARED EXCEPTION TO "EXACTLY ONE": a list may re-run an EARLIER slice's file as a
+  # regression floor by declaring `#!floor-rerun: <file>` in its header. The gate then allows
+  # exactly one extra listing of that file and no more — an undeclared duplicate still fails, and
+  # a stale declaration (the file is no longer double-listed) fails too.
+  db-split-partition-total:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Assert the slice lists partition the x41/x42 corpus exactly once
+        working-directory: packages/db
+        run: |
+          # WHICH D-b SLICES ARE ON DISK — by stable NAME, so a renumber cannot hide one
+          # [light re-confirm RC2/RC4].
+          DBMIG=""
+          for nm in wave_d_b0_shared_authorities wave_d_b1_staff_advances \
+                    wave_d_b3_af2_composite wave_d_b2_recurring_adjustments; do
+            # `| head -1` keeps the pipeline's status 0 when nothing matches, and the test is a
+            # full `if` rather than `&&` so a no-match cannot trip the runner's `set -e`.
+            m="$(ls migrations/[0-9][0-9][0-9][0-9]_${nm}.sql 2>/dev/null | head -1)"
+            if [ -n "$m" ]; then DBMIG="$DBMIG $(basename "$m")"; fi
+          done
+          if [ ! -d tests/split-lists ]; then
+            # RC5: this used to exit GREEN unconditionally — so a PR that landed a slice
+            # migration and forgot tests/split-lists/ left the corpus completely unguarded and
+            # said nothing. The directory is optional only while NO slice has landed.
+            if [ -n "$DBMIG" ]; then
+              echo "tests/split-lists/ is MISSING, but Wave D-b slice migrations ARE on disk:$DBMIG"
+              echo "This gate is the only thing standing between a test file joining the corpus and"
+              echo "never running again under the split. It is not optional once a slice has landed."
+              exit 1
+            fi
+            echo "no tests/split-lists/ and no Wave D-b slice migration — the split has not landed; nothing to check"; exit 0
+          fi
+          # And the converse, stated rather than assumed: lists without any slice migration is a
+          # half-landed PR too — the lists name files that no frontier leg will ever run.
+          if [ -z "$DBMIG" ]; then
+            echo "tests/split-lists/ exists but NO Wave D-b slice migration is on disk — a partial landing."
+            echo "The lists are the split's coverage contract; they land with the slice they describe."
+            exit 1
+          fi
+          echo "--- Wave D-b slice migrations on disk:$DBMIG ---"
+          # EXCLUDED, both by design: x42x-* are the cross-slice contracts (they appear in
+          # SEVERAL lists on purpose — each is frontier-aware), and x42-<NNNN>-bN-upgrade are the
+          # four reset-gated deploy drills (each runs ALONE in the frontier job, never in a list).
+          # The drill pattern is number-AGNOSTIC on purpose: migration numbers are claimed at MERGE
+          # time (slices/forks/RENUMBER.md), so a slice landing as 0050 must not rejoin the corpus.
+          ls tests/x41-*.test.mjs tests/x42-*.test.mjs tests/x41b*.test.mjs tests/x42b*.test.mjs 2>/dev/null \
+            | xargs -n1 basename | grep -v '^x42x-' \
+            | grep -vE '^x42-[0-9]{4}-b[0-9]-upgrade\.test\.mjs$' | sort > /tmp/corpus.txt
+          cat tests/split-lists/test-list-*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > /tmp/listed.txt
+          # EVERY list must declare its cell floor — the file-granular gate cannot see a deleted cell.
+          for L in tests/split-lists/test-list-*.txt; do
+            grep -qE '^#!cells-floor:' "$L" || { echo "$L declares no '#!cells-floor:'"; exit 1; }
+          done
+          # The declared floor re-runs: allow exactly ONE extra listing each, then fall through to
+          # the strict checks, which still fail on any undeclared duplicate.
+          cat tests/split-lists/test-list-*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > /tmp/floorruns.txt
+          while read -r fr || [ -n "$fr" ]; do
+            [ -n "$fr" ] || continue
+            grep -qxF "$fr" /tmp/listed.txt || { echo "declared floor re-run $fr is on no list at all"; exit 1; }
+            awk -v t="$fr" 'BEGIN{d=0} { if(!d && $0==t){d=1; next} print }' /tmp/listed.txt > /tmp/listed.tmp
+            mv /tmp/listed.tmp /tmp/listed.txt
+            grep -qxF "$fr" /tmp/listed.txt || {
+              echo "stale allowance: $fr is declared a floor re-run but is listed only once"; exit 1; }
+            echo "floor re-run allowed: $fr (one extra listing)"
+          done < /tmp/floorruns.txt
+          if ! diff -u /tmp/corpus.txt /tmp/listed.txt; then
+            echo "the slice lists do not partition the x41/x42 corpus exactly once"; exit 1
+          fi
+          test "$(sort /tmp/listed.txt | uniq -d | wc -l)" = "0" || { echo "a file is listed twice"; exit 1; }
+          echo "partition OK: $(wc -l < /tmp/corpus.txt) files, each in exactly one list"

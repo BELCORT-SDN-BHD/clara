@@ -136,14 +136,44 @@ export function fyBefore(fy) {
 }
 
 // ---------------------------------------------------------------------------
-// The WHOLE-DB fa_register_tie sweep (G7 shape (c)) — the PRODUCTION instrument,
-// driven once per register-bearing client under that client's own most-senior
-// active firm member, exactly as a WD-R14 pre-flight would run it.
+// THE x41-FAMILY-SCOPED fa_register_tie sweep (G7 shape (c)) — the PRODUCTION
+// INSTRUMENT (clara.fa_register_tie itself, per-client, exactly as a WD-R14
+// pre-flight would run it), driven once per register-bearing client OF THIS WAVE'S
+// OWN FIXTURE FAMILY under that client's own most-senior active firm member.
+//
+// [task #62 / WDB-R2, round-7] SCOPED, NOT WHOLE-DATABASE. It used to loop over
+// EVERY `clara.clients` row with no predicate at all — provable only on a database
+// this suite owns in full, which CI's shared-database model (`pnpm -r --if-present
+// test` against one Postgres) never is. Measured offender: x42-reservation-authority
+// / x42-reservation-role plant RAW, deliberately-unbacked `clara.fixed_assets` rows
+// (x42-ra-helpers.mjs's `plantRow`/`plantAssetWithGl`/`plantDisposed`) on their own
+// `x42v_...` clients to exercise the RESERVATION AUTHORITY predicate in isolation —
+// by design, never through the acquisition/disposal writers, so they have no GL
+// counterpart and were never meant to answer to a REGISTER-vs-GL tie at all. Run the
+// x42 battery before this file on one shared database and its `200-V42` (FACOST)
+// fixtures surface here as unexplained reds no accounting act could ever clear, and
+// one of them (x42.ra1's raw `superseded` plant, which never runs the K6 hand-off
+// writer G3 stamps) also feeds x41.s5's global orphan census below.
+//
+// THE SCOPE: every client this wave's OWN two client-minting paths
+// (`freshFaClient` / `kSeededFaClient`, both x41-fa-world.mjs — the ONLY
+// `createClient()` call sites under the `x41_` name, grep-verified against every
+// other call site in packages/db/tests) name `x41_<label>_<tag>`; `ALLOWED_RED`'s
+// own `/^x41_r3_/` entry already relies on this being the WHOLE x41 family, not just
+// this file, so the scope below matches that existing assumption rather than
+// narrowing it further. WITHIN that scope the claim stays exactly what it was:
+// unexplained differences are EMPTY. `X41_FAMILY_NAME_RE` is the ONE place the law
+// lives, so the sweep and its own pin (x41.s4z, x41-round35-tie.test.mjs) read the
+// identical predicate and cannot drift apart (WDB-R2).
 // ---------------------------------------------------------------------------
 
-/** Every register-bearing client's tie at `asOf`, as {client, client_name, tie, err}.
- *  A DO body is a string literal, so no bind parameter can reach inside it — `asOf` is
- *  therefore shape-asserted to a bare ISO date before it is inlined. */
+export const X41_FAMILY_NAME_RE = "^x41_";
+
+/** Every register-bearing client OF THE x41 FAMILY's tie at `asOf`, as
+ *  {client, client_name, tie, err}. A DO body is a string literal, so no bind
+ *  parameter can reach inside it — `asOf` is therefore shape-asserted to a bare ISO
+ *  date, and the name predicate is a repo-controlled constant (never caller input),
+ *  before either is inlined. */
 export async function tieSweep(asOf) {
   assert.match(String(asOf), /^\d{4}-\d{2}-\d{2}$/,
     `the whole-DB sweep as-of must be a bare ISO date (got '${asOf}')`);
@@ -155,8 +185,9 @@ export async function tieSweep(asOf) {
       declare cl record; v_sub uuid; v_tie jsonb;
       begin
         for cl in select c.id, c.firm_id, c.name from clara.clients c
-                  where exists (select 1 from clara.fixed_assets f where f.client_id = c.id)
-                     or exists (select 1 from clara.fa_account_profiles p where p.client_id = c.id)
+                  where c.name ~ '${X41_FAMILY_NAME_RE}'
+                    and (exists (select 1 from clara.fixed_assets f where f.client_id = c.id)
+                      or exists (select 1 from clara.fa_account_profiles p where p.client_id = c.id))
         loop
           select m.user_id into v_sub from clara.firm_memberships m
             where m.firm_id = cl.firm_id and m.status = 'active'

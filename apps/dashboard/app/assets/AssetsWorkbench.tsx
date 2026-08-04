@@ -17,7 +17,7 @@ import {
   proposeDepreciationAuthority, signDepreciationAuthority, retireDepreciationAuthority, setClientFyEnd,
 } from "../shared/assetsApi";
 import {
-  assetsScreenState, assetIsIncomplete, assetHasUnchargedDue, fyEndLabel,
+  assetsScreenState, assetIsIncomplete, assetHasUnchargedDue, assetHasSplitMonthAdvisory, fyEndLabel,
   type AssetRow, type DepreciationAuthorityRead, type DepreciationCadence, type ScreenState,
 } from "./assetsModel";
 import { AssetDetailPane } from "./AssetDetailPane";
@@ -166,12 +166,29 @@ export function AssetListBody({
               <td>
                 {a.description ?? shortId(a.id)}
                 {assetIsIncomplete(a) ? <span className={styles.overdueTag}>incomplete</span> : null}
+                {/* [round-5 fix] the WDB-G14 changeover and the WDB-G10 freeze are
+                    DB-owned facts about this row; both were emitted and rendered
+                    nowhere. A reviewer scanning the register must see them here,
+                    not only after selecting the row. */}
+                {assetHasSplitMonthAdvisory(a) ? (
+                  <span className={styles.overdueTag} title="A revision took effect after day 1 — the whole changeover month stayed with the predecessor. Open the row to review materiality.">
+                    mid-month changeover
+                  </span>
+                ) : null}
+                {a.disposal_draft_outstanding ? (
+                  <span className={styles.overdueTag} title="A disposal draft is outstanding — a second disposal is refused until it is approved or withdrawn.">
+                    disposal draft
+                  </span>
+                ) : null}
               </td>
               <td><span className={`${styles.band} ${a.status === "active" ? styles.bandReady : styles.bandNeutral}`}>{a.status}</span></td>
               <td className={styles.num}>{fmtCents(a.cost_cents)}</td>
               <td className={styles.num}>{fmtCents(a.accumulated_cents)}</td>
               <td className={styles.num}><strong>{fmtCents(a.nbv_cents)}</strong></td>
-              <td>{assetHasUnchargedDue(a) ? <span className={styles.overdueTag}>{a.uncharged_due_count} due</span> : "—"}</td>
+              {/* WD-R6: the DB projects WHICH months are owed, not only how many — show them. */}
+              <td title={a.uncharged_due.join(", ")}>
+                {assetHasUnchargedDue(a) ? <span className={styles.overdueTag}>{a.uncharged_due_count} due</span> : "—"}
+              </td>
             </tr>
           ))}
         </tbody>
