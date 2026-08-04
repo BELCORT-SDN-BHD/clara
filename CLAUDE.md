@@ -101,36 +101,40 @@ read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this f
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
 **Phase 4 — WAVE C CLOSED (ADR-051..054) · WAVE D OPEN (ADR-055): D-a CLOSED (ADR-056) ·
-D-b DESIGN CLOSED (ADR-057, 2026-08-02, PR #180) — the D-b BUILD (0042) is NEXT.** Closed:
-**A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) · the extraction slice
-(ADR-047/048) · the settlement program (ADR-049) · the first production autopost (ADR-050) ·
-**C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliation receipts at exactly 0, nine real
-RPR months chained to the sen; records `wave-c-*-design.md` + parts).
+D-b's SHIPPING SLICES CLOSED (ADR-058, 2026-08-05) — D-b2 (`0045`) is HELD and is NEXT.**
+Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) · the extraction
+slice (ADR-047/048) · the settlement program (ADR-049) · the first production autopost
+(ADR-050) · **C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliation receipts at exactly 0,
+nine real RPR months chained to the sen; records `wave-c-*-design.md` + parts).
 
-**LIVE POSTURE: 40 migrations (`0041`) · Fly `clara-runtime` v53 · FOUR firms** (BELCORT —
-real, 3 clients, high-stakes RM100,000 ADR-044 · ROME PUBLIC ADVISORY `39008536` = the
-Gate-S synthetic sandbox, RM10k default — its only client is "Fictional Test Services"; do
-not confuse with BELCORT's real ROME PROPERTIES / ROME SECRETARY · Alara + Borneo =
-slice-era RLS fixtures, never repurpose) **· dashboard Pages `app.clarabook.com` incl.
-/assets** (needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **·
-`clara-backup` daily.** No migration queued — D-b claims `0042` at merge. Both REAL FA
-registers are honestly EMPTY (ADR-056: neither RPR nor RS has ever owned a fixed asset);
-the sandbox register carries the labelled-synthetic acceptance corpus + a live monthly
-depreciation authority.
+**LIVE POSTURE: 43 migrations (frontier `0044`) · Fly `clara-runtime` v53 · Supavisor 32/60 ·
+FOUR firms** (BELCORT — real, 3 clients, high-stakes RM100,000 ADR-044 · ROME PUBLIC ADVISORY
+`39008536` = the Gate-S synthetic sandbox, RM10k default — its only client is "Fictional Test
+Services"; do not confuse with BELCORT's real ROME PROPERTIES / ROME SECRETARY · Alara +
+Borneo = slice-era RLS fixtures, never repurpose) **· dashboard Pages `app.clarabook.com`
+incl. /assets** (needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.dev`) **·
+`clara-backup` daily.** No migration queued — **D-b2 claims `0045` at ITS merge.** Both REAL
+FA registers AND both REAL staff-advance registers are honestly EMPTY (ADR-056: no real
+client has ever owned a fixed asset; ADR-058: both real clients are in strike-off); the
+sandbox carries the labelled-synthetic corpora — a live monthly depreciation authority and
+ONE synthetic staff advance, `staff_advance_tie` TRUE at difference 0.
 
 **WAVE D — `docs/plan/wave-d-contract.md` is the mechanism of record** (WD-R1..R15, ADR-055;
 never re-grill). **D-a CLOSED (ADR-056)** — `wave-d-a-fa-design.md` v2.1 + `-part2.md` = the
 full record; both real registers honestly EMPTY (the WD-R14 named deviation); RS's real
-FYE = 31 March. **D-b DESIGN CLOSED (ADR-057, PR #180)** — the design of record =
-`wave-d-b-design.md` v8 (WDB-G1..G16) + `wave-d-b-design-abi.md` (the builder ABI) + the
-EIGHT-round ladder record (`-part2.md`/`-part3.md`, ~170 adjudications) + the split-month
-research record; the D-a ladder residuals are RULED IN (G10..G12, G14). **NEXT: the D-b
-BUILD** — harvest → 0042 + contract-blind x42 + runtime + surfaces → as-built ladder →
-build PR (0042 claims at ITS merge) → ceremony → acceptance (real = one owner-named
-template's ramp + auto-reversal; advances close on the G8 named deferral). Closing stock →
-Wave E (WD-R11). The Wave C records (never re-grill): `wave-c-contract.md` (WC-R1..R12) ·
-the C-a/C-b/C-c design docs + parts (WCA/WCB/WCC + AF-1..AF-5). Open registers: PROJECTLOG
-PART 2 (Gate P · the §7-A bundle parked for the unattended sales drafter).
+FYE = 31 March. **D-b: the AS-BUILT truth is `wave-d-b-asbuilt.md` + `-part2.md` (ADR-058)** —
+the wave shipped as a **FOUR-SLICE SPLIT** (`0042` D-b0 shared authorities · `0043` D-b1 staff
+advances · `0044` D-b3 AF-2 composite + producer, all LIVE · `0045` D-b2 recurring adjustments
+**HELD**), proven complete by twin-rig equivalence (zero semantic difference, 14 axes) and a
+418-cell test partition. `wave-d-b-design.md` v8 (WDB-G1..G16) + `-abi.md` + `-part2/-part3`
+remain the DESIGN-time record and are bannered as such. **NEXT: D-b2's hold-ladder** (it ships
+no round-11 fix by design; the inheritance register is asbuilt-part2 §12), then Gate P and the
+§7-A bundle. The `bank_rule_suggested` producer is live but **UNGRANTED by design** — its
+grant lands with `0045`. Closing stock → Wave E (WD-R11). The Wave C records (never re-grill):
+`wave-c-contract.md` (WC-R1..R12) · the C-a/C-b/C-c design docs + parts (WCA/WCB/WCC +
+AF-1..AF-5; **AF-2 shipped at `0044`**). Archive branch `build/wave-d-b-0042`: **NEVER MERGE**
+(evidence only; do-not-restore list in asbuilt-part2 §13). Open registers: PROJECTLOG PART 2
+(D-b2 · Gate P · the §7-A bundle parked for the unattended sales drafter).
 
 **Autopost law (ADR-049/050):** vendor-binding v4.1 BUILT AND LIVE; hand-drafts are never
 autopost-eligible BY DESIGN; autopost-from-seeding stays REFUSED (WB-R2/ADR-046). The
@@ -140,9 +144,9 @@ law: migration numbers are claimed at MERGE time.** Malaysian tax facts live in
 effective-dated policy tables, never in prose
 (`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
 
-**Open build items (PROJECTLOG PART 2 is the live register):** **the D-b BUILD** (0042:
-templates + advances + the AF-2 composite + the `bank_rule_suggested` producer + the ruled
-D-a residual fixes — design-complete, build from `wave-d-b-design.md` + the ABI) · Gate P
+**Open build items (PROJECTLOG PART 2 is the live register):** **D-b2 / `0045`** (recurring +
+reversing adjustments — BUILT, twin-proven and HELD; needs its own hold-ladder before any PR;
+it also carries the producer's guarded grant and the D-b3 lane inheritance) · Gate P
 (operating runway; owns the capitalised/mixed-purchase tax-allocation question) · the §7-A
 runtime bundle (parked for the unattended sales drafter) · the `opening_tb.line` producer +
 K-doc door (Phase 5, review-gated).

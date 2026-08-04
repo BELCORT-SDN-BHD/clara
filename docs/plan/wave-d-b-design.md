@@ -1,5 +1,12 @@
 # Wave D-b — adjustments + staff advances (migration 0042): the design
 
+> ⚠️ **DESIGN-TIME record. The AS-BUILT truth is [`wave-d-b-asbuilt.md`](./wave-d-b-asbuilt.md)
+> (+ `-part2.md`).** The build shipped as a **four-slice split** — `0042` D-b0 · `0043` D-b1 ·
+> `0044` D-b3 LIVE, `0045` D-b2 **HELD** — not as the single `0042` monolith this file
+> describes; the `bank_rule_suggested` producer's grant moved to `0045`. **See ADR-058.** The
+> rulings (WDB-G1..G16) stand; the ladder record below is design-time and four rounds behind
+> the as-built ladder. Body unchanged on purpose.
+
 > **Status: v7 — grilled 2026-08-02 (WDB-G1..G16), rounds 1–6 of the design ladder folded
 > (fifteen lanes, ~155 findings; the record: `wave-d-b-design-part2.md` rounds 1–4,
 > `wave-d-b-design-part3.md` rounds 5+; the ABI: `wave-d-b-design-abi.md`).** Contract:

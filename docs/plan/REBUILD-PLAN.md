@@ -237,6 +237,34 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > claims at ITS merge) → ceremony → acceptance** (sandbox full corpus; real = one owner-named
 > recurring template's ramp + auto-reversal on a real month; advances close on the G8 named
 > deferral).
+>
+> **STATUS (2026-08-05): D-b's SHIPPING SLICES ARE CLOSED (ADR-058) — the wave shipped as a
+> FOUR-SLICE SPLIT.** The as-built record is `wave-d-b-asbuilt.md` + `-part2.md`;
+> `wave-d-b-design.md`/`-abi.md` are now DESIGN-time only (bannered — they describe a monolith
+> that never shipped). An **eleven-round** as-built ladder (127 findings; for eight consecutive
+> rounds the worst defect lived inside the previous round's repair) localised every surviving
+> mechanism to ONE family, and the owner's conditional whole-ship ruling was overturned by its
+> own condition when round 11 found two more — **the split became the executed ruling.** Shipped:
+> **`0042` D-b0 (shared class authorities, PR #182) · `0043` D-b1 (staff advances, #183) ·
+> `0044` D-b3 (the AF-2 composite + the `bank_rule_suggested` producer, #184)**; **`0045` D-b2
+> (recurring adjustments) is BUILT, twin-proven and HELD** (it ships no round-11 fix by design).
+> Completeness proven twice: **twin-rig equivalence at ZERO semantic difference** vs the
+> whole unit across 14 exhaustive axes (3 comment-only body diffs, each adjudicated), and a
+> **418-cell test partition** scoring 415/0/3 in exactly the same cells as the monolith. A
+> five-reviewer confirming round over the INTERMEDIATE FRONTIERS AS PRODUCTION STATES found and
+> killed two money mechanisms the monolith could not have had (the phantom staff advance at
+> `0044` → **the producer's grant is withheld until `0045`**; the disposed-asset walk gate at
+> `0042` → S5.19 pulled forward). Three Codex merge gates (the fail-open binding-gate exemption
+> → strict census grammar + a one-entry enforced allowlist; the show-B-settle-A money-UI
+> blocker). **Deployed 2026-08-05: 43 migrations (frontier `0044`) · runtime v53 untouched ·
+> Supavisor 32/60**; postverify 12/12 with `producer_authed` FALSE live. Sandbox acceptance ran
+> as ONE THREAD through the production verbs (intake → honest abstention → the agent refusing
+> to file → the human two-step → a chained statement → an exception → the composite in one act
+> → the advance BIRTHED → `staff_advance_tie` TRUE at difference 0 → 42501 on production), with
+> **all four structural invariants witnessed live**. **The real half closed on a NAMED, MEASURED
+> deviation: both real clients are in STRIKE-OFF** (books closed, no open period) — the first
+> live real template defers to the first going-concern client, the ADR-056 precedent.
+> **NEXT: D-b2's hold-ladder** (inheritance register: asbuilt-part2 §12), then Wave E.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
@@ -250,7 +278,7 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > Wave-C grilling: structured-sales autopost as a tail slice (PRD §4.95).
 
 **Wave C — money movement.** Bank statement ingest, parity-checked matching + exclusivity, reconciliation tie-out, receipt/payment allocation (intrinsic), aging + statements, the self-reconcile learn loop (advisory, human-gated).
-**Wave D — assets + adjustments** *(OPEN, ADR-055; `docs/plan/wave-d-contract.md` = WD-R1..R15; **D-a FA/0041 CLOSED (ADR-056)** → D-b adjustments+advances/0042 next)*. FA register from coding (intrinsic, soft-birth per WD-R1), depreciation runs (scheduled; the close gate is a NAMED Wave-E deferral per WD-R6), disposal (full + partial per WD-R7), CA metadata (inert per WD-R12), recurring/reversing adjustments (signed templates per WD-R8), staff advances (the B-lite register per WD-R10, §7-B). *Closing stock moved → Wave E (WD-R11).*
+**Wave D — assets + adjustments** *(OPEN, ADR-055; `docs/plan/wave-d-contract.md` = WD-R1..R15; **D-a FA/0041 CLOSED (ADR-056)**; **D-b shipped as a four-slice split — 0042/0043/0044 CLOSED (ADR-058), 0045 D-b2 HELD**)*. FA register from coding (intrinsic, soft-birth per WD-R1), depreciation runs (scheduled; the close gate is a NAMED Wave-E deferral per WD-R6), disposal (full + partial per WD-R7), CA metadata (inert per WD-R12), recurring/reversing adjustments (signed templates per WD-R8), staff advances (the B-lite register per WD-R10, §7-B). *Closing stock moved → Wave E (WD-R11).*
 **Wave E — periods + statements.** Serialized year-end close with structural pre-close gates, segmented continuity reads, ordered reverse guards, carry-forward; the honest FS pack (SoFP/SoCI/SOCE/cash-flow/notes); the reporting engine (spec → DB reads → renderers → auditable artifacts). *Owns by inheritance:* periodic closing-stock at close + its completeness check (WD-R11) · the depreciation close gate over D's receipts (WD-R6) · the segment-aware FA tie-out (the REBUILD-rated `fa_control_tie_out`).
 **Wave F — tax.** The SST engine per the practice map (periods, payment basis, dual-registrant exports, SST-02, bad-debt relief); the payroll deadline calendar; **last: the draft tax computation** (add-backs, CA, chargeable income, forms — the slice allowed to slip to v1.1).
 **Wave G — the OS surface.** Proactive inbox (allowlisted wakes), cross-scope needs-you, ⌘K Ask/Do/Go + ActionPanels, plan-as-document for close/onboarding, exports UI, generative-UI completion + parity CI gates, the design floors.
