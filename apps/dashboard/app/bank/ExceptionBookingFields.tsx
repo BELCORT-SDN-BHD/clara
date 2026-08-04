@@ -31,7 +31,7 @@
 // (`parseCentsInput` keeps the sen exact on the write path), and every open-item
 // outstanding figure is rendered verbatim from the DB.
 
-import { useEffect, useState } from "react";
+import { useEffect, useReducer, useState } from "react";
 import type { ResolveAndBookBankLineDisposition } from "../shared/reconApi";
 import type { SettleAllocationInput, BankAdjustmentInput } from "../shared/bankApi";
 import { listOpenItemsByCounterparty } from "../shared/bankApi";
@@ -40,8 +40,11 @@ import { staffAdvanceSummary, type StaffAdvanceApplicationKind } from "../shared
 import type { StaffAdvanceSummaryRow } from "../advances/advancesModel";
 import type { OpenItemRow } from "./model";
 import { exceptionDispositionLabel } from "./reconModel";
-import { af2Admission, type Af2Request } from "./resolveBookModel";
-import { parseCentsInput, settlementDomainFor, REFUND_WORKAROUND_MESSAGE } from "./matchModel";
+import {
+  af2Admission, settlementAllocationInputs, settlementLegInitialState, settlementLegReducer,
+  type Af2Request,
+} from "./resolveBookModel";
+import { parseCentsInput, refundSubmitBlock, settlementDomainFor, REFUND_WORKAROUND_MESSAGE } from "./matchModel";
 import { fmtCents, shortId } from "../shared/fmt";
 import styles from "./bank.module.css";
 
@@ -140,8 +143,13 @@ export function ExceptionBookingFields({
 }
 
 /** Shared between the two legs: the ONE admission body decides the submit
- *  button's enabled state and its disabled copy. */
-function SubmitRow({
+ *  button's enabled state and its disabled copy.
+ *
+ *  EXPORTED for the same reason OpenItemAllocations is: its two states — an
+ *  admissible request with a LOCAL block, and one without — are reachable in
+ *  this surface only after a network effect and a typed allocation, and a state
+ *  no cell can render is a state no cell can hold to account. */
+export function SubmitRow({
   request, busy, label, busyLabel, blockedBy, onSubmit,
 }: {
   request: Af2Request; busy: boolean; label: string; busyLabel: string;
@@ -177,41 +185,52 @@ function SettlementLegFields({
   disposition: ResolveAndBookBankLineDisposition; note: string; busy: boolean;
   onSubmit: (args: ResolveAndBookArgs) => void;
 }) {
-  const [kind, setKind] = useState<CounterpartyKind>(initialKind ?? ((lineAmountCents ?? 0) >= 0 ? "customer" : "vendor"));
+  // [merge gate PR #184, finding 1] EVERY state this leg's scope owns lives in
+  // ONE reducer (resolveBookModel), because the defect the gate caught was a
+  // TRANSITION: switching party or kind cleared the displayed items and kept the
+  // allocation map, and the composite derives its counterparty from the ids in
+  // that map — so the surface could show party B and settle party A. The reducer
+  // makes voiding the map a law of the transition rather than a call somebody
+  // has to remember, and `settlementAllocationInputs` re-checks it on the way
+  // out (belt and braces: an id that is not on screen cannot reach the wire).
+  const [state, dispatch] = useReducer(
+    settlementLegReducer,
+    initialKind ?? ((lineAmountCents ?? 0) >= 0 ? "customer" : "vendor"),
+    settlementLegInitialState,
+  );
+  const { kind, counterpartyId, openItems, itemsAvailable, allocations } = state;
   const [counterparties, setCounterparties] = useState<CounterpartyRow[]>([]);
-  const [counterpartyId, setCounterpartyId] = useState("");
-  const [openItems, setOpenItems] = useState<OpenItemRow[]>([]);
-  const [itemsAvailable, setItemsAvailable] = useState<boolean | null>(null);
-  const [allocations, setAllocations] = useState<Record<string, number>>({});
 
   // The composite DERIVES its counterparty from the items named, so this picker
   // exists only to narrow the open-item list — it is never sent.
   const domain = kind === "customer" ? "ar" : "ap";
 
   useEffect(() => {
-    setCounterpartyId("");
-    setOpenItems([]);
-    setItemsAvailable(null);
+    // A session/client change voids the scope exactly as a kind toggle does:
+    // nothing already picked is known to belong to the client now in view.
+    dispatch({ type: "scope", kind });
     listCounterparties(token, clientId, kind).then(setCounterparties).catch(() => setCounterparties([]));
   }, [token, clientId, kind]);
 
   useEffect(() => {
-    if (!counterpartyId) { setOpenItems([]); setItemsAvailable(null); return; }
+    if (!counterpartyId) return; // the reducer already voided items on the switch
     let cancelled = false;
     listOpenItemsByCounterparty(token, clientId, domain, counterpartyId)
-      .then((rows) => { if (!cancelled) { setOpenItems(rows); setItemsAvailable(true); } })
-      .catch(() => { if (!cancelled) { setOpenItems([]); setItemsAvailable(false); } });
+      .then((rows) => { if (!cancelled) dispatch({ type: "items_loaded", items: rows }); })
+      .catch(() => { if (!cancelled) dispatch({ type: "items_unreadable" }); });
     return () => { cancelled = true; };
   }, [token, clientId, counterpartyId, domain]);
 
-  const allocationInputs: SettleAllocationInput[] = Object.entries(allocations)
-    .filter(([, v]) => v > 0)
-    .map(([item_id, amount_cents]) => ({ item_id, amount_cents }));
+  const allocationInputs: SettleAllocationInput[] = settlementAllocationInputs(state);
 
   // The refund quadrant is a settle_from_bank_line law (design §4.6); previewed
   // only when the DB gave this exception an amount to preview it against.
+  // [merge gate PR #184, finding 2] It also BLOCKS the submit: showing the
+  // workaround while leaving the button live offered a call this surface had
+  // already said the DB refuses by name.
   const refund = lineAmountCents !== null
     && settlementDomainFor(kind, lineAmountCents) === "refund_not_supported";
+  const refundBlock = refundSubmitBlock(kind, lineAmountCents);
 
   const request: Af2Request = {
     disposition, note, draft: null, allocations: allocationInputs,
@@ -221,10 +240,11 @@ function SettlementLegFields({
   return (
     <>
       <div className={styles.actions}>
-        <button className={kind === "customer" ? styles.button : styles.buttonSecondary} onClick={() => setKind("customer")}>Customer</button>
-        <button className={kind === "vendor" ? styles.button : styles.buttonSecondary} onClick={() => setKind("vendor")}>Vendor</button>
+        <button className={kind === "customer" ? styles.button : styles.buttonSecondary} onClick={() => dispatch({ type: "scope", kind: "customer" })}>Customer</button>
+        <button className={kind === "vendor" ? styles.button : styles.buttonSecondary} onClick={() => dispatch({ type: "scope", kind: "vendor" })}>Vendor</button>
         <select
-          className={styles.select} value={counterpartyId} onChange={(e) => setCounterpartyId(e.target.value)}
+          className={styles.select} value={counterpartyId}
+          onChange={(e) => dispatch({ type: "counterparty", counterpartyId: e.target.value })}
           aria-label={`Settlement counterparty for exception ${exceptionId}`} style={{ flex: 1 }}
         >
           <option value="">Select a counterparty to list its open items…</option>
@@ -238,12 +258,13 @@ function SettlementLegFields({
         <OpenItemAllocations
           items={openItems} available={itemsAvailable} domain={domain}
           allocations={allocations}
-          onAllocate={(id, cents) => setAllocations((a) => ({ ...a, [id]: cents }))}
+          onAllocate={(id, cents) => dispatch({ type: "allocate", itemId: id, cents })}
         />
       ) : null}
 
       <SubmitRow
         request={request} busy={busy} label="Resolve + settle these items" busyLabel="Settling…"
+        blockedBy={refundBlock}
         onSubmit={() => onSubmit({ draft: null, allocations: allocationInputs, adjustments: null, chargeCents: null, chargeAccount: null })}
       />
     </>
@@ -265,7 +286,7 @@ export function OpenItemAllocations({
   /** null = not asked yet; false = the read failed or came back wrong-shaped. */
   available: boolean | null;
   domain: "ar" | "ap";
-  allocations: Record<string, number>;
+  allocations: Readonly<Record<string, number>>;
   onAllocate: (itemId: string, cents: number) => void;
 }) {
   if (available === false) {

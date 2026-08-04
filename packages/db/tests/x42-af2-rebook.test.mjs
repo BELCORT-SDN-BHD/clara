@@ -398,7 +398,7 @@ test("x42.af2-14f a counterparty merge landing inside the composite's lock windo
   // acquisition and everything downstream; the merge then commits (it takes only
   // counterparty ROW locks, and the composite's draft does not exist yet, so
   // `open_draft_blocks` cannot see it); the barrier releases.
-  
+
   const exRace = await openException(sub, { client, line: racedLine.id, reason: "x42 race" });
   const holder = await getPool().connect();
   const actor = await getPool().connect();

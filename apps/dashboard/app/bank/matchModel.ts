@@ -128,6 +128,34 @@ export const REFUND_WORKAROUND_MESSAGE =
   "the adjustment open item, apply_open_items against the residue, then match_bank_line the line to that " +
   "entry.";
 
+/** The same law as ONE line of blocking copy for a submit control.
+ *
+ *  [merge gate PR #184, finding 2] Stating the workaround is not enough on its
+ *  own: the AF-2 settlement sub-form showed REFUND_WORKAROUND_MESSAGE and left
+ *  its submit ENABLED, so the moment an allocation existed the surface offered a
+ *  call it had ALREADY told the user the DB refuses by name. That is the
+ *  walled-corridor shape in reverse — a control that promises an outcome its own
+ *  copy denies — and this repo's answer is always the same: the control is
+ *  blocked and says why, in the words of the refusal. */
+export const REFUND_SUBMIT_BLOCKED_MESSAGE =
+  "A refund cannot be settled here: settle_from_bank_line refuses this counterparty/direction pair by " +
+  "name (`refund_not_supported`), so this control stays blocked rather than sending a call the DB is " +
+  "certain to refuse. Use the workaround stated above, or switch the quadrant.";
+
+/** Null when the quadrant is lawful; the blocking copy when it is a refund.
+ *  `lineAmountCents` null = the DB gave this exception no amount to judge the
+ *  quadrant against, so nothing is claimed and nothing is blocked — the DB
+ *  remains the authority either way. */
+export function refundSubmitBlock(
+  counterpartyKind: "customer" | "vendor",
+  lineAmountCents: number | null,
+): string | null {
+  if (lineAmountCents === null) return null;
+  return settlementDomainFor(counterpartyKind, lineAmountCents) === "refund_not_supported"
+    ? REFUND_SUBMIT_BLOCKED_MESSAGE
+    : null;
+}
+
 // ---------------------------------------------------------------------------
 // Refusal-reason copy (the KbRuleProposalCard idiom: the CLR badge rides ALONGSIDE
 // the DB's verbatim message, never in place of it — this only adds a friendlier

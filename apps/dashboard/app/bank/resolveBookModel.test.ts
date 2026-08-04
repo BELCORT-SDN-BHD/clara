@@ -20,8 +20,15 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { af2Admission, af2AdmissionBlockReason, type Af2Request } from "./resolveBookModel";
-import { describeBankRefusal, BANK_REFUSAL_AXIS_COPY, parseRefusalAxis } from "./matchModel";
+import {
+  af2Admission, af2AdmissionBlockReason, settlementAllocationInputs, settlementLegInitialState,
+  settlementLegReducer, type Af2Request, type SettlementLegAction, type SettlementLegState,
+} from "./resolveBookModel";
+import {
+  describeBankRefusal, BANK_REFUSAL_AXIS_COPY, parseRefusalAxis, refundSubmitBlock,
+  REFUND_SUBMIT_BLOCKED_MESSAGE,
+} from "./matchModel";
+import type { OpenItemRow } from "./model";
 import { resolveAndBookBankLine } from "../shared/reconApi";
 import type { PgrestError } from "../shared/wire";
 
@@ -245,4 +252,139 @@ test("[CLASS — SUBSET HONESTY] the predicate answers SHAPE only; it never clai
   // The leg is DERIVED, never selected — the verb takes no leg argument.
   const d = af2Admission(req({ draft: OK_DRAFT }));
   assert.equal(d.admitted && d.leg, "draft");
+});
+
+// ===========================================================================
+// [MERGE GATE PR #184, finding 1 — THE MERGE-BLOCKER] THE PARTY SWITCH.
+//
+// The settlement sub-form cleared its DISPLAYED open items when the user
+// switched counterparty or customer/vendor kind, and kept the allocation map.
+// The submit payload was derived from that map, and the composite DERIVES ITS
+// COUNTERPARTY FROM THE ITEM IDS IT IS GIVEN — so the surface could show party B
+// while settling party A, with nothing on screen naming the survivors.
+//
+// These cells drive the reducer through the EXACT action sequence the controls
+// dispatch (`scope` = the Customer/Vendor toggle, `counterparty` = the picker,
+// `items_loaded`/`items_unreadable` = the open-item effect, `allocate` = the
+// cents input). They are the transition half of the regression; the render half
+// is in ExceptionBookingFields.test.tsx.
+// ===========================================================================
+
+const A1 = "11111111-1111-4111-8111-111111111111";
+const A2 = "22222222-2222-4222-8222-222222222222";
+const B1 = "33333333-3333-4333-8333-333333333333";
+
+function item(id: string, counterparty: string): OpenItemRow {
+  return {
+    id, domain: "ar", counterparty_id: counterparty, item_kind: "invoice",
+    item_date: "2035-01-02", due_date: null, amount_cents: 100000,
+    outstanding_cents: 100000, entry_id: `e-${id}`,
+  };
+}
+const PARTY_A = [item(A1, "cp-A"), item(A2, "cp-A")];
+const PARTY_B = [item(B1, "cp-B")];
+
+function drive(state: SettlementLegState, actions: SettlementLegAction[]): SettlementLegState {
+  return actions.reduce(settlementLegReducer, state);
+}
+
+/** Party A picked, its items loaded, one of them allocated — the state the user
+ *  is in the instant before the switch that used to leak. */
+function allocatedUnderA(): SettlementLegState {
+  const s = drive(settlementLegInitialState("customer"), [
+    { type: "counterparty", counterpartyId: "cp-A" },
+    { type: "items_loaded", items: PARTY_A },
+    { type: "allocate", itemId: A1, cents: 100000 },
+  ]);
+  // Not vacuous: the pre-switch payload really does name party A.
+  assert.deepEqual(settlementAllocationInputs(s), [{ item_id: A1, amount_cents: 100000 }]);
+  return s;
+}
+
+test("[MG184 F1 RED] switching COUNTERPARTY leaves zero party-A ids in the payload", () => {
+  const after = drive(allocatedUnderA(), [{ type: "counterparty", counterpartyId: "cp-B" }]);
+  assert.deepEqual(after.allocations, {}, "the map itself is void, not merely filtered on the way out");
+  assert.deepEqual(settlementAllocationInputs(after), []);
+  // …and the submit is a CLEAN SLATE: the request it would send is the empty
+  // one, which the admission body refuses on the same axis an untouched form does.
+  const a = af2Admission(req({ allocations: settlementAllocationInputs(after) }));
+  assert.equal(a.admitted, false);
+  assert.equal(a.admitted === false && a.axis, "no_booking");
+  // The whole scope is reset, not just the map — a party-B load must not inherit
+  // party A's list either.
+  assert.deepEqual(after.openItems, []);
+  assert.equal(after.itemsAvailable, null);
+  assert.equal(after.counterpartyId, "cp-B");
+});
+
+test("[MG184 F1 RED] switching KIND leaves zero party-A ids in the payload, and voids the party too", () => {
+  const after = drive(allocatedUnderA(), [{ type: "scope", kind: "vendor" }]);
+  assert.deepEqual(after.allocations, {});
+  assert.deepEqual(settlementAllocationInputs(after), []);
+  assert.equal(after.counterpartyId, "", "a vendor list cannot keep a customer selection");
+  assert.equal(after.kind, "vendor");
+  assert.deepEqual(after.openItems, []);
+});
+
+test("[MG184 F1 BELT] the payload names ONLY items currently on screen — even if a map ever survives", () => {
+  // The belt is asserted directly rather than through a transition, because its
+  // job is to hold for a transition NOBODY HAS WRITTEN YET. A hand-built state
+  // whose map speaks about a party that is no longer displayed sends nothing.
+  const stale: SettlementLegState = {
+    kind: "customer", counterpartyId: "cp-B", openItems: PARTY_B, itemsAvailable: true,
+    allocations: { [A1]: 100000, [A2]: 50000, [B1]: 700 },
+  };
+  assert.deepEqual(settlementAllocationInputs(stale), [{ item_id: B1, amount_cents: 700 }]);
+  // And a RE-LOAD narrows the map itself, so the survivors cannot ride a later
+  // load back onto the screen either.
+  const reloaded = settlementLegReducer(stale, { type: "items_loaded", items: PARTY_B });
+  assert.deepEqual(reloaded.allocations, { [B1]: 700 });
+});
+
+test("[MG184 F1] an UNREADABLE open-item list voids the map — fail-closed, the OpenItemAllocations law", () => {
+  const after = drive(allocatedUnderA(), [{ type: "items_unreadable" }]);
+  assert.equal(after.itemsAvailable, false);
+  assert.deepEqual(after.openItems, []);
+  assert.deepEqual(settlementAllocationInputs(after), [],
+    "a list that could not be read must never be settled against — an allocation typed before the failure is not evidence");
+});
+
+test("[MG184 F1] re-picking the SAME counterparty is not a switch — typed work survives an idle re-select", () => {
+  const s = allocatedUnderA();
+  const same = settlementLegReducer(s, { type: "counterparty", counterpartyId: "cp-A" });
+  assert.equal(same, s, "identity: no re-render, no lost input");
+  assert.deepEqual(settlementAllocationInputs(same), [{ item_id: A1, amount_cents: 100000 }]);
+});
+
+test("[MG184 F1] zero cents never reaches the wire, and the map is the only writer", () => {
+  const s = drive(allocatedUnderA(), [
+    { type: "allocate", itemId: A2, cents: 0 },
+    { type: "allocate", itemId: A1, cents: 0 },
+  ]);
+  assert.deepEqual(settlementAllocationInputs(s), [], "clearing every box is an empty payload, not a zero-cent one");
+  assert.equal(af2Admission(req({ allocations: settlementAllocationInputs(s) })).admitted, false);
+});
+
+// ===========================================================================
+// [MERGE GATE PR #184, finding 2] THE REFUND QUADRANT BLOCKS, IT DOES NOT WARN.
+// ===========================================================================
+
+test("[MG184 F2] the refund quadrants BLOCK the submit; the lawful ones do not", () => {
+  // All four quadrants, both signs — so this cannot pass by measuring one.
+  assert.equal(refundSubmitBlock("customer", -50_000), REFUND_SUBMIT_BLOCKED_MESSAGE, "customer + outflow = refund");
+  assert.equal(refundSubmitBlock("vendor", 50_000), REFUND_SUBMIT_BLOCKED_MESSAGE, "vendor + inflow = refund");
+  assert.equal(refundSubmitBlock("customer", 50_000), null, "customer + inflow is an ordinary receipt");
+  assert.equal(refundSubmitBlock("vendor", -50_000), null, "vendor + outflow is an ordinary payment");
+  // No amount = no claim: the DB stays the authority and nothing is blocked on a
+  // quadrant this surface cannot compute.
+  assert.equal(refundSubmitBlock("customer", null), null);
+  assert.equal(refundSubmitBlock("vendor", null), null);
+});
+
+test("[MG184 F2] the blocking copy names the DB's own refusal token — a blocked control says why", () => {
+  assert.match(REFUND_SUBMIT_BLOCKED_MESSAGE, /refund_not_supported/);
+  assert.ok(REFUND_SUBMIT_BLOCKED_MESSAGE.length > 40);
+  // …and the gloss the DB's own refusal would render is still reachable, so the
+  // local block and the remote refusal cannot drift into two different stories.
+  assert.ok((describeBankRefusal("refund_not_supported", null) ?? "").length > 20);
 });

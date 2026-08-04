@@ -18,10 +18,15 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { ExceptionBookingFields, OpenItemAllocations, AdvanceApplicationFields } from "./ExceptionBookingFields";
+import {
+  ExceptionBookingFields, OpenItemAllocations, AdvanceApplicationFields, SubmitRow,
+} from "./ExceptionBookingFields";
 import { SnapshotTables } from "./ReconciliationSnapshotTables";
 import { toSnapshot } from "./reconSnapshotModel";
-import { af2Admission } from "./resolveBookModel";
+import {
+  af2Admission, settlementAllocationInputs, settlementLegInitialState, settlementLegReducer,
+} from "./resolveBookModel";
+import { refundSubmitBlock } from "./matchModel";
 
 function render(props: Partial<Parameters<typeof ExceptionBookingFields>[0]> = {}): string {
   return renderToStaticMarkup(createElement(ExceptionBookingFields, {
@@ -216,4 +221,108 @@ test("[F-F2 WDB-R4 off-path] a draft with NO advance section still admits cleanl
     advanceApplications: null,
   });
   assert.equal(a.admitted, true);
+});
+
+// ===========================================================================
+// [MERGE GATE PR #184] THE RENDER HALF OF THE TWO FINDINGS.
+//
+// This suite renders static markup (no jsdom, no click), so the switching
+// regression is split at the seam the fix created: the TRANSITION is asserted in
+// resolveBookModel.test.ts against the very reducer these controls dispatch
+// into, and what a RENDER can see is asserted here — that the payload and the
+// screen are derived from ONE state, and that a control the composite would
+// refuse is disabled with its reason showing.
+// ===========================================================================
+
+test("[MG184 F1] the surface's own controls dispatch the switch — party A allocated, party B selected, zero party-A ids survive", () => {
+  // The exact sequence the settlement leg runs: the picker's onChange dispatches
+  // `counterparty`, the open-item effect dispatches `items_loaded`, the cents
+  // input dispatches `allocate`, the Customer/Vendor buttons dispatch `scope`.
+  const itemA = {
+    id: "11111111-1111-4111-8111-111111111111", domain: "ar" as const, counterparty_id: "cp-A",
+    item_kind: "invoice", item_date: "2035-01-02", due_date: null,
+    amount_cents: 100000, outstanding_cents: 100000, entry_id: "e-A",
+  };
+  const itemB = { ...itemA, id: "33333333-3333-4333-8333-333333333333", counterparty_id: "cp-B", entry_id: "e-B" };
+
+  let s = settlementLegInitialState("customer");
+  s = settlementLegReducer(s, { type: "counterparty", counterpartyId: "cp-A" });
+  s = settlementLegReducer(s, { type: "items_loaded", items: [itemA] });
+  s = settlementLegReducer(s, { type: "allocate", itemId: itemA.id, cents: 100000 });
+  assert.deepEqual(settlementAllocationInputs(s), [{ item_id: itemA.id, amount_cents: 100000 }],
+    "setup must be real: before the switch the payload DOES name party A");
+
+  s = settlementLegReducer(s, { type: "counterparty", counterpartyId: "cp-B" });
+  s = settlementLegReducer(s, { type: "items_loaded", items: [itemB] });
+  assert.deepEqual(settlementAllocationInputs(s), [],
+    "after the switch the payload names NOBODY — the composite derives its counterparty from these ids");
+  assert.ok(!Object.keys(s.allocations).includes(itemA.id));
+
+  // The SCREEN agrees with the payload: the picker renders party B's item and no
+  // trace of party A's, because both read the same one state.
+  const html = renderToStaticMarkup(createElement(OpenItemAllocations, {
+    items: s.openItems, available: s.itemsAvailable, domain: "ar" as const,
+    allocations: s.allocations, onAllocate: () => {},
+  }));
+  assert.ok(html.includes(itemB.id), "party B's item is on screen");
+  assert.ok(!html.includes(itemA.id), "party A's item is NOT on screen — and is not in the payload either");
+
+  // …and the submit is a clean slate: the request this state would send is the
+  // empty one, which the shared admission body refuses.
+  const admission = af2Admission({
+    disposition: "matched_booking", note: "n", allocations: settlementAllocationInputs(s),
+  });
+  assert.equal(admission.admitted, false);
+  assert.equal(admission.admitted === false && admission.axis, "no_booking");
+});
+
+test("[MG184 F1] a stale map cannot be rendered as a value either — the input boxes read the SAME state the payload does", () => {
+  // The dangerous middle state, rendered on purpose: a map that still names a
+  // party who is no longer displayed. Nothing shows, and nothing sends.
+  const itemB = {
+    id: "33333333-3333-4333-8333-333333333333", domain: "ar" as const, counterparty_id: "cp-B",
+    item_kind: "invoice", item_date: "2035-01-02", due_date: null,
+    amount_cents: 100000, outstanding_cents: 100000, entry_id: "e-B",
+  };
+  const stale = {
+    kind: "customer" as const, counterpartyId: "cp-B", openItems: [itemB], itemsAvailable: true,
+    allocations: { "11111111-1111-4111-8111-111111111111": 500_00, [itemB.id]: 700 },
+  };
+  const html = renderToStaticMarkup(createElement(OpenItemAllocations, {
+    items: stale.openItems, available: stale.itemsAvailable, domain: "ar" as const,
+    allocations: stale.allocations, onAllocate: () => {},
+  }));
+  assert.ok(!/value="500"/.test(html), "an off-screen allocation has no box to appear in — it must not appear anywhere");
+  assert.match(html, /value="7"/, "…while the on-screen one renders its own typed value");
+  assert.deepEqual(settlementAllocationInputs(stale), [{ item_id: itemB.id, amount_cents: 700 }]);
+});
+
+test("[MG184 F2] SubmitRow BLOCKS an otherwise-admissible request when the quadrant is a refund, and states the reason", () => {
+  const admissible = {
+    disposition: "matched_booking", note: "the deposit is ACME invoice 42",
+    allocations: [{ item_id: "0d87188e-645a-453a-953f-71df97773db7", amount_cents: 100000 }],
+  };
+  // NOT VACUOUS: with no local block this same request leaves the control LIVE.
+  // Without this half, a cell asserting "disabled" would pass on an empty form
+  // and prove nothing — which is exactly how the defect survived review.
+  const live = renderToStaticMarkup(createElement(SubmitRow, {
+    request: admissible, busy: false, label: "Resolve + settle these items",
+    busyLabel: "Settling…", blockedBy: null, onSubmit: () => {},
+  }));
+  assert.equal(buttons(live)[0]?.disabled, false, "an admissible request with no local block submits");
+
+  const blocked = renderToStaticMarkup(createElement(SubmitRow, {
+    request: admissible, busy: false, label: "Resolve + settle these items",
+    busyLabel: "Settling…", blockedBy: refundSubmitBlock("customer", -50_000), onSubmit: () => {},
+  }));
+  assert.equal(buttons(blocked)[0]?.disabled, true,
+    "the refund quadrant refuses `refund_not_supported` — the control must not offer the call");
+  assert.match(blocked, /refund_not_supported/, "…and it says why, in the DB's own token");
+});
+
+test("[MG184 F2] the refund quadrant still states the workaround up front — the block did not replace the explanation", () => {
+  const refundHtml = render({ lineAmountCents: -50_000, initialKind: "customer" });
+  assert.match(refundHtml, /does not support it directly/, "the workaround copy stays at the quadrant");
+  // Both halves of the answer are present: what is wrong, and what to do instead.
+  assert.match(refundHtml, /Workaround: post a generic entry/);
 });

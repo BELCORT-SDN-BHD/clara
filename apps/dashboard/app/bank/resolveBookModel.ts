@@ -47,6 +47,7 @@
 // would be the same walled corridor wearing a new hat.
 
 import type { SettleAllocationInput, BankAdjustmentInput } from "../shared/bankApi";
+import type { OpenItemRow } from "./model";
 
 function s(v: unknown): string | null {
   return typeof v === "string" ? v : null;
@@ -227,4 +228,115 @@ export function af2Admission(req: Af2Request): Af2Admission {
 export function af2AdmissionBlockReason(req: Af2Request): string | null {
   const a = af2Admission(req);
   return a.admitted ? null : a.message;
+}
+
+// ---------------------------------------------------------------------------
+// THE SETTLEMENT LEG'S STATE — A PURE TRANSITION, BECAUSE THE DANGEROUS ACT
+// HERE IS A TRANSITION AND NOT A RENDER.
+// ---------------------------------------------------------------------------
+//
+// ═══ WHAT THE MERGE GATE FOUND (PR #184, finding 1 — a MERGE-BLOCKER) ═══
+// The settlement sub-form held `allocations` as a bare id→cents map beside a
+// separately-loaded `openItems` list, and its two scope changes — switching the
+// counterparty, switching the customer/vendor kind — cleared the DISPLAYED items
+// while LEAVING the map alone. Nothing on screen showed the survivors, and the
+// submit payload was derived from the map, so the surface could show party B and
+// settle party A.
+//
+// It is a money defect rather than a tidiness one because of WHICH verb receives
+// it: `clara.resolve_and_book_bank_line` takes NO counterparty argument at all —
+// it DERIVES the counterparty from the open items named (that is why the picker
+// above it exists only to narrow a list, and says so). A stale id is therefore
+// not a mismatch the DB can notice; it is the whole instruction. The sibling
+// SettleLinePanel carries the same shape over `clara.settle_from_bank_line`,
+// which DOES take an explicit counterparty and refuses items that are not that
+// party's — the difference is exactly the missing declared-party cross-check.
+//
+// THE FIX IS A STATE MACHINE, NOT TWO MORE `setAllocations({})` CALLS. A cleared
+// map is one line and one line is what was missing; a reducer makes the clearing
+// a LAW of the transition, and the payload derivation below re-checks it anyway
+// (belt and braces: the map may only ever speak about items currently on screen).
+// It also makes the defect ASSERTABLE — this repo's dashboard cells render static
+// markup and cannot click, so a transition that lives only inside `useState`
+// callbacks is a transition no cell can ask about. Every action below is
+// dispatched verbatim by a control in SettlementLegFields.
+
+export type SettlementKind = "customer" | "vendor";
+
+export type SettlementLegState = {
+  kind: SettlementKind;
+  counterpartyId: string;
+  /** The open items CURRENTLY on screen — the only ids a payload may name. */
+  openItems: readonly OpenItemRow[];
+  /** null = not asked yet; false = the read failed (the fail-closed state). */
+  itemsAvailable: boolean | null;
+  allocations: Readonly<Record<string, number>>;
+};
+
+export type SettlementLegAction =
+  /** The customer/vendor toggle, and any session/client change: EVERYTHING
+   *  derived from the counterparty scope is void, allocations included. */
+  | { type: "scope"; kind: SettlementKind }
+  /** The counterparty picker. Same law: a new party voids the old party's map. */
+  | { type: "counterparty"; counterpartyId: string }
+  | { type: "items_loaded"; items: readonly OpenItemRow[] }
+  | { type: "items_unreadable" }
+  | { type: "allocate"; itemId: string; cents: number };
+
+export function settlementLegInitialState(kind: SettlementKind): SettlementLegState {
+  return { kind, counterpartyId: "", openItems: [], itemsAvailable: null, allocations: {} };
+}
+
+/** Narrow a map to the items on screen. Used on every load as well as on the
+ *  payload, so a survivor cannot ride a re-load either. */
+function onScreenOnly(
+  allocations: Readonly<Record<string, number>>,
+  items: readonly OpenItemRow[],
+): Record<string, number> {
+  const live = new Set(items.map((i) => i.id));
+  const out: Record<string, number> = {};
+  for (const [id, cents] of Object.entries(allocations)) if (live.has(id)) out[id] = cents;
+  return out;
+}
+
+export function settlementLegReducer(
+  state: SettlementLegState,
+  action: SettlementLegAction,
+): SettlementLegState {
+  switch (action.type) {
+    case "scope":
+      // Unconditional, even when the kind is unchanged: this action also carries
+      // "the session or the client moved", after which nothing on screen is
+      // known to be this client's.
+      return settlementLegInitialState(action.kind);
+    case "counterparty":
+      if (action.counterpartyId === state.counterpartyId) return state;
+      return { ...settlementLegInitialState(state.kind), counterpartyId: action.counterpartyId };
+    case "items_loaded":
+      return {
+        ...state,
+        openItems: action.items,
+        itemsAvailable: true,
+        allocations: onScreenOnly(state.allocations, action.items),
+      };
+    case "items_unreadable":
+      // The fail-closed state (the OpenItemAllocations law): a list that could
+      // not be read shows nothing — so nothing may be allocated against it.
+      return { ...state, openItems: [], itemsAvailable: false, allocations: {} };
+    case "allocate":
+      return { ...state, allocations: { ...state.allocations, [action.itemId]: action.cents } };
+    default:
+      return state;
+  }
+}
+
+/** THE PAYLOAD WALL. The composite's `p_allocations` may name ONLY items the
+ *  surface is currently showing — an id from a party the user has navigated away
+ *  from would silently redirect the whole settlement, because the verb reads the
+ *  counterparty OUT of these ids. Positive whole cents only, matching arm (8). */
+export function settlementAllocationInputs(state: SettlementLegState): SettleAllocationInput[] {
+  const live = new Set(state.openItems.map((i) => i.id));
+  return Object.entries(state.allocations)
+    .filter(([item_id, cents]) => cents > 0 && live.has(item_id))
+    .map(([item_id, amount_cents]) => ({ item_id, amount_cents }));
 }

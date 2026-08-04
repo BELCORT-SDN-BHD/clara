@@ -667,12 +667,21 @@ reset role;
 --
 -- FINAL FORM: this IS the final form. No later slice re-splices any body this section writes.
 --
--- ONE EXCEPTION, ADDED BY THE CONFIRMING ROUND'S FIX WAVE AND MARKED AT ITS OWN SITE: S4.13's
--- ACL block (canonical s4 L4342-4350) is the ONE place this section is not byte-exact. The
--- producer's `grant execute ... to clara_authenticated` is WITHHELD here and ships with D-b2
--- (0045). Nothing else in these 4,436 lines moves: no body, no index, no splice, no prestate --
--- the diff of this file against 0042-sections/s4-af2.sql is exactly that one grant plus the
--- note that explains it. See the [SPLIT D-b3] block at S4.13 for the measured mechanism.
+-- TWO EXCEPTIONS, BOTH AT S4.13, BOTH MARKED AT THEIR OWN SITES, AND THEY ARE THE SAME FACT
+-- STATED TWICE -- once in code, once in the prose above it.
+--   (1) THE GRANT, added by the confirming round's fix wave: S4.13's ACL block (canonical s4
+--       L4342-4350) WITHHOLDS the producer's `grant execute ... to clara_authenticated`, which
+--       ships with D-b2 (0045).
+--   (2) THE HEADER ABOVE IT (canonical s4 L4321-4328), reworded by the merge gate (PR #184,
+--       finding 3): the canonical paragraph opens "BOTH new verbs are HUMAN verbs and reach
+--       clara_authenticated only" -- the WHOLE UNIT's truth and this frontier's FALSEHOOD,
+--       because it claims the very grant (1) withholds, and claims it in the permissive
+--       direction. A header that contradicts the code beneath it is fixed AT THE HEADER (the
+--       CF-B0-2 header-truth precedent), never waived and never left for the reader to catch.
+-- Nothing else in these 4,436 lines moves: no body, no index, no splice, no prestate -- the diff
+-- of this file against 0042-sections/s4-af2.sql is exactly that one withheld grant, its note,
+-- and the header that now describes it. See the [SPLIT D-b3] block at S4.13 for the measured
+-- mechanism.
 
 -- #####################################################################################
 -- ############ SECTION S4 -- THE AF-2 COMPOSITE + THE bank_rule_suggested PRODUCER ####
@@ -4998,10 +5007,18 @@ end $s4_12b$;
 -- S4.13 -- ACLs (the 0041:4405-4440 idiom): revoke from PUBLIC, grant to
 -- clara_authenticated ONLY, re-assert clara_fn_owner ownership.
 -- =====================================================================================
--- BOTH new verbs are HUMAN verbs and reach clara_authenticated only -- no wake role, no
--- clara_runtime, no clara_agent_ro. Their FLOORS live in the bodies (owner for the composite,
--- bookkeeper+ for the producer) because a floor is a statement about the ACTOR, which only
--- clara._human_ctx can make; the grant is a statement about the ROLE, and both are needed.
+-- [SPLIT D-b3 2026-08-04] AT THIS FRONTIER EXACTLY ONE OF THE TWO NEW VERBS IS GRANTED, and the
+-- header says so because the canonical one did not: the whole unit granted BOTH, this slice
+-- grants clara.resolve_and_book_bank_line ALONE. clara.accept_bank_rule_suggestion (the
+-- producer) is CREATED by SECTION S4 above, revoked from PUBLIC and owned by clara_fn_owner,
+-- and carries NO grant to any role at 0044 -- its clara_authenticated grant lands with D-b2
+-- (0045), for the measured money reason set out in the [SPLIT D-b3] block below, which is the
+-- authority on it and which asserts the withholding on the live catalog rather than claiming
+-- it in prose. Both verbs are HUMAN verbs: when granted, each reaches clara_authenticated only
+-- -- no wake role, no clara_runtime, no clara_agent_ro. Their FLOORS live in the bodies (owner
+-- for the composite, bookkeeper+ for the producer) because a floor is a statement about the
+-- ACTOR, which only clara._human_ctx can make; the grant is a statement about the ROLE, and
+-- both are needed.
 --
 -- The three cores, the two hash primitives, the cascade predicate and the shared
 -- booking-block predicate are granted to NOBODY
@@ -6646,4 +6663,3 @@ do $tail_final$
 begin
   raise notice '0042 wave D-b SLICE D-b3 (the AF-2 composite + the bank_rule_suggested producer): APPLIED. SECTION 0 (6 probes) + S1 (the two clara.bank_matches park columns with their CHECK and FK, the set-once trigger, and the bank.line_exception_reopened half of SECTION EVENTS) + S2 (clara._wdb_suggestion_rule_hit + clara._wdb_suggestion_lines, moved to the family they belong to) + S4 WHOLE (the three preheld-aware cores factored out of both allocate bodies and both settle overloads, clara.resolve_and_book_bank_line, the seven-site parked-declaration admission, the four live-body splices, the post-flip reopen, the shared line-keyed booking-block predicate, clara.accept_bank_rule_suggestion with its dedup index, the parked badge on the live reconciliation preview and the ACL blocks) + tails 4, 5, 6, 7, 8, 11, 13, 14 and 20, the two-index definition census and the S5.25-b3 clock-census re-run, all green. THE PRODUCER IS CREATED BUT NOT GRANTED: clara.accept_bank_rule_suggestion is revoked from PUBLIC and owned by clara_fn_owner, and its clara_authenticated grant ships with D-b2 beside clara._adj_on_approve arm (3) -- the approve-time account-role door that keeps the round-2 PHANTOM STAFF ADVANCE shut. Its dashboard chip and its test cells defer with it. NEXT: D-b2 (recurring adjustments, held back with the round-11 fixes) -- which adds that one grant, and which finds clara._wdb_suggestion_rule_hit and clara._wdb_suggestion_lines already here and must NOT create a second copy: clara._adj_on_approve arm (3) re-derives through these very bodies.';
 end $tail_final$;
-
