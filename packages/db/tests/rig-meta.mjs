@@ -384,6 +384,46 @@ const ADV_0043_READ_FNS = [
 // sweep already fails if any of them ever GAINS a grant, so their absence is enforced without
 // a cohort. The disappearance half of that contract arrives with the cohort at D-b2.
 
+// ---------------------------------------------------------------------------
+// 0044 [Wave D-b, SLICE D-b3] — the AF-2 composite (`resolve_and_book_bank_line`).
+//
+// SPLIT NOTE (LAW D1, third application): GRANT MATRIX ENTRIES ONLY, no cohort — D-b0 shipped
+// this file unchanged, D-b1 added its seven, this slice adds its ONE, and the whole-unit Wave
+// D-b `cohortFailures(...)` roster still lands with the slice whose frontier makes it whole
+// (D-b2 / 0045). `cohortFailures()` fails a PARTIAL cohort BY DESIGN — "wholly present or
+// wholly absent per MIGRATION BOUNDARY", the 0022 header's rule — so a roster naming 0045
+// bodies would go red on every database at this frontier.
+//
+// EXACTLY ONE NAME, and the count is the security claim. 0044's `$s4_acl$` grant loop reaches
+// a single verb: `clara.resolve_and_book_bank_line`. Its floor is BODY-enforced via
+// clara._human_ctx(clara.role_rank(...)) at OWNER (ABI §A; WD-R13 — the composite books a
+// hand-draft or spends an open-item settlement preheld, in one transaction, against a bank
+// line the firm has already excepted), and the role-level grant is clara_authenticated, the
+// SUBLEDGER_0037 / BANK_0038 / FA_0041 / ADV_0043 pattern. NO machine role holds it.
+//
+// **THE SECOND VERB THIS MIGRATION CREATES IS DELIBERATELY ABSENT FROM EVERY ROLE SET.**
+// 0044 also creates `clara.accept_bank_rule_suggestion` — the `bank_rule_suggested` producer —
+// and WITHHOLDS its `grant execute … to clara_authenticated` (the migration's own
+// `$s4_acl_b3_withheld$` block revokes it from PUBLIC, owns it as clara_fn_owner and then
+// ASSERTS on the live catalog that no non-owner role can reach it at all). The reason is a
+// money mechanism found by two independent reviewers in the split's confirming round: the
+// producer's approve-time re-validation is `clara._adj_on_approve` arm (3), a D-b2 body, so a
+// reachable producer between 0044 and 0045 could mint a staff advance nobody incurred. 0045
+// adds the single grant beside that arm. Until then the correct expectation for EVERY role in
+// this matrix is `false`, which is what leaving the name out of every set already asserts —
+// the main sweep below iterates the LIVE catalog and fails the moment it gains a grant here.
+// Its dashboard chip and its test cells defer to D-b2 with it.
+const AF2_0044_HUMAN_FNS = ["resolve_and_book_bank_line"];
+// 0044's internals — the three preheld-aware money cores factored out of clara.allocate_receipt /
+// allocate_payment / settle_from_bank_line so the composite can pre-reserve their op keys and
+// spend them preheld, the suggestion pair (clara._wdb_suggestion_rule_hit,
+// _wdb_suggestion_lines), the shared line-keyed booking-block predicate
+// (clara._wdb_line_booking_block) and the park's set-once trigger function — are named in NO
+// role set on purpose. A grant on a `_core` would be a FLOORLESS money verb: the floor stayed
+// in the public wrapper. The main sweep already fails if any of them ever GAINS a grant, so
+// their absence is enforced without a cohort; the disappearance half arrives with the cohort
+// at D-b2.
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -439,6 +479,9 @@ export const ALLOWED = {
     ...FA_0041_SHARED_FNS, // 0041 the due probe — the one name BOTH lanes hold (design §3.4)
     ...ADV_0043_HUMAN_FNS, // 0043 [D-b1] the staff-advance write verbs (human judgement only)
     ...ADV_0043_READ_FNS, // 0043 [D-b1] the /advances read surface (viewer+, definer, firm-predicated)
+    ...AF2_0044_HUMAN_FNS, // 0044 [D-b3] the AF-2 composite (owner floor). The producer created
+    // beside it, clara.accept_bank_rule_suggestion, is NOT here on purpose — its grant is
+    // withheld until D-b2 (0045) ships its approve-time door; see the block above.
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.

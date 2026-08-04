@@ -201,11 +201,71 @@ export const BANK_REFUSAL_COPY: Record<string, string> = {
   rule_not_signed: "This rule is not signed (or already retired).",
   // Wave C-c — set_counterparty_terms.
   terms_out_of_range: "Payment terms must be between 1 and 365 days.",
+  // Wave D-b (design §4/§5, ABI §F) — resolve_and_book_bank_line / the flip /
+  // the reopen / accept_bank_rule_suggestion.
+  disposition_unsupported: "The AF-2 composite only books 'matched to a booking' or 'written off' — use the direct resolve action for a bank-corrective pair.",
+  // [round-3 fix] `booking_request_invalid` was raised on SIX distinct axes and
+  // glossed on NONE, so the dead "declare only" button showed a raw token. It is
+  // one token with several remedies, so the AXIS carries the copy (below) and
+  // this base gloss only ever shows when the DB omits an axis.
+  booking_request_invalid: "The composite could not tell which booking was meant — name a hand-draft or an open-item settlement, not both and not neither.",
+  pending_branch_ancillary_unsupported: "This exception is high-stakes — the composite can only DECLARE the resolution here; a distinct checker flips it via 'complete'.",
+  pending_resolution_stale: "This declaration is no longer current — reload and re-declare.",
+  exception_reopen_blocked: "A newer exception is already open on this line — the reopen cannot proceed.",
+  suggestion_outstanding: "A rule suggestion is already drafted-or-approved-and-unmatched for this line.",
+  suggestion_stale: "This suggestion no longer re-matches (the rule, the line, or the statement has changed) — reload and re-check.",
+  approve_key_collision: "A derived approval key already resolved to a different outcome — reload before retrying.",
 };
 
-export function describeBankRefusal(reason: string | null | undefined): string | null {
+/** [round-3 fix] Some governed refusals carry a second discriminant — an AXIS —
+ *  beside the reason, because one token covers several distinct mistakes with
+ *  several distinct remedies (the 0041 `disposal_request_invalid` precedent the
+ *  AF-2 composite follows). Keyed `"<reason>/<axis>"`; an axis with no entry
+ *  falls back to the reason's own base gloss, never to nothing. */
+export const BANK_REFUSAL_AXIS_COPY: Record<string, string> = {
+  "booking_request_invalid/draft_and_allocations":
+    "Name a hand-draft OR an open-item settlement, never both — that is two bookings for one statement line.",
+  "booking_request_invalid/no_booking":
+    "This act must book something: hand-code an entry, or allocate the line against at least one open item. A high-stakes park is not a separate act — it is what the DB does with the settlement leg when the amount is at or above the firm's threshold.",
+  "booking_request_invalid/settle_argument_on_draft_leg":
+    "Difference adjustments and the bank charge belong to the settlement leg — a hand-draft states its own lines.",
+  "booking_request_invalid/draft_malformed":
+    "The hand-draft needs a posting date, a memo and at least one line.",
+  "booking_request_invalid/advance_payload_without_draft":
+    "A staff-advance repayment is coded, not settled against open items — its allocations name line positions inside a hand-draft.",
+  "booking_request_invalid/allocation_counterparty_underivable":
+    "None of the open items named carries a counterparty this client owns, so the settlement has no counterparty to settle with.",
+  "pending_branch_ancillary_unsupported/draft":
+    "A high-stakes HAND-DRAFT cannot be parked — only a settlement can, and nothing was written: the draft rolled back with the refusal. No v1 door books a high-stakes hand-draft against an open bank-line exception in one act; the DB's own message names what is admitted in this state (it measures it first). Render it verbatim.",
+  "booking_request_invalid/ack_without_draft":
+    "The settlement leg posts at the statement line's own entry_date, which is inside the period by construction — there is no posting-date exception to acknowledge. Send the acknowledgement only with a hand-draft.",
+  "pending_branch_ancillary_unsupported/ancillaries":
+    "This settlement is high-stakes, so it parks the settlement leg ONLY — book the bank charge and any difference adjustments as their own acts after a checker flips the group.",
+};
+
+/** The reason's gloss, sharpened by the AXIS when the DB reported one. Callers
+ *  that never learned about axes keep working unchanged (the parameter is
+ *  optional and absent ⇒ the base gloss). */
+export function describeBankRefusal(reason: string | null | undefined, axis?: string | null): string | null {
   if (!reason) return null;
+  if (axis) {
+    const sharp = BANK_REFUSAL_AXIS_COPY[`${reason}/${axis}`];
+    if (sharp) return sharp;
+  }
   return BANK_REFUSAL_COPY[reason] ?? null;
+}
+
+/** The AXIS discriminant rides in the SAME exception DETAIL object as the
+ *  reason (`{"reason": …, "axis": …}`), which shared/wire.ts surfaces raw as
+ *  `PgrestError.pgDetails`. Defensive parse — the reason parser's twin. */
+export function parseRefusalAxis(details: string | null | undefined): string | null {
+  if (!details) return null;
+  try {
+    const j = JSON.parse(details) as { axis?: unknown };
+    return typeof j.axis === "string" ? j.axis : null;
+  } catch {
+    return null;
+  }
 }
 
 // ---------------------------------------------------------------------------

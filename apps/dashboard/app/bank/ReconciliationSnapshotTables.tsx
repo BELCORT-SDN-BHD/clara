@@ -13,17 +13,40 @@ import {
   exceptionDispositionLabel, exceptionKindLabel, EXCEPTION_DISPOSITIONS,
   type BankReconciliationSnapshot, type ReconExceptionEntry, type BankLineExceptionDisposition,
 } from "./reconModel";
+import type { ResolveAndBookBankLineDisposition } from "../shared/reconApi";
 import { describeBankRefusal } from "./matchModel";
+import { ExceptionBookingFields, type ResolveAndBookArgs } from "./ExceptionBookingFields";
 import { fmtCents, fmtDeltaCents, shortId } from "../shared/fmt";
 import styles from "./bank.module.css";
 
+// [round-3 fix] `ResolveAndBookArgs` and BOTH booking sub-forms now live in
+// ExceptionBookingFields.tsx (file-size discipline + the walled-corridor fix
+// this round landed). Re-exported so existing importers keep their one home.
+export type { ResolveAndBookArgs };
+
+/** A governed refusal as this surface carries it: the DB's verbatim message,
+ *  its machine reason token, and — new in round 3 — the AXIS, because
+ *  `booking_request_invalid` alone names six different mistakes. */
+export type ExceptionActionErr = { id: string; message: string; reason: string | null; axis?: string | null };
+
 export function SnapshotTables({
-  snapshot, onResolveException, resolving, resolveErr,
+  snapshot, token, clientId,
+  onResolveException, resolving, resolveErr, onResolveAndBook, resolvingBook, resolveBookErr,
 }: {
   snapshot: BankReconciliationSnapshot;
+  /** Threaded through to the settlement leg, which must read this client's
+   *  counterparties and open items. Absent in the read-only (voided receipt)
+   *  reuse, where no booking control renders at all. */
+  token?: string | null;
+  clientId?: string | null;
   onResolveException?: (exceptionId: string, disposition: BankLineExceptionDisposition, note: string, counterpartLineId?: string | null) => void;
   resolving?: string | null;
-  resolveErr?: { id: string; message: string; reason: string | null } | null;
+  resolveErr?: ExceptionActionErr | null;
+  /** design §4 the AF-2 composite (resolve_and_book_bank_line) — the two
+   *  booking dispositions ONLY; `bank_corrective_line` stays on onResolveException. */
+  onResolveAndBook?: (exceptionId: string, disposition: ResolveAndBookBankLineDisposition, note: string, args: ResolveAndBookArgs) => void;
+  resolvingBook?: string | null;
+  resolveBookErr?: ExceptionActionErr | null;
 }) {
   const snap = snapshot;
   // [F15/CX6#4 fix] shapeOk gates FIRST, unconditionally — a known-but-
@@ -125,7 +148,11 @@ export function SnapshotTables({
         <div className={styles.section}>
           <p className={styles.sectionTitle}>Exceptions ({snap.exceptions.length})</p>
           {snap.exceptions.map((exc) => (
-            <ExceptionRow key={exc.exception_id} exc={exc} siblings={snap.exceptions} onResolve={onResolveException} busy={resolving === exc.exception_id} err={resolveErr?.id === exc.exception_id ? resolveErr : null} />
+            <ExceptionRow
+              key={exc.exception_id} exc={exc} siblings={snap.exceptions} token={token ?? null} clientId={clientId ?? null}
+              onResolve={onResolveException} busy={resolving === exc.exception_id} err={resolveErr?.id === exc.exception_id ? resolveErr : null}
+              onResolveAndBook={onResolveAndBook} bookBusy={resolvingBook === exc.exception_id} bookErr={resolveBookErr?.id === exc.exception_id ? resolveBookErr : null}
+            />
           ))}
         </div>
       ) : null}
@@ -133,30 +160,41 @@ export function SnapshotTables({
   );
 }
 
-/** [D3 fix] exceptions items are ReconExceptionEntry, not a table row (real
- *  id is `exception_id`). `matched_booking`/`written_off_adjustment` are
- *  OFFERED-BUT-DISABLED — no composite same-txn booking verb exists yet
- *  (design §4.2 open question); `bank_corrective_line` is the only reachable
- *  disposition and the default, naming a counterpart from this exception's
- *  siblings in the same snapshot. Read-only (no controls rendered) when the
- *  caller omits `onResolve` — the [voided_receipt follow-up] reuse for a
- *  frozen, historical snapshot. */
+/** [D3 fix; AF-2 re-enable, Wave D-b design §4] exceptions items are
+ *  ReconExceptionEntry, not a table row (real id is `exception_id`). All
+ *  THREE dispositions are now reachable: `bank_corrective_line` keeps the
+ *  existing counterpart-line flow (`onResolve` → resolve_bank_line_
+ *  exception); `matched_booking`/`written_off_adjustment` now book via the
+ *  AF-2 composite (`onResolveAndBook` → resolve_and_book_bank_line) — the
+ *  same-transaction booking door design §4.2 previously flagged as an open
+ *  question. Read-only (no controls rendered) when the caller omits both
+ *  handlers — the [voided_receipt follow-up] reuse for a frozen, historical
+ *  snapshot. A "resolution parked" badge renders whenever this exception's
+ *  own `pending_resolution` is present (design §4's high-stakes park). */
 function ExceptionRow({
-  exc, siblings, onResolve, busy, err,
+  exc, siblings, token, clientId, onResolve, busy, err, onResolveAndBook, bookBusy, bookErr,
 }: {
   exc: ReconExceptionEntry;
   siblings: ReconExceptionEntry[];
+  token: string | null;
+  clientId: string | null;
   onResolve?: (exceptionId: string, disposition: BankLineExceptionDisposition, note: string, counterpartLineId?: string | null) => void;
   busy?: boolean;
-  err?: { message: string; reason: string | null } | null;
+  err?: { message: string; reason: string | null; axis?: string | null } | null;
+  onResolveAndBook?: (exceptionId: string, disposition: ResolveAndBookBankLineDisposition, note: string, args: ResolveAndBookArgs) => void;
+  bookBusy?: boolean;
+  bookErr?: { message: string; reason: string | null; axis?: string | null } | null;
 }) {
   const [disposition, setDisposition] = useState<BankLineExceptionDisposition>("bank_corrective_line");
   const [note, setNote] = useState("");
   const [counterpartLineId, setCounterpartLineId] = useState("");
   const open = exc.status === "open";
   const needsCounterpart = disposition === "bank_corrective_line";
+  const isBookingDisposition = disposition === "matched_booking" || disposition === "written_off_adjustment";
   const candidates = siblings.filter((x) => x.exception_id !== exc.exception_id);
   const canSubmit = note.trim().length > 0 && (!needsCounterpart || counterpartLineId !== "");
+  const parked = exc.pending_resolution !== null;
+
   return (
     <div className={styles.candidateRow} style={{ flexDirection: "column", alignItems: "stretch" }}>
       <div className={styles.accountMain}>
@@ -164,21 +202,24 @@ function ExceptionRow({
           {exceptionKindLabel(exc.kind)} · line {shortId(exc.line_id)}
           {exc.amount_cents !== null ? ` · ${fmtCents(exc.amount_cents)}` : ""}
           <span className={`${styles.band} ${open ? styles.bandYou : styles.bandReady}`} style={{ marginLeft: "0.4rem" }}>{exc.status}</span>
+          {parked ? <span className={`${styles.band} ${styles.bandReview}`} style={{ marginLeft: "0.3rem" }}>resolution parked</span> : null}
         </span>
         <span className={styles.accountSub}>{exc.entry_date ?? "—"}{exc.age_days !== null ? ` · ${exc.age_days}d` : ""}</span>
       </div>
+      {parked ? (
+        <p className={styles.hint}>
+          Declared{exc.pending_resolution?.disposition ? ` — ${exceptionDispositionLabel(exc.pending_resolution.disposition)}` : ""}
+          {exc.pending_resolution?.declared_at ? ` at ${new Date(exc.pending_resolution.declared_at).toLocaleString()}` : ""}; a checker must flip the pending line (complete/cancel, above) to finish it.
+        </p>
+      ) : null}
       {!open ? (
         <p className={styles.okText}>
           Resolved{exc.resolution_disposition ? ` — ${exceptionDispositionLabel(exc.resolution_disposition)}` : ""}
         </p>
-      ) : onResolve ? (
+      ) : (onResolve || onResolveAndBook) ? (
         <div className={styles.actions} style={{ flexWrap: "wrap" }}>
           <select className={styles.select} value={disposition} onChange={(e) => setDisposition(e.target.value as BankLineExceptionDisposition)} aria-label={`Disposition for exception ${exc.exception_id}`}>
-            {EXCEPTION_DISPOSITIONS.map((d) => (
-              <option key={d} value={d} disabled={d !== "bank_corrective_line"}>
-                {exceptionDispositionLabel(d)}{d !== "bank_corrective_line" ? " — book the match first, a composite verb is owed" : ""}
-              </option>
-            ))}
+            {EXCEPTION_DISPOSITIONS.map((d) => <option key={d} value={d}>{exceptionDispositionLabel(d)}</option>)}
           </select>
           {needsCounterpart ? (
             <select className={styles.select} value={counterpartLineId} onChange={(e) => setCounterpartLineId(e.target.value)} aria-label={`Counterpart line for exception ${exc.exception_id}`}>
@@ -191,15 +232,28 @@ function ExceptionRow({
             </select>
           ) : null}
           <input className={styles.input} placeholder="Resolution note" value={note} onChange={(e) => setNote(e.target.value)} aria-label={`Resolution note for exception ${exc.exception_id}`} style={{ flex: 1 }} />
-          <button className={styles.buttonSecondary} disabled={busy || !canSubmit} onClick={() => onResolve(exc.exception_id, disposition, note.trim(), needsCounterpart ? counterpartLineId : null)}>
-            {busy ? "Resolving…" : "Resolve (owner)"}
-          </button>
-          {needsCounterpart && candidates.length === 0 ? (
-            <p className={styles.hint}>No other excepted line is available yet to name as the offsetting counterpart.</p>
+          {needsCounterpart ? (
+            <>
+              <button className={styles.buttonSecondary} disabled={!onResolve || busy || !canSubmit} onClick={() => onResolve?.(exc.exception_id, disposition, note.trim(), counterpartLineId)}>
+                {busy ? "Resolving…" : "Resolve (owner)"}
+              </button>
+              {candidates.length === 0 ? (
+                <p className={styles.hint}>No other excepted line is available yet to name as the offsetting counterpart.</p>
+              ) : null}
+            </>
+          ) : null}
+          {err ? <p className={styles.errorText}>{err.message}{describeBankRefusal(err.reason, err.axis) ? ` — ${describeBankRefusal(err.reason, err.axis)}` : ""}</p> : null}
+          {isBookingDisposition && onResolveAndBook ? (
+            <ExceptionBookingFields
+              token={token} clientId={clientId}
+              exceptionId={exc.exception_id} lineAmountCents={exc.amount_cents}
+              disposition={disposition} note={note} busy={!!bookBusy}
+              onSubmit={(args) => onResolveAndBook(exc.exception_id, disposition, note.trim(), args)}
+            />
           ) : null}
         </div>
       ) : null}
-      {err ? <p className={styles.errorText}>{err.message}{describeBankRefusal(err.reason) ? ` — ${describeBankRefusal(err.reason)}` : ""}</p> : null}
+      {bookErr ? <p className={styles.errorText}>{bookErr.message}{describeBankRefusal(bookErr.reason, bookErr.axis) ? ` — ${describeBankRefusal(bookErr.reason, bookErr.axis)}` : ""}</p> : null}
     </div>
   );
 }

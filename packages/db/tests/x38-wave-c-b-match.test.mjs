@@ -1490,19 +1490,52 @@ test("x38.aa lock-order prosrc pins for match_bank_line, settle_from_bank_line a
   // composite order (op-receipt -> sub-key reservations -> 003 -> 004 ->
   // open_items -> fresh entries -> groups) then bank rows LAST.
   // ADJUDICATED at assembly (the match lane's documented call-not-inline decision):
-  // settle DELEGATES to clara.allocate_receipt/allocate_payment, whose OWN prosrc carries
-  // the 003->004 rung (pinned by x37); settle's body must carry the call edges and NO
-  // advisory rung of its own (a direct acquisition would re-open the nesting window).
-  const settleSrc = await fnSource("settle_from_bank_line");
+  // settle DELEGATES to the allocation composites, whose OWN prosrc carries the 003->004
+  // rung (pinned by x37); settle's body must carry the call edges and NO advisory rung of
+  // its own (a direct acquisition would re-open the nesting window).
+  //
+  // 0042 (design SS4 "public wrappers reserve-then-delegate; S4.Z pins move to the cores",
+  // [L3/V3+C3-1]) factored that body into clara._settle_from_bank_line_core so the AF-2
+  // composite (clara.resolve_and_book_bank_line) can pre-reserve `<op>:settle` and spend it
+  // preheld. The acquisition sequence therefore now lives in the CORE, and so does this pin
+  // -- same three rungs, same order, nothing dropped. Its callee edge also moved one level
+  // down (the core calls clara._allocate_{receipt,payment}_core, not the public verbs), which
+  // is the SAME factoring: the ladder x37 pins is inside those cores.
+  const settleSrc = await fnSource("_settle_from_bank_line_core");
   ordered(settleSrc, [
     "clara._reserve_op(",
-    "clara.allocate_",           // the composite call edge (receipt or payment branch)
+    "clara._allocate_",          // the composite call edge (receipt or payment branch)
     "insert into clara.bank_match_line_members", // bank rows LAST
-  ], "settle_from_bank_line delegation order");
-  assert.ok(settleSrc.includes("clara.allocate_receipt") && settleSrc.includes("clara.allocate_payment"),
-    "settle_from_bank_line delegates to BOTH composites");
+  ], "_settle_from_bank_line_core delegation order");
+  assert.ok(settleSrc.includes("clara._allocate_receipt_core(") && settleSrc.includes("clara._allocate_payment_core("),
+    "_settle_from_bank_line_core delegates to BOTH allocation composites");
   assert.ok(!settleSrc.includes("pg_advisory_xact_lock(203005003") && !settleSrc.includes("pg_advisory_xact_lock(203005004"),
-    "settle_from_bank_line takes NO advisory rung in its own body (the composites own it)");
+    "_settle_from_bank_line_core takes NO advisory rung in its own body (the allocation cores own it)");
+
+  // THE WRAPPER PIN -- BOTH live overloads (the 12-arg form and the 13-arg p_via_rule form).
+  // Each must be a real delegator: the bookkeeper+ floor, then the core call, and NOTHING that
+  // acquires. Without this, a future build could re-inline the ladder into one overload and
+  // walk out from under the core pin above. Per-oid, because fnSource() concatenates overloads
+  // and a delegating twin would mask an inlined one.
+  const settleOverloads = await rootQuery(
+    `select p.oid::regprocedure::text as sig, p.prosrc as src
+       from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='clara' and p.proname='settle_from_bank_line' order by 1`,
+  );
+  assert.equal(settleOverloads.rows.length, 2, "clara.settle_from_bank_line still has exactly the two live overloads (12-arg + 13-arg p_via_rule)");
+  for (const { sig, src } of settleOverloads.rows) {
+    ordered(src, [
+      "clara._human_ctx(clara.role_rank('bookkeeper'))",  // the floor stays in the wrapper ...
+      "clara._settle_from_bank_line_core(",               // ... above the delegation
+    ], `${sig} delegation order`);
+    assert.ok(src.includes("'receipt_preheld', false"),
+      `${sig} must hand the core receipt_preheld=false -- otherwise the core skips its own clara._reserve_op and the public settle path posts with NO op receipt`);
+    for (const rung of ["clara._reserve_op(", "pg_advisory_xact_lock(203005003",
+      "pg_advisory_xact_lock(203005004", "for update", "insert into clara.bank_match_line_members"]) {
+      assert.ok(!src.includes(rung),
+        `${sig} must acquire NOTHING in its own body -- found the rung "${rung}", so the ladder has been re-inlined above the core and the core's pin no longer covers the live path`);
+    }
+  }
 
   // void_bank_statement: 004 -> 203005006 (the NEW per-account chain rung) ->
   // line rows FOR UPDATE -> the live-member probe (the void-vs-match race).

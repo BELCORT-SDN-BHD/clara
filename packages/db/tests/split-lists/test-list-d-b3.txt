@@ -1,0 +1,73 @@
+# WAVE D-b SPLIT — D-b3 TEST LIST  (0044_wave_d_b3_af2_composite)
+#
+# 13 runnable test files · 62 cells. EVERY cell was MEASURED green on this slice's
+# rig (clara_0041_asm + the chain through 0044), F1 fork lane, 2026-08-04.
+# [E21 RESIDUAL, executed] x42-r9-n2.test.mjs (WHOLE, 7 cells) is now FORKED:
+# x42b3-r9-n2.test.mjs keeps f1a/f1b/f1c (3 cells) here; f3/f6/f7 moved to D-b0 and
+# f1-census moved to D-b1 (their earliest-green slices). See PARTITION.md's appended
+# "E21 residual EXECUTED" section.
+# [FIX WAVE, CF-B3-1/CX1] The three producer forks (x42b3-producer, -role, -stale) are GONE
+# from this slice and their files ship WHOLE with D-b2: 0044 creates
+# clara.accept_bank_rule_suggestion but withholds its clara_authenticated grant, so every one
+# of their cells here is either RED (42501) or — x42.prod-21 — GREEN FOR THE WRONG REASON.
+# x42-af2-rebook4 forked for the same cause: x42.af2-15e calls the producer and moves to D-b2,
+# x42.af2-15d/-15f stay here as x42b3-af2-rebook4.test.mjs. Whole 12->11, forks 4->2,
+# cells 70-8=62.
+#
+# CI (E17 IS BINDING): every run sets CLARA_MIGRATIONS_DIR at the migrations copy the DB was
+# built from. In this slice's own PR that is packages/db/migrations, so the default resolves
+# and nothing needs setting; a multi-chain checkout MUST set it or the rig's ensureReady()
+# re-migrate fails its history-integrity check and eats exactly one cell (x42-s5c-awcc).
+#
+# THE CELL FLOOR (machine-read by ci.yml's db-slice-frontiers leg — the totality gate is
+# FILE-granular and cannot see a cell deleted inside a still-listed file). MEASURED whole on
+# clara_wc_b3 (0041_asm + this slice's chain), E17 honoured, --test-concurrency=1:
+#   70 pass / 0 fail / 4 skip over 16 files. Raise it when you add cells; NEVER lower it to
+#   go green.
+#!cells-floor: 70
+#
+# THE RESET-GATED DRILL RUNS ALONE, in its own throwaway DB — NOT in this list:
+#   PGDATABASE=clara_x42_b3_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+#     CLARA_RIG_DB=1 node --test tests/x42-0044-b3-upgrade.test.mjs
+#
+# DASHBOARD: D-b3's dashboard half: app/bank/ExceptionBookingFields*, app/bank/resolveBookModel*,
+#   and ONE app/shared/reconApi.ts wrapper (resolveAndBookBankLine). [FIX WAVE, CF-B3-1/CX1]
+#   The SECOND wrapper (acceptBankRuleSuggestion) and the /bank coding-chip wiring in
+#   app/bank/StatementDetail.tsx that calls it DEFER TO D-b2: 0044 creates the producer but
+#   withholds its clara_authenticated grant, so from 0044 until 0045 the chip would be a live
+#   button whose RPC Postgres refuses at the ROLE level (42501, no reason key for
+#   describeBankRefusal to map). The chip ships with the grant. PARTITION.md §7.1 carries the
+#   full consumer list.
+#   Its dbSeamCensus.bindings.ts variant is bindings/dbSeamCensus.bindings.b3.ts.
+
+# --- WHOLE FILES (11) — every cell in the file belongs to this slice ---
+x42-af2-park.test.mjs
+x42-af2-rebook.test.mjs
+x42-af2-rebook2.test.mjs
+x42-af2-rebook3.test.mjs
+x42-af2-reopen.test.mjs
+x42-af2-settled.test.mjs
+x42-af2.test.mjs
+x42-r7-af2-classifier.test.mjs
+x42-r7-af2-offpath.test.mjs
+x42-r8-seam.test.mjs
+x42-r8-seam2.test.mjs
+
+# --- FORKS (2) — this slice's share of a file whose cells span slices ---
+x42b3-af2-rebook4.test.mjs
+x42b3-r9-n2.test.mjs
+
+# --- CROSS-SLICE CONTRACTS (3) — frontier-aware; each asserts what is TRUE here ---
+x42x-b0-b1-reservation-union.test.mjs
+x42x-b1-b3-line-booking-walls.test.mjs
+x42x-b3-b2-hook-order.test.mjs
+
+# --- HELPER MODULES this slice's files import (not runnable; ship with the slice) ---
+#   NEW in this slice: x42-af2-rebook-kit.mjs, x42-af2-rebook3-kit.mjs
+#   NEW in the SPEC, but SHIPPED EARLY with D-b0 (the fork-closure law — x42b0-r9-n2 /
+#     x42b1-r9-n2 resolve them at import time even though no cell of theirs calls in):
+#     x42-af2-helpers.mjs, x42-af2-world.mjs, x42-r10-o3-kit.mjs, x42-r8-seam-kit.mjs
+#   already shipped by an earlier slice: x41-fa-fixtures.mjs, x41-fa-world.mjs, x42-s5-helpers.mjs,
+#     x42-split-upgrade-kit.mjs (the shared upgrade-drill kit — landed with D-b0)
+#   plus the pre-D-b shared rig: a21-helpers.mjs, rig-helpers.mjs, rig-meta.mjs,
+#   x38-match-fixtures.mjs, wave-a/wave-b fixtures (all already on main).

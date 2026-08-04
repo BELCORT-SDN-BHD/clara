@@ -13,7 +13,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { getBankReconciliation, getBankRule, resolveBankLineException } from "./reconApi";
+import { getBankReconciliation, getBankRule, resolveBankLineException, resolveAndBookBankLine } from "./reconApi";
+import type { PgrestError } from "./wire";
 
 function jsonRes(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -219,4 +220,69 @@ test("[D5 fix] resolveBankLineException omits p_counterpart_line when none is su
   await resolveBankLineException("jwt", { clientId: "c1", exceptionId: "e1", disposition: "matched_booking", note: "booked" });
   assert.ok(!("p_counterpart_line" in seenBody));
   assert.ok(!("p_booking_entries" in seenBody));
+});
+
+// --- [round-7 F-F2] resolveAndBookBankLine carries p_advance_applications ------
+//
+// The finding: `advanceApplications` existed only in this wrapper's TYPE — no
+// component ever SET it, so the AF-2 advance-repayment channel was surface-dead
+// (measured: `apps/dashboard/app/bank/ExceptionBookingFields.tsx`'s hand-draft
+// leg had no field for it at all). These cells pin the WIRE half of that fix —
+// byte-exact forwarding into `p_advance_applications`, and that a DB refusal on
+// this channel (CLR40 `advance_application_missing`) is never swallowed — the
+// half this lane owns without touching the un-owned composer file itself.
+
+const ADVANCE_PAYLOAD = {
+  kind: "bank_return", reason: "the transfer is the returned advance",
+  allocations: [{ line_no: 2, advance_id: "adv-1", amount_cents: 30000 }],
+};
+const ADV_DRAFT = {
+  posting_date: "2026-05-15", memo: "advance returned",
+  lines: [
+    { account_code: "601-000", debit_cents: 30000, credit_cents: 0 },
+    { account_code: "350-003", debit_cents: 0, credit_cents: 30000 },
+  ],
+};
+
+test("[F-F2] resolveAndBookBankLine forwards p_advance_applications VERBATIM (ABI §A copies it byte-for-byte); absent stays null", async (t) => {
+  let body: Record<string, unknown> = {};
+  t.mock.method(globalThis, "fetch", async (_u: string, init?: RequestInit) => {
+    body = JSON.parse(String(init?.body));
+    return jsonRes({ branch: "live", entry_id: "e1" });
+  });
+  setup();
+  await resolveAndBookBankLine("jwt", {
+    clientId: "c1", exceptionId: "exc1", disposition: "matched_booking",
+    note: "the deposit is ACME's invoice 42", draft: ADV_DRAFT, advanceApplications: ADVANCE_PAYLOAD,
+  });
+  assert.deepEqual(body.p_advance_applications, ADVANCE_PAYLOAD, "the payload rides through unchanged — the DB copies it verbatim into flags");
+
+  await resolveAndBookBankLine("jwt", {
+    clientId: "c1", exceptionId: "exc1", disposition: "matched_booking", note: "n", draft: ADV_DRAFT,
+  });
+  assert.equal(body.p_advance_applications, null, "an unset advance payload sends SQL null, never undefined (PostgREST drops the key otherwise)");
+});
+
+test("[F-F2] a CLR40 advance_application_missing refusal from the DB is never swallowed — it reaches the caller with its reason and figures intact", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => new Response(
+    JSON.stringify({
+      message: "line 2 credits 30000 cents on staff-advance account 350-003 but the allocations account for 0 cents; state one allocation per advance so the two agree exactly",
+      details: JSON.stringify({ reason: "advance_application_missing", axis: "under", line_no: 2, account_code: "350-003", credit_cents: 30000, allocated_cents: 0 }),
+      code: "CLR40",
+    }),
+    { status: 400, headers: { "content-type": "application/json" } },
+  ));
+  setup();
+  await assert.rejects(
+    () => resolveAndBookBankLine("jwt", {
+      clientId: "c1", exceptionId: "exc1", disposition: "matched_booking", note: "n", draft: ADV_DRAFT,
+    }),
+    (e: unknown) => {
+      const pe = e as PgrestError;
+      assert.equal(pe.clr, "CLR40");
+      assert.equal(pe.reason, "advance_application_missing");
+      assert.match(pe.message ?? "", /state one allocation per advance/i, "the DB's own remedy text must reach the caller verbatim");
+      return true;
+    },
+  );
 });

@@ -187,6 +187,10 @@ export function exceptionKindLabel(k: string): string {
   return k;
 }
 
+// resolve_and_book_bank_line's result type + mapper: ./resolveBookModel.ts
+// (file-size discipline — this file was already at the ceiling).
+export { toResolveAndBookBankLineResult, type ResolveAndBookBankLineResult, type ResolveAndBookBankLineBranch } from "./resolveBookModel";
+
 // ---------------------------------------------------------------------------
 // The receipt / preview envelope (design §3 "Snapshot spec" / §4.1 / §6).
 // ---------------------------------------------------------------------------
