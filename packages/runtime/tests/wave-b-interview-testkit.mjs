@@ -128,11 +128,25 @@ export const INTERVIEW_V2_CLIENT_ANSWERS = {
  */
 export function scriptedAnswers(map = INTERVIEW_V2_CLIENT_ANSWERS) {
   const queues = new Map(Object.entries(map).map(([k, v]) => [k, Array.isArray(v) ? [...v] : [v]]));
-  return (seg) => {
+  // AN ANSWER BELONGS TO A PARK (GH #152). Memoized by parkIndex, so re-asking for the SAME park
+  // returns the SAME value instead of consuming the segment's next scripted answer. Without this
+  // the driver's retry loop burned one queue entry per attempt: a POST that came back 409 sent
+  // the driver round the loop, it dequeued AGAIN for the same still-open park, and a segment
+  // scripted with one answer reported "exhausted — it opened more parks than the script carries".
+  // That message was a hypothesis baked into a string, and it was WRONG: the interview opens
+  // exactly the scripted number of parks. The real cause was the park/hook inversion fixed in
+  // clientOnboarding_v3/firmInterview_v3; this memo is the INDEPENDENT harness half, and it alone
+  // would have made the flake impossible. parkIndex is optional so non-live callers (the closure
+  // battery) keep the plain per-segment queue behaviour.
+  const byPark = new Map();
+  return (seg, parkIndex) => {
+    if (parkIndex != null && byPark.has(parkIndex)) return byPark.get(parkIndex);
     const queue = queues.get(seg);
     if (!queue) throw new Error(`no scripted answer for segment '${seg}' — the interview asks a segment this script does not carry`);
     if (queue.length === 0) throw new Error(`scripted answers for segment '${seg}' are exhausted — it opened more parks than the script carries`);
-    return queue.shift();
+    const value = queue.shift();
+    if (parkIndex != null) byPark.set(parkIndex, value);
+    return value;
   };
 }
 

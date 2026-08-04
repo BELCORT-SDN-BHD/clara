@@ -203,7 +203,7 @@ async function driveUntilConfirms({ runId, planId }, jwt, targetConfirms, answer
       await sleep(120);
       continue;
     }
-    const value = pp.phase === "c" ? "yes" : answers(pp.seg);
+    const value = pp.phase === "c" ? "yes" : answers(pp.seg, pp.parkIndex);
     const res = await postJson("/api/interview/answer", { runId, scope: "client", parkIndex: pp.parkIndex, planId, value }, jwt);
     if (res.status === 200) {
       answered.add(pp.parkIndex);
@@ -233,7 +233,7 @@ async function driveToComplete({ runId, planId }, jwt, answers, deadlineMs = 900
       await sleep(120);
       continue;
     }
-    const value = pp.phase === "c" ? "yes" : answers(pp.seg);
+    const value = pp.phase === "c" ? "yes" : answers(pp.seg, pp.parkIndex);
     const res = await postJson("/api/interview/answer", { runId, scope: "client", parkIndex: pp.parkIndex, planId, value }, jwt);
     if (res.status === 200) answered.add(pp.parkIndex);
     else if (res.status !== 409) throw new Error(`answer failed at park ${pp.parkIndex}: ${res.status} ${JSON.stringify(res.body)}`);
