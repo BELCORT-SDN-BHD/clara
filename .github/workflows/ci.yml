@@ -597,26 +597,36 @@ jobs:
       # (0) THE PRESENCE GATE — NONE-OR-ALL. The four slices land days apart; this job is fully
       # populated from the first PR. A leg whose slice is nowhere in the tree SKIPS; a leg whose
       # slice is HALF in the tree FAILS. Nothing in between passes silently.
+      #
+      # EACH ARTIFACT IS LOOKED FOR ON ITS OWN [merge-gate SF3]. The drill used to be searched
+      # for by a name DERIVED from the migration — so with no migration on disk there was no
+      # name to look for, the drill counted as absent, `have` stayed 0 and a DRILL-ONLY landing
+      # skipped GREEN. Nothing else would have caught it: the normal DB suite reset-skips the
+      # drill, the `ci` job's derived drill step keys on migrations, and the totality gate
+      # excludes drills from the corpus by design. The drill is therefore globbed by `dbtag`
+      # alone — number-agnostic, exactly like the totality gate's own drill pattern — so an
+      # orphan drill is COUNTED, lands in the partial-landing branch, and fails BY NAME.
       - name: Is the ${{ matrix.slice }} slice in the tree yet?
         id: gate
         run: |
           MIG="$(ls packages/db/migrations/[0-9][0-9][0-9][0-9]_${{ matrix.migname }}.sql 2>/dev/null | head -1)"
           LIST="packages/db/tests/split-lists/test-list-${{ matrix.slice }}.txt"
-          have=0; miss=""
-          if [ -n "$MIG" ]; then have=$((have+1)); else miss="$miss packages/db/migrations/NNNN_${{ matrix.migname }}.sql"; fi
-          if [ -f "$LIST" ]; then have=$((have+1)); else miss="$miss $LIST"; fi
-          # The drill's NUMBER comes from the migration that was actually found — never a pin.
-          # With no migration on disk there is no number to look for, so the drill counts as
-          # absent, which is the "none" case and skips.
-          DRILL=""
-          if [ -n "$MIG" ]; then
-            N="$(basename "$MIG" | cut -c1-4)"
-            DRILL="x42-${N}-${{ matrix.dbtag }}-upgrade"
-            if [ -f "packages/db/tests/$DRILL.test.mjs" ]; then have=$((have+1))
-            else miss="$miss packages/db/tests/$DRILL.test.mjs"; fi
-          else
-            miss="$miss packages/db/tests/x42-NNNN-${{ matrix.dbtag }}-upgrade.test.mjs"
+          DRILLGLOB="packages/db/tests/x42-[0-9][0-9][0-9][0-9]-${{ matrix.dbtag }}-upgrade.test.mjs"
+          # `| head -1` / `| wc -l` keep the pipeline's status 0 when the glob matches nothing,
+          # so a no-match cannot trip the runner's `set -e`.
+          NDRILL="$(ls $DRILLGLOB 2>/dev/null | wc -l)"
+          DRILLFILE="$(ls $DRILLGLOB 2>/dev/null | head -1)"
+          if [ "$NDRILL" -gt 1 ]; then
+            echo "AMBIGUOUS DRILL: the ${{ matrix.slice }} slice has $NDRILL numbered upgrade drills on disk:"
+            ls $DRILLGLOB | sed 's/^/  · /'
+            echo "A slice has exactly ONE drill, and a renumber RENAMES it (RENUMBER.md §2(4)) rather"
+            echo "than leaving the old number behind. Two is a stale file, and this leg cannot pick."
+            exit 1
           fi
+          have=0; miss=""; got=""
+          if [ -n "$MIG" ]; then have=$((have+1)); got="$got $MIG"; else miss="$miss packages/db/migrations/NNNN_${{ matrix.migname }}.sql"; fi
+          if [ -f "$LIST" ]; then have=$((have+1)); got="$got $LIST"; else miss="$miss $LIST"; fi
+          if [ -n "$DRILLFILE" ]; then have=$((have+1)); got="$got $DRILLFILE"; else miss="$miss packages/db/tests/x42-NNNN-${{ matrix.dbtag }}-upgrade.test.mjs"; fi
           if [ "$have" = "0" ]; then
             echo "${{ matrix.slice }} has NOT landed yet (none of its three artifacts is on disk) — this leg skips (green, by design)."
             echo "ready=false" >> "$GITHUB_OUTPUT"
@@ -624,13 +634,26 @@ jobs:
           fi
           if [ "$have" != "3" ]; then
             # RC5: a PARTIAL landing used to skip GREEN. It is a broken PR, not an absent slice.
+            # SF3: a drill-only landing is one of those partial shapes, and now reaches here.
             echo "PARTIAL LANDING: the ${{ matrix.slice }} slice has $have of its 3 artifacts on disk."
+            echo "present:"; for g in $got; do echo "  · $g"; done
             echo "missing:"; for m in $miss; do echo "  · $m"; done
             echo "A Wave D-b slice ships its migration, its test list and its upgrade drill in ONE PR."
             echo "Skipping this leg would leave the slice's whole frontier unproven — failing instead."
             exit 1
           fi
-          echo "frontier=$(basename "$MIG" | cut -c1-4)" >> "$GITHUB_OUTPUT"
+          # All three are here, so the drill's NUMBER must be the migration's number. A drill
+          # left behind at an old number after a merge-time renumber is a broken PR, not a
+          # licence to run an EARLIER slice's drill against a LATER frontier.
+          N="$(basename "$MIG" | cut -c1-4)"
+          DRILL="x42-${N}-${{ matrix.dbtag }}-upgrade"
+          if [ "$(basename "$DRILLFILE")" != "$DRILL.test.mjs" ]; then
+            echo "NUMBER MISMATCH: the ${{ matrix.slice }} migration is $(basename "$MIG") but its drill on disk is"
+            echo "  $(basename "$DRILLFILE") — expected $DRILL.test.mjs."
+            echo "A renumbered slice renames its drill to its new number (RENUMBER.md §2(4))."
+            exit 1
+          fi
+          echo "frontier=$N" >> "$GITHUB_OUTPUT"
           echo "drill=$DRILL" >> "$GITHUB_OUTPUT"
           echo "migfile=$(basename "$MIG")" >> "$GITHUB_OUTPUT"
           echo "ready=true" >> "$GITHUB_OUTPUT"
@@ -728,6 +751,42 @@ jobs:
           test -n "$PASS" && [ "$PASS" -ge "$FLOOR" ] || {
             echo "CELL FLOOR BREACHED: the ${{ matrix.slice }} list passed ${PASS:-?} cells, floor $FLOOR — a cell was deleted or silently skipped"; exit 1; }
 
+      # (3c) THE CROSS-SLICE CONTRACTS, from their OWN roster [merge-gate SF4]. The x42x-*
+      # contracts are excluded from the file-granular totality gate below (each appears in
+      # SEVERAL slice lists on purpose), which left them covered by nothing but each slice
+      # list's goodwill: a later slice could simply omit them and pass, even though every one
+      # of them asserts what is true AT EVERY FRONTIER and is only a contract if it runs at
+      # all of them. They now have a dedicated roster — tests/split-lists/test-list-contracts.txt
+      # — which the totality job asserts is TOTAL against the x42x files on disk, and which
+      # every leg runs here. Coverage no longer depends on any per-slice list.
+      #
+      # SAFE AT EVERY FRONTIER, AND SAFE TWICE: each contract is rig-gated and frontier-aware
+      # (it skips the arm that is not live yet) and stages its own uniquely-tagged world, so a
+      # slice list that ALSO names one simply runs it twice. That overlap is deliberate — the
+      # lists carry MEASURED cell floors and are not re-measured to accommodate this gate.
+      - name: Run the cross-slice contract roster at the ${{ matrix.slice }} frontier
+        if: steps.gate.outputs.ready == 'true'
+        working-directory: packages/db
+        env:
+          CLARA_MIGRATIONS_DIR: ${{ steps.chain.outputs.dir }}
+        run: |
+          set -o pipefail
+          ROSTER="tests/split-lists/test-list-contracts.txt"
+          test -f "$ROSTER" || { echo "missing $ROSTER — the cross-slice contract roster is not optional"; exit 1; }
+          FILES=""
+          while read -r f || [ -n "$f" ]; do
+            case "$f" in ''|'#'*) continue;; esac
+            test -f "tests/$f" || { echo "the contract roster names a file that does not exist: tests/$f"; exit 1; }
+            FILES="$FILES tests/$f"
+          done < "$ROSTER"
+          test -n "$FILES" || { echo "$ROSTER lists no contracts"; exit 1; }
+          echo "--- ${{ matrix.slice }} frontier: $(echo $FILES | wc -w) cross-slice contract(s) ---"
+          CLARA_RIG_DB=1 node --test --test-concurrency=1 $FILES 2>&1 | tee /tmp/contracts-run.txt
+          FAIL="$(grep -E '^# fail ' /tmp/contracts-run.txt | tail -1 | awk '{print $3}')"
+          PASS="$(grep -E '^# pass ' /tmp/contracts-run.txt | tail -1 | awk '{print $3}')"
+          echo "--- contracts at the ${{ matrix.slice }} frontier: $PASS pass / $FAIL fail ---"
+          test "$FAIL" = "0" || { echo "a cross-slice contract is RED at the ${{ matrix.slice }} frontier"; exit 1; }
+
       # (4) the slice's OWN deploy drill, alone, in its own throwaway database.
       # DB NAME FROM `dbtag`: `clara_d-b0_upgrade_ci` is not a legal identifier.
       - name: ${{ matrix.slice }} upgrade drill (isolated DB)
@@ -757,6 +816,13 @@ jobs:
   # regression floor by declaring `#!floor-rerun: <file>` in its header. The gate then allows
   # exactly one extra listing of that file and no more — an undeclared duplicate still fails, and
   # a stale declaration (the file is no longer double-listed) fails too.
+  #
+  # AND THE CROSS-SLICE CONTRACTS GET THEIR OWN TOTALITY [merge-gate SF4]. x42x-* files are
+  # excluded from the partition above because each belongs in SEVERAL lists, which used to mean
+  # they were guarded by nothing: a later slice could omit both and pass. They now have a
+  # dedicated roster — tests/split-lists/test-list-contracts.txt — asserted TOTAL against the
+  # x42x files on disk here, and RUN by every frontier leg above. A new contract that joins the
+  # corpus and not the roster fails this job by name.
   db-split-partition-total:
     runs-on: ubuntu-latest
     steps:
@@ -795,22 +861,43 @@ jobs:
             exit 1
           fi
           echo "--- Wave D-b slice migrations on disk:$DBMIG ---"
-          # EXCLUDED, both by design: x42x-* are the cross-slice contracts (they appear in
-          # SEVERAL lists on purpose — each is frontier-aware), and x42-<NNNN>-bN-upgrade are the
-          # four reset-gated deploy drills (each runs ALONE in the frontier job, never in a list).
-          # The drill pattern is number-AGNOSTIC on purpose: migration numbers are claimed at MERGE
-          # time (slices/forks/RENUMBER.md), so a slice landing as 0050 must not rejoin the corpus.
+          # THE CROSS-SLICE CONTRACT ROSTER IS TOTAL [SF4]. Checked FIRST, and unconditionally:
+          # every x42x-*.test.mjs on disk must be on the roster (or it runs at no frontier), and
+          # every roster line must be on disk (or every frontier leg dies on a missing file).
+          # The roster is a separate file from the slice lists ON PURPOSE — it is not a partition
+          # of anything, it is the set of files that run EVERYWHERE.
+          ROSTER="tests/split-lists/test-list-contracts.txt"
+          test -f "$ROSTER" || { echo "missing $ROSTER — the cross-slice contract roster is not optional once the split has landed"; exit 1; }
+          ls tests/x42x-*.test.mjs 2>/dev/null | xargs -n1 basename | sort > /tmp/contracts-disk.txt
+          grep -v '^#' "$ROSTER" | grep -v '^$' | sort > /tmp/contracts-roster.txt
+          if ! diff -u /tmp/contracts-disk.txt /tmp/contracts-roster.txt; then
+            echo "the cross-slice contract roster ($ROSTER) is not the set of x42x-*.test.mjs on disk."
+            echo "  a '-' line is a contract on disk that NO frontier leg runs — add it to the roster;"
+            echo "  a '+' line is a roster entry with no file — every frontier leg would fail on it."
+            exit 1
+          fi
+          test "$(sort /tmp/contracts-roster.txt | uniq -d | wc -l)" = "0" || { echo "a contract is on the roster twice"; exit 1; }
+          echo "contract roster OK: $(wc -l < /tmp/contracts-roster.txt) cross-slice contract(s), each run at EVERY frontier"
+          # EXCLUDED from the partition below, both by design: x42x-* are the cross-slice contracts
+          # (covered by the roster above — they run at every frontier, so they partition nothing),
+          # and x42-<NNNN>-bN-upgrade are the four reset-gated deploy drills (each runs ALONE in the
+          # frontier job, never in a list). The drill pattern is number-AGNOSTIC on purpose:
+          # migration numbers are claimed at MERGE time (slices/forks/RENUMBER.md), so a slice
+          # landing as 0050 must not rejoin the corpus.
           ls tests/x41-*.test.mjs tests/x42-*.test.mjs tests/x41b*.test.mjs tests/x42b*.test.mjs 2>/dev/null \
             | xargs -n1 basename | grep -v '^x42x-' \
             | grep -vE '^x42-[0-9]{4}-b[0-9]-upgrade\.test\.mjs$' | sort > /tmp/corpus.txt
-          cat tests/split-lists/test-list-*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > /tmp/listed.txt
+          # THE SLICE LISTS ARE test-list-d-bN.txt, NEVER test-list-*.txt: the contract roster
+          # lives in the same directory and is not a slice list — it declares no cell floor and
+          # partitions nothing.
+          cat tests/split-lists/test-list-d-b*.txt | grep -v '^#' | grep -v '^$' | grep -v '^x42x-' | sort > /tmp/listed.txt
           # EVERY list must declare its cell floor — the file-granular gate cannot see a deleted cell.
-          for L in tests/split-lists/test-list-*.txt; do
+          for L in tests/split-lists/test-list-d-b*.txt; do
             grep -qE '^#!cells-floor:' "$L" || { echo "$L declares no '#!cells-floor:'"; exit 1; }
           done
           # The declared floor re-runs: allow exactly ONE extra listing each, then fall through to
           # the strict checks, which still fail on any undeclared duplicate.
-          cat tests/split-lists/test-list-*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > /tmp/floorruns.txt
+          cat tests/split-lists/test-list-d-b*.txt | grep -E '^#!floor-rerun:' | awk '{print $2}' | sort -u > /tmp/floorruns.txt
           while read -r fr || [ -n "$fr" ]; do
             [ -n "$fr" ] || continue
             grep -qxF "$fr" /tmp/listed.txt || { echo "declared floor re-run $fr is on no list at all"; exit 1; }

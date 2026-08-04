@@ -1,0 +1,33 @@
+# WAVE D-b SPLIT — THE CROSS-SLICE CONTRACT ROSTER.
+#
+# NOT a slice list. The four test-list-d-bN.txt files PARTITION the x41/x42 corpus — every
+# file in exactly one of them, each declaring its own measured cell floor. The files named
+# HERE are the opposite shape: each is FRONTIER-AWARE and asserts what is true at whatever
+# frontier it finds, so each must run at EVERY frontier or it is not a contract at all.
+#
+# WHY IT EXISTS [merge-gate SF4, PR #182]. x42x-* files are excluded from the file-granular
+# totality gate precisely because they belong in several places at once — which left them
+# guarded by nothing but each slice list's goodwill. A later slice could omit every contract
+# from its list and still pass the partition. This roster replaces that goodwill:
+#   · ci.yml's db-slice-frontiers job RUNS every line below in every ready leg; and
+#   · ci.yml's db-split-partition-total job asserts this roster is EXACTLY the set of
+#     tests/x42x-*.test.mjs on disk — a contract that joins the corpus and not this file
+#     fails by name, and a line here with no file fails too.
+# The roster therefore GROWS in the PR that ships the contract, and nowhere else.
+#
+# NO CELL FLOOR HERE, on purpose: a contract's cell count legitimately CHANGES with the
+# frontier (each arm skips on the side of the boundary it does not describe), so a fixed
+# floor would be a lie at three frontiers out of four. The frontier leg asserts `fail = 0`
+# and prints the pass/skip split instead.
+#
+# D-b0 SHIPS TWO OF THE THREE. x42x-b1-b3-line-booking-walls.test.mjs is deliberately ABSENT
+# here: at the D-b0 frontier neither of the two slices it describes exists, so it is vacuous
+# — it ships with D-b1, which is the first frontier at which it can assert anything, and is
+# added to this roster in that PR.
+#
+# MEASURED at the D-b0 frontier (0001..0042, CLARA_MIGRATIONS_DIR honoured):
+#   x42x-b0-b1-reservation-union   2 pass / 1 skip   (ru3, the POST arm, awaits D-b1)
+#   x42x-b3-b2-hook-order          2 pass / 2 skip   (both later arms await D-b3/D-b2)
+
+x42x-b0-b1-reservation-union.test.mjs
+x42x-b3-b2-hook-order.test.mjs

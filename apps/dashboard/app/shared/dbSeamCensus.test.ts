@@ -17,7 +17,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -385,13 +385,13 @@ test("[F-F3] every READ whose wire wrapper is called from NO `.tsx` component is
 
 const RIG = process.env.CLARA_RIG_DB === "1";
 
+/** CLARA_PSQL_BIN, else whatever `psql` PATH resolves to — and nothing else.
+ *  NO MACHINE-SPECIFIC BRANCH [merge-gate SF5]: this used to prefer one developer's
+ *  absolute Windows install path, which made the rig-backed census silently behave
+ *  differently on that machine than anywhere else. CI has psql on PATH; a local Windows
+ *  run sets CLARA_PSQL_BIN (or puts psql on PATH) like every other environment. */
 function psqlBin(): string {
-  if (process.env.CLARA_PSQL_BIN) return process.env.CLARA_PSQL_BIN;
-  if (process.platform === "win32") {
-    const p = "C:/Users/zhant/pgsql-17/pgsql/bin/psql.exe";
-    if (existsSync(p)) return p;
-  }
-  return "psql";
+  return process.env.CLARA_PSQL_BIN || "psql";
 }
 
 const US = "\u0001";

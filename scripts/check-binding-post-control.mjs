@@ -23,15 +23,17 @@
 // consumer census every 0042 splice runs on itself. That value is consumed by an
 // aggregate and lands in an int; no DDL can be built from it, and demanding a
 // signature binding for it is demanding attribution for a read that patches nothing.
-// `parseCoRPatches` therefore marks a `pg_get_functiondef` call `censusOnly` when,
-// and ONLY when, the block PROVABLY cannot feed that call's value to any `execute`
-// (an over-approximated execute-reaching set, closed backwards over every binding
-// statement; a positively-bound target; and no bound target inside that set). Any
-// other shape — an unbound call, a value that reaches an `execute` — keeps the
-// existing fail-closed behaviour. NOT "the block has no execute": a block with no
-// `execute` is not a CoR patch at all, so that test would exempt nothing.
-// EVERY GRANTED EXEMPTION IS PRINTED on success; a silent exemption is invisible
-// policy, and the merge gate reads this output.
+// `parseCoRPatches` marks a `pg_get_functiondef` call `censusOnly` when, and ONLY
+// when, its enclosing statement matches that STRICT GRAMMAR exactly — see the
+// "CENSUS READS" header in wiki-lint-checks.mjs for the whole rule and for the five
+// evasion shapes that retired the earlier value-flow analysis. Every other shape
+// fails closed, exactly as before the exemption existed.
+//
+// AND THE EXEMPTION SET IS ALLOWLISTED, TREE-WIDE. A grammar that is right is still
+// not a licence to grow the hole: this checker refuses unless the exemptions the
+// tree produces are EXACTLY the ones named in CENSUS_EXEMPTION_ALLOWLIST below —
+// no extra, none missing. EVERY GRANTED EXEMPTION IS PRINTED on success; a silent
+// exemption is invisible policy, and the merge gate reads this output.
 //
 // SCOPE: every packages/db/migrations/*.sql file, in filename order.
 // No dependencies — Node built-ins plus the repo's shared SQL lexer only.
@@ -56,6 +58,22 @@ const MIGRATIONS_DIR = join(
 const EXECUTOR_IDENTITY = "execute_rule_post(uuid,text)";
 const EXECUTOR_MIGRATION = "0029_vendor_binding_executor.sql";
 
+// ---------------------------------------------------------------------------
+// THE CENSUS-EXEMPTION ALLOWLIST — the complete, named list of every place in the
+// migration tree where an unattributed pg_get_functiondef call is tolerated.
+//
+// ADDING AN ENTRY HERE IS A REVIEW EVENT. It widens the only hole in a fail-closed
+// security gate, and the diff must say why in the PR that adds it. Removing the
+// census the entry names is equally a diff here: the match is EXACT in both
+// directions, so a stale entry fails the gate rather than silently permitting a
+// future exemption to take its place.
+// ---------------------------------------------------------------------------
+const CENSUS_EXEMPTION_ALLOWLIST = [
+  { migration: "0042_wave_d_b0_shared_authorities", block: "$s5_24$", variable: "v_n" },
+];
+
+const exemptionKey = (e) => `${e.migration}/${e.block}/${e.variable}`;
+
 // MUST match packages/db/deploy/vendor-binding-executor-0029-postverify.sql's
 // own gate string after comment stripping, lower-casing, and whitespace folding.
 const BINDING_GATE =
@@ -68,8 +86,13 @@ function normalizeBody(body) {
 }
 
 /** Check an ordered migration source set. Exported so the self-test exercises
- * the exact certification logic without writing a fake migration into the tree. */
-export function checkBindingPostControlSources(sources) {
+ * the exact certification logic without writing a fake migration into the tree.
+ * `allowlist` defaults to the tree's own; the self-test injects its own so its
+ * synthetic fixtures never widen the real one. */
+export function checkBindingPostControlSources(
+  sources,
+  { allowlist = CENSUS_EXEMPTION_ALLOWLIST } = {},
+) {
   let current = null;
   let definitions = 0;
   const dynamicRecuts = [];
@@ -96,11 +119,16 @@ export function checkBindingPostControlSources(sources) {
           dynamicRecuts.push(`${file}:${patch.line}`);
         }
         for (const read of patch.censusReads ?? []) {
-          exemptions.push(
-            `  EXEMPT  ${file}:${read.line}  block ${patch.tag ?? "do $$"} `
-            + `(opens ${file}:${patch.line})  pg_get_functiondef bound to `
-            + `${read.bound.join(", ")}  — non-execute-reaching (census read, not a patch site)`,
-          );
+          const block = patch.tag ?? "do $$";
+          exemptions.push({
+            migration: file.replace(/\.sql$/, ""),
+            block,
+            variable: read.variable,
+            text:
+              `  EXEMPT  ${file}:${read.line}  block ${block} `
+              + `(opens ${file}:${patch.line})  pg_get_functiondef bound to `
+              + `${read.variable}  — census grammar (catalog count, not a patch site)`,
+          });
         }
       }
     }
@@ -163,6 +191,40 @@ export function checkBindingPostControlSources(sources) {
     };
   }
 
+  // THE TREE-WIDE EXEMPTION INVARIANT. The grammar decides what CAN be exempt; this
+  // decides what IS. Multiset equality against the allowlist, so an added census, a
+  // moved one, and a removed one are all diffs a human has to make deliberately.
+  const granted = exemptions.map(exemptionKey).sort();
+  const expected = allowlist.map(exemptionKey).sort();
+  if (granted.length !== expected.length
+    || granted.some((k, i) => k !== expected[i])) {
+    const count = (list, k) => list.filter((x) => x === k).length;
+    const unexpected = [...new Set(granted)]
+      .filter((k) => count(granted, k) > count(expected, k));
+    const missing = [...new Set(expected)]
+      .filter((k) => count(expected, k) > count(granted, k));
+    return {
+      ok: false,
+      exemptions,
+      message:
+        "binding-post-control: FAIL — the census-read exemption set does not match "
+        + "the allowlist.\n\n"
+        + (unexpected.length > 0
+          ? `UNEXPECTED exemption(s) — ${unexpected.length}:\n`
+            + exemptions.filter((e) => unexpected.includes(exemptionKey(e)))
+              .map((e) => e.text).join("\n") + "\n\n"
+          : "")
+        + (missing.length > 0
+          ? `ALLOWLISTED but NOT GRANTED — ${missing.length}: ${missing.join(", ")}\n`
+            + "(the census this entry names is gone, or no longer matches the grammar; "
+            + "remove the entry in the same PR)\n\n"
+          : "")
+        + "Every unattributed pg_get_functiondef call is a potential patch site. A NEW "
+        + "one is a review event: prove it is a catalog census, then name it in "
+        + "CENSUS_EXEMPTION_ALLOWLIST in this file.",
+    };
+  }
+
   return {
     ok: true,
     exemptions,
@@ -173,9 +235,10 @@ export function checkBindingPostControlSources(sources) {
       + "binding live/unexpired assignment -> refusal-use -> approve-call order, "
       + "with no post-0029 dynamic executor recut."
       + (exemptions.length === 0
-        ? "\n  0 census-read exemption(s) granted."
-        : `\n  ${exemptions.length} census-read exemption(s) granted — every one printed:\n`
-          + exemptions.join("\n")),
+        ? "\n  0 census-read exemption(s) granted (the allowlist is empty too)."
+        : `\n  ${exemptions.length} census-read exemption(s) granted — every one allowlisted, `
+          + "every one printed:\n"
+          + exemptions.map((e) => e.text).join("\n")),
   };
 }
 

@@ -105,10 +105,12 @@ $cor$;
 };
 
 // ---------------------------------------------------------------------------
-// THE CENSUS-READ EXEMPTION (0042 `$s5_24$`). A `pg_get_functiondef` call whose value
-// PROVABLY cannot reach an `execute` is not a patch site and needs no signature binding.
-// The four fixtures below pin the exemption from both sides: it fires on the real census
-// shape, and it is revoked the moment the value can reach DDL or is not bound at all.
+// THE CENSUS-READ EXEMPTION (0042 `$s5_24$`). A `pg_get_functiondef` call is exempt ONLY
+// when its enclosing statement matches the census GRAMMAR exactly — `select count(*) …
+// into <one scalar> … where <predicate carrying the call>` — and the bound name goes
+// nowhere near an `execute`. The fixtures below pin the exemption from both sides: it
+// fires on the real census shape, and it is refused for every other shape, including the
+// five evasions a cross-model merge gate landed on the earlier value-flow analysis.
 // ---------------------------------------------------------------------------
 
 // (a) THE REAL SHAPE — one attributed splice (read → rewrite → execute) PLUS a consumer
@@ -196,6 +198,152 @@ $cor$;
 `,
 };
 
+// ---------------------------------------------------------------------------
+// THE FIVE EVASION PROBES [merge-gate MB1, 2026-08-04], reproduced VERBATIM from the
+// gate's own fixtures. Every one of them was granted an exemption by the value-flow
+// analysis this grammar replaced; every one of them must now FAIL CLOSED. They are kept
+// as fixtures rather than prose because the next rewrite of this analysis has to pass
+// them too.
+// ---------------------------------------------------------------------------
+
+// (1) `=` instead of `:=` — a perfectly legal plpgsql assignment the binding closure did
+// not recognise, so `v_def` never appeared to reach the `execute`.
+const evasionEqualsAlias = {
+  file: "0031_evasion_equals_alias.sql",
+  sql: `
+do $cor$
+declare v_def text; v_cmd text;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = clara._choose_target_oid();
+  v_cmd = replace(v_def, 'safe', 'malicious');
+  execute v_cmd;
+end
+$cor$;
+`,
+};
+
+// (2) a SUBSCRIPTED target — same idea, one array element away from being seen.
+const evasionArrayAlias = {
+  file: "0031_evasion_array_alias.sql",
+  sql: `
+do $cor$
+declare v_def text; v_cmd text[];
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = clara._choose_target_oid();
+  v_cmd[1] := replace(v_def, 'safe', 'malicious');
+  execute v_cmd[1];
+end
+$cor$;
+`,
+};
+
+// (3) EXECUTE … INTO — the `into` made the whole statement look like a BINDING, so the
+// analysis treated the DDL execution itself as the safe consumer.
+const evasionExecuteInto = {
+  file: "0031_evasion_execute_into.sql",
+  sql: `
+do $cor$
+declare v_dummy text;
+begin
+  execute format('select pg_temp.run_ddl(%L)', replace(pg_get_functiondef(clara._choose_target_oid()), 'safe', 'malicious')) into v_dummy;
+end
+$cor$;
+`,
+};
+
+// (4) EXECUTE … USING — `readExecuteExpr` stops at `using`, so the value actually handed
+// to the dynamic statement was in no execute expression at all. The grammar's belt (f)
+// uses whole STATEMENTS that mention `execute`, which is what closes this one.
+const evasionExecuteUsing = {
+  file: "0031_evasion_execute_using.sql",
+  sql: `
+do $cor$
+declare v_def text; v_dummy text;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = clara._choose_target_oid();
+  execute 'select pg_temp.run_ddl($1)' into v_dummy using v_def;
+end
+$cor$;
+`,
+};
+
+// (5) a PHANTOM binding — the text `into v_safe` inside a string literal, which the old
+// `into`-anywhere regex read as a real binding to a name nothing executes.
+const evasionFakeBindingLiteral = {
+  file: "0031_evasion_fake_binding_literal.sql",
+  sql: `
+do $cor$
+begin
+  perform pg_temp.run_ddl(replace(pg_get_functiondef(clara._choose_target_oid()), 'safe', 'malicious')), 'into v_safe';
+  execute 'select 1';
+end
+$cor$;
+`,
+};
+
+// THE POSITIVE SHAPE, copied from 0042's `$s5_24$` (the block the allowlist names): a real
+// splice — read, prestate-check, rewrite, execute — followed by the consumer census whose
+// predicate carries the second `pg_get_functiondef`. The splice stays ATTRIBUTED (through
+// `p.oid = v_sig::regprocedure`); only the census is exempt, and it is bound to `v_n`.
+const s5_24Shape = {
+  file: "0042_wave_d_b0_shared_authorities.sql",
+  sql: `
+do $s5_24$
+declare
+  v_sig text := 'clara._document_retention_date(uuid)';
+  v_def text; v_frm text; v_cnt int; v_n int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  v_frm := $f$date_trunc('year', current_date)$f$;
+  v_cnt := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_cnt <> 1 then
+    raise exception '0042 S5.24 prestate: the year-truncation appears % time(s)', v_cnt using errcode = 'CLR10';
+  end if;
+  v_def := replace(v_def, v_frm, $t$date_trunc('year', clara._book_today())$t$);
+  execute v_def;
+  -- ITS ONE CONSUMER STILL REACHES IT. pg_get_functiondef's own header line would
+  -- self-match, so the census excludes the target itself before it can execute anything.
+  select count(*)::int into v_n from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace
+      and p.proname <> '_document_retention_date'
+      and (coalesce(p.prosrc, '') || coalesce(pg_get_functiondef(p.oid), '')) like '%clara._document_retention_date(%';
+  if v_n <> 1 then
+    raise exception '0042 S5.24 postcheck: called from % body/bodies', v_n using errcode = 'CLR10';
+  end if;
+end $s5_24$;
+`,
+};
+
+// A SECOND census, in a different migration and a different block — perfectly lawful under
+// the grammar, and therefore exactly what the tree-wide allowlist exists to catch.
+const secondCensusElsewhere = {
+  file: "0043_second_census.sql",
+  sql: `
+do $cor$
+declare v_sig text := 'clara.some_function(uuid)';
+  v_def text; v_m int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  execute v_def;
+  select count(*)::int into v_m from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace
+      and (coalesce(p.prosrc, '') || coalesce(pg_get_functiondef(p.oid), '')) like '%clara.some_other(%';
+  if v_m <> 1 then
+    raise exception 'census: % callers', v_m;
+  end if;
+end
+$cor$;
+`,
+};
+
+const NO_EXEMPTIONS = [];
+const CENSUS_FIXTURE_ALLOWLIST = [
+  { migration: "0031_census_read", block: "$cor$", variable: "v_n" },
+];
+const S5_24_ALLOWLIST = [
+  { migration: "0042_wave_d_b0_shared_authorities", block: "$s5_24$", variable: "v_n" },
+];
+
 let failures = 0;
 function testCase(name, fn) {
   try {
@@ -212,7 +360,7 @@ testCase("literal-valued variable target resolves to execute_rule_post and is re
   const result = checkBindingPostControlSources([
     currentExecutor,
     computedExecutorRecut,
-  ]);
+  ], { allowlist: NO_EXEMPTIONS });
   if (result.ok) throw new Error("computed execute_rule_post recut passed");
   if (!result.message.includes("target clara.execute_rule_post(uuid,text)")) {
     throw new Error(`wrong failure: ${result.message}`);
@@ -223,7 +371,7 @@ testCase("genuinely unparseable post-0029 target fails loud", () => {
   const result = checkBindingPostControlSources([
     currentExecutor,
     unresolvedRecut,
-  ]);
+  ], { allowlist: NO_EXEMPTIONS });
   if (result.ok) throw new Error("unresolved CoR target passed");
   if (!result.message.includes("unresolved target identity")) {
     throw new Error(`wrong failure: ${result.message}`);
@@ -234,7 +382,7 @@ testCase("a resolved dynamic recut of another function does not impersonate the 
   const result = checkBindingPostControlSources([
     currentExecutor,
     unrelatedLiteralRecut,
-  ]);
+  ], { allowlist: NO_EXEMPTIONS });
   if (!result.ok) throw new Error(result.message);
 });
 
@@ -242,7 +390,7 @@ testCase("R2: a decoy literal followed by a computed reassignment of the SAME va
   const result = checkBindingPostControlSources([
     currentExecutor,
     reassignedTargetRecut,
-  ]);
+  ], { allowlist: NO_EXEMPTIONS });
   if (result.ok) throw new Error("reassigned (decoy-then-computed) target passed as unrelated");
   if (!result.message.includes("unresolved target identity")) {
     throw new Error(`wrong failure: ${result.message}`);
@@ -253,14 +401,14 @@ testCase("census exemption (a): a consumer census beside an attributed splice pa
   const result = checkBindingPostControlSources([
     currentExecutor,
     censusReadInPatchingBlock,
-  ]);
+  ], { allowlist: CENSUS_FIXTURE_ALLOWLIST });
   if (!result.ok) throw new Error(result.message);
   if ((result.exemptions ?? []).length !== 1) {
     throw new Error(`expected exactly 1 printed exemption, got ${(result.exemptions ?? []).length}`);
   }
-  if (!result.exemptions[0].includes("bound to v_n")
-    || !result.exemptions[0].includes("non-execute-reaching")) {
-    throw new Error(`exemption not audited legibly: ${result.exemptions[0]}`);
+  if (!result.exemptions[0].text.includes("bound to v_n")
+    || !result.exemptions[0].text.includes("census grammar")) {
+    throw new Error(`exemption not audited legibly: ${result.exemptions[0].text}`);
   }
   if (!result.message.includes("1 census-read exemption(s) granted")) {
     throw new Error("the OK message does not disclose the exemption");
@@ -271,7 +419,7 @@ testCase("census exemption (b): an unattributable read whose value IS executed s
   const result = checkBindingPostControlSources([
     currentExecutor,
     unattributedReadThatExecutes,
-  ]);
+  ], { allowlist: NO_EXEMPTIONS });
   if (result.ok) throw new Error("an unattributed patch site was exempted");
   if (!result.message.includes("unresolved target identity")) {
     throw new Error(`wrong failure: ${result.message}`);
@@ -282,7 +430,7 @@ testCase("census exemption (c): census SHAPE whose variable reaches an execute i
   const result = checkBindingPostControlSources([
     currentExecutor,
     censusShapeThatReachesExecute,
-  ]);
+  ], { allowlist: NO_EXEMPTIONS });
   if (result.ok) throw new Error("a value that reaches EXECUTE was exempted as a census read");
   if (!result.message.includes("unresolved target identity")) {
     throw new Error(`wrong failure: ${result.message}`);
@@ -293,9 +441,77 @@ testCase("census exemption (d): a read with NO named binding (loop/record target
   const result = checkBindingPostControlSources([
     currentExecutor,
     unboundReadInLoop,
-  ]);
+  ], { allowlist: NO_EXEMPTIONS });
   if (result.ok) throw new Error("an unbound read was exempted");
   if (!result.message.includes("unresolved target identity")) {
+    throw new Error(`wrong failure: ${result.message}`);
+  }
+});
+
+// --- MB1: the five evasion probes, each of which the value-flow analysis exempted --------
+
+for (const [probe, fixture] of [
+  ["(1) `v_cmd = replace(v_def,…)` then `execute v_cmd` — an `=` assignment alias", evasionEqualsAlias],
+  ["(2) `v_cmd[1] := …` then `execute v_cmd[1]` — a subscripted alias", evasionArrayAlias],
+  ["(3) `execute format(…pg_get_functiondef…) into v_dummy` — EXECUTE read as a binding", evasionExecuteInto],
+  ["(4) `execute '…$1…' into v_dummy using v_def` — the value arrives via USING", evasionExecuteUsing],
+  ["(5) a string literal containing `into v_safe` — a phantom binding", evasionFakeBindingLiteral],
+]) {
+  testCase(`MB1 evasion probe ${probe} FAILS CLOSED`, () => {
+    const result = checkBindingPostControlSources([currentExecutor, fixture], {
+      allowlist: NO_EXEMPTIONS,
+    });
+    if (result.ok) {
+      throw new Error(
+        `the probe was CERTIFIED — exemptions: ${JSON.stringify((result.exemptions ?? []).map((e) => e.text))}`,
+      );
+    }
+    if (!result.message.includes("unresolved target identity")) {
+      throw new Error(`wrong failure: ${result.message}`);
+    }
+    if ((result.exemptions ?? []).length !== 0) {
+      throw new Error(`the probe was granted ${(result.exemptions ?? []).length} exemption(s)`);
+    }
+  });
+}
+
+testCase("MB1 positive: the real 0042 `$s5_24$` shape is exempt — census only, splice still attributed", () => {
+  const result = checkBindingPostControlSources([currentExecutor, s5_24Shape], {
+    allowlist: S5_24_ALLOWLIST,
+  });
+  if (!result.ok) throw new Error(result.message);
+  if ((result.exemptions ?? []).length !== 1) {
+    throw new Error(`expected exactly 1 exemption (the census), got ${(result.exemptions ?? []).length}`);
+  }
+  const [e] = result.exemptions;
+  if (e.block !== "$s5_24$" || e.variable !== "v_n") {
+    throw new Error(`wrong exemption: ${JSON.stringify(e)}`);
+  }
+});
+
+// --- MB2: the tree-wide exemption set must EQUAL the allowlist ---------------------------
+
+testCase("MB2: a SECOND census elsewhere in the tree fails the gate and is named", () => {
+  const result = checkBindingPostControlSources(
+    [currentExecutor, s5_24Shape, secondCensusElsewhere],
+    { allowlist: S5_24_ALLOWLIST },
+  );
+  if (result.ok) throw new Error("an un-allowlisted census exemption was certified");
+  if (!result.message.includes("does not match the allowlist")) {
+    throw new Error(`wrong failure: ${result.message}`);
+  }
+  if (!result.message.includes("0043_second_census.sql")
+    || !result.message.includes("bound to v_m")) {
+    throw new Error(`the unexpected exemption is not NAMED: ${result.message}`);
+  }
+});
+
+testCase("MB2: an allowlist entry whose census is GONE fails too — the match is exact both ways", () => {
+  const result = checkBindingPostControlSources([currentExecutor, unrelatedLiteralRecut], {
+    allowlist: S5_24_ALLOWLIST,
+  });
+  if (result.ok) throw new Error("a stale allowlist entry was tolerated");
+  if (!result.message.includes("ALLOWLISTED but NOT GRANTED")) {
     throw new Error(`wrong failure: ${result.message}`);
   }
 });

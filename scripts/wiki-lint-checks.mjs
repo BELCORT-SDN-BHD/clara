@@ -750,7 +750,7 @@ function coRTargetIdentity(block, argText, callStart, callEnd) {
 }
 
 // ---------------------------------------------------------------------------
-// CENSUS READS — a `pg_get_functiondef` call whose value provably cannot reach an EXECUTE.
+// CENSUS READS — ONE EXEMPT GRAMMAR, MATCHED POSITIVELY. EVERYTHING ELSE FAILS CLOSED.
 //
 // A CoR patch SITE is a read of a function body that is rewritten and `execute`d back. That
 // is what makes an unattributable target dangerous: an unknown body goes in, DDL comes out.
@@ -760,26 +760,44 @@ function coRTargetIdentity(block, argText, callStart, callEnd) {
 // aggregate and lands in an int; no DDL can ever be built from it. Demanding a signature
 // binding for it is demanding attribution for a read that patches nothing.
 //
-// THE TEST IS VALUE FLOW, NOT BLOCK SHAPE, and it is deliberately not "the block contains no
-// EXECUTE" — a block with no `execute` is already skipped by `parseCoRPatches` below (it
-// installs nothing), so that test would exempt nothing that is not already exempt. A census
-// read lives in the SAME block as a real splice, which is exactly why the analysis has to be
-// per-call.
+// WHY THIS IS A GRAMMAR AND NOT A FLOW ANALYSIS [merge-gate MB1, 2026-08-04]. The first cut
+// keyed the exemption on VALUE FLOW: exempt when no bound name could reach an `execute`. A
+// cross-model merge gate probed that analysis with five shapes and ALL FIVE were exempted:
+//   (1) `v_cmd = replace(v_def,…); execute v_cmd;`  — an `=` assignment, which the binding
+//       closure did not recognise (it read `:=` only), so v_def never "reached" the execute;
+//   (2) `v_cmd[1] := …; execute v_cmd[1];`          — a subscripted target, likewise unseen;
+//   (3) `execute format(… pg_get_functiondef(…) …) into v_dummy;` — an `EXECUTE … INTO` read
+//       as a BINDING statement rather than as an execute;
+//   (4) `execute '…$1…' into v_dummy using v_def;`  — `readExecuteExpr` stops at `using`, so
+//       the USING values were never part of any execute expression; and
+//   (5) a string LITERAL containing the text `into v_safe` — a phantom binding.
+// A sound flow analysis over arbitrary PL/pgSQL is not a thing this repo can maintain, and a
+// fail-OPEN default in the only hole of a fail-closed gate is the wrong trade. So the test is
+// inverted: the exemption is a WHITELIST OF ONE STATEMENT SHAPE, matched positively. Anything
+// a single reader would not instantly recognise as "a catalog count" is not exempt.
 //
-// FAIL-CLOSED IN THREE PLACES:
-//   1. the EXECUTE-REACHING set is an OVER-approximation — seeded with every identifier in
-//      every `execute` expression, then closed BACKWARDS over every binding statement
-//      (`select … into v`, `v := …`) with no regard to program order, so anything that could
-//      conceivably feed an `execute` is treated as if it does;
-//   2. the call's enclosing statement must POSITIVELY bind its result to named targets. No
-//      binding — a bare `execute (select pg_get_functiondef(…) …)`, a `for r in select …
-//      loop`, a record target — is not a census read, it is an unattributed patch site; and
-//   3. every bound target must be outside the reaching set. One reaching target revokes the
-//      exemption for the whole statement.
+// THE GRAMMAR — all of it, on the comment-masked statement, keywords taken at paren depth 0
+// with every string literal and dollar-quoted region blanked:
+//   (a) the statement's first word is `select`;
+//   (b) the select list — everything between `select` and the statement's single top-level
+//       `into` — is exactly `count(*)`, optionally cast (`count(*)::int`);
+//   (c) there is EXACTLY ONE top-level `into`, and its target is ONE plain identifier
+//       immediately followed by `from` (no comma list, no `strict`, no dotted, record or
+//       subscripted target);
+//   (d) there is a top-level `where`, and EVERY `pg_get_functiondef` occurrence in the
+//       statement — scanned RAW, literals included — sits AFTER it, i.e. inside the
+//       predicate, never in the select list, the FROM list or the INTO target;
+//   (e) the statement contains no `execute` and no `using` at all; and
+//   (f) BELT, textual and deliberately over-broad: the bound name appears in NO statement of
+//       the block that mentions `execute` anywhere, and in no `execute` expression the lexer
+//       reconstructs. This is what closes probe (4) — the USING values the expression reader
+//       drops are still identifiers of a statement that says `execute`.
+// Everything else — every other statement shape, every call the grammar does not cover — is
+// an unattributed patch site and FAILS CLOSED, exactly as it did before the exemption existed.
 // ---------------------------------------------------------------------------
 
 /** Every identifier-shaped word in `text`, lower-cased. Keywords are included on purpose:
- *  the reaching set is an over-approximation and a false member only fails harder. */
+ *  the belt set is an over-approximation and a false member only fails harder. */
 function identifierWords(text) {
   return (String(text).match(/[A-Za-z_][A-Za-z0-9_]*/g) ?? []).map((w) => w.toLowerCase());
 }
@@ -800,49 +818,75 @@ function blockStatements(masked) {
   return out;
 }
 
-/** The names one statement BINDS, or null when it binds nothing this analysis can name.
- *  `select … into [strict] a, b` and `[declare] v [type] := …` are the two shapes plpgsql
- *  uses here; `insert into` / `merge into` are DML, not bindings, and are not mistaken for one. */
-function statementBindings(text) {
-  const intoRe = /(\binsert\b\s+|\bmerge\b\s+)?\binto\b\s+(?:strict\s+)?([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)/gi;
-  let m;
-  while ((m = intoRe.exec(text))) {
-    if (m[1]) continue;                                   // insert into … / merge into …
-    return { names: m[2].split(",").map((n) => n.trim().toLowerCase()), producer: text };
+/** A length-preserving view of one statement with every string literal and dollar-quoted
+ *  region BLANKED, plus the paren depth at every offset — so a keyword can be located at the
+ *  statement's own top level rather than inside a literal (probe 5) or a subquery. */
+function topLevelView(text) {
+  const chars = text.split("");
+  const depth = new Array(text.length).fill(0);
+  let d = 0, i = 0;
+  const blank = (from, to) => {
+    for (let k = from; k < to && k < text.length; k++) {
+      if (chars[k] !== "\n") chars[k] = " ";
+      depth[k] = d;
+    }
+  };
+  while (i < text.length) {
+    const ch = text[i];
+    if (ch === "'") { const j = skipQuoted(text, i); blank(i, j); i = j; continue; }
+    if (ch === "$") {
+      const j = skipDollar(text, i);
+      if (j > i) { blank(i, j); i = j; continue; }
+    }
+    if (ch === "(") { depth[i] = d; d++; i++; continue; }
+    if (ch === ")") { d = Math.max(0, d - 1); depth[i] = d; i++; continue; }
+    depth[i] = d;
+    i++;
   }
-  const assign = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:constant\s+)?(?:[A-Za-z_][A-Za-z0-9_ ]*?)?:=\s*([\s\S]*)$/
-    .exec(text.replace(/^\s*(?:declare|begin)\b/i, ""));
-  if (assign) return { names: [assign[1].toLowerCase()], producer: assign[2] };
-  return null;
+  return { plain: chars.join(""), depth };
 }
 
-/** Every identifier that could flow into an `execute` in this block (see the note above). */
-function executeReachingNames(block, masked) {
-  const reaching = new Set();
-  for (const { expr } of executeExpressions(block)) {
-    for (const w of identifierWords(expr)) reaching.add(w);
+/** Offsets of every depth-0 match of a /g-flagged `re` in the blanked view. */
+function topLevelMatches(view, re) {
+  const out = [];
+  re.lastIndex = 0;
+  let m;
+  while ((m = re.exec(view.plain))) {
+    if (view.depth[m.index] === 0) out.push(m.index);
   }
-  const statements = blockStatements(masked)
-    .map((s) => ({ ...s, binding: statementBindings(s.text) }));
-  for (let changed = true; changed;) {
-    changed = false;
-    for (const s of statements) {
-      if (!s.binding) continue;
-      if (!s.binding.names.some((n) => reaching.has(n))) continue;
-      for (const w of identifierWords(s.binding.producer)) {
-        if (!reaching.has(w)) { reaching.add(w); changed = true; }
-      }
-    }
+  return out;
+}
+
+const CENSUS_COUNT_LIST = /^\s*count\s*\(\s*\*\s*\)\s*(?:::\s*[A-Za-z_][A-Za-z0-9_]*\s*)?$/i;
+const CENSUS_INTO_TARGET = /^\s+([A-Za-z_][A-Za-z0-9_]*)\s+from\b/i;
+
+/** The census grammar (a)–(e) above, matched positively on ONE statement.
+ *  Returns the single bound variable name, or null for "not this shape". */
+function censusStatementBinding(text) {
+  if (/\bexecute\b/i.test(text) || /\busing\b/i.test(text)) return null;          // (e)
+  const view = topLevelView(text);
+  const head = /^\s*select\b/i.exec(view.plain);                                  // (a)
+  if (!head) return null;
+  const intos = topLevelMatches(view, /\binto\b/gi);                              // (c)
+  if (intos.length !== 1) return null;
+  if (!CENSUS_COUNT_LIST.test(view.plain.slice(head[0].length, intos[0]))) return null;   // (b)
+  const target = CENSUS_INTO_TARGET.exec(view.plain.slice(intos[0] + "into".length));
+  if (!target) return null;                                                       // (c)
+  const wheres = topLevelMatches(view, /\bwhere\b/gi);                            // (d)
+  if (wheres.length === 0) return null;
+  const calls = /pg_get_functiondef/gi;
+  let c;
+  while ((c = calls.exec(text))) {
+    if (c.index < wheres[0]) return null;      // a call outside the predicate is not a census
   }
-  return { reaching, statements };
+  return target[1].toLowerCase();
 }
 
 /**
- * `pg_get_functiondef(` call offsets (into `masked`) that are PROVEN census reads: bound to
- * named targets, none of which can reach an `execute`. Returns `offset -> boundTargetNames`
- * so the caller can PRINT what it exempted — a silent exemption is invisible policy.
- * Everything else is absent from the map and keeps whatever attribution
- * `coRTargetIdentity` could (or could not) make.
+ * `pg_get_functiondef(` call offsets (into the comment-masked block) that match the census
+ * grammar EXACTLY. Returns `offset -> boundVariableName` so the caller can PRINT what it
+ * exempted — a silent exemption is invisible policy. Everything else is absent from the map
+ * and keeps whatever attribution `coRTargetIdentity` could (or could not) make.
  */
 function censusReadOffsets(block) {
   // `maskComments` SKIPS dollar-quoted regions, so the interior of a `do $tag$ … $tag$` block
@@ -851,15 +895,31 @@ function censusReadOffsets(block) {
   // phantom literal that swallows the rest of the analysis. Length is preserved, so every
   // offset below still lines up with the caller's scan of the raw block.
   const masked = maskComments(block);
-  const { reaching, statements } = executeReachingNames(block, masked);
+  const statements = blockStatements(masked);
+
+  // (f) THE BELT. Every identifier of every statement that so much as mentions `execute`,
+  // plus every identifier of every reconstructed execute EXPRESSION. Whole statements are
+  // used on purpose: `execute … using v_def` drops its USING values from the expression the
+  // lexer reads, and that gap is exactly probe (4).
+  const executeTouched = new Set();
+  for (const st of statements) {
+    if (!/\bexecute\b/i.test(st.text)) continue;
+    for (const w of identifierWords(st.text)) executeTouched.add(w);
+  }
+  for (const { expr } of executeExpressions(block)) {
+    for (const w of identifierWords(expr)) executeTouched.add(w);
+  }
+
   const out = new Map();
   const re = /pg_get_functiondef\s*\(/gi;
   let m;
   while ((m = re.exec(masked))) {
     const st = statements.find((s) => m.index >= s.start && m.index < s.end);
-    if (!st || !st.binding) continue;                                    // no binding ⇒ patch site
-    if (st.binding.names.some((n) => reaching.has(n))) continue;         // reaches EXECUTE ⇒ patch site
-    out.set(m.index, st.binding.names);
+    if (!st) continue;
+    const bound = censusStatementBinding(st.text);
+    if (!bound) continue;                        // not the census grammar ⇒ patch site
+    if (executeTouched.has(bound)) continue;     // (f) the name is near DDL ⇒ patch site
+    out.set(m.index, bound);
   }
   return out;
 }
@@ -868,10 +928,11 @@ function censusReadOffsets(block) {
  * Every CHANGE-OF-RECORD patch: a `do $tag$ … $tag$` block that installs a callable
  * surface — it reads a function body with `pg_get_functiondef` and `execute`s a rewritten
  * version, or it dynamically creates a function/procedure.
- * Returns {line, kind, targets:[identity|null], censusOnly:[boolean], whitelisted,
- * fragments:[string]}. `censusOnly[i]` marks a `null` target that is a PROVEN census read
- * (see above) rather than an unattributable patch site; `targets` itself is unchanged, so a
- * consumer that ignores the new field behaves exactly as before.
+ * Returns {line, tag, kind, targets:[identity|null], censusOnly:[boolean],
+ * censusReads:[{line, variable}], whitelisted, fragments:[string]}. `censusOnly[i]` marks a
+ * `null` target that matches the census GRAMMAR exactly (see above) rather than an
+ * unattributable patch site; `targets` itself is unchanged, so a consumer that ignores the
+ * new field behaves exactly as before.
  * `spans` (from parseFunctions) suppresses `do` matches that live inside a body.
  */
 export function parseCoRPatches(sql, spans = []) {
@@ -916,7 +977,7 @@ export function parseCoRPatches(sql, spans = []) {
       targets.push(identity);
       censusOnly.push(exempt);
       if (exempt) {
-        censusReads.push({ line: lineOf(sql, open + t.index), bound: census.get(t.index) });
+        censusReads.push({ line: lineOf(sql, open + t.index), variable: census.get(t.index) });
       }
       tre.lastIndex = arg.end;
     }
