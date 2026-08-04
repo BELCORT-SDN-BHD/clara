@@ -373,6 +373,10 @@
       "note": "",
       "deployed": true
     },
+    "packages/runtime/workflows/clientOnboarding.v3.ts": {
+      "sha256": "e4d69f4beb9a2a884aea24c7ed6341c9f7b388f9d9db3200ab972135ffa7be6f",
+      "note": ""
+    },
     "packages/runtime/workflows/closeExample.v1.ts": {
       "sha256": "42b4f889ea9472ab67b26c3921abe3b1453a7310fef0ece12261aeb971a429c3",
       "note": "",
@@ -414,6 +418,10 @@
       "sha256": "ab9dcecd3b1c36b600e7161d93fd5b113474cd18c83a280d2d24c94426c4b406",
       "note": "",
       "deployed": true
+    },
+    "packages/runtime/workflows/firmInterview.v3.ts": {
+      "sha256": "cb3048a2fe1ec2f1fe70c50727995add44972d85b75ee6979eebe0473d3ab817",
+      "note": ""
     },
     "packages/runtime/workflows/interview.v1.core.ts": {
       "sha256": "8a4d79337256050dac239d1165e87e778a2f4ee584464c9a56f2981791e23c54",

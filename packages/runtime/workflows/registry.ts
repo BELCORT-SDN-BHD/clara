@@ -26,8 +26,10 @@ import { autoDraft_v4 } from "./autoDraft.v4.js";
 import { autoDraft_v5 } from "./autoDraft.v5.js";
 import { firmInterview_v1 } from "./firmInterview.v1.js";
 import { firmInterview_v2 } from "./firmInterview.v2.js";
+import { firmInterview_v3 } from "./firmInterview.v3.js";
 import { clientOnboarding_v1 } from "./clientOnboarding.v1.js";
 import { clientOnboarding_v2 } from "./clientOnboarding.v2.js";
+import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
@@ -36,8 +38,8 @@ export const workflows = {
   invoiceFacts: invoiceFacts_v1,
   statementFacts: statementFacts_v1,
   autoDraft: autoDraft_v5,
-  firmInterview: firmInterview_v2,
-  clientOnboarding: clientOnboarding_v2,
+  firmInterview: firmInterview_v3,
+  clientOnboarding: clientOnboarding_v3,
 } as const;
 
 // Slice 6 repointed `chatTurn:` v1→v2, then v2→v3 (the GATE-3 live find: v2's
@@ -134,9 +136,23 @@ export const workflows = {
 // runtime image ships FIRST, then migration 0038, then the consent ceremony — which is also
 // why `enqueueForLane` (lib/reconciler-documents.mjs) became an explicit allowlist in the
 // same change, so a migration-before-runtime window can never route a bank statement into a
-// consentless generic OCR run.
+// consentless generic OCR run. GH #152 repointed BOTH interview classes v2->v3 (the park/hook
+// INVERSION): v1 and v2 announced a park via streamPromptStep BEFORE arming its hook with
+// createHook. WDK registers a hook only at suspension, so those two lines landed in two
+// DIFFERENT suspensions and every park was briefly VISIBLE-BUT-UNARMED; an answer POSTed in that
+// window raised HookNotFoundError, which the answer route maps to 409 not_pending — a status
+// documented as "already delivered" — so a real answer was silently DROPPED (the dashboard's
+// useInterviewRun follows that contract; the human just retyped, which is why it went unnoticed
+// in production and surfaced first as a CI flake). Measured on the durable record: 44/44 parks
+// armed 1.4–55.6ms AFTER they were announced. v3 swaps the two lines to the chatTurn.v8 shape
+// (arm, then announce) — within a suspension the engine creates hooks before it dispatches any
+// step, so the window is closed by construction. The v1 AND v2 bodies stay frozen, built and
+// EXPORTED so no parked run is stranded (policy (c)) — this class's parks are the ≥48h kind, so
+// a live run on an older body is the expected case, not a corner one.
 export { firmInterview_v1 };
+export { firmInterview_v2 };
 export { clientOnboarding_v1 };
+export { clientOnboarding_v2 };
 export { chatTurn_v1 };
 export { chatTurn_v2 };
 export { chatTurn_v3 };

@@ -1,8 +1,15 @@
 // STANDALONE interview cancellation + drive-to-complete e2e (Wave B, GATE 3 — the
 // rig-confined fault gate). NOT a `node --test` file: it boots the built server + the
 // real WDK Postgres world IN-PROCESS (the world-e2e.mjs pattern) and drives a REAL
-// begin_client_onboarding-born interview through the REAL clientOnboarding_v1 /
-// firmInterview_v1 workflows over HTTP, so it owns its lifecycle and exits explicitly.
+// begin_client_onboarding-born interview through the REAL interview workflows over HTTP,
+// so it owns its lifecycle and exits explicitly.
+//
+// VERSION-AGNOSTIC BY CONSTRUCTION: it starts runs through the HTTP routes, which enqueue
+// via workflows/registry.ts — so it drives WHATEVER THE REGISTRY POINTS AT, never a version
+// named here (today clientOnboarding_v3 / firmInterview_v3; it drove v1 at GATE 3 and v2
+// after the F1/F2 repoint, with no edit to this file). Do not re-pin a version into this
+// header — a version named in prose goes stale at the next repoint and misleads the next
+// reader about what actually ran.
 // Run (against a disposable local DB named in the ENVIRONMENT):
 //
 //   PGHOST=127.0.0.1 PGPORT=55440 PGUSER=postgres PGDATABASE=clara_rt_test \
@@ -186,8 +193,10 @@ async function driveClientToComplete({ runId, planId }, jwt, answers = scriptedA
       continue;
     }
     // `scriptedAnswers` throws by itself when a segment is unscripted or exhausted, and says which
-    // — the v1-era map returned `undefined` and surfaced as a park timeout instead.
-    const value = pp.phase === "c" ? "yes" : answers(pp.seg);
+    // — the v1-era map returned `undefined` and surfaced as a park timeout instead. The parkIndex
+    // is passed so a retry at the SAME park resends the SAME value (GH #152) rather than
+    // consuming the segment's next scripted answer.
+    const value = pp.phase === "c" ? "yes" : answers(pp.seg, pp.parkIndex);
     const res = await postJson("/api/interview/answer", { runId, scope: "client", parkIndex: pp.parkIndex, planId, value }, jwt);
     if (res.status === 200) answered.add(pp.parkIndex);
     else if (res.status !== 409) throw new Error(`answer failed at park ${pp.parkIndex} (${pp.seg}/${pp.phase}): ${res.status} ${JSON.stringify(res.body)}`);
