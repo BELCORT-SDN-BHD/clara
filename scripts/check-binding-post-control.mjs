@@ -15,6 +15,24 @@
 // CoR target it cannot attribute and on every attributed execute_rule_post recut:
 // a human must prove the gate survives or extend this checker before merge.
 //
+// THE ONE EXEMPTION — A CENSUS READ IS NOT A PATCH SITE (0042 `$s5_24$`). The gate
+// exists to keep PATCH targets attributable, and a patch site is a function body
+// that is read, rewritten and `execute`d back. The same builtin is also used as a
+// pure catalog PREDICATE — `select count(*) into v_n from pg_proc p where
+// (coalesce(p.prosrc,'')||coalesce(pg_get_functiondef(p.oid),'')) like '%…%'`, the
+// consumer census every 0042 splice runs on itself. That value is consumed by an
+// aggregate and lands in an int; no DDL can be built from it, and demanding a
+// signature binding for it is demanding attribution for a read that patches nothing.
+// `parseCoRPatches` therefore marks a `pg_get_functiondef` call `censusOnly` when,
+// and ONLY when, the block PROVABLY cannot feed that call's value to any `execute`
+// (an over-approximated execute-reaching set, closed backwards over every binding
+// statement; a positively-bound target; and no bound target inside that set). Any
+// other shape — an unbound call, a value that reaches an `execute` — keeps the
+// existing fail-closed behaviour. NOT "the block has no execute": a block with no
+// `execute` is not a CoR patch at all, so that test would exempt nothing.
+// EVERY GRANTED EXEMPTION IS PRINTED on success; a silent exemption is invisible
+// policy, and the merge gate reads this output.
+//
 // SCOPE: every packages/db/migrations/*.sql file, in filename order.
 // No dependencies — Node built-ins plus the repo's shared SQL lexer only.
 
@@ -56,6 +74,7 @@ export function checkBindingPostControlSources(sources) {
   let definitions = 0;
   const dynamicRecuts = [];
   const unresolvedRecuts = [];
+  const exemptions = [];
 
   for (const { file, sql } of [...sources].sort((a, b) =>
     a.file.localeCompare(b.file))) {
@@ -67,11 +86,21 @@ export function checkBindingPostControlSources(sources) {
     }
     if (file > EXECUTOR_MIGRATION) {
       for (const patch of parseCoRPatches(sql, functions)) {
-        if (patch.targets.includes(null)) {
+        // A `null` target is unattributed UNLESS it is a proven census read (see the header).
+        const unattributed = patch.targets
+          .some((t, i) => t === null && !(patch.censusOnly ?? [])[i]);
+        if (unattributed) {
           unresolvedRecuts.push(`${file}:${patch.line}`);
         }
         if (patch.targets.includes(EXECUTOR_IDENTITY)) {
           dynamicRecuts.push(`${file}:${patch.line}`);
+        }
+        for (const read of patch.censusReads ?? []) {
+          exemptions.push(
+            `  EXEMPT  ${file}:${read.line}  block ${patch.tag ?? "do $$"} `
+            + `(opens ${file}:${patch.line})  pg_get_functiondef bound to `
+            + `${read.bound.join(", ")}  — non-execute-reaching (census read, not a patch site)`,
+          );
         }
       }
     }
@@ -136,12 +165,17 @@ export function checkBindingPostControlSources(sources) {
 
   return {
     ok: true,
+    exemptions,
     message:
       "binding-post-control: OK — "
       + `${definitions} execute_rule_post(uuid,text) definition(s) scanned; `
       + `current body ${current.file}:${current.line} retains the 0029 `
       + "binding live/unexpired assignment -> refusal-use -> approve-call order, "
-      + "with no post-0029 dynamic executor recut.",
+      + "with no post-0029 dynamic executor recut."
+      + (exemptions.length === 0
+        ? "\n  0 census-read exemption(s) granted."
+        : `\n  ${exemptions.length} census-read exemption(s) granted — every one printed:\n`
+          + exemptions.join("\n")),
   };
 }
 

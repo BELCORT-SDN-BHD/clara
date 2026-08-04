@@ -69,10 +69,18 @@ const applied = async (re) => Number((await rootQuery(
  *  against a database that has none of the objects that arm names. Keying on the full stable
  *  name makes every arm below renumber-proof, and makes the renumber inventory in RENUMBER.md
  *  §2 a list of FILENAMES to rename rather than a list of regexes to re-derive.
+ *
+ *  THE ROSTER IS DELIBERATELY WHOLE — all four slices, in every x42x contract, whichever pair
+ *  that contract asserts on. That is what makes RENUMBER.md §2 one edit per file in one known
+ *  place for EVERY slice, instead of a per-file re-derivation of which two regexes this
+ *  particular contract happens to consume. The two this file does not read are kept, not
+ *  trimmed; each carries its own disable so the exemption stays visible and scoped to the line.
  */
 const V_B0 = "^[0-9]{4}_wave_d_b0_shared_authorities$";
 const V_B1 = "^[0-9]{4}_wave_d_b1_staff_advances$";
+// eslint-disable-next-line no-unused-vars -- whole-roster invariant; see the note above
 const V_B3 = "^[0-9]{4}_wave_d_b3_af2_composite$";
+// eslint-disable-next-line no-unused-vars -- whole-roster invariant; see the note above
 const V_B2 = "^[0-9]{4}_wave_d_b2_recurring_adjustments$";
 
 const reservedRoles = async (client, code) => (await rootQuery(

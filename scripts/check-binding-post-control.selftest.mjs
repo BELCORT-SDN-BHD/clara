@@ -104,6 +104,98 @@ $cor$;
 `,
 };
 
+// ---------------------------------------------------------------------------
+// THE CENSUS-READ EXEMPTION (0042 `$s5_24$`). A `pg_get_functiondef` call whose value
+// PROVABLY cannot reach an `execute` is not a patch site and needs no signature binding.
+// The four fixtures below pin the exemption from both sides: it fires on the real census
+// shape, and it is revoked the moment the value can reach DDL or is not bound at all.
+// ---------------------------------------------------------------------------
+
+// (a) THE REAL SHAPE — one attributed splice (read → rewrite → execute) PLUS a consumer
+// census in the SAME block. The splice must still be bound; the census must be exempt.
+// The comment before the census deliberately carries an APOSTROPHE and the word `execute`:
+// `maskComments` skips dollar-quoted regions, so a `do` block arrives at the analysis with
+// its comments RAW, and an unmasked apostrophe opens a phantom literal that swallows the
+// census statement. This fixture fails loudly if the block is ever analysed unmasked.
+const censusReadInPatchingBlock = {
+  file: "0031_census_read.sql",
+  sql: `
+do $cor$
+declare
+  v_sig text := 'clara.some_function(uuid)';
+  v_def text; v_n int;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  v_def := replace(v_def, 'current_date', 'clara._book_today()');
+  execute v_def;
+  -- ITS ONE CONSUMER STILL REACHES IT. pg_get_functiondef's own header line would
+  -- self-match, so the census excludes the target itself before it can execute anything.
+  select count(*)::int into v_n from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace
+      and p.proname <> 'some_function'
+      and (coalesce(p.prosrc, '') || coalesce(pg_get_functiondef(p.oid), '')) like '%clara.some_function(%';
+  if v_n <> 1 then
+    raise exception 'consumer census: % callers', v_n;
+  end if;
+end
+$cor$;
+`,
+};
+
+// (b) An unattributable read bound into a variable that IS executed — the patch site the
+// gate exists for. The census analysis must not touch it.
+const unattributedReadThatExecutes = {
+  file: "0031_unattributed_execute.sql",
+  sql: `
+do $cor$
+declare
+  v_def text;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.proname = 'mystery';
+  execute v_def;
+end
+$cor$;
+`,
+};
+
+// (c) MIXED, AND THE EXEMPTION IS PER VALUE FLOW. The second read is written in census
+// shape — an aggregate over the whole clara namespace — but its variable is fed to
+// `execute` later in the SAME block. One flow into DDL revokes it; the block still fails.
+const censusShapeThatReachesExecute = {
+  file: "0031_census_shape_executes.sql",
+  sql: `
+do $cor$
+declare
+  v_sig text := 'clara.some_function(uuid)';
+  v_def text; v_probe text;
+begin
+  select pg_get_functiondef(p.oid) into v_def from pg_proc p where p.oid = v_sig::regprocedure;
+  select string_agg(coalesce(pg_get_functiondef(p.oid), ''), ';') into v_probe from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace;
+  execute v_probe;
+end
+$cor$;
+`,
+};
+
+// (d) NO BINDING AT ALL — a loop over a query has no named target this analysis can prove
+// anything about, so it is an unattributed patch site, not a census read.
+const unboundReadInLoop = {
+  file: "0031_unbound_loop.sql",
+  sql: `
+do $cor$
+declare
+  v_def text;
+begin
+  for v_def in select pg_get_functiondef(p.oid) from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace loop
+    execute v_def;
+  end loop;
+end
+$cor$;
+`,
+};
+
 let failures = 0;
 function testCase(name, fn) {
   try {
@@ -152,6 +244,57 @@ testCase("R2: a decoy literal followed by a computed reassignment of the SAME va
     reassignedTargetRecut,
   ]);
   if (result.ok) throw new Error("reassigned (decoy-then-computed) target passed as unrelated");
+  if (!result.message.includes("unresolved target identity")) {
+    throw new Error(`wrong failure: ${result.message}`);
+  }
+});
+
+testCase("census exemption (a): a consumer census beside an attributed splice passes, and is PRINTED", () => {
+  const result = checkBindingPostControlSources([
+    currentExecutor,
+    censusReadInPatchingBlock,
+  ]);
+  if (!result.ok) throw new Error(result.message);
+  if ((result.exemptions ?? []).length !== 1) {
+    throw new Error(`expected exactly 1 printed exemption, got ${(result.exemptions ?? []).length}`);
+  }
+  if (!result.exemptions[0].includes("bound to v_n")
+    || !result.exemptions[0].includes("non-execute-reaching")) {
+    throw new Error(`exemption not audited legibly: ${result.exemptions[0]}`);
+  }
+  if (!result.message.includes("1 census-read exemption(s) granted")) {
+    throw new Error("the OK message does not disclose the exemption");
+  }
+});
+
+testCase("census exemption (b): an unattributable read whose value IS executed still fails", () => {
+  const result = checkBindingPostControlSources([
+    currentExecutor,
+    unattributedReadThatExecutes,
+  ]);
+  if (result.ok) throw new Error("an unattributed patch site was exempted");
+  if (!result.message.includes("unresolved target identity")) {
+    throw new Error(`wrong failure: ${result.message}`);
+  }
+});
+
+testCase("census exemption (c): census SHAPE whose variable reaches an execute in the same block still fails", () => {
+  const result = checkBindingPostControlSources([
+    currentExecutor,
+    censusShapeThatReachesExecute,
+  ]);
+  if (result.ok) throw new Error("a value that reaches EXECUTE was exempted as a census read");
+  if (!result.message.includes("unresolved target identity")) {
+    throw new Error(`wrong failure: ${result.message}`);
+  }
+});
+
+testCase("census exemption (d): a read with NO named binding (loop/record target) still fails", () => {
+  const result = checkBindingPostControlSources([
+    currentExecutor,
+    unboundReadInLoop,
+  ]);
+  if (result.ok) throw new Error("an unbound read was exempted");
   if (!result.message.includes("unresolved target identity")) {
     throw new Error(`wrong failure: ${result.message}`);
   }

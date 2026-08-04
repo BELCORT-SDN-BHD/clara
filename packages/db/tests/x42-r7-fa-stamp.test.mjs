@@ -28,7 +28,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import {
-  opk, x41EnsureReady, skip41, BANK, GAIN, LOSS, OTHER, mon, dayIn, runPeriod, runDue, caught,
+  opk, x41EnsureReady, skip41, BANK, GAIN, LOSS, OTHER, mon, dayIn, runDue, caught,
   faWorld, faRow, entryRowOf, freshFaClient, buyAsset, completeSL, liveAuthority,
   earnRamp, runAndSettle, disposeAndSettle, reverseAndSettle, clientCharges, approvedEntry,
   accumulatedAt, glNet, rootQuery, endPool,
