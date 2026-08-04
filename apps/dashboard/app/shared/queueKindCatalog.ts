@@ -102,6 +102,15 @@ const FIXTURES = {
     asset_id: "a1000000-0000-4000-8000-000000000001",
     question_text: "Fixed asset (particulars pending) — 170-000 RM12,000.00",
   }),
+  // 0042 (Wave D-b, design §3.4): one row per disbursed advance whose
+  // particulars are still incomplete — the staff_advance_incomplete twin of
+  // fixed_asset_incomplete above. Title rides the DB's own placeholder
+  // description, same convention.
+  staff_advance_incomplete: fx({
+    row_kind: "staff_advance_incomplete", id: "fixture-advance",
+    advance_id: "d1000000-0000-4000-8000-000000000001",
+    question_text: "Staff advance (particulars pending) — 610-000 RM1,200.00",
+  }),
 } as const;
 
 /** NOT a catalog key — proves the honest degrade path for a row_kind the catalog
@@ -126,6 +135,9 @@ const TITLES = {
   // 0041: the DB's own placeholder description rides question_text, exactly
   // like open_question/compliance_watch above (pin sheet §6).
   fixed_asset_incomplete: (row: QueueRow) => row.question_text ?? "Fixed asset (particulars pending)",
+  // 0042: the DB's own placeholder description rides question_text, exactly
+  // like fixed_asset_incomplete above (design §3.4).
+  staff_advance_incomplete: (row: QueueRow) => row.question_text ?? "Staff advance (particulars pending)",
 } as const satisfies Record<string, (row: QueueRow) => string>;
 
 /** The honest fallback title for a row_kind with no catalog entry — the id-only
@@ -250,6 +262,26 @@ function FixedAssetIncompleteDetail({ row }: QueueDetailProps): ReactElement {
   );
 }
 
+/** 0042 (Wave D-b, design §3.4): a LIGHT panel only — the full particulars/
+ *  applications surfaces live on the /advances workbench, not inline here
+ *  (mirrors FixedAssetIncompleteDetail's own "light panel, links out" law). */
+function StaffAdvanceIncompleteDetail({ row }: QueueDetailProps): ReactElement {
+  if (!row.advance_id) return createElement(FallbackPanel, { row });
+  const qs = new URLSearchParams();
+  if (row.client_id) qs.set("client_id", row.client_id);
+  const href = `/advances?${qs.toString()}`;
+  return createElement(
+    "div", null,
+    createElement("div", { className: queueStyles.sectionHeader }, TITLES.staff_advance_incomplete(row)),
+    createElement("p", { className: queueStyles.muted }, row.client_id ? `client ${shortId(row.client_id)}` : ""),
+    createElement(
+      "p", { className: queueStyles.detailEmpty },
+      "This advance's particulars are incomplete — complete them on the advances workbench (no inline completion form here).",
+    ),
+    createElement("a", { className: queueStyles.linkButton, href }, "Open in the advances workbench →"),
+  );
+}
+
 // --- the catalog ------------------------------------------------------------------
 
 /** Every row_kind `clara.list_review_queue` emits (0011 base + 0016 compliance_watch
@@ -277,6 +309,10 @@ export const QUEUE_KIND_CATALOG: Record<string, QueueKindEntry> = {
   fixed_asset_incomplete: {
     row_kind: "fixed_asset_incomplete", title: TITLES.fixed_asset_incomplete, RowAccessory: null,
     Detail: FixedAssetIncompleteDetail, fixture: FIXTURES.fixed_asset_incomplete,
+  },
+  staff_advance_incomplete: {
+    row_kind: "staff_advance_incomplete", title: TITLES.staff_advance_incomplete, RowAccessory: null,
+    Detail: StaffAdvanceIncompleteDetail, fixture: FIXTURES.staff_advance_incomplete,
   },
 };
 

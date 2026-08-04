@@ -343,6 +343,47 @@ export const FA_0041_COHORT = [
   ...FA_0041_SHARED_FNS, ...FA_0041_UNGRANTED_FNS,
 ];
 
+// ---------------------------------------------------------------------------
+// 0043 [Wave D-b, SLICE D-b1] — the staff-advance family (the B-lite register).
+//
+// SPLIT NOTE, and it is deliberate: this block declares the GRANT MATRIX ENTRIES ONLY — the
+// seven names 0043's S3.7 grant loop actually reaches. It declares NO cohort. Wave D-b's
+// whole-unit `cohortFailures(...)` roster spans all four slices (templates + pairs at 0045,
+// the AF-2 composite at 0044, advances here), and `cohortFailures()` fails a PARTIAL cohort
+// BY DESIGN — "wholly present or wholly absent per MIGRATION BOUNDARY", the 0022 header's
+// rule. A roster naming 0044/0045 bodies would go red on every database at this frontier,
+// which is a false failure on a database that is simply behind. **The cohort roster lands
+// with the slice whose frontier makes it whole (D-b2 / 0045)** — split-record LAW D1,
+// established when D-b0 shipped `rig-meta.mjs` unchanged for the same reason.
+//
+// The four WRITE verbs. Floors are BODY-enforced via clara._human_ctx(clara.role_rank(...))
+// and the role-level grant is clara_authenticated for all of them — the SUBLEDGER_0037 /
+// BANK_0038 / FA_0041 pattern. As built: admin+ for enrol/retire (they SIGN an account-role
+// authority and burn a reserved code), bookkeeper+ for complete_particulars and for
+// book_staff_advance_application (it moves money). NO machine role holds any of them: 0043's
+// TAIL 7 proves it from the other side (no wake-allowlist row names a staff-advance verb, and
+// none is granted to an agent or wake role) — every advance act is a professional act taken
+// by a named human, and the runtime never books one.
+const ADV_0043_HUMAN_FNS = [
+  "enrol_staff_advance_account", "retire_staff_advance_account",
+  "complete_staff_advance_particulars", "book_staff_advance_application",
+];
+// The /advances READ surface (definer + clara._human_ctx viewer floor + firm predicates) —
+// the BANK_0038_READ_FNS / FA_0041_READ_FNS pattern. No machine role reads the advance
+// register: an advance names a PERSON, and staff_advance_summary returns their label, their
+// purpose and their days-outstanding.
+const ADV_0043_READ_FNS = [
+  "staff_advance_summary", "staff_advance_statement", "staff_advance_tie",
+];
+// 0043's THIRTEEN internal helpers (clara._adv_assert_proposal, _adv_enrolment_at,
+// _adv_window_closed_under, _adv_enrolment_admission, _adv_outstanding, _adv_over_application,
+// _adv_release_one_way, _adv_net_applications, _adv_entry_carries_correction,
+// _adv_reversal_admission, _adv_reversal_blocked, _adv_on_approve, _tf_adv_movement_belt) are
+// named in NO role set on purpose: each was revoked from public at its own creation site and
+// each is reached only through a SECURITY DEFINER verb, the approve hook or the belt. The main
+// sweep already fails if any of them ever GAINS a grant, so their absence is enforced without
+// a cohort. The disappearance half of that contract arrives with the cohort at D-b2.
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -396,6 +437,8 @@ export const ALLOWED = {
     ...FA_0041_HUMAN_FNS, // 0041 the Wave D-a fixed-asset verbs (human judgement only)
     ...FA_0041_READ_FNS, // 0041 the /assets read surface
     ...FA_0041_SHARED_FNS, // 0041 the due probe — the one name BOTH lanes hold (design §3.4)
+    ...ADV_0043_HUMAN_FNS, // 0043 [D-b1] the staff-advance write verbs (human judgement only)
+    ...ADV_0043_READ_FNS, // 0043 [D-b1] the /advances read surface (viewer+, definer, firm-predicated)
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.

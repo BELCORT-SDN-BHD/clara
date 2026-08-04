@@ -1,0 +1,87 @@
+# WAVE D-b SPLIT — D-b1 TEST LIST  (0043_wave_d_b1_staff_advances)
+#
+# 12 runnable test files · 66 cells, PLUS one declared FLOOR RE-RUN (x41-belt.test.mjs, 4
+# cells — D-b0's file, re-run here because one of its cells is VACUOUS at D-b0's frontier;
+# see the FLOOR RE-RUNS section below). 13 files run, 70 corpus cells. EVERY cell was
+# MEASURED green on this slice's rig (clara_0041_asm + the chain through 0043), F1 fork
+# lane, 2026-08-04.
+# [E21 RESIDUAL, executed] +1 file / +1 cell: x42b1-r9-n2.test.mjs (f1-census), forked
+# out of x42-r9-n2 per ERRATA-E19-E25.md E21's own remedy. See PARTITION.md's appended
+# "E21 residual EXECUTED" section.
+#
+# CI (E17 IS BINDING): every run sets CLARA_MIGRATIONS_DIR at the migrations copy the DB was
+# built from. In this slice's own PR that is packages/db/migrations, so the default resolves
+# and nothing needs setting; a multi-chain checkout MUST set it or the rig's ensureReady()
+# re-migrate fails its history-integrity check and eats exactly one cell (x42-s5c-awcc).
+#
+# THE CELL FLOOR (machine-read by ci.yml's db-slice-frontiers leg — the totality gate is
+# FILE-granular and cannot see a cell deleted inside a still-listed file). MEASURED whole on
+# clara_wc_b1 (0041_asm + this slice's chain), E17 honoured, --test-concurrency=1:
+#   76 pass / 0 fail / 6 skip over 16 files (72 without the floor re-run, +4 with it).
+#   Raise it when you add cells; NEVER lower it to go green.
+#!cells-floor: 76
+#
+# THE RESET-GATED DRILL RUNS ALONE, in its own throwaway DB — NOT in this list:
+#   PGDATABASE=clara_x42_b1_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+#     CLARA_RIG_DB=1 node --test tests/x42-0043-b1-upgrade.test.mjs
+#
+# DASHBOARD: D-b1's dashboard half: app/advances/**, app/shared/advancesApi.ts, app/shared/cards/StaffAdvanceCard.tsx.
+#   Its dbSeamCensus.bindings.ts variant is bindings/dbSeamCensus.bindings.b1.ts.
+
+# --- WHOLE FILES (9) — every cell in the file belongs to this slice ---
+x42-advances-admission.test.mjs
+x42-advances-belt.test.mjs
+x42-advances-gap.test.mjs
+x42-advances-guards.test.mjs
+x42-advances-reversal.test.mjs
+x42-advances-watermark.test.mjs
+x42-r7-s5-entry-indexes.test.mjs
+x42-reservation-authority.test.mjs
+x42-reservation-role.test.mjs
+
+# --- FORKS (3) — this slice's share of a file whose cells span slices ---
+x42b1-advances-reads.test.mjs
+x42b1-advances.test.mjs
+x42b1-r9-n2.test.mjs
+
+# --- CROSS-SLICE CONTRACTS (3) — frontier-aware; each asserts what is TRUE here ---
+x42x-b0-b1-reservation-union.test.mjs
+x42x-b1-b3-line-booking-walls.test.mjs
+x42x-b3-b2-hook-order.test.mjs
+
+# --- FLOOR RE-RUNS (1) — an EARLIER slice's file, re-run here because a cell of it is
+#     VACUOUS at that slice's frontier. Declared to the totality gate below, which allows
+#     exactly ONE extra listing per declaration and still fails on any undeclared duplicate.
+#
+#     x41-belt.test.mjs (D-b0's, 4 cells) — cell `x41.b6` carries a SECOND-NET census over
+#     every function whose name matches ^(deactivate|retire|archive)_.*_account$ (minus
+#     %bank%), asserting none of them touches clara.coa_accounts. MEASURED on the frontier
+#     rigs: that set is the EMPTY SET at 0042 and is {retire_staff_advance_account} from
+#     0043 on — i.e. the loop body never executes at the frontier the cell is assigned to,
+#     and the verb it was written for (the cell's own comment says "0042 adds
+#     clara.retire_staff_advance_account") is shipped by THIS slice under the split. The
+#     cell stays D-b0's (it is green and non-vacuous there in its other arms); this re-run
+#     is what makes its second net bite.
+#!floor-rerun: x41-belt.test.mjs
+x41-belt.test.mjs
+
+# --- HELPER MODULES this slice's files import (not runnable; ship with the slice) ---
+#   NEW in this slice: x42-adv-helpers.mjs, x42-adv-world.mjs, x42-ra-helpers.mjs
+#   already shipped by an earlier slice: x41-fa-fixtures.mjs, x41-fa-world.mjs, x42-s5-helpers.mjs,
+#     x42-split-upgrade-kit.mjs (the shared upgrade-drill kit — landed with D-b0)
+#   plus the pre-D-b shared rig: a21-helpers.mjs, rig-helpers.mjs, rig-meta.mjs,
+#   x38-match-fixtures.mjs, wave-a/wave-b fixtures (all already on main).
+#
+# [E21 RESIDUAL CAVEAT, measured] x42b1-r9-n2.test.mjs's prologue is byte-identical to the
+# original x42-r9-n2.test.mjs's, which ALSO imports x42-af2-world.mjs, x42-r8-seam-kit.mjs
+# and x42-r10-o3-kit.mjs — D-b3-only modules — and x42-af2-world.mjs itself imports a FOURTH,
+# x42-af2-helpers.mjs. This fork's own kept cell (f1-census) never calls into any of them (it
+# only uses rootQuery). A true D-b1-only checkout therefore needs ALL FOUR files present
+# (unused):
+#     x42-af2-world.mjs · x42-af2-helpers.mjs · x42-r8-seam-kit.mjs · x42-r10-o3-kit.mjs
+# THE LAW (measured the hard way — carrying only the three NAMED modules gives
+# ERR_MODULE_NOT_FOUND on x42-af2-helpers.mjs and the fork runs 0 pass / 1 fail, before a
+# single cell executes):
+#     a fork's shipping set is the transitive closure of its prologue.
+# Not "the modules its kept cells call", and not "the modules its prologue names" — the
+# CLOSURE. Node resolves the whole import graph before any test gating runs.

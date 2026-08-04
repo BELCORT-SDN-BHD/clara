@@ -116,7 +116,25 @@ export type FixedAssetPart = { type: "fixed_asset"; client_id: string; asset_id:
  *  Identifier-only; the card hydrates get_depreciation_run(run_id) on mount. */
 export type DepreciationRunReceiptPart = { type: "depreciation_run_receipt"; client_id: string; run_id: string; label?: string };
 
-/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 + 2 Wave-C-c + 2 Wave-D-a members. */
+// --- Wave D-b addition (design §2.5/§3.4/§7; wave-d-b-design-abi.md §A) ---
+// Identifier-only, mirroring FixedAssetPart/DepreciationRunReceiptPart exactly. D-b
+// ships no new chatTurn machine lane — chatTurn.v8 stays FROZEN, untouched — so
+// nothing in the runtime emits this on the wire TODAY; it is declared here by
+// analogy (parts.ts:101-107's own precedent restated) so the surface exists the day
+// a chat turn references one. (The AdjustmentRunReceiptPart sibling arrives with
+// D-b2, the migration that emits get_adjustment_run.)
+
+/** A staff advance's register row (design §3.2/§3.4). Identifier-only; the card
+ *  hydrates `staff_advance_summary(client, as_of=today)` and picks the row by
+ *  `advance_id` — there is no single-row getter in the ABI (§9/ABI §A names only
+ *  the summary/statement/tie reads), so this follows the SAME "pick by id from a
+ *  list" fallback `reconApi.ts`'s `getBankRule` already uses against
+ *  `list_bank_rules` (the D4 fix precedent) — never a fabricated read fn. Every
+ *  outstanding/cents figure is DB-derived by the summary read itself, never
+ *  summed here. */
+export type StaffAdvancePart = { type: "staff_advance"; client_id: string; advance_id: string; label?: string };
+
+/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 + 2 Wave-C-c + 2 Wave-D-a + 1 Wave-D-b member. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
@@ -140,4 +158,6 @@ export type ClaraPart =
   | BankRuleProposalPart
   // --- Wave D-a additions ---
   | FixedAssetPart
-  | DepreciationRunReceiptPart;
+  | DepreciationRunReceiptPart
+  // --- Wave D-b addition ---
+  | StaffAdvancePart;
