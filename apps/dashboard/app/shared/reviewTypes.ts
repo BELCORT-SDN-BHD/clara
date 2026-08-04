@@ -30,7 +30,9 @@ export type QueueRowKind =
   // 0041 additive (Wave D-a, design v2.1 §6) — optional-but-consistent, not load-bearing
   // (this union is already aspirational/incomplete: `lint_finding`, added 0017, is missing
   // too; QueueRow.row_kind's real type stays `QueueRowKind | string` below).
-  | "fixed_asset_incomplete";
+  | "fixed_asset_incomplete"
+  // 0043 additive (Wave D-b, slice D-b1, design §3.4) — same optional-but-consistent posture.
+  | "staff_advance_incomplete";
 export type QueueSection = "needs_review" | "needs_you";
 export type QueueLane = "ready" | "needs_review" | "needs_you" | null;
 
@@ -71,6 +73,10 @@ export type QueueRow = {
   // typechecking unchanged; a pre-0041 envelope (or either of those fixtures)
   // degrades this to undefined, never a crash.
   asset_id?: string | null;
+  // 0043 additive key (Wave D-b, slice D-b1, design §3.4): the staff_advance_incomplete
+  // row's identifying id — the same OPTIONAL, non-load-bearing posture as asset_id
+  // above (a pre-0043 envelope degrades this to undefined).
+  advance_id?: string | null;
 };
 
 export type QueueCounts = {
@@ -147,6 +153,10 @@ function toQueueRow(raw: unknown): QueueRow {
     // so the mapping ships with them. The staff-advance sibling (`advance_id`)
     // arrives with D-b1, which is the migration that emits it.
     asset_id: s(o.asset_id),
+    // [D-b1] the sibling half, landing with 0043 — the migration that emits
+    // `advance_id` on the staff_advance_incomplete row. Same shape, same reason:
+    // without the mapping the /advances detail link degrades to FallbackPanel.
+    advance_id: s(o.advance_id),
   };
 }
 

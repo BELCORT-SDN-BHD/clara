@@ -19,6 +19,7 @@ import { BankReconReceiptCard } from "../shared/cards/BankReconReceiptCard";
 import { BankRuleProposalCard } from "../shared/cards/BankRuleProposalCard";
 import { FixedAssetCard } from "../shared/cards/FixedAssetCard";
 import { DepreciationRunReceiptCard } from "../shared/cards/DepreciationRunReceiptCard";
+import { StaffAdvanceCard } from "../shared/cards/StaffAdvanceCard";
 import styles from "./chat.module.css";
 
 /** Matches CLARIFY_FRAMING in the runtime (chatTurn.prompt.ts:31) — used only for
@@ -253,6 +254,12 @@ export function TranscriptParts({
         }
         if (p.type === "depreciation_run_receipt") {
           return <DepreciationRunReceiptCard key={`farun:${p.run_id}:${i}`} token={token ?? null} part={p} />;
+        }
+        // Wave D-b (design §3.4/§7): identifier-only; the card hydrates on mount
+        // via staff_advance_summary. (The adjustment_run_receipt sibling branch
+        // arrives with D-b2, the migration that emits get_adjustment_run.)
+        if (p.type === "staff_advance") {
+          return <StaffAdvanceCard key={`adv:${p.advance_id}:${i}`} token={token ?? null} part={p} />;
         }
         // tool_result / tool_error resolve their call's chip — render nothing (the
         // one place this is declared is partCatalog's STATUS_RESOLVER_TYPES).

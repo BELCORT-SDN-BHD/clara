@@ -20,14 +20,22 @@
 # floor would be a lie at three frontiers out of four. The frontier leg asserts `fail = 0`
 # and prints the pass/skip split instead.
 #
-# D-b0 SHIPS TWO OF THE THREE. x42x-b1-b3-line-booking-walls.test.mjs is deliberately ABSENT
-# here: at the D-b0 frontier neither of the two slices it describes exists, so it is vacuous
-# — it ships with D-b1, which is the first frontier at which it can assert anything, and is
-# added to this roster in that PR.
+# D-b0 SHIPPED TWO OF THE THREE. x42x-b1-b3-line-booking-walls.test.mjs was deliberately ABSENT
+# there: at the D-b0 frontier neither of the two slices it describes exists, so it was vacuous
+# — it ships with D-b1, which is the first frontier at which it can assert anything, and it is
+# added to this roster in THAT PR (done: the third line below, added by D-b1 / 0043).
 #
 # MEASURED at the D-b0 frontier (0001..0042, CLARA_MIGRATIONS_DIR honoured):
 #   x42x-b0-b1-reservation-union   2 pass / 1 skip   (ru3, the POST arm, awaits D-b1)
 #   x42x-b3-b2-hook-order          2 pass / 2 skip   (both later arms await D-b3/D-b2)
+#
+# MEASURED at the D-b1 frontier (0001..0043, CLARA_MIGRATIONS_DIR honoured):
+#   x42x-b0-b1-reservation-union   2 pass / 1 skip   (ru3, the COMPLETION arm, now BITES; the
+#                                                     D-b0-only shell arm ru2 is the skip)
+#   x42x-b1-b3-line-booking-walls  2 pass / 3 skip   (lw1 the walls exist + lw2 the PRE arm
+#                                                     assert here; the three POST arms await 0044)
+#   x42x-b3-b2-hook-order          2 pass / 2 skip   (ho3 swaps in for ho2 — same 2/2 split)
 
 x42x-b0-b1-reservation-union.test.mjs
+x42x-b1-b3-line-booking-walls.test.mjs
 x42x-b3-b2-hook-order.test.mjs
