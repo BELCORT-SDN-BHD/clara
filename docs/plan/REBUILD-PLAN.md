@@ -266,11 +266,23 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > **all four structural invariants witnessed live**. **The real half closed on a NAMED, MEASURED
 > deviation: both real clients are in STRIKE-OFF** (books closed, no open period) — the first
 > live real template defers to the first going-concern client, the ADR-056 precedent.
-> **NEXT: D-b2's hold-ladder** (inheritance register: asbuilt-part2 §12), then Wave E. Hold-ladder
-> state (2026-08-05): two fix waves are BUILT into the held `0045` in the session substrate (the
-> round-11 list + the confirm-round's findings, every fix proven both ways); a further confirm round
-> found more mechanisms in the new armour and **the honest stop fired** — the next work list (W-R13)
-> is named in the substrate record; `0045` remains unmerged and unclaimed, exactly as ADR-058 records.
+> **D-b2 CLOSED (ADR-059, 2026-08-06): `0045` MERGED (#188, `c60abb8`) AND LIVE — 44 migrations,
+> frontier `0045`; WAVE D-b IS COMPLETE ACROSS ITS FOUR SLICES.** The hold-ladder ran FIVE fix
+> waves (W-R13..W-R15.1, all generator-built, every fix proven both ways at planted deploys) and
+> THREE two-lens rounds — the third came back **MECHANISM-BEARING: NO from both lenses** and the
+> close rule fired. The armour's terminal law is in the file: **fail-closed-on-unknown** (the
+> deploy instruments refuse loudly what they cannot certify — silent misjudgement is not a
+> reachable outcome class). The merge gate ran as an **owner-ruled NATIVE substitute** (Codex
+> account-locked until 2026-08-08); its one SHOULD-FIX (the D-b1/D-b3 cohort "disappearance half"
+> promise) was discharged by two independent empirical derivations agreeing diff-empty (cohort
+> 49→80). Ceremony recipe learned: session-level `statement_timeout` inside the migration
+> connection (Supavisor pools are invisible to ALTER ROLE); the apply took 211s. Acceptance on
+> production: **`auto_reversal_of` 0→live** (mirror born approved in the approving statement,
+> nine lines swapped to the sen), **every account nets ZERO**, fourteen-plus walls by name, the
+> replaced-period advisory speaking and its wall keeping the promise, the producer grant flip
+> proven, `staff_advance_tie` undisturbed. Sandbox register: A+B retired with reasons, **B2 LIVE
+> from 2026-07-01** — the belt's **first autonomous DRAFT ~2026-08-06/07**, the **first
+> autonomous POST ≥2026-10-01**. **NEXT: Gate P · the §7-A bundle · Wave E.**
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
@@ -284,7 +296,7 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > Wave-C grilling: structured-sales autopost as a tail slice (PRD §4.95).
 
 **Wave C — money movement.** Bank statement ingest, parity-checked matching + exclusivity, reconciliation tie-out, receipt/payment allocation (intrinsic), aging + statements, the self-reconcile learn loop (advisory, human-gated).
-**Wave D — assets + adjustments** *(OPEN, ADR-055; `docs/plan/wave-d-contract.md` = WD-R1..R15; **D-a FA/0041 CLOSED (ADR-056)**; **D-b shipped as a four-slice split — 0042/0043/0044 CLOSED (ADR-058), 0045 D-b2 HELD**)*. FA register from coding (intrinsic, soft-birth per WD-R1), depreciation runs (scheduled; the close gate is a NAMED Wave-E deferral per WD-R6), disposal (full + partial per WD-R7), CA metadata (inert per WD-R12), recurring/reversing adjustments (signed templates per WD-R8), staff advances (the B-lite register per WD-R10, §7-B). *Closing stock moved → Wave E (WD-R11).*
+**Wave D — assets + adjustments** *(**COMPLETE**, ADR-055..059; `docs/plan/wave-d-contract.md` = WD-R1..R15; **D-a FA/0041 CLOSED (ADR-056)**; **D-b shipped as a four-slice split — 0042/0043/0044 CLOSED (ADR-058), 0045 D-b2 CLOSED (ADR-059)**)*. FA register from coding (intrinsic, soft-birth per WD-R1), depreciation runs (scheduled; the close gate is a NAMED Wave-E deferral per WD-R6), disposal (full + partial per WD-R7), CA metadata (inert per WD-R12), recurring/reversing adjustments (signed templates per WD-R8), staff advances (the B-lite register per WD-R10, §7-B). *Closing stock moved → Wave E (WD-R11).*
 **Wave E — periods + statements.** Serialized year-end close with structural pre-close gates, segmented continuity reads, ordered reverse guards, carry-forward; the honest FS pack (SoFP/SoCI/SOCE/cash-flow/notes); the reporting engine (spec → DB reads → renderers → auditable artifacts). *Owns by inheritance:* periodic closing-stock at close + its completeness check (WD-R11) · the depreciation close gate over D's receipts (WD-R6) · the segment-aware FA tie-out (the REBUILD-rated `fa_control_tie_out`).
 **Wave F — tax.** The SST engine per the practice map (periods, payment basis, dual-registrant exports, SST-02, bad-debt relief); the payroll deadline calendar; **last: the draft tax computation** (add-backs, CA, chargeable income, forms — the slice allowed to slip to v1.1).
 **Wave G — the OS surface.** Proactive inbox (allowlisted wakes), cross-scope needs-you, ⌘K Ask/Do/Go + ActionPanels, plan-as-document for close/onboarding, exports UI, generative-UI completion + parity CI gates, the design floors.
