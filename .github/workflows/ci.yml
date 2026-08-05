@@ -163,7 +163,7 @@ jobs:
       # resolution — never on either parent's own line — is invisible to gitleaks
       # in EITHER context today. Fix: `--diff-merges=first-parent`, which diffs the
       # merge result against its first parent like an ordinary commit. Measured,
-      # not assumed: `--diff-merges=cc` (compact combined — the tighter option,
+      # not assumed: `--diff-merges=cc` (dense combined — the tighter option,
       # showing only content that differs from ALL parents) looks appealing but
       # DOES NOT WORK WITH GITLEAKS — its `diff --cc <path>` header and `++`-style
       # multi-parent line prefixes never match gitleaks' `diff --git a/<path>
