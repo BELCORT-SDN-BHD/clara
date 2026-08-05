@@ -88,8 +88,26 @@ export async function reconcileFaRuns(client, opts = {}) {
     out.faExamined += 1;
     try {
       for (let i = 0; i < FA_PERIOD_CAP; i++) {
-        const due = (await client.query("select clara.depreciation_run_due($1) as r", [clientId])).rows[0]?.r ?? {};
-        if (due?.due !== true) break; // no live authority, an outstanding draft, or caught up
+        const dueRow = (await client.query("select clara.depreciation_run_due($1) as r", [clientId])).rows[0]?.r;
+        const due = dueRow ?? {};
+        if (due?.due !== true) {
+          // ANOMALOUS SHAPE, LOUD [round-7 E3]. clara.depreciation_run_due's documented
+          // contract (0041 S3.5/S2.2b) always answers {due:boolean,...} -- due:false is the
+          // ordinary "nothing to do" case and stays quiet, exactly as before. Any OTHER
+          // shape (a null/empty row, a due-probe whose result silently changed shape) reads
+          // as due:false too under the `?? {}` fallback and `due?.due !== true` above --
+          // INDISTINGUISHABLE from a healthy idle client. That silence is the concealment
+          // layer round-7 named: a genuine wiring defect in the due oracle looks exactly
+          // like "the belt has nothing to do" and never raises an alarm. A malformed/missing
+          // answer is now named in the log (the [reconcile] idiom reconciler.mjs:258 uses
+          // for other anomalous-but-non-throwing states); the sweep still does not crash or
+          // spin -- it breaks the chase for this client on THIS cycle, exactly as before, and
+          // tries again next cycle.
+          if (due?.due !== false) {
+            log(`[reconcile] fa run client=${clientId} due-probe returned an unexpected shape (expected {due:boolean,...}, got ${JSON.stringify(dueRow)}) — treating as not-due this cycle`);
+          }
+          break; // no live authority, an outstanding draft, caught up, or an anomalous shape (logged above)
+        }
         const opKey = `fa:${clientId}:${due.period_start}:${randomUUID().slice(0, 8)}`;
         const r = (await client.query("select clara.run_depreciation_period($1,$2,$3,$4) as r", [clientId, due.period_start, due.period_end, opKey])).rows[0]?.r ?? {};
         // ANY non-throw is success for cadence purposes (0041 contract §5) — a refusal

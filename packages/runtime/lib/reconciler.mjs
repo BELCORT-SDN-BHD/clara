@@ -22,6 +22,7 @@ import { isRunNotFound, reconcileDocumentIntakes, reconcileDocumentTasks } from 
 import { reconcileSstWatches } from "./reconciler-sst.mjs";
 import { reconcileLintBelt } from "./reconciler-lint.mjs";
 import { reconcileFaRuns } from "./reconciler-fa.mjs";
+import { reconcileAdjustmentRuns } from "./reconciler-adjustments.mjs";
 
 const GRACE_REENQUEUE = process.env.CLARA_RECONCILE_GRACE || "15 seconds";
 const ORPHAN_WINDOW = process.env.CLARA_RECONCILE_ORPHAN_WINDOW || "30 minutes";
@@ -437,6 +438,9 @@ export { reconcileLintBelt };
 // or nothing overdue is a cheap {due:false} no-op.
 export { reconcileFaRuns };
 
+// The Wave D-b adjustment belt (design §2.3/§2.7 / 0042) lives in reconciler-adjustments.mjs.
+export { reconcileAdjustmentRuns };
+
 // ---------------------------------------------------------------------------
 // One full sweep (called under the leader lock by the supervisor).
 // ---------------------------------------------------------------------------
@@ -446,11 +450,12 @@ export { reconcileFaRuns };
  * (opts.prune=true) so it does not scan on every fast sweep; the autopost-rule
  * expiry sweep runs on the leader's daily flag (opts.autopostRules=true); the SST
  * compliance-watch repair belt runs on the leader's daily flag (opts.sstWatches=true);
- * the per-client wiki-lint belt runs on the leader's daily flag (opts.lintBelt=true); the
- * Wave D-a depreciation-run belt runs on the leader's daily flag (opts.faRuns=true).
+ * the per-client wiki-lint belt runs on the leader's daily flag (opts.lintBelt=true); the FA
+ * belt (opts.faRuns=true) and the D-b adjustment belt (opts.adjRuns=true) run on the same flag.
  * @param {import("pg").ClientBase} client  a clara_runtime connection
  * @param {{enqueueChatTurn:Function, getRun:Function, log?:Function, prune?:boolean,
- *          autopostRules?:boolean, sstWatches?:boolean, lintBelt?:boolean, faRuns?:boolean}} deps
+ *          autopostRules?:boolean, sstWatches?:boolean, lintBelt?:boolean, faRuns?:boolean,
+ *          adjRuns?:boolean}} deps
  */
 export async function runReconcilerSweep(client, deps) {
   const log = deps.log ?? (() => {});
@@ -482,6 +487,7 @@ export async function runReconcilerSweep(client, deps) {
   if (deps.lintBelt) lint = await reconcileLintBelt(client, { log });
   let fa = {};
   if (deps.faRuns) fa = await reconcileFaRuns(client, { log });
+  const adj = deps.adjRuns ? await reconcileAdjustmentRuns(client, { log }) : {}; // Wave D-b belt (0042)
   let prune = { pruned: 0 };
   if (deps.prune) {
     try {
@@ -490,5 +496,5 @@ export async function runReconcilerSweep(client, deps) {
       log(`[reconcile] trace prune error: ${err?.message ?? err}`);
     }
   }
-  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...lint, ...fa, ...prune };
+  return { ...expiry, ...tasks, ...autodraftTasks, ...documentTasks, ...documentIntakes, ...intakeRecovery, ...spool, ...autopost, ...sst, ...lint, ...fa, ...adj, ...prune };
 }

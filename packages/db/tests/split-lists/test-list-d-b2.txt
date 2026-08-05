@@ -1,0 +1,84 @@
+# WAVE D-b SPLIT — D-b2 TEST LIST  (0045_wave_d_b2_recurring_adjustments)
+#
+# 35 runnable test files · 172 cells (168 pass + 4 skip). EVERY cell was MEASURED green on this
+# slice's rig (clara_0041_asm + the chain through 0045), W-R13 lane, 2026-08-05. The two numbers
+# in this line are COUNTED on the run, not carried forward: the header said "31 files / 142 cells"
+# while the floor below said "34 files / 154 cells", which is the same two-conventions defect the
+# re-confirming round found in the migration's own prose (Codex RC5). One convention now: a
+# RUNNABLE FILE is a line in the list below, and a CELL is a TAP result the run reports.
+#
+# CI (E17 IS BINDING): every run sets CLARA_MIGRATIONS_DIR at the migrations copy the DB was
+# built from. In this slice's own PR that is packages/db/migrations, so the default resolves
+# and nothing needs setting; a multi-chain checkout MUST set it or the rig's ensureReady()
+# re-migrate fails its history-integrity check and eats exactly one cell (x42-s5c-awcc).
+#
+# THE CELL FLOOR (machine-read by ci.yml's db-slice-frontiers leg — the totality gate is
+# FILE-granular and cannot see a cell deleted inside a still-listed file). MEASURED whole on
+# clara_wc_b2 (0041_asm + the whole four-slice chain), E17 honoured, --test-concurrency=1:
+#   168 pass / 0 fail / 4 skip over 35 files. Raise it when you add cells; NEVER lower it to
+#   go green.
+#   150 -> 168 at W-R13 (2026-08-05): x42-r11-lineage.test.mjs joins the list carrying all
+#   eighteen as-built-ladder cells (nine round-11, six round-12, three round-13). It was written
+#   at round 11 and run by hand every round since; a cell nobody lists is a cell CI cannot lose
+#   loudly, which is what this floor exists to prevent.
+#!cells-floor: 168
+#
+# THE RESET-GATED DRILL RUNS ALONE, in its own throwaway DB — NOT in this list:
+#   PGDATABASE=clara_x42_b2_upgrade_ci CLARA_RIG_ALLOW_RESET=1 CLARA_ALLOW_DESTRUCTIVE=1 \
+#     CLARA_RIG_DB=1 node --test tests/x42-0045-b2-upgrade.test.mjs
+#
+# DASHBOARD: D-b2's dashboard half: app/rules/AdjustmentTemplatePanel*, app/rules/adjustmentModel*,
+#   app/shared/adjustmentApi.ts, app/shared/cards/AdjustmentRunReceiptCard.tsx — PLUS, deferred
+#   here by CF-B3-1/CX1, the SECOND app/shared/reconApi.ts wrapper (acceptBankRuleSuggestion)
+#   and the /bank coding-chip wiring in app/bank/StatementDetail.tsx that calls it (the grant
+#   this slice adds in S2.9-b3 is what makes the button work) — and it RESTORES
+#   dbSeamCensus.bindings.ts to the whole-unit file.
+#   Its dbSeamCensus.bindings.ts variant is bindings/dbSeamCensus.bindings.b2.ts.
+
+# --- WHOLE FILES (21) — every cell in the file belongs to this slice ---
+x42-adj-canon.test.mjs
+x42-adj-due.test.mjs
+x42-adj-period-double.test.mjs
+x42-adj-reads.test.mjs
+x42-adjustments-stale.test.mjs
+x42-adjustments.test.mjs
+x42-due-admission.test.mjs
+x42-pair-correction.test.mjs
+x42-pair.test.mjs
+x42-producer-role.test.mjs
+x42-producer-stale.test.mjs
+x42-producer.test.mjs
+x42-r10-o2.test.mjs
+x42-r10-o3.test.mjs
+x42-r10-p1-lineage.test.mjs
+x42-r10-p1-recovery.test.mjs
+x42-r10-remedy.test.mjs
+x42-r11-lineage.test.mjs
+x42-r7-class.test.mjs
+x42-r8-m1-collision.test.mjs
+x42-r9-mirror.test.mjs
+x42-r9-remedy.test.mjs
+
+# --- FORKS (10) — this slice's share of a file whose cells span slices ---
+x41b2-surface.test.mjs
+x42b2-advances-reads.test.mjs
+x42b2-advances.test.mjs
+x42b2-af2-rebook4.test.mjs
+x42b2-period-class.test.mjs
+x42b2-r7-s5-census.test.mjs
+x42b2-r7-s5-clock.test.mjs
+x42b2-r8-fy.test.mjs
+x42b2-r8-tails.test.mjs
+x42b2-s5c-clock.test.mjs
+
+# --- CROSS-SLICE CONTRACTS (3) — frontier-aware; each asserts what is TRUE here ---
+x42x-b0-b1-reservation-union.test.mjs
+x42x-b1-b3-line-booking-walls.test.mjs
+x42x-b3-b2-hook-order.test.mjs
+
+# --- HELPER MODULES this slice's files import (not runnable; ship with the slice) ---
+#   NEW in this slice: x42-adj-core.mjs, x42-adj-helpers.mjs
+#   already shipped by an earlier slice: x41-fa-fixtures.mjs, x41-fa-world.mjs, x41-surface-helpers.mjs, x42-adv-helpers.mjs, x42-adv-world.mjs, x42-af2-helpers.mjs, x42-af2-world.mjs, x42-r10-o3-kit.mjs, x42-s5-helpers.mjs,
+#     x42-split-upgrade-kit.mjs (the shared upgrade-drill kit — landed with D-b0)
+#   plus the pre-D-b shared rig: a21-helpers.mjs, rig-helpers.mjs, rig-meta.mjs,
+#   x38-match-fixtures.mjs, wave-a/wave-b fixtures (all already on main).

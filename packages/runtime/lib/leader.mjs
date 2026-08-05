@@ -51,6 +51,13 @@ const LINT_RECONCILE_MS = Number.isFinite(LINT_RECONCILE_MS_ENV) && LINT_RECONCI
 // feature-detect + per-client depreciation_run_due probe decide whether there is anything to do.
 const FA_RECONCILE_MS_ENV = Number(process.env.CLARA_FA_RECONCILE_MS);
 const FA_RECONCILE_MS = Number.isFinite(FA_RECONCILE_MS_ENV) && FA_RECONCILE_MS_ENV > 0 ? FA_RECONCILE_MS_ENV : 24 * 3600000;
+// Finite-guarded like the SST/lint/FA cadence: junk or non-positive CLARA_ADJ_RECONCILE_MS
+// falls back to 24h — a NaN here would make the due-check permanently false and silently
+// DISABLE the Wave D-b adjustment-occurrence belt. This gates only the DAILY cadence;
+// reconciler-adjustments.mjs's own feature-detect + per-client adjustment_run_due probe
+// decide whether there is anything to do.
+const ADJ_RECONCILE_MS_ENV = Number(process.env.CLARA_ADJ_RECONCILE_MS);
+const ADJ_RECONCILE_MS = Number.isFinite(ADJ_RECONCILE_MS_ENV) && ADJ_RECONCILE_MS_ENV > 0 ? ADJ_RECONCILE_MS_ENV : 24 * 3600000;
 
 /** True iff the daily autopost-rule expiry sweep is due (pure — the since-last-run
  *  guard; lastRunMs=0 makes the first cycle after (re)boot run it immediately, which
@@ -86,6 +93,16 @@ export function depreciationRunDue(lastRunMs, nowMs, intervalMs = FA_RECONCILE_M
   return nowMs - lastRunMs >= intervalMs;
 }
 
+/** True iff the daily adjustment-occurrence sweep is due (pure — the since-last-run guard;
+ *  lastRunMs=0 makes the first cycle after (re)boot run it immediately, which is safe:
+ *  reconciler-adjustments.mjs feature-detects 0042 itself and per-client
+ *  adjustment_run_due is idempotent recomputation, so an extra run is a no-op). Wave D-b
+ *  §2.3/§2.7 (WD-R8/R9) — this predicate only gates CADENCE, never the migration's
+ *  presence. */
+export function adjustmentRunDue(lastRunMs, nowMs, intervalMs = ADJ_RECONCILE_MS) {
+  return nowMs - lastRunMs >= intervalMs;
+}
+
 /**
  * Start the leader loop. Returns { stop, done }. `onHalt` (default process.exit(2))
  * fires on a taxonomy HALT. Deps: { enqueueChatTurn, getRun, log }.
@@ -108,6 +125,7 @@ export function startLeaderLoop(deps) {
     let lastSstRun = 0; // 0 ⇒ the first cycle after boot runs the SST repair belt (catches pre-existing crossings post-0016)
     let lastLintRun = 0; // 0 ⇒ the first cycle after boot runs the wiki lint belt (catches pre-existing conditions post-0017, WB-R8 daily cadence)
     let lastFaRun = 0; // 0 ⇒ first cycle after boot runs the depreciation sweep (reconciler-fa.mjs feature-detects 0041 itself, so a pre-0041 boot is a cheap no-op)
+    let lastAdjRun = 0; // 0 ⇒ first cycle after boot runs the adjustment-occurrence sweep (reconciler-adjustments.mjs feature-detects 0042 itself, so a pre-0042 boot is a cheap no-op)
     while (!stopRef.stop) {
       const client = makeRuntimeClient();
       let connErr = null;
@@ -131,6 +149,7 @@ export function startLeaderLoop(deps) {
             const sstDue = sstReconcileDue(lastSstRun, Date.now());
             const lintDue = lintReconcileDue(lastLintRun, Date.now());
             const faDue = depreciationRunDue(lastFaRun, Date.now());
+            const adjDue = adjustmentRunDue(lastAdjRun, Date.now());
             const swept = await runReconcilerSweep(client, {
               ...deps,
               prune: iteration % PRUNE_EVERY === 0,
@@ -138,11 +157,13 @@ export function startLeaderLoop(deps) {
               sstWatches: sstDue,
               lintBelt: lintDue,
               faRuns: faDue,
+              adjRuns: adjDue,
             });
             if (autopostDue && swept.autopostOk) lastAutopostRun = Date.now(); // a failed autopost sweep retries next cycle
             if (sstDue && swept.sstOk) lastSstRun = Date.now(); // a failed SST belt retries next cycle
             if (lintDue && swept.lintOk) lastLintRun = Date.now(); // a failed lint belt retries next cycle
             if (faDue && swept.faOk) lastFaRun = Date.now(); // a failed FA sweep retries next cycle
+            if (adjDue && swept.adjOk) lastAdjRun = Date.now(); // a failed adjustment sweep retries next cycle
             // NB: the 'world' heartbeat is NOT written here (S4-AB7b / ND5) — relay
             // leadership must not gate /ready. The engine heartbeat is a dedicated
             // task in the supervisor; the leader only beats 'reconciler' (via the sweep).

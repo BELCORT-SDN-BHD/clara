@@ -2758,42 +2758,125 @@ test("x40.al match_bank_line's p_via_rule overload stamps origin='rule' and matc
 });
 
 // ---------------------------------------------------------------------------
+// x40.am HELPERS -- the 0042 producer verb + the three root readbacks the
+// carve-out cell measures with. Kept beside the cell (its only caller) rather
+// than in the C-c verb block above: accept_bank_rule_suggestion is a WAVE D-b
+// verb (design S5 / ABI SSA), not one of the five C-c verbs IA-1..IA-7.
+// ---------------------------------------------------------------------------
+
+/** clara.accept_bank_rule_suggestion(p_client, p_line, p_rule, p_op_key) -- ABI §A,
+ *  bookkeeper+. The ONLY lawful writer of the `bank_rule_suggested` flags key
+ *  (0042 tail 6(a) pins that writer census at exactly this one function). */
+async function acceptSuggestion(sub, { client, line, rule, opKey = null }) {
+  const r = await humanQuery(
+    sub,
+    namedCall("accept_bank_rule_suggestion", [
+      { name: "p_client" }, { name: "p_line" }, { name: "p_rule" }, { name: "p_op_key" },
+    ]),
+    [client, line, rule, opKey ?? opk("x40-accept-sugg")],
+  );
+  return r.rows[0].result;
+}
+
+/** A draft's CURRENT revision token. The producer's receipt carries only
+ *  {entry_id} (ABI §A), and the flags stamp in arm B is a raw UPDATE -- so the
+ *  token is always re-read immediately before approve rather than carried. */
+async function revisionOf(entry) {
+  const r = await rootQuery("select revision_token from clara.journal_entries where id=$1", [entry]);
+  return r.rows[0]?.revision_token ?? null;
+}
+
+/** The rule_sightings evidence rows a set of entries accrued (root; RLS bypass).
+ *  This is the carve-out's OWN subject -- 0040 S5 gates the two sighting INSERTs
+ *  themselves, not merely the >=3 proposal loop they feed. */
+async function sightingCount(entries) {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.rule_sightings s where s.entry_id = any($1::uuid[])",
+    [entries],
+  );
+  return r.rows[0].n;
+}
+
+/** vendor_account autopost proposals standing for one counterparty (0037:2085). */
+async function vendorAccountProposals(client, counterparty) {
+  const r = await rootQuery(
+    "select count(*)::int as n from clara.coding_rules where client_id=$1 and rule_type='vendor_account' and counterparty_id=$2",
+    [client, counterparty],
+  );
+  return r.rows[0].n;
+}
+
+/** A statement line's entry_date as a plain YYYY-MM-DD string (never a JS Date
+ *  round-trip -- the rig has been bitten by timezone drift on date columns). */
+async function lineDateOf(line) {
+  const r = await rootQuery(
+    "select to_char(entry_date,'YYYY-MM-DD') as d from clara.bank_statement_lines where id=$1", [line]);
+  return r.rows[0].d;
+}
+
+// ---------------------------------------------------------------------------
 // x40.am -- THE SIGHTING CARVE-OUT: a bank_rule_suggested-stamped draft
 // approved THREE TIMES breeds NO vendor_account autopost proposal (part2
 // finding 29, the WA2-R9 wall applied).
 //
-// REBUILT (fix-wave E1/A2, asbuilt-authority.md finding 2). Two independent
-// breaks in the original cut, both traced to the migration text: (1) the
-// stamp targeted a column, `journal_entries.bank_rule_suggested`, that does
-// not exist -- the build carries the marker as a KEY INSIDE `flags` instead
-// (0040 S5: `not (coalesce(e.flags,'{}'::jsonb) ? 'bank_rule_suggested')`),
-// so the UPDATE raised 42703 and was swallowed by `.catch()` -- every draft
-// approved UNSTAMPED, and the carve-out conjunct was never evaluated false.
-// (2) the query asked for `rule_type='autopost'`, but the shape this fixture
-// actually breeds is `rule_type='vendor_account'` (0037_wave_c_a_subledger.sql
-// `values(c.firm,e.client_id,'vendor_account',v_counterparty,...)`) --
-// independently vacuous even if the stamp had landed. Fixed: stamp through
-// `flags` (the lawful draft-state allowset, 0016 `_tf_entry_immutable`), no
-// `.catch()` on the stamp's own rowCount, and the correct `rule_type`. PLUS
-// the positive control the finding names: an IDENTICAL unstamped trio on a
-// SECOND counterparty must breed EXACTLY ONE proposal -- proving the carve-out
-// really discriminates the stamped case rather than the cell being vacuous by
-// some other route (e.g. the whole sighting mechanism being dead).
+// PREVIOUS REBUILD (fix-wave E1/A2, asbuilt-authority.md finding 2) fixed two
+// vacuity breaks: the stamp targeted a non-existent COLUMN (the build carries
+// the marker as a KEY INSIDE `flags`) and the query asked for the wrong
+// rule_type. Both fixes stand; the construction below keeps them.
 //
-// [WAVE D-b SPLIT — D-b3 (0044)] THIS CELL STAYS AT ITS C-c CUT, AND ITS D-b REWRITE
-// DEFERS TO D-b2 (0045). The wave's rewrite gives it a three-arm shape whose ARM A calls
-// `clara.accept_bank_rule_suggestion` — the `bank_rule_suggested` producer — through the
-// authenticated lane. 0044 CREATES that verb but deliberately WITHHOLDS its
-// `grant execute … to clara_authenticated` (the confirming round's CF-B3-1 ≡ Codex CX1: its
-// approve-time re-validation is `clara._adj_on_approve` arm (3), a D-b2 body, and a reachable
-// producer without it can mint a staff advance nobody incurred). Arm A would therefore fail
-// 42501 here, and arm B's `{rule_id, line_id}` stamp asserts a refusal — CLR39
-// `suggestion_stale` — that only arm (3) can raise. This is the same rule the eight producer
-// test cells in four x42 files already follow: **a cell whose subject is the GRANTED verb
-// ships with the grant.** The two hunks this file needs at 0044 — x40.z-A1's reopen and
-// x40.ap's `match_id` allowlist — ARE shipped, because both are 0044's own behaviour.
-// D-b2 MUST bring the rest: the five helpers (`acceptSuggestion`, `revisionOf`,
-// `sightingCount`, `vendorAccountProposals`, `lineDateOf`) and the arm A/B/C rewrite below.
+// REBUILT AGAIN (0042, wave D-b) -- BECAUSE THE BUILD CLOSED A HOLE. 0040
+// shipped the S5 carve-out deliberately INERT: "no writer stamps this key yet
+// ... it ships AHEAD of its producer" (0040:6987), so the E1/A2 cut had no
+// lawful way to reach it and forged the stamp by hand out of a random uuid.
+// Nothing validated that stamp at approve, so the forgery sailed through.
+// 0042 ships the producer AND its approve-time re-validation:
+// clara._adj_on_approve arm (3) [design §5; ABI §A] re-asks every question
+// clara.accept_bank_rule_suggestion asked -- signed coding rule, line unmatched
+// and un-excepted, statement live, predicate still matching, legs byte-equal to
+// clara._wdb_suggestion_lines -- refusing CLR39 suggestion_stale otherwise. The
+// forged stamp names no signed rule, so it is now CORRECTLY refused on axis
+// 'rule'. That is a desirable tightening, not a regression: before 0042 a
+// hand-stamped flag silently suppressed vendor-binding sighting accrual. The
+// assertion FOLLOWS THE INVARIANT to its new home -- the cell now reaches the
+// carve-out the way the build says it is reached.
+//
+// THREE ARMS, because 0042 gave this invariant a SECOND, INDEPENDENT wall and
+// an honest cell has to tell the two apart:
+//   A  THE LAWFUL PRODUCER, END TO END. clara.accept_bank_rule_suggestion
+//      direct-INSERTs its draft with NO counterparty on any leg and NO client
+//      resolution (design §5's attribution posture: "the entry is FK-anchored
+//      to the statement line"). So v_counterparty is NULL at 0037:1891 and the
+//      whole accrual block is skipped BEFORE the carve-out conjunct is ever
+//      evaluated. Arm A therefore states the PRODUCTION fact -- a bank rule's
+//      own output accrues nothing -- but cannot, alone, discriminate the
+//      carve-out. Saying so out loud is precisely why arm B exists.
+//   B  THE CARVE-OUT, ISOLATED. The same draft, but carrying a VENDOR, so
+//      v_counterparty is non-null and 0040 S5's
+//      `not (coalesce(e.flags,'{}'::jsonb) ? 'bank_rule_suggested')` conjunct
+//      is the ONLY thing left withholding accrual. Its stamp names a REAL
+//      signed coding rule and a REAL live unmatched line and its legs ARE the
+//      derived legs, so it passes all five of arm (3)'s axes and is refused by
+//      nothing. Hand-built on purpose: the lawful verb binds no counterparty by
+//      design, so no lawful call can put the conjunct under load. flags is in
+//      _tf_entry_immutable's draft->draft allowset (0016:4956), which is what
+//      makes the stamp landable without a verb.
+//   C  THE POSITIVE CONTROL: arm B's draft MINUS the stamp, on a second
+//      counterparty, must breed EXACTLY ONE proposal. Without it, a dead
+//      sighting mechanism would read identically to a working carve-out.
+//
+// [WAVE D-b SPLIT — INHERITED AT D-b2 (0045)] This cell's D-b rewrite deferred
+// out of D-b3 (0044) because ARM A calls `clara.accept_bank_rule_suggestion` —
+// the `bank_rule_suggested` producer — through the authenticated lane, and 0044
+// deliberately WITHHELD its `grant execute … to clara_authenticated` (the
+// confirming round's CF-B3-1 ≡ Codex CX1: its approve-time re-validation is
+// `clara._adj_on_approve` arm (3), a D-b2 body, and a reachable producer
+// without it can mint a staff advance nobody incurred). Arm A would have
+// failed 42501 at that frontier, and arm B's `{rule_id, line_id}` stamp
+// asserts a refusal — CLR39 `suggestion_stale` — that only arm (3) can raise.
+// D-b2 (0045, block S2.9-b3) lands BOTH: the grant and arm (3)'s wall. The
+// inheritance below is therefore whole -- the five helpers (`acceptSuggestion`,
+// `revisionOf`, `sightingCount`, `vendorAccountProposals`, `lineDateOf`) and the
+// arm A/B/C rewrite, unmodified from the wave's pre-split cut, now GREEN on 0045.
 // ---------------------------------------------------------------------------
 test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO vendor_account autopost proposal -- an identical unstamped trio on a second counterparty breeds exactly one", async (t) => {
   if (skipHere(t)) return;
@@ -2802,52 +2885,95 @@ test("x40.am a bank-suggestion-stamped draft, approved three times, breeds NO ve
   const acct = await freshAccount(sub, client, "am1");
   const cpStamped = await birthCounterparty(sub, { client, name: `X40AM STAMPED CO ${randomUUID().slice(0, 6)}` });
   const cpControl = await birthCounterparty(sub, { client, name: `X40AM CONTROL CO ${randomUUID().slice(0, 6)}` });
-  const fakeRuleId = randomUUID();
 
+  // SIX matching lines on one statement: three for the lawful producer (arm A), three named
+  // by the hand-built isolation drafts (arm B). It has to be six DIFFERENT lines -- the
+  // producer's dedup law (design §5: at most ONE bank_rule_suggested entry per line across
+  // status IN ('draft','approved') AND reversed_by IS NULL, index
+  // uq_je_bank_rule_suggested_line) means "approved three times" is necessarily three lines.
+  const stmt = await multilineStatement(sub, client, acct.bankAccountId, { tag: "AM1", count: 6 });
+  const pattern = { tokens: ["EPF", "PAYMENT", "AM1"], direction: "debit" };
+  const proposed = await proposeRule(sub, {
+    client, kind: "coding", pattern,
+    proposal: { account_code: EXPN, narration_template: "x40.am coded from a signed rule" },
+  });
+  const ruleId = idOf(proposed, "rule_id", "id");
+  await signRule(sub, { client, rule: ruleId });
+
+  // ---- ARM A: the lawful producer, end to end (design §5 / ABI §A). ----
+  const armA = [];
   for (let i = 0; i < 3; i++) {
+    const accepted = await acceptSuggestion(sub, { client, line: stmt.lines[i].id, rule: ruleId, opKey: opk(`x40-am-accept-${i}`) });
+    const entry = idOf(accepted, "entry_id", "id");
+    assert.ok(entry, `x40.am mandatory setup: accept_bank_rule_suggestion minted a draft for line ${i}`);
+    await approveEntry(sub, { entry, expectedRevision: await revisionOf(entry), opKey: opk(`x40-am-accepta-${i}`) });
+    armA.push(entry);
+  }
+  const armAState = await rootQuery(
+    `select count(*) filter (where e.status='approved')::int as approved,
+            count(*) filter (where e.proposed_counterparty is not null
+              or exists (select 1 from clara.journal_lines l
+                         where l.entry_id=e.id and l.counterparty_id is not null))::int as bound
+       from clara.journal_entries e where e.id = any($1::uuid[])`,
+    [armA],
+  );
+  assert.equal(armAState.rows[0].approved, 3, "x40.am ARM A mandatory setup: all three LAWFULLY suggested drafts approved -- arm (3)'s five axes all held on a producer-minted draft");
+  assert.equal(armAState.rows[0].bound, 0, "x40.am ARM A: the producer's own drafts bind NO counterparty at all (design §5's FK-anchored attribution posture) -- so v_counterparty is null and the accrual block never reaches the carve-out conjunct. THAT is why arm A alone cannot discriminate it, and why arm B follows");
+  assert.equal(await sightingCount(armA), 0, "x40.am ARM A: three lawfully suggested approvals accrue ZERO rule_sightings -- a bank rule's own output never becomes autopost evidence (WA2-R9)");
+
+  // The two legs clara._wdb_suggestion_lines derives for a money-OUT line (ABI §A / 0042 S2):
+  // Dr the rule's account / Cr the bank account's GL code, magnitude the line's own, DEBIT LEG
+  // FIRST. Arm (3) compares this array position-for-position against `order by line_no`, so
+  // arms B and C carry it verbatim -- and arm B's stamp is refused on axis 'legs' if it drifts.
+  const derivedLines = [
+    { account_code: EXPN, debit_cents: 96750, credit_cents: 0, description: "x40.am coded leg" },
+    { account_code: acct.coaCode, debit_cents: 0, credit_cents: 96750, description: "x40.am bank leg" },
+  ];
+
+  // ---- ARM B: the same draft WITH a vendor -- the carve-out conjunct alone. ----
+  const armB = [];
+  for (let i = 0; i < 3; i++) {
+    const line = stmt.lines[3 + i];
     const d = await draftEntryV3(sub, {
-      client, resolution: await manualRes(sub, client), memo: `x40.am suggestion-stamped draft ${i}`, postingDate: `2034-04-0${i + 1}`,
-      lines: [
-        { account_code: EXPN, debit_cents: 500, credit_cents: 0, description: "coding-suggestion dr" },
-        { account_code: acct.coaCode, debit_cents: 0, credit_cents: 500, description: "coding-suggestion cr" },
-      ],
+      client, resolution: await manualRes(sub, client), memo: `x40.am suggestion-stamped draft ${i}`,
+      postingDate: await lineDateOf(line.id), lines: derivedLines,
       vendor: { existing_id: cpStamped }, opKey: opk(`x40-am-draft-${i}`),
     });
     // Stamp bank_rule_suggested THROUGH THE LAWFUL COLUMN: flags is in
-    // _tf_entry_immutable's draft->draft allowset (0016:4956), and the carve-out
-    // reads it as a KEY, not a value -- any non-null value under that key qualifies.
+    // _tf_entry_immutable's draft->draft allowset (0016:4956). The VALUE is now the ABI §B
+    // shape {rule_id, line_id} naming a real signed rule and a real live unmatched line --
+    // a random uuid would be refused CLR39 suggestion_stale by arm (3), which is exactly the
+    // hole 0042 closed. No `.catch()`: a swallowed stamp is how this cell went vacuous once.
     const stamped = await withActor({}, (c) => c.query(
-      "update clara.journal_entries set flags = coalesce(flags,'{}'::jsonb) || jsonb_build_object('bank_rule_suggested', $2::text) where id=$1",
-      [d.entry_id, fakeRuleId],
+      `update clara.journal_entries set flags = coalesce(flags,'{}'::jsonb)
+         || jsonb_build_object('bank_rule_suggested',
+              jsonb_build_object('rule_id', $2::uuid, 'line_id', $3::uuid))
+       where id=$1`,
+      [d.entry_id, ruleId, line.id],
     ));
     assert.equal(stamped.rowCount, 1, `x40.am: the bank_rule_suggested stamp landed on draft ${i} (no swallowed error)`);
-    await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk(`x40-am-approve-${i}`) });
+    await approveEntry(sub, { entry: d.entry_id, expectedRevision: await revisionOf(d.entry_id), opKey: opk(`x40-am-approve-${i}`) });
+    armB.push(d.entry_id);
   }
-  const proposals = await rootQuery(
-    "select count(*)::int as n from clara.coding_rules where client_id=$1 and rule_type='vendor_account' and counterparty_id=$2",
-    [client, cpStamped],
-  );
-  assert.equal(proposals.rows[0].n, 0, "x40.am: three suggestion-stamped approvals breed ZERO vendor_account autopost proposals -- the sighting carve-out excludes them from the pool");
+  assert.equal(await sightingCount(armB), 0, "x40.am ARM B: three stamped approvals that DO carry a vendor accrue ZERO rule_sightings -- with v_counterparty non-null the 0040 S5 conjunct is the only wall left, and it holds");
+  assert.equal(await vendorAccountProposals(client, cpStamped), 0, "x40.am ARM B: and therefore ZERO vendor_account autopost proposals -- a bank rule may not breed a coding rule out of three assisted approvals of its own output (WA2-R9)");
 
-  // THE POSITIVE CONTROL. An IDENTICAL trio, UNSTAMPED, on a different counterparty -- if the
-  // carve-out (or the whole sighting mechanism) were dead, this would ALSO breed zero and the
-  // cell above would be proving nothing. It must breed exactly one.
+  // ---- ARM C: THE POSITIVE CONTROL. Arm B's draft MINUS the stamp, on a different
+  // counterparty -- if the carve-out (or the whole sighting mechanism) were dead this would
+  // ALSO breed zero and both arms above would be proving nothing. It must breed exactly one.
+  const armC = [];
   for (let i = 0; i < 3; i++) {
     const d = await draftEntryV3(sub, {
-      client, resolution: await manualRes(sub, client), memo: `x40.am UNSTAMPED control draft ${i}`, postingDate: `2034-04-1${i + 1}`,
-      lines: [
-        { account_code: EXPN, debit_cents: 500, credit_cents: 0, description: "coding-control dr" },
-        { account_code: acct.coaCode, debit_cents: 0, credit_cents: 500, description: "coding-control cr" },
-      ],
+      client, resolution: await manualRes(sub, client), memo: `x40.am UNSTAMPED control draft ${i}`,
+      postingDate: await lineDateOf(stmt.lines[3 + i].id), lines: derivedLines,
       vendor: { existing_id: cpControl }, opKey: opk(`x40-am-ctrl-${i}`),
     });
     await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk(`x40-am-ctrla-${i}`) });
+    armC.push(d.entry_id);
   }
-  const controlProposals = await rootQuery(
-    "select count(*)::int as n from clara.coding_rules where client_id=$1 and rule_type='vendor_account' and counterparty_id=$2",
-    [client, cpControl],
-  );
-  assert.equal(controlProposals.rows[0].n, 1, "x40.am POSITIVE CONTROL: an identical UNSTAMPED trio breeds EXACTLY ONE vendor_account proposal -- the sighting mechanism is alive, and the carve-out above is the reason the stamped trio bred none");
+  assert.equal(await sightingCount(armC), 3, "x40.am POSITIVE CONTROL: the identical UNSTAMPED trio accrues one debit sighting per entry on the coded account -- the accrual the stamp withheld in arm B");
+  assert.equal(await vendorAccountProposals(client, cpControl), 1, "x40.am POSITIVE CONTROL: an identical UNSTAMPED trio breeds EXACTLY ONE vendor_account proposal -- the sighting mechanism is alive, and the carve-out is the reason arms A and B bred none");
+  noteLane(`x40.am carve-out arms: lawful=${armA.length} stamped=${armB.length} control=${armC.length}; signed coding rule ${ruleId}`);
 });
 
 // ===========================================================================
