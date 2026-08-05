@@ -76,7 +76,18 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
   one audited function per mutation class; validate `db` changes on a throwaway.
 - ⚠️ **Ask the owner first:** any design-vs-contract collision; deleting/
   overwriting files you didn't create; a genuinely destructive/irreversible op
-  (a DROP on shared state, a data delete, a project teardown).
+  (a DROP on shared state, a project teardown). **EXCEPTION until beta —
+  ADR-060 (the pre-beta data doctrine):** there are no real clients yet; every
+  firm/client/accounting row in the LIVE CLARA project is partner-authorized
+  test state, and the agent holds standing authority to delete, reverse, reseed
+  and re-run it in service of wave validation (record each reset). The
+  authority is **DATA-scoped only** — the product's security MECHANISMS (forced
+  RLS, the four structural invariants, maker/checker, audited-function-only
+  writes, wake allowlists) are the product under test and are NEVER weakened or
+  bypassed for testing convenience; the engineering gates (PR-only, green CI,
+  the review ladders, cross-model gates) and secrets discipline are unchanged.
+  It does NOT reach the frozen prior build or the spike's parked run (below).
+  **The doctrine EXPIRES AT BETA** — the resumption is itself a gate item.
 - 🚫 **Never:** compute a financial number in the agent/UI (the DB owns it);
   hand-write a books row when an audited fn exists; push to `main` directly;
   commit a secret; disturb the frozen prior project/repo or the spike's parked run.

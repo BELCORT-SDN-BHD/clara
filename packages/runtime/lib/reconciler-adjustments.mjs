@@ -100,8 +100,9 @@ export async function reconcileAdjustmentRuns(client, opts = {}) {
   const log = opts.log ?? (() => {});
 
   if (!(await hasAdjustmentSurface(client))) {
-    // 0042 not yet applied — a clean no-op, never a failure (the image boots dormant on
-    // pre-0042 per the design's runtime-image-first ceremony order).
+    // the adjustment surface (0045) is not yet applied — a clean no-op, never a failure
+    // (the image boots dormant on pre-0045 per the design's runtime-image-first ceremony
+    // order).
     return { adjOk: true, adjExamined: 0, adjPosted: 0, adjDrafted: 0, adjFailed: 0, adjDormant: true, adjBlockedClients: 0, adjTransientBlockedClients: 0 };
   }
 
