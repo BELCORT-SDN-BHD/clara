@@ -304,3 +304,32 @@ test("answer: a non-conflict refusal throws immediately — no re-read, no retry
   });
   assert.equal(calls.length, 1);
 });
+
+// [cross-model review B-1] The park-less arm must read the TERMINAL OBJECT, never the derived
+// `chip`. A cancelled run's engine status is deterministically "completed", and the terminal
+// chunk is the first casualty of /state's 800ms bounded replay — so a chip-based test would read
+// a DROPPED terminal as proof of delivery. These two cells are the discriminator: identical
+// bodies apart from whether a terminal was actually seen.
+test("answer: a park-less run with a COMPLETE terminal proves delivery", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending", message: "the original refusal" }, 409),
+    jsonRes({ status: "completed", pending_park: null, terminal: { outcome: "interview_complete" } }),
+  ]);
+  await answerInterview("jwt", ANSWER);
+  assert.equal(calls.length, 2, "delivery proven by the terminal — no retry");
+});
+
+test("answer: a park-less run whose terminal was NOT seen throws, even when status says completed", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending", message: "the original refusal" }, 409),
+    // The cancelled-run shape: engine status "completed", terminal chunk dropped by the bounded
+    // replay. deriveChip() would call this "complete"; the terminal object says nothing.
+    jsonRes({ status: "completed", pending_park: null, terminal: null }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
+    assert.equal(e.code, "not_pending");
+    assert.match(e.message, /the original refusal/, "the ORIGINAL refusal survives a derived-complete");
+    return true;
+  });
+  assert.equal(calls.length, 2, "no retry — the state is undiagnosable, not delivered");
+});

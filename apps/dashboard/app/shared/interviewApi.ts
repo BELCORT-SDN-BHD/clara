@@ -374,7 +374,17 @@ export async function answerInterview(token: string, a: AnswerArgs): Promise<voi
   // No open park. Only a COMPLETE-class end proves the run consumed its answers; a cancelled,
   // expired or otherwise ended run proves the opposite, and a park-less running run proves
   // nothing at all.
-  if (s.chip === "complete") return;
+  //
+  // THE OUTCOME IS READ OFF THE TERMINAL OBJECT, NEVER OFF `chip` [cross-model review B-1].
+  // `chip` is DERIVED: with no terminal in hand `deriveChip` falls back to the engine status,
+  // and a CANCELLED interview run's engine status is deterministically "completed" — while the
+  // terminal chunk is exactly what `/state`'s 800ms bounded marker replay drops first. A
+  // chip-based test therefore reads a DROPPED terminal as proof of delivery, which is the same
+  // "absence is evidence" mistake this whole function exists to stop, one branch over. Only a
+  // terminal the read actually SAW may count; everything else falls through to the refusal.
+  const outcome = s.terminal?.outcome;
+  if (outcome === "firm_created" || outcome === "interview_complete"
+      || outcome === "complete" || outcome === "completed") return;
   throw refusal;
 }
 
