@@ -127,8 +127,70 @@ jobs:
       # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
       # "backed by gitleaks in CI" claim true). Version-pinned to a released
       # gitleaks binary (not a mutable action tag); config + allowlist in
-      # .gitleaks.toml. Scans the tracked git tree (history included via
-      # fetch-depth:0), so node_modules/.output are never scanned.
+      # .gitleaks.toml (same config, both contexts below).
+      #
+      # PUSH: full history, unchanged in SCOPE — but see MERGE-DIFF COVERAGE below,
+      # which applies to this branch too. This stays the only place a leak already
+      # sitting in history is ever re-caught.
+      #
+      # PULL_REQUEST: scoped to `origin/main..HEAD` — this PR's own history plus
+      # the synthetic merge commit GitHub checks out as HEAD (refs/pull/N/merge).
+      # Unscoped, HEAD's full ancestry is the entire base-branch history too, so
+      # one bad commit already on main reds every unrelated PR opened after it
+      # (the 2026-08-05 archive-branch incident: an evidence branch's unmarked
+      # UUIDs would have red ALL CI). DOUBLE-dot, not triple. `origin/main..HEAD`
+      # is "commits reachable from HEAD, minus commits reachable from CURRENT
+      # origin/main" — a commit that exists only on the PR side can never be
+      # reachable from origin/main (main never contains not-yet-merged PR work),
+      # so double-dot can never exclude one. Triple-dot is the *symmetric*
+      # difference: it ALSO pulls in whatever is reachable from current origin/main
+      # but not from HEAD — i.e. whatever landed on main after this PR's merge-ref
+      # was last computed (the ordinary case for any PR left open a while, not an
+      # edge case) — and scans that as if it were "the PR's own", reopening the
+      # exact hole this scoping exists to close. (Correction from an earlier draft
+      # of this comment: origin/main is NOT "always an ancestor of HEAD" once main
+      # has advanced past the merge-ref's own base-parent snapshot — the double-dot
+      # conclusion holds regardless, for the reachability reason above, not because
+      # of an ancestry guarantee that doesn't actually hold.) `origin/main` is
+      # already fetched above for the append-only checks; "main is PR-only"
+      # (CLAUDE.md) makes it the only legal PR base — asserted below rather than
+      # assumed, so a stacked-PR base fails closed instead of silently scoping
+      # against the wrong branch.
+      #
+      # MERGE-DIFF COVERAGE (both branches — this gap predates this PR and is not
+      # PR-scoping-specific). `git log`'s default `-p` output shows NO diff at all
+      # for a merge commit, so content that exists ONLY in a merge's own conflict
+      # resolution — never on either parent's own line — is invisible to gitleaks
+      # in EITHER context today. Fix: `--diff-merges=first-parent`, which diffs the
+      # merge result against its first parent like an ordinary commit. Measured,
+      # not assumed: `--diff-merges=cc` (dense combined — the tighter option,
+      # showing only content that differs from ALL parents) looks appealing but
+      # DOES NOT WORK WITH GITLEAKS — its `diff --cc <path>` header and `++`-style
+      # multi-parent line prefixes never match gitleaks' `diff --git a/<path>
+      # b/<path>` parser, so a merge scanned under `cc` silently contributes ZERO
+      # commits and ZERO findings regardless of content (confirmed directly: a
+      # secret present verbatim in `git log -p --diff-merges=cc` text is still
+      # reported as "no leaks found" by gitleaks). `first-parent` uses the ordinary
+      # single-file unified-diff format gitleaks already parses, and is confirmed
+      # to catch it. The cost is real but bounded and measured: on this repo,
+      # `--diff-merges=first-parent --all` re-scans each of the 72 existing real
+      # merge commits' full first-parent diff (already-covered content, since each
+      # PR's own commits are separately in history too) — commit count 436 -> 524,
+      # scan time +25%, same 9 pre-existing findings (nothing lost, nothing new).
+      # PUSH context takes NO --log-opts today, which — also measured, not assumed
+      # — turns out to itself be load-bearing: gitleaks' no-flag default already
+      # behaves like `--all` (candidate confirms: with `--diff-merges=cc --all`,
+      # commit/finding counts exactly match today's baseline, 436/9). Passing
+      # `--log-opts` AT ALL replaces that default rather than extending it, so the
+      # push-context flag below explicitly carries `--all` alongside
+      # `--diff-merges=first-parent` — dropping `--all` here would silently shrink
+      # today's every-local/fetched-ref coverage down to HEAD's own ancestry only.
+      #
+      # $GITHUB_EVENT_NAME / $GITHUB_BASE_REF are the runner's own default env
+      # vars (GitHub sets these for every step) — read as shell data, never
+      # spliced in via `${{ }}` templating, so nothing about this step's branch
+      # naming can inject into the script (the same discipline the libpq-vars
+      # comment at the top of this file already applies to connection strings).
       - name: Gitleaks (maintained secret scan, version-pinned)
         env:
           GITLEAKS_VERSION: "8.18.4"
@@ -136,7 +198,22 @@ jobs:
           curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
           tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
           /tmp/gitleaks version
-          /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            if [ "$GITHUB_BASE_REF" != "main" ]; then
+              echo "pull_request base ref is '$GITHUB_BASE_REF', not 'main' — main is PR-only (CLAUDE.md); refusing to guess a scan scope." >&2
+              exit 1
+            fi
+            if git rev-parse --verify -q origin/main >/dev/null; then
+              echo "PR context: scoping gitleaks to this PR's own commits (origin/main..HEAD, first-parent merge diffs included)"
+              /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent origin/main..HEAD"
+            else
+              echo "PR context but origin/main does not exist yet (first introduction) — nothing to scope against; full-history scan"
+              /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+            fi
+          else
+            echo "push context ($GITHUB_REF): full-history scan, unchanged scope, first-parent merge diffs included"
+            /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "--diff-merges=first-parent --all"
+          fi
 
       - name: Build (nitro runtime + next dashboard)
         run: pnpm build
