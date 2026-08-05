@@ -26,6 +26,13 @@
 
 Ordered by dependency + risk; each wave keeps the app runnable.
 
+> **CURRENT (2026-08-06) — read this line, not the first dated block below.**
+> **44 migrations (frontier `0045`) · Fly `clara-runtime` v54 · the adjustments belt ARMED ·
+> WAVE D COMPLETE (ADR-055..059).** Waves A / A2 / A2.1 / B / C / D are all closed; **Wave E
+> (periods + statements) is next.** Everything that follows is the CHRONOLOGICAL record,
+> **oldest first** — each `STATUS (date)` block was true on its date and is superseded by the
+> ones below it. The live pin lives in `CLAUDE.md`; the open register is PROJECTLOG PART 2.
+
 > **STATUS (2026-07-23):** Wave **A** is FULLY LIVE (ADR-022/023/024). **Wave A2**
 > — the sales-invoice/AR side + MyInvois UBL local-parse + SST 3-leg + CN/DN +
 > **purchase-only** bounded auto-posting (the "standing rules" from Wave A's scope)
@@ -92,7 +99,9 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > production. Purely additive, so **no quiescence and no runtime redeploy**
 > (`docs/ops/wave-b-0021-ceremony-runbook.md`).
 >
-> **Remaining of Wave B.** Both owner rulings are IN (WB-R28/R29). **Building:**
+> **Remaining of Wave B — AS AT 2026-07-26; SUPERSEDED by the dated blocks below**
+> (Wave B closed on intent, ADR-046; Gate F CLOSED, ADR-045; the 0021 ceremony ran).
+> Both owner rulings are IN (WB-R28/R29). **Building:**
 > the **0021 ceremony**, which is the only thing between here and Gate K on Bee
 > Creative. **Operating:** **W2's remaining three claims**, which need a real wake
 > credential and a real draft — journey work, not a probe; **Gate F** on Rome Public
@@ -106,7 +115,11 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > `keyed`). And the interview's SSM validator + `framework` question both assume a
 > **company**, so a sole proprietorship cannot answer either honestly; all three
 > interview files are freeze-locked, so the fix is an **`interview_v2`** ceremony.
-> Waves **C–G** below are unchanged.
+> **(UPDATE: the interview half is RESOLVED — `interview_v2` shipped 2026-07-28, ADR-048/PR #120,
+> and the live registry is now `firmInterview_v3` / `clientOnboarding_v3`; `sole_prop` has its own
+> framework/basis default. The `opening_tb.line` producer is the only half of this paragraph still
+> open — Phase 5, review-gated.)**
+> Waves **C–G** below were unchanged **as at 2026-07-26** — C and D have both closed since.
 >
 > **STATUS (2026-07-27): WAVE B IS CLOSED ON INTENT (ADR-046).** Closed on real evidence:
 > O ××2 · K(keyed) ××2 · B-12 · W2 (1)+(2)-structural · R2 (1)+(2) · **F** (ADR-045 — firm
@@ -257,7 +270,7 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > `0042` → S5.19 pulled forward). Three Codex merge gates (the fail-open binding-gate exemption
 > → strict census grammar + a one-entry enforced allowlist; the show-B-settle-A money-UI
 > blocker). **Deployed 2026-08-05: 43 migrations (frontier `0044`) · runtime v53 untouched at the
-> ceremony, then **v54** same day (PR #186 — the interview park/hook inversion root-fixed as v3
+> ceremony, then v54 same day (PR #186 — the interview park/hook inversion root-fixed as v3
 > workflows; the adjustments belt rides dormant until `0045`) ·
 > Supavisor 32/60**; postverify 12/12 with `producer_authed` FALSE live. Sandbox acceptance ran
 > as ONE THREAD through the production verbs (intake → honest abstention → the agent refusing
@@ -266,8 +279,12 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > **all four structural invariants witnessed live**. **The real half closed on a NAMED, MEASURED
 > deviation: both real clients are in STRIKE-OFF** (books closed, no open period) — the first
 > live real template defers to the first going-concern client, the ADR-056 precedent.
-> **D-b2 CLOSED (ADR-059, 2026-08-06): `0045` MERGED (#188, `c60abb8`) AND LIVE — 44 migrations,
-> frontier `0045`; WAVE D-b IS COMPLETE ACROSS ITS FOUR SLICES.** The hold-ladder ran FIVE fix
+>
+> **STATUS (2026-08-06): D-b2 CLOSED (ADR-059) — `0045` MERGED (#188, `c60abb8`) AND LIVE —
+> 44 migrations, frontier `0045`; WAVE D-b IS COMPLETE ACROSS ITS FOUR SLICES.** *(This entry
+> supersedes the 2026-08-05 block above, which correctly recorded `0045` as HELD, the frontier
+> as `0044` and the adjustments belt as dormant — all true that day, none true now.)* The
+> hold-ladder ran FIVE fix
 > waves (W-R13..W-R15.1, all generator-built, every fix proven both ways at planted deploys) and
 > THREE two-lens rounds — the third came back **MECHANISM-BEARING: NO from both lenses** and the
 > close rule fired. The armour's terminal law is in the file: **fail-closed-on-unknown** (the
@@ -288,8 +305,9 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > and each needs an independent review pass before merge. Then Gate P · the §7-A bundle ·
 > Wave E.**
 
-**Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
-**Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
+**Wave A — the daily loop** *(**CLOSED**, ADR-022..030 — incl. A2 / A2.1)*. Coding with **intrinsic side-effects** (composed inside `approve_entry` / `_subledger_on_approve` as built; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
+**Wave B — knowledge + onboarding** *(**CLOSED on intent**, ADR-044..046)*. The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
+> **[SUPERSEDED — Wave C CLOSED 2026-08-01, ADR-051..054; Wave D closed 2026-08-06.]**
 > **STATUS (2026-07-29): THE PRE-WAVE-C PROGRAM IS COMPLETE — WAVE C IS NEXT (fresh session).**
 > The extraction slice CLOSED (ADR-047/048) → the settlement program EXECUTED (ADR-049) → **the
 > first production autopost DONE** (ADR-050: entry `f65eba11`, RM350, 38s PDF→posted unattended)
@@ -299,7 +317,7 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > contention; the nonzero-tax DB belt stays TRIGGER-BOUND (PROJECTLOG PART 2). Undecided for the
 > Wave-C grilling: structured-sales autopost as a tail slice (PRD §4.95).
 
-**Wave C — money movement.** Bank statement ingest, parity-checked matching + exclusivity, reconciliation tie-out, receipt/payment allocation (intrinsic), aging + statements, the self-reconcile learn loop (advisory, human-gated).
+**Wave C — money movement** *(**CLOSED**, ADR-051..054 — C0/C-a/C-b/C-c)*. Bank statement ingest, parity-checked matching + exclusivity, reconciliation tie-out, receipt/payment allocation (intrinsic), aging + statements, the self-reconcile learn loop (advisory, human-gated).
 **Wave D — assets + adjustments** *(**COMPLETE**, ADR-055..059; `docs/plan/wave-d-contract.md` = WD-R1..R15; **D-a FA/0041 CLOSED (ADR-056)**; **D-b shipped as a four-slice split — 0042/0043/0044 CLOSED (ADR-058), 0045 D-b2 CLOSED (ADR-059)**)*. FA register from coding (intrinsic, soft-birth per WD-R1), depreciation runs (scheduled; the close gate is a NAMED Wave-E deferral per WD-R6), disposal (full + partial per WD-R7), CA metadata (inert per WD-R12), recurring/reversing adjustments (signed templates per WD-R8), staff advances (the B-lite register per WD-R10, §7-B). *Closing stock moved → Wave E (WD-R11).*
 **Wave E — periods + statements.** Serialized year-end close with structural pre-close gates, segmented continuity reads, ordered reverse guards, carry-forward; the honest FS pack (SoFP/SoCI/SOCE/cash-flow/notes); the reporting engine (spec → DB reads → renderers → auditable artifacts). *Owns by inheritance:* periodic closing-stock at close + its completeness check (WD-R11) · the depreciation close gate over D's receipts (WD-R6) · the segment-aware FA tie-out (the REBUILD-rated `fa_control_tie_out`) · **MPERS presentation wording** (a Wave-E verification item carried over from the Wave D close).
 **Wave F — tax.** The SST engine per the practice map (periods, payment basis, dual-registrant exports, SST-02, bad-debt relief); the payroll deadline calendar; **last: the draft tax computation** (add-backs, CA, chargeable income, forms — the slice allowed to slip to v1.1).
@@ -308,8 +326,10 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 ### The `coding_kind` roadmap — where each classified document lands
 
 > **Added 2026-07-29** (Wave-C grilling). The classifier recognises **17 `document_kind` values**
-> (`0007_document_pipeline.sql:33-37`) while the books can code **3 `coding_kind` values**
-> (`0015_ar_myinvois_rules.sql:217-219`). Until now **no artifact stated where the other 14 land** —
+> (`0007_document_pipeline.sql:33-37`) while the books can code **5 `coding_kind` values**
+> (`0037_wave_c_a_subledger.sql:500-503` — widened from 0015's three by WC-R9:
+> `supplier_bill,sales_invoice,sales_credit_note,customer_receipt,supplier_payment`).
+> Until now **no artifact stated where the other 12 land** —
 > a search of PRD, this plan, ARCHITECTURE and all three project logs returned zero hits. That
 > absence is what produced the receipt-routing seam: ADR-ruled receipt auto-routing (0025) sends
 > every receipt into the paid OCR lane, and those receipts are now read and then strand, because a
@@ -329,11 +349,11 @@ decision.**
 |---|---|---|
 | `invoice` | `supplier_bill` · `sales_invoice` | **LIVE** |
 | `e_invoice_xml` | `sales_invoice` via the structured (XML-only) lane | **LIVE** |
-| `credit_note` | `sales_credit_note` LIVE; purchase side → `supplier_credit_note`, added additively **[P]** | LIVE / post-C-a |
+| `credit_note` | `sales_credit_note` LIVE; purchase side → `supplier_credit_note`, added additively **[P]** | LIVE / purchase side **UNBUILT** (not in the five-value set) |
 | `debit_note` | rides `sales_invoice` deliberately — identical subledger effect **[R]** | **LIVE** |
-| `payment_voucher` | `supplier_payment` (settlement kind) **[R]** | **C-a** |
-| `bank_statement` | **Not a coding kind.** Becomes statement lines that MATCH entries; settlement is carried by `customer_receipt`/`supplier_payment` **[R]** | **C-b** |
-| `receipt` | `cash_purchase` — zero control legs, creates no AP. **Blocked**: "paid at the counter?" is not extractable today (no payment-method field; `invoice.amount_due` is a consistency test). Interim: generic lane **[R]** | post-C-a |
+| `payment_voucher` | `supplier_payment` (settlement kind) **[R]** | **LIVE** (ADR-052 / `0037`) |
+| `bank_statement` | **Not a coding kind.** Becomes statement lines that MATCH entries; settlement is carried by `customer_receipt`/`supplier_payment` **[R]** | **LIVE** (ADR-053 / `0038`) |
+| `receipt` | `cash_purchase` — zero control legs, creates no AP. **Blocked**: "paid at the counter?" is not extractable today (no payment-method field; `invoice.amount_due` is a consistency test). Interim: generic lane **[R]** | **UNBUILT** — still the generic lane |
 | `claim_form` | **Generic lane, permanently** — a non-`payable`-class "due to employee/director" liability by account convention (WC-R10). The real want is tier-2 rule breeding, not a typed kind **[P]** | — |
 | `payroll_summary` | **Generic lane, permanently** for the journal; the statutory deadline calendar is Wave F (PRD §4.16 — no payroll engine) **[P]** | F (calendar only) |
 | `handwritten_note` · `other` | Generic lane **[P]** | — |
@@ -348,7 +368,11 @@ transcribe any document into the generic lane interactively, and (2) propose a r
 human-approved sightings for a human to sign — but **(2) exists only for supplier bills and sales
 invoices**, because sightings breed only on control-account entries. Generic-lane entries breed
 nothing, so the long tail gets no compounding autonomy. **Extending sighting breeding to
-generic-lane shapes is the highest-value autonomy work after Wave C** — not widening this table.
+generic-lane shapes is the highest-value autonomy work STILL UNBUILT after Waves C and D**
+(the timing anchor "after Wave C" has passed; the mechanism claim above was re-verified
+2026-08-06 against `0037` — settlements still never breed, and the coding-rule sighting pool
+is still bills + invoices only; `0040`'s `_bank_rule_sightings` is a separate pool over
+statement lines, so it does not discharge this) — not widening this table.
 
 **Doctrine/skills:** regenerated fresh against the real tool registry per wave (registry-generated catalog + drift lint), never copied wholesale from `belcort/` (the domain gold — SST ladder, carry-down interview, CN/DN polarity — is extracted deliberately, per the salvage manifest).
 
@@ -367,7 +391,7 @@ generic-lane shapes is the highest-value autonomy work after Wave C** — not wi
 
 ## Phase 5 — Verification plan (the hero prompt's criteria, made falsifiable)
 
-Run in local/dev with synthetic data only. Every scenario records: **what was read, changed, synced, skipped, or blocked.**
+Run against synthetic / labelled-synthetic data — local/dev, **or the live sandbox firm** under ADR-048's pulled-forward methodology and **ADR-060's pre-beta data doctrine** (every firm's data in the live project is partner-authorized test state until beta; mechanisms, process and secrets stay unrelaxed). *This line originally read "local/dev with synthetic data only"; in practice every acceptance since Wave C-b has run against the live project's sandbox firm with named real-book halves, and ADR-060 ratified that posture.* Every scenario records: **what was read, changed, synced, skipped, or blocked.**
 
 1. **End-to-end use cases** (each with evidence): document ingestion + classification; bank statement ingestion → coding → reconciliation → exception handling; SOFP/balance-sheet preparation + review; AR/AP sync, matching, aging, list updates; payment coding to AP/AR; customer/vendor ledger updates; year-end depreciation calculation + posting; fixed-asset disposal treatment; report generation with provenance, scope, audit trail.
 2. **Acceptance criteria** (Workstream G): schema/context retrieval before workflows; relevance determination; scoping by client/entity/period/permission with zero cross-client mixing; COA validation; lock-date/closed-period/approval checks before posting; outcome sync-back; read/changed/synced/skipped/blocked records; resumability under interruption.
