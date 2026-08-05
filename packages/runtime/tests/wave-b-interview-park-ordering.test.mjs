@@ -24,6 +24,20 @@
 // literals are not call expressions and cannot vote; whitespace has no representation in the tree
 // at all; and the type argument is ignored, so `createHook<Anything>(...)` still counts.
 //
+// AND IT IS FAIL-CLOSED ON UNKNOWN (the ADR-059 armour law), because "parses the source" is not
+// the same as "cannot be fooled". A cross-model review of the first AST cut MEASURED three false
+// greens, each reproduced here before it was closed:
+//   · `if (false) { createHook(...) }` ahead of the announce — an arm that never runs;
+//   · `createHook(await streamPromptStep(...))` — one statement, where the ANNOUNCE (the
+//     argument) evaluates FIRST, so written order is exactly backwards;
+//   · a correctly-ordered but UNUSED `ask` sitting beside the real, inverted `askPark`.
+// So the guard now names the only shape it will certify, and REFUSES everything else instead of
+// guessing: exactly one `ask`; no createHook anywhere else in the file; exactly one arm and one
+// announce inside it; the announce directly awaited; both calls unconditional top-level
+// statements of the ask body (no branch, loop, try or nested closure in the path); and the two
+// in DIFFERENT statements, because intra-statement order is evaluation order, not text order.
+// A refusal is a red cell with a diagnosis naming the construct — never a silent pass.
+//
 // These cells are pure: no WDK engine, no DB, no server. They lock in both halves cheaply enough
 // to run in the unit battery.
 
@@ -55,38 +69,49 @@ function isFunctionLike(n) {
   return ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n);
 }
 
-/** The called name: `f(...)` -> "f", `o.f(...)` -> "f". */
-function calleeName(call) {
-  const e = call.expression;
-  if (ts.isIdentifier(e)) return e.text;
-  if (ts.isPropertyAccessExpression(e)) return e.name.text;
-  return null;
+/** A call to the BARE identifier `name`. A property call (`o.createHook()`) is deliberately NOT
+ *  a match: it is a different function, and counting it was a way to fake an arm. */
+function isBareCallTo(n, name) {
+  return ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name;
 }
 
-/** The first CallExpression to `name` inside `node`, NOT descending into a nested function — a
- *  call written inside a closure does not execute where the closure is written. */
-function findCallIn(node, name) {
-  let found = null;
+/** Every bare call to `name` anywhere under `node` (nested functions included — the caller
+ *  decides what to do about them; this walk never silently drops a candidate). */
+function collectCalls(node, name) {
+  const out = [];
   const visit = (n) => {
-    if (found) return;
-    if (n !== node && isFunctionLike(n)) return;
-    if (ts.isCallExpression(n) && calleeName(n) === name) {
-      found = n;
-      return;
-    }
+    if (isBareCallTo(n, name)) out.push(n);
     ts.forEachChild(n, visit);
   };
   visit(node);
-  return found;
+  return out;
 }
 
-/** Which top-level statement of `block` calls `name` first: { index, node } or null. */
-function findCallStatement(block, name) {
-  for (let i = 0; i < block.statements.length; i++) {
-    const node = findCallIn(block.statements[i], name);
-    if (node) return { index: i, node };
+/** Nodes whose presence between a call and the function body means the call is CONDITIONAL or
+ *  REPEATED, so its written position no longer implies it runs, or runs once, at that point. */
+function isControlFlow(n) {
+  return (
+    ts.isIfStatement(n) || ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) ||
+    ts.isWhileStatement(n) || ts.isDoStatement(n) || ts.isSwitchStatement(n) || ts.isCaseClause(n) ||
+    ts.isTryStatement(n) || ts.isCatchClause(n) || ts.isConditionalExpression(n) ||
+    (ts.isBinaryExpression(n) &&
+      [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]
+        .includes(n.operatorToken.kind))
+  );
+}
+
+/** Locate `call` as an UNCONDITIONAL top-level statement of `body`.
+ *  Returns { index } or { refused: <why> } — never a guess. */
+function topLevelStatementOf(body, call, label) {
+  let n = call;
+  while (n.parent && n.parent !== body) {
+    n = n.parent;
+    if (isFunctionLike(n)) return { refused: `the ${label} call sits inside a NESTED FUNCTION, so its position does not say when it runs` };
+    if (isControlFlow(n)) return { refused: `the ${label} call sits inside a CONDITIONAL or LOOP (${ts.SyntaxKind[n.kind]}), so its position does not prove it runs there` };
   }
-  return null;
+  const index = body.statements.indexOf(n);
+  if (index < 0) return { refused: `the ${label} call could not be tied to a top-level statement of 'ask'` };
+  return { index };
 }
 
 /** Every `ask` function in a workflow body — `const ask = ... =>` or `function ask()`. */
@@ -157,30 +182,55 @@ export function analyzeParkOrdering(workflowsDir = WORKFLOWS) {
     const path = join(workflowsDir, file);
     const sf = parse(path, readFileSync(path, "utf8"));
 
+    const refuse = (why) => ({ cls, ident, file, ok: false, detail: `${where}: ${why}` });
+
     const asks = findAskFunctions(sf);
-    if (asks.length !== 1) {
-      return { cls, ident, file, ok: false, detail: `${where}: expected exactly one 'ask' function, found ${asks.length}` };
+    if (asks.length !== 1) return refuse(`expected exactly one 'ask' function, found ${asks.length}`);
+    const ask = asks[0];
+    const body = ask.body;
+    if (!body || !ts.isBlock(body)) return refuse("'ask' has no block body to analyse");
+
+    // NO ARM MAY LIVE OUTSIDE THE ANALYSED CLOSURE. A second park-asking closure (an `askPark`
+    // beside a decoy `ask`) would otherwise let the guard certify a function nobody calls.
+    const fileArms = collectCalls(sf, ARM);
+    for (const c of fileArms) {
+      let owner = c.parent;
+      while (owner && !isFunctionLike(owner)) owner = owner.parent;
+      if (owner !== ask) return refuse(`a ${ARM}() call lives OUTSIDE the analysed 'ask' closure — this file asks parks in more than one place, and the guard will not certify only one of them`);
     }
-    const body = asks[0].body;
-    if (!body || !ts.isBlock(body)) {
-      return { cls, ident, file, ok: false, detail: `${where}: 'ask' has no block body to analyse` };
+
+    // Exactly one of each inside `ask`. Two arms or two announces is ambiguous, and ambiguity
+    // is refused rather than guessed (the ADR-059 fail-closed-on-unknown law).
+    const arms = collectCalls(body, ARM);
+    const announces = collectCalls(body, ANNOUNCE);
+    if (arms.length === 0) return refuse(`'ask' never calls ${ARM}() — it arms no hook at all`);
+    if (announces.length === 0) return refuse(`'ask' never calls ${ANNOUNCE}() — it announces no park at all`);
+    if (arms.length > 1) return refuse(`'ask' calls ${ARM}() ${arms.length} times — ambiguous, refused`);
+    if (announces.length > 1) return refuse(`'ask' calls ${ANNOUNCE}() ${announces.length} times — ambiguous, refused`);
+
+    // THE ANNOUNCE MUST BE AWAITED. The await IS the suspension the arm has to beat; an
+    // un-awaited announce is a different (and broken) shape, not a passing one.
+    if (!announces[0].parent || !ts.isAwaitExpression(announces[0].parent)) {
+      return refuse(`the ${ANNOUNCE}() call is not directly awaited — the suspension it is supposed to be cannot be proven`);
     }
 
-    const arm = findCallStatement(body, ARM);
-    const announce = findCallStatement(body, ANNOUNCE);
-    if (!arm) return { cls, ident, file, ok: false, detail: `${where}: 'ask' never calls ${ARM}() — it arms no hook at all` };
-    if (!announce) return { cls, ident, file, ok: false, detail: `${where}: 'ask' never calls ${ANNOUNCE}() — it announces no park at all` };
+    const arm = topLevelStatementOf(body, arms[0], ARM);
+    if (arm.refused) return refuse(arm.refused);
+    const announce = topLevelStatementOf(body, announces[0], ANNOUNCE);
+    if (announce.refused) return refuse(announce.refused);
 
-    // Same statement (e.g. the arm nested in the announce's own arguments): fall back to tree
-    // position, which is evaluation order within a single expression.
-    const armFirst = arm.index === announce.index
-      ? arm.node.getStart(sf) < announce.node.getStart(sf)
-      : arm.index < announce.index;
+    // SAME STATEMENT => REFUSE. `createHook(await streamPromptStep(...))` reads arm-then-announce
+    // left to right but EVALUATES the argument first, so textual position is exactly backwards
+    // there. The guard does not adjudicate intra-statement order; it declines to certify it.
+    if (arm.index === announce.index) {
+      return refuse(`${ARM}() and ${ANNOUNCE}() share statement ${arm.index} — written order is not evaluation order inside one expression, so this shape is refused rather than certified`);
+    }
 
+    const armFirst = arm.index < announce.index;
     return {
       cls, ident, file, ok: armFirst,
       detail: armFirst
-        ? `${where}: arms at statement ${arm.index}, announces at statement ${announce.index}`
+        ? `${where}: arms at statement ${arm.index}, announces (awaited) at statement ${announce.index}`
         : `${where} ANNOUNCES BEFORE IT ARMS (announce at statement ${announce.index}, arm at statement ${arm.index}).`,
     };
   });

@@ -125,10 +125,13 @@ test("commitOpKeyFromPrompt returns null when the typed field is absent", () => 
 
 // --- error helper --------------------------------------------------------------
 
-test("isNotPending detects the 409/not_pending branch", () => {
+test("isNotPending matches the not_pending CODE exactly — not any bare 409", () => {
   assert.equal(isNotPending(new RuntimeApiError(409, "not_pending", "gone")), true);
   assert.equal(isNotPending(new RuntimeApiError(403, "forbidden", "no")), false);
   assert.equal(isNotPending(new Error("plain")), false);
+  // A DIFFERENT 409 is a genuine conflict and must never reach the answer re-POST path.
+  assert.equal(isNotPending(new RuntimeApiError(409, "conflict", "plan is not open")), false);
+  assert.equal(isNotPending(new RuntimeApiError(409, "http_409", "bare")), false);
 });
 
 // --- answer: the LOSSY 409, disambiguated against /state then retried ONCE (GH #152) --------
@@ -193,22 +196,75 @@ test("answer: a lossy 409 with the SAME park still open re-reads once and RETRIE
   assert.deepEqual(calls[2]!.body, calls[0]!.body, "the retry re-sends the identical payload — same park, same value");
 });
 
-test("answer: a lossy 409 whose /state shows the park ADVANCED is the benign half — no retry", async (t) => {
+test("answer: a lossy 409 whose /state shows a HIGHER park is the benign half — no retry", async (t) => {
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending" }, 409),
-    jsonRes(parkedAt(4)), // the park moved on ⇒ our answer DID land
+    jsonRes(parkedAt(4)), // the park moved PAST ours ⇒ our answer DID land
   ]);
   await answerInterview("jwt", ANSWER);
   assert.equal(calls.length, 2, "already-delivered costs the re-read and nothing more");
 });
 
-test("answer: a lossy 409 on a run that went TERMINAL is also already-delivered", async (t) => {
+test("answer: a lossy 409 on a COMPLETE-class terminal is already-delivered", async (t) => {
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending" }, 409),
     jsonRes({ run_id: "r1", scope: "client", status: "complete", items: [], terminal: { outcome: "interview_complete" } }),
   ]);
   await answerInterview("jwt", ANSWER);
   assert.equal(calls.length, 2);
+});
+
+// --- FAIL-CLOSED ON UNKNOWN: only positive evidence counts as delivery ----------------------
+// Each of these once read as "delivered" under the first cut of this recovery, which would have
+// walked the dropped-answer bug back in through the code meant to close it.
+
+test("answer: a CANCELLED run is NOT delivery — the refusal is surfaced", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending", message: "no open question" }, 409),
+    jsonRes({ run_id: "r1", scope: "client", status: "cancelled", items: [], terminal: { outcome: "cancelled" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
+    assert.equal(e.code, "not_pending");
+    return true;
+  });
+  assert.equal(calls.length, 2, "a dead run is not retried, and never reported as delivered");
+});
+
+test("answer: a park-less but still RUNNING state proves nothing — the refusal is surfaced", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ run_id: "r1", scope: "client", status: "running", items: [], pending_park: null }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+test("answer: an unparseable /state body ({}) is never read as delivery", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    new Response("not json at all", { status: 200, headers: { "content-type": "application/json" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2, "a {} body degrades to unknown, not to success");
+});
+
+test("answer: a LOWER park index (a different/restarted run) is surfaced, never retried", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes(parkedAt(1)),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+test("answer: a 409 with a DIFFERENT code is a genuine conflict — thrown at once, no re-read", async (t) => {
+  const calls = scriptFetch(t, [jsonRes({ error: "conflict", message: "onboarding plan is not open" }, 409)]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
+    assert.equal(e.status, 409);
+    assert.equal(e.code, "conflict");
+    return true;
+  });
+  assert.equal(calls.length, 1, "only the documented lossy status earns a re-read");
 });
 
 test("answer: when the RETRY also fails the refusal is SURFACED, never swallowed", async (t) => {
