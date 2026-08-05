@@ -49,7 +49,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import ts from "typescript";
@@ -115,8 +116,18 @@ function isControlFlow(n) {
   );
 }
 
-/** Locate `call` as an UNCONDITIONAL top-level statement of `body`.
- *  Returns { index } or { refused: <why> } — never a guess. */
+/** Locate `call` as an UNCONDITIONAL top-level statement of `body`, and insist the statement is
+ *  the CANONICAL shape for its role. Returns { index } or { refused: <why> } — never a guess.
+ *
+ *  The canonical-shape rule is what finally ended the false-green hunt. Successive rounds each
+ *  found another construct whose written position is not its execution order — a dead `if
+ *  (false)`, an argument evaluated before its callee, a constructor, a class instance FIELD, a
+ *  skipped destructuring default, a statement after `break` in a labelled block, `maybe?.(
+ *  createHook())` whose argument is skipped when the callee is absent. Enumerating them is a
+ *  losing game, so the guard stopped enumerating: the arm must be exactly a top-level
+ *  `const <id> = createHook(...)` and the announce exactly a top-level `await
+ *  streamPromptStep(...)`. That is the shape every registered body actually uses; every other
+ *  shape — however innocent — is REFUSED and must be re-certified by a human. */
 function topLevelStatementOf(body, call, label) {
   let n = call;
   while (n.parent && n.parent !== body) {
@@ -126,6 +137,20 @@ function topLevelStatementOf(body, call, label) {
   }
   const index = body.statements.indexOf(n);
   if (index < 0) return { refused: `the ${label} call could not be tied to a top-level statement of 'ask'` };
+
+  if (label === ARM) {
+    // exactly: const <identifier> = createHook(...);
+    const ok =
+      ts.isVariableStatement(n) &&
+      n.declarationList.declarations.length === 1 &&
+      ts.isIdentifier(n.declarationList.declarations[0].name) &&
+      n.declarationList.declarations[0].initializer === call;
+    if (!ok) return { refused: `the ${ARM} call is not the canonical \`const <name> = ${ARM}(...)\` statement (found ${ts.SyntaxKind[n.kind]}), so the guard will not certify when it runs` };
+  } else {
+    // exactly: await streamPromptStep(...);
+    const ok = ts.isExpressionStatement(n) && ts.isAwaitExpression(n.expression) && n.expression.expression === call;
+    if (!ok) return { refused: `the ${ANNOUNCE} call is not the canonical \`await ${ANNOUNCE}(...)\` statement (found ${ts.SyntaxKind[n.kind]}), so the guard will not certify when it runs` };
+  }
   return { index };
 }
 
@@ -269,6 +294,39 @@ test("GH #152: every REGISTERED interview body arms its hook BEFORE it announces
         `"already delivered", so a real answer is silently dropped. Put createHook(...) BEFORE ` +
         `await streamPromptStep(...), as chatTurn.v8 does.`,
     );
+  }
+});
+
+test("GH #152: the guard REFUSES every shape whose written position is not its execution order", () => {
+  // The false-green museum. Every entry was MEASURED green against an earlier cut of this guard
+  // across three review rounds; each is an inversion or a non-arm, and each must now be refused.
+  // They live here so the armour is checked by CI rather than by memory.
+  const src = readFileSync(join(WORKFLOWS, "clientOnboarding.v3.ts"), "utf8");
+  const armRe = /^.*const hook = createHook<Resolution>\(.*$/m;
+  const annRe = /^.*await streamPromptStep\(.*$/m;
+  const armExpr = src.match(armRe)[0].trim().replace(/^const hook = /, "").replace(/;$/, "");
+  const ann = src.match(annRe)[0];
+
+  const shapes = [
+    ["the arm inside `if (false)`", (s) => s.replace(armRe, `    if (false) { const hook = ${armExpr}; }\n    const hook = null as never;`)],
+    ["the announce as the arm's own ARGUMENT (it evaluates first)", (s) => s.replace(annRe, "").replace(armRe, `    const hook = createHook<Resolution>(({ x: ${ann.trim().replace(/;$/, "")} }) as never);`)],
+    ["a constructor arming, instantiated after the announce", (s) => s.replace(armRe, `    class A { h: unknown; constructor() { this.h = ${armExpr}; } }`).replace(annRe, `${ann}\n    const hook = new A().h as never;`)],
+    ["an instance FIELD arming, instantiated after the announce", (s) => s.replace(armRe, `    class A { h = ${armExpr}; }`).replace(annRe, `${ann}\n    const hook = new A().h as never;`)],
+    ["a skipped destructuring default", (s) => s.replace(armRe, `    const { z: hook = ${armExpr} } = { z: 1 as never };`)],
+    ["an unreachable arm after `break` in a labelled block", (s) => s.replace(armRe, `    let hook: never = null as never;\n    lbl: { break lbl; hook = ${armExpr}; }`)],
+    ["`maybe?.(createHook())`, whose argument is skipped", (s) => s.replace(armRe, `    const maybe: ((x: unknown) => never) | undefined = undefined;\n    const hook = maybe?.(${armExpr}) as never;`)],
+  ];
+
+  for (const [label, mutate] of shapes) {
+    const dir = mkdtempSync(join(tmpdir(), "park-order-selftest-"));
+    try {
+      cpSync(WORKFLOWS, dir, { recursive: true });
+      writeFileSync(join(dir, "clientOnboarding.v3.ts"), mutate(src));
+      const finding = analyzeParkOrdering(dir).find((f) => f.file === "clientOnboarding.v3.ts");
+      assert.equal(finding.ok, false, `the guard must REFUSE ${label}, but it certified it: ${finding.detail}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 });
 

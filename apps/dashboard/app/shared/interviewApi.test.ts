@@ -144,12 +144,18 @@ function jsonRes(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-/** /state v2 showing the run parked at `parkIndex` (the pinned shape). */
+/** /state v2 showing OUR run parked at `parkIndex` (the pinned shape). The identity fields are
+ *  load-bearing: the delivery decoder requires run_id, scope and plan.id to match the answer. */
 function parkedAt(parkIndex: number) {
   return {
-    run_id: "r1", scope: "client", status: "running", items: [],
+    run_id: "r1", scope: "client", status: "running", items: [], plan: { id: "p1" },
     pending_park: { parkIndex, seg: "tin", phase: "q", question: "TIN?" },
   };
+}
+
+/** /state v2 showing OUR run ended with `outcome`. */
+function endedWith(outcome: string, status = "complete") {
+  return { run_id: "r1", scope: "client", status, items: [], plan: { id: "p1" }, terminal: { outcome } };
 }
 
 const ANSWER: AnswerArgs = { runId: "r1", scope: "client", parkIndex: 3, value: "C1234", planId: "p1" };
@@ -208,7 +214,7 @@ test("answer: a lossy 409 whose /state shows a HIGHER park is the benign half �
 test("answer: a lossy 409 on a COMPLETE-class terminal is already-delivered", async (t) => {
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending" }, 409),
-    jsonRes({ run_id: "r1", scope: "client", status: "complete", items: [], terminal: { outcome: "interview_complete" } }),
+    jsonRes(endedWith("interview_complete")),
   ]);
   await answerInterview("jwt", ANSWER);
   assert.equal(calls.length, 2);
@@ -221,7 +227,7 @@ test("answer: a lossy 409 on a COMPLETE-class terminal is already-delivered", as
 test("answer: a CANCELLED run is NOT delivery — the refusal is surfaced", async (t) => {
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending", message: "no open question" }, 409),
-    jsonRes({ run_id: "r1", scope: "client", status: "cancelled", items: [], terminal: { outcome: "cancelled" } }),
+    jsonRes(endedWith("cancelled", "cancelled")),
   ]);
   await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
     assert.equal(e.code, "not_pending");
@@ -238,7 +244,7 @@ test("answer: a CANCELLED run whose engine status reads 'completed' is NOT deliv
   // terminal MARKER instead, and here there is none.
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending" }, 409),
-    jsonRes({ run_id: "r1", scope: "client", status: "completed", items: [], pending_park: null }),
+    jsonRes({ run_id: "r1", scope: "client", status: "completed", items: [], plan: { id: "p1" }, pending_park: null }),
   ]);
   assert.equal(deriveChip(null, null, "completed"), "complete", "the chip really does say complete here");
   await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
@@ -248,7 +254,7 @@ test("answer: a CANCELLED run whose engine status reads 'completed' is NOT deliv
 test("answer: a park-less but still RUNNING state proves nothing — the refusal is surfaced", async (t) => {
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending" }, 409),
-    jsonRes({ run_id: "r1", scope: "client", status: "running", items: [], pending_park: null }),
+    jsonRes({ run_id: "r1", scope: "client", status: "running", items: [], plan: { id: "p1" }, pending_park: null }),
   ]);
   await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
   assert.equal(calls.length, 2);
@@ -301,6 +307,47 @@ test("answer: a completion terminal with NO identity at all is not evidence", as
   ]);
   await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
   assert.equal(calls.length, 2);
+});
+
+test("answer: a plan-id mismatch is not evidence, even with a higher park", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ ...parkedAt(9), plan: { id: "p2" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+// --- CONTRADICTORY state: a present terminal outranks a stale park -------------------------
+// The decoder reads the RAW body, not the tolerant UI normalizer, precisely so these cannot be
+// smoothed away: the normalizer coerces an absent scope to "client" and DROPS a malformed
+// terminal, both of which would turn a refusal into a false delivery.
+
+test("answer: a higher park does NOT outvote a cancelled terminal", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ ...parkedAt(9), terminal: { outcome: "cancelled" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+test("answer: a MALFORMED terminal outcome is refused, not discarded", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ ...parkedAt(9), terminal: { outcome: 7 } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2, "the UI normalizer would have dropped this terminal and read the park as delivery");
+});
+
+test("answer: our OWN park plus a completion terminal resolves — the terminal is authoritative", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ ...parkedAt(3), terminal: { outcome: "interview_complete" } }),
+  ]);
+  await answerInterview("jwt", ANSWER);
+  assert.equal(calls.length, 2, "no pointless retry against a run that has already ended");
 });
 
 // --- the LAGGING-MARKER case: a retry that 409s is not yet proof of failure -----------------

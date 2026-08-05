@@ -337,47 +337,70 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
  *  through the recovery meant to close it.
  *
  *  KNOWN RESIDUAL, named rather than papered over: "a higher park ⇒ my answer landed" is an
- *  inference, not a receipt. A SECOND client on the same run (two tabs of the same principal —
- *  a different principal is already refused by F1) could win the park with a different value and
- *  advance it, and this lane would call that delivery. Closing it needs a server-authored
- *  per-(run, park) delivery receipt the client can match its own value against; that is a runtime
- *  contract change, not a client one. Until then the same-owner two-tab race stands.
+ *  INFERENCE, NOT A RECEIPT. A concurrent submitter can win the single hook and advance the park,
+ *  and this lane would read that advance as its own delivery. The exposure is wider than one
+ *  person's two tabs: a CLIENT-scope answer authorises on the plan's firm plus a bookkeeper+ floor
+ *  (interviewRoutes.ts — "a bookkeeper or above must answer"), so ANY bookkeeper+ of the firm can
+ *  be the winner; only the FIRM scope is bound to a single pre-firm principal. Closing it needs a
+ *  server-authored per-(run, park, submission) receipt the client can match its own submission id
+ *  against — a RUNTIME CONTRACT change, not a client one, and out of scope here. What this lane
+ *  does do is shrink the fail-open set from "every 409" (the shipped behaviour) to exactly this
+ *  concurrent-winner case. The residual is a tracked follow-up, not a solved problem.
  *
  *  Only a retry that ALSO fails is surfaced. A caller that sees this throw therefore knows the
  *  answer is not confirmed delivered — `deliverValue`'s F-M10 receipt retention relies on it. */
 type Delivery = "delivered" | "still_open" | "unknown";
 
-/** Read ONE /state and classify it as evidence about OUR answer.
+/** Classify a RAW /state body as evidence about OUR answer.
  *
- *  IDENTITY-BOUND FIRST: a reply describing a different run or a different scope is not weak
- *  evidence, it is NO evidence — an advanced park in run B says nothing about our POST to run A.
+ *  IT READS THE RAW BODY ON PURPOSE, not `normalizeInterviewState`. That normalizer is a
+ *  deliberately TOLERANT UI mapper — it coerces an absent or unrecognised `scope` to "client",
+ *  drops a malformed terminal, and degrades junk to empty fields, all of which are right for
+ *  rendering and WRONG for a safety decision. Deciding delivery from a lossy projection is the
+ *  same mistake as deciding it from the derived chip, one layer down.
+ *
+ *  IDENTITY FIRST, by literal equality and with no defaulting: a reply about a different run, a
+ *  different scope, or a different plan is not weak evidence, it is NO evidence.
+ *
  *  Then, and only from a reply that is about us:
- *    · a park at a HIGHER index        ⇒ the park moved past ours          ⇒ delivered
- *    · an EXPLICIT completion terminal ⇒ the run reached its intended end  ⇒ delivered
- *    · our OWN park still open         ⇒ nothing landed                    ⇒ still_open
- *    · anything else                   ⇒ unknown (and unknown never means delivered)
- *
- *  The terminal test reads the terminal MARKER, never the derived `chip`: A DERIVED STATE IS NOT
- *  EVIDENCE. `deriveChip` falls back to the ENGINE status when no marker is present, and a
- *  domain-cancelled interview returns NORMALLY from its terminal() branch, so its engine run row
- *  settles 'completed' (interview-e2e.mjs asserts exactly that). A cancelled run whose marker had
- *  not yet streamed would chip as "complete" and be read as delivery — the whole bug again. */
-function classifyDelivery(s: InterviewState, a: AnswerArgs): Delivery {
-  if (s.runId !== a.runId || s.scope !== a.scope) return "unknown";
-  if (s.pendingPark) {
-    if (s.pendingPark.parkIndex > a.parkIndex) return "delivered";
-    if (s.pendingPark.parkIndex === a.parkIndex) return "still_open";
-    return "unknown"; // a LOWER index — a different or restarted run, not our evidence
+ *    · a terminal PRESENT AT ALL is AUTHORITATIVE — complete-class ⇒ delivered, and anything
+ *      else (cancelled, expired, ended, or a malformed outcome) ⇒ unknown. It is checked BEFORE
+ *      the park so a stale park cannot outvote a run that has actually ended.
+ *    · a park at a HIGHER index ⇒ the park moved past ours ⇒ delivered
+ *    · our OWN park still open  ⇒ nothing landed           ⇒ still_open
+ *    · anything else            ⇒ unknown, and unknown NEVER means delivered. */
+function classifyDeliveryBody(r: Record<string, unknown>, a: AnswerArgs): Delivery {
+  if (r.run_id !== a.runId) return "unknown";
+  if (r.scope !== a.scope) return "unknown"; // absent/unknown scope is NOT silently "client"
+  if (a.planId != null) {
+    const plan = asRecord(r.plan);
+    if (!plan || plan.id !== a.planId) return "unknown";
   }
-  if (s.terminal && COMPLETE_OUTCOMES.has(s.terminal.outcome)) return "delivered";
-  return "unknown"; // park-less and not completed: running, cancelled, expired, `{}` — all unknown
+
+  if (r.terminal !== undefined && r.terminal !== null) {
+    const outcome = asRecord(r.terminal)?.outcome;
+    return typeof outcome === "string" && COMPLETE_OUTCOMES.has(outcome) ? "delivered" : "unknown";
+  }
+
+  const idx = asRecord(r.pending_park)?.parkIndex;
+  if (typeof idx !== "number" || !Number.isInteger(idx)) return "unknown";
+  if (idx > a.parkIndex) return "delivered";
+  if (idx === a.parkIndex) return "still_open";
+  return "unknown"; // a LOWER index — a different or restarted run, not our evidence
 }
 
-/** One classified /state read. A read that THROWS is "unknown" — never evidence either way. */
+/** One classified /state read. Anything that is not a clean 2xx JSON object — a non-2xx, an
+ *  unparseable body, a thrown fetch — is "unknown", never evidence either way. */
 async function readDelivery(token: string, a: AnswerArgs): Promise<Delivery> {
   try {
-    const s = await getInterviewState(token, { runId: a.runId, scope: a.scope, planId: a.planId });
-    return classifyDelivery(s, a);
+    const params = new URLSearchParams();
+    params.set("scope", a.scope);
+    params.set("runId", a.runId);
+    if (a.planId) params.set("planId", a.planId);
+    const res = await runtimeFetch(`/api/interview/state?${params.toString()}`, token);
+    if (!res.ok) return "unknown";
+    const raw = asRecord(await res.json());
+    return raw ? classifyDeliveryBody(raw, a) : "unknown";
   } catch {
     return "unknown";
   }
