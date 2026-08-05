@@ -172,12 +172,17 @@ export function commitOpKeyFromPrompt(park: PendingPark | null | undefined): str
   return null;
 }
 
+/** Terminal outcomes meaning the run reached its INTENDED end (not cancelled, expired or
+ *  otherwise stopped). Shared by `deriveChip` and the answer verb's delivery test so the two
+ *  can never drift apart. */
+const COMPLETE_OUTCOMES = new Set(["firm_created", "interview_complete", "complete", "completed"]);
+
 /** Derive the run chip (§3.1). Terminal wins; then a pending park (awaiting_you, incl.
  *  the parked framing); then a running engine status (working); else unknown. */
 export function deriveChip(pendingPark: PendingPark | null, terminal: InterviewTerminal | null, status: string | null): InterviewChip {
   if (terminal) {
     const o = terminal.outcome;
-    if (o === "firm_created" || o === "interview_complete" || o === "complete" || o === "completed") return "complete";
+    if (COMPLETE_OUTCOMES.has(o)) return "complete";
     if (o === "cancelled" || o === "canceled") return "cancelled";
     if (o === "expired") return "expired";
     return "ended"; // plan_gone / superseded_by_existing_run / anything else terminal
@@ -328,7 +333,8 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
  *  UNKNOWN (the ADR-059 armour law): only POSITIVE evidence counts as delivery, everything else
  *  surfaces the original refusal. Re-read ONCE and classify:
  *    · a park at a HIGHER index      ⇒ the park moved past ours  ⇒ delivered, return.
- *    · a COMPLETE-class terminal     ⇒ the run reached its end   ⇒ delivered, return.
+ *    · an EXPLICIT completion terminal ⇒ the run reached its end ⇒ delivered, return.
+ *      (the terminal MARKER, never the derived chip — see the note at that branch)
  *    · the SAME park still open      ⇒ nothing landed            ⇒ re-POST ONCE.
  *    · cancelled / expired / ended   ⇒ our answer never landed   ⇒ surface the refusal.
  *    · no park and not terminal, a LOWER park index, an unparseable body, a failed read
@@ -371,10 +377,15 @@ export async function answerInterview(token: string, a: AnswerArgs): Promise<voi
     throw errorFrom(retry.status, await bodyOf(retry));
   }
 
-  // No open park. Only a COMPLETE-class end proves the run consumed its answers; a cancelled,
-  // expired or otherwise ended run proves the opposite, and a park-less running run proves
-  // nothing at all.
-  if (s.chip === "complete") return;
+  // No open park. Only an EXPLICIT completion TERMINAL proves the run consumed its answers.
+  //
+  // Read the terminal outcome, NEVER the derived `chip`: A DERIVED STATE IS NOT EVIDENCE.
+  // `deriveChip` falls back to the ENGINE status when no terminal marker is present, and a
+  // domain-cancelled interview returns NORMALLY from its terminal() branch, so the engine's run
+  // row is deterministically 'completed' (interview-e2e.mjs asserts exactly that). A cancelled
+  // run whose terminal marker has not been streamed yet would therefore chip as "complete" —
+  // and this arm would report a dropped answer as delivered, which is the whole bug again.
+  if (s.terminal && COMPLETE_OUTCOMES.has(s.terminal.outcome)) return;
   throw refusal;
 }
 

@@ -230,6 +230,21 @@ test("answer: a CANCELLED run is NOT delivery — the refusal is surfaced", asyn
   assert.equal(calls.length, 2, "a dead run is not retried, and never reported as delivered");
 });
 
+test("answer: a CANCELLED run whose engine status reads 'completed' is NOT delivery", async (t) => {
+  // A DERIVED STATE IS NOT EVIDENCE. A domain cancel returns NORMALLY from the workflow, so the
+  // engine run row settles 'completed' (interview-e2e.mjs asserts this). With the terminal
+  // marker not yet streamed, deriveChip's STATUS fallback calls that "complete" — so a delivery
+  // test written against the chip would report a dropped answer as delivered. It reads the
+  // terminal MARKER instead, and here there is none.
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ run_id: "r1", scope: "client", status: "completed", items: [], pending_park: null }),
+  ]);
+  assert.equal(deriveChip(null, null, "completed"), "complete", "the chip really does say complete here");
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2, "a status-derived 'complete' must never count as delivery");
+});
+
 test("answer: a park-less but still RUNNING state proves nothing — the refusal is surfaced", async (t) => {
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending" }, 409),
