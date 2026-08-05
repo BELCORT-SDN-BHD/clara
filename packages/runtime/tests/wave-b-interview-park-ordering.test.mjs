@@ -37,11 +37,18 @@
 // functions and arrows but not constructors. The boundary test is now the compiler's own
 // `ts.isFunctionLike`, which is the lesson generalised: do not re-implement the language.
 //
+// A fourth round then made the deepest point: SPELLING IS NOT IDENTITY. Matching a callee by
+// name proves nothing, because a local `function createHook() {}` shadowing the real import
+// satisfies "arms before it announces" while the engine's hook is never created at all. So both
+// names are first proven to BE their imports — a single named import from the expected module,
+// and no other binding of that name anywhere in the file.
+//
 // So the guard now names the only shape it will certify, and REFUSES everything else instead of
-// guessing: exactly one `ask`; no createHook anywhere else in the file; exactly one arm and one
-// announce inside it; the announce directly awaited; both calls unconditional top-level
-// statements of the ask body (no branch, loop, try or nested closure in the path); and the two
-// in DIFFERENT statements, because intra-statement order is evaluation order, not text order.
+// guessing: both names proven to be the real imports; exactly one `ask`; no createHook anywhere
+// else in the file; exactly one arm and one announce inside it; the announce directly awaited;
+// both calls unconditional top-level statements of the ask body in the canonical `const x =
+// createHook(...)` / `await streamPromptStep(...)` forms; and the two in DIFFERENT statements,
+// because intra-statement order is evaluation order, not text order.
 // A refusal is a red cell with a diagnosis naming the construct — never a silent pass.
 //
 // These cells are pure: no WDK engine, no DB, no server. They lock in both halves cheaply enough
@@ -60,6 +67,14 @@ const WORKFLOWS = join(HERE, "..", "workflows");
 
 const ARM = "createHook";
 const ANNOUNCE = "streamPromptStep";
+
+/** WHERE each name must come from. A guard that matches a callee by SPELLING proves nothing: a
+ *  local `function createHook() {}` shadowing the real import satisfies "arms before it
+ *  announces" while the engine's hook is never created. So each name must be proven to BE the
+ *  import — bound by a named import from the expected module, with no other binding of that name
+ *  anywhere in the file. */
+const ARM_MODULE = /^workflow$/;
+const ANNOUNCE_MODULE = /^\.\/interview\.v\d+\.steps\.js$/;
 
 function parse(file, src) {
   return ts.createSourceFile(file, src, ts.ScriptTarget.Latest, /* setParentNodes */ true, ts.ScriptKind.TS);
@@ -154,6 +169,33 @@ function topLevelStatementOf(body, call, label) {
   return { index };
 }
 
+/** Prove `name` in this file IS the named import from a module matching `moduleRe`, and that
+ *  NOTHING ELSE in the file binds that name. Returns null when proven, else the refusal reason. */
+function bindingRefusal(sf, name, moduleRe) {
+  let imported = 0;
+  let other = 0;
+  const visit = (n) => {
+    if (ts.isImportSpecifier(n) && n.name.text === name) {
+      const spec = n.parent.parent.parent.moduleSpecifier;
+      if (ts.isStringLiteral(spec) && moduleRe.test(spec.text)) imported++;
+      else other++;
+    } else if (
+      (ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) && n.name?.text === name
+    ) other++;
+    else if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name) other++;
+    else if (ts.isParameter(n) && ts.isIdentifier(n.name) && n.name.text === name) other++;
+    else if (ts.isImportClause(n) && n.name?.text === name) other++;
+    else if (ts.isNamespaceImport(n) && n.name.text === name) other++;
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+
+  if (imported === 0) return `'${name}' is not imported from a module matching ${moduleRe} — the call cannot be proven to be the real one`;
+  if (imported > 1) return `'${name}' is imported ${imported} times — ambiguous, refused`;
+  if (other > 0) return `'${name}' is ALSO bound locally (${other} other binding(s)) — a shadowing declaration means the call site may not be the import at all`;
+  return null;
+}
+
 /** Every `ask` function in a workflow body — `const ask = ... =>` or `function ask()`. */
 function findAskFunctions(sf) {
   const hits = [];
@@ -223,6 +265,12 @@ export function analyzeParkOrdering(workflowsDir = WORKFLOWS) {
     const sf = parse(path, readFileSync(path, "utf8"));
 
     const refuse = (why) => ({ cls, ident, file, ok: false, detail: `${where}: ${why}` });
+
+    // SPELLING IS NOT IDENTITY. Prove both names are the real imports before reading any order.
+    const armBinding = bindingRefusal(sf, ARM, ARM_MODULE);
+    if (armBinding) return refuse(armBinding);
+    const announceBinding = bindingRefusal(sf, ANNOUNCE, ANNOUNCE_MODULE);
+    if (announceBinding) return refuse(announceBinding);
 
     const asks = findAskFunctions(sf);
     if (asks.length !== 1) return refuse(`expected exactly one 'ask' function, found ${asks.length}`);
@@ -315,6 +363,13 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
     ["a skipped destructuring default", (s) => s.replace(armRe, `    const { z: hook = ${armExpr} } = { z: 1 as never };`)],
     ["an unreachable arm after `break` in a labelled block", (s) => s.replace(armRe, `    let hook: never = null as never;\n    lbl: { break lbl; hook = ${armExpr}; }`)],
     ["`maybe?.(createHook())`, whose argument is skipped", (s) => s.replace(armRe, `    const maybe: ((x: unknown) => never) | undefined = undefined;\n    const hook = maybe?.(${armExpr}) as never;`)],
+    // SPELLING IS NOT IDENTITY: a local decoy named like the import satisfies the order test
+    // while the REAL hook is never created.
+    ["a local `createHook` shadowing the real import", (s) =>
+      s.replace('import { createHook } from "workflow";', 'import { createHook as realCreateHook } from "workflow";\nfunction createHook<T>(_a: unknown): T { return null as T; }\nvoid realCreateHook;')],
+    ["a local `streamPromptStep` shadowing the real import", (s) =>
+      s.replace("import { mintOpKeyStep, runIdStep, streamPromptStep,", "import { mintOpKeyStep, runIdStep, streamPromptStep as realStreamPromptStep,")
+        .replace(armRe, `    async function streamPromptStep(_a: unknown): Promise<void> { void realStreamPromptStep; }\n${src.match(armRe)[0]}`)],
   ];
 
   for (const [label, mutate] of shapes) {
