@@ -1,9 +1,9 @@
 // The recurring/reversing-adjustment occurrence daily sweep (Wave D-b §2.3/§2.7 —
-// migration 0042). Split out of reconciler.mjs like reconciler-sst.mjs / reconciler-lint.mjs
+// migration 0045). Split out of reconciler.mjs like reconciler-sst.mjs / reconciler-lint.mjs
 // / reconciler-fa.mjs (module-size budget), and — like the D-a FA belt — the sweep must
-// FEATURE-DETECT its own DB surface: this runtime image ships before 0042 lands (the same
+// FEATURE-DETECT its own DB surface: this runtime image ships before 0045 lands (the same
 // runtime-image-first, DB-second ceremony order design §2.7 inherits from D-a §3.4), so it
-// must boot dormant on pre-0042 and light on the very next cycle after 0042 applies, with
+// must boot dormant on pre-0045 and light on the very next cycle after 0045 applies, with
 // no restart.
 //
 // FEATURE-DETECT, EXACT SIGNATURES, PER CYCLE (never cached at startup — the
@@ -11,7 +11,7 @@
 // `clara.adjustment_run_due(uuid)` and `clara.run_adjustment_occurrence(uuid,uuid,date,date,
 // text)` are plain catalog reads (no EXECUTE needed), so the guard never fails for a
 // privilege reason and distinguishes THESE exact signatures from any future overload of
-// either name. Both land in the SAME migration (0042), so there is no meaningful
+// either name. Both land in the SAME migration (0045), so there is no meaningful
 // partially-migrated state to diagnose between them — ONE combined boolean probe (both
 // non-null) is sufficient, unlike a design that might straddle two migrations. Absent →
 // a clean no-op ({adjOk:true, adjDormant:true}), never a failure — the belt simply has
@@ -76,7 +76,7 @@ const ADJ_PERIOD_CAP = 24; // bounded — never loop unboundedly on a poisoned/m
 /** True iff BOTH clara.adjustment_run_due(uuid) and clara.run_adjustment_occurrence(uuid,
  *  uuid,date,date,text) exist — the EXACT signatures, never an overloaded-name to_regproc
  *  probe (the wiki-projection.mjs:321-346 R5 idiom). Evaluated PER CYCLE, never cached at
- *  startup, so the belt lights the moment 0042 lands. */
+ *  startup, so the belt lights the moment 0045 lands. */
 async function hasAdjustmentSurface(client) {
   const r = await client.query(
     "select to_regprocedure('clara.adjustment_run_due(uuid)') is not null " +
@@ -127,7 +127,7 @@ export async function reconcileAdjustmentRuns(client, opts = {}) {
         const due = dueRow ?? {};
         if (due?.due !== true) {
           // ANOMALOUS SHAPE, LOUD [round-8 F2, cloned from reconciler-fa.mjs's round-7 E3
-          // cure]. clara.adjustment_run_due's documented contract (0042 §2.3) always answers
+          // cure]. clara.adjustment_run_due's documented contract (0045 §2.3) always answers
           // {due:boolean,...} -- due:false is the ordinary "nothing to do" case and stays
           // quiet, exactly as before. Any OTHER shape (a null/empty row, a due-probe whose
           // result silently changed shape) reads as due:false too under the `?? {}` fallback
@@ -140,12 +140,12 @@ export async function reconcileAdjustmentRuns(client, opts = {}) {
           } else if (due?.reason === "all_blocked") {
             // THE SECOND silent state the FA belt does not carry [round-8 F2]:
             // adjustment_run_due's OWN due:false/reason distinguishes "every live template
-            // is blocked" from an ordinary caught-up "nothing_due" (0042 §2.3's
+            // is blocked" from an ordinary caught-up "nothing_due" (0045 §2.3's
             // jsonb_build_object -- 'reason' is 'all_blocked' only when v_blocked is
             // non-empty).
             //
             // BUT all_blocked ITSELF MIXES TWO KINDS [round-9 fix wave, lane N2; r9 finding
-            // 8, LOW]. The DB's blocked[] rows carry one of four reasons (0042 §2.3, the
+            // 8, LOW]. The DB's blocked[] rows carry one of four reasons (0045 §2.3, the
             // dashboard's own blockedReasonLabel, adjustmentModel.ts:208), and only THREE
             // are terminal (template_line_ineligible, period_correction_unsound,
             // period_shape_already_met — the sweep can never clear them unassisted).
