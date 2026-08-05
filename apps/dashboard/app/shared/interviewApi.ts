@@ -330,18 +330,11 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
  *  bug stayed invisible in production: the answer vanished and the human just retyped.
  *
  *  So a 409 is DISAMBIGUATED against /state, never assumed — and the reading is FAIL-CLOSED ON
- *  UNKNOWN (the ADR-059 armour law): only POSITIVE evidence counts as delivery, everything else
- *  surfaces the original refusal. Re-read ONCE and classify:
- *    · a park at a HIGHER index      ⇒ the park moved past ours  ⇒ delivered, return.
- *    · an EXPLICIT completion terminal ⇒ the run reached its end ⇒ delivered, return.
- *      (the terminal MARKER, never the derived chip — see the note at that branch)
- *    · the SAME park still open      ⇒ nothing landed            ⇒ re-POST ONCE.
- *    · cancelled / expired / ended   ⇒ our answer never landed   ⇒ surface the refusal.
- *    · no park and not terminal, a LOWER park index, an unparseable body, a failed read
- *                                    ⇒ undiagnosable            ⇒ surface the refusal.
- *  The last line is the one that matters: a `{}` body or a momentarily park-less "working" state
- *  must NEVER read as delivery, or the dropped-answer bug walks straight back in through the
- *  recovery meant to close it.
+ *  UNKNOWN (the ADR-059 armour law): only POSITIVE evidence about THIS run counts as delivery,
+ *  and everything else surfaces the original refusal. `classifyDelivery` below is that reading;
+ *  a `{}` body, a momentarily park-less "working" state, a cancelled run, or a reply about some
+ *  OTHER run must never read as delivery, or the dropped-answer bug walks straight back in
+ *  through the recovery meant to close it.
  *
  *  KNOWN RESIDUAL, named rather than papered over: "a higher park ⇒ my answer landed" is an
  *  inference, not a receipt. A SECOND client on the same run (two tabs of the same principal —
@@ -352,6 +345,44 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
  *
  *  Only a retry that ALSO fails is surfaced. A caller that sees this throw therefore knows the
  *  answer is not confirmed delivered — `deliverValue`'s F-M10 receipt retention relies on it. */
+type Delivery = "delivered" | "still_open" | "unknown";
+
+/** Read ONE /state and classify it as evidence about OUR answer.
+ *
+ *  IDENTITY-BOUND FIRST: a reply describing a different run or a different scope is not weak
+ *  evidence, it is NO evidence — an advanced park in run B says nothing about our POST to run A.
+ *  Then, and only from a reply that is about us:
+ *    · a park at a HIGHER index        ⇒ the park moved past ours          ⇒ delivered
+ *    · an EXPLICIT completion terminal ⇒ the run reached its intended end  ⇒ delivered
+ *    · our OWN park still open         ⇒ nothing landed                    ⇒ still_open
+ *    · anything else                   ⇒ unknown (and unknown never means delivered)
+ *
+ *  The terminal test reads the terminal MARKER, never the derived `chip`: A DERIVED STATE IS NOT
+ *  EVIDENCE. `deriveChip` falls back to the ENGINE status when no marker is present, and a
+ *  domain-cancelled interview returns NORMALLY from its terminal() branch, so its engine run row
+ *  settles 'completed' (interview-e2e.mjs asserts exactly that). A cancelled run whose marker had
+ *  not yet streamed would chip as "complete" and be read as delivery — the whole bug again. */
+function classifyDelivery(s: InterviewState, a: AnswerArgs): Delivery {
+  if (s.runId !== a.runId || s.scope !== a.scope) return "unknown";
+  if (s.pendingPark) {
+    if (s.pendingPark.parkIndex > a.parkIndex) return "delivered";
+    if (s.pendingPark.parkIndex === a.parkIndex) return "still_open";
+    return "unknown"; // a LOWER index — a different or restarted run, not our evidence
+  }
+  if (s.terminal && COMPLETE_OUTCOMES.has(s.terminal.outcome)) return "delivered";
+  return "unknown"; // park-less and not completed: running, cancelled, expired, `{}` — all unknown
+}
+
+/** One classified /state read. A read that THROWS is "unknown" — never evidence either way. */
+async function readDelivery(token: string, a: AnswerArgs): Promise<Delivery> {
+  try {
+    const s = await getInterviewState(token, { runId: a.runId, scope: a.scope, planId: a.planId });
+    return classifyDelivery(s, a);
+  } catch {
+    return "unknown";
+  }
+}
+
 export async function answerInterview(token: string, a: AnswerArgs): Promise<void> {
   const res = await postAnswer(token, a);
   if (res.status === 200) return;
@@ -361,32 +392,23 @@ export async function answerInterview(token: string, a: AnswerArgs): Promise<voi
   // genuine conflict (a plan that is not open, say) and is reported as-is, never re-POSTed.
   if (!isNotPending(refusal)) throw refusal;
 
-  let s: InterviewState;
-  try {
-    s = await getInterviewState(token, { runId: a.runId, scope: a.scope, planId: a.planId });
-  } catch {
-    throw refusal; // cannot tell delivered from dropped — keep the runtime's own word for it
-  }
+  const first = await readDelivery(token, a);
+  if (first === "delivered") return;
+  if (first === "unknown") throw refusal;
 
-  if (s.pendingPark) {
-    if (s.pendingPark.parkIndex > a.parkIndex) return; // the park moved PAST ours ⇒ delivered
-    if (s.pendingPark.parkIndex < a.parkIndex) throw refusal; // a different/restarted run
-    // Same park, still open: nothing landed. This is the ONE path that retries.
-    const retry = await postAnswer(token, a);
-    if (retry.status === 200) return;
-    throw errorFrom(retry.status, await bodyOf(retry));
-  }
+  // still_open: our park is genuinely unanswered. This is the ONE path that retries.
+  const retry = await postAnswer(token, a);
+  if (retry.status === 200) return;
+  const retryRefusal = errorFrom(retry.status, await bodyOf(retry));
+  if (!isNotPending(retryRefusal)) throw retryRefusal;
 
-  // No open park. Only an EXPLICIT completion TERMINAL proves the run consumed its answers.
-  //
-  // Read the terminal outcome, NEVER the derived `chip`: A DERIVED STATE IS NOT EVIDENCE.
-  // `deriveChip` falls back to the ENGINE status when no terminal marker is present, and a
-  // domain-cancelled interview returns NORMALLY from its terminal() branch, so the engine's run
-  // row is deterministically 'completed' (interview-e2e.mjs asserts exactly that). A cancelled
-  // run whose terminal marker has not been streamed yet would therefore chip as "complete" —
-  // and this arm would report a dropped answer as delivered, which is the whole bug again.
-  if (s.terminal && COMPLETE_OUTCOMES.has(s.terminal.outcome)) return;
-  throw refusal;
+  // The retry ALSO says not_pending. Two readings remain: our first answer had in fact landed and
+  // the park markers were merely LAGGING behind it (the duplicate-submit-of-the-last-answer case,
+  // where throwing here would be a FALSE refusal at the natural end of an interview), or it is
+  // still being dropped. One more read decides, and anything short of positive evidence is still
+  // a refusal. Bounded by construction: at most two POSTs and two reads, no loop.
+  if ((await readDelivery(token, a)) === "delivered") return;
+  throw retryRefusal;
 }
 
 export type CancelArgs = { runId: string; scope: InterviewScope; parkIndex: number; planId?: string | null };

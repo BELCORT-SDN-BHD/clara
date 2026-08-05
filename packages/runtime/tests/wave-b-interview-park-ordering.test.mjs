@@ -31,6 +31,12 @@
 //   · `createHook(await streamPromptStep(...))` — one statement, where the ANNOUNCE (the
 //     argument) evaluates FIRST, so written order is exactly backwards;
 //   · a correctly-ordered but UNUSED `ask` sitting beside the real, inverted `askPark`.
+// A SECOND review round then measured a FOURTH, from the same root — a hand-rolled notion of
+// "function": a `class Armer { constructor() { createHook(...) } }` DECLARED before the announce
+// and INSTANTIATED after it read as an earlier arm, because the boundary test knew about
+// functions and arrows but not constructors. The boundary test is now the compiler's own
+// `ts.isFunctionLike`, which is the lesson generalised: do not re-implement the language.
+//
 // So the guard now names the only shape it will certify, and REFUSES everything else instead of
 // guessing: exactly one `ask`; no createHook anywhere else in the file; exactly one arm and one
 // announce inside it; the announce directly awaited; both calls unconditional top-level
@@ -65,8 +71,17 @@ function unwrap(node) {
   return n;
 }
 
-function isFunctionLike(n) {
-  return ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n);
+/** ANY function-like boundary — the compiler's own predicate, which covers constructors,
+ *  get/set accessors and methods as well as functions and arrows. A hand-rolled list missed
+ *  constructors, and a `class Armer { constructor() { createHook(...) } }` declared before the
+ *  announce then instantiated after it read as an earlier arm. Do not narrow this back. */
+function isFunctionBoundary(n) {
+  return ts.isFunctionLike(n);
+}
+
+/** A callable WITH a body, for spotting `const ask = ... =>` / `function ask()`. */
+function isCallableWithBody(n) {
+  return ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n);
 }
 
 /** A call to the BARE identifier `name`. A property call (`o.createHook()`) is deliberately NOT
@@ -106,7 +121,7 @@ function topLevelStatementOf(body, call, label) {
   let n = call;
   while (n.parent && n.parent !== body) {
     n = n.parent;
-    if (isFunctionLike(n)) return { refused: `the ${label} call sits inside a NESTED FUNCTION, so its position does not say when it runs` };
+    if (isFunctionBoundary(n)) return { refused: `the ${label} call sits inside a NESTED FUNCTION, so its position does not say when it runs` };
     if (isControlFlow(n)) return { refused: `the ${label} call sits inside a CONDITIONAL or LOOP (${ts.SyntaxKind[n.kind]}), so its position does not prove it runs there` };
   }
   const index = body.statements.indexOf(n);
@@ -120,7 +135,7 @@ function findAskFunctions(sf) {
   const visit = (n) => {
     if (
       ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === "ask" &&
-      n.initializer && isFunctionLike(n.initializer)
+      n.initializer && isCallableWithBody(n.initializer)
     ) hits.push(n.initializer);
     else if (ts.isFunctionDeclaration(n) && n.name?.text === "ask") hits.push(n);
     ts.forEachChild(n, visit);
@@ -195,7 +210,7 @@ export function analyzeParkOrdering(workflowsDir = WORKFLOWS) {
     const fileArms = collectCalls(sf, ARM);
     for (const c of fileArms) {
       let owner = c.parent;
-      while (owner && !isFunctionLike(owner)) owner = owner.parent;
+      while (owner && !isFunctionBoundary(owner)) owner = owner.parent;
       if (owner !== ask) return refuse(`a ${ARM}() call lives OUTSIDE the analysed 'ask' closure — this file asks parks in more than one place, and the guard will not certify only one of them`);
     }
 
