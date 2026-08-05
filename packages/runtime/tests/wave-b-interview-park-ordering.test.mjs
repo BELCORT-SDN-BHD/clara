@@ -169,27 +169,55 @@ function topLevelStatementOf(body, call, label) {
   return { index };
 }
 
+/** Every identifier a BindingName introduces, INCLUDING nested destructuring and defaults —
+ *  `const { createHook } = decoy` binds the name just as surely as `function createHook()`. */
+function boundNames(name, out = []) {
+  if (!name) return out;
+  if (ts.isIdentifier(name)) out.push(name.text);
+  else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+    for (const el of name.elements) if (ts.isBindingElement(el)) boundNames(el.name, out);
+  }
+  return out;
+}
+
 /** Prove `name` in this file IS the named import from a module matching `moduleRe`, and that
- *  NOTHING ELSE in the file binds that name. Returns null when proven, else the refusal reason. */
+ *  NOTHING ELSE in the file binds that name. Returns null when proven, else the refusal reason.
+ *
+ *  Three ways this was defeated before, all now closed:
+ *    · `streamTerminalStep as streamPromptStep` — the LOCAL name matched while the imported
+ *      symbol was a different function entirely. The import's propertyName must match too.
+ *    · `const { createHook } = decoy` — a destructured binding is a binding; binding PATTERNS
+ *      are now walked, not just plain identifiers.
+ *    · a `import type { … }` of the same name, which binds nothing at runtime.
+ *  The set of ways a module-level name can be bound is small and closed, so it is enumerated
+ *  exhaustively here rather than approximated. */
 function bindingRefusal(sf, name, moduleRe) {
   let imported = 0;
   let other = 0;
+  let aliased = false;
+  let typeOnly = false;
+
   const visit = (n) => {
     if (ts.isImportSpecifier(n) && n.name.text === name) {
-      const spec = n.parent.parent.parent.moduleSpecifier;
-      if (ts.isStringLiteral(spec) && moduleRe.test(spec.text)) imported++;
+      const clause = n.parent.parent;
+      const spec = clause.parent.moduleSpecifier;
+      if (n.isTypeOnly || clause.isTypeOnly) typeOnly = true;
+      else if (n.propertyName && n.propertyName.text !== name) aliased = true;
+      else if (ts.isStringLiteral(spec) && moduleRe.test(spec.text)) imported++;
       else other++;
-    } else if (
-      (ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) && n.name?.text === name
-    ) other++;
-    else if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name) other++;
-    else if (ts.isParameter(n) && ts.isIdentifier(n.name) && n.name.text === name) other++;
+    } else if ((ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) && n.name?.text === name) other++;
+    else if (ts.isVariableDeclaration(n) && boundNames(n.name).includes(name)) other++;
+    else if (ts.isParameter(n) && boundNames(n.name).includes(name)) other++;
+    else if (ts.isCatchClause(n) && boundNames(n.variableDeclaration?.name).includes(name)) other++;
     else if (ts.isImportClause(n) && n.name?.text === name) other++;
     else if (ts.isNamespaceImport(n) && n.name.text === name) other++;
+    else if (ts.isImportEqualsDeclaration(n) && n.name.text === name) other++;
     ts.forEachChild(n, visit);
   };
   visit(sf);
 
+  if (typeOnly) return `'${name}' is imported TYPE-ONLY — it binds nothing at runtime, so no call of that name can be the real one`;
+  if (aliased) return `'${name}' is an ALIAS for a different export — the local spelling matches but the imported symbol does not`;
   if (imported === 0) return `'${name}' is not imported from a module matching ${moduleRe} — the call cannot be proven to be the real one`;
   if (imported > 1) return `'${name}' is imported ${imported} times — ambiguous, refused`;
   if (other > 0) return `'${name}' is ALSO bound locally (${other} other binding(s)) — a shadowing declaration means the call site may not be the import at all`;
@@ -240,16 +268,34 @@ export function registeredInterviewBodies(workflowsDir = WORKFLOWS) {
     }
     const ident = prop.initializer.text;
 
+    // The registry entry must be a NON-ALIASED, non-type-only named import: `import {
+    // decoyWorkflow as clientOnboarding_v3 }` would otherwise let the guard certify the correct
+    // but UNUSED `ask` in clientOnboarding.v3.ts while the registry runs the decoy.
     let spec = null;
     for (const st of sf.statements) {
       if (!ts.isImportDeclaration(st)) continue;
       const named = st.importClause?.namedBindings;
       if (!named || !ts.isNamedImports(named)) continue;
-      if (named.elements.some((el) => el.name.text === ident)) spec = st.moduleSpecifier.text;
+      const el = named.elements.find((e) => e.name.text === ident);
+      if (!el) continue;
+      if (el.isTypeOnly || st.importClause.isTypeOnly) throw new Error(`registry.ts imports '${ident}' TYPE-ONLY — it binds no workflow body`);
+      if (el.propertyName && el.propertyName.text !== ident) {
+        throw new Error(`registry.ts binds '${ident}' to a DIFFERENT export ('${el.propertyName.text}') — the name in the table is not the function that would run`);
+      }
+      spec = st.moduleSpecifier.text;
     }
     if (!spec) throw new Error(`registry.ts imports '${ident}' from nowhere resolvable`);
 
-    bodies.push({ cls, ident, file: `${spec.replace(/^\.\//, "").replace(/\.js$/, "")}.ts` });
+    const file = `${spec.replace(/^\.\//, "").replace(/\.js$/, "")}.ts`;
+    // …and that module must really EXPORT a function of that exact name.
+    const bodySf = parse(join(workflowsDir, file), readFileSync(join(workflowsDir, file), "utf8"));
+    const exportsIt = bodySf.statements.some(
+      (st) => ts.isFunctionDeclaration(st) && st.name?.text === ident &&
+        st.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword),
+    );
+    if (!exportsIt) throw new Error(`${file} does not export a function named '${ident}' — the registry entry cannot be tied to a body`);
+
+    bodies.push({ cls, ident, file });
   }
   return bodies;
 }
@@ -370,6 +416,11 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
     ["a local `streamPromptStep` shadowing the real import", (s) =>
       s.replace("import { mintOpKeyStep, runIdStep, streamPromptStep,", "import { mintOpKeyStep, runIdStep, streamPromptStep as realStreamPromptStep,")
         .replace(armRe, `    async function streamPromptStep(_a: unknown): Promise<void> { void realStreamPromptStep; }\n${src.match(armRe)[0]}`)],
+    // …and the same trick one level subtler: the local NAME is right, the imported SYMBOL is not.
+    ["`streamTerminalStep as streamPromptStep` — right spelling, wrong export", (s) =>
+      s.replace("import { mintOpKeyStep, runIdStep, streamPromptStep,", "import { mintOpKeyStep, runIdStep, streamTerminalStep as streamPromptStep,")],
+    ["`const { createHook } = decoy` — a DESTRUCTURED shadow", (s) =>
+      s.replace(armRe, `    const decoy = { createHook: <T,>(_a: unknown): T => null as T };\n    const { createHook } = decoy;\n${src.match(armRe)[0]}`)],
   ];
 
   for (const [label, mutate] of shapes) {

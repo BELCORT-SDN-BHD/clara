@@ -347,8 +347,10 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
  *  does do is shrink the fail-open set from "every 409" (the shipped behaviour) to exactly this
  *  concurrent-winner case. The residual is a tracked follow-up, not a solved problem.
  *
- *  Only a retry that ALSO fails is surfaced. A caller that sees this throw therefore knows the
- *  answer is not confirmed delivered — `deliverValue`'s F-M10 receipt retention relies on it. */
+ *  A caller that sees this throw knows the answer is NOT CONFIRMED DELIVERED — either the retry
+ *  also failed, or the state could not be read as evidence at all. That is the guarantee
+ *  `deliverValue`'s F-M10 receipt retention relies on; it is deliberately weaker than "the answer
+ *  definitely failed", because proving THAT needs a receipt the runtime does not yet issue. */
 type Delivery = "delivered" | "still_open" | "unknown";
 
 /** Classify a RAW /state body as evidence about OUR answer.

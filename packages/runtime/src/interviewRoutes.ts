@@ -208,8 +208,10 @@ export function deriveInterviewChip(state: { pending_park?: unknown; terminal?: 
   return String(state.status ?? "unknown");
 }
 
-/** True iff a thrown error is the engine's single-shot "hook already gone" signal — the
- *  answer was already delivered by a prior attempt (idempotent success). */
+/** True iff a thrown error is the engine's single-shot "hook not found" signal. It means the
+ *  hook is not there RIGHT NOW — which is NOT the same as "already delivered": an unarmed hook
+ *  raises the identical error, and that ambiguity is the GH #152 bug. The route maps it to 409
+ *  not_pending and the client disambiguates against GET /state. */
 function isHookNotFound(err: unknown): boolean {
   const e = err as { name?: string; message?: string } | null;
   return !!e && (e.name === "HookNotFoundError" || /hook not found/i.test(String(e?.message || "")));
