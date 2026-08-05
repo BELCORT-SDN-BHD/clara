@@ -140,9 +140,12 @@ export const PART_CATALOG = {
     renderBranch: true,
     fixtures: [{ type: "depreciation_run_receipt", client_id: "client-1111", run_id: "run-1313" }],
   },
-  // --- Wave D-b addition (design §3.4/§7): identifier-only; the card hydrates
-  // authoritative state on mount, mirroring the receipt idiom. (The
-  // adjustment_run_receipt sibling entry arrives with D-b2.)
+  // --- Wave D-b additions (design §2.7/§2.8/§3.4/§7): identifier-only; each
+  // card hydrates authoritative state on mount, mirroring the receipt idiom.
+  adjustment_run_receipt: {
+    renderBranch: true,
+    fixtures: [{ type: "adjustment_run_receipt", client_id: "client-1111", run_id: "run-1414" }],
+  },
   staff_advance: {
     renderBranch: true,
     fixtures: [{ type: "staff_advance", client_id: "client-1111", advance_id: "advance-1515" }],

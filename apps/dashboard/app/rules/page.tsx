@@ -16,6 +16,7 @@ import { listClients, type ClientRow } from "../documents/api";
 import { runtimeBase, supabaseBase } from "../shared/wire";
 import { isExpiringSoon } from "./model";
 import { AutopostRulePanel } from "./AutopostRulePanel";
+import { AdjustmentTemplatePanel } from "./AdjustmentTemplatePanel";
 import styles from "./rules.module.css";
 
 const TOKEN_KEY = "clara_dev_jwt"; // shared with /chat + /documents + /queue
@@ -117,6 +118,16 @@ export default function RulesPage() {
           </div>
 
           <ProposeForm token={token} clients={clients} defaultClient={scope} onProposed={() => void load()} />
+
+          {/* Wave D-b (design §2.7/§2.8): adjustment templates are ALWAYS
+              client-scoped (list_adjustment_templates/adjustment_run_due both
+              take p_client, unlike the autopost rules' optional {}-scope
+              above) — only rendered once a specific client is picked. */}
+          {scope ? (
+            <AdjustmentTemplatePanel token={token} clientId={scope} />
+          ) : (
+            <p className={styles.muted}>Scope to one client above to see its adjustment templates.</p>
+          )}
         </>
       )}
     </main>

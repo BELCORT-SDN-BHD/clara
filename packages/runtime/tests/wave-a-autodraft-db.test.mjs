@@ -9,6 +9,7 @@
 
 import { test, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import * as rig from "./rig.mjs";
 import { autodraftHealth, runCatchupPass } from "../lib/autodraft.mjs";
 import { reconcileAutoDraftTasks, terminalForAutodraft } from "../lib/reconciler.mjs";
@@ -58,16 +59,32 @@ test("autodraftHealth reports the consumer's own lag + dead-letter counts (spine
   assert.ok(h.lag >= 0 && h.pendingDeadLetters >= 0 && h.firmsTracked >= 0);
 });
 
-test("reconcileAutoDraftTasks no-ops cleanly when no autodraft task rows exist", { skip }, async () => {
+// [ROOT-ERADICATION residue R9 / WDB-R1 — ruled 2026-08-03] THIS CELL USED TO ASSERT A GLOBAL
+// ZERO. `reconcileAutoDraftTasks` with no `onlyFirm` walks EVERY firm's agent_tasks, so the
+// assertion was not "this cell's world is empty" but "the whole database is empty of autodraft
+// work" — a statement no cell owns and no cell can keep true. CI runs `pnpm -r --if-present
+// test`, i.e. the db package and the runtime package against ONE shared database, so any earlier
+// suite that left a queued autodraft task behind turns this green cell red (measured: the full
+// DB suite then the runtime suite, sequentially, on one database -> 999/1000). It has been green
+// for many waves only because the two packages' cells happen not to overlap in time, which
+// nothing enforces. Pre-existing, NOT introduced by 0042 — but "fix it all at the root" means
+// the assertion should say what it always meant.
+//
+// THE FIX USES THE PRODUCTION KNOB, not a test-only escape hatch: the reconciler already carries
+// `onlyFirm`, the same predicate the per-firm sweep uses in production. Scoping the cell to a
+// firm id that owns nothing makes the claim true by construction and immune to any other suite.
+test("reconcileAutoDraftTasks no-ops cleanly when its own firm has no autodraft task rows", { skip }, async () => {
   const enqueued = [];
   const out = await rig.asRuntime((c) =>
     reconcileAutoDraftTasks(c, {
+      // A firm id that exists in no row anywhere — the cell's own empty world.
+      onlyFirm: randomUUID(),
       enqueueAutoDraft: async (id) => enqueued.push(id),
       getRun: () => ({ status: Promise.resolve("running") }),
     }),
   );
   assert.deepEqual(out, { autodraftReenqueued: 0, autodraftSettled: 0 });
-  assert.deepEqual(enqueued, [], "no autodraft tasks -> nothing re-enqueued");
+  assert.deepEqual(enqueued, [], "no autodraft tasks in THIS firm -> nothing re-enqueued");
 });
 
 test("reconcileAutoDraftTasks is a clean no-op when enqueueAutoDraft is not wired (legacy callers)", { skip }, async () => {
@@ -76,6 +93,60 @@ test("reconcileAutoDraftTasks is a clean no-op when enqueueAutoDraft is not wire
 });
 
 // --- SKIP until 0011 -------------------------------------------------------
+
+// [WDB-R4 — the question the R9 fix did NOT ask.] Scoping a no-op assertion to a firm that
+// cannot own rows makes it un-pollutable AND makes it VACUOUS: it would stay green if arm (A)
+// were deleted outright, or if `onlyFirm` silently matched nothing for every firm. A cell that
+// only walks its own fix's path proves nothing. So this one plants a genuinely stuck autodraft
+// task and asks the reconciler THREE questions the scoping fix does not answer on its own:
+//   (i)   scoped to the task's OWN firm, is it found and re-enqueued? (arm A is alive)
+//   (ii)  scoped to a DIFFERENT firm, is it left alone? (the predicate is real, not decoration)
+//   (iii) once the task leaves `queued`, is it dropped? (the status half of the predicate)
+// It then leaves the database as it found it: the planted task is cancelled through the LEGAL
+// queued->cancelled transition (`_tf_agent_task_update`; agent_tasks are never deleted), so this
+// cell cannot become the pollution it exists to guard against.
+// Gated on skip0011 rather than `skip` because `kind='autodraft'` is a 0011 CHECK value.
+test("the autodraft reconciler's firm predicate is load-bearing: a planted stuck task is re-enqueued for ITS firm, invisible to another, and dropped once it leaves queued", { skip: skip0011 }, async () => {
+  const mine = await rig.buildFirm("r9a");
+  const other = await rig.buildFirm("r9b");
+  const planted = (
+    await rig.rootQuery(
+      `insert into clara.agent_tasks (firm_id, client_id, kind, status, model_snapshot, created_at)
+         values ($1, $2, 'autodraft', 'queued', $3, now() - interval '1 hour') returning id`,
+      [mine.firm, mine.client, rig.DEFAULT_MODEL],
+    )
+  ).rows[0].id;
+
+  const run = async (firm) => {
+    const enqueued = [];
+    const out = await rig.asRuntime((c) =>
+      reconcileAutoDraftTasks(c, {
+        onlyFirm: firm,
+        enqueueAutoDraft: async (id) => enqueued.push(id),
+        getRun: () => ({ status: Promise.resolve("running") }),
+      }),
+    );
+    return { out, enqueued };
+  };
+
+  const foreign = await run(other.firm);
+  assert.deepEqual(foreign.enqueued, [], "(ii) a task belonging to another firm is not re-enqueued");
+  assert.equal(foreign.out.autodraftReenqueued, 0, "(ii) …and the count agrees — the firm predicate is real");
+
+  const own = await run(mine.firm);
+  assert.deepEqual(own.enqueued, [planted], "(i) scoped to its own firm the stuck task IS re-enqueued — arm (A) is alive, so the zero above is a fact and not a vacuum");
+  assert.equal(own.out.autodraftReenqueued, 1, "(i) …and exactly one, not a duplicate sweep");
+
+  // Leave it as we found it, through the legal transition — and check the status half too.
+  await rig.rootQuery("update clara.agent_tasks set status = 'cancelled' where id = $1", [planted]);
+  const after = await run(mine.firm);
+  assert.deepEqual(after.enqueued, [], "(iii) a task that has left `queued` is no longer a candidate");
+  assert.equal(
+    (await rig.rootQuery("select count(*)::int n from clara.agent_tasks where kind='autodraft' and status='queued' and workflow_run_id is null and firm_id in ($1,$2)", [mine.firm, other.firm])).rows[0].n,
+    0,
+    "this cell leaves no stuck autodraft row behind — it must not become the pollution it guards against",
+  );
+});
 
 test("runCatchupPass drives list_autodraft_candidates + reconcile_sweep_runs without throwing", { skip: skip0011 }, async () => {
   const enqueued = [];

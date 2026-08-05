@@ -9,7 +9,7 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import type { PgrestError } from "../shared/wire";
 import { getBankStatement, voidBankStatement, unmatchBankMatch, completePendingMatch } from "../shared/bankApi";
-import { getBankReconciliation, listBankLineSuggestions, exceptBankLine } from "../shared/reconApi";
+import { getBankReconciliation, listBankLineSuggestions, exceptBankLine, acceptBankRuleSuggestion } from "../shared/reconApi";
 import { DocViewer } from "../shared/cards/DocViewer";
 import {
   statementStatusLabel, tieBannerState, tieVarianceCents, lineMatchLabel,
@@ -206,6 +206,7 @@ export function StatementDetail({
             setSelected(new Set([lineId]));
             setPendingSuggestion({ lineId, ruleId, counterpartyId, kind });
           }}
+          onAcceptSuggestion={(lineId, ruleId) => runLine(lineId, () => acceptBankRuleSuggestion(token, clientId, lineId, ruleId))}
           exceptOpenLineId={exceptOpenLineId}
           onToggleExceptForm={(lineId) => { setExceptErr(null); setExceptOpenLineId((cur) => (cur === lineId ? null : lineId)); }}
           onExcept={(lineId, kind, reason) => void doExcept(lineId, kind, reason)}
@@ -232,7 +233,7 @@ export function StatementDetail({
 
 function LinesTable({
   lines, selected, onToggle, lineBusy, lineErr, onUnmatch, onCompletePending, voidUnwindCount,
-  suggestions, onChipSelect, exceptOpenLineId, onToggleExceptForm, onExcept, exceptBusy, exceptErr,
+  suggestions, onChipSelect, onAcceptSuggestion, exceptOpenLineId, onToggleExceptForm, onExcept, exceptBusy, exceptErr,
 }: {
   lines: BankStatementLineRow[];
   selected: Set<string>;
@@ -247,6 +248,7 @@ function LinesTable({
   voidUnwindCount: number | null;
   suggestions: BankLineSuggestionRow[];
   onChipSelect: (lineId: string, ruleId: string, counterpartyId: string, kind: CounterpartyKind) => void;
+  onAcceptSuggestion: (lineId: string, ruleId: string) => void;
   exceptOpenLineId: string | null;
   onToggleExceptForm: (lineId: string) => void;
   onExcept: (lineId: string, kind: BankLineExceptionKind, reason: string) => void;
@@ -301,7 +303,12 @@ function LinesTable({
                 {l.match_state === "unmatched" && lineSuggestions.length > 0 ? (
                   <tr>
                     <td></td>
-                    <td colSpan={7}><SuggestionChips line={l} suggestions={lineSuggestions} onSelect={onChipSelect} /></td>
+                    <td colSpan={7}>
+                      <SuggestionChips
+                        line={l} suggestions={lineSuggestions} onSelect={onChipSelect}
+                        onAccept={onAcceptSuggestion} busy={lineBusy === l.id}
+                      />
+                    </td>
                   </tr>
                 ) : null}
                 {exceptOpenLineId === l.id ? (
@@ -321,20 +328,25 @@ function LinesTable({
   );
 }
 
-/** design §7: "suggestion chips on unmatched lines (match/settle chip
- *  pre-fills the existing panels + passes via_rule; coding chip opens a
- *  pre-filled generic draft flow...)". A `match_settle` chip selects the line
- *  and hands the rule id + proposed counterparty up to StatementDetail, which
- *  threads it through MatchingWorkspace → SettleLinePanel. A `coding` chip is
- *  RENDERED INFORMATION ONLY — grep-verified zero hits for any manual
- *  generic-draft creation entry point anywhere in this dashboard, so there is
- *  nothing for this chip to open yet; see build-0040/u1-notes.md. */
+/** design §7 + Wave D-b design §5 (the `bank_rule_suggested` producer): "suggestion
+ *  chips on unmatched lines (match/settle chip pre-fills the existing panels +
+ *  passes via_rule; coding chip opens a pre-filled generic draft flow...)". A
+ *  `match_settle` chip selects the line and hands the rule id + proposed
+ *  counterparty up to StatementDetail, which threads it through
+ *  MatchingWorkspace → SettleLinePanel. [Wave D-b: the span→button upgrade]
+ *  a `coding` chip now calls `accept_bank_rule_suggestion` directly — the
+ *  producer direct-INSERTs the coding draft itself (design §5), so there is
+ *  no separate generic-draft form to open; refusals (`suggestion_outstanding`
+ *  at accept time, `suggestion_stale` at approve time) surface through the
+ *  same lineErr/describeBankRefusal idiom every other line action uses. */
 function SuggestionChips({
-  line, suggestions, onSelect,
+  line, suggestions, onSelect, onAccept, busy,
 }: {
   line: BankStatementLineRow;
   suggestions: BankLineSuggestionRow[];
   onSelect: (lineId: string, ruleId: string, counterpartyId: string, kind: CounterpartyKind) => void;
+  onAccept: (lineId: string, ruleId: string) => void;
+  busy: boolean;
 }) {
   return (
     <div className={styles.actions} style={{ marginTop: 0 }}>
@@ -356,9 +368,15 @@ function SuggestionChips({
           );
         }
         return (
-          <span key={`${sg.kind}:${sg.rule_id}`} className={styles.idChip} title="No manual generic-draft entry point exists yet — code this from /chat.">
-            suggested coding — {label}
-          </span>
+          <button
+            key={`${sg.kind}:${sg.rule_id}`}
+            className={styles.buttonSecondary}
+            disabled={busy}
+            title="Accepts the coding rule — direct-drafts a generic entry from it (bookkeeper+; a checker approves it like any other draft)."
+            onClick={() => onAccept(line.id, sg.rule_id)}
+          >
+            {busy ? "Accepting…" : `suggested coding — ${label}`}
+          </button>
         );
       })}
     </div>

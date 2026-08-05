@@ -424,6 +424,102 @@ const AF2_0044_HUMAN_FNS = ["resolve_and_book_bank_line"];
 // their absence is enforced without a cohort; the disappearance half arrives with the cohort
 // at D-b2.
 
+// ---------------------------------------------------------------------------
+// 0045 [Wave D-b, SLICE D-b2] — recurring adjustment templates, the auto-reversal pair
+// machine, and the ONE grant that closes the split.
+//
+// THE COHORT LANDS HERE, and that is LAW D1 discharged: D-b0 shipped this file unchanged,
+// D-b1 added its seven grant-matrix names, D-b3 added its one, and none of the three could
+// declare a cohort because `cohortFailures()` fails a PARTIAL cohort BY DESIGN. D-b2 is the
+// slice whose frontier makes the roster whole, so the roster is declared here.
+//
+// EVERY NAME BELOW WAS DERIVED EMPIRICALLY, NOT COPIED. Two rigs were built from the same
+// clara_0041_asm template — one migrated 0001..0044, one 0001..0045 — and
+// `select proname from pg_proc where pronamespace='clara'::regnamespace` was diffed across
+// them. The difference IS this block: 40 net-new functions, zero removed. That method is the
+// point. The pre-split whole-unit tree bundled all four slices' names under one "0042" family
+// and claimed several as D-b2-new that D-b1/D-b3 had already created — `_wdb_reversal_blocked`,
+// the thirteen `_adv_*` helpers, `_acct_role_reserved`, `_adj_line_eligibility_breach` and the
+// three money `_core`s all measure PRESENT on the 0044 rig. Re-declaring them here would have
+// dressed another slice's work as this one's.
+//
+// The seven WRITE verbs. Floors are BODY-enforced via clara._human_ctx(clara.role_rank(...))
+// and the role-level grant is clara_authenticated — the SUBLEDGER_0037 / BANK_0038 / FA_0041 /
+// ADV_0043 / AF2_0044 pattern. As built: bookkeeper+ for propose, run_manual and the three pair
+// verbs; admin+ for sign and retire (they SIGN a standing authority that books money every
+// period without a human in the loop). NO machine role holds any of them.
+const ADJ_0045_HUMAN_FNS = [
+  "propose_adjustment_template", "sign_adjustment_template", "retire_adjustment_template",
+  "run_adjustment_manual",
+  "reverse_adjustment_pair", "approve_pair_reversal", "cancel_pair_reversal",
+];
+// THE ONE GRANT THIS MIGRATION LANDS ON A FUNCTION IT DID NOT CREATE. 0044 created
+// clara.accept_bank_rule_suggestion — the `bank_rule_suggested` producer — and deliberately
+// WITHHELD its `grant execute … to clara_authenticated`, because the producer's approve-time
+// re-validation is clara._adj_on_approve arm (3), a body that only exists here: a reachable
+// producer between 0044 and 0045 could mint a staff advance nobody incurred. 0045 ships arm (3)
+// and the grant together, which is why the name is in NO net-new list above (it is not new) but
+// IS in the grant matrix below (its reachability is). MEASURED on both rigs:
+// has_function_privilege('clara_authenticated', 'clara.accept_bank_rule_suggestion(uuid,uuid,
+// uuid,text)', 'EXECUTE') is `f` at 0044 and `t` at 0045.
+const ADJ_0045_PRODUCER_GRANT_FNS = ["accept_bank_rule_suggestion"];
+// The /rules TEMPLATE read surface: definer + clara._human_ctx(viewer) + firm predicates, the
+// BANK_0038_READ_FNS / FA_0041_READ_FNS / ADV_0043_READ_FNS pattern. No machine role reads it.
+const ADJ_0045_READ_FNS = [
+  "list_adjustment_templates", "list_adjustment_runs", "get_adjustment_run",
+];
+// The leader sweep's run verb — EXECUTE clara_runtime ONLY, never clara_authenticated. It
+// carries no role_rank floor at all, so its authority IS this grant: exactly the
+// run_depreciation_period shape it was cut from. A clara_authenticated grant here would hand
+// any logged-in viewer an unfloored poster.
+const ADJ_0045_RUNTIME_FNS = ["run_adjustment_occurrence"];
+// The due probe — the ONE name BOTH lanes hold, the FA_0041_SHARED_FNS precedent (design §3.4):
+// the leader sweep asks it before scheduling and /rules asks it to light the panel.
+const ADJ_0045_SHARED_FNS = ["adjustment_run_due"];
+// 0045's TWENTY-EIGHT ungranted internals, declared the 0020 way: the main sweep fails if one
+// ever GAINS a grant (expected false for every role, and MEASURED false for every role on the
+// 0045 rig), and the cohort check below fails if one ever DISAPPEARS. The load-bearing ones:
+//   * `_adj_on_approve` — the approve-time hook, and the reason the producer's grant waited for
+//     this slice. A grant would let a caller drive occurrence state OUTSIDE an approve
+//     transaction (the `_fa_on_approve` reasoning, verbatim);
+//   * `_pair_reverse_core` — the pair machine the three public pair verbs share;
+//   * `_adj_template_hash` / `_adj_canon_lines` — the content-hash pair. A grant would let a
+//     caller mint the hash a template's identity is keyed on.
+// Three of them were born in the fix waves rather than the original cut and are named here for
+// that reason, not despite it: `_wdb_iso_day` (the day-of-week arithmetic the cadence clock
+// needs), `_wdb_period_overlap_advisory` (the propose/sign-time advisory) and
+// `_tf_adjustment_template_lineage_root` (the trigger that keeps a lineage single-rooted).
+const ADJ_0045_UNGRANTED_FNS = [
+  // The recurring-adjustment family: the occurrence core, the content-hash pair, the period
+  // arithmetic, the due/outstanding oracles, the approve hook, the correction door and the two
+  // json serializers the reads are cut from.
+  "_adj_run_occurrence_core", "_adj_template_hash", "_adj_canon_lines",
+  "_adj_occurrence_outstanding", "_adj_oldest_unmet_period",
+  "_adj_period_start", "_adj_period_end", "_adj_period_label",
+  "_adj_on_approve", "_adj_correction_door", "_adj_run_json", "_adj_template_json",
+  // The pair machine.
+  "_pair_reverse_core",
+  // The P1 lineage authority: ancestry, the period-keyed standing-charge reader the advisory
+  // is built on, the overlap grammar, and the entry/line shape probes the correction door
+  // compares through.
+  "_wdb_template_ancestry", "_wdb_template_standing_charges",
+  "_wdb_replaced_generation_standing", "_wdb_overlapping_siblings", "_wdb_shape_overlap",
+  "_wdb_period_overlap_advisory", "_wdb_correction_admission",
+  "_wdb_entry_shape", "_wdb_line_shape", "_wdb_iso_day",
+  // Trigger functions: the template transition + lineage-root guards, run immutability, and
+  // the pair-reversal transition pair.
+  "_tf_adjustment_template_transition", "_tf_adjustment_template_lineage_root",
+  "_tf_adjustment_run_immutable",
+  "_tf_adjustment_pair_reversal_transition", "_tf_adjustment_pair_reversal_no_commit_approving",
+];
+// THE WAVE D-b ROSTER, WHOLE AT LAST. D-b1's and D-b3's granted names are spread BY REFERENCE
+// rather than re-listed, so the two declarations can never drift apart.
+export const ADJUSTMENTS_0045_COHORT = [
+  ...ADV_0043_HUMAN_FNS, ...ADV_0043_READ_FNS, ...AF2_0044_HUMAN_FNS,
+  ...ADJ_0045_HUMAN_FNS, ...ADJ_0045_PRODUCER_GRANT_FNS, ...ADJ_0045_READ_FNS,
+  ...ADJ_0045_RUNTIME_FNS, ...ADJ_0045_SHARED_FNS, ...ADJ_0045_UNGRANTED_FNS,
+];
+
 const WAVE_B_0020_HUMAN_FNS = [
   "classify_consent_evidence_document",
   "grant_client_egress_purpose", "activate_client_egress_purpose",
@@ -479,9 +575,13 @@ export const ALLOWED = {
     ...FA_0041_SHARED_FNS, // 0041 the due probe — the one name BOTH lanes hold (design §3.4)
     ...ADV_0043_HUMAN_FNS, // 0043 [D-b1] the staff-advance write verbs (human judgement only)
     ...ADV_0043_READ_FNS, // 0043 [D-b1] the /advances read surface (viewer+, definer, firm-predicated)
-    ...AF2_0044_HUMAN_FNS, // 0044 [D-b3] the AF-2 composite (owner floor). The producer created
-    // beside it, clara.accept_bank_rule_suggestion, is NOT here on purpose — its grant is
-    // withheld until D-b2 (0045) ships its approve-time door; see the block above.
+    ...AF2_0044_HUMAN_FNS, // 0044 [D-b3] the AF-2 composite (owner floor)
+    ...ADJ_0045_HUMAN_FNS, // 0045 [D-b2] the template + pair write verbs (human judgement only)
+    ...ADJ_0045_PRODUCER_GRANT_FNS, // 0045 [D-b2] the producer grant 0044 withheld — it lands
+    // HERE, beside clara._adj_on_approve arm (3), the approve-time door that makes the producer
+    // safe to reach. See the 0045 block above for what was withheld and why.
+    ...ADJ_0045_READ_FNS, // 0045 [D-b2] the /rules template read surface (viewer+, definer)
+    ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe — the one name BOTH lanes hold
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -501,6 +601,8 @@ export const ALLOWED = {
     ...BANK_0038_RUNTIME_FNS, // 0038 the statement-facts writers (the persist_invoice_facts precedent)
     ...FA_0041_RUNTIME_FNS, // 0041 the depreciation sweep's run verb (the leader's SET ROLE lane)
     ...FA_0041_SHARED_FNS, // 0041 the due probe
+    ...ADJ_0045_RUNTIME_FNS, // 0045 [D-b2] the adjustment sweep's run verb (runtime lane ONLY)
+    ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe
     "persist_document_extraction", "complete_stored_document_task",
     "reserve_document_ingest", "resize_ingest_reservation", "settle_ingest_reservation",
     "refund_ingest_reservation", "record_attribution_attempt",
@@ -645,6 +747,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0038 wave C-b bank", BANK_0038_COHORT, liveNames));
   failures.push(...cohortFailures("0040 wave C-c tie-out", TIEOUT_0040_COHORT, liveNames));
   failures.push(...cohortFailures("0041 wave D-a fixed-asset register", FA_0041_COHORT, liveNames));
+  failures.push(...cohortFailures("0045 wave D-b recurring adjustments", ADJUSTMENTS_0045_COHORT, liveNames));
   return failures;
 }
 

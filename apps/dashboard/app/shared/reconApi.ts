@@ -301,17 +301,17 @@ export async function resolveAndBookBankLine(
   return toResolveAndBookBankLineResult(out);
 }
 
-// [WAVE D-b SPLIT — D-b3 (0044)] THE SECOND WRAPPER IS NOT HERE, AND THAT IS THE POINT.
-// `acceptBankRuleSuggestion(...)` — the `bank_rule_suggested` producer's client, and the
-// /bank coding chip in StatementDetail.tsx that calls it — DEFER TO D-b2 (0045) together
-// with the DB grant they need. 0044 CREATES `clara.accept_bank_rule_suggestion` but
-// deliberately WITHHOLDS its `grant execute … to clara_authenticated`: the verb's
-// approve-time re-validation is `clara._adj_on_approve` arm (3), a D-b2 body, and a
-// reachable producer without it can mint a staff advance nobody incurred (the confirming
-// round's CF-B3-1 ≡ Codex CX1, found twice independently and probed on a rig). Between
-// 0044 and 0045 a wrapper here would be a live button whose RPC Postgres refuses at the
-// ROLE level — `permission denied for function accept_bank_rule_suggestion`, SQLSTATE
-// 42501 — which carries no `reason` key for `describeBankRefusal` to map, so the user
-// would meet a raw driver error. `../bank/matchModel.ts`'s `suggestion_outstanding` /
-// `suggestion_stale` copy needs no change and is already here: it is a message map keyed
-// by reason string, inert while nothing raises those reasons.
+/** accept_bank_rule_suggestion(...) — bookkeeper+ (ABI §A/§5, design S4): the
+ *  suggestion chip's upgraded action. Direct-INSERT drafts a
+ *  `flags.bank_rule_suggested` entry; the approve-time re-validation is
+ *  `_adj_on_approve` arm (3) — refusals surface `suggestion_outstanding`
+ *  (propose-time dedup) / `suggestion_stale` (approve-time), ABI §F. */
+export async function acceptBankRuleSuggestion(token: string, clientId: string, lineId: string, ruleId: string): Promise<{ entry_id: string | null }> {
+  const out = await rpc(
+    "accept_bank_rule_suggestion",
+    { p_client: clientId, p_line: lineId, p_rule: ruleId, p_op_key: opKey() },
+    token,
+  );
+  const o = (out ?? {}) as Record<string, unknown>;
+  return { entry_id: typeof o.entry_id === "string" ? o.entry_id : null };
+}

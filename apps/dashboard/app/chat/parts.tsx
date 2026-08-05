@@ -19,6 +19,7 @@ import { BankReconReceiptCard } from "../shared/cards/BankReconReceiptCard";
 import { BankRuleProposalCard } from "../shared/cards/BankRuleProposalCard";
 import { FixedAssetCard } from "../shared/cards/FixedAssetCard";
 import { DepreciationRunReceiptCard } from "../shared/cards/DepreciationRunReceiptCard";
+import { AdjustmentRunReceiptCard } from "../shared/cards/AdjustmentRunReceiptCard";
 import { StaffAdvanceCard } from "../shared/cards/StaffAdvanceCard";
 import styles from "./chat.module.css";
 
@@ -255,9 +256,11 @@ export function TranscriptParts({
         if (p.type === "depreciation_run_receipt") {
           return <DepreciationRunReceiptCard key={`farun:${p.run_id}:${i}`} token={token ?? null} part={p} />;
         }
-        // Wave D-b (design §3.4/§7): identifier-only; the card hydrates on mount
-        // via staff_advance_summary. (The adjustment_run_receipt sibling branch
-        // arrives with D-b2, the migration that emits get_adjustment_run.)
+        // Wave D-b (design §2.7/§2.8/§3.4/§7): identifier-only; each card
+        // hydrates on mount via get_adjustment_run / get_staff_advance.
+        if (p.type === "adjustment_run_receipt") {
+          return <AdjustmentRunReceiptCard key={`adjrun:${p.run_id}:${i}`} token={token ?? null} part={p} />;
+        }
         if (p.type === "staff_advance") {
           return <StaffAdvanceCard key={`adv:${p.advance_id}:${i}`} token={token ?? null} part={p} />;
         }

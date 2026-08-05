@@ -116,13 +116,19 @@ export type FixedAssetPart = { type: "fixed_asset"; client_id: string; asset_id:
  *  Identifier-only; the card hydrates get_depreciation_run(run_id) on mount. */
 export type DepreciationRunReceiptPart = { type: "depreciation_run_receipt"; client_id: string; run_id: string; label?: string };
 
-// --- Wave D-b addition (design §2.5/§3.4/§7; wave-d-b-design-abi.md §A) ---
+// --- Wave D-b additions (design §2.5/§2.7/§2.8/§3.4/§7; wave-d-b-design-abi.md §A) ---
 // Identifier-only, mirroring FixedAssetPart/DepreciationRunReceiptPart exactly. D-b
 // ships no new chatTurn machine lane — chatTurn.v8 stays FROZEN, untouched — so
-// nothing in the runtime emits this on the wire TODAY; it is declared here by
+// nothing in the runtime emits these on the wire TODAY; they are declared here by
 // analogy (parts.ts:101-107's own precedent restated) so the surface exists the day
-// a chat turn references one. (The AdjustmentRunReceiptPart sibling arrives with
-// D-b2, the migration that emits get_adjustment_run.)
+// a chat turn references one.
+
+/** An adjustment-template occurrence's receipt (design §2.5 "receipts + events" /
+ *  §2.7/§2.8): minted after the (possible) auto-reversal mirror, fully immutable —
+ *  a correction rides `reverse_adjustment_pair`/`reverse_entry`, never an edit.
+ *  Identifier-only; the card hydrates `get_adjustment_run(run_id)` on mount,
+ *  mirroring DepreciationRunReceiptPart's receipt idiom exactly. */
+export type AdjustmentRunReceiptPart = { type: "adjustment_run_receipt"; client_id: string; run_id: string; label?: string };
 
 /** A staff advance's register row (design §3.2/§3.4). Identifier-only; the card
  *  hydrates `staff_advance_summary(client, as_of=today)` and picks the row by
@@ -134,7 +140,7 @@ export type DepreciationRunReceiptPart = { type: "depreciation_run_receipt"; cli
  *  summed here. */
 export type StaffAdvancePart = { type: "staff_advance"; client_id: string; advance_id: string; label?: string };
 
-/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 + 2 Wave-C-c + 2 Wave-D-a + 1 Wave-D-b member. */
+/** The canonical transcript wire union: 9 existing + 5 Wave-A + 1 Wave-A2 + 2 Wave-C-c + 2 Wave-D-a + 2 Wave-D-b members. */
 export type ClaraPart =
   | { type: "text"; text: string }
   | { type: "tool_call"; tool: string; tool_call_id: string; input: unknown }
@@ -159,5 +165,6 @@ export type ClaraPart =
   // --- Wave D-a additions ---
   | FixedAssetPart
   | DepreciationRunReceiptPart
-  // --- Wave D-b addition ---
+  // --- Wave D-b additions ---
+  | AdjustmentRunReceiptPart
   | StaffAdvancePart;

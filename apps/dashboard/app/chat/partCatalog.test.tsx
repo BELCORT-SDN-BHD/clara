@@ -115,13 +115,15 @@ test("wave-d-a fixed_asset and depreciation_run_receipt are registered and rende
   assert.ok(!run.includes(FALLBACK_UNSUPPORTED_PREFIX));
 });
 
-// Belt-and-braces: the Wave D-b staff_advance part (design §3.4/§7) is registered
-// and renders non-empty. (Its adjustment_run_receipt sibling arrives with D-b2.)
-test("wave-d-b staff_advance is registered and renders non-empty", () => {
-  assert.ok(
-    RENDER_BRANCH_TYPES.includes("staff_advance" as (typeof RENDER_BRANCH_TYPES)[number]),
-    "staff_advance must be registered",
-  );
+// Belt-and-braces: the two Wave D-b parts (adjustment_run_receipt/staff_advance,
+// design §2.7/§2.8/§3.4/§7) are registered and render non-empty.
+test("wave-d-b adjustment_run_receipt and staff_advance are registered and render non-empty", () => {
+  for (const t of ["adjustment_run_receipt", "staff_advance"]) {
+    assert.ok(RENDER_BRANCH_TYPES.includes(t as (typeof RENDER_BRANCH_TYPES)[number]), `${t} must be registered`);
+  }
+  const run = render([{ type: "adjustment_run_receipt", client_id: "client-1111", run_id: "run-1414" }]);
+  assert.ok(run.includes("Adjustment run"), "the id-only run receipt card state must render");
+  assert.ok(!run.includes(FALLBACK_UNSUPPORTED_PREFIX));
   const advance = render([{ type: "staff_advance", client_id: "client-1111", advance_id: "advance-1515" }]);
   assert.ok(advance.includes("Staff advance"), "the id-only advance card state must render");
   assert.ok(!advance.includes(FALLBACK_UNSUPPORTED_PREFIX));

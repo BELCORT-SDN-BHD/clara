@@ -97,6 +97,46 @@ test("surface present, nothing due for any client: every client examined, run_de
   assert.ok(!client.queries.some((q) => /^select clara\.run_depreciation_period\(/.test(q.sql)), "due:false never calls the run verb");
 });
 
+// [round-7 E3] A well-formed due:false answer is the ORDINARY "nothing to do" case and must
+// stay quiet — the previous test already proves no warning noise on every healthy cycle
+// (asserted here again, explicitly, as the negative control for the anomalous-shape cell
+// below).
+test("a well-formed due:false answer logs NOTHING beyond the ordinary summary line — no noise on a healthy cycle", async () => {
+  const client = recordingClient({ ids: ["c1"], dueFor: () => ({ due: false }) });
+  const logs = [];
+  const out = await reconcileFaRuns(client, { log: (m) => logs.push(m) });
+  assert.equal(out.faOk, true);
+  assert.ok(!logs.some((m) => /unexpected shape/.test(m)), "a legitimate not-due answer must never be logged as anomalous");
+});
+
+// [round-7 E3] An ANOMALOUS due-probe answer (missing/malformed `due`) is INDISTINGUISHABLE
+// from a healthy "nothing due" client under the old `due?.due !== true` break alone — that
+// silence is the concealment layer round-7 named. The fix must name it in the log while
+// still breaking the chase (never crashing, never spinning) so the belt behaves identically
+// from the caller's point of view.
+for (const [label, malformed] of [
+  ["an empty object (e.g. a due-probe that returned no row)", {}],
+  ["a due-probe answering the wrong shape entirely", { ok: true }],
+  ["a due key that is truthy but not boolean-true", { due: "true" }],
+]) {
+  test(`E3 anomalous due-probe shape (${label}) is logged LOUD, not silently swallowed`, async () => {
+    const client = recordingClient({ ids: ["c1"], dueFor: () => malformed });
+    const logs = [];
+    const out = await reconcileFaRuns(client, { log: (m) => logs.push(m) });
+    assert.equal(out.faOk, true, "an anomalous shape must not crash or fail the belt's cadence");
+    assert.equal(out.faExamined, 1);
+    assert.equal(out.faPosted, 0);
+    assert.ok(
+      !client.queries.some((q) => /^select clara\.run_depreciation_period\(/.test(q.sql)),
+      "an anomalous (non-due:true) shape must never be chased into the run verb",
+    );
+    assert.ok(
+      logs.some((m) => /fa run client=c1 due-probe returned an unexpected shape/.test(m) && m.includes(JSON.stringify(malformed))),
+      `the anomalous shape must be named in the log verbatim (got: ${JSON.stringify(logs)})`,
+    );
+  });
+}
+
 test("a single overdue period clears: one run_depreciation_period call, op-key embeds client+period, no reset-role dance", async () => {
   const ids = ["c1"];
   const client = recordingClient({

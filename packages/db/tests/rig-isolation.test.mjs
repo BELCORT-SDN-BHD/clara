@@ -503,6 +503,30 @@ test("T14 HIGH-11: agent cannot be add_member'd; guard_last_owner ignores an age
 
 // ===========================================================================
 // T17 — privilege matrix; T17b — post-migrate canary (no PUBLIC/default leak)
+//
+// THE CENSUS IS EXPLICIT AND GROWS PER WAVE. `grantMatrixFailures()` sweeps the LIVE clara
+// catalog against rig-meta's per-role EXECUTE allowlist, so every new verb is expected-false
+// until someone WRITES IT DOWN. 0045 (Wave D-b, slice D-b2) closes the four-slice split: it
+// adds 40 net-new functions — 12 granted (7 template/pair write verbs, 3 /rules reads, the
+// runtime-only sweep verb and the shared due probe) plus 28 ungranted internals — and it lands
+// ONE grant on a function it did not create. The roster lives in rig-meta's
+// ADJUSTMENTS_0045_COHORT block, and it is the first Wave D-b cohort to exist at all:
+// `cohortFailures()` fails a PARTIAL cohort by design, so D-b0/D-b1/D-b3 could each only add
+// grant-matrix rows and had to leave the roster to the slice whose frontier makes it whole.
+// Those 40 names were DERIVED by diffing pg_proc across a 0044 rig and a 0045 rig built from
+// the same template, not read off the migration text — which is also how the pre-split tree's
+// claim that `_wdb_reversal_blocked`, the `_adv_*` family and the three money `_core`s were
+// D-b2-new was caught: all of them measure PRESENT at 0044.
+//
+// Three rows carry the wave's sharpest edges. `run_adjustment_occurrence` is clara_runtime
+// ONLY — it has no role_rank floor, so the grant IS its authority. `adjustment_run_due` is the
+// one name BOTH lanes hold (design §3.4's depreciation_run_due precedent).
+// `accept_bank_rule_suggestion` is the grant: 0044 created the producer and withheld its
+// EXECUTE because the approve-time re-validation that makes it safe is clara._adj_on_approve
+// arm (3), a body that ships here — so this cell flips it from expected-false to expected-true
+// in the same migration that supplies the door. Every underscore-prefixed internal — the
+// occurrence core, the pair core, the content-hash pair, the P1 lineage authority, the five
+// trigger functions — is app-callable by NO role, and the sweep's expected-false proves it.
 // ===========================================================================
 test("T17 grant matrix: exact per-role EXECUTE, no PUBLIC leak, helpers/cores not app-callable", async (t) => {
   if (unready(t)) return;
