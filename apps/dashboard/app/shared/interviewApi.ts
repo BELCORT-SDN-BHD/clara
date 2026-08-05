@@ -21,8 +21,9 @@ import { runtimeBase } from "./wire";
 
 /** The typed runtime error envelope (settled plan §3.5): every non-2xx interview route
  *  reply is `{ error: <code>, message? }`; we surface it as {status, code, message}. The
- *  409/not_pending branch (F6) is `code === "not_pending"` — the caller treats it as
- *  already-delivered and refreshes /state (the park index advanced under it). */
+ *  409/not_pending branch (F6) is `code === "not_pending"` — a LOSSY status that conflates
+ *  "already delivered" with "dropped", so it is never read as delivery on its own; see
+ *  `answerInterview`, which disambiguates it against /state. */
 export class RuntimeApiError extends Error {
   readonly status: number;
   readonly code: string;
@@ -303,16 +304,48 @@ export async function getInterviewState(token: string, q: StateQuery): Promise<I
 
 export type AnswerArgs = { runId: string; scope: InterviewScope; parkIndex: number; value: unknown; planId?: string | null };
 
-/** POST /answer — deliver a validated answer into the current park's hook. A 409/not_pending
- *  (the park advanced under the caller — F6) throws a RuntimeApiError the caller detects with
- *  `isNotPending` and treats as already-delivered ⇒ refresh /state. */
-export async function answerInterview(token: string, a: AnswerArgs): Promise<void> {
-  const res = await runtimeFetch("/api/interview/answer", token, {
+function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
+  return runtimeFetch("/api/interview/answer", token, {
     method: "POST",
     body: JSON.stringify({ runId: a.runId, scope: a.scope, parkIndex: a.parkIndex, value: a.value, planId: a.planId ?? undefined }),
   });
+}
+
+/** POST /answer — deliver a validated answer into the current park's hook.
+ *
+ *  THE not_pending CONTRACT IS LOSSY, AND THIS IS ITS CLIENT HALF (GH #152 / PR #186). The
+ *  route answers 409 `not_pending` for two facts it cannot tell apart: the park genuinely
+ *  advanced (our answer already landed — benign), and the hook was not armed when we POSTed
+ *  (our answer was DROPPED). PR #186 closed the runtime half — v3 arms the hook before the park
+ *  is announced, so the drop is no longer reachable through that window — but the STATUS stays
+ *  ambiguous by construction, and assuming "already delivered" is precisely how the original
+ *  bug stayed invisible in production: the answer vanished and the human just retyped.
+ *
+ *  So a 409 is DISAMBIGUATED against /state, never assumed. Re-read ONCE:
+ *    · the SAME park is still open   ⇒ nothing landed        ⇒ re-POST ONCE.
+ *    · the park advanced / terminal  ⇒ the answer did land   ⇒ return normally.
+ *    · the re-read itself failed     ⇒ undiagnosable         ⇒ surface the ORIGINAL refusal.
+ *  Only a retry that ALSO fails is surfaced. A caller that sees this throw therefore knows the
+ *  answer is genuinely undelivered — `deliverValue`'s F-M10 receipt retention relies on it. */
+export async function answerInterview(token: string, a: AnswerArgs): Promise<void> {
+  const res = await postAnswer(token, a);
   if (res.status === 200) return;
-  throw errorFrom(res.status, await bodyOf(res));
+
+  const refusal = errorFrom(res.status, await bodyOf(res));
+  if (!isNotPending(refusal)) throw refusal;
+
+  let stillOpenAtOurPark: boolean;
+  try {
+    const s = await getInterviewState(token, { runId: a.runId, scope: a.scope, planId: a.planId });
+    stillOpenAtOurPark = s.pendingPark?.parkIndex === a.parkIndex;
+  } catch {
+    throw refusal; // cannot tell delivered from dropped — keep the runtime's own word for it
+  }
+  if (!stillOpenAtOurPark) return; // the benign half: the park moved on, so our answer landed
+
+  const retry = await postAnswer(token, a);
+  if (retry.status === 200) return;
+  throw errorFrom(retry.status, await bodyOf(retry));
 }
 
 export type CancelArgs = { runId: string; scope: InterviewScope; parkIndex: number; planId?: string | null };

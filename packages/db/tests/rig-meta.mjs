@@ -375,20 +375,23 @@ const ADV_0043_HUMAN_FNS = [
 const ADV_0043_READ_FNS = [
   "staff_advance_summary", "staff_advance_statement", "staff_advance_tie",
 ];
-// 0043's THIRTEEN internal helpers (clara._adv_assert_proposal, _adv_enrolment_at,
+// 0043's SEVENTEEN internal helpers (clara._adv_assert_proposal, _adv_enrolment_at,
 // _adv_window_closed_under, _adv_enrolment_admission, _adv_outstanding, _adv_over_application,
 // _adv_release_one_way, _adv_net_applications, _adv_entry_carries_correction,
-// _adv_reversal_admission, _adv_reversal_blocked, _adv_on_approve, _tf_adv_movement_belt) are
-// named in NO role set on purpose: each was revoked from public at its own creation site and
-// each is reached only through a SECURITY DEFINER verb, the approve hook or the belt. The main
+// _adv_reversal_admission, _adv_reversal_blocked, _adv_on_approve, _tf_adv_movement_belt,
+// _tf_staff_advance_account_no_delete, _tf_staff_advance_append_only,
+// _tf_staff_advance_application_correction_guard, _wdb_reversal_blocked) are named in NO role
+// set on purpose: each was revoked from public at its own creation site and each is reached
+// only through a SECURITY DEFINER verb, the approve hook, the belt or a table trigger. The main
 // sweep already fails if any of them ever GAINS a grant, so their absence is enforced without
 // a cohort. The disappearance half of that contract IS now covered: they are enumerated in
 // ADV_0043_UNGRANTED_FNS just below and spread into ADJUSTMENTS_0045_COHORT at the 0045 block.
 
 // 0043's SEVENTEEN ungranted internals, declared the 0020 way so the cohort's
 // disappearance half reaches them too. DERIVED by diffing pg_proc across a 0042 rig
-// and a 0043 rig — not transcribed from the prose above, which names thirteen and
-// misses the three _tf_staff_advance_* triggers and _wdb_reversal_blocked.
+// and a 0043 rig, never transcribed from prose — THIS array is the roster of record and the
+// enumeration above is kept in step with it (MG188-2: that enumeration read thirteen until
+// 2026-08-06, missing the three _tf_staff_advance_* triggers and _wdb_reversal_blocked).
 const ADV_0043_UNGRANTED_FNS = [
   "_adv_assert_proposal", "_adv_enrolment_at", "_adv_window_closed_under",
   "_adv_enrolment_admission", "_adv_outstanding", "_adv_over_application",
@@ -429,18 +432,25 @@ const ADV_0043_UNGRANTED_FNS = [
 // the main sweep below iterates the LIVE catalog and fails the moment it gains a grant here.
 // Its dashboard chip and its test cells defer to D-b2 with it.
 const AF2_0044_HUMAN_FNS = ["resolve_and_book_bank_line"];
-// 0044's internals — the three preheld-aware money cores factored out of clara.allocate_receipt /
-// allocate_payment / settle_from_bank_line so the composite can pre-reserve their op keys and
-// spend them preheld, the suggestion pair (clara._wdb_suggestion_rule_hit,
-// _wdb_suggestion_lines), the shared line-keyed booking-block predicate
-// (clara._wdb_line_booking_block) and the park's set-once trigger function — are named in NO
-// role set on purpose. A grant on a `_core` would be a FLOORLESS money verb: the floor stayed
-// in the public wrapper. The main sweep already fails if any of them ever GAINS a grant, so
-// their absence is enforced without a cohort; the disappearance half IS now covered too, by
-// AF2_0044_UNGRANTED_FNS just below, spread into ADJUSTMENTS_0045_COHORT at the 0045 block.
+// 0044's FOURTEEN internals — the three preheld-aware money cores factored out of
+// clara.allocate_receipt / allocate_payment / settle_from_bank_line so the composite can
+// pre-reserve their op keys and spend them preheld (clara._allocate_receipt_core,
+// _allocate_payment_core, _settle_from_bank_line_core), the settle request hash
+// (_settle_request_hash), the bank-snapshot helpers (_bank_adjustments_norm,
+// _bank_parked_cascade_admitted, _bank_recon_snapshot_parked), the suggestion pair
+// (_wdb_suggestion_rule_hit, _wdb_suggestion_lines), the booking-lawfulness family — the
+// shared line-keyed booking-block predicate and the three predicates around it
+// (_wdb_line_booking_block, _wdb_assert_line_booking_lawful, _wdb_born_in_booking_act,
+// _wdb_exception_booking_block) — and the park's set-once trigger function
+// (_tf_bank_matches_resolution_exception_immutable) are named in NO role set on purpose. A
+// grant on a `_core` would be a FLOORLESS money verb: the floor stayed in the public wrapper.
+// The main sweep already fails if any of them ever GAINS a grant, so their absence is enforced
+// without a cohort; the disappearance half IS now covered too, by AF2_0044_UNGRANTED_FNS just
+// below, spread into ADJUSTMENTS_0045_COHORT at the 0045 block.
 
 // 0044's FOURTEEN ungranted internals, same discipline, same derivation (0043 rig vs
-// 0044 rig). The prose above names seven of them; these are all of them.
+// 0044 rig). THIS array is the roster of record and the enumeration above is kept in step
+// with it (MG188-2: that enumeration named only seven of them until 2026-08-06).
 const AF2_0044_UNGRANTED_FNS = [
   "_allocate_receipt_core", "_allocate_payment_core", "_settle_from_bank_line_core",
   "_settle_request_hash", "_bank_adjustments_norm", "_bank_parked_cascade_admitted",
