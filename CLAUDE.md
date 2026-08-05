@@ -107,7 +107,9 @@ slice (ADR-047/048) · the settlement program (ADR-049) · the first production 
 (ADR-050) · **C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliation receipts at exactly 0,
 nine real RPR months chained to the sen; records `wave-c-*-design.md` + parts).
 
-**LIVE POSTURE: 43 migrations (frontier `0044`) · Fly `clara-runtime` v53 · Supavisor 32/60 ·
+**LIVE POSTURE: 43 migrations (frontier `0044`) · Fly `clara-runtime` **v54** (interview v3 —
+hooks arm before the park announces, PR #186 — + the adjustments belt dormant until `0045`) ·
+Supavisor 31/60 ·
 FOUR firms** (BELCORT — real, 3 clients, high-stakes RM100,000 ADR-044 · ROME PUBLIC ADVISORY
 `39008536` = the Gate-S synthetic sandbox, RM10k default — its only client is "Fictional Test
 Services"; do not confuse with BELCORT's real ROME PROPERTIES / ROME SECRETARY · Alara +
