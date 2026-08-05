@@ -382,7 +382,22 @@ const ADV_0043_READ_FNS = [
 // named in NO role set on purpose: each was revoked from public at its own creation site and
 // each is reached only through a SECURITY DEFINER verb, the approve hook or the belt. The main
 // sweep already fails if any of them ever GAINS a grant, so their absence is enforced without
-// a cohort. The disappearance half of that contract arrives with the cohort at D-b2.
+// a cohort. The disappearance half of that contract IS now covered: they are enumerated in
+// ADV_0043_UNGRANTED_FNS just below and spread into ADJUSTMENTS_0045_COHORT at the 0045 block.
+
+// 0043's SEVENTEEN ungranted internals, declared the 0020 way so the cohort's
+// disappearance half reaches them too. DERIVED by diffing pg_proc across a 0042 rig
+// and a 0043 rig — not transcribed from the prose above, which names thirteen and
+// misses the three _tf_staff_advance_* triggers and _wdb_reversal_blocked.
+const ADV_0043_UNGRANTED_FNS = [
+  "_adv_assert_proposal", "_adv_enrolment_at", "_adv_window_closed_under",
+  "_adv_enrolment_admission", "_adv_outstanding", "_adv_over_application",
+  "_adv_release_one_way", "_adv_net_applications", "_adv_entry_carries_correction",
+  "_adv_reversal_admission", "_adv_reversal_blocked", "_adv_on_approve",
+  "_tf_adv_movement_belt", "_tf_staff_advance_account_no_delete",
+  "_tf_staff_advance_append_only",
+  "_tf_staff_advance_application_correction_guard", "_wdb_reversal_blocked",
+];
 
 // ---------------------------------------------------------------------------
 // 0044 [Wave D-b, SLICE D-b3] — the AF-2 composite (`resolve_and_book_bank_line`).
@@ -421,8 +436,19 @@ const AF2_0044_HUMAN_FNS = ["resolve_and_book_bank_line"];
 // (clara._wdb_line_booking_block) and the park's set-once trigger function — are named in NO
 // role set on purpose. A grant on a `_core` would be a FLOORLESS money verb: the floor stayed
 // in the public wrapper. The main sweep already fails if any of them ever GAINS a grant, so
-// their absence is enforced without a cohort; the disappearance half arrives with the cohort
-// at D-b2.
+// their absence is enforced without a cohort; the disappearance half IS now covered too, by
+// AF2_0044_UNGRANTED_FNS just below, spread into ADJUSTMENTS_0045_COHORT at the 0045 block.
+
+// 0044's FOURTEEN ungranted internals, same discipline, same derivation (0043 rig vs
+// 0044 rig). The prose above names seven of them; these are all of them.
+const AF2_0044_UNGRANTED_FNS = [
+  "_allocate_receipt_core", "_allocate_payment_core", "_settle_from_bank_line_core",
+  "_settle_request_hash", "_bank_adjustments_norm", "_bank_parked_cascade_admitted",
+  "_bank_recon_snapshot_parked", "_wdb_suggestion_rule_hit", "_wdb_suggestion_lines",
+  "_wdb_line_booking_block", "_wdb_assert_line_booking_lawful",
+  "_wdb_born_in_booking_act", "_wdb_exception_booking_block",
+  "_tf_bank_matches_resolution_exception_immutable",
+];
 
 // ---------------------------------------------------------------------------
 // 0045 [Wave D-b, SLICE D-b2] — recurring adjustment templates, the auto-reversal pair
@@ -512,10 +538,14 @@ const ADJ_0045_UNGRANTED_FNS = [
   "_tf_adjustment_run_immutable",
   "_tf_adjustment_pair_reversal_transition", "_tf_adjustment_pair_reversal_no_commit_approving",
 ];
-// THE WAVE D-b ROSTER, WHOLE AT LAST. D-b1's and D-b3's granted names are spread BY REFERENCE
-// rather than re-listed, so the two declarations can never drift apart.
+// THE WAVE D-b ROSTER, WHOLE AT LAST. D-b1's and D-b3's names — granted AND ungranted — are
+// spread BY REFERENCE rather than re-listed, so the declarations can never drift apart. The
+// two ungranted spreads are what discharge the "disappearance half" promise those blocks made:
+// cohortFailures() can only notice a name VANISHING if some cohort lists it, and D-b2 is the
+// last slice, so this is the last chance to list them.
 export const ADJUSTMENTS_0045_COHORT = [
-  ...ADV_0043_HUMAN_FNS, ...ADV_0043_READ_FNS, ...AF2_0044_HUMAN_FNS,
+  ...ADV_0043_HUMAN_FNS, ...ADV_0043_READ_FNS, ...ADV_0043_UNGRANTED_FNS,
+  ...AF2_0044_HUMAN_FNS, ...AF2_0044_UNGRANTED_FNS,
   ...ADJ_0045_HUMAN_FNS, ...ADJ_0045_PRODUCER_GRANT_FNS, ...ADJ_0045_READ_FNS,
   ...ADJ_0045_RUNTIME_FNS, ...ADJ_0045_SHARED_FNS, ...ADJ_0045_UNGRANTED_FNS,
 ];
