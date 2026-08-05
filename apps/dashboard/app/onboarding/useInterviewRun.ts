@@ -3,13 +3,15 @@
 // The interview run controller (settled dashboard plan §3.1): polls GET /state (the pinned
 // resume surface — the SSE stream is only a live nicety, so plumbing-grade polling is correct),
 // maintains the append-only Activity thread (seeded from the durable plan items on resume, then
-// grown as the park index advances), and delivers answers. A 409/not_pending on an answer means
-// the park advanced under us (F6) — we refresh /state rather than error. The two-step client
-// cancel lives in the page; this hook exposes the runtime-cancel primitive.
+// grown as the park index advances), and delivers answers. A 409/not_pending on an answer is
+// LOSSY (GH #152) and `answerInterview` owns its whole recovery — it re-reads /state, retries a
+// genuinely-dropped answer once, and resolves when the park has in fact advanced — so anything
+// that reaches THIS hook as an error is an undelivered answer and is surfaced, never swallowed.
+// The two-step client cancel lives in the page; this hook exposes the runtime-cancel primitive.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getInterviewState, answerInterview, cancelInterview, isNotPending,
+  getInterviewState, answerInterview, cancelInterview,
   type InterviewState, type InterviewScope, type PendingPark, type CancelResult,
 } from "../shared/interviewApi";
 import { seedThread, promptEntry, answerEntry, appendUnique, foldActivityThread, type ThreadEntry } from "./thread";
@@ -75,16 +77,20 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
       await answerInterview(token, { runId: runId!, scope, parkIndex: park.parkIndex, value: text, planId });
       await refresh();
     } catch (e) {
-      if (isNotPending(e)) { await refresh(); } else { setError((e as Error).message); }
+      // The lossy 409 was already disambiguated and retried inside answerInterview, so a throw
+      // here means the answer is genuinely UNDELIVERED — surfaced, never swallowed as
+      // "already delivered" (that swallow is how GH #152 hid in production for a whole wave).
+      setError((e as Error).message);
     } finally {
       setBusy(false);
     }
   }, [token, runId, scope, planId, refresh]);
 
   /** Deliver a typed value (e.g. the firm create_firm receipt) without a text bubble. F-M10:
-   *  returns whether delivery CONFIRMED — true on a 200 (or a 409/not_pending, which means the
-   *  park already advanced ⇒ effectively delivered), false on a genuine failure, so the caller
-   *  can retain its receipt and offer a retry without re-asking the admission token. */
+   *  returns whether delivery CONFIRMED — true once answerInterview resolves (on a 200, or on a
+   *  lossy 409 only after a /state re-read PROVED the park advanced), false on a genuine
+   *  failure, so the caller can retain its receipt and offer a retry without re-asking the
+   *  admission token. A dropped receipt now reports false rather than a false-confirming true. */
   const deliverValue = useCallback(async (park: PendingPark, value: unknown, note?: string): Promise<boolean> => {
     setBusy(true);
     setError(null);
@@ -94,7 +100,8 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
       await refresh();
       return true;
     } catch (e) {
-      if (isNotPending(e)) { await refresh(); return true; }
+      // Genuinely undelivered (answerInterview already re-read /state and retried): report false
+      // so the caller RETAINS its create_firm receipt for a manual retry.
       setError((e as Error).message);
       return false;
     } finally {

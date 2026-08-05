@@ -243,8 +243,9 @@ async function main() {
     assert.equal(terminalState.terminal.outcome, "cancelled", "the streamed terminal marker is authoritative (a cancel returns normally)");
 
     // The 'cancelled' outcome above is a DOMAIN-level SegmentResult/terminal() branch
-    // (interview.v1.core.ts) — clientOnboarding_v1 returns NORMALLY from that branch
-    // (`return { ..., outcome: 'cancelled', ... }`), it never calls an engine-level
+    // (interview.v2.core.ts — the segment core the REGISTERED client-onboarding body drives;
+    // no version is named here, per this file's header law) — that body returns NORMALLY
+    // from the branch (`return { ..., outcome: 'cancelled', ... }`), it never calls an engine-level
     // cancel API. So the WDK engine sees an ordinary successful return: the run row's
     // status is DETERMINISTICALLY 'completed', not 'cancelled' — tightened from the
     // original terminal-set assert (verified by an actual e2e run, not just the source).
@@ -292,7 +293,7 @@ async function main() {
 
     const terminalState = await pollState({ runId, scope: "firm" }, jwt, (b) => b.status === "cancelled" && b.terminal?.outcome === "cancelled", "firm cancel terminal");
     assert.equal(terminalState.terminal.outcome, "cancelled");
-    // firmInterview_v1 never reached create_firm — the terminal carries no firm/plan id.
+    // The cancelled run never reached create_firm — the terminal carries no firm/plan id.
     // (FINDING: the cancel branch streams only {outcome, answered}; firmId/planId are ABSENT,
     // i.e. undefined, not the design's literal null — asserted via == null, honest for both.)
     assert.ok(terminalState.terminal.firmId == null, "no firmId in the cancel terminal (never created)");
