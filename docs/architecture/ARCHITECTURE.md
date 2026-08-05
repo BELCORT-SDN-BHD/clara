@@ -52,6 +52,20 @@ Consumers subscribe to the event stream and maintain derived read models: the pe
 
 Three new event-stream consumers join the existing five loops (Wave A2.1, ADR-028/029/030): **`classify`** (document-type resolution, §7), **`facts_gate`** (the classify-first facts dispatch — a document with no resolved kind is routed through the classify lane first, then its facts re-fire: `invoice`/`credit_note`/`debit_note` → `invoice_facts`, XML → `local_facts`, other kinds → a `skipped_kind` receipt), and **`sst_watch`** (the SST registration compliance watch on `entry.approved`, §8). The SST watch also carries a **daily repair belt on the reconciler** — a first-cycle-at-boot sweep that re-evaluates every active client from the books (catching pre-existing crossings, backdating, reversals, schedule/classification changes) and writes one append-only evaluation receipt. The belt evaluates **one client per statement, never all clients in one call**: the evaluator's state transition emits a domain event whose first act row-locks the firm's `firm_event_seq` counter until commit, so a single all-clients transaction would hold that lock across the whole sweep and stall every concurrent writer (approval, draft, chat turn, ingest) behind it — per-client statements take and release the lock per client instead.
 
+**The reconciler now carries FOUR daily belts, not one** (as-built 2026-08-06, all on the
+leader's daily flag, all feature-detecting their own DB surface so a runtime image can boot
+before its migration lands): `sst_watch` (above, `0016`) · the per-client **wiki-lint** belt
+(Wave B) · the **FA depreciation-run** belt (Wave D-a, `0041`) · the **recurring-adjustment**
+belt (Wave D-b2, `0045`). The last one is architecturally new in kind: it is the product's
+**first calendar-triggered poster** — until `0045` nothing in Clara posted on a schedule, only
+in response to an event or a human. Its autonomy is bounded by one authority doctrine shared
+with the FA belt (WD-R5/WD-R8): nothing runs without an **admin+-signed per-client authority**;
+the **first occurrence under a template always DRAFTS** (the ramp), so a human sees the shape
+before any autonomy is earned; only afterwards do occurrences auto-post, each with a receipt;
+and a **high-stakes occurrence always routes to a distinct human checker** regardless of ramp.
+Autonomy is forward-only from the signing date — catch-up occurrences all draft. The
+per-client-statement rule above binds this belt for the same `firm_event_seq` reason.
+
 ### 2.3 Context packs + freshness
 - Before any accounting decision, Clara calls `get_context_pack(client_id, purpose)` → a fresh, typed pack: client profile, FY/period + lock state, MSIC/business description, SST/tax status, COA policy, relevant documents, journal history slice, approval/reversal history, reconciliation exceptions, open questions (must-asks), the relevant wiki pages, and the **current books-version token**.
 - Every pack carries the version token. A write asserts the token is still current (optimistic concurrency); a stale pack forces a re-fetch — Clara **never acts on stale context** (fixes A-7). Figures from an earlier chat turn can never replay as authoritative.
