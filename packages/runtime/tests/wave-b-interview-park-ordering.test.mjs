@@ -216,6 +216,25 @@ function bindingRefusal(sf, name, moduleRe) {
   };
   visit(sf);
 
+  // A NAMESPACE import reaches the very same export under a different spelling —
+  // `import * as w from "workflow"` then `w.createHook()` is the real arm, invisible to a
+  // bare-identifier walk. Both angles are refused: the namespace import itself, and any
+  // property call bearing the name whatever its object.
+  let namespaced = 0;
+  let qualifiedCalls = 0;
+  const visit2 = (n) => {
+    if (ts.isNamespaceImport(n)) {
+      const spec = n.parent.parent.moduleSpecifier;
+      if (ts.isStringLiteral(spec) && moduleRe.test(spec.text)) namespaced++;
+    } else if (
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === name
+    ) qualifiedCalls++;
+    ts.forEachChild(n, visit2);
+  };
+  visit2(sf);
+  if (namespaced > 0) return `the module providing '${name}' is also imported as a NAMESPACE — '${name}' could be reached qualified, where a bare-identifier walk cannot see it`;
+  if (qualifiedCalls > 0) return `'${name}' is called as a PROPERTY (${qualifiedCalls} site(s)) — the guard reads bare calls only, so a qualified call would be invisible to the ordering test`;
+
   if (typeOnly) return `'${name}' is imported TYPE-ONLY — it binds nothing at runtime, so no call of that name can be the real one`;
   if (aliased) return `'${name}' is an ALIAS for a different export — the local spelling matches but the imported symbol does not`;
   if (imported === 0) return `'${name}' is not imported from a module matching ${moduleRe} — the call cannot be proven to be the real one`;
@@ -258,12 +277,21 @@ export function registeredInterviewBodies(workflowsDir = WORKFLOWS) {
   }
   if (!table) throw new Error("registry.ts declares no `workflows` object literal");
 
+  // A SPREAD can silently override an earlier entry — `{ clientOnboarding: v3, ...{
+  // clientOnboarding: v2 } }` runs v2 while a first-match resolver certifies v3. The table must
+  // therefore contain no spreads at all, and exactly one assignment per guarded class.
+  if (table.properties.some((p) => ts.isSpreadAssignment(p))) {
+    throw new Error("registry.ts's `workflows` table contains a SPREAD — a later spread can override a guarded entry, so the effective body cannot be resolved statically");
+  }
+
   const bodies = [];
   for (const cls of ["firmInterview", "clientOnboarding"]) {
-    const prop = table.properties.find(
+    const matches = table.properties.filter(
       (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === cls,
     );
-    if (!prop || !ts.isIdentifier(prop.initializer)) {
+    if (matches.length !== 1) throw new Error(`registry.ts declares '${cls}' ${matches.length} times — the effective body is ambiguous`);
+    const prop = matches[0];
+    if (!ts.isIdentifier(prop.initializer)) {
       throw new Error(`registry.ts names no plain identifier for '${cls}'`);
     }
     const ident = prop.initializer.text;
@@ -401,35 +429,86 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
   const armExpr = src.match(armRe)[0].trim().replace(/^const hook = /, "").replace(/;$/, "");
   const ann = src.match(annRe)[0];
 
+  // Each shape carries the REASON it must be refused for. Asserting only `ok === false` would
+  // let a shape start passing for an unrelated reason and quietly stop testing what it was
+  // written for — a self-test that has silently gone vacuous is worse than none.
   const shapes = [
-    ["the arm inside `if (false)`", (s) => s.replace(armRe, `    if (false) { const hook = ${armExpr}; }\n    const hook = null as never;`)],
-    ["the announce as the arm's own ARGUMENT (it evaluates first)", (s) => s.replace(annRe, "").replace(armRe, `    const hook = createHook<Resolution>(({ x: ${ann.trim().replace(/;$/, "")} }) as never);`)],
-    ["a constructor arming, instantiated after the announce", (s) => s.replace(armRe, `    class A { h: unknown; constructor() { this.h = ${armExpr}; } }`).replace(annRe, `${ann}\n    const hook = new A().h as never;`)],
-    ["an instance FIELD arming, instantiated after the announce", (s) => s.replace(armRe, `    class A { h = ${armExpr}; }`).replace(annRe, `${ann}\n    const hook = new A().h as never;`)],
-    ["a skipped destructuring default", (s) => s.replace(armRe, `    const { z: hook = ${armExpr} } = { z: 1 as never };`)],
-    ["an unreachable arm after `break` in a labelled block", (s) => s.replace(armRe, `    let hook: never = null as never;\n    lbl: { break lbl; hook = ${armExpr}; }`)],
-    ["`maybe?.(createHook())`, whose argument is skipped", (s) => s.replace(armRe, `    const maybe: ((x: unknown) => never) | undefined = undefined;\n    const hook = maybe?.(${armExpr}) as never;`)],
+    ["the arm inside `if (false)`",
+      (s) => s.replace(armRe, `    if (false) { const hook = ${armExpr}; }\n    const hook = null as never;`), /CONDITIONAL or LOOP/],
+    ["the announce as the arm's own ARGUMENT (it evaluates first)",
+      // The canonical-shape rule now catches this before the same-statement rule can: an
+      // announce buried in the arm's arguments is not `await streamPromptStep(...)` either way.
+      (s) => s.replace(annRe, "").replace(armRe, `    const hook = createHook<Resolution>(({ x: ${ann.trim().replace(/;$/, "")} }) as never);`), /canonical|share statement/],
+    ["a constructor arming, instantiated after the announce",
+      (s) => s.replace(armRe, `    class A { h: unknown; constructor() { this.h = ${armExpr}; } }`).replace(annRe, `${ann}\n    const hook = new A().h as never;`), /OUTSIDE the analysed|canonical/],
+    ["an instance FIELD arming, instantiated after the announce",
+      (s) => s.replace(armRe, `    class A { h = ${armExpr}; }`).replace(annRe, `${ann}\n    const hook = new A().h as never;`), /OUTSIDE the analysed|canonical/],
+    ["a skipped destructuring default",
+      (s) => s.replace(armRe, `    const { z: hook = ${armExpr} } = { z: 1 as never };`), /canonical/],
+    ["an unreachable arm after `break` in a labelled block",
+      (s) => s.replace(armRe, `    let hook: never = null as never;\n    lbl: { break lbl; hook = ${armExpr}; }`), /canonical/],
+    ["`maybe?.(createHook())`, whose argument is skipped",
+      (s) => s.replace(armRe, `    const maybe: ((x: unknown) => never) | undefined = undefined;\n    const hook = maybe?.(${armExpr}) as never;`), /canonical/],
     // SPELLING IS NOT IDENTITY: a local decoy named like the import satisfies the order test
     // while the REAL hook is never created.
-    ["a local `createHook` shadowing the real import", (s) =>
-      s.replace('import { createHook } from "workflow";', 'import { createHook as realCreateHook } from "workflow";\nfunction createHook<T>(_a: unknown): T { return null as T; }\nvoid realCreateHook;')],
-    ["a local `streamPromptStep` shadowing the real import", (s) =>
-      s.replace("import { mintOpKeyStep, runIdStep, streamPromptStep,", "import { mintOpKeyStep, runIdStep, streamPromptStep as realStreamPromptStep,")
-        .replace(armRe, `    async function streamPromptStep(_a: unknown): Promise<void> { void realStreamPromptStep; }\n${src.match(armRe)[0]}`)],
+    ["a local `createHook` shadowing the real import",
+      (s) => s.replace('import { createHook } from "workflow";', 'import { createHook as realCreateHook } from "workflow";\nfunction createHook<T>(_a: unknown): T { return null as T; }\nvoid realCreateHook;'), /not imported from a module|bound locally/],
+    ["a local `streamPromptStep` shadowing the real import",
+      (s) => s.replace("import { mintOpKeyStep, runIdStep, streamPromptStep,", "import { mintOpKeyStep, runIdStep, streamPromptStep as realStreamPromptStep,")
+        .replace(armRe, `    async function streamPromptStep(_a: unknown): Promise<void> { void realStreamPromptStep; }\n${src.match(armRe)[0]}`), /not imported from a module|bound locally/],
     // …and the same trick one level subtler: the local NAME is right, the imported SYMBOL is not.
-    ["`streamTerminalStep as streamPromptStep` — right spelling, wrong export", (s) =>
-      s.replace("import { mintOpKeyStep, runIdStep, streamPromptStep,", "import { mintOpKeyStep, runIdStep, streamTerminalStep as streamPromptStep,")],
-    ["`const { createHook } = decoy` — a DESTRUCTURED shadow", (s) =>
-      s.replace(armRe, `    const decoy = { createHook: <T,>(_a: unknown): T => null as T };\n    const { createHook } = decoy;\n${src.match(armRe)[0]}`)],
+    ["`streamTerminalStep as streamPromptStep` — right spelling, wrong export",
+      (s) => s.replace("import { mintOpKeyStep, runIdStep, streamPromptStep,", "import { mintOpKeyStep, runIdStep, streamTerminalStep as streamPromptStep,"), /ALIAS for a different export/],
+    ["`const { createHook } = decoy` — a DESTRUCTURED shadow",
+      (s) => s.replace(armRe, `    const decoy = { createHook: <T,>(_a: unknown): T => null as T };\n    const { createHook } = decoy;\n${src.match(armRe)[0]}`), /bound locally/],
+    ["a TYPE-ONLY import of createHook, which binds nothing at runtime",
+      (s) => s.replace('import { createHook } from "workflow";', 'import type { createHook } from "workflow";'), /TYPE-ONLY/],
+    ["a NAMESPACE import of the arm's module, reachable qualified",
+      (s) => s.replace('import { createHook } from "workflow";', 'import { createHook } from "workflow";\nimport * as workflowNs from "workflow";\nvoid workflowNs;'), /NAMESPACE/],
+    ["a QUALIFIED `ns.createHook()` call the bare-identifier walk cannot see",
+      (s) => s.replace(armRe, `    const ns = { createHook: <T,>(_a: unknown): T => null as T };\n    void ns.createHook(1);\n${src.match(armRe)[0]}`), /called as a PROPERTY/],
   ];
 
-  for (const [label, mutate] of shapes) {
+  for (const [label, mutate, reason] of shapes) {
     const dir = mkdtempSync(join(tmpdir(), "park-order-selftest-"));
     try {
       cpSync(WORKFLOWS, dir, { recursive: true });
-      writeFileSync(join(dir, "clientOnboarding.v3.ts"), mutate(src));
+      const mutated = mutate(src);
+      assert.notEqual(mutated, src, `the "${label}" mutation did not apply — this self-test would be VACUOUS`);
+      writeFileSync(join(dir, "clientOnboarding.v3.ts"), mutated);
       const finding = analyzeParkOrdering(dir).find((f) => f.file === "clientOnboarding.v3.ts");
       assert.equal(finding.ok, false, `the guard must REFUSE ${label}, but it certified it: ${finding.detail}`);
+      assert.match(finding.detail, reason, `${label} was refused, but for the WRONG reason: ${finding.detail}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("GH #152: the guard REFUSES a registry that does not resolve to the body it certifies", () => {
+  // The registry half of the same lesson: certifying clientOnboarding.v3.ts is worthless if the
+  // table would not actually run it. Each of these makes the resolver refuse, loudly.
+  const registry = readFileSync(join(WORKFLOWS, "registry.ts"), "utf8");
+  const mutations = [
+    ["an ALIASED import binding a different export to the registry name",
+      (s) => s.replace('import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";', 'import { clientOnboarding_v2 as clientOnboarding_v3 } from "./clientOnboarding.v2.js";'),
+      /DIFFERENT export/],
+    ["a later SPREAD silently overriding the guarded entry",
+      (s) => s.replace("  clientOnboarding: clientOnboarding_v3,", "  clientOnboarding: clientOnboarding_v3,\n  ...{ clientOnboarding: clientOnboarding_v2 },"),
+      /SPREAD/],
+    ["the class declared TWICE, where the last one wins at runtime",
+      (s) => s.replace("  clientOnboarding: clientOnboarding_v3,", "  clientOnboarding: clientOnboarding_v3,\n  clientOnboarding: clientOnboarding_v2,"),
+      /2 times/],
+  ];
+
+  for (const [label, mutate, reason] of mutations) {
+    const dir = mkdtempSync(join(tmpdir(), "park-order-registry-"));
+    try {
+      cpSync(WORKFLOWS, dir, { recursive: true });
+      const mutated = mutate(registry);
+      assert.notEqual(mutated, registry, `the "${label}" mutation did not apply — this self-test would be VACUOUS`);
+      writeFileSync(join(dir, "registry.ts"), mutated);
+      assert.throws(() => analyzeParkOrdering(dir), reason, `the resolver must REFUSE ${label}`);
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
