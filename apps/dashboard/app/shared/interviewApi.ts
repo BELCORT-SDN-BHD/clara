@@ -35,8 +35,11 @@ export class RuntimeApiError extends Error {
   }
 }
 
+/** The lossy status, EXACTLY. Deliberately narrow: it matches the documented `not_pending` code
+ *  and nothing else. An earlier version also matched any bare 409, which would have handed a
+ *  future unrelated conflict (a plan that is not open, say) to the answer re-POST path. */
 export function isNotPending(err: unknown): boolean {
-  return err instanceof RuntimeApiError && (err.code === "not_pending" || err.status === 409);
+  return err instanceof RuntimeApiError && err.code === "not_pending";
 }
 
 async function runtimeFetch(path: string, token: string, init?: RequestInit): Promise<Response> {
@@ -321,31 +324,58 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
  *  ambiguous by construction, and assuming "already delivered" is precisely how the original
  *  bug stayed invisible in production: the answer vanished and the human just retyped.
  *
- *  So a 409 is DISAMBIGUATED against /state, never assumed. Re-read ONCE:
- *    · the SAME park is still open   ⇒ nothing landed        ⇒ re-POST ONCE.
- *    · the park advanced / terminal  ⇒ the answer did land   ⇒ return normally.
- *    · the re-read itself failed     ⇒ undiagnosable         ⇒ surface the ORIGINAL refusal.
+ *  So a 409 is DISAMBIGUATED against /state, never assumed — and the reading is FAIL-CLOSED ON
+ *  UNKNOWN (the ADR-059 armour law): only POSITIVE evidence counts as delivery, everything else
+ *  surfaces the original refusal. Re-read ONCE and classify:
+ *    · a park at a HIGHER index      ⇒ the park moved past ours  ⇒ delivered, return.
+ *    · a COMPLETE-class terminal     ⇒ the run reached its end   ⇒ delivered, return.
+ *    · the SAME park still open      ⇒ nothing landed            ⇒ re-POST ONCE.
+ *    · cancelled / expired / ended   ⇒ our answer never landed   ⇒ surface the refusal.
+ *    · no park and not terminal, a LOWER park index, an unparseable body, a failed read
+ *                                    ⇒ undiagnosable            ⇒ surface the refusal.
+ *  The last line is the one that matters: a `{}` body or a momentarily park-less "working" state
+ *  must NEVER read as delivery, or the dropped-answer bug walks straight back in through the
+ *  recovery meant to close it.
+ *
+ *  KNOWN RESIDUAL, named rather than papered over: "a higher park ⇒ my answer landed" is an
+ *  inference, not a receipt. A SECOND client on the same run (two tabs of the same principal —
+ *  a different principal is already refused by F1) could win the park with a different value and
+ *  advance it, and this lane would call that delivery. Closing it needs a server-authored
+ *  per-(run, park) delivery receipt the client can match its own value against; that is a runtime
+ *  contract change, not a client one. Until then the same-owner two-tab race stands.
+ *
  *  Only a retry that ALSO fails is surfaced. A caller that sees this throw therefore knows the
- *  answer is genuinely undelivered — `deliverValue`'s F-M10 receipt retention relies on it. */
+ *  answer is not confirmed delivered — `deliverValue`'s F-M10 receipt retention relies on it. */
 export async function answerInterview(token: string, a: AnswerArgs): Promise<void> {
   const res = await postAnswer(token, a);
   if (res.status === 200) return;
 
   const refusal = errorFrom(res.status, await bodyOf(res));
+  // Narrow ON PURPOSE: only the documented lossy status earns a re-read. Any OTHER 409 is a
+  // genuine conflict (a plan that is not open, say) and is reported as-is, never re-POSTed.
   if (!isNotPending(refusal)) throw refusal;
 
-  let stillOpenAtOurPark: boolean;
+  let s: InterviewState;
   try {
-    const s = await getInterviewState(token, { runId: a.runId, scope: a.scope, planId: a.planId });
-    stillOpenAtOurPark = s.pendingPark?.parkIndex === a.parkIndex;
+    s = await getInterviewState(token, { runId: a.runId, scope: a.scope, planId: a.planId });
   } catch {
     throw refusal; // cannot tell delivered from dropped — keep the runtime's own word for it
   }
-  if (!stillOpenAtOurPark) return; // the benign half: the park moved on, so our answer landed
 
-  const retry = await postAnswer(token, a);
-  if (retry.status === 200) return;
-  throw errorFrom(retry.status, await bodyOf(retry));
+  if (s.pendingPark) {
+    if (s.pendingPark.parkIndex > a.parkIndex) return; // the park moved PAST ours ⇒ delivered
+    if (s.pendingPark.parkIndex < a.parkIndex) throw refusal; // a different/restarted run
+    // Same park, still open: nothing landed. This is the ONE path that retries.
+    const retry = await postAnswer(token, a);
+    if (retry.status === 200) return;
+    throw errorFrom(retry.status, await bodyOf(retry));
+  }
+
+  // No open park. Only a COMPLETE-class end proves the run consumed its answers; a cancelled,
+  // expired or otherwise ended run proves the opposite, and a park-less running run proves
+  // nothing at all.
+  if (s.chip === "complete") return;
+  throw refusal;
 }
 
 export type CancelArgs = { runId: string; scope: InterviewScope; parkIndex: number; planId?: string | null };

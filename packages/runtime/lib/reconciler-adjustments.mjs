@@ -1,17 +1,18 @@
-// The recurring/reversing-adjustment occurrence daily sweep (Wave D-b §2.3/§2.7 —
-// migration 0042). Split out of reconciler.mjs like reconciler-sst.mjs / reconciler-lint.mjs
-// / reconciler-fa.mjs (module-size budget), and — like the D-a FA belt — the sweep must
-// FEATURE-DETECT its own DB surface: this runtime image ships before 0042 lands (the same
-// runtime-image-first, DB-second ceremony order design §2.7 inherits from D-a §3.4), so it
-// must boot dormant on pre-0042 and light on the very next cycle after 0042 applies, with
-// no restart.
+// The recurring/reversing-adjustment occurrence daily sweep (Wave D-b §2.3/§2.7 — the D-b2
+// slice, which shipped as migration 0045). Split out of reconciler.mjs like reconciler-sst.mjs /
+// reconciler-lint.mjs / reconciler-fa.mjs (module-size budget), and — like the D-a FA belt — the
+// sweep must FEATURE-DETECT its own DB surface: this runtime image ships before 0045 lands (the
+// same runtime-image-first, DB-second ceremony order design §2.7 inherits from D-a §3.4), so it
+// must boot dormant on pre-0045 and light on the very next cycle after 0045 applies, with
+// no restart. (The design was written against a monolithic 0042; the wave then shipped as the
+// ADR-058 four-slice split and this belt's two verbs were both born in 0045.)
 //
 // FEATURE-DETECT, EXACT SIGNATURES, PER CYCLE (never cached at startup — the
 // wiki-projection.mjs:321-346 R5 idiom, cloned verbatim from reconciler-fa.mjs). Both
 // `clara.adjustment_run_due(uuid)` and `clara.run_adjustment_occurrence(uuid,uuid,date,date,
 // text)` are plain catalog reads (no EXECUTE needed), so the guard never fails for a
 // privilege reason and distinguishes THESE exact signatures from any future overload of
-// either name. Both land in the SAME migration (0042), so there is no meaningful
+// either name. Both land in the SAME migration (0045), so there is no meaningful
 // partially-migrated state to diagnose between them — ONE combined boolean probe (both
 // non-null) is sufficient, unlike a design that might straddle two migrations. Absent →
 // a clean no-op ({adjOk:true, adjDormant:true}), never a failure — the belt simply has
@@ -76,7 +77,7 @@ const ADJ_PERIOD_CAP = 24; // bounded — never loop unboundedly on a poisoned/m
 /** True iff BOTH clara.adjustment_run_due(uuid) and clara.run_adjustment_occurrence(uuid,
  *  uuid,date,date,text) exist — the EXACT signatures, never an overloaded-name to_regproc
  *  probe (the wiki-projection.mjs:321-346 R5 idiom). Evaluated PER CYCLE, never cached at
- *  startup, so the belt lights the moment 0042 lands. */
+ *  startup, so the belt lights the moment 0045 lands. */
 async function hasAdjustmentSurface(client) {
   const r = await client.query(
     "select to_regprocedure('clara.adjustment_run_due(uuid)') is not null " +
