@@ -8,6 +8,14 @@
 // genuinely-dropped answer once, and resolves when the park has in fact advanced — so anything
 // that reaches THIS hook as an error is an undelivered answer and is surfaced, never swallowed.
 // The two-step client cancel lives in the page; this hook exposes the runtime-cancel primitive.
+//
+// AND SURFACING IT IS ONLY HALF THE JOB — IT HAS TO SURVIVE (the §3.1 poller's own hazard).
+// A refusal and a background poll are two writers of one field. The poll's success path used to
+// end in an unconditional clear, so a genuine refusal raised at t+0 was wiped by the next tick
+// ~3s later: the human saw it flash and vanish, which is functionally the swallow GH #152 was
+// about. So the error is no longer a bare string — it carries WHO raised it, WHAT would prove it
+// gone, and a monotonic GENERATION, and only a read that can honestly disprove it may clear it
+// (`readClearsError`). No lifetime here depends on the poll interval.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
@@ -19,15 +27,89 @@ import { seedThread, promptEntry, answerEntry, appendUnique, foldActivityThread,
 const TERMINAL_CHIPS = new Set(["complete", "cancelled", "expired", "ended"]);
 const POLL_MS = 3000;
 
+// ---------------------------------------------------------------------------
+// Error lifetime — the discipline that keeps a refusal alive (thread.ts's precedent: the
+// hook's non-trivial state rules live in named, pure, testable neighbours).
+// ---------------------------------------------------------------------------
+
+/** Why the error was raised, which fixes what could disprove it.
+ *  · `read`   — a /state read itself failed (transport). A later SUCCESSFUL read disproves it
+ *               outright, so a transient network refusal never sticks.
+ *  · `action` — a user-initiated verb failed. Nothing about a healthy /state read disproves
+ *               "your answer did not land", so a read clears it only on the one condition that
+ *               does: the run has LEFT the park the answer was aimed at. */
+export type RunErrorKind = "read" | "action";
+
+export type RunError = {
+  message: string;
+  /** Monotonic per hook instance, bumped on every raise. A poll compares this against the
+   *  generation it captured when its own read STARTED — an error raised while that read was in
+   *  flight is newer than anything the read could know about, so the read may not clear it. */
+  gen: number;
+  kind: RunErrorKind;
+  /** The park an answer failed to reach; null when no read can prove resolution (a plain
+   *  transport failure, or a refusal a page raised through `setError`). */
+  heldAtPark: number | null;
+};
+
+/** May a poll whose read started at generation `genAtReadStart`, and which returned `s`, clear
+ *  `cur`? The whole lifetime rule, in one pure predicate.
+ *
+ *  The park test reuses `answerInterview`'s OWN truth predicate for the lossy 409 — "the run is
+ *  no longer parked where we aimed ⇒ the answer landed" — so the hook and the wire client cannot
+ *  drift into two different opinions about what delivery means. A terminal run reports no
+ *  pending park, and so counts as resolved by the same test. */
+export function readClearsError(
+  cur: RunError | null,
+  genAtReadStart: number,
+  s: Pick<InterviewState, "pendingPark">,
+): boolean {
+  if (!cur) return false;
+  if (cur.gen > genAtReadStart) return false; // raised after this read began — it knows nothing of it
+  if (cur.kind === "read") return true;
+  if (cur.heldAtPark === null) return false;  // an action refusal no read can speak to
+  return s.pendingPark?.parkIndex !== cur.heldAtPark;
+}
+
 export function useInterviewRun(args: { token: string; scope: InterviewScope; runId: string | null; planId?: string | null }) {
   const { token, scope, runId, planId } = args;
   const [state, setState] = useState<InterviewState | null>(null);
   const [thread, setThread] = useState<ThreadEntry[]>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setErrorRecord] = useState<RunError | null>(null);
   const seededRef = useRef(false);
   const stateRef = useRef<InterviewState | null>(null);
   stateRef.current = state;
+  // The error is mirrored into a ref (and the generation kept in one) because every decision
+  // about it is taken inside an async closure that would otherwise read a render-stale copy —
+  // the poll guard has to compare the generation as it is NOW, not as it was when the read began.
+  const errorRef = useRef<RunError | null>(null);
+  const genRef = useRef(0);
+
+  const putError = useCallback((next: RunError | null) => {
+    errorRef.current = next;
+    setErrorRecord(next);
+  }, []);
+
+  /** Raise a refusal at a fresh generation, so no poll already in flight can clear it.
+   *  A transport failure never overwrites a live ACTION refusal: the undelivered answer is the
+   *  more important truth, and letting the poller overwrite it would restore the wipe by another
+   *  route (the read error would then be cleared by the next good read, taking the refusal with
+   *  it). */
+  const raise = useCallback((message: string, kind: RunErrorKind, heldAtPark: number | null) => {
+    if (kind === "read" && errorRef.current?.kind === "action") return;
+    genRef.current += 1;
+    putError({ message, gen: genRef.current, kind, heldAtPark });
+  }, [putError]);
+
+  /** The page-facing setter, signature unchanged. A string is a user-initiated refusal raised
+   *  OUTSIDE this hook (the create_firm failure, the client cancel) — an action error with no
+   *  park to disprove it, so it stands until the human acts; null is the dismiss / the human is
+   *  acting again. */
+  const setError = useCallback((message: string | null) => {
+    if (message === null) putError(null);
+    else raise(message, "action", null);
+  }, [putError, raise]);
 
   const ingest = useCallback((s: InterviewState) => {
     setState(s);
@@ -46,14 +128,17 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
 
   const refresh = useCallback(async () => {
     if (!token || !runId) return;
+    // The guard's anchor: the generation as of the instant THIS read starts. Whatever the read
+    // comes back with, it can only speak to errors that already existed when it left.
+    const genAtReadStart = genRef.current;
     try {
       const s = await getInterviewState(token, { runId, scope, planId });
       ingest(s);
-      setError(null);
+      if (readClearsError(errorRef.current, genAtReadStart, s)) putError(null);
     } catch (e) {
-      setError((e as Error).message);
+      raise((e as Error).message, "read", null);
     }
-  }, [token, runId, scope, planId, ingest]);
+  }, [token, runId, scope, planId, ingest, putError, raise]);
 
   // Poll while the run is live. A fixed interval (not a state-dependent effect) — the terminal
   // check reads a ref so refresh churn never re-arms the interval (which would busy-poll).
@@ -71,7 +156,7 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
   /** Deliver a free-text answer to the current park (optimistic bubble + POST). */
   const submitAnswer = useCallback(async (park: PendingPark, text: string) => {
     setBusy(true);
-    setError(null);
+    putError(null); // the human is acting again — their own retry clears the board
     setThread((cur) => appendUnique(cur, answerEntry(park, text)));
     try {
       await answerInterview(token, { runId: runId!, scope, parkIndex: park.parkIndex, value: text, planId });
@@ -80,11 +165,12 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
       // The lossy 409 was already disambiguated and retried inside answerInterview, so a throw
       // here means the answer is genuinely UNDELIVERED — surfaced, never swallowed as
       // "already delivered" (that swallow is how GH #152 hid in production for a whole wave).
-      setError((e as Error).message);
+      // Held at THIS park: only a read showing the run has left it may take the refusal away.
+      raise((e as Error).message, "action", park.parkIndex);
     } finally {
       setBusy(false);
     }
-  }, [token, runId, scope, planId, refresh]);
+  }, [token, runId, scope, planId, refresh, putError, raise]);
 
   /** Deliver a typed value (e.g. the firm create_firm receipt) without a text bubble. F-M10:
    *  returns whether delivery CONFIRMED — true once answerInterview resolves (on a 200, or on a
@@ -93,7 +179,7 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
    *  admission token. A dropped receipt now reports false rather than a false-confirming true. */
   const deliverValue = useCallback(async (park: PendingPark, value: unknown, note?: string): Promise<boolean> => {
     setBusy(true);
-    setError(null);
+    putError(null);
     if (note) setThread((cur) => appendUnique(cur, { id: `sys:${park.parkIndex}`, role: "you", seg: park.seg, text: note }));
     try {
       await answerInterview(token, { runId: runId!, scope, parkIndex: park.parkIndex, value, planId });
@@ -101,13 +187,14 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
       return true;
     } catch (e) {
       // Genuinely undelivered (answerInterview already re-read /state and retried): report false
-      // so the caller RETAINS its create_firm receipt for a manual retry.
-      setError((e as Error).message);
+      // so the caller RETAINS its create_firm receipt for a manual retry — and hold the refusal
+      // at this park so the retry affordance is still on screen when the human reaches for it.
+      raise((e as Error).message, "action", park.parkIndex);
       return false;
     } finally {
       setBusy(false);
     }
-  }, [token, runId, scope, planId, refresh]);
+  }, [token, runId, scope, planId, refresh, putError, raise]);
 
   /** Deliver a runtime cancel into the open park (the first half of the two-step client cancel;
    *  the whole verb for a firm run). A 409/not_pending is not an error (already resolved). */
@@ -115,5 +202,6 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
     return cancelInterview(token, { runId: runId!, scope, parkIndex: park.parkIndex, planId });
   }, [token, runId, scope, planId]);
 
-  return { state, thread, busy, error, setBusy, setError, refresh, submitAnswer, deliverValue, runtimeCancel };
+  // `error` stays a plain string for the views — the lifetime bookkeeping is this hook's business.
+  return { state, thread, busy, error: error?.message ?? null, setBusy, setError, refresh, submitAnswer, deliverValue, runtimeCancel };
 }
