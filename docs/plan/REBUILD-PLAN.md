@@ -256,7 +256,9 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > `0044` → **the producer's grant is withheld until `0045`**; the disposed-asset walk gate at
 > `0042` → S5.19 pulled forward). Three Codex merge gates (the fail-open binding-gate exemption
 > → strict census grammar + a one-entry enforced allowlist; the show-B-settle-A money-UI
-> blocker). **Deployed 2026-08-05: 43 migrations (frontier `0044`) · runtime v53 untouched ·
+> blocker). **Deployed 2026-08-05: 43 migrations (frontier `0044`) · runtime v53 untouched at the
+> ceremony, then **v54** same day (PR #186 — the interview park/hook inversion root-fixed as v3
+> workflows; the adjustments belt rides dormant until `0045`) ·
 > Supavisor 32/60**; postverify 12/12 with `producer_authed` FALSE live. Sandbox acceptance ran
 > as ONE THREAD through the production verbs (intake → honest abstention → the agent refusing
 > to file → the human two-step → a chained statement → an exception → the composite in one act
@@ -264,7 +266,11 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > **all four structural invariants witnessed live**. **The real half closed on a NAMED, MEASURED
 > deviation: both real clients are in STRIKE-OFF** (books closed, no open period) — the first
 > live real template defers to the first going-concern client, the ADR-056 precedent.
-> **NEXT: D-b2's hold-ladder** (inheritance register: asbuilt-part2 §12), then Wave E.
+> **NEXT: D-b2's hold-ladder** (inheritance register: asbuilt-part2 §12), then Wave E. Hold-ladder
+> state (2026-08-05): two fix waves are BUILT into the held `0045` in the session substrate (the
+> round-11 list + the confirm-round's findings, every fix proven both ways); a further confirm round
+> found more mechanisms in the new armour and **the honest stop fired** — the next work list (W-R13)
+> is named in the substrate record; `0045` remains unmerged and unclaimed, exactly as ADR-058 records.
 
 **Wave A — the daily loop.** Coding with **intrinsic side-effects** (`code_and_open_ar/ap` composites; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding.** The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
