@@ -127,8 +127,35 @@ jobs:
       # Second layer: the MAINTAINED gitleaks ruleset (finding 4 — makes ADR-012's
       # "backed by gitleaks in CI" claim true). Version-pinned to a released
       # gitleaks binary (not a mutable action tag); config + allowlist in
-      # .gitleaks.toml. Scans the tracked git tree (history included via
-      # fetch-depth:0), so node_modules/.output are never scanned.
+      # .gitleaks.toml (same config, both contexts below).
+      #
+      # PUSH: full-history scan, unchanged — scans the tracked git tree (history
+      # included via fetch-depth:0), so node_modules/.output are never scanned.
+      # This stays the only place a leak already sitting in history gets caught.
+      #
+      # PULL_REQUEST: scoped to `origin/main..HEAD` — exactly the commits THIS PR
+      # introduces. A PR's checked-out ref is GitHub's synthetic merge commit
+      # (refs/pull/N/merge), whose ancestry is the ENTIRE base-branch history plus
+      # the PR's own commits — so an unscoped scan on a PR is a full-history scan
+      # too, and one bad commit already on main reds every unrelated PR opened
+      # after it (the 2026-08-05 archive-branch incident: an evidence branch's
+      # unmarked UUIDs would have red ALL CI). DOUBLE-dot, not triple: origin/main
+      # is always an ancestor of the merge commit (it is literally one of its two
+      # parents), so `origin/main..HEAD` can never miss a commit the PR actually
+      # introduces, on any base/head shape GitHub hands us — including when main
+      # has advanced past this PR's merge-ref snapshot, which is the normal case
+      # while a PR sits open. Triple-dot (`...`) would re-pull in whatever landed
+      # on main after that snapshot as a "PR" commit, reopening the exact hole
+      # this scoping exists to close. `origin/main` is already fetched above for
+      # the append-only checks; "main is PR-only" (CLAUDE.md) makes it the only
+      # legal PR base — asserted below rather than assumed, so a stacked-PR base
+      # fails closed instead of silently scoping against the wrong branch.
+      #
+      # $GITHUB_EVENT_NAME / $GITHUB_BASE_REF are the runner's own default env
+      # vars (GitHub sets these for every step) — read as shell data, never
+      # spliced in via `${{ }}` templating, so nothing about this step's branch
+      # naming can inject into the script (the same discipline the libpq-vars
+      # comment at the top of this file already applies to connection strings).
       - name: Gitleaks (maintained secret scan, version-pinned)
         env:
           GITLEAKS_VERSION: "8.18.4"
@@ -136,7 +163,22 @@ jobs:
           curl -fsSL "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" -o /tmp/gitleaks.tgz
           tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
           /tmp/gitleaks version
-          /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            if [ "$GITHUB_BASE_REF" != "main" ]; then
+              echo "pull_request base ref is '$GITHUB_BASE_REF', not 'main' — main is PR-only (CLAUDE.md); refusing to guess a scan scope." >&2
+              exit 1
+            fi
+            if git rev-parse --verify -q origin/main >/dev/null; then
+              echo "PR context: scoping gitleaks to this PR's own commits (origin/main..HEAD)"
+              /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1 --log-opts "origin/main..HEAD"
+            else
+              echo "PR context but origin/main does not exist yet (first introduction) — nothing to scope against; full-history scan"
+              /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1
+            fi
+          else
+            echo "push context ($GITHUB_REF): full-history scan (unchanged)"
+            /tmp/gitleaks detect --source . --config .gitleaks.toml --redact --no-banner -v --exit-code 1
+          fi
 
       - name: Build (nitro runtime + next dashboard)
         run: pnpm build
