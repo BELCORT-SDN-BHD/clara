@@ -42,20 +42,35 @@ export function isNotPending(err: unknown): boolean {
   return err instanceof RuntimeApiError && err.code === "not_pending";
 }
 
-/** Every leg of the answer path is time-bounded. `answerInterview`'s 409 recovery makes up to four
- *  SEQUENTIAL round trips (POST, read, POST, read) while the caller's UI is disabled on `busy`, so
- *  an unbounded hang there is an interview the human cannot get back into — no error, no retry, no
- *  input. 15s is generous for a same-origin route and short enough that a hung leg still ends in a
- *  decision. Bounding is safe here precisely because both ends are already FAIL-CLOSED: an aborted
- *  read is caught into "unknown", which is never delivery, and an aborted POST throws, which every
- *  caller treats as UNDELIVERED. A timeout can therefore only ever cost a false refusal, never a
- *  false confirmation. Each leg gets its OWN signal — the budget is per round trip, not shared. */
-const ANSWER_FETCH_TIMEOUT_MS = 15_000;
+/** EVERY fetch this client makes is time-bounded, and it is bounded HERE — in the one function
+ *  they all go through — rather than at each call site, so the property is structural and a route
+ *  added later cannot arrive unbounded.
+ *
+ *  The reason is the answer path. `answerInterview`'s 409 recovery makes up to four SEQUENTIAL
+ *  round trips (POST, read, POST, read), and `submitAnswer` then awaits `refresh()` — a fifth,
+ *  through `getInterviewState` — with the input disabled on `busy` for all of it and `setBusy`
+ *  only released in a `finally`. An unbounded leg anywhere in that chain is an interview the human
+ *  cannot get back into: no error, no retry, no input. A per-call-site bound would have left the
+ *  fifth leg out, which is precisely the sort of gap that reads as covered and is not.
+ *
+ *  15s is generous for a same-origin route and short enough that a hung leg still ends in a
+ *  decision. Bounding is safe because every consumer of an abort is already FAIL-CLOSED: an
+ *  aborted delivery read is caught into "unknown", which is never delivery; an aborted POST throws,
+ *  which every caller treats as UNDELIVERED; an aborted /state read throws into `refresh`'s own
+ *  catch, which raises a `read`-kind error that can never overwrite a live action refusal and is
+ *  retired by the next good poll. A timeout can therefore only ever cost a false refusal or a
+ *  transient banner — never a false confirmation.
+ *
+ *  Each call gets its OWN signal: the budget is per round trip, never shared across a recovery, or
+ *  a slow-but-progressing recovery would have its last read cancelled by time its first POST
+ *  already spent. A caller-supplied `signal` still wins, so this is a floor and not a ceiling. */
+const INTERVIEW_FETCH_TIMEOUT_MS = 15_000;
 
 async function runtimeFetch(path: string, token: string, init?: RequestInit): Promise<Response> {
   return fetch(`${runtimeBase()}${path}`, {
     ...init,
     cache: "no-store",
+    signal: init?.signal ?? AbortSignal.timeout(INTERVIEW_FETCH_TIMEOUT_MS),
     headers: {
       authorization: `Bearer ${token}`,
       ...(init?.body ? { "content-type": "application/json" } : {}),
@@ -333,7 +348,6 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
   return runtimeFetch("/api/interview/answer", token, {
     method: "POST",
     body: JSON.stringify({ runId: a.runId, scope: a.scope, parkIndex: a.parkIndex, value: a.value, planId: a.planId ?? undefined }),
-    signal: AbortSignal.timeout(ANSWER_FETCH_TIMEOUT_MS),
   });
 }
 
@@ -424,9 +438,7 @@ async function readDelivery(token: string, a: AnswerArgs): Promise<Delivery> {
     params.set("scope", a.scope);
     params.set("runId", a.runId);
     if (a.planId) params.set("planId", a.planId);
-    const res = await runtimeFetch(`/api/interview/state?${params.toString()}`, token, {
-      signal: AbortSignal.timeout(ANSWER_FETCH_TIMEOUT_MS),
-    });
+    const res = await runtimeFetch(`/api/interview/state?${params.toString()}`, token);
     if (!res.ok) return "unknown";
     const raw = asRecord(await res.json());
     return raw ? classifyDeliveryBody(raw, a) : "unknown";

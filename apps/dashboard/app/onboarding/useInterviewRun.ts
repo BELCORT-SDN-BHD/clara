@@ -198,8 +198,15 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
    *  thread that only fills in after a round trip feels broken — but a thread entry looks exactly
    *  the same whether it was delivered or not, so on a throw it has to come back off. Otherwise
    *  the screen holds both halves of a contradiction: the answer sitting in the log as if Clara
-   *  had it, and a banner saying it never arrived. */
-  const submitAnswer = useCallback(async (park: PendingPark, text: string) => {
+   *  had it, and a banner saying it never arrived.
+   *
+   *  AND WITHDRAWING IT MAKES THE RETURN VALUE LOAD-BEARING, which is why this reports delivery
+   *  the way `deliverValue` already does (F-M10). Once the bubble is withdrawn, the thread is no
+   *  longer a copy of what the human typed — so if the answer bar ALSO cleared its draft, a
+   *  refused long free-text answer would be gone from the screen entirely, leaving a banner
+   *  saying it did not land and nothing to retry from. True means delivered (clear the box);
+   *  false means the answer is still the human's to resend. */
+  const submitAnswer = useCallback(async (park: PendingPark, text: string): Promise<boolean> => {
     setBusy(true);
     putError(null); // the human is acting again — their own retry clears the board
     const optimistic = answerEntry(park, text, nextSubmitId());
@@ -207,6 +214,7 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
     try {
       await answerInterview(token, { runId: runId!, scope, parkIndex: park.parkIndex, value: text, planId });
       await refresh();
+      return true;
     } catch (e) {
       // The lossy 409 was already disambiguated and retried inside answerInterview, so a throw
       // here means the answer is genuinely UNDELIVERED — surfaced, never swallowed as
@@ -217,6 +225,7 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
       // this attempt provably did not.
       setThread((cur) => removeEntry(cur, optimistic.id));
       raise((e as Error).message, "action", park.parkIndex);
+      return false;
     } finally {
       setBusy(false);
     }

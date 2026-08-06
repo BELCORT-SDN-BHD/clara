@@ -7,7 +7,7 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import {
   normalizeInterviewState, deriveChip, segmentProgress, commitOpKeyFromPrompt, isNotPending,
-  answerInterview, RuntimeApiError, FIRM_SEG_KEYS, CLIENT_SEG_KEYS,
+  answerInterview, getInterviewState, cancelInterview, RuntimeApiError, FIRM_SEG_KEYS, CLIENT_SEG_KEYS,
   type PendingPark, type AnswerArgs,
 } from "./interviewApi";
 
@@ -462,6 +462,24 @@ test("answer: an ABORTED /state read is UNKNOWN, never delivery — the bound is
     return true;
   });
   assert.equal(calls.length, 2, "an abort ends the recovery — it never counts as evidence to retry on");
+});
+
+test("EVERY route in this client is bounded, not just the two the recovery POSTs", async (t) => {
+  // The bound lives in `runtimeFetch`, so the property is structural: it cannot be true of the
+  // legs someone remembered and false of the rest. It was per-call-site once, and the leg that
+  // fell outside was `getInterviewState` — which `submitAnswer` AWAITS via `refresh()` after a
+  // delivered answer, with the input still disabled on `busy`. A hang there strands the human
+  // with no error and no input, which is verbatim the harm the bound exists to prevent.
+  const calls = scriptFetch(t, [
+    jsonRes(parkedAt(3)),
+    jsonRes({ ok: true }),
+  ]);
+  await getInterviewState("jwt", { runId: "r1", scope: "client", planId: "p1" });
+  await cancelInterview("jwt", { runId: "r1", scope: "client", parkIndex: 3, planId: "p1" });
+
+  assert.match(calls[0]!.url, /\/api\/interview\/state\?/);
+  assert.match(calls[1]!.url, /\/api\/interview\/cancel$/);
+  for (const c of calls) assert.ok(c.signal instanceof AbortSignal, `${c.url} is bounded`);
 });
 
 test("answer: an ABORTED POST throws, and the caller reads that as UNDELIVERED", async (t) => {

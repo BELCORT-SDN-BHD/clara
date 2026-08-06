@@ -343,6 +343,25 @@ test("a second, DIFFERENT answer at the same park renders as its own bubble", as
   } finally { await h.unmount(); }
 });
 
+test("submitAnswer REPORTS delivery, so the answer bar can hold the draft until it lands", async (t) => {
+  // Withdrawing the bubble makes this return value load-bearing. The thread is no longer a copy
+  // of what the human typed, so if the answer bar also cleared its draft on a refusal, the text
+  // would be gone from BOTH places — a banner saying it did not land, and nothing to retry from.
+  // InterviewPanel clears the box only on `true`; the same F-M10 contract `deliverValue` uses.
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const w = mkWorld({ answer: REFUSAL });
+  const h = await mountRun(t, w);
+  try {
+    let delivered!: boolean;
+    await h.act(async () => { delivered = await h.current.submitAnswer(PARK, "a long, expensive-to-retype answer"); });
+    assert.equal(delivered, false, "a refused answer is still the human's to resend");
+
+    w.answer = () => jsonRes({ ok: true });
+    await h.act(async () => { delivered = await h.current.submitAnswer(PARK, "a long, expensive-to-retype answer"); });
+    assert.equal(delivered, true, "and a delivered one releases the draft");
+  } finally { await h.unmount(); }
+});
+
 test("a refused answer's rollback does not take a SUCCESSFUL neighbour with it", async (t) => {
   // Why the rollback is keyed on the submit nonce rather than on the park: at one park there can
   // be a landed attempt and a refused one, and only the refused one may be withdrawn.

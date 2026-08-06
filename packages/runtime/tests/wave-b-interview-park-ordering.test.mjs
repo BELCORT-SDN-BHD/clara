@@ -316,6 +316,50 @@ function isInside(node, ancestor) {
   return n === ancestor;
 }
 
+/** Does this reference HAND THE CLOSURE TO A CALL — i.e. does the value reach an argument list?
+ *  Returns the accepted shape's name, or null for everything else.
+ *
+ *  THE ACCEPTED SET IS ENUMERATED, AND THE REMAINDER IS REFUSED. The first cut of G2 did the
+ *  opposite: it recognised a direct call and counted EVERY other surviving reference as a
+ *  hand-off, which is an OPEN set, and an open set certified three references that reach nothing
+ *  at runtime — measured, not imagined:
+ *    · `void ask;`                     — and this is the LIKELY regression, not an adversarial
+ *                                        one: delete the real hand-off and TypeScript's
+ *                                        unused-local check fires on `ask`; `void ask;` is the
+ *                                        reflexive silencer, and it was the one shape waved through
+ *    · `const unused: unknown = ask;`  — assigned to a dead local
+ *    · `type T = typeof ask;`          — a TYPE-position reference, which binds nothing at runtime.
+ *                                        `bindingRefusal` already refuses a type-only import in
+ *                                        this very file, on exactly that reasoning; counting a
+ *                                        type-only reference as a runtime hand-off was the same
+ *                                        file ruling two ways on one question.
+ *  In all three the closure is provably unreached: no hook is ever armed, every park is announced
+ *  unarmed, and the route 409s every answer — GH #152 restored under a green guard.
+ *
+ *  So the shapes are named, exactly as `topLevelStatementOf` names the arm's and the announce's:
+ *    · a direct argument                       f(ask)
+ *    · a property value of an object/array literal that is ITSELF a call argument, shorthand
+ *      included                                f({ ask, … }, …)
+ *  The second is load-bearing, not defensive padding: firmInterview.v3.ts:166 is
+ *  `writeFirmPlanWithRetries({ ask, mintOpKey: … }, { … })`, so a naive direct-argument-only test
+ *  reds a live body. Nothing else is accepted — not a parenthesis, not an `as` cast — because the
+ *  point of an enumerated set is that widening it is a deliberate act with a diagnosis attached,
+ *  not a shape that slipped in. */
+function callArgumentHandoff(id) {
+  let node = id;
+  let parent = node.parent;
+  for (;;) {
+    if (!parent) return null;
+    if (ts.isCallExpression(parent) || ts.isNewExpression(parent)) {
+      return (parent.arguments ?? []).includes(node) ? "call argument" : null;
+    }
+    if (ts.isShorthandPropertyAssignment(parent) && parent.name === node) { node = parent; parent = parent.parent; continue; }
+    if (ts.isPropertyAssignment(parent) && parent.initializer === node) { node = parent; parent = parent.parent; continue; }
+    if (ts.isObjectLiteralExpression(parent) || ts.isArrayLiteralExpression(parent)) { node = parent; parent = parent.parent; continue; }
+    return null;
+  }
+}
+
 /** Is this identifier a USE of a binding, rather than the place a binding is DECLARED (or a
  *  property/label that merely happens to be spelled the same)? */
 function isValueReference(id) {
@@ -345,7 +389,9 @@ function isValueReference(id) {
  *  (`askAndConfirmSegmentV2(seg, ask, prior)`), and whether the driver calls its callback is a
  *  fact in another module and out of this guard's reach. So a direct call and a hand-off both
  *  count as REACHED, and the finding reports which it saw. A reference from INSIDE `ask` itself
- *  does not count: a closure that only calls itself is not reached by anything.
+ *  does not count: a closure that only calls itself is not reached by anything. And "hand-off"
+ *  means an ENUMERATED set of call-argument shapes, never "any other mention of the name" — see
+ *  `callArgumentHandoff` for the three false greens that open set certified.
  *
  *  SPELLING IS NOT IDENTITY applies here too, and it is the reason this insists on exactly one
  *  binding of the name in the whole file: without that, a reference inside a nested scope that
@@ -374,19 +420,29 @@ function askReachabilityRefusal(sf, ask, ident) {
 
   let calls = 0;
   let handoffs = 0;
+  const inert = [];
   const visit = (n) => {
     if (ts.isIdentifier(n) && n.text === "ask" && isValueReference(n) && !isInside(n, ask)) {
       if (ts.isCallExpression(n.parent) && n.parent.expression === n) calls++;
-      else handoffs++;
+      else if (callArgumentHandoff(n)) handoffs++;
+      else inert.push(`line ${lineOf(sf, n)} (${ts.SyntaxKind[n.parent.kind]})`);
     }
     ts.forEachChild(n, visit);
   };
   visit(exported.body);
 
+  // A reference that reaches neither a call nor an argument list is INERT — it mentions the name
+  // without ever handing the closure anywhere, so it is no evidence of reachability. It is listed
+  // in the refusal (a reader who wrote `void ask;` deserves to be told why it did not count)
+  // rather than being a refusal in itself: an inert reference ALONGSIDE a real hand-off is
+  // harmless noise, and reddening a live body for it would be the guard overreaching.
   if (calls + handoffs === 0) {
-    return { refused: `'ask' is never reached from the exported body '${ident}' — it is neither called nor handed to anything, so no hook it arms can ever be created` };
+    const seen = inert.length
+      ? ` — ${inert.length} reference(s) to 'ask' exist but NONE reaches a call: ${inert.join(", ")}. A reference that is neither called nor passed as a call argument hands the closure to nothing`
+      : " — it is neither called nor handed to anything";
+    return { refused: `'ask' is never reached from the exported body '${ident}'${seen}, so no hook it arms can ever be created` };
   }
-  return { calls, handoffs };
+  return { calls, handoffs, inert: inert.length };
 }
 
 /** Every `ask` function in a workflow body — `const ask = ... =>` or `function ask()`. */
@@ -582,6 +638,10 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
   // statement of a DIFFERENT nested closure inside it.
   const OWNER_LINE = '  await streamOwnerStep({ scope: "client", planId });';
   const RES0_LINE = "    let res = res0;";
+  /** Replace every REAL hand-off of `ask` with an inline stand-in, leaving the closure declared
+   *  and the file otherwise intact — the starting point for the reachability shapes below. */
+  const KILL_HANDOFFS = (s) =>
+    s.replaceAll("askAndConfirmSegmentV2(seg, ask, prior)", "askAndConfirmSegmentV2(seg, (async () => null) as never, prior)");
 
   // Each shape carries the REASON it must be refused for. Asserting only `ok === false` would
   // let a shape start passing for an unrelated reason and quietly stop testing what it was
@@ -634,8 +694,7 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
 
     // G2 — AN UNREACHED `ask`. A perfectly ordered closure nothing reaches arms nothing at all.
     ["an `ask` the exported body never reaches (every hand-off replaced by an inline stand-in)",
-      (s) => s.replaceAll("askAndConfirmSegmentV2(seg, ask, prior)", "askAndConfirmSegmentV2(seg, (async () => null) as never, prior)"),
-      /never reached from the exported body/],
+      (s) => KILL_HANDOFFS(s), /never reached from the exported body/],
     // …and SPELLING IS NOT IDENTITY, one more time: a reference that resolves to a LOCAL decoy
     // is not a reference to the analysed closure. Deliberately written `as never` so it slips
     // past `findAskFunctions` (which only counts callables-with-body) — this is precisely the
@@ -643,6 +702,20 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
     ["a LOCAL `ask` shadowing the analysed closure at a real hand-off site",
       (s) => s.replace(RES0_LINE, `    const ask = (async () => null) as never;\n${RES0_LINE}`),
       /bound 2 times in this file/],
+    // …and the three INERT references an earlier cut of G2 counted as hand-offs, each measured
+    // green before the accepted set was enumerated. `void ask;` is the realistic one: remove the
+    // real hand-off and the unused-local check fires, and this is the reflexive way to silence it.
+    ["`void ask;` — the unused-local silencer, which hands the closure to nothing",
+      (s) => KILL_HANDOFFS(s).replace(RES0_LINE, `    void ask;\n${RES0_LINE}`),
+      /NONE reaches a call/],
+    ["`const unused = ask;` — assigned to a dead local",
+      (s) => KILL_HANDOFFS(s).replace(RES0_LINE, `    const unused: unknown = ask; void unused;\n${RES0_LINE}`),
+      /NONE reaches a call/],
+    // TYPE-ONLY, and the file already rules this way elsewhere: `bindingRefusal` refuses a
+    // type-only import because it binds nothing at runtime. A `typeof` reference is the same fact.
+    ["`type T = typeof ask;` — a TYPE-position reference, which binds nothing at runtime",
+      (s) => KILL_HANDOFFS(s).replace(RES0_LINE, `    type T = typeof ask; const t: T = null as never; void t;\n${RES0_LINE}`),
+      /NONE reaches a call/],
   ];
 
   for (const [label, mutate, reason] of shapes) {
