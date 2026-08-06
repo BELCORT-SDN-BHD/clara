@@ -95,7 +95,7 @@ export function depreciationRunDue(lastRunMs, nowMs, intervalMs = FA_RECONCILE_M
 
 /** True iff the daily adjustment-occurrence sweep is due (pure — the since-last-run guard;
  *  lastRunMs=0 makes the first cycle after (re)boot run it immediately, which is safe:
- *  reconciler-adjustments.mjs feature-detects 0042 itself and per-client
+ *  reconciler-adjustments.mjs feature-detects 0045 itself and per-client
  *  adjustment_run_due is idempotent recomputation, so an extra run is a no-op). Wave D-b
  *  §2.3/§2.7 (WD-R8/R9) — this predicate only gates CADENCE, never the migration's
  *  presence. */
@@ -125,7 +125,7 @@ export function startLeaderLoop(deps) {
     let lastSstRun = 0; // 0 ⇒ the first cycle after boot runs the SST repair belt (catches pre-existing crossings post-0016)
     let lastLintRun = 0; // 0 ⇒ the first cycle after boot runs the wiki lint belt (catches pre-existing conditions post-0017, WB-R8 daily cadence)
     let lastFaRun = 0; // 0 ⇒ first cycle after boot runs the depreciation sweep (reconciler-fa.mjs feature-detects 0041 itself, so a pre-0041 boot is a cheap no-op)
-    let lastAdjRun = 0; // 0 ⇒ first cycle after boot runs the adjustment-occurrence sweep (reconciler-adjustments.mjs feature-detects 0042 itself, so a pre-0042 boot is a cheap no-op)
+    let lastAdjRun = 0; // 0 ⇒ first cycle after boot runs the adjustment-occurrence sweep (reconciler-adjustments.mjs feature-detects 0045 itself, so a pre-0045 boot is a cheap no-op)
     while (!stopRef.stop) {
       const client = makeRuntimeClient();
       let connErr = null;

@@ -3,7 +3,7 @@
 // reconcile-sst-unit.test.mjs / reconcile-autopost-unit.test.mjs precedent). Proves: the
 // per-cycle EXACT-SIGNATURE feature-detect over BOTH clara.adjustment_run_due(uuid) and
 // clara.run_adjustment_occurrence(uuid,uuid,date,date,text) (dormant no-op, never a failure,
-// when 0042 is absent — the runtime-image-first ceremony order), the DB-owned
+// when 0045 is absent — the runtime-image-first ceremony order), the DB-owned
 // adjustment_run_due probe deciding due-ness (never client-side arithmetic), the bounded
 // per-client chase that clears several due templates in one sweep, per-client error isolation
 // (a poisoned client is counted, never gates the belt's daily cadence), the plain group-role
@@ -81,7 +81,7 @@ function recordingClient({ surface = true, ids = [], dueFor = () => ({ due: fals
   };
 }
 
-test("feature-detect absent (pre-0042): a clean no-op, never a failure — no client discovery at all", async () => {
+test("feature-detect absent (pre-0045): a clean no-op, never a failure — no client discovery at all", async () => {
   const client = recordingClient({ surface: false });
   const out = await reconcileAdjustmentRuns(client, { log: () => {} });
   assert.deepEqual(out, { adjOk: true, adjExamined: 0, adjPosted: 0, adjDrafted: 0, adjFailed: 0, adjDormant: true, adjBlockedClients: 0, adjTransientBlockedClients: 0 });
@@ -390,7 +390,7 @@ test("runReconcilerSweep never lets the D-a and D-b belts collide on a shared re
 test("the daily cadence guard: due at boot, guarded within the interval, due after it", () => {
   const DAY = 24 * 3600000;
   const now = 1_000_000_000_000;
-  assert.equal(adjustmentRunDue(0, now, DAY), true, "first cycle after (re)boot runs it (a cheap no-op pre-0042)");
+  assert.equal(adjustmentRunDue(0, now, DAY), true, "first cycle after (re)boot runs it (a cheap no-op pre-0045)");
   assert.equal(adjustmentRunDue(now, now + DAY - 1, DAY), false, "within the interval — guarded");
   assert.equal(adjustmentRunDue(now, now + DAY, DAY), true, "a day later — due again");
 });

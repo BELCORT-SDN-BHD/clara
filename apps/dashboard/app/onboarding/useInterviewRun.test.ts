@@ -81,6 +81,13 @@ test("readClearsError: a park marker the normalizer could not read is not eviden
   const s = normalizeInterviewState({ run_id: "r1", scope: "client", status: "running", pending_park: { parkIndex: "4" } });
   assert.equal(s.pendingPark, null, "the normalizer really did drop it");
   assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, s), false);
+
+  // …and the OTHER half of toPendingPark's guard: a non-integer NUMBER is dropped the same way
+  // (this is why readClearsError may use a bare typeof check — the normalizer is the sole
+  // producer of its input and Number.isInteger is enforced there).
+  const s2 = normalizeInterviewState({ run_id: "r1", scope: "client", status: "running", pending_park: { parkIndex: 3.5 } });
+  assert.equal(s2.pendingPark, null, "a fractional parkIndex is dropped too");
+  assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, s2), false);
 });
 
 // --- the world the mounted cells run in ------------------------------------------

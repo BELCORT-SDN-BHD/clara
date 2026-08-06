@@ -13,7 +13,7 @@ import {
   predecessorOf, retiredTemplates, proposeWarningAxisLabel, proposeRefusalLabel,
 } from "./adjustmentModel";
 
-test("toAdjustmentTemplateRow accepts the 0042 `template_id` spelling AND the bare DDL `id` fallback", () => {
+test("toAdjustmentTemplateRow accepts the 0045 `template_id` spelling AND the bare DDL `id` fallback", () => {
   assert.equal(toAdjustmentTemplateRow({ template_id: "t1" }).template_id, "t1");
   assert.equal(toAdjustmentTemplateRow({ id: "t2" }).template_id, "t2");
   assert.equal(
@@ -168,7 +168,7 @@ test("[round-3] blocked/due are THREE-state — 'we could not ask' never collaps
 // well-formed `{due:false, reason:'client_not_found'}` boolean the caller could not
 // even resolve to a client — rendered as a confident "nothing is due", the SAME
 // class of false-clear `available` already guards against for a wrong SHAPE. These
-// cells cover all three of 0042 §2.3's top-level reasons, not only the one that
+// cells cover all three of 0045 §2.3's top-level reasons, not only the one that
 // changes `available`.
 
 test("[round-8 F3] toAdjustmentRunDue carries the top-level `reason`, and `client_not_found` alone flips `available` false", () => {
@@ -192,7 +192,7 @@ test("[round-8 F3] toAdjustmentRunDue carries the top-level `reason`, and `clien
   );
   assert.equal(clientNotFound.due, false, "…and `due` itself must stay falsy, so only `available` can be trusted, exactly like the wrong-shape case above");
 
-  // due:true never carries a top-level reason (0042 §2.3's jsonb_build_object omits it
+  // due:true never carries a top-level reason (0045 §2.3's jsonb_build_object omits it
   // on that branch) — must read as null, not as a stale leftover or an empty string.
   assert.equal(toAdjustmentRunDue({ due: true, template_id: "t1", period_start: "2026-01-01", period_end: "2026-01-31", blocked: [] }).reason, null);
 });

@@ -438,7 +438,7 @@ export { reconcileLintBelt };
 // or nothing overdue is a cheap {due:false} no-op.
 export { reconcileFaRuns };
 
-// The Wave D-b adjustment belt (design §2.3/§2.7 / 0042) lives in reconciler-adjustments.mjs.
+// The Wave D-b adjustment belt (design §2.3/§2.7 / migration 0045) lives in reconciler-adjustments.mjs.
 export { reconcileAdjustmentRuns };
 
 // ---------------------------------------------------------------------------
@@ -487,7 +487,7 @@ export async function runReconcilerSweep(client, deps) {
   if (deps.lintBelt) lint = await reconcileLintBelt(client, { log });
   let fa = {};
   if (deps.faRuns) fa = await reconcileFaRuns(client, { log });
-  const adj = deps.adjRuns ? await reconcileAdjustmentRuns(client, { log }) : {}; // Wave D-b belt (0042)
+  const adj = deps.adjRuns ? await reconcileAdjustmentRuns(client, { log }) : {}; // Wave D-b belt (0045)
   let prune = { pruned: 0 };
   if (deps.prune) {
     try {

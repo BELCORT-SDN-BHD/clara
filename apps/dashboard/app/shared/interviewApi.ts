@@ -182,7 +182,7 @@ export function commitOpKeyFromPrompt(park: PendingPark | null | undefined): str
  *  chip render nicer would silently widen what counts as proof that an answer landed, and what
  *  counts as grounds to take a refusal off the human's screen. Add an outcome here only when it
  *  genuinely means the run reached its intended end. */
-export const COMPLETE_OUTCOMES = new Set(["firm_created", "interview_complete", "complete", "completed"]);
+export const COMPLETE_OUTCOMES: ReadonlySet<string> = new Set(["firm_created", "interview_complete", "complete", "completed"]);
 
 /** Derive the run chip (§3.1). Terminal wins; then a pending park (awaiting_you, incl.
  *  the parked framing); then a running engine status (working); else unknown. */
@@ -343,9 +343,11 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
  *  OTHER run must never read as delivery, or the dropped-answer bug walks straight back in
  *  through the recovery meant to close it.
  *
- *  KNOWN RESIDUAL, named rather than papered over: "a higher park ⇒ my answer landed" is an
- *  INFERENCE, NOT A RECEIPT. A concurrent submitter can win the single hook and advance the park,
- *  and this lane would read that advance as its own delivery. The exposure is wider than one
+ *  KNOWN RESIDUAL, named rather than papered over — and it covers BOTH delivered arms: "a higher
+ *  park ⇒ my answer landed" AND "a complete-class terminal ⇒ my answer landed" are INFERENCES,
+ *  NOT RECEIPTS (a terminal only proves the run reached its intended end because SOMEONE answered
+ *  the final park — not provably us). A concurrent submitter can win the single hook and advance
+ *  — or complete — the run, and this lane would read either as its own delivery. The exposure is wider than one
  *  person's two tabs: a CLIENT-scope answer authorises on the plan's firm plus a bookkeeper+ floor
  *  (interviewRoutes.ts — "a bookkeeper or above must answer"), so ANY bookkeeper+ of the firm can
  *  be the winner; only the FIRM scope is bound to a single pre-firm principal. Closing it needs a
@@ -369,7 +371,11 @@ type Delivery = "delivered" | "still_open" | "unknown";
  *  same mistake as deciding it from the derived chip, one layer down.
  *
  *  IDENTITY FIRST, by literal equality and with no defaulting: a reply about a different run, a
- *  different scope, or a different plan is not weak evidence, it is NO evidence.
+ *  different scope, or a different plan is not weak evidence, it is NO evidence. (Honesty note:
+ *  against our own route these fields are ECHOES of the query we sent — the route binds run,
+ *  scope and plan by AUTHORIZATION before it reads, and readRunMarkers folds THAT run's stream —
+ *  so these equalities are shape-drift and wrong-responder guards, defence in depth; the real
+ *  identity binding lives server-side, not in this comparison.)
  *
  *  Then, and only from a reply that is about us:
  *    · a terminal PRESENT AT ALL is AUTHORITATIVE — complete-class ⇒ delivered, and anything

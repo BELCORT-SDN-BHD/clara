@@ -7,7 +7,7 @@
 // names as a documented ASSUMPTION and asked the DB lane to confirm or correct
 // them; nobody did, so AdjustmentTemplatePanel took a PostgREST 404 on every
 // load and sign / retire / run-manual were unreachable from the UI. The three
-// reads are now authored in 0042 §S2.8, and the envelopes below were CAPTURED
+// reads are now authored in 0045 §S2.8, and the envelopes below were CAPTURED
 // off a rig database carrying them (ids and all, row counts trimmed) — not
 // shaped by hand, because a hand-shaped fixture reproduces the guess rather than
 // the contract.
@@ -74,7 +74,7 @@ test("listAdjustmentTemplates posts p_client to list_adjustment_templates and un
   });
   setup();
   const read = await listAdjustmentTemplates("jwt", "8c513b53-a526-48a8-8dda-9db831abf3ef");
-  assert.ok(seenUrl.includes("/rpc/list_adjustment_templates"), "the RPC 0042 actually ships");
+  assert.ok(seenUrl.includes("/rpc/list_adjustment_templates"), "the RPC 0045 actually ships");
   assert.equal(seenBody.p_client, "8c513b53-a526-48a8-8dda-9db831abf3ef");
   assert.equal(read.available, true);
   assert.equal(read.templates.length, 1);

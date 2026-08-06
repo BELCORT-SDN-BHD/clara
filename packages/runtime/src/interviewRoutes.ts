@@ -359,7 +359,7 @@ export function interviewRoutes(): express.Router {
       try {
         await resumeHook(token, payload);
       } catch (err) {
-        if (isHookNotFound(err)) return void res.status(409).json({ error: "not_pending", message: "no open question at that park index (already answered or resumed)" });
+        if (isHookNotFound(err)) return void res.status(409).json({ error: "not_pending", message: "no open question at that park index — this submission was not accepted; if the conversation has moved on, check the thread before retyping" });
         throw err;
       }
       res.status(200).json({ ok: true });

@@ -17,7 +17,7 @@
 // PostgREST 404 on every load: templates=null, and sign / retire / run-manual
 // unreachable, while design §2.8 requires that panel.
 //
-// The assumption is now the as-built: migration 0042 §S2.8 ships
+// The assumption is now the as-built: migration 0045 §S2.8 ships
 //   list_adjustment_templates(p_client) -> {client_id, templates[], live_count,
 //                                           draft_blocked_count}
 //   list_adjustment_runs(p_client)      -> {client_id, runs[]}

@@ -126,9 +126,9 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
    *  OUTSIDE this hook — an action error with no park to disprove it, so it stands until the
    *  human acts; null is the dismiss / the human is acting again.
    *
-   *  Its callers are exactly the two CANCEL paths: the firm page's cancel failure
-   *  (firm/page.tsx), and the client page's cancel-reason-required, its pre-attempt clear, and
-   *  its cancel failure (client/page.tsx). NOT create_firm — FirmCommitForm keeps its own local
+   *  Its callers are exactly the two CANCEL paths: the firm page's pre-attempt clear and its
+   *  cancel failure (firm/page.tsx), and the client page's cancel-reason-required, its
+   *  pre-attempt clear, and its cancel failure (client/page.tsx). NOT create_firm — FirmCommitForm keeps its own local
    *  `useState` error for the commit call, and the create_firm RECEIPT's delivery failure reaches
    *  this hook through `deliverValue` → `raise(..., "action", park.parkIndex)`, i.e. the
    *  park-BOUND path, which a later read CAN retire. Only the park-less refusals arrive here. */
