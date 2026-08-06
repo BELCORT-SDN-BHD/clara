@@ -26,12 +26,15 @@
 
 Ordered by dependency + risk; each wave keeps the app runnable.
 
-> **CURRENT (2026-08-06) — read this line, not the first dated block below.**
+> **CURRENT (2026-08-06, session close) — read this line, not the first dated block below.**
 > **44 migrations (frontier `0045`) · Fly `clara-runtime` v54 · the adjustments belt ARMED ·
-> WAVE D COMPLETE (ADR-055..059).** Waves A / A2 / A2.1 / B / C / D are all closed; **Wave E
-> (periods + statements) is next.** Everything that follows is the CHRONOLOGICAL record,
-> **oldest first** — each `STATUS (date)` block was true on its date and is superseded by the
-> ones below it. The live pin lives in `CLAUDE.md`; the open register is PROJECTLOG PART 2.
+> WAVE D COMPLETE (ADR-055..059) · POST-WAVE CLEARED (ADR-060..062).** Waves A / A2 / A2.1 /
+> B / C / D are closed and the pre-E debt is cleared; **NEXT = the §7-A build** (skeleton
+> ratified at `docs/plan/wave-7a-design-skeleton.md`; grill its §6, then five slices, two
+> ceremonies, two-halves acceptance) — **then Wave E** (periods + statements). Everything that
+> follows is the CHRONOLOGICAL record, **oldest first** — each `STATUS (date)` block was true
+> on its date and is superseded by the ones below it. The live pin lives in `CLAUDE.md`; the
+> open register is PROJECTLOG PART 2.
 
 > **STATUS (2026-07-23):** Wave **A** is FULLY LIVE (ADR-022/023/024). **Wave A2**
 > — the sales-invoice/AR side + MyInvois UBL local-parse + SST 3-leg + CN/DN +
@@ -299,11 +302,24 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > replaced-period advisory speaking and its wall keeping the promise, the producer grant flip
 > proven, `staff_advance_tie` undisturbed. Sandbox register: A+B retired with reasons, **B2 LIVE
 > from 2026-07-01** — the belt's **first autonomous DRAFT ~2026-08-06/07**, the **first
-> autonomous POST ≥2026-10-01**. **NEXT: land the two OPEN judgement-logic PRs FIRST — #193
-> (the interview refusal must outlive the poller + the eight stale `0042` comment refs) and
-> #195 (the 409 recovery rewritten fail-closed); `main` still ships the one-sided 409 defect,
-> and each needs an independent review pass before merge. Then Gate P · the §7-A bundle ·
-> Wave E.**
+> autonomous POST ≥2026-10-01**.
+
+> **STATUS (2026-08-06, later — the pre-E clearing day, ADR-060..062): every open item the
+> block above named is LANDED, and the pre-Wave-E debt is CLEARED in one session.** SEVEN
+> merges, each through the ADR-061 law-1 loop: #193/#195 (the one-sided 409 defect dead) ·
+> #196 (harness refresh) · #197 (**ADR-061** — review intensity UNIFORM, tiering declined) ·
+> #198 (the 26 live workflow entries deploy-locked; the ceremony recipe now ends with
+> `--lock-deployed` + commit) · #199 (interview hardening — the reviewer MEASURED a false
+> green in the new guard arm; fixed; re-proven with fresh probes) · #200 (**ADR-062** + the
+> §7-A skeleton landed). **Real-document firsts on BEE CREATIVE:** the first real client
+> asset (`dfd0fc52`, born from the scanned ENOTEX invoice through acquisition-from-coding) +
+> the first real depreciation authority LIVE + OpenAI invoice 0008 booked through the manual
+> attested lane (TB exact). **Gate P and Gate S both re-scoped to operating runway** (first
+> native-MYR SST-stated bill / first real e-invoice XML). **Three structural gaps registered
+> from walls working correctly:** the MSIC commit gate (→ Wave E client-facts) · the missing
+> extraction-recovery door · the FX wall (+ the FX-lite prioritization question for E/F
+> planning). The first local DR round-trip drill PASSED (DR.md §9). **NEXT: the §7-A build
+> session (grill `wave-7a-design-skeleton.md` §6 FIRST) → then Wave E opens.**
 
 **Wave A — the daily loop** *(**CLOSED**, ADR-022..030 — incl. A2 / A2.1)*. Coding with **intrinsic side-effects** (composed inside `approve_entry` / `_subledger_on_approve` as built; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding** *(**CLOSED on intent**, ADR-044..046)*. The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
