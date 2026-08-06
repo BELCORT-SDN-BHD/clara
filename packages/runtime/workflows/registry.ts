@@ -15,6 +15,7 @@ import { chatTurn_v5 } from "./chatTurn.v5.js";
 import { chatTurn_v6 } from "./chatTurn.v6.js";
 import { chatTurn_v7 } from "./chatTurn.v7.js";
 import { chatTurn_v8 } from "./chatTurn.v8.js";
+import { chatTurn_v9 } from "./chatTurn.v9.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -24,6 +25,7 @@ import { autoDraft_v2 } from "./autoDraft.v2.js";
 import { autoDraft_v3 } from "./autoDraft.v3.js";
 import { autoDraft_v4 } from "./autoDraft.v4.js";
 import { autoDraft_v5 } from "./autoDraft.v5.js";
+import { autoDraft_v6 } from "./autoDraft.v6.js";
 import { firmInterview_v1 } from "./firmInterview.v1.js";
 import { firmInterview_v2 } from "./firmInterview.v2.js";
 import { firmInterview_v3 } from "./firmInterview.v3.js";
@@ -33,11 +35,11 @@ import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  chatTurn: chatTurn_v8,
+  chatTurn: chatTurn_v9,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   statementFacts: statementFacts_v1,
-  autoDraft: autoDraft_v5,
+  autoDraft: autoDraft_v6,
   firmInterview: firmInterview_v3,
   clientOnboarding: clientOnboarding_v3,
 } as const;
@@ -149,6 +151,34 @@ export const workflows = {
 // step, so the window is closed by construction. The v1 AND v2 bodies stay frozen, built and
 // EXPORTED so no parked run is stranded (policy (c)) — this class's parks are the ≥48h kind, so
 // a live run on an older body is the expected case, not a corner one.
+//
+// §7-A THE UNATTENDED SALES DRAFTER (wave-7a-contract.md, ADR-063) repointed autoDraft v5->v6
+// and chatTurn v8->v9 (PR-RUNTIME, one of four review/merge units; ships alongside PR-DB's
+// `_coding_lane_core` direction-contract recut + floor drop/recreate + the 6-arity
+// settle_autodraft_task overload, applied under the 7A-R1 continuous quiesce ceremony — v6/v9
+// must be DEPLOYED and VERIFIED LIVE before the DB migration's activation flag ever flips, so
+// the sales draft path is never open against a registry pin that still hardcodes
+// "supplier_bill"). autoDraft v6 stops being purchase-only: the draft schema gains coding_kind
+// (menu EXACTLY supplier_bill | sales_invoice | sales_credit_note — 7A-R7, no journal_entry in
+// the unattended lane), `vendor` generalises to `counterparty` (the SAME match-before-create
+// union, widened to name either party), and the runtime tool — never the model — derives the
+// authoritative counterparty kind from coding_kind (the DB draft writer stays the one authority
+// layer; the model's own optional kind is never trusted, even when it agrees). The
+// DB-authoritative TRI-STATE direction contract (7A-R2: sales | purchase | unresolved, bound at
+// admission, revalidated in the writer) makes the model's coding_kind a checked PROPOSAL, never
+// routing authority. Three new refusal tokens join autoDraft.v6.errors.ts
+// (tax_leg_missing/type_polarity_mismatch as CLR21, sst_account_missing as CLR10 —
+// 0036:828/1642-1659, 0016:1986-2013), and the generic messages become direction-neutral. The
+// settle call moves to the 6-arity settle_autodraft_task overload, carrying the workflow's own
+// engine run id (getWorkflowMetadata().workflowRunId) as the required 6th argument — skeleton
+// §2d's corrected identity: autodraft_attempts.run_id is the admission-time SWEEP uuid, not the
+// engine run id the 0036 caller-run-identity check actually needs. chatTurn v9 carries ONE
+// prompt-only reinforcement (severable per skeleton §2f, riding this wave): a sentence appended
+// to the supplier-bill paragraph makes explicit that a client-issued document is never coded
+// there even if it superficially resembles a bill — it is sales_invoice, crediting income —
+// complementing 7A-R4's DB-layer floor-purity fix (`_ocr_sales_floor`'s authority terms now
+// require coding_kind='sales_invoice', closing the generic-JE provenance hole). The v5/v8
+// bodies stay frozen, built and EXPORTED so no parked run is stranded (policy (c)).
 export { firmInterview_v1 };
 export { firmInterview_v2 };
 export { clientOnboarding_v1 };
@@ -160,10 +190,12 @@ export { chatTurn_v4 };
 export { chatTurn_v5 };
 export { chatTurn_v6 };
 export { chatTurn_v7 };
+export { chatTurn_v8 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
 export { autoDraft_v3 };
 export { autoDraft_v4 };
+export { autoDraft_v5 };
 
 export const workflowNames: string[] = Object.keys(workflows);
