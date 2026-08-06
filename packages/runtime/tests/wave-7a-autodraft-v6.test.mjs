@@ -449,10 +449,35 @@ function maskDirectionClauseDeclaration(text) {
  *  `messages` property — shorthand `{ messages }` or explicit `messages: someOtherName` —
  *  and take WHATEVER identifier it actually references, never assuming the name is literally
  *  "messages"; (4) resolve THAT identifier's OWN declaration, searching ONLY within
- *  runAutoDraftModelStep's own body — the same scope the reference itself lives in. A decoy
- *  sitting in a different function's body is a different lexical scope entirely and is
- *  structurally never visited, exactly as real JS/TS scoping would exclude it — this is no
- *  longer resolution by name at any point, it is resolution by the reference itself. */
+ *  runAutoDraftModelStep's own body — the same scope the reference itself lives in.
+ *
+ *  Codex round 5: two narrower forgeries remained, both closed by changing the guard's
+ *  POSTURE — an AST guard REFUSES what it cannot certify, rather than getting cleverer.
+ *  (1) DECLARATION UNIQUENESS: a DEAD inner-block shadow declaration of the SAME name the
+ *  real streamText call references — round 4's search enumerated same-named declarations
+ *  ANYWHERE under the function body without regard for whether more than one such
+ *  declaration existed; more than one is genuine ambiguity about which one is "the" real
+ *  binding, and the guard must refuse rather than pick either. (2) CALLEE IDENTITY: round
+ *  4 still matched the streamText call by bare SPELLING — a real call aliased to
+ *  `aiStreamText` (via `import { streamText as aiStreamText } from "ai"`) plus a dead decoy
+ *  literally spelled `streamText(...)` fooled a name-only match, because the decoy's mere
+ *  presence was never inspected once the "real" identifier was found by name.
+ *
+ *  TERMINAL FIX (this repo's #195 "named cost" stance: an AST guard REFUSES what it cannot
+ *  certify): (a) `streamText`'s callee identity is resolved through the ACTUAL import
+ *  specifier from the "ai" module — following any local alias to what it imports, never a
+ *  bare spelling match; a local re-declaration that would shadow that import binding inside
+ *  the function is refused, and ANY OTHER call literally spelled "streamText" that is NOT
+ *  the identity-resolved one is ALSO refused outright (its mere presence is suspicious — the
+ *  guard does not try to prove it inert). (b) declaration resolution enumerates EVERY
+ *  same-named declaration anywhere under the function with NO shape pre-filter (a shape
+ *  filter at the search stage is itself exploitable: an exotically-shaped real declaration
+ *  could be silently excluded, leaving a bare decoy as the sole "match") — if more than one
+ *  exists, or the sole candidate's initializer is not a plain array literal, the guard
+ *  refuses. Every refusal path shares one message prefix — CANNOT_CERTIFY, "human eyes
+ *  required" — so a refusal reads as a deliberate posture, not an accidental crash. The
+ *  legitimate v5/v6 shape (one import, one call, one declaration) is simple and passes
+ *  cleanly; anything trickier is refused, not resolved. */
 function findNodesByPredicate(root, predicate) {
   const found = [];
   const visit = (node) => {
@@ -463,31 +488,88 @@ function findNodesByPredicate(root, predicate) {
   return found;
 }
 
+const CANNOT_CERTIFY = "cannot certify — human eyes required";
+
+/** Resolve `streamText`'s LOCAL binding name through the ACTUAL `import ... from "ai"`
+ *  specifier — never a bare spelling match. Follows a local alias (`streamText as X`) to
+ *  what it imports; a callee merely SPELLED "streamText" that is not this binding is not
+ *  the real thing. */
+function resolveStreamTextLocalBindingName(sourceFile) {
+  const aiImports = findNodesByPredicate(
+    sourceFile,
+    (node) => ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier) && node.moduleSpecifier.text === "ai",
+  );
+  const specifiers = [];
+  for (const imp of aiImports) {
+    const bindings = imp.importClause && imp.importClause.namedBindings;
+    if (!bindings || !ts.isNamedImports(bindings)) continue;
+    for (const el of bindings.elements) {
+      const importedName = el.propertyName ? el.propertyName.text : el.name.text;
+      if (importedName === "streamText") specifiers.push(el.name.text);
+    }
+  }
+  assert.equal(specifiers.length, 1, `${CANNOT_CERTIFY} — expected exactly one \`streamText\` named-import specifier from "ai", found ${specifiers.length}`);
+  return specifiers[0];
+}
+
 function extractUserMessageContent(text) {
   const sourceFile = ts.createSourceFile("autodraft-impl-probe.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  const streamTextLocalName = resolveStreamTextLocalBindingName(sourceFile);
 
   const targetFns = findNodesByPredicate(
     sourceFile,
     (node) => ts.isFunctionDeclaration(node) && !!node.name && node.name.text === "runAutoDraftModelStep" && !!node.body,
   );
-  assert.equal(targetFns.length, 1, "exactly one `runAutoDraftModelStep` FunctionDeclaration (with a body) must exist");
+  assert.equal(targetFns.length, 1, `${CANNOT_CERTIFY} — expected exactly one \`runAutoDraftModelStep\` FunctionDeclaration, found ${targetFns.length}`);
   const fnBody = targetFns[0].body;
 
-  // The streamText(...) call must be found INSIDE this function's own body only — never a
-  // file-wide search — so a decoy call or declaration sitting in a different function is
-  // structurally invisible, matching real lexical scoping.
-  const streamTextCalls = findNodesByPredicate(
+  // The resolved import binding must not itself be shadowed by a LOCAL declaration inside
+  // this function — a local re-declaration of the same name would silently redirect every
+  // call spelled with that name to something that is NOT the real "ai" import.
+  const localShadowsOfImport = findNodesByPredicate(
     fnBody,
-    (node) => ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "streamText",
+    (node) =>
+      ((ts.isVariableDeclaration(node) || ts.isParameter(node)) && ts.isIdentifier(node.name) && node.name.text === streamTextLocalName) ||
+      (ts.isFunctionDeclaration(node) && !!node.name && node.name.text === streamTextLocalName),
   );
-  assert.equal(streamTextCalls.length, 1, "exactly one streamText(...) call must exist inside runAutoDraftModelStep's own body");
-  const streamTextArg = streamTextCalls[0].arguments[0];
-  assert.ok(streamTextArg && ts.isObjectLiteralExpression(streamTextArg), "streamText's own first argument must be an object literal");
+  assert.equal(
+    localShadowsOfImport.length,
+    0,
+    `${CANNOT_CERTIFY} — the resolved streamText import binding ("${streamTextLocalName}") is shadowed by a local declaration inside runAutoDraftModelStep`,
+  );
+
+  // Every CallExpression inside this function's own body whose callee is a plain identifier.
+  const allCalleeCalls = findNodesByPredicate(fnBody, (node) => ts.isCallExpression(node) && ts.isIdentifier(node.expression));
+  const trueStreamTextCalls = allCalleeCalls.filter((c) => c.expression.text === streamTextLocalName);
+  // A call literally spelled "streamText" that is NOT one of the identity-resolved calls is
+  // exactly Codex's round-5 forgery shape: a decoy sharing the bare name streamText actually
+  // has, present purely to fool a spelling match. Its mere presence is refused, never
+  // silently ignored as "inert dead code" — the guard does not try to prove a negative.
+  const extraneousRawStreamTextCalls = allCalleeCalls.filter((c) => c.expression.text === "streamText" && !trueStreamTextCalls.includes(c));
+  assert.equal(
+    trueStreamTextCalls.length,
+    1,
+    `${CANNOT_CERTIFY} — expected exactly one call to the resolved streamText binding ("${streamTextLocalName}") inside runAutoDraftModelStep, found ${trueStreamTextCalls.length}`,
+  );
+  assert.equal(
+    extraneousRawStreamTextCalls.length,
+    0,
+    `${CANNOT_CERTIFY} — found a call literally spelled "streamText" that does not resolve to the real "ai" import binding`,
+  );
+  const streamTextCall = trueStreamTextCalls[0];
+
+  const streamTextArg = streamTextCall.arguments[0];
+  assert.ok(streamTextArg && ts.isObjectLiteralExpression(streamTextArg), `${CANNOT_CERTIFY} — streamText's own first argument must be an object literal`);
 
   const messagesProps = streamTextArg.properties.filter(
     (p) => (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && ts.isIdentifier(p.name) && p.name.text === "messages",
   );
-  assert.equal(messagesProps.length, 1, "streamText's own argument object must have exactly one `messages` property");
+  assert.equal(
+    messagesProps.length,
+    1,
+    `${CANNOT_CERTIFY} — streamText's own argument object must have exactly one \`messages\` property, found ${messagesProps.length}`,
+  );
   const messagesProp = messagesProps[0];
 
   // Resolve the IDENTIFIER the `messages` property ACTUALLY references — a shorthand
@@ -502,27 +584,26 @@ function extractUserMessageContent(text) {
     assert.ok(ts.isPropertyAssignment(messagesProp));
     assert.ok(
       ts.isIdentifier(messagesProp.initializer),
-      "the `messages` property's value must be a plain identifier reference — this codebase always builds the array as its own named declaration first",
+      `${CANNOT_CERTIFY} — the \`messages\` property's value must be a plain identifier reference`,
     );
     referencedName = messagesProp.initializer.text;
   }
 
-  // Resolve that identifier to ITS OWN declaration, SCOPED to runAutoDraftModelStep's own
-  // body — never a file-wide name search. A same-named decoy living in a different function
-  // is a different lexical scope and is never visited by this search.
-  const decls = findNodesByPredicate(
-    fnBody,
-    (node) =>
-      ts.isVariableDeclaration(node) &&
-      ts.isIdentifier(node.name) &&
-      node.name.text === referencedName &&
-      !!node.initializer &&
-      ts.isArrayLiteralExpression(node.initializer),
-  );
+  // Resolve that identifier's declaration, SCOPED to runAutoDraftModelStep's own body — never
+  // a file-wide name search (a same-named decoy in a different function is a different
+  // lexical scope and is never visited). Codex round 5: NO shape pre-filter at the search
+  // stage — enumerate EVERY same-named declaration first, THEN check shape only once
+  // uniqueness is established, so an exotically-shaped real declaration can never be
+  // silently excluded from the candidate count while a bare-shaped decoy stands alone.
+  const decls = findNodesByPredicate(fnBody, (node) => ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === referencedName);
   assert.equal(
     decls.length,
     1,
-    `exactly one \`${referencedName}\` array-literal declaration must exist WITHIN runAutoDraftModelStep's own body (streamText's actual referent) — never resolved by a file-wide name search`,
+    `${CANNOT_CERTIFY} — expected exactly one \`${referencedName}\` declaration anywhere within runAutoDraftModelStep's own body, found ${decls.length} (shadowing or a dead-block decoy) — refusing rather than guessing which one streamText actually uses`,
+  );
+  assert.ok(
+    decls[0].initializer && ts.isArrayLiteralExpression(decls[0].initializer),
+    `${CANNOT_CERTIFY} — \`${referencedName}\`'s sole declaration must have a plain array-literal initializer`,
   );
   const messagesArray = decls[0].initializer;
 
@@ -532,14 +613,18 @@ function extractUserMessageContent(text) {
       (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "role" && ts.isStringLiteral(p.initializer) && p.initializer.text === "user",
     );
   });
-  assert.equal(userMessageObjects.length, 1, "exactly one { role: \"user\", ... } object literal must exist inside the resolved messages array");
+  assert.equal(
+    userMessageObjects.length,
+    1,
+    `${CANNOT_CERTIFY} — exactly one { role: "user", ... } object literal must exist inside the resolved messages array, found ${userMessageObjects.length}`,
+  );
 
   const contentProps = userMessageObjects[0].properties.filter((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "content");
-  assert.equal(contentProps.length, 1, "the user message object must have exactly one `content` property assignment");
+  assert.equal(contentProps.length, 1, `${CANNOT_CERTIFY} — the user message object must have exactly one \`content\` property assignment`);
   const contentNode = contentProps[0].initializer;
   assert.ok(
     ts.isTemplateExpression(contentNode) || ts.isNoSubstitutionTemplateLiteral(contentNode),
-    "the user message's content must be a backtick template-literal expression node",
+    `${CANNOT_CERTIFY} — the user message's content must be a backtick template-literal expression node`,
   );
 
   // getText() returns the node's OWN source span, backticks included — never anything from
@@ -566,6 +651,8 @@ test("v6's model user-message content, extracted from its EXACT executable posit
 
 test("Codex round-3's own mutant class, reconstructed and re-run against the extractor: v5's OLD message restored as REAL executable content, with v6's NEW message (AND a fake `const messages: ModelMessage[] = [` anchor) planted only inside a comment — the extractor must still return the EXECUTABLE (old) text, proving comment trivia can never be mistaken for a real node", () => {
   const mutant = `
+import { streamText, stepCountIs } from "ai";
+
 export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
   "use step";
   // Codex round-3 planted mutant: this comment forges a SECOND-LOOKING anchor plus the
@@ -594,6 +681,8 @@ export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
 
 test("Codex round-4's own mutant class, reconstructed and re-run against the identity-resolving extractor: the REAL streamText call site references a RENAMED variable (`runtimeMessages`) carrying the OLD message, while a NEVER-CALLED sibling function contains a decoy `messages` declaration carrying the expected NEW message — the extractor must follow streamText's own `messages: runtimeMessages` reference to runtimeMessages's OWN declaration, never select 'the' declaration literally spelled \"messages\" from anywhere in the file", () => {
   const mutant = `
+import { streamText, stepCountIs } from "ai";
+
 export async function neverCalledDecoy(ctx: ToolCtx) {
   const messages: ModelMessage[] = [
     { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
@@ -619,6 +708,93 @@ export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
     extractUserMessageContent(mutant),
     "Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).",
     "the extractor must resolve streamText's OWN `messages: runtimeMessages` reference to runtimeMessages's declaration inside runAutoDraftModelStep's own body — never the same-named decoy sitting in a different, never-called function",
+  );
+});
+
+test("Codex round-5, forgery 1 (declaration uniqueness): a DEAD inner-block shadow declaration of the SAME name (\"messages\") the real streamText call references — the guard must REFUSE with a CANNOT_CERTIFY message rather than silently pick either candidate", () => {
+  const mutant = `
+import { streamText, stepCountIs } from "ai";
+
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
+  "use step";
+  const messages: ModelMessage[] = [
+    { role: "user", content: \`Draft the supplier bill for document \${ctx.documentId} (filing \${ctx.filingId}).\` },
+  ];
+  if (false) {
+    // DEAD inner-block shadow — never executes, but declares the SAME name "messages" the
+    // real streamText call below actually references. This is genuine ambiguity about which
+    // declaration is "the" real binding — the guard must refuse, not pick either one.
+    const messages: ModelMessage[] = [
+      { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+    ];
+  }
+  const result = streamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages,
+    tools: tools,
+  });
+  return result;
+}
+`;
+  assert.throws(() => extractUserMessageContent(mutant), /cannot certify — human eyes required/, "a shadow/dead-block decoy declaration must REFUSE the extraction, not silently resolve to either candidate");
+});
+
+test("Codex round-5, forgery 2 (callee identity): the REAL streamText call is reached via an import ALIAS (`streamText as aiStreamText`), while a DEAD decoy call literally spelled \"streamText\" (the raw, unaliased name) sits alongside it — the guard must REFUSE because the decoy's mere presence is suspicious, even though the real call is otherwise correctly identity-resolvable", () => {
+  const mutant = `
+import { streamText as aiStreamText, stepCountIs } from "ai";
+
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
+  "use step";
+  const messages: ModelMessage[] = [
+    { role: "user", content: \`Draft the supplier bill for document \${ctx.documentId} (filing \${ctx.filingId}).\` },
+  ];
+  const result = aiStreamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages,
+    tools: tools,
+  });
+  if (false) {
+    // DEAD decoy call, spelled with the RAW "streamText" name — NOT the resolved import
+    // binding ("aiStreamText") — never executes, never informs the model. Its own \`messages\`
+    // property references a REAL declared identifier (decoyMessages), not an inline literal —
+    // this is deliberate: it proves a bare-spelling extractor doesn't merely throw for an
+    // unrelated shape reason here, it silently resolves this decoy's OWN complete, correct-
+    // shaped declaration and returns its WRONG content with no error at all.
+    const decoyMessages: ModelMessage[] = [
+      { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+    ];
+    streamText({ messages: decoyMessages });
+  }
+  return result;
+}
+`;
+  assert.throws(() => extractUserMessageContent(mutant), /cannot certify — human eyes required/, "an extraneous raw-spelled \"streamText\" call that is not the identity-resolved binding must REFUSE the extraction, even though the real (aliased) call is otherwise unambiguous and the decoy's own messages resolve cleanly on their own");
+});
+
+test("Codex round-5 control: the LEGITIMATE shape (one plain `streamText` import, one call, one declaration — exactly what v5/v6 actually look like) must NOT be refused — the terminal fix's stricter posture does not cost a false failure on ordinary code", () => {
+  const control = `
+import { streamText, stepCountIs } from "ai";
+
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
+  "use step";
+  const messages: ModelMessage[] = [
+    { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+  ];
+  const result = streamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages,
+    tools: tools,
+  });
+  return result;
+}
+`;
+  assert.equal(
+    extractUserMessageContent(control),
+    "Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}",
+    "a plain, unambiguous shape must extract cleanly — the stricter posture refuses only genuine ambiguity, not ordinary code",
   );
 });
 
