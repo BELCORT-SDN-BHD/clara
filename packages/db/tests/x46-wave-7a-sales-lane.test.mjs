@@ -19,7 +19,7 @@ import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import {
-  rootQuery, humanQuery, endPool, printLaneNotes, noteLane, printSkipCount,
+  rootQuery, humanQuery, endPool, printLaneNotes, noteLane, printSkipCount, ROLES,
   buildWorld, firmOf, opk, createClient,
   a21EnsureReady, skip16,
   proposeAutopostRule,
@@ -380,7 +380,9 @@ test("C1 with the lane OFF a tax-silent sales filing is NOT ready; with it ON th
   const ext = await rootQuery(
     `select id from clara.document_extractions where document_id=$1 and engine_kind='invoice_facts'
        and status='done' order by version_n desc limit 1`, [cited.documentId]);
-  if (!ext.rows[0]) { noteLane("C1: no invoice_facts extraction — cell dormant"); return; }
+  // MANDATORY, not dormant: a missing extraction made this cell score PASS while measuring
+  // nothing at all about the lane it is named for.
+  assert.ok(ext.rows[0], "mandatory setup: the fixture document carries a done invoice_facts extraction");
   for (const [path, value] of [
     ["invoice.vendor_registration", CLIENT_REG],
     ["invoice.vendor_name", CLIENT_NAME],
@@ -393,10 +395,9 @@ test("C1 with the lane OFF a tax-silent sales filing is NOT ready; with it ON th
   }
   const dir = await rootQuery(
     "select clara._autodraft_direction_tri($1,$2) as d", [cited.documentId, client]);
-  if (dir.rows[0].d !== "sales") {
-    noteLane(`C1: the fixture document resolves ${dir.rows[0].d}, not sales — cell dormant`);
-    return;
-  }
+  assert.equal(dir.rows[0].d, "sales",
+    `mandatory premise: the fixture document must resolve SALES or this cell proves nothing about `
+    + `the sales lane (got '${dir.rows[0].d}')`);
 
   const laneOff = await rootQuery(
     "select lane, reasons from clara._coding_lane_core($1,$2)", [client, cited.filingId]);
@@ -528,6 +529,145 @@ test("C4 the AUTODRAFT lane REFUSES a coding kind that contradicts the re-derive
     }),
     (e) => e.code === "CLR21" && /direction_family_mismatch/.test(String(e.detail ?? "")),
     "a sales_invoice proposed on a purchase-direction document is refused BY THE WRITER, on the family arm");
+});
+
+/** A filing whose document resolves SALES: the client IS the supplier on the page. */
+async function salesDirectionFiling(sub, client, firm) {
+  const cited = await seedCitedDocument(sub, { firm, client, quote: rm(90000) });
+  await seedStatedInvoiceFacts(cited, { firm });
+  const ext = await rootQuery(
+    `select id from clara.document_extractions where document_id=$1 and engine_kind='invoice_facts'
+       and status='done' order by version_n desc limit 1`, [cited.documentId]);
+  if (!ext.rows[0]) return null;
+  for (const [path, value] of [
+    ["invoice.vendor_registration", CLIENT_REG],
+    ["invoice.vendor_name", CLIENT_NAME],
+    ["invoice.customer_name", CUSTOMER],
+  ]) {
+    await rootQuery(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+       values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,1.0)`,
+      [firm, ext.rows[0].id, path, value]);
+  }
+  const dir = (await rootQuery(
+    "select clara._autodraft_direction_tri($1,$2) as d", [cited.documentId, client])).rows[0].d;
+  return dir === "sales" ? cited : null;
+}
+
+test("C5 RETRY and FRESH admissions cannot deadlock on one firm's open batch", async (t) => {
+  if (skipHere(t)) return;
+  // THE SECOND DEADLOCK THIS FILE HAS SEEN, and the reason it needed an ORDER rather than a
+  // deletion. The first was a second advisory KEY (203007001), fixed by removing it. This one
+  // is advisory-vs-ROW: the RETRY path takes the firm advisory lock early and then reaches the
+  // sales branch, while a FRESH admission used to take the backfill batch's ROW lock first and
+  // want the advisory after — opposite orders on one firm, 40P01, and the rollback destroys the
+  // sweep_run_items refusal receipt with it, which is the firm-wide run wedge every other branch
+  // in that function is written to prevent.
+  //
+  // THE SCHEDULE IS DETERMINISTIC, AND IT HAS TO BE. A plain "fire both and hope" race does NOT
+  // reproduce this: I ran that version against a deliberately re-broken (row-first) body four
+  // passes and it stayed green, because the window between the retry path's advisory
+  // acquisition and its batch-row acquisition is a few microseconds wide. A cell that cannot
+  // fail against the defect it names is decoration. So session A HOLDS the firm advisory lock —
+  // which is exactly the state the retry path is in when it reaches the sales branch, reached
+  // through the same key — and session B then runs the REAL admission.
+  //
+  //   PRE-FIX  (row first): B takes the batch ROW, wants the advisory A holds, blocks; A then
+  //                         runs its own real admission, wants the row B holds -> CYCLE -> 40P01.
+  //   POST-FIX (advisory first): B wants the advisory FIRST and blocks there, holding nothing;
+  //                         A completes, commits, releases; B proceeds. No cycle is constructible.
+  const sub = world.users.alice;
+  const client = await freshSalesClient(sub);
+  const firm = await firmOf(client);
+
+  const citedA = await salesDirectionFiling(sub, client, firm);
+  const citedB = await salesDirectionFiling(sub, client, firm);
+  if (!citedA || !citedB) {
+    noteLane("C5: the fixture documents did not resolve sales direction — cell dormant");
+    return;
+  }
+
+  // Lane ON, watermark in the FUTURE so BOTH filings are backlog and must consult the batch —
+  // which is the row lock this cell exists to order against.
+  await rootQuery("select clara.set_sales_lane_activation($1,true,now()+interval '30 days',$2)",
+    [firm, "x46 C5 lock-order race"]);
+  const { getPool } = await import("./rig-docs-fixtures.mjs");
+  const cA = await getPool().connect();
+  const cB = await getPool().connect();
+  try {
+    await humanQuery(sub, "select clara.open_sales_backfill($1,$2,$3,$4)",
+      [client, 50, "x46 C5 batch", opk("c5bf")]);
+    // Filing A in the RETRY shape: a registry row that is neither active nor parked and still
+    // carries a reservation — the state that sends admission down the refund branch which takes
+    // the firm advisory lock BEFORE the sales branch is reached.
+    await rootQuery(
+      `insert into clara.autodraft_attempts(firm_id,client_id,document_id,filing_id,origin,state,
+         reserved_tokens,usage_date)
+       values($1,$2,$3,$4,'one_click','idle',40000,(now() at time zone 'UTC')::date)
+       on conflict(filing_id) do update set state='idle', reserved_tokens=40000`,
+      [firm, client, citedA.documentId, citedA.filingId]);
+
+    const admit = (c, filing) => c.query(
+      "select clara.admit_autodraft_task($1,'one_click',null,$2,$3::bigint) as r",
+      [filing, "openai/gpt-5-mini", 40000]);
+
+    for (const c of [cA, cB]) {
+      await c.query(`set role ${ROLES.runtime}`);
+      await c.query("begin");
+      // Bounded so a genuine cycle surfaces as 40P01 or a timeout, never as a hung suite.
+      await c.query("set local statement_timeout = '8000ms'");
+    }
+    // A holds the firm advisory lock — the retry path's state, same key.
+    await cA.query("select pg_advisory_xact_lock(202991617, hashtext($1::text))", [firm]);
+
+    // B runs the real admission and must BLOCK (post-fix: on the advisory, holding nothing).
+    let bOut = null;
+    const bRun = admit(cB, citedB.filingId)
+      .then((r) => { bOut = { ok: true, r: r.rows[0].r }; })
+      .catch((e) => { bOut = { ok: false, code: e.code, message: e.message }; });
+    await new Promise((r) => setTimeout(r, 600));
+
+    // A now runs its own real admission while still holding the advisory.
+    let aOut = null;
+    try { aOut = { ok: true, r: (await admit(cA, citedA.filingId)).rows[0].r }; }
+    catch (e) { aOut = { ok: false, code: e.code, message: e.message }; }
+    await cA.query("commit").catch(() => cA.query("rollback").catch(() => {}));
+    await bRun;
+    await cB.query("commit").catch(() => cB.query("rollback").catch(() => {}));
+
+    for (const [side, out] of [["A (retry)", aOut], ["B (fresh)", bOut]]) {
+      assert.notEqual(out?.code, "40P01",
+        `${side} deadlocked — the firm advisory lock must be acquired before any firm-scoped row `
+        + `lock on EVERY path (got ${JSON.stringify(out)})`);
+      assert.notEqual(out?.code, "57014",
+        `${side} timed out waiting — a lock cycle or an unreleased hold (got ${JSON.stringify(out)})`);
+    }
+  } finally {
+    for (const c of [cA, cB]) {
+      await c.query("rollback").catch(() => {});
+      await c.query("reset role").catch(() => {});
+      c.release();
+    }
+    await rootQuery("update clara.firm_limits set sales_lane_active=false where firm_id=$1", [firm]);
+  }
+});
+
+test("C6 the canonical lock order is STRUCTURAL: the firm advisory precedes every firm-scoped row lock", async (t) => {
+  if (skipHere(t)) return;
+  // The race above is the behavioural net; this is the one that fails at the SOURCE the moment
+  // somebody reorders the acquisitions, without waiting for a scheduler to interleave badly.
+  const src = (await rootQuery(
+    `select prosrc from pg_proc where pronamespace='clara'::regnamespace
+       and proname='admit_autodraft_task'`)).rows[0].prosrc;
+  const salesAt = src.indexOf("if v_direction='sales' then");
+  assert.ok(salesAt > 0, "mandatory setup: the sales branch is present");
+  const advisoryAt = src.indexOf("pg_advisory_xact_lock(202991617", salesAt);
+  const batchRowAt = src.indexOf("from clara.sales_backfill_batches b", salesAt);
+  assert.ok(advisoryAt > 0 && batchRowAt > 0, "mandatory setup: both acquisitions are on the sales path");
+  assert.ok(advisoryAt < batchRowAt,
+    "the firm advisory lock must be acquired BEFORE the backfill batch row lock — the retry path "
+    + "already holds the advisory when it reaches here, so a row-first order on this path is the "
+    + "opposite order and deadlocks (40P01, reproduced live by the cross-model gate)");
 });
 
 // ---------------------------------------------------------------------------

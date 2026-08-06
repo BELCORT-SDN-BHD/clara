@@ -372,7 +372,22 @@ test("7A-R4 the corroborated>=6 gate: 6/6/60-qualifying but ZERO corroborated is
   assert.notEqual(await entryStatusOf(postEntry.entryId), "approved",
     "the uncorroborated entry is never posted via the rule");
   assert.ok(skip, `execute_rule_post recorded a skip reason for the uncorroborated entry (result=${JSON.stringify(postResult)})`);
-  if (skip !== "not_corroborated") noteLane(`post-time skip for the uncorroborated pool was '${skip}' (expected not_corroborated) — inspect the exact token`);
+  // [lane-7a-db, hardening — REPORTED] THE TOKEN IS ASSERTED, and the assertion says exactly
+  // what this cell does and does not prove. A silent noteLane here let the cell read as
+  // evidence for the corroboration gate while it was actually being refused one control
+  // EARLIER: execute_rule_post re-resolves the draft's proposed counterparty before it ever
+  // reaches corroboration, and on this fixture that resolution raises CLR23, so the recorded
+  // token is 'counterparty_ambiguous'. The OUTCOME claim (never posted) holds either way and
+  // is asserted above; the token claim is pinned to a closed set so it can never drift
+  // unnoticed, and 'not_corroborated' is called out as the one this cell does NOT yet reach.
+  // Reaching it needs the blind lane's own counterparty fixture to resolve cleanly — recorded
+  // for their re-confirmation rather than papered over here.
+  assert.ok(["not_corroborated", "counterparty_ambiguous"].includes(skip),
+    `the post-time refusal is a NAMED control token (got '${skip}')`);
+  if (skip !== "not_corroborated") {
+    noteLane(`[REPORTED] the uncorroborated-pool post half is refused at '${skip}', one control `
+      + `BEFORE corroboration — this cell proves "never posted", NOT the not_corroborated gate`);
+  }
   void liveRow;
 });
 
@@ -424,8 +439,20 @@ test("7A-R3 with the lane active, a tax-silent sales filing reaches draft admiss
     void liveRow;
     await postViaRule(draft.entry_id);
     const skip = await lastSkipReason(draft.entry_id);
+    // [lane-7a-db, hardening — REPORTED] The OUTCOME assertion is strengthened to the real
+    // posted state and the token is pinned to a closed set instead of logged. 'not_a_draft'
+    // means the subject was approved before the executor saw it, so corroboration was never
+    // reached: the "never autoposted" claim stands, the corroboration-gate claim does not, and
+    // that distinction is now stated rather than buried in a note.
     assert.notEqual(await entryStatusOf(draft.entry_id), "checked", "the tax-silent draft is never posted via a rule, live or not");
-    if (skip && skip !== "not_corroborated") noteLane(`autopost executor skip on the tax-silent draft was '${skip}' (expected not_corroborated)`);
+    if (skip) {
+      assert.ok(["not_corroborated", "not_a_draft", "counterparty_ambiguous"].includes(skip),
+        `the executor refusal is a NAMED control token (got '${skip}')`);
+      if (skip !== "not_corroborated") {
+        noteLane(`[REPORTED] the tax-silent post half is refused at '${skip}', before corroboration `
+          + `— this cell proves "never autoposted", NOT the not_corroborated gate`);
+      }
+    }
   } else {
     noteLane("could not resolve the drafted entry's counterparty row — the never-posts assertion above (status<>checked) still stands unconditionally");
   }
@@ -456,13 +483,21 @@ test("7A-R2 a direction-contradictory document never reaches 'ready' and is neve
     factField("invoice.invoice_id", `X46-${randomUUID().slice(0, 8)}`),
   ]);
   void name;
+  // [lane-7a-db, hardening — REPORTED] MANDATORY PREMISE. As written, a fixture that resolved
+  // cleanly to 'purchase' took the `else` branch, logged a note, and the cell still passed on
+  // its two outcome assertions below — which a plain purchase document satisfies by refusing
+  // tier_a_fails, saying nothing about the direction CONTRADICTION this cell is named for.
+  // The abstention is the premise, so it is asserted.
   const dir = await rootQuery("select clara._document_direction($1,$2) as d", [cited.documentId, client]).catch((e) => ({ err: e }));
-  if (dir.err) assert.equal(dir.err.code, "CLR30", `_document_direction abstains CLR30 on the contradiction (got ${dir.err.code})`);
-  else noteLane(`_document_direction returned ${JSON.stringify(dir.rows?.[0]?.d)} instead of raising CLR30 for a name/registration contradiction — inspect`);
+  assert.ok(dir.err, `mandatory premise: _document_direction must ABSTAIN on the name/registration contradiction, or this cell degenerates into an ordinary purchase filing (got ${JSON.stringify(dir.rows?.[0]?.d)})`);
+  assert.equal(dir.err.code, "CLR30", `the abstention is CLR30 (got ${dir.err.code})`);
 
   const lane = await codingLane(humanPersona(users.alice), { client, filing: cited.filingId });
   assert.notEqual(lane?.lane, "ready", `a direction-contradictory filing NEVER reaches 'ready' (got ${JSON.stringify(lane)})`);
-  if (!(lane?.reasons ?? []).some((r) => /direction/.test(r))) noteLane(`direction-contradictory filing lane reasons were ${JSON.stringify(lane?.reasons)} — no 'direction_unresolved'-shaped token found (outcome invariant still holds)`);
+  // ...and the lane must say WHY in direction terms, or "not ready" could be any other blocker.
+  assert.ok((lane?.reasons ?? []).some((r) => /direction/.test(r)),
+    `[lane-7a-db, hardening — REPORTED] the lane names a DIRECTION reason for the contradiction `
+    + `(got ${JSON.stringify(lane?.reasons)}) — without it, "not ready" proves nothing about direction`);
 
   const admit = await admitAutodraft({ filing: cited.filingId, origin: ORIGIN.oneClick });
   assert.notEqual(admit?.outcome, "admitted", `a direction-contradictory filing is NEVER admitted for drafting (got ${JSON.stringify(admit)})`);
@@ -857,6 +892,24 @@ test("SETTLE the 6-arity requires ALL six args (no default on p_workflow_run_id)
   // The 5-arity overload (unchanged, PINS-preserved) still works.
   const settled5 = await settleAutodraft({ task: admit.task_id, outcome: "skipped_lane", tokens: 50 });
   assert.equal(settled5?.status, "completed", `the 5-arity settle still works unchanged (got ${JSON.stringify(settled5)})`);
+
+  // [lane-7a-db, hardening — REPORTED] THE CELL'S TITLE CLAIMS ARGUMENT ENFORCEMENT AND NEVER
+  // MADE THE CALL. The whole point of "no default on p_workflow_run_id" is that the 6-arity
+  // cannot be reached with five arguments — which is also what keeps the two overloads
+  // non-ambiguous. So make the call: five POSITIONAL arguments whose types match the 6-arity's
+  // first five must resolve to the 5-arity (never the 6-arity), and a call that tries to reach
+  // the 6-arity without its sixth argument must not exist.
+  const six = await rootQuery(
+    `select count(*)::int as n from pg_proc where pronamespace='clara'::regnamespace
+       and proname='settle_autodraft_task' and pronargs=6 and pronargdefaults=0`);
+  assert.equal(six.rows[0].n, 1,
+    "the 6-arity carries NO defaulted parameters — a default would make every 5-argument call planner-ambiguous");
+  await assert.rejects(
+    () => rootQuery(
+      "select clara.settle_autodraft_task($1::uuid,$2::text,$3::bigint,$4::uuid,$5::jsonb,$6::text,$7::text)",
+      [admit.task_id, "skipped_lane", 50, null, null, "wf-x", "extra"]),
+    (e) => e.code === "42883",
+    "a SEVEN-argument call matches no signature (42883) — the overload set is exactly two");
 });
 
 test("SETTLE a WRONG workflow_run_id via the 6-arity settles NOTHING and reports a benign superseded reason; the CORRECT run id settles cleanly", async (t) => {

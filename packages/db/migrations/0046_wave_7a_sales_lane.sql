@@ -2133,6 +2133,33 @@ begin
     || '  -- below, which already refuses it as lane_changed/direction_unresolved.' || chr(10)
     || '  v_direction:=clara._autodraft_direction_tri(f.document_id,f.client_id);' || chr(10)
     || '  if v_direction=''sales'' then' || chr(10)
+    -- THE CANONICAL LOCK ORDER FOR THIS FUNCTION, AND WHY IT IS ACQUIRED HERE.
+    --
+    -- EVERY LOCK THIS FUNCTION TAKES, PER PATH, in acquisition order:
+    --   RETRY  (a.reserved_tokens>0): document_filings FOR UPDATE -> ADVISORY 202991617
+    --                                 -> [this block] ADVISORY 202991617 (reentrant, free)
+    --                                 -> sales_backfill_batches FOR UPDATE
+    --                                 -> firm_usage_daily FOR UPDATE
+    --   FRESH  (ordinary admission):  document_filings FOR UPDATE
+    --                                 -> [this block] ADVISORY 202991617
+    --                                 -> sales_backfill_batches FOR UPDATE
+    --                                 -> firm_usage_daily FOR UPDATE
+    -- THE INVARIANT: the firm advisory lock is taken BEFORE any firm-scoped ROW lock, on
+    -- every path. Both orders above are prefixes of one another, so no cycle exists.
+    --
+    -- IT WAS NOT ALWAYS SO, and the second deadlock in this file came from exactly that. The
+    -- cap count used to sit AFTER the backfill batch''s FOR UPDATE, which made the two paths
+    -- disagree: RETRY held ADVISORY and wanted the BATCH ROW, while FRESH held the BATCH ROW
+    -- and wanted ADVISORY -- opposite orders on the same firm, resolved by PostgreSQL aborting
+    -- one with 40P01 (reproduced live by the cross-model gate). The abort rolls the whole
+    -- transaction back, which destroys the sweep_run_items refusal receipt with it, leaving the
+    -- run''s expected_count unreachable -- the firm-wide wedge every other branch here is
+    -- written to prevent. Advisory xact locks are REENTRANT, so hoisting the acquisition to the
+    -- top of the branch costs the retry path nothing and gives every path one order.
+    --
+    -- The FIRST deadlock (a second advisory key, 203007001) was fixed by deleting the key; this
+    -- one needed an ORDER, because a row lock cannot be collapsed into an advisory one.
+    || '    perform pg_advisory_xact_lock(202991617,hashtext(f.firm_id::text));' || chr(10)
     || '    if not clara._sales_lane_active(f.firm_id) then' || chr(10)
     || '      if p_run_id is not null then' || chr(10)
     || '        insert into clara.sweep_run_items(run_id,filing_id,firm_id,client_id,document_id,' || chr(10)
@@ -2164,18 +2191,8 @@ begin
     || '      end if;' || chr(10)
     || '      v_batch_id:=v_batch.id;' || chr(10)
     || '    end if;' || chr(10)
-    -- THE SALES CAP COUNTS UNDER THE FIRM''S EXISTING DAILY-COUNTER LOCK, 202991617, and
-    -- introduces NO SECOND KEY. A second firm-scoped key deadlocks: the retry/refund branch
-    -- far above already takes 202991617 before control falls through to here, so a retry
-    -- admission would hold 202991617 then want the new key while a fresh admission held the
-    -- new key then wanted 202991617 -- opposite orders on the same firm, which PostgreSQL
-    -- resolves by aborting one with 40P01. That abort rolls back the whole transaction and
-    -- writes NO sweep_run_items row, which is precisely the run-wedge this function''s other
-    -- branches are all written to avoid. (Demonstrated by the independent review, two
-    -- sessions, both orders.) Advisory xact locks are REENTRANT, so taking it here is free
-    -- when the retry path already holds it and is simply the same acquisition the budget
-    -- gate below would make anyway.
-    || '    perform pg_advisory_xact_lock(202991617,hashtext(f.firm_id::text));' || chr(10)
+    -- The cap counts under the SAME 202991617 already held since the top of this branch (see
+    -- the canonical-order block above) -- no second key, and no second order.
     || '    select count(*)::int into v_used_sales from clara.autodraft_attempts aa' || chr(10)
     || '      where aa.firm_id=f.firm_id and aa.usage_date=v_today and aa.direction=''sales''' || chr(10)
     || '        and aa.filing_id<>p_filing;' || chr(10)
@@ -3014,12 +3031,45 @@ begin
      or pg_temp._wdb_call_count(pg_temp._wdb_sql_code(v_raw),'clara._sales_lane_active')<>1 then
     raise exception '0046 tail 10: clara.admit_autodraft_task does not resolve the tri-state direction behind the activation flag exactly once each';
   end if;
-  for v_names in select unnest(array['''sales_direction''','''sales_backlog_held''','''refused_sales_cap'''])
-  loop
-    if not pg_temp._wdb_code_literal(v_raw, v_names) then
-      raise exception '0046 tail 10: clara.admit_autodraft_task emits no % receipt IN CODE -- every refusal on this lane must be NAMED, and a comment naming it is not a receipt', v_names;
-    end if;
-  end loop;
+  -- THE RECEIPTS, PINNED AT THEIR EMISSION SITE -- not merely "somewhere in executable code".
+  --
+  -- _wdb_code_literal alone answers "is this token CODE", which killed the comment forge but
+  -- NOT an executable decoy: a dead `perform 'sales_backlog_held';` anywhere in the body
+  -- satisfies it while the real receipt is renamed to something else. So the claim is the
+  -- receipt CONSTRUCTION itself -- the `'clr','CLR29','reason',<token>` run inside the
+  -- jsonb_build_object that builds the refusal_token -- matched as a SHAPE on the lexed body
+  -- (comment-proof, literal LENGTHS in place) and then read for IDENTITY out of raw at the
+  -- offset the lexed body reports. The lengths are MEASURED, not counted by hand: 'clr'=5,
+  -- 'CLR29'=7, 'reason'=8, and the token's own length+2 for its quotes. (Counting them by eye
+  -- is how the first draft of this arm got 'CLR29' wrong.)
+  declare
+    v_prefix text := repeat(chr(2),5) || ',' || repeat(chr(2),7) || ',' || repeat(chr(2),8) || ',';
+    v_lex10  text := pg_temp._wdb_sql_code(v_raw);
+    v_off    int;
+    v_at10   int;
+    v_hit    boolean;
+  begin
+    for v_names in select unnest(array['sales_direction','sales_backlog_held','refused_sales_cap'])
+    loop
+      v_off := 1;
+      v_hit := false;
+      loop
+        v_at10 := position(v_prefix || repeat(chr(2), length(v_names) + 2)
+                           in substr(v_lex10, v_off));
+        exit when v_at10 = 0;
+        v_at10 := v_off + v_at10 - 1;                      -- absolute offset
+        if substr(v_raw, v_at10 + length(v_prefix), length(v_names) + 2)
+           = '''' || v_names || '''' then
+          v_hit := true;
+          exit;
+        end if;
+        v_off := v_at10 + 1;
+      end loop;
+      if not v_hit then
+        raise exception '0046 tail 10: clara.admit_autodraft_task never emits % as the reason of a refusal receipt -- a token loose in executable code is not a receipt, and this arm pins it at the jsonb_build_object that builds one', v_names;
+      end if;
+    end loop;
+  end;
   if pg_temp._wdb_call_count(pg_temp._wdb_sql_code(v_raw),'clara._autodraft_sales_direction')<>0 then
     raise exception '0046 tail 10: clara.admit_autodraft_task still carries the 0036 flat sales refusal beside the new contract';
   end if;
