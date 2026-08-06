@@ -164,13 +164,14 @@ const ANSWER: AnswerArgs = { runId: "r1", scope: "client", parkIndex: 3, value: 
  *  call throws, so a cell that makes an extra round trip fails loudly instead of passing. */
 function scriptFetch(t: TestContext, replies: Array<Response | Error>) {
   process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL = "https://runtime.test";
-  const calls: { url: string; method: string; body: Record<string, unknown> | null }[] = [];
+  const calls: { url: string; method: string; body: Record<string, unknown> | null; signal: AbortSignal | null }[] = [];
   let i = 0;
   t.mock.method(globalThis, "fetch", async (url: string, init?: RequestInit) => {
     calls.push({
       url: String(url),
       method: String(init?.method ?? "GET"),
       body: init?.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : null,
+      signal: init?.signal ?? null,
     });
     const reply = replies[i++];
     if (!reply) throw new Error(`unscripted fetch #${i} to ${String(url)}`);
@@ -422,6 +423,54 @@ test("answer: a non-conflict refusal throws immediately — no re-read, no retry
   await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
     assert.equal(e.status, 403);
     assert.equal(e.code, "forbidden");
+    return true;
+  });
+  assert.equal(calls.length, 1);
+});
+
+// --- the recovery is TIME-bounded as well as round-trip bounded ------------------------------
+
+test("answer: every leg of the recovery carries its OWN AbortSignal", async (t) => {
+  // Four sequential round trips can happen here, and the caller's input is disabled on `busy` for
+  // all of them — so an unbounded leg is an interview the human cannot get back into. One signal
+  // PER LEG, not one budget shared across the recovery: a slow-but-progressing recovery must not
+  // have its last read cancelled by time its first POST already spent.
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes(parkedAt(3)),
+    jsonRes({ ok: true }),
+  ]);
+  await answerInterview("jwt", ANSWER);
+
+  assert.equal(calls.length, 3);
+  for (const c of calls) assert.ok(c.signal instanceof AbortSignal, `${c.url} is bounded`);
+  assert.equal(new Set(calls.map((c) => c.signal)).size, 3, "three legs, three signals");
+  assert.ok(calls.every((c) => !c.signal!.aborted), "and none of them fired during a healthy run");
+});
+
+test("answer: an ABORTED /state read is UNKNOWN, never delivery — the bound is fail-closed", async (t) => {
+  // What a timeout is allowed to cost, stated as a cell: a false refusal, never a false
+  // confirmation. The aborted read reaches `readDelivery`'s catch, which is "unknown", and unknown
+  // keeps the ORIGINAL 409 — the same arm an unreachable network takes.
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending", message: "the original refusal" }, 409),
+    new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
+    assert.equal(e.code, "not_pending");
+    assert.match(e.message, /the original refusal/, "the 409 is reported, not the abort");
+    return true;
+  });
+  assert.equal(calls.length, 2, "an abort ends the recovery — it never counts as evidence to retry on");
+});
+
+test("answer: an ABORTED POST throws, and the caller reads that as UNDELIVERED", async (t) => {
+  // The other end: the POST's abort is not swallowed into a delivery. It propagates, which every
+  // caller (submitAnswer / deliverValue) already treats as "your answer did not land".
+  const abort = new DOMException("The operation was aborted due to timeout", "TimeoutError");
+  const calls = scriptFetch(t, [abort]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: Error) => {
+    assert.equal(e.name, "TimeoutError");
     return true;
   });
   assert.equal(calls.length, 1);

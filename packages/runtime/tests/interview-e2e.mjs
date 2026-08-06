@@ -242,9 +242,11 @@ async function main() {
     assert.equal(terminalState.status, "cancelled");
     assert.equal(terminalState.terminal.outcome, "cancelled", "the streamed terminal marker is authoritative (a cancel returns normally)");
 
-    // The 'cancelled' outcome above is a DOMAIN-level SegmentResult/terminal() branch
-    // (interview.v2.core.ts — the segment core the REGISTERED client-onboarding body drives;
-    // no version is named here, per this file's header law) — that body returns NORMALLY
+    // The 'cancelled' outcome above is a DOMAIN-level SegmentResult/terminal() branch — it comes
+    // from the shared interview SEGMENT CORE that whichever client-onboarding body the registry
+    // points at drives (interview.<v>.core.ts; per this file's header law the version is
+    // deliberately not spelled out, because a version named in prose goes stale at the next
+    // repoint and would misdescribe what actually ran) — and that body returns NORMALLY
     // from the branch (`return { ..., outcome: 'cancelled', ... }`), it never calls an engine-level
     // cancel API. So the WDK engine sees an ordinary successful return: the run row's
     // status is DETERMINISTICALLY 'completed', not 'cancelled' — tightened from the

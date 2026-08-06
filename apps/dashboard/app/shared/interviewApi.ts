@@ -42,6 +42,16 @@ export function isNotPending(err: unknown): boolean {
   return err instanceof RuntimeApiError && err.code === "not_pending";
 }
 
+/** Every leg of the answer path is time-bounded. `answerInterview`'s 409 recovery makes up to four
+ *  SEQUENTIAL round trips (POST, read, POST, read) while the caller's UI is disabled on `busy`, so
+ *  an unbounded hang there is an interview the human cannot get back into — no error, no retry, no
+ *  input. 15s is generous for a same-origin route and short enough that a hung leg still ends in a
+ *  decision. Bounding is safe here precisely because both ends are already FAIL-CLOSED: an aborted
+ *  read is caught into "unknown", which is never delivery, and an aborted POST throws, which every
+ *  caller treats as UNDELIVERED. A timeout can therefore only ever cost a false refusal, never a
+ *  false confirmation. Each leg gets its OWN signal — the budget is per round trip, not shared. */
+const ANSWER_FETCH_TIMEOUT_MS = 15_000;
+
 async function runtimeFetch(path: string, token: string, init?: RequestInit): Promise<Response> {
   return fetch(`${runtimeBase()}${path}`, {
     ...init,
@@ -323,6 +333,7 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
   return runtimeFetch("/api/interview/answer", token, {
     method: "POST",
     body: JSON.stringify({ runId: a.runId, scope: a.scope, parkIndex: a.parkIndex, value: a.value, planId: a.planId ?? undefined }),
+    signal: AbortSignal.timeout(ANSWER_FETCH_TIMEOUT_MS),
   });
 }
 
@@ -405,14 +416,17 @@ function classifyDeliveryBody(r: Record<string, unknown>, a: AnswerArgs): Delive
 }
 
 /** One classified /state read. Anything that is not a clean 2xx JSON object — a non-2xx, an
- *  unparseable body, a thrown fetch — is "unknown", never evidence either way. */
+ *  unparseable body, a thrown fetch, an ABORT on the timeout above — is "unknown", never evidence
+ *  either way. */
 async function readDelivery(token: string, a: AnswerArgs): Promise<Delivery> {
   try {
     const params = new URLSearchParams();
     params.set("scope", a.scope);
     params.set("runId", a.runId);
     if (a.planId) params.set("planId", a.planId);
-    const res = await runtimeFetch(`/api/interview/state?${params.toString()}`, token);
+    const res = await runtimeFetch(`/api/interview/state?${params.toString()}`, token, {
+      signal: AbortSignal.timeout(ANSWER_FETCH_TIMEOUT_MS),
+    });
     if (!res.ok) return "unknown";
     const raw = asRecord(await res.json());
     return raw ? classifyDeliveryBody(raw, a) : "unknown";

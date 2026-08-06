@@ -51,6 +51,23 @@
 // because intra-statement order is evaluation order, not text order.
 // A refusal is a red cell with a diagnosis naming the construct — never a silent pass.
 //
+// TWO LATER ROUNDS (found convergently by a native review and a Codex pass) closed the last two
+// holes, and both were holes of SCOPE rather than of shape — the guard was reading less of the
+// file than it was implicitly claiming to:
+//   · G1, ASYMMETRIC COUNTING. Arms were collected FILE-WIDE and refused unless they sat in the
+//     analysed `ask`; announces were only ever collected INSIDE `ask`. So a top-level `await
+//     streamPromptStep(...)` in the exported body — a park made visible with no hook armed for
+//     it, i.e. GH #152 by hand — was invisible here and stayed green, while being loud in
+//     production (it 409s every answer aimed at that park). Both names are now counted the same
+//     way, and a stray call of either is refused with its line number.
+//   · G2, AN UNREACHED `ask`. The guard proved `ask` was the only arming site in the file, never
+//     that anything REACHES it. A dead `ask` arms no hook at all, and the verdict would still
+//     have read clean. The exported body must now use the `ask` identifier at least once — as a
+//     direct call or, as the registered bodies actually do, by handing the closure to the shared
+//     segment driver. What that proves is deliberately stated no wider than it is: the body
+//     reaches the closure. Whether the driver invokes its callback lives in another module and is
+//     not this guard's to claim.
+//
 // These cells are pure: no WDK engine, no DB, no server. They lock in both halves cheaply enough
 // to run in the unit battery.
 
@@ -243,6 +260,135 @@ function bindingRefusal(sf, name, moduleRe) {
   return null;
 }
 
+/** The owning function-like node of `n`, or undefined at module scope. */
+function ownerFunctionOf(n) {
+  let owner = n.parent;
+  while (owner && !isFunctionBoundary(owner)) owner = owner.parent;
+  return owner;
+}
+
+/** 1-based line of a node, for a diagnosis that NAMES the offending site rather than gesturing
+ *  at it — a refusal a reader cannot locate costs as much time as no refusal at all. */
+function lineOf(sf, n) {
+  return sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
+}
+
+/** G1 — NEITHER CALL MAY LIVE OUTSIDE THE ANALYSED CLOSURE, and the two halves are checked the
+ *  SAME WAY. Arms were already counted file-wide; announces were counted only INSIDE `ask`, and
+ *  that asymmetry was a hole with a name: a top-level `await streamPromptStep(...)` in the
+ *  exported body — a park announced with no hook armed for it, which 409s every answer aimed at
+ *  it — was simply invisible to this guard and stayed green. An announce outside `ask` is exactly
+ *  as disqualifying as an arm outside it: in both cases the file asks parks in more than one
+ *  place, and certifying the ordering of one of them says nothing about the other. */
+function outsideAskRefusal(sf, ask, name) {
+  for (const c of collectCalls(sf, name)) {
+    if (ownerFunctionOf(c) !== ask) {
+      return `a ${name}() call lives OUTSIDE the analysed 'ask' closure (line ${lineOf(sf, c)}) — this file asks parks in more than one place, and the guard will not certify only one of them`;
+    }
+  }
+  return null;
+}
+
+/** Every declaration site that BINDS the name `ask` in this file, by the same exhaustive
+ *  enumeration `bindingRefusal` uses for the imports. Used to prove that a reference to `ask`
+ *  anywhere in the file can only be the closure this guard analysed. */
+function askBindings(sf) {
+  const out = [];
+  const visit = (n) => {
+    if ((ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) && n.name?.text === "ask") out.push(n);
+    else if (ts.isVariableDeclaration(n) && boundNames(n.name).includes("ask")) out.push(n);
+    else if (ts.isParameter(n) && boundNames(n.name).includes("ask")) out.push(n);
+    else if (ts.isCatchClause(n) && boundNames(n.variableDeclaration?.name).includes("ask")) out.push(n);
+    else if (ts.isImportSpecifier(n) && n.name.text === "ask") out.push(n);
+    else if (ts.isImportClause(n) && n.name?.text === "ask") out.push(n);
+    else if (ts.isNamespaceImport(n) && n.name.text === "ask") out.push(n);
+    else if (ts.isImportEqualsDeclaration(n) && n.name.text === "ask") out.push(n);
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/** Is `node` lexically inside `ancestor`? */
+function isInside(node, ancestor) {
+  let n = node.parent;
+  while (n && n !== ancestor) n = n.parent;
+  return n === ancestor;
+}
+
+/** Is this identifier a USE of a binding, rather than the place a binding is DECLARED (or a
+ *  property/label that merely happens to be spelled the same)? */
+function isValueReference(id) {
+  const p = id.parent;
+  if (!p) return false;
+  if ((ts.isVariableDeclaration(p) || ts.isFunctionDeclaration(p) || ts.isClassDeclaration(p) ||
+       ts.isParameter(p) || ts.isBindingElement(p) || ts.isImportSpecifier(p) || ts.isImportClause(p) ||
+       ts.isNamespaceImport(p) || ts.isExportSpecifier(p) || ts.isPropertyAssignment(p) ||
+       ts.isPropertySignature(p) || ts.isPropertyDeclaration(p) || ts.isMethodDeclaration(p)) &&
+      p.name === id) return false;
+  if (ts.isPropertyAccessExpression(p) && p.name === id) return false; // `o.ask` is not our `ask`
+  if (ts.isQualifiedName(p) && p.right === id) return false;
+  return true;
+}
+
+/** G2 — IS `ask` ACTUALLY REACHED FROM THE BODY THE REGISTRY RUNS? The ordering verdict is only
+ *  worth something if the closure it certifies is wired into the workflow at all: an `ask` that
+ *  nothing reaches arms no hook, every park is announced by something else (or never), and the
+ *  guard would still have reported a clean arm-before-announce. That is loud at runtime, but a
+ *  static guard that can say so statically should.
+ *
+ *  WHAT IT PROVES, EXACTLY — and the honesty matters, because overclaiming here would be the same
+ *  error as reading a derived state as evidence. It proves the exported body REACHES the analysed
+ *  closure: the `ask` identifier is used as a value at least once inside the exported function, and
+ *  that identifier can only be this closure. It does NOT prove `ask` is invoked — the registered
+ *  bodies do not call it directly at all; they hand it to the shared segment driver
+ *  (`askAndConfirmSegmentV2(seg, ask, prior)`), and whether the driver calls its callback is a
+ *  fact in another module and out of this guard's reach. So a direct call and a hand-off both
+ *  count as REACHED, and the finding reports which it saw. A reference from INSIDE `ask` itself
+ *  does not count: a closure that only calls itself is not reached by anything.
+ *
+ *  SPELLING IS NOT IDENTITY applies here too, and it is the reason this insists on exactly one
+ *  binding of the name in the whole file: without that, a reference inside a nested scope that
+ *  declares its OWN `ask` would be counted as reaching the analysed closure while resolving to a
+ *  local decoy — the same shadowing trick `bindingRefusal` closes for the imports. */
+function askReachabilityRefusal(sf, ask, ident) {
+  const exported = sf.statements.find(
+    (st) => ts.isFunctionDeclaration(st) && st.name?.text === ident &&
+      st.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword),
+  );
+  if (!exported || !exported.body) return { refused: `the exported body '${ident}' has no analysable function declaration in this file` };
+
+  // The analysed closure must live INSIDE the exported body. An `ask` declared at module scope,
+  // or inside some other function, is not this workflow's asking closure whatever it is called.
+  let scope = ask.parent;
+  while (scope && scope !== exported) scope = scope.parent;
+  if (scope !== exported) return { refused: `the 'ask' closure is not declared inside the exported body '${ident}' — a closure the registered function does not own cannot be the one arming its parks` };
+
+  const bindings = askBindings(sf);
+  if (bindings.length !== 1) {
+    return { refused: `'ask' is bound ${bindings.length} times in this file — a SHADOWING declaration means a reference to 'ask' need not be the analysed closure at all, so reachability cannot be proven` };
+  }
+  // …and that one binding must be the analysed closure's own declaration.
+  const decl = ask.parent && ts.isVariableDeclaration(ask.parent) ? ask.parent : ask;
+  if (bindings[0] !== decl) return { refused: `the single 'ask' binding is not the analysed closure's own declaration` };
+
+  let calls = 0;
+  let handoffs = 0;
+  const visit = (n) => {
+    if (ts.isIdentifier(n) && n.text === "ask" && isValueReference(n) && !isInside(n, ask)) {
+      if (ts.isCallExpression(n.parent) && n.parent.expression === n) calls++;
+      else handoffs++;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(exported.body);
+
+  if (calls + handoffs === 0) {
+    return { refused: `'ask' is never reached from the exported body '${ident}' — it is neither called nor handed to anything, so no hook it arms can ever be created` };
+  }
+  return { calls, handoffs };
+}
+
 /** Every `ask` function in a workflow body — `const ask = ... =>` or `function ask()`. */
 function findAskFunctions(sf) {
   const hits = [];
@@ -352,14 +498,18 @@ export function analyzeParkOrdering(workflowsDir = WORKFLOWS) {
     const body = ask.body;
     if (!body || !ts.isBlock(body)) return refuse("'ask' has no block body to analyse");
 
-    // NO ARM MAY LIVE OUTSIDE THE ANALYSED CLOSURE. A second park-asking closure (an `askPark`
-    // beside a decoy `ask`) would otherwise let the guard certify a function nobody calls.
-    const fileArms = collectCalls(sf, ARM);
-    for (const c of fileArms) {
-      let owner = c.parent;
-      while (owner && !isFunctionBoundary(owner)) owner = owner.parent;
-      if (owner !== ask) return refuse(`a ${ARM}() call lives OUTSIDE the analysed 'ask' closure — this file asks parks in more than one place, and the guard will not certify only one of them`);
-    }
+    // NEITHER CALL MAY LIVE OUTSIDE THE ANALYSED CLOSURE (G1). A second park-asking closure (an
+    // `askPark` beside a decoy `ask`) would otherwise let the guard certify a function nobody
+    // calls — and a bare announce outside `ask` is a park nothing ever armed.
+    const strayArm = outsideAskRefusal(sf, ask, ARM);
+    if (strayArm) return refuse(strayArm);
+    const strayAnnounce = outsideAskRefusal(sf, ask, ANNOUNCE);
+    if (strayAnnounce) return refuse(strayAnnounce);
+
+    // AND THE CLOSURE MUST BE REACHED FROM THE REGISTERED BODY (G2) — an `ask` nothing reaches
+    // arms nothing, however perfectly ordered it is.
+    const reach = askReachabilityRefusal(sf, ask, ident);
+    if (reach.refused) return refuse(reach.refused);
 
     // Exactly one of each inside `ask`. Two arms or two announces is ambiguous, and ambiguity
     // is refused rather than guessed (the ADR-059 fail-closed-on-unknown law).
@@ -392,7 +542,7 @@ export function analyzeParkOrdering(workflowsDir = WORKFLOWS) {
     return {
       cls, ident, file, ok: armFirst,
       detail: armFirst
-        ? `${where}: arms at statement ${arm.index}, announces (awaited) at statement ${announce.index}`
+        ? `${where}: arms at statement ${arm.index}, announces (awaited) at statement ${announce.index}; 'ask' reached from ${ident} (${reach.calls} direct call(s), ${reach.handoffs} hand-off(s))`
         : `${where} ANNOUNCES BEFORE IT ARMS (announce at statement ${announce.index}, arm at statement ${arm.index}).`,
     };
   });
@@ -428,6 +578,10 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
   const annRe = /^.*await streamPromptStep\(.*$/m;
   const armExpr = src.match(armRe)[0].trim().replace(/^const hook = /, "").replace(/;$/, "");
   const ann = src.match(annRe)[0];
+  // Anchors for the G1/G2 mutations: a statement of the EXPORTED body (outside `ask`), and a
+  // statement of a DIFFERENT nested closure inside it.
+  const OWNER_LINE = '  await streamOwnerStep({ scope: "client", planId });';
+  const RES0_LINE = "    let res = res0;";
 
   // Each shape carries the REASON it must be refused for. Asserting only `ok === false` would
   // let a shape start passing for an unrelated reason and quietly stop testing what it was
@@ -467,6 +621,28 @@ test("GH #152: the guard REFUSES every shape whose written position is not its e
       (s) => s.replace('import { createHook } from "workflow";', 'import { createHook } from "workflow";\nimport * as workflowNs from "workflow";\nvoid workflowNs;'), /NAMESPACE/],
     ["a QUALIFIED `ns.createHook()` call the bare-identifier walk cannot see",
       (s) => s.replace(armRe, `    const ns = { createHook: <T,>(_a: unknown): T => null as T };\n    void ns.createHook(1);\n${src.match(armRe)[0]}`), /called as a PROPERTY/],
+
+    // G1 — THE ASYMMETRY. Arms were counted file-wide, announces only inside `ask`, so an
+    // announce ANYWHERE ELSE in the file was invisible and the cell stayed green. Both of these
+    // are a park made visible with no hook armed for it: the exact GH #152 window, hand-written.
+    ["a stray top-level announce in the exported body, outside `ask`",
+      (s) => s.replace(OWNER_LINE, `${OWNER_LINE}\n  await streamPromptStep({ parkIndex: -1, seg: "stray", phase: "q", question: "unarmed", scope: "client" });`),
+      /streamPromptStep\(\) call lives OUTSIDE the analysed/],
+    ["a stray announce inside a DIFFERENT nested closure (not module scope — the check is not just 'top level')",
+      (s) => s.replace(RES0_LINE, `    await streamPromptStep({ parkIndex: -1, seg: "stray", phase: "q", question: "unarmed", scope: "client" });\n${RES0_LINE}`),
+      /streamPromptStep\(\) call lives OUTSIDE the analysed/],
+
+    // G2 — AN UNREACHED `ask`. A perfectly ordered closure nothing reaches arms nothing at all.
+    ["an `ask` the exported body never reaches (every hand-off replaced by an inline stand-in)",
+      (s) => s.replaceAll("askAndConfirmSegmentV2(seg, ask, prior)", "askAndConfirmSegmentV2(seg, (async () => null) as never, prior)"),
+      /never reached from the exported body/],
+    // …and SPELLING IS NOT IDENTITY, one more time: a reference that resolves to a LOCAL decoy
+    // is not a reference to the analysed closure. Deliberately written `as never` so it slips
+    // past `findAskFunctions` (which only counts callables-with-body) — this is precisely the
+    // shape the old "exactly one ask function" check could not see.
+    ["a LOCAL `ask` shadowing the analysed closure at a real hand-off site",
+      (s) => s.replace(RES0_LINE, `    const ask = (async () => null) as never;\n${RES0_LINE}`),
+      /bound 2 times in this file/],
   ];
 
   for (const [label, mutate, reason] of shapes) {

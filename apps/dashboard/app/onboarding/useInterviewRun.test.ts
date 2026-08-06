@@ -12,6 +12,9 @@
 // wiped the banner. Only two facts retire a park-bound refusal now, and they are the wire client's
 // own delivered arms: a COMPLETE-class terminal, or a strictly higher park index.
 //
+// The last group of cells pins the THREAD half of the same honesty problem: an optimistic answer
+// bubble that outlived a refused submit, and a per-park bubble id that made a retype invisible.
+//
 // Two instruments, deliberately. The pure `readClearsError` cells state the rule exhaustively and
 // cost nothing; the mounted cells prove the rule is actually WIRED to the poller — measured with
 // the instrument production uses (a real interval, a real await, the real wire client over a
@@ -288,6 +291,99 @@ test("the human acting again clears the board — a re-submit that lands leaves 
     await h.act(async () => { await h.current.submitAnswer(PARK, "C1234567890"); });
     await h.settle();
     assert.equal(h.current.error, null, "the retry cleared it");
+  } finally { await h.unmount(); }
+});
+
+// --- the optimistic bubble: drawn on hope, removed on proof ------------------------
+//
+// The thread is the other half of what the human reads, and it had the OPPOSITE failure to the
+// banner's. The banner used to say too little (a refusal vanished after 3s); the thread said too
+// much — the optimistic answer bubble was appended before the POST and never taken back, so a
+// REFUSED answer sat in the log looking exactly like a delivered one, directly beside a banner
+// saying it never arrived. A thread entry carries no delivery state, so "looks delivered" is the
+// only thing it can look like: the entry has to go.
+
+test("a REFUSED answer leaves no bubble behind — the thread never shows an undelivered answer as sent", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const w = mkWorld({ answer: REFUSAL });
+  const h = await mountRun(t, w);
+  try {
+    await h.act(async () => { await h.current.submitAnswer(PARK, "C1234567890"); });
+
+    assert.match(h.current.error ?? "", /dropped/, "the refusal is surfaced (as it was before)");
+    // The thread is populated — the guard against a vacuous pass, since an EMPTY thread would
+    // satisfy the claim below for entirely the wrong reason.
+    assert.ok(h.current.thread.some((e) => e.role === "clara" && e.text === "TIN?"), "the park's question is in the log");
+    assert.deepEqual(
+      h.current.thread.filter((e) => e.role === "you"), [],
+      "and the answer that did NOT land is not sitting there looking like it did",
+    );
+
+    // It stays gone across polls: nothing re-materialises it, because /state never saw it either.
+    for (let i = 0; i < 2; i++) await h.act(async () => { t.mock.timers.tick(POLL_MS); await Promise.resolve(); });
+    await h.settle();
+    assert.deepEqual(h.current.thread.filter((e) => e.role === "you"), []);
+  } finally { await h.unmount(); }
+});
+
+test("a second, DIFFERENT answer at the same park renders as its own bubble", async (t) => {
+  // The id used to be one per park+phase, so the second attempt collided with the first and
+  // appendUnique dropped it: the human retyped and watched nothing appear. Both submits here
+  // LAND, so this is purely about the keying — the rollback above is not in play.
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const h = await mountRun(t, mkWorld());
+  try {
+    await h.act(async () => { await h.current.submitAnswer(PARK, "C1234567890"); });
+    await h.act(async () => { await h.current.submitAnswer(PARK, "C9999999999"); });
+    await h.settle();
+
+    const mine = h.current.thread.filter((e) => e.role === "you");
+    assert.deepEqual(mine.map((e) => e.text), ["C1234567890", "C9999999999"], "both attempts at one park render");
+    assert.equal(new Set(mine.map((e) => e.id)).size, 2, "as two entries, not one overwritten");
+  } finally { await h.unmount(); }
+});
+
+test("a refused answer's rollback does not take a SUCCESSFUL neighbour with it", async (t) => {
+  // Why the rollback is keyed on the submit nonce rather than on the park: at one park there can
+  // be a landed attempt and a refused one, and only the refused one may be withdrawn.
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const w = mkWorld();
+  const h = await mountRun(t, w);
+  try {
+    await h.act(async () => { await h.current.submitAnswer(PARK, "C1234567890"); });
+    w.answer = REFUSAL;
+    await h.act(async () => { await h.current.submitAnswer(PARK, "C9999999999"); });
+    await h.settle();
+
+    assert.match(h.current.error ?? "", /dropped/);
+    assert.deepEqual(
+      h.current.thread.filter((e) => e.role === "you").map((e) => e.text), ["C1234567890"],
+      "the landed answer stays; only the refused one is withdrawn",
+    );
+  } finally { await h.unmount(); }
+});
+
+test("deliverValue's past-tense note is withdrawn too when the delivery is refused", async (t) => {
+  // The firm page passes "Delivered create_firm receipt" — a sentence in the past tense about
+  // something that has not happened yet. Left standing after a refusal it states, in words, the
+  // exact thing the banner denies.
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const w = mkWorld({ answer: REFUSAL });
+  const h = await mountRun(t, w);
+  try {
+    let ok!: boolean;
+    await h.act(async () => { ok = await h.current.deliverValue(PARK, { firm_id: "f1" }, "Delivered create_firm receipt"); });
+
+    assert.equal(ok, false, "F-M10: the caller is told to retain its receipt");
+    assert.match(h.current.error ?? "", /dropped/);
+    assert.deepEqual(h.current.thread.filter((e) => e.text.includes("Delivered")), [], "the claim is withdrawn with it");
+
+    // And a retry that LANDS leaves its own note — the id is per submit, not per park.
+    w.answer = () => jsonRes({ ok: true });
+    await h.act(async () => { ok = await h.current.deliverValue(PARK, { firm_id: "f1" }, "Delivered create_firm receipt"); });
+    await h.settle();
+    assert.equal(ok, true);
+    assert.equal(h.current.thread.filter((e) => e.text.includes("Delivered")).length, 1, "the retry's note renders");
   } finally { await h.unmount(); }
 });
 
