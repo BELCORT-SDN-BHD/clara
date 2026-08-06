@@ -14,10 +14,20 @@
 // or the write pool (clara_wake_interactive) — the same pool discipline chatTurn uses, with the
 // wake_kind carried by the credential (the allowlist rows for 'autodraft' gate every writer/read).
 //
-// v6 vs v5 (§7-A, skeleton §2a): this file is an unmodified version-rename of v5. Neither the
-// pool/credential/model-resolution plumbing nor readToolRefusalMessage's shape changes this
-// wave — this wave's functional changes live entirely in autoDraft.v6.prompt.ts /
-// autoDraft.v6.tools.ts / autoDraft.v6.errors.ts / autoDraft.v6.impl.ts's settle call.
+// v6 vs v5 (§7-A, skeleton §2a): the pool/credential/model-resolution plumbing and
+// readToolRefusalMessage's shape are unchanged from v5 — this wave's functional changes live
+// in autoDraft.v6.prompt.ts / autoDraft.v6.tools.ts / autoDraft.v6.errors.ts /
+// autoDraft.v6.impl.ts's settle call, PLUS one small ToolCtx addition here:
+//
+// PR #204 (the DB lane) landed the bound-direction contract fact this file now carries:
+// `ToolCtx` gains `direction: "sales" | "purchase" | null` — the admission-time family
+// `begin_autodraft_task` now returns (`autodraft_attempts.direction`, nullable for
+// pre-migration rows; the DB never admits an 'unresolved' document into this registry at
+// all, so a concrete row is always 'sales' or 'purchase'). The wrapper (tools.ts) validates
+// the model's proposed coding_kind against this family BEFORE any DB call; the model step
+// (impl.ts) surfaces it in the per-run user message so the model proposes correctly the
+// first time. `null` means an unbound/pre-migration attempt — no early validation runs, the
+// DB draft writer stays the sole authority, exactly as before this wave.
 
 import { openai } from "@ai-sdk/openai";
 import { readToolRefusalMessage } from "./autoDraft.v6.errors.js";
@@ -33,8 +43,16 @@ export type ClaraPools = {
 };
 
 /** The per-tool execution context: the firm + the PINNED client + the document/filing the
- *  admission bound this task to. */
-export type ToolCtx = { firmId: string; clientId: string; documentId: string; filingId: string; taskId: string };
+ *  admission bound this task to, PLUS the admission-bound direction ('sales' | 'purchase' |
+ *  null — PR #204, the tri-state contract's runtime-visible half). */
+export type ToolCtx = {
+  firmId: string;
+  clientId: string;
+  documentId: string;
+  filingId: string;
+  taskId: string;
+  direction: "sales" | "purchase" | null;
+};
 
 /** The short TTL minted for a per-attempt read/write step (never outlives one attempt). */
 const AUTODRAFT_CREDENTIAL_TTL = process.env.CLARA_AUTODRAFT_CREDENTIAL_TTL || "5 minutes";

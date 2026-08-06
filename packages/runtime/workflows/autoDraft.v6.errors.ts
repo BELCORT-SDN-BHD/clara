@@ -33,6 +33,21 @@
 //      double_coded/duplicate_bill/coding_incomplete (now reworded to "counterparty"/
 //      "document"), carry the same treatment.
 //
+// PR #204 (the DB lane) adds TWO MORE CLR21 detail reasons this file's own message map was
+// missing, both currently falling back to the generic CLR21 message (safe, unhelpful):
+//   - `counterparty_kind_contradiction` — raised by the DB draft writer itself (THE
+//     COUNTERPARTY CONTRACT's layer 3, the sole authority layer) when a contradictory
+//     counterparty kind reaches it despite layers 1-2 (the schema superRefine, the tool's
+//     own derivation-overwrite in tools.ts) — belt evidence this file's own caught-error
+//     path must still surface intelligibly, not merely a defence that never fires.
+//   - `direction_family_mismatch` — the SAME reason the DB now raises from `_draft_entry_core`
+//     when a proposed coding_kind falls outside the admitted direction's family; tools.ts's
+//     `runDraftJournalEntry` now ALSO raises this reason itself, as a named EARLY refusal
+//     (no DB roundtrip) before ever reaching the writer, sharing this exact token so a
+//     bookkeeper sees the identical message whichever layer actually caught it. A new
+//     factory, `directionFamilyMismatchRefusal()`, mirrors `noDraftRefusal()`'s existing
+//     runtime-labelled-refusal pattern.
+//
 // Every other mapping (23505/23503/23514 native-constraint collapse, 42501 structural
 // refusal, readToolRefusalMessage) is an unmodified carry from v5.
 
@@ -42,7 +57,7 @@ import type { RefusalPart } from "./autoDraft.v6.prompt.js";
  *  are 5 chars); `detail` may carry a machine-readable `{ "reason": <token> }`. */
 export type DbError = { code?: string; detail?: string; message?: string; constraint?: string };
 
-/** CLR21 reason tokens carried in the DETAIL payload (0036/0016 pins). */
+/** CLR21 reason tokens carried in the DETAIL payload (0036/0016/0046 pins). */
 export type Clr21Reason =
   | "amount_conflict"
   | "currency_unsupported"
@@ -52,7 +67,9 @@ export type Clr21Reason =
   | "duplicate_bill"
   | "coding_incomplete"
   | "tax_leg_missing"
-  | "type_polarity_mismatch";
+  | "type_polarity_mismatch"
+  | "counterparty_kind_contradiction"
+  | "direction_family_mismatch";
 
 /** CLR10 reason tokens (§7-A adds the first one — the SST-output-account precondition
  *  for a tax-bearing sales document). */
@@ -101,6 +118,8 @@ const CLR21_REASON_MESSAGES: Record<Clr21Reason, string> = {
   coding_incomplete: "The sweep could not complete this document into a review draft.",
   tax_leg_missing: "A stated nonzero tax on this document requires one tied SST-portion-of-cost debit leg.",
   type_polarity_mismatch: "This document's own stated type does not match the coding kind proposed.",
+  counterparty_kind_contradiction: "The proposed counterparty does not match the coding kind — a supplier bill names a vendor, a sales entry names a customer.",
+  direction_family_mismatch: "The proposed coding kind does not match this document's admitted direction (sales vs purchase).",
 };
 
 const CLR10_REASON_MESSAGES: Record<Clr10Reason, string> = {
@@ -161,6 +180,15 @@ export function noFilingRefusal(): RefusalPart {
 /** The terminal "produced no draft" refusal (the model explained a block but did not draft). */
 export function noDraftRefusal(): RefusalPart {
   return runtimeRefusal("CLR21", "coding_incomplete", CLR21_REASON_MESSAGES.coding_incomplete);
+}
+
+/** PR #204 / 7A-R2: an EARLY, runtime-labelled refusal — the wrapper's own check that the
+ *  model's proposed coding_kind falls inside the admission-bound direction family, BEFORE
+ *  any DB call. Shares the exact CLR21 reason token the DB draft writer raises for the same
+ *  contradiction (`direction_family_mismatch`), so the bookkeeper sees an identical message
+ *  whichever layer actually caught it. */
+export function directionFamilyMismatchRefusal(): RefusalPart {
+  return runtimeRefusal("CLR21", "direction_family_mismatch", CLR21_REASON_MESSAGES.direction_family_mismatch);
 }
 
 /** An oracle-safe string a READ tool returns as its `{ error }` result on an authority/tenant

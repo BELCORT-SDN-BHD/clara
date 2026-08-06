@@ -157,15 +157,15 @@
       "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v6.errors.ts": {
-      "sha256": "98b1a4e6d9d787101f8a054f428e01dc0c4d0385a779e9f1aa6206f0b10a3743",
+      "sha256": "a729c17de699d35463ed1be0e641f4f11bfcd0552759c3d723a3f5c772516d41",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v6.impl.ts": {
-      "sha256": "dcd7a87d880bf7d040c430d03c5317084ba3e79d570dd6d169d3dbe93bc2d02e",
+      "sha256": "b2ebf20e13477c2b712eff40b007a5b3028b413c3ccb880d94007aa9da44bf77",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v6.infra.ts": {
-      "sha256": "12d91b1a6aa3c9bd6ba13f92fce3681e26879790e9eb7d8d1f8892efec2b795d",
+      "sha256": "6e0ff3a4872d4b0d8b1aa05bea2eb94b63c65fa867a30351e6c4c14e7864a112",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v6.prompt.ts": {
@@ -173,11 +173,11 @@
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v6.tools.ts": {
-      "sha256": "324fba14b40d75192d526d707b13251fdd33657c27c8a165b907e606cf4c63ae",
+      "sha256": "0a31e6c4fac3c4eb8dace7f8d16de040ce4898c60ad8023b9f20b62d589a20d5",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v6.ts": {
-      "sha256": "856f0a33f07d1d76f8ef72db005fe83574e917a855138c3341bf9b299dbec573",
+      "sha256": "42d09cd4662052ddb1025ed7ee0f74509373430577e07c704bd752c3d3df2bc3",
       "note": ""
     },
     "packages/runtime/workflows/chatTurn.impl.ts": {

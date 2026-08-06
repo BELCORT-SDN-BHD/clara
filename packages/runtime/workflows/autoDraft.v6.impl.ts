@@ -8,17 +8,46 @@
 // credentials are minted inside the step that uses them and never cross a step boundary
 // (§4.1).
 //
-// v6 vs v5 (§7-A, skeleton §2a item (d) / §2d): ONE functional change in THIS file — the
-// settle call moves to the 6-arity `settle_autodraft_task` overload, carrying the workflow's
-// OWN engine run id as the required 6th argument `p_workflow_run_id`. Skeleton §2d's
-// corrected identity: `autodraft_attempts.run_id` is the sweep uuid (from `sweep_runs`),
-// while `agent_tasks.workflow_run_id` is the ENGINE run id the WDK actually issued — the two
-// are different columns of different types, and the 0036 caller-run-identity check needs the
-// LATTER. `getWorkflowMetadata().workflowRunId` is already read inside claimAutoDraftStep
-// (below, unchanged) for exactly that reason; settleAutoDraftStep reads it again itself
-// (fresh per step execution, matching the established claim-step pattern — no new parameter
-// threaded through the workflow body in autoDraft.v6.ts, which stays a version-rename).
-// Every other step body (claim/recover/model/question/close, and consumeAutoDraftModelResult's
+// v6 vs v5 (§7-A, skeleton §2a item (d) / §2d): the settle call moves to the 6-arity
+// `settle_autodraft_task` overload, carrying the workflow's OWN engine run id as the required
+// 6th argument `p_workflow_run_id`. Skeleton §2d's corrected identity: `autodraft_attempts.
+// run_id` is the sweep uuid (from `sweep_runs`), while `agent_tasks.workflow_run_id` is the
+// ENGINE run id the WDK actually issued — the two are different columns of different types,
+// and the 0036 caller-run-identity check needs the LATTER. `getWorkflowMetadata().
+// workflowRunId` is already read inside claimAutoDraftStep (below, unchanged) for exactly
+// that reason; settleAutoDraftStep reads it again itself (fresh per step execution, matching
+// the established claim-step pattern — no new parameter threaded through the workflow body
+// in autoDraft.v6.ts, which stays a version-rename).
+//
+// PR #204 (the DB lane) landed THREE more contract facts this file now honours:
+//
+//   1. THE BOUND FAMILY (7A-R2). `begin_autodraft_task` now returns `direction` ('sales' |
+//      'purchase' | null) in BOTH its return shapes (the replay branch and the fresh-start
+//      branch — 0046 S7.2 asserts the anchor occurs exactly twice, so a future recut that
+//      drops it from either shape fails the migration's own tail, not silently). This file's
+//      `AutoDraftContext` gains a `direction` field, `claimAutoDraftStep` reads it off the
+//      receipt, and `runAutoDraftModelStep`'s per-run user message now names the bound
+//      direction explicitly (surfacing it to the model so it proposes the RIGHT coding_kind
+//      the first time, rather than discovering the mismatch only via a refusal round-trip).
+//      The actual EARLY-VALIDATION check against this family lives in tools.ts's
+//      runDraftJournalEntry (the wrapper), not here — this file only carries the fact through.
+//   2. THE SETTLE NO-OP (skeleton §2d, the 6-arity's own new branch). A losing dispatch — this
+//      run's settle call arriving after a DIFFERENT workflow run already holds the task
+//      (`t.workflow_run_id is distinct from p_workflow_run_id`) — no longer needs a raise to
+//      stay safe: the 6-arity returns `{settled:false,outcome:'not_settled',
+//      reason:'run_superseded'}` instead, the SAME shape 0036 already used for
+//      `task_superseded`/`registry_superseded`/`registry_released` (never raise on a losing
+//      dispatch — the winning run's own settle call owns the real accounting). v5's settle
+//      call discarded its query result entirely (fire-and-forget), which already tolerated
+//      any non-throwing outcome; settleAutoDraftStep now reads the result EXPLICITLY and
+//      short-circuits on `settled === false` — making the no-op path observable and testable
+//      rather than merely accidental.
+//   3. The `wake_draft_entry` write floor's own two new CLR21 detail reasons
+//      (`counterparty_kind_contradiction`, `direction_family_mismatch`) reach this file only
+//      via the ALREADY-EXISTING caught-error path (refusalFromDbError in .errors.ts) — no
+//      change needed here.
+//
+// Every other step body (recover/question/close, and consumeAutoDraftModelResult's
 // stream-error tagging) is an unmodified version-rename of v5.
 
 import { streamText, stepCountIs } from "ai";
@@ -37,7 +66,9 @@ import { buildAutoDraftTools } from "./autoDraft.v6.tools.js";
 
 export { SYSTEM_PROMPT_AUTODRAFT_V6 };
 
-/** The claim context returned by begin_autodraft_task (the CAS + bind + context read). */
+/** The claim context returned by begin_autodraft_task (the CAS + bind + context read).
+ *  `direction` is PR #204's addition — the admission-bound coding-kind family ('sales' |
+ *  'purchase'), or null for a pre-migration attempt row the DB never backfilled. */
 export type AutoDraftContext = {
   firmId: string;
   clientId: string;
@@ -47,6 +78,7 @@ export type AutoDraftContext = {
   runId: string | null;
   model: string;
   reservedTokens: number;
+  direction: "sales" | "purchase" | null;
 };
 
 /** CLAIM this task for THIS run (CAS queued->running + bind run id; idempotent re-claim on the
@@ -66,6 +98,7 @@ export async function claimAutoDraftStep(taskId: string): Promise<{ claimed: boo
       run_id?: string | null;
       model_snapshot?: string;
       reserved_tokens?: number | string;
+      direction?: string | null;
     };
     if (receipt.claimed === false || !receipt.firm_id || !receipt.client_id || !receipt.document_id) {
       return { claimed: false, ctx: null };
@@ -81,6 +114,7 @@ export async function claimAutoDraftStep(taskId: string): Promise<{ claimed: boo
         runId: receipt.run_id == null ? null : String(receipt.run_id),
         model: String(receipt.model_snapshot ?? process.env.CLARA_CHAT_MODEL ?? "gpt-5.6-terra"),
         reservedTokens: Number(receipt.reserved_tokens ?? 0),
+        direction: receipt.direction === "sales" || receipt.direction === "purchase" ? receipt.direction : null,
       },
     };
   });
@@ -174,8 +208,20 @@ export async function runAutoDraftModelStep(
 ): Promise<{ outcome: AutoDraftOutcome; usageTokens: number; entryId: string | null }> {
   "use step";
   const tools = buildAutoDraftTools(ctx);
+  // PR #204 / 7A-R2: surface the admission-bound direction to the model directly, so it
+  // proposes the right coding_kind family the FIRST time rather than discovering a mismatch
+  // only via runDraftJournalEntry's early refusal. `direction` is null only for a
+  // pre-migration attempt row (never for a document admitted under the ceremony's activated
+  // flag) — the clause is simply omitted then, and the static system prompt's own
+  // direction-determination guidance still applies.
+  const directionClause =
+    ctx.direction === "sales"
+      ? ' This admission is bound to the SALES direction — propose coding_kind "sales_invoice" or "sales_credit_note" accordingly.'
+      : ctx.direction === "purchase"
+        ? ' This admission is bound to the PURCHASE direction — propose coding_kind "supplier_bill" accordingly.'
+        : "";
   const messages: ModelMessage[] = [
-    { role: "user", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).` },
+    { role: "user", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}` },
   ];
   const result = streamText({
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -209,7 +255,14 @@ export async function runAutoDraftModelStep(
  *  §7-A / skeleton §2d: the 6-arity overload's REQUIRED 6th argument is the workflow's OWN
  *  engine run id (agent_tasks.workflow_run_id) — NOT the admission-time sweep uuid — sourced
  *  fresh from getWorkflowMetadata() inside this step, matching the pattern already
- *  established in claimAutoDraftStep above. */
+ *  established in claimAutoDraftStep above.
+ *
+ *  PR #204: a LOSING dispatch (this run's own workflow_run_id no longer matches the task's —
+ *  a different run already holds it) is not a raise on the 6-arity: it returns
+ *  `{settled:false,outcome:'not_settled',reason:'run_superseded'}`, the SAME shape 0036's
+ *  body already uses for `task_superseded`/`registry_superseded`/`registry_released` — never
+ *  raise on a losing dispatch, the winning run's own settle call owns the real accounting.
+ *  Read explicitly and short-circuited on `settled === false`: benign, not an error. */
 export async function settleAutoDraftStep(
   taskId: string,
   outcome: "drafted" | "skipped_lane" | "noop_existing" | "failed",
@@ -219,8 +272,8 @@ export async function settleAutoDraftStep(
 ): Promise<void> {
   "use step";
   const { workflowRunId } = getWorkflowMetadata();
-  await pools().withRuntime((c) =>
-    c.query("select clara.settle_autodraft_task($1, $2, $3, $4, $5::jsonb, $6::text)", [
+  const r = await pools().withRuntime((c) =>
+    c.query("select clara.settle_autodraft_task($1, $2, $3, $4, $5::jsonb, $6::text) as receipt", [
       taskId,
       outcome,
       Math.max(0, Math.round(tokens)),
@@ -229,6 +282,13 @@ export async function settleAutoDraftStep(
       workflowRunId,
     ]),
   );
+  const receipt = (r.rows[0]?.receipt ?? {}) as { settled?: boolean; outcome?: string; reason?: string };
+  if (receipt.settled === false) {
+    // run_superseded (or, in principle, any sibling losing-dispatch reason): this run lost
+    // the run-identity race. Nothing was written on this call; the winning run's own settle
+    // already owns (or will own) the real accounting. Benign — return without throwing.
+    return;
+  }
 }
 
 /** Open a scoped open-question for a question-shaped refusal (origin recorded 'sweep_refusal'

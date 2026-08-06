@@ -25,6 +25,16 @@
 //   3. The DRAFT_TOOL's own `.description` generalises to both directions (was
 //      purchase-only, matching this wave's prompt.ts.describe() text).
 //
+// PR #204 (the DB lane) adds a FOURTH change (7A-R2, "the bound family"): runDraftJournalEntry
+// now VALIDATES the model's proposed coding_kind against ctx.direction (the admission-bound
+// family `begin_autodraft_task` returns — sales admits sales_invoice/sales_credit_note,
+// purchase admits supplier_bill only) as the VERY FIRST check, BEFORE any DB read — a
+// mismatch is a named early refusal (`direction_family_mismatch`, the exact CLR21 reason the
+// DB draft writer itself raises for the same contradiction — see errors.ts), never a DB
+// roundtrip. `ctx.direction === null` (a pre-migration attempt row) skips this early check
+// entirely; the DB draft writer stays the sole authority in that case, exactly as before this
+// wave.
+//
 // Every read tool (read_document, get_context_pack, coding_lane, get_draft_review) and the
 // wrapper's server-side authoritative-read logic (readInvoiceFactState, the filing/pack/
 // extract fetch) is an unmodified version-rename of v5.
@@ -37,7 +47,7 @@ import {
   type DraftToolResult,
   type JeReviewPart,
 } from "./autoDraft.v6.prompt.js";
-import { refusalFromDbError } from "./autoDraft.v6.errors.js";
+import { refusalFromDbError, directionFamilyMismatchRefusal } from "./autoDraft.v6.errors.js";
 import { readScoped, writeScoped, safeRead, type PgExec, type ToolCtx } from "./autoDraft.v6.infra.js";
 
 export type DraftInput = z.infer<typeof draftJournalEntryInputSchema>;
@@ -97,6 +107,16 @@ export function deriveCounterpartyKind(codingKind: DraftInput["coding_kind"]): "
   return codingKind === "supplier_bill" ? "vendor" : "customer";
 }
 
+/** PR #204 / 7A-R2, THE BOUND FAMILY: the coding_kind values an admitted direction allows.
+ *  A `direction` of null (a pre-migration attempt row) allows nothing to be checked here at
+ *  all — returns null, meaning "no early family to validate against; the DB draft writer
+ *  stays the sole authority." Pure. */
+export function allowedCodingKindsForDirection(direction: "sales" | "purchase" | null): readonly DraftInput["coding_kind"][] | null {
+  if (direction === "sales") return ["sales_invoice", "sales_credit_note"];
+  if (direction === "purchase") return ["supplier_bill"];
+  return null;
+}
+
 /**
  * The draft_journal_entry wrapper (exported for direct unit testing). Fetches authoritative
  * values server-side, runs the tier check, then executes the DB writer through the write
@@ -105,6 +125,14 @@ export function deriveCounterpartyKind(codingKind: DraftInput["coding_kind"]): "
  */
 export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Promise<DraftToolResult> {
   const clientId = ctx.clientId;
+  // PR #204 / 7A-R2, THE BOUND FAMILY — the VERY FIRST check, before any DB read: the model's
+  // proposed coding_kind must fall inside the admission-bound direction's family. A mismatch
+  // is a named EARLY refusal, never a DB roundtrip. ctx.direction === null (a pre-migration
+  // attempt row) skips this check entirely — the DB draft writer stays the sole authority.
+  const allowedKinds = allowedCodingKindsForDirection(ctx.direction);
+  if (allowedKinds && !allowedKinds.includes(input.coding_kind)) {
+    return { ok: false, refusal: directionFamilyMismatchRefusal() };
+  }
   if (input.document_id !== ctx.documentId) {
     return { ok: false, refusal: refusalFromDbError({ code: "CLR11" }) };
   }
