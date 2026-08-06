@@ -176,15 +176,7 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "fail_classify", "fail_invoice_facts", "fail_statement_facts", "finalize_document_intake", "get_bank_reconciliation",
   "get_context_pack", "list_autopost_rules", "list_review_queue", "list_vendor_bindings", "mark_document_intake_received",
   "mark_wiki_citations_stale", "match_bank_line", "merge_counterparties", "mint_wake_credential", "open_interruption",
-  // 0046 (§7-A) joins three names, and the adjudication is the same one the roster exists to
-  // record: arm (D) catches a BARE clock token, and a bare token is only a defect when the
-  // body derives a DATE from it. All three stamp TIMESTAMPTZ values — an evaluation instant
-  // on an advisory read, and closed_at/updated_at/the activation watermark on two writers.
-  // The one place §7-A needs a MYT money DATE, clara.preview_ocr_sales_evidence, calls
-  // clara._book_today() instead, which is exactly the outcome S5.25 arm (B) exists to
-  // produce (and 0046's tail arm (7) re-measures that roster unchanged).
-  "persist_document_extraction", "persist_invoice_facts", "persist_statement_facts", "prepare_egress_dispatch",
-  "preview_ocr_sales_evidence", "propose_autopost_rule",
+  "persist_document_extraction", "persist_invoice_facts", "persist_statement_facts", "prepare_egress_dispatch", "propose_autopost_rule",
   "propose_bank_rule", "propose_vendor_identity_binding", "reconcile_autopost_rules", "reconcile_sweep_runs", "record_future_attestation",
   "record_opening_keyed_resolution", "relay_health", "remove_member", "rename_counterparty", "request_reextraction",
   "resolve_and_book_bank_line", "resolve_bank_line_exception", "resolve_compliance_watch", "resolve_lint_finding", "resolve_onboarding_plan_item",
@@ -192,11 +184,42 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "retire_coding_rule", "retire_counterparty_alias", "retire_depreciation_authority", "retire_document_filing", "retire_fa_account_profile",
   "retire_staff_advance_account", "retire_wiki_page", "reverse_entry", "revise_entry", "revise_fixed_asset_particulars",
   "revoke_client_egress", "revoke_client_egress_purpose", "revoke_vendor_identity_binding", "revoke_wake_credential", "run_client_lint",
-  "run_lint_all", "set_counterparty_terms", "set_document_kind", "set_member_role",
-  // 0046 (§7-A) — see the note above: both stamp timestamptz, neither derives a date.
-  "set_sales_backfill_state", "set_sales_lane_activation", "set_wiki_synthesis_hold",
+  "run_lint_all", "set_counterparty_terms", "set_document_kind", "set_member_role", "set_wiki_synthesis_hold",
   "settle_chat_turn", "settle_ingest_reservation", "sign_adjustment_template", "sign_autopost_rule", "sign_bank_rule",
   "sign_coding_rule", "sign_depreciation_authority", "sign_vendor_identity_binding", "snooze_compliance_watch", "tick_seeding_proposal",
   "unmatch_bank_match", "update_onboarding_plan", "upsert_fa_account_profile", "verify_document_intake", "void_bank_reconciliation",
   "void_bank_statement", "wake_context", "wake_record_notification", "withdraw_draft",
 ].sort();
+
+// ---------------------------------------------------------------------------
+// 0046 [§7-A] — THE THREE NAMES THIS MIGRATION ADDS, AND WHY THE ROSTER IS BIMODAL.
+//
+// THE ADJUDICATION FIRST. Arm (D) catches a BARE clock token, and a bare token is only a
+// defect when the body derives a DATE from it. All three of these stamp TIMESTAMPTZ values —
+// an evaluation instant on an advisory read, and closed_at/updated_at/the activation
+// watermark on two writers. The one place §7-A needs a MYT money DATE,
+// clara.preview_ocr_sales_evidence, calls clara._book_today() instead, which is exactly the
+// outcome S5.25 arm (B) exists to produce (0046's own tail arm (7) re-measures that roster
+// unchanged).
+//
+// AND WHY IT IS NOT JUST APPENDED TO THE LIST ABOVE. The roster is compared EXACTLY against
+// the live catalog, and `db-slice-frontiers` runs this battery against databases pinned at
+// EARLIER frontiers (d-b0/b1/b2/b3 stop at 0042-0045), where these three functions do not
+// exist. An unconditional entry turns every one of those legs red while saying nothing about
+// clock discipline — the same failure mode rig-meta's 0037 table cohort and its
+// cohortFailures() gate already exist to prevent. Gating on the migration ledger keeps arm
+// (D) exact in BOTH directions at 0045 and at 0046+ alike: a missing name still fails.
+const SALES_LANE_0046_CLOCK_NAMES = [
+  "preview_ocr_sales_evidence", "set_sales_backfill_state", "set_sales_lane_activation",
+];
+
+/** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
+export async function s5BareTokenRoster(query) {
+  const applied = (await query(
+    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'"
+  )).rows[0].n === 1;
+  const names = applied
+    ? [...S5_25_BARE_TOKEN_ROSTER, ...SALES_LANE_0046_CLOCK_NAMES]
+    : [...S5_25_BARE_TOKEN_ROSTER];
+  return names.sort();
+}

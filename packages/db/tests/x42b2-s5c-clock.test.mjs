@@ -77,7 +77,7 @@ import {
   a21EnsureReady, buildWorld, firmOf, upsertAccountClassed, grantConsent,
   freshResolution, draftEntryV3, approveEntry, counterpartyRows, normalize, idOf,
 } from "./a21-helpers.mjs";
-import { S5_25_BARE_TOKEN_RE, S5_25_BARE_TOKEN_ROSTER } from "./x42-s5-helpers.mjs";
+import { S5_25_BARE_TOKEN_RE, s5BareTokenRoster } from "./x42-s5-helpers.mjs";
 
 // This suite's OWN codes (grepped against every other battery before choosing).
 const ARK = "374-K42"; // receivable control (asset, account_class='receivable')
@@ -369,5 +369,6 @@ test("x42.s5c.6 [F2] arm (D)'s bare-token detector and roster, re-derived indepe
   const flagged = (await rootQuery(
     `select coalesce(string_agg(distinct proname, ', ' order by proname), '') as n from pg_proc
       where pronamespace='clara'::regnamespace and proname <> '_book_today' and ${wide} ~* $1`, [S5_25_BARE_TOKEN_RE])).rows[0].n;
-  assert.equal(flagged, S5_25_BARE_TOKEN_ROSTER.join(", "), "arm (D)'s live roster drifted from the round-8 M4 measurement");
+  // 0046: frontier-aware — see s5BareTokenRoster's header.
+  assert.equal(flagged, (await s5BareTokenRoster(rootQuery)).join(", "), "arm (D)'s live roster drifted from the round-8 M4 measurement");
 });

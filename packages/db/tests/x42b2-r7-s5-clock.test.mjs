@@ -57,7 +57,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, withActor, ROLES, endPool, printLaneNotes, printSkipCount, noteLane } from "./a21-helpers.mjs";
-import { x42S5Ready, x42S5SkipHere, S5_25_BARE_TOKEN_RE, S5_25_BARE_TOKEN_ROSTER } from "./x42-s5-helpers.mjs";
+import { x42S5Ready, x42S5SkipHere, S5_25_BARE_TOKEN_RE, s5BareTokenRoster } from "./x42-s5-helpers.mjs";
 
 let live = false;
 
@@ -205,7 +205,10 @@ test("x42.r7.s5c.5 [round-8 M4 F2] the bare-token arm catches a real assignment-
                 '/\\*[\\s\\S]*?\\*/', '', 'g'), '--[^\\n]*', '', 'g'), '\\s+', ' ', 'g'))
               ~* $3`,
       [DECOY_ASSIGN, DECOY_INSERT, BARE])).rows[0].n;
-    assert.equal(wholeCatalog, S5_25_BARE_TOKEN_ROSTER.join(", "),
+    // 0046: the roster is frontier-aware — `db-slice-frontiers` runs this battery against
+    // databases pinned at 0042-0045, where §7-A's three names do not exist yet.
+    const roster = await s5BareTokenRoster(rootQuery);
+    assert.equal(wholeCatalog, roster.join(", "),
       "arm (D)'s live bare-token roster (decoys excluded) must be exactly the round-8 M4 measurement");
 
     // (d) clara._book_today() itself DOES match the bare pattern (it calls statement_timestamp())
@@ -213,7 +216,7 @@ test("x42.r7.s5c.5 [round-8 M4 F2] the bare-token arm catches a real assignment-
     const bookToday = (await bodyOf("_book_today"));
     assert.equal(await bareMatches(bookToday), true, "mandatory setup: clara._book_today()'s own body must match the bare pattern");
 
-    noteLane(`s5c.5 [F2] both decoys caught; the live roster (decoys excluded) is exactly ${S5_25_BARE_TOKEN_ROSTER.length} names; _book_today() matches the pattern but is exempted by name`);
+    noteLane(`s5c.5 [F2] both decoys caught; the live roster (decoys excluded) is exactly ${roster.length} names; _book_today() matches the pattern but is exempted by name`);
   } finally {
     // Never leave a decoy behind for a sibling test/lane to trip over.
     await withActor({ role: ROLES.fnOwner }, async (c) => {
