@@ -196,6 +196,13 @@ test("A3 7A-R4: the SAME seven entries, tagged sales_invoice, DO earn it", async
   assert.ok(f.span_days >= 60, `the posting-date span is >= 60 (got ${f.span_days})`);
   // The span is measured on POSTING_DATE, not on approval date — documentation defect 1,
   // corrected in 0046's header. These seven were approved within one rig run.
+  // ASSERTED, NOT LOGGED. The corroboration reading is the headline 7A-R4/ROOT-fix term, and
+  // for THIS corpus the true value is ZERO — the rig's stated-invoice fixture seeds an invoice
+  // number and nothing else, so none of these documents states a tax and none can corroborate
+  // (0023:311). Logging it left the term unasserted anywhere in this file. The POSITIVE side
+  // lives in A5, which builds genuinely corroborating documents.
+  assert.equal(f.corroborated, 0,
+    `a tax-silent corpus earns SEVEN qualifying sightings and ZERO corroboration (got ${JSON.stringify(f)})`);
   noteLane(`A3 floor: qualifying=${f.qualifying} invoices=${f.distinct_invoices} corroborated=${f.corroborated} span=${f.span_days}`);
 });
 
@@ -285,8 +292,19 @@ test("A5 the POSITIVE side of corroborated>=6: six corroborating sales invoices 
 
 test("B1 the lane SHIPS OFF for every firm, and an absent firm_limits row reads OFF", async (t) => {
   if (skipHere(t)) return;
-  const on = await rootQuery("select count(*)::int as n from clara.firm_limits where sales_lane_active");
-  assert.equal(on.rows[0].n, 0, "no firm has the sales lane active after the migration");
+  // SCOPED TO THIS CELL'S OWN FIRM, not the database. A sibling battery that legitimately
+  // activates a firm (C1 does, inside a try/finally) would otherwise make this cell fail for a
+  // reason that has nothing to do with what it tests — a measured cross-file interference, not
+  // a hypothetical. The ships-OFF guarantee for the WHOLE database is asserted where it cannot
+  // race: tail arm (6) of the migration itself, in the same transaction that creates the column,
+  // and it reads the column DEFAULT as well as the rows.
+  const sub0 = world.users.alice;
+  const mine = await firmOf(await freshSalesClient(sub0));
+  const on = await rootQuery(
+    "select count(*)::int as n from clara.firm_limits where sales_lane_active and firm_id=$1", [mine]);
+  assert.equal(on.rows[0].n, 0, "a firm created after the migration is not sales-lane active");
+  assert.equal((await rootQuery("select clara._sales_lane_active($1) as a", [mine])).rows[0].a, false,
+    "...and the helper agrees");
 
   // A firm id that has no firm_limits row at all — absence must read FALSE, never NULL and
   // never true. (Law 2: an absence is not positive evidence.)

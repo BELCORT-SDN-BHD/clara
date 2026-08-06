@@ -483,14 +483,25 @@ export async function seedCorroboratingInvoiceFacts(cited, {
  *  produces this evidence in production.
  *
  *  IT IS NOT A BACK DOOR. `coding_kind` is on _tf_entry_immutable's OWN draft->draft
- *  allowset, so this is a transition the schema sanctions; and stamping it ARMS
- *  t_je_sales_invoice_shape, so the entry must genuinely hold a sales-invoice shape or the
- *  update is refused. The fixture gets stricter, not looser. */
+ *  allowset, so this is a transition the schema sanctions. It also ARMS the sales-invoice
+ *  shape wall for this entry: t_je_sales_invoice_shape is a DEFERRABLE constraint trigger, so
+ *  it does not adjudicate at the stamp itself — it fires when the stamping statement commits
+ *  and again on the approval that follows, and from then on the entry must genuinely hold a
+ *  sales-invoice shape. The fixture gets stricter, not looser. */
 export async function stampCodingKind(entry, kind = "sales_invoice") {
-  await rootQuery(
+  const r = await rootQuery(
     "update clara.journal_entries set coding_kind=$2, updated_at=now() where id=$1 and status='draft'",
     [entry, kind],
   );
+  // A ZERO-ROW UPDATE IS A SILENT PASS, and this helper is upstream of every floor fixture:
+  // if the entry were already approved (or the id wrong), the stamp would do nothing, the
+  // entry would stay coding_kind NULL, and the floor cell downstream would fail somewhere far
+  // from the cause. Assert the write happened.
+  if (r.rowCount !== 1) {
+    throw new Error(
+      `stampCodingKind: expected to stamp exactly ONE draft row, updated ${r.rowCount} `
+      + `(entry ${entry} — already approved, or not a draft?)`);
+  }
   return entry;
 }
 

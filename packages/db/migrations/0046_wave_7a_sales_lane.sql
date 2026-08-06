@@ -410,6 +410,34 @@ create or replace function pg_temp._wdb_call_rx(p_qname text) returns text
 -- on purpose: the same rule the stripper states one screen up -- a deploy-time instrument that
 -- needs a recent server function is an instrument that fails on the one database nobody tested
 -- against (regexp_count is PostgreSQL 15+).
+-- IS THIS LITERAL CODE, OR IS IT PROSE? Several arms below assert that a NAMED receipt token
+-- really is emitted, and a bare `position(token in prosrc)` cannot tell a live
+-- `jsonb_build_object(...,'sales_direction')` from a COMMENT that happens to spell it. That
+-- distinction matters here more than anywhere, because this migration SPLICES its own
+-- explanatory comments INTO the very bodies those arms measure -- so an arm reading raw source
+-- can be satisfied by the migration's own prose, and is then structurally incapable of failing.
+-- A mutation audit found exactly that in seven places.
+--
+-- The lexer above is position- AND length-preserving: a comment becomes a run of chr(1), a
+-- string literal a run of chr(2), each exactly as long as what it replaced. So the character
+-- class UNDER an occurrence answers the question exactly. chr(2) => the occurrence sits inside
+-- a real string literal (code). chr(1) => it sits inside a comment (prose).
+create or replace function pg_temp._wdb_code_literal(p_src text, p_lit text) returns boolean
+  language plpgsql immutable as $cl$
+declare v_lex text; v_pos int; v_from int := 1; v_hit int;
+begin
+  if p_src is null or p_lit is null or p_lit = '' then return false; end if;
+  v_lex := pg_temp._wdb_sql_code(p_src);
+  loop
+    v_hit := position(p_lit in substr(p_src, v_from));
+    exit when v_hit = 0;
+    v_pos := v_from + v_hit - 1;
+    if substr(v_lex, v_pos, length(p_lit)) ~ ('^' || chr(2) || '+$') then return true; end if;
+    v_from := v_pos + 1;
+  end loop;
+  return false;
+end $cl$;
+
 create or replace function pg_temp._wdb_call_count(p_code text, p_qname text) returns int
   language sql immutable as $cc$
   select count(*)::int from regexp_matches(p_code, pg_temp._wdb_call_rx(p_qname), 'g') $cc$;
@@ -699,7 +727,7 @@ $callers$;
 -- whose executor has drifted fails loudly instead of being silently overwritten.
 -- ---------------------------------------------------------------------
 do $erp_prestate$
-declare v_def text; v_n int;
+declare v_def text; v_n int; v_src text;
 begin
   select pg_get_functiondef('clara.execute_rule_post(uuid,text)'::regprocedure) into v_def;
   v_n := (length(v_def)-length(replace(v_def,'  v_fseen int; v_fdocs int; v_fspan int;','')))
@@ -716,6 +744,31 @@ begin
     raise exception '0046 S4.3 prestate: the live clara.execute_rule_post has no 0029 Slot C binding gate -- refusing to re-ship over a body this migration cannot account for'
       using errcode='CLR10';
   end if;
+
+  -- THE IDENTITY PROOF, HALF ONE: derive what the re-shipped body MUST be.
+  --
+  -- A static re-ship is the one shape that can silently DROP a later recut -- exactly the
+  -- silent-omission hazard SS0.2-2 records ("an un-recut caller SUCCEEDS while omitting the
+  -- gate; silent, not loud"). Asserting "the body I typed is present" proves nothing about
+  -- what it REPLACED. So the prestate takes the LIVE body, applies the two documented edits
+  -- MECHANICALLY, and stashes the result; tail arm (14) then requires the INSTALLED body to
+  -- equal it. Anything the live body carried that this file's text does not -- a hotfix, a
+  -- later slice's recut, a hand patch on a live database -- breaks that equality and refuses
+  -- the deploy, instead of being overwritten without a word.
+  select prosrc into v_src from pg_proc
+    where pronamespace='clara'::regnamespace and proname='execute_rule_post';
+  v_src := replace(v_src,
+    '  v_fseen int; v_fdocs int; v_fspan int;',
+    '  v_fseen int; v_fdocs int; v_fspan int; v_fcorr int;');
+  v_src := replace(v_src,
+    '    select f.qualifying,f.distinct_invoices,f.span_days into v_fseen,v_fdocs,v_fspan',
+    '    select f.qualifying,f.distinct_invoices,f.corroborated,f.span_days into v_fseen,v_fdocs,v_fcorr,v_fspan');
+  v_src := replace(v_src,
+    '    if coalesce(v_fseen,0)<6 or coalesce(v_fdocs,0)<6 or v_fspan is null or v_fspan<60 then',
+    '    if coalesce(v_fseen,0)<6 or coalesce(v_fdocs,0)<6 or coalesce(v_fcorr,0)<6 or v_fspan is null or v_fspan<60 then');
+  create temporary table if not exists _wdb_erp_expected(txt text) on commit drop;
+  delete from _wdb_erp_expected;
+  insert into _wdb_erp_expected values (regexp_replace(v_src,'\s+',' ','g'));
 end
 $erp_prestate$;
 
@@ -2675,26 +2728,38 @@ $acls$;
 -- =====================================================================
 do $tail$
 declare
-  v_n int; v_names text; v_code text; v_raw text; v_missing text;
+  v_n int; v_names text; v_code text; v_raw text; v_missing text; v_needle text;
   r record;
 begin
-  -- TWO INSTRUMENTS, AND EACH QUESTION GETS THE RIGHT ONE. `v_code` is the LEXED body:
-  -- comments and STRING LITERALS are blanked to fill characters, which is exactly what
-  -- makes it the honest instrument for "does this body CALL that function". `v_raw` is
-  -- prosrc as written. A receipt token like 'sales_backlog_held' IS a string literal, so
-  -- it exists only in v_raw -- asking the lexed body for it would report every one of
-  -- them missing. Getting this backwards is a silent false negative, so the arms below
-  -- name which instrument they use and why.
+  -- THE INSTRUMENT LAW FOR EVERY ARM BELOW, stated once because an earlier cut of this block
+  -- got it wrong in seven places and a mutation audit found ten ways to satisfy it while
+  -- breaking the lane.
+  --
+  --   STRUCTURE is asserted on the LEXED body. Comments are chr(1) there, so no comment this
+  --   migration splices into a body it also measures can forge a shape.
+  --   LITERAL IDENTITY is asserted with pg_temp._wdb_code_literal, which answers "is this token
+  --   CODE" rather than "does this token appear anywhere".
+  --   Both halves sit in the SAME predicate, because either alone is forgeable: a shape without
+  --   a token proves nothing about which receipt is emitted, and a token without a shape is
+  --   satisfied by prose.
+  --
+  -- WHOLE PREDICATES, NOT SUBSTRINGS. `coalesce(v_corr,0)<6` present somewhere is not the
+  -- claim; the claim is the exact boolean the writer evaluates, so that swapping one `or` for
+  -- an `and` -- which would let a zero-corroboration rule sign -- breaks the match.
+  --
+  -- Whitespace is folded on both sides, so re-indentation is not a failure. A comment landing
+  -- INSIDE a pinned predicate IS one, and that is deliberate.
+
   -- (1) THE EXACT LIVE CALLER SET OF THE FLOOR IS NOW FOUR.
   --
-  -- ASKED ON THE SHARED LEX INSTRUMENT, never on raw prosrc, for the reason SECTION 1
-  -- gives: a comment that merely NAMES the floor would read as a caller and refuse a
-  -- correct deploy, and an upper-cased or quoted respelling would read as absent and pass
-  -- a wrong one. Both directions were measured during the D-b2 ladder.
+  -- Asked on the shared lex instrument, never on raw prosrc: a comment that merely NAMES the
+  -- floor would read as a caller and refuse a correct deploy, and an upper-cased or quoted
+  -- respelling would read as absent and pass a wrong one. Both directions were measured during
+  -- the D-b2 ladder.
   --
-  -- clara._ocr_sales_floor_pop CANNOT collide with this roster: the matcher requires the
-  -- name to be followed by optional whitespace and then `(`, and `_ocr_sales_floor_pop(`
-  -- puts `_pop` in between. The floor's own body calls the POP helper, not itself.
+  -- clara._ocr_sales_floor_pop CANNOT collide with this roster: the matcher requires the name
+  -- to be followed by optional whitespace and then `(`, and `_ocr_sales_floor_pop(` puts `_pop`
+  -- in between. The floor's own body calls the POP helper, not itself.
   select count(*)::int, coalesce(string_agg(p.proname,' ' order by p.proname),'')
     into v_n, v_names
     from pg_proc p
@@ -2705,47 +2770,141 @@ begin
     raise exception '0046 tail 1: the live callers of clara._ocr_sales_floor are {%} (n=%), not the pinned FOUR -- a caller was missed by this migration''s recut, or a new one appeared', v_names, v_n;
   end if;
 
-  -- (2) EACH AUTHORITY WRITER POSITIVELY BINDS `corroborated` AND GATES IT AT SIX.
+  -- (2) EACH AUTHORITY WRITER EVALUATES THE WHOLE CORROBORATION PREDICATE.
   --
-  -- THIS IS THE ARM THAT REPLACES v1'S INSUFFICIENT PROBE. v1 proposed asserting that the
-  -- old four-column shape no longer appears in prosrc. That proves nothing: no caller ever
-  -- mentioned `distinct_docs`, so there was no reliable caller token to look for -- and,
-  -- worse, an un-recut caller does not FAIL. It succeeds while silently omitting the gate.
-  -- The only honest assertion is a POSITIVE one, made per writer.
+  -- THIS IS THE ARM THAT REPLACES v1'S INSUFFICIENT PROBE, and it is now stronger than the
+  -- version that shipped first. v1 proposed asserting the old four-column shape is gone: that
+  -- proves nothing, because no caller ever mentioned `distinct_docs` and, worse, an un-recut
+  -- caller does not FAIL -- it succeeds while silently omitting the gate. The first fix asserted
+  -- that `f.corroborated` and a `<6` comparison were each present SOMEWHERE, which a mutation
+  -- audit defeated by changing one `or` to an `and`: every term is still there, and a rule with
+  -- zero corroborating documents signs. So the pin is the exact boolean, per writer.
   for r in select p.proname,
-                  pg_temp._wdb_sql_code(coalesce(p.prosrc,'')) as code
+                  regexp_replace(pg_temp._wdb_sql_code(coalesce(p.prosrc,'')),'\s+',' ','g') as code
              from pg_proc p
             where p.pronamespace='clara'::regnamespace
               and p.proname in ('propose_autopost_rule','sign_autopost_rule','execute_rule_post')
   loop
-    if position('f.corroborated' in r.code) = 0 then
-      raise exception '0046 tail 2: clara.% does not BIND the floor''s corroborated column -- it would succeed while silently omitting the gate', r.proname;
+    v_needle := case r.proname
+      when 'propose_autopost_rule' then
+        'if coalesce(v_seen,0)<6 or coalesce(v_docs,0)<6 or coalesce(v_corr,0)<6 or v_span_days is null or v_span_days<60 then'
+      when 'sign_autopost_rule' then
+        'if coalesce(v_seen,0)<6 or coalesce(v_docs,0)<6 or coalesce(v_corr,0)<6 or v_span is null or v_span<60 then'
+      else
+        'if coalesce(v_fseen,0)<6 or coalesce(v_fdocs,0)<6 or coalesce(v_fcorr,0)<6 or v_fspan is null or v_fspan<60 then'
+      end;
+    if position(v_needle in r.code) = 0 then
+      raise exception '0046 tail 2: clara.% does not evaluate the pinned corroboration predicate -- an un-recut or glue-weakened caller SUCCEEDS while omitting the gate, so the whole boolean is the claim, never its terms', r.proname;
     end if;
-    if r.code !~ 'coalesce\(v_[a-z_]*corr[a-z_]*,0\)<6' then
-      raise exception '0046 tail 2: clara.% binds corroborated but does not GATE it at six', r.proname;
+    if position('f.corroborated' in r.code) = 0 then
+      raise exception '0046 tail 2: clara.% does not BIND the floor''s corroborated column', r.proname;
     end if;
   end loop;
 
-  -- (6) THE ACTIVATION SHIPS OFF, FOR EVERY FIRM (7A-R1).
+  -- (3) THE SS7-A VERB SURFACE EXISTS, AT THE EXACT SIGNATURES THE REST OF THE WAVE CALLS.
+  --
+  -- Ordinals 3, 4 and 5 were VACANT in the first cut of this block, and the honest reason is
+  -- recorded rather than tidied away: the ACL arms that held them moved to the $acls$ block (so
+  -- the wiki-authority gate could tell a privilege probe from a change-of-record patch) and
+  -- nothing took their place, while the closing notice went on claiming thirteen. They are
+  -- refilled here with the coverage the migration genuinely lacked -- the DDL surface itself,
+  -- which until now no arm read at all.
+  for v_names in select unnest(array[
+      'clara.preview_ocr_sales_evidence(uuid)',
+      'clara.set_sales_lane_activation(uuid,boolean,timestamptz,text)',
+      'clara.open_sales_backfill(uuid,integer,text,text)',
+      'clara.set_sales_backfill_state(uuid,text,text)',
+      'clara.list_sales_backfill_batches(jsonb)',
+      'clara._ocr_sales_floor_pop(uuid,uuid,text,date)',
+      'clara._sales_lane_active(uuid)',
+      'clara._sales_admission_open(uuid,uuid,uuid)',
+      'clara._autodraft_direction_tri(uuid,uuid)'])
+  loop
+    begin
+      perform v_names::regprocedure;
+    exception when others then
+      raise exception '0046 tail 3: % does not exist at that exact signature -- the rest of the wave (the v6 runtime, the dashboard preview, the ceremony flip) calls these by name', v_names;
+    end;
+  end loop;
+
+  -- (4) THE BOUND DIRECTION IS CARRIED, AND CONSTRAINED.
+  -- 7A-R2 binds the coding-kind family at ADMISSION; these two columns are where that binding
+  -- becomes durable and how clara.begin_autodraft_task hands it to the runtime. A `direction`
+  -- that could hold any string would not be a binding.
+  select count(*)::int into v_n from pg_attribute a
+    where a.attrelid='clara.autodraft_attempts'::regclass and not a.attisdropped
+      and a.attname in ('direction','backfill_batch_id');
+  if v_n <> 2 then
+    raise exception '0046 tail 4: clara.autodraft_attempts is missing the direction/backfill_batch_id carriers (matched %/2)', v_n;
+  end if;
+  select count(*)::int into v_n from pg_constraint
+    where conrelid='clara.autodraft_attempts'::regclass and contype='c'
+      and pg_get_constraintdef(oid) like '%direction%'
+      and pg_get_constraintdef(oid) like '%sales%'
+      and pg_get_constraintdef(oid) like '%purchase%';
+  if v_n < 1 then
+    raise exception '0046 tail 4: clara.autodraft_attempts.direction carries no CHECK restricting it to sales/purchase -- an unconstrained column is not a bound family';
+  end if;
+
+  -- (5) THE BACKFILL DOOR'S STRUCTURAL GUARANTEES.
+  -- The partial unique index is the one that matters: with two non-closed batches for a client,
+  -- "which batch paid for this admission" has no answer and the accounting stops being a
+  -- receipt.
+  select count(*)::int into v_n from pg_indexes
+    where schemaname='clara' and tablename='sales_backfill_batches'
+      and indexname='uq_sales_backfill_open'
+      and indexdef like '%UNIQUE%' and indexdef like '%WHERE%' and indexdef like '%closed%';
+  if v_n <> 1 then
+    raise exception '0046 tail 5: the one-open-batch partial unique index is missing or no longer partial';
+  end if;
+  select count(*)::int into v_n from pg_constraint
+    where conrelid='clara.sales_backfill_batches'::regclass and contype='c'
+      and conname in ('ck_sales_backfill_admitted_within_batch','ck_sales_backfill_closed_at');
+  if v_n <> 2 then
+    raise exception '0046 tail 5: the backfill batch CHECKs (admitted<=batch_size, closed_at<=>closed) are not both present (matched %/2)', v_n;
+  end if;
+
+  -- (6) THE ACTIVATION SHIPS OFF -- ROWS **AND** THE COLUMN DEFAULT (7A-R1).
+  --
+  -- A row census alone is worthless as a ships-OFF guarantee: `default true` leaves every
+  -- EXISTING row false, so the census passes, while every FUTURE firm arrives ACTIVE. The
+  -- default is what actually carries the promise, so it is read directly. NOT NULL is read too
+  -- -- a nullable flag makes the lane's `not clara._sales_lane_active(...)` depend on a
+  -- coalesce somebody could later drop.
   select count(*)::int into v_n from clara.firm_limits where sales_lane_active;
   if v_n <> 0 then
     raise exception '0046 tail 6: % firm(s) already have sales_lane_active -- this migration must ship the lane OFF', v_n;
   end if;
+  select count(*)::int into v_n from pg_attribute a
+    left join pg_attrdef d on d.adrelid=a.attrelid and d.adnum=a.attnum
+    where a.attrelid='clara.firm_limits'::regclass and a.attname='sales_lane_active'
+      and a.attnotnull and pg_get_expr(d.adbin,d.adrelid)='false';
+  if v_n <> 1 then
+    raise exception '0046 tail 6: clara.firm_limits.sales_lane_active is not NOT NULL DEFAULT false -- the row census cannot carry the ships-OFF guarantee alone, because a true default arms every FUTURE firm while leaving every existing row false';
+  end if;
 
   -- (7) THE Asia/Kuala_Lumpur DUPLICATION ROSTER IS UNCHANGED.
   --
-  -- 0042:5536 and 0044:6525 assert this set EXACTLY, on both sides: an unexpected name is a
-  -- new second body owning one house fact, and a MISSING name means a recorded copy moved
-  -- to a spelling those gates cannot see. clara._ocr_sales_floor is on that list precisely
-  -- because of the literal this migration drop/recreates, so the roster is the direct proof
-  -- that the pin held. The expected value is the FINAL D-b2 form 0042's own header records.
+  -- 0042:5536 and 0044:6525 assert this set EXACTLY, both ways: an unexpected name is a new
+  -- second body owning one house fact, a missing one means a recorded copy moved to a spelling
+  -- those gates cannot see. clara._ocr_sales_floor is on the list precisely because of the
+  -- literal this migration drop/recreates, so the roster is the direct proof the pin held.
+  --
+  -- ASKED AS CODE, not on raw text and NOT on the lexed body either -- and the second half of
+  -- that sentence is a correction this arm made to itself on its first run. The inline
+  -- `/*...*/` stripper the 0042/0044 tails use is NON-GREEDY and single-pass, so it cannot
+  -- handle NESTED block comments, and PostgreSQL nests them: a body could hide the MYT literal
+  -- inside `/* /* ... */ */` and run on current_date with the arm green. But the obvious
+  -- remedy -- run the shared lexer and search its output -- is WRONG in the opposite direction,
+  -- because the lexer blanks STRING LITERALS and 'Asia/Kuala_Lumpur' IS one, so it returned the
+  -- empty set and refused a correct deploy. The instrument that answers the actual question
+  -- ("does this body spell the conversion in CODE") is the code-literal predicate: comment-
+  -- proof AND literal-preserving. lower() is applied to the SOURCE, which preserves every
+  -- position and length, so the case-insensitive reading of the 0042 roster is kept.
   select coalesce(string_agg(distinct p.proname,' ' order by p.proname),'') into v_names
     from pg_proc p
    where p.pronamespace='clara'::regnamespace
-     and lower(regexp_replace(regexp_replace(regexp_replace(
-           coalesce(p.prosrc,'') || coalesce(pg_get_functiondef(p.oid),''),
-           '/\*[\s\S]*?\*/','','g'), '--[^\n]*','','g'), '\s+',' ','g'))
-         like '%asia/kuala_lumpur%';
+     and pg_temp._wdb_code_literal(lower(coalesce(p.prosrc,'')),'asia/kuala_lumpur');
   if v_names <> '_adj_on_approve _adj_run_occurrence_core _book_today _ocr_sales_floor '
               || 'ack_compliance_watch evaluate_sst_watch evaluate_sst_watches_all '
               || 'record_future_attestation reverse_entry' then
@@ -2762,88 +2921,120 @@ begin
     where p.pronamespace='clara'::regnamespace
       and p.proname in ('_ocr_sales_floor','_ocr_sales_floor_pop')
       and p.prosecdef and pg_get_userbyid(p.proowner)='clara_fn_owner'
-      -- PostgreSQL normalises the SET clause it stores ("search_path=clara, pg_temp"),
-      -- so the comparison is made whitespace-insensitively rather than against the
-      -- spelling this file happens to use.
+      -- PostgreSQL normalises the stored SET clause ("search_path=clara, pg_temp"), so the
+      -- comparison is whitespace-insensitive rather than against this file's spelling.
       and exists(select 1 from unnest(coalesce(p.proconfig,'{}'::text[])) cfg
                  where replace(cfg,' ','')='search_path=clara,pg_temp');
   if v_n <> 2 then
     raise exception '0046 tail 8: the floor pair did not re-establish owner/SECURITY DEFINER/pinned search_path (matched %/2)', v_n;
   end if;
 
-  -- (9) THE SALES LANE'S JUDGEMENT DELTAS LANDED, AND ALL OF THEM ARE FLAG-GATED.
-  select pg_temp._wdb_sql_code(coalesce(p.prosrc,'')), coalesce(p.prosrc,'')
+  -- (9) THE SALES LANE'S JUDGEMENT DELTAS LANDED, AND THE BYPASS IS FLAG-GATED.
+  --
+  -- THE WORST ARM IN THE FIRST CUT, and the mutation that beat it is the one to keep in mind:
+  -- the raw-source checks were satisfied by a COMMENT, so a body carrying an UNGATED
+  -- `array_remove(v_ready,'tier_a_fails')` -- stripping the corroboration blocker for PURCHASE
+  -- entries, on a lane switched OFF -- passed green. Both shapes are now pinned on the LEXED
+  -- body, where a comment is chr(1) and cannot spell code, and the literal identity is asserted
+  -- separately as CODE.
+  select regexp_replace(pg_temp._wdb_sql_code(coalesce(p.prosrc,'')),'\s+',' ','g'), coalesce(p.prosrc,'')
     into v_code, v_raw from pg_proc p
     where p.pronamespace='clara'::regnamespace and p.proname='_coding_lane_core';
+  if position('v_sales_lane:=(v_tri=' || repeat(chr(2),7) || ' and clara._sales_lane_active(f.firm_id));' in v_code) = 0 then
+    raise exception '0046 tail 9: clara._coding_lane_core''s v_sales_lane is not the single flag-gated assignment -- every sales delta must be unreachable while the lane is OFF';
+  end if;
+  if (length(v_code) - length(replace(v_code,'v_sales_lane:=','')))/length('v_sales_lane:=') <> 1 then
+    raise exception '0046 tail 9: v_sales_lane is assigned more than once -- a second assignment can re-arm the sales deltas past the flag';
+  end if;
+  if position('if v_sales_lane then v_ready:=array_remove(v_ready,' || repeat(chr(2),14) || '); end if;' in v_code) = 0
+     or not pg_temp._wdb_code_literal(v_raw,'''tier_a_fails''') then
+    raise exception '0046 tail 9: the tier_a_fails bypass is not the exact flag-gated statement -- an UNGATED strip would apply to purchase entries and to a lane that is switched OFF';
+  end if;
   v_missing := '';
-  -- the flag READ is a call -> lexed.
-  if pg_temp._wdb_call_count(v_code,'clara._sales_lane_active')<>1 then
+  if pg_temp._wdb_call_count(pg_temp._wdb_sql_code(v_raw),'clara._sales_lane_active')<>1 then
     v_missing := v_missing || ' sales_lane_active_read';
   end if;
-  -- the reason TOKENS are string literals -> raw.
-  if position('customer_name_missing' in v_raw)=0 then v_missing := v_missing || ' customer_name_missing'; end if;
-  if position('customer_ambiguous' in v_raw)=0 then v_missing := v_missing || ' customer_ambiguous'; end if;
-  if position('array_remove(v_ready,''tier_a_fails'')' in v_raw)=0 then
-    v_missing := v_missing || ' tier_a_bypass';
-  end if;
+  if not pg_temp._wdb_code_literal(v_raw,'''customer_name_missing''') then v_missing := v_missing || ' customer_name_missing'; end if;
+  if not pg_temp._wdb_code_literal(v_raw,'''customer_ambiguous''') then v_missing := v_missing || ' customer_ambiguous'; end if;
   if v_missing <> '' then
     raise exception '0046 tail 9: clara._coding_lane_core is missing the sales-lane deltas {%}', btrim(v_missing);
   end if;
-  -- ...and the bypass is UNREACHABLE unless the flag is on: v_sales_lane is the only
-  -- guard on it, and v_sales_lane is assigned exactly once, from the flag read. Both
-  -- shapes carry quoted literals, so both are asked of the raw body.
-  if v_raw !~ 'v_sales_lane:=\(v_tri=''sales'' and clara\._sales_lane_active\(f\.firm_id\)\)' then
-    raise exception '0046 tail 9: clara._coding_lane_core''s v_sales_lane is not the single flag-gated assignment -- the sales deltas must be unreachable while the lane is OFF';
-  end if;
-  if v_raw !~ 'if v_sales_lane then v_ready:=array_remove\(v_ready,''tier_a_fails''\); end if;' then
-    raise exception '0046 tail 9: the tier_a_fails bypass is not gated on v_sales_lane';
-  end if;
 
-  -- (10) THE ADMISSION PATH CARRIES THE CONTRACT.
-  select pg_temp._wdb_sql_code(coalesce(p.prosrc,'')), coalesce(p.prosrc,'')
+  -- (10) THE ADMISSION PATH CARRIES THE CONTRACT, AND ITS RECEIPTS ARE CODE.
+  --
+  -- The first cut asked raw prosrc whether each receipt token appeared -- in a body into which
+  -- THIS MIGRATION SPLICES COMMENTS NAMING THOSE VERY TOKENS. That arm was structurally
+  -- incapable of failing. Every token is now asked as CODE.
+  select regexp_replace(pg_temp._wdb_sql_code(coalesce(p.prosrc,'')),'\s+',' ','g'), coalesce(p.prosrc,'')
     into v_code, v_raw from pg_proc p
     where p.pronamespace='clara'::regnamespace and p.proname='admit_autodraft_task';
-  if pg_temp._wdb_call_count(v_code,'clara._autodraft_direction_tri')<>1
-     or pg_temp._wdb_call_count(v_code,'clara._sales_lane_active')<>1 then
+  if pg_temp._wdb_call_count(pg_temp._wdb_sql_code(v_raw),'clara._autodraft_direction_tri')<>1
+     or pg_temp._wdb_call_count(pg_temp._wdb_sql_code(v_raw),'clara._sales_lane_active')<>1 then
     raise exception '0046 tail 10: clara.admit_autodraft_task does not resolve the tri-state direction behind the activation flag exactly once each';
   end if;
-  -- the receipt reasons are string literals -> raw. 'sales_direction' is on this list
-  -- BECAUSE IT MUST SURVIVE: it is the inactive-lane receipt, byte-identical to 0036's, and
-  -- it is what makes this migration observably inert until the ceremony's flip.
-  for v_names in select unnest(array['sales_direction','sales_backlog_held','refused_sales_cap'])
+  for v_names in select unnest(array['''sales_direction''','''sales_backlog_held''','''refused_sales_cap'''])
   loop
-    if position(v_names in v_raw)=0 then
-      raise exception '0046 tail 10: clara.admit_autodraft_task has no % receipt -- every refusal on this lane must be NAMED, never inferred', v_names;
+    if not pg_temp._wdb_code_literal(v_raw, v_names) then
+      raise exception '0046 tail 10: clara.admit_autodraft_task emits no % receipt IN CODE -- every refusal on this lane must be NAMED, and a comment naming it is not a receipt', v_names;
     end if;
   end loop;
-  if pg_temp._wdb_call_count(v_code,'clara._autodraft_sales_direction')<>0 then
+  if pg_temp._wdb_call_count(pg_temp._wdb_sql_code(v_raw),'clara._autodraft_sales_direction')<>0 then
     raise exception '0046 tail 10: clara.admit_autodraft_task still carries the 0036 flat sales refusal beside the new contract';
   end if;
+  -- ONE advisory key on this path. A second firm-scoped key inverts against the retry branch's
+  -- 202991617 (opposite acquisition orders on the same firm -> 40P01 -> the whole transaction
+  -- rolls back -> no sweep_run_items row -> the run wedges open). Demonstrated live during
+  -- review; the number is pinned here so it cannot come back.
+  select count(distinct m[1])::int into v_n
+    from regexp_matches(v_code,'pg_advisory_xact_lock\((\d+)','g') m;
+  if v_n <> 1 or position('pg_advisory_xact_lock(202991617' in v_code) = 0 then
+    raise exception '0046 tail 10: clara.admit_autodraft_task must take exactly ONE advisory key (202991617); found % distinct -- a second firm-scoped key inverts against the retry branch and deadlocks', v_n;
+  end if;
 
-  -- (11) THE DRAFT WRITER IS THE AUTHORITY LAYER.
-  select pg_temp._wdb_sql_code(coalesce(p.prosrc,'')), coalesce(p.prosrc,'')
+  -- (11) THE DRAFT WRITER IS THE AUTHORITY LAYER -- THE WHOLE PREDICATE, NOT ITS PRESENCE.
+  --
+  -- Presence-only was defeated by INVERSION: flip `<>` to `=` in both arms and the writer
+  -- refuses every LAWFUL pair while admitting every contradiction, with the arm green. The two
+  -- refusal predicates are pinned entire.
+  select regexp_replace(pg_temp._wdb_sql_code(coalesce(p.prosrc,'')),'\s+',' ','g'), coalesce(p.prosrc,'')
     into v_code, v_raw from pg_proc p
     where p.pronamespace='clara'::regnamespace and p.proname='_draft_entry_core';
-  if position('counterparty_kind_contradiction' in v_raw)=0
-     or position('direction_family_mismatch' in v_raw)=0
-     or pg_temp._wdb_call_count(v_code,'clara._autodraft_direction_tri')<>1 then
-    raise exception '0046 tail 11: clara._draft_entry_core does not revalidate the coding-kind family -- the tool and the zod schema are ergonomics, this is the only authority layer';
+  if position('if not p_is_human then if p_coding_kind in (' || repeat(chr(2),15) || ',' || repeat(chr(2),19)
+              || ') and v_kind<>' || repeat(chr(2),10) || ' then raise exception ' in v_code) = 0 then
+    raise exception '0046 tail 11: the sales-family contradiction arm is not the pinned predicate -- an INVERTED comparison refuses lawful pairs and admits contradictions while every token is still present';
+  end if;
+  if position('if p_coding_kind=' || repeat(chr(2),15) || ' and v_kind<>' || repeat(chr(2),8) || ' then' in v_code) = 0 then
+    raise exception '0046 tail 11: the supplier-bill contradiction arm is not the pinned predicate';
+  end if;
+  if position('p_wake_kind=' || repeat(chr(2),11) || ' and p_document is not null and p_coding_kind in (' in v_code) = 0
+     or position('then v_tri:=clara._autodraft_direction_tri(p_document,p_client); if v_tri=' || repeat(chr(2),12) in v_code) = 0 then
+    raise exception '0046 tail 11: the autodraft-lane family revalidation is not the pinned shape (wake-kind scoping + the unresolved refusal)';
+  end if;
+  if not pg_temp._wdb_code_literal(v_raw,'counterparty_kind_contradiction')
+     or not pg_temp._wdb_code_literal(v_raw,'direction_family_mismatch') then
+    raise exception '0046 tail 11: the writer''s refusal reasons are not emitted IN CODE -- the tool and the zod schema are ergonomics, this is the only authority layer';
   end if;
 
   -- (12) PURCHASE ISOLATION. The purchase evidence floor is the SEPARATE v_seen<3 branch
-  -- (0016:1714-1725); it must still be there, untouched, and it must still be the branch
-  -- that answers `insufficient_evidence` for a purchase proposal.
-  select pg_temp._wdb_sql_code(coalesce(p.prosrc,'')), coalesce(p.prosrc,'')
-    into v_code, v_raw from pg_proc p
-    where p.pronamespace='clara'::regnamespace and p.proname='propose_autopost_rule';
+  -- (0016:1714-1725); it must still be there, and corroboration must appear ONLY inside the
+  -- ocr_sales branch. Both halves on the lexed body: the second used to read raw, where this
+  -- migration's own commentary about direction-aware sides could satisfy it.
+  select regexp_replace(pg_temp._wdb_sql_code(coalesce(p.prosrc,'')),'\s+',' ','g') into v_code
+    from pg_proc p where p.pronamespace='clara'::regnamespace and p.proname='propose_autopost_rule';
   if position('if v_seen<3 then' in v_code)=0 then
     raise exception '0046 tail 12: the purchase evidence floor (v_seen<3) is gone from clara.propose_autopost_rule -- this migration must not touch purchase behaviour';
   end if;
-  if v_raw !~ 'v_side:=case when v_direction=''sales'' then ''credit'' else ''debit'' end' then
+  if position('v_side:=case when v_direction=' || repeat(chr(2),7) || ' then ' || repeat(chr(2),8)
+              || ' else ' || repeat(chr(2),7) || ' end;' in v_code)=0 then
     raise exception '0046 tail 12: the direction-aware sighting side selection drifted in clara.propose_autopost_rule';
   end if;
 
-  -- (13) THE NEW TABLE IS GOVERNED. RLS ENABLE + FORCE, owned by clara_fn_owner.
+  -- (13) THE NEW TABLE IS GOVERNED -- AND ITS POLICIES ARE READ, NOT JUST ITS FLAGS.
+  --
+  -- ENABLE+FORCE+owner says the door has a lock; it says nothing about who the lock admits. A
+  -- `using (true)` human policy passes every flag check while publishing every firm's backfill
+  -- history to every other firm, and a stray INSERT grant lets the human lane write the
+  -- accounting the audited verbs exist to own. Both are read here.
   select count(*)::int into v_n from pg_class c join pg_namespace n on n.oid=c.relnamespace
     where n.nspname='clara' and c.relname='sales_backfill_batches'
       and c.relrowsecurity and c.relforcerowsecurity
@@ -2851,11 +3042,42 @@ begin
   if v_n <> 1 then
     raise exception '0046 tail 13: clara.sales_backfill_batches is not RLS ENABLE+FORCE under clara_fn_owner';
   end if;
+  select count(*)::int into v_n from pg_policy
+    where polrelid='clara.sales_backfill_batches'::regclass;
+  if v_n <> 2 then
+    raise exception '0046 tail 13: clara.sales_backfill_batches carries % policies, expected exactly 2 (the fn_owner ALL and the firm-scoped human SELECT)', v_n;
+  end if;
+  select count(*)::int into v_n from pg_policy
+    where polrelid='clara.sales_backfill_batches'::regclass
+      and polname='p_sales_backfill_batches_human' and polcmd='r'
+      and pg_get_expr(polqual,polrelid)='(firm_id = clara.jwt_firm())'
+      and polroles = array[(select oid from pg_roles where rolname='clara_authenticated')];
+  if v_n <> 1 then
+    raise exception '0046 tail 13: the human read policy is not a SELECT for clara_authenticated scoped to (firm_id = clara.jwt_firm()) -- a widened qual publishes every firm''s backfill history to every firm';
+  end if;
+  for v_names in select unnest(array['insert','update','delete'])
+  loop
+    if has_table_privilege('clara_authenticated','clara.sales_backfill_batches',v_names) then
+      raise exception '0046 tail 13: clara_authenticated holds % on clara.sales_backfill_batches -- the batch accounting is written by the audited verbs alone', v_names;
+    end if;
+  end loop;
 
-  -- TEN arms live here and THREE more in the $acls$ block above (they moved so the
-  -- wiki-authority gate could tell a privilege probe from a change-of-record patch --
-  -- see that block's header). The count is stated because a notice that overstates what
-  -- ran is the same class of defect as a probe that measures the wrong thing.
-  raise notice '0046 tail: 10 arms clean here; 3 more in the $acls$ block (13 total)';
+  -- (14) THE STATIC RE-SHIP IS THE LIVE BODY PLUS EXACTLY THE DOCUMENTED DELTA.
+  --
+  -- HALF TWO of the identity proof the S4.3 prestate set up. A re-ship replaces whatever was
+  -- there; this is what makes that safe rather than merely convenient. The comparison is on
+  -- whitespace-folded prosrc, so re-indentation is not a failure -- but a dropped recut, an
+  -- extra edit, or a live hand-patch this file cannot account for all are.
+  select txt into v_needle from _wdb_erp_expected;
+  if v_needle is null then
+    raise exception '0046 tail 14: the S4.3 prestate stashed no expected body -- the identity proof did not run, so the re-ship is unverified';
+  end if;
+  select regexp_replace(coalesce(prosrc,''),'\s+',' ','g') into v_code from pg_proc
+    where pronamespace='clara'::regnamespace and proname='execute_rule_post';
+  if v_code is distinct from v_needle then
+    raise exception '0046 tail 14: the re-shipped clara.execute_rule_post is NOT the live body plus the documented corroboration delta -- a static re-ship that silently drops a later recut is exactly the SS0.2-2 hazard, so the deploy is refused rather than the difference overwritten';
+  end if;
+
+  raise notice '0046 tail: 14 arms clean here; 3 more in the $acls$ block above (17 total)';
 end
 $tail$;

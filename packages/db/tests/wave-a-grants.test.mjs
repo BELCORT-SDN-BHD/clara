@@ -84,7 +84,14 @@ test("C-1 every new public writer holds EXACTLY ONE overload (unqualified call n
   // arise here, because the new arity has NO defaulted parameters: a 5-argument call
   // resolves only to the 5-arity and a 6-argument call only to the new one. 0046's tail
   // arm (3) measures pronargdefaults to keep that true.
-  const RATIFIED_OVERLOADS = { settle_autodraft_task: 2 };
+  // BIMODAL, and the reason is the same one the S5.25 clock roster carries: `db-slice-frontiers`
+  // runs this battery against databases pinned at EARLIER frontiers, where the 6-arity does not
+  // exist yet. An unconditional `2` fails every one of those legs while saying nothing about
+  // overload safety. Gated on the migration ledger, the expectation stays exact in BOTH
+  // directions — one overload before 0046, exactly two after, never "one or two".
+  const has0046 = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'")).rows[0].n === 1;
+  const RATIFIED_OVERLOADS = has0046 ? { settle_autodraft_task: 2 } : {};
   for (const fn of fns) {
     const r = await rootQuery("select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname=$1", [fn]);
     if (r.rows[0].n === 0) { noteLane(`${fn} absent when counting overloads — name/arity may differ (interface expectation)`); continue; }
