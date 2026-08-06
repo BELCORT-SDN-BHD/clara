@@ -473,9 +473,16 @@ alter table clara.firm_limits
   -- THE DAILY CAP GOVERNS THE WHOLE SALES LANE, STEADY STATE **AND** BACKFILL, and that is
   -- deliberate rather than incidental: it is the one number that bounds how much unattended
   -- sales drafting a firm can receive in a day, and a recorded backfill is not a reason to
-  -- lift that bound -- it is a reason to have chosen it. So a 500-document batch does NOT
-  -- move in a day; it moves at the cap. The lever for moving a backlog faster is this
-  -- column, per firm, settable without a migration -- NOT a second, hidden governor.
+  -- lift that bound -- it is a reason to have chosen it.
+  --
+  -- SO SAY THE ARITHMETIC OUT LOUD, because batch_size looks like the governor and is not.
+  -- A batch is a BUDGET (how many documents this operation may move at all), never a RATE.
+  -- At the default cap of 15/day: ROME SECRETARY's 22 real invoices take ~2 days; a
+  -- 500-document batch -- which the CHECK permits -- takes ~34. An operator who sets
+  -- batch_size=500 expecting it to drain over a weekend will be surprised, and the place to
+  -- fix that expectation is here rather than in a support conversation. The lever for moving
+  -- a backlog faster is THIS column, per firm, settable without a migration -- never a
+  -- second, hidden governor.
   add column sales_admission_daily_cap int,
   add column sales_admission_watermark timestamptz,
   add constraint ck_firm_limits_sales_admission_daily_cap check (
@@ -556,7 +563,7 @@ set role clara_fn_owner;
 -- THE AS-OF DATE IS A PARAMETER, DELIBERATELY. The MYT legal-date literal stays in
 -- clara._ocr_sales_floor's own body so that the 0042:5536 / 0044:6525 duplication roster
 -- (the EXACT set of clara bodies spelling the Asia/Kuala_Lumpur conversion) is unchanged by
--- this migration -- tail arm (5) re-measures it. Moving the literal in here would have
+-- this migration -- tail arm (7) re-measures it. Moving the literal in here would have
 -- swapped one name for another in a set both those tails assert EXACTLY.
 create function clara._ocr_sales_floor_pop(p_client uuid, p_cp uuid, p_account text,
     p_as_of date)
@@ -1873,6 +1880,10 @@ begin
   if v_note is null then
     raise exception 'a note is required to open a sales backfill' using errcode='CLR10';
   end if;
+  -- batch_size is a BUDGET, not a RATE: the per-firm daily cap (clara.firm_limits.
+  -- sales_admission_daily_cap, default 15) still governs how fast this batch actually moves,
+  -- so a 500-document batch drains over roughly 34 days, not overnight. Raise the cap, not
+  -- the batch, to go faster.
   if p_batch_size < 1 or p_batch_size > 500 then
     raise exception 'batch_size must be between 1 and 500' using errcode='CLR10';
   end if;
@@ -2946,10 +2957,41 @@ begin
   if (length(v_code) - length(replace(v_code,'v_sales_lane:=','')))/length('v_sales_lane:=') <> 1 then
     raise exception '0046 tail 9: v_sales_lane is assigned more than once -- a second assignment can re-arm the sales deltas past the flag';
   end if;
-  if position('if v_sales_lane then v_ready:=array_remove(v_ready,' || repeat(chr(2),14) || '); end if;' in v_code) = 0
-     or not pg_temp._wdb_code_literal(v_raw,'''tier_a_fails''') then
-    raise exception '0046 tail 9: the tier_a_fails bypass is not the exact flag-gated statement -- an UNGATED strip would apply to purchase entries and to a lane that is switched OFF';
+  -- TWO RESIDUALS THE FIRST RE-INSTRUMENTATION STILL LEFT OPEN, both found by the closing
+  -- mutation pass, both fixed here:
+  --
+  --   (a) NO COUNT. `position(...) = 0` only asks whether the gated statement EXISTS. Keeping
+  --       it and ADDING an ungated `array_remove(v_ready,'tier_a_fails')` beside it passed --
+  --       the bypass then applies unconditionally and the arm is still green. So the claim is
+  --       EXACTLY ONE removal from v_ready, and it is the gated one. (This is the same count
+  --       discipline the v_sales_lane assignment check above already used; arm 9 simply did
+  --       not apply it to the second half of its own claim.)
+  --
+  --   (b) chr(2){14} IS A LENGTH, NOT AN IDENTITY. It matches ANY 14-character literal, and
+  --       'vendor_bound' is also 14 -- swapping it turns 7A-R3's bypass into a silent no-op
+  --       (tier_a_fails keeps blocking, sales never drafts) with every arm green. The reviewer
+  --       dumped the mutated body to prove it. The literal is now pinned AT THIS SITE by
+  --       reading the RAW body at the offset the LEXED body reports: the lexer preserves
+  --       position and length, so the same offset in raw holds the actual literal.
+  if (length(v_code) - length(replace(v_code,'array_remove(v_ready,','')))/length('array_remove(v_ready,') <> 1 then
+    raise exception '0046 tail 9: v_ready is stripped more than once -- an UNGATED strip beside the gated one applies the 7A-R3 bypass to purchase entries and to a lane that is switched OFF';
   end if;
+  if position('if v_sales_lane then v_ready:=array_remove(v_ready,' || repeat(chr(2),14) || '); end if;' in v_code) = 0 then
+    raise exception '0046 tail 9: the tier_a_fails bypass is not the exact flag-gated statement';
+  end if;
+  declare
+    v_lex text; v_at int;
+  begin
+    v_lex := pg_temp._wdb_sql_code(v_raw);
+    v_at := position('if v_sales_lane then v_ready:=array_remove(v_ready,' in v_lex);
+    if v_at = 0 then
+      raise exception '0046 tail 9: the gated bypass statement is not on one line in the live body -- this arm reads the literal by OFFSET and cannot locate it';
+    end if;
+    v_at := v_at + length('if v_sales_lane then v_ready:=array_remove(v_ready,');
+    if substr(v_raw, v_at, 14) <> '''tier_a_fails''' then
+      raise exception '0046 tail 9: the literal the flag-gated bypass removes is %, not ''tier_a_fails'' -- a same-length substitution (''vendor_bound'' is also 14 characters) turns 7A-R3 into a silent no-op with every shape still matching', substr(v_raw, v_at, 14);
+    end if;
+  end;
   v_missing := '';
   if pg_temp._wdb_call_count(pg_temp._wdb_sql_code(v_raw),'clara._sales_lane_active')<>1 then
     v_missing := v_missing || ' sales_lane_active_read';

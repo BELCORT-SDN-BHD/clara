@@ -483,11 +483,15 @@ export async function seedCorroboratingInvoiceFacts(cited, {
  *  produces this evidence in production.
  *
  *  IT IS NOT A BACK DOOR. `coding_kind` is on _tf_entry_immutable's OWN draft->draft
- *  allowset, so this is a transition the schema sanctions. It also ARMS the sales-invoice
- *  shape wall for this entry: t_je_sales_invoice_shape is a DEFERRABLE constraint trigger, so
- *  it does not adjudicate at the stamp itself — it fires when the stamping statement commits
- *  and again on the approval that follows, and from then on the entry must genuinely hold a
- *  sales-invoice shape. The fixture gets stricter, not looser. */
+ *  allowset, so this is a transition the schema sanctions.
+ *
+ *  WHEN THE SHAPE WALL ACTUALLY ADJUDICATES — stated from the catalog this time, because the
+ *  two earlier versions of this comment were both wrong. t_je_sales_invoice_shape carries
+ *  `WHEN ((old.status IS DISTINCT FROM new.status) AND (new.status = 'approved'))`, so it does
+ *  NOT fire at this stamp at all: a draft->draft update leaves status alone. It fires on the
+ *  APPROVAL that follows, and that is where a stamped entry must genuinely hold a
+ *  sales-invoice shape. The fixture is still stricter than before — it just becomes so one
+ *  step later than the earlier comments claimed. */
 export async function stampCodingKind(entry, kind = "sales_invoice") {
   const r = await rootQuery(
     "update clara.journal_entries set coding_kind=$2, updated_at=now() where id=$1 and status='draft'",

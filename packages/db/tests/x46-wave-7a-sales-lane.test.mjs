@@ -26,7 +26,7 @@ import {
   upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedStatedInvoiceFacts,
   seedCorroboratingInvoiceFacts,
   approveEntry, ev, FIELD, counterpartyRows,
-  mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm,
+  mintInteractive, mintAutodraftCred, wakeDraftEntry, addClientIdentifier, addClientAlias, rm,
   rlsFlags,
 } from "./a21-helpers.mjs";
 
@@ -484,6 +484,50 @@ test("C3 the tri-state direction is total: sales | purchase | unresolved, never 
             clara._autodraft_direction_tri(gen_random_uuid(),gen_random_uuid()) as b`);
   assert.equal(r.rows[0].a, "purchase", "a null document answers purchase — the conservative answer for THIS lane");
   assert.equal(r.rows[0].b, "purchase", "an unknown document likewise, never null");
+});
+
+test("C4 the AUTODRAFT lane REFUSES a coding kind that contradicts the re-derived direction", async (t) => {
+  if (skipHere(t)) return;
+  // C2 covers the writer's CONTRADICTION arm (coding kind vs counterparty kind). This covers
+  // the FAMILY arm, which had no behavioural cell at all — and it is the one 7A-R2 leans on
+  // hardest, because it is what makes the model's coding_kind a PROPOSAL rather than routing
+  // authority: the writer re-derives the direction from the document itself and refuses a
+  // proposal that contradicts it, no matter what was carried in the task context.
+  //
+  // The fixture document carries no client-identity match, so clara._document_direction
+  // resolves 'purchase' — and a 'sales_invoice' proposal on it must be refused. The lane is
+  // the real one: an AUTODRAFT wake credential, because the family arm is scoped to that
+  // wake kind (the human-present chat lane is deliberately untouched).
+  const sub = world.users.alice;
+  const client = await freshSalesClient(sub);
+  const firm = await firmOf(client);
+  const cited = await seedCitedDocument(sub, { firm, client, quote: rm(90000) });
+  await seedStatedInvoiceFacts(cited, { firm });
+
+  const dir = (await rootQuery(
+    "select clara._autodraft_direction_tri($1,$2) as d", [cited.documentId, client])).rows[0].d;
+  assert.equal(dir, "purchase",
+    `mandatory premise: the fixture document must resolve PURCHASE for this cell to isolate the family arm (got '${dir}')`);
+
+  const cred = await mintAutodraftCred(firm, client);
+  const res = await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId });
+  await assert.rejects(
+    () => wakeDraftEntry(cred, {
+      client,
+      resolution: res,
+      document: cited.documentId, sha256: cited.sha256,
+      lines: [
+        { account_code: REC, debit_cents: 90000, credit_cents: 0, description: "sales-ar" },
+        { account_code: REV, debit_cents: 0, credit_cents: 90000, description: "sales-rev" },
+      ],
+      // counterparty kind AGREES with the coding kind, so arm 1 cannot be what refuses:
+      // this cell must be refused by the DIRECTION family arm or not at all.
+      vendor: { new: { name: "SEVEN A FAMILY MISMATCH SDN BHD" }, kind: "customer" },
+      evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+      postingDate: "2026-06-10", codingKind: "sales_invoice", opKey: opk("x46c4"),
+    }),
+    (e) => e.code === "CLR21" && /direction_family_mismatch/.test(String(e.detail ?? "")),
+    "a sales_invoice proposed on a purchase-direction document is refused BY THE WRITER, on the family arm");
 });
 
 // ---------------------------------------------------------------------------

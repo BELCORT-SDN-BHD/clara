@@ -34,7 +34,7 @@ import {
   addClientIdentifier, upsertAccountClassed, upsertPayableAccount, grantConsent,
   seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField,
   freshResolution, draftEntryV3, approveEntry, stampCodingKind, seedCorroboratingInvoiceFacts,
-  proposeAutopostRule, signAutopostRule, postViaRule, ruleRowById, codingRuleRows, counterpartyRows,
+  proposeAutopostRule, signAutopostRule, postViaRule, counterpartyRows,
   reasonOf, mintInteractive, wakeDraftEntry, ev, factsRegion, FIELD,
   admitAutodraft, ORIGIN, primeReadyFiling, beginAutodraft, settleAutodraft,
   humanPersona, codingLane, lastSkipReason, entryStatusOf, assertRaises,
@@ -150,7 +150,7 @@ async function birthSalesCustomer(sub, { client, firm, name, date, stampKind = t
 
 /** A follow-up sales sighting for an EXISTING customer, citing a fresh document.
  *  `stampKind`/`corroborate` gate the two 7A-R4 dimensions independently. */
-async function salesSighting(sub, { client, firm, cp, date, stampKind = true, corroborate = true, cents = 90000 }) {
+async function salesSighting(sub, { client, firm, cp, date, stampKind = true, corroborate = true, cents = 90000, approve = true }) {
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 900.00", kind: "invoice" });
   if (corroborate) await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, cents });
   else await persistTaxSilentFacts(sub, { cited, firm, client, cents });
@@ -165,7 +165,13 @@ async function salesSighting(sub, { client, firm, cp, date, stampKind = true, co
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)], postingDate: date, opKey: opk("ss46"),
   });
   if (stampKind) await stampCodingKind(d.entry_id);
-  await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("ss46a") });
+  // [lane-7a-db, cherry-pick repair #2 — REPORTED] `approve:false` leaves the entry a DRAFT.
+  // clara.execute_rule_post operates on a DRAFT, so a cell testing "the rule refuses to post
+  // this" must hand it one; an already-approved subject makes the status reading meaningless
+  // (see the post half of the 7A-R4 cell).
+  if (approve) {
+    await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("ss46a") });
+  }
   return { entryId: d.entry_id, documentId: cited.documentId };
 }
 
@@ -348,10 +354,22 @@ test("7A-R4 the corroborated>=6 gate: 6/6/60-qualifying but ZERO corroborated is
   // execute_rule_post's OWN floor re-derivation (post-time control 8: "no trust
   // in signing-time state").
   const liveRow = await rawRule(users.alice, { client, firm, cp: birth.cp, accountCode: REV, status: "live" });
-  const postEntry = await salesSighting(users.alice, { client, firm, cp: birth.cp, date: "2026-07-05", stampKind: true, corroborate: false });
+  // [lane-7a-db, cherry-pick repair — REPORTED, not silently rewritten] TWO defects, and the
+  // second was hidden by the first.
+  //   (a) The assertion read `notEqual(status, "approved" && (...) === "checked")`. JavaScript
+  //       evaluates the right-hand side to a BOOLEAN, so it asserted `status !== false` — true
+  //       for EVERY status, including "approved". The cell's load-bearing claim could not fail.
+  //   (b) Repairing (a) turned the cell red and showed why: the subject was an APPROVED entry,
+  //       because salesSighting approves. clara.execute_rule_post posts a DRAFT, so an
+  //       already-approved subject makes the status reading say nothing about the rule at all.
+  //       The subject is now a genuine draft (approve:false), which is what the cell's own
+  //       title claims to be testing.
+  const postEntry = await salesSighting(users.alice, { client, firm, cp: birth.cp, date: "2026-07-05", stampKind: true, corroborate: false, approve: false });
+  assert.equal(await entryStatusOf(postEntry.entryId), "draft",
+    "mandatory premise: execute_rule_post's subject is a DRAFT (an approved one proves nothing)");
   const postResult = await postViaRule(postEntry.entryId);
   const skip = await lastSkipReason(postEntry.entryId);
-  assert.notEqual(await entryStatusOf(postEntry.entryId), "approved" && (await entryStatusOf(postEntry.entryId)) === "checked",
+  assert.notEqual(await entryStatusOf(postEntry.entryId), "approved",
     "the uncorroborated entry is never posted via the rule");
   assert.ok(skip, `execute_rule_post recorded a skip reason for the uncorroborated entry (result=${JSON.stringify(postResult)})`);
   if (skip !== "not_corroborated") noteLane(`post-time skip for the uncorroborated pool was '${skip}' (expected not_corroborated) — inspect the exact token`);
