@@ -8,13 +8,56 @@
 // there is no edit affordance. Every figure is a DB bigint (fmtCents) — the UI computes
 // none. Refusals render verbatim (CLR27 rule lifecycle / CLR04 role floor).
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AutopostRule } from "../shared/reviewCardTypes";
-import { signAutopostRule, retireAutopostRule, narrowRuleWrite } from "../shared/reviewApi";
+import { signAutopostRule, retireAutopostRule, narrowRuleWrite, previewOcrSalesEvidence } from "../shared/reviewApi";
 import type { PgrestError } from "../shared/wire";
 import { fmtCents, shortId } from "../shared/fmt";
-import { ruleUrgency, windowLabel, postsRemaining, canSign, canRetire, daysUntil } from "./model";
+import {
+  ruleUrgency, windowLabel, postsRemaining, canSign, canRetire, daysUntil,
+  salesEvidenceNotApplicableLabel, taxSilentGapLabel, type SalesEvidencePreviewFetch,
+} from "./model";
 import styles from "./rules.module.css";
+
+/** §7-A(b) — the signing-time evidence floor preview, rendered for sales-
+ *  direction rules only (the DB answers `not_sales` for anything else, but
+ *  there is no reason to ask a purchase rule to prove that on every render —
+ *  `AutopostRulePanel` gates the FETCH the same way). EXPORTED so the three
+ *  render states (ready / not-applicable / unavailable) can be asserted
+ *  directly, the `AdjustmentTemplatePanel`'s `AdvisoryBanners`/`TemplateRow`
+ *  precedent. Every count below is an INTEGER rendered verbatim from the DB —
+ *  `fmtCents` (money-only, `:73-80`) never touches this block. */
+export function EvidencePreview({ state }: { state: SalesEvidencePreviewFetch }) {
+  if (state.kind === "loading") return null;
+  if (state.kind === "unavailable") {
+    return <p className={styles.muted}>evidence preview unavailable{state.error ? `: ${state.error}` : ""}.</p>;
+  }
+  const { preview } = state;
+  if (!preview.applicable) {
+    return <p className={styles.muted}>{salesEvidenceNotApplicableLabel(preview)}</p>;
+  }
+  const req = preview.required;
+  const gap = taxSilentGapLabel(preview);
+  return (
+    <div className={styles.section}>
+      <p className={styles.sectionTitle}>Sales evidence floor (signing preview)</p>
+      <div className={styles.bounds}>
+        <span className={styles.bound}>qualifying {preview.qualifying}/{req.qualifying}</span>
+        <span className={styles.bound}>distinct invoices {preview.distinct_invoices}/{req.distinct_invoices}</span>
+        <span className={styles.bound}>corroborated {preview.corroborated}/{req.corroborated}</span>
+        <span className={styles.bound}>span {preview.span_days ?? "—"}/{req.span_days} days</span>
+        <span className={`${styles.band} ${preview.floor_met ? styles.bandReady : styles.bandReview}`}>
+          {preview.floor_met ? "floor met" : "floor not yet met"}
+        </span>
+      </div>
+      {gap ? <p className={styles.hint}>{gap}</p> : null}
+      <p className={styles.hint}>
+        Advisory — the sign act re-checks the live floor.
+        {preview.evaluated_at ? ` Evaluated ${new Date(preview.evaluated_at).toLocaleString()}.` : ""}
+      </p>
+    </div>
+  );
+}
 
 const BAND: Record<string, string | undefined> = {
   proposed: styles.bandReview, live: styles.bandReady, expiring: styles.bandReview,
@@ -32,6 +75,28 @@ export function AutopostRulePanel({ token, rule, now, onChanged }: {
   // membership / insufficient role). This panel mixes floors: signing is admin+, but
   // retiring is bookkeeper+ — so only a sign refusal may name admin.
   const [adminFloor, setAdminFloor] = useState(false);
+  // §7-A(b) signing-time evidence preview — fetched (and rendered) for
+  // sales-direction rules only; the DB verb answers `not_sales` for anything
+  // else, but a purchase rule has no reason to spend the round trip proving
+  // that. The verb ships in this same wave, so an absent-verb 404 is expected
+  // during rollout and must not block the row — it degrades through the SAME
+  // "unavailable" state a network failure does.
+  const [preview, setPreview] = useState<SalesEvidencePreviewFetch>({ kind: "loading" });
+
+  useEffect(() => {
+    if (rule.direction !== "sales") return;
+    let live = true;
+    setPreview({ kind: "loading" });
+    void (async () => {
+      try {
+        const p = await previewOcrSalesEvidence(token, rule.rule_id);
+        if (live) setPreview(p ? { kind: "ready", preview: p } : { kind: "unavailable", error: null });
+      } catch (e) {
+        if (live) setPreview({ kind: "unavailable", error: (e as PgrestError).message ?? String(e) });
+      }
+    })();
+    return () => { live = false; };
+  }, [token, rule.rule_id, rule.direction]);
 
   const run = async (fn: () => Promise<unknown>, adminOnly = false) => {
     setBusy(true); setErr(null); setClr(null); setAdminFloor(adminOnly);
@@ -83,6 +148,8 @@ export function AutopostRulePanel({ token, rule, now, onChanged }: {
       {rule.status === "retired" || rule.status === "declined" ? (
         <p className={styles.muted}>{rule.status}{rule.reason ? `: ${rule.reason}` : ""}.</p>
       ) : null}
+
+      {rule.direction === "sales" ? <EvidencePreview state={preview} /> : null}
 
       {(canSign(rule) || canRetire(rule)) ? (
         <div className={styles.actions}>
