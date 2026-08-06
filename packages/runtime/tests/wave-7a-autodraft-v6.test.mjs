@@ -83,15 +83,46 @@ function dropHeader(text) {
 // 1a. PURE-RENAME FILES — whole-file, token-for-token identical (header aside).
 // ===========================================================================
 
-test("autoDraft.v6.infra.ts + autoDraft.v6.ts are token-for-token identical to v5 (version-renamed only, header narrative aside)", () => {
-  for (const name of ["infra", ""]) {
-    const suffix = name ? `.${name}` : "";
-    assert.equal(
-      dropHeader(asVN(src(`autoDraft.v6${suffix}.ts`), 6)),
-      dropHeader(asVN(src(`autoDraft.v5${suffix}.ts`), 5)),
-      `autoDraft.v6${suffix}.ts must be a version-renamed copy of v5 — no behavioural change`,
-    );
-  }
+/** PR #204: ToolCtx gains the `direction` field (infra.ts) — AND its own preceding JSDoc
+ *  gained a clause naming it, so the mask must start BEFORE that comment, not just before
+ *  the type literal. Anchored on ClaraPools's own stable closing (common to both versions).
+ *  v5's ToolCtx declaration is a one-liner with no nested `{}`, so the first `};` after the
+ *  type's own opening IS its own close on both sides — a safe anchor for either shape. */
+function maskToolCtxType(text) {
+  const startAnchor = "withRuntime<T>(fn: (c: PgExec) => Promise<T>): Promise<T>;\n};\n\n";
+  const anchorIdx = text.indexOf(startAnchor);
+  assert.ok(anchorIdx > 0, "ClaraPools's own closing must be present in both versions");
+  const start = anchorIdx + startAnchor.length;
+  const typeStart = text.indexOf("export type ToolCtx = {", start);
+  assert.ok(typeStart >= start, "the ToolCtx type must follow ClaraPools in both versions");
+  const end = text.indexOf("};", typeStart) + 2;
+  assert.ok(end > typeStart + 1, "the type literal must close");
+  return `${text.slice(0, start)}<the ToolCtx JSDoc + type literal — masked>${text.slice(end)}`;
+}
+
+test("autoDraft.v6.infra.ts differs from v5 ONLY inside the ToolCtx type literal (PR #204's new `direction` field; header narrative aside) — pools()/resolveModel/readScoped/writeScoped/safeRead are byte-identical", () => {
+  const v6 = dropHeader(asVN(src("autoDraft.v6.infra.ts"), 6));
+  const v5 = dropHeader(asVN(src("autoDraft.v5.infra.ts"), 5));
+  assert.equal(maskToolCtxType(v6), maskToolCtxType(v5), "outside the masked ToolCtx type, autoDraft.v6.infra.ts must be a version-renamed copy of v5");
+});
+
+/** PR #204: the workflow entry's `ctx` object gains ONE new line, `direction: claim.ctx.
+ *  direction,` — a pure insertion, absent from v5 entirely. */
+function maskEntryDirectionField(text) {
+  return text.replace("      direction: claim.ctx.direction,\n", "");
+}
+
+test("autoDraft.v6.ts differs from v5 ONLY in the ctx object's new `direction: claim.ctx.direction,` line (PR #204; header narrative aside) — the happy path, the catch block, and the finally block are otherwise byte-identical", () => {
+  const v6 = dropHeader(asVN(src("autoDraft.v6.ts"), 6));
+  const v5 = dropHeader(asVN(src("autoDraft.v5.ts"), 5));
+  assert.equal(maskEntryDirectionField(v6), maskEntryDirectionField(v5), "outside the one masked line, autoDraft.v6.ts must be a version-renamed copy of v5");
+});
+
+test("v5's infra.ts / entry .ts have no `direction` field anywhere (proves PR #204's addition is genuinely NEW in v6, not carried)", () => {
+  const v5infra = src("autoDraft.v5.infra.ts");
+  const v5entry = src("autoDraft.v5.ts");
+  assert.doesNotMatch(v5infra, /direction/);
+  assert.doesNotMatch(v5entry, /direction/);
 });
 
 /** The KNOWN identifier/import-path renames between chatTurn v8 and v9 — targeted, not a
@@ -235,14 +266,57 @@ function maskDraftToolDesc(text) {
   return `${text.slice(0, start)}<the DRAFT_TOOL description — masked>${text.slice(end)}`;
 }
 
-function maskToolsChanges(text) {
-  return maskDraftToolDesc(maskReadDocumentDesc(maskWriterArgsArray(maskCounterpartyPayloadBlock(maskDeriveCounterpartyKindFn(text)))));
+/** PR #204: the errors.js import gains directionFamilyMismatchRefusal. */
+function maskErrorsImportList(text) {
+  return text
+    .replace(
+      'import { refusalFromDbError, directionFamilyMismatchRefusal } from "./autoDraft.vN.errors.js";',
+      '<errors import list — masked>',
+    )
+    .replace('import { refusalFromDbError } from "./autoDraft.vN.errors.js";', '<errors import list — masked>');
 }
 
-test("autoDraft.v6.tools.ts differs from v5 ONLY inside the documented §2a spans (the new deriveCounterpartyKind fn, the counterparty-payload derivation, the writer args array, read_document's description, and DRAFT_TOOL's description) — every read tool's execute logic and the wrapper's authoritative-read plumbing are unchanged", () => {
+/** PR #204 / 7A-R2, THE BOUND FAMILY: the early direction-family check inside
+ *  runDraftJournalEntry, BEFORE the (unchanged, common) document_id pinning check. A pure
+ *  INSERTION (v5 has nothing between these two common anchor lines) — the SAME symmetric
+ *  slice-mask technique handles an insertion fine: both sides collapse to the identical
+ *  placeholder regardless of how much (if anything) sat between the anchors. */
+function maskDirectionFamilyCheck(text) {
+  const startAnchor = "  const clientId = ctx.clientId;\n";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the clientId binding must be present in both versions");
+  const from = start + startAnchor.length;
+  const endAnchor = "  if (input.document_id !== ctx.documentId) {";
+  const end = text.indexOf(endAnchor, from);
+  // >= , not > : on v5's side the two anchors are ADJACENT (zero gap — v5 has no early
+  // check at all), so indexOf legitimately returns exactly `from`.
+  assert.ok(end >= from, "the document_id pinning check must follow in both versions");
+  return `${text.slice(0, from)}<the direction-family early check — masked>${text.slice(end)}`;
+}
+
+function maskToolsChanges(text) {
+  return maskDirectionFamilyCheck(
+    maskErrorsImportList(maskDraftToolDesc(maskReadDocumentDesc(maskWriterArgsArray(maskCounterpartyPayloadBlock(maskDeriveCounterpartyKindFn(text)))))),
+  );
+}
+
+test("autoDraft.v6.tools.ts differs from v5 ONLY inside the documented §2a + PR #204 spans (the new deriveCounterpartyKind fn, the counterparty-payload derivation, the writer args array, read_document's description, DRAFT_TOOL's description, the errors import list, and the new direction-family early check) — every read tool's execute logic and the wrapper's authoritative-read plumbing are unchanged", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.tools.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.tools.ts"), 5));
-  assert.equal(maskToolsChanges(v6), maskToolsChanges(v5), "outside the five masked spans, autoDraft.v6.tools.ts must be a version-renamed copy of v5");
+  assert.equal(maskToolsChanges(v6), maskToolsChanges(v5), "outside the masked spans, autoDraft.v6.tools.ts must be a version-renamed copy of v5");
+});
+
+test("allowedCodingKindsForDirection: sales -> [sales_invoice, sales_credit_note]; purchase -> [supplier_bill]; null -> null (no early family to validate — the DB draft writer stays sole authority)", () => {
+  assert.deepEqual(toolsV6.allowedCodingKindsForDirection("sales"), ["sales_invoice", "sales_credit_note"]);
+  assert.deepEqual(toolsV6.allowedCodingKindsForDirection("purchase"), ["supplier_bill"]);
+  assert.equal(toolsV6.allowedCodingKindsForDirection(null), null);
+});
+
+test("v5's tools.ts has no allowedCodingKindsForDirection / directionFamilyMismatchRefusal at all (proves the bound-family early check is genuinely NEW in v6, not carried)", () => {
+  const v5 = src("autoDraft.v5.tools.ts");
+  assert.doesNotMatch(v5, /allowedCodingKindsForDirection/);
+  assert.doesNotMatch(v5, /directionFamilyMismatchRefusal/);
+  assert.doesNotMatch(v5, /ctx\.direction/);
 });
 
 test("v5's tools.ts has no deriveCounterpartyKind or counterpartyPayload at all (proves the derivation is genuinely NEW in v6, not carried)", () => {
@@ -271,32 +345,46 @@ test("the wake_draft_entry writer args array: positions 1-10 and 12-13 (12 of 14
 //     Mirrors the ledger-44-autodraft-v4.test.mjs:319-343 maskModelStepChange idiom.
 // ===========================================================================
 
-/** The model's own user-message text ("the supplier bill" -> "the document") — a
- *  RATIFIED §2a addendum (Codex round-1, native review N-8 concurs): necessary because
- *  v6 drafts both directions, and the old purchase-only message would fight the v6
- *  system prompt on a sales run. UNMASKED here (a narrow, single-line, no-op-on-mismatch
- *  swap) so the structural byte-compare below still passes; the REAL verification is the
- *  dedicated exact-string test immediately after this function, which pins BOTH the new
- *  v6 string and the old v5 string directly — no placeholder, no "something changed here"
- *  hand-waving. */
+/** The model's own user-message text — now a DYNAMIC template (PR #204 appends
+ *  `${directionClause}`), so this mask no longer targets one fixed v6 string; it targets
+ *  the STRUCTURE (the template literal itself, whatever directionClause currently reads)
+ *  vs v5's one fixed string. The REAL verification is the dedicated tests below, which pin
+ *  directionClause's own three-way ternary text exactly, plus a regression pin that v5's
+ *  original fixed string is untouched. */
 function maskUserMessageLine(text) {
   return text
     .replace(
-      '{ role: "user", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).` },',
-      "<user message — pinned exactly by the dedicated test below, not by this mask>",
+      "{ role: \"user\", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}` },",
+      "<user message template — pinned exactly by the dedicated tests below, not by this mask>",
     )
     .replace(
       '{ role: "user", content: `Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).` },',
-      "<user message — pinned exactly by the dedicated test below, not by this mask>",
+      "<user message template — pinned exactly by the dedicated tests below, not by this mask>",
     );
 }
 
-test("v6's model user-message is direction-generic (\"Draft the document...\"), replacing v5's purchase-only \"Draft the supplier bill...\" — RATIFIED as a necessary §2a addendum (Codex round-1: the old message would fight the v6 system prompt on a sales run; native review N-8 concurs) — both exact strings pinned, no mask", () => {
+/** PR #204: the new `directionClause` const declaration, inserted between the (unchanged,
+ *  common) `buildAutoDraftTools(ctx)` call and the (now-templated, separately masked)
+ *  messages array. A pure insertion — v5 has nothing between these two common anchors. */
+function maskDirectionClauseDeclaration(text) {
+  const startAnchor = "  const tools = buildAutoDraftTools(ctx);\n";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the tools binding must be present in both versions");
+  const from = start + startAnchor.length;
+  const endAnchor = "  const messages: ModelMessage[] = [\n";
+  const end = text.indexOf(endAnchor, from);
+  // >= , not > : v5's two anchor lines are ADJACENT (v5 has no directionClause at all), so
+  // indexOf legitimately returns exactly `from` on that side.
+  assert.ok(end >= from, "the messages array must follow in both versions");
+  return `${text.slice(0, from)}<the directionClause declaration — masked>${text.slice(end)}`;
+}
+
+test("v6's model user-message is direction-generic (\"Draft the document...\"), replacing v5's purchase-only \"Draft the supplier bill...\" — RATIFIED as a necessary §2a addendum (Codex round-1: the old message would fight the v6 system prompt on a sales run; native review N-8 concurs). PR #204 ADDS a dynamic ${directionClause} suffix on top — both v6's template STRUCTURE and v5's original fixed string are pinned, no mask", () => {
   const v6 = src("autoDraft.v6.impl.ts");
   const v5 = src("autoDraft.v5.impl.ts");
   assert.ok(
-    v6.includes('{ role: "user", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).` },'),
-    "v6 must use the exact direction-generic user message",
+    v6.includes("{ role: \"user\", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}` },"),
+    "v6 must use the exact direction-generic template, with the directionClause suffix appended",
   );
   assert.ok(
     v5.includes('{ role: "user", content: `Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).` },'),
@@ -304,16 +392,90 @@ test("v6's model user-message is direction-generic (\"Draft the document...\"), 
   );
 });
 
+test("PR #204: directionClause's three-way ternary is pinned exactly — 'sales' -> the SALES sentence naming sales_invoice/sales_credit_note, 'purchase' -> the PURCHASE sentence naming supplier_bill, anything else (including null) -> the empty string", () => {
+  const v6 = src("autoDraft.v6.impl.ts");
+  assert.match(
+    v6,
+    /ctx\.direction === "sales"\s*\n\s*\? ' This admission is bound to the SALES direction — propose coding_kind "sales_invoice" or "sales_credit_note" accordingly\.'/,
+    "the SALES branch must name both sales coding_kind values",
+  );
+  assert.match(
+    v6,
+    /: ctx\.direction === "purchase"\s*\n\s*\? ' This admission is bound to the PURCHASE direction — propose coding_kind "supplier_bill" accordingly\.'/,
+    "the PURCHASE branch must name supplier_bill",
+  );
+  assert.match(v6, /:\s*""\s*;/, "the fallback (null / anything else) must be the empty string — no clause appended");
+});
+
+test("v5's impl.ts has no directionClause / ctx.direction anywhere (proves the direction hint is genuinely NEW in v6, not carried)", () => {
+  const v5 = src("autoDraft.v5.impl.ts");
+  assert.doesNotMatch(v5, /directionClause/);
+  assert.doesNotMatch(v5, /ctx\.direction/);
+});
+
+/** PR #204: AutoDraftContext gains `direction: "sales" | "purchase" | null;` — a pure
+ *  insertion right after `reservedTokens: number;`, before the type literal's own close. */
+function maskAutoDraftContextDirectionField(text) {
+  // AutoDraftContext's own preceding JSDoc gained a clause naming the new field too, so the
+  // mask must start BEFORE that comment — anchored on the stable, common export statement
+  // right above it (post-asVN, both versions read "SYSTEM_PROMPT_AUTODRAFT_VN").
+  const startAnchor = "export { SYSTEM_PROMPT_AUTODRAFT_VN };\n\n";
+  const anchorIdx = text.indexOf(startAnchor);
+  assert.ok(anchorIdx > 0, "the SYSTEM_PROMPT re-export must be present in both versions");
+  const from = anchorIdx + startAnchor.length;
+  const typeAnchor = text.indexOf("export type AutoDraftContext = {", from);
+  assert.ok(typeAnchor >= from, "AutoDraftContext's own type declaration must follow in both versions");
+  const end = text.indexOf("};", typeAnchor) + 2;
+  assert.ok(end > typeAnchor + 1, "AutoDraftContext's own type literal must close");
+  return `${text.slice(0, from)}<the AutoDraftContext JSDoc + direction field — masked>${text.slice(end)}`;
+}
+
+/** PR #204: TWO scoped insertions inside claimAutoDraftStep's OWN body — the receipt type's
+ *  new `direction?: string | null;` field, and the returned ctx literal's new `direction:
+ *  receipt.direction === ... ? ... : null,` field. Both pure insertions, anchored on common,
+ *  unchanged lines either side. */
+function maskClaimDirectionFields(text) {
+  let t = text;
+  const receiptAnchor = "      reserved_tokens?: number | string;\n";
+  const receiptIdx = t.indexOf(receiptAnchor);
+  assert.ok(receiptIdx > 0, "the receipt type's reserved_tokens field must be present in both versions");
+  const receiptFrom = receiptIdx + receiptAnchor.length;
+  const receiptEnd = t.indexOf("    };", receiptFrom);
+  // >= , not > : v5's anchor and the type's own close are ADJACENT (zero gap — v5 has no
+  // direction field at all), so indexOf legitimately returns exactly `receiptFrom` there.
+  assert.ok(receiptEnd >= receiptFrom, "the receipt type literal must close");
+  t = `${t.slice(0, receiptFrom)}<the receipt type's own direction field — masked>${t.slice(receiptEnd)}`;
+
+  const ctxAnchor = "        reservedTokens: Number(receipt.reserved_tokens ?? 0),\n";
+  const ctxIdx = t.indexOf(ctxAnchor);
+  assert.ok(ctxIdx > 0, "the returned ctx literal's reservedTokens field must be present in both versions");
+  const ctxFrom = ctxIdx + ctxAnchor.length;
+  const ctxEnd = t.indexOf("      },\n    };", ctxFrom);
+  assert.ok(ctxEnd >= ctxFrom, "the returned ctx literal must close"); // same zero-gap reasoning
+  return `${t.slice(0, ctxFrom)}<the returned ctx literal's own direction field — masked>${t.slice(ctxEnd)}`;
+}
+
+test("autoDraft.v6.impl.ts: AutoDraftContext's own direction field + claimAutoDraftStep's two scoped direction insertions are masked as PRECISELY those spans — every OTHER field/line in the type and the function is compared as literal text", () => {
+  // A narrow, self-contained probe: these three masks compose over v6's own text and must
+  // each find their anchors (the asserts inside the mask functions do the real checking);
+  // this test exists so a broken anchor fails HERE with a clear name, not silently inside
+  // the big structural test below.
+  const v6 = asVN(src("autoDraft.v6.impl.ts"), 6); // maskAutoDraftContextDirectionField anchors post-asVN
+  maskAutoDraftContextDirectionField(v6);
+  maskClaimDirectionFields(v6);
+});
+
 /** The settle step's own JSDoc tail (the §2d rationale, v6-only — a genuine VALUE change,
- *  masked as one small precise span) plus exactly THREE scoped insertions inside
+ *  masked as one small precise span) plus FOUR scoped insertions/edits inside
  *  settleAutoDraftStep's OWN body (never file-wide: claimAutoDraftStep, earlier in this
  *  same file, ALSO destructures workflowRunId from getWorkflowMetadata() — an unscoped
  *  replace would silently hit the WRONG occurrence): the workflowRunId destructure line,
- *  the SQL text's trailing $6::text placeholder, and the params array's trailing
- *  workflowRunId element. Everything else in the function — the signature, "use step",
- *  and params[0..4] — is left as LITERAL text, so a mutation there fails THIS test too,
- *  not only the dedicated params-array test below (Codex SF: stop masking the whole
- *  function). */
+ *  the `const r = ` capture + the SQL text's trailing `$6::text) as receipt` addition, the
+ *  params array's trailing workflowRunId element, and (PR #204) the new
+ *  receipt/settled-check block appended after the query call. Everything else in the
+ *  function — the signature, "use step", and params[0..4] — is left as LITERAL text, so a
+ *  mutation there fails THIS test too, not only the dedicated params-array test below
+ *  (Codex SF: stop masking the whole function). */
 function maskSettleFunction(text) {
   const jsDocStart = text.indexOf(" *  writes the sweep_run_items row, and updates the registry counters (a 2nd failure parks)");
   assert.ok(jsDocStart > 0, "the settle step's own JSDoc tail lead-in must be present in both versions");
@@ -326,23 +488,50 @@ function maskSettleFunction(text) {
   assert.ok(fnEnd > fnStart, "openSweepQuestionStep's own doc-comment must follow");
   let fnBody = text.slice(fnStart, fnEnd);
   fnBody = fnBody.replace("  const { workflowRunId } = getWorkflowMetadata();\n", "");
+  fnBody = fnBody.replace("  const r = await pools().withRuntime((c) =>\n", "  await pools().withRuntime((c) =>\n");
   fnBody = fnBody.replace(
-    'c.query("select clara.settle_autodraft_task($1, $2, $3, $4, $5::jsonb, $6::text)", [',
+    'c.query("select clara.settle_autodraft_task($1, $2, $3, $4, $5::jsonb, $6::text) as receipt", [',
     'c.query("select clara.settle_autodraft_task($1, $2, $3, $4, $5::jsonb)", [',
   );
   fnBody = fnBody.replace("\n      workflowRunId,\n    ]),", "\n    ]),");
+  fnBody = fnBody.replace(
+    "\n  const receipt = (r.rows[0]?.receipt ?? {}) as { settled?: boolean; outcome?: string; reason?: string };" +
+      "\n  if (receipt.settled === false) {" +
+      "\n    // run_superseded (or, in principle, any sibling losing-dispatch reason): this run lost" +
+      "\n    // the run-identity race. Nothing was written on this call; the winning run's own settle" +
+      "\n    // already owns (or will own) the real accounting. Benign — return without throwing." +
+      "\n    return;" +
+      "\n  }",
+    "",
+  );
 
   return `${text.slice(0, jsDocStart)}<settle JSDoc tail — masked>${text.slice(jsDocEnd, fnStart)}${fnBody}${text.slice(fnEnd)}`;
 }
 
 function maskImplChanges(text) {
-  return maskSettleFunction(maskUserMessageLine(text));
+  return maskSettleFunction(
+    maskClaimDirectionFields(maskAutoDraftContextDirectionField(maskDirectionClauseDeclaration(maskUserMessageLine(text)))),
+  );
 }
 
-test("autoDraft.v6.impl.ts differs from v5 ONLY inside the settle step's own JSDoc tail + its three scoped 6-arity insertions (header narrative aside; the user-message swap is pinned exactly by the test above, not masked away) — claim/recover/model/question/close and consumeAutoDraftModelResult's stream-error tagging are unchanged, INCLUDING the settle function's own signature, \"use step\" directive, and params[0..4], which are compared as LITERAL text here (not masked)", () => {
+test("autoDraft.v6.impl.ts differs from v5 ONLY inside the documented §2a + PR #204 spans (the settle step's JSDoc tail + its four scoped insertions, AutoDraftContext's direction field, claimAutoDraftStep's two direction insertions, the directionClause declaration, and the templated user message — pinned exactly by the tests above, not masked away) — recover/question/close and consumeAutoDraftModelResult's stream-error tagging are unchanged, INCLUDING the settle function's own signature, \"use step\" directive, and params[0..4], which are compared as LITERAL text here (not masked)", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.impl.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.impl.ts"), 5));
-  assert.equal(maskImplChanges(v6), maskImplChanges(v5), "outside the JSDoc tail + the three scoped insertions, autoDraft.v6.impl.ts must be a version-renamed copy of v5");
+  assert.equal(maskImplChanges(v6), maskImplChanges(v5), "outside the masked spans, autoDraft.v6.impl.ts must be a version-renamed copy of v5");
+});
+
+test("PR #204: settleAutoDraftStep's SQL text carries the `as receipt` alias, and the receipt is read explicitly (settled/outcome/reason) — the settle no-op is now OBSERVABLE, not merely accidental", () => {
+  const body = extractSettleStepBody(src("autoDraft.v6.impl.ts"));
+  assert.match(body, /as receipt/, "the SQL call must alias its return value");
+  assert.match(body, /const receipt = \(r\.rows\[0\]\?\.receipt \?\? \{\}\) as \{ settled\?: boolean; outcome\?: string; reason\?: string \};/);
+  assert.match(body, /if \(receipt\.settled === false\) \{/, "a losing dispatch (settled:false) must be checked explicitly");
+  assert.match(body, /return;/, "a losing dispatch must return WITHOUT throwing — a benign no-op, matching 0036's task_superseded/registry_superseded/registry_released pattern");
+});
+
+test("v5's settle step never reads its own query result at all (fire-and-forget) — proves the explicit settled:false check is genuinely NEW in v6, not carried", () => {
+  const body = extractSettleStepBody(src("autoDraft.v5.impl.ts"));
+  assert.doesNotMatch(body, /as receipt/);
+  assert.doesNotMatch(body, /receipt\.settled/);
 });
 
 // ===========================================================================
@@ -409,14 +598,67 @@ function maskInternalFallback(text) {
   return `${text.slice(0, start)}<the internal fallback message — masked>${text.slice(end)}`;
 }
 
-function maskErrorsChanges(text) {
-  return maskInternalFallback(maskClr10Branch(maskReasonMessagesBlock(maskMessagesBlock(maskReasonTypes(text)))));
+/** PR #204: the new directionFamilyMismatchRefusal() factory (v5-absent entirely — a pure
+ *  insertion right after noDraftRefusal's own closing brace, before readToolRefusalMessage's
+ *  doc-comment). */
+function maskDirectionFamilyMismatchRefusalFn(text) {
+  const startAnchor =
+    'export function noDraftRefusal(): RefusalPart {\n' +
+    '  return runtimeRefusal("CLR21", "coding_incomplete", CLR21_REASON_MESSAGES.coding_incomplete);\n' +
+    '}\n\n';
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "noDraftRefusal's own closing must be present, unchanged, in both versions");
+  const from = start + startAnchor.length;
+  const endAnchor = "/** An oracle-safe string a READ tool returns";
+  const end = text.indexOf(endAnchor, from);
+  // >= , not > : v5's noDraftRefusal close and readToolRefusalMessage's doc-comment are
+  // ADJACENT (v5 has no directionFamilyMismatchRefusal at all), so indexOf legitimately
+  // returns exactly `from` on that side.
+  assert.ok(end >= from, "readToolRefusalMessage's own doc-comment must follow");
+  return `${text.slice(0, from)}<directionFamilyMismatchRefusal — masked>${text.slice(end)}`;
 }
 
-test("autoDraft.v6.errors.ts differs from v5 ONLY inside the documented §2a(e) spans (the new reason types, the reworded MESSAGES/CLR21_REASON_MESSAGES, the new CLR10_REASON_MESSAGES, the new CLR10 branch, and the reworded internal fallback) — every native-constraint collapse (23505/23503/23514/42501) and readToolRefusalMessage are unchanged", () => {
+function maskErrorsChanges(text) {
+  return maskDirectionFamilyMismatchRefusalFn(maskInternalFallback(maskClr10Branch(maskReasonMessagesBlock(maskMessagesBlock(maskReasonTypes(text))))));
+}
+
+test("autoDraft.v6.errors.ts differs from v5 ONLY inside the documented §2a(e) + PR #204 spans (the new reason types incl. counterparty_kind_contradiction/direction_family_mismatch, the reworded MESSAGES/CLR21_REASON_MESSAGES, the new CLR10_REASON_MESSAGES, the new CLR10 branch, the reworded internal fallback, and the new directionFamilyMismatchRefusal factory) — every native-constraint collapse (23505/23503/23514/42501) and readToolRefusalMessage are unchanged", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.errors.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.errors.ts"), 5));
   assert.equal(maskErrorsChanges(v6), maskErrorsChanges(v5), "outside the masked spans, autoDraft.v6.errors.ts must be a version-renamed copy of v5");
+});
+
+const errorsV6 = await import("../workflows/autoDraft.v6.errors.ts");
+
+test("directionFamilyMismatchRefusal() pins the exact refusal shape — the SAME CLR21 reason token the DB draft writer raises for the identical contradiction, so a bookkeeper sees one message whichever layer caught it", () => {
+  const r = errorsV6.directionFamilyMismatchRefusal();
+  assert.deepEqual(r, {
+    type: "refusal",
+    code: "CLR21",
+    reason: "direction_family_mismatch",
+    message: "The proposed coding kind does not match this document's admitted direction (sales vs purchase).",
+  });
+});
+
+test("refusalFromDbError surfaces counterparty_kind_contradiction with its OWN specific message, not the generic CLR21 fallback (PR #204 — the DB draft writer's own layer-3 rejection)", () => {
+  const r = errorsV6.refusalFromDbError({ code: "CLR21", detail: '{"reason":"counterparty_kind_contradiction"}' });
+  assert.equal(r.code, "CLR21");
+  assert.equal(r.reason, "counterparty_kind_contradiction");
+  assert.notEqual(r.message, "This document cannot be coded as proposed.", "must NOT fall back to the generic CLR21 message");
+  assert.match(r.message, /counterparty/i);
+});
+
+test("refusalFromDbError surfaces direction_family_mismatch with the SAME message directionFamilyMismatchRefusal() itself returns (one message, two layers)", () => {
+  const r = errorsV6.refusalFromDbError({ code: "CLR21", detail: '{"reason":"direction_family_mismatch"}' });
+  assert.equal(r.code, "CLR21");
+  assert.equal(r.reason, "direction_family_mismatch");
+  assert.equal(r.message, errorsV6.directionFamilyMismatchRefusal().message);
+});
+
+test("v5's errors.ts has neither counterparty_kind_contradiction nor direction_family_mismatch anywhere (proves both are genuinely NEW in v6, not carried)", () => {
+  const v5 = src("autoDraft.v5.errors.ts");
+  assert.doesNotMatch(v5, /counterparty_kind_contradiction/);
+  assert.doesNotMatch(v5, /direction_family_mismatch/);
 });
 
 // ===========================================================================
@@ -701,7 +943,11 @@ test("structural (comment-free): the counterpartyPayload object literal spreads 
 });
 
 const DOC = "11111111-1111-1111-1111-111111111111";
-const draftCtx = { firmId: "F", clientId: "c1", documentId: DOC, filingId: "fil-1", taskId: "task-7" };
+// direction: null — the baseline, pre-PR-#204 case (a pre-migration attempt row, or simply
+// "no early check should run"): allowedCodingKindsForDirection(null) is null, so
+// runDraftJournalEntry's new early check is a no-op and every test below this line behaves
+// exactly as it did before PR #204 landed.
+const draftCtx = { firmId: "F", clientId: "c1", documentId: DOC, filingId: "fil-1", taskId: "task-7", direction: null };
 
 function stubPools() {
   const write = { params: null };
@@ -767,6 +1013,73 @@ test("behavioural: an OMITTED counterparty.kind is derived normally (the common 
   const counterpartyArg = JSON.parse(write.params[10]);
   assert.equal(counterpartyArg.kind, "vendor");
   assert.equal(write.params[13], "supplier_bill");
+});
+
+// ===========================================================================
+// 5b. PR #204 / 7A-R2 — THE BOUND FAMILY, behaviourally: runDraftJournalEntry's early
+//     direction-family check. Both mismatch directions, both matches, and the null-direction
+//     (skip-check) baseline — the SAME contradiction matrix idiom the counterparty-kind
+//     schema test (section 3 above) already uses.
+// ===========================================================================
+
+const salesBoundCtx = { ...draftCtx, direction: "sales" };
+const purchaseBoundCtx = { ...draftCtx, direction: "purchase" };
+
+const familyInput = (coding_kind) => ({
+  coding_kind,
+  posting_date: "2025-10-15",
+  lines: [
+    { account_code: "410-000", debit_cents: 1000, credit_cents: 0 },
+    { account_code: "600-000", debit_cents: 0, credit_cents: 1000 },
+  ],
+  document_id: DOC,
+  counterparty: { existing_id: "22222222-2222-2222-2222-222222222222" },
+  evidence: [{ region_id: "33333333-3333-3333-3333-333333333333", quote: "1000" }],
+});
+
+test("behavioural: a SALES-bound admission REFUSES a proposed supplier_bill — a named EARLY refusal (direction_family_mismatch), NEVER a DB roundtrip (no read/write call ever fires)", async () => {
+  const write = stubPools();
+  const r = await runDraftJournalEntry(salesBoundCtx, familyInput("supplier_bill"));
+  assert.equal(r.ok, false, `expected a refusal, got ${JSON.stringify(r)}`);
+  assert.equal(r.refusal.code, "CLR21");
+  assert.equal(r.refusal.reason, "direction_family_mismatch");
+  assert.equal(write.params, null, "the writer must NEVER be called — this is an early refusal, not a DB roundtrip");
+});
+
+test("behavioural: a PURCHASE-bound admission REFUSES a proposed sales_invoice — a named EARLY refusal, NEVER a DB roundtrip", async () => {
+  const write = stubPools();
+  const r = await runDraftJournalEntry(purchaseBoundCtx, familyInput("sales_invoice"));
+  assert.equal(r.ok, false, `expected a refusal, got ${JSON.stringify(r)}`);
+  assert.equal(r.refusal.code, "CLR21");
+  assert.equal(r.refusal.reason, "direction_family_mismatch");
+  assert.equal(write.params, null, "the writer must NEVER be called");
+});
+
+test("behavioural: a PURCHASE-bound admission REFUSES a proposed sales_credit_note too (the whole sales family is blocked, not just sales_invoice)", async () => {
+  const write = stubPools();
+  const r = await runDraftJournalEntry(purchaseBoundCtx, familyInput("sales_credit_note"));
+  assert.equal(r.ok, false);
+  assert.equal(r.refusal.reason, "direction_family_mismatch");
+  assert.equal(write.params, null);
+});
+
+test("behavioural: an AGREEING coding_kind proceeds normally under a bound direction — sales+sales_invoice and purchase+supplier_bill both reach the writer", async () => {
+  const w1 = stubPools();
+  const r1 = await runDraftJournalEntry(salesBoundCtx, familyInput("sales_invoice"));
+  assert.equal(r1.ok, true, `expected ok, got ${JSON.stringify(r1)}`);
+  assert.ok(w1.params, "the writer must be reached when coding_kind agrees with the bound direction");
+
+  const w2 = stubPools();
+  const r2 = await runDraftJournalEntry(purchaseBoundCtx, familyInput("supplier_bill"));
+  assert.equal(r2.ok, true, `expected ok, got ${JSON.stringify(r2)}`);
+  assert.ok(w2.params, "the writer must be reached when coding_kind agrees with the bound direction");
+});
+
+test("behavioural: direction === null (a pre-migration attempt row) skips the early check entirely — ANY coding_kind reaches the writer, exactly as before PR #204", async () => {
+  const write = stubPools();
+  const r = await runDraftJournalEntry(draftCtx, familyInput("sales_invoice"));
+  assert.equal(r.ok, true, `expected ok (no early check when direction is null), got ${JSON.stringify(r)}`);
+  assert.ok(write.params, "the writer must be reached — direction:null means no family to validate against");
 });
 
 // ===========================================================================
