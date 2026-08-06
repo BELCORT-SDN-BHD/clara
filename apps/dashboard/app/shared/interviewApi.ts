@@ -35,8 +35,11 @@ export class RuntimeApiError extends Error {
   }
 }
 
+/** The lossy status, EXACTLY. Deliberately narrow: it matches the documented `not_pending` code
+ *  and nothing else. An earlier version also matched any bare 409, which would have handed a
+ *  future unrelated conflict (a plan that is not open, say) to the answer re-POST path. */
 export function isNotPending(err: unknown): boolean {
-  return err instanceof RuntimeApiError && (err.code === "not_pending" || err.status === 409);
+  return err instanceof RuntimeApiError && err.code === "not_pending";
 }
 
 async function runtimeFetch(path: string, token: string, init?: RequestInit): Promise<Response> {
@@ -169,12 +172,17 @@ export function commitOpKeyFromPrompt(park: PendingPark | null | undefined): str
   return null;
 }
 
+/** Terminal outcomes meaning the run reached its INTENDED end (not cancelled, expired or
+ *  otherwise stopped). Shared by `deriveChip` and the answer verb's delivery test so the two
+ *  can never drift apart. */
+const COMPLETE_OUTCOMES = new Set(["firm_created", "interview_complete", "complete", "completed"]);
+
 /** Derive the run chip (§3.1). Terminal wins; then a pending park (awaiting_you, incl.
  *  the parked framing); then a running engine status (working); else unknown. */
 export function deriveChip(pendingPark: PendingPark | null, terminal: InterviewTerminal | null, status: string | null): InterviewChip {
   if (terminal) {
     const o = terminal.outcome;
-    if (o === "firm_created" || o === "interview_complete" || o === "complete" || o === "completed") return "complete";
+    if (COMPLETE_OUTCOMES.has(o)) return "complete";
     if (o === "cancelled" || o === "canceled") return "cancelled";
     if (o === "expired") return "expired";
     return "ended"; // plan_gone / superseded_by_existing_run / anything else terminal
@@ -321,31 +329,111 @@ function postAnswer(token: string, a: AnswerArgs): Promise<Response> {
  *  ambiguous by construction, and assuming "already delivered" is precisely how the original
  *  bug stayed invisible in production: the answer vanished and the human just retyped.
  *
- *  So a 409 is DISAMBIGUATED against /state, never assumed. Re-read ONCE:
- *    · the SAME park is still open   ⇒ nothing landed        ⇒ re-POST ONCE.
- *    · the park advanced / terminal  ⇒ the answer did land   ⇒ return normally.
- *    · the re-read itself failed     ⇒ undiagnosable         ⇒ surface the ORIGINAL refusal.
- *  Only a retry that ALSO fails is surfaced. A caller that sees this throw therefore knows the
- *  answer is genuinely undelivered — `deliverValue`'s F-M10 receipt retention relies on it. */
+ *  So a 409 is DISAMBIGUATED against /state, never assumed — and the reading is FAIL-CLOSED ON
+ *  UNKNOWN (the ADR-059 armour law): only POSITIVE evidence about THIS run counts as delivery,
+ *  and everything else surfaces the original refusal. `classifyDelivery` below is that reading;
+ *  a `{}` body, a momentarily park-less "working" state, a cancelled run, or a reply about some
+ *  OTHER run must never read as delivery, or the dropped-answer bug walks straight back in
+ *  through the recovery meant to close it.
+ *
+ *  KNOWN RESIDUAL, named rather than papered over: "a higher park ⇒ my answer landed" is an
+ *  INFERENCE, NOT A RECEIPT. A concurrent submitter can win the single hook and advance the park,
+ *  and this lane would read that advance as its own delivery. The exposure is wider than one
+ *  person's two tabs: a CLIENT-scope answer authorises on the plan's firm plus a bookkeeper+ floor
+ *  (interviewRoutes.ts — "a bookkeeper or above must answer"), so ANY bookkeeper+ of the firm can
+ *  be the winner; only the FIRM scope is bound to a single pre-firm principal. Closing it needs a
+ *  server-authored per-(run, park, submission) receipt the client can match its own submission id
+ *  against — a RUNTIME CONTRACT change, not a client one, and out of scope here. What this lane
+ *  does do is shrink the fail-open set from "every 409" (the shipped behaviour) to exactly this
+ *  concurrent-winner case. The residual is a tracked follow-up, not a solved problem.
+ *
+ *  A caller that sees this throw knows the answer is NOT CONFIRMED DELIVERED — either the retry
+ *  also failed, or the state could not be read as evidence at all. That is the guarantee
+ *  `deliverValue`'s F-M10 receipt retention relies on; it is deliberately weaker than "the answer
+ *  definitely failed", because proving THAT needs a receipt the runtime does not yet issue. */
+type Delivery = "delivered" | "still_open" | "unknown";
+
+/** Classify a RAW /state body as evidence about OUR answer.
+ *
+ *  IT READS THE RAW BODY ON PURPOSE, not `normalizeInterviewState`. That normalizer is a
+ *  deliberately TOLERANT UI mapper — it coerces an absent or unrecognised `scope` to "client",
+ *  drops a malformed terminal, and degrades junk to empty fields, all of which are right for
+ *  rendering and WRONG for a safety decision. Deciding delivery from a lossy projection is the
+ *  same mistake as deciding it from the derived chip, one layer down.
+ *
+ *  IDENTITY FIRST, by literal equality and with no defaulting: a reply about a different run, a
+ *  different scope, or a different plan is not weak evidence, it is NO evidence.
+ *
+ *  Then, and only from a reply that is about us:
+ *    · a terminal PRESENT AT ALL is AUTHORITATIVE — complete-class ⇒ delivered, and anything
+ *      else (cancelled, expired, ended, or a malformed outcome) ⇒ unknown. It is checked BEFORE
+ *      the park so a stale park cannot outvote a run that has actually ended.
+ *    · a park at a HIGHER index ⇒ the park moved past ours ⇒ delivered
+ *    · our OWN park still open  ⇒ nothing landed           ⇒ still_open
+ *    · anything else            ⇒ unknown, and unknown NEVER means delivered. */
+function classifyDeliveryBody(r: Record<string, unknown>, a: AnswerArgs): Delivery {
+  if (r.run_id !== a.runId) return "unknown";
+  if (r.scope !== a.scope) return "unknown"; // absent/unknown scope is NOT silently "client"
+  if (a.planId != null) {
+    const plan = asRecord(r.plan);
+    if (!plan || plan.id !== a.planId) return "unknown";
+  }
+
+  if (r.terminal !== undefined && r.terminal !== null) {
+    const outcome = asRecord(r.terminal)?.outcome;
+    return typeof outcome === "string" && COMPLETE_OUTCOMES.has(outcome) ? "delivered" : "unknown";
+  }
+
+  const idx = asRecord(r.pending_park)?.parkIndex;
+  if (typeof idx !== "number" || !Number.isInteger(idx)) return "unknown";
+  if (idx > a.parkIndex) return "delivered";
+  if (idx === a.parkIndex) return "still_open";
+  return "unknown"; // a LOWER index — a different or restarted run, not our evidence
+}
+
+/** One classified /state read. Anything that is not a clean 2xx JSON object — a non-2xx, an
+ *  unparseable body, a thrown fetch — is "unknown", never evidence either way. */
+async function readDelivery(token: string, a: AnswerArgs): Promise<Delivery> {
+  try {
+    const params = new URLSearchParams();
+    params.set("scope", a.scope);
+    params.set("runId", a.runId);
+    if (a.planId) params.set("planId", a.planId);
+    const res = await runtimeFetch(`/api/interview/state?${params.toString()}`, token);
+    if (!res.ok) return "unknown";
+    const raw = asRecord(await res.json());
+    return raw ? classifyDeliveryBody(raw, a) : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 export async function answerInterview(token: string, a: AnswerArgs): Promise<void> {
   const res = await postAnswer(token, a);
   if (res.status === 200) return;
 
   const refusal = errorFrom(res.status, await bodyOf(res));
+  // Narrow ON PURPOSE: only the documented lossy status earns a re-read. Any OTHER 409 is a
+  // genuine conflict (a plan that is not open, say) and is reported as-is, never re-POSTed.
   if (!isNotPending(refusal)) throw refusal;
 
-  let stillOpenAtOurPark: boolean;
-  try {
-    const s = await getInterviewState(token, { runId: a.runId, scope: a.scope, planId: a.planId });
-    stillOpenAtOurPark = s.pendingPark?.parkIndex === a.parkIndex;
-  } catch {
-    throw refusal; // cannot tell delivered from dropped — keep the runtime's own word for it
-  }
-  if (!stillOpenAtOurPark) return; // the benign half: the park moved on, so our answer landed
+  const first = await readDelivery(token, a);
+  if (first === "delivered") return;
+  if (first === "unknown") throw refusal;
 
+  // still_open: our park is genuinely unanswered. This is the ONE path that retries.
   const retry = await postAnswer(token, a);
   if (retry.status === 200) return;
-  throw errorFrom(retry.status, await bodyOf(retry));
+  const retryRefusal = errorFrom(retry.status, await bodyOf(retry));
+  if (!isNotPending(retryRefusal)) throw retryRefusal;
+
+  // The retry ALSO says not_pending. Two readings remain: our first answer had in fact landed and
+  // the park markers were merely LAGGING behind it (the duplicate-submit-of-the-last-answer case,
+  // where throwing here would be a FALSE refusal at the natural end of an interview), or it is
+  // still being dropped. One more read decides, and anything short of positive evidence is still
+  // a refusal. Bounded by construction: at most two POSTs and two reads, no loop.
+  if ((await readDelivery(token, a)) === "delivered") return;
+  throw retryRefusal;
 }
 
 export type CancelArgs = { runId: string; scope: InterviewScope; parkIndex: number; planId?: string | null };

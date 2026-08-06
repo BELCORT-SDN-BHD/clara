@@ -125,10 +125,13 @@ test("commitOpKeyFromPrompt returns null when the typed field is absent", () => 
 
 // --- error helper --------------------------------------------------------------
 
-test("isNotPending detects the 409/not_pending branch", () => {
+test("isNotPending matches the not_pending CODE exactly — not any bare 409", () => {
   assert.equal(isNotPending(new RuntimeApiError(409, "not_pending", "gone")), true);
   assert.equal(isNotPending(new RuntimeApiError(403, "forbidden", "no")), false);
   assert.equal(isNotPending(new Error("plain")), false);
+  // A DIFFERENT 409 is a genuine conflict and must never reach the answer re-POST path.
+  assert.equal(isNotPending(new RuntimeApiError(409, "conflict", "plan is not open")), false);
+  assert.equal(isNotPending(new RuntimeApiError(409, "http_409", "bare")), false);
 });
 
 // --- answer: the LOSSY 409, disambiguated against /state then retried ONCE (GH #152) --------
@@ -141,12 +144,18 @@ function jsonRes(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 }
 
-/** /state v2 showing the run parked at `parkIndex` (the pinned shape). */
+/** /state v2 showing OUR run parked at `parkIndex` (the pinned shape). The identity fields are
+ *  load-bearing: the delivery decoder requires run_id, scope and plan.id to match the answer. */
 function parkedAt(parkIndex: number) {
   return {
-    run_id: "r1", scope: "client", status: "running", items: [],
+    run_id: "r1", scope: "client", status: "running", items: [], plan: { id: "p1" },
     pending_park: { parkIndex, seg: "tin", phase: "q", question: "TIN?" },
   };
+}
+
+/** /state v2 showing OUR run ended with `outcome`. */
+function endedWith(outcome: string, status = "complete") {
+  return { run_id: "r1", scope: "client", status, items: [], plan: { id: "p1" }, terminal: { outcome } };
 }
 
 const ANSWER: AnswerArgs = { runId: "r1", scope: "client", parkIndex: 3, value: "C1234", planId: "p1" };
@@ -193,37 +202,206 @@ test("answer: a lossy 409 with the SAME park still open re-reads once and RETRIE
   assert.deepEqual(calls[2]!.body, calls[0]!.body, "the retry re-sends the identical payload — same park, same value");
 });
 
-test("answer: a lossy 409 whose /state shows the park ADVANCED is the benign half — no retry", async (t) => {
+test("answer: a lossy 409 whose /state shows a HIGHER park is the benign half — no retry", async (t) => {
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending" }, 409),
-    jsonRes(parkedAt(4)), // the park moved on ⇒ our answer DID land
+    jsonRes(parkedAt(4)), // the park moved PAST ours ⇒ our answer DID land
   ]);
   await answerInterview("jwt", ANSWER);
   assert.equal(calls.length, 2, "already-delivered costs the re-read and nothing more");
 });
 
-test("answer: a lossy 409 on a run that went TERMINAL is also already-delivered", async (t) => {
+test("answer: a lossy 409 on a COMPLETE-class terminal is already-delivered", async (t) => {
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending" }, 409),
-    jsonRes({ run_id: "r1", scope: "client", status: "complete", items: [], terminal: { outcome: "interview_complete" } }),
+    jsonRes(endedWith("interview_complete")),
   ]);
   await answerInterview("jwt", ANSWER);
   assert.equal(calls.length, 2);
 });
 
-test("answer: when the RETRY also fails the refusal is SURFACED, never swallowed", async (t) => {
+// --- FAIL-CLOSED ON UNKNOWN: only positive evidence counts as delivery ----------------------
+// Each of these once read as "delivered" under the first cut of this recovery, which would have
+// walked the dropped-answer bug back in through the code meant to close it.
+
+test("answer: a CANCELLED run is NOT delivery — the refusal is surfaced", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending", message: "no open question" }, 409),
+    jsonRes(endedWith("cancelled", "cancelled")),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
+    assert.equal(e.code, "not_pending");
+    return true;
+  });
+  assert.equal(calls.length, 2, "a dead run is not retried, and never reported as delivered");
+});
+
+test("answer: a CANCELLED run whose engine status reads 'completed' is NOT delivery", async (t) => {
+  // A DERIVED STATE IS NOT EVIDENCE. A domain cancel returns NORMALLY from the workflow, so the
+  // engine run row settles 'completed' (interview-e2e.mjs asserts this). With the terminal
+  // marker not yet streamed, deriveChip's STATUS fallback calls that "complete" — so a delivery
+  // test written against the chip would report a dropped answer as delivered. It reads the
+  // terminal MARKER instead, and here there is none.
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ run_id: "r1", scope: "client", status: "completed", items: [], plan: { id: "p1" }, pending_park: null }),
+  ]);
+  assert.equal(deriveChip(null, null, "completed"), "complete", "the chip really does say complete here");
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2, "a status-derived 'complete' must never count as delivery");
+});
+
+test("answer: a park-less but still RUNNING state proves nothing — the refusal is surfaced", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ run_id: "r1", scope: "client", status: "running", items: [], plan: { id: "p1" }, pending_park: null }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+test("answer: an unparseable /state body ({}) is never read as delivery", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    new Response("not json at all", { status: 200, headers: { "content-type": "application/json" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2, "a {} body degrades to unknown, not to success");
+});
+
+test("answer: a LOWER park index (a different/restarted run) is surfaced, never retried", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes(parkedAt(1)),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+// --- the evidence must be ABOUT OUR RUN --------------------------------------------------
+// An advanced park in run B says nothing about our POST to run A. These are no-evidence, not
+// weak evidence.
+
+test("answer: a HIGHER park belonging to a DIFFERENT runId is not evidence", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ run_id: "r2", scope: "client", status: "running", items: [], pending_park: { parkIndex: 9, seg: "tin", phase: "q", question: "?" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+test("answer: a completion terminal for a DIFFERENT scope is not evidence", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ run_id: "r1", scope: "firm", status: "complete", items: [], terminal: { outcome: "interview_complete" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+test("answer: a completion terminal with NO identity at all is not evidence", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ status: "complete", items: [], terminal: { outcome: "interview_complete" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+test("answer: a plan-id mismatch is not evidence, even with a higher park", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ ...parkedAt(9), plan: { id: "p2" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+// --- CONTRADICTORY state: a present terminal outranks a stale park -------------------------
+// The decoder reads the RAW body, not the tolerant UI normalizer, precisely so these cannot be
+// smoothed away: the normalizer coerces an absent scope to "client" and DROPS a malformed
+// terminal, both of which would turn a refusal into a false delivery.
+
+test("answer: a higher park does NOT outvote a cancelled terminal", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ ...parkedAt(9), terminal: { outcome: "cancelled" } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2);
+});
+
+test("answer: a MALFORMED terminal outcome is refused, not discarded", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ ...parkedAt(9), terminal: { outcome: 7 } }),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => e.code === "not_pending");
+  assert.equal(calls.length, 2, "the UI normalizer would have dropped this terminal and read the park as delivery");
+});
+
+test("answer: our OWN park plus a completion terminal resolves — the terminal is authoritative", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes({ ...parkedAt(3), terminal: { outcome: "interview_complete" } }),
+  ]);
+  await answerInterview("jwt", ANSWER);
+  assert.equal(calls.length, 2, "no pointless retry against a run that has already ended");
+});
+
+// --- the LAGGING-MARKER case: a retry that 409s is not yet proof of failure -----------------
+
+test("answer: a retry that 409s but whose SECOND read shows the park advanced is delivered", async (t) => {
+  // The duplicate-submit-of-the-last-answer shape: the first answer DID land, but /state still
+  // showed our park when we looked. Throwing here would be a false refusal at the natural end
+  // of an interview, so one bounded second read decides.
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes(parkedAt(3)),                      // markers lagging: our park still shown
+    jsonRes({ error: "not_pending" }, 409),    // the retry is refused too
+    jsonRes(parkedAt(4)),                      // now the truth: the park DID advance
+  ]);
+  await answerInterview("jwt", ANSWER);
+  assert.equal(calls.length, 4, "bounded: two POSTs and two reads, never a loop");
+});
+
+test("answer: a retry that 409s with the park STILL ours surfaces the retry's refusal", async (t) => {
   const calls = scriptFetch(t, [
     jsonRes({ error: "not_pending", message: "first" }, 409),
     jsonRes(parkedAt(3)),
     jsonRes({ error: "not_pending", message: "still not pending" }, 409),
+    jsonRes(parkedAt(3)),                      // no advance: genuinely undelivered
   ]);
   await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
-    assert.equal(e.status, 409);
-    assert.equal(e.code, "not_pending");
     assert.match(e.message, /still not pending/, "the RETRY's refusal is the one reported");
     return true;
   });
-  assert.equal(calls.length, 3, "exactly one re-read and exactly one retry — never a loop");
+  assert.equal(calls.length, 4);
+});
+
+test("answer: a 409 with a DIFFERENT code is a genuine conflict — thrown at once, no re-read", async (t) => {
+  const calls = scriptFetch(t, [jsonRes({ error: "conflict", message: "onboarding plan is not open" }, 409)]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
+    assert.equal(e.status, 409);
+    assert.equal(e.code, "conflict");
+    return true;
+  });
+  assert.equal(calls.length, 1, "only the documented lossy status earns a re-read");
+});
+
+test("answer: a retry that fails with a NON-conflict error is surfaced at once", async (t) => {
+  const calls = scriptFetch(t, [
+    jsonRes({ error: "not_pending" }, 409),
+    jsonRes(parkedAt(3)),
+    jsonRes({ error: "forbidden", message: "no longer your run" }, 403),
+  ]);
+  await assert.rejects(() => answerInterview("jwt", ANSWER), (e: RuntimeApiError) => {
+    assert.equal(e.status, 403);
+    assert.equal(e.code, "forbidden");
+    return true;
+  });
+  assert.equal(calls.length, 3, "a non-conflict retry failure needs no further reading");
 });
 
 test("answer: an unreadable /state keeps the ORIGINAL refusal (undiagnosable ⇒ never assume delivery)", async (t) => {
