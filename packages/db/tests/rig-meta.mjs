@@ -587,6 +587,27 @@ export const WAVE_B_0020_COHORT = [
 // header describes for 19 and 20+.
 export const EXTRACTION_0022_COHORT = [...EXTRACTION_0022_HUMAN_FNS];
 
+// 0046 [§7-A] — the unattended sales lane. The whole HUMAN surface this migration adds is
+// the signing-time evidence preview plus the recorded backfill door; the drafter itself
+// reaches the DB through verbs that already existed.
+const SALES_LANE_0046_HUMAN_FNS = ["open_sales_backfill", "set_sales_backfill_state"];
+const SALES_LANE_0046_READ_FNS = ["preview_ocr_sales_evidence", "list_sales_backfill_batches"];
+// The definer internals, named so their absence from every role set is a DECLARED
+// expectation the cohort carries rather than a silent default (the 0020 block's reasoning).
+//
+// clara.set_sales_lane_activation IS IN THIS LIST ON PURPOSE AND IS THE POINT OF IT. 7A-R1
+// rules that the activation flip belongs to the owner/deploy connection alone, so it is
+// granted to NO application role — and the main sweep, which expects `false` for every role
+// not listed in ALLOWED, is what turns that ruling into a test. If a future migration ever
+// grants it, this file fails and somebody has to say so out loud.
+const SALES_LANE_0046_UNGRANTED_FNS = [
+  "_ocr_sales_floor_pop", "_sales_lane_active", "_autodraft_direction_tri",
+  "_sales_admission_open", "set_sales_lane_activation",
+];
+export const SALES_LANE_0046_COHORT = [
+  ...SALES_LANE_0046_HUMAN_FNS, ...SALES_LANE_0046_READ_FNS, ...SALES_LANE_0046_UNGRANTED_FNS,
+];
+
 export const ALLOWED = {
   // Slice-4 governance writers (contract v2.1 §3.2/3.3/3.5): human lane only.
   [ROLES.authenticated]: new Set([
@@ -622,6 +643,8 @@ export const ALLOWED = {
     // safe to reach. See the 0045 block above for what was withheld and why.
     ...ADJ_0045_READ_FNS, // 0045 [D-b2] the /rules template read surface (viewer+, definer)
     ...ADJ_0045_SHARED_FNS, // 0045 [D-b2] the due probe — the one name BOTH lanes hold
+    ...SALES_LANE_0046_HUMAN_FNS, // 0046 [§7-A] the recorded sales backfill door (admin floor)
+    ...SALES_LANE_0046_READ_FNS, // 0046 [§7-A] the signing-time evidence preview + batch read
   ]),
   // [S6 §9/C-11] agent lane loses the bare get_journal_entry(uuid) oracle; keeps the other
   // reads and gains the client-pinned S6 reads + get_journal_entry_for.
@@ -788,6 +811,7 @@ export async function grantMatrixFailures() {
   failures.push(...cohortFailures("0040 wave C-c tie-out", TIEOUT_0040_COHORT, liveNames));
   failures.push(...cohortFailures("0041 wave D-a fixed-asset register", FA_0041_COHORT, liveNames));
   failures.push(...cohortFailures("0045 wave D-b recurring adjustments", ADJUSTMENTS_0045_COHORT, liveNames));
+  failures.push(...cohortFailures("0046 §7-A unattended sales lane", SALES_LANE_0046_COHORT, liveNames));
   return failures;
 }
 
