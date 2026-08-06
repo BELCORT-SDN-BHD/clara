@@ -16,13 +16,22 @@
 // about. So the error is no longer a bare string — it carries WHO raised it, WHAT would prove it
 // gone, and a monotonic GENERATION, and only a read that can honestly disprove it may clear it
 // (`readClearsError`). No lifetime here depends on the poll interval.
+//
+// AND THE THREAD IS THE SAME PROBLEM WEARING THE OPPOSITE FACE. The banner used to say too little;
+// the thread said too much. Its answer bubbles are drawn OPTIMISTICALLY — before the POST, because
+// a log that only fills in after a round trip feels broken — but a thread entry carries no
+// delivery state, so an entry for a REFUSED answer renders identically to a delivered one, right
+// beside a banner saying it never arrived. So every optimistic entry this hook draws is keyed by a
+// per-submit nonce and withdrawn (`removeEntry`) the moment the submit throws: the log shows what
+// happened, and a second attempt at one park is a second entry rather than a collision the
+// idempotent append silently swallows.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   getInterviewState, answerInterview, cancelInterview, COMPLETE_OUTCOMES,
   type InterviewState, type InterviewScope, type PendingPark, type CancelResult,
 } from "../shared/interviewApi";
-import { seedThread, promptEntry, answerEntry, appendUnique, foldActivityThread, type ThreadEntry } from "./thread";
+import { seedThread, promptEntry, answerEntry, noteEntry, appendUnique, removeEntry, foldActivityThread, type ThreadEntry } from "./thread";
 
 const TERMINAL_CHIPS = new Set(["complete", "cancelled", "expired", "ended"]);
 const POLL_MS = 3000;
@@ -105,6 +114,10 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
   // the poll guard has to compare the generation as it is NOW, not as it was when the read began.
   const errorRef = useRef<RunError | null>(null);
   const genRef = useRef(0);
+  // A monotonic per-submit counter. Every optimistic thread entry this hook draws is keyed by it,
+  // so each attempt at a park is its own entry — see `answerEntry`'s nonce note.
+  const submitSeqRef = useRef(0);
+  const nextSubmitId = useCallback(() => `s${(submitSeqRef.current += 1)}`, []);
 
   const putError = useCallback((next: RunError | null) => {
     errorRef.current = next;
@@ -179,24 +192,44 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
     return () => clearInterval(id);
   }, [token, runId, refresh]);
 
-  /** Deliver a free-text answer to the current park (optimistic bubble + POST). */
-  const submitAnswer = useCallback(async (park: PendingPark, text: string) => {
+  /** Deliver a free-text answer to the current park (optimistic bubble + POST).
+   *
+   *  THE BUBBLE IS OPTIMISTIC, SO IT IS ALSO REVERSIBLE. It is drawn before the POST because a
+   *  thread that only fills in after a round trip feels broken — but a thread entry looks exactly
+   *  the same whether it was delivered or not, so on a throw it has to come back off. Otherwise
+   *  the screen holds both halves of a contradiction: the answer sitting in the log as if Clara
+   *  had it, and a banner saying it never arrived.
+   *
+   *  AND WITHDRAWING IT MAKES THE RETURN VALUE LOAD-BEARING, which is why this reports delivery
+   *  the way `deliverValue` already does (F-M10). Once the bubble is withdrawn, the thread is no
+   *  longer a copy of what the human typed — so if the answer bar ALSO cleared its draft, a
+   *  refused long free-text answer would be gone from the screen entirely, leaving a banner
+   *  saying it did not land and nothing to retry from. True means delivered (clear the box);
+   *  false means the answer is still the human's to resend. */
+  const submitAnswer = useCallback(async (park: PendingPark, text: string): Promise<boolean> => {
     setBusy(true);
     putError(null); // the human is acting again — their own retry clears the board
-    setThread((cur) => appendUnique(cur, answerEntry(park, text)));
+    const optimistic = answerEntry(park, text, nextSubmitId());
+    setThread((cur) => appendUnique(cur, optimistic));
     try {
       await answerInterview(token, { runId: runId!, scope, parkIndex: park.parkIndex, value: text, planId });
       await refresh();
+      return true;
     } catch (e) {
       // The lossy 409 was already disambiguated and retried inside answerInterview, so a throw
       // here means the answer is genuinely UNDELIVERED — surfaced, never swallowed as
       // "already delivered" (that swallow is how GH #152 hid in production for a whole wave).
       // Held at THIS park: only a read showing the run has left it may take the refusal away.
+      // Roll the optimistic bubble back FIRST, by its own nonce id, so a concurrent or earlier
+      // attempt at the same park keeps its entry: the log must show what actually happened, and
+      // this attempt provably did not.
+      setThread((cur) => removeEntry(cur, optimistic.id));
       raise((e as Error).message, "action", park.parkIndex);
+      return false;
     } finally {
       setBusy(false);
     }
-  }, [token, runId, scope, planId, refresh, putError, raise]);
+  }, [token, runId, scope, planId, refresh, putError, raise, nextSubmitId]);
 
   /** Deliver a typed value (e.g. the firm create_firm receipt) without a text bubble. F-M10:
    *  returns whether delivery CONFIRMED — true once answerInterview resolves (on a 200, or on a
@@ -206,7 +239,12 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
   const deliverValue = useCallback(async (park: PendingPark, value: unknown, note?: string): Promise<boolean> => {
     setBusy(true);
     putError(null);
-    if (note) setThread((cur) => appendUnique(cur, { id: `sys:${park.parkIndex}`, role: "you", seg: park.seg, text: note }));
+    // Its note is optimistic on the same terms as `submitAnswer`'s bubble — and its wording makes
+    // the point sharper still: the firm page passes "Delivered create_firm receipt", a sentence in
+    // the PAST TENSE about something that has not happened yet. Left standing after a throw it
+    // states, in words, the exact thing the banner denies.
+    const optimistic = note ? noteEntry(park, note, nextSubmitId()) : null;
+    if (optimistic) setThread((cur) => appendUnique(cur, optimistic));
     try {
       await answerInterview(token, { runId: runId!, scope, parkIndex: park.parkIndex, value, planId });
       await refresh();
@@ -215,12 +253,13 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
       // Genuinely undelivered (answerInterview already re-read /state and retried): report false
       // so the caller RETAINS its create_firm receipt for a manual retry — and hold the refusal
       // at this park so the retry affordance is still on screen when the human reaches for it.
+      if (optimistic) setThread((cur) => removeEntry(cur, optimistic.id));
       raise((e as Error).message, "action", park.parkIndex);
       return false;
     } finally {
       setBusy(false);
     }
-  }, [token, runId, scope, planId, refresh, putError, raise]);
+  }, [token, runId, scope, planId, refresh, putError, raise, nextSubmitId]);
 
   /** Deliver a runtime cancel into the open park (the first half of the two-step client cancel;
    *  the whole verb for a firm run). A 409/not_pending is not an error (already resolved). */

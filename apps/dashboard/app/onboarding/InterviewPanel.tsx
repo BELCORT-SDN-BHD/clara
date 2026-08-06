@@ -34,7 +34,9 @@ const TERMINAL_COPY: Record<string, string> = {
 export function InterviewPanel(props: {
   state: InterviewState;
   thread: ThreadEntry[];
-  onSubmitAnswer: (park: PendingPark, text: string) => void;
+  /** Resolves TRUE only when the answer was delivered. The answer bar holds the human's draft
+   *  until it does — see `submit` below. */
+  onSubmitAnswer: (park: PendingPark, text: string) => Promise<boolean>;
   onCancel: () => void;
   busy: boolean;
   error: string | null;
@@ -47,10 +49,15 @@ export function InterviewPanel(props: {
   const park = state.pendingPark;
   const isFirmCommit = !!park && park.expects === "create_firm_receipt" && !!commitSlot;
 
-  const submit = () => {
-    if (!park || !draft.trim()) return;
-    onSubmitAnswer(park, draft.trim());
-    setDraft("");
+  // THE DRAFT IS THE HUMAN'S ONLY COPY OF WHAT THEY TYPED, so it is held until delivery is
+  // confirmed. It used to be cleared unconditionally, the instant the submit was fired: harmless
+  // while a refused answer stayed visible in the thread as an (incorrectly) delivered-looking
+  // bubble, and a real loss now that the thread withdraws that bubble on a refusal — the answer
+  // would be gone from both places at once, leaving a banner saying it did not land and nothing
+  // to retry from. That cost lands hardest on exactly the answers most expensive to retype.
+  const submit = async () => {
+    if (!park || busy || !draft.trim()) return;
+    if (await onSubmitAnswer(park, draft.trim())) setDraft("");
   };
 
   return (
@@ -89,12 +96,12 @@ export function InterviewPanel(props: {
               placeholder={park.phase === "c" ? "yes / change" : "Type your answer… (or 'skip' where allowed)"}
               value={draft}
               onChange={(ev) => setDraft(ev.target.value)}
-              onKeyDown={(ev) => { if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) submit(); }}
+              onKeyDown={(ev) => { if (ev.key === "Enter" && (ev.metaKey || ev.ctrlKey)) void submit(); }}
               aria-label="Your answer"
               disabled={busy}
             />
             <div className={styles.answerActions}>
-              <button className={styles.button} onClick={submit} disabled={busy || !draft.trim()}>Send</button>
+              <button className={styles.button} onClick={() => { void submit(); }} disabled={busy || !draft.trim()}>Send</button>
               <button className={styles.buttonDanger} onClick={onCancel} disabled={busy}>{props.cancelLabel ?? "Cancel"}</button>
             </div>
           </div>

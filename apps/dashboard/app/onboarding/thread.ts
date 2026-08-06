@@ -71,13 +71,39 @@ export function promptEntry(park: PendingPark): ThreadEntry {
   return { id: `p:${park.parkIndex}:${park.phase}`, role: "clara", seg: park.seg, phase: park.phase, text: park.question };
 }
 
-/** The your-side optimistic entry when you submit an answer to a park. */
-export function answerEntry(park: PendingPark, text: string): ThreadEntry {
-  return { id: `a:${park.parkIndex}:${park.phase}`, role: "you", seg: park.seg, phase: park.phase, text };
+/** The your-side optimistic entry when you submit an answer to a park.
+ *
+ *  `submitId` IS A PER-SUBMIT NONCE, AND IT IS REQUIRED — no default, because a default would
+ *  quietly restore the collision it exists to kill. The id used to be `a:<park>:<phase>`, i.e. one
+ *  id per PARK, which is wrong twice over: a park is answered as many times as the human tries,
+ *  and each try is its own event. A second, DIFFERENT answer at the same park collided with the
+ *  first by id, `appendUnique` dropped it, and the human watched their retype produce nothing at
+ *  all. The nonce also gives a failed submit an exact handle to roll back by (`removeEntry`) —
+ *  removing "the bubble for park N" would take a neighbouring attempt with it. */
+export function answerEntry(park: PendingPark, text: string, submitId: string): ThreadEntry {
+  return { id: `a:${park.parkIndex}:${park.phase}:${submitId}`, role: "you", seg: park.seg, phase: park.phase, text };
+}
+
+/** The your-side breadcrumb for a TYPED delivery (the firm create_firm receipt) — same nonce
+ *  discipline as `answerEntry` and for the same two reasons: a retried delivery is a second event
+ *  that must render, and a failed one must be removable by its own id. */
+export function noteEntry(park: PendingPark, text: string, submitId: string): ThreadEntry {
+  return { id: `sys:${park.parkIndex}:${submitId}`, role: "you", seg: park.seg, text };
 }
 
 /** Append `entry` iff no entry with its id is already present (idempotent across /state polls
  *  and optimistic re-renders). Returns a new array (never mutates). */
 export function appendUnique(log: readonly ThreadEntry[], entry: ThreadEntry): ThreadEntry[] {
   return log.some((e) => e.id === entry.id) ? log.slice() : [...log, entry];
+}
+
+/** Drop the entry with `id`, if present. Returns a new array (never mutates).
+ *
+ *  This is the OPTIMISTIC ROLLBACK. An optimistic bubble is a claim the client has not yet earned;
+ *  when the submit throws, the claim is disproven and the bubble has to go, because a thread entry
+ *  renders identically whether it was delivered or not — so leaving it says DELIVERED on screen
+ *  while the banner beside it says the answer was refused. That contradiction is the same lie
+ *  GH #152 told (a dropped answer that looked accepted), one layer up in the UI. */
+export function removeEntry(log: readonly ThreadEntry[], id: string): ThreadEntry[] {
+  return log.filter((e) => e.id !== id);
 }
