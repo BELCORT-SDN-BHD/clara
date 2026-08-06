@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, printLaneNotes, noteLane, printSkipCount,
   buildWorld, firmOf, opk,
-  a21EnsureReady, skip16, metaProbe0016, SUSPENDED_STATUS, seedStatedInvoiceFacts, seedCorroboratingInvoiceFacts,
+  a21EnsureReady, skip16, metaProbe0016, SUSPENDED_STATUS, seedCorroboratingInvoiceFacts,
   proposeAutopostRule, signAutopostRule, ruleRowById,
   upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution,
   draftEntryV3, approveEntry, stampCodingKind, billLines, ev, FIELD, counterpartyRows, codingRuleRows, sightingRows,
@@ -47,7 +47,9 @@ function skipHere(t) { return skip16(t, has16, "0016 not applied — credit-sigh
 async function makeCustomer(sub, { client, name, date = undefined }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 900.00" });
-  await seedStatedInvoiceFacts(cited, { firm }); // ADV-R2 R1#5: floor evidence needs a STATED invoice id
+  // 0046: the BIRTH entry is floor evidence too — it needs the same corroboration and the
+  // same coding kind as every top-up sighting, or the pool is one short of what the cell means.
+  await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, cents: 90000 });
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,
@@ -61,6 +63,7 @@ async function makeCustomer(sub, { client, name, date = undefined }) {
     // cells must control the birth date too, not just the top-up sightings.
     ...(date ? { postingDate: date } : {}),
   });
+  await stampCodingKind(d.entry_id);
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("custa") });
   const norm = name.toLowerCase().replace(/[^a-z0-9]/g, "");
   const cp = (await counterpartyRows(client)).find((c) => (c.name_normalized ?? "") === norm)?.id ?? null;
