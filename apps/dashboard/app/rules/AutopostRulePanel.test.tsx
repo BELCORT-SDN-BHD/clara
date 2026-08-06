@@ -18,6 +18,7 @@ const APPLICABLE: SalesEvidencePreviewApplicable = {
   tax_silent_documents: 2,
   required: { qualifying: 6, distinct_invoices: 6, corroborated: 6, span_days: 60 },
   floor_met: false, evaluated_at: "2026-08-07T03:00:00+08:00",
+  advisory: true,
 };
 
 function render(state: SalesEvidencePreviewFetch): string {
@@ -73,6 +74,19 @@ test("a met floor with zero tax-silent documents renders the OTHER badge and car
   assert.match(html, />floor met</);
   assert.doesNotMatch(html, /floor not yet met/);
   assert.doesNotMatch(html, /cannot corroborate/, "nothing to call out once every qualifying document corroborates");
+});
+
+test("the advisory banner is conditioned on the envelope's OWN advisory field — present when true, absent otherwise, and it never withholds the counts/gap/floor badge", () => {
+  const on = render({ kind: "ready", preview: { ...APPLICABLE, advisory: true } });
+  assert.match(on, /Advisory — the sign act re-checks the live floor/);
+  assert.match(on, /Evaluated/);
+
+  const off = render({ kind: "ready", preview: { ...APPLICABLE, advisory: false } });
+  assert.doesNotMatch(off, /Advisory — the sign act re-checks the live floor/);
+  // The rest of the block is unaffected — advisory:false hides only the banner sentence.
+  assert.match(off, /qualifying 4\/6/);
+  assert.match(off, /floor not yet met/);
+  assert.match(off, /cannot corroborate/);
 });
 
 test("a null span_days (an empty population) renders the DB's own em-dash, never a stray 'null'", () => {

@@ -124,6 +124,12 @@ export type SalesEvidencePreviewApplicable = {
   required: SalesEvidencePreviewRequired;
   floor_met: boolean;
   evaluated_at: string | null;
+  /** The envelope's OWN `advisory` flag (0046 §SECTION 6 emits `'advisory',true` on
+   *  every branch). The panel's "Advisory — the sign act re-checks the live floor"
+   *  banner is conditioned on THIS field, not hardcoded prose — so the claim has a
+   *  data provenance and a future envelope that drops or flips the flag changes
+   *  what renders, rather than the UI asserting something the DB no longer says. */
+  advisory: boolean;
 };
 
 export type SalesEvidencePreviewNotApplicable = {
@@ -178,6 +184,7 @@ export function toSalesEvidencePreview(raw: unknown): SalesEvidencePreview | nul
       required: toSalesEvidencePreviewRequired(o.required),
       floor_met: o.floor_met === true,
       evaluated_at: s(o.evaluated_at),
+      advisory: o.advisory === true,
     };
   }
   return {

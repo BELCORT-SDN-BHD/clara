@@ -107,6 +107,16 @@ test("toSalesEvidencePreview maps the applicable branch — every count an INTEG
   assert.deepEqual(a.required, { qualifying: 6, distinct_invoices: 6, corroborated: 6, span_days: 60 });
   assert.equal(a.floor_met, false);
   assert.equal(a.evaluated_at, "2026-08-07T03:00:00+08:00");
+  assert.equal(a.advisory, true);
+});
+
+test("toSalesEvidencePreview reads `advisory` off the envelope's OWN field — false or absent maps to false, never a hardcoded true", () => {
+  const off = toSalesEvidencePreview({ ...APPLICABLE_RAW, advisory: false }) as SalesEvidencePreviewApplicable;
+  assert.equal(off.advisory, false);
+  const withoutAdvisory: Record<string, unknown> = { ...APPLICABLE_RAW };
+  delete withoutAdvisory.advisory;
+  const missing = toSalesEvidencePreview(withoutAdvisory) as SalesEvidencePreviewApplicable;
+  assert.equal(missing.advisory, false, "an envelope minted before this key existed must not be read as advisory:true");
 });
 
 test("toSalesEvidencePreview maps every not-applicable reason (0046's pinned vocabulary)", () => {

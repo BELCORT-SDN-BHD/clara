@@ -51,10 +51,16 @@ export function EvidencePreview({ state }: { state: SalesEvidencePreviewFetch })
         </span>
       </div>
       {gap ? <p className={styles.hint}>{gap}</p> : null}
-      <p className={styles.hint}>
-        Advisory — the sign act re-checks the live floor.
-        {preview.evaluated_at ? ` Evaluated ${new Date(preview.evaluated_at).toLocaleString()}.` : ""}
-      </p>
+      {/* Conditioned on the envelope's OWN `advisory` field (0046 §SECTION 6),
+          not hardcoded prose — the claim has a data provenance. Absent/false
+          renders nothing, the same fail-quiet law every other state here
+          follows; it does not withhold the counts/gap/floor badge above. */}
+      {preview.advisory ? (
+        <p className={styles.hint}>
+          Advisory — the sign act re-checks the live floor.
+          {preview.evaluated_at ? ` Evaluated ${new Date(preview.evaluated_at).toLocaleString()}.` : ""}
+        </p>
+      ) : null}
     </div>
   );
 }
