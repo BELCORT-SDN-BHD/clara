@@ -8,9 +8,12 @@ single source of truth. This repo is the rebuild from the Gate-1 audit + Gate-2
 blueprint. **Product law → `docs/prd/PRD.md`. Target architecture →
 `docs/architecture/ARCHITECTURE.md`. Plan → `docs/plan/REBUILD-PLAN.md`.**
 
-> **Status → `docs/PROJECTLOG.md` (START HERE) + project memory** — one home, so
-> the copies can't drift. In one line: Phase 3 foundations (scaffold, CI, ops
-> floor), *not* the product yet; the plan is `docs/plan/REBUILD-PLAN.md`.
+> **Status → `CLAUDE.md`'s "Where we are" + `docs/PROJECTLOG.md` PART 2 (the open
+> register)** — one home each, so the copies can't drift. In one line (2026-08-06):
+> Phase 4 is live product — Waves A/A2/A2.1, B, C and **D are closed**, running on
+> **44 migrations (frontier `0045`)** with the runtime on Fly and the dashboard on
+> Cloudflare Pages. Wave E (periods + statements) is next. Plan →
+> `docs/plan/REBUILD-PLAN.md`.
 
 ## The stack (ratified at Gate 2)
 
