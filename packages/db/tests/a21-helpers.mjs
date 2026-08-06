@@ -403,6 +403,30 @@ export async function seedStatedInvoiceFacts(cited, { firm, invoiceId = null } =
 // Autopost plumbing shared across the P2/P4 files (the proven Wave-A2 idioms).
 // ---------------------------------------------------------------------------
 
+/** 0046 (7A-R4) — stamp a DRAFT entry's coding_kind. The OCR-sales floor now counts only
+ *  entries coded `sales_invoice`, so every fixture that builds floor evidence must say what
+ *  its entries ARE.
+ *
+ *  WHY THIS IS AN UPDATE AND NOT A WRITER CALL, WHICH IS ALSO THE PRODUCT FACT WORTH
+ *  KNOWING: nothing in the HUMAN lane can set a coding kind. `clara.draft_entry` has no
+ *  p_coding_kind parameter and neither does `clara.revise_entry` — the only verb that
+ *  carries one is `clara.wake_draft_entry`, the AGENT draft door. A hand-drafted entry is
+ *  therefore permanently coding_kind NULL, by construction, and these fixtures were
+ *  hand-drafting. Stamping the draft is the rig's stand-in for the agent draft that
+ *  produces this evidence in production.
+ *
+ *  IT IS NOT A BACK DOOR. `coding_kind` is on _tf_entry_immutable's OWN draft->draft
+ *  allowset, so this is a transition the schema sanctions; and stamping it ARMS
+ *  t_je_sales_invoice_shape, so the entry must genuinely hold a sales-invoice shape or the
+ *  update is refused. The fixture gets stricter, not looser. */
+export async function stampCodingKind(entry, kind = "sales_invoice") {
+  await rootQuery(
+    "update clara.journal_entries set coding_kind=$2, updated_at=now() where id=$1 and status='draft'",
+    [entry, kind],
+  );
+  return entry;
+}
+
 /** Propose an autopost rule via the as-built jsonb-proposal writer. Returns
  *  {id} or {error} — refusal cells inspect .error, happy cells .id. */
 export async function proposeAutopostRule(sub, {

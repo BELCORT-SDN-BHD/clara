@@ -1077,11 +1077,21 @@ begin
   end if;
 
   v_new :=
-    '  -- 0046 SS7-A (7A-R2/R1/R5): the DIRECTION CONTRACT. The tri-state answer is computed' || chr(10)
-    || '  -- from hard document evidence and BINDS the coding-kind family for this task; the' || chr(10)
-    || '  -- draft writer revalidates it, so a model-chosen coding_kind is never routing' || chr(10)
-    || '  -- authority. ''unresolved'' takes NO branch here on purpose -- it falls through to the' || chr(10)
-    || '  -- lane check below, which already refuses it as lane_changed/direction_unresolved.' || chr(10)
+    '  -- 0046 SS7-A (7A-R2/R1/R5): THE DIRECTION CONTRACT REPLACES THE FLAT REFUSAL ABOVE.' || chr(10)
+    || '  -- The comment block immediately above is 0036 SSD''s, kept because its reasoning about' || chr(10)
+    || '  -- WHY a sales document had to be fenced away -- and why the receipt rides' || chr(10)
+    || '  -- ''skipped_lane'' with a distinct token -- is still the reasoning this branch obeys.' || chr(10)
+    || '  -- What changed: the fence is now conditional on a per-firm activation flag.' || chr(10)
+    || '  --' || chr(10)
+    || '  -- WHILE THE FLAG IS OFF THIS IS BYTE-IDENTICAL TO 0036, AND THAT IS THE POINT. The' || chr(10)
+    || '  -- inactive branch returns 0036''s exact receipt -- outcome skipped_direction, reason' || chr(10)
+    || '  -- ''sales_direction'' -- so nothing observable changes anywhere in the product until' || chr(10)
+    || '  -- the ceremony flips the flag. The lane is not merely disabled; it is INERT.' || chr(10)
+    || '  --' || chr(10)
+    || '  -- The tri-state answer BINDS the coding-kind family for this task; the draft writer' || chr(10)
+    || '  -- revalidates it, so a model-chosen coding_kind is never routing authority.' || chr(10)
+    || '  -- ''unresolved'' takes NO branch here on purpose -- it falls through to the lane check' || chr(10)
+    || '  -- below, which already refuses it as lane_changed/direction_unresolved.' || chr(10)
     || '  v_direction:=clara._autodraft_direction_tri(f.document_id,f.client_id);' || chr(10)
     || '  if v_direction=''sales'' then' || chr(10)
     || '    if not clara._sales_lane_active(f.firm_id) then' || chr(10)
@@ -1089,11 +1099,11 @@ begin
     || '        insert into clara.sweep_run_items(run_id,filing_id,firm_id,client_id,document_id,' || chr(10)
     || '            outcome,refusal_token)' || chr(10)
     || '          values(p_run_id,p_filing,f.firm_id,f.client_id,f.document_id,''skipped_lane'',' || chr(10)
-    || '            jsonb_build_object(''clr'',''CLR29'',''reason'',''sales_lane_inactive'',''direction'',''sales''))' || chr(10)
+    || '            jsonb_build_object(''clr'',''CLR29'',''reason'',''sales_direction'',''direction'',''sales''))' || chr(10)
     || '          on conflict do nothing;' || chr(10)
     || '      end if;' || chr(10)
-    || '      return jsonb_build_object(''outcome'',''skipped_direction'',' || chr(10)
-    || '        ''reason'',''sales_lane_inactive'',''direction'',''sales'');' || chr(10)
+    || '      return jsonb_build_object(''outcome'',''skipped_direction'',''reason'',''sales_direction'',' || chr(10)
+    || '        ''direction'',''sales'');' || chr(10)
     || '    end if;' || chr(10)
     || '    select fl.sales_admission_watermark,coalesce(fl.sales_admission_daily_cap,15)' || chr(10)
     || '      into v_wm,v_cap_sales from clara.firm_limits fl where fl.firm_id=f.firm_id;' || chr(10)
@@ -1214,6 +1224,54 @@ begin
   v_next := replace(v_def, v_anchor,
     '    and (not clara._autodraft_sales_direction(f.document_id,f.client_id)' || chr(10)
     || '         or clara._sales_admission_open(f.firm_id,f.client_id,f.id))');
+  execute v_next;
+
+  -- ------------------------------------------------------- (7.4) the queue's own answer
+  -- NOT IN THE LITERAL SCOPE LIST, AND HERE ON PURPOSE. clara._autodraft_attempt_budget is
+  -- what clara.list_review_queue renders as "why the sweep will never take this filing"
+  -- (0036 SSD's visibility half). It reads the flat clara._autodraft_sales_direction, so
+  -- after activation it would tell a human `sweep_eligible=false, sales_direction` about a
+  -- filing the sweep is, at that moment, about to draft. Shipping a lane that makes its own
+  -- queue read lie is not a thing to leave for later.
+  --
+  -- WHILE THE FLAG IS OFF THE ANSWER IS UNCHANGED: clara._sales_admission_open is false for
+  -- every firm, so `not v_sales or false` is `not v_sales` and the reason is still
+  -- 'sales_direction' -- the same inertness the admission branch above carries.
+  select pg_get_functiondef('clara._autodraft_attempt_budget(uuid)'::regprocedure) into v_def;
+  v_anchor := '    ''sweep_eligible'', not v_sales,' || chr(10)
+    || '    ''blocked_reason'', case when v_sales then ''sales_direction'' else null end);';
+  v_count := (length(v_def)-length(replace(v_def,v_anchor,'')))/length(v_anchor);
+  if v_count <> 1 then
+    raise exception '0046 S7.4: _autodraft_attempt_budget eligibility anchor occurs % times, expected 1', v_count
+      using errcode='CLR10';
+  end if;
+  v_next := replace(v_def, v_anchor,
+    '    ''sweep_eligible'', not v_sales or clara._sales_admission_open(v_firm,v_client,p_filing),' || chr(10)
+    || '    ''blocked_reason'', case' || chr(10)
+    || '      when not v_sales then null' || chr(10)
+    || '      when clara._sales_admission_open(v_firm,v_client,p_filing) then null' || chr(10)
+    || '      when clara._sales_lane_active(v_firm) then ''sales_backlog_held''' || chr(10)
+    || '      else ''sales_direction'' end);');
+  -- v_firm is new: the eligibility read is per-FIRM (the flag, the watermark and the batch
+  -- all are) and this body only ever resolved the client.
+  v_anchor := '  v_document uuid; v_client uuid; v_cap int; v_used int; v_sales boolean;';
+  v_count := (length(v_next)-length(replace(v_next,v_anchor,'')))/length(v_anchor);
+  if v_count <> 1 then
+    raise exception '0046 S7.4: _autodraft_attempt_budget declare anchor occurs % times, expected 1', v_count
+      using errcode='CLR10';
+  end if;
+  v_next := replace(v_next, v_anchor,
+    '  v_document uuid; v_client uuid; v_cap int; v_used int; v_sales boolean; v_firm uuid;');
+  v_anchor := '  select df.document_id, df.client_id into v_document, v_client' || chr(10)
+    || '    from clara.document_filings df where df.id = p_filing;';
+  v_count := (length(v_next)-length(replace(v_next,v_anchor,'')))/length(v_anchor);
+  if v_count <> 1 then
+    raise exception '0046 S7.4: _autodraft_attempt_budget filing-select anchor occurs % times, expected 1', v_count
+      using errcode='CLR10';
+  end if;
+  v_next := replace(v_next, v_anchor,
+    '  select df.document_id, df.client_id, df.firm_id into v_document, v_client, v_firm' || chr(10)
+    || '    from clara.document_filings df where df.id = p_filing;');
   execute v_next;
 
   raise notice '0046 S7: admission direction contract installed';
@@ -1601,6 +1659,17 @@ begin
   if v_n <> 2 then
     raise exception '0046 tail 3: expected exactly TWO clara.settle_autodraft_task signatures, found %', v_n;
   end if;
+  -- ...AND THE PAIR CANNOT BE AMBIGUOUS. This is the property that makes a second overload
+  -- safe rather than the planner hazard the repo's no-orphan-overload sweep exists to catch,
+  -- and it is the same proof 0040 made for match_bank_line / settle_from_bank_line: the
+  -- 6-arity carries ZERO defaulted parameters, so a 5-argument call can only ever resolve to
+  -- the 5-arity and a 6-argument call only to this one. Asserted, not asserted-about.
+  select count(*)::int into v_n from pg_proc p
+    where p.pronamespace='clara'::regnamespace and p.proname='settle_autodraft_task'
+      and p.pronargs=6 and p.pronargdefaults=0;
+  if v_n <> 1 then
+    raise exception '0046 tail 3: the 6-arity clara.settle_autodraft_task must carry NO defaulted parameters (matched %/1) -- a default would make every 5-argument call planner-ambiguous', v_n;
+  end if;
   for r in select p.oid, p.oid::regprocedure::text as sig from pg_proc p
             where p.pronamespace='clara'::regnamespace and p.proname='settle_autodraft_task'
   loop
@@ -1725,8 +1794,10 @@ begin
      or pg_temp._wdb_call_count(v_code,'clara._sales_lane_active')<>1 then
     raise exception '0046 tail 10: clara.admit_autodraft_task does not resolve the tri-state direction behind the activation flag exactly once each';
   end if;
-  -- the receipt reasons are string literals -> raw.
-  for v_names in select unnest(array['sales_lane_inactive','sales_backlog_held','refused_sales_cap'])
+  -- the receipt reasons are string literals -> raw. 'sales_direction' is on this list
+  -- BECAUSE IT MUST SURVIVE: it is the inactive-lane receipt, byte-identical to 0036's, and
+  -- it is what makes this migration observably inert until the ceremony's flip.
+  for v_names in select unnest(array['sales_direction','sales_backlog_held','refused_sales_cap'])
   loop
     if position(v_names in v_raw)=0 then
       raise exception '0046 tail 10: clara.admit_autodraft_task has no % receipt -- every refusal on this lane must be NAMED, never inferred', v_names;

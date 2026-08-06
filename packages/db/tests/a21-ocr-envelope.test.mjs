@@ -26,7 +26,7 @@ import {
   proposeAutopostRule, signAutopostRule, ruleRowById, postViaRule, lastSkipReason, entryStatusOf,
   classifyDocument, notificationsMatching,
   upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedStatedInvoiceFacts,
-  draftEntryV3, approveEntry, ev, FIELD, counterpartyRows, sightingRows,
+  draftEntryV3, approveEntry, stampCodingKind, ev, FIELD, counterpartyRows, sightingRows,
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm, fnSource,
 } from "./a21-helpers.mjs";
@@ -63,6 +63,11 @@ async function approvedSales(sub, { client, cp = null, newName = null, date = "2
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
     postingDate: date, opKey: opk("os"),
   });
+    // 0046 (7A-R4): the OCR-sales floor now counts only entries coded `sales_invoice`.
+  // Nothing in the human lane can set a coding kind (neither clara.draft_entry nor
+  // clara.revise_entry takes one), so the rig stamps the draft — see stampCodingKind's
+  // header for why that is the sanctioned transition and not a back door.
+  await stampCodingKind(d.entry_id);
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("osa") });
   return d.entry_id;
 }

@@ -28,7 +28,7 @@ import {
   a21EnsureReady, skip16, metaProbe0016, SUSPENDED_STATUS, seedStatedInvoiceFacts,
   proposeAutopostRule, signAutopostRule, ruleRowById,
   upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution,
-  draftEntryV3, approveEntry, billLines, ev, FIELD, counterpartyRows, codingRuleRows, sightingRows,
+  draftEntryV3, approveEntry, stampCodingKind, billLines, ev, FIELD, counterpartyRows, codingRuleRows, sightingRows,
   checkDefs, uniqueIndexDefs, reasonOf,
   AP, EXP,
 } from "./a21-helpers.mjs";
@@ -88,6 +88,11 @@ async function salesSighting(sub, { client, cp, date = "2026-06-10", cents = 900
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
     postingDate: date, opKey: opk("ss"),
   });
+    // 0046 (7A-R4): the OCR-sales floor now counts only entries coded `sales_invoice`.
+  // Nothing in the human lane can set a coding kind (neither clara.draft_entry nor
+  // clara.revise_entry takes one), so the rig stamps the draft — see stampCodingKind's
+  // header for why that is the sanctioned transition and not a back door.
+  await stampCodingKind(d.entry_id);
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("ssa") });
   return { entryId: d.entry_id, documentId: cited.documentId, cited };
 }

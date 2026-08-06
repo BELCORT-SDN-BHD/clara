@@ -78,10 +78,18 @@ test("C-1 every new public writer holds EXACTLY ONE overload (unqualified call n
     // recreated (C-1) writers whose arity changed:
     "mint_wake_credential", "wake_context", "_resolve_counterparty",
   ];
+  // AMENDMENT 0046 (§7-A, skeleton §2d): settle_autodraft_task carries a ratified SECOND
+  // arity (p_workflow_run_id text), which is how the run-identity gap 0036:927-933 named
+  // gets closed. The hazard this cell guards — an unqualified call throwing 42725 — cannot
+  // arise here, because the new arity has NO defaulted parameters: a 5-argument call
+  // resolves only to the 5-arity and a 6-argument call only to the new one. 0046's tail
+  // arm (3) measures pronargdefaults to keep that true.
+  const RATIFIED_OVERLOADS = { settle_autodraft_task: 2 };
   for (const fn of fns) {
     const r = await rootQuery("select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname=$1", [fn]);
     if (r.rows[0].n === 0) { noteLane(`${fn} absent when counting overloads — name/arity may differ (interface expectation)`); continue; }
-    assert.equal(r.rows[0].n, 1, `clara.${fn} has exactly ONE overload (got ${r.rows[0].n})`);
+    const expected = RATIFIED_OVERLOADS[fn] ?? 1;
+    assert.equal(r.rows[0].n, expected, `clara.${fn} has exactly ${expected} overload(s) (got ${r.rows[0].n})`);
   }
 });
 

@@ -97,9 +97,17 @@ export async function overloadFailures() {
   // arities carry NO defaults, so the two candidates can never both match one call --
   // asserted by 0040's own S4.Z pronargdefaults census, which is what makes a second
   // overload safe here rather than the ambiguity this sweep exists to catch.
+  // AMENDMENT 0046 (§7-A, skeleton §2d): settle_autodraft_task gains a ratified SECOND
+  // arity carrying p_workflow_run_id, which closes the run-identity gap 0036:927-933 named
+  // and could not close ("this function receives no run id to compare against
+  // agent_tasks.workflow_run_id"). Same safety proof as the 0040 pair and not a weaker one:
+  // the 6-arity carries NO defaulted parameters, so a 5-argument call can only resolve to
+  // the 5-arity and a 6-argument call only to the new one — asserted by 0046's own tail arm
+  // (3), which measures pronargdefaults rather than asserting it in prose.
   const RATIFIED = {
     prepare_egress_dispatch: 2, consume_egress_dispatch: 2,
     match_bank_line: 2, settle_from_bank_line: 2,
+    settle_autodraft_task: 2,
   };
   const r = await rootQuery(
     `select p.proname, count(*)::int as n from pg_proc p join pg_namespace n on n.oid = p.pronamespace

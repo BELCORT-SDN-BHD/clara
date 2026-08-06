@@ -25,7 +25,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, opk, buildWorld, firmOf, rm, fnSource,
   upsertAccountClassed, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
-  persistInvoiceFacts, agreedEnvelope, factsRegion, grantConsent, freshResolution, ev, approveEntry,
+  persistInvoiceFacts, agreedEnvelope, factsRegion, grantConsent, freshResolution, ev, approveEntry stampCodingKind,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, draftEntryV3,
   classifyDocument, postViaRule, lastSkipReason, entryStatusOf, counterpartyRows,
   proposeAutopostRule, signAutopostRule, ruleRowById, seedStatedInvoiceFacts, FIELD,
@@ -64,6 +64,9 @@ async function approvedSales({ cp = null, newName = null, date, cents = 90000 })
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
     postingDate: date, opKey: opk("os"),
   });
+    // 0046 (7A-R4): the OCR-sales floor now counts only entries coded `sales_invoice`.
+  // The human draft verb cannot set one — see stampCodingKind's header.
+  await stampCodingKind(d.entry_id);
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("osa") });
   return d.entry_id;
 }
