@@ -140,9 +140,12 @@ autopost (ADR-050) · **C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliati
 exactly 0, nine real RPR months chained to the sen) · **D-a** FA register (0041) · **D-b**
 adjustments + advances + AF-2 + producer as a four-slice split (0042/0043/0044/0045).
 
-**LIVE POSTURE: 44 migrations (frontier `0045`) · Fly `clara-runtime` **v54** — THE
-ADJUSTMENTS BELT IS ARMED** (daily sweep; every occurrence DRAFTS, attested approves; the
-producer verb `accept_bank_rule_suggestion` granted authenticated-ONLY) **· Supavisor 32/60
+**LIVE POSTURE: 44 migrations (frontier `0045`) · Fly `clara-runtime` **v55** (2026-08-06
+— the FIRST release actually carrying the adjustments belt: v54 was built 08-05 04:13Z,
+BEFORE the belt's code merged at 15:52Z, so the belt was dark for ~35h while the record said
+"armed"; the B2 witness caught it — PART 2 records the incident + the deploy law it minted)
+— **THE ADJUSTMENTS BELT IS ARMED AND WITNESSED** (daily sweep; every occurrence DRAFTS,
+attested approves; the producer verb `accept_bank_rule_suggestion` granted authenticated-ONLY) **· Supavisor 32/60
 (runtime pool 11, its post-restart baseline; measured 2026-08-06) · FOUR firms** (BELCORT — real,
 high-stakes RM100,000 ADR-044, **THREE clients: ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE
 SOLUTION** `9e957c0f` — a sole prop onboarded 2026-08-06, the FIRST going-concern real client
@@ -158,8 +161,12 @@ going-concern client ADR-058 said those deferrals were waiting for** — it owns
 labelled-synthetic corpora — a live
 depreciation authority, ONE synthetic staff advance (tie 0), and the D-b2 acceptance register
 (templates A+B retired with reasons · **B2 LIVE from 2026-07-01** · the May occurrence+mirror
-pair netting ZERO · one cancelled pair drill). **Two dated witnesses:** the belt's first
-autonomous DRAFT (B2's July, ~2026-08-06/07) · the first autonomous POST (≥2026-10-01).
+pair netting ZERO · one cancelled pair drill). **Witnesses:** the belt's first
+autonomous DRAFT is RECORDED (B2's July: entry `d023b48c`, drafted by v55's boot sweep
+2026-08-06 16:56Z, `adjustment_runs` untouched, August correctly held transient — NEVER
+approve it) · BEE's first real depreciation draft `3c05ab82` (Feb-2025, 10,393¢, the 0041
+ramp rule: first-ever run under an authority always drafts; owner approval unlocks the
+remaining ten catch-up periods) · the first autonomous POST (≥2026-10-01) stands open.
 
 **WAVE D records (never re-grill):** `docs/plan/wave-d-contract.md` (WD-R1..R15, ADR-055) ·
 D-a: `wave-d-a-fa-design.md` v2.1 + `-part2.md` (ADR-056) · D-b AS-BUILT:
@@ -180,7 +187,11 @@ floor accrues ONLY from chatTurn drafts tagged `sales_invoice` — contract §7-
 law: migration numbers are claimed at MERGE time** (RENUMBER.md procedure). **Ceremony law
 (ADR-059): live applies carrying whole-schema lex passes set session-level
 `statement_timeout` inside the migration connection — role/db-level settings are invisible
-through Supavisor's pool.** Malaysian tax facts live in effective-dated policy tables, never
+through Supavisor's pool.** **Deploy law (2026-08-06, minted by the v54 belt gap): a deploy
+ceremony closes only on a POSITIVE read that the running release carries the intended
+commit — compare the release's build time against the merge it must contain, then read the
+new code's own boot/log line; "the deploy command completed" is a derived state, not
+evidence.** Malaysian tax facts live in effective-dated policy tables, never
 in prose (`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
 
 **Open build items (PROJECTLOG PART 2 is the live register):** **§7-A NEXT — skeleton
