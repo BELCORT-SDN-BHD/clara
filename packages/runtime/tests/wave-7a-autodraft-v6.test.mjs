@@ -512,17 +512,136 @@ function resolveStreamTextLocalBindingName(sourceFile) {
   return specifiers[0];
 }
 
+function findAncestor(node, predicate) {
+  let cur = node.parent;
+  while (cur) {
+    if (predicate(cur)) return cur;
+    cur = cur.parent;
+  }
+  return undefined;
+}
+
+/** Codex round 6: five FRESH forgeries against the round-5 identity resolver, all one family
+ *  — make the REAL call EXOTIC (a parameter shadow, a module-scope forwarding const, an
+ *  `ai.streamText` namespace call, a "./ai" path import) while a CLEAN decoy matches the
+ *  simple pattern round 5's resolution logic was built to trust and resolve. Team lead's
+ *  ruling: stop trying to out-resolve novel shapes with more semantic cleverness — a test
+ *  guard that needs a type-checker is a defect surface of its own. CLOSE THE CLASS BY CENSUS.
+ *
+ *  Before ANY identity resolution runs, refuse unless the WHOLE FILE matches the canonical
+ *  v5/v6 shape EXACTLY, by pure TOKEN-COUNT equality over the parser's own identifier nodes
+ *  (never regex — comments and string/template text are never tokenized as identifiers, so
+ *  they cannot smuggle a phantom "count"). Four checks, each pinned by measuring the REAL,
+ *  unmodified v5 and v6 files (both must pass this census untouched — that is its own
+ *  control): (1) exactly ONE import binding named `streamText` anywhere in the file, from ANY
+ *  module — not scoped to moduleSpecifier==="ai" at the search stage, which is exactly what
+ *  would miss a "./ai" path-import forgery — and THAT one binding must be a plain, unaliased,
+ *  NAMED import specifier whose own ImportDeclaration's module specifier is the exact string
+ *  "ai"; (2) no namespace import of "ai" exists anywhere (explicit and redundant with (1)'s
+ *  positive requirement, but stated directly per the ruling — an `ai.streamText(...)` call's
+ *  own `.name` would otherwise still count as a legitimate-looking "streamText" identifier);
+ *  (3) the identifier "streamText" appears EXACTLY TWICE in the whole file — the import
+ *  specifier and one bare-identifier CallExpression callee, itself inside
+ *  runAutoDraftModelStep's own body; (4) the identifier "messages" appears EXACTLY TWICE in
+ *  the whole file — pinned at 2 by measuring the real files (the declaration + the streamText
+ *  property) — with NO function parameter named "messages" ANYWHERE (round 6's own named
+ *  forgery), and the declaration-shaped occurrence must sit inside runAutoDraftModelStep
+ *  specifically, never module scope or a different function. A forgery that makes the real
+ *  call exotic STRUCTURALLY REQUIRES an extra census-visible token somewhere — there is no
+ *  way to construct one that doesn't, because the predicate is now count-equality over lexer
+ *  tokens, with nothing semantic left to fool. Only once this census passes does the existing
+ *  (round 5) identity-resolution logic below even run. */
+function runWholeFileLexicalCensus(sourceFile, targetFn) {
+  const allIdentifiers = findNodesByPredicate(sourceFile, (node) => ts.isIdentifier(node));
+
+  // --- streamText's import binding: exactly one, from ANY module (not pre-filtered to "ai" —
+  // that is precisely what would miss a "./ai" path-import forgery). ---
+  const streamTextImportBindings = [];
+  for (const id of allIdentifiers) {
+    if (ts.isImportSpecifier(id.parent) && id.parent.name === id && id.text === "streamText") {
+      streamTextImportBindings.push({ kind: "named", node: id, propertyName: id.parent.propertyName, importDecl: findAncestor(id, ts.isImportDeclaration) });
+    } else if (ts.isImportClause(id.parent) && id.parent.name === id && id.text === "streamText") {
+      streamTextImportBindings.push({ kind: "default", node: id, importDecl: findAncestor(id, ts.isImportDeclaration) });
+    } else if (ts.isNamespaceImport(id.parent) && id.parent.name === id && id.text === "streamText") {
+      streamTextImportBindings.push({ kind: "namespace", node: id, importDecl: findAncestor(id, ts.isImportDeclaration) });
+    }
+  }
+  assert.equal(
+    streamTextImportBindings.length,
+    1,
+    `${CANNOT_CERTIFY} — expected exactly one import binding named "streamText" anywhere in the file, found ${streamTextImportBindings.length}`,
+  );
+  const streamTextImport = streamTextImportBindings[0];
+  assert.equal(streamTextImport.kind, "named", `${CANNOT_CERTIFY} — the streamText import must be a plain named-import specifier, not a default or namespace import`);
+  assert.equal(streamTextImport.propertyName, undefined, `${CANNOT_CERTIFY} — the streamText import specifier must be unaliased`);
+  assert.ok(streamTextImport.importDecl, `${CANNOT_CERTIFY} — the streamText import specifier's own ImportDeclaration must be found`);
+  assert.ok(
+    ts.isStringLiteral(streamTextImport.importDecl.moduleSpecifier) && streamTextImport.importDecl.moduleSpecifier.text === "ai",
+    `${CANNOT_CERTIFY} — the streamText import must come from the exact module specifier "ai"`,
+  );
+
+  // Explicit, redundant-by-design: no namespace import of "ai" anywhere in the file, under ANY
+  // local name.
+  const aiNamespaceImports = findNodesByPredicate(sourceFile, (node) => ts.isNamespaceImport(node)).filter((ns) => {
+    const decl = findAncestor(ns, ts.isImportDeclaration);
+    return decl && ts.isStringLiteral(decl.moduleSpecifier) && decl.moduleSpecifier.text === "ai";
+  });
+  assert.equal(aiNamespaceImports.length, 0, `${CANNOT_CERTIFY} — a namespace import of "ai" exists somewhere in the file`);
+
+  // --- streamText identifier census: EXACTLY TWO occurrences in the whole file. ---
+  const streamTextIdents = allIdentifiers.filter((n) => n.text === "streamText");
+  assert.equal(
+    streamTextIdents.length,
+    2,
+    `${CANNOT_CERTIFY} — the identifier "streamText" must appear EXACTLY twice in the whole file (the import + the one call site), found ${streamTextIdents.length}`,
+  );
+  const callSiteIdent = streamTextIdents.find((n) => n !== streamTextImport.node);
+  assert.ok(callSiteIdent, `${CANNOT_CERTIFY} — could not isolate the non-import "streamText" occurrence`);
+  assert.ok(
+    ts.isCallExpression(callSiteIdent.parent) && callSiteIdent.parent.expression === callSiteIdent,
+    `${CANNOT_CERTIFY} — the non-import "streamText" occurrence must be a bare-identifier CallExpression callee`,
+  );
+  assert.ok(
+    findAncestor(callSiteIdent, (n) => n === targetFn),
+    `${CANNOT_CERTIFY} — the streamText call site must be inside runAutoDraftModelStep's own body`,
+  );
+
+  // --- messages identifier census: EXACTLY TWO occurrences in the whole file (pinned by
+  // measuring the real, unmodified v5 and v6 files). ---
+  const messagesIdents = allIdentifiers.filter((n) => n.text === "messages");
+  assert.equal(
+    messagesIdents.length,
+    2,
+    `${CANNOT_CERTIFY} — the identifier "messages" must appear EXACTLY twice in the whole file (the declaration + the streamText property), found ${messagesIdents.length}`,
+  );
+  const messagesParams = findNodesByPredicate(sourceFile, (node) => ts.isParameter(node) && ts.isIdentifier(node.name) && node.name.text === "messages");
+  assert.equal(messagesParams.length, 0, `${CANNOT_CERTIFY} — a function parameter named "messages" exists somewhere in the file`);
+  const messagesDeclIdents = messagesIdents.filter((n) => ts.isVariableDeclaration(n.parent) && n.parent.name === n);
+  assert.equal(
+    messagesDeclIdents.length,
+    1,
+    `${CANNOT_CERTIFY} — exactly one of the two "messages" occurrences must be a variable declaration's own name, found ${messagesDeclIdents.length}`,
+  );
+  assert.ok(
+    findAncestor(messagesDeclIdents[0], (n) => n === targetFn),
+    `${CANNOT_CERTIFY} — the "messages" declaration must sit inside runAutoDraftModelStep's own body, not module scope or a different function`,
+  );
+}
+
 function extractUserMessageContent(text) {
   const sourceFile = ts.createSourceFile("autodraft-impl-probe.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
-
-  const streamTextLocalName = resolveStreamTextLocalBindingName(sourceFile);
 
   const targetFns = findNodesByPredicate(
     sourceFile,
     (node) => ts.isFunctionDeclaration(node) && !!node.name && node.name.text === "runAutoDraftModelStep" && !!node.body,
   );
   assert.equal(targetFns.length, 1, `${CANNOT_CERTIFY} — expected exactly one \`runAutoDraftModelStep\` FunctionDeclaration, found ${targetFns.length}`);
-  const fnBody = targetFns[0].body;
+  const targetFn = targetFns[0];
+  const fnBody = targetFn.body;
+
+  runWholeFileLexicalCensus(sourceFile, targetFn);
+
+  const streamTextLocalName = resolveStreamTextLocalBindingName(sourceFile);
 
   // The resolved import binding must not itself be shadowed by a LOCAL declaration inside
   // this function — a local re-declaration of the same name would silently redirect every
@@ -679,7 +798,7 @@ export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
   );
 });
 
-test("Codex round-4's own mutant class, reconstructed and re-run against the identity-resolving extractor: the REAL streamText call site references a RENAMED variable (`runtimeMessages`) carrying the OLD message, while a NEVER-CALLED sibling function contains a decoy `messages` declaration carrying the expected NEW message — the extractor must follow streamText's own `messages: runtimeMessages` reference to runtimeMessages's OWN declaration, never select 'the' declaration literally spelled \"messages\" from anywhere in the file", () => {
+test("Codex round-4's own mutant class, reconstructed and re-run against the CENSUS-GATED extractor: the REAL streamText call site references a RENAMED variable (`runtimeMessages`) carrying the OLD message, while a NEVER-CALLED sibling function contains a decoy `messages` declaration carrying the expected NEW message — round 6's census now REFUSES this shape outright (a same-named decoy declaration outside runAutoDraftModelStep's own body is exactly what the messages-declaration-position check exists to catch), superseding round 5's identity resolution rather than merely being resolved by it — the guard now catches this ONE STEP EARLIER than before", () => {
   const mutant = `
 import { streamText, stepCountIs } from "ai";
 
@@ -687,7 +806,6 @@ export async function neverCalledDecoy(ctx: ToolCtx) {
   const messages: ModelMessage[] = [
     { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
   ];
-  return messages;
 }
 
 export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
@@ -704,10 +822,10 @@ export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
   return result;
 }
 `;
-  assert.equal(
-    extractUserMessageContent(mutant),
-    "Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).",
-    "the extractor must resolve streamText's OWN `messages: runtimeMessages` reference to runtimeMessages's declaration inside runAutoDraftModelStep's own body — never the same-named decoy sitting in a different, never-called function",
+  assert.throws(
+    () => extractUserMessageContent(mutant),
+    /cannot certify — human eyes required/,
+    "round 6's census must refuse a same-named decoy declaration sitting outside runAutoDraftModelStep's own body — round 5's identity resolution never even runs",
   );
 });
 
@@ -796,6 +914,133 @@ export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
     "Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}",
     "a plain, unambiguous shape must extract cleanly — the stricter posture refuses only genuine ambiguity, not ordinary code",
   );
+});
+
+// ===========================================================================
+// Codex round 6 (CENSUS): five FRESH forgeries, all one family — make the REAL call EXOTIC
+// while a CLEAN decoy matches the simple canonical pattern round 5's identity resolution was
+// built to trust. Two of the five (parameter shadow, ai.streamText namespace) are verified
+// NON-TAUTOLOGICAL below: a since-deleted scratch script reimplementing round 5's
+// identity-resolution logic VERBATIM (no census) was run against each, and BOTH silently
+// returned the DECOY's WRONG content with no throw at all — genuine, concrete closures, not
+// re-assertions of an already-refused shape. The other three (module-scope forwarding const,
+// "./ai" path import, a source-side import rename) were ALSO verified against the same
+// standalone round-5 reimplementation and found to already throw — for reasons UNRELATED to
+// distinguishing real-from-decoy (an accidental structural mismatch, the same class of
+// finding round 5's OWN ADDENDUM recorded honestly for its "forgery 1"). The census closes
+// all five uniformly and DELIBERATELY regardless of which category each falls into.
+// ===========================================================================
+
+test("Codex round-6, forgery 1 (parameter shadow) — VERIFIED NON-TAUTOLOGICAL against round 5's standalone logic: the real runtime `messages` value comes from an EXTERNALLY-PASSED PARAMETER (its actual content is not visible in this file at all), while a dead-block decoy `const messages = [...]` sits alongside it — round 5's decls search only matches VariableDeclaration nodes, so it silently found the decoy (the ONLY declaration-shaped candidate) and returned its content with NO throw; the census refuses because \"messages\" appears three times whole-file (parameter + decoy declaration + property) and a parameter named \"messages\" exists at all", () => {
+  const mutant = `
+import { streamText, stepCountIs } from "ai";
+
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string, messages: ModelMessage[]) {
+  "use step";
+  if (false) {
+    const messages: ModelMessage[] = [
+      { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+    ];
+  }
+  const result = streamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages,
+    tools: tools,
+  });
+  return result;
+}
+`;
+  assert.throws(() => extractUserMessageContent(mutant), /cannot certify — human eyes required/, "a parameter named \"messages\" anywhere in the file must refuse the extraction — its real runtime content is not statically knowable at all");
+});
+
+test("Codex round-6, forgery 2 (module-scope forwarding const): the array a human might assume is \"the message\" is declared OUTSIDE runAutoDraftModelStep entirely, at module scope, then referenced via shorthand from inside the function — the census refuses because the declaration-shaped \"messages\" occurrence does not sit inside runAutoDraftModelStep's own body", () => {
+  const mutant = `
+import { streamText, stepCountIs } from "ai";
+
+const messages: ModelMessage[] = [
+  { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+];
+
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
+  "use step";
+  const result = streamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages,
+    tools: tools,
+  });
+  return result;
+}
+`;
+  assert.throws(() => extractUserMessageContent(mutant), /cannot certify — human eyes required/, "a \"messages\" declaration sitting at module scope (outside runAutoDraftModelStep) must refuse the extraction");
+});
+
+test("Codex round-6, forgery 3 (ai.streamText namespace) — VERIFIED NON-TAUTOLOGICAL against round 5's standalone logic: the REAL call is `ai.streamText(...)` (a namespace property access) carrying the CORRECT content, while a dead-block decoy call literally spelled `streamText(...)` (a bare identifier) sits alongside it carrying WRONG content — round 5's call search only matches bare-identifier callees, so `ai.streamText(...)` is INVISIBLE to it entirely and the decoy becomes the ONLY call it can see, silently returning the decoy's WRONG content with no throw; the census refuses immediately on the namespace import of \"ai\" alone, before any call-site analysis even runs", () => {
+  const mutant = `
+import { streamText, stepCountIs } from "ai";
+import * as ai from "ai";
+
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
+  "use step";
+  const result = ai.streamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages: [{ role: "user", content: \`Draft the supplier bill for document \${ctx.documentId} (filing \${ctx.filingId}).\` }],
+    tools: tools,
+  });
+  if (false) {
+    const messages: ModelMessage[] = [
+      { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+    ];
+    streamText({ messages });
+  }
+  return result;
+}
+`;
+  assert.throws(() => extractUserMessageContent(mutant), /cannot certify — human eyes required/, "a namespace import of \"ai\" anywhere in the file must refuse the extraction, regardless of whether a bare-identifier call also exists");
+});
+
+test("Codex round-6, forgery 4 (\"./ai\" relative-path import): the REAL streamText binding comes from the relative path \"./ai\", not the exact module specifier \"ai\" — the census's import search is NOT pre-filtered to moduleSpecifier===\"ai\" (that pre-filtering is exactly what would miss this forgery); it finds the \"./ai\"-sourced binding as the sole \"streamText\" identifier binding in the file and refuses because that binding's own import declaration is not from the exact string \"ai\"", () => {
+  const mutant = `
+import { streamText, stepCountIs } from "./ai";
+
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
+  "use step";
+  const messages: ModelMessage[] = [
+    { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+  ];
+  const result = streamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages,
+    tools: tools,
+  });
+  return result;
+}
+`;
+  assert.throws(() => extractUserMessageContent(mutant), /cannot certify — human eyes required/, "a streamText binding sourced from \"./ai\" rather than the exact string \"ai\" must refuse the extraction");
+});
+
+test("Codex round-6, forgery 5 (source-side import rename): `import { someOtherExport as streamText } from \"ai\"` — the LOCAL name is genuinely \"streamText\" (this is NOT a local alias in the usual sense; the alias is on the REMOTE/imported side), but it does not import the real streamText export at all — the census refuses because the sole \"streamText\" import binding carries a propertyName (i.e. it is NOT a plain, unaliased specifier)", () => {
+  const mutant = `
+import { someOtherExport as streamText, stepCountIs } from "ai";
+
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
+  "use step";
+  const messages: ModelMessage[] = [
+    { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+  ];
+  const result = streamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages,
+    tools: tools,
+  });
+  return result;
+}
+`;
+  assert.throws(() => extractUserMessageContent(mutant), /cannot certify — human eyes required/, "an import specifier that renames some OTHER export to the local name \"streamText\" must refuse the extraction");
 });
 
 test("PR #204: directionClause's three-way ternary is pinned exactly — 'sales' -> the SALES sentence naming sales_invoice/sales_credit_note, 'purchase' -> the PURCHASE sentence naming supplier_bill, anything else (including null) -> the empty string", () => {
