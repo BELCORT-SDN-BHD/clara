@@ -33,6 +33,26 @@
 //      `kind` that CONTRADICTS coding_kind, never trusting it even when present.
 //   4. A short registry/freeze sanity check that this file's own premises (autoDraft_v6 /
 //      chatTurn_v9 are the live registry pins; v5/v8 stay exported) still hold.
+//
+// Codex round-1 fix wave (tests-only, zero implementation-file changes; the cross-model
+// gate returned NOT-READY on test-guard grounds only, core implementation verified solid
+// by execution): (a) the impl.ts model user-message delta ("Draft the supplier bill..."
+// -> "Draft the document...") is UNMASKED — both exact strings pinned directly, no
+// placeholder — and RATIFIED as a documented §2a addendum (native review N-8 concurred:
+// the old message would fight the v6 system prompt on a sales run); (b) the writer-args
+// fidelity mask narrows from "the whole 14-element array" to ONLY positions 11
+// (counterparty payload) and 14 (coding_kind), with a dedicated test asserting the other
+// 12 positions token-identical to v5's own call site; (c) the settle fidelity mask
+// narrows from "the whole function" to three tightly-scoped insertions (properly SCOPED
+// to settleAutoDraftStep's own body — claimAutoDraftStep, earlier in this file, ALSO
+// destructures workflowRunId from getWorkflowMetadata(), so an unscoped mask/replace
+// would silently hit the wrong occurrence), plus an explicit params[0..4]-identical-to-v5
+// cross-check; (d) the prompt.ts carried-invariant clause set expands from three
+// (SST-zero, watch-existence-only, wiki) to cover every OTHER load-bearing v5 invariant:
+// DB-owns-every-number, evidence-citation, MYR-only, no-guess, uncertainty-qualitative,
+// and the closing citation-precision rule — each checked present in BOTH v5 and v6, so a
+// mutant that quietly deleted one would fail here even though every other test stayed
+// green.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -144,16 +164,52 @@ function maskCounterpartyPayloadBlock(text) {
   return `${text.slice(0, start)}<the counterparty-payload derivation block — masked>${text.slice(end)}`;
 }
 
-/** The writer args array itself: arg 11 (counterparty JSON) and arg 14 (the coding_kind
- *  marker, item 1) both change. Masked as one span — the whole array literal. */
-function maskWriterArgsArray(text) {
-  const startAnchor = "        [\n          clientId,";
-  const start = text.indexOf(startAnchor);
+/** Split a comma-list respecting paren/bracket depth — Math.max(0, Math.round(tokens))
+ *  and similar nested-call expressions must stay ONE element, never split on their own
+ *  internal comma. Shared by the writer-args-array and settle-params-array extractors. */
+function splitArgs(text) {
+  const out = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(" || ch === "[") depth++;
+    if (ch === ")" || ch === "]") depth--;
+    if (ch === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+/** Extract wake_draft_entry's 14-element writer args array, positionally. */
+function extractWriterArgsArray(text) {
+  const startMarker = "        [\n          clientId,";
+  const start = text.indexOf(startMarker);
   assert.ok(start > 0, "the writer args array must be present in both versions");
-  const endAnchor = "        ],\n      );";
-  const end = text.indexOf(endAnchor, start);
+  const arrayInnerStart = start + "        [\n".length;
+  const endMarker = "        ],\n      );";
+  const end = text.indexOf(endMarker, start);
   assert.ok(end > start, "the array's own close must follow");
-  return `${text.slice(0, start)}<the writer args array — masked>${text.slice(end + endAnchor.length)}`;
+  const inner = text.slice(arrayInnerStart, end);
+  return { elements: splitArgs(inner), start, end };
+}
+
+/** THE COUNTERPARTY CONTRACT + item 1 (skeleton §2a): mask ONLY positions 11
+ *  (the counterparty payload) and 14 (the coding_kind marker — the exact §0.1 headline
+ *  defect this wave fixes). Reconstructed from the SAME extraction the dedicated
+ *  14-position test below uses, so positions 1-10/12/13 are LEFT AS LITERAL TEXT here
+ *  too — a mutation to any of those 12 positions fails THIS structural test, not only
+ *  the dedicated one (Codex SF: stop masking the whole array). */
+function maskWriterArgsArray(text) {
+  const { elements, start, end } = extractWriterArgsArray(text);
+  assert.equal(elements.length, 14, "the writer args array must have exactly 14 positions");
+  const masked = elements.map((el, i) => (i === 10 || i === 13 ? `<position ${i + 1} masked>` : el));
+  const maskedInner = `          ${masked.join(",\n          ")},\n`;
+  return `${text.slice(0, start)}        [\n${maskedInner}${text.slice(end)}`;
 }
 
 /** read_document's own description text: "this bill's" -> "this document's" (a
@@ -195,44 +251,98 @@ test("v5's tools.ts has no deriveCounterpartyKind or counterpartyPayload at all 
   assert.doesNotMatch(v5, /counterpartyPayload/);
 });
 
+test("the wake_draft_entry writer args array: positions 1-10 and 12-13 (12 of 14) are token-IDENTICAL between v6 and v5; ONLY positions 11 and 14 differ, and they differ to exactly the documented values — a mutant that changed any OTHER position (e.g. shuffled sha256/booksVersion/evidence) is caught HERE, not only by the structural mask above", () => {
+  const v6 = extractWriterArgsArray(src("autoDraft.v6.tools.ts")).elements;
+  const v5 = extractWriterArgsArray(src("autoDraft.v5.tools.ts")).elements;
+  assert.equal(v6.length, 14, "v6 writer args must have exactly 14 positions");
+  assert.equal(v5.length, 14, "v5 writer args must have exactly 14 positions");
+  for (let i = 0; i < 14; i++) {
+    if (i === 10 || i === 13) continue; // positions 11 and 14 (0-indexed 10, 13) — the two documented deltas
+    assert.equal(v6[i], v5[i], `writer arg position ${i + 1} must be token-identical to v5's — v6="${v6[i]}" v5="${v5[i]}"`);
+  }
+  assert.equal(v6[10], "JSON.stringify(counterpartyPayload)", "v6 position 11 must pass the DERIVED counterparty payload");
+  assert.equal(v5[10], "JSON.stringify(input.vendor)", "v5 position 11 (regression pin — the pre-derivation shape)");
+  assert.equal(v6[13], "input.coding_kind", "v6 position 14 must pass input.coding_kind — the §0.1 headline defect this wave fixes");
+  assert.equal(v5[13], '"supplier_bill"', "v5 position 14 (regression pin — the hardcoded literal this wave replaces)");
+});
+
 // ===========================================================================
 // 1c. autoDraft.v6.impl.ts — masked-diff vs v5 (skeleton §2a item (d) / §2d).
 //     Mirrors the ledger-44-autodraft-v4.test.mjs:319-343 maskModelStepChange idiom.
 // ===========================================================================
 
-/** The model's own user-message text ("the supplier bill" -> "the document" — necessary
- *  because v6 drafts both directions; sits outside the settle-call span proper). */
-function maskUserMessage(text) {
-  const anchor = '{ role: "user", content: `Draft the';
-  const start = text.indexOf(anchor);
-  assert.ok(start > 0, "the model user-message must be present in both versions");
-  const end = text.indexOf("` },", start);
-  assert.ok(end > start, "the message template literal must close");
-  return `${text.slice(0, start)}<the model user-message — masked>${text.slice(end)}`;
+/** The model's own user-message text ("the supplier bill" -> "the document") — a
+ *  RATIFIED §2a addendum (Codex round-1, native review N-8 concurs): necessary because
+ *  v6 drafts both directions, and the old purchase-only message would fight the v6
+ *  system prompt on a sales run. UNMASKED here (a narrow, single-line, no-op-on-mismatch
+ *  swap) so the structural byte-compare below still passes; the REAL verification is the
+ *  dedicated exact-string test immediately after this function, which pins BOTH the new
+ *  v6 string and the old v5 string directly — no placeholder, no "something changed here"
+ *  hand-waving. */
+function maskUserMessageLine(text) {
+  return text
+    .replace(
+      '{ role: "user", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).` },',
+      "<user message — pinned exactly by the dedicated test below, not by this mask>",
+    )
+    .replace(
+      '{ role: "user", content: `Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).` },',
+      "<user message — pinned exactly by the dedicated test below, not by this mask>",
+    );
 }
 
-/** The settle step's own doc-comment tail (the §2d rationale, v6-only) plus the 6-arity
- *  call itself (the getWorkflowMetadata() destructure + the extra placeholder/param) —
- *  one contiguous span from the settle doc-comment through openSweepQuestionStep's own
- *  doc-comment start. */
-function maskSettleDocAndCall(text) {
-  const startAnchor = " *  writes the sweep_run_items row, and updates the registry counters (a 2nd failure parks)";
-  const start = text.indexOf(startAnchor);
-  assert.ok(start > 0, "the settle step's own doc-comment lead-in must be present in both versions");
-  const endAnchor = "export async function openSweepQuestionStep";
-  const end = text.indexOf(endAnchor, start);
-  assert.ok(end > start, "openSweepQuestionStep must follow settleAutoDraftStep");
-  return `${text.slice(0, start)}<the settle doc-comment tail + the 6-arity settle call — masked>\n\n${text.slice(end)}`;
+test("v6's model user-message is direction-generic (\"Draft the document...\"), replacing v5's purchase-only \"Draft the supplier bill...\" — RATIFIED as a necessary §2a addendum (Codex round-1: the old message would fight the v6 system prompt on a sales run; native review N-8 concurs) — both exact strings pinned, no mask", () => {
+  const v6 = src("autoDraft.v6.impl.ts");
+  const v5 = src("autoDraft.v5.impl.ts");
+  assert.ok(
+    v6.includes('{ role: "user", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).` },'),
+    "v6 must use the exact direction-generic user message",
+  );
+  assert.ok(
+    v5.includes('{ role: "user", content: `Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).` },'),
+    "v5 must still carry its exact original purchase-only user message (regression pin)",
+  );
+});
+
+/** The settle step's own JSDoc tail (the §2d rationale, v6-only — a genuine VALUE change,
+ *  masked as one small precise span) plus exactly THREE scoped insertions inside
+ *  settleAutoDraftStep's OWN body (never file-wide: claimAutoDraftStep, earlier in this
+ *  same file, ALSO destructures workflowRunId from getWorkflowMetadata() — an unscoped
+ *  replace would silently hit the WRONG occurrence): the workflowRunId destructure line,
+ *  the SQL text's trailing $6::text placeholder, and the params array's trailing
+ *  workflowRunId element. Everything else in the function — the signature, "use step",
+ *  and params[0..4] — is left as LITERAL text, so a mutation there fails THIS test too,
+ *  not only the dedicated params-array test below (Codex SF: stop masking the whole
+ *  function). */
+function maskSettleFunction(text) {
+  const jsDocStart = text.indexOf(" *  writes the sweep_run_items row, and updates the registry counters (a 2nd failure parks)");
+  assert.ok(jsDocStart > 0, "the settle step's own JSDoc tail lead-in must be present in both versions");
+  const jsDocEnd = text.indexOf("*/", jsDocStart);
+  assert.ok(jsDocEnd > jsDocStart, "the JSDoc must close");
+
+  const fnStart = text.indexOf("export async function settleAutoDraftStep(", jsDocEnd);
+  assert.ok(fnStart > jsDocEnd, "settleAutoDraftStep's own signature must follow its JSDoc");
+  const fnEnd = text.indexOf("/** Open a scoped open-question", fnStart);
+  assert.ok(fnEnd > fnStart, "openSweepQuestionStep's own doc-comment must follow");
+  let fnBody = text.slice(fnStart, fnEnd);
+  fnBody = fnBody.replace("  const { workflowRunId } = getWorkflowMetadata();\n", "");
+  fnBody = fnBody.replace(
+    'c.query("select clara.settle_autodraft_task($1, $2, $3, $4, $5::jsonb, $6::text)", [',
+    'c.query("select clara.settle_autodraft_task($1, $2, $3, $4, $5::jsonb)", [',
+  );
+  fnBody = fnBody.replace("\n      workflowRunId,\n    ]),", "\n    ]),");
+
+  return `${text.slice(0, jsDocStart)}<settle JSDoc tail — masked>${text.slice(jsDocEnd, fnStart)}${fnBody}${text.slice(fnEnd)}`;
 }
 
 function maskImplChanges(text) {
-  return maskSettleDocAndCall(maskUserMessage(text));
+  return maskSettleFunction(maskUserMessageLine(text));
 }
 
-test("autoDraft.v6.impl.ts differs from v5 ONLY inside the model user-message text and the settle step's own doc-comment + 6-arity call (header narrative aside) — claim/recover/model/question/close and consumeAutoDraftModelResult's stream-error tagging are unchanged", () => {
+test("autoDraft.v6.impl.ts differs from v5 ONLY inside the settle step's own JSDoc tail + its three scoped 6-arity insertions (header narrative aside; the user-message swap is pinned exactly by the test above, not masked away) — claim/recover/model/question/close and consumeAutoDraftModelResult's stream-error tagging are unchanged, INCLUDING the settle function's own signature, \"use step\" directive, and params[0..4], which are compared as LITERAL text here (not masked)", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.impl.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.impl.ts"), 5));
-  assert.equal(maskImplChanges(v6), maskImplChanges(v5), "outside the two masked spans, autoDraft.v6.impl.ts must be a version-renamed copy of v5");
+  assert.equal(maskImplChanges(v6), maskImplChanges(v5), "outside the JSDoc tail + the three scoped insertions, autoDraft.v6.impl.ts must be a version-renamed copy of v5");
 });
 
 // ===========================================================================
@@ -401,6 +511,25 @@ test("v6 carries the wiki-notes framing (inform-never-decide, the citation law, 
   }
 });
 
+test("v6 carries EVERY other load-bearing invariant clause from v5's prompt, byte-for-byte (Codex SF: enumerate v5's invariant clauses and cover each — a mutant that quietly deleted one of these would stay green everywhere else)", () => {
+  const clauses = [
+    ["You never approve, post, or finalise anything, and a human approves every draft.", "human-approves-every-draft (agent-never-signs, ADR-015)"],
+    ["The database owns every number: never compute, sum, or invent a figure", "DB-owns-every-number / no-computed-figure rule"],
+    ["read amounts from the document's extracted invoice facts and cite them (region id + exact quote per amount).", "evidence-citation requirement"],
+    ["This ledger is MYR-only.", "MYR-only rule"],
+    [
+      "DO NOT draft and DO NOT guess: reply with a short plain-text explanation of exactly what is blocking the draft. There is no human to ask right now; a truthful non-draft is correct.",
+      "no-guess / truthful-non-draft rule",
+    ],
+    ["State any uncertainty qualitatively with alternatives — never a percentage, never a suspense account.", "uncertainty-qualitative rule"],
+    ["Be concise and precise. Cite the figures you read rather than paraphrasing them loosely.", "closing citation-precision rule"],
+  ];
+  for (const [c, why] of clauses) {
+    has(P6, c, `v6 carries: ${why}`);
+    has(P5, c, `…and it is genuinely CARRIED — present in v5 too (${why})`);
+  }
+});
+
 test("v6 gains the DB-authoritative BOUND-direction framing (7A-R2: coding_kind is a checked proposal, never routing authority) — genuinely NEW, not carried", () => {
   const c = "This document was admitted into a BOUND direction — sales or purchase — before this run";
   has(P6, c, "v6 states the bound-direction contract");
@@ -488,25 +617,7 @@ test("v6's zod schema rejects a counterparty.kind that CONTRADICTS coding_kind, 
 //    direct call outside a real WDK step — ledger-44's own established precedent).
 // ===========================================================================
 
-/** Split a comma-list respecting paren/bracket depth — Math.max(0, Math.round(tokens))
- *  must stay ONE element, never split on its own internal comma. */
-function splitArgs(text) {
-  const out = [];
-  let depth = 0;
-  let cur = "";
-  for (const ch of text) {
-    if (ch === "(" || ch === "[") depth++;
-    if (ch === ")" || ch === "]") depth--;
-    if (ch === "," && depth === 0) {
-      out.push(cur.trim());
-      cur = "";
-      continue;
-    }
-    cur += ch;
-  }
-  if (cur.trim()) out.push(cur.trim());
-  return out;
-}
+// splitArgs is defined once, near maskWriterArgsArray above, and reused here.
 
 function extractSettleStepBody(text) {
   const start = text.indexOf("export async function settleAutoDraftStep(");
@@ -525,13 +636,23 @@ test("v6's settle SQL text carries EXACTLY six placeholders, the sixth being $6:
   assert.equal(placeholders[5], "$6::text", "the 6th placeholder must be $6::text");
 });
 
-test("v6's settle params array has EXACTLY six elements, the sixth being workflowRunId, destructured from getWorkflowMetadata() INSIDE the step, BEFORE the query fires", () => {
-  const body = extractSettleStepBody(src("autoDraft.v6.impl.ts"));
+function extractSettleParams(text) {
+  const body = extractSettleStepBody(text);
   const paramsMatch = /\[\s*taskId,([\s\S]*?)\]\s*\),\s*\n\s*\);/.exec(body);
   assert.ok(paramsMatch, "the settle params array must be present");
-  const params = ["taskId", ...splitArgs(paramsMatch[1])];
-  assert.equal(params.length, 6, `expected 6 params, got ${JSON.stringify(params)}`);
-  assert.equal(params[5], "workflowRunId", "the 6th param must be the workflowRunId identifier");
+  return { params: ["taskId", ...splitArgs(paramsMatch[1])], body };
+}
+
+test("v6's settle params array has EXACTLY six elements: the FIRST FIVE are TEXT-IDENTICAL to v5's own five params (Codex SF — this is the explicit cross-check the masked structural test above no longer substitutes for), and the SIXTH is workflowRunId, destructured from getWorkflowMetadata() INSIDE the step, BEFORE the query fires", () => {
+  const { params: v6params, body } = extractSettleParams(src("autoDraft.v6.impl.ts"));
+  const { params: v5params } = extractSettleParams(src("autoDraft.v5.impl.ts"));
+  assert.equal(v6params.length, 6, `expected 6 params, got ${JSON.stringify(v6params)}`);
+  assert.deepEqual(
+    v6params.slice(0, 5),
+    v5params,
+    `v6's first five params must be TEXT-IDENTICAL to v5's own five — v6=${JSON.stringify(v6params.slice(0, 5))} v5=${JSON.stringify(v5params)}`,
+  );
+  assert.equal(v6params[5], "workflowRunId", "the 6th param must be the workflowRunId identifier");
 
   assert.match(body, /const \{ workflowRunId \} = getWorkflowMetadata\(\);/, "workflowRunId must be destructured from getWorkflowMetadata()");
   const destructureIdx = body.indexOf("const { workflowRunId } = getWorkflowMetadata();");
@@ -547,9 +668,7 @@ test("v5's settle call-site is pinned the OTHER direction (regression, both ways
   assert.equal(placeholders.length, 5, `v5 must stay 5-arity, got ${JSON.stringify(placeholders)}`);
   assert.doesNotMatch(sqlMatch[1], /\$6/, "v5 must carry no $6 placeholder at all");
 
-  const paramsMatch = /\[\s*taskId,([\s\S]*?)\]\s*\),\s*\n\s*\);/.exec(body);
-  assert.ok(paramsMatch, "v5's settle params array must be present");
-  const params = ["taskId", ...splitArgs(paramsMatch[1])];
+  const { params } = extractSettleParams(src("autoDraft.v5.impl.ts"));
   assert.equal(params.length, 5, `v5 must stay 5 params, got ${JSON.stringify(params)}`);
 
   assert.doesNotMatch(body, /getWorkflowMetadata/, "v5's settleAutoDraftStep must never call getWorkflowMetadata — that is v6's own addition");

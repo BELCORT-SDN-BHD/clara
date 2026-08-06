@@ -86,9 +86,15 @@ test("native-constraint collapse (23505/23503/23514) and the structural 42501 ma
   assert.equal(dupOther.reason, "double_coded");
   const fk = refusalFromDbError({ code: "23503" });
   assert.equal(fk.code, "CLR11");
+  // Codex NOTE: the title named 23514 but the body never actually invoked it — made real
+  // here. errors.ts's own branch is `code === "23503" || code === "23514"`, so 23514
+  // (a CHECK constraint breach) must collapse to the SAME not-found shape as 23503 (an FK
+  // breach) — no tenant/existence oracle either way.
+  const check = refusalFromDbError({ code: "23514" });
+  assert.equal(check.code, "CLR11", "23514 (CHECK breach) must collapse to CLR11, same as 23503 (FK breach)");
   const structural = refusalFromDbError({ code: "42501" });
   assert.equal(structural.code, "CLR03");
-  for (const r of [dupCounterparty, dupOther, fk, structural]) {
+  for (const r of [dupCounterparty, dupOther, fk, check, structural]) {
     assert.doesNotMatch(r.message, PURCHASE_WORDS);
   }
 });
