@@ -81,6 +81,74 @@ function dropHeader(text) {
 }
 
 // ===========================================================================
+// Codex round 7 (the fidelity tests' own masked spans): round 6's whole-file lexical
+// census closed every forgery OUTSIDE a masked span (plain string inequality already
+// catches an insertion anywhere the structural fidelity tests compare literally) — but a
+// zero-identifier-token construct (`import("ai")["streamText"]({["messages"]: wrong})`,
+// a computed/string-keyed property, an eval-string) planted INSIDE an already-masked span
+// is invisible to BOTH the census (which counts identifier NODES — a dynamic import and a
+// computed member access produce none) AND the whole-file comparison (which was told to
+// skip that exact span's content entirely). The canonical, census-certified call stays
+// present and correct elsewhere in the file as the "certified decoy," while the masked
+// span silently carries something else.
+//
+// The fix: every masked span becomes an EXACT-EQUALITY assertion against a golden
+// reconstruction of its documented canonical text, captured directly from the real,
+// reviewed v6 (or v9) source below — never "mask and skip", never "contains" (assert.
+// match). A span may hold EXACTLY its documented insertion and nothing else: any
+// additional statement, spread, computed property, or string-keyed anything inside a span
+// changes that span's own extracted text and fails the assertion below, regardless of
+// whether the identifier-token census would ever see it. Combined with round 6's census:
+// outside every span = whole-file string equality; inside every span = span string
+// equality; the streamText call itself = census + identity. There is no remaining place
+// for divergent content to live undetected.
+const EXPECTED_TOOLCTX_JSDOC_TAIL = ", PLUS the admission-bound direction ('sales' | 'purchase' |\n *  null — PR #204, the tri-state contract's runtime-visible half). */";
+const EXPECTED_DERIVE_COUNTERPARTY_KIND_FN = "/** THE COUNTERPARTY CONTRACT, layer 2 of 3 (skeleton §2a): the runtime tool — never the\n *  model — derives the authoritative counterparty kind from coding_kind. A supplier_bill\n *  names a vendor; sales_invoice/sales_credit_note name a customer. Pure. */\nexport function deriveCounterpartyKind(codingKind: DraftInput[\"coding_kind\"]): \"vendor\" | \"customer\" {\n  return codingKind === \"supplier_bill\" ? \"vendor\" : \"customer\";\n}\n\n/** PR #204 / 7A-R2, THE BOUND FAMILY: the coding_kind values an admitted direction allows.\n *  A `direction` of null (a pre-migration attempt row) allows nothing to be checked here at\n *  all — returns null, meaning \"no early family to validate against; the DB draft writer\n *  stays the sole authority.\" Pure. */\nexport function allowedCodingKindsForDirection(direction: \"sales\" | \"purchase\" | null): readonly DraftInput[\"coding_kind\"][] | null {\n  if (direction === \"sales\") return [\"sales_invoice\", \"sales_credit_note\"];\n  if (direction === \"purchase\") return [\"supplier_bill\"];\n  return null;\n}\n\n/**\n * The draft_journal_entry wrapper (exported for direct unit testing). Fetches authoritative\n * values server-side, runs the tier check, then executes the DB writer through the write\n * floor. Never throws — always resolves to a typed result. The sweep task is client- and\n * document-bound: a draft naming a DIFFERENT document than the task's is refused (CLR11).\n */\n";
+const EXPECTED_COUNTERPARTY_PAYLOAD_BLOCK = "    // 2. Assemble writer args. The model NEVER supplies sha256/books/op_key/resolution.\n    // THE COUNTERPARTY CONTRACT: the derived kind ALWAYS overwrites whatever (optional)\n    // kind the model proposed — the tool is the derivation authority, not a second model\n    // choice (skeleton §2a layer 2; the zod superRefine in .prompt.ts is layer 1, a\n    // model-supplied contradiction is ergonomics only; the DB draft writer is layer 3,\n    // the sole authority).\n    const counterpartyPayload = {\n      ...(input.counterparty as Record<string, unknown>),\n      kind: deriveCounterpartyKind(input.coding_kind),\n    };\n\n    const partPayload = {\n      client_id: clientId,\n      document_id: ctx.documentId,\n      provenance_tier: detectedTier,\n      uncertainty: input.uncertainty ?? null,\n    };\n    const coding = { task_id: ctx.taskId, part_payload: partPayload };\n    const opKey = `code-doc:${ctx.taskId}:${ctx.documentId}`;\n\n";
+const EXPECTED_READ_DOCUMENT_DESC = "read_document: tool({\n      description:\n        \"Read this document's stored extraction: filing state, invoice facts (when present), bounded text, and region ids to cite as evidence.\",";
+const EXPECTED_DRAFT_TOOL_DESC = "[DRAFT_TOOL]: tool({\n      description:\n        \"Draft ONE journal entry for a human to review: a supplier bill — with NO stated tax, or a stated ZERO tax, in the facts, \" +\n        \"expense debit(s) GROSS + a credit to Accounts Payable GROSS with the vendor; with a STATED NONZERO tax, expense debit(s) NET + \" +\n        \"ONE sst_purchase_cost debit equal EXACTLY to the stated tax + the Accounts Payable credit GROSS — \" +\n        \"or a sales invoice / sales credit note (Trade Debtors debit/credit gross + revenue credit/debit net, + an SST output \" +\n        \"credit/debit when the document states tax) with the customer. \" +\n        \"This is a proposal, not a posting. Provide coding_kind, lines, document_id, counterparty, and an evidence array — never set \" +\n        \"counterparty.kind yourself, it is derived from coding_kind. If the document is not lawfully draftable, do NOT call this — \" +\n        \"explain the block in text.\",\n      ";
+const EXPECTED_DIRECTION_FAMILY_CHECK = "  // PR #204 / 7A-R2, THE BOUND FAMILY — the VERY FIRST check, before any DB read: the model's\n  // proposed coding_kind must fall inside the admission-bound direction's family. A mismatch\n  // is a named EARLY refusal, never a DB roundtrip. ctx.direction === null (a pre-migration\n  // attempt row) skips this check entirely — the DB draft writer stays the sole authority.\n  const allowedKinds = allowedCodingKindsForDirection(ctx.direction);\n  if (allowedKinds && !allowedKinds.includes(input.coding_kind)) {\n    return { ok: false, refusal: directionFamilyMismatchRefusal() };\n  }\n";
+const EXPECTED_DIRECTION_CLAUSE_DECLARATION = "  // PR #204 / 7A-R2: surface the admission-bound direction to the model directly, so it\n  // proposes the right coding_kind family the FIRST time rather than discovering a mismatch\n  // only via runDraftJournalEntry's early refusal. `direction` is null only for a\n  // pre-migration attempt row (never for a document admitted under the ceremony's activated\n  // flag) — the clause is simply omitted then, and the static system prompt's own\n  // direction-determination guidance still applies.\n  const directionClause =\n    ctx.direction === \"sales\"\n      ? ' This admission is bound to the SALES direction — propose coding_kind \"sales_invoice\" or \"sales_credit_note\" accordingly.'\n      : ctx.direction === \"purchase\"\n        ? ' This admission is bound to the PURCHASE direction — propose coding_kind \"supplier_bill\" accordingly.'\n        : \"\";\n";
+const EXPECTED_CLAIM_RECEIPT_DIRECTION_FIELD = "      direction?: string | null;\n";
+const EXPECTED_CLAIM_CTX_DIRECTION_FIELD = "        direction: receipt.direction === \"sales\" || receipt.direction === \"purchase\" ? receipt.direction : null,\n";
+const EXPECTED_CLASSIFY_SETTLE_RECEIPT_FN = "function isNonEmptyString(x: unknown): x is string {\n  return typeof x === \"string\" && x.length > 0;\n}\n\nfunction isNonNegativeNumber(x: unknown): x is number {\n  return typeof x === \"number\" && Number.isFinite(x) && x >= 0;\n}\n\n/** True iff `r`'s OWN enumerable keys are EXACTLY `keys` (same set, same size) — not a\n *  subset check. Codex round 3 named this the missing piece: shape checks that only tested\n *  for PRESENCE of the fields they expected let an object carrying EXTRA, unaccounted-for\n *  fields (or a field with the wrong runtime type smuggled in alongside correct ones) slip\n *  through as if it were a real DB shape. */\nfunction hasExactlyKeys(r: Record<string, unknown>, keys: readonly string[]): boolean {\n  const actual = Object.keys(r);\n  if (actual.length !== keys.length) return false;\n  return keys.every((k) => Object.prototype.hasOwnProperty.call(r, k));\n}\n\n/** PR #204 fix (Codex round 2, B1 — an IMPLEMENTATION blocker, not a test-guard gap): the\n *  original receipt read failed OPEN. `r.rows[0]?.receipt ?? {}` + `receipt.settled ===\n *  false` means a missing row, NULL, `{}`, or ANY malformed/unrecognized shape all fall\n *  through past that one check silently — the workflow would report \"drafted\" while the\n *  task stays running and its reservation stays charged forever. Codex verified by\n *  EXECUTION against d404ff9 that the fix cannot be \"require settled===true\" either: the\n *  DB's own SUCCESS shape carries no `settled` key at all (see shape 3 below).\n *\n *  Codex round 3 (B1, deepened): the round-2 version checked FIELD PRESENCE and coarse type\n *  (e.g. \"has a `reason` string in a known set\"), which let SHAPE-LIKE malformed objects pass\n *  — `{task_id:null,status:null,replayed:true}`, `{task_id:\"t\",status:\"running\",\n *  replayed:true}` (REPLAY does not exist for a non-terminal status), a no-op missing its own\n *  task identity, `{status:\"completed\",outcome:\"failed\",...}` (that status/outcome pairing\n *  cannot exist — 'completed' only ever pairs with drafted|skipped_lane|noop_existing), and a\n *  SUCCESS shape missing `task_id` entirely. This version re-derives every shape's EXACT field\n *  set and value-level constraints straight from the SQL a second time — every field the\n *  function genuinely returns, not a convenient subset — and rejects anything with an\n *  unaccounted-for extra field via hasExactlyKeys.\n *\n *  Shape 1 — REPLAY (0036:871-873, reached only via `t.status in ('completed','failed')`):\n *    `{task_id, status, replayed:true}`, EXACTLY these 3 keys. `task_id` a non-empty string\n *    (it is always `p_task`, itself null-checked at function entry). `status` restricted to\n *    'completed'|'failed' — no OTHER task status ever reaches this branch, so a replay\n *    carrying e.g. 'running' cannot be genuine.\n *  Shapes 2-5 — the FOUR named benign no-ops, ALL carrying `settled:false, outcome:\n *    'not_settled', reason:<name>` plus `task_id` (non-empty string) and `status` (a string —\n *    see per-reason restriction below), and NOTHING else except each reason's own extra field:\n *      task_superseded     (0036:899-909) — reached only via `t.status in ('cancelled',\n *        'expired')`; EXACTLY 6 keys, the extra one `released_reservation:boolean`.\n *      registry_superseded (0036:934-939) — reached only via `t.status in ('running',\n *        'cancel_requested')` (the prior guard at 0036:927-929 already excludes every other\n *        status); EXACTLY 5 keys, no extra field.\n *      registry_released   (0036:941-946) — same status restriction as registry_superseded;\n *        EXACTLY 6 keys, the extra one `registry_state`, itself restricted to 'parked'|'idle'\n *        (0011_daily_loop.sql:709's own check constraint — `a.state<>'active'` is the ONLY\n *        way this branch is reached, and 'active'/'parked'/'idle' are the constraint's ENTIRE\n *        domain, so excluding 'active' leaves exactly those two).\n *      run_superseded      (0046 §8) — spliced in immediately after the SAME running-check\n *        anchor registry_superseded's guard sits behind, so the SAME status restriction\n *        applies; EXACTLY 5 keys, structurally identical to registry_superseded (the `reason`\n *        string is the only field that tells the two apart — confirmed against 0046's own\n *        splice text, not assumed).\n *  Shape 6 — SUCCESS (0036:994-996, the function's own final return, reached only after every\n *    guard above passes): `{task_id, status, outcome, entry_id, tokens_spent, tokens_refunded}`,\n *    EXACTLY 6 keys, NO `settled` key at all (Codex's own round-2 finding, re-cited here so a\n *    future reader never \"fixes\" this by requiring settled===true). `task_id` non-empty\n *    string. The status<->outcome pairing is NOT two independent checks — the SQL computes\n *    status FROM outcome (`case when p_outcome='failed' then 'failed' else 'completed' end`),\n *    so 'completed' can only ever pair with outcome in {drafted, skipped_lane, noop_existing}\n *    and 'failed' can only ever pair with outcome='failed'; a 'completed'+'failed' pairing (or\n *    any other cross) cannot come from this function and must throw. `entry_id`: this file's\n *    own settleAutoDraftStep (below) only ever passes a non-null p_entry when\n *    outcome==='drafted' (runAutoDraftModelStep sets `entryId` to null for every other\n *    outcome) — so within the shapes THIS runtime can genuinely produce, entry_id is a\n *    non-empty string for 'drafted' and null for every other outcome; anything else is\n *    unrecognized. `tokens_spent`/`tokens_refunded`: non-negative numbers (both computed via\n *    `greatest(...,0)` / a failed-outcome zero-floor in the SQL — never negative). */\nexport function classifySettleReceipt(receipt: unknown): \"settled\" | \"benign-no-op\" {\n  if (receipt == null || typeof receipt !== \"object\") {\n    throw new Error(`settle_autodraft_task returned an unrecognized receipt (missing row or non-object): ${JSON.stringify(receipt)}`);\n  }\n  const r = receipt as Record<string, unknown>;\n\n  // Shape 1 — REPLAY (0036:871-873).\n  if (\n    r.replayed === true &&\n    isNonEmptyString(r.task_id) &&\n    (r.status === \"completed\" || r.status === \"failed\") &&\n    hasExactlyKeys(r, [\"task_id\", \"status\", \"replayed\"])\n  ) {\n    return \"settled\";\n  }\n\n  // Shapes 2-5 — the four named benign no-ops (0036:899-946; 0046 §8's run_superseded).\n  // Every reason this function can genuinely produce restricts `status` to the same set the\n  // SQL itself restricts it to at the point that reason's branch is reached. A function\n  // (not an index signature lookup) keeps this precise under noUncheckedIndexedAccess and\n  // avoids the \"possibly undefined\" trap of indexing a Record by an unnarrowed key.\n  const noopStatusesForReason = (reason: unknown): readonly string[] | undefined => {\n    if (reason === \"task_superseded\") return [\"cancelled\", \"expired\"];\n    if (reason === \"registry_superseded\" || reason === \"registry_released\" || reason === \"run_superseded\") return [\"running\", \"cancel_requested\"];\n    return undefined;\n  };\n  const noopStatuses = noopStatusesForReason(r.reason);\n  if (\n    r.settled === false &&\n    r.outcome === \"not_settled\" &&\n    isNonEmptyString(r.task_id) &&\n    typeof r.status === \"string\" &&\n    noopStatuses !== undefined &&\n    noopStatuses.includes(r.status)\n  ) {\n    if (r.reason === \"task_superseded\") {\n      if (typeof r.released_reservation === \"boolean\" && hasExactlyKeys(r, [\"task_id\", \"status\", \"settled\", \"outcome\", \"reason\", \"released_reservation\"])) {\n        return \"benign-no-op\";\n      }\n    } else if (r.reason === \"registry_released\") {\n      if ((r.registry_state === \"parked\" || r.registry_state === \"idle\") && hasExactlyKeys(r, [\"task_id\", \"status\", \"settled\", \"outcome\", \"reason\", \"registry_state\"])) {\n        return \"benign-no-op\";\n      }\n    } else {\n      // registry_superseded | run_superseded — structurally identical, 5 keys, no extra field.\n      if (hasExactlyKeys(r, [\"task_id\", \"status\", \"settled\", \"outcome\", \"reason\"])) {\n        return \"benign-no-op\";\n      }\n    }\n  }\n\n  // Shape 6 — SUCCESS (0036:994-996). No `settled` key — deliberately not checked here.\n  // Same function-not-index-signature reasoning as noopStatusesForReason above: `status`\n  // determines the outcome the SQL could have computed it FROM (`case when p_outcome=\n  // 'failed' then 'failed' else 'completed' end`), so this is a real correlation, not two\n  // independent set-membership checks.\n  const successOutcomesForStatus = (status: unknown): readonly string[] | undefined => {\n    if (status === \"completed\") return [\"drafted\", \"skipped_lane\", \"noop_existing\"];\n    if (status === \"failed\") return [\"failed\"];\n    return undefined;\n  };\n  const successOutcomes = successOutcomesForStatus(r.status);\n  if (\n    isNonEmptyString(r.task_id) &&\n    successOutcomes !== undefined &&\n    typeof r.outcome === \"string\" &&\n    successOutcomes.includes(r.outcome) &&\n    ((r.outcome === \"drafted\" && isNonEmptyString(r.entry_id)) || (r.outcome !== \"drafted\" && r.entry_id === null)) &&\n    isNonNegativeNumber(r.tokens_spent) &&\n    isNonNegativeNumber(r.tokens_refunded) &&\n    hasExactlyKeys(r, [\"task_id\", \"status\", \"outcome\", \"entry_id\", \"tokens_spent\", \"tokens_refunded\"])\n  ) {\n    return \"settled\";\n  }\n\n  throw new Error(`settle_autodraft_task returned an unrecognized receipt shape: ${JSON.stringify(receipt)}`);\n}\n\n";
+const EXPECTED_AUTODRAFT_CONTEXT_JSDOC_TAIL = "\n *  `direction` is PR #204's addition — the admission-bound coding-kind family ('sales' |\n *  'purchase'), or null for a pre-migration attempt row the DB never backfilled. */";
+const EXPECTED_SETTLE_JSDOC_TAIL = " *  writes the sweep_run_items row, and updates the registry counters (a 2nd failure parks).\n *  §7-A / skeleton §2d: the 6-arity overload's REQUIRED 6th argument is the workflow's OWN\n *  engine run id (agent_tasks.workflow_run_id) — NOT the admission-time sweep uuid — sourced\n *  fresh from getWorkflowMetadata() inside this step, matching the pattern already\n *  established in claimAutoDraftStep above.\n *\n *  PR #204 (fixed per Codex round 2, B1): the receipt is read explicitly and classified via\n *  classifySettleReceipt, which FAILS CLOSED — a missing row, NULL, `{}`, or any shape\n *  outside the six enumerated ones throws, rather than silently completing as if settled. */";
+const EXPECTED_REASON_TYPES_BLOCK = "constraint?: string };\n\n/** CLR21 reason tokens carried in the DETAIL payload (0036/0016/0046 pins). */\nexport type Clr21Reason =\n  | \"amount_conflict\"\n  | \"currency_unsupported\"\n  | \"vendor_malformed\"\n  | \"evidence_invalid\"\n  | \"double_coded\"\n  | \"duplicate_bill\"\n  | \"coding_incomplete\"\n  | \"tax_leg_missing\"\n  | \"type_polarity_mismatch\"\n  | \"counterparty_kind_contradiction\"\n  | \"direction_family_mismatch\";\n\n/** CLR10 reason tokens (§7-A adds the first one — the SST-output-account precondition\n *  for a tax-bearing sales document). */\nexport type Clr10Reason = \"sst_account_missing\";\n\n";
+const EXPECTED_MESSAGES_BLOCK = "/** Oracle-safe message per CLR code — never the raw SQL/DETAIL. A concrete object (not a\n *  Record) so dot access is non-optional; use messageFor() for a dynamic code lookup.\n *  Direction-neutral: this sweep drafts both purchase and sales documents. */\nconst MESSAGES = {\n  CLR01: \"This document is not resolved to the client with enough confidence to code it.\",\n  CLR02: \"This document has no active, verified filing for the client, so it cannot be coded yet.\",\n  CLR03: \"The sweep does not hold an authorised context for this client.\",\n  CLR10: \"The request is missing or malformed information required to draft this entry.\",\n  CLR11: \"That document is not available in this context.\",\n  CLR21: \"This document cannot be coded as proposed.\",\n  CLR23: \"The counterparty could not be resolved as proposed.\",\n  CLR26: \"An open question blocks this document — resolve it first.\",\n  CLR28: \"Document processing is paused for this client — consent required.\",\n  CLR29: \"This document is already being coded.\",\n};\n\n";
+const EXPECTED_REASON_MESSAGES_BLOCK = "const CLR21_REASON_MESSAGES: Record<Clr21Reason, string> = {\n  amount_conflict: \"The proposed total does not match the machine-corroborated invoice total.\",\n  currency_unsupported: \"This ledger only supports MYR; a non-MYR document cannot be coded here.\",\n  vendor_malformed: \"The counterparty details on the draft are malformed.\",\n  evidence_invalid: \"The cited evidence does not match the document's extraction.\",\n  double_coded: \"This document is already being coded in another draft this window.\",\n  duplicate_bill: \"This exact document (same counterparty and invoice number) already has an approved entry.\",\n  coding_incomplete: \"The sweep could not complete this document into a review draft.\",\n  tax_leg_missing: \"A stated nonzero tax on this document requires one tied SST-portion-of-cost debit leg.\",\n  type_polarity_mismatch: \"This document's own stated type does not match the coding kind proposed.\",\n  counterparty_kind_contradiction: \"The proposed counterparty does not match the coding kind — a supplier bill names a vendor, a sales entry names a customer.\",\n  direction_family_mismatch: \"The proposed coding kind does not match this document's admitted direction (sales vs purchase).\",\n};\n\nconst CLR10_REASON_MESSAGES: Record<Clr10Reason, string> = {\n  sst_account_missing: \"This client's chart of accounts has no active SST output account for a tax-bearing sales document.\",\n};\n\n";
+const EXPECTED_CLR10_BRANCH = "  if (code === \"CLR10\") {\n    // §7-A: sst_account_missing rides CLR10 (positive-tax only), not CLR21 — the sales-side\n    // mirror of the purchase precondition. Other CLR10 raises stay the generic message.\n    const reason = reasonFromDetail(err.detail);\n    const message = (reason && CLR10_REASON_MESSAGES[reason as Clr10Reason]) ?? MESSAGES.CLR10;\n    return { type: \"refusal\", code: \"CLR10\", reason, message };\n  }\n  ";
+const EXPECTED_INTERNAL_FALLBACK_MESSAGE = "return { type: \"refusal\", code: \"internal\", message: \"This document could not be coded automatically.\" ";
+const EXPECTED_DIRECTION_FAMILY_MISMATCH_REFUSAL_FN = "/** PR #204 / 7A-R2: an EARLY, runtime-labelled refusal — the wrapper's own check that the\n *  model's proposed coding_kind falls inside the admission-bound direction family, BEFORE\n *  any DB call. Shares the exact CLR21 reason token the DB draft writer raises for the same\n *  contradiction (`direction_family_mismatch`), so the bookkeeper sees an identical message\n *  whichever layer actually caught it. */\nexport function directionFamilyMismatchRefusal(): RefusalPart {\n  return runtimeRefusal(\"CLR21\", \"direction_family_mismatch\", CLR21_REASON_MESSAGES.direction_family_mismatch);\n}\n\n";
+const EXPECTED_V9_ANTI_PRIMACY_SENTENCE = "\n  \"A client-issued document — the client is the ISSUER, not the bill-to party — is NEVER coded\",\n  \"here even if it superficially resembles a bill (a payment-due date, a supplier-shaped\",\n  \"layout): code it as sales_invoice below, crediting income, never as a supplier_bill\",\n  \"crediting Accounts Payable.\",\n  \"\",\n  ";
+const EXPECTED_WRITER_ARG_11_V6 = "JSON.stringify(counterpartyPayload)";
+const EXPECTED_WRITER_ARG_11_V5 = "JSON.stringify(input.vendor)";
+const EXPECTED_WRITER_ARG_14_V6 = "input.coding_kind";
+const EXPECTED_WRITER_ARG_14_V5 = '"supplier_bill"';
+// The FULL LINE constants are DERIVED from the content-only constants (not independently
+// typed), so maskUserMessageLine's own check and the dedicated extractUserMessageContent-
+// based content test below share ONE source of truth — no possibility of drift between them.
+const EXPECTED_USER_MESSAGE_CONTENT_V6 = "Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}";
+const EXPECTED_USER_MESSAGE_CONTENT_V5 = "Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).";
+const EXPECTED_USER_MESSAGE_LINE_V6 = `{ role: "user", content: \`${EXPECTED_USER_MESSAGE_CONTENT_V6}\` },`;
+const EXPECTED_USER_MESSAGE_LINE_V5 = `{ role: "user", content: \`${EXPECTED_USER_MESSAGE_CONTENT_V5}\` },`;
+// The V5 SIDE of each span above (most are NOT empty — v5 has its own real, different
+// content there; captured the SAME way, directly from the real v5 source).
+const EXPECTED_TOOLCTX_JSDOC_TAIL_V5 = ". */";
+const EXPECTED_DERIVE_COUNTERPARTY_KIND_FN_V5 = "/**\n * The draft_journal_entry wrapper (exported for direct unit testing). Fetches authoritative\n * values server-side, runs the tier check, then executes the DB writer through the write\n * floor. Never throws — always resolves to a typed result. The sweep task is client- and\n * document-bound: a draft naming a DIFFERENT document than the task's is refused (CLR11).\n */\n";
+const EXPECTED_COUNTERPARTY_PAYLOAD_BLOCK_V5 = "    // 2. Assemble writer args. The model NEVER supplies sha256/books/op_key/resolution.\n    const partPayload = {\n      client_id: clientId,\n      document_id: ctx.documentId,\n      provenance_tier: detectedTier,\n      uncertainty: input.uncertainty ?? null,\n    };\n    const coding = { task_id: ctx.taskId, part_payload: partPayload };\n    const opKey = `code-doc:${ctx.taskId}:${ctx.documentId}`;\n\n";
+const EXPECTED_READ_DOCUMENT_DESC_V5 = "read_document: tool({\n      description:\n        \"Read this bill's stored extraction: filing state, invoice facts (when present), bounded text, and region ids to cite as evidence.\",";
+const EXPECTED_DRAFT_TOOL_DESC_V5 = "[DRAFT_TOOL]: tool({\n      description:\n        \"Draft ONE supplier-bill journal entry for a human to review: with NO stated tax, or a stated ZERO tax, in the facts, expense debit(s) \" +\n        \"GROSS + a credit to Accounts Payable GROSS with the vendor; with a STATED NONZERO tax, expense debit(s) NET + ONE sst_purchase_cost debit \" +\n        \"equal EXACTLY to the stated tax + the Accounts Payable credit GROSS. \" +\n        \"This is a proposal, not a posting. Provide lines, document_id, vendor, and an evidence array. If the bill is not lawfully draftable, do NOT call this — explain the block in text.\",\n      ";
+const EXPECTED_AUTODRAFT_CONTEXT_JSDOC_TAIL_V5 = " */";
+const EXPECTED_SETTLE_JSDOC_TAIL_V5 = " *  writes the sweep_run_items row, and updates the registry counters (a 2nd failure parks). */";
+const EXPECTED_REASON_TYPES_BLOCK_V5 = "constraint?: string };\n\n/** CLR21 reason tokens carried in the DETAIL payload (pins §2/§6). */\nexport type Clr21Reason =\n  | \"amount_conflict\"\n  | \"currency_unsupported\"\n  | \"vendor_malformed\"\n  | \"evidence_invalid\"\n  | \"double_coded\"\n  | \"duplicate_bill\"\n  | \"coding_incomplete\";\n\n";
+const EXPECTED_MESSAGES_BLOCK_V5 = "/** Oracle-safe message per CLR code — never the raw SQL/DETAIL. A concrete object (not a\n *  Record) so dot access is non-optional; use messageFor() for a dynamic code lookup. */\nconst MESSAGES = {\n  CLR01: \"This document is not resolved to the client with enough confidence to code it.\",\n  CLR02: \"This document has no active, verified filing for the client, so it cannot be coded yet.\",\n  CLR03: \"The sweep does not hold an authorised context for this client.\",\n  CLR10: \"The request is missing or malformed information required to draft this entry.\",\n  CLR11: \"That document is not available in this context.\",\n  CLR21: \"This bill cannot be coded as proposed.\",\n  CLR23: \"The supplier could not be resolved as proposed.\",\n  CLR26: \"An open question blocks this bill — resolve it first.\",\n  CLR28: \"Document processing is paused for this client — consent required.\",\n  CLR29: \"This bill is already being coded.\",\n};\n\n";
+const EXPECTED_REASON_MESSAGES_BLOCK_V5 = "const CLR21_REASON_MESSAGES: Record<Clr21Reason, string> = {\n  amount_conflict: \"The proposed total does not match the machine-corroborated invoice total.\",\n  currency_unsupported: \"This ledger only supports MYR; a non-MYR bill cannot be coded here.\",\n  vendor_malformed: \"The supplier details on the draft are malformed.\",\n  evidence_invalid: \"The cited evidence does not match the document's extraction.\",\n  double_coded: \"This bill is already being coded in another draft this window.\",\n  duplicate_bill: \"This exact bill (same supplier and invoice number) already has an approved entry.\",\n  coding_incomplete: \"The sweep could not complete this bill into a review draft.\",\n};\n\n";
+const EXPECTED_CLR10_BRANCH_V5 = "  ";
+const EXPECTED_INTERNAL_FALLBACK_MESSAGE_V5 = "return { type: \"refusal\", code: \"internal\", message: \"This bill could not be coded automatically.\" ";
+const EXPECTED_V9_ANTI_PRIMACY_SENTENCE_V8 = "\n  \"\",\n  ";
+
+// ===========================================================================
 // 1a. PURE-RENAME FILES — whole-file, token-for-token identical (header aside).
 // ===========================================================================
 
@@ -122,6 +190,12 @@ function maskToolCtxType(text) {
   const jsDocFrom = jsDocStart + jsDocPrefix.length;
   const jsDocEnd = text.indexOf("*/", jsDocFrom) + 2;
   assert.ok(jsDocEnd > jsDocFrom + 1, "the JSDoc must close");
+  // Codex round 7: EXACT equality, not "mask and skip".
+  const jsDocTail = text.slice(jsDocFrom, jsDocEnd);
+  assert.ok(
+    jsDocTail === EXPECTED_TOOLCTX_JSDOC_TAIL || jsDocTail === EXPECTED_TOOLCTX_JSDOC_TAIL_V5,
+    `the ToolCtx JSDoc's trailing clause must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(jsDocTail)}`,
+  );
   let t = `${text.slice(0, jsDocFrom)}<the JSDoc's own trailing clause — masked>${text.slice(jsDocEnd)}`;
 
   const { fields, typeStart, typeEnd } = extractToolCtxFields(t);
@@ -221,6 +295,17 @@ function maskDeriveCounterpartyKindFn(text) {
   const endAnchor = "export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Promise<DraftToolResult> {";
   const end = text.indexOf(endAnchor, from);
   assert.ok(end > from, "runDraftJournalEntry's own signature must follow");
+  // Codex round 7: EXACT equality, not "mask and skip" — this span is a whole new function
+  // (deriveCounterpartyKind + allowedCodingKindsForDirection, ahead of v5's OWN carried
+  // wrapper JSDoc). Either side's content must be EXACTLY the documented text and nothing
+  // more (no hidden extra statement, no zero-identifier-token construct like
+  // `import("ai")["streamText"]({["messages"]: wrong})` could ever hide in a blindly-masked
+  // "whatever's here" span).
+  const span = text.slice(from, end);
+  assert.ok(
+    span === EXPECTED_DERIVE_COUNTERPARTY_KIND_FN || span === EXPECTED_DERIVE_COUNTERPARTY_KIND_FN_V5,
+    `the deriveCounterpartyKind span must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, from)}<deriveCounterpartyKind + its own/the wrapper's JSDoc — masked>\n${text.slice(end)}`;
 }
 
@@ -233,6 +318,12 @@ function maskCounterpartyPayloadBlock(text) {
   const endAnchor = "    const receipt = await writeScoped(ctx, async (c: PgExec) => {";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "the writeScoped call must follow");
+  // Codex round 7: EXACT equality, not "mask and skip".
+  const span = text.slice(start, end);
+  assert.ok(
+    span === EXPECTED_COUNTERPARTY_PAYLOAD_BLOCK || span === EXPECTED_COUNTERPARTY_PAYLOAD_BLOCK_V5,
+    `the counterparty-payload derivation block must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, start)}<the counterparty-payload derivation block — masked>${text.slice(end)}`;
 }
 
@@ -279,6 +370,17 @@ function extractWriterArgsArray(text) {
 function maskWriterArgsArray(text) {
   const { elements, start, end } = extractWriterArgsArray(text);
   assert.equal(elements.length, 14, "the writer args array must have exactly 14 positions");
+  // Codex round 7: EXACT equality on the two masked positions themselves, not "mask and
+  // skip" — sharing the SAME two constants the dedicated positional test below asserts, so
+  // there is no separate, driftable source of truth for what these two positions may hold.
+  assert.ok(
+    elements[10] === EXPECTED_WRITER_ARG_11_V6 || elements[10] === EXPECTED_WRITER_ARG_11_V5,
+    `writer arg position 11 must be EXACTLY one of the two documented values, found: ${JSON.stringify(elements[10])}`,
+  );
+  assert.ok(
+    elements[13] === EXPECTED_WRITER_ARG_14_V6 || elements[13] === EXPECTED_WRITER_ARG_14_V5,
+    `writer arg position 14 must be EXACTLY one of the two documented values, found: ${JSON.stringify(elements[13])}`,
+  );
   const masked = elements.map((el, i) => (i === 10 || i === 13 ? `<position ${i + 1} masked>` : el));
   const maskedInner = `          ${masked.join(",\n          ")},\n`;
   return `${text.slice(0, start)}        [\n${maskedInner}${text.slice(end)}`;
@@ -293,6 +395,12 @@ function maskReadDocumentDesc(text) {
   const endAnchor = "cite as evidence.\",";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "the description must close");
+  // Codex round 7: EXACT equality, not "mask and skip".
+  const span = text.slice(start, end + endAnchor.length);
+  assert.ok(
+    span === EXPECTED_READ_DOCUMENT_DESC || span === EXPECTED_READ_DOCUMENT_DESC_V5,
+    `the read_document description must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, start)}<read_document description — masked>${text.slice(end + endAnchor.length)}`;
 }
 
@@ -304,6 +412,12 @@ function maskDraftToolDesc(text) {
   const endAnchor = "inputSchema: draftJournalEntryInputSchema,";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "inputSchema must follow the description in both versions");
+  // Codex round 7: EXACT equality, not "mask and skip".
+  const span = text.slice(start, end);
+  assert.ok(
+    span === EXPECTED_DRAFT_TOOL_DESC || span === EXPECTED_DRAFT_TOOL_DESC_V5,
+    `the DRAFT_TOOL description must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, start)}<the DRAFT_TOOL description — masked>${text.slice(end)}`;
 }
 
@@ -332,6 +446,14 @@ function maskDirectionFamilyCheck(text) {
   // >= , not > : on v5's side the two anchors are ADJACENT (zero gap — v5 has no early
   // check at all), so indexOf legitimately returns exactly `from`.
   assert.ok(end >= from, "the document_id pinning check must follow in both versions");
+  // Codex round 7: EXACT equality, not "mask and skip" — a pure insertion, v5's side is
+  // confirmed genuinely empty (zero gap between the anchors), v6's must be EXACTLY the
+  // documented check and nothing else.
+  const span = text.slice(from, end);
+  assert.ok(
+    span === "" || span === EXPECTED_DIRECTION_FAMILY_CHECK,
+    `the direction-family early check must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, from)}<the direction-family early check — masked>${text.slice(end)}`;
 }
 
@@ -375,10 +497,10 @@ test("the wake_draft_entry writer args array: positions 1-10 and 12-13 (12 of 14
     if (i === 10 || i === 13) continue; // positions 11 and 14 (0-indexed 10, 13) — the two documented deltas
     assert.equal(v6[i], v5[i], `writer arg position ${i + 1} must be token-identical to v5's — v6="${v6[i]}" v5="${v5[i]}"`);
   }
-  assert.equal(v6[10], "JSON.stringify(counterpartyPayload)", "v6 position 11 must pass the DERIVED counterparty payload");
-  assert.equal(v5[10], "JSON.stringify(input.vendor)", "v5 position 11 (regression pin — the pre-derivation shape)");
-  assert.equal(v6[13], "input.coding_kind", "v6 position 14 must pass input.coding_kind — the §0.1 headline defect this wave fixes");
-  assert.equal(v5[13], '"supplier_bill"', "v5 position 14 (regression pin — the hardcoded literal this wave replaces)");
+  assert.equal(v6[10], EXPECTED_WRITER_ARG_11_V6, "v6 position 11 must pass the DERIVED counterparty payload");
+  assert.equal(v5[10], EXPECTED_WRITER_ARG_11_V5, "v5 position 11 (regression pin — the pre-derivation shape)");
+  assert.equal(v6[13], EXPECTED_WRITER_ARG_14_V6, "v6 position 14 must pass input.coding_kind — the §0.1 headline defect this wave fixes");
+  assert.equal(v5[13], EXPECTED_WRITER_ARG_14_V5, "v5 position 14 (regression pin — the hardcoded literal this wave replaces)");
 });
 
 // ===========================================================================
@@ -393,15 +515,19 @@ test("the wake_draft_entry writer args array: positions 1-10 and 12-13 (12 of 14
  *  directionClause's own three-way ternary text exactly, plus a regression pin that v5's
  *  original fixed string is untouched. */
 function maskUserMessageLine(text) {
-  return text
-    .replace(
-      "{ role: \"user\", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}` },",
-      "<user message template — pinned exactly by the dedicated tests below, not by this mask>",
-    )
-    .replace(
-      '{ role: "user", content: `Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).` },',
-      "<user message template — pinned exactly by the dedicated tests below, not by this mask>",
-    );
+  // Codex round 7: EXACT equality made EXPLICIT — this was already effectively exact (two
+  // targeted .replace() calls on KNOWN strings; any deviation left the line un-replaced,
+  // failing the outer whole-file comparison), but only IMPLICITLY so. Asserting directly
+  // means a broken/renamed line fails HERE with a clear message, not via an opaque mismatch
+  // many lines away, and shares the SAME two constants the dedicated content test below uses.
+  assert.ok(
+    text.includes(EXPECTED_USER_MESSAGE_LINE_V6) || text.includes(EXPECTED_USER_MESSAGE_LINE_V5),
+    "the user-message line must be EXACTLY one of the two documented templates",
+  );
+  return text.replace(EXPECTED_USER_MESSAGE_LINE_V6, "<user message template — pinned exactly by the dedicated tests below, not by this mask>").replace(
+    EXPECTED_USER_MESSAGE_LINE_V5,
+    "<user message template — pinned exactly by the dedicated tests below, not by this mask>",
+  );
 }
 
 /** PR #204: the new `directionClause` const declaration, inserted between the (unchanged,
@@ -417,6 +543,14 @@ function maskDirectionClauseDeclaration(text) {
   // >= , not > : v5's two anchor lines are ADJACENT (v5 has no directionClause at all), so
   // indexOf legitimately returns exactly `from` on that side.
   assert.ok(end >= from, "the messages array must follow in both versions");
+  // Codex round 7: EXACT equality, not "mask and skip" (and not assert.match — a regex
+  // "contains" check elsewhere in this file already pinned parts of this text, but never
+  // that the WHOLE span holds nothing else). A pure insertion, v5's side confirmed empty.
+  const span = text.slice(from, end);
+  assert.ok(
+    span === "" || span === EXPECTED_DIRECTION_CLAUSE_DECLARATION,
+    `the directionClause declaration must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, from)}<the directionClause declaration — masked>${text.slice(end)}`;
 }
 
@@ -758,12 +892,12 @@ test("v6's model user-message content, extracted from its EXACT executable posit
   const v5Content = extractUserMessageContent(src("autoDraft.v5.impl.ts"));
   assert.equal(
     v6Content,
-    "Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}",
+    EXPECTED_USER_MESSAGE_CONTENT_V6,
     "v6's EXECUTABLE user-message content must be exactly this — not merely present somewhere in the file",
   );
   assert.equal(
     v5Content,
-    "Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).",
+    EXPECTED_USER_MESSAGE_CONTENT_V5,
     "v5's EXECUTABLE user-message content must still be exactly its original string",
   );
 });
@@ -1094,6 +1228,12 @@ function maskAutoDraftContextDirectionField(text) {
   const jsDocFrom = jsDocStart + jsDocPrefix.length;
   const jsDocEnd = text.indexOf("*/", jsDocFrom) + 2;
   assert.ok(jsDocEnd > jsDocFrom + 1, "the JSDoc must close");
+  // Codex round 7: EXACT equality, not "mask and skip".
+  const jsDocTail = text.slice(jsDocFrom, jsDocEnd);
+  assert.ok(
+    jsDocTail === EXPECTED_AUTODRAFT_CONTEXT_JSDOC_TAIL || jsDocTail === EXPECTED_AUTODRAFT_CONTEXT_JSDOC_TAIL_V5,
+    `the AutoDraftContext JSDoc's trailing clause must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(jsDocTail)}`,
+  );
   let t = `${text.slice(0, jsDocFrom)}<the JSDoc's own trailing clause — masked>${text.slice(jsDocEnd)}`;
 
   const { fields, typeStart, typeEnd } = extractAutoDraftContextFields(t);
@@ -1127,6 +1267,13 @@ function maskClaimDirectionFields(text) {
   // >= , not > : v5's anchor and the type's own close are ADJACENT (zero gap — v5 has no
   // direction field at all), so indexOf legitimately returns exactly `receiptFrom` there.
   assert.ok(receiptEnd >= receiptFrom, "the receipt type literal must close");
+  // Codex round 7: EXACT equality, not "mask and skip" — both pure insertions, v5 confirmed
+  // empty on both.
+  const receiptSpan = t.slice(receiptFrom, receiptEnd);
+  assert.ok(
+    receiptSpan === "" || receiptSpan === EXPECTED_CLAIM_RECEIPT_DIRECTION_FIELD,
+    `the receipt type's direction field must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(receiptSpan)}`,
+  );
   t = `${t.slice(0, receiptFrom)}<the receipt type's own direction field — masked>${t.slice(receiptEnd)}`;
 
   const ctxAnchor = "        reservedTokens: Number(receipt.reserved_tokens ?? 0),\n";
@@ -1135,6 +1282,11 @@ function maskClaimDirectionFields(text) {
   const ctxFrom = ctxIdx + ctxAnchor.length;
   const ctxEnd = t.indexOf("      },\n    };", ctxFrom);
   assert.ok(ctxEnd >= ctxFrom, "the returned ctx literal must close"); // same zero-gap reasoning
+  const ctxSpan = t.slice(ctxFrom, ctxEnd);
+  assert.ok(
+    ctxSpan === "" || ctxSpan === EXPECTED_CLAIM_CTX_DIRECTION_FIELD,
+    `the returned ctx literal's direction field must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(ctxSpan)}`,
+  );
   return `${t.slice(0, ctxFrom)}<the returned ctx literal's own direction field — masked>${t.slice(ctxEnd)}`;
 }
 
@@ -1163,6 +1315,17 @@ function maskClassifySettleReceiptFn(text) {
   // >= , not > : v5 has NOTHING between runAutoDraftModelStep's close and settleAutoDraftStep's
   // own JSDoc, so indexOf legitimately returns exactly `from` on that side.
   assert.ok(end >= from, "settleAutoDraftStep's own JSDoc must follow in both versions");
+  // Codex round 7: EXACT equality, not "mask and skip" — THE severe case this round closes.
+  // This 60+ line span was previously accepted UNCONDITIONALLY (the behavioural tests below
+  // check classifySettleReceipt's RETURN VALUES for given inputs, never its literal SOURCE
+  // TEXT) — a hidden, zero-identifier-token side-effect statement anywhere in this span
+  // (e.g. `import("ai")["streamText"]({["messages"]: wrong})`) would have changed nothing
+  // those behavioural tests could observe. A pure insertion, v5's side confirmed empty.
+  const span = text.slice(from, end);
+  assert.ok(
+    span === "" || span === EXPECTED_CLASSIFY_SETTLE_RECEIPT_FN,
+    `the classifySettleReceipt function span must be empty (v5) or EXACTLY the documented text (v6) — found a length-${span.length} span that does not match either`,
+  );
   return `${text.slice(0, from)}<the new classifySettleReceipt function — masked>${text.slice(end)}`;
 }
 
@@ -1182,6 +1345,14 @@ function maskSettleFunction(text) {
   assert.ok(jsDocStart > 0, "the settle step's own JSDoc tail lead-in must be present in both versions");
   const jsDocEnd = text.indexOf("*/", jsDocStart);
   assert.ok(jsDocEnd > jsDocStart, "the JSDoc must close");
+  // Codex round 7: EXACT equality, not "mask and skip" — checked over [jsDocStart, jsDocEnd+2)
+  // (including the closing "*/" itself) as a SEPARATE span; jsDocEnd itself is left
+  // unchanged since the mask/replace logic below relies on its ORIGINAL (pre-"*/") value.
+  const jsDocSpan = text.slice(jsDocStart, jsDocEnd + 2);
+  assert.ok(
+    jsDocSpan === EXPECTED_SETTLE_JSDOC_TAIL || jsDocSpan === EXPECTED_SETTLE_JSDOC_TAIL_V5,
+    `the settle step's JSDoc tail must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(jsDocSpan)}`,
+  );
 
   const fnStart = text.indexOf("export async function settleAutoDraftStep(", jsDocEnd);
   assert.ok(fnStart > jsDocEnd, "settleAutoDraftStep's own signature must follow its JSDoc");
@@ -1212,6 +1383,46 @@ test("autoDraft.v6.impl.ts differs from v5 ONLY inside the documented §2a + PR 
   const v6 = dropHeader(asVN(src("autoDraft.v6.impl.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.impl.ts"), 5));
   assert.equal(maskImplChanges(v6), maskImplChanges(v5), "outside the masked spans, autoDraft.v6.impl.ts must be a version-renamed copy of v5");
+});
+
+// ===========================================================================
+// Codex round 7: the ACTUAL forgery — a zero-identifier-token construct planted INSIDE the
+// classifySettleReceipt masked span (the largest, most opaque one), with the real,
+// census-certified streamText call left untouched elsewhere in the file as the "certified
+// decoy". Both reconstruct a real, unmodified v6 source file with the hazard spliced into
+// the EXACT span maskClassifySettleReceiptFn accepts, and assert the NEW exact-equality
+// check refuses it — proving the fix closes the specific shape Codex named, not merely a
+// hypothetical.
+// ===========================================================================
+
+test("Codex round 7, forgery 1 (dynamic import + computed property, the exact shape Codex named): `import(\"ai\")[\"streamText\"]({[\"messages\"]: wrong})` planted INSIDE the classifySettleReceipt masked span — ZERO identifier tokens (a dynamic import call, a computed member access, a computed object key produce no Identifier nodes at all), so it is invisible to round 6's census AND to the OLD 'mask and skip' fidelity test; the NEW exact-equality span check must refuse it", () => {
+  const v6 = asVN(src("autoDraft.v6.impl.ts"), 6);
+  const hazard = 'import("ai")["streamText"]({["messages"]: wrong});\n\n';
+  const mutant = v6.replace(
+    "  throw new Error(`settle_autodraft_task returned an unrecognized receipt shape: ${JSON.stringify(receipt)}`);\n}\n\n",
+    `  throw new Error(\`settle_autodraft_task returned an unrecognized receipt shape: \${JSON.stringify(receipt)}\`);\n}\n\n${hazard}`,
+  );
+  assert.notEqual(mutant, v6, "the mutant construction must actually have changed the text (the splice anchor must exist)");
+  assert.throws(
+    () => maskClassifySettleReceiptFn(mutant),
+    /classifySettleReceipt function span must be empty \(v5\) or EXACTLY the documented text \(v6\)/,
+    "a dynamic-import + computed-property hazard hidden inside the masked span must be refused, not silently accepted as 'whatever's here'",
+  );
+});
+
+test("Codex round 7, forgery 2 (string-keyed-property variant): the SAME hazard, but using a plain STRING-LITERAL object key (`{\"messages\": wrong}`, non-computed) instead of a computed one — a StringLiteral token, not an Identifier token, so it is ALSO zero-identifier-token and ALSO invisible to the census; the exact-equality span check must refuse this variant too, proving the closure is not narrowly tied to Codex's ONE literal example string", () => {
+  const v6 = asVN(src("autoDraft.v6.impl.ts"), 6);
+  const hazard = 'import("ai")["streamText"]({"messages": wrong});\n\n';
+  const mutant = v6.replace(
+    "  throw new Error(`settle_autodraft_task returned an unrecognized receipt shape: ${JSON.stringify(receipt)}`);\n}\n\n",
+    `  throw new Error(\`settle_autodraft_task returned an unrecognized receipt shape: \${JSON.stringify(receipt)}\`);\n}\n\n${hazard}`,
+  );
+  assert.notEqual(mutant, v6, "the mutant construction must actually have changed the text (the splice anchor must exist)");
+  assert.throws(
+    () => maskClassifySettleReceiptFn(mutant),
+    /classifySettleReceipt function span must be empty \(v5\) or EXACTLY the documented text \(v6\)/,
+    "a string-keyed-property hazard hidden inside the masked span must ALSO be refused",
+  );
 });
 
 test("PR #204: settleAutoDraftStep's SQL text carries the `as receipt` alias, and the result is read explicitly via classifySettleReceipt — the settle no-op (and every other outcome) is now OBSERVABLE and FAIL-CLOSED, not merely accidental", () => {
@@ -1453,6 +1664,12 @@ function maskReasonTypes(text) {
   const endAnchor = '/** Parse the `{ "reason": <token> }`';
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "reasonFromDetail's own doc-comment must follow");
+  // Codex round 7: EXACT equality, not "mask and skip".
+  const span = text.slice(start, end);
+  assert.ok(
+    span === EXPECTED_REASON_TYPES_BLOCK || span === EXPECTED_REASON_TYPES_BLOCK_V5,
+    `the Clr21Reason/Clr10Reason type block must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, start)}<the Clr21Reason/Clr10Reason type block — masked>${text.slice(end)}`;
 }
 
@@ -1465,6 +1682,14 @@ function maskMessagesBlock(text) {
   const endAnchor = "/** Dynamic (arbitrary-code) message lookup";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "messageFor's own doc-comment must follow");
+  // Codex round 7: EXACT equality, not "mask and skip" — MESSAGES is a plain object literal
+  // of string VALUES, but a computed property key inside an object literal CAN execute
+  // arbitrary code when the literal is evaluated, so this is a genuine risk zone too.
+  const span = text.slice(start, end);
+  assert.ok(
+    span === EXPECTED_MESSAGES_BLOCK || span === EXPECTED_MESSAGES_BLOCK_V5,
+    `the MESSAGES block must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, start)}<the MESSAGES block — masked>${text.slice(end)}`;
 }
 
@@ -1477,6 +1702,12 @@ function maskReasonMessagesBlock(text) {
   const endAnchor = "/**\n * Map a caught DB error";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "refusalFromDbError's own doc-comment must follow");
+  // Codex round 7: EXACT equality, not "mask and skip".
+  const span = text.slice(start, end);
+  assert.ok(
+    span === EXPECTED_REASON_MESSAGES_BLOCK || span === EXPECTED_REASON_MESSAGES_BLOCK_V5,
+    `the CLR21/CLR10 reason-messages block must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, start)}<the CLR21/CLR10 reason-messages block — masked>${text.slice(end)}`;
 }
 
@@ -1490,6 +1721,12 @@ function maskClr10Branch(text) {
   const endAnchor = 'if (code === "CLR29") {';
   const end = text.indexOf(endAnchor, from);
   assert.ok(end > from, "the CLR29 branch must follow");
+  // Codex round 7: EXACT equality, not "mask and skip" — genuine executable branch logic.
+  const span = text.slice(from, end);
+  assert.ok(
+    span === EXPECTED_CLR10_BRANCH || span === EXPECTED_CLR10_BRANCH_V5,
+    `the new CLR10 branch must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, from)}<the new CLR10 branch — masked>${text.slice(end)}`;
 }
 
@@ -1500,6 +1737,12 @@ function maskInternalFallback(text) {
   assert.ok(start > 0, "the internal fallback must be present in both versions");
   const end = text.indexOf("};", start);
   assert.ok(end > start, "the fallback statement must close");
+  // Codex round 7: EXACT equality, not "mask and skip".
+  const span = text.slice(start, end);
+  assert.ok(
+    span === EXPECTED_INTERNAL_FALLBACK_MESSAGE || span === EXPECTED_INTERNAL_FALLBACK_MESSAGE_V5,
+    `the internal fallback message must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, start)}<the internal fallback message — masked>${text.slice(end)}`;
 }
 
@@ -1520,6 +1763,14 @@ function maskDirectionFamilyMismatchRefusalFn(text) {
   // ADJACENT (v5 has no directionFamilyMismatchRefusal at all), so indexOf legitimately
   // returns exactly `from` on that side.
   assert.ok(end >= from, "readToolRefusalMessage's own doc-comment must follow");
+  // Codex round 7: EXACT equality, not "mask and skip" — a whole new function, v5 confirmed
+  // empty. The dedicated test below checks its RETURN VALUE (behavioural), never its
+  // literal source text, so this is the only guard against a hidden extra statement inside.
+  const span = text.slice(from, end);
+  assert.ok(
+    span === "" || span === EXPECTED_DIRECTION_FAMILY_MISMATCH_REFUSAL_FN,
+    `the directionFamilyMismatchRefusal span must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, from)}<directionFamilyMismatchRefusal — masked>${text.slice(end)}`;
 }
 
@@ -1591,6 +1842,14 @@ function maskNewSentence(text) {
   const endAnchor = '"Coding a sales invoice';
   const end = text.indexOf(endAnchor, from);
   assert.ok(end > from, "the sales-invoice paragraph must follow in both versions");
+  // Codex round 7: EXACT equality, not "mask and skip" — prose sent to the model, not
+  // executable code, but a semantic risk zone regardless (an unreviewed extra sentence
+  // changes what the model is actually told).
+  const span = text.slice(from, end);
+  assert.ok(
+    span === EXPECTED_V9_ANTI_PRIMACY_SENTENCE || span === EXPECTED_V9_ANTI_PRIMACY_SENTENCE_V8,
+    `the v9 anti-primacy sentence span must be EXACTLY the v9 or v8 documented text, found: ${JSON.stringify(span)}`,
+  );
   return `${text.slice(0, from)}<the v9 anti-primacy sentence — masked>${text.slice(end)}`;
 }
 
