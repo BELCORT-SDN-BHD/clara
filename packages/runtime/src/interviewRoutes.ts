@@ -16,8 +16,12 @@
 // marker (principalUserId must equal the caller's sub). A binding mismatch is an
 // indistinguishable 404 — a bookkeeper of firm B can neither consume nor read firm A's run.
 //
-// Replay note: a client retry that receives 409 not_pending should treat the park as
-// already-delivered and refresh via GET /state (the park index advanced under it).
+// Replay note: 409 not_pending is a LOSSY status — it is emitted both when the park genuinely
+// advanced (the answer landed) and when the hook was not yet armed (the answer was DROPPED, the
+// GH #152 window). A client must NOT read it as already-delivered on its own; it re-reads GET
+// /state and only treats POSITIVE evidence — a higher park index, or a complete-class terminal —
+// as delivery, retrying once when its own park is still open. See the dashboard's
+// answerInterview (apps/dashboard/app/shared/interviewApi.ts) for the client half.
 //
 // Call-lane law: the human-floor verbs (begin/commit/cancel_client_onboarding,
 // create_firm, resolve_onboarding_plan_item) are clara_authenticated-only and run on the
@@ -204,8 +208,10 @@ export function deriveInterviewChip(state: { pending_park?: unknown; terminal?: 
   return String(state.status ?? "unknown");
 }
 
-/** True iff a thrown error is the engine's single-shot "hook already gone" signal — the
- *  answer was already delivered by a prior attempt (idempotent success). */
+/** True iff a thrown error is the engine's single-shot "hook not found" signal. It means the
+ *  hook is not there RIGHT NOW — which is NOT the same as "already delivered": an unarmed hook
+ *  raises the identical error, and that ambiguity is the GH #152 bug. The route maps it to 409
+ *  not_pending and the client disambiguates against GET /state. */
 function isHookNotFound(err: unknown): boolean {
   const e = err as { name?: string; message?: string } | null;
   return !!e && (e.name === "HookNotFoundError" || /hook not found/i.test(String(e?.message || "")));

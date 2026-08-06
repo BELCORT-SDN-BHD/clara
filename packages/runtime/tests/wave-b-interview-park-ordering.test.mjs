@@ -24,12 +24,40 @@
 // literals are not call expressions and cannot vote; whitespace has no representation in the tree
 // at all; and the type argument is ignored, so `createHook<Anything>(...)` still counts.
 //
+// AND IT IS FAIL-CLOSED ON UNKNOWN (the ADR-059 armour law), because "parses the source" is not
+// the same as "cannot be fooled". A cross-model review of the first AST cut MEASURED three false
+// greens, each reproduced here before it was closed:
+//   · `if (false) { createHook(...) }` ahead of the announce — an arm that never runs;
+//   · `createHook(await streamPromptStep(...))` — one statement, where the ANNOUNCE (the
+//     argument) evaluates FIRST, so written order is exactly backwards;
+//   · a correctly-ordered but UNUSED `ask` sitting beside the real, inverted `askPark`.
+// A SECOND review round then measured a FOURTH, from the same root — a hand-rolled notion of
+// "function": a `class Armer { constructor() { createHook(...) } }` DECLARED before the announce
+// and INSTANTIATED after it read as an earlier arm, because the boundary test knew about
+// functions and arrows but not constructors. The boundary test is now the compiler's own
+// `ts.isFunctionLike`, which is the lesson generalised: do not re-implement the language.
+//
+// A fourth round then made the deepest point: SPELLING IS NOT IDENTITY. Matching a callee by
+// name proves nothing, because a local `function createHook() {}` shadowing the real import
+// satisfies "arms before it announces" while the engine's hook is never created at all. So both
+// names are first proven to BE their imports — a single named import from the expected module,
+// and no other binding of that name anywhere in the file.
+//
+// So the guard now names the only shape it will certify, and REFUSES everything else instead of
+// guessing: both names proven to be the real imports; exactly one `ask`; no createHook anywhere
+// else in the file; exactly one arm and one announce inside it; the announce directly awaited;
+// both calls unconditional top-level statements of the ask body in the canonical `const x =
+// createHook(...)` / `await streamPromptStep(...)` forms; and the two in DIFFERENT statements,
+// because intra-statement order is evaluation order, not text order.
+// A refusal is a red cell with a diagnosis naming the construct — never a silent pass.
+//
 // These cells are pure: no WDK engine, no DB, no server. They lock in both halves cheaply enough
 // to run in the unit battery.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import ts from "typescript";
@@ -39,6 +67,14 @@ const WORKFLOWS = join(HERE, "..", "workflows");
 
 const ARM = "createHook";
 const ANNOUNCE = "streamPromptStep";
+
+/** WHERE each name must come from. A guard that matches a callee by SPELLING proves nothing: a
+ *  local `function createHook() {}` shadowing the real import satisfies "arms before it
+ *  announces" while the engine's hook is never created. So each name must be proven to BE the
+ *  import — bound by a named import from the expected module, with no other binding of that name
+ *  anywhere in the file. */
+const ARM_MODULE = /^workflow$/;
+const ANNOUNCE_MODULE = /^\.\/interview\.v\d+\.steps\.js$/;
 
 function parse(file, src) {
   return ts.createSourceFile(file, src, ts.ScriptTarget.Latest, /* setParentNodes */ true, ts.ScriptKind.TS);
@@ -51,41 +87,159 @@ function unwrap(node) {
   return n;
 }
 
-function isFunctionLike(n) {
-  return ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n);
+/** ANY function-like boundary — the compiler's own predicate, which covers constructors,
+ *  get/set accessors and methods as well as functions and arrows. A hand-rolled list missed
+ *  constructors, and a `class Armer { constructor() { createHook(...) } }` declared before the
+ *  announce then instantiated after it read as an earlier arm. Do not narrow this back. */
+function isFunctionBoundary(n) {
+  return ts.isFunctionLike(n);
 }
 
-/** The called name: `f(...)` -> "f", `o.f(...)` -> "f". */
-function calleeName(call) {
-  const e = call.expression;
-  if (ts.isIdentifier(e)) return e.text;
-  if (ts.isPropertyAccessExpression(e)) return e.name.text;
-  return null;
+/** A callable WITH a body, for spotting `const ask = ... =>` / `function ask()`. */
+function isCallableWithBody(n) {
+  return ts.isArrowFunction(n) || ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n);
 }
 
-/** The first CallExpression to `name` inside `node`, NOT descending into a nested function — a
- *  call written inside a closure does not execute where the closure is written. */
-function findCallIn(node, name) {
-  let found = null;
+/** A call to the BARE identifier `name`. A property call (`o.createHook()`) is deliberately NOT
+ *  a match: it is a different function, and counting it was a way to fake an arm. */
+function isBareCallTo(n, name) {
+  return ts.isCallExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === name;
+}
+
+/** Every bare call to `name` anywhere under `node` (nested functions included — the caller
+ *  decides what to do about them; this walk never silently drops a candidate). */
+function collectCalls(node, name) {
+  const out = [];
   const visit = (n) => {
-    if (found) return;
-    if (n !== node && isFunctionLike(n)) return;
-    if (ts.isCallExpression(n) && calleeName(n) === name) {
-      found = n;
-      return;
-    }
+    if (isBareCallTo(n, name)) out.push(n);
     ts.forEachChild(n, visit);
   };
   visit(node);
-  return found;
+  return out;
 }
 
-/** Which top-level statement of `block` calls `name` first: { index, node } or null. */
-function findCallStatement(block, name) {
-  for (let i = 0; i < block.statements.length; i++) {
-    const node = findCallIn(block.statements[i], name);
-    if (node) return { index: i, node };
+/** Nodes whose presence between a call and the function body means the call is CONDITIONAL or
+ *  REPEATED, so its written position no longer implies it runs, or runs once, at that point. */
+function isControlFlow(n) {
+  return (
+    ts.isIfStatement(n) || ts.isForStatement(n) || ts.isForInStatement(n) || ts.isForOfStatement(n) ||
+    ts.isWhileStatement(n) || ts.isDoStatement(n) || ts.isSwitchStatement(n) || ts.isCaseClause(n) ||
+    ts.isTryStatement(n) || ts.isCatchClause(n) || ts.isConditionalExpression(n) ||
+    (ts.isBinaryExpression(n) &&
+      [ts.SyntaxKind.AmpersandAmpersandToken, ts.SyntaxKind.BarBarToken, ts.SyntaxKind.QuestionQuestionToken]
+        .includes(n.operatorToken.kind))
+  );
+}
+
+/** Locate `call` as an UNCONDITIONAL top-level statement of `body`, and insist the statement is
+ *  the CANONICAL shape for its role. Returns { index } or { refused: <why> } — never a guess.
+ *
+ *  The canonical-shape rule is what finally ended the false-green hunt. Successive rounds each
+ *  found another construct whose written position is not its execution order — a dead `if
+ *  (false)`, an argument evaluated before its callee, a constructor, a class instance FIELD, a
+ *  skipped destructuring default, a statement after `break` in a labelled block, `maybe?.(
+ *  createHook())` whose argument is skipped when the callee is absent. Enumerating them is a
+ *  losing game, so the guard stopped enumerating: the arm must be exactly a top-level
+ *  `const <id> = createHook(...)` and the announce exactly a top-level `await
+ *  streamPromptStep(...)`. That is the shape every registered body actually uses; every other
+ *  shape — however innocent — is REFUSED and must be re-certified by a human. */
+function topLevelStatementOf(body, call, label) {
+  let n = call;
+  while (n.parent && n.parent !== body) {
+    n = n.parent;
+    if (isFunctionBoundary(n)) return { refused: `the ${label} call sits inside a NESTED FUNCTION, so its position does not say when it runs` };
+    if (isControlFlow(n)) return { refused: `the ${label} call sits inside a CONDITIONAL or LOOP (${ts.SyntaxKind[n.kind]}), so its position does not prove it runs there` };
   }
+  const index = body.statements.indexOf(n);
+  if (index < 0) return { refused: `the ${label} call could not be tied to a top-level statement of 'ask'` };
+
+  if (label === ARM) {
+    // exactly: const <identifier> = createHook(...);
+    const ok =
+      ts.isVariableStatement(n) &&
+      n.declarationList.declarations.length === 1 &&
+      ts.isIdentifier(n.declarationList.declarations[0].name) &&
+      n.declarationList.declarations[0].initializer === call;
+    if (!ok) return { refused: `the ${ARM} call is not the canonical \`const <name> = ${ARM}(...)\` statement (found ${ts.SyntaxKind[n.kind]}), so the guard will not certify when it runs` };
+  } else {
+    // exactly: await streamPromptStep(...);
+    const ok = ts.isExpressionStatement(n) && ts.isAwaitExpression(n.expression) && n.expression.expression === call;
+    if (!ok) return { refused: `the ${ANNOUNCE} call is not the canonical \`await ${ANNOUNCE}(...)\` statement (found ${ts.SyntaxKind[n.kind]}), so the guard will not certify when it runs` };
+  }
+  return { index };
+}
+
+/** Every identifier a BindingName introduces, INCLUDING nested destructuring and defaults —
+ *  `const { createHook } = decoy` binds the name just as surely as `function createHook()`. */
+function boundNames(name, out = []) {
+  if (!name) return out;
+  if (ts.isIdentifier(name)) out.push(name.text);
+  else if (ts.isObjectBindingPattern(name) || ts.isArrayBindingPattern(name)) {
+    for (const el of name.elements) if (ts.isBindingElement(el)) boundNames(el.name, out);
+  }
+  return out;
+}
+
+/** Prove `name` in this file IS the named import from a module matching `moduleRe`, and that
+ *  NOTHING ELSE in the file binds that name. Returns null when proven, else the refusal reason.
+ *
+ *  Three ways this was defeated before, all now closed:
+ *    · `streamTerminalStep as streamPromptStep` — the LOCAL name matched while the imported
+ *      symbol was a different function entirely. The import's propertyName must match too.
+ *    · `const { createHook } = decoy` — a destructured binding is a binding; binding PATTERNS
+ *      are now walked, not just plain identifiers.
+ *    · a `import type { … }` of the same name, which binds nothing at runtime.
+ *  The set of ways a module-level name can be bound is small and closed, so it is enumerated
+ *  exhaustively here rather than approximated. */
+function bindingRefusal(sf, name, moduleRe) {
+  let imported = 0;
+  let other = 0;
+  let aliased = false;
+  let typeOnly = false;
+
+  const visit = (n) => {
+    if (ts.isImportSpecifier(n) && n.name.text === name) {
+      const clause = n.parent.parent;
+      const spec = clause.parent.moduleSpecifier;
+      if (n.isTypeOnly || clause.isTypeOnly) typeOnly = true;
+      else if (n.propertyName && n.propertyName.text !== name) aliased = true;
+      else if (ts.isStringLiteral(spec) && moduleRe.test(spec.text)) imported++;
+      else other++;
+    } else if ((ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) && n.name?.text === name) other++;
+    else if (ts.isVariableDeclaration(n) && boundNames(n.name).includes(name)) other++;
+    else if (ts.isParameter(n) && boundNames(n.name).includes(name)) other++;
+    else if (ts.isCatchClause(n) && boundNames(n.variableDeclaration?.name).includes(name)) other++;
+    else if (ts.isImportClause(n) && n.name?.text === name) other++;
+    else if (ts.isNamespaceImport(n) && n.name.text === name) other++;
+    else if (ts.isImportEqualsDeclaration(n) && n.name.text === name) other++;
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+
+  // A NAMESPACE import reaches the very same export under a different spelling —
+  // `import * as w from "workflow"` then `w.createHook()` is the real arm, invisible to a
+  // bare-identifier walk. Both angles are refused: the namespace import itself, and any
+  // property call bearing the name whatever its object.
+  let namespaced = 0;
+  let qualifiedCalls = 0;
+  const visit2 = (n) => {
+    if (ts.isNamespaceImport(n)) {
+      const spec = n.parent.parent.moduleSpecifier;
+      if (ts.isStringLiteral(spec) && moduleRe.test(spec.text)) namespaced++;
+    } else if (
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === name
+    ) qualifiedCalls++;
+    ts.forEachChild(n, visit2);
+  };
+  visit2(sf);
+  if (namespaced > 0) return `the module providing '${name}' is also imported as a NAMESPACE — '${name}' could be reached qualified, where a bare-identifier walk cannot see it`;
+  if (qualifiedCalls > 0) return `'${name}' is called as a PROPERTY (${qualifiedCalls} site(s)) — the guard reads bare calls only, so a qualified call would be invisible to the ordering test`;
+
+  if (typeOnly) return `'${name}' is imported TYPE-ONLY — it binds nothing at runtime, so no call of that name can be the real one`;
+  if (aliased) return `'${name}' is an ALIAS for a different export — the local spelling matches but the imported symbol does not`;
+  if (imported === 0) return `'${name}' is not imported from a module matching ${moduleRe} — the call cannot be proven to be the real one`;
+  if (imported > 1) return `'${name}' is imported ${imported} times — ambiguous, refused`;
+  if (other > 0) return `'${name}' is ALSO bound locally (${other} other binding(s)) — a shadowing declaration means the call site may not be the import at all`;
   return null;
 }
 
@@ -95,7 +249,7 @@ function findAskFunctions(sf) {
   const visit = (n) => {
     if (
       ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === "ask" &&
-      n.initializer && isFunctionLike(n.initializer)
+      n.initializer && isCallableWithBody(n.initializer)
     ) hits.push(n.initializer);
     else if (ts.isFunctionDeclaration(n) && n.name?.text === "ask") hits.push(n);
     ts.forEachChild(n, visit);
@@ -123,26 +277,53 @@ export function registeredInterviewBodies(workflowsDir = WORKFLOWS) {
   }
   if (!table) throw new Error("registry.ts declares no `workflows` object literal");
 
+  // A SPREAD can silently override an earlier entry — `{ clientOnboarding: v3, ...{
+  // clientOnboarding: v2 } }` runs v2 while a first-match resolver certifies v3. The table must
+  // therefore contain no spreads at all, and exactly one assignment per guarded class.
+  if (table.properties.some((p) => ts.isSpreadAssignment(p))) {
+    throw new Error("registry.ts's `workflows` table contains a SPREAD — a later spread can override a guarded entry, so the effective body cannot be resolved statically");
+  }
+
   const bodies = [];
   for (const cls of ["firmInterview", "clientOnboarding"]) {
-    const prop = table.properties.find(
+    const matches = table.properties.filter(
       (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === cls,
     );
-    if (!prop || !ts.isIdentifier(prop.initializer)) {
+    if (matches.length !== 1) throw new Error(`registry.ts declares '${cls}' ${matches.length} times — the effective body is ambiguous`);
+    const prop = matches[0];
+    if (!ts.isIdentifier(prop.initializer)) {
       throw new Error(`registry.ts names no plain identifier for '${cls}'`);
     }
     const ident = prop.initializer.text;
 
+    // The registry entry must be a NON-ALIASED, non-type-only named import: `import {
+    // decoyWorkflow as clientOnboarding_v3 }` would otherwise let the guard certify the correct
+    // but UNUSED `ask` in clientOnboarding.v3.ts while the registry runs the decoy.
     let spec = null;
     for (const st of sf.statements) {
       if (!ts.isImportDeclaration(st)) continue;
       const named = st.importClause?.namedBindings;
       if (!named || !ts.isNamedImports(named)) continue;
-      if (named.elements.some((el) => el.name.text === ident)) spec = st.moduleSpecifier.text;
+      const el = named.elements.find((e) => e.name.text === ident);
+      if (!el) continue;
+      if (el.isTypeOnly || st.importClause.isTypeOnly) throw new Error(`registry.ts imports '${ident}' TYPE-ONLY — it binds no workflow body`);
+      if (el.propertyName && el.propertyName.text !== ident) {
+        throw new Error(`registry.ts binds '${ident}' to a DIFFERENT export ('${el.propertyName.text}') — the name in the table is not the function that would run`);
+      }
+      spec = st.moduleSpecifier.text;
     }
     if (!spec) throw new Error(`registry.ts imports '${ident}' from nowhere resolvable`);
 
-    bodies.push({ cls, ident, file: `${spec.replace(/^\.\//, "").replace(/\.js$/, "")}.ts` });
+    const file = `${spec.replace(/^\.\//, "").replace(/\.js$/, "")}.ts`;
+    // …and that module must really EXPORT a function of that exact name.
+    const bodySf = parse(join(workflowsDir, file), readFileSync(join(workflowsDir, file), "utf8"));
+    const exportsIt = bodySf.statements.some(
+      (st) => ts.isFunctionDeclaration(st) && st.name?.text === ident &&
+        st.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword),
+    );
+    if (!exportsIt) throw new Error(`${file} does not export a function named '${ident}' — the registry entry cannot be tied to a body`);
+
+    bodies.push({ cls, ident, file });
   }
   return bodies;
 }
@@ -157,30 +338,61 @@ export function analyzeParkOrdering(workflowsDir = WORKFLOWS) {
     const path = join(workflowsDir, file);
     const sf = parse(path, readFileSync(path, "utf8"));
 
+    const refuse = (why) => ({ cls, ident, file, ok: false, detail: `${where}: ${why}` });
+
+    // SPELLING IS NOT IDENTITY. Prove both names are the real imports before reading any order.
+    const armBinding = bindingRefusal(sf, ARM, ARM_MODULE);
+    if (armBinding) return refuse(armBinding);
+    const announceBinding = bindingRefusal(sf, ANNOUNCE, ANNOUNCE_MODULE);
+    if (announceBinding) return refuse(announceBinding);
+
     const asks = findAskFunctions(sf);
-    if (asks.length !== 1) {
-      return { cls, ident, file, ok: false, detail: `${where}: expected exactly one 'ask' function, found ${asks.length}` };
+    if (asks.length !== 1) return refuse(`expected exactly one 'ask' function, found ${asks.length}`);
+    const ask = asks[0];
+    const body = ask.body;
+    if (!body || !ts.isBlock(body)) return refuse("'ask' has no block body to analyse");
+
+    // NO ARM MAY LIVE OUTSIDE THE ANALYSED CLOSURE. A second park-asking closure (an `askPark`
+    // beside a decoy `ask`) would otherwise let the guard certify a function nobody calls.
+    const fileArms = collectCalls(sf, ARM);
+    for (const c of fileArms) {
+      let owner = c.parent;
+      while (owner && !isFunctionBoundary(owner)) owner = owner.parent;
+      if (owner !== ask) return refuse(`a ${ARM}() call lives OUTSIDE the analysed 'ask' closure — this file asks parks in more than one place, and the guard will not certify only one of them`);
     }
-    const body = asks[0].body;
-    if (!body || !ts.isBlock(body)) {
-      return { cls, ident, file, ok: false, detail: `${where}: 'ask' has no block body to analyse` };
+
+    // Exactly one of each inside `ask`. Two arms or two announces is ambiguous, and ambiguity
+    // is refused rather than guessed (the ADR-059 fail-closed-on-unknown law).
+    const arms = collectCalls(body, ARM);
+    const announces = collectCalls(body, ANNOUNCE);
+    if (arms.length === 0) return refuse(`'ask' never calls ${ARM}() — it arms no hook at all`);
+    if (announces.length === 0) return refuse(`'ask' never calls ${ANNOUNCE}() — it announces no park at all`);
+    if (arms.length > 1) return refuse(`'ask' calls ${ARM}() ${arms.length} times — ambiguous, refused`);
+    if (announces.length > 1) return refuse(`'ask' calls ${ANNOUNCE}() ${announces.length} times — ambiguous, refused`);
+
+    // THE ANNOUNCE MUST BE AWAITED. The await IS the suspension the arm has to beat; an
+    // un-awaited announce is a different (and broken) shape, not a passing one.
+    if (!announces[0].parent || !ts.isAwaitExpression(announces[0].parent)) {
+      return refuse(`the ${ANNOUNCE}() call is not directly awaited — the suspension it is supposed to be cannot be proven`);
     }
 
-    const arm = findCallStatement(body, ARM);
-    const announce = findCallStatement(body, ANNOUNCE);
-    if (!arm) return { cls, ident, file, ok: false, detail: `${where}: 'ask' never calls ${ARM}() — it arms no hook at all` };
-    if (!announce) return { cls, ident, file, ok: false, detail: `${where}: 'ask' never calls ${ANNOUNCE}() — it announces no park at all` };
+    const arm = topLevelStatementOf(body, arms[0], ARM);
+    if (arm.refused) return refuse(arm.refused);
+    const announce = topLevelStatementOf(body, announces[0], ANNOUNCE);
+    if (announce.refused) return refuse(announce.refused);
 
-    // Same statement (e.g. the arm nested in the announce's own arguments): fall back to tree
-    // position, which is evaluation order within a single expression.
-    const armFirst = arm.index === announce.index
-      ? arm.node.getStart(sf) < announce.node.getStart(sf)
-      : arm.index < announce.index;
+    // SAME STATEMENT => REFUSE. `createHook(await streamPromptStep(...))` reads arm-then-announce
+    // left to right but EVALUATES the argument first, so textual position is exactly backwards
+    // there. The guard does not adjudicate intra-statement order; it declines to certify it.
+    if (arm.index === announce.index) {
+      return refuse(`${ARM}() and ${ANNOUNCE}() share statement ${arm.index} — written order is not evaluation order inside one expression, so this shape is refused rather than certified`);
+    }
 
+    const armFirst = arm.index < announce.index;
     return {
       cls, ident, file, ok: armFirst,
       detail: armFirst
-        ? `${where}: arms at statement ${arm.index}, announces at statement ${announce.index}`
+        ? `${where}: arms at statement ${arm.index}, announces (awaited) at statement ${announce.index}`
         : `${where} ANNOUNCES BEFORE IT ARMS (announce at statement ${announce.index}, arm at statement ${arm.index}).`,
     };
   });
@@ -204,6 +416,102 @@ test("GH #152: every REGISTERED interview body arms its hook BEFORE it announces
         `"already delivered", so a real answer is silently dropped. Put createHook(...) BEFORE ` +
         `await streamPromptStep(...), as chatTurn.v8 does.`,
     );
+  }
+});
+
+test("GH #152: the guard REFUSES every shape whose written position is not its execution order", () => {
+  // The false-green museum. Every entry was MEASURED green against an earlier cut of this guard
+  // across three review rounds; each is an inversion or a non-arm, and each must now be refused.
+  // They live here so the armour is checked by CI rather than by memory.
+  const src = readFileSync(join(WORKFLOWS, "clientOnboarding.v3.ts"), "utf8");
+  const armRe = /^.*const hook = createHook<Resolution>\(.*$/m;
+  const annRe = /^.*await streamPromptStep\(.*$/m;
+  const armExpr = src.match(armRe)[0].trim().replace(/^const hook = /, "").replace(/;$/, "");
+  const ann = src.match(annRe)[0];
+
+  // Each shape carries the REASON it must be refused for. Asserting only `ok === false` would
+  // let a shape start passing for an unrelated reason and quietly stop testing what it was
+  // written for — a self-test that has silently gone vacuous is worse than none.
+  const shapes = [
+    ["the arm inside `if (false)`",
+      (s) => s.replace(armRe, `    if (false) { const hook = ${armExpr}; }\n    const hook = null as never;`), /CONDITIONAL or LOOP/],
+    ["the announce as the arm's own ARGUMENT (it evaluates first)",
+      // The canonical-shape rule now catches this before the same-statement rule can: an
+      // announce buried in the arm's arguments is not `await streamPromptStep(...)` either way.
+      (s) => s.replace(annRe, "").replace(armRe, `    const hook = createHook<Resolution>(({ x: ${ann.trim().replace(/;$/, "")} }) as never);`), /canonical|share statement/],
+    ["a constructor arming, instantiated after the announce",
+      (s) => s.replace(armRe, `    class A { h: unknown; constructor() { this.h = ${armExpr}; } }`).replace(annRe, `${ann}\n    const hook = new A().h as never;`), /OUTSIDE the analysed|canonical/],
+    ["an instance FIELD arming, instantiated after the announce",
+      (s) => s.replace(armRe, `    class A { h = ${armExpr}; }`).replace(annRe, `${ann}\n    const hook = new A().h as never;`), /OUTSIDE the analysed|canonical/],
+    ["a skipped destructuring default",
+      (s) => s.replace(armRe, `    const { z: hook = ${armExpr} } = { z: 1 as never };`), /canonical/],
+    ["an unreachable arm after `break` in a labelled block",
+      (s) => s.replace(armRe, `    let hook: never = null as never;\n    lbl: { break lbl; hook = ${armExpr}; }`), /canonical/],
+    ["`maybe?.(createHook())`, whose argument is skipped",
+      (s) => s.replace(armRe, `    const maybe: ((x: unknown) => never) | undefined = undefined;\n    const hook = maybe?.(${armExpr}) as never;`), /canonical/],
+    // SPELLING IS NOT IDENTITY: a local decoy named like the import satisfies the order test
+    // while the REAL hook is never created.
+    ["a local `createHook` shadowing the real import",
+      (s) => s.replace('import { createHook } from "workflow";', 'import { createHook as realCreateHook } from "workflow";\nfunction createHook<T>(_a: unknown): T { return null as T; }\nvoid realCreateHook;'), /not imported from a module|bound locally/],
+    ["a local `streamPromptStep` shadowing the real import",
+      (s) => s.replace("import { mintOpKeyStep, runIdStep, streamPromptStep,", "import { mintOpKeyStep, runIdStep, streamPromptStep as realStreamPromptStep,")
+        .replace(armRe, `    async function streamPromptStep(_a: unknown): Promise<void> { void realStreamPromptStep; }\n${src.match(armRe)[0]}`), /not imported from a module|bound locally/],
+    // …and the same trick one level subtler: the local NAME is right, the imported SYMBOL is not.
+    ["`streamTerminalStep as streamPromptStep` — right spelling, wrong export",
+      (s) => s.replace("import { mintOpKeyStep, runIdStep, streamPromptStep,", "import { mintOpKeyStep, runIdStep, streamTerminalStep as streamPromptStep,"), /ALIAS for a different export/],
+    ["`const { createHook } = decoy` — a DESTRUCTURED shadow",
+      (s) => s.replace(armRe, `    const decoy = { createHook: <T,>(_a: unknown): T => null as T };\n    const { createHook } = decoy;\n${src.match(armRe)[0]}`), /bound locally/],
+    ["a TYPE-ONLY import of createHook, which binds nothing at runtime",
+      (s) => s.replace('import { createHook } from "workflow";', 'import type { createHook } from "workflow";'), /TYPE-ONLY/],
+    ["a NAMESPACE import of the arm's module, reachable qualified",
+      (s) => s.replace('import { createHook } from "workflow";', 'import { createHook } from "workflow";\nimport * as workflowNs from "workflow";\nvoid workflowNs;'), /NAMESPACE/],
+    ["a QUALIFIED `ns.createHook()` call the bare-identifier walk cannot see",
+      (s) => s.replace(armRe, `    const ns = { createHook: <T,>(_a: unknown): T => null as T };\n    void ns.createHook(1);\n${src.match(armRe)[0]}`), /called as a PROPERTY/],
+  ];
+
+  for (const [label, mutate, reason] of shapes) {
+    const dir = mkdtempSync(join(tmpdir(), "park-order-selftest-"));
+    try {
+      cpSync(WORKFLOWS, dir, { recursive: true });
+      const mutated = mutate(src);
+      assert.notEqual(mutated, src, `the "${label}" mutation did not apply — this self-test would be VACUOUS`);
+      writeFileSync(join(dir, "clientOnboarding.v3.ts"), mutated);
+      const finding = analyzeParkOrdering(dir).find((f) => f.file === "clientOnboarding.v3.ts");
+      assert.equal(finding.ok, false, `the guard must REFUSE ${label}, but it certified it: ${finding.detail}`);
+      assert.match(finding.detail, reason, `${label} was refused, but for the WRONG reason: ${finding.detail}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test("GH #152: the guard REFUSES a registry that does not resolve to the body it certifies", () => {
+  // The registry half of the same lesson: certifying clientOnboarding.v3.ts is worthless if the
+  // table would not actually run it. Each of these makes the resolver refuse, loudly.
+  const registry = readFileSync(join(WORKFLOWS, "registry.ts"), "utf8");
+  const mutations = [
+    ["an ALIASED import binding a different export to the registry name",
+      (s) => s.replace('import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";', 'import { clientOnboarding_v2 as clientOnboarding_v3 } from "./clientOnboarding.v2.js";'),
+      /DIFFERENT export/],
+    ["a later SPREAD silently overriding the guarded entry",
+      (s) => s.replace("  clientOnboarding: clientOnboarding_v3,", "  clientOnboarding: clientOnboarding_v3,\n  ...{ clientOnboarding: clientOnboarding_v2 },"),
+      /SPREAD/],
+    ["the class declared TWICE, where the last one wins at runtime",
+      (s) => s.replace("  clientOnboarding: clientOnboarding_v3,", "  clientOnboarding: clientOnboarding_v3,\n  clientOnboarding: clientOnboarding_v2,"),
+      /2 times/],
+  ];
+
+  for (const [label, mutate, reason] of mutations) {
+    const dir = mkdtempSync(join(tmpdir(), "park-order-registry-"));
+    try {
+      cpSync(WORKFLOWS, dir, { recursive: true });
+      const mutated = mutate(registry);
+      assert.notEqual(mutated, registry, `the "${label}" mutation did not apply — this self-test would be VACUOUS`);
+      writeFileSync(join(dir, "registry.ts"), mutated);
+      assert.throws(() => analyzeParkOrdering(dir), reason, `the resolver must REFUSE ${label}`);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   }
 });
 

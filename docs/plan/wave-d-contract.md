@@ -20,7 +20,9 @@
 
 Wave D wires the workflows onto a register that has waited two phases: **FA register from coding
 (intrinsic), depreciation runs (scheduled + close-gated), disposal, recurring/reversing
-adjustments** (`REBUILD-PLAN.md:193`) **[V]** — plus the one §7-B behaviour assigned here:
+adjustments** (`REBUILD-PLAN.md`, the **"Wave D — assets + adjustments"** row; the old `:193`
+line pointer had drifted and was repaired to a named anchor 2026-08-06 — the ruling text is
+untouched) **[V]** — plus the one §7-B behaviour assigned here:
 **staff advances** (`PRD.md:97-106`, ADR-054) **[V]**.
 
 The inheritance is unusually concrete:
