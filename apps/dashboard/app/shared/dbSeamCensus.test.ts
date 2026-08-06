@@ -429,16 +429,81 @@ function loadCatalog(): { catalog: Map<string, CatalogFn[]>; isAction: Map<strin
   return { catalog, isAction };
 }
 
+/** True when a migration whose filename starts with `prefix + '_'` has been applied to
+ *  the rig under test, read off `clara.schema_migrations` — the AUTHORITATIVE signal,
+ *  never inferred from the catalog itself. Deriving "applied" from "the catalog has the
+ *  function" would make the receipt below a tautology (it could never fail): a ledger
+ *  that says a migration applied while the function it ships is genuinely absent from
+ *  `pg_proc` is exactly the anomaly a frontier-aware assertion exists to still catch.
+ *  Mirrors origin/build/wave-7a-db's own frontier idiom VERBATIM — `s5BareTokenRoster`/
+ *  `s5KlDuplicationRoster` (packages/db/tests/x42-s5-helpers.mjs) and the C-1 overload
+ *  cell (packages/db/tests/wave-a-grants.test.mjs): `select count(*)::int … where
+ *  version like '<prefix>_%'`, compared to exactly 1. */
+function migrationApplied(prefix: string): boolean {
+  const out = execFileSync(
+    psqlBin(),
+    ["-X", "--no-psqlrc", "-tA", "-v", "ON_ERROR_STOP=1", "-c",
+      `select count(*)::int from clara.schema_migrations where version like '${prefix}_%'`],
+    {
+      env: {
+        ...process.env,
+        PGHOST: process.env.PGHOST || "localhost", PGPORT: process.env.PGPORT || "55443",
+        PGUSER: process.env.PGUSER || "postgres", PGDATABASE: process.env.PGDATABASE || "clara_ci",
+      },
+      encoding: "utf8",
+    },
+  ).trim();
+  return out === "1";
+}
+
+// [§7-A(b), 2026-08-07] FRONTIER-GATED READS — the fourth application of the pattern
+// this PR family minted tonight (see migrationApplied's header for the DB-lane
+// precedents). `clara.preview_ocr_sales_evidence` ships in migration 0046
+// (packages/db/migrations/0046_wave_7a_sales_lane.sql, on origin/build/wave-7a-db) —
+// this branch is off main's 0045 frontier, and PR-DB has not merged, so a rig migrated
+// to THIS branch's own tree genuinely does not carry the verb yet. An unconditional
+// "every called RPC must exist in the catalog" assertion would turn this cell red on
+// every pre-0046 CI leg while proving nothing about the seam itself — the same failure
+// mode the DB lane's roster helpers exist to prevent. The absence must be a NAMED,
+// ASSERTED fact (a receipt), never a silent skip: gatedButUnready below is EXPLICITLY
+// checked against the catalog before being excused from the "unknown" failure, and once
+// 0046 IS applied, the name is not excused from anything — it re-joins `reads` and gets
+// the FULL bidirectional accounting like every other read, with zero special-casing.
+const FRONTIER_GATED_READS: Record<string, string> = {
+  preview_ocr_sales_evidence: "0046",
+};
+
 test("[rig] every jsonb key crossing the DB→dashboard seam is accounted for, both directions", () => {
   if (!RIG) return; // self-skip: no migrated rig configured (CLARA_RIG_DB!=1)
   const { catalog, isAction } = loadCatalog();
   assert.ok(catalog.size > 100, "the catalog read came back nearly empty — the probe would pass vacuously");
 
   const names = rpcNames();
-  const unknown = names.filter((n) => !catalog.has(n));
+
+  // Resolve each DISTINCT frontier once (never per-name — there is one rig, so its
+  // migration state does not vary by which gated name is asking).
+  const frontierApplied = new Map(
+    [...new Set(Object.values(FRONTIER_GATED_READS))].map((prefix) => [prefix, migrationApplied(prefix)]),
+  );
+  const gatedButUnready = names.filter((n) => {
+    const gate = FRONTIER_GATED_READS[n];
+    return gate !== undefined && !frontierApplied.get(gate);
+  });
+  // THE RECEIPT: a positive, checkable assertion — not a silent filter. If a future rig
+  // somehow carried the function ahead of its own migration ledger (or the ledger query
+  // above regressed), this fails LOUDLY instead of quietly excusing a real seam gap.
+  for (const n of gatedButUnready) {
+    assert.ok(
+      !catalog.has(n),
+      `${n} is gated to migration ${FRONTIER_GATED_READS[n]}, which this rig's schema_migrations says is NOT applied — but the catalog has it anyway. The ledger and the catalog disagree; that is a real defect, not a frontier gap.`,
+    );
+  }
+  const gatedSet = new Set(gatedButUnready);
+
+  const unknown = names.filter((n) => !catalog.has(n) && !gatedSet.has(n));
   assert.deepEqual(unknown, [], `the dashboard calls RPCs that do not exist in the shipped catalog: ${unknown.join(", ")}`);
 
-  const reads = names.filter((n) => !isAction.get(n)).sort();
+  const reads = names.filter((n) => !gatedSet.has(n) && !isAction.get(n)).sort();
   assert.ok(reads.length > 20, `only ${reads.length} reads classified — the p_op_key discriminator regressed`);
 
   const measuredOpaque: string[] = [];
