@@ -11,10 +11,10 @@
 // 2026-07-29). The "newest" leg tracks registry.ts's literal source, so it breaks (by
 // design — fail loud, never false-green) the moment a FUTURE PR repoints chatTurn: again;
 // that PR owes this file the same bump. The frozen-workflows.json deployed:true check below
-// applies ONLY to the RETAINED OLD leg (v7, already live) — the newest leg (v8) is
-// intentionally checked as hash-locked-but-NOT-yet-deployed, since a registry repoint and
-// its actual runtime deploy are two separate, centrally-sequenced steps in this ceremony
-// (this PR merges the repoint; a later, separate ceremony deploys + locks it). Run:
+// applies to BOTH legs now: v7 was live at the repoint, and v8's deploy ceremony has since
+// shipped and been deploy-locked (the flag is monotonic, so both assertions are stable). A
+// future repoint PR (v8 -> v9) re-enters the split state: its newest leg starts
+// hash-locked-but-NOT-yet-deployed until its own ceremony runs --lock-deployed. Run:
 //
 //   PGHOST=127.0.0.1 PGPORT=55440 PGUSER=postgres PGDATABASE=clara_rt_test \
 //   WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:55440/clara_rt_test \

@@ -475,6 +475,19 @@ restored; migration floor 15 = manifest = live (0001→0015); **Gate A EXACT
 `former_name` alias intact; plaintext purged after verification. First scheduled
 unattended run: the next daily tick.
 
+**First LOCAL round-trip drill: EXECUTED 2026-08-06, PASS (ADR-062).** Full-profile pg_dump
+(4 schemas, 140,219,999 bytes, 49.6 s) → clean single-transaction restore into a local
+throwaway PG17 (4,486-line transcript, zero errors) → `dr-verify` STRICT, 330 probes:
+**136/136 row-count parity · the full security envelope byte-identical · 145/145 entries
+balanced both sides · migration ledger checksum-exact (44 files, frontier 0045) ·
+`approve_entry` correctly 42501s under `clara_agent_ro` on the restored copy.** All 109 raw
+STRICT fails root-caused to artifacts, none a restore defect — 101 were session-timezone
+hashing (PROVEN by re-hashing all 101 tables under `set timezone='UTC'`: 101/101 exact).
+Tooling follow-ups registered in PROJECTLOG PART 2: dr-verify should set `timezone='UTC'`
+both sides before content-md5 · the STRICT canary probe hardcodes "pending" (the canary is
+now EXPIRED on both sides — observed read-only, never answered) · §3's worked-example
+`CLARA_DR_AP_CLIENT_NAME_ILIKE='RPR%'` predates the current client roster.
+
 ### Verify cadence (a backup you never restored is not a backup)
 
 - **Monthly-light:** decrypt the latest bundle + restore the DB dumps into a **local
