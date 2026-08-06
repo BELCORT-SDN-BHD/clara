@@ -1,0 +1,663 @@
+// §7-A THE UNATTENDED SALES DRAFTER — the companion test for autoDraft_v5->v6 and
+// chatTurn_v8->v9 (wave-7a-contract.md 7A-R2/7A-R3/7A-R7, skeleton §2a/§2f). Written
+// post-merge, closing PR #203's independent review SF-1 (an unbroken repo precedent —
+// every prior bump in this closure family shipped a companion test; this one did not).
+//
+// Four jobs:
+//   1. VERSION FIDELITY — every one of the 12 new files is its prior version modulo the
+//      documented delta, never more. The 7 pure-rename files (autoDraft.v6.infra/.ts,
+//      chatTurn.v9.tools/impl/errors/infra/.ts) get a whole-file token-for-token compare
+//      (the wave-b-autodraft-v3.test.mjs:432-440 idiom). The 4 files with a real delta
+//      (autoDraft.v6.tools/impl/errors.ts, chatTurn.v9.prompt.ts) get the
+//      ledger-44-autodraft-v4.test.mjs:319-343 masked-span idiom — mask exactly the
+//      documented delta, assert everything else is byte-identical. autoDraft.v6.prompt.ts
+//      is too large a rewrite to mask cell-by-cell (the whole system prompt gains
+//      direction-determination + sales guidance); it gets wave-b-autodraft-v3.test.mjs's
+//      own alternate idiom instead — clause-level has()/lacks() assertions, run against
+//      BOTH versions so a "new" clause is proven absent from v5 and a "carried" clause is
+//      proven present in v5 too (never a clause that merely happens to already match).
+//   2. THE 6-ARITY SETTLE CALL-SITE, SOURCE-LEVEL — mock.module (Node 22+) is unavailable
+//      on this repo's Node 20; getWorkflowMetadata() throws outside a real WDK step
+//      execution (ledger-44's own precedent), so settleAutoDraftStep cannot be exercised
+//      by direct call. Source-level regex assertions instead: the SQL text carries exactly
+//      six placeholders ending `$6::text`; the params array's 6th element is `workflowRunId`,
+//      destructured from `getWorkflowMetadata()` INSIDE the step, before the query fires;
+//      and v5's call site is pinned the OTHER direction — still 5-parameter, no
+//      getWorkflowMetadata() call anywhere in its settle step body.
+//   3. THE COUNTERPARTY CONTRACT — deriveCounterpartyKind's three-value mapping pinned
+//      directly; a structural (source-order) check that the payload spread puts the
+//      derived `kind` LAST; and a BEHAVIOURAL check (deriveCounterpartyKind and
+//      runDraftJournalEntry are both pure/DB-injected — no WDK-ambient call — so, unlike
+//      the settle step, they ARE directly exercisable, mirroring wave-b-autodraft-v3.
+//      test.mjs's own stubPools rig) proving the wrapper overwrites a model-supplied
+//      `kind` that CONTRADICTS coding_kind, never trusting it even when present.
+//   4. A short registry/freeze sanity check that this file's own premises (autoDraft_v6 /
+//      chatTurn_v9 are the live registry pins; v5/v8 stay exported) still hold.
+
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+
+const { register } = await import("tsx/esm/api");
+register();
+
+const promptV6 = await import("../workflows/autoDraft.v6.prompt.ts");
+const promptV5 = await import("../workflows/autoDraft.v5.prompt.ts");
+const toolsV6 = await import("../workflows/autoDraft.v6.tools.ts");
+const registryMod = await import("../workflows/registry.ts");
+
+const { deriveCounterpartyKind, runDraftJournalEntry } = toolsV6;
+
+const src = (name) => readFileSync(new URL(`../workflows/${name}`, import.meta.url), "utf8");
+const asVN = (text, n) => text.replaceAll(`v${n}`, "vN").replaceAll(`V${n}`, "VN");
+/** Drop the top-of-file block comment: it legitimately narrates each version's delta so it
+ *  is EXPECTED to diverge; only the code from the first REAL import statement onward is
+ *  compared. Line-anchored (mirrors the family's own dropHeader). */
+function dropHeader(text) {
+  const m = /^import /m.exec(text);
+  assert.ok(m, "a real import statement must be present");
+  return text.slice(m.index);
+}
+
+// ===========================================================================
+// 1a. PURE-RENAME FILES — whole-file, token-for-token identical (header aside).
+// ===========================================================================
+
+test("autoDraft.v6.infra.ts + autoDraft.v6.ts are token-for-token identical to v5 (version-renamed only, header narrative aside)", () => {
+  for (const name of ["infra", ""]) {
+    const suffix = name ? `.${name}` : "";
+    assert.equal(
+      dropHeader(asVN(src(`autoDraft.v6${suffix}.ts`), 6)),
+      dropHeader(asVN(src(`autoDraft.v5${suffix}.ts`), 5)),
+      `autoDraft.v6${suffix}.ts must be a version-renamed copy of v5 — no behavioural change`,
+    );
+  }
+});
+
+/** The KNOWN identifier/import-path renames between chatTurn v8 and v9 — targeted, not a
+ *  blanket "v8"->"vN" substring replace (which would also rewrite legitimate historical
+ *  version markers inside carried-forward prose — e.g. a JSDoc describing what v8 itself
+ *  changed relative to v7 legitimately keeps saying "v8", and must keep saying it).
+ *  Mirrors ledger-46-chatturn-v8-prompt.test.mjs's own V7_TO_V8_RENAMES precedent. */
+const V8_TO_V9_RENAMES = [
+  ["SYSTEM_PROMPT_V8", "SYSTEM_PROMPT_V9"],
+  ["toTypedParts_v8", "toTypedParts_v9"],
+  ["messageFromParts_v8", "messageFromParts_v9"],
+  ["loadTaskStepV8", "loadTaskStepV9"],
+  ["loadContextStepV8", "loadContextStepV9"],
+  ["runModelSegmentStepV8", "runModelSegmentStepV9"],
+  ["buildToolsV8", "buildToolsV9"],
+  ["chatTurn_v8", "chatTurn_v9"],
+  ["chatTurn.v8.prompt.js", "chatTurn.v9.prompt.js"],
+  ["chatTurn.v8.errors.js", "chatTurn.v9.errors.js"],
+  ["chatTurn.v8.infra.js", "chatTurn.v9.infra.js"],
+  ["chatTurn.v8.impl.js", "chatTurn.v9.impl.js"],
+  ["chatTurn.v8.tools.js", "chatTurn.v9.tools.js"],
+  ["chatTurn.v8.ts", "chatTurn.v9.ts"],
+  ["chatTurn.v8.impl.ts", "chatTurn.v9.impl.ts"],
+  ["this batch's", "that batch's"], // a carried JSDoc's own "this batch" (=v8's batch) reads as "that batch" from v9
+];
+function upgradeV8(text) {
+  let t = text;
+  for (const [from, to] of V8_TO_V9_RENAMES) t = t.split(from).join(to);
+  return t;
+}
+
+test("chatTurn.v9.tools/impl/errors/infra.ts + chatTurn.v9.ts are token-for-token identical to v8 (targeted renames only — every OTHER carried-forward historical reference to \"v8\" is untouched, header narrative aside)", () => {
+  for (const part of ["tools", "impl", "errors", "infra", ""]) {
+    const suffix = part ? `.${part}` : "";
+    assert.equal(
+      dropHeader(src(`chatTurn.v9${suffix}.ts`)),
+      dropHeader(upgradeV8(src(`chatTurn.v8${suffix}.ts`))),
+      `chatTurn.v9${suffix}.ts must be a version-renamed copy of v8 — this wave's ONE behavioural change lives entirely in chatTurn.v9.prompt.ts`,
+    );
+  }
+});
+
+// ===========================================================================
+// 1b. autoDraft.v6.tools.ts — masked-diff vs v5 (skeleton §2a items 1-3).
+// ===========================================================================
+
+/** The new deriveCounterpartyKind export + its own JSDoc + runDraftJournalEntry's own
+ *  JSDoc (both v5-absent) sit between readInvoiceFactState's close and
+ *  runDraftJournalEntry's signature. */
+function maskDeriveCounterpartyKindFn(text) {
+  const anchor = "corroborated, explicitNonMyr };\n}\n\n";
+  const start = text.indexOf(anchor);
+  assert.ok(start > 0, "readInvoiceFactState's own closing must be present, unchanged, in both versions");
+  const from = start + anchor.length;
+  const endAnchor = "export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Promise<DraftToolResult> {";
+  const end = text.indexOf(endAnchor, from);
+  assert.ok(end > from, "runDraftJournalEntry's own signature must follow");
+  return `${text.slice(0, from)}<deriveCounterpartyKind + its own/the wrapper's JSDoc — masked>\n${text.slice(end)}`;
+}
+
+/** THE COUNTERPARTY CONTRACT's layer-2 block (skeleton §2a item 2): the derived-kind
+ *  overwrite. v5 has no equivalent span at all (it builds no counterpartyPayload). */
+function maskCounterpartyPayloadBlock(text) {
+  const startAnchor = "    // 2. Assemble writer args.";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the 'assemble writer args' comment must be present in both versions");
+  const endAnchor = "    const receipt = await writeScoped(ctx, async (c: PgExec) => {";
+  const end = text.indexOf(endAnchor, start);
+  assert.ok(end > start, "the writeScoped call must follow");
+  return `${text.slice(0, start)}<the counterparty-payload derivation block — masked>${text.slice(end)}`;
+}
+
+/** The writer args array itself: arg 11 (counterparty JSON) and arg 14 (the coding_kind
+ *  marker, item 1) both change. Masked as one span — the whole array literal. */
+function maskWriterArgsArray(text) {
+  const startAnchor = "        [\n          clientId,";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the writer args array must be present in both versions");
+  const endAnchor = "        ],\n      );";
+  const end = text.indexOf(endAnchor, start);
+  assert.ok(end > start, "the array's own close must follow");
+  return `${text.slice(0, start)}<the writer args array — masked>${text.slice(end + endAnchor.length)}`;
+}
+
+/** read_document's own description text: "this bill's" -> "this document's" (a
+ *  necessary direction-neutralisation sitting slightly outside the item-1..3 table). */
+function maskReadDocumentDesc(text) {
+  const startAnchor = 'read_document: tool({\n      description:\n        "Read';
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the read_document tool registration must be present in both versions");
+  const endAnchor = "cite as evidence.\",";
+  const end = text.indexOf(endAnchor, start);
+  assert.ok(end > start, "the description must close");
+  return `${text.slice(0, start)}<read_document description — masked>${text.slice(end + endAnchor.length)}`;
+}
+
+/** DRAFT_TOOL's own description (item 3: generalised to both directions). */
+function maskDraftToolDesc(text) {
+  const startAnchor = "[DRAFT_TOOL]: tool({\n      description:\n";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the DRAFT_TOOL registration must be present in both versions");
+  const endAnchor = "inputSchema: draftJournalEntryInputSchema,";
+  const end = text.indexOf(endAnchor, start);
+  assert.ok(end > start, "inputSchema must follow the description in both versions");
+  return `${text.slice(0, start)}<the DRAFT_TOOL description — masked>${text.slice(end)}`;
+}
+
+function maskToolsChanges(text) {
+  return maskDraftToolDesc(maskReadDocumentDesc(maskWriterArgsArray(maskCounterpartyPayloadBlock(maskDeriveCounterpartyKindFn(text)))));
+}
+
+test("autoDraft.v6.tools.ts differs from v5 ONLY inside the documented §2a spans (the new deriveCounterpartyKind fn, the counterparty-payload derivation, the writer args array, read_document's description, and DRAFT_TOOL's description) — every read tool's execute logic and the wrapper's authoritative-read plumbing are unchanged", () => {
+  const v6 = dropHeader(asVN(src("autoDraft.v6.tools.ts"), 6));
+  const v5 = dropHeader(asVN(src("autoDraft.v5.tools.ts"), 5));
+  assert.equal(maskToolsChanges(v6), maskToolsChanges(v5), "outside the five masked spans, autoDraft.v6.tools.ts must be a version-renamed copy of v5");
+});
+
+test("v5's tools.ts has no deriveCounterpartyKind or counterpartyPayload at all (proves the derivation is genuinely NEW in v6, not carried)", () => {
+  const v5 = src("autoDraft.v5.tools.ts");
+  assert.doesNotMatch(v5, /deriveCounterpartyKind/);
+  assert.doesNotMatch(v5, /counterpartyPayload/);
+});
+
+// ===========================================================================
+// 1c. autoDraft.v6.impl.ts — masked-diff vs v5 (skeleton §2a item (d) / §2d).
+//     Mirrors the ledger-44-autodraft-v4.test.mjs:319-343 maskModelStepChange idiom.
+// ===========================================================================
+
+/** The model's own user-message text ("the supplier bill" -> "the document" — necessary
+ *  because v6 drafts both directions; sits outside the settle-call span proper). */
+function maskUserMessage(text) {
+  const anchor = '{ role: "user", content: `Draft the';
+  const start = text.indexOf(anchor);
+  assert.ok(start > 0, "the model user-message must be present in both versions");
+  const end = text.indexOf("` },", start);
+  assert.ok(end > start, "the message template literal must close");
+  return `${text.slice(0, start)}<the model user-message — masked>${text.slice(end)}`;
+}
+
+/** The settle step's own doc-comment tail (the §2d rationale, v6-only) plus the 6-arity
+ *  call itself (the getWorkflowMetadata() destructure + the extra placeholder/param) —
+ *  one contiguous span from the settle doc-comment through openSweepQuestionStep's own
+ *  doc-comment start. */
+function maskSettleDocAndCall(text) {
+  const startAnchor = " *  writes the sweep_run_items row, and updates the registry counters (a 2nd failure parks)";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the settle step's own doc-comment lead-in must be present in both versions");
+  const endAnchor = "export async function openSweepQuestionStep";
+  const end = text.indexOf(endAnchor, start);
+  assert.ok(end > start, "openSweepQuestionStep must follow settleAutoDraftStep");
+  return `${text.slice(0, start)}<the settle doc-comment tail + the 6-arity settle call — masked>\n\n${text.slice(end)}`;
+}
+
+function maskImplChanges(text) {
+  return maskSettleDocAndCall(maskUserMessage(text));
+}
+
+test("autoDraft.v6.impl.ts differs from v5 ONLY inside the model user-message text and the settle step's own doc-comment + 6-arity call (header narrative aside) — claim/recover/model/question/close and consumeAutoDraftModelResult's stream-error tagging are unchanged", () => {
+  const v6 = dropHeader(asVN(src("autoDraft.v6.impl.ts"), 6));
+  const v5 = dropHeader(asVN(src("autoDraft.v5.impl.ts"), 5));
+  assert.equal(maskImplChanges(v6), maskImplChanges(v5), "outside the two masked spans, autoDraft.v6.impl.ts must be a version-renamed copy of v5");
+});
+
+// ===========================================================================
+// 1d. autoDraft.v6.errors.ts — masked-diff vs v5 (skeleton §2a item (e)).
+// ===========================================================================
+
+/** The Clr21Reason union's own two new members + the new Clr10Reason type + their own
+ *  doc-comment (which ALSO gains a "0036/0016 pins" citation, replacing "pins §2/§6" —
+ *  masked from the stable DbError-type close through the stable reasonFromDetail doc). */
+function maskReasonTypes(text) {
+  const startAnchor = "constraint?: string };\n\n/** CLR21 reason tokens";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the DbError type's own close must be present in both versions");
+  const endAnchor = '/** Parse the `{ "reason": <token> }`';
+  const end = text.indexOf(endAnchor, start);
+  assert.ok(end > start, "reasonFromDetail's own doc-comment must follow");
+  return `${text.slice(0, start)}<the Clr21Reason/Clr10Reason type block — masked>${text.slice(end)}`;
+}
+
+/** MESSAGES' own doc-comment (gains a "direction-neutral" sentence) + the const itself
+ *  (CLR21/CLR23/CLR26/CLR29 reworded off "bill"/"supplier"). */
+function maskMessagesBlock(text) {
+  const startAnchor = "/** Oracle-safe message per CLR code";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the MESSAGES doc-comment must be present in both versions");
+  const endAnchor = "/** Dynamic (arbitrary-code) message lookup";
+  const end = text.indexOf(endAnchor, start);
+  assert.ok(end > start, "messageFor's own doc-comment must follow");
+  return `${text.slice(0, start)}<the MESSAGES block — masked>${text.slice(end)}`;
+}
+
+/** CLR21_REASON_MESSAGES (reworded off "bill"/"supplier", + the two new tax_leg_missing/
+ *  type_polarity_mismatch entries) + the new CLR10_REASON_MESSAGES const (v5-absent). */
+function maskReasonMessagesBlock(text) {
+  const startAnchor = "const CLR21_REASON_MESSAGES: Record<Clr21Reason, string> = {";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "CLR21_REASON_MESSAGES must be present in both versions");
+  const endAnchor = "/**\n * Map a caught DB error";
+  const end = text.indexOf(endAnchor, start);
+  assert.ok(end > start, "refusalFromDbError's own doc-comment must follow");
+  return `${text.slice(0, start)}<the CLR21/CLR10 reason-messages block — masked>${text.slice(end)}`;
+}
+
+/** The new CLR10 branch inside refusalFromDbError (v5-absent entirely — v5's CLR10 falls
+ *  straight through to the generic messageFor(code) path with no reason handling). */
+function maskClr10Branch(text) {
+  const startAnchor = 'return { type: "refusal", code: "CLR21", reason, message };\n  }\n';
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the CLR21 branch's own close must be present in both versions");
+  const from = start + startAnchor.length;
+  const endAnchor = 'if (code === "CLR29") {';
+  const end = text.indexOf(endAnchor, from);
+  assert.ok(end > from, "the CLR29 branch must follow");
+  return `${text.slice(0, from)}<the new CLR10 branch — masked>${text.slice(end)}`;
+}
+
+/** The "internal" fallback message ("This bill..." -> "This document..."). */
+function maskInternalFallback(text) {
+  const startAnchor = 'return { type: "refusal", code: "internal", message: "';
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the internal fallback must be present in both versions");
+  const end = text.indexOf("};", start);
+  assert.ok(end > start, "the fallback statement must close");
+  return `${text.slice(0, start)}<the internal fallback message — masked>${text.slice(end)}`;
+}
+
+function maskErrorsChanges(text) {
+  return maskInternalFallback(maskClr10Branch(maskReasonMessagesBlock(maskMessagesBlock(maskReasonTypes(text)))));
+}
+
+test("autoDraft.v6.errors.ts differs from v5 ONLY inside the documented §2a(e) spans (the new reason types, the reworded MESSAGES/CLR21_REASON_MESSAGES, the new CLR10_REASON_MESSAGES, the new CLR10 branch, and the reworded internal fallback) — every native-constraint collapse (23505/23503/23514/42501) and readToolRefusalMessage are unchanged", () => {
+  const v6 = dropHeader(asVN(src("autoDraft.v6.errors.ts"), 6));
+  const v5 = dropHeader(asVN(src("autoDraft.v5.errors.ts"), 5));
+  assert.equal(maskErrorsChanges(v6), maskErrorsChanges(v5), "outside the masked spans, autoDraft.v6.errors.ts must be a version-renamed copy of v5");
+});
+
+// ===========================================================================
+// 1e. chatTurn.v9.prompt.ts — masked-diff vs v8 (skeleton §2f: ONE behavioural change).
+// ===========================================================================
+
+const V8_TO_V9_PROMPT_RENAMES = [
+  ["SYSTEM_PROMPT_V8", "SYSTEM_PROMPT_V9"],
+  ["toTypedParts_v8", "toTypedParts_v9"],
+  ["chatTurn.v8.impl.ts", "chatTurn.v9.impl.ts"],
+];
+function upgradeV8Prompt(text) {
+  let t = text;
+  for (const [from, to] of V8_TO_V9_PROMPT_RENAMES) t = t.split(from).join(to);
+  return t;
+}
+
+/** The ONE new sentence-group (v9:176-179), appended to the end of the supplier-bill
+ *  paragraph, right after its own "Call `draft_journal_entry`..." call-to-action. */
+function maskNewSentence(text) {
+  const startAnchor = 'Call `draft_journal_entry` with coding_kind \\"supplier_bill\\".",';
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "the supplier_bill call-to-action must be present in both versions");
+  const from = start + startAnchor.length;
+  const endAnchor = '"Coding a sales invoice';
+  const end = text.indexOf(endAnchor, from);
+  assert.ok(end > from, "the sales-invoice paragraph must follow in both versions");
+  return `${text.slice(0, from)}<the v9 anti-primacy sentence — masked>${text.slice(end)}`;
+}
+
+test("chatTurn.v9.prompt.ts differs from v8 ONLY in the ONE new sentence-group appended to the supplier-bill paragraph (targeted renames + header narrative aside) — the clarify tool, the draft schema, and every typed-part shape are unchanged", () => {
+  const v9 = dropHeader(src("chatTurn.v9.prompt.ts"));
+  const v8 = dropHeader(upgradeV8Prompt(src("chatTurn.v8.prompt.ts")));
+  assert.equal(maskNewSentence(v9), maskNewSentence(v8), "outside the masked span, chatTurn.v9.prompt.ts must be a version-renamed copy of v8");
+});
+
+test("v8's supplier-bill paragraph does NOT already carry the anti-primacy sentence (proves it is genuinely NEW in v9)", () => {
+  assert.doesNotMatch(promptV5.SYSTEM_PROMPT_AUTODRAFT_V5, /is NEVER coded here even if it superficially resembles/, "sanity: this is a chatTurn clause, not an autoDraft one — confirms the two prompts are independent");
+  const v8Body = src("chatTurn.v8.prompt.ts");
+  assert.doesNotMatch(v8Body, /is NEVER coded here even if it superficially resembles a bill/, "v8's own text must not already carry this sentence");
+});
+
+// ===========================================================================
+// 2. autoDraft.v6.prompt.ts — too large a rewrite to mask cell-by-cell (the WHOLE
+//    system prompt gains direction-determination + sales guidance). Clause-level
+//    has()/lacks() assertions instead, mirroring wave-b-autodraft-v3.test.mjs's own
+//    alternate idiom for this exact situation. Every "carried" assertion is ALSO
+//    checked present in v5 (proves it is genuinely carried, not new text that
+//    happens to match); every "new" assertion is ALSO checked absent from v5
+//    (proves it is genuinely new, not carried text this test merely restates).
+// ===========================================================================
+
+const P6 = promptV6.SYSTEM_PROMPT_AUTODRAFT_V6.replace(/\s+/g, " ");
+const P5 = promptV5.SYSTEM_PROMPT_AUTODRAFT_V5.replace(/\s+/g, " ");
+const has = (hay, needle, why) => assert.ok(hay.includes(needle), `${why}\n  MISSING CLAUSE: ${needle}`);
+const lacks = (hay, needle, why) => assert.ok(!hay.includes(needle), `${why}\n  CLAUSE MUST BE GONE: ${needle}`);
+
+test("v6 carries the SST-zero purchase leg-shape rule byte-for-byte from v5 (both branches, unchanged) — this wave does not touch the ledger #46 precedent", () => {
+  const clause2leg =
+    "NO stated tax in the facts, OR a stated tax that is EXACTLY ZERO: a TWO-leg entry — the expense account(s) DEBIT for the GROSS, and the Accounts Payable CREDIT for the same GROSS.";
+  const clause3leg =
+    "A STATED NONZERO tax amount in the facts: a THREE-leg VISIBILITY split — the expense account(s) DEBIT for the NET, ONE tied SST-portion-of-cost DEBIT leg equal EXACTLY to the stated tax figure from the facts";
+  has(P6, clause2leg, "the 2-leg branch persists in v6");
+  has(P5, clause2leg, "…and is genuinely CARRIED (present in v5 too)");
+  has(P6, clause3leg, "the 3-leg branch persists in v6");
+  has(P5, clause3leg, "…and is genuinely CARRIED (present in v5 too)");
+  has(P6, "Malaysian SST has NO input-tax credit", "the no-input-tax-credit doctrine persists");
+});
+
+test("v6 carries the SST-registration-watch EXISTENCE-ONLY framing byte-for-byte from v5", () => {
+  const c1 =
+    "Because no human is watching this run, the ONLY thing you may ever say about it is that an SST registration watch is OPEN for this client and that the professional handles it in the review queue.";
+  const c2 =
+    'NEVER quote any figure, status, tier, window, or deadline from it, and NEVER draw ANY conclusion from it: no liability, no registration status, no tax computation, no multiplying by 8%, no threshold judgement, no future-method inference, and never "below threshold" or "no issue".';
+  const c3 = "This unattended sweep NEVER acts on it — surfacing and professional review belong to the attended chat lane.";
+  for (const c of [c1, c2, c3]) {
+    has(P6, c, "the watch existence-only clause persists in v6");
+    has(P5, c, "…and is genuinely CARRIED (present in v5 too)");
+  }
+});
+
+test("v6 carries the wiki-notes framing (inform-never-decide, the citation law, the freshness token) byte-for-byte from v5", () => {
+  const c1 = "Clara's wiki notes: the context pack may include a `wiki` block";
+  const c2 = "Wiki content may INFORM this draft; it may NEVER decide one";
+  const c3 =
+    "every DB gate, bound, floor, and autopost rule stays authoritative regardless of what the wiki says, and this sweep draft remains human-reviewed under the same acknowledgement floors as any other draft.";
+  const c4 =
+    "The books_version freshness token stays authoritative regardless of the wiki's projection lag — never treat a wiki note as more current than the books.";
+  for (const c of [c1, c2, c3, c4]) {
+    has(P6, c, "the wiki-notes clause persists in v6");
+    has(P5, c, "…and is genuinely CARRIED (present in v5 too)");
+  }
+});
+
+test("v6 gains the DB-authoritative BOUND-direction framing (7A-R2: coding_kind is a checked proposal, never routing authority) — genuinely NEW, not carried", () => {
+  const c = "This document was admitted into a BOUND direction — sales or purchase — before this run";
+  has(P6, c, "v6 states the bound-direction contract");
+  lacks(P5, c, "v5 must NOT already have this — it is genuinely new this wave");
+});
+
+test("v6 gains the SALES INVOICE / SALES CREDIT NOTE leg-shape paragraph — genuinely NEW, not carried", () => {
+  const c = "SALES INVOICE / SALES CREDIT NOTE leg shape:";
+  has(P6, c, "v6 states the sales leg-shape rule");
+  lacks(P5, c, "v5 must NOT already have this — it is genuinely new this wave");
+});
+
+test("v6 gains the anti-primacy sentence closing the supplier-bill guidance (a client-issued document is never coded as a bill) — genuinely NEW, not carried", () => {
+  const c = "is NEVER coded here even if it superficially resembles a bill: code it as sales_invoice below, crediting income";
+  has(P6, c, "v6 states the anti-primacy sentence");
+  lacks(P5, c, "v5 must NOT already have this — v5 never coded sales documents at all");
+});
+
+test("v6 gains the counterparty.kind derivation warning — genuinely NEW, not carried", () => {
+  const c = "NEVER set counterparty.kind yourself: it is derived server-side from coding_kind";
+  has(P6, c, "v6 warns the model never to set kind itself");
+  lacks(P5, c, "v5 must NOT already have this — v5 had no counterparty.kind field at all");
+});
+
+test("v6's removed clause: v5's purchase-only framing sentence is GONE (the sweep now drafts both directions)", () => {
+  const c = "This sweep only ever codes a supplier bill (purchase direction): the counterparty is the VENDOR, never a customer.";
+  has(P5, c, "sanity: v5 really did carry this sentence");
+  lacks(P6, c, "v6 must NOT carry this sentence — it now drafts sales documents too");
+});
+
+// ===========================================================================
+// 3. draftJournalEntryInputSchema — the coding_kind menu (7A-R7) + the counterparty
+//    generalisation + the contradiction-rejecting superRefine (THE COUNTERPARTY
+//    CONTRACT, layer 1 of 3 — ergonomics, never the guard).
+// ===========================================================================
+
+test("v6's coding_kind menu is EXACTLY supplier_bill | sales_invoice | sales_credit_note — 7A-R7: no journal_entry in the unattended lane", () => {
+  const r = promptV6.draftJournalEntryInputSchema.safeParse;
+  const base = {
+    posting_date: "2026-08-01",
+    lines: [
+      { account_code: "600-000", debit_cents: 100, credit_cents: 0 },
+      { account_code: "400-000", debit_cents: 0, credit_cents: 100 },
+    ],
+    document_id: "11111111-1111-4111-8111-111111111111",
+    counterparty: { existing_id: "22222222-2222-4222-8222-222222222222" },
+    evidence: [{ region_id: "33333333-3333-4333-8333-333333333333", quote: "100" }],
+  };
+  for (const kind of ["supplier_bill", "sales_invoice", "sales_credit_note"]) {
+    assert.equal(r({ ...base, coding_kind: kind }).success, true, `${kind} must be accepted`);
+  }
+  assert.equal(r({ ...base, coding_kind: "journal_entry" }).success, false, "journal_entry must be REFUSED — 7A-R7");
+  assert.equal(r({ ...base, coding_kind: undefined }).success, false, "coding_kind is required, not optional");
+});
+
+test("v6's zod schema rejects a counterparty.kind that CONTRADICTS coding_kind, and accepts an omitted or agreeing kind (THE COUNTERPARTY CONTRACT, layer 1 — ergonomics; layer 3, the DB draft writer, is the only authority)", () => {
+  const base = {
+    posting_date: "2026-08-01",
+    lines: [
+      { account_code: "600-000", debit_cents: 100, credit_cents: 0 },
+      { account_code: "400-000", debit_cents: 0, credit_cents: 100 },
+    ],
+    document_id: "11111111-1111-4111-8111-111111111111",
+    evidence: [{ region_id: "33333333-3333-4333-8333-333333333333", quote: "100" }],
+  };
+  const cases = [
+    ["supplier_bill", "vendor", true, "agreeing kind accepted"],
+    ["supplier_bill", "customer", false, "contradicting kind (bill+customer) rejected"],
+    ["supplier_bill", undefined, true, "omitted kind accepted (the tool derives it)"],
+    ["sales_invoice", "customer", true, "agreeing kind accepted"],
+    ["sales_invoice", "vendor", false, "contradicting kind (sales+vendor) rejected"],
+    ["sales_credit_note", "vendor", false, "the CN->vendor contradiction is ALSO rejected"],
+    ["sales_credit_note", "customer", true, "agreeing kind accepted"],
+  ];
+  for (const [coding_kind, kind, expectOk, why] of cases) {
+    const counterparty = kind ? { kind, existing_id: "22222222-2222-4222-8222-222222222222" } : { existing_id: "22222222-2222-4222-8222-222222222222" };
+    const result = promptV6.draftJournalEntryInputSchema.safeParse({ ...base, coding_kind, counterparty });
+    assert.equal(result.success, expectOk, `coding_kind=${coding_kind} kind=${kind ?? "(omitted)"}: ${why}`);
+  }
+});
+
+// ===========================================================================
+// 4. THE 6-ARITY SETTLE CALL-SITE — source-level (mock.module is Node 22+; this repo
+//    runs Node 20, and getWorkflowMetadata()/settleAutoDraftStep cannot be exercised by
+//    direct call outside a real WDK step — ledger-44's own established precedent).
+// ===========================================================================
+
+/** Split a comma-list respecting paren/bracket depth — Math.max(0, Math.round(tokens))
+ *  must stay ONE element, never split on its own internal comma. */
+function splitArgs(text) {
+  const out = [];
+  let depth = 0;
+  let cur = "";
+  for (const ch of text) {
+    if (ch === "(" || ch === "[") depth++;
+    if (ch === ")" || ch === "]") depth--;
+    if (ch === "," && depth === 0) {
+      out.push(cur.trim());
+      cur = "";
+      continue;
+    }
+    cur += ch;
+  }
+  if (cur.trim()) out.push(cur.trim());
+  return out;
+}
+
+function extractSettleStepBody(text) {
+  const start = text.indexOf("export async function settleAutoDraftStep(");
+  assert.ok(start > 0, "settleAutoDraftStep must be present");
+  const end = text.indexOf("/** Open a scoped open-question", start);
+  assert.ok(end > start, "openSweepQuestionStep's own doc-comment must follow");
+  return text.slice(start, end);
+}
+
+test("v6's settle SQL text carries EXACTLY six placeholders, the sixth being $6::text", () => {
+  const body = extractSettleStepBody(src("autoDraft.v6.impl.ts"));
+  const sqlMatch = /select clara\.settle_autodraft_task\(([^)]*)\)/.exec(body);
+  assert.ok(sqlMatch, "the settle_autodraft_task call text must be present");
+  const placeholders = sqlMatch[1].split(",").map((s) => s.trim());
+  assert.equal(placeholders.length, 6, `expected 6 placeholders, got ${JSON.stringify(placeholders)}`);
+  assert.equal(placeholders[5], "$6::text", "the 6th placeholder must be $6::text");
+});
+
+test("v6's settle params array has EXACTLY six elements, the sixth being workflowRunId, destructured from getWorkflowMetadata() INSIDE the step, BEFORE the query fires", () => {
+  const body = extractSettleStepBody(src("autoDraft.v6.impl.ts"));
+  const paramsMatch = /\[\s*taskId,([\s\S]*?)\]\s*\),\s*\n\s*\);/.exec(body);
+  assert.ok(paramsMatch, "the settle params array must be present");
+  const params = ["taskId", ...splitArgs(paramsMatch[1])];
+  assert.equal(params.length, 6, `expected 6 params, got ${JSON.stringify(params)}`);
+  assert.equal(params[5], "workflowRunId", "the 6th param must be the workflowRunId identifier");
+
+  assert.match(body, /const \{ workflowRunId \} = getWorkflowMetadata\(\);/, "workflowRunId must be destructured from getWorkflowMetadata()");
+  const destructureIdx = body.indexOf("const { workflowRunId } = getWorkflowMetadata();");
+  const queryIdx = body.indexOf('c.query("select clara.settle_autodraft_task');
+  assert.ok(destructureIdx > 0 && destructureIdx < queryIdx, "the destructure must precede the query call, inside this SAME step execution");
+});
+
+test("v5's settle call-site is pinned the OTHER direction (regression, both ways): still exactly 5 placeholders, still exactly 5 params, and NO getWorkflowMetadata() call anywhere in its settle step", () => {
+  const body = extractSettleStepBody(src("autoDraft.v5.impl.ts"));
+  const sqlMatch = /select clara\.settle_autodraft_task\(([^)]*)\)/.exec(body);
+  assert.ok(sqlMatch, "v5's settle_autodraft_task call text must be present");
+  const placeholders = sqlMatch[1].split(",").map((s) => s.trim());
+  assert.equal(placeholders.length, 5, `v5 must stay 5-arity, got ${JSON.stringify(placeholders)}`);
+  assert.doesNotMatch(sqlMatch[1], /\$6/, "v5 must carry no $6 placeholder at all");
+
+  const paramsMatch = /\[\s*taskId,([\s\S]*?)\]\s*\),\s*\n\s*\);/.exec(body);
+  assert.ok(paramsMatch, "v5's settle params array must be present");
+  const params = ["taskId", ...splitArgs(paramsMatch[1])];
+  assert.equal(params.length, 5, `v5 must stay 5 params, got ${JSON.stringify(params)}`);
+
+  assert.doesNotMatch(body, /getWorkflowMetadata/, "v5's settleAutoDraftStep must never call getWorkflowMetadata — that is v6's own addition");
+});
+
+// ===========================================================================
+// 5. deriveCounterpartyKind — pinned mapping, a structural spread-order check, and a
+//    BEHAVIOURAL overwrite-wins check (deriveCounterpartyKind and runDraftJournalEntry
+//    carry no WDK-ambient call, so — unlike settleAutoDraftStep above — they ARE
+//    directly exercisable; mirrors wave-b-autodraft-v3.test.mjs's own stubPools rig).
+// ===========================================================================
+
+test("deriveCounterpartyKind: supplier_bill -> vendor; sales_invoice -> customer; sales_credit_note -> customer", () => {
+  assert.equal(deriveCounterpartyKind("supplier_bill"), "vendor");
+  assert.equal(deriveCounterpartyKind("sales_invoice"), "customer");
+  assert.equal(deriveCounterpartyKind("sales_credit_note"), "customer");
+});
+
+test("structural (comment-free): the counterpartyPayload object literal spreads input.counterparty FIRST and writes kind: deriveCounterpartyKind(...) LAST — the source ORDER, not a comment claiming it, is what makes the derived value win the overwrite", () => {
+  const toolsSrc = src("autoDraft.v6.tools.ts");
+  const blockStart = toolsSrc.indexOf("const counterpartyPayload = {");
+  assert.ok(blockStart > 0, "the counterpartyPayload literal must be present");
+  const blockEnd = toolsSrc.indexOf("};", blockStart);
+  assert.ok(blockEnd > blockStart, "the literal must close");
+  const block = toolsSrc.slice(blockStart, blockEnd);
+  const spreadIdx = block.indexOf("...(input.counterparty");
+  const kindIdx = block.indexOf("kind: deriveCounterpartyKind(input.coding_kind)");
+  assert.ok(spreadIdx >= 0, "the spread of input.counterparty must be present");
+  assert.ok(kindIdx > spreadIdx, "kind: must be written AFTER the spread, in raw source-character order, so a same-named key inside the spread loses");
+});
+
+const DOC = "11111111-1111-1111-1111-111111111111";
+const draftCtx = { firmId: "F", clientId: "c1", documentId: DOC, filingId: "fil-1", taskId: "task-7" };
+
+function stubPools() {
+  const write = { params: null };
+  const readClient = {
+    query: async (sql) => {
+      if (/from clara\.document_filings/.test(sql)) return { rows: [{ sha256: "sha-abc", filing_id: "fil-1", resolution_id: "res-1" }], rowCount: 1 };
+      if (/get_context_pack/.test(sql)) return { rows: [{ pack: { books_version: 7 } }], rowCount: 1 };
+      if (/get_document_extract/.test(sql)) return { rows: [{ x: null }], rowCount: 1 };
+      return { rows: [], rowCount: 0 };
+    },
+  };
+  const writeClient = {
+    query: async (_sql, params) => {
+      write.params = params;
+      return { rows: [{ receipt: { entry_id: "entry-9", revision_token: "rev-9" } }], rowCount: 1 };
+    },
+  };
+  const mintClient = { query: async () => ({ rows: [{ credential_id: "cred", secret: "s3cr3t" }], rowCount: 1 }) };
+  globalThis.__claraPools = {
+    withRuntime: async (fn) => fn(mintClient),
+    withReadWakeScoped: async (_secret, fn) => fn(readClient),
+    withWriteWakeScoped: async (_secret, fn) => fn(writeClient),
+  };
+  return write;
+}
+
+test("behavioural: runDraftJournalEntry OVERWRITES a contradicting model-supplied counterparty.kind with the derived value — the tool never trusts the model's kind, even when present and even though the schema layer would normally have already rejected this exact contradiction (this proves the WRAPPER's own defence-in-depth, independent of schema validation)", async () => {
+  const input = {
+    coding_kind: "sales_invoice", // -> derives "customer"
+    posting_date: "2025-10-15",
+    lines: [
+      { account_code: "410-000", debit_cents: 1000, credit_cents: 0 },
+      { account_code: "600-000", debit_cents: 0, credit_cents: 1000 },
+    ],
+    document_id: DOC,
+    counterparty: { kind: "vendor", existing_id: "22222222-2222-2222-2222-222222222222" }, // contradicts coding_kind
+    evidence: [{ region_id: "33333333-3333-3333-3333-333333333333", quote: "1000" }],
+  };
+  const write = stubPools();
+  const r = await runDraftJournalEntry(draftCtx, input);
+  assert.equal(r.ok, true, `expected ok, got ${JSON.stringify(r)}`);
+  const counterpartyArg = JSON.parse(write.params[10]); // arg 11 (0-indexed 10)
+  assert.equal(counterpartyArg.kind, "customer", "the wrapper must overwrite the model's contradicting 'vendor' with the derived 'customer'");
+  assert.equal(counterpartyArg.existing_id, "22222222-2222-2222-2222-222222222222", "the existing_id itself still passes through, unmodified");
+  assert.equal(write.params[13], "sales_invoice", "arg 14 (the coding_kind marker) must carry input.coding_kind — the §0.1 headline defect this wave fixes (v5 hardcoded 'supplier_bill' here)");
+});
+
+test("behavioural: an OMITTED counterparty.kind is derived normally (the common case — the model never sets it)", async () => {
+  const input = {
+    coding_kind: "supplier_bill", // -> derives "vendor"
+    posting_date: "2025-10-15",
+    lines: [
+      { account_code: "600-000", debit_cents: 1000, credit_cents: 0 },
+      { account_code: "400-000", debit_cents: 0, credit_cents: 1000 },
+    ],
+    document_id: DOC,
+    counterparty: { existing_id: "44444444-4444-4444-4444-444444444444" },
+    evidence: [{ region_id: "33333333-3333-3333-3333-333333333333", quote: "1000" }],
+  };
+  const write = stubPools();
+  const r = await runDraftJournalEntry(draftCtx, input);
+  assert.equal(r.ok, true, `expected ok, got ${JSON.stringify(r)}`);
+  const counterpartyArg = JSON.parse(write.params[10]);
+  assert.equal(counterpartyArg.kind, "vendor");
+  assert.equal(write.params[13], "supplier_bill");
+});
+
+// ===========================================================================
+// 6. Registry sanity — autoDraft_v6 / chatTurn_v9 are the live pins; v5/v8 stay
+//    exported so no parked run on the prior body is stranded (policy (c)).
+// ===========================================================================
+
+test("registry.ts pins autoDraft: autoDraft_v6 and chatTurn: chatTurn_v9, and still exports the superseded autoDraft_v5 / chatTurn_v8 bodies", () => {
+  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v6");
+  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v9");
+  assert.equal(typeof registryMod.autoDraft_v5, "function", "autoDraft_v5 must stay exported (policy c)");
+  assert.equal(typeof registryMod.chatTurn_v8, "function", "chatTurn_v8 must stay exported (policy c)");
+});
