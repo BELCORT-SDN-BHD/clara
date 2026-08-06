@@ -295,10 +295,11 @@ async function main() {
 
     // frozen-workflows.json carries a hash-locked entry for BOTH closures, proving a cutover can
     // never be an in-place body edit (the T6 silent-correctness hazard): the old body stays
-    // structurally resolvable. deployed:true is checked ONLY for v7 (already live in production);
-    // a registry repoint and its actual runtime deploy are two separate, centrally-sequenced steps
-    // in this ceremony (this PR merges the repoint; a later ceremony deploys + locks v8) — v8 is
-    // asserted hash-locked and explicitly NOT YET deployed:true.
+    // structurally resolvable. Both are deployed:true — v8 shipped in a live image long ago and
+    // the deploy-lock ceremony act stamped it (the flag is MONOTONIC, enforced by freeze-lint's
+    // UNLOCKED-VS-BASE, so this assertion is stable forever). The original repoint-era assertion
+    // here pinned "v8 NOT YET deployed" as a point-in-time state and correctly tripped when the
+    // missed lock ceremony was finally recorded — a dated expectation, not an invariant.
     const frozen = JSON.parse(await readFile(new URL("../../../frozen-workflows.json", import.meta.url), "utf8"));
     const v7Entry = frozen.workflows?.["packages/runtime/workflows/chatTurn.v7.ts"];
     assert.ok(v7Entry, "frozen-workflows.json has a chatTurn.v7.ts entry");
@@ -308,8 +309,8 @@ async function main() {
     const v8Entry = frozen.workflows?.["packages/runtime/workflows/chatTurn.v8.ts"];
     assert.ok(v8Entry, "frozen-workflows.json has a chatTurn.v8.ts entry");
     assert.match(v8Entry.sha256 ?? "", /^[0-9a-f]{64}$/, "chatTurn.v8.ts is hash-locked");
-    assert.notEqual(v8Entry.deployed, true, "chatTurn.v8.ts is NOT YET deployed:true — this PR merges the repoint; a later ceremony deploys + locks it");
-    console.log("[cutover-e2e] static guards: registry repoint + v7 retention + frozen v7/v8 hash-locks (v8 not yet deployed)");
+    assert.equal(v8Entry.deployed, true, "chatTurn.v8.ts is deployed:true (shipped live, deploy-locked; the flag is monotonic)");
+    console.log("[cutover-e2e] static guards: registry repoint + v7 retention + frozen v7/v8 hash-locks (both deploy-locked)");
   }
 
   console.log("\nVERSION CUTOVER E2E: ALL PASS");
