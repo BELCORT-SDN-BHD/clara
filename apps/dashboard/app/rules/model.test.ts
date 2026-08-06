@@ -4,7 +4,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AutopostRule } from "../shared/reviewCardTypes";
-import { daysUntil, isExpiringSoon, ruleUrgency, windowLabel, postsRemaining, canSign, canRetire } from "./model";
+import {
+  daysUntil, isExpiringSoon, ruleUrgency, windowLabel, postsRemaining, canSign, canRetire,
+  toSalesEvidencePreview, salesEvidenceNotApplicableLabel, taxSilentGapLabel,
+  type SalesEvidencePreviewApplicable, type SalesEvidencePreviewNotApplicable,
+} from "./model";
 import { narrowRuleWrite, ruleWriteRefusedError } from "../shared/reviewApi";
 
 const NOW = new Date("2026-07-22T00:00:00Z");
@@ -77,4 +81,77 @@ test("ruleWriteRefusedError renders through the existing refusal UI (PgrestError
   assert.equal(err.clr, "CLR27");
   assert.equal(err.reason, "bounds_exceeded");
   assert.match(err.message, /bounds_exceeded/);
+});
+
+// === §7-A(b) — clara.preview_ocr_sales_evidence, mapped (0046 §SECTION 6) =========
+
+const APPLICABLE_RAW = {
+  rule_id: "r1", applicable: true, advisory: true,
+  client_id: "c1", counterparty_id: "cp1", account_code: "410-000", rule_status: "proposed",
+  qualifying: 4, distinct_invoices: 4, corroborated: 2, span_days: 45,
+  tax_silent_documents: 2,
+  required: { qualifying: 6, distinct_invoices: 6, corroborated: 6, span_days: 60 },
+  floor_met: false, evaluated_at: "2026-08-07T03:00:00+08:00",
+};
+
+test("toSalesEvidencePreview maps the applicable branch — every count an INTEGER, verbatim", () => {
+  const p = toSalesEvidencePreview(APPLICABLE_RAW);
+  assert.ok(p && p.applicable);
+  const a = p as SalesEvidencePreviewApplicable;
+  assert.equal(a.rule_id, "r1");
+  assert.equal(a.qualifying, 4);
+  assert.equal(a.distinct_invoices, 4);
+  assert.equal(a.corroborated, 2);
+  assert.equal(a.span_days, 45);
+  assert.equal(a.tax_silent_documents, 2);
+  assert.deepEqual(a.required, { qualifying: 6, distinct_invoices: 6, corroborated: 6, span_days: 60 });
+  assert.equal(a.floor_met, false);
+  assert.equal(a.evaluated_at, "2026-08-07T03:00:00+08:00");
+});
+
+test("toSalesEvidencePreview maps every not-applicable reason (0046's pinned vocabulary)", () => {
+  const notSales = toSalesEvidencePreview({ rule_id: "r2", applicable: false, reason: "not_sales", advisory: true, evaluated_at: "t" });
+  assert.ok(notSales && !notSales.applicable);
+  assert.equal((notSales as SalesEvidencePreviewNotApplicable).reason, "not_sales");
+  assert.equal((notSales as SalesEvidencePreviewNotApplicable).evidence_class, null);
+
+  const notOcr = toSalesEvidencePreview({ rule_id: "r3", applicable: false, reason: "not_ocr_sales", evidence_class: "structured", advisory: true, evaluated_at: "t" });
+  assert.equal((notOcr as SalesEvidencePreviewNotApplicable).evidence_class, "structured");
+
+  const notAccessible = toSalesEvidencePreview({ rule_id: "r4", applicable: false, reason: "rule_not_accessible", advisory: true, evaluated_at: "t" });
+  assert.equal((notAccessible as SalesEvidencePreviewNotApplicable).reason, "rule_not_accessible");
+});
+
+test("toSalesEvidencePreview returns null for a shape that matches NEITHER branch — folds into 'unavailable', never a confident verdict", () => {
+  assert.equal(toSalesEvidencePreview(null), null);
+  assert.equal(toSalesEvidencePreview([1, 2, 3]), null);
+  assert.equal(toSalesEvidencePreview({ applicable: true }), null, "missing rule_id");
+  assert.equal(toSalesEvidencePreview({ rule_id: "r1" }), null, "missing the applicable discriminant");
+});
+
+test("toSalesEvidencePreview defends span_days=null (an empty population) and defaults a missing `required`", () => {
+  const p = toSalesEvidencePreview({ ...APPLICABLE_RAW, span_days: null, required: undefined }) as SalesEvidencePreviewApplicable;
+  assert.equal(p.span_days, null);
+  assert.deepEqual(p.required, { qualifying: 6, distinct_invoices: 6, corroborated: 6, span_days: 60 });
+});
+
+test("salesEvidenceNotApplicableLabel glosses all three reasons and falls back honestly for an unnamed one", () => {
+  assert.match(salesEvidenceNotApplicableLabel({ applicable: false, rule_id: "r", reason: "not_sales", evidence_class: null, evaluated_at: null }), /not a sales-direction rule/);
+  assert.match(
+    salesEvidenceNotApplicableLabel({ applicable: false, rule_id: "r", reason: "not_ocr_sales", evidence_class: "structured", evaluated_at: null }),
+    /structured/,
+  );
+  assert.match(salesEvidenceNotApplicableLabel({ applicable: false, rule_id: "r", reason: "rule_not_accessible", evidence_class: null, evaluated_at: null }), /unavailable/);
+  assert.match(salesEvidenceNotApplicableLabel({ applicable: false, rule_id: "r", reason: "some_future_reason", evidence_class: null, evaluated_at: null }), /some_future_reason/);
+});
+
+test("taxSilentGapLabel reads the DB's OWN tax_silent_documents count — never re-subtracts qualifying-corroborated itself", () => {
+  const gapped = toSalesEvidencePreview(APPLICABLE_RAW) as SalesEvidencePreviewApplicable;
+  assert.match(taxSilentGapLabel(gapped) ?? "", /2 qualifying documents cannot corroborate — tax-silent documents/);
+
+  const singular = toSalesEvidencePreview({ ...APPLICABLE_RAW, tax_silent_documents: 1 }) as SalesEvidencePreviewApplicable;
+  assert.match(taxSilentGapLabel(singular) ?? "", /1 qualifying document cannot corroborate — tax-silent document\./);
+
+  const clean = toSalesEvidencePreview({ ...APPLICABLE_RAW, tax_silent_documents: 0, corroborated: 6, floor_met: true }) as SalesEvidencePreviewApplicable;
+  assert.equal(taxSilentGapLabel(clean), null, "no gap to call out once every qualifying document corroborates");
 });
