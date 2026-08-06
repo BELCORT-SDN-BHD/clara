@@ -968,7 +968,12 @@ test("SETTLE a WRONG workflow_run_id via the 6-arity settles NOTHING and reports
   await upsertAccountClassed(users.alice, { client: clients.A1, code: EXP, name: "Prof Fees", type: "expense", opKey: opk("s7bexp") });
   const rf = await primeReadyFiling(users.alice, { client: clients.A1 });
   const admit = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.sweep });
-  if (admit?.outcome !== "admitted" || !admit.task_id) { noteLane(`6-arity wrong-run setup: admission did not reach 'admitted' (got ${JSON.stringify(admit)})`); return; }
+  // [lane-7a-db — REPORTED] MANDATORY, never dormant — the sibling of the escape closed in the
+  // cell above, found by sweeping this file for the same shape rather than only the one named.
+  assert.equal(admit?.outcome, "admitted",
+    `mandatory premise: the wrong-run fixture admits (got ${JSON.stringify(admit)}) — with no task`
+    + ` there is no run identity to mismatch, and the whole cell would pass having measured nothing`);
+  assert.ok(admit.task_id, "mandatory premise: admission returns a task id");
   await beginAutodraft({ task: admit.task_id, workflowRunId: "wf-x46-correct" });
 
   const wrong = await roleQuery(ROLES.runtime,
@@ -976,8 +981,16 @@ test("SETTLE a WRONG workflow_run_id via the 6-arity settles NOTHING and reports
     [admit.task_id, "skipped_lane", 50, null, null, "wf-x46-WRONG"]);
   const wrongR = wrong.rows[0].r;
   assert.equal(wrongR.settled, false, `a wrong workflow_run_id settles NOTHING (got ${JSON.stringify(wrongR)})`);
-  assert.ok(wrongR.reason, "the mismatch reports a reason token rather than raising");
-  if (wrongR.reason !== "run_superseded") noteLane(`wrong-run settle reason was '${wrongR.reason}' (expected something like run_superseded) — token is contract-silent, outcome (settled:false, no raise) is the load-bearing check`);
+  // [lane-7a-db — REPORTED] THE TOKEN IS ASSERTED, not hedged. This used to soft-note any
+  // reason other than run_superseded on the grounds that "the token is contract-silent". It is
+  // not: the 6-arity emits exactly 'run_superseded' from its run-mismatch branch, and that
+  // token is what the PR contract tells v6 to treat as benign — a hedge here would let the
+  // refusal drift to a DIFFERENT benign-looking token (task_superseded, registry_released)
+  // while the cell stayed green, which is precisely the reading v6 must not be given.
+  assert.equal(wrongR.reason, "run_superseded",
+    `a run-identity mismatch is refused as 'run_superseded' specifically (got '${wrongR.reason}')`
+    + ` — an earlier token means the settle was refused for some other reason and this cell never`
+    + ` exercised run identity at all`);
 
   const right = await roleQuery(ROLES.runtime,
     "select clara.settle_autodraft_task(p_task=>$1,p_outcome=>$2,p_tokens=>$3::bigint,p_entry=>$4,p_refusal=>$5::jsonb,p_workflow_run_id=>$6) as r",
