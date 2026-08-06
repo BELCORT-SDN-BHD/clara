@@ -148,6 +148,20 @@ const EXPECTED_CLR10_BRANCH_V5 = "  ";
 const EXPECTED_INTERNAL_FALLBACK_MESSAGE_V5 = "return { type: \"refusal\", code: \"internal\", message: \"This bill could not be coded automatically.\" ";
 const EXPECTED_V9_ANTI_PRIMACY_SENTENCE_V8 = "\n  \"\",\n  ";
 
+// Codex round 8: every span check below now BINDS to the caller's OWN declared side —
+// "new" input (v6/v9) must match ONLY the new-side golden, "old" input (v5/v8) must match
+// ONLY the old-side golden. Round 7's checks accepted "whichever golden happens to match,
+// regardless of which file is actually being checked" (`span === GOLDEN_NEW || span ===
+// GOLDEN_OLD` on BOTH calls) — which let a REVERSION mutant (v6's CLR10 branch, or its
+// read_document description, quietly reverted back to v5's own original text) pass as
+// legitimate v6 content, since v5's golden is ALSO an accepted value on the v6 call. Every
+// mask function below now takes an explicit `version` argument ("new" or "old") and this
+// helper picks EXACTLY one golden — never both — based on it.
+function pickGolden(version, goldenNew, goldenOld) {
+  assert.ok(version === "new" || version === "old", `pickGolden: unrecognized version tag ${JSON.stringify(version)} — every call site must pass "new" or "old" explicitly`);
+  return version === "new" ? goldenNew : goldenOld;
+}
+
 // ===========================================================================
 // 1a. PURE-RENAME FILES — whole-file, token-for-token identical (header aside).
 // ===========================================================================
@@ -183,18 +197,19 @@ function extractToolCtxFields(text) {
  *  both sides regardless of whether it exists, so the two reconstructions compare equal;
  *  the separate dedicated test below independently asserts the field COUNT and the new
  *  field's own exact content. */
-function maskToolCtxType(text) {
+function maskToolCtxType(text, version) {
   const jsDocPrefix = "/** The per-tool execution context: the firm + the PINNED client + the document/filing the\n *  admission bound this task to";
   const jsDocStart = text.indexOf(jsDocPrefix);
   assert.ok(jsDocStart > 0, "the ToolCtx JSDoc's own common prefix must be present in both versions");
   const jsDocFrom = jsDocStart + jsDocPrefix.length;
   const jsDocEnd = text.indexOf("*/", jsDocFrom) + 2;
   assert.ok(jsDocEnd > jsDocFrom + 1, "the JSDoc must close");
-  // Codex round 7: EXACT equality, not "mask and skip".
+  // Codex round 8: VERSION-BOUND exact equality — this text's OWN declared side only.
   const jsDocTail = text.slice(jsDocFrom, jsDocEnd);
-  assert.ok(
-    jsDocTail === EXPECTED_TOOLCTX_JSDOC_TAIL || jsDocTail === EXPECTED_TOOLCTX_JSDOC_TAIL_V5,
-    `the ToolCtx JSDoc's trailing clause must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(jsDocTail)}`,
+  assert.equal(
+    jsDocTail,
+    pickGolden(version, EXPECTED_TOOLCTX_JSDOC_TAIL, EXPECTED_TOOLCTX_JSDOC_TAIL_V5),
+    `the ToolCtx JSDoc's trailing clause must be EXACTLY the ${version} documented text, found: ${JSON.stringify(jsDocTail)}`,
   );
   let t = `${text.slice(0, jsDocFrom)}<the JSDoc's own trailing clause — masked>${text.slice(jsDocEnd)}`;
 
@@ -207,7 +222,7 @@ function maskToolCtxType(text) {
 test("autoDraft.v6.infra.ts differs from v5 ONLY inside the ToolCtx JSDoc's own trailing clause + the type literal's new (6th) field (PR #204; header narrative aside) — pools()/resolveModel/readScoped/writeScoped/safeRead are byte-identical", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.infra.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.infra.ts"), 5));
-  assert.equal(maskToolCtxType(v6), maskToolCtxType(v5), "outside the masked spans, autoDraft.v6.infra.ts must be a version-renamed copy of v5");
+  assert.equal(maskToolCtxType(v6, "new"), maskToolCtxType(v5, "old"), "outside the masked spans, autoDraft.v6.infra.ts must be a version-renamed copy of v5");
 });
 
 test("Codex round-2 SF: ToolCtx's five CARRIED fields (firmId/clientId/documentId/filingId/taskId) are token-IDENTICAL between v6 and v5, in the same order; a mutant that widened/narrowed ANY carried field (e.g. filingId made optional) is caught HERE — the structural mask above no longer absorbs it silently", () => {
@@ -287,7 +302,7 @@ test("chatTurn.v9.tools/impl/errors/infra.ts + chatTurn.v9.ts are token-for-toke
 /** The new deriveCounterpartyKind export + its own JSDoc + runDraftJournalEntry's own
  *  JSDoc (both v5-absent) sit between readInvoiceFactState's close and
  *  runDraftJournalEntry's signature. */
-function maskDeriveCounterpartyKindFn(text) {
+function maskDeriveCounterpartyKindFn(text, version) {
   const anchor = "corroborated, explicitNonMyr };\n}\n\n";
   const start = text.indexOf(anchor);
   assert.ok(start > 0, "readInvoiceFactState's own closing must be present, unchanged, in both versions");
@@ -295,34 +310,33 @@ function maskDeriveCounterpartyKindFn(text) {
   const endAnchor = "export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Promise<DraftToolResult> {";
   const end = text.indexOf(endAnchor, from);
   assert.ok(end > from, "runDraftJournalEntry's own signature must follow");
-  // Codex round 7: EXACT equality, not "mask and skip" — this span is a whole new function
+  // Codex round 8: VERSION-BOUND exact equality — this span is a whole new function
   // (deriveCounterpartyKind + allowedCodingKindsForDirection, ahead of v5's OWN carried
-  // wrapper JSDoc). Either side's content must be EXACTLY the documented text and nothing
-  // more (no hidden extra statement, no zero-identifier-token construct like
-  // `import("ai")["streamText"]({["messages"]: wrong})` could ever hide in a blindly-masked
-  // "whatever's here" span).
+  // wrapper JSDoc). This text's OWN declared side only — never "whichever golden matches".
   const span = text.slice(from, end);
-  assert.ok(
-    span === EXPECTED_DERIVE_COUNTERPARTY_KIND_FN || span === EXPECTED_DERIVE_COUNTERPARTY_KIND_FN_V5,
-    `the deriveCounterpartyKind span must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_DERIVE_COUNTERPARTY_KIND_FN, EXPECTED_DERIVE_COUNTERPARTY_KIND_FN_V5),
+    `the deriveCounterpartyKind span must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, from)}<deriveCounterpartyKind + its own/the wrapper's JSDoc — masked>\n${text.slice(end)}`;
 }
 
 /** THE COUNTERPARTY CONTRACT's layer-2 block (skeleton §2a item 2): the derived-kind
  *  overwrite. v5 has no equivalent span at all (it builds no counterpartyPayload). */
-function maskCounterpartyPayloadBlock(text) {
+function maskCounterpartyPayloadBlock(text, version) {
   const startAnchor = "    // 2. Assemble writer args.";
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the 'assemble writer args' comment must be present in both versions");
   const endAnchor = "    const receipt = await writeScoped(ctx, async (c: PgExec) => {";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "the writeScoped call must follow");
-  // Codex round 7: EXACT equality, not "mask and skip".
+  // Codex round 8: VERSION-BOUND exact equality.
   const span = text.slice(start, end);
-  assert.ok(
-    span === EXPECTED_COUNTERPARTY_PAYLOAD_BLOCK || span === EXPECTED_COUNTERPARTY_PAYLOAD_BLOCK_V5,
-    `the counterparty-payload derivation block must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_COUNTERPARTY_PAYLOAD_BLOCK, EXPECTED_COUNTERPARTY_PAYLOAD_BLOCK_V5),
+    `the counterparty-payload derivation block must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, start)}<the counterparty-payload derivation block — masked>${text.slice(end)}`;
 }
@@ -367,19 +381,21 @@ function extractWriterArgsArray(text) {
  *  14-position test below uses, so positions 1-10/12/13 are LEFT AS LITERAL TEXT here
  *  too — a mutation to any of those 12 positions fails THIS structural test, not only
  *  the dedicated one (Codex SF: stop masking the whole array). */
-function maskWriterArgsArray(text) {
+function maskWriterArgsArray(text, version) {
   const { elements, start, end } = extractWriterArgsArray(text);
   assert.equal(elements.length, 14, "the writer args array must have exactly 14 positions");
-  // Codex round 7: EXACT equality on the two masked positions themselves, not "mask and
-  // skip" — sharing the SAME two constants the dedicated positional test below asserts, so
-  // there is no separate, driftable source of truth for what these two positions may hold.
-  assert.ok(
-    elements[10] === EXPECTED_WRITER_ARG_11_V6 || elements[10] === EXPECTED_WRITER_ARG_11_V5,
-    `writer arg position 11 must be EXACTLY one of the two documented values, found: ${JSON.stringify(elements[10])}`,
+  // Codex round 8: VERSION-BOUND exact equality on the two masked positions — sharing the
+  // SAME two constants the dedicated positional test below asserts, so there is no
+  // separate, driftable source of truth for what these two positions may hold.
+  assert.equal(
+    elements[10],
+    pickGolden(version, EXPECTED_WRITER_ARG_11_V6, EXPECTED_WRITER_ARG_11_V5),
+    `writer arg position 11 must be EXACTLY the ${version} documented value, found: ${JSON.stringify(elements[10])}`,
   );
-  assert.ok(
-    elements[13] === EXPECTED_WRITER_ARG_14_V6 || elements[13] === EXPECTED_WRITER_ARG_14_V5,
-    `writer arg position 14 must be EXACTLY one of the two documented values, found: ${JSON.stringify(elements[13])}`,
+  assert.equal(
+    elements[13],
+    pickGolden(version, EXPECTED_WRITER_ARG_14_V6, EXPECTED_WRITER_ARG_14_V5),
+    `writer arg position 14 must be EXACTLY the ${version} documented value, found: ${JSON.stringify(elements[13])}`,
   );
   const masked = elements.map((el, i) => (i === 10 || i === 13 ? `<position ${i + 1} masked>` : el));
   const maskedInner = `          ${masked.join(",\n          ")},\n`;
@@ -388,47 +404,52 @@ function maskWriterArgsArray(text) {
 
 /** read_document's own description text: "this bill's" -> "this document's" (a
  *  necessary direction-neutralisation sitting slightly outside the item-1..3 table). */
-function maskReadDocumentDesc(text) {
+function maskReadDocumentDesc(text, version) {
   const startAnchor = 'read_document: tool({\n      description:\n        "Read';
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the read_document tool registration must be present in both versions");
   const endAnchor = "cite as evidence.\",";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "the description must close");
-  // Codex round 7: EXACT equality, not "mask and skip".
+  // Codex round 8: VERSION-BOUND exact equality.
   const span = text.slice(start, end + endAnchor.length);
-  assert.ok(
-    span === EXPECTED_READ_DOCUMENT_DESC || span === EXPECTED_READ_DOCUMENT_DESC_V5,
-    `the read_document description must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_READ_DOCUMENT_DESC, EXPECTED_READ_DOCUMENT_DESC_V5),
+    `the read_document description must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, start)}<read_document description — masked>${text.slice(end + endAnchor.length)}`;
 }
 
 /** DRAFT_TOOL's own description (item 3: generalised to both directions). */
-function maskDraftToolDesc(text) {
+function maskDraftToolDesc(text, version) {
   const startAnchor = "[DRAFT_TOOL]: tool({\n      description:\n";
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the DRAFT_TOOL registration must be present in both versions");
   const endAnchor = "inputSchema: draftJournalEntryInputSchema,";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "inputSchema must follow the description in both versions");
-  // Codex round 7: EXACT equality, not "mask and skip".
+  // Codex round 8: VERSION-BOUND exact equality.
   const span = text.slice(start, end);
-  assert.ok(
-    span === EXPECTED_DRAFT_TOOL_DESC || span === EXPECTED_DRAFT_TOOL_DESC_V5,
-    `the DRAFT_TOOL description must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_DRAFT_TOOL_DESC, EXPECTED_DRAFT_TOOL_DESC_V5),
+    `the DRAFT_TOOL description must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, start)}<the DRAFT_TOOL description — masked>${text.slice(end)}`;
 }
 
 /** PR #204: the errors.js import gains directionFamilyMismatchRefusal. */
-function maskErrorsImportList(text) {
-  return text
-    .replace(
-      'import { refusalFromDbError, directionFamilyMismatchRefusal } from "./autoDraft.vN.errors.js";',
-      '<errors import list — masked>',
-    )
-    .replace('import { refusalFromDbError } from "./autoDraft.vN.errors.js";', '<errors import list — masked>');
+function maskErrorsImportList(text, version) {
+  const v6Line = 'import { refusalFromDbError, directionFamilyMismatchRefusal } from "./autoDraft.vN.errors.js";';
+  const v5Line = 'import { refusalFromDbError } from "./autoDraft.vN.errors.js";';
+  // Codex round 8: VERSION-BOUND — this text's OWN declared side's line, exactly, or refuse.
+  // The prior chained .replace() accepted WHICHEVER of the two known lines matched,
+  // regardless of which file was being checked — a reversion of v6's import list back to
+  // v5's own (shorter) line would still "mask successfully" and pass as valid v6 content.
+  const expected = pickGolden(version, v6Line, v5Line);
+  assert.ok(text.includes(expected), `the errors import list must be EXACTLY the ${version} documented line — found neither this nor a matching one`);
+  return text.replace(expected, "<errors import list — masked>");
 }
 
 /** PR #204 / 7A-R2, THE BOUND FAMILY: the early direction-family check inside
@@ -436,7 +457,7 @@ function maskErrorsImportList(text) {
  *  INSERTION (v5 has nothing between these two common anchor lines) — the SAME symmetric
  *  slice-mask technique handles an insertion fine: both sides collapse to the identical
  *  placeholder regardless of how much (if anything) sat between the anchors. */
-function maskDirectionFamilyCheck(text) {
+function maskDirectionFamilyCheck(text, version) {
   const startAnchor = "  const clientId = ctx.clientId;\n";
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the clientId binding must be present in both versions");
@@ -446,27 +467,43 @@ function maskDirectionFamilyCheck(text) {
   // >= , not > : on v5's side the two anchors are ADJACENT (zero gap — v5 has no early
   // check at all), so indexOf legitimately returns exactly `from`.
   assert.ok(end >= from, "the document_id pinning check must follow in both versions");
-  // Codex round 7: EXACT equality, not "mask and skip" — a pure insertion, v5's side is
-  // confirmed genuinely empty (zero gap between the anchors), v6's must be EXACTLY the
-  // documented check and nothing else.
+  // Codex round 8: VERSION-BOUND exact equality — a pure insertion, so the "old" (v5)
+  // golden is literally the empty string; pickGolden handles this uniformly, with no OR.
   const span = text.slice(from, end);
-  assert.ok(
-    span === "" || span === EXPECTED_DIRECTION_FAMILY_CHECK,
-    `the direction-family early check must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_DIRECTION_FAMILY_CHECK, ""),
+    `the direction-family early check must be EXACTLY the ${version} documented text (empty for old/v5), found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, from)}<the direction-family early check — masked>${text.slice(end)}`;
 }
 
-function maskToolsChanges(text) {
+function maskToolsChanges(text, version) {
   return maskDirectionFamilyCheck(
-    maskErrorsImportList(maskDraftToolDesc(maskReadDocumentDesc(maskWriterArgsArray(maskCounterpartyPayloadBlock(maskDeriveCounterpartyKindFn(text)))))),
+    maskErrorsImportList(
+      maskDraftToolDesc(maskReadDocumentDesc(maskWriterArgsArray(maskCounterpartyPayloadBlock(maskDeriveCounterpartyKindFn(text, version), version), version), version), version),
+      version,
+    ),
+    version,
   );
 }
 
 test("autoDraft.v6.tools.ts differs from v5 ONLY inside the documented §2a + PR #204 spans (the new deriveCounterpartyKind fn, the counterparty-payload derivation, the writer args array, read_document's description, DRAFT_TOOL's description, the errors import list, and the new direction-family early check) — every read tool's execute logic and the wrapper's authoritative-read plumbing are unchanged", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.tools.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.tools.ts"), 5));
-  assert.equal(maskToolsChanges(v6), maskToolsChanges(v5), "outside the masked spans, autoDraft.v6.tools.ts must be a version-renamed copy of v5");
+  assert.equal(maskToolsChanges(v6, "new"), maskToolsChanges(v5, "old"), "outside the masked spans, autoDraft.v6.tools.ts must be a version-renamed copy of v5");
+});
+
+test("Codex round 8, forgery (read_document-description reverted to v5): a v6 file whose read_document description was REVERTED to v5's own golden text (\"this bill's\") must be REFUSED when checked AS v6 (\"new\") — round 7's check accepted EITHER golden regardless of which file was being examined, so this exact reversion previously passed as valid v6 content", () => {
+  const v6 = asVN(src("autoDraft.v6.tools.ts"), 6);
+  assert.ok(v6.includes(EXPECTED_READ_DOCUMENT_DESC), "the real v6 file must genuinely carry the v6 golden before we revert it");
+  const mutant = v6.replace(EXPECTED_READ_DOCUMENT_DESC, EXPECTED_READ_DOCUMENT_DESC_V5);
+  assert.notEqual(mutant, v6, "the reversion must actually have changed the text");
+  assert.throws(
+    () => maskReadDocumentDesc(mutant, "new"),
+    /read_document description must be EXACTLY the new documented text/,
+    "a v6 file reverted to v5's own read_document description must be refused when checked as v6 — v5's golden is not an acceptable v6 value",
+  );
 });
 
 test("allowedCodingKindsForDirection: sales -> [sales_invoice, sales_credit_note]; purchase -> [supplier_bill]; null -> null (no early family to validate — the DB draft writer stays sole authority)", () => {
@@ -514,26 +551,20 @@ test("the wake_draft_entry writer args array: positions 1-10 and 12-13 (12 of 14
  *  vs v5's one fixed string. The REAL verification is the dedicated tests below, which pin
  *  directionClause's own three-way ternary text exactly, plus a regression pin that v5's
  *  original fixed string is untouched. */
-function maskUserMessageLine(text) {
-  // Codex round 7: EXACT equality made EXPLICIT — this was already effectively exact (two
-  // targeted .replace() calls on KNOWN strings; any deviation left the line un-replaced,
-  // failing the outer whole-file comparison), but only IMPLICITLY so. Asserting directly
-  // means a broken/renamed line fails HERE with a clear message, not via an opaque mismatch
-  // many lines away, and shares the SAME two constants the dedicated content test below uses.
-  assert.ok(
-    text.includes(EXPECTED_USER_MESSAGE_LINE_V6) || text.includes(EXPECTED_USER_MESSAGE_LINE_V5),
-    "the user-message line must be EXACTLY one of the two documented templates",
-  );
-  return text.replace(EXPECTED_USER_MESSAGE_LINE_V6, "<user message template — pinned exactly by the dedicated tests below, not by this mask>").replace(
-    EXPECTED_USER_MESSAGE_LINE_V5,
-    "<user message template — pinned exactly by the dedicated tests below, not by this mask>",
-  );
+function maskUserMessageLine(text, version) {
+  // Codex round 8: VERSION-BOUND — this text's OWN declared side's line, exactly, or
+  // refuse. Round 7 accepted WHICHEVER of the two known lines was present regardless of
+  // which file was being checked; a reversion of v6's message back to v5's own original
+  // text would still "mask successfully" and pass as valid v6 content.
+  const expected = pickGolden(version, EXPECTED_USER_MESSAGE_LINE_V6, EXPECTED_USER_MESSAGE_LINE_V5);
+  assert.ok(text.includes(expected), `the user-message line must be EXACTLY the ${version} documented template`);
+  return text.replace(expected, "<user message template — pinned exactly by the dedicated tests below, not by this mask>");
 }
 
 /** PR #204: the new `directionClause` const declaration, inserted between the (unchanged,
  *  common) `buildAutoDraftTools(ctx)` call and the (now-templated, separately masked)
  *  messages array. A pure insertion — v5 has nothing between these two common anchors. */
-function maskDirectionClauseDeclaration(text) {
+function maskDirectionClauseDeclaration(text, version) {
   const startAnchor = "  const tools = buildAutoDraftTools(ctx);\n";
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the tools binding must be present in both versions");
@@ -543,13 +574,13 @@ function maskDirectionClauseDeclaration(text) {
   // >= , not > : v5's two anchor lines are ADJACENT (v5 has no directionClause at all), so
   // indexOf legitimately returns exactly `from` on that side.
   assert.ok(end >= from, "the messages array must follow in both versions");
-  // Codex round 7: EXACT equality, not "mask and skip" (and not assert.match — a regex
-  // "contains" check elsewhere in this file already pinned parts of this text, but never
-  // that the WHOLE span holds nothing else). A pure insertion, v5's side confirmed empty.
+  // Codex round 8: VERSION-BOUND exact equality — a pure insertion, so the "old" golden is
+  // literally the empty string.
   const span = text.slice(from, end);
-  assert.ok(
-    span === "" || span === EXPECTED_DIRECTION_CLAUSE_DECLARATION,
-    `the directionClause declaration must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_DIRECTION_CLAUSE_DECLARATION, ""),
+    `the directionClause declaration must be EXACTLY the ${version} documented text (empty for old/v5), found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, from)}<the directionClause declaration — masked>${text.slice(end)}`;
 }
@@ -1221,18 +1252,19 @@ function extractAutoDraftContextFields(text) {
  *  JSDoc + type literal" to EXACTLY the new content — the JSDoc's own trailing clause (a
  *  targeted replace on the stable common prefix) and the type literal's new (9th) field,
  *  reconstructed so every one of the 8 CARRIED fields stays literal, compared text. */
-function maskAutoDraftContextDirectionField(text) {
+function maskAutoDraftContextDirectionField(text, version) {
   const jsDocPrefix = "/** The claim context returned by begin_autodraft_task (the CAS + bind + context read).";
   const jsDocStart = text.indexOf(jsDocPrefix);
   assert.ok(jsDocStart > 0, "the AutoDraftContext JSDoc's own common prefix must be present in both versions");
   const jsDocFrom = jsDocStart + jsDocPrefix.length;
   const jsDocEnd = text.indexOf("*/", jsDocFrom) + 2;
   assert.ok(jsDocEnd > jsDocFrom + 1, "the JSDoc must close");
-  // Codex round 7: EXACT equality, not "mask and skip".
+  // Codex round 8: VERSION-BOUND exact equality.
   const jsDocTail = text.slice(jsDocFrom, jsDocEnd);
-  assert.ok(
-    jsDocTail === EXPECTED_AUTODRAFT_CONTEXT_JSDOC_TAIL || jsDocTail === EXPECTED_AUTODRAFT_CONTEXT_JSDOC_TAIL_V5,
-    `the AutoDraftContext JSDoc's trailing clause must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(jsDocTail)}`,
+  assert.equal(
+    jsDocTail,
+    pickGolden(version, EXPECTED_AUTODRAFT_CONTEXT_JSDOC_TAIL, EXPECTED_AUTODRAFT_CONTEXT_JSDOC_TAIL_V5),
+    `the AutoDraftContext JSDoc's trailing clause must be EXACTLY the ${version} documented text, found: ${JSON.stringify(jsDocTail)}`,
   );
   let t = `${text.slice(0, jsDocFrom)}<the JSDoc's own trailing clause — masked>${text.slice(jsDocEnd)}`;
 
@@ -1257,7 +1289,7 @@ test("Codex round-2 SF: AutoDraftContext's eight CARRIED fields are token-IDENTI
  *  new `direction?: string | null;` field, and the returned ctx literal's new `direction:
  *  receipt.direction === ... ? ... : null,` field. Both pure insertions, anchored on common,
  *  unchanged lines either side. */
-function maskClaimDirectionFields(text) {
+function maskClaimDirectionFields(text, version) {
   let t = text;
   const receiptAnchor = "      reserved_tokens?: number | string;\n";
   const receiptIdx = t.indexOf(receiptAnchor);
@@ -1267,12 +1299,12 @@ function maskClaimDirectionFields(text) {
   // >= , not > : v5's anchor and the type's own close are ADJACENT (zero gap — v5 has no
   // direction field at all), so indexOf legitimately returns exactly `receiptFrom` there.
   assert.ok(receiptEnd >= receiptFrom, "the receipt type literal must close");
-  // Codex round 7: EXACT equality, not "mask and skip" — both pure insertions, v5 confirmed
-  // empty on both.
+  // Codex round 8: VERSION-BOUND exact equality — both pure insertions.
   const receiptSpan = t.slice(receiptFrom, receiptEnd);
-  assert.ok(
-    receiptSpan === "" || receiptSpan === EXPECTED_CLAIM_RECEIPT_DIRECTION_FIELD,
-    `the receipt type's direction field must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(receiptSpan)}`,
+  assert.equal(
+    receiptSpan,
+    pickGolden(version, EXPECTED_CLAIM_RECEIPT_DIRECTION_FIELD, ""),
+    `the receipt type's direction field must be EXACTLY the ${version} documented text (empty for old/v5), found: ${JSON.stringify(receiptSpan)}`,
   );
   t = `${t.slice(0, receiptFrom)}<the receipt type's own direction field — masked>${t.slice(receiptEnd)}`;
 
@@ -1283,9 +1315,10 @@ function maskClaimDirectionFields(text) {
   const ctxEnd = t.indexOf("      },\n    };", ctxFrom);
   assert.ok(ctxEnd >= ctxFrom, "the returned ctx literal must close"); // same zero-gap reasoning
   const ctxSpan = t.slice(ctxFrom, ctxEnd);
-  assert.ok(
-    ctxSpan === "" || ctxSpan === EXPECTED_CLAIM_CTX_DIRECTION_FIELD,
-    `the returned ctx literal's direction field must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(ctxSpan)}`,
+  assert.equal(
+    ctxSpan,
+    pickGolden(version, EXPECTED_CLAIM_CTX_DIRECTION_FIELD, ""),
+    `the returned ctx literal's direction field must be EXACTLY the ${version} documented text (empty for old/v5), found: ${JSON.stringify(ctxSpan)}`,
   );
   return `${t.slice(0, ctxFrom)}<the returned ctx literal's own direction field — masked>${t.slice(ctxEnd)}`;
 }
@@ -1297,15 +1330,15 @@ test("autoDraft.v6.impl.ts: AutoDraftContext's own direction field + claimAutoDr
   // test exists so a broken anchor fails HERE with a clear name, not silently inside the
   // big structural test below.
   const v6 = src("autoDraft.v6.impl.ts");
-  maskAutoDraftContextDirectionField(v6);
-  maskClaimDirectionFields(v6);
+  maskAutoDraftContextDirectionField(v6, "new");
+  maskClaimDirectionFields(v6, "new");
 });
 
 /** Codex round-2 B1: classifySettleReceipt is a WHOLE NEW function (60+ lines), inserted
  *  between runAutoDraftModelStep's own closing and settleAutoDraftStep's own JSDoc — a pure
  *  insertion, masked as one unit (its own dedicated tests below are the real verification of
  *  its content, mirroring how directionFamilyMismatchRefusal is handled in errors.ts). */
-function maskClassifySettleReceiptFn(text) {
+function maskClassifySettleReceiptFn(text, version) {
   const startAnchor = "  return { outcome, usageTokens, entryId };\n}\n\n";
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "runAutoDraftModelStep's own closing must be present in both versions");
@@ -1315,17 +1348,15 @@ function maskClassifySettleReceiptFn(text) {
   // >= , not > : v5 has NOTHING between runAutoDraftModelStep's close and settleAutoDraftStep's
   // own JSDoc, so indexOf legitimately returns exactly `from` on that side.
   assert.ok(end >= from, "settleAutoDraftStep's own JSDoc must follow in both versions");
-  // Codex round 7: EXACT equality, not "mask and skip" — THE severe case this round closes.
-  // This 60+ line span was previously accepted UNCONDITIONALLY (the behavioural tests below
+  // Codex round 8: VERSION-BOUND exact equality — THE severe case rounds 7/8 close. This
+  // 60+ line span was previously accepted UNCONDITIONALLY (the behavioural tests below
   // check classifySettleReceipt's RETURN VALUES for given inputs, never its literal SOURCE
-  // TEXT) — a hidden, zero-identifier-token side-effect statement anywhere in this span
-  // (e.g. `import("ai")["streamText"]({["messages"]: wrong})`) would have changed nothing
-  // those behavioural tests could observe. A pure insertion, v5's side confirmed empty.
+  // TEXT); round 7 fixed the "accept anything" gap but still let a REVERSION mutant (v6's
+  // whole function reverted to v5's empty span) pass as valid v6 content, since "" was
+  // accepted on BOTH calls. A pure insertion, so the "old" golden is the empty string.
   const span = text.slice(from, end);
-  assert.ok(
-    span === "" || span === EXPECTED_CLASSIFY_SETTLE_RECEIPT_FN,
-    `the classifySettleReceipt function span must be empty (v5) or EXACTLY the documented text (v6) — found a length-${span.length} span that does not match either`,
-  );
+  const expected = pickGolden(version, EXPECTED_CLASSIFY_SETTLE_RECEIPT_FN, "");
+  assert.equal(span, expected, `the classifySettleReceipt function span must be EXACTLY the ${version} documented text (empty for old/v5) — found a length-${span.length} span that does not match`);
   return `${text.slice(0, from)}<the new classifySettleReceipt function — masked>${text.slice(end)}`;
 }
 
@@ -1340,18 +1371,19 @@ function maskClassifySettleReceiptFn(text) {
  *  function — the signature, "use step", and params[0..4] — is left as LITERAL text, so a
  *  mutation there fails THIS test too, not only the dedicated params-array test below
  *  (Codex round-1 SF: stop masking the whole function). */
-function maskSettleFunction(text) {
+function maskSettleFunction(text, version) {
   const jsDocStart = text.indexOf(" *  writes the sweep_run_items row, and updates the registry counters (a 2nd failure parks)");
   assert.ok(jsDocStart > 0, "the settle step's own JSDoc tail lead-in must be present in both versions");
   const jsDocEnd = text.indexOf("*/", jsDocStart);
   assert.ok(jsDocEnd > jsDocStart, "the JSDoc must close");
-  // Codex round 7: EXACT equality, not "mask and skip" — checked over [jsDocStart, jsDocEnd+2)
+  // Codex round 8: VERSION-BOUND exact equality — checked over [jsDocStart, jsDocEnd+2)
   // (including the closing "*/" itself) as a SEPARATE span; jsDocEnd itself is left
   // unchanged since the mask/replace logic below relies on its ORIGINAL (pre-"*/") value.
   const jsDocSpan = text.slice(jsDocStart, jsDocEnd + 2);
-  assert.ok(
-    jsDocSpan === EXPECTED_SETTLE_JSDOC_TAIL || jsDocSpan === EXPECTED_SETTLE_JSDOC_TAIL_V5,
-    `the settle step's JSDoc tail must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(jsDocSpan)}`,
+  assert.equal(
+    jsDocSpan,
+    pickGolden(version, EXPECTED_SETTLE_JSDOC_TAIL, EXPECTED_SETTLE_JSDOC_TAIL_V5),
+    `the settle step's JSDoc tail must be EXACTLY the ${version} documented text, found: ${JSON.stringify(jsDocSpan)}`,
   );
 
   const fnStart = text.indexOf("export async function settleAutoDraftStep(", jsDocEnd);
@@ -1371,18 +1403,20 @@ function maskSettleFunction(text) {
   return `${text.slice(0, jsDocStart)}<settle JSDoc tail — masked>${text.slice(jsDocEnd, fnStart)}${fnBody}${text.slice(fnEnd)}`;
 }
 
-function maskImplChanges(text) {
+function maskImplChanges(text, version) {
   return maskSettleFunction(
     maskClassifySettleReceiptFn(
-      maskClaimDirectionFields(maskAutoDraftContextDirectionField(maskDirectionClauseDeclaration(maskUserMessageLine(text)))),
+      maskClaimDirectionFields(maskAutoDraftContextDirectionField(maskDirectionClauseDeclaration(maskUserMessageLine(text, version), version), version), version),
+      version,
     ),
+    version,
   );
 }
 
 test("autoDraft.v6.impl.ts differs from v5 ONLY inside the documented §2a + PR #204 spans (the new classifySettleReceipt function, the settle step's JSDoc tail + its four scoped insertions, AutoDraftContext's direction field, claimAutoDraftStep's two direction insertions, the directionClause declaration, and the templated user message — each pinned exactly by a dedicated test, not masked away) — recover/question/close and consumeAutoDraftModelResult's stream-error tagging are unchanged, INCLUDING the settle function's own signature, \"use step\" directive, and params[0..4], which are compared as LITERAL text here (not masked)", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.impl.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.impl.ts"), 5));
-  assert.equal(maskImplChanges(v6), maskImplChanges(v5), "outside the masked spans, autoDraft.v6.impl.ts must be a version-renamed copy of v5");
+  assert.equal(maskImplChanges(v6, "new"), maskImplChanges(v5, "old"), "outside the masked spans, autoDraft.v6.impl.ts must be a version-renamed copy of v5");
 });
 
 // ===========================================================================
@@ -1404,8 +1438,8 @@ test("Codex round 7, forgery 1 (dynamic import + computed property, the exact sh
   );
   assert.notEqual(mutant, v6, "the mutant construction must actually have changed the text (the splice anchor must exist)");
   assert.throws(
-    () => maskClassifySettleReceiptFn(mutant),
-    /classifySettleReceipt function span must be empty \(v5\) or EXACTLY the documented text \(v6\)/,
+    () => maskClassifySettleReceiptFn(mutant, "new"),
+    /classifySettleReceipt function span must be EXACTLY the new documented text/,
     "a dynamic-import + computed-property hazard hidden inside the masked span must be refused, not silently accepted as 'whatever's here'",
   );
 });
@@ -1419,8 +1453,8 @@ test("Codex round 7, forgery 2 (string-keyed-property variant): the SAME hazard,
   );
   assert.notEqual(mutant, v6, "the mutant construction must actually have changed the text (the splice anchor must exist)");
   assert.throws(
-    () => maskClassifySettleReceiptFn(mutant),
-    /classifySettleReceipt function span must be empty \(v5\) or EXACTLY the documented text \(v6\)/,
+    () => maskClassifySettleReceiptFn(mutant, "new"),
+    /classifySettleReceipt function span must be EXACTLY the new documented text/,
     "a string-keyed-property hazard hidden inside the masked span must ALSO be refused",
   );
 });
@@ -1657,63 +1691,66 @@ test("classifySettleReceipt: the SUCCESS shape genuinely carries NO settled key 
 /** The Clr21Reason union's own two new members + the new Clr10Reason type + their own
  *  doc-comment (which ALSO gains a "0036/0016 pins" citation, replacing "pins §2/§6" —
  *  masked from the stable DbError-type close through the stable reasonFromDetail doc). */
-function maskReasonTypes(text) {
+function maskReasonTypes(text, version) {
   const startAnchor = "constraint?: string };\n\n/** CLR21 reason tokens";
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the DbError type's own close must be present in both versions");
   const endAnchor = '/** Parse the `{ "reason": <token> }`';
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "reasonFromDetail's own doc-comment must follow");
-  // Codex round 7: EXACT equality, not "mask and skip".
+  // Codex round 8: VERSION-BOUND exact equality.
   const span = text.slice(start, end);
-  assert.ok(
-    span === EXPECTED_REASON_TYPES_BLOCK || span === EXPECTED_REASON_TYPES_BLOCK_V5,
-    `the Clr21Reason/Clr10Reason type block must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_REASON_TYPES_BLOCK, EXPECTED_REASON_TYPES_BLOCK_V5),
+    `the Clr21Reason/Clr10Reason type block must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, start)}<the Clr21Reason/Clr10Reason type block — masked>${text.slice(end)}`;
 }
 
 /** MESSAGES' own doc-comment (gains a "direction-neutral" sentence) + the const itself
  *  (CLR21/CLR23/CLR26/CLR29 reworded off "bill"/"supplier"). */
-function maskMessagesBlock(text) {
+function maskMessagesBlock(text, version) {
   const startAnchor = "/** Oracle-safe message per CLR code";
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the MESSAGES doc-comment must be present in both versions");
   const endAnchor = "/** Dynamic (arbitrary-code) message lookup";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "messageFor's own doc-comment must follow");
-  // Codex round 7: EXACT equality, not "mask and skip" — MESSAGES is a plain object literal
-  // of string VALUES, but a computed property key inside an object literal CAN execute
+  // Codex round 8: VERSION-BOUND exact equality — MESSAGES is a plain object literal of
+  // string VALUES, but a computed property key inside an object literal CAN execute
   // arbitrary code when the literal is evaluated, so this is a genuine risk zone too.
   const span = text.slice(start, end);
-  assert.ok(
-    span === EXPECTED_MESSAGES_BLOCK || span === EXPECTED_MESSAGES_BLOCK_V5,
-    `the MESSAGES block must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_MESSAGES_BLOCK, EXPECTED_MESSAGES_BLOCK_V5),
+    `the MESSAGES block must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, start)}<the MESSAGES block — masked>${text.slice(end)}`;
 }
 
 /** CLR21_REASON_MESSAGES (reworded off "bill"/"supplier", + the two new tax_leg_missing/
  *  type_polarity_mismatch entries) + the new CLR10_REASON_MESSAGES const (v5-absent). */
-function maskReasonMessagesBlock(text) {
+function maskReasonMessagesBlock(text, version) {
   const startAnchor = "const CLR21_REASON_MESSAGES: Record<Clr21Reason, string> = {";
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "CLR21_REASON_MESSAGES must be present in both versions");
   const endAnchor = "/**\n * Map a caught DB error";
   const end = text.indexOf(endAnchor, start);
   assert.ok(end > start, "refusalFromDbError's own doc-comment must follow");
-  // Codex round 7: EXACT equality, not "mask and skip".
+  // Codex round 8: VERSION-BOUND exact equality.
   const span = text.slice(start, end);
-  assert.ok(
-    span === EXPECTED_REASON_MESSAGES_BLOCK || span === EXPECTED_REASON_MESSAGES_BLOCK_V5,
-    `the CLR21/CLR10 reason-messages block must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_REASON_MESSAGES_BLOCK, EXPECTED_REASON_MESSAGES_BLOCK_V5),
+    `the CLR21/CLR10 reason-messages block must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, start)}<the CLR21/CLR10 reason-messages block — masked>${text.slice(end)}`;
 }
 
 /** The new CLR10 branch inside refusalFromDbError (v5-absent entirely — v5's CLR10 falls
  *  straight through to the generic messageFor(code) path with no reason handling). */
-function maskClr10Branch(text) {
+function maskClr10Branch(text, version) {
   const startAnchor = 'return { type: "refusal", code: "CLR21", reason, message };\n  }\n';
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the CLR21 branch's own close must be present in both versions");
@@ -1721,27 +1758,32 @@ function maskClr10Branch(text) {
   const endAnchor = 'if (code === "CLR29") {';
   const end = text.indexOf(endAnchor, from);
   assert.ok(end > from, "the CLR29 branch must follow");
-  // Codex round 7: EXACT equality, not "mask and skip" — genuine executable branch logic.
+  // Codex round 8: VERSION-BOUND exact equality — genuine executable branch logic, THE
+  // named exploit: a v6 file whose CLR10 branch was REVERTED to v5's own golden text
+  // previously still passed as "valid" content, since round 7 accepted EITHER golden
+  // regardless of which file was being checked.
   const span = text.slice(from, end);
-  assert.ok(
-    span === EXPECTED_CLR10_BRANCH || span === EXPECTED_CLR10_BRANCH_V5,
-    `the new CLR10 branch must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_CLR10_BRANCH, EXPECTED_CLR10_BRANCH_V5),
+    `the new CLR10 branch must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, from)}<the new CLR10 branch — masked>${text.slice(end)}`;
 }
 
 /** The "internal" fallback message ("This bill..." -> "This document..."). */
-function maskInternalFallback(text) {
+function maskInternalFallback(text, version) {
   const startAnchor = 'return { type: "refusal", code: "internal", message: "';
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the internal fallback must be present in both versions");
   const end = text.indexOf("};", start);
   assert.ok(end > start, "the fallback statement must close");
-  // Codex round 7: EXACT equality, not "mask and skip".
+  // Codex round 8: VERSION-BOUND exact equality.
   const span = text.slice(start, end);
-  assert.ok(
-    span === EXPECTED_INTERNAL_FALLBACK_MESSAGE || span === EXPECTED_INTERNAL_FALLBACK_MESSAGE_V5,
-    `the internal fallback message must be EXACTLY the v6 or v5 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_INTERNAL_FALLBACK_MESSAGE, EXPECTED_INTERNAL_FALLBACK_MESSAGE_V5),
+    `the internal fallback message must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, start)}<the internal fallback message — masked>${text.slice(end)}`;
 }
@@ -1749,7 +1791,7 @@ function maskInternalFallback(text) {
 /** PR #204: the new directionFamilyMismatchRefusal() factory (v5-absent entirely — a pure
  *  insertion right after noDraftRefusal's own closing brace, before readToolRefusalMessage's
  *  doc-comment). */
-function maskDirectionFamilyMismatchRefusalFn(text) {
+function maskDirectionFamilyMismatchRefusalFn(text, version) {
   const startAnchor =
     'export function noDraftRefusal(): RefusalPart {\n' +
     '  return runtimeRefusal("CLR21", "coding_incomplete", CLR21_REASON_MESSAGES.coding_incomplete);\n' +
@@ -1763,25 +1805,42 @@ function maskDirectionFamilyMismatchRefusalFn(text) {
   // ADJACENT (v5 has no directionFamilyMismatchRefusal at all), so indexOf legitimately
   // returns exactly `from` on that side.
   assert.ok(end >= from, "readToolRefusalMessage's own doc-comment must follow");
-  // Codex round 7: EXACT equality, not "mask and skip" — a whole new function, v5 confirmed
-  // empty. The dedicated test below checks its RETURN VALUE (behavioural), never its
-  // literal source text, so this is the only guard against a hidden extra statement inside.
+  // Codex round 8: VERSION-BOUND exact equality — a whole new function, so the "old"
+  // golden is the empty string. The dedicated test below checks its RETURN VALUE
+  // (behavioural), never its literal source text, so this is the only guard against a
+  // hidden extra statement inside.
   const span = text.slice(from, end);
-  assert.ok(
-    span === "" || span === EXPECTED_DIRECTION_FAMILY_MISMATCH_REFUSAL_FN,
-    `the directionFamilyMismatchRefusal span must be empty (v5) or EXACTLY the documented text (v6), found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_DIRECTION_FAMILY_MISMATCH_REFUSAL_FN, ""),
+    `the directionFamilyMismatchRefusal span must be EXACTLY the ${version} documented text (empty for old/v5), found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, from)}<directionFamilyMismatchRefusal — masked>${text.slice(end)}`;
 }
 
-function maskErrorsChanges(text) {
-  return maskDirectionFamilyMismatchRefusalFn(maskInternalFallback(maskClr10Branch(maskReasonMessagesBlock(maskMessagesBlock(maskReasonTypes(text))))));
+function maskErrorsChanges(text, version) {
+  return maskDirectionFamilyMismatchRefusalFn(
+    maskInternalFallback(maskClr10Branch(maskReasonMessagesBlock(maskMessagesBlock(maskReasonTypes(text, version), version), version), version), version),
+    version,
+  );
 }
 
 test("autoDraft.v6.errors.ts differs from v5 ONLY inside the documented §2a(e) + PR #204 spans (the new reason types incl. counterparty_kind_contradiction/direction_family_mismatch, the reworded MESSAGES/CLR21_REASON_MESSAGES, the new CLR10_REASON_MESSAGES, the new CLR10 branch, the reworded internal fallback, and the new directionFamilyMismatchRefusal factory) — every native-constraint collapse (23505/23503/23514/42501) and readToolRefusalMessage are unchanged", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.errors.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.errors.ts"), 5));
-  assert.equal(maskErrorsChanges(v6), maskErrorsChanges(v5), "outside the masked spans, autoDraft.v6.errors.ts must be a version-renamed copy of v5");
+  assert.equal(maskErrorsChanges(v6, "new"), maskErrorsChanges(v5, "old"), "outside the masked spans, autoDraft.v6.errors.ts must be a version-renamed copy of v5");
+});
+
+test("Codex round 8, forgery (CLR10 branch reverted to v5): a v6 file whose CLR10 branch was REVERTED to v5's own golden text (essentially nothing — v5's CLR10 falls straight through to the generic message) must be REFUSED when checked AS v6 (\"new\") — THE exact mutant Codex compiled and got 64/64 green against round 7's either-or check", () => {
+  const v6 = asVN(src("autoDraft.v6.errors.ts"), 6);
+  assert.ok(v6.includes(EXPECTED_CLR10_BRANCH), "the real v6 file must genuinely carry the v6 golden before we revert it");
+  const mutant = v6.replace(EXPECTED_CLR10_BRANCH, EXPECTED_CLR10_BRANCH_V5);
+  assert.notEqual(mutant, v6, "the reversion must actually have changed the text");
+  assert.throws(
+    () => maskClr10Branch(mutant, "new"),
+    /new CLR10 branch must be EXACTLY the new documented text/,
+    "a v6 file reverted to v5's own (essentially absent) CLR10 branch must be refused when checked as v6 — v5's golden is not an acceptable v6 value",
+  );
 });
 
 const errorsV6 = await import("../workflows/autoDraft.v6.errors.ts");
@@ -1834,7 +1893,7 @@ function upgradeV8Prompt(text) {
 
 /** The ONE new sentence-group (v9:176-179), appended to the end of the supplier-bill
  *  paragraph, right after its own "Call `draft_journal_entry`..." call-to-action. */
-function maskNewSentence(text) {
+function maskNewSentence(text, version) {
   const startAnchor = 'Call `draft_journal_entry` with coding_kind \\"supplier_bill\\".",';
   const start = text.indexOf(startAnchor);
   assert.ok(start > 0, "the supplier_bill call-to-action must be present in both versions");
@@ -1842,13 +1901,14 @@ function maskNewSentence(text) {
   const endAnchor = '"Coding a sales invoice';
   const end = text.indexOf(endAnchor, from);
   assert.ok(end > from, "the sales-invoice paragraph must follow in both versions");
-  // Codex round 7: EXACT equality, not "mask and skip" — prose sent to the model, not
-  // executable code, but a semantic risk zone regardless (an unreviewed extra sentence
-  // changes what the model is actually told).
+  // Codex round 8: VERSION-BOUND exact equality — prose sent to the model, not executable
+  // code, but a semantic risk zone regardless (an unreviewed extra sentence changes what
+  // the model is actually told).
   const span = text.slice(from, end);
-  assert.ok(
-    span === EXPECTED_V9_ANTI_PRIMACY_SENTENCE || span === EXPECTED_V9_ANTI_PRIMACY_SENTENCE_V8,
-    `the v9 anti-primacy sentence span must be EXACTLY the v9 or v8 documented text, found: ${JSON.stringify(span)}`,
+  assert.equal(
+    span,
+    pickGolden(version, EXPECTED_V9_ANTI_PRIMACY_SENTENCE, EXPECTED_V9_ANTI_PRIMACY_SENTENCE_V8),
+    `the v9 anti-primacy sentence span must be EXACTLY the ${version} documented text, found: ${JSON.stringify(span)}`,
   );
   return `${text.slice(0, from)}<the v9 anti-primacy sentence — masked>${text.slice(end)}`;
 }
@@ -1856,7 +1916,7 @@ function maskNewSentence(text) {
 test("chatTurn.v9.prompt.ts differs from v8 ONLY in the ONE new sentence-group appended to the supplier-bill paragraph (targeted renames + header narrative aside) — the clarify tool, the draft schema, and every typed-part shape are unchanged", () => {
   const v9 = dropHeader(src("chatTurn.v9.prompt.ts"));
   const v8 = dropHeader(upgradeV8Prompt(src("chatTurn.v8.prompt.ts")));
-  assert.equal(maskNewSentence(v9), maskNewSentence(v8), "outside the masked span, chatTurn.v9.prompt.ts must be a version-renamed copy of v8");
+  assert.equal(maskNewSentence(v9, "new"), maskNewSentence(v8, "old"), "outside the masked span, chatTurn.v9.prompt.ts must be a version-renamed copy of v8");
 });
 
 test("v8's supplier-bill paragraph does NOT already carry the anti-primacy sentence (proves it is genuinely NEW in v9)", () => {
