@@ -22,7 +22,7 @@ import {
   rootQuery, humanQuery, endPool, printLaneNotes, noteLane, printSkipCount,
   buildWorld, firmOf, opk, createClient,
   a21EnsureReady, skip16,
-  proposeAutopostRule, signAutopostRule, ruleRowById,
+  proposeAutopostRule,
   upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedStatedInvoiceFacts,
   approveEntry, ev, FIELD, counterpartyRows,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm,

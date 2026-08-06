@@ -19,6 +19,10 @@ import {
   waveAEnsureReady, createClient, upsertAccountClassed, draftEntryV3, approveEntry,
   freshResolution, fnExists, hasColumn, resolveFn, callFnAdaptive, humanPersona,
   codingRuleRows, withSessionAuth,
+  // 0046: seedCorroboratingInvoiceFacts drives the REAL facts writer, so these come into
+  // local scope rather than riding the `export *` below (which re-exports without binding).
+  enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, agreedEnvelope,
+  grantConsent,
 } from "./wave-a-fixtures.mjs";
 
 export * from "./wave-a-fixtures.mjs";
@@ -402,6 +406,62 @@ export async function seedStatedInvoiceFacts(cited, { firm, invoiceId = null } =
 // ---------------------------------------------------------------------------
 // Autopost plumbing shared across the P2/P4 files (the proven Wave-A2 idioms).
 // ---------------------------------------------------------------------------
+
+/** 0046 (the ROOT corroboration fix) — a floor-evidence document that CORROBORATES.
+ *
+ *  WHY THE FIXTURES NEEDED THIS. `seedStatedInvoiceFacts` seeds one region: a stated invoice
+ *  id. That was enough for the pre-0046 floor, which asked for qualifying sightings, distinct
+ *  invoice numbers and a 60-day span and never asked whether the documents CORROBORATED. It
+ *  is not enough for the floor 0046 ships, which adds `corroborated >= 6` — and that gap is
+ *  precisely the defect the ROOT fix exists to close (an owner could reach the old floor,
+ *  sign, and watch `execute_rule_post` refuse `not_corroborated` on every document).
+ *
+ *  IT GOES THROUGH THE REAL WRITER, not a raw insert, because corroboration is a property of
+ *  what `clara.persist_invoice_facts` accepted: the 0023 predicate reads per-field two-reader
+ *  AGREEMENT out of the envelope (`agreedEnvelope`), and regions alone are one reader's
+ *  assertion. The field set below is the minimum that satisfies the whole 0023:304-346
+ *  predicate — single positive gross with a real polygon, MYR, amount_due equal to gross,
+ *  explicit net and an explicit ZERO tax (explicit zero counts; missing does not), and the
+ *  exact net+tax+rounding = gross identity.
+ *
+ *  Returns the stated invoice id, so it is a drop-in for seedStatedInvoiceFacts. */
+export async function seedCorroboratingInvoiceFacts(cited, {
+  sub = null, firm = null, client = null,
+  vendorName = "RIG SELLER SDN BHD", customerName = "RIG BUYER SDN BHD",
+  cents = 90000, invoiceId = null, invoiceDate = "2026-06-15",
+} = {}) {
+  const id = invoiceId ?? `RIG-${randomUUID().slice(0, 10)}`;
+  // EGRESS CONSENT IS A REAL PRECONDITION OF THIS PATH, not a fixture nicety. Without a
+  // live client_egress_consents row, claim_document_processing_task parks the facts task
+  // at 'held_egress' with CLR28/no_consent and persist_invoice_facts then refuses CLR16
+  // "task is not running" — which is what the first cut of this helper hit, in the three
+  // callers whose consent grant runs after their first floor-evidence document (or, for
+  // a21-sightings-lift, not at all). Granting here is idempotent and keeps the helper
+  // self-sufficient. None of the four callers asserts on no_consent.
+  if (sub && firm && client) await grantConsent(sub, { firm, client }).catch(() => {});
+  await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  const claimed = await claimTask(task.id, { egressApproved: true });
+  if (claimed?.status !== "running") {
+    throw new Error(
+      `seedCorroboratingInvoiceFacts: the invoice_facts task did not reach 'running' `
+      + `(got ${JSON.stringify(claimed)}) — persist_invoice_facts would refuse CLR16 and the `
+      + `document would silently fail to corroborate`);
+  }
+  await persistInvoiceFacts(task.id, [
+    factField("invoice.total", rm(cents)),
+    factField("invoice.currency", "MYR"),
+    factField("invoice.vendor_name", vendorName),
+    factField("invoice.customer_name", customerName),
+    factField("invoice.invoice_id", id),
+    factField("invoice.invoice_date", invoiceDate, { polygon: [], confidence: 0.9 }),
+    factField("invoice.total_excl_tax", rm(cents), { polygon: [], confidence: 0.9 }),
+    factField("invoice.tax_total", "RM 0.00", { polygon: [], confidence: 0.9 }),
+    factField("invoice.amount_due", rm(cents), { polygon: [], confidence: 0.9 }),
+  ], { envelope: agreedEnvelope() });
+  return id;
+}
 
 /** 0046 (7A-R4) — stamp a DRAFT entry's coding_kind. The OCR-sales floor now counts only
  *  entries coded `sales_invoice`, so every fixture that builds floor evidence must say what

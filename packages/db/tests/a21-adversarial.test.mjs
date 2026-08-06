@@ -28,7 +28,7 @@ import {
   buildWorld, firmOf, opk,
   a21EnsureReady, skip16, metaProbe0016, THRESHOLD_CENTS, INC, INC_I,
   proposeAutopostRule, signAutopostRule, ruleRowById, postViaRule, lastSkipReason, entryStatusOf,
-  upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedStatedInvoiceFacts,
+  upsertPayableAccount, upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedCorroboratingInvoiceFacts,
   draftEntryV3, approveEntry, stampCodingKind, reverseEntry, ev, FIELD, counterpartyRows, codingRuleRows,
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, classifyDocument, rm, reasonOf,
@@ -56,7 +56,9 @@ function skipHere(t) { return skip16(t, has16, "0016 not applied — adversarial
 async function approvedSales(sub, { client, cp = null, newName = null, date = "2026-06-10", cents = 90000, statedId = true }) {
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
-  if (statedId) await seedStatedInvoiceFacts(cited, { firm }); // ADV-R2 R1#5: floor evidence needs a STATED invoice id
+  // 0046: see a21-helpers.seedCorroboratingInvoiceFacts — the floor now also needs
+  // `corroborated >= 6`, which a stated id alone never earns.
+  if (statedId) await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, vendorName: CLIENT_NAME, cents });
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,
@@ -68,7 +70,7 @@ async function approvedSales(sub, { client, cp = null, newName = null, date = "2
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
     postingDate: date, opKey: opk("advs"),
   });
-    // 0046 (7A-R4): the OCR-sales floor now counts only entries coded `sales_invoice`.
+  // 0046 (7A-R4): the OCR-sales floor now counts only entries coded `sales_invoice`.
   // Nothing in the human lane can set a coding kind (neither clara.draft_entry nor
   // clara.revise_entry takes one), so the rig stamps the draft — see stampCodingKind's
   // header for why that is the sanctioned transition and not a back door.

@@ -25,10 +25,10 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, endPool, opk, buildWorld, firmOf, rm, fnSource,
   upsertAccountClassed, seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
-  persistInvoiceFacts, agreedEnvelope, factsRegion, grantConsent, freshResolution, ev, approveEntry stampCodingKind,
+  persistInvoiceFacts, agreedEnvelope, factsRegion, grantConsent, freshResolution, ev, approveEntry, stampCodingKind,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, draftEntryV3,
   classifyDocument, postViaRule, lastSkipReason, entryStatusOf, counterpartyRows,
-  proposeAutopostRule, signAutopostRule, ruleRowById, seedStatedInvoiceFacts, FIELD,
+  proposeAutopostRule, signAutopostRule, ruleRowById, seedCorroboratingInvoiceFacts, FIELD,
   has0022, fail0022, ocrAnchorDarkGuard, componentFields, LAI_LOU_MEI, factField,
 } from "./x1-helpers.mjs";
 
@@ -51,7 +51,8 @@ async function approvedSales({ cp = null, newName = null, date, cents = 90000 })
   const sub = W.users.alice;
   const firm = await firmOf(CLIENT);
   const cited = await seedCitedDocument(sub, { firm, client: CLIENT, quote: rm(cents) });
-  await seedStatedInvoiceFacts(cited, { firm }); // the floor needs >=6 DISTINCT stated invoice ids
+  // 0046: the floor needs >=6 DISTINCT stated invoice ids AND >=6 corroborating documents.
+  await seedCorroboratingInvoiceFacts(cited, { sub, firm, client: CLIENT, cents });
   const d = await draftEntryV3(sub, {
     client: CLIENT,
     resolution: await freshResolution(sub, CLIENT, { subjectKind: "document", subjectId: cited.documentId }),
@@ -64,7 +65,7 @@ async function approvedSales({ cp = null, newName = null, date, cents = 90000 })
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
     postingDate: date, opKey: opk("os"),
   });
-    // 0046 (7A-R4): the OCR-sales floor now counts only entries coded `sales_invoice`.
+  // 0046 (7A-R4): the OCR-sales floor now counts only entries coded `sales_invoice`.
   // The human draft verb cannot set one — see stampCodingKind's header.
   await stampCodingKind(d.entry_id);
   await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("osa") });

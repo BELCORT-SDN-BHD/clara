@@ -25,7 +25,7 @@ import {
   OCR_SKIP, SUSPENDED_STATUS,
   proposeAutopostRule, signAutopostRule, ruleRowById, postViaRule, lastSkipReason, entryStatusOf,
   classifyDocument, notificationsMatching,
-  upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedStatedInvoiceFacts,
+  upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedCorroboratingInvoiceFacts,
   draftEntryV3, approveEntry, stampCodingKind, ev, FIELD, counterpartyRows, sightingRows,
   enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts, factField, factsRegion,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm, fnSource,
@@ -49,7 +49,9 @@ function skipHere(t) { return skip16(t, has16, "0016 not applied — OCR-envelop
 async function approvedSales(sub, { client, cp = null, newName = null, date = "2026-06-10", cents = 90000, doc = null }) {
   const firm = await firmOf(client);
   const cited = doc ?? await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
-  if (!doc) await seedStatedInvoiceFacts(cited, { firm }); // ADV-R2 R1#5: floor evidence needs a STATED invoice id
+  // 0046: floor evidence needs a stated invoice id AND corroboration (the ROOT fix adds
+  // `corroborated >= 6`). seedStatedInvoiceFacts seeds only the id.
+  if (!doc) await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, vendorName: CLIENT_NAME, cents });
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,
@@ -63,7 +65,7 @@ async function approvedSales(sub, { client, cp = null, newName = null, date = "2
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
     postingDate: date, opKey: opk("os"),
   });
-    // 0046 (7A-R4): the OCR-sales floor now counts only entries coded `sales_invoice`.
+  // 0046 (7A-R4): the OCR-sales floor now counts only entries coded `sales_invoice`.
   // Nothing in the human lane can set a coding kind (neither clara.draft_entry nor
   // clara.revise_entry takes one), so the rig stamps the draft — see stampCodingKind's
   // header for why that is the sanctioned transition and not a back door.
