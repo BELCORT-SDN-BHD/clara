@@ -83,27 +83,67 @@ function dropHeader(text) {
 // 1a. PURE-RENAME FILES — whole-file, token-for-token identical (header aside).
 // ===========================================================================
 
-/** PR #204: ToolCtx gains the `direction` field (infra.ts) — AND its own preceding JSDoc
- *  gained a clause naming it, so the mask must start BEFORE that comment, not just before
- *  the type literal. Anchored on ClaraPools's own stable closing (common to both versions).
- *  v5's ToolCtx declaration is a one-liner with no nested `{}`, so the first `};` after the
- *  type's own opening IS its own close on both sides — a safe anchor for either shape. */
-function maskToolCtxType(text) {
-  const startAnchor = "withRuntime<T>(fn: (c: PgExec) => Promise<T>): Promise<T>;\n};\n\n";
-  const anchorIdx = text.indexOf(startAnchor);
-  assert.ok(anchorIdx > 0, "ClaraPools's own closing must be present in both versions");
-  const start = anchorIdx + startAnchor.length;
-  const typeStart = text.indexOf("export type ToolCtx = {", start);
-  assert.ok(typeStart >= start, "the ToolCtx type must follow ClaraPools in both versions");
-  const end = text.indexOf("};", typeStart) + 2;
-  assert.ok(end > typeStart + 1, "the type literal must close");
-  return `${text.slice(0, start)}<the ToolCtx JSDoc + type literal — masked>${text.slice(end)}`;
+/** Extract ToolCtx's own field list as `"name: type"` tokens, whitespace-normalized so
+ *  v5's one-liner and v6's multi-line shape compare on equal footing. */
+function extractToolCtxFields(text) {
+  const typeStart = text.indexOf("export type ToolCtx = {");
+  assert.ok(typeStart > 0, "the ToolCtx type must be present in both versions");
+  const bodyStart = typeStart + "export type ToolCtx = {".length;
+  const bodyEnd = text.indexOf("};", bodyStart);
+  assert.ok(bodyEnd > bodyStart, "the type literal must close");
+  return {
+    fields: text
+      .slice(bodyStart, bodyEnd)
+      .split(";")
+      .map((s) => s.replace(/\s+/g, " ").trim())
+      .filter(Boolean),
+    typeStart,
+    typeEnd: bodyEnd + 2,
+  };
 }
 
-test("autoDraft.v6.infra.ts differs from v5 ONLY inside the ToolCtx type literal (PR #204's new `direction` field; header narrative aside) — pools()/resolveModel/readScoped/writeScoped/safeRead are byte-identical", () => {
+/** Codex round-2 SF: the PRIOR version of this mask covered the ENTIRE JSDoc + type literal
+ *  as one opaque span — an executed mutant that made carried `filingId` optional passed,
+ *  because the mask silently absorbed it. Narrowed to EXACTLY the new content: (a) the
+ *  JSDoc's own trailing clause (a targeted replace on the stable common prefix, not the
+ *  whole comment), and (b) the type literal, reconstructed from extractToolCtxFields so
+ *  every CARRIED field (firmId/clientId/documentId/filingId/taskId) is compared as LITERAL,
+ *  whitespace-normalized text — v5's one-liner and v6's multi-line shape read as equal
+ *  ONLY because the fields themselves are identical, never because the whole region was
+ *  masked away. A genuinely new (6th) field is represented by the SAME fixed placeholder on
+ *  both sides regardless of whether it exists, so the two reconstructions compare equal;
+ *  the separate dedicated test below independently asserts the field COUNT and the new
+ *  field's own exact content. */
+function maskToolCtxType(text) {
+  const jsDocPrefix = "/** The per-tool execution context: the firm + the PINNED client + the document/filing the\n *  admission bound this task to";
+  const jsDocStart = text.indexOf(jsDocPrefix);
+  assert.ok(jsDocStart > 0, "the ToolCtx JSDoc's own common prefix must be present in both versions");
+  const jsDocFrom = jsDocStart + jsDocPrefix.length;
+  const jsDocEnd = text.indexOf("*/", jsDocFrom) + 2;
+  assert.ok(jsDocEnd > jsDocFrom + 1, "the JSDoc must close");
+  let t = `${text.slice(0, jsDocFrom)}<the JSDoc's own trailing clause — masked>${text.slice(jsDocEnd)}`;
+
+  const { fields, typeStart, typeEnd } = extractToolCtxFields(t);
+  const carried = fields.slice(0, 5).join("; ");
+  const rebuilt = `export type ToolCtx = { ${carried}; <any new field(s) — masked> };`;
+  return `${t.slice(0, typeStart)}${rebuilt}${t.slice(typeEnd)}`;
+}
+
+test("autoDraft.v6.infra.ts differs from v5 ONLY inside the ToolCtx JSDoc's own trailing clause + the type literal's new (6th) field (PR #204; header narrative aside) — pools()/resolveModel/readScoped/writeScoped/safeRead are byte-identical", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.infra.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.infra.ts"), 5));
-  assert.equal(maskToolCtxType(v6), maskToolCtxType(v5), "outside the masked ToolCtx type, autoDraft.v6.infra.ts must be a version-renamed copy of v5");
+  assert.equal(maskToolCtxType(v6), maskToolCtxType(v5), "outside the masked spans, autoDraft.v6.infra.ts must be a version-renamed copy of v5");
+});
+
+test("Codex round-2 SF: ToolCtx's five CARRIED fields (firmId/clientId/documentId/filingId/taskId) are token-IDENTICAL between v6 and v5, in the same order; a mutant that widened/narrowed ANY carried field (e.g. filingId made optional) is caught HERE — the structural mask above no longer absorbs it silently", () => {
+  const v6Fields = extractToolCtxFields(src("autoDraft.v6.infra.ts")).fields;
+  const v5Fields = extractToolCtxFields(src("autoDraft.v5.infra.ts")).fields;
+  assert.equal(v6Fields.length, 6, "v6 ToolCtx must have exactly 6 fields");
+  assert.equal(v5Fields.length, 5, "v5 ToolCtx must have exactly 5 fields");
+  for (let i = 0; i < 5; i++) {
+    assert.equal(v6Fields[i], v5Fields[i], `ToolCtx field ${i + 1} must be token-identical to v5's — v6="${v6Fields[i]}" v5="${v5Fields[i]}"`);
+  }
+  assert.equal(v6Fields[5], 'direction: "sales" | "purchase" | null', "v6's 6th field must be exactly the new direction field");
 });
 
 /** PR #204: the workflow entry's `ctx` object gains ONE new line, `direction: claim.ctx.
@@ -379,16 +419,41 @@ function maskDirectionClauseDeclaration(text) {
   return `${text.slice(0, from)}<the directionClause declaration — masked>${text.slice(end)}`;
 }
 
-test("v6's model user-message is direction-generic (\"Draft the document...\"), replacing v5's purchase-only \"Draft the supplier bill...\" — RATIFIED as a necessary §2a addendum (Codex round-1: the old message would fight the v6 system prompt on a sales run; native review N-8 concurs). PR #204 ADDS a dynamic ${directionClause} suffix on top — both v6's template STRUCTURE and v5's original fixed string are pinned, no mask", () => {
-  const v6 = src("autoDraft.v6.impl.ts");
-  const v5 = src("autoDraft.v5.impl.ts");
-  assert.ok(
-    v6.includes("{ role: \"user\", content: `Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}` },"),
-    "v6 must use the exact direction-generic template, with the directionClause suffix appended",
+/** Codex round-2 B2: a file-wide `.includes()` check is COMMENT-FORGEABLE — Codex executed
+ *  the exact mutant (v5's message restored EXECUTABLE, v6's real message parked inside a
+ *  COMMENT sitting in the masked directionClause span) and both `.includes()` assertions
+ *  stayed green, because `.includes()` cannot distinguish code from prose anywhere in the
+ *  file. Fixed by extracting the messages array's OWN executable content at its EXACT
+ *  source position (anchored on `const messages: ModelMessage[] = [` then the very next
+ *  `{ role: "user", content: \`...\` }` object) — never a file-wide search. A mutant that
+ *  restores v5's message AT THIS EXECUTABLE POSITION is caught because the extracted text
+ *  won't match the expected v6 string; a mutant that parks v6's real message in a comment
+ *  ELSEWHERE while leaving something else executable HERE is caught the same way, because
+ *  this extraction only ever reads what is ACTUALLY at that position, never a comment. */
+function extractUserMessageContent(text) {
+  const arrayStart = text.indexOf("const messages: ModelMessage[] = [\n");
+  assert.ok(arrayStart > 0, "the messages array's own declaration must be present in both versions");
+  const objAnchor = '{ role: "user", content: `';
+  const objStart = text.indexOf(objAnchor, arrayStart);
+  assert.ok(objStart > arrayStart, "the user message object must immediately follow the array's own opening");
+  const contentStart = objStart + objAnchor.length;
+  const contentEnd = text.indexOf("` },", contentStart);
+  assert.ok(contentEnd > contentStart, "the content template literal must close");
+  return text.slice(contentStart, contentEnd);
+}
+
+test("v6's model user-message content, extracted from its EXACT executable position (not a file-wide search), is direction-generic with the directionClause suffix appended — RATIFIED as a necessary §2a addendum (Codex round-1: the old message would fight the v6 system prompt on a sales run; native review N-8 concurs) — and v5's own executable content, extracted the SAME way, is still its exact original purchase-only string (regression pin)", () => {
+  const v6Content = extractUserMessageContent(src("autoDraft.v6.impl.ts"));
+  const v5Content = extractUserMessageContent(src("autoDraft.v5.impl.ts"));
+  assert.equal(
+    v6Content,
+    "Draft the document for document ${ctx.documentId} (filing ${ctx.filingId}).${directionClause}",
+    "v6's EXECUTABLE user-message content must be exactly this — not merely present somewhere in the file",
   );
-  assert.ok(
-    v5.includes('{ role: "user", content: `Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).` },'),
-    "v5 must still carry its exact original purchase-only user message (regression pin)",
+  assert.equal(
+    v5Content,
+    "Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).",
+    "v5's EXECUTABLE user-message content must still be exactly its original string",
   );
 });
 
@@ -413,22 +478,54 @@ test("v5's impl.ts has no directionClause / ctx.direction anywhere (proves the d
   assert.doesNotMatch(v5, /ctx\.direction/);
 });
 
-/** PR #204: AutoDraftContext gains `direction: "sales" | "purchase" | null;` — a pure
- *  insertion right after `reservedTokens: number;`, before the type literal's own close. */
-function maskAutoDraftContextDirectionField(text) {
-  // AutoDraftContext's own preceding JSDoc gained a clause naming the new field too, so the
-  // mask must start BEFORE that comment — anchored on the stable, common export statement
-  // right above it (post-asVN, both versions read "SYSTEM_PROMPT_AUTODRAFT_VN").
-  const startAnchor = "export { SYSTEM_PROMPT_AUTODRAFT_VN };\n\n";
-  const anchorIdx = text.indexOf(startAnchor);
-  assert.ok(anchorIdx > 0, "the SYSTEM_PROMPT re-export must be present in both versions");
-  const from = anchorIdx + startAnchor.length;
-  const typeAnchor = text.indexOf("export type AutoDraftContext = {", from);
-  assert.ok(typeAnchor >= from, "AutoDraftContext's own type declaration must follow in both versions");
-  const end = text.indexOf("};", typeAnchor) + 2;
-  assert.ok(end > typeAnchor + 1, "AutoDraftContext's own type literal must close");
-  return `${text.slice(0, from)}<the AutoDraftContext JSDoc + direction field — masked>${text.slice(end)}`;
+/** Extract AutoDraftContext's own field list (already multi-line in BOTH versions — no
+ *  reformatting to normalize, unlike ToolCtx). */
+function extractAutoDraftContextFields(text) {
+  const typeStart = text.indexOf("export type AutoDraftContext = {");
+  assert.ok(typeStart > 0, "the AutoDraftContext type must be present in both versions");
+  const bodyStart = typeStart + "export type AutoDraftContext = {".length;
+  const bodyEnd = text.indexOf("};", bodyStart);
+  assert.ok(bodyEnd > bodyStart, "the type literal must close");
+  return {
+    fields: text
+      .slice(bodyStart, bodyEnd)
+      .split(";")
+      .map((s) => s.replace(/\s+/g, " ").trim())
+      .filter(Boolean),
+    typeStart,
+    typeEnd: bodyEnd + 2,
+  };
 }
+
+/** Codex round-2 SF (same class of fix as ToolCtx above): narrowed from "mask the whole
+ *  JSDoc + type literal" to EXACTLY the new content — the JSDoc's own trailing clause (a
+ *  targeted replace on the stable common prefix) and the type literal's new (9th) field,
+ *  reconstructed so every one of the 8 CARRIED fields stays literal, compared text. */
+function maskAutoDraftContextDirectionField(text) {
+  const jsDocPrefix = "/** The claim context returned by begin_autodraft_task (the CAS + bind + context read).";
+  const jsDocStart = text.indexOf(jsDocPrefix);
+  assert.ok(jsDocStart > 0, "the AutoDraftContext JSDoc's own common prefix must be present in both versions");
+  const jsDocFrom = jsDocStart + jsDocPrefix.length;
+  const jsDocEnd = text.indexOf("*/", jsDocFrom) + 2;
+  assert.ok(jsDocEnd > jsDocFrom + 1, "the JSDoc must close");
+  let t = `${text.slice(0, jsDocFrom)}<the JSDoc's own trailing clause — masked>${text.slice(jsDocEnd)}`;
+
+  const { fields, typeStart, typeEnd } = extractAutoDraftContextFields(t);
+  const carried = fields.slice(0, 8);
+  const rebuilt = `export type AutoDraftContext = {\n${carried.map((f) => `  ${f};`).join("\n")}\n  <any new field(s) — masked>\n};`;
+  return `${t.slice(0, typeStart)}${rebuilt}${t.slice(typeEnd)}`;
+}
+
+test("Codex round-2 SF: AutoDraftContext's eight CARRIED fields are token-IDENTICAL between v6 and v5, in the same order; a mutant that widened/narrowed any carried field is caught HERE, not silently absorbed by a blanket mask", () => {
+  const v6Fields = extractAutoDraftContextFields(src("autoDraft.v6.impl.ts")).fields;
+  const v5Fields = extractAutoDraftContextFields(src("autoDraft.v5.impl.ts")).fields;
+  assert.equal(v6Fields.length, 9, "v6 AutoDraftContext must have exactly 9 fields");
+  assert.equal(v5Fields.length, 8, "v5 AutoDraftContext must have exactly 8 fields");
+  for (let i = 0; i < 8; i++) {
+    assert.equal(v6Fields[i], v5Fields[i], `AutoDraftContext field ${i + 1} must be token-identical to v5's — v6="${v6Fields[i]}" v5="${v5Fields[i]}"`);
+  }
+  assert.equal(v6Fields[8], 'direction: "sales" | "purchase" | null', "v6's 9th field must be exactly the new direction field");
+});
 
 /** PR #204: TWO scoped insertions inside claimAutoDraftStep's OWN body — the receipt type's
  *  new `direction?: string | null;` field, and the returned ctx literal's new `direction:
@@ -456,14 +553,32 @@ function maskClaimDirectionFields(text) {
 }
 
 test("autoDraft.v6.impl.ts: AutoDraftContext's own direction field + claimAutoDraftStep's two scoped direction insertions are masked as PRECISELY those spans — every OTHER field/line in the type and the function is compared as literal text", () => {
-  // A narrow, self-contained probe: these three masks compose over v6's own text and must
-  // each find their anchors (the asserts inside the mask functions do the real checking);
-  // this test exists so a broken anchor fails HERE with a clear name, not silently inside
-  // the big structural test below.
-  const v6 = asVN(src("autoDraft.v6.impl.ts"), 6); // maskAutoDraftContextDirectionField anchors post-asVN
+  // A narrow, self-contained probe: these two masks compose over v6's own RAW text (neither
+  // anchor contains a "v6"/"V6" substring, so no asVN transform is needed) and must each
+  // find their anchors (the asserts inside the mask functions do the real checking); this
+  // test exists so a broken anchor fails HERE with a clear name, not silently inside the
+  // big structural test below.
+  const v6 = src("autoDraft.v6.impl.ts");
   maskAutoDraftContextDirectionField(v6);
   maskClaimDirectionFields(v6);
 });
+
+/** Codex round-2 B1: classifySettleReceipt is a WHOLE NEW function (60+ lines), inserted
+ *  between runAutoDraftModelStep's own closing and settleAutoDraftStep's own JSDoc — a pure
+ *  insertion, masked as one unit (its own dedicated tests below are the real verification of
+ *  its content, mirroring how directionFamilyMismatchRefusal is handled in errors.ts). */
+function maskClassifySettleReceiptFn(text) {
+  const startAnchor = "  return { outcome, usageTokens, entryId };\n}\n\n";
+  const start = text.indexOf(startAnchor);
+  assert.ok(start > 0, "runAutoDraftModelStep's own closing must be present in both versions");
+  const from = start + startAnchor.length;
+  const endAnchor = "/** Settle the sweep task (idempotent)";
+  const end = text.indexOf(endAnchor, from);
+  // >= , not > : v5 has NOTHING between runAutoDraftModelStep's close and settleAutoDraftStep's
+  // own JSDoc, so indexOf legitimately returns exactly `from` on that side.
+  assert.ok(end >= from, "settleAutoDraftStep's own JSDoc must follow in both versions");
+  return `${text.slice(0, from)}<the new classifySettleReceipt function — masked>${text.slice(end)}`;
+}
 
 /** The settle step's own JSDoc tail (the §2d rationale, v6-only — a genuine VALUE change,
  *  masked as one small precise span) plus FOUR scoped insertions/edits inside
@@ -471,11 +586,11 @@ test("autoDraft.v6.impl.ts: AutoDraftContext's own direction field + claimAutoDr
  *  same file, ALSO destructures workflowRunId from getWorkflowMetadata() — an unscoped
  *  replace would silently hit the WRONG occurrence): the workflowRunId destructure line,
  *  the `const r = ` capture + the SQL text's trailing `$6::text) as receipt` addition, the
- *  params array's trailing workflowRunId element, and (PR #204) the new
- *  receipt/settled-check block appended after the query call. Everything else in the
+ *  params array's trailing workflowRunId element, and (PR #204, fixed per Codex round 2)
+ *  the call to classifySettleReceipt appended after the query call. Everything else in the
  *  function — the signature, "use step", and params[0..4] — is left as LITERAL text, so a
  *  mutation there fails THIS test too, not only the dedicated params-array test below
- *  (Codex SF: stop masking the whole function). */
+ *  (Codex round-1 SF: stop masking the whole function). */
 function maskSettleFunction(text) {
   const jsDocStart = text.indexOf(" *  writes the sweep_run_items row, and updates the registry counters (a 2nd failure parks)");
   assert.ok(jsDocStart > 0, "the settle step's own JSDoc tail lead-in must be present in both versions");
@@ -494,44 +609,90 @@ function maskSettleFunction(text) {
     'c.query("select clara.settle_autodraft_task($1, $2, $3, $4, $5::jsonb)", [',
   );
   fnBody = fnBody.replace("\n      workflowRunId,\n    ]),", "\n    ]),");
-  fnBody = fnBody.replace(
-    "\n  const receipt = (r.rows[0]?.receipt ?? {}) as { settled?: boolean; outcome?: string; reason?: string };" +
-      "\n  if (receipt.settled === false) {" +
-      "\n    // run_superseded (or, in principle, any sibling losing-dispatch reason): this run lost" +
-      "\n    // the run-identity race. Nothing was written on this call; the winning run's own settle" +
-      "\n    // already owns (or will own) the real accounting. Benign — return without throwing." +
-      "\n    return;" +
-      "\n  }",
-    "",
-  );
+  fnBody = fnBody.replace("  classifySettleReceipt(r.rows[0]?.receipt);\n", "");
 
   return `${text.slice(0, jsDocStart)}<settle JSDoc tail — masked>${text.slice(jsDocEnd, fnStart)}${fnBody}${text.slice(fnEnd)}`;
 }
 
 function maskImplChanges(text) {
   return maskSettleFunction(
-    maskClaimDirectionFields(maskAutoDraftContextDirectionField(maskDirectionClauseDeclaration(maskUserMessageLine(text)))),
+    maskClassifySettleReceiptFn(
+      maskClaimDirectionFields(maskAutoDraftContextDirectionField(maskDirectionClauseDeclaration(maskUserMessageLine(text)))),
+    ),
   );
 }
 
-test("autoDraft.v6.impl.ts differs from v5 ONLY inside the documented §2a + PR #204 spans (the settle step's JSDoc tail + its four scoped insertions, AutoDraftContext's direction field, claimAutoDraftStep's two direction insertions, the directionClause declaration, and the templated user message — pinned exactly by the tests above, not masked away) — recover/question/close and consumeAutoDraftModelResult's stream-error tagging are unchanged, INCLUDING the settle function's own signature, \"use step\" directive, and params[0..4], which are compared as LITERAL text here (not masked)", () => {
+test("autoDraft.v6.impl.ts differs from v5 ONLY inside the documented §2a + PR #204 spans (the new classifySettleReceipt function, the settle step's JSDoc tail + its four scoped insertions, AutoDraftContext's direction field, claimAutoDraftStep's two direction insertions, the directionClause declaration, and the templated user message — each pinned exactly by a dedicated test, not masked away) — recover/question/close and consumeAutoDraftModelResult's stream-error tagging are unchanged, INCLUDING the settle function's own signature, \"use step\" directive, and params[0..4], which are compared as LITERAL text here (not masked)", () => {
   const v6 = dropHeader(asVN(src("autoDraft.v6.impl.ts"), 6));
   const v5 = dropHeader(asVN(src("autoDraft.v5.impl.ts"), 5));
   assert.equal(maskImplChanges(v6), maskImplChanges(v5), "outside the masked spans, autoDraft.v6.impl.ts must be a version-renamed copy of v5");
 });
 
-test("PR #204: settleAutoDraftStep's SQL text carries the `as receipt` alias, and the receipt is read explicitly (settled/outcome/reason) — the settle no-op is now OBSERVABLE, not merely accidental", () => {
+test("PR #204: settleAutoDraftStep's SQL text carries the `as receipt` alias, and the result is read explicitly via classifySettleReceipt — the settle no-op (and every other outcome) is now OBSERVABLE and FAIL-CLOSED, not merely accidental", () => {
   const body = extractSettleStepBody(src("autoDraft.v6.impl.ts"));
   assert.match(body, /as receipt/, "the SQL call must alias its return value");
-  assert.match(body, /const receipt = \(r\.rows\[0\]\?\.receipt \?\? \{\}\) as \{ settled\?: boolean; outcome\?: string; reason\?: string \};/);
-  assert.match(body, /if \(receipt\.settled === false\) \{/, "a losing dispatch (settled:false) must be checked explicitly");
-  assert.match(body, /return;/, "a losing dispatch must return WITHOUT throwing — a benign no-op, matching 0036's task_superseded/registry_superseded/registry_released pattern");
+  assert.match(body, /classifySettleReceipt\(r\.rows\[0\]\?\.receipt\);/, "the receipt must be classified explicitly, not discarded");
 });
 
-test("v5's settle step never reads its own query result at all (fire-and-forget) — proves the explicit settled:false check is genuinely NEW in v6, not carried", () => {
+test("v5's settle step never reads its own query result at all (fire-and-forget) — proves classifySettleReceipt is genuinely NEW in v6, not carried", () => {
   const body = extractSettleStepBody(src("autoDraft.v5.impl.ts"));
   assert.doesNotMatch(body, /as receipt/);
-  assert.doesNotMatch(body, /receipt\.settled/);
+  assert.doesNotMatch(body, /classifySettleReceipt/);
+});
+
+// ===========================================================================
+// Codex round-2 B1 (an IMPLEMENTATION blocker): classifySettleReceipt itself. Pure — no
+// WDK-ambient call — so, unlike settleAutoDraftStep, it IS directly exercisable. Every
+// shape here is grounded in the migration SQL, not assumed: clara.settle_autodraft_task's
+// live body (0036_wave_c0_deferred_belts.sql:856-997, the 6-arity's own splice at
+// 0046_wave_7a_sales_lane.sql §8) — verified by reading the actual SQL text before writing
+// these fixtures, matching classifySettleReceipt's own header citations.
+// ===========================================================================
+
+const implV6 = await import("../workflows/autoDraft.v6.impl.ts");
+const { classifySettleReceipt } = implV6;
+
+test("classifySettleReceipt: the SIX real DB shapes are each classified correctly — REPLAY and SUCCESS as 'settled', the four named losing-dispatch shapes as 'benign-no-op'", () => {
+  assert.equal(classifySettleReceipt({ task_id: "t1", status: "completed", replayed: true }), "settled", "shape 1 — REPLAY (0036:871-873)");
+  for (const reason of ["task_superseded", "registry_superseded", "registry_released", "run_superseded"]) {
+    assert.equal(
+      classifySettleReceipt({ task_id: "t1", status: "running", settled: false, outcome: "not_settled", reason }),
+      "benign-no-op",
+      `shape — ${reason}`,
+    );
+  }
+  assert.equal(
+    classifySettleReceipt({ task_id: "t1", status: "completed", outcome: "drafted", entry_id: "e1", tokens_spent: 100, tokens_refunded: 0 }),
+    "settled",
+    "shape 6 — SUCCESS, outcome=drafted (0036:994-996)",
+  );
+  assert.equal(
+    classifySettleReceipt({ task_id: "t1", status: "failed", outcome: "failed", entry_id: null, tokens_spent: 0, tokens_refunded: 500 }),
+    "settled",
+    "shape 6 — SUCCESS, outcome=failed (a real settle, not a no-op — 'failed' is a legitimate p_outcome value, not an error)",
+  );
+});
+
+test("classifySettleReceipt FAILS CLOSED on every shape outside the enumerated six — a missing row, null, {}, an unrecognized reason, and a malformed success ALL throw, never silently succeed", () => {
+  for (const bad of [
+    undefined,
+    null,
+    {},
+    "oops",
+    42,
+    { settled: false, outcome: "not_settled", reason: "some_new_reason_the_db_might_add_later" },
+    { settled: false, reason: "run_superseded" }, // missing outcome
+    { status: "completed", outcome: "drafted", entry_id: "e1", tokens_spent: 1 }, // missing tokens_refunded
+    { status: "running", outcome: "drafted", entry_id: "e1", tokens_spent: 1, tokens_refunded: 0 }, // bad status
+  ]) {
+    assert.throws(() => classifySettleReceipt(bad), `must throw for ${JSON.stringify(bad)}`);
+  }
+});
+
+test("classifySettleReceipt: the SUCCESS shape genuinely carries NO settled key — Codex's own finding, pinned so 'require settled===true' is never reintroduced as a future 'fix'", () => {
+  const success = { task_id: "t1", status: "completed", outcome: "drafted", entry_id: "e1", tokens_spent: 100, tokens_refunded: 0 };
+  assert.equal("settled" in success, false, "the fixture itself must NOT carry a settled key, matching the real DB shape");
+  assert.equal(classifySettleReceipt(success), "settled", "…and classifySettleReceipt must still accept it as settled");
 });
 
 // ===========================================================================
