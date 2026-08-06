@@ -6,6 +6,12 @@
 // the fix — a refusal outlives the poller, a poll can still retire an error it can honestly
 // disprove, and the human's own next action clears the board.
 //
+// AND "DISPROVE" MEANS POSITIVE EVIDENCE, NOT MERE DIFFERENCE (the ADR-059 armour law). The first
+// cut of the guard cleared whenever the read's park index differed from the held one — which an
+// ABSENT park satisfies, so the between-parks window, a cancelled run and an unreadable marker all
+// wiped the banner. Only two facts retire a park-bound refusal now, and they are the wire client's
+// own delivered arms: a COMPLETE-class terminal, or a strictly higher park index.
+//
 // Two instruments, deliberately. The pure `readClearsError` cells state the rule exhaustively and
 // cost nothing; the mounted cells prove the rule is actually WIRED to the poller — measured with
 // the instrument production uses (a real interval, a real await, the real wire client over a
@@ -22,7 +28,7 @@ import { test, type TestContext } from "node:test";
 import assert from "node:assert/strict";
 import { renderHook } from "../../test/hookHarness";
 import { useInterviewRun, readClearsError, type RunError } from "./useInterviewRun";
-import type { PendingPark } from "../shared/interviewApi";
+import { COMPLETE_OUTCOMES, normalizeInterviewState, type InterviewTerminal, type PendingPark } from "../shared/interviewApi";
 
 const POLL_MS = 3000;
 const PARK: PendingPark = { parkIndex: 3, seg: "tin", phase: "q", question: "TIN?" };
@@ -32,8 +38,9 @@ const PARK: PendingPark = { parkIndex: 3, seg: "tin", phase: "q", question: "TIN
 function err(p: Partial<RunError> = {}): RunError {
   return { message: "refused", gen: 1, kind: "action", heldAtPark: 3, ...p };
 }
-const parkedAt = (parkIndex: number | null) =>
-  ({ pendingPark: parkIndex === null ? null : { ...PARK, parkIndex } });
+/** The slice of /state the predicate reads: a park (null = none) and a terminal (null = none). */
+const parkedAt = (parkIndex: number | null, terminal: InterviewTerminal | null = null) =>
+  ({ pendingPark: parkIndex === null ? null : { ...PARK, parkIndex }, terminal });
 
 test("readClearsError: a poll may never clear an error raised AFTER its read began", () => {
   // The generation guard. The read left at gen 0 knowing of no error; the refusal is gen 1.
@@ -46,11 +53,34 @@ test("readClearsError: a successful read retires a READ error — a transport bl
   assert.equal(readClearsError(err({ kind: "read", heldAtPark: null }), 1, parkedAt(3)), true);
 });
 
-test("readClearsError: an ACTION refusal is retired only when the run has LEFT its park", () => {
+test("readClearsError: an ACTION refusal is retired only by POSITIVE evidence it was resolved", () => {
   assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, parkedAt(3)), false, "still parked where the answer was aimed");
-  assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, parkedAt(4)), true, "the park advanced — answerInterview's own 'it landed' test");
-  assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, parkedAt(null)), true, "terminal / no open park counts as resolved");
+  assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, parkedAt(4)), true, "a STRICTLY higher park — classifyDeliveryBody's own 'it landed' arm");
+  assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, parkedAt(2)), false, "a LOWER park is a different or restarted run, not our evidence");
+  assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, parkedAt(null)), false, "ABSENCE IS NOT EVIDENCE — a park-less read proves nothing");
   assert.equal(readClearsError(err({ heldAtPark: null }), 1, parkedAt(3)), false, "a page-raised refusal: no read speaks to it");
+});
+
+test("readClearsError: a terminal clears only when its outcome is COMPLETE-class", () => {
+  // Parity with the wire client, by construction: the predicate reads the SAME shared set the
+  // answer verb's delivery test reads, so the two cannot drift into different opinions.
+  for (const outcome of COMPLETE_OUTCOMES) {
+    assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, parkedAt(null, { outcome })), true, `${outcome} is an intended end`);
+  }
+  for (const outcome of ["cancelled", "canceled", "expired", "plan_gone", "superseded_by_existing_run", ""]) {
+    assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, parkedAt(null, { outcome })), false, `${outcome} is a STOP, not a delivery`);
+  }
+  // The terminal is authoritative and read FIRST, so a stale park cannot outvote a run that has
+  // actually been cancelled — the same ordering `classifyDeliveryBody` uses.
+  assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, parkedAt(4, { outcome: "cancelled" })), false, "a cancelled run outranks a stale higher park");
+});
+
+test("readClearsError: a park marker the normalizer could not read is not evidence", () => {
+  // Measured with the instrument production uses: `toPendingPark` drops a non-integer parkIndex
+  // outright, so the hook is handed NO park — and no park is no proof.
+  const s = normalizeInterviewState({ run_id: "r1", scope: "client", status: "running", pending_park: { parkIndex: "4" } });
+  assert.equal(s.pendingPark, null, "the normalizer really did drop it");
+  assert.equal(readClearsError(err({ heldAtPark: 3 }), 1, s), false);
 });
 
 // --- the world the mounted cells run in ------------------------------------------
@@ -62,6 +92,8 @@ function jsonRes(body: unknown, status = 200): Response {
 type World = {
   /** What /state reports right now (null = no open park). */
   park: number | null;
+  /** What /state reports as `terminal` (null = the run is still live). */
+  terminal: { outcome: string } | null;
   /** What POST /answer replies. A 500 keeps `answerInterview` from making its own /state
    *  re-read, which matters when a cell is counting reads. */
   answer: () => Response;
@@ -73,7 +105,7 @@ type World = {
 };
 
 function mkWorld(p: Partial<World> = {}): World {
-  return { park: 3, answer: () => jsonRes({ ok: true }), gate: null, stateFails: false, stateReads: 0, ...p };
+  return { park: 3, terminal: null, answer: () => jsonRes({ ok: true }), gate: null, stateFails: false, stateReads: 0, ...p };
 }
 
 function installFetch(t: TestContext, w: World) {
@@ -87,6 +119,7 @@ function installFetch(t: TestContext, w: World) {
       return jsonRes({
         run_id: "r1", scope: "client", status: "running", items: [], activity: [],
         pending_park: w.park === null ? null : { parkIndex: w.park, seg: "tin", phase: "q", question: "TIN?" },
+        terminal: w.terminal,
       });
     }
     if (u.includes("/api/interview/answer")) return w.answer();
@@ -161,6 +194,65 @@ test("a poll DOES retire the refusal once the run leaves the park the answer was
   } finally { await h.unmount(); }
 });
 
+test("a park-LESS read does not clear the refusal — the between-parks window is not evidence", async (t) => {
+  // The window every confirmed segment passes through: the runtime has taken the last answer off
+  // the hook and not yet announced the next question, so /state reports no park at all. The old
+  // "any index that differs" test read that silence as proof of delivery and wiped the banner —
+  // which is the three-second swallow again, arriving on a normal segment boundary.
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const w = mkWorld({ answer: REFUSAL });
+  const h = await mountRun(t, w);
+  try {
+    await h.act(async () => { await h.current.submitAnswer(PARK, "C1234567890"); });
+    assert.match(h.current.error ?? "", /dropped/);
+
+    w.park = null;
+    const readsBefore = w.stateReads;
+    for (let i = 0; i < 3; i++) await h.act(async () => { t.mock.timers.tick(POLL_MS); await Promise.resolve(); });
+    await h.settle();
+    assert.ok(w.stateReads > readsBefore, "the poller really did run (guard against a dead-clock pass)");
+    assert.equal(h.current.state?.chip, "working", "the fixture really is the park-less, non-terminal window");
+    assert.match(h.current.error ?? "", /dropped/, "and the refusal is still on screen");
+  } finally { await h.unmount(); }
+});
+
+test("a CANCELLED terminal does not clear the refusal — a stop is not a delivery", async (t) => {
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const w = mkWorld({ answer: REFUSAL });
+  const h = await mountRun(t, w);
+  try {
+    await h.act(async () => { await h.current.submitAnswer(PARK, "C1234567890"); });
+    assert.match(h.current.error ?? "", /dropped/);
+
+    // The run ends without ever reaching its intended end. Nothing here says our answer landed —
+    // if anything the cancel is why it did not.
+    w.park = null; w.terminal = { outcome: "cancelled" };
+    for (let i = 0; i < 2; i++) await h.act(async () => { t.mock.timers.tick(POLL_MS); await Promise.resolve(); });
+    await h.settle();
+    assert.equal(h.current.state?.chip, "cancelled", "the fixture really is a terminal cancel");
+    assert.match(h.current.error ?? "", /dropped/, "the undelivered answer is still surfaced");
+  } finally { await h.unmount(); }
+});
+
+test("a COMPLETE-class terminal DOES clear the refusal — the run reached its intended end", async (t) => {
+  // The arm that keeps the rule from being a one-way ratchet: a completed run reports no pending
+  // park forever and the poller stops on the terminal chip, so without this a park-held refusal
+  // could never be retired by any read at all.
+  t.mock.timers.enable({ apis: ["setInterval"] });
+  const w = mkWorld({ answer: REFUSAL });
+  const h = await mountRun(t, w);
+  try {
+    await h.act(async () => { await h.current.submitAnswer(PARK, "C1234567890"); });
+    assert.match(h.current.error ?? "", /dropped/);
+
+    w.park = null; w.terminal = { outcome: "interview_complete" };
+    await h.act(async () => { t.mock.timers.tick(POLL_MS); await Promise.resolve(); });
+    await h.settle();
+    assert.equal(h.current.state?.chip, "complete", "the fixture really is a complete-class terminal");
+    assert.equal(h.current.error, null, "a read that PROVES resolution still clears");
+  } finally { await h.unmount(); }
+});
+
 test("a transient READ failure is retired by the next good poll — it does not stick forever", async (t) => {
   t.mock.timers.enable({ apis: ["setInterval"] });
   const w = mkWorld({ stateFails: true });
@@ -193,8 +285,10 @@ test("the human acting again clears the board — a re-submit that lands leaves 
 });
 
 test("a page-raised refusal (setError) also outlives the poller, and dismiss still works", async (t) => {
-  // The firm page raises the create_firm failure through `setError`; the client page raises the
-  // cancel failure the same way. Those are human-verb refusals too — no read disproves them.
+  // Both pages raise their CANCEL failures through `setError` (firm/page.tsx, client/page.tsx),
+  // and the client page also raises its "a reason is required" refusal there. Those are
+  // human-verb refusals with no park to aim at — no read disproves them, so only the human can
+  // clear them, which is why each page clears the board itself before it re-attempts.
   t.mock.timers.enable({ apis: ["setInterval"] });
   const h = await mountRun(t, mkWorld());
   try {

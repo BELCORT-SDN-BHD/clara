@@ -19,7 +19,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  getInterviewState, answerInterview, cancelInterview,
+  getInterviewState, answerInterview, cancelInterview, COMPLETE_OUTCOMES,
   type InterviewState, type InterviewScope, type PendingPark, type CancelResult,
 } from "../shared/interviewApi";
 import { seedThread, promptEntry, answerEntry, appendUnique, foldActivityThread, type ThreadEntry } from "./thread";
@@ -36,8 +36,9 @@ const POLL_MS = 3000;
  *  · `read`   — a /state read itself failed (transport). A later SUCCESSFUL read disproves it
  *               outright, so a transient network refusal never sticks.
  *  · `action` — a user-initiated verb failed. Nothing about a healthy /state read disproves
- *               "your answer did not land", so a read clears it only on the one condition that
- *               does: the run has LEFT the park the answer was aimed at. */
+ *               "your answer did not land", so a read clears it only on POSITIVE evidence that
+ *               the run moved past the park the answer was aimed at — a strictly higher park
+ *               index, or a complete-class terminal. See `readClearsError`. */
 export type RunErrorKind = "read" | "action";
 
 export type RunError = {
@@ -55,20 +56,39 @@ export type RunError = {
 /** May a poll whose read started at generation `genAtReadStart`, and which returned `s`, clear
  *  `cur`? The whole lifetime rule, in one pure predicate.
  *
- *  The park test reuses `answerInterview`'s OWN truth predicate for the lossy 409 — "the run is
- *  no longer parked where we aimed ⇒ the answer landed" — so the hook and the wire client cannot
- *  drift into two different opinions about what delivery means. A terminal run reports no
- *  pending park, and so counts as resolved by the same test. */
+ *  IT CLEARS ONLY ON POSITIVE EVIDENCE (the ADR-059 armour law: absence is not evidence, and a
+ *  derived state is not evidence). An earlier version cleared a park-bound refusal whenever the
+ *  read's park index merely DIFFERED from the held one — which `pendingPark: null` satisfies, so
+ *  every confirmed segment, every terminal including a CANCELLED one, an unreadable park marker
+ *  and a `{}` body all wiped the refusal. That is the three-second swallow again, wearing a
+ *  guard's clothes.
+ *
+ *  So exactly two facts retire a park-bound refusal, and they are `classifyDeliveryBody`'s own
+ *  delivered arms, verbatim:
+ *    · a terminal whose outcome is in the SHARED `COMPLETE_OUTCOMES` set (the run reached its
+ *      intended end — checked first, so a stale park cannot outvote a run that has ended), or
+ *    · a pending park at a STRICTLY HIGHER integer index (the run moved past where we aimed).
+ *  Everything else leaves the banner standing: an absent park, a non-complete terminal
+ *  (cancelled / expired / ended / malformed outcome), a non-integer index, a lower index, no
+ *  evidence at all. Sharing `COMPLETE_OUTCOMES` with the wire client is what keeps the hook and
+ *  `answerInterview` from drifting into two different opinions about what delivery means.
+ *
+ *  The terminal arm is REQUIRED, not a nicety: a normally-completed run reports no pending park
+ *  forever and the poller stops on the terminal chip, so without it a refusal held at a park
+ *  could never be retired by any read at all. */
 export function readClearsError(
   cur: RunError | null,
   genAtReadStart: number,
-  s: Pick<InterviewState, "pendingPark">,
+  s: Pick<InterviewState, "pendingPark" | "terminal">,
 ): boolean {
   if (!cur) return false;
   if (cur.gen > genAtReadStart) return false; // raised after this read began — it knows nothing of it
   if (cur.kind === "read") return true;
   if (cur.heldAtPark === null) return false;  // an action refusal no read can speak to
-  return s.pendingPark?.parkIndex !== cur.heldAtPark;
+  const outcome = s.terminal?.outcome;
+  if (typeof outcome === "string") return COMPLETE_OUTCOMES.has(outcome);
+  const idx = s.pendingPark?.parkIndex;
+  return typeof idx === "number" && idx > cur.heldAtPark;
 }
 
 export function useInterviewRun(args: { token: string; scope: InterviewScope; runId: string | null; planId?: string | null }) {
@@ -103,9 +123,15 @@ export function useInterviewRun(args: { token: string; scope: InterviewScope; ru
   }, [putError]);
 
   /** The page-facing setter, signature unchanged. A string is a user-initiated refusal raised
-   *  OUTSIDE this hook (the create_firm failure, the client cancel) — an action error with no
-   *  park to disprove it, so it stands until the human acts; null is the dismiss / the human is
-   *  acting again. */
+   *  OUTSIDE this hook — an action error with no park to disprove it, so it stands until the
+   *  human acts; null is the dismiss / the human is acting again.
+   *
+   *  Its callers are exactly the two CANCEL paths: the firm page's cancel failure
+   *  (firm/page.tsx), and the client page's cancel-reason-required, its pre-attempt clear, and
+   *  its cancel failure (client/page.tsx). NOT create_firm — FirmCommitForm keeps its own local
+   *  `useState` error for the commit call, and the create_firm RECEIPT's delivery failure reaches
+   *  this hook through `deliverValue` → `raise(..., "action", park.parkIndex)`, i.e. the
+   *  park-BOUND path, which a later read CAN retire. Only the park-less refusals arrive here. */
   const setError = useCallback((message: string | null) => {
     if (message === null) putError(null);
     else raise(message, "action", null);
