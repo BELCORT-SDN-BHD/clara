@@ -427,39 +427,104 @@ function maskDirectionClauseDeclaration(text) {
  *  file.
  *
  *  Codex round 3: the round-2 fix (anchored on `const messages: ModelMessage[] = [` via raw
- *  `indexOf`) is STILL comment-forgeable — Codex planted a FAKE anchor string
- *  (`const messages: ModelMessage[] = [`) plus the expected object INSIDE the already-masked
- *  directionClause comment span, and both assertions stayed green again, because `indexOf`
- *  over raw text cannot tell a comment from code either, no matter how precisely the anchor
- *  is worded. Closing the CLASS, not the instance: parse the file with the real TypeScript
- *  compiler (`ts.createSourceFile`) and walk the AST to the actual `messages` variable
- *  declaration's initializer — comments are LEXICAL TRIVIA in the TS AST, never nodes, so no
- *  string planted in a comment can ever be produced by `getText()` on a real node. This is
- *  no longer a text search of any kind: it is a walk to the executable node, full stop. */
-function findNodesByPredicate(sourceFile, predicate) {
+ *  `indexOf`) is STILL comment-forgeable — Codex planted a FAKE anchor string plus the
+ *  expected object INSIDE the already-masked directionClause comment span, and both
+ *  assertions stayed green again, because `indexOf` over raw text cannot tell a comment
+ *  from code either, no matter how precisely the anchor is worded. Fixed by parsing with the
+ *  real TypeScript compiler and walking the AST to the actual `messages` variable
+ *  declaration's initializer — comments are LEXICAL TRIVIA in the TS AST, never nodes.
+ *
+ *  Codex round 4: the round-3 fix is STILL wrong, in a THIRD way — it selects the sole
+ *  array-literal VariableDeclaration named "messages" GLOBALLY (spelling, not identity, the
+ *  same law this repo has hit twice before). Codex's mutant: rename the REAL declaration
+ *  that streamText actually uses to `runtimeMessages` (carrying the OLD message), and add a
+ *  decoy `const messages = [...]` (carrying the expected NEW message) inside a SEPARATE,
+ *  never-called function elsewhere in the file. The round-3 extractor finds "the" declaration
+ *  named "messages" — the decoy — and passed both guards, because it never looked at what
+ *  streamText's own argument object ACTUALLY references.
+ *
+ *  Fixed by walking to the true call site and following its OWN reference, never a name:
+ *  (1) locate runAutoDraftModelStep's own FunctionDeclaration; (2) find the streamText(...)
+ *  call INSIDE that function's own body (not file-wide); (3) read its argument object's
+ *  `messages` property — shorthand `{ messages }` or explicit `messages: someOtherName` —
+ *  and take WHATEVER identifier it actually references, never assuming the name is literally
+ *  "messages"; (4) resolve THAT identifier's OWN declaration, searching ONLY within
+ *  runAutoDraftModelStep's own body — the same scope the reference itself lives in. A decoy
+ *  sitting in a different function's body is a different lexical scope entirely and is
+ *  structurally never visited, exactly as real JS/TS scoping would exclude it — this is no
+ *  longer resolution by name at any point, it is resolution by the reference itself. */
+function findNodesByPredicate(root, predicate) {
   const found = [];
   const visit = (node) => {
     if (predicate(node)) found.push(node);
     ts.forEachChild(node, visit);
   };
-  visit(sourceFile);
+  visit(root);
   return found;
 }
 
 function extractUserMessageContent(text) {
   const sourceFile = ts.createSourceFile("autodraft-impl-probe.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
 
-  const messagesDecls = findNodesByPredicate(
+  const targetFns = findNodesByPredicate(
     sourceFile,
+    (node) => ts.isFunctionDeclaration(node) && !!node.name && node.name.text === "runAutoDraftModelStep" && !!node.body,
+  );
+  assert.equal(targetFns.length, 1, "exactly one `runAutoDraftModelStep` FunctionDeclaration (with a body) must exist");
+  const fnBody = targetFns[0].body;
+
+  // The streamText(...) call must be found INSIDE this function's own body only — never a
+  // file-wide search — so a decoy call or declaration sitting in a different function is
+  // structurally invisible, matching real lexical scoping.
+  const streamTextCalls = findNodesByPredicate(
+    fnBody,
+    (node) => ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === "streamText",
+  );
+  assert.equal(streamTextCalls.length, 1, "exactly one streamText(...) call must exist inside runAutoDraftModelStep's own body");
+  const streamTextArg = streamTextCalls[0].arguments[0];
+  assert.ok(streamTextArg && ts.isObjectLiteralExpression(streamTextArg), "streamText's own first argument must be an object literal");
+
+  const messagesProps = streamTextArg.properties.filter(
+    (p) => (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) && ts.isIdentifier(p.name) && p.name.text === "messages",
+  );
+  assert.equal(messagesProps.length, 1, "streamText's own argument object must have exactly one `messages` property");
+  const messagesProp = messagesProps[0];
+
+  // Resolve the IDENTIFIER the `messages` property ACTUALLY references — a shorthand
+  // `{ messages }` references `messages` itself; an explicit `messages: someOtherName`
+  // references whatever THAT identifier is. Never assume the referenced name is literally
+  // "messages" — Codex's round-4 mutant renames the real declaration and relies on exactly
+  // that assumption to smuggle a same-named decoy past a name-based lookup.
+  let referencedName;
+  if (ts.isShorthandPropertyAssignment(messagesProp)) {
+    referencedName = messagesProp.name.text;
+  } else {
+    assert.ok(ts.isPropertyAssignment(messagesProp));
+    assert.ok(
+      ts.isIdentifier(messagesProp.initializer),
+      "the `messages` property's value must be a plain identifier reference — this codebase always builds the array as its own named declaration first",
+    );
+    referencedName = messagesProp.initializer.text;
+  }
+
+  // Resolve that identifier to ITS OWN declaration, SCOPED to runAutoDraftModelStep's own
+  // body — never a file-wide name search. A same-named decoy living in a different function
+  // is a different lexical scope and is never visited by this search.
+  const decls = findNodesByPredicate(
+    fnBody,
     (node) =>
       ts.isVariableDeclaration(node) &&
       ts.isIdentifier(node.name) &&
-      node.name.text === "messages" &&
+      node.name.text === referencedName &&
       !!node.initializer &&
       ts.isArrayLiteralExpression(node.initializer),
   );
-  assert.equal(messagesDecls.length, 1, "exactly one `const messages = [...]` array-literal VariableDeclaration must exist, found via the AST — never a text search");
-  const messagesArray = messagesDecls[0].initializer;
+  assert.equal(
+    decls.length,
+    1,
+    `exactly one \`${referencedName}\` array-literal declaration must exist WITHIN runAutoDraftModelStep's own body (streamText's actual referent) — never resolved by a file-wide name search`,
+  );
+  const messagesArray = decls[0].initializer;
 
   const userMessageObjects = messagesArray.elements.filter((el) => {
     if (!ts.isObjectLiteralExpression(el)) return false;
@@ -467,7 +532,7 @@ function extractUserMessageContent(text) {
       (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "role" && ts.isStringLiteral(p.initializer) && p.initializer.text === "user",
     );
   });
-  assert.equal(userMessageObjects.length, 1, "exactly one { role: \"user\", ... } object literal must exist inside the messages array, found via the AST");
+  assert.equal(userMessageObjects.length, 1, "exactly one { role: \"user\", ... } object literal must exist inside the resolved messages array");
 
   const contentProps = userMessageObjects[0].properties.filter((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "content");
   assert.equal(contentProps.length, 1, "the user message object must have exactly one `content` property assignment");
@@ -499,7 +564,7 @@ test("v6's model user-message content, extracted from its EXACT executable posit
   );
 });
 
-test("Codex round-3's own mutant class, reconstructed and re-run against the AST extractor: v5's OLD message restored as REAL executable content, with v6's NEW message (AND a fake `const messages: ModelMessage[] = [` anchor) planted only inside a comment — the extractor must still return the EXECUTABLE (old) text, proving comment trivia can never be mistaken for a real node", () => {
+test("Codex round-3's own mutant class, reconstructed and re-run against the extractor: v5's OLD message restored as REAL executable content, with v6's NEW message (AND a fake `const messages: ModelMessage[] = [` anchor) planted only inside a comment — the extractor must still return the EXECUTABLE (old) text, proving comment trivia can never be mistaken for a real node", () => {
   const mutant = `
 export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
   "use step";
@@ -511,13 +576,49 @@ export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
   const messages: ModelMessage[] = [
     { role: "user", content: \`Draft the supplier bill for document \${ctx.documentId} (filing \${ctx.filingId}).\` },
   ];
-  return messages;
+  const result = streamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages,
+    tools: tools,
+  });
+  return result;
 }
 `;
   assert.equal(
     extractUserMessageContent(mutant),
     "Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).",
     "the extractor must read the REAL executable content node, never text sitting inside a // comment — even one crafted to look like the exact anchor + expected value",
+  );
+});
+
+test("Codex round-4's own mutant class, reconstructed and re-run against the identity-resolving extractor: the REAL streamText call site references a RENAMED variable (`runtimeMessages`) carrying the OLD message, while a NEVER-CALLED sibling function contains a decoy `messages` declaration carrying the expected NEW message — the extractor must follow streamText's own `messages: runtimeMessages` reference to runtimeMessages's OWN declaration, never select 'the' declaration literally spelled \"messages\" from anywhere in the file", () => {
+  const mutant = `
+export async function neverCalledDecoy(ctx: ToolCtx) {
+  const messages: ModelMessage[] = [
+    { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+  ];
+  return messages;
+}
+
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
+  "use step";
+  const runtimeMessages: ModelMessage[] = [
+    { role: "user", content: \`Draft the supplier bill for document \${ctx.documentId} (filing \${ctx.filingId}).\` },
+  ];
+  const result = streamText({
+    model: resolveModel(model),
+    system: SYSTEM_PROMPT_AUTODRAFT_V6,
+    messages: runtimeMessages,
+    tools: tools,
+  });
+  return result;
+}
+`;
+  assert.equal(
+    extractUserMessageContent(mutant),
+    "Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).",
+    "the extractor must resolve streamText's OWN `messages: runtimeMessages` reference to runtimeMessages's declaration inside runAutoDraftModelStep's own body — never the same-named decoy sitting in a different, never-called function",
   );
 });
 
