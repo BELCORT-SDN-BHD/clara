@@ -57,6 +57,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import ts from "typescript";
 
 const { register } = await import("tsx/esm/api");
 register();
@@ -423,23 +424,64 @@ function maskDirectionClauseDeclaration(text) {
  *  the exact mutant (v5's message restored EXECUTABLE, v6's real message parked inside a
  *  COMMENT sitting in the masked directionClause span) and both `.includes()` assertions
  *  stayed green, because `.includes()` cannot distinguish code from prose anywhere in the
- *  file. Fixed by extracting the messages array's OWN executable content at its EXACT
- *  source position (anchored on `const messages: ModelMessage[] = [` then the very next
- *  `{ role: "user", content: \`...\` }` object) — never a file-wide search. A mutant that
- *  restores v5's message AT THIS EXECUTABLE POSITION is caught because the extracted text
- *  won't match the expected v6 string; a mutant that parks v6's real message in a comment
- *  ELSEWHERE while leaving something else executable HERE is caught the same way, because
- *  this extraction only ever reads what is ACTUALLY at that position, never a comment. */
+ *  file.
+ *
+ *  Codex round 3: the round-2 fix (anchored on `const messages: ModelMessage[] = [` via raw
+ *  `indexOf`) is STILL comment-forgeable — Codex planted a FAKE anchor string
+ *  (`const messages: ModelMessage[] = [`) plus the expected object INSIDE the already-masked
+ *  directionClause comment span, and both assertions stayed green again, because `indexOf`
+ *  over raw text cannot tell a comment from code either, no matter how precisely the anchor
+ *  is worded. Closing the CLASS, not the instance: parse the file with the real TypeScript
+ *  compiler (`ts.createSourceFile`) and walk the AST to the actual `messages` variable
+ *  declaration's initializer — comments are LEXICAL TRIVIA in the TS AST, never nodes, so no
+ *  string planted in a comment can ever be produced by `getText()` on a real node. This is
+ *  no longer a text search of any kind: it is a walk to the executable node, full stop. */
+function findNodesByPredicate(sourceFile, predicate) {
+  const found = [];
+  const visit = (node) => {
+    if (predicate(node)) found.push(node);
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  return found;
+}
+
 function extractUserMessageContent(text) {
-  const arrayStart = text.indexOf("const messages: ModelMessage[] = [\n");
-  assert.ok(arrayStart > 0, "the messages array's own declaration must be present in both versions");
-  const objAnchor = '{ role: "user", content: `';
-  const objStart = text.indexOf(objAnchor, arrayStart);
-  assert.ok(objStart > arrayStart, "the user message object must immediately follow the array's own opening");
-  const contentStart = objStart + objAnchor.length;
-  const contentEnd = text.indexOf("` },", contentStart);
-  assert.ok(contentEnd > contentStart, "the content template literal must close");
-  return text.slice(contentStart, contentEnd);
+  const sourceFile = ts.createSourceFile("autodraft-impl-probe.ts", text, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+
+  const messagesDecls = findNodesByPredicate(
+    sourceFile,
+    (node) =>
+      ts.isVariableDeclaration(node) &&
+      ts.isIdentifier(node.name) &&
+      node.name.text === "messages" &&
+      !!node.initializer &&
+      ts.isArrayLiteralExpression(node.initializer),
+  );
+  assert.equal(messagesDecls.length, 1, "exactly one `const messages = [...]` array-literal VariableDeclaration must exist, found via the AST — never a text search");
+  const messagesArray = messagesDecls[0].initializer;
+
+  const userMessageObjects = messagesArray.elements.filter((el) => {
+    if (!ts.isObjectLiteralExpression(el)) return false;
+    return el.properties.some(
+      (p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "role" && ts.isStringLiteral(p.initializer) && p.initializer.text === "user",
+    );
+  });
+  assert.equal(userMessageObjects.length, 1, "exactly one { role: \"user\", ... } object literal must exist inside the messages array, found via the AST");
+
+  const contentProps = userMessageObjects[0].properties.filter((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "content");
+  assert.equal(contentProps.length, 1, "the user message object must have exactly one `content` property assignment");
+  const contentNode = contentProps[0].initializer;
+  assert.ok(
+    ts.isTemplateExpression(contentNode) || ts.isNoSubstitutionTemplateLiteral(contentNode),
+    "the user message's content must be a backtick template-literal expression node",
+  );
+
+  // getText() returns the node's OWN source span, backticks included — never anything from
+  // outside that span, and never anything that is merely nearby comment trivia.
+  const raw = contentNode.getText(sourceFile);
+  assert.ok(raw.startsWith("`") && raw.endsWith("`"), "a template literal node's own text must be backtick-delimited");
+  return raw.slice(1, -1);
 }
 
 test("v6's model user-message content, extracted from its EXACT executable position (not a file-wide search), is direction-generic with the directionClause suffix appended — RATIFIED as a necessary §2a addendum (Codex round-1: the old message would fight the v6 system prompt on a sales run; native review N-8 concurs) — and v5's own executable content, extracted the SAME way, is still its exact original purchase-only string (regression pin)", () => {
@@ -454,6 +496,28 @@ test("v6's model user-message content, extracted from its EXACT executable posit
     v5Content,
     "Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).",
     "v5's EXECUTABLE user-message content must still be exactly its original string",
+  );
+});
+
+test("Codex round-3's own mutant class, reconstructed and re-run against the AST extractor: v5's OLD message restored as REAL executable content, with v6's NEW message (AND a fake `const messages: ModelMessage[] = [` anchor) planted only inside a comment — the extractor must still return the EXECUTABLE (old) text, proving comment trivia can never be mistaken for a real node", () => {
+  const mutant = `
+export async function runAutoDraftModelStep(ctx: ToolCtx, model: string) {
+  "use step";
+  // Codex round-3 planted mutant: this comment forges a SECOND-LOOKING anchor plus the
+  // "expected" v6 content, purely as prose — none of this is a real AST node.
+  // const messages: ModelMessage[] = [
+  //   { role: "user", content: \`Draft the document for document \${ctx.documentId} (filing \${ctx.filingId}).\${directionClause}\` },
+  // ];
+  const messages: ModelMessage[] = [
+    { role: "user", content: \`Draft the supplier bill for document \${ctx.documentId} (filing \${ctx.filingId}).\` },
+  ];
+  return messages;
+}
+`;
+  assert.equal(
+    extractUserMessageContent(mutant),
+    "Draft the supplier bill for document ${ctx.documentId} (filing ${ctx.filingId}).",
+    "the extractor must read the REAL executable content node, never text sitting inside a // comment — even one crafted to look like the exact anchor + expected value",
   );
 });
 
@@ -652,45 +716,203 @@ test("v5's settle step never reads its own query result at all (fire-and-forget)
 const implV6 = await import("../workflows/autoDraft.v6.impl.ts");
 const { classifySettleReceipt } = implV6;
 
-test("classifySettleReceipt: the SIX real DB shapes are each classified correctly — REPLAY and SUCCESS as 'settled', the four named losing-dispatch shapes as 'benign-no-op'", () => {
-  assert.equal(classifySettleReceipt({ task_id: "t1", status: "completed", replayed: true }), "settled", "shape 1 — REPLAY (0036:871-873)");
-  for (const reason of ["task_superseded", "registry_superseded", "registry_released", "run_superseded"]) {
-    assert.equal(
-      classifySettleReceipt({ task_id: "t1", status: "running", settled: false, outcome: "not_settled", reason }),
-      "benign-no-op",
-      `shape — ${reason}`,
-    );
+// Codex round 3 (B1, deepened): round 2's fixtures asserted PRESENCE of the right fields
+// with the right coarse type, but never the VALUE-LEVEL constraints the SQL itself imposes
+// (which status values a given reason/replay can genuinely carry, which registry_state
+// values the check constraint actually allows, the status<->outcome correlation, the
+// entry_id<->outcome correlation) — so a SHAPE-LIKE malformed object built from otherwise
+// "plausible" field values could still slip past. THE ACCEPTANCE FLOOR (Codex's own audit):
+// all 18 of the REAL variants below (2 REPLAY statuses x 1; 2 task_superseded statuses x 2
+// released_reservation values; 2 registry_superseded statuses; 2 registry_released statuses
+// x 2 registry_state values; 2 run_superseded statuses; 4 SUCCESS outcome/status/entry_id
+// combinations) must classify correctly, and every one of Codex's named mutants — plus the
+// same class of defect probed against every other field — must throw.
+
+const uuid1 = "11111111-1111-4111-8111-111111111111";
+const uuid2 = "22222222-2222-4222-8222-222222222222";
+
+const REAL_SETTLE_SHAPES = [
+  // Shape 1 — REPLAY (0036:871-873): task_id + status (restricted to completed|failed) + replayed:true, EXACTLY 3 keys.
+  [{ task_id: uuid1, status: "completed", replayed: true }, "settled", "REPLAY, status=completed"],
+  [{ task_id: uuid1, status: "failed", replayed: true }, "settled", "REPLAY, status=failed"],
+  // Shape 2 — task_superseded (0036:899-909): status restricted to cancelled|expired, EXACTLY 6 keys (released_reservation required).
+  [
+    { task_id: uuid1, status: "cancelled", settled: false, outcome: "not_settled", reason: "task_superseded", released_reservation: true },
+    "benign-no-op",
+    "task_superseded, cancelled, released_reservation=true",
+  ],
+  [
+    { task_id: uuid1, status: "cancelled", settled: false, outcome: "not_settled", reason: "task_superseded", released_reservation: false },
+    "benign-no-op",
+    "task_superseded, cancelled, released_reservation=false",
+  ],
+  [
+    { task_id: uuid1, status: "expired", settled: false, outcome: "not_settled", reason: "task_superseded", released_reservation: true },
+    "benign-no-op",
+    "task_superseded, expired, released_reservation=true",
+  ],
+  [
+    { task_id: uuid1, status: "expired", settled: false, outcome: "not_settled", reason: "task_superseded", released_reservation: false },
+    "benign-no-op",
+    "task_superseded, expired, released_reservation=false",
+  ],
+  // Shape 3 — registry_superseded (0036:934-939): status restricted to running|cancel_requested, EXACTLY 5 keys.
+  [
+    { task_id: uuid1, status: "running", settled: false, outcome: "not_settled", reason: "registry_superseded" },
+    "benign-no-op",
+    "registry_superseded, running",
+  ],
+  [
+    { task_id: uuid1, status: "cancel_requested", settled: false, outcome: "not_settled", reason: "registry_superseded" },
+    "benign-no-op",
+    "registry_superseded, cancel_requested",
+  ],
+  // Shape 4 — registry_released (0036:941-946): status restricted to running|cancel_requested, registry_state
+  // restricted to parked|idle (0011_daily_loop.sql:709's own check constraint minus 'active', the ONLY way
+  // this branch is reached), EXACTLY 6 keys.
+  [
+    { task_id: uuid1, status: "running", settled: false, outcome: "not_settled", reason: "registry_released", registry_state: "parked" },
+    "benign-no-op",
+    "registry_released, running, parked",
+  ],
+  [
+    { task_id: uuid1, status: "running", settled: false, outcome: "not_settled", reason: "registry_released", registry_state: "idle" },
+    "benign-no-op",
+    "registry_released, running, idle",
+  ],
+  [
+    {
+      task_id: uuid1,
+      status: "cancel_requested",
+      settled: false,
+      outcome: "not_settled",
+      reason: "registry_released",
+      registry_state: "parked",
+    },
+    "benign-no-op",
+    "registry_released, cancel_requested, parked",
+  ],
+  [
+    { task_id: uuid1, status: "cancel_requested", settled: false, outcome: "not_settled", reason: "registry_released", registry_state: "idle" },
+    "benign-no-op",
+    "registry_released, cancel_requested, idle",
+  ],
+  // Shape 5 — run_superseded (0046 §8): SAME status restriction and 5-key shape as registry_superseded
+  // (spliced immediately after the same running-check anchor) — only `reason` tells them apart.
+  [
+    { task_id: uuid1, status: "running", settled: false, outcome: "not_settled", reason: "run_superseded" },
+    "benign-no-op",
+    "run_superseded, running",
+  ],
+  [
+    { task_id: uuid1, status: "cancel_requested", settled: false, outcome: "not_settled", reason: "run_superseded" },
+    "benign-no-op",
+    "run_superseded, cancel_requested",
+  ],
+  // Shape 6 — SUCCESS (0036:994-996): status<->outcome correlation is COMPUTED, not independent
+  // (`case when p_outcome='failed' then 'failed' else 'completed' end`); entry_id is a non-empty
+  // string ONLY for outcome=drafted (this runtime's own call site never passes a non-null p_entry
+  // for any other outcome — runAutoDraftModelStep sets entryId:null whenever outcome.kind !== "drafted").
+  [
+    { task_id: uuid1, status: "completed", outcome: "drafted", entry_id: uuid2, tokens_spent: 120, tokens_refunded: 5 },
+    "settled",
+    "SUCCESS, completed/drafted",
+  ],
+  [
+    { task_id: uuid1, status: "completed", outcome: "skipped_lane", entry_id: null, tokens_spent: 0, tokens_refunded: 30 },
+    "settled",
+    "SUCCESS, completed/skipped_lane",
+  ],
+  [
+    { task_id: uuid1, status: "completed", outcome: "noop_existing", entry_id: null, tokens_spent: 0, tokens_refunded: 30 },
+    "settled",
+    "SUCCESS, completed/noop_existing",
+  ],
+  [
+    { task_id: uuid1, status: "failed", outcome: "failed", entry_id: null, tokens_spent: 0, tokens_refunded: 30 },
+    "settled",
+    "SUCCESS, failed/failed (a real settle, not a no-op — 'failed' is a legitimate p_outcome, not an error)",
+  ],
+];
+
+test(`classifySettleReceipt: all ${REAL_SETTLE_SHAPES.length} real DB variants classify correctly — Codex round 3's own acceptance floor`, () => {
+  assert.equal(REAL_SETTLE_SHAPES.length, 18, "the acceptance floor itself must stay at 18 real variants — update this count deliberately if the DB ever adds a new one");
+  for (const [receipt, expected, label] of REAL_SETTLE_SHAPES) {
+    assert.equal(classifySettleReceipt(receipt), expected, `${label}: ${JSON.stringify(receipt)}`);
   }
-  assert.equal(
-    classifySettleReceipt({ task_id: "t1", status: "completed", outcome: "drafted", entry_id: "e1", tokens_spent: 100, tokens_refunded: 0 }),
-    "settled",
-    "shape 6 — SUCCESS, outcome=drafted (0036:994-996)",
-  );
-  assert.equal(
-    classifySettleReceipt({ task_id: "t1", status: "failed", outcome: "failed", entry_id: null, tokens_spent: 0, tokens_refunded: 500 }),
-    "settled",
-    "shape 6 — SUCCESS, outcome=failed (a real settle, not a no-op — 'failed' is a legitimate p_outcome value, not an error)",
-  );
 });
 
-test("classifySettleReceipt FAILS CLOSED on every shape outside the enumerated six — a missing row, null, {}, an unrecognized reason, and a malformed success ALL throw, never silently succeed", () => {
-  for (const bad of [
-    undefined,
-    null,
-    {},
-    "oops",
-    42,
-    { settled: false, outcome: "not_settled", reason: "some_new_reason_the_db_might_add_later" },
-    { settled: false, reason: "run_superseded" }, // missing outcome
-    { status: "completed", outcome: "drafted", entry_id: "e1", tokens_spent: 1 }, // missing tokens_refunded
-    { status: "running", outcome: "drafted", entry_id: "e1", tokens_spent: 1, tokens_refunded: 0 }, // bad status
-  ]) {
-    assert.throws(() => classifySettleReceipt(bad), `must throw for ${JSON.stringify(bad)}`);
+// Codex round 3's own named mutants (executed against the round-2 export, all five passed
+// when they should have thrown) plus the same class of defect probed against every other
+// value-level constraint the deepened classifier now enforces.
+const MALFORMED_SETTLE_SHAPES = [
+  [{ task_id: null, status: null, replayed: true }, "REPLAY with null task_id/status"],
+  [{ task_id: uuid1, status: "running", replayed: true }, "REPLAY does not exist for a non-terminal status"],
+  [{ settled: false, outcome: "not_settled", reason: "task_superseded" }, "a no-op missing its own task identity"],
+  [
+    { status: "completed", outcome: "failed", entry_id: null, tokens_spent: 0, tokens_refunded: 1 },
+    "impossible status/outcome pairing (completed never pairs with failed) — and missing task_id besides",
+  ],
+  [
+    { status: "completed", outcome: "drafted", entry_id: uuid2, tokens_spent: 5, tokens_refunded: 0 },
+    "SUCCESS missing task_id entirely",
+  ],
+  [
+    { task_id: uuid1, status: "cancelled", settled: false, outcome: "not_settled", reason: "task_superseded" },
+    "task_superseded missing its own released_reservation field",
+  ],
+  [
+    { task_id: uuid1, status: "running", settled: false, outcome: "not_settled", reason: "registry_released", registry_state: "active" },
+    "registry_released with registry_state='active' — impossible; the branch is only reached when state<>'active'",
+  ],
+  [
+    { task_id: uuid1, status: "queued", settled: false, outcome: "not_settled", reason: "registry_superseded" },
+    "registry_superseded with an impossible status for that reason (queued never reaches this branch)",
+  ],
+  [
+    { task_id: uuid1, status: "completed", outcome: "drafted", entry_id: null, tokens_spent: 5, tokens_refunded: 0 },
+    "outcome=drafted with a null entry_id — the CLR11 guard requires a real entry for a drafted settle",
+  ],
+  [
+    { task_id: uuid1, status: "completed", outcome: "skipped_lane", entry_id: uuid2, tokens_spent: 0, tokens_refunded: 30 },
+    "outcome=skipped_lane carrying a non-null entry_id — this runtime never passes p_entry for a non-drafted outcome",
+  ],
+  [
+    { task_id: uuid1, status: "completed", outcome: "drafted", entry_id: uuid2, tokens_spent: -1, tokens_refunded: 0 },
+    "negative tokens_spent — the SQL never produces a negative value",
+  ],
+  [
+    { task_id: uuid1, status: "completed", outcome: "drafted", entry_id: uuid2, tokens_spent: 5, tokens_refunded: 0, extra_field: "x" },
+    "SUCCESS carrying an extra, unaccounted-for field",
+  ],
+  [
+    {
+      task_id: uuid1,
+      status: "cancelled",
+      settled: false,
+      outcome: "not_settled",
+      reason: "task_superseded",
+      released_reservation: true,
+      extra: 1,
+    },
+    "a no-op carrying an extra, unaccounted-for field",
+  ],
+  [undefined, "undefined"],
+  [null, "null"],
+  [{}, "empty object"],
+  ["oops", "a bare string"],
+  [42, "a bare number"],
+];
+
+test(`classifySettleReceipt FAILS CLOSED on every shape outside the ${REAL_SETTLE_SHAPES.length} enumerated real variants — Codex round 3's named shape-like mutants, and the same class of defect probed against every other value-level constraint, ALL throw, never silently succeed`, () => {
+  assert.equal(MALFORMED_SETTLE_SHAPES.length, 18, "keep this floor at 18 deliberately — matches Codex's own audited mutant count");
+  for (const [bad, label] of MALFORMED_SETTLE_SHAPES) {
+    assert.throws(() => classifySettleReceipt(bad), `must throw for ${label}: ${JSON.stringify(bad)}`);
   }
 });
 
 test("classifySettleReceipt: the SUCCESS shape genuinely carries NO settled key — Codex's own finding, pinned so 'require settled===true' is never reintroduced as a future 'fix'", () => {
-  const success = { task_id: "t1", status: "completed", outcome: "drafted", entry_id: "e1", tokens_spent: 100, tokens_refunded: 0 };
+  const success = { task_id: uuid1, status: "completed", outcome: "drafted", entry_id: uuid2, tokens_spent: 100, tokens_refunded: 0 };
   assert.equal("settled" in success, false, "the fixture itself must NOT carry a settled key, matching the real DB shape");
   assert.equal(classifySettleReceipt(success), "settled", "…and classifySettleReceipt must still accept it as settled");
 });
