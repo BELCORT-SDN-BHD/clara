@@ -24,6 +24,7 @@ import {
   a21EnsureReady, skip16,
   proposeAutopostRule,
   upsertAccountClassed, seedCitedDocument, freshResolution, grantConsent, seedStatedInvoiceFacts,
+  seedCorroboratingInvoiceFacts,
   approveEntry, ev, FIELD, counterpartyRows,
   mintInteractive, wakeDraftEntry, addClientIdentifier, addClientAlias, rm,
   rlsFlags,
@@ -215,10 +216,12 @@ test("A4 the corroboration gate is POSITIVE at propose and at sign, not merely p
   // documents state no tax and cannot corroborate (0023:311 — "a document that does not
   // state a tax has proven nothing about its tax"). If that ever changes, this cell tells
   // us by failing on its own premise rather than by quietly passing.
-  if (before.corroborated >= 6) {
-    noteLane("A4 premise moved: the rig's stated-invoice fixture now corroborates — cell reports rather than asserts");
-    return;
-  }
+  // THE PREMISE IS ASSERTED, NOT USED AS AN ESCAPE. An earlier draft of this cell returned
+  // early when the premise moved, which is a cell that disarms itself precisely when
+  // something changed — the shape a green suite should never be able to hide.
+  assert.ok(before.corroborated < 6,
+    `mandatory premise: the stated-invoice fixture must NOT corroborate, or this cell cannot `
+    + `isolate the corroboration gate from the other three legs (got ${JSON.stringify(before)})`);
   assert.ok(before.qualifying >= 6 && before.distinct_invoices >= 6 && before.span_days >= 60,
     `mandatory premise: every OTHER floor leg is satisfied (got ${JSON.stringify(before)})`);
 
@@ -229,6 +232,51 @@ test("A4 the corroboration gate is POSITIVE at propose and at sign, not merely p
     "6 qualifying / 6 invoice numbers / 60+ days but < 6 CORROBORATED is REFUSED — the gate that "
     + "an un-recut caller would have silently omitted");
   assert.match(String(prop.error.detail ?? prop.error.message), /insufficient_evidence/);
+});
+
+test("A5 the POSITIVE side of corroborated>=6: six corroborating sales invoices ADMIT", async (t) => {
+  if (skipHere(t)) return;
+  // A2/A3/A4 are all NEGATIVE — they prove the two new terms REFUSE. A gate that only ever
+  // refuses is indistinguishable from a gate that always refuses, so this is the cell that
+  // proves the ROOT fix lets earned authority through. It is also the only place x46
+  // asserts `corroborated` as a POSITIVE number.
+  const sub = world.users.alice;
+  const client = await freshSalesClient(sub);
+  const firm = await firmOf(client);
+  const cred = await mintInteractive(firm);
+
+  let cp = null;
+  const dates = ["2026-01-08", "2026-02-08", "2026-03-08", "2026-04-08", "2026-05-08", "2026-06-18"];
+  for (const date of dates) {
+    const cited = await seedCitedDocument(sub, { firm, client, quote: rm(90000) });
+    await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, cents: 90000 });
+    const d = await wakeDraftEntry(cred, {
+      client,
+      resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
+      document: cited.documentId, sha256: cited.sha256,
+      lines: [
+        { account_code: REC, debit_cents: 90000, credit_cents: 0, description: "sales-ar" },
+        { account_code: REV, debit_cents: 0, credit_cents: 90000, description: "sales-rev" },
+      ],
+      vendor: cp ? { existing_id: cp, kind: "customer" } : { new: { name: CUSTOMER }, kind: "customer" },
+      evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+      postingDate: date, codingKind: "sales_invoice", opKey: opk("x46a5"),
+    });
+    await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x46a5a") });
+    if (!cp) { cp = await cpOf(client); assert.ok(cp, "mandatory setup: the customer was born at approval"); }
+  }
+
+  const f = await floorOf(client, cp);
+  assert.ok(f.corroborated >= 6,
+    `six corroborating sales invoices read >=6 CORROBORATED (got ${JSON.stringify(f)})`);
+  assert.ok(f.qualifying >= 6 && f.distinct_invoices >= 6 && f.span_days >= 60,
+    `...and every other leg is satisfied too (got ${JSON.stringify(f)})`);
+
+  const prop = await proposeAutopostRule(sub, {
+    client, cp, accountCode: REV, direction: "sales", evidenceClass: "ocr_sales",
+  });
+  assert.ok(!prop.error,
+    `earned authority is ADMITTED, not merely un-refused (got ${prop.error?.code}: ${prop.error?.message})`);
 });
 
 // ---------------------------------------------------------------------------
@@ -350,6 +398,74 @@ test("C1 with the lane OFF a tax-silent sales filing is NOT ready; with it ON th
   } finally {
     await rootQuery("update clara.firm_limits set sales_lane_active=false where firm_id=$1", [firm]);
   }
+});
+
+test("C2 the DB writer REFUSES a contradictory coding-kind/counterparty-kind pair (7A-R2)", async (t) => {
+  if (skipHere(t)) return;
+  // THE AUTHORITY LAYER, DRIVEN. 7A-R2 says the contradiction is "rejected in the DB writer
+  // (the only authority layer)" and that the tool's derivation and the zod schema are
+  // "ergonomics on top". Ergonomics cannot be the test: this drives clara.wake_draft_entry
+  // directly with the pair the model is not supposed to be able to produce, and requires the
+  // WRITER to refuse it.
+  //
+  // WHY THE CONTRADICTION AND NOT THE OMISSION: live precedence is
+  // `coalesce(explicit kind, derive-from-coding_kind)` — the EXPLICIT kind WINS — so the
+  // failure mode was never a missing kind, it was a contradicting one, and it is quiet:
+  // a sales invoice labelled `vendor` enters the production vendor-binding resolver and can
+  // be STAMPED as a vendor (0028:1212-1274).
+  const sub = world.users.alice;
+  const client = await freshSalesClient(sub);
+  const firm = await firmOf(client);
+  const cred = await mintInteractive(firm);
+  const cited = await seedCitedDocument(sub, { firm, client, quote: rm(90000) });
+  await seedStatedInvoiceFacts(cited, { firm });
+
+  const res1 = await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId });
+  await assert.rejects(
+    () => wakeDraftEntry(cred, {
+      client,
+      resolution: res1,
+      document: cited.documentId, sha256: cited.sha256,
+      lines: [
+        { account_code: REC, debit_cents: 90000, credit_cents: 0, description: "sales-ar" },
+        { account_code: REV, debit_cents: 0, credit_cents: 90000, description: "sales-rev" },
+      ],
+      vendor: { new: { name: "SEVEN A CONTRADICTION SDN BHD" }, kind: "vendor" },
+      evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+      postingDate: "2026-06-10", codingKind: "sales_invoice", opKey: opk("x46c2"),
+    }),
+    (e) => e.code === "CLR21" && /counterparty_kind_contradiction/.test(String(e.detail ?? "")),
+    "a sales_invoice carrying an explicit vendor counterparty is refused BY THE WRITER");
+
+  // ...and the same pair the other way round.
+  const res2 = await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId });
+  await assert.rejects(
+    () => wakeDraftEntry(cred, {
+      client,
+      resolution: res2,
+      document: cited.documentId, sha256: cited.sha256,
+      lines: [
+        { account_code: REV, debit_cents: 90000, credit_cents: 0, description: "x" },
+        { account_code: REC, debit_cents: 0, credit_cents: 90000, description: "y" },
+      ],
+      vendor: { new: { name: "SEVEN A CONTRADICTION SDN BHD" }, kind: "customer" },
+      evidence: [ev(cited.regionId, cited.quote, FIELD.total)],
+      postingDate: "2026-06-10", codingKind: "supplier_bill", opKey: opk("x46c2b"),
+    }),
+    (e) => e.code === "CLR21" && /counterparty_kind_contradiction/.test(String(e.detail ?? "")),
+    "a supplier_bill carrying an explicit customer counterparty is refused BY THE WRITER");
+});
+
+test("C3 the tri-state direction is total: sales | purchase | unresolved, never null", async (t) => {
+  if (skipHere(t)) return;
+  // The family binding is only as good as the answer it binds to, and this helper is
+  // consumed inside the draft writer's refusal predicate — a null there would make the
+  // whole comparison null and the refusal silently vanish.
+  const r = await rootQuery(
+    `select clara._autodraft_direction_tri(null,null) as a,
+            clara._autodraft_direction_tri(gen_random_uuid(),gen_random_uuid()) as b`);
+  assert.equal(r.rows[0].a, "purchase", "a null document answers purchase — the conservative answer for THIS lane");
+  assert.equal(r.rows[0].b, "purchase", "an unknown document likewise, never null");
 });
 
 // ---------------------------------------------------------------------------

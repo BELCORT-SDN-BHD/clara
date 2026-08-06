@@ -57,8 +57,12 @@ async function approvedSales(sub, { client, cp = null, newName = null, date = "2
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
   // 0046: see a21-helpers.seedCorroboratingInvoiceFacts — the floor now also needs
-  // `corroborated >= 6`, which a stated id alone never earns.
-  if (statedId) await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, vendorName: CLIENT_NAME, cents });
+  // `corroborated >= 6`, which a stated id alone never earns. statedId:false keeps the
+  // document CORROBORATED and drops ONLY its stated number, so the "six stated numbers"
+  // cell still isolates the distinct_invoices leg instead of being satisfied by the
+  // corroboration leg as well.
+  await seedCorroboratingInvoiceFacts(cited, {
+    sub, firm, client, vendorName: CLIENT_NAME, cents, omitInvoiceId: !statedId });
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,

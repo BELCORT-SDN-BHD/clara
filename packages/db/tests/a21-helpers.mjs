@@ -424,11 +424,18 @@ export async function seedStatedInvoiceFacts(cited, { firm, invoiceId = null } =
  *  explicit net and an explicit ZERO tax (explicit zero counts; missing does not), and the
  *  exact net+tax+rounding = gross identity.
  *
- *  Returns the stated invoice id, so it is a drop-in for seedStatedInvoiceFacts. */
+ *  `omitInvoiceId` drops ONLY the stated invoice number. That is exactly what isolates the
+ *  floor's distinct_invoices leg: `invoice.invoice_id` appears nowhere in the 0023
+ *  corroboration predicate, so the document still CORROBORATES while contributing no
+ *  invoice-number evidence — which is the only way a "six stated numbers" cell can prove it
+ *  is the number term doing the refusing rather than some other leg.
+ *
+ *  Returns the stated invoice id (null when omitted), so it is a drop-in for
+ *  seedStatedInvoiceFacts. */
 export async function seedCorroboratingInvoiceFacts(cited, {
   sub = null, firm = null, client = null,
   vendorName = "RIG SELLER SDN BHD", customerName = "RIG BUYER SDN BHD",
-  cents = 90000, invoiceId = null, invoiceDate = "2026-06-15",
+  cents = 90000, invoiceId = null, invoiceDate = "2026-06-15", omitInvoiceId = false,
 } = {}) {
   const id = invoiceId ?? `RIG-${randomUUID().slice(0, 10)}`;
   // EGRESS CONSENT IS A REAL PRECONDITION OF THIS PATH, not a fixture nicety. Without a
@@ -454,13 +461,13 @@ export async function seedCorroboratingInvoiceFacts(cited, {
     factField("invoice.currency", "MYR"),
     factField("invoice.vendor_name", vendorName),
     factField("invoice.customer_name", customerName),
-    factField("invoice.invoice_id", id),
+    ...(omitInvoiceId ? [] : [factField("invoice.invoice_id", id)]),
     factField("invoice.invoice_date", invoiceDate, { polygon: [], confidence: 0.9 }),
     factField("invoice.total_excl_tax", rm(cents), { polygon: [], confidence: 0.9 }),
     factField("invoice.tax_total", "RM 0.00", { polygon: [], confidence: 0.9 }),
     factField("invoice.amount_due", rm(cents), { polygon: [], confidence: 0.9 }),
   ], { envelope: agreedEnvelope() });
-  return id;
+  return omitInvoiceId ? null : id;
 }
 
 /** 0046 (7A-R4) — stamp a DRAFT entry's coding_kind. The OCR-sales floor now counts only

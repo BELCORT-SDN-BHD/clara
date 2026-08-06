@@ -442,6 +442,12 @@ set role clara_fn_owner;
 -- positive evidence.
 alter table clara.firm_limits
   add column sales_lane_active boolean not null default false,
+  -- THE DAILY CAP GOVERNS THE WHOLE SALES LANE, STEADY STATE **AND** BACKFILL, and that is
+  -- deliberate rather than incidental: it is the one number that bounds how much unattended
+  -- sales drafting a firm can receive in a day, and a recorded backfill is not a reason to
+  -- lift that bound -- it is a reason to have chosen it. So a 500-document batch does NOT
+  -- move in a day; it moves at the cap. The lever for moving a backlog faster is this
+  -- column, per firm, settable without a migration -- NOT a second, hidden governor.
   add column sales_admission_daily_cap int,
   add column sales_admission_watermark timestamptz,
   add constraint ck_firm_limits_sales_admission_daily_cap check (
@@ -2094,7 +2100,18 @@ begin
     || '      end if;' || chr(10)
     || '      v_batch_id:=v_batch.id;' || chr(10)
     || '    end if;' || chr(10)
-    || '    perform pg_advisory_xact_lock(203007001,hashtext(f.firm_id::text));' || chr(10)
+    -- THE SALES CAP COUNTS UNDER THE FIRM''S EXISTING DAILY-COUNTER LOCK, 202991617, and
+    -- introduces NO SECOND KEY. A second firm-scoped key deadlocks: the retry/refund branch
+    -- far above already takes 202991617 before control falls through to here, so a retry
+    -- admission would hold 202991617 then want the new key while a fresh admission held the
+    -- new key then wanted 202991617 -- opposite orders on the same firm, which PostgreSQL
+    -- resolves by aborting one with 40P01. That abort rolls back the whole transaction and
+    -- writes NO sweep_run_items row, which is precisely the run-wedge this function''s other
+    -- branches are all written to avoid. (Demonstrated by the independent review, two
+    -- sessions, both orders.) Advisory xact locks are REENTRANT, so taking it here is free
+    -- when the retry path already holds it and is simply the same acquisition the budget
+    -- gate below would make anyway.
+    || '    perform pg_advisory_xact_lock(202991617,hashtext(f.firm_id::text));' || chr(10)
     || '    select count(*)::int into v_used_sales from clara.autodraft_attempts aa' || chr(10)
     || '      where aa.firm_id=f.firm_id and aa.usage_date=v_today and aa.direction=''sales''' || chr(10)
     || '        and aa.filing_id<>p_filing;' || chr(10)
@@ -2835,6 +2852,10 @@ begin
     raise exception '0046 tail 13: clara.sales_backfill_batches is not RLS ENABLE+FORCE under clara_fn_owner';
   end if;
 
-  raise notice '0046 tail: all 13 arms clean';
+  -- TEN arms live here and THREE more in the $acls$ block above (they moved so the
+  -- wiki-authority gate could tell a privilege probe from a change-of-record patch --
+  -- see that block's header). The count is stated because a notice that overstates what
+  -- ran is the same class of defect as a probe that measures the wrong thing.
+  raise notice '0046 tail: 10 arms clean here; 3 more in the $acls$ block (13 total)';
 end
 $tail$;
