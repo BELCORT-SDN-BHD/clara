@@ -161,7 +161,7 @@
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v6.impl.ts": {
-      "sha256": "b2ebf20e13477c2b712eff40b007a5b3028b413c3ccb880d94007aa9da44bf77",
+      "sha256": "c298cd13dd412b733477ded6714f6a175a1a2f1d6e82be1557fc9a912298e66b",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v6.infra.ts": {

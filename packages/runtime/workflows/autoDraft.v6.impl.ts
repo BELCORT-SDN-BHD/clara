@@ -249,6 +249,67 @@ export async function runAutoDraftModelStep(
   return { outcome, usageTokens, entryId };
 }
 
+/** PR #204 fix (Codex round 2, B1 — an IMPLEMENTATION blocker, not a test-guard gap): the
+ *  original receipt read failed OPEN. `r.rows[0]?.receipt ?? {}` + `receipt.settled ===
+ *  false` means a missing row, NULL, `{}`, or ANY malformed/unrecognized shape all fall
+ *  through past that one check silently — the workflow would report "drafted" while the
+ *  task stays running and its reservation stays charged forever. Codex verified by
+ *  EXECUTION against d404ff9 that the fix cannot be "require settled===true" either: the
+ *  DB's own SUCCESS shape carries no `settled` key at all (see shape 3 below).
+ *
+ *  This function enumerates the EXACT jsonb shapes clara.settle_autodraft_task can return —
+ *  read directly from the migration (0036_wave_c0_deferred_belts.sql:856-997, the live body
+ *  the 6-arity is harvested from at 0046_wave_7a_sales_lane.sql §8, plus that section's own
+ *  run_superseded splice) — and accepts ONLY those. Anything else THROWS: a throw retries
+ *  the step / surfaces for reconcile_sweep_runs to recover; silence strands the task
+ *  non-terminal with a live reservation forever.
+ *
+ *  Shape 1 — REPLAY (0036:871-873, `t.status in ('completed','failed')`): an idempotent
+ *    re-settle of an already-terminal task — `{task_id, status, replayed:true}`. NO
+ *    `settled` key, NO `outcome` key at all.
+ *  Shapes 2-5 — the FOUR named benign no-ops. ALL carry `settled:false, outcome:
+ *    'not_settled'` plus a `reason` drawn from EXACTLY this set:
+ *      task_superseded     (0036:899-909 — t.status in ('cancelled','expired'))
+ *      registry_superseded (0036:934-939 — no registry row points at this task any more)
+ *      registry_released   (0036:941-946 — the registry row is not state='active')
+ *      run_superseded      (0046 §8 — t.workflow_run_id is distinct from p_workflow_run_id)
+ *  Shape 6 — SUCCESS (0036:994-996, the function's own final return, reached only after
+ *    every guard above passes): `{task_id, status:'failed'|'completed', outcome, entry_id,
+ *    tokens_spent, tokens_refunded}`. NO `settled` key at all — Codex's own finding, cited
+ *    here so a future reader never "fixes" this by requiring settled===true. */
+export function classifySettleReceipt(receipt: unknown): "settled" | "benign-no-op" {
+  if (receipt == null || typeof receipt !== "object") {
+    throw new Error(`settle_autodraft_task returned an unrecognized receipt (missing row or non-object): ${JSON.stringify(receipt)}`);
+  }
+  const r = receipt as Record<string, unknown>;
+
+  // Shape 1 — REPLAY (0036:871-873).
+  if (r.replayed === true && "task_id" in r && "status" in r) {
+    return "settled";
+  }
+
+  // Shapes 2-5 — the four named benign no-ops (0036:899-946; 0046 §8's run_superseded).
+  const KNOWN_NOOP_REASONS = new Set(["task_superseded", "registry_superseded", "registry_released", "run_superseded"]);
+  if (r.settled === false && r.outcome === "not_settled" && typeof r.reason === "string" && KNOWN_NOOP_REASONS.has(r.reason)) {
+    return "benign-no-op";
+  }
+
+  // Shape 6 — SUCCESS (0036:994-996). No `settled` key — deliberately not checked here.
+  const KNOWN_OUTCOMES = new Set(["drafted", "skipped_lane", "noop_existing", "failed"]);
+  if (
+    (r.status === "completed" || r.status === "failed") &&
+    typeof r.outcome === "string" &&
+    KNOWN_OUTCOMES.has(r.outcome) &&
+    "entry_id" in r &&
+    typeof r.tokens_spent === "number" &&
+    typeof r.tokens_refunded === "number"
+  ) {
+    return "settled";
+  }
+
+  throw new Error(`settle_autodraft_task returned an unrecognized receipt shape: ${JSON.stringify(receipt)}`);
+}
+
 /** Settle the sweep task (idempotent). outcome ∈ drafted|skipped_lane|noop_existing|failed;
  *  settle_autodraft_task adjusts the reserved tokens to actual + refund under the budget lock,
  *  writes the sweep_run_items row, and updates the registry counters (a 2nd failure parks).
@@ -257,12 +318,9 @@ export async function runAutoDraftModelStep(
  *  fresh from getWorkflowMetadata() inside this step, matching the pattern already
  *  established in claimAutoDraftStep above.
  *
- *  PR #204: a LOSING dispatch (this run's own workflow_run_id no longer matches the task's —
- *  a different run already holds it) is not a raise on the 6-arity: it returns
- *  `{settled:false,outcome:'not_settled',reason:'run_superseded'}`, the SAME shape 0036's
- *  body already uses for `task_superseded`/`registry_superseded`/`registry_released` — never
- *  raise on a losing dispatch, the winning run's own settle call owns the real accounting.
- *  Read explicitly and short-circuited on `settled === false`: benign, not an error. */
+ *  PR #204 (fixed per Codex round 2, B1): the receipt is read explicitly and classified via
+ *  classifySettleReceipt, which FAILS CLOSED — a missing row, NULL, `{}`, or any shape
+ *  outside the six enumerated ones throws, rather than silently completing as if settled. */
 export async function settleAutoDraftStep(
   taskId: string,
   outcome: "drafted" | "skipped_lane" | "noop_existing" | "failed",
@@ -282,13 +340,7 @@ export async function settleAutoDraftStep(
       workflowRunId,
     ]),
   );
-  const receipt = (r.rows[0]?.receipt ?? {}) as { settled?: boolean; outcome?: string; reason?: string };
-  if (receipt.settled === false) {
-    // run_superseded (or, in principle, any sibling losing-dispatch reason): this run lost
-    // the run-identity race. Nothing was written on this call; the winning run's own settle
-    // already owns (or will own) the real accounting. Benign — return without throwing.
-    return;
-  }
+  classifySettleReceipt(r.rows[0]?.receipt);
 }
 
 /** Open a scoped open-question for a question-shaped refusal (origin recorded 'sweep_refusal'
