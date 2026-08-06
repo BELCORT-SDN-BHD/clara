@@ -131,9 +131,10 @@ Current phase/slice **status lives in memory** (`project-clara-rebuild-state`,
 read-first) **+ `docs/plan/REBUILD-PLAN.md`** — refreshed each slice so this file
 stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
-**Phase 4 — WAVE C CLOSED (ADR-051..054) · WAVE D COMPLETE (ADR-055..059): D-a CLOSED
-(ADR-056) · D-b CLOSED ACROSS ALL FOUR SLICES (ADR-058 shipping slices + ADR-059 D-b2,
-2026-08-06).** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) ·
+**Phase 4 — WAVE C CLOSED (ADR-051..054) · WAVE D COMPLETE (ADR-055..059) · POST-WAVE
+CLEARED (ADR-060..062: the data doctrine · uniform review intensity · the pre-E clearing
+day — real FA + real booking on BEE, three structural gaps registered, §7-A skeleton
+ratified).** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) ·
 the extraction slice (ADR-047/048) · the settlement program (ADR-049) · the first production
 autopost (ADR-050) · **C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliation receipts at
 exactly 0, nine real RPR months chained to the sen) · **D-a** FA register (0041) · **D-b**
@@ -182,15 +183,14 @@ law: migration numbers are claimed at MERGE time** (RENUMBER.md procedure). **Ce
 through Supavisor's pool.** Malaysian tax facts live in effective-dated policy tables, never
 in prose (`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
 
-**Open build items (PROJECTLOG PART 2 is the live register):** **TWO OPEN PRs, both
-judgement-logic changes awaiting an independent review pass — `main` still ships the
-one-sided 409 defect: #193** (the interview refusal must outlive the poller + all eight stale
-`0042` refs in `reconciler-adjustments.mjs`) and **#195** (the 409 recovery rewritten
-fail-closed + AST-guard hardening) · Gate P (operating runway; owns the capitalised/
-mixed-purchase tax-allocation question) · the §7-A runtime bundle (parked for the unattended
-sales drafter) · Wave E (periods + statements; owns closing stock per WD-R11, the
-segment-aware FA tie, the depreciation close gate, MPERS presentation wording) · the
-`opening_tb.line` producer + K-doc door (Phase 5, review-gated) · ADR-059's follow-up register
-(the fifth-lex measurement constraint · Codex locked until 2026-08-08).
+**Open build items (PROJECTLOG PART 2 is the live register):** **§7-A NEXT — skeleton
+RATIFIED at v2** (`docs/plan/wave-7a-design-skeleton.md`, ADR-062; the build session grills
+its §6 then builds five slices) · Gate P + Gate S both **operating runway** (first native-MYR
+SST-stated bill / first real e-invoice XML) · the extraction-recovery door + FX-lite
+prioritization (ADR-062 registrations) · Wave E (periods + statements; owns closing stock per
+WD-R11, the segment-aware FA tie, the depreciation close gate, MPERS presentation wording,
+**and the consolidated client-facts inputs: the F-1 allocation-date guard · entity_type
+surfacing · the MSIC capture door**) · the `opening_tb.line` producer + K-doc door (Phase 5,
+review-gated) · the fifth-lex measurement constraint (standing).
 
 **Canary `daba7f2e` was due 2026-08-02 — NEVER answer it, even past due.**
