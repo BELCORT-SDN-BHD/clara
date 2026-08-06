@@ -174,8 +174,15 @@ export function commitOpKeyFromPrompt(park: PendingPark | null | undefined): str
 
 /** Terminal outcomes meaning the run reached its INTENDED end (not cancelled, expired or
  *  otherwise stopped). Shared by `deriveChip` and the answer verb's delivery test so the two
- *  can never drift apart. */
-const COMPLETE_OUTCOMES = new Set(["firm_created", "interview_complete", "complete", "completed"]);
+ *  can never drift apart.
+ *
+ *  SAFETY-LOAD-BEARING — NOT a display list. Three decisions read this one set: `deriveChip`
+ *  (what the chip SAYS), `classifyDeliveryBody` (whether an answer was DELIVERED), and the
+ *  hook's `readClearsError` (whether a surfaced refusal may be CLEARED). Widening it to make a
+ *  chip render nicer would silently widen what counts as proof that an answer landed, and what
+ *  counts as grounds to take a refusal off the human's screen. Add an outcome here only when it
+ *  genuinely means the run reached its intended end. */
+export const COMPLETE_OUTCOMES = new Set(["firm_created", "interview_complete", "complete", "completed"]);
 
 /** Derive the run chip (§3.1). Terminal wins; then a pending park (awaiting_you, incl.
  *  the parked framing); then a running engine status (working); else unknown. */

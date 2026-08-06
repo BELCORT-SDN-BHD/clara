@@ -68,6 +68,11 @@ export default function FirmOnboardingPage() {
     const park = run.state?.pendingPark;
     if (!park) return;
     run.setBusy(true);
+    // The human is acting again, so their own retry clears the board (client/page.tsx does the
+    // same before its cancel). Without this, a FAILED cancel raises a park-less refusal that no
+    // read can retire, and a LATER SUCCESSFUL cancel would leave that "cancel failed" banner
+    // standing for good — the run is terminal by then, so the poller has stopped for good too.
+    run.setError(null);
     try {
       await run.runtimeCancel(park);
       await run.refresh();
