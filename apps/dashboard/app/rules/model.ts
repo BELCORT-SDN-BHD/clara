@@ -94,11 +94,18 @@ export function canRetire(rule: AutopostRule): boolean {
 function s(v: unknown): string | null {
   return typeof v === "string" ? v : null;
 }
-function numOrNull(v: unknown): number | null {
-  return typeof v === "number" ? v : null;
-}
-function rec(v: unknown): Record<string, unknown> {
-  return (v ?? {}) as Record<string, unknown>;
+
+/** [Codex HIGH, 2026-08-07] Every count `clara.preview_ocr_sales_evidence` emits is a
+ *  real Postgres integer (`count(...)::int`, a literal 6/60, `_ocr_sales_floor`'s own
+ *  `int` columns — 0046 §SECTION 6) — never a string, a fraction, or an out-of-range
+ *  value. A string/fraction/NaN/Infinity/negative arriving here is a CONTRACT
+ *  VIOLATION, not an input to coerce: `numOrNull(v) ?? 0` (the shape this replaces)
+ *  would have the UI INVENT a zero and print "floor not yet met" against a figure
+ *  nobody measured — exactly what "the DB owns every number" forbids. `null` here
+ *  means "reject", and every call site below folds a `null` into the WHOLE preview
+ *  failing to `null` (the same unavailable state an RPC throw produces). */
+function strictNonNegInt(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) && Number.isInteger(v) && v >= 0 ? v : null;
 }
 
 export type SalesEvidencePreviewRequired = {
@@ -145,54 +152,99 @@ export type SalesEvidencePreviewNotApplicable = {
 
 export type SalesEvidencePreview = SalesEvidencePreviewApplicable | SalesEvidencePreviewNotApplicable;
 
-const DEFAULT_REQUIRED: SalesEvidencePreviewRequired = { qualifying: 6, distinct_invoices: 6, corroborated: 6, span_days: 60 };
-
-function toSalesEvidencePreviewRequired(raw: unknown): SalesEvidencePreviewRequired {
-  const o = rec(raw);
-  return {
-    qualifying: numOrNull(o.qualifying) ?? DEFAULT_REQUIRED.qualifying,
-    distinct_invoices: numOrNull(o.distinct_invoices) ?? DEFAULT_REQUIRED.distinct_invoices,
-    corroborated: numOrNull(o.corroborated) ?? DEFAULT_REQUIRED.corroborated,
-    span_days: numOrNull(o.span_days) ?? DEFAULT_REQUIRED.span_days,
-  };
+/** [Codex HIGH, 2026-08-07] `required`'s four fields come from the ENVELOPE — never
+ *  a hardcoded 6/6/6/60 fallback. The migration's literal 6/6/6/60 is the CURRENT
+ *  contract value, not a client-side assumption this mapper is entitled to
+ *  substitute when the envelope is silent or malformed; a missing `required`
+ *  object, a missing sub-field, or a sub-field that fails the strict integer test
+ *  is a shape defect and fails the WHOLE mapping (returns `null`), exactly like
+ *  every other strict field below. */
+function toSalesEvidencePreviewRequired(raw: unknown): SalesEvidencePreviewRequired | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Record<string, unknown>;
+  const qualifying = strictNonNegInt(o.qualifying);
+  if (qualifying === null) return null;
+  const distinctInvoices = strictNonNegInt(o.distinct_invoices);
+  if (distinctInvoices === null) return null;
+  const corroborated = strictNonNegInt(o.corroborated);
+  if (corroborated === null) return null;
+  const spanDays = strictNonNegInt(o.span_days);
+  if (spanDays === null) return null;
+  return { qualifying, distinct_invoices: distinctInvoices, corroborated, span_days: spanDays };
 }
 
-/** `clara.preview_ocr_sales_evidence`'s jsonb, mapped defensively. Returns `null`
- *  when the envelope is shaped like NEITHER branch the verb is documented to
- *  return (every branch carries a string `rule_id` and a boolean `applicable` —
- *  0046 §SECTION 6) — the caller folds that into the same "preview unavailable"
- *  state an RPC throw produces, the `adjustmentModel` shape-law extended here: a
- *  wrong shape reads as unknown, never as a confident verdict either way. */
+/** `clara.preview_ocr_sales_evidence`'s jsonb, mapped STRICTLY. Returns `null` on
+ *  ANY shape violation, in either branch — a wrong-shaped `rule_id`/`applicable`
+ *  discriminant (0046 §SECTION 6 carries both on every branch), or — on the
+ *  applicable branch specifically — a count, a `required` threshold, `floor_met`,
+ *  `advisory`, or `evaluated_at` that fails its strict test. `null` folds into the
+ *  SAME "preview unavailable" state an RPC throw produces (the `adjustmentModel`
+ *  shape-law extended here): a wrong shape reads as unknown, never as a confident
+ *  verdict, and NEVER as a coerced number the UI would print as if the DB said it.
+ *
+ *  [Codex HIGH, 2026-08-07] This replaces an earlier build that defaulted absent/
+ *  malformed counts to `0` and absent `required` to the CURRENT literal 6/6/6/60 —
+ *  both are the exact failure this file's own house law forbids: "the DB owns
+ *  every number; the agent/UI never computes or invents one." A missing count is
+ *  not "zero of them"; it is an envelope this build cannot honestly read. */
 export function toSalesEvidencePreview(raw: unknown): SalesEvidencePreview | null {
   if (typeof raw !== "object" || raw === null) return null;
   const o = raw as Record<string, unknown>;
   const ruleId = s(o.rule_id);
   if (ruleId === null || typeof o.applicable !== "boolean") return null;
-  if (o.applicable) {
+
+  if (!o.applicable) {
     return {
-      applicable: true,
+      applicable: false,
       rule_id: ruleId,
-      client_id: s(o.client_id),
-      counterparty_id: s(o.counterparty_id),
-      account_code: s(o.account_code),
-      rule_status: s(o.rule_status),
-      qualifying: numOrNull(o.qualifying) ?? 0,
-      distinct_invoices: numOrNull(o.distinct_invoices) ?? 0,
-      corroborated: numOrNull(o.corroborated) ?? 0,
-      span_days: numOrNull(o.span_days),
-      tax_silent_documents: numOrNull(o.tax_silent_documents) ?? 0,
-      required: toSalesEvidencePreviewRequired(o.required),
-      floor_met: o.floor_met === true,
+      reason: s(o.reason) ?? "unknown",
+      evidence_class: s(o.evidence_class),
       evaluated_at: s(o.evaluated_at),
-      advisory: o.advisory === true,
     };
   }
+
+  const qualifying = strictNonNegInt(o.qualifying);
+  if (qualifying === null) return null;
+  const distinctInvoices = strictNonNegInt(o.distinct_invoices);
+  if (distinctInvoices === null) return null;
+  const corroborated = strictNonNegInt(o.corroborated);
+  if (corroborated === null) return null;
+  const taxSilentDocuments = strictNonNegInt(o.tax_silent_documents);
+  if (taxSilentDocuments === null) return null;
+  // span_days is the ONLY nullable count (an empty population leaves the floor's
+  // own span unaggregated) — accept an EXPLICIT null, but hold any non-null value
+  // to the SAME strict integer test, and treat a MISSING key as a violation too:
+  // the envelope always emits this key (0046 §SECTION 6's jsonb_build_object
+  // includes it even when the underlying SQL value is NULL), so `undefined` here
+  // means the shape drifted, not that the population happens to be empty.
+  const spanDaysRaw = o.span_days;
+  const spanDays = spanDaysRaw === null ? null : strictNonNegInt(spanDaysRaw);
+  if (spanDaysRaw !== null && spanDays === null) return null;
+  const required = toSalesEvidencePreviewRequired(o.required);
+  if (required === null) return null;
+  const floorMet = o.floor_met;
+  if (typeof floorMet !== "boolean") return null;
+  const advisory = o.advisory;
+  if (typeof advisory !== "boolean") return null;
+  const evaluatedAt = s(o.evaluated_at);
+  if (evaluatedAt === null) return null;
+
   return {
-    applicable: false,
+    applicable: true,
     rule_id: ruleId,
-    reason: s(o.reason) ?? "unknown",
-    evidence_class: s(o.evidence_class),
-    evaluated_at: s(o.evaluated_at),
+    client_id: s(o.client_id),
+    counterparty_id: s(o.counterparty_id),
+    account_code: s(o.account_code),
+    rule_status: s(o.rule_status),
+    qualifying,
+    distinct_invoices: distinctInvoices,
+    corroborated,
+    span_days: spanDays,
+    tax_silent_documents: taxSilentDocuments,
+    required,
+    floor_met: floorMet,
+    evaluated_at: evaluatedAt,
+    advisory,
   };
 }
 

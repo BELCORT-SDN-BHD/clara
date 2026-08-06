@@ -9,7 +9,14 @@ import {
   toSalesEvidencePreview, salesEvidenceNotApplicableLabel, taxSilentGapLabel,
   type SalesEvidencePreviewApplicable, type SalesEvidencePreviewNotApplicable,
 } from "./model";
-import { narrowRuleWrite, ruleWriteRefusedError } from "../shared/reviewApi";
+import { narrowRuleWrite, ruleWriteRefusedError, previewOcrSalesEvidence } from "../shared/reviewApi";
+
+function jsonRes(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
+}
+function setupPgrest() {
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+}
 
 const NOW = new Date("2026-07-22T00:00:00Z");
 
@@ -110,13 +117,17 @@ test("toSalesEvidencePreview maps the applicable branch — every count an INTEG
   assert.equal(a.advisory, true);
 });
 
-test("toSalesEvidencePreview reads `advisory` off the envelope's OWN field — false or absent maps to false, never a hardcoded true", () => {
+test("toSalesEvidencePreview reads `advisory` off the envelope's OWN field — a genuine false parses fine, but MISSING or non-boolean fails the WHOLE preview closed [Codex HIGH]", () => {
   const off = toSalesEvidencePreview({ ...APPLICABLE_RAW, advisory: false }) as SalesEvidencePreviewApplicable;
-  assert.equal(off.advisory, false);
+  assert.equal(off.advisory, false, "advisory:false is a real, present answer and must parse");
+
   const withoutAdvisory: Record<string, unknown> = { ...APPLICABLE_RAW };
   delete withoutAdvisory.advisory;
-  const missing = toSalesEvidencePreview(withoutAdvisory) as SalesEvidencePreviewApplicable;
-  assert.equal(missing.advisory, false, "an envelope minted before this key existed must not be read as advisory:true");
+  assert.equal(
+    toSalesEvidencePreview(withoutAdvisory), null,
+    "advisory must be PRESENT — a missing key is a shape defect, and defaulting it (the old build's behavior) would have the UI silently drop the 'this is a snapshot' claim rather than refuse to render",
+  );
+  assert.equal(toSalesEvidencePreview({ ...APPLICABLE_RAW, advisory: "true" }), null, "a truthy non-boolean must not coerce to true");
 });
 
 test("toSalesEvidencePreview maps every not-applicable reason (0046's pinned vocabulary)", () => {
@@ -126,6 +137,7 @@ test("toSalesEvidencePreview maps every not-applicable reason (0046's pinned voc
   assert.equal((notSales as SalesEvidencePreviewNotApplicable).evidence_class, null);
 
   const notOcr = toSalesEvidencePreview({ rule_id: "r3", applicable: false, reason: "not_ocr_sales", evidence_class: "structured", advisory: true, evaluated_at: "t" });
+  assert.equal((notOcr as SalesEvidencePreviewNotApplicable).reason, "not_ocr_sales", "the REASON TOKEN, not just its side-effect evidence_class — a future reason that also happens to carry an evidence_class must not be mistaken for this one");
   assert.equal((notOcr as SalesEvidencePreviewNotApplicable).evidence_class, "structured");
 
   const notAccessible = toSalesEvidencePreview({ rule_id: "r4", applicable: false, reason: "rule_not_accessible", advisory: true, evaluated_at: "t" });
@@ -139,10 +151,93 @@ test("toSalesEvidencePreview returns null for a shape that matches NEITHER branc
   assert.equal(toSalesEvidencePreview({ rule_id: "r1" }), null, "missing the applicable discriminant");
 });
 
-test("toSalesEvidencePreview defends span_days=null (an empty population) and defaults a missing `required`", () => {
-  const p = toSalesEvidencePreview({ ...APPLICABLE_RAW, span_days: null, required: undefined }) as SalesEvidencePreviewApplicable;
-  assert.equal(p.span_days, null);
-  assert.deepEqual(p.required, { qualifying: 6, distinct_invoices: 6, corroborated: 6, span_days: 60 });
+// === [Codex HIGH, 2026-08-07] STRICT COUNTS — the mapper REFUSES a contract
+// violation rather than inventing a figure. Every count `clara.
+// preview_ocr_sales_evidence` emits is a real Postgres integer; a string,
+// fraction, NaN, Infinity, or negative value is not an input to coerce — it is
+// a shape defect, and it fails the WHOLE preview, never just that one field. ===
+
+const STRICT_VIOLATIONS: Array<[string, unknown]> = [
+  ["a fraction", 4.5], ["a numeric string", "4"], ["null", null],
+  ["NaN", NaN], ["Infinity", Infinity], ["-Infinity", -Infinity],
+  ["a negative integer", -1], ["a boolean", true], ["an array", [4]],
+];
+
+for (const field of ["qualifying", "distinct_invoices", "corroborated", "tax_silent_documents"] as const) {
+  test(`toSalesEvidencePreview: a contract-violating ${field} folds the WHOLE preview to null, never a coerced 0`, () => {
+    for (const [label, bad] of STRICT_VIOLATIONS) {
+      assert.equal(toSalesEvidencePreview({ ...APPLICABLE_RAW, [field]: bad }), null, `${field} = ${label}`);
+    }
+    const withoutField: Record<string, unknown> = { ...APPLICABLE_RAW };
+    delete withoutField[field];
+    assert.equal(toSalesEvidencePreview(withoutField), null, `${field} missing entirely`);
+  });
+}
+
+test("toSalesEvidencePreview: span_days is the ONLY nullable count — an explicit null is a legitimate empty-population answer, but a MISSING key or any other bad value still fails", () => {
+  const empty = toSalesEvidencePreview({ ...APPLICABLE_RAW, span_days: null }) as SalesEvidencePreviewApplicable;
+  assert.ok(empty.applicable);
+  assert.equal(empty.span_days, null);
+
+  for (const [label, bad] of [["a fraction", 4.5], ["a numeric string", "45"], ["NaN", NaN], ["a negative integer", -1]] as Array<[string, unknown]>) {
+    assert.equal(toSalesEvidencePreview({ ...APPLICABLE_RAW, span_days: bad }), null, `span_days = ${label}`);
+  }
+  const withoutSpanDays: Record<string, unknown> = { ...APPLICABLE_RAW };
+  delete withoutSpanDays.span_days;
+  assert.equal(
+    toSalesEvidencePreview(withoutSpanDays), null,
+    "a MISSING span_days key is a shape defect too — the envelope always emits the key even when the SQL value is null",
+  );
+});
+
+test("toSalesEvidencePreview: `required` is read from the envelope, NEVER a hardcoded 6/6/6/60 fallback — missing, a missing sub-field, or a wrong-typed sub-field all fail closed", () => {
+  const withoutRequired: Record<string, unknown> = { ...APPLICABLE_RAW };
+  delete withoutRequired.required;
+  assert.equal(toSalesEvidencePreview(withoutRequired), null, "no fallback — a missing `required` object fails the whole mapping");
+
+  assert.equal(
+    toSalesEvidencePreview({ ...APPLICABLE_RAW, required: { qualifying: 6, distinct_invoices: 6, corroborated: 6 } }),
+    null, "a required object missing ONE sub-field (span_days here) still fails",
+  );
+  assert.equal(
+    toSalesEvidencePreview({ ...APPLICABLE_RAW, required: { qualifying: "6", distinct_invoices: 6, corroborated: 6, span_days: 60 } }),
+    null, "a stringified sub-field fails the same strict test as a top-level count",
+  );
+  // A genuinely different envelope value (the contract may change its own thresholds
+  // over time) is read VERBATIM — this mapper asserts nothing about what the numbers
+  // must equal, only that they are well-shaped integers.
+  const different = toSalesEvidencePreview({ ...APPLICABLE_RAW, required: { qualifying: 8, distinct_invoices: 8, corroborated: 8, span_days: 90 } }) as SalesEvidencePreviewApplicable;
+  assert.deepEqual(different.required, { qualifying: 8, distinct_invoices: 8, corroborated: 8, span_days: 90 });
+});
+
+test("toSalesEvidencePreview: floor_met and evaluated_at are held to the same strict-presence law — a coerced or missing value fails closed [Codex HIGH]", () => {
+  assert.equal(toSalesEvidencePreview({ ...APPLICABLE_RAW, floor_met: "true" }), null, "a string must not coerce to true");
+  assert.equal(toSalesEvidencePreview({ ...APPLICABLE_RAW, floor_met: 1 }), null);
+  const withoutFloorMet: Record<string, unknown> = { ...APPLICABLE_RAW };
+  delete withoutFloorMet.floor_met;
+  assert.equal(toSalesEvidencePreview(withoutFloorMet), null);
+
+  const withoutEvaluatedAt: Record<string, unknown> = { ...APPLICABLE_RAW };
+  delete withoutEvaluatedAt.evaluated_at;
+  assert.equal(toSalesEvidencePreview(withoutEvaluatedAt), null);
+});
+
+// === [Codex MEDIUM, 2026-08-07] previewOcrSalesEvidence BINDS the response to
+// the request — every branch echoes p_rule back as rule_id, so a mismatch is a
+// defensive check against a server regression, not an expected path. ===
+
+test("previewOcrSalesEvidence: a response naming a DIFFERENT rule_id than requested folds to null — never renders beside the wrong row", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => jsonRes({ ...APPLICABLE_RAW, rule_id: "some-other-rule" }));
+  setupPgrest();
+  assert.equal(await previewOcrSalesEvidence("jwt", "r1"), null);
+});
+
+test("previewOcrSalesEvidence: a response naming the SAME rule_id as requested maps through normally", async (t) => {
+  t.mock.method(globalThis, "fetch", async () => jsonRes(APPLICABLE_RAW));
+  setupPgrest();
+  const out = await previewOcrSalesEvidence("jwt", "r1");
+  assert.ok(out?.applicable);
+  assert.equal(out.rule_id, "r1");
 });
 
 test("salesEvidenceNotApplicableLabel glosses all three reasons and falls back honestly for an unnamed one", () => {
