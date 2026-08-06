@@ -249,6 +249,25 @@ export async function runAutoDraftModelStep(
   return { outcome, usageTokens, entryId };
 }
 
+function isNonEmptyString(x: unknown): x is string {
+  return typeof x === "string" && x.length > 0;
+}
+
+function isNonNegativeNumber(x: unknown): x is number {
+  return typeof x === "number" && Number.isFinite(x) && x >= 0;
+}
+
+/** True iff `r`'s OWN enumerable keys are EXACTLY `keys` (same set, same size) — not a
+ *  subset check. Codex round 3 named this the missing piece: shape checks that only tested
+ *  for PRESENCE of the fields they expected let an object carrying EXTRA, unaccounted-for
+ *  fields (or a field with the wrong runtime type smuggled in alongside correct ones) slip
+ *  through as if it were a real DB shape. */
+function hasExactlyKeys(r: Record<string, unknown>, keys: readonly string[]): boolean {
+  const actual = Object.keys(r);
+  if (actual.length !== keys.length) return false;
+  return keys.every((k) => Object.prototype.hasOwnProperty.call(r, k));
+}
+
 /** PR #204 fix (Codex round 2, B1 — an IMPLEMENTATION blocker, not a test-guard gap): the
  *  original receipt read failed OPEN. `r.rows[0]?.receipt ?? {}` + `receipt.settled ===
  *  false` means a missing row, NULL, `{}`, or ANY malformed/unrecognized shape all fall
@@ -257,26 +276,55 @@ export async function runAutoDraftModelStep(
  *  EXECUTION against d404ff9 that the fix cannot be "require settled===true" either: the
  *  DB's own SUCCESS shape carries no `settled` key at all (see shape 3 below).
  *
- *  This function enumerates the EXACT jsonb shapes clara.settle_autodraft_task can return —
- *  read directly from the migration (0036_wave_c0_deferred_belts.sql:856-997, the live body
- *  the 6-arity is harvested from at 0046_wave_7a_sales_lane.sql §8, plus that section's own
- *  run_superseded splice) — and accepts ONLY those. Anything else THROWS: a throw retries
- *  the step / surfaces for reconcile_sweep_runs to recover; silence strands the task
- *  non-terminal with a live reservation forever.
+ *  Codex round 3 (B1, deepened): the round-2 version checked FIELD PRESENCE and coarse type
+ *  (e.g. "has a `reason` string in a known set"), which let SHAPE-LIKE malformed objects pass
+ *  — `{task_id:null,status:null,replayed:true}`, `{task_id:"t",status:"running",
+ *  replayed:true}` (REPLAY does not exist for a non-terminal status), a no-op missing its own
+ *  task identity, `{status:"completed",outcome:"failed",...}` (that status/outcome pairing
+ *  cannot exist — 'completed' only ever pairs with drafted|skipped_lane|noop_existing), and a
+ *  SUCCESS shape missing `task_id` entirely. This version re-derives every shape's EXACT field
+ *  set and value-level constraints straight from the SQL a second time — every field the
+ *  function genuinely returns, not a convenient subset — and rejects anything with an
+ *  unaccounted-for extra field via hasExactlyKeys.
  *
- *  Shape 1 — REPLAY (0036:871-873, `t.status in ('completed','failed')`): an idempotent
- *    re-settle of an already-terminal task — `{task_id, status, replayed:true}`. NO
- *    `settled` key, NO `outcome` key at all.
- *  Shapes 2-5 — the FOUR named benign no-ops. ALL carry `settled:false, outcome:
- *    'not_settled'` plus a `reason` drawn from EXACTLY this set:
- *      task_superseded     (0036:899-909 — t.status in ('cancelled','expired'))
- *      registry_superseded (0036:934-939 — no registry row points at this task any more)
- *      registry_released   (0036:941-946 — the registry row is not state='active')
- *      run_superseded      (0046 §8 — t.workflow_run_id is distinct from p_workflow_run_id)
- *  Shape 6 — SUCCESS (0036:994-996, the function's own final return, reached only after
- *    every guard above passes): `{task_id, status:'failed'|'completed', outcome, entry_id,
- *    tokens_spent, tokens_refunded}`. NO `settled` key at all — Codex's own finding, cited
- *    here so a future reader never "fixes" this by requiring settled===true. */
+ *  Shape 1 — REPLAY (0036:871-873, reached only via `t.status in ('completed','failed')`):
+ *    `{task_id, status, replayed:true}`, EXACTLY these 3 keys. `task_id` a non-empty string
+ *    (it is always `p_task`, itself null-checked at function entry). `status` restricted to
+ *    'completed'|'failed' — no OTHER task status ever reaches this branch, so a replay
+ *    carrying e.g. 'running' cannot be genuine.
+ *  Shapes 2-5 — the FOUR named benign no-ops, ALL carrying `settled:false, outcome:
+ *    'not_settled', reason:<name>` plus `task_id` (non-empty string) and `status` (a string —
+ *    see per-reason restriction below), and NOTHING else except each reason's own extra field:
+ *      task_superseded     (0036:899-909) — reached only via `t.status in ('cancelled',
+ *        'expired')`; EXACTLY 6 keys, the extra one `released_reservation:boolean`.
+ *      registry_superseded (0036:934-939) — reached only via `t.status in ('running',
+ *        'cancel_requested')` (the prior guard at 0036:927-929 already excludes every other
+ *        status); EXACTLY 5 keys, no extra field.
+ *      registry_released   (0036:941-946) — same status restriction as registry_superseded;
+ *        EXACTLY 6 keys, the extra one `registry_state`, itself restricted to 'parked'|'idle'
+ *        (0011_daily_loop.sql:709's own check constraint — `a.state<>'active'` is the ONLY
+ *        way this branch is reached, and 'active'/'parked'/'idle' are the constraint's ENTIRE
+ *        domain, so excluding 'active' leaves exactly those two).
+ *      run_superseded      (0046 §8) — spliced in immediately after the SAME running-check
+ *        anchor registry_superseded's guard sits behind, so the SAME status restriction
+ *        applies; EXACTLY 5 keys, structurally identical to registry_superseded (the `reason`
+ *        string is the only field that tells the two apart — confirmed against 0046's own
+ *        splice text, not assumed).
+ *  Shape 6 — SUCCESS (0036:994-996, the function's own final return, reached only after every
+ *    guard above passes): `{task_id, status, outcome, entry_id, tokens_spent, tokens_refunded}`,
+ *    EXACTLY 6 keys, NO `settled` key at all (Codex's own round-2 finding, re-cited here so a
+ *    future reader never "fixes" this by requiring settled===true). `task_id` non-empty
+ *    string. The status<->outcome pairing is NOT two independent checks — the SQL computes
+ *    status FROM outcome (`case when p_outcome='failed' then 'failed' else 'completed' end`),
+ *    so 'completed' can only ever pair with outcome in {drafted, skipped_lane, noop_existing}
+ *    and 'failed' can only ever pair with outcome='failed'; a 'completed'+'failed' pairing (or
+ *    any other cross) cannot come from this function and must throw. `entry_id`: this file's
+ *    own settleAutoDraftStep (below) only ever passes a non-null p_entry when
+ *    outcome==='drafted' (runAutoDraftModelStep sets `entryId` to null for every other
+ *    outcome) — so within the shapes THIS runtime can genuinely produce, entry_id is a
+ *    non-empty string for 'drafted' and null for every other outcome; anything else is
+ *    unrecognized. `tokens_spent`/`tokens_refunded`: non-negative numbers (both computed via
+ *    `greatest(...,0)` / a failed-outcome zero-floor in the SQL — never negative). */
 export function classifySettleReceipt(receipt: unknown): "settled" | "benign-no-op" {
   if (receipt == null || typeof receipt !== "object") {
     throw new Error(`settle_autodraft_task returned an unrecognized receipt (missing row or non-object): ${JSON.stringify(receipt)}`);
@@ -284,25 +332,70 @@ export function classifySettleReceipt(receipt: unknown): "settled" | "benign-no-
   const r = receipt as Record<string, unknown>;
 
   // Shape 1 — REPLAY (0036:871-873).
-  if (r.replayed === true && "task_id" in r && "status" in r) {
+  if (
+    r.replayed === true &&
+    isNonEmptyString(r.task_id) &&
+    (r.status === "completed" || r.status === "failed") &&
+    hasExactlyKeys(r, ["task_id", "status", "replayed"])
+  ) {
     return "settled";
   }
 
   // Shapes 2-5 — the four named benign no-ops (0036:899-946; 0046 §8's run_superseded).
-  const KNOWN_NOOP_REASONS = new Set(["task_superseded", "registry_superseded", "registry_released", "run_superseded"]);
-  if (r.settled === false && r.outcome === "not_settled" && typeof r.reason === "string" && KNOWN_NOOP_REASONS.has(r.reason)) {
-    return "benign-no-op";
+  // Every reason this function can genuinely produce restricts `status` to the same set the
+  // SQL itself restricts it to at the point that reason's branch is reached. A function
+  // (not an index signature lookup) keeps this precise under noUncheckedIndexedAccess and
+  // avoids the "possibly undefined" trap of indexing a Record by an unnarrowed key.
+  const noopStatusesForReason = (reason: unknown): readonly string[] | undefined => {
+    if (reason === "task_superseded") return ["cancelled", "expired"];
+    if (reason === "registry_superseded" || reason === "registry_released" || reason === "run_superseded") return ["running", "cancel_requested"];
+    return undefined;
+  };
+  const noopStatuses = noopStatusesForReason(r.reason);
+  if (
+    r.settled === false &&
+    r.outcome === "not_settled" &&
+    isNonEmptyString(r.task_id) &&
+    typeof r.status === "string" &&
+    noopStatuses !== undefined &&
+    noopStatuses.includes(r.status)
+  ) {
+    if (r.reason === "task_superseded") {
+      if (typeof r.released_reservation === "boolean" && hasExactlyKeys(r, ["task_id", "status", "settled", "outcome", "reason", "released_reservation"])) {
+        return "benign-no-op";
+      }
+    } else if (r.reason === "registry_released") {
+      if ((r.registry_state === "parked" || r.registry_state === "idle") && hasExactlyKeys(r, ["task_id", "status", "settled", "outcome", "reason", "registry_state"])) {
+        return "benign-no-op";
+      }
+    } else {
+      // registry_superseded | run_superseded — structurally identical, 5 keys, no extra field.
+      if (hasExactlyKeys(r, ["task_id", "status", "settled", "outcome", "reason"])) {
+        return "benign-no-op";
+      }
+    }
   }
 
   // Shape 6 — SUCCESS (0036:994-996). No `settled` key — deliberately not checked here.
-  const KNOWN_OUTCOMES = new Set(["drafted", "skipped_lane", "noop_existing", "failed"]);
+  // Same function-not-index-signature reasoning as noopStatusesForReason above: `status`
+  // determines the outcome the SQL could have computed it FROM (`case when p_outcome=
+  // 'failed' then 'failed' else 'completed' end`), so this is a real correlation, not two
+  // independent set-membership checks.
+  const successOutcomesForStatus = (status: unknown): readonly string[] | undefined => {
+    if (status === "completed") return ["drafted", "skipped_lane", "noop_existing"];
+    if (status === "failed") return ["failed"];
+    return undefined;
+  };
+  const successOutcomes = successOutcomesForStatus(r.status);
   if (
-    (r.status === "completed" || r.status === "failed") &&
+    isNonEmptyString(r.task_id) &&
+    successOutcomes !== undefined &&
     typeof r.outcome === "string" &&
-    KNOWN_OUTCOMES.has(r.outcome) &&
-    "entry_id" in r &&
-    typeof r.tokens_spent === "number" &&
-    typeof r.tokens_refunded === "number"
+    successOutcomes.includes(r.outcome) &&
+    ((r.outcome === "drafted" && isNonEmptyString(r.entry_id)) || (r.outcome !== "drafted" && r.entry_id === null)) &&
+    isNonNegativeNumber(r.tokens_spent) &&
+    isNonNegativeNumber(r.tokens_refunded) &&
+    hasExactlyKeys(r, ["task_id", "status", "outcome", "entry_id", "tokens_spent", "tokens_refunded"])
   ) {
     return "settled";
   }
