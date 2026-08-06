@@ -47,7 +47,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, withActor, endPool, printLaneNotes, printSkipCount } from "./a21-helpers.mjs";
-import { x42S5Ready, x42S5SkipHere } from "./x42-s5-helpers.mjs";
+import { x42S5Ready, x42S5SkipHere, s5KlDuplicationRoster } from "./x42-s5-helpers.mjs";
 
 let live = false;
 
@@ -128,9 +128,7 @@ test("x42.r7.s5.census.4b the S5.25 (B) duplication roster and (B2) authority-cl
       where pronamespace='clara'::regnamespace and ${strip} like '%asia/kuala_lumpur%'`)).rows[0].n;
   assert.equal(
     roster,
-    "_adj_on_approve _adj_run_occurrence_core _book_today _ocr_sales_floor "
-    + "ack_compliance_watch evaluate_sst_watch evaluate_sst_watches_all "
-    + "record_future_attestation reverse_entry",
+    await s5KlDuplicationRoster(rootQuery),
   );
   const bookToday = (await rootQuery(`select ${strip} as body from pg_proc where pronamespace='clara'::regnamespace and proname='_book_today'`)).rows[0].body;
   assert.ok(bookToday.includes("statement_timestamp()"));

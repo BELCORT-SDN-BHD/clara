@@ -223,3 +223,32 @@ export async function s5BareTokenRoster(query) {
     : [...S5_25_BARE_TOKEN_ROSTER];
   return names.sort();
 }
+
+// ---------------------------------------------------------------------------
+// S5.25 arm (B) — THE Asia/Kuala_Lumpur DUPLICATION ROSTER, frontier-aware for the same
+// reason arm (D)'s is (see s5BareTokenRoster above): `db-slice-frontiers` runs this battery
+// against databases pinned at 0042-0045, where 0046's bodies do not exist.
+//
+// 0046 (§7-A) adds ONE name, and it is a DECLARED change rather than a drift.
+// clara.preview_ocr_sales_evidence must read the SAME as-of date clara._ocr_sales_floor
+// uses, or one advisory can describe two populations across MYT midnight: the floor's cutoff
+// is transaction-pinned now(), while clara._book_today() samples statement_timestamp() per
+// STATEMENT. So the roster's standing advice — "call the authority instead" — CANNOT be
+// followed here, because the authority reads a different clock than the body this verb must
+// agree with. Spelling the floor's own expression is the correctness fix, and joining this
+// roster is its declared cost. 0046's own tail arm (7) pins the same ten names.
+const KL_ROSTER_BASE = [
+  "_adj_on_approve", "_adj_run_occurrence_core", "_book_today", "_ocr_sales_floor",
+  "ack_compliance_watch", "evaluate_sst_watch", "evaluate_sst_watches_all",
+  "record_future_attestation", "reverse_entry",
+];
+const KL_ROSTER_0046 = ["preview_ocr_sales_evidence"];
+
+/** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
+export async function s5KlDuplicationRoster(query) {
+  const applied = (await query(
+    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'"
+  )).rows[0].n === 1;
+  const names = applied ? [...KL_ROSTER_BASE, ...KL_ROSTER_0046] : [...KL_ROSTER_BASE];
+  return names.sort().join(" ");
+}

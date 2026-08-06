@@ -2038,11 +2038,30 @@ begin
   select f.qualifying,f.distinct_invoices,f.corroborated,f.span_days
     into v_q,v_inv,v_corr,v_span
     from clara._ocr_sales_floor(r.client_id,v_cp,r.account_code) f;
-  -- clara._book_today() is the house MYT legal-date authority (0042:4592). Calling it --
-  -- rather than spelling the conversion again -- is what keeps the 0042 S5.25 duplication
-  -- roster unchanged by this migration; a new CALLER of the authority is the outcome that
-  -- section exists to produce.
-  v_as_of := clara._book_today();
+  -- ONE AS-OF FOR THE WHOLE PREVIEW, AND IT IS THE FLOOR'S OWN EXPRESSION.
+  --
+  -- This used to call clara._book_today(), which is wrong in a way only a midnight crossing
+  -- would ever show. _book_today() samples statement_timestamp() -- per STATEMENT, and
+  -- deliberately so (0042 round-7 finding C) -- while clara._ocr_sales_floor's own cutoff is
+  -- `(now() at time zone 'Asia/Kuala_Lumpur')::date`, and now() is per TRANSACTION. In a
+  -- multi-statement read that straddles MYT midnight the two disagree, and this verb would
+  -- then report its authority numbers for one population and its tax_silent_documents count
+  -- for another: an advisory that quietly describes two different corpora and cannot be
+  -- reconciled by the reader, because nothing in the payload says the snapshot moved.
+  --
+  -- Spelling the floor's OWN expression makes them provably identical rather than merely
+  -- usually equal: both sides read the same transaction-pinned now(), so within one
+  -- transaction the value is the same BY CONSTRUCTION. That is the whole property -- the two
+  -- halves of one advisory must describe one instant.
+  --
+  -- THE COST, DECLARED HERE RATHER THAN DISCOVERED LATER, which is exactly what the 0042
+  -- S5.25 duplication roster exists to force: this body now spells the Asia/Kuala_Lumpur
+  -- conversion, so it JOINS that roster and tail arm (7) carries the tenth name and says why.
+  -- The roster's standing advice is "call the authority instead" -- and here that advice
+  -- CANNOT be followed, because the authority samples a different clock than the floor this
+  -- verb must agree with. Keeping _book_today() would have bought a shorter roster with a
+  -- correctness property, which is the wrong way round.
+  v_as_of := (now() at time zone 'Asia/Kuala_Lumpur')::date;
   select count(distinct p.document_id)::int into v_silent
     from clara._ocr_sales_floor_pop(r.client_id,v_cp,r.account_code,v_as_of) p
     where not p.corroborated;
@@ -2933,10 +2952,17 @@ begin
     from pg_proc p
    where p.pronamespace='clara'::regnamespace
      and pg_temp._wdb_code_literal(lower(coalesce(p.prosrc,'')),'asia/kuala_lumpur');
+  -- THE SET GAINS EXACTLY ONE NAME, AND IT IS DECLARED, NOT DISCOVERED.
+  -- clara.preview_ocr_sales_evidence must read the SAME as-of date the floor uses or one
+  -- advisory can describe two populations across MYT midnight (see that verb's own note).
+  -- The floor's cutoff is transaction-pinned now(), so the preview spells the same
+  -- expression -- which puts it on this roster. Everything else is byte-identical to the
+  -- D-b2 nine, and clara._ocr_sales_floor is still among them, which is the standing proof
+  -- that the drop/recreate preserved its literal.
   if v_names <> '_adj_on_approve _adj_run_occurrence_core _book_today _ocr_sales_floor '
               || 'ack_compliance_watch evaluate_sst_watch evaluate_sst_watches_all '
-              || 'record_future_attestation reverse_entry' then
-    raise exception '0046 tail 7: the bodies spelling the Asia/Kuala_Lumpur conversion are {%}, which is not the pinned D-b2 set -- the floor drop/recreate was required to PRESERVE that literal so the 0042/0044 roster assertions stand unchanged', v_names;
+              || 'preview_ocr_sales_evidence record_future_attestation reverse_entry' then
+    raise exception '0046 tail 7: the bodies spelling the Asia/Kuala_Lumpur conversion are {%}, which is not the pinned set (the D-b2 nine PLUS clara.preview_ocr_sales_evidence, declared) -- and clara._ocr_sales_floor must still be among them, which is what proves the drop/recreate preserved its literal', v_names;
   end if;
 
   -- (8) THE FLOOR'S OWN POST-STATE: the new shape, definer, pinned search_path.
@@ -3047,12 +3073,49 @@ begin
     v_lex10  text := pg_temp._wdb_sql_code(v_raw);
     v_off    int;
     v_at10   int;
-    v_hit    boolean;
+    v_hit_n  int;
   begin
-    for v_names in select unnest(array['sales_direction','sales_backlog_held','refused_sales_cap'])
+    -- AND THE COUNT IS THE CLAIM, NOT THE EXISTENCE. Shape + identity still cannot see
+    -- REACHABILITY: `if false then perform jsonb_build_object('clr','CLR29','reason',
+    -- 'sales_direction',...)` is a perfectly well-formed emission shape carrying the right
+    -- literal, so a decoy in a dead branch satisfies a presence test while BOTH real
+    -- emissions are renamed. Static text cannot decide reachability -- but it can decide
+    -- ARITY, and that is enough: each token is emitted a KNOWN number of times at KNOWN
+    -- sites, so a decoy changes the count and fails. (The arm-9(a) discipline, applied to
+    -- the arm that needed it next.)
+    --
+    -- THE EXPECTED COUNTS ARE MEASURED, NOT REASONED. The first cut of this arm guessed TWO
+    -- per token -- "the run-bound receipt and the returned jsonb" -- and the migration refused
+    -- itself on the spot, which is the arm working: the RETURNED jsonb is built from a
+    -- DIFFERENT shape (`'outcome',<...>,'reason',<tok>`), so it is not what this pin counts.
+    -- What is counted is the DURABLE receipt: the `'clr','CLR29','reason',<tok>` run inside
+    -- the sweep_run_items refusal_token, ONE per refusal branch:
+    --   sales_direction     1 -- the inactive-lane branch (0036's exact receipt, byte-for-byte,
+    --                          which is what makes this migration observably inert until the flip)
+    --   sales_backlog_held  1 -- the watermark/backfill branch
+    --   refused_sales_cap   1 -- the daily-cap branch
+    -- These are the only three refusals this lane can produce, so any change to a branch's
+    -- receipt -- a rename, a drop, or an added decoy in a dead `if false` -- moves a count.
+    -- ...AND THE TOTAL, which is what actually closes the decoy. Per-token counts alone are
+    -- defeated by SUBSTITUTION: rename the real emission and add a decoy carrying the old
+    -- token and the per-token count is still 1. The function contains a FIXED NUMBER of
+    -- refusal-receipt constructions -- EIGHT, measured: 0036's five (the two noop/parked and
+    -- three budget/lane refusals) plus this migration's three. A decoy is an ADDITION, and an
+    -- addition moves the total whether or not it is reachable.
+    --
+    -- STATED PLAINLY: static text cannot decide REACHABILITY, and this arm does not pretend
+    -- to. What it decides is ARITY -- exactly eight receipt constructions, each of the three
+    -- sales tokens carried by exactly one of them. A dead `if false then perform
+    -- jsonb_build_object(...)` is still a ninth construction and still fails.
+    if (length(v_lex10) - length(replace(v_lex10, v_prefix, ''))) / length(v_prefix) <> 8 then
+      raise exception '0046 tail 10: clara.admit_autodraft_task builds % refusal receipts, expected 8 (0036''s five plus this migration''s three) -- an ADDED construction is a decoy or an unrecorded refusal, and either way the receipt census this lane depends on has moved',
+        (length(v_lex10) - length(replace(v_lex10, v_prefix, ''))) / length(v_prefix);
+    end if;
+    for v_names, v_n in
+      select * from (values ('sales_direction',1),('sales_backlog_held',1),('refused_sales_cap',1)) v(t,n)
     loop
       v_off := 1;
-      v_hit := false;
+      v_hit_n := 0;
       loop
         v_at10 := position(v_prefix || repeat(chr(2), length(v_names) + 2)
                            in substr(v_lex10, v_off));
@@ -3060,13 +3123,12 @@ begin
         v_at10 := v_off + v_at10 - 1;                      -- absolute offset
         if substr(v_raw, v_at10 + length(v_prefix), length(v_names) + 2)
            = '''' || v_names || '''' then
-          v_hit := true;
-          exit;
+          v_hit_n := v_hit_n + 1;
         end if;
         v_off := v_at10 + 1;
       end loop;
-      if not v_hit then
-        raise exception '0046 tail 10: clara.admit_autodraft_task never emits % as the reason of a refusal receipt -- a token loose in executable code is not a receipt, and this arm pins it at the jsonb_build_object that builds one', v_names;
+      if v_hit_n <> v_n then
+        raise exception '0046 tail 10: clara.admit_autodraft_task emits % as a refusal reason % time(s), expected % -- fewer means the receipt was renamed or dropped; MORE means a decoy emission was added (possibly unreachable, which static text cannot see -- so the count is the claim)', v_names, v_hit_n, v_n;
       end if;
     end loop;
   end;
