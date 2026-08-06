@@ -61,9 +61,9 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
      the thing, not the thing — prove an identifier IS its import before trusting
      it. *(The live exhibit: the park-ordering AST guard matches any callee spelled
      `createHook`.)*
-  - **OPEN owner decision (raised 2026-08-06, unruled):** tier review intensity by
-    risk — the full ladder on money-touching paths, one two-lens round on
-    instrument/UI/doc changes. Until ruled, keep law 1 above as the floor.
+  - **RULED (ADR-061, 2026-08-06): review intensity stays UNIFORM — the full ladder
+    for every substantive change; the risk-tiering proposal is declined. Law 1 stays
+    the floor, not the ceiling.**
 - **`main` is PR-only** — land via PR with green CI (never push `main`). Free-tier
   branch protection is not platform-enforced, so the git-base freeze-lint + CI are
   the real gate — treat them as binding.

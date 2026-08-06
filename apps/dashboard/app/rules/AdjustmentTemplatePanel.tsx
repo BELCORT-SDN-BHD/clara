@@ -78,7 +78,7 @@ export function AdjustmentTemplatePanel({ token, clientId }: { token: string; cl
         Adjustment templates (recurring / reversing)
         {read?.live_count ? <span className={styles.badge}>{read.live_count} live</span> : null}
       </p>
-      {error ? <p className={styles.banner}>Could not load adjustment templates: {error}. The 0042 fns may not be deployed yet.</p> : null}
+      {error ? <p className={styles.banner}>Could not load adjustment templates: {error}. The 0045 fns may not be deployed yet.</p> : null}
       {loading && !read ? <p className={styles.muted}>Loading adjustment templates…</p> : null}
       {read && !read.available ? (
         <p className={styles.banner}>

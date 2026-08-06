@@ -9,7 +9,7 @@
 //
 // READ NAMES — RESOLVED (as-built ladder round 2). `AdjustmentTemplateRow`'s
 // fields mirror ABI §D.1's DDL columns verbatim, plus the ONE derived key the
-// 0042 §S2.8 projection adds: `occurrence_draft_entry_id`. That key is
+// 0045 §S2.8 projection adds: `occurrence_draft_entry_id`. That key is
 // load-bearing rather than decorative — `adjustment_run_due` reports
 // `occurrence_draft_outstanding` and names the remedy ("approve or withdraw the
 // draft"), and without the draft's id on the row the panel could state the
@@ -146,7 +146,7 @@ export function retiredTemplates(templates: readonly AdjustmentTemplateRow[]): A
   return templates.filter((t) => t.status === "retired");
 }
 
-/** list_adjustment_templates(p_client) — ONE jsonb object (0042 §S2.8). The
+/** list_adjustment_templates(p_client) — ONE jsonb object (0045 §S2.8). The
  *  `available` SHAPE signal follows the assetsModel law: a wrong shape reads as
  *  `unavailable`, never as a confident "no templates". */
 export type ListAdjustmentTemplatesRead = {
@@ -185,7 +185,7 @@ export type AdjustmentRunBlocked = { template_id: string; reason: string };
 
 export type AdjustmentRunDue = {
   due: boolean;
-  /** [round-8 F3] The envelope's TOP-LEVEL reason (0042 §2.3: 'nothing_due' |
+  /** [round-8 F3] The envelope's TOP-LEVEL reason (0045 §2.3: 'nothing_due' |
    *  'all_blocked' | 'client_not_found' on a due:false answer; null on due:true).
    *  Distinct from `blocked[].reason`, which is PER-TEMPLATE. Dropped entirely
    *  before this fix — a `client_not_found` answer is a well-formed
@@ -493,7 +493,7 @@ export function toAdjustmentRunRow(raw: unknown): AdjustmentRunRow {
   };
 }
 
-/** list_adjustment_runs(p_client) — ONE jsonb object (0042 §S2.8), newest
+/** list_adjustment_runs(p_client) — ONE jsonb object (0045 §S2.8), newest
  *  period first. Same `available` SHAPE law as the template list. */
 export type ListAdjustmentRunsRead = {
   client_id: string | null;
