@@ -103,8 +103,24 @@ async function taxSilentSalesFiling(sub, { client, firm, customerName, reg = "19
  *  that carries NO facts at all — `distinct_invoices` reads the stated invoice
  *  number, so a facts-absent document would undercount `qualifying`'s partner
  *  dimensions too, conflating "never examined" with "examined, tax-silent". */
-async function persistTaxSilentFacts(sub, { cited, firm, client, cents = 90000, vendorName = "X46 SELLER SDN BHD", customerName = "X46 BUYER" }) {
+async function persistTaxSilentFacts(sub, { cited, firm, client, cents = 90000, vendorName = "X46 SELLER SDN BHD", customerName = "X46 BUYER", sellerIsClient = false }) {
   await grantConsent(sub, { firm, client }).catch(() => {});
+  // [lane-7a-db, terminal-proof fixture — REPORTED] `sellerIsClient` states the CLIENT as the
+  // supplier on the page, which is what makes clara._document_direction resolve SALES.
+  //
+  // WHY THAT DECIDES WHETHER A CELL CAN SEE `not_corroborated` AT ALL — measured, not guessed.
+  // clara.execute_rule_post derives the counterparty kind it looks for FROM THE DIRECTION
+  // (`case when v_direction='sales' then 'customer' else 'vendor' end`) and then re-resolves
+  // the draft's proposed counterparty with that kind. With a generic seller the direction is
+  // PURCHASE, so the executor hunts a VENDOR, the customer row fails
+  // _resolve_counterparty's `kind=v_kind` filter, and the whole post is refused CLR23 ->
+  // `counterparty_ambiguous` — one control BEFORE corroboration is ever consulted. Every
+  // zero-corroboration cell that used this fixture was therefore proving "never posted" and
+  // NOT "not_corroborated". Both registration and name are stated together because a
+  // registration that matches while the name names someone else makes direction ABSTAIN
+  // (CLR30, the RESIDUAL-3 shape) instead of resolving sales.
+  const sellerName = sellerIsClient ? await clientName(client) : vendorName;
+  const sellerReg = sellerIsClient ? "199901000700" : null;
   await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
   await enqueueInvoiceFacts(cited.documentId);
   const task = await invoiceFactsTask(cited.documentId);
@@ -113,7 +129,8 @@ async function persistTaxSilentFacts(sub, { cited, firm, client, cents = 90000, 
   const rm = (c) => `RM ${(c / 100).toLocaleString("en-US", { minimumFractionDigits: 2 })}`;
   await persistInvoiceFacts(task.id, [
     factField("invoice.total", rm(cents)), factField("invoice.currency", "MYR"),
-    factField("invoice.vendor_name", vendorName), factField("invoice.customer_name", customerName),
+    factField("invoice.vendor_name", sellerName), factField("invoice.customer_name", customerName),
+    ...(sellerReg ? [factField("invoice.vendor_registration", sellerReg, { polygon: [], confidence: 0.9 })] : []),
     factField("invoice.invoice_id", `X46NC-${randomUUID().slice(0, 8)}`),
     // deliberately NO total_excl_tax / tax_total — a real stated invoice number,
     // never corroborating (7A-R3's real-world tax-silent shape).
@@ -126,10 +143,10 @@ async function persistTaxSilentFacts(sub, { cited, firm, client, cents = 90000, 
  *  stampCodingKind header explains why the rig stamps drafts as the agent's
  *  stand-in). `corroborate=false` still states a real invoice number (tax-silent,
  *  qualifying) — see persistTaxSilentFacts. Returns { cp, entryId, documentId }. */
-async function birthSalesCustomer(sub, { client, firm, name, date, stampKind = true, corroborate = true, cents = 90000 }) {
+async function birthSalesCustomer(sub, { client, firm, name, date, stampKind = true, corroborate = true, cents = 90000 , sellerIsClient = false }) {
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 900.00", kind: "invoice" });
   if (corroborate) await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, cents });
-  else await persistTaxSilentFacts(sub, { cited, firm, client, cents, vendorName: name, customerName: "X46 BUYER" });
+  else await persistTaxSilentFacts(sub, { cited, firm, client, cents, vendorName: name, customerName: name, sellerIsClient });
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,
@@ -150,10 +167,10 @@ async function birthSalesCustomer(sub, { client, firm, name, date, stampKind = t
 
 /** A follow-up sales sighting for an EXISTING customer, citing a fresh document.
  *  `stampKind`/`corroborate` gate the two 7A-R4 dimensions independently. */
-async function salesSighting(sub, { client, firm, cp, date, stampKind = true, corroborate = true, cents = 90000, approve = true }) {
+async function salesSighting(sub, { client, firm, cp, date, stampKind = true, corroborate = true, cents = 90000, approve = true, sellerIsClient = false }) {
   const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 900.00", kind: "invoice" });
   if (corroborate) await seedCorroboratingInvoiceFacts(cited, { sub, firm, client, cents });
-  else await persistTaxSilentFacts(sub, { cited, firm, client, cents });
+  else await persistTaxSilentFacts(sub, { cited, firm, client, cents, sellerIsClient });
   const d = await draftEntryV3(sub, {
     client, resolution: await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId }),
     document: cited.documentId, sha256: cited.sha256,
@@ -327,10 +344,10 @@ test("7A-R4 the corroborated>=6 gate: 6/6/60-qualifying but ZERO corroborated is
   // 6 distinct sales-invoice-coded, tax-silent (non-corroborating) sightings
   // spanning >=60 posting days — every OTHER dimension of the floor is satisfied.
   const name = `X46NOCORR ${randomUUID().slice(0, 6)}`;
-  const birth = await birthSalesCustomer(users.alice, { client, firm, name, date: "2026-01-05", stampKind: true, corroborate: false });
+  const birth = await birthSalesCustomer(users.alice, { client, firm, name, date: "2026-01-05", stampKind: true, corroborate: false, sellerIsClient: true });
   assert.ok(birth.cp, "the non-corroborating customer exists (mandatory setup)");
   for (const date of ["2026-02-05", "2026-03-05", "2026-04-05", "2026-05-05", "2026-06-05"]) {
-    await salesSighting(users.alice, { client, firm, cp: birth.cp, date, stampKind: true, corroborate: false });
+    await salesSighting(users.alice, { client, firm, cp: birth.cp, date, stampKind: true, corroborate: false, sellerIsClient: true });
   }
   const floor = await rootQuery("select * from clara._ocr_sales_floor($1,$2,$3)", [client, birth.cp, REV]);
   const f = floor.rows[0];
@@ -364,7 +381,7 @@ test("7A-R4 the corroborated>=6 gate: 6/6/60-qualifying but ZERO corroborated is
   //       already-approved subject makes the status reading say nothing about the rule at all.
   //       The subject is now a genuine draft (approve:false), which is what the cell's own
   //       title claims to be testing.
-  const postEntry = await salesSighting(users.alice, { client, firm, cp: birth.cp, date: "2026-07-05", stampKind: true, corroborate: false, approve: false });
+  const postEntry = await salesSighting(users.alice, { client, firm, cp: birth.cp, date: "2026-07-05", stampKind: true, corroborate: false, approve: false, sellerIsClient: true });
   assert.equal(await entryStatusOf(postEntry.entryId), "draft",
     "mandatory premise: execute_rule_post's subject is a DRAFT (an approved one proves nothing)");
   const postResult = await postViaRule(postEntry.entryId);
@@ -372,22 +389,19 @@ test("7A-R4 the corroborated>=6 gate: 6/6/60-qualifying but ZERO corroborated is
   assert.notEqual(await entryStatusOf(postEntry.entryId), "approved",
     "the uncorroborated entry is never posted via the rule");
   assert.ok(skip, `execute_rule_post recorded a skip reason for the uncorroborated entry (result=${JSON.stringify(postResult)})`);
-  // [lane-7a-db, hardening — REPORTED] THE TOKEN IS ASSERTED, and the assertion says exactly
-  // what this cell does and does not prove. A silent noteLane here let the cell read as
-  // evidence for the corroboration gate while it was actually being refused one control
-  // EARLIER: execute_rule_post re-resolves the draft's proposed counterparty before it ever
-  // reaches corroboration, and on this fixture that resolution raises CLR23, so the recorded
-  // token is 'counterparty_ambiguous'. The OUTCOME claim (never posted) holds either way and
-  // is asserted above; the token claim is pinned to a closed set so it can never drift
-  // unnoticed, and 'not_corroborated' is called out as the one this cell does NOT yet reach.
-  // Reaching it needs the blind lane's own counterparty fixture to resolve cleanly — recorded
-  // for their re-confirmation rather than papered over here.
-  assert.ok(["not_corroborated", "counterparty_ambiguous"].includes(skip),
-    `the post-time refusal is a NAMED control token (got '${skip}')`);
-  if (skip !== "not_corroborated") {
-    noteLane(`[REPORTED] the uncorroborated-pool post half is refused at '${skip}', one control `
-      + `BEFORE corroboration — this cell proves "never posted", NOT the not_corroborated gate`);
-  }
+  // [lane-7a-db, terminal proof — REPORTED] THE TERMINAL TOKEN, ASSERTED EXACTLY.
+  //
+  // This cell used to be refused at 'counterparty_ambiguous' — one control BEFORE
+  // corroboration — because its documents stated a generic seller, so the direction resolved
+  // PURCHASE and execute_rule_post hunted a VENDOR for a customer counterparty. It therefore
+  // proved "never posted" and said nothing about the gate in its own title. The pool is now
+  // built through the cleanly-resolving fixture (sellerIsClient), so the executor gets past
+  // direction, past the buyer match and past the customer control, and the refusal it lands
+  // on is the one 7A-R4 is about. Anything else here is a real finding, so it is an equality,
+  // not a membership test.
+  assert.equal(skip, "not_corroborated",
+    `the post-time refusal is TERMINAL at corroboration (got '${skip}') — an earlier token means `
+    + `the executor never reached the gate this cell exists to prove`);
   void liveRow;
 });
 
@@ -426,7 +440,12 @@ test("7A-R3 with the lane active, a tax-silent sales filing reaches draft admiss
     codingKind: "sales_invoice", opKey: opk("r3draft"),
   });
   assert.ok(draft?.entry_id, "the tax-silent sales filing DRAFTS (human approves each entry, 7A-R3)");
-  await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("r3app") });
+  // [lane-7a-db, terminal proof — REPORTED] THE ORDER IS THE FIX. The approve used to sit
+  // HERE, before the post below — so clara.execute_rule_post saw a NON-DRAFT and refused
+  // 'not_a_draft' without ever consulting corroboration, and this cell's posting claim
+  // proved only that an approved entry cannot be re-posted. The post now runs while the
+  // entry is still a DRAFT (what the executor is built to act on) and the human approval
+  // 7A-R3 sanctions follows it. One entry, both claims, neither weakened.
 
   // No posting path accepts it: even a raw-inserted LIVE rule pointed straight
   // at this entry's counterparty/account refuses to post it (not_corroborated).
@@ -445,17 +464,17 @@ test("7A-R3 with the lane active, a tax-silent sales filing reaches draft admiss
     // reached: the "never autoposted" claim stands, the corroboration-gate claim does not, and
     // that distinction is now stated rather than buried in a note.
     assert.notEqual(await entryStatusOf(draft.entry_id), "checked", "the tax-silent draft is never posted via a rule, live or not");
-    if (skip) {
-      assert.ok(["not_corroborated", "not_a_draft", "counterparty_ambiguous"].includes(skip),
-        `the executor refusal is a NAMED control token (got '${skip}')`);
-      if (skip !== "not_corroborated") {
-        noteLane(`[REPORTED] the tax-silent post half is refused at '${skip}', before corroboration `
-          + `— this cell proves "never autoposted", NOT the not_corroborated gate`);
-      }
-    }
+    assert.equal(skip, "not_corroborated",
+      `the executor refusal is TERMINAL at corroboration (got '${skip}') — an earlier token`
+      + ` means the post never reached the gate 7A-R3 says EVERY posting path keeps`);
   } else {
     noteLane("could not resolve the drafted entry's counterparty row — the never-posts assertion above (status<>checked) still stands unconditionally");
   }
+  // 7A-R3's OTHER half, measured only after the posting gate has been: the human approval
+  // this contract sanctions still succeeds on the very entry no rule would post.
+  await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("r3app") });
+  assert.equal(await entryStatusOf(draft.entry_id), "approved",
+    "the tax-silent sales draft is APPROVABLE by a human — 7A-R3 sanctions the DRAFT, never the autopost");
 });
 
 // ===========================================================================
@@ -879,7 +898,7 @@ test("SETTLE exactly two settle_autodraft_task signatures exist: 5-arity and 6-a
   }
 });
 
-test("SETTLE the 6-arity requires ALL six args (no default on p_workflow_run_id) — a 5-positional call against it is 42883, but the 5-arity overload itself still works", async (t) => {
+test("SETTLE the 6-arity carries NO defaults, so a 6-argument call reaches it unambiguously while 3-to-5 arguments resolve to the 5-arity (which keeps its two defaults); 2 and 7 match nothing", async (t) => {
   if (skip46(t)) return;
   const w = await buildWorld();
   const { users, clients } = w;
@@ -887,7 +906,15 @@ test("SETTLE the 6-arity requires ALL six args (no default on p_workflow_run_id)
   await upsertAccountClassed(users.alice, { client: clients.A1, code: EXP, name: "Prof Fees", type: "expense", opKey: opk("s7exp") });
   const rf = await primeReadyFiling(users.alice, { client: clients.A1 });
   const admit = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.sweep });
-  if (admit?.outcome !== "admitted" || !admit.task_id) { noteLane(`6-arity setup: admission did not reach 'admitted' (got ${JSON.stringify(admit)}) — settle cells depend on the READY predicate outside this file's control`); return; }
+  // MANDATORY, never dormant. This used to `noteLane(...); return;` when admission did not
+  // reach 'admitted', which made every assertion below skippable — a green cell that had
+  // measured nothing about the overload set. The overload set is a pure catalog property;
+  // if the fixture stops admitting, that is a real regression in this file's world and the
+  // cell must say so in red rather than pass quietly.
+  assert.equal(admit?.outcome, "admitted",
+    `mandatory premise: the settle fixture admits (got ${JSON.stringify(admit)}) — the 5-arity`
+    + ` half of this cell needs a real task to settle`);
+  assert.ok(admit.task_id, "mandatory premise: admission returns a task id");
   await beginAutodraft({ task: admit.task_id, workflowRunId: "wf-x46-5arity" }).catch(() => {});
   // The 5-arity overload (unchanged, PINS-preserved) still works.
   const settled5 = await settleAutodraft({ task: admit.task_id, outcome: "skipped_lane", tokens: 50 });
@@ -904,12 +931,33 @@ test("SETTLE the 6-arity requires ALL six args (no default on p_workflow_run_id)
        and proname='settle_autodraft_task' and pronargs=6 and pronargdefaults=0`);
   assert.equal(six.rows[0].n, 1,
     "the 6-arity carries NO defaulted parameters — a default would make every 5-argument call planner-ambiguous");
-  await assert.rejects(
-    () => rootQuery(
-      "select clara.settle_autodraft_task($1::uuid,$2::text,$3::bigint,$4::uuid,$5::jsonb,$6::text,$7::text)",
-      [admit.task_id, "skipped_lane", 50, null, null, "wf-x", "extra"]),
-    (e) => e.code === "42883",
-    "a SEVEN-argument call matches no signature (42883) — the overload set is exactly two");
+  // The 5-arity keeps its own two defaults (p_entry, p_refusal) — MEASURED, and pinned here
+  // because it is the other half of what makes resolution unambiguous. Between them the two
+  // signatures accept 3, 4, 5 (-> 5-arity) and 6 (-> 6-arity) arguments and nothing else.
+  const five = await rootQuery(
+    `select pronargdefaults as d from pg_proc where pronamespace='clara'::regnamespace
+       and proname='settle_autodraft_task' and pronargs=5`);
+  assert.equal(five.rows[0]?.d, 2,
+    "the 5-arity keeps p_entry and p_refusal defaulted — its 3- and 4-argument callers depend on that");
+
+  // BOTH wrong arities, not just the high one. A 2-argument call is below the 5-arity's
+  // three required parameters; a 7-argument call is above the 6-arity. Neither exists.
+  for (const [n, sql, args] of [
+    [2, "select clara.settle_autodraft_task($1::uuid,$2::text)", [admit.task_id, "skipped_lane"]],
+    [7, "select clara.settle_autodraft_task($1::uuid,$2::text,$3::bigint,$4::uuid,$5::jsonb,$6::text,$7::text)",
+        [admit.task_id, "skipped_lane", 50, null, null, "wf-x", "extra"]],
+  ]) {
+    await assert.rejects(
+      () => rootQuery(sql, args),
+      (e) => e.code === "42883",
+      `a ${n}-argument call matches no signature (42883) — the overload set is exactly two, of`
+      + ` arities 5 (3 required) and 6 (all required)`);
+  }
+
+  // ...and note what did NOT happen at the 5-argument call above: it returned, it did not
+  // raise 42725. If anyone defaults p_workflow_run_id on the 6-arity, five arguments would
+  // match BOTH signatures and that call becomes ambiguous rather than 42883 — which is why
+  // the pronargdefaults=0 assertion above is the load-bearing one, not the arity probes.
 });
 
 test("SETTLE a WRONG workflow_run_id via the 6-arity settles NOTHING and reports a benign superseded reason; the CORRECT run id settles cleanly", async (t) => {

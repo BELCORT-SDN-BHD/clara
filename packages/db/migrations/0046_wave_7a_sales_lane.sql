@@ -2152,19 +2152,49 @@ begin
     || '  -- below, which already refuses it as lane_changed/direction_unresolved.' || chr(10)
     || '  v_direction:=clara._autodraft_direction_tri(f.document_id,f.client_id);' || chr(10)
     || '  if v_direction=''sales'' then' || chr(10)
-    -- THE CANONICAL LOCK ORDER FOR THIS FUNCTION, AND WHY IT IS ACQUIRED HERE.
+    -- THE CANONICAL LOCK ORDER FOR THIS FUNCTION, AND WHY THE ADVISORY IS TAKEN HERE.
     --
-    -- EVERY LOCK THIS FUNCTION TAKES, PER PATH, in acquisition order:
-    --   RETRY  (a.reserved_tokens>0): document_filings FOR UPDATE -> ADVISORY 202991617
-    --                                 -> [this block] ADVISORY 202991617 (reentrant, free)
-    --                                 -> sales_backfill_batches FOR UPDATE
-    --                                 -> firm_usage_daily FOR UPDATE
-    --   FRESH  (ordinary admission):  document_filings FOR UPDATE
-    --                                 -> [this block] ADVISORY 202991617
-    --                                 -> sales_backfill_batches FOR UPDATE
-    --                                 -> firm_usage_daily FOR UPDATE
-    -- THE INVARIANT: the firm advisory lock is taken BEFORE any firm-scoped ROW lock, on
-    -- every path. Both orders above are prefixes of one another, so no cycle exists.
+    -- EVERY LOCK THIS FUNCTION TAKES, PER PATH, IN ACQUISITION ORDER. "Row lock" below means
+    -- ANY statement that locks an existing row -- an UPDATE or a DELETE just as much as a
+    -- SELECT ... FOR UPDATE. The first cut of this enumeration listed only the FOR UPDATEs and
+    -- so omitted the retry path entirely; measuring locks with a `for update` grep is the wrong
+    -- instrument, and this comment is the record of that correction.
+    --
+    --   COMMON PREAMBLE, every path:
+    --        document_filings FOR UPDATE                                [FILING-scoped]
+    --   then RETRY WITH REFUND (a.reserved_tokens>0):
+    --        ADVISORY 202991617
+    --     -> firm_usage_daily  upsert + UPDATE (the refund)              [FIRM-scoped]
+    --     -> autodraft_attempts UPDATE (by filing_id)                    [FILING-scoped]
+    --     -> op_receipts DELETE (by the filing-derived op_key)           [FILING-scoped]
+    --   or RETRY WITHOUT REFUND (a.reserved_tokens=0):
+    --        autodraft_attempts UPDATE -> op_receipts DELETE             [FILING-scoped]
+    --   or FRESH: nothing further before this block.
+    --   then ALL PATHS reach here:
+    --        [this block] ADVISORY 202991617 (reentrant when already held)
+    --     -> sales_backfill_batches FOR UPDATE                           [FIRM-scoped]
+    --     -> ADVISORY 202991617 again (0036''s own, inherited and left in place -- reentrant
+    --        and free now that this block takes it first; it is listed because "every lock"
+    --        has to mean every lock, not every lock this migration added)
+    --     -> firm_usage_daily upsert + FOR UPDATE, later + UPDATE        [FIRM-scoped]
+    --     -> sales_backfill_batches UPDATE (row already held above)      [FIRM-scoped]
+    --     -> agent_tasks / autodraft_attempts INSERT (new rows, uncontended)
+    --
+    -- THE INVARIANT, stated over exactly that list: the firm advisory is HELD BEFORE ANY
+    -- FIRM-SCOPED ROW LOCK, on every path. The locks that legitimately precede it are all
+    -- FILING-scoped -- document_filings, autodraft_attempts by filing_id, and the single
+    -- op_receipts row keyed by the filing -- and every path takes them behind the same
+    -- document_filings FOR UPDATE, so two transactions on one filing serialize there and two
+    -- on different filings never want the same row.
+    --
+    -- IT IS **NOT** "the two orders are prefixes of one another". An earlier version of this
+    -- comment claimed that, and it is false: the refund path takes firm_usage_daily BEFORE
+    -- sales_backfill_batches while the fresh path takes sales_backfill_batches BEFORE
+    -- firm_usage_daily. The argument that actually holds is the advisory one -- because every
+    -- FIRM-scoped row lock on every path is taken while holding the single key 202991617 for
+    -- that firm, no two transactions ever hold firm-scoped row locks on the same firm at the
+    -- same time, so those row locks cannot form a cycle in whatever order they are taken.
+    -- That is a stronger claim than a prefix relation, and unlike the prefix claim it is true.
     --
     -- IT WAS NOT ALWAYS SO, and the second deadlock in this file came from exactly that. The
     -- cap count used to sit AFTER the backfill batch''s FOR UPDATE, which made the two paths

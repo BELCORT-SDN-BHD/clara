@@ -582,10 +582,13 @@ test("C5 RETRY and FRESH admissions cannot deadlock on one firm's open batch", a
 
   const citedA = await salesDirectionFiling(sub, client, firm);
   const citedB = await salesDirectionFiling(sub, client, firm);
-  if (!citedA || !citedB) {
-    noteLane("C5: the fixture documents did not resolve sales direction — cell dormant");
-    return;
-  }
+  // MANDATORY, never dormant. A cell that returns PASS when its fixture failed measures
+  // nothing while reporting success — the same noteLane-and-return family the C1 premises and
+  // the blind lane's cells were carrying. If these documents stop resolving sales, this cell
+  // must go RED, because a lock-order proof built on a purchase filing proves nothing.
+  assert.ok(citedA && citedB,
+    "mandatory premise: both fixture documents resolve SALES direction — the sales branch is "
+    + "where the advisory/row ordering lives, so a purchase filing never reaches it");
 
   // Lane ON, watermark in the FUTURE so BOTH filings are backlog and must consult the batch —
   // which is the row lock this cell exists to order against.
@@ -652,22 +655,50 @@ test("C5 RETRY and FRESH admissions cannot deadlock on one firm's open batch", a
   }
 });
 
-test("C6 the canonical lock order is STRUCTURAL: the firm advisory precedes every firm-scoped row lock", async (t) => {
+test("C6 the canonical lock order is STRUCTURAL: the firm advisory precedes EVERY firm-scoped row lock", async (t) => {
   if (skipHere(t)) return;
-  // The race above is the behavioural net; this is the one that fails at the SOURCE the moment
-  // somebody reorders the acquisitions, without waiting for a scheduler to interleave badly.
+  // C5 is the behavioural net; this fails at the SOURCE the moment somebody reorders the
+  // acquisitions, without waiting for a scheduler to interleave badly.
+  //
+  // AND IT COMPARES AGAINST EVERY FIRM-SCOPED ROW LOCK, not just the batch. The first cut
+  // checked the advisory against clara.sales_backfill_batches ALONE, and the cross-model gate
+  // compiled a mutant that defeated it: acquire clara.firm_usage_daily FOR UPDATE before the
+  // advisory and the ordering claim still "passed" while the same inversion was back. A lock
+  // order is a property of the WHOLE set or it is not a property at all.
+  //
+  // THE SET IS MEASURED, not assumed: clara.admit_autodraft_task takes exactly two
+  // FIRM-scoped row locks (clara.sales_backfill_batches and clara.firm_usage_daily) plus one
+  // FILING-scoped one (clara.document_filings, taken first and identically on every path, so
+  // it carries no ordering hazard). If a future edit adds a third firm-scoped row lock, the
+  // "no row lock before the advisory" arm below catches it without needing this list updated.
   const src = (await rootQuery(
     `select prosrc from pg_proc where pronamespace='clara'::regnamespace
        and proname='admit_autodraft_task'`)).rows[0].prosrc;
+
   const salesAt = src.indexOf("if v_direction='sales' then");
   assert.ok(salesAt > 0, "mandatory setup: the sales branch is present");
   const advisoryAt = src.indexOf("pg_advisory_xact_lock(202991617", salesAt);
-  const batchRowAt = src.indexOf("from clara.sales_backfill_batches b", salesAt);
-  assert.ok(advisoryAt > 0 && batchRowAt > 0, "mandatory setup: both acquisitions are on the sales path");
-  assert.ok(advisoryAt < batchRowAt,
-    "the firm advisory lock must be acquired BEFORE the backfill batch row lock — the retry path "
-    + "already holds the advisory when it reaches here, so a row-first order on this path is the "
-    + "opposite order and deadlocks (40P01, reproduced live by the cross-model gate)");
+  assert.ok(advisoryAt > 0, "mandatory setup: the sales branch acquires the firm advisory lock");
+
+  // (a) every firm-scoped row lock that follows the branch start comes AFTER the advisory.
+  for (const [rel, marker] of [
+    ["clara.sales_backfill_batches", "from clara.sales_backfill_batches b"],
+    ["clara.firm_usage_daily", "from clara.firm_usage_daily"],
+  ]) {
+    const at = src.indexOf(marker, salesAt);
+    assert.ok(at > 0, `mandatory setup: ${rel} is locked somewhere at or after the sales branch`);
+    assert.ok(advisoryAt < at,
+      `the firm advisory lock must be acquired BEFORE the ${rel} row lock — the retry path already `
+      + `holds the advisory when it reaches here, so a row-first order on this path is the opposite `
+      + `order and deadlocks (40P01, reproduced live)`);
+  }
+
+  // (b) ...and NOTHING firm-scoped is locked between the branch start and the advisory. This is
+  // the arm that does not need a list: any future row lock hoisted above the advisory fails here.
+  const preamble = src.slice(salesAt, advisoryAt);
+  assert.ok(!/for\s+update/i.test(preamble),
+    `a row lock is taken between the sales branch start and the firm advisory lock — the advisory `
+    + `must be the FIRST lock this branch acquires (found: ${JSON.stringify(preamble.slice(-160))})`);
 });
 
 // ---------------------------------------------------------------------------
@@ -810,11 +841,19 @@ test("E3 the backfill door is recorded, singular per client, pausable, and termi
 // F. PURCHASE ISOLATION. The whole purchase lane must be untouched.
 // ---------------------------------------------------------------------------
 
-test("F1 the purchase evidence floor still admits a purchase proposal on 3 debit sightings", async (t) => {
+test("F1 the purchase floor is STRUCTURALLY untouched: its 3-sighting branch is intact and the corroboration term appears ONLY inside the ocr_sales branch", async (t) => {
   if (skipHere(t)) return;
   // The purchase floor is the SEPARATE v_seen<3 branch (0016:1714-1725); the OCR floor sits
   // under v_evc='ocr_sales' and structured sales never calls it. A purchase proposal must
   // therefore never see a corroboration term at all.
+  //
+  // [lane-7a-db — REPORTED] THE TITLE WAS WRONG AND I CAUGHT IT BY ITS CLOCK. It used to read
+  // "still admits a purchase proposal on 3 debit sightings", which promises a BEHAVIOURAL
+  // admission this cell has never performed — it reads prosrc and nothing else. The tell was
+  // the 0.8ms duration while every behavioural cell in this file costs 20ms+. A title that
+  // overstates its probe is how a suite comes to be believed for coverage it does not have,
+  // so the title now states the SOURCE-STRUCTURE claim that is actually measured here.
+  // Behavioural purchase admission is 0016's own territory and is not re-proved in this file.
   const r = await rootQuery(
     `select prosrc from pg_proc where pronamespace='clara'::regnamespace
       and proname='propose_autopost_rule'`);
