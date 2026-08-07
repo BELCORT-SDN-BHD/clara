@@ -191,7 +191,7 @@ test("F1 runtime half: THE RETRY LOOP ENDS on a human-superseded task — it lea
   // it every leader cycle forever with its reservation charged. A single-sweep assertion
   // cannot tell "settled terminally" from "refused but isolated" — both are non-throwing.
   const first = await reconcileAutoDraftTasks(client, deps(() => {}));
-  const second = await reconcileAutoDraftTasks(client, deps(() => {}));
+  await reconcileAutoDraftTasks(client, deps(() => {})); // sweep 2 — proven via selections[1], its receipt unused
 
   assert.equal(first.autodraftSettled, 1, "sweep 1 settles it terminally");
   assert.equal(first.autodraftSettleFailed, 0, "...without a refusal");
