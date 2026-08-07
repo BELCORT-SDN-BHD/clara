@@ -536,7 +536,7 @@ test("C3 the tri-state direction is total: sales | purchase | unresolved, never 
   // consumed inside the draft writer's refusal predicate — a null there would make the
   // whole comparison null and the refusal silently vanish.
   //
-  // 0048 CHANGED WHAT THE UNKNOWN DOCUMENT ANSWERS, and this cell is where the old contract
+  // 0049 CHANGED WHAT THE UNKNOWN DOCUMENT ANSWERS, and this cell is where the old contract
   // was written down, so this is where the new one goes. 0046 answered 'purchase' and called
   // it "conservative for THIS lane" — true of the sales half only: 'purchase' refuses a sales
   // admission but ADMITS a supplier_bill, so it was fail-OPEN on the purchase side. ADR-063 /
@@ -573,7 +573,7 @@ test("C4 the AUTODRAFT lane REFUSES a coding kind that contradicts the re-derive
   // wake credential, because the family arm is scoped to that wake kind (the human-present
   // chat lane is deliberately untouched).
   //
-  // THE SUPPLIER NAME IS SEEDED DELIBERATELY (0048). Before 0048 this cell used a facts
+  // THE SUPPLIER NAME IS SEEDED DELIBERATELY (0049). Before 0049 this cell used a facts
   // document with no counterparty identity at all and leaned on the old zero-evidence default
   // to make it 'purchase' — so the premise it asserted was the very defect ADR-063 removed,
   // and the cell would have kept passing on 'unresolved' for the wrong reason. Naming a real

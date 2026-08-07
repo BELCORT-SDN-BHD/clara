@@ -1,6 +1,6 @@
-// 0048 — THE DIRECTION ANSWER MUST BE EARNED, IN BOTH DIRECTIONS.
+// 0049 — THE DIRECTION ANSWER MUST BE EARNED, IN BOTH DIRECTIONS.
 //
-// WHAT THIS FILE IS FOR. 0048's own tail asserts SHAPE (which arms the body carries, that the
+// WHAT THIS FILE IS FOR. 0049's own tail asserts SHAPE (which arms the body carries, that the
 // old fallthrough is gone, that both entry points delegate to one core) and re-measures the
 // estate it is applied to. Neither is behaviour on FIXTURES it controls. Every cell below
 // builds a document with a named evidence shape and reads what the DB actually answers.
@@ -29,18 +29,18 @@ import {
   addClientIdentifier, rm,
 } from "./a21-helpers.mjs";
 
-let has48 = false;
+let has49 = false;
 let world = null;
 
 function skipHere(t) {
-  return skip16(t, has48, "0048 not applied — the direction-evidence battery is dormant");
+  return skip16(t, has49, "0049 not applied — the direction-evidence battery is dormant");
 }
 
-/** Is 0048 on this database? Read from the migration ledger, not from a function's
+/** Is 0049 on this database? Read from the migration ledger, not from a function's
  *  existence: a half-applied file is a different failure than an unapplied one. */
-async function has0048() {
+async function has0049() {
   const r = await rootQuery(
-    "select count(*)::int as n from clara.schema_migrations where version like '0048_%'");
+    "select count(*)::int as n from clara.schema_migrations where version like '0049_%'");
   return r.rows[0].n === 1;
 }
 
@@ -49,7 +49,7 @@ async function has0048() {
  *  was measured. Every cell that matters here needs it, so it is the default. */
 async function bareClient(sub) {
   const client = await createClient(sub, {
-    name: `x48_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`, opKey: opk("cli"),
+    name: `x49_${Date.now().toString(36)}_${randomUUID().slice(0, 6)}`, opKey: opk("cli"),
   });
   await grantConsent(sub, { firm: await firmOf(client), client }).catch(() => {});
   return client;
@@ -117,11 +117,11 @@ async function lane(client, filing) {
 
 before(async () => {
   const ready = await a21EnsureReady();
-  has48 = ready.base && ready.has16 && (await has0048());
-  if (has48) world = await buildWorld();
-  else noteLane("0048 absent — direction-evidence battery skipped");
+  has49 = ready.base && ready.has16 && (await has0049());
+  if (has49) world = await buildWorld();
+  else noteLane("0049 absent — direction-evidence battery skipped");
 });
-after(async () => { printLaneNotes("x48-direction-evidence"); printSkipCount("x48-direction-evidence"); await endPool(); });
+after(async () => { printLaneNotes("x49-direction-evidence"); printSkipCount("x49-direction-evidence"); await endPool(); });
 
 // ===========================================================================
 // THE DEFECT ITSELF
@@ -131,7 +131,7 @@ test("D1 a stated supplier REGISTRATION the client cannot be compared against AB
   if (skipHere(t)) return;
   // THE §7-A HALF-1 SHAPE, EXACTLY. The page states a registration and a name; the client
   // holds NO tin/ssm identifier and no alias, so neither arm can hit — and the registration
-  // arm could not even RUN. Pre-0048 this answered 'purchase' with total confidence.
+  // arm could not even RUN. Pre-0049 this answered 'purchase' with total confidence.
   const sub = world.users.alice;
   const client = await bareClient(sub);
   const doc = await evidenceDoc(sub, client, {
@@ -161,18 +161,29 @@ test("D2 the SAME document resolves 'purchase' once the client has a hard identi
   });
   assert.equal((await direction(doc.documentId, client)).code, "CLR30",
     "premise: with no client identifier the stated registration is untestable");
+  // ONE KIND IS NOT COVERAGE (the 2026-08-08 revision). `invoice.vendor_registration` carries
+  // a BRN or a TIN and never says which, so an ssm-only client still cannot test a stated
+  // registration: the value could be the TIN it has never recorded. This half of the cell is
+  // the reviewer's exact scenario, and before the revision it answered a confident 'purchase'.
   await addClientIdentifier(sub, { client, kind: "ssm", value: "199901000777" });
+  const partial = await direction(doc.documentId, client);
+  assert.equal(partial.code, "CLR30",
+    `an ssm-only client STILL cannot test a stated registration — the stated value may be the tin it does not hold (got '${partial.value}'/${partial.code})`);
+  await addClientIdentifier(sub, { client, kind: "tin", value: "c99887766554" });
   const after = await direction(doc.documentId, client);
   assert.equal(after.value, "purchase",
-    `with a hard identifier on file the registration arm really runs, misses, and the answer is a TESTED purchase (got '${after.value}'/${after.code})`);
+    `with BOTH hard kinds on file the registration arm really runs, misses, and the answer is a TESTED purchase (got '${after.value}'/${after.code})`);
 });
 
 test("D3 an ACCEPTED VENDOR of this client is positive purchase evidence, even with no client identifier at all", async (t) => {
   if (skipHere(t)) return;
-  // THE BLAST-RADIUS ARM. ROME PROPERTIES holds no tin/ssm identifier and its two BRIGHTPATH
-  // bills state a registration, so the testability rule alone would have sent two LIVE
-  // purchase documents to unresolved. They stay 'purchase' because BRIGHTPATH is already a
-  // vendor in ROME PROPERTIES' own books — which is this cell.
+  // THE ARM WITH NO LIVE COVERAGE, WHICH IS WHY IT HAS THIS CELL. Measured read-only on
+  // 2026-08-08: across all four live clients, 29 read filings answer (P1), 19 answer (P2) and
+  // ZERO answer (P3) — including the two ROME PROPERTIES BRIGHTPATH bills an earlier note
+  // credited to this arm, which in fact resolve their BUYER to the client and are answered by
+  // (P1) two branches earlier. So THIS CELL IS (P3)'s ONLY COVERAGE anywhere. It matters
+  // forward, not today: it is what answers the same bill once a page stops naming its
+  // customer, on a client that holds no hard identifiers of its own.
   const sub = world.users.alice;
   const client = await bareClient(sub);
   const doc = await evidenceDoc(sub, client, {
@@ -229,7 +240,7 @@ test("D6 the BUYER resolving to this client is purchase evidence on its own", as
 
 test("D7 a document with NO invoice facts at all is 'unresolved', and the human queue is UNCHANGED", async (t) => {
   if (skipHere(t)) return;
-  // Two claims, and the second is why 0048 recuts clara._coding_lane_core at all. The tri
+  // Two claims, and the second is why 0049 recuts clara._coding_lane_core at all. The tri
   // answer must be honest — nothing has been read. The QUEUE must not change: 36 of the 38
   // live filings in this state are bank statements and management accounts, and telling a
   // human "we could not tell if this is a sale or a purchase" about a bank statement, in the
@@ -287,7 +298,7 @@ test("D9 supplier = the client still resolves 'sales'", async (t) => {
 
 test("D10 a supplier NAME matching the client but a registration that does not still ABSTAINS", async (t) => {
   if (skipHere(t)) return;
-  // 0015's FIX-4 contradiction arm, re-asserted here because 0048 rewrote the body it lives
+  // 0015's FIX-4 contradiction arm, re-asserted here because 0049 rewrote the body it lives
   // in: a contradiction must stay a CONTRADICTION and must not be absorbed into the new
   // zero-evidence branch, which would lose the distinction the detail payload now carries.
   const sub = world.users.alice;
@@ -309,7 +320,7 @@ test("D10 a supplier NAME matching the client but a registration that does not s
 test("D11 a pin that is not a done invoice_facts extraction of this document ABSTAINS, never 'purchase'", async (t) => {
   if (skipHere(t)) return;
   // clara.execute_rule_post reads the 3-arity variant, so this is the path that POSTS. Before
-  // 0048 it carried a byte-duplicate of the decision and an unhonourable pin answered
+  // 0049 it carried a byte-duplicate of the decision and an unhonourable pin answered
   // 'purchase' — the executor would then have looked for a purchase-side rule on a document
   // it had not read.
   const sub = world.users.alice;
@@ -351,4 +362,42 @@ test("D12 the two entry points cannot drift: they answer identically on every fi
     assert.equal(pinnedValue, live.value, `shape ${i}: the pinned variant answers what the live one answers`);
     assert.equal(pinnedCode, live.code, `shape ${i}: and abstains exactly where the live one abstains`);
   }
+});
+
+// ===========================================================================
+// THE APPLY-TIME CHANNEL ITSELF
+// ===========================================================================
+
+test("D13 the apply left a DURABLE receipt â€” clara.migration_receipts, not a discarded NOTICE", async (t) => {
+  if (skipHere(t)) return;
+  // THE ARM THE REVIEW MINTED. 0049's tail measures one class it deliberately does not assert
+  // away (a READ filing moving off a defaulted direction) and the first cut reported it with
+  // `raise notice`, while the production runner (packages/db/scripts/migrate.mjs â†’ a bare
+  // pg.Client) attached no 'notice' listener and dropped every one of them. This cell is the
+  // positive read that the replacement channel SURVIVED the apply on this very database â€”
+  // not that the code contains an insert, but that a row is there to be selected.
+  const r = await rootQuery(
+    `select receipt, measured_at from clara.migration_receipts
+      where version = '0049_direction_zero_evidence' order by id desc limit 1`);
+  assert.ok(r.rows[0], "0049's apply persisted a receipt row (the channel the ceremony reads)");
+  const receipt = r.rows[0].receipt;
+  for (const k of ["filings_measured", "read_filings_moved", "read_movement_declared",
+                   "unread_filings_now_unresolved", "moved_filings", "database", "applied_by"]) {
+    assert.ok(Object.hasOwn(receipt, k), `the receipt carries '${k}' (got keys: ${Object.keys(receipt).join(",")})`);
+  }
+  // The named list and the count are the SAME measurement stated twice; a receipt whose list
+  // is shorter than its count is the truncated-evidence shape this cell exists to refuse.
+  assert.equal(receipt.moved_filings.length, receipt.read_filings_moved,
+    "every counted movement is also NAMED in the receipt (no truncation)");
+  // ...and the table is unreachable from every application role: it is ceremony metadata.
+  for (const role of ["clara_authenticated", "clara_agent_ro", "clara_runtime"]) {
+    for (const priv of ["select", "insert", "update", "delete"]) {
+      const ok = (await rootQuery("select has_table_privilege($1,$2,$3) as ok",
+        [role, "clara.migration_receipts", priv])).rows[0].ok;
+      assert.equal(ok, false, `${role} must NOT ${priv} clara.migration_receipts`);
+    }
+  }
+  const rls = (await rootQuery(
+    "select relrowsecurity as rls, relforcerowsecurity as force from pg_class where oid='clara.migration_receipts'::regclass")).rows[0];
+  assert.ok(rls.rls && rls.force, `clara.migration_receipts is RLS ENABLE+FORCE (got ${JSON.stringify(rls)})`);
 });

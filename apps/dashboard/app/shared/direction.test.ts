@@ -40,6 +40,10 @@ test("laneReasonCopy swaps vendor→customer for sales, keeps current wording ot
   assert.equal(laneReasonCopy("vendor_unresolved", null), LANE_REASON_COPY.vendor_unresolved);
   assert.equal(laneReasonCopy("already_coded", "sales"), LANE_REASON_COPY.already_coded); // non-vendor reason unchanged
   assert.equal(laneReasonCopy("unknown_token", null), "unknown_token"); // unknown → echoed
+  // 0049 — the abstain token must NOT fall through to the echo above. queueKindCatalog renders
+  // every reason through this function, so a missing entry puts the raw token on a human card.
+  assert.notEqual(laneReasonCopy("direction_unresolved", null), "direction_unresolved");
+  assert.equal(laneReasonCopy("direction_unresolved", "sales"), LANE_REASON_COPY.direction_unresolved);
 });
 
 test("clr21Copy swaps the vendor noun for sales, else matches CLR21_COPY", () => {

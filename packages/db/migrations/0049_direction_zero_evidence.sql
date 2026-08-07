@@ -1,4 +1,4 @@
--- 0048_direction_zero_evidence.sql -- THE TRI-STATE DIRECTION CONTRACT STOPS DEFAULTING TO
+-- 0049_direction_zero_evidence.sql -- THE TRI-STATE DIRECTION CONTRACT STOPS DEFAULTING TO
 -- 'purchase' WHEN NOTHING WAS ACTUALLY TESTED.
 --
 -- GOVERNING LAW: ADR-063 / docs/plan/wave-7a-contract.md 7A-R2 (Q1 = A) -- direction is
@@ -6,9 +6,27 @@
 -- CLAUDE.md review/evidence law 2: "absence is not evidence, and a derived state is not
 -- evidence" -- every absence falls through to the fail-closed branch.
 --
--- MIGRATION NUMBER claimed at MERGE time (standing law, CLAUDE.md + RENUMBER.md). 0048 is the
--- WORKING number; the frontier probe in SECTION 0 pins 0047_settle_guard_identity as the
--- applied predecessor.
+-- MIGRATION NUMBER claimed at MERGE time (standing law, CLAUDE.md + RENUMBER.md). This file
+-- was authored as 0048 and RENUMBERED TO 0049 for the agreed merge order: three open PRs each
+-- claimed 0048, and #209 (0048_autodraft_sweep_cap_own_run) merges first, this one second,
+-- #210 (egress release) third as 0050. The renumber is mechanical and complete -- the file,
+-- its rig battery (x48- -> x49-direction-evidence.test.mjs, which reads the ledger for
+-- '0049_%'), the ceremony postverify and the seed companion all move together, and nothing
+-- keys on the number except that ledger read. NO SPLICE-ANCHOR OVERLAP EXISTS WITH EITHER
+-- SIBLING, so the merge order is free: #209 recuts clara.admit_autodraft_task, #210 recuts
+-- clara.release_held_document_tasks, and this file recuts the direction trio plus
+-- clara._coding_lane_core. The frontier probe in SECTION 0 pins 0046 and 0047 -- the two
+-- bodies this file reads -- and deliberately does NOT pin 0048 by name: what this file needs
+-- is those bodies, not a particular sibling, and the runner already refuses an out-of-order
+-- number on its own.
+--
+-- THE CEREMONY COMPANIONS (both in packages/db/deploy/, neither applied by the author):
+--   direction-zero-evidence-0049-postverify.sql  -- READS the durable receipt this file
+--     writes, prints the named movements, and STOPS if any read filing moved. Run it after
+--     the apply; a ceremony that does not run it has not read the census.
+--   client-identifiers-0049-seed.sql             -- the evidence-cited hard-identifier seed
+--     for BEE CREATIVE SOLUTION and ROME PROPERTIES (both hold none today), through the
+--     audited verb clara.add_client_identifier, armed only by an explicit confirmation.
 --
 -- =====================================================================================
 -- WHAT WENT WRONG, IN ONE PARAGRAPH
@@ -49,9 +67,14 @@
 --   (P2) A SUPPLIER IDENTITY WAS STATED **AND EVERY STATED ARM WAS TESTABLE**, and none of
 --        them matched the client. "Testable" is the whole fix: a stated supplier NAME is
 --        always testable (clara.clients.name is NOT NULL, so the comparison really happens),
---        while a stated supplier REGISTRATION is testable ONLY if the client carries at
---        least one tin/ssm identifier. An untested hard identifier cannot be scored as a
---        miss -- that is (d) above, restated as a rule.
+--        while a stated supplier REGISTRATION is testable ONLY if the client holds an
+--        identifier of BOTH hard kinds -- tin AND ssm. Both, because the document does not
+--        say which kind it stated and cannot: `invoice.vendor_registration` carries a BRN or
+--        a TIN, whichever the page supplied (myinvois.mjs:165 `supplier.brn ?? supplier.tin`;
+--        the Azure DI lane pushes a typed VendorTaxId into the same field), and there is no
+--        separate vendor-taxid field to tell them apart. An untested hard identifier cannot
+--        be scored as a miss -- that is (d) above, restated as a rule, and "untested" has to
+--        mean untested in EVERY kind the stated value could be.
 --   (P3) THE STATED SUPPLIER IS AN ACCEPTED VENDOR OF THIS CLIENT -- it matches a live
 --        clara.counterparties row of kind='vendor' (by registration, by name, or by an
 --        approved alias). A party the client's own books already hold as a supplier is
@@ -60,11 +83,25 @@
 --
 -- Anything else raises CLR30 with reason `direction_unresolved`. The ERRCODE AND THE REASON
 -- TOKEN ARE DELIBERATELY THE EXISTING ONES, not new: every caller in the live catalog
--- already handles CLR30, and clara._coding_lane_core already renders that token as a named
--- reason the dashboard has copy for. A new token would have been a second path to maintain
--- and a dashboard change for no gain. The detail payload gains ONE key, `"evidence":"none"`,
--- so a reader can tell "we read the page and it contradicted itself" from "we never got to
--- ask" without either becoming a new refusal class.
+-- already handles CLR30, and clara._coding_lane_core already appends that exact token to
+-- `reasons`, so nothing downstream gains a branch. A new token would have been a second path
+-- to maintain for no gain. The detail payload gains ONE key, `"evidence":"none"`, so a reader
+-- can tell "we read the page and it contradicted itself" from "we never got to ask" without
+-- either becoming a new refusal class.
+--
+-- WHAT THE DASHBOARD ACTUALLY RENDERS FOR IT (corrected 2026-08-08; an earlier cut of this
+-- header claimed the dashboard "already has copy for that reason token", and that was FALSE).
+-- `LANE_REASON_COPY` in apps/dashboard/app/shared/reviewCardTypes.ts did NOT carry
+-- `direction_unresolved`, and `laneReasonCopy()` ends `LANE_REASON_COPY[reason] ?? reason` --
+-- it ECHOES an unknown token verbatim, which apps/dashboard/app/shared/direction.test.ts pins
+-- deliberately. queueKindCatalog.ts renders each reason through that function, so the first
+-- read-but-undirectable document would have shown an accountant the raw string
+-- `direction_unresolved` on a card where every other reason is a sentence. THIS PR IS WHAT
+-- CREATES THAT DOCUMENT CLASS, so it ships the one missing line of copy with it (the only
+-- change outside packages/db). THREE OTHER TOKENS ARE ALSO MISSING COPY -- 0046's
+-- `customer_name_missing` and `customer_ambiguous`, and `binding_ambiguous` -- and are LEFT
+-- ALONE and recorded here rather than fixed silently: this file did not create them, and a
+-- token-by-token copy sweep belongs to whoever owns the queue surface.
 --
 -- =====================================================================================
 -- EVERY CALLER, MEASURED FROM THE LIVE CATALOG (not grepped from the repo), AND WHERE
@@ -91,31 +128,49 @@
 --   clara._document_direction / _at        the two this file recuts.
 --
 -- =====================================================================================
--- THE BLAST-RADIUS PROBE (read-only against live, 2026-08-07, python live_ro.py)
+-- THE BLAST-RADIUS PROBE (read-only against live, RE-MEASURED 2026-08-08, python live_ro.py)
 -- =====================================================================================
--- 129 non-retired document_filings across the four live clients. Evidence class by client,
--- with the answer today and the answer under this file:
+-- 130 non-retired document_filings across the four live clients (an earlier cut of this table
+-- read 129 on 2026-08-07 and attributed the arms wrongly; §7-A Half-1 acceptance is ingesting,
+-- so the estate MOVES -- one further ROME SECRETARY sale has been read since, and the arm
+-- attribution below is now re-derived from the FINAL predicate rather than described).
 --
---   CLIENT                     tin/ssm ids   n   evidence                     now -> after
---   BEE CREATIVE SOLUTION          NO       10   supplier NAME stated         purchase -> purchase  (P2)
+-- The probe re-derives the whole decision as a read-only CTE and reports WHICH ARM answers,
+-- per filing. Evidence class by client, with the answer today and the answer under this file:
+--
+--   CLIENT                     tin/ssm ids   n   ARM THAT ANSWERS             now -> after
+--   BEE CREATIVE SOLUTION          NO        6   (P1) buyer IS the client     purchase -> purchase
+--   BEE CREATIVE SOLUTION          NO        4   (P2) supplier NAME missed    purchase -> purchase
 --   BEE CREATIVE SOLUTION          NO       11   no invoice_facts extraction  purchase -> UNRESOLVED
---   ROME PROPERTIES                NO       27   supplier NAME stated         purchase -> purchase  (P2)
---   ROME PROPERTIES                NO        2   supplier NAME + REGISTRATION purchase -> purchase  (P3)
+--   ROME PROPERTIES                NO       14   (P1) buyer IS the client     purchase -> purchase
+--   ROME PROPERTIES                NO       15   (P2) supplier NAME missed    purchase -> purchase
 --   ROME PROPERTIES                NO       13   no invoice_facts extraction  purchase -> UNRESOLVED
---   ROME SECRETARY                YES       21   supplier = the client        sales    -> sales
---   ROME SECRETARY                YES        9   supplier NAME stated         purchase -> purchase  (P2)
+--   ROME SECRETARY                YES       22   supplier = the client        sales    -> sales
+--   ROME SECRETARY                YES        9   (P1) buyer IS the client     purchase -> purchase
 --   ROME SECRETARY                YES        2   no invoice_facts extraction  purchase -> UNRESOLVED
 --   Fictional Test Services       YES       22   supplier = the client        sales    -> sales
 --   Fictional Test Services       YES       12   no invoice_facts extraction  purchase -> UNRESOLVED
 --   (Alara / Borneo RLS fixtures: zero filings.)
 --
--- READ THE ROME PROPERTIES ROW MARKED (P3) TWICE -- it is the trap this file had to clear.
--- Those two documents (BRIGHTPATH, BINV202510-018 / BINV202511-014) state a supplier
--- registration `2024010477561593602x`, and ROME PROPERTIES carries NO tin/ssm identifier at
--- all (its one client_identifiers row is kind='bank_account'). Under (P2) alone they would
--- have flipped to UNRESOLVED and a live purchase pipeline would have broken. They stay
--- 'purchase' because BRIGHTPATH is a live kind='vendor' counterparty of ROME PROPERTIES --
--- which is (P3), and which is exactly why (P3) is in the rule and not left as a nicety.
+-- (P3) HOLDS UP NOTHING ON LIVE, AND SAYING OTHERWISE WAS A REAL ERROR. An earlier cut of this
+-- header claimed the two ROME PROPERTIES BRIGHTPATH bills (BINV202510-018 / BINV202511-014,
+-- supplier registration `2024010477561593602x`) "stay purchase because BRIGHTPATH is a live
+-- kind='vendor' counterparty" and that "(P2) alone would have broken a live purchase
+-- pipeline". MEASURED, both documents ALSO resolve their BUYER to ROME PROPERTIES, and (P1)
+-- is evaluated two branches EARLIER, so (P3) is never reached on either. Across all four
+-- clients: 29 filings answer (P1), 19 answer (P2), and ZERO answer (P3). The live answers are
+-- more robust than that claim, and the claim pointed a future reviewer at the wrong guard in
+-- both directions -- weakening (P3) would have looked live-breaking when it is not, and
+-- weakening (P1) would have looked safe when it is not. (P3) stays in the rule on its own
+-- merits -- it is the arm that keeps an identifier-less client's purchases alive once a page
+-- stops naming its customer -- and its only coverage is rig cell D3, which is now labelled as
+-- the ONLY coverage it has.
+--
+-- ...AND THE (P2) COVERAGE RULE COSTS NOTHING ON LIVE TODAY, MEASURED THE SAME WAY. Every one
+-- of the 19 (P2) filings is a NAME-ONLY page (`invoice.vendor_registration` absent), so the
+-- registration limb -- the one this file tightened from "holds any hard identifier" to "holds
+-- both kinds" -- does not fire on a single live filing. Live hard-identifier coverage today:
+-- ROME SECRETARY ssm only, Fictional Test Services ssm+tin, BEE and ROME PROPERTIES none.
 --
 -- THE ONLY LIVE FLIPS ARE THE 38 FILINGS WITH NO invoice_facts EXTRACTION, and 36 of those
 -- are documents that HAVE no direction: 20 bank statements, 4 management accounts, 2 consent
@@ -124,8 +179,10 @@
 -- The tail arms do not take this table on trust: tail arm 7 re-measures every filing before
 -- and after the recut on whatever database this file is applied to, HARD-refuses anything
 -- that crosses the sales boundary or widens off 'unresolved', hard-refuses any movement in
--- the human queue for an unread filing, and COUNTS AND NAMES every read filing that moved off
--- a defaulted direction. On live that count must be ZERO; the ceremony reads it.
+-- the human queue for an unread filing, and -- since the 2026-08-08 revision -- HARD-REFUSES
+-- any read filing moving off a defaulted direction unless the operator declared the exact
+-- number in advance, and writes the whole census to clara.migration_receipts where the
+-- ceremony can SELECT it. See "THE DURABLE RECEIPT" below.
 --
 -- =====================================================================================
 -- WHY clara._coding_lane_core IS RECUT TOO (SECTION 3), AND WHY THAT IS NOT A LOOPHOLE
@@ -168,7 +225,12 @@
 --   * clara._autodraft_sales_direction keeps its name, its boolean answer and its
 --     never-null contract (0036:497). CLR30 was already false there and still is.
 --   * The `sales_direction` receipt token (7A-R2's last sentence) is untouched.
---   * No workflow body moves; no runtime or dashboard code is in this PR.
+--   * No workflow body moves. TWO non-DB files DO move, both minted by this file's review and
+--     both named where they land: apps/dashboard/app/shared/reviewCardTypes.ts gains the one
+--     line of queue copy for `direction_unresolved` (this file creates the first document that
+--     carries it into the human queue -- see the token note above), and
+--     packages/db/scripts/migrate.mjs starts PRINTING server notices, which it silently
+--     dropped (SECTION 4). Neither is a behaviour change to any DB decision.
 --
 -- THE DUPLICATE BODY IS REMOVED WHILE WE ARE HERE. clara._document_direction_at (0016:1852)
 -- was a verbatim copy of the 0015 decision with one different extraction lookup, and both
@@ -197,7 +259,7 @@ set local statement_timeout = '20min';
 -- properties a careless re-ship silently drops. Stashed rather than pinned as literals in the
 -- tail on purpose: the claim is "unchanged", and comparing post against pre states exactly
 -- that (0047 SECTION 0's reasoning, and its recorded proconfig-rendering mistake).
-create temp table _d48_pre(
+create temp table _d49_pre(
   sig     text primary key,
   folded  text    not null,
   secdef  boolean not null,
@@ -208,7 +270,7 @@ create temp table _d48_pre(
 -- than trusted from a comment. One row per non-retired filing: what the tri-state authority
 -- answers today, what the human queue shows today, and whether the document has any
 -- invoice-facts extraction at all -- the one property that licenses a changed answer.
-create temp table _d48_pre_dir(
+create temp table _d49_pre_dir(
   filing    uuid primary key,
   client    uuid not null,
   document  uuid not null,
@@ -231,7 +293,7 @@ begin
   loop
     select count(*) into v_n from clara.schema_migrations where version = v_sig;
     if v_n <> 1 then
-      raise exception '0048 prestate: % is not recorded as applied -- apply in order', v_sig
+      raise exception '0049 prestate: % is not recorded as applied -- apply in order', v_sig
         using errcode = 'CLR10';
     end if;
   end loop;
@@ -249,7 +311,7 @@ begin
     begin
       perform v_sig::regprocedure;
     exception when others then
-      raise exception '0048 prestate: % does not exist at that exact signature', v_sig
+      raise exception '0049 prestate: % does not exist at that exact signature', v_sig
         using errcode = 'CLR10';
     end;
   end loop;
@@ -257,7 +319,7 @@ begin
     where p.pronamespace='clara'::regnamespace
       and p.proname in ('_document_direction','_document_direction_at','_autodraft_direction_tri');
   if v_n <> 3 then
-    raise exception '0048 prestate: expected exactly THREE direction functions across those three names, found % -- an overload this file does not know about would keep the old answer reachable', v_n
+    raise exception '0049 prestate: expected exactly THREE direction functions across those three names, found % -- an overload this file does not know about would keep the old answer reachable', v_n
       using errcode = 'CLR10';
   end if;
 
@@ -269,13 +331,13 @@ begin
   loop
     select prosrc into v_src from pg_proc where oid = v_sig::regprocedure;
     if position('if v_sales then return ''sales''; else return ''purchase''; end if;' in v_src) = 0 then
-      raise exception '0048 prestate: % no longer ends in the sales-or-purchase fallthrough this file exists to remove -- the body has already been changed by something else', v_sig
+      raise exception '0049 prestate: % no longer ends in the sales-or-purchase fallthrough this file exists to remove -- the body has already been changed by something else', v_sig
         using errcode = 'CLR10';
     end if;
   end loop;
   select prosrc into v_src from pg_proc where oid = 'clara._autodraft_direction_tri(uuid,uuid)'::regprocedure;
   if position('if p_document is null or p_client is null then return ''purchase''; end if;' in v_src) = 0 then
-    raise exception '0048 prestate: clara._autodraft_direction_tri no longer carries 0046''s null-answers-purchase arm -- the body has already been changed'
+    raise exception '0049 prestate: clara._autodraft_direction_tri no longer carries 0046''s null-answers-purchase arm -- the body has already been changed'
       using errcode = 'CLR10';
   end if;
 
@@ -283,15 +345,15 @@ begin
   -- (P3) compares a document region normalised by THIS file's own
   -- lower(regexp_replace(x,'[^a-zA-Z0-9]','','g')) against columns normalised by the
   -- counterparty tables' CHECK constraints. If those constraints ever said something else,
-  -- (P3) would be comparing two different alphabets and would quietly stop matching -- and
-  -- the ROME PROPERTIES pair in the header would flip to unresolved with nothing failing.
+  -- (P3) would be comparing two different alphabets and would quietly stop matching, and the
+  -- arm would answer "no accepted vendor" for every client on earth with nothing failing.
   -- The constraint definitions are pinned as deparsed text, so even a PostgreSQL deparse
   -- change fails here loudly rather than weakening the claim silently.
   if not exists(select 1 from pg_constraint
       where conrelid='clara.counterparties'::regclass and conname='ck_counterparties_name_normalized'
         and pg_get_constraintdef(oid) =
             'CHECK ((name_normalized = lower(regexp_replace(name, ''[^a-zA-Z0-9]''::text, ''''::text, ''g''::text))))') then
-    raise exception '0048 prestate: clara.counterparties.name_normalized is not the pinned lower/regexp_replace normalisation (found %) -- the vendor-evidence arm would compare two alphabets',
+    raise exception '0049 prestate: clara.counterparties.name_normalized is not the pinned lower/regexp_replace normalisation (found %) -- the vendor-evidence arm would compare two alphabets',
       (select coalesce(pg_get_constraintdef(oid),'<absent>') from pg_constraint
         where conrelid='clara.counterparties'::regclass and conname='ck_counterparties_name_normalized')
       using errcode = 'CLR10';
@@ -299,7 +361,7 @@ begin
   if not exists(select 1 from pg_constraint
       where conrelid='clara.counterparties'::regclass and conname='ck_counterparties_registration_normalized'
         and pg_get_constraintdef(oid) like '%lower(regexp_replace(registration_no, ''[^a-zA-Z0-9]''::text, ''''::text, ''g''::text))%') then
-    raise exception '0048 prestate: clara.counterparties.registration_normalized is not the pinned normalisation (found %)',
+    raise exception '0049 prestate: clara.counterparties.registration_normalized is not the pinned normalisation (found %)',
       (select coalesce(pg_get_constraintdef(oid),'<absent>') from pg_constraint
         where conrelid='clara.counterparties'::regclass and conname='ck_counterparties_registration_normalized')
       using errcode = 'CLR10';
@@ -308,23 +370,25 @@ begin
       where conrelid='clara.counterparty_aliases'::regclass and conname='ck_counterparty_aliases_normalized'
         and pg_get_constraintdef(oid) =
             'CHECK ((alias_normalized = lower(regexp_replace(alias_display, ''[^a-zA-Z0-9]''::text, ''''::text, ''g''::text))))') then
-    raise exception '0048 prestate: clara.counterparty_aliases.alias_normalized is not the pinned normalisation (found %)',
+    raise exception '0049 prestate: clara.counterparty_aliases.alias_normalized is not the pinned normalisation (found %)',
       (select coalesce(pg_get_constraintdef(oid),'<absent>') from pg_constraint
         where conrelid='clara.counterparty_aliases'::regclass and conname='ck_counterparty_aliases_normalized')
       using errcode = 'CLR10';
   end if;
 
   -- (0.5) THE HARD-IDENTIFIER DOMAIN IS THE THREE VALUES (P2) REASONS ABOUT. "Testable" means
-  -- `kind in ('tin','ssm')` -- the same pair the sales arms have always used, and the same
-  -- pair 0030's AB-3 matcher uses. A FOURTH kind arriving later (a distinct 'brn', say) would
-  -- make a client that holds only that kind read as "no hard identifier" and send its
-  -- purchases to unresolved, with no line of this file changing. Refuse instead.
+  -- the client holds an identifier of BOTH hard kinds, and (P2) spells that as
+  -- `count(distinct kind) filtered to ('tin','ssm') = 2` -- the same pair the sales arms have
+  -- always used, and the same pair 0030's AB-3 matcher uses. THE LITERAL 2 IS A FACT ABOUT
+  -- THIS DOMAIN, so the domain is pinned rather than assumed: a FOURTH kind arriving later (a
+  -- distinct 'brn', say) would make the coverage test either unsatisfiable or wrong, with no
+  -- line of this file changing. Refuse instead, and re-derive the rule deliberately.
   if not exists(select 1 from pg_constraint
       where conrelid='clara.client_identifiers'::regclass
         and conname='client_identifiers_kind_check'
         and pg_get_constraintdef(oid) =
             'CHECK ((kind = ANY (ARRAY[''tin''::text, ''ssm''::text, ''bank_account''::text])))') then
-    raise exception '0048 prestate: clara.client_identifiers.kind is not the pinned tin/ssm/bank_account domain (found %) -- re-derive (P2)''s testability rule before applying',
+    raise exception '0049 prestate: clara.client_identifiers.kind is not the pinned tin/ssm/bank_account domain (found %) -- re-derive (P2)''s testability rule before applying',
       (select coalesce(pg_get_constraintdef(oid),'<absent>') from pg_constraint
         where conrelid='clara.client_identifiers'::regclass and conname='client_identifiers_kind_check')
       using errcode = 'CLR10';
@@ -343,7 +407,7 @@ begin
       where attrelid = split_part(v_sig,':',1)::regclass
         and attname = split_part(v_sig,':',2) and attnum > 0 and not attisdropped;
     if v_n <> 1 then
-      raise exception '0048 prestate: % does not exist', v_sig using errcode = 'CLR10';
+      raise exception '0049 prestate: % does not exist', v_sig using errcode = 'CLR10';
     end if;
   end loop;
 
@@ -366,14 +430,14 @@ begin
     from pg_proc where oid = 'clara._coding_lane_core(uuid,uuid)'::regprocedure;
   v_count := (length(v_src) - length(replace(v_src, v_anchor, ''))) / length(v_anchor);
   if v_count <> 1 then
-    raise exception '0048 prestate: the 0046 S9.1 direction block occurs % times in clara._coding_lane_core (expected 1) -- this is not the body this file was authored against', v_count
+    raise exception '0049 prestate: the 0046 S9.1 direction block occurs % times in clara._coding_lane_core (expected 1) -- this is not the body this file was authored against', v_count
       using errcode = 'CLR10';
   end if;
   if not v_secdef or position('search_path=' in v_config) = 0 then
-    raise exception '0048 prestate: clara._coding_lane_core is not SECURITY DEFINER with a pinned search_path (secdef %, proconfig %) -- refusing to re-ship a body whose privilege shape it does not recognise', v_secdef, v_config
+    raise exception '0049 prestate: clara._coding_lane_core is not SECURITY DEFINER with a pinned search_path (secdef %, proconfig %) -- refusing to re-ship a body whose privilege shape it does not recognise', v_secdef, v_config
       using errcode = 'CLR10';
   end if;
-  insert into _d48_pre(sig, folded, secdef, config)
+  insert into _d49_pre(sig, folded, secdef, config)
     values ('clara._coding_lane_core(uuid,uuid)', regexp_replace(v_src,'\s+',' ','g'), v_secdef, v_config);
 
   -- (0.8) THE 0046 SPLICES SURVIVED INTO THE BODY BEING HARVESTED. These are the receipts a
@@ -382,7 +446,7 @@ begin
   foreach v_sig in array array['customer_name_missing','customer_ambiguous','v_sales_lane','v_ready']
   loop
     if position(v_sig in v_src) = 0 then
-      raise exception '0048 prestate: clara._coding_lane_core is missing 0046 S9''s ''%'' -- the live body is not post-0046', v_sig
+      raise exception '0049 prestate: clara._coding_lane_core is missing 0046 S9''s ''%'' -- the live body is not post-0046', v_sig
         using errcode = 'CLR10';
     end if;
   end loop;
@@ -401,7 +465,7 @@ begin
     exception when others then
       v_lane := '<raised:' || sqlstate || '>'; v_reasons := '<raised>';
     end;
-    insert into _d48_pre_dir(filing, client, document, has_facts, tri, lane, reasons)
+    insert into _d49_pre_dir(filing, client, document, has_facts, tri, lane, reasons)
     values (
       r.filing, r.client_id, r.document_id,
       exists(select 1 from clara.document_processing_tasks t
@@ -413,8 +477,8 @@ begin
       coalesce((select clara._autodraft_direction_tri(r.document_id, r.client_id)), '<null>'),
       coalesce(v_lane,'<null>'), coalesce(v_reasons,''));
   end loop;
-  select count(*) into v_n from _d48_pre_dir;
-  raise notice '0048 prestate: clean (frontier 0047, 3 direction fns, 1 lane anchor, 3 pinned normalisations, % filings measured)', v_n;
+  select count(*) into v_n from _d49_pre_dir;
+  raise notice '0049 prestate: clean (frontier 0047, 3 direction fns, 1 lane anchor, 3 pinned normalisations, % filings measured)', v_n;
 end
 $prestate$;
 
@@ -787,14 +851,18 @@ revoke all on function clara._document_facts_extraction(uuid) from public;
 --   (P1) the BUYER resolves to this client -- decisive, the client is on the buying side;
 --   (P2) a supplier identity was stated AND EVERY STATED ARM WAS TESTABLE and missed. A
 --        stated NAME is always testable (clara.clients.name is NOT NULL). A stated
---        REGISTRATION is testable only when the client holds at least one tin/ssm identifier
---        -- otherwise `exists(...)` returns false because there was nothing to compare with,
+--        REGISTRATION is testable only when the client holds BOTH hard kinds (tin AND ssm),
+--        because the field carries either kind and never says which -- otherwise
+--        `exists(...)` returns false because there was nothing of that kind to compare with,
 --        and scoring that false as "not this client" is precisely the §7-A Half-1 defect;
 --   (P3) the stated supplier is an ACCEPTED VENDOR of this client -- a live kind='vendor'
 --        counterparty by registration, name or approved alias. This is what keeps a real
 --        purchase pipeline working for a client that has not recorded its own identifiers
---        yet: ROME PROPERTIES has none, and its BRIGHTPATH bills state a registration, so
---        (P2) alone would have sent two live purchase documents to unresolved.
+--        yet. NOTE, MEASURED: NO live filing reaches (P3) today -- the two ROME PROPERTIES
+--        bills that state a supplier registration also resolve their BUYER to the client, so
+--        (P1) answers them first. (P3)'s only coverage is rig cell D3. It is kept because it
+--        is the arm that answers the same bill once the page stops naming its customer, not
+--        because it is currently holding a live pipeline up.
 -- Anything else raises CLR30 `direction_unresolved` with `"evidence":"none"`.
 --
 -- (P3) IS A MATCH ACROSS TWO NORMALISATION VOCABULARIES AND THAT IS MEASURED, NOT ASSUMED.
@@ -883,13 +951,43 @@ begin
   if v_cust then return 'purchase'; end if;
   if v_sup_reg is not null or v_sup_name is not null then
     if v_sup_reg is not null then
-      v_hard_id:=exists(select 1 from clara.client_identifiers ci
-        where ci.client_id=p_client and ci.kind in ('tin','ssm'));
+      -- THE TEST IS "COULD THIS COMPARISON HAVE MATCHED", AND THAT NEEDS THE KIND. A stated
+      -- registration is compared against `kind in ('tin','ssm')` -- but the DOCUMENT does not
+      -- say which of the two it stated, and it cannot: `invoice.vendor_registration` carries
+      -- EITHER, by construction. Read its producers, do not assume --
+      -- packages/runtime/lib/myinvois.mjs:165 emits `supplier.brn ?? supplier.tin` into that
+      -- one path, and the Azure DI lane emits a typed VendorTaxId into the same path
+      -- (packages/runtime/lib/invoice-vendor-identity.mjs:427). There is no
+      -- `invoice.vendor_taxid` field anywhere in the vocabulary to separate them (measured on
+      -- live: the invoice.* field set is amount_due, currency, customer_name,
+      -- customer_registration, customer_taxid, invoice_date, invoice_id, rounding,
+      -- tax_breakdown, tax_total, total, total_excl_tax, type_code, vendor_name,
+      -- vendor_registration -- and no vendor taxid).
+      --
+      -- SO A CLIENT HOLDING ONLY *ONE* OF THE TWO KINDS CANNOT TEST A STATED REGISTRATION.
+      -- If the client has recorded only its ssm and the page states a TIN, `exists(...)`
+      -- returns false because there was no tin row to compare with -- and scoring THAT false
+      -- as "the supplier is not this client" is the §7-A Half-1 defect exactly, one identifier
+      -- kind over. An earlier cut of this file asked only "does the client hold ANY hard
+      -- identifier", which is coarser than the comparison it licenses and left that class
+      -- alive. Coverage of BOTH kinds is what makes the miss a real miss.
+      --
+      -- THE COST IS NAMED AND IT IS THE FAIL-CLOSED DIRECTION. A real Malaysian client
+      -- typically has its ssm recorded and no LHDN TIN, so this limb will usually NOT fire;
+      -- an ordinary supplier bill still resolves through (P1) when the page names its customer
+      -- and through (P3) when the supplier is already an accepted vendor, and everything else
+      -- becomes a named needs_you card instead of a confident guess. Recording the client's
+      -- TIN (clara.add_client_identifier) turns the limb back on permanently.
+      -- Prestate (0.5) pins the kind domain, so "both kinds" cannot silently come to mean
+      -- something else.
+      v_hard_id:=(select count(distinct ci.kind) from clara.client_identifiers ci
+        where ci.client_id=p_client and ci.kind in ('tin','ssm')) = 2;
     end if;
     -- (P2) A STATED SUPPLIER IDENTITY, EVERY ARM OF IT TESTABLE, AND IT IS NOT THIS CLIENT.
-    -- The `v_sup_reg is null` limb is the name-only page: the name arm above really ran.
+    -- The `v_sup_reg is null` limb is the name-only page: the name arm above really ran
+    -- (clara.clients.name is NOT NULL, so that comparison always happens).
     -- The `v_hard_id` limb is the whole fix -- a stated registration only counts as MISSED
-    -- when there was something to miss against.
+    -- when there was something to miss against, in every kind it could have been.
     if v_sup_reg is null or v_hard_id then
       return 'purchase';
     end if;
@@ -989,10 +1087,10 @@ reset role;
 -- must be applying and measuring THE SAME text. Typing it twice makes a transcription slip
 -- look like a clean deploy.
 -- =====================================================================
-create temp table _d48_delta(anchor text not null, repl text not null) on commit drop;
-grant select on _d48_delta to clara_fn_owner;
+create temp table _d49_delta(anchor text not null, repl text not null) on commit drop;
+grant select on _d49_delta to clara_fn_owner;
 
-insert into _d48_delta(anchor, repl) values (
+insert into _d49_delta(anchor, repl) values (
   -- THE ANCHOR: 0046 S9.1's whole direction block, verbatim from the live body.
   '  begin' || chr(10) ||
   '    v_direction:=clara._document_direction(f.document_id,p_client);' || chr(10) ||
@@ -1002,7 +1100,7 @@ insert into _d48_delta(anchor, repl) values (
   '    v_tri:=''unresolved'';' || chr(10) ||
   '  end;',
 
-  '  -- [0048] THE LANE DOES NOT ASK A QUESTION WHOSE INPUT HAS NOT BEEN READ.' || chr(10) ||
+  '  -- [0049] THE LANE DOES NOT ASK A QUESTION WHOSE INPUT HAS NOT BEEN READ.' || chr(10) ||
   '  --' || chr(10) ||
   '  -- clara._document_direction now REFUSES (CLR30) instead of defaulting to ''purchase''' || chr(10) ||
   '  -- when there is no evidence to test. For a document with no invoice_facts extraction at' || chr(10) ||
@@ -1013,7 +1111,7 @@ insert into _d48_delta(anchor, repl) values (
   '  -- HAVE no direction (20 bank statements, 4 management accounts, 2 consent evidences, a' || chr(10) ||
   '  -- receipt, a claim form, an other, 7 failed extractions).' || chr(10) ||
   '  --' || chr(10) ||
-  '  -- THIS IS NOT THE DEFAULTING 0048 REMOVES, and the difference is worth being exact about:' || chr(10) ||
+  '  -- THIS IS NOT THE DEFAULTING 0049 REMOVES, and the difference is worth being exact about:' || chr(10) ||
   '  --   * the state is ALREADY NAMED -- `facts_pending` was appended a few lines above for' || chr(10) ||
   '  --     exactly this condition. One state, one name; no absence is being read as a fact.' || chr(10) ||
   '  --   * v_direction in THIS body is a REGION SELECTOR, not an authority (0046 S9.1 says so:' || chr(10) ||
@@ -1047,16 +1145,16 @@ do $lane$
 declare v_def text; v_anchor text; v_repl text; v_count int;
 begin
   select pg_get_functiondef('clara._coding_lane_core(uuid,uuid)'::regprocedure) into v_def;
-  select anchor, repl into v_anchor, v_repl from _d48_delta;
+  select anchor, repl into v_anchor, v_repl from _d49_delta;
   -- The count guard is RE-MADE here rather than inherited from the prestate: the prestate
   -- measured prosrc, this measures the functiondef that is actually about to be edited.
   v_count := (length(v_def) - length(replace(v_def, v_anchor, ''))) / length(v_anchor);
   if v_count <> 1 then
-    raise exception '0048 S3: the 0046 S9.1 direction block occurs % times in the functiondef of clara._coding_lane_core (expected 1)', v_count
+    raise exception '0049 S3: the 0046 S9.1 direction block occurs % times in the functiondef of clara._coding_lane_core (expected 1)', v_count
       using errcode = 'CLR10';
   end if;
   execute replace(v_def, v_anchor, v_repl);
-  raise notice '0048 S3: clara._coding_lane_core no longer asks direction of an unread document';
+  raise notice '0049 S3: clara._coding_lane_core no longer asks direction of an unread document';
 end
 $lane$;
 reset role;
@@ -1064,6 +1162,54 @@ reset role;
 -- The grants are UNTOUCHED and deliberately not re-issued: CREATE OR REPLACE preserves a
 -- function's existing ACL, so re-granting here would be noise that hides a real regression.
 -- The tail asserts the post-state instead.
+
+-- =====================================================================
+-- SECTION 4 -- THE DURABLE RECEIPT SURFACE.
+--
+-- WHY THIS EXISTS. Tail arm 7 measures one class it deliberately does not assert away (a READ
+-- filing moving off a defaulted direction -- see the arm's own note), and the first cut of
+-- this file reported that class with `raise notice` and told the ceremony to read the number.
+-- THE PRODUCTION APPLY PATH DISCARDS NOTICES: the ceremony runs ~/.clara-tools/live_migrate.py
+-- -> node packages/db/scripts/migrate.mjs, whose client comes from packages/db/lib/pg.mjs as a
+-- bare `new pg.Client(...)` with no 'notice' listener, so node-postgres drops every NOTICE on
+-- the floor. Applied through the real runner, this file printed exactly two lines: `applied
+-- ...` and the migrate summary. The number the ceremony was told to read was never printed.
+-- An unprinted number is not evidence of zero -- law 2, applied to this file's own evidence.
+--
+-- SO THE CHANNEL IS NOW THREE THINGS, AND THE NOTICES ARE ONLY THE THIRD:
+--   1. A HARD GATE. A read filing that moves is a deploy STOP unless the operator declared
+--      the exact count in advance (`clara.d49_expected_read_movement`, below). On live nobody
+--      declares anything, so any movement rolls the migration back. Populated rig estates
+--      legitimately have many and say so.
+--   2. A PERSISTED ROW. The whole census -- counts AND the named filings that moved -- is
+--      written to clara.migration_receipts and read back inside this same transaction, so
+--      "the receipt is durable" is measured rather than hoped. The ceremony SELECTs it
+--      afterwards (packages/db/deploy/direction-zero-evidence-0049-postverify.sql).
+--   3. The notices, kept for a psql-run apply, where they are visible.
+--
+-- THE TABLE IS GENERIC ON PURPOSE. Any later migration with an apply-time census can write to
+-- it; that is strictly better than each one inventing a private channel. It is operational
+-- metadata about the migration ledger (the clara.schema_migrations family), NOT client data:
+-- RLS is ENABLED and FORCED with no policy at all and no grant to any role, so no application
+-- role can see it under any circumstances -- it is reachable only by the ceremony's own
+-- superuser connection, which is exactly who has to read it.
+-- =====================================================================
+create table if not exists clara.migration_receipts (
+  id          bigint generated always as identity primary key,
+  version     text        not null,
+  measured_at timestamptz not null default now(),
+  receipt     jsonb       not null
+);
+alter table clara.migration_receipts owner to clara_fn_owner;
+alter table clara.migration_receipts enable row level security;
+alter table clara.migration_receipts force row level security;
+revoke all on table clara.migration_receipts from public;
+create index if not exists ix_migration_receipts_version
+  on clara.migration_receipts(version, measured_at desc);
+comment on table clara.migration_receipts is
+  'Apply-time census rows written by migrations whose blast radius must be READ after the '
+  'fact, not merely raised as a NOTICE (the production runner discards notices). RLS forced '
+  'with no policy and no grants: ceremony-superuser-only. First writer: 0049.';
 
 -- =====================================================================
 -- TAIL -- IN-TRANSACTION SELF-VERIFICATION. Every raise is a real assertion failure.
@@ -1081,6 +1227,7 @@ declare
   v_anchor text; v_repl text; v_shape_raw text; v_shape_lex text;
   v_sig text; v_off int; v_count int; v_n int; v_tri text; r record;
   v_changed int:=0; v_flipped int:=0; v_lane text; v_reasons text;
+  v_moved jsonb := '[]'::jsonb; v_declared text; v_declared_n int; v_receipt_id bigint;
 begin
   -- ------------------------------------------------------------------
   -- (1) MECHANICAL EQUIVALENCE FOR THE ONE SPLICED BODY. Not "the new guard is present" --
@@ -1088,16 +1235,16 @@ begin
   -- cannot account for all fail here. Whitespace-folded, so re-indentation is not a failure
   -- and a changed character anywhere is.
   -- ------------------------------------------------------------------
-  select anchor, repl into v_anchor, v_repl from _d48_delta;
-  select folded into v_pre from _d48_pre where sig = 'clara._coding_lane_core(uuid,uuid)';
+  select anchor, repl into v_anchor, v_repl from _d49_delta;
+  select folded into v_pre from _d49_pre where sig = 'clara._coding_lane_core(uuid,uuid)';
   if v_pre is null then
-    raise exception '0048 tail 1: no prestate pre-image was stashed for clara._coding_lane_core -- the identity proof did not run, so the splice is unverified';
+    raise exception '0049 tail 1: no prestate pre-image was stashed for clara._coding_lane_core -- the identity proof did not run, so the splice is unverified';
   end if;
   select prosrc into v_raw from pg_proc where oid='clara._coding_lane_core(uuid,uuid)'::regprocedure;
   v_expected := replace(v_pre, regexp_replace(v_anchor,'\s+',' ','g'), regexp_replace(v_repl,'\s+',' ','g'));
   v_actual   := regexp_replace(v_raw,'\s+',' ','g');
   if v_actual is distinct from v_expected then
-    raise exception '0048 tail 1: the recut clara._coding_lane_core is NOT its pre-image plus exactly the documented delta -- something else in the body moved';
+    raise exception '0049 tail 1: the recut clara._coding_lane_core is NOT its pre-image plus exactly the documented delta -- something else in the body moved';
   end if;
 
   -- ------------------------------------------------------------------
@@ -1120,21 +1267,21 @@ begin
     '  else';
   v_count := (length(v_lex) - length(replace(v_lex, v_shape_lex, ''))) / length(v_shape_lex);
   if v_count <> 1 then
-    raise exception '0048 tail 2: the unread-document guard occurs % times in the LEXED clara._coding_lane_core (expected 1)', v_count;
+    raise exception '0049 tail 2: the unread-document guard occurs % times in the LEXED clara._coding_lane_core (expected 1)', v_count;
   end if;
   v_off := position(v_shape_lex in v_lex);
   if substr(v_raw, v_off, length(v_shape_raw)) <> v_shape_raw then
-    raise exception '0048 tail 2: the unread-document guard matches the shape but not the literals -- it assigns some other pair of values than purchase/unresolved';
+    raise exception '0049 tail 2: the unread-document guard matches the shape but not the literals -- it assigns some other pair of values than purchase/unresolved';
   end if;
   -- ...and the CLR30 handler it now sits beside is still there, still hard. Losing it would
   -- turn a genuine contradiction into a silent needs_review.
   -- literal length MEASURED, not counted by eye: 'direction_unresolved' is 22 characters
   -- with its quotes.
   if position('v_reasons:=array_append(v_reasons,' || repeat(chr(2),22) || '); v_hard:=true;' in v_lex) = 0 then
-    raise exception '0048 tail 2: clara._coding_lane_core no longer marks a CLR30 direction contradiction HARD';
+    raise exception '0049 tail 2: clara._coding_lane_core no longer marks a CLR30 direction contradiction HARD';
   end if;
   if not pg_temp._wdb_code_literal(v_raw, '''direction_unresolved''') then
-    raise exception '0048 tail 2: clara._coding_lane_core no longer carries ''direction_unresolved'' as a CODE literal';
+    raise exception '0049 tail 2: clara._coding_lane_core no longer carries ''direction_unresolved'' as a CODE literal';
   end if;
 
   -- ------------------------------------------------------------------
@@ -1151,11 +1298,11 @@ begin
     select prosrc into v_raw from pg_proc where oid = v_sig::regprocedure;
     v_lex := pg_temp._wdb_sql_code(v_raw);
     if position('if v_sales then return ' || repeat(chr(2),7) || '; else return ' || repeat(chr(2),10) || '; end if;' in v_lex) <> 0 then
-      raise exception '0048 tail 3: the sales-or-purchase fallthrough is STILL executable in % -- the recut added beside the defect instead of replacing it', v_sig;
+      raise exception '0049 tail 3: the sales-or-purchase fallthrough is STILL executable in % -- the recut added beside the defect instead of replacing it', v_sig;
     end if;
     if pg_temp._wdb_code_literal(v_raw, '''purchase''')
        and v_sig in ('clara._document_direction(uuid,uuid)','clara._document_direction_at(uuid,uuid,uuid)') then
-      raise exception '0048 tail 3: % still names ''purchase'' as CODE -- the two entry points must carry no decision at all, only the delegation', v_sig;
+      raise exception '0049 tail 3: % still names ''purchase'' as CODE -- the two entry points must carry no decision at all, only the delegation', v_sig;
     end if;
   end loop;
 
@@ -1171,19 +1318,20 @@ begin
     select prosrc into v_raw from pg_proc where oid = v_sig::regprocedure;
     v_lex := pg_temp._wdb_sql_code(v_raw);
     if position('clara._direction_from_extraction(' in v_lex) = 0 then
-      raise exception '0048 tail 4: % does not call clara._direction_from_extraction as CODE -- it is carrying its own copy of the decision again', v_sig;
+      raise exception '0049 tail 4: % does not call clara._direction_from_extraction as CODE -- it is carrying its own copy of the decision again', v_sig;
     end if;
   end loop;
   select prosrc into v_raw from pg_proc where oid='clara._document_direction(uuid,uuid)'::regprocedure;
   if position('clara._document_facts_extraction(' in pg_temp._wdb_sql_code(v_raw)) = 0 then
-    raise exception '0048 tail 4: clara._document_direction no longer resolves its extraction through the shared selector';
+    raise exception '0049 tail 4: clara._document_direction no longer resolves its extraction through the shared selector';
   end if;
 
   -- ------------------------------------------------------------------
   -- (5) THE CORE CARRIES ALL THREE PURCHASE ARMS AND THE FINAL REFUSAL, AS CODE. Shape plus
-  -- literals, as above. Losing (P3) silently would break ROME PROPERTIES' live purchase
-  -- documents; losing the final raise would restore the whole defect while every other arm
-  -- here stayed green.
+  -- literals, as above. Losing the final raise would restore the whole defect while every
+  -- other arm here stayed green. (P3) is asserted for the same reason even though NO live
+  -- filing reaches it today -- it is the arm with the least behavioural coverage, which makes
+  -- it the one most able to disappear unnoticed.
   -- ------------------------------------------------------------------
   select prosrc into v_raw from pg_proc where oid='clara._direction_from_extraction(uuid,uuid)'::regprocedure;
   v_lex := pg_temp._wdb_sql_code(v_raw);
@@ -1191,37 +1339,50 @@ begin
   v_shape_raw := '  if v_cust then return ''purchase''; end if;';
   v_shape_lex := '  if v_cust then return ' || repeat(chr(2),10) || '; end if;';
   if position(v_shape_lex in v_lex) = 0 then
-    raise exception '0048 tail 5: the core is missing the (P1) buyer-is-the-client arm as code';
+    raise exception '0049 tail 5: the core is missing the (P1) buyer-is-the-client arm as code';
   end if;
   v_off := position(v_shape_lex in v_lex);
   if substr(v_raw, v_off, length(v_shape_raw)) <> v_shape_raw then
-    raise exception '0048 tail 5: the (P1) arm matches the shape but not the literal';
+    raise exception '0049 tail 5: the (P1) arm matches the shape but not the literal';
   end if;
   -- (P2) -- the testability limb IS the fix; a body that returned 'purchase' on any stated
   -- supplier would satisfy a weaker arm and reintroduce the §7-A Half-1 defect exactly.
   v_shape_raw := '    if v_sup_reg is null or v_hard_id then' || chr(10) || '      return ''purchase'';';
   v_shape_lex := '    if v_sup_reg is null or v_hard_id then' || chr(10) || '      return ' || repeat(chr(2),10) || ';';
   if position(v_shape_lex in v_lex) = 0 then
-    raise exception '0048 tail 5: the core is missing the (P2) testable-supplier arm as code -- an untestable stated registration would be scored as a miss again';
+    raise exception '0049 tail 5: the core is missing the (P2) testable-supplier arm as code -- an untestable stated registration would be scored as a miss again';
   end if;
   v_off := position(v_shape_lex in v_lex);
   if substr(v_raw, v_off, length(v_shape_raw)) <> v_shape_raw then
-    raise exception '0048 tail 5: the (P2) arm matches the shape but not the literal';
+    raise exception '0049 tail 5: the (P2) arm matches the shape but not the literal';
   end if;
-  -- ...and v_hard_id is DERIVED from the client's own identifiers, not assumed.
-  if position('v_hard_id:=exists(select 1 from clara.client_identifiers ci' in v_lex) = 0 then
-    raise exception '0048 tail 5: the core does not derive v_hard_id from clara.client_identifiers -- (P2) would be testing a constant';
+  -- ...and v_hard_id is DERIVED from the client's own identifiers, not assumed -- AND it is
+  -- the KIND-COVERAGE derivation, not the coarse "holds any hard identifier" one. The coarse
+  -- form is a real, previously-shipped alternative that satisfies every other arm here, so it
+  -- is refused by name: `invoice.vendor_registration` carries a BRN or a TIN and never says
+  -- which, so a client holding only one of the two kinds cannot test a stated registration.
+  v_shape_raw := 'v_hard_id:=(select count(distinct ci.kind) from clara.client_identifiers ci'
+    || chr(10) || '        where ci.client_id=p_client and ci.kind in (''tin'',''ssm'')) = 2;';
+  v_shape_lex := 'v_hard_id:=(select count(distinct ci.kind) from clara.client_identifiers ci'
+    || chr(10) || '        where ci.client_id=p_client and ci.kind in (' || repeat(chr(2),5)
+    || ',' || repeat(chr(2),5) || ')) = 2;';
+  if position(v_shape_lex in v_lex) = 0 then
+    raise exception '0049 tail 5: the core does not derive v_hard_id as KIND COVERAGE over clara.client_identifiers -- (P2) would score an untestable registration as a miss again, one identifier kind over';
+  end if;
+  v_off := position(v_shape_lex in v_lex);
+  if substr(v_raw, v_off, length(v_shape_raw)) <> v_shape_raw then
+    raise exception '0049 tail 5: the (P2) coverage derivation matches the shape but not the ''tin''/''ssm'' literals';
   end if;
   -- (P3)
   if position('from clara.counterparties cp' in v_lex) = 0
      or position('from clara.counterparty_aliases ca' in v_lex) = 0
      or not pg_temp._wdb_code_literal(v_raw, '''vendor''') then
-    raise exception '0048 tail 5: the core is missing the (P3) accepted-vendor arm as code';
+    raise exception '0049 tail 5: the core is missing the (P3) accepted-vendor arm as code';
   end if;
   -- THE FINAL REFUSAL, and that it really is CLR30 with the evidence-none reason.
   if not pg_temp._wdb_code_literal(v_raw, '''CLR30''')
      or not pg_temp._wdb_code_literal(v_raw, '''{"reason":"direction_unresolved","evidence":"none"}''') then
-    raise exception '0048 tail 5: the core does not raise CLR30 with the evidence-none detail as code -- the zero-evidence answer would exist only in prose';
+    raise exception '0049 tail 5: the core does not raise CLR30 with the evidence-none detail as code -- the zero-evidence answer would exist only in prose';
   end if;
 
   -- ------------------------------------------------------------------
@@ -1236,26 +1397,26 @@ begin
   loop
     v_tri := clara._autodraft_direction_tri(r.d, r.c);
     if v_tri is distinct from 'unresolved' then
-      raise exception '0048 tail 6: clara._autodraft_direction_tri(%,%) answered ''%'' -- a document nothing is known about must answer unresolved, never a confident direction and never null',
+      raise exception '0049 tail 6: clara._autodraft_direction_tri(%,%) answered ''%'' -- a document nothing is known about must answer unresolved, never a confident direction and never null',
         coalesce(r.d::text,'null'), coalesce(r.c::text,'null'), coalesce(v_tri,'<null>');
     end if;
     -- ...and the sibling boolean still answers FALSE rather than null: it is consumed as
     -- `and not clara._autodraft_sales_direction(...)` inside a language-sql WHERE clause,
     -- where a null silently DROPS the row and strands purchase work invisibly (0036:1794).
     if clara._autodraft_sales_direction(r.d, r.c) is not false then
-      raise exception '0048 tail 6: clara._autodraft_sales_direction(%,%) is no longer FALSE for an unknown document -- 0036''s enumeration invariant is broken',
+      raise exception '0049 tail 6: clara._autodraft_sales_direction(%,%) is no longer FALSE for an unknown document -- 0036''s enumeration invariant is broken',
         coalesce(r.d::text,'null'), coalesce(r.c::text,'null');
     end if;
     -- ...and the two entry points REFUSE rather than answer.
     begin
       perform clara._document_direction(r.d, r.c);
-      raise exception '0048 tail 6: clara._document_direction(%,%) returned a direction for a document nothing is known about',
+      raise exception '0049 tail 6: clara._document_direction(%,%) returned a direction for a document nothing is known about',
         coalesce(r.d::text,'null'), coalesce(r.c::text,'null');
     exception when sqlstate 'CLR30' then null;
     end;
     begin
       perform clara._document_direction_at(r.d, r.c, gen_random_uuid());
-      raise exception '0048 tail 6: clara._document_direction_at(%,%,<unknown pin>) returned a direction for a pin it could not honour',
+      raise exception '0049 tail 6: clara._document_direction_at(%,%,<unknown pin>) returned a direction for a pin it could not honour',
         coalesce(r.d::text,'null'), coalesce(r.c::text,'null');
     exception when sqlstate 'CLR30' then null;
     end;
@@ -1282,34 +1443,44 @@ begin
   --   (d) an UNREAD document answers 'unresolved' and its HUMAN QUEUE ROW IS BYTE-IDENTICAL,
   --       lane and reasons both. That is SECTION 3's whole claim, and it is where the 38 live
   --       filings live.
-  -- The purchase -> unresolved movements among READ documents are COUNTED AND NAMED in the
-  -- closing notice instead, because on live there are none (measured read-only 2026-08-07,
-  -- all 91 read filings resolve) and on a rig database there are many. A ceremony reads that
-  -- number; a wrong number is a stop, not a silent pass.
+  -- The purchase -> unresolved movements among READ documents are COUNTED AND NAMED, because
+  -- on live there are none (measured read-only 2026-08-08, all 92 read filings resolve) and on
+  -- a rig database there are many.
+  --
+  -- ...AND SINCE THE 2026-08-08 REVISION THAT COUNT IS A GATE, NOT A NOTICE. It used to say
+  -- "a ceremony reads that number", and the production runner discards notices (SECTION 4),
+  -- so nobody could read it. Now: the count must equal what the operator DECLARED before
+  -- applying, in the session GUC `clara.d49_expected_read_movement`. Declaring nothing means
+  -- declaring ZERO, which is the live expectation, so the live ceremony gets the hard gate by
+  -- doing nothing. A populated rig estate passes its real number in:
+  --     PGOPTIONS="-c clara.d49_expected_read_movement=116" node packages/db/scripts/migrate.mjs
+  --     -- or, under psql:  set clara.d49_expected_read_movement = '116';
+  -- The declaration is recorded in the receipt, so an estate that waved a number through
+  -- cannot later be mistaken for one that measured zero.
   --
   -- IT ASSUMES THE D1 WRITE-QUIESCE, and says so: the two measurements are separate
   -- statements, so a concurrent commit between them could move a lane for reasons that have
   -- nothing to do with this file. That is the recorded procedure for a body-replacing
   -- migration, not an extra requirement invented here.
   -- ------------------------------------------------------------------
-  for r in select * from _d48_pre_dir
+  for r in select * from _d49_pre_dir
   loop
     v_tri := clara._autodraft_direction_tri(r.document, r.client);
     if v_tri is null or v_tri not in ('sales','purchase','unresolved') then
-      raise exception '0048 tail 7: filing % answered ''%'' -- outside the ternary domain',
+      raise exception '0049 tail 7: filing % answered ''%'' -- outside the ternary domain',
         r.filing, coalesce(v_tri,'<null>');
     end if;
     if (r.tri = 'sales') <> (v_tri = 'sales') then
-      raise exception '0048 tail 7: filing % (client %) moved ''%'' -> ''%'' across the SALES boundary -- 0048 carries every sales arm across unchanged, so nothing may enter or leave it',
+      raise exception '0049 tail 7: filing % (client %) moved ''%'' -> ''%'' across the SALES boundary -- 0049 carries every sales arm across unchanged, so nothing may enter or leave it',
         r.filing, r.client, r.tri, v_tri;
     end if;
     if r.tri = 'unresolved' and v_tri <> 'unresolved' then
-      raise exception '0048 tail 7: filing % (client %) moved ''unresolved'' -> ''%'' -- this file only ever narrows confidence, never widens it',
+      raise exception '0049 tail 7: filing % (client %) moved ''unresolved'' -> ''%'' -- this file only ever narrows confidence, never widens it',
         r.filing, r.client, v_tri;
     end if;
     if not r.has_facts then
       if v_tri is distinct from 'unresolved' then
-        raise exception '0048 tail 7: filing % (client %) has NO invoice facts but answered ''%'' -- an unread document must answer unresolved',
+        raise exception '0049 tail 7: filing % (client %) has NO invoice facts but answered ''%'' -- an unread document must answer unresolved',
           r.filing, r.client, v_tri;
       end if;
       -- (d) THE QUEUE, for exactly the population SECTION 3 protects.
@@ -1322,18 +1493,65 @@ begin
       end;
       if coalesce(v_lane,'<null>') is distinct from r.lane
          or coalesce(v_reasons,'') is distinct from r.reasons then
-        raise exception '0048 tail 7: the human queue moved for UNREAD filing % (client %): lane ''%''/[%] -> ''%''/[%] -- SECTION 3 exists precisely so it does not',
+        raise exception '0049 tail 7: the human queue moved for UNREAD filing % (client %): lane ''%''/[%] -> ''%''/[%] -- SECTION 3 exists precisely so it does not',
           r.filing, r.client, r.lane, r.reasons, coalesce(v_lane,'<null>'), coalesce(v_reasons,'');
       end if;
     elsif v_tri is distinct from r.tri then
       v_flipped := v_flipped + 1;
+      -- NAMED, NOT JUST COUNTED, AND NAMED SOMEWHERE THAT SURVIVES THE TRANSACTION. Every one
+      -- of them, not the first five: the receipt is what a ceremony reads afterwards, and a
+      -- truncated list is a list that cannot be reconciled against the estate.
+      v_moved := v_moved || jsonb_build_object(
+        'filing', r.filing, 'client', r.client, 'document', r.document,
+        'from', r.tri, 'to', v_tri);
       if v_flipped <= 5 then
-        raise notice '0048 tail 7: READ filing % (client %) moved ''%'' -> ''%'' -- a document with no testable identity; expected ZERO of these on live',
+        raise notice '0049 tail 7: READ filing % (client %) moved ''%'' -> ''%'' -- a document with no testable identity; expected ZERO of these on live',
           r.filing, r.client, r.tri, v_tri;
       end if;
     end if;
     v_changed := v_changed + 1;
   end loop;
+
+  -- THE GATE. An undeclared movement is a deploy STOP. `current_setting(...,true)` returns
+  -- null when the GUC was never set, and the null-safe coalesce turns "said nothing" into
+  -- "said zero" -- the live expectation, reached by doing nothing, which is the only default
+  -- a fail-closed gate may have. A malformed declaration is refused rather than coerced,
+  -- because a GUC that does not parse is an absence wearing a number's clothes.
+  v_declared := nullif(btrim(coalesce(current_setting('clara.d49_expected_read_movement', true), '')), '');
+  if v_declared is not null and v_declared !~ '^[0-9]+$' then
+    raise exception '0049 tail 7: clara.d49_expected_read_movement is ''%'' -- it must be a plain non-negative integer, or unset (which declares ZERO)', v_declared;
+  end if;
+  v_declared_n := coalesce(v_declared::int, 0);
+  if v_flipped <> v_declared_n then
+    raise exception '0049 tail 7: % READ filing(s) moved off a defaulted direction, but % was declared (clara.d49_expected_read_movement %). On live this number is ZERO and an undeclared movement is a STOP: re-measure the estate read-only, decide whether each named filing SHOULD move, and re-run declaring the exact count. The moved filings are: %',
+      v_flipped, v_declared_n,
+      coalesce('= ''' || v_declared || '''', 'unset -> 0'),
+      left(v_moved::text, 2000);
+  end if;
+
+  -- THE RECEIPT, WRITTEN AND THEN READ BACK. Written before arm 8 so that a privilege regime
+  -- in which this insert cannot happen fails the migration rather than quietly skipping the
+  -- one durable channel. The read-back is the point: an INSERT that a row-level policy
+  -- silently discarded returns success and no row, which is precisely the shape law 2 refuses
+  -- to accept as evidence.
+  insert into clara.migration_receipts(version, receipt)
+  values ('0049_direction_zero_evidence', jsonb_build_object(
+    'database', current_database(),
+    'applied_by', current_user,
+    'filings_measured', v_changed,
+    'read_filings_moved', v_flipped,
+    'read_movement_declared', coalesce(v_declared, '<unset -> 0>'),
+    'unread_filings_now_unresolved', (select count(*) from _d49_pre_dir where not has_facts),
+    'unread_queue_rows_moved', 0,
+    'tri_before', (select jsonb_object_agg(tri, n) from (select tri, count(*) n from _d49_pre_dir group by tri) x),
+    'moved_filings', v_moved))
+  returning id into v_receipt_id;
+  if v_receipt_id is null
+     or not exists(select 1 from clara.migration_receipts
+                   where id = v_receipt_id and version = '0049_direction_zero_evidence') then
+    raise exception '0049 tail 7: the apply-time census could not be PERSISTED to clara.migration_receipts (insert returned %) -- this file refuses to apply with no durable channel, because a NOTICE is discarded by the production runner and an unread number is not evidence',
+      coalesce(v_receipt_id::text, '<null>');
+  end if;
 
   -- ------------------------------------------------------------------
   -- (8) THE SIGNATURES, THE PRIVILEGE SHAPE AND THE ACLs. CREATE OR REPLACE preserves ACLs,
@@ -1344,7 +1562,7 @@ begin
     where p.pronamespace='clara'::regnamespace
       and p.proname in ('_document_direction','_document_direction_at','_autodraft_direction_tri');
   if v_n <> 3 then
-    raise exception '0048 tail 8: expected exactly THREE direction functions after the recut, found % -- a CREATE OR REPLACE became a CREATE and the old body is still reachable', v_n;
+    raise exception '0049 tail 8: expected exactly THREE direction functions after the recut, found % -- a CREATE OR REPLACE became a CREATE and the old body is still reachable', v_n;
   end if;
   foreach v_sig in array array[
       'clara._document_direction(uuid,uuid)',
@@ -1355,35 +1573,35 @@ begin
       'clara._coding_lane_core(uuid,uuid)']
   loop
     if not (select p.prosecdef from pg_proc p where p.oid=v_sig::regprocedure) then
-      raise exception '0048 tail 8: % is not SECURITY DEFINER', v_sig;
+      raise exception '0049 tail 8: % is not SECURITY DEFINER', v_sig;
     end if;
     if position('search_path=' in (select coalesce(array_to_string(p.proconfig,'|'),'<none>')
                                    from pg_proc p where p.oid=v_sig::regprocedure)) = 0 then
-      raise exception '0048 tail 8: % carries no pinned search_path', v_sig;
+      raise exception '0049 tail 8: % carries no pinned search_path', v_sig;
     end if;
     if exists(select 1 from pg_proc p, aclexplode(p.proacl) a
               where p.oid=v_sig::regprocedure and a.grantee=0 and a.privilege_type='EXECUTE') then
-      raise exception '0048 tail 8: PUBLIC holds EXECUTE on % -- these are internals', v_sig;
+      raise exception '0049 tail 8: PUBLIC holds EXECUTE on % -- these are internals', v_sig;
     end if;
     -- Not one of them is a human/agent surface: they are called only from inside other
     -- SECURITY DEFINER bodies, which run as the owner.
     if has_function_privilege('clara_authenticated', v_sig::regprocedure, 'execute')
        or has_function_privilege('clara_agent_ro', v_sig::regprocedure, 'execute') then
-      raise exception '0048 tail 8: % is reachable from a non-definer role -- direction is an internal, never a verb', v_sig;
+      raise exception '0049 tail 8: % is reachable from a non-definer role -- direction is an internal, never a verb', v_sig;
     end if;
   end loop;
   -- clara._coding_lane_core's own privilege shape is asserted as UNCHANGED FROM THE PRE-IMAGE
   -- rather than against a literal typed here: the claim CREATE OR REPLACE makes is
   -- "preserved", so "equal to what was there before" is the claim stated exactly.
   if (select p.prosecdef from pg_proc p where p.oid='clara._coding_lane_core(uuid,uuid)'::regprocedure)
-     is distinct from (select secdef from _d48_pre where sig='clara._coding_lane_core(uuid,uuid)')
+     is distinct from (select secdef from _d49_pre where sig='clara._coding_lane_core(uuid,uuid)')
      or (select coalesce(array_to_string(p.proconfig,'|'),'<none>') from pg_proc p
          where p.oid='clara._coding_lane_core(uuid,uuid)'::regprocedure)
-        is distinct from (select config from _d48_pre where sig='clara._coding_lane_core(uuid,uuid)') then
-    raise exception '0048 tail 8: clara._coding_lane_core changed its privilege shape across the splice';
+        is distinct from (select config from _d49_pre where sig='clara._coding_lane_core(uuid,uuid)') then
+    raise exception '0049 tail 8: clara._coding_lane_core changed its privilege shape across the splice';
   end if;
 
-  raise notice '0048 tail: 8 arms clean -- % filings re-measured; % READ filings moved off a defaulted direction (live expects ZERO); every unread filing now answers unresolved with a byte-identical queue row',
-    v_changed, v_flipped;
+  raise notice '0049 tail: 8 arms clean -- % filings re-measured; % READ filings moved off a defaulted direction (declared: %); every unread filing now answers unresolved with a byte-identical queue row. DURABLE RECEIPT: clara.migration_receipts id % -- the ceremony reads THAT, not this line.',
+    v_changed, v_flipped, coalesce(v_declared, 'nothing -> 0'), v_receipt_id;
 end
 $tail$;
