@@ -38,10 +38,16 @@
 --   with the confirmation set — the script tells you the exact line if you forget.
 --
 -- THE EVIDENCE, CITED PER VALUE (verify before confirming):
---   BEE CREATIVE SOLUTION  ssm 0516352-X
---     a document region of BEE's own filed corpus renders its customer as
---     "Bee Creative Solution (0516352-X)" — the bracketed number is a sole-proprietor
---     business registration. Result set (E1) below prints the region that says so.
+--   BEE CREATIVE SOLUTION  ssm 202103229799  and  ssm PG0516352-X
+--     BEE's OWN filed Statement of Financial Position (document bb862854…, region
+--     pages.1.lines.2) states "Company No .: 202103229799 (PG0516352-X)" — the
+--     new-format and old-format pair from the client's own filing; TWO ROWS are
+--     seeded, one per format, the ROME PROPERTIES shape. A vendor-side region also
+--     renders "Bee Creative Solution (0516352-X)" — a vendor's transcription that
+--     DROPS the PG prefix; it corroborates the digit core but is NOT seedable (the
+--     PR #211 re-review caught the first cut seeding that transcription, a value
+--     the exact-equality matcher could never reach from any real page).
+--     Result set (E1) below prints the regions that say so.
 --   ROME PROPERTIES SDN BHD  ssm 202501005621  and  ssm 1607035-V
 --     clara.counterparties holds a row IN ROME PROPERTIES' OWN BOOKS naming the client itself
 --     with registration_no '202501005621 (1607035-V)' — the new-format and old-format pair,
@@ -64,7 +70,7 @@ select c.name as client, r.field_path, r.text_content
   join clara.document_filings df on df.document_id = e.document_id and df.retired_at is null
   join clara.clients c on c.id = df.client_id
  where c.name = 'BEE CREATIVE SOLUTION'
-   and r.text_content ilike '%0516352%';
+   and (r.text_content ilike '%202103229799%' or r.text_content ilike '%0516352%');
 
 \echo '=== (E2) EVIDENCE — the counterparty row that states ROME PROPERTIES'' registration ==='
 select c.name as owner_client, cp.name as counterparty, cp.kind, cp.registration_no
@@ -105,12 +111,17 @@ begin
   -- (2) THE EVIDENCE IS RE-READ, NOT TRUSTED. If the citing document or counterparty row is
   -- gone, the constants below have no support and the script refuses rather than asserting a
   -- registered identity on somebody's real books.
+  -- BOTH renderings must come from BEE's OWN corpus: the new-format number and the
+  -- PG-prefixed old format, in ONE region (the SoFP's "Company No" line). The ilike on the
+  -- digit core alone is NOT sufficient -- a vendor's PG-less transcription also contains it
+  -- (the exact wrong value the PR #211 re-review caught the first cut seeding).
   select count(*) into v_n from clara.document_regions dr
     join clara.document_extractions e on e.id = dr.extraction_id
     join clara.document_filings df on df.document_id = e.document_id and df.retired_at is null
-   where df.client_id = v_bee and dr.text_content ilike '%0516352%';
+   where df.client_id = v_bee
+     and dr.text_content ilike '%202103229799%' and dr.text_content ilike '%PG0516352%';
   if v_n = 0 then
-    raise exception 'seed: no document region of BEE CREATIVE SOLUTION states 0516352 any more -- the cited evidence for its ssm is gone; re-derive it before seeding';
+    raise exception 'seed: no document region of BEE CREATIVE SOLUTION states 202103229799 + PG0516352 together any more -- the cited SoFP evidence for its ssm pair is gone; re-derive it before seeding';
   end if;
   select count(*) into v_n from clara.counterparties cp
    where cp.client_id = v_rp and cp.name_normalized = 'romepropertiessdnbhd'
@@ -156,7 +167,8 @@ begin
   -- stored a value no document can ever match.
   for v_row in
     select * from (values
-      (v_bee, 'ssm', '0516352X',     'bee-ssm-brn'),
+      (v_bee, 'ssm', '202103229799', 'bee-ssm-new'),
+      (v_bee, 'ssm', 'PG0516352X',   'bee-ssm-old'),
       (v_rp,  'ssm', '202501005621', 'rp-ssm-new'),
       (v_rp,  'ssm', '1607035V',     'rp-ssm-old')
     ) as t(client, kind, value, tag)
