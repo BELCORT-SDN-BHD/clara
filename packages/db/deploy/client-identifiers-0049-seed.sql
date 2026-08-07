@@ -82,7 +82,12 @@ declare
   v_actor    uuid;
   v_firm     uuid;
   v_n        int;
-  r          record;
+  -- NOT `r`: the evidence query below aliases clara.document_regions, and PL/pgSQL resolves a
+  -- qualified name to a DECLARED RECORD before it resolves it to a table alias. With `r`
+  -- declared here, `r.text_content` in that query reads an unassigned record and the whole
+  -- ceremony dies mid-file ("record r is not assigned yet") -- measured, on a drill that built
+  -- this file's exact live shape and ran it armed.
+  v_row      record;
   v_seeded   int := 0;
 begin
   -- (1) THE CLIENTS, RESOLVED BY NAME AND PINNED BY ID. Both must agree: a uuid typed into a
@@ -100,10 +105,10 @@ begin
   -- (2) THE EVIDENCE IS RE-READ, NOT TRUSTED. If the citing document or counterparty row is
   -- gone, the constants below have no support and the script refuses rather than asserting a
   -- registered identity on somebody's real books.
-  select count(*) into v_n from clara.document_regions r
-    join clara.document_extractions e on e.id = r.extraction_id
+  select count(*) into v_n from clara.document_regions dr
+    join clara.document_extractions e on e.id = dr.extraction_id
     join clara.document_filings df on df.document_id = e.document_id and df.retired_at is null
-   where df.client_id = v_bee and r.text_content ilike '%0516352%';
+   where df.client_id = v_bee and dr.text_content ilike '%0516352%';
   if v_n = 0 then
     raise exception 'seed: no document region of BEE CREATIVE SOLUTION states 0516352 any more -- the cited evidence for its ssm is gone; re-derive it before seeding';
   end if;
@@ -139,18 +144,39 @@ begin
   -- (5) THE SEED ITSELF — audited verb, stable op_key, one row per (client, kind, value).
   -- The op_key is DERIVED from the value, so re-running is a no-op and adding a value later
   -- cannot collide with one already granted.
-  for r in
+  --
+  -- THE VALUES ARE PUNCTUATION-FREE, AND THAT IS LOAD-BEARING, NOT COSMETIC. The verb
+  -- normalises with `lower(regexp_replace(value,'\s+','','g'))` -- it strips WHITESPACE only.
+  -- The matcher on the other side normalises the document's text with
+  -- `lower(regexp_replace(x,'[^a-zA-Z0-9]','','g'))` -- it strips ALL punctuation. So a stored
+  -- '0516352-x' could never equal a page's '0516352x' and the identifier would sit in the
+  -- table matching nothing, forever, with nothing failing. The live rows agree: ROME
+  -- SECRETARY carries '202501019265' and '1620678m', hyphen-free. MEASURED on a drill that ran
+  -- this file armed against its exact live shape -- the first cut passed '0516352-X' and
+  -- stored a value no document can ever match.
+  for v_row in
     select * from (values
-      (v_bee, 'ssm', '0516352-X',    'bee-ssm-brn'),
+      (v_bee, 'ssm', '0516352X',     'bee-ssm-brn'),
       (v_rp,  'ssm', '202501005621', 'rp-ssm-new'),
-      (v_rp,  'ssm', '1607035-V',    'rp-ssm-old')
+      (v_rp,  'ssm', '1607035V',     'rp-ssm-old')
     ) as t(client, kind, value, tag)
   loop
-    perform clara.add_client_identifier(r.client, r.kind, r.value, '0049-idseed-' || r.tag);
+    perform clara.add_client_identifier(v_row.client, v_row.kind, v_row.value,
+      '0049-idseed-' || v_row.tag);
     v_seeded := v_seeded + 1;
   end loop;
   perform set_config('role', 'none', true);
-  raise notice 'seed: % identifier statements issued through clara.add_client_identifier (idempotent; a re-run returns the same receipts)', v_seeded;
+
+  -- (6) THE STORED FORM IS RE-READ AND MUST BE IN THE MATCHER'S ALPHABET. The rule above is
+  -- only as good as what actually landed, so this asserts the landed rows rather than the
+  -- constants -- any punctuation that survived normalisation aborts the whole seed.
+  select count(*) into v_n from clara.client_identifiers ci
+   where ci.client_id in (v_bee, v_rp) and ci.kind in ('tin','ssm')
+     and ci.value_normalized !~ '^[a-z0-9]+$';
+  if v_n > 0 then
+    raise exception 'seed: % hard identifier(s) on these two clients are stored with characters the direction matcher strips -- they can never match a document and the seed is refused', v_n;
+  end if;
+  raise notice 'seed: % identifier statements issued through clara.add_client_identifier (idempotent; a re-run returns the same receipts), all stored in the matcher''s alphabet', v_seeded;
 end
 $seed$;
 
