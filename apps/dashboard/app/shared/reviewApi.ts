@@ -14,6 +14,8 @@ import {
 } from "./reviewTypes";
 import { toSweepRun, toOpenQuestion, toCodingRule, toCodingLane, type SweepRun, type OpenQuestion, type CodingRule, type CodingLane } from "./reviewCardTypes";
 import { toRulePostRun, toAutopostRule, toNotification, type RulePostRun, type AutopostRule, type Notification } from "./reviewCardTypes";
+// Row type + mapper live in ../rules/model.ts (the adjustmentApi.ts/adjustmentModel.ts split).
+import { toSalesEvidencePreview, type SalesEvidencePreview } from "../rules/model";
 
 const opKey = () => crypto.randomUUID();
 
@@ -81,6 +83,33 @@ export async function listAutopostRules(token: string, scope: QueueScope): Promi
   const out = await rpc("list_autopost_rules", { p_scope: scope }, token);
   const rows = Array.isArray(out) ? out : ((out as { rules?: unknown })?.rules ?? []);
   return (Array.isArray(rows) ? rows : []).map(toAutopostRule);
+}
+
+/** `clara.preview_ocr_sales_evidence(p_rule)` — §7-A(b) signing-time evidence
+ *  preview (contract §3 PR-DASHBOARD; skeleton §2b; migration 0046 §SECTION 6).
+ *  A viewer-floored SECURITY DEFINER read, firm-scoped like
+ *  `list_autopost_rules`. ADVISORY ONLY — `sign_autopost_rule` and
+ *  `execute_rule_post` each re-derive the live floor themselves at their own
+ *  moment; this is a snapshot with a timestamp on it. Returns `null` when the
+ *  envelope is shaped like neither branch the verb is documented to return, or
+ *  fails `toSalesEvidencePreview`'s strict field checks (never crashes — the
+ *  caller folds that into its "preview unavailable" state, the same fold an
+ *  outright throw produces on a verb this build has not deployed yet).
+ *  Callers should gate the CALL on `rule.direction === 'sales'` — the verb
+ *  answers `not_sales` for anything else, but there is no reason to spend the
+ *  round trip finding that out.
+ *
+ *  [Codex MEDIUM, 2026-08-07] BINDS THE RESPONSE TO THE REQUEST. Every branch
+ *  the verb returns echoes `p_rule` back as `rule_id` (0046 §SECTION 6) — under
+ *  a correct server this can never differ from `ruleId`, so a mismatch is a
+ *  DEFENSIVE check against a server regression, never an expected path: without
+ *  it, a caching bug or a mixed-up response could render rule B's evidence
+ *  beside rule A's row with nothing catching it. A mismatch folds to `null`,
+ *  the same unavailable state every other shape violation produces here. */
+export async function previewOcrSalesEvidence(token: string, ruleId: string): Promise<SalesEvidencePreview | null> {
+  const preview = toSalesEvidencePreview(await rpc("preview_ocr_sales_evidence", { p_rule: ruleId }, token));
+  if (preview !== null && preview.rule_id !== ruleId) return null;
+  return preview;
 }
 
 /** Rule-lifecycle nudges (WA2 §6.2 / L6). Assumed fn `list_notifications(p_scope,p_kinds)`. */
