@@ -247,7 +247,7 @@
 -- STATEMENT TIMEOUT (ADR-059 ceremony law). Set inside the migration connection because role-
 -- and database-level settings are invisible through Supavisor's pool. Load-bearing here: tail
 -- arms 6 and 7 evaluate the direction and the coding lane once per non-retired filing, twice
--- (prestate + tail). O(filings), 129 on live today; a future estate large enough to matter
+-- (prestate + tail). O(filings), 130 on live today (re-measured 2026-08-08); a future estate large enough to matter
 -- must revisit the arm rather than silently narrow it.
 set local statement_timeout = '20min';
 
@@ -1107,7 +1107,7 @@ insert into _d49_delta(anchor, repl) values (
   '  -- all that refusal is correct and useless here: this lane runs for EVERY filing, so the' || chr(10) ||
   '  -- handler below would have marked every bank statement, management account and' || chr(10) ||
   '  -- failed-extraction document HARD, with the reason `direction_unresolved`, forever.' || chr(10) ||
-  '  -- Measured on live 2026-08-07: 38 of 129 non-retired filings, 36 of them documents that' || chr(10) ||
+  '  -- Measured on live 2026-08-08: 38 of 130 non-retired filings, 36 of them documents that' || chr(10) ||
   '  -- HAVE no direction (20 bank statements, 4 management accounts, 2 consent evidences, a' || chr(10) ||
   '  -- receipt, a claim form, an other, 7 failed extractions).' || chr(10) ||
   '  --' || chr(10) ||
