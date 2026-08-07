@@ -78,10 +78,25 @@ test("C-1 every new public writer holds EXACTLY ONE overload (unqualified call n
     // recreated (C-1) writers whose arity changed:
     "mint_wake_credential", "wake_context", "_resolve_counterparty",
   ];
+  // AMENDMENT 0046 (§7-A, skeleton §2d): settle_autodraft_task carries a ratified SECOND
+  // arity (p_workflow_run_id text), which is how the run-identity gap 0036:927-933 named
+  // gets closed. The hazard this cell guards — an unqualified call throwing 42725 — cannot
+  // arise here, because the new arity has NO defaulted parameters: a 5-argument call
+  // resolves only to the 5-arity and a 6-argument call only to the new one. 0046's tail
+  // arm (3) measures pronargdefaults to keep that true.
+  // BIMODAL, and the reason is the same one the S5.25 clock roster carries: `db-slice-frontiers`
+  // runs this battery against databases pinned at EARLIER frontiers, where the 6-arity does not
+  // exist yet. An unconditional `2` fails every one of those legs while saying nothing about
+  // overload safety. Gated on the migration ledger, the expectation stays exact in BOTH
+  // directions — one overload before 0046, exactly two after, never "one or two".
+  const has0046 = (await rootQuery(
+    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'")).rows[0].n === 1;
+  const RATIFIED_OVERLOADS = has0046 ? { settle_autodraft_task: 2 } : {};
   for (const fn of fns) {
     const r = await rootQuery("select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname=$1", [fn]);
     if (r.rows[0].n === 0) { noteLane(`${fn} absent when counting overloads — name/arity may differ (interface expectation)`); continue; }
-    assert.equal(r.rows[0].n, 1, `clara.${fn} has exactly ONE overload (got ${r.rows[0].n})`);
+    const expected = RATIFIED_OVERLOADS[fn] ?? 1;
+    assert.equal(r.rows[0].n, expected, `clara.${fn} has exactly ${expected} overload(s) (got ${r.rows[0].n})`);
   }
 });
 

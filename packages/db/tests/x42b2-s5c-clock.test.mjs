@@ -77,7 +77,7 @@ import {
   a21EnsureReady, buildWorld, firmOf, upsertAccountClassed, grantConsent,
   freshResolution, draftEntryV3, approveEntry, counterpartyRows, normalize, idOf,
 } from "./a21-helpers.mjs";
-import { S5_25_BARE_TOKEN_RE, S5_25_BARE_TOKEN_ROSTER } from "./x42-s5-helpers.mjs";
+import { S5_25_BARE_TOKEN_RE, s5BareTokenRoster, s5KlDuplicationRoster } from "./x42-s5-helpers.mjs";
 
 // This suite's OWN codes (grepped against every other battery before choosing).
 const ARK = "374-K42"; // receivable control (asset, account_class='receivable')
@@ -310,9 +310,7 @@ test("x42.s5c.5 no clara object derives a date from the session clock, and the d
       where pronamespace='clara'::regnamespace and ${stripWide} like '%asia/kuala_lumpur%'`)).rows[0].n;
   assert.equal(
     roster,
-    "_adj_on_approve _adj_run_occurrence_core _book_today _ocr_sales_floor "
-    + "ack_compliance_watch evaluate_sst_watch evaluate_sst_watches_all "
-    + "record_future_attestation reverse_entry",
+    await s5KlDuplicationRoster(rootQuery),
     "the Asia/Kuala_Lumpur duplication roster changed. A NEW name is a second body owning the house legal date"
     + " — call clara._book_today(). A MISSING name means a recorded pre-existing copy moved.",
   );
@@ -369,5 +367,6 @@ test("x42.s5c.6 [F2] arm (D)'s bare-token detector and roster, re-derived indepe
   const flagged = (await rootQuery(
     `select coalesce(string_agg(distinct proname, ', ' order by proname), '') as n from pg_proc
       where pronamespace='clara'::regnamespace and proname <> '_book_today' and ${wide} ~* $1`, [S5_25_BARE_TOKEN_RE])).rows[0].n;
-  assert.equal(flagged, S5_25_BARE_TOKEN_ROSTER.join(", "), "arm (D)'s live roster drifted from the round-8 M4 measurement");
+  // 0046: frontier-aware — see s5BareTokenRoster's header.
+  assert.equal(flagged, (await s5BareTokenRoster(rootQuery)).join(", "), "arm (D)'s live roster drifted from the round-8 M4 measurement");
 });
