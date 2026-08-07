@@ -1,7 +1,7 @@
 -- 0050_egress_release_skip_consent.sql -- H2 ACCEPTANCE FINDING F4: the egress-hold
 -- RELEASE path must not release a task whose hold is consent-based.
 --
--- GOVERNING EVIDENCE: .tmp/H2-ACCEPTANCE-REPORT.txt, "FINDING F4 -- a correct wall that
+-- GOVERNING EVIDENCE: docs/plan/wave-7a-acceptance-h2.md (the archived as-run record; formerly .tmp/H2-ACCEPTANCE-REPORT.txt), "FINDING F4 -- a correct wall that
 -- reads as an outage: the egress hold storm" (lines 354-376), witnessed live 05:42-05:48Z
 -- 2026-08-07: the release/re-hold pair cycled ~29 workflow runs/minute for six minutes,
 -- DB connections went 32/60 -> 42/60, and the health-check flapped twice through the proxy.
