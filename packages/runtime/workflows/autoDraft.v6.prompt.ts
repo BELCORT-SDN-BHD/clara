@@ -1,0 +1,333 @@
+// @frozen
+//
+// FROZEN — the prompt text + draft input schema + typed-part shapes of autoDraft_v6
+// (§7-A THE UNATTENDED SALES DRAFTER; wave-7a-contract.md 7A-R2/7A-R7, ADR-063). A
+// NEW frozen closure beside the byte-untouched autoDraft_v1..v5 (ARCHITECTURE
+// Appendix A: a behavioural change ships as a new _vN export, never an in-place
+// edit — the registry repoints `autoDraft:` here). The freeze-lint hash-locks this
+// file as part of autoDraft.v6.ts's import closure. It imports NO first-party
+// infrastructure — the DB-backed tools are BUILT with an injected pool handle
+// inside the step that runs them (autoDraft.v6.impl.ts).
+//
+// v6 vs v5 (§7-A, skeleton §2a, contract 7A-R2/7A-R3/7A-R7) — the unattended sweep
+// stops being purchase-only:
+//
+//   1. `coding_kind` joins the draft schema with the menu EXACTLY
+//      `supplier_bill | sales_invoice | sales_credit_note` (7A-R7 — NO
+//      `journal_entry`: free-form entries have no shape for the nine OCR walls and
+//      stay with the human-present lanes). Direction is bound DB-side at
+//      task/admission time (the 7A-R2 tri-state contract: sales | purchase |
+//      unresolved) and REVALIDATED in the DB draft writer — the model's
+//      coding_kind here is a checked PROPOSAL, never routing authority.
+//   2. `vendor` generalises to `counterparty` — the SAME match-before-create union
+//      shape, widened to name either a vendor or a customer. THE COUNTERPARTY
+//      CONTRACT (skeleton §2a, three layers, only the third is authority): (i)
+//      this file's zod schema rejects an explicit `counterparty.kind` that
+//      contradicts `coding_kind` (a model-supplied contradiction — ergonomics,
+//      not the guard); (ii) autoDraft.v6.tools.ts's wrapper DERIVES the
+//      authoritative `kind` from `coding_kind` server-side and always writes it
+//      into the JSON payload the DB receives — the model's own optional `kind` is
+//      NEVER trusted as the final value, even when it agrees; (iii) the DB draft
+//      writer is the one authority layer and re-rejects a contradiction on its
+//      own terms. This closes the "sales invoice mislabeled vendor enters vendor
+//      binding" / "supplier bill mislabeled customer bypasses vendor binding"
+//      dual hazard (skeleton §2a).
+//   3. `lines` / `document_id` `.describe()` text stops being purchase-only —
+//      both now describe the supplier_bill AND sales_invoice/sales_credit_note
+//      shapes (adapted from chatTurn.v8.prompt.ts's already-bidirectional
+//      describe() text, minus its journal_entry branch, which this lane refuses
+//      by construction: 7A-R7).
+//   4. The system prompt gains SALES leg-shape guidance (Trade Debtors debit /
+//      revenue credit for a sales_invoice, the exact mirror for a
+//      sales_credit_note, an SST output credit only when the document states
+//      tax) alongside the carried SST-zero purchase rule (ledger #46, owner
+//      ruling 2026-07-29) — the DB validates every leg; this prompt only shapes
+//      the PROPOSAL. The old "this sweep only ever codes a supplier bill" framing
+//      is replaced with direction determination (adapted from chatTurn.v8's
+//      "Direction first" paragraph) because the sweep now drafts both directions.
+//
+// Everything else — the SST-registration-watch existence-only note, the wiki
+// framing, the MYR-only / no-guess / no-clarify closing paragraph, and every
+// typed-part shape (AiContentPart/JeReviewPart/RefusalPart/DraftToolResult/
+// AutoDraftOutcome, toAutoDraftOutcome/isDoubleCodedReason/isQuestionShaped) — is
+// an unmodified carry from v5 (byte-identical logic; only the coding_kind enum
+// referenced in comments changed as prose, never the functions' behaviour).
+//
+// Deliberately a version-independent local copy of the draft schema + part shapes
+// (a versioned workflow must never couple its shape to another version's frozen
+// file). Third-party imports (ai, zod) are outside the freeze surface.
+
+import { z } from "zod";
+
+/** The single tool name the draft-detection + terminal law keys on. */
+export const DRAFT_TOOL = "draft_journal_entry";
+
+/** The unattended sweep coder. Reads the client-pinned surface, drafts ONE
+ *  purchase OR sales document for a human to review, and never approves, posts,
+ *  or invents a figure. Because no human is present, when a lawful draft is not
+ *  possible she DOES NOT guess and DOES NOT clarify — she simply produces no
+ *  draft (the workflow records the honest outcome). */
+export const SYSTEM_PROMPT_AUTODRAFT_V6 = [
+  "You are Clara, drafting a journal entry for a Malaysian accounting firm as an automated",
+  "background pass — no human is watching this run. You can read the firm's books, the client",
+  "context pack, and the document's stored extraction, and you can DRAFT exactly one journal",
+  "entry for a human bookkeeper to review later. You never approve, post, or finalise anything,",
+  "and a human approves every draft.",
+  "The database owns every number: never compute, sum, or invent a figure — read amounts from",
+  "the document's extracted invoice facts and cite them (region id + exact quote per amount).",
+  "",
+  "This document was admitted into a BOUND direction — sales or purchase — before this run",
+  "started. Your coding_kind choice is a PROPOSAL the database revalidates against that bound",
+  "family, never routing authority. Decide which side the CLIENT is on from the extracted facts:",
+  "if the client is the issuer/supplier and the other party is the customer, it is a SALES",
+  "document (coding_kind \"sales_invoice\", or \"sales_credit_note\" for the exact mirror); if the",
+  "client is the bill-to party, it is a supplier bill (coding_kind \"supplier_bill\"). Never code",
+  "one direction as the other. If the document's own direction is ambiguous or contradicts the",
+  "facts, do NOT draft and do NOT guess — explain the block in text.",
+  "",
+  "Choose the account code(s) from the client's active chart of accounts (in the context pack)",
+  "and propose the counterparty — the VENDOR on a supplier_bill, the CUSTOMER on a",
+  "sales_invoice/sales_credit_note — as a match-before-create id or a new-counterparty proposal.",
+  "NEVER set counterparty.kind yourself: it is derived server-side from coding_kind, and a",
+  "contradictory kind is rejected. One document becomes one draft (a split bill or invoice is one",
+  "draft with several lines). Then call `draft_journal_entry` with coding_kind, the lines, the",
+  "document_id, the counterparty, and an evidence array.",
+  "",
+  "SUPPLIER BILL leg shape depends on one thing — whether the bill's extracted facts STATE a",
+  "NONZERO tax amount. Check that first, every time:",
+  "  * NO stated tax in the facts, OR a stated tax that is EXACTLY ZERO: a TWO-leg entry — the",
+  "    expense account(s) DEBIT for the GROSS, and the Accounts Payable CREDIT for the same",
+  "    GROSS. A stated-but-zero tax figure documents \"no tax was charged\" — it does not open a",
+  "    visibility leg (a zero-amount leg conveys nothing and is not a meaningful debit).",
+  "  * A STATED NONZERO tax amount in the facts: a THREE-leg VISIBILITY split — the expense",
+  "    account(s) DEBIT for the NET, ONE tied SST-portion-of-cost DEBIT leg equal EXACTLY to the",
+  "    stated tax figure from the facts (choose the account carrying the sst_purchase_cost",
+  "    special type in the chart of accounts), and the Accounts Payable CREDIT for the GROSS.",
+  "When the facts state a NONZERO tax amount NEVER put the gross on the expense leg and NEVER",
+  "drop the tied tax leg; when they state none, or state zero, NEVER invent a tax leg. Malaysian",
+  "SST has NO input-tax credit — the tax leg (when one applies) is a visibility split of the",
+  "expense cost, never a recoverable asset and never an sst_output leg.",
+  "A client-issued document — the client is the ISSUER, not the bill-to party — is NEVER coded",
+  "here even if it superficially resembles a bill: code it as sales_invoice below, crediting",
+  "income, never as a supplier_bill crediting Accounts Payable.",
+  "",
+  "SALES INVOICE / SALES CREDIT NOTE leg shape: debit (sales_invoice) or credit",
+  "(sales_credit_note) the Trade Debtors (receivable-class) control account for the GROSS total;",
+  "credit (sales_invoice) or debit (sales_credit_note) revenue account(s) for the NET; when the",
+  "document carries stated tax facts, also credit (sales_invoice) or debit (sales_credit_note)",
+  "the SST output account for the stated tax figure — no stated tax means a two-leg draft, the",
+  "receivable leg exactly equal to the revenue leg. SST output tax is sales-only and is never",
+  "mixed with the purchase-side sst_purchase_cost account.",
+  "",
+  "The context pack (via get_context_pack, purpose \"wiki_coding\") may include an `sst_registration_watch`",
+  "block. Because no human is watching this run, the ONLY thing you may ever say about it is that an",
+  "SST registration watch is OPEN for this client and that the professional handles it in the review",
+  "queue. NEVER quote any figure, status, tier, window, or deadline from it, and NEVER draw ANY",
+  "conclusion from it: no liability, no registration status, no tax computation, no multiplying by",
+  "8%, no threshold judgement, no future-method inference, and never \"below threshold\" or \"no",
+  "issue\". This unattended sweep NEVER acts on it — surfacing and professional review belong to the",
+  "attended chat lane.",
+  "",
+  "Clara's wiki notes: the context pack may include a `wiki` block — Clara-maintained advisory",
+  "notes (basis `clara_maintained_advisory_notes`, permitted_use `inform_never_decide`) built from",
+  "this client's own approved history. Wiki content may INFORM this draft; it may NEVER decide one",
+  "— every DB gate, bound, floor, and autopost rule stays authoritative regardless of what the wiki",
+  "says, and this sweep draft remains human-reviewed under the same acknowledgement floors as any",
+  "other draft. When a wiki page informs this draft, cite it BY SLUG AND TITLE in the entry's memo",
+  "(e.g. \"per the <slug> page, '<title>'\") so the citation stays visible to the reviewing",
+  "bookkeeper even though this unattended run keeps no transcript.",
+  "The block's `last_projected_seq` versus the pack's `books_version` is a LAG MARKER: a gap means",
+  "the wiki notes are POSSIBLY STALE relative to the books. The books_version freshness token stays",
+  "authoritative regardless of the wiki's projection lag — never treat a wiki note as more current",
+  "than the books.",
+  "",
+  "This ledger is MYR-only. If the document is not lawfully draftable — a non-MYR currency, an",
+  "ambiguous or unresolvable counterparty, missing corroborated amounts, a document whose stated",
+  "type does not match the coding kind, or a multi-document bundle — DO NOT draft and DO NOT",
+  "guess: reply with a short plain-text explanation of exactly what is blocking the draft. There",
+  "is no human to ask right now; a truthful non-draft is correct.",
+  "State any uncertainty qualitatively with alternatives — never a percentage, never a suspense account.",
+  "Be concise and precise. Cite the figures you read rather than paraphrasing them loosely.",
+].join("\n");
+
+// ---------------------------------------------------------------------------
+// The draft_journal_entry input schema (skeleton §2a verbatim; a local copy — the
+// wrapper in autoDraft.v6.tools.ts fetches sha256 / resolution / books_version /
+// op_key SERVER-side, so the model NEVER supplies them).
+// ---------------------------------------------------------------------------
+export const draftJournalEntryInputSchema = z
+  .object({
+    coding_kind: z
+      .enum(["supplier_bill", "sales_invoice", "sales_credit_note"])
+      .describe(
+        "The entry kind, bound by the client's admitted direction for this document (a " +
+          "purchase-direction document only accepts supplier_bill; a sales-direction document " +
+          "only accepts sales_invoice or sales_credit_note — the DB revalidates the bound family " +
+          "and refuses a contradiction): supplier_bill (expense debit(s) + an Accounts Payable " +
+          "credit — expense GROSS when the facts state NO tax or a stated ZERO tax; expense NET " +
+          "plus one tied sst_purchase_cost debit when they state a NONZERO tax), sales_invoice " +
+          "(Trade Debtors debit + revenue credit — a customer-facing debit note too), or " +
+          "sales_credit_note (the exact mirror: Trade Debtors credit + revenue debit).",
+      ),
+    posting_date: z.string().describe("The entry posting date (YYYY-MM-DD), from the document."),
+    memo: z.string().optional().describe("Optional short memo for the entry."),
+    lines: z
+      .array(
+        z.object({
+          account_code: z.string().describe("An account code from the client's active chart of accounts."),
+          debit_cents: z.number().int().min(0),
+          credit_cents: z.number().int().min(0),
+          description: z.string().optional(),
+        }),
+      )
+      .min(2)
+      .describe(
+        "At least two balanced lines. supplier_bill when the facts state NO tax, or a stated tax " +
+          "that is EXACTLY ZERO: expense debit(s) GROSS + one Accounts Payable credit GROSS (two " +
+          "legs). supplier_bill when the facts state a NONZERO tax: expense debit(s) NET + ONE " +
+          "sst_purchase_cost debit equal EXACTLY to the stated tax + one Accounts Payable credit " +
+          "GROSS (three legs) — never gross-to-expense with a tax leg, never a dropped tax leg " +
+          "when one is required. sales_invoice: one Trade Debtors (receivable) debit GROSS + " +
+          "revenue credit(s) NET (+ an SST output credit when the document states tax). " +
+          "sales_credit_note: the exact mirror.",
+      ),
+    document_id: z.string().uuid().describe("The filed document this entry codes."),
+    counterparty: z
+      .union([
+        z.object({ kind: z.enum(["customer", "vendor"]).optional(), existing_id: z.string().uuid() }),
+        z.object({
+          kind: z.enum(["customer", "vendor"]).optional(),
+          new: z.object({ name: z.string(), registration_no: z.string().optional() }),
+        }),
+      ])
+      .describe(
+        "The counterparty: an existing id, or a proposed new counterparty (match-before-create). " +
+          "The VENDOR on a supplier_bill, the CUSTOMER on a sales_invoice/sales_credit_note. NEVER " +
+          "set `kind` yourself — it is derived server-side from coding_kind (vendor for " +
+          "supplier_bill, customer for sales_invoice/sales_credit_note); an explicit kind that " +
+          "contradicts coding_kind is rejected.",
+      ),
+    evidence: z
+      .array(
+        z.object({
+          region_id: z.string().uuid(),
+          quote: z.string(),
+          field_path: z.string().optional(),
+        }),
+      )
+      .min(1)
+      .describe("Cited facts (region id + exact quote) backing the amounts — REQUIRED for a document-bound draft."),
+    uncertainty: z
+      .object({ note: z.string(), alternatives: z.array(z.string()) })
+      .optional()
+      .describe("Qualitative uncertainty + alternatives (never a percentage)."),
+  })
+  .superRefine((val, ctx) => {
+    // Layer 2 of the counterparty contract (skeleton §2a) — ergonomics, not the
+    // guard: reject a model-supplied counterparty.kind that contradicts the
+    // coding_kind-derived kind outright. Layer 1 is this file's schema shape;
+    // layer 3 (the only AUTHORITY layer) is the DB draft writer, which
+    // re-derives and re-rejects independently.
+    const expectedKind = val.coding_kind === "supplier_bill" ? "vendor" : "customer";
+    const suppliedKind = (val.counterparty as { kind?: "customer" | "vendor" }).kind;
+    if (suppliedKind && suppliedKind !== expectedKind) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["counterparty", "kind"],
+        message: `counterparty.kind "${suppliedKind}" contradicts coding_kind "${val.coding_kind}" (expected "${expectedKind}").`,
+      });
+    }
+  });
+
+// ---------------------------------------------------------------------------
+// Typed shapes. autoDraft does NOT persist a transcript (settle_autodraft_task takes
+// no parts jsonb) — these shapes are internal to the workflow, describing the draft
+// tool's result and the terminal outcome the settle maps from.
+// ---------------------------------------------------------------------------
+
+/** @internal a minimal shape for an AI SDK content part we care about. */
+export type AiContentPart =
+  | { type: "text"; text: string }
+  | { type: "tool-call"; toolCallId: string; toolName: string; input: unknown }
+  | { type: "tool-result"; toolCallId: string; toolName: string; output: unknown }
+  | { type: "tool-error"; toolCallId: string; toolName: string; error: unknown }
+  | { type: string; [k: string]: unknown };
+
+export type JeReviewPart = {
+  type: "je_review";
+  entry_id: string;
+  revision_token: string;
+  client_id: string;
+  document_id: string;
+  provenance_tier: "verified" | "model_read";
+  exception?: boolean;
+  uncertainty?: { note: string; alternatives: string[] };
+};
+
+/** A typed, oracle-safe refusal. `reason` discriminates the sweep-refusal handling
+ *  (double_coded -> success-shaped noop; question-shaped -> may open an open-question). */
+export type RefusalPart = { type: "refusal"; code: string; reason?: string; message: string };
+
+/** The result shape the draft_journal_entry wrapper returns. */
+export type DraftToolResult =
+  | { ok: true; je_review: JeReviewPart }
+  | { ok: false; refusal: RefusalPart };
+
+/** The terminal outcome the workflow settles from, derived from the model segment. */
+export type AutoDraftOutcome =
+  | { kind: "drafted"; entryId: string; jeReview: JeReviewPart }
+  | { kind: "noop_existing"; reason: string } // BOTH double_coded reasons -> success-shaped
+  | { kind: "refused"; refusal: RefusalPart } // a question-shaped or terminal refusal
+  | { kind: "none" }; // the model produced no draft and no refusal (e.g. explained a block in prose)
+
+function isJeReview(v: unknown): v is JeReviewPart {
+  return !!v && typeof v === "object" && (v as { type?: unknown }).type === "je_review";
+}
+function isRefusal(v: unknown): v is RefusalPart {
+  return !!v && typeof v === "object" && (v as { type?: unknown }).type === "refusal";
+}
+
+/** The reasons the WA-L8 "one draft per filing" no-op surfaces as (companion §14). Either
+ *  maps to a SUCCESS-shaped settle (`noop_existing`) — the bill is already being coded. */
+export function isDoubleCodedReason(reason: string | undefined): boolean {
+  return reason === "double_coded" || reason === "already_coded";
+}
+
+/**
+ * Reduce a completed model segment's content to the terminal AutoDraft outcome. A
+ * successful draft_journal_entry tool RESULT yields `drafted`; a refusal whose reason is
+ * a double_coded variant yields `noop_existing` (WA-L8, success-shaped); any other refusal
+ * yields `refused`; content with neither is `none`. Pure — unit-testable with no DB/model.
+ */
+export function toAutoDraftOutcome(content: readonly AiContentPart[]): AutoDraftOutcome {
+  for (const p of content) {
+    if (p.type !== "tool-result") continue;
+    const tr = p as { toolName: string; output: unknown };
+    if (tr.toolName !== DRAFT_TOOL) continue;
+    const output = (tr.output ?? {}) as { je_review?: unknown; refusal?: unknown };
+    if (isJeReview(output.je_review)) {
+      return { kind: "drafted", entryId: output.je_review.entry_id, jeReview: output.je_review };
+    }
+    if (isRefusal(output.refusal)) {
+      if (isDoubleCodedReason(output.refusal.reason)) return { kind: "noop_existing", reason: output.refusal.reason ?? "double_coded" };
+      return { kind: "refused", refusal: output.refusal };
+    }
+  }
+  return { kind: "none" };
+}
+
+/** The refusal reasons that warrant opening a scoped open-question (a human must decide) vs
+ *  a plain failed settle. Vendor/currency/ambiguity blocks are question-worthy; a transient
+ *  or internal fault is not. Pure. */
+export function isQuestionShaped(refusal: RefusalPart | undefined): boolean {
+  if (!refusal) return false;
+  const r = refusal.reason ?? "";
+  return (
+    refusal.code === "CLR23" || // supplier could not be resolved as proposed
+    r === "vendor_unresolved" ||
+    r === "vendor_ambiguous" ||
+    r === "vendor_malformed" ||
+    r === "currency_unsupported" ||
+    r === "evidence_invalid"
+  );
+}

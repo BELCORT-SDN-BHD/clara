@@ -77,7 +77,7 @@ import {
   a21EnsureReady, buildWorld, firmOf, upsertAccountClassed, grantConsent,
   freshResolution, draftEntryV3, approveEntry, counterpartyRows, normalize, idOf,
 } from "./a21-helpers.mjs";
-import { S5_25_BARE_TOKEN_RE, S5_25_BARE_TOKEN_ROSTER } from "./x42-s5-helpers.mjs";
+import { S5_25_BARE_TOKEN_RE, s5BareTokenRoster } from "./x42-s5-helpers.mjs";
 
 // This suite's OWN codes (grepped against every other battery before choosing).
 const ARK = "374-K42"; // receivable control (asset, account_class='receivable')

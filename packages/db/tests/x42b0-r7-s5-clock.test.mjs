@@ -57,7 +57,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { rootQuery, withActor, ROLES, endPool, printLaneNotes, printSkipCount, noteLane } from "./a21-helpers.mjs";
-import { x42S5Ready, x42S5SkipHere, S5_25_BARE_TOKEN_RE, S5_25_BARE_TOKEN_ROSTER } from "./x42-s5-helpers.mjs";
+import { x42S5Ready, x42S5SkipHere, S5_25_BARE_TOKEN_RE, s5BareTokenRoster } from "./x42-s5-helpers.mjs";
 
 let live = false;
 

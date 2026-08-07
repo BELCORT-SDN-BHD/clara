@@ -190,3 +190,65 @@ export const S5_25_BARE_TOKEN_ROSTER = [
   "unmatch_bank_match", "update_onboarding_plan", "upsert_fa_account_profile", "verify_document_intake", "void_bank_reconciliation",
   "void_bank_statement", "wake_context", "wake_record_notification", "withdraw_draft",
 ].sort();
+
+// ---------------------------------------------------------------------------
+// 0046 [§7-A] — THE THREE NAMES THIS MIGRATION ADDS, AND WHY THE ROSTER IS BIMODAL.
+//
+// THE ADJUDICATION FIRST. Arm (D) catches a BARE clock token, and a bare token is only a
+// defect when the body derives a DATE from it. All three of these stamp TIMESTAMPTZ values —
+// an evaluation instant on an advisory read, and closed_at/updated_at/the activation
+// watermark on two writers. The one place §7-A needs a MYT money DATE,
+// clara.preview_ocr_sales_evidence, calls clara._book_today() instead, which is exactly the
+// outcome S5.25 arm (B) exists to produce (0046's own tail arm (7) re-measures that roster
+// unchanged).
+//
+// AND WHY IT IS NOT JUST APPENDED TO THE LIST ABOVE. The roster is compared EXACTLY against
+// the live catalog, and `db-slice-frontiers` runs this battery against databases pinned at
+// EARLIER frontiers (d-b0/b1/b2/b3 stop at 0042-0045), where these three functions do not
+// exist. An unconditional entry turns every one of those legs red while saying nothing about
+// clock discipline — the same failure mode rig-meta's 0037 table cohort and its
+// cohortFailures() gate already exist to prevent. Gating on the migration ledger keeps arm
+// (D) exact in BOTH directions at 0045 and at 0046+ alike: a missing name still fails.
+const SALES_LANE_0046_CLOCK_NAMES = [
+  "preview_ocr_sales_evidence", "set_sales_backfill_state", "set_sales_lane_activation",
+];
+
+/** The arm (D) roster for the database under test, sorted as the catalog sorts it. */
+export async function s5BareTokenRoster(query) {
+  const applied = (await query(
+    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'"
+  )).rows[0].n === 1;
+  const names = applied
+    ? [...S5_25_BARE_TOKEN_ROSTER, ...SALES_LANE_0046_CLOCK_NAMES]
+    : [...S5_25_BARE_TOKEN_ROSTER];
+  return names.sort();
+}
+
+// ---------------------------------------------------------------------------
+// S5.25 arm (B) — THE Asia/Kuala_Lumpur DUPLICATION ROSTER, frontier-aware for the same
+// reason arm (D)'s is (see s5BareTokenRoster above): `db-slice-frontiers` runs this battery
+// against databases pinned at 0042-0045, where 0046's bodies do not exist.
+//
+// 0046 (§7-A) adds ONE name, and it is a DECLARED change rather than a drift.
+// clara.preview_ocr_sales_evidence must read the SAME as-of date clara._ocr_sales_floor
+// uses, or one advisory can describe two populations across MYT midnight: the floor's cutoff
+// is transaction-pinned now(), while clara._book_today() samples statement_timestamp() per
+// STATEMENT. So the roster's standing advice — "call the authority instead" — CANNOT be
+// followed here, because the authority reads a different clock than the body this verb must
+// agree with. Spelling the floor's own expression is the correctness fix, and joining this
+// roster is its declared cost. 0046's own tail arm (7) pins the same ten names.
+const KL_ROSTER_BASE = [
+  "_adj_on_approve", "_adj_run_occurrence_core", "_book_today", "_ocr_sales_floor",
+  "ack_compliance_watch", "evaluate_sst_watch", "evaluate_sst_watches_all",
+  "record_future_attestation", "reverse_entry",
+];
+const KL_ROSTER_0046 = ["preview_ocr_sales_evidence"];
+
+/** The arm (B) duplication roster for the database under test, sorted as the catalog sorts it. */
+export async function s5KlDuplicationRoster(query) {
+  const applied = (await query(
+    "select count(*)::int as n from clara.schema_migrations where version like '0046_%'"
+  )).rows[0].n === 1;
+  const names = applied ? [...KL_ROSTER_BASE, ...KL_ROSTER_0046] : [...KL_ROSTER_BASE];
+  return names.sort().join(" ");
+}

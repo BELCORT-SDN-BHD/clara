@@ -1,20 +1,30 @@
 // STANDALONE v25 version-cutover + rollback-preflight e2e (Wave B, GATE 7 — the
 // rig-confined fault gate). NOT a `node --test` file: it boots the built server + the real
 // WDK Postgres world IN-PROCESS (the world-e2e.mjs §2 clarify-park pattern), stages a parked
-// run on the RETAINED OLD version chatTurn_v7, cuts a second turn over to chatTurn_v8
-// (workflows.chatTurn, through the registry indirection), proves the parked v7 run
-// resumes+completes on its ORIGINAL body (name-column invariance — the Slice-0 T6 evidence),
-// and turns the WB-R18 runbook rollback-preflight SQL into executable coverage.
+// run on a RETAINED OLD version (chatTurn_v7, a fixture — see below), cuts a second turn
+// over to whatever registry.ts's chatTurn: mapping CURRENTLY names as newest (through the
+// registry indirection), proves the parked v7 run resumes+completes on its ORIGINAL body
+// (name-column invariance — the Slice-0 T6 evidence), and turns the WB-R18 runbook
+// rollback-preflight SQL into executable coverage.
 //
-// Version pair maintenance note: this test hardcodes the CONCRETE pair the registry's
-// chatTurn: mapping currently cuts over (v7 -> v8, owner-approved closing batch,
-// 2026-07-29). The "newest" leg tracks registry.ts's literal source, so it breaks (by
-// design — fail loud, never false-green) the moment a FUTURE PR repoints chatTurn: again;
-// that PR owes this file the same bump. The frozen-workflows.json deployed:true check below
-// applies to BOTH legs now: v7 was live at the repoint, and v8's deploy ceremony has since
-// shipped and been deploy-locked (the flag is monotonic, so both assertions are stable). A
-// future repoint PR (v8 -> v9) re-enters the split state: its newest leg starts
-// hash-locked-but-NOT-yet-deployed until its own ceremony runs --lock-deployed. Run:
+// Version pair maintenance note (Codex round 9, §7-A PR-RUNTIME's own CI leg — this exact
+// class is PART 2's dated-tripwire pattern, already recorded for interview-e2e): this test
+// used to HARDCODE the concrete "newest" literal (v8), which went stale the moment a later
+// PR repointed chatTurn: to v9 and broke CI silently-until-red. Fixed: the NEWEST leg is now
+// DERIVED from registry.ts's own live `chatTurn: chatTurn_vN` pin (deriveNewestChatTurnExport
+// below) — never a hardcoded literal — so a future repoint no longer requires touching this
+// file at all for the newest side. The OLD/retained leg stays a hardcoded fixture (chatTurn_
+// v7): the invariant under test — "a parked run on an old, already-shipped body stays bound
+// to that body while new admissions go to whatever is currently newest" — holds for ANY
+// sufficiently old, still-frozen, still-deployed body, not specifically v7; v7 is simply a
+// convenient, permanently-retained (policy: no parked run is ever stranded) representative,
+// legitimately a STAGED fixture rather than an EXPECTED-CURRENT fact. The frozen-workflows.
+// json check below therefore also splits: v7's `deployed:true` stays an asserted invariant
+// (an old fixture is, by construction, already shipped); the DERIVED newest entry is only
+// asserted to exist and be hash-locked — its OWN `deployed` flag is genuinely ceremony-
+// dependent (a freshly-repointed newest leg starts hash-locked-but-NOT-yet-deployed until
+// its own ceremony runs `--lock-deployed`, exactly as this file's own PRIOR version of this
+// note already anticipated) and is not a stable fact this e2e should pin either way. Run:
 //
 //   PGHOST=127.0.0.1 PGPORT=55440 PGUSER=postgres PGDATABASE=clara_rt_test \
 //   WORKFLOW_POSTGRES_URL=postgres://postgres@127.0.0.1:55440/clara_rt_test \
@@ -72,7 +82,8 @@ process.env.CLARA_START_WORLD = "1";
 process.env.PORT ||= "3215";
 process.env.WORKFLOW_TARGET_WORLD = "@workflow/world-postgres";
 // Lengthen the reconciler grace far beyond the test window so the leader loop can never
-// re-enqueue the unbound T6 on workflows.chatTurn (v8) mid-test — start(v7) is the sole starter.
+// re-enqueue the unbound T6 on workflows.chatTurn (whatever's currently newest) mid-test —
+// start(v7) is the sole starter.
 process.env.CLARA_RECONCILE_GRACE ||= "30 minutes";
 const ISSUER = "https://clara-cutover.test/auth/v1";
 const AUD = "authenticated";
@@ -144,6 +155,21 @@ async function manifestWorkflowId(fileNeedle, exportName) {
   throw new Error(`manifest has no workflowId for ${exportName} in ${fileNeedle}`);
 }
 
+/** Derive the CURRENT newest chatTurn export from registry.ts's own live pin — never a
+ *  hardcoded literal (Codex round 9: the prior hardcoded "v8" went stale the moment a later
+ *  PR repointed chatTurn: to v9, and CI went red silently-until-caught — the SAME
+ *  dated-tripwire class PROJECTLOG PART 2 already tracks for interview-e2e). Reads
+ *  registry.ts's source once and extracts the literal `chatTurn: chatTurn_vN` mapping via
+ *  regex — the SAME source text the static registry guard near the end of this file also
+ *  reads, so both consumers share ONE read and ONE derivation, never two independently
+ *  hardcoded expectations that could drift from each other. */
+async function deriveNewestChatTurnExport() {
+  const registrySrc = await readFile(new URL("../workflows/registry.ts", import.meta.url), "utf8");
+  const m = /chatTurn:\s*(chatTurn_v(\d+))\b/.exec(registrySrc);
+  if (!m) throw new Error("could not derive the newest chatTurn export — registry.ts has no `chatTurn: chatTurn_vN` mapping");
+  return { registrySrc, exportName: m[1], version: Number(m[2]), fileName: `chatTurn.v${m[2]}.ts` };
+}
+
 /** The runbook §0/§8 preflight, executable: a version is rollback-'allowed' iff it has ZERO
  *  non-terminal runs (docs/ops/wave-b-ceremony-runbook.md lines 18/87). */
 async function rollbackPreflight(rig, name) {
@@ -191,6 +217,9 @@ async function main() {
 
   const v7ManifestName = await manifestWorkflowId("chatTurn.v7.ts", "chatTurn_v7");
   const closeExampleName = await manifestWorkflowId("closeExample.v1.ts", "closeExampleV1");
+  const { registrySrc, exportName: newestExportName, version: newestVersion, fileName: newestFileName } = await deriveNewestChatTurnExport();
+  const newestRowNamePattern = new RegExp(`chatTurn\\.v${newestVersion}\\b|${newestExportName}\\b`);
+  console.log(`[cutover-e2e] derived newest chatTurn export from registry.ts: ${newestExportName} (${newestFileName})`);
 
   const { owner, client } = await rig.buildFirm("cutover");
   const jwt = await mint(owner);
@@ -208,37 +237,44 @@ async function main() {
   await start({ workflowId: v7ManifestName }, [{ taskId: t7 }]);
   const t7Parked = await pollTask(rig, t7, (t) => t.status === "awaiting_input", "T7 parks on clarify (v7)");
   const v7RowName = (await rig.readWorkflowRun(t7Parked.workflow_run_id)).name;
-  // GUARD: prove v7 (not a reconciler-raced v8) actually bound — fail loud so the race never false-greens.
-  assert.match(v7RowName, /chatTurn\.v7|chatTurn_v7/, `GUARD: the parked run bound chatTurn_v7, not v8 (row name ${v7RowName})`);
+  // GUARD: prove v7 (not a reconciler-raced newest) actually bound — fail loud so the race never false-greens.
+  assert.match(v7RowName, /chatTurn\.v7|chatTurn_v7/, `GUARD: the parked run bound chatTurn_v7, not the newest export (row name ${v7RowName})`);
   console.log(`[cutover-e2e] parked v7 run staged FIRST (${v7RowName})`);
 
   // -------------------------------------------------------------------------
-  // CUTOVER: AFTER v7 is already parked, a NEW admission targets the newest
-  // version (v8) through the registry indirection — the HTTP /turns route
-  // calls start(workflows.chatTurn) = chatTurn_v8.
+  // CUTOVER: AFTER v7 is already parked, a NEW admission targets the CURRENT
+  // newest version (registry-derived above — see the "derived newest chatTurn
+  // export" log line for exactly which one, this run) through the registry
+  // indirection — the HTTP /turns route calls start(workflows.chatTurn) =
+  // the live pin.
   // -------------------------------------------------------------------------
   const s8 = await rig.createChatSession({ author: owner, client });
   const turnRes = await fetch(`${BASE}/api/chat/${s8}/turns`, {
     method: "POST",
     headers: { authorization: `Bearer ${jwt}`, "content-type": "application/json" },
-    body: JSON.stringify({ turnKey: "cutover-v8", parts: [{ type: "text", text: "help please" }] }),
+    body: JSON.stringify({ turnKey: "cutover-newest", parts: [{ type: "text", text: "help please" }] }),
     signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
   });
-  assert.equal(turnRes.status, 202, "v8 turn admitted 202");
+  assert.equal(turnRes.status, 202, "newest-version turn admitted 202");
   const t8 = (await turnRes.json()).task_id;
   const t8Parked = await pollTask(rig, t8, (t) => t.status === "awaiting_input", "T8 parks on clarify");
   const v8RowName = (await rig.readWorkflowRun(t8Parked.workflow_run_id)).name;
-  assert.match(v8RowName, /chatTurn\.v8|chatTurn_v8/, `new admission bound the NEWEST version v8 (row name ${v8RowName})`);
-  assert.notEqual(v7RowName, v8RowName, "the v7 run and the v8 run carry DISTINCT body names");
-  console.log(`[cutover-e2e] CUTOVER: new admission → v8 (${v8RowName})`);
+  assert.match(
+    v8RowName,
+    newestRowNamePattern,
+    `new admission bound the NEWEST version (registry-derived: ${newestExportName}, row name ${v8RowName})`,
+  );
+  assert.notEqual(v7RowName, v8RowName, "the v7 run and the newest-version run carry DISTINCT body names");
+  console.log(`[cutover-e2e] CUTOVER: new admission → ${newestExportName} (${v8RowName})`);
 
   // -------------------------------------------------------------------------
   // ROLLBACK PREFLIGHT (executable): both parked → both REFUSED (per-name),
   // AND the inventory-shaped preflight against a v7-only supported set (the
-  // build being rolled back to — it never registered v8) REFUSES BY NAME.
+  // build being rolled back to — it never registered the newest export)
+  // REFUSES BY NAME.
   // -------------------------------------------------------------------------
   assert.equal(await rollbackPreflight(rig, v7RowName), "refused", "v7 has a non-terminal run → rollback refused");
-  assert.equal(await rollbackPreflight(rig, v8RowName), "refused", "v8 has a non-terminal run → rollback refused");
+  assert.equal(await rollbackPreflight(rig, v8RowName), "refused", "the newest version has a non-terminal run → rollback refused");
   // The zero-run control (asserted directly, not inferred): a registered-but-unused version passes.
   assert.equal(await rollbackPreflight(rig, closeExampleName), "allowed", "a workflow with ZERO runs → rollback allowed");
   console.log("[cutover-e2e] preflight: v7 refused, v8 refused, closeExample (zero-run) allowed");
@@ -285,32 +321,40 @@ async function main() {
   // Static freeze/registry invariants that make the pin real.
   // -------------------------------------------------------------------------
   {
-    // The registry repoints chatTurn: → v8 AND retains the v7 export (so a parked v7 run is never
-    // stranded). Asserted textually on the source — a standalone plain-node e2e cannot import the
-    // frozen "use workflow" closure (see the header note); the runtime behaviour above already
-    // proved v8 is the newest and v7 remained resolvable/runnable.
-    const registrySrc = await readFile(new URL("../workflows/registry.ts", import.meta.url), "utf8");
-    assert.match(registrySrc, /chatTurn:\s*chatTurn_v8/, "registry repoints chatTurn: → chatTurn_v8 (newest)");
+    // The registry repoints chatTurn: → the DERIVED newest export AND retains the v7 export (so
+    // a parked v7 run is never stranded). Asserted textually on the SAME registrySrc the
+    // derivation itself already read at the top of main() (one read, one source of truth) — a
+    // standalone plain-node e2e cannot import the frozen "use workflow" closure (see the header
+    // note); the runtime behaviour above already proved the derived export is the newest and v7
+    // remained resolvable/runnable.
+    assert.match(registrySrc, new RegExp(`chatTurn:\\s*${newestExportName}\\b`), `registry repoints chatTurn: → ${newestExportName} (the derived newest)`);
     assert.match(registrySrc, /export\s*\{\s*chatTurn_v7\s*\}/, "registry RETAINS the chatTurn_v7 export (parked v7 runs never stranded)");
 
     // frozen-workflows.json carries a hash-locked entry for BOTH closures, proving a cutover can
     // never be an in-place body edit (the T6 silent-correctness hazard): the old body stays
-    // structurally resolvable. Both are deployed:true — v8 shipped in a live image long ago and
-    // the deploy-lock ceremony act stamped it (the flag is MONOTONIC, enforced by freeze-lint's
-    // UNLOCKED-VS-BASE, so this assertion is stable forever). The original repoint-era assertion
-    // here pinned "v8 NOT YET deployed" as a point-in-time state and correctly tripped when the
-    // missed lock ceremony was finally recorded — a dated expectation, not an invariant.
+    // structurally resolvable. v7's `deployed:true` is a stable INVARIANT — it is chosen
+    // specifically as an old, already-shipped fixture, so it is asserted unconditionally
+    // (the exact SAME assertion this file already made when v8 itself WAS the derived newest,
+    // and correctly kept making after v8's own deploy-lock ceremony landed). The DERIVED newest
+    // entry's `deployed` flag is deliberately NOT asserted either way: a freshly-repointed newest
+    // leg starts hash-locked-but-NOT-yet-deployed until its OWN ceremony runs --lock-deployed —
+    // exactly the "split state" this file's own header has anticipated since the v7->v8 repoint,
+    // and pinning a specific boolean here would recreate the SAME dated-expectation trap that
+    // originally broke this file (the ORIGINAL v7->v8 assertion pinned "v8 NOT YET deployed" as a
+    // point-in-time truth and correctly tripped once v8's ceremony actually ran).
     const frozen = JSON.parse(await readFile(new URL("../../../frozen-workflows.json", import.meta.url), "utf8"));
     const v7Entry = frozen.workflows?.["packages/runtime/workflows/chatTurn.v7.ts"];
     assert.ok(v7Entry, "frozen-workflows.json has a chatTurn.v7.ts entry");
     assert.equal(v7Entry.deployed, true, "chatTurn.v7.ts is deployed:true (already live, immutable)");
     assert.match(v7Entry.sha256 ?? "", /^[0-9a-f]{64}$/, "chatTurn.v7.ts is hash-locked");
 
-    const v8Entry = frozen.workflows?.["packages/runtime/workflows/chatTurn.v8.ts"];
-    assert.ok(v8Entry, "frozen-workflows.json has a chatTurn.v8.ts entry");
-    assert.match(v8Entry.sha256 ?? "", /^[0-9a-f]{64}$/, "chatTurn.v8.ts is hash-locked");
-    assert.equal(v8Entry.deployed, true, "chatTurn.v8.ts is deployed:true (shipped live, deploy-locked; the flag is monotonic)");
-    console.log("[cutover-e2e] static guards: registry repoint + v7 retention + frozen v7/v8 hash-locks (both deploy-locked)");
+    const newestEntry = frozen.workflows?.[`packages/runtime/workflows/${newestFileName}`];
+    assert.ok(newestEntry, `frozen-workflows.json has a ${newestFileName} entry`);
+    assert.match(newestEntry.sha256 ?? "", /^[0-9a-f]{64}$/, `${newestFileName} is hash-locked`);
+    console.log(
+      `[cutover-e2e] static guards: registry repoint (-> ${newestExportName}) + v7 retention + frozen v7/${newestFileName} hash-locks ` +
+        `(v7 deploy-locked; ${newestFileName} deployed=${newestEntry.deployed === true} — ceremony-dependent, not asserted either way)`,
+    );
   }
 
   console.log("\nVERSION CUTOVER E2E: ALL PASS");
