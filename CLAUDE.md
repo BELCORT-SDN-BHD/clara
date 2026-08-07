@@ -46,7 +46,7 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 - **Never Blindly dispatch the main model.** Every subagent/workflow/teammate dispatch carries an explicit `model`; ***omission silently inherits Fable, which is forbidden.*** Codex lanes stay `gpt-5.6-sol`.
 - **Ground before building.** On a new or compacted session, before answering an architecture question or changing code: **query the codebase-memory graph first** for structure, and read the relevant harness row above. For substantial, opt-in-scale work a grounding fan-out (Workflow) can help — but a few targeted graph queries + reads usually suffice.
 - **Query the graph, don't grep.** The codebase-memory graph is the first stop for "where / what / who-calls" questions (~100× cheaper than file-by-file reading). Use Grep/Read to drill into the specific file the graph points you at. Re-index after big code changes. *(stdio MCP, project-scoped in `.mcp.json`.)*
-- **Keep the harness fresh — each artifact for its purpose (before compact / refresh).** Check all the harness status and related docs is sync and refreshed with newest project state like **prd, rebuildplan, projectlog.......etc** , housekeeping anything that is stale or wrong/outdated, its for avoid the project's state, plan, decision, log 's pollution. and also refresh/update the memory record. (btw tidy up the loooong project log. make sure no context pollute in there and make sure claudemd is clean.)Always remember to refresh codebase-mcp and Do a harness-refresh pass before compacting a long session.
+- **Keep the harness fresh — each artifact for its purpose (before compact / refresh).** Check all the harness status and related docs is sync and refreshed with newest project state like **prd, rebuildplan, projectlog, all architecture.......etc** , housekeeping anything that is stale or wrong/outdated, its for avoid the project's state, plan, decision, log 's pollution. and also refresh/update the memory record. (btw tidy up the loooong project log. make sure no context pollute in there and make sure claudemd is clean.)Always remember to refresh codebase-mcp and Do a harness-refresh pass before compacting a long session.
 - **Grill until crystal-clear.** For any non-trivial plan, bug fix, or feature, use the **`grilling` skill (`/grillme`)** to interview the owner — as many rounds as it takes until the plan is unambiguous and aligned. Resolve ambiguity before writing code.
 - **Three review/evidence laws (minted 2026-08-06 — they cost real money to learn):**
   1. **A PR that changes JUDGEMENT LOGIC gets an independent review pass before
@@ -133,18 +133,23 @@ stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 
 **Phase 4 — WAVE C CLOSED (ADR-051..054) · WAVE D COMPLETE (ADR-055..059) · POST-WAVE
 CLEARED (ADR-060..062: the data doctrine · uniform review intensity · the pre-E clearing
-day — real FA + real booking on BEE, three structural gaps registered, §7-A skeleton
-ratified).** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) ·
+day) · §7-A GRILLED AND CLOSED (ADR-063/064 — the unattended sales drafter, accepted on a
+two-halves acceptance).** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) ·
 the extraction slice (ADR-047/048) · the settlement program (ADR-049) · the first production
 autopost (ADR-050) · **C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliation receipts at
 exactly 0, nine real RPR months chained to the sen) · **D-a** FA register (0041) · **D-b**
 adjustments + advances + AF-2 + producer as a four-slice split (0042/0043/0044/0045).
 
-**LIVE POSTURE: 44 migrations (frontier `0045`) · Fly `clara-runtime` **v55** (2026-08-06
-— the FIRST release actually carrying the adjustments belt: v54 was built 08-05 04:13Z,
-BEFORE the belt's code merged at 15:52Z, so the belt was dark for ~35h while the record said
-"armed"; the B2 witness caught it — PART 2 records the incident + the deploy law it minted)
-— **THE ADJUSTMENTS BELT IS ARMED AND WITNESSED** (daily sweep; every occurrence DRAFTS,
+**LIVE POSTURE: 46 migrations (frontier `0047`) · Fly `clara-runtime` **v57** ·
+**§7-A CLOSED (ADR-064, 2026-08-07)** — the sandbox posted UNATTENDED (five ocr_sales posts,
+two rule ids; nine-controls battery complete — eight tokens SEEN incl. a wild-caught
+`floor_lost`, four documented NOT-REACHABLE; floor `floor_met` TRUE 6/6/6/85, TB
+33,133,816 = 33,133,816¢) and **ROME SECRETARY's 22 REAL sales invoices** ran draft-only
+(21 drafted unattended, 19 approved: TB 915,000 → **3,056,500/3,056,500¢** to the sen,
+**10 customers born NAME-ONLY — never enrich them with registrations**, PART 2's
+enrichment trap; 2 KONG CHENG rows held on F7, FINCARE held `customer_name_missing`).
+Findings **F6–F9 → tasks #31–34** (PART 2 holds the register). **·
+THE ADJUSTMENTS BELT IS ARMED AND WITNESSED** (daily sweep; every occurrence DRAFTS,
 attested approves; the producer verb `accept_bank_rule_suggestion` granted authenticated-ONLY) **· Supavisor 32/60
 (runtime pool 11, its post-restart baseline; measured 2026-08-06) · FOUR firms** (BELCORT — real,
 high-stakes RM100,000 ADR-044, **THREE clients: ROME PROPERTIES · ROME SECRETARY · BEE CREATIVE
@@ -158,15 +163,15 @@ adjustments** (needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.de
 (ADR-056/058 — both are in strike-off, so neither could carry a live register); **BEE is the
 going-concern client ADR-058 said those deferrals were waiting for** — it owns tasks #71/#72
 (Gate P on its SST invoices + the WD-R14 real FA carry-down). The sandbox carries the
-labelled-synthetic corpora — a live
-depreciation authority, ONE synthetic staff advance (tie 0), and the D-b2 acceptance register
-(templates A+B retired with reasons · **B2 LIVE from 2026-07-01** · the May occurrence+mirror
-pair netting ZERO · one cancelled pair drill). **Witnesses:** the belt's first
-autonomous DRAFT is RECORDED (B2's July: entry `d023b48c`, drafted by v55's boot sweep
-2026-08-06 16:56Z, `adjustment_runs` untouched, August correctly held transient — NEVER
-approve it) · BEE's first real depreciation draft `3c05ab82` (Feb-2025, 10,393¢, the 0041
-ramp rule: first-ever run under an authority always drafts; owner approval unlocks the
-remaining ten catch-up periods) · the first autonomous POST (≥2026-10-01) stands open.
+labelled-synthetic corpora — a live depreciation authority, ONE synthetic staff advance (tie 0),
+the D-b2 acceptance register (templates A+B retired with reasons · **B2 LIVE from 2026-07-01** ·
+the May occurrence+mirror pair netting ZERO · one cancelled pair drill), and §7-A's live
+`ocr_sales` rule + earned floor. **Witnesses:** the belt's first autonomous DRAFT `d023b48c`
+(B2's July, v55's boot sweep — **NEVER approve it**) · BEE's first real depreciation draft
+`3c05ab82` (Feb-2025, 10,393¢; the 0041 ramp rule — a first-ever run under an authority always
+drafts, owner approval unlocks the remaining ten catch-up periods) · the first `ocr_sales`
+unattended POSTS (five, sandbox, ADR-064) · the first autonomous adjustments POST (≥2026-10-01)
+stands open.
 
 **WAVE D records (never re-grill):** `docs/plan/wave-d-contract.md` (WD-R1..R15, ADR-055) ·
 D-a: `wave-d-a-fa-design.md` v2.1 + `-part2.md` (ADR-056) · D-b AS-BUILT:
@@ -182,8 +187,10 @@ do-not-restore list in asbuilt-part2 §13). The Wave C records: `wave-c-contract
 
 **Autopost law (ADR-049/050):** vendor-binding v4.1 BUILT AND LIVE; hand-drafts are never
 autopost-eligible BY DESIGN; autopost-from-seeding stays REFUSED (WB-R2/ADR-046). The
-OCR-sales envelope is BUILT; the missing piece is the unattended sales drafter, and the
-floor accrues ONLY from chatTurn drafts tagged `sales_invoice` — contract §7-A. **Standing
+OCR-sales envelope is BUILT and now WITNESSED end-to-end (ADR-064): the unattended sales
+drafter ships in `0046`/`0047`, tax-silent sales invoices DRAFT but can never autopost
+(7A-R3), and the floor counts `coding_kind='sales_invoice'` only and **excludes entries a
+rule posted itself** — a rule can never feed its own floor. **Standing
 law: migration numbers are claimed at MERGE time** (RENUMBER.md procedure). **Ceremony law
 (ADR-059): live applies carrying whole-schema lex passes set session-level
 `statement_timeout` inside the migration connection — role/db-level settings are invisible
@@ -194,14 +201,20 @@ new code's own boot/log line; "the deploy command completed" is a derived state,
 evidence.** Malaysian tax facts live in effective-dated policy tables, never
 in prose (`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
 
-**Open build items (PROJECTLOG PART 2 is the live register):** **§7-A NEXT — skeleton
-RATIFIED at v2** (`docs/plan/wave-7a-design-skeleton.md`, ADR-062; the build session grills
-its §6 then builds five slices) · Gate P + Gate S both **operating runway** (first native-MYR
-SST-stated bill / first real e-invoice XML) · the extraction-recovery door + FX-lite
-prioritization (ADR-062 registrations) · Wave E (periods + statements; owns closing stock per
-WD-R11, the segment-aware FA tie, the depreciation close gate, MPERS presentation wording,
-**and the consolidated client-facts inputs: the F-1 allocation-date guard · entity_type
-surfacing · the MSIC capture door**) · the `opening_tb.line` producer + K-doc door (Phase 5,
-review-gated) · the fifth-lex measurement constraint (standing).
+**§7-A records (never re-grill):** contract `docs/plan/wave-7a-contract.md` (7A-R1..R12,
+ADR-063) · skeleton `wave-7a-design-skeleton.md` v2 · ACCEPTANCE (as-run, evidence grade):
+`wave-7a-acceptance-h2.md` (sandbox) + `-h1.md` (RS real).
+
+**Open build items (PROJECTLOG PART 2 is the live register):** **WAVE E NEXT — grill it**
+(periods + statements, sequential per 7A-R10; owns closing stock per WD-R11, the segment-aware
+FA tie, the depreciation close gate, MPERS presentation wording, **the consolidated
+client-facts inputs — the F-1 allocation-date guard · entity_type surfacing · the MSIC
+capture door** — and the §7-A carry-ins: the settlement-corroboration door, the owner UX-debt
+list, the third-reader #25) · the **F6–F9 fix batch** (tasks #31–34) · **PRs #209/#210/#211 →
+review → merge → ONE deploy ceremony** (`0048` + runtime vNext) · Gate P + Gate S both
+**operating runway** (first native-MYR SST-stated bill / first real e-invoice XML) · the
+extraction-recovery door (**now F6/#31's**) + FX-lite prioritization (ADR-062 registrations) ·
+the `opening_tb.line` producer + K-doc door (Phase 5, review-gated) · the fifth-lex
+measurement constraint (standing).
 
 **Canary `daba7f2e` was due 2026-08-02 — NEVER answer it, even past due.**
