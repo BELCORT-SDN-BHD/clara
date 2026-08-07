@@ -1,6 +1,9 @@
 # §7-A — THE UNATTENDED SALES DRAFTER · DESIGN SKELETON **v2**
 
-> **STATUS: SKELETON, NOT RATIFIED.** The document a fresh build session grills. Nothing built.
+> **STATUS: §6 RESOLVED — see `wave-7a-contract.md` (7A-R1..R12, owner-grilled 2026-08-06).**
+> This document remains the mechanism of record for §0–§5/§7; on any conflict with the
+> contract's rulings, the contract wins (it supersedes exactly one lean: §3.2 → shape (B) with
+> a kill-switch, 7A-R1).
 >
 > **REVIEW PROVENANCE**
 > `v1` (design lane, 2026-08-06) → native orchestrator read (**clean**) → **Codex `gpt-5.6-sol`
