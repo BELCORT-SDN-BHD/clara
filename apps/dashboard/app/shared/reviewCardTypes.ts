@@ -296,6 +296,11 @@ export const LANE_REASON_COPY: Record<string, string> = {
   facts_pending: "extraction still in progress",
   parked: "parked after repeated auto-draft failures",
   rule_backed: "a signed rule backs the account choice",
+  // 0049 — the first reason token that lands on a card because the DB ABSTAINED rather than
+  // because something is missing. Without a line here laneReasonCopy() echoes the raw token
+  // (its documented `?? reason` fallback), so the accountant would read the literal string
+  // `direction_unresolved` beside sentences.
+  direction_unresolved: "cannot tell if this is a sale or a purchase — confirm the parties",
 };
 
 /** §6.2 direction-aware lane-reason copy. Compatible with LANE_REASON_COPY (same tokens,

@@ -81,6 +81,17 @@ export async function migrate({ log = console.log, dir } = {}) {
   assertNoTargetSplit();
 
   const client = makeClient();
+  // MIGRATION NOTICES ARE OUTPUT, NOT EXHAUST (added 2026-08-08, minted by 0049's review).
+  // node-postgres discards every server NOTICE unless something listens, and this runner
+  // never listened — so a migration whose in-transaction census reports through
+  // `raise notice` printed NOTHING through the production apply path, while the same file
+  // under `psql -f` printed all of it. A ceremony was being told to read a number that was
+  // never on its screen; an unprinted number is not evidence. Routed through `log`, so the
+  // callers that pass a silent log (the rig's upgrade tests) stay silent.
+  client.on("notice", (n) => {
+    const msg = (n?.message ?? "").toString();
+    if (msg) log(`  [${(n?.severity ?? "NOTICE").toLowerCase()}] ${msg}`);
+  });
   await client.connect();
   let locked = false;
   try {
