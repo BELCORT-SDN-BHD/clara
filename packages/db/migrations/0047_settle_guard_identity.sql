@@ -240,7 +240,7 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  raise notice '0047 prestate: clean (frontier 0046, binary status domain, 2 overloads, 1 anchor each, run-identity intact)';
+  raise notice '0047 prestate: clean (frontier 0046, ternary draft/approved/withdrawn status domain, 2 overloads, 1 anchor each, run-identity intact)';
 end
 $prestate$;
 
