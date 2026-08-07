@@ -118,6 +118,38 @@ async function cpOf(client, name = CUSTOMER) {
   return (await counterpartyRows(client)).find((c) => (c.name_normalized ?? "") === norm)?.id ?? null;
 }
 
+/**
+ * Every lock-taking shape found between the sales branch start and the firm advisory in a
+ * clara.admit_autodraft_task body, as a list of human-readable findings ([] = clean).
+ *
+ * DEFAULT-DENY, not pattern-hunting: the branch must acquire the advisory FIRST, so any
+ * statement that can take a row lock before it is a finding — whatever table it names. That
+ * is what keeps the arm list-free as the body grows. The shapes below are the ways PostgreSQL
+ * takes a row lock, not a guess at which ones this function happens to use today:
+ *   - SELECT ... FOR UPDATE          explicit
+ *   - UPDATE <table>                 locks every row it touches
+ *   - DELETE FROM <table>            likewise
+ *   - INSERT ... ON CONFLICT         locks the conflicting row when one exists
+ * Exported shape is a LIST rather than a boolean so the failure message can name what it hit.
+ */
+function preambleLockViolations(src) {
+  const salesAt = src.indexOf("if v_direction='sales' then");
+  const advisoryAt = src.indexOf("pg_advisory_xact_lock(202991617", salesAt);
+  if (salesAt < 0 || advisoryAt < 0) return ["ANCHORS MISSING — the branch or the advisory moved"];
+  const preamble = src.slice(salesAt, advisoryAt);
+  const found = [];
+  for (const [shape, rx] of [
+    ["SELECT ... FOR UPDATE", /for\s+update/i],
+    ["UPDATE of a clara table", /\bupdate\s+clara\.\w+/i],
+    ["DELETE from a clara table", /\bdelete\s+from\s+clara\.\w+/i],
+    ["INSERT ... ON CONFLICT (locks the conflicting row)", /\bon\s+conflict\b/i],
+  ]) {
+    const m = preamble.match(rx);
+    if (m) found.push(`${shape} -> ${JSON.stringify(m[0])}`);
+  }
+  return found;
+}
+
 before(async () => {
   await a21EnsureReady();
   has46 = await has0046();
@@ -270,8 +302,15 @@ test("A5 the POSITIVE side of corroborated>=6: six corroborating sales invoices 
       postingDate: date, codingKind: "sales_invoice", opKey: opk("x46a5"),
     });
     await approveEntry(sub, { entry: d.entry_id, expectedRevision: d.revision_token, opKey: opk("x46a5a") });
-    if (!cp) { cp = await cpOf(client); assert.ok(cp, "mandatory setup: the customer was born at approval"); }
+    if (!cp) { cp = await cpOf(client); }
   }
+  // [lane-7a-db — REPORTED] STATED UNCONDITIONALLY. The premise used to live inside the
+  // `if (!cp)` initializer, so it only ran on the loop's first pass — harmless today, but it
+  // was the last conditionally-executed assertion in either x46 file, and a premise that holds
+  // only on one iteration is not a premise. A null cp would make floorOf() read a different
+  // population entirely, so the cell says so before it measures.
+  assert.ok(cp,
+    "mandatory premise: the sales customer counterparty exists before the floor is measured");
 
   const f = await floorOf(client, cp);
   assert.ok(f.corroborated >= 6,
@@ -669,8 +708,9 @@ test("C6 the canonical lock order is STRUCTURAL: the firm advisory precedes EVER
   // THE SET IS MEASURED, not assumed: clara.admit_autodraft_task takes exactly two
   // FIRM-scoped row locks (clara.sales_backfill_batches and clara.firm_usage_daily) plus one
   // FILING-scoped one (clara.document_filings, taken first and identically on every path, so
-  // it carries no ordering hazard). If a future edit adds a third firm-scoped row lock, the
-  // "no row lock before the advisory" arm below catches it without needing this list updated.
+  // it carries no ordering hazard). If a future edit adds a third firm-scoped row lock, arm
+  // (b) catches it without needing this list updated — it is DEFAULT-DENY over every
+  // lock-taking shape, not a search for the tables named here.
   const src = (await rootQuery(
     `select prosrc from pg_proc where pronamespace='clara'::regnamespace
        and proname='admit_autodraft_task'`)).rows[0].prosrc;
@@ -693,12 +733,55 @@ test("C6 the canonical lock order is STRUCTURAL: the firm advisory precedes EVER
       + `order and deadlocks (40P01, reproduced live)`);
   }
 
-  // (b) ...and NOTHING firm-scoped is locked between the branch start and the advisory. This is
-  // the arm that does not need a list: any future row lock hoisted above the advisory fails here.
-  const preamble = src.slice(salesAt, advisoryAt);
-  assert.ok(!/for\s+update/i.test(preamble),
+  // (b) ...and NOTHING is locked between the branch start and the advisory. List-free, and
+  // DEFAULT-DENY rather than pattern-hunting: no row lock of any shape may appear there.
+  //
+  // [lane-7a-db — REPORTED] THE FIRST CUT OF THIS ARM WAS WRITE-BLIND, and it failed on the
+  // exact lesson the migration comment two files over teaches in writing. It tested
+  // /for\s+update/i ALONE, so the cross-model gate defeated it a second time: a plain
+  // `update clara.firm_usage_daily ...` hoisted above the advisory takes the same row lock, in
+  // the same inverted order, and sailed past. An UPDATE and a DELETE lock rows exactly as
+  // SELECT ... FOR UPDATE does, and an INSERT ... ON CONFLICT locks the row it conflicts with.
+  // Writing "grepping for update is the wrong instrument" into the migration and then shipping
+  // a guard that greps `for update` is the same mistake twice, so this arm now denies EVERY
+  // lock-taking shape and names which one it found.
+  const violations = preambleLockViolations(src);
+  assert.deepEqual(violations, [],
     `a row lock is taken between the sales branch start and the firm advisory lock — the advisory `
-    + `must be the FIRST lock this branch acquires (found: ${JSON.stringify(preamble.slice(-160))})`);
+    + `must be the FIRST lock this branch acquires. Found: ${violations.join(" · ")}`);
+
+  // (c) THE GUARD IS PROVED AGAINST BOTH MUTANTS, because an assertion that has never failed is
+  // not yet known to be able to. Each mutant splices a real inverted acquisition into the
+  // preamble of the real body; the second is the one the previous cut missed.
+  for (const [label, injected, expectedShape] of [
+    ["FOR UPDATE reorder",
+      "  select 1 from clara.firm_usage_daily where firm_id=f.firm_id for update;\n",
+      "SELECT ... FOR UPDATE"],
+    ["plain UPDATE reorder (the shape the /for update/ arm was blind to)",
+      "  update clara.firm_usage_daily set tokens_used=tokens_used where firm_id=f.firm_id;\n",
+      "UPDATE of a clara table"],
+    ["DELETE reorder",
+      "  delete from clara.sales_backfill_batches where firm_id=f.firm_id and false;\n",
+      "DELETE from a clara table"],
+    ["INSERT ... ON CONFLICT reorder (locks the conflicting row)",
+      "  insert into clara.firm_usage_daily(firm_id,usage_date,tokens_used) values(f.firm_id,v_today,0)"
+      + " on conflict(firm_id,usage_date) do nothing;\n",
+      "INSERT ... ON CONFLICT"],
+  ]) {
+    const mutant = src.slice(0, advisoryAt) + injected + src.slice(advisoryAt);
+    const hits = preambleLockViolations(mutant);
+    // Each mutant must be caught BY ITS OWN SHAPE. A bare notDeepEqual(hits, []) would also be
+    // satisfied by the ANCHORS-MISSING sentinel, which is a vacuous pass dressed as a rejection
+    // — the same "absence is not evidence" trap this lane keeps meeting, so the guard is held
+    // to the same standard as the code it guards.
+    assert.ok(!hits.some((h) => h.startsWith("ANCHORS MISSING")),
+      `the ${label} mutant must still parse — an ANCHORS MISSING result would make the rejection `
+      + `below vacuous (got ${JSON.stringify(hits)})`);
+    assert.ok(hits.some((h) => h.startsWith(expectedShape)),
+      `the guard must REJECT the ${label} mutant via its own shape "${expectedShape}" — if it `
+      + `passes, or trips on something else, this cell cannot detect the inversion it exists to `
+      + `prevent (got ${JSON.stringify(hits)})`);
+  }
 });
 
 // ---------------------------------------------------------------------------

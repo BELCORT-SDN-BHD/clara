@@ -414,7 +414,17 @@ test("7A-R3 with the lane active, a tax-silent sales filing reaches draft admiss
   if (skip46(t)) return;
   const { users, clients } = world;
   const client = clients.A1;
-  const filing = await taxSilentSalesFiling(users.alice, { client, firm: firmA, customerName: `X46 DRAFT CO ${randomUUID().slice(0, 6)}` });
+  // [lane-7a-db, terminal proof — REPORTED] THE COUNTERPARTY IS BIRTHED FIRST, AND THE DOCUMENT
+  // NAMES THE SAME ONE. Previously the cell invented a customer name for the document and a
+  // DIFFERENT random name for the draft's proposal, then tried to discover the counterparty by
+  // reading clara.journal_lines.counterparty_id — which is null here BY DESIGN, so the whole
+  // posting block was skipped. See the note at the cp assertion below for the measurement.
+  const custName = `X46 DRAFT CO ${randomUUID().slice(0, 6)}`;
+  const birth = await birthSalesCustomer(users.alice, {
+    client, firm: firmA, name: custName, date: "2026-01-05",
+    stampKind: true, corroborate: false, sellerIsClient: true,
+  });
+  const filing = await taxSilentSalesFiling(users.alice, { client, firm: firmA, customerName: custName });
 
   const lane = await codingLane(humanPersona(users.alice), { client, filing: filing.filingId });
   assert.equal(lane?.lane, "ready", `an active-lane tax-silent sales filing reaches 'ready' (got ${JSON.stringify(lane)})`);
@@ -435,7 +445,7 @@ test("7A-R3 with the lane active, a tax-silent sales filing reaches draft admiss
       { account_code: REV, debit_cents: 0, credit_cents: 100000, description: "sales-rev" },
     ],
     document: filing.documentId, sha256: filing.sha256,
-    vendor: { new: { name: `X46 DRAFT CO ${randomUUID().slice(0, 4)}` }, kind: "customer" },
+    vendor: { existing_id: birth.cp, kind: "customer" },
     evidence: [ev(region?.id, region?.text_content ?? "RM 1,000.00", "invoice.total")],
     codingKind: "sales_invoice", opKey: opk("r3draft"),
   });
@@ -449,27 +459,38 @@ test("7A-R3 with the lane active, a tax-silent sales filing reaches draft admiss
 
   // No posting path accepts it: even a raw-inserted LIVE rule pointed straight
   // at this entry's counterparty/account refuses to post it (not_corroborated).
-  const cpRow = (await counterpartyRows(client)).find((c) => c.id != null && draft.entry_id) ; // presence probe only
-  void cpRow;
-  const lines = await rootQuery("select counterparty_id from clara.journal_lines where entry_id=$1 and counterparty_id is not null limit 1", [draft.entry_id]);
-  const cp = lines.rows[0]?.counterparty_id ?? null;
-  if (cp) {
-    const liveRow = await rawRule(users.alice, { client, firm: firmA, cp, accountCode: REV, status: "live" });
-    void liveRow;
-    await postViaRule(draft.entry_id);
-    const skip = await lastSkipReason(draft.entry_id);
-    // [lane-7a-db, hardening — REPORTED] The OUTCOME assertion is strengthened to the real
-    // posted state and the token is pinned to a closed set instead of logged. 'not_a_draft'
-    // means the subject was approved before the executor saw it, so corroboration was never
-    // reached: the "never autoposted" claim stands, the corroboration-gate claim does not, and
-    // that distinction is now stated rather than buried in a note.
-    assert.notEqual(await entryStatusOf(draft.entry_id), "checked", "the tax-silent draft is never posted via a rule, live or not");
-    assert.equal(skip, "not_corroborated",
-      `the executor refusal is TERMINAL at corroboration (got '${skip}') — an earlier token`
-      + ` means the post never reached the gate 7A-R3 says EVERY posting path keeps`);
-  } else {
-    noteLane("could not resolve the drafted entry's counterparty row — the never-posts assertion above (status<>checked) still stands unconditionally");
-  }
+  // [lane-7a-db, terminal proof — REPORTED] MANDATORY PREMISE, replacing a conditional escape
+  // that made this cell green while it measured nothing.
+  //
+  // WHAT WAS WRONG, MEASURED IN THE CATALOG RATHER THAN GUESSED. The cell used to discover the
+  // counterparty with `select counterparty_id from clara.journal_lines where entry_id=...`, and
+  // wrapped the entire rule/post/not_corroborated block in `if (cp)`. That column is NULL here
+  // BY DESIGN, so the block never ran and the else-branch printed a note while the cell
+  // reported PASS. clara._draft_entry_core stamps journal_lines.counterparty_id only under
+  // `if v_vendor_binding is not null`, i.e. only when clara._resolve_vendor_binding returned
+  // 'bound' — and a SALES draft never runs vendor binding at all (7A-R2). So no sales draft
+  // will EVER carry that stamp, and no fixture change could have produced one through the
+  // audited path.
+  //
+  // WHAT THE EXECUTOR ACTUALLY READS is clara.entries.proposed_counterparty, not the line
+  // stamp: execute_rule_post refuses 'ineligible_no_counterparty' when it is null, then
+  // re-resolves it via _resolve_counterparty with the kind FORCED from the direction
+  // ('customer' for sales). So the fix is to give the entry a proposal that resolves — the
+  // customer is birthed above, the document names that same customer, and the draft proposes
+  // it by existing_id — and to point the rule at that identity.
+  const cp = birth.cp;
+  assert.ok(cp,
+    "mandatory premise: the sales customer counterparty exists before the draft is proposed — "
+    + "without it execute_rule_post refuses at counterparty resolution and never reaches the "
+    + "corroboration gate this cell exists to prove");
+  const liveRow = await rawRule(users.alice, { client, firm: firmA, cp, accountCode: REV, status: "live" });
+  void liveRow;
+  await postViaRule(draft.entry_id);
+  const skip = await lastSkipReason(draft.entry_id);
+  assert.notEqual(await entryStatusOf(draft.entry_id), "checked", "the tax-silent draft is never posted via a rule, live or not");
+  assert.equal(skip, "not_corroborated",
+    `the executor refusal is TERMINAL at corroboration (got '${skip}') — an earlier token`
+    + ` means the post never reached the gate 7A-R3 says EVERY posting path keeps`);
   // 7A-R3's OTHER half, measured only after the posting gate has been: the human approval
   // this contract sanctions still succeeds on the very entry no rule would post.
   await approveEntry(users.alice, { entry: draft.entry_id, expectedRevision: draft.revision_token, opKey: opk("r3app") });
