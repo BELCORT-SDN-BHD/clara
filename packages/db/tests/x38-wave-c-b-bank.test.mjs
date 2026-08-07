@@ -1704,9 +1704,37 @@ test("x38.aa kill switch OFF holds a statement_facts claim even with an ACTIVE c
   assert.notEqual(held.status, "running", "an un-egressed statement_facts task is NOT running (held by the kill switch)");
   assert.equal(held.workflow_run_id ?? null, null, "no workflow_run_id is stamped while held");
 
+  assert.equal(held.status, "held_egress", `the kill switch HOLDS the statement_facts task (got ${held.status})`);
+
+  // ● THE RELEASE MUST ACTUALLY RELEASE IT. This cell used to close on
+  // `assert.ok(after, "...inspectable after a release cycle")` -- a row that always exists,
+  // satisfied by ANY status including a permanently-stalled held_egress. That is the whole
+  // reason a migration recut could drop 'statement_facts' from the release lane list and
+  // still see 43/43 green here (H2 F4 review, 2026-08-07). The assertion is now the
+  // PROPERTY: a lane that can be HELD and cannot be RELEASED is a permanent stall
+  // (0038 E4's own words), so the released task must read 'queued'.
+  //
+  // And it must release WITHOUT any legacy-consent condition: statement_facts is a
+  // KILL-SWITCH-ONLY lane at claim time (0038 E3 -- widening the legacy purpose-blind
+  // consent branch to it would let that table authorize a statement-specific vendor read,
+  // the conflation 0020 section 1 built a separate relation to prevent). Its typed
+  // (consent, activation) gate lives at ENQUEUE, which this cell already passed. So the
+  // release sweep -- called only when the runtime believes the switch is back on -- has
+  // exactly one correct answer here, whatever clara.client_egress_consents says.
+  const legacy = await rootQuery(
+    "select count(*)::int n from clara.client_egress_consents where client_id=$1 and revoked_at is null",
+    [client],
+  );
   await roleQuery(ROLES.runtime, "select clara.release_held_document_tasks(p_limit => 100)").catch((e) => noteLane(`x38.aa release_held_document_tasks raised ${e.code} -- inspect (should cover statement_facts)`));
   const after = await statementTask(filed.documentId, LANE_OCR);
   assert.ok(after, "the held statement_facts task is inspectable after a release cycle");
+  assert.equal(
+    after.status, "queued",
+    `x38.aa: the released statement_facts task must be QUEUED (got ${after.status}; live legacy consents for this client: ${legacy.rows[0].n}) -- `
+    + "a statement lane missing from release_held_document_tasks' lane list is a PERMANENT stall, "
+    + "and a statement lane gated on the LEGACY consent table here is the 0020 section 1 conflation",
+  );
+  assert.equal(after.workflow_run_id ?? null, null, "the released task carries no workflow_run_id -- the reconciler binds one when it dispatches");
 });
 
 // ===========================================================================

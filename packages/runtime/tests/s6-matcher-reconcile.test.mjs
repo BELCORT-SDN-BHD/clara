@@ -142,24 +142,86 @@ test("ocr queued task still routes to enqueueDocumentIngest (unchanged)", async 
   await removeTaskMeta(row.taskId);
 });
 
+// F4 (H2 acceptance report, migration 0050): this cell used to prove the WRONG property. It
+// ran the DENIED-snapshot path with a sidecar reading held_egress and a canned release
+// receipt, so what it actually asserted was "the env flag dispatches a held task" — the
+// runtime half of the release/re-hold storm. The release is now DB-adjudicated: the sweep
+// asks the database to release, re-reads, and dispatches only what the database MOVED. So the
+// released task is modelled the way Postgres answers it — the post-release row reads 'queued'
+// — and the fail-closed direction gets its own cell below.
 test("released held_egress invoice_facts task routes to the facts lane in the same cycle", async () => {
   process.env.CLARA_DOC_EGRESS_APPROVED = "1";
   const row = task("invoice_facts", "held_egress");
   await writeTaskMeta(row.taskId, row);
   const ingest = [];
   const facts = [];
-  const client = deniedSnapshotClient(async (sql) => ({
-    rows: [{ receipt: /release_held/.test(sql) ? { released: 2 } : {} }],
-    rowCount: 1,
-  }));
+  let released = false;
+  // A WORKING snapshot (not the 42501 fallback): the release commits first, so the row this
+  // sweep then reads already says 'queued'.
+  const client = {
+    query(sql) {
+      if (/release_held/.test(sql)) {
+        released = true;
+        return Promise.resolve({ rows: [{ receipt: { released: 2 } }], rowCount: 1 });
+      }
+      if (/select t\.id as task_id/.test(sql)) {
+        return Promise.resolve({
+          rows: [{
+            task_id: row.taskId, document_id: row.documentId, firm_id: row.firmId,
+            engine_id: "azure-di:prebuilt-invoice", engine_config: {}, version_n: 1,
+            lane: "invoice_facts", status: released ? "queued" : "held_egress",
+            run_id: null, created_at: row.createdAt,
+          }],
+          rowCount: 1,
+        });
+      }
+      return Promise.resolve({ rows: [{ receipt: {} }], rowCount: 1 });
+    },
+  };
   const out = await reconcileDocumentTasks(client, {
     enqueueDocumentIngest: async (id) => (ingest.push(id), { runId: "ingest-run" }),
     enqueueInvoiceFacts: async (id) => (facts.push(id), { runId: "facts-run" }),
     getRun: () => ({ status: Promise.resolve("running") }),
   });
-  assert.equal(out.documentHeldReleased, 2, "held-release count reflects the DB body (both lanes)");
+  assert.equal(out.documentHeldReleased, 2, "held-release count reflects the DB body (the whole egressing lane triple)");
   assert.deepEqual(facts, [row.taskId], "the released facts task re-enqueues on its own lane");
   assert.deepEqual(ingest, [], "documentIngest never sees the released facts task");
+  delete process.env.CLARA_DOC_EGRESS_APPROVED;
+  await removeTaskMeta(row.taskId);
+});
+
+test("a held_egress invoice_facts task the DB DECLINED to release is NOT dispatched (F4 — the flag is not the release authority)", async () => {
+  process.env.CLARA_DOC_EGRESS_APPROVED = "1";
+  const row = task("invoice_facts", "held_egress");
+  await writeTaskMeta(row.taskId, row);
+  const ingest = [];
+  const facts = [];
+  // Post-0050: the consent hold survives the sweep, so the re-read still says held_egress.
+  const client = {
+    query(sql) {
+      if (/release_held/.test(sql)) return Promise.resolve({ rows: [{ receipt: { released: 0 } }], rowCount: 1 });
+      if (/select t\.id as task_id/.test(sql)) {
+        return Promise.resolve({
+          rows: [{
+            task_id: row.taskId, document_id: row.documentId, firm_id: row.firmId,
+            engine_id: "azure-di:prebuilt-invoice", engine_config: {}, version_n: 1,
+            lane: "invoice_facts", status: "held_egress", run_id: null, created_at: row.createdAt,
+          }],
+          rowCount: 1,
+        });
+      }
+      return Promise.resolve({ rows: [{ receipt: {} }], rowCount: 1 });
+    },
+  };
+  const out = await reconcileDocumentTasks(client, {
+    enqueueDocumentIngest: async (id) => (ingest.push(id), { runId: "ingest-run" }),
+    enqueueInvoiceFacts: async (id) => (facts.push(id), { runId: "facts-run" }),
+    getRun: () => ({ status: Promise.resolve("running") }),
+  });
+  assert.deepEqual(facts, [], "no run is dispatched for a task the DB left held — this is the storm's runtime half");
+  assert.deepEqual(ingest, []);
+  assert.equal(out.documentReenqueued, 0);
+  assert.equal(out.documentHeldDeclined, 1);
   delete process.env.CLARA_DOC_EGRESS_APPROVED;
   await removeTaskMeta(row.taskId);
 });
