@@ -1203,7 +1203,12 @@ create table if not exists clara.migration_receipts (
 alter table clara.migration_receipts owner to clara_fn_owner;
 alter table clara.migration_receipts enable row level security;
 alter table clara.migration_receipts force row level security;
-revoke all on table clara.migration_receipts from public;
+-- DELIBERATELY NO explicit revoke/grant: PUBLIC holds no default table privileges, so a
+-- `revoke all from public` would change nothing effective while MATERIALIZING the owner ACL
+-- (relacl NULL -> explicit list). pg_dump/restore normalizes that back to the default-NULL
+-- state, and the DR round-trip's grant-matrix check (4.6) then reads source-only rows that
+-- the target legitimately lacks — a restore-equality break for zero security gain. The
+-- owner-only + FORCE-RLS-no-policy posture above IS the default state; leave it unmaterialized.
 create index if not exists ix_migration_receipts_version
   on clara.migration_receipts(version, measured_at desc);
 comment on table clara.migration_receipts is
