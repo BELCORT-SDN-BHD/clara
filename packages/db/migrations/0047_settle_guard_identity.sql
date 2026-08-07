@@ -35,41 +35,58 @@
 --     and (e.status='draft' or (e.status='approved' and e.checked_via_rule_id is not null))
 --
 -- `checked_via_rule_id` is the right second term for a structural reason, not a convenient
--- one: it is written ONLY by the rule-post executor's approve path (0016:1448 /
--- 0029:267, from p_ctx), and 0016's own tail arm (0016:5109-5112) ASSERTS that the human
--- approve wrapper can never set it -- "the human approve wrapper STILL never sets
--- checked_via_rule_id", enforced as a deploy-time refusal. So a non-null value is a durable,
--- write-once record of HOW the entry was approved, not a status that varies underneath the
--- reader. That is an identity fact in exactly the sense law 2 demands.
+-- one. STATED PRECISELY, because an earlier cut of this file called it "write-once" and that
+-- was wrong (review finding 1): the property the guard relies on is TWO clauses, and it needs
+-- BOTH --
+--   (a) exactly ONE caller ever supplies a non-null value: the rule-post executor's approve
+--       path (0016:1448 / 0029:267, from p_ctx). 0016's own tail arm (0016:5109-5112) makes
+--       it a deploy-time refusal -- "the human approve wrapper STILL never sets
+--       checked_via_rule_id" -- so the human lane cannot reach the column at all; and
+--   (b) draft->approved is the ONLY transition that admits the column (0016:4955-4961 lists
+--       it in that arm and no other), and that transition is ONE-WAY, so nothing later can
+--       add, clear or repoint the value.
+-- Together those make a non-null value a durable record of HOW the entry was approved rather
+-- than a status that varies underneath the reader -- an identity fact in exactly the sense
+-- law 2 demands.
+-- WARNING TO WHOEVER CHANGES THIS NEXT: a future RE-APPROVAL path -- anything that returns an
+-- approved entry to draft and approves it again -- breaks (b) while the word "write-once"
+-- would still read as perfectly satisfied. That is precisely why the adjective was replaced
+-- by the two clauses: the clauses are testable, the adjective hid the failure mode.
 --
--- WHAT THIS DELIBERATELY DOES NOT COVER, STATED SO THE REVIEWER RULES ON IT RATHER THAN
--- DISCOVERS IT. clara.journal_entries.status is a TERNARY domain, not a binary one --
--- check (status in ('draft','approved','withdrawn')), 0007:1013 (0003:105 shipped the
--- two-value version and 0007 widened it; a reversed original KEEPS 'approved', 0003:97-99).
--- The first draft of this file reasoned about a binary domain and was WRONG; prestate arm
--- (0.3) below caught it on the rig, which is the arm doing its job and is why it pins the
--- deparsed constraint rather than trusting the header.
+-- THE THIRD ARM: THE HUMAN PATH SETTLES TERMINALLY (added on the Law-1 review's ruling).
+-- clara.journal_entries.status is a TERNARY domain, not a binary one -- check (status in
+-- ('draft','approved','withdrawn')), 0007:1013 (0003:105 shipped the two-value version and
+-- 0007 widened it; a reversed original KEEPS 'approved', 0003:97-99). The first draft of this
+-- file reasoned about a binary domain and was WRONG; prestate arm (0.3) caught it on the rig,
+-- which is why that arm pins the deparsed constraint rather than trusting this header.
 --
--- So a draft has THREE exits, and this guard admits ONE of them plus the un-exited state:
---   draft -> approved, checked_via_rule_id NOT NULL  -- the rule-post race. ADMITTED. This
---          is the whole defect: it is the only MACHINE-speed transition, it fires on every
---          successful unattended post, and it fired 3 times out of 3.
+-- So a draft has THREE exits, and all three now END:
+--   draft -> approved, checked_via_rule_id NOT NULL  -- the rule-post race. ADMITTED as a
+--          normal 'drafted' settlement. This is the whole defect: the only MACHINE-speed
+--          transition, it fires on every successful unattended post, 3 times out of 3.
 --   draft -> approved, checked_via_rule_id NULL      -- clara.approve_entry, a HUMAN act.
---          NOT admitted; still raises CLR11.
 --   draft -> withdrawn                               -- clara.withdraw_draft (0009:1882), a
---          HUMAN act under _human_ctx(bookkeeper), and a terminal frozen evidence state
---          (0007:1011 "draft->withdrawn only"). NOT admitted; still raises CLR11.
+--          HUMAN act under _human_ctx(bookkeeper), terminal frozen evidence
+--          (0007:1011 "draft->withdrawn only").
+-- The two HUMAN exits are settled TERMINALLY with the named reason `superseded_by_human`,
+-- the full reservation refunded, and no attempt consumed. The first cut of this fix left them
+-- raising CLR11, and the review proved that was not merely conservative but WRONG-SHAPED: the
+-- reconciler re-selects a still-'running' task on every leader cycle, so the refusal became a
+-- permanent per-cycle retry with the tokens charged forever. Loud and harmless is not the
+-- same as terminated. Every state must end with a receipt.
 --
--- Both uncovered transitions are HUMAN acts that would have to land inside the millisecond
--- gap between the drafter's write and its own settle step, and neither has ever been
--- observed. They are left uncovered on purpose rather than by oversight: widening the guard
--- to bare existence would spend the entire remaining liveness signal to buy two cases that
--- no human queue can reach that fast. The residual is also BOUNDED by the second half of
--- this fix -- the reconciler edge now isolates per task, so a task stranded this way can no
--- longer wedge the leader loop; it stays 'running' until a human cancels it, which is the
--- pre-existing behaviour for every other un-settleable task. FLAGGED FOR LAW-1 REVIEW: if
--- the reviewer wants either transition admitted, the shape is one more disjunct, and the
--- accounting argument below (nothing downstream reads the entry) already covers it.
+-- WHY THE RECEIPT IS SHAPED LIKE A SUCCESS RATHER THAN LIKE 0036's settled:false FAMILY --
+-- the constraint that decided the design, recorded because it is not obvious. autoDraft.v6's
+-- classifySettleReceipt (autoDraft.v6.impl.ts:328-403) validates this function's return
+-- against a CLOSED set of six shapes and THROWS on anything else, and its benign-no-op arm
+-- admits exactly four reasons: task_superseded, registry_superseded, registry_released,
+-- run_superseded. A fifth reason -- however well-named -- would throw out of a FROZEN
+-- workflow module, which is the very failure class this migration exists to remove, and v6
+-- cannot be edited without a new _vN and a ceremony. The terminal SUCCESS shape is therefore
+-- the only terminal shape available: status 'completed', outcome 'skipped_lane', entry_id
+-- null (all three are what that validator requires of a non-'drafted' settlement). The NAME
+-- lives where 0046 already puts its named tokens -- clara.audit_log, and
+-- sweep_run_items.refusal_token / autodraft_attempts.last_refusal via p_refusal.
 --
 -- NOTHING DOWNSTREAM OF THE GUARD TOUCHES THE ENTRY. Read the body: after the guard the
 -- function does token accounting (firm_usage_daily, task_usage), flips agent_tasks.status,
@@ -586,13 +603,16 @@ create temp table _f1_delta(anchor text not null, repl text not null) on commit 
 grant select on _f1_delta to clara_fn_owner;
 
 insert into _f1_delta(anchor, repl) values (
-  -- THE ANCHOR: the whole three-line existence test, verbatim from the live body (0036:949-952,
-  -- copied into the 6-arity by 0046 S8). The WHOLE statement is the anchor, not just its
-  -- status term, so the replacement can carry an explanatory comment ABOVE the `if` -- and
-  -- deliberately not INSIDE the predicate the tail pins, where a comment would be a failure.
+  -- THE ANCHOR: the WHOLE five-line guard -- test, refusal and `end if` -- verbatim from the
+  -- live body (0036:949-953, copied into the 6-arity by 0046 S8). It grew from three lines to
+  -- five when arm 3 landed: the refusal is no longer the only thing that can happen when the
+  -- test fails, so the `raise` and its `end if` are now part of what is being replaced rather
+  -- than text left standing after the splice.
   '  if p_outcome=''drafted'' and (p_entry is null or not exists(' || chr(10) ||
   '      select 1 from clara.journal_entries e where e.id=p_entry and e.firm_id=a.firm_id' || chr(10) ||
-  '        and e.client_id=a.client_id and e.filing_id=a.filing_id and e.status=''draft'')) then',
+  '        and e.client_id=a.client_id and e.filing_id=a.filing_id and e.status=''draft'')) then' || chr(10) ||
+  '    raise exception ''draft settlement entry not found'' using errcode=''CLR11'';' || chr(10) ||
+  '  end if;',
 
   '  -- [0047 / SS7-A FINDING F1] IDENTITY, NOT LIVENESS. The four terms above -- id, firm,' || chr(10) ||
   '  -- client, filing -- already prove that this entry is the one this task produced. The' || chr(10) ||
@@ -600,20 +620,73 @@ insert into _f1_delta(anchor, repl) values (
   '  -- the event-driven rule-post consumer approves the same entry roughly 100ms after the' || chr(10) ||
   '  -- unattended drafter writes it, so on every successful autopost this guard refused its' || chr(10) ||
   '  -- own task, stranded it ''running'' with its tokens charged, and wedged the reconciler''s' || chr(10) ||
-  '  -- leader cycle behind the same raise. checked_via_rule_id is the honest second term:' || chr(10) ||
-  '  -- it is written ONLY by the rule-post approve path (0016:1448 / 0029:267) and 0016''s' || chr(10) ||
-  '  -- own tail (0016:5109-5112) refuses any deploy whose HUMAN approve wrapper can set it,' || chr(10) ||
-  '  -- so a non-null value is a write-once record of HOW the entry was approved -- an' || chr(10) ||
-  '  -- identity fact, not a status read. STILL UNCOVERED, on purpose: the two HUMAN exits' || chr(10) ||
-  '  -- from draft -- approve_entry (checked_via_rule_id stays null) and withdraw_draft' || chr(10) ||
-  '  -- (0009:1882, draft->withdrawn only) -- would each have to land inside the same' || chr(10) ||
-  '  -- millisecond window, and neither has been observed. Nothing below this guard reads' || chr(10) ||
-  '  -- or writes the entry, so admitting an already-posted one changes no accounting.' || chr(10) ||
+  '  -- leader cycle behind the same raise.' || chr(10) ||
+  '  --' || chr(10) ||
+  '  -- WHY checked_via_rule_id IS AN IDENTITY FACT, STATED PRECISELY. It is NOT "write-once";' || chr(10) ||
+  '  -- that word appeared in an earlier cut of this comment and was wrong. The property the' || chr(10) ||
+  '  -- guard actually relies on is TWO clauses, and it needs both:' || chr(10) ||
+  '  --   (a) exactly ONE caller ever supplies a non-null value -- the rule-post approve path' || chr(10) ||
+  '  --       (0016:1448 / 0029:267) -- and 0016''s own tail (0016:5109-5112) refuses any' || chr(10) ||
+  '  --       deploy whose HUMAN approve wrapper can set it; and' || chr(10) ||
+  '  --   (b) draft->approved is the ONLY transition that admits the column at all' || chr(10) ||
+  '  --       (0016:4955-4961 allows it in that arm and no other), and that transition is' || chr(10) ||
+  '  --       ONE-WAY, so nothing later can add, clear or repoint the value.' || chr(10) ||
+  '  -- WARNING TO WHOEVER CHANGES THIS NEXT: a future RE-APPROVAL path -- anything that' || chr(10) ||
+  '  -- returns an approved entry to draft and approves it again -- breaks (b) while the word' || chr(10) ||
+  '  -- "write-once" would still read as perfectly satisfied. The two clauses are the test;' || chr(10) ||
+  '  -- the adjective is not.' || chr(10) ||
   '  if p_outcome=''drafted'' and (p_entry is null or not exists(' || chr(10) ||
   '      select 1 from clara.journal_entries e where e.id=p_entry and e.firm_id=a.firm_id' || chr(10) ||
   '        and e.client_id=a.client_id and e.filing_id=a.filing_id' || chr(10) ||
   '        and (e.status=''draft''' || chr(10) ||
-  '             or (e.status=''approved'' and e.checked_via_rule_id is not null)))) then'
+  '             or (e.status=''approved'' and e.checked_via_rule_id is not null)))) then' || chr(10) ||
+  '    -- ARM 3 -- THE HUMAN PATH SETTLES TERMINALLY. Identity matches, but the entry left' || chr(10) ||
+  '    -- draft the OTHER way: a human approved it (checked_via_rule_id null) or withdrew it' || chr(10) ||
+  '    -- (0009:1882, draft->withdrawn only). Refusing here was harmless and loud -- and never' || chr(10) ||
+  '    -- TERMINAL: the reconciler re-selected the still-''running'' task every leader cycle,' || chr(10) ||
+  '    -- forever, with its reservation charged forever. Every state has to end with a receipt.' || chr(10) ||
+  '    --' || chr(10) ||
+  '    -- WHY THIS RECEIPT IS SHAPED LIKE A SUCCESS AND NOT LIKE 0036''S settled:false FAMILY.' || chr(10) ||
+  '    -- That family was the obvious model and it is NOT AVAILABLE. autoDraft.v6''s' || chr(10) ||
+  '    -- classifySettleReceipt (autoDraft.v6.impl.ts:328-403) validates this function''s return' || chr(10) ||
+  '    -- against a CLOSED set of shapes and THROWS on anything else, and its no-op arm admits' || chr(10) ||
+  '    -- exactly four reasons: task_superseded, registry_superseded, registry_released,' || chr(10) ||
+  '    -- run_superseded. A fifth reason would throw out of a FROZEN workflow module -- which is' || chr(10) ||
+  '    -- precisely the failure class this migration exists to remove -- and v6 cannot be edited' || chr(10) ||
+  '    -- without a new _vN and a ceremony. So the terminal SUCCESS shape is used (status' || chr(10) ||
+  '    -- ''completed'', outcome ''skipped_lane'', entry_id null: all three are what that' || chr(10) ||
+  '    -- validator requires), and the NAME lives where 0046 already puts its named tokens --' || chr(10) ||
+  '    -- the durable receipts. audit_log gets it here; sweep_run_items.refusal_token and' || chr(10) ||
+  '    -- autodraft_attempts.last_refusal get it from p_refusal. Named, never inferred.' || chr(10) ||
+  '    --' || chr(10) ||
+  '    -- THE FOUR REWRITES ARE THE WHOLE MECHANISM. Every downstream receipt in this function' || chr(10) ||
+  '    -- is computed FROM these parameters, so rewriting them once makes the token accounting,' || chr(10) ||
+  '    -- the task status, the registry reset, the sweep item and the return value consistent' || chr(10) ||
+  '    -- BY CONSTRUCTION instead of by five parallel edits free to drift. They are plpgsql' || chr(10) ||
+  '    -- locals; nothing is visible to the caller.' || chr(10) ||
+  '    --   p_outcome -> ''skipped_lane'': terminal, and deliberately NOT ''failed'' -- the failed' || chr(10) ||
+  '    --     branch increments attempt_count and parks the filing at the cap, which would' || chr(10) ||
+  '    --     punish a filing for a human''s decision. The else-branch resets it to 0 instead.' || chr(10) ||
+  '    --   p_entry   -> null: required by the validator for a non-''drafted'' outcome, and' || chr(10) ||
+  '    --     honest -- no draft was accepted.' || chr(10) ||
+  '    --   p_tokens  -> 0: v_actual becomes 0, so firm_usage_daily moves by (0 - reserved) and' || chr(10) ||
+  '    --     the FULL reservation is refunded. The ''failed'' branch''s own precedent: nothing' || chr(10) ||
+  '    --     bookable survived, so nothing is billed.' || chr(10) ||
+  '    --   p_refusal -> the named token, which is what reaches the two durable receipts.' || chr(10) ||
+  '    if p_entry is not null and exists(' || chr(10) ||
+  '        select 1 from clara.journal_entries e where e.id=p_entry and e.firm_id=a.firm_id' || chr(10) ||
+  '          and e.client_id=a.client_id and e.filing_id=a.filing_id' || chr(10) ||
+  '          and (e.status=''withdrawn''' || chr(10) ||
+  '               or (e.status=''approved'' and e.checked_via_rule_id is null))) then' || chr(10) ||
+  '      perform clara._audit(a.firm_id,null,null,null,''settle_autodraft_task'',p_entry,' || chr(10) ||
+  '        jsonb_build_object(''task'',p_task,''outcome'',p_outcome,''settled'',true,' || chr(10) ||
+  '          ''reason'',''superseded_by_human'',''entry'',p_entry));' || chr(10) ||
+  '      p_outcome:=''skipped_lane''; p_entry:=null; p_tokens:=0;' || chr(10) ||
+  '      p_refusal:=jsonb_build_object(''clr'',''CLR29'',''reason'',''superseded_by_human'');' || chr(10) ||
+  '    else' || chr(10) ||
+  '      raise exception ''draft settlement entry not found'' using errcode=''CLR11'';' || chr(10) ||
+  '    end if;' || chr(10) ||
+  '  end if;'
 );
 
 -- =====================================================================
@@ -686,6 +759,8 @@ do $tail$
 declare
   v_sig text; v_raw text; v_lex text; v_pre text; v_expected text; v_actual text;
   v_anchor text; v_repl text; v_shape_lex text; v_shape_raw text; v_old_lex text;
+  v_arm3_raw text; v_arm3_lex text; v_arm3_settle_raw text; v_arm3_settle_lex text;
+  v_arm3_else_raw text; v_arm3_else_lex text;
   v_off int; v_count int; v_n int; r record;
   v_pre_secdef boolean; v_pre_config text;
 begin
@@ -718,6 +793,40 @@ begin
     '             or (e.status=' || repeat(chr(2), 10) || ' and e.checked_via_rule_id is not null)))) then';
   -- ...AND THE SHAPE THAT MUST BE GONE. The defect itself, in the same lexed alphabet.
   v_old_lex := 'and e.filing_id=a.filing_id and e.status=' || repeat(chr(2), 7) || '))';
+
+  -- ARM 3's THREE NEEDLES, typed here independently of SECTION 2, same discipline as above.
+  -- Literal lengths MEASURED, not counted by eye: 'withdrawn' 11, 'approved' 10,
+  -- 'skipped_lane' 14, 'clr' 5, 'CLR29' 7, 'reason' 8, 'superseded_by_human' 21,
+  -- 'settle_autodraft_task' 23, 'draft settlement entry not found' 34, 'CLR11' 7.
+  v_arm3_raw :=
+    '    if p_entry is not null and exists(' || chr(10) ||
+    '        select 1 from clara.journal_entries e where e.id=p_entry and e.firm_id=a.firm_id' || chr(10) ||
+    '          and e.client_id=a.client_id and e.filing_id=a.filing_id' || chr(10) ||
+    '          and (e.status=''withdrawn''' || chr(10) ||
+    '               or (e.status=''approved'' and e.checked_via_rule_id is null))) then';
+  v_arm3_lex :=
+    '    if p_entry is not null and exists(' || chr(10) ||
+    '        select 1 from clara.journal_entries e where e.id=p_entry and e.firm_id=a.firm_id' || chr(10) ||
+    '          and e.client_id=a.client_id and e.filing_id=a.filing_id' || chr(10) ||
+    '          and (e.status=' || repeat(chr(2), 11) || chr(10) ||
+    '               or (e.status=' || repeat(chr(2), 10) || ' and e.checked_via_rule_id is null))) then';
+
+  v_arm3_settle_raw :=
+    '      p_outcome:=''skipped_lane''; p_entry:=null; p_tokens:=0;' || chr(10) ||
+    '      p_refusal:=jsonb_build_object(''clr'',''CLR29'',''reason'',''superseded_by_human'');';
+  v_arm3_settle_lex :=
+    '      p_outcome:=' || repeat(chr(2), 14) || '; p_entry:=null; p_tokens:=0;' || chr(10) ||
+    '      p_refusal:=jsonb_build_object(' || repeat(chr(2), 5) || ',' || repeat(chr(2), 7)
+      || ',' || repeat(chr(2), 8) || ',' || repeat(chr(2), 21) || ');';
+
+  v_arm3_else_raw :=
+    '    else' || chr(10) ||
+    '      raise exception ''draft settlement entry not found'' using errcode=''CLR11'';' || chr(10) ||
+    '    end if;';
+  v_arm3_else_lex :=
+    '    else' || chr(10) ||
+    '      raise exception ' || repeat(chr(2), 34) || ' using errcode=' || repeat(chr(2), 7) || ';' || chr(10) ||
+    '    end if;';
 
   for v_sig in select unnest(array[
       'clara.settle_autodraft_task(uuid,text,bigint,uuid,jsonb)',
@@ -770,6 +879,56 @@ begin
     -- the refusal is not. The CLR11 raise must still be there, as CODE.
     if not pg_temp._wdb_code_literal(v_raw, '''draft settlement entry not found''') then
       raise exception '0047 tail 4: % no longer raises the CLR11 refusal as code -- an entry that belongs to no task must still be refused', v_sig;
+    end if;
+
+    -- (9) ARM 3 EXISTS, AND IT TESTS THE HUMAN PATH -- not "anything that is not admitted".
+    -- Same instrument law as arm 2: shape on the LEXED body with the literal LENGTHS in
+    -- place ('withdrawn' is 11 characters with its quotes, 'approved' 10), then identity
+    -- read from RAW at the offset the lexed body reports. A branch that matched the shape
+    -- with some other pair of statuses would settle the wrong states terminally, which is
+    -- strictly worse than the retry loop it replaces.
+    v_count := (length(v_lex) - length(replace(v_lex, v_arm3_lex, ''))) / length(v_arm3_lex);
+    if v_count <> 1 then
+      raise exception '0047 tail 9: the human-path test occurs % times in the LEXED body of % (expected 1)', v_count, v_sig;
+    end if;
+    v_off := position(v_arm3_lex in v_lex);
+    if substr(v_raw, v_off, length(v_arm3_raw)) <> v_arm3_raw then
+      raise exception '0047 tail 9: the human-path test in % matches the shape but not the literals -- it settles some other pair of statuses terminally', v_sig;
+    end if;
+
+    -- (10) ...AND IT SETTLES TERMINALLY, NON-PUNITIVELY, WITH THE NAME ON IT. The four
+    -- parameter rewrites ARE the mechanism, so they are pinned as one whole -- a partial
+    -- match is a real defect, not a formatting difference:
+    --   'skipped_lane' missing  -> the function would fall through to the drafted path and
+    --                              record a draft that a human had already superseded;
+    --   p_entry not nulled      -> autoDraft.v6's classifySettleReceipt REJECTS a
+    --                              non-'drafted' outcome carrying an entry id, and throws;
+    --   p_tokens not zeroed     -> the reservation is billed rather than refunded;
+    --   p_refusal not set       -> the receipt loses the only place the name survives.
+    v_count := (length(v_lex) - length(replace(v_lex, v_arm3_settle_lex, ''))) / length(v_arm3_settle_lex);
+    if v_count <> 1 then
+      raise exception '0047 tail 10: the terminal-settle rewrite occurs % times in the LEXED body of % (expected 1)', v_count, v_sig;
+    end if;
+    v_off := position(v_arm3_settle_lex in v_lex);
+    if substr(v_raw, v_off, length(v_arm3_settle_raw)) <> v_arm3_settle_raw then
+      raise exception '0047 tail 10: the terminal-settle rewrite in % matches the shape but not the literals', v_sig;
+    end if;
+    if not pg_temp._wdb_code_literal(v_raw, '''superseded_by_human''') then
+      raise exception '0047 tail 10: % does not carry ''superseded_by_human'' as a CODE literal -- the name would exist only in prose', v_sig;
+    end if;
+
+    -- (11) THE REFUSAL IS NOW THE *ELSE* OF ARM 3, NOT A DELETED BRANCH. Arms 4 and 9/10
+    -- together still permit a body where the CLR11 raise sits somewhere unreachable and the
+    -- human-path branch swallows everything. This pins the actual control flow: else, raise,
+    -- end if -- so an entry that is neither this task's draft, nor rule-posted, nor
+    -- human-superseded still reaches the refusal.
+    v_count := (length(v_lex) - length(replace(v_lex, v_arm3_else_lex, ''))) / length(v_arm3_else_lex);
+    if v_count <> 1 then
+      raise exception '0047 tail 11: the fail-closed else-branch occurs % times in the LEXED body of % (expected 1) -- the refusal must be arm 3''s alternative, not orphaned code', v_count, v_sig;
+    end if;
+    v_off := position(v_arm3_else_lex in v_lex);
+    if substr(v_raw, v_off, length(v_arm3_else_raw)) <> v_arm3_else_raw then
+      raise exception '0047 tail 11: the fail-closed else-branch in % matches the shape but not the literals', v_sig;
     end if;
 
     -- (5) 0036 SSB'S LOSING-DISPATCH NO-OPS SURVIVED THE HARVEST. These are the receipts a
@@ -848,6 +1007,6 @@ begin
     end if;
   end loop;
 
-  raise notice '0047 tail: 8 arms clean -- both overloads are the pre-image plus exactly the identity delta';
+  raise notice '0047 tail: 11 arms clean -- both overloads are the pre-image plus exactly the identity delta, arm 3 terminal and fail-closed intact';
 end
 $tail$;

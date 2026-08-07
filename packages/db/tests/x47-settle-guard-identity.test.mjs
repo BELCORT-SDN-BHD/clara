@@ -15,9 +15,12 @@
 // owns. The runtime half — one un-settleable task must never abort the sweep — is covered in
 // packages/runtime/tests/reconcile-autodraft-settle-unit.test.mjs.
 //
-// The negative cells matter as much as the positive one: 0047 WIDENS the guard, and a
-// widening that quietly became "accept anything" would strand nothing and prove nothing.
-// Both remaining human exits from 'draft' must still refuse, and so must a foreign entry.
+// THREE ARMS, THREE ENDINGS. 0047 WIDENS the guard, and a widening that quietly became
+// "accept anything" would strand nothing and prove nothing. So the cells pin all three:
+// the rule-post race settles as a normal draft (x47.a/b); the two HUMAN exits settle
+// TERMINALLY with the named reason superseded_by_human (x47.c/d); and an entry that is none
+// of those still refuses (x47.e). Arm 3 was added on the Law-1 review's ruling, which proved
+// the first cut left the human exits as a permanent per-cycle reconciler retry.
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
@@ -273,7 +276,14 @@ test("x47.b the SAME rule-approved entry settles cleanly through the 5-ARITY —
 // THE WIDENING IS NARROW — every other exit from 'draft' still refuses.
 // ===========================================================================
 
-test("x47.c a HUMAN-approved entry (checked_via_rule_id NULL) still REFUSES with CLR11 — the liveness term was widened, not deleted", async (t) => {
+// ===========================================================================
+// ARM 3 — the two HUMAN exits from 'draft' SETTLE TERMINALLY (the Law-1 review's ruling).
+// Before this arm they raised CLR11, which was loud, harmless and NEVER TERMINAL: the
+// reconciler re-selects a still-'running' task on every leader cycle, so the refusal became a
+// permanent per-cycle retry with the reservation charged forever.
+// ===========================================================================
+
+test("x47.c a HUMAN-approved entry (checked_via_rule_id NULL) SETTLES TERMINALLY as superseded_by_human — full refund, no attempt consumed, named receipts", async (t) => {
   if (skip47(t)) return;
   const { clients } = world;
   const staged = await draftUnderTask(clients.A1, "X47HUMANCO SDN BHD");
@@ -286,16 +296,63 @@ test("x47.c a HUMAN-approved entry (checked_via_rule_id NULL) still REFUSES with
   assert.equal(st.rows[0]?.status, "approved", "staging premise: approved");
   assert.equal(st.rows[0]?.checked_via_rule_id, null, "staging premise: and NOT via a rule");
 
+  const reserved = Number((await rootQuery(
+    "select reserved_tokens from clara.autodraft_attempts where task_id=$1", [staged.task])).rows[0]?.reserved_tokens ?? 0);
+  assert.ok(reserved > 0, "staging premise: the admission actually reserved tokens, so 'fully refunded' is measurable");
+
   const runId = await runIdOf(staged.task);
-  await assert.rejects(
-    () => settle6(staged.task, { entry: staged.entry, runId }),
-    (e) => e.code === "CLR11" && /draft settlement entry not found/.test(e.message ?? ""),
-    "a human approval inside the settle window is a KNOWN uncovered transition (0047 header) — it must still"
-    + " refuse, so that a future widening is a deliberate decision rather than a silent side effect",
+  const settled = await settle6(staged.task, { entry: staged.entry, tokens: 12345, runId });
+
+  // (1) THE RETURN IS THE TERMINAL SUCCESS SHAPE — and it is EXACTLY the shape autoDraft.v6's
+  // classifySettleReceipt admits for a non-'drafted' settlement. All three of these are that
+  // validator's requirements, not stylistic choices: a different status, a fifth benign
+  // reason, or a non-null entry_id would each make it THROW out of a FROZEN workflow module.
+  assert.equal(settled?.status, "completed", `terminal, not a no-op (got ${JSON.stringify(settled)})`);
+  assert.equal(settled?.outcome, "skipped_lane", "the outcome is one of the three the validator accepts under status 'completed'");
+  assert.equal(settled?.entry_id, null, "entry_id MUST be null for a non-'drafted' outcome — the validator rejects the pair otherwise");
+  assert.deepEqual(
+    Object.keys(settled).sort(),
+    ["entry_id", "outcome", "status", "task_id", "tokens_refunded", "tokens_spent"],
+    "EXACTLY the six keys of the success shape — classifySettleReceipt uses hasExactlyKeys, so an extra key is a throw",
   );
+
+  // (2) THE FULL RESERVATION IS REFUNDED. Nothing bookable survived a human's own decision,
+  // so nothing is billed — the 'failed' branch's precedent.
+  assert.equal(Number(settled.tokens_spent), 0, "no tokens are charged");
+  assert.equal(Number(settled.tokens_refunded), reserved, `the WHOLE reservation comes back (reserved ${reserved})`);
+
+  // (3) THE TASK IS TERMINAL — the property whose absence WAS the retry loop.
+  const task = await rootQuery("select status from clara.agent_tasks where id=$1", [staged.task]);
+  assert.equal(task.rows[0]?.status, "completed", "the agent_task left 'running', so the reconciler can never select it again");
+
+  // (4) NON-PUNITIVE. A human superseding a draft must not consume the filing's retry budget
+  // or park it — which is exactly what routing this through the 'failed' branch would have done.
+  const reg = await rootQuery(
+    "select attempt_count, state, reserved_tokens, last_refusal from clara.autodraft_attempts where task_id=$1", [staged.task]);
+  assert.equal(Number(reg.rows[0]?.attempt_count), 0, "no attempt was consumed");
+  assert.equal(reg.rows[0]?.state, "idle", "the registry row is released, not parked");
+  assert.equal(Number(reg.rows[0]?.reserved_tokens), 0, "and holds no reservation");
+  assert.equal(reg.rows[0]?.last_refusal?.reason, "superseded_by_human", "last_refusal carries the NAME");
+
+  // (5) THE NAME IS ON THE DURABLE RECEIPTS — named, never inferred.
+  const audit = await rootQuery(
+    `select args from clara.audit_log where fn='settle_autodraft_task' and args->>'task'=$1
+       and args->>'reason'='superseded_by_human' order by id desc limit 1`, [staged.task]);
+  assert.equal(audit.rows.length, 1, "clara.audit_log records the reason at the moment of the decision");
+  assert.equal(audit.rows[0].args.entry, staged.entry, "...and names the entry that was superseded, before p_entry is nulled");
+
+  const item = await rootQuery(
+    "select outcome, refusal_token from clara.sweep_run_items where filing_id=(select filing_id from clara.autodraft_attempts where task_id=$1) order by created_at desc limit 1",
+    [staged.task]);
+  if (item.rows.length === 0) {
+    noteLane("x47.c: no sweep_run_items row — the admission was not run-bound in this world; the sweep receipt is unverified");
+  } else {
+    assert.equal(item.rows[0].outcome, "skipped_lane", "the sweep receipt records the coarse outcome");
+    assert.equal(item.rows[0].refusal_token?.reason, "superseded_by_human", "...and the refusal_token carries the fine one");
+  }
 });
 
-test("x47.d a WITHDRAWN entry still REFUSES with CLR11 — the third exit from 'draft' is not admitted either", async (t) => {
+test("x47.d a WITHDRAWN entry settles TERMINALLY the same way — the third exit from 'draft' also ends", async (t) => {
   if (skip47(t)) return;
   const { clients } = world;
   const staged = await draftUnderTask(clients.A2, "X47WITHDRAWCO SDN BHD");
@@ -314,12 +371,20 @@ test("x47.d a WITHDRAWN entry still REFUSES with CLR11 — the third exit from '
   assert.equal(st.rows[0]?.status, "withdrawn", "staging premise: withdrawn");
 
   const runId = await runIdOf(staged.task);
-  await assert.rejects(
-    () => settle6(staged.task, { entry: staged.entry, runId }),
-    (e) => e.code === "CLR11",
-    "a withdrawn draft is frozen evidence (0007:1011, draft->withdrawn only) and is not something this task"
-    + " 'produced' in any live sense — it must still refuse",
-  );
+  const settled = await settle6(staged.task, { entry: staged.entry, tokens: 999, runId });
+
+  assert.equal(settled?.status, "completed", `a withdrawn draft terminates too (got ${JSON.stringify(settled)})`);
+  assert.equal(settled?.outcome, "skipped_lane");
+  assert.equal(settled?.entry_id, null);
+  assert.equal(Number(settled.tokens_spent), 0, "full refund on this exit as well");
+
+  const task = await rootQuery("select status from clara.agent_tasks where id=$1", [staged.task]);
+  assert.equal(task.rows[0]?.status, "completed", "terminal — no per-cycle retry survives either human exit");
+
+  const audit = await rootQuery(
+    `select 1 from clara.audit_log where fn='settle_autodraft_task' and args->>'task'=$1
+       and args->>'reason'='superseded_by_human' limit 1`, [staged.task]);
+  assert.equal(audit.rows.length, 1, "the withdrawn exit is named with the SAME token — one reason for one situation");
 });
 
 test("x47.e the guard still FAILS CLOSED: a null entry, and an entry belonging to a DIFFERENT client, both refuse", async (t) => {
