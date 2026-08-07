@@ -535,11 +535,28 @@ test("C3 the tri-state direction is total: sales | purchase | unresolved, never 
   // The family binding is only as good as the answer it binds to, and this helper is
   // consumed inside the draft writer's refusal predicate — a null there would make the
   // whole comparison null and the refusal silently vanish.
+  //
+  // 0049 CHANGED WHAT THE UNKNOWN DOCUMENT ANSWERS, and this cell is where the old contract
+  // was written down, so this is where the new one goes. 0046 answered 'purchase' and called
+  // it "conservative for THIS lane" — true of the sales half only: 'purchase' refuses a sales
+  // admission but ADMITS a supplier_bill, so it was fail-OPEN on the purchase side. ADR-063 /
+  // 7A-R2 ruled the zero-evidence answer is 'unresolved', which is the one value that refuses
+  // both families. The totality claim is unchanged and is still what this cell defends.
   const r = await rootQuery(
     `select clara._autodraft_direction_tri(null,null) as a,
-            clara._autodraft_direction_tri(gen_random_uuid(),gen_random_uuid()) as b`);
-  assert.equal(r.rows[0].a, "purchase", "a null document answers purchase — the conservative answer for THIS lane");
-  assert.equal(r.rows[0].b, "purchase", "an unknown document likewise, never null");
+            clara._autodraft_direction_tri(gen_random_uuid(),gen_random_uuid()) as b,
+            clara._autodraft_direction_tri(gen_random_uuid(),null) as c,
+            clara._autodraft_direction_tri(null,gen_random_uuid()) as d`);
+  for (const k of ["a", "b", "c", "d"]) {
+    assert.equal(r.rows[0][k], "unresolved",
+      `a document nothing is known about answers 'unresolved', never a confident direction and never null (arm ${k})`);
+  }
+  // ...and the two entry points REFUSE rather than answer, which is what makes the helper's
+  // 'unresolved' a trapped refusal instead of a defaulted value.
+  await assert.rejects(
+    () => rootQuery("select clara._document_direction(gen_random_uuid(),gen_random_uuid())"),
+    (e) => e.code === "CLR30",
+    "clara._document_direction abstains (CLR30) for an unknown document rather than returning purchase");
 });
 
 test("C4 the AUTODRAFT lane REFUSES a coding kind that contradicts the re-derived direction", async (t) => {
@@ -550,15 +567,30 @@ test("C4 the AUTODRAFT lane REFUSES a coding kind that contradicts the re-derive
   // authority: the writer re-derives the direction from the document itself and refuses a
   // proposal that contradicts it, no matter what was carried in the task context.
   //
-  // The fixture document carries no client-identity match, so clara._document_direction
-  // resolves 'purchase' — and a 'sales_invoice' proposal on it must be refused. The lane is
-  // the real one: an AUTODRAFT wake credential, because the family arm is scoped to that
-  // wake kind (the human-present chat lane is deliberately untouched).
+  // The fixture document names a THIRD-PARTY supplier and the client holds its own tin/ssm
+  // identifiers, so clara._document_direction resolves a genuine 'purchase' — and a
+  // 'sales_invoice' proposal on it must be refused. The lane is the real one: an AUTODRAFT
+  // wake credential, because the family arm is scoped to that wake kind (the human-present
+  // chat lane is deliberately untouched).
+  //
+  // THE SUPPLIER NAME IS SEEDED DELIBERATELY (0049). Before 0049 this cell used a facts
+  // document with no counterparty identity at all and leaned on the old zero-evidence default
+  // to make it 'purchase' — so the premise it asserted was the very defect ADR-063 removed,
+  // and the cell would have kept passing on 'unresolved' for the wrong reason. Naming a real
+  // supplier makes the premise a measured purchase rather than a defaulted one.
   const sub = world.users.alice;
   const client = await freshSalesClient(sub);
   const firm = await firmOf(client);
   const cited = await seedCitedDocument(sub, { firm, client, quote: rm(90000) });
   await seedStatedInvoiceFacts(cited, { firm });
+  const c4ext = await rootQuery(
+    `select id from clara.document_extractions where document_id=$1 and engine_kind='invoice_facts'
+       and status='done' order by version_n desc limit 1`, [cited.documentId]);
+  assert.ok(c4ext.rows[0], "mandatory setup: the fixture document carries a done invoice_facts extraction");
+  await rootQuery(
+    `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+     values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,'invoice.vendor_name',$3,1.0)`,
+    [firm, c4ext.rows[0].id, "SEVEN A THIRD PARTY SUPPLIER SDN BHD"]);
 
   const dir = (await rootQuery(
     "select clara._autodraft_direction_tri($1,$2) as d", [cited.documentId, client])).rows[0].d;
