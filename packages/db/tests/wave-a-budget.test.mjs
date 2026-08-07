@@ -141,18 +141,65 @@ test("one-click is exempt from sweep_budget_share but BOUND by the plain daily l
   assert.notEqual(outcomeOf(c), "refused_budget", `the one-click origin is exempt from the sweep share and admitted under the daily limit (got ${outcomeOf(c)})`);
 });
 
-test("concurrent-sweep cap: with max_concurrent_sweeps open runs already OPEN, a sweep admission is refused_budget (bounds overshoot)", async (t) => {
+// F5 FIX (ledger #27, docs/.. .tmp/H2-ACCEPTANCE-REPORT.txt FINDING F5, migration 0048).
+// open_sweep_run always opens a run BEFORE any item is admitted under it, so the run's own
+// clara.sweep_runs row is ALREADY state='open' by the time admit_autodraft_task's
+// concurrency-cap query runs inside that same call. The test this replaces pinned that
+// self-count as CORRECT ("the cap check sees EXACTLY THE ONE open run ≥
+// max_concurrent_sweeps") — opening a single run at cap=1 and admitting UNDER THAT SAME
+// run, asserting refused_budget. That was the bug, not a documented safety reason: it meant
+// a firm at max_concurrent_sweeps=1 refused EVERY admission under its own sole open run,
+// unconditionally — a sweep refusing work its own presence caused.
+//
+// The REAL property the old test protected is genuine and is NOT weakened by 0048: the cap
+// bounds how many sweep runs may draw on a firm's shared per-firm resources AT THE SAME
+// TIME. It was never meant to mean "a run may not admit under itself". 0048 excludes only
+// the CALLER's own run id from the count — two cells below pin both halves: the fix itself,
+// and a contrast cell proving a genuinely OTHER concurrently-open run still trips the cap.
+async function finalizeAllOpenRuns(firm) {
+  // Rig lever (root-level, test-only): force a clean concurrency-cap slate on a firm so
+  // these two cells are not at the mercy of runs earlier tests in this file left open on
+  // the SAME shared firm (see the accumulation note at the top of this file — clients.A1
+  // and clients.A2 share one firm, and admitAutodraft auto-opens a run per sweep-origin
+  // call with no explicit runId). ck_sweep_runs_terminal requires BOTH finalized_at and
+  // window_ended_at whenever state='finalized'.
+  await rootQuery(
+    "update clara.sweep_runs set state='finalized', window_ended_at=now(), finalized_at=now() where firm_id=$1 and state='open'",
+    [firm],
+  );
+}
+
+test("F5 fix: with max_concurrent_sweeps=1 and NO OTHER open run, admission under the caller's OWN open run is NOT refused (the run's own presence does not count against its own cap)", async (t) => {
   if (skipUnready(t, ready)) return;
   const { users, clients } = world;
   const firm = await firmOf(clients.A1);
   await setFirmLimit(firm, { daily: 10_000_000, share: 0.6, maxSweeps: 1 });
-  // Open one sweep run → at the cap of 1; admit UNDER that run (run-bound) so no extra
-  // run is opened and the cap check sees exactly the one open run ≥ max_concurrent_sweeps.
-  const capRun = await openSweepRun({ firm, expected: 3 }).catch((e) => { noteLane(`open_sweep_run raised ${e.code}`); return null; });
-  const rf = await primeReadyFiling(users.alice, { client: clients.A1, vendorName: "CAPSWEEP SDN BHD", registration: "201801002600" });
-  const a = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.sweep, runId: capRun, reserveTokens: RESERVE });
-  if (outcomeOf(a) === "lane_changed") { noteLane("concurrent-sweep cap: lane_changed — READY not reached"); return; }
-  assert.equal(outcomeOf(a), "refused_budget", `a sweep admission at the concurrent-run cap is refused_budget (got ${outcomeOf(a)})`);
+  await finalizeAllOpenRuns(firm);
+  const ownRun = await openSweepRun({ firm, expected: 1 }).catch((e) => { noteLane(`open_sweep_run raised ${e.code}`); return null; });
+  const rf = await primeReadyFiling(users.alice, { client: clients.A1, vendorName: "OWNRUNCO SDN BHD", registration: "201801002600" });
+  const a = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.sweep, runId: ownRun, reserveTokens: RESERVE });
+  if (outcomeOf(a) === "lane_changed") { noteLane("F5 own-run: lane_changed — READY not reached"); return; }
+  assert.notEqual(outcomeOf(a), "refused_budget", `a sweep admission under its OWN sole open run at cap=1 must NOT be refused_budget by the concurrency gate (got ${outcomeOf(a)}) — this is the F5 regression`);
+  assert.equal(outcomeOf(a), "admitted", `the admission genuinely proceeds once the self-count is excluded (got ${outcomeOf(a)})`);
+});
+
+test("contrast: with max_concurrent_sweeps=1 and ONE OTHER genuinely-concurrent open run, a second run's admission IS STILL refused_budget/concurrency (the safety property F5's fix must not lose)", async (t) => {
+  if (skipUnready(t, ready)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.A1);
+  await setFirmLimit(firm, { daily: 10_000_000, share: 0.6, maxSweeps: 1 });
+  await finalizeAllOpenRuns(firm);
+  // R1: a genuinely OTHER sweep run, left open — simulates an in-flight sweep (or a stale
+  // run reconcile_sweep_runs has not yet finalized). Never admitted under; only its
+  // state='open' row matters here.
+  await openSweepRun({ firm, expected: 1 }).catch((e) => { noteLane(`open_sweep_run raised ${e.code}`); return null; });
+  // R2: the caller's own run, opened SECOND — its own presence must NOT be what trips the
+  // cap; R1's presence is what must.
+  const ownRun = await openSweepRun({ firm, expected: 1 }).catch((e) => { noteLane(`open_sweep_run raised ${e.code}`); return null; });
+  const rf = await primeReadyFiling(users.alice, { client: clients.A1, vendorName: "OTHERRUNCO SDN BHD", registration: "201801002700" });
+  const a = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.sweep, runId: ownRun, reserveTokens: RESERVE });
+  if (outcomeOf(a) === "lane_changed") { noteLane("F5 contrast: lane_changed — READY not reached"); return; }
+  assert.equal(outcomeOf(a), "refused_budget", `a sweep admission is still refused_budget when a genuinely OTHER run is already open at the cap (got ${outcomeOf(a)})`);
 });
 
 test("NULL daily limit → the fn-constant default applies; a normal reserve still admits (companion §5 / P10)", async (t) => {
