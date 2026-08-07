@@ -11,8 +11,14 @@
 // documentIngest, 'invoice_facts' → invoiceFacts. A facts task must NEVER be driven
 // through documentIngest (that would run OCR steps + persist a layout extraction for a
 // facts task). The held-egress bulk release + the stranded requeue are DB-side and
-// already cover both lanes (release_held_document_tasks / requeue_stranded_document_task
-// key by task, and the 0009 claim/release bodies cover lane in ('ocr','invoice_facts')).
+// already cover every egressing lane (release_held_document_tasks /
+// requeue_stranded_document_task key by task, and the claim/release bodies cover
+// lane in ('ocr','invoice_facts','statement_facts') since 0038).
+//
+// F4 (migration 0050): the release is DB-ADJUDICATED, not flag-adjudicated. The sweep asks
+// the database to release, then re-reads; whatever still says 'held_egress' is never
+// dispatched. See reconcileDocumentTasks's own comment for why the previous env-flag
+// rewrite was the other half of the release/re-hold storm.
 //
 // WAVE C-b (design part2 §5): two MORE lanes — 'statement_facts' (pdf/image, vendor egress
 // under the typed statement_extraction consent) and 'statement_parse' (csv/ofx, a free
@@ -247,13 +253,16 @@ async function documentRunState(getRun, runId) {
 /** Reconcile queued-unbound, held-egress, and stranded-running document tasks. */
 export async function reconcileDocumentTasks(client, deps) {
   const log = deps.log ?? (() => {});
-  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0 };
+  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentHeldDeclined: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0 };
   if (typeof deps.enqueueDocumentIngest !== "function") return out;
 
   if (process.env.CLARA_DOC_EGRESS_APPROVED === "1") {
     try {
-      // The 0009 body releases held_egress across BOTH lanes ('ocr','invoice_facts');
-      // the returned count is the whole released population.
+      // The DB body adjudicates the release across the whole EGRESSING lane triple
+      // ('ocr','invoice_facts','statement_facts'). It does NOT release everything it
+      // selects: a held invoice_facts task whose filing clients lack a live consent is
+      // deliberately LEFT held (migration 0050 — the F4 fix). The returned count is the
+      // population it actually MOVED to 'queued', not the population it considered.
       const released = await client.query("select clara.release_held_document_tasks($1) as receipt", [1000]);
       out.documentHeldReleased = Number(released.rows[0]?.receipt?.released ?? 0);
     } catch (err) {
@@ -261,14 +270,32 @@ export async function reconcileDocumentTasks(client, deps) {
     }
   }
 
+  // Read AFTER the release, so a row the DB just released reads 'queued' here on its own.
   const { tasks, corruptRebuilt } = await documentTaskIndex(client, deps);
   out.documentSidecarCorruptRebuilt = corruptRebuilt;
   for (const task of tasks) {
     if (!task?.taskId) continue;
-    if (task.status === "held_egress" && process.env.CLARA_DOC_EGRESS_APPROVED === "1") {
-      task.status = "queued";
-      task.runId = null;
-      await writeTaskMeta(task.taskId, { ...task, updatedAt: new Date().toISOString() });
+    // F4 (H2 acceptance report), the RUNTIME half of the fix. This used to rewrite EVERY
+    // held_egress task to 'queued' in the sweep's own working copy whenever
+    // CLARA_DOC_EGRESS_APPROVED was "1", and then dispatch it — regardless of what
+    // clara.release_held_document_tasks had just decided one statement earlier. That made
+    // the env flag, not the database, the release authority: the DB would correctly decline
+    // a consent-held task and the reconciler would dispatch it anyway, the claim would
+    // re-derive 'no_consent' and re-hold it, and the pair cycled ~29 workflow runs/minute
+    // for six minutes (DB connections 32/60 → 42/60, two health flaps). Fixing only the DB
+    // half would have left that storm running at exactly the same rate.
+    //
+    // The DB row is now the authority, per evidence law 2 (absence is not evidence, and a
+    // derived state is not evidence): a task that STILL reads 'held_egress' in the snapshot
+    // taken AFTER the release call is one the release DECLINED — or one whose release never
+    // ran (flag off, the call raised, the sweep's limit was reached, or the snapshot fell
+    // back to the durable sidecar index because the DB SELECT was unavailable). Every one of
+    // those is a "we did not SEE it released", and all of them fall through to the same
+    // fail-closed branch: never dispatch. A genuinely released task needs nothing here —
+    // its own DB row already says 'queued' and it flows into the queued branch below.
+    if (task.status === "held_egress") {
+      out.documentHeldDeclined += 1;
+      continue;
     }
 
     if (task.status === "queued") {

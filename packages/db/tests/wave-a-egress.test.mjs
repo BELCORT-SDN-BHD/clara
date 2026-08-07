@@ -14,7 +14,7 @@ import {
   waveAEnsureReady, buildWorld, firmOf, seedCitedDocument, seedVerifiedDocument, fileDocument,
   freshResolution, enqueueInvoiceFacts, invoiceFactsTask, claimTask,
   grantConsent, grantClientEgress, revokeClientEgress, filedDocument,
-  WREASON,
+  WREASON, ROLES, roleQuery, createClient,
 } from "./wave-a-fixtures.mjs";
 
 let ready = false;
@@ -25,6 +25,12 @@ after(async () => { printLaneNotes("wave-a-egress"); printSkipCount("wave-a-egre
 async function taskStatus(taskId) {
   const r = await rootQuery("select status, workflow_run_id from clara.document_processing_tasks where id=$1", [taskId]);
   return r.rows[0];
+}
+/** clara.release_held_document_tasks(p_limit) — the SAME call reconciler-documents.mjs
+ *  makes (runtime lane) whenever it believes CLARA_DOC_EGRESS_APPROVED=1. */
+async function releaseHeld() {
+  const r = await roleQuery(ROLES.runtime, "select clara.release_held_document_tasks(p_limit => 100) as receipt", []);
+  return r.rows[0]?.receipt ?? {};
 }
 /** Read the CLR/reason discriminant off a claim receipt (best-effort across shapes). */
 function clrOf(receipt) {
@@ -174,4 +180,184 @@ test("grant/revoke writers: OWNER floor + a live grant is one-per-client; grant�
   assert.ok(rows.rows[0].n >= 2, "grant→revoke→grant left ≥2 audit rows (distinct, one live)");
   const live = await rootQuery("select count(*)::int n from clara.client_egress_consents where client_id=$1 and revoked_at is null", [clients.A1]);
   assert.equal(live.rows[0].n, 1, "exactly one LIVE consent row per client (partial-unique)");
+});
+
+// ===========================================================================
+// F4 (H2 acceptance report, .tmp/H2-ACCEPTANCE-REPORT.txt) — the RELEASE path
+// must not release a task whose hold is consent-based. Only the kill switch may
+// lift its OWN hold; it has no authority over a hold the client's OWN consent (or
+// its absence) put there. Every cell here uses firm B (clients.B1, a fresh B2 —
+// NEVER firm A's A1/A2, which the tests above this section choreograph their own
+// consent state on) so this section needs no normalize-first revoke calls.
+//
+// Prior (buggy) behaviour: clara.release_held_document_tasks released EVERY
+// held_egress row in lane ('ocr','invoice_facts') unconditionally the instant the
+// runtime believed the kill switch was on — including a still-unconsented
+// invoice_facts task, which the very next claim re-derives as 'no_consent' and
+// slams straight back to held_egress (the release/re-hold storm the finding
+// witnessed live: ~29 workflow runs/minute for 6 minutes, DB connections
+// 32/60->42/60, two health-check flaps). These cells assert the FIXED truth
+// table directly against clara.release_held_document_tasks; F4-1/F4-2 FAIL
+// against the pre-fix (0009/pre-0048) function body because it flips status to
+// 'queued' unconditionally where the fixed body must leave it held_egress.
+// ===========================================================================
+
+test("F4-1: a no_consent hold SURVIVES a release sweep (the task stays held_egress, never queued)", async (t) => {
+  if (skipUnready(t, ready)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.B1);
+  // NO grantConsent call — clients.B1 has never held a live consent in this test.
+  const cited = await seedCitedDocument(users.dave, { firm, client: clients.B1, kind: "invoice" });
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  const claimReceipt = await claimTask(task.id, { egressApproved: true }).catch((e) => ({ raised: e.code }));
+  const held = await taskStatus(task.id);
+  assert.equal(held.status, "held_egress", `precondition: the claim holds the task (got ${held.status}, claim receipt ${JSON.stringify(claimReceipt)})`);
+  await releaseHeld();
+  const after = await taskStatus(task.id);
+  assert.equal(after.status, "held_egress", `a no_consent hold must SURVIVE the release sweep (got ${after.status}) — the kill switch has no authority over a consent hold`);
+  assert.equal(after.workflow_run_id ?? null, null, "a task the release sweep correctly declines carries no workflow_run_id");
+});
+
+test("F4-2: a partial_consent hold SURVIVES a release sweep (one of two filing clients still lacks consent)", async (t) => {
+  if (skipUnready(t, ready)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.B1);
+  const b2 = await createClient(users.dave, { name: `f4-b2-${opk("cli")}`, opKey: opk("cli") });
+  await grantConsent(users.dave, { firm, client: clients.B1 }); // B1 consented, B2 is NOT.
+  const seed = await seedVerifiedDocument({ firm, kind: "invoice" });
+  await fileDocument(users.dave, { document: seed.documentId, client: clients.B1, resolution: await freshResolution(users.dave, clients.B1, { subjectKind: "document", subjectId: seed.documentId }) });
+  await fileDocument(users.dave, { document: seed.documentId, client: b2, resolution: await freshResolution(users.dave, b2, { subjectKind: "document", subjectId: seed.documentId }) });
+  await enqueueInvoiceFacts(seed.documentId);
+  const task = await invoiceFactsTask(seed.documentId);
+  await claimTask(task.id, { egressApproved: true }).catch(() => {});
+  const held = await taskStatus(task.id);
+  assert.equal(held.status, "held_egress", `precondition: the shared filing holds the task (got ${held.status})`);
+  await releaseHeld();
+  const after = await taskStatus(task.id);
+  assert.equal(after.status, "held_egress", `a partial_consent hold must SURVIVE the release sweep (got ${after.status}) — EVERY active filing client must consent`);
+});
+
+test("F4-3: a kill_switch hold on a FULLY CONSENTED invoice_facts task DOES release (the switch may lift its own hold)", async (t) => {
+  if (skipUnready(t, ready)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.B1);
+  await grantConsent(users.dave, { firm, client: clients.B1 }).catch(() => {}); // idempotent: may already be live from F4-2
+  const cited = await seedCitedDocument(users.dave, { firm, client: clients.B1, kind: "invoice" });
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  await claimTask(task.id, { egressApproved: false }).catch(() => {}); // kill switch OFF -> kill_switch hold
+  const held = await taskStatus(task.id);
+  assert.equal(held.status, "held_egress", `precondition: the kill switch holds the task (got ${held.status})`);
+  await releaseHeld();
+  const after = await taskStatus(task.id);
+  assert.equal(after.status, "queued", `a kill_switch hold on a fully-consented document MUST release (got ${after.status})`);
+});
+
+test("F4-4: an OCR-lane kill_switch hold DOES release regardless of consent (OCR runs no per-client consent check at all)", async (t) => {
+  if (skipUnready(t, ready)) return;
+  const { clients } = world;
+  const firm = await firmOf(clients.B1);
+  // An UNFILED verified doc — pre-attribution, so OCR is gated on the kill switch alone.
+  // Unfiled is the sharp case: the document has ZERO active filings, which is precisely the
+  // state the invoice_facts predicate reads as 'no_consent' and declines. An OCR task on it
+  // releasing therefore proves the fast path is REAL, not incidentally satisfied.
+  //
+  // The task row is HAND-BUILT rather than discovered. The earlier cut of this cell looked
+  // for an auto-created OCR task and, finding none on this rig, early-returned via noteLane
+  // — so the one truth-table row whose fast path the migration hard-codes had, in a PR whose
+  // blocker was an uncovered lane, zero coverage while reporting green (H2 F4 review). The
+  // 'clara-fixture:%' engine arm (ck_processing_task_lane_engine_0038) is the schema's own
+  // hatch for a forged probe row.
+  const seed = await seedVerifiedDocument({ firm, kind: "invoice" });
+  const filings = await rootQuery("select count(*)::int n from clara.document_filings where document_id=$1 and retired_at is null", [seed.documentId]);
+  assert.equal(filings.rows[0].n, 0, "precondition: the document is UNFILED — the state the invoice_facts predicate declines");
+  const taskId = (await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,version_n,lane,status)
+       values($1,$2,'clara-fixture:f4-ocr','{}'::jsonb,1,'ocr','held_egress') returning id`,
+    [firm, seed.documentId],
+  )).rows[0].id;
+  const held = await taskStatus(taskId);
+  assert.equal(held.status, "held_egress", `precondition: the OCR task is held (got ${held.status})`);
+  await releaseHeld();
+  const after = await taskStatus(taskId);
+  assert.equal(after.status, "queued", `an OCR-lane kill_switch hold MUST release regardless of consent, on a document with no filing at all (got ${after.status})`);
+  const doc = await rootQuery("select extraction_status from clara.documents where id=$1", [seed.documentId]);
+  assert.equal(doc.rows[0].extraction_status, "pending", "the ocr-only extraction_status reset still fires for a released OCR task");
+});
+
+test("F4-6: the release's LANE SPLIT, one document, one consent state, two lanes — statement_facts releases, invoice_facts does NOT", async (t) => {
+  if (skipUnready(t, ready)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.B1);
+  // The tightest possible differential: ONE document, ONE filing, ONE (absent) legacy
+  // consent — the ONLY thing that differs between the two held tasks is the lane.
+  await revokeClientEgress(users.dave, { client: clients.B1 }).catch(() => {}); // normalize: B1 may be live-consented from an earlier cell
+  const seed = await seedVerifiedDocument({ firm, kind: "invoice" });
+  await fileDocument(users.dave, {
+    document: seed.documentId, client: clients.B1,
+    resolution: await freshResolution(users.dave, clients.B1, { subjectKind: "document", subjectId: seed.documentId }),
+  });
+
+  // The invoice_facts side runs the REAL path: enqueue, then claim with the kill switch ON —
+  // the claim re-derives 'no_consent' and writes the typed hold itself.
+  await enqueueInvoiceFacts(seed.documentId);
+  const invTask = (await invoiceFactsTask(seed.documentId)).id;
+  await claimTask(invTask, { egressApproved: true }).catch(() => {});
+
+  // The statement_facts side is HAND-BUILT (the x37.z / x38.f precedent for probing a belt
+  // with a forged shape). Driving it through its own enqueue path would drag in the typed
+  // statement-consent ceremony, the bank-account registration and the multi-client gate —
+  // none of which clara.release_held_document_tasks reads, and all of which would obscure the
+  // one variable this cell isolates: the lane. engine_id uses the 'clara-fixture:%' arm of
+  // ck_processing_task_lane_engine_0038, the schema's own escape hatch for exactly this.
+  const stmtTask = (await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,version_n,lane,status)
+       values($1,$2,'clara-fixture:f4-stmt','{}'::jsonb,1,'statement_facts','held_egress') returning id`,
+    [firm, seed.documentId],
+  )).rows[0].id;
+
+  const live = await rootQuery("select count(*)::int n from clara.client_egress_consents where client_id=$1 and revoked_at is null", [clients.B1]);
+  assert.equal(live.rows[0].n, 0, "precondition: the filing client holds NO live legacy consent");
+  assert.equal((await taskStatus(invTask)).status, "held_egress", "precondition: the claim holds the invoice_facts task (no_consent)");
+  assert.equal((await taskStatus(stmtTask)).status, "held_egress", "precondition: the statement_facts task is held");
+
+  const receipt = await releaseHeld();
+
+  // statement_facts is a KILL-SWITCH-ONLY lane at claim time (0038 E3: widening the LEGACY,
+  // purpose-blind consent branch to it would let that table authorize a statement-specific
+  // vendor read — the conflation 0020 §1 built a separate relation to prevent). Its typed
+  // (consent, activation) gate is adjudicated at ENQUEUE. So the release, which the runtime
+  // calls only when it believes the switch is back on, MUST release it — with or without a
+  // legacy consent row. A lane that can be HELD and cannot be RELEASED is a permanent stall.
+  assert.equal(
+    (await taskStatus(stmtTask)).status, "queued",
+    "a held statement_facts task MUST release (kill-switch-only lane) — if it does not, the release lane list lost 'statement_facts' (a permanent stall, 0038 E4) or the consent re-derivation was wrongly widened to the statement lane (the 0020 §1 conflation)",
+  );
+  // Same document, same client, same absent consent — the invoice_facts lane IS the legacy
+  // consent gate's lane, so its hold survives.
+  assert.equal(
+    (await taskStatus(invTask)).status, "held_egress",
+    "the invoice_facts task on the SAME document must STAY held — the kill switch has no authority over a consent hold",
+  );
+  assert.ok(Number(receipt.released ?? 0) >= 1, `the receipt counts the rows it actually moved (got ${JSON.stringify(receipt)})`);
+});
+
+test("F4-5: a no_consent hold releases CORRECTLY once consent is later granted — self-healing, no reclaim storm required", async (t) => {
+  if (skipUnready(t, ready)) return;
+  const { users, clients } = world;
+  const firm = await firmOf(clients.B1);
+  await revokeClientEgress(users.dave, { client: clients.B1 }).catch(() => {}); // normalize: B1 may be live-consented from F4-2/F4-3
+  const cited = await seedCitedDocument(users.dave, { firm, client: clients.B1, kind: "invoice" });
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  await claimTask(task.id, { egressApproved: true }).catch(() => {});
+  const held = await taskStatus(task.id);
+  assert.equal(held.status, "held_egress", `precondition: the claim holds the task (got ${held.status})`);
+  await releaseHeld(); // still unconsented — must decline (F4-1's cell, restated as a precondition here).
+  assert.equal((await taskStatus(task.id)).status, "held_egress", "still unconsented: the sweep must decline before consent is granted");
+  await grantConsent(users.dave, { firm, client: clients.B1 }); // the blocking condition actually resolves
+  await releaseHeld();
+  const after = await taskStatus(task.id);
+  assert.equal(after.status, "queued", `once genuinely consented, the NEXT release sweep must release it (got ${after.status}) — no reclaim storm needed`);
 });

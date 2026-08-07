@@ -128,20 +128,44 @@ test("a QUEUED classify task is never driven through documentIngest (finding 12)
   await removeTaskMeta(row.taskId);
 });
 
-test("flag flip releases held-egress tasks before re-enqueue", async () => {
+// F4 (H2 acceptance report, migration 0050). This cell used to run the DENIED-snapshot path
+// with a canned receipt, which made it a proof that THE FLAG dispatches a held task — the
+// runtime half of the release/re-hold storm. The release is DB-adjudicated now: the sweep
+// asks, re-reads, and dispatches only what the DB actually MOVED. Modelled the way Postgres
+// answers (the release commits before the re-read), an OCR hold — kill-switch-only, so the
+// DB always releases it once the switch is on — still dispatches in the same cycle.
+test("flag flip releases held-egress tasks before re-enqueue (the DB moves the row; the sweep re-reads it)", async () => {
   process.env.CLARA_DOC_EGRESS_APPROVED = "1";
   const row = task("held_egress", { lane: "ocr" });
   await writeTaskMeta(row.taskId, row);
   const starts = [];
-  const client = deniedSnapshotClient(async (sql) => ({
-    rows: [{ receipt: /release_held/.test(sql) ? { released: 1 } : {} }],
-    rowCount: 1,
-  }));
+  let released = false;
+  const client = {
+    query(sql) {
+      if (/release_held/.test(sql)) {
+        released = true;
+        return Promise.resolve({ rows: [{ receipt: { released: 1 } }], rowCount: 1 });
+      }
+      if (/select t\.id as task_id/.test(sql)) {
+        return Promise.resolve({
+          rows: [{
+            task_id: row.taskId, document_id: row.documentId, firm_id: row.firmId,
+            engine_id: "azure-di:layout", engine_config: {}, version_n: 1,
+            lane: "ocr", status: released ? "queued" : "held_egress",
+            run_id: null, created_at: row.createdAt,
+          }],
+          rowCount: 1,
+        });
+      }
+      return Promise.resolve({ rows: [{ receipt: {} }], rowCount: 1 });
+    },
+  };
   const out = await reconcileDocumentTasks(client, {
     enqueueDocumentIngest: async (id) => (starts.push(id), { runId: "released-run" }),
     getRun: () => ({ status: Promise.resolve("running") }),
   });
   assert.equal(out.documentHeldReleased, 1);
   assert.deepEqual(starts, [row.taskId]);
+  delete process.env.CLARA_DOC_EGRESS_APPROVED;
   await removeTaskMeta(row.taskId);
 });
