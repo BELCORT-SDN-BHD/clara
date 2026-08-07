@@ -83,13 +83,19 @@ test("reconcileAutoDraftTasks no-ops cleanly when its own firm has no autodraft 
       getRun: () => ({ status: Promise.resolve("running") }),
     }),
   );
-  assert.deepEqual(out, { autodraftReenqueued: 0, autodraftSettled: 0 });
+  // autodraftSettleFailed joined the receipt in the §7-A F1 fix (migration 0047's runtime
+  // half): the terminal edge now isolates per task, and a refused settle has to be COUNTED
+  // rather than thrown. deepEqual on the whole shape is what noticed the new key — kept
+  // exact, and updated, rather than loosened to a subset match.
+  assert.deepEqual(out, { autodraftReenqueued: 0, autodraftSettled: 0, autodraftSettleFailed: 0 });
   assert.deepEqual(enqueued, [], "no autodraft tasks in THIS firm -> nothing re-enqueued");
 });
 
 test("reconcileAutoDraftTasks is a clean no-op when enqueueAutoDraft is not wired (legacy callers)", { skip }, async () => {
   const out = await rig.asRuntime((c) => reconcileAutoDraftTasks(c, { getRun: () => ({ status: Promise.resolve("running") }) }));
-  assert.deepEqual(out, { autodraftReenqueued: 0, autodraftSettled: 0 });
+  // ...and the unwired no-op returns the SAME shape as the wired one — including the F1
+  // failure counter, which must exist at zero rather than be absent on this early-return path.
+  assert.deepEqual(out, { autodraftReenqueued: 0, autodraftSettled: 0, autodraftSettleFailed: 0 });
 });
 
 // --- SKIP until 0011 -------------------------------------------------------
