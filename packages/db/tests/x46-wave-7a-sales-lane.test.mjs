@@ -126,10 +126,23 @@ async function cpOf(client, name = CUSTOMER) {
  * statement that can take a row lock before it is a finding — whatever table it names. That
  * is what keeps the arm list-free as the body grows. The shapes below are the ways PostgreSQL
  * takes a row lock, not a guess at which ones this function happens to use today:
- *   - SELECT ... FOR UPDATE          explicit
+ *   - SELECT ... FOR UPDATE          explicit, the strongest row lock
+ *   - SELECT ... FOR NO KEY UPDATE   explicit, weaker but still a row lock
+ *   - SELECT ... FOR SHARE           explicit, shared
+ *   - SELECT ... FOR KEY SHARE       explicit, weakest
  *   - UPDATE <table>                 locks every row it touches
  *   - DELETE FROM <table>            likewise
  *   - INSERT ... ON CONFLICT         locks the conflicting row when one exists
+ *
+ * THE FOUR `FOR` CLAUSES ARE THE COMPLETE GRAMMAR, not a list somebody has to remember to
+ * extend: PostgreSQL's locking clause is exactly {FOR UPDATE | FOR NO KEY UPDATE | FOR SHARE |
+ * FOR KEY SHARE}, so enumerating them is exhaustive by construction. They are matched
+ * SEPARATELY rather than by one loose alternation because they must be, and because the first
+ * cut proved why: a single /for\s+update/i cannot see `FOR NO KEY UPDATE` — the words `NO KEY`
+ * sit between `for` and `update` — and the cross-model gate executed exactly that clause in
+ * PL/pgSQL on PG17 and took a real clara.firm_usage_daily row lock with it. Reachable, not
+ * theoretical. Trailing modifiers (OF <table>, NOWAIT, SKIP LOCKED) do not affect the match.
+ *
  * Exported shape is a LIST rather than a boolean so the failure message can name what it hit.
  */
 function preambleLockViolations(src) {
@@ -139,7 +152,10 @@ function preambleLockViolations(src) {
   const preamble = src.slice(salesAt, advisoryAt);
   const found = [];
   for (const [shape, rx] of [
-    ["SELECT ... FOR UPDATE", /for\s+update/i],
+    ["SELECT ... FOR UPDATE", /\bfor\s+update\b/i],
+    ["SELECT ... FOR NO KEY UPDATE", /\bfor\s+no\s+key\s+update\b/i],
+    ["SELECT ... FOR SHARE", /\bfor\s+share\b/i],
+    ["SELECT ... FOR KEY SHARE", /\bfor\s+key\s+share\b/i],
     ["UPDATE of a clara table", /\bupdate\s+clara\.\w+/i],
     ["DELETE from a clara table", /\bdelete\s+from\s+clara\.\w+/i],
     ["INSERT ... ON CONFLICT (locks the conflicting row)", /\bon\s+conflict\b/i],
@@ -757,6 +773,20 @@ test("C6 the canonical lock order is STRUCTURAL: the firm advisory precedes EVER
     ["FOR UPDATE reorder",
       "  select 1 from clara.firm_usage_daily where firm_id=f.firm_id for update;\n",
       "SELECT ... FOR UPDATE"],
+    // The three weaker FOR clauses complete PostgreSQL's locking grammar. FOR NO KEY UPDATE is
+    // the one the cross-model gate actually executed on PG17 to take a real firm_usage_daily
+    // row lock past the previous guard — /for\s+update/i cannot see it, because `NO KEY` sits
+    // between the two words. FOR SHARE and FOR KEY SHARE are the same hole one notch weaker,
+    // and a shared row lock still participates in the cycle this cell exists to prevent.
+    ["FOR NO KEY UPDATE reorder (executed on PG17; the variant /for update/ is blind to)",
+      "  select 1 from clara.firm_usage_daily where firm_id=f.firm_id for no key update;\n",
+      "SELECT ... FOR NO KEY UPDATE"],
+    ["FOR SHARE reorder",
+      "  select 1 from clara.firm_usage_daily where firm_id=f.firm_id for share;\n",
+      "SELECT ... FOR SHARE"],
+    ["FOR KEY SHARE reorder",
+      "  select 1 from clara.firm_usage_daily where firm_id=f.firm_id for key share;\n",
+      "SELECT ... FOR KEY SHARE"],
     ["plain UPDATE reorder (the shape the /for update/ arm was blind to)",
       "  update clara.firm_usage_daily set tokens_used=tokens_used where firm_id=f.firm_id;\n",
       "UPDATE of a clara table"],
