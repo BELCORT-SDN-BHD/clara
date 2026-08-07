@@ -329,7 +329,7 @@ async function settleAutoDraftTerminal(client, taskId, outcome, entryId, refusal
  */
 export async function reconcileAutoDraftTasks(client, deps) {
   const { enqueueAutoDraft, getRun, onlyFirm = null, graceInterval = GRACE_REENQUEUE, log = () => {} } = deps;
-  const out = { autodraftReenqueued: 0, autodraftSettled: 0 };
+  const out = { autodraftReenqueued: 0, autodraftSettled: 0, autodraftSettleFailed: 0 };
   if (typeof enqueueAutoDraft !== "function") return out; // not wired — no-op
 
   // A) admitted-but-unstarted (queued, no run) past grace -> re-enqueue. The workflow's
@@ -380,13 +380,39 @@ export async function reconcileAutoDraftTasks(client, deps) {
     } catch {
       /* no recovery surface — treat as no draft */
     }
-    if (draftedEntry) {
-      await settleAutoDraftTerminal(client, t.id, "drafted", draftedEntry, null); // crash-after-draft honored
-    } else {
-      const settle = terminalForAutodraft(engine) ?? { outcome: "failed", reason: "internal" };
-      await settleAutoDraftTerminal(client, t.id, "failed", null, { code: "internal", reason: settle.reason });
+    // ISOLATED PER TASK — the §7-A Half-2 blocker (FINDING F1, 2026-08-07), and the SAME
+    // isolation reconcileTasks's section B already carries for the cancel edge. This settle
+    // used to run bare, so a single task the DB refuses to settle threw all the way out of
+    // reconcileAutoDraftTasks -> runReconcilerSweep and aborted the WHOLE leader cycle before
+    // its remaining work: document dispatch, matching, the intake sweeps, the adjustments
+    // belt, FA runs and SST watches all starved behind it, every ~2s, forever, because the
+    // reconciler IS the thing that would otherwise have healed it. Measured: 52 "LEADER
+    // cycle-error draft settlement entry not found" in one 25-minute window, five document
+    // tasks queued 19 minutes, /ready warning on a 1,158,951 ms unbound-task age — cleared
+    // only when a human cancelled a task they had no reason to know existed.
+    //
+    // The DB half of that specific CLR11 is fixed in migration 0047 (the guard now tests
+    // identity, not a time-varying status). This is the OTHER half, and it is deliberately
+    // not conditional on that one: whatever the DB refuses for — a genuinely foreign entry,
+    // a losing dispatch, a transient error — one un-settleable task must never be able to
+    // abort the sweep. The failure is COUNTED (autodraftSettleFailed) as well as logged, so
+    // it stays visible rather than swallowed, and it retries next cycle.
+    //
+    // Logging every cycle rather than once is deliberate: it matches section B's cancel-edge
+    // idiom exactly, and the leader does not log the sweep result, so a de-duplicated line
+    // would turn a persistent strand into silence after its first occurrence.
+    try {
+      if (draftedEntry) {
+        await settleAutoDraftTerminal(client, t.id, "drafted", draftedEntry, null); // crash-after-draft honored
+      } else {
+        const settle = terminalForAutodraft(engine) ?? { outcome: "failed", reason: "internal" };
+        await settleAutoDraftTerminal(client, t.id, "failed", null, { code: "internal", reason: settle.reason });
+      }
+      out.autodraftSettled += 1;
+    } catch (err) {
+      out.autodraftSettleFailed += 1;
+      log(`[reconcile] autodraft settle failed task=${t.id} entry=${draftedEntry ?? "none"} engine=${engine}: ${err?.message ?? err}`);
     }
-    out.autodraftSettled += 1;
   }
   return out;
 }
