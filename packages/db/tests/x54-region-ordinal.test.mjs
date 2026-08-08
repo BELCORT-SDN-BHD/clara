@@ -9,19 +9,16 @@
 // fixtures it controls. Every cell below builds a document with regions it chose and reads
 // what the function actually answers (the x49 division of labour, verbatim).
 //
-// THE FOUR PROPERTIES THE RUNTIME DEPENDS ON, each with its own cell:
+// THE PROPERTIES THE RUNTIME DEPENDS ON, each with its own cell:
 //   1. PRESENT + DENSE — every region carries an integer idx, and the set is exactly 1..N.
-//   2. ORDERED — regions[] arrives in idx order, so "the nth element" and "idx n" agree
-//      for a reader that (wrongly) uses position; the runtime resolves by FIELD anyway,
-//      and its own suite proves that, but a list that is NOT in order would be a trap for
-//      every human reading a transcript.
-//   3. STABLE — two independent calls answer the same idx for the same region. This is the
-//      whole premise of the fix: the model reads the list through read_document and the
-//      wrapper resolves the cited idx against a SECOND, separate call of the same RPC.
-//   4. USABLE END TO END — the region an idx names really is citable: taking id + text at
-//      an idx and drafting through the REAL evidence wall succeeds. The wall
-//      (clara._write_entry_evidence) is untouched by 0054 and this cell is what proves the
-//      ordinal did not quietly drift off the ids the wall reads.
+//   2. ORDERED — regions[] arrives in idx order (a list that is not would be a trap for
+//      every human reading a transcript, even though the runtime resolves by FIELD).
+//   3. STABLE WITHIN A GENERATION — two independent calls answer the same idx for the same
+//      region, and the char budget does not move the mapping.
+//   4. USABLE END TO END — the region an idx names really is citable through the REAL,
+//      untouched evidence wall, so the ordinal has not drifted off the ids that wall reads.
+//   5. THE DRIFT WITNESSES (h/i) — what happens ACROSS generations, which is why the
+//      runtime binds resolution to the snapshot it read.
 //
 // CONTRACT-BLIND where it can be: the cells name the OUTCOME (an ordinal is published,
 // dense, ordered, stable, and citable), never the CTE that produces it.
@@ -31,7 +28,7 @@ import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import {
-  rootQuery, endPool, printLaneNotes, printSkipCount, markSkip,
+  rootQuery, endPool, printLaneNotes, printSkipCount, markSkip, noteLane,
   waveAEnsureReady, buildWorld, firmOf, opk,
 } from "./a21-helpers.mjs";
 import {
@@ -44,15 +41,48 @@ const EXP = "500-X54";
 const VENDOR = { new: { name: "X54 SUPPLIES SDN BHD", registration_no: "202401000054" } };
 
 let ready = false;
-let has54 = false;
+let applied = false;
+let appliedAs = null;
 let world = null;
 
-/** Is 0054 on this database? Read from the migration LEDGER, not from the function's
- *  source: a half-applied file is a different failure than an unapplied one. */
-async function has0054() {
+/** THE LEDGER GATE, KEYED ON THE STABLE SUFFIX — NEVER ON THE NUMBER.
+ *
+ *  WHY (the standard minted by the F6 native review, which DEMONSTRATED the failure; the
+ *  repo's own RC3 lesson is the citation — wave-d-b-asbuilt-part2.md:100). Numbers are claimed
+ *  at MERGE time, so the number is the one part of this identity GUARANTEED to move, and a
+ *  gate pinned to `'0054_%'` goes SILENTLY DORMANT when it does: every cell skips, the file
+ *  reports 0 pass / N skip, node exits 0, CI green over a battery that measured nothing.
+ *
+ *  AND A SKIP MUST EARN ITSELF. "No ledger row" is lawful evidence of "not applied" ONLY
+ *  when the CAPABILITY is absent too. Three states, three answers:
+ *    * capability absent  + no row -> genuinely unapplied. The one lawful SKIP.
+ *    * capability PRESENT + no row -> the gate has lost its subject (renamed away from the
+ *                                     suffix it keys on). RAISES — the exact dormancy trap
+ *                                     this standard closes, which a skip would hide.
+ *    * capability absent  + a row  -> HALF-APPLIED, a third failure. RAISES.
+ *  Absence is not evidence; a derived state is not evidence. Both directions are measured. */
+const LEDGER_RE = "^[0-9]{4}_region_ordinal$";
+
+/** The ledger rows for THIS migration, whatever number it merged as. `null` means
+ *  clara.schema_migrations itself is unreadable (a pre-migration database). */
+async function ledgerVersions() {
   try {
-    const r = await rootQuery("select count(*)::int as n from clara.schema_migrations where version like '0054_%'");
-    return r.rows[0].n === 1;
+    const r = await rootQuery("select version from clara.schema_migrations where version ~ $1 order by version", [LEDGER_RE]);
+    return r.rows.map((x) => x.version);
+  } catch {
+    return null;
+  }
+}
+
+/** THE CAPABILITY, read from the CATALOG — the instrument production itself uses — never
+ *  from the migrations directory: only the shipped body can answer whether the ordinal is
+ *  actually published. */
+async function ordinalPublished() {
+  try {
+    const r = await rootQuery(
+      "select position('''idx'',rr.idx' in p.prosrc) > 0 as has from pg_proc p where p.oid = 'clara.get_document_extract(uuid,uuid,int)'::regprocedure",
+    );
+    return r.rows[0]?.has === true;
   } catch {
     return false;
   }
@@ -64,9 +94,9 @@ function skipHere(t) {
     t.skip("rig not reachable / pre-Wave-A schema — x54 dormant");
     return true;
   }
-  if (!has54) {
+  if (!applied) {
     markSkip();
-    t.skip("0054 not applied (clara.schema_migrations has no '0054_%' row) — the region-ordinal battery is dormant");
+    t.skip(`the region-ordinal migration is not applied (no ledger row matching /${LEDGER_RE}/ AND the ordinal is not published) — the battery is dormant`);
     return true;
   }
   return false;
@@ -74,8 +104,27 @@ function skipHere(t) {
 
 before(async () => {
   ready = await waveAEnsureReady();
-  has54 = ready ? await has0054() : false;
   if (ready) {
+    const versions = await ledgerVersions();
+    const capable = await ordinalPublished();
+    if (capable && (versions === null || versions.length === 0)) {
+      throw new Error(
+        `x54 GATE HAS LOST ITS SUBJECT: get_document_extract PUBLISHES the region ordinal, but no clara.schema_migrations row matches /${LEDGER_RE}/. Every cell would ` +
+          "have SKIPPED and this file would have reported 0 pass with exit 0 — the renumber-dormancy trap. Re-key this gate to the suffix the migration now carries; " +
+          "never let it skip (RC3, wave-d-b-asbuilt-part2.md:100).",
+      );
+    }
+    if (!capable && versions !== null && versions.length > 0) {
+      throw new Error(
+        `x54 GATE: ${versions.join(", ")} is recorded as applied, but clara.get_document_extract does NOT publish the region ordinal. A HALF-APPLIED migration is a ` +
+          "different failure from an unapplied one and must never read as dormancy.",
+      );
+    }
+    if (versions !== null && versions.length > 1) {
+      throw new Error(`x54 GATE: ${versions.length} ledger rows match /${LEDGER_RE}/ (${versions.join(", ")}) — this migration must exist exactly once.`);
+    }
+    applied = capable && versions !== null && versions.length === 1;
+    appliedAs = applied ? versions[0] : null;
     world = await buildWorld();
     for (const c of [world.clients.A1]) {
       await upsertPayableAccount(world.users.alice, { client: c, code: AP, name: "Trade Creditors", opKey: opk("x54ap") });
@@ -140,14 +189,16 @@ const regionsOf = (extract) => {
 // META — a partial apply can never green this suite silently.
 // ===========================================================================
 
-test("x54 META: 0054 is applied exactly once, and clara.get_document_extract exists at exactly one signature", async (t) => {
+test("x54 META: the region-ordinal migration is applied exactly once — matched by STABLE SUFFIX, so a merge-time renumber cannot take this battery dormant — and get_document_extract exists at exactly one signature", async (t) => {
   if (skipHere(t)) return;
-  const mig = await rootQuery("select version from clara.schema_migrations where version like '0054_%'");
-  assert.equal(mig.rows.length, 1, `exactly one applied 0054_* migration (got ${mig.rows.map((x) => x.version).join(",")})`);
+  const versions = await ledgerVersions();
+  assert.deepEqual(versions, [appliedAs], `exactly one applied *_region_ordinal migration (got ${JSON.stringify(versions)})`);
+  assert.match(appliedAs, /^[0-9]{4}_region_ordinal$/, "the ledger row keeps the four-digit prefix the runner requires");
+  noteLane(`x54: the region-ordinal migration is applied as "${appliedAs}" — this gate keys on the SUFFIX, not that number`);
   const fns = await rootQuery(
     "select count(*)::int as n from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='clara' and p.proname='get_document_extract'",
   );
-  assert.equal(fns.rows[0].n, 1, "an overload would leave the pre-0054 shape reachable");
+  assert.equal(fns.rows[0].n, 1, "an overload would leave the pre-ordinal shape reachable");
 });
 
 // ===========================================================================

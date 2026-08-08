@@ -10,8 +10,8 @@
 -- while every other cited region matched exactly. The same document drafted CLEANLY, FIRST
 -- TRY, through the HAND DOOR with the corrected id (h1.md:786-790).
 -- ADR-064 SS3 records the fix shape this file implements the DB half of: "the toolface
--- accepts a short index into the evidence list it was shown; the server resolves
--- index->region_id; a bad index rejects with the valid list."
+-- accepts a short index into the evidence list it was shown; the server resolves it; a bad
+-- index rejects with the valid list."
 --
 -- WHAT IS **NOT** CHANGED, AND WHY THAT IS THE POINT.
 -- clara._write_entry_evidence (0009_coding_floor.sql:411-472) IS UNTOUCHED. Its per-item
@@ -49,13 +49,13 @@
 -- recovering the moment this lands. Apply, read the shipped body positively, then flip.
 --
 -- MIGRATION NUMBER claimed at MERGE time (standing law, CLAUDE.md + RENUMBER.md). Authored
--- as 0054 on branch build/wave-e-f9 while the F6/F7/F8 siblings were still open; if the
--- merge order changes, RENUMBER this file AND its rig battery together (x54-region-ordinal
--- .test.mjs reads the ledger for '0054_%' -- the only thing keyed on the number). The
+-- as 0054 on branch build/wave-e-f9 while the F6/F7/F8 siblings were still open. RENUMBER
+-- FREELY: nothing keys on the number. The rig battery gates on the STABLE SUFFIX
+-- `_region_ordinal` and RAISES if the ordinal is published with no matching ledger row (RC3;
+-- the F6 review demonstrated the silent-dormancy failure a number-keyed gate has). The
 -- frontier probe pins 0050, the last migration whose NAME this branch can see; the runner
--- never requires contiguity, so a sibling at 0051-0053 needs no change. NO SPLICE-ANCHOR
--- OVERLAP with any sibling: F6 recuts request_reextraction, F7 touches
--- persist_invoice_facts' field_path allowlist, F8 touches admit_autodraft_task.
+-- never requires contiguity. NO SPLICE-ANCHOR OVERLAP with any sibling: F6 recuts
+-- request_reextraction, F7 touches persist_invoice_facts' allowlist, F8 admit_autodraft_task.
 --
 -- PROVENANCE OF THE BODY BEING RECUT. The LIVE body of get_document_extract(uuid,uuid,int)
 -- is packages/db/migrations/0011_daily_loop.sql:3232, NOT 0009_coding_floor.sql:2613. 0009
