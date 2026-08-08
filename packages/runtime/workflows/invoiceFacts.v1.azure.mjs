@@ -12,6 +12,8 @@ import { readTotalsFromLines } from "../lib/invoice-totals-reader.mjs";
 import { mergeTotalsIntoFields } from "../lib/invoice-totals-merge.mjs";
 import { looksLikeRegistration, readVendorIdentityFromLines, mergeVendorIdentity, anchorsFromTypedFields } from "../lib/invoice-vendor-identity.mjs";
 import { readCurrencyFromLines, mergeCurrencyIntoFields } from "../lib/invoice-currency-reader.mjs";
+import { readCustomerIdentityFromLines, mergeCustomerIdentity } from "../lib/invoice-customer-identity.mjs";
+import { recoverInvoiceId } from "../lib/invoice-id-recovery.mjs";
 
 const API_VERSION = "2024-11-30";
 const MODEL = "prebuilt-invoice";
@@ -74,8 +76,23 @@ export const AZURE_INVOICE_ENGINE_SNAPSHOT = Object.freeze({
  *  `invoice.currency` emission below, a MODEL GUESS measured wrong on 7/40 real documents CLR21
  *  then refused to code at all. Agreement keeps the typed row + stamps `typed_collapsed`;
  *  disagreement withdraws BOTH rows, lifting the refusal without ever adding a document to
- *  `corroborated`. NO DB CHANGE ships here; bumped for the v6/v7/v8 reason — a different fact set. */
-export const NORMALIZATION_VERSION = "clara-invoice-norm:v9";
+ *  `corroborated`. NO DB CHANGE ships here; bumped for the v6/v7/v8 reason — a different fact set.
+ *  v10 (the F6–F9 fix batch, finding F7): the DETERMINISTIC CUSTOMER-IDENTITY READER, X7
+ *  (lib/invoice-customer-identity.mjs + lib/invoice-party-grammar.mjs — full rationale there).
+ *  Until now `invoice.customer_name` was a byte-for-byte pass-through of Azure's typed
+ *  `CustomerName`, with no second reader anywhere: on BOTH real KONG CHENG invoices
+ *  (wave-7a-acceptance-h1.md rows 1 and 12) the model typed the `Attn :` CONTACT PERSON instead
+ *  of the company in the bill-to box, and both drafts are still held `counterparty_unresolved`.
+ *  X7 reads the addressee party off the layout — label-anchored, attributed to the typed
+ *  CustomerName region's own geometry — and emits the `Attn` person separately as the NEW
+ *  `invoice.contact_person` fact. Bumped for the v6/v7/v8/v9 reason and one more: the same
+ *  document now yields a fact it could not under v9, and on the F7 shape it yields a DIFFERENT
+ *  customer_name, so v9 and v10 extractions must stay distinguishable and a re-extraction is a
+ *  genuinely new fact set rather than a silent supersede. The reader's counters ride the
+ *  envelope under `customer_identity`. THIS ONE DOES CARRY A DB CHANGE — `invoice.contact_person`
+ *  joins persist_invoice_facts' CLOSED field_path allowlist in its own migration; without it
+ *  every extraction carrying the new fact would raise CLR10 and forfeit outright. */
+export const NORMALIZATION_VERSION = "clara-invoice-norm:v10";
 
 export class DocumentEngineError extends Error {
   constructor(code, message) {
@@ -230,45 +247,11 @@ const FIELD_MAP = {
 const DEPOSIT_FIELDS = ["Deposit", "Deposits", "DepositAmount"];
 
 // --- invoice_id recovery (WA §11) -----------------------------------------------
-// The prebuilt-invoice `InvoiceId` typed field is high-recall on US templates but
-// LOSSY on Malaysian layouts: on the RPR corpus it returned a bounding region with
-// an EMPTY value (or no field at all) on most bills, while the number was plainly in
-// the OCR content. The typed field stays the source of truth; ONLY when it yields no
-// value do we recover the number from the response's own structures — first the
-// model's key-value pairs (features=keyValuePairs), then a label-anchored line scan of
-// analyzeResult.content. Recovery is conservative (label-anchored + a plausibility
-// gate) and NEVER overrides a non-empty typed hit, so the fields Azure did type stay
-// byte-identical. A recovered id carries whatever geometry its source had (KV) or an
-// empty polygon (content) — invoice_id is non-monetary, so it never affects Tier-A
-// total corroboration; it only arms the duplicate-bill + near-dup keys the DB owns.
-
-// Normalizes a label for matching: lowercase, collapse runs to single spaces, trim.
-function normLabel(s) {
-  return String(s ?? "").toLowerCase().replace(/\s+/g, " ").trim();
-}
-
-// Label vocabulary for the invoice-number field across the layouts we see (English +
-// Malay: "No. Invois", "No. Bil"). Deliberately excludes purchase-order / account /
-// customer labels so we never capture a neighbouring number.
-// Invoice-number anchors ONLY. `reference/ref/document/doc no.` labels are
-// deliberately EXCLUDED: the recovered id feeds the exact-duplicate-bill key, and a
-// delivery-order / customer reference sharing across two of a vendor's bills would
-// false-positive that gate. Keep to invoice/bill/invois anchors (dual-review LOW).
-const INVOICE_ID_LABEL =
-  /\b(?:tax\s+)?inv(?:oice)?\.?\s*(?:no\.?|number|num\.?|#|id)\b|\binvois\b|\bno\.?\s*bil\b|\bbil\s*(?:no\.?|number)\b/i;
-
-// A plausible invoice number: has a digit, sane length, and is not a bare currency
-// amount or an ISO date (those are other fields). Invoice numbers may carry slashes,
-// dashes and dots (INV2510/10, IV-2512-001, 202509230), so those pass.
-function looksLikeInvoiceNumber(s) {
-  const v = String(s ?? "").trim();
-  if (v.length < 3 || v.length > 40) return false;
-  if (!/[0-9]/.test(v)) return false;
-  if (/^\(?\s*(?:rm|myr|usd|sgd)?\s*[\d,]+\.\d{2}\s*\)?$/i.test(v)) return false; // currency total
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return false; // ISO date == invoice_date, not id
-  if (/^[\d\s]+$/.test(v) && v.replace(/\D/g, "").length > 12) return false; // long digit run (phone/acct)
-  return true;
-}
+// MOVED, byte-for-byte, to lib/invoice-id-recovery.mjs by the F6–F9 fix batch (the repo's
+// 500-line file limit, when X7's wiring landed below) and imported back above — the same
+// mechanical-move discipline the X6 note below records. Its full rationale travels with it;
+// `firstRegion` stays here (the typed loop, the currency emit and both tax-id emits use it too)
+// and is passed in, so there is still exactly ONE definition of it.
 
 // A plausible vendor registration number (Malaysian SSM/ROC or tax id): has a sane
 // length and substantive alphanumeric content, and is not a bare currency amount or
@@ -281,62 +264,6 @@ function looksLikeInvoiceNumber(s) {
 // v7 (X6): the body MOVED, byte-for-byte, to lib/invoice-vendor-identity.mjs so the typed
 // emits below and the new layout reader share ONE gate instead of two that drift apart.
 // Imported back above; behaviour here is unchanged.
-
-// Trims label noise and surrounding punctuation, returning the invoice-number token.
-function cleanIdToken(s) {
-  return String(s ?? "")
-    .replace(/^[\s:#.\-–—]+/, "")
-    .replace(/[\s:#]+$/, "")
-    .trim();
-}
-
-// Recover the invoice number from the model's key-value pairs (features=keyValuePairs).
-function recoverFromKeyValuePairs(result) {
-  const kvps = Array.isArray(result?.keyValuePairs) ? result.keyValuePairs : [];
-  for (const kv of kvps) {
-    if (!INVOICE_ID_LABEL.test(normLabel(kv?.key?.content))) continue;
-    const val = cleanIdToken(kv?.value?.content);
-    if (!looksLikeInvoiceNumber(val)) continue;
-    const region = firstRegion(kv?.value);
-    return {
-      value: val,
-      page: region.page,
-      polygon: region.polygon,
-      confidence: kv?.confidence == null ? null : Number(kv.confidence),
-    };
-  }
-  return null;
-}
-
-// Recover from a label-anchored scan of the concatenated OCR content. Conservative:
-// the value must sit after the label on the SAME line, or be the first plausible token
-// on the NEXT line (the common "Invoice No:\nINV2510/10" print shape).
-function recoverFromContent(result) {
-  const content = typeof result?.content === "string" ? result.content : "";
-  if (!content) return null;
-  const lines = content.split(/\r?\n/);
-  for (let i = 0; i < lines.length; i++) {
-    const m = INVOICE_ID_LABEL.exec(lines[i]); // case-insensitive, matched on the raw line
-    if (!m) continue;
-    // Same-line: the first whitespace-delimited token after the label.
-    const sameLine = cleanIdToken(lines[i].slice(m.index + m[0].length)).split(/\s+/)[0];
-    if (looksLikeInvoiceNumber(sameLine)) {
-      return { value: sameLine, page: 1, polygon: [], confidence: null };
-    }
-    // Next-line: first whitespace-delimited token on the following line.
-    const next = cleanIdToken((lines[i + 1] ?? "").trim().split(/\s+/)[0]);
-    if (looksLikeInvoiceNumber(next)) {
-      return { value: next, page: 1, polygon: [], confidence: null };
-    }
-  }
-  return null;
-}
-
-// Best-effort recovery: KV first (Azure-structured), then content scan. Returns a
-// {value, page, polygon, confidence} facts row or null.
-function recoverInvoiceId(result) {
-  return recoverFromKeyValuePairs(result) || recoverFromContent(result);
-}
 
 /** Map a succeeded prebuilt-invoice payload to the persist_invoice_facts fields
  *  array [{field_path, value_raw, page, polygon, confidence}] + a raw hash + pages +
@@ -417,7 +344,7 @@ export function normalizeAzureInvoice(payload) {
   // key-value pairs / OCR content — never overriding a real typed hit.
   const idFact = out.find((r) => r.field_path === "invoice.invoice_id");
   if (!idFact || !String(idFact.value_raw ?? "").trim()) {
-    const recovered = recoverInvoiceId(result);
+    const recovered = recoverInvoiceId(result, firstRegion);
     if (recovered) {
       const row = {
         field_path: "invoice.invoice_id",
@@ -464,6 +391,18 @@ export function normalizeAzureInvoice(payload) {
     : { fields: [], receipt: { ...readVendorIdentityFromLines([]).receipt, outcome: "multi_document" } };
   mergeVendorIdentity(out, identity);
 
+  // --- X7: the deterministic CUSTOMER-identity reader (F6–F9 fix batch, finding F7) ----------
+  // Runs after the typed CustomerName emit above, so a typed row is present to reconcile
+  // against, and it rides the SAME anchors X6 built — the typed CustomerName region is what
+  // makes a bill-to candidate EVIDENCED rather than merely label-shaped. Single-document only,
+  // for the reason X2 and X6 are: typed fields come from documents[0] while pages span the whole
+  // scan, so on a bundle document B's bill-to box would be filed as document A's buyer — a WRONG
+  // party, which is worse than the missing one it replaces.
+  const customer = singleDocument
+    ? readCustomerIdentityFromLines(result.pages, anchors)
+    : { fields: [], receipt: { ...readCustomerIdentityFromLines([]).receipt, outcome: "multi_document" } };
+  mergeCustomerIdentity(out, customer);
+
   // --- the currency reader (design doc part 1 §3/§4; rationale in its own header). Document-
   // scope; gated on `singleDocument` anyway so a foreign token on B's page can't withdraw A's row.
   const currencyReader = singleDocument
@@ -481,6 +420,7 @@ export function normalizeAzureInvoice(payload) {
   envelope.totals_reader = totals.receipt;
   envelope.vendor_identity = identity.receipt;
   envelope.currency_reader = currencyReader.receipt;
+  envelope.customer_identity = customer.receipt;
 
   const rawSha256 = createHash("sha256")
     .update(JSON.stringify(payload ?? {}) + "|" + NORMALIZATION_VERSION, "utf8")

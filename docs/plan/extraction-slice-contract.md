@@ -145,6 +145,51 @@ the fix is its **own block** — never inside X5's micro-migration; X5 stays LAS
 ALONE — and a resolution-LOGIC change carries its **own cross-model adversarial review**
 before merge (house law for live-lane code).
 
+**X7 — the deterministic CUSTOMER-identity reader.** *(X7 added by the F6–F9 fix batch,
+2026-08-09 — see the batch ADR. The ADR-047 ratification above closed at X6; this block is an
+AMENDMENT to that closed list, not a re-grill of it.)*
+
+**The measured defect (F7, ADR-064 §3 / ledger task #32).** ROME SECRETARY issued two real
+invoices to **KONG CHENG RESTAURANTS SDN BHD**. Both print the company in the bill-to box and a
+separate `Attn : Lim Xiao Shan` contact line under it. Azure typed `CustomerName` as **the
+person** on BOTH, so `invoice.customer_name` was captured as `"Lim Xiao Shan"` and both drafts
+(`53504c0e-…` RM2,800 and `7995b1a3-…` RM600) sit `status='draft'` skip=`counterparty_unresolved`
+to this day (`docs/plan/wave-7a-acceptance-h1.md` exhibit E7 + manifest rows 1 and 12).
+
+**Why this is NEW-BUILD, not a lexicon re-rank.** Before X7 there was **no deterministic
+customer-identity reader at all** — `invoice.customer_name` was a byte-for-byte pass-through of
+Azure's typed field, so an ML model's pick of which line in the bill-to box is "the customer"
+reached the books unchallenged. X7 supplies the missing second reader.
+
+- **Ranking (the fix):** a positively-identified **boxed / labelled party block outranks
+  Attn-line adjacency** for `customer_name`. It is structural, not a tie-break: an `Attn` line is
+  claimed as a CONTACT before party candidacy is considered, so the person is never in the race.
+  The person is emitted as the **new `invoice.contact_person` fact**.
+- **Twins X6's architecture** (`lib/invoice-customer-identity.mjs` + `lib/invoice-party-grammar
+  .mjs`): uniqueness-or-nothing · the label + party-name gate · **customer-block attribution**
+  (a candidate must sit next to the typed `CustomerName` region and closer to it than to
+  `VendorName`) · reconciliation against the typed emission. **X6's insight re-applied is what
+  makes it work on the very documents it fixes:** Azure's typed CustomerName picked the wrong
+  LINE but a line *inside* the bill-to box — its content is wrong, its **geometry** is sound.
+- **No top-band analogue**, deliberately: a bill-to block has no positional convention
+  comparable to a letterhead, and an unmeasured band is a guess wearing a threshold.
+- **Reconciliation matrix:** reader absent/refused → typed stands (pre-X7 behaviour) · reader
+  ambiguous → typed stands · typed empty → reader supplies · agreement → ONE row, the typed one ·
+  **typed == the reader's own Attn person → the party overrides (the F7 branch)** · unexplained
+  disagreement → **emit neither** (X6's semantics; a contested buyer resolves no counterparty on
+  its own authority).
+- **DB half is mandatory, not optional:** `invoice.contact_person` joins `persist_invoice_facts`'
+  **CLOSED** allowlist and its conflicting-duplicate text set in its own migration. Without it
+  the first extraction carrying the fact does not drop it — it raises **CLR10** and forfeits the
+  whole persist. `NORMALIZATION_VERSION` → **v10**.
+- **Two honest limits, recorded rather than discovered later.** (i) The thresholds are
+  **UNMEASURED** — the KONG CHENG captures are real client documents and are not in this repo, so
+  unlike X6 the defaults are conservative opts and the reader is built to ABSTAIN when one is
+  wrong; the **live replay is the measurement**. (ii) Attribution anchors on the typed
+  `CustomerName` region, so X7 can never supply a name where Azure typed none — the **FINCARE**
+  row (acceptance-h1 row 10, held `customer_name_missing`) is NOT fixed by F7, and relaxing the
+  anchor to "far from the vendor" would be absence-as-evidence, which review law 2 forbids.
+
 ## 3. Falsifiable gates
 
 | gate | claim |
