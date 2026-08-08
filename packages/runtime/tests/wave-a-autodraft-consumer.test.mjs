@@ -39,9 +39,15 @@ test("consumer name + subscribed event types are the fixed spine identity", () =
   assert.deepEqual([...AUTODRAFT_EVENT_TYPES], ["document.invoice_facts_completed", "document.invoice_facts_failed"]);
 });
 
-test("admissionNeedsStart enqueues on 'admitted' AND 're_admitted' — every no-op/refusal outcome does not", () => {
+test("admissionNeedsStart enqueues on ALL THREE task-minting outcomes — every no-op/refusal outcome does not", () => {
   assert.equal(admissionNeedsStart("admitted"), true);
   assert.equal(admissionNeedsStart("re_admitted"), true, "the 0034 supersede outcome mints a real queued task and must enqueue");
+  assert.equal(
+    admissionNeedsStart("re_admitted_after_withdrawal"), true,
+    "the 0053 / F8 outcome (a COMPLETED task whose entry was withdrawn) rides the SAME mint pipeline and mints a real queued task — leaving it un-enqueued would recreate F8 one layer up: the row exists, nothing ever runs it",
+  );
+  // 'already_done' stays FALSE and that is the whole contrast: 0053 narrowed which completed
+  // attempts re-admit, it did not turn the honest refusal into an enqueue.
   for (const o of [
     "noop_existing",
     "refused_budget",
@@ -50,6 +56,11 @@ test("admissionNeedsStart enqueues on 'admitted' AND 're_admitted' — every no-
     "skipped_lane",
     "already_done",
     "skipped_direction",
+    // Near-misses that must not be admitted by a loose prefix/substring test — spelling is
+    // not identity (CLAUDE.md law 3): only the exact tokens enqueue.
+    "re_admitted_after_withdrawal_x",
+    "readmitted",
+    "RE_ADMITTED",
     undefined,
     "",
   ]) {

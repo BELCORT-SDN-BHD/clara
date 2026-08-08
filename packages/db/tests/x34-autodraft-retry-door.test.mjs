@@ -29,6 +29,35 @@
 //          Reduction-tested: reverting the durable per-row UPDATE reproduces the
 //          leak here.
 //
+// Migration 0053 -- §7-A FINDING F8 (ledger task #33): the unattended lane must be
+// able to honor the remedy CLR23 itself prints. 0034 refused EVERY completed
+// attempt; a WITHDRAWN entry falsifies its "the work already exists" premise, so a
+// completed attempt whose filing carries no live entry now re-admits.
+//
+//   x34.g  THE FIX, end to end on the real product path: admit -> draft -> settle
+//          'drafted' -> (standing draft: still already_done, the F8 wall reproduced
+//          in the same cell as its own prestate) -> clara.withdraw_draft ->
+//          re-admit as 're_admitted_after_withdrawal', a genuinely NEW queued task,
+//          registry repointed, op-key receipt rewritten exactly once, and the new
+//          task dispatches + settles clean.
+//   x34.h  CONTRAST: completed + APPROVED-and-unreversed -> still already_done.
+//   x34.i  CONTRAST: completed + approved-then-REVERSED -> still already_done. A
+//          reversal is NOT a withdrawal: the work HAPPENED and was formally undone
+//          in the books, so re-drafting is a human accounting judgement, not an
+//          unattended retry. Deliberate boundary, pinned so it is not "fixed" later.
+//   x34.j  The THIRD predicate is load-bearing, not decorative: a filing that
+//          carries BOTH a withdrawn entry AND a later approved-and-unreversed one
+//          refuses (already_done). REDUCTION-TESTED on a copy of the rig with that
+//          one conjunct stripped: the branch then fires, the lane check downstream
+//          still stops the draft (an independent backstop), but the refusal is
+//          misnamed 'lane_changed' AND the branch's side effects have already
+//          deleted the filing's settled admission receipt (1 -> 0). Both are
+//          asserted here.
+//
+//   x34.c is ALSO the fourth contrast and is left UNMODIFIED: it settles
+//   'skipped_lane' with no entry, so its filing has NO journal_entries row at all --
+//   the "absence is not evidence" case, which must keep refusing.
+//
 // Serial discipline: --test-concurrency=1 (shared rig convention).
 
 import { test, before, after } from "node:test";
@@ -37,21 +66,27 @@ import { randomUUID } from "node:crypto";
 import {
   admitAutodraft,
   AP,
+  approveEntry,
   attemptRow,
+  autodraftDraftEntry,
   beginAutodraft,
   buildWorld,
   endPool,
   EXP,
   grantConsent,
   humanQuery,
+  mintAutodraftCred,
   opk,
   ORIGIN,
   primeReadyFiling,
+  reverseEntry,
   rootQuery,
   settleAutodraft,
   upsertAccountClassed,
   upsertPayableAccount,
+  wakeBillDraft,
   withActor,
+  withdrawDraft,
 } from "./wave-a-fixtures.mjs";
 
 let w = null;
@@ -78,6 +113,17 @@ async function has34() {
   }
 }
 
+async function has53() {
+  try {
+    const r = await rootQuery(
+      "select 1 from clara.schema_migrations where version='0053_autodraft_readmit_after_withdrawal'",
+    );
+    return r.rows.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 async function requireReady() {
   if (!await has31()) {
     throw new Error(
@@ -89,6 +135,75 @@ async function requireReady() {
       "0034_autodraft_retry_door is not applied -- this battery must fail against the pre-0034 behavior",
     );
   }
+  // 0053 is hard-required for the SAME reason 0034 is: the g/h/i/j cells must FAIL against
+  // the pre-fix behavior rather than skip past it. (0034's own precedent, restated.)
+  if (!await has53()) {
+    throw new Error(
+      "0053_autodraft_readmit_after_withdrawal is not applied -- the F8 cells must fail against the pre-0053 behavior, never skip",
+    );
+  }
+}
+
+/** The revision token + status of an entry, read fresh (withdraw/approve both need the
+ *  CURRENT token, and settle does not rotate it -- so this is read at the point of use
+ *  rather than cached from the draft receipt). */
+async function entryRow(entry) {
+  const r = await rootQuery(
+    "select status, revision_token, reversed_by, reversal_of, filing_id from clara.journal_entries where id=$1",
+    [entry],
+  );
+  return r.rows[0] ?? null;
+}
+
+/** Every journal entry bound to a filing -- the population the 0053 branch judges. */
+async function entriesOf(filing) {
+  const r = await rootQuery(
+    "select id, status, reversed_by, reversal_of from clara.journal_entries where filing_id=$1 order by created_at, id",
+    [filing],
+  );
+  return r.rows;
+}
+
+async function receiptCount(filing, origin = "one_click") {
+  const r = await rootQuery(
+    `select count(*)::int as n from clara.op_receipts
+     where fn='admit_autodraft_task' and op_key='autodraft:'||$1::text||':'||$2`,
+    [filing, origin],
+  );
+  return r.rows[0].n;
+}
+
+/** Drive an admitted task to a genuine DRAFT via the REAL wake path, with an EXPLICIT
+ *  op_key. autodraftDraftEntry() hard-codes the deterministic `code-doc:<filing>:<doc>`
+ *  key, so a SECOND draft on the same filing would replay the first receipt and hand back
+ *  the OLD entry id -- silently turning a two-draft cell into a one-draft one. x34.j needs
+ *  two genuine drafts on one filing, so it needs its own key. */
+async function draftUnderTask(sub, { task, rf, firm, client, vendorName, amount = 500000, opKey }) {
+  await beginAutodraft({ task, workflowRunId: `wf-${randomUUID()}` }).catch(() => {});
+  const cred = await mintAutodraftCred(firm, client);
+  const draft = await wakeBillDraft(sub, cred, { client, cited: rf, vendorName, amount, opKey });
+  return draft.entry_id ?? draft.entryId ?? null;
+}
+
+/** admit -> real draft -> settle 'drafted'. Leaves: task COMPLETED, registry idle, and
+ *  exactly one standing draft on the filing. The shared prestate of every F8 cell. */
+async function completedAttemptWithDraft(label, vendorName) {
+  const rf = await primeReadyFiling(w.users.alice, {
+    client: w.clients.A1,
+    vendorName,
+    registration: `2026${randomUUID().replaceAll("-", "").slice(0, 8)}`,
+  });
+  const first = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick, reserveTokens: 40000 });
+  assert.equal(first.outcome, "admitted", `${label} premise: the fixture admits (${JSON.stringify(first)})`);
+  const entry = await autodraftDraftEntry(w.users.alice, {
+    task: first.task_id, rf, firm: w.firms.A, client: w.clients.A1, vendorName,
+  });
+  assert.ok(entry, `${label} premise: the real autodraft draft path produced an entry`);
+  await settleAutodraft({ task: first.task_id, outcome: "drafted", tokens: 1200, entry });
+  assert.equal(await taskStatus(first.task_id), "completed", `${label} premise: the task settled COMPLETED`);
+  const row = await entryRow(entry);
+  assert.equal(row.status, "draft", `${label} premise: the settled entry is a standing draft`);
+  return { rf, task1: first.task_id, entry, vendorName };
 }
 
 async function liveTasks(filing) {
@@ -500,4 +615,187 @@ test("x34.f O-round confirmation (Codex): a cancellation whose retry is ITSELF r
     afterFinal - beforeAll, 22000,
     "net across the whole cell: +40000 (first admit) -40000 (single genuine refund) +22000 (final successful retry) = +22000 from baseline, proving no leak and no double-refund end to end",
   );
+});
+
+// ===========================================================================
+// 0053 -- §7-A FINDING F8: the unattended lane can honor CLR23's own remedy.
+// ===========================================================================
+
+test("x34.g a COMPLETED attempt whose entry is WITHDRAWN re-admits ('re_admitted_after_withdrawal') into a genuinely NEW task -- while a STANDING draft still refuses", async () => {
+  const { rf, task1, entry } = await completedAttemptWithDraft("x34.g", `X34-G ${randomUUID().slice(0, 8)} SDN BHD`);
+
+  const receiptBefore = await receiptFor(rf.filingId, "one_click");
+  assert.equal(receiptBefore.outcome, "admitted");
+  assert.equal(receiptBefore.task_id, task1);
+
+  // ---- THE WALL, REPRODUCED IN ITS OWN PRESTATE. While the draft STANDS, 0034's honest
+  // refusal is exactly right and 0053 must not have touched it: the work really does exist.
+  const whileStanding = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick, reserveTokens: 40000 });
+  assert.equal(
+    whileStanding.outcome, "already_done",
+    `a completed attempt with a STANDING draft must still refuse -- 0053 narrowed the branch, it did not open it: ${JSON.stringify(whileStanding)}`,
+  );
+  assert.equal(whileStanding.task_id, task1);
+  assert.equal(await liveTasks(rf.filingId), 0, "no task is minted while the draft stands");
+  assert.deepEqual(
+    await receiptFor(rf.filingId, "one_click"), receiptBefore,
+    "the standing-draft refusal must leave the settled admission receipt byte-untouched (x34.c's law, re-asserted on this shape)",
+  );
+
+  // ---- THE REMEDY CLR23 PRINTS, TAKEN THROUGH THE REAL VERB.
+  const pre = await entryRow(entry);
+  await withdrawDraft(w.users.alice, {
+    entry, reason: "x34.g CLR23 redraft cycle", expectedRevision: pre.revision_token, opKey: opk("x34-g-wd"),
+  });
+  const post = await entryRow(entry);
+  assert.equal(post.status, "withdrawn", "clara.withdraw_draft flipped the entry -- the POSITIVE evidence the branch reads");
+  // The premise F8 is about, read rather than assumed: the withdrawal is structurally
+  // invisible to the registry, which still points at the completed task.
+  const staleRegistry = await attemptRow(rf.filingId);
+  assert.equal(staleRegistry.task_id, task1, "withdraw_draft never touches clara.autodraft_attempts -- the registry still points at the completed task");
+
+  // ---- THE FIX.
+  const readmit = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick, reserveTokens: 31000 });
+  assert.equal(
+    readmit.outcome, "re_admitted_after_withdrawal",
+    `a withdrawn filing must re-admit under its OWN token -- never 'already_done' (F8), and never the plain 're_admitted', which means a failed/cancelled/expired retry: ${JSON.stringify(readmit)}`,
+  );
+  assert.notEqual(readmit.task_id, task1, "the re-admission must mint a GENUINELY NEW task, not replay the completed one");
+  assert.equal(readmit.reserved_tokens, 31000);
+  const task2 = readmit.task_id;
+
+  // A REAL queued agent_task, not a bookkeeping entry -- this is what the runtime enqueues.
+  assert.equal(await taskStatus(task2), "queued", "the re-admitted task is a real QUEUED agent_tasks row");
+  assert.equal(await liveTasks(rf.filingId), 1, "exactly one non-terminal task after the re-admission");
+
+  const registry = await attemptRow(rf.filingId);
+  assert.equal(registry.task_id, task2, "the registry now points at the fresh task");
+  assert.equal(registry.state, "active");
+  assert.equal(Number(registry.reserved_tokens), 31000);
+
+  // OP-KEY HYGIENE, mirroring the supersede branch: the stale settled receipt is cleared and
+  // re-settled under the SAME deterministic key -- one row, carrying the honest outcome.
+  const receiptAfter = await receiptFor(rf.filingId, "one_click");
+  assert.equal(receiptAfter.outcome, "re_admitted_after_withdrawal", "the durable receipt must carry the honest token, not the stale 'admitted'");
+  assert.equal(receiptAfter.task_id, task2, "the receipt must point at the NEW task");
+  assert.equal(await receiptCount(rf.filingId, "one_click"), 1, "exactly one op receipt for the deterministic key -- cleared and re-settled, never duplicated");
+
+  // END TO END: the re-admitted task drafts and settles for real, so the door cannot leave a
+  // half-wired task behind.
+  const entry2 = await draftUnderTask(w.users.alice, {
+    task: task2, rf, firm: w.firms.A, client: w.clients.A1,
+    vendorName: rf.vendorName, opKey: opk("x34-g-redraft"),
+  });
+  assert.ok(entry2, "the re-admitted task drafts for real");
+  assert.notEqual(entry2, entry, "the redraft is a NEW entry, never the withdrawn one");
+  await settleAutodraft({ task: task2, outcome: "drafted", tokens: 900, entry: entry2 });
+  assert.equal(await taskStatus(task2), "completed");
+  const settled = await attemptRow(rf.filingId);
+  assert.equal(settled.state, "idle");
+  assert.equal(Number(settled.reserved_tokens), 0);
+});
+
+test("x34.h CONTRAST: a COMPLETED attempt whose entry is APPROVED and unreversed still refuses ('already_done')", async () => {
+  const { rf, task1, entry } = await completedAttemptWithDraft("x34.h", `X34-H ${randomUUID().slice(0, 8)} SDN BHD`);
+  const receiptBefore = await receiptFor(rf.filingId, "one_click");
+
+  const pre = await entryRow(entry);
+  await approveEntry(w.users.alice, { entry, expectedRevision: pre.revision_token, opKey: opk("x34-h-ap") });
+  const post = await entryRow(entry);
+  assert.equal(post.status, "approved");
+  assert.equal(post.reversed_by, null, "premise: the approved entry is LIVE (not reversed)");
+
+  const refused = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick, reserveTokens: 40000 });
+  assert.equal(
+    refused.outcome, "already_done",
+    `an approved-and-unreversed entry means the work exists and is in the books -- the refusal must stand: ${JSON.stringify(refused)}`,
+  );
+  assert.equal(refused.task_id, task1);
+  assert.equal(await liveTasks(rf.filingId), 0, "no task is minted for an already-coded filing");
+  assert.deepEqual(await receiptFor(rf.filingId, "one_click"), receiptBefore, "the refusal leaves the settled receipt byte-untouched");
+});
+
+test("x34.i CONTRAST (deliberate boundary): a COMPLETED attempt whose entry was approved and then REVERSED still refuses -- a reversal is not a withdrawal", async () => {
+  const { rf, task1, entry } = await completedAttemptWithDraft("x34.i", `X34-I ${randomUUID().slice(0, 8)} SDN BHD`);
+  const receiptBefore = await receiptFor(rf.filingId, "one_click");
+
+  const pre = await entryRow(entry);
+  await approveEntry(w.users.alice, { entry, expectedRevision: pre.revision_token, opKey: opk("x34-i-ap") });
+  await reverseEntry(w.users.alice, { entry, reason: "x34.i reversal", opKey: opk("x34-i-rv") });
+
+  // Read the post-state the branch actually judges rather than assuming its shape: the
+  // ORIGINAL keeps status='approved' and gains reversed_by (0003:97-99), and whether the
+  // mirror carries this filing_id is the DB's business, not this cell's assumption. Either
+  // shape must refuse, and the cell records which one the DB produced.
+  const original = await entryRow(entry);
+  assert.equal(original.status, "approved", "a reversed original KEEPS 'approved'");
+  assert.ok(original.reversed_by, "premise: the original is now linked to its reversal");
+  const rows = await entriesOf(rf.filingId);
+  assert.equal(
+    rows.filter((r) => r.status === "withdrawn").length, 0,
+    "premise: a reversal produces NO withdrawn row -- which is exactly why the 0053 branch cannot fire here",
+  );
+
+  const refused = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick, reserveTokens: 40000 });
+  assert.equal(
+    refused.outcome, "already_done",
+    `a reversal means the work HAPPENED and was formally undone in the books; re-drafting is a human accounting judgement, not an unattended retry. If this ever starts re-admitting, 0053's header records the decision to change, not a bug to fix: ${JSON.stringify(refused)}`,
+  );
+  assert.equal(refused.task_id, task1);
+  assert.equal(await liveTasks(rf.filingId), 0);
+  assert.deepEqual(await receiptFor(rf.filingId, "one_click"), receiptBefore, "the refusal leaves the settled receipt byte-untouched");
+});
+
+test("x34.j the no-live-entry predicate is LOAD-BEARING: a filing carrying BOTH a withdrawn entry and a later approved one refuses", async () => {
+  const { rf, entry } = await completedAttemptWithDraft("x34.j", `X34-J ${randomUUID().slice(0, 8)} SDN BHD`);
+
+  // (1) withdraw -> re-admit, exactly as x34.g proves.
+  const pre = await entryRow(entry);
+  await withdrawDraft(w.users.alice, {
+    entry, reason: "x34.j first cycle", expectedRevision: pre.revision_token, opKey: opk("x34-j-wd"),
+  });
+  const readmit = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick, reserveTokens: 25000 });
+  assert.equal(readmit.outcome, "re_admitted_after_withdrawal", JSON.stringify(readmit));
+
+  // (2) The redraft is approved, so the filing is now genuinely CODED -- and the withdrawn
+  // row from cycle 1 is still sitting there.
+  const entry2 = await draftUnderTask(w.users.alice, {
+    task: readmit.task_id, rf, firm: w.firms.A, client: w.clients.A1,
+    vendorName: rf.vendorName, opKey: opk("x34-j-redraft"),
+  });
+  assert.ok(entry2);
+  await settleAutodraft({ task: readmit.task_id, outcome: "drafted", tokens: 800, entry: entry2 });
+  const r2 = await entryRow(entry2);
+  await approveEntry(w.users.alice, { entry: entry2, expectedRevision: r2.revision_token, opKey: opk("x34-j-ap") });
+
+  const rows = await entriesOf(rf.filingId);
+  assert.ok(
+    rows.some((r) => r.status === "withdrawn") && rows.some((r) => r.status === "approved" && r.reversed_by === null),
+    `premise: the filing carries BOTH a withdrawn row and a live approved one -- the exact shape the third predicate exists for: ${JSON.stringify(rows)}`,
+  );
+  const receiptBefore = await receiptFor(rf.filingId, "one_click");
+  assert.ok(receiptBefore, "premise: the filing carries a settled admission receipt under the deterministic op-key");
+
+  // (3) THE MEASUREMENT, AND WHAT THE REDUCTION ACTUALLY SHOWED. A branch that asked only
+  // "does a withdrawn row exist" fires here. It does NOT then draft into the coded filing --
+  // the lane check downstream is an independent backstop and refuses (double_coded). What it
+  // DOES do, measured on a reduced copy of this database rather than argued:
+  //   * it reports 'lane_changed' instead of 'already_done' -- naming the wrong reason for
+  //     the refusal, which is the same class of dishonest receipt 0034 called the #43 sin; and
+  //   * its side effects run FIRST, so the settled admission receipt under the deterministic
+  //     op-key is DELETED (measured: 1 receipt with the predicate, 0 without) and the registry
+  //     row is rewritten -- on EVERY such call, for a filing that is correctly refused.
+  // Both assertions below fail against the reduced body; the receipt one is the sharper of
+  // the two because it survives any future change to which refusal token the lane emits.
+  const refused = await admitAutodraft({ filing: rf.filingId, origin: ORIGIN.oneClick, reserveTokens: 40000 });
+  assert.equal(
+    refused.outcome, "already_done",
+    `a withdrawn row is not enough -- the filing is coded, so the door must refuse BY NAME, not fall through to a lane refusal: ${JSON.stringify(refused)}`,
+  );
+  assert.equal(await liveTasks(rf.filingId), 0, "no task is minted for a filing that is already coded");
+  assert.deepEqual(
+    await receiptFor(rf.filingId, "one_click"), receiptBefore,
+    "the refusal must not run the re-admit branch's side effects -- deleting the settled admission receipt of an already-coded filing erases the record of what really happened",
+  );
+  assert.equal(await receiptCount(rf.filingId, "one_click"), 1, "the deterministic op-key still carries exactly its one settled receipt");
 });

@@ -109,9 +109,15 @@ test("x35.a section B: counterparty-landscape-changed refusal carries the new re
   // extra or altered text were prepended/appended around the expected phrase
   // (an O-round Codex finding). The live message carries no DETAIL suffix for
   // this refusal, so the raised message IS the full remedy text.
+  // 0053 / §7-A FINDING F8 rewords this remedy to name the doors that actually exist. The
+  // old text told a human to "withdraw and re-draft" while admission answered already_done
+  // forever for a completed attempt -- a remedy pointing at nothing (8 of 9 real H1 redrafts
+  // hit that wall). 0053 opens the autodraft door for a withdrawn filing AND names the chat
+  // and hand-draft lanes, which remain the doors for the cases it deliberately does not
+  // re-admit (an approved-then-reversed entry). errcode is unchanged, asserted above.
   assert.equal(
     caught.message,
-    "counterparty match landscape changed; withdraw the draft and re-draft; the new draft will resolve against the current counterparty landscape",
+    "counterparty match landscape changed; withdraw the draft and re-draft (the withdrawn filing re-admits through the autodraft door, or use the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape",
     `refusal message must be exactly the new remedy text -- got: ${caught.message}`,
   );
 });

@@ -42,14 +42,26 @@ const RECONNECT_MAX_MS = 5000;
 // Pure helpers — no DB, fully unit-testable.
 // ---------------------------------------------------------------------------
 
-/** True iff an admission outcome should enqueue a run. 'admitted' AND 're_admitted' (the 0034
- *  supersede outcome) both start a workflow: a re_admitted task is a REAL queued agent_tasks
- *  row, minted exactly like a fresh admit, and must be enqueued exactly like one — leaving it
- *  un-enqueued means the one-click retry mints a row that never runs (design §4.10).
- *  noop_existing / refused_budget / refused_attempts / lane_changed all wrote their own
- *  sweep_run_item and must NOT enqueue (idempotency + no double-spend). Pure. */
+/** True iff an admission outcome should enqueue a run. THREE outcomes mint a REAL queued
+ *  clara.agent_tasks row through the same mint pipeline and must each be enqueued exactly like
+ *  a fresh admit — leaving any of them un-enqueued means a row is created that never runs
+ *  (design §4.10):
+ *    'admitted'                     — the first-ever dispatch for a filing.
+ *    're_admitted'                  — the 0034 supersede outcome (a FAILED/CANCELLED/EXPIRED
+ *                                     task retried).
+ *    're_admitted_after_withdrawal' — the 0053 / §7-A F8 outcome: a COMPLETED task whose entry
+ *                                     was withdrawn, so the filing has no standing draft and
+ *                                     CLR23's own "withdraw and re-draft" remedy is finally
+ *                                     honourable through the unattended door. It is a SEPARATE
+ *                                     token, not a reuse of 're_admitted', because it reports a
+ *                                     different event — see 0053's header.
+ *  noop_existing / already_done / refused_budget / refused_attempts / lane_changed /
+ *  skipped_direction all wrote their own sweep_run_item (where run-bound) and must NOT enqueue
+ *  (idempotency + no double-spend). Pure. */
 export function admissionNeedsStart(outcome) {
-  return outcome === "admitted" || outcome === "re_admitted";
+  return outcome === "admitted"
+    || outcome === "re_admitted"
+    || outcome === "re_admitted_after_withdrawal";
 }
 
 // ---------------------------------------------------------------------------
