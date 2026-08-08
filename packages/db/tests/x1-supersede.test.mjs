@@ -23,7 +23,7 @@ import {
   has0022, fail0022, requestReextraction, extractedDoc, extractionsOf, authoritativeExtraction,
   invoiceFactsTask, claimTask, persistInvoiceFacts, factField,
   draftEntryV3, approveEntry, freshResolution, ev, FIELD,
-  failedFactsDoc, laneTasks, markSkip,
+  failedFactsDoc, laneTasks, markSkip, requireRecoveryDoor,
 } from "./x1-helpers.mjs";
 
 let W = null;
@@ -37,9 +37,10 @@ before(async () => {
   } catch { /* dirty tree — probe the live catalog as-is */ }
   live = await has0022();
   if (live) W = await buildWorld();
-  try {
-    has51 = (await rootQuery("select 1 from clara.schema_migrations where version ~ '^0051_' limit 1")).rows.length > 0;
-  } catch { has51 = false; }
+  // Keyed on the migration's STABLE SUFFIX + a catalog cross-check, never on '^0051_':
+  // migration numbers are claimed at merge, and a number-keyed gate turns a renumber into a
+  // silent 0-pass/all-skip green. See requireRecoveryDoor in x1-helpers.mjs.
+  has51 = live ? await requireRecoveryDoor() : false;
 });
 after(async () => { await endPool(); });
 

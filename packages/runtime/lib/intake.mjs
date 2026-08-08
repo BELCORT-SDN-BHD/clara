@@ -155,8 +155,7 @@ function failureCode(err) {
 }
 
 async function callWriter(client, sql, params) {
-  const out = await client.query(sql, params);
-  return receipt(out.rows[0]);
+  return receipt((await client.query(sql, params)).rows[0]);
 }
 
 export async function beginDocumentIntake(client, principal, input) {
@@ -362,12 +361,16 @@ export async function finalizeDocumentIntake(options) {
     );
     requireContinuableIntakeReceipt(finalized);
 
-    // 0051 §2 — the intake recovery door, runtime half. Rationale + every refusal:
-    // intake-recovery.mjs. Returns the recovery task's sidecar, or null (fail-closed).
-    const recovery = await recoveryTaskMeta(finalized, {
-      firmId: meta.firmId, detected, snapshot, canonicalKey: key,
-    });
-    const needsStart = finalized.status === "finalized" || finalized.upgraded === true || recovery !== null;
+    // 0051 §2 — the intake recovery door (rationale + every refusal: intake-recovery.mjs). An
+    // unmaterialisable fragment means Postgres holds a queued task this process failed to
+    // serve: raise LOUD (`internal` keeps the spool, so the bytes stay re-drivable). An ECHO
+    // whose sidecar is intact has nothing to heal and must not start a second run.
+    const recovery = await recoveryTaskMeta(finalized, { firmId: meta.firmId, canonicalKey: key });
+    if (finalized.recovery && !recovery) {
+      throw Object.assign(new Error(`intake recovery could not be materialised for task ${finalized.recovery.task_id ?? "?"} — a queued task was left without transport metadata; the intake spool is retained`), { code: "internal" });
+    }
+    const echoIntact = recovery?.mode === "echo" && Boolean((await readTaskMeta(recovery.taskId))?.storageKey);
+    const needsStart = !echoIntact && (finalized.status === "finalized" || finalized.upgraded === true || recovery !== null);
     if (needsStart && (recovery?.taskId || finalized.task_id)) {
       const task = recovery ?? {
         schemaVersion: 1,
@@ -386,10 +389,7 @@ export async function finalizeDocumentIntake(options) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      // Sidecar BEFORE enqueue, as the fresh path has always done — documentIngest_v2 claims
-      // via noteClaim -> mergeTaskMeta{requireExists:true} and hard-fails on a null
-      // readTaskMeta (behavior_v2.mjs:176-177). The crash-between-commit-and-write residual
-      // is the fresh path's own, unchanged: not a new class.
+      // Sidecar BEFORE enqueue: documentIngest_v2 hard-fails on a null readTaskMeta.
       await writeTaskMeta(task.taskId, task);
       try {
         const run = await enqueue(task.taskId);

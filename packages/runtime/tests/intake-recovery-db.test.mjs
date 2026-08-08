@@ -27,7 +27,8 @@ import { Readable } from "node:stream";
 import * as rig from "./rig.mjs";
 import { beginDocumentIntake, finalizeDocumentIntake, makeDocumentServices, uploadDocumentBytes } from "../lib/intake.mjs";
 import { processDocumentTaskBehaviorV2 } from "../workflows/documentIngest.behavior_v2.mjs";
-import { readTaskMeta } from "../lib/spool.mjs";
+import { reconcileDocumentTasks } from "../lib/reconciler.mjs";
+import { readTaskMeta, removeTaskMeta } from "../lib/spool.mjs";
 
 const READY = await rig.documentPipelineReady();
 const skip = READY ? false : "Slice-5 (0007) document pipeline surface absent";
@@ -142,6 +143,95 @@ test("[0051 §2] END TO END: a real failed ingest, a real re-upload, and the rec
 
 /** The failed task's version, read from the row the cell already fetched. */
 function failedVersion(row) { return Number(row.version_n); }
+
+test("[0051 §2] END TO END: the crash window — a sidecar-less queued task is NOT dispatched, and heals on the next re-upload", { skip }, async () => {
+  // The review's finding #3, end to end on the real path. The sidecar is written by this
+  // process AFTER the DB commits, so a crash in that window leaves a queued task with no
+  // transport. Two halves are proven here:
+  //   (a) the reconciler must NOT dispatch it — behavior_v2 would call downloadCanonical with
+  //       an undefined key, and storage.mjs's safeKey() rejects it, manufacturing a
+  //       `storage_error` terminal indistinguishable from a real vendor fault;
+  //   (b) re-uploading the same bytes ECHOES the queued task's transport, so the sidecar is
+  //       rebuilt and the run finally starts — the heal, driven by the action the human is
+  //       already taking.
+  const { owner, firm } = await rig.buildFirm("x51-recovery-crash");
+  const first = await ingest(owner, firm, "x51-crash-first");
+  const originalTask = first.receipt.task_id;
+  await rig.asRuntime((c) => c.query("select clara.claim_document_processing_task($1,$2,$3)", [originalTask, "x51-crash-run", true]));
+  await rig.asRuntime((c) => c.query(
+    "select clara.persist_document_extraction($1,'failed',0,'{}'::jsonb,'[]'::jsonb,'engine_error',null,$2)",
+    [originalTask, `x51-crash-fail-${Date.now()}`]));
+
+  // A re-upload mints the recovery… and then we simulate the crash by deleting its sidecar.
+  const second = await ingest(owner, firm, "x51-crash-retry");
+  const recoveredId = second.receipt.recovery.task_id;
+  assert.equal(second.receipt.recovery.mode, "mint", "mandatory setup: the first re-upload MINTED");
+  await removeTaskMeta(recoveredId);
+  assert.equal(await readTaskMeta(recoveredId), null, "…and its sidecar is gone, as a crash would leave it");
+
+  // (a) The reconciler sees a queued task past its grace and REFUSES to dispatch it.
+  const started = [];
+  const sweep = await rig.asRuntime((client) => reconcileDocumentTasks(client, {
+    enqueueDocumentIngest: async (id) => (started.push(id), { runId: "should-not-happen" }),
+    getRun: async () => ({ status: "lost" }),
+    graceMs: 0,
+    onlyFirm: firm,
+  }));
+  assert.deepEqual(started, [],
+    "the reconciler did NOT dispatch the transport-less task — dispatching would have "
+    + "manufactured a storage_error terminal that looks exactly like a real engine failure");
+  assert.ok(sweep.documentTransportless >= 1, "…and it counted the skip rather than passing silently");
+  assert.equal((await taskRow(recoveredId)).status, "queued", "…the task is still queued, still recoverable");
+
+  // (b) THE HEAL: the same bytes again. The door ECHOES rather than minting a second attempt.
+  const third = await ingest(owner, firm, "x51-crash-heal");
+  assert.equal(third.receipt.status, "adopted", "the heal is an ordinary adoption");
+  assert.equal(third.receipt.recovery?.mode, "echo", "…answering in ECHO mode");
+  assert.equal(third.receipt.recovery.task_id, recoveredId, "…naming the SAME queued task, not a new one");
+  assert.deepEqual(third.started, [recoveredId], "…and the run finally starts");
+  const healed = await readTaskMeta(recoveredId);
+  assert.ok(healed, "the sidecar is rebuilt");
+  assert.equal(healed.storageKey, `firms/${firm}/docs/${healed.sha256}.pdf`, "…with real transport");
+
+  const tasks = await rig.asRuntime((c) => c.query(
+    "select count(*)::int n from clara.document_processing_tasks where document_id=$1 and lane='ocr'",
+    [first.receipt.document_id]));
+  assert.equal(tasks.rows[0].n, 2, "…and the heal minted NOTHING: two tasks total, the failure and the one recovery");
+});
+
+test("[0051 §2] END TO END: a recovery mint BINDS the intake reservation; the adoption that mints nothing refunds it", { skip }, async () => {
+  // The CRITICAL finding's fix on the real path, where the reservation is taken by
+  // create_document_intake for real rather than seeded.
+  const { owner, firm } = await rig.buildFirm("x51-recovery-budget");
+  const first = await ingest(owner, firm, "x51-budget-first");
+  const originalTask = first.receipt.task_id;
+  await rig.asRuntime((c) => c.query("select clara.claim_document_processing_task($1,$2,$3)", [originalTask, "x51-budget-run", true]));
+  await rig.asRuntime((c) => c.query(
+    "select clara.persist_document_extraction($1,'failed',0,'{}'::jsonb,'[]'::jsonb,'engine_error',null,$2)",
+    [originalTask, `x51-budget-fail-${Date.now()}`]));
+
+  const second = await ingest(owner, firm, "x51-budget-retry");
+  const recoveredId = second.receipt.recovery.task_id;
+  const bound = await rig.asRuntime((c) => c.query(
+    "select state, task_id from clara.document_ingest_reservations where intake_id=$1", [second.receipt.intake_id]));
+  // 'resized', not 'reserved' — and that is the point rather than a detail:
+  // clara.verify_document_intake resized this reservation to the document's TRUE page count
+  // (0007:1937) before finalize ran, so what the recovery binds is a correctly-sized charge,
+  // not the opening estimate.
+  assert.ok(["reserved", "resized"].includes(bound.rows[0].state),
+    `the re-upload's reservation was NOT refunded (state=${bound.rows[0].state})`);
+  assert.equal(bound.rows[0].task_id, recoveredId,
+    "…it is BOUND to the recovery task: a recovery is a real vendor attempt and pays like a fresh ingest");
+
+  // …and the reservation then settles on the recovered task's own success, exactly as a first
+  // ingest's does — the lifecycle, not just the charge.
+  globalThis.__claraAzureForTest = async () => OK_AZURE;
+  await rig.asRuntime((c) => c.query("select clara.claim_document_processing_task($1,$2,$3)", [recoveredId, "x51-budget-recovered", true]));
+  await processDocumentTaskBehaviorV2(makeDocumentServices(), withRuntime, recoveredId, 1);
+  const settled = await rig.asRuntime((c) => c.query(
+    "select state from clara.document_ingest_reservations where intake_id=$1", [second.receipt.intake_id]));
+  assert.equal(settled.rows[0].state, "settled", "…and it SETTLES when the recovered read succeeds");
+});
 
 test("[0051 §2] END TO END: re-uploading a HEALTHY document adopts and starts nothing", { skip }, async () => {
   // The contrast, on the same real path. Door 3 of ADR-064 §3 is unchanged for every healthy

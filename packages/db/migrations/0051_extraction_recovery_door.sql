@@ -427,10 +427,55 @@ $prestate51_grants$;
 set role clara_fn_owner;
 do $splice51$
 declare
-  v_def text; v_next text; v_anchor text; v_repl text; v_count int;
+  v_def text; v_next text; v_anchor text; v_repl text; v_count int; v_frm text;
 begin
   select pg_get_functiondef('clara.request_reextraction(uuid,text,text)'::regprocedure)
     into v_def;
+
+  -- EDIT 0 (review follow-through, 0024's ruled ordering) -- MOVE THE OP-KEY RESERVATION
+  -- ABOVE THE ADMISSION CHAIN. Making the failed_retry door read the lane's NEWEST task is
+  -- correct, but it turns the admission into a STATE-DEPENDENT branch that the state a
+  -- successful first call itself creates can flip: once the recovery is queued, a caller
+  -- replaying the SAME op_key was refused CLR16 instead of receiving its stored receipt --
+  -- so a lost ack became indistinguishable from a refusal, on a verb whose whole retry
+  -- contract is that it is not. 0024_fail_classify.sql:45-55 already ruled this exact class,
+  -- in its own words: "that only holds if the op_key reservation runs BEFORE the task-state
+  -- shortcut ... Ordering the reservation first makes a same-key replay return the identical
+  -- stored jsonb, no exceptions." Nothing else moves, and a refusal still costs nothing: a
+  -- raise rolls the reservation back inside this same transaction (0026's own note on the
+  -- bounded-retry raise). The 0040 statement branch is unaffected -- it takes its OWN
+  -- reservation and RETURNS before this point is ever reached. The anchor includes the
+  -- comment above the call precisely so it cannot match that branch's identical two lines.
+  v_frm := $r0$  -- The request hash covers EVERY argument that reaches a stored column or an audit row.
+  -- An argument left OUT is one a caller can change under a re-used op_key and have
+  -- silently ignored — so a corrected reason under the old key is an honest CLR10, not a
+  -- stale receipt for the request they were trying to fix.
+  v_dedupe := clara._reserve_op(c.firm, 'request_reextraction', p_op_key,
+    clara._hash(jsonb_build_object('d', p_document, 'r', v_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;$r0$;
+  v_count := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_count <> 1 then
+    raise exception '0051 S1 edit 0: the op-key reservation block appears % times (expected 1)', v_count using errcode='CLR10';
+  end if;
+  v_def := replace(v_def, v_frm, $r1$  -- [0051] the op-key reservation moved ABOVE the admission chain (0024:45-55).$r1$);
+
+  v_frm := $r2$  if exists (select 1 from clara.document_extractions e$r2$;
+  v_count := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_count <> 1 then
+    raise exception '0051 S1 edit 0b: the admission-chain opening appears % times (expected 1)', v_count using errcode='CLR10';
+  end if;
+  v_def := replace(v_def, v_frm, $r3$  -- The request hash covers EVERY argument that reaches a stored column or an audit row.
+  -- An argument left OUT is one a caller can change under a re-used op_key and have
+  -- silently ignored — so a corrected reason under the old key is an honest CLR10, not a
+  -- stale receipt for the request they were trying to fix.
+  -- [0051] RESERVED BEFORE THE DOORS (0024:45-55's ruled ordering): the admission below is
+  -- state-dependent, and the state a successful first call creates would otherwise make a
+  -- same-key replay refuse instead of replaying its own receipt.
+  v_dedupe := clara._reserve_op(c.firm, 'request_reextraction', p_op_key,
+    clara._hash(jsonb_build_object('d', p_document, 'r', v_reason)));
+  if v_dedupe is not null then return v_dedupe; end if;
+
+  if exists (select 1 from clara.document_extractions e$r3$);
 
   v_anchor := '    v_admission := ''filed_bootstrap'';' || chr(10)
     || '  else' || chr(10)
@@ -466,8 +511,24 @@ begin
     || '  --     same earlier door and keeps the same v_admission label; the only answer that' || chr(10)
     || '  --     changes belongs to callers that reached the raise below. In particular the' || chr(10)
     || '  --     genuinely-never-extracted document still refuses: the 0009 coding-time' || chr(10)
-    || '  --     backstop leaves its lane task ''queued'', never ''failed'', so this positive' || chr(10)
-    || '  --     read finds nothing (x1-reextraction.test.mjs:110-129, kept green unmodified).' || chr(10)
+    || '  --     backstop leaves its lane task ''queued'', never ''failed'', so the NEWEST-task' || chr(10)
+    || '  --     read below sees ''queued'' and the chain falls through' || chr(10)
+    || '  --     (x1-reextraction.test.mjs:110-129, kept green unmodified).' || chr(10)
+    || '  --' || chr(10)
+    || '  --     NEWEST, NOT "ANY" (cross-model review finding #5, CONFIRMED). The first cut' || chr(10)
+    || '  --     asked `exists(... status=''failed'')`, i.e. ANY historical failure. Two ways' || chr(10)
+    || '  --     that is wrong, one of them ordinary: (a) once a recovery is queued or running,' || chr(10)
+    || '  --     a second call was still ADMITTED here because v1 was failed, and only the' || chr(10)
+    || '  --     in-flight short-circuit further down stopped a double mint -- an admission that' || chr(10)
+    || '  --     depends on a later guard for its safety is the wrong admission; (b) in a' || chr(10)
+    || '  --     schema-valid state where the newest task is ''done'' but its extraction row is' || chr(10)
+    || '  --     absent, the stale v1 failure would mint v3 instead of failing closed on a' || chr(10)
+    || '  --     POSITIVE newest-''done'' read. The scalar subquery below answers with the LANE''s' || chr(10)
+    || '  --     newest task and nothing else; when the lane is empty it returns NULL, and' || chr(10)
+    || '  --     `NULL = ''failed''` is NULL, which is not true -- fail-closed by construction.' || chr(10)
+    || '  --     Engine-AGNOSTIC on purpose: version_n is minted as max+1 over (document,lane),' || chr(10)
+    || '  --     so it orders the lane regardless of which engine snapshot took each attempt.' || chr(10)
+    || '  --     `id desc` is the deterministic tiebreak the 0026 P2 lesson asks for.' || chr(10)
     || '  --' || chr(10)
     || '  --     The second condition is LOGICALLY REDUNDANT here -- reaching this elsif' || chr(10)
     || '  --     already proves the first door was false -- and is written anyway so the door' || chr(10)
@@ -479,12 +540,18 @@ begin
     || '  --     (document,lane), never mutate or reopen the terminal row" is satisfied by the' || chr(10)
     || '  --     machinery this function already has: the in-flight short-circuit, the bounded' || chr(10)
     || '  --     3-attempt version-race loop (max(version_n)+1, insert ... on conflict do' || chr(10)
-    || '  --     nothing), the page-budget reservation, the audit row and the receipt. The' || chr(10)
-    || '  --     claim-time attempt cap (0038:6907-6924) is likewise unchanged and still fires' || chr(10)
-    || '  --     on the row this door mints.' || chr(10)
-    || '  elsif exists (select 1 from clara.document_processing_tasks pft' || chr(10)
-    || '      where pft.document_id = p_document and pft.lane = v_lane' || chr(10)
-    || '        and pft.status = ''failed'')' || chr(10)
+    || '  --     nothing), the page-budget reservation, the audit row and the receipt.' || chr(10)
+    || '  --     THIS POPULATION IS RESERVED AND CAPPED BY THAT EXISTING MACHINERY, verified' || chr(10)
+    || '  --     rather than assumed (review ruling 1c): every non-reused invoice_facts mint' || chr(10)
+    || '  --     falls into `if not v_reused and v_lane = ''invoice_facts'' then' || chr(10)
+    || '  --     clara._reserve_processing_call(v_task, v_pages)` with its CLR18 ->' || chr(10)
+    || '  --     failed/''budget'' branch (0026:1229-1238), and clara.' || chr(10)
+    || '  --     claim_document_processing_task caps the lane at three summed attempts' || chr(10)
+    || '  --     (0038:6907-6924, whose scope is exactly invoice_facts + statement_facts). The' || chr(10)
+    || '  --     local_facts lane is deliberately unreserved -- a local XML parse buys nothing.' || chr(10)
+    || '  elsif (select pft.status from clara.document_processing_tasks pft' || chr(10)
+    || '           where pft.document_id = p_document and pft.lane = v_lane' || chr(10)
+    || '           order by pft.version_n desc, pft.id desc limit 1) = ''failed''' || chr(10)
     || '     and not exists (select 1 from clara.document_extractions efx' || chr(10)
     || '      where efx.document_id = p_document' || chr(10)
     || '        and efx.engine_kind = ''invoice_facts'' and efx.status = ''done'') then' || chr(10)
@@ -541,22 +608,29 @@ begin
   end if;
 
   ---- (2) THE PREDICATE ITSELF, read as a PROPERTY of the branch rather than as a loose
-  ---- token: the door's own condition must read the TASK table for status='failed' scoped to
-  ---- v_lane. A door that admitted on anything weaker (any task, any status, any lane) would
-  ---- satisfy a token check and be a different, wrong door.
-  v_pos := position('elsif exists (select 1 from clara.document_processing_tasks pft' in v_def);
+  ---- token: the door's own condition must read the LANE's NEWEST task and require it to be
+  ---- terminally failed. A door that admitted on anything weaker -- any task, any status, any
+  ---- lane, or ANY HISTORICAL failure (the shape review finding #5 confirmed) -- would satisfy
+  ---- a token check and be a different, wrong door.
+  v_pos := position('elsif (select pft.status from clara.document_processing_tasks pft' in v_def);
   if v_pos = 0 then
-    raise exception '0051 tail: the failed_retry door does not open with a positive read of clara.document_processing_tasks -- an admission derived from an ABSENCE is exactly what evidence law 2 forbids here'
+    raise exception '0051 tail: the failed_retry door does not open with a positive NEWEST-task read of clara.document_processing_tasks -- an admission derived from an ABSENCE, or from any historical failure, is exactly what evidence law 2 and review finding #5 forbid here'
       using errcode = 'CLR10';
   end if;
-  v_window := substring(v_def from v_pos for 420);
+  v_window := substring(v_def from v_pos for 460);
   if position('pft.lane = v_lane' in v_window) = 0 then
     raise exception '0051 tail: the failed_retry door is not scoped to the document''s OWN facts lane (pft.lane = v_lane)'
       using errcode = 'CLR10';
   end if;
-  if position('pft.status = ''failed''' in v_window) = 0 then
-    raise exception '0051 tail: the failed_retry door does not require a TERMINALLY FAILED task -- it would admit a queued/running lane and race the in-flight pipeline'
+  ---- NEWEST semantics, asserted as the ORDER BY + LIMIT that produces them. Without this the
+  ---- branch degrades to "any historical failure" and a queued recovery re-admits forever.
+  if position('order by pft.version_n desc, pft.id desc limit 1) = ''failed''' in v_window) = 0 then
+    raise exception '0051 tail: the failed_retry door does not read the LANE''s NEWEST task (order by version_n desc, id desc limit 1) and compare it to ''failed'' -- it would admit on ANY historical failure, re-admitting while a recovery is already queued and minting over a newest-''done'' task whose extraction row is missing'
       using errcode = 'CLR10';
+  end if;
+  ---- and it must NOT have regressed to the exists() shape.
+  if position('elsif exists (select 1 from clara.document_processing_tasks pft' in v_def) <> 0 then
+    raise exception '0051 tail: the failed_retry door still carries the ANY-historical-failure exists() shape' using errcode = 'CLR10';
   end if;
   if position('efx.status = ''done''' in v_window) = 0
      or position('not exists' in v_window) = 0 then
@@ -801,23 +875,47 @@ $tail51_grants$;
 -- transaction just minted a live one -- is the stale answer this repo does not ship.
 --
 -- =====================================================================================
--- THE RESERVATION, MEASURED: the recovered read is NOT charged to the daily page budget
+-- THE RESERVATION: a recovery is a real vendor attempt and PAYS like one
 -- =====================================================================================
--- The adopted branch refunds the intake's reservation one statement earlier
--- (`_refund_document_reservation(..., 'duplicate-adopted')`, 0026:299) and the recovery does
--- not open a new one. Both settle paths handle that cleanly -- checked, not assumed:
--- clara._settle_document_reservation returns null on `if not found`, with its own comment
--- "an adopted existing document has no new carrier" (0007:1699-1701), and
--- clara._refund_document_reservation likewise (0007:1684-1686). A recovered task therefore
--- settles or fails with no reservation and no raise.
--- The consequence, stated rather than discovered later: a recovered OCR read is not counted
--- against clara.firm_document_limits.pages_per_day. It is NOT unbounded -- a recovery
--- requires a REAL prior failure (condition 2) and refuses while anything is in flight
--- (condition 3), so the only way to buy a second one is for the first to genuinely fail --
--- and the kill switch plus the per-firm OCR concurrency cap both still gate the claim
--- (0038:6866-6868, 6926-6933). Binding a fresh reservation would mean a new reservation
--- writer and a second refund path: net-new surface for a bound the failure requirement
--- already supplies. REGISTERED, not built.
+-- THE FIRST CUT WAS WRONG HERE, and it was the review's CRITICAL finding. It minted after
+-- the adopted branch's refund and charged nothing, and this header then claimed the result
+-- was "NOT unbounded" because a recovery needs a real prior failure. That sentence was
+-- FALSE: every terminal failure is another admission, so re-uploading identical bytes after
+-- each engine fault bought vendor reads indefinitely inside one day's headroom. A file that
+-- discloses an exemption must not also reassure the reader about it.
+--
+-- WHAT IT COSTS NOW, and the four bounds that are actually true:
+--   * RESERVED. On a MINT the door BINDS this re-upload's own intake reservation to the new
+--     task -- `update clara.document_ingest_reservations set task_id=... where intake_id=...`,
+--     the same single statement the created/upgraded branch above already uses (0026:297) --
+--     instead of refunding it. The lifecycle is then a first ingest's, exactly:
+--     clara._settle_document_reservation settles it by task_id when the read succeeds
+--     (0007:1694-1712) and clara._refund_document_reservation refunds it when it fails
+--     (0007:1679-1692, reached through persist_document_extraction's own failure arm).
+--     THE BUDGET IS ENFORCED, one step earlier and harder: clara._reserve_document_ingest
+--     checks docs_per_day AND pages_per_day and raises CLR18 (0007:1632-1653) when
+--     clara.create_document_intake opens the intake (0007:1852), so an over-budget firm
+--     cannot even BEGIN the re-upload -- there is no path from an exhausted budget to a
+--     recovery mint. And the reservation carries the document's TRUE page count by then:
+--     clara.verify_document_intake resizes it from the detected pages before finalize runs
+--     (0007:1937 -> _resize_document_reservation).
+--     WHY BIND RATHER THAN TAKE A FRESH ONE: clara.document_ingest_reservations is
+--     `unique (intake_id)` (0007), so a second reservation for this intake is not merely
+--     redundant, it is impossible -- and it would be double-charging the same upload anyway.
+--     WHY NOT clara._reserve_processing_call: it REFUSES every lane outside
+--     ('invoice_facts','statement_facts') (0038:7059), and a processing-call reservation
+--     could never settle on this lane because persist_document_extraction settles through
+--     _settle_document_reservation, which reads document_ingest_reservations by task_id.
+--     That function is the FACTS lane's budget; §1 rides it already (0026:1229-1238).
+--   * CAPPED. The lane's summed attempt_count must be under 3. This is the ONLY cap an
+--     ingest lane has -- clara.claim_document_processing_task's cap is scoped to
+--     ('invoice_facts','statement_facts') (0038:6907) and never sees ocr.
+--   * RETRYABLE-ONLY. A deterministic failure (corrupt/encrypted/bad_type/internal/...) is
+--     refused by name, so unreadable bytes cannot be re-bought at all.
+--   * IN-FLIGHT-GUARDED. Nothing is minted while any task on that lane is live, so the
+--     attempts are strictly sequential.
+-- The kill switch and the per-firm OCR concurrency cap still gate the claim on top of all
+-- four (0038:6866-6868, 6926-6933).
 --
 -- =====================================================================================
 -- THE RUNTIME HALF (packages/runtime/lib/intake.mjs -- UNFROZEN, same commit)
@@ -1000,26 +1098,36 @@ begin$f1$;
   i record; d record; v_dedupe jsonb; v_doc uuid; v_task uuid; v_filing uuid;
   v_created boolean:=false; v_upgraded boolean:=false; v_filed boolean:=false; v_basis text;
   v_expired jsonb;
-  -- 0051 §2 (the intake recovery door): the recovery receipt fragment, the failed ingest
-  -- task it was minted from, and the new row's version + id.
+  -- 0051 §2 (the intake recovery door): the receipt fragment, the lane's newest task the
+  -- decision was taken on, the resulting row's version + id, which mode fired (mint | echo),
+  -- a NAMED refusal when the door declines, and the lane's summed attempts for the cap.
   v_recovery jsonb; v_ing record; v_rvn int; v_rtask uuid;
+  v_rmode text; v_rrefuse jsonb; v_attempts int;
 begin$t1$;
   v_def := replace(v_def, v_frm, v_to);
 
-  -- EDIT 2 -- the recovery door itself, appended INSIDE the adopted branch, after the
-  -- existing (byte-untouched) duplicate-path re-select.
-  v_frm := $f2$    select id into v_task from clara.document_processing_tasks
+  -- EDIT 2 -- the recovery door, spliced over the WHOLE adopted branch. The anchor now spans
+  -- the refund as well, because the refund itself is what changes: a recovery that mints a
+  -- real vendor attempt must PAY for it, and the money it pays with is this very re-upload's
+  -- own intake reservation. The 0026 P2 comment + re-select are reproduced BYTE-IDENTICALLY
+  -- inside the replacement.
+  v_frm := $f2$  else
+    perform clara._refund_document_reservation(i.firm_id,p_intake,'duplicate-adopted');
+    -- 0026 P2 (O-round finding): pinned to THIS call's own engine_id + lane — post-
+    -- widening, an unscoped `document_id=v_doc order by version_n desc limit 1` can grab
+    -- a facts/re-extraction task from a DIFFERENT lane entirely (now legal coexistence),
+    -- or tie-break nondeterministically between two lanes at the same version_n,
+    -- persisting the WRONG task_id into the intake receipt. Scoped to the SAME
+    -- (engine_id,lane) a fresh creation on this call would have looked up.
+    select id into v_task from clara.document_processing_tasks
       where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
       order by version_n desc limit 1;
   end if;$f2$;
   v_count := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
   if v_count <> 1 then
-    raise exception '0051 S5 edit 2: the adopted-branch re-select appears % times (expected 1)', v_count using errcode='CLR10';
+    raise exception '0051 S5 edit 2: the adopted branch appears % times (expected 1)', v_count using errcode='CLR10';
   end if;
-  v_to := $t2$    select id into v_task from clara.document_processing_tasks
-      where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
-      order by version_n desc limit 1;
-
+  v_to := $t2$  else
     -- 0051 §2 -- THE INTAKE RECOVERY DOOR (§7-A finding F6 / task #31 + the ADR-062
     -- extraction-recovery-door registration; the INGEST half, whose facts-lane twin is the
     -- 'failed_retry' door in clara.request_reextraction).
@@ -1031,68 +1139,167 @@ begin$t1$;
     -- back into the pipeline except an out-of-product re-export with different bytes
     -- (ADR-064 §3's fourth door, a user workaround rather than a product one).
     --
-    -- THE READ IS OF THE TASK ROW, POSITIVELY (evidence law 2). "No successful ingest" is an
-    -- ABSENCE shared by never-started, in-flight and failed documents alike; status='failed'
-    -- is a state a writer committed. ck_processing_task_terminal (0007:175) and the
-    -- transition trigger (0011:1292, 1298-1307) make that read terminal by construction, so
-    -- no second column is consulted.
+    -- IT PAYS LIKE A FRESH INGEST, AND IT IS CAPPED (cross-model review finding #1,
+    -- CRITICAL, CONFIRMED). The first cut minted after the refund and charged nothing, so a
+    -- user could re-upload identical bytes after every engine failure and buy vendor reads
+    -- forever inside one day's headroom. Two controls, and the SECOND one is the only one
+    -- this lane has:
+    --   * RESERVED: on a MINT the intake reservation this very re-upload already took is
+    --     BOUND to the new task instead of being refunded -- the same one statement the
+    --     created/upgraded branch above uses. That is the correct instrument for this lane:
+    --     clara._reserve_processing_call REFUSES anything outside
+    --     ('invoice_facts','statement_facts') (0038:7059), and a processing-call reservation
+    --     would never settle here anyway because persist_document_extraction settles through
+    --     clara._settle_document_reservation, which keys on document_ingest_reservations by
+    --     task_id (0007:1694-1701). The budget was charged when the re-upload BEGAN --
+    --     clara._reserve_document_ingest enforces docs_per_day AND pages_per_day and raises
+    --     CLR18 before an over-budget firm can even open the intake (0007:1632-1653) -- and
+    --     the bound reservation then settles or refunds on the recovered task's own outcome,
+    --     exactly like a first ingest's.
+    --   * CAPPED: the lane's summed attempt_count must be under 3. State plainly why this
+    --     lives here and is not the 0050 two-copies-of-one-rule sin: the claim-time cap in
+    --     clara.claim_document_processing_task is scoped to ('invoice_facts','statement_facts')
+    --     (0038:6907) and does NOT cover ocr / structured_parse / none. For an ingest lane
+    --     THIS IS THE ONLY CAP THERE IS. Three matches the repo's existing number.
     --
-    -- THREE CONDITIONS, each load-bearing:
+    -- THE READ IS OF THE TASK ROW, POSITIVELY (evidence law 2), AND IT IS THE LANE'S NEWEST
+    -- (review finding #4/#5). "No successful ingest" is an ABSENCE shared by never-started,
+    -- in-flight and failed documents alike; status='failed' is a state a writer committed.
+    -- ck_processing_task_terminal (0007:175) and the transition trigger (0011:1292,
+    -- 1298-1307) make that read terminal by construction.
+    -- ENGINE-AGNOSTIC, deliberately: the first cut looked only under THIS call's
+    -- p_engine_id, so an engine-snapshot upgrade between the failure and the remediation
+    -- deploy silently adopted with no recovery -- the exact pre-F6 symptom this door exists
+    -- to remove. version_n is minted as max+1 over (document,lane), so it orders the lane
+    -- across snapshots; `id desc` is the deterministic tiebreak 0026's P2 lesson asks for.
+    -- The MINT then uses THIS call's CURRENT engine (p_engine_id/p_engine_config), which is
+    -- fresh-ingest semantics: the attempt is bought from the engine this image would use,
+    -- and the envelope it writes names that engine truthfully.
+    --
+    -- FIVE CONDITIONS, each load-bearing:
     --   (1) an INGEST lane only. A facts lane is refused outright -- a failed FACTS attempt
     --       is request_reextraction's verb, under a bookkeeper's hand and an audited reason,
     --       never something a silent re-upload re-buys.
-    --   (2) the NEWEST task on THIS document's own (engine_id, lane) is 'failed'. Scoped to
-    --       engine_id as well as lane because that is the scope 0026's P2 fix already uses
-    --       just above, and because it makes version_n unique within the scope -- so the
-    --       ordering is deterministic rather than a tie-break. A changed engine snapshot
-    --       finds nothing and mints nothing: fail-closed.
-    --   (3) NOTHING is in flight on that lane, under ANY engine -- deliberately wider than
-    --       (2). Two live tasks on one ingest lane is a double vendor read.
+    --   (1b) the failure must be RETRYABLE. A 100-page corrupt or encrypted PDF fails
+    --       DETERMINISTICALLY: the same bytes will not read differently, so admitting it
+    --       would buy a full vendor read of a document that cannot succeed, once per
+    --       re-upload, forever. The admitted set is documentIngest.behavior_v2.mjs's OWN
+    --       ratified RETRYABLE set, copied rather than reinvented --
+    --       (engine_error, timeout, engine_lost, storage_error) -- out of the nine codes
+    --       that lane can write (its processingFailureCode, :122-127, also yields corrupt,
+    --       encrypted, bad_type, limit and internal). `internal` is deliberately EXCLUDED,
+    --       and that is the frozen file's own doctrine quoted at its :130-131: "the catch-all
+    --       for an uncategorised error is deliberately NOT retryable ... fail closed on the
+    --       unknown". A NULL code is refused for the same reason -- a failure that never
+    --       said why is not provably transient.
+    --       The refusal NAMES the honest remedy: correct or re-export the file. New bytes
+    --       are a new document and take the ordinary pipeline -- which is exactly the
+    --       LUMINOUS precedent, where a re-export was the remedy of last resort rather than
+    --       a door. REGISTERED RESIDUAL, stated rather than discovered later: a task that
+    --       terminalised on `internal` is therefore not re-uploadable either. That is the
+    --       ruled taxonomy working, but it does leave a runtime-defect class with no
+    --       self-service door; it is not widened here on this file's own authority.
+    --   (2) the fresh upload's declared mime EQUALS the document's durable mime. Detection is
+    --       filename-sensitive for the ambiguous text formats: identical bytes sent once as
+    --       .csv and again as .tsv keep the same sha256, the same lane and the same engine,
+    --       so every other check passes -- and the frozen worker would then parse a CSV
+    --       document as TSV and write rows that disagree with the durable document (review
+    --       finding #2). intake.mjs:271 refuses an upload whose detected mime differs from
+    --       its declared one, so i.declared_mime IS the detected mime by the time this runs.
+    --       A mismatch is a NAMED refusal, not silence: the receipt tells the human to
+    --       re-upload in the document's original form.
+    --   (3) the lane's NEWEST task is terminally 'failed', and nothing on that lane -- under
+    --       ANY engine -- is queued/held_egress/running. Two live tasks on one ingest lane
+    --       is a double vendor read.
+    --   (4) the lane's summed attempt_count is under 3.
     --
-    -- NO RETRY LOOP, and that is not an oversight: this transaction already holds
-    -- clara.documents FOR UPDATE from the adoption read above, and no other writer mints on
-    -- an ingest lane (request_reextraction and _enqueue_invoice_facts_core are both
-    -- facts-lane writers), so the version cannot be lost. A conflict here is an impossible
-    -- state and gets this file's loudest answer, which is the same CLR35 idiom 0026 §C
-    -- installed one branch up.
+    -- THE ECHO, and why a second mode exists (review finding #3). The sidecar the frozen
+    -- worker needs is written by the runtime AFTER this transaction commits, so a crash in
+    -- that window leaves a queued task with no transport metadata and no way to rebuild it.
+    -- When the lane's newest task is already QUEUED this door therefore mints NOTHING and
+    -- ECHOES that task's transport instead; the runtime materialises the missing sidecar and
+    -- dispatches idempotently. A lost sidecar heals on the next re-upload of the same bytes,
+    -- which is the same action the human was already taking. An echo buys nothing, so its
+    -- reservation is refunded exactly as an ordinary adoption's is.
     --
     -- THE FAILED ROW IS NEVER TOUCHED -- a sibling at the next version, exactly as ADR-062
     -- requires (and as _tf_processing_task_update would enforce regardless).
     if p_lane in ('ocr','structured_parse','none') then
       select * into v_ing from clara.document_processing_tasks
-        where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
-        order by version_n desc limit 1;
-      if found and v_ing.status='failed'
-         and not exists (select 1 from clara.document_processing_tasks pit
+        where document_id=v_doc and lane=p_lane
+        order by version_n desc, id desc limit 1;
+      if found and v_ing.status in ('failed','queued')
+         and lower(btrim(coalesce(i.declared_mime,''))) is distinct from lower(btrim(coalesce(d.mime_type,''))) then
+        v_rrefuse := jsonb_build_object('reason','mime_mismatch',
+          'document_mime',d.mime_type,'upload_mime',i.declared_mime);
+      elsif found and v_ing.status='queued' then
+        v_rmode := 'echo'; v_rtask := v_ing.id; v_rvn := v_ing.version_n;
+      elsif found and v_ing.status='failed' then
+        if coalesce(v_ing.error_code,'') not in ('engine_error','timeout','engine_lost','storage_error') then
+          v_rrefuse := jsonb_build_object('reason','not_retryable','error_code',v_ing.error_code,
+            'remedy','this document could not be READ, and the same bytes will not read differently. Correct or re-export the file: new bytes are a new document and take the ordinary pipeline.');
+        elsif exists (select 1 from clara.document_processing_tasks pit
              where pit.document_id=v_doc and pit.lane=p_lane
                and pit.status in ('queued','held_egress','running')) then
-        select coalesce(max(version_n),0)+1 into v_rvn
-          from clara.document_processing_tasks
-          where document_id=v_doc and lane=p_lane;
-        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
-            version_n,lane,status)
-          values(i.firm_id,v_doc,v_ing.engine_id,v_ing.engine_config,v_rvn,p_lane,'queued')
-          on conflict (document_id,engine_id,version_n,lane) do nothing
-          returning id into v_rtask;
-        if v_rtask is null then
-          raise exception 'impossible state: the intake recovery mint conflicted at (document=%,engine=%,version=%,lane=%) while this transaction holds the documents row FOR UPDATE',
-            v_doc,v_ing.engine_id,v_rvn,p_lane using errcode='CLR35';
+          v_rrefuse := jsonb_build_object('reason','lane_busy');
+        else
+          select coalesce(sum(attempt_count),0)::int into v_attempts
+            from clara.document_processing_tasks
+            where document_id=v_doc and lane=p_lane;
+          if v_attempts >= 3 then
+            v_rrefuse := jsonb_build_object('reason','attempt_cap','attempts',v_attempts);
+          else
+            select coalesce(max(version_n),0)+1 into v_rvn
+              from clara.document_processing_tasks
+              where document_id=v_doc and lane=p_lane;
+            insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+                version_n,lane,status)
+              values(i.firm_id,v_doc,p_engine_id,coalesce(p_engine_config,'{}'::jsonb),v_rvn,p_lane,'queued')
+              on conflict (document_id,engine_id,version_n,lane) do nothing
+              returning id into v_rtask;
+            if v_rtask is null then
+              raise exception 'impossible state: the intake recovery mint conflicted at (document=%,engine=%,version=%,lane=%) while this transaction holds the documents row FOR UPDATE',
+                v_doc,p_engine_id,v_rvn,p_lane using errcode='CLR35';
+            end if;
+            v_rmode := 'mint';
+            -- PAY FOR IT. The same single statement the created/upgraded branch above uses;
+            -- the reservation then settles or refunds on this task's own outcome.
+            update clara.document_ingest_reservations set task_id=v_rtask where intake_id=p_intake;
+          end if;
         end if;
-        -- The receipt's task_id becomes the LIVE task. Its one consumer
-        -- (packages/runtime/lib/intake.mjs:365) is gated on needsStart, which is false for
-        -- every adopted receipt today, so nothing observes the change -- and naming the dead
-        -- task while this transaction just minted a live one would be a stale answer.
-        v_task := v_rtask;
-        -- Every field here is read off rows this function already holds: the failed task and
-        -- the adopted document. storage_path is the DURABLE record's own value -- the same
-        -- one clara.claim_document_processing_task hands every other lane -- and
-        -- ck_documents_storage_path_v2 (0007:53-54) guarantees it is the content-addressed
-        -- key the re-uploading runtime just computed and verified for these identical bytes.
+      end if;
+      if v_rtask is not null then
+        -- Every field is read off rows this function already holds: the recovered task and
+        -- the adopted document. mime_type and format come from the DOCUMENT'S DURABLE
+        -- IDENTITY, never from the re-upload's filename-sensitive detection -- storage_path's
+        -- extension is pinned by ck_documents_storage_path_v2 (0007:53-54), which is the same
+        -- content-addressed key the runtime just computed and verified for these bytes.
         v_recovery := jsonb_build_object('task_id',v_rtask,'lane',p_lane,'version_n',v_rvn,
-          'engine_id',v_ing.engine_id,'storage_path',d.storage_path,'sha256',d.sha256,
-          'mime_type',d.mime_type);
+          'engine_id',(select engine_id from clara.document_processing_tasks where id=v_rtask),
+          'storage_path',d.storage_path,'sha256',d.sha256,'mime_type',d.mime_type,
+          'format',substring(d.storage_path from '[.]([a-z0-9]{1,12})$'),'mode',v_rmode);
       end if;
     end if;
+    -- An adoption that bought nothing refunds, exactly as it always did. Only a MINT keeps
+    -- the reservation, because only a mint spends it.
+    if v_rmode is distinct from 'mint' then
+      perform clara._refund_document_reservation(i.firm_id,p_intake,'duplicate-adopted');
+    end if;
+    -- 0026 P2 (O-round finding): pinned to THIS call's own engine_id + lane — post-
+    -- widening, an unscoped `document_id=v_doc order by version_n desc limit 1` can grab
+    -- a facts/re-extraction task from a DIFFERENT lane entirely (now legal coexistence),
+    -- or tie-break nondeterministically between two lanes at the same version_n,
+    -- persisting the WRONG task_id into the intake receipt. Scoped to the SAME
+    -- (engine_id,lane) a fresh creation on this call would have looked up.
+    select id into v_task from clara.document_processing_tasks
+      where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
+      order by version_n desc limit 1;
+    -- The receipt's task_id names the LIVE task whenever this door produced one. Its only
+    -- consumer (packages/runtime/lib/intake.mjs) is gated on needsStart, which is false for
+    -- every adopted receipt that carries no recovery, so nothing that works today observes
+    -- the change -- and naming a dead task while the same transaction just minted a live one
+    -- would be a stale answer.
+    if v_rtask is not null then v_task := v_rtask; end if;
   end if;$t2$;
   v_def := replace(v_def, v_frm, v_to);
 
@@ -1112,7 +1319,9 @@ begin$t1$;
       'filing_id',v_filing,'status',case when v_created then 'finalized' else 'adopted' end,
       'upgraded',v_upgraded)
     || case when v_recovery is null then '{}'::jsonb
-            else jsonb_build_object('recovery',v_recovery) end);$t3$;
+            else jsonb_build_object('recovery',v_recovery) end
+    || case when v_rrefuse is null then '{}'::jsonb
+            else jsonb_build_object('recovery_refused',v_rrefuse) end);$t3$;
   v_def := replace(v_def, v_frm, v_to);
 
   execute v_def;
@@ -1127,7 +1336,7 @@ reset role;
 do $tail51b$
 declare
   v_def text; v_n int; v_secdef boolean; v_config text; v_acl text; v_pre record;
-  v_key text; v_pos int; v_window text; v_trg text; v_pre1 record;
+  v_key text; v_pos int; v_window text; v_trg text; v_pre1 record; v_lockpos int;
 begin
   select count(*) into v_n from pg_proc p
     where p.pronamespace = 'clara'::regnamespace and p.proname = 'finalize_document_intake';
@@ -1146,31 +1355,85 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  ---- (2) THE THREE CONDITIONS, read as properties of the door's own window.
+  ---- (2) THE ADMISSION CONDITIONS, read as properties of the door's own window.
   v_pos := position('if p_lane in (''ocr'',''structured_parse'',''none'') then' in v_def);
   if v_pos = 0 then
     raise exception '0051 §2 tail: the recovery door is not gated to the INGEST lanes -- a facts-lane failure must stay request_reextraction''s verb, never something a silent re-upload re-buys'
       using errcode = 'CLR10';
   end if;
-  v_window := substring(v_def from v_pos for 1400);
-  if position('v_ing.status=''failed''' in v_window) = 0 then
+  -- NB: the tokens below are searched over the WHOLE body, not a fixed-size window. Each is
+  -- text unique to this door, so a window buys no extra strength and a magic length is a
+  -- silent trap the moment the branch grows (it did, and it failed this tail honestly).
+  -- The one genuinely POSITIONAL proof is the lock ordering in (5b) below.
+  if position('v_ing.status=''failed''' in v_def) = 0 then
     raise exception '0051 §2 tail: the recovery door does not require a TERMINALLY FAILED ingest task -- an admission resting on an ABSENCE is what evidence law 2 forbids here'
       using errcode = 'CLR10';
   end if;
-  if position('pit.status in (''queued'',''held_egress'',''running'')' in v_window) = 0
-     or position('not exists' in v_window) = 0 then
+  ---- NEWEST-PER-LANE, ENGINE-AGNOSTIC (review findings #4/#5). The read must order the whole
+  ---- lane and take one row; and it must NOT carry an engine pin, or an engine-snapshot
+  ---- upgrade between the failure and the remediation deploy silently closes the door again.
+  if position('where document_id=v_doc and lane=p_lane' || chr(10)
+              || '        order by version_n desc, id desc limit 1;' in v_def) = 0 then
+    raise exception '0051 §2 tail: the recovery door does not read the LANE''s NEWEST task engine-agnostically (order by version_n desc, id desc limit 1) -- an engine-pinned or unordered read reintroduces review finding #4''s silent adopt'
+      using errcode = 'CLR10';
+  end if;
+  if position('where document_id=v_doc and engine_id=p_engine_id and lane=p_lane' || chr(10)
+              || '        order by version_n desc, id desc limit 1;' in v_def) <> 0 then
+    raise exception '0051 §2 tail: the newest-task read is still pinned to p_engine_id' using errcode = 'CLR10';
+  end if;
+  ---- THE IN-FLIGHT GUARD. Note the shape: it is a POSITIVE read of a live task that
+  ---- REFUSES, not an absence that admits -- the Law-2 direction. Its refusal is named.
+  if position('pit.status in (''queued'',''held_egress'',''running'')' in v_def) = 0
+     or position('if exists (select 1 from clara.document_processing_tasks pit' in v_def) = 0
+     or position('''reason'',''lane_busy''' in v_def) = 0 then
     raise exception '0051 §2 tail: the recovery door lost its in-flight guard -- it would mint a second live task on a lane that already has one, and buy a second vendor read'
       using errcode = 'CLR10';
   end if;
-  if position('pit.lane=p_lane' in v_window) = 0 then
-    raise exception '0051 §2 tail: the in-flight guard is not lane-scoped'
+  -- The in-flight guard must span the whole lane, never a single engine.
+  if position('pit.document_id=v_doc and pit.lane=p_lane' in v_def) = 0
+     or position('pit.engine_id' in v_def) <> 0 then
+    raise exception '0051 §2 tail: the in-flight guard is pinned to engine_id -- it must span the whole lane, or a live task under another engine snapshot would still egress alongside the one this door mints'
       using errcode = 'CLR10';
   end if;
-  -- The in-flight guard must be WIDER than the failed-task read: it must NOT carry the
-  -- engine_id pin, or an in-flight task under a different engine would be invisible to it.
-  if position('pit.document_id=v_doc and pit.lane=p_lane' in v_window) = 0
-     or position('pit.engine_id' in v_window) <> 0 then
-    raise exception '0051 §2 tail: the in-flight guard is pinned to engine_id -- it must span the whole lane, or a live task under another engine snapshot would still egress alongside the one this door mints'
+  ---- THE MIME GATE (review finding #2): the durable mime and the fresh upload's declared
+  ---- mime must be compared, and the refusal must be NAMED rather than silent.
+  if position('lower(btrim(coalesce(i.declared_mime,'''')))' in v_def) = 0
+     or position('lower(btrim(coalesce(d.mime_type,'''')))' in v_def) = 0 then
+    raise exception '0051 §2 tail: the recovery door does not compare the fresh upload''s declared mime against the document''s DURABLE mime -- identical bytes re-sent under another extension would be parsed by the wrong reader (review finding #2)'
+      using errcode = 'CLR10';
+  end if;
+  if position('''reason'',''mime_mismatch''' in v_def) = 0 then
+    raise exception '0051 §2 tail: the mime mismatch is refused SILENTLY -- it must name itself on the receipt so the human knows to re-upload in the document''s original form'
+      using errcode = 'CLR10';
+  end if;
+  ---- THE BUDGET AND THE CAP (review finding #1, CRITICAL). A recovery mint must bind this
+  ---- re-upload's own intake reservation instead of refunding it, and the lane must be capped.
+  if position('update clara.document_ingest_reservations set task_id=v_rtask where intake_id=p_intake;' in v_def) = 0 then
+    raise exception '0051 §2 tail: the recovery mint does not BIND the intake reservation to the new task -- it would buy a real vendor attempt and charge nothing, which is review finding #1''s unbounded budget bypass'
+      using errcode = 'CLR10';
+  end if;
+  if position('if v_rmode is distinct from ''mint'' then' in v_def) = 0
+     or position('clara._refund_document_reservation(i.firm_id,p_intake,''duplicate-adopted'')' in v_def) = 0 then
+    raise exception '0051 §2 tail: the adoption refund is no longer conditional on NOT having minted -- either every adoption keeps a reservation it never spends, or every mint gives back the one it did'
+      using errcode = 'CLR10';
+  end if;
+  if position('if v_attempts >= 3 then' in v_def) = 0
+     or position('''reason'',''attempt_cap''' in v_def) = 0 then
+    raise exception '0051 §2 tail: the ingest lane''s summed-attempt cap is missing or unnamed -- the claim-time cap covers only invoice_facts/statement_facts (0038:6907), so for ocr this door is the ONLY cap there is'
+      using errcode = 'CLR10';
+  end if;
+  ---- THE ECHO (review finding #3): a queued newest task hands its transport back instead of
+  ---- minting, so a sidecar lost to a crash heals on the next re-upload of the same bytes.
+  if position('v_rmode := ''echo''' in v_def) = 0 then
+    raise exception '0051 §2 tail: the queued-task ECHO is missing -- a recovery whose sidecar was lost in the post-commit crash window could never be healed without it'
+      using errcode = 'CLR10';
+  end if;
+  ---- The fragment's transport must come from the DOCUMENT's durable identity, never from
+  ---- the re-upload's detection: mime from the column, format from the storage_path extension
+  ---- that ck_documents_storage_path_v2 pins.
+  if position('''format'',substring(d.storage_path from ''[.]([a-z0-9]{1,12})$'')' in v_def) = 0
+     or position('''mime_type'',d.mime_type' in v_def) = 0 then
+    raise exception '0051 §2 tail: the recovery fragment does not derive format/mime from the DOCUMENT''s durable identity -- the runtime would fall back to filename-sensitive detection (review finding #2)'
       using errcode = 'CLR10';
   end if;
 
@@ -1179,8 +1442,13 @@ begin
     raise exception '0051 §2 tail: finalize_document_intake now UPDATEs a document_processing_tasks row -- the recovery must mint a SIBLING at the next version and never reopen the terminal one (ADR-062, and _tf_processing_task_update would refuse it anyway)'
       using errcode = 'CLR10';
   end if;
-  if position('coalesce(max(version_n),0)+1' in v_window) = 0 then
+  if position('coalesce(max(version_n),0)+1' in v_def) = 0 then
     raise exception '0051 §2 tail: the recovery mint does not compute version_n = max+1' using errcode = 'CLR10';
+  end if;
+  ---- and it mints under THIS call's CURRENT engine, not the failed attempt's.
+  if position('values(i.firm_id,v_doc,p_engine_id,coalesce(p_engine_config,''{}''::jsonb),v_rvn,p_lane,''queued'')' in v_def) = 0 then
+    raise exception '0051 §2 tail: the recovery does not mint under the CURRENT engine snapshot -- reusing the failed attempt''s engine would label a read with an engine that did not perform it'
+      using errcode = 'CLR10';
   end if;
 
   ---- (4) EXACTLY TWO task INSERTs now -- the intake mint and the recovery mint. Prestate
@@ -1192,9 +1460,10 @@ begin
       using errcode = 'CLR10';
   end if;
 
-  ---- (5) THE RECEIPT: the recovery key is CONDITIONAL, and the existing object is intact.
-  if position('else jsonb_build_object(''recovery'',v_recovery) end)' in v_def) = 0 then
-    raise exception '0051 §2 tail: the recovery key is not appended conditionally -- an unconditional key would change every intake receipt in the product for the sake of one branch'
+  ---- (5) THE RECEIPT: both new keys are CONDITIONAL, and the existing object is intact.
+  if position('else jsonb_build_object(''recovery'',v_recovery) end' in v_def) = 0
+     or position('else jsonb_build_object(''recovery_refused'',v_rrefuse) end)' in v_def) = 0 then
+    raise exception '0051 §2 tail: a receipt key is not appended conditionally -- an unconditional key would change every intake receipt in the product for the sake of one branch'
       using errcode = 'CLR10';
   end if;
   if position('jsonb_build_object(''intake_id'',p_intake,''document_id'',v_doc,''task_id'',v_task,' in v_def) = 0 then
@@ -1203,6 +1472,20 @@ begin
   if position('''status'',case when v_created then ''finalized'' else ''adopted'' end' in v_def) = 0 then
     raise exception '0051 §2 tail: the receipt no longer reports adopted/finalized as it did -- a recovery does not change the fact that the document was ADOPTED'
       using errcode = 'CLR10';
+  end if;
+
+  ---- (5b) THE SERIALIZATION PROOF IS POSITIONAL, not token-only (review finding #6). The
+  ---- mint carries no retry loop because this transaction already holds the documents row
+  ---- FOR UPDATE before it reaches the adopted branch. Asserting only that the token exists
+  ---- SOMEWHERE would let a refactor move the lock BELOW the branch -- keeping every anchor
+  ---- green while turning concurrent re-uploads into CLR35 failures. Assert the ORDER.
+  v_lockpos := position('where firm_id=i.firm_id and sha256=i.sha256 for update' in v_def);
+  if v_lockpos = 0 then
+    raise exception '0051 §2 tail: the documents FOR UPDATE lock is gone' using errcode = 'CLR10';
+  end if;
+  if v_lockpos >= v_pos then
+    raise exception '0051 §2 tail: the documents FOR UPDATE lock (offset %) does not PRECEDE the recovery door (offset %) -- the mint''s no-retry-loop design rests on that lock serialising concurrent re-uploads of the same bytes, and a lock taken after the branch serialises nothing',
+      v_lockpos, v_pos using errcode = 'CLR10';
   end if;
 
   ---- (6) THE 0026 §C LINEAGE AND THE LOCK BOTH SURVIVED.

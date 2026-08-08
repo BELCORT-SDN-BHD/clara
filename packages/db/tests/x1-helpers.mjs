@@ -159,6 +159,53 @@ export async function extractedDoc(sub, { client, cents = 90000, fields = null, 
   return cited;
 }
 
+// ---------------------------------------------------------------------------
+// The extraction-recovery door's readiness gate (migration 0051)
+// ---------------------------------------------------------------------------
+
+/** Is the extraction-recovery door live on this database? Returns {ledger, installed}.
+ *
+ *  KEYED ON THE STABLE SUFFIX, NEVER THE NUMBER. Migration numbers are claimed at MERGE time
+ *  (CLAUDE.md's standing law), so a battery pinned to `version ~ '^0051_'` goes quietly
+ *  dormant the instant the file is renumbered in a merge train: 0 pass / N skip, exit 0 — a
+ *  green run that proved nothing at all. The repo has already paid for this lesson once
+ *  (the RC3 note in wave-d-b-asbuilt-part2). The suffix is the part that does not move.
+ *
+ *  AND IT IS CROSS-CHECKED AGAINST THE CATALOG. "No ledger row" and "no door" are different
+ *  facts, and only one of them means dormant. If the door's code is INSTALLED while no ledger
+ *  row names it — or a ledger row exists while the code is absent — the database's ledger
+ *  disagrees with its own catalog, and a battery that skips there hides precisely the drift
+ *  it exists to catch. `requireRecoveryDoor` fails LOUDLY on either half (the fail0022 idiom
+ *  one migration up). */
+export async function recoveryDoorState() {
+  const led = await rootQuery(
+    "select count(*)::int n from clara.schema_migrations where version like '%extraction\\_recovery\\_door'");
+  let installed = false;
+  try {
+    installed = (await fnSource("finalize_document_intake")).includes("v_recovery");
+  } catch { installed = false; }
+  return { ledger: led.rows[0].n > 0, installed };
+}
+
+/** true when the door is live, false when genuinely dormant, THROWS on ledger/catalog drift. */
+export async function requireRecoveryDoor() {
+  const s = await recoveryDoorState();
+  if (s.installed && !s.ledger) {
+    throw new Error(
+      "extraction-recovery door DRIFT: clara.finalize_document_intake carries the door's code but "
+      + "clara.schema_migrations has no '%extraction_recovery_door' row. This battery refuses to "
+      + "report itself dormant against a database whose ledger disagrees with its catalog — that is "
+      + "the exact state a silent skip would hide.");
+  }
+  if (s.ledger && !s.installed) {
+    throw new Error(
+      "extraction-recovery door DRIFT: clara.schema_migrations records the migration but "
+      + "clara.finalize_document_intake does not carry the door — the recorded apply did not install "
+      + "what it claims, or a later recut reverted it.");
+  }
+  return s.ledger && s.installed;
+}
+
 /** Seed a filed, kind-stamped invoice document whose ONLY invoice_facts attempt is
  *  TERMINALLY FAILED — the F6 / LUMINOUS shape, reproduced through the REAL writers
  *  (enqueue -> claim -> fail_invoice_facts), never by hand-writing a task row.

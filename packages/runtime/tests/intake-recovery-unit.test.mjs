@@ -79,6 +79,10 @@ function fragment(over = {}) {
       storage_path: `firms/${"f".repeat(8)}/docs/${SHA}.pdf`,
       sha256: SHA,
       mime_type: "application/pdf",
+      // DURABLE, derived by the DB from storage_path's extension — never from this upload's
+      // filename-sensitive detection. It is a transport field like the rest.
+      format: "pdf",
+      mode: "mint",
       ...over,
     },
   };
@@ -109,10 +113,11 @@ test("[0051 §2] a complete recovery fragment becomes a sidecar built from the D
   assert.equal(meta.engineId, AZURE_ENGINE_SNAPSHOT.engineId,
     "…carrying the engine id, which egress.mjs:152 stamps into the persisted envelope");
   assert.equal(meta.status, "queued", "…queued");
-  // The one field with no DB column, taken from THIS upload's detection over the same bytes.
   assert.equal(meta.format, "pdf",
-    "format has no column in clara.documents; it is the fresh detection's, cross-checked "
-    + "against the lane before it gets this far");
+    "…and a DURABLE format. It has no column of its own, but it is NOT this upload's detection: "
+    + "the DB derives it from storage_path's extension, which ck_documents_storage_path_v2 pins. "
+    + "Detection is filename-sensitive, so deriving it here is how identical bytes re-sent as "
+    + ".tsv got a CSV document parsed as TSV — the review's finding #2");
 });
 
 test("[0051 §2] a receipt with no recovery fragment yields nothing — the ordinary adoption is untouched", async () => {
@@ -127,7 +132,7 @@ test("[0051 §2] an INCOMPLETE fragment refuses — a partial transport record i
   // Each of these is a field the frozen workflow will read. Filling a missing one from local
   // state would defeat the reason they are DB-sourced: they describe the row that will be
   // claimed, not the upload that happened to trigger it.
-  for (const missing of ["task_id", "lane", "storage_path", "sha256", "mime_type"]) {
+  for (const missing of ["task_id", "lane", "storage_path", "sha256", "mime_type", "format"]) {
     const f = fragment({ [missing]: null });
     assert.equal(await recoveryTaskMeta(f, {
       firmId: "firm-1", detected: DETECTED, snapshot: PDF_SNAPSHOT, log: quiet,
@@ -144,25 +149,36 @@ test("[0051 §2] an INCOMPLETE fragment refuses — a partial transport record i
   }
 });
 
-test("[0051 §2] a LANE disagreement refuses — the workflow must never get a reader its lane denies", async () => {
-  // documentIngest branches on the sidecar's lane (behavior_v2.mjs:191-193): 'ocr' runs
-  // analyzeDocument(mime), anything else runs parseStructured(format). A pdf minted on
-  // structured_parse would be handed to the values-only spreadsheet worker.
-  const f = fragment({ lane: "structured_parse" });
-  assert.equal(await recoveryTaskMeta(f, {
-    firmId: "firm-1", detected: DETECTED, snapshot: PDF_SNAPSHOT, log: quiet,
-  }), null, "a lane the fresh detection would not choose refuses to start");
+test("[0051 §2] a DEPLOY-SKEW lane disagreement refuses — the reader must match the task's lane", async () => {
+  // RESHAPED after review. The point is NOT that the DB could hand out a self-inconsistent
+  // fragment — within one image, format→lane is an identity by construction, so a cell built
+  // on that would be exercising a shape production cannot make. What genuinely varies is
+  // ACROSS DEPLOYS: the task's lane was chosen by whichever image ran the ORIGINAL intake, and
+  // intake-lanes.mjs is a policy that has already moved once (Wave C-b moved OFX from
+  // structured_parse to none). So the cell models the real divergence: a durable format this
+  // image maps to a DIFFERENT lane than the task was minted on. documentIngest branches on the
+  // sidecar's lane (behavior_v2.mjs:191-193), so proceeding would hand the file to the wrong
+  // reader.
+  const f = fragment({ format: "csv", lane: "ocr" }); // this image maps csv → structured_parse
+  assert.equal(await recoveryTaskMeta(f, { firmId: "firm-1", canonicalKey: f.recovery.storage_path, log: quiet }),
+    null, "a task whose lane this image's policy no longer agrees with refuses to start");
 });
 
-test("[0051 §2] an ENGINE disagreement refuses — an envelope must not name an engine that did not read it", async () => {
-  // egress.mjs:152 stamps `engine: {id: task.engineId, version_n: task.versionN}` into the
-  // persisted extraction envelope. If the recovered task carries the engine id of the attempt
-  // that failed and this image has since moved on, starting the read would write a provenance
-  // claim that is simply false.
-  const f = fragment({ engine_id: "azure-di:prebuilt-layout:1999-01-01" });
-  assert.equal(await recoveryTaskMeta(f, {
-    firmId: "firm-1", detected: DETECTED, snapshot: PDF_SNAPSHOT, log: quiet,
-  }), null, "a stale engine id refuses rather than mislabelling the read");
+test("[0051 §2] the sidecar takes the DOCUMENT's durable identity, never a caller-supplied guess", async () => {
+  // REPLACES the engine-mismatch cell, which review showed was wrong twice over: for a MINT the
+  // engine is now this call's own snapshot (identity by construction), and for an ECHO the task
+  // legitimately carries an OLDER engine — so refusing on inequality would have made the
+  // crash-heal impossible for exactly the deploy that caused the crash. The field that
+  // genuinely varies is the transport itself, and the rule is that it comes from the DB.
+  const f = fragment({ mime_type: "text/csv", format: "csv", lane: "structured_parse",
+    engine_id: "clara-structured:v0-ancient" });
+  const meta = await recoveryTaskMeta(f, { firmId: "firm-1", canonicalKey: f.recovery.storage_path, log: quiet });
+  assert.ok(meta, "an echo of a task minted under an older engine still materialises");
+  assert.equal(meta.engineId, "clara-structured:v0-ancient",
+    "…carrying the TASK's own engine verbatim, so egress.mjs:152 stamps an envelope that names "
+    + "the engine which actually owns the attempt");
+  assert.equal(meta.mime, "text/csv", "…the document's durable mime");
+  assert.equal(meta.format, "csv", "…and the durable format the DB derived from storage_path");
 });
 
 test("[0051 §2] a DIVERGENT storage_path is re-verified against the durable object, and refuses if it cannot be", async () => {
@@ -223,7 +239,7 @@ test("[0051 §2] the canonical key really is the content-addressed template the 
   const firmId = randomUUID();
   const recovered = { document_id: randomUUID(), status: "adopted", task_id: randomUUID(),
     recovery: { task_id: randomUUID(), lane: "ocr", version_n: 2, engine_id: AZURE_ENGINE_SNAPSHOT.engineId,
-      storage_path: `firms/${firmId}/docs/${SHA}.pdf`, sha256: SHA, mime_type: "application/pdf" } };
+      storage_path: `firms/${firmId}/docs/${SHA}.pdf`, sha256: SHA, mime_type: "application/pdf", format: "pdf", mode: "mint" } };
   const intakeId = randomUUID();
   const { client, withRuntime } = mockDb(recovered, intakeId);
   const started = [];
@@ -249,7 +265,7 @@ test("[0051 §2] an ADOPTED receipt carrying a recovery STARTS it, with the side
   const firmId = randomUUID();
   const receipt = { document_id: randomUUID(), status: "adopted", task_id: recoveryTask,
     recovery: { task_id: recoveryTask, lane: "ocr", version_n: 3, engine_id: AZURE_ENGINE_SNAPSHOT.engineId,
-      storage_path: `firms/${firmId}/docs/${SHA}.pdf`, sha256: SHA, mime_type: "application/pdf" } };
+      storage_path: `firms/${firmId}/docs/${SHA}.pdf`, sha256: SHA, mime_type: "application/pdf", format: "pdf", mode: "mint" } };
   const intakeId = randomUUID();
   const { client, withRuntime } = mockDb(receipt, intakeId);
   const started = [];

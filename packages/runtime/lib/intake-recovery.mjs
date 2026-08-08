@@ -2,20 +2,19 @@
 // the ADR-062 extraction-recovery-door registration).
 //
 // Split out of intake.mjs for the reason intake-lanes.mjs was: this is a small, self-contained
-// policy with its own rationale, and it reads far better next to that rationale than buried
-// between the upload state machine and the failure mapper. intake.mjs is also at the repo's
-// 500-line module budget.
+// policy with its own rationale, and intake.mjs is at the repo's 500-line module budget.
 //
-// WHAT THE DB HALF DOES, so the refusals below are readable. clara.finalize_document_intake's
-// ADOPTED branch (a re-upload of bytes the firm already holds) used to mint nothing, which
-// left a document whose ONLY ingest attempt died terminally with no way back into the
-// pipeline. Migration 0051 §2 opens that door: when the adopted document's newest task on its
-// own ingest lane is status='failed' and nothing is in flight on that lane, the DB mints a
-// fresh attempt (version_n+1, 'queued') and returns a `recovery` fragment on the otherwise
-// unchanged 'adopted' receipt:
-//     {task_id, lane, version_n, engine_id, storage_path, sha256, mime_type}
+// WHAT THE DB HALF DOES. clara.finalize_document_intake's ADOPTED branch (a re-upload of bytes
+// the firm already holds) used to mint nothing, leaving a document whose only ingest attempt
+// died terminally with no way back into the pipeline. Migration 0051 §2 opens that door and
+// returns a `recovery` fragment on the otherwise unchanged 'adopted' receipt:
+//     {task_id, lane, version_n, engine_id, storage_path, sha256, mime_type, format, mode}
+// `mode` is 'mint' (a fresh attempt was created and this re-upload's reservation bound to it)
+// or 'echo' (the lane's newest task was ALREADY queued — a previous mint whose sidecar may
+// have been lost in the post-commit crash window; nothing new is created or charged, the
+// transport is simply handed back so this process can rebuild the sidecar).
 //
-// WHY THE RUNTIME MUST DO ANYTHING AT ALL. documentIngest_v2 is FROZEN and deployed. Its
+// WHY THE RUNTIME MUST DO ANYTHING AT ALL. documentIngest_v2 is frozen and deployed. Its
 // processing step hard-fails on a task with no spool sidecar (documentIngest.behavior_v2.mjs:
 // 176-177) and reads storageKey/sha256/mime/format off it (:190-193); its claim step keeps
 // only `result.status` from the claim receipt (documentIngest.impl.ts:56-59), so the transport
@@ -25,34 +24,37 @@
 // sidecar. THIS is that something — and it needs no new grant, because a re-upload already
 // carries every input in hand.
 //
-// EVERY VALUE IS DB-SOURCED EXCEPT ONE, and the exception is stated rather than hidden:
-// `format` has no column in clara.documents (it is an intake-time detection, intake.mjs:348).
-// It comes from THIS upload's own detection over the same bytes — and the lane it implies is
-// cross-checked against the lane the DB actually minted on, because handing the frozen
-// workflow a reader its lane disagrees with is how you get parseStructured pointed at a PDF.
+// EVERY VALUE COMES FROM THE DOCUMENT'S DURABLE IDENTITY. NOTHING IS DERIVED HERE.
+// The first cut wrote the fresh upload's own `detected.format` into the sidecar, and the
+// cross-model review found the hole: detection is FILENAME-SENSITIVE for the ambiguous text
+// formats, so identical bytes sent once as `.csv` and again as `.tsv` keep the same sha256,
+// the same lane and the same engine — every check passed, the old `.csv` storage object was
+// used, and the frozen worker parsed a CSV document as TSV. So this module now derives
+// nothing at all: `mime` is clara.documents.mime_type and `format` is the extension of
+// clara.documents.storage_path, which ck_documents_storage_path_v2 (0007:53-54) pins to
+// `^firms/<firm>/docs/<sha256>.<ext>$`. The DB additionally REFUSES the recovery outright when
+// the re-upload's declared mime disagrees with the durable one, so the mismatch never reaches
+// this module — the derivation is removed here as well because a second, independent way to
+// get the answer wrong is not defence in depth, it is another way to get it wrong.
 //
-// THE storage_path NAMESPACE, ANSWERED BY A SCHEMA CONSTRAINT AND NOT BY INFERENCE. The
-// sidecar's storageKey is the receipt's `recovery.storage_path` — clara.documents.storage_path
-// — not this process's freshly computed key. The two are provably the same string:
-//   * clara.documents carries ck_documents_storage_path_v2 (0007_document_pipeline.sql:53-54):
-//     `storage_path ~ ('^firms/' || firm_id::text || '/docs/' || sha256 || '[.][a-z0-9]{1,12}$')`
-//     — the DB ENFORCES the content-addressed layout.
-//   * intake.mjs:273 computes exactly that template:
-//     `firms/${meta.firmId}/docs/${meta.sha256}.${detected.ext}`.
-// "Adopted" MEANS same firm + same sha256, so only the extension is free, and that comes from
-// detectDocument over identical bytes. The fresh upload therefore discards nothing:
-// putCanonical (intake.mjs:274) re-writes the SAME content-addressed object and verifyCanonical
-// (:275/:280) has already proven it hashes correctly in this very call.
-// The DB value is used anyway, for two reasons that survive even if that equality stopped
-// holding: it is what the DOCUMENT row asserts and therefore what
-// clara.claim_document_processing_task hands every other lane (0038:6851-6852), and it is a
-// positive read of the durable record rather than a recomputation. On any divergence the
-// object is re-verified before use, and an unverifiable one refuses to start.
+// WHAT IS *NOT* CROSS-CHECKED, AND WHY (corrected by review). An earlier cut refused when the
+// fragment's engine_id differed from this image's snapshot. That is wrong for the ECHO mode:
+// a task minted before an engine-snapshot bump legitimately carries the older engine, and
+// refusing it would make the crash-heal impossible for exactly the deploy that caused the
+// crash. The task's own engine_id is its truth and is passed through verbatim; egress.mjs:152
+// stamps it into the envelope, which is then honest about which engine owns the attempt.
 //
-// FAIL-CLOSED IS ALWAYS "RETURN NULL", NEVER "THROW". A recovery that cannot be verified must
-// not take down the intake request that carried it — the document really was adopted and that
-// receipt is still the caller's honest answer. The DB row simply stays queued; nothing has
-// been started against inputs nobody checked.
+// WHAT *IS* CROSS-CHECKED: that THIS image's lane mapping still agrees with the lane the DB
+// minted on. That is not an identity-by-construction — the DB's lane was decided by whichever
+// image ran the ORIGINAL intake, and packages/runtime/lib/intake-lanes.mjs is a policy that
+// can change between deploys (Wave C-b moved OFX from structured_parse to none). If a format's
+// lane has since moved, the sidecar would send the file to a reader the DB's lane disagrees
+// with. Fail closed on the skew.
+//
+// FAIL-CLOSED IS "RETURN NULL", NEVER "THROW". A recovery that cannot be verified must not take
+// down the intake request that carried it — the document really was adopted and that receipt is
+// still the caller's honest answer. The CALLER decides how loud to be (intake.mjs raises, and
+// deliberately retains the intake spool, precisely because a queued DB task is left unserved).
 
 import { laneSnapshot } from "./intake-lanes.mjs";
 import { verifyCanonical } from "./storage.mjs";
@@ -66,12 +68,10 @@ const NOOP = /** @type {(message: string) => void} */ (() => {});
  * @param {Record<string, any>|null|undefined} finalized  the clara.finalize_document_intake receipt
  * @param {object} opts
  * @param {string} opts.firmId
- * @param {{format: string, mime: string}} opts.detected   THIS upload's own detection
- * @param {{lane: string, engineId: string, engineConfig: object}} opts.snapshot  laneSnapshot(detected.format)
  * @param {string|null} [opts.canonicalKey]  the key this upload computed, for the divergence check
  * @param {(message: string) => void} [opts.log]
  */
-export async function recoveryTaskMeta(finalized, { firmId, detected, snapshot, canonicalKey = null, log = NOOP } = {}) {
+export async function recoveryTaskMeta(finalized, { firmId, canonicalKey = null, log = NOOP } = {}) {
   const r = finalized?.recovery ?? null;
   if (!r) return null;
 
@@ -82,6 +82,7 @@ export async function recoveryTaskMeta(finalized, { firmId, detected, snapshot, 
   const storageKey = r.storage_path ? String(r.storage_path) : null;
   const sha256 = r.sha256 ? String(r.sha256) : null;
   const mime = r.mime_type ? String(r.mime_type) : null;
+  const format = r.format ? String(r.format) : null;
   const documentId = finalized?.document_id ? String(finalized.document_id) : null;
   // NOT `Number(r.version_n)`: `Number(null)` is 0, which is finite — so a null version would
   // have passed a Number.isFinite guard and been stamped into the extraction envelope
@@ -94,34 +95,26 @@ export async function recoveryTaskMeta(finalized, { firmId, detected, snapshot, 
   // (1) EVERY transport field must be PRESENT. A partial fragment is not a reason to guess the
   // rest from local state — the whole point of sourcing them from the DB is that they describe
   // the row the workflow will claim.
-  if (!taskId || !lane || !storageKey || !sha256 || !mime || !documentId
+  if (!taskId || !lane || !storageKey || !sha256 || !mime || !format || !documentId
       || !Number.isInteger(versionN) || versionN < 1) {
     say(`intake recovery IGNORED: the receipt's recovery fragment is incomplete (task=${taskId ?? "?"}) — refusing to start a run on a partial transport record`);
     return null;
   }
 
-  // (2) The lane the DB minted on must be the lane THIS upload's own detection implies.
+  // (2) DEPLOY SKEW. The lane the DB minted on was chosen by whichever image ran the original
+  // intake; this image's own policy may since have moved that format to another lane.
   // documentIngest branches on the sidecar's lane (behavior_v2.mjs:191-193): 'ocr' runs
-  // analyzeDocument(mime), anything else runs parseStructured(format). A disagreement here
-  // means one of the two is about to read the file with the wrong reader.
-  const detectedLane = laneSnapshot(detected.format).lane;
-  if (detectedLane !== lane) {
-    say(`intake recovery ABANDONED task=${taskId}: the DB minted lane='${lane}' but this upload's detection maps format='${detected.format}' to lane='${detectedLane}' — refusing to hand the workflow a reader its lane disagrees with`);
+  // analyzeDocument(mime), anything else runs parseStructured(format). A disagreement means one
+  // of the two is about to read the file with the wrong reader.
+  const laneNow = laneSnapshot(format).lane;
+  if (laneNow !== lane) {
+    say(`intake recovery ABANDONED task=${taskId}: the task's lane is '${lane}' but this image maps the document's durable format '${format}' to lane '${laneNow}' — the lane policy moved under an existing task; refusing to hand the workflow a reader its lane disagrees with`);
     return null;
   }
 
-  // (3) The engine the DB copied from the failed attempt must be the engine this image would
-  // use. egress.mjs:152 stamps the persisted envelope with `engine: {id: task.engineId,
-  // version_n: task.versionN}`, so starting a read on today's model while labelling it with
-  // yesterday's engine id would put a false provenance claim into the extraction record.
-  if (snapshot?.engineId && r.engine_id && String(r.engine_id) !== String(snapshot.engineId)) {
-    say(`intake recovery ABANDONED task=${taskId}: the recovered task carries engine_id='${r.engine_id}' but this image's snapshot for lane='${lane}' is '${snapshot.engineId}' — the envelope would claim a read the named engine did not perform`);
-    return null;
-  }
-
-  // (4) The storage namespace. Provably identical (see the header), so a divergence means the
-  // premise broke — re-verify the durable object before trusting it, and refuse if it does not
-  // hash to the sha256 the document row asserts.
+  // (3) The storage namespace. The DB value and this upload's computed key are the same string
+  // by construction (see the header), so a divergence means the premise broke — read the
+  // durable object before trusting it, and refuse if it does not hash to the document's sha.
   if (canonicalKey && storageKey !== canonicalKey) {
     try {
       await verifyCanonical(storageKey, sha256);
@@ -141,18 +134,17 @@ export async function recoveryTaskMeta(finalized, { firmId, detected, snapshot, 
     storageKey,
     sha256,
     mime,
-    // The one non-DB field, by necessity — clara.documents has no format column. Cross-checked
-    // against `lane` at (2) above before it is allowed this far.
-    format: detected.format,
+    format,
     lane,
-    engineId: String(r.engine_id ?? snapshot?.engineId ?? ""),
-    // Also not a DB-sourced value for this path: the task row's engine_config is not carried on
-    // the receipt. (3) has already proven the engine ids agree, so this image's own snapshot for
-    // that engine is the same configuration by construction. Nothing reads it before the
-    // reconciler's next merge overwrites it from the task row anyway (reconciler-documents.mjs).
-    engineConfig: snapshot?.engineConfig ?? {},
+    // The TASK's own engine, passed through verbatim — see the header on why this is not
+    // compared against this image's snapshot.
+    engineId: String(r.engine_id ?? ""),
+    // Not carried on the fragment and not needed before the reconciler's next merge overwrites
+    // it from the task row; the frozen readers never consult it.
+    engineConfig: {},
     versionN,
     status: "queued",
+    mode: r.mode ? String(r.mode) : null,
     createdAt: now,
     updatedAt: now,
   };

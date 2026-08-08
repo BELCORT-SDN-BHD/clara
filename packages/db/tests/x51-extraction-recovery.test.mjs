@@ -35,13 +35,11 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { randomUUID } from "node:crypto";
 import {
   ROLES, CLR, rootQuery, roleQuery, opk, endPool, buildWorld, assertRaises, firmOf,
   requestReextraction, extractedDoc, failedFactsDoc, taskRow, laneTasks, extractionsOf,
   auditArgs, holdThenContend, seedCitedDocument,
-  invoiceFactsTask, claimTask, failInvoiceFacts,
-  seedIntake, finalizeIntake, seedVerifiedDocument,
+  invoiceFactsTask, claimTask, failInvoiceFacts, requireRecoveryDoor,
   markSkip, noteLane, printLaneNotes, printSkipCount,
 } from "./x1-helpers.mjs";
 
@@ -49,15 +47,10 @@ let W = null;
 let ready = false;
 let has51 = false;
 
-/** Read from the migration ledger, not from the function's existence: request_reextraction
- *  exists at 0022 and every migration since, so probing the FUNCTION would green this
- *  battery against a database that has none of 0051's behaviour. */
-async function has0051() {
-  try {
-    const r = await rootQuery("select 1 from clara.schema_migrations where version ~ '^0051_' limit 1");
-    return r.rows.length > 0;
-  } catch { return false; }
-}
+// The readiness gate lives in x1-helpers.mjs (`requireRecoveryDoor`) and is keyed on the
+// migration's STABLE SUFFIX cross-checked against the live catalog — never on '^0051_'. A
+// number-keyed gate goes silently dormant the moment the file is renumbered at merge, which
+// is exactly how a battery reports 0 pass / 17 skip / exit 0 and looks green.
 
 before(async () => {
   try {
@@ -68,12 +61,12 @@ before(async () => {
     noteLane(`rig-docs ensureReady failed (${e?.code ?? "?"}) — probing the live catalog as-is`);
     ready = true;
   }
-  has51 = await has0051();
+  has51 = await requireRecoveryDoor();
   if (ready && has51) W = await buildWorld();
 });
 after(async () => { printLaneNotes("x51-extraction-recovery"); printSkipCount("x51-extraction-recovery"); await endPool(); });
 
-function skip51(t, msg = "0051 not applied — the extraction-recovery-door battery is dormant") {
+function skip51(t, msg = "the extraction-recovery door is not applied — battery dormant") {
   if (!ready || !has51) { markSkip(); t.skip(msg); return true; }
   return false;
 }
@@ -206,21 +199,46 @@ test("[0051] a document whose lane holds a DONE extraction takes the ordinary do
     + "reroute of a population that already had a path");
 });
 
-test("[0051] an in-flight recovery is RETURNED, never double-queued", async (t) => {
+test("[0051] NEWEST, not ANY: once a recovery is queued the door REFUSES rather than re-admitting", async (t) => {
   if (skip51(t)) return;
+  // REPLACES the cell that blessed "any historical failure" admission (cross-model finding #5,
+  // CONFIRMED). The first cut asked `exists(... status='failed')`, so after a recovery was
+  // minted a second call was STILL admitted here — because v1 was failed — and only the
+  // in-flight short-circuit further down stopped it double-minting. An admission that depends
+  // on a later guard for its safety is the wrong admission. The door now reads the LANE's
+  // NEWEST task, which is the queued recovery, and refuses.
   const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
   const first = await requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("x51") });
-  assert.equal(first.reused, false, "mandatory setup: the first call minted a live task");
+  assert.equal(first.admission, "failed_retry", "mandatory setup: the first call was admitted and minted");
+  assert.equal(first.reused, false, "…a live task");
 
-  // A DIFFERENT op_key: op-key replay is not what protects here — the in-flight check is. The
-  // new door admits the call (the FAILED v1 is still there and still the only settled
-  // outcome), and the short-circuit below it answers with the live task rather than racing a
-  // second one onto the same (document, engine, version, lane) key.
-  const second = await requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("x51") });
-  assert.equal(second.task_id, first.task_id, "the second request names the SAME in-flight task");
-  assert.equal(second.reused, true, "…and says so honestly");
-  assert.equal(second.admission, "failed_retry", "…admitted through the recovery door, as it must be");
+  await assertRaises("CLR16",
+    () => requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("x51") }),
+    "a second call while the recovery is still queued");
   assert.equal((await laneTasks(doc.documentId)).length, 2, "…and no third row was created");
+});
+
+test("[0051] NEWEST, not ANY: a stale failure under a newest-DONE task never re-admits", async (t) => {
+  if (skip51(t)) return;
+  // The second half of finding #5, and the one that matters most: in a schema-valid state
+  // where the newest task is 'done' but its extraction row is absent, "any historical failure"
+  // would mint over it. The door must fail closed on the POSITIVE newest-'done' read instead.
+  const doc = await failedFactsDoc(W.users.alice, { client: W.clients.A1 });
+  const firm = (await rootQuery("select firm_id from clara.documents where id=$1", [doc.documentId])).rows[0].firm_id;
+  const v = Math.max(...(await laneTasks(doc.documentId)).map((x) => x.version_n)) + 1;
+  await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status,workflow_run_id,started_at,finished_at,attempt_count)
+     values ($1,$2,'azure-di:prebuilt-invoice:2024-11-30','{}'::jsonb,$3,'invoice_facts','done','rig-run',now(),now(),1)`,
+    [firm, doc.documentId, v]);
+  assert.deepEqual(await extractionsOf(doc.documentId), [],
+    "mandatory setup: the newest task is DONE while its extraction row is absent — schema-valid, and "
+    + "exactly the inconsistent state an any-historical-failure door would mint over");
+
+  await assertRaises("CLR16",
+    () => requestReextraction(W.users.bob, { document: doc.documentId, opKey: opk("x51") }),
+    "re-extracting when the lane's NEWEST task succeeded");
+  assert.equal((await laneTasks(doc.documentId)).length, 2, "…and nothing was minted");
 });
 
 test("[0051] the kind and mime gates are untouched — an unclassified document is still refused", async (t) => {
@@ -349,239 +367,3 @@ test("[0051] the bounded retry converges on the recovery path too, under a force
   assert.equal(committed.find((x) => x.id === r.task_id).status, "queued", "…and the verb's own task is queued");
 });
 
-// ===========================================================================
-// (e) §2 — THE INTAKE RECOVERY DOOR. Re-uploading the same file recovers a failed INGEST.
-//
-// The facts-lane door above is reached by a human verb; THIS one is reached by the ordinary
-// duplicate-intake path, so every cell drives clara.finalize_document_intake for real and
-// reads the committed rows back. The shared setup shape is the one x-lane-widen-0026's own
-// P2 cell established: a verified document, a hand-planted intake task in whatever state the
-// cell is about, then a SECOND intake of the same sha256 — the exact ELSE (adopted) branch.
-//
-// The runtime half — that a minted recovery actually gets a spool sidecar and a run — is
-// proven in packages/runtime/tests/intake-recovery-unit.test.mjs and never here.
-// ===========================================================================
-
-const FIXTURE_ENGINE = "clara-fixture:v1"; // finalize_document_intake's own p_engine_id default
-const AZURE_OCR = "azure-di:prebuilt-layout:2024-11-30";
-
-/** A fresh 64-hex sha, the shape clara.documents' storage_path CHECK is written against. */
-const freshSha = () => randomUUID().replace(/-/g, "").padEnd(64, "0").slice(0, 64);
-
-/** The ONLY error codes a terminally-failed task may carry with a NULL workflow_run_id —
- *  ck_processing_task_binding_0038's own never-claimed allowlist (0038:7304-7305). Every
- *  other failure reaches 'failed' through a CLAIMED task and keeps its run id. */
-const NEVER_CLAIMED = ["budget", "attempt_cap", "skipped_kind", "consent_inactive", "statement_multi_client"];
-
-/** Plant a processing task directly. Setup only — the product path for these states runs
- *  through the runtime workflow, which no DB rig can drive.
- *
- *  IT MUST STILL PLANT A ROW THE PRODUCT COULD PRODUCE. The first cut of this fixture did
- *  not, and the rig said so: five cells died 23514 on ck_processing_task_binding_0038
- *  (0038:7298-7306) before the door was ever exercised.
- *      (status in ('queued','held_egress') and workflow_run_id is null and started_at is null)
- *   or (status in ('running','done')      and workflow_run_id is not null and started_at is not null)
- *   or (status = 'failed' and ((workflow_run_id is not null and started_at is not null)
- *                              or (workflow_run_id is null and started_at is null
- *                                  and error_code in (<the never-claimed five>))))
- *  So 'done' and an ordinary 'failed' (engine_error, internal, …) are CLAIMED shapes: the
- *  workflow claimed the task — stamping workflow_run_id + started_at — and only then settled
- *  it. That is exactly what clara.persist_document_extraction and clara.fail_invoice_facts do,
- *  both of which refuse a task that is not already 'running'. Relaxing the fixture instead
- *  (dropping the constraint, or planting NULLs anyway) would have tested the door against a
- *  row shape the product cannot create — which proves nothing about the door.
- *
- *  `neverClaimed` is deliberately UNUSED by any cell below, and that is a measurement rather
- *  than an oversight: none of the five never-claimed codes is reachable on an INGEST lane
- *  today. `budget` comes from _reserve_processing_call, which is invoice_facts-only; the
- *  claim-time attempt cap is scoped to ('invoice_facts','statement_facts') (0038:6907); and
- *  skipped_kind / consent_inactive / statement_multi_client are the statement router's codes.
- *  The option and its guard exist so that the day one becomes reachable, a cell can plant it
- *  and gets a named refusal instead of a raw 23514 — the door itself already admits it, since
- *  its predicate reads status alone and never the run id. */
-async function plantTask(firm, document, { engine = FIXTURE_ENGINE, version = 1, lane = "ocr", status, error = null, neverClaimed = false } = {}) {
-  if (status === "failed" && neverClaimed && !NEVER_CLAIMED.includes(error)) {
-    throw new Error(`plantTask: '${error}' is not one of the never-claimed codes ${NEVER_CLAIMED.join("/")} — a failed row with no run id would violate ck_processing_task_binding_0038`);
-  }
-  const claimed = status === "running" || status === "done" || (status === "failed" && !neverClaimed);
-  const terminal = status === "done" || status === "failed";
-  const now = new Date().toISOString();
-  const r = await rootQuery(
-    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
-        version_n,lane,status,error_code,workflow_run_id,started_at,finished_at,attempt_count)
-     values ($1,$2,$3,'{}'::jsonb,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
-    [firm, document, engine, version, lane, status, error,
-      claimed ? `rig-run-${randomUUID()}` : null,
-      claimed ? now : null,
-      terminal ? now : null,
-      claimed ? 1 : 0]);
-  return r.rows[0].id;
-}
-
-/** A verified document plus a SECOND intake of the same bytes, finalized — i.e. the adopted
- *  branch, driven for real. `plant` receives (firm, documentId) and sets up the lane state
- *  the cell is about. Returns { documentId, receipt }. */
-async function reIngest(firm, plant, { lane = null, engine = null } = {}) {
-  const sha = freshSha();
-  const seed = await seedVerifiedDocument({ firm, sha256: sha, mime: "application/pdf" });
-  await plant(firm, seed.documentId);
-  // uploadedBy is MANDATORY, not decoration: the 0007 attribution trigger resolves an
-  // intake's firm from `firm_memberships where user_id = new.uploaded_by and status='active'`
-  // (0007:440-443) and raises CLR11 'uploader has no matching intake firm' when that read
-  // comes back empty — which a NULL uploader always does. The first cut of this fixture
-  // omitted it and the rig caught it. Same binding every other intake seed in
-  // rig-docs-fixtures.mjs uses.
-  const dup = await seedIntake({
-    firm, uploadedBy: W.users.alice, sha256: sha, status: "verified", mime: "application/pdf",
-    storageKey: `firms/${firm}/docs/${sha}.pdf`,
-  });
-  // The explicit-lane cells bypass the adaptive wrapper so they can pass p_lane themselves.
-  const receipt = (lane || engine)
-    ? (await roleQuery(ROLES.runtime,
-        `select clara.finalize_document_intake(p_intake=>$1, p_engine_id=>$2, p_lane=>$3,
-           p_version_n=>1, p_op_key=>$4) as r`,
-        [dup, engine ?? FIXTURE_ENGINE, lane ?? "ocr", opk("x51fin")])).rows[0].r
-    : await finalizeIntake({ intake: dup });
-  return { documentId: seed.documentId, sha, receipt };
-}
-
-test("[0051 §2] a failed INGEST + a re-upload of the same bytes: adopted, and a recovery attempt is minted", async (t) => {
-  if (skip51(t)) return;
-  const firm = W.firms.A;
-  let failedTask = null;
-  const { documentId, sha, receipt } = await reIngest(firm, async (f, d) => {
-    failedTask = await plantTask(f, d, { status: "failed", error: "engine_error" });
-  });
-
-  // The ORIGINAL exhibit shape: exactly one ingest task, terminal, nothing else.
-  const frozen = await taskRow(failedTask);
-  assert.equal(frozen.status, "failed", "mandatory setup: the document's only ingest task is TERMINAL");
-
-  assert.equal(receipt.status, "adopted",
-    "the receipt still says ADOPTED — the document really was adopted by sha256, and a "
-    + "recovery does not change that fact for any existing reader");
-  assert.ok(receipt.recovery, "…and it now carries a recovery fragment");
-  assert.equal(receipt.recovery.lane, "ocr", "…on the ingest lane");
-  assert.equal(receipt.recovery.version_n, 2, "…at version max+1");
-  assert.equal(receipt.recovery.engine_id, FIXTURE_ENGINE,
-    "…on the SAME engine the failed attempt used, so the lane/engine CHECK holds and the chain composes");
-  assert.equal(receipt.recovery.sha256, sha, "…carrying the document's own sha256");
-  assert.equal(receipt.recovery.mime_type, "application/pdf", "…and its mime");
-  assert.equal(receipt.recovery.storage_path, `firms/${firm}/docs/${sha}.pdf`,
-    "…and the DOCUMENT row's storage_path, which ck_documents_storage_path_v2 pins to the "
-    + "content-addressed template the re-uploading runtime just computed for these same bytes");
-  assert.equal(receipt.task_id, receipt.recovery.task_id,
-    "the receipt's task_id names the LIVE task, not the dead one it was minted from");
-
-  const tasks = await laneTasks(documentId, "ocr");
-  assert.equal(tasks.length, 2, "exactly one new row exists");
-  const fresh = tasks.find((x) => x.id === receipt.recovery.task_id);
-  assert.equal(fresh.status, "queued", "the committed recovery row is queued");
-  assert.equal(fresh.version_n, 2, "…at the next version");
-  assert.equal(fresh.error_code, null, "…and carries no error code");
-
-  // ADR-062's binding requirement, over the WHOLE row rather than a chosen column.
-  assert.deepEqual(await taskRow(failedTask), frozen,
-    "the terminally-failed row is byte-identical afterwards — a SIBLING was minted, the "
-    + "failure was never reopened (which _tf_processing_task_update would refuse anyway)");
-});
-
-test("[0051 §2] a HEALTHY adoption is untouched — no recovery, no new task, and no `recovery` key at all", async (t) => {
-  if (skip51(t)) return;
-  const firm = W.firms.A;
-  const { documentId, receipt } = await reIngest(firm, (f, d) => plantTask(f, d, { status: "done" }));
-
-  assert.equal(receipt.status, "adopted", "a healthy duplicate still adopts");
-  assert.equal(receipt.recovery, undefined,
-    "…and the receipt carries NO recovery key whatsoever — not even a null one. The key is "
-    + "appended conditionally precisely so that every intake receipt in the product stays "
-    + "byte-identical to what it was");
-  assert.equal((await laneTasks(documentId, "ocr")).length, 1,
-    "…and nothing was minted: this is the overwhelmingly common path and it must not change");
-});
-
-test("[0051 §2] an IN-FLIGHT ingest blocks the recovery even when the newest task on its own engine failed", async (t) => {
-  if (skip51(t)) return;
-  // The condition-(3) cell specifically. The newest task on (clara-fixture:v1, ocr) IS failed,
-  // so condition (2) is satisfied — but another task on the SAME LANE under a DIFFERENT engine
-  // is queued. That is why the in-flight guard is deliberately wider than the failed-task read:
-  // an in-flight task under any engine would still egress, and two live tasks on one ingest
-  // lane is a double vendor read.
-  const firm = W.firms.A;
-  const { documentId, receipt } = await reIngest(firm, async (f, d) => {
-    await plantTask(f, d, { status: "failed", error: "engine_error" });
-    await plantTask(f, d, { engine: AZURE_OCR, version: 2, status: "queued" });
-  });
-
-  assert.equal(receipt.status, "adopted", "still adopted");
-  assert.equal(receipt.recovery, undefined,
-    "…and NO recovery was minted while a task on that lane is still in flight");
-  assert.equal((await laneTasks(documentId, "ocr")).length, 2, "…and no third row was created");
-});
-
-test("[0051 §2] a QUEUED newest task is not a failure — nothing is minted", async (t) => {
-  if (skip51(t)) return;
-  // The condition-(2) cell. 'queued' is not 'failed', and the door reads the task POSITIVELY:
-  // an admission phrased as "no successful ingest" would fire here, on a document whose
-  // pipeline is simply still running.
-  const firm = W.firms.A;
-  const { documentId, receipt } = await reIngest(firm, (f, d) => plantTask(f, d, { status: "queued" }));
-  assert.equal(receipt.recovery, undefined, "an in-flight first attempt is not a recovery case");
-  assert.equal((await laneTasks(documentId, "ocr")).length, 1, "…and nothing was minted");
-});
-
-test("[0051 §2] a failed FACTS extraction on a healthy ingest gets NO ingest recovery — that is §1's verb", async (t) => {
-  if (skip51(t)) return;
-  // The boundary between the two doors, asserted rather than assumed. This document's INGEST
-  // succeeded; what failed is its invoice_facts pass. Re-uploading the bytes must not silently
-  // re-buy an OCR read — the facts failure is recovered by request_reextraction, under a
-  // bookkeeper's hand and an audited reason.
-  const firm = W.firms.A;
-  const { documentId, receipt } = await reIngest(firm, async (f, d) => {
-    await plantTask(f, d, { status: "done" });
-    await plantTask(f, d, { engine: "azure-di:prebuilt-invoice:2024-11-30", version: 1, lane: "invoice_facts", status: "failed", error: "internal" });
-  });
-
-  assert.equal(receipt.recovery, undefined,
-    "the intake door never looks at a facts lane — a failed invoice_facts attempt is "
-    + "request_reextraction's population, not a re-upload's");
-  assert.equal((await laneTasks(documentId, "ocr")).length, 1, "…the ingest lane is untouched");
-  assert.equal((await laneTasks(documentId, "invoice_facts")).length, 1, "…and so is the facts lane");
-});
-
-test("[0051 §2] the door is gated to the INGEST lanes: a facts lane passed explicitly mints nothing", async (t) => {
-  if (skip51(t)) return;
-  // Condition (1), driven directly. packages/runtime/lib/intake-lanes.mjs never produces a
-  // facts lane here, so this argument is only reachable by a caller that constructs it — and
-  // the gate is the wall for exactly that. Without it, a caller could turn a re-upload into a
-  // silent, unaudited facts re-extraction that bypasses request_reextraction's bookkeeper
-  // floor entirely.
-  const firm = W.firms.A;
-  const { documentId, receipt } = await reIngest(
-    firm,
-    (f, d) => plantTask(f, d, { engine: "azure-di:prebuilt-invoice:2024-11-30", version: 1, lane: "invoice_facts", status: "failed", error: "internal" }),
-    { lane: "invoice_facts", engine: "azure-di:prebuilt-invoice:2024-11-30" },
-  );
-  assert.equal(receipt.recovery, undefined,
-    "a facts lane is refused by the door's own gate, however it is reached");
-  assert.equal((await laneTasks(documentId, "invoice_facts")).length, 1, "…and no facts task was minted");
-});
-
-test("[0051 §2] the recovery door opened no new reach — finalize_document_intake stays runtime-only", async (t) => {
-  if (skip51(t)) return;
-  // The mirror of §1's cost-bound cell. This part deliberately avoids widening anybody's
-  // privileges — that is WHY it lives in finalize_document_intake at all rather than in a new
-  // verb granted to the runtime. Asserted here rather than inherited from the migration tail,
-  // because a tail runs once at apply time and a cell runs on every database the suite meets.
-  for (const role of [ROLES.authenticated, ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive]) {
-    if (!role) continue;
-    const err = await roleQuery(role,
-      "select clara.finalize_document_intake($1,null,'clara-fixture:v1','{}'::jsonb,1,'ocr',null,null,$2)",
-      [randomUUID(), opk("x51fin")]).then(() => null, (e) => e);
-    assert.ok(err, `${role} must not be able to execute finalize_document_intake`);
-    assert.equal(err.code, "42501", `${role} is refused at the GRANT, not inside the body`);
-  }
-  const allow = await rootQuery(
-    "select count(*)::int n from clara.wake_fn_allowlist where function_name='finalize_document_intake'");
-  assert.equal(allow.rows[0].n, 0, "…and no wake allowlist row admits it for any wake kind");
-});
