@@ -22,6 +22,7 @@ import {
 import { downloadCanonical, putCanonical, StorageError, verifyCanonical } from "./storage.mjs";
 import { parseStructured } from "./structured.mjs";
 import { laneSnapshot } from "./intake-lanes.mjs";
+import { recoveryTaskMeta } from "./intake-recovery.mjs";
 import { processDocumentTaskBehavior } from "../workflows/documentIngest.behavior.mjs";
 
 const MAX_BYTES = 20 * 1024 * 1024;
@@ -361,9 +362,14 @@ export async function finalizeDocumentIntake(options) {
     );
     requireContinuableIntakeReceipt(finalized);
 
-    const needsStart = finalized.status === "finalized" || finalized.upgraded === true;
-    if (needsStart && finalized.task_id) {
-      const task = {
+    // 0051 §2 — the intake recovery door, runtime half. Rationale + every refusal:
+    // intake-recovery.mjs. Returns the recovery task's sidecar, or null (fail-closed).
+    const recovery = await recoveryTaskMeta(finalized, {
+      firmId: meta.firmId, detected, snapshot, canonicalKey: key,
+    });
+    const needsStart = finalized.status === "finalized" || finalized.upgraded === true || recovery !== null;
+    if (needsStart && (recovery?.taskId || finalized.task_id)) {
+      const task = recovery ?? {
         schemaVersion: 1,
         taskId: String(finalized.task_id),
         documentId: String(finalized.document_id),
@@ -380,6 +386,10 @@ export async function finalizeDocumentIntake(options) {
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
+      // Sidecar BEFORE enqueue, as the fresh path has always done — documentIngest_v2 claims
+      // via noteClaim -> mergeTaskMeta{requireExists:true} and hard-fails on a null
+      // readTaskMeta (behavior_v2.mjs:176-177). The crash-between-commit-and-write residual
+      // is the fresh path's own, unchanged: not a new class.
       await writeTaskMeta(task.taskId, task);
       try {
         const run = await enqueue(task.taskId);

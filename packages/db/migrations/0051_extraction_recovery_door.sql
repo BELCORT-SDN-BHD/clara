@@ -674,3 +674,614 @@ begin
   raise notice '0051 tail grants: clean -- request_reextraction is still clara_authenticated-only, no machine role, no PUBLIC, zero wake_fn_allowlist rows';
 end
 $tail51_grants$;
+
+-- #####################################################################################
+--
+--  PART 2 -- THE INTAKE RECOVERY DOOR: re-uploading the same file recovers a failed
+--  INGEST. (Sections 4-6. Part 1, above, is the facts-lane door in
+--  clara.request_reextraction.)
+--
+-- #####################################################################################
+--
+-- WHY A SECOND DOOR. Part 1 closes the FACTS-lane half of F6 (a failed invoice_facts /
+-- local_facts attempt). ADR-062's own registration names the other half -- "a
+-- terminally-failed document INGEST has no recovery door ... surfaced by the 2026-08-06
+-- Azure DI credential outage that failed seven fresh ingests" -- and PROJECTLOG.md:128 hangs
+-- Gate P's four waiting manual bills off it. Part 1 CANNOT reach that population: an ingest
+-- that died was never classified, so request_reextraction's kind gate (0026:1053-1058)
+-- refuses it before the admission chain is consulted at all.
+--
+-- THE ROUTE THAT WAS REFUSED, AND WHY THIS FILE LOOKS THE WAY IT DOES. The obvious fix --
+-- have request_reextraction mint an 'ocr' task -- is unbuildable without widening the
+-- runtime's privilege surface, and that widening is REFUSED (orchestrator ruling: the
+-- security posture is the product under test). The measurement behind the refusal:
+--   * packages/runtime/workflows/documentIngest.behavior_v2.mjs:176-177 hard-fails a task
+--     whose spool sidecar is absent (`if (!task) throw ... {code:"internal"}`), then reads
+--     task.storageKey/.sha256/.mime/.format at :190-193. @frozen AND deployed.
+--   * packages/runtime/workflows/documentIngest.impl.ts:56-59 (also @frozen + deployed)
+--     keeps only `result.status` from the claim receipt -- the storage_path/sha256/mime_type
+--     clara.claim_document_processing_task returns (0038:6942-6946) are DISCARDED inside the
+--     frozen step, so no unfrozen code can ever see them.
+--   * The runtime holds NO SELECT on clara.documents (PIN-AB-6,
+--     packages/runtime/lib/reconciler-documents.mjs:157-162), and `format` is not a column
+--     of clara.documents at all.
+-- A DB-minted ingest task is therefore undispatchable unless clara_runtime gains a new
+-- definer verb handing out document transport metadata WITHOUT a claim. Refused.
+--
+-- THE GRANT-CLEAN ROUTE THIS PART BUILDS. The user-natural recovery action for a failed
+-- ingest is RE-UPLOADING THE SAME FILE -- and that action already carries every input the
+-- frozen workflow needs, because the intake path computed them itself moments earlier.
+-- Today it dead-ends: finalize_document_intake's duplicate branch ADOPTS the existing
+-- document (door 3 of ADR-064's four), refunds the reservation and mints nothing
+-- (0026:298-309), and the runtime's `needsStart` is false for an adopted receipt
+-- (intake.mjs:364), so no run starts. This part opens exactly that door for the FAILED case
+-- and only for it. NO NEW GRANT OF ANY KIND: finalize_document_intake is already granted to
+-- clara_runtime (0015:3663) and already reads every row the recovery needs.
+--
+-- =====================================================================================
+-- LINEAGE OF THE BODY BEING PATCHED, CHECKED THE SAME WAY PART 1'S WAS
+-- =====================================================================================
+--   0007_document_pipeline.sql:1977  the original CREATE.
+--   0015_ar_myinvois_rules.sql:3431  CoR -- retire the 'fixture-engine' default.
+--   0026_lane_widen.sql:234          CoR (§C) -- the LAST full CREATE OR REPLACE: the ON
+--                                    CONFLICT target widens to include lane, the
+--                                    duplicate-path re-select gains its (engine_id,lane) pin
+--                                    (P2), and the impossible-state CLR35 raise lands.
+-- Grepped 0027..0050 for any later CoR **or dynamic splice**: NONE. No `pg_get_functiondef`
+-- anywhere in the tree names this function; 0027/0038 mention it only in comments and an
+-- existence probe, and 0042/0044 only carry its name inside a census array. So unlike Part
+-- 1's target, 0026's file text IS the live body here.
+--
+-- THIS PART STILL USES HARVEST-AND-SPLICE ANYWAY. A from-file `create or replace` would be
+-- defensible (it is what 0050 did) but it is strictly weaker: it re-ships ~120 lines this
+-- migration has no business re-typing, and one transcription slip in any of them is a silent
+-- revert no prestate probe would catch -- because the probe would be written against the
+-- same mistaken text. Three small anchors under count guards can only change what they name.
+-- One discipline for both parts.
+--
+-- =====================================================================================
+-- THE ADMISSION, AND EVERY POPULATION IT REFUSES
+-- =====================================================================================
+-- Inside the ADOPTED branch only (`not v_created and not v_upgraded`; a fresh or upgraded
+-- document already mints its own task and is untouched here), the door mints ONE new attempt
+-- row when ALL of these hold:
+--   (1) p_lane is an INGEST lane -- 'ocr' / 'structured_parse' / 'none'. A facts lane
+--       reaching this argument is refused outright: a failed FACTS attempt is Part 1's verb,
+--       under a bookkeeper's hand and an audited reason, not something a re-upload should
+--       silently re-buy. (Reachable today only by a caller passing a lane
+--       packages/runtime/lib/intake-lanes.mjs never produces -- the gate is the wall for it.)
+--   (2) The NEWEST task on this document's own (engine_id, lane) is status='failed'. A
+--       POSITIVE read of a committed row -- the same Law-2 form Part 1 uses and for the same
+--       reason: "no successful task" is an ABSENCE shared by never-started, in-flight and
+--       failed documents alike. Terminality needs no second column
+--       (ck_processing_task_terminal, 0007:175; 0011:1292 and 1298-1307 admit no transition
+--       out of 'failed').
+--       Scoped to (engine_id, lane) deliberately: it is the scope 0026's own duplicate-path
+--       re-select already uses (P2, 0026:300-308); it makes version_n UNIQUE within the
+--       scope, so `order by version_n desc limit 1` is deterministic rather than a
+--       nondeterministic tie-break (0026 P2's own lesson); and if the engine snapshot has
+--       changed since the original ingest the read finds nothing and NO recovery is minted,
+--       which is the fail-closed answer, not a bug.
+--   (3) NO task on that lane -- ANY engine -- is 'queued'/'held_egress'/'running'. Widened
+--       past (2)'s engine scope on purpose: an in-flight task under a different engine id
+--       would still egress, and two live tasks on one lane is exactly the double vendor read
+--       this condition exists to prevent.
+-- REFUSED, each deliberately: an ingest lane whose newest task is 'done' (a healthy
+-- adoption -- unchanged, and the overwhelmingly common case); anything in flight; a document
+-- whose INGEST succeeded but whose FACTS extraction failed (Part 1's verb -- this door never
+-- looks at a facts lane); and every non-adopted path.
+--
+-- THE MINT mirrors Part 1: version_n = max+1 over (document_id, lane), a fresh row, `on
+-- conflict do nothing`. It NEVER touches the failed row -- _tf_processing_task_update would
+-- refuse it anyway, and ADR-062's binding requirement is a sibling, never a reopen.
+--
+-- WHY NO BOUNDED RETRY LOOP HERE (Part 1 has one). Part 1's loop exists because two humans
+-- can press its button concurrently with nothing serialising them. This function has already
+-- taken `select * into d from clara.documents ... for update` (0026:263) before reaching this
+-- branch, and clara.documents is the ONLY row an ingest-lane minter locks -- so two
+-- concurrent finalizes of the same bytes serialise on it, and nothing else mints on an ingest
+-- lane at all (request_reextraction and _enqueue_invoice_facts_core are facts-lane writers).
+-- A conflict here is genuinely impossible, and the file's own impossible-state-loud idiom
+-- (the CLR35 raise §C itself installed, 0026:292-295) is the honest response to one -- not a
+-- retry pretending to handle a case that cannot arise.
+--
+-- THE RECEIPT gains a `recovery` object -- {task_id, lane, version_n, engine_id,
+-- storage_path, sha256, mime_type} -- and ONLY when a recovery was actually minted. It is
+-- appended with `|| case when ... then '{}'::jsonb ...`, never through jsonb_build_object's
+-- own argument list, so a receipt with no recovery is BYTE-IDENTICAL to what this function
+-- returns today (a `'recovery', null` key would have changed every intake receipt in the
+-- product for the sake of one branch). `status` stays 'adopted': the document really was
+-- adopted, and re-labelling it would lie to every existing reader.
+--
+-- `task_id` DOES change for this one population -- it becomes the recovery task. Verified
+-- before doing it rather than assumed: `finalized.task_id` has exactly ONE consumer,
+-- packages/runtime/lib/intake.mjs:365-368, and it is guarded by `needsStart`, which is FALSE
+-- for every adopted receipt today. So no live reader can observe the change, and the
+-- alternative -- a receipt (and an audit row, 0026:335-337) naming a DEAD task while the same
+-- transaction just minted a live one -- is the stale answer this repo does not ship.
+--
+-- =====================================================================================
+-- THE RESERVATION, MEASURED: the recovered read is NOT charged to the daily page budget
+-- =====================================================================================
+-- The adopted branch refunds the intake's reservation one statement earlier
+-- (`_refund_document_reservation(..., 'duplicate-adopted')`, 0026:299) and the recovery does
+-- not open a new one. Both settle paths handle that cleanly -- checked, not assumed:
+-- clara._settle_document_reservation returns null on `if not found`, with its own comment
+-- "an adopted existing document has no new carrier" (0007:1699-1701), and
+-- clara._refund_document_reservation likewise (0007:1684-1686). A recovered task therefore
+-- settles or fails with no reservation and no raise.
+-- The consequence, stated rather than discovered later: a recovered OCR read is not counted
+-- against clara.firm_document_limits.pages_per_day. It is NOT unbounded -- a recovery
+-- requires a REAL prior failure (condition 2) and refuses while anything is in flight
+-- (condition 3), so the only way to buy a second one is for the first to genuinely fail --
+-- and the kill switch plus the per-firm OCR concurrency cap both still gate the claim
+-- (0038:6866-6868, 6926-6933). Binding a fresh reservation would mean a new reservation
+-- writer and a second refund path: net-new surface for a bound the failure requirement
+-- already supplies. REGISTERED, not built.
+--
+-- =====================================================================================
+-- THE RUNTIME HALF (packages/runtime/lib/intake.mjs -- UNFROZEN, same commit)
+-- =====================================================================================
+-- The DB half alone would mint a task the deployed image cannot run. intake.mjs now
+-- materialises the spool sidecar for the recovery task id BEFORE any enqueue, exactly as it
+-- already does for a freshly finalized task (intake.mjs:366-383), and extends `needsStart`
+-- to include a recovery-bearing receipt. documentIngest.behavior_v2 / .impl.ts stay
+-- BYTE-UNTOUCHED -- by the time the workflow claims, a recovered task is indistinguishable
+-- from an intake-minted one.
+--
+-- THE storage_path NAMESPACE QUESTION, ANSWERED BY A SCHEMA CONSTRAINT RATHER THAN BY
+-- INFERENCE. The runtime writes the sidecar's storageKey from the receipt's
+-- `recovery.storage_path` (clara.documents.storage_path), not from its own freshly computed
+-- key. The two are provably the same string:
+--   * clara.documents carries ck_documents_storage_path_v2 (0007_document_pipeline.sql:53-54)
+--     -- `storage_path ~ ('^firms/' || firm_id::text || '/docs/' || sha256 ||
+--     '[.][a-z0-9]{1,12}$')`. The DB ENFORCES the content-addressed layout.
+--   * packages/runtime/lib/intake.mjs:273 computes exactly that template:
+--     `firms/${meta.firmId}/docs/${meta.sha256}.${detected.ext}`.
+-- Adoption MEANS same firm + same sha256 (0026:263 matches on firm_id+sha256), which leaves
+-- only the extension free -- and that comes from detectDocument over identical bytes. So the
+-- fresh upload discards nothing: putCanonical (intake.mjs:274) re-writes the SAME
+-- content-addressed object, and verifyCanonical (:275/:280) has already proven the object at
+-- that key hashes to that sha256 in this very call.
+-- The DB value is nonetheless the one used, for two reasons that survive even if that
+-- equality ever stopped holding: it is what the DOCUMENT row asserts and therefore what
+-- clara.claim_document_processing_task hands every other lane (0038:6851-6852), and it is a
+-- positive read of the durable record rather than a recomputation. The runtime cross-checks
+-- the two and, on any divergence, re-verifies the DB's object before using it -- refusing to
+-- start if that verification fails.
+-- `format` is the ONE field that cannot come from the DB (clara.documents has no such
+-- column; it is an intake-time detection, intake.mjs:348). The recovery path takes it from
+-- THIS upload's own detection over the same bytes, and cross-checks that
+-- laneSnapshot(format).lane equals the lane the DB minted on; a mismatch refuses to start
+-- rather than handing the workflow a reader its lane disagrees with.
+--
+-- =====================================================================================
+-- ACCEPTANCE CAUTION, RECORDED AT THE ORCHESTRATOR'S INSTRUCTION
+-- =====================================================================================
+-- NOBODY MAY CLAIM THIS DOOR UNBLOCKS GATE P'S FOUR WAITING MANUAL BILLS UNTIL A LIVE READ
+-- SAYS SO. ADR-062 and PROJECTLOG.md:128 describe those four in prose; NO document_id and NO
+-- failed lane is recorded in any file in this repo. Whether each is a failed INGEST (this
+-- door), a failed FACTS extraction (Part 1's door), or neither, is a measurement that must be
+-- taken against the live database at acceptance time -- `select lane, status, error_code,
+-- version_n from clara.document_processing_tasks where document_id = ...` per bill -- BEFORE
+-- any claim is made. A door that exists is not evidence that a specific document can walk
+-- through it.
+
+-- =====================================================================
+-- SECTION 4 -- PART 2 PRESTATE. Same discipline as section 0: every claim the Part 2 header
+-- makes about the body being patched is measured before a byte changes.
+-- =====================================================================
+create temp table _x51_pre2(
+  secdef boolean not null,
+  config text not null,
+  acl    text not null
+) on commit drop;
+
+do $prestate51b$
+declare
+  v_n int; v_def text; v_count int; v_secdef boolean; v_config text; v_acl text;
+  v_key text; v_a1 text; v_a2 text; v_a3 text;
+begin
+  -- (4.1) EXACTLY ONE finalize_document_intake overload, at the pinned 9-arity signature.
+  select count(*) into v_n from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace and p.proname = 'finalize_document_intake';
+  if v_n <> 1 then
+    raise exception '0051 §2 prestate: expected exactly ONE clara.finalize_document_intake overload, found %', v_n
+      using errcode = 'CLR10';
+  end if;
+  perform 'clara.finalize_document_intake(uuid,text,text,jsonb,int,text,uuid,uuid,text)'::regprocedure;
+
+  select pg_get_functiondef('clara.finalize_document_intake(uuid,text,text,jsonb,int,text,uuid,uuid,text)'::regprocedure)
+    into v_def;
+  if v_def is null then
+    raise exception '0051 §2 prestate: clara.finalize_document_intake is GONE' using errcode = 'CLR10';
+  end if;
+
+  -- (4.2) ALREADY-APPLIED GUARD.
+  if position('v_recovery' in v_def) <> 0 then
+    raise exception '0051 §2 prestate: the intake recovery door is already installed -- 0051 (or an equivalent recut) has already been applied to this database'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (4.3) THE 0026 §C LINEAGE, marker by marker. Each of these is a real fix that a
+  -- from-file rebuild of an OLDER body would silently revert.
+  foreach v_key in array array[
+      'on conflict (document_id,engine_id,version_n,lane) do nothing',
+      'duplicate-adopted',
+      'impossible state: an ON CONFLICT fired',
+      'where document_id=v_doc and engine_id=p_engine_id and lane=p_lane'] loop
+    if position(v_key in v_def) = 0 then
+      raise exception '0051 §2 prestate: finalize_document_intake is missing the 0026 section-C marker % -- the live body is not the 0026 recut this patch was authored against', v_key
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- (4.4) THE LOCK THE "NO RETRY LOOP NEEDED" ARGUMENT RESTS ON, read POSITIVELY. If this
+  -- function ever stops locking the documents row before the adopted branch, two concurrent
+  -- finalizes of the same bytes could both reach the recovery mint and the CLR35 raise below
+  -- would stop being an impossible-state assertion and start being a reachable crash.
+  if position('where firm_id=i.firm_id and sha256=i.sha256 for update' in v_def) = 0 then
+    raise exception '0051 §2 prestate: finalize_document_intake no longer locks the documents row FOR UPDATE before adopting -- the recovery mint below is written on the premise that this lock serialises every concurrent finalize of the same bytes, and without it the mint needs a bounded retry loop this file does not ship'
+      using errcode = 'CLR10';
+  end if;
+
+  -- (4.5) EXACTLY ONE direct task INSERT today (the intake mint). Section 6 asserts TWO.
+  v_count := (length(v_def) - length(replace(v_def, 'insert into clara.document_processing_tasks', '')))
+    / length('insert into clara.document_processing_tasks');
+  if v_count <> 1 then
+    raise exception '0051 §2 prestate: finalize_document_intake carries % direct task INSERT(s), expected exactly 1 (the intake mint) -- the body is not the one this file accounts for', v_count
+      using errcode = 'CLR10';
+  end if;
+
+  -- (4.6) THE THREE ANCHORS, each exactly once.
+  v_a1 := $p1$declare
+  i record; d record; v_dedupe jsonb; v_doc uuid; v_task uuid; v_filing uuid;
+  v_created boolean:=false; v_upgraded boolean:=false; v_filed boolean:=false; v_basis text;
+  v_expired jsonb;
+begin$p1$;
+  v_a2 := $p2$    select id into v_task from clara.document_processing_tasks
+      where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
+      order by version_n desc limit 1;
+  end if;$p2$;
+  v_a3 := $p3$  return clara._finish_op(i.firm_id,'finalize_document_intake',p_op_key,
+    jsonb_build_object('intake_id',p_intake,'document_id',v_doc,'task_id',v_task,
+      'filing_id',v_filing,'status',case when v_created then 'finalized' else 'adopted' end,
+      'upgraded',v_upgraded));$p3$;
+  foreach v_key in array array[v_a1, v_a2, v_a3] loop
+    v_count := (length(v_def) - length(replace(v_def, v_key, ''))) / length(v_key);
+    if v_count <> 1 then
+      raise exception '0051 §2 prestate: a splice anchor occurs % times in the live body (expected 1) -- the body drifted from the 0026 section-C text this file was authored against. Anchor: %', v_count, left(v_key, 80)
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  -- (4.7) STASH the privilege shape for section 6's byte-identical proof.
+  select prosecdef, coalesce(array_to_string(proconfig, '|'), '<none>'),
+      coalesce(pg_catalog.array_to_string(proacl, '|'), '<default>')
+    into v_secdef, v_config, v_acl
+    from pg_proc where oid = 'clara.finalize_document_intake(uuid,text,text,jsonb,int,text,uuid,uuid,text)'::regprocedure;
+  if not v_secdef then
+    raise exception '0051 §2 prestate: clara.finalize_document_intake is not SECURITY DEFINER'
+      using errcode = 'CLR10';
+  end if;
+  if v_config = '<none>' or position('search_path=' in v_config) = 0 then
+    raise exception '0051 §2 prestate: clara.finalize_document_intake carries no pinned search_path (proconfig %)', v_config
+      using errcode = 'CLR10';
+  end if;
+  insert into _x51_pre2(secdef, config, acl) values (v_secdef, v_config, v_acl);
+
+  raise notice '0051 §2 prestate: clean (one finalize_document_intake overload, the 0026 section-C lineage intact, the documents FOR UPDATE lock live, one task INSERT, all three anchors occur exactly once)';
+end
+$prestate51b$;
+
+-- =====================================================================
+-- SECTION 5 -- PART 2 SPLICE. Three anchors, each count-guarded, harvested from the live
+-- catalog and never re-typed (same law as section 1).
+-- =====================================================================
+set role clara_fn_owner;
+do $splice51b$
+declare
+  v_def text; v_frm text; v_to text; v_count int;
+begin
+  select pg_get_functiondef('clara.finalize_document_intake(uuid,text,text,jsonb,int,text,uuid,uuid,text)'::regprocedure)
+    into v_def;
+
+  -- EDIT 1 -- four locals for the recovery door.
+  v_frm := $f1$declare
+  i record; d record; v_dedupe jsonb; v_doc uuid; v_task uuid; v_filing uuid;
+  v_created boolean:=false; v_upgraded boolean:=false; v_filed boolean:=false; v_basis text;
+  v_expired jsonb;
+begin$f1$;
+  v_count := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_count <> 1 then
+    raise exception '0051 S5 edit 1: the declare block appears % times (expected 1)', v_count using errcode='CLR10';
+  end if;
+  v_to := $t1$declare
+  i record; d record; v_dedupe jsonb; v_doc uuid; v_task uuid; v_filing uuid;
+  v_created boolean:=false; v_upgraded boolean:=false; v_filed boolean:=false; v_basis text;
+  v_expired jsonb;
+  -- 0051 §2 (the intake recovery door): the recovery receipt fragment, the failed ingest
+  -- task it was minted from, and the new row's version + id.
+  v_recovery jsonb; v_ing record; v_rvn int; v_rtask uuid;
+begin$t1$;
+  v_def := replace(v_def, v_frm, v_to);
+
+  -- EDIT 2 -- the recovery door itself, appended INSIDE the adopted branch, after the
+  -- existing (byte-untouched) duplicate-path re-select.
+  v_frm := $f2$    select id into v_task from clara.document_processing_tasks
+      where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
+      order by version_n desc limit 1;
+  end if;$f2$;
+  v_count := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_count <> 1 then
+    raise exception '0051 S5 edit 2: the adopted-branch re-select appears % times (expected 1)', v_count using errcode='CLR10';
+  end if;
+  v_to := $t2$    select id into v_task from clara.document_processing_tasks
+      where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
+      order by version_n desc limit 1;
+
+    -- 0051 §2 -- THE INTAKE RECOVERY DOOR (§7-A finding F6 / task #31 + the ADR-062
+    -- extraction-recovery-door registration; the INGEST half, whose facts-lane twin is the
+    -- 'failed_retry' door in clara.request_reextraction).
+    --
+    -- Re-uploading the same file is the recovery action a human actually takes when an
+    -- ingest dies. Until now it dead-ended right here: the document is ADOPTED by sha256,
+    -- the reservation is refunded, nothing is minted, and the runtime's needsStart is false
+    -- for an adopted receipt -- so a document whose ONLY ingest attempt failed had no way
+    -- back into the pipeline except an out-of-product re-export with different bytes
+    -- (ADR-064 §3's fourth door, a user workaround rather than a product one).
+    --
+    -- THE READ IS OF THE TASK ROW, POSITIVELY (evidence law 2). "No successful ingest" is an
+    -- ABSENCE shared by never-started, in-flight and failed documents alike; status='failed'
+    -- is a state a writer committed. ck_processing_task_terminal (0007:175) and the
+    -- transition trigger (0011:1292, 1298-1307) make that read terminal by construction, so
+    -- no second column is consulted.
+    --
+    -- THREE CONDITIONS, each load-bearing:
+    --   (1) an INGEST lane only. A facts lane is refused outright -- a failed FACTS attempt
+    --       is request_reextraction's verb, under a bookkeeper's hand and an audited reason,
+    --       never something a silent re-upload re-buys.
+    --   (2) the NEWEST task on THIS document's own (engine_id, lane) is 'failed'. Scoped to
+    --       engine_id as well as lane because that is the scope 0026's P2 fix already uses
+    --       just above, and because it makes version_n unique within the scope -- so the
+    --       ordering is deterministic rather than a tie-break. A changed engine snapshot
+    --       finds nothing and mints nothing: fail-closed.
+    --   (3) NOTHING is in flight on that lane, under ANY engine -- deliberately wider than
+    --       (2). Two live tasks on one ingest lane is a double vendor read.
+    --
+    -- NO RETRY LOOP, and that is not an oversight: this transaction already holds
+    -- clara.documents FOR UPDATE from the adoption read above, and no other writer mints on
+    -- an ingest lane (request_reextraction and _enqueue_invoice_facts_core are both
+    -- facts-lane writers), so the version cannot be lost. A conflict here is an impossible
+    -- state and gets this file's loudest answer, which is the same CLR35 idiom 0026 §C
+    -- installed one branch up.
+    --
+    -- THE FAILED ROW IS NEVER TOUCHED -- a sibling at the next version, exactly as ADR-062
+    -- requires (and as _tf_processing_task_update would enforce regardless).
+    if p_lane in ('ocr','structured_parse','none') then
+      select * into v_ing from clara.document_processing_tasks
+        where document_id=v_doc and engine_id=p_engine_id and lane=p_lane
+        order by version_n desc limit 1;
+      if found and v_ing.status='failed'
+         and not exists (select 1 from clara.document_processing_tasks pit
+             where pit.document_id=v_doc and pit.lane=p_lane
+               and pit.status in ('queued','held_egress','running')) then
+        select coalesce(max(version_n),0)+1 into v_rvn
+          from clara.document_processing_tasks
+          where document_id=v_doc and lane=p_lane;
+        insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+            version_n,lane,status)
+          values(i.firm_id,v_doc,v_ing.engine_id,v_ing.engine_config,v_rvn,p_lane,'queued')
+          on conflict (document_id,engine_id,version_n,lane) do nothing
+          returning id into v_rtask;
+        if v_rtask is null then
+          raise exception 'impossible state: the intake recovery mint conflicted at (document=%,engine=%,version=%,lane=%) while this transaction holds the documents row FOR UPDATE',
+            v_doc,v_ing.engine_id,v_rvn,p_lane using errcode='CLR35';
+        end if;
+        -- The receipt's task_id becomes the LIVE task. Its one consumer
+        -- (packages/runtime/lib/intake.mjs:365) is gated on needsStart, which is false for
+        -- every adopted receipt today, so nothing observes the change -- and naming the dead
+        -- task while this transaction just minted a live one would be a stale answer.
+        v_task := v_rtask;
+        -- Every field here is read off rows this function already holds: the failed task and
+        -- the adopted document. storage_path is the DURABLE record's own value -- the same
+        -- one clara.claim_document_processing_task hands every other lane -- and
+        -- ck_documents_storage_path_v2 (0007:53-54) guarantees it is the content-addressed
+        -- key the re-uploading runtime just computed and verified for these identical bytes.
+        v_recovery := jsonb_build_object('task_id',v_rtask,'lane',p_lane,'version_n',v_rvn,
+          'engine_id',v_ing.engine_id,'storage_path',d.storage_path,'sha256',d.sha256,
+          'mime_type',d.mime_type);
+      end if;
+    end if;
+  end if;$t2$;
+  v_def := replace(v_def, v_frm, v_to);
+
+  -- EDIT 3 -- the receipt gains `recovery`, and ONLY when there is one. Appended with `||`
+  -- rather than added to jsonb_build_object's argument list, so a receipt with no recovery
+  -- stays byte-identical to what this function returns today.
+  v_frm := $f3$  return clara._finish_op(i.firm_id,'finalize_document_intake',p_op_key,
+    jsonb_build_object('intake_id',p_intake,'document_id',v_doc,'task_id',v_task,
+      'filing_id',v_filing,'status',case when v_created then 'finalized' else 'adopted' end,
+      'upgraded',v_upgraded));$f3$;
+  v_count := (length(v_def) - length(replace(v_def, v_frm, ''))) / length(v_frm);
+  if v_count <> 1 then
+    raise exception '0051 S5 edit 3: the receipt return appears % times (expected 1)', v_count using errcode='CLR10';
+  end if;
+  v_to := $t3$  return clara._finish_op(i.firm_id,'finalize_document_intake',p_op_key,
+    jsonb_build_object('intake_id',p_intake,'document_id',v_doc,'task_id',v_task,
+      'filing_id',v_filing,'status',case when v_created then 'finalized' else 'adopted' end,
+      'upgraded',v_upgraded)
+    || case when v_recovery is null then '{}'::jsonb
+            else jsonb_build_object('recovery',v_recovery) end);$t3$;
+  v_def := replace(v_def, v_frm, v_to);
+
+  execute v_def;
+  raise notice '0051 S5: finalize_document_intake recut -- an ADOPTED re-upload of a document whose ingest lane is terminally failed now mints a recovery attempt and reports it in a `recovery` receipt fragment';
+end
+$splice51b$;
+reset role;
+
+-- =====================================================================
+-- SECTION 6 -- PART 2 TAIL. Properties, not spellings.
+-- =====================================================================
+do $tail51b$
+declare
+  v_def text; v_n int; v_secdef boolean; v_config text; v_acl text; v_pre record;
+  v_key text; v_pos int; v_window text; v_trg text; v_pre1 record;
+begin
+  select count(*) into v_n from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace and p.proname = 'finalize_document_intake';
+  if v_n <> 1 then
+    raise exception '0051 §2 tail: expected exactly ONE finalize_document_intake overload after the splice, found %', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  select pg_get_functiondef('clara.finalize_document_intake(uuid,text,text,jsonb,int,text,uuid,uuid,text)'::regprocedure)
+    into v_def;
+
+  ---- (1) THE DOOR IS PRESENT, EXACTLY ONCE.
+  if (length(v_def) - length(replace(v_def, 'v_recovery := jsonb_build_object(', '')))
+      / length('v_recovery := jsonb_build_object(') <> 1 then
+    raise exception '0051 §2 tail: the recovery receipt fragment is missing, or occurs more than once, in the post-splice body'
+      using errcode = 'CLR10';
+  end if;
+
+  ---- (2) THE THREE CONDITIONS, read as properties of the door's own window.
+  v_pos := position('if p_lane in (''ocr'',''structured_parse'',''none'') then' in v_def);
+  if v_pos = 0 then
+    raise exception '0051 §2 tail: the recovery door is not gated to the INGEST lanes -- a facts-lane failure must stay request_reextraction''s verb, never something a silent re-upload re-buys'
+      using errcode = 'CLR10';
+  end if;
+  v_window := substring(v_def from v_pos for 1400);
+  if position('v_ing.status=''failed''' in v_window) = 0 then
+    raise exception '0051 §2 tail: the recovery door does not require a TERMINALLY FAILED ingest task -- an admission resting on an ABSENCE is what evidence law 2 forbids here'
+      using errcode = 'CLR10';
+  end if;
+  if position('pit.status in (''queued'',''held_egress'',''running'')' in v_window) = 0
+     or position('not exists' in v_window) = 0 then
+    raise exception '0051 §2 tail: the recovery door lost its in-flight guard -- it would mint a second live task on a lane that already has one, and buy a second vendor read'
+      using errcode = 'CLR10';
+  end if;
+  if position('pit.lane=p_lane' in v_window) = 0 then
+    raise exception '0051 §2 tail: the in-flight guard is not lane-scoped'
+      using errcode = 'CLR10';
+  end if;
+  -- The in-flight guard must be WIDER than the failed-task read: it must NOT carry the
+  -- engine_id pin, or an in-flight task under a different engine would be invisible to it.
+  if position('pit.document_id=v_doc and pit.lane=p_lane' in v_window) = 0
+     or position('pit.engine_id' in v_window) <> 0 then
+    raise exception '0051 §2 tail: the in-flight guard is pinned to engine_id -- it must span the whole lane, or a live task under another engine snapshot would still egress alongside the one this door mints'
+      using errcode = 'CLR10';
+  end if;
+
+  ---- (3) THE MINT IS A SIBLING, NEVER A REOPEN: no UPDATE of a task row was introduced.
+  if position('update clara.document_processing_tasks' in v_def) <> 0 then
+    raise exception '0051 §2 tail: finalize_document_intake now UPDATEs a document_processing_tasks row -- the recovery must mint a SIBLING at the next version and never reopen the terminal one (ADR-062, and _tf_processing_task_update would refuse it anyway)'
+      using errcode = 'CLR10';
+  end if;
+  if position('coalesce(max(version_n),0)+1' in v_window) = 0 then
+    raise exception '0051 §2 tail: the recovery mint does not compute version_n = max+1' using errcode = 'CLR10';
+  end if;
+
+  ---- (4) EXACTLY TWO task INSERTs now -- the intake mint and the recovery mint. Prestate
+  ---- 4.5 measured exactly one; anything but two here means an edit landed twice or not at all.
+  v_n := (length(v_def) - length(replace(v_def, 'insert into clara.document_processing_tasks', '')))
+    / length('insert into clara.document_processing_tasks');
+  if v_n <> 2 then
+    raise exception '0051 §2 tail: finalize_document_intake carries % direct task INSERT(s), expected exactly 2 (the intake mint + the recovery mint)', v_n
+      using errcode = 'CLR10';
+  end if;
+
+  ---- (5) THE RECEIPT: the recovery key is CONDITIONAL, and the existing object is intact.
+  if position('else jsonb_build_object(''recovery'',v_recovery) end)' in v_def) = 0 then
+    raise exception '0051 §2 tail: the recovery key is not appended conditionally -- an unconditional key would change every intake receipt in the product for the sake of one branch'
+      using errcode = 'CLR10';
+  end if;
+  if position('jsonb_build_object(''intake_id'',p_intake,''document_id'',v_doc,''task_id'',v_task,' in v_def) = 0 then
+    raise exception '0051 §2 tail: the existing receipt object was not preserved verbatim' using errcode = 'CLR10';
+  end if;
+  if position('''status'',case when v_created then ''finalized'' else ''adopted'' end' in v_def) = 0 then
+    raise exception '0051 §2 tail: the receipt no longer reports adopted/finalized as it did -- a recovery does not change the fact that the document was ADOPTED'
+      using errcode = 'CLR10';
+  end if;
+
+  ---- (6) THE 0026 §C LINEAGE AND THE LOCK BOTH SURVIVED.
+  foreach v_key in array array[
+      'on conflict (document_id,engine_id,version_n,lane) do nothing',
+      'duplicate-adopted',
+      'impossible state: an ON CONFLICT fired',
+      'where document_id=v_doc and engine_id=p_engine_id and lane=p_lane',
+      'where firm_id=i.firm_id and sha256=i.sha256 for update'] loop
+    if position(v_key in v_def) = 0 then
+      raise exception '0051 §2 tail: the 0026 section-C marker % was lost by this splice', v_key
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+
+  ---- (7) THE TERMINAL-ROW TRIGGER IS STILL BYTE-IDENTICAL TO SECTION 0'S STASH. Part 1's
+  ---- tail asserted this BEFORE Part 2 spliced anything; re-read here so the assertion covers
+  ---- this migration end to end rather than only its first half.
+  select * into v_pre1 from _x51_pre;
+  select p.prosrc into v_trg from pg_proc p
+    where p.oid = 'clara._tf_processing_task_update()'::regprocedure;
+  if encode(sha256(convert_to(v_trg, 'UTF8')), 'hex') is distinct from v_pre1.trigger_hash then
+    raise exception '0051 §2 tail: clara._tf_processing_task_update''s source changed during Part 2 -- terminal task rows must stay immutable'
+      using errcode = 'CLR10';
+  end if;
+
+  ---- (8) SECURITY DEFINER / search_path / ACL byte-identical to the Part 2 prestate.
+  select * into v_pre from _x51_pre2;
+  select prosecdef, coalesce(array_to_string(proconfig, '|'), '<none>'),
+      coalesce(pg_catalog.array_to_string(proacl, '|'), '<default>')
+    into v_secdef, v_config, v_acl
+    from pg_proc where oid = 'clara.finalize_document_intake(uuid,text,text,jsonb,int,text,uuid,uuid,text)'::regprocedure;
+  if v_secdef is distinct from v_pre.secdef then
+    raise exception '0051 §2 tail: SECURITY DEFINER changed by this splice (was %, now %)', v_pre.secdef, v_secdef
+      using errcode = 'CLR10';
+  end if;
+  if v_config is distinct from v_pre.config then
+    raise exception '0051 §2 tail: proconfig changed by this splice (was %, now %)', v_pre.config, v_config
+      using errcode = 'CLR10';
+  end if;
+  if v_acl is distinct from v_pre.acl then
+    raise exception '0051 §2 tail: proacl changed by this splice (was %, now %)', v_pre.acl, v_acl
+      using errcode = 'CLR10';
+  end if;
+
+  raise notice '0051 §2 tail: clean -- the intake recovery door is present exactly once, gated to the ingest lanes, resting on a POSITIVE terminally-failed task read plus a lane-wide in-flight guard; it mints a sibling (two task INSERTs, no task UPDATE); the recovery receipt key is conditional and the existing receipt object is intact; the 0026 section-C lineage and the documents FOR UPDATE lock survive; the terminal-row trigger is unchanged; SECURITY DEFINER + search_path + ACL byte-identical to prestate';
+end
+$tail51b$;
+
+-- SECTION 7 -- PART 2's GRANT FLOOR. In its own block for the same lint-contract reason as
+-- sections 0/3's grant probes (see the prestate grants block above): this block installs
+-- nothing and reads no function body.
+--
+-- The point being asserted: this part opens a recovery door WITHOUT widening anybody's
+-- reach. finalize_document_intake was already a clara_runtime verb (0015:3663) and stays
+-- exactly that -- no human role, no agent role, no wake lane, no PUBLIC.
+do $tail51b_grants$
+declare v_n int; v_sig text := 'clara.finalize_document_intake(uuid,text,text,jsonb,int,text,uuid,uuid,text)';
+begin
+  if not has_function_privilege('clara_runtime', v_sig::regprocedure, 'execute') then
+    raise exception '0051 §2 tail: clara_runtime lost EXECUTE on finalize_document_intake -- the intake lane is the only caller there has ever been'
+      using errcode = 'CLR10';
+  end if;
+  if has_function_privilege('clara_authenticated', v_sig::regprocedure, 'execute')
+     or has_function_privilege('clara_agent_ro', v_sig::regprocedure, 'execute')
+     or has_function_privilege('clara_wake_interactive', v_sig::regprocedure, 'execute')
+     or has_function_privilege('clara_wake_proactive', v_sig::regprocedure, 'execute') then
+    raise exception '0051 §2 tail: a non-runtime role holds EXECUTE on finalize_document_intake -- the recovery door must not have widened anyone''s reach'
+      using errcode = 'CLR10';
+  end if;
+  if exists (select 1 from pg_proc p, aclexplode(p.proacl) a
+             where p.oid = v_sig::regprocedure and a.grantee = 0 and a.privilege_type = 'EXECUTE') then
+    raise exception '0051 §2 tail: PUBLIC holds EXECUTE on finalize_document_intake' using errcode = 'CLR10';
+  end if;
+  select count(*) into v_n from clara.wake_fn_allowlist where function_name = 'finalize_document_intake';
+  if v_n <> 0 then
+    raise exception '0051 §2 tail: finalize_document_intake carries % wake_fn_allowlist row(s)', v_n
+      using errcode = 'CLR10';
+  end if;
+  raise notice '0051 §2 tail grants: clean -- finalize_document_intake is still clara_runtime-only, no human/agent/wake role, no PUBLIC, zero wake_fn_allowlist rows';
+end
+$tail51b_grants$;

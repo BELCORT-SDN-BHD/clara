@@ -35,11 +35,13 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
 import {
   ROLES, CLR, rootQuery, roleQuery, opk, endPool, buildWorld, assertRaises, firmOf,
   requestReextraction, extractedDoc, failedFactsDoc, taskRow, laneTasks, extractionsOf,
   auditArgs, holdThenContend, seedCitedDocument,
   invoiceFactsTask, claimTask, failInvoiceFacts,
+  seedIntake, finalizeIntake, seedVerifiedDocument,
   markSkip, noteLane, printLaneNotes, printSkipCount,
 } from "./x1-helpers.mjs";
 
@@ -345,4 +347,197 @@ test("[0051] the bounded retry converges on the recovery path too, under a force
   assert.equal(committed.filter((x) => x.version_n === N)[0].status, "failed",
     "the winner it lost to is the terminal budget row");
   assert.equal(committed.find((x) => x.id === r.task_id).status, "queued", "…and the verb's own task is queued");
+});
+
+// ===========================================================================
+// (e) §2 — THE INTAKE RECOVERY DOOR. Re-uploading the same file recovers a failed INGEST.
+//
+// The facts-lane door above is reached by a human verb; THIS one is reached by the ordinary
+// duplicate-intake path, so every cell drives clara.finalize_document_intake for real and
+// reads the committed rows back. The shared setup shape is the one x-lane-widen-0026's own
+// P2 cell established: a verified document, a hand-planted intake task in whatever state the
+// cell is about, then a SECOND intake of the same sha256 — the exact ELSE (adopted) branch.
+//
+// The runtime half — that a minted recovery actually gets a spool sidecar and a run — is
+// proven in packages/runtime/tests/intake-recovery-unit.test.mjs and never here.
+// ===========================================================================
+
+const FIXTURE_ENGINE = "clara-fixture:v1"; // finalize_document_intake's own p_engine_id default
+const AZURE_OCR = "azure-di:prebuilt-layout:2024-11-30";
+
+/** A fresh 64-hex sha, the shape clara.documents' storage_path CHECK is written against. */
+const freshSha = () => randomUUID().replace(/-/g, "").padEnd(64, "0").slice(0, 64);
+
+/** Plant a processing task directly. Setup only — the product path for these states runs
+ *  through the runtime workflow, which no DB rig can drive. */
+async function plantTask(firm, document, { engine = FIXTURE_ENGINE, version = 1, lane = "ocr", status, error = null }) {
+  const terminal = status === "done" || status === "failed";
+  const r = await rootQuery(
+    `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
+        version_n,lane,status,error_code,finished_at)
+     values ($1,$2,$3,'{}'::jsonb,$4,$5,$6,$7,case when $8 then now() end) returning id`,
+    [firm, document, engine, version, lane, status, error, terminal]);
+  return r.rows[0].id;
+}
+
+/** A verified document plus a SECOND intake of the same bytes, finalized — i.e. the adopted
+ *  branch, driven for real. `plant` receives (firm, documentId) and sets up the lane state
+ *  the cell is about. Returns { documentId, receipt }. */
+async function reIngest(firm, plant, { lane = null, engine = null } = {}) {
+  const sha = freshSha();
+  const seed = await seedVerifiedDocument({ firm, sha256: sha, mime: "application/pdf" });
+  await plant(firm, seed.documentId);
+  const dup = await seedIntake({
+    firm, sha256: sha, status: "verified", mime: "application/pdf",
+    storageKey: `firms/${firm}/docs/${sha}.pdf`,
+  });
+  // The explicit-lane cells bypass the adaptive wrapper so they can pass p_lane themselves.
+  const receipt = (lane || engine)
+    ? (await roleQuery(ROLES.runtime,
+        `select clara.finalize_document_intake(p_intake=>$1, p_engine_id=>$2, p_lane=>$3,
+           p_version_n=>1, p_op_key=>$4) as r`,
+        [dup, engine ?? FIXTURE_ENGINE, lane ?? "ocr", opk("x51fin")])).rows[0].r
+    : await finalizeIntake({ intake: dup });
+  return { documentId: seed.documentId, sha, receipt };
+}
+
+test("[0051 §2] a failed INGEST + a re-upload of the same bytes: adopted, and a recovery attempt is minted", async (t) => {
+  if (skip51(t)) return;
+  const firm = W.firms.A;
+  let failedTask = null;
+  const { documentId, sha, receipt } = await reIngest(firm, async (f, d) => {
+    failedTask = await plantTask(f, d, { status: "failed", error: "engine_error" });
+  });
+
+  // The ORIGINAL exhibit shape: exactly one ingest task, terminal, nothing else.
+  const frozen = await taskRow(failedTask);
+  assert.equal(frozen.status, "failed", "mandatory setup: the document's only ingest task is TERMINAL");
+
+  assert.equal(receipt.status, "adopted",
+    "the receipt still says ADOPTED — the document really was adopted by sha256, and a "
+    + "recovery does not change that fact for any existing reader");
+  assert.ok(receipt.recovery, "…and it now carries a recovery fragment");
+  assert.equal(receipt.recovery.lane, "ocr", "…on the ingest lane");
+  assert.equal(receipt.recovery.version_n, 2, "…at version max+1");
+  assert.equal(receipt.recovery.engine_id, FIXTURE_ENGINE,
+    "…on the SAME engine the failed attempt used, so the lane/engine CHECK holds and the chain composes");
+  assert.equal(receipt.recovery.sha256, sha, "…carrying the document's own sha256");
+  assert.equal(receipt.recovery.mime_type, "application/pdf", "…and its mime");
+  assert.equal(receipt.recovery.storage_path, `firms/${firm}/docs/${sha}.pdf`,
+    "…and the DOCUMENT row's storage_path, which ck_documents_storage_path_v2 pins to the "
+    + "content-addressed template the re-uploading runtime just computed for these same bytes");
+  assert.equal(receipt.task_id, receipt.recovery.task_id,
+    "the receipt's task_id names the LIVE task, not the dead one it was minted from");
+
+  const tasks = await laneTasks(documentId, "ocr");
+  assert.equal(tasks.length, 2, "exactly one new row exists");
+  const fresh = tasks.find((x) => x.id === receipt.recovery.task_id);
+  assert.equal(fresh.status, "queued", "the committed recovery row is queued");
+  assert.equal(fresh.version_n, 2, "…at the next version");
+  assert.equal(fresh.error_code, null, "…and carries no error code");
+
+  // ADR-062's binding requirement, over the WHOLE row rather than a chosen column.
+  assert.deepEqual(await taskRow(failedTask), frozen,
+    "the terminally-failed row is byte-identical afterwards — a SIBLING was minted, the "
+    + "failure was never reopened (which _tf_processing_task_update would refuse anyway)");
+});
+
+test("[0051 §2] a HEALTHY adoption is untouched — no recovery, no new task, and no `recovery` key at all", async (t) => {
+  if (skip51(t)) return;
+  const firm = W.firms.A;
+  const { documentId, receipt } = await reIngest(firm, (f, d) => plantTask(f, d, { status: "done" }));
+
+  assert.equal(receipt.status, "adopted", "a healthy duplicate still adopts");
+  assert.equal(receipt.recovery, undefined,
+    "…and the receipt carries NO recovery key whatsoever — not even a null one. The key is "
+    + "appended conditionally precisely so that every intake receipt in the product stays "
+    + "byte-identical to what it was");
+  assert.equal((await laneTasks(documentId, "ocr")).length, 1,
+    "…and nothing was minted: this is the overwhelmingly common path and it must not change");
+});
+
+test("[0051 §2] an IN-FLIGHT ingest blocks the recovery even when the newest task on its own engine failed", async (t) => {
+  if (skip51(t)) return;
+  // The condition-(3) cell specifically. The newest task on (clara-fixture:v1, ocr) IS failed,
+  // so condition (2) is satisfied — but another task on the SAME LANE under a DIFFERENT engine
+  // is queued. That is why the in-flight guard is deliberately wider than the failed-task read:
+  // an in-flight task under any engine would still egress, and two live tasks on one ingest
+  // lane is a double vendor read.
+  const firm = W.firms.A;
+  const { documentId, receipt } = await reIngest(firm, async (f, d) => {
+    await plantTask(f, d, { status: "failed", error: "engine_error" });
+    await plantTask(f, d, { engine: AZURE_OCR, version: 2, status: "queued" });
+  });
+
+  assert.equal(receipt.status, "adopted", "still adopted");
+  assert.equal(receipt.recovery, undefined,
+    "…and NO recovery was minted while a task on that lane is still in flight");
+  assert.equal((await laneTasks(documentId, "ocr")).length, 2, "…and no third row was created");
+});
+
+test("[0051 §2] a QUEUED newest task is not a failure — nothing is minted", async (t) => {
+  if (skip51(t)) return;
+  // The condition-(2) cell. 'queued' is not 'failed', and the door reads the task POSITIVELY:
+  // an admission phrased as "no successful ingest" would fire here, on a document whose
+  // pipeline is simply still running.
+  const firm = W.firms.A;
+  const { documentId, receipt } = await reIngest(firm, (f, d) => plantTask(f, d, { status: "queued" }));
+  assert.equal(receipt.recovery, undefined, "an in-flight first attempt is not a recovery case");
+  assert.equal((await laneTasks(documentId, "ocr")).length, 1, "…and nothing was minted");
+});
+
+test("[0051 §2] a failed FACTS extraction on a healthy ingest gets NO ingest recovery — that is §1's verb", async (t) => {
+  if (skip51(t)) return;
+  // The boundary between the two doors, asserted rather than assumed. This document's INGEST
+  // succeeded; what failed is its invoice_facts pass. Re-uploading the bytes must not silently
+  // re-buy an OCR read — the facts failure is recovered by request_reextraction, under a
+  // bookkeeper's hand and an audited reason.
+  const firm = W.firms.A;
+  const { documentId, receipt } = await reIngest(firm, async (f, d) => {
+    await plantTask(f, d, { status: "done" });
+    await plantTask(f, d, { engine: "azure-di:prebuilt-invoice:2024-11-30", version: 1, lane: "invoice_facts", status: "failed", error: "internal" });
+  });
+
+  assert.equal(receipt.recovery, undefined,
+    "the intake door never looks at a facts lane — a failed invoice_facts attempt is "
+    + "request_reextraction's population, not a re-upload's");
+  assert.equal((await laneTasks(documentId, "ocr")).length, 1, "…the ingest lane is untouched");
+  assert.equal((await laneTasks(documentId, "invoice_facts")).length, 1, "…and so is the facts lane");
+});
+
+test("[0051 §2] the door is gated to the INGEST lanes: a facts lane passed explicitly mints nothing", async (t) => {
+  if (skip51(t)) return;
+  // Condition (1), driven directly. packages/runtime/lib/intake-lanes.mjs never produces a
+  // facts lane here, so this argument is only reachable by a caller that constructs it — and
+  // the gate is the wall for exactly that. Without it, a caller could turn a re-upload into a
+  // silent, unaudited facts re-extraction that bypasses request_reextraction's bookkeeper
+  // floor entirely.
+  const firm = W.firms.A;
+  const { documentId, receipt } = await reIngest(
+    firm,
+    (f, d) => plantTask(f, d, { engine: "azure-di:prebuilt-invoice:2024-11-30", version: 1, lane: "invoice_facts", status: "failed", error: "internal" }),
+    { lane: "invoice_facts", engine: "azure-di:prebuilt-invoice:2024-11-30" },
+  );
+  assert.equal(receipt.recovery, undefined,
+    "a facts lane is refused by the door's own gate, however it is reached");
+  assert.equal((await laneTasks(documentId, "invoice_facts")).length, 1, "…and no facts task was minted");
+});
+
+test("[0051 §2] the recovery door opened no new reach — finalize_document_intake stays runtime-only", async (t) => {
+  if (skip51(t)) return;
+  // The mirror of §1's cost-bound cell. This part deliberately avoids widening anybody's
+  // privileges — that is WHY it lives in finalize_document_intake at all rather than in a new
+  // verb granted to the runtime. Asserted here rather than inherited from the migration tail,
+  // because a tail runs once at apply time and a cell runs on every database the suite meets.
+  for (const role of [ROLES.authenticated, ROLES.agentRo, ROLES.wakeInteractive, ROLES.wakeProactive]) {
+    if (!role) continue;
+    const err = await roleQuery(role,
+      "select clara.finalize_document_intake($1,null,'clara-fixture:v1','{}'::jsonb,1,'ocr',null,null,$2)",
+      [randomUUID(), opk("x51fin")]).then(() => null, (e) => e);
+    assert.ok(err, `${role} must not be able to execute finalize_document_intake`);
+    assert.equal(err.code, "42501", `${role} is refused at the GRANT, not inside the body`);
+  }
+  const allow = await rootQuery(
+    "select count(*)::int n from clara.wake_fn_allowlist where function_name='finalize_document_intake'");
+  assert.equal(allow.rows[0].n, 0, "…and no wake allowlist row admits it for any wake kind");
 });
