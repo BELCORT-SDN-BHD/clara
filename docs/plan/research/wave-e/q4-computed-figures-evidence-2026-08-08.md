@@ -259,7 +259,7 @@ This matters in Malaysia beyond abstract “AI safety.” The Companies Act 2016
 
 MIA’s professional rules require competence, due care, diligence, and appropriate supervision. They do not prescribe a database architecture, but “the model seemed extremely precise” is not persuasive evidence of due care. [MIA By-Laws](https://mia.org.my/storage/2025/07/By-Laws-updated-Feb-2025-Effective-1-July-2025.pdf)
 
-This is also exactly the boundary the prior Clara build violated: it could launder model-authored figures into branded artifacts and describe SQL literals as database-computed. [Gate‑1 pattern 9](docs/audit/00-GATE-1-README.md:59) The present [PRD law](docs/prd/PRD.md:123) is a rational response to that evidence, not superstition.
+This is also exactly the boundary the prior Clara build violated: it could launder model-authored figures into branded artifacts and describe SQL literals as database-computed. [Gate‑1 pattern 9](../../../audit/00-GATE-1-README.md:59) The present [PRD law](../../../prd/PRD.md:123) is a rational response to that evidence, not superstition.
 
 ## 5. Verdict
 

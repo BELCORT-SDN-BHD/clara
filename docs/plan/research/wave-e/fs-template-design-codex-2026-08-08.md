@@ -38,7 +38,9 @@ periods beginning ≥ 1 Jan 2027 — the tax-policy-table pattern.**
 Statements" bundled with MPERS(2025) at `masb.org.my/pdf_file/MPERS_2025_BC_IE.pdf`.
 Could not extract text (image/binary PDF, two attempts); existence confirmed by
 title/linked-document metadata only. **Manual pull required** — if it holds up, it
-outranks every practitioner source (standard-setter provenance).
+outranks every practitioner source (standard-setter provenance). *[Ed., review round 3:
+"image/binary" is the lane's inference — only the extraction FAILURE was observed; the
+encoding is unverified. E-R14's mandatory manual-pull + human-verification step governs.]*
 
 **PRACTITIONER ILLUSTRATIVE FS — secondary, for cross-checking**
 
@@ -64,7 +66,10 @@ unverified.
 confirmed, component completeness NOT verified by content. A human opens at least one
 (MIA or KPMG) before treating it as wording ground truth.
 
-**SOLE PROPRIETORSHIPS — NOT FOUND (no authoritative format)**
+**SOLE PROPRIETORSHIPS — NOT FOUND (no authoritative format)** *[Ed., review round 3:
+this heading states the lane's search outcome, not a proven absence — E-R14 treats the
+sole-prop authority question as UNRESOLVED pending a positive primary check (LHDN / MIA /
+ROBA) at build; the convention label is interim.]*
 
 Sole props are not MPERS-bound; no legal FS-format requirement (ROBA 1956 governs
 registration only). LHDN's Form B requires the data, not a presentation format. No
@@ -77,7 +82,7 @@ never cited as MPERS-equivalent.
 
 ## Lane 2 — the Codex gpt-5.6-sol design (verbatim below; ratified as E-R14's architecture)
 
-The architecture should treat a firm’s “golden FS template” as a versioned composition, not a fork of statutory truth: an exact statutory profile + an exact firm house style + constrained preferences. This extends Clara’s existing [reporting-engine boundary](docs/architecture/ARCHITECTURE.md:157), [honest-FS requirement](docs/prd/PRD.md:84), and [Wave E scope](docs/plan/REBUILD-PLAN.md:357).
+The architecture should treat a firm’s “golden FS template” as a versioned composition, not a fork of statutory truth: an exact statutory profile + an exact firm house style + constrained preferences. This extends Clara’s existing [reporting-engine boundary](../../../architecture/ARCHITECTURE.md:157), [honest-FS requirement](../../../prd/PRD.md:84), and [Wave E scope](../../REBUILD-PLAN.md:357).
 
 ## 1. Layered template model
 

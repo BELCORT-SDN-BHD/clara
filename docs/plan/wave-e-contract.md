@@ -40,9 +40,11 @@ attested human override:
   earnings roll; opening(n+1) = closing(n); tie asserted) · the reverse/re-open ordering
   guard (no reversing FY(n) under a live FY(n+1) close) · **the DB-owned control tie-outs
   at the close boundary** (AR control = Σ open items · AP control · the FA register tie,
-  including its segment-aware Wave-E rebuild) — these are arithmetic identities the DB
-  owns by construction, so a mismatch is a DEFECT, not a judgement item: no attestation
-  path exists, and an UNKNOWN/ERROR tie state fails closed exactly like a mismatch.
+  including its segment-aware Wave-E rebuild · **the bank reconciliation IDENTITY** —
+  book balance = statement balance ± the recorded open items, per PRD §4 item 8) — these
+  are arithmetic identities the DB owns by construction, so a mismatch is a DEFECT, not a
+  judgement item: no attestation path exists, and an UNKNOWN/ERROR tie state — or a
+  non-zero unexplained identity difference — fails closed exactly like a mismatch.
 - **Drawer 2 — DEFAULT-REFUSE, PER-ITEM ATTESTED OVERRIDE** (who/why/when written into the
   close receipt, permanent). All five named checks live here:
   1. depreciation not run through FY end — **this is the WD-R6 answer: the advisory
@@ -59,9 +61,12 @@ Drawer 2's "open bank-reconciliation items" means the evidence-dependent states 
 unmatched statement lines, missing statements — never the DB-owned tie identities,
 which live in drawer 1. PRD journey-7's "tie-outs clean" is thereby a gate, not prose.)*
 
-Rationale of record: all-hard ⇒ one stubborn RM50 recon diff makes a client permanently
-unclosable and users route around the system; all-soft ⇒ decoration. The middle drawer is
-audit working-paper practice (exceptions allowed, partner-signed, filed).
+Rationale of record: all-hard ⇒ one stubborn unmatched RM50 statement item makes a client
+permanently unclosable and users route around the system; all-soft ⇒ decoration. The
+middle drawer is audit working-paper practice (exceptions allowed, partner-signed,
+filed). (Round 3, precision: what is attestable is the EXISTENCE of unmatched/
+evidence-dependent items — never an arithmetic difference in a DB-owned identity, which
+is drawer 1.)
 
 ## E-R3 — Locking granularity
 
@@ -258,11 +263,16 @@ D-b staff-advance register) registers to **Wave F**; the submission/approval sur
   E-R6's ruled reopen path, which governs corrections into a closed period.)*
 - **Supersession registered NOW, activated only at the F build:** this door, when built,
   NARROWS 7A-R3's blanket "tax-silent never autoposts" to "never WITHOUT settlement
-  corroboration". The Wave-F build ADR executes that narrowing and must define the
-  alternate corroboration predicate — the bank-external settlement anchor standing in
-  for control 4's document-internal second numeric anchor — plus negative tests for
-  ambiguity and race shapes. Until that ADR lands, 7A-R3 stands whole and no tax-silent
-  document posts unattended.
+  corroboration". The Wave-F build ADR executes that narrowing and must define a COMPLETE
+  alternate control-4 branch — control 4 today requires explicit net AND tax plus a
+  second document-internal numeric anchor, and a tax-silent document fails BOTH halves,
+  so the branch must supply: (a) **positive, effective-dated tax-status evidence** that
+  the document is lawfully tax-silent (e.g. a non-SST-registrant status row — never
+  absence-read-as-zero), standing in for the explicit-tax identity, AND (b) the
+  bank-external settlement anchor standing in for the second numeric anchor, plus the
+  post-time state/predicate that carries both, plus negative tests for ambiguity and
+  race shapes. Until that ADR lands, 7A-R3 stands whole and no tax-silent document posts
+  unattended.
 - **Agentic layer (attended):** ambiguity (partial payments, combo settlements, multiple
   candidates) routes to an agent-built SUGGESTION card carrying evidence + client-KB
   reasoning; the human's one-click approve IS the human witness; posting walks the normal
