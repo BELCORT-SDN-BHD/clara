@@ -9,7 +9,7 @@
 // about unmeasured thresholds — lives in `invoice-customer-identity.mjs`'s header.
 
 import { asciiTrim, DASH_CHARS } from "./invoice-amount-grammar.mjs";
-import { foldUnicode, hasColon } from "./invoice-entity-lexicon.mjs";
+import { foldUnicode, hasColon, isNameShaped } from "./invoice-entity-lexicon.mjs";
 
 // The REGISTERED-ENTITY LEXICON lives next door — it owns what a Malaysian business is
 // CALLED and the two asymmetric predicates built from that (strict endsWith for party
@@ -280,12 +280,13 @@ export function looksLikePartyName(s) {
   if (HOUSE_NUMBER.test(v)) return false;                                          // `12, Main Road`
   if (/^[\d\s,.\-/]+$/.test(v)) return false;                                      // pure punctuation/digits
   if (STOPWORD_OPENERS.has(foldForMatch(v.split(/\s+/)[0] ?? ""))) return false;    // a sentence, not a name
-  // A COLON ANYWHERE MEANS A CAPTION, not an identity — registered company names do not contain
-  // one. This is the ROOT closer for the possessive-caption class: `Customer＇s Ref: ACME SDN BHD`
-  // leaves `＇s Ref: ACME SDN BHD` as a remainder whatever apostrophe glyph the OCR produced, and
-  // the embedded suffix then satisfies the entity gate. The class itself must be COMPLETE or it
-  // reopens one glyph at a time — `Reference﹕`, `∶` and `꞉` each reached customer_name against
-  // an ASCII+fullwidth-only test. `hasColon` normalizes NFKC first, then matches the residue.
+  // THE POSITIVE CHARACTER CLASS — the wall. A value may contain only what a registered name
+  // may contain; anything else abstains. This replaced a colon ENUMERATION that leaked a fresh
+  // glyph every round (U+FE55/U+2236/U+A789, then U+02D0/U+205A): the open world was on the
+  // wrong side of the test. Full justification, category by category, in the lexicon.
+  if (!isNameShaped(v)) return false;
+  // A COLON ANYWHERE MEANS A CAPTION — kept as DEFENCE IN DEPTH behind the positive class, and
+  // still the reason `Customer＇s Ref: ACME SDN BHD` dies whatever apostrophe glyph OCR produced.
   if (hasColon(v)) return false;
   const folded = foldForMatch(v);
   if (HEADER_WORDS.has(folded)) return false;

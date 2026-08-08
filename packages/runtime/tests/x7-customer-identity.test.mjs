@@ -190,10 +190,13 @@ test("ONE LEXICON, TWO POLARITIES — a party must carry the signal, a contact m
   const company = line("ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54));
   const { fields, receipt } = read([BILL_TO_LABEL, attnLabel, company]);
   assert.equal(contactOf({ fields }), undefined, "an entity-suffixed string is never a person");
-  // …and it is not merely dropped: it competes on the PARTY path, where it belongs.
-  assert.equal(partyOf({ fields }).value_raw, "ACME SDN BHD");
+  // AND THE CLAIMED LINE IS OUT OF THE PARTY READ TOO. An earlier round let it "compete as a
+  // party", which is how a refused company came back and overrode customer_name. The contact
+  // label CLAIMED that line; the claim is geometric evidence and it stands whatever the value's
+  // shape is, so the line supplies nothing at all — typed simply stands.
+  assert.equal(partyOf({ fields }), undefined, "a contact-CLAIMED line is not a party candidate");
   assert.equal(receipt.attn_rejected_gate, 1, "the contact pass examined the company and refused it");
-  assert.equal(receipt.attn_no_value, 1, "…and then reported that the bare label found no contact at all");
+  assert.ok(receipt.reserved_skipped >= 1, "…and the party scan stepped over the claimed line");
   // The true F7 shape still yields BOTH fields — the person a person, the company a company.
   const real = read(KONG_CHENG_BLOCK);
   assert.equal(partyOf(real).value_raw, "KONG CHENG RESTAURANTS SDN BHD");

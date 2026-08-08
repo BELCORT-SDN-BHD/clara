@@ -58,14 +58,65 @@ export const foldUnicode = (s) => String(s ?? "").normalize("NFKC").replace(/[^\
  * `customer_name` end-to-end. That is a CORRUPTED party rather than a wrong one, but it would
  * still birth a counterparty under a mangled name, so the class takes it and the value abstains.
  *
- * "COMPLETE" MEANS: complete for the OCR-producible colon glyphs measured so far. It is a
- * closed enumeration over an open world, which is exactly why the rule is fail-closed — an
- * unlisted glyph makes the reader ABSTAIN on that value, never assert a party from it.
+ * THIS LIST IS NO LONGER THE WALL — `NAME_SHAPE` below is. It survives as DEFENCE IN DEPTH.
+ * Enumerating colon lookalikes is an open world and it behaved like one: an ASCII+fullwidth list
+ * leaked U+FE55/U+2236/U+A789; adding those leaked U+02D0 and U+205A. Each round of enumeration
+ * bought exactly one round of safety.
+ *
+ * THE TWO ENUMERATIONS IN THIS MODULE DIFFER IN KIND, and the distinction is worth keeping:
+ * `NON_ADDRESSEE_MARKERS` enumerates an OPEN SEMANTIC space (which is why residual (5) exists and
+ * cannot be closed by listing harder), while this one enumerates a CLOSED TYPOGRAPHIC space that
+ * is auditable against published data. UPGRADE PATH, if full closure is ever wanted: derive the
+ * class from Unicode general-category plus the confusables table rather than hand-listing —
+ * a build step, deliberately not taken here because the positive class already carries the load.
  */
-export const COLON_CLASS = /[:∶꞉˸׃։]/u;
+export const COLON_CLASS = /[:∶꞉˸ː⁚׃։]/u;
 
 /** Does this value carry a colon in ANY of its printed forms? NFKC first, then the residue. */
 export const hasColon = (s) => COLON_CLASS.test(String(s ?? "").normalize("NFKC"));
+
+/**
+ * ══ THE POSITIVE NAME-SHAPE CLASS — the batch's third polarity inversion ══════════════════════
+ *
+ * A candidate value may contain ONLY these characters. Anything else and the value ABSTAINS.
+ *
+ * WHY THIS REPLACES THE COLON ENUMERATION AS THE WALL. Chasing colon lookalikes is an open world
+ * and it showed: an ASCII+fullwidth list leaked U+FE55/U+2236/U+A789; adding those leaked U+02D0
+ * and U+205A. Every round of enumeration bought one round of safety. The same inversion that
+ * fixed party candidacy (round 3) and the contact refusal (round 4) applies to the character
+ * set: say what a Malaysian registered name MAY contain, and let everything else abstain.
+ * `COLON_CLASS` above is now DEFENCE IN DEPTH, not the wall.
+ *
+ * THE LETTER CATEGORIES, and why \p{L} alone is wrong. \p{L} INCLUDES \p{Lm} (modifier letters),
+ * and the colon lookalikes live there — U+02D0 MODIFIER LETTER TRIANGULAR COLON is category Lm,
+ * so a \p{L}-based class would have admitted the very glyph that leaked. The class therefore
+ * names the four categories a registered name actually uses:
+ *   · \p{Lu} \p{Ll} \p{Lt} — cased letters (Latin, and any cased script)
+ *   · \p{Lo}               — "other letters": CJK, Jawi/Arabic, Tamil — `鑫旺 SDN BHD` reads here
+ * DELIBERATELY EXCLUDED: \p{Lm}. Cost, stated: U+3005 (the CJK iteration mark, as in `佐々木`) is
+ * Lm, so such a name abstains. Not a Malaysian registered-name shape, and abstaining is free.
+ *
+ * THE PUNCTUATION, each justified rather than inherited:
+ *   space  — word separator
+ *   &      — `D&D DEVELOPMENT SDN BHD`, a real customer on this client's books
+ *   .      — `SDN. BHD.`, `A.B.` initials
+ *   ,      — `ACME SDN BHD, KUALA LUMPUR` (the contact door refuses it for other reasons)
+ *   ' ‘ ’ ʼ — `O'Brien`, and the OCR renderings of the same apostrophe
+ *   ( )    — `ACME (M) SDN BHD`, the standard Malaysian regional infix
+ *   -      — hyphenated names; also a key-significant class (see `foldKey`)
+ *   /      — `S/B`, `A/B`; also key-significant
+ *   @      — Malaysian names genuinely carry `@` as an alias marker (`AHMAD @ JOHN`)
+ * Digits are in: `3M`, `7-ELEVEN`, `2020 VISION SDN BHD`.
+ *
+ * A CLOSED CLASS OVER AN OPEN WORLD IS SAFE IN THIS DIRECTION: an unlisted character makes the
+ * value ABSTAIN (typed stands, zero loss) rather than assert a party. That is the whole point of
+ * inverting — the failure mode of an unanticipated glyph flips from "becomes the customer" to
+ * "is not read".
+ */
+const NAME_SHAPE = /^[\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{N} .,&'‘’ʼ()\-/@]+$/u;
+
+/** Is every character in this value one a registered name may carry? NFKC first. */
+export const isNameShaped = (s) => NAME_SHAPE.test(String(s ?? "").normalize("NFKC"));
 
 const ENTITY_SUFFIXES = Object.freeze([
   ["sdnbhd", "sendirian berhad"],
@@ -122,32 +173,38 @@ export function splitEntitySuffix(raw) {
   const sb = SB_PUNCTUATED.exec(original);
   if (sb) {
     const baseRaw = original.slice(0, sb.index);
-    return { base: foldUnicode(baseRaw), baseRaw, canonical: "sdnbhd" };
+    return { base: foldUnicode(baseRaw), baseRaw, variant: null, canonical: "sdnbhd" };
   }
   const folded = foldUnicode(original);
   for (const [canonical, variant] of ENTITY_SUFFIXES_BY_LENGTH) {
-    if (folded === variant) return { base: "", baseRaw: "", canonical };
+    if (folded === variant) return { base: "", baseRaw: "", variant, canonical };
     if (folded.endsWith(` ${variant}`)) {
-      // Every non-S/B suffix form is letters and spaces only, so the whole original is a safe
-      // signature source — no slash or hyphen can come from the suffix region.
-      return { base: folded.slice(0, folded.length - variant.length - 1).trim(), baseRaw: original, canonical };
+      return { base: folded.slice(0, folded.length - variant.length - 1).trim(), baseRaw: original, variant, canonical };
     }
   }
   return null;
 }
 
 /**
- * PUNCTUATION CLASSES FOLD DISTINCTLY. `A/B TRADING SDN BHD` and `A-B TRADING SDN BHD` are two
- * different registered names; both folded to `a b`, keyed the same, and the reader reported
- * `matched` — SUPPRESSING a lawful contest. A silent merge of two identities is strictly worse
- * than a hold, so the slash class and the hyphen class each leave their own mark on the key.
- * They still differ from `AB` (no punctuation at all), and ordinary noise punctuation — commas,
- * dots, brackets — still folds to a boundary and stays harmless.
+ * PUNCTUATION CLASSES FOLD TO CANONICAL LITERALS, IN PLACE. `A/B TRADING SDN BHD` and
+ * `A-B TRADING SDN BHD` are two different registered names; folding both to a bare boundary
+ * keyed them identically and the reader reported `matched` — SUPPRESSING a lawful contest.
+ *
+ * A SIGNATURE WAS NOT ENOUGH, and that is the lesson worth keeping. The first repair appended a
+ * per-class OCCURRENCE flag (`#sh`), which distinguished the named pair but still collided on
+ * `A/B-C` vs `A-B/C` — both contain one slash and one hyphen, so both signed `#sh`. Occurrence
+ * is not placement. Each class now folds to ITSELF where it stands, so the key carries position:
+ *   hyphen class → `-`   ·   slash class → `/`   ·   every other non-alphanumeric → a space
+ * `a/b-c` ≠ `a-b/c` ≠ `a b c` ≠ `abc`, while noise punctuation (commas, dots, brackets) still
+ * collapses to a boundary and stays harmless: `KONG, CHENG` ≡ `KONG CHENG`.
  */
-const punctSignature = (s) => {
-  const t = String(s ?? "").normalize("NFKC");
-  return (/[/／]/.test(t) ? "s" : "") + (/[-‐‑‒–—―−]/.test(t) ? "h" : "");
-};
+const foldKey = (s) => String(s ?? "").normalize("NFKC")
+  .replace(/[-‐‑‒–—―−]+/gu, "-")
+  .replace(/[/／]+/gu, "/")
+  .replace(/[^\p{L}\p{N}\-/]+/gu, " ")
+  .replace(/\s+/g, " ")
+  .trim()
+  .toLowerCase();
 
 /**
  * PARTY CANDIDACY — STRICT: the string must END in a suffix, with a name in front of it.
@@ -205,7 +262,13 @@ export function containsEntityToken(s) {
  */
 export const partyKey = (s) => {
   const hit = splitEntitySuffix(s);
-  const sig = punctSignature(hit ? hit.baseRaw : s);
-  const body = hit ? `${hit.base} ${hit.canonical}`.trim() : foldUnicode(s);
-  return sig ? `${body}#${sig}` : body;
+  if (!hit) return foldKey(s);
+  // The BASE, keyed with punctuation placement preserved. For the S/B path `baseRaw` already
+  // excludes the suffix (its own slash must not sign the key, or every `S/B` name would stop
+  // collapsing with its `SDN BHD` spelling). For the endsWith path the suffix is letters and
+  // spaces only, so it is stripped from the keyed form by its own folded spelling.
+  let base = foldKey(hit.baseRaw);
+  if (hit.variant && base.endsWith(` ${hit.variant}`)) base = base.slice(0, -(hit.variant.length + 1)).trim();
+  else if (hit.variant && base === hit.variant) base = "";
+  return `${base} ${hit.canonical}`.trim();
 };

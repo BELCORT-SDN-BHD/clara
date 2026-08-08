@@ -250,6 +250,27 @@ reached the books unchallenged. X7 supplies the missing second reader.
   away made `A-B SDN BHD` ≡ `AB SDN BHD`, so a document naming two different companies read as
   `matched` and **suppressed a lawful contest** — wrong-silent, which loses to a safe hold.
   Noise commas stay harmless (`KONG, CHENG` ≡ `KONG CHENG`); suffix canonicalization is untouched.
+- **Round-6 — the last two absence-validated surfaces become positive-evidence:**
+  - **R6-1 reservation happens on LABEL-CLAIM, not on acceptance.** A contact label positively
+    claims a LINE; that claim is geometric evidence and stands whatever the value's shape is.
+    Reserving only on ACCEPTANCE let a refused company (`Attention:` → `ACME SDN BHD`) fall back
+    into the party scan and override `customer_name`. **The invariant is about LINES, not
+    strings:** a contact-CLAIMED line can never override, withdraw or collapse — while the same
+    STRING on an UNCLAIMED line still qualifies on its own merits (pinned by the reviewer's own
+    probe). This also retired the round-5 counterexample: the AMATERUS layout no longer withdraws
+    a correct typed name.
+  - **R6-2 the POSITIVE name-shape class** replaces colon enumeration as the wall. A candidate may
+    contain only what a registered name may contain — cased letters, `\p{Lo}` (CJK et al.), digits,
+    space and a justified punctuation set (`& . , ' ( ) - / @`). **`\p{Lm}` is excluded on
+    purpose:** the colon lookalikes live there (`U+02D0` is a *letter* by category), so a naive
+    `\p{L}` class would have admitted the very glyph that leaked. `COLON_CLASS` becomes
+    defence-in-depth; its upgrade path (derive from Unicode category + confusables data rather
+    than hand-listing) is recorded in the lexicon.
+  - **R6-3 punctuation folds to canonical class LITERALS, in place.** A per-class occurrence
+    signature distinguished `A/B` from `A-B` but still collided `A/B-C` with `A-B/C` — occurrence
+    is not placement. Each class now folds to itself where it stands.
+  - **R6-4/R6-5** — the residual record and its corpus accounting are trued; see the residual
+    section above.
 - **Round-5 supplement — four more, each a bug in a previous round's own fix:**
   - **S1** the C3-2 broad contact predicate landed only in the split-line scan, so the **same-line**
     `Attention: ACME SDN BHD (123456-X)` seam kept persisting companies as people. A rule at one
@@ -282,11 +303,15 @@ reached the books unchallenged. X7 supplies the missing second reader.
 > ends in a registered-business suffix (`SDN BHD`, `BHD`, `PLT`, `LLP`). **Residual: a line that
 > *mentions* a company but is not the addressee — `A division of AMATERUS GROUP SDN BHD`,
 > `t/a …`, `Parent company …` — can still be read as the customer.** Eleven such phrases are
-> explicitly refused; reviewers constructed more and **20 still pass, 5 producing a wrong customer
-> name end-to-end**. It only fires when four things coincide: the real buyer's name carries **no**
-> suffix, the phrase line sits inside the bill-to block, it is geometrically closer to the buyer
-> box than the seller's, **and** Azure independently typed the `Attn` person as the customer. Each
-> of the four is individually necessary — measured by removing one at a time. **The harm ceiling
+> explicitly refused; reviewers constructed more and **23 of the 38 pinned forms still pass, 5
+> producing a wrong customer name end-to-end**. It fires when the phrase sits inside the bill-to
+> block **and** Azure independently typed the `Attn` person as the customer **and** no
+> suffix-bearing line appears earlier in that block; when Azure typed a seller name, the phrase
+> must also sit nearer the buyer box than the seller's. *(Corrected round 6: an earlier record
+> claimed four coincidences "each individually necessary". Two were disproved — a **suffixed**
+> real buyer printed **after** the phrase still loses, so what matters is scan ORDER not the
+> buyer's suffix; and the seller comparison does not run at all when Azure typed no VendorName.
+> The residual is **wider** than that story.)* **The harm ceiling
 > is a wrong DRAFT**: counterparty creation happens at human approval and no unattended-posting
 > path reaches this field — the same maker/checker wall that caught the original KONG CHENG
 > defect. A proposed rule (refuse when a lowercase relational phrase precedes an upper-cased name)
@@ -299,20 +324,25 @@ reached the books unchallenged. X7 supplies the missing second reader.
 
 **The measurement table (path A, case discontinuity — REJECTED).**
 
-*Each row names the subset it quotes — the denominators differ, and both the "0/24" and the
-"lost 4" figures are true only of their own subset.*
+*Every row names its subset, and every figure is **re-derived in CI** from an explicit named
+corpus — `packages/runtime/tests/x7-path-a-rejected.mjs` retains the rejected predicate so the
+decision can be re-run and challenged rather than taken on trust.*
 
 | subset measured | result |
 |---|---|
 | the **5** end-to-end leak scenarios | **5/5 closed** ✓ |
-| the **24 constructed** relational forms (all, incl. the 4 already refused) | 20/24 closed |
-| **the same 24, re-cased ALL-CAPS** | **0/24 closed** ✗ — the class survives re-casing |
-| legitimate names appearing in the **battery** (57 candidacy-passing strings) | 54 kept, **3 lost** (label-prefixed lines, e.g. `M/s ACME SDN BHD`) |
-| **of-names only**, all-caps (8) | 8/8 kept ✓ |
-| **of-names + real names, title-case** (5) | 1 kept, **4 lost** ✗ (`Bank of China (Malaysia) Berhad`) |
-| of-names + real names, all-lowercase OCR (4) | 4/4 kept ✓ |
-| **legitimate loss, all subsets summed** | **7** (4 title-case + 3 battery label-lines) |
+| the **23 distinct constructed** relational forms | **19 of the 23** closed |
+| **the same forms, re-cased ALL-CAPS** | **0 closed** ✗ — the class survives re-casing |
+| legitimate names, **all-caps** (17) | 17/17 kept ✓ |
+| legitimate names, **title-case** (5) | 1 kept, **4 lost** ✗ (`Bank of China (Malaysia) Berhad`) |
+| legitimate names, **all-lowercase OCR** (4) | 4/4 kept ✓ |
+| **legitimate loss, summed** | **4** — all title-case |
 | **verdict** | **DROP** — rule required ≥5 closed with **zero** legitimate loss |
+
+*Two corrections against the round-5 record, both found by re-deriving instead of re-quoting:
+the constructed set is **23 distinct**, not 24 (`trading as` was contributed by both review lanes
+and counted twice); and the legitimate loss is **4**, not 7 — the extra 3 were an artefact of
+scraping test files for the corpus, which swept up leak forms as the batteries grew.*
 
 - **Two honest limits, recorded rather than discovered later.** (i) The thresholds are
   **UNMEASURED** — the KONG CHENG captures are real client documents and are not in this repo, so

@@ -233,12 +233,34 @@ test("R3-Codex R2-B: a COMPANY is never persisted as a contact person", () => {
     L("ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54))];
   const r = run(lines, "Lim Xiao Shan", box(0.72, 2.40, 2.60, 2.54));
   assert.equal(r.contact, undefined, "an entity-suffixed string is never a person");
-  // It competes on the PARTY path instead — proven positively by a typed value that AGREES.
+  // AND (round 6) THE CLAIMED LINE SUPPLIES NOTHING AT ALL. An earlier round let it "compete as
+  // a party", which is precisely how a refused company came back and overrode `customer_name`.
+  // Typed stands untouched whether it agrees or not — the observable value is unchanged, only
+  // the receipt says `absent` rather than `matched`, because no party was read on that line.
   const agree = run(lines, "ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54));
-  assert.equal(agree.customer, "ACME SDN BHD");
-  assert.equal(agree.outcome, "matched", "read as a PARTY and collapsed against the agreeing typed row");
-  assert.equal(agree.envelope.customer_identity.typed_collapsed, 1);
+  assert.equal(agree.customer, "ACME SDN BHD", "the typed value is untouched…");
+  assert.equal(agree.outcome, "absent", "…and no party was read from the claimed line");
   assert.equal(agree.contact, undefined);
+});
+
+test("R6-1: the invariant is about LINES, not STRINGS — the same name on an UNCLAIMED line wins", () => {
+  // The adversarial probe that keeps the strong wording honest. Line 2 is a BARE
+  // `ACME SDN BHD` under `Bill To:`; line 3 is `Attention: ACME SDN BHD`, refused at the contact
+  // door and CLAIMED by that label. The override must STILL write ACME — because line 2 earned
+  // it on its own merits and the claimed line 3 contributed nothing. Spelling is not identity,
+  // in the pleasant direction.
+  const r = run([VENDOR, BILL_TO,
+    L("ACME SDN BHD", box(0.72, 2.30, 2.60, 2.44)),
+    L("Attention: ACME SDN BHD", box(0.72, 2.50, 3.60, 2.64)),
+    ATTN,
+  ], "Lim Xiao Shan");
+  assert.equal(r.customer, "ACME SDN BHD", "the unclaimed line qualifies on its own merits");
+  assert.equal(r.outcome, "attn_overridden");
+  assert.equal(r.contact, "Lim Xiao Shan");
+  // …and with line 2 removed, the claimed line alone supplies nothing.
+  const claimedOnly = run([VENDOR, BILL_TO, L("Attention: ACME SDN BHD", box(0.72, 2.50, 3.60, 2.64)), ATTN], "Lim Xiao Shan");
+  assert.equal(claimedOnly.customer, "Lim Xiao Shan", "no unclaimed line, so nothing overrides");
+  assert.notEqual(claimedOnly.outcome, "attn_overridden");
 });
 
 // ══════════════════════════════════════════════════════════════════════════════════════
@@ -388,7 +410,7 @@ test("S2 end-to-end: no colon glyph manufactures a party", () => {
   }
 });
 
-test("S3: a contact-door refusal HOLDS — it may collapse, but never override or withdraw", () => {
+test("S3 / R6-1: a contact-CLAIMED line can never override, withdraw, or collapse", () => {
   // THE SIDE-EFFECT CHAIN, traced: the contact gate refuses `Lim P.L.T.` (single-letter-run
   // joining reads `plt`), so `attn_key` is never set, so the F7 OVERRIDE shape is scored as an
   // UNEXPLAINED disagreement — and the reconciler WITHDREW a correct `KONG CHENG…SDN BHD`.
@@ -397,27 +419,39 @@ test("S3: a contact-door refusal HOLDS — it may collapse, but never override o
     L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim P.L.T.", box(0.72, 2.40, 2.60, 2.54));
   assert.equal(withPlt.customer, "Lim P.L.T.", "typed stands — pre-X7 behaviour, zero loss");
   assert.equal(withPlt.outcome, "attn_inconclusive_hold");
-  // THE INVARIANT: a string refused at the contact door may still COLLAPSE with an agreeing typed
-  // row, but it can never win AGAINST the typed value it sat beside.
+  // THE INVARIANT, now TRUE as originally stated because reservation happens on the CLAIM: a
+  // contact-CLAIMED line supplies nothing to the party read — it cannot override, cannot drive a
+  // withdraw, and cannot collapse. Typed simply stands, agreeing or not. (The round-5 wording
+  // had to be narrowed because reservation then happened only on ACCEPTANCE; R6-1 removed the
+  // hole rather than the claim.)
   const disagree = run([VENDOR, BILL_TO, ATTN_LABEL, L("ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54))],
     "Lim Xiao Shan", box(0.72, 2.40, 2.60, 2.54));
   assert.equal(disagree.customer, "Lim Xiao Shan", "it does not override…");
-  assert.equal(disagree.outcome, "attn_inconclusive_hold", "…and it does not withdraw either");
+  assert.notEqual(disagree.outcome, "attn_overridden", "…and it does not withdraw either");
+  assert.equal(disagree.customer !== undefined, true, "the typed row survives");
   const agree = run([VENDOR, BILL_TO, ATTN_LABEL, L("ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54))],
     "ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54));
-  assert.equal(agree.customer, "ACME SDN BHD", "…but an agreeing typed row still collapses");
-  assert.equal(agree.outcome, "matched");
-  // THE NARROWED CLAIM, pinned. A contact-refused string CAN still drive a CONTESTED withdraw on
-  // its own merits as a party candidate — the earlier "can never withdraw" wording was false.
-  // Here `AMATERUS GROUP SDN BHD` is refused as a contact, competes as a party, and meets a
-  // SECOND distinct labelled party; two real parties on one page is a genuine contest, so the
-  // typed row withdraws. Fail-closed and deliberate: this is not the inconclusive-hold case.
-  const contest = run([VENDOR, BILL_TO, ATTN_LABEL,
+  assert.equal(agree.customer, "ACME SDN BHD", "…and an agreeing typed row is left untouched");
+  assert.equal(agree.outcome, "absent", "no party was read from the claimed line at all");
+  // THE ROUND-5 COUNTEREXAMPLE, NOW CLOSED BY R6-1. This layout was the reason the invariant had
+  // to be narrowed at 7bcbd39: `AMATERUS GROUP SDN BHD` was refused as a contact, re-entered as a
+  // party, met a second labelled party, and drove a CONTESTED withdraw of a CORRECT typed name.
+  // With reservation on the CLAIM, the AMATERUS line is out of the party read entirely, only
+  // KONG CHENG remains, and the correct typed name simply survives. The strong wording holds
+  // again — and this is the fail-open-free direction: one fewer withdraw, no new assertion.
+  const wasContest = run([VENDOR, BILL_TO, ATTN_LABEL,
     L("AMATERUS GROUP SDN BHD", box(0.72, 2.40, 2.90, 2.54)),
     L("Customer : KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.70, 4.60, 2.84)),
   ], "KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.70, 3.60, 2.84));
-  assert.equal(contest.outcome, "contested", "two distinct labelled parties is a real contest");
-  assert.equal(contest.customer, undefined, "…and a contest withdraws, even a CORRECT typed name");
+  assert.equal(wasContest.customer, "KONG CHENG RESTAURANTS SDN BHD", "the correct typed name is no longer withdrawn");
+  assert.equal(wasContest.outcome, "matched", "the claimed line never entered the contest");
+  // A GENUINE two-party contest — both on UNCLAIMED lines — still withdraws (residual 3).
+  const realContest = run([VENDOR,
+    L("Bill To: WRONG HOLDING SDN BHD", box(0.72, 2.15, 3.60, 2.29)),
+    L("Customer : ACTUAL SUBSIDIARY SDN BHD", box(0.72, 2.32, 3.90, 2.46)),
+  ], "WRONG HOLDING SDN BHD", box(0.72, 2.15, 3.60, 2.29));
+  assert.equal(realContest.outcome, "contested");
+  assert.equal(realContest.customer, undefined);
   // The S/B rescue survives: a dotted-initials person is readable, so the override still fires.
   const sb = run([VENDOR, BILL_TO, ATTN_LABEL, L("Lim S.B.", box(0.72, 2.40, 2.60, 2.54)),
     L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim S.B.", box(0.72, 2.40, 2.60, 2.54));

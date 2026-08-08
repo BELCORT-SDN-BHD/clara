@@ -91,18 +91,23 @@
 //      typed value standing — zero loss against today.
 //  (5) SUFFIXED RELATIONAL PHRASES — THE OPEN ONE, and the only residual that can still write a
 //      WRONG party rather than abstain. `NON_ADDRESSEE_MARKERS` enumerates the ELEVEN measured
-//      forms; reviewers constructed 24 more, of which 20 pass candidacy, 5 producing a wrong
-//      `customer_name` end-to-end (`A division of AMATERUS GROUP SDN BHD` is the realistic one).
-//      The base is still validated by ABSENCE-of-known-bad. The case-discontinuity proposal was
-//      implemented and MEASURED, then REJECTED. DENOMINATORS, stated because they differ by
-//      subset: it closed 5/5 end-to-end; it lost 4 of 5 TITLE-CASE of-names (7 of 74 across the
-//      whole legitimate corpus, the other 3 being label-prefixed battery lines); and it closed
-//      0 of the 24 CONSTRUCTED forms once they are ALL-CAPS, which is how Malaysian invoices are
-//      usually printed. Harm ceiling is a wrong DRAFT — counterparty birth is at
-//      HUMAN APPROVAL and no unattended-post path reaches `customer_name`. The 20 forms and the
-//      5 scenarios are PINNED as cells so this is measured, not remembered. FULL VETO-READY
-//      RECORD, with the measurement table and the four-part reachability precondition:
-//      docs/plan/extraction-slice-contract.md, X7 → "RECORDED RESIDUAL (5)". OWNER-VETOABLE.
+//      forms; reviewers constructed 23 distinct more, of which 23 of the 38 pinned entries still
+//      pass candidacy, 5 producing a wrong `customer_name` end-to-end (`A division of AMATERUS
+//      GROUP SDN BHD` is the realistic one). The base is still validated by ABSENCE-of-known-bad
+//      — the LAST such surface in X7. The case-discontinuity proposal was implemented, MEASURED
+//      and REJECTED; the predicate is RETAINED and re-run in CI (`x7-path-a-rejected.mjs`), so
+//      the rejection is a fact, not a claim: 5/5 end-to-end closed, but 4 of 5 TITLE-CASE names
+//      lost (`Bank of China (Malaysia) Berhad`) and 0 of the constructed forms closed once
+//      ALL-CAPS, which is how Malaysian invoices usually print.
+//      REACHABILITY, re-measured after the round-6 fixes and WIDER than the retired
+//      four-coincidence story: LOAD-BEARING are the bounded scan window, typed == the reader's
+//      own Attn person, and (only when Azure typed a VendorName) the closer-to-buyer comparison.
+//      NOT load-bearing: "the real buyer is unsuffixed" — a SUFFIXED buyer printed AFTER the
+//      phrase still loses, so what matters is scan ORDER; and the seller comparison does not run
+//      at all when no VendorName anchor exists. Harm ceiling is a wrong DRAFT — counterparty
+//      birth is at HUMAN APPROVAL and no unattended-post path reaches `customer_name`. The 38
+//      forms and the 5 scenarios are PINNED so this is measured, not remembered. FULL
+//      VETO-READY RECORD: docs/plan/extraction-slice-contract.md, X7. OWNER-VETOABLE.
 
 import { pageFrame } from "./invoice-totals-reader.mjs";
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
@@ -230,8 +235,14 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
       // different proposition: company-shaped strings that failed candidacy for some other
       // reason (`SDN BHD` alone, `ACME SDN BHD (123456-X)`, `ACME SDN BHD, Kuala Lumpur`,
       // `ACME P.L.T.`) all landed in the contact bucket and were persisted as people.
+      //
+      // THE CONTACT SCAN LOOKS FOR THE LABEL'S VALUE, NOT FOR A PERSON. It stops at the first
+      // NAME-SHAPED line and hands it to the caller, which then judges whether that value is a
+      // person. Keeping the entity test out of the scan is what lets the caller RESERVE the line
+      // even when it refuses the value — see the claim/judge split in pass 1. Furniture (an
+      // address, a caption) is still skipped, so a person printed under an address still reads.
       const isCandidate = (raw) => (looksLikePartyName(raw)
-        && (kind === "party" ? hasRegisteredEntitySuffix(raw) : !containsEntityToken(raw)));
+        && (kind === "party" ? hasRegisteredEntitySuffix(raw) : true));
       const limit = Math.min(lines.length - 1, i + Math.max(0, settings.maxLookaheadLines));
       for (let j = i + 1; j <= limit; j++) {
         const box = boxes[j];
@@ -281,30 +292,40 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
       if (!frame) { receipt.unit_unresolved += 1; note("unit_unresolved", attn.label, pageNumber, { kind: "attn" }); continue; }
       if (boxes[i] === null) { receipt.no_geometry += 1; note("no_geometry", attn.label, pageNumber, { kind: "attn" }); continue; }
 
-      let value = null;
+      // ══ CLAIM, THEN JUDGE — AND RESERVE ON THE CLAIM ═════════════════════════════════════
+      // A contact LABEL positively claims a LINE: its own, or the first name-shaped line in its
+      // block. That claim is GEOMETRIC EVIDENCE about what the line IS, and it stands whatever
+      // the value's shape turns out to be. Reservation used to happen only after the value was
+      // ACCEPTED, so a refused company (`Attention:` → `ACME SDN BHD`) fell back into the party
+      // scan and overrode `customer_name` — the refusal had judged the value's SHAPE, not the
+      // label's CLAIM, and those are different facts.
+      //
+      // THE INVARIANT IS ABOUT LINES, NOT STRINGS. A contact-CLAIMED LINE can never supply the
+      // override or drive a withdraw. The SAME STRING on an UNCLAIMED line still qualifies on its
+      // own merits — `Bill To:` / `ACME SDN BHD` / `Attention: ACME SDN BHD` / `Attn : <person>`
+      // must still override with ACME, because the bare line 2 earned it and the refused line 3
+      // contributed nothing. Spelling is not identity, in the pleasant direction.
+      let claim = null;
       if (attn.remainder) {
-        // THE SAME BROAD PREDICATE AS `scanBelow` — this seam shipped with the STRICT one, so
-        // `Attention: ACME SDN BHD (123456-X)` / `P.L.T.` / bare `SDN BHD` were refused on the
-        // split seam and persisted as people here. A rule at one of two seams is not a rule.
-        if (!looksLikePartyName(attn.remainder) || containsEntityToken(attn.remainder)) {
-          if (containsEntityToken(attn.remainder)) receipt.contact_read_inconclusive = true;
-          receipt.attn_rejected_gate += 1;
-          note("attn_rejected_gate", attn.label, pageNumber, { kind: "attn" });
-          continue;
-        }
-        value = { raw: attn.remainder, box: boxes[i], lineIndex: i };
+        claim = { raw: attn.remainder, box: boxes[i], lineIndex: i };
       } else {
-        value = scanBelow(i, boxes[i], "attn", attn.label);
+        claim = scanBelow(i, boxes[i], "attn", attn.label);
         // Counted apart from `attn_rejected_gate`: that head means "a line was examined and
         // refused as a contact VALUE"; this one means "a bare Attn label found no value at all".
-        // Spending one counter on both makes the receipt double-count a single line.
-        if (!value) { receipt.attn_no_value += 1; note("attn_no_value", attn.label, pageNumber, { kind: "attn" }); continue; }
+        if (!claim) { receipt.attn_no_value += 1; note("attn_no_value", attn.label, pageNumber, { kind: "attn" }); continue; }
       }
-      // RESERVE THE VALUE LINE UNCONDITIONALLY — before attribution, and whether or not
-      // attribution goes on to accept it. The document labelled that line a contact; attribution
-      // failing says something about GEOMETRY, nothing about what the line IS. Reserving only on
-      // success would hand the party read exactly the lines the contact read could not vouch for.
-      reserved.add(value.lineIndex);
+      reserved.add(claim.lineIndex);
+
+      // NOW judge the value, with the same BROAD predicate the split seam uses — this seam once
+      // shipped with the strict one, so `Attention: ACME SDN BHD (123456-X)` / `P.L.T.` / bare
+      // `SDN BHD` were refused there and persisted as people here.
+      if (!looksLikePartyName(claim.raw) || containsEntityToken(claim.raw)) {
+        if (containsEntityToken(claim.raw)) receipt.contact_read_inconclusive = true;
+        receipt.attn_rejected_gate += 1;
+        note("attn_rejected_gate", attn.label, pageNumber, { kind: "attn" });
+        continue;
+      }
+      const value = claim;
       if (!attributed(value.box, attn.label, "attn")) continue;
       const src = lines[value.lineIndex];
       contacts.push({
