@@ -1,54 +1,61 @@
 // WAVE E / FINDING F9 — the shared kit for the autoDraft_v7 and chatTurn_v10 suites.
 // NOT a test file (node --test's default patterns do not match `-testkit.mjs`).
 //
-// WHAT THE FIDELITY INSTRUMENT HERE CLAIMS, AND WHAT IT DOES NOT — stated up front so no
-// reader over-reads it. `cutLines` DELETES a declared span from each side and then the
-// suites compare what is left with plain string equality. So:
-//   * EVERY byte OUTSIDE a declared span is compared literally, both directions. A
-//     smuggled change anywhere else fails.
-//   * Each declared span is pinned by its FIRST line, its LAST line, and its EXACT line
-//     count (blank-line tails included) — so content cannot be added to a span without
-//     changing its length, and a span cannot silently move or vanish.
-//   * What a span's INTERIOR contains is NOT proven by this instrument. That is
-//     deliberate and is covered a different way: every span in these closures is either
-//     model-facing TEXT (pinned separately, exactly, by the golden-string cells) or
-//     EXECUTABLE code (`resolveEvidenceRegions` and its call site), exercised directly by
-//     the behavioural cells. The mask is the fidelity claim; behaviour is the correctness
-//     claim; neither is asked to do the other's job.
+// WHAT THE FIDELITY INSTRUMENTS HERE CLAIM, AND WHAT THEY DO NOT — stated up front so no
+// reader over-reads them.
+//   * `cutLines` deletes a declared span from each side and the suites compare what is left
+//     with plain string equality. Every byte OUTSIDE a span is compared literally; each span
+//     is pinned by its first line, its last line, and its exact line count. What a span's
+//     INTERIOR contains is NOT proven by it. Used only where the delta is small and the
+//     interior is model-facing TEXT that is separately pinned exactly (prompt.ts), or where
+//     the claim is "purely additive" (errors.ts).
+//   * `slice` extracts a NAMED region by anchors so the suites can assert the CARRIED parts
+//     of a heavily-changed file are byte-identical to their predecessor. After the F9 fix
+//     round, tools.ts's evidence path is a rewrite, not a delta — masking it would be a
+//     mask over most of the interesting file, so the suites assert the carried regions
+//     positively instead and cover the new ones by EXECUTION.
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
-/** Read a workflow source file. */
 export const src = (name) => readFileSync(new URL(`../workflows/${name}`, import.meta.url), "utf8");
 
-/** Drop the top-of-file block comment: it legitimately narrates each version's delta so it
- *  is EXPECTED to diverge; only the code from the first REAL import statement onward is
- *  compared (the family's own dropHeader idiom). */
+/** Drop the top-of-file block comment (it legitimately narrates each version's delta). */
 export function dropHeader(text) {
   const m = /^import /m.exec(text);
   assert.ok(m, "a real import statement must be present");
   return text.slice(m.index);
 }
 
-/** Rename version tokens across a body. `pairs` is applied in order, so multi-digit
- *  versions (v10) must be listed before any prefix of themselves. */
 export function rename(text, pairs) {
   let out = text;
   for (const [from, to] of pairs) out = out.split(from).join(to);
   return out;
 }
 
-/**
- * Delete declared spans from `text`, in order, asserting each one's shape.
- *
- * Each cut is `{ label, from, to, lines, trailingBlanks? }` where `from`/`to` are EXACT
- * full lines (indentation included), `lines` is the exact number of lines the span
- * occupies INCLUDING any `trailingBlanks` consumed after the `to` line.
- *
- * Cuts are matched in the order given, each scanning forward from the previous one — so a
- * repeated anchor line is unambiguous and a cut that has moved before its predecessor
- * fails rather than silently matching a later occurrence.
- */
+/** Extract the text from `from` (inclusive) to `to` (exclusive), by exact substring anchors. */
+export function slice(text, from, to, label) {
+  const a = text.indexOf(from);
+  assert.ok(a >= 0, `slice "${label}": start anchor not found`);
+  const b = text.indexOf(to, a + from.length);
+  assert.ok(b > a, `slice "${label}": end anchor not found after the start`);
+  return text.slice(a, b);
+}
+
+/** Extract a named function, from its own doc-comment (when it has one) through the first
+ *  line that is exactly `}` — i.e. the whole declaration, comment included, so a silently
+ *  reworded comment on a "carried" function fails too. */
+export function fnBody(text, name) {
+  const lines = text.split("\n");
+  const sig = lines.findIndex((l) => l.startsWith(`export function ${name}(`) || l.startsWith(`function ${name}(`));
+  assert.ok(sig >= 0, `fnBody: ${name} not found`);
+  let start = sig;
+  while (start > 0 && (lines[start - 1].startsWith(" *") || lines[start - 1].startsWith("/**"))) start--;
+  const end = lines.findIndex((l, i) => i > sig && l === "}");
+  assert.ok(end > sig, `fnBody: ${name} never closes at column 0`);
+  return lines.slice(start, end + 1).join("\n");
+}
+
+/** Delete declared spans, in order, asserting each one's shape (see the header). */
 export function cutLines(text, cuts) {
   const lines = text.split("\n");
   const out = [];
@@ -59,13 +66,13 @@ export function cutLines(text, cuts) {
     if (cut && lines[i] === cut.from) {
       let j = i;
       while (j < lines.length && lines[j] !== cut.to) j++;
-      assert.ok(j < lines.length, `cut "${cut.label}": start anchor found at line ${i + 1} but the end anchor was never reached`);
+      assert.ok(j < lines.length, `cut "${cut.label}": start anchor at line ${i + 1} but the end anchor was never reached`);
       const blanks = cut.trailingBlanks ?? 0;
       for (let b = 0; b < blanks; b++) {
-        assert.equal(lines[j + 1], "", `cut "${cut.label}": expected ${blanks} trailing blank line(s) after its end anchor`);
+        assert.equal(lines[j + 1], "", `cut "${cut.label}": expected ${blanks} trailing blank line(s)`);
         j++;
       }
-      assert.equal(j - i + 1, cut.lines, `cut "${cut.label}" spans ${j - i + 1} lines (expected exactly ${cut.lines}) — content was added to or removed from a masked span`);
+      assert.equal(j - i + 1, cut.lines, `cut "${cut.label}" spans ${j - i + 1} lines (expected ${cut.lines}) — content was added to or removed from a masked span`);
       pending.shift();
       i = j + 1;
       continue;
@@ -77,35 +84,39 @@ export function cutLines(text, cuts) {
   return out.join("\n");
 }
 
-/** A single-line cut (the common shape on the OLD side of a delta). */
 export const line = (label, text) => ({ label, from: text, to: text, lines: 1 });
 
 // ===========================================================================
-// The stub pool rig. Mirrors wave-7a-autodraft-v6.test.mjs's own stubPools, with ONE
-// addition: the get_document_extract read returns a caller-supplied extract instead of
-// always null, because F9's whole subject is what the wrapper does with those regions.
+// The stub pool rig. Extended for the fix round: get_document_extract can return a
+// DIFFERENT payload on each successive call, which is the only way to exercise the drift
+// the snapshot gate exists to catch — the first cut's stub returned one fixed extract for
+// every read, which is precisely why its battery could not see the defect (Codex #5).
 // ===========================================================================
 
 /**
- * @param {unknown} extract  what the server-side get_document_extract read returns.
- * @returns {{ params: unknown[] | null, reads: string[] }} a live capture of the writer's
- *   params (null until the writer is actually reached — the "no DB roundtrip" assertions
- *   depend on that staying null).
+ * @param {unknown|unknown[]} extracts one payload, or a queue consumed one call at a time
+ *   (the last entry repeats once the queue is exhausted).
  */
-export function stubPools(extract = null) {
-  const write = { params: null, reads: [] };
+export function stubPools(extracts = null) {
+  const queue = Array.isArray(extracts) ? [...extracts] : [extracts];
+  const state = { params: null, extractCalls: 0, writes: 0 };
+  const nextExtract = () => {
+    const x = queue.length > 1 ? queue.shift() : queue[0];
+    state.extractCalls += 1;
+    return x;
+  };
   const readClient = {
     query: async (sql) => {
-      write.reads.push(sql);
       if (/from clara\.document_filings/.test(sql)) return { rows: [{ sha256: "sha-abc", filing_id: "fil-1", resolution_id: "res-1" }], rowCount: 1 };
       if (/get_context_pack/.test(sql)) return { rows: [{ pack: { books_version: 7 } }], rowCount: 1 };
-      if (/get_document_extract/.test(sql)) return { rows: [{ x: extract }], rowCount: 1 };
+      if (/get_document_extract/.test(sql)) return { rows: [{ x: nextExtract() }], rowCount: 1 };
       return { rows: [], rowCount: 0 };
     },
   };
   const writeClient = {
     query: async (_sql, params) => {
-      write.params = params;
+      state.params = params;
+      state.writes += 1;
       return { rows: [{ receipt: { entry_id: "entry-9", revision_token: "rev-9" } }], rowCount: 1 };
     },
   };
@@ -114,36 +125,82 @@ export function stubPools(extract = null) {
     withRuntime: async (fn) => fn(mintClient),
     withReadWakeScoped: async (_secret, fn) => fn(readClient),
     withWriteWakeScoped: async (_secret, fn) => fn(writeClient),
-    // chatTurn's infra mints OBO the initiator through these two names instead.
     mintWakeCredential: async () => ({ credentialId: "cred", secret: "s3cr3t" }),
     mintWakeCredentialObo: async () => ({ credentialId: "cred", secret: "s3cr3t" }),
   };
-  return write;
+  return state;
 }
 
-/** The uuids the fixtures cite. Deliberately NOT sequential-looking: a resolution that
- *  accidentally worked by array position must not also look right by id. */
 export const REGION_TOTAL = "7770763e-56c0-4fce-a641-0cf54d2edf31"; // the real F9 region id
 export const REGION_VENDOR = "1c1c1c1c-2d2d-4e4e-8f8f-909090909090";
 export const REGION_DATE = "abababab-cdcd-4efe-8a8a-b1b1b1b1b1b1";
+export const REGION_DRIFT = "deadbeef-1111-4222-8333-444455556666";
+export const EXT_OCR = "e0000000-0000-4000-8000-00000000000a";
+export const EXT_FACTS = "e0000000-0000-4000-8000-00000000000b";
+
+const region = (idx, id, field_path, text_content, extraction_id = EXT_OCR) => ({
+  idx,
+  id,
+  extraction_id,
+  version_n: 1,
+  engine_kind: extraction_id === EXT_FACTS ? "invoice_facts" : "ocr",
+  field_path,
+  text_content,
+});
 
 /**
- * A get_document_extract shape whose ARRAY ORDER IS NOT idx ORDER. This is the fixture the
- * "by field, not by position" claim rests on: element[0] carries idx 3, so any resolver
- * that indexes the array would map region_idx 1 to the wrong region — and, because the
- * quote would then not be found in that region's text, would have re-created F9 in a new
- * disguise instead of fixing it.
+ * The snapshot the model reads. Its ARRAY ORDER IS NOT ITS idx ORDER — a resolver that
+ * indexed the array would map idx 1 to the wrong region, so the "by field, not by position"
+ * claim is under test on every use of this fixture.
  */
-export const SCRAMBLED_EXTRACT = {
+export const READ_EXTRACT = {
   regions: [
-    { idx: 3, id: REGION_DATE, field_path: "invoice.invoice_date", text_content: "2026-01-31", engine_kind: "invoice_facts", version_n: 1 },
-    { idx: 1, id: REGION_VENDOR, field_path: "invoice.vendor_name", text_content: "ACME SDN BHD", engine_kind: "invoice_facts", version_n: 1 },
-    { idx: 2, id: REGION_TOTAL, field_path: "invoice.total", text_content: "RM 1,000.00", engine_kind: "invoice_facts", version_n: 1 },
+    region(3, REGION_DATE, "invoice.invoice_date", "2026-01-31"),
+    region(1, REGION_VENDOR, "invoice.vendor_name", "ACME SDN BHD"),
+    region(2, REGION_TOTAL, "invoice.total", "RM 1,000.00"),
   ],
 };
 
-/** Two balanced lines — the shape both draft schemas accept. */
+/**
+ * THE DRIFT FIXTURE (native reviewer Finding 1, reproduced on a rig before the fix). An
+ * `invoice_facts` extraction has landed between the model's read and the draft call. Because
+ * the DB ordinal sorts by (engine_kind, version_n, id) and 'invoice_facts' < 'ocr', EVERY
+ * index is renumbered — and idx 2, which the model read as the OCR `invoice.total` region,
+ * now names a DIFFERENT extraction's region carrying THE SAME TEXT. The wall cannot see the
+ * difference: the quote really is a substring of the region it is handed.
+ */
+export const DRIFTED_EXTRACT = {
+  regions: [
+    region(1, REGION_DRIFT, "invoice.currency", "MYR", EXT_FACTS),
+    region(2, "cafe0000-0000-4000-8000-00000000000c", "invoice.total", "RM 1,000.00", EXT_FACTS),
+    region(3, REGION_DATE, "invoice.invoice_date", "2026-01-31"),
+    region(4, REGION_VENDOR, "invoice.vendor_name", "ACME SDN BHD"),
+    region(5, REGION_TOTAL, "invoice.total", "RM 1,000.00"),
+  ],
+};
+
+/** A snapshot in which the SAME short quote appears in two regions of ONE set — the residual
+ *  the uuid era also had. Resolution binds by idx to the region the model read; the quote
+ *  collision changes nothing, which is the point of the cell that uses it. */
+export const COLLIDING_EXTRACT = {
+  regions: [
+    region(1, REGION_TOTAL, "invoice.total", "RM 1,000.00"),
+    region(2, REGION_DRIFT, "invoice.amount_due", "RM 1,000.00"),
+  ],
+};
+
+/** The pre-0054 shape: regions with ids, no ordinal at all. */
+export const PRE_0054_EXTRACT = {
+  regions: [
+    { id: REGION_VENDOR, extraction_id: EXT_OCR, field_path: "invoice.vendor_name", text_content: "ACME SDN BHD" },
+    { id: REGION_TOTAL, extraction_id: EXT_OCR, field_path: "invoice.total", text_content: "RM 1,000.00" },
+  ],
+};
+
 export const LINES = [
   { account_code: "600-000", debit_cents: 100000, credit_cents: 0 },
   { account_code: "400-000", debit_cents: 0, credit_cents: 100000 },
 ];
+
+/** A cited fact in the post-fix shape (field_path is REQUIRED and echoes the region's own). */
+export const cite = (region_idx, quote, field_path) => ({ region_idx, quote, field_path });

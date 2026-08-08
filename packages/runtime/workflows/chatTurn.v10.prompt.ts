@@ -56,6 +56,10 @@ export const SYSTEM_PROMPT_V10 = [
   "from the document's extracted facts and cite them. CITE A REGION BY ITS `idx` — the small",
   "integer read_document prints on every region — together with the exact quote. NEVER type a",
   "region's long id: the tool does not accept one, and the server resolves your idx for you.",
+  "Call read_document for THAT document in this turn before you cite it — an idx only means",
+  "something against the list that call printed, reading one document never licenses citing",
+  "another, and if the extraction changes in between you simply read again and re-cite. Echo each",
+  "cited region's own field_path exactly as it was printed.",
   "",
   "Perceiving a document: an attachment appears in the conversation as `[attachment: <document_id>]`.",
   "Call `read_document(document_id)` to see its stored extraction (filing state, invoice facts,",
@@ -276,19 +280,27 @@ export const draftJournalEntryInputSchema = z.object({
           .int()
           .min(1)
           .describe(
-            "The region's `idx` from read_document — a small 1-based integer, NOT a region id. The " +
-              "server resolves it to that region before the database checks your quote against the " +
-              "stored text.",
+            "The region's `idx` from THIS run's read_document call — a small 1-based integer, NOT a " +
+              "region id. The server resolves it against the very list that call printed; if the " +
+              "document's extraction has changed since, the draft is refused and you simply read " +
+              "the document again and re-cite.",
           ),
         quote: z.string(),
-        field_path: z.string().optional(),
+        field_path: z
+          .string()
+          .describe(
+            "The region's OWN `field_path`, copied EXACTLY as read_document printed it — send an " +
+              "empty string for a region that printed none. You never choose this label, you echo " +
+              "it: it is checked against the region your idx names, and the database records the " +
+              "region's own label either way.",
+          ),
       }),
     )
     .min(1)
     .describe(
-      "Cited facts (region idx + exact quote) backing the amounts — REQUIRED for a document-bound draft. " +
-        "An idx that names no region of this document is refused, and the refusal lists the idx values " +
-        "that do exist.",
+      "Cited facts (region idx + exact quote + the region's own field_path) backing the amounts — " +
+        "REQUIRED for a document-bound draft. Read the document in THIS run before citing: an idx " +
+        "only means something against the list you were shown.",
     ),
   uncertainty: z
     .object({ note: z.string(), alternatives: z.array(z.string()) })

@@ -198,15 +198,34 @@ export const workflows = {
 // GONE from the toolface — a field the model cannot supply is a field it cannot
 // mis-transcribe), and each wrapper's `resolveEvidenceRegions` maps that index back to a
 // region_id BY THE `idx` FIELD — never by array position — off the regions it already
-// fetches server-side. The `idx` itself is the DB's own stable per-region ordinal, added
-// additively by migration 0054_region_ordinal to clara.get_document_extract — WHICH MUST
-// BE APPLIED BEFORE THIS IMAGE GOES LIVE: with no idx published, v7/v10 can resolve
-// nothing and every document-bound draft refuses (fail-closed, but a full stop on the
-// drafting lane; 0054's own header states the order as binding). An idx that
-// names no region of the document is refused at the wrapper with the valid idx set (and
-// each one's field_path) echoed back, under the SAME CLR21 `evidence_invalid` token the
-// wall itself raises — so no downstream consumer gains a branch. The v6/v9 bodies stay
-// frozen, built and EXPORTED so no parked run is stranded (policy (c)).
+// fetches server-side. The `idx` itself is the DB's own per-region ordinal, added
+// additively by migration 0054_region_ordinal to clara.get_document_extract — WHICH MUST BE
+// APPLIED BEFORE THIS IMAGE GOES LIVE: with no idx published, v7/v10 resolve nothing and
+// every document-bound draft refuses (fail-closed, but a full stop on drafting; 0054's own
+// header states the order as binding).
+//
+// THE FIX ROUND (the cross-model review's CRITICAL — Codex #1 + the native reviewer's
+// Finding 1, both CONFIRMED, the second MEASURED on a rig). Resolving an index against the
+// wrapper's OWN fresh fetch is not enough: an index is RELATIVE. An extraction landing
+// between the model's read_document call and its draft call renumbers every ordinal
+// ('invoice_facts' sorts before 'ocr', so a facts pass completing renumbers everything), and
+// the measured consequence was idx 2 resolving to a DIFFERENT extraction's region carrying
+// the same text — which the untouched wall ACCEPTED, recording field_path 'invoice.total',
+// the very label the corroboration bound and the supplier-bill shape check select on. A
+// stale UUID always named the region it was read from; a stale INDEX can name another. So
+// v7/v10 bind resolution to the SNAPSHOT: read_document records a rev of the (idx -> region
+// id) mapping it showed, per document, in the tool-set closure; the draft wrapper refuses
+// unless the fresh fetch still carries that rev, and refuses outright if this run never read
+// THAT document (reading A never licenses citing B — the property the DB wall's document
+// join gave v9 for free and an index does not). `field_path` also becomes REQUIRED and is
+// cross-checked against the resolved region, so the recorded label is DB-sourced end to end.
+// STALENESS IS CLASSIFIED AS A SYSTEM CONDITION, never `evidence_invalid` and never
+// question-shaped — a durable human question reading "the extraction moved" is noise, and an
+// evidence-blame receipt for a race is a false receipt; each is retryable in-run. A genuine
+// mislabel inside a snapshot the model DID read keeps `evidence_invalid`. A duplicate idx
+// refuses rather than taking the first (array order must never regain authority).
+//
+// The v6/v9 bodies stay frozen, built and EXPORTED so no parked run is stranded (policy (c)).
 export { firmInterview_v1 };
 export { firmInterview_v2 };
 export { clientOnboarding_v1 };

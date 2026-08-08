@@ -28,11 +28,25 @@
 
 import type { RefusalPart } from "./autoDraft.v7.prompt.js";
 
-/** The (idx, field_path) pairs a resolution refusal echoes back so the model can re-cite —
- *  the shape evidenceIdxUnresolvedRefusal below takes. DECLARED HERE rather than beside the
- *  resolver that builds it because the dependency only runs one way inside this closure:
- *  tools.ts imports from errors.ts, never the reverse. */
+/** The (idx, field_path) pairs a resolution refusal echoes back so the model can re-cite,
+ *  and the two shapes a failed resolution can take. DECLARED HERE rather than beside the
+ *  resolver that builds them because the dependency only runs one way inside this closure:
+ *  tools.ts imports from errors.ts, never the reverse.
+ *
+ *  THE TWO FAILURE KINDS ARE NOT THE SAME KIND OF FACT, and collapsing them is the defect
+ *  the F9 fix round exists to remove (Codex #3, native Finding 1):
+ *    * `system`      — the run cannot lawfully resolve an index AT ALL: it never read the
+ *                      document, the extraction moved under it, the extraction publishes no
+ *                      ordinal, or the ordinal is self-contradictory. Nobody's evidence is
+ *                      wrong; the WORLD moved or the deployment is mid-window. Retryable.
+ *    * `mislabelled` — inside a snapshot the model demonstrably read, it claimed a
+ *                      field_path the cited region does not carry. That IS a bad citation,
+ *                      and it keeps the existing `evidence_invalid` discriminant. */
 export type RegionIdxHint = { idx: number; field_path: string | null };
+export type MislabelledCitation = { idx: number; cited: string; actual: string | null };
+export type EvidenceFailure =
+  | { kind: "system"; reason: EvidenceSystemReason; citedIdx: number[]; valid: RegionIdxHint[] }
+  | { kind: "mislabelled"; entries: MislabelledCitation[] };
 
 
 /** A DB error as node-postgres surfaces it. `code` is the 5-char SQLSTATE (our CLRxx codes
@@ -173,31 +187,78 @@ export function directionFamilyMismatchRefusal(): RefusalPart {
   return runtimeRefusal("CLR21", "direction_family_mismatch", CLR21_REASON_MESSAGES.direction_family_mismatch);
 }
 
-/** F9 (ADR-064 §3): the EARLY, runtime-labelled refusal for a cited `region_idx` that names
- *  no region of this document's current extraction. It carries the EXISTING
- *  `evidence_invalid` token DELIBERATELY — the meaning is unchanged ("the cited evidence does
- *  not match the document's extraction"), so every downstream consumer behaves exactly as it
- *  does when the DB wall itself raises it: isQuestionShaped still opens a scoped
- *  open-question, the dashboard's CLR21 copy still reads "re-cite before approving", and the
- *  settle record keeps the same discriminant. Introducing a new token would have forked all
- *  of that for a case that IS the same case, caught one layer earlier.
+/** F9 FIX ROUND (coordinator ruling 2, from Codex #3 + native Finding 1). The conditions
+ *  under which a cited region INDEX cannot be lawfully resolved are SYSTEM conditions, not
+ *  bad evidence:
  *
- *  What is new is the HINT appended after the standard message: which idx values actually
- *  exist, each with its field_path, so the model can re-cite rather than guess again. The
- *  hint is derived entirely from the extraction of the document this task is ALREADY bound
- *  to, names no other tenant's data, and carries no monetary value — so it adds no oracle to
- *  a message the model has already been handed the source of via read_document. */
-export function evidenceIdxUnresolvedRefusal(citedIdx: readonly number[], valid: readonly RegionIdxHint[]): RefusalPart {
-  const cited = citedIdx.join(", ");
-  const list =
-    valid.length === 0
-      ? "none"
-      : valid.map((v) => (v.field_path ? `${v.idx} (${v.field_path})` : String(v.idx))).join(", ");
-  return runtimeRefusal(
-    "CLR21",
-    "evidence_invalid",
-    `${CLR21_REASON_MESSAGES.evidence_invalid} No region of this document has region_idx ${cited}. Valid region_idx values: ${list}.`,
-  );
+ *    evidence_not_read           the run holds no read_document snapshot FOR THIS DOCUMENT
+ *                                (native Finding 2: reading document A never licenses
+ *                                citing document B).
+ *    evidence_snapshot_changed   the extraction set moved between the model's read and this
+ *                                draft, so the same idx no longer names the same region.
+ *    evidence_index_unavailable  the extraction publishes no citable ordinal at all — the
+ *                                pre-0054 database in a runtime-ahead-of-migration window.
+ *    evidence_index_unknown      a cited idx is not in the snapshot the model read.
+ *    evidence_index_ambiguous    the snapshot lists one idx twice, so an index cannot name
+ *                                one region (Codex #4 / native Finding 3: first-wins would
+ *                                hand array order the authority the idx design removes).
+ *
+ *  NONE of them may map to `evidence_invalid`, and NONE may be question-shaped. A durable
+ *  human question reading "the extraction moved" or "the database is not migrated yet" is
+ *  noise a bookkeeper cannot act on, and recording an evidence-blame receipt for a snapshot
+ *  race is a FALSE receipt. Each is RETRYABLE IN-RUN: the tool result tells the model exactly
+ *  what to do (read again, then re-cite) and the model loop still holds its step budget.
+ *
+ *  THE CODE IS DELIBERATELY NOT A CLR. No DB gate raised this, and reusing a CLR reason token
+ *  is precisely the misclassification being fixed. "transient" sits beside the existing
+ *  runtime-labelled "internal" code. isQuestionShaped() keys on CLR23 plus a CLOSED set of
+ *  CLR21 reasons, so none of these can open a durable question — asserted directly in the
+ *  battery rather than left to inspection. */
+export type EvidenceSystemReason =
+  | "evidence_not_read"
+  | "evidence_snapshot_changed"
+  | "evidence_index_unavailable"
+  | "evidence_index_unknown"
+  | "evidence_index_ambiguous";
+
+export const EVIDENCE_SYSTEM_CODE = "transient";
+
+const EVIDENCE_SYSTEM_MESSAGES: Record<EvidenceSystemReason, string> = {
+  evidence_not_read:
+    "Read this document with read_document in this run before citing evidence — a region index only means something against the list that call prints.",
+  evidence_snapshot_changed:
+    "This document's stored extraction changed after you read it, so the region indexes have been renumbered. Call read_document again and re-cite from the new list.",
+  evidence_index_unavailable: "This document's stored extraction does not publish region indexes, so no region can be cited yet.",
+  evidence_index_unknown: "One of the cited region indexes is not in the list read_document printed for this document.",
+  evidence_index_ambiguous: "This document's stored extraction lists the same region index more than once, so an index cannot name one region.",
+};
+
+/** The (idx, field_path) hint appended to an unknown-index refusal. Derived entirely from the
+ *  extraction of the document this run has ALREADY been shown, so it adds no oracle; it names
+ *  no monetary value. Deliberately NOT attached to `evidence_snapshot_changed`: after a
+ *  renumber the model must RE-READ, and handing it a list it did not read would let a hint
+ *  stand in for the read the gate exists to require. */
+export function validIdxHint(valid: readonly RegionIdxHint[]): string {
+  if (valid.length === 0) return "This document has no citable region index.";
+  return `Valid region_idx values: ${valid.map((v) => (v.field_path ? `${v.idx} (${v.field_path})` : String(v.idx))).join(", ")}.`;
+}
+
+export function evidenceSystemRefusal(reason: EvidenceSystemReason, hint?: string): RefusalPart {
+  const base = EVIDENCE_SYSTEM_MESSAGES[reason];
+  return runtimeRefusal(EVIDENCE_SYSTEM_CODE, reason, hint ? `${base} ${hint}` : base);
+}
+
+/** Map a failed resolution to its refusal. The ONE place the two failure kinds are given
+ *  their different names, so no call site can accidentally blame evidence for a system
+ *  condition. */
+export function refusalForEvidenceFailure(failure: EvidenceFailure): RefusalPart {
+  if (failure.kind === "mislabelled") {
+    const detail = failure.entries
+      .map((m) => `region_idx ${m.idx} is ${m.actual === null ? "unlabelled" : `"${m.actual}"`}, not "${m.cited}"`)
+      .join("; ");
+    return runtimeRefusal("CLR21", "evidence_invalid", `${CLR21_REASON_MESSAGES.evidence_invalid} ${detail}.`);
+  }
+  return evidenceSystemRefusal(failure.reason, failure.reason === "evidence_index_unknown" ? validIdxHint(failure.valid) : undefined);
 }
 
 /** An oracle-safe string a READ tool returns as its `{ error }` result on an authority/tenant

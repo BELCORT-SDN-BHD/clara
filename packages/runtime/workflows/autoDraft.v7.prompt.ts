@@ -52,7 +52,10 @@ export const SYSTEM_PROMPT_AUTODRAFT_V7 = [
   "the document's extracted invoice facts and cite them. CITE A REGION BY ITS `idx` — the small",
   "integer read_document prints on every region — together with the exact quote for that amount.",
   "NEVER type a region's long id: the tool does not accept one, and the server resolves your idx",
-  "back to the region itself.",
+  "back to the region itself. Always call read_document in THIS run before you draft — an idx only",
+  "means something against the list that call printed — and echo each cited region's own field_path",
+  "exactly as it was printed. If the document's extraction changed in between, the draft is refused",
+  "and you simply read again and re-cite; that is a normal outcome, not an error to explain away.",
   "",
   "This document was admitted into a BOUND direction — sales or purchase — before this run",
   "started. Your coding_kind choice is a PROPOSAL the database revalidates against that bound",
@@ -193,19 +196,27 @@ export const draftJournalEntryInputSchema = z
             .int()
             .min(1)
             .describe(
-              "The region's `idx` from read_document — a small 1-based integer, NOT a region id. The " +
-                "server resolves it to that region before the database checks your quote against the " +
-                "stored text.",
+              "The region's `idx` from THIS run's read_document call — a small 1-based integer, NOT a " +
+                "region id. The server resolves it against the very list that call printed; if the " +
+                "document's extraction has changed since, the draft is refused and you simply read " +
+                "the document again and re-cite.",
             ),
           quote: z.string(),
-          field_path: z.string().optional(),
+          field_path: z
+            .string()
+            .describe(
+              "The region's OWN `field_path`, copied EXACTLY as read_document printed it — send an " +
+                "empty string for a region that printed none. You never choose this label, you echo " +
+                "it: it is checked against the region your idx names, and the database records the " +
+                "region's own label either way.",
+            ),
         }),
       )
       .min(1)
       .describe(
-        "Cited facts (region idx + exact quote) backing the amounts — REQUIRED for a document-bound draft. " +
-          "An idx that names no region of this document is refused, and the refusal lists the idx values " +
-          "that do exist.",
+        "Cited facts (region idx + exact quote + the region's own field_path) backing the amounts — " +
+          "REQUIRED for a document-bound draft. Read the document in THIS run before citing: an idx " +
+          "only means something against the list you were shown.",
       ),
     uncertainty: z
       .object({ note: z.string(), alternatives: z.array(z.string()) })

@@ -1,15 +1,14 @@
 -- 0054_region_ordinal.sql -- H1 ACCEPTANCE FINDING F9: stop asking the drafting model to
--- transcribe a 36-character opaque UUID. clara.get_document_extract gains a STABLE
--- per-region ordinal (`idx`) so the toolface can be cited by INDEX and the SERVER resolves
--- index -> region_id before the DB evidence wall ever sees it.
+-- transcribe a 36-character opaque UUID. clara.get_document_extract gains a per-region
+-- ordinal (`idx`) so the toolface is cited by INDEX and the SERVER resolves it to a
+-- region_id before the DB evidence wall ever sees it.
 --
 -- GOVERNING EVIDENCE: docs/plan/wave-7a-acceptance-h1.md:773-790 (row 19 / filing e1034202).
 -- The model cited region_id `7770763e-56c0-4c6d-a641-0cf54d2edf31`; the real row is
 -- `7770763e-56c0-4fce-a641-0cf54d2edf31` -- ONE hex group wrong, recurring across
--- independent attempts (a fresh autodraft supersede AND the separate chat-lane attempt on
--- the same document), while every other cited region (customer name, total, currency,
--- invoice date, vendor name, line description) matched exactly. The same document drafted
--- CLEANLY, FIRST TRY, through the HAND DOOR with the corrected id (h1.md:786-790).
+-- independent attempts (a fresh autodraft supersede AND the separate chat-lane attempt),
+-- while every other cited region matched exactly. The same document drafted CLEANLY, FIRST
+-- TRY, through the HAND DOOR with the corrected id (h1.md:786-790).
 -- ADR-064 SS3 records the fix shape this file implements the DB half of: "the toolface
 -- accepts a short index into the evidence list it was shown; the server resolves
 -- index->region_id; a bad index rejects with the valid list."
@@ -17,109 +16,108 @@
 -- WHAT IS **NOT** CHANGED, AND WHY THAT IS THE POINT.
 -- clara._write_entry_evidence (0009_coding_floor.sql:411-472) IS UNTOUCHED. Its per-item
 -- loop casts `e.elem->>'region_id'` to uuid, looks the region up by plain id-equality
--- joined to a done extraction of THIS document, and requires the quote to be a substring
--- of that region's text_content -- otherwise CLR21 `evidence_invalid`. That wall behaved
--- CORRECTLY on every F9 attempt: provenance binding (one of the four structural
--- invariants) held, and the hand-draft proof above shows its contract is exactly right.
--- The defect was entirely on the PERCEPTION side, so the wall's id-based contract stays
--- the authority and the runtime keeps handing it a region_id. Nothing here weakens,
--- widens or re-routes the evidence check.
+-- joined to a done extraction of THIS document, and requires the quote to be a substring of
+-- that region's text_content -- otherwise CLR21 `evidence_invalid`. It behaved CORRECTLY on
+-- every F9 attempt (provenance binding held; the hand-draft proof above shows the contract
+-- is right), so the wall's id-based contract stays the authority and the runtime keeps
+-- handing it a region_id. Nothing here weakens, widens or re-routes the evidence check.
 --
 -- THE DB HALF IS NECESSARY-BUT-NOT-SUFFICIENT. The RUNTIME half (autoDraft_v7 +
 -- chatTurn_v10, new frozen closures + a workflows/registry.ts repoint) is what changes the
--- toolface: the evidence schema becomes `region_idx`, and the draft wrapper resolves idx ->
--- region_id off the `idx` FIELD of the regions it already fetches server-side (never by
--- array position) before calling clara.wake_draft_entry. This file only publishes the
--- ordinal.
+-- toolface: the evidence schema becomes `region_idx` + a REQUIRED `field_path`, and the
+-- draft wrapper resolves idx -> region_id off the `idx` FIELD (never by array position),
+-- ONLY within the snapshot read_document showed the model in that same run, before calling
+-- clara.wake_draft_entry. This file only publishes the ordinal.
 --
--- **DEPLOY ORDER IS BINDING: THIS MIGRATION FIRST, THEN THE RUNTIME IMAGE.** The two
--- directions are NOT symmetric. New DB + OLD runtime is free (v6/v9 pass the RPC jsonb
--- through verbatim and read five named fields; one extra key changes nothing — see
--- COMPATIBILITY). New runtime + OLD DB is an OUTAGE: with no `idx` on any region, the
--- v7/v10 wrappers can resolve nothing, and EVERY document-bound draft refuses CLR21
--- evidence_invalid with "Valid region_idx values: none." Fail-closed and honest, but a
--- full stop on the drafting lane. Apply this file, verify on a positive read that the
--- shipped body emits idx, and only then flip the runtime.
+-- AN INDEX IS RELATIVE AND AN ID IS NOT — THE PROPERTY THE RUNTIME MUST RESTORE. This
+-- ordinal is defined over the CURRENT chosen extraction set, so an extraction landing
+-- between two reads renumbers every index. Correct for an index, but it means idx N is only
+-- meaningful against the list it was read from. The cross-model review MEASURED the
+-- consequence on a rig: an `ocr` extract read at T0, an `invoice_facts` extraction landing
+-- before the draft ('invoice_facts' < 'ocr', so everything renumbers), and the model's idx 2
+-- resolving at T1 to a DIFFERENT extraction's region carrying the same text -- which
+-- _write_entry_evidence ACCEPTED, because document + done-extraction + quote-as-substring
+-- all held. THE FIX IS IN THE RUNTIME: the wrapper binds resolution to the snapshot rev it
+-- recorded when read_document ran. Rig cells (h) and (i) witness both halves here -- the
+-- silent accept and the loud CLR21 -- so nobody can read the runtime gate as belt-and-braces.
 --
--- MIGRATION NUMBER claimed at MERGE time (standing law, CLAUDE.md + RENUMBER.md).
--- Authored as 0054 on branch build/wave-e-f9 while the F6/F7/F8 siblings were still open;
--- if the merge order changes, RENUMBER this file AND its rig battery together
--- (packages/db/tests/x54-region-ordinal.test.mjs reads the ledger for '0054_%' -- the only
--- thing keyed on the number). The frontier probe pins 0050, the last migration whose NAME
--- this branch can see; the runner applies in numeric order and never requires contiguity,
--- so a sibling landing at 0051-0053 needs no change. NO SPLICE-ANCHOR OVERLAP with any
--- sibling: F6 recuts clara.request_reextraction, F7 touches persist_invoice_facts'
--- field_path allowlist, F8 touches admit_autodraft_task; this file recuts
--- clara.get_document_extract alone.
+-- **DEPLOY ORDER IS BINDING: THIS MIGRATION FIRST, THEN THE RUNTIME IMAGE.** The directions
+-- are NOT symmetric. New DB + OLD runtime is free (v6/v9 pass the RPC jsonb through verbatim
+-- -- see COMPATIBILITY). New runtime + OLD DB is a full stop on drafting: with no `idx`
+-- published the wrappers resolve nothing and every document-bound draft refuses
+-- `evidence_index_unavailable` -- a SYSTEM condition (no human question, no evidence blame),
+-- recovering the moment this lands. Apply, read the shipped body positively, then flip.
+--
+-- MIGRATION NUMBER claimed at MERGE time (standing law, CLAUDE.md + RENUMBER.md). Authored
+-- as 0054 on branch build/wave-e-f9 while the F6/F7/F8 siblings were still open; if the
+-- merge order changes, RENUMBER this file AND its rig battery together (x54-region-ordinal
+-- .test.mjs reads the ledger for '0054_%' -- the only thing keyed on the number). The
+-- frontier probe pins 0050, the last migration whose NAME this branch can see; the runner
+-- never requires contiguity, so a sibling at 0051-0053 needs no change. NO SPLICE-ANCHOR
+-- OVERLAP with any sibling: F6 recuts request_reextraction, F7 touches
+-- persist_invoice_facts' field_path allowlist, F8 touches admit_autodraft_task.
 --
 -- PROVENANCE OF THE BODY BEING RECUT. The LIVE body of get_document_extract(uuid,uuid,int)
 -- is packages/db/migrations/0011_daily_loop.sql:3232, NOT 0009_coding_floor.sql:2613. 0009
 -- CREATEd it; 0011 CREATE-OR-REPLACEd it to add the wake-secret-GUC agent lane (the
 -- `clara.wake_context()` branch, the per-wake allowlist assertion, and the client-pin
--- refusal `if w.client_id is not null and p_client is distinct from w.client_id then
--- return null`). Recutting 0009's body would silently REVERT that whole lane -- the class
--- of mistake 0050's header records catching in review. This file recuts 0011:3232 verbatim
--- and changes ONE thing: the region CTE. The prestate REFUSES any other body.
+-- refusal). Recutting 0009's body would silently REVERT that whole lane -- the class of
+-- mistake 0050's header records catching in review. This file recuts 0011:3232 verbatim and
+-- changes ONE thing: the region CTE. The prestate REFUSES any other body.
 --
--- THE ORDINAL, AND THE STABILITY KEY IT IS DERIVED FROM (the one real design choice).
--- `idx` is a DENSE 1..N ordinal over the regions[] array, computed as
---   row_number() over (order by c.engine_kind, c.version_n, r.id)
--- -- EXACTLY the triple this CTE has aggregated by since 0009. Two load-bearing
--- consequences:
+-- THE ORDINAL, AND THE STABILITY KEY IT IS DERIVED FROM (the one real design choice). `idx`
+-- is a DENSE 1..N ordinal over regions[], computed as `row_number() over (order by
+-- c.engine_kind, c.version_n, r.id)` -- EXACTLY the triple this CTE has aggregated by since
+-- 0009. Two load-bearing consequences:
 --
---   (1) STABILITY. Every key column is immutable for a settled extraction (engine_kind/
---       version_n never change on a settled row; document_regions.id is a primary key),
---       and `chosen` picks the NEWEST done extraction per engine_kind -- so while the
---       same extraction set is chosen, a region gets the same idx on every call, from
---       every caller, in any session. That is what the runtime depends on: the model
---       reads the list through read_document, then cites an idx the wrapper resolves
---       against a SECOND, independent call of the same RPC. A RE-EXTRACTION deliberately
---       renumbers (new extraction, new region rows, `chosen` moves) -- correct, because
---       an idx indexes the CURRENT extraction, and a stale idx lands on a region whose
---       text will not carry the stale quote, so the wall refuses as it does today.
+--   (1) STABILITY WITHIN A GENERATION. Every key column is immutable for a settled
+--       extraction (engine_kind/version_n never change on a settled row; document_regions.id
+--       is a primary key), and `chosen` picks the NEWEST done extraction per engine_kind --
+--       so while the SAME extraction set is chosen, a region gets the same idx on every
+--       call, from every caller, in any session. ACROSS generations it deliberately does
+--       NOT: a landing extraction renumbers. An earlier draft of this header claimed a
+--       stale idx would then "land on a region whose text will not carry the stale quote,
+--       so the wall refuses" -- that was ASSUMED and is FALSE, measured (see the paragraph
+--       above). Binding a citation to the generation it was read from is the RUNTIME's job.
 --   (2) THE ARRAY ORDER DOES NOT MOVE. The aggregate's `order by` becomes `order by
---       rr.idx`, computed from the very triple it used before -- same order as today,
---       one extra key per element. Deliberate: the LIVE frozen consumers (autoDraft_v6,
---       chatTurn_v9) read this shape today.
+--       rr.idx`, computed from the very triple it used before -- same order, one extra key
+--       per element. Deliberate: the LIVE frozen consumers read this shape today, and rig
+--       cell (j) re-derives the order from the base tables to prove it.
 --
 -- WHY NOT A GEOMETRIC / "READING ORDER" KEY. document_regions.locator is polymorphic jsonb
 -- following locator_kind, whose CHECK admits FOUR kinds (0007:203-220); only page_polygon
 -- carries page + polygon. A sort key null for three of four kinds is not a stable order, it
--- is an arbitrary one that LOOKS meaningful. The human-sensible handle is already on every
--- element -- `field_path` -- which is what the runtime's refusal lists beside each idx.
+-- is an arbitrary one that LOOKS meaningful. The human handle is already on every element --
+-- `field_path` -- which is what the runtime echoes and its refusals list beside each idx.
 --
--- COMPATIBILITY WITH THE LIVE FROZEN CONSUMERS (measured from their source, not assumed).
+-- COMPATIBILITY WITH THE LIVE FROZEN CONSUMERS (measured from source, not assumed).
 --   * autoDraft.v6.tools.ts:262 / chatTurn.v9.tools.ts:227 -- read_document returns
 --     `r.rows[0]?.x ?? null`, the RPC's jsonb VERBATIM: no projection, no key allowlist, no
---     zod parse. readInvoiceFactState (both closures) casts `regions` to a TypeScript
---     `ExtractRegion[]` -- structural, erased at runtime -- and reads five named fields. Its
---     `totals[0]` read is order-sensitive ONLY when more than one `invoice.total` region
---     exists, and then `corroborated` is already false (`totals.length === 1` is one of its
---     own conjuncts). The array order is unchanged regardless.
+--     zod parse. readInvoiceFactState casts `regions` to a TypeScript `ExtractRegion[]` --
+--     structural, erased at runtime -- and reads five named fields. Its `totals[0]` read is
+--     order-sensitive ONLY when more than one `invoice.total` region exists, and then
+--     `corroborated` is already false. The array order is unchanged regardless.
 --   * apps/dashboard/app/chat/review.ts:340 (getMachineTotal) filters by engine_kind /
 --     field_path / a done extraction id and SORTS by version_n itself.
---   * apps/dashboard/app/shared/dbSeamCensus.bindings.ts's UNCONSUMED_BASELINE for
---     get_document_extract is an EXACT ratchet over emitted-but-unconsumed keys, so `idx`
---     joins that line in the SAME PR -- a ledger entry, not a behaviour change.
+--   * dbSeamCensus.bindings.ts's UNCONSUMED_BASELINE is an EXACT ratchet over
+--     emitted-but-unconsumed keys, so `idx` joins that line in the SAME PR.
 --
 -- D1 BINDS (packages/db/README.md:99-118): this replaces a live function body, so the
 -- recorded write-quiesce procedure applies. The change is read-only and additive, so an
 -- interleaved apply cannot corrupt anything -- a reader mid-flight gets the old shape.
 --
 -- WHAT THE TAIL PROVES AND WHAT IT DOES NOT (0049's own division: "the tail asserts
--- SHAPE ... behaviour on FIXTURES belongs to the rig"). The tail asserts (a) the ordinal
--- is installed and aggregated by, (b) all twelve pre-existing region keys survived,
--- (c) 0011's agent lane survived, (d) ACLs/ownership are unchanged, and (e) -- more than
--- a string match -- the recut query PARSE-ANALYZES against this database's real catalog
--- via a pg_temp `language sql` probe carrying the same CTE chain (SQL bodies are fully
--- analyzed at CREATE; a plpgsql body's statements are planned lazily at first execution,
--- so a successful CREATE OR REPLACE proves only syntax), with the probe's own region CTEs
--- asserted VERBATIM in the installed prosrc so it cannot certify a different query.
--- BEHAVIOUR -- dense, stable, idx-ordered ordinals on a real document -- belongs to
--- packages/db/tests/x54-region-ordinal.test.mjs, on fixtures it builds itself: this
--- function cannot be executed from inside a migration at all (it needs an authenticated
--- human context -- clara._human_ctx raises CLR04 without a JWT -- or a live wake
--- credential, and manufacturing either here would be faking an auth context).
+-- SHAPE ... behaviour on FIXTURES belongs to the rig"). The tail asserts (a) the ordinal is
+-- installed and aggregated by, (b) all twelve pre-existing region keys survived, (c) 0011's
+-- agent lane survived, (d) ACLs/ownership are unchanged, and (e) -- more than a string
+-- match -- the recut query PARSE-ANALYZES against this database's real catalog via a
+-- pg_temp `language sql` probe carrying the same CTE chain (SQL bodies are fully analyzed
+-- at CREATE; a plpgsql body's statements are planned lazily, so a successful CREATE OR
+-- REPLACE proves only syntax), with the probe's region CTEs asserted VERBATIM in the
+-- installed prosrc. BEHAVIOUR belongs to packages/db/tests/x54-region-ordinal.test.mjs, on
+-- fixtures it builds itself -- including a REAL second-apply drill (cell k). This function
+-- cannot be executed from inside a migration at all (it needs an authenticated human
+-- context -- clara._human_ctx raises CLR04 without a JWT -- or a live wake credential).
 
 -- SECTION 0 -- PRESTATE. Runs BEFORE the role switch, as the connecting (migration-runner)
 -- role, on the same table migrate.mjs itself owns and reads.

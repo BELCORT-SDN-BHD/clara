@@ -1,31 +1,37 @@
 // WAVE E / THE F6–F9 FIX BATCH — the companion suite for autoDraft_v6 -> autoDraft_v7
-// (H1 ACCEPTANCE FINDING F9, ADR-064 §3). The v6 counterpart is
-// wave-7a-autodraft-v6.test.mjs; this file follows its four jobs, scoped to F9's delta.
+// (H1 ACCEPTANCE FINDING F9, ADR-064 §3), including the FIX ROUND that closed the
+// cross-model review's CRITICAL: Codex #1 and the native reviewer's Finding 1, which both
+// showed that resolving a cited INDEX against a freshly-fetched region set lets a
+// re-extraction rebind that index to a different region while the untouched wall accepts it.
 //
-// THE FINDING THESE CELLS EXIST FOR. The drafting model mis-transcribed ONE hex group of a
-// 36-char region UUID (…-4c6d-… for the true …-4fce-…) across INDEPENDENT attempts, and the
-// DB evidence wall correctly refused CLR21 evidence_invalid every time
-// (wave-7a-acceptance-h1.md:773-790). v7 removes the transcription surface: the toolface
-// takes a small `region_idx`, and the wrapper resolves it to a region_id server-side.
+// THE DEFECT, MEASURED BEFORE THE FIX (native reviewer's probe, re-run on this lane's rig):
+//   T0  idx=1 invoice.currency | idx=2 invoice.amount_due "RM 5,000.00" | idx=3 invoice.total …
+//   ->  the model cites region_idx=2, quote "RM 5,000.00"
+//   T1  an invoice_facts extraction lands; every index is renumbered
+//   ->  cited idx=2 now names invoice.total (a DIFFERENT extraction's region, same text)
+//   ->  WALL: ACCEPTED. recorded evidence field_path 'invoice.total'
+// The recorded label is what the corroboration bound and the supplier-bill shape check
+// select on, so a race could promote an entry's provenance tier off uncited evidence.
 //
-// FOUR JOBS:
-//   1. VERSION FIDELITY — every one of the 6 new files is v6 modulo the documented delta.
-//      Three pure renames get a whole-body token-for-token compare; the three with a real
-//      delta get the cut-and-compare instrument (wave-e-f9-testkit.mjs's own header states
-//      exactly what that instrument proves and what it does not).
-//   2. THE TOOLFACE — the schema no longer HAS a region_id field, and the model-facing
-//      strings that teach the idx are pinned exactly.
-//   3. RESOLUTION — resolveEvidenceRegions is pure, so it is tested by execution: by FIELD
-//      not by position, unknown idx, unnameable regions, duplicates, hint ordering.
-//   4. THE WRAPPER — end to end through runDraftJournalEntry with a stubbed pool: the DB
-//      receives a region_id (never an idx), a bad idx never reaches the writer at all, and
-//      the refusal carries the valid set.
+// SIX JOBS:
+//   1. VERSION FIDELITY — the three pure renames whole-body; prompt.ts and errors.ts by
+//      cut-and-compare; tools.ts by POSITIVE equality of every carried region (its evidence
+//      path is now a rewrite, and masking a rewrite would be a mask over the whole subject).
+//   2. THE TOOLFACE — region_idx and (fix round) field_path are REQUIRED; the prose teaches
+//      read-before-cite; the model-facing strings are pinned exactly.
+//   3. RESOLUTION — pure, by execution: by field not position, and each of the five gates.
+//   4. CLASSIFICATION — staleness is a SYSTEM condition: never evidence_invalid, never
+//      question-shaped. A genuine mislabel inside a read snapshot still IS evidence_invalid.
+//   5. THE WRAPPER — end to end, including THE DRIFT CELL (this cell fails on the pre-fix
+//      resolver and passes after; that experiment is recorded in the PR body).
+//   6. Registry sanity.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  src, dropHeader, rename, cutLines, line, stubPools,
-  SCRAMBLED_EXTRACT, REGION_TOTAL, REGION_VENDOR, REGION_DATE, LINES,
+  src, dropHeader, rename, cutLines, line, slice, fnBody, stubPools, cite,
+  READ_EXTRACT, DRIFTED_EXTRACT, COLLIDING_EXTRACT, PRE_0054_EXTRACT,
+  REGION_TOTAL, REGION_VENDOR, REGION_DATE, LINES,
 } from "./wave-e-f9-testkit.mjs";
 
 const { register } = await import("tsx/esm/api");
@@ -37,9 +43,8 @@ const toolsV7 = await import("../workflows/autoDraft.v7.tools.ts");
 const errorsV7 = await import("../workflows/autoDraft.v7.errors.ts");
 const registryMod = await import("../workflows/registry.ts");
 
-const { resolveEvidenceRegions, runDraftJournalEntry } = toolsV7;
+const { resolveEvidenceRegions, runDraftJournalEntry, extractRev, newReadSnapshots } = toolsV7;
 
-/** v6 -> v7 token rename, applied to the OLD side so the two bodies compare on equal footing. */
 const V6_TO_V7 = [
   ["autoDraft.v6.", "autoDraft.v7."],
   ["autoDraft_v6", "autoDraft_v7"],
@@ -54,119 +59,84 @@ const newBody = (name) => dropHeader(src(`autoDraft.v7.${name}`));
 
 for (const name of ["infra.ts", "impl.ts", "ts"]) {
   test(`autoDraft.v7.${name} is a PURE version-rename of v6 — whole-body, token-for-token (header aside)`, () => {
-    assert.equal(newBody(name), oldBody(name), `autoDraft.v7.${name} must differ from v6 only in the version tokens and its header narrative`);
+    assert.equal(newBody(name), oldBody(name));
   });
 }
 
-test("autoDraft.v7.prompt.ts differs from v6 ONLY in the citation instruction and the evidence schema element", () => {
+test("autoDraft.v7.prompt.ts differs from v6 ONLY in the citation prose and the evidence element", () => {
   const cutNew = cutLines(newBody("prompt.ts"), [
     {
       label: "prompt/citation instruction",
       from: '  "the document\'s extracted invoice facts and cite them. CITE A REGION BY ITS `idx` — the small",',
-      to: '  "back to the region itself.",',
-      lines: 4,
+      to: '  "and you simply read again and re-cite; that is a normal outcome, not an error to explain away.",',
+      lines: 7,
     },
-    {
-      label: "prompt/region_idx field",
-      from: "          region_idx: z",
-      to: "            ),",
-      lines: 9,
-    },
-    {
-      label: "prompt/evidence array describe",
-      from: "      .describe(",
-      to: "      ),",
-      lines: 5,
-    },
+    { label: "prompt/region_idx", from: "          region_idx: z", to: "            ),", lines: 10 },
+    { label: "prompt/field_path", from: "          field_path: z", to: "            ),", lines: 8 },
+    { label: "prompt/evidence array describe", from: "      .describe(", to: "      ),", lines: 5 },
   ]);
   const cutOld = cutLines(oldBody("prompt.ts"), [
     line("prompt/old citation instruction", '  "the document\'s extracted invoice facts and cite them (region id + exact quote per amount).",'),
     line("prompt/old region_id field", "          region_id: z.string().uuid(),"),
-    line(
-      "prompt/old evidence array describe",
-      '      .describe("Cited facts (region id + exact quote) backing the amounts — REQUIRED for a document-bound draft."),',
-    ),
+    line("prompt/old field_path", "          field_path: z.string().optional(),"),
+    line("prompt/old array describe", '      .describe("Cited facts (region id + exact quote) backing the amounts — REQUIRED for a document-bound draft."),'),
   ]);
-  assert.equal(cutNew, cutOld, "outside the three documented spans, autoDraft.v7.prompt.ts must be a version-renamed copy of v6 — every other schema field, the whole system prompt body and every typed-part shape are carried");
+  assert.equal(cutNew, cutOld, "outside the documented spans, autoDraft.v7.prompt.ts must be a version-renamed copy of v6");
 });
 
-test("autoDraft.v7.errors.ts is PURELY ADDITIVE over v6 — two new blocks, and not one existing line touched", () => {
+test("autoDraft.v7.errors.ts is PURELY ADDITIVE over v6 — new blocks only, and not one existing line touched", () => {
   const cutNew = cutLines(newBody("errors.ts"), [
     {
-      label: "errors/RegionIdxHint",
-      from: "/** The (idx, field_path) pairs a resolution refusal echoes back so the model can re-cite —",
-      to: "export type RegionIdxHint = { idx: number; field_path: string | null };",
-      lines: 7,
+      label: "errors/evidence failure types",
+      from: "/** The (idx, field_path) pairs a resolution refusal echoes back so the model can re-cite,",
+      to: "  | { kind: \"mislabelled\"; entries: MislabelledCitation[] };",
+      lines: 21,
       trailingBlanks: 2,
     },
-    {
-      label: "errors/evidenceIdxUnresolvedRefusal",
-      from: "/** F9 (ADR-064 §3): the EARLY, runtime-labelled refusal for a cited `region_idx` that names",
-      to: "}",
-      lines: 27,
-      trailingBlanks: 1,
-    },
+    // Four sub-spans rather than one, so each new declaration's LENGTH is pinned separately
+    // and a body cannot grow inside a neighbour's mask.
+    { label: "errors/system reasons + messages", from: "/** F9 FIX ROUND (coordinator ruling 2, from Codex #3 + native Finding 1). The conditions", to: "};", lines: 46, trailingBlanks: 1 },
+    { label: "errors/validIdxHint", from: "/** The (idx, field_path) hint appended to an unknown-index refusal. Derived entirely from the", to: "}", lines: 10, trailingBlanks: 1 },
+    { label: "errors/evidenceSystemRefusal", from: "export function evidenceSystemRefusal(reason: EvidenceSystemReason, hint?: string): RefusalPart {", to: "}", lines: 5, trailingBlanks: 1 },
+    { label: "errors/refusalForEvidenceFailure", from: "/** Map a failed resolution to its refusal. The ONE place the two failure kinds are given", to: "}", lines: 13, trailingBlanks: 1 },
   ]);
-  assert.equal(cutNew, oldBody("errors.ts"), "with its two new blocks removed, autoDraft.v7.errors.ts must be BYTE-IDENTICAL to v6 — the CLR map, every reason message and every other factory are carried, not re-typed");
+  assert.equal(cutNew, oldBody("errors.ts"), "with its new blocks removed, autoDraft.v7.errors.ts must be BYTE-IDENTICAL to v6");
 });
 
-test("autoDraft.v7.tools.ts differs from v6 ONLY in the documented resolution spans", () => {
-  const cutNew = cutLines(newBody("tools.ts"), [
-    line(
-      "tools/errors import",
-      'import { refusalFromDbError, directionFamilyMismatchRefusal, evidenceIdxUnresolvedRefusal, type RegionIdxHint } from "./autoDraft.v7.errors.js";',
-    ),
-    {
-      label: "tools/ExtractRegion doc",
-      from: "/** One region of the get_document_extract shape (regions[] of a done extraction). `id` and",
-      to: " *  here — a region missing either is simply not citable (see resolveEvidenceRegions). */",
-      lines: 5,
-    },
-    { label: "tools/ExtractRegion id+idx", from: "  id?: string;", to: "  idx?: number;", lines: 2 },
-    {
-      label: "tools/resolveEvidenceRegions",
-      from: "/** One cited fact as the model supplies it (region INDEX + quote), and the resolved shape",
-      to: "}",
-      lines: 54,
-      trailingBlanks: 1,
-    },
-    {
-      label: "tools/resolution call site",
-      from: "    // F9 (ADR-064 §3): resolve the model's cited region INDEXES into the region ids the DB",
-      to: "    }",
-      lines: 12,
-      trailingBlanks: 1,
-    },
-    line("tools/writer arg 12", "          JSON.stringify(cited.evidence),"),
-    line(
-      "tools/read_document description",
-      '        "Read this document\'s stored extraction: filing state, invoice facts (when present), bounded text, and the numbered regions — each carries an `idx` you cite as evidence.",',
-    ),
-    {
-      label: "tools/draft tool description",
-      from: '        "This is a proposal, not a posting. Provide coding_kind, lines, document_id, counterparty, and an evidence array citing " +',
-      to: '        "each amount by its region `idx` from read_document (never a region id) — never set " +',
-      lines: 2,
-    },
-  ]);
-  const cutOld = cutLines(oldBody("tools.ts"), [
-    line("tools/old errors import", 'import { refusalFromDbError, directionFamilyMismatchRefusal } from "./autoDraft.v7.errors.js";'),
-    line("tools/old ExtractRegion doc", "/** One region of the get_document_extract shape (regions[] of a done extraction). */"),
-    line("tools/old writer arg 12", "          JSON.stringify(input.evidence),"),
-    line(
-      "tools/old read_document description",
-      '        "Read this document\'s stored extraction: filing state, invoice facts (when present), bounded text, and region ids to cite as evidence.",',
-    ),
-    line(
-      "tools/old draft tool description",
-      '        "This is a proposal, not a posting. Provide coding_kind, lines, document_id, counterparty, and an evidence array — never set " +',
-    ),
-  ]);
-  assert.equal(cutNew, cutOld, "outside the documented spans, autoDraft.v7.tools.ts must be a version-renamed copy of v6 — the direction-family check, readInvoiceFactState, the counterparty derivation and every other writer arg are carried");
+test("autoDraft.v7.tools.ts CARRIES every region v6 owned, byte-for-byte — the rewrite is confined to the evidence path", () => {
+  const v7 = newBody("tools.ts");
+  const v6 = oldBody("tools.ts");
+  for (const name of ["normalizeCurrency", "readInvoiceFactState", "deriveCounterpartyKind", "allowedCodingKindsForDirection"]) {
+    assert.equal(fnBody(v7, name), fnBody(v6, name), `${name} (doc comment included) must be byte-identical to v6`);
+  }
+  const carried = [
+    ["the direction-family early check", "  // PR #204 / 7A-R2, THE BOUND FAMILY — the VERY FIRST check", "  try {"],
+    ["the server-side read block", "    // 1. Server-side authoritative reads", "    const filing = server.filing"],
+    ["the counterparty payload + op_key", "    // 2. Assemble writer args.", "    const receipt = await writeScoped"],
+    ["the receipt handling + je_review", "    if (!receipt.entry_id || !receipt.revision_token)", "/**\n * Build the autoDraft tool set"],
+    ["get_context_pack / coding_lane / get_draft_review", "    get_context_pack: tool({", "    [DRAFT_TOOL]: tool({"],
+  ];
+  for (const [label, from, to] of carried) {
+    assert.equal(slice(v7, from, to, label), slice(v6, from, to, label), `the "${label}" region must be byte-identical to v6 — the fix round touches the evidence path and nothing else`);
+  }
+});
+
+test("autoDraft.v7.tools.ts's writer args are v6's, except position 12 (the resolved evidence)", () => {
+  const argsOf = (t) => slice(t, "        [\n          clientId,", "        ],\n      );", "writer args").split("\n").map((s) => s.trim()).filter(Boolean);
+  const v7 = argsOf(newBody("tools.ts"));
+  const v6 = argsOf(oldBody("tools.ts"));
+  assert.equal(v7.length, v6.length, "the writer arity must not move");
+  for (let i = 0; i < v7.length; i++) {
+    if (v7[i] === "JSON.stringify(cited.evidence),") {
+      assert.equal(v6[i], "JSON.stringify(input.evidence),", "position 12 is the ONE changed arg");
+      continue;
+    }
+    assert.equal(v7[i], v6[i], `writer arg ${i + 1} must be carried from v6`);
+  }
 });
 
 // ===========================================================================
-// 2. THE TOOLFACE — the schema, and the model-facing strings.
+// 2. THE TOOLFACE
 // ===========================================================================
 
 const baseDraft = {
@@ -178,255 +148,267 @@ const baseDraft = {
 };
 const parse = (evidence) => promptV7.draftJournalEntryInputSchema.safeParse({ ...baseDraft, evidence });
 
-test("the evidence element is { region_idx, quote, field_path? } — a region_idx is REQUIRED and a region_id is not accepted in its place", () => {
-  assert.equal(parse([{ region_idx: 1, quote: "RM 1,000.00" }]).success, true, "a plain region_idx + quote is the accepted shape");
-  assert.equal(parse([{ region_idx: 2, quote: "RM 1,000.00", field_path: "invoice.total" }]).success, true, "field_path stays optional");
-  assert.equal(parse([{ region_id: REGION_TOTAL, quote: "RM 1,000.00" }]).success, false, "a uuid where the idx belongs must be REFUSED — the transcription surface is gone, not merely discouraged");
-  assert.equal(parse([{ quote: "RM 1,000.00" }]).success, false, "region_idx is required");
+test("the evidence element is { region_idx, quote, field_path } — all three REQUIRED, and a region_id is not accepted in its place", () => {
+  assert.equal(parse([cite(1, "RM 1,000.00", "invoice.total")]).success, true);
+  assert.equal(parse([{ region_idx: 1, quote: "q" }]).success, false, "field_path is REQUIRED after the fix round (ruling 5) — it is the label the DB records and the tier logic selects on");
+  assert.equal(parse([{ region_id: REGION_TOTAL, quote: "q", field_path: "invoice.total" }]).success, false, "a uuid where the idx belongs must be REFUSED");
+  assert.equal(parse([cite(1, "q", "")]).success, true, "an EMPTY field_path is the sanctioned encoding for a region that printed none");
 });
 
-test("region_idx is a 1-based INTEGER: 0, a negative, a fraction and a numeric string are all refused", () => {
-  for (const bad of [0, -1, 1.5, "1"]) {
-    assert.equal(parse([{ region_idx: bad, quote: "q" }]).success, false, `region_idx=${JSON.stringify(bad)} must be refused`);
-  }
-  assert.equal(parse([{ region_idx: 1, quote: "q" }]).success, true);
-});
-
-test("evidence stays REQUIRED — .min(1) is carried, not relaxed by the schema change", () => {
-  assert.equal(parse([]).success, false, "an empty evidence array must still be refused");
-  assert.equal(promptV7.draftJournalEntryInputSchema.safeParse({ ...baseDraft }).success, false, "an omitted evidence array must still be refused");
+test("region_idx is a 1-based INTEGER and evidence stays REQUIRED", () => {
+  for (const bad of [0, -1, 1.5, "1"]) assert.equal(parse([{ region_idx: bad, quote: "q", field_path: "p" }]).success, false, `region_idx=${JSON.stringify(bad)}`);
+  assert.equal(parse([]).success, false);
+  assert.equal(promptV7.draftJournalEntryInputSchema.safeParse({ ...baseDraft }).success, false);
 });
 
 const P7 = promptV7.SYSTEM_PROMPT_AUTODRAFT_V7.replace(/\s+/g, " ");
 const P6 = promptV6.SYSTEM_PROMPT_AUTODRAFT_V6.replace(/\s+/g, " ");
 
-test("v7's system prompt teaches the idx and forbids typing a region id — genuinely NEW, not carried", () => {
-  const cite = "CITE A REGION BY ITS `idx` — the small integer read_document prints on every region — together with the exact quote for that amount.";
-  const forbid = "NEVER type a region's long id: the tool does not accept one, and the server resolves your idx back to the region itself.";
-  assert.ok(P7.includes(cite), `v7 must carry the idx citation rule\n  MISSING: ${cite}`);
-  assert.ok(P7.includes(forbid), `v7 must carry the no-long-id rule\n  MISSING: ${forbid}`);
-  assert.ok(!P6.includes("CITE A REGION"), "v6 must NOT already carry it — this is genuinely new this wave");
+test("v7's prompt teaches the idx, the READ-BEFORE-CITE contract and the echo-the-label rule — all genuinely new", () => {
+  for (const c of [
+    "CITE A REGION BY ITS `idx`",
+    "NEVER type a region's long id",
+    "Always call read_document in THIS run before you draft",
+    "echo each cited region's own field_path exactly as it was printed",
+    "If the document's extraction changed in between, the draft is refused",
+  ]) {
+    assert.ok(P7.includes(c), `v7 must carry: ${c}`);
+    assert.ok(!P6.includes(c), `…and v6 must NOT: ${c}`);
+  }
+  assert.ok(P6.includes("cite them (region id + exact quote per amount)."), "sanity: v6 really did teach region-id citation");
+  assert.ok(!P7.includes("cite them (region id + exact quote per amount)."), "…and v7 must not");
 });
 
-test("v6's own region-id citation sentence is GONE from v7 (a rule the schema contradicts is a rule the model breaks)", () => {
-  const old = "cite them (region id + exact quote per amount).";
-  assert.ok(P6.includes(old), "sanity: v6 really did carry the region-id citation sentence");
-  assert.ok(!P7.includes(old), "v7 must NOT carry it");
-});
-
-test("v7 carries every OTHER load-bearing prompt invariant from v6, byte-for-byte", () => {
-  const clauses = [
+test("v7 carries every other load-bearing prompt invariant from v6, byte-for-byte", () => {
+  for (const c of [
     "You never approve, post, or finalise anything, and a human approves every draft.",
     "The database owns every number: never compute, sum, or invent a figure",
     "This ledger is MYR-only.",
-    "State any uncertainty qualitatively with alternatives — never a percentage, never a suspense account.",
     "This document was admitted into a BOUND direction — sales or purchase — before this run",
     "SALES INVOICE / SALES CREDIT NOTE leg shape:",
-    "NEVER set counterparty.kind yourself: it is derived server-side from coding_kind",
     "Malaysian SST has NO input-tax credit",
-  ];
-  for (const c of clauses) {
+  ]) {
     assert.ok(P7.includes(c), `v7 must carry: ${c}`);
-    assert.ok(P6.includes(c), `…and it must be genuinely CARRIED — present in v6 too: ${c}`);
+    assert.ok(P6.includes(c), `…genuinely CARRIED — present in v6 too: ${c}`);
   }
 });
 
-test("the read_document and draft_journal_entry tool descriptions are EXACTLY the documented v7 text", () => {
-  const toolsSrc = src("autoDraft.v7.tools.ts");
-  assert.ok(
-    toolsSrc.includes(
-      '        "Read this document\'s stored extraction: filing state, invoice facts (when present), bounded text, and the numbered regions — each carries an `idx` you cite as evidence.",',
-    ),
-    "read_document's description must name the numbered regions and their idx",
-  );
-  assert.ok(
-    toolsSrc.includes('        "each amount by its region `idx` from read_document (never a region id) — never set " +'),
-    "the draft tool's description must tell the model to cite by idx and never by id",
-  );
-  assert.ok(!toolsSrc.includes("region ids to cite as evidence"), "v6's region-ids wording must be gone from v7");
-});
+// ===========================================================================
+// 3. RESOLUTION — pure, by execution. `rev` is what read_document recorded.
+// ===========================================================================
 
-// ===========================================================================
-// 3. RESOLUTION — pure, exercised by execution.
-// ===========================================================================
+const readRev = extractRev(READ_EXTRACT);
 
 test("resolution is BY THE idx FIELD, not by array position — the fixture's array order is deliberately NOT its idx order", () => {
-  const r = resolveEvidenceRegions(SCRAMBLED_EXTRACT, [
-    { region_idx: 1, quote: "ACME SDN BHD" },
-    { region_idx: 2, quote: "RM 1,000.00" },
-    { region_idx: 3, quote: "2026-01-31" },
-  ]);
+  const r = resolveEvidenceRegions(READ_EXTRACT, [
+    cite(1, "ACME SDN BHD", "invoice.vendor_name"),
+    cite(2, "RM 1,000.00", "invoice.total"),
+    cite(3, "2026-01-31", "invoice.invoice_date"),
+  ], readRev);
   assert.equal(r.ok, true, `expected a resolution, got ${JSON.stringify(r)}`);
-  assert.deepEqual(
-    r.evidence.map((e) => e.region_id),
-    [REGION_VENDOR, REGION_TOTAL, REGION_DATE],
-    "idx 1/2/3 must resolve to the regions CARRYING those idx values — a positional resolver would have returned the array order (date, vendor, total)",
-  );
-  // The positional answer, spelled out so a future reader sees exactly what is excluded.
-  assert.notDeepEqual(r.evidence.map((e) => e.region_id), [REGION_DATE, REGION_VENDOR, REGION_TOTAL]);
+  assert.deepEqual(r.evidence.map((e) => e.region_id), [REGION_VENDOR, REGION_TOTAL, REGION_DATE]);
+  assert.notDeepEqual(r.evidence.map((e) => e.region_id), [REGION_DATE, REGION_VENDOR, REGION_TOTAL], "the positional answer must be excluded, not merely unlikely");
 });
 
-test("the quote and the optional field_path ride through unchanged; an omitted field_path is OMITTED, never nulled", () => {
-  const r = resolveEvidenceRegions(SCRAMBLED_EXTRACT, [
-    { region_idx: 2, quote: "RM 1,000.00", field_path: "invoice.total" },
-    { region_idx: 1, quote: "ACME SDN BHD" },
-  ]);
-  assert.equal(r.ok, true);
-  assert.deepEqual(r.evidence[0], { region_id: REGION_TOTAL, quote: "RM 1,000.00", field_path: "invoice.total" });
-  assert.deepEqual(r.evidence[1], { region_id: REGION_VENDOR, quote: "ACME SDN BHD" });
-  assert.ok(!("field_path" in r.evidence[1]), "an omitted field_path must not become an explicit undefined/null key on the DB payload");
+test("GATE 1 — read-before-cite: with no recorded snapshot for this document, NOTHING resolves", () => {
+  const r = resolveEvidenceRegions(READ_EXTRACT, [cite(2, "RM 1,000.00", "invoice.total")], undefined);
+  assert.equal(r.ok, false);
+  assert.equal(r.failure.kind, "system");
+  assert.equal(r.failure.reason, "evidence_not_read");
 });
 
-test("an UNKNOWN idx refuses and reports BOTH what was cited and the full valid set, idx-ordered with field_paths", () => {
-  const r = resolveEvidenceRegions(SCRAMBLED_EXTRACT, [{ region_idx: 2, quote: "RM 1,000.00" }, { region_idx: 9, quote: "nope" }]);
-  assert.equal(r.ok, false, "an idx that names no region must refuse the WHOLE draft, never silently drop the citation");
-  assert.deepEqual(r.citedIdx, [9]);
-  assert.deepEqual(r.valid, [
+test("GATE 2 — THE DRIFT GATE: a snapshot that moved between the read and the draft REFUSES, even though the drifted region carries the identical quote (the measured silent-accept)", () => {
+  // The model read READ_EXTRACT and cites idx 2 = the OCR invoice.total, "RM 1,000.00".
+  // DRIFTED_EXTRACT's idx 2 is a DIFFERENT extraction's invoice.total with the SAME text —
+  // so the DB wall could not tell, and did not, before this gate existed.
+  const drifted = DRIFTED_EXTRACT.regions.find((x) => x.idx === 2);
+  assert.notEqual(drifted.id, REGION_TOTAL, "fixture premise: idx 2 names a different region after the drift");
+  assert.equal(drifted.text_content, "RM 1,000.00", "fixture premise: …carrying the SAME quote, so the wall cannot see the difference");
+  const r = resolveEvidenceRegions(DRIFTED_EXTRACT, [cite(2, "RM 1,000.00", "invoice.total")], readRev);
+  assert.equal(r.ok, false, "the drifted snapshot must REFUSE — this is the CRITICAL both reviews raised");
+  assert.equal(r.failure.reason, "evidence_snapshot_changed");
+  assert.deepEqual(r.failure.valid, [], "no hint list on a renumber: the model must RE-READ, and a hint must never stand in for the read");
+});
+
+test("GATE 3 — a DUPLICATE idx in the fetched set REFUSES; first-wins would hand array order the authority the idx design removes", () => {
+  const dup = { regions: [READ_EXTRACT.regions[1], { ...READ_EXTRACT.regions[2], idx: 1, id: REGION_DATE }] };
+  const r = resolveEvidenceRegions(dup, [cite(1, "ACME SDN BHD", "invoice.vendor_name")], extractRev(dup));
+  assert.equal(r.ok, false);
+  assert.equal(r.failure.reason, "evidence_index_ambiguous");
+});
+
+test("GATE 4 — a PRE-0054 snapshot (ids, no ordinal) is named as unavailable, never reported as a bad citation", () => {
+  const r = resolveEvidenceRegions(PRE_0054_EXTRACT, [cite(1, "RM 1,000.00", "invoice.total")], extractRev(PRE_0054_EXTRACT));
+  assert.equal(r.ok, false);
+  assert.equal(r.failure.reason, "evidence_index_unavailable");
+  for (const empty of [null, {}, { regions: [] }, { regions: "nope" }]) {
+    assert.equal(resolveEvidenceRegions(empty, [cite(1, "q", "p")], extractRev(empty)).failure.reason, "evidence_index_unavailable");
+  }
+});
+
+test("GATE 5a — an UNKNOWN idx inside a matched snapshot reports what was cited AND the valid set, idx-ordered with labels", () => {
+  const r = resolveEvidenceRegions(READ_EXTRACT, [cite(2, "RM 1,000.00", "invoice.total"), cite(9, "x", "y")], readRev);
+  assert.equal(r.ok, false);
+  assert.equal(r.failure.reason, "evidence_index_unknown");
+  assert.deepEqual(r.failure.citedIdx, [9]);
+  assert.deepEqual(r.failure.valid, [
     { idx: 1, field_path: "invoice.vendor_name" },
     { idx: 2, field_path: "invoice.total" },
     { idx: 3, field_path: "invoice.invoice_date" },
   ]);
 });
 
-test("a region the extraction cannot NAME (no id, or no integer idx) is not citable — and never positionally guessed at", () => {
-  const extract = {
-    regions: [
-      { idx: 1, field_path: "invoice.total" }, // no id
-      { id: REGION_VENDOR, field_path: "invoice.vendor_name" }, // no idx
-      { idx: "2", id: REGION_DATE, field_path: "invoice.invoice_date" }, // idx is a string, not an integer
-      { idx: 4, id: REGION_TOTAL, field_path: null }, // citable, null field_path
-    ],
-  };
-  const bad = resolveEvidenceRegions(extract, [{ region_idx: 1, quote: "x" }]);
-  assert.equal(bad.ok, false, "an idx whose region carries no id must not resolve");
-  assert.deepEqual(bad.valid, [{ idx: 4, field_path: null }], "only the fully-named region is offered as valid, and a null field_path is reported as null");
-  const good = resolveEvidenceRegions(extract, [{ region_idx: 4, quote: "x" }]);
-  assert.equal(good.ok, true);
-  assert.equal(good.evidence[0].region_id, REGION_TOTAL);
+test("GATE 5b — the field_path CROSS-CHECK (ruling 5): a label the region does not carry is a MISLABEL, and the resolved evidence always carries the REGION's own label", () => {
+  const bad = resolveEvidenceRegions(READ_EXTRACT, [cite(2, "RM 1,000.00", "invoice.amount_due")], readRev);
+  assert.equal(bad.ok, false);
+  assert.equal(bad.failure.kind, "mislabelled", "a wrong label inside a snapshot the model READ is bad evidence, not a system condition");
+  assert.deepEqual(bad.failure.entries, [{ idx: 2, cited: "invoice.amount_due", actual: "invoice.total" }]);
+
+  const pathless = { regions: [{ ...READ_EXTRACT.regions[1], field_path: null }] };
+  const rev = extractRev(pathless);
+  const claimed = resolveEvidenceRegions(pathless, [cite(1, "ACME SDN BHD", "invoice.total")], rev);
+  assert.equal(claimed.failure.kind, "mislabelled", "claiming a label for a region that has none is the mislabel-promotes-tier vector, closed at the toolface");
+  const honest = resolveEvidenceRegions(pathless, [cite(1, "ACME SDN BHD", "")], rev);
+  assert.equal(honest.ok, true, "a pathless region stays CITABLE — the model echoes the empty label rather than inventing one");
+  assert.ok(!("field_path" in honest.evidence[0]), "…and no field_path is sent to the DB, so the recorded row matches the region");
+
+  const good = resolveEvidenceRegions(READ_EXTRACT, [cite(2, "RM 1,000.00", "invoice.total")], readRev);
+  assert.equal(good.evidence[0].field_path, "invoice.total", "the resolved label is read BACK OFF THE REGION — DB-sourced end to end, never the model's string");
 });
 
-test("a DUPLICATE idx keeps the FIRST occurrence — never a silent last-write-wins", () => {
-  const extract = {
-    regions: [
-      { idx: 1, id: REGION_VENDOR, field_path: "invoice.vendor_name" },
-      { idx: 1, id: REGION_TOTAL, field_path: "invoice.total" },
-    ],
-  };
-  const r = resolveEvidenceRegions(extract, [{ region_idx: 1, quote: "x" }]);
+test("the RESIDUAL is stated, not hidden: the same quote in two regions of ONE set still resolves by idx to the region the model read — no worse than the uuid era, and no better", () => {
+  const rev = extractRev(COLLIDING_EXTRACT);
+  const r = resolveEvidenceRegions(COLLIDING_EXTRACT, [cite(2, "RM 1,000.00", "invoice.amount_due")], rev);
   assert.equal(r.ok, true);
-  assert.equal(r.evidence[0].region_id, REGION_VENDOR, "the first region carrying that idx wins");
+  assert.equal(r.evidence[0].region_id, COLLIDING_EXTRACT.regions[1].id, "idx picks the region, not the quote — a quote collision inside one snapshot is a wall-level residual this PR does not claim to fix");
 });
 
-test("THE DEPLOY-ORDER HAZARD, pinned: a PRE-0054 extract (regions with ids but NO idx) resolves nothing and refuses — v7 on an unmigrated DB is a fail-closed drafting stop, never a silent mis-citation", () => {
-  // This is the shape clara.get_document_extract returns BEFORE migration 0054. It is why
-  // 0054's header states the order as BINDING: DB first, then the runtime image. The
-  // failure mode is loud and safe (every draft refuses with an empty valid set), but it IS
-  // a full stop, and a reviewer should be able to see the exact behaviour here rather than
-  // infer it.
-  const preMigration = {
-    regions: [
-      { id: REGION_VENDOR, field_path: "invoice.vendor_name", text_content: "ACME SDN BHD", engine_kind: "invoice_facts", version_n: 1 },
-      { id: REGION_TOTAL, field_path: "invoice.total", text_content: "RM 1,000.00", engine_kind: "invoice_facts", version_n: 1 },
-    ],
-  };
-  const r = resolveEvidenceRegions(preMigration, [{ region_idx: 1, quote: "RM 1,000.00" }]);
-  assert.equal(r.ok, false, "with no idx published, NOTHING is citable — the resolver must not fall back to array position");
-  assert.deepEqual(r.valid, [], "and the hint list is honestly empty rather than inventing ordinals the DB never published");
-});
-
-test("a missing / empty / non-array regions payload resolves NOTHING and refuses with an empty valid set", () => {
-  for (const extract of [null, undefined, {}, { regions: null }, { regions: "not an array" }, { regions: [] }]) {
-    const r = resolveEvidenceRegions(extract, [{ region_idx: 1, quote: "x" }]);
-    assert.equal(r.ok, false, `extract ${JSON.stringify(extract)} must refuse, never resolve`);
-    assert.deepEqual(r.valid, []);
-    assert.deepEqual(r.citedIdx, [1]);
-  }
-});
-
-test("the refusal message names the cited idx and lists the valid ones with their field_paths, on the CARRIED evidence_invalid token", () => {
-  const refusal = errorsV7.evidenceIdxUnresolvedRefusal([9, 12], [
-    { idx: 1, field_path: "invoice.vendor_name" },
-    { idx: 2, field_path: null },
-  ]);
-  assert.equal(refusal.code, "CLR21");
-  assert.equal(refusal.reason, "evidence_invalid", "the token must be the EXISTING one — a new token would fork isQuestionShaped, the dashboard copy and the settle record for a case that is the same case");
-  assert.ok(refusal.message.startsWith("The cited evidence does not match the document's extraction."), "the standard message must lead, so any consumer matching on it still matches");
-  assert.ok(refusal.message.includes("region_idx 9, 12"), "the cited idx values must be named");
-  assert.ok(refusal.message.includes("1 (invoice.vendor_name)"), "a valid idx must be listed with its field_path");
-  assert.ok(refusal.message.includes(", 2."), "a valid idx with no field_path is listed bare");
-  assert.ok(!/\d[\d,]*\.\d\d/.test(refusal.message), "the hint must carry no monetary figure — it names idx values and field paths, nothing the tool has not already shown the model");
-  const empty = errorsV7.evidenceIdxUnresolvedRefusal([1], []);
-  assert.ok(empty.message.includes("Valid region_idx values: none."), "an extraction with no citable region says so plainly");
-});
-
-test("evidence_invalid stays QUESTION-SHAPED, so the sweep's open-question behaviour is unchanged by where the refusal is raised", () => {
-  assert.equal(promptV7.isQuestionShaped(errorsV7.evidenceIdxUnresolvedRefusal([9], [])), true);
+test("extractRev is the MAPPING, not a proxy for it: reordering the array does not change it, but renumbering, re-identifying or re-generating a region does", () => {
+  const reordered = { regions: [...READ_EXTRACT.regions].reverse() };
+  assert.equal(extractRev(reordered), readRev, "array order is not identity");
+  const renumbered = { regions: READ_EXTRACT.regions.map((r) => ({ ...r, idx: r.idx + 1 })) };
+  assert.notEqual(extractRev(renumbered), readRev);
+  const regenerated = { regions: READ_EXTRACT.regions.map((r) => (r.idx === 2 ? { ...r, extraction_id: "other" } : r)) };
+  assert.notEqual(extractRev(regenerated), readRev, "the same idx pointing into a different extraction generation is a different snapshot");
 });
 
 // ===========================================================================
-// 4. THE WRAPPER, end to end.
+// 4. CLASSIFICATION — ruling 2's side effects.
+// ===========================================================================
+
+const SYSTEM_REASONS = ["evidence_not_read", "evidence_snapshot_changed", "evidence_index_unavailable", "evidence_index_unknown", "evidence_index_ambiguous"];
+
+test("every SYSTEM reason refuses as `transient`, is NOT evidence_invalid, and is NOT question-shaped — no durable human question, no evidence-blame receipt", () => {
+  for (const reason of SYSTEM_REASONS) {
+    const r = errorsV7.evidenceSystemRefusal(reason);
+    assert.equal(r.code, "transient", `${reason} must not borrow a CLR code`);
+    assert.equal(r.reason, reason);
+    assert.notEqual(r.reason, "evidence_invalid");
+    assert.equal(promptV7.isQuestionShaped(r), false, `${reason} must NEVER open a scoped open-question — it is a system condition, not something a bookkeeper can answer`);
+    assert.ok(r.message.length > 0);
+    assert.ok(!/\d[\d,]*\.\d\d/.test(r.message), "a system message names no monetary figure");
+  }
+});
+
+test("a genuine MISLABEL keeps the existing evidence_invalid discriminant AND stays question-shaped — the fix round narrows blame, it does not abolish it", () => {
+  const r = errorsV7.refusalForEvidenceFailure({ kind: "mislabelled", entries: [{ idx: 2, cited: "invoice.total", actual: "invoice.amount_due" }] });
+  assert.equal(r.code, "CLR21");
+  assert.equal(r.reason, "evidence_invalid");
+  assert.equal(promptV7.isQuestionShaped(r), true, "bad evidence remains a human-answerable question, exactly as before");
+  assert.ok(r.message.startsWith("The cited evidence does not match the document's extraction."), "the standard message must lead");
+  assert.ok(r.message.includes('region_idx 2 is "invoice.amount_due", not "invoice.total"'));
+});
+
+test("the unknown-index refusal carries the valid set; the snapshot-changed refusal deliberately does NOT", () => {
+  const unknown = errorsV7.refusalForEvidenceFailure({ kind: "system", reason: "evidence_index_unknown", citedIdx: [9], valid: [{ idx: 1, field_path: "invoice.total" }, { idx: 2, field_path: null }] });
+  assert.ok(unknown.message.includes("1 (invoice.total)"));
+  assert.ok(unknown.message.includes(", 2."));
+  const moved = errorsV7.refusalForEvidenceFailure({ kind: "system", reason: "evidence_snapshot_changed", citedIdx: [2], valid: [] });
+  assert.ok(!moved.message.includes("Valid region_idx"), "after a renumber the remedy is a RE-READ; a hint list would let the hint stand in for the read");
+  assert.ok(/read_document again/.test(moved.message));
+});
+
+// ===========================================================================
+// 5. THE WRAPPER, end to end.
 // ===========================================================================
 
 const DOC = "11111111-1111-1111-1111-111111111111";
 const ctx = { firmId: "F", clientId: "c1", documentId: DOC, filingId: "fil-1", taskId: "task-7", direction: "purchase" };
 const draftInput = (evidence) => ({ ...baseDraft, document_id: DOC, evidence });
+/** The state read_document would have left behind for this document. */
+const readsFor = (extract) => {
+  const m = newReadSnapshots();
+  m.set(DOC, extractRev(extract));
+  return m;
+};
 
-test("wrapper: a resolvable idx reaches the writer as a REGION_ID — the DB contract is still uuid-based, and no idx is ever sent", async () => {
-  const write = stubPools(SCRAMBLED_EXTRACT);
-  const r = await runDraftJournalEntry(ctx, draftInput([{ region_idx: 2, quote: "RM 1,000.00", field_path: "invoice.total" }]));
+test("wrapper: a citation from the snapshot the model read reaches the writer as a REGION_ID plus the REGION's own label — and no idx is ever sent to the DB", async () => {
+  const w = stubPools(READ_EXTRACT);
+  const r = await runDraftJournalEntry(ctx, draftInput([cite(2, "RM 1,000.00", "invoice.total")]), readsFor(READ_EXTRACT));
   assert.equal(r.ok, true, `expected ok, got ${JSON.stringify(r)}`);
-  const evidenceArg = JSON.parse(write.params[11]); // arg 12 (0-indexed 11)
-  assert.deepEqual(evidenceArg, [{ region_id: REGION_TOTAL, quote: "RM 1,000.00", field_path: "invoice.total" }]);
-  assert.ok(!JSON.stringify(evidenceArg).includes("region_idx"), "the DB must never receive an idx — clara._write_entry_evidence reads region_id and nothing else");
+  assert.deepEqual(JSON.parse(w.params[11]), [{ region_id: REGION_TOTAL, quote: "RM 1,000.00", field_path: "invoice.total" }]);
+  assert.ok(!JSON.stringify(JSON.parse(w.params[11])).includes("region_idx"));
 });
 
-test("wrapper: the array-order-vs-idx-order trap is closed end to end (idx 1 reaches the writer as the VENDOR region, not the array's first element)", async () => {
-  const write = stubPools(SCRAMBLED_EXTRACT);
-  const r = await runDraftJournalEntry(ctx, draftInput([{ region_idx: 1, quote: "ACME SDN BHD" }]));
-  assert.equal(r.ok, true, `expected ok, got ${JSON.stringify(r)}`);
-  assert.equal(JSON.parse(write.params[11])[0].region_id, REGION_VENDOR);
+test("wrapper: THE DRIFT CELL — an extraction that lands between the read and the draft is REFUSED, and the writer is never reached (this cell FAILS on the pre-fix resolver)", async () => {
+  const w = stubPools([DRIFTED_EXTRACT]); // the wrapper's own fetch sees the NEW set
+  const r = await runDraftJournalEntry(ctx, draftInput([cite(2, "RM 1,000.00", "invoice.total")]), readsFor(READ_EXTRACT));
+  assert.equal(r.ok, false, "the pre-fix resolver returned ok here and the wall then accepted the wrong region");
+  assert.equal(r.refusal.code, "transient");
+  assert.equal(r.refusal.reason, "evidence_snapshot_changed");
+  assert.equal(w.writes, 0, "the DB writer must NEVER be reached with a citation bound to a set the model did not read");
 });
 
-test("wrapper: an UNKNOWN idx refuses BEFORE the writer — the write pool is never reached, and the refusal carries the valid set", async () => {
-  const write = stubPools(SCRAMBLED_EXTRACT);
-  const r = await runDraftJournalEntry(ctx, draftInput([{ region_idx: 7, quote: "RM 1,000.00" }]));
-  assert.equal(r.ok, false, `expected a refusal, got ${JSON.stringify(r)}`);
-  assert.equal(r.refusal.code, "CLR21");
-  assert.equal(r.refusal.reason, "evidence_invalid");
-  assert.ok(r.refusal.message.includes("1 (invoice.vendor_name), 2 (invoice.total), 3 (invoice.invoice_date)"), `the valid set must be echoed, got: ${r.refusal.message}`);
-  assert.equal(write.params, null, "the DB writer must NEVER be called for an unresolvable citation");
-});
-
-test("wrapper: when the extract read is unavailable the draft is REFUSED, never sent through with an unresolvable citation", async () => {
-  const write = stubPools(null);
-  const r = await runDraftJournalEntry(ctx, draftInput([{ region_idx: 1, quote: "x" }]));
-  assert.equal(r.ok, false, "no extraction means no citable region — fail closed");
-  assert.equal(r.refusal.reason, "evidence_invalid");
-  assert.equal(write.params, null);
-});
-
-test("wrapper: the carried v6 guards still fire FIRST — a foreign document_id is still CLR11, before any resolution", async () => {
-  const write = stubPools(SCRAMBLED_EXTRACT);
-  const r = await runDraftJournalEntry(ctx, { ...draftInput([{ region_idx: 1, quote: "x" }]), document_id: "99999999-9999-4999-8999-999999999999" });
+test("wrapper: a run that never read this document is refused before any write — reading nothing licenses nothing", async () => {
+  const w = stubPools(READ_EXTRACT);
+  const r = await runDraftJournalEntry(ctx, draftInput([cite(2, "RM 1,000.00", "invoice.total")]), newReadSnapshots());
   assert.equal(r.ok, false);
-  assert.equal(r.refusal.code, "CLR11");
-  assert.equal(write.params, null);
+  assert.equal(r.refusal.reason, "evidence_not_read");
+  assert.equal(w.writes, 0);
 });
 
-test("wrapper: the carried direction-family guard still fires FIRST — a purchase-bound admission still refuses a sales_invoice", async () => {
-  const write = stubPools(SCRAMBLED_EXTRACT);
-  const r = await runDraftJournalEntry(ctx, { ...draftInput([{ region_idx: 1, quote: "x" }]), coding_kind: "sales_invoice" });
+test("wrapper: the pre-0054 deploy window refuses as a SYSTEM condition with NO question and NO evidence blame — and the identical input resolves once the ordinal is published", async () => {
+  const w = stubPools(PRE_0054_EXTRACT);
+  const r = await runDraftJournalEntry(ctx, draftInput([cite(2, "RM 1,000.00", "invoice.total")]), readsFor(PRE_0054_EXTRACT));
   assert.equal(r.ok, false);
-  assert.equal(r.refusal.reason, "direction_family_mismatch");
-  assert.equal(write.params, null);
+  assert.equal(r.refusal.reason, "evidence_index_unavailable");
+  assert.equal(promptV7.isQuestionShaped(r.refusal), false, "no durable human question in the deploy window");
+  assert.notEqual(r.refusal.reason, "evidence_invalid", "and no evidence-blame receipt");
+  assert.equal(w.writes, 0);
+  // …and the SAME citation, once 0054 publishes the ordinal, goes through.
+  const w2 = stubPools(READ_EXTRACT);
+  const ok = await runDraftJournalEntry(ctx, draftInput([cite(2, "RM 1,000.00", "invoice.total")]), readsFor(READ_EXTRACT));
+  assert.equal(ok.ok, true, "recovery needs no code change and no human — only the migration");
+  assert.equal(w2.writes, 1);
+});
+
+test("wrapper: the carried v6 guards still fire FIRST — a foreign document_id is CLR11 and a purchase-bound sales_invoice is direction_family_mismatch, both before any resolution", async () => {
+  const w1 = stubPools(READ_EXTRACT);
+  const foreign = await runDraftJournalEntry(ctx, { ...draftInput([cite(2, "RM 1,000.00", "invoice.total")]), document_id: "99999999-9999-4999-8999-999999999999" }, readsFor(READ_EXTRACT));
+  assert.equal(foreign.refusal.code, "CLR11");
+  assert.equal(w1.writes, 0);
+  const w2 = stubPools(READ_EXTRACT);
+  const family = await runDraftJournalEntry(ctx, { ...draftInput([cite(2, "RM 1,000.00", "invoice.total")]), coding_kind: "sales_invoice" }, readsFor(READ_EXTRACT));
+  assert.equal(family.refusal.reason, "direction_family_mismatch");
+  assert.equal(w2.writes, 0);
+});
+
+test("the tool set wires the gate: read_document RECORDS the snapshot it showed, and the draft tool is handed that same record", () => {
+  const toolsSrc = src("autoDraft.v7.tools.ts");
+  assert.ok(toolsSrc.includes("const reads = newReadSnapshots();"), "the tool set must own one read record per model-step execution");
+  assert.ok(toolsSrc.includes("reads.set(ctx.documentId, extractRev(extract));"), "read_document must record the rev of what it returned");
+  assert.ok(toolsSrc.includes("runDraftJournalEntry(ctx, input, reads)"), "the draft tool must be handed that record");
+  const readIdx = toolsSrc.indexOf("reads.set(ctx.documentId");
+  const returnIdx = toolsSrc.indexOf("return extract;", readIdx);
+  assert.ok(readIdx > 0 && returnIdx > readIdx, "the record must be written before the extract is handed to the model");
 });
 
 // ===========================================================================
-// 5. Registry sanity.
+// 6. Registry sanity.
 // ===========================================================================
 
 test("registry.ts pins autoDraft: autoDraft_v7, and still exports the superseded autoDraft_v6 (policy (c))", () => {
   assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v7");
-  assert.equal(typeof registryMod.autoDraft_v6, "function", "autoDraft_v6 must stay exported so no parked v6 run is stranded");
-  assert.equal(typeof registryMod.autoDraft_v5, "function", "…and every earlier body stays exported too");
+  assert.equal(typeof registryMod.autoDraft_v6, "function");
+  assert.equal(typeof registryMod.autoDraft_v5, "function");
 });

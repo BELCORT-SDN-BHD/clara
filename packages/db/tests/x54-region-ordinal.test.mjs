@@ -29,6 +29,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import {
   rootQuery, endPool, printLaneNotes, printSkipCount, markSkip,
   waveAEnsureReady, buildWorld, firmOf, opk,
@@ -263,6 +264,166 @@ test("x54.f the region an idx names is genuinely citable: taking (id, text) at a
   });
   assert.ok(draft.entry_id, "a draft citing the region an idx names must be accepted by the wall");
   assert.equal((await entryRow(draft.entry_id)).status, "draft");
+});
+
+// ===========================================================================
+// 5. THE DRIFT WITNESSES (the cross-model review's CRITICAL, institutionalised at the DB
+//    layer). NOTHING HERE IS A CLAIM THAT THE DB IS WRONG — the ordinal is doing exactly
+//    what it is defined to do. These cells RECORD the two behaviours that make the
+//    RUNTIME's snapshot gate necessary, so a future reader can never conclude the gate is
+//    belt-and-braces: an index is only meaningful against the list it was read from, and
+//    the wall (correctly, by its own contract) cannot tell a drifted region from the
+//    intended one when both carry the cited text.
+// ===========================================================================
+
+/** A document whose ONLY done extraction is the 'ocr' one, with four regions. The drift
+ *  cells need this rather than multiRegionDoc: `chosen` takes ONE extraction per
+ *  engine_kind, so a document that already has an invoice_facts pass would simply swap
+ *  which invoice_facts extraction is chosen instead of GAINING a generation, and nothing
+ *  would renumber. Measured, not assumed — the first cut of these cells used
+ *  multiRegionDoc and read `DRIFTED: false`. */
+async function ocrOnlyDoc(sub, client) {
+  const firm = await firmOf(client);
+  const cited = await seedCitedDocument(sub, { firm, client, quote: "RM 5,000.00" });
+  for (const [path, text] of [
+    ["invoice.amount_due", "RM 5,000.00"],
+    ["invoice.currency", "MYR"],
+    ["invoice.vendor_name", "X54 SUPPLIES SDN BHD"],
+  ]) {
+    await rootQuery(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+       values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,1.0)`,
+      [firm, cited.extractionId, path, text],
+    );
+  }
+  return { ...cited, firm };
+}
+
+/** Land a NEW extraction of a kind that sorts BEFORE 'ocr', with regions carrying the given
+ *  texts. Every existing index is renumbered by construction — no randomness. */
+async function landEarlierExtraction(firm, document, texts) {
+  const ext = randomUUID();
+  await rootQuery(
+    `insert into clara.document_extractions(id,firm_id,document_id,engine_id,engine_kind,version_n,status,page_count)
+     values($1,$2,$3,'clara-fixture:x54drift','invoice_facts',1,'done',1)`,
+    [ext, firm, document],
+  );
+  for (const [path, text] of texts) {
+    await rootQuery(
+      `insert into clara.document_regions(firm_id,extraction_id,locator_kind,locator,field_path,text_content,engine_confidence)
+       values($1,$2,'page_polygon','{"page":1,"polygon":[0,0,1,1]}'::jsonb,$3,$4,1.0)`,
+      [firm, ext, path, text],
+    );
+  }
+  return ext;
+}
+
+test("x54.h THE SILENT DRIFT, witnessed: an extraction landing between two reads renumbers every index, and when the region now at the cited idx carries the SAME text the wall ACCEPTS it — this is why the runtime binds resolution to the snapshot the model read", async (t) => {
+  if (skipHere(t)) return;
+  const { users, clients } = world;
+  const doc = await ocrOnlyDoc(users.alice, clients.A1);
+  const t0 = regionsOf(await getDocumentExtract(users.alice, { document: doc.documentId, client: clients.A1 }));
+  const meant = t0.find((r) => r.idx === 1);
+  assert.ok(meant, "T0 must have an idx 1");
+
+  // Every region of the landing extraction carries the SAME text as the region the model
+  // read at idx 1 — so whichever of them lands at idx 1 afterwards, the quote still matches
+  // and the collision is DETERMINISTIC rather than a coin flip on region-id ordering.
+  await landEarlierExtraction(doc.firm, doc.documentId, [
+    ["invoice.total", meant.text_content],
+    ["invoice.currency", meant.text_content],
+  ]);
+
+  const t1 = regionsOf(await getDocumentExtract(users.alice, { document: doc.documentId, client: clients.A1 }));
+  const nowAt = t1.find((r) => r.idx === 1);
+  assert.notEqual(nowAt.id, meant.id, "the ordinal must genuinely have renumbered — otherwise this cell proves nothing");
+  assert.equal(nowAt.text_content, meant.text_content, "…and the region now at that index carries the SAME text the model quoted");
+
+  // Cite the region the *index* now names, with the quote the model read at T0 — exactly what
+  // an ungated wrapper would have sent. The wall's contract is document + done extraction +
+  // quote-as-substring, and all three hold, so it accepts. Correctly, by its own contract.
+  const cred = await mintInteractive(doc.firm);
+  const res = await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: doc.documentId });
+  const draft = await wakeDraftEntry(cred, {
+    client: clients.A1, resolution: res, lines: billLines(EXP, AP, 500000),
+    document: doc.documentId, sha256: doc.sha256, vendor: VENDOR,
+    evidence: [ev(nowAt.id, meant.text_content, nowAt.field_path)],
+    codingKind: CODING_KIND, opKey: opk("x54drift"),
+  });
+  assert.ok(draft.entry_id, "the wall accepts a drifted-but-text-compatible citation — it has no way to know which list the index came from");
+  const rows = await rootQuery("select region_id from clara.entry_evidence where entry_id=$1", [draft.entry_id]);
+  assert.equal(rows.rows[0].region_id, nowAt.id, "…and the evidence recorded is the DRIFTED region, not the one the model read");
+  assert.notEqual(rows.rows[0].region_id, meant.id, "THE WITNESS: without the runtime's snapshot gate, a race binds evidence to a region nobody cited");
+});
+
+test("x54.i THE LOUD CONTRAST: when the drifted region's text does NOT contain the cited quote, the same wall refuses CLR21 evidence_invalid — the wall is not weak, it is answering a different question", async (t) => {
+  if (skipHere(t)) return;
+  const { users, clients } = world;
+  const doc = await ocrOnlyDoc(users.alice, clients.A1);
+  const t0 = regionsOf(await getDocumentExtract(users.alice, { document: doc.documentId, client: clients.A1 }));
+  const meant = t0.find((r) => r.idx === 1);
+  await landEarlierExtraction(doc.firm, doc.documentId, [
+    ["invoice.total", "TOTALLY DIFFERENT TEXT A"],
+    ["invoice.currency", "TOTALLY DIFFERENT TEXT B"],
+  ]);
+  const t1 = regionsOf(await getDocumentExtract(users.alice, { document: doc.documentId, client: clients.A1 }));
+  const nowAt = t1.find((r) => r.idx === 1);
+  assert.notEqual(nowAt.id, meant.id, "renumbered");
+  assert.ok(!String(nowAt.text_content).includes(meant.text_content), "…to a region whose text cannot contain the cited quote");
+
+  const cred = await mintInteractive(doc.firm);
+  const res = await freshResolution(users.alice, clients.A1, { subjectKind: "document", subjectId: doc.documentId });
+  let raised = null;
+  try {
+    await wakeDraftEntry(cred, {
+      client: clients.A1, resolution: res, lines: billLines(EXP, AP, 500000),
+      document: doc.documentId, sha256: doc.sha256, vendor: VENDOR,
+      evidence: [ev(nowAt.id, meant.text_content, nowAt.field_path)],
+      codingKind: CODING_KIND, opKey: opk("x54drift2"),
+    });
+  } catch (e) {
+    raised = e;
+  }
+  assert.ok(raised, "a text-incompatible drift must RAISE");
+  assert.equal(raised.code, "CLR21");
+  assert.match(String(raised.detail ?? ""), /evidence_invalid/);
+});
+
+test("x54.j the ARRAY ORDER did not move: regions[] comes back in exactly the order the pre-0054 aggregate produced — (engine_kind, version_n, region id), measured against the tables, not against the function", async (t) => {
+  if (skipHere(t)) return;
+  const { users, clients } = world;
+  const doc = await ocrOnlyDoc(users.alice, clients.A1);
+  await landEarlierExtraction(doc.firm, doc.documentId, [["invoice.total", "RM 5,000.00"]]);
+  const regions = regionsOf(await getDocumentExtract(users.alice, { document: doc.documentId, client: clients.A1 }));
+  // The pre-0054 order, re-derived INDEPENDENTLY from the base tables with the same triple
+  // 0009/0011's aggregate used. If the recut had reordered the array, the live frozen
+  // consumers would have shifted under it.
+  const expected = await rootQuery(
+    `select r.id from clara.document_regions r
+       join clara.document_extractions e on e.id=r.extraction_id
+      where e.document_id=$1 and e.status='done'
+        and e.version_n = (select max(e2.version_n) from clara.document_extractions e2
+                            where e2.document_id=e.document_id and e2.engine_kind=e.engine_kind and e2.status='done')
+      order by e.engine_kind, e.version_n, r.id`,
+    [doc.documentId],
+  );
+  assert.deepEqual(regions.map((r) => r.id), expected.rows.map((r) => r.id), "the recut is additive: same rows, same order, one extra key");
+});
+
+test("x54.k the SECOND-APPLY refusal is real, not merely present in the file: re-running 0054 against a database that already has it raises BY NAME and changes nothing", async (t) => {
+  if (skipHere(t)) return;
+  const sql = readFileSync(new URL("../migrations/0054_region_ordinal.sql", import.meta.url), "utf8");
+  const before = await rootQuery("select prosrc from pg_proc where oid='clara.get_document_extract(uuid,uuid,int)'::regprocedure");
+  let raised = null;
+  try {
+    await rootQuery(sql);
+  } catch (e) {
+    raised = e;
+  }
+  assert.ok(raised, "a second apply must RAISE — a silent re-ship could overwrite a body somebody else has since changed");
+  assert.match(String(raised.message ?? ""), /ALREADY emits an idx key/, `expected the by-name prestate refusal, got: ${raised.message}`);
+  const after = await rootQuery("select prosrc from pg_proc where oid='clara.get_document_extract(uuid,uuid,int)'::regprocedure");
+  assert.equal(after.rows[0].prosrc, before.rows[0].prosrc, "…and the installed body must be byte-identical afterwards");
 });
 
 test("x54.g the wall is UNCHANGED by 0054: an id that names no region of this document is still refused, and this file must never be the reason that stops being true", async (t) => {

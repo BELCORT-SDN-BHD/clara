@@ -49,7 +49,14 @@ import {
   type DraftToolResult,
   type JeReviewPart,
 } from "./chatTurn.v10.prompt.js";
-import { refusalFromDbError, sessionUnboundRefusal, evidenceIdxUnresolvedRefusal, type RegionIdxHint } from "./chatTurn.v10.errors.js";
+import {
+  refusalFromDbError,
+  sessionUnboundRefusal,
+  refusalForEvidenceFailure,
+  type EvidenceFailure,
+  type MislabelledCitation,
+  type RegionIdxHint,
+} from "./chatTurn.v10.errors.js";
 import { readScoped, writeScoped, safeRead, type PgExec, type ToolCtx } from "./chatTurn.v10.infra.js";
 
 export type DraftInput = z.infer<typeof draftJournalEntryInputSchema>;
@@ -63,6 +70,7 @@ type ExtractRegion = {
    *  missing either is simply not citable (see resolveEvidenceRegions). */
   id?: string;
   idx?: number;
+  extraction_id?: string;
   engine_kind?: string;
   version_n?: number;
   field_path?: string;
@@ -116,31 +124,101 @@ function readInvoiceFactState(extract: unknown): {
   return { verifiedTotalCents: corroborated ? totalCents : null, corroborated, explicitNonMyr };
 }
 
-/** One cited fact as the model supplies it (region INDEX + quote), and the resolved shape
- *  the DB evidence writer receives (region ID + quote). The two are deliberately different
- *  types: the toolface stopped taking ids, the wall never stopped taking them. */
+/** One cited fact as the model supplies it (region INDEX + quote + the region's own label),
+ *  and the resolved shape the DB evidence writer receives (region ID + quote + the label read
+ *  BACK OFF THE REGION, never the model's string). The two are deliberately different types:
+ *  the toolface stopped taking ids, the wall never stopped taking them. */
 export type DraftEvidence = DraftInput["evidence"][number];
 export type ResolvedEvidence = { region_id: string; quote: string; field_path?: string };
 
-export type EvidenceResolution =
-  | { ok: true; evidence: ResolvedEvidence[] }
-  | { ok: false; citedIdx: number[]; valid: RegionIdxHint[] };
+export type EvidenceResolution = { ok: true; evidence: ResolvedEvidence[] } | { ok: false; failure: EvidenceFailure };
 
-/** F9 (ADR-064 §3): resolve each cited `region_idx` to its region_id BY THE `idx` FIELD on
- *  the regions this wrapper fetched server-side — NEVER by array position. Position would quietly re-introduce the very
- *  defect this bump removes: the array the model read and the array this wrapper fetched are
- *  two independent RPC results, and "the nth element" is only accidentally the same region in
- *  both. `idx` is the DATABASE's own stable per-region ordinal (migration 0054,
- *  `row_number() over (order by engine_kind, version_n, r.id)`), so this is a mapping by
- *  identity, not by luck.
+/** THE IN-RUN READ RECORD — what read_document actually showed the model, per document id,
+ *  as a snapshot rev. Lives in the TOOL-SET CLOSURE: built inside the model step, consumed
+ *  inside the same step, never crossing a WDK step boundary — the same lifetime discipline
+ *  the per-attempt wake credentials already follow (§4.1).
  *
- *  A region the extraction cannot name (no integer idx, or no string id) is skipped rather
- *  than positionally guessed at, and a DUPLICATE idx keeps the FIRST occurrence rather than
- *  silently overwriting — a duplicate would be a DB defect, and resolving it to "whichever
- *  came last" is exactly the kind of derived answer that is not evidence.
+ *  REPLAY-SAFETY, MEASURED NOT ASSUMED. @workflow/core@4.6.0's own step.js says of its
+ *  memoization: "Only primitive results are memoized; non-primitives re-hydrate fresh each
+ *  replay so a shared reference can never carry a mutation between replays." Replay is at
+ *  STEP granularity — a replayed model step re-enters this body, rebuilds the tool set, and
+ *  gets an EMPTY map. So a replay cannot inherit a stale snapshot (fail-open) and cannot
+ *  smuggle one across runs; it simply has to read again, which is the fail-CLOSED direction
+ *  and is exactly what the gate wants. */
+export type ReadSnapshots = Map<string, string>;
+export function newReadSnapshots(): ReadSnapshots {
+  return new Map<string, string>();
+}
+
+/** THE SNAPSHOT REV — a canonical encoding of the very thing an index indexes: the
+ *  (idx -> region id) mapping, each entry tagged with the extraction generation it came from.
  *
- *  Pure — no DB, no model, directly unit-testable. */
-export function resolveEvidenceRegions(extract: unknown, evidence: readonly DraftEvidence[]): EvidenceResolution {
+ *  WHY THE MAPPING AND NOT THE (extraction_id, version_n) SET. The pair set is a PROXY for
+ *  the mapping; the mapping is the thing the model is being asked to point into. Law 3 —
+ *  prove the thing, not a projection of it. Any re-extraction, supersede, renumber, added or
+ *  removed region changes this string, and nothing else does. Sorted, so an incidental change
+ *  in array order is not mistaken for a change in identity.
+ *
+ *  It is never shown to the model, never persisted, and never sent to the DB: it is compared
+ *  for equality, in memory, inside one step. Pure. */
+export function extractRev(extract: unknown): string {
+  const raw = (extract as { regions?: unknown } | null)?.regions;
+  const regions = (Array.isArray(raw) ? raw : []) as ExtractRegion[];
+  const parts: string[] = [];
+  for (const r of regions) {
+    const idx = typeof r?.idx === "number" && Number.isInteger(r.idx) ? r.idx : null;
+    const id = typeof r?.id === "string" && r.id.length > 0 ? r.id : null;
+    if (idx === null || id === null) continue;
+    parts.push(`${idx}:${id}@${String(r.extraction_id ?? "")}#${String(r.version_n ?? "")}`);
+  }
+  parts.sort();
+  return `${parts.length}|${parts.join("|")}`;
+}
+
+/** F9 (ADR-064 §3) + THE FIX ROUND: resolve each cited `region_idx` to its region_id, BY THE
+ *  `idx` FIELD — never by array position — and ONLY inside the snapshot the model actually
+ *  read THIS RUN.
+ *
+ *  WHY THE SNAPSHOT GATE EXISTS (Codex #1 CRITICAL, native Finding 1, REPRODUCED on a rig
+ *  before this fix). The first cut resolved the model's number against the WRAPPER's own,
+ *  independently-issued RPC call. Measured: a four-region `ocr` extract is read at T0; an
+ *  `invoice_facts` extraction lands before the draft call; because the ordinal sorts by
+ *  (engine_kind, version_n, id) and 'invoice_facts' < 'ocr', EVERY index is renumbered. The
+ *  model's idx=2 (the `invoice.amount_due` region, "RM 5,000.00") resolved at T1 to a
+ *  DIFFERENT extraction's `invoice.total` region carrying the SAME text, and the untouched
+ *  wall ACCEPTED it — the quote really is a substring of that region. The recorded evidence
+ *  then read field_path 'invoice.total', which is exactly what the corroboration bound and
+ *  the supplier-bill shape check select on. A stale UUID always named the region it was read
+ *  from; a stale INDEX can name a different one. That is a new silent-wrong-binding class,
+ *  and it is closed HERE, at the toolface that introduced it — the DB wall is untouched.
+ *
+ *  THE FIVE GATES, IN ORDER, ALL FAIL-CLOSED:
+ *    1. read-before-cite, PER DOCUMENT (native Finding 2) — no snapshot for THIS document,
+ *       no citation. Reading A never licenses citing B.
+ *    2. the snapshot must still be the one that was read — else the world moved; re-read.
+ *    3. a duplicate idx REFUSES (Codex #4, native Finding 3). First-wins would re-smuggle
+ *       array order as authority. "A duplicate would be a DB defect" is the argument FOR
+ *       refusing, not for picking one.
+ *    4. an empty citable set is named as such rather than reported as a bad index.
+ *    5. the model's field_path must EQUAL the region's own (coordinator ruling 5): a region
+ *       with a label must be cited by that label, a region with none must not be given one.
+ *       The resolved evidence then carries the REGION'S label, never the model's string, so
+ *       the recorded field_path is DB-sourced end to end.
+ *
+ *  Pure — no DB, no model, no clock. Directly unit-testable. */
+export function resolveEvidenceRegions(
+  extract: unknown,
+  evidence: readonly DraftEvidence[],
+  readRev: string | undefined,
+): EvidenceResolution {
+  const citedAll = evidence.map((e) => e.region_idx);
+  if (readRev === undefined) {
+    return { ok: false, failure: { kind: "system", reason: "evidence_not_read", citedIdx: citedAll, valid: [] } };
+  }
+  if (extractRev(extract) !== readRev) {
+    return { ok: false, failure: { kind: "system", reason: "evidence_snapshot_changed", citedIdx: citedAll, valid: [] } };
+  }
+
   const raw = (extract as { regions?: unknown } | null)?.regions;
   const regions = (Array.isArray(raw) ? raw : []) as ExtractRegion[];
   const byIdx = new Map<number, ExtractRegion>();
@@ -148,25 +226,39 @@ export function resolveEvidenceRegions(extract: unknown, evidence: readonly Draf
     const idx = typeof r?.idx === "number" && Number.isInteger(r.idx) ? r.idx : null;
     const id = typeof r?.id === "string" && r.id.length > 0 ? r.id : null;
     if (idx === null || id === null) continue;
-    if (!byIdx.has(idx)) byIdx.set(idx, r);
+    if (byIdx.has(idx)) {
+      return { ok: false, failure: { kind: "system", reason: "evidence_index_ambiguous", citedIdx: [idx], valid: [] } };
+    }
+    byIdx.set(idx, r);
   }
+  if (byIdx.size === 0) {
+    return { ok: false, failure: { kind: "system", reason: "evidence_index_unavailable", citedIdx: citedAll, valid: [] } };
+  }
+
   const resolved: ResolvedEvidence[] = [];
-  const citedIdx: number[] = [];
+  const unknown: number[] = [];
+  const mislabelled: MislabelledCitation[] = [];
   for (const e of evidence) {
     const hit = byIdx.get(e.region_idx);
     const id = typeof hit?.id === "string" ? hit.id : null;
-    if (id === null) {
-      citedIdx.push(e.region_idx);
+    if (hit === undefined || id === null) {
+      unknown.push(e.region_idx);
       continue;
     }
-    resolved.push({ region_id: id, quote: e.quote, ...(e.field_path === undefined ? {} : { field_path: e.field_path }) });
+    const actual = typeof hit.field_path === "string" && hit.field_path.length > 0 ? hit.field_path : null;
+    if ((actual ?? "") !== e.field_path) {
+      mislabelled.push({ idx: e.region_idx, cited: e.field_path, actual });
+      continue;
+    }
+    resolved.push({ region_id: id, quote: e.quote, ...(actual === null ? {} : { field_path: actual }) });
   }
-  if (citedIdx.length > 0) {
+  if (unknown.length > 0) {
     const valid: RegionIdxHint[] = [...byIdx.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([idx, r]) => ({ idx, field_path: typeof r.field_path === "string" ? r.field_path : null }));
-    return { ok: false, citedIdx, valid };
+    return { ok: false, failure: { kind: "system", reason: "evidence_index_unknown", citedIdx: unknown, valid } };
   }
+  if (mislabelled.length > 0) return { ok: false, failure: { kind: "mislabelled", entries: mislabelled } };
   return { ok: true, evidence: resolved };
 }
 
@@ -175,7 +267,7 @@ export function resolveEvidenceRegions(extract: unknown, evidence: readonly Draf
  * authoritative values server-side, runs the tier check, then executes the DB
  * writer through the write floor. Never throws — always resolves to a typed result.
  */
-export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Promise<DraftToolResult> {
+export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput, reads: ReadSnapshots): Promise<DraftToolResult> {
   const clientId = ctx.clientId;
   if (!clientId) return { ok: false, refusal: sessionUnboundRefusal() };
   try {
@@ -216,18 +308,16 @@ export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Pro
     }
     const detectedTier: "verified" | "model_read" = facts.corroborated ? "verified" : "model_read";
 
-    // F9 (ADR-064 §3): resolve the model's cited region INDEXES into the region ids the DB
-    // evidence wall reads. The regions come from THIS wrapper's own server-side
-    // get_document_extract call — the same RPC read_document showed the model — and the
-    // mapping is by the `idx` FIELD, never by array position. An idx that names no region
-    // is refused HERE, with the valid set echoed back, instead of being sent to the wall as
-    // a citation that cannot possibly match: the SAME CLR21 evidence_invalid token, the same
-    // downstream handling, but the model is told what it could have cited.
-    const cited = resolveEvidenceRegions(server.extract, input.evidence);
+    // F9 (ADR-064 §3) + THE FIX ROUND: resolve the model's cited region INDEXES into the
+    // region ids the DB evidence wall reads — by the `idx` FIELD, never by array position,
+    // and ONLY within the snapshot read_document showed the model in THIS run for THIS
+    // document. `reads` is the tool-set closure's own record; a run that never read, or read
+    // a snapshot that has since moved, is refused as a SYSTEM condition and told to re-read
+    // (see resolveEvidenceRegions' own header for the measured drift this closes).
+    const cited = resolveEvidenceRegions(server.extract, input.evidence, reads.get(input.document_id));
     if (!cited.ok) {
-      return { ok: false, refusal: evidenceIdxUnresolvedRefusal(cited.citedIdx, cited.valid) };
+      return { ok: false, refusal: refusalForEvidenceFailure(cited.failure) };
     }
-
     // 2. Assemble writer args. The model NEVER supplies sha256/books/op_key/resolution.
     // The DB re-derives the authoritative provenance_tier into the coding_attempts row;
     // detectedTier is a hint carried for the fresh part when the receipt omits a tier.
@@ -300,6 +390,12 @@ export async function runDraftJournalEntry(ctx: ToolCtx, input: DraftInput): Pro
  */
 export function buildToolsV10(ctx: ToolCtx) {
   const clientId = ctx.clientId;
+  // THE IN-RUN READ RECORD (the fix round's gate), keyed BY DOCUMENT — the chat lane lets the
+  // model choose which document to read and which to draft, so reading A must never license
+  // citing B (native Finding 2; under v9 the DB wall's own document join refused that
+  // structurally, and the index toolface has to restore the property). Declared before the
+  // firm-scoped set so the unbound-session branch shares the same record.
+  const reads = newReadSnapshots();
   const firmScoped = {
     list_unassigned_documents: tool({
       description: "List firm documents not yet filed to any client. File one on the /documents tab before it can be coded.",
@@ -320,7 +416,13 @@ export function buildToolsV10(ctx: ToolCtx) {
       execute: ({ document_id }: { document_id: string }) =>
         safeRead(() =>
           readScoped(ctx, (c) =>
-            c.query("select clara.get_document_extract($1::uuid, $2::uuid) as x", [document_id, clientId]).then((r) => r.rows[0]?.x ?? null),
+            c.query("select clara.get_document_extract($1::uuid, $2::uuid) as x", [document_id, clientId]).then((r) => {
+              const extract = r.rows[0]?.x ?? null;
+              // Record WHAT WAS SHOWN, under THE DOCUMENT THAT WAS READ. A throwing read
+              // records nothing, so a failed read can never license a citation.
+              reads.set(document_id, extractRev(extract));
+              return extract;
+            }),
           ),
         ),
     }),
@@ -388,7 +490,7 @@ export function buildToolsV10(ctx: ToolCtx) {
         "prefer an existing counterparty_id (from list_journal_entries/get_journal_entry) over proposing a new name when the vendor " +
         "or customer is already established for this client.",
       inputSchema: draftJournalEntryInputSchema,
-      execute: (input: DraftInput) => runDraftJournalEntry(ctx, input),
+      execute: (input: DraftInput) => runDraftJournalEntry(ctx, input, reads),
     }),
   };
 }

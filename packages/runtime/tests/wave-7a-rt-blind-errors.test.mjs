@@ -145,8 +145,19 @@ test("autoDraft_v7's error map answers IDENTICALLY to v6 across every code and r
   }
 });
 
-test("autoDraft_v7 ADDS evidenceIdxUnresolvedRefusal, on the EXISTING evidence_invalid token — a cited region_idx that names no region gets the same discriminant the DB wall raises, plus the valid set", () => {
-  const r = errorsV7.evidenceIdxUnresolvedRefusal([9], [{ idx: 1, field_path: "invoice.total" }, { idx: 2, field_path: null }]);
+test("autoDraft_v7 ADDS a SYSTEM refusal family that is deliberately NOT a CLR and deliberately NOT evidence_invalid — staleness is a system condition, not bad evidence (fix round, ruling 2)", () => {
+  for (const reason of ["evidence_not_read", "evidence_snapshot_changed", "evidence_index_unavailable", "evidence_index_unknown", "evidence_index_ambiguous"]) {
+    const r = errorsV7.evidenceSystemRefusal(reason);
+    assert.equal(r.code, "transient", `${reason} must not borrow a CLR code from the business map`);
+    assert.equal(r.reason, reason);
+    assert.notEqual(r.reason, "evidence_invalid");
+    assert.doesNotMatch(r.message, PURCHASE_WORDS, "the system messages stay direction-neutral like every other v6/v7 message");
+  }
+  assert.equal(typeof errors.evidenceSystemRefusal, "undefined", "v6 must NOT have gained the family — the frozen v6 closure is byte-untouched by this wave");
+});
+
+test("autoDraft_v7's MISLABEL arm keeps the EXISTING evidence_invalid discriminant — the fix round narrows blame to a citation the model demonstrably got wrong, it does not abolish it", () => {
+  const r = errorsV7.refusalForEvidenceFailure({ kind: "mislabelled", entries: [{ idx: 2, cited: "invoice.total", actual: "invoice.amount_due" }] });
   assert.equal(r.code, "CLR21");
   assert.equal(r.reason, "evidence_invalid", "a NEW token would have forked every downstream consumer for a case that is the same case");
   assert.equal(
@@ -154,8 +165,8 @@ test("autoDraft_v7 ADDS evidenceIdxUnresolvedRefusal, on the EXISTING evidence_i
     true,
     "the standard evidence_invalid message must LEAD, so a consumer matching on it still matches",
   );
-  assert.match(r.message, /region_idx 9/);
-  assert.match(r.message, /1 \(invoice\.total\)/);
-  assert.doesNotMatch(r.message, PURCHASE_WORDS, "the hint stays direction-neutral like every other v6/v7 message");
-  assert.equal(typeof errors.evidenceIdxUnresolvedRefusal, "undefined", "v6 must NOT have gained the factory — the frozen v6 closure is byte-untouched by this wave");
+  assert.match(r.message, /region_idx 2 is "invoice\.amount_due", not "invoice\.total"/);
+  assert.doesNotMatch(r.message, PURCHASE_WORDS);
+  const hinted = errorsV7.refusalForEvidenceFailure({ kind: "system", reason: "evidence_index_unknown", citedIdx: [9], valid: [{ idx: 1, field_path: "invoice.total" }] });
+  assert.match(hinted.message, /1 \(invoice\.total\)/, "the unknown-index refusal still tells the model what it could have cited");
 });
