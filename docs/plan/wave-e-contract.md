@@ -104,11 +104,10 @@ never retypes figures into prose or charts.
 **Binding interpretation (round-3 cross-model review; closes the lawyer holes without
 touching the ratified sentence):**
 - **"Authoritative"** = every product-presented or persisted quantitative or assurance
-  claim. Transient UI is NOT an escape hatch — the retained render boundary (below)
-  already covers everything the product shows.
+  claim. Transient UI is NOT an escape hatch — "product-presented" reaches it directly.
 - **The ratified sentence is a PERMISSION grant** (proposing and checking are lawful),
   not a relaxation. The retained, stricter operational law — PRD §4 item 14 ("never
-  model-computed"), PRD §9's exclusion table ("Model-computed numbers in any artifact"),
+  model-computed"), PRD §8's exclusion table ("Model-computed numbers in any artifact"),
   ARCHITECTURE §6's render boundary — **GOVERNS wherever the two could diverge.** The
   asymmetry is deliberate.
 - **"Reproduces … from DB-owned inputs" means ORIGINATES:** the evaluator computes the
@@ -255,6 +254,8 @@ D-b staff-advance register) registers to **Wave F**; the submission/approval sur
   no new autopost class is created. A late settlement whose invoice sits in a CLOSED FY
   is HELD and surfaced on the exception panel; entering the closed year takes the formal
   reopen path (E-R6 / key ③) — a drawer-2 attestation never posts into a closed year.
+  *(Round 3: the rulings draft's looser "drawer-2 surfacing" phrasing is resolved toward
+  E-R6's ruled reopen path, which governs corrections into a closed period.)*
 - **Supersession registered NOW, activated only at the F build:** this door, when built,
   NARROWS 7A-R3's blanket "tax-silent never autoposts" to "never WITHOUT settlement
   corroboration". The Wave-F build ADR executes that narrowing and must define the

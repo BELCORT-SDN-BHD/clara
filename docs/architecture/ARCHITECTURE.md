@@ -13,7 +13,7 @@
 3. **Wake authority** — each wake kind carries a DB-enforced **allowlist** of invokable functions; `[proactive]` can call only `record_notification`. Not a blocklist.
 4. **Write authorization** — the agent's read path is **structurally read-only** (a role with no EXECUTE on any volatile writer + `default_transaction_read_only`), so no SELECT-wrapped write is possible; role floors and plan→approve live in the DB.
 
-Everything else (coding choices, materiality, close-readiness judgement) stays **visibility-first** — surfaced, not hard-blocked — per the owner's standing philosophy. **One ruled exception (ADR-065/E-R2, 2026-08-08): the year-end close's drawer-2 gates default-REFUSE until a per-item, named, receipted human attestation — close-readiness at the close boundary is fail-closed-with-attestation, not advisory. Drawer-3 readiness signals remain visibility-first.**
+Everything else (coding choices, materiality, close-readiness judgement) stays **visibility-first** — surfaced, not hard-blocked — per the owner's standing philosophy. **One ruled exception (ADR-065/E-R2, 2026-08-08): the year-end close's drawer-2 gates default-REFUSE until a per-item, named, receipted human attestation — close-readiness at the close boundary is fail-closed-with-attestation, not advisory. Drawer-3 readiness signals remain visibility-first. Drawer-1 items (continuity math, control tie-outs, ordering) are structural invariants, not judgement — this sentence never reached them.**
 
 ---
 
