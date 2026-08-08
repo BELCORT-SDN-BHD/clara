@@ -18,6 +18,12 @@ register();
 const errors = await import("../workflows/autoDraft.v6.errors.ts");
 const { refusalFromDbError } = errors;
 
+// WAVE E / F9 (2026-08-09): autoDraft_v7 is the live pin now. Its errors module is a
+// PURELY ADDITIVE copy of v6's (proven byte-for-byte in wave-e-f9-autodraft-v7.test.mjs),
+// so every contract cell below is re-run against it — a "purely additive" claim that is
+// never exercised on the new module is a claim nobody checked.
+const errorsV7 = await import("../workflows/autoDraft.v7.errors.ts");
+
 const PURCHASE_WORDS = /\b(bill|supplier|vendor)\b/i;
 
 // ===========================================================================
@@ -103,4 +109,64 @@ test("CLR29 (the one-draft-per-filing no-op) preserves the double_coded reason d
   const r = refusalFromDbError({ code: "CLR29" });
   assert.equal(r.code, "CLR29");
   assert.equal(r.reason, "double_coded");
+});
+
+// ===========================================================================
+// WAVE E / F9 — the SAME contract, re-run against the live autoDraft_v7 module, plus the
+// one thing v7 adds.
+// ===========================================================================
+
+test("autoDraft_v7's error map answers IDENTICALLY to v6 across every code and reason this lane pins — the F9 bump is additive, and that is checked, not assumed", () => {
+  const cases = [
+    { code: "CLR21", detail: '{"reason":"tax_leg_missing"}' },
+    { code: "CLR21", detail: '{"reason":"type_polarity_mismatch"}' },
+    { code: "CLR21", detail: '{"reason":"evidence_invalid"}' },
+    { code: "CLR21", detail: '{"reason":"direction_family_mismatch"}' },
+    { code: "CLR21" },
+    { code: "CLR10", detail: '{"reason":"sst_account_missing"}' },
+    { code: "CLR10" },
+    { code: "CLR29" },
+    { code: "23505", constraint: "counterparty_alias_uq" },
+    { code: "23505", constraint: "some_other_uq" },
+    { code: "23503" },
+    { code: "23514" },
+    { code: "42501" },
+    { code: "CLR99" },
+    { code: "CLR01" },
+    { code: "CLR02" },
+    { code: "CLR03" },
+    { code: "CLR11" },
+    { code: "CLR23" },
+    { code: "CLR26" },
+    { code: "CLR28" },
+  ];
+  for (const c of cases) {
+    assert.deepEqual(errorsV7.refusalFromDbError(c), refusalFromDbError(c), `v7 must answer identically for ${JSON.stringify(c)}`);
+  }
+});
+
+test("autoDraft_v7 ADDS a SYSTEM refusal family that is deliberately NOT a CLR and deliberately NOT evidence_invalid — staleness is a system condition, not bad evidence (fix round, ruling 2)", () => {
+  for (const reason of ["evidence_not_read", "evidence_snapshot_changed", "evidence_index_unavailable", "evidence_index_unknown", "evidence_index_ambiguous"]) {
+    const r = errorsV7.evidenceSystemRefusal(reason);
+    assert.equal(r.code, "transient", `${reason} must not borrow a CLR code from the business map`);
+    assert.equal(r.reason, reason);
+    assert.notEqual(r.reason, "evidence_invalid");
+    assert.doesNotMatch(r.message, PURCHASE_WORDS, "the system messages stay direction-neutral like every other v6/v7 message");
+  }
+  assert.equal(typeof errors.evidenceSystemRefusal, "undefined", "v6 must NOT have gained the family — the frozen v6 closure is byte-untouched by this wave");
+});
+
+test("autoDraft_v7's MISLABEL arm keeps the EXISTING evidence_invalid discriminant — the fix round narrows blame to a citation the model demonstrably got wrong, it does not abolish it", () => {
+  const r = errorsV7.refusalForEvidenceFailure({ kind: "mislabelled", entries: [{ idx: 2, cited: "invoice.total", actual: "invoice.amount_due" }] });
+  assert.equal(r.code, "CLR21");
+  assert.equal(r.reason, "evidence_invalid", "a NEW token would have forked every downstream consumer for a case that is the same case");
+  assert.equal(
+    r.message.startsWith(refusalFromDbError({ code: "CLR21", detail: '{"reason":"evidence_invalid"}' }).message),
+    true,
+    "the standard evidence_invalid message must LEAD, so a consumer matching on it still matches",
+  );
+  assert.match(r.message, /region_idx 2 is "invoice\.amount_due", not "invoice\.total"/);
+  assert.doesNotMatch(r.message, PURCHASE_WORDS);
+  const hinted = errorsV7.refusalForEvidenceFailure({ kind: "system", reason: "evidence_index_unknown", citedIdx: [9], valid: [{ idx: 1, field_path: "invoice.total" }] });
+  assert.match(hinted.message, /1 \(invoice\.total\)/, "the unknown-index refusal still tells the model what it could have cited");
 });
