@@ -15,6 +15,7 @@ import {
   MAX_FILE_BYTES,
   putIntakeBytes,
   readIntake,
+  recoveryCopy,
 } from "../shared/intake";
 import { supabaseBase } from "../shared/wire";
 
@@ -70,7 +71,14 @@ export function useComposerAttachments(token: string, onNote: (msg: string) => v
         });
         patch(localId, { intakeId: begun.intake_id, state: "uploading", label: "Uploading…" });
         await putIntakeBytes(begun.upload_token, begun.intake_id, file);
-        await finalizeIntake(begun.upload_token, begun.intake_id);
+        // 0051 §2 — the finalize receipt is the ONLY place the recovery door's answer appears,
+        // and this door matters MORE here than on the documents tab: an attachment that reads
+        // "Stored" is about to be submitted into a turn on the understanding that Clara can
+        // read it. If the re-upload was refused (corrupt bytes, a mime mismatch, attempts
+        // spent) the document is stored but will never be read, and the turn would be built on
+        // that misunderstanding. Discarding this body is what made the refusal invisible.
+        const receipt = await finalizeIntake(begun.upload_token, begun.intake_id);
+        const recovery = recoveryCopy(receipt);
         patch(localId, { state: "polling", label: "Verifying…" });
         if (!supabaseBase()) {
           patch(localId, { state: "error", label: "Cannot confirm filing", error: "Set NEXT_PUBLIC_SUPABASE_URL to confirm the intake." });
@@ -82,7 +90,16 @@ export function useComposerAttachments(token: string, onNote: (msg: string) => v
             const label = intakeStatusCopy(row.status, row.failure_code);
             if (row.status === "failed") return patch(localId, { state: "failed", label });
             if (INTAKE_ADOPTED.has(row.status) && row.document_id) {
-              return patch(localId, { state: "ready", documentId: row.document_id, label });
+              // The document really was stored and is a legitimate attachment, so the state
+              // stays 'ready' (marking it failed would be the lie) — but when the recovery door
+              // said something, IT is what the person needs to read, not the generic adoption
+              // copy that implies a fresh read is coming.
+              return patch(localId, {
+                state: "ready",
+                documentId: row.document_id,
+                label: recovery?.label ?? label,
+                error: recovery?.detail ?? null,
+              });
             }
             patch(localId, { state: "polling", label });
           }

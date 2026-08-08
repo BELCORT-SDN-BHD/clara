@@ -178,8 +178,9 @@ test("[0051 §2] the sidecar takes the DOCUMENT's durable identity, never a call
   // verbatim from the TASK ROW, which makes the envelope's `engine` field the ADMISSION-TIME
   // snapshot — the engine under which the attempt was admitted — NOT an assertion about which
   // adapter performed the read. That distinction is pre-existing and pipeline-wide, not this
-  // door's: `task.engineId` has no consumer anywhere except the envelope stamp (egress.mjs:152,
-  // myinvois.mjs:129, structured-worker.mjs:53/92/107) while the reader is always the current
+  // door's: `task.engineId` has no consumer anywhere except the envelope stamp — FIVE stamp
+  // expressions across THREE modules (egress.mjs:152; myinvois.mjs:129; structured-worker.mjs:53,
+  // :92 and :107, the csv/tsv, xlsx and docx arms) — while the reader is always the current
   // image (egress.mjs:161-168), and the ordinary reconciler dispatch hands every queued task
   // its own stored engine_id (reconciler-documents.mjs:163-186) — so a task queued before any
   // deploy and claimed after one has ALWAYS produced an older-labelled envelope. Registered in

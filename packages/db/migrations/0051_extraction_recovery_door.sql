@@ -982,8 +982,9 @@ $tail51_grants$;
 -- (R1) THE ENVELOPE'S `engine` FIELD IS THE ADMISSION-TIME SNAPSHOT, NOT THE READER'S
 -- IDENTITY -- across ANY deploy boundary, and since long before this door existed. Verified:
 -- `task.engineId` has no consumer anywhere in the runtime except the envelope stamp itself --
--- packages/runtime/lib/egress.mjs:152 (ocr), lib/myinvois.mjs:129 (local_facts) and
--- lib/structured-worker.mjs:53/92/107 (structured_parse) -- while the reader is always the
+-- FIVE stamp expressions across THREE modules: packages/runtime/lib/egress.mjs:152 (ocr),
+-- lib/myinvois.mjs:129 (local_facts) and lib/structured-worker.mjs:53, :92 and :107 (the
+-- csv/tsv, xlsx and docx arms of structured_parse) -- while the reader is always the
 -- CURRENT image's adapter (egress.mjs:161-168 calls analyzeLayoutReal directly). And the
 -- ordinary dispatch path feeds every queued task its own stored engine_id:
 -- lib/reconciler-documents.mjs:163-186 selects `t.engine_id` and puts it in the meta the
