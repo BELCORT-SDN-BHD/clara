@@ -261,7 +261,9 @@ reached the books unchallenged. X7 supplies the missing second reader.
     a correct typed name.
   - **R6-2 the POSITIVE name-shape class** replaces colon enumeration as the wall. A candidate may
     contain only what a registered name may contain — cased letters, `\p{Lo}` (CJK et al.), digits,
-    space and a justified punctuation set (`& . , ' ( ) - / @`). **`\p{Lm}` is excluded on
+    space and a justified punctuation set (`& . , ' ( ) - /`, plus the curly/modifier apostrophe
+    renderings; `@` was listed in the round-6 draft and **dropped** in the same round — see R6-B
+    below). **`\p{Lm}` is excluded on
     purpose:** the colon lookalikes live there (`U+02D0` is a *letter* by category), so a naive
     `\p{L}` class would have admitted the very glyph that leaked. `COLON_CLASS` becomes
     defence-in-depth; its upgrade path (derive from Unicode category + confusables data rather

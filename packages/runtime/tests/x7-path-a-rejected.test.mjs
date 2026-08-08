@@ -26,6 +26,10 @@ test("path (A) FAILS the decision rule — closes the 5, but loses legitimate na
   // The half it PASSES: every end-to-end leak closes.
   assert.equal(t.e2eClosed, 5, "5/5 end-to-end leaks closed");
   assert.equal(t.e2eTotal, 5);
+  // …and the constructed-corpus row of the contract table, which this file's header claims to
+  // assert in full. Without it the "19 of the 23" figure was documented but never checked.
+  assert.equal(t.constructedClosed, 19, "19 of the constructed forms closed");
+  assert.equal(t.constructedCandidates, 23, "…out of 23 that pass shipped candidacy");
   // The half it FAILS: the rule required ZERO legitimate loss.
   const lost = [...t.lostAllCaps, ...t.lostTitleCase, ...t.lostLowercase];
   assert.ok(lost.length > 0, "the decision rule required zero legitimate-name loss");
