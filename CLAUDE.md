@@ -11,7 +11,7 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 | Need | Source of truth |
 |---|---|
-| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-060 onward**, PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
+| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-065 onward** (next: the Wave E contract), PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059**, **060–064** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
 | Live CODE structure (functions, callers, routes) | **codebase-memory graph — query it, don't grep** (`get_architecture` / `search_graph` / `trace_path`; re-index after big changes) |
 | What / why / scope · product invariants (LAW) | `docs/prd/PRD.md` |
 | Target architecture (event spine, structural invariants, runtime, reporting) | `docs/architecture/ARCHITECTURE.md` |
@@ -140,7 +140,12 @@ autopost (ADR-050) · **C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliati
 exactly 0, nine real RPR months chained to the sen) · **D-a** FA register (0041) · **D-b**
 adjustments + advances + AF-2 + producer as a four-slice split (0042/0043/0044/0045).
 
-**LIVE POSTURE: 46 migrations (frontier `0047`) · Fly `clara-runtime` **v57** ·
+**LIVE POSTURE: 49 migrations (frontier `0050`) · Fly `clara-runtime` **v58** (2026-08-07 night:
+the post-close fix train `0048` F5-cap + `0049` direction-abstains (+ the generic
+`clara.migration_receipts` ceremony channel, receipt id 1) + `0050` F4-egress (DB + runtime
+halves — the release/re-hold storm is dead) deployed in ONE ceremony on positive reads; the
+BEE/RP identifier seed live — 4 ssm rows; ceremony-recipe fact: Supavisor drops PGOPTIONS, an
+armed seed's confirm GUC is SET in-session) ·
 **§7-A CLOSED (ADR-064, 2026-08-07)** — the sandbox posted UNATTENDED (five ocr_sales posts,
 two rule ids; nine-controls battery complete — eight tokens SEEN incl. a wild-caught
 `floor_lost`, four documented NOT-REACHABLE; floor `floor_met` TRUE 6/6/6/85, TB
@@ -210,8 +215,7 @@ ADR-063) · skeleton `wave-7a-design-skeleton.md` v2 · ACCEPTANCE (as-run, evid
 FA tie, the depreciation close gate, MPERS presentation wording, **the consolidated
 client-facts inputs — the F-1 allocation-date guard · entity_type surfacing · the MSIC
 capture door** — and the §7-A carry-ins: the settlement-corroboration door, the owner UX-debt
-list, the third-reader #25) · the **F6–F9 fix batch** (tasks #31–34) · **PRs #209/#210/#211 →
-review → merge → ONE deploy ceremony** (`0048` + runtime vNext) · Gate P + Gate S both
+list, the third-reader #25) · the **F6–F9 fix batch** (tasks #31–34) · Gate P + Gate S both
 **operating runway** (first native-MYR SST-stated bill / first real e-invoice XML) · the
 extraction-recovery door (**now F6/#31's**) + FX-lite prioritization (ADR-062 registrations) ·
 the `opening_tb.line` producer + K-doc door (Phase 5, review-gated) · the fifth-lex

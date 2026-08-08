@@ -318,8 +318,27 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > native-MYR SST-stated bill / first real e-invoice XML). **Three structural gaps registered
 > from walls working correctly:** the MSIC commit gate (→ Wave E client-facts) · the missing
 > extraction-recovery door · the FX wall (+ the FX-lite prioritization question for E/F
-> planning). The first local DR round-trip drill PASSED (DR.md §9). **NEXT: the §7-A build
-> session (grill `wave-7a-design-skeleton.md` §6 FIRST) → then Wave E opens.**
+> planning). The first local DR round-trip drill PASSED (DR.md §9). *(The §7-A build followed —
+> next block.)*
+
+> **STATUS (2026-08-07 — §7-A CLOSED, ADR-063/064 + the fix train deployed): the unattended
+> sales drafter is BUILT, ACCEPTED on the two-halves acceptance, and LIVE.** Grilled to nine
+> rulings (`wave-7a-contract.md`, 7A-R1..R12) · built as three PRs through the full ladder ·
+> one quiesce ceremony (`0046` + v56, sandbox flip) · **Half 2:** five unattended `ocr_sales`
+> posts in the sandbox, the nine-controls receipt battery 100% (a wild-caught `floor_lost`;
+> four documented not-reachable), the F1 settle-guard race found by acceptance and fixed live
+> (`0047` + v57) · **Half 1:** ROME SECRETARY's 22 REAL invoices — 21 drafted unattended,
+> 19 approved (TB 915,000 → **3,056,500/3,056,500¢** to the sen), 10 customers born NAME-ONLY
+> (the enrichment trap is a standing ops note), the KONG CHENG pair + FINCARE held on findings.
+> **Findings F6–F9 minted → ONE Wave-E-adjacent fix batch** (extraction-failure recovery ·
+> Attn-line anchoring · CLR23 remedy gap · cite-regions-by-index). **The post-close fix train
+> merged AND deployed the same night:** `0048` (F5 sweep-cap own-run) · `0049` (zero-evidence
+> direction ABSTAINS; `clara.migration_receipts` born; `migrate.mjs` now prints notices) ·
+> `0050` (F4 egress-release consent re-derivation + the runtime's DB-verdict-authoritative
+> reconciler — the release/re-hold storm is dead). **LIVE: 49 migrations (frontier `0050`) ·
+> runtime v58 · the BEE/RP identifier seed landed (4 ssm rows). NEXT: the Wave E grill**
+> (agenda in PROJECTLOG PART 2 — periods + statements + the F6–F9 batch + the
+> settlement-corroboration door + the third-reader question + the owner's UX-debt list).
 
 **Wave A — the daily loop** *(**CLOSED**, ADR-022..030 — incl. A2 / A2.1)*. Coding with **intrinsic side-effects** (composed inside `approve_entry` / `_subledger_on_approve` as built; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding** *(**CLOSED on intent**, ADR-044..046)*. The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
