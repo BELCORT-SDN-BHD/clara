@@ -333,14 +333,34 @@ export async function readyFiling(sub, { client, amount = 500000, vendorName = "
 
 /** Draft an AP supplier bill on a cited doc via the wake ceiling (agent-made draft:
  *  last_human_editor NULL). `sub` (the firm owner) authors the resolution the wake
- *  draft binds to. Returns the draft receipt {entry_id, revision_token}. */
-export async function wakeBillDraft(sub, cred, { client, cited, amount = 500000, vendorName = "DRAFTCO SDN BHD", registration = "201801001000", opKey = null }) {
+ *  draft binds to. Returns the draft receipt {entry_id, revision_token}.
+ *
+ *  TWO KNOWN DIVERGENCES FROM PRODUCTION, both deliberate defaults, both documented here
+ *  because a fixture that quietly differs from the real caller can make a cell prove the
+ *  opposite of what it claims:
+ *
+ *  1. `coding` DEFAULTS TO NULL, so NO clara.coding_attempts row is written. Production's
+ *     autodraft lane DOES pass one -- autoDraft.v6.tools.ts:193 builds
+ *     `{ task_id: ctx.taskId, part_payload }` and hands it to wake_draft_entry -- and the
+ *     live clara._draft_entry_core admits it for kind='autodraft' as well as 'chat_turn'.
+ *     coding_attempts is the ONLY task->entry identity link in the schema
+ *     (uq_coding_attempts_task / uq_coding_attempts_entry), so a cell that needs to reason
+ *     about "the entry THIS task produced" must pass `coding` or it is testing a shape
+ *     production never emits. Opt in rather than changed by default: every pre-existing
+ *     caller keeps its current behaviour.
+ *  2. `opKey` DEFAULTS TO A FILING-KEYED value (`code-doc:<filing>:<document>`), whereas
+ *     production's key is task-keyed. The consequence is real: two drafts on the SAME filing
+ *     through this fixture replay the first op receipt and hand back the OLD entry id unless
+ *     the caller passes its own key. Documented, not changed -- existing cells depend on the
+ *     current default. (Reported by the §7-A F8 review.) */
+export async function wakeBillDraft(sub, cred, { client, cited, amount = 500000, vendorName = "DRAFTCO SDN BHD", registration = "201801001000", opKey = null, coding = null }) {
   const res = await freshResolution(sub, client, { subjectKind: "document", subjectId: cited.documentId });
   return wakeDraftEntry(cred, {
     client, resolution: res, lines: billLines(EXP, AP, amount),
     document: cited.documentId, sha256: cited.sha256,
     vendor: { new: { name: vendorName, registration_no: registration } },
     evidence: [ev(cited.regionId, cited.quote, FIELD.total)], codingKind: CODING_KIND,
+    coding,
     opKey: opKey ?? `code-doc:${cited.filingId}:${cited.documentId}`,
   });
 }

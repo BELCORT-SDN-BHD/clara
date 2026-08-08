@@ -58,67 +58,140 @@
 -- filing the moment the old one is withdrawn. The registry gate sitting ABOVE it never healed.
 -- The two layers disagreed, and only the upper one was reachable from the unattended lane.
 --
--- WHAT STAYS 'already_done' -- FOUR CASES, EACH DELIBERATE:
---   * the entry is STILL A DRAFT           -- the work genuinely exists and is standing.
---   * the entry is APPROVED, NOT REVERSED  -- the work exists and is in the books.
---   * the entry was APPROVED then REVERSED -- REVERSAL IS NOT WITHDRAWAL, and the difference
---       is not cosmetic. A reversal means the work HAPPENED and was formally undone in the
---       books, leaving two posted entries and an audit trail; deciding to re-draft after that
---       is a human accounting judgement about a booked event, not an unattended retry of an
---       attempt that produced nothing. It keeps refusing, and the human keeps the chat and
---       hand-draft lanes. Recorded here as a deliberate boundary so a later reader does not
---       "fix" it as an oversight.
---   * NO ENTRY AT ALL for the filing       -- absence is not evidence (CLAUDE.md law 2). A
---       registry row whose task completed but whose filing carries no journal_entries row at
---       all is a shape this file cannot explain; it falls through to the refusal, never to
---       the re-admit.
+-- WHAT STAYS 'already_done' -- FIVE CASES, EACH DELIBERATE:
+--   * the task's entry is STILL A DRAFT       -- the work genuinely exists and is standing.
+--   * the task's entry is APPROVED, NOT REVERSED -- the work exists and is in the books.
+--   * the filing has EVER BEEN REVERSED       -- REVERSAL IS NOT WITHDRAWAL, and the
+--       difference is not cosmetic. A reversal means the work HAPPENED and was formally undone
+--       in the books, leaving two posted entries and an audit trail; deciding to re-draft
+--       after that is a human accounting judgement about a booked event, not an unattended
+--       retry of an attempt that produced nothing. This holds even when the task's OWN entry
+--       was withdrawn and the reversal belongs to a different entry on the same filing -- the
+--       conjunction of the two histories was a real defect in this file's first cut, found by
+--       the cross-model review and pinned by a cell. The human keeps the chat and hand-draft
+--       lanes. Recorded as a deliberate boundary so a later reader does not "fix" it.
+--   * the task DRAFTED NOTHING (no coding_attempts row) -- absence is not evidence
+--       (CLAUDE.md law 2). A completed task with no entry of its own cannot have had one
+--       withdrawn, whatever else the filing's history contains.
+--   * a LIVE entry exists on the filing from any other cycle -- the filing is coded.
+--   * THE CALL DID NOT COME FROM A HUMAN (p_origin<>'one_click') -- see the next block.
 --
 -- =====================================================================================
--- HOW "THE ENTRY WAS WITHDRAWN" IS PROVEN -- LAW 2, IN BOTH DIRECTIONS
+-- THE ORIGIN GATE: A WITHDRAWAL IS STICKY AGAINST AUTOMATION
 -- =====================================================================================
--- clara.autodraft_attempts has NO entry_id column (0011:699-726, widened only by 0046:531-533
--- with direction/backfill_batch_id), so the registry cannot point at the entry directly. The
--- only sound join is filing_id equality against clara.journal_entries -- and it IS sound, for
--- a measured reason rather than a hopeful one: uq_journal_entries_one_open_draft_filing plus
--- clara._draft_entry_core's own double_coded guard (0009:1244-1250, "active filing is already
--- coded", checked as status='approved' and reversed_by is null) together bound a filing to at
--- most ONE live entry at a time. Both are asserted POSITIVELY in the prestate below; if either
--- is gone, this migration refuses rather than re-deriving the argument silently.
+-- THE ARM FIRES ONLY FOR p_origin='one_click'. This is not a scope narrowing bolted on; it
+-- is the recorded ruling's scope read correctly. CLR23's remedy is addressed to the HUMAN it
+-- just refused, and all nine H1 redraft rows were humans acting deliberately.
 --
--- THE BRANCH ASKS THREE QUESTIONS, NOT ONE, and each is a POSITIVE read:
---   (1) EXISTS a 'withdrawn' entry for this filing        -- the positive evidence itself.
---   (2) NOT EXISTS a 'draft' entry for this filing        -- no standing draft.
---   (3) NOT EXISTS an 'approved' entry with reversed_by null -- nothing live in the books,
---       mirroring the double_coded predicate EXACTLY so admission and the draft writer agree
---       by construction rather than by parallel maintenance.
--- (1) alone would not be enough: a filing could carry a withdrawn entry from an earlier cycle
--- AND a live one from a later one. All three must hold.
+-- WHAT THE GATE PREVENTS, measured rather than imagined. The estate-wide catch-up sweep runs
+-- unattended every CLARA_AUTODRAFT_CATCHUP_SECONDS (default 300) and passes p_origin='sweep';
+-- so does the per-document dispatcher (packages/runtime/lib/autodraft.mjs -- both call sites,
+-- and startWorld.ts wires the loop live). clara.list_autodraft_candidates enumerates exactly
+-- the no-live-entry state a withdrawal creates. Without this gate, the first sweep after a
+-- human withdrew a draft would re-admit that filing, redraft it unattended, and -- where a
+-- matching autopost rule is live -- see it approved again within ~100ms. The human's explicit
+-- rejection would be silently undone by a background loop. The already_done short-circuit was,
+-- unnamed and unintentionally, the thing that made a withdrawal STICK; this file must not
+-- remove that property while fixing the door it also blocked.
+--
+-- SO THE PROPERTY IS NOW NAMED AND DELIBERATE: a withdrawal is sticky against automation.
+-- Only a human act -- clara.request_autodraft, the SOLE producer of p_origin='one_click',
+-- under _human_ctx(role_rank('bookkeeper')) and granted to clara_authenticated only -- can
+-- re-invite the unattended lane onto a filing the human just emptied. The prestate below
+-- PROVES that producer set is exactly {clara.request_autodraft} by censusing pg_proc for the
+-- literal, rather than trusting this paragraph; if a second producer ever appears, or if that
+-- one loses its human floor or gains a machine grant, this migration refuses.
+--
+-- ROADMAP, NOT BUILT HERE: a sweep-side "counterparty landscape refreshed, re-offer this
+-- filing" behaviour is a genuinely different AUTONOMY CLASS -- the machine deciding to redo
+-- work a human rejected -- and needs its own owner ruling before anything is built. Recorded
+-- so a later reader sees the sweep's already_done as a decision, not an oversight.
+--
+-- THE GATE AND THE TASK-ENTRY IDENTITY TEST ARE INDEPENDENT, AND BOTH ARE REQUIRED. The gate
+-- decides WHO may re-open the door; the coding_attempts test decides WHETHER this task's own
+-- work was actually withdrawn. Neither substitutes for the other: a human calling on a filing
+-- whose task drafted nothing must still refuse, and a sweep calling on a genuinely withdrawn
+-- task's filing must still refuse.
+--
+-- =====================================================================================
+-- INHERITED FROM 0034, REGISTERED, NOT CHANGED HERE
+-- =====================================================================================
+-- The refund/reset block below is a VERBATIM copy of 0034's supersede branch, and it inherits
+-- two of that branch's properties unchanged. Both are recorded for the open register rather
+-- than altered here, because changing them would change 0034's live behaviour too -- a
+-- separate decision with its own blast radius:
+--   * ORDERING: the settled op-receipt is deleted BEFORE the lane/budget checks that may then
+--     refuse the re-admission, so a re-admission that is subsequently refused has already
+--     removed the prior receipt. (0034's own x34.f cell pins the token accounting across
+--     exactly that path; the receipt's disappearance is the inherited part.)
+--   * SALES BACKFILL SLOT: a re-admission that reaches the sales branch consumes a
+--     sales_backfill_batches slot exactly as a fresh admission does.
+--
+-- =====================================================================================
+-- HOW "THE ENTRY WAS WITHDRAWN" IS PROVEN -- LAW 3 (READ THE THING), THEN LAW 2
+-- =====================================================================================
+-- THE IDENTITY LINK EXISTS, AND THIS BRANCH READS IT. An earlier cut of this migration
+-- reasoned that clara.autodraft_attempts has no entry_id column (true -- 0011:699-726,
+-- widened only by 0046:531-533) and therefore that the entry could only be reached by
+-- FILING. That was wrong, and the cross-model review caught it: clara.coding_attempts
+-- (0009:961-986) maps a task to its entry EXACTLY once --
+--     constraint uq_coding_attempts_task  unique (task_id)
+--     constraint uq_coding_attempts_entry unique (entry_id)
+--     fk_coding_attempts_task  (task_id, firm_id, client_id) -> clara.agent_tasks
+--     fk_coding_attempts_entry (entry_id, firm_id, client_id) -> clara.journal_entries
+-- -- and no later migration alters it (grepped; and the prestate below re-reads both unique
+-- constraints from pg_constraint rather than trusting this comment). Reading the FILING's
+-- entry population was reading a PROJECTION of "the entry this task produced"; reading
+-- coding_attempts reads the THING. CLAUDE.md law 3, applied to this file's own first draft.
+--
+-- THE BRANCH ASKS FOUR QUESTIONS, and each is a POSITIVE read:
+--   (1) EXISTS: THIS TASK'S OWN entry, resolved through coding_attempts, is 'withdrawn'
+--       (firm-scoped on both hops). This is the positive evidence, and it is now about the
+--       work THIS registry row represents -- not about anything else that ever happened to
+--       the filing.
+--   (2) NOT EXISTS a 'draft' entry for the filing        -- no standing draft to collide with.
+--   (3) NOT EXISTS an 'approved' entry with reversed_by null -- the filing is not coded.
+--       Mirrors clara._draft_entry_core's double_coded predicate (0009:1244-1250) EXACTLY,
+--       so admission and the draft writer agree by construction, not by parallel maintenance.
+--   (4) NOT EXISTS any entry for the filing with reversed_by NOT NULL -- a filing that has
+--       EVER been reversed stays a human decision, permanently. See the next block.
+--
+-- WHAT (1) BUYS THAT A FILING-WIDE READ DID NOT. A completed task that drafted NOTHING (a
+-- 'skipped_lane' settlement) has NO coding_attempts row at all, so (1) is false and the arm
+-- cannot fire -- absence is not evidence. Under the old filing-wide predicate, any historical
+-- withdrawn row on that filing would have acted as a PERMANENT re-admission permit: every
+-- later no-draft completion would have re-entered the arm, deleted the settled receipt and
+-- reserved again, repeatably. That loop is gone by construction, not by a guard.
+--
+-- WHY (4) IS SEPARATE FROM (3), AND WHY THE MIRROR CANNOT SUPPLY IT. (3) asks "is anything
+-- live in the books"; (4) asks "did this filing ever have something in the books that a human
+-- formally undid". They are different questions and the conjunction of the two HISTORIES is
+-- what makes (4) necessary: an entry that was approved and then reversed keeps status
+-- 'approved' with reversed_by set (0003:97-99), so (3) passes it -- and clara.reverse_entry's
+-- MIRROR is inserted WITHOUT a filing_id (0009:1715-1721, read: the insert's column list has
+-- no filing_id), so the mirror is invisible to every filing-scoped read here. With only
+-- (1)-(3), a filing carrying a withdrawn entry AND a later approved-then-reversed one passed
+-- all three and re-admitted -- exactly the case this file's own header calls a human
+-- accounting decision. (4) therefore reads ORIGINALS only, which is precisely right: the
+-- original is where reversed_by lives.
 --
 -- THE SCOPING DIRECTIONS ARE CHOSEN SO EVERY ERROR IS A REFUSAL. The POSITIVE read (1) is
--- additionally scoped by firm_id -- a stricter predicate, so a mis-scope makes it fail to
--- fire (refuse). The two NEGATIVE reads (2) and (3) are deliberately NOT firm-scoped -- a
--- broader predicate, so a mis-scope makes them find MORE reasons to refuse, never fewer.
--- (2) is also deliberately blind to is_opening_balance, which the unique index exempts: this
--- predicate is strictly stricter than the index, again in the refusing direction.
+-- firm-scoped on BOTH hops -- a stricter predicate, so a mis-scope makes it fail to fire
+-- (refuse). The NEGATIVE reads (2), (3) and (4) are deliberately NOT firm-scoped -- broader
+-- predicates, so a mis-scope makes them find MORE reasons to refuse, never fewer. (2) is
+-- also deliberately blind to is_opening_balance, which the unique index exempts: strictly
+-- stricter than the index, again in the refusing direction.
 --
--- THE BRANCH KEYS ON THE FILING'S STATE, NOT ON A LINK FROM THIS TASK TO THAT ENTRY -- and
--- that is a real, deliberate widening beyond the narrow F8 story, named here rather than
--- left for a reviewer to find. The registry has no entry_id, so no such link exists to read.
--- The consequence: a filing whose autodraft attempt completed WITHOUT drafting (settled
--- 'skipped_lane') and whose separately-authored draft was later withdrawn also re-admits.
--- That is safe and, on inspection, right: the filing genuinely has no live entry, a human
--- withdrawal is the same explicit "redo this" signal in either case, and the lane check
--- immediately below still decides whether the filing is codeable at all. What the branch
--- must never do is re-admit a filing that IS coded, and predicates (2) and (3) are what
--- prevent that -- reduction-tested, see the CELLS note below.
---
--- LOCKS: THE BRANCH ADDS NONE. Its three reads are plain SELECTs (ACCESS SHARE on
--- clara.journal_entries only -- no FOR UPDATE, no row locks), so they cannot participate in
--- a lock cycle. Its refund block is byte-identical to the retry path 0046's canonical
--- lock-order comment already enumerates ("RETRY WITH REFUND": advisory 202991617, then
--- firm_usage_daily, then autodraft_attempts by filing_id, then the filing-keyed op_receipts
--- row), so that enumeration stays accurate with this branch as a second entrance to the same
--- path. Stated explicitly because 0046 paid for that invariant with two live deadlocks.
+-- LOCKS: THE BRANCH ADDS NONE. Its four reads are plain SELECTs (ACCESS SHARE on
+-- clara.journal_entries and clara.coding_attempts -- no FOR UPDATE, no row locks), so they
+-- cannot participate in a lock cycle. Every path into the arm is already behind the same
+-- `document_filings ... FOR UPDATE` the whole function takes, which is what serializes two
+-- concurrent admissions on one filing. Its refund block is byte-identical to the retry path
+-- 0046's canonical lock-order comment already enumerates ("RETRY WITH REFUND": advisory
+-- 202991617, then firm_usage_daily, then autodraft_attempts by filing_id, then the
+-- filing-keyed op_receipts row), so that enumeration stays accurate with this branch as a
+-- second entrance to the same path. Stated explicitly because 0046 paid for that invariant
+-- with two live deadlocks.
 --
 -- =====================================================================================
 -- THE NEW OUTCOME TOKEN, AND WHY IT IS A NEW ONE
@@ -169,10 +242,20 @@
 -- FIX (b): THE CLR23 MESSAGE NOW NAMES THE REAL DOORS
 -- =====================================================================================
 -- The remedy text is reworded to name the doors that actually exist, and stays short. The
--- errcode stays CLR23 and nothing else about the refusal changes. With fix (a) shipped the
--- autodraft door genuinely re-opens for a withdrawn filing, so the message can name it
--- truthfully -- and it still names the chat and hand-draft lanes, because those remain the
--- doors for the cases fix (a) deliberately does NOT re-admit (a reversed entry, above).
+-- errcode stays CLR23 and nothing else about the refusal changes.
+--
+-- IT PROMISES NOTHING IT CANNOT KEEP. An earlier cut said a withdrawn filing "re-admits
+-- through the autodraft door" -- an unconditional claim the same call can still refuse:
+-- refused_attempts (a parked registry), lane_changed (consent revoked, lane not ready),
+-- skipped_direction, refused_budget, and now also a non-human origin. The wording is
+-- therefore CONDITIONAL and names the gates: a bookkeeper CAN ASK, subject to the usual
+-- lane/consent/budget/attempt gates. A refusal message that oversells its own remedy is the
+-- same class of defect as F8 itself, one level up.
+--
+-- IT ALSO CANNOT PRESUPPOSE A FILING. This refusal fires for ANY entry carrying a proposed
+-- counterparty -- including chat and adjustment drafts whose filing_id IS NULL, where a
+-- phrase like "the withdrawn filing" names nothing. The wording avoids that noun entirely
+-- and reads correctly for a filing-less draft.
 -- packages/db/tests/x35-drafting-trio.test.mjs:112-116 asserts this message by EXACT equality
 -- and is updated in the same change. apps/dashboard was swept for an echo of the DB text:
 -- there is none (its only CLR23 copy, partCatalog.ts:90, is a different refusal entirely --
@@ -230,11 +313,34 @@
 --          draft (an independent backstop), but the refusal is MISNAMED 'lane_changed' and
 --          the branch's side effects have already DELETED the filing's settled admission
 --          receipt (measured 1 -> 0). Both are asserted.
---   x34.c  UNMODIFIED, and it is the fourth contrast: it settles 'skipped_lane' with no
---          entry, so its filing carries NO journal_entries row at all -- the "absence is not
---          evidence" case, which must keep refusing.
+--   x34.c  UNMODIFIED, and it doubles as a conjunct-1 cell: it settles 'skipped_lane' with no
+--          entry at all -- the "absence is not evidence" case.
+--   x34.k  the ORIGIN GATE, both directions on ONE state: sweep -> already_done (receipt
+--          untouched), human one_click -> re_admitted_after_withdrawal.
+--   x34.l  the filing was EVER reversed -> refuse, even though this task's own entry was
+--          withdrawn and nothing is live.
+--   x34.m  the REFUND path with a genuinely OUTSTANDING reservation dated in the PAST --
+--          released against ITS OWN (firm, usage_date) while the new reservation lands on
+--          today, so a wrong-day regression shows as two wrong numbers, not one net zero.
+--   x34.n  a STANDING draft refuses. x34.o a task that DRAFTED NOTHING refuses however many
+--          withdrawn rows the filing carries. x34.p a LIVE approved entry refuses.
+--
+-- EVERY CONJUNCT HAS A CELL, PROVEN BY REDUCTION rather than asserted. The harness strips one
+-- conjunct at a time on a copy of the rig and re-runs the battery:
+--     0 origin gate -> x34.k · 1 task's own entry withdrawn -> x34.c, x34.o ·
+--     2 no standing draft -> x34.n · 3 nothing live -> x34.p · 4 never reversed -> x34.l
+-- It earned its cost twice: it reported conjunct 3 as UNTESTED (x34.j reaches its refusal
+-- through conjunct 1, shadowing it) which is why x34.p exists, and an earlier build had no
+-- cell for conjunct 2 at all.
 --   packages/db/tests/x35-drafting-trio.test.mjs -- x35.a's exact-equality message assertion,
---     updated to the new remedy text.
+--     updated to the reworded remedy.
+--   packages/db/tests/wave-a-fixtures.mjs -- wakeBillDraft gains an OPT-IN `coding` passthrough
+--     (default unchanged) and documents two divergences from production that this work hit:
+--     the missing coding payload (so no coding_attempts row -- the very link this arm reads)
+--     and the filing-keyed op_key default. A fixture that quietly differs from the real caller
+--     can make a cell prove the opposite of what it claims: MEASURED, with the default, 16
+--     autodraft tasks in this battery produced ZERO coding_attempts rows, which briefly looked
+--     like evidence that the identity link did not exist for this task kind.
 --   packages/runtime/tests/wave-a-autodraft-consumer.test.mjs -- admissionNeedsStart pins all
 --     three enqueueing tokens, still refuses every no-op/refusal outcome (including
 --     'already_done'), and adds near-miss spellings so no loose substring test can pass.
@@ -259,9 +365,81 @@ create temp table _x53_pre(
   owner   text    not null
 ) on commit drop;
 
+-- ---------------------------------------------------------------------------------------
+-- THE CODE-ONLY VIEW OF A BODY. Every marker census below counts in THIS projection, not in
+-- raw source, unless the marker is deliberately a COMMENT (only the [0053 / F8] placement
+-- anchor is). The distinction is load-bearing and was measured, not assumed: in the live
+-- body `or (p_origin='sweep' and p_run_id is null)` occurs TWICE raw but ONCE in code (0048's
+-- installed comment quotes the guard beside it), and `bank_rule_suggested` occurs twice raw
+-- but once in code (0040's comment names its own stamp). A raw census is therefore satisfiable
+-- by PROSE: a future body could keep every named substring in a comment while changing the
+-- executable region underneath, and this migration would harvest and re-bless it. Counting
+-- code closes that.
+--
+-- THE STRIPPER IS THE HOUSE IDIOM (0037's tail, 0047 §1's rationale), not the 0042 lexer: it
+-- is a naive comment strip plus a whitespace fold, so it would mis-handle a `--` INSIDE a
+-- string literal. That is why §2's reworded CLR23 message deliberately carries no `--`
+-- sequence, and why this note sits next to the instrument rather than far from it.
+create or replace function pg_temp._x53_code(p_src text) returns text
+  language sql immutable as $code$
+  select lower(regexp_replace(regexp_replace(regexp_replace(
+           coalesce(p_src,''), '/\*[\s\S]*?\*/', '', 'g'), '--[^\n]*', '', 'g'), '\s+', ' ', 'g'))
+$code$;
+grant execute on function pg_temp._x53_code(text) to clara_fn_owner;
+
+-- ---------------------------------------------------------------------------------------
+-- (0.A) THE ORIGIN GATE'S MEANING, PROVEN FROM THE CATALOG -- IN ITS OWN BLOCK, DELIBERATELY.
+--
+-- The arm fires only for p_origin='one_click', and that is load-bearing ONLY because
+-- 'one_click' means "a human bookkeeper asked". Censused rather than asserted: exactly ONE
+-- clara function other than admit_autodraft_task itself (which merely validates/branches on
+-- the literal) may produce it, it must carry the human context floor, and it must not be
+-- reachable by any machine role. A second producer, a lost floor, or a machine grant would
+-- silently turn the gate into decoration -- so each is a refusal.
+--
+-- WHY IT IS A SEPARATE BLOCK: this census names the EXECUTE privilege, and
+-- scripts/check-wiki-dynamic-sql.mjs classifies any `do` block that both reads a body with
+-- pg_get_functiondef AND contains the token `execute` as a change-of-record patch whose
+-- dynamic statement it must be able to reconstruct. That gate is fail-closed by design and it
+-- is RIGHT to be; the honest fix is to keep the privilege census away from the block that
+-- harvests bodies, not to weaken the gate or spell the privilege evasively.
+-- ---------------------------------------------------------------------------------------
+do $origin_gate$
+declare v_n int; v_src text;
+begin
+  select count(*) into v_n from pg_proc p
+    where p.pronamespace = 'clara'::regnamespace
+      and coalesce(p.prosrc,'') like '%''one_click''%'
+      and p.proname <> 'admit_autodraft_task';
+  if v_n <> 1 then
+    raise exception '0053 prestate: expected exactly ONE clara function to produce p_origin=''one_click'' (clara.request_autodraft), found % (%) -- the origin gate would no longer mean "a human asked"',
+      v_n,
+      (select coalesce(string_agg(p.oid::regprocedure::text, ', '),'<none>') from pg_proc p
+        where p.pronamespace='clara'::regnamespace and coalesce(p.prosrc,'') like '%''one_click''%'
+          and p.proname <> 'admit_autodraft_task')
+      using errcode = 'CLR10';
+  end if;
+  select prosrc into v_src from pg_proc
+    where pronamespace = 'clara'::regnamespace and proname = 'request_autodraft' order by oid limit 1;
+  if v_src is null or position('clara._human_ctx(clara.role_rank(''bookkeeper''))' in v_src) = 0 then
+    raise exception '0053 prestate: clara.request_autodraft no longer opens with the bookkeeper human-context floor -- p_origin=''one_click'' would stop meaning "a human asked" and the origin gate would be decoration'
+      using errcode = 'CLR10';
+  end if;
+  select count(*) into v_n from pg_proc p, aclexplode(p.proacl) ae
+    where p.pronamespace = 'clara'::regnamespace and p.proname = 'request_autodraft'
+      and ae.privilege_type = 'EXECUTE'
+      and ae.grantee::regrole::text not in ('clara_fn_owner','clara_authenticated');
+  if v_n <> 0 then
+    raise exception '0053 prestate: clara.request_autodraft is executable by % role(s) beyond clara_fn_owner/clara_authenticated -- a machine lane could reach the one_click origin and the withdrawal would stop being sticky against automation', v_n
+      using errcode = 'CLR10';
+  end if;
+  raise notice '0053 prestate (0.A): the origin gate means "a human asked" -- clara.request_autodraft is the sole one_click producer, bookkeeper-floored, and executable only by clara_authenticated';
+end
+$origin_gate$;
+
 do $prestate$
 declare
-  v_n int; v_def text; v_count int;
+  v_n int; v_def text; v_code text; v_count int;
   v_secdef boolean; v_config text; v_acl text; v_owner text;
   v_first int; v_second int; v_lock int;
   r record;
@@ -297,6 +475,30 @@ begin
         where schemaname='clara' and indexname='uq_journal_entries_one_open_draft_filing')
       using errcode = 'CLR10';
   end if;
+
+  -- (0.2a-bis) THE TASK->ENTRY IDENTITY LINK. The arm's POSITIVE evidence resolves the
+  -- completed task's OWN entry through clara.coding_attempts. That is only an identity read
+  -- if the mapping is unique in both directions and firm-scoped on both hops -- so both
+  -- unique constraints and the two composite FKs are read from pg_constraint here. If any is
+  -- gone, the arm would be reading a set rather than a thing and this file refuses.
+  for r in select * from (values
+      ('uq_coding_attempts_task',  'UNIQUE (task_id)'),
+      ('uq_coding_attempts_entry', 'UNIQUE (entry_id)'),
+      ('fk_coding_attempts_task',  'FOREIGN KEY (task_id, firm_id, client_id) REFERENCES clara.agent_tasks(id, firm_id, client_id)'),
+      ('fk_coding_attempts_entry', 'FOREIGN KEY (entry_id, firm_id, client_id) REFERENCES clara.journal_entries(id, firm_id, client_id)')
+    ) as t(cname, cdef)
+  loop
+    select count(*) into v_n from pg_constraint
+      where conrelid = 'clara.coding_attempts'::regclass and conname = r.cname
+        and pg_get_constraintdef(oid) = r.cdef;
+    if v_n <> 1 then
+      raise exception '0053 prestate: clara.coding_attempts.% is not the pinned shape "%" (found: %) -- the task->entry identity link the re-admit arm reads is not what this migration was authored against',
+        r.cname, r.cdef,
+        (select coalesce(pg_get_constraintdef(oid),'<absent>') from pg_constraint
+          where conrelid='clara.coding_attempts'::regclass and conname=r.cname)
+        using errcode = 'CLR10';
+    end if;
+  end loop;
 
   -- (0.2b) THE DOUBLE_CODED GUARD -- one approved-and-unreversed entry per filing. The new
   -- branch's third predicate MIRRORS this one exactly; reading it here proves the mirror has
@@ -345,6 +547,28 @@ begin
       using errcode = 'CLR10';
   end if;
 
+  -- (0.2e) THE REVERSAL SHAPE PREDICATE (4) DEPENDS ON. Two facts, both read positively:
+  -- clara.reverse_entry stamps reversed_by on the ORIGINAL, and inserts its MIRROR with NO
+  -- filing_id -- which is exactly why (4) must read originals and why the mirror can never
+  -- supply the evidence. If the mirror ever starts carrying a filing_id, (3) would begin
+  -- catching these cases and (4)'s rationale (though not its safety) changes; if reversed_by
+  -- stops being stamped, (4) goes blind. Either way this file's argument is stale.
+  select prosrc into v_def from pg_proc
+    where pronamespace = 'clara'::regnamespace and proname = 'reverse_entry' order by oid limit 1;
+  if v_def is null then
+    raise exception '0053 prestate: clara.reverse_entry is gone' using errcode = 'CLR10';
+  end if;
+  if position('set reversed_by=' in v_def) = 0 and position('reversed_by=v_mirror' in v_def) = 0 then
+    raise exception '0053 prestate: clara.reverse_entry no longer stamps reversed_by on the original -- the re-admit arm''s reversal-history exclusion would read nothing'
+      using errcode = 'CLR10';
+  end if;
+  if position('insert into clara.journal_entries(client_id,status,posting_date,memo,origin,resolution_id,' in v_def) = 0
+     or position('filing_id' in substr(v_def,
+          position('insert into clara.journal_entries(client_id,status,posting_date,memo,origin,resolution_id,' in v_def), 400)) <> 0 then
+    raise exception '0053 prestate: clara.reverse_entry''s mirror insert is not the pinned filing_id-less shape this fix reasons about -- re-derive the (3)-does-not-imply-(4) argument in this file''s header'
+      using errcode = 'CLR10';
+  end if;
+
   -- -------------------------------------------------------------------------------------
   -- (0.3) clara.admit_autodraft_task -- ONE overload, at the pinned 5-arity signature.
   -- -------------------------------------------------------------------------------------
@@ -370,28 +594,42 @@ begin
   -- silently reverts; measuring them here and again in the tail is what makes their survival
   -- structural rather than a promise. 0034's own branches are measured too, because this
   -- migration inserts INTO that chain and must not disturb the arms above or below it.
+  v_code := pg_temp._x53_code(v_def);
   for r in select * from (values
+      -- 0046 S7.1's EXECUTABLE regions, not just its function names: the tri-state gate, the
+      -- registry-insert widening and the audit widening. A body that kept the names in prose
+      -- while losing these would pass a name-only census.
       ('clara._autodraft_direction_tri(',                                        1),
       ('clara._sales_lane_active(',                                              1),
+      ('direction,backfill_batch_id)',                                           1),
+      ('direction=excluded.direction,backfill_batch_id=excluded.backfill_batch_id;', 1),
+      ('''direction'',v_direction, ''backfill_batch'',v_batch_id));',            1),
+      -- 0048 S1's own-run exclusion.
       ('and id<>p_run_id)>=v_cap then',                                          1),
-      -- 2, not 1: 0048's own installed comment quotes this guard verbatim beside the
-      -- executable copy, which is exactly why the census counts rather than probes.
-      ('or (p_origin=''sweep'' and p_run_id is null)',                           2),
+      -- ONE in code (0048's installed comment quotes it a second time -- raw would say 2).
+      ('or (p_origin=''sweep'' and p_run_id is null)',                           1),
+      -- 0034's four registry arms, all of which this splice must leave alone.
       ('if found and a.state=''active'' and a.task_status in',                   2),
       ('elsif found and a.state=''parked'' then',                                2),
       ('elsif found and a.task_status=''completed'' then',                       1),
       ('return jsonb_build_object(''outcome'',''already_done'',''task_id'',a.task_id);', 1),
       ('elsif found and a.task_status in (''failed'',''cancelled'',''expired'') then',   1),
-      ('  v_is_retry boolean:=false;',                                           1),
+      ('v_is_retry boolean:=false;',                                             1),
       ('case when v_is_retry then ''re_admitted'' else ''admitted'' end',        1)
     ) as t(marker, want)
   loop
-    v_count := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
+    v_count := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
     if v_count <> r.want then
-      raise exception '0053 prestate: the live admit_autodraft_task body carries the marker "%" % time(s), expected % -- the body drifted or lost a prior splice; re-derive this migration against the live catalog', r.marker, v_count, r.want
+      raise exception '0053 prestate: the live admit_autodraft_task CODE carries the marker "%" % time(s), expected % -- the body drifted or lost a prior splice; re-derive this migration against the live catalog', r.marker, v_count, r.want
         using errcode = 'CLR10';
     end if;
   end loop;
+  -- 0048's OLD self-counting predicate must ALREADY be gone -- the positive marker above
+  -- proves the new one landed, this proves the old one did not survive beside it.
+  if position('where firm_id=f.firm_id and state=''open'')>=v_cap then' in v_code) <> 0 then
+    raise exception '0053 prestate: the PRE-0048 self-counting concurrency predicate is still live in admit_autodraft_task -- 0048 S1 was reverted somewhere upstream'
+      using errcode = 'CLR10';
+  end if;
 
   -- (0.3c) THE NEW BRANCH MUST LAND IN THE AUTHORITATIVE (POST-LOCK) REGISTRY BLOCK, NOT IN
   -- THE PRE-LOCK FAST PATH. Proven by ORDER, anchored on the SECOND occurrence of the
@@ -447,7 +685,7 @@ begin
     into v_def;
 
   -- (0.4a) IDEMPOTENCY.
-  if position('re-admits through the autodraft door' in v_def) <> 0 then
+  if position('a bookkeeper can ask the autodraft door to try again' in v_def) <> 0 then
     raise exception '0053 prestate: _approve_entry_core already carries the reworded CLR23 remedy -- this splice has already been applied to this database'
       using errcode = 'CLR10';
   end if;
@@ -456,28 +694,44 @@ begin
   -- every one of these on a database migrated from zero and pinned them precisely so a body
   -- that lost a prior splice refuses BEFORE anything is added to it. The same list is the
   -- right list here, for the same reason, and it is re-read in the tail.
+  -- CODE-ONLY. 0040 §S5's census counted raw source, where several of these markers also
+  -- appear in the installed comments beside their executable use (bank_rule_suggested is
+  -- exactly that: 2 raw, 1 in code). Counting code is what makes the census unsatisfiable by
+  -- prose alone.
+  v_code := pg_temp._x53_code(v_def);
   for r in select * from (values
       ('counterparty match landscape changed; withdraw the draft and re-draft; the new draft will resolve against the current counterparty landscape', 1),
       ('opening_entry_k_family_only',                                  1),
-      ('[R1-F1] K-family-only lifecycle boundary',                     1),
       ('receipt_preheld',                                              1),
       ('bound_extraction',                                             1),
       ('unpinned_rule_post',                                           1),
       ('settlement_not_autopostable',                                  1),
       ('clara._subledger_on_approve(',                                 1),
       ('no_counterparty_sighting',                                     1),
-      ('H2 CARVE-OUT: sightings + auto-proposal are HUMAN-only',       1),
-      ('bank_rule_suggested',                                          2),
+      ('bank_rule_suggested',                                          1),
       ('insert into clara.rule_sightings',                             2),
       ('uq_rule_sightings_mapping',                                    2),
-      -- The CLR23 raises are counted, not merely probed: the anchor below replaces a MESSAGE
-      -- and must leave every refusal's classification exactly where it was.
-      ('using errcode=''CLR23''',                                      3)
+      -- The CLR23 raises are counted, not merely probed: §2 replaces a MESSAGE and must leave
+      -- every refusal's classification exactly where it was.
+      ('using errcode=''clr23''',                                      3)
+    ) as t(marker, want)
+  loop
+    v_count := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
+    if v_count <> r.want then
+      raise exception '0053 prestate: the live _approve_entry_core CODE carries the marker "%" % time(s), expected % -- the body drifted or lost a prior splice; re-derive this migration against the live catalog', r.marker, v_count, r.want
+        using errcode = 'CLR10';
+    end if;
+  end loop;
+  -- The two 0040 markers that ARE comments stay counted on raw source, and are named as such
+  -- so nobody later "fixes" them into the code census where they would read 0.
+  for r in select * from (values
+      ('[R1-F1] K-family-only lifecycle boundary',                     1),
+      ('H2 CARVE-OUT: sightings + auto-proposal are HUMAN-only',       1)
     ) as t(marker, want)
   loop
     v_count := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
     if v_count <> r.want then
-      raise exception '0053 prestate: the live _approve_entry_core body carries the marker "%" % time(s), expected % -- the body drifted or lost a prior splice; re-derive this migration against the live catalog', r.marker, v_count, r.want
+      raise exception '0053 prestate: the live _approve_entry_core COMMENT marker "%" occurs % time(s), expected %', r.marker, v_count, r.want
         using errcode = 'CLR10';
     end if;
   end loop;
@@ -499,7 +753,7 @@ begin
   insert into _x53_pre(sig, secdef, config, acl, owner)
     values ('clara._approve_entry_core(jsonb,uuid,uuid,text,text)', v_secdef, v_config, v_acl, v_owner);
 
-  raise notice '0053 prestate: clean (frontier 0050; one-live-entry-per-filing invariants present; ternary status domain; withdraw_draft registry-blind; one admit_autodraft_task overload with the 0034/0046/0048 markers intact; one _approve_entry_core overload with 0040''s 12-marker census intact)';
+  raise notice '0053 prestate: clean (frontier 0050; coding_attempts task->entry identity link at its pinned unique+FK shape; request_autodraft the SOLE one_click producer, human-floored, authenticated-only; one-live-entry invariants; ternary status domain; withdraw_draft registry-blind; reverse_entry stamps reversed_by and mints a filing_id-less mirror; admit_autodraft_task CODE carries the 0034/0046/0048 markers; _approve_entry_core CODE carries 0040''s census)';
 end
 $prestate$;
 
@@ -559,44 +813,70 @@ begin
     || '  -- judgement, not an unattended retry), and a filing with NO entry at all (absence is' || chr(10)
     || '  -- not evidence).' || chr(10)
     || '  --' || chr(10)
-    || '  -- WHY A FILING-SCOPED READ OF journal_entries IS SOUND EVIDENCE HERE. This registry' || chr(10)
-    || '  -- has no entry_id column, so the entry cannot be reached by pointer. It can be' || chr(10)
-    || '  -- reached by filing_id because a filing carries at most ONE live entry at a time --' || chr(10)
-    || '  -- uq_journal_entries_one_open_draft_filing (0017:798-801) for the draft, and' || chr(10)
-    || '  -- clara._draft_entry_core''s double_coded guard (0009:1244-1250) for the approved' || chr(10)
-    || '  -- one. Both are asserted positively by 0053''s prestate; the third test below is that' || chr(10)
-    || '  -- guard''s predicate mirrored EXACTLY, so admission and the draft writer agree by' || chr(10)
-    || '  -- construction rather than by parallel maintenance.' || chr(10)
+    || '  -- IT READS THE THING, NOT A PROJECTION OF IT. clara.coding_attempts (0009:961-986)' || chr(10)
+    || '  -- maps a task to its entry EXACTLY once -- uq_coding_attempts_task unique(task_id),' || chr(10)
+    || '  -- uq_coding_attempts_entry unique(entry_id), both hops firm-scoped by composite FK.' || chr(10)
+    || '  -- An earlier cut of this arm read the FILING''s entry population instead, having' || chr(10)
+    || '  -- proved "no entry_id column" on clara.autodraft_attempts and concluded it for the' || chr(10)
+    || '  -- whole system. That is a law-3 error: absence in ONE table is not absence of the' || chr(10)
+    || '  -- link. Its cost was real -- any historical withdrawn row on the filing became a' || chr(10)
+    || '  -- permanent re-admission permit for later completed tasks that drafted NOTHING.' || chr(10)
+    || '  -- A task with no coding_attempts row cannot have had an entry withdrawn: absence is' || chr(10)
+    || '  -- not evidence, so the arm cannot fire for it.' || chr(10)
     || '  --' || chr(10)
-    || '  -- EVERY ERROR DIRECTION IS A REFUSAL. The POSITIVE evidence read is firm-scoped (a' || chr(10)
-    || '  -- stricter predicate: a mis-scope means it does not fire). The two NEGATIVE reads are' || chr(10)
-    || '  -- deliberately NOT firm-scoped and deliberately blind to is_opening_balance (broader' || chr(10)
-    || '  -- predicates: a mis-scope means MORE reasons to refuse, never fewer).' || chr(10)
+    || '  -- THE FILING-SCOPED TESTS THAT REMAIN, AND WHY EACH IS SEPARATE. (2) no standing' || chr(10)
+    || '  -- draft to collide with. (3) nothing live in the books -- this MIRRORS' || chr(10)
+    || '  -- clara._draft_entry_core''s double_coded predicate (0009:1244-1250) exactly, so' || chr(10)
+    || '  -- admission and the draft writer agree by construction. (4) the filing has NEVER been' || chr(10)
+    || '  -- reversed. (4) is NOT implied by (3): a reversed original keeps status=''approved''' || chr(10)
+    || '  -- with reversed_by set (0003:97-99), so (3) passes it, and clara.reverse_entry''s' || chr(10)
+    || '  -- MIRROR is inserted with NO filing_id at all (0009:1715-1721), so the mirror is' || chr(10)
+    || '  -- invisible to every filing-scoped read here. Without (4), a filing carrying a' || chr(10)
+    || '  -- withdrawn entry AND a later approved-then-reversed one satisfied (1)-(3) and' || chr(10)
+    || '  -- re-admitted -- the exact case this migration calls a human accounting decision.' || chr(10)
+    || '  -- (4) reads ORIGINALS only, which is right: the original is where reversed_by lives.' || chr(10)
     || '  --' || chr(10)
-    || '  -- IT KEYS ON THE FILING''S STATE, NOT ON A LINK FROM THIS TASK TO THAT ENTRY (there is' || chr(10)
-    || '  -- no entry_id to read). So a filing whose attempt completed WITHOUT drafting, and whose' || chr(10)
-    || '  -- separately-authored draft was later withdrawn, also re-admits -- deliberate: the' || chr(10)
-    || '  -- filing has no live entry, a withdrawal is the same explicit "redo this" signal, and' || chr(10)
-    || '  -- the lane check below still decides whether it is codeable at all.' || chr(10)
+    || '  -- EVERY ERROR DIRECTION IS A REFUSAL. The POSITIVE evidence read is firm-scoped on' || chr(10)
+    || '  -- BOTH hops (stricter: a mis-scope means it does not fire). The three NEGATIVE reads' || chr(10)
+    || '  -- are deliberately NOT firm-scoped and (2) is deliberately blind to' || chr(10)
+    || '  -- is_opening_balance (broader: a mis-scope means MORE reasons to refuse, never fewer).' || chr(10)
     || '  --' || chr(10)
-    || '  -- LOCKS: THIS BRANCH ADDS NONE. The three reads are plain SELECTs (ACCESS SHARE only,' || chr(10)
-    || '  -- no FOR UPDATE), so they cannot join a lock cycle; the refund block below is the same' || chr(10)
-    || '  -- sequence 0046''s canonical lock-order comment already enumerates as "RETRY WITH' || chr(10)
-    || '  -- REFUND", so that enumeration stays accurate with this as a second entrance to it.' || chr(10)
+    || '  -- p_origin=''one_click'' -- A WITHDRAWAL IS STICKY AGAINST AUTOMATION. The unattended' || chr(10)
+    || '  -- catch-up sweep passes ''sweep'' and enumerates exactly the no-live-entry state a' || chr(10)
+    || '  -- withdrawal creates; without this gate the next sweep would redraft the filing a' || chr(10)
+    || '  -- human had just emptied, and a live autopost rule would re-approve it within ~100ms' || chr(10)
+    || '  -- -- the human''s explicit rejection silently undone by a background loop. The' || chr(10)
+    || '  -- already_done short-circuit was, unnamed, the thing that made a withdrawal STICK.' || chr(10)
+    || '  -- clara.request_autodraft is the SOLE producer of ''one_click'' (censused in 0053''s' || chr(10)
+    || '  -- prestate, not assumed), under _human_ctx(bookkeeper) and granted to' || chr(10)
+    || '  -- clara_authenticated only -- so this gate means "a human asked". A sweep-side' || chr(10)
+    || '  -- landscape-refresh is a different AUTONOMY CLASS and needs its own owner ruling.' || chr(10)
+    || '  -- THIS GATE AND THE coding_attempts TEST ARE INDEPENDENT; both are required.' || chr(10)
+    || '  --' || chr(10)
+    || '  -- LOCKS: THIS BRANCH ADDS NONE. The four reads are plain SELECTs (ACCESS SHARE only,' || chr(10)
+    || '  -- no FOR UPDATE), so they cannot join a lock cycle; every path into the arm is already' || chr(10)
+    || '  -- behind this function''s document_filings FOR UPDATE, which is what serializes two' || chr(10)
+    || '  -- concurrent admissions on one filing. The refund block below is the same sequence' || chr(10)
+    || '  -- 0046''s canonical lock-order comment already enumerates as "RETRY WITH REFUND", so' || chr(10)
+    || '  -- that enumeration stays accurate with this as a second entrance to it.' || chr(10)
     || '  --' || chr(10)
     || '  -- THE OUTCOME IS ITS OWN TOKEN: re_admitted_after_withdrawal, never the plain' || chr(10)
     || '  -- ''re_admitted'', which means a FAILED/CANCELLED/EXPIRED retry -- a different fact' || chr(10)
     || '  -- about a different event. Telling a caller the wrong story about which event' || chr(10)
     || '  -- happened is 0034''s #43 sin in a new spelling.' || chr(10)
-    || '  elsif found and a.task_status=''completed''' || chr(10)
-    || '     and exists(select 1 from clara.journal_entries je' || chr(10)
-    || '                  where je.filing_id=a.filing_id and je.firm_id=a.firm_id' || chr(10)
-    || '                    and je.status=''withdrawn'')' || chr(10)
+    || '  elsif found and a.task_status=''completed'' and p_origin=''one_click''' || chr(10)
+    || '     and exists(select 1 from clara.coding_attempts ca' || chr(10)
+    || '                  join clara.journal_entries je' || chr(10)
+    || '                    on je.id=ca.entry_id and je.firm_id=ca.firm_id' || chr(10)
+    || '                 where ca.task_id=a.task_id and ca.firm_id=a.firm_id' || chr(10)
+    || '                   and je.status=''withdrawn'')' || chr(10)
     || '     and not exists(select 1 from clara.journal_entries je' || chr(10)
     || '                  where je.filing_id=a.filing_id and je.status=''draft'')' || chr(10)
     || '     and not exists(select 1 from clara.journal_entries je' || chr(10)
     || '                  where je.filing_id=a.filing_id and je.status=''approved''' || chr(10)
-    || '                    and je.reversed_by is null) then' || chr(10)
+    || '                    and je.reversed_by is null)' || chr(10)
+    || '     and not exists(select 1 from clara.journal_entries je' || chr(10)
+    || '                  where je.filing_id=a.filing_id and je.reversed_by is not null) then' || chr(10)
     || '    -- The mechanics below are 0034''s supersede branch VERBATIM, and deliberately so:' || chr(10)
     || '    -- reconcile any still-outstanding reservation, durably clear it on the row itself' || chr(10)
     || '    -- (0034''s O-round fix -- without this, a re-admit later refused by the lane or' || chr(10)
@@ -648,7 +928,7 @@ begin
     || '                    when v_is_retry then ''re_admitted'' else ''admitted'' end');
 
   execute v_next;
-  raise notice '0053 S1: admit_autodraft_task recut -- a completed attempt whose entry was WITHDRAWN (and whose filing carries no live entry) re-admits as re_admitted_after_withdrawal';
+  raise notice '0053 S1: admit_autodraft_task recut -- a HUMAN one_click admission re-admits (re_admitted_after_withdrawal) when THIS task''s own entry was withdrawn and the filing carries no standing draft, nothing live in the books, and no reversal in its history; the sweep still answers already_done';
 end
 $splice_a$;
 reset role;
@@ -675,10 +955,13 @@ begin
       using errcode = 'CLR10';
   end if;
   v_def := replace(v_def, v_anchor,
-    '''counterparty match landscape changed; withdraw the draft and re-draft (the withdrawn filing re-admits through the autodraft door, or use the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape''');
+    -- NOTE, DELIBERATE: the message carries NO `--` sequence. The tail's comment-insensitive
+    -- census strips SQL line comments, and a `--` inside a string literal would be mangled by
+    -- that strip, quietly corrupting what the census measures. Punctuation only.
+    '''counterparty match landscape changed; withdraw the draft and re-draft (after withdrawing, a bookkeeper can ask the autodraft door to try again; it may still refuse on the usual lane, consent, budget or attempt gates, or you can re-draft through the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape''');
 
   execute v_def;
-  raise notice '0053 S2: _approve_entry_core recut -- the CLR23 remedy now names the autodraft, chat and hand-draft doors';
+  raise notice '0053 S2: _approve_entry_core recut -- the CLR23 remedy now names the autodraft, chat and hand-draft doors CONDITIONALLY (it promises no unconditional re-admission) and presupposes no filing';
 end
 $splice_b$;
 reset role;
@@ -695,7 +978,7 @@ reset role;
 -- =====================================================================================
 do $tail$
 declare
-  v_def text; v_n int; v_count int; r record; v_pre record;
+  v_def text; v_code text; v_n int; v_count int; r record; v_pre record;
   v_secdef boolean; v_config text; v_acl text; v_owner text;
   v_first int; v_second int; v_lock int; v_new int; v_old int; v_sup int;
 begin
@@ -708,54 +991,83 @@ begin
   select pg_get_functiondef('clara.admit_autodraft_task(uuid,text,uuid,text,bigint)'::regprocedure)
     into v_def;
 
-  -- (3.1a) THE NEW SURFACE LANDED, EXACTLY ONCE EACH. 're_admitted_after_withdrawal' is
-  -- expected TWICE and both occurrences are named: once in the installed comment that says
-  -- what the branch is, once in the live outcome expression that returns it.
+  v_code := pg_temp._x53_code(v_def);
+
+  -- (3.1a) THE NEW SURFACE LANDED, EXACTLY ONCE EACH -- COUNTED IN CODE, so no arrangement of
+  -- comments can satisfy this census. Each of the FIVE conjuncts of the new arm's condition is
+  -- pinned separately: the origin gate, the coding_attempts identity read, and the three
+  -- filing-scoped exclusions. A future edit that drops any one of them fails here.
   for r in select * from (values
-      ('  v_withdrawn_readmit boolean:=false;',                                   1),
-      ('[0053 / F8] RE-ADMIT A COMPLETED ATTEMPT WHOSE ENTRY WAS WITHDRAWN.',      1),
-      ('re_admitted_after_withdrawal',                                            2),
-      ('case when v_withdrawn_readmit then ''re_admitted_after_withdrawal''',      1),
-      ('v_is_retry:=true; v_withdrawn_readmit:=true;',                             1),
-      ('and je.status=''withdrawn'')',                                             1),
-      ('where je.filing_id=a.filing_id and je.status=''draft'')',                   1),
-      ('and je.reversed_by is null) then',                                          1)
+      ('v_withdrawn_readmit boolean:=false;',                                    1),
+      ('re_admitted_after_withdrawal',                                           1),
+      ('case when v_withdrawn_readmit then ''re_admitted_after_withdrawal''',    1),
+      ('v_is_retry:=true; v_withdrawn_readmit:=true;',                           1),
+      -- conjunct 0: the ORIGIN GATE (a withdrawal is sticky against automation).
+      ('elsif found and a.task_status=''completed'' and p_origin=''one_click''', 1),
+      -- conjunct 1: the TASK'S OWN entry, via the coding_attempts identity link.
+      ('exists(select 1 from clara.coding_attempts ca',                          1),
+      ('where ca.task_id=a.task_id and ca.firm_id=a.firm_id',                    1),
+      ('and je.status=''withdrawn'')',                                           1),
+      -- conjuncts 2-4: no standing draft, nothing live in the books, never reversed.
+      ('where je.filing_id=a.filing_id and je.status=''draft'')',                1),
+      ('and je.reversed_by is null)',                                            1),
+      ('where je.filing_id=a.filing_id and je.reversed_by is not null) then',    1)
     ) as t(marker, want)
   loop
-    v_count := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
+    v_count := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
     if v_count <> r.want then
-      raise exception '0053 tail: the post-splice admit_autodraft_task carries the NEW marker "%" % time(s), expected %', r.marker, v_count, r.want;
+      raise exception '0053 tail: the post-splice admit_autodraft_task CODE carries the NEW marker "%" % time(s), expected %', r.marker, v_count, r.want;
     end if;
   end loop;
 
+  -- The one marker that IS a comment -- the placement anchor -- counted on RAW source, and
+  -- named as such so it is not later "fixed" into the code census where it would read 0.
+  v_count := (length(v_def) - length(replace(v_def,
+      '[0053 / F8] RE-ADMIT A COMPLETED ATTEMPT WHOSE ENTRY WAS WITHDRAWN.', '')))
+    / length('[0053 / F8] RE-ADMIT A COMPLETED ATTEMPT WHOSE ENTRY WAS WITHDRAWN.');
+  if v_count <> 1 then
+    raise exception '0053 tail: the installed [0053 / F8] comment anchor occurs % time(s), expected 1', v_count;
+  end if;
+
   -- The OLD outcome expression must be GONE -- proof the replace took effect rather than the
   -- postcheck passing on an untouched body.
-  if position('case when v_is_retry then ''re_admitted'' else ''admitted'' end' in v_def) <> 0 then
+  if position('case when v_is_retry then ''re_admitted'' else ''admitted'' end' in v_code) <> 0 then
     raise exception '0053 tail: the pre-patch outcome expression is still present -- the S1.3 replace did not land';
   end if;
 
-  -- (3.1b) EVERY PRIOR MARKER SURVIVES AT ITS PRESTATE COUNT. This is the anti-revert half:
-  -- it proves the recut carried 0046 S7.1's tri-state direction contract and 0048 S1's own-run
-  -- exclusion through unchanged, and that 0034's four registry arms are all still there --
-  -- including the already_done return this migration must NOT have altered.
+  -- (3.1b) EVERY PRIOR MARKER SURVIVES AT ITS PRESTATE COUNT, IN CODE. This is the anti-revert
+  -- half, and it now pins 0046 S7.1's EXECUTABLE regions (the registry-insert widening and the
+  -- audit widening), not merely the function names it calls -- a body that kept the names in
+  -- prose while losing the widenings would have passed the earlier, name-only census.
   for r in select * from (values
       ('clara._autodraft_direction_tri(',                                        1),
       ('clara._sales_lane_active(',                                              1),
+      ('direction,backfill_batch_id)',                                           1),
+      ('direction=excluded.direction,backfill_batch_id=excluded.backfill_batch_id;', 1),
+      ('''direction'',v_direction, ''backfill_batch'',v_batch_id));',            1),
       ('and id<>p_run_id)>=v_cap then',                                          1),
-      ('or (p_origin=''sweep'' and p_run_id is null)',                           2),
+      ('or (p_origin=''sweep'' and p_run_id is null)',                           1),
       ('if found and a.state=''active'' and a.task_status in',                   2),
       ('elsif found and a.state=''parked'' then',                                2),
       ('elsif found and a.task_status=''completed'' then',                       1),
       ('return jsonb_build_object(''outcome'',''already_done'',''task_id'',a.task_id);', 1),
       ('elsif found and a.task_status in (''failed'',''cancelled'',''expired'') then',   1),
-      ('  v_is_retry boolean:=false;',                                           1)
+      ('v_is_retry boolean:=false;',                                             1)
     ) as t(marker, want)
   loop
-    v_count := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
+    v_count := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
     if v_count <> r.want then
-      raise exception '0053 tail: the recut admit_autodraft_task lost or duplicated the pre-existing marker "%" (% time(s), expected %) -- a prior splice was reverted', r.marker, v_count, r.want;
+      raise exception '0053 tail: the recut admit_autodraft_task lost or duplicated the pre-existing CODE marker "%" (% time(s), expected %) -- a prior splice was reverted', r.marker, v_count, r.want;
     end if;
   end loop;
+
+  -- NEGATIVE: 0048's pre-fix self-counting concurrency predicate must be ABSENT. The positive
+  -- marker above proves the fixed predicate is present; only this proves the broken one did
+  -- not survive alongside it (a splice that appended rather than replaced would pass the
+  -- positive check alone).
+  if position('where firm_id=f.firm_id and state=''open'')>=v_cap then' in v_code) <> 0 then
+    raise exception '0053 tail: the PRE-0048 self-counting concurrency predicate is present in the post-splice body -- 0048 S1 was reverted by this splice';
+  end if;
 
   -- (3.1c) PLACEMENT, BY ORDER, ANCHORED ON THE SECOND (POST-LOCK) REGISTRY RE-READ. The new
   -- arm must sit inside the AUTHORITATIVE block -- after the filing lock and the re-read --
@@ -807,44 +1119,62 @@ begin
   select pg_get_functiondef('clara._approve_entry_core(jsonb,uuid,uuid,text,text)'::regprocedure)
     into v_def;
 
-  -- The NEW remedy is present exactly once, the OLD one is gone, and the refusal is still
-  -- raised as CLR23 -- the errcode line was never inside the anchor, but a body that somehow
-  -- lost it would be a silent reclassification, so it is read positively rather than assumed.
-  v_count := (length(v_def) - length(replace(v_def,
-      'counterparty match landscape changed; withdraw the draft and re-draft (the withdrawn filing re-admits through the autodraft door, or use the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape', '')))
-    / length('counterparty match landscape changed; withdraw the draft and re-draft (the withdrawn filing re-admits through the autodraft door, or use the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape');
+  v_code := pg_temp._x53_code(v_def);
+
+  -- The NEW remedy is present exactly once and the OLD one is gone. Counted in CODE (the
+  -- message is a string literal, so it survives the strip) -- and the reworded text carries no
+  -- `--` sequence precisely so the strip cannot mangle it.
+  v_count := (length(v_code) - length(replace(v_code,
+      'counterparty match landscape changed; withdraw the draft and re-draft (after withdrawing, a bookkeeper can ask the autodraft door to try again; it may still refuse on the usual lane, consent, budget or attempt gates, or you can re-draft through the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape', '')))
+    / length('counterparty match landscape changed; withdraw the draft and re-draft (after withdrawing, a bookkeeper can ask the autodraft door to try again; it may still refuse on the usual lane, consent, budget or attempt gates, or you can re-draft through the chat or hand-draft lanes); the new draft will resolve against the current counterparty landscape');
   if v_count <> 1 then
     raise exception '0053 tail: the reworded CLR23 remedy occurs % time(s) in _approve_entry_core (expected 1)', v_count;
   end if;
-  if position('counterparty match landscape changed; withdraw the draft and re-draft; the new draft will resolve' in v_def) <> 0 then
+  if position('counterparty match landscape changed; withdraw the draft and re-draft; the new draft will resolve' in v_code) <> 0 then
     raise exception '0053 tail: the pre-patch CLR23 remedy is still present -- the S2 replace did not land';
   end if;
-  if position('using errcode=''CLR23''' in v_def) = 0 then
-    raise exception '0053 tail: _approve_entry_core no longer raises CLR23 -- the refusal was silently reclassified';
+  -- THE MESSAGE MUST NOT PROMISE WHAT THE DOOR CANNOT KEEP, and must not presuppose a filing.
+  -- Both are structural properties of the wording, so both are asserted rather than left to a
+  -- reviewer's reading: the unconditional claim is absent, and the noun that only makes sense
+  -- for a filing-bearing entry is absent (this refusal also fires for filing_id IS NULL chat
+  -- and adjustment drafts).
+  if position('re-admits through the autodraft door' in v_code) <> 0
+     or position('the withdrawn filing' in v_code) <> 0 then
+    raise exception '0053 tail: the CLR23 remedy still makes an unconditional re-admission promise, or still presupposes a filing -- both were the point of the reword';
   end if;
 
-  -- 0040 §S5's full marker census, re-read. Same list, same counts, same reason.
+  -- 0040 §S5's census, re-read IN CODE (see the prestate's note: bank_rule_suggested is 2 raw
+  -- but 1 in code, and a raw census is satisfiable by prose).
   for r in select * from (values
       ('opening_entry_k_family_only',                                  1),
-      ('[R1-F1] K-family-only lifecycle boundary',                     1),
       ('receipt_preheld',                                              1),
       ('bound_extraction',                                             1),
       ('unpinned_rule_post',                                           1),
       ('settlement_not_autopostable',                                  1),
       ('clara._subledger_on_approve(',                                 1),
       ('no_counterparty_sighting',                                     1),
-      ('H2 CARVE-OUT: sightings + auto-proposal are HUMAN-only',       1),
-      ('bank_rule_suggested',                                          2),
+      ('bank_rule_suggested',                                          1),
       ('insert into clara.rule_sightings',                             2),
       ('uq_rule_sightings_mapping',                                    2),
-      -- The CLR23 raises are counted, not merely probed: the anchor below replaces a MESSAGE
-      -- and must leave every refusal's classification exactly where it was.
-      ('using errcode=''CLR23''',                                      3)
+      -- The CLR23 raises are counted, not merely probed: §2 replaced a MESSAGE and must leave
+      -- every refusal's classification exactly where it was.
+      ('using errcode=''clr23''',                                      3)
+    ) as t(marker, want)
+  loop
+    v_count := (length(v_code) - length(replace(v_code, r.marker, ''))) / length(r.marker);
+    if v_count <> r.want then
+      raise exception '0053 tail: the recut _approve_entry_core lost or duplicated the pre-existing CODE marker "%" (% time(s), expected %) -- a prior splice was reverted', r.marker, v_count, r.want;
+    end if;
+  end loop;
+  -- 0040's two COMMENT markers, on raw source.
+  for r in select * from (values
+      ('[R1-F1] K-family-only lifecycle boundary',                     1),
+      ('H2 CARVE-OUT: sightings + auto-proposal are HUMAN-only',       1)
     ) as t(marker, want)
   loop
     v_count := (length(v_def) - length(replace(v_def, r.marker, ''))) / length(r.marker);
     if v_count <> r.want then
-      raise exception '0053 tail: the recut _approve_entry_core lost or duplicated the pre-existing marker "%" (% time(s), expected %) -- a prior splice was reverted', r.marker, v_count, r.want;
+      raise exception '0053 tail: the recut _approve_entry_core lost the COMMENT marker "%" (% time(s), expected %)', r.marker, v_count, r.want;
     end if;
   end loop;
 
@@ -882,6 +1212,6 @@ begin
     raise exception '0053 tail: clara.withdraw_draft was given autodraft-registry awareness by this migration -- it must not have been';
   end if;
 
-  raise notice '0053 tail: clean -- the re-admit arm is present exactly once inside the authoritative post-lock block and strictly before 0034''s completed arm; the already_done return, the parked gate, the supersede arm, 0046 S7.1 and 0048 S1 all survive; the CLR23 remedy is reworded exactly once and still raises CLR23; 0040''s 12-marker census intact; SECURITY DEFINER + search_path + ACL + owner byte-identical on both functions';
+  raise notice '0053 tail: clean -- all FIVE conjuncts of the re-admit arm are present exactly once in CODE (origin gate, coding_attempts identity read, no standing draft, nothing live, never reversed), the arm sits inside the authoritative post-lock block and strictly before 0034''s completed arm; the already_done return, the parked gate, the supersede arm, 0046 S7.1''s registry+audit widenings and 0048 S1 all survive and the PRE-0048 predicate is absent; the CLR23 remedy is reworded exactly once, still raises CLR23, promises nothing unconditional and presupposes no filing; 0040''s census intact; SECURITY DEFINER + search_path + ACL + owner byte-identical on both functions';
 end
 $tail$;
