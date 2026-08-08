@@ -186,7 +186,7 @@ test("[0051 §2] a DIVERGENT storage_path is re-verified against the durable obj
 function mockDb(finalizeReceipt, intakeId) {
   const seen = [];
   const client = {
-    async query(sql, params) {
+    async query(sql) {
       seen.push(sql);
       const r = (v) => ({ rows: [{ receipt: v }] });
       if (sql.includes("create_document_intake")) return r({ intake_id: intakeId });

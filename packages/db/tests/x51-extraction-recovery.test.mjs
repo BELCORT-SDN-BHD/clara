@@ -368,15 +368,53 @@ const AZURE_OCR = "azure-di:prebuilt-layout:2024-11-30";
 /** A fresh 64-hex sha, the shape clara.documents' storage_path CHECK is written against. */
 const freshSha = () => randomUUID().replace(/-/g, "").padEnd(64, "0").slice(0, 64);
 
+/** The ONLY error codes a terminally-failed task may carry with a NULL workflow_run_id —
+ *  ck_processing_task_binding_0038's own never-claimed allowlist (0038:7304-7305). Every
+ *  other failure reaches 'failed' through a CLAIMED task and keeps its run id. */
+const NEVER_CLAIMED = ["budget", "attempt_cap", "skipped_kind", "consent_inactive", "statement_multi_client"];
+
 /** Plant a processing task directly. Setup only — the product path for these states runs
- *  through the runtime workflow, which no DB rig can drive. */
-async function plantTask(firm, document, { engine = FIXTURE_ENGINE, version = 1, lane = "ocr", status, error = null }) {
+ *  through the runtime workflow, which no DB rig can drive.
+ *
+ *  IT MUST STILL PLANT A ROW THE PRODUCT COULD PRODUCE. The first cut of this fixture did
+ *  not, and the rig said so: five cells died 23514 on ck_processing_task_binding_0038
+ *  (0038:7298-7306) before the door was ever exercised.
+ *      (status in ('queued','held_egress') and workflow_run_id is null and started_at is null)
+ *   or (status in ('running','done')      and workflow_run_id is not null and started_at is not null)
+ *   or (status = 'failed' and ((workflow_run_id is not null and started_at is not null)
+ *                              or (workflow_run_id is null and started_at is null
+ *                                  and error_code in (<the never-claimed five>))))
+ *  So 'done' and an ordinary 'failed' (engine_error, internal, …) are CLAIMED shapes: the
+ *  workflow claimed the task — stamping workflow_run_id + started_at — and only then settled
+ *  it. That is exactly what clara.persist_document_extraction and clara.fail_invoice_facts do,
+ *  both of which refuse a task that is not already 'running'. Relaxing the fixture instead
+ *  (dropping the constraint, or planting NULLs anyway) would have tested the door against a
+ *  row shape the product cannot create — which proves nothing about the door.
+ *
+ *  `neverClaimed` is deliberately UNUSED by any cell below, and that is a measurement rather
+ *  than an oversight: none of the five never-claimed codes is reachable on an INGEST lane
+ *  today. `budget` comes from _reserve_processing_call, which is invoice_facts-only; the
+ *  claim-time attempt cap is scoped to ('invoice_facts','statement_facts') (0038:6907); and
+ *  skipped_kind / consent_inactive / statement_multi_client are the statement router's codes.
+ *  The option and its guard exist so that the day one becomes reachable, a cell can plant it
+ *  and gets a named refusal instead of a raw 23514 — the door itself already admits it, since
+ *  its predicate reads status alone and never the run id. */
+async function plantTask(firm, document, { engine = FIXTURE_ENGINE, version = 1, lane = "ocr", status, error = null, neverClaimed = false } = {}) {
+  if (status === "failed" && neverClaimed && !NEVER_CLAIMED.includes(error)) {
+    throw new Error(`plantTask: '${error}' is not one of the never-claimed codes ${NEVER_CLAIMED.join("/")} — a failed row with no run id would violate ck_processing_task_binding_0038`);
+  }
+  const claimed = status === "running" || status === "done" || (status === "failed" && !neverClaimed);
   const terminal = status === "done" || status === "failed";
+  const now = new Date().toISOString();
   const r = await rootQuery(
     `insert into clara.document_processing_tasks(firm_id,document_id,engine_id,engine_config,
-        version_n,lane,status,error_code,finished_at)
-     values ($1,$2,$3,'{}'::jsonb,$4,$5,$6,$7,case when $8 then now() end) returning id`,
-    [firm, document, engine, version, lane, status, error, terminal]);
+        version_n,lane,status,error_code,workflow_run_id,started_at,finished_at,attempt_count)
+     values ($1,$2,$3,'{}'::jsonb,$4,$5,$6,$7,$8,$9,$10,$11) returning id`,
+    [firm, document, engine, version, lane, status, error,
+      claimed ? `rig-run-${randomUUID()}` : null,
+      claimed ? now : null,
+      terminal ? now : null,
+      claimed ? 1 : 0]);
   return r.rows[0].id;
 }
 
@@ -387,8 +425,14 @@ async function reIngest(firm, plant, { lane = null, engine = null } = {}) {
   const sha = freshSha();
   const seed = await seedVerifiedDocument({ firm, sha256: sha, mime: "application/pdf" });
   await plant(firm, seed.documentId);
+  // uploadedBy is MANDATORY, not decoration: the 0007 attribution trigger resolves an
+  // intake's firm from `firm_memberships where user_id = new.uploaded_by and status='active'`
+  // (0007:440-443) and raises CLR11 'uploader has no matching intake firm' when that read
+  // comes back empty — which a NULL uploader always does. The first cut of this fixture
+  // omitted it and the rig caught it. Same binding every other intake seed in
+  // rig-docs-fixtures.mjs uses.
   const dup = await seedIntake({
-    firm, sha256: sha, status: "verified", mime: "application/pdf",
+    firm, uploadedBy: W.users.alice, sha256: sha, status: "verified", mime: "application/pdf",
     storageKey: `firms/${firm}/docs/${sha}.pdf`,
   });
   // The explicit-lane cells bypass the adaptive wrapper so they can pass p_lane themselves.
