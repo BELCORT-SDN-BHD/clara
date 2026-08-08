@@ -115,7 +115,10 @@ test("R2-Codex: nothing may fill an EMPTY typed CustomerName — contact, captio
   const split = run([BILL_TO, attnLabel, person, L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "");
   assert.equal(split.customer, "", "the contact never becomes the customer");
   assert.equal(split.contact, "Lim Xiao Shan");
-  assert.equal(split.outcome, "sole_authorship_refused");
+  // `absent` rather than `sole_authorship_refused` since C6-3: the party scan now stops at the
+  // intervening `Attention:` label, so there is no party to refuse authorship FOR. Same emitted
+  // value, one wall earlier — the point of this cell (nothing fills an empty typed field) holds.
+  assert.equal(split.outcome, "absent");
   // #3 — captions, English addresses and spaced-out contact labels.
   for (const furniture of ["Name:", "12, Main Road", "A T T N : Lim Xiao Shan"]) {
     const r = run([BILL_TO, L(furniture, box(0.72, 2.30, 3.30, 2.45))], "");
@@ -418,7 +421,11 @@ test("S3 / R6-1: a contact-CLAIMED line can never override, withdraw, or collaps
   const withPlt = run([VENDOR, BILL_TO, ATTN_LABEL, L("Lim P.L.T.", box(0.72, 2.40, 2.60, 2.54)),
     L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim P.L.T.", box(0.72, 2.40, 2.60, 2.54));
   assert.equal(withPlt.customer, "Lim P.L.T.", "typed stands — pre-X7 behaviour, zero loss");
-  assert.equal(withPlt.outcome, "attn_inconclusive_hold");
+  // `absent` since C6-3 — the party scan stops at the intervening `Attention:` label, so no
+  // party is read and the inconclusive-hold branch is never reached. The OBSERVABLE is
+  // unchanged (typed stands); an earlier wall now does the work. The hold branch is still live
+  // and still pinned — by the disagree/agree pair below, where no label intervenes.
+  assert.equal(withPlt.outcome, "absent");
   // THE INVARIANT, now TRUE as originally stated because reservation happens on the CLAIM: a
   // contact-CLAIMED line supplies nothing to the party read — it cannot override, cannot drive a
   // withdraw, and cannot collapse. Typed simply stands, agreeing or not. (The round-5 wording
@@ -452,10 +459,13 @@ test("S3 / R6-1: a contact-CLAIMED line can never override, withdraw, or collaps
   ], "WRONG HOLDING SDN BHD", box(0.72, 2.15, 3.60, 2.29));
   assert.equal(realContest.outcome, "contested");
   assert.equal(realContest.customer, undefined);
-  // The S/B rescue survives: a dotted-initials person is readable, so the override still fires.
-  const sb = run([VENDOR, BILL_TO, ATTN_LABEL, L("Lim S.B.", box(0.72, 2.40, 2.60, 2.54)),
-    L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim S.B.", box(0.72, 2.40, 2.60, 2.54));
+  // The S/B rescue survives — shown on the ORDINARY ordering (`Bill To:` / party / `Attn :`),
+  // which is what the measured KONG CHENG documents actually print. The previous fixture put the
+  // party AFTER an `Attention:` block, and since C6-3 a label terminates the scan, so that
+  // layout now abstains regardless of the S/B question — it could no longer exercise it.
+  const sb = run([VENDOR, BILL_TO, KONG_CHENG, L("Attn : Lim S.B.", ATTN_BOX)], "Lim S.B.");
   assert.equal(sb.customer, "KONG CHENG RESTAURANTS SDN BHD");
+  assert.equal(sb.contact, "Lim S.B.");
   assert.equal(sb.outcome, "attn_overridden");
 });
 

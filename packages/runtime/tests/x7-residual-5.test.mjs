@@ -2,10 +2,10 @@
 //
 // The ONE residual that can still write a WRONG party rather than abstain, given its own file so
 // it is impossible to miss. `NON_ADDRESSEE_MARKERS` enumerates the ELEVEN measured forms;
-// reviewers constructed more and 20 still pass candidacy, 5 of them producing a wrong
+// reviewers constructed more and 23 of the 38 pinned forms still pass candidacy, 5 producing a wrong
 // `customer_name` end-to-end. The base is validated by ABSENCE-of-known-bad — the same law that
 // produced rounds 1-3 — and the case-discontinuity proposal was implemented, MEASURED and
-// REJECTED (it closed 5/5 end-to-end but lost 4 legitimate title-case names and closed 0/24 once
+// REJECTED (it closed 5/5 end-to-end but lost 4 legitimate title-case names and closed NONE once
 // the phrases are ALL-CAPS, which is how Malaysian invoices are usually printed).
 //
 // HARM CEILING: a wrong DRAFT. Counterparty birth happens at HUMAN APPROVAL and no

@@ -319,15 +319,31 @@ export function looksLikePartyName(s) {
 export function splitLabelled(text, vocabulary) {
   const folded = foldForMatch(text);
   if (!folded) return null;
+  // PUNCTUATION-INSENSITIVE MATCHING, second fold. Punctuation sitting BETWEEN two alphanumerics
+  // is joined rather than spaced, so `Att'n` / `Att.n` / `Att-n` / `Att/n` all reach `attn`.
+  //
+  // WHY THIS IS NEEDED AND WHY THE COLON RULE DID NOT COVER IT. Those variants were not
+  // recognized as contact labels, so their lines were never CLAIMED — and an unclaimed
+  // `Att'n ACME SDN BHD` is name-shaped (the apostrophe is an admitted character) and
+  // entity-suffixed, so it became a party candidate and the override wrote the whole
+  // contact-labelled string as `customer_name`. The colon rule only fires when the line carries
+  // a colon: `Att'n : Lim Xiao Shan` dies on it, but `Att'n ACME SDN BHD` has none.
+  //
+  // OVER-CLAIMING IS SAFE BY CONSTRUCTION under claim -> reserve -> judge: recognizing a label
+  // that was not really one can only RESERVE a line, and a reserved line abstains. The failure
+  // mode of a false positive here is a missed read, never a wrong party.
+  const joined = foldForMatch(String(text ?? "").replace(/(?<=[a-zA-Z0-9])[^a-zA-Z0-9\s]+(?=[a-zA-Z0-9])/g, ""));
   let label = null;
-  for (const candidate of vocabulary) {
-    if (!folded.startsWith(candidate)) continue;
-    // THE WORD BOUNDARY. `to` must not match `total`; `attn` must not match `attnxyz`. In the
-    // folded form every separator is a single space, so the character after the label must be
-    // that space (or the string must end there — a bare label on its own line).
-    if (folded.length > candidate.length && /[a-z0-9]/.test(folded[candidate.length])) continue;
-    if (label && label.length >= candidate.length) continue;
-    label = candidate;
+  for (const form of joined === folded ? [folded] : [folded, joined]) {
+    for (const candidate of vocabulary) {
+      if (!form.startsWith(candidate)) continue;
+      // THE WORD BOUNDARY. `to` must not match `total`; `attn` must not match `attnxyz`. In the
+      // folded form every separator is a single space, so the character after the label must be
+      // that space (or the string must end there — a bare label on its own line).
+      if (form.length > candidate.length && /[a-z0-9]/.test(form[candidate.length])) continue;
+      if (label && label.length >= candidate.length) continue;
+      label = candidate;
+    }
   }
   if (!label) return null;
   const want = label.replace(/[^a-z0-9]/g, "").length;

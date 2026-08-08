@@ -79,15 +79,18 @@ export function mergeCustomerIdentity(out, identity) {
   // absence of an explanation this reader COULD NOT READ is not evidence of a contest (review
   // law 2), so it holds instead: typed stands, exactly today's behaviour, zero loss.
   //
-  // THE EXACT GUARANTEE, narrowed to what this code actually enforces. A string refused at the
-  // contact door: (i) cannot OVERRIDE the typed value, and (ii) cannot drive an
-  // UNEXPLAINED-DISAGREEMENT withdraw. It CAN still COLLAPSE with an agreeing typed row, and it
-  // CAN still participate in a CONTEST on its own merits as a party candidate — an earlier
-  // wording claimed it could "never withdraw", which is false: `Bill To:` / `Attention:` /
-  // `AMATERUS GROUP SDN BHD` / `Customer : KONG CHENG…SDN BHD` with a CORRECT typed name reads
-  // `contested` and withdraws, because TWO distinct labelled parties really are on the page.
-  // That withdraw is fail-closed and stays; reordering the passes to suppress it would trade the
-  // mirror case's safety for this case's convenience.
+  // THE EXACT GUARANTEE. Since R6-1 reservation happens on the CLAIM, so a contact-CLAIMED LINE
+  // supplies NOTHING to the party read: it cannot override, cannot withdraw, and cannot collapse
+  // — typed simply stands, agreeing or not, and the receipt reads `absent`. (Round 5 had to
+  // narrow this to "cannot override / cannot drive an unexplained-disagreement withdraw" because
+  // reservation then happened only on ACCEPTANCE; R6-1 removed the hole rather than the claim,
+  // and the round-5 counterexample — `Attention:` / `AMATERUS…` / `Customer : KONG CHENG…` —
+  // now reads `matched` instead of withdrawing a correct name.)
+  //
+  // THE INVARIANT IS ABOUT LINES, NOT STRINGS: the same STRING on an UNCLAIMED line still
+  // qualifies on its own merits, and two genuinely distinct labelled parties on unclaimed lines
+  // still contest. This branch below is what remains — a contact read the module could not
+  // COMPLETE (an entity-ambiguous value) must not be scored as an unexplained disagreement.
   if (receipt.contact_read_inconclusive) {
     receipt.attn_inconclusive_hold += 1;
     receipt.outcome = "attn_inconclusive_hold";

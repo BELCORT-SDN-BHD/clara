@@ -32,7 +32,31 @@
 /** The fold for VALUES — Unicode letters and numbers survive. `鑫旺 SDN BHD` must fold to
  *  `鑫旺 sdn bhd`, not to `sdn bhd`; an ASCII fold silently deletes the only part of that name
  *  that identifies the party. */
-export const foldUnicode = (s) => String(s ?? "").normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
+/**
+ * THE APOSTROPHE CLASS — every rendering `NAME_SHAPE` admits, folded IDENTICALLY everywhere.
+ *
+ * It must be named explicitly because Unicode disagrees with itself about what an apostrophe is:
+ * `U+02BC MODIFIER LETTER APOSTROPHE` is category **Lm — a LETTER** — so the `[^\p{L}\p{N}]`
+ * folds preserved it while the ASCII, curly and fullwidth forms all collapsed to a space.
+ * Measured: `O'BRIEN SDN BHD` keyed `o brien sdnbhd` and `OʼBRIEN SDN BHD` keyed `oʼbrien sdnbhd`,
+ * so ONE company written two lawful ways read as a CONTEST and withdrew a correct typed name.
+ * A character the positive class ADMITS must fold the same way in every comparison, or the two
+ * halves of the module disagree about identity.
+ *
+ * ONE SET, TWO USES. The admitted set and the folded set are the SAME string literal, so they
+ * cannot drift: `NAME_SHAPE` interpolates it, and `deApostrophe` builds its class from it. An
+ * earlier cut listed extra renderings here that `NAME_SHAPE` did not admit — harmless in effect
+ * (an unadmitted character can never reach a key) but exactly the kind of stated-set/real-set gap
+ * this module has been bitten by four times. The fullwidth `U+FF07` is deliberately in NEITHER:
+ * admission normalizes with NFC, which does not fold it, so a name printed with it ABSTAINS.
+ */
+export const APOSTROPHES = "'‘’ʼ";
+const APOSTROPHE_CLASS = new RegExp(`[${APOSTROPHES}]`, "gu");
+
+/** Strip the apostrophe class to a space FIRST, so no fold can treat one rendering as a letter. */
+const deApostrophe = (s) => String(s ?? "").normalize("NFKC").replace(APOSTROPHE_CLASS, " ");
+
+export const foldUnicode = (s) => deApostrophe(s).replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
 
 /**
  * EVERY COLON A DOCUMENT CAN PRINT. A colon means a CAPTION, and a caption is never an identity —
@@ -105,18 +129,44 @@ export const hasColon = (s) => COLON_CLASS.test(String(s ?? "").normalize("NFKC"
  *   ( )    — `ACME (M) SDN BHD`, the standard Malaysian regional infix
  *   -      — hyphenated names; also a key-significant class (see `foldKey`)
  *   /      — `S/B`, `A/B`; also key-significant
- *   @      — Malaysian names genuinely carry `@` as an alias marker (`AHMAD @ JOHN`)
  * Digits are in: `3M`, `7-ELEVEN`, `2020 VISION SDN BHD`.
+ *
+ * `@` IS NOT IN THE CLASS, and the reason is worth keeping. It was listed, justified with a real
+ * Malaysian alias shape (`AHMAD @ JOHN`) — and it could never fire: `looksLikePartyName` refuses
+ * every `@`-bearing value as an email thirteen lines before it consults this class. A justified
+ * allowance that no input can reach is not a permission, it is a comment that looks like one.
+ * Dropped rather than rescued by loosening the email guard: if a real alias-marker case ever
+ * appears in a corpus, the guard gets scoped to actual address shapes THEN, on evidence.
+ *
+ * ══ NFC HERE, NFKC ELSEWHERE — AND THAT ASYMMETRY IS THE POINT ═══════════════════════════════
+ * This test ran on the NFKC form and admitted anything that COMPATIBILITY-folded into the class
+ * while the RAW glyph was what got emitted: `U+FE30`→`..`, `U+2025`→`..`, `U+FE50`→`,`,
+ * `U+FE52`→`.` all passed, and on the SPLIT-LINE path (where the value line's own text becomes
+ * `value_raw` verbatim) `Bill To:` / `ACME︰SDN BHD` produced `customer_name = "ACME︰SDN BHD"` —
+ * a corrupted counterparty. Compatibility folding is a MANY-TO-ONE map, so normalizing before a
+ * POSITIVE admission test silently widens the class by every glyph that folds into it.
+ *
+ * THE RULE: a class that ADMITS must normalize with NFC (canonical only — it never merges
+ * distinct characters), and it must be tested against what will actually be EMITTED. A fold used
+ * for COMPARISON must keep NFKC, because there the many-to-one behaviour is exactly what is
+ * wanted: `hasColon` needs the fullwidth colon to reach `:`, and `foldUnicode`/`foldKey` need two
+ * renderings of one name to meet. Admission narrows; comparison merges. Same input, opposite
+ * requirements — which is why these two normalizations must never be unified.
+ *
+ * RECORDED BEHAVIOUR CHANGE: a NON-BREAKING SPACE (U+00A0) inside a name now abstains, where
+ * NFKC previously folded it to a plain space. It is a formatting artefact, and abstaining leaves
+ * Azure's typed value standing — the fail-closed direction, zero loss. (Named by codepoint, not
+ * embedded: a raw NBSP in source is invisible to a reader and trips the lint.)
  *
  * A CLOSED CLASS OVER AN OPEN WORLD IS SAFE IN THIS DIRECTION: an unlisted character makes the
  * value ABSTAIN (typed stands, zero loss) rather than assert a party. That is the whole point of
  * inverting — the failure mode of an unanticipated glyph flips from "becomes the customer" to
  * "is not read".
  */
-const NAME_SHAPE = /^[\p{Lu}\p{Ll}\p{Lt}\p{Lo}\p{N} .,&'‘’ʼ()\-/@]+$/u;
+const NAME_SHAPE = new RegExp(`^[\\p{Lu}\\p{Ll}\\p{Lt}\\p{Lo}\\p{N} .,&${APOSTROPHES}()\\-/]+$`, "u");
 
-/** Is every character in this value one a registered name may carry? NFKC first. */
-export const isNameShaped = (s) => NAME_SHAPE.test(String(s ?? "").normalize("NFKC"));
+/** Is every character in this value one a registered name may carry? NFC — canonical only. */
+export const isNameShaped = (s) => NAME_SHAPE.test(String(s ?? "").normalize("NFC"));
 
 const ENTITY_SUFFIXES = Object.freeze([
   ["sdnbhd", "sendirian berhad"],
@@ -198,7 +248,7 @@ export function splitEntitySuffix(raw) {
  * `a/b-c` ≠ `a-b/c` ≠ `a b c` ≠ `abc`, while noise punctuation (commas, dots, brackets) still
  * collapses to a boundary and stays harmless: `KONG, CHENG` ≡ `KONG CHENG`.
  */
-const foldKey = (s) => String(s ?? "").normalize("NFKC")
+const foldKey = (s) => deApostrophe(s)
   .replace(/[-‐‑‒–—―−]+/gu, "-")
   .replace(/[/／]+/gu, "/")
   .replace(/[^\p{L}\p{N}\-/]+/gu, " ")

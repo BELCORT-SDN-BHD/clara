@@ -47,6 +47,16 @@
 // prefer-last heuristic needed. And (round 4) A SUFFIX PROVES A NAME, NOT THE ADDRESSEE: the
 // base must be a name, not a phrase mentioning one (`NON_ADDRESSEE_MARKERS`, enforced in
 // `looksLikePartyName` so BOTH polarities inherit it). Residual (5) below is what remains.
+//
+// THE SURFACE CLAIM, precisely: thirteen refusal predicates now sit BEHIND the two positive walls
+// (name shape, entity signal). Only `NON_ADDRESSEE_MARKERS` is still load-bearing BY ABSENCE —
+// and that IS residual (5) by construction, not an additional gap.
+//
+// RECEIPT CONSEQUENCE OF THE CLAIM RULE, recorded for whoever mines these: when a
+// contact-CLAIMED line AGREES with the typed value the outcome is `absent`, not
+// `typed_collapsed`, because no party is read from a claimed line at all. Anyone counting "how
+// often did the reader corroborate Azure" UNDERCOUNTS on that shape. The emitted `customer_name`
+// is identical either way; only the receipt differs.
 // ──────────────────────────────────────────────────────────────────────────────────────────────
 //
 // ─── HONESTY NOTE, A REAL DIFFERENCE FROM X6 ──────────────────────────────────────────────────
@@ -151,7 +161,7 @@ const emptyReceipt = () => ({
   rejected_gate: 0, label_continuation: 0, no_geometry: 0, unit_unresolved: 0,
   no_customer_anchor: 0, customer_anchor_far: 0, closer_to_vendor: 0,
   split_line_scanned: 0, split_line_exhausted: 0, no_entity_suffix: 0,
-  attn_skipped: 0, column_skipped: 0, reserved_skipped: 0,
+  attn_skipped: 0, column_skipped: 0, reserved_skipped: 0, label_boundary: 0,
   attn_matched: 0, attn_ambiguous: 0, attn_rejected_gate: 0, attn_no_value: 0, attn_unattributed: 0,
   contact_emitted: 0,
   typed_collapsed: 0, typed_overridden_attn: 0, typed_disagreement: 0,
@@ -251,7 +261,18 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
         if (box.ymin - labelBox.ymax > blockGap) return null;  // the block ended
         if (xOverlap(box, labelBox) <= 0) { receipt.column_skipped += 1; continue; }
         if (reserved.has(j)) { receipt.reserved_skipped += 1; continue; }
-        if (splitAttnLabel(String(lines[j]?.content ?? ""))) { receipt.attn_skipped += 1; continue; }
+        // ANY RECOGNIZED LABEL TERMINATES THE SCAN — a label starts a NEW block, and a claim
+        // never crosses into it. Measured: `Attention:` / `Bill To:` / `ACME SDN BHD` — the
+        // CONTACT scan walked past `Bill To:`, claimed and reserved ACME, and the party scan
+        // then found nothing, so the F7 repair missed the actual buyer on that layout. Stopping
+        // at the label lets the contact read end where its block ends and the bill-to block own
+        // its own value. Symmetric on purpose: the party scan stops at an `Attn` label too.
+        const nextText = String(lines[j]?.content ?? "");
+        if (splitAttnLabel(nextText) || splitBillToLabel(nextText)) {
+          receipt.label_boundary += 1;
+          note("label_boundary", label, pageNumber, { kind: `${kind}_value` });
+          return null;
+        }
         const raw = asciiTrim(String(lines[j]?.content ?? ""));
         if (!isCandidate(raw)) {
           // Counted under the head that actually refused it — a receipt that lumps "this is not

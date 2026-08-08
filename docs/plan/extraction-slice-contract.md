@@ -271,6 +271,50 @@ reached the books unchallenged. X7 supplies the missing second reader.
     is not placement. Each class now folds to itself where it stands.
   - **R6-4/R6-5** — the residual record and its corpus accounting are trued; see the residual
     section above.
+  - **R6-A the positive class normalizes with NFC, not NFKC.** Testing on the NFKC form admitted
+    anything that **compatibility**-folded into the class while the **raw** glyph was what got
+    emitted — `U+FE30`→`..`, `U+2025`→`..`, `U+FE50`→`,`, `U+FE52`→`.`. On the split-line path
+    (where the value line's text becomes `value_raw` verbatim) `Bill To:` / `ACME︰SDN BHD` emitted
+    a **corrupted** counterparty. **The rule: a class that ADMITS normalizes canonically (NFC) and
+    is tested against what will be EMITTED; a fold used for COMPARISON keeps NFKC, because there
+    many-to-one is exactly what is wanted** (`hasColon` must reach the fullwidth colon;
+    `foldUnicode`/`foldKey` must let two renderings of one name meet). Admission narrows,
+    comparison merges — the two must never be unified. *Recorded change:* a non-breaking space
+    inside a name now abstains. Fullwidth names, `José` (composed **and** decomposed), CJK, `(M)`
+    and `D&D` are all kept — verified directly, correcting a trailing note in the review that
+    said fullwidth would be lost.
+  - **C6-2 label matching is PUNCTUATION-INSENSITIVE.** `Att'n` / `Att.n` / `Att-n` / `Att/n`
+    were not recognized, so their lines were never CLAIMED — and an unclaimed `Att'n ACME SDN BHD`
+    is name-shaped (the apostrophe is an admitted character) and entity-suffixed, so it became a
+    party candidate and the override wrote **the whole contact-labelled string** as
+    `customer_name`. The colon rule could not catch it: it fires only on a line carrying a colon,
+    and that shape has none. Punctuation between two alphanumerics is now joined when matching
+    labels. **Over-claiming is safe by construction** under claim → reserve → judge: a false label
+    match can only reserve a line, and a reserved line abstains.
+  - **C6-3 any recognized LABEL terminates a split-value scan.** `Attention:` / `Bill To:` /
+    `ACME SDN BHD` — the contact scan walked past `Bill To:`, claimed the buyer, and left the
+    party scan with nothing; fail-closed, but the F7 repair *missed the buyer*. A label starts a
+    new block and a claim never crosses into it. *Coverage change recorded:* the mirror layout
+    (`Bill To:` / `Attention:` / … / party) no longer reads a party printed **after** an Attn
+    block — it abstains. The ordinary ordering the measured KONG CHENG documents use
+    (`Bill To:` / party / … / `Attn`) is unaffected.
+  - **C6-4 the apostrophe class folds identically everywhere.** `U+02BC` is category **Lm — a
+    letter** — so the folds preserved it while ASCII/curly forms collapsed to a space:
+    `O'BRIEN` and `OʼBRIEN` keyed apart, and one company written two lawful ways read as a
+    CONTEST that withdrew a correct typed name. The admitted set and the folded set are now **one
+    string literal** in the lexicon, so they cannot drift. *(Fullwidth `U+FF07` is in neither —
+    admission normalizes NFC, which does not fold it, so such a name abstains.)*
+  - **R6-B `@` dropped from the class.** Its justification (`AHMAD @ JOHN`) could never fire — the
+    email guard refuses every `@`-bearing value thirteen lines earlier. Removed rather than
+    rescued by loosening that guard; if a real alias-marker case appears, the guard gets scoped to
+    actual address shapes **then**, on evidence. *(Fourth dissolved justification in this PR.)*
+- **Receipt consequence, recorded:** when a contact-CLAIMED line agrees with the typed value the
+  outcome is `absent`, not `typed_collapsed` — anyone mining receipts for "how often did the
+  reader corroborate Azure" **undercounts** on that shape. The emitted `customer_name` is
+  unchanged; only the receipt differs.
+- **Surface accounting:** thirteen refusal predicates now sit **behind** the two positive walls
+  (name shape, entity signal). Only `NON_ADDRESSEE_MARKERS` is still load-bearing by absence —
+  and that **is** residual (5) by construction, not an additional gap.
 - **Round-5 supplement — four more, each a bug in a previous round's own fix:**
   - **S1** the C3-2 broad contact predicate landed only in the split-line scan, so the **same-line**
     `Attention: ACME SDN BHD (123456-X)` seam kept persisting companies as people. A rule at one
@@ -282,7 +326,9 @@ reached the books unchallenged. X7 supplies the missing second reader.
     shape was scored as an unexplained **disagreement** and *withdrew a correct customer name*.
     Absence of an explanation the reader could not read is not evidence of a contest, so it now
     **holds** (`attn_inconclusive_hold`). Invariant, with its own cell: a string refused at the
-    contact door may COLLAPSE with an agreeing typed row but can **never** override or withdraw.
+    contact door can **never** override or withdraw. *(Superseded by R6-1: since reservation
+    happens on the CLAIM, a contact-CLAIMED line supplies nothing at all — it cannot collapse
+    either. Typed simply stands, agreeing or not, and the receipt reads `absent`.)*
   - **S4** hyphen and slash folded to the same boundary, so `A/B TRADING SDN BHD` ≡
     `A-B TRADING SDN BHD` suppressed a lawful contest. The classes now sign the key distinctly.
     *Narrowing recorded:* `KONG-CHENG` no longer keys as `KONG CHENG` — two renderings of one
@@ -316,11 +362,13 @@ reached the books unchallenged. X7 supplies the missing second reader.
 > path reaches this field — the same maker/checker wall that caught the original KONG CHENG
 > defect. A proposed rule (refuse when a lowercase relational phrase precedes an upper-cased name)
 > was **implemented, measured and rejected**: it closed all 5 end-to-end cases but **lost 4
-> legitimate names** (`Bank of China (Malaysia) Berhad`) and closed **0 of 24** once the phrases
-> are printed ALL-CAPS, which is how Malaysian invoices usually print. **Recommendation: accept
-> the residual and re-measure against the real KONG CHENG capture at the live replay.** All 24
-> forms and the 5 scenarios are pinned as tests (`x7-residual-5.test.mjs`) so the class is
-> measured on every run, not remembered.
+> legitimate names** (`Bank of China (Malaysia) Berhad`) and closed **none of the constructed
+> forms** once they are printed ALL-CAPS, which is how Malaysian invoices usually print.
+> **Recommendation: accept the residual and re-measure against the real KONG CHENG capture at the
+> live replay.** The **38 pinned forms** (23 admitted / 15 refused) and the 5 scenarios are tests
+> (`x7-residual-5.test.mjs`), and the rejected predicate is re-run in CI against its own
+> **23-distinct** corpus (`x7-path-a-rejected.mjs`) — every number below is derived there, not
+> counted by hand.
 
 **The measurement table (path A, case discontinuity — REJECTED).**
 

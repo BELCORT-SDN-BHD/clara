@@ -95,8 +95,13 @@ test("a SPLIT `Attention:` label RESERVES its value line — the contact can nev
   const party = line("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69));
   const { fields, receipt } = read([BILL_TO_LABEL, attnLabel, person, party]);
   assert.equal(contactOf({ fields }).value_raw, "Lim Xiao Shan", "the split form still reads the contact");
-  assert.equal(partyOf({ fields }).value_raw, "KONG CHENG RESTAURANTS SDN BHD", "and the party beneath it still reads");
-  assert.ok(receipt.reserved_skipped >= 1, "the reserved value line was stepped over, not consumed");
+  // COVERAGE CHANGE (round 6, C6-3): the party below the Attn block is NO LONGER read as the
+  // `Bill To:` value. Any recognized LABEL now terminates a split-value scan — `Attention:`
+  // starts a new block, and a company printed after it belongs to that block, not to the
+  // bill-to one. Fail-closed: typed stands. The ordinary ordering (Bill To: / party / … / Attn)
+  // is unaffected, and it is the ordering the measured KONG CHENG documents actually use.
+  assert.equal(partyOf({ fields }), undefined, "the scan stops at the intervening label");
+  assert.equal(receipt.label_boundary, 1, "…and says so");
   // Even when attribution REFUSES the contact, the line stays reserved: the document labelled it
   // a contact, and attribution failing says something about geometry, not about what the line IS.
   const noAnchor = read([BILL_TO_LABEL, attnLabel, person, party], { vendor: null, customer: { page: 1, xmin: 0.72, xmax: 3.30, ymin: 2.55, ymax: 2.69 } });
@@ -196,7 +201,9 @@ test("ONE LEXICON, TWO POLARITIES — a party must carry the signal, a contact m
   // shape is, so the line supplies nothing at all — typed simply stands.
   assert.equal(partyOf({ fields }), undefined, "a contact-CLAIMED line is not a party candidate");
   assert.equal(receipt.attn_rejected_gate, 1, "the contact pass examined the company and refused it");
-  assert.ok(receipt.reserved_skipped >= 1, "…and the party scan stepped over the claimed line");
+  // The party scan never even reaches the claimed line now — it stops at the `Attention:` label
+  // itself (C6-3). Two independent walls arrive at the same refusal; the receipt names which.
+  assert.equal(receipt.label_boundary, 1, "…and the party scan stopped at the intervening label");
   // The true F7 shape still yields BOTH fields — the person a person, the company a company.
   const real = read(KONG_CHENG_BLOCK);
   assert.equal(partyOf(real).value_raw, "KONG CHENG RESTAURANTS SDN BHD");

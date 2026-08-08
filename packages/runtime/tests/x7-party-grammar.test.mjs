@@ -20,6 +20,7 @@ import {
   splitBillToLabel, splitAttnLabel, looksLikePartyName, partyKey, hasRegisteredEntitySuffix,
   containsEntityToken,
 } from "../lib/invoice-party-grammar.mjs";
+import { hasColon, APOSTROPHES } from "../lib/invoice-entity-lexicon.mjs";
 
 test("C3-1: a COLON anywhere means a caption — the root closer for the possessive class", () => {
   // The tokenizer knew four apostrophe glyphs; OCR produces more. NFKC folds the FULLWIDTH form
@@ -66,6 +67,85 @@ test("S2: the COLON class is complete — NFKC first, then the enumerated residu
   // "COMPLETE" means complete for the OCR-producible glyphs measured so far — a closed
   // enumeration over an open world, which is why an unlisted glyph must ABSTAIN, never assert.
   assert.equal(looksLikePartyName("BANK OF CHINA (MALAYSIA) BERHAD"), true);
+});
+
+test("R6-A: the positive class normalizes with NFC — COMPATIBILITY folding must not widen it", () => {
+  // The class ran on the NFKC form and admitted anything that COMPATIBILITY-folded into it,
+  // while the RAW glyph was what got emitted. Four measured leaks, each folding to an allowed
+  // character: U+FE30→`..`, U+2025→`..`, U+FE50→`,`, U+FE52→`.`.
+  for (const [name, glyph] of [["U+FE30 vertical two-dot leader", "︰"], ["U+2025 two-dot leader", "‥"],
+    ["U+FE50 small comma", "﹐"], ["U+FE52 small full stop", "﹒"]]) {
+    assert.equal(looksLikePartyName(`ACME${glyph}SDN BHD`), false, `${name} inside a name`);
+    assert.equal(looksLikePartyName(`${glyph} ACME SDN BHD`), false, `${name} leading`);
+    // Each one really does compatibility-fold into the class — that is the mechanism, pinned.
+    assert.ok(/^[.,]+$/.test(glyph.normalize("NFKC")), `${name} folds to allowed punctuation under NFKC`);
+    assert.equal(glyph.normalize("NFC"), glyph, "…and NFC leaves it alone, which is why NFC is the right fold here");
+  }
+  // THE KEEP-SET. NFC must not cost a legitimate name.
+  for (const good of ["José Silva Sdn Bhd", "José Silva Sdn Bhd", "鑫旺 SDN BHD",
+    "ＡＣＭＥ SDN BHD", "２０２０ VISION SDN BHD", "ACME (M) SDN BHD", "D&D DEVELOPMENT SDN BHD",
+    "KONG CHENG RESTAURANTS SDN BHD"]) {
+    assert.equal(looksLikePartyName(good), true, good);
+  }
+  // THE ONE RECORDED BEHAVIOUR CHANGE: a non-breaking space inside a name now abstains.
+  assert.equal(looksLikePartyName("ACME SDN BHD"), false, "NBSP is a formatting artefact — fail-closed");
+});
+
+test("R6-A: the OTHER normalizations stay NFKC — admission narrows, comparison merges", () => {
+  // The asymmetry is deliberate and load-bearing: a class that ADMITS must not merge distinct
+  // characters, while a fold used for COMPARISON must. Unifying them would break one or the other.
+  assert.equal(hasColon("Ref： ACME"), true, "hasColon still catches the FULLWIDTH colon…");
+  assert.equal(hasColon("Ref﹕ ACME"), true, "…and the small colon, via NFKC");
+  // …and the comparison fold still lets two renderings of one name meet.
+  assert.equal(partyKey("ＡＣＭＥ SDN BHD"), partyKey("ACME SDN BHD"), "fullwidth and ASCII are one party");
+});
+
+test("C6-2: label matching is PUNCTUATION-INSENSITIVE — `Att'n` ≡ `Attn`", () => {
+  // WHY THIS MATTERED, and why the colon rule did not cover it. The variants were not recognized
+  // as contact labels, so their lines were never CLAIMED — and an unclaimed `Att'n ACME SDN BHD`
+  // is name-shaped (the apostrophe is an ADMITTED character) and entity-suffixed, so it became a
+  // party candidate and the override wrote the whole contact-labelled string as customer_name.
+  // The colon rule only fires on a line that carries a colon: `Att'n : Lim` dies on it, but
+  // `Att'n ACME SDN BHD` has none — which is exactly the shape the reviewer probed.
+  for (const lbl of ["Att'n", "Att.n", "Att-n", "Att/n", "Att’n", "Attn"]) {
+    assert.ok(splitAttnLabel(`${lbl} : Lim Xiao Shan`), `${lbl} must be a contact label`);
+    assert.equal(splitAttnLabel(`${lbl} : Lim Xiao Shan`).remainder, "Lim Xiao Shan");
+    assert.ok(splitAttnLabel(`${lbl} ACME SDN BHD`), `${lbl} must claim even a company value`);
+  }
+  // OVER-CLAIMING IS SAFE BY CONSTRUCTION under claim -> reserve -> judge: a false label match
+  // can only RESERVE a line, and a reserved line abstains. The word boundary still holds, so
+  // ordinary words are not swallowed.
+  assert.equal(splitAttnLabel("ATTNXYZ SDN BHD"), null);
+  assert.equal(splitBillToLabel("TOTAL PAYABLE : 2,800.00"), null, "the `to` boundary survives the second fold");
+  assert.equal(splitBillToLabel("Bill To: ACME SDN BHD").remainder, "ACME SDN BHD");
+});
+
+test("C6-4: every apostrophe rendering folds identically — one name, one key", () => {
+  // `U+02BC` is category Lm — a LETTER — so the `[^\p{L}\p{N}]` folds PRESERVED it while ASCII,
+  // curly and fullwidth apostrophes collapsed to a space. `O'BRIEN` and `OʼBRIEN` keyed
+  // differently, so one company written two lawful ways read as a CONTEST and withdrew a correct
+  // typed name. A character the positive class ADMITS must fold the same way in every comparison.
+  const keys = ["O'BRIEN SDN BHD", "O‘BRIEN SDN BHD", "O’BRIEN SDN BHD", "OʼBRIEN SDN BHD"].map(partyKey);
+  assert.equal(new Set(keys).size, 1, `all renderings must key alike, got ${JSON.stringify(keys)}`);
+  // …and the class does not over-merge: a genuinely different name still keys apart.
+  assert.notEqual(partyKey("O'BRIEN SDN BHD"), partyKey("OBRIEN HOLDINGS SDN BHD"));
+  // THE INVARIANT: the ADMITTED set and the FOLDED set are one string literal in the lexicon, so
+  // they cannot drift. Every admitted rendering folds alike; nothing folds that is not admitted.
+  for (const glyph of APOSTROPHES) {
+    assert.equal(looksLikePartyName(`O${glyph}BRIEN SDN BHD`), true, `${glyph} is admitted…`);
+    assert.equal(partyKey(`O${glyph}BRIEN SDN BHD`), partyKey("O'BRIEN SDN BHD"), "…and folds alike");
+  }
+  // The FULLWIDTH apostrophe is in NEITHER set: admission normalizes with NFC, which does not
+  // fold it, so a name printed with it ABSTAINS. Fail-closed, and recorded rather than silent.
+  assert.equal(looksLikePartyName("O＇BRIEN SDN BHD"), false, "U+FF07 abstains — not admitted, not folded");
+});
+
+test("R6-B: `@` is not in the class — the email guard already owns that character", () => {
+  // The allowance was justified with a real Malaysian alias shape and could never fire: the
+  // email guard refuses every `@`-bearing value thirteen lines earlier. A permission no input
+  // can reach is a comment that looks like one.
+  assert.equal(looksLikePartyName("AHMAD @ JOHN SDN BHD"), false);
+  assert.equal(looksLikePartyName("accounts@acme.com.my"), false, "the guard that owns `@` still works");
 });
 
 test("C3-2: the contact refusal is a CONTAINS test, not the negation of party candidacy", () => {
