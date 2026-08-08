@@ -6,14 +6,14 @@
 
 ## 0. The one invariant, and how it is made structural
 
-**The DB owns every number; the agent only orchestrates; one audited function per mutation class.** The prior build honoured this for GL balance but leaked everywhere else — the read tool could write (Ggr-1), provenance was unvalidated (GAP0-1), side-effects were prompt-only (F3), gates were model-asserted (A-5/A-16). The rebuild makes the invariant **structural at four load-bearing points** (Gate-1 C3), so correctness does not depend on model or app discipline:
+**The DB owns every AUTHORITATIVE number; the agent only orchestrates; one audited function per mutation class.** *(Wording amended by ADR-065/E-R4, 2026-08-08, mirroring PRD §6 invariant 1: the LLM may propose or independently check a calculation, but no model-generated numeral enters a durable report unless a versioned deterministic evaluator reproduces it from DB-owned inputs.)* The prior build honoured this for GL balance but leaked everywhere else — the read tool could write (Ggr-1), provenance was unvalidated (GAP0-1), side-effects were prompt-only (F3), gates were model-asserted (A-5/A-16). The rebuild makes the invariant **structural at four load-bearing points** (Gate-1 C3), so correctness does not depend on model or app discipline:
 
 1. **Client attribution** — a DB function (`assert_client_resolved`) gates every client-scoped write on a persisted, ≥0.95, *server-verified* client resolution; no write path exists that skips it.
 2. **Provenance binding** — document-origin writes validate `source_doc_sha256` + `document_id` against a real ingested document row in the same transaction; an invalid or absent pair RAISES.
 3. **Wake authority** — each wake kind carries a DB-enforced **allowlist** of invokable functions; `[proactive]` can call only `record_notification`. Not a blocklist.
 4. **Write authorization** — the agent's read path is **structurally read-only** (a role with no EXECUTE on any volatile writer + `default_transaction_read_only`), so no SELECT-wrapped write is possible; role floors and plan→approve live in the DB.
 
-Everything else (coding choices, materiality, close-readiness judgement) stays **visibility-first** — surfaced, not hard-blocked — per the owner's standing philosophy.
+Everything else (coding choices, materiality, close-readiness judgement) stays **visibility-first** — surfaced, not hard-blocked — per the owner's standing philosophy. **One ruled exception (ADR-065/E-R2, 2026-08-08): the year-end close's drawer-2 gates default-REFUSE until a per-item, named, receipted human attestation — close-readiness at the close boundary is fail-closed-with-attestation, not advisory. Drawer-3 readiness signals remain visibility-first. Drawer-1 items (continuity math, control tie-outs, ordering) are structural invariants, not judgement — this sentence never reached them.**
 
 ---
 

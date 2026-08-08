@@ -11,7 +11,7 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 | Need | Source of truth |
 |---|---|
-| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-065 onward** (next: the Wave E contract), PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059**, **060–064** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
+| Decisions (append-only ADRs) + open items | `docs/PROJECTLOG.md` — PART 1 holds **ADR-065 onward** (ADR-065 = the Wave E contract), PART 2 is the live open register. Archived: **001–021**, **022–043**, **044–054**, **055–059**, **060–064** in `docs/PROJECTLOG-ARCHIVE-ADR-<range>.md` |
 | Live CODE structure (functions, callers, routes) | **codebase-memory graph — query it, don't grep** (`get_architecture` / `search_graph` / `trace_path`; re-index after big changes) |
 | What / why / scope · product invariants (LAW) | `docs/prd/PRD.md` |
 | Target architecture (event spine, structural invariants, runtime, reporting) | `docs/architecture/ARCHITECTURE.md` |
@@ -26,9 +26,12 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 ## Cardinal invariants (never violate — full set in `docs/prd/PRD.md`)
 
-- **The DB owns every number; the agent only orchestrates.** Book writes go
-  through named, audited Postgres functions — never hand-write a row when a
-  function exists. The agent never *computes* a figure.
+- **The DB owns every AUTHORITATIVE number; the agent only orchestrates.** Book
+  writes go through named, audited Postgres functions — never hand-write a row
+  when a function exists. The LLM may propose or independently check a
+  calculation, but no model-generated numeral enters a durable report unless a
+  versioned deterministic evaluator reproduces it from DB-owned inputs
+  (ADR-065/E-R4, verbatim).
 - **Four structural invariants** (ARCHITECTURE §0/§3.3), enforced in the DB, not
   by model discipline: client attribution (`assert_client_resolved` ≥0.95),
   provenance binding (`source_doc_sha256` + `document_id` validated in-txn), wake
@@ -167,7 +170,10 @@ adjustments** (needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.de
 `clara-backup` daily.** The **ROME pair's** FA and staff-advance registers are honestly EMPTY
 (ADR-056/058 — both are in strike-off, so neither could carry a live register); **BEE is the
 going-concern client ADR-058 said those deferrals were waiting for** — it owns tasks #71/#72
-(Gate P on its SST invoices + the WD-R14 real FA carry-down). The sandbox carries the
+(Gate P on its SST invoices + the first close-time real FA continuity roll, FY2025 closing
+NBV → FY2026 opening, riding the Wave-E first real close; **NOT** WD-R14's *opening*
+carry-down deferral, which still needs a client that owned assets at opening — PROJECTLOG
+PART 2's measured reason stands). The sandbox carries the
 labelled-synthetic corpora — a live depreciation authority, ONE synthetic staff advance (tie 0),
 the D-b2 acceptance register (templates A+B retired with reasons · **B2 LIVE from 2026-07-01** ·
 the May occurrence+mirror pair netting ZERO · one cancelled pair drill), and §7-A's live
