@@ -95,17 +95,48 @@
 -- remove that property while fixing the door it also blocked.
 --
 -- SO THE PROPERTY IS NOW NAMED AND DELIBERATE: a withdrawal is sticky against automation.
--- Only a human act -- clara.request_autodraft, the SOLE producer of p_origin='one_click',
+-- Only a human act -- clara.request_autodraft, the SOLE SQL PRODUCER of p_origin='one_click',
 -- under _human_ctx(role_rank('bookkeeper')) and granted to clara_authenticated only -- can
 -- re-invite the unattended lane onto a filing the human just emptied. The prestate below
 -- PROVES that producer set is exactly {clara.request_autodraft} by censusing pg_proc for the
 -- literal, rather than trusting this paragraph; if a second producer ever appears, or if that
 -- one loses its human floor or gains a machine grant, this migration refuses.
 --
+-- "SOLE SQL PRODUCER" IS THE PRECISE CLAIM, AND THE LIMIT IS STATED RATHER THAN GLOSSED. This
+-- gate is RUNTIME-LAYER DISCIPLINE, NOT A PRIVILEGE BOUNDARY: clara_runtime holds EXECUTE on
+-- admit_autodraft_task and can pass 'one_click' itself, and the census above reads pg_proc --
+-- which the runtime's own callers are not in. Measured by the review, not assumed. The
+-- runtime side is therefore pinned where it actually lives, by test:
+-- packages/runtime/tests/wave-a-autodraft-consumer.test.mjs pins BOTH production admit call
+-- sites to origin 'sweep' by full positional deep-equal -- admitDocument (per-document
+-- dispatch) and runCatchupPass (the unattended catch-up loop, the one this blocker was about).
+-- A future "let the retry door work for stragglers too" edit fails a named test rather than
+-- silently reopening the hole.
+--
 -- ROADMAP, NOT BUILT HERE: a sweep-side "counterparty landscape refreshed, re-offer this
 -- filing" behaviour is a genuinely different AUTONOMY CLASS -- the machine deciding to redo
 -- work a human rejected -- and needs its own owner ruling before anything is built. Recorded
 -- so a later reader sees the sweep's already_done as a decision, not an oversight.
+--
+-- =====================================================================================
+-- THE DOOR IS SINGLE-USE PER WITHDRAWAL -- A RECORDED DECISION, NOT A RESIDUAL BUG
+-- =====================================================================================
+-- ONE UNATTENDED RETRY PER WITHDRAWAL; A NO-OP RETRY SPENDS IT; THE ATTENDED DOORS ARE THE
+-- REMAINDER.
+--
+-- The mechanism, stated plainly so nobody later reads it as a recurrence of F8: a re-admitted
+-- task that settles WITHOUT drafting ('skipped_lane') writes no clara.coding_attempts row, so
+-- the arm's conjunct (1) then reads THAT task -- the current registry occupant -- finds no
+-- entry of its own, and the door answers already_done from then on. The withdrawal's single
+-- unattended retry has been spent, even though the filing still carries the old withdrawn row.
+--
+-- THIS IS THE FAIL-CLOSED DIRECTION AND IT IS THE ONE WE WANT. The alternative -- letting a
+-- historical withdrawn row keep authorising re-admission after every future no-draft
+-- completion -- is precisely the permanent re-admission permit the cross-model review flagged,
+-- with its receipt-deletion and re-reservation on every pass. Between "the human may have to
+-- use the chat or hand-draft lane" and "a stale row silently re-arms an unattended loop", the
+-- first is the correct trade. The reworded CLR23 message names those attended doors, so the
+-- remedy a human is handed stays accurate in exactly this state. Pinned by x34.o.
 --
 -- THE GATE AND THE TASK-ENTRY IDENTITY TEST ARE INDEPENDENT, AND BOTH ARE REQUIRED. The gate
 -- decides WHO may re-open the door; the coding_attempts test decides WHETHER this task's own

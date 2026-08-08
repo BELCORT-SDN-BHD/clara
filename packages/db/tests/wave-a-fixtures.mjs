@@ -343,6 +343,10 @@ export async function readyFiling(sub, { client, amount = 500000, vendorName = "
  *     autodraft lane DOES pass one -- autoDraft.v6.tools.ts:193 builds
  *     `{ task_id: ctx.taskId, part_payload }` and hands it to wake_draft_entry -- and the
  *     live clara._draft_entry_core admits it for kind='autodraft' as well as 'chat_turn'.
+ *     A caller that opts in is ENVELOPE-IDENTICAL WHERE LOAD-BEARING ({ task_id, part_payload }
+ *     through the same p_coding parameter); the inner part_payload keys differ inertly, and
+ *     that is safe precisely because the 0053 arm never reads them -- it reads only the
+ *     coding_attempts row's task_id -> entry_id mapping.
  *     coding_attempts is the ONLY task->entry identity link in the schema
  *     (uq_coding_attempts_task / uq_coding_attempts_entry), so a cell that needs to reason
  *     about "the entry THIS task produced" must pass `coding` or it is testing a shape
