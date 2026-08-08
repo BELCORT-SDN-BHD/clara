@@ -224,7 +224,7 @@ test("vendor_registration: a typed VendorTaxId is emitted as invoice.vendor_regi
   assert.equal(reg.value_raw, "201801000900");
   assert.equal(reg.page, 1);
   assert.equal(reg.confidence, 0.88);
-  assert.equal(out.normalizationVersion, "clara-invoice-norm:v9", "normalization version is bumped to v9 (the currency-defect fix)");
+  assert.equal(out.normalizationVersion, "clara-invoice-norm:v10", "normalization version is bumped to v10 (X7, the deterministic customer-identity reader)");
 });
 
 test("v5 (Wave A2): CustomerName/SubTotal/TotalTax map to AR facts; CustomerTaxId → customer_registration", () => {
@@ -245,6 +245,42 @@ test("v5 (Wave A2): CustomerName/SubTotal/TotalTax map to AR facts; CustomerTaxI
   for (const p of Object.keys(byPath)) {
     assert.ok(!/tin|ssm|account/.test(p), `v5 key ${p} avoids the attribution patterns`);
   }
+});
+
+test("v10 (X7/F7): the typed CustomerName pass-through above is OVERRIDDEN when it is the Attn person", () => {
+  // The cell above pins the v5 contract and is still exactly right: a typed CustomerName with no
+  // deterministic reader to challenge it maps VERBATIM. This adjacent cell pins what changed —
+  // when the layout states a boxed party AND names the typed value as the `Attn` contact, the
+  // party wins and the person becomes `invoice.contact_person`. That is the F7 defect, measured
+  // on both real KONG CHENG invoices (docs/plan/wave-7a-acceptance-h1.md rows 1 and 12, E7).
+  // The full matrix lives in x7-customer-mapper.test.mjs; this is the end-to-end sighting.
+  const poly = (xmin, ymin, xmax, ymax) => [xmin, ymin, xmax, ymin, xmax, ymax, xmin, ymax];
+  const out = azure.normalizeAzureInvoice({
+    status: "succeeded",
+    analyzeResult: {
+      documents: [{ fields: {
+        InvoiceTotal: { content: "2,800.00", valueCurrency: { currencyCode: "MYR" }, boundingRegions: [{ pageNumber: 1, polygon: poly(6.5, 8.0, 7.7, 8.15) }], confidence: 0.93 },
+        VendorName: { content: "ROME SECRETARY SDN BHD", boundingRegions: [{ pageNumber: 1, polygon: poly(0.70, 0.65, 3.50, 0.81) }], confidence: 0.94 },
+        CustomerName: { content: "Lim Xiao Shan", boundingRegions: [{ pageNumber: 1, polygon: poly(1.10, 2.90, 2.20, 3.04) }], confidence: 0.91 },
+      } }],
+      pages: [{
+        pageNumber: 1, unit: "inch", width: 8.2639, height: 11.6806,
+        lines: [
+          { content: "ROME SECRETARY SDN BHD", polygon: poly(0.70, 0.65, 3.50, 0.81) },
+          { content: "Bill To:", polygon: poly(0.72, 2.10, 1.45, 2.24) },
+          { content: "KONG CHENG RESTAURANTS SDN BHD", polygon: poly(0.72, 2.30, 3.30, 2.45) },
+          { content: "Attn : Lim Xiao Shan", polygon: poly(0.72, 2.90, 2.20, 3.04) },
+        ],
+      }],
+    },
+  });
+  const got = Object.fromEntries(out.fields.map((f) => [f.field_path, f]));
+  assert.equal(got["invoice.customer_name"].value_raw, "KONG CHENG RESTAURANTS SDN BHD", "the party in the box, not the person addressed");
+  assert.equal(got["invoice.contact_person"].value_raw, "Lim Xiao Shan", "the contact is kept as its own fact, never as the counterparty");
+  assert.equal(out.fields.filter((f) => f.field_path === "invoice.customer_name").length, 1, "never two rows for one field_path");
+  assert.equal(out.envelope.customer_identity.typed_overridden_attn, 1);
+  // AB-3 boundary again: the NEW key must also avoid the attribution patterns.
+  assert.ok(!/tin|ssm|account/.test("invoice.contact_person"));
 });
 
 test("vendor_registration: a MISSING VendorTaxId yields no invoice.vendor_registration field", () => {

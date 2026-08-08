@@ -253,7 +253,7 @@ async function documentRunState(getRun, runId) {
 /** Reconcile queued-unbound, held-egress, and stranded-running document tasks. */
 export async function reconcileDocumentTasks(client, deps) {
   const log = deps.log ?? (() => {});
-  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentHeldDeclined: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0 };
+  const out = { documentReenqueued: 0, documentRequeuedLost: 0, documentHeldReleased: 0, documentHeldDeclined: 0, documentIntegrityWarnings: 0, documentSidecarCorruptRebuilt: 0, documentTransportless: 0 };
   if (typeof deps.enqueueDocumentIngest !== "function") return out;
 
   if (process.env.CLARA_DOC_EGRESS_APPROVED === "1") {
@@ -309,6 +309,24 @@ export async function reconcileDocumentTasks(client, deps) {
           log(`[reconcile] document status probe failed task=${task.taskId}: ${err?.message ?? err}`);
           continue;
         }
+      }
+      // 0051 §2 — NEVER DISPATCH A TRANSPORT-LESS INGEST TASK. documentIngest reads
+      // storageKey/sha256 off the SIDECAR (behavior_v2.mjs:190-193), and storage.mjs's
+      // safeKey() rejects an empty key outright — so a task dispatched without them does not
+      // fail honestly, it manufactures a `storage_error` terminal that looks exactly like a
+      // real vendor fault, burning an attempt and closing the document out under a misleading
+      // code. That shape is reachable: documentTaskIndex's own merge is deliberately LENIENT
+      // (mergeTaskMeta with requireExists:false, :224) and REBUILDS a missing sidecar from the
+      // task columns alone — which carry no transport at all — and this loop would then
+      // dispatch it once past the grace. Skip and say so; the DB door's ECHO mode rebuilds the
+      // real sidecar on the next re-upload of the same bytes (migration 0051 §2), which is the
+      // action the human is already taking. A queued task that waits is recoverable; a task
+      // terminalised under a false code is not.
+      if ((task.lane === "ocr" || task.lane === "structured_parse" || task.lane === "none")
+          && (!task.storageKey || !task.sha256)) {
+        out.documentTransportless += 1;
+        log(`[reconcile] ingest task ${task.taskId} (lane ${task.lane}) has no transport metadata in its sidecar — NOT dispatched. Re-uploading the same bytes will rebuild it (0051 §2 recovery echo); dispatching now would manufacture a storage_error terminal that is indistinguishable from a real engine failure.`);
+        continue;
       }
       // Lane-aware dispatch: never route a facts task through documentIngest.
       const enqueue = enqueueForLane(deps, task.lane);

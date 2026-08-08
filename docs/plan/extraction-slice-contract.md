@@ -145,6 +145,263 @@ the fix is its **own block** — never inside X5's micro-migration; X5 stays LAS
 ALONE — and a resolution-LOGIC change carries its **own cross-model adversarial review**
 before merge (house law for live-lane code).
 
+**X7 — the deterministic CUSTOMER-identity reader.** *(X7 added by the F6–F9 fix batch,
+2026-08-09 — see the batch ADR. The ADR-047 ratification above closed at X6; this block is an
+AMENDMENT to that closed list, not a re-grill of it.)*
+
+**The measured defect (F7, ADR-064 §3 / ledger task #32).** ROME SECRETARY issued two real
+invoices to **KONG CHENG RESTAURANTS SDN BHD**. Both print the company in the bill-to box and a
+separate `Attn : Lim Xiao Shan` contact line under it. Azure typed `CustomerName` as **the
+person** on BOTH, so `invoice.customer_name` was captured as `"Lim Xiao Shan"` and both drafts
+(`53504c0e-…` RM2,800 and `7995b1a3-…` RM600) sit `status='draft'` skip=`counterparty_unresolved`
+to this day (`docs/plan/wave-7a-acceptance-h1.md` exhibit E7 + manifest rows 1 and 12).
+
+**Why this is NEW-BUILD, not a lexicon re-rank.** Before X7 there was **no deterministic
+customer-identity reader at all** — `invoice.customer_name` was a byte-for-byte pass-through of
+Azure's typed field, so an ML model's pick of which line in the bill-to box is "the customer"
+reached the books unchallenged. X7 supplies the missing second reader.
+
+- **Ranking (the fix):** a positively-identified **boxed / labelled party block outranks
+  Attn-line adjacency** for `customer_name`. It is structural, not a tie-break: an `Attn` line is
+  claimed as a CONTACT before party candidacy is considered, so the person is never in the race.
+  The person is emitted as the **new `invoice.contact_person` fact**.
+- **Twins X6's architecture** (`lib/invoice-customer-identity.mjs` + `lib/invoice-party-grammar
+  .mjs`): uniqueness-or-nothing · the label + party-name gate · **customer-block attribution**
+  (a candidate must sit next to the typed `CustomerName` region and closer to it than to
+  `VendorName`) · reconciliation against the typed emission. **X6's insight re-applied is what
+  makes it work on the very documents it fixes:** Azure's typed CustomerName picked the wrong
+  LINE but a line *inside* the bill-to box — its content is wrong, its **geometry** is sound.
+- **No top-band analogue**, deliberately: a bill-to block has no positional convention
+  comparable to a letterhead, and an unmeasured band is a guess wearing a threshold.
+- **THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR** *(orchestrator ruling on the
+  two-lane review, 2026-08-09 — this overruled two behaviours the original build order specified,
+  after BOTH review lanes broke them by executing the code).* Its lawful actions are exactly four:
+  **collapse** (agrees with typed → one row, the typed one) · **override** (non-empty typed ==
+  the reader's own Attn person → the party wins; the F7 branch) · **withdraw** on unexplained
+  disagreement · **withdraw** on a contested landscape. Its two lawful silences: reader
+  absent/refused → typed stands byte-identically; reader has a party but typed is empty/absent →
+  **nothing emitted** (`sole_authorship_refused`).
+  - *Overrule 1 — sole authorship DELETED.* With an empty-but-regioned typed `CustomerName` the
+    first cut emitted a line item, a contact person, a caption (`Name:`) and a street address as
+    `customer_name` — each a WRONG identity manufactured where pass-through had supplied none.
+  - *Overrule 2 — a contested landscape (≥2 distinct labelled parties) WITHDRAWS the typed row*
+    rather than leaving it standing. A contest is a positive measurement, not an absence of
+    opinion: typed `WRONG HOLDING` against `Bill To: WRONG HOLDING` + `Bill To: ACTUAL
+    SUBSIDIARY` persisted the wrong identity.
+- **`to` is BARE-LABEL ONLY.** Malaysian invoices print line items in the infinitive — `To supply
+  and install…`, `To Secretarial fee for the year 2025` — which are legal `to` label hits whose
+  remainder opens with a content word. Left unrestricted they became live party candidates and
+  broke all four downstream branches. The header's own use case for `to` was the split-line bare
+  form, so the entry is restricted to it.
+- **The identity key is Unicode-aware** (`\p{L}\p{N}`, NFKC): the ASCII rule collapsed
+  `鑫旺 SDN BHD` and `宏达 SDN BHD` to `sdnbhd`, defeating uniqueness-or-nothing.
+- **PARTY CANDIDACY REQUIRES A POSITIVE REGISTERED-ENTITY SIGNAL** *(round-3 design law — this
+  closes the CLASS the first three rounds kept finding instances of).* A scanned or labelled
+  string may become a party candidate only if it ends in the documented Malaysian legal-entity
+  suffix family: **SDN BHD** (+ `SDN. BHD.`, `S/B`, `Sendirian Berhad`) · **BHD/BERHAD** ·
+  **PLT** · **LLP**. No suffix ⇒ no candidacy ⇒ no override, no contest, no
+  disagreement-withdraw — the reader abstains and typed stands.
+  - *Why the shape changed:* the gate was a **blocklist**, and both scan paths took the FIRST
+    string it admitted. A blocklist can only enumerate the past, so every round produced a fresh
+    instance of one class — a label whose remainder is furniture (`Customer's Ref: PO-8891` →
+    `'s Ref: PO-8891`, `Buyer Signature` → `Signature`: fifteen in one probe) — and every scan
+    widening reopened it (the two-column skip repair let the caption `DELIVERY ADDRESS` win).
+    The override branch is the only branch that can write a WRONG party onto real books, so it
+    now demands positive evidence. Review law 2 in grammar form.
+  - *One lexicon, two polarities:* the same family that ADMITS a party REFUSES a contact — an
+    entity-suffixed string is never a person. Without the symmetry, `Attention:` → `ACME SDN BHD`
+    emitted the company as both `customer_name` and `contact_person`.
+  - *A non-candidate is a SKIP, not a stop*, so a caption printed above the party no longer hides
+    it — no prefer-last heuristic needed.
+  - *The honest narrowing:* an unsuffixed buyer (an individual, an unregistered trade name — this
+    client's own `SIFU LAB`) never overrides. Typed stands: **zero loss against today.** The
+    measured F7 defect still fixes — `KONG CHENG RESTAURANTS SDN BHD` carries the signal.
+- **A SUFFIX PROVES A NAME IS PRESENT, NOT THAT THE NAME IS THE ADDRESSEE** *(round 4)*. Because
+  a non-candidate is a SKIP, an entity-suffixed **non-addressee** line outranked an unsuffixed
+  real buyer: `Bill To:` / `SIFU LAB` / `c/o AMATERUS GROUP SDN BHD` skipped the real customer
+  and birthed the c/o line. 11/11 measured forms passed candidacy. The base in front of the
+  suffix must be a **name, not a phrase that mentions one** — `NON_ADDRESSEE_MARKERS`
+  (c/o · care of · subsidiary of · member of · managed by · agent for · payable to · known as ·
+  the `Group Company:` caption), enforced in the shared name gate so **both polarities** inherit
+  it. Demoting a party without demoting a contact would merely re-route the same string through
+  the contact door. **Bare ` of ` is NOT a marker** — `BANK OF CHINA (MALAYSIA) BERHAD` stays a
+  candidate, with its own counter-cell in both batteries.
+- **`S/B` is matched on its PUNCTUATED form only** *(round 4)*. The folded `s b` variant read a
+  person's initials as a company: `Attn : Lim S B` → the contact polarity refused the person →
+  `attn_key` unset → the override could not fire → the reconciler REMOVED a correct customer name
+  on exactly the F7 shape. `S/B` is printed with a slash; the spaced form was a folding artefact.
+  *Recorded tension:* dotted `S.B.` is the same shape as personal initials and no rule separates
+  them without token-counting (which would refuse `ACME S/B`), so a company printing `S.B.`
+  **abstains** — fail-closed, zero loss, while `Tan S.B.` stays readable as a contact.
+- **A COLON anywhere means a CAPTION** *(round 4)*. The possessive tokenizer knew four apostrophe
+  glyphs; OCR produces more, and NFKC folds only the **fullwidth** form (`U+FF07`) — `’ ‘ ʼ ′ ´`
+  all survive it — so `Customer＇s Ref: ACME SDN BHD` left `＇s Ref: ACME SDN BHD` as a base whose
+  embedded suffix satisfied the entity gate. Enumerating glyphs chases renderings forever;
+  refusing a colon closes the class in one rule (registered names carry none). The apostrophe set
+  is still widened to the verified NFKC residue as defence in depth.
+- **TWO PREDICATES FROM ONE LEXICON, deliberately asymmetric, both fail-closed** *(round 4)*.
+  Party candidacy = **strict endsWith**; contact refusal = **broad contains-any-entity-token**
+  (incl. punctuated `P.L.T.`, `S/B`). The contact side had been the *negation* of party
+  candidacy — a different proposition — so `SDN BHD`, `ACME SDN BHD (123456-X)`,
+  `ACME SDN BHD, Kuala Lumpur` and `ACME P.L.T.` were all emitted as `contact_person`,
+  persisting companies as people. "Not a valid party" ≠ "is a person"; that is the house's
+  spelling-is-not-identity law biting the reader's own predicate.
+- **Punctuation in the base key folds to a SPACE, never to nothing** *(round 4)*. Collapsing it
+  away made `A-B SDN BHD` ≡ `AB SDN BHD`, so a document naming two different companies read as
+  `matched` and **suppressed a lawful contest** — wrong-silent, which loses to a safe hold.
+  Noise commas stay harmless (`KONG, CHENG` ≡ `KONG CHENG`); suffix canonicalization is untouched.
+- **Round-6 — the last two absence-validated surfaces become positive-evidence:**
+  - **R6-1 reservation happens on LABEL-CLAIM, not on acceptance.** A contact label positively
+    claims a LINE; that claim is geometric evidence and stands whatever the value's shape is.
+    Reserving only on ACCEPTANCE let a refused company (`Attention:` → `ACME SDN BHD`) fall back
+    into the party scan and override `customer_name`. **The invariant is about LINES, not
+    strings:** a contact-CLAIMED line can never override, withdraw or collapse — while the same
+    STRING on an UNCLAIMED line still qualifies on its own merits (pinned by the reviewer's own
+    probe). This also retired the round-5 counterexample: the AMATERUS layout no longer withdraws
+    a correct typed name.
+  - **R6-2 the POSITIVE name-shape class** replaces colon enumeration as the wall. A candidate may
+    contain only what a registered name may contain — cased letters, `\p{Lo}` (CJK et al.), digits,
+    space and a justified punctuation set (`& . , ' ( ) - /`, plus the curly/modifier apostrophe
+    renderings; `@` was listed in the round-6 draft and **dropped** in the same round — see R6-B
+    below). **`\p{Lm}` is excluded on
+    purpose:** the colon lookalikes live there (`U+02D0` is a *letter* by category), so a naive
+    `\p{L}` class would have admitted the very glyph that leaked. `COLON_CLASS` becomes
+    defence-in-depth; its upgrade path (derive from Unicode category + confusables data rather
+    than hand-listing) is recorded in the lexicon.
+  - **R6-3 punctuation folds to canonical class LITERALS, in place.** A per-class occurrence
+    signature distinguished `A/B` from `A-B` but still collided `A/B-C` with `A-B/C` — occurrence
+    is not placement. Each class now folds to itself where it stands.
+  - **R6-4/R6-5** — the residual record and its corpus accounting are trued; see the residual
+    section above.
+  - **R6-A the positive class normalizes with NFC, not NFKC.** Testing on the NFKC form admitted
+    anything that **compatibility**-folded into the class while the **raw** glyph was what got
+    emitted — `U+FE30`→`..`, `U+2025`→`..`, `U+FE50`→`,`, `U+FE52`→`.`. On the split-line path
+    (where the value line's text becomes `value_raw` verbatim) `Bill To:` / `ACME︰SDN BHD` emitted
+    a **corrupted** counterparty. **The rule: a class that ADMITS normalizes canonically (NFC) and
+    is tested against what will be EMITTED; a fold used for COMPARISON keeps NFKC, because there
+    many-to-one is exactly what is wanted** (`hasColon` must reach the fullwidth colon;
+    `foldUnicode`/`foldKey` must let two renderings of one name meet). Admission narrows,
+    comparison merges — the two must never be unified. *Recorded change:* a non-breaking space
+    inside a name now abstains. Fullwidth names, `José` (composed **and** decomposed), CJK, `(M)`
+    and `D&D` are all kept — verified directly, correcting a trailing note in the review that
+    said fullwidth would be lost.
+  - **C6-2 label matching is PUNCTUATION-INSENSITIVE.** `Att'n` / `Att.n` / `Att-n` / `Att/n`
+    were not recognized, so their lines were never CLAIMED — and an unclaimed `Att'n ACME SDN BHD`
+    is name-shaped (the apostrophe is an admitted character) and entity-suffixed, so it became a
+    party candidate and the override wrote **the whole contact-labelled string** as
+    `customer_name`. The colon rule could not catch it: it fires only on a line carrying a colon,
+    and that shape has none. Punctuation between two alphanumerics is now joined when matching
+    labels. **Over-claiming is safe by construction** under claim → reserve → judge: a false label
+    match can only reserve a line, and a reserved line abstains.
+  - **C6-3 any recognized LABEL terminates a split-value scan.** `Attention:` / `Bill To:` /
+    `ACME SDN BHD` — the contact scan walked past `Bill To:`, claimed the buyer, and left the
+    party scan with nothing; fail-closed, but the F7 repair *missed the buyer*. A label starts a
+    new block and a claim never crosses into it. *Coverage change recorded:* the mirror layout
+    (`Bill To:` / `Attention:` / … / party) no longer reads a party printed **after** an Attn
+    block — it abstains. The ordinary ordering the measured KONG CHENG documents use
+    (`Bill To:` / party / … / `Attn`) is unaffected.
+  - **C6-4 the apostrophe class folds identically everywhere.** `U+02BC` is category **Lm — a
+    letter** — so the folds preserved it while ASCII/curly forms collapsed to a space:
+    `O'BRIEN` and `OʼBRIEN` keyed apart, and one company written two lawful ways read as a
+    CONTEST that withdrew a correct typed name. The admitted set and the folded set are now **one
+    string literal** in the lexicon, so they cannot drift. *(Fullwidth `U+FF07` is in neither —
+    admission normalizes NFC, which does not fold it, so such a name abstains.)*
+  - **R6-B `@` dropped from the class.** Its justification (`AHMAD @ JOHN`) could never fire — the
+    email guard refuses every `@`-bearing value thirteen lines earlier. Removed rather than
+    rescued by loosening that guard; if a real alias-marker case appears, the guard gets scoped to
+    actual address shapes **then**, on evidence. *(Fourth dissolved justification in this PR.)*
+- **Receipt consequence, recorded:** when a contact-CLAIMED line agrees with the typed value the
+  outcome is `absent`, not `typed_collapsed` — anyone mining receipts for "how often did the
+  reader corroborate Azure" **undercounts** on that shape. The emitted `customer_name` is
+  unchanged; only the receipt differs.
+- **Surface accounting:** thirteen refusal predicates now sit **behind** the two positive walls
+  (name shape, entity signal). Only `NON_ADDRESSEE_MARKERS` is still load-bearing by absence —
+  and that **is** residual (5) by construction, not an additional gap.
+- **Round-5 supplement — four more, each a bug in a previous round's own fix:**
+  - **S1** the C3-2 broad contact predicate landed only in the split-line scan, so the **same-line**
+    `Attention: ACME SDN BHD (123456-X)` seam kept persisting companies as people. A rule at one
+    of two seams is not a rule; both doors now take `containsEntityToken`.
+  - **S2** the colon rule knew ASCII + fullwidth only, so `Reference﹕` (U+FE55), `∶` (U+2236) and
+    `꞉` (U+A789) reached `customer_name`. **NFKC first** (it folds U+FE55/U+FF1A with no
+    enumeration), then a named class for the residue, each codepoint cited in the lexicon.
+  - **S3** a contact-door refusal (`Lim P.L.T.`) left `attn_key` unset, so the F7 **override**
+    shape was scored as an unexplained **disagreement** and *withdrew a correct customer name*.
+    Absence of an explanation the reader could not read is not evidence of a contest, so it now
+    **holds** (`attn_inconclusive_hold`). Invariant, with its own cell: a string refused at the
+    contact door can **never** override or withdraw. *(Superseded by R6-1: since reservation
+    happens on the CLAIM, a contact-CLAIMED line supplies nothing at all — it cannot collapse
+    either. Typed simply stands, agreeing or not, and the receipt reads `absent`.)*
+  - **S4** hyphen and slash folded to the same boundary, so `A/B TRADING SDN BHD` ≡
+    `A-B TRADING SDN BHD` suppressed a lawful contest. The classes now sign the key distinctly.
+    *Narrowing recorded:* `KONG-CHENG` no longer keys as `KONG CHENG` — two renderings of one
+    name now HOLD rather than merge, which is the fail-closed direction.
+- **Suffix-variant canonicalization in `partyKey`.** The module still never STRIPS a suffix
+  (`ACME` ≠ `ACME SDN BHD`); equivalent SPELLINGS of the same suffix canonicalize
+  (`S/B` ≡ `SDN BHD`, `BHD` ≡ `BERHAD`). Without it `KONG CHENG…SDN BHD` vs `KONG CHENG…S/B` —
+  one company, two lawful spellings — read as a CONTEST and withdrew a correct typed name. Two
+  genuinely different-keyed entities still contest; that residual is held **eyes-open**.
+- **DB half is mandatory, not optional:** `invoice.contact_person` joins `persist_invoice_facts`'
+  **CLOSED** allowlist and its conflicting-duplicate text set in its own migration. Without it
+  the first extraction carrying the fact does not drop it — it raises **CLR10** and forfeits the
+  whole persist. `NORMALIZATION_VERSION` → **v10**.
+### X7 — RECORDED RESIDUAL (5): suffixed relational phrases *(round 5, OWNER-VETOABLE)*
+
+> **The one-paragraph record, for the owner.** X7 reads the buyer's name off the invoice layout
+> and may override Azure's own reading in one narrow case. A line only becomes a candidate if it
+> ends in a registered-business suffix (`SDN BHD`, `BHD`, `PLT`, `LLP`). **Residual: a line that
+> *mentions* a company but is not the addressee — `A division of AMATERUS GROUP SDN BHD`,
+> `t/a …`, `Parent company …` — can still be read as the customer.** Eleven such phrases are
+> explicitly refused; reviewers constructed more and **23 of the 38 pinned forms still pass, 5
+> producing a wrong customer name end-to-end**. It fires when the phrase sits inside the bill-to
+> block **and** Azure independently typed the `Attn` person as the customer **and** no
+> suffix-bearing line appears earlier in that block; when Azure typed a seller name, the phrase
+> must also sit nearer the buyer box than the seller's. *(Corrected round 6: an earlier record
+> claimed four coincidences "each individually necessary". Two were disproved — a **suffixed**
+> real buyer printed **after** the phrase still loses, so what matters is scan ORDER not the
+> buyer's suffix; and the seller comparison does not run at all when Azure typed no VendorName.
+> The residual is **wider** than that story.)* **The harm ceiling
+> is a wrong DRAFT**: counterparty creation happens at human approval and no unattended-posting
+> path reaches this field — the same maker/checker wall that caught the original KONG CHENG
+> defect. A proposed rule (refuse when a lowercase relational phrase precedes an upper-cased name)
+> was **implemented, measured and rejected**: it closed all 5 end-to-end cases but **lost 4
+> legitimate names** (`Bank of China (Malaysia) Berhad`) and closed **none of the constructed
+> forms** once they are printed ALL-CAPS, which is how Malaysian invoices usually print.
+> **Recommendation: accept the residual and re-measure against the real KONG CHENG capture at the
+> live replay.** The **38 pinned forms** (23 admitted / 15 refused) and the 5 scenarios are tests
+> (`x7-residual-5.test.mjs`), and the rejected predicate is re-run in CI against its own
+> **23-distinct** corpus (`x7-path-a-rejected.mjs`) — every number below is derived there, not
+> counted by hand.
+
+**The measurement table (path A, case discontinuity — REJECTED).**
+
+*Every row names its subset, and every figure is **re-derived in CI** from an explicit named
+corpus — `packages/runtime/tests/x7-path-a-rejected.mjs` retains the rejected predicate so the
+decision can be re-run and challenged rather than taken on trust.*
+
+| subset measured | result |
+|---|---|
+| the **5** end-to-end leak scenarios | **5/5 closed** ✓ |
+| the **23 distinct constructed** relational forms | **19 of the 23** closed |
+| **the same forms, re-cased ALL-CAPS** | **0 closed** ✗ — the class survives re-casing |
+| legitimate names, **all-caps** (17) | 17/17 kept ✓ |
+| legitimate names, **title-case** (5) | 1 kept, **4 lost** ✗ (`Bank of China (Malaysia) Berhad`) |
+| legitimate names, **all-lowercase OCR** (4) | 4/4 kept ✓ |
+| **legitimate loss, summed** | **4** — all title-case |
+| **verdict** | **DROP** — rule required ≥5 closed with **zero** legitimate loss |
+
+*Two corrections against the round-5 record, both found by re-deriving instead of re-quoting:
+the constructed set is **23 distinct**, not 24 (`trading as` was contributed by both review lanes
+and counted twice); and the legitimate loss is **4**, not 7 — the extra 3 were an artefact of
+scraping test files for the corpus, which swept up leak forms as the batteries grew.*
+
+- **Two honest limits, recorded rather than discovered later.** (i) The thresholds are
+  **UNMEASURED** — the KONG CHENG captures are real client documents and are not in this repo, so
+  unlike X6 the defaults are conservative opts and the reader is built to ABSTAIN when one is
+  wrong; the **live replay is the measurement**. (ii) Attribution anchors on the typed
+  `CustomerName` region, so X7 can never supply a name where Azure typed none — the **FINCARE**
+  row (acceptance-h1 row 10, held `customer_name_missing`) is NOT fixed by F7, and relaxing the
+  anchor to "far from the vendor" would be absence-as-evidence, which review law 2 forbids.
+
 ## 3. Falsifiable gates
 
 | gate | claim |

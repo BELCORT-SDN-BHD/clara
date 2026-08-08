@@ -13,6 +13,7 @@ import {
   MAX_FILE_BYTES,
   putIntakeBytes,
   readIntake,
+  recoveryCopy,
 } from "../shared/intake";
 import { supabaseBase } from "../shared/wire";
 
@@ -69,7 +70,12 @@ export function useUploadQueue(token: string, onAdopted: () => void, onNote: (m:
         });
         patch(localId, { intakeId: begun.intake_id, state: "uploading", label: "Uploading…" });
         await putIntakeBytes(begun.upload_token, begun.intake_id, file);
-        await finalizeIntake(begun.upload_token, begun.intake_id);
+        // 0051 §2 — the finalize receipt is the ONLY place the recovery door's answer appears.
+        // A refusal still returns 202 with status 'adopted', so without this the person who
+        // re-uploaded a document to fix it was told "Stored — matched an existing document"
+        // and nothing else, whether it was retried or refused.
+        const receipt = await finalizeIntake(begun.upload_token, begun.intake_id);
+        const recovery = recoveryCopy(receipt);
         patch(localId, { state: "verifying", label: "Verifying…" });
         if (!supabaseBase()) {
           patch(localId, { state: "error", label: "Cannot confirm filing", error: "Set NEXT_PUBLIC_SUPABASE_URL to confirm the intake." });
@@ -81,7 +87,15 @@ export function useUploadQueue(token: string, onAdopted: () => void, onNote: (m:
             const label = intakeStatusCopy(row.status, row.failure_code);
             if (row.status === "failed") return patch(localId, { state: "failed", label });
             if (INTAKE_ADOPTED.has(row.status) && row.document_id) {
-              patch(localId, { state: "ready", documentId: row.document_id, label });
+              // The document really was stored, so the row stays 'ready' — but when the
+              // recovery door said something, IT is the answer the person needs, not the
+              // generic adoption copy.
+              patch(localId, {
+                state: "ready",
+                documentId: row.document_id,
+                label: recovery?.label ?? label,
+                error: recovery?.detail ?? null,
+              });
               onAdopted();
               return;
             }
