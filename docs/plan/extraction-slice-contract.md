@@ -216,6 +216,40 @@ reached the books unchallenged. X7 supplies the missing second reader.
   - *The honest narrowing:* an unsuffixed buyer (an individual, an unregistered trade name — this
     client's own `SIFU LAB`) never overrides. Typed stands: **zero loss against today.** The
     measured F7 defect still fixes — `KONG CHENG RESTAURANTS SDN BHD` carries the signal.
+- **A SUFFIX PROVES A NAME IS PRESENT, NOT THAT THE NAME IS THE ADDRESSEE** *(round 4)*. Because
+  a non-candidate is a SKIP, an entity-suffixed **non-addressee** line outranked an unsuffixed
+  real buyer: `Bill To:` / `SIFU LAB` / `c/o AMATERUS GROUP SDN BHD` skipped the real customer
+  and birthed the c/o line. 11/11 measured forms passed candidacy. The base in front of the
+  suffix must be a **name, not a phrase that mentions one** — `NON_ADDRESSEE_MARKERS`
+  (c/o · care of · subsidiary of · member of · managed by · agent for · payable to · known as ·
+  the `Group Company:` caption), enforced in the shared name gate so **both polarities** inherit
+  it. Demoting a party without demoting a contact would merely re-route the same string through
+  the contact door. **Bare ` of ` is NOT a marker** — `BANK OF CHINA (MALAYSIA) BERHAD` stays a
+  candidate, with its own counter-cell in both batteries.
+- **`S/B` is matched on its PUNCTUATED form only** *(round 4)*. The folded `s b` variant read a
+  person's initials as a company: `Attn : Lim S B` → the contact polarity refused the person →
+  `attn_key` unset → the override could not fire → the reconciler REMOVED a correct customer name
+  on exactly the F7 shape. `S/B` is printed with a slash; the spaced form was a folding artefact.
+  *Recorded tension:* dotted `S.B.` is the same shape as personal initials and no rule separates
+  them without token-counting (which would refuse `ACME S/B`), so a company printing `S.B.`
+  **abstains** — fail-closed, zero loss, while `Tan S.B.` stays readable as a contact.
+- **A COLON anywhere means a CAPTION** *(round 4)*. The possessive tokenizer knew four apostrophe
+  glyphs; OCR produces more, and NFKC folds only the **fullwidth** form (`U+FF07`) — `’ ‘ ʼ ′ ´`
+  all survive it — so `Customer＇s Ref: ACME SDN BHD` left `＇s Ref: ACME SDN BHD` as a base whose
+  embedded suffix satisfied the entity gate. Enumerating glyphs chases renderings forever;
+  refusing a colon closes the class in one rule (registered names carry none). The apostrophe set
+  is still widened to the verified NFKC residue as defence in depth.
+- **TWO PREDICATES FROM ONE LEXICON, deliberately asymmetric, both fail-closed** *(round 4)*.
+  Party candidacy = **strict endsWith**; contact refusal = **broad contains-any-entity-token**
+  (incl. punctuated `P.L.T.`, `S/B`). The contact side had been the *negation* of party
+  candidacy — a different proposition — so `SDN BHD`, `ACME SDN BHD (123456-X)`,
+  `ACME SDN BHD, Kuala Lumpur` and `ACME P.L.T.` were all emitted as `contact_person`,
+  persisting companies as people. "Not a valid party" ≠ "is a person"; that is the house's
+  spelling-is-not-identity law biting the reader's own predicate.
+- **Punctuation in the base key folds to a SPACE, never to nothing** *(round 4)*. Collapsing it
+  away made `A-B SDN BHD` ≡ `AB SDN BHD`, so a document naming two different companies read as
+  `matched` and **suppressed a lawful contest** — wrong-silent, which loses to a safe hold.
+  Noise commas stay harmless (`KONG, CHENG` ≡ `KONG CHENG`); suffix canonicalization is untouched.
 - **Suffix-variant canonicalization in `partyKey`.** The module still never STRIPS a suffix
   (`ACME` ≠ `ACME SDN BHD`); equivalent SPELLINGS of the same suffix canonicalize
   (`S/B` ≡ `SDN BHD`, `BHD` ≡ `BERHAD`). Without it `KONG CHENG…SDN BHD` vs `KONG CHENG…S/B` —

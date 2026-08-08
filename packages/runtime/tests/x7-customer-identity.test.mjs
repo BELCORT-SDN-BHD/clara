@@ -48,7 +48,9 @@ test("the KONG CHENG shape: the BOXED PARTY is the customer, the Attn person is 
   assert.equal(receipt.outcome, "matched");
   assert.equal(receipt.matched, 1);
   assert.equal(receipt.attn_matched, 1);
-  assert.equal(receipt.attn_key, "limxiaoshan", "the contact key is what the mapper's override branch tests against");
+  // Word boundaries survive in the key (round 4): punctuation folds to a SPACE, never to nothing,
+  // so `A-B SDN BHD` and `AB SDN BHD` cannot silently become one identity.
+  assert.equal(receipt.attn_key, "lim xiao shan", "the contact key is what the mapper's override branch tests against");
   // The emission rides the PARTY LINE's own polygon — never the label's, never fabricated.
   assert.deepEqual(partyOf({ fields }).polygon, KONG_CHENG.polygon);
   assert.deepEqual(contactOf({ fields }).polygon, ATTN_PERSON.polygon);
@@ -223,7 +225,7 @@ test("the identity key is UNICODE-AWARE — two Chinese company names are two pa
   const { fields, receipt } = read([a, b]);
   assert.equal(partyOf({ fields }), undefined);
   assert.equal(receipt.outcome, "contested");
-  assert.deepEqual(receipt.distinct_keys.sort(), ["宏达sdnbhd", "鑫旺sdnbhd"].sort());
+  assert.deepEqual(receipt.distinct_keys.sort(), ["宏达 sdnbhd", "鑫旺 sdnbhd"].sort());
   // …while the SAME Chinese name printed twice is still one candidate.
   const twice = read([a, line("Bill To: 鑫旺 Sdn Bhd", box(0.72, 2.50, 3.30, 2.65))]);
   assert.equal(partyOf(twice).value_raw, "鑫旺 SDN BHD");
@@ -240,7 +242,7 @@ test("TWO DISTINCT labelled parties is a CONTEST — no identity beats the wrong
   assert.equal(partyOf({ fields }), undefined);
   assert.equal(receipt.outcome, "contested", "a measured contest, not an abstention");
   assert.equal(receipt.contested, 1);
-  assert.deepEqual(receipt.distinct_keys.sort(), ["kongchengrestaurantssdnbhd", "someotherbuyersdnbhd"]);
+  assert.deepEqual(receipt.distinct_keys.sort(), ["kong cheng restaurants sdnbhd", "some other buyer sdnbhd"]);
   // The contact read is INDEPENDENT: a contested party says nothing about who the Attn person is.
   assert.equal(contactOf({ fields }).value_raw, "Lim Xiao Shan");
 });

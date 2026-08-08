@@ -43,23 +43,25 @@
 // documented Malaysian suffix family in `invoice-party-grammar.mjs`). No suffix ⇒ no candidacy ⇒
 // no override, no contest, no disagreement-withdraw: the reader abstains and typed stands.
 //
-// WHY, and this is the structural lesson three rounds paid for. The party gate was a BLOCKLIST,
-// and both scan paths took the FIRST string it admitted. A blocklist can only enumerate the
-// past, so every round found a fresh instance of ONE class — a label whose remainder is furniture
-// (`Customer's Ref: PO-8891`, `Buyer Signature`, `Customer Since 2019`: fifteen in a single
-// probe) — and every widening of the scan reopened it (the two-column skip repair let the
-// caption `DELIVERY ADDRESS` win on the reviewer's own layout). The override branch is the only
-// branch that can write a WRONG party onto real client books, so it now demands positive
-// evidence rather than the absence of a known-bad shape.
+// WHY, the structural lesson three rounds paid for. The party gate was a BLOCKLIST and both scan
+// paths took the FIRST string it admitted. A blocklist only enumerates the past, so every round
+// found a fresh instance of ONE class — a label whose remainder is furniture (`Customer's Ref:
+// PO-8891`, `Buyer Signature`: fifteen in a single probe) — and every scan widening reopened it
+// (the two-column skip repair let the caption `DELIVERY ADDRESS` win). The override branch is the
+// only branch that can write a WRONG party onto real books, so it demands positive evidence.
 //
 // ONE LEXICON, TWO POLARITIES. The same suffix family that ADMITS a party REFUSES a contact: an
-// entity-suffixed string is never a person. Without that symmetry `Bill To:` → `Attention:` →
-// `ACME SDN BHD` emitted the company as BOTH `customer_name` and `contact_person`, persisting a
-// real party as a human being.
+// entity-suffixed string is never a person. Without that symmetry, `Attention:` → `ACME SDN BHD`
+// emitted the company as BOTH `customer_name` and `contact_person`.
 //
 // A NON-CANDIDATE IS A SKIP, NOT A STOP. The scan walks past anything without the signal, within
 // its existing bounds, so a caption printed ABOVE the party no longer hides it — and no
 // prefer-last heuristic is needed: the first line carrying the signal still wins.
+//
+// A SUFFIX PROVES A NAME IS PRESENT, NOT THAT THE NAME IS THE ADDRESSEE (round 4). Skipping is
+// what made this bite: `Bill To:` / `SIFU LAB` / `c/o AMATERUS GROUP SDN BHD` skipped a REAL
+// unsuffixed buyer and birthed the c/o line. So the base must be a NAME, not a phrase mentioning
+// one — `NON_ADDRESSEE_MARKERS`, enforced in `looksLikePartyName` so BOTH polarities inherit it.
 // ──────────────────────────────────────────────────────────────────────────────────────────────
 //
 // ─── HONESTY NOTE, STATED BECAUSE IT IS A REAL DIFFERENCE FROM X6 ─────────────────────────────
@@ -79,8 +81,8 @@
 //       independently. Two DISTINCT labelled party blocks ⇒ emit no party. Identical readings
 //       collapse (the two-page invoice that repeats its bill-to box).
 //   (b) THE LABEL GATE + THE PARTY-NAME GATE — `invoice-party-grammar.mjs`, which owns every
-//       question about spelling. This is where X6's top-band defense would sit; there is
-//       deliberately NO band analogue here (see THE MISSING BAND below).
+//       question about spelling. Where X6's top-band defense would sit; there is deliberately
+//       NO band analogue (see THE MISSING BAND below).
 //   (c) CUSTOMER-BLOCK ATTRIBUTION, the defense that makes an emission EVIDENCED rather than
 //       merely label-shaped. A candidate must sit next to the typed `CustomerName` field's OWN
 //       bounding region and — when a typed `VendorName` region also exists — closer to the
@@ -94,23 +96,20 @@
 //       written out there rather than left to be inferred from the branches.
 //
 // THE MISSING BAND, stated rather than papered over. X6's second defense is "a letterhead sits
-// at the top of its page by convention". No such convention exists for the buyer block — it sits
-// upper-left on one layout, upper-right on the next, lower on a letterhead-heavy one. Inventing
-// an unmeasured band would refuse real documents for a reason no one measured, and X6's own
-// lesson cuts both ways: a wall that vanishes when its input goes missing is not a wall, and a
-// wall no measurement supports is not one either — it is a guess wearing a threshold.
-// Attribution (c) does the work the band did for X6, against evidence Azure actually produced.
+// at the top of its page by convention". No such convention exists for the buyer block, so an
+// unmeasured band would refuse real documents for a reason no one measured — X6's lesson cuts
+// both ways: a wall no measurement supports is a guess wearing a threshold. Attribution (c) does
+// the band's work here, against evidence Azure actually produced.
 //
 // A KNOWN LIMIT, recorded now rather than discovered later: because attribution anchors on the
-// typed CustomerName region, this reader can NEVER supply a customer_name for a document where
-// Azure typed no CustomerName at all. The FINCARE row (acceptance-h1 row 10, held
-// `customer_name_missing`) is exactly that shape and is NOT fixed by F7. Relaxing the anchor to
-// "far from the vendor" would be absence-as-evidence, which the house's review law 2 forbids.
-// That document needs a different door.
+// typed CustomerName region, this reader can NEVER supply a customer_name where Azure typed none.
+// The FINCARE row (acceptance-h1 row 10, held `customer_name_missing`) is that shape and is NOT
+// fixed by F7. Relaxing the anchor to "far from the vendor" would be absence-as-evidence, which
+// review law 2 forbids. That document needs a different door.
 
 import { pageFrame } from "./invoice-totals-reader.mjs";
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
-import { hasRegisteredEntitySuffix, looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
+import { containsEntityToken, hasRegisteredEntitySuffix, looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
 import { customerAttributionFailure, extentOf, scaleAnchor, xOverlap } from "./invoice-block-geometry.mjs";
 
 export { looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel, splitLabelled, BILL_TO_LABELS, ATTN_LABELS } from "./invoice-party-grammar.mjs";
@@ -227,13 +226,14 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
      * NO prefer-last heuristic is involved — the first line carrying the signal wins, as before.
      */
     const scanBelow = (i, labelBox, kind, label) => {
-      // ONE LEXICON, TWO POLARITIES. A party candidate must CARRY the registered-entity signal;
-      // a contact candidate must NOT — a contact person is a person, and an entity-suffixed
-      // string is never one. Executed before this rule: `Bill To:` → `Attention:` →
-      // `ACME SDN BHD` emitted the company as BOTH customer_name and contact_person, persisting
-      // a real party as a human being.
+      // ONE LEXICON, TWO DIFFERENT PREDICATES — deliberately asymmetric, both fail-closed.
+      // A party must END in the entity signal (strict); a contact must not CONTAIN one anywhere
+      // (broad). The contact side used to be the NEGATION of party candidacy, which is a
+      // different proposition: company-shaped strings that failed candidacy for some other
+      // reason (`SDN BHD` alone, `ACME SDN BHD (123456-X)`, `ACME SDN BHD, Kuala Lumpur`,
+      // `ACME P.L.T.`) all landed in the contact bucket and were persisted as people.
       const isCandidate = (raw) => (looksLikePartyName(raw)
-        && (kind === "party" ? hasRegisteredEntitySuffix(raw) : !hasRegisteredEntitySuffix(raw)));
+        && (kind === "party" ? hasRegisteredEntitySuffix(raw) : !containsEntityToken(raw)));
       const limit = Math.min(lines.length - 1, i + Math.max(0, settings.maxLookaheadLines));
       for (let j = i + 1; j <= limit; j++) {
         const box = boxes[j];

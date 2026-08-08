@@ -187,7 +187,7 @@ test("R3-2: a caption ABOVE the party no longer hides it — the reviewer's own 
   assert.equal(r.contact, "Lim Xiao Shan");
   assert.equal(r.outcome, "attn_overridden", "and the F7 fix still fires on this layout");
   const accepted = r.envelope.customer_identity.candidates.filter((c) => c.outcome === "accepted" && c.kind === "party");
-  assert.deepEqual(accepted.map((c) => c.key), ["kongchengrestaurantssdnbhd"], "exactly one accepted party, and it is the right one");
+  assert.deepEqual(accepted.map((c) => c.key), ["kong cheng restaurants sdnbhd"], "exactly one accepted party, and it is the right one");
 });
 
 test("R3-3: `SDN BHD` and `S/B` are ONE company — no contest, the typed name survives", () => {
@@ -239,6 +239,119 @@ test("R3-Codex R2-B: a COMPANY is never persisted as a contact person", () => {
   assert.equal(agree.outcome, "matched", "read as a PARTY and collapsed against the agreeing typed row");
   assert.equal(agree.envelope.customer_identity.typed_collapsed, 1);
   assert.equal(agree.contact, undefined);
+});
+
+// ══════════════════════════════════════════════════════════════════════════════════════
+// ROUND 4 — a suffix proves a NAME is present, not that the name is the ADDRESSEE
+// ══════════════════════════════════════════════════════════════════════════════════════
+
+test("R4-1: a `c/o` line never outranks an UNSUFFIXED real buyer", () => {
+  // The executed blocker. `SIFU LAB` is a REAL unsuffixed RS customer; the entity gate skipped
+  // it, walked on to the c/o line, and BIRTHED `customer_name = "c/o AMATERUS GROUP SDN BHD"`
+  // through the override branch — a wrong counterparty on real books, the one forbidden outcome.
+  const r = run([
+    VENDOR, BILL_TO,
+    L("SIFU LAB", box(0.72, 2.30, 1.90, 2.45)),
+    L("c/o AMATERUS GROUP SDN BHD", box(0.72, 2.55, 3.40, 2.70)),
+    L("Attn : Lim Xiao Shan", box(0.72, 2.80, 2.20, 2.94)),
+  ], "Lim Xiao Shan", box(0.72, 2.80, 2.20, 2.94));
+  assert.equal(r.customer, "Lim Xiao Shan", "typed stands — no party is manufactured from a c/o line");
+  assert.notEqual(r.outcome, "attn_overridden");
+});
+
+test("R4-1: all ELEVEN measured non-addressee forms are dead on both seams", () => {
+  const FORMS = [
+    "c/o AMATERUS GROUP SDN BHD", "C/O ACME SDN BHD", "care of ACME SDN BHD",
+    "A subsidiary of AMATERUS GROUP SDN BHD", "A member of ACME SDN BHD",
+    "Group Company: AMATERUS GROUP SDN BHD", "Managed by ACME SDN BHD",
+    "Agent for ACME SDN BHD", "Formerly known as OLD NAME SDN BHD",
+    "Payable to ROME SECRETARY SDN BHD", "Cheque payable to ROME SECRETARY SDN BHD",
+  ];
+  for (const f of FORMS) {
+    // (i) the OVERRIDE seam — the only branch that can write a party.
+    const sameLine = run([VENDOR, L(f, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
+    assert.equal(sameLine.customer, "Lim Xiao Shan", `${f} must not override`);
+    assert.notEqual(sameLine.outcome, "attn_overridden");
+    // (ii) the SPLIT-VALUE seam beneath a bare `Bill To:`.
+    const split = run([VENDOR, BILL_TO, L(f, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
+    assert.equal(split.customer, "Lim Xiao Shan", `${f} must not override via the split seam`);
+    assert.notEqual(split.outcome, "attn_overridden");
+    // (iii) and it must not slip through the CONTACT door either — the polarity inversion means
+    // "not an entity" is a POSITIVE contact signal, so a party-only rule would promote it here.
+    assert.notEqual(split.contact, f, `${f} must not become a contact person`);
+  }
+});
+
+test("R4-1 COUNTER-CELL: a legitimate bare-`of` company name is still a candidate", () => {
+  // Bare ` of ` mid-name is NOT a non-addressee marker; only the marked phrases are.
+  const r = run([VENDOR, BILL_TO,
+    L("BANK OF CHINA (MALAYSIA) BERHAD", box(0.72, 2.30, 3.80, 2.45)), ATTN], "Lim Xiao Shan");
+  assert.equal(r.customer, "BANK OF CHINA (MALAYSIA) BERHAD", "the of-name reads, and overrides the Attn person");
+  assert.equal(r.contact, "Lim Xiao Shan");
+  assert.equal(r.outcome, "attn_overridden");
+});
+
+test("R4-2: an Attn person written with INITIALS is read, and the override fires", () => {
+  // The folded `s b` entity variant read `Lim S B` as a company, so the contact polarity refused
+  // the person, attn_key was never set, and the reconciler REMOVED a correct customer name on
+  // exactly the F7 shape this reader exists to fix.
+  for (const person of ["Lim S B", "Tan S.B.", "Wong K L"]) {
+    const r = run([VENDOR, BILL_TO, KONG_CHENG, L(`Attn : ${person}`, ATTN_BOX)], person);
+    assert.equal(r.customer, "KONG CHENG RESTAURANTS SDN BHD", `${person} — the F7 override must still fire`);
+    assert.equal(r.contact, person);
+    assert.equal(r.outcome, "attn_overridden");
+  }
+  // And the punctuated S/B still canonicalizes, so the round-3 false contest stays dissolved.
+  const sb = run([VENDOR,
+    L("Bill To: KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.30, 4.60, 2.45)),
+    L("Customer : KONG CHENG RESTAURANTS S/B", box(0.72, 2.60, 4.20, 2.75)),
+  ], "KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.30, 3.30, 2.45));
+  assert.equal(sb.outcome, "matched");
+});
+
+test("C3-1 end-to-end: no apostrophe glyph manufactures a party through the override branch", () => {
+  // Executed at HEAD: `Customer＇s Ref: ACME SDN BHD` produced customer_name = "＇s Ref: ACME SDN
+  // BHD" with outcome attn_overridden — the embedded suffix satisfied the entity gate while the
+  // caption survived as the base.
+  for (const v of ["Customer＇s Ref: ACME SDN BHD", "Customer´s Ref: ACME SDN BHD",
+    "Customerʼs Ref: ACME SDN BHD", "Customer′s Ref: ACME SDN BHD",
+    "Customer’s Ref: ACME SDN BHD", "Customer's Ref:ACME SDN BHD"]) {
+    const r = run([VENDOR, L(v, box(0.72, 2.30, 4.60, 2.45)), ATTN], "Lim Xiao Shan");
+    assert.equal(r.customer, "Lim Xiao Shan", `${JSON.stringify(v)} must not override`);
+    assert.notEqual(r.outcome, "attn_overridden");
+  }
+});
+
+test("C3-2 end-to-end: a company-shaped string is never persisted as contact_person", () => {
+  for (const company of ["SDN BHD", "ACME SDN BHD (123456-X)", "ACME SDN BHD, Kuala Lumpur", "ACME P.L.T."]) {
+    const r = run([VENDOR, BILL_TO, L("Attention:", box(0.72, 2.25, 1.60, 2.39)),
+      L(company, box(0.72, 2.40, 3.20, 2.54))], "Lim Xiao Shan", box(0.72, 2.40, 3.20, 2.54));
+    assert.notEqual(r.contact, company, `${company} must never be a person`);
+  }
+  // …and a real person, on the real F7 shape, still reads and still drives the override.
+  for (const person of ["Lim Xiao Shan", "Lim S B", "Tan S.B.", "Wong K L"]) {
+    const r = run([VENDOR, BILL_TO, KONG_CHENG, L(`Attn : ${person}`, ATTN_BOX)], person);
+    assert.equal(r.contact, person);
+    assert.equal(r.customer, "KONG CHENG RESTAURANTS SDN BHD");
+    assert.equal(r.outcome, "attn_overridden");
+  }
+});
+
+test("C3-3 end-to-end: two companies differing only by punctuation still CONTEST", () => {
+  // `A-B SDN BHD` vs `AB SDN BHD` keyed the same, so the reader reported `matched` and silently
+  // suppressed the contest — the typed row survived on the strength of a collision.
+  const r = run([VENDOR,
+    L("Bill To: A-B TRADING SDN BHD", box(0.72, 2.15, 3.60, 2.29)),
+    L("Customer : AB TRADING SDN BHD", box(0.72, 2.32, 3.60, 2.46)),
+  ], "AB TRADING SDN BHD", box(0.72, 2.32, 3.60, 2.46));
+  assert.equal(r.outcome, "contested", "two different registered names must not collide into one");
+  assert.equal(r.customer, undefined);
+  // The lawful collapse still collapses.
+  const same = run([VENDOR,
+    L("Bill To: KONG, CHENG SDN BHD", box(0.72, 2.15, 3.60, 2.29)),
+    L("Customer : KONG CHENG SDN BHD", box(0.72, 2.32, 3.60, 2.46)),
+  ], "KONG CHENG SDN BHD", box(0.72, 2.32, 3.60, 2.46));
+  assert.equal(same.outcome, "matched");
 });
 
 test("THE CONTROL: F7's own measured defect still fixes, and the honest narrowing is real", () => {

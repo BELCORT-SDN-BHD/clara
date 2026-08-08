@@ -18,7 +18,60 @@ import assert from "node:assert/strict";
 
 import {
   splitBillToLabel, splitAttnLabel, looksLikePartyName, partyKey, hasRegisteredEntitySuffix,
+  containsEntityToken,
 } from "../lib/invoice-party-grammar.mjs";
+
+test("C3-1: a COLON anywhere means a caption — the root closer for the possessive class", () => {
+  // The tokenizer knew four apostrophe glyphs; OCR produces more. NFKC folds the FULLWIDTH form
+  // (U+FF07) and nothing else here — U+2018/U+2019/U+02BC/U+2032/U+00B4 all survive it — so an
+  // enumeration will always lag some rendering. Refusing a colon closes the class in one rule:
+  // registered company names do not contain one.
+  for (const glyph of ["'", "‘", "’", "ʼ", "′", "´", "＇"]) {
+    const text = `Customer${glyph}s Ref: ACME SDN BHD`;
+    const hit = splitBillToLabel(text);
+    const remainder = hit?.remainder ?? "";
+    assert.equal(looksLikePartyName(remainder), false, `${JSON.stringify(text)} -> ${JSON.stringify(remainder)}`);
+  }
+  // The missing-space variant too, and a bare caption.
+  assert.equal(looksLikePartyName("Ref:ACME SDN BHD"), false);
+  assert.equal(looksLikePartyName("Invoice No: RS-0041"), false);
+  assert.equal(looksLikePartyName("客户：ACME SDN BHD"), false, "the fullwidth colon counts as well");
+  // A real name is unaffected — company names carry no colon.
+  assert.equal(looksLikePartyName("KONG CHENG RESTAURANTS SDN BHD"), true);
+  assert.equal(looksLikePartyName("BANK OF CHINA (MALAYSIA) BERHAD"), true);
+});
+
+test("C3-2: the contact refusal is a CONTAINS test, not the negation of party candidacy", () => {
+  // `!hasRegisteredEntitySuffix` is a different proposition from `is a person`: every
+  // company-shaped string that failed candidacy for some OTHER reason landed in the contact
+  // bucket. All four were executed and emitted as `contact_person`.
+  for (const company of ["SDN BHD", "ACME SDN BHD (123456-X)", "ACME SDN BHD, Kuala Lumpur",
+    "ACME P.L.T.", "ACME S/B", "ACME SDN. BHD.", "ACME BERHAD - KL BRANCH"]) {
+    assert.equal(containsEntityToken(company), true, `${company} must never be read as a person`);
+  }
+  // …while a genuine person still passes, INCLUDING the initials forms that R3-2 rescued.
+  for (const person of ["Lim Xiao Shan", "Lim S B", "Tan S.B.", "Wong K L", "Tan C K",
+    "Ms Tan Wei Ming", "Muhammad Bin Abdullah", "Lee Chong Wei"]) {
+    assert.equal(containsEntityToken(person), false, `${person} is a person`);
+  }
+  // The two predicates are ASYMMETRIC on purpose — strict for admission, broad for refusal.
+  assert.equal(hasRegisteredEntitySuffix("ACME SDN BHD (123456-X)"), false, "strict: not a party candidate");
+  assert.equal(containsEntityToken("ACME SDN BHD (123456-X)"), true, "broad: and not a contact either");
+});
+
+test("C3-3: punctuation in the base folds to a SPACE, never to nothing", () => {
+  // Collapsing it away made `A-B SDN BHD` and `AB SDN BHD` ONE key, so a document naming two
+  // different companies read as `matched` and SUPPRESSED a lawful contest — wrong-silent, which
+  // loses to a safe hold.
+  assert.notEqual(partyKey("A-B SDN BHD"), partyKey("AB SDN BHD"));
+  assert.notEqual(partyKey("A.B. SDN BHD"), partyKey("AB SDN BHD"));
+  assert.equal(partyKey("A-B SDN BHD"), "a b sdnbhd");
+  // …while noise punctuation between whole words stays harmless.
+  assert.equal(partyKey("KONG, CHENG SDN BHD"), partyKey("KONG CHENG SDN BHD"));
+  assert.equal(partyKey("KONG-CHENG SDN BHD"), partyKey("KONG CHENG SDN BHD"));
+  // Suffix-variant canonicalization is untouched by the change.
+  assert.equal(partyKey("KONG CHENG RESTAURANTS S/B"), partyKey("KONG CHENG RESTAURANTS SDN BHD"));
+});
 
 test("`M/s` is matched as PUNCTUATION, so a company named `M S ...` keeps its own name", () => {
   // Folding `M/s` to `m s` would also match `M S DEVELOPMENT SDN BHD` and hand back
@@ -102,6 +155,50 @@ test("PARTY CANDIDACY REQUIRES A POSITIVE ENTITY SIGNAL — the round-3 design l
   assert.equal(hasRegisteredEntitySuffix("SDN BHD"), false);
 });
 
+test("A NON-ADDRESSEE PHRASE is not a party — a suffix proves a NAME, not the ADDRESSEE", () => {
+  // Measured class: 11 of 11 passed candidacy. The executed defect — `Bill To:` / `SIFU LAB` /
+  // `c/o AMATERUS GROUP SDN BHD` — skipped a REAL unsuffixed buyer and birthed the c/o line.
+  for (const phrase of [
+    "c/o AMATERUS GROUP SDN BHD", "C/O ACME SDN BHD", "care of ACME SDN BHD",
+    "A subsidiary of AMATERUS GROUP SDN BHD", "A member of ACME SDN BHD",
+    "Group Company: AMATERUS GROUP SDN BHD", "Managed by ACME SDN BHD",
+    "Agent for ACME SDN BHD", "Formerly known as OLD NAME SDN BHD",
+    "Payable to ROME SECRETARY SDN BHD", "Cheque payable to ROME SECRETARY SDN BHD",
+  ]) {
+    assert.equal(looksLikePartyName(phrase), false, `${phrase} — a phrase that mentions a company is not one`);
+    // The rule lives in the NAME gate, so it closes BOTH polarities: demoting a party without
+    // demoting a contact would merely hand every one of these to the contact read instead.
+    assert.equal(looksLikePartyName(phrase) && hasRegisteredEntitySuffix(phrase), false);
+  }
+  // REQUIRED COUNTER-CELL: bare ` of ` mid-name is NOT a marker. These are legitimate registered
+  // names and must remain candidates.
+  for (const real of ["BANK OF CHINA (MALAYSIA) BERHAD", "BANK OF AMERICA MALAYSIA BERHAD",
+    "UNITED OVERSEAS BANK (MALAYSIA) BHD", "CHAMBER OF COMMERCE SDN BHD",
+    "INSTITUTE OF TECHNOLOGY SDN BHD"]) {
+    assert.equal(looksLikePartyName(real), true, real);
+    assert.equal(hasRegisteredEntitySuffix(real), true, real);
+  }
+});
+
+test("`S/B` is matched on its PUNCTUATED form only — the folded `s b` swallowed a person", () => {
+  // `Attn : Lim S B` folded to `lim s b`, read as an entity, so the CONTACT polarity refused the
+  // person, attn_key was never set, and the reconciler REMOVED a correct customer name on
+  // exactly the F7 shape. `S/B` is printed with a slash; the spaced form is a folding artefact.
+  assert.equal(hasRegisteredEntitySuffix("KONG CHENG RESTAURANTS S/B"), true);
+  assert.equal(hasRegisteredEntitySuffix("ACME S/B"), true);
+  assert.equal(partyKey("KONG CHENG RESTAURANTS S/B"), partyKey("KONG CHENG RESTAURANTS SDN BHD"),
+    "the canonicalization that dissolved the false contest still holds");
+  // A PERSON written with initials is never an entity — the point of the change.
+  for (const person of ["Lim S B", "Tan S.B.", "Wong K L", "Tan C K", "Lim Xiao Shan"]) {
+    assert.equal(hasRegisteredEntitySuffix(person), false, person);
+    assert.equal(looksLikePartyName(person), true, `${person} is still a readable contact`);
+  }
+  // THE RECORDED TENSION, resolved fail-closed: `S.B.` with dots is the same shape as a person's
+  // initials, so a company printing it ABSTAINS rather than risk swallowing `Tan S.B.`.
+  assert.equal(hasRegisteredEntitySuffix("KONG CHENG RESTAURANTS S.B."), false,
+    "a false abstain leaves typed standing — zero loss; a wrong party is the forbidden outcome");
+});
+
 test("the POSSESSIVE belongs to the label — `Customer's Ref:` is not a party named `'s Ref`", () => {
   // The tokenizer cut after `Customer` and left `'s Ref: PO-8891` as the remainder, which then
   // read as a name because `'s` is not a separator and `s` is not a continuation token.
@@ -130,7 +227,7 @@ test("SUFFIX VARIANTS CANONICALIZE — one company, two lawful spellings, is one
   // Punctuation and case still collapse, and the key stays UNICODE-AWARE.
   assert.equal(partyKey("KONG CHENG RESTAURANTS SDN. BHD."), partyKey("Kong Cheng Restaurants Sdn Bhd"));
   assert.notEqual(partyKey("鑫旺 SDN BHD"), partyKey("宏达 SDN BHD"));
-  assert.equal(partyKey("鑫旺 SDN BHD"), "鑫旺sdnbhd");
+  assert.equal(partyKey("鑫旺 SDN BHD"), "鑫旺 sdnbhd");
 });
 
 test("the ATTN vocabulary keeps its own word boundary", () => {

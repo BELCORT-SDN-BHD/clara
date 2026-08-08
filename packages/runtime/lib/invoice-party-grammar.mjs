@@ -9,6 +9,14 @@
 // about unmeasured thresholds — lives in `invoice-customer-identity.mjs`'s header.
 
 import { asciiTrim, DASH_CHARS } from "./invoice-amount-grammar.mjs";
+import { foldUnicode } from "./invoice-entity-lexicon.mjs";
+
+// The REGISTERED-ENTITY LEXICON lives next door — it owns what a Malaysian business is
+// CALLED and the two asymmetric predicates built from that (strict endsWith for party
+// candidacy, broad contains for the contact refusal). Re-exported so every existing importer
+// of this module keeps working and there is still ONE place these rules are defined.
+export { hasRegisteredEntitySuffix, containsEntityToken, partyKey, splitEntitySuffix }
+  from "./invoice-entity-lexicon.mjs";
 
 /**
  * THE CLOSED BILL-TO LABEL VOCABULARY, EN + BM. Matching is exact-prefix on a form where every
@@ -139,86 +147,7 @@ const CONTINUATION_TOKENS = Object.freeze(new Set([
  *  other. NEVER use this on a VALUE: it deletes CJK outright (see `foldUnicode`). */
 const foldForMatch = (s) => String(s ?? "").replace(/[^a-zA-Z0-9]+/g, " ").trim().toLowerCase();
 
-/** The same fold for VALUES — Unicode letters and numbers survive. `鑫旺 SDN BHD` must fold to
- *  `鑫旺 sdn bhd`, not to `sdn bhd`; the ASCII fold silently deletes the only part of that name
- *  that identifies the party. */
-const foldUnicode = (s) => String(s ?? "").normalize("NFKC").replace(/[^\p{L}\p{N}]+/gu, " ").trim().toLowerCase();
 
-/**
- * ══ THE ROUND-3 DESIGN LAW: POSITIVE EVIDENCE, NOT ENUMERATION ══
- *
- * THE REGISTERED-ENTITY SUFFIX FAMILY. A scanned or labelled string may become a PARTY CANDIDATE
- * only if it ends in one of these. No suffix ⇒ no candidacy ⇒ no override, no contest, no
- * disagreement-withdraw: the reader abstains and Azure's typed value stands, which is exactly
- * today's behaviour.
- *
- * WHY THE SHAPE OF THE GATE CHANGED, and this is the lesson three review rounds paid for. The
- * party gate was a BLOCKLIST — it admitted any string that did not look like an address, a
- * phone number, an amount or a caption. A blocklist can only enumerate the past, so every round
- * found a new instance of one class: a label whose remainder is FURNITURE (`Customer's Ref:
- * PO-8891` → `'s Ref: PO-8891`, `Buyer Signature` → `Signature`, `Customer Since 2019` →
- * `Since 2019` — fifteen in one probe), and every widening of the scan reopened it (the
- * two-column skip repair let the caption `DELIVERY ADDRESS` win). Enumerating harder is a losing
- * game. The OVERRIDE branch is the only branch that can write a WRONG party onto real books, so
- * it now demands POSITIVE evidence that the string names a registered business — house review
- * law 2 ("absence is not evidence") expressed in grammar.
- *
- * THE SET IS THE MALAYSIAN LEGAL-ENTITY SUFFIX FAMILY AND NOTHING ELSE:
- *   · SDN BHD (Sendirian Berhad, private limited) and its lawful spellings — `SDN. BHD.`,
- *     `SDN.BHD.`, `S/B`, `Sendirian Berhad`;
- *   · BHD / BERHAD (public limited);
- *   · PLT (Perkongsian Liabiliti Terhad) and LLP.
- * DELIBERATELY EXCLUDED: `ENTERPRISE`, `TRADING`, `RESOURCES`, `HOLDINGS`, `SERVICES`. Those are
- * conventional ROB trade-name words, not entity suffixes, and admitting them would reopen the
- * very class this gate closes (`TRADING TERMS` is a caption). Also excluded: `有限公司` and other
- * non-romanized renderings — an SSM-registered name is romanized, and a Chinese-script rendering
- * is a trade form, so it abstains rather than overrides.
- *
- * THE HONEST NARROWING, stated because it is a real loss of reach: an UNSUFFIXED buyer — an
- * individual, a sole proprietor, an unregistered trade name (`SIFU LAB` on this client's own
- * books) — can never override a typed name. It abstains, typed stands, and that is ZERO loss
- * against today, because today the typed value stands unconditionally. The measured F7 defect
- * still fixes: `KONG CHENG RESTAURANTS SDN BHD` carries the signal.
- */
-const ENTITY_SUFFIXES = Object.freeze([
-  ["sdnbhd", "sendirian berhad"],
-  ["sdnbhd", "sdn berhad"],
-  ["sdnbhd", "sdn bhd"],
-  ["sdnbhd", "sdnbhd"],
-  ["sdnbhd", "s b"],
-  ["berhad", "berhad"],
-  ["berhad", "bhd"],
-  ["plt", "perkongsian liabiliti terhad"],
-  ["plt", "plt"],
-  ["llp", "llp"],
-]);
-/** Longest variant first, so `sdn bhd` is matched as the SDN BHD family and never decomposed
- *  into a bare `bhd` — which would canonicalize the same company two different ways. */
-const ENTITY_SUFFIXES_BY_LENGTH = Object.freeze([...ENTITY_SUFFIXES].sort((a, b) => b[1].length - a[1].length));
-
-/**
- * Split a folded value into {base, canonical} when it ENDS in a registered-entity suffix, else
- * null. The canonical form is what makes `KONG CHENG…SDN BHD` and `KONG CHENG…S/B` — one company,
- * two lawful Malaysian spellings — a single identity instead of a contest that withdrew a
- * correct typed name.
- */
-function splitEntitySuffix(folded) {
-  for (const [canonical, variant] of ENTITY_SUFFIXES_BY_LENGTH) {
-    if (folded === variant) return { base: "", canonical };
-    if (folded.endsWith(` ${variant}`)) {
-      return { base: folded.slice(0, folded.length - variant.length - 1).trim(), canonical };
-    }
-  }
-  return null;
-}
-
-/** Does this string carry a POSITIVE registered-entity signal? The party-candidacy gate. */
-export function hasRegisteredEntitySuffix(s) {
-  const hit = splitEntitySuffix(foldUnicode(s));
-  // A bare suffix with no name in front of it (`SDN BHD` alone, an OCR fragment) is not an
-  // identity — it is the ending of one.
-  return hit !== null && hit.base.length > 0;
-}
 
 /** Leading separators between a label and its value: `. `, ` : `, ` - `, `# `. */
 const LEADING_SEPARATORS = new RegExp(`^[ \t.:#${DASH_CHARS}]+`);
@@ -264,6 +193,44 @@ const HEADER_WORDS = Object.freeze(new Set([
  *  as a party. `A T T N : Lim Xiao Shan` folds to `a t t n lim xiao shan`, which the ordinary
  *  prefix match cannot see, and it then reached `customer_name` in an executed probe. */
 const ATTN_DESPACED = Object.freeze(ATTN_LABELS.map((l) => l.replace(/\s+/g, "")));
+
+/**
+ * NON-ADDRESSEE MARKERS — a phrase that CONTAINS a company name is not that company's invoice.
+ *
+ * THE DEFECT THIS CLOSES, measured: `Bill To:` / `SIFU LAB` / `c/o AMATERUS GROUP SDN BHD` /
+ * `Attn : Lim Xiao Shan`. The entity gate skipped `SIFU LAB` (a REAL unsuffixed RS customer,
+ * cited in this module's own narrowing note) because it carries no suffix, walked on to the
+ * `c/o` line, and BIRTHED `customer_name = "c/o AMATERUS GROUP SDN BHD"` through the override
+ * branch. Eleven of eleven measured non-addressee forms passed candidacy. A registered-entity
+ * suffix proves a NAME is present; it does not prove the name is the ADDRESSEE, and the base in
+ * front of it has to be a name rather than a phrase that mentions one.
+ *
+ * APPLIED IN `looksLikePartyName`, i.e. to BOTH polarities, not only to the base before a
+ * suffix. Putting it in the entity function alone would have handed every one of these strings
+ * straight to the CONTACT read instead — the polarity inversion means "not an entity" is a
+ * positive contact signal, so a rule that only demotes a party promotes a contact. One phrase
+ * rule, both doors.
+ *
+ * NARROWEST SET THAT CLOSES THE MEASURED CLASS — the eleven forms and nothing speculative:
+ * c/o · care of · subsidiary of · member of · managed by · agent for · payable to · known as
+ * (covers formerly/also) · the start-anchored `Group Company:` caption.
+ *
+ * BARE ` of ` IS NOT A MARKER, deliberately: `BANK OF CHINA (MALAYSIA) BERHAD` is a legitimate
+ * registered name and must stay a candidate. Only the MARKED phrases disqualify. That counter
+ * case has its own cell in both batteries.
+ */
+const NON_ADDRESSEE_MARKERS = Object.freeze([
+  /^c o\b/,              // `c/o` / `C/O` — folded, so the slash is already a space
+  /\bcare of\b/,
+  /\bsubsidiary of\b/,
+  /\bmember of\b/,
+  /\bmanaged by\b/,
+  /\bagent for\b/,
+  /\bagents for\b/,
+  /\bpayable to\b/,      // covers `Cheque payable to …`
+  /\bknown as\b/,        // covers `Formerly known as …` / `also known as`
+  /^group company\b/,
+]);
 
 /**
  * FUNCTION WORDS THAT NO PARTY NAME OPENS WITH — the guard that earns the weakest vocabulary
@@ -313,10 +280,18 @@ export function looksLikePartyName(s) {
   if (HOUSE_NUMBER.test(v)) return false;                                          // `12, Main Road`
   if (/^[\d\s,.\-/]+$/.test(v)) return false;                                      // pure punctuation/digits
   if (STOPWORD_OPENERS.has(foldForMatch(v.split(/\s+/)[0] ?? ""))) return false;    // a sentence, not a name
-  // A caption, not an identity. `Name:` / `Customer` / `Description` are furniture.
-  if (/:\s*$/.test(v)) return false;                                               // a name never ends in a colon
+  // A COLON ANYWHERE MEANS A CAPTION, not an identity — registered company names do not contain
+  // one. This is the ROOT closer for the possessive-caption class: `Customer＇s Ref: ACME SDN BHD`
+  // leaves `＇s Ref: ACME SDN BHD` as a remainder whatever apostrophe glyph the OCR produced, and
+  // the embedded suffix then satisfies the entity gate. Enumerating apostrophes chases renderings
+  // forever; refusing a colon closes the class in one rule.
+  if (/[:：]/.test(v)) return false;
   const folded = foldForMatch(v);
   if (HEADER_WORDS.has(folded)) return false;
+  // A PHRASE that mentions a company is not that company. Folded on the UNICODE fold so a
+  // marker in front of a non-Latin name is still seen.
+  const phrase = foldUnicode(v);
+  if (NON_ADDRESSEE_MARKERS.some((m) => m.test(phrase))) return false;
   // A SPACED-OUT contact label. `A T T N : Lim Xiao Shan` never reaches the ordinary prefix
   // match, so the party gate is the only thing standing between it and `customer_name`.
   // SCOPED TO THE SPACED-OUT SHAPE — at least three single-letter tokens in a row. The first cut
@@ -329,39 +304,6 @@ export function looksLikePartyName(s) {
   return true;
 }
 
-/**
- * The identity key two readings are compared on: NFKC-normalize, keep only Unicode letters and
- * numbers, lowercase — so `KONG CHENG RESTAURANTS SDN. BHD.` and `Kong Cheng Restaurants Sdn Bhd`
- * are ONE party rather than a contest. Used ONLY to decide whether two readings are the same
- * party; never emitted.
- *
- * UNICODE-AWARE, and that is not cosmetic. The first cut used the DB's registration rule
- * (`[^a-zA-Z0-9]`), which DELETES every non-ASCII letter — so two genuinely different Malaysian
- * Chinese company names, `鑫旺 SDN BHD` and `宏达 SDN BHD`, both keyed to `sdnbhd`. Executed
- * through the real normalizer that read as ONE party matched twice instead of a contest, and
- * emitted `"?? SDN BHD"`. Uniqueness-or-nothing is only a defense if the key can tell two names
- * apart; \p{L}\p{N} is what makes it one. (`registrationKey` in the X6 module keeps the ASCII
- * rule deliberately — it must equal the DB's own `regexp_replace(reg,'[^a-zA-Z0-9]','','g')`,
- * and a registration number has no non-ASCII letters. These two keys are NOT interchangeable.)
- *
- * Legal suffixes are DELIBERATELY NOT STRIPPED: `ACME SDN BHD` and `ACME` may well be two
- * different registered entities, and collapsing them would be this code inventing an identity
- * rather than reading one. But EQUIVALENT SPELLINGS OF THE SAME SUFFIX ARE CANONICALIZED, which
- * is a different rule and resolves a defect the strict version created: `KONG CHENG RESTAURANTS
- * SDN BHD` and `KONG CHENG RESTAURANTS S/B` are ONE company written two lawful ways, and keying
- * them apart made the reader declare a CONTEST and withdraw a correct typed name.
- *
- * TWO GENUINELY DIFFERENT-KEYED ENTITIES STILL CONTEST, and that residual is held EYES-OPEN: a
- * document that really does name two different registered buyers withdraws the typed row rather
- * than picking one (the earlier contested ruling). Canonicalization narrows that to spellings of
- * the same suffix; it does not soften the contest itself.
- */
-export const partyKey = (s) => {
-  const folded = foldUnicode(s);
-  const hit = splitEntitySuffix(folded);
-  const flat = (t) => t.replace(/[^\p{L}\p{N}]/gu, "");
-  return hit ? flat(hit.base) + hit.canonical : flat(folded);
-};
 
 /**
  * Split a line into {label, remainder, continuation} when it opens with a vocabulary label on a
@@ -400,8 +342,14 @@ export function splitLabelled(text, vocabulary) {
   // `'s` is not a separator and `s` is not a continuation token. The apostrophe-s is part of the
   // label's own word; consume it so the remainder starts at the value (`Ref: …`, which the
   // continuation guard then refuses). Straight and typographic apostrophes both.
-  let rest = original.slice(cut);
-  const possessive = /^['‘’ʼ]s?\b/i.exec(rest);
+  // THE APOSTROPHE SET IS THE RESIDUE AFTER NFKC, VERIFIED RATHER THAN GUESSED. NFKC folds the
+  // FULLWIDTH apostrophe (U+FF07 → U+0027) and nothing else here: U+2018/U+2019 (curly), U+02BC
+  // (modifier letter), U+2032 (prime) and U+00B4 (acute, which NFKC expands to space+combining)
+  // all survive normalization, so they are enumerated. The enumeration is DEFENCE IN DEPTH only
+  // — it will always lag some OCR rendering, which is why the colon rule in `looksLikePartyName`
+  // is the actual class-closer: `Customer＇s Ref: ACME SDN BHD` dies there whatever the glyph.
+  let rest = original.slice(cut).normalize("NFKC");
+  const possessive = /^['‘’ʼ′´]\s*s?\b/i.exec(rest);
   if (possessive) rest = rest.slice(possessive[0].length);
   const remainder = asciiTrim(asciiTrim(rest).replace(LEADING_SEPARATORS, ""));
   // BARE-ONLY: a `to` carrying anything after it is a line item, not an addressee. NOT a
