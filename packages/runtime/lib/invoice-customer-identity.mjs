@@ -24,6 +24,20 @@
 // resolves to REFUSE, and refusing means Azure's typed value stands exactly as it did before
 // this module existed.
 //
+// ─── THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR ────────────────────────────────
+// (orchestrator ruling on the two-lane review, 2026-08-09.) Two behaviours the original work
+// order specified were OVERRULED toward fail-closed after both review lanes broke them by
+// executing this code, and the overrules are recorded here rather than only in the ADR:
+//   1. SOLE AUTHORSHIP IS DELETED. The reader may never fill an empty or absent typed
+//      `CustomerName`. With an empty-but-regioned typed field the first cut emitted a line item,
+//      a contact person, a caption (`Name:`) and a street address as the customer of record —
+//      each a WRONG identity manufactured where pass-through had supplied none.
+//   2. A CONTESTED landscape (≥2 distinct labelled parties) WITHDRAWS the typed row instead of
+//      leaving it standing. A contest is something the reader positively measured, not an
+//      absence of opinion.
+// The full lawful-action set lives on `mergeCustomerIdentity` below.
+// ──────────────────────────────────────────────────────────────────────────────────────────────
+//
 // ─── HONESTY NOTE, STATED BECAUSE IT IS A REAL DIFFERENCE FROM X6 ─────────────────────────────
 // X6's thresholds were CALIBRATED against two real Azure captures (a measured 0.015in vendor
 // gap; a letterhead at y≈0.88 of an 11.68in page). THE THRESHOLDS BELOW ARE NOT MEASURED — the
@@ -73,6 +87,7 @@
 import { pageFrame } from "./invoice-totals-reader.mjs";
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
 import { looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
+import { customerAttributionFailure, extentOf, scaleAnchor, xOverlap } from "./invoice-block-geometry.mjs";
 
 export { looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel, splitLabelled, BILL_TO_LABELS, ATTN_LABELS } from "./invoice-party-grammar.mjs";
 
@@ -93,82 +108,29 @@ export const DEFAULT_CUSTOMER_IDENTITY_OPTS = Object.freeze({
    *  inches, for the split-line scan. One or two printed rows on an A4 bill. */
   blockGapIn: 0.6,
   /** How many following lines the split-line scan may examine before giving up. The party name
-   *  is conventionally the first line of the block; the allowance covers an `Attn` line printed
-   *  ABOVE the name plus one stray OCR fragment. */
-  maxLookaheadLines: 3,
+   *  is conventionally the first line of the block; the allowance covers an `Attn` label and its
+   *  reserved value line printed ABOVE the name, plus an interleaved right-hand meta column
+   *  (Azure emits lines in reading order, so a two-column header alternates). RAISED FROM 3
+   *  because SKIPPED lines now spend budget where they used to end the scan — the bound is what
+   *  matters, not its exact size, and a pathological page still terminates in `maxLookaheadLines`
+   *  steps per label. */
+  maxLookaheadLines: 5,
   /** Skew tolerance when deciding whether a line sits BELOW another, in inches. X2 measured page
    *  angles of -1.31° and +0.21°, moving a same-row box up to 0.14in against its neighbour; 0.15
    *  is that measurement's own ratified window, carried across rather than re-derived. */
   skewToleranceIn: 0.15,
 });
 
-/**
- * TWO-DIMENSIONAL gap between two boxes on the same page — 0 when they overlap in both axes,
- * else the Euclidean distance between their nearest edges. Null when the anchor is absent or on
- * another page, which is NO EVIDENCE rather than a near miss. Identical in rule to X6's, for the
- * identical reason: a y-only gap calls a name on the left and a name on the right "adjacent".
- */
-function boxDistance(candidate, anchor) {
-  if (!anchor || anchor.page !== candidate.page) return null;
-  const dx = Math.max(0, anchor.xmin - candidate.xmax, candidate.xmin - anchor.xmax);
-  const dy = Math.max(0, anchor.ymin - candidate.ymax, candidate.ymin - anchor.ymax);
-  return Math.hypot(dx, dy);
-}
-
-/** Shared horizontal extent between two boxes; <= 0 means different columns. */
-const xOverlap = (a, b) => Math.min(a.xmax, b.xmax) - Math.max(a.xmin, b.xmin);
-
-/**
- * Is this candidate attributable to the CUSTOMER block? Returns null when it is, else the reason
- * it is not — so the receipt can name which defense refused it.
- *
- * The mirror of X6's `vendorAttributionFailure`, including its tie rule: STRICTLY closer to the
- * customer than to the vendor, with an epsilon, because a tie decided by floating-point dust is
- * still a tie and resolving it in the buyer's favour is exactly the guess this defense prevents.
- */
-function customerAttributionFailure(candidate, anchors, limit) {
-  const customerDistance = boxDistance(candidate, anchors?.customer);
-  if (customerDistance === null) return "no_customer_anchor";
-  if (customerDistance > limit) return "customer_anchor_far";
-  const vendorDistance = boxDistance(candidate, anchors?.vendor);
-  const TIE_EPSILON = 1e-9;
-  if (vendorDistance !== null && !(customerDistance + TIE_EPSILON < vendorDistance)) return "closer_to_vendor";
-  return null;
-}
-
-/** Full 2D extent of a flat polygon, scaled into the page's frame, or null when unusable. */
-function extentOf(polygon, scale) {
-  if (!Array.isArray(polygon) || polygon.length < 8 || polygon.length % 2 !== 0) return null;
-  const xs = [];
-  const ys = [];
-  for (let i = 0; i < polygon.length; i += 2) {
-    const x = Number(polygon[i]);
-    const y = Number(polygon[i + 1]);
-    if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-    xs.push(x * scale);
-    ys.push(y * scale);
-  }
-  return { xmin: Math.min(...xs), xmax: Math.max(...xs), ymin: Math.min(...ys), ymax: Math.max(...ys) };
-}
-
-/** The anchor boxes, scaled into the same frame as the candidates. */
-function scaleAnchor(anchor, scale) {
-  if (!anchor) return null;
-  return {
-    page: anchor.page,
-    xmin: anchor.xmin * scale, xmax: anchor.xmax * scale,
-    ymin: anchor.ymin * scale, ymax: anchor.ymax * scale,
-  };
-}
-
 const emptyReceipt = () => ({
-  matched: 0, absent: 0, ambiguous: 0,
+  matched: 0, absent: 0, contested: 0,
   rejected_gate: 0, label_continuation: 0, no_geometry: 0, unit_unresolved: 0,
   no_customer_anchor: 0, customer_anchor_far: 0, closer_to_vendor: 0,
-  split_line_scanned: 0, split_line_exhausted: 0, attn_skipped: 0,
+  split_line_scanned: 0, split_line_exhausted: 0,
+  attn_skipped: 0, column_skipped: 0, reserved_skipped: 0,
   attn_matched: 0, attn_ambiguous: 0, attn_rejected_gate: 0, attn_unattributed: 0,
-  emitted: 0, contact_emitted: 0,
+  contact_emitted: 0,
   typed_collapsed: 0, typed_overridden_attn: 0, typed_disagreement: 0,
+  typed_vs_contested: 0, sole_authorship_refused: 0,
   candidates: [],
 });
 
@@ -205,6 +167,8 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
     const scaledAnchors = frame
       ? { vendor: scaleAnchor(anchors?.vendor, frame.scale), customer: scaleAnchor(anchors?.customer, frame.scale) }
       : null;
+    /** Line indices claimed by PASS 1 as a contact VALUE — never available to the party read. */
+    const reserved = new Set();
 
     /** Attribution (defense c), counted under the right head so the receipt names the refusal. */
     const attributed = (box, label, kind) => {
@@ -216,33 +180,97 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
       return false;
     };
 
-    for (let i = 0; i < lines.length; i++) {
-      const text = String(lines[i]?.content ?? "");
+    /**
+     * The BOUNDED FORWARD SCAN shared by both split-line reads (`Bill To:` / `Attention:` alone
+     * on a row, value beneath). Bounded on every axis — reading order, a line budget, a vertical
+     * gap, column cohesion and the value gate — and it distinguishes SKIP from STOP:
+     *
+     *   SKIP (keep looking, spend budget): a line in another COLUMN, an `Attn` label line, or a
+     *     line already reserved as a contact value. Azure emits lines in READING ORDER, so a
+     *     two-column header interleaves the right-hand meta column between a `Bill To:` label and
+     *     the party beneath it. The first cut BROKE on the first non-overlapping line, which
+     *     fails closed but means the fix may never FIRE on a real two-column KONG CHENG layout.
+     *   STOP (the block has ended): unusable geometry, a line above the label, a line past the
+     *     vertical gap, or a value that fails the gate — once the address has begun, the name
+     *     portion is over.
+     */
+    const scanBelow = (i, labelBox, kind, label) => {
+      const limit = Math.min(lines.length - 1, i + Math.max(0, settings.maxLookaheadLines));
+      for (let j = i + 1; j <= limit; j++) {
+        const box = boxes[j];
+        if (box === null) { receipt.no_geometry += 1; note("no_geometry", label, pageNumber, { kind: `${kind}_value` }); return null; }
+        if (box.ymin + skewTol < labelBox.ymin) return null;   // above the label: not this block
+        if (box.ymin - labelBox.ymax > blockGap) return null;  // the block ended
+        if (xOverlap(box, labelBox) <= 0) { receipt.column_skipped += 1; continue; }
+        if (reserved.has(j)) { receipt.reserved_skipped += 1; continue; }
+        if (splitAttnLabel(String(lines[j]?.content ?? ""))) { receipt.attn_skipped += 1; continue; }
+        const raw = asciiTrim(String(lines[j]?.content ?? ""));
+        if (!looksLikePartyName(raw)) {
+          receipt[kind === "party" ? "rejected_gate" : "attn_rejected_gate"] += 1;
+          note("rejected_gate", label, pageNumber, { kind: `${kind}_value` });
+          return null;
+        }
+        return { raw, box, lineIndex: j };
+      }
+      return null;
+    };
 
-      // ── THE CONTACT READ. An `Attn` line is claimed FIRST and unconditionally: whatever else
-      // it might look like, a line naming a contact person is not the party, and taking it out of
-      // party candidacy HERE is the structural form of "the boxed party beats the Attn person".
-      // The ranking is not a tie-break applied later — the person is never in the race.
-      const attn = splitAttnLabel(text);
-      if (attn) {
-        if (attn.continuation || !attn.remainder || !looksLikePartyName(attn.remainder)) {
+    // ══ PASS 1 — THE CONTACT READ, and it runs FIRST for a structural reason.
+    // A line the document labelled as a contact is not the party, whatever else it looks like.
+    // Claiming those lines up front is the structural form of "the boxed party beats the Attn
+    // person": the ranking is not a tie-break applied later — the person is never in the race.
+    // THE SPLIT FORM IS WHY THIS IS A SEPARATE PASS. `Attention:` alone on a row, with the name
+    // beneath it, reserves only its LABEL line under a single interleaved pass — so the value
+    // line stayed a live party candidate and an executed probe emitted `Lim Xiao Shan` as
+    // `customer_name`. Reserving the VALUE line is the fix, and it must happen before any party
+    // scan can reach it.
+    for (let i = 0; i < lines.length; i++) {
+      const attn = splitAttnLabel(String(lines[i]?.content ?? ""));
+      if (!attn) continue;
+      if (attn.continuation) {
+        receipt.attn_rejected_gate += 1;
+        note("attn_rejected_gate", attn.label, pageNumber, { kind: "attn" });
+        continue;
+      }
+      if (!frame) { receipt.unit_unresolved += 1; note("unit_unresolved", attn.label, pageNumber, { kind: "attn" }); continue; }
+      if (boxes[i] === null) { receipt.no_geometry += 1; note("no_geometry", attn.label, pageNumber, { kind: "attn" }); continue; }
+
+      let value = null;
+      if (attn.remainder) {
+        if (!looksLikePartyName(attn.remainder)) {
           receipt.attn_rejected_gate += 1;
           note("attn_rejected_gate", attn.label, pageNumber, { kind: "attn" });
           continue;
         }
-        if (!frame) { receipt.unit_unresolved += 1; note("unit_unresolved", attn.label, pageNumber, { kind: "attn" }); continue; }
-        if (boxes[i] === null) { receipt.no_geometry += 1; note("no_geometry", attn.label, pageNumber, { kind: "attn" }); continue; }
-        if (!attributed(boxes[i], attn.label, "attn")) continue;
-        contacts.push({
-          value_raw: attn.remainder, key: partyKey(attn.remainder), page: pageNumber,
-          polygon: (lines[i].polygon || []).map(Number),
-          confidence: lines[i]?.confidence == null ? null : Number(lines[i].confidence),
-        });
-        note("attn_accepted", attn.label, pageNumber, { kind: "attn", key: partyKey(attn.remainder) });
-        continue;
+        value = { raw: attn.remainder, box: boxes[i], lineIndex: i };
+      } else {
+        value = scanBelow(i, boxes[i], "attn", attn.label);
+        if (!value) { receipt.attn_rejected_gate += 1; note("attn_no_value", attn.label, pageNumber, { kind: "attn" }); continue; }
       }
+      // RESERVE THE VALUE LINE UNCONDITIONALLY — before attribution, and whether or not
+      // attribution goes on to accept it. The document labelled that line a contact; attribution
+      // failing says something about GEOMETRY, nothing about what the line IS. Reserving only on
+      // success would hand the party read exactly the lines the contact read could not vouch for.
+      reserved.add(value.lineIndex);
+      if (!attributed(value.box, attn.label, "attn")) continue;
+      const src = lines[value.lineIndex];
+      contacts.push({
+        value_raw: value.raw, key: partyKey(value.raw), page: pageNumber,
+        polygon: (src.polygon || []).map(Number),
+        confidence: src?.confidence == null ? null : Number(src.confidence),
+      });
+      note("attn_accepted", attn.label, pageNumber, { kind: "attn", key: partyKey(value.raw) });
+    }
 
-      // ── THE PARTY READ.
+    // ══ PASS 2 — THE PARTY READ.
+    for (let i = 0; i < lines.length; i++) {
+      // A reserved line cannot open a party read either. NOT counted here: `reserved_skipped`
+      // means "a candidate VALUE line was stepped over", which is what `scanBelow` records —
+      // counting the same line twice from two different positions makes the receipt lie about
+      // how many candidates the scan actually passed.
+      if (reserved.has(i)) continue;
+      const text = String(lines[i]?.content ?? "");
+      if (splitAttnLabel(text)) continue;      // an Attn LABEL line is never a party line
       const hit = splitBillToLabel(text);
       if (!hit) continue;
       if (hit.continuation) {
@@ -272,28 +300,9 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
       } else {
         // SPLIT-LINE: a bare `Bill To:` with the party on a following row. Unlike X6 — where a
         // letterhead prints label and number on ONE line, so a split shape is out of scope — the
-        // bill-to BOX is split-line by construction, so this path is not optional. It is bounded
-        // on every axis: reading order, a line count, a vertical gap, column overlap, and the
-        // party gate. It STOPS at the first line that is not a name, because once the address has
-        // begun the name portion has ended.
+        // bill-to BOX is split-line by construction, so this path is not optional.
         receipt.split_line_scanned += 1;
-        const limit = Math.min(lines.length - 1, i + Math.max(0, settings.maxLookaheadLines));
-        for (let j = i + 1; j <= limit; j++) {
-          const box = boxes[j];
-          if (box === null) { receipt.no_geometry += 1; note("no_geometry", hit.label, pageNumber, { kind: "party_value" }); break; }
-          if (box.ymin + skewTol < labelBox.ymin) break;   // above the label: not this block
-          if (box.ymin - labelBox.ymax > blockGap) break;  // the block ended
-          if (xOverlap(box, labelBox) <= 0) break;         // a different column
-          if (splitAttnLabel(String(lines[j]?.content ?? ""))) { receipt.attn_skipped += 1; continue; }
-          const raw = asciiTrim(String(lines[j]?.content ?? ""));
-          if (!looksLikePartyName(raw)) {
-            receipt.rejected_gate += 1;
-            note("rejected_gate", hit.label, pageNumber, { kind: "party_value" });
-            break;
-          }
-          value = { raw, box, lineIndex: j };
-          break;
-        }
+        value = scanBelow(i, labelBox, "party", hit.label);
         if (!value) {
           receipt.split_line_exhausted += 1;
           note("split_line_exhausted", hit.label, pageNumber, { kind: "party" });
@@ -336,10 +345,16 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
   }
   const partyKeys = new Set(parties.map((c) => c.key));
   if (partyKeys.size > 1) {
-    // Two different labelled parties, both attributable to the customer block. There is no basis
-    // for preferring one, so neither is emitted.
-    receipt.ambiguous += 1;
-    receipt.outcome = "ambiguous";
+    // A CONTEST, not an abstention — and the distinction is the whole point. Two DIFFERENT
+    // labelled parties, both attributable to the customer block, is something the reader
+    // POSITIVELY MEASURED about the document: its buyer identity is not settled. Neither is
+    // emitted, and `mergeCustomerIdentity` withdraws the typed row too (Ruling 3): leaving it
+    // standing lets a typed value that happens to equal ONE of two conflicting labelled parties
+    // resolve a counterparty on its own authority — `Bill To: WRONG HOLDING` +
+    // `Bill To: ACTUAL SUBSIDIARY` with typed `WRONG HOLDING` persisted the wrong identity.
+    // Same-key repeats across pages are ONE candidate (see `occurrences`), never a contest.
+    receipt.contested += 1;
+    receipt.outcome = "contested";
     receipt.distinct_keys = [...partyKeys];
     return { fields, receipt };
   }
@@ -356,59 +371,77 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
  * Merge the reader's emissions into the mapper's field list, reconciling `invoice.customer_name`
  * against Azure's typed row. Mutates `out` and `identity.receipt`.
  *
- * THE FULL MATRIX — this is the judgement half of the module, so it is written out rather than
- * left to be inferred from the branches below:
+ * ══ THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR ══
+ * (orchestrator ruling on the two-lane review, 2026-08-09 — this OVERRULES two behaviours the
+ * original work order specified, and both overrules are recorded here on purpose.)
  *
- *   reader ABSENT / refused   → typed stands, byte-identical to pre-X7 behaviour. The reader
- *                               having nothing to say is not evidence about Azure.
- *   reader AMBIGUOUS          → typed stands. DELIBERATELY UNLIKE X6, which withdraws the typed
- *                               row when its own reader is contested. The asymmetry is reasoned:
- *                               ambiguity is the reader making NO assertion, and one assertion is
- *                               not a contest. X6's case is genuinely different — there the typed
- *                               value is by construction one of the two contested readings,
- *                               because both come from the same closed registration grammar; a
- *                               typed CustomerName need not be either of two labelled blocks.
- *   typed ABSENT / empty      → the reader supplies the identity. `emitted`.
- *   reader AGREES with typed  → ONE row survives and it is the TYPED one: it carries Azure's own
- *                               region. `typed_collapsed`. Never two rows for one field_path —
- *                               `persist_invoice_facts` forfeits the WHOLE extraction on
- *                               conflicting text duplicates (0026:810-819), which would destroy
- *                               the working `invoice.total` capture along with this one.
- *   typed == the reader's OWN
- *     Attn person, party
- *     differs                 → THE F7 DEFECT, named and fixed: the reader's party REPLACES the
- *                               typed row and the person is emitted separately as
- *                               `invoice.contact_person`. `typed_overridden_attn`. This is the
- *                               ONLY branch where one machine reading overrides another of the
- *                               same field, and the document itself licenses it — the person is
- *                               labelled `Attn`, and a contact line is not a party under any
- *                               reading of the page.
- *   UNEXPLAINED disagreement  → EMIT NEITHER (X6's semantics). Two readers, two different buyers,
- *                               and nothing on the page explains the difference: a contested
- *                               identity resolves no counterparty on its own authority. The
- *                               document falls to `customer_name_missing`, where a human reads
- *                               the actual page. `typed_disagreement`.
+ * OVERRULE 1 — the reader never AUTHORS a customer_name. The first cut let it fill an empty or
+ * absent typed field. Both review lanes broke that arm independently: with an empty-but-regioned
+ * typed `CustomerName` the reader emitted a line item (`supply and install air-conditioning
+ * system`), a contact (`Lim Xiao Shan`), a caption (`Name:`) and an address (`12, Main Road`) as
+ * the customer of record — each one a WRONG identity created where pass-through had supplied no
+ * usable identity at all. Sole authorship is deleted, not patched: on an empty/absent typed field
+ * the reader emits nothing for `customer_name`, the document stays `customer_name_missing`, and a
+ * human reads the page. That is exactly today's behaviour, which is the point.
+ *
+ * OVERRULE 2 — a CONTESTED landscape fails closed (see the reader's `contested` outcome). The
+ * first cut left the typed row standing on ≥2 distinct labelled parties, on the reasoning that
+ * ambiguity is "no assertion". It is an assertion: the reader positively measured that the
+ * document's buyer is not settled, and a typed value equal to one of the two conflicting parties
+ * then resolves a counterparty on the strength of a coin toss that already landed.
+ *
+ * THE READER'S LAWFUL ACTIONS ARE THEREFORE EXACTLY FOUR:
+ *   COLLAPSE   reader AGREES with typed → ONE row survives and it is the TYPED one (it carries
+ *              Azure's own region). `typed_collapsed`. Never two rows for one field_path —
+ *              `persist_invoice_facts` forfeits the WHOLE extraction on conflicting text
+ *              duplicates (0026:810-819), which would destroy the working `invoice.total`
+ *              capture along with this one.
+ *   OVERRIDE   typed (non-empty) == the reader's OWN Attn person, and a distinct party block
+ *              exists → THE F7 DEFECT: the party REPLACES the typed row and the person is
+ *              emitted separately as `invoice.contact_person`. `typed_overridden_attn`. The only
+ *              branch where one machine reading overrules another of the same field, and the
+ *              document itself licenses it — a line labelled `Attn` is not a party under any
+ *              reading of the page.
+ *   WITHDRAW   unexplained disagreement → EMIT NEITHER (X6's semantics). Two readers, two
+ *              different buyers, nothing on the page explaining it. `typed_disagreement`.
+ *   WITHDRAW   contested landscape → EMIT NEITHER. `typed_vs_contested`.
+ *
+ * And its two lawful silences: reader ABSENT/refused → typed stands byte-identically (the reader
+ * having nothing to say is not evidence about Azure); reader has a party but typed is
+ * empty/absent → nothing emitted, `sole_authorship_refused`.
+ *
+ * `invoice.contact_person` is unaffected by all of the above: it has no typed counterpart in the
+ * Document Intelligence vocabulary and no other producer in the repo, so it is purely additive.
  */
 export function mergeCustomerIdentity(out, identity) {
   const receipt = identity.receipt;
   const contact = identity.fields.find((f) => f.field_path === "invoice.contact_person");
   const party = identity.fields.find((f) => f.field_path === "invoice.customer_name");
+  const typed = out.find((r) => r.field_path === "invoice.customer_name");
+  const typedRaw = String(typed?.value_raw ?? "").trim();
 
-  // `invoice.contact_person` has NO typed counterpart in the Document Intelligence vocabulary and
-  // no other producer anywhere in the repo, so it is purely additive: nothing to reconcile
-  // against, nothing it can collide with.
   if (contact && !out.some((r) => r.field_path === "invoice.contact_person")) {
     out.push(contact);
     receipt.contact_emitted += 1;
   }
+
+  // A CONTEST is a positive measurement, so it is handled BEFORE the no-party return — the
+  // reader emits no party precisely because it found two.
+  if (receipt.outcome === "contested") {
+    if (typed && typedRaw) {
+      out.splice(out.indexOf(typed), 1);
+      receipt.typed_vs_contested += 1;
+    }
+    return;
+  }
   if (!party) return;
 
-  const typed = out.find((r) => r.field_path === "invoice.customer_name");
-  const typedRaw = String(typed?.value_raw ?? "").trim();
   if (!typed || !typedRaw) {
-    if (typed) Object.assign(typed, party);
-    else out.push(party);
-    receipt.emitted += 1;
+    // RECONCILIATION-ONLY. There is nothing to reconcile against, and the reader does not get to
+    // author an identity on its own. Recorded rather than silent so the refusal is inspectable
+    // on live without re-running the engine.
+    receipt.sole_authorship_refused += 1;
+    receipt.outcome = "sole_authorship_refused";
     return;
   }
   if (partyKey(typedRaw) === partyKey(party.value_raw)) {

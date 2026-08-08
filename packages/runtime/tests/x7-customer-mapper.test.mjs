@@ -95,33 +95,57 @@ test("reader AGREES: one row survives and it is the TYPED one (it carries Azure'
   assert.equal(contactOf(out).value_raw, "Lim Xiao Shan", "the contact is emitted either way");
 });
 
-test("reader AMBIGUOUS: the typed row STANDS — one assertion is not a contest", () => {
-  // Deliberately unlike X6, which withdraws its typed row on ambiguity. Reasoned in
-  // mergeCustomerIdentity's header: X6's typed value is by construction one of the two contested
-  // readings (both come from the same closed registration grammar); a typed CustomerName need not
-  // be either of two labelled blocks, so withdrawing it would cost a document for no evidence.
-  const second = line("Bill To: SOME OTHER BUYER SDN BHD", box(0.72, 2.55, 3.80, 2.70));
+test("CONTESTED landscape: the typed row is WITHDRAWN — a coin toss that already landed is not evidence", () => {
+  // OVERRULE 2. The first cut left the typed row standing on ≥2 distinct labelled parties, on the
+  // reasoning that ambiguity is "no assertion". It is one: the reader positively measured that
+  // the document's buyer is not settled. The executed counterexample that ended the argument —
+  // `Bill To: WRONG HOLDING` + `Bill To: ACTUAL SUBSIDIARY` with typed `WRONG HOLDING` persisted
+  // the WRONG identity while cheerfully recording the contest in its receipt.
+  const wrong = line("Bill To: WRONG HOLDING SDN BHD", box(0.72, 2.15, 3.60, 2.29));
+  const actual = line("Bill To: ACTUAL SUBSIDIARY SDN BHD", box(0.72, 2.32, 3.90, 2.46));
   const out = normalizeAzureInvoice(
-    payloadWith({ CustomerName: typedCustomerName("KONG CHENG RESTAURANTS SDN BHD") },
-      [BILL_TO_LABEL, KONG_CHENG, second, ATTN_PERSON]),
+    payloadWith({ CustomerName: typedCustomerName("WRONG HOLDING SDN BHD") }, [wrong, actual]),
   );
-  assert.equal(customerOf(out).value_raw, "KONG CHENG RESTAURANTS SDN BHD", "the typed row is left exactly as it was");
-  assert.equal(receiptOf(out).outcome, "ambiguous");
-  assert.equal(receiptOf(out).typed_disagreement, 0);
+  assert.equal(customerOf(out), undefined, "neither labelled party, and not the typed one either");
+  assert.equal(receiptOf(out).outcome, "contested");
+  assert.equal(receiptOf(out).typed_vs_contested, 1);
   assert.equal(receiptOf(out).typed_collapsed, 0);
-  assert.equal(receiptOf(out).emitted, 0);
+  // The rest of the extraction is untouched — one contested field never costs the document.
+  assert.equal(out.fields.find((f) => f.field_path === "invoice.total").value_raw, "2,800.00");
 });
 
-test("typed EMPTY but regioned: the reader fills the hole, it does not duplicate it", () => {
-  // A real Azure shape — the InvoiceId precedent, a bounding region with no value. The region is
-  // what gives the reader its anchor, so this is the one way a document with no usable typed
-  // customer name can still be read.
+test("typed EMPTY but regioned: the reader REFUSES to author — it is a check layer, not a source", () => {
+  // OVERRULE 1, and the single most important cell in this file. Both review lanes broke the old
+  // "empty typed → reader supplies" arm by executing it: with an empty-but-regioned CustomerName
+  // the reader emitted a line item, a contact person, a caption (`Name:`) and a street address as
+  // the customer of record — each a WRONG identity manufactured where pass-through had supplied
+  // none. Sole authorship is DELETED, not patched.
   const out = normalizeAzureInvoice(payloadWith({ CustomerName: typedCustomerName("", 0.3) }, KONG_CHENG_BLOCK));
   const rows = rowsFor(out, "invoice.customer_name");
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].value_raw, "KONG CHENG RESTAURANTS SDN BHD", "an empty typed hit is a hole, not a disagreement");
-  assert.equal(receiptOf(out).emitted, 1);
-  assert.equal(receiptOf(out).typed_disagreement, 0);
+  assert.equal(rows.length, 1, "the typed row is left exactly as Azure produced it");
+  assert.equal(rows[0].value_raw, "", "…empty, so the document stays customer_name_missing for a human");
+  assert.equal(receiptOf(out).sole_authorship_refused, 1);
+  assert.equal(receiptOf(out).outcome, "sole_authorship_refused");
+  assert.equal(receiptOf(out).typed_overridden_attn, 0);
+  // The CONTACT is still emitted — it has no typed counterpart, so it authors nothing.
+  assert.equal(contactOf(out).value_raw, "Lim Xiao Shan");
+});
+
+test("the four shapes that reached customer_name through an EMPTY typed field are all dead", () => {
+  // Every one of these was an executed review probe that manufactured a wrong identity.
+  const attnLabel = line("Attention:", box(0.72, 2.25, 1.60, 2.39));
+  const person = line("Lim Xiao Shan", box(0.72, 2.40, 2.20, 2.54));
+  for (const [name, lines] of [
+    ["a LINE ITEM", [BILL_TO_LABEL, line("To supply and install air-conditioning system", box(0.72, 2.30, 4.60, 2.45))]],
+    ["a split-Attn CONTACT", [BILL_TO_LABEL, attnLabel, person]],
+    ["a CAPTION", [BILL_TO_LABEL, line("Name:", box(0.72, 2.30, 1.40, 2.45))]],
+    ["an ADDRESS", [BILL_TO_LABEL, line("12, Main Road", box(0.72, 2.30, 2.40, 2.45))]],
+    ["a SPACED contact label", [BILL_TO_LABEL, line("A T T N : Lim Xiao Shan", box(0.72, 2.30, 3.00, 2.45))]],
+  ]) {
+    const out = normalizeAzureInvoice(payloadWith({ CustomerName: typedCustomerName("", 0.2) }, lines));
+    assert.equal(customerOf(out).value_raw, "", `${name} must never become the customer`);
+    assert.equal(rowsFor(out, "invoice.customer_name").length, 1);
+  }
 });
 
 test("UNEXPLAINED disagreement: EMIT NEITHER — a contested buyer resolves nothing on its own authority", () => {
@@ -185,7 +209,7 @@ test("a legacy payload with NO pages[].lines[] is a pure widening of v9", () => 
   assert.equal(contactOf(out), undefined);
   const receipt = receiptOf(out);
   assert.equal(receipt.outcome, "absent");
-  assert.equal(receipt.emitted, 0);
+  assert.equal(receipt.sole_authorship_refused, 0);
   assert.equal(receipt.contact_emitted, 0);
   assert.equal(receipt.typed_collapsed, 0);
   assert.deepEqual(receipt.candidates, []);
@@ -207,7 +231,7 @@ test("a MULTI-DOCUMENT bundle runs no customer reader at all", () => {
   assert.equal(customerOf(out).value_raw, "Lim Xiao Shan", "wrong, but not overridden by another document's box");
   assert.equal(contactOf(out), undefined);
   assert.equal(receiptOf(out).outcome, "multi_document");
-  assert.equal(receiptOf(out).emitted, 0);
+  assert.equal(receiptOf(out).sole_authorship_refused, 0);
   assert.equal(receiptOf(out).contact_emitted, 0);
 });
 

@@ -70,7 +70,25 @@ test("an Attn line printed ABOVE the party name is skipped, not taken", () => {
   const { fields, receipt } = read([BILL_TO_LABEL, attnFirst, partySecond]);
   assert.equal(partyOf({ fields }).value_raw, "KONG CHENG RESTAURANTS SDN BHD");
   assert.equal(contactOf({ fields }).value_raw, "Lim Xiao Shan");
-  assert.equal(receipt.attn_skipped, 1, "skipped as a party candidate, captured as a contact");
+  assert.equal(receipt.reserved_skipped, 1, "claimed by the contact pass, so the party scan steps over it");
+});
+
+test("a SPLIT `Attention:` label RESERVES its value line — the contact can never become the party", () => {
+  // The contact read runs as its own pass precisely for this shape. Under a single interleaved
+  // pass a bare `Attention:` reserved only its LABEL line, so the name beneath it stayed a live
+  // party candidate — and with an empty-but-regioned typed CustomerName the reader emitted
+  // `Lim Xiao Shan` as customer_name, manufacturing a wrong identity where pass-through had none.
+  const attnLabel = line("Attention:", box(0.72, 2.25, 1.60, 2.39));
+  const person = line("Lim Xiao Shan", box(0.72, 2.40, 2.20, 2.54));
+  const party = line("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69));
+  const { fields, receipt } = read([BILL_TO_LABEL, attnLabel, person, party]);
+  assert.equal(contactOf({ fields }).value_raw, "Lim Xiao Shan", "the split form still reads the contact");
+  assert.equal(partyOf({ fields }).value_raw, "KONG CHENG RESTAURANTS SDN BHD", "and the party beneath it still reads");
+  assert.ok(receipt.reserved_skipped >= 1, "the reserved value line was stepped over, not consumed");
+  // Even when attribution REFUSES the contact, the line stays reserved: the document labelled it
+  // a contact, and attribution failing says something about geometry, not about what the line IS.
+  const noAnchor = read([BILL_TO_LABEL, attnLabel, person, party], { vendor: null, customer: { page: 1, xmin: 0.72, xmax: 3.30, ymin: 2.55, ymax: 2.69 } });
+  assert.notEqual(partyOf(noAnchor)?.value_raw, "Lim Xiao Shan", "a contact is never promoted, however attribution lands");
 });
 
 test("the SAME-LINE bill-to form reads too — `Bill To: ACME` and `M/s ACME`", () => {
@@ -91,11 +109,40 @@ test("`to` MUST NOT match `TOTAL PAYABLE` — the boundary is the only thing sta
   assert.equal(splitBillToLabel("TOTAL PAYABLE : 2,800.00"), null);
   assert.equal(splitBillToLabel("Total"), null);
   assert.equal(splitBillToLabel("Tolak Diskaun"), null);
-  // The genuine bare form still reads.
-  assert.equal(splitBillToLabel("To : ACME SDN BHD").remainder, "ACME SDN BHD");
+  // The genuine BARE form still reads — and only the bare form (see the next cell).
+  assert.equal(splitBillToLabel("To:").remainder, "");
+  assert.equal(splitBillToLabel("To").remainder, "");
   // And the same boundary on the Attn side.
   assert.equal(splitAttnLabel("ATTNXYZ SDN BHD"), null);
   assert.equal(splitAttnLabel("Attention: Ms Tan").remainder, "Ms Tan");
+});
+
+test("`to` IS BARE-LABEL ONLY — Malaysian invoices print their LINE ITEMS in the infinitive", () => {
+  // The merge-blocking defect of the first cut, and the reason the entry is now restricted.
+  // `To supply and install…` is a legal `to` hit whose remainder opens with a CONTENT word, so
+  // the stop-word guard never fires — and the line item became a live party candidate. Executed,
+  // it births a line-item string as customer_name, destroys correct typed names, and makes the
+  // F7 fix itself read `contested` on its own target document.
+  for (const item of [
+    "To supply and install air-conditioning system",
+    "To Secretarial fee for the year 2025",
+    "To Professional fee for incorporation of company",
+    "To render professional secretarial services",
+    "To carry out annual audit",
+    "TO SUPPLY LABOUR AND MATERIAL",
+    "To Annual Return filing fee",
+  ]) {
+    assert.equal(splitBillToLabel(item), null, `${item} must not be a label hit at all`);
+    // …and it must produce ZERO party candidates through the READER, not merely the grammar.
+    const { fields, receipt } = read([line(item, box(0.72, 2.30, 4.60, 2.45)), ATTN_PERSON]);
+    assert.equal(partyOf({ fields }), undefined, `${item} must never become a party`);
+    assert.equal(receipt.outcome, "absent");
+  }
+  // The cost, stated: a same-line `To : ACME` no longer reads. Abstaining is the safe direction —
+  // Azure's typed value stands, which is exactly the pre-X7 behaviour.
+  assert.equal(splitBillToLabel("To : ACME SDN BHD"), null);
+  // Every OTHER label still takes a same-line remainder; only `to` is restricted.
+  assert.equal(splitBillToLabel("Bill To: ACME SDN BHD").remainder, "ACME SDN BHD");
 });
 
 test("`M/s` is matched as PUNCTUATION, so a company named `M S ...` keeps its own name", () => {
@@ -157,20 +204,48 @@ test("the party gate refuses everything that is not an identity", () => {
   }
 });
 
-test("a SENTENCE is not an addressee — the guard that earns the bare `To` label its place", () => {
-  // The hazard the rest of the gate does not catch: `TO BE PAID BY 30 DAYS` is a legal `to`
-  // label hit whose remainder carries letters, no address term, no postcode and no amount. If
-  // it were the document's only candidate it could reach customer_name through the empty-typed
-  // or Attn-override branches. A party name does not begin with a function word.
+test("captions, addresses and OBFUSCATED contact labels are not identities", () => {
+  // Each of these reached `customer_name` through the real normalizer in an executed review
+  // probe, because every other term in the gate admitted it: `Name:` carries letters and no
+  // address term; `12, Main Road` is an ENGLISH address (the first gate knew only Malay street
+  // nouns); `A T T N : …` is a spaced-out contact label the ordinary prefix match cannot see.
+  for (const bad of ["Name:", "Customer", "Description", "Particulars", "Amount", "Qty",
+    "12, Main Road", "45, Main Street", "8, Park Avenue",
+    "A T T N : Lim Xiao Shan", "A T T E N T I O N : Lim Xiao Shan"]) {
+    assert.equal(looksLikePartyName(bad), false, bad);
+  }
+  // …and through the FULL reader, since grammar-only cells were proven to lie.
+  for (const bad of ["Name:", "12, Main Road", "A T T N : Lim Xiao Shan"]) {
+    const { fields } = read([BILL_TO_LABEL, line(bad, box(0.72, 2.30, 3.30, 2.45))]);
+    assert.equal(partyOf({ fields }), undefined, `${bad} must never become a party`);
+  }
+  // A function word still cannot open a name either (the stop-word wall, kept as a second line).
   for (const bad of ["BE PAID BY 30 DAYS", "WHOM IT MAY CONCERN", "ALL AMOUNTS IN RINGGIT",
     "OUR REF ABC123", "PLEASE MAKE CHEQUES PAYABLE", "AS PER AGREEMENT", "UNTUK BAYARAN PENUH"]) {
     assert.equal(looksLikePartyName(bad), false, bad);
   }
-  const sentence = line("TO BE PAID BY 30 DAYS", box(0.72, 2.30, 3.30, 2.45));
-  const { fields, receipt } = read([sentence, ATTN_PERSON]);
-  assert.equal(partyOf({ fields }), undefined, "a payment term is not the customer");
-  assert.equal(receipt.rejected_gate, 1);
-  assert.equal(receipt.outcome, "absent");
+});
+
+test("the identity key is UNICODE-AWARE — two Chinese company names are two parties", () => {
+  // The ASCII key deleted every non-ASCII letter, so `鑫旺 SDN BHD` and `宏达 SDN BHD` both keyed
+  // to `sdnbhd`: uniqueness-or-nothing read ONE party matched twice instead of a contest, and
+  // the reader emitted `"?? SDN BHD"`. A key that cannot tell two names apart is not a defense.
+  assert.notEqual(partyKey("鑫旺 SDN BHD"), partyKey("宏达 SDN BHD"));
+  assert.equal(partyKey("鑫旺 SDN BHD"), "鑫旺sdnbhd");
+  // The same name printed twice still collapses, and a mixed Latin/Chinese name round-trips.
+  assert.equal(partyKey("鑫旺 SDN. BHD."), partyKey("鑫旺 Sdn Bhd"));
+  assert.equal(partyKey("鑫旺 KONG CHENG (M) SDN BHD"), "鑫旺kongchengmsdnbhd");
+  // Two distinct Chinese parties are a CONTEST, not a match with two occurrences.
+  const a = line("Bill To: 鑫旺 SDN BHD", box(0.72, 2.30, 3.30, 2.45));
+  const b = line("Customer: 宏达 SDN BHD", box(0.72, 2.50, 3.30, 2.65));
+  const { fields, receipt } = read([a, b]);
+  assert.equal(partyOf({ fields }), undefined);
+  assert.equal(receipt.outcome, "contested");
+  assert.deepEqual(receipt.distinct_keys.sort(), ["宏达sdnbhd", "鑫旺sdnbhd"].sort());
+  // …while the SAME Chinese name printed twice is still one candidate.
+  const twice = read([a, line("Bill To: 鑫旺 Sdn Bhd", box(0.72, 2.50, 3.30, 2.65))]);
+  assert.equal(partyOf(twice).value_raw, "鑫旺 SDN BHD");
+  assert.equal(twice.receipt.occurrences, 2);
 });
 
 test("the identity key collapses punctuation and case, and NEVER a legal suffix", () => {
@@ -182,12 +257,12 @@ test("the identity key collapses punctuation and case, and NEVER a legal suffix"
 // UNIQUENESS-OR-NOTHING (defense a)
 // ======================================================================================
 
-test("TWO DISTINCT labelled parties emit NOTHING — no identity beats the wrong identity", () => {
+test("TWO DISTINCT labelled parties is a CONTEST — no identity beats the wrong identity", () => {
   const second = line("Bill To: SOME OTHER BUYER SDN BHD", box(0.72, 2.55, 3.80, 2.70));
   const { fields, receipt } = read([BILL_TO_LABEL, KONG_CHENG, second, ATTN_PERSON]);
   assert.equal(partyOf({ fields }), undefined);
-  assert.equal(receipt.outcome, "ambiguous");
-  assert.equal(receipt.ambiguous, 1);
+  assert.equal(receipt.outcome, "contested", "a measured contest, not an abstention");
+  assert.equal(receipt.contested, 1);
   assert.deepEqual(receipt.distinct_keys.sort(), ["kongchengrestaurantssdnbhd", "someotherbuyersdnbhd"]);
   // The contact read is INDEPENDENT: a contested party says nothing about who the Attn person is.
   assert.equal(contactOf({ fields }).value_raw, "Lim Xiao Shan");
@@ -243,7 +318,7 @@ test("a labelled party NEARER THE SELLER is refused — both attribution terms a
   // The mirror of X6's wrong-party path. Geometry chosen so ONLY the second term can refuse it:
   // 0.95in from the customer anchor (INSIDE the 1.0in gap, so the gap alone would let it through)
   // but 0.91in from the vendor's. Nearer the seller means it is the seller's.
-  const nearerSeller = line("To: ROME SECRETARY SDN BHD", box(0.72, 1.72, 3.30, 1.95));
+  const nearerSeller = line("Bill To: ROME SECRETARY SDN BHD", box(0.72, 1.72, 3.30, 1.95));
   const { fields, receipt } = read([VENDOR_LETTERHEAD, nearerSeller, KONG_CHENG, ATTN_PERSON]);
   assert.equal(partyOf({ fields }), undefined, "the seller's own name is never the buyer");
   assert.equal(receipt.closer_to_vendor, 1);
@@ -253,7 +328,7 @@ test("a labelled party NEARER THE SELLER is refused — both attribution terms a
   // A `To:` line further up, INSIDE the letterhead, is refused one wall earlier — the same
   // ordering X6 records for its own buyer-block cell, and worth pinning so a threshold change
   // that reshuffles the two walls is visible rather than silent.
-  const inLetterhead = line("To: ROME SECRETARY SDN BHD", box(0.70, 0.85, 3.50, 1.00));
+  const inLetterhead = line("Bill To: ROME SECRETARY SDN BHD", box(0.70, 0.85, 3.50, 1.00));
   const higher = read([VENDOR_LETTERHEAD, inLetterhead, ATTN_PERSON]);
   assert.equal(higher.receipt.customer_anchor_far, 1);
   assert.equal(higher.receipt.closer_to_vendor, 0);
@@ -325,16 +400,50 @@ test("a pixel page with no usable width is refused, not measured in the wrong un
   assert.equal(receipt.unit_unresolved, 2, "both the party label and the Attn line are refused, and both are counted");
 });
 
-test("the split-line scan stops at the block boundary, the column, and the line budget", () => {
+test("the split-line scan STOPS at the block boundary and the column, and SKIPS within it", () => {
   const anchors = { vendor: null, customer: ANCHORS.customer };
-  // (i) too far below the label — the block has ended.
+  // (i) too far below the label — the block has ended. A STOP.
   const farBelow = line("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 3.20, 3.30, 3.35));
   assert.equal(read([BILL_TO_LABEL, farBelow], anchors).receipt.split_line_exhausted, 1);
-  // (ii) a different column — same band, not this block.
+  // (ii) a line in another COLUMN is a SKIP, not a stop — see the interleave cell below — but a
+  // block whose ONLY following line is in another column still finds no party.
   const otherColumn = line("KONG CHENG RESTAURANTS SDN BHD", box(5.00, 2.30, 7.50, 2.45));
-  assert.equal(read([BILL_TO_LABEL, otherColumn], anchors).receipt.split_line_exhausted, 1);
-  // (iii) the lookahead budget — three skippable lines then the name is out of reach.
-  const attnAt = (y) => line("Attn : Lim Xiao Shan", box(0.72, y, 2.20, y + 0.14));
-  const deep = [BILL_TO_LABEL, attnAt(2.28), attnAt(2.42), attnAt(2.56), KONG_CHENG];
-  assert.equal(read(deep, anchors).receipt.split_line_exhausted, 1, "the budget is a wall, not a suggestion");
+  const only = read([BILL_TO_LABEL, otherColumn], anchors);
+  assert.equal(only.receipt.split_line_exhausted, 1);
+  assert.equal(only.receipt.column_skipped, 1, "skipped and counted, not silently dropped");
+});
+
+test("a TWO-COLUMN header interleaves the right column — the party is still found", () => {
+  // Azure emits lines in READING ORDER, so a two-column header alternates left/right between the
+  // `Bill To:` label and the party beneath it. The first cut BROKE on the first non-overlapping
+  // line: fail-closed, but it meant the fix might never FIRE on a real KONG CHENG layout, and it
+  // made a line item far more likely to be the document's only candidate.
+  const lines = [
+    VENDOR_LETTERHEAD,
+    BILL_TO_LABEL,
+    line("Invoice No: RSINV-0041", box(5.20, 2.10, 7.60, 2.24)),   // right column, same row
+    KONG_CHENG,
+    line("Date: 14/10/2025", box(5.20, 2.30, 6.80, 2.45)),          // right column again
+    ATTN_PERSON,
+  ];
+  const { fields, receipt } = read(lines);
+  assert.equal(partyOf({ fields }).value_raw, "KONG CHENG RESTAURANTS SDN BHD", "the interleave no longer hides the party");
+  assert.equal(contactOf({ fields }).value_raw, "Lim Xiao Shan");
+  assert.equal(receipt.outcome, "matched");
+  assert.equal(receipt.split_line_exhausted, 0);
+  assert.ok(receipt.column_skipped >= 1, "the right-column line was stepped over, and counted");
+});
+
+test("the lookahead budget still TERMINATES a pathological page", () => {
+  // Skipping spends budget where it used to end the scan, so the bound is the only thing that
+  // stops a page of interleaved noise. It is a wall, not a suggestion.
+  const anchors = { vendor: null, customer: ANCHORS.customer };
+  const noise = (y) => line("Invoice No: RSINV-0041", box(5.20, y, 7.60, y + 0.10));
+  const lines = [BILL_TO_LABEL];
+  for (let k = 0; k < 12; k++) lines.push(noise(2.26 + k * 0.02));
+  lines.push(line("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.52, 3.30, 2.66)));
+  const { fields, receipt } = read(lines, anchors);
+  assert.equal(partyOf({ fields }), undefined, "beyond the budget is out of reach, whatever it is");
+  assert.equal(receipt.split_line_exhausted, 1);
+  assert.equal(receipt.column_skipped, 5, "exactly maxLookaheadLines steps were taken, then it stopped");
 });

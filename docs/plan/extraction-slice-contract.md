@@ -173,11 +173,28 @@ reached the books unchallenged. X7 supplies the missing second reader.
   LINE but a line *inside* the bill-to box — its content is wrong, its **geometry** is sound.
 - **No top-band analogue**, deliberately: a bill-to block has no positional convention
   comparable to a letterhead, and an unmeasured band is a guess wearing a threshold.
-- **Reconciliation matrix:** reader absent/refused → typed stands (pre-X7 behaviour) · reader
-  ambiguous → typed stands · typed empty → reader supplies · agreement → ONE row, the typed one ·
-  **typed == the reader's own Attn person → the party overrides (the F7 branch)** · unexplained
-  disagreement → **emit neither** (X6's semantics; a contested buyer resolves no counterparty on
-  its own authority).
+- **THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR** *(orchestrator ruling on the
+  two-lane review, 2026-08-09 — this overruled two behaviours the original build order specified,
+  after BOTH review lanes broke them by executing the code).* Its lawful actions are exactly four:
+  **collapse** (agrees with typed → one row, the typed one) · **override** (non-empty typed ==
+  the reader's own Attn person → the party wins; the F7 branch) · **withdraw** on unexplained
+  disagreement · **withdraw** on a contested landscape. Its two lawful silences: reader
+  absent/refused → typed stands byte-identically; reader has a party but typed is empty/absent →
+  **nothing emitted** (`sole_authorship_refused`).
+  - *Overrule 1 — sole authorship DELETED.* With an empty-but-regioned typed `CustomerName` the
+    first cut emitted a line item, a contact person, a caption (`Name:`) and a street address as
+    `customer_name` — each a WRONG identity manufactured where pass-through had supplied none.
+  - *Overrule 2 — a contested landscape (≥2 distinct labelled parties) WITHDRAWS the typed row*
+    rather than leaving it standing. A contest is a positive measurement, not an absence of
+    opinion: typed `WRONG HOLDING` against `Bill To: WRONG HOLDING` + `Bill To: ACTUAL
+    SUBSIDIARY` persisted the wrong identity.
+- **`to` is BARE-LABEL ONLY.** Malaysian invoices print line items in the infinitive — `To supply
+  and install…`, `To Secretarial fee for the year 2025` — which are legal `to` label hits whose
+  remainder opens with a content word. Left unrestricted they became live party candidates and
+  broke all four downstream branches. The header's own use case for `to` was the split-line bare
+  form, so the entry is restricted to it.
+- **The identity key is Unicode-aware** (`\p{L}\p{N}`, NFKC): the ASCII rule collapsed
+  `鑫旺 SDN BHD` and `宏达 SDN BHD` to `sdnbhd`, defeating uniqueness-or-nothing.
 - **DB half is mandatory, not optional:** `invoice.contact_person` joins `persist_invoice_facts`'
   **CLOSED** allowlist and its conflicting-duplicate text set in its own migration. Without it
   the first extraction carrying the fact does not drop it — it raises **CLR10** and forfeits the

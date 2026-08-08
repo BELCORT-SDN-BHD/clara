@@ -200,7 +200,7 @@ export async function analyzeInvoiceReal({ filePath, mime, totalDeadlineMs = 120
 // empty polygon). An empty polygon is the honest "no physical region" marker — the DB's
 // _invoice_fact_state refuses to corroborate a total whose polygon is empty, so a
 // geometry-less fact can never be promoted to Tier A.
-function firstRegion(field) {
+export function firstRegion(field) {
   const region = Array.isArray(field?.boundingRegions) ? field.boundingRegions[0] : null;
   if (!region) return { page: 1, polygon: [] };
   const polygon = Array.isArray(region.polygon) && region.polygon.length > 0 ? region.polygon.map(Number) : [];
@@ -280,6 +280,14 @@ export function normalizeAzureInvoice(payload) {
   const doc = documents[0] || null;
   const fields = doc?.fields || {};
   const out = [];
+  // A CROSS-MODULE COUPLING, named here because tidying this loop would move behaviour two files
+  // away. A row is emitted whenever the typed field OBJECT exists — even when its content is
+  // EMPTY — and X7's `mergeCustomerIdentity` is written against exactly that: it finds a
+  // `invoice.customer_name` row to reconcile against, and its `!typed` arm is unreachable through
+  // this adapter. Skipping empty-content fields here would make that arm live again. It is now a
+  // deliberate REFUSAL rather than a hole (the reader never authors a name — see that module's
+  // header), so a change here would not create a wrong identity; it would silently move which
+  // branch runs. Reconcile the two modules before tidying either.
   for (const [diName, fieldPath] of Object.entries(FIELD_MAP)) {
     const f = fields[diName];
     if (!f) continue;

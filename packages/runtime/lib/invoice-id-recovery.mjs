@@ -1,11 +1,37 @@
-// invoice_id recovery (WA §11) — MOVED HERE VERBATIM from invoiceFacts.v1.azure.mjs by the
-// F6–F9 fix batch (F7 / task #32). The move is MECHANICAL: every body below is byte-for-byte
-// what the adapter carried, and the adapter imports the entry point back — the same "moved, not
-// rewritten, so the two can never drift" precedent that file's own header records for
-// `looksLikeRegistration` (v7 / X6). It was forced by the repo's 500-line-per-file limit when
-// the X7 customer-identity wiring landed, and it is the tidy direction anyway: every other
-// deterministic reader this adapter uses already lives in lib/ (X2 totals, X6 vendor identity,
-// the currency reader, X7 customer identity). NO BEHAVIOUR CHANGE — see the batch's test run.
+// invoice_id recovery (WA §11) — MOVED HERE from invoiceFacts.v1.azure.mjs by the F6–F9 fix
+// batch (F7 / task #32), forced by the repo's 500-line-per-file limit when the X7
+// customer-identity wiring landed. It is the tidy direction anyway: every other deterministic
+// reader this adapter uses already lives in lib/ (X2 totals, X6 vendor identity, the currency
+// reader, X7 customer identity), following the "moved, not rewritten, so the two can never
+// drift" precedent that file's own header records for `looksLikeRegistration` (v7 / X6).
+//
+// THE MOVE IS MECHANICAL WITH DECLARED DELTAS — stated precisely, because the first version of
+// this header claimed "byte-for-byte" and a reviewer correctly called that inaccurate. Every
+// function BODY below is byte-identical to what the adapter carried. The deltas, all of them:
+//   (1) `INVOICE_ID_LABEL`, `looksLikeInvoiceNumber` and `recoverInvoiceId` gained `export`;
+//   (2) `recoverInvoiceId` / `recoverFromKeyValuePairs` gained a `firstRegion` parameter, and
+//       the adapter's call site passes it;
+//   (3) that parameter DEFAULTS to `defaultFirstRegion` below, so a call without it behaves as
+//       the original did instead of throwing on a valid key-value hit.
+// A verification script proved bodies (1)-(2) equivalent modulo exactly those deltas; a test
+// pins (3) against the adapter's own `firstRegion` so the two can never drift apart.
+
+/**
+ * The adapter's `firstRegion`, as a FALLBACK for callers that do not inject one.
+ *
+ * A SECOND DEFINITION IS A DRIFT HAZARD and it is admitted here on purpose: the alternative was
+ * a parameter with no default, which turns a caller's omission into a crash on a valid document.
+ * The hazard is converted into a pinned invariant instead — `x7-id-recovery.test.mjs` asserts
+ * this function and the adapter's produce identical output on the same inputs, the same
+ * technique X6 uses to pin `registrationKey` against `normalizeRegistration`. NEVER fabricates
+ * geometry: an absent or empty bounding region yields an EMPTY polygon (W3 / finding 3).
+ */
+function defaultFirstRegion(field) {
+  const region = Array.isArray(field?.boundingRegions) ? field.boundingRegions[0] : null;
+  if (!region) return { page: 1, polygon: [] };
+  const polygon = Array.isArray(region.polygon) && region.polygon.length > 0 ? region.polygon.map(Number) : [];
+  return { page: Number(region.pageNumber || 1), polygon };
+}
 //
 // THE ORIGINAL RATIONALE, unedited:
 // The prebuilt-invoice `InvoiceId` typed field is high-recall on US templates but
@@ -60,9 +86,9 @@ function cleanIdToken(s) {
 //
 // `firstRegion` is INJECTED rather than re-implemented here: it is the adapter's general
 // Azure-payload geometry helper (used by the typed loop, the currency emit and both tax-id
-// emits as well as this path), and duplicating it would create exactly the second definition
-// the X6 note above warns about. One definition, passed in.
-function recoverFromKeyValuePairs(result, firstRegion) {
+// emits as well as this path). It DEFAULTS to the equivalent fallback above so an omission
+// degrades to the original behaviour rather than throwing on a valid hit.
+function recoverFromKeyValuePairs(result, firstRegion = defaultFirstRegion) {
   const kvps = Array.isArray(result?.keyValuePairs) ? result.keyValuePairs : [];
   for (const kv of kvps) {
     if (!INVOICE_ID_LABEL.test(normLabel(kv?.key?.content))) continue;
@@ -105,6 +131,9 @@ function recoverFromContent(result) {
 
 // Best-effort recovery: KV first (Azure-structured), then content scan. Returns a
 // {value, page, polygon, confidence} facts row or null.
-export function recoverInvoiceId(result, firstRegion) {
+export function recoverInvoiceId(result, firstRegion = defaultFirstRegion) {
   return recoverFromKeyValuePairs(result, firstRegion) || recoverFromContent(result);
 }
+
+/** Exported ONLY so a test can pin it against the adapter's `firstRegion` (see its header). */
+export { defaultFirstRegion as __defaultFirstRegionForTest };
