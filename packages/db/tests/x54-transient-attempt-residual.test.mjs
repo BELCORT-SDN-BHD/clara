@@ -121,9 +121,16 @@ test("NOTHING unparks a filing: the set of live writers of autodraft_attempts.st
   // autoDraft.v7.errors.ts's header is "NONE EXISTS; registered", and this is that claim as
   // a test. If a future migration adds an unpark verb, this cell fails and the header has to
   // be corrected with it rather than quietly going stale.
+  // THE PATTERN MATCHES BOTH WRITE FORMS (native round-3 review). An UPDATE is not the only
+  // way to write this table: admit_autodraft_task's own registry write is an
+  // `insert ... on conflict (filing_id) do update set ...`, which the update-only pattern
+  // does NOT match. Today the census is 4=4 either way only because admit ALSO carries a
+  // plain UPDATE — a coincidence, not a property. A future writer that only upserts would
+  // have slipped through unnoticed; with the insert form in the pattern it is adjudicated.
   const writers = await rootQuery(
     `select p.oid::regprocedure::text as sig from pg_proc p
-      where p.pronamespace='clara'::regnamespace and p.prosrc ~ 'autodraft_attempts[[:space:]]+(aa[[:space:]]+)?set'
+      where p.pronamespace='clara'::regnamespace
+        and p.prosrc ~ '(autodraft_attempts[[:space:]]+(aa[[:space:]]+)?set|insert[[:space:]]+into[[:space:]]+clara\\.autodraft_attempts)'
       order by 1`,
   );
   assert.deepEqual(
@@ -137,10 +144,38 @@ test("NOTHING unparks a filing: the set of live writers of autodraft_attempts.st
     "the set of functions that can write the registry state is closed — a new one must be adjudicated, not discovered",
   );
 
+  // THE ORDERING THAT ACTUALLY PROTECTS A PARKED ROW, pinned at its STRONGEST point. Three
+  // of the four writers exclude parked with a PREDICATE (`state='active'` / a live task).
+  // admit_autodraft_task's registry upsert does NOT: it sets state='active' with no state
+  // predicate at all, so what keeps it off a parked row is CONTROL FLOW — both parked
+  // branches return before execution can reach it. That distinction is the whole point of
+  // this cell: a predicate survives a reorder, control flow does not. Offsets measured on
+  // this catalog for the record (they move with any recut; the ORDER is what is asserted):
+  // parked #1 1414 < post-lock parked #2 4520 < supersede arm 5586 < plain idle-update 9576
+  // < the upsert 23620.
   const admit = (await rootQuery("select prosrc from pg_proc where oid='clara.admit_autodraft_task(uuid,text,uuid,text,bigint)'::regprocedure")).rows[0].prosrc;
+  const firstParked = admit.indexOf("a.state='parked' then");
+  const lastParked = admit.lastIndexOf("a.state='parked' then");
+  const supersede = admit.indexOf("a.task_status in ('failed','cancelled','expired') then");
+  const upsert = admit.indexOf("insert into clara.autodraft_attempts");
+  assert.ok(firstParked > 0 && lastParked > firstParked, "both parked branches must be present (the pre-lock fast path and the post-lock re-check)");
+  assert.ok(firstParked < supersede, "the parked refusal returns BEFORE the supersede arm that sets state='idle'");
   assert.ok(
-    admit.indexOf("a.state='parked' then") < admit.indexOf("a.task_status in ('failed','cancelled','expired') then"),
-    "the parked refusal returns BEFORE the supersede arm that sets state='idle' — so a parked filing can never reach the one admission path that would clear it",
+    lastParked < upsert,
+    "EVERY parked return must precede the registry upsert — that upsert sets state='active' with NO state predicate, so only control flow keeps it off a parked row",
+  );
+  // NB the regex is JAVASCRIPT, not POSIX: a first cut of this line used `[[:space:]]`,
+  // which in JS is the character class [ : a c e p s ] — so it matched nothing and the
+  // doesNotMatch passed VACUOUSLY. Spelling is not identity, including in a test's own guard.
+  // The whole upsert statement, not a guessed window: it spans the column list, the VALUES
+  // row that inserts 'active', and the `on conflict ... do update set ... state='active'`.
+  const upsertArm = admit.slice(upsert, admit.indexOf(";", upsert) + 1);
+  assert.match(upsertArm, /on conflict\(filing_id\) do update set/, "sanity: this is the UPSERT arm, not some other insert");
+  assert.match(upsertArm, /state='active'/, "sanity: it really does set state='active' — otherwise the check below would be vacuous");
+  assert.doesNotMatch(
+    upsertArm,
+    /state\s*(=|<>|!=)\s*'parked'|where/i,
+    "…and it carries NO state predicate at all (no parked test, no WHERE) — which is exactly why only control flow protects a parked row here",
   );
 
   const recon = (await rootQuery("select prosrc from pg_proc where oid='clara.reconcile_sweep_runs()'::regprocedure")).rows[0].prosrc;

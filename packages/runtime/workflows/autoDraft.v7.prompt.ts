@@ -329,11 +329,23 @@ export function isDoubleCodedReason(reason: string | undefined): boolean {
  * `noop_existing` outranks `refused` for the same honesty reason the WA-L8 rule exists: a
  * double_coded refusal is the DB reporting that the work ALREADY EXISTS, so a later
  * transient must not turn "already coded" into "failed".
+ *
+ * AND WITHIN `refused`, A QUESTION-SHAPED REFUSAL OUTRANKS A LATER ONE THAT IS NOT (native
+ * round-3 review, measured). Plain recency loses the one refusal a human can actually act
+ * on: `[CLR23 vendor conflict, transient idx slip]` reduced to the transient, so
+ * isQuestionShaped answered FALSE, NO scoped open-question was opened, and the filing could
+ * park carrying "transient" as its legible last_refusal — the vendor conflict buried behind
+ * a retry artefact. The rule is therefore: the LAST question-shaped refusal if any exists,
+ * else the LAST refusal. Recency still decides between two of the same kind; it just no
+ * longer lets a system condition outrank a human decision. This is the same precedence
+ * instinct as drafted/noop above — prefer the refusal that carries the most actionable
+ * truth — applied one level down.
  */
 export function toAutoDraftOutcome(content: readonly AiContentPart[]): AutoDraftOutcome {
   let drafted: AutoDraftOutcome | null = null;
   let noop: AutoDraftOutcome | null = null;
   let refused: AutoDraftOutcome | null = null;
+  let refusedQuestionShaped: AutoDraftOutcome | null = null;
   for (const p of content) {
     if (p.type !== "tool-result") continue;
     const tr = p as { toolName: string; output: unknown };
@@ -344,11 +356,15 @@ export function toAutoDraftOutcome(content: readonly AiContentPart[]): AutoDraft
       continue;
     }
     if (isRefusal(output.refusal)) {
-      if (isDoubleCodedReason(output.refusal.reason)) noop = { kind: "noop_existing", reason: output.refusal.reason ?? "double_coded" };
-      else refused = { kind: "refused", refusal: output.refusal };
+      if (isDoubleCodedReason(output.refusal.reason)) {
+        noop = { kind: "noop_existing", reason: output.refusal.reason ?? "double_coded" };
+      } else {
+        refused = { kind: "refused", refusal: output.refusal };
+        if (isQuestionShaped(output.refusal)) refusedQuestionShaped = refused;
+      }
     }
   }
-  return drafted ?? noop ?? refused ?? { kind: "none" };
+  return drafted ?? noop ?? refusedQuestionShaped ?? refused ?? { kind: "none" };
 }
 
 /** The refusal reasons that warrant opening a scoped open-question (a human must decide) vs

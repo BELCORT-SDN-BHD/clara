@@ -187,7 +187,7 @@
       "deployed": true
     },
     "packages/runtime/workflows/autoDraft.v7.errors.ts": {
-      "sha256": "2b23a1966a0474a621d7e92568102d86593c35991be3c09a62cfdbbfca8c667e",
+      "sha256": "b15f47f826e89ccb9b96648b01554f6c70e9aff3e7aae45d16ad6ee81afffb88",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v7.impl.ts": {
@@ -199,7 +199,7 @@
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v7.prompt.ts": {
-      "sha256": "b118c7b0823505a786254ef4ee1be5f366f4f6ad56c7729432cd0e13ffd384c6",
+      "sha256": "c45eff4e8f97dbac3b64bc23e46f197251443183e9c1a4fd98c3311e90f32786",
       "note": ""
     },
     "packages/runtime/workflows/autoDraft.v7.tools.ts": {

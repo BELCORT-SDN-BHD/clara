@@ -25,6 +25,8 @@
 //   5. THE WRAPPER — end to end, including THE DRIFT CELL (this cell fails on the pre-fix
 //      resolver and passes after; that experiment is recorded in the PR body).
 //   6. Registry sanity.
+// The RETRY LEG — what the workflow does with a loop that refused then succeeded — is the
+// sibling file wave-e-f9-autodraft-v7-retry.test.mjs (split at the 500-line cap).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -76,7 +78,7 @@ test("autoDraft.v7.prompt.ts differs from v6 ONLY in the citation prose and the 
     { label: "prompt/evidence array describe", from: "      .describe(", to: "      ),", lines: 5 },
     // Fix round 3: the outcome reducer is rewritten (precedence-then-recency) and its header
     // carries the finding. Declared as its own span; its BEHAVIOUR is covered by section 6.
-    { label: "prompt/toAutoDraftOutcome", from: " * Reduce a completed model segment's content to the terminal AutoDraft outcome. A successful", to: "}", lines: 55 },
+    { label: "prompt/toAutoDraftOutcome", from: " * Reduce a completed model segment's content to the terminal AutoDraft outcome. A successful", to: "}", lines: 71 },
   ]);
   const cutOld = cutLines(oldBody("prompt.ts"), [
     line("prompt/old citation instruction", '  "the document\'s extracted invoice facts and cite them (region id + exact quote per amount).",'),
@@ -99,7 +101,7 @@ test("autoDraft.v7.errors.ts is PURELY ADDITIVE over v6 — new blocks only, and
     },
     // Four sub-spans rather than one, so each new declaration's LENGTH is pinned separately
     // and a body cannot grow inside a neighbour's mask.
-    { label: "errors/system reasons + messages", from: "/** F9 FIX ROUND (coordinator ruling 2, from Codex #3 + native Finding 1). The conditions", to: "};", lines: 83, trailingBlanks: 1 },
+    { label: "errors/system reasons + messages", from: "/** F9 FIX ROUND (coordinator ruling 2, from Codex #3 + native Finding 1). The conditions", to: "};", lines: 89, trailingBlanks: 1 },
     { label: "errors/validIdxHint", from: "/** The (idx, field_path) hint appended to an unknown-index refusal. Derived entirely from the", to: "}", lines: 10, trailingBlanks: 1 },
     { label: "errors/evidenceSystemRefusal", from: "export function evidenceSystemRefusal(reason: EvidenceSystemReason, hint?: string): RefusalPart {", to: "}", lines: 5, trailingBlanks: 1 },
     { label: "errors/refusalForEvidenceFailure", from: "/** Map a failed resolution to its refusal. The ONE place the two failure kinds are given", to: "}", lines: 13, trailingBlanks: 1 },
@@ -408,79 +410,7 @@ test("the tool set wires the gate: read_document RECORDS the snapshot it showed,
 });
 
 // ===========================================================================
-// 6. THE RETRY LEG (fix round 3 — the mechanism section 4's classification INVITES).
-//    Section 5's wrapper cells stop at one call; these drive the REAL reducer over the
-//    multi-step content the AI SDK actually hands the workflow, because that is where the
-//    transient -> re-read -> retry -> success sequence is turned into a settle.
-// ===========================================================================
-
-const draftResult = (output, id = "call-1") => ({ type: "tool-result", toolCallId: id, toolName: "draft_journal_entry", output });
-const TRANSIENT = { ok: false, refusal: { type: "refusal", code: "transient", reason: "evidence_snapshot_changed", message: "…re-read and re-cite." } };
-const SUCCESS = {
-  ok: true,
-  je_review: { type: "je_review", entry_id: "entry-9", revision_token: "rev-9", client_id: "c1", document_id: DOC, provenance_tier: "model_read" },
-};
-const DOUBLE_CODED = { ok: false, refusal: { type: "refusal", code: "CLR29", reason: "double_coded", message: "already being coded" } };
-const OTHER_REFUSAL = { ok: false, refusal: { type: "refusal", code: "CLR21", reason: "coding_incomplete", message: "no lawful draft" } };
-
-test("THE RETRY CELL: [transient refusal, then a successful draft] reduces to DRAFTED — the run must not settle failed over a draft that stands", () => {
-  // The AI SDK's `content` getter flattens EVERY step of the model loop chronologically, so
-  // this is the exact array the workflow reduces after a transient the model recovered from.
-  // The pre-fix reducer returned on the FIRST draft result and answered "refused" here.
-  const outcome = promptV7.toAutoDraftOutcome([
-    { type: "text", text: "reading the document" },
-    draftResult(TRANSIENT, "call-1"),
-    { type: "text", text: "re-reading and re-citing" },
-    draftResult(SUCCESS, "call-2"),
-  ]);
-  assert.equal(outcome.kind, "drafted", "a successful retry must win — the DB write already happened, and a failed settle would be a receipt that lies");
-  assert.equal(outcome.entryId, "entry-9");
-});
-
-test("…and the reverse order is the control: [success, then a later transient] is still DRAFTED (precedence, not position)", () => {
-  const outcome = promptV7.toAutoDraftOutcome([draftResult(SUCCESS, "call-1"), draftResult(TRANSIENT, "call-2")]);
-  assert.equal(outcome.kind, "drafted", "a plain LAST-result rule would have reported the transient and buried a real draft");
-});
-
-test("the SAME-STEP edge the stop condition forces: two draft calls in one step, [success, refusal], is DRAFTED — stoppedOnSuccessfulDraft ends the loop on ANY successful result in the last step, wherever it sits", () => {
-  const outcome = promptV7.toAutoDraftOutcome([draftResult(SUCCESS, "a"), draftResult(OTHER_REFUSAL, "b")]);
-  assert.equal(outcome.kind, "drafted");
-  // …and the alignment is a real property of the source, not a claim: the stop condition
-  // keys on output.ok === true, which runDraftJournalEntry only ever pairs with je_review.
-  const implSrc = src("autoDraft.v7.impl.ts");
-  assert.match(implSrc, /r\.toolName === DRAFT_TOOL && !!r\.output && typeof r\.output === "object" && \(r\.output as \{ ok\?: unknown \}\)\.ok === true/);
-});
-
-test("among refusals the LAST wins (the freshest state the model reached), and double_coded outranks any later transient — 'already coded' must never become 'failed'", () => {
-  const twoRefusals = promptV7.toAutoDraftOutcome([draftResult(OTHER_REFUSAL, "a"), draftResult(TRANSIENT, "b")]);
-  assert.equal(twoRefusals.kind, "refused");
-  assert.equal(twoRefusals.refusal.reason, "evidence_snapshot_changed", "the freshest refusal is the honest one to record");
-  for (const seq of [[TRANSIENT, DOUBLE_CODED], [DOUBLE_CODED, TRANSIENT]]) {
-    const o = promptV7.toAutoDraftOutcome(seq.map((x, i) => draftResult(x, `c${i}`)));
-    assert.equal(o.kind, "noop_existing", `WA-L8: a double_coded refusal reports work that EXISTS, in either order (${JSON.stringify(seq.map((s) => s.refusal.reason))})`);
-  }
-  assert.equal(promptV7.toAutoDraftOutcome([{ type: "text", text: "explained a block" }]).kind, "none");
-});
-
-test("the reducer's answer really is what the workflow settles on — the branch mapping is pinned in autoDraft.v7.ts's own source", () => {
-  const entry = src("autoDraft.v7.ts");
-  assert.match(entry, /if \(outcome\.kind === "drafted"\) \{\s*\n\s*await settle\("drafted", seg\.usageTokens, outcome\.entryId, null\);/, "drafted -> settle('drafted') with the entry id");
-  assert.match(entry, /if \(outcome\.kind === "noop_existing"\) \{[\s\S]{0,400}?await settle\("noop_existing"/, "noop_existing -> the success-shaped settle");
-  assert.match(entry, /await settle\("failed", seg\.usageTokens, null, refusal\);/, "everything else -> the failed settle");
-});
-
-test("THE DEFECT IS PRE-EXISTING AND v6 IS UNTOUCHED: the frozen v6 reducer still returns on the FIRST draft result, and answers 'refused' to the very sequence v7 now answers 'drafted'", () => {
-  // This is the evidence for shipping the correction in v7/v10 only. v6 is deployed and
-  // frozen; what v7 changed is the REACHABILITY of the defect, by inviting in-run retries.
-  const seq = [draftResult(TRANSIENT, "call-1"), draftResult(SUCCESS, "call-2")];
-  assert.equal(promptV6.toAutoDraftOutcome(seq).kind, "refused", "v6 must still show the old behaviour — if this flips, a frozen body was edited");
-  assert.equal(promptV7.toAutoDraftOutcome(seq).kind, "drafted");
-  const v6Body = src("autoDraft.v6.prompt.ts");
-  assert.match(v6Body, /if \(isJeReview\(output\.je_review\)\) \{\s*\n\s*return \{ kind: "drafted"/, "v6 returns on the first result — the shape this fix replaces");
-});
-
-// ===========================================================================
-// 7. Registry sanity.
+// 6. Registry sanity.
 // ===========================================================================
 
 test("registry.ts pins autoDraft: autoDraft_v7, and still exports the superseded autoDraft_v6 (policy (c))", () => {

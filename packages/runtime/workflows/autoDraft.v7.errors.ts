@@ -222,16 +222,22 @@ export function directionFamilyMismatchRefusal(): RefusalPart {
  *
  *  SO "AUTOMATIC RECOVERY ONCE THE MIGRATION LANDS" IS FALSE FOR A PARKED FILING, and the
  *  earlier wording that implied it is withdrawn. MEASURED on the live catalog: exactly four
- *  functions write `autodraft_attempts.state`, and NOT ONE can move a row off 'parked' —
+ *  functions write `autodraft_attempts.state` (counting BOTH write forms — an UPDATE and an
+ *  `insert ... on conflict do update`), and NOT ONE can move a row off 'parked'. THREE of
+ *  them are excluded by a PREDICATE:
  *    settle_autodraft_task (both overloads), cancelled/expired arm: `where task_id=p_task
- *      and state='active'` (0036:900-901) — excludes parked;
+ *      and state='active'` (0036:900-901);
  *    settle_autodraft_task, success arm: `attempt_count=0,state='idle'` (0036:977) — needs a
  *      live task, and a parked filing admits none;
- *    admit_autodraft_task, supersede arm: `state='idle'` (0036:1307) — unreachable, because
- *      the parked return sits at prosrc offset 1414 and that arm at 5586 (measured against
- *      the live catalog, not read off the migration file);
- *    reconcile_sweep_runs: `where aa.state='active'` (0011_daily_loop.sql:2734-2736) —
- *      excludes parked.
+ *    reconcile_sweep_runs: `where aa.state='active'` (0011_daily_loop.sql:2734-2736).
+ *  THE FOURTH IS NOT, AND THAT DISTINCTION IS THE FRAGILE PART. admit_autodraft_task's own
+ *  registry UPSERT sets `state='active'` with NO state predicate at all; what keeps it off a
+ *  parked row is CONTROL FLOW — both parked branches return before execution reaches it
+ *  (measured on the live catalog: parked #1 at prosrc offset 1414, the post-lock parked
+ *  re-check at 4520, the supersede arm at 5586, the upsert at 23620). A predicate survives a
+ *  reorder; control flow does not, so a future recut that moved the upsert or dropped an
+ *  early return would break this SILENTLY. That is why the ordering is pinned as a cell
+ *  (packages/db/tests/x54-transient-attempt-residual.test.mjs) rather than trusted here.
  *  No dashboard or human verb touches it either (the dashboard's own "parked" strings are the
  *  bank-reconciliation declaration, a different concept). THERE IS NO UNPARK PATH: NONE
  *  EXISTS — registered for PROJECTLOG PART 2, not silently absorbed here.
