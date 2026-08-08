@@ -170,7 +170,10 @@ adjustments** (needs `NEXT_PUBLIC_CLARA_RUNTIME_URL=https://clara-runtime.fly.de
 `clara-backup` daily.** The **ROME pair's** FA and staff-advance registers are honestly EMPTY
 (ADR-056/058 — both are in strike-off, so neither could carry a live register); **BEE is the
 going-concern client ADR-058 said those deferrals were waiting for** — it owns tasks #71/#72
-(Gate P on its SST invoices + the WD-R14 real FA carry-down). The sandbox carries the
+(Gate P on its SST invoices + the first close-time real FA continuity roll, FY2025 closing
+NBV → FY2026 opening, riding the Wave-E first real close; **NOT** WD-R14's *opening*
+carry-down deferral, which still needs a client that owned assets at opening — PROJECTLOG
+PART 2's measured reason stands). The sandbox carries the
 labelled-synthetic corpora — a live depreciation authority, ONE synthetic staff advance (tie 0),
 the D-b2 acceptance register (templates A+B retired with reasons · **B2 LIVE from 2026-07-01** ·
 the May occurrence+mirror pair netting ZERO · one cancelled pair drill), and §7-A's live

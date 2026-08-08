@@ -144,7 +144,7 @@ filename/cover/metadata.
 |---|---|---|
 | Full synthetic battery | Sandbox (RPA) | close → reopen → guard activation → abuse drills |
 | Closing stock (WD-R11) | **Sandbox synthetic goods-trader fixture ONLY** | no real goods-trading client exists; **NAMED DEBT:** the first real goods-trading client's onboarding carries the real acceptance |
-| First REAL close | **BEE FY2025** | the drawer-2 depreciation gate's first real firing pulls the 11-period catch-up approval through (draft `3c05ab82`); **the WD-R14 real-FA-carry-down debt** (FY2025 closing NBV → FY2026 opening; the rolling posture's task #72) discharges in the same act |
+| First REAL close | **BEE FY2025** | the drawer-2 depreciation gate's first real firing pulls the 11-period catch-up approval through (draft `3c05ab82`); **the close-time FA continuity roll** (FY2025 closing NBV → FY2026 opening; the rolling posture's task #72) fires for real in the same act — this does **NOT** discharge WD-R14's *opening* carry-down deferral, which still needs a client that owned assets at opening (PROJECTLOG PART 2's measured reason) |
 | MPERS company-format FS, real corpus | **RPR historical FY** | Sdn Bhd, 9 real months to the sen; strike-off companies legitimately prepare historical accounts |
 | Snapshot + staleness witness | **RS** | 19 approved real invoices; snapshot a month, post into it, watch the label |
 | Sole-prop FS format | BEE | convention-labelled, never MPERS-claimed (E-R14) |
@@ -205,8 +205,8 @@ D-b staff-advance register) registers to **Wave F**; the submission/approval sur
 
 **Golden wording source:** MASB official, dual-version effective-dated — MPERS(2016) for
 periods beginning before 2027-01-01; MPERS(2025) (issued 2025-10-10, based on IFRS for
-SMEs 3rd ed.) for periods beginning on/after 2027-01-01, the old version withdrawn the
-same date. The wording tables are BORN two-versioned (the tax-table pattern). MASB's own
+SMEs 3rd ed.) for periods beginning on/after 2027-01-01, with the 2016 text withdrawn at
+that same boundary — live 2025/26 clients stay on MPERS(2016) wording. The wording tables are BORN two-versioned (the tax-table pattern). MASB's own
 illustrative FS (`MPERS_2025_BC_IE.pdf`) is the primary illustrative-source CANDIDATE (standard-setter provenance; existence confirmed by metadata only) — it is an
 image PDF: **a manual pull + HUMAN verification is REQUIRED before any wording enters the
 policy tables** (extraction was refused to every reader; absence-is-not-evidence applies).
