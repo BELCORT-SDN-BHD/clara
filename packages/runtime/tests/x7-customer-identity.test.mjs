@@ -6,6 +6,14 @@
 // to `customer_name_missing`, where a human already has to look. So the majority of these cells
 // assert that nothing is emitted.
 //
+// ── WHAT IS PINNED WHERE, stated because an earlier version of this claim was overstated ──────
+// This file pins the READER: which line wins, which wall refused, and what the receipt says.
+// SPELLING lives in `x7-party-grammar.test.mjs`, and since round 3 spelling DOES NOT decide party
+// candidacy — `hasRegisteredEntitySuffix` does. END-TO-END behaviour lives in
+// `x7-customer-mapper.test.mjs`, through `normalizeAzureInvoice`; EVERY executed review-probe
+// scenario from all three rounds is pinned THERE, because reviewers twice disproved a claim of
+// mine that rested on grammar-level cells alone.
+//
 // Fixture provenance and its honest limits: see x7-customer-testkit.mjs's header.
 
 process.env.RELAY_TEST_MODE ??= "1";
@@ -18,7 +26,6 @@ import {
   splitBillToLabel,
   splitAttnLabel,
   looksLikePartyName,
-  partyKey,
 } from "../lib/invoice-customer-identity.mjs";
 import {
   ANCHORS, ATTN_PERSON, BILL_TO_LABEL, KONG_CHENG, KONG_CHENG_BLOCK,
@@ -56,7 +63,10 @@ test("the ADDRESS between the name and the Attn line is never promoted to a part
   // With the party line REMOVED, the block states no party at all and the reader says so.
   const { fields, receipt } = read([VENDOR_LETTERHEAD, BILL_TO_LABEL, ADDRESS_STREET, ADDRESS_CITY, ATTN_PERSON]);
   assert.equal(partyOf({ fields }), undefined, "an address is not an identity");
-  assert.equal(receipt.rejected_gate, 1);
+  // BOTH address lines are now examined (a non-candidate is a SKIP, not a stop) and both are
+  // refused by the NAME gate rather than the entity gate — the receipt says which wall fired.
+  assert.equal(receipt.rejected_gate, 2);
+  assert.equal(receipt.no_entity_suffix, 0);
   assert.equal(receipt.split_line_exhausted, 1);
   assert.equal(receipt.outcome, "absent");
   // The contact still reads — it is an independent fact about the same block.
@@ -145,39 +155,6 @@ test("`to` IS BARE-LABEL ONLY — Malaysian invoices print their LINE ITEMS in t
   assert.equal(splitBillToLabel("Bill To: ACME SDN BHD").remainder, "ACME SDN BHD");
 });
 
-test("`M/s` is matched as PUNCTUATION, so a company named `M S ...` keeps its own name", () => {
-  // Folding `M/s` to `m s` would also match `M S DEVELOPMENT SDN BHD` and hand back
-  // `DEVELOPMENT SDN BHD` as the party — a wrong identity, the one outcome this module exists to
-  // prevent. The literal form is matched precisely or not at all.
-  assert.equal(splitBillToLabel("M S DEVELOPMENT SDN BHD"), null);
-  assert.equal(splitBillToLabel("MS DEVELOPMENT SDN BHD"), null);
-  assert.equal(splitBillToLabel("M/s ACME SDN BHD").remainder, "ACME SDN BHD");
-  assert.equal(splitBillToLabel("M.S. ACME SDN BHD").remainder, "ACME SDN BHD");
-  assert.equal(splitBillToLabel("Messrs ACME SDN BHD").remainder, "ACME SDN BHD");
-});
-
-test("the vocabulary reads the printed variants, and only those", () => {
-  for (const [text, expected] of [
-    ["Bill To: ACME SDN BHD", "ACME SDN BHD"],
-    ["BILL  TO - ACME SDN BHD", "ACME SDN BHD"],
-    ["Billed To : ACME SDN BHD", "ACME SDN BHD"],
-    ["Invoice To: ACME SDN BHD", "ACME SDN BHD"],
-    ["Sold To : ACME SDN BHD", "ACME SDN BHD"],
-    ["Customer Name : ACME SDN BHD", "ACME SDN BHD"],
-    ["Buyer: ACME SDN BHD", "ACME SDN BHD"],
-    ["Kepada : ACME SDN BHD", "ACME SDN BHD"],
-    ["Pelanggan : ACME SDN BHD", "ACME SDN BHD"],
-  ]) {
-    assert.equal(splitBillToLabel(text)?.remainder, expected, text);
-  }
-  // VENDOR-side labels are absent from the vocabulary by construction — a seller block can never
-  // open a buyer candidate on the label alone.
-  for (const text of ["From: ROME SECRETARY SDN BHD", "Sold By: ROME SECRETARY SDN BHD",
-    "Supplier : ROME SECRETARY SDN BHD", "Remit To: MAYBANK 5123", "Pay To: MAYBANK 5123"]) {
-    assert.equal(splitBillToLabel(text), null, text);
-  }
-});
-
 test("a label CONTINUATION refuses the line outright — `Customer Service` is not a customer", () => {
   for (const text of ["Customer Service : 03-1234 5678", "Bill To Address : 12 Jalan Ampang",
     "Customer No. 8011408205", "Customer Ref: PO-9001", "Client Account : 5123"]) {
@@ -190,51 +167,56 @@ test("a label CONTINUATION refuses the line outright — `Customer Service` is n
   assert.equal(receipt.outcome, "absent");
 });
 
-test("the party gate refuses everything that is not an identity", () => {
-  for (const bad of ["RM 2,800.00", "2025-10-14", "2026-01-01", "accounts@acme.com.my",
-    "www.acme.com.my", "Tel : 017-472 9637", "Fax: 03-2100 1000", "No. 12", "Lot 3A",
-    "Level 5, Wisma ACME", "50450 Kuala Lumpur", "12, Jalan Ampang", "--", "  "]) {
-    assert.equal(looksLikePartyName(bad), false, bad);
+test("PARTY CANDIDACY needs the ENTITY SIGNAL — furniture and captions never reach the party path", () => {
+  // The round-3 design law, exercised through the READER (the grammar-level half lives in
+  // x7-party-grammar.test.mjs, and a green cell there proves nothing about this).
+  for (const furniture of ["Name:", "12, Main Road", "A T T N : Lim Xiao Shan", "DELIVERY ADDRESS",
+    "MAILING ADDRESS", "Payment Terms", "Signature", "Delivery Note", "鑫旺有限公司"]) {
+    const { fields, receipt } = read([BILL_TO_LABEL, line(furniture, box(0.72, 2.30, 3.30, 2.45))]);
+    assert.equal(partyOf({ fields }), undefined, `${furniture} must never become a party`);
+    assert.equal(receipt.outcome, "absent");
   }
-  // …and admits the identities this client's REAL books actually carry (acceptance-h1 rows).
-  for (const good of ["KONG CHENG RESTAURANTS SDN BHD", "D&D DEVELOPMENT SDN BHD", "SIFU LAB",
-    "Lim Xiao Shan", "AMATERUS GROUP SDN BHD", "DD ECORISE SDN BHD", "SELANGOR ENTERPRISE SDN BHD",
-    "THE ROOF SDN BHD", "Ms Tan Wei Ming"]) {
-    assert.equal(looksLikePartyName(good), true, good);
-  }
+  // A SUFFIXED name in the same position reads — the gate admits on evidence, not on shape luck.
+  const { fields } = read([BILL_TO_LABEL, line("ACME SDN BHD", box(0.72, 2.30, 3.30, 2.45))]);
+  assert.equal(partyOf({ fields }).value_raw, "ACME SDN BHD");
 });
 
-test("captions, addresses and OBFUSCATED contact labels are not identities", () => {
-  // Each of these reached `customer_name` through the real normalizer in an executed review
-  // probe, because every other term in the gate admitted it: `Name:` carries letters and no
-  // address term; `12, Main Road` is an ENGLISH address (the first gate knew only Malay street
-  // nouns); `A T T N : …` is a spaced-out contact label the ordinary prefix match cannot see.
-  for (const bad of ["Name:", "Customer", "Description", "Particulars", "Amount", "Qty",
-    "12, Main Road", "45, Main Street", "8, Park Avenue",
-    "A T T N : Lim Xiao Shan", "A T T E N T I O N : Lim Xiao Shan"]) {
-    assert.equal(looksLikePartyName(bad), false, bad);
-  }
-  // …and through the FULL reader, since grammar-only cells were proven to lie.
-  for (const bad of ["Name:", "12, Main Road", "A T T N : Lim Xiao Shan"]) {
-    const { fields } = read([BILL_TO_LABEL, line(bad, box(0.72, 2.30, 3.30, 2.45))]);
-    assert.equal(partyOf({ fields }), undefined, `${bad} must never become a party`);
-  }
-  // A function word still cannot open a name either (the stop-word wall, kept as a second line).
-  for (const bad of ["BE PAID BY 30 DAYS", "WHOM IT MAY CONCERN", "ALL AMOUNTS IN RINGGIT",
-    "OUR REF ABC123", "PLEASE MAKE CHEQUES PAYABLE", "AS PER AGREEMENT", "UNTUK BAYARAN PENUH"]) {
-    assert.equal(looksLikePartyName(bad), false, bad);
-  }
+test("ONE LEXICON, TWO POLARITIES — a party must carry the signal, a contact must not", () => {
+  // Executed before this rule: `Bill To:` → `Attention:` → `ACME SDN BHD` emitted the company as
+  // BOTH customer_name and contact_person, persisting a real party as a human being.
+  const attnLabel = line("Attention:", box(0.72, 2.25, 1.60, 2.39));
+  const company = line("ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54));
+  const { fields, receipt } = read([BILL_TO_LABEL, attnLabel, company]);
+  assert.equal(contactOf({ fields }), undefined, "an entity-suffixed string is never a person");
+  // …and it is not merely dropped: it competes on the PARTY path, where it belongs.
+  assert.equal(partyOf({ fields }).value_raw, "ACME SDN BHD");
+  assert.equal(receipt.attn_rejected_gate, 1, "the contact pass examined the company and refused it");
+  assert.equal(receipt.attn_no_value, 1, "…and then reported that the bare label found no contact at all");
+  // The true F7 shape still yields BOTH fields — the person a person, the company a company.
+  const real = read(KONG_CHENG_BLOCK);
+  assert.equal(partyOf(real).value_raw, "KONG CHENG RESTAURANTS SDN BHD");
+  assert.equal(contactOf(real).value_raw, "Lim Xiao Shan");
+});
+
+test("SUFFIX SPELLINGS collapse; two genuinely different entities still contest", () => {
+  // `KONG CHENG…SDN BHD` vs `KONG CHENG…S/B` is one company written two lawful ways. Keying them
+  // apart made the reader declare a contest and WITHDRAW a correct typed name.
+  const s1 = line("Bill To: KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.15, 4.60, 2.29));
+  const s2 = line("Customer : KONG CHENG RESTAURANTS S/B", box(0.72, 2.32, 4.20, 2.46));
+  const same = read([s1, s2]);
+  assert.equal(same.receipt.outcome, "matched");
+  assert.equal(same.receipt.occurrences, 2);
+  assert.equal(partyOf(same).value_raw, "KONG CHENG RESTAURANTS SDN BHD");
+  // The residual, held EYES-OPEN: two genuinely different registered buyers still contest.
+  const a = line("Bill To: WRONG HOLDING SDN BHD", box(0.72, 2.15, 3.60, 2.29));
+  const b = line("Customer : ACTUAL SUBSIDIARY SDN BHD", box(0.72, 2.32, 3.90, 2.46));
+  assert.equal(read([a, b]).receipt.outcome, "contested");
 });
 
 test("the identity key is UNICODE-AWARE — two Chinese company names are two parties", () => {
   // The ASCII key deleted every non-ASCII letter, so `鑫旺 SDN BHD` and `宏达 SDN BHD` both keyed
   // to `sdnbhd`: uniqueness-or-nothing read ONE party matched twice instead of a contest, and
   // the reader emitted `"?? SDN BHD"`. A key that cannot tell two names apart is not a defense.
-  assert.notEqual(partyKey("鑫旺 SDN BHD"), partyKey("宏达 SDN BHD"));
-  assert.equal(partyKey("鑫旺 SDN BHD"), "鑫旺sdnbhd");
-  // The same name printed twice still collapses, and a mixed Latin/Chinese name round-trips.
-  assert.equal(partyKey("鑫旺 SDN. BHD."), partyKey("鑫旺 Sdn Bhd"));
-  assert.equal(partyKey("鑫旺 KONG CHENG (M) SDN BHD"), "鑫旺kongchengmsdnbhd");
   // Two distinct Chinese parties are a CONTEST, not a match with two occurrences.
   const a = line("Bill To: 鑫旺 SDN BHD", box(0.72, 2.30, 3.30, 2.45));
   const b = line("Customer: 宏达 SDN BHD", box(0.72, 2.50, 3.30, 2.65));
@@ -246,11 +228,6 @@ test("the identity key is UNICODE-AWARE — two Chinese company names are two pa
   const twice = read([a, line("Bill To: 鑫旺 Sdn Bhd", box(0.72, 2.50, 3.30, 2.65))]);
   assert.equal(partyOf(twice).value_raw, "鑫旺 SDN BHD");
   assert.equal(twice.receipt.occurrences, 2);
-});
-
-test("the identity key collapses punctuation and case, and NEVER a legal suffix", () => {
-  assert.equal(partyKey("KONG CHENG RESTAURANTS SDN. BHD."), partyKey("Kong Cheng Restaurants Sdn Bhd"));
-  assert.notEqual(partyKey("ACME SDN BHD"), partyKey("ACME"), "two entities, not one — never collapsed");
 });
 
 // ======================================================================================

@@ -195,6 +195,32 @@ reached the books unchallenged. X7 supplies the missing second reader.
   form, so the entry is restricted to it.
 - **The identity key is Unicode-aware** (`\p{L}\p{N}`, NFKC): the ASCII rule collapsed
   `鑫旺 SDN BHD` and `宏达 SDN BHD` to `sdnbhd`, defeating uniqueness-or-nothing.
+- **PARTY CANDIDACY REQUIRES A POSITIVE REGISTERED-ENTITY SIGNAL** *(round-3 design law — this
+  closes the CLASS the first three rounds kept finding instances of).* A scanned or labelled
+  string may become a party candidate only if it ends in the documented Malaysian legal-entity
+  suffix family: **SDN BHD** (+ `SDN. BHD.`, `S/B`, `Sendirian Berhad`) · **BHD/BERHAD** ·
+  **PLT** · **LLP**. No suffix ⇒ no candidacy ⇒ no override, no contest, no
+  disagreement-withdraw — the reader abstains and typed stands.
+  - *Why the shape changed:* the gate was a **blocklist**, and both scan paths took the FIRST
+    string it admitted. A blocklist can only enumerate the past, so every round produced a fresh
+    instance of one class — a label whose remainder is furniture (`Customer's Ref: PO-8891` →
+    `'s Ref: PO-8891`, `Buyer Signature` → `Signature`: fifteen in one probe) — and every scan
+    widening reopened it (the two-column skip repair let the caption `DELIVERY ADDRESS` win).
+    The override branch is the only branch that can write a WRONG party onto real books, so it
+    now demands positive evidence. Review law 2 in grammar form.
+  - *One lexicon, two polarities:* the same family that ADMITS a party REFUSES a contact — an
+    entity-suffixed string is never a person. Without the symmetry, `Attention:` → `ACME SDN BHD`
+    emitted the company as both `customer_name` and `contact_person`.
+  - *A non-candidate is a SKIP, not a stop*, so a caption printed above the party no longer hides
+    it — no prefer-last heuristic needed.
+  - *The honest narrowing:* an unsuffixed buyer (an individual, an unregistered trade name — this
+    client's own `SIFU LAB`) never overrides. Typed stands: **zero loss against today.** The
+    measured F7 defect still fixes — `KONG CHENG RESTAURANTS SDN BHD` carries the signal.
+- **Suffix-variant canonicalization in `partyKey`.** The module still never STRIPS a suffix
+  (`ACME` ≠ `ACME SDN BHD`); equivalent SPELLINGS of the same suffix canonicalize
+  (`S/B` ≡ `SDN BHD`, `BHD` ≡ `BERHAD`). Without it `KONG CHENG…SDN BHD` vs `KONG CHENG…S/B` —
+  one company, two lawful spellings — read as a CONTEST and withdrew a correct typed name. Two
+  genuinely different-keyed entities still contest; that residual is held **eyes-open**.
 - **DB half is mandatory, not optional:** `invoice.contact_person` joins `persist_invoice_facts`'
   **CLOSED** allowlist and its conflicting-duplicate text set in its own migration. Without it
   the first extraction carrying the fact does not drop it — it raises **CLR10** and forfeits the

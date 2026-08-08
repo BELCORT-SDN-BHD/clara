@@ -38,6 +38,30 @@
 // The full lawful-action set lives on `mergeCustomerIdentity` below.
 // ──────────────────────────────────────────────────────────────────────────────────────────────
 //
+// ─── ROUND-3 DESIGN LAW: POSITIVE EVIDENCE, NOT ENUMERATION ───────────────────────────────────
+// PARTY CANDIDACY REQUIRES A POSITIVE REGISTERED-ENTITY SIGNAL (`hasRegisteredEntitySuffix`, the
+// documented Malaysian suffix family in `invoice-party-grammar.mjs`). No suffix ⇒ no candidacy ⇒
+// no override, no contest, no disagreement-withdraw: the reader abstains and typed stands.
+//
+// WHY, and this is the structural lesson three rounds paid for. The party gate was a BLOCKLIST,
+// and both scan paths took the FIRST string it admitted. A blocklist can only enumerate the
+// past, so every round found a fresh instance of ONE class — a label whose remainder is furniture
+// (`Customer's Ref: PO-8891`, `Buyer Signature`, `Customer Since 2019`: fifteen in a single
+// probe) — and every widening of the scan reopened it (the two-column skip repair let the
+// caption `DELIVERY ADDRESS` win on the reviewer's own layout). The override branch is the only
+// branch that can write a WRONG party onto real client books, so it now demands positive
+// evidence rather than the absence of a known-bad shape.
+//
+// ONE LEXICON, TWO POLARITIES. The same suffix family that ADMITS a party REFUSES a contact: an
+// entity-suffixed string is never a person. Without that symmetry `Bill To:` → `Attention:` →
+// `ACME SDN BHD` emitted the company as BOTH `customer_name` and `contact_person`, persisting a
+// real party as a human being.
+//
+// A NON-CANDIDATE IS A SKIP, NOT A STOP. The scan walks past anything without the signal, within
+// its existing bounds, so a caption printed ABOVE the party no longer hides it — and no
+// prefer-last heuristic is needed: the first line carrying the signal still wins.
+// ──────────────────────────────────────────────────────────────────────────────────────────────
+//
 // ─── HONESTY NOTE, STATED BECAUSE IT IS A REAL DIFFERENCE FROM X6 ─────────────────────────────
 // X6's thresholds were CALIBRATED against two real Azure captures (a measured 0.015in vendor
 // gap; a letterhead at y≈0.88 of an 11.68in page). THE THRESHOLDS BELOW ARE NOT MEASURED — the
@@ -86,7 +110,7 @@
 
 import { pageFrame } from "./invoice-totals-reader.mjs";
 import { asciiTrim } from "./invoice-amount-grammar.mjs";
-import { looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
+import { hasRegisteredEntitySuffix, looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel } from "./invoice-party-grammar.mjs";
 import { customerAttributionFailure, extentOf, scaleAnchor, xOverlap } from "./invoice-block-geometry.mjs";
 
 export { looksLikePartyName, partyKey, splitAttnLabel, splitBillToLabel, splitLabelled, BILL_TO_LABELS, ATTN_LABELS } from "./invoice-party-grammar.mjs";
@@ -125,9 +149,9 @@ const emptyReceipt = () => ({
   matched: 0, absent: 0, contested: 0,
   rejected_gate: 0, label_continuation: 0, no_geometry: 0, unit_unresolved: 0,
   no_customer_anchor: 0, customer_anchor_far: 0, closer_to_vendor: 0,
-  split_line_scanned: 0, split_line_exhausted: 0,
+  split_line_scanned: 0, split_line_exhausted: 0, no_entity_suffix: 0,
   attn_skipped: 0, column_skipped: 0, reserved_skipped: 0,
-  attn_matched: 0, attn_ambiguous: 0, attn_rejected_gate: 0, attn_unattributed: 0,
+  attn_matched: 0, attn_ambiguous: 0, attn_rejected_gate: 0, attn_no_value: 0, attn_unattributed: 0,
   contact_emitted: 0,
   typed_collapsed: 0, typed_overridden_attn: 0, typed_disagreement: 0,
   typed_vs_contested: 0, sole_authorship_refused: 0,
@@ -185,16 +209,31 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
      * on a row, value beneath). Bounded on every axis — reading order, a line budget, a vertical
      * gap, column cohesion and the value gate — and it distinguishes SKIP from STOP:
      *
-     *   SKIP (keep looking, spend budget): a line in another COLUMN, an `Attn` label line, or a
-     *     line already reserved as a contact value. Azure emits lines in READING ORDER, so a
-     *     two-column header interleaves the right-hand meta column between a `Bill To:` label and
-     *     the party beneath it. The first cut BROKE on the first non-overlapping line, which
-     *     fails closed but means the fix may never FIRE on a real two-column KONG CHENG layout.
-     *   STOP (the block has ended): unusable geometry, a line above the label, a line past the
-     *     vertical gap, or a value that fails the gate — once the address has begun, the name
-     *     portion is over.
+     *   SKIP (keep looking, spend budget): a line in another COLUMN, an `Attn` label line, a line
+     *     already reserved as a contact value, or — for a PARTY read — anything that is not a
+     *     registered-entity candidate. Azure emits lines in READING ORDER, so a two-column header
+     *     interleaves the right-hand meta column between a `Bill To:` label and the party beneath
+     *     it. The first cut BROKE on the first non-overlapping line, which fails closed but means
+     *     the fix may never FIRE on a real two-column KONG CHENG layout.
+     *   STOP (out of bounds): unusable geometry, a line above the label, a line past the vertical
+     *     gap, or the line budget.
+     *
+     * A NON-CANDIDATE IS A SKIP, NOT A STOP, and that is what the entity gate bought. The old
+     * scan stopped at the first line failing the name gate, on the theory "once the address has
+     * begun, the name portion is over" — so a caption printed ABOVE the party (`DELIVERY ADDRESS`
+     * on the reviewer's own two-column layout) either ENDED the scan or, once it passed the
+     * blocklist, WON as the party. With a positive entity signal neither happens: the caption
+     * simply is not a candidate, the scan steps over it, and the suffixed line beneath is found.
+     * NO prefer-last heuristic is involved — the first line carrying the signal wins, as before.
      */
     const scanBelow = (i, labelBox, kind, label) => {
+      // ONE LEXICON, TWO POLARITIES. A party candidate must CARRY the registered-entity signal;
+      // a contact candidate must NOT — a contact person is a person, and an entity-suffixed
+      // string is never one. Executed before this rule: `Bill To:` → `Attention:` →
+      // `ACME SDN BHD` emitted the company as BOTH customer_name and contact_person, persisting
+      // a real party as a human being.
+      const isCandidate = (raw) => (looksLikePartyName(raw)
+        && (kind === "party" ? hasRegisteredEntitySuffix(raw) : !hasRegisteredEntitySuffix(raw)));
       const limit = Math.min(lines.length - 1, i + Math.max(0, settings.maxLookaheadLines));
       for (let j = i + 1; j <= limit; j++) {
         const box = boxes[j];
@@ -205,10 +244,16 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
         if (reserved.has(j)) { receipt.reserved_skipped += 1; continue; }
         if (splitAttnLabel(String(lines[j]?.content ?? ""))) { receipt.attn_skipped += 1; continue; }
         const raw = asciiTrim(String(lines[j]?.content ?? ""));
-        if (!looksLikePartyName(raw)) {
-          receipt[kind === "party" ? "rejected_gate" : "attn_rejected_gate"] += 1;
-          note("rejected_gate", label, pageNumber, { kind: `${kind}_value` });
-          return null;
+        if (!isCandidate(raw)) {
+          // Counted under the head that actually refused it — a receipt that lumps "this is not
+          // a name" together with "this is a name but carries no entity signal" cannot tell a
+          // reader which wall did the work.
+          if (kind !== "party") receipt.attn_rejected_gate += 1;
+          else if (!looksLikePartyName(raw)) receipt.rejected_gate += 1;
+          else receipt.no_entity_suffix += 1;
+          note(kind === "party" && looksLikePartyName(raw) ? "no_entity_signal" : "rejected_gate",
+            label, pageNumber, { kind: `${kind}_value` });
+          continue;
         }
         return { raw, box, lineIndex: j };
       }
@@ -237,7 +282,8 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
 
       let value = null;
       if (attn.remainder) {
-        if (!looksLikePartyName(attn.remainder)) {
+        // The contact polarity: a person, and NEVER an entity-suffixed string (see scanBelow).
+        if (!looksLikePartyName(attn.remainder) || hasRegisteredEntitySuffix(attn.remainder)) {
           receipt.attn_rejected_gate += 1;
           note("attn_rejected_gate", attn.label, pageNumber, { kind: "attn" });
           continue;
@@ -245,7 +291,10 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
         value = { raw: attn.remainder, box: boxes[i], lineIndex: i };
       } else {
         value = scanBelow(i, boxes[i], "attn", attn.label);
-        if (!value) { receipt.attn_rejected_gate += 1; note("attn_no_value", attn.label, pageNumber, { kind: "attn" }); continue; }
+        // Counted apart from `attn_rejected_gate`: that head means "a line was examined and
+        // refused as a contact VALUE"; this one means "a bare Attn label found no value at all".
+        // Spending one counter on both makes the receipt double-count a single line.
+        if (!value) { receipt.attn_no_value += 1; note("attn_no_value", attn.label, pageNumber, { kind: "attn" }); continue; }
       }
       // RESERVE THE VALUE LINE UNCONDITIONALLY — before attribution, and whether or not
       // attribution goes on to accept it. The document labelled that line a contact; attribution
@@ -290,10 +339,18 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
 
       let value = null; // {raw, box, lineIndex}
       if (hit.remainder) {
-        // SAME-LINE: `Bill To: KONG CHENG RESTAURANTS SDN BHD`.
+        // SAME-LINE: `Bill To: KONG CHENG RESTAURANTS SDN BHD`. The entity signal is required
+        // HERE too, not only on the split-line value path — this is where the fifteen furniture
+        // remainders (`Buyer Signature` → `Signature`, `Customer Since 2019` → `Since 2019`)
+        // entered, and no blocklist enumerated them all.
         if (!looksLikePartyName(hit.remainder)) {
           receipt.rejected_gate += 1;
           note("rejected_gate", hit.label, pageNumber, { kind: "party" });
+          continue;
+        }
+        if (!hasRegisteredEntitySuffix(hit.remainder)) {
+          receipt.no_entity_suffix += 1;
+          note("no_entity_signal", hit.label, pageNumber, { kind: "party" });
           continue;
         }
         value = { raw: hit.remainder, box: labelBox, lineIndex: i };
@@ -371,26 +428,8 @@ export function readCustomerIdentityFromLines(pages, anchors = null, opts = {}) 
  * Merge the reader's emissions into the mapper's field list, reconciling `invoice.customer_name`
  * against Azure's typed row. Mutates `out` and `identity.receipt`.
  *
- * ══ THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR ══
- * (orchestrator ruling on the two-lane review, 2026-08-09 — this OVERRULES two behaviours the
- * original work order specified, and both overrules are recorded here on purpose.)
- *
- * OVERRULE 1 — the reader never AUTHORS a customer_name. The first cut let it fill an empty or
- * absent typed field. Both review lanes broke that arm independently: with an empty-but-regioned
- * typed `CustomerName` the reader emitted a line item (`supply and install air-conditioning
- * system`), a contact (`Lim Xiao Shan`), a caption (`Name:`) and an address (`12, Main Road`) as
- * the customer of record — each one a WRONG identity created where pass-through had supplied no
- * usable identity at all. Sole authorship is deleted, not patched: on an empty/absent typed field
- * the reader emits nothing for `customer_name`, the document stays `customer_name_missing`, and a
- * human reads the page. That is exactly today's behaviour, which is the point.
- *
- * OVERRULE 2 — a CONTESTED landscape fails closed (see the reader's `contested` outcome). The
- * first cut left the typed row standing on ≥2 distinct labelled parties, on the reasoning that
- * ambiguity is "no assertion". It is an assertion: the reader positively measured that the
- * document's buyer is not settled, and a typed value equal to one of the two conflicting parties
- * then resolves a counterparty on the strength of a coin toss that already landed.
- *
- * THE READER'S LAWFUL ACTIONS ARE THEREFORE EXACTLY FOUR:
+ * THE READER IS A CHECK/OVERRIDE LAYER, NEVER A SOLE AUTHOR — the two overrules and the
+ * positive-evidence law are recorded in the module header above. THE LAWFUL ACTIONS ARE FOUR:
  *   COLLAPSE   reader AGREES with typed → ONE row survives and it is the TYPED one (it carries
  *              Azure's own region). `typed_collapsed`. Never two rows for one field_path —
  *              `persist_invoice_facts` forfeits the WHOLE extraction on conflicting text
