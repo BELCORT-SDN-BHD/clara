@@ -28,10 +28,10 @@ domain gold is extracted deliberately per `docs/audit/02-salvage-manifest.md`.
 
 - **The DB owns every AUTHORITATIVE number; the agent only orchestrates.** Book
   writes go through named, audited Postgres functions — never hand-write a row
-  when a function exists. The LLM may *propose or check* a calculation, but no
-  model-generated numeral becomes authoritative or enters a durable artifact
-  unless a versioned deterministic evaluator reproduces it from DB-owned inputs
-  (ADR-065/E-R4 wording).
+  when a function exists. The LLM may propose or independently check a
+  calculation, but no model-generated numeral enters a durable report unless a
+  versioned deterministic evaluator reproduces it from DB-owned inputs
+  (ADR-065/E-R4, verbatim).
 - **Four structural invariants** (ARCHITECTURE §0/§3.3), enforced in the DB, not
   by model discipline: client attribution (`assert_client_resolved` ≥0.95),
   provenance binding (`source_doc_sha256` + `document_id` validated in-txn), wake

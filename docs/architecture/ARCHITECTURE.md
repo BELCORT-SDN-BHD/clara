@@ -6,7 +6,7 @@
 
 ## 0. The one invariant, and how it is made structural
 
-**The DB owns every number; the agent only orchestrates; one audited function per mutation class.** The prior build honoured this for GL balance but leaked everywhere else — the read tool could write (Ggr-1), provenance was unvalidated (GAP0-1), side-effects were prompt-only (F3), gates were model-asserted (A-5/A-16). The rebuild makes the invariant **structural at four load-bearing points** (Gate-1 C3), so correctness does not depend on model or app discipline:
+**The DB owns every AUTHORITATIVE number; the agent only orchestrates; one audited function per mutation class.** *(Wording amended by ADR-065/E-R4, 2026-08-08, mirroring PRD §6 invariant 1: the LLM may propose or independently check a calculation, but no model-generated numeral enters a durable report unless a versioned deterministic evaluator reproduces it from DB-owned inputs.)* The prior build honoured this for GL balance but leaked everywhere else — the read tool could write (Ggr-1), provenance was unvalidated (GAP0-1), side-effects were prompt-only (F3), gates were model-asserted (A-5/A-16). The rebuild makes the invariant **structural at four load-bearing points** (Gate-1 C3), so correctness does not depend on model or app discipline:
 
 1. **Client attribution** — a DB function (`assert_client_resolved`) gates every client-scoped write on a persisted, ≥0.95, *server-verified* client resolution; no write path exists that skips it.
 2. **Provenance binding** — document-origin writes validate `source_doc_sha256` + `document_id` against a real ingested document row in the same transaction; an invalid or absent pair RAISES.

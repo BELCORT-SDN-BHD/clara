@@ -31,8 +31,9 @@ Five candidate classes were put to the owner; ruled:
 
 ## E-R2 — Close gates: the three-drawer model
 
-Reconciles PRD journey-7 "structural pre-close gates" with ARCHITECTURE §0 "close-readiness
-is visibility-first" via fail-closed + attested human override:
+Reconciles PRD journey-7's "pre-close gates" (rated "structural" by REBUILD-PLAN's Wave-E
+line) with ARCHITECTURE §0 "close-readiness is visibility-first" via fail-closed +
+attested human override:
 
 - **Drawer 1 — ABSOLUTE (no override, nobody):** the serialized close lock (advisory lock
   per client; no writer escapes into the FY mid-close) · continuity math (P&L→retained
@@ -83,6 +84,8 @@ substitution — the model never retypes figures into prose or charts.
 
 ## E-R5 — The typed metric algebra ("乐高厨房")
 
+*(Architecture-of-record: `docs/plan/research/wave-e/q4-computed-figures-evidence-2026-08-08.md`, Lane 3 §5 — the ratified Codex verdict; this section binds, that file details.)*
+
 - A closed set of typed calculation primitives (`measure`, `sum`, `average`, `lag`,
   `subtract`, `divide`, `days_in_period`, `percent_change`, …), each deterministic in the
   DB; exact-decimal evaluation; money stays `bigint` cents.
@@ -98,6 +101,15 @@ substitution — the model never retypes figures into prose or charts.
   firm-approved definitions; one-off management analysis may be looser but is labelled.
 - The validator proves syntax/types/scope/cost/provenance completeness; it does NOT claim
   a novel definition is professionally appropriate — that is the human approval.
+- **Per-cell provenance is mandatory.** Every evaluated cell records: definition version /
+  normalized formula hash · periods · account-set + presentation-map versions · input
+  values and entry/document references · books watermark · evaluator version · exact
+  result and displayed rounding · the model proposal · the human approval · supersession
+  links. This is the record that answers "where did this 12.3% come from" seven years
+  later — the mechanism the E-R4 amendment rests on.
+- **Edge policies are defined explicitly, never left to the evaluator's discretion:**
+  division-by-zero, negative denominators, missing data, sign normalization, and rounding
+  each get a named, versioned policy.
 
 ## E-R6 — The dormant correction guards POWER ON
 
@@ -123,7 +135,8 @@ user-directed; the LLM designs layouts on request; layouts persist as registered
 templates. Two fixed floors: every cell's figure comes from the DB/algebra, and every
 render is a durable reproducible artifact. Statutory packs: structure is prescribed —
 the product never blocks a custom cut, it strips the compliance claim honestly
-(PRD item 14), and the claim cannot be smuggled back via filename/cover/metadata.
+(PRD §4 item 14 — the honest-FS law), and the claim cannot be smuggled back via
+filename/cover/metadata.
 
 ## E-R9 — Acceptance corpus map
 
@@ -131,7 +144,7 @@ the product never blocks a custom cut, it strips the compliance claim honestly
 |---|---|---|
 | Full synthetic battery | Sandbox (RPA) | close → reopen → guard activation → abuse drills |
 | Closing stock (WD-R11) | **Sandbox synthetic goods-trader fixture ONLY** | no real goods-trading client exists; **NAMED DEBT:** the first real goods-trading client's onboarding carries the real acceptance |
-| First REAL close | **BEE FY2025** | the drawer-2 depreciation gate's first real firing pulls the 11-period catch-up approval through (draft `3c05ab82`); #72's FA carry-down (FY2025 closing NBV → FY2026 opening) discharges in the same act |
+| First REAL close | **BEE FY2025** | the drawer-2 depreciation gate's first real firing pulls the 11-period catch-up approval through (draft `3c05ab82`); **the WD-R14 real-FA-carry-down debt** (FY2025 closing NBV → FY2026 opening; the rolling posture's task #72) discharges in the same act |
 | MPERS company-format FS, real corpus | **RPR historical FY** | Sdn Bhd, 9 real months to the sen; strike-off companies legitimately prepare historical accounts |
 | Snapshot + staleness witness | **RS** | 19 approved real invoices; snapshot a month, post into it, watch the label |
 | Sole-prop FS format | BEE | convention-labelled, never MPERS-claimed (E-R14) |
@@ -194,7 +207,7 @@ D-b staff-advance register) registers to **Wave F**; the submission/approval sur
 periods beginning before 2027-01-01; MPERS(2025) (issued 2025-10-10, based on IFRS for
 SMEs 3rd ed.) for periods beginning on/after 2027-01-01, the old version withdrawn the
 same date. The wording tables are BORN two-versioned (the tax-table pattern). MASB's own
-illustrative FS (`MPERS_2025_BC_IE.pdf`) is the primary illustrative source — it is an
+illustrative FS (`MPERS_2025_BC_IE.pdf`) is the primary illustrative-source CANDIDATE (standard-setter provenance; existence confirmed by metadata only) — it is an
 image PDF: **a manual pull + HUMAN verification is REQUIRED before any wording enters the
 policy tables** (extraction was refused to every reader; absence-is-not-evidence applies).
 KPMG's free illustrative FS is the cross-check; the MIA paid illustrative book is
@@ -243,6 +256,9 @@ Pages/dashboard); the recipe joins the DR battery.
 - **Month lock:** build only on a real client need (E-R3).
 - **Real closing-stock acceptance:** rides the first real goods-trading client (E-R9).
 - **MIA illustrative purchase:** only if free golden sources prove thin (E-R14).
+- **FX-lite (ADR-062's prioritization question):** passed through the E grill UNRULED —
+  not silently dropped; it is an explicit Wave-F planning decision (purchase-side foreign
+  bills over effective-dated BNM rate tables, DB-computed conversion citing the rate row).
 
 ## Standing laws that bind this wave (cited, not restated)
 
@@ -253,3 +269,15 @@ explicitly extended to reporting evaluators (E-R14) · Malaysian accounting/tax 
 in effective-dated policy tables, never prose · the enrichment trap (RS's 10 name-only
 customers are NEVER enriched with registrations) · canary `daba7f2e` never answered · B2
 witness `d023b48c` never approved.
+
+## Derived implementation notes (recorded so the never-re-grill banner does not harden them into rulings)
+
+Four items in this contract were not separately ruled in the grill; each is a faithful
+derivation from standing law or the ratified design records, and a builder may adjust
+their mechanics without re-opening a ruling: the `fy_end_month/day` nullable-default
+handling (E-R3; the columns and coalesce defaults are 0041's) · the money-stays-
+`bigint`-cents restatement (E-R5; PRD invariant 6) · partial payments named in the
+agentic layer's trigger set (E-R13; the ruled principle is "ambiguity routes to
+suggestions", of which a partial payment is one shape) · the freeze-lint extension to
+reporting evaluators (E-R14; the ratified requirement is evaluator immutability — the
+lint is the natural enforcement instrument, mirroring Appendix A).
