@@ -225,6 +225,24 @@ export const workflows = {
 // mislabel inside a snapshot the model DID read keeps `evidence_invalid`. A duplicate idx
 // refuses rather than taking the first (array order must never regain authority).
 //
+// ROUND 3 (the cross-model re-verify DISCHARGED the snapshot binding by execution, and found
+// the RETRY LEG broken — the mechanism the classification above invites). autoDraft's outcome
+// reducer returned on the FIRST draft_journal_entry result, but the AI SDK flattens every
+// step of the model loop into one `content` array — so `[transient refusal, successful
+// draft]` reduced to `refused` and the run settled FAILED while the successful DB write
+// already stood. The reducer now takes precedence-then-recency (drafted > noop_existing >
+// refused > none), which is what aligning with `stoppedOnSuccessfulDraft`'s own stop
+// condition actually means, since two draft calls can land in ONE step. THE DEFECT IS
+// PRE-EXISTING: autoDraft.v6.prompt.ts carries the same body byte-identically. What v7
+// changed is its REACHABILITY, by inviting the retry — so the correction ships in the v7/v10
+// closures and the frozen v6/v9 bodies are not touched. chatTurn was checked and has no
+// mirror: toTypedParts_v10 is a MAP, not a reducer, so a retry sequence keeps both parts.
+// ONE RESIDUAL IS ACCEPTED AND NAMED, not silently absorbed: a transient the model does NOT
+// recover from in-run still settles failed, consumes a durable attempt, and parks the filing
+// at the cap — and NO path unparks one (measured across the whole live catalog;
+// autoDraft.v7.errors.ts carries the four writers and why each excludes 'parked'). The chat
+// and hand doors do not consult that registry, so a parked filing stays codable by a human.
+//
 // The v6/v9 bodies stay frozen, built and EXPORTED so no parked run is stranded (policy (c)).
 export { firmInterview_v1 };
 export { firmInterview_v2 };

@@ -209,6 +209,43 @@ export function directionFamilyMismatchRefusal(): RefusalPart {
  *  race is a FALSE receipt. Each is RETRYABLE IN-RUN: the tool result tells the model exactly
  *  what to do (read again, then re-cite) and the model loop still holds its step budget.
  *
+ *  WHAT "RETRYABLE" DOES **NOT** MEAN — the accepted residual, stated in full because the
+ *  first cut of this comment let a reader infer more than is true (Codex re-verify HIGH,
+ *  CONFIRMED by end-to-end execution on a real database). A transient that the model does
+ *  NOT recover from IN-RUN still reaches `settle("failed", ...)` in autoDraft.v7.ts, and the
+ *  DB counts that like any other failure: settle_autodraft_task increments attempt_count and
+ *  sets `state='parked'` at the cap of two (0036_wave_c0_deferred_belts.sql:962-973), after
+ *  which admit_autodraft_task refuses every future admission with `refused_attempts`
+ *  (0036:1188). Codex drove exactly that: two transient-coded failed settles ->
+ *  attempt_count=2, state=parked, open_questions=0; applying 0054 then made the same extract
+ *  resolve, and admission STILL answered refused_attempts.
+ *
+ *  SO "AUTOMATIC RECOVERY ONCE THE MIGRATION LANDS" IS FALSE FOR A PARKED FILING, and the
+ *  earlier wording that implied it is withdrawn. MEASURED on the live catalog: exactly four
+ *  functions write `autodraft_attempts.state`, and NOT ONE can move a row off 'parked' —
+ *    settle_autodraft_task (both overloads), cancelled/expired arm: `where task_id=p_task
+ *      and state='active'` (0036:900-901) — excludes parked;
+ *    settle_autodraft_task, success arm: `attempt_count=0,state='idle'` (0036:977) — needs a
+ *      live task, and a parked filing admits none;
+ *    admit_autodraft_task, supersede arm: `state='idle'` (0036:1307) — unreachable, because
+ *      the parked return sits at prosrc offset 1414 and that arm at 5586 (measured against
+ *      the live catalog, not read off the migration file);
+ *    reconcile_sweep_runs: `where aa.state='active'` (0011_daily_loop.sql:2734-2736) —
+ *      excludes parked.
+ *  No dashboard or human verb touches it either (the dashboard's own "parked" strings are the
+ *  bank-reconciliation declaration, a different concept). THERE IS NO UNPARK PATH: NONE
+ *  EXISTS — registered for PROJECTLOG PART 2, not silently absorbed here.
+ *
+ *  WHY THE RESIDUAL IS STILL ACCEPTED, AS A DECISION: (a) with the reducer fix
+ *  (autoDraft.v7.prompt.ts) a transient that the model recovers from in-run never settles at
+ *  all, which is the designed path for every one of these; (b) the deploy order is BINDING
+ *  (migration before image), so the one condition that could hit every document at once —
+ *  evidence_index_unavailable — should never open; (c) parking closes the UNATTENDED lane for
+ *  that filing only: the chat and hand doors do not consult this registry, so the document
+ *  stays codable by a human (the same route ADR-064 records all nine H1 redrafts taking).
+ *  Widening the DB's own attempt accounting to distinguish a system condition from a real
+ *  failure is a REGISTERED follow-up, deliberately out of this PR's scope.
+ *
  *  THE CODE IS DELIBERATELY NOT A CLR. No DB gate raised this, and reusing a CLR reason token
  *  is precisely the misclassification being fixed. "transient" sits beside the existing
  *  runtime-labelled "internal" code. isQuestionShaped() keys on CLR23 plus a CLOSED set of

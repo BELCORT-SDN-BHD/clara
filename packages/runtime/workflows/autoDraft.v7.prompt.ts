@@ -295,26 +295,60 @@ export function isDoubleCodedReason(reason: string | undefined): boolean {
 }
 
 /**
- * Reduce a completed model segment's content to the terminal AutoDraft outcome. A
- * successful draft_journal_entry tool RESULT yields `drafted`; a refusal whose reason is
- * a double_coded variant yields `noop_existing` (WA-L8, success-shaped); any other refusal
- * yields `refused`; content with neither is `none`. Pure — unit-testable with no DB/model.
+ * Reduce a completed model segment's content to the terminal AutoDraft outcome. A successful
+ * draft_journal_entry tool RESULT yields `drafted`; a refusal whose reason is a double_coded
+ * variant yields `noop_existing` (WA-L8, success-shaped); any other refusal yields `refused`;
+ * content with neither is `none`. Pure — unit-testable with no DB/model.
+ *
+ * THE FIX ROUND'S SECOND DEFECT (Codex re-verify HIGH, CONFIRMED BY EXECUTION). v1..v6 of
+ * this reducer returned on the FIRST draft_journal_entry result. `content` is not one step:
+ * the AI SDK's `content` getter flattens EVERY step chronologically (ai@7.0.31 dist/index.js
+ * :9679), and the model loop runs up to eight steps. So the sequence
+ * `[transient refusal, successful draft]` reduced to `refused` — measured — and the workflow
+ * then settled the run FAILED while the successful DB write already stood. A receipt that
+ * lies about a draft that exists is worse than the refusal it reports.
+ *
+ * PRE-EXISTING, NEWLY REACHABLE — and that distinction is why the fix ships HERE and not as
+ * a patch to frozen bodies. autoDraft.v6.prompt.ts carries this function BYTE-IDENTICALLY;
+ * the defect is v6's too. What v7 changed is the REACHABILITY: v7's system classification
+ * (errors.ts) deliberately INVITES an in-run retry — "read the document again and re-cite" —
+ * so the retry-then-succeed sequence stops being a corner case and becomes the designed
+ * happy path for every transient. v6/v9 stay frozen and byte-untouched (Appendix A); the
+ * corrected reducer is part of the v7/v10 closures only.
+ *
+ * THE RULE, AND WHY IT IS NOT SIMPLY "TAKE THE LAST RESULT". Precedence, then recency:
+ *   drafted  >  noop_existing  >  refused  >  none,   and the LAST result within each class.
+ * "Last result" alone is wrong in one reachable shape: the model may emit two draft
+ * tool-CALLS inside ONE step, so a step's results can be `[success, refusal]` — and
+ * `stoppedOnSuccessfulDraft` (impl.ts) stops the loop when ANY result in the last step has
+ * `output.ok === true`, regardless of its position in that step. Aligning with that stop
+ * condition therefore means "a success anywhere wins", not "whatever came last wins". The
+ * two discriminants agree by construction: runDraftJournalEntry returns exactly
+ * `{ok:true, je_review}` or `{ok:false, refusal}`, so `ok === true` and `isJeReview(...)`
+ * are the same fact read two ways.
+ * `noop_existing` outranks `refused` for the same honesty reason the WA-L8 rule exists: a
+ * double_coded refusal is the DB reporting that the work ALREADY EXISTS, so a later
+ * transient must not turn "already coded" into "failed".
  */
 export function toAutoDraftOutcome(content: readonly AiContentPart[]): AutoDraftOutcome {
+  let drafted: AutoDraftOutcome | null = null;
+  let noop: AutoDraftOutcome | null = null;
+  let refused: AutoDraftOutcome | null = null;
   for (const p of content) {
     if (p.type !== "tool-result") continue;
     const tr = p as { toolName: string; output: unknown };
     if (tr.toolName !== DRAFT_TOOL) continue;
     const output = (tr.output ?? {}) as { je_review?: unknown; refusal?: unknown };
     if (isJeReview(output.je_review)) {
-      return { kind: "drafted", entryId: output.je_review.entry_id, jeReview: output.je_review };
+      drafted = { kind: "drafted", entryId: output.je_review.entry_id, jeReview: output.je_review };
+      continue;
     }
     if (isRefusal(output.refusal)) {
-      if (isDoubleCodedReason(output.refusal.reason)) return { kind: "noop_existing", reason: output.refusal.reason ?? "double_coded" };
-      return { kind: "refused", refusal: output.refusal };
+      if (isDoubleCodedReason(output.refusal.reason)) noop = { kind: "noop_existing", reason: output.refusal.reason ?? "double_coded" };
+      else refused = { kind: "refused", refusal: output.refusal };
     }
   }
-  return { kind: "none" };
+  return drafted ?? noop ?? refused ?? { kind: "none" };
 }
 
 /** The refusal reasons that warrant opening a scoped open-question (a human must decide) vs

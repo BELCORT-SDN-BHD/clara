@@ -76,6 +76,9 @@ test("chatTurn.v10.prompt.ts differs from v9 ONLY in the citation prose and the 
     { label: "prompt/region_idx", from: "        region_idx: z", to: "          ),", lines: 10 },
     { label: "prompt/field_path", from: "        field_path: z", to: "          ),", lines: 8 },
     { label: "prompt/evidence array describe", from: "    .describe(", to: "    ),", lines: 5 },
+    // Fix round 3: a comment-only note recording that autoDraft's reducer defect was CHECKED
+    // here and is structurally absent (toTypedParts_v10 is a map). Pinned by a cell below.
+    { label: "prompt/reducer-absence note", from: " * THE FIX ROUND CHECKED THIS FOR autoDraft's REDUCER DEFECT AND IT IS STRUCTURALLY", to: " * Pinned by a cell rather than left as a claim (wave-e-f9-chatturn-v10.test.mjs).", lines: 12 },
   ]);
   const cutOld = cutLines(oldBody("prompt.ts"), [
     line("prompt/old citation instruction", '  "from the document\'s extracted facts and cite them.",'),
@@ -103,7 +106,7 @@ test("chatTurn.v10.errors.ts is PURELY ADDITIVE over v9, except ONE widened type
       trailingBlanks: 2,
     },
     line("errors/runtimeRefusal reason widening", "export function runtimeRefusal(code: string, reason: Clr21Reason | EvidenceSystemReason | undefined, message: string): RefusalPart {"),
-    { label: "errors/system reasons + messages", from: "/** F9 FIX ROUND (coordinator ruling 2, from Codex #3 + native Finding 1). The conditions", to: "};", lines: 46, trailingBlanks: 1 },
+    { label: "errors/system reasons + messages", from: "/** F9 FIX ROUND (coordinator ruling 2, from Codex #3 + native Finding 1). The conditions", to: "};", lines: 55, trailingBlanks: 1 },
     { label: "errors/validIdxHint", from: "/** The (idx, field_path) hint appended to an unknown-index refusal. Derived entirely from the", to: "}", lines: 10, trailingBlanks: 1 },
     { label: "errors/evidenceSystemRefusal", from: "export function evidenceSystemRefusal(reason: EvidenceSystemReason, hint?: string): RefusalPart {", to: "}", lines: 5, trailingBlanks: 1 },
     { label: "errors/refusalForEvidenceFailure", from: "/** Map a failed resolution to its refusal. The ONE place the two failure kinds are given", to: "}", lines: 13, trailingBlanks: 1 },
@@ -319,7 +322,43 @@ test("the tool set wires the gate PER DOCUMENT: read_document records under the 
 });
 
 // ===========================================================================
-// 5. Registry sanity.
+// 5. THE RETRY LEG — checked here for autoDraft's reducer defect, and pinned ABSENT.
+//     autoDraft's toAutoDraftOutcome collapsed a whole model loop to one terminal outcome
+//     and returned on the FIRST draft result, so [transient, success] settled the run
+//     failed (fixed in v7; the v7 suite owns those cells). The chat lane's analogue is
+//     toTypedParts_v10 — a MAP, not a reducer — so the sequence must keep BOTH parts and
+//     the card must still be there. Pinned rather than asserted in a comment.
+// ===========================================================================
+
+const draftResult = (output, id) => ({ type: "tool-result", toolCallId: id, toolName: "draft_journal_entry", output });
+const TRANSIENT = { ok: false, refusal: { type: "refusal", code: "transient", reason: "evidence_snapshot_changed", message: "…re-read and re-cite." } };
+const SUCCESS = {
+  ok: true,
+  je_review: { type: "je_review", entry_id: "entry-9", revision_token: "rev-9", client_id: "c1", document_id: DOC_A, provenance_tier: "model_read" },
+};
+
+test("THE RETRY SEQUENCE keeps BOTH parts and the card: [transient refusal, then a successful draft] promotes the refusal AND the je_review, in order — no collapse to the first result", () => {
+  const parts = promptV10.toTypedParts_v10([
+    { type: "tool-call", toolCallId: "call-1", toolName: "draft_journal_entry", input: {} },
+    draftResult(TRANSIENT, "call-1"),
+    { type: "tool-call", toolCallId: "call-2", toolName: "draft_journal_entry", input: {} },
+    draftResult(SUCCESS, "call-2"),
+  ]);
+  const promoted = parts.filter((p) => p.type === "je_review" || p.type === "refusal");
+  assert.deepEqual(promoted.map((p) => p.type), ["refusal", "je_review"], "both survive, in the order they happened — the transcript's honest record of 'the extraction moved, I re-read, here is the draft'");
+  assert.equal(promoted[1].entry_id, "entry-9", "the card the human approves is present");
+  assert.equal(promoted[0].reason, "evidence_snapshot_changed");
+});
+
+test("…and the chat lane settles on that transcript, not on a derived outcome — its C-19 terminal invariant is satisfied by the je_review, so no synthesized coding_incomplete refusal can bury a real draft", () => {
+  const entry = src("chatTurn.v10.ts");
+  assert.match(entry, /const hasTerminal = allParts\.some\(\(p\) => p\.type === "je_review" \|\| p\.type === "refusal" \|\| p\.type === "clarify"\);/);
+  assert.match(entry, /if \(!hasTerminal\) pushPart\(allParts, codingIncompleteRefusal\(\)\);/);
+  assert.doesNotMatch(src("chatTurn.v10.prompt.ts"), /export function toAutoDraftOutcome/, "the chat closure has no outcome reducer at all — the defect has no surface here");
+});
+
+// ===========================================================================
+// 6. Registry sanity.
 // ===========================================================================
 
 test("registry.ts pins chatTurn: chatTurn_v10, and still exports the superseded chatTurn_v9 (policy (c))", () => {

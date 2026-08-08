@@ -194,6 +194,15 @@ export function codingIncompleteRefusal(): RefusalPart {
  *  race is a FALSE receipt. Each is RETRYABLE IN-RUN: the tool result tells the model exactly
  *  what to do (read again, then re-cite) and the model loop still holds its step budget.
  *
+ *  THE CHAT LANE CARRIES NONE OF autoDraft's ATTEMPT-CAP RESIDUAL, and that asymmetry is
+ *  recorded here so a reader of this file does not import a consequence it does not have.
+ *  autoDraft's copy of this comment documents a real, accepted cost: a transient the model
+ *  never recovers from reaches a failed settle, which consumes a durable attempt and parks
+ *  the filing at the cap. This lane has no such registry — clara.autodraft_attempts is never
+ *  consulted by the chat door — and chatTurn.v10.ts settles `completed` with the refusal
+ *  simply recorded as a transcript part. A transient here costs the human one more turn and
+ *  nothing else.
+ *
  *  THE CODE IS DELIBERATELY NOT A CLR. No DB gate raised this, and reusing a CLR reason token
  *  is precisely the misclassification being fixed. "transient" sits beside the existing
  *  runtime-labelled "internal" code. isQuestionShaped() keys on CLR23 plus a CLOSED set of

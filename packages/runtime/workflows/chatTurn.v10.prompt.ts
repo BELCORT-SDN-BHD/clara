@@ -372,6 +372,18 @@ function isRefusal(v: unknown): v is RefusalPart {
  * WITHIN this segment (by entry_id / by code+reason+message); cross-segment/replay
  * dedup is the workflow body's job (accumulate-with-dedup). clarify is handled by
  * the caller (findClarifyCall), exactly as v1.
+ * THE FIX ROUND CHECKED THIS FOR autoDraft's REDUCER DEFECT AND IT IS STRUCTURALLY
+ * ABSENT — recorded so nobody has to re-derive it. autoDraft's toAutoDraftOutcome
+ * collapsed a whole model loop to ONE terminal outcome and returned on the FIRST
+ * draft result, so `[transient refusal, successful draft]` settled the run failed
+ * (see autoDraft.v7.prompt.ts's own header). This function has no such collapse:
+ * it is a MAP, not a reducer — every draft result in the flattened content becomes
+ * its own part, in order, so a retry sequence yields the refusal AND the je_review
+ * and the card still renders. Nor does the chat lane settle on an outcome derived
+ * from them: chatTurn.v10.ts settles `completed` and the C-19 terminal invariant is
+ * satisfied by the je_review's presence. The transcript showing "the extraction
+ * moved, I re-read, here is the draft" is the honest record of what happened.
+ * Pinned by a cell rather than left as a claim (wave-e-f9-chatturn-v10.test.mjs).
  */
 export function toTypedParts_v10(content: readonly AiContentPart[]): ClaraPart[] {
   const out: ClaraPart[] = [];
