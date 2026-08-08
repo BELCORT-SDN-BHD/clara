@@ -242,6 +242,54 @@ test("[0051 §2] the lane's summed-attempt CAP refuses the fourth attempt", asyn
   assert.equal((await reservationRow(reservation)).state, "refunded", "…and nothing was charged for the refusal");
 });
 
+test("[0051 §2] WITNESS (registered, not fixed): the mint is capped, but a lost run can RECLAIM past the cap", async (t) => {
+  if (gate(t)) return;
+  // This cell pins TODAY'S FACTUAL BEHAVIOUR for a property registered in migration 0051's
+  // header (R2) and carried to the open register — it is a witness, not an assertion that the
+  // behaviour is desirable.
+  //
+  // THE CYCLE, and why none of it is this door's: the door caps at MINT time, but
+  // clara.claim_document_processing_task's own cap excludes ocr (0038:6907) while every claim
+  // increments attempt_count (0038:6937), and clara.requeue_stranded_document_task — created in
+  // 0007_document_pipeline.sql:2146, forty-four migrations before this one — legally returns a
+  // stranded task to 'queued' so it can be claimed again. The identical cycle applies to an
+  // ORDINARY intake-minted ocr task; the door neither created it nor widened it.
+  const firm = W.firms.A;
+  let minted = null;
+  const { documentId, receipt } = await reIngest(firm, async (f, d) => {
+    await plantTask(f, d, { version: 1, status: "failed", error: "engine_error", attempts: 1 });
+    await plantTask(f, d, { version: 2, status: "failed", error: "engine_error", attempts: 1 });
+  }, { reserve: true });
+  assert.ok(receipt.recovery, "at summed attempts 2 the door MINTS (the cap is not yet reached)");
+  minted = receipt.recovery.task_id;
+
+  const summed = async () => (await rootQuery(
+    "select coalesce(sum(attempt_count),0)::int n from clara.document_processing_tasks where document_id=$1 and lane='ocr'",
+    [documentId])).rows[0].n;
+  assert.equal(await summed(), 2, "…and the mint itself charges no attempt");
+
+  // First claim: the workflow picks it up. sum -> 3, i.e. AT the door's cap.
+  await roleQuery(ROLES.runtime, "select clara.claim_document_processing_task($1,$2,true)", [minted, "x51-reclaim-run-1"]);
+  assert.equal(await summed(), 3, "the first claim takes the lane to the cap");
+
+  // The run is lost. The reconciler's pre-existing edge returns the task to 'queued'…
+  await roleQuery(ROLES.runtime, "select clara.requeue_stranded_document_task($1,$2)", [minted, opk("x51req")]);
+  assert.equal((await taskRow(minted)).status, "queued", "…the stranded task is legally re-queued");
+
+  // …and it can be claimed AGAIN, past the cap, on the same reservation.
+  await roleQuery(ROLES.runtime, "select clara.claim_document_processing_task($1,$2,true)", [minted, "x51-reclaim-run-2"]);
+  assert.equal(await summed(), 4,
+    "THE REGISTERED PROPERTY: summed attempts reach 4 — past the door's cap of 3 — without a "
+    + "second mint, because the bound is enforced only where this door acts. Pinned so the "
+    + "register entry has a witness and so a future fix has a failing cell to flip");
+
+  // What the door DOES still bound is its own act: no second attempt is ever MINTED.
+  const { receipt: again } = await reIngest(firm, null, {});
+  assert.equal(again.recovery, undefined, "a fresh document is unaffected; the door mints only what it admits");
+  assert.equal((await laneTasks(documentId, "ocr")).length, 3,
+    "…and the reclaimed document still holds exactly three tasks: two failures and the one recovery");
+});
+
 test("[0051 §2] an IN-FLIGHT task on the lane blocks a mint, by name", async (t) => {
   if (gate(t)) return;
   const firm = W.firms.A;

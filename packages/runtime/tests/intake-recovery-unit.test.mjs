@@ -174,9 +174,21 @@ test("[0051 §2] the sidecar takes the DOCUMENT's durable identity, never a call
     engine_id: "clara-structured:v0-ancient" });
   const meta = await recoveryTaskMeta(f, { firmId: "firm-1", canonicalKey: f.recovery.storage_path, log: quiet });
   assert.ok(meta, "an echo of a task minted under an older engine still materialises");
+  // WHAT THIS PINS, STATED SO NOBODY LATER READS IT AS BLESSING A LIE. The engine id travels
+  // verbatim from the TASK ROW, which makes the envelope's `engine` field the ADMISSION-TIME
+  // snapshot — the engine under which the attempt was admitted — NOT an assertion about which
+  // adapter performed the read. That distinction is pre-existing and pipeline-wide, not this
+  // door's: `task.engineId` has no consumer anywhere except the envelope stamp (egress.mjs:152,
+  // myinvois.mjs:129, structured-worker.mjs:53/92/107) while the reader is always the current
+  // image (egress.mjs:161-168), and the ordinary reconciler dispatch hands every queued task
+  // its own stored engine_id (reconciler-documents.mjs:163-186) — so a task queued before any
+  // deploy and claimed after one has ALWAYS produced an older-labelled envelope. Registered in
+  // migration 0051's header (R1) and carried to the open register; the alternative — refusing
+  // the echo on inequality — would make the crash-heal impossible for exactly the deploy that
+  // caused the crash, which is why this cell asserts pass-through rather than refusal.
   assert.equal(meta.engineId, "clara-structured:v0-ancient",
-    "…carrying the TASK's own engine verbatim, so egress.mjs:152 stamps an envelope that names "
-    + "the engine which actually owns the attempt");
+    "…carrying the TASK's own engine verbatim: the envelope records the engine the attempt was "
+    + "ADMITTED under, which is what that field has always meant");
   assert.equal(meta.mime, "text/csv", "…the document's durable mime");
   assert.equal(meta.format, "csv", "…and the durable format the DB derived from storage_path");
 });

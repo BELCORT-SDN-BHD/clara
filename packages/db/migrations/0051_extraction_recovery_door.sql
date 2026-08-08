@@ -964,6 +964,53 @@ $tail51_grants$;
 -- version_n from clara.document_processing_tasks where document_id = ...` per bill -- BEFORE
 -- any claim is made. A door that exists is not evidence that a specific document can walk
 -- through it.
+--
+-- ADDITIONAL REASON THE GATE-P READ IS MANDATORY (review round 3, item 4): ADR-062's own
+-- credential-outage population may not present as a transient code at all. Azure DI submission
+-- classifies EVERY non-202 below 500 as `bad_type` (packages/runtime/lib/egress.mjs:74-76,
+-- `response.status >= 500 ? "engine_error" : "bad_type"`), so a 401/403 credential rejection --
+-- exactly the 2026-08-06 outage's shape -- lands as `bad_type`, which this door refuses as
+-- NOT RETRYABLE. Those documents would need the code split below before a re-upload could
+-- recover them. Measure the four bills' actual error_code, not just their lane.
+--
+-- =====================================================================================
+-- REGISTERED, NOT FIXED HERE -- three properties this door INHERITS or SHARES
+-- =====================================================================================
+-- Each was raised in review, each was verified against the code rather than argued, and each
+-- is recorded here because a file that discloses a limit must not also quietly rely on it.
+--
+-- (R1) THE ENVELOPE'S `engine` FIELD IS THE ADMISSION-TIME SNAPSHOT, NOT THE READER'S
+-- IDENTITY -- across ANY deploy boundary, and since long before this door existed. Verified:
+-- `task.engineId` has no consumer anywhere in the runtime except the envelope stamp itself --
+-- packages/runtime/lib/egress.mjs:152 (ocr), lib/myinvois.mjs:129 (local_facts) and
+-- lib/structured-worker.mjs:53/92/107 (structured_parse) -- while the reader is always the
+-- CURRENT image's adapter (egress.mjs:161-168 calls analyzeLayoutReal directly). And the
+-- ordinary dispatch path feeds every queued task its own stored engine_id:
+-- lib/reconciler-documents.mjs:163-186 selects `t.engine_id` and puts it in the meta the
+-- workflow reads. So ANY task that was queued before a snapshot bump and claimed after one has
+-- always produced an envelope labelled with the older engine. This door adds INSTANCES of that
+-- class (a recovery echo can hand back an older task's engine), not the class itself. The
+-- honest fix is a pipeline-wide decision about what that field means -- reader identity or
+-- admission record -- and it is NOT taken on this migration's authority.
+--
+-- (R2) THE INGEST LANE'S ATTEMPT BOUND IS MINT-TIME ONLY; A LOST RUN CAN RECLAIM PAST IT.
+-- Measured cycle, quoted from the review: sum 2 -> mint (queued, reservation bound, sum 2) ->
+-- claim (sum 3) -> clara.requeue_stranded_document_task -> reclaim (sum 4), same reservation
+-- still bound, repeatable while successive workflow runs are lost. PRE-EXISTING, and none of
+-- the three moving parts is this migration's: clara.requeue_stranded_document_task was created
+-- in 0007_document_pipeline.sql:2146 (CoR 0009:2266); the claim-time cap has excluded ocr since
+-- 0038:6907; every claim increments attempt_count at 0038:6937; and the reconciler's requeue
+-- edge (lib/reconciler-documents.mjs) is untouched by this branch -- its only edits here are
+-- the transport guard and its counter. The identical cycle applies to an ORDINARY
+-- intake-minted ocr task, with or without this door. What this door DOES bound is the thing it
+-- creates: a new attempt is only ever MINTED under the cap. Registered for the batch's open
+-- register; deliberately not widened into clara.claim_document_processing_task here, which
+-- would be a second copy of a rule that belongs in one place (0050's own lesson).
+--
+-- (R3) A CREDENTIAL REJECTION IS INDISTINGUISHABLE FROM A BAD FILE at the error_code layer --
+-- see the Gate-P note above. The remedy text this door emits was softened accordingly: it
+-- never asserts the file is bad, and it names the reading service as the other possibility.
+-- Splitting 401/403 out of `bad_type` into a retryable auth code is registered, not built.
 
 -- =====================================================================
 -- SECTION 4 -- PART 2 PRESTATE. Same discipline as section 0: every claim the Part 2 header
@@ -1237,7 +1284,7 @@ begin$t1$;
       elsif found and v_ing.status='failed' then
         if coalesce(v_ing.error_code,'') not in ('engine_error','timeout','engine_lost','storage_error') then
           v_rrefuse := jsonb_build_object('reason','not_retryable','error_code',v_ing.error_code,
-            'remedy','this document could not be READ, and the same bytes will not read differently. Correct or re-export the file: new bytes are a new document and take the ordinary pipeline.');
+            'remedy','this document could not be read in its current form. That can mean the file itself, or that the reading service refused the request. If the file is sound, it may read on a later attempt; a corrected or re-exported file is new bytes and takes the ordinary pipeline.');
         elsif exists (select 1 from clara.document_processing_tasks pit
              where pit.document_id=v_doc and pit.lane=p_lane
                and pit.status in ('queued','held_egress','running')) then
