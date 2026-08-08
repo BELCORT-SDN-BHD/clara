@@ -12,13 +12,13 @@ truth (`docs/architecture/ARCHITECTURE.md` §3).
 > structural invariants, the balance/immutability/append-only triggers, and
 > money-as-cents. See `docs/plan/REBUILD-PLAN.md`.
 >
-> **Migration ledger (as of 2026-08-06).** The repo carries **44 migrations,
-> `0001`–`0045`** (the sequence skips `0032`, which never existed — 44 files, not 45),
-> and **live Supabase is applied through the frontier `0045`**. The most recent arrival
-> is `0045_wave_d_b2_recurring_adjustments.sql` (Wave D-b2: recurring/reversing
-> adjustment templates, the auto-reversal mirror, the daily adjustment belt), which
-> closed Wave D across its four-slice split `0042`+`0043`+`0044`+`0045` — ADR-058 and
-> ADR-059.
+> **Migration ledger (as of 2026-08-08).** The repo carries **49 migrations,
+> `0001`–`0050`** (the sequence skips `0032`, which never existed — 49 files, not 50),
+> and **live Supabase is applied through the frontier `0050`**. The most recent arrivals
+> are the §7-A pair `0046`/`0047` (the unattended sales drafter + the F1 settle-guard
+> fix, ADR-063/064) and the post-close fix train `0048` (F5 sweep-cap own-run) ·
+> `0049` (zero-evidence direction abstains; born `clara.migration_receipts`) ·
+> `0050_egress_release_skip_consent.sql` (F4, the release/re-hold storm fix).
 >
 > **This ledger is a snapshot and WILL go stale — verify before relying on it.**
 > The authoritative reads are `select count(*), max(version) from clara.schema_migrations`

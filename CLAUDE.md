@@ -137,7 +137,10 @@ stays stable. (`docs/PROJECTLOG.md` is **decisions-only**, not a status home.)
 **Phase 4 — WAVE C CLOSED (ADR-051..054) · WAVE D COMPLETE (ADR-055..059) · POST-WAVE
 CLEARED (ADR-060..062: the data doctrine · uniform review intensity · the pre-E clearing
 day) · §7-A GRILLED AND CLOSED (ADR-063/064 — the unattended sales drafter, accepted on a
-two-halves acceptance).** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) ·
+two-halves acceptance) · WAVE E CONTRACT RATIFIED AND MERGED (ADR-065, PR #214,
+2026-08-08) — the grill is DONE; the LAW WAS AMENDED (E-R4: the DB owns every
+AUTHORITATIVE number — see the cardinal invariants above). NEXT: the WAVE E BUILD,
+opening with the F6–F9 fix batch.** Closed: **A/A2/A2.1** LIVE (ADR-022..030) · **B** on intent (ADR-044..046) ·
 the extraction slice (ADR-047/048) · the settlement program (ADR-049) · the first production
 autopost (ADR-050) · **C0/C-a/C-b/C-c** (ADR-051..054 — thirteen reconciliation receipts at
 exactly 0, nine real RPR months chained to the sen) · **D-a** FA register (0041) · **D-b**
@@ -216,15 +219,29 @@ in prose (`docs/plan/research/wave-c/my-tax-verified-2026-07-29.md`).
 ADR-063) · skeleton `wave-7a-design-skeleton.md` v2 · ACCEPTANCE (as-run, evidence grade):
 `wave-7a-acceptance-h2.md` (sandbox) + `-h1.md` (RS real).
 
-**Open build items (PROJECTLOG PART 2 is the live register):** **WAVE E NEXT — grill it**
-(periods + statements, sequential per 7A-R10; owns closing stock per WD-R11, the segment-aware
-FA tie, the depreciation close gate, MPERS presentation wording, **the consolidated
-client-facts inputs — the F-1 allocation-date guard · entity_type surfacing · the MSIC
-capture door** — and the §7-A carry-ins: the settlement-corroboration door, the owner UX-debt
-list, the third-reader #25) · the **F6–F9 fix batch** (tasks #31–34) · Gate P + Gate S both
-**operating runway** (first native-MYR SST-stated bill / first real e-invoice XML) · the
-extraction-recovery door (**now F6/#31's**) + FX-lite prioritization (ADR-062 registrations) ·
-the `opening_tb.line` producer + K-doc door (Phase 5, review-gated) · the fifth-lex
-measurement constraint (standing).
+**WAVE E records (never re-grill):** contract `docs/plan/wave-e-contract.md` (E-R1..E-R14,
+ADR-065) — three-drawer close gates (drawer 1 absolute incl. the DB-owned tie identities ·
+drawer 2 default-refuse + attested per-item override · drawer 3 advisory) · annual-only
+lock + month snapshots with same-transaction staleness · the typed metric algebra/catalog
+with mandatory per-cell provenance · ONE campaign (owner: 一口气全做) · acceptance corpus
+(BEE FY2025 first real close · RPR historical FY = the MPERS pack corpus · RS = the
+snapshot witness · sandbox = the full battery incl. the synthetic goods-trader closing
+stock) · the client-facts trio (F-1 guard refuses outright · entity_type context key ·
+MSIC door + backfill RPR 68109 / RS 82110 / BEE 74101) · evidence dossiers
+`docs/plan/research/wave-e/`.
+
+**Open build items (PROJECTLOG PART 2 is the live register):** **THE WAVE E BUILD —
+contract ratified (ADR-065, `docs/plan/wave-e-contract.md`, E-R1..E-R14); the grill is
+DONE.** Opens with the **F6–F9 fix batch** (tasks #31–34; F7 unblocks the held KONG CHENG
+pair, F6 merges the ADR-062 extraction-recovery door), then periods + statements
+(sequential per 7A-R10; owns closing stock per WD-R11 — synthetic-only this wave, the
+segment-aware FA tie, the depreciation close gate, MPERS presentation wording —
+dual-version: 2016 wording for pre-2027 FYs, MPERS(2025) from FY start ≥ 2027-01-01) and
+the client-facts trio. The §7-A carry-ins are DISPOSITIONED, not open-in-E: the
+settlement-corroboration door stays design-only (build = Wave F); the third-reader #25
+and the FX-lite decision move to Wave-F planning; ALL owner UX debt moves to Wave G ·
+Gate P + Gate S both **operating runway** (first native-MYR SST-stated bill / first real
+e-invoice XML) · the `opening_tb.line` producer + K-doc door (Phase 5, review-gated) ·
+the fifth-lex measurement constraint (standing).
 
 **Canary `daba7f2e` was due 2026-08-02 — NEVER answer it, even past due.**

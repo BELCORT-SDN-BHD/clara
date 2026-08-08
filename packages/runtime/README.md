@@ -99,9 +99,10 @@ Azure.
 ## Slice-6 coding floor (`chatTurn_v2` + the write floor + invoice facts)
 
 `chatTurn_v2` (Slice 6) added the narrow WRITE capability; the registry now runs
-`chatTurn_v7` (v1–v6 stay frozen + reachable for parked runs; v7 = Wave B's
+`chatTurn_v9` (v1–v8 stay frozen + reachable for parked runs; v7 = Wave B's
 `'wiki_coding'` pack purpose + the txn-local `clara.pack_consumer` GUC + the
-citation-visible wiki framing): the model can **draft**
+citation-visible wiki framing; v8 = the Wave-C closing batch; v9 = the §7-A
+PR-RUNTIME cut — registry.ts's inline comments carry the per-version details): the model can **draft**
 ONE journal entry per turn — a supplier bill, a sales invoice / sales credit note, or
 a generic voucher-style `journal_entry` — always for a human to approve; it never
 approves or posts (agent-never-signs, ADR-015). New in v2:
