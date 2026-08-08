@@ -145,10 +145,29 @@ export async function putIntakeBytes(
   }
 }
 
+/** What clara.finalize_document_intake reports back about the 0051 §2 recovery door. Both
+ *  keys are CONDITIONAL — an ordinary intake carries neither. */
+export type IntakeRecovery = { mode?: string | null; lane?: string | null; task_id?: string | null };
+export type IntakeRecoveryRefused = {
+  reason?: string | null; remedy?: string | null; error_code?: string | null;
+  document_mime?: string | null; upload_mime?: string | null; attempts?: number | null;
+};
+export type IntakeFinalizeReceipt = {
+  status?: string | null;
+  document_id?: string | null;
+  recovery?: IntakeRecovery | null;
+  recovery_refused?: IntakeRecoveryRefused | null;
+};
+
 /** Seal the intake (the runtime hashes, scans, uploads once, reads back, finalizes).
  *  The body is empty JSON — the runtime knows the spooled bytes; the browser never
- *  supplies the canonical sha (the sha↔bytes bond is the runtime's, HIGH-12). */
-export async function finalizeIntake(uploadToken: string, intakeId: string): Promise<void> {
+ *  supplies the canonical sha (the sha↔bytes bond is the runtime's, HIGH-12).
+ *
+ *  RETURNS THE RECEIPT rather than discarding it (0051 §2). The recovery door answers HTTP
+ *  202 with `status:'adopted'` whether it retried the document or refused to — and the refusal
+ *  carries the only copy of WHY and what to do instead. Throwing that body away made a
+ *  re-upload of a corrupt file look like a success to the person who sent it. */
+export async function finalizeIntake(uploadToken: string, intakeId: string): Promise<IntakeFinalizeReceipt> {
   const res = await fetch(`${runtimeBase()}/api/intake/documents/${encodeURIComponent(intakeId)}/finalize`, {
     method: "POST",
     cache: "no-store",
@@ -159,6 +178,33 @@ export async function finalizeIntake(uploadToken: string, intakeId: string): Pro
     const body = await res.text().catch(() => "");
     throw new Error(`finalize intake failed (${res.status}): ${body.slice(0, 300)}`);
   }
+  return (await res.json().catch(() => ({}))) as IntakeFinalizeReceipt;
+}
+
+/** Human copy for a finalize receipt's recovery outcome, or null when the receipt carries
+ *  none (every ordinary upload). Kept next to the wire type so the two move together.
+ *
+ *  The DB's own `remedy` text is preferred wherever it is present: it is the authoritative
+ *  wording, and it is deliberately careful never to assert that the file is bad — a read can
+ *  also fail because the reading service refused the request. */
+export function recoveryCopy(receipt: IntakeFinalizeReceipt | null | undefined):
+  { label: string; detail: string | null } | null {
+  const refused = receipt?.recovery_refused;
+  if (refused) {
+    const detail = refused.remedy
+      ?? (refused.reason === "mime_mismatch"
+        ? `This document was stored as ${refused.document_mime ?? "another type"}; it was re-sent as ${refused.upload_mime ?? "a different type"}. Re-upload it in its original form.`
+        : null);
+    switch (refused.reason) {
+      case "mime_mismatch": return { label: "Stored — not re-read (different file type)", detail };
+      case "attempt_cap": return { label: "Stored — not re-read (retry attempts used up)", detail };
+      case "lane_busy": return { label: "Stored — a read is already in progress", detail };
+      case "not_retryable": return { label: "Stored — not re-read", detail };
+      default: return { label: "Stored — not re-read", detail };
+    }
+  }
+  if (receipt?.recovery) return { label: "Stored — re-reading this document…", detail: null };
+  return null;
 }
 
 // ---------------------------------------------------------------------------
