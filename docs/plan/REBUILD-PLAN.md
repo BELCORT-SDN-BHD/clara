@@ -336,9 +336,21 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 > direction ABSTAINS; `clara.migration_receipts` born; `migrate.mjs` now prints notices) ·
 > `0050` (F4 egress-release consent re-derivation + the runtime's DB-verdict-authoritative
 > reconciler — the release/re-hold storm is dead). **LIVE: 49 migrations (frontier `0050`) ·
-> runtime v58 · the BEE/RP identifier seed landed (4 ssm rows). NEXT: the Wave E grill**
-> (agenda in PROJECTLOG PART 2 — periods + statements + the F6–F9 batch + the
-> settlement-corroboration door + the third-reader question + the owner's UX-debt list).
+> runtime v58 · the BEE/RP identifier seed landed (4 ssm rows).**
+>
+> **THE WAVE E GRILL RAN AND RATIFIED (2026-08-08, ADR-065): the contract is
+> `docs/plan/wave-e-contract.md` (E-R1..E-R14).** Highlights: the three-drawer close-gate
+> model (WD-R6 answered: default-refuse-attestable) · annual-only lock + month snapshots
+> with staleness labels · **the E-R4 LAW AMENDMENT** (PRD invariant 1 reworded — the LLM
+> may propose/check, a versioned deterministic evaluator must reproduce; evidence dossier
+> in `docs/plan/research/wave-e/`) · the typed metric algebra + approved-definition
+> catalog · full scope in ONE campaign (owner: "一口气全做", no deferral valve) · the
+> acceptance corpus map (BEE FY2025 first real close · RPR historical FY for the MPERS
+> pack · RS snapshot witness · sandbox synthetic battery incl. the goods-trader
+> closing-stock fixture) · MASB dual-version wording (MPERS 2016 → MPERS 2025 at FY start
+> ≥ 2027-01-01) · the six-layer template model + chart AST regime + sealed-artifact
+> reproducibility · settlement-corroboration door DESIGNED (build = F) · ALL UX debt → G.
+> **BUILD OPENS with the F6–F9 fix batch (tasks #31–34).**
 
 **Wave A — the daily loop** *(**CLOSED**, ADR-022..030 — incl. A2 / A2.1)*. Coding with **intrinsic side-effects** (composed inside `approve_entry` / `_subledger_on_approve` as built; counterparty entity + aliases PORT'd in), the review queue (List model), `doc_review` side-by-side evidence surface, the confidence ladder lanes (DB-gated), auto-draft sweep with human acknowledgement floors, KB Layer-2 (typed rules, user-gated; open-question objects), diffs (legs + doc↔entry).
 **Wave B — knowledge + onboarding** *(**CLOSED on intent**, ADR-044..046)*. The client wiki (ingest/query/lint; injected context packs; lint schedule), firm/client onboarding interviews as durable runs, ongoing-client carry-down (one-shot, idempotent, TB tie-out — the FA-register **schema** lands in Phase-3 Slice 2 so the carry-down can seed asset rows + depreciation baseline here; the FA **workflows** wire up in Wave D), bulk rule/knowledge seeding from prior GL (redesigned per the Karpathy direction, not the stale notes).
@@ -354,7 +366,7 @@ Ordered by dependency + risk; each wave keeps the app runnable.
 
 **Wave C — money movement** *(**CLOSED**, ADR-051..054 — C0/C-a/C-b/C-c)*. Bank statement ingest, parity-checked matching + exclusivity, reconciliation tie-out, receipt/payment allocation (intrinsic), aging + statements, the self-reconcile learn loop (advisory, human-gated).
 **Wave D — assets + adjustments** *(**COMPLETE**, ADR-055..059; `docs/plan/wave-d-contract.md` = WD-R1..R15; **D-a FA/0041 CLOSED (ADR-056)**; **D-b shipped as a four-slice split — 0042/0043/0044 CLOSED (ADR-058), 0045 D-b2 CLOSED (ADR-059)**)*. FA register from coding (intrinsic, soft-birth per WD-R1), depreciation runs (scheduled; the close gate is a NAMED Wave-E deferral per WD-R6), disposal (full + partial per WD-R7), CA metadata (inert per WD-R12), recurring/reversing adjustments (signed templates per WD-R8), staff advances (the B-lite register per WD-R10, §7-B). *Closing stock moved → Wave E (WD-R11).*
-**Wave E — periods + statements.** Serialized year-end close with structural pre-close gates, segmented continuity reads, ordered reverse guards, carry-forward; the honest FS pack (SoFP/SoCI/SOCE/cash-flow/notes); the reporting engine (spec → DB reads → renderers → auditable artifacts). *Owns by inheritance:* periodic closing-stock at close + its completeness check (WD-R11) · the depreciation close gate over D's receipts (WD-R6) · the segment-aware FA tie-out (the REBUILD-rated `fa_control_tie_out`) · **MPERS presentation wording** (a Wave-E verification item carried over from the Wave D close).
+**Wave E — periods + statements** *(**CONTRACT RATIFIED**, ADR-065; `docs/plan/wave-e-contract.md` = E-R1..E-R14 — the build is NEXT, opening with the F6–F9 fix batch)*. Serialized year-end close with structural pre-close gates, segmented continuity reads, ordered reverse guards, carry-forward; the honest FS pack (SoFP/SoCI/SOCE/cash-flow/notes); the reporting engine (spec → DB reads → renderers → auditable artifacts). *Owns by inheritance:* periodic closing-stock at close + its completeness check (WD-R11) · the depreciation close gate over D's receipts (WD-R6) · the segment-aware FA tie-out (the REBUILD-rated `fa_control_tie_out`) · **MPERS presentation wording** (a Wave-E verification item carried over from the Wave D close). *Added by the contract:* the typed metric algebra + catalog (E-R5) · the E-R4 law amendment · the six-layer FS template + chart regime (E-R14) · the client-facts trio (E-R12) · the three-keys close governance (E-R11).
 **Wave F — tax.** The SST engine per the practice map (periods, payment basis, dual-registrant exports, SST-02, bad-debt relief); the payroll deadline calendar; **last: the draft tax computation** (add-backs, CA, chargeable income, forms — the slice allowed to slip to v1.1).
 **Wave G — the OS surface.** Proactive inbox (allowlisted wakes), cross-scope needs-you, ⌘K Ask/Do/Go + ActionPanels, plan-as-document for close/onboarding, exports UI, generative-UI completion + parity CI gates, the design floors.
 

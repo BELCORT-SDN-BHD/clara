@@ -23,9 +23,78 @@
 > [`PROJECTLOG-ARCHIVE-ADR-060-064.md`](./PROJECTLOG-ARCHIVE-ADR-060-064.md). Split
 > 2026-07-26, 2026-07-27, 2026-08-02, 2026-08-06 and 2026-08-08 as this append-only log grows
 > by design — the fix is a split, never a rewrite or a prune. Nothing was edited; cite
-> archived ADRs by number exactly as before. This file holds **ADR-065 onward** (none yet —
-> the next ADR is the Wave E contract) plus PART 2 (open items).
+> archived ADRs by number exactly as before. This file holds **ADR-065 onward** plus PART 2 (open items).
 > Split the next time this section outgrows a read — never rewrite, never prune.
+
+---
+
+### ADR-065 — the Wave E contract (E-R1..E-R14) + the invariant-1 law amendment (2026-08-08)
+
+**Decision.** Wave E (periods + statements + the reporting engine) is contracted on
+fourteen rulings, grilled with the owner in Chinese (recommendations attached to every
+question, each ruling explicitly confirmed) and ratified 2026-08-08. **The contract of
+record is `docs/plan/wave-e-contract.md` — cite it, don't restate it.** Headlines:
+
+1. **Boundary (E-R1):** core + five named debts in contract; the F6–F9 batch (tasks
+   #31–34) is the first strike; the settlement-corroboration door is DESIGN-ONLY (build =
+   Wave F); the third-reader + four NOT-REACHABLE controls are ruled-and-recorded, not
+   built; ALL UX debt goes to Wave G (the E-side painkiller lane was declined).
+2. **THE LAW AMENDMENT (E-R4) — PRD invariant 1 reworded:** *"The DB owns every
+   AUTHORITATIVE number. The LLM may propose or independently check a calculation, but no
+   model-generated numeral enters a durable report unless a versioned deterministic
+   evaluator reproduces it from DB-owned inputs."* Ratified on a three-lane evidence
+   dossier (Anthropic docs · OpenAI docs + arithmetic benchmarks · a Codex gpt-5.6
+   adversarial debate) preserved at
+   `docs/plan/research/wave-e/q4-computed-figures-evidence-2026-08-08.md`. PRD §6 and
+   CLAUDE.md are amended in this PR. The owner's flexibility instinct is served by the
+   **typed metric algebra (E-R5)**: typed/scoped primitives, mechanical incompatibility
+   rejection, exact-decimal DB evaluation, catalog = approved effective-dated definitions,
+   novel LLM-authored definitions draft-until-approved, placeholder narration everywhere.
+3. **The close model:** three-drawer gates (absolute · default-refuse-attestable ·
+   advisory) — WD-R6's question answered: the depreciation advisory upgrades to
+   default-refuse-attestable, NOT absolute (E-R2); annual-only lock, month snapshots with
+   staleness labels, date-range FY windows (E-R3); the dormant `_correction_period_state`
+   guards POWER ON with the close model's birth (E-R6); three-keys governance with a
+   firm-configurable authorization list, the agent structurally key-less (E-R11).
+4. **One campaign (E-R7):** the owner ruled "一口气全做" — full scope, no deferral valve;
+   parallel build lanes; acceptance in dependency order (dependency, not slicing).
+5. **Acceptance corpus (E-R9):** sandbox full battery (incl. the synthetic goods-trader
+   closing-stock fixture — no real goods trader exists; the real acceptance rides the
+   first such client, a NAMED debt) · **BEE FY2025 = the first real close** (its
+   drawer-2 depreciation gate pulls the 11-period catch-up approval; #72's carry-down
+   discharges in the same act) · RPR historical FY = the MPERS-format real corpus · RS =
+   the snapshot/staleness witness · BEE = the convention-labelled sole-prop format.
+6. **The FS regime (E-R14):** MASB dual-version golden wording (MPERS 2016 → MPERS 2025
+   at FY start ≥ 2027-01-01 — the tax-table pattern, discovered live: MASB issued
+   MPERS(2025) on 2025-10-10 and withdraws the old text the same date) · the six-layer
+   template model (statutory profile curator-only → firm house style owner-sovereign →
+   immutable registered golden variants) with honest per-instance claim assessment
+   (`stripped` never blocks, claims can't smuggle back via filename/cover/metadata) ·
+   chart specs as closed typed ASTs (DB-computed points only, named axis policies,
+   accessible tables) · sealed-artifact seven-year reproducibility (signed originals
+   retrieved never regenerated; evaluators get workflow-style `_vN` immutability; a
+   dedicated offline render worker; the recipe joins the DR battery). Design-of-record:
+   `docs/plan/research/wave-e/fs-template-design-codex-2026-08-08.md`.
+7. **Client-facts trio (E-R12):** the F-1 time-travel guard REFUSES outright (no
+   override — advances machinery already serves money-before-bill) · entity_type joins
+   the context pack · the MSIC capture door is built and backfills the three parked codes.
+8. **Settlement-corroboration door (E-R13, design of record):** mechanical layer =
+   exact-to-the-sen single-candidate matching only, corroboration buys the settled
+   draft's unattended post alone; agentic layer = ambiguity routes to suggestion cards
+   (evidence + client KB), the human's approve is the witness; suggestion-earned combo
+   autopost registered as a post-F candidate class.
+
+**Why.** 7A-R10 sequenced this grill after §7-A's close; the F6–F9 findings, the ADR-062
+consolidation items, and the owner's product vision (autopost-everything, report
+flexibility) all needed one binding contract before any Wave-E code. The law amendment
+exists because the owner challenged the old wording's absolutism and the evidence run
+showed the honest line is *authoritativeness*, not *arithmetic* — the amendment names
+propose/check as lawful while keeping every authoritative numeral deterministic,
+reproducible, and DB-owned.
+
+**Supersessions.** PRD §6 invariant 1's wording (this ADR governs); the "E-c may slip"
+sequencing offer (dead per E-R7); WD-R6's open "advisory vs hard" question (answered).
+The four archives and every prior ADR stand unchanged.
 
 
 ## PART 2 — OPEN ITEMS
@@ -40,7 +109,7 @@
 - ~~THREE POST-CLOSE FIX PRs IN FLIGHT~~ — **LANDED AND DEPLOYED (2026-08-07 night, one ceremony as ruled).** **#209 → `0048`** (F5: the sweep cap excludes the caller's own run) · **#211 → `0049`** (direction ABSTAINS on zero evidence; born the generic `clara.migration_receipts` ceremony channel — receipt id 1 is its 130-filing census with ZERO read movement; `migrate.mjs` now prints server notices; the BEE/RP identifier seed ran armed, 4 ssm rows live-verified, BEE's pair taken from its OWN SoFP after the re-review caught a vendor-transcription value) · **#210 → `0050`** (F4: the egress release re-derives consent for `invoice_facts` only, the 0038 lane triple preserved, PLUS the runtime reconciler now treats the DB verdict as authoritative — the release/re-hold storm is dead; its first cut was NOT_READY on two EXECUTED blockers, the stale-body recut and the missing runtime half — the ladder paid for itself). Every PR through law (1) with executed re-review verdicts; merge order was load-bearing (the runner refuses a pending number ≤ the frontier). **Ceremony closed on positive reads: 49 migrations (frontier `0050`) · runtime v58 · `--lock-deployed` clean. NEW CEREMONY RECIPE FACT: Supavisor drops `PGOPTIONS` startup options — an armed seed's confirm GUC must be `SET` in-session (wrapper: `set clara.seed_confirm='YES'; \i <seed>`).**
 - **RS's two held rows + one unfiled invoice — owner/accounting decisions, not engineering.** The **KONG CHENG pair** (drafts `53504c0e` row 1 · `7995b1a3` row 12) is HELD pending F7: re-extract, then approve against the correct boxed bill-to counterparty. **FINCARE (#10, RSINV-2510/02, RM2,500)** never drafted — the extraction captured no buyer name at all (`customer_name_missing`, correctly, every tick) — so it needs a **human coding decision** to enter the books.
 - **OPS NOTE, standing — THE ENRICHMENT TRAP (F3, sandbox-measured, live consequence on RS's 10 customers).** `clara._resolve_counterparty` refuses a name-only match against a counterparty that CARRIES a registration ("registered name match is ambiguous without a registration number", CLR23 `registration_conflict`). RS's 10 customers were deliberately born **NAME-ONLY** because no RS invoice prints a buyer registration. **Do not enrich them with registration numbers** — doing so would strand every subsequent invoice to that customer at `customer_ambiguous`, unattended and silently. Any future "tidy up the counterparty master" instinct must read this first.
-- **WAVE E GRILL — agenda additions carried out of the §7-A campaign** (on top of the ADR-062 consolidation: the F-1 allocation-date guard · `entity_type` surfacing · the MSIC/client-facts capture door): **the settlement-corroboration door** (the bank-settlement receipt as an independent second reader — the designed path by which tax-silent documents earn corroboration and autopost eligibility; ADR-063's roadmap registration, and RS's 22 tax-silent invoices are now the concrete motivating corpus) · **the third-reader question (task #25)** · **the owner's UX-debt list gathered during the approval batch** · **the four NOT-REACHABLE controls** (`polarity_unverified` · `direction_unproven` · `buyer_mismatch` · `customer_unresolved`) — each needs a deliberate new capability (an unclassified-document fixture, a non-model draft source, a counterparty landscape-change harness) if the owner wants them exercised; that is a design decision, not an acceptance step. **Also parked:** the sandbox floor sits at exactly its 6/6/6/85 minimum with zero headroom (`SYNTHETIC-TEST-MY-INV-0023.pdf` is pre-generated and untouched if headroom is ever wanted).
+- ~~WAVE E GRILL — agenda additions carried out of the §7-A campaign~~ — **THE GRILL RAN AND RATIFIED (ADR-065, 2026-08-08): `docs/plan/wave-e-contract.md` (E-R1..E-R14).** Every agenda item below was ruled: the settlement door DESIGNED (build = F, E-R13) · the third-reader #25 → Wave F planning · the UX-debt list restated + recorded in the contract, ALL of it → Wave G (E-R10) · the four NOT-REACHABLE controls ruled defense-in-depth, live-fired only when a real feature opens each door. The original agenda, kept for the trail: (on top of the ADR-062 consolidation: the F-1 allocation-date guard · `entity_type` surfacing · the MSIC/client-facts capture door): **the settlement-corroboration door** (the bank-settlement receipt as an independent second reader — the designed path by which tax-silent documents earn corroboration and autopost eligibility; ADR-063's roadmap registration, and RS's 22 tax-silent invoices are now the concrete motivating corpus) · **the third-reader question (task #25)** · **the owner's UX-debt list gathered during the approval batch** · **the four NOT-REACHABLE controls** (`polarity_unverified` · `direction_unproven` · `buyer_mismatch` · `customer_unresolved`) — each needs a deliberate new capability (an unclassified-document fixture, a non-model draft source, a counterparty landscape-change harness) if the owner wants them exercised; that is a design decision, not an acceptance step. **Also parked:** the sandbox floor sits at exactly its 6/6/6/85 minimum with zero headroom (`SYNTHETIC-TEST-MY-INV-0023.pdf` is pre-generated and untouched if headroom is ever wanted).
 - **THE v54 BELT GAP — INCIDENT RECORDED + A DEPLOY LAW MINTED (2026-08-06, session `fd311e06`).** The D-b2 close declared "v54 — the adjustments belt is ARMED"; the belt's first-draft witness then failed to appear at the 08-06 16:09Z tick and the diagnosis proved **the belt was never deployed**: v54's image was built 08-05 **04:13Z**, eleven hours BEFORE c60abb8 (15:52Z) created `reconciler-adjustments.mjs` — a build cannot contain a commit made after it; the 0045 ceremony applied the DB and took the deploy's completion as the deploy's content (a DERIVED state — Law 2 at the deploy layer). The belt's code was proven correct by local repro before any fix (drafts July first pass, plain and exact-lineage shapes; live DB bodies byte-identical to rig). **Fix: v55 deployed 2026-08-06 ~16:55Z from main `8fb3910`** under the standing ceremony grant; its boot sweep immediately produced **the product's first autonomous adjustment draft** (sandbox B2 `75f08877`, July-2026, entry `d023b48c`, status draft, 16:56:02Z; `adjustment_runs` untouched; August correctly held `occurrence_draft_outstanding` — draft-N-blocks-N+1 live; NEVER approved, per the witness law) — and BEE's first real depreciation draft had already landed at the same day's v54 tick (`3c05ab82`, Feb-2025, 10,393¢; the 0041 ramp rule explains draft-vs-posted: a first-ever run under an authority always drafts). Freeze manifest verified post-deploy (`--lock-deployed`: 0 new; all locked). **THE LAW (added to CLAUDE.md's ceremony block): a deploy ceremony closes only on a POSITIVE read that the running release carries the intended commit** — release build-time vs the merge it must contain, plus the new code's own boot line. Witness values proven in one incident: the autonomy witnesses exist precisely to catch this class.
 - **#195 + #193 LANDED 2026-08-06 (`cbc024b` · `ca6e07f`) — `main` no longer ships the one-sided 409 defect.** Each walked law (1): #195 got an independent from-scratch native review (MERGE; convergent with Codex rounds 1–7 on the guard's two blind spots); #193's review returned HOLD with two blockers — `readClearsError` cleared a refusal on ABSENCE, and a failed-then-successful cancel left a permanent false banner — both fixed by a separate lane (positive-evidence-only clearing via the now-exported safety-load-bearing `COMPLETE_OUTCOMES`; the firm page's pre-attempt clear) and re-reviewed CLEAR by the original reviewer. **NOT SHIPPED, still open: the optimistic-bubble rollback** — this register listed it under #193's subject, but the landed PR does not touch the thread. Carried in the interview-v3 residuals below.
 - **THREE LAWS MINTED 2026-08-06** — recorded in `CLAUDE.md`'s working protocol, which is what a fresh session actually reads; kept here as the decision trail only. (1) a judgement-logic PR gets an independent review pass before merge; (2) **absence is not evidence, and a derived state is not evidence** — only what a read actually SAW counts, everything else falls to the fail-closed branch; (3) **spelling is not identity** — a guard that reads a NAME reads a projection, so prove an identifier IS its import.
@@ -61,7 +130,7 @@
 - **C6 checklist (ADR-011):** the DPA execution, firm-facing disclosure text, and PDPA cross-border check are OWNER/legal work items before any vendor trace export; engineering keeps the vendor-trace flag OFF until all three are evidenced. (WA2-R2 declared client consent material handled for the product's own cross-border processors; the C6 vendor-*trace-export* items remain open.)
 - **Billing / scale guardrails, MyInvois depth (API pull + issuance), tax-comp v1-vs-v1.1 slip, multi-currency, opening-balance onboarding** — deferred product questions (PRD §9; multi-currency and opening-balance land with their waves).
 - ~~Undecided: structured (MyInvois) sales autopost on Wave C's tail~~ — **RULED (WC-R12, ADR-051): not a Wave C item; superseded by fact (zero XML documents exist outside the sandbox).** Corrected en route: the OCR-sales nine-control envelope **is already BUILT** (0016 §3.3 + `_ocr_sales_floor` + post-time re-derivation) — the blocker was the missing unattended sales drafter + the floor not accruing from manual drafts (contract §7-A), not the envelope. **Both are now BUILT AND WITNESSED (ADR-064, `0046`/`0047`): the drafter posts unattended and the floor accrues `sales_invoice`-only, anti-circularly.**
-- **Remaining product waves** (REBUILD-PLAN; A/A2/A2.1/B, the pre-Wave-C program, and **C — CLOSED, ADR-051..054**): **D** assets + adjustments — **COMPLETE** (D-a CLOSED ADR-056/`0041`; D-b CLOSED across all four slices, ADR-058 `0042`+`0043`+`0044` and ADR-059 `0045`) · **E** periods + statements (now also owns: closing stock per WD-R11 · the segment-aware FA tie-out · the close gate for depreciation per WD-R6 · MPERS presentation wording) · **F** tax (SST engine + payroll calendar + tax-comp; CA computation over D's inert metadata; the payroll staff-master mapping over D's advance register) · **G** the OS surface. The §7-B PRD §4 amendment LANDED with ADR-054 (the five no-home behaviours named with waves: staff advances → D · staff allowances → F · self-billed e-Invoice detection → F · WHT-as-mechanic → F · foreign currency → its own post-G wave per WC-R5). The **§7-A runtime bundle reached its destination and is CLOSED: the unattended-sales-drafter build opened at ADR-063 and was ACCEPTED at ADR-064** (contract `wave-7a-contract.md`; acceptance records `wave-7a-acceptance-h1/-h2.md`). **Wave E is NEXT and SEQUENTIAL (7A-R10).**
+- **Remaining product waves** (REBUILD-PLAN; A/A2/A2.1/B, the pre-Wave-C program, and **C — CLOSED, ADR-051..054**): **D** assets + adjustments — **COMPLETE** (D-a CLOSED ADR-056/`0041`; D-b CLOSED across all four slices, ADR-058 `0042`+`0043`+`0044` and ADR-059 `0045`) · **E** periods + statements (now also owns: closing stock per WD-R11 · the segment-aware FA tie-out · the close gate for depreciation per WD-R6 · MPERS presentation wording) · **F** tax (SST engine + payroll calendar + tax-comp; CA computation over D's inert metadata; the payroll staff-master mapping over D's advance register) · **G** the OS surface. The §7-B PRD §4 amendment LANDED with ADR-054 (the five no-home behaviours named with waves: staff advances → D · staff allowances → F · self-billed e-Invoice detection → F · WHT-as-mechanic → F · foreign currency → its own post-G wave per WC-R5). The **§7-A runtime bundle reached its destination and is CLOSED: the unattended-sales-drafter build opened at ADR-063 and was ACCEPTED at ADR-064** (contract `wave-7a-contract.md`; acceptance records `wave-7a-acceptance-h1/-h2.md`). **Wave E is NEXT and SEQUENTIAL (7A-R10) — its contract is RATIFIED (ADR-065, `wave-e-contract.md`); the build opens with the F6–F9 batch.**
 
 **Triggered gates (met / standing):**
 - **Full-profile fresh-project DR drill (ADR-020): ✅ CLOSED 2026-07-20** — executed against a real fresh Supabase project, 177/0 STRICT (AP gate exact; canary parked both sides; storage byte-identical); found + fixed five defects three review stages missed; CI-gated by a cross-cluster round-trip. **Re-run quarterly.** The off-site R2 wiring closed 2026-07-22 (evidence DR.md §9); still owner-tracked: PITR (deferred).
