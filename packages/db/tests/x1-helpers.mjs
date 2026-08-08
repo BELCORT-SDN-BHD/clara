@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, roleQuery, humanQuery, namedCall, opk, fnSource, firmOf,
   seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
-  factField, rm, grantConsent,
+  failInvoiceFacts, factField, rm, grantConsent,
 } from "./a21-helpers.mjs";
 
 export * from "./a21-helpers.mjs";
@@ -157,6 +157,47 @@ export async function extractedDoc(sub, { client, cents = 90000, fields = null, 
     factField("invoice.invoice_date", "2026-06-15", { polygon: [], confidence: 0.9 }),
   ]);
   return cited;
+}
+
+/** Seed a filed, kind-stamped invoice document whose ONLY invoice_facts attempt is
+ *  TERMINALLY FAILED — the F6 / LUMINOUS shape, reproduced through the REAL writers
+ *  (enqueue -> claim -> fail_invoice_facts), never by hand-writing a task row.
+ *
+ *  The live exhibit this mirrors, quoted: docs/plan/wave-7a-acceptance-h1.md:542-545 —
+ *  "invoice_facts FAILED on its only-ever attempt: `document_processing_tasks`
+ *  status='failed', error_code='internal', attempt_count=1 (OCR on the SAME document
+ *  completed fine)". `seedCitedDocument` supplies that same completed-OCR half (it seeds a
+ *  done engine_kind='ocr' extraction + its region), so the fixture is the whole shape, not
+ *  just the failing half.
+ *
+ *  THE THING TO NOTICE, because it is what 0051's door had to be built around:
+ *  `clara.fail_invoice_facts` (0009:2152-2178) writes NO `clara.document_extractions` row —
+ *  it only terminalises the task. So this fixture ends with ZERO invoice_facts extractions,
+ *  which is precisely why an admission guard phrased against the extraction table could
+ *  never have admitted it. Cells assert that emptiness explicitly rather than assuming it.
+ *
+ *  Returns the seedCitedDocument receipt plus `{ taskId, versionN }` of the failed attempt. */
+export async function failedFactsDoc(sub, { client, cents = 90000, reason = "internal" } = {}) {
+  const firm = await firmOf(client);
+  // Same lane-carve as extractedDoc: without a live consent the invoice_facts CLAIM
+  // fail-closes to held_egress and the task never reaches 'running', so it could not be
+  // FAILED either — the fixture would silently model a different shape.
+  await grantConsent(sub, { firm, client }).catch(() => {});
+  const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
+  await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  await claimTask(task.id, { egressApproved: true });
+  await failInvoiceFacts(task.id, reason);
+  return { ...cited, taskId: task.id, versionN: task.version_n };
+}
+
+/** to_jsonb of one processing task — the whole row, so a cell can prove a terminal row was
+ *  not touched without having to enumerate (and therefore under-enumerate) its columns. */
+export async function taskRow(taskId) {
+  const r = await rootQuery("select to_jsonb(t) as row from clara.document_processing_tasks t where t.id=$1",
+    [taskId]);
+  return r.rows[0]?.row ?? null;
 }
 
 /** The fact field list for a stated-component sales document. Omitted components are NOT

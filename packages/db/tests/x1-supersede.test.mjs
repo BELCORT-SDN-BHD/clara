@@ -23,10 +23,12 @@ import {
   has0022, fail0022, requestReextraction, extractedDoc, extractionsOf, authoritativeExtraction,
   invoiceFactsTask, claimTask, persistInvoiceFacts, factField,
   draftEntryV3, approveEntry, freshResolution, ev, FIELD,
+  failedFactsDoc, laneTasks, markSkip,
 } from "./x1-helpers.mjs";
 
 let W = null;
 let live = false;
+let has51 = false;
 
 before(async () => {
   try {
@@ -35,10 +37,21 @@ before(async () => {
   } catch { /* dirty tree — probe the live catalog as-is */ }
   live = await has0022();
   if (live) W = await buildWorld();
+  try {
+    has51 = (await rootQuery("select 1 from clara.schema_migrations where version ~ '^0051_' limit 1")).rows.length > 0;
+  } catch { has51 = false; }
 });
 after(async () => { await endPool(); });
 
 const gate = () => fail0022(live);
+
+/** 0051's cells are SKIP-gated rather than fail-gated (the 0022 ratchet applies to 0022's
+ *  own battery): this file must stay green on every database from 0022 up to the migration
+ *  before 0051. */
+function skip51(t) {
+  if (!live || !has51) { markSkip(); t.skip("0051 not applied — the failed-first settlement re-proof is dormant"); return true; }
+  return false;
+}
 
 /** Claim + settle the task the verb just queued, with a CHANGED total, and return the id. */
 async function settleReextraction(document, cents) {
@@ -139,6 +152,84 @@ test("[0022] a mid-review re-extraction cannot swap figures under an approver (c
   const ok = await approveEntry(W.users.alice, {
     entry: draft.entry_id, expectedRevision: rotated, opKey: opk("x1a2") });
   assert.ok(ok, "with the CURRENT token the same approval goes through");
+});
+
+// ===========================================================================
+// 0051 — settlement AFTER a terminally-failed FIRST attempt (§7-A finding F6 / ADR-062).
+//
+// The 0051 migration only widens ADMISSION; it claims the settlement half needs nothing new.
+// That claim is exactly the kind that gets asserted in a header and never measured, so it is
+// measured here: a recovery admitted through the new door must settle into the SAME
+// authority/supersede machinery every other extraction uses, and a document that has been
+// through a failure must still behave normally on every subsequent re-extraction.
+// ===========================================================================
+
+test("[0051] a done extraction settling after a FAILED first attempt takes the authority pointer", async (t) => {
+  if (skip51(t)) return;
+  const client = W.clients.A1;
+  const doc = await failedFactsDoc(W.users.alice, { client, cents: 135000 });
+
+  // The starting state, asserted: the failed attempt left NOTHING in the extraction chain, so
+  // there is nothing for the settlement to supersede — the case 0017's trigger has never been
+  // exercised on through this verb. The authority pointer sits on the fixture's own primary
+  // OCR extraction (seedCitedDocument seeds one, done), NOT on a facts extraction.
+  assert.deepEqual(await extractionsOf(doc.documentId), [],
+    "no invoice_facts extraction exists after a failed first attempt (mandatory setup)");
+  assert.equal(await authoritativeExtraction(doc.documentId), doc.extractionId,
+    "…and the authoritative pointer is still the primary OCR extraction");
+
+  const admitted = await requestReextraction(W.users.bob, {
+    document: doc.documentId, reason: "the only attempt died on an engine fault", opKey: opk("x51s") });
+  assert.equal(admitted.admission, "failed_retry", "the recovery door admitted it (mandatory setup)");
+  await settleReextraction(doc.documentId, 135000);
+
+  const chain = await extractionsOf(doc.documentId);
+  assert.equal(chain.length, 1,
+    "the recovery settles as the FIRST invoice_facts extraction this document has ever had — "
+    + "the failed attempt contributed no row to supersede");
+  assert.equal(chain[0].status, "done", "…and it is done");
+  assert.equal(chain[0].superseded_by, null, "…and live");
+  assert.equal(await authoritativeExtraction(doc.documentId), chain[0].id,
+    "…with documents.authoritative_extraction_id repointed at it by the 0017 trigger, which "
+    + "needed no change for the failed-first case: it ignores non-'done' rows, and a failed "
+    + "attempt never produced one");
+
+  const state = (await rootQuery("select clara._invoice_fact_state($1) as s", [doc.documentId])).rows[0].s;
+  assert.equal(Number(state.total_cents), 135000, "the fact state reads the recovered extraction");
+  assert.equal(state.extraction_id, chain[0].id, "…pinned to its id");
+
+  // And the failed task is STILL terminal and untouched by the settlement.
+  const failed = (await laneTasks(doc.documentId)).find((x) => x.id === doc.taskId);
+  assert.equal(failed.status, "failed", "the original failure is still on the record — recovery is not erasure");
+});
+
+test("[0051] a LATER re-extraction of a recovered document supersedes normally", async (t) => {
+  if (skip51(t)) return;
+  const client = W.clients.A1;
+  const doc = await failedFactsDoc(W.users.alice, { client, cents: 135000 });
+  await requestReextraction(W.users.bob, {
+    document: doc.documentId, reason: "recover the failed attempt", opKey: opk("x51s") });
+  await settleReextraction(doc.documentId, 135000);
+
+  // From here the document is ordinary: the next request goes through the ORIGINAL door and
+  // the supersede chain composes exactly as x1-supersede's first cell proves it does for a
+  // document that never failed. This is what "the recovery is not a special lineage" means.
+  const again = await requestReextraction(W.users.bob, {
+    document: doc.documentId, reason: "the total was read short by RM 180", opKey: opk("x51s") });
+  assert.equal(again.admission, "reextraction",
+    "a recovered document is admitted through the ORDINARY door afterwards — the recovery "
+    + "door fires at most once per document");
+  await settleReextraction(doc.documentId, 153000);
+
+  const both = await extractionsOf(doc.documentId);
+  assert.equal(both.length, 2, "two invoice_facts extractions now exist");
+  const [older, newer] = both;
+  assert.equal(newer.version_n, older.version_n + 1, "…at consecutive versions");
+  assert.equal(older.superseded_by, newer.id, "…with the recovered one superseded by the corrected one");
+  assert.equal(newer.superseded_by, null, "…and the corrected one live");
+  assert.equal(await authoritativeExtraction(doc.documentId), newer.id, "…and authoritative");
+  const state = (await rootQuery("select clara._invoice_fact_state($1) as s", [doc.documentId])).rows[0].s;
+  assert.equal(Number(state.total_cents), 153000, "…and the fact state reads the corrected figure");
 });
 
 test("[0022] a re-extraction is inert outside the extraction chain — no entry, no filing, no resolution", async () => {
