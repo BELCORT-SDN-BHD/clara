@@ -71,15 +71,23 @@ export function mergeCustomerIdentity(out, identity) {
     receipt.outcome = "attn_overridden";
     return;
   }
-  // A COMPROMISED CONTACT READ MAY NOT DRIVE A CONTEST. When an `Attn` line HAD a value but the
-  // contact door refused it for entity-ambiguity, `attn_key` is never set — so a disagreement
-  // that might really be the F7 OVERRIDE shape gets scored as "unexplained" and WITHDRAWS a
-  // correct name. Measured: `Attention:` / `Lim P.L.T.` / `KONG CHENG…SDN BHD` with typed
-  // `Lim P.L.T.` withdrew `KONG CHENG RESTAURANTS SDN BHD`. The absence of an explanation this
-  // reader COULD NOT READ is not evidence of a contest (review law 2), so it holds instead:
-  // typed stands, exactly today's behaviour, zero loss. This also enforces the round-5 invariant
-  // that a string refused at the contact door can never win against the typed value it sat next
-  // to — it may still COLLAPSE with an agreeing typed row, but it can never override or withdraw.
+  // A COMPROMISED CONTACT READ MAY NOT DRIVE AN UNEXPLAINED-DISAGREEMENT WITHDRAW. When an `Attn`
+  // line HAD a value but the contact door refused it for entity-ambiguity, `attn_key` is never
+  // set — so a disagreement that might really be the F7 OVERRIDE shape gets scored as
+  // "unexplained" and WITHDRAWS a correct name. Measured: `Attention:` / `Lim P.L.T.` /
+  // `KONG CHENG…SDN BHD` with typed `Lim P.L.T.` withdrew `KONG CHENG RESTAURANTS SDN BHD`. The
+  // absence of an explanation this reader COULD NOT READ is not evidence of a contest (review
+  // law 2), so it holds instead: typed stands, exactly today's behaviour, zero loss.
+  //
+  // THE EXACT GUARANTEE, narrowed to what this code actually enforces. A string refused at the
+  // contact door: (i) cannot OVERRIDE the typed value, and (ii) cannot drive an
+  // UNEXPLAINED-DISAGREEMENT withdraw. It CAN still COLLAPSE with an agreeing typed row, and it
+  // CAN still participate in a CONTEST on its own merits as a party candidate — an earlier
+  // wording claimed it could "never withdraw", which is false: `Bill To:` / `Attention:` /
+  // `AMATERUS GROUP SDN BHD` / `Customer : KONG CHENG…SDN BHD` with a CORRECT typed name reads
+  // `contested` and withdraws, because TWO distinct labelled parties really are on the page.
+  // That withdraw is fail-closed and stays; reordering the passes to suppress it would trade the
+  // mirror case's safety for this case's convenience.
   if (receipt.contact_read_inconclusive) {
     receipt.attn_inconclusive_hold += 1;
     receipt.outcome = "attn_inconclusive_hold";

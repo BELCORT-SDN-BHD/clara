@@ -47,10 +47,22 @@ export const foldUnicode = (s) => String(s ?? "").normalize("NFKC").replace(/[^\
  *   · U+2236 RATIO                    — a distinct math character, no compatibility mapping; OCR
  *                                       emits it for a colon on some engines
  *   · U+A789 MODIFIER LETTER COLON    — a letter-class character, so it also survives \p{L} folds
+ *   · U+02F8 MODIFIER LETTER RAISED COLON — same family as U+A789, and INCLUDED ON MEASUREMENT
  *   · U+05C3 HEBREW PUNCTUATION SOF PASUQ, U+0589 ARMENIAN FULL STOP — same shape, no mapping
- * All three probed glyphs (U+FE55, U+2236, U+A789) reached `customer_name` before this class.
+ *
+ * WHY U+02F8 IS IN, against an initial adjudication to leave it out. The stated ground for
+ * excluding it was that the continuation guard catches the realistic shape. Measured, that holds
+ * for `Customer Ref˸ …` (remainder opens with `Ref`, a continuation token) but NOT for
+ * `Bill To˸ ACME SDN BHD` or `Customer˸ ACME SDN BHD` — there the label matches, the glyph is not
+ * in `LEADING_SEPARATORS`, and the remainder survives as `˸ ACME SDN BHD`, which was emitted as
+ * `customer_name` end-to-end. That is a CORRUPTED party rather than a wrong one, but it would
+ * still birth a counterparty under a mangled name, so the class takes it and the value abstains.
+ *
+ * "COMPLETE" MEANS: complete for the OCR-producible colon glyphs measured so far. It is a
+ * closed enumeration over an open world, which is exactly why the rule is fail-closed — an
+ * unlisted glyph makes the reader ABSTAIN on that value, never assert a party from it.
  */
-export const COLON_CLASS = /[:∶꞉׃։]/u;
+export const COLON_CLASS = /[:∶꞉˸׃։]/u;
 
 /** Does this value carry a colon in ANY of its printed forms? NFKC first, then the residue. */
 export const hasColon = (s) => COLON_CLASS.test(String(s ?? "").normalize("NFKC"));

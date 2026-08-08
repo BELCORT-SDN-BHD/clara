@@ -91,12 +91,14 @@
 //      typed value standing — zero loss against today.
 //  (5) SUFFIXED RELATIONAL PHRASES — THE OPEN ONE, and the only residual that can still write a
 //      WRONG party rather than abstain. `NON_ADDRESSEE_MARKERS` enumerates the ELEVEN measured
-//      forms; reviewers constructed more and 20 passed candidacy, 5 producing a wrong
+//      forms; reviewers constructed 24 more, of which 20 pass candidacy, 5 producing a wrong
 //      `customer_name` end-to-end (`A division of AMATERUS GROUP SDN BHD` is the realistic one).
 //      The base is still validated by ABSENCE-of-known-bad. The case-discontinuity proposal was
-//      implemented and MEASURED, then REJECTED: it closed 5/5 end-to-end but lost 4 legitimate
-//      title-case names and closed 0/20 once the phrases are ALL-CAPS, which is how Malaysian
-//      invoices are usually printed. Harm ceiling is a wrong DRAFT — counterparty birth is at
+//      implemented and MEASURED, then REJECTED. DENOMINATORS, stated because they differ by
+//      subset: it closed 5/5 end-to-end; it lost 4 of 5 TITLE-CASE of-names (7 of 74 across the
+//      whole legitimate corpus, the other 3 being label-prefixed battery lines); and it closed
+//      0 of the 24 CONSTRUCTED forms once they are ALL-CAPS, which is how Malaysian invoices are
+//      usually printed. Harm ceiling is a wrong DRAFT — counterparty birth is at
 //      HUMAN APPROVAL and no unattended-post path reaches `customer_name`. The 20 forms and the
 //      5 scenarios are PINNED as cells so this is measured, not remembered. FULL VETO-READY
 //      RECORD, with the measurement table and the four-part reachability precondition:

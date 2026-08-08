@@ -55,7 +55,16 @@ test("S2: the COLON class is complete — NFKC first, then the enumerated residu
   assert.equal("：".normalize("NFKC"), ":", "U+FF1A folds too");
   assert.equal("∶".normalize("NFKC"), "∶", "U+2236 does NOT fold — hence the class");
   assert.equal("꞉".normalize("NFKC"), "꞉", "U+A789 does NOT fold either");
-  // A real name still reads.
+  // U+02F8 MODIFIER LETTER RAISED COLON. An initial adjudication left it out on the ground that
+  // the continuation guard catches the realistic shape. MEASURED: that holds for `Customer Ref˸`
+  // (remainder opens with the continuation token `Ref`) but NOT for `Bill To˸` / `Customer˸`,
+  // where the remainder survived as `˸ ACME SDN BHD` and was emitted as customer_name — a
+  // CORRUPTED party. Both halves pinned so the reason for including it stays checkable.
+  assert.equal("˸".normalize("NFKC"), "˸", "U+02F8 does not fold, so it must be listed");
+  assert.equal(splitBillToLabel("Customer Ref˸ ACME SDN BHD")?.continuation, true, "the guard DOES catch this shape");
+  assert.equal(looksLikePartyName("˸ ACME SDN BHD"), false, "…and the class catches the shape it does not");
+  // "COMPLETE" means complete for the OCR-producible glyphs measured so far — a closed
+  // enumeration over an open world, which is why an unlisted glyph must ABSTAIN, never assert.
   assert.equal(looksLikePartyName("BANK OF CHINA (MALAYSIA) BERHAD"), true);
 });
 

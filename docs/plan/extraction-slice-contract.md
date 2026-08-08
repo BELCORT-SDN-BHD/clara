@@ -299,16 +299,20 @@ reached the books unchallenged. X7 supplies the missing second reader.
 
 **The measurement table (path A, case discontinuity — REJECTED).**
 
-| corpus | result |
+*Each row names the subset it quotes — the denominators differ, and both the "0/24" and the
+"lost 4" figures are true only of their own subset.*
+
+| subset measured | result |
 |---|---|
-| the 5 end-to-end leaks | **5/5 closed** ✓ |
-| the 24 relational forms | 20/24 closed |
-| the same 24, **ALL-CAPS** | **0/24 closed** ✗ — the class survives re-casing |
-| legitimate names in the 81-cell battery | 54/57 kept, **3 lost** |
-| of-names, all-caps | 8/8 kept ✓ |
-| of-names / real names, **title-case** | 1/5 kept, **4 lost** ✗ (`Bank of China (Malaysia) Berhad`) |
-| of-names / real names, all-lowercase OCR | 4/4 kept ✓ |
-| **verdict** | **DROP** — decision rule required ≥5 closed with **zero** legitimate loss; 7 lost |
+| the **5** end-to-end leak scenarios | **5/5 closed** ✓ |
+| the **24 constructed** relational forms (all, incl. the 4 already refused) | 20/24 closed |
+| **the same 24, re-cased ALL-CAPS** | **0/24 closed** ✗ — the class survives re-casing |
+| legitimate names appearing in the **battery** (57 candidacy-passing strings) | 54 kept, **3 lost** (label-prefixed lines, e.g. `M/s ACME SDN BHD`) |
+| **of-names only**, all-caps (8) | 8/8 kept ✓ |
+| **of-names + real names, title-case** (5) | 1 kept, **4 lost** ✗ (`Bank of China (Malaysia) Berhad`) |
+| of-names + real names, all-lowercase OCR (4) | 4/4 kept ✓ |
+| **legitimate loss, all subsets summed** | **7** (4 title-case + 3 battery label-lines) |
+| **verdict** | **DROP** — rule required ≥5 closed with **zero** legitimate loss |
 
 - **Two honest limits, recorded rather than discovered later.** (i) The thresholds are
   **UNMEASURED** — the KONG CHENG captures are real client documents and are not in this repo, so

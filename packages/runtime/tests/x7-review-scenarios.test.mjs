@@ -407,6 +407,17 @@ test("S3: a contact-door refusal HOLDS — it may collapse, but never override o
     "ACME SDN BHD", box(0.72, 2.40, 2.60, 2.54));
   assert.equal(agree.customer, "ACME SDN BHD", "…but an agreeing typed row still collapses");
   assert.equal(agree.outcome, "matched");
+  // THE NARROWED CLAIM, pinned. A contact-refused string CAN still drive a CONTESTED withdraw on
+  // its own merits as a party candidate — the earlier "can never withdraw" wording was false.
+  // Here `AMATERUS GROUP SDN BHD` is refused as a contact, competes as a party, and meets a
+  // SECOND distinct labelled party; two real parties on one page is a genuine contest, so the
+  // typed row withdraws. Fail-closed and deliberate: this is not the inconclusive-hold case.
+  const contest = run([VENDOR, BILL_TO, ATTN_LABEL,
+    L("AMATERUS GROUP SDN BHD", box(0.72, 2.40, 2.90, 2.54)),
+    L("Customer : KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.70, 4.60, 2.84)),
+  ], "KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.70, 3.60, 2.84));
+  assert.equal(contest.outcome, "contested", "two distinct labelled parties is a real contest");
+  assert.equal(contest.customer, undefined, "…and a contest withdraws, even a CORRECT typed name");
   // The S/B rescue survives: a dotted-initials person is readable, so the override still fires.
   const sb = run([VENDOR, BILL_TO, ATTN_LABEL, L("Lim S.B.", box(0.72, 2.40, 2.60, 2.54)),
     L("KONG CHENG RESTAURANTS SDN BHD", box(0.72, 2.55, 3.30, 2.69))], "Lim S.B.", box(0.72, 2.40, 2.60, 2.54));
