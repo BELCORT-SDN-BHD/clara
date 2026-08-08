@@ -14,11 +14,24 @@
 // re-upload was refused, the document exists but will never be read, and the turn is built on
 // a misunderstanding. A symmetric fix deserves symmetric evidence.
 
-import { test } from "node:test";
+import { before, test } from "node:test";
 import assert from "node:assert/strict";
 import { renderHook } from "../../test/hookHarness";
 import { useComposerAttachments } from "../chat/attachments";
 import { useUploadQueue } from "../documents/useUploadQueue";
+
+// THE CELLS MUST CARRY THEIR OWN ENVIRONMENT (app/accounts/api.test.ts:30's convention).
+// Both hooks check `supabaseBase()` before they will poll and short-circuit to state 'error'
+// when NEXT_PUBLIC_SUPABASE_URL is unset (shared/wire.ts:17-20), so without this the six cells
+// below fail 0/6 on any clean shell — including CI, whose env block carries only CLARA_RIG_DB.
+// The first cut of this file relied on the variables being exported in the author's own shell,
+// which is the round-2 lesson ("measure with the instrument production uses") landing on the
+// author rather than the code. `runtimeBase()` tolerates an unset value (it yields relative
+// URLs the stub still matches), but it is set here too so the fixture states its whole world.
+before(() => {
+  process.env.NEXT_PUBLIC_SUPABASE_URL = "https://example.supabase.co";
+  process.env.NEXT_PUBLIC_CLARA_RUNTIME_URL = "https://runtime.example.test";
+});
 
 const CALLER = "jwt-fixture";
 const INTAKE = "11111111-1111-4111-8111-111111111111";
