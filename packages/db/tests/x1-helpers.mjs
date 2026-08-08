@@ -15,7 +15,7 @@ import { randomUUID } from "node:crypto";
 import {
   rootQuery, roleQuery, humanQuery, namedCall, opk, fnSource, firmOf,
   seedCitedDocument, enqueueInvoiceFacts, invoiceFactsTask, claimTask, persistInvoiceFacts,
-  factField, rm, grantConsent,
+  failInvoiceFacts, factField, rm, grantConsent,
 } from "./a21-helpers.mjs";
 
 export * from "./a21-helpers.mjs";
@@ -157,6 +157,94 @@ export async function extractedDoc(sub, { client, cents = 90000, fields = null, 
     factField("invoice.invoice_date", "2026-06-15", { polygon: [], confidence: 0.9 }),
   ]);
   return cited;
+}
+
+// ---------------------------------------------------------------------------
+// The extraction-recovery door's readiness gate (migration 0051)
+// ---------------------------------------------------------------------------
+
+/** Is the extraction-recovery door live on this database? Returns {ledger, installed}.
+ *
+ *  KEYED ON THE STABLE SUFFIX, NEVER THE NUMBER. Migration numbers are claimed at MERGE time
+ *  (CLAUDE.md's standing law), so a battery pinned to `version ~ '^0051_'` goes quietly
+ *  dormant the instant the file is renumbered in a merge train: 0 pass / N skip, exit 0 — a
+ *  green run that proved nothing at all. The repo has already paid for this lesson once
+ *  (the RC3 note in wave-d-b-asbuilt-part2). The suffix is the part that does not move.
+ *
+ *  AND IT IS CROSS-CHECKED AGAINST THE CATALOG. "No ledger row" and "no door" are different
+ *  facts, and only one of them means dormant. If the door's code is INSTALLED while no ledger
+ *  row names it — or a ledger row exists while the code is absent — the database's ledger
+ *  disagrees with its own catalog, and a battery that skips there hides precisely the drift
+ *  it exists to catch. `requireRecoveryDoor` fails LOUDLY on either half (the fail0022 idiom
+ *  one migration up). */
+export async function recoveryDoorState() {
+  const led = await rootQuery(
+    "select count(*)::int n from clara.schema_migrations where version like '%extraction\\_recovery\\_door'");
+  let installed = false;
+  try {
+    installed = (await fnSource("finalize_document_intake")).includes("v_recovery");
+  } catch { installed = false; }
+  return { ledger: led.rows[0].n > 0, installed };
+}
+
+/** true when the door is live, false when genuinely dormant, THROWS on ledger/catalog drift. */
+export async function requireRecoveryDoor() {
+  const s = await recoveryDoorState();
+  if (s.installed && !s.ledger) {
+    throw new Error(
+      "extraction-recovery door DRIFT: clara.finalize_document_intake carries the door's code but "
+      + "clara.schema_migrations has no '%extraction_recovery_door' row. This battery refuses to "
+      + "report itself dormant against a database whose ledger disagrees with its catalog — that is "
+      + "the exact state a silent skip would hide.");
+  }
+  if (s.ledger && !s.installed) {
+    throw new Error(
+      "extraction-recovery door DRIFT: clara.schema_migrations records the migration but "
+      + "clara.finalize_document_intake does not carry the door — the recorded apply did not install "
+      + "what it claims, or a later recut reverted it.");
+  }
+  return s.ledger && s.installed;
+}
+
+/** Seed a filed, kind-stamped invoice document whose ONLY invoice_facts attempt is
+ *  TERMINALLY FAILED — the F6 / LUMINOUS shape, reproduced through the REAL writers
+ *  (enqueue -> claim -> fail_invoice_facts), never by hand-writing a task row.
+ *
+ *  The live exhibit this mirrors, quoted: docs/plan/wave-7a-acceptance-h1.md:542-545 —
+ *  "invoice_facts FAILED on its only-ever attempt: `document_processing_tasks`
+ *  status='failed', error_code='internal', attempt_count=1 (OCR on the SAME document
+ *  completed fine)". `seedCitedDocument` supplies that same completed-OCR half (it seeds a
+ *  done engine_kind='ocr' extraction + its region), so the fixture is the whole shape, not
+ *  just the failing half.
+ *
+ *  THE THING TO NOTICE, because it is what 0051's door had to be built around:
+ *  `clara.fail_invoice_facts` (0009:2152-2178) writes NO `clara.document_extractions` row —
+ *  it only terminalises the task. So this fixture ends with ZERO invoice_facts extractions,
+ *  which is precisely why an admission guard phrased against the extraction table could
+ *  never have admitted it. Cells assert that emptiness explicitly rather than assuming it.
+ *
+ *  Returns the seedCitedDocument receipt plus `{ taskId, versionN }` of the failed attempt. */
+export async function failedFactsDoc(sub, { client, cents = 90000, reason = "internal" } = {}) {
+  const firm = await firmOf(client);
+  // Same lane-carve as extractedDoc: without a live consent the invoice_facts CLAIM
+  // fail-closes to held_egress and the task never reaches 'running', so it could not be
+  // FAILED either — the fixture would silently model a different shape.
+  await grantConsent(sub, { firm, client }).catch(() => {});
+  const cited = await seedCitedDocument(sub, { firm, client, quote: rm(cents) });
+  await rootQuery("update clara.documents set document_kind='invoice' where id=$1", [cited.documentId]);
+  await enqueueInvoiceFacts(cited.documentId);
+  const task = await invoiceFactsTask(cited.documentId);
+  await claimTask(task.id, { egressApproved: true });
+  await failInvoiceFacts(task.id, reason);
+  return { ...cited, taskId: task.id, versionN: task.version_n };
+}
+
+/** to_jsonb of one processing task — the whole row, so a cell can prove a terminal row was
+ *  not touched without having to enumerate (and therefore under-enumerate) its columns. */
+export async function taskRow(taskId) {
+  const r = await rootQuery("select to_jsonb(t) as row from clara.document_processing_tasks t where t.id=$1",
+    [taskId]);
+  return r.rows[0]?.row ?? null;
 }
 
 /** The fact field list for a stated-component sales document. Omitted components are NOT
