@@ -18,23 +18,39 @@ const { register } = await import("tsx/esm/api");
 register();
 
 const registry = await import("../workflows/registry.ts");
+const entryAutoDraftV7 = await import("../workflows/autoDraft.v7.ts");
 const entryAutoDraftV6 = await import("../workflows/autoDraft.v6.ts");
 const entryAutoDraftV5 = await import("../workflows/autoDraft.v5.ts");
+const entryChatTurnV10 = await import("../workflows/chatTurn.v10.ts");
 const entryChatTurnV9 = await import("../workflows/chatTurn.v9.ts");
 const entryChatTurnV8 = await import("../workflows/chatTurn.v8.ts");
+const promptV10 = await import("../workflows/chatTurn.v10.prompt.ts");
 const promptV9 = await import("../workflows/chatTurn.v9.prompt.ts");
 const promptV8 = await import("../workflows/chatTurn.v8.prompt.ts");
 
 // ===========================================================================
-// Registry pin.
+// Registry pin. WAVE E / F9 (2026-08-09) moved both pins one version forward —
+// autoDraft_v7 / chatTurn_v10, the cite-by-index closures (ADR-064 §3). The §7-A
+// v6/v9 assertions below did not become wrong, they became POLICY (c) assertions:
+// a superseded body must stay exported or its parked runs are stranded.
 // ===========================================================================
 
-test("registry pins autoDraft to the v6 export", () => {
-  assert.equal(registry.workflows.autoDraft, entryAutoDraftV6.autoDraft_v6);
+test("registry pins autoDraft to the v7 export", () => {
+  assert.equal(registry.workflows.autoDraft, entryAutoDraftV7.autoDraft_v7);
 });
 
-test("registry pins chatTurn to the v9 export", () => {
-  assert.equal(registry.workflows.chatTurn, entryChatTurnV9.chatTurn_v9);
+test("registry pins chatTurn to the v10 export", () => {
+  assert.equal(registry.workflows.chatTurn, entryChatTurnV10.chatTurn_v10);
+});
+
+test("registry still EXPORTS autoDraft_v6 so no parked v6 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.autoDraft_v6, "function");
+  assert.equal(registry.autoDraft_v6, entryAutoDraftV6.autoDraft_v6);
+});
+
+test("registry still EXPORTS chatTurn_v9 so no parked v9 run is stranded (Appendix A policy (c))", () => {
+  assert.equal(typeof registry.chatTurn_v9, "function");
+  assert.equal(registry.chatTurn_v9, entryChatTurnV9.chatTurn_v9);
 });
 
 test("registry still EXPORTS autoDraft_v5 so no parked v5 run is stranded (Appendix A policy (c))", () => {
@@ -70,5 +86,13 @@ test("chatTurn_v8's system prompt does NOT carry the client-issuer directive —
     promptV8.SYSTEM_PROMPT_V8,
     /client-issued document/i,
     "v8's system prompt must not already carry the client-issuer reinforcement",
+  );
+});
+
+test("chatTurn_v10 CARRIES v9's client-issuer directive forward — the F9 bump must not have dropped §7-A's own reinforcement on its way past", () => {
+  assert.match(
+    promptV10.SYSTEM_PROMPT_V10,
+    /client-issued document[\s\S]{0,60}NEVER coded[\s\S]{0,160}sales_invoice[\s\S]{0,120}never as a supplier_bill/,
+    "SYSTEM_PROMPT_V10 must still direct a client-issued document to sales_invoice, never supplier_bill",
   );
 });

@@ -214,7 +214,15 @@ export const UNCONSUMED_BASELINE: Record<string, string> = {
   get_coding_rule: "counterparty name question registration_no rule",
   get_depreciation_authority: "client_id",
   get_depreciation_run: "client_id",
-  get_document_extract: "basis byte_size bytes_verified_at client_id document document_kind engine_confidence engine_id engine_kind envelope_text extraction_id extraction_status field_path filed_at filing financial_date id locator locator_kind max_chars mime_type monetary_cents monetary_raw normalization_version original_filename page_count raw_sha256 sha256 status text_content unassigned version_n",
+  // `idx` entered with migration 0054_region_ordinal (WAVE E / F9): the per-region
+  // ordinal the DRAFTING TOOLFACE cites instead of a 36-char region UUID. Its consumer is
+  // the runtime (autoDraft_v7 / chatTurn_v10 resolve idx -> region_id server-side), which
+  // this census deliberately does not read — "Runtime/agent-lane consumers
+  // (packages/runtime)" is one of dbSeamCensus.ts's own declared blind spots. So it is
+  // unconsumed BY THE DASHBOARD and correctly listed here; the dashboard's own
+  // get_document_extract reader (chat/review.ts getMachineTotal) needs the region `id`,
+  // not the ordinal, and was deliberately left alone.
+  get_document_extract: "basis byte_size bytes_verified_at client_id document document_kind engine_confidence engine_id engine_kind envelope_text extraction_id extraction_status field_path filed_at filing financial_date id idx locator locator_kind max_chars mime_type monetary_cents monetary_raw normalization_version original_filename page_count raw_sha256 sha256 status text_content unassigned version_n",
   get_draft_review: "account_type counterparty_name current_outcome decision extraction_id fingerprint line_no name_normalized proposal registration_normalized signed_by vendor_binding_id",
   // `month`/`months`/`skip_reason` are INTERNAL keys of _fa_asset_charges and the
   // run-skip helper, pulled in by the depth-2 closure; they are not envelope keys.

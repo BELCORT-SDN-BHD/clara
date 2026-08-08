@@ -16,6 +16,7 @@ import { chatTurn_v6 } from "./chatTurn.v6.js";
 import { chatTurn_v7 } from "./chatTurn.v7.js";
 import { chatTurn_v8 } from "./chatTurn.v8.js";
 import { chatTurn_v9 } from "./chatTurn.v9.js";
+import { chatTurn_v10 } from "./chatTurn.v10.js";
 import { documentIngest_v1 } from "./documentIngest.v1.js";
 import { documentIngest_v2 } from "./documentIngest.v2.js";
 import { invoiceFacts_v1 } from "./invoiceFacts.v1.js";
@@ -26,6 +27,7 @@ import { autoDraft_v3 } from "./autoDraft.v3.js";
 import { autoDraft_v4 } from "./autoDraft.v4.js";
 import { autoDraft_v5 } from "./autoDraft.v5.js";
 import { autoDraft_v6 } from "./autoDraft.v6.js";
+import { autoDraft_v7 } from "./autoDraft.v7.js";
 import { firmInterview_v1 } from "./firmInterview.v1.js";
 import { firmInterview_v2 } from "./firmInterview.v2.js";
 import { firmInterview_v3 } from "./firmInterview.v3.js";
@@ -35,11 +37,11 @@ import { clientOnboarding_v3 } from "./clientOnboarding.v3.js";
 
 export const workflows = {
   closeExample: closeExampleV1,
-  chatTurn: chatTurn_v9,
+  chatTurn: chatTurn_v10,
   documentIngest: documentIngest_v2,
   invoiceFacts: invoiceFacts_v1,
   statementFacts: statementFacts_v1,
-  autoDraft: autoDraft_v6,
+  autoDraft: autoDraft_v7,
   firmInterview: firmInterview_v3,
   clientOnboarding: clientOnboarding_v3,
 } as const;
@@ -179,6 +181,32 @@ export const workflows = {
 // complementing 7A-R4's DB-layer floor-purity fix (`_ocr_sales_floor`'s authority terms now
 // require coding_kind='sales_invoice', closing the generic-JE provenance hole). The v5/v8
 // bodies stay frozen, built and EXPORTED so no parked run is stranded (policy (c)).
+//
+// WAVE E / THE F6–F9 FIX BATCH repointed autoDraft v6->v7 and chatTurn v9->v10 (H1
+// ACCEPTANCE FINDING F9, ADR-064 §3). §7-A's H1 run measured the drafting model
+// mis-transcribing ONE hex group of a 36-character region UUID (…-4c6d-… for the true
+// …-4fce-…) on row 19 / filing e1034202, recurring across INDEPENDENT attempts — a fresh
+// autodraft supersede AND a separate chat-lane attempt on the same document, which is why
+// BOTH families bump. Every other cited region matched exactly, and the same document
+// drafted cleanly first try through the hand door with the corrected id
+// (wave-7a-acceptance-h1.md:773-790). The DB evidence wall
+// (clara._write_entry_evidence) refused CLR21 evidence_invalid every time and was RIGHT
+// each time: provenance binding held, and its plain id-equality contract is UNTOUCHED by
+// this wave. The defect was upstream — asking a model to reproduce an opaque 36-char
+// identifier it was shown once inside a large JSON array. v7/v10 stop asking: the draft
+// tool's `evidence[]` element becomes `{ region_idx, quote, field_path? }` (region_id is
+// GONE from the toolface — a field the model cannot supply is a field it cannot
+// mis-transcribe), and each wrapper's `resolveEvidenceRegions` maps that index back to a
+// region_id BY THE `idx` FIELD — never by array position — off the regions it already
+// fetches server-side. The `idx` itself is the DB's own stable per-region ordinal, added
+// additively by migration 0054_region_ordinal to clara.get_document_extract — WHICH MUST
+// BE APPLIED BEFORE THIS IMAGE GOES LIVE: with no idx published, v7/v10 can resolve
+// nothing and every document-bound draft refuses (fail-closed, but a full stop on the
+// drafting lane; 0054's own header states the order as binding). An idx that
+// names no region of the document is refused at the wrapper with the valid idx set (and
+// each one's field_path) echoed back, under the SAME CLR21 `evidence_invalid` token the
+// wall itself raises — so no downstream consumer gains a branch. The v6/v9 bodies stay
+// frozen, built and EXPORTED so no parked run is stranded (policy (c)).
 export { firmInterview_v1 };
 export { firmInterview_v2 };
 export { clientOnboarding_v1 };
@@ -191,11 +219,13 @@ export { chatTurn_v5 };
 export { chatTurn_v6 };
 export { chatTurn_v7 };
 export { chatTurn_v8 };
+export { chatTurn_v9 };
 export { documentIngest_v1 };
 export { autoDraft_v1 };
 export { autoDraft_v2 };
 export { autoDraft_v3 };
 export { autoDraft_v4 };
 export { autoDraft_v5 };
+export { autoDraft_v6 };
 
 export const workflowNames: string[] = Object.keys(workflows);

@@ -2311,9 +2311,26 @@ test("behavioural: direction === null (a pre-migration attempt row) skips the ea
 //    exported so no parked run on the prior body is stranded (policy (c)).
 // ===========================================================================
 
-test("registry.ts pins autoDraft: autoDraft_v6 and chatTurn: chatTurn_v9, and still exports the superseded autoDraft_v5 / chatTurn_v8 bodies", () => {
-  assert.equal(registryMod.workflows.autoDraft.name, "autoDraft_v6");
-  assert.equal(registryMod.workflows.chatTurn.name, "chatTurn_v9");
+// WAVE E / F9 UPDATE (2026-08-09): the live pins moved OFF v6/v9 when autoDraft_v7 +
+// chatTurn_v10 landed (the cite-by-index fix; wave-e-f9-autodraft-v7.test.mjs owns that
+// wave's own registry cell). This file's premise was never "v6/v9 are the newest" — it was
+// "v6/v9 are REACHABLE, so every fidelity comparison above is comparing live bodies against
+// a body the engine can still resume". That is what it now asserts, in the direction that
+// still means something: v6/v9 must stay EXPORTED (Appendix A policy (c) — dropping the
+// export would strand any parked run), and the pins must be at or ahead of them.
+test("registry.ts keeps autoDraft_v6 / chatTurn_v9 EXPORTED after being superseded (policy (c)), and still exports their own predecessors", () => {
+  assert.equal(typeof registryMod.autoDraft_v6, "function", "autoDraft_v6 must stay exported (policy c)");
+  assert.equal(typeof registryMod.chatTurn_v9, "function", "chatTurn_v9 must stay exported (policy c)");
   assert.equal(typeof registryMod.autoDraft_v5, "function", "autoDraft_v5 must stay exported (policy c)");
   assert.equal(typeof registryMod.chatTurn_v8, "function", "chatTurn_v8 must stay exported (policy c)");
+});
+
+test("the live registry pins are at or AHEAD of the versions this file compares against — never behind (a downgrade would mean this file is measuring a body newer than the one that ships)", () => {
+  const versionOf = (name, prefix) => {
+    const m = new RegExp(`^${prefix}_v(\\d+)$`).exec(name);
+    assert.ok(m, `unexpected registry pin name ${name}`);
+    return Number(m[1]);
+  };
+  assert.ok(versionOf(registryMod.workflows.autoDraft.name, "autoDraft") >= 6, `autoDraft pin ${registryMod.workflows.autoDraft.name} is behind v6`);
+  assert.ok(versionOf(registryMod.workflows.chatTurn.name, "chatTurn") >= 9, `chatTurn pin ${registryMod.workflows.chatTurn.name} is behind v9`);
 });
