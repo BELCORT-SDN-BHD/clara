@@ -41,7 +41,8 @@ attested human override:
   guard (no reversing FY(n) under a live FY(n+1) close) · **the DB-owned control tie-outs
   at the close boundary** (AR control = Σ open items · AP control · the FA register tie,
   including its segment-aware Wave-E rebuild · **the bank reconciliation IDENTITY** —
-  book balance = statement balance ± the recorded open items, per PRD §4 item 8) — these
+  book balance = statement balance ± the recorded open items, the tie-out PRD §4 item 8
+  makes a close gate) — these
   are arithmetic identities the DB owns by construction, so a mismatch is a DEFECT, not a
   judgement item: no attestation path exists, and an UNKNOWN/ERROR tie state — or a
   non-zero unexplained identity difference — fails closed exactly like a mismatch.
@@ -64,9 +65,11 @@ which live in drawer 1. PRD journey-7's "tie-outs clean" is thereby a gate, not 
 Rationale of record: all-hard ⇒ one stubborn unmatched RM50 statement item makes a client
 permanently unclosable and users route around the system; all-soft ⇒ decoration. The
 middle drawer is audit working-paper practice (exceptions allowed, partner-signed,
-filed). (Round 3, precision: what is attestable is the EXISTENCE of unmatched/
-evidence-dependent items — never an arithmetic difference in a DB-owned identity, which
-is drawer 1.)
+filed). (Round 4, precision + disclosure: the rulings draft's rationale read "RM50 recon
+diff"; reworded here to "unmatched statement item" because an arithmetic difference in a
+DB-owned identity is drawer 1. The ruled drawer PRINCIPLE is unchanged — only the example
+is disambiguated. What is attestable is the EXISTENCE of unmatched/evidence-dependent
+items — never an arithmetic difference in a DB-owned identity.)
 
 ## E-R3 — Locking granularity
 
